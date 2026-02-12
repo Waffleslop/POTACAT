@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.tile.openstreetmap.org; connect-src 'self' https://*.tile.openstreetmap.org;">
+  <title>POTA Activator Lookup</title>
+  <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="filters">
+      <label>Band:
+        <select id="band-filter">
+          <option value="all">All</option>
+          <option value="160m">160m</option>
+          <option value="80m">80m</option>
+          <option value="60m">60m</option>
+          <option value="40m">40m</option>
+          <option value="30m">30m</option>
+          <option value="20m" selected>20m</option>
+          <option value="17m">17m</option>
+          <option value="15m">15m</option>
+          <option value="12m">12m</option>
+          <option value="10m">10m</option>
+          <option value="6m">6m</option>
+        </select>
+      </label>
+      <label>Mode:
+        <select id="mode-filter">
+          <option value="all">All</option>
+          <option value="CW" selected>CW</option>
+          <option value="SSB">SSB</option>
+          <option value="FT8">FT8</option>
+          <option value="FT4">FT4</option>
+          <option value="FM">FM</option>
+        </select>
+      </label>
+      <label>CAT:
+        <select id="cat-selector">
+          <option value="">None</option>
+        </select>
+      </label>
+      <button id="refresh-btn" title="Refresh spots now">Refresh</button>
+      <button id="settings-btn" title="Settings">Settings</button>
+      <div class="view-toggle">
+        <button id="view-table-btn" class="view-btn active" title="Table view">Table</button>
+        <button id="view-map-btn" class="view-btn" title="Map view">Map</button>
+      </div>
+    </div>
+    <div class="status-bar">
+      <span id="cat-status" class="status disconnected">CAT: Disconnected</span>
+      <span id="spot-count"></span>
+      <span id="last-refresh"></span>
+    </div>
+  </header>
+
+  <main>
+    <table id="spots-table">
+      <thead>
+        <tr>
+          <th data-sort="callsign">Callsign</th>
+          <th data-sort="frequency">Freq (kHz)</th>
+          <th data-sort="mode">Mode</th>
+          <th data-sort="reference">Park Ref</th>
+          <th data-sort="parkName">Park Name</th>
+          <th data-sort="locationDesc">State</th>
+          <th data-sort="distance">Dist (mi)</th>
+          <th data-sort="spotTime">Spot Time</th>
+        </tr>
+      </thead>
+      <tbody id="spots-body"></tbody>
+    </table>
+    <div id="no-spots" class="hidden">No spots match current filters</div>
+    <div id="map" class="hidden"></div>
+  </main>
+
+  <!-- Settings dialog -->
+  <dialog id="settings-dialog">
+    <h3>Settings</h3>
+    <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+    <div class="dialog-buttons">
+      <button id="settings-save">Save</button>
+      <button id="settings-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
