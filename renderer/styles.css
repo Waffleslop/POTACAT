@@ -82,7 +82,8 @@ button:hover {
 
 main {
   padding: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   height: calc(100vh - 52px);
 }
 

@@ -138,15 +138,18 @@ function sortSpots(spots) {
 }
 
 // --- Column Resizing ---
-const COL_WIDTHS_KEY = 'pota-cat-col-widths';
-const DEFAULT_COL_WIDTHS = [90, 95, 55, 80, 200, 60, 75, 90];
+// --- Column Resizing ---
+// Widths stored as percentages of table width so they always fit
+const COL_WIDTHS_KEY = 'pota-cat-col-pct';
+// Callsign, Freq, Mode, Ref, Park Name, State, Dist, Age
+const DEFAULT_COL_PCT = [10, 10, 6, 9, 30, 12, 8, 7];
 
 function loadColWidths() {
   try {
     const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY));
-    if (Array.isArray(saved) && saved.length === DEFAULT_COL_WIDTHS.length) return saved;
+    if (Array.isArray(saved) && saved.length === DEFAULT_COL_PCT.length) return saved;
   } catch { /* ignore */ }
-  return [...DEFAULT_COL_WIDTHS];
+  return [...DEFAULT_COL_PCT];
 }
 
 function saveColWidths(widths) {
@@ -156,13 +159,13 @@ function saveColWidths(widths) {
 function applyColWidths(widths) {
   const ths = spotsTable.querySelectorAll('thead th');
   ths.forEach((th, i) => {
-    if (widths[i] != null) th.style.width = widths[i] + 'px';
+    if (widths[i] != null) th.style.width = widths[i] + '%';
   });
 }
 
 function initColumnResizing() {
-  const colWidths = loadColWidths();
-  applyColWidths(colWidths);
+  const colPcts = loadColWidths();
+  applyColWidths(colPcts);
 
   const ths = spotsTable.querySelectorAll('thead th');
   ths.forEach((th, i) => {
@@ -171,26 +174,28 @@ function initColumnResizing() {
     th.style.position = 'relative';
     th.appendChild(handle);
 
-    let startX, startW;
+    let startX, startPct;
 
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation(); // don't trigger sort
       startX = e.clientX;
-      startW = th.offsetWidth;
+      startPct = colPcts[i];
+      const tableW = spotsTable.offsetWidth;
       document.body.style.cursor = 'col-resize';
 
       const onMove = (ev) => {
-        const newW = Math.max(40, startW + ev.clientX - startX);
-        colWidths[i] = newW;
-        th.style.width = newW + 'px';
+        const deltaPx = ev.clientX - startX;
+        const deltaPct = (deltaPx / tableW) * 100;
+        colPcts[i] = Math.max(3, startPct + deltaPct);
+        th.style.width = colPcts[i] + '%';
       };
 
       const onUp = () => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
         document.body.style.cursor = '';
-        saveColWidths(colWidths);
+        saveColWidths(colPcts);
       };
 
       document.addEventListener('mousemove', onMove);
