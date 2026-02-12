@@ -1,13 +1,43 @@
 {
-  "name": "flex-lookup",
+  "name": "pota-cat",
   "version": "1.0.0",
-  "description": "POTA Activator Lookup for FlexRadio",
+  "description": "POTA activator lookup with FlexRadio CAT control",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build-icon": "node scripts/build-icon.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.waffleslop.pota-cat",
+    "productName": "POTA CAT",
+    "icon": "assets/icon.png",
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**/*",
+      "renderer/**/*",
+      "assets/icon.png",
+      "node_modules/leaflet/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities"
+    }
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^26.7.0",
+    "sharp": "^0.34.5"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

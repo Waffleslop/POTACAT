@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="90" fill="#16213e"/>
+  <!-- Cat ears -->
+  <polygon points="105,255 168,48 255,225" fill="#e94560"/>
+  <polygon points="257,225 344,48 407,255" fill="#e94560"/>
+  <!-- Head -->
+  <ellipse cx="256" cy="320" rx="182" ry="168" fill="#e94560"/>
+  <!-- Inner ears -->
+  <polygon points="135,245 172,88 235,225" fill="#ff6b81"/>
+  <polygon points="277,225 340,88 377,245" fill="#ff6b81"/>
+  <!-- Eyes -->
+  <ellipse cx="190" cy="290" rx="26" ry="30" fill="#16213e"/>
+  <ellipse cx="322" cy="290" rx="26" ry="30" fill="#16213e"/>
+  <!-- Pupils -->
+  <ellipse cx="190" cy="290" rx="10" ry="26" fill="#4fc3f7"/>
+  <ellipse cx="322" cy="290" rx="10" ry="26" fill="#4fc3f7"/>
+  <!-- Nose -->
+  <polygon points="242,352 270,352 256,370" fill="#16213e"/>
+  <!-- Mouth -->
+  <path d="M232,378 Q256,398 280,378" fill="none" stroke="#16213e" stroke-width="5" stroke-linecap="round"/>
+  <!-- Whiskers -->
+  <line x1="75" y1="335" x2="175" y2="350" stroke="#16213e" stroke-width="4" stroke-linecap="round"/>
+  <line x1="75" y1="370" x2="175" y2="365" stroke="#16213e" stroke-width="4" stroke-linecap="round"/>
+  <line x1="337" y1="350" x2="437" y2="335" stroke="#16213e" stroke-width="4" stroke-linecap="round"/>
+  <line x1="337" y1="365" x2="437" y2="370" stroke="#16213e" stroke-width="4" stroke-linecap="round"/>
+  <!-- Radio wave arcs (top-right) -->
+  <path d="M380,120 A45,45 0 0,1 410,80" fill="none" stroke="#4fc3f7" stroke-width="6" stroke-linecap="round"/>
+  <path d="M395,135 A65,65 0 0,1 435,75" fill="none" stroke="#4fc3f7" stroke-width="5" stroke-linecap="round"/>
+  <path d="M410,150 A85,85 0 0,1 460,70" fill="none" stroke="#4fc3f7" stroke-width="4" stroke-linecap="round"/>
+</svg>
