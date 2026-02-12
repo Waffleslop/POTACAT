@@ -1,7 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { fetchSpots } = require('./lib/pota');
+const { fetchSpots: fetchPotaSpots } = require('./lib/pota');
+const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache } = require('./lib/sota');
 const { CatClient, listSerialPorts } = require('./lib/cat');
 const { gridToLatLon, haversineDistanceMiles } = require('./lib/grid');
 const { freqToBand } = require('./lib/bands');
@@ -13,7 +14,7 @@ function loadSettings() {
   try {
     return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
   } catch {
-    return { grid: 'FN20jb', catTarget: { type: 'tcp', host: '127.0.0.1', port: 5002 } };
+    return { grid: 'FN20jb', catTarget: { type: 'tcp', host: '127.0.0.1', port: 5002 }, enablePota: true, enableSota: false };
   }
 }
 
@@ -40,7 +41,7 @@ function connectCat() {
 }
 
 // --- Spot processing ---
-function processSpots(raw) {
+function processPotaSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
   return raw.map((s) => {
     const freqMHz = parseFloat(s.frequency) / 1000; // API gives kHz
@@ -68,6 +69,7 @@ function processSpots(raw) {
     }
 
     return {
+      source: 'pota',
       callsign: s.activator || s.callsign || '',
       frequency: s.frequency,
       freqMHz,
@@ -84,12 +86,69 @@ function processSpots(raw) {
   });
 }
 
+async function processSotaSpots(raw) {
+  const myPos = gridToLatLon(settings.grid);
+
+  // Batch-fetch summit coordinates (cached across refreshes)
+  await fetchSummitCoordsBatch(raw);
+
+  return raw.map((s) => {
+    const freqMHz = parseFloat(s.frequency);
+    const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz → convert to kHz
+    const assoc = s.associationCode || '';
+    const code = s.summitCode || '';
+    const ref = assoc && code ? assoc + '/' + code : '';
+
+    // Look up cached summit coordinates
+    const coords = ref ? summitCache.get(ref) : null;
+    const lat = coords ? coords.lat : null;
+    const lon = coords ? coords.lon : null;
+
+    let distance = null;
+    if (myPos && lat != null && lon != null) {
+      distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, lat, lon));
+    }
+
+    return {
+      source: 'sota',
+      callsign: s.activatorCallsign || '',
+      frequency: String(freqKHz),
+      freqMHz,
+      mode: (s.mode || '').toUpperCase(),
+      reference: ref,
+      parkName: s.summitDetails || '',
+      locationDesc: assoc,
+      distance,
+      lat,
+      lon,
+      band: freqToBand(freqMHz),
+      spotTime: s.timeStamp || '',
+    };
+  });
+}
+
 async function refreshSpots() {
   try {
-    const raw = await fetchSpots();
-    const spots = processSpots(raw);
+    const enablePota = settings.enablePota !== false; // default true
+    const enableSota = settings.enableSota === true;  // default false
+
+    const fetches = [];
+    if (enablePota) fetches.push(fetchPotaSpots().then(processPotaSpots));
+    if (enableSota) fetches.push(fetchSotaSpots().then(processSotaSpots));
+
+    const results = await Promise.allSettled(fetches);
+    const spots = results
+      .filter((r) => r.status === 'fulfilled')
+      .flatMap((r) => r.value);
+
     if (win && !win.isDestroyed()) {
       win.webContents.send('spots', spots);
+    }
+
+    // Report errors from rejected fetches
+    const errors = results.filter((r) => r.status === 'rejected');
+    if (errors.length > 0 && spots.length === 0 && win && !win.isDestroyed()) {
+      win.webContents.send('spots-error', errors[0].reason.message);
     }
   } catch (err) {
     if (win && !win.isDestroyed()) {

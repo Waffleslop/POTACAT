@@ -9,6 +9,8 @@ body {
   background: #1a1a2e;
   color: #e0e0e0;
   font-size: 14px;
+  height: 100vh;
+  overflow: hidden;
 }
 
 header {
@@ -363,3 +365,80 @@ dialog input, dialog select {
   justify-content: flex-end;
   margin-top: 16px;
 }
+
+/* CAT dialog */
+.cat-option {
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+
+.cat-option:hover {
+  background: #1a4080;
+}
+
+.cat-option.selected {
+  border-color: #4ecca3;
+  background: #0a3d2a;
+}
+
+.cat-option .cat-option-label {
+  color: #e0e0e0;
+}
+
+.cat-option .cat-option-detail {
+  color: #808090;
+  font-size: 11px;
+}
+
+.cat-section-label {
+  color: #808090;
+  font-size: 11px;
+  text-transform: uppercase;
+  margin: 10px 0 4px 4px;
+  letter-spacing: 0.5px;
+}
+
+.cat-section-label:first-child {
+  margin-top: 0;
+}
+
+/* Spot source color-coding */
+.spot-pota {
+  border-left: 3px solid #4ecca3;
+}
+
+.spot-sota {
+  border-left: 3px solid #f0a500;
+}
+
+/* Settings source toggles */
+.source-toggles {
+  border: 1px solid #1a4080;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.source-toggles legend {
+  color: #a0a0c0;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.checkbox-label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+  margin-top: 0;
+}
+

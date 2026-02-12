@@ -10,6 +10,8 @@ let currentView = 'table'; // 'table' or 'map'
 let distUnit = 'mi';    // 'mi' or 'km'
 let watchlist = new Set(); // uppercase callsigns
 let scanDwell = 7;       // seconds per frequency during scan
+let enablePota = true;
+let enableSota = false;
 
 // --- Scan state ---
 let scanning = false;
@@ -21,7 +23,7 @@ const MI_TO_KM = 1.60934;
 
 const bandFilter = document.getElementById('band-filter');
 const modeFilter = document.getElementById('mode-filter');
-const catSelector = document.getElementById('cat-selector');
+const catOptions = document.getElementById('cat-options');
 const tbody = document.getElementById('spots-body');
 const noSpots = document.getElementById('no-spots');
 const catStatusEl = document.getElementById('cat-status');
@@ -36,6 +38,8 @@ const setGrid = document.getElementById('set-grid');
 const setDistUnit = document.getElementById('set-dist-unit');
 const setScanDwell = document.getElementById('set-scan-dwell');
 const setWatchlist = document.getElementById('set-watchlist');
+const setEnablePota = document.getElementById('set-enable-pota');
+const setEnableSota = document.getElementById('set-enable-sota');
 const scanBtn = document.getElementById('scan-btn');
 const spotsTable = document.getElementById('spots-table');
 const mapDiv = document.getElementById('map');
@@ -63,6 +67,8 @@ async function loadPrefs() {
   distUnit = settings.distUnit || 'mi';
   scanDwell = parseInt(settings.scanDwell, 10) || 7;
   watchlist = parseWatchlist(settings.watchlist);
+  enablePota = settings.enablePota !== false; // default true
+  enableSota = settings.enableSota === true;  // default false
   updateHeaders();
 }
 
@@ -70,56 +76,62 @@ function updateHeaders() {
   distHeader.childNodes[0].textContent = distUnit === 'km' ? 'Dist (km)' : 'Dist (mi)';
 }
 
-// --- CAT selector ---
-// Known SmartSDR CAT TCP ports (Slice A=5002, B=5003, etc.)
+// --- CAT selector (inside Settings) ---
 const TCP_PORTS = [
-  { label: 'Slice A - TCP 5002', type: 'tcp', host: '127.0.0.1', port: 5002 },
-  { label: 'Slice B - TCP 5003', type: 'tcp', host: '127.0.0.1', port: 5003 },
-  { label: 'Slice C - TCP 5004', type: 'tcp', host: '127.0.0.1', port: 5004 },
-  { label: 'Slice D - TCP 5005', type: 'tcp', host: '127.0.0.1', port: 5005 },
+  { label: 'Slice A', detail: 'TCP 127.0.0.1:5002', type: 'tcp', host: '127.0.0.1', port: 5002 },
+  { label: 'Slice B', detail: 'TCP 127.0.0.1:5003', type: 'tcp', host: '127.0.0.1', port: 5003 },
+  { label: 'Slice C', detail: 'TCP 127.0.0.1:5004', type: 'tcp', host: '127.0.0.1', port: 5004 },
+  { label: 'Slice D', detail: 'TCP 127.0.0.1:5005', type: 'tcp', host: '127.0.0.1', port: 5005 },
 ];
 
-async function populateCatSelector() {
-  const settings = await window.api.getSettings();
+let selectedCatValue = ''; // tracks selection within the open dialog
+
+async function populateCatOptions(currentTarget) {
   const ports = await window.api.listPorts();
+  const currentStr = currentTarget ? JSON.stringify(currentTarget) : '';
+  selectedCatValue = currentStr;
 
-  // Clear existing options except "None"
-  while (catSelector.options.length > 1) catSelector.remove(1);
+  catOptions.innerHTML = '';
 
-  // Add TCP options
+  // "None" option
+  catOptions.appendChild(buildCatOption('None', 'Disconnect CAT', '', currentStr));
+
+  // TCP section
+  const tcpLabel = document.createElement('div');
+  tcpLabel.className = 'cat-section-label';
+  tcpLabel.textContent = 'SmartSDR TCP';
+  catOptions.appendChild(tcpLabel);
+
   for (const tcp of TCP_PORTS) {
-    const opt = document.createElement('option');
-    opt.value = JSON.stringify({ type: tcp.type, host: tcp.host, port: tcp.port });
-    opt.textContent = tcp.label;
-    catSelector.appendChild(opt);
+    const val = JSON.stringify({ type: tcp.type, host: tcp.host, port: tcp.port });
+    catOptions.appendChild(buildCatOption(tcp.label, tcp.detail, val, currentStr));
   }
 
-  // Add detected COM ports
-  for (const p of ports) {
-    const opt = document.createElement('option');
-    opt.value = JSON.stringify({ type: 'serial', path: p.path });
-    opt.textContent = `${p.path} (${p.friendlyName})`;
-    catSelector.appendChild(opt);
-  }
+  // Serial section (only if ports detected)
+  if (ports.length > 0) {
+    const serialLabel = document.createElement('div');
+    serialLabel.className = 'cat-section-label';
+    serialLabel.textContent = 'Serial Ports';
+    catOptions.appendChild(serialLabel);
 
-  // Select the current target
-  if (settings.catTarget) {
-    const targetStr = JSON.stringify(settings.catTarget);
-    for (const opt of catSelector.options) {
-      if (opt.value === targetStr) {
-        opt.selected = true;
-        break;
-      }
+    for (const p of ports) {
+      const val = JSON.stringify({ type: 'serial', path: p.path });
+      catOptions.appendChild(buildCatOption(p.path, p.friendlyName, val, currentStr));
     }
   }
 }
 
-catSelector.addEventListener('change', () => {
-  const val = catSelector.value;
-  if (!val) return;
-  const target = JSON.parse(val);
-  window.api.connectCat(target);
-});
+function buildCatOption(label, detail, value, currentStr) {
+  const div = document.createElement('div');
+  div.className = 'cat-option' + (value === currentStr ? ' selected' : '');
+  div.innerHTML = `<div class="cat-option-label">${label}</div><div class="cat-option-detail">${detail}</div>`;
+  div.addEventListener('click', () => {
+    selectedCatValue = value;
+    catOptions.querySelectorAll('.cat-option').forEach((el) => el.classList.remove('selected'));
+    div.classList.add('selected');
+  });
+  return div;
+}
 
 // --- Filtering ---
 function modeMatches(spotMode, filter) {
@@ -132,6 +144,8 @@ function getFiltered() {
   const band = bandFilter.value;
   const mode = modeFilter.value;
   return allSpots.filter((s) => {
+    if (s.source === 'pota' && !enablePota) return false;
+    if (s.source === 'sota' && !enableSota) return false;
     if (band !== 'all' && s.band !== band) return false;
     if (!modeMatches(s.mode, mode)) return false;
     return true;
@@ -158,8 +172,8 @@ function sortSpots(spots) {
 // --- Column Resizing ---
 // --- Column Resizing ---
 // Widths stored as percentages of table width so they always fit
-const COL_WIDTHS_KEY = 'pota-cat-col-pct-v2';
-// Callsign, Freq, Mode, Ref, Park Name, State, Dist, Age, Skip
+const COL_WIDTHS_KEY = 'pota-cat-col-pct-v4';
+// Callsign, Freq, Mode, Ref, Name, State, Dist, Age, Skip
 const DEFAULT_COL_PCT = [10, 9, 5, 8, 26, 11, 7, 7, 6];
 
 function loadColWidths() {
@@ -229,6 +243,18 @@ L.Icon.Default.mergeOptions({
   iconRetinaUrl: '../node_modules/leaflet/dist/images/marker-icon-2x.png',
   iconUrl: '../node_modules/leaflet/dist/images/marker-icon.png',
   shadowUrl: '../node_modules/leaflet/dist/images/marker-shadow.png',
+});
+
+// Orange teardrop pin for SOTA spots (same shape as default Leaflet marker)
+const sotaIcon = L.divIcon({
+  className: '',
+  html: '<svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0Z" fill="#f0a500" stroke="#c47f00" stroke-width="1"/>' +
+    '<circle cx="12.5" cy="12.5" r="5.5" fill="#fff" opacity="0.4"/>' +
+    '</svg>',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
 });
 
 let map = null;
@@ -321,17 +347,23 @@ function updateMapMarkers(filtered) {
     const distStr = s.distance != null ? formatDistance(s.distance) + ' ' + unit : '';
     const watched = watchlist.has(s.callsign.toUpperCase());
 
+    const sourceLabel = (s.source || 'pota').toUpperCase();
     const popupContent = `
-      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b><br>
+      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${s.source === 'sota' ? '#f0a500' : '#4ecca3'};font-size:11px;">[${sourceLabel}]</span><br>
       ${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}<br>
       ${distStr}<br>
       <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}">Tune</button>
     `;
 
+    // SOTA gets orange pin, POTA gets default blue marker
+    const markerOptions = s.source === 'sota'
+      ? { icon: sotaIcon }
+      : {};
+
     // Plot marker at canonical position and one world-copy in each direction
     for (const offset of [-360, 0, 360]) {
-      const marker = L.marker([s.lat, s.lon + offset]).bindPopup(popupContent);
+      const marker = L.marker([s.lat, s.lon + offset], markerOptions).bindPopup(popupContent);
       marker.addTo(markerLayer);
     }
   }
@@ -446,6 +478,10 @@ function render() {
     for (const s of filtered) {
       const tr = document.createElement('tr');
       const isSkipped = scanSkipped.has(s.frequency);
+
+      // Source color-coding
+      if (s.source === 'pota') tr.classList.add('spot-pota');
+      if (s.source === 'sota') tr.classList.add('spot-sota');
 
       // Highlight the row currently being scanned
       if (scanSpot && s.frequency === scanSpot.frequency) {
@@ -581,6 +617,9 @@ settingsBtn.addEventListener('click', async () => {
   setDistUnit.value = s.distUnit || 'mi';
   setScanDwell.value = s.scanDwell || 7;
   setWatchlist.value = s.watchlist || '';
+  setEnablePota.checked = s.enablePota !== false;
+  setEnableSota.checked = s.enableSota === true;
+  await populateCatOptions(s.catTarget);
   settingsDialog.showModal();
 });
 
@@ -589,15 +628,27 @@ settingsCancel.addEventListener('click', () => settingsDialog.close());
 settingsSave.addEventListener('click', async () => {
   const watchlistRaw = setWatchlist.value.trim();
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
+  const potaEnabled = setEnablePota.checked;
+  const sotaEnabled = setEnableSota.checked;
+
+  // Apply CAT selection
+  if (selectedCatValue) {
+    window.api.connectCat(JSON.parse(selectedCatValue));
+  }
+
   await window.api.saveSettings({
     grid: setGrid.value.trim() || 'FN20jb',
     distUnit: setDistUnit.value,
     scanDwell: dwellVal,
     watchlist: watchlistRaw,
+    enablePota: potaEnabled,
+    enableSota: sotaEnabled,
   });
   distUnit = setDistUnit.value;
   scanDwell = dwellVal;
   watchlist = parseWatchlist(watchlistRaw);
+  enablePota = potaEnabled;
+  enableSota = sotaEnabled;
   updateHeaders();
   settingsDialog.close();
   render();
@@ -625,5 +676,4 @@ window.api.onCatStatus(({ connected }) => {
 loadPrefs().then(() => {
   render();
 });
-populateCatSelector();
 initColumnResizing();

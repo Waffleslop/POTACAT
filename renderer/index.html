@@ -36,11 +36,6 @@
           <option value="FM">FM</option>
         </select>
       </label>
-      <label>CAT:
-        <select id="cat-selector">
-          <option value="">None</option>
-        </select>
-      </label>
       <button id="refresh-btn" title="Refresh spots now">Refresh</button>
       <button id="scan-btn" title="Scan through spots">Scan</button>
       <button id="settings-btn" title="Settings">Settings</button>
@@ -64,8 +59,8 @@
           <th data-sort="callsign">Callsign</th>
           <th data-sort="frequency">Freq (kHz)</th>
           <th data-sort="mode">Mode</th>
-          <th data-sort="reference">Park Ref</th>
-          <th data-sort="parkName">Park Name</th>
+          <th data-sort="reference">Ref</th>
+          <th data-sort="parkName">Name</th>
           <th data-sort="locationDesc">State</th>
           <th data-sort="distance" id="dist-header">Dist (mi)</th>
           <th data-sort="spotTime" id="time-header">Age</th>
@@ -92,8 +87,17 @@
       <input type="number" id="set-scan-dwell" min="2" max="30" value="7">
     </label>
     <label>Watchlist (comma-separated callsigns):
-      <input type="text" id="set-watchlist" placeholder="W3ABC, K1DEF, N2GHI">
+      <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL, KI6NAZ">
     </label>
+    <fieldset class="source-toggles">
+      <legend>Spot Sources</legend>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-pota" checked> Enable POTA</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-sota"> Enable SOTA</label>
+    </fieldset>
+    <fieldset class="source-toggles">
+      <legend>CAT Connection</legend>
+      <div id="cat-options"></div>
+    </fieldset>
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
       <button id="settings-cancel">Cancel</button>
