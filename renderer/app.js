@@ -8,7 +8,6 @@ let currentView = 'table'; // 'table' or 'map'
 
 // User preferences (loaded from settings)
 let distUnit = 'mi';    // 'mi' or 'km'
-let timeFormat = 'utc';  // 'utc' or 'local'
 
 const MI_TO_KM = 1.60934;
 
@@ -27,13 +26,11 @@ const settingsSave = document.getElementById('settings-save');
 const settingsCancel = document.getElementById('settings-cancel');
 const setGrid = document.getElementById('set-grid');
 const setDistUnit = document.getElementById('set-dist-unit');
-const setTimeFormat = document.getElementById('set-time-format');
 const spotsTable = document.getElementById('spots-table');
 const mapDiv = document.getElementById('map');
 const viewTableBtn = document.getElementById('view-table-btn');
 const viewMapBtn = document.getElementById('view-map-btn');
 const distHeader = document.getElementById('dist-header');
-const timeHeader = document.getElementById('time-header');
 const utcClockEl = document.getElementById('utc-clock');
 
 // --- UTC Clock ---
@@ -48,13 +45,11 @@ setInterval(updateUtcClock, 1000);
 async function loadPrefs() {
   const settings = await window.api.getSettings();
   distUnit = settings.distUnit || 'mi';
-  timeFormat = settings.timeFormat || 'utc';
   updateHeaders();
 }
 
 function updateHeaders() {
   distHeader.childNodes[0].textContent = distUnit === 'km' ? 'Dist (km)' : 'Dist (mi)';
-  timeHeader.childNodes[0].textContent = timeFormat === 'utc' ? 'Spot Time (UTC)' : 'Spot Time';
 }
 
 // --- CAT selector ---
@@ -403,7 +398,7 @@ function render() {
         s.parkName,
         s.locationDesc,
         formatDistance(s.distance),
-        formatTime(s.spotTime),
+        formatAge(s.spotTime),
       ];
 
       for (const val of cells) {
@@ -426,16 +421,17 @@ function render() {
   }
 }
 
-function formatTime(isoStr) {
+function formatAge(isoStr) {
   if (!isoStr) return '';
   try {
     const d = new Date(isoStr);
-    if (timeFormat === 'utc') {
-      const hh = String(d.getUTCHours()).padStart(2, '0');
-      const mm = String(d.getUTCMinutes()).padStart(2, '0');
-      return hh + ':' + mm + 'z';
-    }
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+    if (secs < 60) return secs + 's';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return mins + 'm';
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return hrs + 'h ' + remMins + 'm';
   } catch {
     return isoStr;
   }
@@ -465,7 +461,6 @@ settingsBtn.addEventListener('click', async () => {
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
   setDistUnit.value = s.distUnit || 'mi';
-  setTimeFormat.value = s.timeFormat || 'utc';
   settingsDialog.showModal();
 });
 
@@ -475,10 +470,8 @@ settingsSave.addEventListener('click', async () => {
   await window.api.saveSettings({
     grid: setGrid.value.trim() || 'FN20jb',
     distUnit: setDistUnit.value,
-    timeFormat: setTimeFormat.value,
   });
   distUnit = setDistUnit.value;
-  timeFormat = setTimeFormat.value;
   updateHeaders();
   settingsDialog.close();
   render();
