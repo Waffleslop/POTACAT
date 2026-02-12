@@ -172,6 +172,56 @@ a.qrz-link:hover {
   display: none;
 }
 
+/* Scan */
+.scan-active {
+  background: #e94560 !important;
+  color: #fff !important;
+  border-color: #e94560 !important;
+}
+
+.scan-highlight {
+  background: #1a4080;
+  outline: 2px solid #4fc3f7;
+  outline-offset: -2px;
+}
+
+.scan-skipped {
+  opacity: 0.4;
+}
+
+.skip-cell {
+  text-align: center;
+}
+
+.skip-btn {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #0f3460;
+  color: #a0a0c0;
+  border: 1px solid #1a4080;
+  cursor: pointer;
+}
+
+.skip-btn:hover {
+  background: #1a4080;
+  color: #e0e0e0;
+}
+
+.skip-btn.skipped {
+  background: #3d0a0a;
+  color: #e94560;
+  border-color: #e94560;
+}
+
+th.no-sort {
+  cursor: default;
+}
+
+th.no-sort:hover {
+  color: #a0a0c0;
+}
+
 /* Column resize handles */
 .col-resize-handle {
   position: absolute;

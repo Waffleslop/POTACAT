@@ -9,6 +9,13 @@ let currentView = 'table'; // 'table' or 'map'
 // User preferences (loaded from settings)
 let distUnit = 'mi';    // 'mi' or 'km'
 let watchlist = new Set(); // uppercase callsigns
+let scanDwell = 7;       // seconds per frequency during scan
+
+// --- Scan state ---
+let scanning = false;
+let scanTimer = null;
+let scanIndex = 0;
+let scanSkipped = new Set(); // frequencies to skip (as strings)
 
 const MI_TO_KM = 1.60934;
 
@@ -27,7 +34,9 @@ const settingsSave = document.getElementById('settings-save');
 const settingsCancel = document.getElementById('settings-cancel');
 const setGrid = document.getElementById('set-grid');
 const setDistUnit = document.getElementById('set-dist-unit');
+const setScanDwell = document.getElementById('set-scan-dwell');
 const setWatchlist = document.getElementById('set-watchlist');
+const scanBtn = document.getElementById('scan-btn');
 const spotsTable = document.getElementById('spots-table');
 const mapDiv = document.getElementById('map');
 const viewTableBtn = document.getElementById('view-table-btn');
@@ -52,6 +61,7 @@ function parseWatchlist(str) {
 async function loadPrefs() {
   const settings = await window.api.getSettings();
   distUnit = settings.distUnit || 'mi';
+  scanDwell = parseInt(settings.scanDwell, 10) || 7;
   watchlist = parseWatchlist(settings.watchlist);
   updateHeaders();
 }
@@ -148,9 +158,9 @@ function sortSpots(spots) {
 // --- Column Resizing ---
 // --- Column Resizing ---
 // Widths stored as percentages of table width so they always fit
-const COL_WIDTHS_KEY = 'pota-cat-col-pct';
-// Callsign, Freq, Mode, Ref, Park Name, State, Dist, Age
-const DEFAULT_COL_PCT = [10, 10, 6, 9, 30, 12, 8, 7];
+const COL_WIDTHS_KEY = 'pota-cat-col-pct-v2';
+// Callsign, Freq, Mode, Ref, Park Name, State, Dist, Age, Skip
+const DEFAULT_COL_PCT = [10, 9, 5, 8, 26, 11, 7, 7, 6];
 
 function loadColWidths() {
   try {
@@ -341,6 +351,50 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// --- Scan ---
+function getScanList() {
+  const filtered = sortSpots(getFiltered());
+  return filtered.filter((s) => !scanSkipped.has(s.frequency));
+}
+
+function startScan() {
+  const list = getScanList();
+  if (list.length === 0) return;
+  scanning = true;
+  scanIndex = 0;
+  scanBtn.textContent = 'Stop';
+  scanBtn.classList.add('scan-active');
+  scanStep();
+}
+
+function stopScan() {
+  scanning = false;
+  if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+  scanBtn.textContent = 'Scan';
+  scanBtn.classList.remove('scan-active');
+  render(); // clear highlight
+}
+
+function scanStep() {
+  if (!scanning) return;
+  const list = getScanList();
+  if (list.length === 0) { stopScan(); return; }
+  if (scanIndex >= list.length) scanIndex = 0;
+
+  const spot = list[scanIndex];
+  window.api.tune(spot.frequency, spot.mode);
+  render(); // update highlight
+
+  scanTimer = setTimeout(() => {
+    scanIndex++;
+    scanStep();
+  }, scanDwell * 1000);
+}
+
+scanBtn.addEventListener('click', () => {
+  if (scanning) { stopScan(); } else { startScan(); }
+});
+
 // --- View Toggle ---
 function setView(view) {
   currentView = view;
@@ -385,9 +439,24 @@ function render() {
       noSpots.classList.add('hidden');
     }
 
+    // Determine which spot is currently being scanned
+    const scanList = scanning ? getScanList() : [];
+    const scanSpot = scanning && scanList.length > 0 ? scanList[scanIndex % scanList.length] : null;
+
     for (const s of filtered) {
       const tr = document.createElement('tr');
+      const isSkipped = scanSkipped.has(s.frequency);
+
+      // Highlight the row currently being scanned
+      if (scanSpot && s.frequency === scanSpot.frequency) {
+        tr.classList.add('scan-highlight');
+      }
+      if (isSkipped) {
+        tr.classList.add('scan-skipped');
+      }
+
       tr.addEventListener('click', () => {
+        if (scanning) stopScan(); // clicking a row stops scan
         window.api.tune(s.frequency, s.mode);
       });
 
@@ -434,6 +503,26 @@ function render() {
         td.textContent = val;
         tr.appendChild(td);
       }
+
+      // Skip button (last cell)
+      const skipTd = document.createElement('td');
+      skipTd.className = 'skip-cell';
+      const skipButton = document.createElement('button');
+      skipButton.className = 'skip-btn' + (isSkipped ? ' skipped' : '');
+      skipButton.textContent = isSkipped ? 'Unskip' : 'Skip';
+      skipButton.title = isSkipped ? 'Include in scan' : 'Skip during scan';
+      skipButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isSkipped) {
+          scanSkipped.delete(s.frequency);
+        } else {
+          scanSkipped.add(s.frequency);
+        }
+        render();
+      });
+      skipTd.appendChild(skipButton);
+      tr.appendChild(skipTd);
+
       tbody.appendChild(tr);
     }
 
@@ -467,8 +556,8 @@ function formatAge(isoStr) {
 }
 
 // --- Events ---
-bandFilter.addEventListener('change', render);
-modeFilter.addEventListener('change', render);
+bandFilter.addEventListener('change', () => { if (scanning) stopScan(); render(); });
+modeFilter.addEventListener('change', () => { if (scanning) stopScan(); render(); });
 refreshBtn.addEventListener('click', () => window.api.refresh());
 
 // Column sorting
@@ -490,6 +579,7 @@ settingsBtn.addEventListener('click', async () => {
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
   setDistUnit.value = s.distUnit || 'mi';
+  setScanDwell.value = s.scanDwell || 7;
   setWatchlist.value = s.watchlist || '';
   settingsDialog.showModal();
 });
@@ -498,12 +588,15 @@ settingsCancel.addEventListener('click', () => settingsDialog.close());
 
 settingsSave.addEventListener('click', async () => {
   const watchlistRaw = setWatchlist.value.trim();
+  const dwellVal = parseInt(setScanDwell.value, 10) || 7;
   await window.api.saveSettings({
     grid: setGrid.value.trim() || 'FN20jb',
     distUnit: setDistUnit.value,
+    scanDwell: dwellVal,
     watchlist: watchlistRaw,
   });
   distUnit = setDistUnit.value;
+  scanDwell = dwellVal;
   watchlist = parseWatchlist(watchlistRaw);
   updateHeaders();
   settingsDialog.close();

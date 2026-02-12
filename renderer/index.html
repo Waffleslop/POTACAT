@@ -42,6 +42,7 @@
         </select>
       </label>
       <button id="refresh-btn" title="Refresh spots now">Refresh</button>
+      <button id="scan-btn" title="Scan through spots">Scan</button>
       <button id="settings-btn" title="Settings">Settings</button>
       <div class="view-toggle">
         <button id="view-table-btn" class="view-btn active" title="Table view">Table</button>
@@ -68,6 +69,7 @@
           <th data-sort="locationDesc">State</th>
           <th data-sort="distance" id="dist-header">Dist (mi)</th>
           <th data-sort="spotTime" id="time-header">Age</th>
+          <th class="no-sort">Skip</th>
         </tr>
       </thead>
       <tbody id="spots-body"></tbody>
@@ -85,6 +87,9 @@
         <option value="mi">Miles</option>
         <option value="km">Kilometers</option>
       </select>
+    </label>
+    <label>Scan Dwell Time (seconds):
+      <input type="number" id="set-scan-dwell" min="2" max="30" value="7">
     </label>
     <label>Watchlist (comma-separated callsigns):
       <input type="text" id="set-watchlist" placeholder="W3ABC, K1DEF, N2GHI">
