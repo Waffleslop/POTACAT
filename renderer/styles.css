@@ -150,6 +150,17 @@ a.qrz-link:hover {
   color: #81d4fa;
 }
 
+.freq-link {
+  color: #4fc3f7;
+  cursor: pointer;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.freq-link:hover {
+  color: #81d4fa;
+  text-decoration: underline;
+}
+
 #no-spots {
   text-align: center;
   padding: 40px;

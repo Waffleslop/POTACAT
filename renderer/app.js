@@ -396,8 +396,15 @@ function render() {
       callTd.appendChild(callLink);
       tr.appendChild(callTd);
 
+      // Frequency cell — styled as clickable link
+      const freqTd = document.createElement('td');
+      const freqLink = document.createElement('span');
+      freqLink.textContent = parseFloat(s.frequency).toFixed(1);
+      freqLink.className = 'freq-link';
+      freqTd.appendChild(freqLink);
+      tr.appendChild(freqTd);
+
       const cells = [
-        parseFloat(s.frequency).toFixed(1),
         s.mode,
         s.reference,
         s.parkName,
