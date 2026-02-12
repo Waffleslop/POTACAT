@@ -6,6 +6,12 @@ let sortCol = 'distance';
 let sortAsc = true;
 let currentView = 'table'; // 'table' or 'map'
 
+// User preferences (loaded from settings)
+let distUnit = 'mi';    // 'mi' or 'km'
+let timeFormat = 'utc';  // 'utc' or 'local'
+
+const MI_TO_KM = 1.60934;
+
 const bandFilter = document.getElementById('band-filter');
 const modeFilter = document.getElementById('mode-filter');
 const catSelector = document.getElementById('cat-selector');
@@ -20,10 +26,36 @@ const settingsDialog = document.getElementById('settings-dialog');
 const settingsSave = document.getElementById('settings-save');
 const settingsCancel = document.getElementById('settings-cancel');
 const setGrid = document.getElementById('set-grid');
+const setDistUnit = document.getElementById('set-dist-unit');
+const setTimeFormat = document.getElementById('set-time-format');
 const spotsTable = document.getElementById('spots-table');
 const mapDiv = document.getElementById('map');
 const viewTableBtn = document.getElementById('view-table-btn');
 const viewMapBtn = document.getElementById('view-map-btn');
+const distHeader = document.getElementById('dist-header');
+const timeHeader = document.getElementById('time-header');
+const utcClockEl = document.getElementById('utc-clock');
+
+// --- UTC Clock ---
+function updateUtcClock() {
+  const now = new Date();
+  utcClockEl.textContent = now.toISOString().slice(11, 19) + 'z';
+}
+updateUtcClock();
+setInterval(updateUtcClock, 1000);
+
+// --- Load preferences from settings ---
+async function loadPrefs() {
+  const settings = await window.api.getSettings();
+  distUnit = settings.distUnit || 'mi';
+  timeFormat = settings.timeFormat || 'utc';
+  updateHeaders();
+}
+
+function updateHeaders() {
+  distHeader.childNodes[0].textContent = distUnit === 'km' ? 'Dist (km)' : 'Dist (mi)';
+  timeHeader.childNodes[0].textContent = timeFormat === 'utc' ? 'Spot Time (UTC)' : 'Spot Time';
+}
 
 // --- CAT selector ---
 // Known SmartSDR CAT TCP ports (Slice A=5002, B=5003, etc.)
@@ -110,6 +142,68 @@ function sortSpots(spots) {
   });
 }
 
+// --- Column Resizing ---
+const COL_WIDTHS_KEY = 'pota-cat-col-widths';
+const DEFAULT_COL_WIDTHS = [90, 95, 55, 80, 200, 60, 75, 90];
+
+function loadColWidths() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY));
+    if (Array.isArray(saved) && saved.length === DEFAULT_COL_WIDTHS.length) return saved;
+  } catch { /* ignore */ }
+  return [...DEFAULT_COL_WIDTHS];
+}
+
+function saveColWidths(widths) {
+  localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(widths));
+}
+
+function applyColWidths(widths) {
+  const ths = spotsTable.querySelectorAll('thead th');
+  ths.forEach((th, i) => {
+    if (widths[i] != null) th.style.width = widths[i] + 'px';
+  });
+}
+
+function initColumnResizing() {
+  const colWidths = loadColWidths();
+  applyColWidths(colWidths);
+
+  const ths = spotsTable.querySelectorAll('thead th');
+  ths.forEach((th, i) => {
+    const handle = document.createElement('div');
+    handle.className = 'col-resize-handle';
+    th.style.position = 'relative';
+    th.appendChild(handle);
+
+    let startX, startW;
+
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // don't trigger sort
+      startX = e.clientX;
+      startW = th.offsetWidth;
+      document.body.style.cursor = 'col-resize';
+
+      const onMove = (ev) => {
+        const newW = Math.max(40, startW + ev.clientX - startX);
+        colWidths[i] = newW;
+        th.style.width = newW + 'px';
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = '';
+        saveColWidths(colWidths);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
+
 // --- Leaflet Map ---
 // Fix Leaflet default icon paths for bundled usage
 delete L.Icon.Default.prototype._getIconUrl;
@@ -144,7 +238,6 @@ function initMap() {
 async function updateHomeMarker() {
   const settings = await window.api.getSettings();
   const grid = settings.grid || 'FN20jb';
-  // Compute grid center using simple Maidenhead conversion (duplicated from lib/grid for renderer)
   const pos = gridToLatLonLocal(grid);
   if (!pos) return;
 
@@ -192,23 +285,32 @@ function gridToLatLonLocal(grid) {
   return { lat, lon };
 }
 
+function formatDistance(miles) {
+  if (miles == null) return '—';
+  if (distUnit === 'km') return Math.round(miles * MI_TO_KM);
+  return miles;
+}
+
 function updateMapMarkers(filtered) {
   if (!markerLayer) return;
   markerLayer.clearLayers();
 
+  const unit = distUnit === 'km' ? 'km' : 'mi';
+
   for (const s of filtered) {
     if (s.lat == null || s.lon == null) continue;
+
+    const distStr = s.distance != null ? formatDistance(s.distance) + ' ' + unit : '';
 
     const popupContent = `
       <b><a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b><br>
       ${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}<br>
-      ${s.distance != null ? s.distance + ' mi' : ''}<br>
+      ${distStr}<br>
       <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}">Tune</button>
     `;
 
     // Plot marker at canonical position and one world-copy in each direction
-    // so markers are visible when scrolling past the antimeridian
     for (const offset of [-360, 0, 360]) {
       const marker = L.marker([s.lat, s.lon + offset]).bindPopup(popupContent);
       marker.addTo(markerLayer);
@@ -300,7 +402,7 @@ function render() {
         s.reference,
         s.parkName,
         s.locationDesc,
-        s.distance != null ? s.distance : '—',
+        formatDistance(s.distance),
         formatTime(s.spotTime),
       ];
 
@@ -328,6 +430,11 @@ function formatTime(isoStr) {
   if (!isoStr) return '';
   try {
     const d = new Date(isoStr);
+    if (timeFormat === 'utc') {
+      const hh = String(d.getUTCHours()).padStart(2, '0');
+      const mm = String(d.getUTCMinutes()).padStart(2, '0');
+      return hh + ':' + mm + 'z';
+    }
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   } catch {
     return isoStr;
@@ -357,6 +464,8 @@ document.querySelectorAll('thead th[data-sort]').forEach((th) => {
 settingsBtn.addEventListener('click', async () => {
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
+  setDistUnit.value = s.distUnit || 'mi';
+  setTimeFormat.value = s.timeFormat || 'utc';
   settingsDialog.showModal();
 });
 
@@ -365,8 +474,14 @@ settingsCancel.addEventListener('click', () => settingsDialog.close());
 settingsSave.addEventListener('click', async () => {
   await window.api.saveSettings({
     grid: setGrid.value.trim() || 'FN20jb',
+    distUnit: setDistUnit.value,
+    timeFormat: setTimeFormat.value,
   });
+  distUnit = setDistUnit.value;
+  timeFormat = setTimeFormat.value;
+  updateHeaders();
   settingsDialog.close();
+  render();
   // Update home marker if map is initialized
   if (map) updateHomeMarker();
 });
@@ -374,7 +489,7 @@ settingsSave.addEventListener('click', async () => {
 // --- IPC listeners ---
 window.api.onSpots((spots) => {
   allSpots = spots;
-  lastRefreshEl.textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`;
+  lastRefreshEl.textContent = `Updated ${new Date().toISOString().slice(11, 19)}z`;
   render();
 });
 
@@ -388,4 +503,8 @@ window.api.onCatStatus(({ connected }) => {
 });
 
 // Init
+loadPrefs().then(() => {
+  render();
+});
 populateCatSelector();
+initColumnResizing();

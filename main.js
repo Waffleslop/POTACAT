@@ -114,11 +114,12 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  // Re-send CAT status once the renderer is actually ready to listen
+  // Once the renderer is actually ready to listen, send current state
   win.webContents.on('did-finish-load', () => {
     if (cat) {
       sendCatStatus({ connected: cat.connected, target: cat._target });
     }
+    refreshSpots();
   });
 }
 

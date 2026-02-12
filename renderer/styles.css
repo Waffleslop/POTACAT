@@ -89,6 +89,7 @@ main {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 thead th {
@@ -129,6 +130,8 @@ tbody tr:hover {
 tbody td {
   padding: 6px 10px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 tbody td:nth-child(2) {
@@ -155,6 +158,35 @@ a.qrz-link:hover {
 
 .hidden {
   display: none;
+}
+
+/* Column resize handles */
+.col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.col-resize-handle:hover {
+  background: #e94560;
+}
+
+thead th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* UTC Clock */
+.utc-clock {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  font-weight: bold;
+  color: #4fc3f7;
+  letter-spacing: 0.5px;
 }
 
 /* View toggle */
@@ -257,7 +289,7 @@ dialog label {
   color: #a0a0c0;
 }
 
-dialog input {
+dialog input, dialog select {
   display: block;
   margin-top: 4px;
   width: 100%;

@@ -49,6 +49,7 @@
       </div>
     </div>
     <div class="status-bar">
+      <span id="utc-clock" class="utc-clock"></span>
       <span id="cat-status" class="status disconnected">CAT: Disconnected</span>
       <span id="spot-count"></span>
       <span id="last-refresh"></span>
@@ -65,8 +66,8 @@
           <th data-sort="reference">Park Ref</th>
           <th data-sort="parkName">Park Name</th>
           <th data-sort="locationDesc">State</th>
-          <th data-sort="distance">Dist (mi)</th>
-          <th data-sort="spotTime">Spot Time</th>
+          <th data-sort="distance" id="dist-header">Dist (mi)</th>
+          <th data-sort="spotTime" id="time-header">Spot Time</th>
         </tr>
       </thead>
       <tbody id="spots-body"></tbody>
@@ -79,6 +80,18 @@
   <dialog id="settings-dialog">
     <h3>Settings</h3>
     <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+    <label>Distance Unit:
+      <select id="set-dist-unit">
+        <option value="mi">Miles</option>
+        <option value="km">Kilometers</option>
+      </select>
+    </label>
+    <label>Spot Time Display:
+      <select id="set-time-format">
+        <option value="utc">UTC</option>
+        <option value="local">Local Time</option>
+      </select>
+    </label>
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
       <button id="settings-cancel">Cancel</button>
