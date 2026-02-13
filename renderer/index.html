@@ -107,9 +107,40 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-pota" checked> Enable POTA</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-sota"> Enable SOTA</label>
     </fieldset>
-    <label>CAT Connection:
-      <select id="cat-options"></select>
-    </label>
+    <fieldset class="radio-config">
+      <legend>Radio</legend>
+      <label class="radio-label"><input type="radio" name="radio-type" value="none" checked> None</label>
+      <label class="radio-label"><input type="radio" name="radio-type" value="flex"> FlexRadio (SmartSDR)</label>
+      <div id="flex-config" class="radio-sub hidden">
+        <label>Slice: <select id="set-flex-slice">
+          <option value="5002">Slice A (TCP :5002)</option>
+          <option value="5003">Slice B (TCP :5003)</option>
+          <option value="5004">Slice C (TCP :5004)</option>
+          <option value="5005">Slice D (TCP :5005)</option>
+        </select></label>
+      </div>
+      <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
+      <div id="hamlib-config" class="radio-sub hidden">
+        <label>Rig Model:
+          <select id="set-rig-model">
+            <option value="">Select a rig...</option>
+          </select>
+        </label>
+        <label>Serial Port:
+          <select id="set-rig-port"></select>
+        </label>
+        <label>Baud Rate:
+          <select id="set-rig-baud">
+            <option value="4800">4800</option>
+            <option value="9600" selected>9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+          </select>
+        </label>
+      </div>
+    </fieldset>
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
       <button id="settings-cancel">Cancel</button>
@@ -118,7 +149,29 @@
       <div class="settings-version">v0.9 beta</div>
       <div class="settings-bio">Built by <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-issues">Free &amp; open source. Found a bug? <a href="#" id="issues-link">Submit a ticket</a></div>
+      <div class="settings-attribution">Radio control powered by <a href="https://hamlib.github.io/" onclick="return false;" id="hamlib-link">Hamlib</a> (LGPL v2.1)</div>
     </div>
+  </dialog>
+
+  <!-- Welcome dialog (first run) -->
+  <dialog id="welcome-dialog">
+    <h3>Welcome to POTA CAT</h3>
+    <p class="welcome-text">Let's get you set up. What radio are you using?</p>
+    <div class="welcome-choices">
+      <button class="welcome-choice" data-radio="flex">
+        <span class="welcome-choice-title">FlexRadio</span>
+        <span class="welcome-choice-desc">SmartSDR via TCP</span>
+      </button>
+      <button class="welcome-choice" data-radio="hamlib">
+        <span class="welcome-choice-title">Other Rig</span>
+        <span class="welcome-choice-desc">Via Hamlib (rigctld)</span>
+      </button>
+      <button class="welcome-choice" data-radio="none">
+        <span class="welcome-choice-title">No Radio</span>
+        <span class="welcome-choice-desc">Just browse spots</span>
+      </button>
+    </div>
+    <label class="welcome-grid">QTH Grid Square: <input type="text" id="welcome-grid" maxlength="6" placeholder="FN20jb"></label>
   </dialog>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>

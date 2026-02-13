@@ -27,7 +27,6 @@ const MI_TO_KM = 1.60934;
 
 const bandFilterEl = document.getElementById('band-filter');
 const modeFilterEl = document.getElementById('mode-filter');
-const catOptions = document.getElementById('cat-options');
 const tbody = document.getElementById('spots-body');
 const noSpots = document.getElementById('no-spots');
 const catStatusEl = document.getElementById('cat-status');
@@ -46,6 +45,13 @@ const setWatchlist = document.getElementById('set-watchlist');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const scanBtn = document.getElementById('scan-btn');
+const hamlibConfig = document.getElementById('hamlib-config');
+const flexConfig = document.getElementById('flex-config');
+const setFlexSlice = document.getElementById('set-flex-slice');
+const radioTypeBtns = document.querySelectorAll('input[name="radio-type"]');
+const setRigModel = document.getElementById('set-rig-model');
+const setRigPort = document.getElementById('set-rig-port');
+const setRigBaud = document.getElementById('set-rig-baud');
 const spotsTable = document.getElementById('spots-table');
 const mapDiv = document.getElementById('map');
 const viewTableBtn = document.getElementById('view-table-btn');
@@ -70,11 +76,16 @@ function parseWatchlist(str) {
 async function loadPrefs() {
   const settings = await window.api.getSettings();
   distUnit = settings.distUnit || 'mi';
-  maxAgeMin = parseInt(settings.maxAgeMin, 10) || 5;
   scanDwell = parseInt(settings.scanDwell, 10) || 7;
   watchlist = parseWatchlist(settings.watchlist);
   enablePota = settings.enablePota !== false; // default true
   enableSota = settings.enableSota === true;  // default false
+  // maxAgeMin: prefer localStorage (last-used filter) over settings.json
+  try {
+    const saved = JSON.parse(localStorage.getItem(FILTERS_KEY));
+    if (saved && saved.maxAgeMin) { maxAgeMin = saved.maxAgeMin; }
+    else { maxAgeMin = parseInt(settings.maxAgeMin, 10) || 5; }
+  } catch { maxAgeMin = parseInt(settings.maxAgeMin, 10) || 5; }
   updateHeaders();
 }
 
@@ -82,53 +93,80 @@ function updateHeaders() {
   distHeader.childNodes[0].textContent = distUnit === 'km' ? 'Dist (km)' : 'Dist (mi)';
 }
 
-// --- CAT selector (inside Settings) ---
-const TCP_PORTS = [
-  { label: 'Slice A', detail: 'TCP 127.0.0.1:5002', type: 'tcp', host: '127.0.0.1', port: 5002 },
-  { label: 'Slice B', detail: 'TCP 127.0.0.1:5003', type: 'tcp', host: '127.0.0.1', port: 5003 },
-  { label: 'Slice C', detail: 'TCP 127.0.0.1:5004', type: 'tcp', host: '127.0.0.1', port: 5004 },
-  { label: 'Slice D', detail: 'TCP 127.0.0.1:5005', type: 'tcp', host: '127.0.0.1', port: 5005 },
-];
+// --- Radio config (inside Settings) ---
+let hamlibFieldsLoaded = false;
 
-async function populateCatOptions(currentTarget) {
-  const ports = await window.api.listPorts();
-  const currentStr = currentTarget ? JSON.stringify(currentTarget) : '';
+function getSelectedRadioType() {
+  const checked = document.querySelector('input[name="radio-type"]:checked');
+  return checked ? checked.value : 'none';
+}
 
-  catOptions.innerHTML = '';
+function setRadioType(value) {
+  const btn = document.querySelector(`input[name="radio-type"][value="${value}"]`);
+  if (btn) btn.checked = true;
+}
 
-  // None
-  const noneOpt = document.createElement('option');
-  noneOpt.value = '';
-  noneOpt.textContent = 'None';
-  if (!currentStr) noneOpt.selected = true;
-  catOptions.appendChild(noneOpt);
-
-  // TCP group
-  const tcpGroup = document.createElement('optgroup');
-  tcpGroup.label = 'SmartSDR TCP';
-  for (const tcp of TCP_PORTS) {
-    const val = JSON.stringify({ type: tcp.type, host: tcp.host, port: tcp.port });
-    const opt = document.createElement('option');
-    opt.value = val;
-    opt.textContent = `${tcp.label} (${tcp.detail})`;
-    if (val === currentStr) opt.selected = true;
-    tcpGroup.appendChild(opt);
+function updateRadioSubPanels() {
+  const type = getSelectedRadioType();
+  flexConfig.classList.toggle('hidden', type !== 'flex');
+  hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
+  if (type === 'hamlib' && !hamlibFieldsLoaded) {
+    hamlibFieldsLoaded = true;
+    populateHamlibFields(null);
   }
-  catOptions.appendChild(tcpGroup);
+}
 
-  // Serial group (only if ports detected)
-  if (ports.length > 0) {
-    const serialGroup = document.createElement('optgroup');
-    serialGroup.label = 'Serial Ports';
-    for (const p of ports) {
-      const val = JSON.stringify({ type: 'serial', path: p.path });
+async function populateRadioSection(currentTarget) {
+  hamlibFieldsLoaded = false;
+  if (!currentTarget) {
+    setRadioType('none');
+  } else if (currentTarget.type === 'tcp') {
+    setRadioType('flex');
+    setFlexSlice.value = String(currentTarget.port);
+  } else if (currentTarget.type === 'rigctld') {
+    setRadioType('hamlib');
+    hamlibFieldsLoaded = true;
+    await populateHamlibFields(currentTarget);
+  } else {
+    setRadioType('none');
+  }
+  updateRadioSubPanels();
+}
+
+async function populateHamlibFields(savedTarget) {
+  // Populate rig model dropdown
+  setRigModel.innerHTML = '<option value="">Loading rigs...</option>';
+  const rigs = await window.api.listRigs();
+  setRigModel.innerHTML = '';
+  if (rigs.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No rigs found — is Hamlib installed?';
+    setRigModel.appendChild(opt);
+  } else {
+    for (const rig of rigs) {
       const opt = document.createElement('option');
-      opt.value = val;
-      opt.textContent = `${p.path} — ${p.friendlyName}`;
-      if (val === currentStr) opt.selected = true;
-      serialGroup.appendChild(opt);
+      opt.value = rig.id;
+      opt.textContent = `${rig.mfg} ${rig.model}`;
+      if (savedTarget && savedTarget.rigId === rig.id) opt.selected = true;
+      setRigModel.appendChild(opt);
     }
-    catOptions.appendChild(serialGroup);
+  }
+
+  // Populate serial port dropdown
+  const ports = await window.api.listPorts();
+  setRigPort.innerHTML = '';
+  for (const p of ports) {
+    const opt = document.createElement('option');
+    opt.value = p.path;
+    opt.textContent = `${p.path} — ${p.friendlyName}`;
+    if (savedTarget && savedTarget.serialPort === p.path) opt.selected = true;
+    setRigPort.appendChild(opt);
+  }
+
+  // Restore baud rate
+  if (savedTarget && savedTarget.baudRate) {
+    setRigBaud.value = String(savedTarget.baudRate);
   }
 }
 
@@ -181,6 +219,7 @@ function initMultiDropdown(container, label) {
     }
     updateText();
     render();
+    if (typeof saveFilters === 'function') saveFilters();
   });
 
   updateText();
@@ -196,6 +235,76 @@ function getDropdownValues(container) {
 
 initMultiDropdown(bandFilterEl, 'Band');
 initMultiDropdown(modeFilterEl, 'Mode');
+
+// --- Persist filters to localStorage ---
+const FILTERS_KEY = 'pota-cat-filters';
+
+function saveFilters() {
+  const bands = getDropdownValues(bandFilterEl);
+  const modes = getDropdownValues(modeFilterEl);
+  const data = {
+    bands: bands ? [...bands] : null,
+    modes: modes ? [...modes] : null,
+    maxAgeMin,
+  };
+  localStorage.setItem(FILTERS_KEY, JSON.stringify(data));
+}
+
+function restoreFilters() {
+  try {
+    const data = JSON.parse(localStorage.getItem(FILTERS_KEY));
+    if (!data) return;
+
+    // Restore band checkboxes
+    if (data.bands) {
+      const bandSet = new Set(data.bands);
+      bandFilterEl.querySelector('input[value="all"]').checked = false;
+      bandFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => {
+        cb.checked = bandSet.has(cb.value);
+      });
+    } else {
+      bandFilterEl.querySelector('input[value="all"]').checked = true;
+      bandFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => { cb.checked = false; });
+    }
+
+    // Restore mode checkboxes
+    if (data.modes) {
+      const modeSet = new Set(data.modes);
+      modeFilterEl.querySelector('input[value="all"]').checked = false;
+      modeFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => {
+        cb.checked = modeSet.has(cb.value);
+      });
+    } else {
+      modeFilterEl.querySelector('input[value="all"]').checked = true;
+      modeFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => { cb.checked = false; });
+    }
+
+    // Restore max age
+    if (data.maxAgeMin) maxAgeMin = data.maxAgeMin;
+
+    // Update dropdown button text
+    [bandFilterEl, modeFilterEl].forEach((container) => {
+      const textEl = container.querySelector('.multi-dropdown-text');
+      const allCb = container.querySelector('input[value="all"]');
+      const itemCbs = [...container.querySelectorAll('input:not([value="all"])')];
+      const checked = itemCbs.filter((cb) => cb.checked);
+      if (allCb.checked || checked.length === 0) {
+        textEl.textContent = 'All';
+      } else if (checked.length <= 3) {
+        textEl.textContent = checked.map((cb) => cb.value).join(', ');
+      } else {
+        textEl.textContent = checked.length + ' selected';
+      }
+    });
+  } catch { /* ignore corrupt data */ }
+}
+
+restoreFilters();
+
+// Toggle radio sub-panels when radio type changes
+radioTypeBtns.forEach((btn) => {
+  btn.addEventListener('change', () => updateRadioSubPanels());
+});
 
 // Close dropdowns when clicking outside
 document.addEventListener('click', () => {
@@ -703,7 +812,7 @@ settingsBtn.addEventListener('click', async () => {
   setWatchlist.value = s.watchlist || '';
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
-  await populateCatOptions(s.catTarget);
+  await populateRadioSection(s.catTarget);
   settingsDialog.showModal();
 });
 
@@ -716,9 +825,19 @@ settingsSave.addEventListener('click', async () => {
   const potaEnabled = setEnablePota.checked;
   const sotaEnabled = setEnableSota.checked;
 
-  // Apply CAT selection
-  if (catOptions.value) {
-    window.api.connectCat(JSON.parse(catOptions.value));
+  // Apply radio selection
+  const radioType = getSelectedRadioType();
+  if (radioType === 'flex') {
+    window.api.connectCat({ type: 'tcp', host: '127.0.0.1', port: parseInt(setFlexSlice.value, 10) });
+  } else if (radioType === 'hamlib') {
+    window.api.connectCat({
+      type: 'rigctld',
+      rigId: parseInt(setRigModel.value, 10),
+      serialPort: setRigPort.value,
+      baudRate: parseInt(setRigBaud.value, 10),
+    });
+  } else {
+    window.api.connectCat(null);
   }
 
   await window.api.saveSettings({
@@ -737,6 +856,7 @@ settingsSave.addEventListener('click', async () => {
   enablePota = potaEnabled;
   enableSota = sotaEnabled;
   updateHeaders();
+  saveFilters();
   settingsDialog.close();
   render();
   // Update home marker if map is initialized
@@ -776,14 +896,70 @@ document.getElementById('issues-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://github.com/Waffleslop/POTA-CAT/issues');
 });
+document.getElementById('hamlib-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://hamlib.github.io/');
+});
 
 // --- Titlebar controls ---
 document.getElementById('tb-min').addEventListener('click', () => window.api.minimize());
 document.getElementById('tb-max').addEventListener('click', () => window.api.maximize());
 document.getElementById('tb-close').addEventListener('click', () => window.api.close());
 
+// --- Welcome dialog (first run) ---
+const welcomeDialog = document.getElementById('welcome-dialog');
+const welcomeGridInput = document.getElementById('welcome-grid');
+const welcomeChoices = document.querySelectorAll('.welcome-choice');
+let welcomeRadioType = null;
+
+welcomeChoices.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    welcomeChoices.forEach((b) => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    welcomeRadioType = btn.dataset.radio;
+    finishWelcome();
+  });
+});
+
+async function finishWelcome() {
+  const grid = welcomeGridInput.value.trim() || 'FN20jb';
+  let catTarget = null;
+
+  if (welcomeRadioType === 'flex') {
+    catTarget = { type: 'tcp', host: '127.0.0.1', port: 5002 };
+  }
+  // hamlib: save null for now — user will configure details in Settings
+  // none: catTarget stays null
+
+  await window.api.saveSettings({
+    grid,
+    catTarget,
+    firstRun: false,
+    distUnit: 'mi',
+    maxAgeMin: 5,
+    scanDwell: 7,
+    enablePota: true,
+    enableSota: false,
+  });
+
+  welcomeDialog.close();
+
+  // If they chose hamlib, open full settings so they can pick rig/port/baud
+  if (welcomeRadioType === 'hamlib') {
+    settingsBtn.click();
+  }
+}
+
+async function checkFirstRun() {
+  const s = await window.api.getSettings();
+  if (s.firstRun) {
+    welcomeDialog.showModal();
+  }
+}
+
 // Init
 loadPrefs().then(() => {
   render();
+  checkFirstRun();
 });
 initColumnResizing();

@@ -589,3 +589,107 @@ dialog input, dialog select {
   color: #81d4fa;
 }
 
+/* Radio config fieldset */
+.radio-config {
+  border: 1px solid #1a4080;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.radio-config legend {
+  color: #a0a0c0;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.radio-label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.radio-label input[type="radio"] {
+  width: auto;
+  margin-top: 0;
+}
+
+/* Radio sub-panels (Flex slice picker, Hamlib config) */
+.radio-sub {
+  margin-top: 4px;
+  margin-left: 12px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-left: 2px solid #1a4080;
+  background: #0f1a30;
+  border-radius: 0 4px 4px 0;
+}
+
+.radio-sub label {
+  margin-bottom: 8px;
+}
+
+.radio-sub select {
+  width: 100%;
+}
+
+.settings-attribution {
+  font-size: 11px;
+  color: #606080;
+}
+
+/* Welcome dialog */
+.welcome-text {
+  font-size: 13px;
+  color: #a0a0c0;
+  margin-bottom: 16px;
+}
+
+.welcome-choices {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.welcome-choice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 10px;
+  border-radius: 6px;
+  background: #0f3460;
+  border: 2px solid #1a4080;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.welcome-choice:hover {
+  background: #1a4080;
+  border-color: #4fc3f7;
+}
+
+.welcome-choice.selected {
+  border-color: #4ecca3;
+  background: #0a3d2a;
+}
+
+.welcome-choice-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: #e0e0e0;
+}
+
+.welcome-choice-desc {
+  font-size: 11px;
+  color: #808090;
+}
+
+.welcome-grid {
+  display: block;
+  margin-bottom: 0;
+}
+
