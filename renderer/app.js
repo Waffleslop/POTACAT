@@ -4,7 +4,7 @@
 let allSpots = [];
 let sortCol = 'distance';
 let sortAsc = true;
-let currentView = 'table'; // 'table' or 'map'
+let currentView = 'table'; // 'table', 'map', or 'dxcc'
 
 // User preferences (loaded from settings)
 let distUnit = 'mi';    // 'mi' or 'km'
@@ -13,6 +13,9 @@ let maxAgeMin = 5;       // max spot age in minutes
 let scanDwell = 7;       // seconds per frequency during scan
 let enablePota = true;
 let enableSota = false;
+let enableDxcc = false;
+let enableCluster = false;
+let dxccData = null;  // { entities: [...] } from main process
 
 // --- Scan state ---
 // --- Radio frequency tracking ---
@@ -56,6 +59,22 @@ const spotsTable = document.getElementById('spots-table');
 const mapDiv = document.getElementById('map');
 const viewTableBtn = document.getElementById('view-table-btn');
 const viewMapBtn = document.getElementById('view-map-btn');
+const viewDxccBtn = document.getElementById('view-dxcc-btn');
+const dxccView = document.getElementById('dxcc-view');
+const dxccMatrixBody = document.getElementById('dxcc-matrix-body');
+const dxccCountEl = document.getElementById('dxcc-count');
+const dxccPlaceholder = document.getElementById('dxcc-placeholder');
+const dxccModeFilterEl = document.getElementById('dxcc-mode-filter');
+const setEnableCluster = document.getElementById('set-enable-cluster');
+const setMyCallsign = document.getElementById('set-my-callsign');
+const setClusterHost = document.getElementById('set-cluster-host');
+const setClusterPort = document.getElementById('set-cluster-port');
+const clusterConfig = document.getElementById('cluster-config');
+const clusterStatusEl = document.getElementById('cluster-status');
+const setEnableDxcc = document.getElementById('set-enable-dxcc');
+const setAdifPath = document.getElementById('set-adif-path');
+const adifBrowseBtn = document.getElementById('adif-browse-btn');
+const adifPicker = document.getElementById('adif-picker');
 const distHeader = document.getElementById('dist-header');
 const utcClockEl = document.getElementById('utc-clock');
 
@@ -80,6 +99,10 @@ async function loadPrefs() {
   watchlist = parseWatchlist(settings.watchlist);
   enablePota = settings.enablePota !== false; // default true
   enableSota = settings.enableSota === true;  // default false
+  enableDxcc = settings.enableDxcc === true;  // default false
+  enableCluster = settings.enableCluster === true; // default false
+  updateClusterStatusVisibility();
+  updateDxccButton();
   // maxAgeMin: prefer localStorage (last-used filter) over settings.json
   try {
     const saved = JSON.parse(localStorage.getItem(FILTERS_KEY));
@@ -236,6 +259,78 @@ function getDropdownValues(container) {
 initMultiDropdown(bandFilterEl, 'Band');
 initMultiDropdown(modeFilterEl, 'Mode');
 
+// DXCC mode filter — re-render matrix on change instead of spot table
+function initDxccModeFilter() {
+  const btn = dxccModeFilterEl.querySelector('.multi-dropdown-btn');
+  const menu = dxccModeFilterEl.querySelector('.multi-dropdown-menu');
+  const textEl = dxccModeFilterEl.querySelector('.multi-dropdown-text');
+  const allCb = menu.querySelector('input[value="all"]');
+  const itemCbs = [...menu.querySelectorAll('input:not([value="all"])')];
+
+  function updateText() {
+    const checked = itemCbs.filter((cb) => cb.checked);
+    if (allCb.checked || checked.length === 0) {
+      textEl.textContent = 'All';
+    } else if (checked.length <= 3) {
+      textEl.textContent = checked.map((cb) => cb.value).join(', ');
+    } else {
+      textEl.textContent = checked.length + ' selected';
+    }
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.multi-dropdown.open').forEach((d) => {
+      if (d !== dxccModeFilterEl) d.classList.remove('open');
+    });
+    dxccModeFilterEl.classList.toggle('open');
+  });
+
+  menu.addEventListener('click', (e) => e.stopPropagation());
+
+  menu.addEventListener('change', (e) => {
+    const cb = e.target;
+    if (cb.value === 'all') {
+      const nowChecked = cb.checked;
+      itemCbs.forEach((c) => { c.checked = nowChecked; });
+    } else {
+      allCb.checked = false;
+      if (itemCbs.every((c) => !c.checked)) allCb.checked = true;
+      if (itemCbs.every((c) => c.checked)) {
+        allCb.checked = true;
+        itemCbs.forEach((c) => { c.checked = false; });
+      }
+    }
+    updateText();
+    if (currentView === 'dxcc') renderDxccMatrix();
+  });
+
+  updateText();
+}
+initDxccModeFilter();
+
+function getDxccModeFilter() {
+  return getDropdownValues(dxccModeFilterEl);
+}
+
+function updateDxccButton() {
+  if (enableDxcc) {
+    viewDxccBtn.classList.remove('hidden');
+  } else {
+    viewDxccBtn.classList.add('hidden');
+    // Fall back to table if currently on DXCC view
+    if (currentView === 'dxcc') setView('table');
+  }
+}
+
+function updateClusterStatusVisibility() {
+  if (enableCluster) {
+    clusterStatusEl.classList.remove('hidden');
+  } else {
+    clusterStatusEl.classList.add('hidden');
+  }
+}
+
 // --- Persist filters to localStorage ---
 const FILTERS_KEY = 'pota-cat-filters';
 
@@ -306,6 +401,24 @@ radioTypeBtns.forEach((btn) => {
   btn.addEventListener('change', () => updateRadioSubPanels());
 });
 
+// Cluster checkbox toggles cluster config visibility
+setEnableCluster.addEventListener('change', () => {
+  clusterConfig.classList.toggle('hidden', !setEnableCluster.checked);
+});
+
+// DXCC checkbox toggles ADIF picker visibility
+setEnableDxcc.addEventListener('change', () => {
+  adifPicker.classList.toggle('hidden', !setEnableDxcc.checked);
+});
+
+// ADIF file browser
+adifBrowseBtn.addEventListener('click', async () => {
+  const filePath = await window.api.chooseAdifFile();
+  if (filePath) {
+    setAdifPath.value = filePath;
+  }
+});
+
 // Close dropdowns when clicking outside
 document.addEventListener('click', () => {
   document.querySelectorAll('.multi-dropdown.open').forEach((d) => d.classList.remove('open'));
@@ -334,6 +447,7 @@ function getFiltered() {
   return allSpots.filter((s) => {
     if (s.source === 'pota' && !enablePota) return false;
     if (s.source === 'sota' && !enableSota) return false;
+    if (s.source === 'dxc' && !enableCluster) return false;
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
     if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
@@ -526,6 +640,17 @@ function formatDistance(miles) {
 
 function updateMapMarkers(filtered) {
   if (!markerLayer) return;
+
+  // Preserve open popup across re-render
+  let openPopupCallsign = null;
+  let openPopupLatLng = null;
+  markerLayer.eachLayer((layer) => {
+    if (layer.getPopup && layer.getPopup() && layer.getPopup().isOpen()) {
+      openPopupCallsign = layer._spotCallsign || null;
+      openPopupLatLng = layer.getLatLng();
+    }
+  });
+
   markerLayer.clearLayers();
 
   const unit = distUnit === 'km' ? 'km' : 'mi';
@@ -537,8 +662,9 @@ function updateMapMarkers(filtered) {
     const watched = watchlist.has(s.callsign.toUpperCase());
 
     const sourceLabel = (s.source || 'pota').toUpperCase();
+    const sourceColor = s.source === 'sota' ? '#f0a500' : s.source === 'dxc' ? '#e040fb' : '#4ecca3';
     const popupContent = `
-      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${s.source === 'sota' ? '#f0a500' : '#4ecca3'};font-size:11px;">[${sourceLabel}]</span><br>
+      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span><br>
       ${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}<br>
       ${distStr}<br>
@@ -553,7 +679,14 @@ function updateMapMarkers(filtered) {
     // Plot marker at canonical position and one world-copy in each direction
     for (const offset of [-360, 0, 360]) {
       const marker = L.marker([s.lat, s.lon + offset], markerOptions).bindPopup(popupContent);
+      marker._spotCallsign = s.callsign;
       marker.addTo(markerLayer);
+
+      // Re-open popup if it was open before re-render
+      if (openPopupCallsign && s.callsign === openPopupCallsign && openPopupLatLng &&
+          Math.abs(marker.getLatLng().lng - openPopupLatLng.lng) < 1) {
+        marker.openPopup();
+      }
     }
   }
 }
@@ -620,30 +753,114 @@ scanBtn.addEventListener('click', () => {
 function setView(view) {
   currentView = view;
 
+  // Hide all views
+  spotsTable.classList.add('hidden');
+  noSpots.classList.add('hidden');
+  mapDiv.classList.add('hidden');
+  dxccView.classList.add('hidden');
+
+  // Deactivate all view buttons
+  viewTableBtn.classList.remove('active');
+  viewMapBtn.classList.remove('active');
+  viewDxccBtn.classList.remove('active');
+
   if (view === 'table') {
     spotsTable.classList.remove('hidden');
-    mapDiv.classList.add('hidden');
     viewTableBtn.classList.add('active');
-    viewMapBtn.classList.remove('active');
-  } else {
-    spotsTable.classList.add('hidden');
-    noSpots.classList.add('hidden');
+    render();
+  } else if (view === 'map') {
     mapDiv.classList.remove('hidden');
-    viewTableBtn.classList.remove('active');
     viewMapBtn.classList.add('active');
-
     if (!map) {
       initMap();
     }
-    // Leaflet needs a size recalc when container becomes visible
     setTimeout(() => map.invalidateSize(), 0);
+    render();
+  } else if (view === 'dxcc') {
+    dxccView.classList.remove('hidden');
+    viewDxccBtn.classList.add('active');
+    renderDxccMatrix();
   }
-
-  render();
 }
 
 viewTableBtn.addEventListener('click', () => setView('table'));
 viewMapBtn.addEventListener('click', () => setView('map'));
+viewDxccBtn.addEventListener('click', () => setView('dxcc'));
+
+// --- DXCC Matrix Rendering ---
+const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+
+function renderDxccMatrix() {
+  if (!dxccData || !dxccData.entities) {
+    dxccMatrixBody.innerHTML = '';
+    dxccPlaceholder.classList.remove('hidden');
+    dxccCountEl.textContent = '0 / 0';
+    return;
+  }
+
+  dxccPlaceholder.classList.add('hidden');
+  const modeFilter = getDxccModeFilter(); // null = all modes
+
+  let confirmedCount = 0;
+  const rows = [];
+
+  for (const ent of dxccData.entities) {
+    let hasAny = false;
+    const bandCells = [];
+
+    for (const band of DXCC_BANDS) {
+      const modes = ent.confirmed[band];
+      let confirmed = false;
+      if (modes && modes.length > 0) {
+        if (!modeFilter) {
+          confirmed = true;
+        } else {
+          confirmed = modes.some((m) => modeFilter.has(m));
+        }
+      }
+      if (confirmed) hasAny = true;
+      bandCells.push(confirmed);
+    }
+
+    if (hasAny) confirmedCount++;
+    rows.push({ ent, bandCells, hasAny });
+  }
+
+  dxccCountEl.textContent = `${confirmedCount} / ${dxccData.entities.length}`;
+
+  // Build table rows
+  const fragment = document.createDocumentFragment();
+  for (const { ent, bandCells, hasAny } of rows) {
+    const tr = document.createElement('tr');
+    if (!hasAny) tr.classList.add('dxcc-unworked');
+
+    // Entity name
+    const nameTd = document.createElement('td');
+    nameTd.textContent = ent.name;
+    nameTd.title = ent.prefix;
+    tr.appendChild(nameTd);
+
+    // Continent
+    const contTd = document.createElement('td');
+    contTd.textContent = ent.continent;
+    tr.appendChild(contTd);
+
+    // Band cells
+    for (const confirmed of bandCells) {
+      const td = document.createElement('td');
+      if (confirmed) {
+        td.textContent = '\u2713';
+        td.classList.add('dxcc-confirmed');
+      }
+      tr.appendChild(td);
+    }
+
+    fragment.appendChild(tr);
+  }
+
+  dxccMatrixBody.innerHTML = '';
+  dxccMatrixBody.appendChild(fragment);
+}
 
 // --- Rendering ---
 function render() {
@@ -671,6 +888,7 @@ function render() {
       // Source color-coding
       if (s.source === 'pota') tr.classList.add('spot-pota');
       if (s.source === 'sota') tr.classList.add('spot-sota');
+      if (s.source === 'dxc') tr.classList.add('spot-dxc');
 
       // Highlight the row currently being scanned
       if (scanSpot && s.frequency === scanSpot.frequency) {
@@ -812,6 +1030,14 @@ settingsBtn.addEventListener('click', async () => {
   setWatchlist.value = s.watchlist || '';
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
+  setEnableCluster.checked = s.enableCluster === true;
+  setMyCallsign.value = s.myCallsign || '';
+  setClusterHost.value = s.clusterHost || 'w3lpl.net';
+  setClusterPort.value = s.clusterPort || 7373;
+  clusterConfig.classList.toggle('hidden', !s.enableCluster);
+  setEnableDxcc.checked = s.enableDxcc === true;
+  setAdifPath.value = s.adifPath || '';
+  adifPicker.classList.toggle('hidden', !s.enableDxcc);
   await populateRadioSection(s.catTarget);
   settingsDialog.showModal();
 });
@@ -824,6 +1050,12 @@ settingsSave.addEventListener('click', async () => {
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
   const potaEnabled = setEnablePota.checked;
   const sotaEnabled = setEnableSota.checked;
+  const clusterEnabled = setEnableCluster.checked;
+  const myCallsign = setMyCallsign.value.trim().toUpperCase();
+  const clusterHost = setClusterHost.value.trim() || 'w3lpl.net';
+  const clusterPort = parseInt(setClusterPort.value, 10) || 7373;
+  const dxccEnabled = setEnableDxcc.checked;
+  const adifPath = setAdifPath.value.trim() || '';
 
   // Apply radio selection
   const radioType = getSelectedRadioType();
@@ -848,6 +1080,12 @@ settingsSave.addEventListener('click', async () => {
     watchlist: watchlistRaw,
     enablePota: potaEnabled,
     enableSota: sotaEnabled,
+    enableCluster: clusterEnabled,
+    myCallsign: myCallsign,
+    clusterHost: clusterHost,
+    clusterPort: clusterPort,
+    enableDxcc: dxccEnabled,
+    adifPath: adifPath,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -855,6 +1093,10 @@ settingsSave.addEventListener('click', async () => {
   watchlist = parseWatchlist(watchlistRaw);
   enablePota = potaEnabled;
   enableSota = sotaEnabled;
+  enableCluster = clusterEnabled;
+  updateClusterStatusVisibility();
+  enableDxcc = dxccEnabled;
+  updateDxccButton();
   updateHeaders();
   saveFilters();
   settingsDialog.close();
@@ -877,6 +1119,19 @@ window.api.onSpotsError((msg) => {
 window.api.onCatStatus(({ connected }) => {
   catStatusEl.textContent = connected ? 'CAT: Connected' : 'CAT: Disconnected';
   catStatusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
+});
+
+// --- DXCC data listener ---
+window.api.onDxccData((data) => {
+  dxccData = data;
+  if (currentView === 'dxcc') renderDxccMatrix();
+});
+
+// --- Cluster status listener ---
+window.api.onClusterStatus(({ connected }) => {
+  clusterStatusEl.textContent = connected ? 'Cluster: Connected' : 'Cluster: Disconnected';
+  clusterStatusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
+  if (enableCluster) clusterStatusEl.classList.remove('hidden');
 });
 
 // --- Radio frequency tracking ---

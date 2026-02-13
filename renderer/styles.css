@@ -288,7 +288,7 @@ a.qrz-link:hover {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 /* Scan */
@@ -392,6 +392,10 @@ thead th {
 
 .view-btn:first-child {
   border-radius: 4px 0 0 4px;
+}
+
+.view-btn:not(:first-child):not(:last-child) {
+  border-radius: 0;
 }
 
 .view-btn:last-child {
@@ -536,6 +540,10 @@ dialog input, dialog select {
 
 .spot-sota {
   border-left: 3px solid #f0a500;
+}
+
+.spot-dxc {
+  border-left: 3px solid #e040fb;
 }
 
 /* Settings source toggles */
@@ -691,5 +699,130 @@ dialog input, dialog select {
 .welcome-grid {
   display: block;
   margin-bottom: 0;
+}
+
+/* DXCC Tracker */
+#dxcc-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.dxcc-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+}
+
+.dxcc-progress {
+  font-size: 13px;
+  color: #a0a0c0;
+}
+
+#dxcc-count {
+  font-weight: bold;
+  color: #4ecca3;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.dxcc-table-container {
+  flex: 1;
+  overflow: auto;
+}
+
+.dxcc-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+.dxcc-matrix thead th {
+  background: #16213e;
+  position: sticky;
+  top: 0;
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #a0a0c0;
+  border-bottom: 2px solid #0f3460;
+  cursor: default;
+  z-index: 2;
+}
+
+.dxcc-matrix thead th:hover {
+  color: #a0a0c0;
+}
+
+.dxcc-entity-col {
+  text-align: left !important;
+  min-width: 180px;
+  position: sticky;
+  left: 0;
+  background: #16213e;
+  z-index: 3 !important;
+  padding-left: 12px !important;
+}
+
+.dxcc-cont-col {
+  min-width: 40px;
+}
+
+.dxcc-band-col {
+  width: 50px;
+  min-width: 40px;
+}
+
+.dxcc-matrix tbody td {
+  padding: 4px 4px;
+  text-align: center;
+  font-size: 12px;
+  border-bottom: 1px solid #0f3460;
+  white-space: nowrap;
+}
+
+.dxcc-matrix tbody td:first-child {
+  text-align: left;
+  padding-left: 12px;
+  position: sticky;
+  left: 0;
+  background: inherit;
+  z-index: 1;
+}
+
+.dxcc-matrix tbody td:nth-child(2) {
+  color: #808090;
+  font-size: 11px;
+}
+
+.dxcc-matrix tbody tr:nth-child(even) {
+  background: #1a1a2e;
+}
+
+.dxcc-matrix tbody tr:nth-child(odd) {
+  background: #171730;
+}
+
+.dxcc-matrix tbody tr:hover {
+  background: #1a4080;
+}
+
+.dxcc-confirmed {
+  color: #4ecca3;
+  font-weight: bold;
+}
+
+.dxcc-unworked {
+  opacity: 0.4;
+}
+
+#dxcc-placeholder {
+  text-align: center;
+  padding: 60px 20px;
+  color: #808090;
+  font-size: 15px;
 }
 

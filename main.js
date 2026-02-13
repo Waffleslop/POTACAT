@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
@@ -7,6 +7,12 @@ const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache } = requ
 const { CatClient, RigctldClient, listSerialPorts } = require('./lib/cat');
 const { gridToLatLon, haversineDistanceMiles } = require('./lib/grid');
 const { freqToBand } = require('./lib/bands');
+const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
+const { parseAdifFile } = require('./lib/adif');
+const { DxClusterClient } = require('./lib/dxcluster');
+
+// --- cty.dat database (loaded once at startup) ---
+let ctyDb = null;
 
 // --- Settings ---
 const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
@@ -28,6 +34,9 @@ let win = null;
 let cat = null;
 let spotTimer = null;
 let rigctldProc = null;
+let cluster = null;
+let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
+let clusterFlushTimer = null; // throttle timer for cluster → renderer updates
 
 // --- Rigctld management ---
 function findRigctld() {
@@ -145,6 +154,100 @@ async function connectCat() {
   }
 }
 
+// --- DX Cluster ---
+function sendClusterStatus(s) {
+  if (win && !win.isDestroyed()) win.webContents.send('cluster-status', s);
+}
+
+function connectCluster() {
+  if (cluster) {
+    cluster.disconnect();
+    cluster.removeAllListeners();
+    cluster = null;
+  }
+  clusterSpots = [];
+
+  if (!settings.enableCluster || !settings.myCallsign) {
+    sendClusterStatus({ connected: false });
+    return;
+  }
+
+  cluster = new DxClusterClient();
+  const myPos = gridToLatLon(settings.grid);
+
+  cluster.on('spot', (raw) => {
+    // Normalize to standard spot shape
+    const spot = {
+      source: 'dxc',
+      callsign: raw.callsign,
+      frequency: raw.frequency,
+      freqMHz: raw.freqMHz,
+      mode: raw.mode,
+      reference: '',
+      parkName: raw.comment || '',
+      locationDesc: '',
+      distance: null,
+      lat: null,
+      lon: null,
+      band: raw.band,
+      spotTime: raw.spotTime,
+    };
+
+    // Resolve DXCC entity for location info + approximate coordinates
+    if (ctyDb) {
+      const entity = resolveCallsign(raw.callsign, ctyDb);
+      if (entity) {
+        spot.locationDesc = entity.name;
+        if (entity.lat != null && entity.lon != null) {
+          spot.lat = entity.lat;
+          spot.lon = entity.lon;
+          if (myPos) {
+            spot.distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, entity.lat, entity.lon));
+          }
+        }
+      }
+    }
+
+    clusterSpots.push(spot);
+    // FIFO cap at 500
+    if (clusterSpots.length > 500) {
+      clusterSpots = clusterSpots.slice(-500);
+    }
+
+    // Throttle: batch spots and flush to renderer at most once every 2s
+    if (!clusterFlushTimer) {
+      clusterFlushTimer = setTimeout(() => {
+        clusterFlushTimer = null;
+        sendMergedSpots();
+      }, 2000);
+    }
+  });
+
+  cluster.on('status', (s) => {
+    sendClusterStatus(s);
+  });
+
+  cluster.connect({
+    host: settings.clusterHost || 'w3lpl.net',
+    port: settings.clusterPort || 7373,
+    callsign: settings.myCallsign,
+  });
+}
+
+function disconnectCluster() {
+  if (clusterFlushTimer) {
+    clearTimeout(clusterFlushTimer);
+    clusterFlushTimer = null;
+  }
+  if (cluster) {
+    cluster.disconnect();
+    cluster.removeAllListeners();
+    cluster = null;
+  }
+  clusterSpots = [];
+  sendClusterStatus({ connected: false });
+}
+
 // --- Spot processing ---
 function processPotaSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
@@ -232,6 +335,14 @@ async function processSotaSpots(raw) {
   });
 }
 
+let lastPotaSotaSpots = []; // cache of last fetched POTA+SOTA spots
+
+function sendMergedSpots() {
+  if (!win || win.isDestroyed()) return;
+  const merged = [...lastPotaSotaSpots, ...clusterSpots];
+  win.webContents.send('spots', merged);
+}
+
 async function refreshSpots() {
   try {
     const enablePota = settings.enablePota !== false; // default true
@@ -242,23 +353,88 @@ async function refreshSpots() {
     if (enableSota) fetches.push(fetchSotaSpots().then(processSotaSpots));
 
     const results = await Promise.allSettled(fetches);
-    const spots = results
+    lastPotaSotaSpots = results
       .filter((r) => r.status === 'fulfilled')
       .flatMap((r) => r.value);
 
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('spots', spots);
-    }
+    sendMergedSpots();
 
     // Report errors from rejected fetches
     const errors = results.filter((r) => r.status === 'rejected');
-    if (errors.length > 0 && spots.length === 0 && win && !win.isDestroyed()) {
+    if (errors.length > 0 && lastPotaSotaSpots.length === 0 && win && !win.isDestroyed()) {
       win.webContents.send('spots-error', errors[0].reason.message);
     }
   } catch (err) {
     if (win && !win.isDestroyed()) {
       win.webContents.send('spots-error', err.message);
     }
+  }
+}
+
+// --- DXCC data builder ---
+function buildDxccData() {
+  if (!ctyDb || !settings.adifPath) return null;
+  try {
+    const qsos = parseAdifFile(settings.adifPath);
+
+    // Build confirmation map: entityIndex → { band → Set<mode> }
+    const confirmMap = new Map();
+
+    for (const qso of qsos) {
+      // Use DXCC field from ADIF if present, otherwise resolve via cty.dat
+      let entIdx = null;
+      if (qso.dxcc != null) {
+        // Find entity by matching DXCC number — cty.dat doesn't store DXCC numbers directly,
+        // so we resolve the callsign instead
+        const entity = resolveCallsign(qso.call, ctyDb);
+        if (entity) {
+          entIdx = ctyDb.entities.indexOf(entity);
+        }
+      } else {
+        const entity = resolveCallsign(qso.call, ctyDb);
+        if (entity) {
+          entIdx = ctyDb.entities.indexOf(entity);
+        }
+      }
+      if (entIdx == null || entIdx < 0) continue;
+
+      if (!confirmMap.has(entIdx)) confirmMap.set(entIdx, {});
+      const bands = confirmMap.get(entIdx);
+      if (!bands[qso.band]) bands[qso.band] = new Set();
+      bands[qso.band].add(qso.mode);
+    }
+
+    // Build entity list with confirmations
+    const allEnts = ctyDb.entities.map((ent, idx) => {
+      const confirmed = {};
+      const bandData = confirmMap.get(idx);
+      if (bandData) {
+        for (const [band, modes] of Object.entries(bandData)) {
+          confirmed[band] = [...modes];
+        }
+      }
+      return {
+        name: ent.name,
+        prefix: ent.prefix,
+        continent: ent.continent,
+        confirmed,
+      };
+    });
+
+    // Sort by entity name
+    allEnts.sort((a, b) => a.name.localeCompare(b.name));
+
+    return { entities: allEnts };
+  } catch (err) {
+    console.error('Failed to parse ADIF:', err.message);
+    return null;
+  }
+}
+
+function sendDxccData() {
+  const data = buildDxccData();
+  if (data && win && !win.isDestroyed()) {
+    win.webContents.send('dxcc-data', data);
   }
 }
 
@@ -284,7 +460,14 @@ function createWindow() {
     if (cat) {
       sendCatStatus({ connected: cat.connected, target: cat._target });
     }
+    if (cluster) {
+      sendClusterStatus({ connected: cluster.connected, host: settings.clusterHost, port: settings.clusterPort });
+    }
     refreshSpots();
+    // Auto-send DXCC data if enabled and ADIF path is set
+    if (settings.enableDxcc && settings.adifPath) {
+      sendDxccData();
+    }
   });
 }
 
@@ -292,8 +475,16 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   settings = loadSettings();
 
+  // Load cty.dat for DXCC lookups
+  try {
+    ctyDb = loadCtyDat(path.join(__dirname, 'assets', 'cty.dat'));
+  } catch (err) {
+    console.error('Failed to load cty.dat:', err.message);
+  }
+
   createWindow();
   connectCat();
+  if (settings.enableCluster) connectCluster();
 
   // Window control IPC
   ipcMain.on('win-minimize', () => { if (win) win.minimize(); });
@@ -340,11 +531,48 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-settings', (_e, newSettings) => {
+    const clusterChanged = newSettings.enableCluster !== settings.enableCluster ||
+      newSettings.myCallsign !== settings.myCallsign ||
+      newSettings.clusterHost !== settings.clusterHost ||
+      newSettings.clusterPort !== settings.clusterPort;
+
     settings = { ...settings, ...newSettings };
     saveSettings(settings);
     connectCat();
     refreshSpots();
+
+    // Reconnect cluster if settings changed
+    if (clusterChanged) {
+      if (settings.enableCluster) {
+        connectCluster();
+      } else {
+        disconnectCluster();
+      }
+    }
+
+    // Auto-parse ADIF and send DXCC data if enabled
+    if (settings.enableDxcc && settings.adifPath) {
+      sendDxccData();
+    }
     return settings;
+  });
+
+  // --- DXCC Tracker IPC ---
+  ipcMain.handle('choose-adif-file', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Select ADIF File',
+      filters: [
+        { name: 'ADIF Files', extensions: ['adi', 'adif'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('parse-adif', () => {
+    return buildDxccData();
   });
 
   ipcMain.on('connect-cat', (_e, target) => {
@@ -357,6 +585,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (spotTimer) clearInterval(spotTimer);
   if (cat) cat.disconnect();
+  if (cluster) cluster.disconnect();
   killRigctld();
   app.quit();
 });

@@ -52,11 +52,13 @@
       <div class="view-toggle">
         <button id="view-table-btn" class="view-btn active" title="Table view">Table</button>
         <button id="view-map-btn" class="view-btn" title="Map view">Map</button>
+        <button id="view-dxcc-btn" class="view-btn hidden" title="DXCC Tracker">DXCC</button>
       </div>
     </div>
     <div class="status-bar">
       <span id="utc-clock" class="utc-clock"></span>
       <span id="cat-status" class="status disconnected">CAT: Disconnected</span>
+      <span id="cluster-status" class="status disconnected hidden">Cluster: Off</span>
       <span id="spot-count"></span>
       <span id="last-refresh"></span>
     </div>
@@ -81,6 +83,45 @@
     </table>
     <div id="no-spots" class="hidden">No spots match current filters</div>
     <div id="map" class="hidden"></div>
+    <div id="dxcc-view" class="hidden">
+      <div class="dxcc-header">
+        <span class="dxcc-progress"><span id="dxcc-count">0 / 0</span> entities confirmed</span>
+        <div class="multi-dropdown" id="dxcc-mode-filter">
+          <button class="multi-dropdown-btn" type="button">Mode: <span class="multi-dropdown-text">All</span></button>
+          <div class="multi-dropdown-menu">
+            <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="CW"> CW</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="SSB"> SSB</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="FT8"> FT8</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="FT4"> FT4</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="RTTY"> RTTY</label>
+          </div>
+        </div>
+      </div>
+      <div class="dxcc-table-container">
+        <table class="dxcc-matrix">
+          <thead>
+            <tr>
+              <th class="dxcc-entity-col">Entity</th>
+              <th class="dxcc-cont-col">Cont</th>
+              <th class="dxcc-band-col">160m</th>
+              <th class="dxcc-band-col">80m</th>
+              <th class="dxcc-band-col">60m</th>
+              <th class="dxcc-band-col">40m</th>
+              <th class="dxcc-band-col">30m</th>
+              <th class="dxcc-band-col">20m</th>
+              <th class="dxcc-band-col">17m</th>
+              <th class="dxcc-band-col">15m</th>
+              <th class="dxcc-band-col">12m</th>
+              <th class="dxcc-band-col">10m</th>
+              <th class="dxcc-band-col">6m</th>
+            </tr>
+          </thead>
+          <tbody id="dxcc-matrix-body"></tbody>
+        </table>
+      </div>
+      <div id="dxcc-placeholder" class="hidden">No ADIF file loaded. Go to Settings to select your ADIF export.</div>
+    </div>
   </main>
 
   <!-- Settings dialog -->
@@ -106,6 +147,21 @@
       <legend>Spot Sources</legend>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-pota" checked> Enable POTA</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-sota"> Enable SOTA</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-cluster"> Enable DX Cluster</label>
+      <div id="cluster-config" class="radio-sub hidden">
+        <label>My Callsign: <input type="text" id="set-my-callsign" maxlength="10" placeholder="K3SBP"></label>
+        <label>Cluster Host: <input type="text" id="set-cluster-host" value="w3lpl.net"></label>
+        <label>Cluster Port: <input type="number" id="set-cluster-port" value="7373" min="1" max="65535"></label>
+      </div>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-dxcc"> DXCC Tracker (Beta)</label>
+      <div id="adif-picker" class="hidden" style="margin-top:6px;margin-left:12px;">
+        <label style="margin-bottom:4px;">ADIF File:
+          <div style="display:flex;gap:6px;margin-top:4px;">
+            <input type="text" id="set-adif-path" readonly placeholder="No file selected" style="flex:1;">
+            <button type="button" id="adif-browse-btn">Browse</button>
+          </div>
+        </label>
+      </div>
     </fieldset>
     <fieldset class="radio-config">
       <legend>Radio</legend>
