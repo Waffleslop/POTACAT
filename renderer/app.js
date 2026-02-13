@@ -47,6 +47,7 @@ const setScanDwell = document.getElementById('set-scan-dwell');
 const setWatchlist = document.getElementById('set-watchlist');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
+const setCwXit = document.getElementById('set-cw-xit');
 const scanBtn = document.getElementById('scan-btn');
 const hamlibConfig = document.getElementById('hamlib-config');
 const flexConfig = document.getElementById('flex-config');
@@ -1027,6 +1028,7 @@ settingsBtn.addEventListener('click', async () => {
   setDistUnit.value = s.distUnit || 'mi';
   setMaxAge.value = s.maxAgeMin || 5;
   setScanDwell.value = s.scanDwell || 7;
+  setCwXit.value = s.cwXit || 0;
   setWatchlist.value = s.watchlist || '';
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
@@ -1048,6 +1050,7 @@ settingsSave.addEventListener('click', async () => {
   const watchlistRaw = setWatchlist.value.trim();
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
+  const cwXitVal = parseInt(setCwXit.value, 10) || 0;
   const potaEnabled = setEnablePota.checked;
   const sotaEnabled = setEnableSota.checked;
   const clusterEnabled = setEnableCluster.checked;
@@ -1077,6 +1080,7 @@ settingsSave.addEventListener('click', async () => {
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
     scanDwell: dwellVal,
+    cwXit: cwXitVal,
     watchlist: watchlistRaw,
     enablePota: potaEnabled,
     enableSota: sotaEnabled,
