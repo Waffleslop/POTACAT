@@ -509,7 +509,11 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('tune', (_e, { frequency, mode }) => {
-    const freqHz = Math.round(parseFloat(frequency) * 1000); // kHz → Hz
+    let freqHz = Math.round(parseFloat(frequency) * 1000); // kHz → Hz
+    // Apply CW XIT offset — shift tune frequency so TX lands offset from the activator
+    if ((mode === 'CW') && settings.cwXit) {
+      freqHz += settings.cwXit;
+    }
     cat.tune(freqHz, mode);
   });
 
