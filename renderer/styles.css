@@ -13,6 +13,56 @@ body {
   overflow: hidden;
 }
 
+/* Custom titlebar */
+.titlebar {
+  background: #16213e;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  -webkit-app-region: drag;
+  user-select: none;
+  padding-left: 12px;
+  border-bottom: 1px solid #0f3460;
+}
+
+.titlebar-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #4fc3f7;
+  letter-spacing: 0.5px;
+}
+
+.titlebar-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  background: transparent;
+  border: none;
+  color: #a0a0c0;
+  width: 46px;
+  height: 32px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  padding: 0;
+}
+
+.titlebar-btn:hover {
+  background: #1a4080;
+  color: #e0e0e0;
+}
+
+.titlebar-close:hover {
+  background: #e94560;
+  color: #fff;
+}
+
 header {
   background: #16213e;
   padding: 10px 16px;
@@ -86,7 +136,7 @@ main {
   padding: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  height: calc(100vh - 52px);
+  height: calc(100vh - 52px - 32px);
 }
 
 table {
@@ -182,6 +232,12 @@ a.qrz-link:hover {
 }
 
 .scan-highlight {
+  background: #1a4080;
+  outline: 2px solid #4fc3f7;
+  outline-offset: -2px;
+}
+
+.on-freq {
   background: #1a4080;
   outline: 2px solid #4fc3f7;
   outline-offset: -2px;
@@ -440,5 +496,29 @@ dialog input, dialog select {
 .checkbox-label input[type="checkbox"] {
   width: auto;
   margin-top: 0;
+}
+
+.settings-footer {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 12px;
+  color: #808090;
+  line-height: 1.8;
+}
+
+.settings-version {
+  font-weight: bold;
+  color: #a0a0c0;
+}
+
+.settings-footer a {
+  color: #4fc3f7;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.settings-footer a:hover {
+  text-decoration: underline;
+  color: #81d4fa;
 }
 

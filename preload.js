@@ -11,4 +11,8 @@ contextBridge.exposeInMainWorld('api', {
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   listPorts: () => ipcRenderer.invoke('list-ports'),
   connectCat: (target) => ipcRenderer.send('connect-cat', target),
+  onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
+  minimize: () => ipcRenderer.send('win-minimize'),
+  maximize: () => ipcRenderer.send('win-maximize'),
+  close: () => ipcRenderer.send('win-close'),
 });

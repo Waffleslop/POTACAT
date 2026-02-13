@@ -14,6 +14,9 @@ let enablePota = true;
 let enableSota = false;
 
 // --- Scan state ---
+// --- Radio frequency tracking ---
+let radioFreqKhz = null;
+
 let scanning = false;
 let scanTimer = null;
 let scanIndex = 0;
@@ -487,6 +490,10 @@ function render() {
       if (scanSpot && s.frequency === scanSpot.frequency) {
         tr.classList.add('scan-highlight');
       }
+      // Highlight row matching radio's current frequency
+      if (radioFreqKhz !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhz) < 1) {
+        tr.classList.add('on-freq');
+      }
       if (isSkipped) {
         tr.classList.add('scan-skipped');
       }
@@ -671,6 +678,27 @@ window.api.onCatStatus(({ connected }) => {
   catStatusEl.textContent = connected ? 'CAT: Connected' : 'CAT: Disconnected';
   catStatusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
 });
+
+// --- Radio frequency tracking ---
+window.api.onCatFrequency((hz) => {
+  radioFreqKhz = Math.round(hz / 1000);
+  render();
+});
+
+// --- Settings footer links ---
+document.getElementById('bio-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://caseystanton.com/?utm_source=potacat&utm_medium=bio');
+});
+document.getElementById('issues-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://github.com/Waffleslop/POTA-CAT/issues');
+});
+
+// --- Titlebar controls ---
+document.getElementById('tb-min').addEventListener('click', () => window.api.minimize());
+document.getElementById('tb-max').addEventListener('click', () => window.api.maximize());
+document.getElementById('tb-close').addEventListener('click', () => window.api.close());
 
 // Init
 loadPrefs().then(() => {

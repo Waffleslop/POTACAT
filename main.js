@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { fetchSpots: fetchPotaSpots } = require('./lib/pota');
@@ -31,10 +31,15 @@ function sendCatStatus(s) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-status', s);
 }
 
+function sendCatFrequency(hz) {
+  if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
+}
+
 function connectCat() {
   if (cat) cat.disconnect();
   cat = new CatClient();
   cat.on('status', sendCatStatus);
+  cat.on('frequency', sendCatFrequency);
   if (settings.catTarget) {
     cat.connect(settings.catTarget);
   }
@@ -163,6 +168,7 @@ function createWindow() {
     width: 1100,
     height: 700,
     title: 'POTA CAT',
+    frame: false,
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -183,10 +189,20 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   settings = loadSettings();
 
   createWindow();
   connectCat();
+
+  // Window control IPC
+  ipcMain.on('win-minimize', () => { if (win) win.minimize(); });
+  ipcMain.on('win-maximize', () => {
+    if (!win) return;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  });
+  ipcMain.on('win-close', () => { if (win) win.close(); });
 
   // Start spot fetching
   refreshSpots();
@@ -195,8 +211,8 @@ app.whenReady().then(() => {
   // IPC handlers
   ipcMain.on('open-external', (_e, url) => {
     const { shell } = require('electron');
-    // Only allow QRZ URLs
-    if (url.startsWith('https://www.qrz.com/')) {
+    // Only allow known URLs
+    if (url.startsWith('https://www.qrz.com/') || url.startsWith('https://caseystanton.com/') || url.startsWith('https://github.com/Waffleslop/POTA-CAT/')) {
       shell.openExternal(url);
     }
   });

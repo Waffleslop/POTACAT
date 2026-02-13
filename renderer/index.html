@@ -8,6 +8,14 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div class="titlebar">
+    <div class="titlebar-title">POTA CAT</div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
   <header>
     <div class="filters">
       <label>Band:
@@ -101,6 +109,11 @@
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
       <button id="settings-cancel">Cancel</button>
+    </div>
+    <div class="settings-footer">
+      <div class="settings-version">v0.9 beta</div>
+      <div class="settings-bio">Built by <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
+      <div class="settings-issues">Free &amp; open source. Found a bug? <a href="#" id="issues-link">Submit a ticket</a></div>
     </div>
   </dialog>
 
