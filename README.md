@@ -59,3 +59,7 @@ The app is built with Electron and is cross-platform. You can build a `.dmg` by 
 ## License
 
 MIT
+
+### Third-Party Software
+
+This application uses [Hamlib](https://hamlib.github.io/) for radio control via rigctld. Hamlib is licensed under the [GNU Lesser General Public License v2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html). Hamlib is invoked as a separate process and is not bundled with or linked into this application.
