@@ -15,7 +15,7 @@ function loadSettings() {
   try {
     return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
   } catch {
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, firstRun: true };
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, firstRun: true, watchlist: 'K3SBP' };
   }
 }
 
