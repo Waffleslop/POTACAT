@@ -12,6 +12,14 @@ A desktop app for hunting [Parks on the Air (POTA)](https://pota.app) activators
 - **QRZ lookup** — callsign links open the station's QRZ page
 - **Distance sorting** — spots include distance from your QTH (Maidenhead grid square)
 - **Home QTH marker** — your location shown on the map as a red dot
+- **SOTA spots** — optional Summits on the Air spot support with orange markers
+- **DX Cluster** — live telnet streaming from AR-Cluster/DXSpider nodes
+- **Reverse Beacon Network** — dedicated map view showing where your CQ calls are being heard, with band-colored markers and SNR/WPM popups
+- **Solar propagation** — SFI, A-index, and K-index indicators with band activity heatmap
+- **Watchlist notifications** — desktop pop-up notifications when watched callsigns appear on any source (POTA, SOTA, DX Cluster, RBN), with configurable sound and duration
+- **DXCC Tracker** — import ADIF log, view band/mode confirmation matrix by entity
+- **Hamlib/rigctld support** — control non-Flex radios via Hamlib rigctld
+- **CW XIT offset** — configurable Hz offset applied when tuning to CW spots
 
 ## Install (Windows)
 

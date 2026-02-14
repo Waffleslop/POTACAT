@@ -53,6 +53,9 @@ const setWatchlist = document.getElementById('set-watchlist');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setCwXit = document.getElementById('set-cw-xit');
+const setNotifyPopup = document.getElementById('set-notify-popup');
+const setNotifySound = document.getElementById('set-notify-sound');
+const setNotifyTimeout = document.getElementById('set-notify-timeout');
 const setLicenseClass = document.getElementById('set-license-class');
 const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
 const scanBtn = document.getElementById('scan-btn');
@@ -1295,6 +1298,9 @@ settingsBtn.addEventListener('click', async () => {
   setScanDwell.value = s.scanDwell || 7;
   setCwXit.value = s.cwXit || 0;
   setWatchlist.value = s.watchlist || '';
+  setNotifyPopup.checked = s.notifyPopup !== false;
+  setNotifySound.checked = s.notifySound !== false;
+  setNotifyTimeout.value = s.notifyTimeout || 10;
   setLicenseClass.value = s.licenseClass || 'none';
   setHideOutOfBand.checked = s.hideOutOfBand === true;
   setEnablePota.checked = s.enablePota !== false;
@@ -1322,6 +1328,9 @@ settingsSave.addEventListener('click', async () => {
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
   const cwXitVal = parseInt(setCwXit.value, 10) || 0;
+  const notifyPopupEnabled = setNotifyPopup.checked;
+  const notifySoundEnabled = setNotifySound.checked;
+  const notifyTimeoutVal = parseInt(setNotifyTimeout.value, 10) || 10;
   const potaEnabled = setEnablePota.checked;
   const sotaEnabled = setEnableSota.checked;
   const clusterEnabled = setEnableCluster.checked;
@@ -1358,6 +1367,9 @@ settingsSave.addEventListener('click', async () => {
     scanDwell: dwellVal,
     cwXit: cwXitVal,
     watchlist: watchlistRaw,
+    notifyPopup: notifyPopupEnabled,
+    notifySound: notifySoundEnabled,
+    notifyTimeout: notifyTimeoutVal,
     enablePota: potaEnabled,
     enableSota: sotaEnabled,
     enableCluster: clusterEnabled,

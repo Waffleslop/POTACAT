@@ -190,7 +190,7 @@
   <!-- Settings dialog -->
   <dialog id="settings-dialog">
     <h3>Settings</h3>
-    <label>My Callsign: <input type="text" id="set-my-callsign" maxlength="10" placeholder="W1AW"></label>
+    <label>My Callsign: <input type="text" id="set-my-callsign" maxlength="10" placeholder="WB6ACU"></label>
     <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
     <label>Distance Unit:
       <select id="set-dist-unit">
@@ -210,6 +210,14 @@
     <label>Watchlist (comma-separated callsigns):
       <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL, KI6NAZ">
     </label>
+    <fieldset class="source-toggles" style="margin-top:8px;">
+      <legend>Watchlist Notifications</legend>
+      <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
+      <label>Notification duration (seconds):
+        <input type="number" id="set-notify-timeout" min="3" max="60" step="1" value="10">
+      </label>
+    </fieldset>
     <fieldset class="source-toggles">
       <legend>Spot Sources</legend>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-pota" checked> Enable POTA</label>
@@ -289,7 +297,7 @@
       <button id="settings-cancel">Cancel</button>
     </div>
     <div class="settings-footer">
-      <div class="settings-version">v0.9.2 beta</div>
+      <div class="settings-version">v0.9.3 beta</div>
       <div class="settings-bio">Built by <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-issues">Free &amp; open source. Found a bug? <a href="#" id="issues-link">Submit a ticket</a></div>
       <div class="settings-attribution">Radio control powered by <a href="https://hamlib.github.io/" onclick="return false;" id="hamlib-link">Hamlib</a> (LGPL v2.1)</div>

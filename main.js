@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
@@ -42,6 +42,59 @@ let clusterFlushTimer = null; // throttle timer for cluster → renderer updates
 let rbn = null;
 let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
 let rbnFlushTimer = null; // throttle timer for RBN → renderer updates
+
+// --- Watchlist notifications ---
+const recentNotifications = new Map(); // callsign → timestamp for dedup (5-min window)
+let lastNotifiedPotaSota = new Set(); // callsigns seen in previous POTA/SOTA refresh
+
+function parseWatchlist(str) {
+  if (!str) return new Set();
+  const set = new Set();
+  for (const cs of str.split(',')) {
+    const trimmed = cs.trim().toUpperCase();
+    if (trimmed) set.add(trimmed);
+  }
+  return set;
+}
+
+function notifyWatchlistSpot({ callsign, frequency, mode, source, reference, locationDesc }) {
+  // Skip if pop-up notifications are disabled
+  if (settings.notifyPopup === false) return;
+
+  // Dedup: skip if same callsign notified within 5 minutes
+  const now = Date.now();
+  const lastTime = recentNotifications.get(callsign);
+  if (lastTime && now - lastTime < 300000) return;
+
+  // Prune stale entries
+  for (const [cs, ts] of recentNotifications) {
+    if (now - ts >= 300000) recentNotifications.delete(cs);
+  }
+
+  recentNotifications.set(callsign, now);
+
+  // Build notification body
+  const freqMHz = (parseFloat(frequency) / 1000).toFixed(3);
+  let body = `${freqMHz} MHz`;
+  if (mode) body += ` ${mode}`;
+  const sourceLabels = { pota: 'POTA', sota: 'SOTA', dxc: 'DX Cluster', rbn: 'RBN' };
+  const label = sourceLabels[source] || source;
+  if (reference) {
+    body += ` \u2014 ${label} ${reference}`;
+  } else if (locationDesc) {
+    body += ` \u2014 ${label} ${locationDesc}`;
+  } else {
+    body += ` \u2014 ${label}`;
+  }
+
+  const silent = settings.notifySound === false;
+  const n = new Notification({ title: callsign, body, silent });
+  n.show();
+
+  // Auto-dismiss after configured timeout (default 10s)
+  const timeout = (settings.notifyTimeout || 10) * 1000;
+  setTimeout(() => { try { n.close(); } catch { /* already dismissed */ } }, timeout);
+}
 
 // --- Rigctld management ---
 function findRigctld() {
@@ -217,6 +270,19 @@ function connectCluster() {
       }
     }
 
+    // Watchlist notification for DX Cluster spots
+    const watchSet = parseWatchlist(settings.watchlist);
+    if (watchSet.has(raw.callsign.toUpperCase())) {
+      notifyWatchlistSpot({
+        callsign: raw.callsign,
+        frequency: raw.frequency,
+        mode: raw.mode,
+        source: 'dxc',
+        reference: '',
+        locationDesc: spot.locationDesc,
+      });
+    }
+
     clusterSpots.push(spot);
     // FIFO cap at 500
     if (clusterSpots.length > 500) {
@@ -383,6 +449,20 @@ function connectRbn() {
       }
     }
 
+    // Watchlist notification for RBN spots (skip self — own callsign is expected)
+    const myCall = (settings.myCallsign || '').toUpperCase();
+    const rbnWatchSet = parseWatchlist(settings.watchlist);
+    if (rbnWatchSet.has(raw.callsign.toUpperCase()) && raw.callsign.toUpperCase() !== myCall) {
+      notifyWatchlistSpot({
+        callsign: raw.callsign,
+        frequency: raw.frequency,
+        mode: raw.mode,
+        source: 'rbn',
+        reference: '',
+        locationDesc: `spotted by ${spotter}`,
+      });
+    }
+
     rbnSpots.push(spot);
     if (rbnSpots.length > 500) {
       rbnSpots = rbnSpots.slice(-500);
@@ -405,6 +485,7 @@ function connectRbn() {
     host: 'telnet.reversebeacon.net',
     port: 7000,
     callsign: settings.myCallsign,
+    watchlist: settings.watchlist || '',
   });
 }
 
@@ -569,6 +650,26 @@ async function refreshSpots() {
       .flatMap((r) => r.value);
 
     sendMergedSpots();
+
+    // Watchlist notifications for newly-appeared POTA/SOTA spots
+    const potaSotaWatchSet = parseWatchlist(settings.watchlist);
+    if (potaSotaWatchSet.size > 0) {
+      const currentCallsigns = new Set(lastPotaSotaSpots.map(s => s.callsign.toUpperCase()));
+      for (const spot of lastPotaSotaSpots) {
+        const csUpper = spot.callsign.toUpperCase();
+        if (potaSotaWatchSet.has(csUpper) && !lastNotifiedPotaSota.has(csUpper)) {
+          notifyWatchlistSpot({
+            callsign: spot.callsign,
+            frequency: spot.frequency,
+            mode: spot.mode,
+            source: spot.source,
+            reference: spot.reference,
+            locationDesc: spot.locationDesc,
+          });
+        }
+      }
+      lastNotifiedPotaSota = currentCallsigns;
+    }
 
     // Report errors from rejected fetches
     const errors = results.filter((r) => r.status === 'rejected');
@@ -761,7 +862,8 @@ app.whenReady().then(() => {
       newSettings.clusterPort !== settings.clusterPort;
 
     const rbnChanged = newSettings.enableRbn !== settings.enableRbn ||
-      newSettings.myCallsign !== settings.myCallsign;
+      newSettings.myCallsign !== settings.myCallsign ||
+      newSettings.watchlist !== settings.watchlist;
 
     settings = { ...settings, ...newSettings };
     saveSettings(settings);
