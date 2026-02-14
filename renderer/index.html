@@ -44,6 +44,7 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="FT8"> FT8</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="FT4"> FT4</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="FM"> FM</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="RTTY"> RTTY</label>
         </div>
       </div>
       <button id="refresh-btn" title="Refresh spots now">Refresh</button>
@@ -57,8 +58,11 @@
     </div>
     <div class="status-bar">
       <span id="utc-clock" class="utc-clock"></span>
-      <span id="cat-status" class="status disconnected">CAT: Disconnected</span>
-      <span id="cluster-status" class="status disconnected hidden">Cluster: Off</span>
+      <span id="cat-status" class="status disconnected">CAT</span>
+      <span id="cluster-status" class="status disconnected hidden">Cluster</span>
+      <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
+      <span id="k-status" class="status solar-pill hidden">K —</span>
+      <span id="a-status" class="status solar-pill hidden">A —</span>
       <span id="spot-count"></span>
       <span id="last-refresh"></span>
     </div>
@@ -82,7 +86,10 @@
       <tbody id="spots-body"></tbody>
     </table>
     <div id="no-spots" class="hidden">No spots match current filters</div>
-    <div id="map" class="hidden"></div>
+    <div id="map-container" class="hidden">
+      <div id="map"></div>
+      <div id="band-activity-bar" class="hidden"></div>
+    </div>
     <div id="dxcc-view" class="hidden">
       <div class="dxcc-header">
         <span class="dxcc-progress"><span id="dxcc-count">0 / 0</span> entities confirmed</span>
@@ -156,6 +163,8 @@
         <label>Cluster Host: <input type="text" id="set-cluster-host" value="w3lpl.net"></label>
         <label>Cluster Port: <input type="number" id="set-cluster-port" value="7373" min="1" max="65535"></label>
       </div>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-dxcc"> DXCC Tracker (Beta)</label>
       <div id="adif-picker" class="hidden" style="margin-top:6px;margin-left:12px;">
         <label style="margin-bottom:4px;">ADIF File:
@@ -200,6 +209,21 @@
         </label>
       </div>
     </fieldset>
+    <label>License Class:
+      <select id="set-license-class">
+        <option value="none">None (no filtering)</option>
+        <optgroup label="United States">
+          <option value="us_extra">US Extra</option>
+          <option value="us_general">US General</option>
+          <option value="us_technician">US Technician</option>
+        </optgroup>
+        <optgroup label="Canada">
+          <option value="ca_honours">CA Basic with Honours</option>
+          <option value="ca_basic">CA Basic</option>
+        </optgroup>
+      </select>
+    </label>
+    <label class="checkbox-label"><input type="checkbox" id="set-hide-out-of-band"> Hide out-of-band spots</label>
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
       <button id="settings-cancel">Cancel</button>

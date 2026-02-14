@@ -15,6 +15,10 @@ let enablePota = true;
 let enableSota = false;
 let enableDxcc = false;
 let enableCluster = false;
+let enableSolar = false;
+let enableBandActivity = false;
+let licenseClass = 'none';
+let hideOutOfBand = false;
 let dxccData = null;  // { entities: [...] } from main process
 
 // --- Scan state ---
@@ -48,6 +52,8 @@ const setWatchlist = document.getElementById('set-watchlist');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setCwXit = document.getElementById('set-cw-xit');
+const setLicenseClass = document.getElementById('set-license-class');
+const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
 const scanBtn = document.getElementById('scan-btn');
 const hamlibConfig = document.getElementById('hamlib-config');
 const flexConfig = document.getElementById('flex-config');
@@ -57,7 +63,9 @@ const setRigModel = document.getElementById('set-rig-model');
 const setRigPort = document.getElementById('set-rig-port');
 const setRigBaud = document.getElementById('set-rig-baud');
 const spotsTable = document.getElementById('spots-table');
+const mapContainer = document.getElementById('map-container');
 const mapDiv = document.getElementById('map');
+const bandActivityBar = document.getElementById('band-activity-bar');
 const viewTableBtn = document.getElementById('view-table-btn');
 const viewMapBtn = document.getElementById('view-map-btn');
 const viewDxccBtn = document.getElementById('view-dxcc-btn');
@@ -78,6 +86,11 @@ const adifBrowseBtn = document.getElementById('adif-browse-btn');
 const adifPicker = document.getElementById('adif-picker');
 const distHeader = document.getElementById('dist-header');
 const utcClockEl = document.getElementById('utc-clock');
+const sfiStatusEl = document.getElementById('sfi-status');
+const kStatusEl = document.getElementById('k-status');
+const aStatusEl = document.getElementById('a-status');
+const setEnableSolar = document.getElementById('set-enable-solar');
+const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 
 // --- UTC Clock ---
 function updateUtcClock() {
@@ -102,6 +115,11 @@ async function loadPrefs() {
   enableSota = settings.enableSota === true;  // default false
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
+  enableSolar = settings.enableSolar === true;   // default false
+  enableBandActivity = settings.enableBandActivity === true; // default false
+  updateSolarVisibility();
+  licenseClass = settings.licenseClass || 'none';
+  hideOutOfBand = settings.hideOutOfBand === true;
   updateClusterStatusVisibility();
   updateDxccButton();
   // maxAgeMin: prefer localStorage (last-used filter) over settings.json
@@ -452,6 +470,7 @@ function getFiltered() {
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
     if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
+    if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     return true;
   });
 }
@@ -561,12 +580,81 @@ const sotaIcon = L.divIcon({
   popupAnchor: [1, -34],
 });
 
+// Red/grey teardrop pin for out-of-privilege spots
+const oopIcon = L.divIcon({
+  className: '',
+  html: '<svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0Z" fill="#8a8a8a" stroke="#666" stroke-width="1"/>' +
+    '<circle cx="12.5" cy="12.5" r="5.5" fill="#ff6b6b" opacity="0.7"/>' +
+    '</svg>',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+});
+
 let map = null;
 let markerLayer = null;
 let homeMarker = null;
+let nightLayer = null;
 
 // Default center: FN20jb (eastern PA) ≈ 40.35°N, 75.58°W
 const DEFAULT_CENTER = [40.35, -75.58];
+
+function computeNightPolygon() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((now - start) / 86400000);
+  const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+
+  // Solar declination (degrees)
+  const declRad = (-23.44 * Math.PI / 180) * Math.cos((2 * Math.PI / 365) * (dayOfYear + 10));
+  // Subsolar longitude
+  const sunLon = -(utcHours - 12) * 15;
+
+  const tanDecl = Math.tan(declRad);
+  const terminator = [];
+  for (let lon = -180; lon <= 180; lon += 2) {
+    const lonRad = (lon - sunLon) * Math.PI / 180;
+    // Guard against equinox singularity
+    const lat = Math.abs(tanDecl) < 1e-10
+      ? 0
+      : Math.atan(-Math.cos(lonRad) / tanDecl) * 180 / Math.PI;
+    terminator.push([lat, lon]);
+  }
+
+  // Dark pole: south pole when sun is in northern hemisphere, north pole otherwise
+  const darkPoleLat = declRad > 0 ? -90 : 90;
+
+  // Build polygon across three world copies for antimeridian scrolling
+  const rings = [];
+  for (const offset of [-360, 0, 360]) {
+    const ring = terminator.map(([lat, lon]) => [lat, lon + offset]);
+    // Close polygon by wrapping to the dark pole
+    ring.push([darkPoleLat, 180 + offset]);
+    ring.push([darkPoleLat, -180 + offset]);
+    ring.unshift([darkPoleLat, -180 + offset]);
+    rings.push(ring);
+  }
+  return rings;
+}
+
+function updateNightOverlay() {
+  if (!map) return;
+  const rings = computeNightPolygon();
+  if (nightLayer) {
+    nightLayer.setLatLngs(rings);
+  } else {
+    nightLayer = L.polygon(rings, {
+      fillColor: '#000',
+      fillOpacity: 0.25,
+      color: '#4fc3f7',
+      weight: 1,
+      opacity: 0.4,
+      interactive: false,
+    }).addTo(map);
+  }
+  if (markerLayer) markerLayer.bringToFront();
+}
 
 function initMap() {
   map = L.map('map', { zoomControl: true, worldCopyJump: true }).setView(DEFAULT_CENTER, 5);
@@ -581,6 +669,10 @@ function initMap() {
 
   // Add home marker
   updateHomeMarker();
+
+  // Add day/night overlay and refresh every 60s
+  updateNightOverlay();
+  setInterval(updateNightOverlay, 60000);
 }
 
 async function updateHomeMarker() {
@@ -633,6 +725,56 @@ function gridToLatLonLocal(grid) {
   return { lat, lon };
 }
 
+// --- License privilege check (duplicated from lib/privileges.js — no require in renderer) ---
+const PRIVILEGE_RANGES = {
+  us_extra: [
+    [1800, 2000, 'all'], [3500, 3600, 'cw_digi'], [3600, 4000, 'phone'],
+    [7000, 7125, 'cw_digi'], [7125, 7300, 'phone'], [10100, 10150, 'all'],
+    [14000, 14150, 'cw_digi'], [14150, 14350, 'phone'], [18068, 18168, 'all'],
+    [21000, 21200, 'cw_digi'], [21200, 21450, 'phone'], [24890, 24990, 'all'],
+    [28000, 28300, 'cw_digi'], [28300, 29700, 'phone'], [50000, 54000, 'all'],
+  ],
+  us_general: [
+    [1800, 2000, 'all'], [3525, 3600, 'cw_digi'], [3800, 4000, 'phone'],
+    [7025, 7125, 'cw_digi'], [7175, 7300, 'phone'], [10100, 10150, 'all'],
+    [14025, 14150, 'cw_digi'], [14225, 14350, 'phone'], [18068, 18168, 'all'],
+    [21025, 21200, 'cw_digi'], [21275, 21450, 'phone'], [24890, 24990, 'all'],
+    [28000, 28300, 'cw_digi'], [28300, 29700, 'phone'], [50000, 54000, 'all'],
+  ],
+  us_technician: [
+    [3525, 3600, 'cw_digi'], [7025, 7125, 'cw_digi'], [21025, 21200, 'cw_digi'],
+    [28000, 28300, 'cw_digi'], [28300, 28500, 'phone'], [50000, 54000, 'all'],
+  ],
+  ca_basic: [
+    [50000, 54000, 'all'],
+  ],
+  ca_honours: [
+    [1800, 2000, 'all'], [3500, 4000, 'all'], [7000, 7300, 'all'],
+    [10100, 10150, 'all'], [14000, 14350, 'all'], [18068, 18168, 'all'],
+    [21000, 21450, 'all'], [24890, 24990, 'all'], [28000, 29700, 'all'],
+    [50000, 54000, 'all'],
+  ],
+};
+
+const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
+const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
+
+function isOutOfPrivilege(freqKhz, mode, cls) {
+  if (!cls || cls === 'none') return false;
+  const ranges = PRIVILEGE_RANGES[cls];
+  if (!ranges) return false;
+  if (!mode) return false;
+  const modeUpper = mode.toUpperCase();
+  for (const [lower, upper, allowed] of ranges) {
+    if (freqKhz >= lower && freqKhz <= upper) {
+      if (allowed === 'all') return false;
+      if (allowed === 'cw_digi' && CW_DIGI_MODES.has(modeUpper)) return false;
+      if (allowed === 'phone' && PHONE_MODES.has(modeUpper)) return false;
+    }
+  }
+  return true;
+}
+
 function formatDistance(miles) {
   if (miles == null) return '—';
   if (distUnit === 'km') return Math.round(miles * MI_TO_KM);
@@ -672,10 +814,13 @@ function updateMapMarkers(filtered) {
       <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}">Tune</button>
     `;
 
-    // SOTA gets orange pin, POTA gets default blue marker
-    const markerOptions = s.source === 'sota'
-      ? { icon: sotaIcon }
-      : {};
+    // Out-of-privilege gets grey/red pin, SOTA gets orange, POTA gets default blue
+    const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
+    const markerOptions = oop
+      ? { icon: oopIcon, opacity: 0.5 }
+      : s.source === 'sota'
+        ? { icon: sotaIcon }
+        : {};
 
     // Plot marker at canonical position and one world-copy in each direction
     for (const offset of [-360, 0, 360]) {
@@ -757,7 +902,7 @@ function setView(view) {
   // Hide all views
   spotsTable.classList.add('hidden');
   noSpots.classList.add('hidden');
-  mapDiv.classList.add('hidden');
+  mapContainer.classList.add('hidden');
   dxccView.classList.add('hidden');
 
   // Deactivate all view buttons
@@ -770,8 +915,9 @@ function setView(view) {
     viewTableBtn.classList.add('active');
     render();
   } else if (view === 'map') {
-    mapDiv.classList.remove('hidden');
+    mapContainer.classList.remove('hidden');
     viewMapBtn.classList.add('active');
+    updateBandActivityVisibility();
     if (!map) {
       initMap();
     }
@@ -891,6 +1037,11 @@ function render() {
       if (s.source === 'sota') tr.classList.add('spot-sota');
       if (s.source === 'dxc') tr.classList.add('spot-dxc');
 
+      // License privilege check
+      if (isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) {
+        tr.classList.add('out-of-privilege');
+      }
+
       // Highlight the row currently being scanned
       if (scanSpot && s.frequency === scanSpot.frequency) {
         tr.classList.add('scan-highlight');
@@ -983,6 +1134,7 @@ function render() {
     });
   } else {
     updateMapMarkers(filtered);
+    renderBandActivity();
   }
 }
 
@@ -1030,6 +1182,8 @@ settingsBtn.addEventListener('click', async () => {
   setScanDwell.value = s.scanDwell || 7;
   setCwXit.value = s.cwXit || 0;
   setWatchlist.value = s.watchlist || '';
+  setLicenseClass.value = s.licenseClass || 'none';
+  setHideOutOfBand.checked = s.hideOutOfBand === true;
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
   setEnableCluster.checked = s.enableCluster === true;
@@ -1037,6 +1191,8 @@ settingsBtn.addEventListener('click', async () => {
   setClusterHost.value = s.clusterHost || 'w3lpl.net';
   setClusterPort.value = s.clusterPort || 7373;
   clusterConfig.classList.toggle('hidden', !s.enableCluster);
+  setEnableSolar.checked = s.enableSolar === true;
+  setEnableBandActivity.checked = s.enableBandActivity === true;
   setEnableDxcc.checked = s.enableDxcc === true;
   setAdifPath.value = s.adifPath || '';
   adifPicker.classList.toggle('hidden', !s.enableDxcc);
@@ -1057,7 +1213,11 @@ settingsSave.addEventListener('click', async () => {
   const myCallsign = setMyCallsign.value.trim().toUpperCase();
   const clusterHost = setClusterHost.value.trim() || 'w3lpl.net';
   const clusterPort = parseInt(setClusterPort.value, 10) || 7373;
+  const solarEnabled = setEnableSolar.checked;
+  const bandActivityEnabled = setEnableBandActivity.checked;
   const dxccEnabled = setEnableDxcc.checked;
+  const licenseClassVal = setLicenseClass.value;
+  const hideOob = setHideOutOfBand.checked;
   const adifPath = setAdifPath.value.trim() || '';
 
   // Apply radio selection
@@ -1088,7 +1248,11 @@ settingsSave.addEventListener('click', async () => {
     myCallsign: myCallsign,
     clusterHost: clusterHost,
     clusterPort: clusterPort,
+    enableSolar: solarEnabled,
+    enableBandActivity: bandActivityEnabled,
     enableDxcc: dxccEnabled,
+    licenseClass: licenseClassVal,
+    hideOutOfBand: hideOob,
     adifPath: adifPath,
   });
   distUnit = setDistUnit.value;
@@ -1099,7 +1263,13 @@ settingsSave.addEventListener('click', async () => {
   enableSota = sotaEnabled;
   enableCluster = clusterEnabled;
   updateClusterStatusVisibility();
+  enableSolar = solarEnabled;
+  updateSolarVisibility();
+  enableBandActivity = bandActivityEnabled;
+  updateBandActivityVisibility();
   enableDxcc = dxccEnabled;
+  licenseClass = licenseClassVal;
+  hideOutOfBand = hideOob;
   updateDxccButton();
   updateHeaders();
   saveFilters();
@@ -1121,7 +1291,7 @@ window.api.onSpotsError((msg) => {
 });
 
 window.api.onCatStatus(({ connected }) => {
-  catStatusEl.textContent = connected ? 'CAT: Connected' : 'CAT: Disconnected';
+  catStatusEl.textContent = 'CAT';
   catStatusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
 });
 
@@ -1133,7 +1303,7 @@ window.api.onDxccData((data) => {
 
 // --- Cluster status listener ---
 window.api.onClusterStatus(({ connected }) => {
-  clusterStatusEl.textContent = connected ? 'Cluster: Connected' : 'Cluster: Disconnected';
+  clusterStatusEl.textContent = 'Cluster';
   clusterStatusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
   if (enableCluster) clusterStatusEl.classList.remove('hidden');
 });
@@ -1145,6 +1315,114 @@ window.api.onCatFrequency((hz) => {
   radioFreqKhz = newKhz;
   if (currentView === 'table') render();
 });
+
+// --- Solar data listener ---
+function updateSolarVisibility() {
+  const method = enableSolar ? 'remove' : 'add';
+  sfiStatusEl.classList[method]('hidden');
+  kStatusEl.classList[method]('hidden');
+  aStatusEl.classList[method]('hidden');
+}
+
+window.api.onSolarData(({ sfi, kIndex, aIndex }) => {
+  const hidden = enableSolar ? '' : ' hidden';
+
+  // SFI: higher is better
+  const sfiClass = sfi >= 100 ? 'connected' : sfi >= 70 ? 'warn' : 'disconnected';
+  sfiStatusEl.textContent = `SFI ${sfi}`;
+  sfiStatusEl.className = `status solar-pill ${sfiClass}${hidden}`;
+
+  // K-index: lower is better
+  const kClass = kIndex <= 2 ? 'connected' : kIndex <= 4 ? 'warn' : 'disconnected';
+  kStatusEl.textContent = `K ${kIndex}`;
+  kStatusEl.className = `status solar-pill ${kClass}${hidden}`;
+
+  // A-index: lower is better
+  const aClass = aIndex <= 7 ? 'connected' : aIndex <= 20 ? 'warn' : 'disconnected';
+  aStatusEl.textContent = `A ${aIndex}`;
+  aStatusEl.className = `status solar-pill ${aClass}${hidden}`;
+});
+
+// --- Band Activity Heatmap ---
+const HEATMAP_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+const HEATMAP_CONTINENTS = ['EU', 'NA', 'SA', 'AS', 'AF', 'OC'];
+
+function updateBandActivityVisibility() {
+  if (enableBandActivity && currentView === 'map') {
+    bandActivityBar.classList.remove('hidden');
+  } else {
+    bandActivityBar.classList.add('hidden');
+  }
+  if (map) setTimeout(() => map.invalidateSize(), 0);
+}
+
+function renderBandActivity() {
+  if (!enableBandActivity || currentView !== 'map') return;
+
+  const now = Date.now();
+  const oneHourAgo = now - 3600000;
+
+  // Filter spots from the last 60 minutes
+  const recentSpots = allSpots.filter((s) => {
+    if (!s.spotTime) return false;
+    try {
+      const t = new Date(s.spotTime.endsWith('Z') ? s.spotTime : s.spotTime + 'Z').getTime();
+      return t >= oneHourAgo;
+    } catch { return false; }
+  });
+
+  // Aggregate by band × continent
+  const counts = {}; // key: "band|continent" → count
+  for (const s of recentSpots) {
+    if (!s.band || !s.continent) continue;
+    const key = `${s.band}|${s.continent}`;
+    counts[key] = (counts[key] || 0) + 1;
+  }
+
+  // Build grid: columns = header + bands, rows = header + continents
+  const cols = HEATMAP_BANDS.length + 1; // +1 for row labels
+  bandActivityBar.innerHTML = '';
+
+  const grid = document.createElement('div');
+  grid.className = 'band-activity-grid';
+  grid.style.gridTemplateColumns = `auto repeat(${HEATMAP_BANDS.length}, 1fr)`;
+
+  // Header row: empty corner + band labels
+  const corner = document.createElement('div');
+  corner.className = 'band-activity-header';
+  corner.textContent = '';
+  grid.appendChild(corner);
+
+  for (const band of HEATMAP_BANDS) {
+    const hdr = document.createElement('div');
+    hdr.className = 'band-activity-header';
+    hdr.textContent = band;
+    grid.appendChild(hdr);
+  }
+
+  // Data rows: continent label + cells
+  for (const cont of HEATMAP_CONTINENTS) {
+    const label = document.createElement('div');
+    label.className = 'band-activity-label';
+    label.textContent = cont;
+    grid.appendChild(label);
+
+    for (const band of HEATMAP_BANDS) {
+      const count = counts[`${band}|${cont}`] || 0;
+      const cell = document.createElement('div');
+      cell.className = 'band-activity-cell';
+
+      // Heat level: 0 = empty, 1 = 1-2 spots, 2 = 3-5, 3 = 6+
+      const heat = count === 0 ? 0 : count <= 2 ? 1 : count <= 5 ? 2 : 3;
+      cell.classList.add(`heat-${heat}`);
+      cell.textContent = count || '';
+      cell.title = `${band} ${cont}: ${count} spot${count !== 1 ? 's' : ''}`;
+      grid.appendChild(cell);
+    }
+  }
+
+  bandActivityBar.appendChild(grid);
+}
 
 // --- Settings footer links ---
 document.getElementById('bio-link').addEventListener('click', (e) => {

@@ -33,6 +33,7 @@ let settings = null;
 let win = null;
 let cat = null;
 let spotTimer = null;
+let solarTimer = null;
 let rigctldProc = null;
 let cluster = null;
 let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
@@ -174,6 +175,8 @@ function connectCluster() {
 
   cluster = new DxClusterClient();
   const myPos = gridToLatLon(settings.grid);
+  // Resolve user's own entity so we can suppress meaningless same-entity distances
+  const myEntity = (ctyDb && settings.myCallsign) ? resolveCallsign(settings.myCallsign, ctyDb) : null;
 
   cluster.on('spot', (raw) => {
     // Normalize to standard spot shape
@@ -198,10 +201,12 @@ function connectCluster() {
       const entity = resolveCallsign(raw.callsign, ctyDb);
       if (entity) {
         spot.locationDesc = entity.name;
+        spot.continent = entity.continent || '';
         if (entity.lat != null && entity.lon != null) {
           spot.lat = entity.lat;
           spot.lon = entity.lon;
-          if (myPos) {
+          // Skip distance for same-entity spots — cty.dat centroid is meaningless
+          if (myPos && entity !== myEntity) {
             spot.distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, entity.lat, entity.lon));
           }
         }
@@ -248,6 +253,25 @@ function disconnectCluster() {
   sendClusterStatus({ connected: false });
 }
 
+// --- Solar data ---
+function fetchSolarData() {
+  const https = require('https');
+  const req = https.get('https://www.hamqsl.com/solarxml.php', { timeout: 10000 }, (res) => {
+    let body = '';
+    res.on('data', (chunk) => { body += chunk; });
+    res.on('end', () => {
+      const sfi = (body.match(/<solarflux>\s*(\d+)\s*<\/solarflux>/) || [])[1];
+      const aIndex = (body.match(/<aindex>\s*(\d+)\s*<\/aindex>/) || [])[1];
+      const kIndex = (body.match(/<kindex>\s*(\d+)\s*<\/kindex>/) || [])[1];
+      if (sfi && aIndex && kIndex) {
+        const data = { sfi: parseInt(sfi, 10), aIndex: parseInt(aIndex, 10), kIndex: parseInt(kIndex, 10) };
+        if (win && !win.isDestroyed()) win.webContents.send('solar-data', data);
+      }
+    });
+  });
+  req.on('error', () => { /* silently ignore — pills keep last known values */ });
+}
+
 // --- Spot processing ---
 function processPotaSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
@@ -276,9 +300,17 @@ function processPotaSpots(raw) {
       else { lat = null; lon = null; }
     }
 
+    // Resolve continent from cty.dat
+    const callsign = s.activator || s.callsign || '';
+    let continent = '';
+    if (ctyDb && callsign) {
+      const entity = resolveCallsign(callsign, ctyDb);
+      if (entity) continent = entity.continent || '';
+    }
+
     return {
       source: 'pota',
-      callsign: s.activator || s.callsign || '',
+      callsign,
       frequency: s.frequency,
       freqMHz,
       mode: (s.mode || '').toUpperCase(),
@@ -290,6 +322,7 @@ function processPotaSpots(raw) {
       lon,
       band: freqToBand(freqMHz),
       spotTime: s.spotTime || '',
+      continent,
     };
   });
 }
@@ -317,9 +350,17 @@ async function processSotaSpots(raw) {
       distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, lat, lon));
     }
 
+    // Resolve continent from cty.dat
+    const callsign = s.activatorCallsign || '';
+    let continent = '';
+    if (ctyDb && callsign) {
+      const entity = resolveCallsign(callsign, ctyDb);
+      if (entity) continent = entity.continent || '';
+    }
+
     return {
       source: 'sota',
-      callsign: s.activatorCallsign || '',
+      callsign,
       frequency: String(freqKHz),
       freqMHz,
       mode: (s.mode || '').toUpperCase(),
@@ -331,6 +372,7 @@ async function processSotaSpots(raw) {
       lon,
       band: freqToBand(freqMHz),
       spotTime: s.timeStamp || '',
+      continent,
     };
   });
 }
@@ -464,6 +506,7 @@ function createWindow() {
       sendClusterStatus({ connected: cluster.connected, host: settings.clusterHost, port: settings.clusterPort });
     }
     refreshSpots();
+    fetchSolarData();
     // Auto-send DXCC data if enabled and ADIF path is set
     if (settings.enableDxcc && settings.adifPath) {
       sendDxccData();
@@ -498,6 +541,9 @@ app.whenReady().then(() => {
   // Start spot fetching
   refreshSpots();
   spotTimer = setInterval(refreshSpots, 30000);
+
+  // Start solar data fetching (every 10 minutes)
+  solarTimer = setInterval(fetchSolarData, 600000);
 
   // IPC handlers
   ipcMain.on('open-external', (_e, url) => {
@@ -588,6 +634,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (spotTimer) clearInterval(spotTimer);
+  if (solarTimer) clearInterval(solarTimer);
   if (cat) cat.disconnect();
   if (cluster) cluster.disconnect();
   killRigctld();

@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   parseAdif: () => ipcRenderer.invoke('parse-adif'),
   onDxccData: (cb) => ipcRenderer.on('dxcc-data', (_e, data) => cb(data)),
   onClusterStatus: (cb) => ipcRenderer.on('cluster-status', (_e, s) => cb(s)),
+  onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, d) => cb(d)),
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),
   close: () => ipcRenderer.send('win-close'),

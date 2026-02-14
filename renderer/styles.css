@@ -199,6 +199,11 @@ button:hover {
   color: #e94560;
 }
 
+.status.warn {
+  background: #3d3a0a;
+  color: #f0d050;
+}
+
 main {
   padding: 0;
   overflow-x: hidden;
@@ -409,10 +414,18 @@ thead th {
 }
 
 /* Map */
-#map {
+#map-container {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   width: 100%;
+}
+
+#map {
+  flex: 1;
+  width: 100%;
   background: #1a1a2e;
+  min-height: 0;
 }
 
 .dark-tiles {
@@ -824,5 +837,78 @@ dialog input, dialog select {
   padding: 60px 20px;
   color: #808090;
   font-size: 15px;
+}
+
+/* Out-of-privilege spots */
+.out-of-privilege {
+  opacity: 0.4;
+}
+
+.out-of-privilege .freq-link,
+.out-of-privilege .qrz-link {
+  color: #ff6b6b;
+}
+
+/* Band Activity Heatmap */
+#band-activity-bar {
+  background: #16213e;
+  border-top: 1px solid #0f3460;
+  padding: 6px 10px;
+  overflow-x: auto;
+}
+
+.band-activity-grid {
+  display: grid;
+  gap: 1px;
+  font-size: 10px;
+  font-family: Consolas, "Courier New", monospace;
+  min-width: fit-content;
+}
+
+.band-activity-header {
+  text-align: center;
+  color: #a0a0c0;
+  font-weight: bold;
+  text-transform: uppercase;
+  padding: 2px 4px;
+  white-space: nowrap;
+}
+
+.band-activity-label {
+  color: #a0a0c0;
+  font-weight: bold;
+  padding: 2px 6px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+.band-activity-cell {
+  text-align: center;
+  padding: 2px 4px;
+  border-radius: 2px;
+  min-width: 28px;
+  color: #808090;
+}
+
+.band-activity-cell.heat-0 {
+  background: #1a1a2e;
+  color: #404060;
+}
+
+.band-activity-cell.heat-1 {
+  background: #2a1a2e;
+  color: #c080a0;
+}
+
+.band-activity-cell.heat-2 {
+  background: #3d1a2a;
+  color: #e0708a;
+}
+
+.band-activity-cell.heat-3 {
+  background: #4d1a24;
+  color: #e94560;
+  font-weight: bold;
 }
 
