@@ -1854,6 +1854,10 @@ document.getElementById('bio-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://caseystanton.com/?utm_source=potacat&utm_medium=bio');
 });
+document.getElementById('discord-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://discord.gg/JjdKSshej');
+});
 document.getElementById('issues-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://github.com/Waffleslop/POTA-CAT/issues');

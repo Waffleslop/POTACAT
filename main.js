@@ -824,7 +824,7 @@ app.whenReady().then(() => {
   ipcMain.on('open-external', (_e, url) => {
     const { shell } = require('electron');
     // Only allow known URLs
-    if (url.startsWith('https://www.qrz.com/') || url.startsWith('https://caseystanton.com/') || url.startsWith('https://github.com/Waffleslop/POTA-CAT/') || url.startsWith('https://hamlib.github.io/')) {
+    if (url.startsWith('https://www.qrz.com/') || url.startsWith('https://caseystanton.com/') || url.startsWith('https://github.com/Waffleslop/POTA-CAT/') || url.startsWith('https://hamlib.github.io/') || url.startsWith('https://discord.gg/')) {
       shell.openExternal(url);
     }
   });
