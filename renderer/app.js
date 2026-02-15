@@ -835,6 +835,9 @@ function initMap() {
 
   markerLayer = L.layerGroup().addTo(map);
 
+  // Bind tune/QRZ handlers inside popups
+  bindPopupClickHandlers(map);
+
   // Add home marker
   updateHomeMarker();
 
@@ -1012,19 +1015,25 @@ function updateMapMarkers(filtered) {
   }
 }
 
-// Handle popup clicks (delegated)
-document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('tune-btn')) {
-    const freq = e.target.dataset.freq;
-    const mode = e.target.dataset.mode;
-    window.api.tune(freq, mode);
-  }
-  if (e.target.classList.contains('popup-qrz')) {
-    e.preventDefault();
-    const call = e.target.dataset.call;
-    window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(call)}`);
-  }
-});
+// Handle popup clicks — Leaflet stops click propagation inside popups,
+// so we bind handlers directly when a popup opens instead of delegating to document.
+function bindPopupClickHandlers(mapInstance) {
+  mapInstance.on('popupopen', (e) => {
+    const container = e.popup.getElement();
+    if (!container) return;
+    container.querySelectorAll('.tune-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        window.api.tune(btn.dataset.freq, btn.dataset.mode);
+      });
+    });
+    container.querySelectorAll('.popup-qrz').forEach((link) => {
+      link.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(link.dataset.call)}`);
+      });
+    });
+  });
+}
 
 // --- Scan ---
 function getScanList() {
@@ -1642,6 +1651,9 @@ function initRbnMap() {
   }).addTo(rbnMap);
 
   rbnMarkerLayer = L.layerGroup().addTo(rbnMap);
+
+  // Bind QRZ handlers inside popups
+  bindPopupClickHandlers(rbnMap);
 
   // Add home marker
   updateRbnHomeMarker();
