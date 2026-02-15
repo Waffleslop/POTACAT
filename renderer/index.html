@@ -264,7 +264,10 @@
           </select>
         </label>
         <label>Serial Port:
-          <select id="set-rig-port"></select>
+          <div style="display:flex;gap:6px;margin-top:4px;">
+            <select id="set-rig-port" style="flex:1;"></select>
+            <input type="text" id="set-rig-port-manual" placeholder="COM5" style="width:70px;" title="Type a port manually if not listed">
+          </div>
         </label>
         <label>Baud Rate:
           <select id="set-rig-baud">

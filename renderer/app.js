@@ -65,6 +65,7 @@ const setFlexSlice = document.getElementById('set-flex-slice');
 const radioTypeBtns = document.querySelectorAll('input[name="radio-type"]');
 const setRigModel = document.getElementById('set-rig-model');
 const setRigPort = document.getElementById('set-rig-port');
+const setRigPortManual = document.getElementById('set-rig-port-manual');
 const setRigBaud = document.getElementById('set-rig-baud');
 const setRigSearch = document.getElementById('set-rig-search');
 const hamlibTestBtn = document.getElementById('hamlib-test-btn');
@@ -165,6 +166,11 @@ function updateHeaders() {
 let hamlibFieldsLoaded = false;
 let allRigOptions = []; // cached rig list from listRigs()
 
+function getEffectivePort() {
+  const manual = setRigPortManual.value.trim();
+  return manual || setRigPort.value;
+}
+
 function getSelectedRadioType() {
   const checked = document.querySelector('input[name="radio-type"]:checked');
   return checked ? checked.value : 'none';
@@ -232,12 +238,20 @@ async function populateHamlibFields(savedTarget) {
   // Populate serial port dropdown
   const ports = await window.api.listPorts();
   setRigPort.innerHTML = '';
+  setRigPortManual.value = '';
+  const detectedPaths = new Set();
   for (const p of ports) {
+    detectedPaths.add(p.path);
     const opt = document.createElement('option');
     opt.value = p.path;
     opt.textContent = `${p.path} — ${p.friendlyName}`;
     if (savedTarget && savedTarget.serialPort === p.path) opt.selected = true;
     setRigPort.appendChild(opt);
+  }
+
+  // If the saved port isn't in the detected list, put it in the manual input
+  if (savedTarget && savedTarget.serialPort && !detectedPaths.has(savedTarget.serialPort)) {
+    setRigPortManual.value = savedTarget.serialPort;
   }
 
   // Restore baud rate
@@ -517,7 +531,7 @@ setRigSearch.addEventListener('input', () => {
 // Hamlib test button
 hamlibTestBtn.addEventListener('click', async () => {
   const rigId = parseInt(setRigModel.value, 10);
-  const serialPort = setRigPort.value;
+  const serialPort = getEffectivePort();
   const baudRate = parseInt(setRigBaud.value, 10);
 
   if (!rigId) {
@@ -1435,7 +1449,7 @@ settingsSave.addEventListener('click', async () => {
     window.api.connectCat({
       type: 'rigctld',
       rigId: parseInt(setRigModel.value, 10),
-      serialPort: setRigPort.value,
+      serialPort: getEffectivePort(),
       baudRate: parseInt(setRigBaud.value, 10),
     });
   } else {
