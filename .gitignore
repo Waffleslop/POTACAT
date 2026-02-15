@@ -2,3 +2,5 @@ node_modules/
 dist/
 CLAUDE.md
 .claude/
+*.png
+!assets/*.png
