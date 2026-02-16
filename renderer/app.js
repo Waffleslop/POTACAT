@@ -22,6 +22,7 @@ let licenseClass = 'none';
 let hideOutOfBand = false;
 let enableLogging = false;
 let defaultPower = 100;
+let tuneClick = false;
 let dxccData = null;  // { entities: [...] } from main process
 
 // --- Scan state ---
@@ -60,6 +61,7 @@ const setNotifySound = document.getElementById('set-notify-sound');
 const setNotifyTimeout = document.getElementById('set-notify-timeout');
 const setLicenseClass = document.getElementById('set-license-class');
 const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
+const setTuneClick = document.getElementById('set-tune-click');
 const scanBtn = document.getElementById('scan-btn');
 const hamlibConfig = document.getElementById('hamlib-config');
 const flexConfig = document.getElementById('flex-config');
@@ -68,6 +70,13 @@ const setTcpcatHost = document.getElementById('set-tcpcat-host');
 const setTcpcatPort = document.getElementById('set-tcpcat-port');
 const setFlexSlice = document.getElementById('set-flex-slice');
 const radioTypeBtns = document.querySelectorAll('input[name="radio-type"]');
+const myRigsList = document.getElementById('my-rigs-list');
+const rigAddBtn = document.getElementById('rig-add-btn');
+const rigEditor = document.getElementById('rig-editor');
+const rigEditorTitle = document.getElementById('rig-editor-title');
+const setRigName = document.getElementById('set-rig-name');
+const rigSaveBtn = document.getElementById('rig-save-btn');
+const rigCancelBtn = document.getElementById('rig-cancel-btn');
 const setRigModel = document.getElementById('set-rig-model');
 const setRigPort = document.getElementById('set-rig-port');
 const setRigPortManual = document.getElementById('set-rig-port-manual');
@@ -128,6 +137,11 @@ const setDefaultPower = document.getElementById('set-default-power');
 const setSendToLogbook = document.getElementById('set-send-to-logbook');
 const logbookConfig = document.getElementById('logbook-config');
 const setLogbookType = document.getElementById('set-logbook-type');
+const logbookInstructions = document.getElementById('logbook-instructions');
+const logbookPortConfig = document.getElementById('logbook-port-config');
+const setLogbookHost = document.getElementById('set-logbook-host');
+const setLogbookPort = document.getElementById('set-logbook-port');
+const logbookHelp = document.getElementById('logbook-help');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
 const logFrequency = document.getElementById('log-frequency');
@@ -175,6 +189,7 @@ async function loadPrefs() {
   updateLoggingVisibility();
   licenseClass = settings.licenseClass || 'none';
   hideOutOfBand = settings.hideOutOfBand === true;
+  tuneClick = settings.tuneClick === true;
   updateClusterStatusVisibility();
   updateRbnStatusVisibility();
   updateRbnButton();
@@ -225,7 +240,7 @@ function updateRadioSubPanels() {
 async function populateRadioSection(currentTarget) {
   hamlibFieldsLoaded = false;
   if (!currentTarget) {
-    setRadioType('none');
+    setRadioType('flex');
   } else if (currentTarget.type === 'tcp') {
     // Check if it matches a standard Flex slice (localhost + 5002-5005)
     const isFlexSlice = (currentTarget.host === '127.0.0.1' || !currentTarget.host) &&
@@ -243,7 +258,7 @@ async function populateRadioSection(currentTarget) {
     hamlibFieldsLoaded = true;
     await populateHamlibFields(currentTarget);
   } else {
-    setRadioType('none');
+    setRadioType('flex');
   }
   updateRadioSubPanels();
 }
@@ -299,6 +314,198 @@ async function populateHamlibFields(savedTarget) {
     setRigBaud.value = String(savedTarget.baudRate);
   }
 }
+
+// --- Rig profile management ---
+let rigEditorMode = null; // null | 'add' | 'edit'
+let editingRigId = null;
+let currentRigs = []; // local copy of settings.rigs
+let currentActiveRigId = null; // local copy of settings.activeRigId
+
+function describeRigTarget(target) {
+  if (!target) return 'Not configured';
+  if (target.type === 'tcp') {
+    const host = target.host || '127.0.0.1';
+    const port = target.port || 5002;
+    if ((host === '127.0.0.1' || host === 'localhost') && port >= 5002 && port <= 5005) {
+      const sliceLetter = String.fromCharCode(65 + port - 5002);
+      return `FlexRadio Slice ${sliceLetter} (TCP :${port})`;
+    }
+    return `TCP ${host}:${port}`;
+  }
+  if (target.type === 'rigctld') {
+    const port = target.serialPort || '?';
+    return `Hamlib on ${port}`;
+  }
+  return 'Unknown';
+}
+
+function renderRigList(rigs, activeRigId) {
+  myRigsList.innerHTML = '';
+  currentRigs = rigs || [];
+  currentActiveRigId = activeRigId || null;
+
+  // "None" option
+  const noneItem = document.createElement('div');
+  noneItem.className = 'rig-item' + (!activeRigId ? ' active' : '');
+  noneItem.innerHTML = `
+    <input type="radio" name="active-rig" value="" ${!activeRigId ? 'checked' : ''}>
+    <div class="rig-item-info">
+      <div class="rig-item-name">None</div>
+      <div class="rig-item-desc">No radio connected</div>
+    </div>
+  `;
+  noneItem.addEventListener('click', () => {
+    noneItem.querySelector('input[type="radio"]').checked = true;
+    myRigsList.querySelectorAll('.rig-item').forEach(el => el.classList.remove('active'));
+    noneItem.classList.add('active');
+  });
+  myRigsList.appendChild(noneItem);
+
+  for (const rig of rigs) {
+    const isActive = rig.id === activeRigId;
+    const item = document.createElement('div');
+    item.className = 'rig-item' + (isActive ? ' active' : '');
+    item.dataset.rigId = rig.id;
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'active-rig';
+    radio.value = rig.id;
+    if (isActive) radio.checked = true;
+
+    const info = document.createElement('div');
+    info.className = 'rig-item-info';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'rig-item-name';
+    nameEl.textContent = rig.name || 'Unnamed Rig';
+    const descEl = document.createElement('div');
+    descEl.className = 'rig-item-desc';
+    descEl.textContent = describeRigTarget(rig.catTarget);
+    info.appendChild(nameEl);
+    info.appendChild(descEl);
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'rig-item-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.title = 'Edit this rig';
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openRigEditor('edit', rig.id);
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'rig-item-btn rig-delete-btn';
+    deleteBtn.textContent = '\u2715';
+    deleteBtn.title = 'Delete this rig';
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteRig(rig.id);
+    });
+
+    item.appendChild(radio);
+    item.appendChild(info);
+    item.appendChild(editBtn);
+    item.appendChild(deleteBtn);
+
+    item.addEventListener('click', () => {
+      radio.checked = true;
+      myRigsList.querySelectorAll('.rig-item').forEach(el => el.classList.remove('active'));
+      item.classList.add('active');
+    });
+
+    myRigsList.appendChild(item);
+  }
+}
+
+function buildCatTargetFromForm() {
+  const radioType = getSelectedRadioType();
+  if (radioType === 'flex') {
+    return { type: 'tcp', host: '127.0.0.1', port: parseInt(setFlexSlice.value, 10) };
+  } else if (radioType === 'tcpcat') {
+    return { type: 'tcp', host: setTcpcatHost.value.trim() || '127.0.0.1', port: parseInt(setTcpcatPort.value, 10) || 5002 };
+  } else if (radioType === 'hamlib') {
+    return {
+      type: 'rigctld',
+      rigId: parseInt(setRigModel.value, 10),
+      serialPort: getEffectivePort(),
+      baudRate: parseInt(setRigBaud.value, 10),
+    };
+  }
+  return null;
+}
+
+async function openRigEditor(mode, rigId) {
+  rigEditorMode = mode;
+  editingRigId = rigId || null;
+  hamlibFieldsLoaded = false;
+
+  if (mode === 'edit') {
+    rigEditorTitle.textContent = 'Edit Rig';
+    const rig = currentRigs.find(r => r.id === rigId);
+    if (rig) {
+      setRigName.value = rig.name || '';
+      await populateRadioSection(rig.catTarget);
+    }
+  } else {
+    rigEditorTitle.textContent = 'Add Rig';
+    setRigName.value = '';
+    setRadioType('flex');
+    updateRadioSubPanels();
+  }
+
+  rigEditor.classList.remove('hidden');
+  rigAddBtn.classList.add('hidden');
+  setRigName.focus();
+}
+
+function closeRigEditor() {
+  rigEditorMode = null;
+  editingRigId = null;
+  rigEditor.classList.add('hidden');
+  rigAddBtn.classList.remove('hidden');
+  hamlibTestResult.textContent = '';
+  hamlibTestResult.className = '';
+}
+
+async function deleteRig(rigId) {
+  currentRigs = currentRigs.filter(r => r.id !== rigId);
+  // If deleted the active rig, select none
+  if (currentActiveRigId === rigId) {
+    currentActiveRigId = null;
+  }
+  renderRigList(currentRigs, currentActiveRigId);
+  closeRigEditor();
+}
+
+// Rig editor event handlers
+rigAddBtn.addEventListener('click', () => openRigEditor('add'));
+
+rigCancelBtn.addEventListener('click', () => closeRigEditor());
+
+rigSaveBtn.addEventListener('click', async () => {
+  const name = setRigName.value.trim() || 'Unnamed Rig';
+  const catTarget = buildCatTargetFromForm();
+
+  if (rigEditorMode === 'edit' && editingRigId) {
+    const rig = currentRigs.find(r => r.id === editingRigId);
+    if (rig) {
+      rig.name = name;
+      rig.catTarget = catTarget;
+    }
+  } else {
+    const newRig = {
+      id: 'rig_' + Date.now(),
+      name,
+      catTarget,
+    };
+    currentRigs.push(newRig);
+  }
+
+  renderRigList(currentRigs, currentActiveRigId);
+  closeRigEditor();
+});
 
 // --- Multi-select dropdowns ---
 function initMultiDropdown(container, label, onChange) {
@@ -468,6 +675,23 @@ function updateLoggingVisibility() {
   }
 }
 
+// --- Tune confirmation click ---
+let audioCtx = null;
+function playTuneClick() {
+  if (!tuneClick) return;
+  if (!audioCtx) audioCtx = new AudioContext();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 1200;
+  gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.06);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.06);
+}
+
 
 // --- Persist filters to localStorage ---
 const FILTERS_KEY = 'pota-cat-filters';
@@ -562,11 +786,49 @@ setEnableLogging.addEventListener('change', () => {
 // Send to Logbook checkbox toggles logbook dropdown visibility
 setSendToLogbook.addEventListener('change', () => {
   logbookConfig.classList.toggle('hidden', !setSendToLogbook.checked);
+  updateLogbookPortConfig();
 });
 
-// ADIF log file browser
+// Logbook type dropdown — show port config and contextual help
+const LOGBOOK_DEFAULTS = {
+  log4om: {
+    fileWatch: true,
+    instructions: 'In Log4OM 2: Settings > Program Configuration > Software Integration > ADIF Functions. In the ADIF Monitor tab, check "Enable ADIF monitor". Click the folder icon next to "ADIF file" and select the same ADIF log file used in POTA CAT. Press the green + button to add it to the list, then press "Save and apply". Log4OM will automatically import new QSOs as they are saved.',
+  },
+  n1mm: { port: 2333, help: 'In N1MM+: Configurer > WSJT/JTDX Setup > set UDP port.' },
+  n3fjp: { port: 1100, help: 'In N3FJP: Settings > Application Program Interface > enable TCP API.' },
+  hrd: { port: 7826, help: 'HRD Logbook TCP API is always available when Logbook is running.' },
+};
+
+function updateLogbookPortConfig() {
+  const type = setLogbookType.value;
+  const defaults = LOGBOOK_DEFAULTS[type];
+  if (defaults && defaults.fileWatch) {
+    // File-based integration (e.g. Log4OM) — show instructions, hide port config
+    logbookInstructions.innerHTML = defaults.instructions;
+    logbookInstructions.classList.remove('hidden');
+    logbookPortConfig.classList.add('hidden');
+    logbookHelp.textContent = '';
+  } else if (defaults) {
+    logbookInstructions.classList.add('hidden');
+    logbookPortConfig.classList.remove('hidden');
+    const currentPort = parseInt(setLogbookPort.value, 10);
+    const isDefaultPort = !currentPort || Object.values(LOGBOOK_DEFAULTS).some(d => d.port === currentPort);
+    if (isDefaultPort) setLogbookPort.value = defaults.port;
+    logbookHelp.textContent = defaults.help;
+  } else {
+    logbookInstructions.classList.add('hidden');
+    logbookPortConfig.classList.add('hidden');
+    logbookHelp.textContent = '';
+  }
+}
+
+setLogbookType.addEventListener('change', updateLogbookPortConfig);
+
+// ADIF log file browser (save dialog, starts at current path or default)
 adifLogBrowseBtn.addEventListener('click', async () => {
-  const filePath = await window.api.chooseAdifFile();
+  const currentPath = setAdifLogPath.value || await window.api.getDefaultLogPath();
+  const filePath = await window.api.chooseLogFile(currentPath);
   if (filePath) {
     setAdifLogPath.value = filePath;
   }
@@ -1605,7 +1867,11 @@ logSaveBtn.addEventListener('click', async () => {
     const result = await window.api.saveQso(qsoData);
     if (result.success) {
       logDialog.close();
-      showLogToast(`Logged ${callsign}`);
+      if (result.logbookError) {
+        showLogToast(`Logged ${callsign} (logbook error: ${result.logbookError})`);
+      } else {
+        showLogToast(`Logged ${callsign}`);
+      }
     } else {
       showLogToast(`Error: ${result.error}`, true);
     }
@@ -1658,6 +1924,7 @@ settingsBtn.addEventListener('click', async () => {
   setNotifyTimeout.value = s.notifyTimeout || 10;
   setLicenseClass.value = s.licenseClass || 'none';
   setHideOutOfBand.checked = s.hideOutOfBand === true;
+  setTuneClick.checked = s.tuneClick === true;
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
   setEnableCluster.checked = s.enableCluster === true;
@@ -1668,12 +1935,19 @@ settingsBtn.addEventListener('click', async () => {
   clusterConfig.classList.toggle('hidden', !s.enableCluster);
   rbnConfig.classList.toggle('hidden', !s.enableRbn);
   setEnableLogging.checked = s.enableLogging === true;
-  setAdifLogPath.value = s.adifLogPath || '';
+  if (s.adifLogPath) {
+    setAdifLogPath.value = s.adifLogPath;
+  } else {
+    setAdifLogPath.value = await window.api.getDefaultLogPath();
+  }
   setDefaultPower.value = s.defaultPower || 100;
   setSendToLogbook.checked = s.sendToLogbook === true;
   setLogbookType.value = s.logbookType || '';
+  setLogbookHost.value = s.logbookHost || '127.0.0.1';
+  setLogbookPort.value = s.logbookPort || '';
   loggingConfig.classList.toggle('hidden', !s.enableLogging);
   logbookConfig.classList.toggle('hidden', !s.sendToLogbook);
+  updateLogbookPortConfig();
   setEnableSolar.checked = s.enableSolar === true;
   setEnableBandActivity.checked = s.enableBandActivity === true;
   setEnableDxcc.checked = s.enableDxcc === true;
@@ -1681,7 +1955,8 @@ settingsBtn.addEventListener('click', async () => {
   adifPicker.classList.toggle('hidden', !s.enableDxcc);
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
-  await populateRadioSection(s.catTarget);
+  renderRigList(s.rigs || [], s.activeRigId || null);
+  closeRigEditor();
   settingsDialog.showModal();
 });
 
@@ -1707,31 +1982,26 @@ settingsSave.addEventListener('click', async () => {
   const dxccEnabled = setEnableDxcc.checked;
   const licenseClassVal = setLicenseClass.value;
   const hideOob = setHideOutOfBand.checked;
+  const tuneClickEnabled = setTuneClick.checked;
   const adifPath = setAdifPath.value.trim() || '';
   const loggingEnabled = setEnableLogging.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
   const sendToLogbook = setSendToLogbook.checked;
   const logbookTypeVal = setLogbookType.value;
+  const logbookHostVal = setLogbookHost.value.trim() || '127.0.0.1';
+  const logbookPortVal = parseInt(setLogbookPort.value, 10) || 0;
 
-  // Apply radio selection
-  const radioType = getSelectedRadioType();
-  if (radioType === 'flex') {
-    window.api.connectCat({ type: 'tcp', host: '127.0.0.1', port: parseInt(setFlexSlice.value, 10) });
-  } else if (radioType === 'tcpcat') {
-    window.api.connectCat({ type: 'tcp', host: setTcpcatHost.value.trim() || '127.0.0.1', port: parseInt(setTcpcatPort.value, 10) || 5002 });
-  } else if (radioType === 'hamlib') {
-    window.api.connectCat({
-      type: 'rigctld',
-      rigId: parseInt(setRigModel.value, 10),
-      serialPort: getEffectivePort(),
-      baudRate: parseInt(setRigBaud.value, 10),
-    });
-  } else {
-    window.api.connectCat(null);
-  }
+  // Apply rig selection from list
+  const selectedRigRadio = document.querySelector('input[name="active-rig"]:checked');
+  const selectedRigId = selectedRigRadio ? selectedRigRadio.value : '';
+  const selectedRig = selectedRigId ? currentRigs.find(r => r.id === selectedRigId) : null;
+  const rigTarget = selectedRig ? selectedRig.catTarget : null;
+  window.api.connectCat(rigTarget);
 
   await window.api.saveSettings({
+    rigs: currentRigs,
+    activeRigId: selectedRigId || null,
     grid: setGrid.value.trim() || 'FN20jb',
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
@@ -1753,12 +2023,15 @@ settingsSave.addEventListener('click', async () => {
     enableDxcc: dxccEnabled,
     licenseClass: licenseClassVal,
     hideOutOfBand: hideOob,
+    tuneClick: tuneClickEnabled,
     adifPath: adifPath,
     enableLogging: loggingEnabled,
     adifLogPath: adifLogPath,
     defaultPower: defaultPowerVal,
     sendToLogbook: sendToLogbook,
     logbookType: logbookTypeVal,
+    logbookHost: logbookHostVal,
+    logbookPort: logbookPortVal,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -1781,6 +2054,7 @@ settingsSave.addEventListener('click', async () => {
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
+  tuneClick = tuneClickEnabled;
   updateDxccButton();
   updateHeaders();
   saveFilters();
@@ -1808,6 +2082,31 @@ window.api.onCatStatus(({ connected, error }) => {
   catStatusEl.title = connected ? 'Connected' : (error || 'Disconnected');
 });
 
+// --- Update available listener ---
+window.api.onUpdateAvailable(({ version, url, headline }) => {
+  const banner = document.getElementById('update-banner');
+  const message = document.getElementById('update-message');
+  const updateLink = document.getElementById('update-link');
+  const supportLink = document.getElementById('support-link');
+  const dismissBtn = document.getElementById('update-dismiss');
+
+  message.textContent = headline
+    ? `v${version}: ${headline}`
+    : `POTA CAT v${version} is available!`;
+  updateLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.api.openExternal(url);
+  });
+  supportLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.api.openExternal('https://potacat.com/support');
+  });
+  dismissBtn.addEventListener('click', () => {
+    banner.classList.add('hidden');
+  });
+  banner.classList.remove('hidden');
+});
+
 // --- DXCC data listener ---
 window.api.onDxccData((data) => {
   dxccData = data;
@@ -1826,6 +2125,7 @@ window.api.onCatFrequency((hz) => {
   const newKhz = Math.round(hz / 1000);
   if (newKhz === radioFreqKhz) return;
   radioFreqKhz = newKhz;
+  playTuneClick();
   if (currentView === 'table') render();
 });
 
@@ -2277,9 +2577,14 @@ welcomeChoices.forEach((btn) => {
 async function finishWelcome() {
   const grid = welcomeGridInput.value.trim() || 'FN20jb';
   let catTarget = null;
+  let rigs = [];
+  let activeRigId = null;
 
   if (welcomeRadioType === 'flex') {
     catTarget = { type: 'tcp', host: '127.0.0.1', port: 5002 };
+    const rig = { id: 'rig_' + Date.now(), name: 'FlexRadio Slice A', catTarget };
+    rigs = [rig];
+    activeRigId = rig.id;
   }
   // hamlib: save null for now — user will configure details in Settings
   // none: catTarget stays null
@@ -2287,6 +2592,8 @@ async function finishWelcome() {
   await window.api.saveSettings({
     grid,
     catTarget,
+    rigs,
+    activeRigId,
     firstRun: false,
     distUnit: 'mi',
     maxAgeMin: 5,

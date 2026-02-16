@@ -11,7 +11,7 @@ const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile } = require('./lib/adif');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
-const { appendQso } = require('./lib/adif-writer');
+const { appendQso, buildAdifRecord } = require('./lib/adif-writer');
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
@@ -804,6 +804,20 @@ function sendDxccData() {
   }
 }
 
+// --- Logbook forwarding ---
+function forwardToLogbook(qsoData) {
+  const type = settings.logbookType;
+  const host = settings.logbookHost || '127.0.0.1';
+  const port = parseInt(settings.logbookPort, 10);
+
+  if (type === 'log4om') {
+    // Log4OM watches the ADIF file directly — no network forwarding needed
+    return Promise.resolve();
+  }
+  // Future: n1mm, n3fjp, hrd
+  return Promise.resolve();
+}
+
 // --- App lifecycle ---
 function createWindow() {
   win = new BrowserWindow({
@@ -842,9 +856,86 @@ function createWindow() {
   });
 }
 
+// --- Update check ---
+function checkForUpdates() {
+  const https = require('https');
+  const currentVersion = require('./package.json').version;
+  const options = {
+    hostname: 'api.github.com',
+    path: '/repos/Waffleslop/POTA-CAT/releases/latest',
+    headers: { 'User-Agent': 'POTA-CAT/' + currentVersion },
+    timeout: 10000,
+  };
+  const req = https.get(options, (res) => {
+    let body = '';
+    res.on('data', (chunk) => { body += chunk; });
+    res.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const latestTag = (data.tag_name || '').replace(/^v/, '');
+        if (latestTag && isNewerVersion(currentVersion, latestTag)) {
+          const releaseUrl = data.html_url || `https://github.com/Waffleslop/POTA-CAT/releases/tag/${data.tag_name}`;
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('update-available', { version: latestTag, url: releaseUrl, headline: data.name || '' });
+          }
+        }
+      } catch { /* silently ignore parse errors */ }
+    });
+  });
+  req.on('error', () => { /* silently ignore — no internet is fine */ });
+}
+
+function isNewerVersion(current, latest) {
+  const a = current.split('.').map(Number);
+  const b = latest.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const av = a[i] || 0;
+    const bv = b[i] || 0;
+    if (bv > av) return true;
+    if (bv < av) return false;
+  }
+  return false;
+}
+
+// --- Rig profile migration ---
+function describeTargetForMigration(target) {
+  if (!target) return 'No Radio';
+  if (target.type === 'tcp') {
+    const host = target.host || '127.0.0.1';
+    const port = target.port || 5002;
+    if ((host === '127.0.0.1' || host === 'localhost') && port >= 5002 && port <= 5005) {
+      const sliceLetter = String.fromCharCode(65 + port - 5002); // A, B, C, D
+      return `FlexRadio Slice ${sliceLetter}`;
+    }
+    return `TCP ${host}:${port}`;
+  }
+  if (target.type === 'rigctld') {
+    const port = target.serialPort || 'unknown';
+    return `Hamlib Rig on ${port}`;
+  }
+  return 'Radio';
+}
+
+function migrateRigSettings(s) {
+  if (!s.rigs) {
+    s.rigs = [];
+  }
+  if (s.catTarget && s.rigs.length === 0) {
+    const rig = {
+      id: 'rig_' + Date.now(),
+      name: describeTargetForMigration(s.catTarget),
+      catTarget: JSON.parse(JSON.stringify(s.catTarget)),
+    };
+    s.rigs.push(rig);
+    s.activeRigId = rig.id;
+    saveSettings(s);
+  }
+}
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   settings = loadSettings();
+  migrateRigSettings(settings);
 
   // Load cty.dat for DXCC lookups
   try {
@@ -874,11 +965,14 @@ app.whenReady().then(() => {
   // Start solar data fetching (every 10 minutes)
   solarTimer = setInterval(fetchSolarData, 600000);
 
+  // Check for updates (after a short delay so the window is ready)
+  setTimeout(checkForUpdates, 5000);
+
   // IPC handlers
   ipcMain.on('open-external', (_e, url) => {
     const { shell } = require('electron');
     // Only allow known URLs
-    if (url.startsWith('https://www.qrz.com/') || url.startsWith('https://caseystanton.com/') || url.startsWith('https://github.com/Waffleslop/POTA-CAT/') || url.startsWith('https://hamlib.github.io/') || url.startsWith('https://github.com/Hamlib/') || url.startsWith('https://discord.gg/')) {
+    if (url.startsWith('https://www.qrz.com/') || url.startsWith('https://caseystanton.com/') || url.startsWith('https://github.com/Waffleslop/POTA-CAT/') || url.startsWith('https://hamlib.github.io/') || url.startsWith('https://github.com/Hamlib/') || url.startsWith('https://discord.gg/') || url.startsWith('https://potacat.com/')) {
       shell.openExternal(url);
     }
   });
@@ -967,6 +1061,25 @@ app.whenReady().then(() => {
     return buildDxccData();
   });
 
+  // --- QSO Logging IPC ---
+  ipcMain.handle('get-default-log-path', () => {
+    return path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  });
+
+  ipcMain.handle('choose-log-file', async (_e, currentPath) => {
+    const defaultPath = currentPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Choose QSO Log File',
+      defaultPath,
+      filters: [
+        { name: 'ADIF Files', extensions: ['adi', 'adif'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled) return null;
+    return result.filePath;
+  });
+
   ipcMain.handle('test-hamlib', async (_e, config) => {
     const { rigId, serialPort, baudRate } = config;
     let testProc = null;
@@ -1023,8 +1136,19 @@ app.whenReady().then(() => {
 
   ipcMain.handle('save-qso', async (_e, qsoData) => {
     try {
-      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'qso_log.adi');
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       appendQso(logPath, qsoData);
+
+      // Forward to external logbook if enabled
+      if (settings.sendToLogbook && settings.logbookType) {
+        try {
+          await forwardToLogbook(qsoData);
+        } catch (fwdErr) {
+          console.error('Logbook forwarding failed:', fwdErr.message);
+          return { success: true, logbookError: fwdErr.message };
+        }
+      }
+
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };

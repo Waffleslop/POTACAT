@@ -204,6 +204,71 @@ button:hover {
   color: #f0d050;
 }
 
+/* Update banner */
+#update-banner {
+  background: #0a3d2a;
+  border-bottom: 1px solid #4ecca3;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #e0e0e0;
+}
+
+#update-banner.hidden + main {
+  height: calc(100vh - 52px - 32px);
+}
+
+#update-banner:not(.hidden) + main {
+  height: calc(100vh - 52px - 32px - 33px);
+}
+
+#update-message {
+  color: #4ecca3;
+  font-weight: bold;
+}
+
+#update-link {
+  color: #4fc3f7;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#update-link:hover {
+  text-decoration: underline;
+}
+
+#support-link {
+  color: #f0a500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#support-link:hover {
+  text-decoration: underline;
+}
+
+.update-sep {
+  color: #808090;
+}
+
+#update-dismiss {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #808090;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+#update-dismiss:hover {
+  color: #e94560;
+  background: transparent;
+}
+
 main {
   padding: 0;
   overflow-x: hidden;
@@ -479,6 +544,10 @@ dialog {
   min-width: 300px;
 }
 
+#settings-dialog {
+  max-width: 420px;
+}
+
 dialog::backdrop {
   background: rgba(0, 0, 0, 0.6);
 }
@@ -661,6 +730,132 @@ dialog input, dialog select {
 .settings-attribution {
   font-size: 11px;
   color: #606080;
+}
+
+/* My Rigs list */
+#my-rigs-list {
+  margin-bottom: 8px;
+}
+
+.rig-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: #0f1a30;
+  border: 1px solid #1a4080;
+  cursor: pointer;
+}
+
+.rig-item:hover {
+  background: #1a2a50;
+}
+
+.rig-item.active {
+  border-color: #4fc3f7;
+  background: #0f2a50;
+}
+
+.rig-item input[type="radio"] {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.rig-item-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rig-item-name {
+  font-size: 13px;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rig-item-desc {
+  font-size: 11px;
+  color: #808090;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rig-item-btn {
+  background: transparent;
+  border: none;
+  color: #808090;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.rig-item-btn:hover {
+  background: #1a4080;
+  color: #e0e0e0;
+}
+
+.rig-item-btn.rig-delete-btn:hover {
+  background: #3d0a0a;
+  color: #e94560;
+}
+
+.rig-action-btn {
+  display: block;
+  width: 100%;
+  padding: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  background: #0f3460;
+  color: #4fc3f7;
+  border: 1px dashed #1a4080;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.rig-action-btn:hover {
+  background: #1a4080;
+  border-style: solid;
+}
+
+/* Rig editor panel */
+#rig-editor {
+  border: 1px solid #4fc3f7;
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 8px;
+  background: #0f1a30;
+}
+
+#rig-editor h4 {
+  color: #4fc3f7;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.rig-editor-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rig-editor-buttons button:first-child {
+  background: #4ecca3;
+  color: #1a1a2e;
+  border-color: #4ecca3;
+  font-weight: bold;
+}
+
+.rig-editor-buttons button:first-child:hover {
+  background: #3db892;
 }
 
 /* Hamlib rig list box */

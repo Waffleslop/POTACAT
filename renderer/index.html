@@ -70,6 +70,14 @@
     </div>
   </header>
 
+  <div id="update-banner" class="hidden">
+    <span id="update-message"></span>
+    <a href="#" id="update-link">Download</a>
+    <span class="update-sep">&middot;</span>
+    <a href="#" id="support-link">Support POTA CAT</a>
+    <button id="update-dismiss" title="Dismiss">&times;</button>
+  </div>
+
   <main>
     <table id="spots-table">
       <thead>
@@ -191,28 +199,56 @@
   <!-- Settings dialog -->
   <dialog id="settings-dialog">
     <h3>Settings</h3>
-    <label>My Callsign: <input type="text" id="set-my-callsign" maxlength="10" placeholder="WB6ACU"></label>
-    <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
-    <label>Distance Unit:
-      <select id="set-dist-unit">
-        <option value="mi">Miles</option>
-        <option value="km">Kilometers</option>
-      </select>
-    </label>
-    <label>Max Spot Age (minutes):
-      <input type="number" id="set-max-age" min="1" max="120" value="5">
-    </label>
-    <label>Scan Dwell Time (seconds):
-      <input type="number" id="set-scan-dwell" min="2" max="30" value="7">
-    </label>
-    <label>CW XIT Offset (Hz):
-      <input type="number" id="set-cw-xit" min="-999" max="999" step="10" value="0">
-    </label>
-    <label>Watchlist (comma-separated callsigns):
-      <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL, KI6NAZ">
-    </label>
-    <fieldset class="source-toggles" style="margin-top:8px;">
-      <legend>Watchlist Notifications</legend>
+    <fieldset class="source-toggles">
+      <legend>Station</legend>
+      <label>My Callsign: <input type="text" id="set-my-callsign" maxlength="10" placeholder="WB6ACU"></label>
+      <span style="font-size:11px;color:#808090;margin-top:-8px;margin-bottom:8px;display:block;">Required for DX Cluster, Reverse Beacon Network, and QSO Logging</span>
+      <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+      <label>Distance Unit:
+        <select id="set-dist-unit">
+          <option value="mi">Miles</option>
+          <option value="km">Kilometers</option>
+        </select>
+      </label>
+    </fieldset>
+    <fieldset class="source-toggles">
+      <legend>Spots</legend>
+      <label>Max Spot Age (minutes):
+        <input type="number" id="set-max-age" min="1" max="120" value="5">
+      </label>
+      <label>License Class:
+        <select id="set-license-class">
+          <option value="none">None (no filtering)</option>
+          <optgroup label="United States">
+            <option value="us_extra">US Extra</option>
+            <option value="us_advanced">US Advanced</option>
+            <option value="us_general">US General</option>
+            <option value="us_technician">US Technician</option>
+          </optgroup>
+          <optgroup label="Canada">
+            <option value="ca_honours">CA Basic with Honours</option>
+            <option value="ca_basic">CA Basic</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="checkbox-label"><input type="checkbox" id="set-hide-out-of-band"> Hide out-of-band spots</label>
+    </fieldset>
+    <fieldset class="source-toggles">
+      <legend>Tuning</legend>
+      <label>Scan Dwell Time (seconds):
+        <input type="number" id="set-scan-dwell" min="2" max="30" value="7">
+      </label>
+      <label>CW XIT Offset (Hz):
+        <input type="number" id="set-cw-xit" min="-999" max="999" step="10" value="0">
+      </label>
+      <label class="checkbox-label"><input type="checkbox" id="set-tune-click"> Tune confirmation sound</label>
+      <span style="font-size:11px;color:#808090;margin-top:-8px;margin-bottom:8px;display:block;">Play a click when the radio confirms it has changed frequency</span>
+    </fieldset>
+    <fieldset class="source-toggles">
+      <legend>Watchlist</legend>
+      <label>Callsigns (comma-separated):
+        <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL, KI6NAZ">
+      </label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
       <label>Notification duration (seconds):
@@ -225,7 +261,7 @@
       <div id="logging-config" class="radio-sub hidden">
         <label>ADIF Log File:
           <div style="display:flex;gap:6px;margin-top:4px;">
-            <input type="text" id="set-adif-log-path" readonly placeholder="Default: qso_log.adi in app data" style="flex:1;">
+            <input type="text" id="set-adif-log-path" readonly style="flex:1;">
             <button type="button" id="adif-log-browse-btn">Browse</button>
           </div>
         </label>
@@ -235,15 +271,24 @@
         <label class="checkbox-label"><input type="checkbox" id="set-send-to-logbook"> Send Data to Logbook</label>
         <div id="logbook-config" class="hidden" style="margin-left:12px;margin-top:4px;">
           <label>Logbook:
-            <select id="set-logbook-type" disabled>
-              <option value="">Coming soon</option>
-              <option value="n1mm" disabled>N1MM</option>
-              <option value="log4om" disabled>Log4OM</option>
-              <option value="hrd" disabled>Ham Radio Deluxe</option>
-              <option value="n3fjp" disabled>N3FJP</option>
+            <select id="set-logbook-type">
+              <option value="">Select...</option>
+              <option value="log4om">Log4OM 2</option>
+              <option value="n1mm" disabled>N1MM+ (coming soon)</option>
+              <option value="hrd" disabled>Ham Radio Deluxe (coming soon)</option>
+              <option value="n3fjp" disabled>N3FJP (coming soon)</option>
             </select>
           </label>
-          <span style="font-size:11px;color:#808090;">Logbook integration coming in a future update.</span>
+          <div id="logbook-instructions" class="hidden" style="margin-top:6px;font-size:11px;color:#808090;line-height:1.5;"></div>
+          <div id="logbook-port-config" class="hidden" style="margin-top:6px;">
+            <label>Host:
+              <input type="text" id="set-logbook-host" placeholder="127.0.0.1" value="127.0.0.1">
+            </label>
+            <label>Port:
+              <input type="number" id="set-logbook-port" min="1" max="65535">
+            </label>
+            <div id="logbook-help" style="font-size:11px;color:#808090;margin-top:4px;"></div>
+          </div>
         </div>
       </div>
     </fieldset>
@@ -264,7 +309,9 @@
     <fieldset class="source-toggles">
       <legend>Display</legend>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
+      <span style="font-size:11px;color:#808090;margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
+      <span style="font-size:11px;color:#808090;margin-left:12px;display:block;">Displayed on the Map view only</span>
     </fieldset>
     <fieldset class="source-toggles">
       <legend>Beta</legend>
@@ -280,78 +327,73 @@
     </fieldset>
     <fieldset class="radio-config">
       <legend>Radio</legend>
-      <label class="radio-label"><input type="radio" name="radio-type" value="none" checked> None</label>
-      <label class="radio-label"><input type="radio" name="radio-type" value="flex"> FlexRadio (SmartSDR)</label>
-      <div id="flex-config" class="radio-sub hidden">
-        <label>Slice: <select id="set-flex-slice">
-          <option value="5002">Slice A (TCP :5002)</option>
-          <option value="5003">Slice B (TCP :5003)</option>
-          <option value="5004">Slice C (TCP :5004)</option>
-          <option value="5005">Slice D (TCP :5005)</option>
-        </select></label>
-      </div>
-      <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
-      <div id="tcpcat-config" class="radio-sub hidden">
-        <span style="font-size:12px;color:#808090;">Connect to any radio with TCP CAT (Flex on custom port, Elecraft K4, etc.)</span>
-        <label>Host:
-          <input type="text" id="set-tcpcat-host" placeholder="127.0.0.1" value="127.0.0.1">
+      <div id="my-rigs-list"></div>
+      <button type="button" id="rig-add-btn" class="rig-action-btn">+ Add Rig</button>
+      <div id="rig-editor" class="hidden">
+        <h4 id="rig-editor-title">Add Rig</h4>
+        <label>Rig Name:
+          <input type="text" id="set-rig-name" placeholder="My Radio" maxlength="40">
         </label>
-        <label>Port:
-          <input type="number" id="set-tcpcat-port" placeholder="5002" min="1" max="65535" value="5002">
-        </label>
-      </div>
-      <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
-      <div id="hamlib-config" class="radio-sub hidden">
-        <label>Rig Model:
-          <input type="text" id="set-rig-search" placeholder="Search rigs..." style="margin-bottom:4px;">
-          <select id="set-rig-model" size="6">
-            <option value="">Select a rig...</option>
-          </select>
-        </label>
-        <label>Serial Port:
-          <div style="display:flex;gap:6px;margin-top:4px;">
-            <select id="set-rig-port" style="flex:1;"></select>
-            <input type="text" id="set-rig-port-manual" placeholder="COM5" style="width:70px;" title="Type a port manually if not listed">
+        <label class="radio-label"><input type="radio" name="radio-type" value="flex" checked> FlexRadio (SmartSDR)</label>
+        <div id="flex-config" class="radio-sub hidden">
+          <label>Slice: <select id="set-flex-slice">
+            <option value="5002">Slice A (TCP :5002)</option>
+            <option value="5003">Slice B (TCP :5003)</option>
+            <option value="5004">Slice C (TCP :5004)</option>
+            <option value="5005">Slice D (TCP :5005)</option>
+          </select></label>
+        </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
+        <div id="tcpcat-config" class="radio-sub hidden">
+          <span style="font-size:12px;color:#808090;">Connect to any radio with TCP CAT (Flex on custom port, Elecraft K4, etc.)</span>
+          <label>Host:
+            <input type="text" id="set-tcpcat-host" placeholder="127.0.0.1" value="127.0.0.1">
+          </label>
+          <label>Port:
+            <input type="number" id="set-tcpcat-port" placeholder="5002" min="1" max="65535" value="5002">
+          </label>
+        </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
+        <div id="hamlib-config" class="radio-sub hidden">
+          <label>Rig Model:
+            <input type="text" id="set-rig-search" placeholder="Search rigs..." style="margin-bottom:4px;">
+            <select id="set-rig-model" size="6">
+              <option value="">Select a rig...</option>
+            </select>
+          </label>
+          <label>Serial Port:
+            <div style="display:flex;gap:6px;margin-top:4px;">
+              <select id="set-rig-port" style="flex:1;"></select>
+              <input type="text" id="set-rig-port-manual" placeholder="COM5" style="width:70px;" title="Type a port manually if not listed">
+            </div>
+          </label>
+          <label>Baud Rate:
+            <select id="set-rig-baud">
+              <option value="4800">4800</option>
+              <option value="9600" selected>9600</option>
+              <option value="19200">19200</option>
+              <option value="38400">38400</option>
+              <option value="57600">57600</option>
+              <option value="115200">115200</option>
+            </select>
+          </label>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="hamlib-test-btn">Test Connection</button>
+            <span id="hamlib-test-result" style="font-size:12px;"></span>
           </div>
-        </label>
-        <label>Baud Rate:
-          <select id="set-rig-baud">
-            <option value="4800">4800</option>
-            <option value="9600" selected>9600</option>
-            <option value="19200">19200</option>
-            <option value="38400">38400</option>
-            <option value="57600">57600</option>
-            <option value="115200">115200</option>
-          </select>
-        </label>
-        <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
-          <button type="button" id="hamlib-test-btn">Test Connection</button>
-          <span id="hamlib-test-result" style="font-size:12px;"></span>
+        </div>
+        <div class="rig-editor-buttons">
+          <button type="button" id="rig-save-btn">Save Rig</button>
+          <button type="button" id="rig-cancel-btn">Cancel</button>
         </div>
       </div>
     </fieldset>
-    <label>License Class:
-      <select id="set-license-class">
-        <option value="none">None (no filtering)</option>
-        <optgroup label="United States">
-          <option value="us_extra">US Extra</option>
-          <option value="us_advanced">US Advanced</option>
-          <option value="us_general">US General</option>
-          <option value="us_technician">US Technician</option>
-        </optgroup>
-        <optgroup label="Canada">
-          <option value="ca_honours">CA Basic with Honours</option>
-          <option value="ca_basic">CA Basic</option>
-        </optgroup>
-      </select>
-    </label>
-    <label class="checkbox-label"><input type="checkbox" id="set-hide-out-of-band"> Hide out-of-band spots</label>
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
       <button id="settings-cancel">Cancel</button>
     </div>
     <div class="settings-footer">
-      <div class="settings-version">v0.9.5 beta</div>
+      <div class="settings-version">v0.9.6 beta</div>
       <div class="settings-bio">Built by <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-discord">Join the <a href="#" id="discord-link">POTA CAT Discord</a> to help test and share feedback!</div>
       <div class="settings-issues">Free &amp; open source. Found a bug? <a href="#" id="issues-link">Submit a ticket</a></div>
