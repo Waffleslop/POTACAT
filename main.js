@@ -179,6 +179,7 @@ function spawnRigctld(target, portOverride) {
       '-r', target.serialPort,
       '-s', String(target.baudRate),
       '-t', port,
+      '--set-conf=dtr_state=OFF,rts_state=OFF',
     ];
 
     if (!portOverride) killRigctld();
