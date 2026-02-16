@@ -146,6 +146,13 @@ const setLogbookHost = document.getElementById('set-logbook-host');
 const setLogbookPort = document.getElementById('set-logbook-port');
 const logbookHelp = document.getElementById('logbook-help');
 const setEnableTelemetry = document.getElementById('set-enable-telemetry');
+const setSmartSdrSpots = document.getElementById('set-smartsdr-spots');
+const smartSdrConfig = document.getElementById('smartsdr-config');
+const setSmartSdrHost = document.getElementById('set-smartsdr-host');
+const setSmartSdrPota = document.getElementById('set-smartsdr-pota');
+const setSmartSdrSota = document.getElementById('set-smartsdr-sota');
+const setSmartSdrCluster = document.getElementById('set-smartsdr-cluster');
+const setSmartSdrRbn = document.getElementById('set-smartsdr-rbn');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
 const logFrequency = document.getElementById('log-frequency');
@@ -798,6 +805,11 @@ setEnableCluster.addEventListener('change', () => {
 // RBN checkbox toggles RBN config visibility
 setEnableRbn.addEventListener('change', () => {
   rbnConfig.classList.toggle('hidden', !setEnableRbn.checked);
+});
+
+// SmartSDR checkbox toggles config visibility
+setSmartSdrSpots.addEventListener('change', () => {
+  smartSdrConfig.classList.toggle('hidden', !setSmartSdrSpots.checked);
 });
 
 // DXCC checkbox toggles ADIF picker visibility
@@ -1723,6 +1735,12 @@ function render() {
       tbody.appendChild(tr);
     }
 
+    // Auto-scroll to the row being scanned so it stays visible
+    if (scanning) {
+      const highlighted = tbody.querySelector('.scan-highlight');
+      if (highlighted) highlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
     // Update sort indicators
     document.querySelectorAll('thead th').forEach((th) => {
       th.classList.remove('sort-asc', 'sort-desc');
@@ -1985,6 +2003,13 @@ settingsBtn.addEventListener('click', async () => {
   setEnableDxcc.checked = s.enableDxcc === true;
   setAdifPath.value = s.adifPath || '';
   adifPicker.classList.toggle('hidden', !s.enableDxcc);
+  setSmartSdrSpots.checked = s.smartSdrSpots === true;
+  setSmartSdrHost.value = s.smartSdrHost || '127.0.0.1';
+  setSmartSdrPota.checked = s.smartSdrPota !== false;
+  setSmartSdrSota.checked = s.smartSdrSota !== false;
+  setSmartSdrCluster.checked = s.smartSdrCluster !== false;
+  setSmartSdrRbn.checked = s.smartSdrRbn === true;
+  smartSdrConfig.classList.toggle('hidden', !s.smartSdrSpots);
   setEnableTelemetry.checked = s.enableTelemetry === true;
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
@@ -2017,6 +2042,12 @@ settingsSave.addEventListener('click', async () => {
   const hideOob = setHideOutOfBand.checked;
   const tuneClickEnabled = setTuneClick.checked;
   const telemetryEnabled = setEnableTelemetry.checked;
+  const smartSdrSpotsEnabled = setSmartSdrSpots.checked;
+  const smartSdrHostVal = setSmartSdrHost.value.trim() || '127.0.0.1';
+  const smartSdrPotaEnabled = setSmartSdrPota.checked;
+  const smartSdrSotaEnabled = setSmartSdrSota.checked;
+  const smartSdrClusterEnabled = setSmartSdrCluster.checked;
+  const smartSdrRbnEnabled = setSmartSdrRbn.checked;
   const adifPath = setAdifPath.value.trim() || '';
   const loggingEnabled = setEnableLogging.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
@@ -2067,6 +2098,12 @@ settingsSave.addEventListener('click', async () => {
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
     enableTelemetry: telemetryEnabled,
+    smartSdrSpots: smartSdrSpotsEnabled,
+    smartSdrHost: smartSdrHostVal,
+    smartSdrPota: smartSdrPotaEnabled,
+    smartSdrSota: smartSdrSotaEnabled,
+    smartSdrCluster: smartSdrClusterEnabled,
+    smartSdrRbn: smartSdrRbnEnabled,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -2166,6 +2203,9 @@ window.api.onCatFrequency((hz) => {
   playTuneClick();
   if (currentView === 'table') render();
 });
+
+// --- CAT debug log (shows in DevTools console) ---
+window.api.onCatLog((msg) => { console.log(msg); });
 
 // --- Solar data listener ---
 function updateSolarVisibility() {

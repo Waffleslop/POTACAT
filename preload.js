@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   clearRbn: () => ipcRenderer.send('rbn-clear'),
   onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, d) => cb(d)),
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_e, d) => cb(d)),
+  onCatLog: (cb) => ipcRenderer.on('cat-log', (_e, msg) => cb(msg)),
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
   getDefaultLogPath: () => ipcRenderer.invoke('get-default-log-path'),
   chooseLogFile: (currentPath) => ipcRenderer.invoke('choose-log-file', currentPath),

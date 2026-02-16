@@ -320,6 +320,25 @@
       </div>
     </fieldset>
     <fieldset class="source-toggles">
+      <legend>SmartSDR Spots</legend>
+      <label class="checkbox-label">
+        <input type="checkbox" id="set-smartsdr-spots"> Push spots to SmartSDR panadapter
+      </label>
+      <div id="smartsdr-config" class="radio-sub hidden">
+        <label>Radio IP:
+          <input type="text" id="set-smartsdr-host" placeholder="127.0.0.1" style="width:140px;">
+        </label>
+        <span style="font-size:11px;color:#808090;">Connect to FlexRadio on port 4992</span>
+        <div style="margin-top:8px;">
+          <span style="font-size:12px;color:#c0c0d0;">Sources to show on panadapter:</span>
+          <label class="checkbox-label"><input type="checkbox" id="set-smartsdr-pota" checked> POTA</label>
+          <label class="checkbox-label"><input type="checkbox" id="set-smartsdr-sota" checked> SOTA</label>
+          <label class="checkbox-label"><input type="checkbox" id="set-smartsdr-cluster" checked> DX Cluster</label>
+          <label class="checkbox-label"><input type="checkbox" id="set-smartsdr-rbn"> RBN</label>
+        </div>
+      </div>
+    </fieldset>
+    <fieldset class="source-toggles">
       <legend>Display</legend>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
       <span style="font-size:11px;color:#808090;margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>

@@ -12,6 +12,7 @@ const { parseAdifFile } = require('./lib/adif');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord } = require('./lib/adif-writer');
+const { SmartSdrClient } = require('./lib/smartsdr');
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
@@ -43,6 +44,8 @@ let clusterFlushTimer = null; // throttle timer for cluster → renderer updates
 let rbn = null;
 let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
 let rbnFlushTimer = null; // throttle timer for RBN → renderer updates
+let smartSdr = null;
+let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
 
 // --- Watchlist notifications ---
 const recentNotifications = new Map(); // callsign → timestamp for dedup (5-min window)
@@ -232,6 +235,13 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
 }
 
+function sendCatLog(msg) {
+  const ts = new Date().toISOString().slice(11, 23);
+  const line = `[CAT ${ts}] ${msg}`;
+  console.log(line);
+  if (win && !win.isDestroyed()) win.webContents.send('cat-log', line);
+}
+
 async function connectCat() {
   if (cat) cat.disconnect();
   killRigctld();
@@ -259,6 +269,8 @@ async function connectCat() {
     cat.connect({ type: 'rigctld', host: '127.0.0.1', port: 4532 });
   } else {
     cat = new CatClient();
+    cat._debug = true;
+    cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', sendCatFrequency);
     if (target) {
@@ -558,6 +570,47 @@ function disconnectRbn() {
   sendRbnStatus({ connected: false });
 }
 
+// --- SmartSDR panadapter spots ---
+function connectSmartSdr() {
+  disconnectSmartSdr();
+  if (!settings.smartSdrSpots) return;
+  smartSdr = new SmartSdrClient();
+  smartSdr.on('error', (err) => {
+    console.error('SmartSDR:', err.message);
+  });
+  smartSdr.connect(settings.smartSdrHost || '127.0.0.1');
+}
+
+function disconnectSmartSdr() {
+  if (smartSdrPushTimer) {
+    clearTimeout(smartSdrPushTimer);
+    smartSdrPushTimer = null;
+  }
+  if (smartSdr) {
+    if (smartSdr.connected) smartSdr.clearSpots();
+    smartSdr.disconnect();
+    smartSdr = null;
+  }
+}
+
+let lastSmartSdrPush = 0;
+
+function pushSpotsToSmartSdr(spots) {
+  if (!smartSdr || !smartSdr.connected) return;
+  const now = Date.now();
+  if (now - lastSmartSdrPush < 5000) return;
+  lastSmartSdrPush = now;
+
+  smartSdr.clearSpots();
+  for (const spot of spots) {
+    if (spot.source === 'pota' && settings.smartSdrPota === false) continue;
+    if (spot.source === 'sota' && settings.smartSdrSota === false) continue;
+    if (spot.source === 'dxc' && settings.smartSdrCluster === false) continue;
+    if (spot.source === 'rbn' && !settings.smartSdrRbn) continue;
+    smartSdr.addSpot(spot);
+  }
+}
+
 // --- Solar data ---
 function fetchSolarData() {
   const https = require('https');
@@ -688,6 +741,7 @@ function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const merged = [...lastPotaSotaSpots, ...clusterSpots];
   win.webContents.send('spots', merged);
+  pushSpotsToSmartSdr(merged);
 }
 
 async function refreshSpots() {
@@ -1040,6 +1094,7 @@ app.whenReady().then(() => {
   connectCat();
   if (settings.enableCluster) connectCluster();
   if (settings.enableRbn) connectRbn();
+  if (settings.smartSdrSpots) connectSmartSdr();
 
   // Window control IPC
   ipcMain.on('win-minimize', () => { if (win) win.minimize(); });
@@ -1078,6 +1133,7 @@ app.whenReady().then(() => {
     if ((mode === 'CW') && settings.cwXit) {
       freqHz += settings.cwXit;
     }
+    sendCatLog(`tune IPC: freq=${frequency}kHz → ${freqHz}Hz mode=${mode} cat.connected=${cat ? cat.connected : 'no cat'}`);
     cat.tune(freqHz, mode);
   });
 
@@ -1108,6 +1164,9 @@ app.whenReady().then(() => {
       newSettings.myCallsign !== settings.myCallsign ||
       newSettings.watchlist !== settings.watchlist;
 
+    const smartSdrChanged = newSettings.smartSdrSpots !== settings.smartSdrSpots ||
+      newSettings.smartSdrHost !== settings.smartSdrHost;
+
     settings = { ...settings, ...newSettings };
     saveSettings(settings);
     connectCat();
@@ -1128,6 +1187,15 @@ app.whenReady().then(() => {
         connectRbn();
       } else {
         disconnectRbn();
+      }
+    }
+
+    // Reconnect SmartSDR if settings changed
+    if (smartSdrChanged) {
+      if (settings.smartSdrSpots) {
+        connectSmartSdr();
+      } else {
+        disconnectSmartSdr();
       }
     }
 
@@ -1239,6 +1307,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('save-qso', async (_e, qsoData) => {
     try {
+      // Inject operator callsign from settings
+      if (settings.myCallsign && !qsoData.operator) {
+        qsoData.operator = settings.myCallsign.toUpperCase();
+      }
       const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       appendQso(logPath, qsoData);
 
@@ -1281,6 +1353,7 @@ app.on('window-all-closed', () => {
   if (cat) cat.disconnect();
   if (cluster) cluster.disconnect();
   if (rbn) rbn.disconnect();
+  disconnectSmartSdr();
   killRigctld();
   app.quit();
 });
