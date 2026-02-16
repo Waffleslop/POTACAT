@@ -916,7 +916,8 @@ hamlibTestBtn.addEventListener('click', async () => {
   hamlibTestResult.className = '';
 
   try {
-    const result = await window.api.testHamlib({ rigId, serialPort, baudRate });
+    const dtrOff = setRigDtrOff.checked;
+    const result = await window.api.testHamlib({ rigId, serialPort, baudRate, dtrOff });
     if (result.success) {
       const freqMHz = (parseInt(result.frequency, 10) / 1e6).toFixed(6);
       hamlibTestResult.textContent = `Connected! Freq: ${freqMHz} MHz`;

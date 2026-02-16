@@ -1244,13 +1244,13 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('test-hamlib', async (_e, config) => {
-    const { rigId, serialPort, baudRate } = config;
+    const { rigId, serialPort, baudRate, dtrOff } = config;
     let testProc = null;
     const net = require('net');
 
     try {
       // Spawn rigctld on port 4533 to avoid conflict with live instance on 4532
-      testProc = await spawnRigctld({ rigId, serialPort, baudRate }, '4533');
+      testProc = await spawnRigctld({ rigId, serialPort, baudRate, dtrOff }, '4533');
 
       // Give rigctld time to initialize and open the serial port
       await new Promise((r) => setTimeout(r, 1000));
