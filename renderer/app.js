@@ -63,6 +63,7 @@ const setNotifyTimeout = document.getElementById('set-notify-timeout');
 const setLicenseClass = document.getElementById('set-license-class');
 const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
 const setTuneClick = document.getElementById('set-tune-click');
+const continentFilterEl = document.getElementById('continent-filter');
 const scanBtn = document.getElementById('scan-btn');
 const hamlibConfig = document.getElementById('hamlib-config');
 const flexConfig = document.getElementById('flex-config');
@@ -583,6 +584,7 @@ function getDropdownValues(container) {
 
 initMultiDropdown(bandFilterEl, 'Band');
 initMultiDropdown(modeFilterEl, 'Mode');
+initMultiDropdown(continentFilterEl, 'Region');
 initMultiDropdown(rbnBandFilterEl, 'Band', rerenderRbn);
 
 // RBN age filter — re-render on change
@@ -710,9 +712,11 @@ const FILTERS_KEY = 'pota-cat-filters';
 function saveFilters() {
   const bands = getDropdownValues(bandFilterEl);
   const modes = getDropdownValues(modeFilterEl);
+  const continents = getDropdownValues(continentFilterEl);
   const data = {
     bands: bands ? [...bands] : null,
     modes: modes ? [...modes] : null,
+    continents: continents ? [...continents] : null,
     maxAgeMin,
   };
   localStorage.setItem(FILTERS_KEY, JSON.stringify(data));
@@ -747,11 +751,23 @@ function restoreFilters() {
       modeFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => { cb.checked = false; });
     }
 
+    // Restore continent checkboxes
+    if (data.continents) {
+      const contSet = new Set(data.continents);
+      continentFilterEl.querySelector('input[value="all"]').checked = false;
+      continentFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => {
+        cb.checked = contSet.has(cb.value);
+      });
+    } else {
+      continentFilterEl.querySelector('input[value="all"]').checked = true;
+      continentFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => { cb.checked = false; });
+    }
+
     // Restore max age
     if (data.maxAgeMin) maxAgeMin = data.maxAgeMin;
 
     // Update dropdown button text
-    [bandFilterEl, modeFilterEl].forEach((container) => {
+    [bandFilterEl, modeFilterEl, continentFilterEl].forEach((container) => {
       const textEl = container.querySelector('.multi-dropdown-text');
       const allCb = container.querySelector('input[value="all"]');
       const itemCbs = [...container.querySelectorAll('input:not([value="all"])')];
@@ -929,6 +945,7 @@ function spotAgeSecs(spotTime) {
 function getFiltered() {
   const bands = getDropdownValues(bandFilterEl);
   const modes = getDropdownValues(modeFilterEl);
+  const continents = getDropdownValues(continentFilterEl);
   const maxAgeSecs = maxAgeMin * 60;
   return allSpots.filter((s) => {
     if (s.source === 'pota' && !enablePota) return false;
@@ -936,6 +953,7 @@ function getFiltered() {
     if (s.source === 'dxc' && !enableCluster) return false;
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
+    if (continents && !continents.has(s.continent)) return false;
     if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     return true;
@@ -2595,6 +2613,7 @@ welcomeChoices.forEach((btn) => {
 });
 
 async function finishWelcome() {
+  const myCallsign = (document.getElementById('welcome-callsign').value.trim() || '').toUpperCase();
   const grid = welcomeGridInput.value.trim() || 'FN20jb';
   const telemetryOptIn = document.getElementById('welcome-telemetry').checked;
   let catTarget = null;
@@ -2611,6 +2630,7 @@ async function finishWelcome() {
   // none: catTarget stays null
 
   await window.api.saveSettings({
+    myCallsign,
     grid,
     catTarget,
     rigs,
