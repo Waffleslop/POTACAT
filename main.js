@@ -951,7 +951,7 @@ function isNewerVersion(current, latest) {
 }
 
 // --- Anonymous telemetry (opt-in only) ---
-const TELEMETRY_URL = 'https://pota-cat-telemetry.casey-3dc.workers.dev/ping';
+const TELEMETRY_URL = 'https://telemetry.potacat.com/ping';
 let sessionStartTime = Date.now();
 
 function generateTelemetryId() {
