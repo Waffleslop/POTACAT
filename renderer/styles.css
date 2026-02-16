@@ -662,12 +662,33 @@ dialog input, dialog select {
   margin-top: 16px;
   font-size: 12px;
   color: #808090;
-  line-height: 1.8;
 }
 
 .settings-version {
-  font-weight: bold;
-  color: #a0a0c0;
+  color: #606080;
+  margin-bottom: 4px;
+}
+
+.settings-version a {
+  color: #808090;
+}
+
+.settings-coffee {
+  margin-bottom: 4px;
+}
+
+.settings-coffee a {
+  color: #f0a500;
+}
+
+.settings-links {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.footer-dot {
+  color: #404060;
 }
 
 .settings-footer a {
@@ -727,10 +748,6 @@ dialog input, dialog select {
   width: 100%;
 }
 
-.settings-attribution {
-  font-size: 11px;
-  color: #606080;
-}
 
 /* My Rigs list */
 #my-rigs-list {

@@ -2537,6 +2537,10 @@ document.getElementById('bio-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://caseystanton.com/?utm_source=potacat&utm_medium=bio');
 });
+document.getElementById('coffee-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://buymeacoffee.com/potacat');
+});
 document.getElementById('discord-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://discord.gg/JjdKSshej');
@@ -2548,10 +2552,6 @@ document.getElementById('issues-link').addEventListener('click', (e) => {
 document.getElementById('hamlib-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://hamlib.github.io/');
-});
-document.getElementById('hamlib-source-link').addEventListener('click', (e) => {
-  e.preventDefault();
-  window.api.openExternal('https://github.com/Hamlib/Hamlib');
 });
 
 // --- Titlebar controls ---
