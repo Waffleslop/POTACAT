@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   onRbnStatus: (cb) => ipcRenderer.on('rbn-status', (_e, s) => cb(s)),
   clearRbn: () => ipcRenderer.send('rbn-clear'),
   onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, d) => cb(d)),
+  saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),
   close: () => ipcRenderer.send('win-close'),

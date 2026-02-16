@@ -1087,3 +1087,144 @@ dialog input, dialog select {
   border-radius: 50%;
 }
 
+/* QSO Logging */
+.log-col {
+  display: none;
+}
+
+.logging-enabled .log-col {
+  display: table-cell;
+}
+
+.log-cell {
+  text-align: center;
+}
+
+.log-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: #0a3d2a;
+  color: #4ecca3;
+  border: 1px solid #4ecca3;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.log-btn:hover {
+  background: #4ecca3;
+  color: #1a1a2e;
+}
+
+.log-btn.logged {
+  background: #0a3d2a;
+  color: #4ecca3;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Log dialog */
+#log-dialog {
+  min-width: 340px;
+  max-width: 400px;
+}
+
+.log-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.log-dialog-header h3 {
+  margin-bottom: 0;
+}
+
+.log-dialog-x {
+  background: transparent;
+  border: none;
+  color: #808090;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.log-dialog-x:hover {
+  color: #e94560;
+  background: transparent;
+}
+
+.log-save-btn {
+  background: #4ecca3 !important;
+  color: #1a1a2e !important;
+  font-weight: bold;
+  border-color: #4ecca3 !important;
+}
+
+.log-save-btn:hover {
+  background: #3db892 !important;
+}
+
+.rst-quick-btn {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #0f3460;
+  color: #a0a0c0;
+  border: 1px solid #1a4080;
+  cursor: pointer;
+  min-width: 32px;
+}
+
+.rst-quick-btn:hover {
+  background: #1a4080;
+  color: #e0e0e0;
+}
+
+.rst-quick-btn.active {
+  background: #4ecca3;
+  color: #1a1a2e;
+  border-color: #4ecca3;
+}
+
+/* Map popup log button */
+.log-popup-btn {
+  background: #0a3d2a;
+  color: #4ecca3;
+  border: 1px solid #4ecca3;
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-top: 4px;
+  margin-left: 4px;
+  font-size: 12px;
+}
+
+.log-popup-btn:hover {
+  background: #4ecca3;
+  color: #1a1a2e;
+}
+
+/* Log toast notification */
+.log-toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #0a3d2a;
+  color: #4ecca3;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid #4ecca3;
+  font-size: 13px;
+  z-index: 10001;
+  animation: log-toast-fade 2s ease-in-out forwards;
+}
+
+@keyframes log-toast-fade {
+  0% { opacity: 0; transform: translateY(10px); }
+  15% { opacity: 1; transform: translateY(0); }
+  85% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+

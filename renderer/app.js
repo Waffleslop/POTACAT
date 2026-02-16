@@ -20,6 +20,8 @@ let enableSolar = false;
 let enableBandActivity = false;
 let licenseClass = 'none';
 let hideOutOfBand = false;
+let enableLogging = false;
+let defaultPower = 100;
 let dxccData = null;  // { entities: [...] } from main process
 
 // --- Scan state ---
@@ -118,6 +120,28 @@ const kStatusEl = document.getElementById('k-status');
 const aStatusEl = document.getElementById('a-status');
 const setEnableSolar = document.getElementById('set-enable-solar');
 const setEnableBandActivity = document.getElementById('set-enable-band-activity');
+const setEnableLogging = document.getElementById('set-enable-logging');
+const loggingConfig = document.getElementById('logging-config');
+const setAdifLogPath = document.getElementById('set-adif-log-path');
+const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
+const setDefaultPower = document.getElementById('set-default-power');
+const setSendToLogbook = document.getElementById('set-send-to-logbook');
+const logbookConfig = document.getElementById('logbook-config');
+const setLogbookType = document.getElementById('set-logbook-type');
+const logDialog = document.getElementById('log-dialog');
+const logCallsign = document.getElementById('log-callsign');
+const logFrequency = document.getElementById('log-frequency');
+const logMode = document.getElementById('log-mode');
+const logDate = document.getElementById('log-date');
+const logTime = document.getElementById('log-time');
+const logPower = document.getElementById('log-power');
+const logRstSent = document.getElementById('log-rst-sent');
+const logRstRcvd = document.getElementById('log-rst-rcvd');
+const logRefDisplay = document.getElementById('log-ref-display');
+const logComment = document.getElementById('log-comment');
+const logSaveBtn = document.getElementById('log-save');
+const logCancelBtn = document.getElementById('log-cancel');
+const logDialogClose = document.getElementById('log-dialog-close');
 
 // --- UTC Clock ---
 function updateUtcClock() {
@@ -146,6 +170,9 @@ async function loadPrefs() {
   enableSolar = settings.enableSolar === true;   // default false
   enableBandActivity = settings.enableBandActivity === true; // default false
   updateSolarVisibility();
+  enableLogging = settings.enableLogging === true;
+  defaultPower = parseInt(settings.defaultPower, 10) || 100;
+  updateLoggingVisibility();
   licenseClass = settings.licenseClass || 'none';
   hideOutOfBand = settings.hideOutOfBand === true;
   updateClusterStatusVisibility();
@@ -433,6 +460,14 @@ function updateRbnButton() {
   }
 }
 
+function updateLoggingVisibility() {
+  if (enableLogging) {
+    spotsTable.classList.add('logging-enabled');
+  } else {
+    spotsTable.classList.remove('logging-enabled');
+  }
+}
+
 
 // --- Persist filters to localStorage ---
 const FILTERS_KEY = 'pota-cat-filters';
@@ -517,6 +552,24 @@ setEnableRbn.addEventListener('change', () => {
 // DXCC checkbox toggles ADIF picker visibility
 setEnableDxcc.addEventListener('change', () => {
   adifPicker.classList.toggle('hidden', !setEnableDxcc.checked);
+});
+
+// Logging checkbox toggles logging config visibility
+setEnableLogging.addEventListener('change', () => {
+  loggingConfig.classList.toggle('hidden', !setEnableLogging.checked);
+});
+
+// Send to Logbook checkbox toggles logbook dropdown visibility
+setSendToLogbook.addEventListener('change', () => {
+  logbookConfig.classList.toggle('hidden', !setSendToLogbook.checked);
+});
+
+// ADIF log file browser
+adifLogBrowseBtn.addEventListener('click', async () => {
+  const filePath = await window.api.chooseAdifFile();
+  if (filePath) {
+    setAdifLogPath.value = filePath;
+  }
 });
 
 // ADIF file browser
@@ -637,9 +690,9 @@ function sortSpots(spots) {
 // --- Column Resizing ---
 // --- Column Resizing ---
 // Widths stored as percentages of table width so they always fit
-const COL_WIDTHS_KEY = 'pota-cat-col-pct-v4';
-// Callsign, Freq, Mode, Ref, Name, State, Dist, Age, Skip
-const DEFAULT_COL_PCT = [10, 9, 5, 8, 26, 11, 7, 7, 6];
+const COL_WIDTHS_KEY = 'pota-cat-col-pct-v5';
+// Log, Callsign, Freq, Mode, Ref, Name, State, Dist, Age, Skip
+const DEFAULT_COL_PCT = [4, 10, 8, 5, 8, 24, 11, 7, 7, 6];
 
 function loadColWidths() {
   try {
@@ -1011,12 +1064,15 @@ function updateMapMarkers(filtered) {
 
     const sourceLabel = (s.source || 'pota').toUpperCase();
     const sourceColor = s.source === 'sota' ? '#f0a500' : s.source === 'dxc' ? '#e040fb' : '#4ecca3';
+    const logBtnHtml = enableLogging
+      ? ` <button class="log-popup-btn" data-call="${s.callsign}" data-freq="${s.frequency}" data-mode="${s.mode}" data-ref="${s.reference || ''}" data-name="${(s.parkName || '').replace(/"/g, '&quot;')}" data-source="${s.source || ''}">Log</button>`
+      : '';
     const popupContent = `
       <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span><br>
       ${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}<br>
       ${distStr}<br>
-      <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}">Tune</button>
+      <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}">Tune</button>${logBtnHtml}
     `;
 
     // Out-of-privilege gets grey/red pin, SOTA gets orange, POTA gets default blue
@@ -1057,6 +1113,20 @@ function bindPopupClickHandlers(mapInstance) {
       link.addEventListener('click', (ev) => {
         ev.preventDefault();
         window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(link.dataset.call)}`);
+      });
+    });
+    container.querySelectorAll('.log-popup-btn').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const spot = {
+          callsign: btn.dataset.call,
+          frequency: btn.dataset.freq,
+          mode: btn.dataset.mode,
+          reference: btn.dataset.ref,
+          parkName: btn.dataset.name,
+          source: btn.dataset.source,
+        };
+        openLogPopup(spot);
       });
     });
   });
@@ -1134,8 +1204,10 @@ function setView(view) {
     if (!map) {
       initMap();
     }
-    setTimeout(() => map.invalidateSize(), 0);
-    render();
+    setTimeout(() => {
+      map.invalidateSize();
+      render();
+    }, 0);
   } else if (view === 'dxcc') {
     dxccView.classList.remove('hidden');
     viewDxccBtn.classList.add('active');
@@ -1282,6 +1354,19 @@ function render() {
         window.api.tune(s.frequency, s.mode);
       });
 
+      // Log button cell (first column, hidden unless logging enabled)
+      const logTd = document.createElement('td');
+      logTd.className = 'log-cell log-col';
+      const logButton = document.createElement('button');
+      logButton.className = 'log-btn';
+      logButton.textContent = 'Log';
+      logButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openLogPopup(s);
+      });
+      logTd.appendChild(logButton);
+      tr.appendChild(logTd);
+
       // Callsign cell — clickable link to QRZ
       const isWatched = watchlist.has(s.callsign.toUpperCase());
       const callTd = document.createElement('td');
@@ -1378,6 +1463,169 @@ function formatAge(isoStr) {
   }
 }
 
+// --- QSO Logging ---
+const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
+
+// Band lookup for ADIF (frequency in kHz → band string)
+const BAND_RANGES = [
+  [1800, 2000, '160m'], [3500, 4000, '80m'], [5330, 5410, '60m'],
+  [7000, 7300, '40m'], [10100, 10150, '30m'], [14000, 14350, '20m'],
+  [18068, 18168, '17m'], [21000, 21450, '15m'], [24890, 24990, '12m'],
+  [28000, 29700, '10m'], [50000, 54000, '6m'],
+];
+
+function freqKhzToBand(khz) {
+  const f = parseFloat(khz);
+  for (const [lo, hi, band] of BAND_RANGES) {
+    if (f >= lo && f <= hi) return band;
+  }
+  return '';
+}
+
+let currentLogSpot = null;
+
+function openLogPopup(spot) {
+  currentLogSpot = spot;
+  logCallsign.value = spot.callsign || '';
+  logFrequency.value = parseFloat(spot.frequency).toFixed(1);
+
+  // Set mode dropdown
+  const mode = (spot.mode || '').toUpperCase();
+  const modeOption = logMode.querySelector(`option[value="${mode}"]`);
+  if (modeOption) {
+    logMode.value = mode;
+  } else if (mode === 'USB' || mode === 'LSB') {
+    logMode.value = mode;
+  } else {
+    logMode.value = 'SSB';
+  }
+
+  // Pre-fill date/time with current UTC
+  const now = new Date();
+  logDate.value = now.toISOString().slice(0, 10);
+  logTime.value = now.toISOString().slice(11, 16);
+
+  // Pre-fill power from settings
+  logPower.value = defaultPower || 100;
+
+  // Pre-fill RST based on mode
+  const defaultRst = CW_DIGI_MODES_SET.has(mode) ? '599' : '59';
+  logRstSent.value = defaultRst;
+  logRstRcvd.value = defaultRst;
+  updateRstButtons();
+
+  // Show park/summit reference if applicable
+  if (spot.reference) {
+    const sig = spot.source === 'sota' ? 'SOTA' : spot.source === 'pota' ? 'POTA' : '';
+    logRefDisplay.textContent = sig ? `${sig}: ${spot.reference}` : spot.reference;
+    if (spot.parkName) logRefDisplay.textContent += ` — ${spot.parkName}`;
+    logRefDisplay.classList.remove('hidden');
+  } else {
+    logRefDisplay.classList.add('hidden');
+  }
+
+  logComment.value = '';
+  logDialog.showModal();
+}
+
+function updateRstButtons() {
+  const mode = logMode.value.toUpperCase();
+  const isDigiCw = CW_DIGI_MODES_SET.has(mode);
+  document.querySelectorAll('#log-dialog .rst-quick-btn').forEach((btn) => {
+    const val = btn.dataset.value;
+    btn.classList.toggle('active', (isDigiCw && val === '599') || (!isDigiCw && val === '59'));
+  });
+}
+
+// RST quick-fill buttons
+document.querySelectorAll('#log-dialog .rst-quick-btn').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const target = document.getElementById(btn.dataset.target);
+    if (target) target.value = btn.dataset.value;
+  });
+});
+
+// Mode change updates RST defaults
+logMode.addEventListener('change', () => {
+  const mode = logMode.value.toUpperCase();
+  const defaultRst = CW_DIGI_MODES_SET.has(mode) ? '599' : '59';
+  logRstSent.value = defaultRst;
+  logRstRcvd.value = defaultRst;
+  updateRstButtons();
+});
+
+// Log dialog close/cancel
+logCancelBtn.addEventListener('click', () => logDialog.close());
+logDialogClose.addEventListener('click', () => logDialog.close());
+
+// Save QSO
+logSaveBtn.addEventListener('click', async () => {
+  const callsign = logCallsign.value.trim().toUpperCase();
+  const frequency = logFrequency.value.trim();
+  const mode = logMode.value;
+  const date = logDate.value;
+  const time = logTime.value;
+
+  if (!callsign || !frequency || !mode || !date || !time) {
+    logCallsign.focus();
+    return;
+  }
+
+  const qsoDate = date.replace(/-/g, ''); // YYYYMMDD
+  const timeOn = time.replace(':', '');     // HHMM
+  const band = freqKhzToBand(frequency);
+
+  // Determine SIG/SIG_INFO from spot
+  let sig = '';
+  let sigInfo = '';
+  if (currentLogSpot && currentLogSpot.reference) {
+    if (currentLogSpot.source === 'pota') sig = 'POTA';
+    else if (currentLogSpot.source === 'sota') sig = 'SOTA';
+    sigInfo = currentLogSpot.reference;
+  }
+
+  const qsoData = {
+    callsign,
+    frequency,
+    mode,
+    qsoDate,
+    timeOn,
+    rstSent: logRstSent.value.trim() || '59',
+    rstRcvd: logRstRcvd.value.trim() || '59',
+    txPower: logPower.value.trim(),
+    band,
+    sig,
+    sigInfo,
+    comment: logComment.value.trim(),
+  };
+
+  logSaveBtn.disabled = true;
+  try {
+    const result = await window.api.saveQso(qsoData);
+    if (result.success) {
+      logDialog.close();
+      showLogToast(`Logged ${callsign}`);
+    } else {
+      showLogToast(`Error: ${result.error}`, true);
+    }
+  } catch (err) {
+    showLogToast(`Error: ${err.message}`, true);
+  } finally {
+    logSaveBtn.disabled = false;
+  }
+});
+
+function showLogToast(message) {
+  const existing = document.querySelector('.log-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'log-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 2200);
+}
+
 // --- Events ---
 // Band/mode dropdowns already wired via initMultiDropdown()
 refreshBtn.addEventListener('click', () => window.api.refresh());
@@ -1419,6 +1667,13 @@ settingsBtn.addEventListener('click', async () => {
   setClusterPort.value = s.clusterPort || 7373;
   clusterConfig.classList.toggle('hidden', !s.enableCluster);
   rbnConfig.classList.toggle('hidden', !s.enableRbn);
+  setEnableLogging.checked = s.enableLogging === true;
+  setAdifLogPath.value = s.adifLogPath || '';
+  setDefaultPower.value = s.defaultPower || 100;
+  setSendToLogbook.checked = s.sendToLogbook === true;
+  setLogbookType.value = s.logbookType || '';
+  loggingConfig.classList.toggle('hidden', !s.enableLogging);
+  logbookConfig.classList.toggle('hidden', !s.sendToLogbook);
   setEnableSolar.checked = s.enableSolar === true;
   setEnableBandActivity.checked = s.enableBandActivity === true;
   setEnableDxcc.checked = s.enableDxcc === true;
@@ -1453,6 +1708,11 @@ settingsSave.addEventListener('click', async () => {
   const licenseClassVal = setLicenseClass.value;
   const hideOob = setHideOutOfBand.checked;
   const adifPath = setAdifPath.value.trim() || '';
+  const loggingEnabled = setEnableLogging.checked;
+  const adifLogPath = setAdifLogPath.value.trim() || '';
+  const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
+  const sendToLogbook = setSendToLogbook.checked;
+  const logbookTypeVal = setLogbookType.value;
 
   // Apply radio selection
   const radioType = getSelectedRadioType();
@@ -1494,6 +1754,11 @@ settingsSave.addEventListener('click', async () => {
     licenseClass: licenseClassVal,
     hideOutOfBand: hideOob,
     adifPath: adifPath,
+    enableLogging: loggingEnabled,
+    adifLogPath: adifLogPath,
+    defaultPower: defaultPowerVal,
+    sendToLogbook: sendToLogbook,
+    logbookType: logbookTypeVal,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -1510,6 +1775,9 @@ settingsSave.addEventListener('click', async () => {
   updateSolarVisibility();
   enableBandActivity = bandActivityEnabled;
   updateBandActivityVisibility();
+  enableLogging = loggingEnabled;
+  defaultPower = defaultPowerVal;
+  updateLoggingVisibility();
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;

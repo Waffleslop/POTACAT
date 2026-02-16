@@ -11,6 +11,7 @@ const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile } = require('./lib/adif');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
+const { appendQso } = require('./lib/adif-writer');
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
@@ -1017,6 +1018,16 @@ app.whenReady().then(() => {
       if (testProc) {
         try { testProc.kill(); } catch { /* ignore */ }
       }
+    }
+  });
+
+  ipcMain.handle('save-qso', async (_e, qsoData) => {
+    try {
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'qso_log.adi');
+      appendQso(logPath, qsoData);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
     }
   });
 
