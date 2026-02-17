@@ -697,6 +697,10 @@ dialog input, dialog select {
   border-left: 3px solid #e040fb;
 }
 
+.spot-rbn {
+  border-left: 3px solid #00bcd4;
+}
+
 /* Settings source toggles */
 .source-toggles {
   border: 1px solid var(--border-secondary);

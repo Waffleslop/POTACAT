@@ -1063,6 +1063,7 @@ function getFiltered() {
     if (s.source === 'pota' && !enablePota) return false;
     if (s.source === 'sota' && !enableSota) return false;
     if (s.source === 'dxc' && !enableCluster) return false;
+    if (s.source === 'rbn' && !enableRbn) return false;
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
     if (continents && !continents.has(s.continent)) return false;
@@ -1466,7 +1467,7 @@ function updateMapMarkers(filtered) {
     const watched = watchlist.has(s.callsign.toUpperCase());
 
     const sourceLabel = (s.source || 'pota').toUpperCase();
-    const sourceColor = s.source === 'sota' ? '#f0a500' : s.source === 'dxc' ? '#e040fb' : '#4ecca3';
+    const sourceColor = s.source === 'sota' ? '#f0a500' : s.source === 'dxc' ? '#e040fb' : s.source === 'rbn' ? '#00bcd4' : '#4ecca3';
     const logBtnHtml = enableLogging
       ? ` <button class="log-popup-btn" data-call="${s.callsign}" data-freq="${s.frequency}" data-mode="${s.mode}" data-ref="${s.reference || ''}" data-name="${(s.parkName || '').replace(/"/g, '&quot;')}" data-source="${s.source || ''}">Log</button>`
       : '';
@@ -1548,6 +1549,7 @@ function startScan() {
   scanning = true;
   scanIndex = 0;
   scanBtn.textContent = 'Stop';
+  scanBtn.title = 'Press Stop or Spacebar to stop scanning';
   scanBtn.classList.add('scan-active');
   scanStep();
 }
@@ -1556,6 +1558,7 @@ function stopScan() {
   scanning = false;
   if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
   scanBtn.textContent = 'Scan';
+  scanBtn.title = 'Scan through spots';
   scanBtn.classList.remove('scan-active');
   render(); // clear highlight
 }
@@ -1578,6 +1581,14 @@ function scanStep() {
 
 scanBtn.addEventListener('click', () => {
   if (scanning) { stopScan(); } else { startScan(); }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (!scanning) return;
+  if (e.code === 'Space' && !e.target.matches('input, select, textarea')) {
+    e.preventDefault();
+    stopScan();
+  }
 });
 
 // --- View Toggle ---
@@ -1736,6 +1747,7 @@ function render() {
       if (s.source === 'pota') tr.classList.add('spot-pota');
       if (s.source === 'sota') tr.classList.add('spot-sota');
       if (s.source === 'dxc') tr.classList.add('spot-dxc');
+      if (s.source === 'rbn') tr.classList.add('spot-rbn');
 
       // License privilege check
       if (isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) {

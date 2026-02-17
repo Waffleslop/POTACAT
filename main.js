@@ -44,6 +44,7 @@ let clusterFlushTimer = null; // throttle timer for cluster → renderer updates
 let rbn = null;
 let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
 let rbnFlushTimer = null; // throttle timer for RBN → renderer updates
+let rbnWatchSpots = []; // RBN spots for watchlist callsigns, merged into main table
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
 let workedCallsigns = new Set(); // callsigns from QSO log (all QSOs, not just confirmed)
@@ -537,11 +538,54 @@ function connectRbn() {
       rbnSpots = rbnSpots.slice(-500);
     }
 
+    // Add watchlist callsigns (not self) to main table as merged spots
+    if (rbnWatchSet.has(raw.callsign.toUpperCase()) && raw.callsign.toUpperCase() !== myCall) {
+      // Resolve activator's location (not spotter's) for main table/map
+      let actLat = null, actLon = null, actDist = null, actLoc = '', actContinent = '';
+      if (ctyDb) {
+        const actEntity = resolveCallsign(raw.callsign, ctyDb);
+        if (actEntity) {
+          actLoc = actEntity.name;
+          actContinent = actEntity.continent || '';
+          if (actEntity.lat != null && actEntity.lon != null) {
+            actLat = actEntity.lat;
+            actLon = actEntity.lon;
+            if (myPos) {
+              actDist = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, actEntity.lat, actEntity.lon));
+            }
+          }
+        }
+      }
+      const mainSpot = {
+        source: 'rbn',
+        callsign: raw.callsign,
+        frequency: raw.frequency,
+        freqMHz: raw.freqMHz,
+        mode: raw.mode,
+        band: raw.band,
+        reference: '',
+        parkName: `spotted by ${spotter} (${raw.snr} dB)`,
+        locationDesc: actLoc,
+        continent: actContinent,
+        distance: actDist,
+        lat: actLat,
+        lon: actLon,
+        spotTime: raw.spotTime,
+      };
+      // Deduplicate: keep only the most recent spot per callsign+band
+      rbnWatchSpots = rbnWatchSpots.filter(s =>
+        !(s.callsign.toUpperCase() === raw.callsign.toUpperCase() && s.band === raw.band)
+      );
+      rbnWatchSpots.push(mainSpot);
+      if (rbnWatchSpots.length > 50) rbnWatchSpots = rbnWatchSpots.slice(-50);
+    }
+
     // Throttle: flush to renderer at most once every 2s
     if (!rbnFlushTimer) {
       rbnFlushTimer = setTimeout(() => {
         rbnFlushTimer = null;
         sendRbnSpots();
+        sendMergedSpots();
       }, 2000);
     }
   });
@@ -569,6 +613,7 @@ function disconnectRbn() {
     rbn = null;
   }
   rbnSpots = [];
+  rbnWatchSpots = [];
   sendRbnStatus({ connected: false });
 }
 
@@ -741,7 +786,7 @@ let lastPotaSotaSpots = []; // cache of last fetched POTA+SOTA spots
 
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
-  const merged = [...lastPotaSotaSpots, ...clusterSpots];
+  const merged = [...lastPotaSotaSpots, ...clusterSpots, ...rbnWatchSpots];
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
 }
