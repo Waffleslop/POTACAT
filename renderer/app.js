@@ -1061,14 +1061,21 @@ function getFiltered() {
   const continents = getDropdownValues(continentFilterEl);
   const maxAgeSecs = maxAgeMin * 60;
   return allSpots.filter((s) => {
-    if (s.source === 'pota' && !enablePota) return false;
-    if (s.source === 'sota' && !enableSota) return false;
-    if (s.source === 'dxc' && !enableCluster) return false;
-    if (s.source === 'rbn' && !enableRbn) return false;
+    const sourceOff =
+      (s.source === 'pota' && !enablePota) ||
+      (s.source === 'sota' && !enableSota) ||
+      (s.source === 'dxc' && !enableCluster) ||
+      (s.source === 'rbn' && !enableRbn);
+    const isWatched = watchlist.has(s.callsign.toUpperCase());
+
+    if (sourceOff) {
+      if (!isWatched || spotAgeSecs(s.spotTime) > 300) return false;
+    } else {
+      if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
+    }
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
     if (continents && !continents.has(s.continent)) return false;
-    if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     if (hideWorked && workedCallsigns.has(s.callsign.toUpperCase())) return false;
     return true;
@@ -1173,6 +1180,18 @@ const sotaIcon = L.divIcon({
   className: '',
   html: '<svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">' +
     '<path d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0Z" fill="#f0a500" stroke="#c47f00" stroke-width="1"/>' +
+    '<circle cx="12.5" cy="12.5" r="5.5" fill="#fff" opacity="0.4"/>' +
+    '</svg>',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+});
+
+// Cyan teardrop pin for RBN watchlist spots
+const rbnIcon = L.divIcon({
+  className: '',
+  html: '<svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0Z" fill="#00bcd4" stroke="#0097a7" stroke-width="1"/>' +
     '<circle cx="12.5" cy="12.5" r="5.5" fill="#fff" opacity="0.4"/>' +
     '</svg>',
   iconSize: [25, 41],
@@ -1487,7 +1506,9 @@ function updateMapMarkers(filtered) {
       ? { icon: oopIcon, opacity: 0.4 }
       : s.source === 'sota'
         ? { icon: sotaIcon, ...(worked ? { opacity: 0.5 } : {}) }
-        : worked ? { opacity: 0.5 } : {};
+        : s.source === 'rbn'
+          ? { icon: rbnIcon, ...(worked ? { opacity: 0.5 } : {}) }
+          : worked ? { opacity: 0.5 } : {};
 
     // Plot marker at canonical position and one world-copy in each direction
     for (const offset of [-360, 0, 360]) {
@@ -2818,44 +2839,18 @@ document.getElementById('tb-close').addEventListener('click', () => window.api.c
 const welcomeDialog = document.getElementById('welcome-dialog');
 const welcomeGridInput = document.getElementById('welcome-grid');
 const welcomeLightMode = document.getElementById('welcome-light-mode');
-const welcomeChoices = document.querySelectorAll('.welcome-choice');
-let welcomeRadioType = null;
 
 welcomeLightMode.addEventListener('change', () => applyTheme(welcomeLightMode.checked));
 
-welcomeChoices.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    welcomeChoices.forEach((b) => b.classList.remove('selected'));
-    btn.classList.add('selected');
-    welcomeRadioType = btn.dataset.radio;
-    finishWelcome();
-  });
-});
-
-async function finishWelcome() {
+document.getElementById('welcome-start').addEventListener('click', async () => {
   const myCallsign = (document.getElementById('welcome-callsign').value.trim() || '').toUpperCase();
   const grid = welcomeGridInput.value.trim() || 'FN20jb';
   const telemetryOptIn = document.getElementById('welcome-telemetry').checked;
   const lightModeEnabled = welcomeLightMode.checked;
-  let catTarget = null;
-  let rigs = [];
-  let activeRigId = null;
-
-  if (welcomeRadioType === 'flex') {
-    catTarget = { type: 'tcp', host: '127.0.0.1', port: 5002 };
-    const rig = { id: 'rig_' + Date.now(), name: 'FlexRadio Slice A', catTarget };
-    rigs = [rig];
-    activeRigId = rig.id;
-  }
-  // hamlib: save null for now — user will configure details in Settings
-  // none: catTarget stays null
 
   await window.api.saveSettings({
     myCallsign,
     grid,
-    catTarget,
-    rigs,
-    activeRigId,
     firstRun: false,
     distUnit: 'mi',
     maxAgeMin: 5,
@@ -2867,12 +2862,7 @@ async function finishWelcome() {
   });
 
   welcomeDialog.close();
-
-  // If they chose hamlib, open full settings so they can pick rig/port/baud
-  if (welcomeRadioType === 'hamlib') {
-    settingsBtn.click();
-  }
-}
+});
 
 async function checkFirstRun() {
   const s = await window.api.getSettings();
