@@ -10,4 +10,4 @@ routes = [
 
 [[kv_namespaces]]
 binding = "TELEMETRY"
-id = "f63629549e5349b790628f469999c64b"
+id = "ff8649a3be4140509d3a7a150dd14aac"
