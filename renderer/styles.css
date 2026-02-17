@@ -1,3 +1,69 @@
+/* Theme variables */
+:root {
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #16213e;
+  --bg-tertiary: #0f3460;
+  --bg-hover: #1a4080;
+  --bg-input: #0a0a1a;
+  --bg-panel: #0f1a30;
+  --border-primary: #0f3460;
+  --border-secondary: #1a4080;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0c0;
+  --text-tertiary: #808090;
+  --text-dim: #606080;
+  --text-dimmer: #404060;
+  --accent-red: #e94560;
+  --accent-blue: #4fc3f7;
+  --accent-green: #4ecca3;
+  --shadow: rgba(0,0,0,0.3);
+  --shadow-heavy: rgba(0,0,0,0.5);
+  --backdrop: rgba(0,0,0,0.6);
+  --table-stripe: rgba(255,255,255,0.02);
+  --tint-green: #0a3d2a;
+  --tint-red: #3d0a0a;
+  --tint-yellow: #3d3a0a;
+  --tint-orange: #3d2a0a;
+  --scrollbar-thumb: #0f3460;
+  --scrollbar-track: #0a0a1a;
+  --map-tile-filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
+[data-theme="light"] {
+  --bg-primary: #f0f2f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8eaed;
+  --bg-hover: #d0d4da;
+  --bg-input: #ffffff;
+  --bg-panel: #f5f5f8;
+  --border-primary: #c0c4cc;
+  --border-secondary: #d8dce4;
+  --text-primary: #1a1a2e;
+  --text-secondary: #4a4a6a;
+  --text-tertiary: #6a6a80;
+  --text-dim: #8a8a9a;
+  --text-dimmer: #a0a0b0;
+  --accent-red: #d32f2f;
+  --accent-blue: #1976d2;
+  --accent-green: #2e7d5a;
+  --shadow: rgba(0,0,0,0.1);
+  --shadow-heavy: rgba(0,0,0,0.2);
+  --backdrop: rgba(0,0,0,0.3);
+  --table-stripe: rgba(0,0,0,0.03);
+  --tint-green: #d4edda;
+  --tint-red: #f8d7da;
+  --tint-yellow: #fff3cd;
+  --tint-orange: #fde8cd;
+  --scrollbar-thumb: #c0c4cc;
+  --scrollbar-track: #e8eaed;
+  --map-tile-filter: none;
+}
+
+.help-text {
+  color: var(--text-tertiary);
+  font-size: 0.85em;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -6,8 +72,8 @@
 
 body {
   font-family: "Segoe UI", Consolas, monospace;
-  background: #1a1a2e;
-  color: #e0e0e0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
   font-size: 14px;
   height: 100vh;
   overflow: hidden;
@@ -15,7 +81,7 @@ body {
 
 /* Custom titlebar */
 .titlebar {
-  background: #16213e;
+  background: var(--bg-secondary);
   height: 32px;
   display: flex;
   align-items: center;
@@ -23,13 +89,13 @@ body {
   -webkit-app-region: drag;
   user-select: none;
   padding-left: 12px;
-  border-bottom: 1px solid #0f3460;
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .titlebar-title {
   font-size: 13px;
   font-weight: bold;
-  color: #4fc3f7;
+  color: var(--accent-blue);
   letter-spacing: 0.5px;
 }
 
@@ -41,7 +107,7 @@ body {
 .titlebar-btn {
   background: transparent;
   border: none;
-  color: #a0a0c0;
+  color: var(--text-secondary);
   width: 46px;
   height: 32px;
   font-size: 13px;
@@ -54,22 +120,22 @@ body {
 }
 
 .titlebar-btn:hover {
-  background: #1a4080;
-  color: #e0e0e0;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .titlebar-close:hover {
-  background: #e94560;
+  background: var(--accent-red);
   color: #fff;
 }
 
 header {
-  background: #16213e;
+  background: var(--bg-secondary);
   padding: 10px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #0f3460;
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .filters {
@@ -84,9 +150,9 @@ header {
 }
 
 .multi-dropdown-btn {
-  background: #0f3460;
-  color: #e0e0e0;
-  border: 1px solid #1a4080;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 13px;
@@ -95,11 +161,11 @@ header {
 }
 
 .multi-dropdown-btn:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
 }
 
 .multi-dropdown-text {
-  color: #4fc3f7;
+  color: var(--accent-blue);
 }
 
 .multi-dropdown-menu {
@@ -108,15 +174,15 @@ header {
   top: 100%;
   left: 0;
   z-index: 10000;
-  background: #16213e;
-  border: 1px solid #1a4080;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
   border-radius: 4px;
   padding: 4px 0;
   margin-top: 2px;
   min-width: 120px;
   max-height: 260px;
   overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 12px var(--shadow-heavy);
 }
 
 .multi-dropdown.open .multi-dropdown-menu {
@@ -129,41 +195,41 @@ header {
   gap: 6px;
   padding: 4px 10px;
   font-size: 13px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   cursor: pointer;
   white-space: nowrap;
   margin-bottom: 0 !important;
 }
 
 .multi-dropdown-item:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
 }
 
 .multi-dropdown-item input[type="checkbox"] {
   width: auto;
   margin: 0;
-  accent-color: #e94560;
+  accent-color: var(--accent-red);
 }
 
 .filters label {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #a0a0c0;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
 select, button, input {
-  background: #0f3460;
-  color: #e0e0e0;
-  border: 1px solid #1a4080;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 13px;
 }
 
 select:focus, input:focus {
-  outline: 1px solid #e94560;
+  outline: 1px solid var(--accent-red);
 }
 
 button {
@@ -171,7 +237,7 @@ button {
 }
 
 button:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
 }
 
 .status-bar {
@@ -179,7 +245,7 @@ button:hover {
   gap: 16px;
   align-items: center;
   font-size: 12px;
-  color: #808090;
+  color: var(--text-tertiary);
 }
 
 .status {
@@ -190,30 +256,30 @@ button:hover {
 }
 
 .status.connected {
-  background: #0a3d2a;
-  color: #4ecca3;
+  background: var(--tint-green);
+  color: var(--accent-green);
 }
 
 .status.disconnected {
-  background: #3d0a0a;
-  color: #e94560;
+  background: var(--tint-red);
+  color: var(--accent-red);
 }
 
 .status.warn {
-  background: #3d3a0a;
+  background: var(--tint-yellow);
   color: #f0d050;
 }
 
 /* Update banner */
 #update-banner {
-  background: #0a3d2a;
-  border-bottom: 1px solid #4ecca3;
+  background: var(--tint-green);
+  border-bottom: 1px solid var(--accent-green);
   padding: 6px 16px;
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 13px;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 #update-banner.hidden + main {
@@ -230,7 +296,7 @@ button:hover {
 }
 
 #update-link {
-  color: #4fc3f7;
+  color: var(--accent-blue);
   text-decoration: none;
   cursor: pointer;
 }
@@ -250,14 +316,14 @@ button:hover {
 }
 
 .update-sep {
-  color: #808090;
+  color: var(--text-tertiary);
 }
 
 #update-dismiss {
   margin-left: auto;
   background: transparent;
   border: none;
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 16px;
   cursor: pointer;
   padding: 0 4px;
@@ -265,7 +331,7 @@ button:hover {
 }
 
 #update-dismiss:hover {
-  color: #e94560;
+  color: var(--accent-red);
   background: transparent;
 }
 
@@ -283,21 +349,21 @@ table {
 }
 
 thead th {
-  background: #16213e;
+  background: var(--bg-secondary);
   position: sticky;
   top: 0;
   padding: 8px 10px;
   text-align: left;
   font-size: 12px;
   text-transform: uppercase;
-  color: #a0a0c0;
+  color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
-  border-bottom: 2px solid #0f3460;
+  border-bottom: 2px solid var(--border-primary);
 }
 
 thead th:hover {
-  color: #e94560;
+  color: var(--accent-red);
 }
 
 thead th.sort-asc::after {
@@ -310,11 +376,11 @@ thead th.sort-desc::after {
 
 tbody tr {
   cursor: pointer;
-  border-bottom: 1px solid #0f3460;
+  border-bottom: 1px solid var(--border-primary);
 }
 
 tbody tr:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
 }
 
 tbody td {
@@ -329,7 +395,7 @@ tbody td:nth-child(2) {
 }
 
 a.qrz-link {
-  color: #4fc3f7;
+  color: var(--accent-blue);
   text-decoration: none;
   cursor: pointer;
 }
@@ -340,7 +406,7 @@ a.qrz-link:hover {
 }
 
 .freq-link {
-  color: #4fc3f7;
+  color: var(--accent-blue);
   cursor: pointer;
   font-family: Consolas, "Courier New", monospace;
 }
@@ -353,7 +419,7 @@ a.qrz-link:hover {
 #no-spots {
   text-align: center;
   padding: 40px;
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 16px;
 }
 
@@ -363,20 +429,20 @@ a.qrz-link:hover {
 
 /* Scan */
 .scan-active {
-  background: #e94560 !important;
+  background: var(--accent-red) !important;
   color: #fff !important;
-  border-color: #e94560 !important;
+  border-color: var(--accent-red) !important;
 }
 
 .scan-highlight {
-  background: #1a4080;
-  outline: 2px solid #4fc3f7;
+  background: var(--bg-hover);
+  outline: 2px solid var(--accent-blue);
   outline-offset: -2px;
 }
 
 .on-freq {
-  background: #1a4080;
-  outline: 2px solid #4fc3f7;
+  background: var(--bg-hover);
+  outline: 2px solid var(--accent-blue);
   outline-offset: -2px;
 }
 
@@ -392,21 +458,21 @@ a.qrz-link:hover {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 3px;
-  background: #0f3460;
-  color: #a0a0c0;
-  border: 1px solid #1a4080;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
   cursor: pointer;
 }
 
 .skip-btn:hover {
-  background: #1a4080;
-  color: #e0e0e0;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .skip-btn.skipped {
-  background: #3d0a0a;
-  color: #e94560;
-  border-color: #e94560;
+  background: var(--tint-red);
+  color: var(--accent-red);
+  border-color: var(--accent-red);
 }
 
 th.no-sort {
@@ -414,7 +480,7 @@ th.no-sort {
 }
 
 th.no-sort:hover {
-  color: #a0a0c0;
+  color: var(--text-secondary);
 }
 
 /* Column resize handles */
@@ -429,7 +495,7 @@ th.no-sort:hover {
 }
 
 .col-resize-handle:hover {
-  background: #e94560;
+  background: var(--accent-red);
 }
 
 thead th {
@@ -442,7 +508,7 @@ thead th {
   font-family: Consolas, "Courier New", monospace;
   font-size: 13px;
   font-weight: bold;
-  color: #4fc3f7;
+  color: var(--accent-blue);
   letter-spacing: 0.5px;
   padding-right: 8px;
   flex-shrink: 0;
@@ -457,7 +523,7 @@ thead th {
 
 .view-btn {
   border-radius: 0;
-  border: 1px solid #1a4080;
+  border: 1px solid var(--border-secondary);
   padding: 4px 10px;
   font-size: 12px;
 }
@@ -475,9 +541,9 @@ thead th {
 }
 
 .view-btn.active {
-  background: #e94560;
+  background: var(--accent-red);
   color: #fff;
-  border-color: #e94560;
+  border-color: var(--accent-red);
 }
 
 /* Map */
@@ -491,22 +557,22 @@ thead th {
 #map {
   flex: 1;
   width: 100%;
-  background: #1a1a2e;
+  background: var(--bg-primary);
   min-height: 0;
 }
 
 .dark-tiles {
-  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+  filter: var(--map-tile-filter);
 }
 
 #map .leaflet-popup-content-wrapper {
-  background: #16213e;
-  color: #e0e0e0;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   border-radius: 6px;
 }
 
 #map .leaflet-popup-tip {
-  background: #16213e;
+  background: var(--bg-secondary);
 }
 
 #map .leaflet-popup-content {
@@ -516,11 +582,11 @@ thead th {
 }
 
 #map .leaflet-popup-content a {
-  color: #4fc3f7;
+  color: var(--accent-blue);
 }
 
 #map .leaflet-popup-content .tune-btn {
-  background: #e94560;
+  background: var(--accent-red);
   color: #fff;
   border: none;
   padding: 3px 10px;
@@ -536,9 +602,9 @@ thead th {
 
 /* Settings dialog */
 dialog {
-  background: #16213e;
-  color: #e0e0e0;
-  border: 1px solid #0f3460;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
   padding: 20px;
   min-width: 300px;
@@ -549,25 +615,26 @@ dialog {
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--backdrop);
 }
 
 dialog h3 {
   margin-bottom: 16px;
-  color: #e94560;
+  color: var(--accent-red);
 }
 
 dialog label {
   display: block;
   margin-bottom: 12px;
   font-size: 13px;
-  color: #a0a0c0;
+  color: var(--text-secondary);
 }
 
 dialog input, dialog select {
   display: block;
   margin-top: 4px;
   width: 100%;
+  background: var(--bg-input);
 }
 
 .dialog-buttons {
@@ -588,25 +655,25 @@ dialog input, dialog select {
 }
 
 .cat-option:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
 }
 
 .cat-option.selected {
-  border-color: #4ecca3;
-  background: #0a3d2a;
+  border-color: var(--accent-green);
+  background: var(--tint-green);
 }
 
 .cat-option .cat-option-label {
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 .cat-option .cat-option-detail {
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 11px;
 }
 
 .cat-section-label {
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 11px;
   text-transform: uppercase;
   margin: 10px 0 4px 4px;
@@ -632,14 +699,14 @@ dialog input, dialog select {
 
 /* Settings source toggles */
 .source-toggles {
-  border: 1px solid #1a4080;
+  border: 1px solid var(--border-secondary);
   border-radius: 4px;
   padding: 8px 12px;
   margin-bottom: 12px;
 }
 
 .source-toggles legend {
-  color: #a0a0c0;
+  color: var(--text-secondary);
   font-size: 12px;
   padding: 0 4px;
 }
@@ -661,16 +728,16 @@ dialog input, dialog select {
   text-align: center;
   margin-top: 16px;
   font-size: 12px;
-  color: #808090;
+  color: var(--text-tertiary);
 }
 
 .settings-version {
-  color: #606080;
+  color: var(--text-dim);
   margin-bottom: 4px;
 }
 
 .settings-version a {
-  color: #808090;
+  color: var(--text-tertiary);
 }
 
 .settings-coffee {
@@ -688,11 +755,11 @@ dialog input, dialog select {
 }
 
 .footer-dot {
-  color: #404060;
+  color: var(--text-dimmer);
 }
 
 .settings-footer a {
-  color: #4fc3f7;
+  color: var(--accent-blue);
   text-decoration: none;
   cursor: pointer;
 }
@@ -704,14 +771,14 @@ dialog input, dialog select {
 
 /* Radio config fieldset */
 .radio-config {
-  border: 1px solid #1a4080;
+  border: 1px solid var(--border-secondary);
   border-radius: 4px;
   padding: 8px 12px;
   margin-bottom: 12px;
 }
 
 .radio-config legend {
-  color: #a0a0c0;
+  color: var(--text-secondary);
   font-size: 12px;
   padding: 0 4px;
 }
@@ -735,8 +802,8 @@ dialog input, dialog select {
   margin-left: 12px;
   margin-bottom: 8px;
   padding: 8px 12px;
-  border-left: 2px solid #1a4080;
-  background: #0f1a30;
+  border-left: 2px solid var(--border-secondary);
+  background: var(--bg-panel);
   border-radius: 0 4px 4px 0;
 }
 
@@ -761,18 +828,18 @@ dialog input, dialog select {
   padding: 6px 10px;
   margin-bottom: 4px;
   border-radius: 4px;
-  background: #0f1a30;
-  border: 1px solid #1a4080;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-secondary);
   cursor: pointer;
 }
 
 .rig-item:hover {
-  background: #1a2a50;
+  background: var(--bg-hover);
 }
 
 .rig-item.active {
-  border-color: #4fc3f7;
-  background: #0f2a50;
+  border-color: var(--accent-blue);
+  background: var(--bg-hover);
 }
 
 .rig-item input[type="radio"] {
@@ -789,7 +856,7 @@ dialog input, dialog select {
 
 .rig-item-name {
   font-size: 13px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -797,7 +864,7 @@ dialog input, dialog select {
 
 .rig-item-desc {
   font-size: 11px;
-  color: #808090;
+  color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -806,7 +873,7 @@ dialog input, dialog select {
 .rig-item-btn {
   background: transparent;
   border: none;
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 12px;
   cursor: pointer;
   padding: 2px 6px;
@@ -815,13 +882,13 @@ dialog input, dialog select {
 }
 
 .rig-item-btn:hover {
-  background: #1a4080;
-  color: #e0e0e0;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .rig-item-btn.rig-delete-btn:hover {
-  background: #3d0a0a;
-  color: #e94560;
+  background: var(--tint-red);
+  color: var(--accent-red);
 }
 
 .rig-action-btn {
@@ -830,30 +897,30 @@ dialog input, dialog select {
   padding: 6px;
   margin-bottom: 8px;
   font-size: 13px;
-  background: #0f3460;
-  color: #4fc3f7;
-  border: 1px dashed #1a4080;
+  background: var(--bg-tertiary);
+  color: var(--accent-blue);
+  border: 1px dashed var(--border-secondary);
   border-radius: 4px;
   cursor: pointer;
   text-align: center;
 }
 
 .rig-action-btn:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
   border-style: solid;
 }
 
 /* Rig editor panel */
 #rig-editor {
-  border: 1px solid #4fc3f7;
+  border: 1px solid var(--accent-blue);
   border-radius: 4px;
   padding: 12px;
   margin-top: 8px;
-  background: #0f1a30;
+  background: var(--bg-panel);
 }
 
 #rig-editor h4 {
-  color: #4fc3f7;
+  color: var(--accent-blue);
   margin-bottom: 10px;
   font-size: 13px;
 }
@@ -865,9 +932,9 @@ dialog input, dialog select {
 }
 
 .rig-editor-buttons button:first-child {
-  background: #4ecca3;
-  color: #1a1a2e;
-  border-color: #4ecca3;
+  background: var(--accent-green);
+  color: var(--bg-primary);
+  border-color: var(--accent-green);
   font-weight: bold;
 }
 
@@ -891,17 +958,17 @@ dialog input, dialog select {
 }
 
 .hamlib-test-success {
-  color: #4ecca3;
+  color: var(--accent-green);
 }
 
 .hamlib-test-fail {
-  color: #e94560;
+  color: var(--accent-red);
 }
 
 /* Welcome dialog */
 .welcome-text {
   font-size: 13px;
-  color: #a0a0c0;
+  color: var(--text-secondary);
   margin-bottom: 16px;
 }
 
@@ -919,31 +986,31 @@ dialog input, dialog select {
   gap: 4px;
   padding: 14px 10px;
   border-radius: 6px;
-  background: #0f3460;
-  border: 2px solid #1a4080;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-secondary);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
 
 .welcome-choice:hover {
-  background: #1a4080;
-  border-color: #4fc3f7;
+  background: var(--bg-hover);
+  border-color: var(--accent-blue);
 }
 
 .welcome-choice.selected {
-  border-color: #4ecca3;
-  background: #0a3d2a;
+  border-color: var(--accent-green);
+  background: var(--tint-green);
 }
 
 .welcome-choice-title {
   font-size: 14px;
   font-weight: bold;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 
 .welcome-choice-desc {
   font-size: 11px;
-  color: #808090;
+  color: var(--text-tertiary);
 }
 
 .welcome-grid {
@@ -968,18 +1035,18 @@ dialog input, dialog select {
   align-items: center;
   gap: 16px;
   padding: 8px 16px;
-  background: #16213e;
-  border-bottom: 1px solid #0f3460;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .dxcc-progress {
   font-size: 13px;
-  color: #a0a0c0;
+  color: var(--text-secondary);
 }
 
 #dxcc-count {
   font-weight: bold;
-  color: #4ecca3;
+  color: var(--accent-green);
   font-family: Consolas, "Courier New", monospace;
 }
 
@@ -995,21 +1062,21 @@ dialog input, dialog select {
 }
 
 .dxcc-matrix thead th {
-  background: #16213e;
+  background: var(--bg-secondary);
   position: sticky;
   top: 0;
   padding: 6px 4px;
   text-align: center;
   font-size: 11px;
   text-transform: uppercase;
-  color: #a0a0c0;
-  border-bottom: 2px solid #0f3460;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-primary);
   cursor: default;
   z-index: 2;
 }
 
 .dxcc-matrix thead th:hover {
-  color: #a0a0c0;
+  color: var(--text-secondary);
 }
 
 .dxcc-entity-col {
@@ -1017,7 +1084,7 @@ dialog input, dialog select {
   min-width: 180px;
   position: sticky;
   left: 0;
-  background: #16213e;
+  background: var(--bg-secondary);
   z-index: 3 !important;
   padding-left: 12px !important;
 }
@@ -1035,7 +1102,7 @@ dialog input, dialog select {
   padding: 4px 4px;
   text-align: center;
   font-size: 12px;
-  border-bottom: 1px solid #0f3460;
+  border-bottom: 1px solid var(--border-primary);
   white-space: nowrap;
 }
 
@@ -1049,24 +1116,24 @@ dialog input, dialog select {
 }
 
 .dxcc-matrix tbody td:nth-child(2) {
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 11px;
 }
 
 .dxcc-matrix tbody tr:nth-child(even) {
-  background: #1a1a2e;
+  background: var(--bg-primary);
 }
 
 .dxcc-matrix tbody tr:nth-child(odd) {
-  background: #171730;
+  background: var(--bg-secondary);
 }
 
 .dxcc-matrix tbody tr:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
 }
 
 .dxcc-confirmed {
-  color: #4ecca3;
+  color: var(--accent-green);
   font-weight: bold;
 }
 
@@ -1077,24 +1144,44 @@ dialog input, dialog select {
 #dxcc-placeholder {
   text-align: center;
   padding: 60px 20px;
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 15px;
 }
 
 /* Out-of-privilege spots */
 .out-of-privilege {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
-.out-of-privilege .freq-link,
+.out-of-privilege .freq-link {
+  text-decoration: line-through;
+  color: #ff6b6b;
+}
+
 .out-of-privilege .qrz-link {
   color: #ff6b6b;
 }
 
+/* Already-worked spots */
+.already-worked {
+  color: #707088;
+}
+
+.already-worked .freq-link,
+.already-worked .qrz-link {
+  color: #707088;
+}
+
+.already-worked .callsign-cell::before {
+  content: "\2713 ";
+  color: #4ecca3;
+  font-size: 11px;
+}
+
 /* Band Activity Heatmap */
 #band-activity-bar {
-  background: #16213e;
-  border-top: 1px solid #0f3460;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-primary);
   padding: 6px 10px;
   overflow-x: auto;
 }
@@ -1109,7 +1196,7 @@ dialog input, dialog select {
 
 .band-activity-header {
   text-align: center;
-  color: #a0a0c0;
+  color: var(--text-secondary);
   font-weight: bold;
   text-transform: uppercase;
   padding: 2px 4px;
@@ -1117,7 +1204,7 @@ dialog input, dialog select {
 }
 
 .band-activity-label {
-  color: #a0a0c0;
+  color: var(--text-secondary);
   font-weight: bold;
   padding: 2px 6px;
   white-space: nowrap;
@@ -1130,12 +1217,12 @@ dialog input, dialog select {
   padding: 2px 4px;
   border-radius: 2px;
   min-width: 28px;
-  color: #808090;
+  color: var(--text-tertiary);
 }
 
 .band-activity-cell.heat-0 {
-  background: #1a1a2e;
-  color: #404060;
+  background: var(--bg-primary);
+  color: var(--text-dimmer);
 }
 
 .band-activity-cell.heat-1 {
@@ -1150,7 +1237,7 @@ dialog input, dialog select {
 
 .band-activity-cell.heat-3 {
   background: #4d1a24;
-  color: #e94560;
+  color: var(--accent-red);
   font-weight: bold;
 }
 
@@ -1166,13 +1253,13 @@ dialog input, dialog select {
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
-  background: #16213e;
-  border-bottom: 1px solid #0f3460;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .rbn-spot-count {
   font-size: 13px;
-  color: #a0a0c0;
+  color: var(--text-secondary);
 }
 
 .rbn-age-filter {
@@ -1180,7 +1267,7 @@ dialog input, dialog select {
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  color: #a0a0c0;
+  color: var(--text-secondary);
   margin-bottom: 0 !important;
 }
 
@@ -1191,7 +1278,7 @@ dialog input, dialog select {
 
 #rbn-count {
   font-weight: bold;
-  color: #4fc3f7;
+  color: var(--accent-blue);
   font-family: Consolas, "Courier New", monospace;
 }
 
@@ -1204,18 +1291,18 @@ dialog input, dialog select {
 #rbn-map {
   width: 100%;
   height: 100%;
-  background: #1a1a2e;
+  background: var(--bg-primary);
 }
 
 #rbn-splitter {
   height: 5px;
-  background: #0f3460;
+  background: var(--border-primary);
   cursor: row-resize;
   flex-shrink: 0;
 }
 
 #rbn-splitter:hover {
-  background: #e94560;
+  background: var(--accent-red);
 }
 
 #rbn-table-container {
@@ -1232,26 +1319,26 @@ dialog input, dialog select {
 }
 
 #rbn-table thead th {
-  background: #16213e;
+  background: var(--bg-secondary);
   position: sticky;
   top: 0;
   padding: 6px 8px;
   text-align: left;
   font-size: 11px;
   text-transform: uppercase;
-  color: #a0a0c0;
-  border-bottom: 2px solid #0f3460;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-primary);
   cursor: default;
   user-select: none;
   z-index: 2;
 }
 
 #rbn-table tbody tr {
-  border-bottom: 1px solid #0f3460;
+  border-bottom: 1px solid var(--border-primary);
 }
 
 #rbn-table tbody tr:hover {
-  background: #1a4080;
+  background: var(--bg-hover);
 }
 
 #rbn-table tbody td {
@@ -1267,13 +1354,13 @@ dialog input, dialog select {
 }
 
 #rbn-map .leaflet-popup-content-wrapper {
-  background: #16213e;
-  color: #e0e0e0;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   border-radius: 6px;
 }
 
 #rbn-map .leaflet-popup-tip {
-  background: #16213e;
+  background: var(--bg-secondary);
 }
 
 #rbn-map .leaflet-popup-content {
@@ -1294,7 +1381,7 @@ dialog input, dialog select {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: #a0a0c0;
+  color: var(--text-secondary);
 }
 
 .rbn-legend-swatch {
@@ -1315,27 +1402,29 @@ dialog input, dialog select {
 
 .log-cell {
   text-align: center;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .log-btn {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 3px;
-  background: #0a3d2a;
-  color: #4ecca3;
-  border: 1px solid #4ecca3;
+  background: var(--tint-green);
+  color: var(--accent-green);
+  border: 1px solid var(--accent-green);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .log-btn:hover {
-  background: #4ecca3;
-  color: #1a1a2e;
+  background: var(--accent-green);
+  color: var(--bg-primary);
 }
 
 .log-btn.logged {
-  background: #0a3d2a;
-  color: #4ecca3;
+  background: var(--tint-green);
+  color: var(--accent-green);
   opacity: 0.6;
   pointer-events: none;
 }
@@ -1360,7 +1449,7 @@ dialog input, dialog select {
 .log-dialog-x {
   background: transparent;
   border: none;
-  color: #808090;
+  color: var(--text-tertiary);
   font-size: 20px;
   cursor: pointer;
   padding: 0 4px;
@@ -1368,15 +1457,15 @@ dialog input, dialog select {
 }
 
 .log-dialog-x:hover {
-  color: #e94560;
+  color: var(--accent-red);
   background: transparent;
 }
 
 .log-save-btn {
-  background: #4ecca3 !important;
-  color: #1a1a2e !important;
+  background: var(--accent-green) !important;
+  color: var(--bg-primary) !important;
   font-weight: bold;
-  border-color: #4ecca3 !important;
+  border-color: var(--accent-green) !important;
 }
 
 .log-save-btn:hover {
@@ -1387,29 +1476,29 @@ dialog input, dialog select {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 3px;
-  background: #0f3460;
-  color: #a0a0c0;
-  border: 1px solid #1a4080;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
   cursor: pointer;
   min-width: 32px;
 }
 
 .rst-quick-btn:hover {
-  background: #1a4080;
-  color: #e0e0e0;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .rst-quick-btn.active {
-  background: #4ecca3;
-  color: #1a1a2e;
-  border-color: #4ecca3;
+  background: var(--accent-green);
+  color: var(--bg-primary);
+  border-color: var(--accent-green);
 }
 
 /* Map popup log button */
 .log-popup-btn {
-  background: #0a3d2a;
-  color: #4ecca3;
-  border: 1px solid #4ecca3;
+  background: var(--tint-green);
+  color: var(--accent-green);
+  border: 1px solid var(--accent-green);
   padding: 3px 10px;
   border-radius: 3px;
   cursor: pointer;
@@ -1419,8 +1508,8 @@ dialog input, dialog select {
 }
 
 .log-popup-btn:hover {
-  background: #4ecca3;
-  color: #1a1a2e;
+  background: var(--accent-green);
+  color: var(--bg-primary);
 }
 
 /* Log toast notification */
@@ -1428,11 +1517,11 @@ dialog input, dialog select {
   position: fixed;
   bottom: 20px;
   right: 20px;
-  background: #0a3d2a;
-  color: #4ecca3;
+  background: var(--tint-green);
+  color: var(--accent-green);
   padding: 8px 16px;
   border-radius: 4px;
-  border: 1px solid #4ecca3;
+  border: 1px solid var(--accent-green);
   font-size: 13px;
   max-width: 420px;
   z-index: 10001;
@@ -1440,7 +1529,7 @@ dialog input, dialog select {
 }
 
 .log-toast.warn {
-  background: #3d2a0a;
+  background: var(--tint-orange);
   color: #f0a500;
   border-color: #f0a500;
   animation: log-toast-fade-long 8s ease-in-out forwards;
@@ -1458,5 +1547,24 @@ dialog input, dialog select {
   5% { opacity: 1; transform: translateY(0); }
   90% { opacity: 1; transform: translateY(0); }
   100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* Scrollbar theming */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--bg-hover);
 }
 

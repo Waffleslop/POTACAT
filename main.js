@@ -8,7 +8,7 @@ const { CatClient, RigctldClient, listSerialPorts } = require('./lib/cat');
 const { gridToLatLon, haversineDistanceMiles } = require('./lib/grid');
 const { freqToBand } = require('./lib/bands');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
-const { parseAdifFile } = require('./lib/adif');
+const { parseAdifFile, parseWorkedCallsigns } = require('./lib/adif');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord } = require('./lib/adif-writer');
@@ -46,6 +46,7 @@ let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
 let rbnFlushTimer = null; // throttle timer for RBN → renderer updates
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
+let workedCallsigns = new Set(); // callsigns from QSO log (all QSOs, not just confirmed)
 
 // --- Watchlist notifications ---
 const recentNotifications = new Map(); // callsign → timestamp for dedup (5-min window)
@@ -860,6 +861,19 @@ function sendDxccData() {
   }
 }
 
+// --- Worked callsigns tracking ---
+function loadWorkedCallsigns() {
+  if (!settings.adifLogPath) return;
+  try {
+    workedCallsigns = parseWorkedCallsigns(settings.adifLogPath);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('worked-callsigns', [...workedCallsigns]);
+    }
+  } catch (err) {
+    console.error('Failed to parse worked callsigns:', err.message);
+  }
+}
+
 // --- Logbook forwarding ---
 function forwardToLogbook(qsoData) {
   const type = settings.logbookType;
@@ -961,6 +975,8 @@ function createWindow() {
     if (settings.enableDxcc && settings.adifPath) {
       sendDxccData();
     }
+    // Load worked callsigns from QSO log
+    loadWorkedCallsigns();
   });
 }
 
@@ -1159,6 +1175,8 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-settings', (_e, newSettings) => {
+    const adifLogPathChanged = newSettings.adifLogPath !== settings.adifLogPath;
+
     const clusterChanged = newSettings.enableCluster !== settings.enableCluster ||
       newSettings.myCallsign !== settings.myCallsign ||
       newSettings.clusterHost !== settings.clusterHost ||
@@ -1207,6 +1225,12 @@ app.whenReady().then(() => {
     if (settings.enableDxcc && settings.adifPath) {
       sendDxccData();
     }
+
+    // Reload worked callsigns if log path changed
+    if (adifLogPathChanged) {
+      loadWorkedCallsigns();
+    }
+
     return settings;
   });
 
@@ -1401,6 +1425,14 @@ app.whenReady().then(() => {
       }
       const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       appendQso(logPath, qsoData);
+
+      // Update worked callsigns set and notify renderer
+      if (qsoData.callsign) {
+        workedCallsigns.add(qsoData.callsign.toUpperCase());
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('worked-callsigns', [...workedCallsigns]);
+        }
+      }
 
       // Forward to external logbook if enabled
       if (settings.sendToLogbook && settings.logbookType) {

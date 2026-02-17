@@ -214,7 +214,7 @@
     <fieldset class="source-toggles">
       <legend>Station</legend>
       <label>My Callsign: <input type="text" id="set-my-callsign" maxlength="10" placeholder="WB6ACU"></label>
-      <span style="font-size:11px;color:#808090;margin-top:-8px;margin-bottom:8px;display:block;">Required for DX Cluster, Reverse Beacon Network, and QSO Logging</span>
+      <span class="help-text" style="margin-top:-8px;margin-bottom:8px;display:block;">Required for DX Cluster, Reverse Beacon Network, and QSO Logging</span>
       <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
       <label>Distance Unit:
         <select id="set-dist-unit">
@@ -244,6 +244,7 @@
         </select>
       </label>
       <label class="checkbox-label"><input type="checkbox" id="set-hide-out-of-band"> Hide out-of-band spots</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-hide-worked"> Hide already-worked stations</label>
     </fieldset>
     <fieldset class="source-toggles">
       <legend>Tuning</legend>
@@ -254,7 +255,7 @@
         <input type="number" id="set-cw-xit" min="-999" max="999" step="10" value="0">
       </label>
       <label class="checkbox-label"><input type="checkbox" id="set-tune-click"> Tune confirmation sound</label>
-      <span style="font-size:11px;color:#808090;margin-top:-8px;margin-bottom:8px;display:block;">Play a click when the radio confirms it has changed frequency</span>
+      <span class="help-text" style="margin-top:-8px;margin-bottom:8px;display:block;">Play a click when the radio confirms it has changed frequency</span>
     </fieldset>
     <fieldset class="source-toggles">
       <legend>Watchlist</legend>
@@ -276,7 +277,7 @@
             <input type="text" id="set-adif-log-path" readonly style="flex:1;">
             <button type="button" id="adif-log-browse-btn">Browse</button>
           </div>
-          <span style="font-size:11px;color:#808090;display:block;margin-top:4px;">Local backup of all QSOs logged from POTA CAT</span>
+          <span class="help-text" style="display:block;margin-top:4px;">Local backup of all QSOs logged from POTA CAT</span>
         </label>
         <label>Default TX Power (W):
           <input type="number" id="set-default-power" min="1" max="5000" value="100">
@@ -291,7 +292,7 @@
               <option value="n3fjp">N3FJP</option>
             </select>
           </label>
-          <div id="logbook-instructions" class="hidden" style="margin-top:6px;font-size:11px;color:#808090;line-height:1.5;"></div>
+          <div id="logbook-instructions" class="hidden help-text" style="margin-top:6px;line-height:1.5;"></div>
           <div id="logbook-port-config" class="hidden" style="margin-top:6px;">
             <label>Host:
               <input type="text" id="set-logbook-host" placeholder="127.0.0.1" value="127.0.0.1">
@@ -299,7 +300,7 @@
             <label>Port:
               <input type="number" id="set-logbook-port" min="1" max="65535">
             </label>
-            <div id="logbook-help" style="font-size:11px;color:#808090;margin-top:4px;"></div>
+            <div id="logbook-help" class="help-text" style="margin-top:4px;"></div>
           </div>
         </div>
       </div>
@@ -315,8 +316,8 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-rbn"> Reverse Beacon Network</label>
       <div id="rbn-config" class="radio-sub hidden">
-        <span style="font-size:12px;color:#808090;">Shows where your CQ calls are being heard by RBN skimmers worldwide.</span>
-        <span style="font-size:11px;color:#808090;display:block;margin-top:4px;">RBN spots only appear while POTA CAT is open — historical spots are not retrieved.</span>
+        <span class="help-text" style="font-size:12px;">Shows where your CQ calls are being heard by RBN skimmers worldwide.</span>
+        <span class="help-text" style="display:block;margin-top:4px;">RBN spots only appear while POTA CAT is open — historical spots are not retrieved.</span>
       </div>
     </fieldset>
     <fieldset class="source-toggles">
@@ -328,9 +329,9 @@
         <label>Radio IP:
           <input type="text" id="set-smartsdr-host" placeholder="127.0.0.1" style="width:140px;">
         </label>
-        <span style="font-size:11px;color:#808090;">Connect to FlexRadio on port 4992</span>
+        <span class="help-text">Connect to FlexRadio on port 4992</span>
         <div style="margin-top:8px;">
-          <span style="font-size:12px;color:#c0c0d0;">Sources to show on panadapter:</span>
+          <span style="font-size:12px;color:var(--text-secondary);">Sources to show on panadapter:</span>
           <label class="checkbox-label"><input type="checkbox" id="set-smartsdr-pota" checked> POTA</label>
           <label class="checkbox-label"><input type="checkbox" id="set-smartsdr-sota" checked> SOTA</label>
           <label class="checkbox-label"><input type="checkbox" id="set-smartsdr-cluster" checked> DX Cluster</label>
@@ -340,10 +341,11 @@
     </fieldset>
     <fieldset class="source-toggles">
       <legend>Display</legend>
+      <label class="checkbox-label"><input type="checkbox" id="set-light-mode"> Light mode</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
-      <span style="font-size:11px;color:#808090;margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
-      <span style="font-size:11px;color:#808090;margin-left:12px;display:block;">Displayed on the Map view only</span>
+      <span class="help-text" style="margin-left:12px;display:block;">Displayed on the Map view only</span>
     </fieldset>
     <fieldset class="source-toggles">
       <legend>Beta</legend>
@@ -360,7 +362,7 @@
     <fieldset class="source-toggles">
       <legend>Privacy</legend>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-telemetry"> Share anonymous usage statistics</label>
-      <span style="font-size:11px;color:#808090;margin-left:12px;display:block;">Helps improve POTA CAT. Only sends: a random ID, app version, OS, and session duration. No callsign, grid, settings, or frequencies are ever collected. You can opt out at any time.</span>
+      <span class="help-text" style="margin-left:12px;display:block;">Helps improve POTA CAT. Only sends: a random ID, app version, OS, and session duration. No callsign, grid, settings, or frequencies are ever collected. You can opt out at any time.</span>
     </fieldset>
     <fieldset class="radio-config">
       <legend>Radio</legend>
@@ -382,7 +384,7 @@
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">
-          <span style="font-size:12px;color:#808090;">Connect to any radio with TCP CAT (Flex on custom port, Elecraft K4, etc.)</span>
+          <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT (Flex on custom port, Elecraft K4, etc.)</span>
           <label>Host:
             <input type="text" id="set-tcpcat-host" placeholder="127.0.0.1" value="127.0.0.1">
           </label>
@@ -392,7 +394,7 @@
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="serialcat"> Serial CAT (Kenwood)</label>
         <div id="serialcat-config" class="radio-sub hidden">
-          <span style="font-size:12px;color:#808090;">Direct Kenwood-protocol CAT over serial. Recommended for QRPLabs QMX/QDX, and works with most radios that respond to FA/MD commands (Kenwood, Elecraft, etc.).</span>
+          <span class="help-text" style="font-size:12px;">Direct Kenwood-protocol CAT over serial. Recommended for QRPLabs QMX/QDX, and works with most radios that respond to FA/MD commands (Kenwood, Elecraft, etc.).</span>
           <label>Serial Port:
             <div style="display:flex;gap:6px;margin-top:4px;">
               <select id="set-serialcat-port" style="flex:1;"></select>
@@ -412,7 +414,7 @@
           <label class="checkbox-label" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
             <input type="checkbox" id="set-serialcat-dtr-off"> Disable DTR/RTS on connect
           </label>
-          <span style="font-size:11px;color:#808090;margin-top:2px;display:block;">Required for QRPLabs QMX/QDX (uses DTR for PTT). Also check for Digirig, SignaLink, and similar USB interfaces.</span>
+          <span class="help-text" style="margin-top:2px;display:block;">Required for QRPLabs QMX/QDX (uses DTR for PTT). Also check for Digirig, SignaLink, and similar USB interfaces.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="serialcat-test-btn">Test Connection</button>
             <span id="serialcat-test-result" style="font-size:12px;"></span>
@@ -445,7 +447,7 @@
           <label class="checkbox-label" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
             <input type="checkbox" id="set-rig-dtr-off"> Disable DTR/RTS on connect
           </label>
-          <span style="font-size:11px;color:#808090;margin-top:2px;display:block;">Prevents PTT keying on Digirig, SignaLink, and similar interfaces</span>
+          <span class="help-text" style="margin-top:2px;display:block;">Prevents PTT keying on Digirig, SignaLink, and similar interfaces</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="hamlib-test-btn">Test Connection</button>
             <span id="hamlib-test-result" style="font-size:12px;"></span>
@@ -557,10 +559,10 @@
       </button>
     </div>
     <label class="welcome-grid">Callsign: <input type="text" id="welcome-callsign" maxlength="10" placeholder="WB6ACU" style="text-transform:uppercase;"></label>
-    <span style="font-size:11px;color:#808090;margin-left:0;margin-top:-4px;margin-bottom:8px;display:block;">Used for DX Cluster, Reverse Beacon Network, and QSO logging</span>
+    <span class="help-text" style="margin-left:0;margin-top:-4px;margin-bottom:8px;display:block;">Used for DX Cluster, Reverse Beacon Network, and QSO logging</span>
     <label class="welcome-grid">QTH Grid Square: <input type="text" id="welcome-grid" maxlength="6" placeholder="FN20jb"></label>
     <label class="checkbox-label welcome-telemetry"><input type="checkbox" id="welcome-telemetry" checked> Share anonymous usage statistics</label>
-    <span style="font-size:11px;color:#808090;margin-left:12px;margin-top:-4px;display:block;">No callsign, grid, or personal data is collected. You can opt out any time in Settings.</span>
+    <span class="help-text" style="margin-left:12px;margin-top:-4px;display:block;">No callsign, grid, or personal data is collected. You can opt out any time in Settings.</span>
   </dialog>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>

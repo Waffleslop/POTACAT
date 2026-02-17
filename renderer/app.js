@@ -24,6 +24,8 @@ let enableLogging = false;
 let defaultPower = 100;
 let tuneClick = false;
 let activeRigName = ''; // name of the currently active rig profile
+let workedCallsigns = new Set(); // uppercase callsigns from QSO log
+let hideWorked = false;
 let dxccData = null;  // { entities: [...] } from main process
 
 // --- Scan state ---
@@ -62,6 +64,7 @@ const setNotifySound = document.getElementById('set-notify-sound');
 const setNotifyTimeout = document.getElementById('set-notify-timeout');
 const setLicenseClass = document.getElementById('set-license-class');
 const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
+const setHideWorked = document.getElementById('set-hide-worked');
 const setTuneClick = document.getElementById('set-tune-click');
 const continentFilterEl = document.getElementById('continent-filter');
 const scanBtn = document.getElementById('scan-btn');
@@ -153,6 +156,7 @@ const setLogbookHost = document.getElementById('set-logbook-host');
 const setLogbookPort = document.getElementById('set-logbook-port');
 const logbookHelp = document.getElementById('logbook-help');
 const setEnableTelemetry = document.getElementById('set-enable-telemetry');
+const setLightMode = document.getElementById('set-light-mode');
 const setSmartSdrSpots = document.getElementById('set-smartsdr-spots');
 const smartSdrConfig = document.getElementById('smartsdr-config');
 const setSmartSdrHost = document.getElementById('set-smartsdr-host');
@@ -189,8 +193,13 @@ function parseWatchlist(str) {
   return new Set(str.split(',').map((c) => c.trim().toUpperCase()).filter(Boolean));
 }
 
+function applyTheme(light) {
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+}
+
 async function loadPrefs() {
   const settings = await window.api.getSettings();
+  applyTheme(settings.lightMode === true);
   distUnit = settings.distUnit || 'mi';
   scanDwell = parseInt(settings.scanDwell, 10) || 7;
   watchlist = parseWatchlist(settings.watchlist);
@@ -207,6 +216,7 @@ async function loadPrefs() {
   updateLoggingVisibility();
   licenseClass = settings.licenseClass || 'none';
   hideOutOfBand = settings.hideOutOfBand === true;
+  hideWorked = settings.hideWorked === true;
   tuneClick = settings.tuneClick === true;
   // Resolve active rig name
   const rigs = settings.rigs || [];
@@ -1058,6 +1068,7 @@ function getFiltered() {
     if (continents && !continents.has(s.continent)) return false;
     if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
+    if (hideWorked && workedCallsigns.has(s.callsign.toUpperCase())) return false;
     return true;
   });
 }
@@ -1469,11 +1480,12 @@ function updateMapMarkers(filtered) {
 
     // Out-of-privilege gets grey/red pin, SOTA gets orange, POTA gets default blue
     const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
+    const worked = workedCallsigns.has(s.callsign.toUpperCase());
     const markerOptions = oop
-      ? { icon: oopIcon, opacity: 0.5 }
+      ? { icon: oopIcon, opacity: 0.4 }
       : s.source === 'sota'
-        ? { icon: sotaIcon }
-        : {};
+        ? { icon: sotaIcon, ...(worked ? { opacity: 0.5 } : {}) }
+        : worked ? { opacity: 0.5 } : {};
 
     // Plot marker at canonical position and one world-copy in each direction
     for (const offset of [-360, 0, 360]) {
@@ -1527,7 +1539,7 @@ function bindPopupClickHandlers(mapInstance) {
 // --- Scan ---
 function getScanList() {
   const filtered = sortSpots(getFiltered());
-  return filtered.filter((s) => !scanSkipped.has(s.frequency));
+  return filtered.filter((s) => !scanSkipped.has(s.frequency) && !workedCallsigns.has(s.callsign.toUpperCase()));
 }
 
 function startScan() {
@@ -1717,7 +1729,8 @@ function render() {
 
     for (const s of filtered) {
       const tr = document.createElement('tr');
-      const isSkipped = scanSkipped.has(s.frequency);
+      const isWorked = workedCallsigns.has(s.callsign.toUpperCase());
+      const isSkipped = scanSkipped.has(s.frequency) || isWorked;
 
       // Source color-coding
       if (s.source === 'pota') tr.classList.add('spot-pota');
@@ -1727,6 +1740,11 @@ function render() {
       // License privilege check
       if (isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) {
         tr.classList.add('out-of-privilege');
+      }
+
+      // Already-worked check
+      if (isWorked) {
+        tr.classList.add('already-worked');
       }
 
       // Highlight the row currently being scanned
@@ -1762,6 +1780,7 @@ function render() {
       // Callsign cell — clickable link to QRZ
       const isWatched = watchlist.has(s.callsign.toUpperCase());
       const callTd = document.createElement('td');
+      callTd.className = 'callsign-cell';
       if (isWatched) {
         const star = document.createElement('span');
         star.textContent = '\u2B50 ';
@@ -2064,6 +2083,7 @@ settingsBtn.addEventListener('click', async () => {
   setNotifyTimeout.value = s.notifyTimeout || 10;
   setLicenseClass.value = s.licenseClass || 'none';
   setHideOutOfBand.checked = s.hideOutOfBand === true;
+  setHideWorked.checked = s.hideWorked === true;
   setTuneClick.checked = s.tuneClick === true;
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
@@ -2101,6 +2121,7 @@ settingsBtn.addEventListener('click', async () => {
   setSmartSdrRbn.checked = s.smartSdrRbn === true;
   smartSdrConfig.classList.toggle('hidden', !s.smartSdrSpots);
   setEnableTelemetry.checked = s.enableTelemetry === true;
+  setLightMode.checked = s.lightMode === true;
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
   renderRigList(s.rigs || [], s.activeRigId || null);
@@ -2130,8 +2151,10 @@ settingsSave.addEventListener('click', async () => {
   const dxccEnabled = setEnableDxcc.checked;
   const licenseClassVal = setLicenseClass.value;
   const hideOob = setHideOutOfBand.checked;
+  const hideWorkedEnabled = setHideWorked.checked;
   const tuneClickEnabled = setTuneClick.checked;
   const telemetryEnabled = setEnableTelemetry.checked;
+  const lightModeEnabled = setLightMode.checked;
   const smartSdrSpotsEnabled = setSmartSdrSpots.checked;
   const smartSdrHostVal = setSmartSdrHost.value.trim() || '127.0.0.1';
   const smartSdrPotaEnabled = setSmartSdrPota.checked;
@@ -2178,6 +2201,7 @@ settingsSave.addEventListener('click', async () => {
     enableDxcc: dxccEnabled,
     licenseClass: licenseClassVal,
     hideOutOfBand: hideOob,
+    hideWorked: hideWorkedEnabled,
     tuneClick: tuneClickEnabled,
     adifPath: adifPath,
     enableLogging: loggingEnabled,
@@ -2188,6 +2212,7 @@ settingsSave.addEventListener('click', async () => {
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
     enableTelemetry: telemetryEnabled,
+    lightMode: lightModeEnabled,
     smartSdrSpots: smartSdrSpotsEnabled,
     smartSdrHost: smartSdrHostVal,
     smartSdrPota: smartSdrPotaEnabled,
@@ -2213,9 +2238,11 @@ settingsSave.addEventListener('click', async () => {
   enableLogging = loggingEnabled;
   defaultPower = defaultPowerVal;
   updateLoggingVisibility();
+  applyTheme(lightModeEnabled);
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
+  hideWorked = hideWorkedEnabled;
   tuneClick = tuneClickEnabled;
   activeRigName = selectedRig ? selectedRig.name : '';
   updateDxccButton();
@@ -2270,6 +2297,12 @@ window.api.onUpdateAvailable(({ version, url, headline }) => {
     banner.classList.add('hidden');
   });
   banner.classList.remove('hidden');
+});
+
+// --- Worked callsigns listener ---
+window.api.onWorkedCallsigns((list) => {
+  workedCallsigns = new Set(list);
+  render();
 });
 
 // --- DXCC data listener ---
@@ -2536,7 +2569,7 @@ function renderRbnMarkers() {
       ${s.locationDesc}<br>
       ${s.band || ''} ${s.mode || ''} &middot; ${details}<br>
       ${distStr ? distStr + '<br>' : ''}
-      <span style="color:#808090;font-size:11px;">${formatAge(s.spotTime)}</span>
+      <span class="help-text">${formatAge(s.spotTime)}</span>
     `;
 
     for (const offset of [-360, 0, 360]) {
