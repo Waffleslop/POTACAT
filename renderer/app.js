@@ -68,9 +68,16 @@ const scanBtn = document.getElementById('scan-btn');
 const hamlibConfig = document.getElementById('hamlib-config');
 const flexConfig = document.getElementById('flex-config');
 const tcpcatConfig = document.getElementById('tcpcat-config');
+const serialcatConfig = document.getElementById('serialcat-config');
 const setTcpcatHost = document.getElementById('set-tcpcat-host');
 const setTcpcatPort = document.getElementById('set-tcpcat-port');
 const setFlexSlice = document.getElementById('set-flex-slice');
+const setSerialcatPort = document.getElementById('set-serialcat-port');
+const setSerialcatPortManual = document.getElementById('set-serialcat-port-manual');
+const setSerialcatBaud = document.getElementById('set-serialcat-baud');
+const setSerialcatDtrOff = document.getElementById('set-serialcat-dtr-off');
+const serialcatTestBtn = document.getElementById('serialcat-test-btn');
+const serialcatTestResult = document.getElementById('serialcat-test-result');
 const radioTypeBtns = document.querySelectorAll('input[name="radio-type"]');
 const myRigsList = document.getElementById('my-rigs-list');
 const rigAddBtn = document.getElementById('rig-add-btn');
@@ -241,11 +248,20 @@ function setRadioType(value) {
   if (btn) btn.checked = true;
 }
 
+function getEffectiveSerialcatPort() {
+  const manual = setSerialcatPortManual.value.trim();
+  return manual || setSerialcatPort.value;
+}
+
 function updateRadioSubPanels() {
   const type = getSelectedRadioType();
   flexConfig.classList.toggle('hidden', type !== 'flex');
   tcpcatConfig.classList.toggle('hidden', type !== 'tcpcat');
+  serialcatConfig.classList.toggle('hidden', type !== 'serialcat');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
+  if (type === 'serialcat' && !serialcatPortsLoaded) {
+    loadSerialcatPorts();
+  }
   if (type === 'hamlib' && !hamlibFieldsLoaded) {
     hamlibFieldsLoaded = true;
     populateHamlibFields(null);
@@ -268,6 +284,10 @@ async function populateRadioSection(currentTarget) {
       setTcpcatHost.value = currentTarget.host || '127.0.0.1';
       setTcpcatPort.value = currentTarget.port || 5002;
     }
+  } else if (currentTarget.type === 'serial') {
+    setRadioType('serialcat');
+    serialcatPortsLoaded = true;
+    await loadSerialcatPorts(currentTarget);
   } else if (currentTarget.type === 'rigctld') {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
@@ -333,6 +353,31 @@ async function populateHamlibFields(savedTarget) {
   setRigDtrOff.checked = !!(savedTarget && savedTarget.dtrOff);
 }
 
+let serialcatPortsLoaded = false;
+
+async function loadSerialcatPorts(savedTarget) {
+  const ports = await window.api.listPorts();
+  setSerialcatPort.innerHTML = '';
+  setSerialcatPortManual.value = '';
+  const detectedPaths = new Set();
+  for (const p of ports) {
+    detectedPaths.add(p.path);
+    const opt = document.createElement('option');
+    opt.value = p.path;
+    opt.textContent = `${p.path} — ${p.friendlyName}`;
+    if (savedTarget && savedTarget.path === p.path) opt.selected = true;
+    setSerialcatPort.appendChild(opt);
+  }
+  if (savedTarget && savedTarget.path && !detectedPaths.has(savedTarget.path)) {
+    setSerialcatPortManual.value = savedTarget.path;
+  }
+  if (savedTarget && savedTarget.baudRate) {
+    setSerialcatBaud.value = String(savedTarget.baudRate);
+  }
+  setSerialcatDtrOff.checked = !!(savedTarget && savedTarget.dtrOff);
+  serialcatPortsLoaded = true;
+}
+
 // --- Rig profile management ---
 let rigEditorMode = null; // null | 'add' | 'edit'
 let editingRigId = null;
@@ -349,6 +394,9 @@ function describeRigTarget(target) {
       return `FlexRadio Slice ${sliceLetter} (TCP :${port})`;
     }
     return `TCP ${host}:${port}`;
+  }
+  if (target.type === 'serial') {
+    return `Serial CAT on ${target.path || '?'} @ ${target.baudRate || 9600}`;
   }
   if (target.type === 'rigctld') {
     const port = target.serialPort || '?';
@@ -443,6 +491,13 @@ function buildCatTargetFromForm() {
     return { type: 'tcp', host: '127.0.0.1', port: parseInt(setFlexSlice.value, 10) };
   } else if (radioType === 'tcpcat') {
     return { type: 'tcp', host: setTcpcatHost.value.trim() || '127.0.0.1', port: parseInt(setTcpcatPort.value, 10) || 5002 };
+  } else if (radioType === 'serialcat') {
+    return {
+      type: 'serial',
+      path: getEffectiveSerialcatPort(),
+      baudRate: parseInt(setSerialcatBaud.value, 10) || 9600,
+      dtrOff: setSerialcatDtrOff.checked,
+    };
   } else if (radioType === 'hamlib') {
     return {
       type: 'rigctld',
@@ -459,6 +514,7 @@ async function openRigEditor(mode, rigId) {
   rigEditorMode = mode;
   editingRigId = rigId || null;
   hamlibFieldsLoaded = false;
+  serialcatPortsLoaded = false;
 
   if (mode === 'edit') {
     rigEditorTitle.textContent = 'Edit Rig';
@@ -931,6 +987,39 @@ hamlibTestBtn.addEventListener('click', async () => {
     hamlibTestResult.className = 'hamlib-test-fail';
   } finally {
     hamlibTestBtn.disabled = false;
+  }
+});
+
+// Serial CAT test connection
+serialcatTestBtn.addEventListener('click', async () => {
+  const portPath = getEffectiveSerialcatPort();
+  const baudRate = parseInt(setSerialcatBaud.value, 10);
+  const dtrOff = setSerialcatDtrOff.checked;
+
+  if (!portPath) {
+    serialcatTestResult.textContent = 'Select a serial port first';
+    serialcatTestResult.className = 'hamlib-test-fail';
+    return;
+  }
+
+  serialcatTestBtn.disabled = true;
+  serialcatTestResult.textContent = 'Testing...';
+  serialcatTestResult.className = '';
+
+  try {
+    const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff });
+    if (result.success) {
+      serialcatTestResult.textContent = `Connected! Freq: ${result.frequency} MHz`;
+      serialcatTestResult.className = 'hamlib-test-success';
+    } else {
+      serialcatTestResult.textContent = `Failed: ${result.error}`;
+      serialcatTestResult.className = 'hamlib-test-fail';
+    }
+  } catch (err) {
+    serialcatTestResult.textContent = `Error: ${err.message}`;
+    serialcatTestResult.className = 'hamlib-test-fail';
+  } finally {
+    serialcatTestBtn.disabled = false;
   }
 });
 

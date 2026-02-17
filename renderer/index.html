@@ -390,6 +390,34 @@
             <input type="number" id="set-tcpcat-port" placeholder="5002" min="1" max="65535" value="5002">
           </label>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="serialcat"> Serial CAT (Kenwood)</label>
+        <div id="serialcat-config" class="radio-sub hidden">
+          <span style="font-size:12px;color:#808090;">Direct Kenwood-protocol CAT over serial. Recommended for QRPLabs QMX/QDX, and works with most radios that respond to FA/MD commands (Kenwood, Elecraft, etc.).</span>
+          <label>Serial Port:
+            <div style="display:flex;gap:6px;margin-top:4px;">
+              <select id="set-serialcat-port" style="flex:1;"></select>
+              <input type="text" id="set-serialcat-port-manual" placeholder="COM5" style="width:70px;" title="Type a port manually if not listed">
+            </div>
+          </label>
+          <label>Baud Rate:
+            <select id="set-serialcat-baud">
+              <option value="4800">4800</option>
+              <option value="9600" selected>9600</option>
+              <option value="19200">19200</option>
+              <option value="38400">38400</option>
+              <option value="57600">57600</option>
+              <option value="115200">115200</option>
+            </select>
+          </label>
+          <label class="checkbox-label" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="set-serialcat-dtr-off"> Disable DTR/RTS on connect
+          </label>
+          <span style="font-size:11px;color:#808090;margin-top:2px;display:block;">Required for QRPLabs QMX/QDX (uses DTR for PTT). Also check for Digirig, SignaLink, and similar USB interfaces.</span>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="serialcat-test-btn">Test Connection</button>
+            <span id="serialcat-test-result" style="font-size:12px;"></span>
+          </div>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">
           <label>Rig Model:

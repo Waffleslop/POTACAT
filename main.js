@@ -184,6 +184,7 @@ function spawnRigctld(target, portOverride) {
       '-t', port,
     ];
     if (target.dtrOff) args.push('--set-conf=dtr_state=OFF,rts_state=OFF');
+    if (target.verbose) args.push('-vvvv');
 
     if (!portOverride) killRigctld();
     rigctldStderr = '';
@@ -1055,6 +1056,9 @@ function describeTargetForMigration(target) {
     }
     return `TCP ${host}:${port}`;
   }
+  if (target.type === 'serial') {
+    return `Serial CAT on ${target.path || 'unknown'}`;
+  }
   if (target.type === 'rigctld') {
     const port = target.serialPort || 'unknown';
     return `Hamlib Rig on ${port}`;
@@ -1243,6 +1247,88 @@ app.whenReady().then(() => {
     return result.filePath;
   });
 
+  ipcMain.handle('test-serial-cat', async (_e, config) => {
+    const { portPath, baudRate, dtrOff } = config;
+    const { SerialPort } = require('serialport');
+
+    // Temporarily disconnect live CAT + kill rigctld to release the serial port
+    if (cat) cat.disconnect();
+    killRigctld();
+
+    // Wait for OS to fully release the serial port
+    await new Promise((r) => setTimeout(r, 500));
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let buf = '';
+      const port = new SerialPort({
+        path: portPath,
+        baudRate: baudRate || 9600,
+        dataBits: 8, stopBits: 1, parity: 'none',
+        autoOpen: false,
+        rtscts: false, hupcl: false,
+      });
+
+      let allData = ''; // capture everything for diagnostics
+
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          try { port.close(); } catch { /* ignore */ }
+          const hint = allData ? `Got data but no FA response: ${allData.slice(0, 120)}` : 'No response from radio. Check baud rate and cable.';
+          resolve({ success: false, error: hint });
+        }
+      }, 5000);
+
+      port.on('open', () => {
+        if (dtrOff) {
+          try { port.set({ dtr: false, rts: false }); } catch { /* ignore */ }
+        }
+        // Send frequency query immediately, and again after 1s in case startup data interfered
+        setTimeout(() => port.write('FA;'), 100);
+        setTimeout(() => { if (!settled) port.write('FA;'); }, 1200);
+      });
+
+      port.on('data', (chunk) => {
+        const text = chunk.toString();
+        allData += text;
+        buf += text;
+        console.log('[serial-cat-test] rx:', JSON.stringify(text));
+        // Scan for any FA response in the stream (skip startup banners etc.)
+        let semi;
+        while ((semi = buf.indexOf(';')) !== -1) {
+          const msg = buf.slice(0, semi);
+          buf = buf.slice(semi + 1);
+          if (msg.startsWith('FA') && !settled) {
+            settled = true;
+            clearTimeout(timeout);
+            try { port.close(); } catch { /* ignore */ }
+            const hz = parseInt(msg.slice(2), 10);
+            const freqMHz = (hz / 1e6).toFixed(6);
+            resolve({ success: true, frequency: freqMHz });
+            return;
+          }
+        }
+      });
+
+      port.on('error', (err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve({ success: false, error: err.message });
+        }
+      });
+
+      port.open((err) => {
+        if (err && !settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve({ success: false, error: err.message });
+        }
+      });
+    });
+  });
+
   ipcMain.handle('test-hamlib', async (_e, config) => {
     const { rigId, serialPort, baudRate, dtrOff } = config;
     let testProc = null;
@@ -1250,7 +1336,7 @@ app.whenReady().then(() => {
 
     try {
       // Spawn rigctld on port 4533 to avoid conflict with live instance on 4532
-      testProc = await spawnRigctld({ rigId, serialPort, baudRate, dtrOff }, '4533');
+      testProc = await spawnRigctld({ rigId, serialPort, baudRate, dtrOff, verbose: true }, '4533');
 
       // Give rigctld time to initialize and open the serial port
       await new Promise((r) => setTimeout(r, 1000));
@@ -1264,7 +1350,9 @@ app.whenReady().then(() => {
       const freq = await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           sock.destroy();
-          reject(new Error('Timed out waiting for rigctld response'));
+          const lines = rigctldStderr.trim().split('\n').filter(Boolean);
+          const hint = lines.slice(-3).join(' | ');
+          reject(new Error(hint ? `Timed out — rigctld: ${hint}` : 'Timed out waiting for rigctld response'));
         }, 5000);
 
         const sock = net.createConnection({ host: '127.0.0.1', port: 4533 }, () => {
