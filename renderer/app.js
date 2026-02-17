@@ -157,6 +157,7 @@ const setLogbookPort = document.getElementById('set-logbook-port');
 const logbookHelp = document.getElementById('logbook-help');
 const setEnableTelemetry = document.getElementById('set-enable-telemetry');
 const setLightMode = document.getElementById('set-light-mode');
+setLightMode.addEventListener('change', () => applyTheme(setLightMode.checked));
 const setSmartSdrSpots = document.getElementById('set-smartsdr-spots');
 const smartSdrConfig = document.getElementById('smartsdr-config');
 const setSmartSdrHost = document.getElementById('set-smartsdr-host');
@@ -2141,7 +2142,12 @@ settingsBtn.addEventListener('click', async () => {
   settingsDialog.showModal();
 });
 
-settingsCancel.addEventListener('click', () => settingsDialog.close());
+settingsCancel.addEventListener('click', async () => {
+  // Revert theme to saved state on cancel
+  const s = await window.api.getSettings();
+  applyTheme(s.lightMode === true);
+  settingsDialog.close();
+});
 
 settingsSave.addEventListener('click', async () => {
   const watchlistRaw = setWatchlist.value.trim();
@@ -2339,8 +2345,40 @@ window.api.onCatFrequency((hz) => {
   if (currentView === 'table') render();
 });
 
-// --- CAT debug log (shows in DevTools console) ---
-window.api.onCatLog((msg) => { console.log(msg); });
+// --- CAT Log Panel ---
+const catLogPanel = document.getElementById('cat-log-panel');
+const catLogOutput = document.getElementById('cat-log-output');
+const catLogCopyBtn = document.getElementById('cat-log-copy');
+const catLogClearBtn = document.getElementById('cat-log-clear');
+const catLogToggleBtn = document.getElementById('cat-log-toggle');
+const catLogLines = [];
+const CAT_LOG_MAX = 500;
+
+window.api.onCatLog((msg) => {
+  console.log(msg);
+  catLogLines.push(msg);
+  if (catLogLines.length > CAT_LOG_MAX) catLogLines.shift();
+  catLogOutput.value = catLogLines.join('\n');
+  catLogOutput.scrollTop = catLogOutput.scrollHeight;
+});
+
+catLogToggleBtn.addEventListener('click', () => {
+  const isHidden = catLogPanel.classList.toggle('hidden');
+  catLogToggleBtn.classList.toggle('active', !isHidden);
+  document.body.classList.toggle('cat-log-open', !isHidden);
+});
+
+catLogCopyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(catLogOutput.value).then(() => {
+    catLogCopyBtn.textContent = 'Copied!';
+    setTimeout(() => { catLogCopyBtn.textContent = 'Copy'; }, 1500);
+  });
+});
+
+catLogClearBtn.addEventListener('click', () => {
+  catLogLines.length = 0;
+  catLogOutput.value = '';
+});
 
 // --- Solar data listener ---
 function updateSolarVisibility() {
@@ -2758,6 +2796,10 @@ document.getElementById('discord-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://discord.gg/JjdKSshej');
 });
+document.getElementById('welcome-discord-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://discord.gg/JjdKSshej');
+});
 document.getElementById('issues-link').addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openExternal('https://github.com/Waffleslop/POTA-CAT/issues');
@@ -2775,8 +2817,11 @@ document.getElementById('tb-close').addEventListener('click', () => window.api.c
 // --- Welcome dialog (first run) ---
 const welcomeDialog = document.getElementById('welcome-dialog');
 const welcomeGridInput = document.getElementById('welcome-grid');
+const welcomeLightMode = document.getElementById('welcome-light-mode');
 const welcomeChoices = document.querySelectorAll('.welcome-choice');
 let welcomeRadioType = null;
+
+welcomeLightMode.addEventListener('change', () => applyTheme(welcomeLightMode.checked));
 
 welcomeChoices.forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -2791,6 +2836,7 @@ async function finishWelcome() {
   const myCallsign = (document.getElementById('welcome-callsign').value.trim() || '').toUpperCase();
   const grid = welcomeGridInput.value.trim() || 'FN20jb';
   const telemetryOptIn = document.getElementById('welcome-telemetry').checked;
+  const lightModeEnabled = welcomeLightMode.checked;
   let catTarget = null;
   let rigs = [];
   let activeRigId = null;
@@ -2817,6 +2863,7 @@ async function finishWelcome() {
     enablePota: true,
     enableSota: false,
     enableTelemetry: telemetryOptIn,
+    lightMode: lightModeEnabled,
   });
 
   welcomeDialog.close();

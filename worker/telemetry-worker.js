@@ -58,9 +58,12 @@ export default {
         record.version = version || record.version;
         record.os = os || record.os;
         record.lastSeen = new Date().toISOString();
-        record.totalSessions += 1;
         if (sessionSeconds && typeof sessionSeconds === 'number' && sessionSeconds > 0) {
+          // Close ping — add duration only, don't double-count sessions
           record.totalSeconds += Math.min(sessionSeconds, 86400); // cap at 24h per session
+        } else {
+          // Launch ping — count the session
+          record.totalSessions += 1;
         }
 
         // Store with 90-day TTL — inactive users auto-disappear

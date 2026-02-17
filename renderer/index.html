@@ -77,6 +77,7 @@
       <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
       <span id="k-status" class="status solar-pill hidden">K —</span>
       <span id="a-status" class="status solar-pill hidden">A —</span>
+      <button id="cat-log-toggle" class="status cat-log-btn" title="Toggle CAT log panel">Log</button>
       <span id="spot-count"></span>
       <span id="last-refresh"></span>
     </div>
@@ -207,6 +208,17 @@
       </div>
     </div>
   </main>
+
+  <div id="cat-log-panel" class="hidden">
+    <div class="cat-log-header">
+      <span>CAT Log</span>
+      <div>
+        <button id="cat-log-copy" title="Copy log to clipboard">Copy</button>
+        <button id="cat-log-clear" title="Clear log">Clear</button>
+      </div>
+    </div>
+    <textarea id="cat-log-output" readonly></textarea>
+  </div>
 
   <!-- Settings dialog -->
   <dialog id="settings-dialog">
@@ -341,7 +353,14 @@
     </fieldset>
     <fieldset class="source-toggles">
       <legend>Display</legend>
-      <label class="checkbox-label"><input type="checkbox" id="set-light-mode"> Light mode</label>
+      <label class="switch-label">
+        <span>Dark Mode</span>
+        <div class="switch">
+          <input type="checkbox" id="set-light-mode">
+          <span class="switch-slider"></span>
+        </div>
+        <span>Light Mode</span>
+      </label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
@@ -561,8 +580,19 @@
     <label class="welcome-grid">Callsign: <input type="text" id="welcome-callsign" maxlength="10" placeholder="WB6ACU" style="text-transform:uppercase;"></label>
     <span class="help-text" style="margin-left:0;margin-top:-4px;margin-bottom:8px;display:block;">Used for DX Cluster, Reverse Beacon Network, and QSO logging</span>
     <label class="welcome-grid">QTH Grid Square: <input type="text" id="welcome-grid" maxlength="6" placeholder="FN20jb"></label>
+    <label class="switch-label welcome-theme-switch">
+      <span>Dark Mode</span>
+      <div class="switch">
+        <input type="checkbox" id="welcome-light-mode">
+        <span class="switch-slider"></span>
+      </div>
+      <span>Light Mode</span>
+    </label>
     <label class="checkbox-label welcome-telemetry"><input type="checkbox" id="welcome-telemetry" checked> Share anonymous usage statistics</label>
     <span class="help-text" style="margin-left:12px;margin-top:-4px;display:block;">No callsign, grid, or personal data is collected. You can opt out any time in Settings.</span>
+    <div class="welcome-beta-note">
+      POTA CAT is in beta and we're working toward a strong v1 release. We're still collecting feedback on radio settings that work for each rig. Please visit the <a href="#" id="welcome-discord-link">Discord</a> and share a rig report on what you're integrating &mdash; every tester helps!
+    </div>
   </dialog>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>

@@ -194,10 +194,13 @@ function spawnRigctld(target, portOverride) {
     const proc = spawn(rigctldPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     if (!portOverride) rigctldProc = proc;
 
-    // Capture stderr (capped at 4KB)
+    // Capture stderr (capped at 4KB) and pipe to log panel
     proc.stderr.on('data', (chunk) => {
-      rigctldStderr += chunk.toString();
+      const text = chunk.toString();
+      rigctldStderr += text;
       if (rigctldStderr.length > 4096) rigctldStderr = rigctldStderr.slice(-4096);
+      // Send each line to the CAT log panel
+      text.split('\n').filter(Boolean).forEach(line => sendCatLog(`[rigctld] ${line}`));
     });
 
     let settled = false;
@@ -266,9 +269,11 @@ async function connectCat() {
         const lastLine = rigctldStderr.trim().split('\n').pop();
         if (lastLine) s.error = lastLine;
       }
+      sendCatLog(`rigctld status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
     });
     cat.on('frequency', sendCatFrequency);
+    sendCatLog('Connecting to rigctld on 127.0.0.1:4532');
     cat.connect({ type: 'rigctld', host: '127.0.0.1', port: 4532 });
   } else {
     cat = new CatClient();
@@ -1080,7 +1085,7 @@ function generateTelemetryId() {
 }
 
 function sendTelemetry(sessionSeconds) {
-  if (!settings || !settings.enableTelemetry) return;
+  if (!settings || !settings.enableTelemetry) return Promise.resolve();
   if (!settings.telemetryId) {
     settings.telemetryId = generateTelemetryId();
     saveSettings(settings);
@@ -1093,16 +1098,19 @@ function sendTelemetry(sessionSeconds) {
     sessionSeconds: sessionSeconds || 0,
   });
   const url = new URL(TELEMETRY_URL);
-  const req = https.request({
-    hostname: url.hostname,
-    path: url.pathname,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-    timeout: 5000,
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+      timeout: 5000,
+    }, () => resolve());
+    req.on('error', () => resolve());
+    req.on('timeout', () => { req.destroy(); resolve(); });
+    req.write(payload);
+    req.end();
   });
-  req.on('error', () => { /* silently ignore */ });
-  req.write(payload);
-  req.end();
 }
 
 // --- Rig profile migration ---
@@ -1508,10 +1516,10 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
-  // Send session duration telemetry before quitting
+app.on('window-all-closed', async () => {
+  // Send session duration telemetry before quitting — await so the request flushes
   const sessionSeconds = Math.round((Date.now() - sessionStartTime) / 1000);
-  sendTelemetry(sessionSeconds);
+  await sendTelemetry(sessionSeconds);
 
   if (spotTimer) clearInterval(spotTimer);
   if (solarTimer) clearInterval(solarTimer);
