@@ -1597,7 +1597,12 @@ function startScan() {
   const list = getScanList();
   if (list.length === 0) return;
   scanning = true;
+  // Resume from the spot matching the radio's current frequency, or start at 0
   scanIndex = 0;
+  if (radioFreqKhz !== null) {
+    const match = list.findIndex(s => Math.abs(parseFloat(s.frequency) - radioFreqKhz) < 1);
+    if (match !== -1) scanIndex = match;
+  }
   scanBtn.textContent = 'Stop';
   scanBtn.title = 'Press Stop or Spacebar to stop scanning';
   scanBtn.classList.add('scan-active');
