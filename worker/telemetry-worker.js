@@ -23,6 +23,9 @@
  *   key: "user:{telemetryId}"
  *   value: JSON { version, os, lastSeen, totalSessions, totalSeconds }
  *   TTL: 90 days (inactive users auto-expire)
+ *
+ *   key: "global:respots"
+ *   value: number (total POTA re-spots made via POTA CAT, no TTL)
  */
 
 export default {
@@ -75,6 +78,17 @@ export default {
       }
     }
 
+    // POST /respot — app pings after a successful POTA re-spot
+    if (request.method === 'POST' && url.pathname === '/respot') {
+      try {
+        const current = parseInt(await env.TELEMETRY.get('global:respots') || '0', 10);
+        await env.TELEMETRY.put('global:respots', String(current + 1));
+        return new Response('ok', { status: 200, headers: corsHeaders });
+      } catch {
+        return new Response('Server error', { status: 500, headers: corsHeaders });
+      }
+    }
+
     // GET /stats — developer dashboard (simple JSON)
     if (request.method === 'GET' && url.pathname === '/stats') {
       const list = await env.TELEMETRY.list({ prefix: 'user:' });
@@ -100,11 +114,14 @@ export default {
       const weekAgo = Date.now() - 7 * 86400000;
       const activeLastWeek = users.filter(u => new Date(u.lastSeen).getTime() > weekAgo).length;
 
+      const totalRespots = parseInt(await env.TELEMETRY.get('global:respots') || '0', 10);
+
       const stats = {
         totalUsers: users.length,
         activeLastWeek,
         totalSessions,
         totalHours: Math.round(totalSeconds / 3600),
+        totalRespots,
         versions: versionCounts,
         platforms: osCounts,
       };

@@ -1169,6 +1169,21 @@ function sendTelemetry(sessionSeconds) {
   });
 }
 
+function trackRespot() {
+  const https = require('https');
+  const url = new URL('https://telemetry.potacat.com/respot');
+  const req = https.request({
+    hostname: url.hostname,
+    path: url.pathname,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 5000,
+  });
+  req.on('error', () => {});
+  req.on('timeout', () => req.destroy());
+  req.end();
+}
+
 // --- Rig profile migration ---
 function describeTargetForMigration(target) {
   if (!target) return 'No Radio';
@@ -1564,6 +1579,8 @@ app.whenReady().then(() => {
             mode: qsoData.mode,
             comments: qsoData.respotComment || '',
           });
+          // Track re-spot in telemetry (fire-and-forget)
+          trackRespot();
           return { success: true, resposted: true };
         } catch (respotErr) {
           console.error('POTA re-spot failed:', respotErr.message);
