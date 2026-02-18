@@ -14,6 +14,7 @@ let scanDwell = 7;       // seconds per frequency during scan
 let enablePota = true;
 let enableSota = false;
 let enableWwff = false;
+let enableLlota = false;
 let enableDxcc = false;
 let enableCluster = false;
 let enableRbn = false;
@@ -71,6 +72,7 @@ const setWatchlist = document.getElementById('set-watchlist');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setEnableWwff = document.getElementById('set-enable-wwff');
+const setEnableLlota = document.getElementById('set-enable-llota');
 const setCwXit = document.getElementById('set-cw-xit');
 const setNotifyPopup = document.getElementById('set-notify-popup');
 const setNotifySound = document.getElementById('set-notify-sound');
@@ -201,6 +203,7 @@ const setSmartSdrSota = document.getElementById('set-smartsdr-sota');
 const setSmartSdrCluster = document.getElementById('set-smartsdr-cluster');
 const setSmartSdrRbn = document.getElementById('set-smartsdr-rbn');
 const setSmartSdrWwff = document.getElementById('set-smartsdr-wwff');
+const setSmartSdrLlota = document.getElementById('set-smartsdr-llota');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
 const logFrequency = document.getElementById('log-frequency');
@@ -361,6 +364,7 @@ async function loadPrefs() {
   enablePota = settings.enablePota !== false; // default true
   enableSota = settings.enableSota === true;  // default false
   enableWwff = settings.enableWwff === true;  // default false
+  enableLlota = settings.enableLlota === true; // default false
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
   enableRbn = settings.enableRbn === true; // default false
@@ -1274,6 +1278,7 @@ function getFiltered() {
       (s.source === 'pota' && !enablePota) ||
       (s.source === 'sota' && !enableSota) ||
       (s.source === 'wwff' && !enableWwff) ||
+      (s.source === 'llota' && !enableLlota) ||
       (s.source === 'dxc' && !enableCluster) ||
       (s.source === 'rbn' && !enableRbn);
     const isWatched = watchlist.has(s.callsign.toUpperCase());
@@ -1415,6 +1420,18 @@ const wwffIcon = L.divIcon({
   className: '',
   html: '<svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">' +
     '<path d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0Z" fill="#26a69a" stroke="#1b7a71" stroke-width="1"/>' +
+    '<circle cx="12.5" cy="12.5" r="5.5" fill="#fff" opacity="0.4"/>' +
+    '</svg>',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+});
+
+// Blue teardrop pin for LLOTA spots
+const llotaIcon = L.divIcon({
+  className: '',
+  html: '<svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M12.5 0C5.6 0 0 5.6 0 12.5C0 21.9 12.5 41 12.5 41S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0Z" fill="#42a5f5" stroke="#1e88e5" stroke-width="1"/>' +
     '<circle cx="12.5" cy="12.5" r="5.5" fill="#fff" opacity="0.4"/>' +
     '</svg>',
   iconSize: [25, 41],
@@ -1718,7 +1735,7 @@ function updateMapMarkers(filtered) {
     const watched = watchlist.has(s.callsign.toUpperCase());
 
     const sourceLabel = (s.source || 'pota').toUpperCase();
-    const sourceColor = s.source === 'sota' ? '#f0a500' : s.source === 'dxc' ? '#e040fb' : s.source === 'rbn' ? '#00bcd4' : s.source === 'wwff' ? '#26a69a' : '#4ecca3';
+    const sourceColor = s.source === 'sota' ? '#f0a500' : s.source === 'dxc' ? '#e040fb' : s.source === 'rbn' ? '#00bcd4' : s.source === 'wwff' ? '#26a69a' : s.source === 'llota' ? '#42a5f5' : '#4ecca3';
     const logBtnHtml = enableLogging
       ? ` <button class="log-popup-btn" data-call="${s.callsign}" data-freq="${s.frequency}" data-mode="${s.mode}" data-ref="${s.reference || ''}" data-name="${(s.parkName || '').replace(/"/g, '&quot;')}" data-source="${s.source || ''}" data-wwff-ref="${s.wwffReference || ''}" data-wwff-name="${(s.wwffParkName || '').replace(/"/g, '&quot;')}">Log</button>`
       : '';
@@ -1745,7 +1762,9 @@ function updateMapMarkers(filtered) {
           ? { icon: rbnIcon, ...(worked ? { opacity: 0.5 } : {}) }
           : s.source === 'wwff'
             ? { icon: wwffIcon, ...(worked ? { opacity: 0.5 } : {}) }
-            : worked ? { opacity: 0.5 } : {};
+            : s.source === 'llota'
+              ? { icon: llotaIcon, ...(worked ? { opacity: 0.5 } : {}) }
+              : worked ? { opacity: 0.5 } : {};
 
     // Plot marker at canonical position and one world-copy in each direction
     for (const offset of [-360, 0, 360]) {
@@ -2092,6 +2111,7 @@ function render() {
       if (s.source === 'dxc') tr.classList.add('spot-dxc');
       if (s.source === 'rbn') tr.classList.add('spot-rbn');
       if (s.source === 'wwff') tr.classList.add('spot-wwff');
+      if (s.source === 'llota') tr.classList.add('spot-llota');
 
       // License privilege check
       if (isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) {
@@ -2313,7 +2333,7 @@ function openLogPopup(spot) {
 
   // Show park/summit reference if applicable
   if (spot.reference) {
-    const sig = spot.source === 'sota' ? 'SOTA' : spot.source === 'pota' ? 'POTA' : spot.source === 'wwff' ? 'WWFF' : '';
+    const sig = spot.source === 'sota' ? 'SOTA' : spot.source === 'pota' ? 'POTA' : spot.source === 'wwff' ? 'WWFF' : spot.source === 'llota' ? 'LLOTA' : '';
     logRefDisplay.textContent = sig ? `${sig}: ${spot.reference}` : spot.reference;
     if (spot.parkName) logRefDisplay.textContent += ` — ${spot.parkName}`;
     if (spot.wwffReference) logRefDisplay.textContent += `\nWWFF: ${spot.wwffReference}` + (spot.wwffParkName ? ` — ${spot.wwffParkName}` : '');
@@ -2440,6 +2460,7 @@ logSaveBtn.addEventListener('click', async () => {
     if (currentLogSpot.source === 'pota') sig = 'POTA';
     else if (currentLogSpot.source === 'sota') sig = 'SOTA';
     else if (currentLogSpot.source === 'wwff') sig = 'WWFF';
+    else if (currentLogSpot.source === 'llota') sig = 'LLOTA';
     sigInfo = currentLogSpot.reference;
   }
 
@@ -2560,6 +2581,7 @@ settingsBtn.addEventListener('click', async () => {
   setEnablePota.checked = s.enablePota !== false;
   setEnableSota.checked = s.enableSota === true;
   setEnableWwff.checked = s.enableWwff === true;
+  setEnableLlota.checked = s.enableLlota === true;
   setEnableCluster.checked = s.enableCluster === true;
   setEnableRbn.checked = s.enableRbn === true;
   setMyCallsign.value = s.myCallsign || '';
@@ -2601,6 +2623,7 @@ settingsBtn.addEventListener('click', async () => {
   setSmartSdrCluster.checked = s.smartSdrCluster !== false;
   setSmartSdrRbn.checked = s.smartSdrRbn === true;
   setSmartSdrWwff.checked = s.smartSdrWwff !== false;
+  setSmartSdrLlota.checked = s.smartSdrLlota !== false;
   smartSdrConfig.classList.toggle('hidden', !s.smartSdrSpots);
   setEnableTelemetry.checked = s.enableTelemetry === true;
   setLightMode.checked = s.lightMode === true;
@@ -2629,6 +2652,7 @@ settingsSave.addEventListener('click', async () => {
   const potaEnabled = setEnablePota.checked;
   const sotaEnabled = setEnableSota.checked;
   const wwffEnabled = setEnableWwff.checked;
+  const llotaEnabled = setEnableLlota.checked;
   const clusterEnabled = setEnableCluster.checked;
   const rbnEnabled = setEnableRbn.checked;
   const myCallsign = setMyCallsign.value.trim().toUpperCase();
@@ -2656,6 +2680,7 @@ settingsSave.addEventListener('click', async () => {
   const smartSdrClusterEnabled = setSmartSdrCluster.checked;
   const smartSdrRbnEnabled = setSmartSdrRbn.checked;
   const smartSdrWwffEnabled = setSmartSdrWwff.checked;
+  const smartSdrLlotaEnabled = setSmartSdrLlota.checked;
   const adifPath = setAdifPath.value.trim() || '';
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
@@ -2689,6 +2714,7 @@ settingsSave.addEventListener('click', async () => {
     enablePota: potaEnabled,
     enableSota: sotaEnabled,
     enableWwff: wwffEnabled,
+    enableLlota: llotaEnabled,
     enableCluster: clusterEnabled,
     enableRbn: rbnEnabled,
     enableWsjtx: wsjtxEnabled,
@@ -2726,6 +2752,7 @@ settingsSave.addEventListener('click', async () => {
     smartSdrCluster: smartSdrClusterEnabled,
     smartSdrRbn: smartSdrRbnEnabled,
     smartSdrWwff: smartSdrWwffEnabled,
+    smartSdrLlota: smartSdrLlotaEnabled,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -2734,6 +2761,7 @@ settingsSave.addEventListener('click', async () => {
   enablePota = potaEnabled;
   enableSota = sotaEnabled;
   enableWwff = wwffEnabled;
+  enableLlota = llotaEnabled;
   enableCluster = clusterEnabled;
   enableRbn = rbnEnabled;
   enableWsjtx = wsjtxEnabled;
@@ -3468,6 +3496,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   const enablePotaVal = document.getElementById('welcome-enable-pota').checked;
   const enableSotaVal = document.getElementById('welcome-enable-sota').checked;
   const enableWwffVal = document.getElementById('welcome-enable-wwff') ? document.getElementById('welcome-enable-wwff').checked : false;
+  const enableLlotaVal = document.getElementById('welcome-enable-llota') ? document.getElementById('welcome-enable-llota').checked : false;
   const telemetryOptIn = document.getElementById('welcome-telemetry').checked;
   const lightModeEnabled = welcomeLightMode.checked;
   const currentSettings = await window.api.getSettings();
@@ -3485,6 +3514,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     enablePota: enablePotaVal,
     enableSota: enableSotaVal,
     enableWwff: enableWwffVal,
+    enableLlota: enableLlotaVal,
     enableTelemetry: telemetryOptIn,
     lightMode: lightModeEnabled,
   });
@@ -3508,6 +3538,7 @@ async function checkFirstRun() {
       document.getElementById('welcome-enable-pota').checked = s.enablePota !== false;
       document.getElementById('welcome-enable-sota').checked = s.enableSota === true;
       if (document.getElementById('welcome-enable-wwff')) document.getElementById('welcome-enable-wwff').checked = s.enableWwff === true;
+      if (document.getElementById('welcome-enable-llota')) document.getElementById('welcome-enable-llota').checked = s.enableLlota === true;
       document.getElementById('welcome-telemetry').checked = s.enableTelemetry === true;
       welcomeLightMode.checked = s.lightMode === true;
     }

@@ -715,6 +715,10 @@ dialog input, dialog select {
   border-left: 3px solid #26a69a;
 }
 
+.spot-llota {
+  border-left: 3px solid #42a5f5;
+}
+
 /* Settings source toggles */
 .source-toggles {
   border: 1px solid var(--border-secondary);

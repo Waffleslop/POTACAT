@@ -16,6 +16,7 @@ const { SmartSdrClient } = require('./lib/smartsdr');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
 const { WsjtxClient } = require('./lib/wsjtx');
 const { fetchSpots: fetchWwffSpots } = require('./lib/wwff');
+const { fetchSpots: fetchLlotaSpots } = require('./lib/llota');
 const { postWwffRespot } = require('./lib/wwff-respot');
 
 // --- cty.dat database (loaded once at startup) ---
@@ -91,7 +92,7 @@ function notifyWatchlistSpot({ callsign, frequency, mode, source, reference, loc
   const freqMHz = (parseFloat(frequency) / 1000).toFixed(3);
   let body = `${freqMHz} MHz`;
   if (mode) body += ` ${mode}`;
-  const sourceLabels = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', dxc: 'DX Cluster', rbn: 'RBN' };
+  const sourceLabels = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', dxc: 'DX Cluster', rbn: 'RBN' };
   const label = sourceLabels[source] || source;
   if (reference) {
     body += ` \u2014 ${label} ${reference}`;
@@ -842,6 +843,7 @@ function pushSpotsToSmartSdr(spots) {
     if (spot.source === 'dxc' && settings.smartSdrCluster === false) continue;
     if (spot.source === 'rbn' && !settings.smartSdrRbn) continue;
     if (spot.source === 'wwff' && settings.smartSdrWwff === false) continue;
+    if (spot.source === 'llota' && settings.smartSdrLlota === false) continue;
     smartSdr.addSpot(spot);
   }
 }
@@ -1033,7 +1035,66 @@ function processWwffSpots(raw) {
   });
 }
 
-let lastPotaSotaSpots = []; // cache of last fetched POTA+SOTA+WWFF spots
+function processLlotaSpots(raw) {
+  const myPos = gridToLatLon(settings.grid);
+  return raw.filter(s => s.is_active !== false).map((s) => {
+    // Frequency may be kHz (14250) or MHz (14.250) — normalize
+    let freqNum = typeof s.frequency === 'string' ? parseFloat(s.frequency) : (s.frequency || 0);
+    let freqMHz = freqNum >= 1000 ? freqNum / 1000 : freqNum;
+    let freqKhz = freqNum >= 1000 ? Math.round(freqNum) : Math.round(freqNum * 1000);
+
+    const callsign = s.callsign || '';
+
+    // No lat/lon in LLOTA API — resolve approximate location from cty.dat
+    let lat = null, lon = null, continent = '';
+    if (ctyDb && callsign) {
+      const entity = resolveCallsign(callsign, ctyDb);
+      if (entity) {
+        continent = entity.continent || '';
+        lat = entity.lat != null ? entity.lat : null;
+        lon = entity.lon != null ? entity.lon : null;
+      }
+    }
+
+    let distance = null;
+    if (myPos && lat != null && lon != null) {
+      distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, lat, lon));
+    }
+
+    let spotBearing = null;
+    if (myPos && lat != null && lon != null) {
+      spotBearing = Math.round(bearing(myPos.lat, myPos.lon, lat, lon));
+    }
+
+    // Use updated_at or created_at for spot time
+    let spotTime = '';
+    if (s.updated_at) {
+      spotTime = s.updated_at.endsWith('Z') ? s.updated_at : s.updated_at + 'Z';
+    } else if (s.created_at) {
+      spotTime = s.created_at.endsWith('Z') ? s.created_at : s.created_at + 'Z';
+    }
+
+    return {
+      source: 'llota',
+      callsign,
+      frequency: String(freqKhz),
+      freqMHz,
+      mode: (s.mode || '').toUpperCase(),
+      reference: s.reference || '',
+      parkName: s.reference_name || '',
+      locationDesc: '',
+      distance,
+      bearing: spotBearing,
+      lat,
+      lon,
+      band: freqToBand(freqMHz),
+      spotTime,
+      continent,
+    };
+  });
+}
+
+let lastPotaSotaSpots = []; // cache of last fetched POTA+SOTA+WWFF+LLOTA spots
 
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
@@ -1047,11 +1108,13 @@ async function refreshSpots() {
     const enablePota = settings.enablePota !== false; // default true
     const enableSota = settings.enableSota === true;  // default false
     const enableWwff = settings.enableWwff === true;   // default false
+    const enableLlota = settings.enableLlota === true; // default false
 
     const fetches = [];
     if (enablePota) fetches.push(fetchPotaSpots().then(processPotaSpots));
     if (enableSota) fetches.push(fetchSotaSpots().then(processSotaSpots));
     if (enableWwff) fetches.push(fetchWwffSpots().then(processWwffSpots));
+    if (enableLlota) fetches.push(fetchLlotaSpots().then(processLlotaSpots));
 
     const results = await Promise.allSettled(fetches);
     const allSpots = results
