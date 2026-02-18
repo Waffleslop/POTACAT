@@ -135,6 +135,7 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
   border-bottom: 1px solid var(--border-primary);
   position: relative;
 }
@@ -245,6 +246,7 @@ button:hover {
   display: flex;
   gap: 16px;
   align-items: center;
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--text-tertiary);
 }
@@ -1027,6 +1029,50 @@ dialog input, dialog select {
 .welcome-telemetry {
   margin-top: 4px;
   font-size: 12px;
+}
+
+.welcome-import-section {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.welcome-import-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.welcome-import-row + .welcome-import-row {
+  border-top: 1px solid var(--border-primary);
+}
+
+.welcome-import-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.welcome-import-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.welcome-import-result {
+  font-size: 12px;
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
+.welcome-import-result.success {
+  color: #4ecca3;
+}
+
+.welcome-import-result.error {
+  color: var(--accent-red);
 }
 
 /* DXCC Tracker */
@@ -2008,6 +2054,56 @@ dialog input, dialog select {
 .cat-popover-port input {
   margin-top: 0;
   width: auto;
+}
+
+/* Hotkeys dialog */
+#hotkeys-dialog {
+  max-width: 340px;
+}
+
+.hotkeys-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.hotkeys-table td {
+  padding: 6px 10px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.hotkeys-table tr:last-child td {
+  border-bottom: none;
+}
+
+.hotkeys-table td:first-child {
+  width: 80px;
+  text-align: center;
+}
+
+.hotkeys-table kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  color: var(--accent-blue);
+  min-width: 32px;
+  text-align: center;
+}
+
+/* Status bar hotkeys hint */
+.hotkeys-hint {
+  cursor: pointer;
+  color: var(--text-dimmer);
+  font-size: 11px;
+  user-select: none;
+}
+
+.hotkeys-hint:hover {
+  color: var(--text-secondary);
 }
 
 #cat-status {

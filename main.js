@@ -368,6 +368,9 @@ function connectCluster() {
       });
     }
 
+    // Dedupe: keep only the latest spot per callsign
+    const idx = clusterSpots.findIndex(s => s.callsign === spot.callsign);
+    if (idx !== -1) clusterSpots.splice(idx, 1);
     clusterSpots.push(spot);
     // FIFO cap at 500
     if (clusterSpots.length > 500) {
@@ -870,7 +873,7 @@ function fetchSolarData() {
 // --- Spot processing ---
 function processPotaSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
-  return raw.map((s) => {
+  const all = raw.map((s) => {
     const freqMHz = parseFloat(s.frequency) / 1000; // API gives kHz
     let distance = null;
     if (myPos) {
@@ -926,6 +929,10 @@ function processPotaSpots(raw) {
       continent,
     };
   });
+  // Dedupe: keep latest spot per callsign
+  const seen = new Map();
+  for (const s of all) { seen.set(s.callsign, s); }
+  return [...seen.values()];
 }
 
 async function processSotaSpots(raw) {
@@ -934,7 +941,7 @@ async function processSotaSpots(raw) {
   // Batch-fetch summit coordinates (cached across refreshes)
   await fetchSummitCoordsBatch(raw);
 
-  return raw.map((s) => {
+  const all = raw.map((s) => {
     const freqMHz = parseFloat(s.frequency);
     const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz → convert to kHz
     const assoc = s.associationCode || '';
@@ -982,11 +989,15 @@ async function processSotaSpots(raw) {
       continent,
     };
   });
+  // Dedupe: keep latest spot per callsign
+  const seen = new Map();
+  for (const s of all) { seen.set(s.callsign, s); }
+  return [...seen.values()];
 }
 
 function processWwffSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
-  return raw.map((s) => {
+  const all = raw.map((s) => {
     const freqKhz = s.frequency_khz;
     const freqMHz = freqKhz / 1000;
     const callsign = s.activator || '';
@@ -1033,11 +1044,15 @@ function processWwffSpots(raw) {
       continent,
     };
   });
+  // Dedupe: keep latest spot per callsign
+  const seen = new Map();
+  for (const s of all) { seen.set(s.callsign, s); }
+  return [...seen.values()];
 }
 
 function processLlotaSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
-  return raw.filter(s => s.is_active !== false).map((s) => {
+  const all = raw.filter(s => s.is_active !== false).map((s) => {
     // Frequency may be kHz (14250) or MHz (14.250) — normalize
     let freqNum = typeof s.frequency === 'string' ? parseFloat(s.frequency) : (s.frequency || 0);
     let freqMHz = freqNum >= 1000 ? freqNum / 1000 : freqNum;
@@ -1092,6 +1107,10 @@ function processLlotaSpots(raw) {
       continent,
     };
   });
+  // Dedupe: keep latest spot per callsign
+  const seen = new Map();
+  for (const s of all) { seen.set(s.callsign, s); }
+  return [...seen.values()];
 }
 
 let lastPotaSotaSpots = []; // cache of last fetched POTA+SOTA+WWFF+LLOTA spots

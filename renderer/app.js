@@ -1714,15 +1714,18 @@ function formatBearing(deg) {
 function updateMapMarkers(filtered) {
   if (!markerLayer) return;
 
-  // Preserve open popup across re-render
-  let openPopupCallsign = null;
-  let openPopupLatLng = null;
+  // If a popup is open and its callsign is still in the filtered list, skip rebuild
+  // to avoid flash/flicker from the 2s cluster/RBN flush cycles
+  let hasOpenPopup = false;
   markerLayer.eachLayer((layer) => {
     if (layer.getPopup && layer.getPopup() && layer.getPopup().isOpen()) {
-      openPopupCallsign = layer._spotCallsign || null;
-      openPopupLatLng = layer.getLatLng();
+      const call = layer._spotCallsign;
+      if (call && filtered.some(s => s.callsign === call)) {
+        hasOpenPopup = true;
+      }
     }
   });
+  if (hasOpenPopup) return;
 
   markerLayer.clearLayers();
 
@@ -1771,12 +1774,6 @@ function updateMapMarkers(filtered) {
       const marker = L.marker([s.lat, s.lon + offset], markerOptions).bindPopup(popupContent);
       marker._spotCallsign = s.callsign;
       marker.addTo(markerLayer);
-
-      // Re-open popup if it was open before re-render
-      if (openPopupCallsign && s.callsign === openPopupCallsign && openPopupLatLng &&
-          Math.abs(marker.getLatLng().lng - openPopupLatLng.lng) < 1) {
-        marker.openPopup();
-      }
     }
   }
 }
@@ -1891,16 +1888,28 @@ scanBtn.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  // F1 — Hotkeys help
+  if (e.key === 'F1' && !e.target.matches('input, select, textarea')) {
+    e.preventDefault();
+    document.getElementById('hotkeys-dialog').showModal();
+    return;
+  }
   // F2 — Recent QSOs viewer
   if (e.key === 'F2' && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     openRecentQsos();
     return;
   }
-  if (!scanning) return;
+  // F11 — Welcome screen
+  if (e.key === 'F11' && !e.target.matches('input, select, textarea')) {
+    e.preventDefault();
+    checkFirstRun(true);
+    return;
+  }
   if (e.code === 'Space' && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
-    stopScan();
+    if (scanning) { stopScan(); } else { startScan(); }
+    return;
   }
 });
 
@@ -3463,6 +3472,19 @@ document.getElementById('hamlib-link').addEventListener('click', (e) => {
   window.api.openExternal('https://hamlib.github.io/');
 });
 
+// --- Hotkeys dialog ---
+document.getElementById('hotkeys-dialog-close').addEventListener('click', () => {
+  document.getElementById('hotkeys-dialog').close();
+});
+document.getElementById('hotkeys-hint').addEventListener('click', () => {
+  document.getElementById('hotkeys-dialog').showModal();
+});
+document.getElementById('hotkeys-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('settings-dialog').close();
+  document.getElementById('hotkeys-dialog').showModal();
+});
+
 // --- Titlebar controls ---
 document.getElementById('tb-min').addEventListener('click', () => window.api.minimize());
 document.getElementById('tb-max').addEventListener('click', () => window.api.maximize());
@@ -3485,6 +3507,49 @@ welcomeCallsignInput.addEventListener('input', () => {
   } else if (!call) {
     welcomeWatchlistInput.placeholder = 'K3SBP, K4SWL, KI6NAZ';
   }
+});
+
+// Welcome import buttons
+document.getElementById('welcome-import-adif').addEventListener('click', async () => {
+  const resultEl = document.getElementById('welcome-adif-result');
+  resultEl.textContent = 'Importing...';
+  resultEl.className = 'welcome-import-result';
+  try {
+    const result = await window.api.importAdif();
+    if (!result) {
+      resultEl.textContent = '';
+    } else if (result.success) {
+      resultEl.textContent = `${result.imported} QSOs imported`;
+      resultEl.className = 'welcome-import-result success';
+    } else {
+      resultEl.textContent = 'Import failed';
+      resultEl.className = 'welcome-import-result error';
+    }
+  } catch (err) {
+    resultEl.textContent = 'Import failed';
+    resultEl.className = 'welcome-import-result error';
+  }
+});
+
+document.getElementById('welcome-import-parks').addEventListener('click', async () => {
+  const resultEl = document.getElementById('welcome-parks-result');
+  try {
+    const filePath = await window.api.choosePotaParksFile();
+    if (filePath) {
+      const currentSettings = await window.api.getSettings();
+      await window.api.saveSettings(Object.assign({}, currentSettings, { potaParksPath: filePath }));
+      resultEl.textContent = 'Parks loaded';
+      resultEl.className = 'welcome-import-result success';
+    }
+  } catch (err) {
+    resultEl.textContent = 'Load failed';
+    resultEl.className = 'welcome-import-result error';
+  }
+});
+
+document.getElementById('welcome-pota-csv-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal('https://pota.app');
 });
 
 document.getElementById('welcome-start').addEventListener('click', async () => {
@@ -3524,12 +3589,12 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   loadPrefs();
 });
 
-async function checkFirstRun() {
+async function checkFirstRun(force = false) {
   const s = await window.api.getSettings();
   const isNewVersion = s.appVersion && s.lastVersion !== s.appVersion;
-  if (s.firstRun || isNewVersion) {
+  if (force || s.firstRun || isNewVersion) {
     // Pre-fill with existing settings on upgrade (not fresh install)
-    if (!s.firstRun) {
+    if (force || !s.firstRun) {
       welcomeCallsignInput.value = s.myCallsign || '';
       welcomeGridInput.value = s.grid || '';
       welcomeWatchlistInput.value = s.watchlist || '';

@@ -80,6 +80,7 @@
       <span id="a-status" class="status solar-pill hidden">A —</span>
       <button id="parks-stats-toggle" class="status parks-stats-btn hidden" title="Toggle POTA stats panel">POTA Stats</button>
       <button id="cat-log-toggle" class="status cat-log-btn hidden" title="Toggle CAT log panel">Verbose Log</button>
+      <span id="hotkeys-hint" class="hotkeys-hint" title="Keyboard shortcuts (F1)">F1 Hotkeys</span>
       <span id="spot-count"></span>
       <span id="last-refresh"></span>
     </div>
@@ -551,6 +552,8 @@
         <a href="#" id="issues-link">Report Bug</a>
         <span class="footer-dot">&middot;</span>
         <a href="#" id="hamlib-link">Hamlib</a>
+        <span class="footer-dot">&middot;</span>
+        <a href="#" id="hotkeys-link">Hotkeys</a>
       </div>
     </div>
   </dialog>
@@ -655,6 +658,23 @@
     </div>
   </dialog>
 
+  <!-- Hotkeys dialog (F1) -->
+  <dialog id="hotkeys-dialog">
+    <div class="log-dialog-header">
+      <h3>Keyboard Shortcuts</h3>
+      <button type="button" id="hotkeys-dialog-close" class="log-dialog-x" title="Close">&times;</button>
+    </div>
+    <table class="hotkeys-table">
+      <tbody>
+        <tr><td><kbd>F1</kbd></td><td>Keyboard shortcuts</td></tr>
+        <tr><td><kbd>F2</kbd></td><td>Recent QSOs</td></tr>
+        <tr><td><kbd>F11</kbd></td><td>Welcome / setup screen</td></tr>
+        <tr><td><kbd>Space</kbd></td><td>Start / stop scan</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Close dialog</td></tr>
+      </tbody>
+    </table>
+  </dialog>
+
   <!-- Welcome dialog (first run) -->
   <dialog id="welcome-dialog">
     <h3>Welcome to POTA CAT</h3>
@@ -695,6 +715,26 @@
       <label class="checkbox-label"><input type="checkbox" id="welcome-enable-sota" checked> SOTA spots</label>
       <label class="checkbox-label"><input type="checkbox" id="welcome-enable-wwff"> WWFF spots</label>
       <label class="checkbox-label"><input type="checkbox" id="welcome-enable-llota"> LLOTA spots</label>
+    </div>
+    <div class="welcome-import-section">
+      <div style="font-weight:bold;margin-bottom:4px;">Import Your Data (optional)</div>
+      <span class="help-text" style="display:block;margin-bottom:8px;">Already have QSO history or POTA park data? Import now to see worked indicators from the start.</span>
+      <div class="welcome-import-row">
+        <div class="welcome-import-info">
+          <div style="font-weight:bold;">QSO History</div>
+          <div class="help-text">ADIF from LoTW, QRZ, POTA, or any logger</div>
+        </div>
+        <button type="button" id="welcome-import-adif" class="welcome-import-btn">Browse</button>
+        <span id="welcome-adif-result" class="welcome-import-result"></span>
+      </div>
+      <div class="welcome-import-row">
+        <div class="welcome-import-info">
+          <div style="font-weight:bold;">POTA Parks Worked</div>
+          <div class="help-text">CSV from <a href="#" id="welcome-pota-csv-link">pota.app</a></div>
+        </div>
+        <button type="button" id="welcome-import-parks" class="welcome-import-btn">Browse</button>
+        <span id="welcome-parks-result" class="welcome-import-result"></span>
+      </div>
     </div>
     <label class="switch-label welcome-theme-switch">
       <span>Dark Mode</span>
