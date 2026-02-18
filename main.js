@@ -839,7 +839,6 @@ function pushSpotsToSmartSdr(spots) {
   if (now - lastSmartSdrPush < 5000) return;
   lastSmartSdrPush = now;
 
-  smartSdr.clearSpots();
   for (const spot of spots) {
     if (spot.source === 'pota' && settings.smartSdrPota === false) continue;
     if (spot.source === 'sota' && settings.smartSdrSota === false) continue;
@@ -849,6 +848,8 @@ function pushSpotsToSmartSdr(spots) {
     if (spot.source === 'llota' && settings.smartSdrLlota === false) continue;
     smartSdr.addSpot(spot);
   }
+  // Remove spots no longer in the list (instead of clear+re-add which causes flashing)
+  smartSdr.pruneStaleSpots();
 }
 
 // --- Solar data ---
