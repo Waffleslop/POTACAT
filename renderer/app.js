@@ -1630,18 +1630,13 @@ function bindPopupClickHandlers(mapInstance) {
     if (!container) return;
     container.querySelectorAll('.tune-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        if (enableWsjtx) {
-          const freqMHz = (parseFloat(btn.dataset.freq) / 1000).toFixed(3);
-          showLogToast(`Tune WSJT-X to ${freqMHz} MHz ${btn.dataset.mode}`, { duration: 3000 });
-          return;
-        }
         window.api.tune(btn.dataset.freq, btn.dataset.mode);
       });
     });
     container.querySelectorAll('.popup-qrz').forEach((link) => {
       link.addEventListener('click', (ev) => {
         ev.preventDefault();
-        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(link.dataset.call)}`);
+        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(link.dataset.call.split('/')[0])}`);
       });
     });
     container.querySelectorAll('.log-popup-btn').forEach((btn) => {
@@ -1668,10 +1663,6 @@ function getScanList() {
 }
 
 function startScan() {
-  if (enableWsjtx) {
-    showLogToast('Scan disabled — WSJT-X is controlling the radio', { duration: 3000 });
-    return;
-  }
   const list = getScanList();
   if (list.length === 0) return;
   scanning = true;
@@ -1963,11 +1954,6 @@ function render() {
 
       tr.addEventListener('click', () => {
         if (scanning) stopScan(); // clicking a row stops scan
-        if (enableWsjtx) {
-          const freqMHz = (parseFloat(s.frequency) / 1000).toFixed(3);
-          showLogToast(`Tune WSJT-X to ${freqMHz} MHz ${s.mode}`, { duration: 3000 });
-          return;
-        }
         window.api.tune(s.frequency, s.mode);
       });
 
@@ -2001,7 +1987,7 @@ function render() {
       callLink.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s.callsign)}`);
+        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s.callsign.split('/')[0])}`);
       });
       callTd.appendChild(callLink);
       tr.appendChild(callTd);
@@ -2553,7 +2539,10 @@ window.api.onSpotsError((msg) => {
   lastRefreshEl.textContent = `Error: ${msg}`;
 });
 
+let catConnected = false; // track CAT state for WSJT-X tune decisions
+
 window.api.onCatStatus(({ connected, error, wsjtxMode }) => {
+  catConnected = connected;
   if (wsjtxMode) {
     catStatusEl.textContent = 'CAT';
     catStatusEl.className = 'status connected';
@@ -3056,7 +3045,7 @@ function renderRbnTable() {
     spotterLink.className = 'qrz-link';
     spotterLink.addEventListener('click', (e) => {
       e.preventDefault();
-      window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s.spotter)}`);
+      window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s.spotter.split('/')[0])}`);
     });
     spotterTd.appendChild(spotterLink);
     tr.appendChild(spotterTd);
