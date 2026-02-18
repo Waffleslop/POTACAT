@@ -46,6 +46,7 @@ let scanning = false;
 let scanTimer = null;
 let scanIndex = 0;
 let scanSkipped = new Set(); // frequencies to skip (as strings)
+let pendingSpots = null;     // buffered spots during scan
 
 const MI_TO_KM = 1.60934;
 
@@ -219,6 +220,124 @@ function updateUtcClock() {
 }
 updateUtcClock();
 setInterval(updateUtcClock, 1000);
+
+// --- CAT Popover (rig switcher) ---
+const catPopover = document.getElementById('cat-popover');
+const catPopoverRigs = document.getElementById('cat-popover-rigs');
+const catPopoverWsjtx = document.getElementById('cat-popover-wsjtx');
+const catPopoverWsjtxPort = document.getElementById('cat-popover-wsjtx-port');
+const catPopoverWsjtxPortInput = document.getElementById('cat-popover-wsjtx-port-input');
+let catPopoverOpen = false;
+
+function positionCatPopover() {
+  const rect = catStatusEl.getBoundingClientRect();
+  const headerRect = catStatusEl.closest('header').getBoundingClientRect();
+  catPopover.style.top = (rect.bottom - headerRect.top + 4) + 'px';
+  catPopover.style.left = (rect.left - headerRect.left) + 'px';
+}
+
+async function openCatPopover() {
+  const settings = await window.api.getSettings();
+  const rigs = settings.rigs || [];
+  const activeId = settings.activeRigId || null;
+
+  // Build rig list
+  catPopoverRigs.innerHTML = '';
+
+  // "None" option
+  const noneEl = document.createElement('div');
+  noneEl.className = 'cat-popover-rig' + (!activeId ? ' active' : '');
+  noneEl.innerHTML = `
+    <span class="cat-popover-rig-dot"></span>
+    <div class="cat-popover-rig-info">
+      <div class="cat-popover-rig-name">None</div>
+      <div class="cat-popover-rig-desc">No radio connected</div>
+    </div>
+  `;
+  noneEl.addEventListener('click', async () => {
+    window.api.connectCat(null);
+    await window.api.saveSettings({ activeRigId: null });
+    activeRigName = '';
+    closeCatPopover();
+  });
+  catPopoverRigs.appendChild(noneEl);
+
+  for (const rig of rigs) {
+    const isActive = rig.id === activeId;
+    const rigEl = document.createElement('div');
+    rigEl.className = 'cat-popover-rig' + (isActive ? ' active' : '');
+    const dot = document.createElement('span');
+    dot.className = 'cat-popover-rig-dot';
+    const info = document.createElement('div');
+    info.className = 'cat-popover-rig-info';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'cat-popover-rig-name';
+    nameEl.textContent = rig.name || 'Unnamed Rig';
+    const descEl = document.createElement('div');
+    descEl.className = 'cat-popover-rig-desc';
+    descEl.textContent = describeRigTarget(rig.catTarget);
+    info.appendChild(nameEl);
+    info.appendChild(descEl);
+    rigEl.appendChild(dot);
+    rigEl.appendChild(info);
+    rigEl.addEventListener('click', async () => {
+      window.api.connectCat(rig.catTarget);
+      await window.api.saveSettings({ activeRigId: rig.id, catTarget: rig.catTarget });
+      activeRigName = rig.name || '';
+      closeCatPopover();
+    });
+    catPopoverRigs.appendChild(rigEl);
+  }
+
+  // WSJT-X toggle
+  catPopoverWsjtx.checked = settings.enableWsjtx === true;
+  catPopoverWsjtxPortInput.value = settings.wsjtxPort || 2237;
+  catPopoverWsjtxPort.classList.toggle('hidden', !settings.enableWsjtx);
+
+  positionCatPopover();
+  catPopover.classList.remove('hidden');
+  catPopoverOpen = true;
+}
+
+function closeCatPopover() {
+  catPopover.classList.add('hidden');
+  catPopoverOpen = false;
+}
+
+catStatusEl.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (catPopoverOpen) {
+    closeCatPopover();
+  } else {
+    openCatPopover();
+  }
+});
+
+catPopoverWsjtx.addEventListener('change', async () => {
+  const enabled = catPopoverWsjtx.checked;
+  catPopoverWsjtxPort.classList.toggle('hidden', !enabled);
+  const port = parseInt(catPopoverWsjtxPortInput.value, 10) || 2237;
+  await window.api.saveSettings({ enableWsjtx: enabled, wsjtxPort: port });
+  enableWsjtx = enabled;
+  updateWsjtxStatusVisibility();
+  closeCatPopover();
+});
+
+catPopoverWsjtxPortInput.addEventListener('click', (e) => e.stopPropagation());
+
+// Close popover on outside click
+document.addEventListener('click', (e) => {
+  if (catPopoverOpen && !catPopover.contains(e.target) && e.target !== catStatusEl) {
+    closeCatPopover();
+  }
+});
+
+// Close popover on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && catPopoverOpen) {
+    closeCatPopover();
+  }
+});
 
 // --- Load preferences from settings ---
 function parseWatchlist(str) {
@@ -1681,21 +1800,43 @@ function startScan() {
 function stopScan() {
   scanning = false;
   if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+  // Flush any buffered spots so table shows latest data
+  if (pendingSpots) {
+    allSpots = pendingSpots;
+    pendingSpots = null;
+  }
   scanBtn.textContent = 'Scan';
   scanBtn.title = 'Scan through spots';
   scanBtn.classList.remove('scan-active');
-  render(); // clear highlight
+  render();
 }
 
 function scanStep() {
   if (!scanning) return;
+
+  // Apply buffered spot updates between dwell steps
+  if (pendingSpots) {
+    const prevList = getScanList();
+    const prevFreq = prevList.length > 0 && scanIndex < prevList.length
+      ? prevList[scanIndex].frequency : null;
+    allSpots = pendingSpots;
+    pendingSpots = null;
+    // Re-find position in updated list
+    if (prevFreq) {
+      const newList = getScanList();
+      const idx = newList.findIndex(s => s.frequency === prevFreq);
+      if (idx >= 0) scanIndex = idx;
+      // if not found, scanIndex stays — will be clamped below
+    }
+  }
+
   const list = getScanList();
   if (list.length === 0) { stopScan(); return; }
   if (scanIndex >= list.length) scanIndex = 0;
 
   const spot = list[scanIndex];
   window.api.tune(spot.frequency, spot.mode);
-  render(); // update highlight
+  render();
 
   scanTimer = setTimeout(() => {
     scanIndex++;
@@ -2540,6 +2681,11 @@ settingsSave.addEventListener('click', async () => {
 
 // --- IPC listeners ---
 window.api.onSpots((spots) => {
+  if (scanning) {
+    pendingSpots = spots;
+    lastRefreshEl.textContent = `Updated ${new Date().toISOString().slice(11, 19)}z`;
+    return;
+  }
   allSpots = spots;
   lastRefreshEl.textContent = `Updated ${new Date().toISOString().slice(11, 19)}z`;
   render();
