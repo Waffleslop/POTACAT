@@ -266,6 +266,21 @@ function sendCatLog(msg) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-log', line);
 }
 
+// PstRotator UDP rotor control
+const dgram = require('dgram');
+let rotorSocket = null;
+
+function sendRotorBearing(azimuth) {
+  if (!rotorSocket) rotorSocket = dgram.createSocket('udp4');
+  const host = settings.rotorHost || '127.0.0.1';
+  const port = settings.rotorPort || 12040;
+  const msg = Buffer.from(`<PST><AZIMUTH>${azimuth}</AZIMUTH></PST>`);
+  rotorSocket.send(msg, port, host, (err) => {
+    if (err) sendCatLog(`Rotor UDP error: ${err.message}`);
+  });
+  sendCatLog(`Rotor → ${host}:${port} azimuth=${azimuth}°`);
+}
+
 async function connectCat() {
   if (cat) cat.disconnect();
   killRigctld();
@@ -1744,7 +1759,7 @@ app.whenReady().then(() => {
 
   let _lastTuneFreq = 0;
   let _lastTuneTime = 0;
-  ipcMain.on('tune', (_e, { frequency, mode }) => {
+  ipcMain.on('tune', (_e, { frequency, mode, bearing }) => {
     let freqHz = Math.round(parseFloat(frequency) * 1000); // kHz → Hz
     // Debounce: skip duplicate tune to same frequency within 300ms
     const now = Date.now();
@@ -1765,6 +1780,11 @@ app.whenReady().then(() => {
       filterWidth = settings.ssbFilterWidth || 0;
     } else if (m === 'FT8' || m === 'FT4' || m === 'DIGU' || m === 'DIGL') {
       filterWidth = settings.digitalFilterWidth || 0;
+    }
+
+    // Send bearing to PstRotator via UDP
+    if (settings.enableRotor && bearing != null && !isNaN(bearing)) {
+      sendRotorBearing(Math.round(bearing));
     }
 
     // If WSJT-X is active and CAT is released, try to tune via SmartSDR API

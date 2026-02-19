@@ -115,6 +115,10 @@ const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
 const setHideWorked = document.getElementById('set-hide-worked');
 const setTuneClick = document.getElementById('set-tune-click');
 const setEnableSplit = document.getElementById('set-enable-split');
+const setEnableRotor = document.getElementById('set-enable-rotor');
+const rotorConfig = document.getElementById('rotor-config');
+const setRotorHost = document.getElementById('set-rotor-host');
+const setRotorPort = document.getElementById('set-rotor-port');
 const setVerboseLog = document.getElementById('set-verbose-log');
 const setEnableSplitView = document.getElementById('set-enable-split-view');
 const splitOrientationConfig = document.getElementById('split-orientation-config');
@@ -1135,6 +1139,11 @@ setEnableWsjtx.addEventListener('change', () => {
   wsjtxConfig.classList.toggle('hidden', !setEnableWsjtx.checked);
 });
 
+// PstRotator checkbox toggles rotor config visibility
+setEnableRotor.addEventListener('change', () => {
+  rotorConfig.classList.toggle('hidden', !setEnableRotor.checked);
+});
+
 // Split view checkbox toggles orientation config visibility
 setEnableSplitView.addEventListener('change', () => {
   splitOrientationConfig.classList.toggle('hidden', !setEnableSplitView.checked);
@@ -1967,7 +1976,7 @@ function updateMapMarkers(filtered) {
       ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}${wwffRefLine}<br>
       ${distStr}<br>
-      <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}">Tune</button>${logBtnHtml}
+      <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}" data-bearing="${s.bearing != null ? s.bearing : ''}">Tune</button>${logBtnHtml}
     `;
 
     // Out-of-privilege gets grey/red pin, SOTA gets orange, POTA gets default blue
@@ -2002,7 +2011,8 @@ function bindPopupClickHandlers(mapInstance) {
     if (!container) return;
     container.querySelectorAll('.tune-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        window.api.tune(btn.dataset.freq, btn.dataset.mode);
+        const b = btn.dataset.bearing;
+        window.api.tune(btn.dataset.freq, btn.dataset.mode, b ? parseInt(b, 10) : undefined);
       });
     });
     container.querySelectorAll('.popup-qrz').forEach((link) => {
@@ -2090,7 +2100,7 @@ function scanStep() {
   if (scanIndex >= list.length) scanIndex = 0;
 
   const spot = list[scanIndex];
-  window.api.tune(spot.frequency, spot.mode);
+  window.api.tune(spot.frequency, spot.mode, spot.bearing);
   render();
 
   scanTimer = setTimeout(() => {
@@ -2519,7 +2529,7 @@ function render() {
 
       tr.addEventListener('click', () => {
         if (scanning) stopScan(); // clicking a row stops scan
-        window.api.tune(s.frequency, s.mode);
+        window.api.tune(s.frequency, s.mode, s.bearing);
       });
 
       // Log button cell (first column, hidden unless logging enabled)
@@ -2976,6 +2986,10 @@ settingsBtn.addEventListener('click', async () => {
   setHideOutOfBand.checked = s.hideOutOfBand === true;
   setHideWorked.checked = s.hideWorked === true;
   setTuneClick.checked = s.tuneClick === true;
+  setEnableRotor.checked = s.enableRotor === true;
+  setRotorHost.value = s.rotorHost || '127.0.0.1';
+  setRotorPort.value = s.rotorPort || 12040;
+  rotorConfig.classList.toggle('hidden', !s.enableRotor);
   setEnableSplit.checked = s.enableSplit === true;
   setVerboseLog.checked = s.verboseLog === true;
   setEnablePota.checked = s.enablePota !== false;
@@ -3087,6 +3101,9 @@ settingsSave.addEventListener('click', async () => {
   const hideOob = setHideOutOfBand.checked;
   const hideWorkedEnabled = setHideWorked.checked;
   const tuneClickEnabled = setTuneClick.checked;
+  const rotorEnabled = setEnableRotor.checked;
+  const rotorHostVal = setRotorHost.value.trim() || '127.0.0.1';
+  const rotorPortVal = parseInt(setRotorPort.value, 10) || 12040;
   const enableSplitEnabled = setEnableSplit.checked;
   const verboseLogEnabled = setVerboseLog.checked;
   const telemetryEnabled = setEnableTelemetry.checked;
@@ -3159,6 +3176,9 @@ settingsSave.addEventListener('click', async () => {
     hideOutOfBand: hideOob,
     hideWorked: hideWorkedEnabled,
     tuneClick: tuneClickEnabled,
+    enableRotor: rotorEnabled,
+    rotorHost: rotorHostVal,
+    rotorPort: rotorPortVal,
     enableSplit: enableSplitEnabled,
     verboseLog: verboseLogEnabled,
     adifPath: adifPath,

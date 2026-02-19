@@ -332,6 +332,17 @@
       <span class="help-text" style="margin-top:-8px;margin-bottom:8px;display:block;">Send split on/off with each tune command (VFO A = RX, VFO B = TX)</span>
       <label class="checkbox-label"><input type="checkbox" id="set-tune-click"> Tune confirmation sound</label>
       <span class="help-text" style="margin-top:-8px;margin-bottom:8px;display:block;">Play a click when the radio confirms it has changed frequency</span>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-rotor"> PstRotator rotor control</label>
+      <div id="rotor-config" class="radio-sub hidden">
+        <span class="help-text" style="font-size:12px;">Sends beam heading to PstRotator via UDP when you tune to a spot.</span>
+        <label>Host:
+          <input type="text" id="set-rotor-host" placeholder="127.0.0.1" value="127.0.0.1" style="width:140px;">
+        </label>
+        <label>Port:
+          <input type="number" id="set-rotor-port" value="12040" min="1" max="65535" style="width:80px;">
+        </label>
+        <span class="help-text" style="display:block;margin-top:4px;">Default port is 12040. Use 12042, 12044, 12046 for additional rotators.</span>
+      </div>
     </fieldset>
     <fieldset class="source-toggles">
       <legend>Watchlist</legend>

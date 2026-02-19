@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('api', {
   onSpots: (cb) => ipcRenderer.on('spots', (_e, data) => cb(data)),
   onSpotsError: (cb) => ipcRenderer.on('spots-error', (_e, msg) => cb(msg)),
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
-  tune: (frequency, mode) => ipcRenderer.send('tune', { frequency, mode }),
+  tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
   refresh: () => ipcRenderer.send('refresh'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),

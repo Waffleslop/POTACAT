@@ -1178,6 +1178,10 @@ dialog input, dialog select {
   margin-bottom: 10px;
 }
 
+.welcome-import-section a {
+  color: var(--accent-blue);
+}
+
 .welcome-import-row {
   display: flex;
   align-items: center;
