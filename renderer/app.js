@@ -1413,6 +1413,11 @@ function sortSpots(spots) {
     if (typeof va === 'number' && typeof vb === 'number') {
       return sortAsc ? va - vb : vb - va;
     }
+    // Numeric strings (e.g. frequency "7268") — compare as numbers
+    const na = Number(va), nb = Number(vb);
+    if (!isNaN(na) && !isNaN(nb)) {
+      return sortAsc ? na - nb : nb - na;
+    }
     va = String(va);
     vb = String(vb);
     return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
