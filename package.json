@@ -23,8 +23,10 @@
       "renderer/**/*",
       "assets/icon.png",
       "assets/cty.dat",
-      "node_modules/leaflet/**/*",
-      "node_modules/sql.js/**/*"
+      "node_modules/**/*",
+      "!node_modules/electron/**/*",
+      "!node_modules/electron-builder/**/*",
+      "!node_modules/sharp/**/*"
     ],
     "win": {
       "target": [
