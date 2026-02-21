@@ -18,6 +18,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-popout.js",
       "lib/**/*",
       "renderer/**/*",
       "assets/icon.png",
