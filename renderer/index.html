@@ -617,32 +617,6 @@
         </label>
         <span class="help-text" style="display:block;">0 = no limit (show all spots)</span>
       </div>
-      <label class="checkbox-label">
-        <input type="checkbox" id="set-tci-spots"> Push spots to Thetis/TCI panadapter
-      </label>
-      <div id="tci-config" class="radio-sub hidden">
-        <label>Host:
-          <input type="text" id="set-tci-host" placeholder="127.0.0.1" style="width:140px;">
-        </label>
-        <label style="margin-left:8px;">Port:
-          <input type="number" id="set-tci-port" placeholder="50001" min="1" max="65535" style="width:70px;">
-        </label>
-        <span class="help-text">Connect to Thetis/ExpertSDR3 TCI server (WebSocket)</span>
-        <div style="margin-top:8px;">
-          <span style="font-size:12px;color:var(--text-secondary);">Sources to show on panadapter:</span>
-          <label class="checkbox-label"><input type="checkbox" id="set-tci-pota" checked> POTA</label>
-          <label class="checkbox-label"><input type="checkbox" id="set-tci-sota" checked> SOTA</label>
-          <label class="checkbox-label"><input type="checkbox" id="set-tci-cluster" checked> DX Cluster</label>
-          <label class="checkbox-label"><input type="checkbox" id="set-tci-rbn"> RBN</label>
-          <label class="checkbox-label"><input type="checkbox" id="set-tci-wwff" checked> WWFF</label>
-          <label class="checkbox-label"><input type="checkbox" id="set-tci-llota" checked> LLOTA</label>
-          <label class="checkbox-label"><input type="checkbox" id="set-tci-pskr" checked> FreeDV</label>
-        </div>
-        <label style="margin-top:8px;">Max spot age (minutes):
-          <input type="number" id="set-tci-max-age" min="0" max="120" value="15" style="width:60px;">
-        </label>
-        <span class="help-text" style="display:block;">0 = no limit (show all spots)</span>
-      </div>
     </fieldset>
     <!-- 9. DXCC Tracker -->
     <fieldset class="source-toggles">

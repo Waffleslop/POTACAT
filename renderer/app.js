@@ -283,18 +283,6 @@ const setSmartSdrWwff = document.getElementById('set-smartsdr-wwff');
 const setSmartSdrLlota = document.getElementById('set-smartsdr-llota');
 const setSmartSdrPskr = document.getElementById('set-smartsdr-pskr');
 const setSmartSdrMaxAge = document.getElementById('set-smartsdr-max-age');
-const setTciSpots = document.getElementById('set-tci-spots');
-const tciConfig = document.getElementById('tci-config');
-const setTciHost = document.getElementById('set-tci-host');
-const setTciPort = document.getElementById('set-tci-port');
-const setTciPota = document.getElementById('set-tci-pota');
-const setTciSota = document.getElementById('set-tci-sota');
-const setTciCluster = document.getElementById('set-tci-cluster');
-const setTciRbn = document.getElementById('set-tci-rbn');
-const setTciWwff = document.getElementById('set-tci-wwff');
-const setTciLlota = document.getElementById('set-tci-llota');
-const setTciPskr = document.getElementById('set-tci-pskr');
-const setTciMaxAge = document.getElementById('set-tci-max-age');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
 const logOpName = document.getElementById('log-op-name');
@@ -1195,11 +1183,6 @@ setEnableSplitView.addEventListener('change', () => {
 // SmartSDR checkbox toggles config visibility
 setSmartSdrSpots.addEventListener('change', () => {
   smartSdrConfig.classList.toggle('hidden', !setSmartSdrSpots.checked);
-});
-
-// TCI checkbox toggles config visibility
-setTciSpots.addEventListener('change', () => {
-  tciConfig.classList.toggle('hidden', !setTciSpots.checked);
 });
 
 // DXCC checkbox toggles ADIF picker visibility
@@ -3470,18 +3453,6 @@ settingsBtn.addEventListener('click', async () => {
   setSmartSdrPskr.checked = s.smartSdrPskr !== false;
   setSmartSdrMaxAge.value = s.smartSdrMaxAge != null ? s.smartSdrMaxAge : 15;
   smartSdrConfig.classList.toggle('hidden', !s.smartSdrSpots);
-  setTciSpots.checked = s.tciSpots === true;
-  setTciHost.value = s.tciHost || '127.0.0.1';
-  setTciPort.value = s.tciPort || 50001;
-  setTciPota.checked = s.tciPota !== false;
-  setTciSota.checked = s.tciSota !== false;
-  setTciCluster.checked = s.tciCluster !== false;
-  setTciRbn.checked = s.tciRbn === true;
-  setTciWwff.checked = s.tciWwff !== false;
-  setTciLlota.checked = s.tciLlota !== false;
-  setTciPskr.checked = s.tciPskr !== false;
-  setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
-  tciConfig.classList.toggle('hidden', !s.tciSpots);
   setDisableAutoUpdate.checked = s.disableAutoUpdate === true;
   setEnableTelemetry.checked = s.enableTelemetry === true;
   setLightMode.checked = s.lightMode === true;
@@ -3570,17 +3541,6 @@ settingsSave.addEventListener('click', async () => {
   const smartSdrLlotaEnabled = setSmartSdrLlota.checked;
   const smartSdrPskrEnabled = setSmartSdrPskr.checked;
   const smartSdrMaxAgeVal = parseInt(setSmartSdrMaxAge.value, 10) || 0;
-  const tciSpotsEnabled = setTciSpots.checked;
-  const tciHostVal = setTciHost.value.trim() || '127.0.0.1';
-  const tciPortVal = parseInt(setTciPort.value, 10) || 50001;
-  const tciPotaEnabled = setTciPota.checked;
-  const tciSotaEnabled = setTciSota.checked;
-  const tciClusterEnabled = setTciCluster.checked;
-  const tciRbnEnabled = setTciRbn.checked;
-  const tciWwffEnabled = setTciWwff.checked;
-  const tciLlotaEnabled = setTciLlota.checked;
-  const tciPskrEnabled = setTciPskr.checked;
-  const tciMaxAgeVal = parseInt(setTciMaxAge.value, 10) || 0;
   const adifPath = setAdifPath.value.trim() || '';
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
@@ -3670,17 +3630,6 @@ settingsSave.addEventListener('click', async () => {
     smartSdrLlota: smartSdrLlotaEnabled,
     smartSdrPskr: smartSdrPskrEnabled,
     smartSdrMaxAge: smartSdrMaxAgeVal,
-    tciSpots: tciSpotsEnabled,
-    tciHost: tciHostVal,
-    tciPort: tciPortVal,
-    tciPota: tciPotaEnabled,
-    tciSota: tciSotaEnabled,
-    tciCluster: tciClusterEnabled,
-    tciRbn: tciRbnEnabled,
-    tciWwff: tciWwffEnabled,
-    tciLlota: tciLlotaEnabled,
-    tciPskr: tciPskrEnabled,
-    tciMaxAge: tciMaxAgeVal,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;

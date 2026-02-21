@@ -71,7 +71,6 @@
     "electron-updater": "^6.8.3",
     "leaflet": "^1.9.4",
     "serialport": "^13.0.0",
-    "sql.js": "^1.14.0",
-    "ws": "^8.19.0"
+    "sql.js": "^1.14.0"
   }
 }
