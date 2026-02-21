@@ -1673,6 +1673,14 @@ function createWindow() {
 
   // Close pop-out map when main window closes
   win.on('close', () => {
+    // Save window bounds before destruction
+    settings.windowMaximized = win.isMaximized();
+    if (!win.isMaximized() && !win.isMinimized()) {
+      settings.windowBounds = win.getBounds();
+    }
+    // Remember whether pop-out map was open
+    settings.mapPopoutOpen = !!(popoutWin && !popoutWin.isDestroyed());
+    saveSettings(settings);
     if (popoutWin && !popoutWin.isDestroyed()) popoutWin.close();
   });
 
@@ -1709,6 +1717,10 @@ function createWindow() {
     // Fetch active DX expeditions from Club Log
     fetchExpeditions();
     setInterval(fetchExpeditions, 3600000); // refresh every hour
+    // Auto-reopen pop-out map if it was open when the app last closed
+    if (settings.mapPopoutOpen) {
+      ipcMain.emit('popout-map-open');
+    }
   });
 }
 
@@ -2777,15 +2789,6 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', async () => {
-  // Save window bounds before cleanup
-  if (win && !win.isDestroyed()) {
-    settings.windowMaximized = win.isMaximized();
-    if (!win.isMaximized() && !win.isMinimized()) {
-      settings.windowBounds = win.getBounds();
-    }
-    saveSettings(settings);
-  }
-
   // Send session duration telemetry before quitting — await so the request flushes
   const sessionSeconds = Math.round((Date.now() - sessionStartTime) / 1000);
   await sendTelemetry(sessionSeconds);
