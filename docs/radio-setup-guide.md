@@ -191,11 +191,74 @@ Some radios need the DTR/RTS lines managed carefully. Try toggling the **Disable
 
 ---
 
+## Using POTACAT with Win4Yaesu Suite
+
+**Best for:** Running POTACAT alongside Win4Yaesu Suite without CAT port conflicts
+
+If you use Win4Yaesu Suite to control your Yaesu radio, both programs will fight for the serial port if they try to connect directly. The solution is to let Win4Yaesu own the serial port and route POTACAT's CAT commands through one of Win4Yaesu's **AUX/CAT ports** using a virtual COM port pair.
+
+Win4Yaesu caches the radio's state in memory and exposes it through 4 AUX/CAT ports. External programs connected to these ports see what looks like a real Yaesu radio — but read commands are served from cache (so high polling rates don't slow down the radio), and write commands (frequency/mode changes) are forwarded to the radio immediately.
+
+### What You Need
+
+- **Win4Yaesu Suite** connected to your radio
+- **COM0COM** (free, open-source virtual COM port driver for Windows)
+
+### Setup
+
+#### 1. Install COM0COM
+
+Download the **signed 64-bit version** of COM0COM from SourceForge. Install it and let it run on startup (it must be running before Win4Yaesu starts).
+
+> **Important:** Only use the signed version. Unsigned versions can cause driver issues on 64-bit Windows.
+
+#### 2. Create a Virtual COM Port Pair
+
+Open the COM0COM Setup utility (from Start Menu → COM0COM → Setup). Create a new pair and rename them to regular COM port names that don't already exist on your system (e.g., `COM18` and `COM19`). Make sure neither port name shows in red — red means the name is already in use.
+
+#### 3. Configure Win4Yaesu
+
+1. In Win4Yaesu, go to **Tools → Settings → 3rd Party SW/HW**
+2. Set one of the 4 AUX/CAT ports to one end of your virtual pair (e.g., `COM18`)
+3. Save and restart Win4Yaesu if prompted
+
+#### 4. Configure POTACAT
+
+1. In POTACAT Settings, add a new rig (or edit your existing Yaesu rig)
+2. Select **Serial CAT (Kenwood)** as the connection type
+3. Set the COM port to the **other end** of the virtual pair (e.g., `COM19`)
+4. Set the baud rate to match your radio (typically 9600 or 38400)
+5. Check **Disable DTR/RTS on connect**
+6. Save
+
+> **Why "Kenwood"?** Yaesu and Kenwood radios use the same CAT command format (`FA` for frequency, `MD` for mode, semicolon-delimited). POTACAT's Serial CAT works with both protocols.
+
+### How It Works
+
+```
+POTACAT  ←→  COM19 ──(COM0COM)── COM18  ←→  Win4Yaesu  ←→  Radio
+```
+
+- POTACAT sends `FA;` to poll frequency and `FA00014060000;` to tune — Win4Yaesu handles these through its AUX/CAT port
+- Win4Yaesu serves frequency queries from its in-memory cache, so POTACAT's 1-second polling doesn't add extra load on the radio
+- Tune commands from POTACAT are forwarded to the radio immediately
+- Win4Yaesu, WSJT-X, N1MM+, and other programs can all run simultaneously — each on its own AUX/CAT port
+
+### Troubleshooting
+
+- **POTACAT can't open the port:** Make sure COM0COM is running and the port names match exactly. The COM0COM Setup utility must show the pair as active.
+- **No frequency updates:** Verify you're using the correct ends of the pair — one end goes to Win4Yaesu, the other to POTACAT. If they're swapped, neither will connect.
+- **Stale COM ports:** If a port name shows in red in COM0COM Setup, it's already claimed by another device. Open Device Manager → View → Show Hidden Devices → Ports (COM & LPT) to find and uninstall stale entries.
+
+---
+
 ## General Tips
 
 ### Only One Program Per COM Port
 
 Serial ports can only be used by one program at a time. If POTACAT can't connect, make sure you've closed any other software using the same port: WSJT-X, fldigi, N3FJP, HRD, PuTTY, etc.
+
+> **Exception:** If you use Win4Yaesu Suite, you don't need to close it — see the [Win4Yaesu section](#using-potacat-with-win4yaesu-suite) above for how to run both programs at the same time.
 
 ### Finding Your COM Port
 

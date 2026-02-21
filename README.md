@@ -38,7 +38,7 @@ Built for FlexRadio operators but works with any rig supported by Hamlib or Kenw
 
 - **FlexRadio SmartSDR CAT** — TCP connection to SmartSDR CAT slices (ports 5002–5005 for Slices A–D)
 - **Hamlib/rigctld** — Bundled rigctld 4.6.5 supports 200+ radio models; search and filter rigs by name
-- **Serial CAT (Kenwood)** — Direct serial/COM port using FA/MD commands; works with QRPLabs QMX/QDX (baud 38400, DTR/RTS disabled)
+- **Serial CAT (Kenwood)** — Direct serial/COM port using FA/MD commands; works with QRPLabs QMX/QDX (baud 38400, DTR/RTS disabled) and Win4Yaesu Suite (via COM0COM virtual port pair)
 - **SmartSDR Panadapter** — Push spots to the FlexRadio panadapter display via the SmartSDR TCP API
 - **My Rigs** — Save multiple radio profiles (name + connection config) and switch between them
 - **CW XIT Offset** — Configurable Hz offset applied when tuning to CW spots
