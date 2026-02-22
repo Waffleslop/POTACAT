@@ -8,6 +8,9 @@ routes = [
   { pattern = "telemetry.potacat.com/*", zone_name = "potacat.com" }
 ]
 
+[triggers]
+crons = ["0 5 * * *"]
+
 [[kv_namespaces]]
 binding = "TELEMETRY"
 id = "ff8649a3be4140509d3a7a150dd14aac"

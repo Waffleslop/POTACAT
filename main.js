@@ -1867,6 +1867,10 @@ function checkForUpdates() {
 // --- Anonymous telemetry (opt-in only) ---
 const TELEMETRY_URL = 'https://telemetry.potacat.com/ping';
 let sessionStartTime = Date.now();
+let lastActivityTime = Date.now(); // tracks meaningful user actions for active/idle detection
+
+function markUserActive() { lastActivityTime = Date.now(); }
+function isUserActive() { return (Date.now() - lastActivityTime) < 1800000; } // active within 30 min
 
 function generateTelemetryId() {
   // Random UUID v4 — not tied to any user identity
@@ -1968,6 +1972,7 @@ function sendTelemetry(sessionSeconds) {
     version: require('./package.json').version,
     os: process.platform,
     sessionSeconds: sessionSeconds || 0,
+    active: sessionSeconds === 0 ? true : isUserActive(), // launch ping always active
   });
   const url = new URL(TELEMETRY_URL);
   return new Promise((resolve) => {
@@ -2229,6 +2234,7 @@ app.whenReady().then(() => {
   let _lastTuneFreq = 0;
   let _lastTuneTime = 0;
   ipcMain.on('tune', (_e, { frequency, mode, bearing }) => {
+    markUserActive();
     let freqHz = Math.round(parseFloat(frequency) * 1000); // kHz → Hz
     // Debounce: skip duplicate tune to same frequency within 300ms
     const now = Date.now();
@@ -2275,7 +2281,7 @@ app.whenReady().then(() => {
     cat.tune(freqHz, mode, { split: settings.enableSplit, filterWidth });
   });
 
-  ipcMain.on('refresh', () => { refreshSpots(); });
+  ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
 
@@ -2293,6 +2299,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-settings', (_e, newSettings) => {
+    markUserActive();
     const adifLogPathChanged = newSettings.adifLogPath !== settings.adifLogPath;
     const potaParksPathChanged = newSettings.potaParksPath !== settings.potaParksPath;
 
@@ -2647,6 +2654,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-qso', async (_e, qsoData) => {
+    markUserActive();
     try {
       // Inject operator callsign from settings
       if (settings.myCallsign && !qsoData.operator) {
@@ -2740,6 +2748,7 @@ app.whenReady().then(() => {
 
   // Quick re-spot (no QSO logging)
   ipcMain.handle('quick-respot', async (_e, data) => {
+    markUserActive();
     try {
       const errors = [];
       if (data.potaRespot && data.potaReference && settings.myCallsign) {
@@ -2795,6 +2804,7 @@ app.whenReady().then(() => {
 
   // --- WSJT-X IPC ---
   ipcMain.on('wsjtx-reply', (_e, decode) => {
+    markUserActive();
     if (wsjtx && wsjtx.connected) {
       wsjtx.reply(decode, 0);
     }
