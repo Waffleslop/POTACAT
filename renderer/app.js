@@ -35,7 +35,7 @@ let defaultPower = 100;
 let tuneClick = false;
 let enableSplit = false;
 let activeRigName = ''; // name of the currently active rig profile
-let workedCallsigns = new Set(); // uppercase callsigns from QSO log
+let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log
 let donorCallsigns = new Set(); // supporter callsigns from potacat.com
 let expeditionCallsigns = new Set(); // active DX expeditions from Club Log
 let hideWorked = false;
@@ -44,8 +44,9 @@ let workedParksData = new Map(); // reference → full park data for stats
 let hideWorkedParks = false;
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
-let respotTemplate = 'Thanks for {rst}. 73s {mycallsign} via POTACAT'; // re-spot comment template
-let quickRespotTemplate = 'Heard strong in {QTH}; 73s {callsign} via POTACAT'; // quick re-spot template
+let respotTemplate = 'Thks fer {rst}. 73s {mycallsign} via POTACAT'; // park re-spot comment template
+let dxRespotTemplate = 'Heard in {QTH} 73s {mycallsign} via POTACAT'; // DX cluster spot comment template
+let quickRespotTemplate = 'Heard strong in {QTH}; 73s {callsign} via POTACAT'; // legacy — migrated below
 let myCallsign = '';
 let lastTunedSpot = null; // last clicked/tuned spot for quick respot
 let popoutOpen = false; // pop-out map window is open
@@ -82,6 +83,7 @@ function qrzDisplayName(info) {
 // --- Scan state ---
 // --- Radio frequency tracking ---
 let radioFreqKhz = null;
+let radioMode = null;
 
 let scanning = false;
 let scanTimer = null;
@@ -486,6 +488,7 @@ async function loadPrefs() {
   hideWorkedParks = settings.hideWorkedParks === true;
   respotDefault = settings.respotDefault !== false; // default true
   if (settings.respotTemplate != null) respotTemplate = settings.respotTemplate;
+  if (settings.dxRespotTemplate != null) dxRespotTemplate = settings.dxRespotTemplate;
   if (settings.quickRespotTemplate != null) quickRespotTemplate = settings.quickRespotTemplate;
   myCallsign = settings.myCallsign || '';
   tuneClick = settings.tuneClick === true;
@@ -1532,6 +1535,20 @@ function spotAgeSecs(spotTime) {
   } catch { return Infinity; }
 }
 
+function isWorkedSpot(spot) {
+  const entries = workedQsos.get(spot.callsign.toUpperCase());
+  if (!entries || entries.length === 0) return false;
+  const now = new Date();
+  const todayUtc = now.getUTCFullYear().toString() +
+    String(now.getUTCMonth() + 1).padStart(2, '0') +
+    String(now.getUTCDate()).padStart(2, '0');
+  const todayQsos = entries.filter(e => e.date === todayUtc);
+  if (todayQsos.length === 0) return false;
+  const spotRef = (spot.reference || '').toUpperCase();
+  if (spotRef) return todayQsos.some(e => e.ref === spotRef);
+  return true;
+}
+
 function getFiltered() {
   const bands = getDropdownValues(bandFilterEl);
   const modes = getDropdownValues(modeFilterEl);
@@ -1560,7 +1577,7 @@ function getFiltered() {
     if (!modeMatches(s.mode, modes)) return false;
     if (continents && !continents.has(s.continent)) return false;
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
-    if (hideWorked && workedCallsigns.has(s.callsign.toUpperCase())) return false;
+    if (hideWorked && isWorkedSpot(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
     return true;
   });
@@ -2311,7 +2328,7 @@ function updateMapMarkers(filtered) {
 
     // Pin color matches source: POTA green, SOTA orange, DXC purple, etc.
     const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
-    const worked = workedCallsigns.has(s.callsign.toUpperCase());
+    const worked = workedQsos.has(s.callsign.toUpperCase());
     const isExpedition = expeditionCallsigns.has(s.callsign.toUpperCase());
     const sourceIcon = s.source === 'sota' ? sotaIcon
       : s.source === 'rbn' ? rbnIcon
@@ -2380,7 +2397,7 @@ function bindPopupClickHandlers(mapInstance) {
 // --- Scan ---
 function getScanList() {
   const filtered = sortSpots(getFiltered());
-  return filtered.filter((s) => !scanSkipped.has(s.frequency) && !workedCallsigns.has(s.callsign.toUpperCase()));
+  return filtered.filter((s) => !scanSkipped.has(s.frequency) && !isWorkedSpot(s));
 }
 
 function startScan() {
@@ -2490,20 +2507,44 @@ document.addEventListener('keydown', (e) => {
     openQuickRespot();
     return;
   }
+  // Ctrl+L / Cmd+L — Quick Log (unspotted QSO)
+  if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    openQuickLog();
+    return;
+  }
 });
 
 // --- Quick Re-spot (Ctrl+R) ---
+const SOURCE_COLORS = {
+  pota: '#4ecca3', sota: '#f0a500', wwff: '#26a69a',
+  llota: '#42a5f5', dxc: '#e040fb', rbn: '#00bcd4', pskr: '#ff6b6b'
+};
+const RESPOT_NAMES = { pota: 'POTA', wwff: 'WWFF', llota: 'LLOTA', dxc: 'DX Cluster' };
+
+function getRespotTargets(s) {
+  const targets = [];
+  if (s.source === 'pota' && s.reference) {
+    targets.push('pota');
+    if (s.wwffReference) targets.push('wwff');
+  } else if (s.source === 'wwff' && s.reference) {
+    targets.push('wwff');
+  } else if (s.source === 'llota' && s.reference) {
+    targets.push('llota');
+  } else if (clusterConnected) {
+    targets.push('dxc');
+  }
+  return targets;
+}
+
 async function openQuickRespot() {
   if (!lastTunedSpot) {
     showLogToast('No respottable spot selected', { duration: 2000 });
     return;
   }
   const s = lastTunedSpot;
-  const isPota = s.source === 'pota' && s.reference;
-  const isWwff = (s.source === 'wwff' && s.reference) || (s.source === 'pota' && s.wwffReference);
-  const isLlota = s.source === 'llota' && s.reference;
-  const canDxc = clusterConnected;
-  if (!isPota && !isWwff && !isLlota && !canDxc) {
+  const targets = getRespotTargets(s);
+  if (!targets.length) {
     showLogToast('No respottable spot selected', { duration: 2000 });
     return;
   }
@@ -2524,31 +2565,28 @@ async function openQuickRespot() {
 
   // Reference display
   let refText = '';
-  if (isPota) refText = 'POTA: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
+  if (s.source === 'pota' && s.reference) refText = 'POTA: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
   else if (s.source === 'wwff') refText = 'WWFF: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
-  else if (isLlota) refText = 'LLOTA: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
+  else if (s.source === 'llota') refText = 'LLOTA: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
   else if (s.source === 'dxc') refText = s.callsign + (s.locationDesc ? ' \u2014 ' + s.locationDesc : '');
   document.getElementById('respot-ref').textContent = refText;
 
-  // Respot checkboxes
-  const potaCb = document.getElementById('respot-pota-cb');
-  const wwffCb = document.getElementById('respot-wwff-cb');
-  const llotaCb = document.getElementById('respot-llota-cb');
-  const dxcCb = document.getElementById('respot-dxc-cb');
-  potaCb.parentElement.style.display = isPota ? '' : 'none';
-  potaCb.checked = isPota;
-  wwffCb.parentElement.style.display = isWwff ? '' : 'none';
-  wwffCb.checked = isWwff;
-  llotaCb.parentElement.style.display = isLlota ? '' : 'none';
-  llotaCb.checked = isLlota;
-  dxcCb.parentElement.style.display = canDxc ? '' : 'none';
-  dxcCb.checked = canDxc;
+  // Network indicator bar
+  const bar = document.getElementById('respot-network-bar');
+  const labels = targets.map(t => RESPOT_NAMES[t]);
+  bar.textContent = (targets.includes('dxc') ? 'Spotting to ' : 'Re-spotting to ') + labels.join(' & ');
+  bar.style.borderColor = SOURCE_COLORS[targets[0]];
+  bar.style.color = SOURCE_COLORS[targets[0]];
+  dlg.dataset.targets = JSON.stringify(targets);
 
-  // Comment template
+  // Comment template — pick based on network type
   const commentField = document.getElementById('respot-comment');
-  commentField.value = quickRespotTemplate
+  const tmpl = targets.includes('dxc') ? dxRespotTemplate : respotTemplate;
+  commentField.value = tmpl
     .replace(/\{QTH\}/gi, grid)
-    .replace(/\{callsign\}/gi, myCallsign);
+    .replace(/\{rst\}/gi, '')
+    .replace(/\{callsign\}/gi, myCallsign)
+    .replace(/\{mycallsign\}/gi, myCallsign);
 
   dlg.showModal();
 }
@@ -2558,30 +2596,32 @@ document.getElementById('respot-send').addEventListener('click', async () => {
   const s = lastTunedSpot;
   if (!s) return;
 
-  const potaCb = document.getElementById('respot-pota-cb');
-  const wwffCb = document.getElementById('respot-wwff-cb');
-  const llotaCb = document.getElementById('respot-llota-cb');
-  const dxcCb = document.getElementById('respot-dxc-cb');
-  const commentText = document.getElementById('respot-comment').value.trim();
   const dlg = document.getElementById('respot-dialog');
+  const targets = JSON.parse(dlg.dataset.targets || '[]');
+  const commentText = document.getElementById('respot-comment').value.trim();
   const sendBtn = document.getElementById('respot-send');
 
-  // Persist template (store the raw template with placeholders restored)
-  quickRespotTemplate = commentText || quickRespotTemplate;
-  window.api.saveSettings({ quickRespotTemplate });
+  // Persist template based on network type
+  if (targets.includes('dxc')) {
+    dxRespotTemplate = commentText || dxRespotTemplate;
+    window.api.saveSettings({ dxRespotTemplate });
+  } else {
+    respotTemplate = commentText || respotTemplate;
+    window.api.saveSettings({ respotTemplate });
+  }
 
   const data = {
     callsign: s.callsign,
     frequency: s.frequency,
     mode: s.mode,
     comment: commentText,
-    potaRespot: potaCb.checked && potaCb.parentElement.style.display !== 'none',
+    potaRespot: targets.includes('pota'),
     potaReference: s.reference || '',
-    wwffRespot: wwffCb.checked && wwffCb.parentElement.style.display !== 'none',
+    wwffRespot: targets.includes('wwff'),
     wwffReference: s.wwffReference || (s.source === 'wwff' ? s.reference : ''),
-    llotaRespot: llotaCb.checked && llotaCb.parentElement.style.display !== 'none',
+    llotaRespot: targets.includes('llota'),
     llotaReference: s.source === 'llota' ? s.reference : '',
-    dxcRespot: dxcCb.checked && dxcCb.parentElement.style.display !== 'none',
+    dxcRespot: targets.includes('dxc'),
   };
 
   sendBtn.disabled = true;
@@ -2591,7 +2631,7 @@ document.getElementById('respot-send').addEventListener('click', async () => {
     if (result.error) {
       showLogToast('Re-spot failed: ' + result.error, { warn: true, duration: 5000 });
     } else {
-      const sources = [data.potaRespot && 'POTA', data.wwffRespot && 'WWFF', data.llotaRespot && 'LLOTA', data.dxcRespot && 'DX Cluster'].filter(Boolean).join(' & ');
+      const sources = targets.map(t => RESPOT_NAMES[t]).join(' & ');
       showLogToast('Re-spotted ' + s.callsign + ' on ' + sources);
     }
   } catch (err) {
@@ -2604,6 +2644,57 @@ document.getElementById('respot-send').addEventListener('click', async () => {
 
 document.getElementById('respot-cancel').addEventListener('click', () => {
   document.getElementById('respot-dialog').close();
+});
+
+// --- Quick Log (Ctrl+L) ---
+let quickLogLookupTimer = null;
+
+function openQuickLog() {
+  if (!enableLogging) {
+    showLogToast('Enable QSO Logging in Settings first', { warn: true, duration: 3000 });
+    return;
+  }
+  // Build a synthetic spot from the radio's current frequency/mode
+  const freqKhz = radioFreqKhz || 14074;
+  const mode = radioMode || 'SSB';
+  const syntheticSpot = {
+    callsign: '',
+    frequency: String(freqKhz),
+    mode: mode,
+    source: '',
+    reference: '',
+    parkName: '',
+  };
+  openLogPopup(syntheticSpot);
+  // Clear callsign and name fields, make callsign editable & focused
+  logCallsign.value = '';
+  logCallsign.readOnly = false;
+  logOpName.value = '';
+  logRefDisplay.classList.add('hidden');
+  logCallsign.focus();
+}
+
+// Debounced QRZ name lookup when typing callsign in Quick Log mode
+logCallsign.addEventListener('input', () => {
+  // Only do live lookup in Quick Log mode (no pre-existing callsign on the spot)
+  if (currentLogSpot && currentLogSpot.callsign) return;
+  clearTimeout(quickLogLookupTimer);
+  const cs = logCallsign.value.trim().toUpperCase();
+  if (cs.length < 3) { logOpName.value = ''; return; }
+  quickLogLookupTimer = setTimeout(async () => {
+    // Check local cache first
+    const cached = qrzData.get(cs.split('/')[0]);
+    if (cached) {
+      logOpName.value = qrzDisplayName(cached);
+      return;
+    }
+    // Fetch from QRZ via IPC
+    const result = await window.api.qrzLookup(cs);
+    if (result && logCallsign.value.trim().toUpperCase() === cs) {
+      qrzData.set(cs.split('/')[0], result);
+      logOpName.value = qrzDisplayName(result);
+    }
+  }, 500);
 });
 
 // --- Recent QSOs (F2) ---
@@ -2867,7 +2958,7 @@ window.api.onPopoutOpenLog((spot) => {
 function enrichSpotsForPopout(filtered) {
   return filtered.map(s => ({
     ...s,
-    isWorked: workedCallsigns.has(s.callsign.toUpperCase()),
+    isWorked: workedQsos.has(s.callsign.toUpperCase()),
     isExpedition: expeditionCallsigns.has(s.callsign.toUpperCase()),
     isNewPark: workedParksSet.size > 0 && (s.source === 'pota' || s.source === 'wwff') && s.reference && !workedParksSet.has(s.reference),
     isOop: isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
@@ -3023,7 +3114,7 @@ function render() {
 
     for (const s of filtered) {
       const tr = document.createElement('tr');
-      const isWorked = workedCallsigns.has(s.callsign.toUpperCase());
+      const isWorked = workedQsos.has(s.callsign.toUpperCase());
       const isSkipped = scanSkipped.has(s.frequency) || isWorked;
 
       // Source color-coding
@@ -3057,8 +3148,10 @@ function render() {
       if (scanSpot && s.frequency === scanSpot.frequency) {
         tr.classList.add('scan-highlight');
       }
-      // Highlight row matching radio's current frequency
-      if (radioFreqKhz !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhz) < 1) {
+      // Highlight row matching radio's current frequency or last tuned spot
+      if (radioFreqKhz !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhz) < 1.5) {
+        tr.classList.add('on-freq');
+      } else if (lastTunedSpot && s.callsign === lastTunedSpot.callsign && s.frequency === lastTunedSpot.frequency) {
         tr.classList.add('on-freq');
       }
       if (isSkipped) {
@@ -3076,6 +3169,7 @@ function render() {
         lastTunedSpot = s;
         window.api.tune(s.frequency, s.mode, s.bearing);
         if (s.lat != null && s.lon != null) showTuneArc(s.lat, s.lon, s.frequency, s.source);
+        render(); // highlight the clicked row immediately
       });
 
       // Log button cell (first column, hidden unless logging enabled)
@@ -3318,137 +3412,35 @@ function openLogPopup(spot) {
 
   logComment.value = '';
 
-  // Re-spot section: show for POTA, WWFF, and/or LLOTA spots when myCallsign is set
+  // Re-spot section: single checkbox, auto-determined by spot source
   const respotSection = document.getElementById('log-respot-section');
   const respotCheckbox = document.getElementById('log-respot');
+  const respotLabel = document.getElementById('log-respot-label');
   const respotComment = document.getElementById('log-respot-comment');
   const respotCommentLabel = document.getElementById('log-respot-comment-label');
-  // WWFF respot checkbox (dynamically create/remove)
-  let wwffRespotCheckbox = document.getElementById('log-wwff-respot');
-  // LLOTA respot checkbox (dynamically create/remove)
-  let llotaRespotCheckbox = document.getElementById('log-llota-respot');
-  const isPota = spot.source === 'pota' && spot.reference;
-  const isWwff = spot.source === 'wwff' && spot.reference;
-  const isLlota = spot.source === 'llota' && spot.reference;
-  const isDualPark = spot.source === 'pota' && spot.wwffReference;
-  if (isPota || isWwff || isDualPark || isLlota) {
+  const targets = myCallsign ? getRespotTargets(spot) : [];
+  if (targets.length) {
     respotSection.classList.remove('hidden');
-    // Label the POTA checkbox appropriately
-    if (isPota || isDualPark) {
-      respotCheckbox.checked = respotDefault;
-      respotCheckbox.parentElement.style.display = '';
-      respotCheckbox.parentElement.querySelector('span') && (respotCheckbox.parentElement.childNodes[1].textContent = isDualPark ? ' Re-spot on POTA' : ' Re-spot on POTA');
-    } else {
-      // Non-POTA spot — hide POTA checkbox
-      respotCheckbox.checked = false;
-      respotCheckbox.parentElement.style.display = 'none';
+    respotSection.dataset.targets = JSON.stringify(targets);
+    const labelNames = targets.map(t => RESPOT_NAMES[t]).join(' & ');
+    const verb = targets.includes('dxc') ? 'Spot on ' : 'Re-spot on ';
+    // Update checkbox label text — find the text node after the <input>
+    const inputEl = respotLabel.querySelector('input');
+    let labelTextNode = inputEl.nextSibling;
+    if (!labelTextNode || labelTextNode.nodeType !== 3) {
+      labelTextNode = document.createTextNode('');
+      respotLabel.appendChild(labelTextNode);
     }
-    // Show/create WWFF respot checkbox for WWFF-related spots
-    if (isWwff || isDualPark) {
-      if (!wwffRespotCheckbox) {
-        const label = document.createElement('label');
-        label.className = 'checkbox-label';
-        label.style.marginTop = '4px';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = 'log-wwff-respot';
-        cb.checked = true;
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(' Re-spot on WWFF'));
-        respotCheckbox.parentElement.parentElement.insertBefore(label, respotCommentLabel);
-        wwffRespotCheckbox = cb;
-      } else {
-        wwffRespotCheckbox.checked = true;
-        wwffRespotCheckbox.parentElement.style.display = '';
-      }
-    } else if (wwffRespotCheckbox) {
-      wwffRespotCheckbox.parentElement.style.display = 'none';
-      wwffRespotCheckbox.checked = false;
-    }
-    // Show/create LLOTA respot checkbox for LLOTA spots
-    if (isLlota) {
-      if (!llotaRespotCheckbox) {
-        const label = document.createElement('label');
-        label.className = 'checkbox-label';
-        label.style.marginTop = '4px';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = 'log-llota-respot';
-        cb.checked = true;
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(' Re-spot on LLOTA'));
-        respotCheckbox.parentElement.parentElement.insertBefore(label, respotCommentLabel);
-        llotaRespotCheckbox = cb;
-      } else {
-        llotaRespotCheckbox.checked = true;
-        llotaRespotCheckbox.parentElement.style.display = '';
-      }
-    } else if (llotaRespotCheckbox) {
-      llotaRespotCheckbox.parentElement.style.display = 'none';
-      llotaRespotCheckbox.checked = false;
-    }
-    // Hide DX Cluster checkbox — park spots use their own respot APIs
-    let dxcRespotCheckbox = document.getElementById('log-dxc-respot');
-    if (dxcRespotCheckbox) {
-      dxcRespotCheckbox.parentElement.style.display = 'none';
-      dxcRespotCheckbox.checked = false;
-    }
-    respotComment.value = respotTemplate;
-    const anyChecked = () => respotCheckbox.checked || (wwffRespotCheckbox && wwffRespotCheckbox.checked) || (llotaRespotCheckbox && llotaRespotCheckbox.checked);
-    respotCommentLabel.style.display = anyChecked() ? '' : 'none';
-    const updateCommentVis = () => { respotCommentLabel.style.display = anyChecked() ? '' : 'none'; };
-    respotCheckbox.onchange = updateCommentVis;
-    if (wwffRespotCheckbox) wwffRespotCheckbox.onchange = updateCommentVis;
-    if (llotaRespotCheckbox) llotaRespotCheckbox.onchange = updateCommentVis;
+    labelTextNode.textContent = ' ' + verb + labelNames;
+    respotLabel.style.color = SOURCE_COLORS[targets[0]];
+    respotCheckbox.checked = respotDefault;
+    respotComment.value = targets.includes('dxc') ? dxRespotTemplate : respotTemplate;
+    respotCommentLabel.style.display = respotCheckbox.checked ? '' : 'none';
+    respotCheckbox.onchange = () => { respotCommentLabel.style.display = respotCheckbox.checked ? '' : 'none'; };
   } else {
-    // No POTA/WWFF/LLOTA — but still show section if DX Cluster is connected
-    let dxcRespotCheckbox = document.getElementById('log-dxc-respot');
-    if (clusterConnected) {
-      respotSection.classList.remove('hidden');
-      respotCheckbox.checked = false;
-      respotCheckbox.parentElement.style.display = 'none';
-      if (wwffRespotCheckbox) {
-        wwffRespotCheckbox.parentElement.style.display = 'none';
-        wwffRespotCheckbox.checked = false;
-      }
-      if (llotaRespotCheckbox) {
-        llotaRespotCheckbox.parentElement.style.display = 'none';
-        llotaRespotCheckbox.checked = false;
-      }
-      if (!dxcRespotCheckbox) {
-        const label = document.createElement('label');
-        label.className = 'checkbox-label';
-        label.style.marginTop = '4px';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = 'log-dxc-respot';
-        cb.checked = true;
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(' Spot on DX Cluster'));
-        respotCheckbox.parentElement.parentElement.insertBefore(label, respotCommentLabel);
-        dxcRespotCheckbox = cb;
-      } else {
-        dxcRespotCheckbox.checked = true;
-        dxcRespotCheckbox.parentElement.style.display = '';
-      }
-      respotComment.value = respotTemplate;
-      respotCommentLabel.style.display = dxcRespotCheckbox.checked ? '' : 'none';
-      dxcRespotCheckbox.onchange = () => { respotCommentLabel.style.display = dxcRespotCheckbox.checked ? '' : 'none'; };
-    } else {
-      respotSection.classList.add('hidden');
-      if (wwffRespotCheckbox) {
-        wwffRespotCheckbox.parentElement.style.display = 'none';
-        wwffRespotCheckbox.checked = false;
-      }
-      if (llotaRespotCheckbox) {
-        llotaRespotCheckbox.parentElement.style.display = 'none';
-        llotaRespotCheckbox.checked = false;
-      }
-      if (dxcRespotCheckbox) {
-        dxcRespotCheckbox.parentElement.style.display = 'none';
-        dxcRespotCheckbox.checked = false;
-      }
-    }
+    respotSection.classList.add('hidden');
+    respotSection.dataset.targets = '[]';
+    respotCheckbox.checked = false;
   }
 
   logDialog.showModal();
@@ -3502,38 +3494,49 @@ logSaveBtn.addEventListener('click', async () => {
   const timeOn = time.replace(':', '');     // HHMM
   const band = freqKhzToBand(frequency);
 
-  // Determine SIG/SIG_INFO from spot
+  // Determine SIG/SIG_INFO and program-specific ref fields from spot
   let sig = '';
   let sigInfo = '';
+  let potaRef = '';
+  let sotaRef = '';
+  let wwffRef = '';
   if (currentLogSpot && currentLogSpot.reference) {
-    if (currentLogSpot.source === 'pota') sig = 'POTA';
-    else if (currentLogSpot.source === 'sota') sig = 'SOTA';
-    else if (currentLogSpot.source === 'wwff') sig = 'WWFF';
+    if (currentLogSpot.source === 'pota') { sig = 'POTA'; potaRef = currentLogSpot.reference; }
+    else if (currentLogSpot.source === 'sota') { sig = 'SOTA'; sotaRef = currentLogSpot.reference; }
+    else if (currentLogSpot.source === 'wwff') { sig = 'WWFF'; wwffRef = currentLogSpot.reference; }
     else if (currentLogSpot.source === 'llota') sig = 'LLOTA';
     sigInfo = currentLogSpot.reference;
   }
+  // Dual-park: POTA spot that's also a WWFF park
+  if (currentLogSpot && currentLogSpot.wwffReference) {
+    wwffRef = currentLogSpot.wwffReference;
+  }
 
-  // Re-spot checkbox state
+  // Re-spot state from stored targets
   const respotCheckbox = document.getElementById('log-respot');
   const respotComment = document.getElementById('log-respot-comment');
   const respotSection = document.getElementById('log-respot-section');
-  const wwffRespotCheckbox = document.getElementById('log-wwff-respot');
-  const llotaRespotCheckbox = document.getElementById('log-llota-respot');
-  const dxcRespotCheckbox = document.getElementById('log-dxc-respot');
-  const wantsRespot = !respotSection.classList.contains('hidden') && respotCheckbox.checked;
-  const wantsWwffRespot = !respotSection.classList.contains('hidden') && wwffRespotCheckbox && wwffRespotCheckbox.checked;
-  const wantsLlotaRespot = !respotSection.classList.contains('hidden') && llotaRespotCheckbox && llotaRespotCheckbox.checked;
-  const wantsDxcRespot = !respotSection.classList.contains('hidden') && dxcRespotCheckbox && dxcRespotCheckbox.checked;
+  const logTargets = JSON.parse(respotSection.dataset.targets || '[]');
+  const wantsRespot = respotCheckbox.checked && logTargets.includes('pota');
+  const wantsWwffRespot = respotCheckbox.checked && logTargets.includes('wwff');
+  const wantsLlotaRespot = respotCheckbox.checked && logTargets.includes('llota');
+  const wantsDxcRespot = respotCheckbox.checked && logTargets.includes('dxc');
 
   // Persist re-spot preference and template
   if (!respotSection.classList.contains('hidden')) {
     respotDefault = respotCheckbox.checked;
-    respotTemplate = respotComment.value.trim() || respotTemplate;
-    window.api.saveSettings({ respotDefault: respotCheckbox.checked, respotTemplate });
+    const tmplText = respotComment.value.trim();
+    if (logTargets.includes('dxc')) {
+      dxRespotTemplate = tmplText || dxRespotTemplate;
+      window.api.saveSettings({ respotDefault: respotCheckbox.checked, dxRespotTemplate });
+    } else {
+      respotTemplate = tmplText || respotTemplate;
+      window.api.saveSettings({ respotDefault: respotCheckbox.checked, respotTemplate });
+    }
   }
 
   // Determine WWFF reference for respot
-  const wwffRef = currentLogSpot ? (currentLogSpot.wwffReference || (currentLogSpot.source === 'wwff' ? currentLogSpot.reference : '')) : '';
+  const respotWwffRef = currentLogSpot ? (currentLogSpot.wwffReference || (currentLogSpot.source === 'wwff' ? currentLogSpot.reference : '')) : '';
   const commentText = respotComment.value.trim().replace(/\{rst\}/gi, logRstSent.value.trim() || '59').replace(/\{mycallsign\}/gi, myCallsign);
 
   const qsoData = {
@@ -3548,10 +3551,13 @@ logSaveBtn.addEventListener('click', async () => {
     band,
     sig,
     sigInfo,
+    potaRef,
+    sotaRef,
+    wwffRef,
     comment: logComment.value.trim(),
     respot: wantsRespot,
     wwffRespot: wantsWwffRespot,
-    wwffReference: wantsWwffRespot ? wwffRef : '',
+    wwffReference: wantsWwffRespot ? respotWwffRef : '',
     llotaRespot: wantsLlotaRespot,
     llotaReference: wantsLlotaRespot && currentLogSpot && currentLogSpot.source === 'llota' ? currentLogSpot.reference : '',
     dxcRespot: wantsDxcRespot,
@@ -3577,7 +3583,7 @@ logSaveBtn.addEventListener('click', async () => {
       } else if (result.dxcRespotError) {
         showLogToast(`Logged ${callsign} to ADIF, but DX Cluster spot failed: ${result.dxcRespotError}`, { warn: true, duration: 8000 });
       } else if (result.resposted) {
-        const sources = [wantsRespot && 'POTA', wantsWwffRespot && 'WWFF', wantsLlotaRespot && 'LLOTA', wantsDxcRespot && 'DX Cluster'].filter(Boolean).join(' & ');
+        const sources = logTargets.filter(t => respotCheckbox.checked).map(t => RESPOT_NAMES[t]).join(' & ');
         showLogToast(`Logged ${callsign} — re-spotted on ${sources || 'POTA'}`);
       } else {
         showLogToast(`Logged ${callsign}`);
@@ -4147,9 +4153,9 @@ window.api.onUpdateDownloaded(() => {
   };
 });
 
-// --- Worked callsigns listener ---
-window.api.onWorkedCallsigns((list) => {
-  workedCallsigns = new Set(list);
+// --- Worked QSOs listener ---
+window.api.onWorkedQsos((entries) => {
+  workedQsos = new Map(entries);
   render();
 });
 
@@ -4311,6 +4317,10 @@ window.api.onCatFrequency((hz) => {
   radioFreqKhz = newKhz;
   playTuneClick();
   if (showTable || showMap) render();
+});
+
+window.api.onCatMode((mode) => {
+  radioMode = mode;
 });
 
 // --- CAT Log Panel ---

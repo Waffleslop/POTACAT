@@ -12,7 +12,7 @@ const { CatClient, RigctldClient, listSerialPorts } = require('./lib/cat');
 const { gridToLatLon, haversineDistanceMiles, bearing } = require('./lib/grid');
 const { freqToBand } = require('./lib/bands');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
-const { parseAdifFile, parseWorkedCallsigns, parseAllQsos, parseSqliteFile, parseSqliteConfirmed, isSqliteFile } = require('./lib/adif');
+const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseSqliteFile, parseSqliteConfirmed, isSqliteFile } = require('./lib/adif');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso } = require('./lib/adif-writer');
@@ -63,7 +63,7 @@ let rbnFlushTimer = null; // throttle timer for RBN → renderer updates
 let rbnWatchSpots = []; // RBN spots for watchlist callsigns, merged into main table
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
-let workedCallsigns = new Set(); // callsigns from QSO log (all QSOs, not just confirmed)
+let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
 let workedParks = new Map(); // reference → park data from POTA parks CSV
 let wsjtx = null;
 let wsjtxStatus = null; // last Status message from WSJT-X
@@ -266,6 +266,10 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
 }
 
+function sendCatMode(mode) {
+  if (win && !win.isDestroyed()) win.webContents.send('cat-mode', mode);
+}
+
 function sendCatLog(msg) {
   const ts = new Date().toISOString().slice(11, 23);
   const line = `[CAT ${ts}] ${msg}`;
@@ -313,6 +317,7 @@ async function connectCat() {
       sendCatStatus(s);
     });
     cat.on('frequency', sendCatFrequency);
+    cat.on('mode', sendCatMode);
     sendCatLog('Connecting to rigctld on 127.0.0.1:4532');
     cat.connect({ type: 'rigctld', host: '127.0.0.1', port: 4532 });
   } else {
@@ -321,6 +326,7 @@ async function connectCat() {
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', sendCatFrequency);
+    cat.on('mode', sendCatMode);
     if (target) {
       cat.connect(target);
     }
@@ -956,7 +962,7 @@ function connectWsjtx() {
       }
       fs.appendFileSync(logPath, adif + '\n');
       // Reload worked callsigns
-      loadWorkedCallsigns();
+      loadWorkedQsos();
     } catch (err) {
       console.error('Failed to append WSJT-X ADIF:', err.message);
     }
@@ -1551,16 +1557,16 @@ async function sendDxccData() {
   }
 }
 
-// --- Worked callsigns tracking ---
-function loadWorkedCallsigns() {
+// --- Worked QSOs tracking ---
+function loadWorkedQsos() {
   if (!settings.adifLogPath) return;
   try {
-    workedCallsigns = parseWorkedCallsigns(settings.adifLogPath);
+    workedQsos = parseWorkedQsos(settings.adifLogPath);
     if (win && !win.isDestroyed()) {
-      win.webContents.send('worked-callsigns', [...workedCallsigns]);
+      win.webContents.send('worked-qsos', [...workedQsos.entries()]);
     }
   } catch (err) {
-    console.error('Failed to parse worked callsigns:', err.message);
+    console.error('Failed to parse worked QSOs:', err.message);
   }
 }
 
@@ -1772,7 +1778,7 @@ function createWindow() {
       sendDxccData();
     }
     // Load worked callsigns from QSO log
-    loadWorkedCallsigns();
+    loadWorkedQsos();
     // Load worked parks from POTA CSV
     loadWorkedParks();
     // Fetch donor list (async, non-blocking)
@@ -2446,7 +2452,7 @@ app.whenReady().then(() => {
 
     // Reload worked callsigns if log path changed
     if (adifLogPathChanged) {
-      loadWorkedCallsigns();
+      loadWorkedQsos();
     }
 
     // Reload worked parks if CSV path changed
@@ -2533,7 +2539,7 @@ app.whenReady().then(() => {
     }
 
     // Reload worked callsigns from updated log and push to renderer
-    loadWorkedCallsigns();
+    loadWorkedQsos();
 
     const fileList = fileNames.join(', ');
     dialog.showMessageBox(win, {
@@ -2725,11 +2731,14 @@ app.whenReady().then(() => {
       const qsoSource = (qsoData.sig || '').toLowerCase();
       trackQso(['pota', 'sota', 'wwff', 'llota'].includes(qsoSource) ? qsoSource : null);
 
-      // Update worked callsigns set and notify renderer
+      // Update worked QSOs map and notify renderer
       if (qsoData.callsign) {
-        workedCallsigns.add(qsoData.callsign.toUpperCase());
+        const call = qsoData.callsign.toUpperCase();
+        const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase() };
+        if (!workedQsos.has(call)) workedQsos.set(call, []);
+        workedQsos.get(call).push(entry);
         if (win && !win.isDestroyed()) {
-          win.webContents.send('worked-callsigns', [...workedCallsigns]);
+          win.webContents.send('worked-qsos', [...workedQsos.entries()]);
         }
       }
 
@@ -2896,6 +2905,16 @@ app.whenReady().then(() => {
   ipcMain.on('wsjtx-halt-tx', () => {
     if (wsjtx && wsjtx.connected) {
       wsjtx.haltTx(true);
+    }
+  });
+
+  // --- QRZ single callsign lookup (for Quick Log) ---
+  ipcMain.handle('qrz-lookup', async (_e, callsign) => {
+    if (!qrz.configured || !settings.enableQrz) return null;
+    try {
+      return await qrz.lookup(callsign);
+    } catch {
+      return null;
     }
   });
 

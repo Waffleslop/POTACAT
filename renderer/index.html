@@ -735,12 +735,12 @@
       <input type="text" id="log-comment" placeholder="Optional notes">
     </label>
     <div id="log-respot-section" class="hidden" style="margin:8px 0;">
-      <label class="checkbox-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+      <label class="checkbox-label" id="log-respot-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
         <input type="checkbox" id="log-respot"> Re-spot on POTA
       </label>
       <label id="log-respot-comment-label" style="display:block;margin-top:6px;">
         Re-spot comment:
-        <input type="text" id="log-respot-comment" placeholder="Thanks for {rst}. 73s {mycallsign} via POTACAT">
+        <input type="text" id="log-respot-comment" placeholder="Thks fer {rst}. 73s {mycallsign} via POTACAT">
         <span class="help-text">Use {rst} to automatically fill in the signal report you sent</span>
       </label>
     </div>
@@ -762,20 +762,7 @@
       <div class="respot-row"><span class="respot-label">Frequency</span><span id="respot-freq" class="respot-value"></span></div>
       <div class="respot-row"><span class="respot-label">Reference</span><span id="respot-ref" class="respot-value"></span></div>
     </div>
-    <div style="margin:8px 0;">
-      <label class="checkbox-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="respot-pota-cb"> Re-spot on POTA
-      </label>
-      <label class="checkbox-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="respot-wwff-cb"> Re-spot on WWFF
-      </label>
-      <label class="checkbox-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="respot-llota-cb"> Re-spot on LLOTA
-      </label>
-      <label class="checkbox-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="respot-dxc-cb"> Spot on DX Cluster
-      </label>
-    </div>
+    <div id="respot-network-bar" class="respot-network-bar"></div>
     <label>Comment:
       <input type="text" id="respot-comment" placeholder="Re-spot comment">
     </label>
@@ -824,6 +811,7 @@
         <tr><td><kbd>F11</kbd></td><td>Welcome / setup screen</td></tr>
         <tr><td><kbd>Space</kbd></td><td>Start / stop scan</td></tr>
         <tr><td><kbd>S</kbd></td><td>Toggle split mode</td></tr>
+        <tr><td><kbd>Ctrl+L</kbd></td><td>Quick Log (unspotted QSO)</td></tr>
         <tr><td><kbd>Ctrl+R</kbd></td><td>Quick re-spot</td></tr>
         <tr><td><kbd>Esc</kbd></td><td>Close dialog</td></tr>
       </tbody>

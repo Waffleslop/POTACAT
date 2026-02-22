@@ -1951,6 +1951,16 @@ dialog input, dialog select {
   background: #3db892 !important;
 }
 
+.respot-network-bar {
+  padding: 6px 10px;
+  border-left: 3px solid;
+  border-radius: 3px;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 8px 0;
+  background: rgba(255,255,255,0.03);
+}
+
 .respot-info {
   margin: 8px 0;
 }
