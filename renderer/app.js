@@ -1777,6 +1777,7 @@ let nightLayer = null;
 let mainHomePos = null; // { lat, lon } for tune arc drawing
 let tuneArcLayers = []; // polylines showing arc from QTH to tuned station
 let tuneArcFreq = null; // frequency string of the spot the arc points to
+let pendingTuneArc = null; // stashed arc data when map isn't ready yet
 
 // RBN state
 let rbnSpots = [];
@@ -1971,6 +1972,7 @@ function clearTuneArc() {
   for (const l of tuneArcLayers) map.removeLayer(l);
   tuneArcLayers = [];
   tuneArcFreq = null;
+  pendingTuneArc = null;
 }
 
 function tuneArcColor(source) {
@@ -1986,6 +1988,11 @@ function tuneArcColor(source) {
 function showTuneArc(lat, lon, freq, source) {
   // Forward to pop-out map
   sendPopoutTuneArc(lat, lon, freq, source);
+
+  // Stash arc data so it can be drawn when map becomes visible
+  if (lat != null && lon != null) {
+    pendingTuneArc = { lat, lon, freq, source };
+  }
 
   if (!map || !mainHomePos || lat == null || lon == null) return;
   clearTuneArc();
@@ -2584,6 +2591,11 @@ function updateViewLayout() {
     updateBandActivityVisibility();
     setTimeout(() => {
       if (map) map.invalidateSize();
+      // Draw any pending tune arc that was stashed while map was hidden
+      if (map && pendingTuneArc && mainHomePos) {
+        const a = pendingTuneArc;
+        showTuneArc(a.lat, a.lon, a.freq, a.source);
+      }
     }, 0);
   }
 
@@ -2685,7 +2697,13 @@ window.api.onPopoutMapStatus((open) => {
       updateViewLayout();
     }
     // Send initial data (small delay for pop-out to finish init)
-    setTimeout(sendPopoutSpots, 300);
+    setTimeout(() => {
+      sendPopoutSpots();
+      // Send current tune arc if one is active
+      if (lastTunedSpot && lastTunedSpot.lat != null && lastTunedSpot.lon != null) {
+        window.api.sendPopoutTuneArc({ lat: lastTunedSpot.lat, lon: lastTunedSpot.lon, freq: lastTunedSpot.frequency, source: lastTunedSpot.source });
+      }
+    }, 300);
   } else {
     // Restore inline map if it was showing before
     if (_prePopoutShowMap) {

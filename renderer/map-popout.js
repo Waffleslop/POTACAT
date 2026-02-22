@@ -211,7 +211,7 @@ function initMap() {
     className: 'dark-tiles',
   }).addTo(map);
 
-  markerLayer = L.layerGroup().addTo(map);
+  markerLayer = L.featureGroup().addTo(map);
   bindPopupClickHandlers(map);
   updateNightOverlay();
   setInterval(updateNightOverlay, 60000);
@@ -264,8 +264,23 @@ function clearTuneArc() {
   tuneArcFreq = null;
 }
 
+async function ensureHomePos() {
+  if (homePos) return;
+  try {
+    const settings = await window.api.getSettings();
+    if (settings.grid) setHomeMarker(settings.grid);
+  } catch { /* ignore */ }
+}
+
 function showTuneArc(lat, lon, freq, source) {
-  if (!map || !homePos || lat == null || lon == null) return;
+  if (!map || lat == null || lon == null) return;
+  if (!homePos) {
+    // Try to resolve homePos asynchronously, then redraw
+    ensureHomePos().then(() => {
+      if (homePos) showTuneArc(lat, lon, freq, source);
+    });
+    return;
+  }
   clearTuneArc();
   tuneArcFreq = freq || null;
   const color = tuneArcColor(source);
@@ -447,21 +462,30 @@ window.api.onPopoutTheme((theme) => {
 });
 
 async function init() {
-  // Load settings for distUnit, enableLogging, and theme
-  const settings = await window.api.getSettings();
-  distUnit = settings.distUnit || 'mi';
-  enableLogging = !!settings.enableLogging;
+  try {
+    // Load settings for distUnit, enableLogging, and theme
+    const settings = await window.api.getSettings();
+    distUnit = settings.distUnit || 'mi';
+    enableLogging = !!settings.enableLogging;
 
-  // Apply theme
-  if (settings.lightMode) {
-    document.documentElement.setAttribute('data-theme', 'light');
-  }
+    // Apply theme
+    if (settings.lightMode) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
 
-  initMap();
+    initMap();
 
-  // Set home marker from settings
-  if (settings.grid) {
-    setHomeMarker(settings.grid);
+    // Set home marker from settings
+    if (settings.grid) {
+      console.log('[popout] setHomeMarker grid=' + settings.grid);
+      setHomeMarker(settings.grid);
+    } else {
+      console.warn('[popout] No grid in settings — QTH marker will not be shown');
+    }
+  } catch (err) {
+    console.error('[popout] init() failed:', err);
+    // Still try to init map if it hasn't been created
+    if (!map) initMap();
   }
 
   // Flush any data that arrived before the map was ready
