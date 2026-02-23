@@ -2134,10 +2134,53 @@ dialog input, dialog select {
   margin-top: 8px;
   font-size: 11px;
   color: var(--text-tertiary);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#log-viewer-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.stat-sep {
+  opacity: 0.3;
+}
+
+#log-viewer-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#log-viewer-path-wrap {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #log-viewer-footer a {
   color: var(--accent-blue);
+}
+
+#log-viewer-export {
+  border: 1px solid var(--accent-green, #4ecca3);
+  color: var(--accent-green, #4ecca3);
+  background: transparent;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#log-viewer-export:hover {
+  background: var(--accent-green, #4ecca3);
+  color: #fff;
 }
 
 #log-viewer-toast {

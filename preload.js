@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteQso: (idx) => ipcRenderer.invoke('delete-qso', idx),
   getDefaultLogPath: () => ipcRenderer.invoke('get-default-log-path'),
   chooseLogFile: (currentPath) => ipcRenderer.invoke('choose-log-file', currentPath),
+  exportAdif: (qsos) => ipcRenderer.invoke('export-adif', qsos),
   onQrzData: (cb) => ipcRenderer.on('qrz-data', (_e, data) => cb(data)),
   onDonorCallsigns: (cb) => ipcRenderer.on('donor-callsigns', (_e, data) => cb(data)),
   onExpeditionCallsigns: (cb) => ipcRenderer.on('expedition-callsigns', (_e, data) => cb(data)),

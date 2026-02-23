@@ -830,7 +830,19 @@
       <p id="log-viewer-empty" class="hidden" style="text-align:center;color:var(--text-tertiary);margin:20px 0;">No QSOs logged yet</p>
     </div>
     <div id="log-viewer-footer">
-      <span>Log file: <a href="#" id="log-viewer-path-link"></a></span>
+      <div id="log-viewer-stats">
+        <span id="log-viewer-stat-total"></span>
+        <span class="stat-sep">|</span>
+        <span id="log-viewer-stat-calls"></span>
+        <span class="stat-sep">|</span>
+        <span id="log-viewer-stat-bands"></span>
+        <span class="stat-sep">|</span>
+        <span id="log-viewer-stat-modes"></span>
+      </div>
+      <div id="log-viewer-footer-row">
+        <span id="log-viewer-path-wrap" title="">Log: <a href="#" id="log-viewer-path-link"></a></span>
+        <button type="button" id="log-viewer-export" title="Export filtered QSOs to ADIF file">Export ADIF</button>
+      </div>
     </div>
     <div class="dialog-buttons">
       <button type="button" id="log-viewer-close-btn">Close</button>

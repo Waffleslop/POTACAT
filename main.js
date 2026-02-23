@@ -15,7 +15,7 @@ const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseSqliteFile, parseSqliteConfirmed, isSqliteFile } = require('./lib/adif');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
-const { appendQso, buildAdifRecord, appendImportedQso, rewriteAdifFile } = require('./lib/adif-writer');
+const { appendQso, buildAdifRecord, appendImportedQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient } = require('./lib/smartsdr');
 const { TciClient } = require('./lib/tci');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
@@ -2639,6 +2639,33 @@ app.whenReady().then(() => {
     });
     if (result.canceled) return null;
     return result.filePath;
+  });
+
+  ipcMain.handle('export-adif', async (_e, qsos) => {
+    try {
+      const result = await dialog.showSaveDialog(win, {
+        title: 'Export ADIF',
+        defaultPath: path.join(app.getPath('documents'), 'potacat_export.adi'),
+        filters: [
+          { name: 'ADIF Files', extensions: ['adi', 'adif'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled) return null;
+      let content = ADIF_HEADER;
+      for (const q of qsos) {
+        const parts = [];
+        for (const [key, value] of Object.entries(q)) {
+          if (key === 'idx') continue;
+          if (value != null && value !== '') parts.push(adifField(key, value));
+        }
+        content += '\n' + parts.join(' ') + ' <EOR>\n';
+      }
+      fs.writeFileSync(result.filePath, content, 'utf-8');
+      return { success: true, filePath: result.filePath, count: qsos.length };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 
   ipcMain.handle('test-serial-cat', async (_e, config) => {

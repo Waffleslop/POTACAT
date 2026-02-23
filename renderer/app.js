@@ -2716,6 +2716,7 @@ logCallsign.addEventListener('input', () => {
 
 // --- QSO Log Viewer (F2) ---
 let logViewerQsos = [];
+let logViewerFiltered = [];
 let logViewerSort = 'QSO_DATE';
 let logViewerAsc = false;
 let logViewerSearch = '';
@@ -2743,6 +2744,28 @@ function logViewerToast(msg) {
 function freqMhzToBandLocal(mhz) {
   const khz = parseFloat(mhz) * 1000;
   return freqKhzToBand(khz);
+}
+
+function updateLogViewerStats(filtered) {
+  const totalEl = document.getElementById('log-viewer-stat-total');
+  const callsEl = document.getElementById('log-viewer-stat-calls');
+  const bandsEl = document.getElementById('log-viewer-stat-bands');
+  const modesEl = document.getElementById('log-viewer-stat-modes');
+
+  totalEl.textContent = `${filtered.length} QSOs`;
+  callsEl.textContent = `${new Set(filtered.map(q => (q.CALL || '').toUpperCase())).size} calls`;
+
+  // Bands — top 5
+  const bandCounts = {};
+  for (const q of filtered) if (q.BAND) bandCounts[q.BAND] = (bandCounts[q.BAND] || 0) + 1;
+  const topBands = Object.entries(bandCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  bandsEl.textContent = topBands.map(([b, c]) => `${b}: ${c}`).join(', ') || '-';
+
+  // Modes — top 4
+  const modeCounts = {};
+  for (const q of filtered) if (q.MODE) modeCounts[q.MODE] = (modeCounts[q.MODE] || 0) + 1;
+  const topModes = Object.entries(modeCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  modesEl.textContent = topModes.map(([m, c]) => `${m}: ${c}`).join(', ') || '-';
 }
 
 function renderLogViewer() {
@@ -2779,6 +2802,9 @@ function renderLogViewer() {
   countEl.textContent = search
     ? `${filtered.length} / ${logViewerQsos.length} QSOs`
     : `${logViewerQsos.length} QSOs`;
+
+  logViewerFiltered = filtered;
+  updateLogViewerStats(filtered);
 
   if (logViewerQsos.length === 0) {
     table.classList.add('hidden');
@@ -2855,11 +2881,13 @@ async function openLogViewer() {
   const pathLink = document.getElementById('log-viewer-path-link');
   const settings = await window.api.getSettings();
   const logPath = settings.adifLogPath || await window.api.getDefaultLogPath();
-  pathLink.textContent = logPath;
+  const pathName = logPath.split(/[/\\]/).pop();
+  pathLink.textContent = pathName;
   pathLink.onclick = (e) => {
     e.preventDefault();
     window.api.openExternal('file://' + logPath);
   };
+  document.getElementById('log-viewer-path-wrap').title = logPath;
 
   dlg.showModal();
 }
@@ -2973,6 +3001,26 @@ document.getElementById('log-viewer-tbody').addEventListener('click', async (e) 
       btn.classList.remove('confirming');
       btn.textContent = '\u00D7';
     }, 3000);
+  }
+});
+
+// Export ADIF button
+document.getElementById('log-viewer-export').addEventListener('click', async () => {
+  if (!logViewerFiltered.length) {
+    logViewerToast('No QSOs to export');
+    return;
+  }
+  try {
+    const result = await window.api.exportAdif(logViewerFiltered);
+    if (!result) return; // cancelled
+    if (result.success) {
+      const name = result.filePath.split(/[/\\]/).pop();
+      logViewerToast(`Exported ${result.count} QSOs to ${name}`);
+    } else {
+      logViewerToast('Export failed: ' + (result.error || 'unknown error'));
+    }
+  } catch (err) {
+    logViewerToast('Export failed: ' + err.message);
   }
 });
 
