@@ -1192,99 +1192,24 @@ function pushSpotsToTci(spots) {
 // --- CW Keyer ---
 
 // Morse lookup: element sequence → character
-const MORSE_TABLE = {
-  '.-': 'A', '-...': 'B', '-.-.': 'C', '-..': 'D', '.': 'E',
-  '..-.': 'F', '--.': 'G', '....': 'H', '..': 'I', '.---': 'J',
-  '-.-': 'K', '.-..': 'L', '--': 'M', '-.': 'N', '---': 'O',
-  '.--.': 'P', '--.-': 'Q', '.-.': 'R', '...': 'S', '-': 'T',
-  '..-': 'U', '...-': 'V', '.--': 'W', '-..-': 'X', '-.--': 'Y',
-  '--..': 'Z', '.----': '1', '..---': '2', '...--': '3', '....-': '4',
-  '.....': '5', '-....': '6', '--...': '7', '---..': '8', '----.': '9',
-  '-----': '0', '.-.-.-': '.', '--..--': ',', '..--..': '?',
-  '-..-.': '/', '-.--.': '(', '-.--.-': ')', '-....-': '-',
-  '.--.-.': '@', '-...-': '=',
-};
-
-// CW element decoder state (Morse decode from paddle → cwx send)
-let cwElements = '';     // accumulated dit/dah elements for current character
-let cwCharTimer = null;  // fires after inter-character gap to decode character
-let cwFlushTimer = null; // fires after word gap to flush buffered text to radio
-let cwLastKeyDown = 0;   // timestamp of last key-down event
-let cwTextBuffer = '';   // accumulated decoded characters, flushed as words/phrases
-let cwSentText = '';     // running log of all CW text sent this session
-
-function cwFlushBuffer() {
-  if (cwFlushTimer) { clearTimeout(cwFlushTimer); cwFlushTimer = null; }
-  if (cwTextBuffer) {
-    // Characters already sent individually; just update display with remaining buffer
-    cwSentText += cwTextBuffer;
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('cw-text', { text: cwTextBuffer, total: cwSentText });
-    }
-    cwTextBuffer = '';
-  }
-}
-
 function connectKeyer() {
   disconnectKeyer();
   if (!settings.enableCwKeyer) return;
 
-  // IambicKeyer generates elements; decoded Morse buffered into words, sent via `cwx send`.
+  // IambicKeyer generates elements; raw key events sent directly to SmartSDR
+  // via `cw key 0|1` + MOX control. Preserves operator's exact fist/timing.
   keyer = new IambicKeyer();
   keyer.setWpm(settings.cwWpm || 20);
   keyer.setMode(settings.cwKeyerMode || 'iambicB');
   keyer.setSwapPaddles(!!settings.cwSwapPaddles);
 
   keyer.on('key', ({ down }) => {
-    const ditMs = Math.round(1200 / (settings.cwWpm || 20));
-
-    if (down) {
-      cwLastKeyDown = Date.now();
-      // Cancel pending char/word gap timers — a new element is starting
-      if (cwCharTimer) { clearTimeout(cwCharTimer); cwCharTimer = null; }
-      if (cwFlushTimer) { clearTimeout(cwFlushTimer); cwFlushTimer = null; }
-    } else {
-      // Key up — determine dit vs dah from duration
-      const dur = Date.now() - cwLastKeyDown;
-      const isDit = dur < ditMs * 2;
-      cwElements += isDit ? '.' : '-';
-
-      // Reset timers on each element completion
-      if (cwCharTimer) clearTimeout(cwCharTimer);
-      if (cwFlushTimer) clearTimeout(cwFlushTimer);
-
-      // After inter-character gap (3× ditMs), decode and send character immediately.
-      // Sending per-character to cwx keeps latency low — radio's CWX buffer handles spacing.
-      cwCharTimer = setTimeout(() => {
-        cwCharTimer = null;
-        if (cwElements) {
-          const char = MORSE_TABLE[cwElements];
-          console.log(`[CW] decode: ${cwElements} → ${char || '?'}`);
-          if (char) {
-            cwTextBuffer += char;
-            cwSentText += char;
-            // Send character to radio immediately (radio buffers CWX text)
-            if (smartSdr && smartSdr.connected) {
-              smartSdr.cwxSend(char);
-            }
-            // Update text display in real time
-            if (win && !win.isDestroyed()) {
-              win.webContents.send('cw-text', { text: char, total: cwSentText });
-            }
-          }
-          cwElements = '';
-        }
-        // Word gap timer — just mark the boundary for display (no radio send needed,
-        // the natural pause between cwx sends creates the word gap on air)
-        cwFlushTimer = setTimeout(() => {
-          cwFlushTimer = null;
-          cwSentText += ' ';
-          cwTextBuffer = '';
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('cw-text', { text: ' ', total: cwSentText });
-          }
-        }, ditMs * 4);
-      }, ditMs * 3);
+    // Send raw key event directly to radio — no Morse decode, no latency
+    if (smartSdr && smartSdr.connected) {
+      if (down) {
+        smartSdr.cwMoxOn();  // activate PTT (with holdoff auto-release)
+      }
+      smartSdr.cwKey(down);
     }
 
     // Forward to renderer for sidetone
@@ -1296,7 +1221,6 @@ function connectKeyer() {
   // Bind to SmartSDR GUI client for CW config commands
   if (smartSdr) {
     smartSdr.setNeedsCw(true);
-    // Sync WPM to radio
     if (smartSdr.connected) {
       smartSdr.setCwSpeed(settings.cwWpm || 20);
     }
@@ -1308,12 +1232,6 @@ function connectKeyer() {
 }
 
 function disconnectKeyer() {
-  cwFlushBuffer(); // send any remaining text
-  if (cwCharTimer) { clearTimeout(cwCharTimer); cwCharTimer = null; }
-  if (cwFlushTimer) { clearTimeout(cwFlushTimer); cwFlushTimer = null; }
-  cwElements = '';
-  cwTextBuffer = '';
-  cwSentText = '';
   if (keyer) {
     keyer.stop();
     keyer.removeAllListeners();
