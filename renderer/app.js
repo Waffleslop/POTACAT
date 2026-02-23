@@ -333,6 +333,8 @@ const cwLearnDitBtn = document.getElementById('cw-learn-dit-btn');
 const cwLearnDahBtn = document.getElementById('cw-learn-dah-btn');
 const setCwSidetone = document.getElementById('set-cw-sidetone');
 const setCwSidetonePitch = document.getElementById('set-cw-sidetone-pitch');
+const setCwSidetoneVolume = document.getElementById('set-cw-sidetone-volume');
+const cwSidetoneVolumeLabel = document.getElementById('cw-sidetone-volume-label');
 const cwKeyerStatusEl = document.getElementById('cw-keyer-status');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
@@ -4134,6 +4136,8 @@ settingsBtn.addEventListener('click', async () => {
   setCwMidiDahNote.value = s.cwMidiDahNote != null ? s.cwMidiDahNote : 21;
   setCwSidetone.checked = s.cwSidetone === true;
   setCwSidetonePitch.value = s.cwSidetonePitch || 600;
+  setCwSidetoneVolume.value = s.cwSidetoneVolume != null ? s.cwSidetoneVolume : 30;
+  cwSidetoneVolumeLabel.textContent = setCwSidetoneVolume.value + '%';
   cwKeyerConfig.classList.toggle('hidden', !s.enableCwKeyer);
   if (s.enableCwKeyer) {
     populateMidiDevices().then(() => {
@@ -4249,6 +4253,7 @@ settingsSave.addEventListener('click', async () => {
   const cwMidiDahNoteVal = parseInt(setCwMidiDahNote.value, 10);
   const cwSidetoneVal = setCwSidetone.checked;
   const cwSidetonePitchVal = parseInt(setCwSidetonePitch.value, 10) || 600;
+  const cwSidetoneVolumeVal = parseInt(setCwSidetoneVolume.value, 10);
   const adifPath = setAdifPath.value.trim() || '';
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
@@ -4357,6 +4362,7 @@ settingsSave.addEventListener('click', async () => {
     cwMidiDahNote: cwMidiDahNoteVal,
     cwSidetone: cwSidetoneVal,
     cwSidetonePitch: cwSidetonePitchVal,
+    cwSidetoneVolume: cwSidetoneVolumeVal,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -5298,7 +5304,8 @@ function sidetoneKey(down) {
   const now = sidetoneCtx.currentTime;
   sidetoneGain.gain.cancelScheduledValues(now);
   sidetoneGain.gain.setValueAtTime(sidetoneGain.gain.value, now);
-  sidetoneGain.gain.linearRampToValueAtTime(down ? 0.3 : 0, now + 0.005);
+  const vol = (parseInt(setCwSidetoneVolume.value, 10) || 30) / 100;
+  sidetoneGain.gain.linearRampToValueAtTime(down ? vol : 0, now + 0.005);
 }
 
 function updateSidetonePitch() {
@@ -5308,15 +5315,23 @@ function updateSidetonePitch() {
 }
 
 setCwSidetonePitch.addEventListener('change', updateSidetonePitch);
+setCwSidetoneVolume.addEventListener('input', () => {
+  cwSidetoneVolumeLabel.textContent = setCwSidetoneVolume.value + '%';
+  if (cwPopoverVolume) { cwPopoverVolume.value = setCwSidetoneVolume.value; cwPopoverVolumeLabel.textContent = setCwSidetoneVolume.value + '%'; }
+});
 
-// Live WPM adjustment — send to main immediately
+// Live WPM adjustment — send to main immediately and sync popover
 setCwWpm.addEventListener('change', () => {
   const wpm = parseInt(setCwWpm.value, 10);
-  if (wpm >= 5 && wpm <= 50) window.api.cwSetWpm(wpm);
+  if (wpm >= 5 && wpm <= 50) {
+    window.api.cwSetWpm(wpm);
+    if (cwPopoverWpm) cwPopoverWpm.value = wpm;
+  }
 });
 
 // CW key events from main process → sidetone
 window.api.onCwKey(({ down }) => {
+  console.log(`[Sidetone] key down=${down} checked=${setCwSidetone.checked} ctx=${!!sidetoneCtx}`);
   if (setCwSidetone.checked) {
     initSidetone();
     sidetoneKey(down);
@@ -5324,8 +5339,85 @@ window.api.onCwKey(({ down }) => {
 });
 
 // CW keyer status
-window.api.onCwKeyerStatus(({ enabled }) => {
+const cwTextDisplay = document.getElementById('cw-text-display');
+window.api.onCwKeyerStatus(({ enabled, cwAuth }) => {
   cwKeyerStatusEl.classList.toggle('hidden', !enabled);
+  cwTextDisplay.classList.toggle('hidden', !enabled);
+  if (!enabled) { cwTextDisplay.textContent = ''; closeCwPopover(); }
+  if (cwAuth) {
+    cwKeyerStatusEl.textContent = cwAuth === 'bind' ? 'CW' : 'CW (?)';
+    cwKeyerStatusEl.title = `CW keyer active — ${cwAuth === 'bind' ? 'bound to SmartSDR' : 'unbound (CW may still work)'}`;
+    cwKeyerStatusEl.style.background = '#b8860b';
+  }
+});
+
+// --- CW Popover (volume/WPM dropdown from CW status pill) ---
+const cwPopover = document.getElementById('cw-popover');
+const cwPopoverVolume = document.getElementById('cw-popover-volume');
+const cwPopoverVolumeLabel = document.getElementById('cw-popover-volume-label');
+const cwPopoverWpm = document.getElementById('cw-popover-wpm');
+let cwPopoverOpen = false;
+
+function positionCwPopover() {
+  const rect = cwKeyerStatusEl.getBoundingClientRect();
+  const bar = cwKeyerStatusEl.closest('.status-bar');
+  const barRect = bar.getBoundingClientRect();
+  cwPopover.style.top = (rect.bottom - barRect.top + 4) + 'px';
+  cwPopover.style.left = (rect.left - barRect.left) + 'px';
+}
+
+function openCwPopover() {
+  // Sync popover controls with settings controls
+  cwPopoverVolume.value = setCwSidetoneVolume.value;
+  cwPopoverVolumeLabel.textContent = setCwSidetoneVolume.value + '%';
+  cwPopoverWpm.value = setCwWpm.value;
+  positionCwPopover();
+  cwPopover.classList.remove('hidden');
+  cwPopoverOpen = true;
+}
+
+function closeCwPopover() {
+  cwPopover.classList.add('hidden');
+  cwPopoverOpen = false;
+}
+
+cwKeyerStatusEl.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (cwPopoverOpen) { closeCwPopover(); return; }
+  // Close other popovers
+  if (typeof closeCatPopover === 'function') closeCatPopover();
+  document.querySelectorAll('.multi-dropdown.open').forEach((d) => d.classList.remove('open'));
+  openCwPopover();
+});
+
+cwPopover.addEventListener('click', (e) => e.stopPropagation());
+
+// Volume slider — sync with settings and update live
+cwPopoverVolume.addEventListener('input', () => {
+  const val = cwPopoverVolume.value;
+  cwPopoverVolumeLabel.textContent = val + '%';
+  setCwSidetoneVolume.value = val;
+  cwSidetoneVolumeLabel.textContent = val + '%';
+});
+
+// WPM — sync with settings and send to main process live
+cwPopoverWpm.addEventListener('change', () => {
+  const wpm = parseInt(cwPopoverWpm.value, 10);
+  if (wpm >= 5 && wpm <= 50) {
+    setCwWpm.value = wpm;
+    window.api.cwSetWpm(wpm);
+  }
+});
+
+// Close CW popover when clicking outside
+document.addEventListener('click', () => { if (cwPopoverOpen) closeCwPopover(); });
+
+// CW decoded text display in status bar
+window.api.onCwText(({ total }) => {
+  // Show last ~40 characters of sent text, right-aligned so newest is visible
+  const display = total.length > 40 ? total.slice(-40) : total;
+  cwTextDisplay.textContent = display;
+  cwTextDisplay.classList.remove('hidden');
 });
 
 // MIDI hot-plug: re-enumerate when devices change

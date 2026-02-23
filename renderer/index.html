@@ -92,6 +92,19 @@
       <span id="utc-clock" class="utc-clock"></span>
       <span id="cat-status" class="status disconnected">CAT</span>
       <span id="wsjtx-status" class="status disconnected hidden">WSJT-X</span>
+      <span id="cw-keyer-status" class="status hidden" style="background:#b8860b;color:#fff;cursor:pointer;">CW</span>
+      <span id="cw-text-display" class="hidden" style="font-family:monospace;font-size:11px;color:#4fc3f7;margin-left:4px;max-width:300px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;direction:rtl;text-align:left;"></span>
+      <div id="cw-popover" class="cw-popover hidden">
+        <div class="cw-popover-row">
+          <label>Sidetone Vol</label>
+          <input type="range" id="cw-popover-volume" min="0" max="100" value="30" style="width:90px;accent-color:#b8860b;">
+          <span id="cw-popover-volume-label">30%</span>
+        </div>
+        <div class="cw-popover-row">
+          <label>WPM</label>
+          <input type="number" id="cw-popover-wpm" min="5" max="50" value="20" style="width:50px;">
+        </div>
+      </div>
       <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
       <span id="k-status" class="status solar-pill hidden">K —</span>
       <span id="a-status" class="status solar-pill hidden">A —</span>
@@ -655,7 +668,50 @@
         <span class="help-text" style="display:block;">0 = no limit (show all spots)</span>
       </div>
     </fieldset>
-    <!-- 9. DXCC Tracker -->
+    <!-- 9. CW Keyer -->
+    <fieldset class="source-toggles collapsible">
+      <legend>CW Keyer</legend>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-cw-keyer"> CW Keyer (MIDI paddle)</label>
+      <div id="cw-keyer-config" class="hidden" style="margin-top:6px;margin-left:12px;">
+        <label>Keyer Mode:
+          <select id="set-cw-keyer-mode" style="width:140px;">
+            <option value="iambicB">Iambic B</option>
+            <option value="iambicA">Iambic A</option>
+            <option value="straight">Straight Key</option>
+          </select>
+        </label>
+        <label style="margin-top:6px;">Speed (WPM):
+          <input type="number" id="set-cw-wpm" min="5" max="50" value="20" style="width:60px;">
+        </label>
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-swap-paddles"> Swap paddles</label>
+        <label style="margin-top:8px;">MIDI Device:
+          <div style="display:flex;gap:6px;margin-top:4px;">
+            <select id="set-cw-midi-device" style="flex:1;"><option value="">— No MIDI devices —</option></select>
+            <button type="button" id="cw-midi-refresh-btn" style="padding:2px 8px;">Refresh</button>
+          </div>
+        </label>
+        <div style="margin-top:8px;">
+          <span style="font-size:12px;color:var(--text-secondary);">MIDI Note Mapping:</span>
+          <div style="display:flex;gap:12px;margin-top:4px;align-items:center;">
+            <label>Dit: <input type="number" id="set-cw-midi-dit-note" min="0" max="127" value="20" style="width:50px;"></label>
+            <button type="button" class="learn-btn" id="cw-learn-dit-btn">Learn</button>
+            <label>Dah: <input type="number" id="set-cw-midi-dah-note" min="0" max="127" value="21" style="width:50px;"></label>
+            <button type="button" class="learn-btn" id="cw-learn-dah-btn">Learn</button>
+          </div>
+        </div>
+        <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-cw-sidetone"> Local sidetone</label>
+        <div style="margin-top:4px;margin-left:24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <label>Pitch (Hz):
+            <input type="number" id="set-cw-sidetone-pitch" min="300" max="1000" value="600" style="width:60px;">
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;">Vol:
+            <input type="range" id="set-cw-sidetone-volume" min="0" max="100" value="30" style="width:80px;accent-color:#4fc3f7;">
+            <span id="cw-sidetone-volume-label" style="font-size:11px;min-width:28px;">30%</span>
+          </label>
+        </div>
+      </div>
+    </fieldset>
+    <!-- 10. DXCC Tracker -->
     <fieldset class="source-toggles">
       <legend>DXCC Tracker</legend>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-dxcc"> DXCC Tracker</label>
@@ -801,7 +857,7 @@
   <!-- QSO Log Viewer (F2) -->
   <dialog id="log-viewer-dialog">
     <div class="log-dialog-header">
-      <h3>QSO Log</h3>
+      <h3>View/Edit Logbook</h3>
       <button type="button" id="log-viewer-close" class="log-dialog-x" title="Close">&times;</button>
     </div>
     <div id="log-viewer-toolbar">
@@ -858,7 +914,7 @@
     <table class="hotkeys-table">
       <tbody>
         <tr><td><kbd>F1</kbd></td><td>Keyboard shortcuts</td></tr>
-        <tr><td><kbd>F2</kbd></td><td>QSO Log</td></tr>
+        <tr><td><kbd>F2</kbd></td><td>View/Edit Logbook</td></tr>
         <tr><td><kbd>F11</kbd></td><td>Welcome / setup screen</td></tr>
         <tr><td><kbd>Space</kbd></td><td>Start / stop scan</td></tr>
         <tr><td><kbd>S</kbd></td><td>Toggle split mode</td></tr>

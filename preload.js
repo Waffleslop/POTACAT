@@ -77,4 +77,5 @@ contextBridge.exposeInMainWorld('api', {
   cwStop: () => ipcRenderer.send('cw-stop'),
   onCwKey: (cb) => ipcRenderer.on('cw-key', (_e, data) => cb(data)),
   onCwKeyerStatus: (cb) => ipcRenderer.on('cw-keyer-status', (_e, s) => cb(s)),
+  onCwText: (cb) => ipcRenderer.on('cw-text', (_e, data) => cb(data)),
 });
