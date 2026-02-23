@@ -296,7 +296,10 @@ function sendRotorBearing(azimuth) {
 }
 
 async function connectCat() {
-  if (cat) cat.disconnect();
+  if (cat) {
+    cat.removeAllListeners(); // prevent stale close events from sending false status
+    cat.disconnect();
+  }
   killRigctld();
   const target = settings.catTarget;
 
