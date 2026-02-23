@@ -1274,13 +1274,10 @@ function connectKeyer() {
           }
           cwElements = '';
         }
-        // Start word gap timer — send space after word gap (4 more ditMs)
+        // Word gap timer — just mark the boundary for display (no radio send needed,
+        // the natural pause between cwx sends creates the word gap on air)
         cwFlushTimer = setTimeout(() => {
           cwFlushTimer = null;
-          // Send space to radio (inserts word gap in CWX buffer)
-          if (smartSdr && smartSdr.connected) {
-            smartSdr.cwxSend(' ');
-          }
           cwSentText += ' ';
           cwTextBuffer = '';
           if (win && !win.isDestroyed()) {
