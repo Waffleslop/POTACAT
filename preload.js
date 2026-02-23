@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_e, d) => cb(d)),
   onUpdaterActive: (cb) => ipcRenderer.on('updater-active', (_e, active) => cb(active)),
   onDownloadProgress: (cb) => ipcRenderer.on('update-download-progress', (_e, d) => cb(d)),
+  onUpdateError: (cb) => ipcRenderer.on('update-error', (_e, msg) => cb(msg)),
   onUpdateDownloaded: (cb) => ipcRenderer.on('update-downloaded', () => cb()),
   startDownload: () => ipcRenderer.send('start-download'),
   installUpdate: () => ipcRenderer.send('install-update'),
@@ -69,4 +70,11 @@ contextBridge.exposeInMainWorld('api', {
   sendPopoutTheme: (theme) => ipcRenderer.send('popout-map-theme', theme),
   onPopoutMapStatus: (cb) => ipcRenderer.on('popout-map-status', (_e, open) => cb(open)),
   onPopoutOpenLog: (cb) => ipcRenderer.on('popout-open-log', (_e, spot) => cb(spot)),
+  // CW Keyer
+  cwPaddleDit: (pressed) => ipcRenderer.send('cw-paddle-dit', pressed),
+  cwPaddleDah: (pressed) => ipcRenderer.send('cw-paddle-dah', pressed),
+  cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),
+  cwStop: () => ipcRenderer.send('cw-stop'),
+  onCwKey: (cb) => ipcRenderer.on('cw-key', (_e, data) => cb(data)),
+  onCwKeyerStatus: (cb) => ipcRenderer.on('cw-keyer-status', (_e, s) => cb(s)),
 });

@@ -18,6 +18,7 @@ const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient } = require('./lib/smartsdr');
 const { TciClient } = require('./lib/tci');
+const { IambicKeyer } = require('./lib/keyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
 const { WsjtxClient } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
@@ -76,6 +77,7 @@ let expeditionCallsigns = new Set(); // active DX expeditions from Club Log
 let pskr = null;
 let pskrSpots = [];       // streaming PSKReporter FreeDV spots (FIFO, max 500)
 let pskrFlushTimer = null; // throttle timer for PSKReporter → renderer updates
+let keyer = null;          // IambicKeyer instance for CW MIDI keying
 
 // --- Watchlist notifications ---
 const recentNotifications = new Map(); // callsign → timestamp for dedup (5-min window)
@@ -1052,9 +1054,10 @@ function updateWsjtxHighlights() {
 
 // --- SmartSDR panadapter spots ---
 function needsSmartSdr() {
-  // Connect SmartSDR API if panadapter spots are enabled, OR if WSJT-X is active
-  // with a Flex (TCP CAT) so we can tune via the API when CAT is released
+  // Connect SmartSDR API if panadapter spots are enabled, CW keyer is active,
+  // or WSJT-X is active with a Flex (TCP CAT) so we can tune via the API when CAT is released
   if (settings.smartSdrSpots) return true;
+  if (settings.enableCwKeyer) return true;
   if (settings.enableWsjtx && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   return false;
 }
@@ -1164,6 +1167,53 @@ function pushSpotsToTci(spots) {
   }
   // Remove spots no longer in the list (instead of clear+re-add which causes flashing)
   tciClient.pruneStaleSpots();
+}
+
+// --- CW Keyer ---
+function connectKeyer() {
+  disconnectKeyer();
+  if (!settings.enableCwKeyer) return;
+  keyer = new IambicKeyer();
+  keyer.setWpm(settings.cwWpm || 20);
+  keyer.setMode(settings.cwKeyerMode || 'iambicB');
+  keyer.setSwapPaddles(!!settings.cwSwapPaddles);
+
+  keyer.on('key', ({ down, timestamp }) => {
+    console.log(`[CW] key down=${down} ts=${timestamp} sdr=${!!smartSdr} sdrConn=${smartSdr?.connected}`);
+    // Forward key event to SmartSDR radio
+    if (smartSdr && smartSdr.connected) {
+      smartSdr.cwKey(down, timestamp);
+      if (down) smartSdr.cwPttWithHoldoff(timestamp);
+    }
+    // Forward to renderer for sidetone
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('cw-key', { down, timestamp });
+    }
+  });
+
+  // Sync WPM to radio
+  if (smartSdr && smartSdr.connected) {
+    smartSdr.setCwSpeed(settings.cwWpm || 20);
+  }
+
+  // Send status to renderer
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('cw-keyer-status', { enabled: true });
+  }
+}
+
+function disconnectKeyer() {
+  if (keyer) {
+    keyer.stop();
+    keyer.removeAllListeners();
+    keyer = null;
+  }
+  if (smartSdr && smartSdr.connected) {
+    smartSdr.cwStop();
+  }
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('cw-keyer-status', { enabled: false });
+  }
 }
 
 // --- Solar data ---
@@ -1789,6 +1839,9 @@ function createWindow() {
     win.maximize();
   }
 
+  // Allow MIDI device access for CW keyer
+  win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(true));
+
   win.show();
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -1903,6 +1956,12 @@ function fetchExpeditions() {
 // --- Update check (electron-updater for installed, manual fallback for portable) ---
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = false;
+autoUpdater.logger = {
+  info: (...args) => console.log('[updater]', ...args),
+  warn: (...args) => console.warn('[updater]', ...args),
+  error: (...args) => console.error('[updater]', ...args),
+  debug: (...args) => console.log('[updater:debug]', ...args),
+};
 
 autoUpdater.on('update-available', (info) => {
   if (win && !win.isDestroyed()) {
@@ -1926,7 +1985,12 @@ autoUpdater.on('update-downloaded', () => {
   }
 });
 
-autoUpdater.on('error', () => { /* silently ignore update errors */ });
+autoUpdater.on('error', (err) => {
+  console.error('autoUpdater error:', err);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('update-error', err?.message || String(err));
+  }
+});
 
 ipcMain.on('start-download', () => { autoUpdater.downloadUpdate(); });
 ipcMain.on('install-update', () => { autoUpdater.quitAndInstall(); });
@@ -2192,8 +2256,9 @@ app.whenReady().then(() => {
   if (!settings.enableWsjtx) connectCat();
   if (settings.enableCluster) connectCluster();
   if (settings.enableRbn) connectRbn();
-  connectSmartSdr(); // connects if smartSdrSpots or WSJT-X+Flex
+  connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
+  if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr) connectPskr();
   // Configure QRZ client from saved credentials
@@ -2452,6 +2517,11 @@ app.whenReady().then(() => {
 
     const pskrChanged = has('enablePskr') && newSettings.enablePskr !== settings.enablePskr;
 
+    const cwKeyerChanged = (has('enableCwKeyer') && newSettings.enableCwKeyer !== settings.enableCwKeyer) ||
+      (has('cwKeyerMode') && newSettings.cwKeyerMode !== settings.cwKeyerMode) ||
+      (has('cwWpm') && newSettings.cwWpm !== settings.cwWpm) ||
+      (has('cwSwapPaddles') && newSettings.cwSwapPaddles !== settings.cwSwapPaddles);
+
     const isPartialSave = !has('enablePota'); // hotkey saves only send 1-2 keys
 
     settings = { ...settings, ...newSettings };
@@ -2480,14 +2550,23 @@ app.whenReady().then(() => {
       }
     }
 
-    // Reconnect SmartSDR if settings changed (also needed for WSJT-X+Flex tuning)
-    if (smartSdrChanged || wsjtxChanged) {
+    // Reconnect SmartSDR if settings changed (also needed for WSJT-X+Flex and CW keyer)
+    if (smartSdrChanged || wsjtxChanged || cwKeyerChanged) {
       connectSmartSdr(); // needsSmartSdr() decides whether to actually connect
     }
 
     // Reconnect TCI if settings changed
     if (tciChanged) {
       connectTci();
+    }
+
+    // Reconnect CW keyer if settings changed
+    if (cwKeyerChanged) {
+      if (settings.enableCwKeyer) {
+        connectKeyer();
+      } else {
+        disconnectKeyer();
+      }
     }
 
     // Reconnect WSJT-X if settings changed
@@ -3083,6 +3162,24 @@ app.whenReady().then(() => {
     rbnSpots = [];
     sendRbnSpots();
   });
+
+  // --- CW Keyer IPC ---
+  ipcMain.on('cw-paddle-dit', (_e, pressed) => {
+    console.log(`[CW] paddle-dit pressed=${pressed} keyer=${!!keyer} sdr=${!!smartSdr} sdrConn=${smartSdr?.connected}`);
+    if (keyer) keyer.paddleDit(pressed);
+  });
+  ipcMain.on('cw-paddle-dah', (_e, pressed) => {
+    console.log(`[CW] paddle-dah pressed=${pressed} keyer=${!!keyer} sdr=${!!smartSdr} sdrConn=${smartSdr?.connected}`);
+    if (keyer) keyer.paddleDah(pressed);
+  });
+  ipcMain.on('cw-set-wpm', (_e, wpm) => {
+    if (keyer) keyer.setWpm(wpm);
+    if (smartSdr && smartSdr.connected) smartSdr.setCwSpeed(wpm);
+  });
+  ipcMain.on('cw-stop', () => {
+    if (keyer) keyer.stop();
+    if (smartSdr && smartSdr.connected) smartSdr.cwStop();
+  });
 });
 
 let cleanupDone = false;
@@ -3098,6 +3195,7 @@ function gracefulCleanup() {
   try { disconnectWsjtx(); } catch {}
   try { disconnectSmartSdr(); } catch {}
   try { disconnectTci(); } catch {}
+  try { disconnectKeyer(); } catch {}
   killRigctld();
 }
 

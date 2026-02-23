@@ -319,6 +319,21 @@ const setTciWwff = document.getElementById('set-tci-wwff');
 const setTciLlota = document.getElementById('set-tci-llota');
 const setTciPskr = document.getElementById('set-tci-pskr');
 const setTciMaxAge = document.getElementById('set-tci-max-age');
+// CW Keyer
+const setEnableCwKeyer = document.getElementById('set-enable-cw-keyer');
+const cwKeyerConfig = document.getElementById('cw-keyer-config');
+const setCwKeyerMode = document.getElementById('set-cw-keyer-mode');
+const setCwWpm = document.getElementById('set-cw-wpm');
+const setCwSwapPaddles = document.getElementById('set-cw-swap-paddles');
+const setCwMidiDevice = document.getElementById('set-cw-midi-device');
+const cwMidiRefreshBtn = document.getElementById('cw-midi-refresh-btn');
+const setCwMidiDitNote = document.getElementById('set-cw-midi-dit-note');
+const setCwMidiDahNote = document.getElementById('set-cw-midi-dah-note');
+const cwLearnDitBtn = document.getElementById('cw-learn-dit-btn');
+const cwLearnDahBtn = document.getElementById('cw-learn-dah-btn');
+const setCwSidetone = document.getElementById('set-cw-sidetone');
+const setCwSidetonePitch = document.getElementById('set-cw-sidetone-pitch');
+const cwKeyerStatusEl = document.getElementById('cw-keyer-status');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
 const logOpName = document.getElementById('log-op-name');
@@ -512,6 +527,13 @@ async function loadPrefs() {
   activeRigName = activeRig ? activeRig.name : '';
   enableWsjtx = settings.enableWsjtx === true;
   updateWsjtxStatusVisibility();
+  // CW Keyer: init MIDI + connect saved device on load
+  if (settings.enableCwKeyer) {
+    cwKeyerStatusEl.classList.remove('hidden');
+    populateMidiDevices().then(() => {
+      if (settings.cwMidiDevice) connectMidiDevice(settings.cwMidiDevice);
+    });
+  }
   updateRbnButton();
   updateDxccButton();
   // maxAgeMin: prefer localStorage (last-used filter) over settings.json
@@ -1345,6 +1367,14 @@ setSmartSdrSpots.addEventListener('change', () => {
 // TCI checkbox toggles config visibility
 setTciSpots.addEventListener('change', () => {
   tciConfig.classList.toggle('hidden', !setTciSpots.checked);
+});
+
+// CW Keyer checkbox toggles config visibility + auto-connect MIDI
+setEnableCwKeyer.addEventListener('change', () => {
+  cwKeyerConfig.classList.toggle('hidden', !setEnableCwKeyer.checked);
+  if (setEnableCwKeyer.checked) {
+    populateMidiDevices().then(() => connectMidiDevice(setCwMidiDevice.value));
+  }
 });
 
 // DXCC checkbox toggles ADIF picker visibility
@@ -4095,6 +4125,22 @@ settingsBtn.addEventListener('click', async () => {
   setTciPskr.checked = s.tciPskr !== false;
   setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
   tciConfig.classList.toggle('hidden', !s.tciSpots);
+  // CW Keyer
+  setEnableCwKeyer.checked = s.enableCwKeyer === true;
+  setCwKeyerMode.value = s.cwKeyerMode || 'iambicB';
+  setCwWpm.value = s.cwWpm || 20;
+  setCwSwapPaddles.checked = s.cwSwapPaddles === true;
+  setCwMidiDitNote.value = s.cwMidiDitNote != null ? s.cwMidiDitNote : 20;
+  setCwMidiDahNote.value = s.cwMidiDahNote != null ? s.cwMidiDahNote : 21;
+  setCwSidetone.checked = s.cwSidetone === true;
+  setCwSidetonePitch.value = s.cwSidetonePitch || 600;
+  cwKeyerConfig.classList.toggle('hidden', !s.enableCwKeyer);
+  if (s.enableCwKeyer) {
+    populateMidiDevices().then(() => {
+      if (s.cwMidiDevice) setCwMidiDevice.value = s.cwMidiDevice;
+      connectMidiDevice(setCwMidiDevice.value);
+    });
+  }
   setDisableAutoUpdate.checked = s.disableAutoUpdate === true;
   setEnableTelemetry.checked = s.enableTelemetry === true;
   setLightMode.checked = s.lightMode === true;
@@ -4193,6 +4239,16 @@ settingsSave.addEventListener('click', async () => {
   const tciLlotaEnabled = setTciLlota.checked;
   const tciPskrEnabled = setTciPskr.checked;
   const tciMaxAgeVal = parseInt(setTciMaxAge.value, 10) || 0;
+  // CW Keyer
+  const cwKeyerEnabled = setEnableCwKeyer.checked;
+  const cwKeyerModeVal = setCwKeyerMode.value;
+  const cwWpmVal = parseInt(setCwWpm.value, 10) || 20;
+  const cwSwapPaddlesVal = setCwSwapPaddles.checked;
+  const cwMidiDeviceVal = setCwMidiDevice.value;
+  const cwMidiDitNoteVal = parseInt(setCwMidiDitNote.value, 10);
+  const cwMidiDahNoteVal = parseInt(setCwMidiDahNote.value, 10);
+  const cwSidetoneVal = setCwSidetone.checked;
+  const cwSidetonePitchVal = parseInt(setCwSidetonePitch.value, 10) || 600;
   const adifPath = setAdifPath.value.trim() || '';
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
@@ -4292,6 +4348,15 @@ settingsSave.addEventListener('click', async () => {
     tciLlota: tciLlotaEnabled,
     tciPskr: tciPskrEnabled,
     tciMaxAge: tciMaxAgeVal,
+    enableCwKeyer: cwKeyerEnabled,
+    cwKeyerMode: cwKeyerModeVal,
+    cwWpm: cwWpmVal,
+    cwSwapPaddles: cwSwapPaddlesVal,
+    cwMidiDevice: cwMidiDeviceVal,
+    cwMidiDitNote: cwMidiDitNoteVal,
+    cwMidiDahNote: cwMidiDahNoteVal,
+    cwSidetone: cwSidetoneVal,
+    cwSidetonePitch: cwSidetonePitchVal,
   });
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -4456,6 +4521,13 @@ window.api.onUpdateAvailable((data) => {
 window.api.onDownloadProgress(({ percent }) => {
   const actionBtn = document.getElementById('update-action-btn');
   actionBtn.textContent = `Downloading... ${percent}%`;
+});
+
+window.api.onUpdateError((msg) => {
+  const actionBtn = document.getElementById('update-action-btn');
+  actionBtn.textContent = 'Upgrade';
+  actionBtn.disabled = false;
+  console.error('Update error:', msg);
 });
 
 window.api.onUpdateDownloaded(() => {
@@ -5104,6 +5176,166 @@ window.api.onPskrStatus(({ connected, error, spotCount, nextPollAt, pollUpdate }
   label.addEventListener('mouseleave', () => {
     if (tipTimer) { clearInterval(tipTimer); tipTimer = null; }
   });
+})();
+
+// --- CW Keyer: MIDI + Sidetone ---
+let midiAccess = null;
+let midiInput = null;
+let cwLearningTarget = null; // 'dit' | 'dah' | null
+let sidetoneCtx = null;
+let sidetoneOsc = null;
+let sidetoneGain = null;
+
+async function populateMidiDevices() {
+  setCwMidiDevice.innerHTML = '<option value="">— No MIDI devices —</option>';
+  try {
+    if (!midiAccess) midiAccess = await navigator.requestMIDIAccess();
+    const inputs = Array.from(midiAccess.inputs.values());
+    if (inputs.length > 0) {
+      setCwMidiDevice.innerHTML = '';
+      for (const inp of inputs) {
+        const opt = document.createElement('option');
+        opt.value = inp.id;
+        opt.textContent = inp.name || inp.id;
+        setCwMidiDevice.appendChild(opt);
+      }
+    }
+  } catch (err) {
+    console.warn('MIDI not available:', err.message);
+  }
+}
+
+function connectMidiDevice(id) {
+  if (midiInput) {
+    midiInput.onmidimessage = null;
+    midiInput = null;
+  }
+  if (!midiAccess || !id) return;
+  const inp = midiAccess.inputs.get(id);
+  if (!inp) return;
+  midiInput = inp;
+  midiInput.onmidimessage = handleMidiMessage;
+}
+
+function handleMidiMessage(msg) {
+  const [status, note, velocity] = msg.data;
+  const cmd = status & 0xF0;
+  const isNoteOn = cmd === 0x90 && velocity > 0;
+  const isNoteOff = cmd === 0x80 || (cmd === 0x90 && velocity === 0);
+
+  // Learn mode — capture note number
+  if (cwLearningTarget && isNoteOn) {
+    if (cwLearningTarget === 'dit') {
+      setCwMidiDitNote.value = note;
+    } else if (cwLearningTarget === 'dah') {
+      setCwMidiDahNote.value = note;
+    }
+    stopLearning();
+    return;
+  }
+
+  const ditNote = parseInt(setCwMidiDitNote.value, 10);
+  const dahNote = parseInt(setCwMidiDahNote.value, 10);
+
+  if (note === ditNote) {
+    if (isNoteOn) window.api.cwPaddleDit(true);
+    else if (isNoteOff) window.api.cwPaddleDit(false);
+  } else if (note === dahNote) {
+    if (isNoteOn) window.api.cwPaddleDah(true);
+    else if (isNoteOff) window.api.cwPaddleDah(false);
+  }
+}
+
+function stopLearning() {
+  cwLearningTarget = null;
+  cwLearnDitBtn.classList.remove('learning');
+  cwLearnDitBtn.textContent = 'Learn';
+  cwLearnDahBtn.classList.remove('learning');
+  cwLearnDahBtn.textContent = 'Learn';
+}
+
+cwLearnDitBtn.addEventListener('click', () => {
+  if (cwLearningTarget === 'dit') { stopLearning(); return; }
+  stopLearning();
+  cwLearningTarget = 'dit';
+  cwLearnDitBtn.classList.add('learning');
+  cwLearnDitBtn.textContent = 'Press...';
+});
+
+cwLearnDahBtn.addEventListener('click', () => {
+  if (cwLearningTarget === 'dah') { stopLearning(); return; }
+  stopLearning();
+  cwLearningTarget = 'dah';
+  cwLearnDahBtn.classList.add('learning');
+  cwLearnDahBtn.textContent = 'Press...';
+});
+
+cwMidiRefreshBtn.addEventListener('click', () => {
+  populateMidiDevices().then(() => connectMidiDevice(setCwMidiDevice.value));
+});
+
+// Auto-connect MIDI device when dropdown changes
+setCwMidiDevice.addEventListener('change', () => {
+  connectMidiDevice(setCwMidiDevice.value);
+});
+
+// Sidetone
+function initSidetone() {
+  if (sidetoneCtx) return;
+  sidetoneCtx = new (window.AudioContext || window.webkitAudioContext)();
+  sidetoneOsc = sidetoneCtx.createOscillator();
+  sidetoneOsc.type = 'sine';
+  sidetoneOsc.frequency.value = parseInt(setCwSidetonePitch.value, 10) || 600;
+  sidetoneGain = sidetoneCtx.createGain();
+  sidetoneGain.gain.value = 0;
+  sidetoneOsc.connect(sidetoneGain);
+  sidetoneGain.connect(sidetoneCtx.destination);
+  sidetoneOsc.start();
+}
+
+function sidetoneKey(down) {
+  if (!sidetoneCtx || !sidetoneGain) return;
+  const now = sidetoneCtx.currentTime;
+  sidetoneGain.gain.cancelScheduledValues(now);
+  sidetoneGain.gain.setValueAtTime(sidetoneGain.gain.value, now);
+  sidetoneGain.gain.linearRampToValueAtTime(down ? 0.3 : 0, now + 0.005);
+}
+
+function updateSidetonePitch() {
+  if (sidetoneOsc) {
+    sidetoneOsc.frequency.value = parseInt(setCwSidetonePitch.value, 10) || 600;
+  }
+}
+
+setCwSidetonePitch.addEventListener('change', updateSidetonePitch);
+
+// Live WPM adjustment — send to main immediately
+setCwWpm.addEventListener('change', () => {
+  const wpm = parseInt(setCwWpm.value, 10);
+  if (wpm >= 5 && wpm <= 50) window.api.cwSetWpm(wpm);
+});
+
+// CW key events from main process → sidetone
+window.api.onCwKey(({ down }) => {
+  if (setCwSidetone.checked) {
+    initSidetone();
+    sidetoneKey(down);
+  }
+});
+
+// CW keyer status
+window.api.onCwKeyerStatus(({ enabled }) => {
+  cwKeyerStatusEl.classList.toggle('hidden', !enabled);
+});
+
+// MIDI hot-plug: re-enumerate when devices change
+(async function initMidiHotplug() {
+  try {
+    if (!midiAccess) midiAccess = await navigator.requestMIDIAccess();
+    midiAccess.onstatechange = () => {
+      if (setEnableCwKeyer.checked) populateMidiDevices();
+    };
+  } catch { /* MIDI not available */ }
 })();
 
 // --- Settings footer links ---
