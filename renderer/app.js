@@ -3600,8 +3600,8 @@ function render() {
         tr.classList.add('already-worked');
       }
 
-      // New park indicator (POTA spot with a reference not in worked parks)
-      const isNewPark = workedParksSet.size > 0 && s.source === 'pota' && s.reference && !workedParksSet.has(s.reference);
+      // New park indicator (POTA/WWFF spot with a reference not in worked parks)
+      const isNewPark = workedParksSet.size > 0 && (s.source === 'pota' || s.source === 'wwff') && s.reference && !workedParksSet.has(s.reference);
       if (isNewPark) {
         tr.classList.add('new-park');
       }
@@ -3724,7 +3724,7 @@ function render() {
 
       const cells = [
         { val: s.mode, col: 'mode' },
-        { val: refDisplay, wwff: !!s.wwffReference, col: 'reference' },
+        { val: refDisplay, wwff: !!s.wwffReference, newPark: isNewPark, col: 'reference' },
         { val: parkDisplay, col: 'parkName' },
         { val: s.locationDesc, col: 'locationDesc' },
         { val: formatDistance(s.distance), col: 'distance' },
@@ -3739,6 +3739,12 @@ function render() {
         if (cell.col) td.setAttribute('data-col', cell.col);
         if (cell.cls) td.className = cell.cls;
         if (cell.col === 'comments' && cell.val) td.title = cell.val;
+        if (cell.newPark) {
+          const nb = document.createElement('span');
+          nb.textContent = 'NEW';
+          nb.style.cssText = 'background:#4ecca3;color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;';
+          td.appendChild(nb);
+        }
         if (cell.wwff) {
           const badge = document.createElement('span');
           badge.textContent = 'WWFF';
@@ -4010,6 +4016,9 @@ logSaveBtn.addEventListener('click', async () => {
   const respotWwffRef = currentLogSpot ? (currentLogSpot.wwffReference || (currentLogSpot.source === 'wwff' ? currentLogSpot.reference : '')) : '';
   const commentText = respotComment.value.trim().replace(/\{rst\}/gi, logRstSent.value.trim() || '59').replace(/\{mycallsign\}/gi, myCallsign);
 
+  // Pull QRZ data for ADIF fields (name, state, county, grid)
+  const logQrzInfo = qrzData.get(callsign.split('/')[0]);
+
   const qsoData = {
     callsign,
     frequency,
@@ -4025,7 +4034,12 @@ logSaveBtn.addEventListener('click', async () => {
     potaRef,
     sotaRef,
     wwffRef,
-    comment: logComment.value.trim(),
+    name: logQrzInfo ? [cleanQrzName(logQrzInfo.nickname) || cleanQrzName(logQrzInfo.fname), cleanQrzName(logQrzInfo.name)].filter(Boolean).join(' ') : '',
+    state: logQrzInfo ? logQrzInfo.state : '',
+    county: logQrzInfo && logQrzInfo.state && logQrzInfo.county ? `${logQrzInfo.state},${logQrzInfo.county}` : '',
+    gridsquare: logQrzInfo ? logQrzInfo.grid : '',
+    country: logQrzInfo ? logQrzInfo.country : '',
+    comment: [logComment.value.trim(), sigInfo && !logComment.value.includes(sigInfo) ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' '),
     respot: wantsRespot,
     wwffRespot: wantsWwffRespot,
     wwffReference: wantsWwffRespot ? respotWwffRef : '',
@@ -5460,6 +5474,8 @@ function initSidetone() {
 
 function sidetoneKey(down) {
   if (!sidetoneCtx || !sidetoneGain) return;
+  // Resume AudioContext if suspended (Chromium requires user gesture to start)
+  if (sidetoneCtx.state === 'suspended') sidetoneCtx.resume();
   const now = sidetoneCtx.currentTime;
   sidetoneGain.gain.cancelScheduledValues(now);
   sidetoneGain.gain.setValueAtTime(sidetoneGain.gain.value, now);
@@ -5578,6 +5594,15 @@ window.api.onCwText(({ total }) => {
   cwTextDisplay.textContent = display;
   cwTextDisplay.classList.remove('hidden');
 });
+
+// Unlock AudioContext on first user interaction (Chromium autoplay policy)
+document.addEventListener('click', function unlockAudio() {
+  document.removeEventListener('click', unlockAudio);
+  if (setCwSidetone.checked) {
+    initSidetone();
+    if (sidetoneCtx && sidetoneCtx.state === 'suspended') sidetoneCtx.resume();
+  }
+}, { once: true });
 
 // MIDI hot-plug: re-enumerate when devices change
 (async function initMidiHotplug() {
