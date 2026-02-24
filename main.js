@@ -2854,11 +2854,7 @@ app.whenReady().then(() => {
   // Send telemetry ping on launch (opt-in only, after short delay)
   setTimeout(() => sendTelemetry(0), 8000);
 
-  // Telemetry heartbeat every 30 minutes (captures duration if shutdown is not graceful)
-  setInterval(() => {
-    const sessionSeconds = Math.round((Date.now() - sessionStartTime) / 1000);
-    sendTelemetry(sessionSeconds);
-  }, 1800000);
+
 
   // IPC handlers
   ipcMain.on('open-external', (_e, url) => {
