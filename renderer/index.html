@@ -76,6 +76,12 @@
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-worked"> Hide worked stations</label>
           <label class="spots-toggle" id="spots-hide-parks-label"><input type="checkbox" id="spots-hide-parks"> Hide worked parks</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
+          <div class="spots-panel-divider" id="spots-events-divider" style="display:none;"></div>
+          <div class="spots-panel-section-label" id="spots-events-label" style="display:none;">Events</div>
+          <div class="spots-toggle" id="spots-was250-label" style="display:none;align-items:center;justify-content:space-between;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="spots-was250"> <span style="color:#cf6a00">WAS 250</span></label>
+            <button type="button" id="spots-was250-board" class="event-overlay-btn" style="font-size:10px;padding:1px 6px;">Board</button>
+          </div>
         </div>
       </div>
       <button id="scan-btn" title="Scan through spots">Scan</button>
@@ -137,6 +143,15 @@
     <button id="update-dismiss" title="Dismiss">&times;</button>
   </div>
 
+  <div id="event-banner" class="hidden">
+    <span id="event-badge" class="event-badge-inline">250</span>
+    <span id="event-message"></span>
+    <span id="event-progress-count"></span>
+    <button id="event-optin-btn" class="event-action-btn hidden">Track It</button>
+    <button id="event-progress-btn" class="event-action-btn hidden" title="View progress">Progress</button>
+    <button id="event-dismiss" title="Dismiss">&times;</button>
+  </div>
+
   <main>
     <div id="split-container" class="split-horizontal">
       <div id="table-pane">
@@ -180,6 +195,18 @@
       <div class="parks-stat"><span>Locations</span><strong id="parks-stats-locations">0</strong></div>
       <div class="parks-stats-divider"></div>
       <div class="parks-stat"><span>New on Air Now</span><strong id="parks-stats-new-now" class="stat-highlight">0</strong></div>
+    </div>
+    <div id="event-progress-overlay" class="hidden">
+      <div class="event-overlay-header">
+        <span id="event-overlay-title">America 250 WAS</span>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <button id="event-export-btn" class="event-overlay-btn" title="Export ADIF for LOTW">Export ADIF</button>
+          <button id="event-overlay-close" title="Close">&times;</button>
+        </div>
+      </div>
+      <div id="event-overlay-summary" class="parks-stat"><span>States Worked</span><strong id="event-overlay-count">0 / 50</strong></div>
+      <div class="parks-stats-divider"></div>
+      <div id="event-state-grid"></div>
     </div>
     <div id="dxcc-view" class="hidden">
       <div class="dxcc-header">
@@ -594,6 +621,12 @@
         </div>
       </div>
     </fieldset>
+    <!-- Events -->
+    <fieldset class="source-toggles">
+      <legend>Events</legend>
+      <div id="settings-events-list" style="font-size:12px;color:var(--text-secondary);padding:4px 0;">No active events</div>
+    </fieldset>
+
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
     <fieldset class="source-toggles">
       <legend>Display</legend>
@@ -740,7 +773,7 @@
       <button id="settings-cancel">Cancel</button>
     </div>
     <div class="settings-footer">
-      <div class="settings-version">v0.9.16 beta &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
+      <div class="settings-version">v0.9.17 beta &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-coffee"><a href="#" id="coffee-link">Buy Me a Coffee</a></div>
       <div class="settings-links">
         <a href="#" id="discord-link">Discord</a>
@@ -750,6 +783,8 @@
         <a href="#" id="hamlib-link">Hamlib</a>
         <span class="footer-dot">&middot;</span>
         <a href="#" id="hotkeys-link">Hotkeys</a>
+        <span class="footer-dot">&middot;</span>
+        <a href="#" id="check-update-link">Check for Updates</a>
       </div>
     </div>
   </dialog>
