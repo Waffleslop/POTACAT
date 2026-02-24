@@ -2,6 +2,10 @@
   "name": "potacat",
   "version": "0.9.19",
   "description": "POTA activator lookup with FlexRadio CAT control",
+  "author": {
+    "name": "Casey Stanton",
+    "email": "casey@potacat.com"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
