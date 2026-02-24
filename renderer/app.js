@@ -38,6 +38,9 @@ let activeRigName = ''; // name of the currently active rig profile
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log
 let donorCallsigns = new Set(); // supporter callsigns from potacat.com
 let expeditionCallsigns = new Set(); // active DX expeditions from Club Log
+let activeEvents = [];                // events from remote endpoint
+let eventCallsignMap = new Map();     // callsign pattern → event id (for badge matching)
+let eventOverlayOpen = false;
 let hideWorked = false;
 let workedParksSet = new Set(); // park references from CSV for fast lookup
 let workedParksData = new Map(); // reference → full park data for stats
@@ -2511,13 +2514,15 @@ function updateMapMarkers(filtered) {
     const mapNewPark = workedParksSet.size > 0 && (s.source === 'pota' || s.source === 'wwff') && s.reference && !workedParksSet.has(s.reference);
     const newBadge = mapNewPark ? ' <span style="background:#4ecca3;color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">NEW</span>' : '';
     const expeditionBadge = expeditionCallsigns.has(s.callsign.toUpperCase()) ? ' <span style="background:#ff1744;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">DXP</span>' : '';
+    const mapEvent = getEventForCallsign(s.callsign);
+    const eventBadgeHtml = mapEvent ? ` <span style="background:${mapEvent.badgeColor || '#ff6b00'};color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">${mapEvent.badge || 'EVT'}</span>` : '';
     const wwffBadge = s.wwffReference ? ` <span style="background:#26a69a;color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">WWFF</span>` : '';
     const wwffRefLine = s.wwffReference ? `<br><b>${s.wwffReference}</b> ${s.wwffParkName || ''} <span style="color:#26a69a;font-size:11px;">[WWFF]</span>` : '';
     const qrzOp = qrzData.get(s.callsign.toUpperCase().split('/')[0]);
     const opName = qrzDisplayName(qrzOp);
     const opLine = opName ? `<span style="color:#b0bec5;font-size:11px;">${opName}</span><br>` : '';
     const popupContent = `
-      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${newBadge}${wwffBadge}<br>
+      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${eventBadgeHtml}${newBadge}${wwffBadge}<br>
       ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}${wwffRefLine}<br>
       ${distStr}<br>
@@ -3410,6 +3415,16 @@ function render() {
         dxp.textContent = 'DXP';
         callTd.appendChild(dxp);
       }
+      // Event badge (e.g. "250" for America 250 WAS)
+      const matchedEvent = getEventForCallsign(s.callsign);
+      if (matchedEvent) {
+        const evBadge = document.createElement('span');
+        evBadge.className = 'event-badge';
+        evBadge.style.background = matchedEvent.badgeColor || '#ff6b00';
+        evBadge.title = matchedEvent.name || 'Event';
+        evBadge.textContent = matchedEvent.badge || 'EVT';
+        callTd.appendChild(evBadge);
+      }
       cellMap.set('callsign', callTd);
 
       // Operator name cell (from QRZ lookup)
@@ -4063,6 +4078,8 @@ settingsBtn.addEventListener('click', async () => {
   closeRigEditor();
   // Update connection status pills
   updateSettingsConnBar();
+  // Populate events list
+  populateSettingsEvents();
   settingsDialog.showModal();
 });
 
@@ -4472,6 +4489,530 @@ window.api.onDonorCallsigns((list) => {
 window.api.onExpeditionCallsigns((list) => {
   expeditionCallsigns = new Set(list.map(cs => cs.toUpperCase()));
   render();
+});
+
+// --- Active Events system ---
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
+  'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
+];
+
+function matchesEventPattern(callsign, patterns) {
+  const call = callsign.toUpperCase();
+  return (patterns || []).some(pattern => {
+    if (pattern.endsWith('/*')) {
+      return call.startsWith(pattern.slice(0, -1).toUpperCase());
+    }
+    return call === pattern.toUpperCase();
+  });
+}
+
+function getActiveScheduleEntry(event) {
+  const now = new Date();
+  return (event.schedule || []).find(s => {
+    return now >= new Date(s.start) && now < new Date(s.end);
+  });
+}
+
+function getEventForCallsign(callsign) {
+  for (const ev of activeEvents) {
+    if (matchesEventPattern(callsign, ev.callsignPatterns)) {
+      return ev;
+    }
+  }
+  return null;
+}
+
+function updateEventBanner() {
+  const banner = document.getElementById('event-banner');
+  const message = document.getElementById('event-message');
+  const progressCount = document.getElementById('event-progress-count');
+  const optinBtn = document.getElementById('event-optin-btn');
+  const progressBtn = document.getElementById('event-progress-btn');
+  const badge = document.getElementById('event-badge');
+
+  // Find first event with an active or upcoming schedule entry
+  let activeEvent = null;
+  let activeEntry = null;
+  let isUpcoming = false;
+  const now = new Date();
+  for (const ev of activeEvents) {
+    // Check for currently active entry first
+    const current = getActiveScheduleEntry(ev);
+    if (current) {
+      activeEvent = ev;
+      activeEntry = current;
+      break;
+    }
+    // Fall back to next upcoming entry (within 7 days)
+    if (!activeEvent) {
+      const upcoming = (ev.schedule || []).find(s => {
+        const start = new Date(s.start);
+        return start > now && (start - now) < 7 * 24 * 3600000;
+      });
+      if (upcoming) {
+        activeEvent = ev;
+        activeEntry = upcoming;
+        isUpcoming = true;
+      }
+    }
+  }
+
+  if (!activeEvent || !activeEntry) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  // If dismissed and not opted in, stay hidden
+  if (activeEvent.dismissed && !activeEvent.optedIn) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  badge.textContent = activeEvent.badge || '250';
+  badge.style.background = activeEvent.badgeColor || '#ff6b00';
+
+  const endDate = new Date(activeEntry.end);
+  const endStr = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const startDate = new Date(activeEntry.start);
+  const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const callPattern = (activeEvent.callsignPatterns || [])[0] || '';
+  const callText = callPattern ? ` \u2014 ${callPattern.replace('/*', '/')}*` : '';
+  const trackingLabel = (activeEvent.tracking && activeEvent.tracking.label) || 'items';
+  const board = activeEvent.board || (activeEvent.tracking && activeEvent.tracking.type) || 'regions';
+  const isRegions = board === 'regions';
+
+  if (activeEvent.optedIn) {
+    const worked = Object.keys(activeEvent.progress || {}).length;
+    const total = activeEvent.tracking ? activeEvent.tracking.total : 0;
+    if (isUpcoming) {
+      if (isRegions) {
+        message.textContent = `${activeEntry.regionName} week starts ${startStr}${callText}`;
+      } else {
+        message.textContent = `${activeEvent.name} starts ${startStr}`;
+      }
+    } else {
+      if (isRegions) {
+        message.textContent = `${activeEntry.regionName} week${callText} through ${endStr}`;
+      } else {
+        message.textContent = `${activeEvent.name} active through ${endStr}`;
+      }
+    }
+    if (total > 0) {
+      progressCount.textContent = `${worked}/${total} ${trackingLabel}`;
+    } else {
+      progressCount.textContent = `${worked} ${trackingLabel}`;
+    }
+    optinBtn.classList.add('hidden');
+    progressBtn.classList.remove('hidden');
+  } else {
+    if (isUpcoming) {
+      if (isRegions) {
+        message.textContent = `${activeEvent.name} \u2014 ${activeEntry.regionName}${callText} starts ${startStr}`;
+      } else {
+        message.textContent = `${activeEvent.name} starts ${startStr}`;
+      }
+    } else {
+      if (isRegions) {
+        message.textContent = `${activeEvent.name} \u2014 ${activeEntry.regionName}${callText} active through ${endStr}`;
+      } else {
+        message.textContent = `${activeEvent.name} active through ${endStr}`;
+      }
+    }
+    progressCount.textContent = '';
+    optinBtn.classList.remove('hidden');
+    progressBtn.classList.add('hidden');
+  }
+
+  banner.classList.remove('hidden');
+}
+
+let currentBoardEventId = null;
+
+function renderEventBoard(event) {
+  const board = event.board || (event.tracking && event.tracking.type) || 'regions';
+  if (board === 'regions') renderRegionsBoard(event);
+  else if (board === 'checklist') renderChecklistBoard(event);
+  else if (board === 'counter') renderCounterBoard(event);
+}
+
+function renderRegionsBoard(event) {
+  const content = document.getElementById('event-board-content');
+  const countEl = document.getElementById('event-overlay-count');
+  const titleEl = document.getElementById('event-overlay-title');
+  const labelEl = document.getElementById('event-overlay-label');
+  if (!content || !event) return;
+
+  titleEl.textContent = event.name || 'Event Progress';
+  labelEl.textContent = (event.tracking && event.tracking.label) ? `${event.tracking.label} Worked` : 'States Worked';
+  const progress = event.progress || {};
+  const now = new Date();
+  const activeRegions = new Set();
+  for (const s of (event.schedule || [])) {
+    if (now >= new Date(s.start) && now < new Date(s.end)) {
+      activeRegions.add(s.region);
+    }
+  }
+
+  const worked = Object.keys(progress).length;
+  const total = event.tracking ? event.tracking.total : US_STATES.length;
+  countEl.textContent = `${worked} / ${total}`;
+
+  const scheduleByRegion = {};
+  for (const s of (event.schedule || [])) {
+    if (!scheduleByRegion[s.region]) scheduleByRegion[s.region] = [];
+    scheduleByRegion[s.region].push(s);
+  }
+
+  content.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.id = 'event-state-grid';
+  for (const st of US_STATES) {
+    const cell = document.createElement('div');
+    cell.className = 'event-state-cell';
+    cell.textContent = st;
+
+    const entries = scheduleByRegion[st] || [];
+    const tipParts = [];
+    if (entries.length) {
+      const dateFmt = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      for (const entry of entries) {
+        tipParts.push(`${entry.regionName}: ${dateFmt(entry.start)} – ${dateFmt(entry.end)}`);
+      }
+    } else {
+      tipParts.push(`${st}: Schedule TBD`);
+    }
+
+    if (progress[st]) {
+      cell.classList.add('worked');
+      const p = progress[st];
+      tipParts.push(`Worked: ${p.call} on ${p.band} ${p.mode} (${p.date})`);
+    }
+    if (activeRegions.has(st)) {
+      cell.classList.add('active-week');
+      if (!progress[st]) tipParts.push('Active this week!');
+    }
+    cell.title = tipParts.join('\n');
+    cell.addEventListener('click', async () => {
+      if (progress[st]) return;
+      await window.api.markEventRegion({
+        eventId: event.id,
+        region: st,
+        qsoData: { callsign: 'MANUAL', band: '', mode: '', qsoDate: new Date().toISOString().slice(0, 10) },
+      });
+    });
+    grid.appendChild(cell);
+  }
+  content.appendChild(grid);
+}
+
+function renderChecklistBoard(event) {
+  const content = document.getElementById('event-board-content');
+  const countEl = document.getElementById('event-overlay-count');
+  const titleEl = document.getElementById('event-overlay-title');
+  const labelEl = document.getElementById('event-overlay-label');
+  if (!content || !event) return;
+
+  titleEl.textContent = event.name || 'Event Progress';
+  const trackingLabel = (event.tracking && event.tracking.label) || 'Items';
+  labelEl.textContent = `${trackingLabel} Worked`;
+  const progress = event.progress || {};
+  const items = (event.tracking && event.tracking.items) || [];
+  const worked = items.filter(it => progress[it.id]).length;
+  const total = event.tracking ? event.tracking.total : items.length;
+  countEl.textContent = `${worked} / ${total}`;
+
+  content.innerHTML = '';
+  for (const item of items) {
+    const row = document.createElement('div');
+    row.className = 'event-checklist-item' + (progress[item.id] ? ' worked' : '');
+    const marker = document.createElement('span');
+    marker.textContent = progress[item.id] ? '\u2713' : '\u25CB';
+    marker.style.cssText = 'font-size:14px;width:16px;text-align:center;flex-shrink:0;';
+    const callEl = document.createElement('span');
+    callEl.style.cssText = 'font-weight:600;min-width:60px;';
+    callEl.textContent = item.id;
+    const nameEl = document.createElement('span');
+    nameEl.style.color = 'var(--text-secondary)';
+    nameEl.textContent = item.name;
+    row.append(marker, callEl, nameEl);
+
+    if (progress[item.id]) {
+      const p = progress[item.id];
+      const info = document.createElement('span');
+      info.style.cssText = 'margin-left:auto;font-size:10px;color:var(--text-tertiary);';
+      info.textContent = [p.band, p.mode, p.date].filter(Boolean).join(' ');
+      row.appendChild(info);
+    } else {
+      // Manual mark button
+      const markBtn = document.createElement('button');
+      markBtn.className = 'event-overlay-btn';
+      markBtn.style.cssText = 'margin-left:auto;font-size:9px;padding:1px 4px;';
+      markBtn.textContent = 'Mark';
+      markBtn.addEventListener('click', async () => {
+        await window.api.markEventRegion({
+          eventId: event.id,
+          region: item.id,
+          qsoData: { callsign: item.id, band: '', mode: '', qsoDate: new Date().toISOString().slice(0, 10) },
+        });
+      });
+      row.appendChild(markBtn);
+    }
+
+    content.appendChild(row);
+  }
+}
+
+function renderCounterBoard(event) {
+  const content = document.getElementById('event-board-content');
+  const countEl = document.getElementById('event-overlay-count');
+  const titleEl = document.getElementById('event-overlay-title');
+  const labelEl = document.getElementById('event-overlay-label');
+  if (!content || !event) return;
+
+  titleEl.textContent = event.name || 'Event Progress';
+  const trackingLabel = (event.tracking && event.tracking.label) || 'QSOs';
+  labelEl.textContent = trackingLabel;
+  const progress = event.progress || {};
+  const qsos = Object.values(progress).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const count = qsos.length;
+  countEl.textContent = `${count}`;
+
+  content.innerHTML = '';
+  const counter = document.createElement('div');
+  counter.className = 'event-counter-value';
+  counter.textContent = count;
+  content.appendChild(counter);
+
+  if (qsos.length) {
+    const list = document.createElement('div');
+    list.style.cssText = 'max-height:200px;overflow-y:auto;padding:0 8px 8px;';
+    for (const qso of qsos.slice(0, 50)) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;font-size:11px;padding:2px 4px;color:var(--text-secondary);';
+      row.innerHTML = `<span style="font-weight:600;min-width:70px;">${qso.call || ''}</span>` +
+        `<span>${qso.band || ''}</span>` +
+        `<span>${qso.mode || ''}</span>` +
+        `<span style="margin-left:auto;color:var(--text-tertiary);">${qso.date || ''}</span>`;
+      list.appendChild(row);
+    }
+    content.appendChild(list);
+  } else {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'text-align:center;padding:8px;font-size:11px;color:var(--text-tertiary);';
+    empty.textContent = 'No QSOs logged yet';
+    content.appendChild(empty);
+  }
+}
+
+function openEventBoard(eventId) {
+  const ev = activeEvents.find(e => e.id === eventId);
+  if (!ev) return;
+  currentBoardEventId = eventId;
+  renderEventBoard(ev);
+  document.getElementById('event-progress-overlay').classList.remove('hidden');
+  eventOverlayOpen = true;
+}
+
+function toggleEventOverlay(forceOpen) {
+  const overlay = document.getElementById('event-progress-overlay');
+  eventOverlayOpen = forceOpen !== undefined ? forceOpen : !eventOverlayOpen;
+  if (eventOverlayOpen) {
+    // Open the board for currentBoardEventId, or first opted-in event
+    const ev = (currentBoardEventId && activeEvents.find(e => e.id === currentBoardEventId))
+      || activeEvents.find(e => e.optedIn);
+    if (ev) {
+      currentBoardEventId = ev.id;
+      renderEventBoard(ev);
+      overlay.classList.remove('hidden');
+    }
+  } else {
+    overlay.classList.add('hidden');
+  }
+}
+
+function updateSpotsEventsSection() {
+  const divider = document.getElementById('spots-events-divider');
+  const sectionLabel = document.getElementById('spots-events-label');
+  const container = document.getElementById('spots-events-container');
+  container.innerHTML = '';
+
+  // Filter to events that are active or upcoming within 7 days
+  const now = new Date();
+  const relevantEvents = activeEvents.filter(ev => {
+    if (getActiveScheduleEntry(ev)) return true;
+    return (ev.schedule || []).some(s => {
+      const start = new Date(s.start);
+      return start > now && (start - now) < 7 * 86400000;
+    });
+  });
+
+  const show = relevantEvents.length ? '' : 'none';
+  divider.style.display = show;
+  sectionLabel.style.display = show;
+
+  for (const ev of relevantEvents) {
+    const row = document.createElement('div');
+    row.className = 'spots-toggle';
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!ev.optedIn;
+    cb.addEventListener('change', async () => {
+      await window.api.setEventOptIn({ eventId: ev.id, optedIn: cb.checked, dismissed: false });
+    });
+    const span = document.createElement('span');
+    span.style.color = ev.badgeColor || '#cf6a00';
+    span.textContent = ev.name;
+    lbl.append(cb, span);
+
+    const boardBtn = document.createElement('button');
+    boardBtn.type = 'button';
+    boardBtn.className = 'event-overlay-btn';
+    boardBtn.style.cssText = 'font-size:10px;padding:1px 6px;';
+    boardBtn.textContent = 'Board';
+    boardBtn.addEventListener('click', () => openEventBoard(ev.id));
+
+    row.append(lbl, boardBtn);
+    container.appendChild(row);
+  }
+}
+
+// Event banner button handlers
+function findBannerEvent() {
+  // Same logic as updateEventBanner — find active or upcoming event
+  const now = new Date();
+  for (const ev of activeEvents) {
+    if (getActiveScheduleEntry(ev)) return ev;
+    const upcoming = (ev.schedule || []).find(s => {
+      const start = new Date(s.start);
+      return start > now && (start - now) < 7 * 24 * 3600000;
+    });
+    if (upcoming) return ev;
+  }
+  return null;
+}
+
+document.getElementById('event-optin-btn').addEventListener('click', async () => {
+  const ev = findBannerEvent();
+  if (ev) {
+    await window.api.setEventOptIn({ eventId: ev.id, optedIn: true });
+  }
+});
+
+document.getElementById('event-dismiss').addEventListener('click', async () => {
+  const ev = findBannerEvent();
+  if (ev) {
+    if (ev.optedIn) {
+      document.getElementById('event-banner').classList.add('hidden');
+    } else {
+      await window.api.setEventOptIn({ eventId: ev.id, dismissed: true });
+    }
+  }
+});
+
+document.getElementById('event-progress-btn').addEventListener('click', toggleEventOverlay);
+
+document.getElementById('event-overlay-close').addEventListener('click', () => {
+  toggleEventOverlay(false);
+});
+
+document.getElementById('event-export-btn').addEventListener('click', async () => {
+  const ev = currentBoardEventId && activeEvents.find(e => e.id === currentBoardEventId);
+  if (!ev) return;
+  const result = await window.api.exportEventAdif({ eventId: ev.id });
+  if (result && result.success) {
+    alert(`Exported ${result.count} QSOs to ${result.filePath}`);
+  }
+});
+
+function populateSettingsEvents() {
+  const container = document.getElementById('settings-events-list');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!activeEvents.length) {
+    container.textContent = 'No active events';
+    return;
+  }
+  for (const ev of activeEvents) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 0;';
+    const left = document.createElement('div');
+    left.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    const badge = document.createElement('span');
+    badge.className = 'event-badge-inline';
+    badge.style.background = ev.badgeColor || '#ff6b00';
+    badge.textContent = ev.badge || 'EVT';
+    const label = document.createElement('span');
+    label.textContent = ev.name || ev.id;
+    label.style.color = 'var(--text-primary)';
+    left.appendChild(badge);
+    left.appendChild(label);
+    const right = document.createElement('div');
+    right.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:3px;border:1px solid var(--border-secondary);cursor:pointer;';
+    if (ev.optedIn) {
+      toggle.textContent = 'Tracking';
+      toggle.style.background = 'var(--accent-green)';
+      toggle.style.color = '#1a1a2e';
+      toggle.style.borderColor = 'var(--accent-green)';
+    } else {
+      toggle.textContent = 'Track';
+      toggle.style.background = 'var(--bg-tertiary)';
+      toggle.style.color = 'var(--text-secondary)';
+    }
+    toggle.addEventListener('click', async () => {
+      await window.api.setEventOptIn({ eventId: ev.id, optedIn: !ev.optedIn });
+      // Refresh events and re-render settings list
+      const events = await window.api.getActiveEvents();
+      activeEvents = events;
+      populateSettingsEvents();
+      updateEventBanner();
+    });
+    right.appendChild(toggle);
+    // Reset progress button (only if opted in and has progress)
+    if (ev.optedIn && Object.keys(ev.progress || {}).length > 0) {
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.textContent = 'Reset';
+      resetBtn.title = 'Reset all progress for this event';
+      resetBtn.style.cssText = 'font-size:10px;padding:2px 6px;border-radius:3px;border:1px solid var(--border-secondary);background:var(--bg-tertiary);color:var(--accent-red);cursor:pointer;';
+      resetBtn.addEventListener('click', async () => {
+        if (!confirm(`Reset all progress for ${ev.name}? This cannot be undone.`)) return;
+        await window.api.resetEventProgress(ev.id);
+        const events = await window.api.getActiveEvents();
+        activeEvents = events;
+        populateSettingsEvents();
+        updateEventBanner();
+      });
+      right.appendChild(resetBtn);
+    }
+    row.appendChild(left);
+    row.appendChild(right);
+    container.appendChild(row);
+  }
+}
+
+// Listen for events from main process
+window.api.onActiveEvents((events) => {
+  activeEvents = events;
+  updateEventBanner();
+  updateSpotsEventsSection();
+  // Refresh overlay if open
+  if (eventOverlayOpen && currentBoardEventId) {
+    const ev = activeEvents.find(e => e.id === currentBoardEventId);
+    if (ev) renderEventBoard(ev);
+  }
+  render(); // re-render table for badges
 });
 
 // --- Worked parks listener ---
@@ -5405,6 +5946,11 @@ document.getElementById('hotkeys-link').addEventListener('click', (e) => {
   document.getElementById('settings-dialog').close();
   document.getElementById('hotkeys-dialog').showModal();
 });
+document.getElementById('check-update-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.checkForUpdates();
+  document.getElementById('settings-dialog').close();
+});
 
 // --- Titlebar controls ---
 if (window.api.platform === 'darwin') {
@@ -5725,6 +6271,14 @@ loadPrefs().then(() => {
   render();
   checkFirstRun();
 });
+// Fetch active events on startup
+window.api.getActiveEvents().then((events) => {
+  console.log('[Events] loaded', events.length, 'events:', events.map(e => e.id));
+  activeEvents = events;
+  updateEventBanner();
+  updateSpotsEventsSection();
+  render();
+}).catch(err => console.error('[Events] failed to load:', err));
 applyColOrder();
 initColumnResizing();
 initColumnDragging();

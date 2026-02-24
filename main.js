@@ -2001,46 +2001,99 @@ function fetchExpeditions() {
 }
 
 // --- Active Events (remote endpoint) ---
-// Built-in America 250 WAS schedule — remote endpoint overrides this.
-// Each activation runs Wed 0000z to Tue 2359z (7 days). Multiple states can overlap.
-// Confirmed dates from ARRL V0220 PDF + community reports. Update via potacat.com/events/active.json.
+// Built-in event definitions — remote endpoint overrides these.
+// Board types: "regions" (state grid), "checklist" (named items), "counter" (QSO count)
 const BUILTIN_EVENTS = {
-  events: [{
-    id: 'america250-2026',
-    name: 'ARRL America 250 WAS',
-    type: 'was',
-    url: 'https://www.arrl.org/america250-was',
-    badge: '250',
-    badgeColor: '#cf6a00',
-    callsignPatterns: ['W1AW/*'],
-    schedule: [
-      // Jan 2026
-      { region: 'NY', regionName: 'New York', start: '2026-01-07T00:00:00Z', end: '2026-01-13T23:59:59Z' },
-      { region: 'NE', regionName: 'Nebraska', start: '2026-01-07T00:00:00Z', end: '2026-01-13T23:59:59Z' },
-      { region: 'WV', regionName: 'West Virginia', start: '2026-01-14T00:00:00Z', end: '2026-01-20T23:59:59Z' },
-      { region: 'LA', regionName: 'Louisiana', start: '2026-01-14T00:00:00Z', end: '2026-01-20T23:59:59Z' },
-      { region: 'SC', regionName: 'South Carolina', start: '2026-01-14T00:00:00Z', end: '2026-01-20T23:59:59Z' },
-      { region: 'IL', regionName: 'Illinois', start: '2026-01-21T00:00:00Z', end: '2026-01-27T23:59:59Z' },
-      { region: 'ME', regionName: 'Maine', start: '2026-01-28T00:00:00Z', end: '2026-02-03T23:59:59Z' },
-      // Feb 2026
-      { region: 'CA', regionName: 'California', start: '2026-02-04T00:00:00Z', end: '2026-02-10T23:59:59Z' },
-      { region: 'MA', regionName: 'Massachusetts', start: '2026-02-11T00:00:00Z', end: '2026-02-17T23:59:59Z' },
-      { region: 'MI', regionName: 'Michigan', start: '2026-02-18T00:00:00Z', end: '2026-02-24T23:59:59Z' },
-      { region: 'AZ', regionName: 'Arizona', start: '2026-02-25T00:00:00Z', end: '2026-03-03T23:59:59Z' },
-      // Mar 2026
-      { region: 'AZ', regionName: 'Arizona', start: '2026-03-04T00:00:00Z', end: '2026-03-10T23:59:59Z' },
-      { region: 'VA', regionName: 'Virginia', start: '2026-03-11T00:00:00Z', end: '2026-03-17T23:59:59Z' },
-      { region: 'HI', regionName: 'Hawaii', start: '2026-03-18T00:00:00Z', end: '2026-03-24T23:59:59Z' },
-      { region: 'KY', regionName: 'Kentucky', start: '2026-03-18T00:00:00Z', end: '2026-03-24T23:59:59Z' },
-      { region: 'MN', regionName: 'Minnesota', start: '2026-03-18T00:00:00Z', end: '2026-03-24T23:59:59Z' },
-      { region: 'ND', regionName: 'North Dakota', start: '2026-03-25T00:00:00Z', end: '2026-03-31T23:59:59Z' },
-      { region: 'OK', regionName: 'Oklahoma', start: '2026-03-25T00:00:00Z', end: '2026-03-31T23:59:59Z' },
-      // Apr 2026
-      { region: 'NH', regionName: 'New Hampshire', start: '2026-04-29T00:00:00Z', end: '2026-05-05T23:59:59Z' },
-      // Remaining states will be filled from remote endpoint as schedule is confirmed
-    ],
-    tracking: { type: 'regions', total: 50, label: 'States' },
-  }],
+  events: [
+    // --- ARRL America 250 WAS (year-long, 50-state tracker) ---
+    {
+      id: 'america250-2026',
+      name: 'ARRL America 250 WAS',
+      type: 'was',
+      board: 'regions',
+      url: 'https://www.arrl.org/america250-was',
+      badge: '250',
+      badgeColor: '#cf6a00',
+      callsignPatterns: ['W1AW/*'],
+      schedule: [
+        // Jan 2026
+        { region: 'NY', regionName: 'New York', start: '2026-01-07T00:00:00Z', end: '2026-01-13T23:59:59Z' },
+        { region: 'NE', regionName: 'Nebraska', start: '2026-01-07T00:00:00Z', end: '2026-01-13T23:59:59Z' },
+        { region: 'WV', regionName: 'West Virginia', start: '2026-01-14T00:00:00Z', end: '2026-01-20T23:59:59Z' },
+        { region: 'LA', regionName: 'Louisiana', start: '2026-01-14T00:00:00Z', end: '2026-01-20T23:59:59Z' },
+        { region: 'SC', regionName: 'South Carolina', start: '2026-01-14T00:00:00Z', end: '2026-01-20T23:59:59Z' },
+        { region: 'IL', regionName: 'Illinois', start: '2026-01-21T00:00:00Z', end: '2026-01-27T23:59:59Z' },
+        { region: 'ME', regionName: 'Maine', start: '2026-01-28T00:00:00Z', end: '2026-02-03T23:59:59Z' },
+        // Feb 2026
+        { region: 'CA', regionName: 'California', start: '2026-02-04T00:00:00Z', end: '2026-02-10T23:59:59Z' },
+        { region: 'MA', regionName: 'Massachusetts', start: '2026-02-11T00:00:00Z', end: '2026-02-17T23:59:59Z' },
+        { region: 'MI', regionName: 'Michigan', start: '2026-02-18T00:00:00Z', end: '2026-02-24T23:59:59Z' },
+        { region: 'AZ', regionName: 'Arizona', start: '2026-02-25T00:00:00Z', end: '2026-03-03T23:59:59Z' },
+        // Mar 2026
+        { region: 'AZ', regionName: 'Arizona', start: '2026-03-04T00:00:00Z', end: '2026-03-10T23:59:59Z' },
+        { region: 'VA', regionName: 'Virginia', start: '2026-03-11T00:00:00Z', end: '2026-03-17T23:59:59Z' },
+        { region: 'HI', regionName: 'Hawaii', start: '2026-03-18T00:00:00Z', end: '2026-03-24T23:59:59Z' },
+        { region: 'KY', regionName: 'Kentucky', start: '2026-03-18T00:00:00Z', end: '2026-03-24T23:59:59Z' },
+        { region: 'MN', regionName: 'Minnesota', start: '2026-03-18T00:00:00Z', end: '2026-03-24T23:59:59Z' },
+        { region: 'ND', regionName: 'North Dakota', start: '2026-03-25T00:00:00Z', end: '2026-03-31T23:59:59Z' },
+        { region: 'OK', regionName: 'Oklahoma', start: '2026-03-25T00:00:00Z', end: '2026-03-31T23:59:59Z' },
+        // Apr 2026
+        { region: 'NH', regionName: 'New Hampshire', start: '2026-04-29T00:00:00Z', end: '2026-05-05T23:59:59Z' },
+        // Remaining states will be filled from remote endpoint as schedule is confirmed
+      ],
+      tracking: { type: 'regions', total: 50, label: 'States' },
+    },
+    // --- CQ WW 160m SSB 2026 (weekend contest) ---
+    {
+      id: 'cq160-ssb-2026',
+      name: 'CQ WW 160m SSB',
+      type: 'contest',
+      board: 'counter',
+      url: 'https://cq160.com',
+      badge: '160',
+      badgeColor: '#e040fb',
+      callsignPatterns: [],
+      schedule: [
+        { region: 'ALL', regionName: 'Worldwide', start: '2026-02-27T22:00:00Z', end: '2026-03-01T22:00:00Z' },
+      ],
+      tracking: { type: 'counter', total: 0, label: 'QSOs' },
+    },
+    // --- 13 Colonies Special Event (July) ---
+    {
+      id: '13colonies-2026',
+      name: '13 Colonies',
+      type: 'special-event',
+      board: 'checklist',
+      url: 'https://www.13colonies.us',
+      badge: '13C',
+      badgeColor: '#1776cf',
+      callsignPatterns: ['K2A', 'K2B', 'K2C', 'K2D', 'K2E', 'K2F', 'K2G', 'K2H', 'K2I', 'K2J', 'K2K', 'K2L', 'K2M', 'WM3PEN', 'GB13COL', 'TM13COL'],
+      schedule: [
+        { region: 'ALL', regionName: '13 Colonies', start: '2026-07-01T13:00:00Z', end: '2026-07-07T04:00:00Z' },
+      ],
+      tracking: {
+        type: 'checklist', total: 16, label: 'Stations',
+        items: [
+          { id: 'K2A', name: 'New York' },
+          { id: 'K2B', name: 'Virginia' },
+          { id: 'K2C', name: 'Rhode Island' },
+          { id: 'K2D', name: 'Connecticut' },
+          { id: 'K2E', name: 'Delaware' },
+          { id: 'K2F', name: 'Maryland' },
+          { id: 'K2G', name: 'Georgia' },
+          { id: 'K2H', name: 'Massachusetts' },
+          { id: 'K2I', name: 'New Jersey' },
+          { id: 'K2J', name: 'North Carolina' },
+          { id: 'K2K', name: 'New Hampshire' },
+          { id: 'K2L', name: 'South Carolina' },
+          { id: 'K2M', name: 'Pennsylvania' },
+          { id: 'WM3PEN', name: 'Bonus: Philadelphia' },
+          { id: 'GB13COL', name: 'Bonus: England' },
+          { id: 'TM13COL', name: 'Bonus: France' },
+        ],
+      },
+    },
+  ],
 };
 
 function loadEventsCache() {
@@ -2125,14 +2178,7 @@ function checkEventQso(qsoData) {
     const state = settings.events[ev.id];
     if (!state || !state.optedIn) continue;
 
-    // Check callsign against event patterns
-    const matches = (ev.callsignPatterns || []).some(pattern => {
-      if (pattern.endsWith('/*')) {
-        return call.startsWith(pattern.slice(0, -1)); // W1AW/* matches W1AW/7
-      }
-      return call === pattern.toUpperCase();
-    });
-    if (!matches) continue;
+    const board = ev.board || ev.tracking?.type || 'regions';
 
     // Find the active schedule entry
     const activeEntry = (ev.schedule || []).find(s => {
@@ -2142,10 +2188,29 @@ function checkEventQso(qsoData) {
     });
     if (!activeEntry) continue;
 
-    // Don't overwrite if already worked
-    if (state.progress[activeEntry.region]) continue;
-
-    markEventRegion(ev.id, activeEntry.region, qsoData);
+    if (board === 'checklist') {
+      // Checklist: match callsign exactly against tracking.items[].id
+      const items = (ev.tracking && ev.tracking.items) || [];
+      const matchedItem = items.find(it => call === it.id.toUpperCase() || call.startsWith(it.id.toUpperCase() + '/'));
+      if (!matchedItem) continue;
+      if (state.progress[matchedItem.id]) continue;
+      markEventRegion(ev.id, matchedItem.id, qsoData);
+    } else if (board === 'counter') {
+      // Counter: any QSO during event counts — store by timestamp key
+      const key = `qso-${Date.now()}`;
+      markEventRegion(ev.id, key, qsoData);
+    } else {
+      // Regions (WAS): match callsign pattern, mark active region
+      const matches = (ev.callsignPatterns || []).some(pattern => {
+        if (pattern.endsWith('/*')) {
+          return call.startsWith(pattern.slice(0, -1));
+        }
+        return call === pattern.toUpperCase();
+      });
+      if (!matches) continue;
+      if (state.progress[activeEntry.region]) continue;
+      markEventRegion(ev.id, activeEntry.region, qsoData);
+    }
   }
 }
 

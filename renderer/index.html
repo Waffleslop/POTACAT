@@ -78,10 +78,7 @@
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
           <div class="spots-panel-divider" id="spots-events-divider" style="display:none;"></div>
           <div class="spots-panel-section-label" id="spots-events-label" style="display:none;">Events</div>
-          <div class="spots-toggle" id="spots-was250-label" style="display:none;align-items:center;justify-content:space-between;">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="spots-was250"> <span style="color:#cf6a00">WAS 250</span></label>
-            <button type="button" id="spots-was250-board" class="event-overlay-btn" style="font-size:10px;padding:1px 6px;">Board</button>
-          </div>
+          <div id="spots-events-container"></div>
         </div>
       </div>
       <button id="scan-btn" title="Scan through spots">Scan</button>
@@ -198,15 +195,15 @@
     </div>
     <div id="event-progress-overlay" class="hidden">
       <div class="event-overlay-header">
-        <span id="event-overlay-title">America 250 WAS</span>
+        <span id="event-overlay-title">Event Progress</span>
         <div style="display:flex;gap:4px;align-items:center;">
           <button id="event-export-btn" class="event-overlay-btn" title="Export ADIF for LOTW">Export ADIF</button>
           <button id="event-overlay-close" title="Close">&times;</button>
         </div>
       </div>
-      <div id="event-overlay-summary" class="parks-stat"><span>States Worked</span><strong id="event-overlay-count">0 / 50</strong></div>
+      <div id="event-overlay-summary" class="parks-stat"><span id="event-overlay-label">Progress</span><strong id="event-overlay-count">0 / 0</strong></div>
       <div class="parks-stats-divider"></div>
-      <div id="event-state-grid"></div>
+      <div id="event-board-content"></div>
     </div>
     <div id="dxcc-view" class="hidden">
       <div class="dxcc-header">

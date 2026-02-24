@@ -354,20 +354,31 @@ button:hover {
   color: var(--text-primary);
 }
 
-#update-banner.hidden + main {
+/* Banner-to-main height calculation: both banners can stack */
+#update-banner.hidden + #event-banner.hidden + main {
   height: calc(100vh - 52px - 32px);
 }
-
-#update-banner:not(.hidden) + main {
+#update-banner:not(.hidden) + #event-banner.hidden + main {
   height: calc(100vh - 52px - 32px - 33px);
 }
-
-.cat-log-open #update-banner.hidden + main {
-  height: calc(100vh - 52px - 32px - 150px);
+#update-banner.hidden + #event-banner:not(.hidden) + main {
+  height: calc(100vh - 52px - 32px - 33px);
+}
+#update-banner:not(.hidden) + #event-banner:not(.hidden) + main {
+  height: calc(100vh - 52px - 32px - 66px);
 }
 
-.cat-log-open #update-banner:not(.hidden) + main {
+.cat-log-open #update-banner.hidden + #event-banner.hidden + main {
+  height: calc(100vh - 52px - 32px - 150px);
+}
+.cat-log-open #update-banner:not(.hidden) + #event-banner.hidden + main {
   height: calc(100vh - 52px - 32px - 33px - 150px);
+}
+.cat-log-open #update-banner.hidden + #event-banner:not(.hidden) + main {
+  height: calc(100vh - 52px - 32px - 33px - 150px);
+}
+.cat-log-open #update-banner:not(.hidden) + #event-banner:not(.hidden) + main {
+  height: calc(100vh - 52px - 32px - 66px - 150px);
 }
 
 #update-message {
@@ -441,6 +452,207 @@ button:hover {
 #update-dismiss:hover {
   color: var(--accent-red);
   background: transparent;
+}
+
+/* Event banner */
+#event-banner {
+  background: rgba(255, 107, 0, 0.08);
+  border-bottom: 1px solid #ff6b00;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+#event-banner.hidden {
+  display: none;
+}
+
+.event-badge-inline {
+  background: #ff6b00;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+#event-message {
+  color: var(--text-primary);
+}
+
+#event-progress-count {
+  color: #ff6b00;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.event-action-btn {
+  background: #ff6b00;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.event-action-btn:hover {
+  background: #ff8533;
+}
+
+.event-action-btn.hidden {
+  display: none;
+}
+
+#event-dismiss {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+#event-dismiss:hover {
+  color: var(--accent-red);
+}
+
+/* Event progress overlay */
+#event-progress-overlay {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid #ff6b00;
+  border-radius: 8px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  z-index: 501;
+  min-width: 280px;
+  max-width: 340px;
+  box-shadow: 0 4px 16px var(--shadow-heavy);
+}
+
+.event-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-primary);
+  font-weight: bold;
+  font-size: 12px;
+  color: #ff6b00;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.event-overlay-header button:last-child {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.event-overlay-header button:last-child:hover {
+  color: var(--text-primary);
+}
+
+.event-overlay-btn {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  cursor: pointer;
+}
+
+.event-overlay-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+#event-state-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  padding: 8px;
+}
+
+.event-state-cell {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 2px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-dim);
+  cursor: default;
+  position: relative;
+}
+
+.event-state-cell.worked {
+  background: var(--accent-green);
+  color: #1a1a2e;
+}
+
+.event-state-cell.active-week {
+  outline: 2px solid #ff6b00;
+  outline-offset: -1px;
+  color: #ff6b00;
+  font-weight: 700;
+}
+
+.event-state-cell.active-week.worked {
+  color: #1a1a2e;
+}
+
+/* Event checklist board (13 Colonies etc.) */
+.event-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.event-checklist-item.worked {
+  color: var(--accent-green);
+}
+
+/* Event counter board (contests) */
+.event-counter-value {
+  font-size: 36px;
+  font-weight: bold;
+  text-align: center;
+  padding: 12px;
+  color: var(--text-primary);
+}
+
+/* Event badge on spot table rows */
+.event-badge {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: #ff6b00;
+  color: #fff;
+  vertical-align: middle;
+  cursor: default;
 }
 
 main {
