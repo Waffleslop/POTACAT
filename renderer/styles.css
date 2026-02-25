@@ -1160,33 +1160,40 @@ dialog input, dialog select {
   margin-top: 0;
 }
 
-/* Spot source color-coding */
+/* Spot source color-coding — left border + subtle row tint */
 .spot-pota {
   border-left: 3px solid #4ecca3;
+  background: rgba(78, 204, 163, 0.06);
 }
 
 .spot-sota {
   border-left: 3px solid #f0a500;
+  background: rgba(240, 165, 0, 0.06);
 }
 
 .spot-dxc {
   border-left: 3px solid #e040fb;
+  background: rgba(224, 64, 251, 0.06);
 }
 
 .spot-rbn {
   border-left: 3px solid #00bcd4;
+  background: rgba(0, 188, 212, 0.06);
 }
 
 .spot-wwff {
   border-left: 3px solid #26a69a;
+  background: rgba(38, 166, 154, 0.06);
 }
 
 .spot-llota {
   border-left: 3px solid #42a5f5;
+  background: rgba(66, 165, 245, 0.06);
 }
 
 .spot-pskr {
   border-left: 3px solid #ff6b6b;
+  background: rgba(255, 107, 107, 0.06);
 }
 
 .potacat-respot {
