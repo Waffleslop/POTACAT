@@ -4787,7 +4787,29 @@ function updateEventBanner() {
   const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   const callPattern = (activeEvent.callsignPatterns || [])[0] || '';
-  const callText = callPattern ? ` \u2014 ${callPattern.replace('/*', '/')}*` : '';
+  let callText = '';
+  if (callPattern) {
+    // For W1AW/* pattern, resolve to W1AW/<district> using the active region's call district
+    if (callPattern === 'W1AW/*' && activeEntry.region) {
+      const stateToDistrict = {
+        CT: 1, ME: 1, MA: 1, NH: 1, RI: 1, VT: 1,
+        NJ: 2, NY: 2,
+        DE: 3, DC: 3, MD: 3, PA: 3,
+        AL: 4, FL: 4, GA: 4, KY: 4, NC: 4, SC: 4, TN: 4, VA: 4,
+        AR: 5, LA: 5, MS: 5, NM: 5, OK: 5, TX: 5,
+        CA: 6, HI: 6,
+        AZ: 7, ID: 7, MT: 7, NV: 7, OR: 7, UT: 7, WA: 7, WY: 7,
+        CO: 8, IA: 8, KS: 8, MN: 8, MO: 8, NE: 8, ND: 8, SD: 8,
+        IL: 9, IN: 9, WI: 9,
+        MI: 0, OH: 0, WV: 0,
+        AK: 'KL7', GU: 'KH2', PR: 'KP4', VI: 'KP2',
+      };
+      const d = stateToDistrict[activeEntry.region];
+      callText = d !== undefined ? ` \u2014 W1AW/${d}` : ` \u2014 W1AW/*`;
+    } else {
+      callText = ` \u2014 ${callPattern.replace('/*', '/')}*`;
+    }
+  }
   const trackingLabel = (activeEvent.tracking && activeEvent.tracking.label) || 'items';
   const board = activeEvent.board || (activeEvent.tracking && activeEvent.tracking.type) || 'regions';
   const isRegions = board === 'regions';
