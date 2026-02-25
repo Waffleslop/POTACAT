@@ -900,6 +900,7 @@ th.col-drop-right { border-right: 2px solid var(--accent-blue) !important; }
 .hide-col-operator [data-col="operator"],
 .hide-col-frequency [data-col="frequency"],
 .hide-col-mode [data-col="mode"],
+.hide-col-source [data-col="source"],
 .hide-col-reference [data-col="reference"],
 .hide-col-parkName [data-col="parkName"],
 .hide-col-locationDesc [data-col="locationDesc"],
@@ -1213,12 +1214,6 @@ dialog input, dialog select {
 .source-badge-wwff { background: #26a69a; color: #000; }
 .source-badge-llota { background: #42a5f5; color: #000; }
 .source-badge-pskr { background: #ff6b6b; color: #000; }
-
-/* Hide source column when toggled off */
-.hide-source-col th[data-col="source"],
-.hide-source-col td[data-col="source"] {
-  display: none;
-}
 
 /* When row tinting is disabled, remove backgrounds but keep left borders */
 .no-source-tint .spot-pota,
