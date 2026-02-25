@@ -117,6 +117,7 @@ const spotsHideWorked = document.getElementById('spots-hide-worked');
 const spotsHideParks = document.getElementById('spots-hide-parks');
 const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
+const spotsDxcc = document.getElementById('spots-dxcc');
 const settingsBtn = document.getElementById('settings-btn');
 const logbookBtn = document.getElementById('logbook-btn');
 const settingsDialog = document.getElementById('settings-dialog');
@@ -198,12 +199,15 @@ const splitSplitterEl = document.getElementById('split-splitter');
 const viewTableBtn = document.getElementById('view-table-btn');
 const viewMapBtn = document.getElementById('view-map-btn');
 const popoutMapBtn = document.getElementById('popout-map-btn');
-const viewDxccBtn = document.getElementById('view-dxcc-btn');
+const dxccBoardBtn = document.getElementById('dxcc-board-btn');
 const dxccView = document.getElementById('dxcc-view');
 const dxccMatrixBody = document.getElementById('dxcc-matrix-body');
 const dxccCountEl = document.getElementById('dxcc-count');
 const dxccPlaceholder = document.getElementById('dxcc-placeholder');
-const dxccModeFilterEl = document.getElementById('dxcc-mode-filter');
+const dxccBandSelectEl = document.getElementById('dxcc-band-select');
+const dxccModeSelectEl = document.getElementById('dxcc-mode-select');
+const dxccAwardLabelEl = document.getElementById('dxcc-award-label');
+const dxccChallengeEl = document.getElementById('dxcc-challenge');
 const setEnableCluster = document.getElementById('set-enable-cluster');
 const setEnableRbn = document.getElementById('set-enable-rbn');
 const setEnableWsjtx = document.getElementById('set-enable-wsjtx');
@@ -276,9 +280,6 @@ const parksStatsToggleBtn = document.getElementById('parks-stats-toggle');
 const parksStatsCloseBtn = document.getElementById('parks-stats-close');
 let parksStatsOpen = false;
 const setEnableDxcc = document.getElementById('set-enable-dxcc');
-const setAdifPath = document.getElementById('set-adif-path');
-const adifBrowseBtn = document.getElementById('adif-browse-btn');
-const adifPicker = document.getElementById('adif-picker');
 const distHeader = document.getElementById('dist-header');
 const utcClockEl = document.getElementById('utc-clock');
 const sfiStatusEl = document.getElementById('sfi-status');
@@ -1058,68 +1059,45 @@ initMultiDropdown(rbnBandFilterEl, 'Band', rerenderRbn);
 rbnMaxAgeInput.addEventListener('change', rerenderRbn);
 rbnAgeUnitSelect.addEventListener('change', rerenderRbn);
 
-// DXCC mode filter — re-render matrix on change instead of spot table
-function initDxccModeFilter() {
-  const btn = dxccModeFilterEl.querySelector('.multi-dropdown-btn');
-  const menu = dxccModeFilterEl.querySelector('.multi-dropdown-menu');
-  const textEl = dxccModeFilterEl.querySelector('.multi-dropdown-text');
-  const allCb = menu.querySelector('input[value="all"]');
-  const itemCbs = [...menu.querySelectorAll('input:not([value="all"])')];
+// DXCC filter constants
+const DXCC_MODE_GROUPS = {
+  phone:   new Set(['SSB', 'AM', 'FM', 'USB', 'LSB']),
+  cw:      new Set(['CW']),
+  digital: new Set(['FT8', 'FT4', 'RTTY', 'PSK31', 'JT65', 'JT9', 'DATA', 'OLIVIA', 'MFSK'])
+};
+const DXCC_CHALLENGE_BANDS = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m']; // excludes 60m per ARRL rules
 
-  function updateText() {
-    const checked = itemCbs.filter((cb) => cb.checked);
-    if (allCb.checked || checked.length === 0) {
-      textEl.textContent = 'All';
-    } else if (checked.length <= 3) {
-      textEl.textContent = checked.map((cb) => cb.value).join(', ');
-    } else {
-      textEl.textContent = checked.length + ' selected';
+// DXCC band/mode filter — re-render matrix on change
+function initDxccFilters() {
+  // Restore saved filter state
+  try {
+    const saved = JSON.parse(localStorage.getItem('pota-cat-dxcc-filter'));
+    if (saved) {
+      if (saved.band) dxccBandSelectEl.value = saved.band;
+      if (saved.mode) dxccModeSelectEl.value = saved.mode;
     }
+  } catch (e) { /* ignore */ }
+
+  function onFilterChange() {
+    localStorage.setItem('pota-cat-dxcc-filter', JSON.stringify({
+      band: dxccBandSelectEl.value,
+      mode: dxccModeSelectEl.value
+    }));
+    if (currentView === 'dxcc') renderDxccMatrix();
   }
 
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.querySelectorAll('.multi-dropdown.open').forEach((d) => {
-      if (d !== dxccModeFilterEl) d.classList.remove('open');
-    });
-    dxccModeFilterEl.classList.toggle('open');
-  });
-
-  menu.addEventListener('click', (e) => e.stopPropagation());
-
-  menu.addEventListener('change', (e) => {
-    const cb = e.target;
-    if (cb.value === 'all') {
-      const nowChecked = cb.checked;
-      itemCbs.forEach((c) => { c.checked = nowChecked; });
-    } else {
-      allCb.checked = false;
-      if (itemCbs.every((c) => !c.checked)) allCb.checked = true;
-      if (itemCbs.every((c) => c.checked)) {
-        allCb.checked = true;
-        itemCbs.forEach((c) => { c.checked = false; });
-      }
-    }
-    updateText();
-    if (currentView === 'dxcc') renderDxccMatrix();
-  });
-
-  updateText();
+  dxccBandSelectEl.addEventListener('change', onFilterChange);
+  dxccModeSelectEl.addEventListener('change', onFilterChange);
 }
-initDxccModeFilter();
+initDxccFilters();
 
 function getDxccModeFilter() {
-  return getDropdownValues(dxccModeFilterEl);
+  const val = dxccModeSelectEl.value;
+  return val === 'all' ? null : DXCC_MODE_GROUPS[val] || null;
 }
 
 function updateDxccButton() {
-  if (enableDxcc) {
-    viewDxccBtn.classList.remove('hidden');
-  } else {
-    viewDxccBtn.classList.add('hidden');
-    // Fall back to table if currently on DXCC view
-    if (currentView === 'dxcc') setView('table');
-  }
+  if (!enableDxcc && currentView === 'dxcc') setView('table');
 }
 
 function updateWsjtxStatusVisibility() {
@@ -1435,11 +1413,6 @@ setEnableCwKeyer.addEventListener('change', () => {
   }
 });
 
-// DXCC checkbox toggles ADIF picker visibility
-setEnableDxcc.addEventListener('change', () => {
-  adifPicker.classList.toggle('hidden', !setEnableDxcc.checked);
-});
-
 // Logging checkbox toggles logging config visibility
 setEnableLogging.addEventListener('change', () => {
   loggingConfig.classList.toggle('hidden', !setEnableLogging.checked);
@@ -1514,14 +1487,6 @@ adifImportBtn.addEventListener('click', async () => {
   } catch (err) {
     adifImportResult.textContent = 'Import failed';
     adifImportResult.style.color = '#e94560';
-  }
-});
-
-// ADIF file browser
-adifBrowseBtn.addEventListener('click', async () => {
-  const filePath = await window.api.chooseAdifFile();
-  if (filePath) {
-    setAdifPath.value = filePath;
   }
 });
 
@@ -2747,6 +2712,13 @@ document.addEventListener('keydown', (e) => {
     window.api.qsoPopoutOpen(); // opens or focuses existing pop-out
     return;
   }
+  // F5 — Check for updates
+  if (e.key === 'F5' && !e.target.matches('input, select, textarea')) {
+    e.preventDefault();
+    window.api.checkForUpdates();
+    showLogToast('Checking for updates...', { duration: 2000 });
+    return;
+  }
   // F11 — Welcome screen
   if (e.key === 'F11' && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
@@ -3093,13 +3065,11 @@ function updateViewLayout() {
   // Deactivate all view buttons
   viewTableBtn.classList.remove('active');
   viewMapBtn.classList.remove('active');
-  viewDxccBtn.classList.remove('active');
   viewRbnBtn.classList.remove('active');
 
   if (currentView === 'dxcc') {
     splitContainerEl.classList.add('hidden');
     dxccView.classList.remove('hidden');
-    viewDxccBtn.classList.add('active');
     renderDxccMatrix();
     updateParksStatsOverlay();
     saveViewState();
@@ -3228,7 +3198,17 @@ viewMapBtn.addEventListener('click', () => {
 });
 
 viewRbnBtn.addEventListener('click', () => setView('rbn'));
-viewDxccBtn.addEventListener('click', () => setView('dxcc'));
+dxccBoardBtn.addEventListener('click', () => {
+  if (!enableDxcc) {
+    enableDxcc = true;
+    spotsDxcc.checked = true;
+    setEnableDxcc.checked = true;
+    window.api.saveSettings({ enableDxcc: true });
+  }
+  // Close the spots dropdown
+  document.getElementById('spots-dropdown').classList.remove('open');
+  setView('dxcc');
+});
 
 // --- Pop-out map ---
 popoutMapBtn.addEventListener('click', () => {
@@ -3340,43 +3320,75 @@ splitSplitterEl.addEventListener('mousedown', (e) => {
 // --- DXCC Matrix Rendering ---
 const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
 
+function isEntityConfirmedOnBand(ent, band, modeFilter) {
+  const modes = ent.confirmed[band];
+  if (!modes || modes.length === 0) return false;
+  if (!modeFilter) return true;
+  return modes.some((m) => modeFilter.has(m));
+}
+
 function renderDxccMatrix() {
   if (!dxccData || !dxccData.entities) {
     dxccMatrixBody.innerHTML = '';
     dxccPlaceholder.classList.remove('hidden');
-    dxccCountEl.textContent = '0 / 0';
+    dxccCountEl.textContent = '0 / 100';
+    dxccAwardLabelEl.textContent = '';
+    dxccChallengeEl.classList.add('hidden');
     return;
   }
 
   dxccPlaceholder.classList.add('hidden');
   const modeFilter = getDxccModeFilter(); // null = all modes
+  const bandFilter = dxccBandSelectEl.value; // 'all' or specific band
+  const isAllBands = bandFilter === 'all';
+
+  // Show/hide band columns in thead
+  const theadThs = document.querySelectorAll('.dxcc-matrix thead th.dxcc-band-col');
+  theadThs.forEach((th) => {
+    if (isAllBands) {
+      th.style.display = '';
+    } else {
+      th.style.display = 'none';
+    }
+  });
 
   let confirmedCount = 0;
+  let challengeCount = 0;
   const rows = [];
 
   for (const ent of dxccData.entities) {
     let hasAny = false;
     const bandCells = [];
 
-    for (const band of DXCC_BANDS) {
-      const modes = ent.confirmed[band];
-      let confirmed = false;
-      if (modes && modes.length > 0) {
-        if (!modeFilter) {
-          confirmed = true;
-        } else {
-          confirmed = modes.some((m) => modeFilter.has(m));
-        }
+    if (isAllBands) {
+      // All Bands: full matrix
+      for (const band of DXCC_BANDS) {
+        const confirmed = isEntityConfirmedOnBand(ent, band, modeFilter);
+        if (confirmed) hasAny = true;
+        bandCells.push(confirmed);
+        // DXCC Challenge: count band-entities on challenge bands only
+        if (confirmed && DXCC_CHALLENGE_BANDS.includes(band)) challengeCount++;
       }
-      if (confirmed) hasAny = true;
-      bandCells.push(confirmed);
+    } else {
+      // Specific band selected
+      hasAny = isEntityConfirmedOnBand(ent, bandFilter, modeFilter);
     }
 
     if (hasAny) confirmedCount++;
     rows.push({ ent, bandCells, hasAny });
   }
 
-  dxccCountEl.textContent = `${confirmedCount} / ${dxccData.entities.length}`;
+  // Update progress counter
+  dxccCountEl.textContent = `${confirmedCount} / 100`;
+  dxccAwardLabelEl.textContent = confirmedCount >= 100 ? 'DXCC!' : '';
+
+  // DXCC Challenge counter (All Bands view only)
+  if (isAllBands) {
+    dxccChallengeEl.textContent = `Challenge: ${challengeCount}`;
+    dxccChallengeEl.classList.remove('hidden');
+  } else {
+    dxccChallengeEl.classList.add('hidden');
+  }
 
   // Build table rows
   const fragment = document.createDocumentFragment();
@@ -3386,7 +3398,11 @@ function renderDxccMatrix() {
 
     // Entity name
     const nameTd = document.createElement('td');
-    nameTd.textContent = ent.name;
+    if (!isAllBands && hasAny) {
+      nameTd.textContent = '\u2713 ' + ent.name;
+    } else {
+      nameTd.textContent = ent.name;
+    }
     nameTd.title = ent.prefix;
     tr.appendChild(nameTd);
 
@@ -3395,14 +3411,16 @@ function renderDxccMatrix() {
     contTd.textContent = ent.continent;
     tr.appendChild(contTd);
 
-    // Band cells
-    for (const confirmed of bandCells) {
-      const td = document.createElement('td');
-      if (confirmed) {
-        td.textContent = '\u2713';
-        td.classList.add('dxcc-confirmed');
+    // Band cells (only in All Bands view)
+    if (isAllBands) {
+      for (const confirmed of bandCells) {
+        const td = document.createElement('td');
+        if (confirmed) {
+          td.textContent = '\u2713';
+          td.classList.add('dxcc-confirmed');
+        }
+        tr.appendChild(td);
       }
-      tr.appendChild(td);
     }
 
     fragment.appendChild(tr);
@@ -4062,6 +4080,7 @@ function syncSpotsPanel() {
   spotsHideWorked.checked = hideWorked;
   spotsHideParks.checked = hideWorkedParks;
   spotsHideOob.checked = hideOutOfBand;
+  spotsDxcc.checked = enableDxcc;
   spotsHideParksLabel.classList.toggle('hidden', workedParksSet.size === 0);
 }
 
@@ -4090,6 +4109,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   hideWorked = spotsHideWorked.checked;
   hideWorkedParks = spotsHideParks.checked;
   hideOutOfBand = spotsHideOob.checked;
+  enableDxcc = spotsDxcc.checked;
 
   // Sync Settings dialog checkboxes
   setEnablePota.checked = enablePota;
@@ -4102,8 +4122,10 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   setHideWorked.checked = hideWorked;
   setHideWorkedParks.checked = hideWorkedParks;
   setHideOutOfBand.checked = hideOutOfBand;
+  setEnableDxcc.checked = enableDxcc;
 
   updateRbnButton();
+  updateDxccButton();
   updateDxCommandBar();
 
   // Save and let main process handle connect/disconnect
@@ -4111,6 +4133,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
     enablePota, enableSota, enableWwff, enableLlota,
     enableCluster, enableRbn, enablePskr,
     hideWorked, hideWorkedParks, hideOutOfBand,
+    enableDxcc,
   });
 
   render();
@@ -4218,8 +4241,6 @@ settingsBtn.addEventListener('click', async () => {
   splitOrientationConfig.classList.toggle('hidden', !setEnableSplitView.checked);
   document.getElementById('set-split-orientation').value = s.splitOrientation || 'horizontal';
   setEnableDxcc.checked = s.enableDxcc === true;
-  setAdifPath.value = s.adifPath || '';
-  adifPicker.classList.toggle('hidden', !s.enableDxcc);
   setPotaParksPath.value = s.potaParksPath || '';
   potaParksClearBtn.style.display = s.potaParksPath ? '' : 'none';
   setHideWorkedParks.checked = s.hideWorkedParks === true;
@@ -4381,7 +4402,6 @@ settingsSave.addEventListener('click', async () => {
   const cwSidetoneVal = setCwSidetone.checked;
   const cwSidetonePitchVal = parseInt(setCwSidetonePitch.value, 10) || 600;
   const cwSidetoneVolumeVal = parseInt(setCwSidetoneVolume.value, 10);
-  const adifPath = setAdifPath.value.trim() || '';
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
   const loggingEnabled = setEnableLogging.checked;
@@ -4450,7 +4470,6 @@ settingsSave.addEventListener('click', async () => {
     rotorPort: rotorPortVal,
     enableSplit: enableSplitEnabled,
     verboseLog: verboseLogEnabled,
-    adifPath: adifPath,
     potaParksPath: potaParksPath,
     hideWorkedParks: hideWorkedParksEnabled,
     enableLogging: loggingEnabled,
@@ -4656,6 +4675,10 @@ window.api.onUpdateAvailable((data) => {
     banner.classList.add('hidden');
   };
   banner.classList.remove('hidden');
+});
+
+window.api.onUpdateUpToDate(() => {
+  showLogToast('You\'re up to date!', { duration: 3000 });
 });
 
 window.api.onDownloadProgress(({ percent }) => {
@@ -5042,8 +5065,6 @@ function toggleEventOverlay(forceOpen) {
 }
 
 function updateSpotsEventsSection() {
-  const divider = document.getElementById('spots-events-divider');
-  const sectionLabel = document.getElementById('spots-events-label');
   const container = document.getElementById('spots-events-container');
   container.innerHTML = '';
 
@@ -5056,10 +5077,6 @@ function updateSpotsEventsSection() {
       return start > now && (start - now) < 7 * 86400000;
     });
   });
-
-  const show = relevantEvents.length ? '' : 'none';
-  divider.style.display = show;
-  sectionLabel.style.display = show;
 
   for (const ev of relevantEvents) {
     const row = document.createElement('div');

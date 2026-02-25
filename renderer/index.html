@@ -76,9 +76,13 @@
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-worked"> Hide worked stations</label>
           <label class="spots-toggle" id="spots-hide-parks-label"><input type="checkbox" id="spots-hide-parks"> Hide worked parks</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
-          <div class="spots-panel-divider" id="spots-events-divider" style="display:none;"></div>
-          <div class="spots-panel-section-label" id="spots-events-label" style="display:none;">Events</div>
+          <div class="spots-panel-divider" id="spots-events-divider"></div>
+          <div class="spots-panel-section-label" id="spots-events-label">Events &amp; Awards</div>
           <div id="spots-events-container"></div>
+          <div class="spots-toggle" style="display:flex;align-items:center;justify-content:space-between;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="spots-dxcc"> DXCC Tracker</label>
+            <button type="button" id="dxcc-board-btn" class="event-overlay-btn" style="font-size:10px;padding:1px 6px;">Board</button>
+          </div>
         </div>
       </div>
       <button id="scan-btn" title="Scan through spots">Scan</button>
@@ -89,7 +93,6 @@
         <button id="view-map-btn" class="view-btn" title="Map view">Map</button>
         <button id="popout-map-btn" class="view-btn popout-btn" title="Pop-out map window">&#x2197;</button>
         <button id="view-rbn-btn" class="view-btn hidden" title="Reverse Beacon Network">RBN</button>
-        <button id="view-dxcc-btn" class="view-btn hidden" title="DXCC Tracker">DXCC</button>
       </div>
     </div>
     <div class="status-bar">
@@ -216,18 +219,35 @@
     </div>
     <div id="dxcc-view" class="hidden">
       <div class="dxcc-header">
-        <span class="dxcc-progress"><span id="dxcc-count">0 / 0</span> entities confirmed</span>
-        <div class="multi-dropdown" id="dxcc-mode-filter">
-          <button class="multi-dropdown-btn" type="button">Mode: <span class="multi-dropdown-text">All</span></button>
-          <div class="multi-dropdown-menu">
-            <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="CW"> CW</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="SSB"> SSB</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="FT8"> FT8</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="FT4"> FT4</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="RTTY"> RTTY</label>
-          </div>
-        </div>
+        <label class="dxcc-filter-label">Band:
+          <select id="dxcc-band-select">
+            <option value="all">All Bands</option>
+            <option value="160m">160m</option>
+            <option value="80m">80m</option>
+            <option value="60m">60m</option>
+            <option value="40m">40m</option>
+            <option value="30m">30m</option>
+            <option value="20m">20m</option>
+            <option value="17m">17m</option>
+            <option value="15m">15m</option>
+            <option value="12m">12m</option>
+            <option value="10m">10m</option>
+            <option value="6m">6m</option>
+          </select>
+        </label>
+        <label class="dxcc-filter-label">Mode:
+          <select id="dxcc-mode-select">
+            <option value="all">All Modes</option>
+            <option value="phone">Phone</option>
+            <option value="cw">CW</option>
+            <option value="digital">Digital</option>
+          </select>
+        </label>
+        <span class="dxcc-progress">
+          <span id="dxcc-count">0 / 100</span>
+          <span id="dxcc-award-label"></span>
+        </span>
+        <span id="dxcc-challenge" class="dxcc-challenge hidden"></span>
       </div>
       <div class="dxcc-table-container">
         <table class="dxcc-matrix">
@@ -251,7 +271,7 @@
           <tbody id="dxcc-matrix-body"></tbody>
         </table>
       </div>
-      <div id="dxcc-placeholder" class="hidden">No log file loaded. Go to Settings to select your ADIF or SQLite export.</div>
+      <div id="dxcc-placeholder" class="hidden">No QSOs logged yet. Log some contacts or import a log to see DXCC progress.</div>
     </div>
     <div id="rbn-view" class="hidden">
       <div class="rbn-header">
@@ -643,10 +663,12 @@
         </div>
       </div>
     </fieldset>
-    <!-- Events -->
+    <!-- Events & Awards -->
     <fieldset class="source-toggles">
-      <legend>Events</legend>
+      <legend>Events &amp; Awards</legend>
       <div id="settings-events-list" style="font-size:12px;color:var(--text-secondary);padding:4px 0;">No active events</div>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-dxcc"> DXCC Tracker</label>
+      <span class="help-text" style="margin-left:12px;display:block;">Uses your POTACAT logfile to track DXCC progress.</span>
     </fieldset>
 
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
@@ -768,19 +790,6 @@
         </div>
       </div>
     </fieldset>
-    <!-- 10. DXCC Tracker -->
-    <fieldset class="source-toggles">
-      <legend>DXCC Tracker</legend>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-dxcc"> DXCC Tracker</label>
-      <div id="adif-picker" class="hidden" style="margin-top:6px;margin-left:12px;">
-        <label style="margin-bottom:4px;">Log File:
-          <div style="display:flex;gap:6px;margin-top:4px;">
-            <input type="text" id="set-adif-path" readonly placeholder="No file selected" style="flex:1;">
-            <button type="button" id="adif-browse-btn">Browse</button>
-          </div>
-        </label>
-      </div>
-    </fieldset>
     <!-- 10. About (merged Privacy + Diagnostics) -->
     <fieldset class="source-toggles">
       <legend>About</legend>
@@ -796,7 +805,7 @@
       <button id="settings-cancel">Cancel</button>
     </div>
     <div class="settings-footer">
-      <div class="settings-version">v0.9.21 beta &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
+      <div class="settings-version">v0.9.22 beta &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-coffee"><a href="#" id="coffee-link">Buy Me a Coffee</a></div>
       <div class="settings-links">
         <a href="#" id="discord-link">Discord</a>
@@ -931,6 +940,7 @@
       <tbody>
         <tr><td><kbd>F1</kbd></td><td>Keyboard shortcuts</td></tr>
         <tr><td><kbd>F2</kbd></td><td>View/Edit Logbook</td></tr>
+        <tr><td><kbd>F5</kbd></td><td>Check for updates</td></tr>
         <tr><td><kbd>F11</kbd></td><td>Welcome / setup screen</td></tr>
         <tr><td><kbd>Space</kbd></td><td>Start / stop scan</td></tr>
         <tr><td><kbd>S</kbd></td><td>Toggle split mode</td></tr>

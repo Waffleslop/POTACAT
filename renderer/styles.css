@@ -1774,14 +1774,47 @@ dialog input, dialog select {
   border-bottom: 1px solid var(--border-primary);
 }
 
+.dxcc-filter-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dxcc-filter-label select {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .dxcc-progress {
   font-size: 13px;
   color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 #dxcc-count {
   font-weight: bold;
   color: var(--accent-green);
+  font-family: Consolas, "Courier New", monospace;
+}
+
+#dxcc-award-label {
+  color: #4ecca3;
+  font-weight: bold;
+}
+
+.dxcc-challenge {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-left: auto;
   font-family: Consolas, "Courier New", monospace;
 }
 

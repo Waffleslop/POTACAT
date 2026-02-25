@@ -1655,11 +1655,13 @@ async function refreshSpots() {
 
 // --- DXCC data builder ---
 async function buildDxccData() {
-  if (!ctyDb || !settings.adifPath) return null;
+  if (!ctyDb) return null;
+  const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  if (!fs.existsSync(logPath)) return null;
   try {
-    const qsos = isSqliteFile(settings.adifPath)
-      ? await parseSqliteConfirmed(settings.adifPath)
-      : parseAdifFile(settings.adifPath);
+    const qsos = isSqliteFile(logPath)
+      ? await parseSqliteConfirmed(logPath)
+      : parseAdifFile(logPath, { confirmedOnly: false });
 
     // Build confirmation map: entityIndex → { band → Set<mode> }
     const confirmMap = new Map();
@@ -1944,7 +1946,7 @@ function createWindow() {
     refreshSpots();
     fetchSolarData();
     // Auto-send DXCC data if enabled and ADIF path is set
-    if (settings.enableDxcc && settings.adifPath) {
+    if (settings.enableDxcc) {
       sendDxccData();
     }
     // Load worked callsigns from QSO log
@@ -2354,6 +2356,12 @@ autoUpdater.on('update-downloaded', () => {
   }
 });
 
+autoUpdater.on('update-not-available', () => {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('update-up-to-date');
+  }
+});
+
 autoUpdater.on('error', (err) => {
   console.error('autoUpdater error:', err);
   if (win && !win.isDestroyed()) {
@@ -2387,6 +2395,8 @@ function checkForUpdatesManual() {
           if (win && !win.isDestroyed()) {
             win.webContents.send('update-available', { version: latestTag, url: releaseUrl, headline: data.name || '' });
           }
+        } else if (win && !win.isDestroyed()) {
+          win.webContents.send('update-up-to-date');
         }
       } catch { /* silently ignore parse errors */ }
     });
@@ -3147,7 +3157,7 @@ app.whenReady().then(() => {
     }
 
     // Auto-parse ADIF and send DXCC data if enabled
-    if (settings.enableDxcc && settings.adifPath) {
+    if (settings.enableDxcc) {
       sendDxccData();
     }
 
@@ -3169,19 +3179,7 @@ app.whenReady().then(() => {
     return settings;
   });
 
-  // --- DXCC Tracker IPC ---
-  ipcMain.handle('choose-adif-file', async () => {
-    const result = await dialog.showOpenDialog(win, {
-      title: 'Select Log File',
-      filters: [
-        { name: 'Log Files', extensions: ['adi', 'adif', 'sqlite', 'db'] },
-        { name: 'All Files', extensions: ['*'] },
-      ],
-      properties: ['openFile'],
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
-  });
+
 
   ipcMain.handle('choose-pota-parks-file', async () => {
     const result = await dialog.showOpenDialog(win, {
