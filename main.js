@@ -211,7 +211,7 @@ function killRigctld() {
 function spawnRigctld(target, portOverride) {
   return new Promise((resolve, reject) => {
     const rigctldPath = findRigctld();
-    const port = portOverride || '4532';
+    const port = portOverride || String(target.rigctldPort || 4532);
     const args = [
       '-m', String(target.rigId),
       '-r', target.serialPort,
@@ -333,8 +333,9 @@ async function connectCat() {
     });
     cat.on('frequency', sendCatFrequency);
     cat.on('mode', sendCatMode);
-    sendCatLog('Connecting to rigctld on 127.0.0.1:4532');
-    cat.connect({ type: 'rigctld', host: '127.0.0.1', port: 4532 });
+    const rigctldPort = target.rigctldPort || 4532;
+    sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
+    cat.connect({ type: 'rigctld', host: '127.0.0.1', port: rigctldPort });
   } else {
     cat = new CatClient();
     cat._debug = true;
@@ -3613,12 +3614,18 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('send-cluster-command', async (_e, text) => {
+  ipcMain.handle('send-cluster-command', async (_e, text, nodeId) => {
     let sent = 0;
-    for (const [, entry] of clusterClients) {
-      if (entry.client.sendCommand(text)) sent++;
+    if (nodeId) {
+      const entry = clusterClients.get(nodeId);
+      if (entry && entry.client.sendCommand(text)) sent++;
+      if (sent === 0) return { error: 'Selected node is not connected' };
+    } else {
+      for (const [, entry] of clusterClients) {
+        if (entry.client.sendCommand(text)) sent++;
+      }
+      if (sent === 0) return { error: 'No connected DX Cluster nodes' };
     }
-    if (sent === 0) return { error: 'No connected DX Cluster nodes' };
     return { success: true, sent };
   });
 

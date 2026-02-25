@@ -177,6 +177,7 @@
         </div>
         <div id="dx-command-bar" class="dx-command-bar hidden">
           <span class="dx-command-label">DX&gt;</span>
+          <select id="dx-command-node" class="dx-command-node" title="Send to this node"></select>
           <input type="text" id="dx-command-input" class="dx-command-input" maxlength="80" placeholder="e.g. DX 14025.0 W1AW great signal">
           <button type="button" id="dx-command-send" class="dx-command-btn">Send</button>
         </div>
@@ -458,6 +459,10 @@
             <input type="checkbox" id="set-rig-dtr-off"> Disable DTR/RTS on connect
           </label>
           <span class="help-text" style="margin-top:2px;display:block;">Prevents PTT keying on Digirig, SignaLink, and similar interfaces</span>
+          <label>rigctld Port:
+            <input type="number" id="set-rigctld-port" min="1024" max="65535" value="4532" style="width:80px;">
+          </label>
+          <span class="help-text" style="margin-top:2px;display:block;">Default 4532. Change if another app is using that port.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="hamlib-test-btn">Test Connection</button>
             <span id="hamlib-test-result" style="font-size:12px;"></span>

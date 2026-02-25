@@ -179,6 +179,7 @@ const setRigPort = document.getElementById('set-rig-port');
 const setRigPortManual = document.getElementById('set-rig-port-manual');
 const setRigBaud = document.getElementById('set-rig-baud');
 const setRigDtrOff = document.getElementById('set-rig-dtr-off');
+const setRigctldPort = document.getElementById('set-rigctld-port');
 const setRigSearch = document.getElementById('set-rig-search');
 const hamlibTestBtn = document.getElementById('hamlib-test-btn');
 const hamlibTestResult = document.getElementById('hamlib-test-result');
@@ -528,6 +529,7 @@ async function loadPrefs() {
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
   showDxBar = settings.showDxBar === true;
+  dxCommandPreferredNode = localStorage.getItem('dx-command-node') || '';
   updateDxCommandBar();
   enableRbn = settings.enableRbn === true; // default false
   enablePskr = settings.enablePskr === true; // default false
@@ -728,6 +730,9 @@ async function populateHamlibFields(savedTarget) {
 
   // Restore DTR/RTS checkbox
   setRigDtrOff.checked = !!(savedTarget && savedTarget.dtrOff);
+
+  // Restore rigctld port
+  setRigctldPort.value = (savedTarget && savedTarget.rigctldPort) || 4532;
 }
 
 let serialcatPortsLoaded = false;
@@ -776,8 +781,9 @@ function describeRigTarget(target) {
     return `Serial CAT on ${target.path || '?'} @ ${target.baudRate || 9600}`;
   }
   if (target.type === 'rigctld') {
-    const port = target.serialPort || '?';
-    return `Hamlib on ${port}`;
+    const comPort = target.serialPort || '?';
+    const rPort = target.rigctldPort && target.rigctldPort !== 4532 ? ` (port ${target.rigctldPort})` : '';
+    return `Hamlib on ${comPort}${rPort}`;
   }
   return 'Unknown';
 }
@@ -882,6 +888,7 @@ function buildCatTargetFromForm() {
       serialPort: getEffectivePort(),
       baudRate: parseInt(setRigBaud.value, 10),
       dtrOff: setRigDtrOff.checked,
+      rigctldPort: parseInt(setRigctldPort.value, 10) || 4532,
     };
   }
   return null;
@@ -2883,26 +2890,55 @@ document.getElementById('respot-cancel').addEventListener('click', () => {
 });
 
 // --- DX Command Bar ---
+const dxCommandNode = document.getElementById('dx-command-node');
+let showDxBar = false;
+let dxCommandPreferredNode = '';
+
 function updateDxCommandBar() {
   const bar = document.getElementById('dx-command-bar');
   bar.classList.toggle('hidden', !enableCluster || !showDxBar);
+  updateDxCommandNodeList();
 }
 
-let showDxBar = false;
+function updateDxCommandNodeList() {
+  const prev = dxCommandNode.value || dxCommandPreferredNode;
+  dxCommandNode.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = '';
+  allOpt.textContent = 'All nodes';
+  dxCommandNode.appendChild(allOpt);
+  for (const ns of clusterNodeStatuses) {
+    const opt = document.createElement('option');
+    opt.value = ns.id;
+    opt.textContent = ns.name + (ns.connected ? '' : ' (offline)');
+    dxCommandNode.appendChild(opt);
+  }
+  // Restore previous selection if still present
+  if (prev && [...dxCommandNode.options].some(o => o.value === prev)) {
+    dxCommandNode.value = prev;
+  }
+}
+
+dxCommandNode.addEventListener('change', () => {
+  dxCommandPreferredNode = dxCommandNode.value;
+  localStorage.setItem('dx-command-node', dxCommandPreferredNode);
+});
 
 async function sendDxCommand() {
   const btn = document.getElementById('dx-command-send');
   const input = document.getElementById('dx-command-input');
   const text = input.value.trim();
   if (!text) return;
+  const nodeId = dxCommandNode.value || undefined;
   btn.disabled = true;
   try {
-    const result = await window.api.sendClusterCommand(text);
+    const result = await window.api.sendClusterCommand(text, nodeId);
     if (result.error) {
       showLogToast(result.error, { warn: true, duration: 5000 });
     } else {
       input.value = '';
-      showLogToast('Sent to ' + result.sent + ' node' + (result.sent > 1 ? 's' : ''));
+      const nodeName = nodeId ? dxCommandNode.options[dxCommandNode.selectedIndex].textContent : result.sent + ' node' + (result.sent > 1 ? 's' : '');
+      showLogToast('Sent to ' + nodeName);
     }
   } catch (err) {
     showLogToast('DX command failed: ' + err.message, { warn: true, duration: 5000 });
@@ -5186,6 +5222,7 @@ window.api.onClusterStatus((s) => {
     clusterNodeStatuses = [];
   }
   updateSettingsConnBar();
+  updateDxCommandNodeList();
 });
 
 // --- WSJT-X listeners ---
