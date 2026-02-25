@@ -2874,6 +2874,7 @@ dialog input, dialog select {
 }
 .dx-command-bar.hidden { display: none; }
 .dx-command-label { color: #e040fb; font-weight: 600; white-space: nowrap; font-size: 12px; }
+.dx-command-node { font-size: 12px; max-width: 120px; }
 .dx-command-input { flex: 1; font-size: 12px; font-family: monospace; }
 .dx-command-btn { font-size: 11px; padding: 2px 10px; white-space: nowrap; }
 

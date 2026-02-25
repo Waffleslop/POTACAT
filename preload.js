@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld('api', {
   wsjtxHaltTx: () => ipcRenderer.send('wsjtx-halt-tx'),
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
   quickRespot: (data) => ipcRenderer.invoke('quick-respot', data),
-  sendClusterCommand: (text) => ipcRenderer.invoke('send-cluster-command', text),
+  sendClusterCommand: (text, nodeId) => ipcRenderer.invoke('send-cluster-command', text, nodeId),
   getRecentQsos: () => ipcRenderer.invoke('get-recent-qsos'),
   getAllQsos: () => ipcRenderer.invoke('get-all-qsos'),
   updateQso: (data) => ipcRenderer.invoke('update-qso', data),
