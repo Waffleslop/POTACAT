@@ -1638,8 +1638,9 @@ function isWorkedSpot(spot) {
     String(now.getUTCDate()).padStart(2, '0');
   const todayQsos = entries.filter(e => e.date === todayUtc);
   if (todayQsos.length === 0) return false;
-  const spotRef = (spot.reference || '').toUpperCase();
-  if (spotRef) return todayQsos.some(e => e.ref === spotRef);
+  // Match on band — only grey out if worked on same band today
+  const spotBand = (spot.band || '').toUpperCase();
+  if (spotBand) return todayQsos.some(e => e.band === spotBand);
   return true;
 }
 

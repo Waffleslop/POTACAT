@@ -3460,7 +3460,7 @@ app.whenReady().then(() => {
       // Update worked QSOs map and notify renderer
       if (qsoData.callsign) {
         const call = qsoData.callsign.toUpperCase();
-        const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase() };
+        const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), band: (qsoData.band || '').toUpperCase() };
         if (!workedQsos.has(call)) workedQsos.set(call, []);
         workedQsos.get(call).push(entry);
         if (win && !win.isDestroyed()) {
