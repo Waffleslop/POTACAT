@@ -1858,15 +1858,29 @@ mapResizeObserver.observe(mapPaneEl);
 // --- Column Order (drag-and-drop reordering) ---
 const COL_ORDER_KEY = 'pota-cat-col-order-v1';
 const DEFAULT_COL_ORDER = [
-  'log','callsign','operator','frequency','mode','reference',
+  'log','callsign','operator','frequency','mode','source','reference',
   'parkName','locationDesc','distance','bearing','spotTime','comments','skip'
 ];
 
 function loadColOrder() {
   try {
     const saved = JSON.parse(localStorage.getItem(COL_ORDER_KEY));
-    if (Array.isArray(saved) && saved.length === DEFAULT_COL_ORDER.length &&
-        DEFAULT_COL_ORDER.every(k => saved.includes(k))) return saved;
+    if (Array.isArray(saved)) {
+      // Migrate: insert new columns that didn't exist in older versions
+      for (const col of DEFAULT_COL_ORDER) {
+        if (!saved.includes(col)) {
+          const defaultIdx = DEFAULT_COL_ORDER.indexOf(col);
+          // Find best insertion point: after the previous default column
+          const prev = DEFAULT_COL_ORDER[defaultIdx - 1];
+          const prevIdx = prev ? saved.indexOf(prev) : -1;
+          saved.splice(prevIdx + 1, 0, col);
+        }
+      }
+      // Remove any columns no longer in default
+      const filtered = saved.filter(c => DEFAULT_COL_ORDER.includes(c));
+      if (filtered.length === DEFAULT_COL_ORDER.length &&
+          DEFAULT_COL_ORDER.every(k => filtered.includes(k))) return filtered;
+    }
   } catch { /* ignore */ }
   return [...DEFAULT_COL_ORDER];
 }
@@ -1890,11 +1904,11 @@ let colOrder = loadColOrder();
 
 // --- Column Resizing ---
 // Widths stored as { colKey: pct } object so they follow columns regardless of position
-const COL_WIDTHS_KEY = 'pota-cat-col-pct-v9';
-const COL_WIDTHS_KEY_V8 = 'pota-cat-col-pct-v8';
+const COL_WIDTHS_KEY = 'pota-cat-col-pct-v10';
+const COL_WIDTHS_KEY_V9 = 'pota-cat-col-pct-v9';
 const DEFAULT_COL_PCT_OBJ = {
-  log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, reference: 6,
-  parkName: 16, locationDesc: 8, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4
+  log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, source: 5, reference: 6,
+  parkName: 15, locationDesc: 7, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4
 };
 
 function loadColWidths() {
@@ -1902,14 +1916,15 @@ function loadColWidths() {
     const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY));
     if (saved && typeof saved === 'object' && !Array.isArray(saved)) return saved;
   } catch { /* ignore */ }
-  // Migrate from v8 array format
+  // Migrate from v9 object format — add missing columns with defaults
   try {
-    const v8 = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY_V8));
-    if (Array.isArray(v8) && v8.length === DEFAULT_COL_ORDER.length) {
-      const obj = {};
-      DEFAULT_COL_ORDER.forEach((key, i) => { obj[key] = v8[i]; });
-      saveColWidths(obj);
-      return obj;
+    const v9 = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY_V9));
+    if (v9 && typeof v9 === 'object' && !Array.isArray(v9)) {
+      for (const col of DEFAULT_COL_ORDER) {
+        if (v9[col] == null) v9[col] = DEFAULT_COL_PCT_OBJ[col] || 5;
+      }
+      saveColWidths(v9);
+      return v9;
     }
   } catch { /* ignore */ }
   return { ...DEFAULT_COL_PCT_OBJ };
@@ -2464,6 +2479,10 @@ const PRIVILEGE_RANGES = {
   ],
 };
 
+const SOURCE_LABELS = {
+  pota: 'POTA', sota: 'SOTA', dxc: 'DX', rbn: 'RBN',
+  wwff: 'WWFF', llota: 'LLOTA', pskr: 'FreeDV',
+};
 const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
 
@@ -3536,6 +3555,15 @@ function render() {
       // Build reference display — dual-park shows both refs
       const refDisplay = s.wwffReference ? s.reference + ' / ' + s.wwffReference : s.reference;
       const parkDisplay = s.wwffReference ? s.parkName : s.parkName;
+
+      // Source badge cell
+      const sourceTd = document.createElement('td');
+      sourceTd.setAttribute('data-col', 'source');
+      const sourceBadge = document.createElement('span');
+      sourceBadge.className = 'source-badge source-badge-' + (s.source || 'pota');
+      sourceBadge.textContent = SOURCE_LABELS[s.source] || s.source || '';
+      sourceTd.appendChild(sourceBadge);
+      cellMap.set('source', sourceTd);
 
       const cells = [
         { val: s.mode, col: 'mode' },

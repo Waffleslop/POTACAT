@@ -1196,6 +1196,24 @@ dialog input, dialog select {
   background: rgba(255, 107, 107, 0.06);
 }
 
+/* Source badge in table column */
+.source-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.source-badge-pota { background: #4ecca3; color: #000; }
+.source-badge-sota { background: #f0a500; color: #000; }
+.source-badge-dxc  { background: #e040fb; color: #000; }
+.source-badge-rbn  { background: #00bcd4; color: #000; }
+.source-badge-wwff { background: #26a69a; color: #000; }
+.source-badge-llota { background: #42a5f5; color: #000; }
+.source-badge-pskr { background: #ff6b6b; color: #000; }
+
 /* When row tinting is disabled, remove backgrounds but keep left borders */
 .no-source-tint .spot-pota,
 .no-source-tint .spot-sota,
