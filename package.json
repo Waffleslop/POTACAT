@@ -1,7 +1,7 @@
 {
   "name": "potacat",
-  "version": "0.9.22",
-  "description": "POTA activator lookup with FlexRadio CAT control",
+  "version": "0.9.23",
+  "description": "Amateur radio spot aggregator with CAT control, QSO logging, and panadapter integration",
   "author": {
     "name": "Casey Stanton",
     "email": "casey@potacat.com"
@@ -25,6 +25,7 @@
       "preload.js",
       "preload-popout.js",
       "preload-qso-popout.js",
+      "preload-actmap-popout.js",
       "lib/**/*",
       "renderer/**/*",
       "assets/icon.png",

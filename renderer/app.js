@@ -55,12 +55,28 @@ let myCallsign = '';
 let lastTunedSpot = null; // last clicked/tuned spot for quick respot
 let popoutOpen = false; // pop-out map window is open
 let qsoPopoutOpen = false; // pop-out QSO log window is open
+let actmapPopoutOpen = false; // pop-out activation map window is open
 let dxccData = null;  // { entities: [...] } from main process
 let enableWsjtx = false;
 let wsjtxDecodes = []; // recent decodes from WSJT-X (FIFO, max 50)
 let wsjtxState = null; // last WSJT-X status (freq, mode, etc.)
 const qrzData = new Map(); // callsign → { fname, name, addr2, state, country }
 let qrzFullName = false; // show first+last or just first
+
+// --- Activator Mode State ---
+let appMode = 'hunter'; // 'hunter' or 'activator'
+let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP'}, ...]  max 3
+let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF'}]  max 3, resets per QSO
+let activatorContacts = []; // in-memory QSO list for current activation session
+let activatorFreqKhz = 0;  // from CAT
+let activationActive = false; // true while activation is running
+let activationStartTime = 0;  // Date.now() when activation started
+let activationTimerInterval = null;
+
+/** Get primary activator park ref */
+function primaryParkRef() { return activatorParkRefs[0]?.ref || ''; }
+/** Get primary activator park name */
+function primaryParkName() { return activatorParkRefs[0]?.name || ''; }
 
 /** Clean up QRZ name: title-case, drop trailing single-letter initial */
 function cleanQrzName(raw) {
@@ -519,8 +535,8 @@ function applyTheme(light) {
 async function loadPrefs() {
   const settings = await window.api.getSettings();
   if (settings.appVersion) {
-    const ttEl = document.querySelector('.titlebar-title');
-    if (ttEl) ttEl.textContent = `POTACAT - v${settings.appVersion}`;
+    window._appVersion = settings.appVersion;
+    updateTitleBar();
   }
   applyTheme(settings.lightMode === true);
   grid = settings.grid || '';
@@ -576,6 +592,37 @@ async function loadPrefs() {
   }
   updateRbnButton();
   updateDxccButton();
+  // Activator mode restore
+  if (settings.appMode === 'activator') {
+    appMode = 'activator';
+    // Restore activator parks — migrate from legacy single string to array
+    if (settings.activatorParkRefs && Array.isArray(settings.activatorParkRefs) && settings.activatorParkRefs.length) {
+      activatorParkRefs = settings.activatorParkRefs;
+      activatorParkRefInput.value = primaryParkRef();
+      activatorParkNameEl.textContent = primaryParkName();
+      updateParkExtraBadge();
+      // Resolve names if missing
+      for (const p of activatorParkRefs) {
+        if (!p.name) {
+          window.api.getPark(p.ref).then(park => {
+            if (park) { p.name = park.name || ''; updateParkDisplay(); }
+          });
+        }
+      }
+    } else if (settings.activatorParkRef) {
+      activatorParkRefs = [{ ref: settings.activatorParkRef, name: '' }];
+      activatorParkRefInput.value = settings.activatorParkRef;
+      window.api.getPark(settings.activatorParkRef).then(park => {
+        if (park) {
+          activatorParkRefs[0].name = park.name || '';
+          activatorParkNameEl.textContent = park.name || '';
+        }
+      });
+      // Migrate to new format
+      window.api.saveSettings({ activatorParkRefs, activatorParkRef: undefined });
+    }
+    setAppMode('activator');
+  }
   // maxAgeMin: prefer localStorage (last-used filter) over settings.json
   try {
     const saved = JSON.parse(localStorage.getItem(FILTERS_KEY));
@@ -2743,6 +2790,23 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
+  // Ctrl+M — Multi-park dialog (activator mode)
+  if (e.key === 'm' && (e.ctrlKey || e.metaKey) && appMode === 'activator') {
+    e.preventDefault();
+    const context = document.activeElement === document.getElementById('activator-hunter-park') ? 'hunter' : 'my';
+    openMultiparkDialog(context);
+    return;
+  }
+  // Alt+R — Reload last entry (activator mode)
+  if (e.key === 'r' && e.altKey && appMode === 'activator' && activationActive && activatorContacts.length > 0) {
+    e.preventDefault();
+    const last = activatorContacts[activatorContacts.length - 1];
+    activatorCallsignInput.value = last.callsign;
+    setRstDigits('activator-rst-sent', last.rstSent);
+    setRstDigits('activator-rst-rcvd', last.rstRcvd);
+    activatorCallsignInput.select();
+    return;
+  }
   // Ctrl+R / Cmd+R — Quick re-spot
   if (e.key === 'r' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
@@ -3038,6 +3102,18 @@ logCallsign.addEventListener('input', () => {
 // --- QSO Log Pop-out (F2) ---
 window.api.onQsoPopoutStatus((open) => {
   qsoPopoutOpen = open;
+});
+
+// --- Activation Map Pop-out ---
+window.api.onActmapPopoutStatus((open) => {
+  actmapPopoutOpen = open;
+  if (open) {
+    // Push full state when pop-out becomes ready
+    window.api.actmapPopoutData({
+      parkRefs: activatorParkRefs.map(p => p.ref),
+      contacts: activatorContacts,
+    });
+  }
 });
 
 // --- View Toggle ---
@@ -4301,6 +4377,9 @@ settingsBtn.addEventListener('click', async () => {
   updateSettingsConnBar();
   // Populate events list
   populateSettingsEvents();
+  // App mode radio
+  const modeRadio = document.querySelector(`input[name="set-app-mode"][value="${appMode}"]`);
+  if (modeRadio) modeRadio.checked = true;
   settingsDialog.showModal();
 });
 
@@ -4518,6 +4597,7 @@ settingsSave.addEventListener('click', async () => {
     cwSidetone: cwSidetoneVal,
     cwSidetonePitch: cwSidetonePitchVal,
     cwSidetoneVolume: cwSidetoneVolumeVal,
+    appMode: document.querySelector('input[name="set-app-mode"]:checked')?.value || 'hunter',
   });
   grid = setGrid.value.trim();
   distUnit = setDistUnit.value;
@@ -4556,6 +4636,7 @@ settingsSave.addEventListener('click', async () => {
   applyTheme(lightModeEnabled);
   if (popoutOpen) window.api.sendPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(lightModeEnabled ? 'light' : 'dark');
+  if (actmapPopoutOpen) window.api.actmapPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
@@ -4574,6 +4655,11 @@ settingsSave.addEventListener('click', async () => {
   updateHeaders();
   saveFilters();
   syncSpotsPanel();
+  // App mode switch
+  const newAppMode = document.querySelector('input[name="set-app-mode"]:checked')?.value || 'hunter';
+  if (newAppMode !== appMode) {
+    setAppMode(newAppMode);
+  }
   settingsDialog.close();
   render();
   // Update home marker if map is initialized
@@ -6451,6 +6537,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     enableWwff: enableWwffVal,
     enableLlota: enableLlotaVal,
     lightMode: lightModeEnabled,
+    appMode: document.querySelector('input[name="welcome-app-mode"]:checked')?.value || 'hunter',
   };
   delete saveData.appVersion; // runtime-only, don't persist
 
@@ -6490,6 +6577,8 @@ async function checkFirstRun(force = false) {
       document.getElementById('welcome-enable-sota').checked = s.enableSota === true;
       if (document.getElementById('welcome-enable-wwff')) document.getElementById('welcome-enable-wwff').checked = s.enableWwff === true;
       if (document.getElementById('welcome-enable-llota')) document.getElementById('welcome-enable-llota').checked = s.enableLlota === true;
+      const welcomeModeRadio = document.querySelector(`input[name="welcome-app-mode"][value="${s.appMode || 'hunter'}"]`);
+      if (welcomeModeRadio) welcomeModeRadio.checked = true;
       welcomeLightMode.checked = s.lightMode === true;
       // Show existing active rig if any
       const rigs = s.rigs || [];
@@ -6553,6 +6642,1189 @@ function formatReleaseNotes(md) {
     .replace(/```[\s\S]*?```/g, (m) => '<pre style="background:var(--bg-primary);padding:8px;border-radius:4px;font-size:11px;overflow-x:auto;">' + m.replace(/```\w*\n?/g, '').trim() + '</pre>')
     .replace(/\n\n/g, '<br>')
     .replace(/\n/g, '\n');
+}
+
+// =============================================================================
+// ACTIVATOR MODE
+// =============================================================================
+
+const activatorView = document.getElementById('activator-view');
+const activatorParkRefInput = document.getElementById('activator-park-ref');
+const activatorParkDropdown = document.getElementById('activator-park-dropdown');
+const activatorParkNameEl = document.getElementById('activator-park-name');
+const activatorFreqInput = document.getElementById('activator-freq');
+const activatorBandLabel = document.getElementById('activator-band-label');
+const activatorModeSelect = document.getElementById('activator-mode');
+const activatorCounterEl = document.getElementById('activator-counter');
+const activatorUtcEl = document.getElementById('activator-utc');
+const activatorTimerEl = document.getElementById('activator-timer');
+const activatorCallsignInput = document.getElementById('activator-callsign');
+const activatorOpNameEl = document.getElementById('activator-op-name');
+const activatorLogBtn = document.getElementById('activator-log-btn');
+const activatorLogBody = document.getElementById('activator-log-body');
+const activatorExportBtn = document.getElementById('activator-export');
+const activatorMapBtn = document.getElementById('activator-map-btn');
+const activatorBackBtn = document.getElementById('activator-back');
+const activatorStartBtn = document.getElementById('activator-start-btn');
+const activatorContinueBtn = document.getElementById('activator-continue-btn');
+const activatorStopBtn = document.getElementById('activator-stop-btn');
+const activatorHistoryBtn = document.getElementById('activator-history-btn');
+const activatorQuickLog = document.getElementById('activator-quick-log');
+const activatorIdleMsg = document.getElementById('activator-idle-msg');
+const activatorHistoryPanel = document.getElementById('activator-history-panel');
+const activatorHistoryList = document.getElementById('activator-history-list');
+const activatorHistoryClose = document.getElementById('activator-history-close');
+const headerEl = document.querySelector('header');
+const mainEl = document.querySelector('main');
+const eventBannerEl = document.getElementById('event-banner');
+const dxCommandBarEl = document.querySelector('.dx-command-bar');
+
+/** Update the title bar text based on current mode */
+function updateTitleBar() {
+  const v = window._appVersion || '';
+  const ttEl = document.querySelector('.titlebar-title');
+  if (!ttEl) return;
+  if (appMode === 'activator') {
+    ttEl.textContent = `POTACAT - Activator Mode${v ? ` - v${v}` : ''}`;
+  } else {
+    ttEl.textContent = `POTACAT - Hunter Mode${v ? ` - v${v}` : ''}`;
+  }
+}
+
+/**
+ * Toggle between Hunter and Activator mode.
+ */
+function setAppMode(mode) {
+  appMode = mode;
+  updateTitleBar();
+  if (mode === 'activator') {
+    // Hide hunter UI — including event banner
+    if (headerEl) headerEl.classList.add('hidden');
+    if (mainEl) mainEl.classList.add('hidden');
+    if (eventBannerEl) eventBannerEl.classList.add('hidden');
+    if (dxCommandBarEl) dxCommandBarEl.classList.add('hidden');
+    // Show activator
+    activatorView.classList.remove('hidden');
+    // Focus park ref if empty, otherwise callsign
+    if (!primaryParkRef()) {
+      activatorParkRefInput.focus();
+    } else if (activationActive) {
+      activatorCallsignInput.focus();
+    } else {
+      activatorParkRefInput.focus();
+    }
+    // Seed freq/mode from current CAT state
+    if (radioFreqKhz) {
+      activatorFreqKhz = radioFreqKhz;
+      activatorFreqInput.value = (radioFreqKhz / 1000).toFixed(3);
+      updateActivatorBandLabel(radioFreqKhz);
+    }
+    if (radioMode) updateActivatorModeFromCat(radioMode);
+    // Init activator RST defaults
+    resetActivatorRst();
+    // Start activator UTC clock
+    updateActivatorUtc();
+    // Update activation UI state
+    updateActivationUi();
+    // Trigger parks DB load
+    window.api.fetchParksDb('auto');
+  } else {
+    // Show hunter UI
+    if (headerEl) headerEl.classList.remove('hidden');
+    if (mainEl) mainEl.classList.remove('hidden');
+    if (dxCommandBarEl) dxCommandBarEl.classList.remove('hidden');
+    // Hide activator
+    activatorView.classList.add('hidden');
+    // Restore event banner visibility via its own logic
+    updateEventBanner();
+    render();
+  }
+}
+
+/** Start a brand-new activation for the current park */
+function startActivation() {
+  if (!primaryParkRef()) {
+    activatorParkRefInput.focus();
+    return;
+  }
+  // New activation — clears in-memory contacts
+  activatorContacts = [];
+  beginActivation();
+}
+
+/** Continue the current stopped activation (keep existing contacts) */
+function continueActivation() {
+  if (!primaryParkRef() || activatorContacts.length === 0) return;
+  beginActivation();
+}
+
+/** Resume a past activation from the log */
+function resumeActivation(activation) {
+  activatorParkRefs = [{ ref: activation.parkRef, name: '' }];
+  hunterParkRefs = [];
+  activatorParkRefInput.value = activation.parkRef;
+  activatorParkNameEl.textContent = '';
+  updateParkExtraBadge();
+  // Look up park name
+  window.api.getPark(activation.parkRef).then(park => {
+    if (park) {
+      activatorParkRefs[0].name = park.name || '';
+      activatorParkNameEl.textContent = park.name || '';
+    }
+  });
+  window.api.saveSettings({ activatorParkRefs });
+  // Restore contacts from log data
+  activatorContacts = activation.contacts.map(c => {
+    const timeOn = c.timeOn || '';
+    const hh = timeOn.substring(0, 2);
+    const mm = timeOn.substring(2, 4);
+    const freqMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+    return {
+      callsign: c.callsign,
+      timeUtc: (hh && mm) ? `${hh}:${mm}` : '',
+      freqDisplay: freqMhz,
+      mode: c.mode || '',
+      band: c.band || '',
+      rstSent: c.rstSent || '',
+      rstRcvd: c.rstRcvd || '',
+      name: c.name || '',
+      myParks: [activation.parkRef],
+      theirParks: c.sigInfo ? [c.sigInfo] : [],
+      qsoData: {
+        callsign: c.callsign,
+        frequency: c.freq ? String(Math.round(parseFloat(c.freq) * 1000)) : '',
+        mode: c.mode || '',
+        band: c.band || '',
+        qsoDate: activation.date,
+        timeOn: c.timeOn || '',
+        rstSent: c.rstSent || '',
+        rstRcvd: c.rstRcvd || '',
+        mySig: 'POTA',
+        mySigInfo: activation.parkRef,
+        stationCallsign: myCallsign || '',
+        operator: myCallsign || '',
+      },
+      qsoDataList: [{
+        callsign: c.callsign,
+        frequency: c.freq ? String(Math.round(parseFloat(c.freq) * 1000)) : '',
+        mode: c.mode || '',
+        band: c.band || '',
+        qsoDate: activation.date,
+        timeOn: c.timeOn || '',
+        rstSent: c.rstSent || '',
+        rstRcvd: c.rstRcvd || '',
+        mySig: 'POTA',
+        mySigInfo: activation.parkRef,
+        stationCallsign: myCallsign || '',
+        operator: myCallsign || '',
+      }],
+    };
+  });
+  // Hide history panel
+  activatorHistoryPanel.classList.add('hidden');
+  beginActivation();
+}
+
+/** Common activation start logic (used by start, continue, and resume) */
+function beginActivation() {
+  activationActive = true;
+  activationStartTime = Date.now();
+  updateActivationUi();
+  updateActivatorCounter();
+  renderActivatorLog();
+  activatorCallsignInput.focus();
+  // Start the timer
+  if (activationTimerInterval) clearInterval(activationTimerInterval);
+  activationTimerInterval = setInterval(updateActivationTimer, 1000);
+  updateActivationTimer();
+}
+
+/** Stop the current activation */
+function stopActivation() {
+  activationActive = false;
+  if (activationTimerInterval) {
+    clearInterval(activationTimerInterval);
+    activationTimerInterval = null;
+  }
+  updateActivationUi();
+}
+
+/** Update which UI elements are visible based on activation state */
+function updateActivationUi() {
+  const hasContacts = activatorContacts.length > 0;
+  if (activationActive) {
+    // Running: show Stop, hide Start/Continue
+    activatorStartBtn.classList.add('hidden');
+    activatorContinueBtn.classList.add('hidden');
+    activatorStopBtn.classList.remove('hidden');
+    activatorQuickLog.classList.remove('hidden');
+    activatorIdleMsg.classList.add('hidden');
+    activatorHistoryPanel.classList.add('hidden');
+    activatorTimerEl.classList.add('active');
+    // Lock park ref input while active
+    activatorParkRefInput.disabled = true;
+  } else {
+    // Stopped
+    activatorStopBtn.classList.add('hidden');
+    activatorQuickLog.classList.add('hidden');
+    activatorTimerEl.classList.remove('active');
+    activatorTimerEl.textContent = '--:--';
+    // Unlock park ref
+    activatorParkRefInput.disabled = false;
+
+    if (hasContacts) {
+      // Stopped with contacts — show Continue + New
+      activatorContinueBtn.classList.remove('hidden');
+      activatorStartBtn.classList.remove('hidden');
+      activatorStartBtn.textContent = 'New Activation';
+      activatorStartBtn.disabled = !primaryParkRef();
+      activatorIdleMsg.classList.add('hidden');
+    } else {
+      // No contacts — show Start, hide Continue
+      activatorContinueBtn.classList.add('hidden');
+      activatorStartBtn.classList.remove('hidden');
+      activatorStartBtn.textContent = 'Start Activation';
+      activatorStartBtn.disabled = !primaryParkRef();
+      // Show idle message only when history panel is not open
+      if (activatorHistoryPanel.classList.contains('hidden')) {
+        activatorIdleMsg.classList.remove('hidden');
+      }
+    }
+  }
+}
+
+/** Format and display the running activation timer */
+function updateActivationTimer() {
+  if (!activationActive || !activationStartTime) return;
+  const elapsed = Math.floor((Date.now() - activationStartTime) / 1000);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  if (h > 0) {
+    activatorTimerEl.textContent = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  } else {
+    activatorTimerEl.textContent = `${m}:${String(s).padStart(2, '0')}`;
+  }
+}
+
+function resetActivatorRst() {
+  const mode = activatorModeSelect.value;
+  const isPhone = (mode === 'SSB' || mode === 'FM');
+  const def = isPhone ? '59' : '599';
+  setRstDigits('activator-rst-sent', def);
+  setRstDigits('activator-rst-rcvd', def);
+}
+
+function updateActivatorUtc() {
+  if (appMode !== 'activator') return;
+  const now = new Date();
+  const hh = String(now.getUTCHours()).padStart(2, '0');
+  const mm = String(now.getUTCMinutes()).padStart(2, '0');
+  const ss = String(now.getUTCSeconds()).padStart(2, '0');
+  activatorUtcEl.textContent = `${hh}:${mm}:${ss}Z`;
+  setTimeout(updateActivatorUtc, 1000);
+}
+
+function updateActivatorCounter() {
+  const count = activatorContacts.length;
+  const totalRecords = activatorContacts.reduce((sum, c) => sum + (c.qsoDataList ? c.qsoDataList.length : 1), 0);
+  activatorCounterEl.textContent = count;
+  activatorCounterEl.classList.toggle('valid', count >= 10);
+  const recordNote = totalRecords > count ? ` (${totalRecords} ADIF records)` : '';
+  activatorCounterEl.title = `${count} contact${count !== 1 ? 's' : ''} logged${recordNote}${count >= 10 ? ' — valid activation!' : ` (need ${10 - count} more)`}`;
+}
+
+function renderActivatorLog() {
+  activatorLogBody.innerHTML = '';
+  // Newest on top
+  for (let i = activatorContacts.length - 1; i >= 0; i--) {
+    const c = activatorContacts[i];
+    const tr = document.createElement('tr');
+    // Check if this callsign has been worked before (from main logbook)
+    const workedBefore = workedQsos.has(c.callsign.toUpperCase());
+    const dupeFlag = workedBefore ? '<span class="act-log-dupe" title="Worked before">PREV</span>' : '';
+    const p2pBadge = (c.theirParks && c.theirParks.length > 0) ? `<span class="act-log-p2p" title="P2P: ${c.theirParks.join(', ')}">P2P</span>` : '';
+    tr.innerHTML = `
+      <td class="act-log-num">${i + 1}</td>
+      <td class="act-log-time">${c.timeUtc || ''}</td>
+      <td class="act-log-call">${c.callsign || ''}${dupeFlag}${p2pBadge}</td>
+      <td class="act-log-name">${c.name || ''}</td>
+      <td class="act-log-freq">${c.freqDisplay || ''}</td>
+      <td class="act-log-mode">${c.mode || ''}</td>
+      <td class="act-log-rst">${c.rstSent || ''}</td>
+      <td class="act-log-rst">${c.rstRcvd || ''}</td>
+      <td class="act-log-band">${c.band || ''}</td>
+    `;
+    activatorLogBody.appendChild(tr);
+  }
+}
+
+// --- Start / Stop / Continue / History buttons ---
+if (activatorStartBtn) {
+  activatorStartBtn.addEventListener('click', startActivation);
+}
+if (activatorContinueBtn) {
+  activatorContinueBtn.addEventListener('click', continueActivation);
+}
+if (activatorStopBtn) {
+  activatorStopBtn.addEventListener('click', stopActivation);
+}
+if (activatorHistoryBtn) {
+  activatorHistoryBtn.addEventListener('click', showPastActivations);
+}
+if (activatorHistoryClose) {
+  activatorHistoryClose.addEventListener('click', () => {
+    activatorHistoryPanel.classList.add('hidden');
+    // Restore idle message if appropriate
+    if (!activationActive && activatorContacts.length === 0) {
+      activatorIdleMsg.classList.remove('hidden');
+    }
+  });
+}
+// Activation map close button
+const activationMapClose = document.getElementById('activation-map-close');
+if (activationMapClose) {
+  activationMapClose.addEventListener('click', () => {
+    document.getElementById('activation-map-panel').classList.add('hidden');
+    if (activationMap) { activationMap.remove(); activationMap = null; }
+  });
+}
+
+async function showPastActivations() {
+  activatorIdleMsg.classList.add('hidden');
+  activatorHistoryPanel.classList.remove('hidden');
+  activatorHistoryList.innerHTML = '<div style="padding:12px;color:var(--text-tertiary);">Loading...</div>';
+  try {
+    const activations = await window.api.getPastActivations();
+    activatorHistoryList.innerHTML = '';
+    if (!activations || activations.length === 0) {
+      activatorHistoryList.innerHTML = '<div style="padding:12px;color:var(--text-tertiary);">No past POTA activations found in your logbook.</div>';
+      return;
+    }
+    for (const act of activations) {
+      const count = act.contacts.length;
+      const dateStr = act.date ? `${act.date.substring(0, 4)}-${act.date.substring(4, 6)}-${act.date.substring(6, 8)}` : '?';
+      const validClass = count >= 10 ? 'valid' : '';
+      const wrapper = document.createElement('div');
+      wrapper.className = 'activator-history-wrapper';
+      // Header row (clickable to expand)
+      const item = document.createElement('div');
+      item.className = 'activator-history-item';
+      item.innerHTML = `
+        <span class="activator-history-item-expand">&#x25B6;</span>
+        <span class="activator-history-item-ref">${act.parkRef}</span>
+        <span class="activator-history-item-date">${dateStr}</span>
+        <span class="activator-history-item-count"><span class="${validClass}">${count} QSO${count !== 1 ? 's' : ''}</span></span>
+        <button class="activator-history-item-resume">Resume</button>
+      `;
+      item.querySelector('.activator-history-item-resume').addEventListener('click', (e) => {
+        e.stopPropagation();
+        resumeActivation(act);
+      });
+      // Expandable detail section
+      const detail = document.createElement('div');
+      detail.className = 'activator-history-detail hidden';
+      detail.innerHTML = `
+        <div class="activator-history-actions">
+          <button class="act-hist-export-btn" title="Export this activation as ADIF">Export ADIF</button>
+          <button class="act-hist-map-btn" title="Show contacts on map">Map</button>
+          <button class="act-hist-delete-btn" title="Delete this activation">Delete</button>
+        </div>
+        <table class="act-hist-table">
+          <thead><tr><th>#</th><th>Time</th><th>Call</th><th>Name</th><th>Freq</th><th>Mode</th><th>RST S</th><th>RST R</th></tr></thead>
+          <tbody>${act.contacts.map((c, i) => {
+            const hh = (c.timeOn || '').substring(0, 2);
+            const mm = (c.timeOn || '').substring(2, 4);
+            const t = (hh && mm) ? `${hh}:${mm}` : '';
+            const fMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+            return `<tr><td>${i + 1}</td><td>${t}</td><td>${c.callsign}</td><td>${c.name || ''}</td><td>${fMhz}</td><td>${c.mode || ''}</td><td>${c.rstSent || ''}</td><td>${c.rstRcvd || ''}</td></tr>`;
+          }).join('')}</tbody>
+        </table>
+      `;
+      // Toggle expand on header click
+      item.addEventListener('click', () => {
+        const wasHidden = detail.classList.contains('hidden');
+        detail.classList.toggle('hidden');
+        item.querySelector('.activator-history-item-expand').innerHTML = wasHidden ? '&#x25BC;' : '&#x25B6;';
+      });
+      // Export button
+      detail.querySelector('.act-hist-export-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportPastActivation(act);
+      });
+      // Map button
+      detail.querySelector('.act-hist-map-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showActivationMap(act);
+      });
+      // Delete button (two-click confirmation)
+      const deleteBtn = detail.querySelector('.act-hist-delete-btn');
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (deleteBtn.dataset.confirm === 'yes') {
+          deletePastActivation(act, wrapper);
+        } else {
+          deleteBtn.dataset.confirm = 'yes';
+          deleteBtn.textContent = 'Confirm Delete?';
+          deleteBtn.classList.add('confirm');
+          setTimeout(() => {
+            deleteBtn.dataset.confirm = '';
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.classList.remove('confirm');
+          }, 3000);
+        }
+      });
+      wrapper.appendChild(item);
+      wrapper.appendChild(detail);
+      activatorHistoryList.appendChild(wrapper);
+    }
+  } catch (err) {
+    activatorHistoryList.innerHTML = `<div style="padding:12px;color:var(--accent-red);">Error loading activations: ${err.message}</div>`;
+  }
+}
+
+/** Export a past activation's QSOs as ADIF */
+async function exportPastActivation(act) {
+  const qsos = act.contacts.map(c => ({
+    callsign: c.callsign,
+    frequency: c.freq ? String(Math.round(parseFloat(c.freq) * 1000)) : '',
+    mode: c.mode || '',
+    band: c.band || '',
+    qsoDate: act.date,
+    timeOn: c.timeOn || '',
+    rstSent: c.rstSent || '',
+    rstRcvd: c.rstRcvd || '',
+    mySig: 'POTA',
+    mySigInfo: act.parkRef,
+    stationCallsign: myCallsign || '',
+    operator: myCallsign || '',
+    name: c.name || '',
+  }));
+  try {
+    const result = await window.api.exportActivationAdif({ qsos, parkRef: act.parkRef, myCallsign: myCallsign || '' });
+    if (result && result.success) {
+      showLogToast(`Exported ${qsos.length} QSOs to ${result.path.split(/[\\/]/).pop()}`);
+    }
+  } catch (err) {
+    console.error('[Activator] Export failed:', err);
+  }
+}
+
+/** Delete a past activation and its QSOs from the log */
+async function deletePastActivation(act, wrapperEl) {
+  try {
+    const result = await window.api.deleteActivation(act.parkRef, act.date);
+    if (result && result.success) {
+      wrapperEl.remove();
+      showLogToast(`Deleted ${result.removed} QSO${result.removed !== 1 ? 's' : ''} from ${act.parkRef} (${act.date})`);
+      // If no items left, show empty message
+      if (activatorHistoryList.children.length === 0) {
+        activatorHistoryList.innerHTML = '<div style="padding:12px;color:var(--text-tertiary);">No past POTA activations found in your logbook.</div>';
+      }
+    } else {
+      showLogToast('Delete failed: ' + (result?.error || 'unknown error'));
+    }
+  } catch (err) {
+    showLogToast('Delete failed: ' + err.message);
+  }
+}
+
+/** Show activation contacts on a Leaflet map centered on the park */
+let activationMap = null;
+let activationMapMarkers = [];
+
+async function showActivationMap(act) {
+  const mapPanel = document.getElementById('activation-map-panel');
+  const mapTitle = document.getElementById('activation-map-title');
+  mapPanel.classList.remove('hidden');
+  mapTitle.textContent = `${act.parkRef} — ${act.contacts.length} QSO${act.contacts.length !== 1 ? 's' : ''}`;
+
+  // Get park location
+  let parkLat = null, parkLon = null;
+  try {
+    const park = await window.api.getPark(act.parkRef);
+    if (park && park.latitude && park.longitude) {
+      parkLat = parseFloat(park.latitude);
+      parkLon = parseFloat(park.longitude);
+    }
+  } catch {}
+
+  // Resolve contact callsign locations via cty.dat
+  const callsigns = [...new Set(act.contacts.map(c => c.callsign).filter(Boolean))];
+  let locations = {};
+  try {
+    locations = await window.api.resolveCallsignLocations(callsigns);
+  } catch {}
+
+  // Initialize or reuse map
+  if (activationMap) {
+    activationMap.remove();
+    activationMap = null;
+  }
+  activationMapMarkers = [];
+
+  const centerLat = parkLat ?? 39.8;
+  const centerLon = parkLon ?? -98.5;
+  activationMap = L.map('activation-map', { zoomControl: true, worldCopyJump: true }).setView([centerLat, centerLon], 4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(activationMap);
+
+  // Park marker (green, prominent)
+  if (parkLat != null && parkLon != null) {
+    const parkIcon = L.divIcon({ className: 'activation-map-park-icon', html: '<div class="act-map-park-pin"></div>', iconSize: [20, 20], iconAnchor: [10, 10] });
+    L.marker([parkLat, parkLon], { icon: parkIcon, zIndexOffset: 1000 })
+      .bindPopup(`<b>${act.parkRef}</b><br>${act.contacts.length} contacts`)
+      .addTo(activationMap);
+  }
+
+  // Contact markers — one per QSO, jittered to avoid stacking when
+  // multiple contacts resolve to the same cty.dat country-level position
+  const bounds = [];
+  if (parkLat != null && parkLon != null) bounds.push([parkLat, parkLon]);
+  const usedPositions = []; // track placed positions for jitter
+  for (let i = 0; i < act.contacts.length; i++) {
+    const c = act.contacts[i];
+    const loc = locations[c.callsign];
+    if (!loc) continue;
+    // Jitter: offset markers that land on the same cty.dat position
+    let cLat = loc.lat, cLon = loc.lon;
+    const overlap = usedPositions.filter(p => Math.abs(p[0] - cLat) < 0.01 && Math.abs(p[1] - cLon) < 0.01).length;
+    if (overlap > 0) {
+      // Spread in a small circle around the base point using golden angle
+      const angle = (overlap * 137.5) * Math.PI / 180;
+      const r = 0.8 + overlap * 0.3; // degrees offset
+      cLat += r * Math.cos(angle);
+      cLon += r * Math.sin(angle);
+    }
+    usedPositions.push([cLat, cLon]);
+
+    const hh = (c.timeOn || '').substring(0, 2);
+    const mm = (c.timeOn || '').substring(2, 4);
+    const t = (hh && mm) ? `${hh}:${mm}` : '';
+    const fMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+    const popupHtml = `<b>${c.callsign}</b>${c.name ? ' — ' + c.name : ''}<br>${t} UTC  ${fMhz} ${c.mode || ''}<br><span style="color:#aaa">${loc.name}</span>`;
+    const marker = L.circleMarker([cLat, cLon], {
+      radius: 6, fillColor: '#4fc3f7', color: '#fff', weight: 1, fillOpacity: 0.85,
+    }).bindPopup(popupHtml).addTo(activationMap);
+    activationMapMarkers.push(marker);
+    bounds.push([cLat, cLon]);
+
+    // Draw great circle arc from park to contact
+    if (parkLat != null && parkLon != null) {
+      const arcPoints = greatCircleArc(parkLat, parkLon, cLat, cLon, 50);
+      L.polyline(arcPoints, {
+        color: '#4fc3f7', weight: 1.5, opacity: 0.5, dashArray: '6,4',
+      }).addTo(activationMap);
+    }
+  }
+
+  // Fit bounds if we have points
+  if (bounds.length > 1) {
+    activationMap.fitBounds(bounds, { padding: [30, 30] });
+  }
+
+  // Force a resize after the panel becomes visible
+  setTimeout(() => { if (activationMap) activationMap.invalidateSize(); }, 100);
+}
+
+// --- Park autocomplete ---
+let parkSearchTimeout = null;
+
+if (activatorParkRefInput) {
+  activatorParkRefInput.addEventListener('input', () => {
+    clearTimeout(parkSearchTimeout);
+    const query = activatorParkRefInput.value.trim();
+    if (query.length < 2) {
+      activatorParkDropdown.classList.add('hidden');
+      // Disable start if park cleared
+      activatorStartBtn.disabled = true;
+      activatorParkNameEl.textContent = '';
+      activatorParkRefs = [];
+      updateParkExtraBadge();
+      return;
+    }
+    parkSearchTimeout = setTimeout(async () => {
+      const results = await window.api.searchParks(query);
+      if (!results || !results.length) {
+        activatorParkDropdown.classList.add('hidden');
+        return;
+      }
+      activatorParkDropdown.innerHTML = '';
+      for (const park of results) {
+        const item = document.createElement('div');
+        item.className = 'activator-dropdown-item';
+        item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span><span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
+        item.addEventListener('click', () => selectPark(park));
+        activatorParkDropdown.appendChild(item);
+      }
+      activatorParkDropdown.classList.remove('hidden');
+    }, 150);
+  });
+
+  // Close dropdown on blur (delayed to allow click)
+  activatorParkRefInput.addEventListener('blur', () => {
+    setTimeout(() => activatorParkDropdown.classList.add('hidden'), 200);
+  });
+
+  // Allow Enter to select first dropdown item
+  activatorParkRefInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const first = activatorParkDropdown.querySelector('.activator-dropdown-item');
+      if (first && !activatorParkDropdown.classList.contains('hidden')) {
+        first.click();
+        e.preventDefault();
+      }
+    }
+  });
+}
+
+function selectPark(park) {
+  activatorParkRefs = [{ ref: park.reference, name: park.name || '' }];
+  activatorParkRefInput.value = park.reference;
+  activatorParkNameEl.textContent = park.name || '';
+  activatorParkDropdown.classList.add('hidden');
+  updateParkExtraBadge();
+  // Enable start button
+  activatorStartBtn.disabled = false;
+  // Persist to settings
+  window.api.saveSettings({ activatorParkRefs });
+}
+
+/** Update the park display: input value, name, and extra badge */
+function updateParkDisplay() {
+  activatorParkRefInput.value = primaryParkRef();
+  activatorParkNameEl.textContent = primaryParkName();
+  updateParkExtraBadge();
+}
+
+/** Show/hide the +N badge for additional MY_SIG_INFO parks */
+function updateParkExtraBadge() {
+  const badge = document.getElementById('activator-park-extra');
+  if (!badge) return;
+  const extra = activatorParkRefs.length - 1;
+  if (extra > 0) {
+    badge.textContent = `+${extra}`;
+    badge.classList.remove('hidden');
+    badge.title = activatorParkRefs.slice(1).map(p => p.ref).join(', ');
+  } else {
+    badge.textContent = '';
+    badge.classList.add('hidden');
+  }
+}
+
+/** Update hunter park input display and extra badge */
+function updateHunterParkDisplay() {
+  const input = document.getElementById('activator-hunter-park');
+  const badge = document.getElementById('activator-hunter-park-extra');
+  if (input) {
+    input.value = hunterParkRefs[0]?.ref || '';
+  }
+  if (!badge) return;
+  const extra = hunterParkRefs.length - 1;
+  if (extra > 0) {
+    badge.textContent = `+${extra}`;
+    badge.classList.remove('hidden');
+    badge.title = hunterParkRefs.slice(1).map(p => p.ref).join(', ');
+  } else {
+    badge.textContent = '';
+    badge.classList.add('hidden');
+  }
+}
+
+// --- Quick Log ---
+async function activatorLogContact() {
+  if (!activationActive) return; // must have an active activation
+  const callsign = activatorCallsignInput.value.trim().toUpperCase();
+  if (!callsign) return;
+  if (!primaryParkRef()) {
+    activatorParkRefInput.focus();
+    return;
+  }
+
+  const mode = activatorModeSelect.value;
+  const rstSent = getRstDigits('activator-rst-sent', mode === 'SSB' || mode === 'FM' ? '59' : '599');
+  const rstRcvd = getRstDigits('activator-rst-rcvd', mode === 'SSB' || mode === 'FM' ? '59' : '599');
+
+  // Frequency: prefer the input field (may have been manually entered), fall back to CAT
+  const inputMhz = parseFloat(activatorFreqInput.value);
+  const freqKhz = inputMhz > 0 ? Math.round(inputMhz * 1000) : (activatorFreqKhz || radioFreqKhz || 0);
+  const freqMhz = freqKhz ? (freqKhz / 1000).toFixed(3) : '';
+  const band = freqToBandActivator(freqKhz) || '';
+
+  const now = new Date();
+  const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const hh = String(now.getUTCHours()).padStart(2, '0');
+  const mm = String(now.getUTCMinutes()).padStart(2, '0');
+  const ss = String(now.getUTCSeconds()).padStart(2, '0');
+  const timeOn = `${hh}${mm}${ss}`;
+  const timeUtc = `${hh}:${mm}`;
+
+  // Build base fields for cross-product
+  const baseFields = {
+    callsign,
+    frequency: freqKhz ? String(freqKhz) : '',
+    mode,
+    band,
+    qsoDate,
+    timeOn,
+    rstSent,
+    rstRcvd,
+    txPower: defaultPower ? String(defaultPower) : '',
+    stationCallsign: myCallsign || '',
+    operator: myCallsign || '',
+  };
+
+  // Cross-product: one ADIF record per MY_SIG_INFO × SIG_INFO combination
+  const myParks = activatorParkRefs;                              // always >= 1
+  const theirParks = hunterParkRefs.length > 0 ? hunterParkRefs : [null];
+  const allQsoData = [];
+
+  for (const myPark of myParks) {
+    for (const theirPark of theirParks) {
+      const qsoData = { ...baseFields, mySig: 'POTA', mySigInfo: myPark.ref };
+      if (theirPark) { qsoData.sig = 'POTA'; qsoData.sigInfo = theirPark.ref; }
+      allQsoData.push(qsoData);
+    }
+  }
+
+  // Save all cross-product records via existing pipeline
+  try {
+    for (const qsoData of allQsoData) {
+      await window.api.saveQso(qsoData);
+    }
+  } catch (err) {
+    console.error('[Activator] Failed to save QSO:', err);
+  }
+
+  // Add to in-memory list — one entry per physical QSO
+  const contact = {
+    callsign,
+    timeUtc,
+    freqDisplay: freqMhz,
+    mode,
+    band,
+    rstSent,
+    rstRcvd,
+    name: '',
+    myParks: myParks.map(p => p.ref),
+    theirParks: hunterParkRefs.map(p => p.ref),
+    qsoData: allQsoData[0], // backward compat
+    qsoDataList: allQsoData, // all cross-product records for export
+  };
+  activatorContacts.push(contact);
+  updateActivatorCounter();
+  renderActivatorLog();
+
+  // Push to activation map pop-out
+  if (actmapPopoutOpen) {
+    window.api.actmapPopoutContact({
+      parkRefs: activatorParkRefs.map(p => p.ref),
+      contact,
+    });
+  }
+
+  // Clear and refocus
+  activatorCallsignInput.value = '';
+  activatorOpNameEl.textContent = '';
+  resetActivatorRst();
+  // Reset hunter parks for next QSO
+  hunterParkRefs = [];
+  updateHunterParkDisplay();
+  activatorCallsignInput.focus();
+
+  // Fire-and-forget QRZ lookup for name
+  window.api.qrzLookup(callsign).then(info => {
+    if (info) {
+      const name = qrzDisplayName(info);
+      contact.name = name;
+      renderActivatorLog();
+    }
+  }).catch(() => {});
+}
+
+if (activatorLogBtn) {
+  activatorLogBtn.addEventListener('click', activatorLogContact);
+}
+
+// Enter key in callsign or RST fields triggers log
+if (activatorCallsignInput) {
+  activatorCallsignInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      activatorLogContact();
+    }
+    // Tab — trigger QRZ lookup immediately (let Tab proceed to next field)
+    if (e.key === 'Tab') {
+      const val = activatorCallsignInput.value.trim().toUpperCase();
+      if (val.length >= 3) {
+        clearTimeout(activatorQrzTimeout);
+        window.api.qrzLookup(val).then(info => {
+          if (info && activatorCallsignInput.value.trim().toUpperCase() === val) {
+            activatorOpNameEl.textContent = qrzDisplayName(info);
+          }
+        }).catch(() => {});
+      }
+    }
+  });
+}
+
+// RST digit navigation for activator RST fields
+document.querySelectorAll('#activator-rst-sent .rst-digit, #activator-rst-rcvd .rst-digit').forEach(input => {
+  input.addEventListener('input', () => {
+    if (input.value && input.dataset.idx !== '2') {
+      const next = input.parentElement.querySelector(`.rst-digit[data-idx="${parseInt(input.dataset.idx) + 1}"]`);
+      if (next) next.focus();
+    }
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Backspace' && !input.value && input.dataset.idx !== '0') {
+      const prev = input.parentElement.querySelector(`.rst-digit[data-idx="${parseInt(input.dataset.idx) - 1}"]`);
+      if (prev) prev.focus();
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      activatorLogContact();
+    }
+  });
+});
+
+// Map button — open activation map pop-out
+if (activatorMapBtn) {
+  activatorMapBtn.addEventListener('click', () => {
+    window.api.actmapPopoutOpen();
+  });
+}
+
+// Export button
+if (activatorExportBtn) {
+  activatorExportBtn.addEventListener('click', async () => {
+    if (!activatorContacts.length) return;
+    // Flatten all cross-product records for export
+    const qsos = activatorContacts.flatMap(c => c.qsoDataList || [c.qsoData]);
+    const result = await window.api.exportActivationAdif({
+      qsos,
+      parkRef: primaryParkRef(),
+      myCallsign: myCallsign || '',
+    });
+    if (result && result.success) {
+      const toast = document.createElement('div');
+      toast.textContent = `Exported ${qsos.length} QSOs to ${result.path}`;
+      toast.style.cssText = 'position:fixed;bottom:40px;left:50%;transform:translateX(-50%);background:var(--accent-green);color:#111;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;z-index:9999;';
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+  });
+}
+
+// Back to Hunter button
+if (activatorBackBtn) {
+  activatorBackBtn.addEventListener('click', () => {
+    setAppMode('hunter');
+    window.api.saveSettings({ appMode: 'hunter' });
+  });
+}
+
+// CAT integration for activator mode — freq from VFO updates the input
+window.api.onCatFrequency((hz) => {
+  if (appMode !== 'activator') return;
+  const khz = Math.round(hz / 1000);
+  activatorFreqKhz = khz;
+  // Only update the input if it's not focused (don't fight the user while typing)
+  if (document.activeElement !== activatorFreqInput) {
+    activatorFreqInput.value = (khz / 1000).toFixed(3);
+  }
+  updateActivatorBandLabel(khz);
+});
+
+window.api.onCatMode((mode) => {
+  if (appMode !== 'activator') return;
+  updateActivatorModeFromCat(mode);
+});
+
+/** Update the band label from a frequency in kHz */
+function updateActivatorBandLabel(khz) {
+  const bandStr = freqToBandActivator(khz);
+  activatorBandLabel.textContent = bandStr || '--';
+}
+
+/** Map a CAT mode string to the activator mode selector */
+function updateActivatorModeFromCat(mode) {
+  const m = (mode || '').toUpperCase();
+  if (m === 'USB' || m === 'LSB') activatorModeSelect.value = 'SSB';
+  else if (m === 'CW' || m === 'CWR') activatorModeSelect.value = 'CW';
+  else if (m === 'FM') activatorModeSelect.value = 'FM';
+  else if (m === 'FT8') activatorModeSelect.value = 'FT8';
+  else if (m === 'FT4') activatorModeSelect.value = 'FT4';
+  else if (m === 'RTTY') activatorModeSelect.value = 'RTTY';
+}
+
+// Frequency input: Enter or blur → tune radio
+if (activatorFreqInput) {
+  activatorFreqInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      tuneActivatorFreq();
+      activatorCallsignInput.focus();
+    }
+  });
+  activatorFreqInput.addEventListener('blur', () => {
+    tuneActivatorFreq();
+  });
+}
+
+function tuneActivatorFreq() {
+  const mhz = parseFloat(activatorFreqInput.value);
+  if (!mhz || mhz <= 0) return;
+  const khz = Math.round(mhz * 1000);
+  if (khz === activatorFreqKhz) return; // already there
+  activatorFreqKhz = khz;
+  updateActivatorBandLabel(khz);
+  window.api.tune(khz, activatorModeSelect.value);
+}
+
+// Mode selector change → tune radio to same freq with new mode
+if (activatorModeSelect) {
+  activatorModeSelect.addEventListener('change', () => {
+    resetActivatorRst();
+    const khz = activatorFreqKhz || radioFreqKhz;
+    if (khz) {
+      window.api.tune(khz, activatorModeSelect.value);
+    }
+  });
+}
+
+// QRZ lookup on callsign input (debounced)
+let activatorQrzTimeout = null;
+if (activatorCallsignInput) {
+  activatorCallsignInput.addEventListener('input', () => {
+    clearTimeout(activatorQrzTimeout);
+    const val = activatorCallsignInput.value.trim().toUpperCase();
+    if (val.length < 3) {
+      activatorOpNameEl.textContent = '';
+      return;
+    }
+    activatorQrzTimeout = setTimeout(async () => {
+      const info = await window.api.qrzLookup(val);
+      if (info && activatorCallsignInput.value.trim().toUpperCase() === val) {
+        activatorOpNameEl.textContent = qrzDisplayName(info);
+      }
+    }, 400);
+  });
+}
+
+/** Simple freq → band for activator. Input in kHz. */
+function freqToBandActivator(khz) {
+  if (khz >= 1800 && khz <= 2000) return '160m';
+  if (khz >= 3500 && khz <= 4000) return '80m';
+  if (khz >= 5330 && khz <= 5410) return '60m';
+  if (khz >= 7000 && khz <= 7300) return '40m';
+  if (khz >= 10100 && khz <= 10150) return '30m';
+  if (khz >= 14000 && khz <= 14350) return '20m';
+  if (khz >= 18068 && khz <= 18168) return '17m';
+  if (khz >= 21000 && khz <= 21450) return '15m';
+  if (khz >= 24890 && khz <= 24990) return '12m';
+  if (khz >= 28000 && khz <= 29700) return '10m';
+  if (khz >= 50000 && khz <= 54000) return '6m';
+  if (khz >= 144000 && khz <= 148000) return '2m';
+  return '';
+}
+
+// --- Multi-Park Dialog ---
+let multiparkContext = null; // 'my' or 'hunter'
+const multiparkDialog = document.getElementById('multipark-dialog');
+const multiparkTitle = document.getElementById('multipark-title');
+const multiparkSlots = document.getElementById('multipark-slots');
+const multiparkAddBtn = document.getElementById('multipark-add');
+const multiparkOkBtn = document.getElementById('multipark-ok');
+const multiparkCancelBtn = document.getElementById('multipark-cancel');
+const multiparkCloseBtn = document.getElementById('multipark-close');
+
+function openMultiparkDialog(context) {
+  multiparkContext = context; // 'my' or 'hunter'
+  multiparkTitle.textContent = context === 'my' ? 'My Parks (MY_SIG_INFO)' : "Hunter's Parks (SIG_INFO)";
+  const refs = context === 'my' ? activatorParkRefs : hunterParkRefs;
+  multiparkSlots.innerHTML = '';
+  // Populate existing slots
+  if (refs.length === 0) {
+    addMultiparkSlot('', '');
+  } else {
+    for (const p of refs) {
+      addMultiparkSlot(p.ref, p.name);
+    }
+  }
+  updateMultiparkAddBtn();
+  multiparkDialog.showModal();
+  // Focus first input
+  const first = multiparkSlots.querySelector('.multipark-ref-input');
+  if (first) first.focus();
+}
+
+function addMultiparkSlot(ref, name) {
+  const slotCount = multiparkSlots.querySelectorAll('.multipark-slot').length;
+  if (slotCount >= 3) return;
+  const slot = document.createElement('div');
+  slot.className = 'multipark-slot';
+  slot.innerHTML = `
+    <div class="multipark-slot-row">
+      <input type="text" class="multipark-ref-input" placeholder="Park ref (e.g. K-1234)" maxlength="12" spellcheck="false" autocomplete="off" value="${ref || ''}">
+      <button type="button" class="multipark-remove-btn" title="Remove">&times;</button>
+    </div>
+    <span class="multipark-name">${name || ''}</span>
+    <div class="multipark-dropdown activator-dropdown hidden"></div>
+  `;
+  multiparkSlots.appendChild(slot);
+
+  const input = slot.querySelector('.multipark-ref-input');
+  const nameEl = slot.querySelector('.multipark-name');
+  const dropdown = slot.querySelector('.multipark-dropdown');
+  const removeBtn = slot.querySelector('.multipark-remove-btn');
+
+  // Autocomplete
+  let searchTimer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const query = input.value.trim();
+    if (query.length < 2) { dropdown.classList.add('hidden'); nameEl.textContent = ''; return; }
+    searchTimer = setTimeout(async () => {
+      const results = await window.api.searchParks(query);
+      if (!results || !results.length) { dropdown.classList.add('hidden'); return; }
+      dropdown.innerHTML = '';
+      for (const park of results) {
+        const item = document.createElement('div');
+        item.className = 'activator-dropdown-item';
+        item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span><span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
+        item.addEventListener('click', () => {
+          input.value = park.reference;
+          nameEl.textContent = park.name || '';
+          dropdown.classList.add('hidden');
+        });
+        dropdown.appendChild(item);
+      }
+      dropdown.classList.remove('hidden');
+    }, 150);
+  });
+  input.addEventListener('blur', () => {
+    setTimeout(() => dropdown.classList.add('hidden'), 200);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const first = dropdown.querySelector('.activator-dropdown-item');
+      if (first && !dropdown.classList.contains('hidden')) {
+        first.click();
+        e.preventDefault();
+      }
+    }
+  });
+
+  // Remove
+  removeBtn.addEventListener('click', () => {
+    slot.remove();
+    updateMultiparkAddBtn();
+    // Ensure at least one slot
+    if (multiparkSlots.querySelectorAll('.multipark-slot').length === 0) {
+      addMultiparkSlot('', '');
+    }
+  });
+
+  updateMultiparkAddBtn();
+}
+
+function updateMultiparkAddBtn() {
+  const slotCount = multiparkSlots.querySelectorAll('.multipark-slot').length;
+  multiparkAddBtn.style.display = slotCount >= 3 ? 'none' : '';
+}
+
+if (multiparkAddBtn) {
+  multiparkAddBtn.addEventListener('click', () => addMultiparkSlot('', ''));
+}
+
+if (multiparkOkBtn) {
+  multiparkOkBtn.addEventListener('click', () => {
+    const slots = multiparkSlots.querySelectorAll('.multipark-slot');
+    const refs = [];
+    for (const slot of slots) {
+      const ref = slot.querySelector('.multipark-ref-input').value.trim().toUpperCase();
+      const name = slot.querySelector('.multipark-name').textContent.trim();
+      if (ref) refs.push({ ref, name });
+    }
+    if (multiparkContext === 'my') {
+      if (refs.length === 0) { multiparkDialog.close(); return; }
+      activatorParkRefs = refs;
+      updateParkDisplay();
+      activatorStartBtn.disabled = !primaryParkRef();
+      window.api.saveSettings({ activatorParkRefs });
+    } else {
+      hunterParkRefs = refs;
+      updateHunterParkDisplay();
+    }
+    multiparkDialog.close();
+  });
+}
+
+if (multiparkCancelBtn) {
+  multiparkCancelBtn.addEventListener('click', () => multiparkDialog.close());
+}
+if (multiparkCloseBtn) {
+  multiparkCloseBtn.addEventListener('click', () => multiparkDialog.close());
+}
+
+// Click the +N badge to open multi-park dialog
+const activatorParkExtraBadge = document.getElementById('activator-park-extra');
+if (activatorParkExtraBadge) {
+  activatorParkExtraBadge.addEventListener('click', () => openMultiparkDialog('my'));
+}
+const hunterParkExtraBadge = document.getElementById('activator-hunter-park-extra');
+if (hunterParkExtraBadge) {
+  hunterParkExtraBadge.addEventListener('click', () => openMultiparkDialog('hunter'));
+}
+
+// --- Hunter Park Autocomplete ---
+const hunterParkInput = document.getElementById('activator-hunter-park');
+const hunterParkDropdown = document.getElementById('activator-hunter-dropdown');
+let hunterParkSearchTimeout = null;
+
+if (hunterParkInput) {
+  hunterParkInput.addEventListener('input', () => {
+    clearTimeout(hunterParkSearchTimeout);
+    const query = hunterParkInput.value.trim();
+    if (query.length < 2) { hunterParkDropdown.classList.add('hidden'); hunterParkRefs = []; return; }
+    hunterParkSearchTimeout = setTimeout(async () => {
+      const results = await window.api.searchParks(query);
+      if (!results || !results.length) { hunterParkDropdown.classList.add('hidden'); return; }
+      hunterParkDropdown.innerHTML = '';
+      for (const park of results) {
+        const item = document.createElement('div');
+        item.className = 'activator-dropdown-item';
+        item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span><span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
+        item.addEventListener('click', () => {
+          hunterParkRefs = [{ ref: park.reference, name: park.name || '' }];
+          hunterParkInput.value = park.reference;
+          hunterParkDropdown.classList.add('hidden');
+          updateHunterParkDisplay();
+        });
+        hunterParkDropdown.appendChild(item);
+      }
+      hunterParkDropdown.classList.remove('hidden');
+    }, 150);
+  });
+  hunterParkInput.addEventListener('blur', () => {
+    setTimeout(() => hunterParkDropdown.classList.add('hidden'), 200);
+  });
+  hunterParkInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const first = hunterParkDropdown.querySelector('.activator-dropdown-item');
+      if (first && !hunterParkDropdown.classList.contains('hidden')) {
+        first.click();
+        e.preventDefault();
+      } else {
+        // Enter in hunter park triggers log
+        e.preventDefault();
+        activatorLogContact();
+      }
+    }
+  });
 }
 
 // Restore saved zoom level

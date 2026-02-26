@@ -87,11 +87,26 @@ contextBridge.exposeInMainWorld('api', {
   qsoPopoutClose: () => ipcRenderer.send('qso-popout-close'),
   sendQsoPopoutTheme: (theme) => ipcRenderer.send('qso-popout-theme', theme),
   onQsoPopoutStatus: (cb) => ipcRenderer.on('qso-popout-status', (_e, open) => cb(open)),
+  // Activation map pop-out
+  actmapPopoutOpen: () => ipcRenderer.send('actmap-popout-open'),
+  actmapPopoutData: (data) => ipcRenderer.send('actmap-popout-data', data),
+  actmapPopoutContact: (data) => ipcRenderer.send('actmap-popout-contact', data),
+  actmapPopoutTheme: (theme) => ipcRenderer.send('actmap-popout-theme', theme),
+  onActmapPopoutStatus: (cb) => ipcRenderer.on('actmap-popout-status', (_e, open) => cb(open)),
   // CW Keyer
   cwPaddleDit: (pressed) => ipcRenderer.send('cw-paddle-dit', pressed),
   cwPaddleDah: (pressed) => ipcRenderer.send('cw-paddle-dah', pressed),
   cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),
   cwStop: () => ipcRenderer.send('cw-stop'),
+  // Activator mode — parks DB
+  fetchParksDb: (prefix) => ipcRenderer.invoke('fetch-parks-db', prefix),
+  searchParks: (query) => ipcRenderer.invoke('search-parks', query),
+  getPark: (ref) => ipcRenderer.invoke('get-park', ref),
+  parksDbStatus: () => ipcRenderer.invoke('parks-db-status'),
+  exportActivationAdif: (data) => ipcRenderer.invoke('export-activation-adif', data),
+  getPastActivations: () => ipcRenderer.invoke('get-past-activations'),
+  deleteActivation: (parkRef, date) => ipcRenderer.invoke('delete-activation', parkRef, date),
+  resolveCallsignLocations: (callsigns) => ipcRenderer.invoke('resolve-callsign-locations', callsigns),
   // Zoom
   setZoom: (factor) => webFrame.setZoomFactor(factor),
   getZoom: () => webFrame.getZoomFactor(),

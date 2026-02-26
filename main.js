@@ -26,10 +26,17 @@ const { fetchSpots: fetchWwffSpots } = require('./lib/wwff');
 const { fetchSpots: fetchLlotaSpots } = require('./lib/llota');
 const { postWwffRespot } = require('./lib/wwff-respot');
 const { QrzClient } = require('./lib/qrz');
+const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
 const { autoUpdater } = require('electron-updater');
 
 // --- QRZ.com callsign lookup ---
 let qrz = new QrzClient();
+
+// --- Parks DB (activator mode) ---
+let parksArray = [];
+let parksMap = new Map();
+let parksDbPrefix = '';
+let parksDbLoading = false;
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
@@ -53,6 +60,7 @@ let settings = null;
 let win = null;
 let popoutWin = null; // pop-out map window
 let qsoPopoutWin = null; // pop-out QSO log window
+let actmapPopoutWin = null; // pop-out activation map window
 let cat = null;
 let spotTimer = null;
 let solarTimer = null;
@@ -2689,6 +2697,12 @@ app.whenReady().then(() => {
   if (settings.enableQrz && settings.qrzUsername && settings.qrzPassword) {
     qrz.configure(settings.qrzUsername, settings.qrzPassword);
   }
+  // Load QRZ disk cache
+  const qrzCachePath = path.join(app.getPath('userData'), 'qrz-cache.json');
+  qrz.loadCache(qrzCachePath);
+
+  // Load parks DB for activator mode
+  loadParksDbForCallsign(settings.myCallsign);
 
   // Window control IPC
   ipcMain.on('win-minimize', () => { if (win) win.minimize(); });
@@ -2885,6 +2899,95 @@ app.whenReady().then(() => {
   ipcMain.on('qso-popout-theme', (_e, theme) => {
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
       qsoPopoutWin.webContents.send('qso-popout-theme', theme);
+    }
+  });
+
+  // --- Activation Map Pop-out ---
+  ipcMain.on('actmap-popout-open', () => {
+    if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) {
+      actmapPopoutWin.focus();
+      return;
+    }
+
+    const isMac = process.platform === 'darwin';
+    actmapPopoutWin = new BrowserWindow({
+      width: 700,
+      height: 500,
+      title: 'Activation Map',
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: path.join(__dirname, 'assets', 'icon.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-actmap-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    // Restore saved bounds (DPI-aware)
+    const saved = settings.actmapPopoutBounds;
+    if (saved && saved.width > 200 && saved.height > 150 && isOnScreen(saved)) {
+      actmapPopoutWin.setBounds(saved);
+    }
+    actmapPopoutWin.show();
+
+    actmapPopoutWin.setMenuBarVisibility(false);
+    actmapPopoutWin.loadFile(path.join(__dirname, 'renderer', 'actmap-popout.html'));
+
+    actmapPopoutWin.on('close', () => {
+      if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) {
+        if (!actmapPopoutWin.isMaximized() && !actmapPopoutWin.isMinimized()) {
+          settings.actmapPopoutBounds = actmapPopoutWin.getBounds();
+          saveSettings(settings);
+        }
+      }
+    });
+
+    actmapPopoutWin.on('closed', () => {
+      actmapPopoutWin = null;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('actmap-popout-status', false);
+      }
+    });
+
+    actmapPopoutWin.webContents.on('did-finish-load', () => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('actmap-popout-status', true);
+      }
+    });
+
+    actmapPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        actmapPopoutWin.webContents.toggleDevTools();
+      }
+    });
+  });
+
+  // Activation map pop-out window controls
+  ipcMain.on('actmap-popout-minimize', () => { if (actmapPopoutWin) actmapPopoutWin.minimize(); });
+  ipcMain.on('actmap-popout-maximize', () => {
+    if (!actmapPopoutWin) return;
+    if (actmapPopoutWin.isMaximized()) actmapPopoutWin.unmaximize();
+    else actmapPopoutWin.maximize();
+  });
+  ipcMain.on('actmap-popout-close', () => { if (actmapPopoutWin) actmapPopoutWin.close(); });
+
+  // Relay activation data to pop-out
+  ipcMain.on('actmap-popout-data', (_e, data) => {
+    if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) {
+      actmapPopoutWin.webContents.send('actmap-data', data);
+    }
+  });
+
+  ipcMain.on('actmap-popout-contact', (_e, data) => {
+    if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) {
+      actmapPopoutWin.webContents.send('actmap-contact-added', data);
+    }
+  });
+
+  ipcMain.on('actmap-popout-theme', (_e, theme) => {
+    if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) {
+      actmapPopoutWin.webContents.send('actmap-theme', theme);
     }
   });
 
@@ -3696,6 +3799,127 @@ app.whenReady().then(() => {
     }
   });
 
+  // --- Activator Mode: Parks DB IPC ---
+  ipcMain.handle('fetch-parks-db', async (_e, prefix) => {
+    if (!prefix) return { success: false, error: 'No program prefix' };
+    try {
+      await loadParksDbForCallsign(prefix === 'auto' ? (settings.myCallsign || '') : prefix);
+      return { success: true, count: parksArray.length, prefix: parksDbPrefix };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('search-parks', (_e, query) => {
+    return searchParksDb(parksArray, query);
+  });
+
+  ipcMain.handle('get-park', (_e, ref) => {
+    return getParkDb(parksMap, ref);
+  });
+
+  ipcMain.handle('parks-db-status', () => {
+    return { prefix: parksDbPrefix, count: parksArray.length, loading: parksDbLoading };
+  });
+
+  ipcMain.handle('export-activation-adif', async (event, data) => {
+    const { writeActivationAdifRaw } = require('./lib/adif-writer');
+    const { qsos, parkRef, myCallsign: activatorCall } = data;
+    if (!qsos || !qsos.length) return { success: false, error: 'No contacts to export' };
+    try {
+      const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const defaultName = `${activatorCall || 'POTACAT'}@${parkRef || 'PARK'}-${dateStr}.adi`;
+      const result = await dialog.showSaveDialog(parentWin, {
+        title: 'Export Activation ADIF',
+        defaultPath: path.join(app.getPath('documents'), defaultName),
+        filters: [
+          { name: 'ADIF Files', extensions: ['adi', 'adif'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled) return { success: false };
+      writeActivationAdifRaw(result.filePath, qsos);
+      return { success: true, path: result.filePath };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // --- Past Activations (scan log for MY_SIG=POTA groups) ---
+  ipcMain.handle('get-past-activations', () => {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    try {
+      if (!fs.existsSync(logPath)) return [];
+      const qsos = parseAllRawQsos(logPath);
+      // Group by MY_SIG_INFO (park ref) + QSO_DATE
+      const groups = new Map();
+      for (const q of qsos) {
+        if ((q.MY_SIG || '').toUpperCase() !== 'POTA' || !q.MY_SIG_INFO) continue;
+        const ref = q.MY_SIG_INFO.toUpperCase();
+        const date = q.QSO_DATE || '';
+        const key = `${ref}|${date}`;
+        if (!groups.has(key)) {
+          groups.set(key, { parkRef: ref, date, contacts: [] });
+        }
+        groups.get(key).contacts.push({
+          callsign: q.CALL || '',
+          timeOn: q.TIME_ON || '',
+          freq: q.FREQ || '',
+          mode: q.MODE || '',
+          band: q.BAND || '',
+          rstSent: q.RST_SENT || '',
+          rstRcvd: q.RST_RCVD || '',
+          name: q.NAME || '',
+          sigInfo: q.SIG_INFO || '',
+        });
+      }
+      // Sort newest first
+      const result = [...groups.values()];
+      result.sort((a, b) => (b.date + (b.contacts[0]?.timeOn || '')).localeCompare(a.date + (a.contacts[0]?.timeOn || '')));
+      return result;
+    } catch {
+      return [];
+    }
+  });
+
+  // --- Delete activation (removes matching QSOs from ADIF log) ---
+  ipcMain.handle('delete-activation', async (_e, parkRef, date) => {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    try {
+      if (!fs.existsSync(logPath)) return { success: false, error: 'Log file not found' };
+      const qsos = parseAllRawQsos(logPath);
+      const before = qsos.length;
+      const filtered = qsos.filter(q => {
+        if ((q.MY_SIG || '').toUpperCase() !== 'POTA') return true;
+        if ((q.MY_SIG_INFO || '').toUpperCase() !== parkRef.toUpperCase()) return true;
+        if ((q.QSO_DATE || '') !== date) return true;
+        return false; // matches — remove it
+      });
+      const removed = before - filtered.length;
+      if (removed === 0) return { success: true, removed: 0 };
+      rewriteAdifFile(logPath, filtered);
+      loadWorkedQsos();
+      return { success: true, removed };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // --- Resolve callsigns to lat/lon via cty.dat (for activation map) ---
+  ipcMain.handle('resolve-callsign-locations', (_e, callsigns) => {
+    if (!ctyDb || !Array.isArray(callsigns)) return {};
+    const result = {};
+    for (const cs of callsigns) {
+      const entity = resolveCallsign(cs, ctyDb);
+      if (entity && entity.lat != null && entity.lon != null) {
+        result[cs] = { lat: entity.lat, lon: entity.lon, name: entity.name || '' };
+      }
+    }
+    return result;
+  });
+
   // --- Recent QSOs IPC ---
   ipcMain.handle('get-recent-qsos', () => {
     const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
@@ -3793,10 +4017,52 @@ app.whenReady().then(() => {
   });
 });
 
+// --- Parks DB loader ---
+async function loadParksDbForCallsign(callsign) {
+  const prefix = callsignToProgram(callsign);
+  if (!prefix || prefix === parksDbPrefix) return;
+  if (parksDbLoading) return;
+  parksDbLoading = true;
+  try {
+    const userDataPath = app.getPath('userData');
+    const cached = loadParksCache(userDataPath, prefix);
+    if (cached && !isCacheStale(cached.updatedAt)) {
+      parksArray = cached.parks || [];
+      parksMap = buildParksMap(parksArray);
+      parksDbPrefix = prefix;
+      parksDbLoading = false;
+      return;
+    }
+    // Fetch fresh from API
+    const parks = await fetchParksForProgram(prefix);
+    saveParksCache(userDataPath, prefix, parks);
+    parksArray = parks;
+    parksMap = buildParksMap(parksArray);
+    parksDbPrefix = prefix;
+  } catch (err) {
+    console.error('[ParksDB] Failed to load:', err.message);
+    // Fall back to stale cache if available
+    const userDataPath = app.getPath('userData');
+    const cached = loadParksCache(userDataPath, prefix);
+    if (cached) {
+      parksArray = cached.parks || [];
+      parksMap = buildParksMap(parksArray);
+      parksDbPrefix = prefix;
+    }
+  } finally {
+    parksDbLoading = false;
+  }
+}
+
 let cleanupDone = false;
 function gracefulCleanup() {
   if (cleanupDone) return;
   cleanupDone = true;
+  // Save QRZ cache to disk
+  try {
+    const qrzCachePath = path.join(app.getPath('userData'), 'qrz-cache.json');
+    qrz.saveCache(qrzCachePath);
+  } catch {}
   if (spotTimer) clearInterval(spotTimer);
   if (solarTimer) clearInterval(solarTimer);
   if (cat) try { cat.disconnect(); } catch {}

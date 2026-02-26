@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.tile.openstreetmap.org; connect-src 'self' https://*.tile.openstreetmap.org;">
+  <title>Activation Map</title>
+  <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); }
+    body { display: flex; flex-direction: column; }
+    #map { flex: 1; width: 100%; min-height: 0; }
+    #qso-counter {
+      position: absolute; bottom: 20px; right: 20px; z-index: 1000;
+      background: rgba(0,0,0,0.7); color: #4fc3f7; font-size: 18px; font-weight: bold;
+      padding: 6px 14px; border-radius: 8px; pointer-events: none;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-title">Activation Map</div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+  <div id="map"></div>
+  <div id="qso-counter">0 QSOs</div>
+  <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="actmap-popout.js"></script>
+</body>
+</html>
