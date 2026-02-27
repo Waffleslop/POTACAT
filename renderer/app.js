@@ -4238,8 +4238,50 @@ document.querySelectorAll('thead th[data-sort]').forEach((th) => {
 // Logbook button
 logbookBtn.addEventListener('click', () => window.api.qsoPopoutOpen());
 
+// --- Settings quick-access dropdown ---
+const settingsDropdown = document.getElementById('settings-dropdown');
+const quickLightMode = document.getElementById('quick-light-mode');
+const quickActivatorMode = document.getElementById('quick-activator-mode');
+const openSettingsBtn = document.getElementById('open-settings-btn');
+
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.querySelectorAll('.multi-dropdown.open').forEach((d) => {
+    if (d !== settingsDropdown) d.classList.remove('open');
+  });
+  const opening = !settingsDropdown.classList.contains('open');
+  settingsDropdown.classList.toggle('open');
+  if (opening) {
+    // Sync switches to current state
+    quickLightMode.checked = document.documentElement.getAttribute('data-theme') === 'light';
+    quickActivatorMode.checked = appMode === 'activator';
+  }
+});
+
+quickLightMode.addEventListener('change', async () => {
+  const light = quickLightMode.checked;
+  applyTheme(light);
+  setLightMode.checked = light;
+  if (popoutOpen) window.api.sendPopoutTheme(light ? 'light' : 'dark');
+  if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(light ? 'light' : 'dark');
+  if (actmapPopoutOpen) window.api.actmapPopoutTheme(light ? 'light' : 'dark');
+  await window.api.saveSettings({ lightMode: light });
+});
+
+quickActivatorMode.addEventListener('change', async () => {
+  const mode = quickActivatorMode.checked ? 'activator' : 'hunter';
+  setAppMode(mode);
+  settingsDropdown.classList.remove('open');
+  await window.api.saveSettings({ appMode: mode });
+});
+
+openSettingsBtn.addEventListener('click', () => {
+  settingsDropdown.classList.remove('open');
+  openSettingsDialog();
+});
+
 // Settings dialog
-settingsBtn.addEventListener('click', async () => {
+async function openSettingsDialog() {
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
   setDistUnit.value = s.distUnit || 'mi';
@@ -4381,7 +4423,7 @@ settingsBtn.addEventListener('click', async () => {
   const modeRadio = document.querySelector(`input[name="set-app-mode"][value="${appMode}"]`);
   if (modeRadio) modeRadio.checked = true;
   settingsDialog.showModal();
-});
+}
 
 settingsCancel.addEventListener('click', async () => {
   // Revert theme to saved state on cancel

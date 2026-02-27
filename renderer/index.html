@@ -86,7 +86,24 @@
         </div>
       </div>
       <button id="scan-btn" title="Scan through spots">Scan</button>
-      <button id="settings-btn" title="Settings">Settings</button>
+      <div class="multi-dropdown" id="settings-dropdown">
+        <button class="multi-dropdown-btn" type="button" id="settings-btn" title="Settings">Settings</button>
+        <div class="settings-dropdown-panel">
+          <label class="switch-label compact">
+            <span>Dark</span>
+            <div class="switch"><input type="checkbox" id="quick-light-mode"><span class="switch-slider"></span></div>
+            <span>Light</span>
+          </label>
+          <div class="spots-panel-divider"></div>
+          <label class="switch-label compact">
+            <span>Hunter</span>
+            <div class="switch"><input type="checkbox" id="quick-activator-mode"><span class="switch-slider"></span></div>
+            <span>Activator</span>
+          </label>
+          <div class="spots-panel-divider"></div>
+          <button type="button" id="open-settings-btn" class="settings-dropdown-link">Open Settings...</button>
+        </div>
+      </div>
       <button id="logbook-btn" title="View/Edit Logbook (F2)">Logbook</button>
       <div class="view-toggle">
         <button id="view-table-btn" class="view-btn active" title="Table view">Table</button>

@@ -241,8 +241,49 @@ header {
   box-shadow: 0 4px 12px var(--shadow-heavy);
 }
 
-.multi-dropdown.open .spots-dropdown-panel {
+.multi-dropdown.open .spots-dropdown-panel,
+.multi-dropdown.open .settings-dropdown-panel {
   display: block;
+}
+
+/* Settings quick-access dropdown */
+.settings-dropdown-panel {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-width: 200px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px var(--shadow-heavy);
+}
+
+.switch-label.compact {
+  gap: 10px;
+  font-size: 12px;
+  padding: 4px 0;
+  margin-bottom: 0;
+}
+
+.settings-dropdown-link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 5px 0;
+  cursor: pointer;
+  text-align: center;
+  margin-top: 2px;
+}
+.settings-dropdown-link:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .spots-panel-section-label {
