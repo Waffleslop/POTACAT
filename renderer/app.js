@@ -31,6 +31,7 @@ let enableBandActivity = false;
 let licenseClass = 'none';
 let hideOutOfBand = false;
 let enableLogging = false;
+let n1mmRst = false; // N1MM-style single-field RST inputs
 let defaultPower = 100;
 let tuneClick = false;
 let enableSplit = false;
@@ -306,6 +307,7 @@ const setEnableSolar = document.getElementById('set-enable-solar');
 const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setShowBearing = document.getElementById('set-show-bearing');
 const setEnableLogging = document.getElementById('set-enable-logging');
+const setN1mmRst = document.getElementById('set-n1mm-rst');
 const loggingConfig = document.getElementById('logging-config');
 const setAdifLogPath = document.getElementById('set-adif-log-path');
 const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
@@ -377,18 +379,57 @@ const logMode = document.getElementById('log-mode');
 const logDate = document.getElementById('log-date');
 const logTime = document.getElementById('log-time');
 const logPower = document.getElementById('log-power');
-// RST split-digit helpers
-function setRstDigits(containerId, value) {
-  const digits = document.querySelectorAll(`#${containerId} .rst-digit`);
-  const chars = String(value).split('');
-  digits[0].value = chars[0] || '';
-  digits[1].value = chars[1] || '';
-  digits[2].value = chars[2] || '';
+// RST helpers — support both split-digit and N1MM single-field modes
+// Logical IDs map to DOM element IDs for each mode
+const RST_ID_MAP = {
+  'rst-sent-digits':    { split: 'rst-sent-split',           n1mm: 'rst-sent-n1mm' },
+  'rst-rcvd-digits':    { split: 'rst-rcvd-split',           n1mm: 'rst-rcvd-n1mm' },
+  'activator-rst-sent': { split: 'activator-rst-sent-digits', n1mm: 'activator-rst-sent' },
+  'activator-rst-rcvd': { split: 'activator-rst-rcvd-digits', n1mm: 'activator-rst-rcvd' },
+};
+
+function setRstDigits(id, value) {
+  const map = RST_ID_MAP[id];
+  if (!map) return;
+  const v = String(value);
+  // Set split-digit container
+  const splitEl = document.getElementById(map.split);
+  if (splitEl) {
+    const digits = splitEl.querySelectorAll('.rst-digit');
+    const chars = v.split('');
+    if (digits[0]) digits[0].value = chars[0] || '';
+    if (digits[1]) digits[1].value = chars[1] || '';
+    if (digits[2]) digits[2].value = chars[2] || '';
+  }
+  // Set N1MM single input
+  const n1mmEl = document.getElementById(map.n1mm);
+  if (n1mmEl) n1mmEl.value = v;
 }
-function getRstDigits(containerId, fallback) {
-  const digits = document.querySelectorAll(`#${containerId} .rst-digit`);
-  const val = Array.from(digits).map(d => d.value).join('');
-  return val || fallback;
+
+function getRstDigits(id, fallback) {
+  const map = RST_ID_MAP[id];
+  if (!map) return fallback;
+  if (n1mmRst) {
+    // N1MM mode uses split-digit boxes
+    const splitEl = document.getElementById(map.split);
+    if (splitEl) {
+      const digits = splitEl.querySelectorAll('.rst-digit');
+      const val = Array.from(digits).map(d => d.value).join('');
+      return val || fallback;
+    }
+  } else {
+    // Default uses single text field
+    const el = document.getElementById(map.n1mm);
+    return (el && el.value) || fallback;
+  }
+  return fallback;
+}
+
+function applyRstMode() {
+  // n1mmRst=true → show split-digit boxes, hide single fields
+  // n1mmRst=false (default) → show single fields, hide split-digit boxes
+  document.querySelectorAll('.rst-split-mode').forEach(el => el.classList.toggle('hidden', !n1mmRst));
+  document.querySelectorAll('.rst-n1mm-mode').forEach(el => el.classList.toggle('hidden', n1mmRst));
 }
 const logRefDisplay = document.getElementById('log-ref-display');
 const logComment = document.getElementById('log-comment');
@@ -561,6 +602,8 @@ async function loadPrefs() {
   updateSolarVisibility();
   qrzFullName = settings.qrzFullName === true;
   enableLogging = settings.enableLogging === true;
+  n1mmRst = settings.n1mmRst === true;
+  applyRstMode();
   defaultPower = parseInt(settings.defaultPower, 10) || 100;
   updateLoggingVisibility();
   showBearing = settings.showBearing === true;
@@ -3850,10 +3893,15 @@ function openLogPopup(spot) {
   logPower.value = radioPower > 0 ? radioPower : (defaultPower || 100);
 
   // Pre-fill RST based on mode
-  const defaultRst = CW_DIGI_MODES_SET.has(mode) ? '599' : '59';
+  const isCwDigi = CW_DIGI_MODES_SET.has(mode);
+  const defaultRst = isCwDigi ? '599' : '59';
+  const rstMaxLen = isCwDigi ? '3' : '2';
   setRstDigits('rst-sent-digits', defaultRst);
   setRstDigits('rst-rcvd-digits', defaultRst);
-  updateRstButtons();
+  const n1mmSentEl = document.getElementById('rst-sent-n1mm');
+  const n1mmRcvdEl = document.getElementById('rst-rcvd-n1mm');
+  if (n1mmSentEl) n1mmSentEl.maxLength = rstMaxLen;
+  if (n1mmRcvdEl) n1mmRcvdEl.maxLength = rstMaxLen;
 
   // Show park/summit reference if applicable
   if (spot.reference) {
@@ -3927,33 +3975,13 @@ logTime.addEventListener('input', () => { logTimeUserEdited = true; });
 
 logDialog.addEventListener('close', () => { stopLogClock(); });
 
-function updateRstButtons() {
-  const mode = logMode.value.toUpperCase();
-  const isDigiCw = CW_DIGI_MODES_SET.has(mode);
-  document.querySelectorAll('#log-dialog .rst-quick-btn').forEach((btn) => {
-    const val = btn.dataset.value;
-    btn.classList.toggle('active', (isDigiCw && val === '599') || (!isDigiCw && val === '59'));
-  });
-}
-
-// RST quick-fill buttons
-document.querySelectorAll('#log-dialog .rst-quick-btn').forEach((btn) => {
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    setRstDigits(btn.dataset.target, btn.dataset.value);
-  });
-});
-
-// RST digit auto-advance and backspace navigation
+// --- Split-digit RST navigation (default mode) ---
 document.querySelectorAll('.rst-digits').forEach((container) => {
   const inputs = container.querySelectorAll('.rst-digit');
   inputs.forEach((inp, i) => {
-    // Select content on focus so typing immediately overwrites
     inp.addEventListener('focus', () => inp.select());
     inp.addEventListener('input', () => {
-      // Keep only the last typed digit (handles overwrite)
       if (inp.value.length > 1) inp.value = inp.value.slice(-1);
-      // Auto-advance to next digit
       if (inp.value && i < inputs.length - 1) inputs[i + 1].focus();
     });
     inp.addEventListener('keydown', (e) => {
@@ -3964,13 +3992,38 @@ document.querySelectorAll('.rst-digits').forEach((container) => {
   });
 });
 
+// --- N1MM RST auto-advance ---
+function setupRstAutoAdvance(sentId, rcvdId, getExpectedLen) {
+  const sent = document.getElementById(sentId);
+  const rcvd = document.getElementById(rcvdId);
+  if (!sent || !rcvd) return;
+  [sent, rcvd].forEach(el => el.addEventListener('focus', () => el.select()));
+  sent.addEventListener('input', () => {
+    const expected = getExpectedLen();
+    if (sent.value.length >= expected) {
+      rcvd.focus();
+    }
+  });
+}
+
+// Log dialog N1MM auto-advance
+setupRstAutoAdvance('rst-sent-n1mm', 'rst-rcvd-n1mm', () => {
+  const mode = logMode.value.toUpperCase();
+  return CW_DIGI_MODES_SET.has(mode) ? 3 : 2;
+});
+
 // Mode change updates RST defaults
 logMode.addEventListener('change', () => {
   const mode = logMode.value.toUpperCase();
-  const defaultRst = CW_DIGI_MODES_SET.has(mode) ? '599' : '59';
+  const isCwDigi = CW_DIGI_MODES_SET.has(mode);
+  const defaultRst = isCwDigi ? '599' : '59';
+  const maxLen = isCwDigi ? '3' : '2';
   setRstDigits('rst-sent-digits', defaultRst);
   setRstDigits('rst-rcvd-digits', defaultRst);
-  updateRstButtons();
+  const n1mmSent = document.getElementById('rst-sent-n1mm');
+  const n1mmRcvd = document.getElementById('rst-rcvd-n1mm');
+  if (n1mmSent) n1mmSent.maxLength = maxLen;
+  if (n1mmRcvd) n1mmRcvd.maxLength = maxLen;
 });
 
 // Log dialog close/cancel
@@ -4343,6 +4396,7 @@ async function openSettingsDialog() {
   setEnablePskr.checked = s.enablePskr === true;
   pskrConfig.classList.toggle('hidden', !s.enablePskr);
   setEnableLogging.checked = s.enableLogging === true;
+  setN1mmRst.checked = s.n1mmRst === true;
   if (s.adifLogPath) {
     setAdifLogPath.value = s.adifLogPath;
   } else {
@@ -4531,6 +4585,7 @@ settingsSave.addEventListener('click', async () => {
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
   const loggingEnabled = setEnableLogging.checked;
+  const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
   const sendToLogbook = setSendToLogbook.checked;
@@ -4599,6 +4654,7 @@ settingsSave.addEventListener('click', async () => {
     potaParksPath: potaParksPath,
     hideWorkedParks: hideWorkedParksEnabled,
     enableLogging: loggingEnabled,
+    n1mmRst: n1mmRstEnabled,
     adifLogPath: adifLogPath,
     defaultPower: defaultPowerVal,
     sendToLogbook: sendToLogbook,
@@ -4673,6 +4729,8 @@ settingsSave.addEventListener('click', async () => {
   if (showTable || showMap) updateViewLayout();
   qrzFullName = qrzFullNameEnabled;
   enableLogging = loggingEnabled;
+  n1mmRst = n1mmRstEnabled;
+  applyRstMode();
   defaultPower = defaultPowerVal;
   updateLoggingVisibility();
   applyTheme(lightModeEnabled);
@@ -6953,8 +7011,13 @@ function resetActivatorRst() {
   const mode = activatorModeSelect.value;
   const isPhone = (mode === 'SSB' || mode === 'FM');
   const def = isPhone ? '59' : '599';
+  const maxLen = isPhone ? '2' : '3';
   setRstDigits('activator-rst-sent', def);
   setRstDigits('activator-rst-rcvd', def);
+  const n1mmSent = document.getElementById('activator-rst-sent');
+  const n1mmRcvd = document.getElementById('activator-rst-rcvd');
+  if (n1mmSent) n1mmSent.maxLength = maxLen;
+  if (n1mmRcvd) n1mmRcvd.maxLength = maxLen;
 }
 
 function updateActivatorUtc() {
@@ -7512,19 +7575,15 @@ if (activatorCallsignInput) {
   });
 }
 
-// RST digit navigation for activator RST fields
-document.querySelectorAll('#activator-rst-sent .rst-digit, #activator-rst-rcvd .rst-digit').forEach(input => {
-  input.addEventListener('input', () => {
-    if (input.value && input.dataset.idx !== '2') {
-      const next = input.parentElement.querySelector(`.rst-digit[data-idx="${parseInt(input.dataset.idx) + 1}"]`);
-      if (next) next.focus();
-    }
-  });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Backspace' && !input.value && input.dataset.idx !== '0') {
-      const prev = input.parentElement.querySelector(`.rst-digit[data-idx="${parseInt(input.dataset.idx) - 1}"]`);
-      if (prev) prev.focus();
-    }
+// Activator RST: N1MM auto-advance + Enter to log
+setupRstAutoAdvance('activator-rst-sent', 'activator-rst-rcvd', () => {
+  const mode = activatorModeSelect.value;
+  return (mode === 'SSB' || mode === 'FM') ? 2 : 3;
+});
+
+// Enter key in any activator RST field (both modes) triggers log
+document.querySelectorAll('#activator-rst-sent, #activator-rst-rcvd, #activator-rst-sent-digits .rst-digit, #activator-rst-rcvd-digits .rst-digit').forEach(el => {
+  el.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       activatorLogContact();

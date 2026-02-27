@@ -206,21 +206,29 @@
     </div>
     <div id="activator-quick-log" class="activator-quick-log hidden">
       <input type="text" id="activator-callsign" placeholder="Callsign" maxlength="12" spellcheck="false" autocomplete="off" style="text-transform:uppercase;">
-      <div class="activator-rst-group">
+      <div class="activator-rst-group rst-split-mode hidden">
         <label>S:</label>
-        <div class="rst-digits" id="activator-rst-sent">
+        <div class="rst-digits" id="activator-rst-sent-digits">
           <input type="text" class="rst-digit" maxlength="1" data-idx="0" inputmode="numeric">
           <input type="text" class="rst-digit" maxlength="1" data-idx="1" inputmode="numeric">
           <input type="text" class="rst-digit" maxlength="1" data-idx="2" inputmode="numeric">
         </div>
       </div>
-      <div class="activator-rst-group">
+      <div class="activator-rst-group rst-split-mode hidden">
         <label>R:</label>
-        <div class="rst-digits" id="activator-rst-rcvd">
+        <div class="rst-digits" id="activator-rst-rcvd-digits">
           <input type="text" class="rst-digit" maxlength="1" data-idx="0" inputmode="numeric">
           <input type="text" class="rst-digit" maxlength="1" data-idx="1" inputmode="numeric">
           <input type="text" class="rst-digit" maxlength="1" data-idx="2" inputmode="numeric">
         </div>
+      </div>
+      <div class="activator-rst-group rst-n1mm-mode">
+        <label>S:</label>
+        <input type="text" class="rst-input" id="activator-rst-sent" maxlength="3" inputmode="numeric" value="599" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="activator-rst-group rst-n1mm-mode">
+        <label>R:</label>
+        <input type="text" class="rst-input" id="activator-rst-rcvd" maxlength="3" inputmode="numeric" value="599" spellcheck="false" autocomplete="off">
       </div>
       <span id="activator-op-name" class="activator-op-name"></span>
       <div class="activator-hunter-park-wrap">
@@ -763,6 +771,8 @@
         <label style="margin-top:10px;">Default TX Power (W):
           <input type="number" id="set-default-power" min="1" max="5000" value="100">
         </label>
+        <label class="checkbox-label"><input type="checkbox" id="set-n1mm-rst"> N1MM-style RST logging</label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Single text field per RST — type full report and auto-advance to next field</span>
         <label class="checkbox-label"><input type="checkbox" id="set-send-to-logbook"> Send Data to Logbook</label>
         <div id="logbook-config" class="hidden" style="margin-left:12px;margin-top:4px;">
           <label>Logbook:
@@ -990,25 +1000,27 @@
     </label>
     <div style="display:flex;gap:8px;">
       <label style="flex:1;">RST Sent:
-        <div style="display:flex;gap:4px;align-items:center;margin-top:4px;">
-          <div class="rst-digits" id="rst-sent-digits">
+        <div class="rst-split-mode hidden" style="display:flex;gap:4px;align-items:center;margin-top:4px;">
+          <div class="rst-digits" id="rst-sent-split">
             <input type="text" class="rst-digit" maxlength="1" data-idx="0" inputmode="numeric">
             <input type="text" class="rst-digit" maxlength="1" data-idx="1" inputmode="numeric">
             <input type="text" class="rst-digit" maxlength="1" data-idx="2" inputmode="numeric">
           </div>
-          <button type="button" class="rst-quick-btn" data-target="rst-sent-digits" data-value="59">59</button>
-          <button type="button" class="rst-quick-btn" data-target="rst-sent-digits" data-value="599">599</button>
+        </div>
+        <div class="rst-n1mm-mode" style="margin-top:4px;">
+          <input type="text" class="rst-input" id="rst-sent-n1mm" maxlength="3" inputmode="numeric" value="599" spellcheck="false" autocomplete="off">
         </div>
       </label>
       <label style="flex:1;">RST Received:
-        <div style="display:flex;gap:4px;align-items:center;margin-top:4px;">
-          <div class="rst-digits" id="rst-rcvd-digits">
+        <div class="rst-split-mode hidden" style="display:flex;gap:4px;align-items:center;margin-top:4px;">
+          <div class="rst-digits" id="rst-rcvd-split">
             <input type="text" class="rst-digit" maxlength="1" data-idx="0" inputmode="numeric">
             <input type="text" class="rst-digit" maxlength="1" data-idx="1" inputmode="numeric">
             <input type="text" class="rst-digit" maxlength="1" data-idx="2" inputmode="numeric">
           </div>
-          <button type="button" class="rst-quick-btn" data-target="rst-rcvd-digits" data-value="59">59</button>
-          <button type="button" class="rst-quick-btn" data-target="rst-rcvd-digits" data-value="599">599</button>
+        </div>
+        <div class="rst-n1mm-mode" style="margin-top:4px;">
+          <input type="text" class="rst-input" id="rst-rcvd-n1mm" maxlength="3" inputmode="numeric" value="599" spellcheck="false" autocomplete="off">
         </div>
       </label>
     </div>

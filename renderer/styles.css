@@ -2334,26 +2334,13 @@ dialog input, dialog select {
   padding: 4px 0;
 }
 
-.rst-quick-btn {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-secondary);
-  cursor: pointer;
-  min-width: 32px;
-}
-
-.rst-quick-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.rst-quick-btn.active {
-  background: var(--accent-green);
-  color: var(--bg-primary);
-  border-color: var(--accent-green);
+.rst-input {
+  width: 48px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 4px 2px;
+  letter-spacing: 2px;
 }
 
 /* QSO Log Viewer dialog */
