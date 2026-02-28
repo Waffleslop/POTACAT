@@ -61,6 +61,7 @@ let win = null;
 let popoutWin = null; // pop-out map window
 let qsoPopoutWin = null; // pop-out QSO log window
 let actmapPopoutWin = null; // pop-out activation map window
+let spotsPopoutWin = null; // pop-out spots window (activator mode)
 let cat = null;
 let spotTimer = null;
 let solarTimer = null;
@@ -1542,6 +1543,10 @@ function sendMergedSpots() {
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
   pushSpotsToTci(merged);
+  // Forward to spots pop-out if open
+  if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) {
+    spotsPopoutWin.webContents.send('spots-popout-data', merged);
+  }
   // Trigger QRZ lookups for new callsigns (async, non-blocking)
   if (qrz.configured && settings.enableQrz) {
     const callsigns = [...new Set(merged.map(s => s.callsign))];
@@ -1914,9 +1919,11 @@ function createWindow() {
     // Remember whether pop-out windows were open
     settings.mapPopoutOpen = !!(popoutWin && !popoutWin.isDestroyed());
     settings.qsoPopoutOpen = !!(qsoPopoutWin && !qsoPopoutWin.isDestroyed());
+    settings.spotsPopoutOpen = !!(spotsPopoutWin && !spotsPopoutWin.isDestroyed());
     saveSettings(settings);
     if (popoutWin && !popoutWin.isDestroyed()) popoutWin.close();
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.close();
+    if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) spotsPopoutWin.close();
   });
 
   // Once the renderer is actually ready to listen, send current state
@@ -1969,6 +1976,10 @@ function createWindow() {
     // Auto-reopen pop-out QSO log if it was open when the app last closed
     if (settings.qsoPopoutOpen) {
       ipcMain.emit('qso-popout-open');
+    }
+    // Auto-reopen pop-out spots if it was open when the app last closed
+    if (settings.spotsPopoutOpen) {
+      ipcMain.emit('spots-popout-open');
     }
   });
 }
@@ -2885,6 +2896,95 @@ app.whenReady().then(() => {
   ipcMain.on('qso-popout-theme', (_e, theme) => {
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
       qsoPopoutWin.webContents.send('qso-popout-theme', theme);
+    }
+  });
+
+  // --- Spots Pop-out Window ---
+  ipcMain.on('spots-popout-open', () => {
+    if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) {
+      spotsPopoutWin.focus();
+      return;
+    }
+
+    const isMac = process.platform === 'darwin';
+    spotsPopoutWin = new BrowserWindow({
+      width: 900,
+      height: 500,
+      title: 'POTACAT Spots',
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: path.join(__dirname, 'assets', 'icon.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-spots-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    // Restore saved bounds (DPI-aware)
+    const saved = settings.spotsPopoutBounds;
+    if (saved && saved.width > 200 && saved.height > 150 && isOnScreen(saved)) {
+      spotsPopoutWin.setBounds(saved);
+    }
+    spotsPopoutWin.show();
+
+    spotsPopoutWin.setMenuBarVisibility(false);
+    spotsPopoutWin.loadFile(path.join(__dirname, 'renderer', 'spots-popout.html'));
+
+    spotsPopoutWin.on('close', () => {
+      if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) {
+        if (!spotsPopoutWin.isMaximized() && !spotsPopoutWin.isMinimized()) {
+          settings.spotsPopoutBounds = spotsPopoutWin.getBounds();
+          saveSettings(settings);
+        }
+      }
+    });
+
+    spotsPopoutWin.on('closed', () => {
+      spotsPopoutWin = null;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('spots-popout-status', false);
+      }
+    });
+
+    spotsPopoutWin.webContents.on('did-finish-load', () => {
+      // Send current spots immediately
+      const merged = [...lastPotaSotaSpots, ...clusterSpots, ...rbnWatchSpots, ...pskrSpots];
+      spotsPopoutWin.webContents.send('spots-popout-data', merged);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('spots-popout-status', true);
+      }
+    });
+
+    // F12 opens DevTools in pop-out
+    spotsPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        spotsPopoutWin.webContents.toggleDevTools();
+      }
+    });
+  });
+
+  // Spots pop-out window controls
+  ipcMain.on('spots-popout-minimize', () => { if (spotsPopoutWin) spotsPopoutWin.minimize(); });
+  ipcMain.on('spots-popout-maximize', () => {
+    if (!spotsPopoutWin) return;
+    if (spotsPopoutWin.isMaximized()) spotsPopoutWin.unmaximize();
+    else spotsPopoutWin.maximize();
+  });
+  ipcMain.on('spots-popout-close', () => { if (spotsPopoutWin) spotsPopoutWin.close(); });
+
+  // Relay theme to spots pop-out
+  ipcMain.on('spots-popout-theme', (_e, theme) => {
+    if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) {
+      spotsPopoutWin.webContents.send('spots-popout-theme', theme);
+    }
+  });
+
+  // Relay log dialog request from spots pop-out to main renderer
+  ipcMain.on('spots-popout-open-log', (_e, spot) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('popout-open-log', spot);
+      win.focus();
     }
   });
 
@@ -3860,6 +3960,7 @@ app.whenReady().then(() => {
           name: q.NAME || '',
           sig: q.SIG || '',
           sigInfo: q.SIG_INFO || '',
+          myGridsquare: q.MY_GRIDSQUARE || '',
         });
       }
       // Sort newest first
@@ -3975,6 +4076,85 @@ app.whenReady().then(() => {
         qsoPopoutWin.webContents.send('qso-popout-deleted', idx);
       }
       return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Update QSO(s) by matching fields (used by activator mode to edit a contact with multiple ADIF records)
+  ipcMain.handle('update-qsos-by-match', async (_event, { match, updates }) => {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    try {
+      const qsos = parseAllRawQsos(logPath);
+      const callUpper = (match.callsign || '').toUpperCase();
+      const dateMatch = (match.qsoDate || '').replace(/-/g, '');
+      const timeMatch = (match.timeOn || '').replace(/:/g, '');
+      let updated = 0;
+      for (const q of qsos) {
+        const qCall = (q.CALL || '').toUpperCase();
+        const qDate = (q.QSO_DATE || '').replace(/-/g, '');
+        const qTime = (q.TIME_ON || '').replace(/:/g, '').substring(0, 4);
+        if (qCall !== callUpper) continue;
+        if (qDate !== dateMatch) continue;
+        if (qTime !== timeMatch.substring(0, 4)) continue;
+        if (match.frequency) {
+          const qFreq = parseFloat(q.FREQ || 0) * 1000;
+          const mFreq = parseFloat(match.frequency);
+          if (Math.abs(qFreq - mFreq) > 1) continue;
+        }
+        // Apply updates
+        Object.assign(q, updates);
+        updated++;
+      }
+      if (updated > 0) {
+        rewriteAdifFile(logPath, qsos);
+        loadWorkedQsos();
+        if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+          const refreshed = parseAllRawQsos(logPath);
+          qsoPopoutWin.webContents.send('qso-popout-refreshed', refreshed);
+        }
+      }
+      return { success: true, updated };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Delete QSO(s) by matching fields (used by activator mode to remove a contact with multiple ADIF records)
+  ipcMain.handle('delete-qsos-by-match', async (_event, match) => {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    try {
+      const qsos = parseAllRawQsos(logPath);
+      const before = qsos.length;
+      const callUpper = (match.callsign || '').toUpperCase();
+      const dateMatch = (match.qsoDate || '').replace(/-/g, '');
+      const timeMatch = (match.timeOn || '').replace(/:/g, '');
+      // Remove all QSOs that match callsign + date + time (+ freq if provided)
+      const filtered = qsos.filter(q => {
+        const qCall = (q.CALL || '').toUpperCase();
+        const qDate = (q.QSO_DATE || '').replace(/-/g, '');
+        const qTime = (q.TIME_ON || '').replace(/:/g, '').substring(0, 4);
+        if (qCall !== callUpper) return true;
+        if (qDate !== dateMatch) return true;
+        if (qTime !== timeMatch.substring(0, 4)) return true;
+        if (match.frequency) {
+          const qFreq = parseFloat(q.FREQ || 0) * 1000; // FREQ in MHz → kHz
+          const mFreq = parseFloat(match.frequency);
+          if (Math.abs(qFreq - mFreq) > 1) return true;
+        }
+        return false; // matched — remove
+      });
+      const removed = before - filtered.length;
+      if (removed > 0) {
+        rewriteAdifFile(logPath, filtered);
+        loadWorkedQsos();
+        // Notify QSO pop-out to refresh
+        if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+          const refreshed = parseAllRawQsos(logPath);
+          qsoPopoutWin.webContents.send('qso-popout-refreshed', refreshed);
+        }
+      }
+      return { success: true, removed };
     } catch (err) {
       return { success: false, error: err.message };
     }

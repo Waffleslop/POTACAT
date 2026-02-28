@@ -179,6 +179,7 @@
         <div id="activator-park-dropdown" class="activator-dropdown hidden"></div>
       </div>
       <span id="activator-park-name" class="activator-park-name"></span>
+      <input type="text" id="activator-grid" class="activator-grid" placeholder="Grid" maxlength="6" spellcheck="false" autocomplete="off" title="Park grid square (editable)">
       <span id="activator-park-extra" class="activator-park-extra hidden" title="Additional parks"></span>
       <button id="activator-start-btn" class="activator-start-btn">Start Activation</button>
       <button id="activator-continue-btn" class="activator-continue-btn hidden">Continue</button>
@@ -190,6 +191,8 @@
         <span id="activator-band-label" class="activator-band-label">--</span>
       </div>
       <button id="activator-map-btn" class="activator-map-btn" title="Open activation map">Map</button>
+      <button id="activator-spots-btn" class="activator-spots-btn" title="Show/hide hunter spots">Spots</button>
+      <button id="activator-spots-popout-btn" class="activator-spots-btn" title="Pop out spots window" style="padding:4px 6px;font-size:11px;">&#x2197;</button>
       <select id="activator-mode">
         <option value="SSB">SSB</option>
         <option value="CW">CW</option>
@@ -238,9 +241,6 @@
       </div>
       <button id="activator-log-btn" class="activator-log-btn" title="Log contact (Enter)">Log</button>
     </div>
-    <div id="activator-idle-msg" class="activator-idle-msg">
-      <p>Select a park and click <strong>Start Activation</strong> to begin logging.<br><span style="color:var(--text-dim);font-size:13px;">Or click <strong>Past</strong> to resume a previous activation.</span></p>
-    </div>
     <div id="activator-history-panel" class="activator-history-panel hidden">
       <div class="activator-history-header">
         <h4>Past Activations</h4>
@@ -268,12 +268,18 @@
             <th>RST S</th>
             <th>RST R</th>
             <th>Band</th>
+            <th class="act-log-del-col"></th>
           </tr>
         </thead>
         <tbody id="activator-log-body"></tbody>
       </table>
+      <div id="activator-idle-msg" class="activator-idle-msg">
+        <p>Select a park and click <strong>Start Activation</strong> to begin logging.<br><span style="color:var(--text-dim);font-size:13px;">Or click <strong>Past</strong> to resume a previous activation.</span></p>
+      </div>
     </div>
   </div>
+
+  <div id="activator-spots-splitter" class="activator-spots-splitter hidden"></div>
 
   <main>
     <div id="split-container" class="split-horizontal">

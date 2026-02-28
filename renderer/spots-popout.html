@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>POTACAT Spots</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); }
+    body { display: flex; flex-direction: column; color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
+
+    .spots-toolbar {
+      display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+      background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary);
+      flex-shrink: 0;
+    }
+    .spots-toolbar select {
+      padding: 3px 6px; background: var(--bg-input); border: 1px solid var(--border-primary);
+      border-radius: 4px; color: var(--text-primary); font-size: 12px;
+    }
+    .spots-toolbar select:focus { outline: none; border-color: var(--accent-blue); }
+    .spots-toolbar label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+    .spot-count { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; margin-left: auto; }
+
+    .spots-body { flex: 1; overflow-y: auto; min-height: 0; }
+
+    .spots-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      font-family: 'Consolas', 'Courier New', monospace;
+    }
+    .spots-table th {
+      text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border-primary);
+      color: var(--text-secondary); font-size: 11px; white-space: nowrap;
+      position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;
+      cursor: pointer; user-select: none;
+    }
+    .spots-table th .sort-arrow { margin-left: 2px; font-size: 9px; }
+    .spots-table td {
+      padding: 3px 6px; border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.05));
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .spots-table tr { cursor: pointer; }
+    .spots-table tr:hover { background: var(--bg-hover); }
+    .spots-table tr.tuned { background: rgba(79, 195, 247, 0.12); }
+
+    .spot-source-pota { border-left: 3px solid #4ecca3; }
+    .spot-source-sota { border-left: 3px solid #f0a500; }
+    .spot-source-dxc { border-left: 3px solid #e040fb; }
+    .spot-source-rbn { border-left: 3px solid #00bcd4; }
+    .spot-source-wwff { border-left: 3px solid #26a69a; }
+    .spot-source-llota { border-left: 3px solid #42a5f5; }
+    .spot-source-pskr { border-left: 3px solid #ff6b6b; }
+
+    .call-link { color: var(--accent-blue); text-decoration: none; font-weight: 600; }
+    .call-link:hover { text-decoration: underline; }
+    .log-cell-btn {
+      background: var(--accent-green); color: #111; border: none; border-radius: 3px;
+      padding: 1px 8px; cursor: pointer; font-size: 11px; font-weight: 600;
+    }
+    .log-cell-btn:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-title">POTACAT Spots</div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+  <div class="spots-toolbar">
+    <label>Band:
+      <select id="filter-band">
+        <option value="all">All</option>
+        <option value="160m">160m</option>
+        <option value="80m">80m</option>
+        <option value="60m">60m</option>
+        <option value="40m">40m</option>
+        <option value="30m">30m</option>
+        <option value="20m">20m</option>
+        <option value="17m">17m</option>
+        <option value="15m">15m</option>
+        <option value="12m">12m</option>
+        <option value="10m">10m</option>
+        <option value="6m">6m</option>
+      </select>
+    </label>
+    <label>Mode:
+      <select id="filter-mode">
+        <option value="all">All</option>
+        <option value="CW">CW</option>
+        <option value="SSB">SSB</option>
+        <option value="FT8">FT8</option>
+        <option value="FT4">FT4</option>
+        <option value="FM">FM</option>
+        <option value="RTTY">RTTY</option>
+      </select>
+    </label>
+    <label>Region:
+      <select id="filter-continent">
+        <option value="all">All</option>
+        <option value="AF">Africa</option>
+        <option value="AS">Asia</option>
+        <option value="EU">Europe</option>
+        <option value="NA">North America</option>
+        <option value="OC">Oceania</option>
+        <option value="SA">South America</option>
+      </select>
+    </label>
+    <span class="spot-count" id="spot-count">0 spots</span>
+  </div>
+  <div class="spots-body">
+    <table class="spots-table">
+      <thead>
+        <tr>
+          <th data-sort="callsign">Callsign</th>
+          <th data-sort="frequency">Freq</th>
+          <th data-sort="mode">Mode</th>
+          <th data-sort="source">Source</th>
+          <th data-sort="reference">Ref</th>
+          <th data-sort="parkName">Name</th>
+          <th data-sort="locationDesc">State</th>
+          <th data-sort="distance">Dist</th>
+          <th data-sort="spotTime">Age</th>
+          <th data-sort="comments">Comments</th>
+          <th class="no-sort">Log</th>
+        </tr>
+      </thead>
+      <tbody id="spots-body"></tbody>
+    </table>
+  </div>
+
+  <script src="spots-popout.js"></script>
+</body>
+</html>

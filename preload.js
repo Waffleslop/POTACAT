@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('api', {
   getAllQsos: () => ipcRenderer.invoke('get-all-qsos'),
   updateQso: (data) => ipcRenderer.invoke('update-qso', data),
   deleteQso: (idx) => ipcRenderer.invoke('delete-qso', idx),
+  deleteQsosByMatch: (match) => ipcRenderer.invoke('delete-qsos-by-match', match),
+  updateQsosByMatch: (data) => ipcRenderer.invoke('update-qsos-by-match', data),
   getDefaultLogPath: () => ipcRenderer.invoke('get-default-log-path'),
   chooseLogFile: (currentPath) => ipcRenderer.invoke('choose-log-file', currentPath),
   exportAdif: (qsos) => ipcRenderer.invoke('export-adif', qsos),
@@ -87,6 +89,11 @@ contextBridge.exposeInMainWorld('api', {
   qsoPopoutClose: () => ipcRenderer.send('qso-popout-close'),
   sendQsoPopoutTheme: (theme) => ipcRenderer.send('qso-popout-theme', theme),
   onQsoPopoutStatus: (cb) => ipcRenderer.on('qso-popout-status', (_e, open) => cb(open)),
+  // Pop-out spots window
+  spotsPopoutOpen: () => ipcRenderer.send('spots-popout-open'),
+  spotsPopoutClose: () => ipcRenderer.send('spots-popout-close'),
+  sendSpotsPopoutTheme: (theme) => ipcRenderer.send('spots-popout-theme', theme),
+  onSpotsPopoutStatus: (cb) => ipcRenderer.on('spots-popout-status', (_e, open) => cb(open)),
   // Activation map pop-out
   actmapPopoutOpen: () => ipcRenderer.send('actmap-popout-open'),
   actmapPopoutData: (data) => ipcRenderer.send('actmap-popout-data', data),

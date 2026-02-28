@@ -26,6 +26,7 @@
       "preload-popout.js",
       "preload-qso-popout.js",
       "preload-actmap-popout.js",
+      "preload-spots-popout.js",
       "lib/**/*",
       "renderer/**/*",
       "assets/icon.png",

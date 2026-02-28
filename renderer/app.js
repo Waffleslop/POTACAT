@@ -56,6 +56,7 @@ let myCallsign = '';
 let lastTunedSpot = null; // last clicked/tuned spot for quick respot
 let popoutOpen = false; // pop-out map window is open
 let qsoPopoutOpen = false; // pop-out QSO log window is open
+let spotsPopoutOpen = false; // pop-out spots window is open
 let actmapPopoutOpen = false; // pop-out activation map window is open
 let dxccData = null;  // { entities: [...] } from main process
 let enableWsjtx = false;
@@ -67,12 +68,14 @@ let qrzFullName = false; // show first+last or just first
 // --- Activator Mode State ---
 let appMode = 'hunter'; // 'hunter' or 'activator'
 let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP'}, ...]  max 3
+let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
 let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF'}]  max 3, resets per QSO
 let activatorContacts = []; // in-memory QSO list for current activation session
 let activatorFreqKhz = 0;  // from CAT
 let activationActive = false; // true while activation is running
 let activationStartTime = 0;  // Date.now() when activation started
 let activationTimerInterval = null;
+let activatorSpotsVisible = false; // show hunter spot table below activator view
 
 /** Get primary activator park ref */
 function primaryParkRef() { return activatorParkRefs[0]?.ref || ''; }
@@ -630,13 +633,23 @@ async function loadPrefs() {
       activatorParkRefInput.value = primaryParkRef();
       activatorParkNameEl.textContent = primaryParkName();
       updateParkExtraBadge();
-      // Resolve names if missing
+      // Resolve names and grid if missing
       for (const p of activatorParkRefs) {
         if (!p.name) {
           window.api.getPark(p.ref).then(park => {
             if (park) { p.name = park.name || ''; updateParkDisplay(); }
           });
         }
+      }
+      // Auto-populate grid from primary park
+      if (activatorParkRefs.length > 0) {
+        window.api.getPark(activatorParkRefs[0].ref).then(park => {
+          if (park && park.latitude && park.longitude) {
+            activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
+            const gi = document.getElementById('activator-grid');
+            if (gi) gi.value = activatorParkGrid;
+          }
+        });
       }
     } else if (settings.activatorParkRef) {
       activatorParkRefs = [{ ref: settings.activatorParkRef, name: '' }];
@@ -2501,6 +2514,25 @@ function gridToLatLonLocal(grid) {
   return { lat, lon };
 }
 
+// Lightweight lat/lon → Maidenhead grid for the renderer (no require of Node module)
+function latLonToGridLocal(lat, lon) {
+  let lng = lon + 180;
+  let la = lat + 90;
+  const A = 'A'.charCodeAt(0);
+  const a = 'a'.charCodeAt(0);
+  const field1 = String.fromCharCode(A + Math.floor(lng / 20));
+  const field2 = String.fromCharCode(A + Math.floor(la / 10));
+  lng %= 20;
+  la %= 10;
+  const sq1 = Math.floor(lng / 2);
+  const sq2 = Math.floor(la / 1);
+  lng -= sq1 * 2;
+  la -= sq2 * 1;
+  const sub1 = String.fromCharCode(a + Math.floor(lng / (2 / 24)));
+  const sub2 = String.fromCharCode(a + Math.floor(la / (1 / 24)));
+  return `${field1}${field2}${sq1}${sq2}${sub1}${sub2}`;
+}
+
 // --- License privilege check (duplicated from lib/privileges.js — no require in renderer) ---
 const PRIVILEGE_RANGES = {
   us_extra: [
@@ -3131,6 +3163,11 @@ logCallsign.addEventListener('input', () => {
 // --- QSO Log Pop-out (F2) ---
 window.api.onQsoPopoutStatus((open) => {
   qsoPopoutOpen = open;
+});
+
+// --- Spots Pop-out ---
+window.api.onSpotsPopoutStatus((open) => {
+  spotsPopoutOpen = open;
 });
 
 // --- Activation Map Pop-out ---
@@ -4315,6 +4352,7 @@ quickLightMode.addEventListener('change', async () => {
   if (popoutOpen) window.api.sendPopoutTheme(light ? 'light' : 'dark');
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(light ? 'light' : 'dark');
   if (actmapPopoutOpen) window.api.actmapPopoutTheme(light ? 'light' : 'dark');
+  if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(light ? 'light' : 'dark');
   await window.api.saveSettings({ lightMode: light });
 });
 
@@ -4692,6 +4730,7 @@ settingsSave.addEventListener('click', async () => {
   if (popoutOpen) window.api.sendPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (actmapPopoutOpen) window.api.actmapPopoutTheme(lightModeEnabled ? 'light' : 'dark');
+  if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
@@ -6733,6 +6772,8 @@ const headerEl = document.querySelector('header');
 const mainEl = document.querySelector('main');
 const eventBannerEl = document.getElementById('event-banner');
 const dxCommandBarEl = document.querySelector('.dx-command-bar');
+const activatorSpotsBtn = document.getElementById('activator-spots-btn');
+const activatorSpotsSplitter = document.getElementById('activator-spots-splitter');
 
 /** Update the title bar text based on current mode */
 function updateTitleBar() {
@@ -6753,13 +6794,17 @@ function setAppMode(mode) {
   appMode = mode;
   updateTitleBar();
   if (mode === 'activator') {
-    // Hide hunter UI — including event banner
-    if (headerEl) headerEl.classList.add('hidden');
-    if (mainEl) mainEl.classList.add('hidden');
+    // Hide hunter UI — unless activator spots are visible
+    if (!activatorSpotsVisible) {
+      if (headerEl) headerEl.classList.add('hidden');
+      if (mainEl) mainEl.classList.add('hidden');
+    }
     if (eventBannerEl) eventBannerEl.classList.add('hidden');
     if (dxCommandBarEl) dxCommandBarEl.classList.add('hidden');
     // Show activator
     activatorView.classList.remove('hidden');
+    // Apply activator-spots layout if toggled on
+    applyActivatorSpotsLayout();
     // Focus park ref if empty, otherwise callsign
     if (!primaryParkRef()) {
       activatorParkRefInput.focus();
@@ -6790,11 +6835,89 @@ function setAppMode(mode) {
     if (dxCommandBarEl) dxCommandBarEl.classList.remove('hidden');
     // Hide activator
     activatorView.classList.add('hidden');
+    // Clean up activator-spots layout
+    document.body.classList.remove('activator-spots-on');
+    activatorSpotsSplitter.classList.add('hidden');
+    activatorSpotsBtn.classList.remove('active');
     // Restore event banner visibility via its own logic
     updateEventBanner();
     render();
   }
 }
+
+// --- Activator Spots Toggle ---
+
+const ACTIVATOR_SPOTS_KEY = 'pota-cat-activator-spots';
+const ACTIVATOR_SPLIT_KEY = 'pota-cat-activator-split-height';
+
+// Restore persisted state
+activatorSpotsVisible = localStorage.getItem(ACTIVATOR_SPOTS_KEY) === '1';
+
+/** Apply or remove the activator-spots split layout */
+function applyActivatorSpotsLayout() {
+  if (activatorSpotsVisible && appMode === 'activator') {
+    document.body.classList.add('activator-spots-on');
+    activatorSpotsSplitter.classList.remove('hidden');
+    activatorSpotsBtn.classList.add('active');
+    if (headerEl) headerEl.classList.remove('hidden');
+    if (mainEl) mainEl.classList.remove('hidden');
+    // Restore saved height or use default
+    const savedHeight = localStorage.getItem(ACTIVATOR_SPLIT_KEY);
+    activatorView.style.height = savedHeight || '40%';
+    render();
+  } else {
+    document.body.classList.remove('activator-spots-on');
+    activatorSpotsSplitter.classList.add('hidden');
+    activatorSpotsBtn.classList.remove('active');
+    activatorView.style.height = '';
+  }
+}
+
+/** Toggle hunter spots visibility in activator mode */
+function toggleActivatorSpots() {
+  activatorSpotsVisible = !activatorSpotsVisible;
+  localStorage.setItem(ACTIVATOR_SPOTS_KEY, activatorSpotsVisible ? '1' : '0');
+  if (!activatorSpotsVisible) {
+    if (headerEl) headerEl.classList.add('hidden');
+    if (mainEl) mainEl.classList.add('hidden');
+  }
+  applyActivatorSpotsLayout();
+}
+
+activatorSpotsBtn.addEventListener('click', toggleActivatorSpots);
+
+document.getElementById('activator-spots-popout-btn').addEventListener('click', () => {
+  window.api.spotsPopoutOpen();
+});
+
+// --- Activator-spots splitter drag ---
+activatorSpotsSplitter.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  const startY = e.clientY;
+  const startHeight = activatorView.offsetHeight;
+  const bodyHeight = document.body.offsetHeight;
+
+  const onMove = (ev) => {
+    const delta = ev.clientY - startY;
+    const minActivator = 150;
+    const minSpots = 150;
+    const maxHeight = bodyHeight - minSpots;
+    const newHeight = Math.max(minActivator, Math.min(maxHeight, startHeight + delta));
+    activatorView.style.height = newHeight + 'px';
+  };
+
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.cursor = '';
+    // Persist height
+    localStorage.setItem(ACTIVATOR_SPLIT_KEY, activatorView.style.height);
+  };
+
+  document.body.style.cursor = 'row-resize';
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
 
 /** Start a brand-new activation for the current park */
 function startActivation() {
@@ -6820,11 +6943,16 @@ function resumeActivation(activation) {
   activatorParkRefInput.value = activation.parkRef;
   activatorParkNameEl.textContent = '';
   updateParkExtraBadge();
-  // Look up park name
+  // Look up park name and grid
+  const gridInput = document.getElementById('activator-grid');
   window.api.getPark(activation.parkRef).then(park => {
     if (park) {
       activatorParkRefs[0].name = park.name || '';
       activatorParkNameEl.textContent = park.name || '';
+      if (park.latitude && park.longitude) {
+        activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
+        if (gridInput) gridInput.value = activatorParkGrid;
+      }
     }
   });
   window.api.saveSettings({ activatorParkRefs });
@@ -7000,23 +7128,224 @@ function renderActivatorLog() {
   for (let i = activatorContacts.length - 1; i >= 0; i--) {
     const c = activatorContacts[i];
     const tr = document.createElement('tr');
+    tr.dataset.idx = i;
     // Check if this callsign has been worked before (from main logbook)
     const workedBefore = workedQsos.has(c.callsign.toUpperCase());
     const dupeFlag = workedBefore ? '<span class="act-log-dupe" title="Worked before">PREV</span>' : '';
     const p2pBadge = (c.theirParks && c.theirParks.length > 0) ? `<span class="act-log-p2p" title="P2P: ${c.theirParks.join(', ')}">P2P</span>` : '';
     tr.innerHTML = `
       <td class="act-log-num">${i + 1}</td>
-      <td class="act-log-time">${c.timeUtc || ''}</td>
-      <td class="act-log-call">${c.callsign || ''}${dupeFlag}${p2pBadge}</td>
+      <td class="act-log-time act-log-editable" data-field="timeUtc">${c.timeUtc || ''}</td>
+      <td class="act-log-call act-log-editable" data-field="callsign">${c.callsign || ''}${dupeFlag}${p2pBadge}</td>
       <td class="act-log-name">${c.name || ''}</td>
-      <td class="act-log-freq">${c.freqDisplay || ''}</td>
-      <td class="act-log-mode">${c.mode || ''}</td>
-      <td class="act-log-rst">${c.rstSent || ''}</td>
-      <td class="act-log-rst">${c.rstRcvd || ''}</td>
+      <td class="act-log-freq act-log-editable" data-field="freqDisplay">${c.freqDisplay || ''}</td>
+      <td class="act-log-mode act-log-editable" data-field="mode">${c.mode || ''}</td>
+      <td class="act-log-rst act-log-editable" data-field="rstSent">${c.rstSent || ''}</td>
+      <td class="act-log-rst act-log-editable" data-field="rstRcvd">${c.rstRcvd || ''}</td>
       <td class="act-log-band">${c.band || ''}</td>
+      <td class="act-log-del"><button class="act-log-del-btn" data-idx="${i}" title="Delete this contact">&times;</button></td>
     `;
     activatorLogBody.appendChild(tr);
   }
+
+  // Bind delete buttons
+  activatorLogBody.querySelectorAll('.act-log-del-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx, 10);
+      deleteActivatorContact(idx);
+    });
+  });
+}
+
+// --- Activator log inline edit (double-click) ---
+activatorLogBody.addEventListener('dblclick', (e) => {
+  const td = e.target.closest('td.act-log-editable');
+  if (!td || td.querySelector('input, select')) return;
+  const tr = td.closest('tr');
+  const idx = parseInt(tr.dataset.idx, 10);
+  const field = td.dataset.field;
+  const c = activatorContacts[idx];
+  if (!c) return;
+
+  // Get the raw value (not innerHTML which may contain badges)
+  const rawValue = c[field] || '';
+
+  if (field === 'mode') {
+    // Use a dropdown for mode
+    const select = document.createElement('select');
+    select.className = 'act-log-edit-select';
+    const modes = ['SSB', 'CW', 'FT8', 'FT4', 'FM', 'RTTY', 'PSK31', 'USB', 'LSB', 'AM'];
+    for (const m of modes) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      if (m === rawValue) opt.selected = true;
+      select.appendChild(opt);
+    }
+    td.textContent = '';
+    td.appendChild(select);
+    select.focus();
+
+    function finish() {
+      const newVal = select.value;
+      select.removeEventListener('change', finish);
+      select.removeEventListener('blur', finish);
+      if (newVal !== rawValue) {
+        saveActivatorEdit(idx, field, newVal);
+      } else {
+        renderActivatorLog();
+      }
+    }
+    select.addEventListener('change', finish);
+    select.addEventListener('blur', finish);
+  } else {
+    // Text input for other fields
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'act-log-edit-input';
+    input.value = rawValue;
+    if (field === 'callsign') input.style.textTransform = 'uppercase';
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    let committed = false;
+    function cancel() {
+      if (committed) return;
+      committed = true;
+      renderActivatorLog();
+    }
+    function save() {
+      if (committed) return;
+      committed = true;
+      const newVal = input.value.trim();
+      if (newVal && newVal !== rawValue) {
+        saveActivatorEdit(idx, field, field === 'callsign' ? newVal.toUpperCase() : newVal);
+      } else {
+        renderActivatorLog();
+      }
+    }
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+      if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', save);
+  }
+});
+
+/** Save an inline edit to an activator contact and update the ADIF log */
+async function saveActivatorEdit(idx, field, newVal) {
+  const c = activatorContacts[idx];
+  if (!c) return;
+
+  // Build match criteria from the original contact's QSO data
+  const qso = c.qsoData || {};
+  const match = {
+    callsign: c.callsign,
+    qsoDate: qso.qsoDate || '',
+    timeOn: qso.timeOn || '',
+    frequency: qso.frequency || '',
+  };
+
+  // Map the in-memory field to ADIF field updates
+  const adifUpdates = {};
+  switch (field) {
+    case 'callsign':
+      c.callsign = newVal;
+      adifUpdates.CALL = newVal;
+      break;
+    case 'freqDisplay': {
+      c.freqDisplay = newVal;
+      const freqKhz = Math.round(parseFloat(newVal) * 1000);
+      c.band = freqToBandActivator(freqKhz) || c.band;
+      adifUpdates.FREQ = (freqKhz / 1000).toFixed(6);
+      adifUpdates.BAND = c.band;
+      // Update qsoData frequency for future match reference
+      if (c.qsoData) c.qsoData.frequency = String(freqKhz);
+      if (c.qsoDataList) c.qsoDataList.forEach(q => { q.frequency = String(freqKhz); });
+      break;
+    }
+    case 'mode':
+      c.mode = newVal;
+      adifUpdates.MODE = newVal;
+      break;
+    case 'rstSent':
+      c.rstSent = newVal;
+      adifUpdates.RST_SENT = newVal;
+      break;
+    case 'rstRcvd':
+      c.rstRcvd = newVal;
+      adifUpdates.RST_RCVD = newVal;
+      break;
+    case 'timeUtc': {
+      c.timeUtc = newVal;
+      // Convert HH:MM display to HHMMSS for ADIF
+      const cleaned = newVal.replace(/:/g, '');
+      const timeOn = cleaned.length === 4 ? cleaned + '00' : cleaned;
+      adifUpdates.TIME_ON = timeOn;
+      if (c.qsoData) c.qsoData.timeOn = timeOn;
+      if (c.qsoDataList) c.qsoDataList.forEach(q => { q.timeOn = timeOn; });
+      break;
+    }
+  }
+
+  // Update ADIF log file
+  try {
+    const result = await window.api.updateQsosByMatch({ match, updates: adifUpdates });
+    if (!result.success) {
+      console.error('[Activator] Failed to update QSO in log:', result.error);
+    }
+  } catch (err) {
+    console.error('[Activator] Update QSO error:', err);
+  }
+
+  // Also update qsoData/qsoDataList references for callsign changes (affects future match/delete)
+  if (field === 'callsign') {
+    if (c.qsoData) c.qsoData.callsign = newVal;
+    if (c.qsoDataList) c.qsoDataList.forEach(q => { q.callsign = newVal; });
+    // Re-fetch operator name from QRZ for the new callsign
+    c.name = '';
+    window.api.qrzLookup(newVal).then(info => {
+      if (info) {
+        c.name = qrzDisplayName(info);
+        renderActivatorLog();
+      }
+    }).catch(() => {});
+  }
+
+  renderActivatorLog();
+}
+
+/** Delete an activator contact by index — removes from memory and ADIF log */
+async function deleteActivatorContact(idx) {
+  if (idx < 0 || idx >= activatorContacts.length) return;
+  const c = activatorContacts[idx];
+
+  // Build match criteria from the first QSO record
+  const qso = c.qsoData || {};
+  const match = {
+    callsign: c.callsign,
+    qsoDate: qso.qsoDate || '',
+    timeOn: qso.timeOn || '',
+    frequency: qso.frequency || '',
+  };
+
+  // Remove from ADIF log
+  try {
+    const result = await window.api.deleteQsosByMatch(match);
+    if (!result.success) {
+      console.error('[Activator] Failed to delete QSO from log:', result.error);
+    }
+  } catch (err) {
+    console.error('[Activator] Delete QSO error:', err);
+  }
+
+  // Remove from in-memory list
+  activatorContacts.splice(idx, 1);
+  updateActivatorCounter();
+  renderActivatorLog();
 }
 
 // --- Start / Stop / Continue / History buttons ---
@@ -7161,6 +7490,7 @@ async function exportPastActivation(act) {
     name: c.name || '',
     sig: c.sig || '',
     sigInfo: c.sigInfo || '',
+    myGridsquare: c.myGridsquare || '',
   }));
   try {
     const result = await window.api.exportActivationAdif({ qsos, parkRef: act.parkRef, myCallsign: myCallsign || '' });
@@ -7340,6 +7670,14 @@ if (activatorParkRefInput) {
       }
     }
   });
+
+  // Grid input: manual override
+  const gridInput = document.getElementById('activator-grid');
+  if (gridInput) {
+    gridInput.addEventListener('input', () => {
+      activatorParkGrid = gridInput.value.trim().toUpperCase();
+    });
+  }
 }
 
 function selectPark(park) {
@@ -7348,6 +7686,15 @@ function selectPark(park) {
   activatorParkNameEl.textContent = park.name || '';
   activatorParkDropdown.classList.add('hidden');
   updateParkExtraBadge();
+  // Auto-populate grid from park lat/lon
+  const gridInput = document.getElementById('activator-grid');
+  if (park.latitude && park.longitude) {
+    activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
+    if (gridInput) gridInput.value = activatorParkGrid;
+  } else {
+    activatorParkGrid = '';
+    if (gridInput) gridInput.value = '';
+  }
   // Enable start button
   activatorStartBtn.disabled = false;
   // Persist to settings
@@ -7444,6 +7791,7 @@ async function activatorLogContact() {
       txPower: defaultPower ? String(defaultPower) : '',
       stationCallsign: myCallsign || '',
       operator: myCallsign || '',
+      myGridsquare: activatorParkGrid || '',
     };
 
     // Cross-product: one ADIF record per MY_SIG_INFO × SIG_INFO combination

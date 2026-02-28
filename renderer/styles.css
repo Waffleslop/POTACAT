@@ -3047,6 +3047,7 @@ dialog input, dialog select {
   align-items: center;
   justify-content: center;
   flex: 1;
+  padding-top: 60px;
   color: var(--text-tertiary);
   font-size: 15px;
 }
@@ -3443,6 +3444,17 @@ dialog input, dialog select {
   text-overflow: ellipsis;
   max-width: 300px;
 }
+.activator-grid {
+  width: 7ch;
+  font-family: monospace;
+  font-size: 13px;
+  padding: 3px 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-primary);
+  color: var(--text-primary);
+  border-radius: 4px;
+  text-transform: uppercase;
+}
 
 .activator-freq-group {
   display: flex;
@@ -3521,6 +3533,60 @@ dialog input, dialog select {
 }
 .activator-map-btn:hover { background: var(--bg-hover); }
 
+.activator-spots-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+  color: var(--text-primary);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.activator-spots-btn:hover { background: var(--bg-hover); }
+.activator-spots-btn.active {
+  background: var(--accent-green);
+  color: #111;
+  border-color: var(--accent-green);
+  font-weight: 700;
+}
+
+/* Activator-spots splitter */
+.activator-spots-splitter {
+  height: 5px;
+  background: var(--border-primary);
+  cursor: row-resize;
+  flex-shrink: 0;
+  position: relative;
+}
+.activator-spots-splitter:hover,
+.activator-spots-splitter:active {
+  background: var(--accent-blue);
+}
+.activator-spots-splitter.hidden { display: none; }
+
+/* Activator + Spots split layout */
+body.activator-spots-on #activator-view {
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+body.activator-spots-on header {
+  display: flex !important;
+}
+body.activator-spots-on main {
+  display: block !important;
+  flex: 1;
+  min-height: 0;
+}
+/* Hide map pane in activator-spots mode — table only */
+body.activator-spots-on #map-pane,
+body.activator-spots-on #split-splitter {
+  display: none !important;
+}
+body.activator-spots-on #table-pane {
+  flex: 1 !important;
+}
+
 /* Quick-log bar */
 .activator-quick-log {
   display: flex;
@@ -3582,6 +3648,8 @@ dialog input, dialog select {
 /* Activation log table */
 .activator-log-table-wrap {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   padding: 0;
 }
@@ -3617,6 +3685,41 @@ dialog input, dialog select {
 #activator-log-table .act-log-mode { width: 50px; }
 #activator-log-table .act-log-rst { width: 40px; text-align: center; }
 #activator-log-table .act-log-band { width: 50px; }
+/* Editable cells */
+.act-log-editable { cursor: default; }
+#activator-log-table tbody tr:hover .act-log-editable {
+  outline: 1px dashed var(--border-secondary);
+  outline-offset: -1px;
+  cursor: text;
+}
+.act-log-edit-input, .act-log-edit-select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 1px 4px;
+  font-family: monospace;
+  font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-blue);
+  border-radius: 2px;
+  outline: none;
+}
+
+.act-log-del-col { width: 28px; }
+.act-log-del { width: 28px; text-align: center; }
+.act-log-del-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+#activator-log-table tbody tr:hover .act-log-del-btn { opacity: 1; }
+.act-log-del-btn:hover { color: var(--accent-red); }
 
 /* Settings radio labels */
 .radio-label { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
