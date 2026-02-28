@@ -334,25 +334,11 @@ const setQrzFullName = document.getElementById('set-qrz-full-name');
 const setSmartSdrSpots = document.getElementById('set-smartsdr-spots');
 const smartSdrConfig = document.getElementById('smartsdr-config');
 const setSmartSdrHost = document.getElementById('set-smartsdr-host');
-const setSmartSdrPota = document.getElementById('set-smartsdr-pota');
-const setSmartSdrSota = document.getElementById('set-smartsdr-sota');
-const setSmartSdrCluster = document.getElementById('set-smartsdr-cluster');
-const setSmartSdrRbn = document.getElementById('set-smartsdr-rbn');
-const setSmartSdrWwff = document.getElementById('set-smartsdr-wwff');
-const setSmartSdrLlota = document.getElementById('set-smartsdr-llota');
-const setSmartSdrPskr = document.getElementById('set-smartsdr-pskr');
 const setSmartSdrMaxAge = document.getElementById('set-smartsdr-max-age');
 const setTciSpots = document.getElementById('set-tci-spots');
 const tciConfig = document.getElementById('tci-config');
 const setTciHost = document.getElementById('set-tci-host');
 const setTciPort = document.getElementById('set-tci-port');
-const setTciPota = document.getElementById('set-tci-pota');
-const setTciSota = document.getElementById('set-tci-sota');
-const setTciCluster = document.getElementById('set-tci-cluster');
-const setTciRbn = document.getElementById('set-tci-rbn');
-const setTciWwff = document.getElementById('set-tci-wwff');
-const setTciLlota = document.getElementById('set-tci-llota');
-const setTciPskr = document.getElementById('set-tci-pskr');
 const setTciMaxAge = document.getElementById('set-tci-max-age');
 // CW Keyer
 const setEnableCwKeyer = document.getElementById('set-enable-cw-keyer');
@@ -4423,25 +4409,11 @@ async function openSettingsDialog() {
   setHideWorkedParks.checked = s.hideWorkedParks === true;
   setSmartSdrSpots.checked = s.smartSdrSpots === true;
   setSmartSdrHost.value = s.smartSdrHost || '127.0.0.1';
-  setSmartSdrPota.checked = s.smartSdrPota !== false;
-  setSmartSdrSota.checked = s.smartSdrSota !== false;
-  setSmartSdrCluster.checked = s.smartSdrCluster !== false;
-  setSmartSdrRbn.checked = s.smartSdrRbn === true;
-  setSmartSdrWwff.checked = s.smartSdrWwff !== false;
-  setSmartSdrLlota.checked = s.smartSdrLlota !== false;
-  setSmartSdrPskr.checked = s.smartSdrPskr !== false;
   setSmartSdrMaxAge.value = s.smartSdrMaxAge != null ? s.smartSdrMaxAge : 15;
   smartSdrConfig.classList.toggle('hidden', !s.smartSdrSpots);
   setTciSpots.checked = s.tciSpots === true;
   setTciHost.value = s.tciHost || '127.0.0.1';
   setTciPort.value = s.tciPort || 50001;
-  setTciPota.checked = s.tciPota !== false;
-  setTciSota.checked = s.tciSota !== false;
-  setTciCluster.checked = s.tciCluster !== false;
-  setTciRbn.checked = s.tciRbn === true;
-  setTciWwff.checked = s.tciWwff !== false;
-  setTciLlota.checked = s.tciLlota !== false;
-  setTciPskr.checked = s.tciPskr !== false;
   setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
   tciConfig.classList.toggle('hidden', !s.tciSpots);
   // CW Keyer
@@ -4552,24 +4524,10 @@ settingsSave.addEventListener('click', async () => {
   const lightModeEnabled = setLightMode.checked;
   const smartSdrSpotsEnabled = setSmartSdrSpots.checked;
   const smartSdrHostVal = setSmartSdrHost.value.trim() || '127.0.0.1';
-  const smartSdrPotaEnabled = setSmartSdrPota.checked;
-  const smartSdrSotaEnabled = setSmartSdrSota.checked;
-  const smartSdrClusterEnabled = setSmartSdrCluster.checked;
-  const smartSdrRbnEnabled = setSmartSdrRbn.checked;
-  const smartSdrWwffEnabled = setSmartSdrWwff.checked;
-  const smartSdrLlotaEnabled = setSmartSdrLlota.checked;
-  const smartSdrPskrEnabled = setSmartSdrPskr.checked;
   const smartSdrMaxAgeVal = parseInt(setSmartSdrMaxAge.value, 10) || 0;
   const tciSpotsEnabled = setTciSpots.checked;
   const tciHostVal = setTciHost.value.trim() || '127.0.0.1';
   const tciPortVal = parseInt(setTciPort.value, 10) || 50001;
-  const tciPotaEnabled = setTciPota.checked;
-  const tciSotaEnabled = setTciSota.checked;
-  const tciClusterEnabled = setTciCluster.checked;
-  const tciRbnEnabled = setTciRbn.checked;
-  const tciWwffEnabled = setTciWwff.checked;
-  const tciLlotaEnabled = setTciLlota.checked;
-  const tciPskrEnabled = setTciPskr.checked;
   const tciMaxAgeVal = parseInt(setTciMaxAge.value, 10) || 0;
   // CW Keyer
   const cwKeyerEnabled = setEnableCwKeyer.checked;
@@ -4666,24 +4624,10 @@ settingsSave.addEventListener('click', async () => {
     lightMode: lightModeEnabled,
     smartSdrSpots: smartSdrSpotsEnabled,
     smartSdrHost: smartSdrHostVal,
-    smartSdrPota: smartSdrPotaEnabled,
-    smartSdrSota: smartSdrSotaEnabled,
-    smartSdrCluster: smartSdrClusterEnabled,
-    smartSdrRbn: smartSdrRbnEnabled,
-    smartSdrWwff: smartSdrWwffEnabled,
-    smartSdrLlota: smartSdrLlotaEnabled,
-    smartSdrPskr: smartSdrPskrEnabled,
     smartSdrMaxAge: smartSdrMaxAgeVal,
     tciSpots: tciSpotsEnabled,
     tciHost: tciHostVal,
     tciPort: tciPortVal,
-    tciPota: tciPotaEnabled,
-    tciSota: tciSotaEnabled,
-    tciCluster: tciClusterEnabled,
-    tciRbn: tciRbnEnabled,
-    tciWwff: tciWwffEnabled,
-    tciLlota: tciLlotaEnabled,
-    tciPskr: tciPskrEnabled,
     tciMaxAge: tciMaxAgeVal,
     enableCwKeyer: cwKeyerEnabled,
     cwKeyerMode: cwKeyerModeVal,

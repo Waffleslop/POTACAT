@@ -1151,13 +1151,6 @@ function pushSpotsToSmartSdr(spots) {
   const maxAgeMs = (settings.smartSdrMaxAge != null ? settings.smartSdrMaxAge : 15) * 60000;
 
   for (const spot of spots) {
-    if (spot.source === 'pota' && settings.smartSdrPota === false) continue;
-    if (spot.source === 'sota' && settings.smartSdrSota === false) continue;
-    if (spot.source === 'dxc' && settings.smartSdrCluster === false) continue;
-    if (spot.source === 'rbn' && !settings.smartSdrRbn) continue;
-    if (spot.source === 'wwff' && settings.smartSdrWwff === false) continue;
-    if (spot.source === 'llota' && settings.smartSdrLlota === false) continue;
-    if (spot.source === 'pskr' && settings.smartSdrPskr === false) continue;
     // Age filter — skip spots older than the configured max age (0 = no limit)
     if (maxAgeMs > 0 && spot.spotTime) {
       const t = spot.spotTime.endsWith('Z') ? spot.spotTime : spot.spotTime + 'Z';
@@ -1204,13 +1197,6 @@ function pushSpotsToTci(spots) {
   const maxAgeMs = (settings.tciMaxAge != null ? settings.tciMaxAge : 15) * 60000;
 
   for (const spot of spots) {
-    if (spot.source === 'pota' && settings.tciPota === false) continue;
-    if (spot.source === 'sota' && settings.tciSota === false) continue;
-    if (spot.source === 'dxc' && settings.tciCluster === false) continue;
-    if (spot.source === 'rbn' && !settings.tciRbn) continue;
-    if (spot.source === 'wwff' && settings.tciWwff === false) continue;
-    if (spot.source === 'llota' && settings.tciLlota === false) continue;
-    if (spot.source === 'pskr' && settings.tciPskr === false) continue;
     // Age filter — skip spots older than the configured max age (0 = no limit)
     if (maxAgeMs > 0 && spot.spotTime) {
       const t = spot.spotTime.endsWith('Z') ? spot.spotTime : spot.spotTime + 'Z';
