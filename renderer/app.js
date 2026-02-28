@@ -4026,16 +4026,21 @@ logDialog.addEventListener('keydown', (e) => {
 
 // Save QSO
 logSaveBtn.addEventListener('click', async () => {
-  const callsign = logCallsign.value.trim().toUpperCase();
+  const rawCallsign = logCallsign.value.trim().toUpperCase();
   const frequency = logFrequency.value.trim();
   const mode = logMode.value;
   const date = logDate.value;
   const time = logTime.value;
 
-  if (!callsign || !frequency || !mode || !date || !time) {
+  if (!rawCallsign || !frequency || !mode || !date || !time) {
     logCallsign.focus();
     return;
   }
+
+  // Support comma-separated callsigns (multiple activators at same park)
+  const callsigns = rawCallsign.split(',').map(c => c.trim()).filter(Boolean);
+  if (!callsigns.length) { logCallsign.focus(); return; }
+  const callsign = callsigns[0]; // primary callsign for legacy references below
 
   const qsoDate = date.replace(/-/g, ''); // YYYYMMDD
   const timeOn = time.replace(':', '');     // HHMM
@@ -4086,67 +4091,73 @@ logSaveBtn.addEventListener('click', async () => {
   const respotWwffRef = currentLogSpot ? (currentLogSpot.wwffReference || (currentLogSpot.source === 'wwff' ? currentLogSpot.reference : '')) : '';
   const commentText = respotComment.value.trim().replace(/\{rst\}/gi, getRstDigits('rst-sent-digits', '59')).replace(/\{QTH\}/gi, grid).replace(/\{mycallsign\}/gi, myCallsign);
 
-  // Pull QRZ data for ADIF fields (name, state, county, grid)
-  const logQrzInfo = qrzData.get(callsign.split('/')[0]);
-
-  const qsoData = {
-    callsign,
-    frequency,
-    mode,
-    qsoDate,
-    timeOn,
-    rstSent: getRstDigits('rst-sent-digits', '59'),
-    rstRcvd: getRstDigits('rst-rcvd-digits', '59'),
-    txPower: logPower.value.trim(),
-    band,
-    sig,
-    sigInfo,
-    potaRef,
-    sotaRef,
-    wwffRef,
-    name: logQrzInfo ? [cleanQrzName(logQrzInfo.nickname) || cleanQrzName(logQrzInfo.fname), cleanQrzName(logQrzInfo.name)].filter(Boolean).join(' ') : '',
-    state: logQrzInfo ? logQrzInfo.state : '',
-    county: logQrzInfo && logQrzInfo.state && logQrzInfo.county ? `${logQrzInfo.state},${logQrzInfo.county}` : '',
-    gridsquare: logQrzInfo ? logQrzInfo.grid : '',
-    country: logQrzInfo ? logQrzInfo.country : '',
-    comment: [logComment.value.trim(), sigInfo && !logComment.value.includes(sigInfo) ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' '),
-    respot: wantsRespot,
-    wwffRespot: wantsWwffRespot,
-    wwffReference: wantsWwffRespot ? respotWwffRef : '',
-    llotaRespot: wantsLlotaRespot,
-    llotaReference: wantsLlotaRespot && currentLogSpot && currentLogSpot.source === 'llota' ? currentLogSpot.reference : '',
-    dxcRespot: wantsDxcRespot,
-    respotComment: (wantsRespot || wantsWwffRespot || wantsLlotaRespot || wantsDxcRespot) ? commentText : '',
-  };
+  const rstSent = getRstDigits('rst-sent-digits', '59');
+  const rstRcvd = getRstDigits('rst-rcvd-digits', '59');
+  const txPower = logPower.value.trim();
+  const commentBase = [logComment.value.trim(), sigInfo && !logComment.value.includes(sigInfo) ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' ');
 
   logSaveBtn.disabled = true;
   const origText = logSaveBtn.textContent;
   logSaveBtn.textContent = 'Saving\u2026';
   try {
-    const result = await window.api.saveQso(qsoData);
-    if (result.success) {
+    let lastResult = null;
+    for (let ci = 0; ci < callsigns.length; ci++) {
+      const cs = callsigns[ci];
+      const logQrzInfo = qrzData.get(cs.split('/')[0]);
+
+      const qsoData = {
+        callsign: cs,
+        frequency,
+        mode,
+        qsoDate,
+        timeOn,
+        rstSent,
+        rstRcvd,
+        txPower,
+        band,
+        sig,
+        sigInfo,
+        potaRef,
+        sotaRef,
+        wwffRef,
+        name: logQrzInfo ? [cleanQrzName(logQrzInfo.nickname) || cleanQrzName(logQrzInfo.fname), cleanQrzName(logQrzInfo.name)].filter(Boolean).join(' ') : '',
+        state: logQrzInfo ? logQrzInfo.state : '',
+        county: logQrzInfo && logQrzInfo.state && logQrzInfo.county ? `${logQrzInfo.state},${logQrzInfo.county}` : '',
+        gridsquare: logQrzInfo ? logQrzInfo.grid : '',
+        country: logQrzInfo ? logQrzInfo.country : '',
+        comment: commentBase,
+        // Only respot on the first callsign
+        respot: ci === 0 && wantsRespot,
+        wwffRespot: ci === 0 && wantsWwffRespot,
+        wwffReference: ci === 0 && wantsWwffRespot ? respotWwffRef : '',
+        llotaRespot: ci === 0 && wantsLlotaRespot,
+        llotaReference: ci === 0 && wantsLlotaRespot && currentLogSpot && currentLogSpot.source === 'llota' ? currentLogSpot.reference : '',
+        dxcRespot: ci === 0 && wantsDxcRespot,
+        respotComment: ci === 0 && (wantsRespot || wantsWwffRespot || wantsLlotaRespot || wantsDxcRespot) ? commentText : '',
+      };
+
+      lastResult = await window.api.saveQso(qsoData);
+      if (!lastResult.success) break;
+    }
+
+    const displayCalls = callsigns.join(', ');
+    if (lastResult && lastResult.success) {
       logDialog.close();
-      if (result.logbookError) {
-        const friendly = result.logbookError.includes('ECONNREFUSED')
+      if (lastResult.logbookError) {
+        const friendly = lastResult.logbookError.includes('ECONNREFUSED')
           ? 'Could not reach logbook — is it running and configured correctly?'
-          : result.logbookError;
-        showLogToast(`Logged ${callsign} to ADIF, but logbook forwarding failed: ${friendly}`, { warn: true, duration: 8000 });
-      } else if (result.respotError) {
-        showLogToast(`Logged ${callsign} to ADIF, but POTA re-spot failed: ${result.respotError}`, { warn: true, duration: 8000 });
-      } else if (result.wwffRespotError) {
-        showLogToast(`Logged ${callsign} to ADIF, but WWFF re-spot failed: ${result.wwffRespotError}`, { warn: true, duration: 8000 });
-      } else if (result.llotaRespotError) {
-        showLogToast(`Logged ${callsign} to ADIF, but LLOTA re-spot failed: ${result.llotaRespotError}`, { warn: true, duration: 8000 });
-      } else if (result.dxcRespotError) {
-        showLogToast(`Logged ${callsign} to ADIF, but DX Cluster spot failed: ${result.dxcRespotError}`, { warn: true, duration: 8000 });
-      } else if (result.resposted) {
+          : lastResult.logbookError;
+        showLogToast(`Logged ${displayCalls} to ADIF, but logbook forwarding failed: ${friendly}`, { warn: true, duration: 8000 });
+      } else if (lastResult.respotError) {
+        showLogToast(`Logged ${displayCalls} to ADIF, but POTA re-spot failed: ${lastResult.respotError}`, { warn: true, duration: 8000 });
+      } else if (lastResult.resposted) {
         const sources = logTargets.filter(t => respotCheckbox.checked).map(t => RESPOT_NAMES[t]).join(' & ');
-        showLogToast(`Logged ${callsign} — re-spotted on ${sources || 'POTA'}`);
+        showLogToast(`Logged ${displayCalls} — re-spotted on ${sources || 'POTA'}`);
       } else {
-        showLogToast(`Logged ${callsign}`);
+        showLogToast(`Logged ${displayCalls}`);
       }
-    } else {
-      showLogToast(`Error: ${result.error}`, { warn: true, duration: 5000 });
+    } else if (lastResult) {
+      showLogToast(`Error: ${lastResult.error}`, { warn: true, duration: 5000 });
     }
   } catch (err) {
     showLogToast(`Error: ${err.message}`, { warn: true, duration: 5000 });
@@ -7385,12 +7396,16 @@ function updateHunterParkDisplay() {
 // --- Quick Log ---
 async function activatorLogContact() {
   if (!activationActive) return; // must have an active activation
-  const callsign = activatorCallsignInput.value.trim().toUpperCase();
-  if (!callsign) return;
+  const rawCallsign = activatorCallsignInput.value.trim().toUpperCase();
+  if (!rawCallsign) return;
   if (!primaryParkRef()) {
     activatorParkRefInput.focus();
     return;
   }
+
+  // Support comma-separated callsigns (multiple activators at same park)
+  const callsigns = rawCallsign.split(',').map(c => c.trim()).filter(Boolean);
+  if (!callsigns.length) return;
 
   const mode = activatorModeSelect.value;
   const rstSent = getRstDigits('activator-rst-sent', mode === 'SSB' || mode === 'FM' ? '59' : '599');
@@ -7410,69 +7425,80 @@ async function activatorLogContact() {
   const timeOn = `${hh}${mm}${ss}`;
   const timeUtc = `${hh}:${mm}`;
 
-  // Build base fields for cross-product
-  const baseFields = {
-    callsign,
-    frequency: freqKhz ? String(freqKhz) : '',
-    mode,
-    band,
-    qsoDate,
-    timeOn,
-    rstSent,
-    rstRcvd,
-    txPower: defaultPower ? String(defaultPower) : '',
-    stationCallsign: myCallsign || '',
-    operator: myCallsign || '',
-  };
-
-  // Cross-product: one ADIF record per MY_SIG_INFO × SIG_INFO combination
   const myParks = activatorParkRefs;                              // always >= 1
   const theirParks = hunterParkRefs.length > 0 ? hunterParkRefs : [null];
-  const allQsoData = [];
 
-  for (const myPark of myParks) {
-    for (const theirPark of theirParks) {
-      const qsoData = { ...baseFields, mySig: 'POTA', mySigInfo: myPark.ref };
-      if (theirPark) { qsoData.sig = 'POTA'; qsoData.sigInfo = theirPark.ref; }
-      allQsoData.push(qsoData);
+  // Log each callsign as a separate QSO with identical fields
+  for (const callsign of callsigns) {
+    const baseFields = {
+      callsign,
+      frequency: freqKhz ? String(freqKhz) : '',
+      mode,
+      band,
+      qsoDate,
+      timeOn,
+      rstSent,
+      rstRcvd,
+      txPower: defaultPower ? String(defaultPower) : '',
+      stationCallsign: myCallsign || '',
+      operator: myCallsign || '',
+    };
+
+    // Cross-product: one ADIF record per MY_SIG_INFO × SIG_INFO combination
+    const allQsoData = [];
+    for (const myPark of myParks) {
+      for (const theirPark of theirParks) {
+        const qsoData = { ...baseFields, mySig: 'POTA', mySigInfo: myPark.ref };
+        if (theirPark) { qsoData.sig = 'POTA'; qsoData.sigInfo = theirPark.ref; }
+        allQsoData.push(qsoData);
+      }
     }
+
+    // Save all cross-product records via existing pipeline
+    try {
+      for (const qsoData of allQsoData) {
+        await window.api.saveQso(qsoData);
+      }
+    } catch (err) {
+      console.error('[Activator] Failed to save QSO:', err);
+    }
+
+    // Add to in-memory list — one entry per physical QSO
+    const contact = {
+      callsign,
+      timeUtc,
+      freqDisplay: freqMhz,
+      mode,
+      band,
+      rstSent,
+      rstRcvd,
+      name: '',
+      myParks: myParks.map(p => p.ref),
+      theirParks: hunterParkRefs.map(p => p.ref),
+      qsoData: allQsoData[0], // backward compat
+      qsoDataList: allQsoData, // all cross-product records for export
+    };
+    activatorContacts.push(contact);
+
+    // Push to activation map pop-out
+    if (actmapPopoutOpen) {
+      window.api.actmapPopoutContact({
+        parkRefs: activatorParkRefs.map(p => p.ref),
+        contact,
+      });
+    }
+
+    // Fire-and-forget QRZ lookup for name
+    window.api.qrzLookup(callsign).then(info => {
+      if (info) {
+        contact.name = qrzDisplayName(info);
+        renderActivatorLog();
+      }
+    }).catch(() => {});
   }
 
-  // Save all cross-product records via existing pipeline
-  try {
-    for (const qsoData of allQsoData) {
-      await window.api.saveQso(qsoData);
-    }
-  } catch (err) {
-    console.error('[Activator] Failed to save QSO:', err);
-  }
-
-  // Add to in-memory list — one entry per physical QSO
-  const contact = {
-    callsign,
-    timeUtc,
-    freqDisplay: freqMhz,
-    mode,
-    band,
-    rstSent,
-    rstRcvd,
-    name: '',
-    myParks: myParks.map(p => p.ref),
-    theirParks: hunterParkRefs.map(p => p.ref),
-    qsoData: allQsoData[0], // backward compat
-    qsoDataList: allQsoData, // all cross-product records for export
-  };
-  activatorContacts.push(contact);
   updateActivatorCounter();
   renderActivatorLog();
-
-  // Push to activation map pop-out
-  if (actmapPopoutOpen) {
-    window.api.actmapPopoutContact({
-      parkRefs: activatorParkRefs.map(p => p.ref),
-      contact,
-    });
-  }
 
   // Clear and refocus
   activatorCallsignInput.value = '';
@@ -7482,15 +7508,6 @@ async function activatorLogContact() {
   hunterParkRefs = [];
   updateHunterParkDisplay();
   activatorCallsignInput.focus();
-
-  // Fire-and-forget QRZ lookup for name
-  window.api.qrzLookup(callsign).then(info => {
-    if (info) {
-      const name = qrzDisplayName(info);
-      contact.name = name;
-      renderActivatorLog();
-    }
-  }).catch(() => {});
 }
 
 if (activatorLogBtn) {

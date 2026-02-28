@@ -81,6 +81,8 @@ body {
   font-size: 14px;
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Custom titlebar */
@@ -94,6 +96,7 @@ body {
   user-select: none;
   padding-left: 12px;
   border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
 }
 
 .titlebar-title {
@@ -150,6 +153,7 @@ header {
   gap: 16px;
   border-bottom: 1px solid var(--border-primary);
   position: relative;
+  flex-shrink: 0;
 }
 
 .filters {
@@ -393,34 +397,10 @@ button:hover {
   gap: 10px;
   font-size: 13px;
   color: var(--text-primary);
+  flex-shrink: 0;
 }
 
-/* Banner-to-main height calculation: both banners can stack */
-#update-banner.hidden + #event-banner.hidden + main {
-  height: calc(100vh - 52px - 32px);
-}
-#update-banner:not(.hidden) + #event-banner.hidden + main {
-  height: calc(100vh - 52px - 32px - 33px);
-}
-#update-banner.hidden + #event-banner:not(.hidden) + main {
-  height: calc(100vh - 52px - 32px - 33px);
-}
-#update-banner:not(.hidden) + #event-banner:not(.hidden) + main {
-  height: calc(100vh - 52px - 32px - 66px);
-}
-
-.cat-log-open #update-banner.hidden + #event-banner.hidden + main {
-  height: calc(100vh - 52px - 32px - 150px);
-}
-.cat-log-open #update-banner:not(.hidden) + #event-banner.hidden + main {
-  height: calc(100vh - 52px - 32px - 33px - 150px);
-}
-.cat-log-open #update-banner.hidden + #event-banner:not(.hidden) + main {
-  height: calc(100vh - 52px - 32px - 33px - 150px);
-}
-.cat-log-open #update-banner:not(.hidden) + #event-banner:not(.hidden) + main {
-  height: calc(100vh - 52px - 32px - 66px - 150px);
-}
+/* Banners are flex-shrink:0 siblings; main uses flex:1 */
 
 #update-message {
   color: #4ecca3;
@@ -505,6 +485,7 @@ button:hover {
   gap: 10px;
   font-size: 13px;
   color: var(--text-primary);
+  flex-shrink: 0;
 }
 
 #event-banner.hidden {
@@ -700,7 +681,8 @@ main {
   position: relative;
   padding: 0;
   overflow: hidden;
-  height: calc(100vh - 52px - 32px);
+  flex: 1;
+  min-height: 0;
 }
 
 /* Split container for simultaneous table + map */
@@ -2987,7 +2969,8 @@ dialog input, dialog select {
 #activator-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 30px); /* minus titlebar */
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 #activator-view.hidden { display: none; }
