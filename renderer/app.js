@@ -7915,17 +7915,52 @@ if (activatorExportBtn) {
     if (!activatorContacts.length) return;
     // Flatten all cross-product records for export
     const qsos = activatorContacts.flatMap(c => c.qsoDataList || [c.qsoData]);
+
+    // Multi-park: offer per-park or combined export
+    if (activatorParkRefs.length > 1) {
+      const dlg = document.getElementById('export-choice-dlg');
+      dlg.showModal();
+      const chosen = await new Promise(resolve => {
+        const onPerPark = () => { cleanup(); resolve('perpark'); };
+        const onCombined = () => { cleanup(); resolve('combined'); };
+        const onClose = () => { cleanup(); resolve(null); };
+        const cleanup = () => {
+          document.getElementById('export-choice-perpark').removeEventListener('click', onPerPark);
+          document.getElementById('export-choice-combined').removeEventListener('click', onCombined);
+          document.getElementById('export-choice-close').removeEventListener('click', onClose);
+          dlg.close();
+        };
+        document.getElementById('export-choice-perpark').addEventListener('click', onPerPark);
+        document.getElementById('export-choice-combined').addEventListener('click', onCombined);
+        document.getElementById('export-choice-close').addEventListener('click', onClose);
+      });
+      if (!chosen) return;
+      if (chosen === 'perpark') {
+        // Group QSOs by mySigInfo (park ref)
+        const qsosByPark = {};
+        for (const q of qsos) {
+          const ref = q.mySigInfo || 'UNKNOWN';
+          (qsosByPark[ref] ||= []).push(q);
+        }
+        const result = await window.api.exportActivationAdifPerPark({
+          qsosByPark,
+          myCallsign: myCallsign || '',
+        });
+        if (result && result.success) {
+          showLogToast(`Exported ${result.totalQsos} QSOs across ${result.fileCount} files`);
+        }
+        return;
+      }
+      // else 'combined' — fall through to existing single-file export
+    }
+
     const result = await window.api.exportActivationAdif({
       qsos,
       parkRef: primaryParkRef(),
       myCallsign: myCallsign || '',
     });
     if (result && result.success) {
-      const toast = document.createElement('div');
-      toast.textContent = `Exported ${qsos.length} QSOs to ${result.path}`;
-      toast.style.cssText = 'position:fixed;bottom:40px;left:50%;transform:translateX(-50%);background:var(--accent-green);color:#111;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;z-index:9999;';
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
+      showLogToast(`Exported ${qsos.length} QSOs to ${result.path.split(/[\\/]/).pop()}`);
     }
   });
 }

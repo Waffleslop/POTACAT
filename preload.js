@@ -111,6 +111,7 @@ contextBridge.exposeInMainWorld('api', {
   getPark: (ref) => ipcRenderer.invoke('get-park', ref),
   parksDbStatus: () => ipcRenderer.invoke('parks-db-status'),
   exportActivationAdif: (data) => ipcRenderer.invoke('export-activation-adif', data),
+  exportActivationAdifPerPark: (data) => ipcRenderer.invoke('export-activation-adif-perpark', data),
   getPastActivations: () => ipcRenderer.invoke('get-past-activations'),
   deleteActivation: (parkRef, date) => ipcRenderer.invoke('delete-activation', parkRef, date),
   resolveCallsignLocations: (callsigns) => ipcRenderer.invoke('resolve-callsign-locations', callsigns),

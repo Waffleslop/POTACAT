@@ -3933,6 +3933,36 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle('export-activation-adif-perpark', async (event, data) => {
+    const { writeActivationAdifRaw } = require('./lib/adif-writer');
+    const { qsosByPark, myCallsign: activatorCall } = data;
+    if (!qsosByPark || !Object.keys(qsosByPark).length) return { success: false, error: 'No contacts to export' };
+    try {
+      const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
+      const result = await dialog.showOpenDialog(parentWin, {
+        title: 'Choose folder for per-park ADIF files',
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (result.canceled || !result.filePaths.length) return { success: false };
+      const folder = result.filePaths[0];
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      let fileCount = 0;
+      let totalQsos = 0;
+      for (const [ref, qsos] of Object.entries(qsosByPark)) {
+        const safeRef = ref.replace(/[^A-Za-z0-9_-]/g, '_');
+        const fileName = `${activatorCall || 'POTACAT'}@${safeRef}-${dateStr}.adi`;
+        const filePath = path.join(folder, fileName);
+        writeActivationAdifRaw(filePath, qsos);
+        fileCount++;
+        totalQsos += qsos.length;
+      }
+      return { success: true, folder, fileCount, totalQsos };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // --- Past Activations (scan log for MY_SIG=POTA groups) ---
   ipcMain.handle('get-past-activations', () => {
     const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');

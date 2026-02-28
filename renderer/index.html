@@ -1092,6 +1092,19 @@
     </div>
   </dialog>
 
+  <!-- Export choice dialog (multi-park activations) -->
+  <dialog id="export-choice-dlg">
+    <div class="log-dialog-header">
+      <h3>Export Activation ADIF</h3>
+      <button type="button" id="export-choice-close" class="log-dialog-x" title="Close">&times;</button>
+    </div>
+    <p style="font-size:13px;color:var(--text-secondary);margin:8px 0;">You have multiple parks. How would you like to export?</p>
+    <div class="dialog-buttons">
+      <button type="button" id="export-choice-combined">Combined File</button>
+      <button type="button" id="export-choice-perpark" class="log-save-btn">Per-Park Files</button>
+    </div>
+  </dialog>
+
   <!-- What's New dialog (shown after version update) -->
   <dialog id="whats-new-dialog">
     <div class="log-dialog-header">

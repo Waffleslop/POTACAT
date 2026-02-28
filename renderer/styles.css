@@ -3109,6 +3109,12 @@ dialog input, dialog select {
 #activator-hunter-park:focus { border-color: #4fc3f7; outline: none; }
 #activator-hunter-park::placeholder { color: var(--text-tertiary); font-size: 11px; }
 
+/* Export choice dialog */
+#export-choice-dlg {
+  max-width: 380px;
+  min-width: 300px;
+}
+
 /* Multi-park dialog */
 #multipark-dialog {
   max-width: 420px;
