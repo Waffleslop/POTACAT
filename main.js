@@ -1814,10 +1814,10 @@ function sendN3fjpTcp(qsoData, host, port) {
       });
     });
 
-    // Wait for socket to fully close before resolving — N3FJP can't accept
-    // a new connection while the previous one is still tearing down
+    // Wait for socket to fully close + brief delay — N3FJP needs time
+    // between connections before it can accept the next one
     sock.on('close', () => {
-      if (!settled) { settled = true; resolve(); }
+      if (!settled) { settled = true; setTimeout(resolve, 250); }
     });
 
     sock.setTimeout(5000);
