@@ -932,7 +932,8 @@ th.col-drop-right { border-right: 2px solid var(--accent-blue) !important; }
 .hide-col-distance [data-col="distance"],
 .hide-col-spotTime [data-col="spotTime"],
 .hide-col-skip [data-col="skip"],
-.hide-col-comments [data-col="comments"] {
+.hide-col-comments [data-col="comments"],
+.hide-col-grid [data-col="grid"] {
   display: none;
 }
 

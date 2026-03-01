@@ -1714,9 +1714,15 @@ function isWorkedSpot(spot) {
     String(now.getUTCDate()).padStart(2, '0');
   const todayQsos = entries.filter(e => e.date === todayUtc);
   if (todayQsos.length === 0) return false;
-  // Match on band — only grey out if worked on same band today
+  // Match on band + mode — only hide if worked on same band AND mode today
   const spotBand = (spot.band || '').toUpperCase();
-  if (spotBand) return todayQsos.some(e => e.band === spotBand);
+  const spotMode = (spot.mode || '').toUpperCase();
+  if (spotBand || spotMode) {
+    return todayQsos.some(e =>
+      (!spotBand || e.band === spotBand) &&
+      (!spotMode || e.mode === spotMode)
+    );
+  }
   return true;
 }
 
@@ -1762,8 +1768,14 @@ function sortSpots(spots) {
     const bExp = expeditionCallsigns.has(b.callsign.toUpperCase()) ? 1 : 0;
     if (aExp !== bExp) return bExp - aExp;
 
-    let va = a[sortCol];
-    let vb = b[sortCol];
+    let va, vb;
+    if (sortCol === 'grid') {
+      va = (a.lat != null && a.lon != null) ? latLonToGridLocal(a.lat, a.lon).slice(0, 4) : null;
+      vb = (b.lat != null && b.lon != null) ? latLonToGridLocal(b.lat, b.lon).slice(0, 4) : null;
+    } else {
+      va = a[sortCol];
+      vb = b[sortCol];
+    }
     if (va == null && vb == null) return 0;
     if (va == null) return 1;
     if (vb == null) return -1;
@@ -1792,6 +1804,7 @@ const HIDEABLE_COLUMNS = [
   { key: 'reference', label: 'Ref' },
   { key: 'parkName', label: 'Name' },
   { key: 'locationDesc', label: 'State' },
+  { key: 'grid', label: 'Grid' },
   { key: 'distance', label: 'Distance' },
   { key: 'spotTime', label: 'Age' },
   { key: 'comments', label: 'Comments' },
@@ -1805,8 +1818,8 @@ function loadHiddenColumns() {
     const saved = JSON.parse(localStorage.getItem(HIDDEN_COLS_KEY));
     if (Array.isArray(saved)) return new Set(saved);
   } catch { /* ignore */ }
-  // Default: hide comments column on fresh install
-  return new Set(['comments']);
+  // Default: hide comments and grid columns on fresh install
+  return new Set(['comments', 'grid']);
 }
 
 function saveHiddenColumns() {
@@ -1937,7 +1950,7 @@ mapResizeObserver.observe(mapPaneEl);
 const COL_ORDER_KEY = 'pota-cat-col-order-v1';
 const DEFAULT_COL_ORDER = [
   'log','callsign','operator','frequency','mode','source','reference',
-  'parkName','locationDesc','distance','bearing','spotTime','comments','skip'
+  'parkName','locationDesc','grid','distance','bearing','spotTime','comments','skip'
 ];
 
 function loadColOrder() {
@@ -1986,7 +1999,7 @@ const COL_WIDTHS_KEY = 'pota-cat-col-pct-v10';
 const COL_WIDTHS_KEY_V9 = 'pota-cat-col-pct-v9';
 const DEFAULT_COL_PCT_OBJ = {
   log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, source: 5, reference: 6,
-  parkName: 15, locationDesc: 7, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4
+  parkName: 14, locationDesc: 7, grid: 5, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4
 };
 
 function loadColWidths() {
@@ -3785,6 +3798,7 @@ function render() {
         { val: refDisplay, wwff: !!s.wwffReference, newPark: isNewPark, col: 'reference' },
         { val: parkDisplay, col: 'parkName' },
         { val: s.locationDesc, col: 'locationDesc' },
+        { val: (s.lat != null && s.lon != null) ? latLonToGridLocal(s.lat, s.lon).slice(0, 4) : '', col: 'grid' },
         { val: formatDistance(s.distance), col: 'distance' },
         { val: formatBearing(s.bearing), cls: 'bearing-col', col: 'bearing' },
         { val: formatAge(s.spotTime), col: 'spotTime' },
@@ -3984,6 +3998,14 @@ function openLogPopup(spot) {
   }
 
   logDialog.showModal();
+  // Focus RST Sent so user can immediately type signal report
+  if (n1mmRst) {
+    const firstDigit = document.querySelector('#rst-sent-split .rst-digit');
+    if (firstDigit) firstDigit.focus();
+  } else {
+    const n1mmSent = document.getElementById('rst-sent-n1mm');
+    if (n1mmSent) { n1mmSent.focus(); n1mmSent.select(); }
+  }
   // Start live UTC clock — ticks every second until dialog closes or user edits time
   logTimeUserEdited = false;
   startLogClock();

@@ -65,6 +65,24 @@ function formatAge(spotTime) {
   return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
 }
 
+function latLonToGridLocal(lat, lon) {
+  let lng = lon + 180;
+  let la = lat + 90;
+  const A = 'A'.charCodeAt(0);
+  const a = 'a'.charCodeAt(0);
+  const field1 = String.fromCharCode(A + Math.floor(lng / 20));
+  const field2 = String.fromCharCode(A + Math.floor(la / 10));
+  lng %= 20;
+  la %= 10;
+  const sq1 = Math.floor(lng / 2);
+  const sq2 = Math.floor(la / 1);
+  lng -= sq1 * 2;
+  la -= sq2 * 1;
+  const sub1 = String.fromCharCode(a + Math.floor(lng / (2 / 24)));
+  const sub2 = String.fromCharCode(a + Math.floor(la / (1 / 24)));
+  return `${field1}${field2}${sq1}${sq2}${sub1}${sub2}`;
+}
+
 // --- Filtering ---
 function getFilteredSpots() {
   const band = filterBand.value;
@@ -99,6 +117,10 @@ function compareSpots(a, b) {
       va = ta; vb = tb;
       break;
     }
+    case 'grid':
+      va = (a.lat != null && a.lon != null) ? latLonToGridLocal(a.lat, a.lon).slice(0, 4) : '';
+      vb = (b.lat != null && b.lon != null) ? latLonToGridLocal(b.lat, b.lon).slice(0, 4) : '';
+      break;
     default:
       va = (a[sortCol] || '').toString().toLowerCase();
       vb = (b[sortCol] || '').toString().toLowerCase();
@@ -149,6 +171,7 @@ function render() {
       <td>${s.reference || ''}</td>
       <td style="max-width:160px;">${s.parkName || ''}</td>
       <td>${s.locationDesc || ''}</td>
+      <td>${(s.lat != null && s.lon != null) ? latLonToGridLocal(s.lat, s.lon).slice(0, 4) : ''}</td>
       <td>${dist}</td>
       <td>${formatAge(s.spotTime)}</td>
       <td style="max-width:180px;">${s.comments || ''}</td>
