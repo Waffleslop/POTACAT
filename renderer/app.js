@@ -3053,15 +3053,18 @@ document.getElementById('respot-cancel').addEventListener('click', () => {
 
 // --- DX Command Bar ---
 const dxCommandNode = document.getElementById('dx-command-node');
-const dxCommandInput = document.getElementById('dx-command-input');
+const dxSpotCall = document.getElementById('dx-spot-call');
+const dxSpotFreq = document.getElementById('dx-spot-freq');
+const dxSpotNote = document.getElementById('dx-spot-note');
 let showDxBar = false;
 let dxCommandPreferredNode = '';
 let dxSpotComment = localStorage.getItem('dx-spot-comment') || 'great signal';
 
 function prefillDxCommand(spot) {
   if (!spot || spot.source !== 'dxc' || !showDxBar || !enableCluster) return;
-  const freq = parseFloat(spot.frequency).toFixed(1);
-  dxCommandInput.value = 'DX ' + freq + ' ' + spot.callsign + ' ' + dxSpotComment;
+  dxSpotCall.value = spot.callsign || '';
+  dxSpotFreq.value = parseFloat(spot.frequency).toFixed(1);
+  dxSpotNote.value = dxSpotComment;
 }
 
 function updateDxCommandBar() {
@@ -3096,14 +3099,20 @@ dxCommandNode.addEventListener('change', () => {
 
 async function sendDxCommand() {
   const btn = document.getElementById('dx-command-send');
-  const text = dxCommandInput.value.trim();
-  if (!text) return;
-  // Extract comment from "DX freq call comment..." and remember it
-  const dxMatch = text.match(/^DX\s+[\d.]+\s+\S+\s+(.+)$/i);
-  if (dxMatch) {
-    dxSpotComment = dxMatch[1].trim();
+  const call = dxSpotCall.value.trim();
+  const freq = dxSpotFreq.value.trim();
+  if (!call || !freq) {
+    showLogToast('Callsign and frequency are required', { warn: true, duration: 3000 });
+    if (!call) dxSpotCall.focus();
+    else dxSpotFreq.focus();
+    return;
+  }
+  const note = dxSpotNote.value.trim();
+  if (note) {
+    dxSpotComment = note;
     localStorage.setItem('dx-spot-comment', dxSpotComment);
   }
+  const text = 'DX ' + freq + ' ' + call + (note ? ' ' + note : '');
   const nodeId = dxCommandNode.value || undefined;
   btn.disabled = true;
   try {
@@ -3111,9 +3120,11 @@ async function sendDxCommand() {
     if (result.error) {
       showLogToast(result.error, { warn: true, duration: 5000 });
     } else {
-      dxCommandInput.value = '';
+      dxSpotCall.value = '';
+      dxSpotFreq.value = '';
+      dxSpotNote.value = '';
       const nodeName = nodeId ? dxCommandNode.options[dxCommandNode.selectedIndex].textContent : result.sent + ' node' + (result.sent > 1 ? 's' : '');
-      showLogToast('Sent to ' + nodeName);
+      showLogToast('Spotted ' + call + ' on ' + freq + ' kHz \u2192 ' + nodeName, { duration: 3000 });
     }
   } catch (err) {
     showLogToast('DX command failed: ' + err.message, { warn: true, duration: 5000 });
@@ -3123,8 +3134,10 @@ async function sendDxCommand() {
 }
 
 document.getElementById('dx-command-send').addEventListener('click', sendDxCommand);
-document.getElementById('dx-command-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); sendDxCommand(); }
+[dxSpotCall, dxSpotFreq, dxSpotNote].forEach(el => {
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); sendDxCommand(); }
+  });
 });
 
 // --- Quick Log (Ctrl+L) ---
