@@ -935,6 +935,124 @@ function disconnectPskr() {
   sendPskrStatus({ connected: false });
 }
 
+// --- Shared QSO save logic ---
+// Module-scoped so WSJT-X, Echo CAT, and IPC handlers can all use it
+async function saveQsoRecord(qsoData) {
+  // Inject operator callsign from settings
+  if (settings.myCallsign && !qsoData.operator) {
+    qsoData.operator = settings.myCallsign.toUpperCase();
+  }
+  const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  appendQso(logPath, qsoData);
+
+  // Notify QSO pop-out window
+  if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+    qsoPopoutWin.webContents.send('qso-popout-added', qsoData);
+  }
+
+  // Track QSO in telemetry (fire-and-forget)
+  const qsoSource = (qsoData.sig || '').toLowerCase();
+  trackQso(['pota', 'sota', 'wwff', 'llota'].includes(qsoSource) ? qsoSource : null);
+
+  // Check if QSO matches any active event and auto-mark progress
+  checkEventQso(qsoData);
+
+  // Update worked QSOs map and notify renderer
+  if (qsoData.callsign) {
+    const call = qsoData.callsign.toUpperCase();
+    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: (qsoData.mode || '').toUpperCase() };
+    if (!workedQsos.has(call)) workedQsos.set(call, []);
+    workedQsos.get(call).push(entry);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('worked-qsos', [...workedQsos.entries()]);
+    }
+  }
+
+  // Forward to external logbook if enabled
+  // skipLogbookForward: multi-park activations send one ADIF record per park ref,
+  // but external logbooks only need one QSO per physical contact
+  if (settings.sendToLogbook && settings.logbookType && !qsoData.skipLogbookForward) {
+    try {
+      await forwardToLogbook(qsoData);
+    } catch (fwdErr) {
+      console.error('Logbook forwarding failed:', fwdErr.message);
+      return { success: true, logbookError: fwdErr.message };
+    }
+  }
+
+  // Re-spot on POTA if requested
+  if (qsoData.respot && qsoData.sig === 'POTA' && qsoData.sigInfo && settings.myCallsign) {
+    try {
+      await postPotaRespot({
+        activator: qsoData.callsign,
+        spotter: settings.myCallsign.toUpperCase(),
+        frequency: qsoData.frequency,
+        reference: qsoData.sigInfo,
+        mode: qsoData.mode,
+        comments: qsoData.respotComment || '',
+      });
+      trackRespot('pota');
+    } catch (respotErr) {
+      console.error('POTA re-spot failed:', respotErr.message);
+      return { success: true, respotError: respotErr.message };
+    }
+  }
+
+  // Re-spot on WWFF if requested
+  if (qsoData.wwffRespot && qsoData.wwffReference && settings.myCallsign) {
+    try {
+      await postWwffRespot({
+        activator: qsoData.callsign,
+        spotter: settings.myCallsign.toUpperCase(),
+        frequency: qsoData.frequency,
+        reference: qsoData.wwffReference,
+        mode: qsoData.mode,
+        comments: qsoData.respotComment || '',
+      });
+      trackRespot('wwff');
+    } catch (respotErr) {
+      console.error('WWFF re-spot failed:', respotErr.message);
+      return { success: true, wwffRespotError: respotErr.message };
+    }
+  }
+
+  // Re-spot on LLOTA if requested
+  if (qsoData.llotaRespot && qsoData.llotaReference) {
+    try {
+      await postLlotaRespot({
+        activator: qsoData.callsign,
+        frequency: qsoData.frequency,
+        reference: qsoData.llotaReference,
+        mode: qsoData.mode,
+        comments: qsoData.respotComment || '',
+      });
+      trackRespot('llota');
+    } catch (respotErr) {
+      console.error('LLOTA re-spot failed:', respotErr.message);
+      return { success: true, llotaRespotError: respotErr.message };
+    }
+  }
+
+  // Spot on DX Cluster if requested
+  if (qsoData.dxcRespot) {
+    try {
+      let sent = 0;
+      for (const [, entry] of clusterClients) {
+        if (entry.client.sendSpot({ frequency: qsoData.frequency, callsign: qsoData.callsign, comment: qsoData.respotComment || '' })) {
+          sent++;
+        }
+      }
+      if (sent === 0) throw new Error('no connected nodes');
+    } catch (respotErr) {
+      console.error('DX Cluster spot failed:', respotErr.message);
+      return { success: true, dxcRespotError: respotErr.message };
+    }
+  }
+
+  const didRespot = (qsoData.respot && qsoData.sig === 'POTA') || qsoData.wwffRespot || qsoData.llotaRespot || qsoData.dxcRespot;
+  return { success: true, resposted: didRespot || false };
+}
+
 // --- WSJT-X integration ---
 function sendWsjtxStatus(s) {
   if (win && !win.isDestroyed()) win.webContents.send('wsjtx-status', s);
@@ -1005,46 +1123,40 @@ function connectWsjtx() {
 
   wsjtx.on('logged-adif', async ({ adif }) => {
     if (!settings.wsjtxAutoLog) return;
-    // Append the raw ADIF record to our log file
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     try {
-      // Ensure log file exists with header
-      if (!fs.existsSync(logPath)) {
-        fs.writeFileSync(logPath, 'POTACAT ADIF Log\n<EOH>\n');
-      }
-      fs.appendFileSync(logPath, adif + '\n');
-      // Reload worked callsigns
-      loadWorkedQsos();
-    } catch (err) {
-      console.error('Failed to append WSJT-X ADIF:', err.message);
-    }
+      const f = parseAdifRecord(adif);
+      const freqMHz = parseFloat(f.FREQ || '0');
+      const qsoData = {
+        callsign: f.CALL || '',
+        frequency: String(Math.round(freqMHz * 1000)),
+        mode: f.MODE || '',
+        qsoDate: f.QSO_DATE || '',
+        timeOn: f.TIME_ON || '',
+        rstSent: f.RST_SENT || '',
+        rstRcvd: f.RST_RCVD || '',
+        txPower: f.TX_PWR || '',
+        band: f.BAND || '',
+        sig: f.SIG || '',
+        sigInfo: f.SIG_INFO || '',
+        name: f.NAME || '',
+        gridsquare: f.GRIDSQUARE || '',
+        comment: f.COMMENT || '',
+        operator: f.OPERATOR || settings.myCallsign || '',
+      };
 
-    // Forward to external logbook (ACLog, Log4OM, etc.) if enabled
-    if (settings.sendToLogbook && settings.logbookType) {
-      try {
-        const f = parseAdifRecord(adif);
-        const freqMHz = parseFloat(f.FREQ || '0');
-        const qsoData = {
-          callsign: f.CALL || '',
-          frequency: String(Math.round(freqMHz * 1000)),
-          mode: f.MODE || '',
-          qsoDate: f.QSO_DATE || '',
-          timeOn: f.TIME_ON || '',
-          rstSent: f.RST_SENT || '',
-          rstRcvd: f.RST_RCVD || '',
-          txPower: f.TX_PWR || '',
-          band: f.BAND || '',
-          sig: f.SIG || '',
-          sigInfo: f.SIG_INFO || '',
-          name: f.NAME || '',
-          gridsquare: f.GRIDSQUARE || '',
-          comment: f.COMMENT || '',
-          operator: f.OPERATOR || settings.myCallsign || '',
-        };
-        await forwardToLogbook(qsoData);
-      } catch (fwdErr) {
-        console.error('WSJT-X logbook forwarding failed:', fwdErr.message);
+      // In activator mode, inject MY_SIG fields for each park ref (cross-product)
+      const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
+      if (settings.appMode === 'activator' && parkRefs.length > 0) {
+        for (let i = 0; i < parkRefs.length; i++) {
+          const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
+          if (i > 0) parkQso.skipLogbookForward = true; // only forward first record
+          await saveQsoRecord(parkQso);
+        }
+      } else {
+        await saveQsoRecord(qsoData);
       }
+    } catch (err) {
+      console.error('Failed to log WSJT-X QSO:', err.message);
     }
   });
 
@@ -4132,124 +4244,6 @@ app.whenReady().then(() => {
       }
     }
   });
-
-  // Shared QSO save logic — used by both IPC handler and Echo CAT remote logging
-  async function saveQsoRecord(qsoData) {
-    // Inject operator callsign from settings
-    if (settings.myCallsign && !qsoData.operator) {
-      qsoData.operator = settings.myCallsign.toUpperCase();
-    }
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-    appendQso(logPath, qsoData);
-
-    // Notify QSO pop-out window
-    if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-      qsoPopoutWin.webContents.send('qso-popout-added', qsoData);
-    }
-
-    // Track QSO in telemetry (fire-and-forget)
-    const qsoSource = (qsoData.sig || '').toLowerCase();
-    trackQso(['pota', 'sota', 'wwff', 'llota'].includes(qsoSource) ? qsoSource : null);
-
-    // Check if QSO matches any active event and auto-mark progress
-    checkEventQso(qsoData);
-
-    // Update worked QSOs map and notify renderer
-    if (qsoData.callsign) {
-      const call = qsoData.callsign.toUpperCase();
-      const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: (qsoData.mode || '').toUpperCase() };
-      if (!workedQsos.has(call)) workedQsos.set(call, []);
-      workedQsos.get(call).push(entry);
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('worked-qsos', [...workedQsos.entries()]);
-      }
-    }
-
-    // Forward to external logbook if enabled
-    // skipLogbookForward: multi-park activations send one ADIF record per park ref,
-    // but external logbooks only need one QSO per physical contact
-    if (settings.sendToLogbook && settings.logbookType && !qsoData.skipLogbookForward) {
-      try {
-        await forwardToLogbook(qsoData);
-      } catch (fwdErr) {
-        console.error('Logbook forwarding failed:', fwdErr.message);
-        return { success: true, logbookError: fwdErr.message };
-      }
-    }
-
-    // Re-spot on POTA if requested
-    if (qsoData.respot && qsoData.sig === 'POTA' && qsoData.sigInfo && settings.myCallsign) {
-      try {
-        await postPotaRespot({
-          activator: qsoData.callsign,
-          spotter: settings.myCallsign.toUpperCase(),
-          frequency: qsoData.frequency,
-          reference: qsoData.sigInfo,
-          mode: qsoData.mode,
-          comments: qsoData.respotComment || '',
-        });
-        // Track re-spot in telemetry (fire-and-forget)
-        trackRespot('pota');
-      } catch (respotErr) {
-        console.error('POTA re-spot failed:', respotErr.message);
-        return { success: true, respotError: respotErr.message };
-      }
-    }
-
-    // Re-spot on WWFF if requested
-    if (qsoData.wwffRespot && qsoData.wwffReference && settings.myCallsign) {
-      try {
-        await postWwffRespot({
-          activator: qsoData.callsign,
-          spotter: settings.myCallsign.toUpperCase(),
-          frequency: qsoData.frequency,
-          reference: qsoData.wwffReference,
-          mode: qsoData.mode,
-          comments: qsoData.respotComment || '',
-        });
-        trackRespot('wwff');
-      } catch (respotErr) {
-        console.error('WWFF re-spot failed:', respotErr.message);
-        return { success: true, wwffRespotError: respotErr.message };
-      }
-    }
-
-    // Re-spot on LLOTA if requested
-    if (qsoData.llotaRespot && qsoData.llotaReference) {
-      try {
-        await postLlotaRespot({
-          activator: qsoData.callsign,
-          frequency: qsoData.frequency,
-          reference: qsoData.llotaReference,
-          mode: qsoData.mode,
-          comments: qsoData.respotComment || '',
-        });
-        trackRespot('llota');
-      } catch (respotErr) {
-        console.error('LLOTA re-spot failed:', respotErr.message);
-        return { success: true, llotaRespotError: respotErr.message };
-      }
-    }
-
-    // Spot on DX Cluster if requested
-    if (qsoData.dxcRespot) {
-      try {
-        let sent = 0;
-        for (const [, entry] of clusterClients) {
-          if (entry.client.sendSpot({ frequency: qsoData.frequency, callsign: qsoData.callsign, comment: qsoData.respotComment || '' })) {
-            sent++;
-          }
-        }
-        if (sent === 0) throw new Error('no connected nodes');
-      } catch (respotErr) {
-        console.error('DX Cluster spot failed:', respotErr.message);
-        return { success: true, dxcRespotError: respotErr.message };
-      }
-    }
-
-    const didRespot = (qsoData.respot && qsoData.sig === 'POTA') || qsoData.wwffRespot || qsoData.llotaRespot || qsoData.dxcRespot;
-    return { success: true, resposted: didRespot || false };
-  }
 
   ipcMain.handle('save-qso', async (_e, qsoData) => {
     markUserActive();
