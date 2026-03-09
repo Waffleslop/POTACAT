@@ -353,6 +353,10 @@ const logbookPortConfig = document.getElementById('logbook-port-config');
 const setLogbookHost = document.getElementById('set-logbook-host');
 const setLogbookPort = document.getElementById('set-logbook-port');
 const logbookHelp = document.getElementById('logbook-help');
+const logbookWavelogConfig = document.getElementById('logbook-wavelog-config');
+const setWavelogUrl = document.getElementById('set-wavelog-url');
+const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
+const setWavelogStationId = document.getElementById('set-wavelog-station-id');
 const setDisableAutoUpdate = document.getElementById('set-disable-auto-update');
 const setEnableTelemetry = document.getElementById('set-enable-telemetry');
 const setLightMode = document.getElementById('set-light-mode');
@@ -1900,26 +1904,33 @@ const LOGBOOK_DEFAULTS = {
   hamrs: { port: 2333, help: 'In HamRS: enable WSJT-X integration in Settings. HamRS listens on UDP port 2333 for ADIF data. Leave Host at 127.0.0.1 if HamRS is running on the same computer. HamRS must be running to receive QSOs.' },
   n3fjp: { port: 1100, help: 'In N3FJP: Settings > Application Program Interface > check "TCP API Enabled". Set the port to 1100 (default). N3FJP must be running to receive QSOs. When using with WSJT-X, open WSJT-X first, then POTACAT, then N3FJP.' },
   hrd: { port: 2333, help: 'In HRD Logbook: Tools > Configure > QSO Forwarding. Under UDP Receive, check "Receive QSO notifications using UDP9/ADIF from other logging programs (eg. WSJT-X)". Set the receive port to 2333 and select your target database. POTACAT and WSJT-X can both send to this port simultaneously.' },
+  wavelog: { apiConfig: true },
 };
 
 function updateLogbookPortConfig() {
   const type = setLogbookType.value;
   const defaults = LOGBOOK_DEFAULTS[type];
   if (defaults && defaults.fileWatch) {
-    // File-based integration (e.g. Log4OM) — show instructions, hide port config
     logbookInstructions.innerHTML = defaults.instructions;
     logbookInstructions.classList.remove('hidden');
     logbookPortConfig.classList.add('hidden');
+    logbookWavelogConfig.classList.add('hidden');
     logbookHelp.textContent = '';
+  } else if (defaults && defaults.apiConfig) {
+    logbookInstructions.classList.add('hidden');
+    logbookPortConfig.classList.add('hidden');
+    logbookWavelogConfig.classList.remove('hidden');
   } else if (defaults) {
     logbookInstructions.classList.add('hidden');
     logbookPortConfig.classList.remove('hidden');
+    logbookWavelogConfig.classList.add('hidden');
     const currentPort = parseInt(setLogbookPort.value, 10);
     if (!currentPort || currentPort === defaults.port) setLogbookPort.value = defaults.port;
     logbookHelp.textContent = defaults.help;
   } else {
     logbookInstructions.classList.add('hidden');
     logbookPortConfig.classList.add('hidden');
+    logbookWavelogConfig.classList.add('hidden');
     logbookHelp.textContent = '';
   }
 }
@@ -5221,6 +5232,9 @@ async function openSettingsDialog() {
   setLogbookType.value = s.logbookType || '';
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
   setLogbookPort.value = s.logbookPort || '';
+  setWavelogUrl.value = s.wavelogUrl || '';
+  setWavelogApiKey.value = s.wavelogApiKey || '';
+  setWavelogStationId.value = s.wavelogStationId || '';
   loggingConfig.classList.toggle('hidden', !s.enableLogging);
   logbookConfig.classList.toggle('hidden', !s.sendToLogbook);
   updateLogbookPortConfig();
@@ -5482,6 +5496,9 @@ settingsSave.addEventListener('click', async () => {
     logbookType: logbookTypeVal,
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
+    wavelogUrl: setWavelogUrl.value.trim(),
+    wavelogApiKey: setWavelogApiKey.value.trim(),
+    wavelogStationId: setWavelogStationId.value.trim(),
     disableAutoUpdate: disableAutoUpdate,
     enableTelemetry: telemetryEnabled,
     lightMode: lightModeEnabled,

@@ -855,6 +855,7 @@
               <option value="hrd">Ham Radio Deluxe</option>
               <option value="log4om">Log4OM 2</option>
               <option value="n3fjp">N3FJP</option>
+              <option value="wavelog">Wavelog</option>
             </select>
           </label>
           <div id="logbook-instructions" class="hidden help-text" style="margin-top:6px;line-height:1.5;"></div>
@@ -866,6 +867,18 @@
               <input type="number" id="set-logbook-port" min="1" max="65535">
             </label>
             <div id="logbook-help" class="help-text" style="margin-top:4px;"></div>
+          </div>
+          <div id="logbook-wavelog-config" class="hidden" style="margin-top:6px;">
+            <label>Wavelog URL:
+              <input type="text" id="set-wavelog-url" placeholder="https://log.example.com">
+            </label>
+            <label>API Key:
+              <input type="password" id="set-wavelog-api-key" placeholder="From Wavelog API settings">
+            </label>
+            <label>Station Profile ID:
+              <input type="number" id="set-wavelog-station-id" min="1" placeholder="1">
+            </label>
+            <div id="logbook-wavelog-help" class="help-text" style="margin-top:4px;">In Wavelog: go to API Keys and create a key with read-write access. The Station Profile ID is in the URL when editing a station profile (e.g. /stationsetup/edit/1 means ID is 1).</div>
           </div>
         </div>
       </div>
@@ -1098,7 +1111,7 @@
       <button id="settings-cancel">Cancel</button>
     </div>
     <div class="settings-footer">
-      <div class="settings-version">v0.9.42 beta &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
+      <div class="settings-version">v0.9.44 beta &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-coffee"><a href="#" id="coffee-link">Buy Me a Coffee</a></div>
       <div class="settings-links">
         <a href="#" id="discord-link">Discord</a>

@@ -2938,6 +2938,9 @@ function forwardToLogbook(qsoData) {
   if (type === 'dxkeeper') {
     return sendDxkeeperTcp(qsoData, host, port || 52001);
   }
+  if (type === 'wavelog') {
+    return sendWavelogHttp(qsoData);
+  }
   return Promise.resolve();
 }
 
@@ -3024,6 +3027,66 @@ function sendDxkeeperTcp(qsoData, host, port) {
     sock.on('error', (err) => {
       reject(new Error(`DXKeeper: ${err.message}`));
     });
+  });
+}
+
+/**
+ * Send a QSO to Wavelog via HTTP POST.
+ * POST {url}/index.php/api/qso with JSON body { key, station_profile_id, type: 'adif', string: adifRecord }
+ */
+function sendWavelogHttp(qsoData) {
+  return new Promise((resolve, reject) => {
+    let baseUrl = (settings.wavelogUrl || '').trim().replace(/\/+$/, '');
+    if (!baseUrl) return reject(new Error('Wavelog URL not configured'));
+    const apiKey = settings.wavelogApiKey;
+    if (!apiKey) return reject(new Error('Wavelog API key not configured'));
+    const stationId = settings.wavelogStationId || '1';
+
+    const record = buildAdifRecord(qsoData);
+    const body = JSON.stringify({
+      key: apiKey,
+      station_profile_id: String(stationId),
+      type: 'adif',
+      string: record,
+    });
+
+    const url = new URL(baseUrl + '/index.php/api/qso');
+    const isHttps = url.protocol === 'https:';
+    const httpMod = isHttps ? require('https') : require('http');
+
+    const req = httpMod.request({
+      hostname: url.hostname,
+      port: url.port || (isHttps ? 443 : 80),
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+      timeout: 10000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.status === 'created') {
+            resolve();
+          } else {
+            reject(new Error(`Wavelog: ${json.reason || json.status || 'unknown error'}`));
+          }
+        } catch {
+          if (res.statusCode >= 200 && res.statusCode < 300) resolve();
+          else reject(new Error(`Wavelog HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => reject(new Error(`Wavelog: ${err.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Wavelog request timed out')); });
+    req.write(body);
+    req.end();
   });
 }
 

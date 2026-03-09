@@ -1858,10 +1858,6 @@
     } else if (tab === 'activate') {
       logView.classList.remove('hidden');
       updateLogViewState();
-      if (!activationRunning) {
-        pastActivationsDiv.classList.remove('hidden');
-        requestPastActivations();
-      }
     }
   }
 
@@ -1879,6 +1875,7 @@
       pastActivationsDiv.classList.remove('hidden');
       quickLogForm.classList.add('hidden');
       logFooter.classList.add('hidden');
+      requestPastActivations();
       setupRefInput.focus();
     }
   }
