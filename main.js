@@ -1082,8 +1082,11 @@ async function saveQsoRecord(qsoData) {
   // but external logbooks only need one QSO per physical contact
   if (settings.sendToLogbook && settings.logbookType && !qsoData.skipLogbookForward) {
     try {
+      sendCatLog(`[Logbook] Forwarding QSO to ${settings.logbookType}: ${qsoData.callsign} ${qsoData.frequency}kHz ${qsoData.mode}`);
       await forwardToLogbook(qsoData);
+      sendCatLog(`[Logbook] QSO forwarded successfully`);
     } catch (fwdErr) {
+      sendCatLog(`[Logbook] Forwarding failed: ${fwdErr.message}`);
       console.error('Logbook forwarding failed:', fwdErr.message);
       return { success: true, logbookError: fwdErr.message };
     }
@@ -2965,8 +2968,10 @@ const hamrsBridge = {
         reject(new Error('HamRS bridge not started'));
         return;
       }
-      // Send QSO_LOGGED (type 5) — the primary message most apps listen for
       const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
+      sendCatLog(`[HamRS] Sending QSO: ${qsoData.callsign} ${freqHz}Hz ${qsoData.mode} → ${this.host}:${this.port}`);
+
+      // Send QSO_LOGGED (type 5) — the primary message most apps listen for
       const qsoMsg = encodeQsoLogged(this.id, {
         dxCall: qsoData.callsign || '',
         dxGrid: qsoData.grid || '',
@@ -2981,12 +2986,21 @@ const hamrsBridge = {
         myCall: qsoData.stationCallsign || '',
         myGrid: qsoData.myGridsquare || '',
       });
-      this.socket.send(qsoMsg, 0, qsoMsg.length, this.port, this.host);
+      this.socket.send(qsoMsg, 0, qsoMsg.length, this.port, this.host, (err) => {
+        if (err) sendCatLog(`[HamRS] QSO_LOGGED send error: ${err.message}`);
+        else sendCatLog(`[HamRS] QSO_LOGGED (type 5) sent (${qsoMsg.length} bytes)`);
+      });
+
       // Also send LOGGED_ADIF (type 12) as supplementary
       const adifBuf = encodeLoggedAdif(this.id, adifText);
       this.socket.send(adifBuf, 0, adifBuf.length, this.port, this.host, (err) => {
-        if (err) reject(err);
-        else resolve();
+        if (err) {
+          sendCatLog(`[HamRS] LOGGED_ADIF send error: ${err.message}`);
+          reject(err);
+        } else {
+          sendCatLog(`[HamRS] LOGGED_ADIF (type 12) sent (${adifBuf.length} bytes)`);
+          resolve();
+        }
       });
     });
   },
