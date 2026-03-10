@@ -338,6 +338,9 @@ let jtcatDecodes = [];
 let jtcatRxFreq = 1500;
 let jtcatTxFreq = 1500;
 let jtcatCurrentBand = '20m';
+// QSO state machine
+let jtcatQso = null; // { call, grid, phase, txMsg, report, rrReport }
+// phase: 'reply' → 'report' → 'r+report' → '73' → 'done'
 const setPotaParksPath = document.getElementById('set-pota-parks-path');
 const potaParksBrowseBtn = document.getElementById('pota-parks-browse-btn');
 const potaParksClearBtn = document.getElementById('pota-parks-clear-btn');
@@ -10063,7 +10066,7 @@ function renderJtcatDecodes() {
   } else {
     jtcatBandActivity.innerHTML = jtcatDecodes.map(function(d) {
       var cls = getJtcatDecodeClass(d);
-      return '<div class="jtcat-decode-row ' + cls + '" data-df="' + d.df + '">' + formatJtcatDecode(d) + '</div>';
+      return '<div class="jtcat-decode-row ' + cls + '" data-df="' + d.df + '" data-text="' + escJtcat(d.text) + '">' + formatJtcatDecode(d) + '</div>';
     }).join('');
   }
   var rxNear = jtcatDecodes.filter(function(d) { return Math.abs(d.df - jtcatRxFreq) <= 50; });
@@ -10072,18 +10075,148 @@ function renderJtcatDecodes() {
   } else {
     jtcatRxActivity.innerHTML = rxNear.map(function(d) {
       var cls = getJtcatDecodeClass(d);
-      return '<div class="jtcat-decode-row ' + cls + '" data-df="' + d.df + '">' + formatJtcatDecode(d) + '</div>';
+      return '<div class="jtcat-decode-row ' + cls + '" data-df="' + d.df + '" data-text="' + escJtcat(d.text) + '">' + formatJtcatDecode(d) + '</div>';
     }).join('');
   }
-  jtcatBandActivity.querySelectorAll('.jtcat-decode-row').forEach(function(row) {
-    row.addEventListener('click', function() {
-      var df = parseInt(row.dataset.df, 10);
-      jtcatRxFreq = df;
-      jtcatRxFreqInput.value = df;
-      jtcatRxFreqLabel.textContent = df + ' Hz';
-      if (jtcatRunning) window.api.jtcatSetRxFreq(df);
-      renderJtcatDecodes();
-    });
+  // Click handler — set RX freq; if CQ, start QSO reply sequence
+  var allRows = jtcatBandActivity.querySelectorAll('.jtcat-decode-row');
+  allRows.forEach(function(row) { row.addEventListener('click', onJtcatDecodeClick); });
+  jtcatRxActivity.querySelectorAll('.jtcat-decode-row').forEach(function(row) {
+    row.addEventListener('click', onJtcatDecodeClick);
+  });
+
+  // Auto-advance QSO state machine on incoming decodes
+  if (jtcatQso && jtcatQso.phase !== 'done') {
+    jtcatProcessQsoResponse();
+  }
+}
+
+function onJtcatDecodeClick(e) {
+  var row = e.currentTarget;
+  var df = parseInt(row.dataset.df, 10);
+  var text = row.dataset.text || '';
+  // Set RX freq to this decode's offset
+  jtcatRxFreq = df;
+  jtcatRxFreqInput.value = df;
+  jtcatRxFreqLabel.textContent = df + ' Hz';
+  if (jtcatRunning) window.api.jtcatSetRxFreq(df);
+
+  // If it's a CQ, start a QSO
+  var cqMatch = text.match(/^CQ\s+(?:(\w+)\s+)?([A-Z0-9/]+)\s+([A-R]{2}\d{2})/i);
+  if (cqMatch) {
+    var theirCall = cqMatch[2].toUpperCase();
+    var theirGrid = cqMatch[3].toUpperCase();
+    jtcatStartQso(theirCall, theirGrid, df);
+  }
+  renderJtcatDecodes();
+}
+
+// --- QSO State Machine ---
+
+function getMyCallsign() {
+  var el = document.getElementById('set-my-callsign');
+  return el ? el.value.toUpperCase().trim() : '';
+}
+
+function getMyGrid() {
+  var el = document.getElementById('set-grid');
+  return el ? el.value.toUpperCase().trim().substring(0, 4) : '';
+}
+
+function jtcatStartQso(theirCall, theirGrid, df) {
+  var myCall = getMyCallsign();
+  var myGrid = getMyGrid();
+  if (!myCall) return;
+
+  // Set TX freq to their freq
+  jtcatTxFreq = df;
+  jtcatTxFreqInput.value = df;
+  if (jtcatRunning) window.api.jtcatSetTxFreq(df);
+
+  // Build initial reply message: "THEIRCALL MYCALL MYGRID"
+  var txMsg = theirCall + ' ' + myCall + ' ' + myGrid;
+  jtcatQso = {
+    call: theirCall,
+    grid: theirGrid,
+    phase: 'reply',
+    txMsg: txMsg,
+    report: null,
+    myCall: myCall,
+    myGrid: myGrid,
+  };
+  jtcatTxMsgText.textContent = txMsg;
+  // Auto-enable TX
+  jtcatEnableTxBtn.classList.add('active');
+  jtcatEnableTxBtn.textContent = 'TX Enabled';
+  window.api.jtcatEnableTx(true);
+  console.log('[JTCAT] QSO started with', theirCall, '— sending:', txMsg);
+}
+
+function jtcatProcessQsoResponse() {
+  if (!jtcatQso) return;
+  var myCall = jtcatQso.myCall;
+  var theirCall = jtcatQso.call;
+
+  // Look for a message from their callsign directed to us
+  var response = jtcatDecodes.find(function(d) {
+    var t = (d.text || '').toUpperCase();
+    return t.indexOf(myCall) >= 0 && t.indexOf(theirCall) >= 0;
+  });
+  if (!response) return;
+
+  var text = (response.text || '').toUpperCase();
+
+  if (jtcatQso.phase === 'reply') {
+    // Expect their signal report: "MYCALL THEIRCALL R-XX" or "MYCALL THEIRCALL -XX"
+    var rptMatch = text.match(/[R]?([+-]\d{2})/);
+    if (rptMatch) {
+      jtcatQso.report = rptMatch[1];
+      // Send our report back: "THEIRCALL MYCALL R-XX"
+      var ourReport = response.db >= 0 ? '+' + String(response.db).padStart(2, '0') : String(response.db).padStart(3, '0');
+      // If they sent just a report (no R), we send report. If they sent R+report, we send RR73.
+      if (text.indexOf('R' + rptMatch[1]) >= 0 || text.indexOf('R+') >= 0 || text.indexOf('R-') >= 0) {
+        // They sent R+report, we send RR73
+        jtcatQso.txMsg = theirCall + ' ' + myCall + ' RR73';
+        jtcatQso.phase = '73';
+      } else {
+        // They sent just a report, we send R+report
+        jtcatQso.txMsg = theirCall + ' ' + myCall + ' R' + ourReport;
+        jtcatQso.phase = 'r+report';
+      }
+      jtcatTxMsgText.textContent = jtcatQso.txMsg;
+      console.log('[JTCAT] QSO phase:', jtcatQso.phase, '— sending:', jtcatQso.txMsg);
+    }
+  } else if (jtcatQso.phase === 'r+report') {
+    // Expect RR73 or RRR or 73
+    if (text.indexOf('RR73') >= 0 || text.indexOf('RRR') >= 0 || text.indexOf(' 73') >= 0) {
+      jtcatQso.txMsg = theirCall + ' ' + myCall + ' 73';
+      jtcatQso.phase = '73';
+      jtcatTxMsgText.textContent = jtcatQso.txMsg;
+      console.log('[JTCAT] QSO phase: 73 — sending:', jtcatQso.txMsg);
+    }
+  } else if (jtcatQso.phase === '73') {
+    // QSO complete — disable TX
+    jtcatQso.phase = 'done';
+    jtcatEnableTxBtn.classList.remove('active');
+    jtcatEnableTxBtn.textContent = 'Enable TX';
+    window.api.jtcatHaltTx();
+    jtcatTxMsgText.textContent = 'QSO complete: ' + theirCall;
+    console.log('[JTCAT] QSO complete with', theirCall);
+    // TODO: auto-log the QSO
+  }
+}
+
+function jtcatClearQso() {
+  jtcatQso = null;
+  jtcatTxMsgText.textContent = '\u2014';
+}
+
+// --- POTA activator lookup ---
+
+function jtcatGetActivatorSpot(callsign) {
+  var upper = callsign.toUpperCase();
+  return allSpots.find(function(s) {
+    return (s.source === 'pota' || s.source === 'sota') && s.callsign && s.callsign.toUpperCase() === upper;
   });
 }
 
@@ -10091,16 +10224,37 @@ function formatJtcatDecode(d) {
   var db = String(d.db).padStart(3, ' ');
   var dt = d.dt >= 0 ? '+' + d.dt.toFixed(1) : d.dt.toFixed(1);
   var df = String(d.df).padStart(4, ' ');
-  var text = (d.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return '<span class="jtcat-db">' + db + '</span> <span class="jtcat-dt">' + dt + '</span> <span class="jtcat-df">' + df + '</span> <span class="jtcat-msg">' + text + '</span>';
+  var text = (d.text || '');
+  var html = '<span class="jtcat-db">' + db + '</span> <span class="jtcat-dt">' + dt + '</span> <span class="jtcat-df">' + df + '</span> <span class="jtcat-msg">' + escJtcat(text) + '</span>';
+
+  // Check for POTA/SOTA activator badge
+  var words = text.split(/\s+/);
+  for (var i = 0; i < words.length; i++) {
+    var spot = jtcatGetActivatorSpot(words[i]);
+    if (spot) {
+      var badge = spot.source === 'pota' ? 'POTA' : 'SOTA';
+      var ref = spot.reference || '';
+      html += ' <span class="jtcat-pota-badge" title="' + escJtcat(ref + ' ' + (spot.parkName || '')) + '">' + badge + '</span>';
+      break;
+    }
+  }
+  return html;
+}
+
+function escJtcat(str) {
+  return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function getJtcatDecodeClass(d) {
   var text = d.text || '';
   if (text.startsWith('CQ ')) return 'jtcat-cq';
-  var myCallEl = document.getElementById('set-my-callsign');
-  var myCall = myCallEl ? myCallEl.value : '';
-  if (myCall && text.indexOf(' ' + myCall.toUpperCase().trim() + ' ') >= 0) return 'jtcat-directed';
+  var myCall = getMyCallsign();
+  if (myCall && text.toUpperCase().indexOf(' ' + myCall + ' ') >= 0) return 'jtcat-directed';
+  // Highlight if callsign is a POTA/SOTA activator
+  var words = text.split(/\s+/);
+  for (var i = 0; i < words.length; i++) {
+    if (jtcatGetActivatorSpot(words[i])) return 'jtcat-cq'; // green highlight for activators too
+  }
   return '';
 }
 
