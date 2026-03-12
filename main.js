@@ -1905,6 +1905,10 @@ function connectRemote() {
 
   remoteServer.on('set-mode', ({ mode }) => {
     if (!mode) return;
+    if (!_currentFreqHz) {
+      console.log('[Echo CAT] Set mode ignored — no frequency from radio yet');
+      return;
+    }
     console.log('[Echo CAT] Set mode →', mode);
     // Reset rate limiter so mode-only change goes through
     _lastTuneFreq = 0;

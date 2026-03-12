@@ -752,12 +752,13 @@
               <option value="">Select a rig...</option>
             </select>
           </label>
-          <label>Serial Port:
+          <label>Port / Address:
             <div style="display:flex;gap:6px;margin-top:4px;">
               <select id="set-rig-port" style="flex:1;"></select>
-              <input type="text" id="set-rig-port-manual" placeholder="COM5" style="width:70px;" title="Type a port manually if not listed">
+              <input type="text" id="set-rig-port-manual" placeholder="COM5 or 127.0.0.1" style="width:110px;" title="Serial port or network address (for FLRig, etc.)">
             </div>
           </label>
+          <span class="help-text" style="margin-top:2px;display:block;">For FLRig or OmniRig: select the FLRig/OmniRig rig model above, then enter the host IP and port here (e.g. 127.0.0.1:12345). This lets multiple apps share your radio.</span>
           <label>Baud Rate:
             <select id="set-rig-baud">
               <option value="4800">4800</option>
@@ -1632,10 +1633,10 @@
             <input type="text" id="welcome-rig-search" placeholder="Search rigs...">
             <select id="welcome-rig-model" size="4"><option value="">Select a rig...</option></select>
           </label>
-          <label>Serial Port:
+          <label>Port / Address:
             <div style="display:flex;gap:6px;margin-top:4px;">
               <select id="welcome-rig-port" style="flex:1;"></select>
-              <input type="text" id="welcome-rig-port-manual" placeholder="COM5" style="width:70px;">
+              <input type="text" id="welcome-rig-port-manual" placeholder="COM5 or 127.0.0.1" style="width:110px;">
             </div>
           </label>
           <label>Baud Rate:

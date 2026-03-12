@@ -4679,8 +4679,8 @@ function openLogPopup(spot) {
   logDate.value = now.toISOString().slice(0, 10);
   logTime.value = now.toISOString().slice(11, 16);
 
-  // Pre-fill power: use CAT reading if available, otherwise settings default
-  logPower.value = radioPower > 0 ? radioPower : (defaultPower || 100);
+  // Pre-fill power: use last-entered value if set, otherwise CAT reading, otherwise default
+  logPower.value = lastLogPower > 0 ? lastLogPower : (radioPower > 0 ? radioPower : (defaultPower || 100));
 
   // Pre-fill RST based on mode
   const isCwDigi = CW_DIGI_MODES_SET.has(mode);
@@ -4881,6 +4881,7 @@ logSaveBtn.addEventListener('click', async () => {
   const rstSent = getRstDigits('rst-sent-digits', '59');
   const rstRcvd = getRstDigits('rst-rcvd-digits', '59');
   const txPower = logPower.value.trim();
+  lastLogPower = parseInt(txPower, 10) || 0; // remember for next log
   const commentBase = [logComment.value.trim(), sigInfo && !logComment.value.includes(sigInfo) ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' ');
 
   logSaveBtn.disabled = true;
@@ -7119,6 +7120,7 @@ window.api.onCatMode((mode) => {
 });
 
 let radioPower = 0; // last known TX power from CAT (watts)
+let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 window.api.onCatPower((watts) => {
   radioPower = watts;
 });
