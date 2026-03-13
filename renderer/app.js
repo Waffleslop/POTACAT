@@ -365,6 +365,7 @@ const sfiStatusEl = document.getElementById('sfi-status');
 const kStatusEl = document.getElementById('k-status');
 const aStatusEl = document.getElementById('a-status');
 const setColorblind = document.getElementById('set-colorblind');
+const setWcagMode = document.getElementById('set-wcag-mode');
 const setColorRows = document.getElementById('set-color-rows');
 const setEnableSolar = document.getElementById('set-enable-solar');
 const setEnableBandActivity = document.getElementById('set-enable-band-activity');
@@ -667,6 +668,7 @@ async function loadPrefs() {
   }
   applyTheme(settings.lightMode === true);
   applyColorblindMode(settings.colorblindMode === true);
+  applyWcagMode(settings.wcagMode === true);
   grid = settings.grid || '';
   distUnit = settings.distUnit || 'mi';
   scanDwell = parseInt(settings.scanDwell, 10) || 7;
@@ -2759,10 +2761,15 @@ function rebuildSourceIcons() {
 rebuildSourceIcons(); // initial build with normal palette
 
 function applyColorblindMode(enabled) {
+  const wcag = setWcagMode && setWcagMode.checked;
   if (enabled) {
     Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_CB);
     Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_CB);
     Object.assign(RBN_BAND_COLORS_ACTIVE, RBN_BAND_COLORS_CB);
+  } else if (wcag) {
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_WCAG);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_WCAG);
+    Object.assign(RBN_BAND_COLORS_ACTIVE, RBN_BAND_COLORS_NORMAL);
   } else {
     Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_NORMAL);
     Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_NORMAL);
@@ -2784,6 +2791,51 @@ function applyColorblindMode(enabled) {
     if (span) span.style.color = SOURCE_COLORS_ACTIVE[src];
   }
   // Refresh map markers if map is visible
+  if (typeof renderMarkers === 'function') try { renderMarkers(); } catch {}
+  if (typeof renderRbnMarkers === 'function') try { renderRbnMarkers(); } catch {}
+}
+
+// WCAG AA high-contrast source palettes
+const SOURCE_COLORS_WCAG = {
+  pota: '#5ed8ad', sota: '#f0a500', wwff: '#3cc4b8',
+  llota: '#42a5f5', dxc: '#e87fff', rbn: '#00bcd4', pskr: '#ff9090'
+};
+const SOURCE_STROKES_WCAG = {
+  pota: '#42b88a', sota: '#c47f00', wwff: '#2a9e92',
+  llota: '#1e88e5', dxc: '#c040e0', rbn: '#0097a7', pskr: '#d06060'
+};
+
+function applyWcagMode(enabled) {
+  const root = document.documentElement;
+  if (enabled) {
+    root.setAttribute('data-wcag', '');
+  } else {
+    root.removeAttribute('data-wcag');
+  }
+  // Re-apply colorblind mode on top (colorblind takes priority for source colors)
+  const isCb = setColorblind && setColorblind.checked;
+  if (isCb) {
+    // Colorblind palettes already handle contrast
+    return;
+  }
+  // Swap source colors for WCAG-boosted versions
+  if (enabled) {
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_WCAG);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_WCAG);
+  } else {
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_NORMAL);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_NORMAL);
+  }
+  rebuildSourceIcons();
+  for (const [src, color] of Object.entries(SOURCE_COLORS_ACTIVE)) {
+    root.style.setProperty('--source-' + src, color);
+  }
+  const srcLabels = { pota: '#spots-pota', sota: '#spots-sota', wwff: '#spots-wwff',
+    llota: '#spots-llota', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr' };
+  for (const [src, sel] of Object.entries(srcLabels)) {
+    const span = document.querySelector(sel + ' + span') || document.querySelector(sel)?.parentElement?.querySelector('span');
+    if (span) span.style.color = SOURCE_COLORS_ACTIVE[src];
+  }
   if (typeof renderMarkers === 'function') try { renderMarkers(); } catch {}
   if (typeof renderRbnMarkers === 'function') try { renderRbnMarkers(); } catch {}
 }
@@ -5500,6 +5552,7 @@ async function openSettingsDialog() {
   logbookConfig.classList.toggle('hidden', !s.sendToLogbook);
   updateLogbookPortConfig();
   setColorblind.checked = s.colorblindMode === true;
+  setWcagMode.checked = s.wcagMode === true;
   setColorRows.checked = s.colorRows !== false; // default true
   setEnableSolar.checked = s.enableSolar === true;
   setEnableBandActivity.checked = s.enableBandActivity === true;
@@ -5631,6 +5684,7 @@ settingsSave.addEventListener('click', async () => {
   const wsjtxHighlightEnabled = setWsjtxHighlight.checked;
   const wsjtxAutoLogEnabled = setWsjtxAutoLog.checked;
   const colorblindEnabled = setColorblind.checked;
+  const wcagEnabled = setWcagMode.checked;
   const colorRowsEnabled = setColorRows.checked;
   const solarEnabled = setEnableSolar.checked;
   const bandActivityEnabled = setEnableBandActivity.checked;
@@ -5743,6 +5797,7 @@ settingsSave.addEventListener('click', async () => {
     showDxBar: showDxBarEnabled,
     enableClusterTerminal: clusterTerminalEnabled,
     colorblindMode: colorblindEnabled,
+    wcagMode: wcagEnabled,
     colorRows: colorRowsEnabled,
     enableSolar: solarEnabled,
     enableBandActivity: bandActivityEnabled,
@@ -5828,7 +5883,9 @@ settingsSave.addEventListener('click', async () => {
   updateRbnButton();
   spotsTable.classList.toggle('no-source-tint', !colorRowsEnabled);
   applyColorblindMode(colorblindEnabled);
+  applyWcagMode(wcagEnabled);
   window.api.sendColorblindMode(colorblindEnabled);
+  window.api.sendWcagMode(wcagEnabled);
   enableSolar = solarEnabled;
   updateSolarVisibility();
   enableBandActivity = bandActivityEnabled;

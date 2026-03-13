@@ -242,6 +242,8 @@ function findRigctld() {
   ] : [
     '/usr/bin/rigctld',
     '/usr/local/bin/rigctld',
+    '/opt/homebrew/bin/rigctld',    // macOS Apple Silicon (Homebrew)
+    '/opt/local/bin/rigctld',       // macOS MacPorts
     '/snap/bin/rigctld',
   ];
   for (const p of candidates) {

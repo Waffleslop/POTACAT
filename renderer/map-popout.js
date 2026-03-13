@@ -76,8 +76,17 @@ const SOURCE_STROKES_CB = {
   pota: '#2196f3', sota: '#e6a200', wwff: '#0288d1',
   llota: '#1e88e5', dxc: '#ab00d9', rbn: '#4fc3f7', pskr: '#e68a00'
 };
+const SOURCE_COLORS_WCAG = {
+  pota: '#5ed8ad', sota: '#f0a500', wwff: '#3cc4b8',
+  llota: '#42a5f5', dxc: '#e87fff', rbn: '#00bcd4', pskr: '#ff9090'
+};
+const SOURCE_STROKES_WCAG = {
+  pota: '#42b88a', sota: '#c47f00', wwff: '#2a9e92',
+  llota: '#1e88e5', dxc: '#c040e0', rbn: '#0097a7', pskr: '#d06060'
+};
 let SOURCE_COLORS_ACTIVE = { ...SOURCE_COLORS_NORMAL };
 let SOURCE_STROKES_ACTIVE = { ...SOURCE_STROKES_NORMAL };
+let _wcagActive = false;
 
 function rebuildIcons() {
   for (const src of Object.keys(SOURCE_COLORS_ACTIVE)) {
@@ -472,8 +481,31 @@ window.api.onPopoutTheme((theme) => {
 });
 
 window.api.onColorblindMode((enabled) => {
-  Object.assign(SOURCE_COLORS_ACTIVE, enabled ? SOURCE_COLORS_CB : SOURCE_COLORS_NORMAL);
-  Object.assign(SOURCE_STROKES_ACTIVE, enabled ? SOURCE_STROKES_CB : SOURCE_STROKES_NORMAL);
+  if (enabled) {
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_CB);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_CB);
+  } else if (_wcagActive) {
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_WCAG);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_WCAG);
+  } else {
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_NORMAL);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_NORMAL);
+  }
+  rebuildIcons();
+  if (typeof renderMarkers === 'function') try { renderMarkers(); } catch {}
+});
+
+window.api.onWcagMode((enabled) => {
+  _wcagActive = enabled;
+  if (enabled) {
+    document.documentElement.setAttribute('data-wcag', '');
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_WCAG);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_WCAG);
+  } else {
+    document.documentElement.removeAttribute('data-wcag');
+    Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_NORMAL);
+    Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_NORMAL);
+  }
   rebuildIcons();
   if (typeof renderMarkers === 'function') try { renderMarkers(); } catch {}
 });
@@ -495,6 +527,17 @@ async function init() {
       Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_CB);
       Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_CB);
       rebuildIcons();
+    }
+
+    // Apply WCAG mode
+    if (settings.wcagMode) {
+      _wcagActive = true;
+      document.documentElement.setAttribute('data-wcag', '');
+      if (!settings.colorblindMode) {
+        Object.assign(SOURCE_COLORS_ACTIVE, SOURCE_COLORS_WCAG);
+        Object.assign(SOURCE_STROKES_ACTIVE, SOURCE_STROKES_WCAG);
+        rebuildIcons();
+      }
     }
 
     initMap();

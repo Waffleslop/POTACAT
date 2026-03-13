@@ -69,6 +69,43 @@
   --map-tile-filter: none;
 }
 
+/* WCAG AA — dark theme overrides */
+[data-wcag] {
+  --text-secondary: #b0b0c8;
+  --text-tertiary: #9898a8;
+  --text-dim: #8888a0;
+  --text-dimmer: #6868a0;
+  --accent-red: #ff7088;
+  --accent-green: #5ed8ad;
+  --accent-green-btn: #5ed8ad;
+  --border-primary: #2a4a7a;
+  --border-secondary: #3a5a8a;
+  --source-dxc: #e87fff;
+  --source-pskr: #ff9090;
+  --source-wwff: #3cc4b8;
+}
+
+/* WCAG AA — light theme overrides */
+[data-theme="light"][data-wcag] {
+  --text-primary: #111122;
+  --text-secondary: #333350;
+  --text-tertiary: #444460;
+  --text-dim: #555570;
+  --text-dimmer: #606078;
+  --accent-red: #b71c1c;
+  --accent-green: #1b5e3b;
+  --accent-green-btn: #1b5e3b;
+  --accent-blue: #0d47a1;
+  --border-primary: #888898;
+  --border-secondary: #9a9aaa;
+  --source-pota: #1b6b48;
+  --source-sota: #8a5c00;
+  --source-dxc: #8a1aaf;
+  --source-pskr: #b82020;
+  --source-wwff: #1a7a6e;
+  --source-rbn: #00757a;
+}
+
 .help-text {
   color: var(--text-tertiary);
   font-size: 0.85em;
