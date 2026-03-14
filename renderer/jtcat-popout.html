@@ -63,12 +63,18 @@
     .jp-qso-arrow { color: var(--text-dim); font-size: 8px; margin: 0 1px; }
 
     /* QSO Logged notification */
-    .jp-qso-toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: var(--accent-green, #4ecca3); color: #000; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,0.4); opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+    .jp-qso-toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: #d4edda; color: #1a1a1a; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,0.4); opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
     .jp-qso-toast.visible { opacity: 1; pointer-events: auto; }
     .jp-qso-toast .jp-toast-sub { font-weight: normal; font-size: 11px; opacity: 0.8; margin-top: 2px; }
 
     /* Waterfall */
     .jp-waterfall { width: 100%; height: 80px; image-rendering: pixelated; cursor: crosshair; flex-shrink: 0; border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); display: block; }
+
+    /* Station popup */
+    .jp-station-popup .leaflet-popup-content-wrapper { background: var(--bg-secondary, #1a1a2e); color: var(--text-primary, #eee); border: 1px solid var(--border-primary, #333); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+    .jp-station-popup .leaflet-popup-tip { background: var(--bg-secondary, #1a1a2e); }
+    .jp-station-popup .leaflet-popup-content { margin: 8px 10px; }
+    .jp-popup-qso:hover { background: #3db88a !important; }
 
     /* Animated arcs */
     .jtcat-arc-forward { animation: jtcat-arc-flow 1.5s linear infinite; }

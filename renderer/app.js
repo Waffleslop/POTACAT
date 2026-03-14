@@ -61,6 +61,7 @@ let qsoPopoutOpen = false; // pop-out QSO log window is open
 let spotsPopoutOpen = false; // pop-out spots window is open
 let actmapPopoutOpen = false; // pop-out activation map window is open
 let clusterPopoutOpen = false; // pop-out cluster terminal is open
+let jtcatPopoutOpen = false; // pop-out JTCAT window is open
 let dxccData = null;  // { entities: [...] } from main process
 let enableWsjtx = false;
 let wsjtxDecodes = []; // recent decodes from WSJT-X (FIFO, max 50)
@@ -322,6 +323,7 @@ const jtcatCycleIndicator = document.getElementById('jtcat-cycle-indicator');
 const jtcatCountdown = document.getElementById('jtcat-countdown');
 const jtcatSyncStatus = document.getElementById('jtcat-sync-status');
 const jtcatWaterfall = document.getElementById('jtcat-waterfall');
+const jtcatTxFreqLabel = document.getElementById('jtcat-tx-freq-label');
 const jtcatBandActivity = document.getElementById('jtcat-band-activity');
 const jtcatRxActivity = document.getElementById('jtcat-rx-activity');
 const jtcatRxFreqLabel = document.getElementById('jtcat-rx-freq-label');
@@ -332,15 +334,27 @@ const jtcatHaltTxBtn = document.getElementById('jtcat-halt-tx');
 const jtcatLogQsoBtn = document.getElementById('jtcat-log-qso');
 const jtcatTxMsgText = document.getElementById('jtcat-tx-msg-text');
 const jtcatTxSlotSelect = document.getElementById('jtcat-tx-slot');
+const jtcatCallCqBtn = document.getElementById('jtcat-call-cq');
+const jtcatQsoTracker = document.getElementById('jtcat-qso-tracker');
+const jtcatQsoLabel = document.getElementById('jtcat-qso-label');
+const jtcatQsoSteps = document.getElementById('jtcat-qso-steps');
+const jtcatQsoCancelBtn = document.getElementById('jtcat-qso-cancel');
+const jtcatCqFilterBtn = document.getElementById('jtcat-cq-filter');
+const jtcatSliceSelect = document.getElementById('jtcat-slice');
+const jtcatSliceContainer = document.getElementById('jtcat-slice-select');
 let jtcatRunning = false;
 let jtcatCountdownTimer = null;
-let jtcatDecodes = [];
+let jtcatDecodes = []; // current cycle's decodes (for QSO state machine)
+let jtcatDecodeLog = []; // accumulated decode history: [{cycle, time, slot, results}]
 let jtcatRxFreq = 1500;
 let jtcatTxFreq = 1500;
 let jtcatCurrentBand = '20m';
+let jtcatCqFilter = false;
 // QSO state machine
-let jtcatQso = null; // { call, grid, phase, txMsg, report, rrReport }
+let jtcatQso = null; // { call, grid, phase, txMsg, report, rrReport, txRetries }
 // phase: 'reply' → 'report' → 'r+report' → '73' → 'done'
+var JTCAT_MAX_CQ_RETRIES = 15;   // ~3.75 min of CQ on FT8 before giving up
+var JTCAT_MAX_QSO_RETRIES = 6;   // per-phase retry limit during QSO exchange
 const setPotaParksPath = document.getElementById('set-pota-parks-path');
 const potaParksBrowseBtn = document.getElementById('pota-parks-browse-btn');
 const potaParksClearBtn = document.getElementById('pota-parks-clear-btn');
@@ -444,7 +458,8 @@ const rigRemoteAudioOutput = document.getElementById('rig-remote-audio-output');
 const remoteAudioSummary = document.getElementById('remote-audio-summary');
 const setRemotePttTimeout = document.getElementById('set-remote-ptt-timeout');
 const remoteUrlDisplay = document.getElementById('remote-url-display');
-const remoteTxIndicator = document.getElementById('remote-tx-indicator');
+// remoteTxIndicator removed — ECHOCAT TX indicator no longer used
+const jtcatTxIndicator = document.getElementById('jtcat-tx-indicator');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
 const logOpName = document.getElementById('log-op-name');
@@ -721,6 +736,12 @@ async function loadPrefs() {
       if (settings.cwMidiDevice) connectMidiDevice(settings.cwMidiDevice);
     });
   }
+  // JTCAT Flex slice setting
+  if (settings.jtcatFlexSlice) jtcatSliceSelect.value = settings.jtcatFlexSlice;
+  // Show slice selector if active rig is Flex
+  var isFlex = activeRig && activeRig.catTarget && activeRig.catTarget.type === 'tcp' &&
+    [5002, 5003, 5004, 5005].includes(activeRig.catTarget.port);
+  jtcatSliceContainer.classList.toggle('hidden', !isFlex);
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
   updateDxccButton();
@@ -782,7 +803,9 @@ async function loadPrefs() {
       if (viewState.sortCol) { sortCol = viewState.sortCol; }
       if (typeof viewState.sortAsc === 'boolean') { sortAsc = viewState.sortAsc; }
       if (viewState.lastView === 'jtcat') {
-        setView('jtcat');
+        // JTCAT is always a pop-out now; restore to default table view
+        setView('table');
+        window.api.jtcatPopoutOpen();
       } else
       if (viewState.lastView === 'rbn' && enableRbn) {
         setView('rbn');
@@ -3023,6 +3046,19 @@ function gridToLatLonLocal(grid) {
   return { lat, lon };
 }
 
+// Returns [[south, west], [north, east]] bounds for a 4-char grid
+function gridToBoundsLocal(grid) {
+  if (!grid || grid.length < 4) return null;
+  const g = grid.toUpperCase();
+  const lonField = g.charCodeAt(0) - 65;
+  const latField = g.charCodeAt(1) - 65;
+  const lonSquare = parseInt(g[2], 10);
+  const latSquare = parseInt(g[3], 10);
+  const west = lonField * 20 + lonSquare * 2 - 180;
+  const south = latField * 10 + latSquare * 1 - 90;
+  return [[south, west], [south + 1, west + 2]];
+}
+
 // Lightweight lat/lon → Maidenhead grid for the renderer (no require of Node module)
 function latLonToGridLocal(lat, lon) {
   let lng = lon + 180;
@@ -3861,13 +3897,29 @@ window.api.onActmapPopoutStatus((open) => {
   }
 });
 
+// --- JTCAT Pop-out ---
+window.api.onJtcatPopoutStatus((open) => {
+  jtcatPopoutOpen = open;
+  if (open) {
+    // Start engine + audio capture in the main renderer when pop-out opens
+    if (!jtcatRunning) startJtcatView();
+    // Send current QSO state to the new popout
+    broadcastJtcatQsoState();
+  } else {
+    // Stop engine + audio when pop-out closes (unless phone is driving)
+    if (jtcatRunning && !jtcatRemoteActive) stopJtcatView();
+  }
+});
+
+// Popout QSO commands are handled directly in main.js (no relay needed)
+
 // --- View Toggle ---
 // Table and Map are toggleable (both can be active = split view).
 // RBN and DXCC are exclusive views that hide the split container.
 
 function setView(view) {
   // Called for exclusive views (rbn, dxcc) or to force a specific state
-  if (view === 'rbn' || view === 'dxcc' || view === 'jtcat') {
+  if (view === 'rbn' || view === 'dxcc') {
     currentView = view;
     showTable = false;
     showMap = false;
@@ -3884,6 +3936,7 @@ function setView(view) {
 }
 
 function updateViewLayout() {
+  updateTitleBar();
   // Hide exclusive views
   dxccView.classList.add('hidden');
   rbnView.classList.add('hidden');
@@ -3893,18 +3946,6 @@ function updateViewLayout() {
   viewTableBtn.classList.remove('active');
   viewMapBtn.classList.remove('active');
   viewRbnBtn.classList.remove('active');
-  viewJtcatBtn.classList.remove('active');
-
-
-  if (currentView === 'jtcat') {
-    splitContainerEl.classList.add('hidden');
-    jtcatView.classList.remove('hidden');
-    viewJtcatBtn.classList.add('active');
-    if (!jtcatRunning) startJtcatView();
-    updateParksStatsOverlay();
-    saveViewState();
-    return;
-  }
 
   if (currentView === 'dxcc') {
     splitContainerEl.classList.add('hidden');
@@ -4040,12 +4081,7 @@ viewMapBtn.addEventListener('click', () => {
 
 viewRbnBtn.addEventListener('click', () => setView('rbn'));
 viewJtcatBtn.addEventListener('click', () => {
-  if (currentView === 'jtcat') {
-    stopJtcatView();
-    setView('table');
-  } else {
-    setView('jtcat');
-  }
+  window.api.jtcatPopoutOpen();
 });
 dxccBoardBtn.addEventListener('click', () => {
   if (!enableDxcc) {
@@ -5171,6 +5207,7 @@ quickLightMode.addEventListener('change', async () => {
   if (actmapPopoutOpen) window.api.actmapPopoutTheme(light ? 'light' : 'dark');
   if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(light ? 'light' : 'dark');
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(light ? 'light' : 'dark');
+  if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(light ? 'light' : 'dark');
   await window.api.saveSettings({ lightMode: light });
 });
 
@@ -5775,6 +5812,7 @@ settingsSave.addEventListener('click', async () => {
   if (actmapPopoutOpen) window.api.actmapPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(lightModeEnabled ? 'light' : 'dark');
+  if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
@@ -7171,9 +7209,7 @@ window.api.onRemoteStatus((s) => {
   updateSettingsConnBar();
 });
 
-window.api.onRemoteTxState((state) => {
-  if (remoteTxIndicator) remoteTxIndicator.classList.toggle('hidden', !state);
-});
+// ECHOCAT TX indicator removed — JTCAT TX indicator remains
 
 // Reload prefs when ECHOCAT changes settings remotely
 window.api.onReloadPrefs(() => {
@@ -9908,6 +9944,10 @@ var jtcatAudioCtx = null;
 var jtcatAudioStream = null;
 var jtcatAudioProcessor = null;
 var jtcatAnalyser = null;
+var jtcatRemoteActive = false; // true when phone is driving JTCAT
+var jtcatQuietFreq = 1500;     // auto-detected quiet TX frequency (Hz)
+var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq updates
+var jtcatSpectrumFrame = 0;    // frame counter for throttling spectrum IPC to ~10fps
 
 async function startJtcatAudio() {
   try {
@@ -9982,16 +10022,25 @@ function stopJtcatAudio() {
 function startJtcatView() {
   if (jtcatRunning) return;
   jtcatRunning = true;
-  window.api.jtcatStart(jtcatModeSelect.value);
+  jtcatDecodes = [];
+  jtcatDecodeLog = [];
+  jtcatMapClear();
+  // If remote is already driving the engine, just start the UI — don't restart engine/audio
+  if (!jtcatRemoteActive) {
+    window.api.jtcatStart(jtcatModeSelect.value);
+    startJtcatAudio();
+  }
   startJtcatCountdown();
-  startJtcatAudio();
 }
 
 function stopJtcatView() {
   if (!jtcatRunning) return;
   jtcatRunning = false;
-  window.api.jtcatStop();
-  stopJtcatAudio();
+  // If the phone is driving JTCAT, keep audio capture and engine running
+  if (!jtcatRemoteActive) {
+    window.api.jtcatStop();
+    stopJtcatAudio();
+  }
   if (jtcatCountdownTimer) {
     clearInterval(jtcatCountdownTimer);
     jtcatCountdownTimer = null;
@@ -10023,7 +10072,13 @@ document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     var freq = parseInt(btn.dataset.freq, 10);
     var band = btn.dataset.band;
-    window.api.tune(freq, jtcatModeSelect.value);
+    // Use JTCAT-specific slice if configured, otherwise main CAT
+    var slicePort = jtcatSliceSelect.value ? parseInt(jtcatSliceSelect.value, 10) : 0;
+    if (slicePort) {
+      window.api.tune(freq, jtcatModeSelect.value, null, slicePort);
+    } else {
+      window.api.tune(freq, jtcatModeSelect.value);
+    }
     jtcatCurrentBand = band;
     document.querySelectorAll('.jtcat-band-btn').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
@@ -10034,18 +10089,31 @@ document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
 jtcatModeSelect.addEventListener('change', function() {
   if (jtcatRunning) window.api.jtcatSetMode(jtcatModeSelect.value);
   jtcatDecodes = [];
+  jtcatDecodeLog = [];
+  jtcatMapClear();
   renderJtcatDecodes();
+});
+
+// JTCAT Flex slice change — save setting
+jtcatSliceSelect.addEventListener('change', async function() {
+  var s = await window.api.getSettings();
+  s.jtcatFlexSlice = jtcatSliceSelect.value || '';
+  await window.api.saveSettings(s);
 });
 
 // TX/RX freq inputs
 jtcatTxFreqInput.addEventListener('change', function() {
   jtcatTxFreq = parseInt(jtcatTxFreqInput.value, 10) || 1500;
+  jtcatTxFreqLabel.textContent = 'TX: ' + jtcatTxFreq + ' Hz';
   if (jtcatRunning) window.api.jtcatSetTxFreq(jtcatTxFreq);
 });
 jtcatRxFreqInput.addEventListener('change', function() {
   jtcatRxFreq = parseInt(jtcatRxFreqInput.value, 10) || 1500;
   jtcatRxFreqLabel.textContent = jtcatRxFreq + ' Hz';
   if (jtcatRunning) window.api.jtcatSetRxFreq(jtcatRxFreq);
+});
+jtcatTxSlotSelect.addEventListener('change', function() {
+  window.api.jtcatSetTxSlot(jtcatTxSlotSelect.value);
 });
 
 // Enable TX / Halt TX
@@ -10055,20 +10123,54 @@ jtcatEnableTxBtn.addEventListener('click', function() {
   window.api.jtcatEnableTx(enabled);
 });
 jtcatHaltTxBtn.addEventListener('click', function() {
-  jtcatEnableTxBtn.classList.remove('active');
-  jtcatEnableTxBtn.textContent = 'Enable TX';
-  window.api.jtcatHaltTx();
+  jtcatDisableTxUi();
+  jtcatClearQso();
+});
+
+// CQ-only filter toggle
+jtcatCqFilterBtn.addEventListener('click', function() {
+  jtcatCqFilter = !jtcatCqFilter;
+  jtcatCqFilterBtn.classList.toggle('active', jtcatCqFilter);
+  renderJtcatDecodes();
 });
 
 function renderJtcatDecodes() {
-  if (jtcatDecodes.length === 0) {
+  // --- Band Activity: full scrolling log grouped by cycle ---
+  var wasAtBottom = jtcatBandActivity.scrollTop + jtcatBandActivity.clientHeight >= jtcatBandActivity.scrollHeight - 20;
+
+  if (jtcatDecodeLog.length === 0) {
     jtcatBandActivity.innerHTML = '<div class="jtcat-empty">Waiting for decodes...</div>';
   } else {
-    jtcatBandActivity.innerHTML = jtcatDecodes.map(function(d) {
-      var cls = getJtcatDecodeClass(d);
-      return '<div class="jtcat-decode-row ' + cls + '" data-df="' + d.df + '" data-text="' + escJtcat(d.text) + '">' + formatJtcatDecode(d) + '</div>';
-    }).join('');
+    var html = '';
+    var myCall = getMyCallsign();
+    for (var i = 0; i < jtcatDecodeLog.length; i++) {
+      var entry = jtcatDecodeLog[i];
+      var rows = '';
+      for (var j = 0; j < entry.results.length; j++) {
+        var d = entry.results[j];
+        if (jtcatCqFilter) {
+          var upper = (d.text || '').toUpperCase();
+          var isCq = upper.startsWith('CQ ');
+          var is73 = upper.indexOf('RR73') >= 0 || upper.indexOf(' 73') >= 0;
+          var isDirected = myCall && upper.indexOf(' ' + myCall + ' ') >= 0;
+          if (!isCq && !is73 && !isDirected) continue;
+        }
+        var cls = getJtcatDecodeClass(d);
+        rows += '<div class="jtcat-decode-row ' + cls + '" data-df="' + d.df + '" data-text="' + escJtcat(d.text) + '">' + formatJtcatDecode(d) + '</div>';
+      }
+      if (!jtcatCqFilter || rows) {
+        html += '<div class="jtcat-cycle-separator">' + entry.time + ' UTC &mdash; ' + entry.mode + '</div>' + rows;
+      }
+    }
+    jtcatBandActivity.innerHTML = html || '<div class="jtcat-empty">No CQ/73 decodes yet</div>';
   }
+
+  // Auto-scroll to bottom if user was already near the bottom
+  if (wasAtBottom) {
+    jtcatBandActivity.scrollTop = jtcatBandActivity.scrollHeight;
+  }
+
+  // --- RX Frequency panel: only current cycle, filtered by RX freq ---
   var rxNear = jtcatDecodes.filter(function(d) { return Math.abs(d.df - jtcatRxFreq) <= 50; });
   if (rxNear.length === 0) {
     jtcatRxActivity.innerHTML = '<div class="jtcat-empty">\u2014</div>';
@@ -10078,11 +10180,13 @@ function renderJtcatDecodes() {
       return '<div class="jtcat-decode-row ' + cls + '" data-df="' + d.df + '" data-text="' + escJtcat(d.text) + '">' + formatJtcatDecode(d) + '</div>';
     }).join('');
   }
-  // Click handler — set RX freq; if CQ, start QSO reply sequence
-  var allRows = jtcatBandActivity.querySelectorAll('.jtcat-decode-row');
-  allRows.forEach(function(row) { row.addEventListener('click', onJtcatDecodeClick); });
+
+  // Click handlers
+  jtcatBandActivity.querySelectorAll('.jtcat-decode-row').forEach(function(row) {
+    row.addEventListener('dblclick', onJtcatDecodeClick);
+  });
   jtcatRxActivity.querySelectorAll('.jtcat-decode-row').forEach(function(row) {
-    row.addEventListener('click', onJtcatDecodeClick);
+    row.addEventListener('dblclick', onJtcatDecodeClick);
   });
 
   // Auto-advance QSO state machine on incoming decodes
@@ -10112,6 +10216,12 @@ function onJtcatDecodeClick(e) {
 }
 
 // --- QSO State Machine ---
+//
+// Two flows:
+//   CQ caller:   cq → cq-report → cq-rr73 → done
+//   Responder:   reply → r+report → 73 → done
+//
+// Each phase has a direction (tx/rx) and a message template.
 
 function getMyCallsign() {
   var el = document.getElementById('set-my-callsign');
@@ -10123,6 +10233,80 @@ function getMyGrid() {
   return el ? el.value.toUpperCase().trim().substring(0, 4) : '';
 }
 
+// Phase definitions for the sequence display
+var QSO_PHASES_CQ = [
+  { key: 'cq',        dir: 'tx', label: function(q) { return 'CQ ' + q.myCall + ' ' + q.myGrid; } },
+  { key: 'cq-reply',  dir: 'rx', label: function(q) { return (q.call || '?') + ' ' + q.myCall + ' ' + (q.grid || '??'); } },
+  { key: 'cq-report', dir: 'tx', label: function(q) { return (q.call || '?') + ' ' + q.myCall + ' ' + (q.sentReport || '-XX'); } },
+  { key: 'cq-r+rpt',  dir: 'rx', label: function(q) { return q.myCall + ' ' + (q.call || '?') + ' R' + (q.report || '-XX'); } },
+  { key: 'cq-rr73',   dir: 'tx', label: function(q) { return (q.call || '?') + ' ' + q.myCall + ' RR73'; } },
+  { key: 'done',      dir: '--', label: function()  { return 'QSO Complete'; } },
+];
+
+var QSO_PHASES_REPLY = [
+  { key: 'reply',     dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' ' + q.myGrid; } },
+  { key: 'rpt-rx',    dir: 'rx', label: function(q) { return q.myCall + ' ' + q.call + ' ' + (q.report || '-XX'); } },
+  { key: 'r+report',  dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' R' + (q.sentReport || '-XX'); } },
+  { key: 'rr73-rx',   dir: 'rx', label: function(q) { return q.myCall + ' ' + q.call + ' RR73'; } },
+  { key: '73',        dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' 73'; } },
+  { key: 'done',      dir: '--', label: function()  { return 'QSO Complete'; } },
+];
+
+function jtcatSetTxAndSend(msg) {
+  jtcatTxMsgText.textContent = msg;
+  window.api.jtcatSetTxMsg(msg);
+}
+
+function jtcatEnableTxUi() {
+  jtcatEnableTxBtn.classList.add('active');
+  jtcatEnableTxBtn.textContent = 'TX Enabled';
+  window.api.jtcatEnableTx(true);
+}
+
+function jtcatDisableTxUi() {
+  jtcatEnableTxBtn.classList.remove('active');
+  jtcatEnableTxBtn.textContent = 'Enable TX';
+  window.api.jtcatHaltTx();
+  window.api.jtcatSetTxMsg('');
+}
+
+// --- CQ Calling ---
+
+jtcatCallCqBtn.addEventListener('click', function() {
+  jtcatCallCq();
+});
+
+function jtcatCallCq() {
+  var myCall = getMyCallsign();
+  var myGrid = getMyGrid();
+  if (!myCall || !myGrid) {
+    jtcatTxMsgText.textContent = 'Set callsign & grid in Settings first';
+    console.warn('[JTCAT] CQ aborted — callsign:', myCall || '(empty)', 'grid:', myGrid || '(empty)');
+    return;
+  }
+
+  var txMsg = 'CQ ' + myCall + ' ' + myGrid;
+  jtcatQso = {
+    mode: 'cq',
+    call: null,
+    grid: null,
+    phase: 'cq',
+    txMsg: txMsg,
+    report: null,
+    sentReport: null,
+    myCall: myCall,
+    myGrid: myGrid,
+    txRetries: 0,
+  };
+  jtcatSetTxAndSend(txMsg);
+  jtcatEnableTxUi();
+  jtcatCallCqBtn.classList.add('active');
+  renderJtcatQsoTracker();
+  console.log('[JTCAT] Calling CQ:', txMsg);
+}
+
+// --- Reply to CQ (existing, refactored) ---
+
 function jtcatStartQso(theirCall, theirGrid, df) {
   var myCall = getMyCallsign();
   var myGrid = getMyGrid();
@@ -10131,85 +10315,250 @@ function jtcatStartQso(theirCall, theirGrid, df) {
   // Set TX freq to their freq
   jtcatTxFreq = df;
   jtcatTxFreqInput.value = df;
+  jtcatTxFreqLabel.textContent = 'TX: ' + df + ' Hz';
   if (jtcatRunning) window.api.jtcatSetTxFreq(df);
 
   // Build initial reply message: "THEIRCALL MYCALL MYGRID"
   var txMsg = theirCall + ' ' + myCall + ' ' + myGrid;
   jtcatQso = {
+    mode: 'reply',
     call: theirCall,
     grid: theirGrid,
     phase: 'reply',
     txMsg: txMsg,
     report: null,
+    sentReport: null,
     myCall: myCall,
     myGrid: myGrid,
+    txRetries: 0,
   };
-  jtcatTxMsgText.textContent = txMsg;
-  // Auto-enable TX
-  jtcatEnableTxBtn.classList.add('active');
-  jtcatEnableTxBtn.textContent = 'TX Enabled';
-  window.api.jtcatEnableTx(true);
+  jtcatSetTxAndSend(txMsg);
+  jtcatEnableTxUi();
+  renderJtcatQsoTracker();
   console.log('[JTCAT] QSO started with', theirCall, '— sending:', txMsg);
 }
 
-function jtcatProcessQsoResponse() {
-  if (!jtcatQso) return;
-  var myCall = jtcatQso.myCall;
-  var theirCall = jtcatQso.call;
+// --- Process incoming decodes for QSO advancement ---
 
-  // Look for a message from their callsign directed to us
+function jtcatProcessQsoResponse() {
+  if (!jtcatQso || jtcatQso.phase === 'done') return;
+  var myCall = jtcatQso.myCall;
+  var phaseBefore = jtcatQso.phase;
+
+  if (jtcatQso.mode === 'cq') {
+    jtcatProcessCqResponse(myCall);
+  } else {
+    jtcatProcessReplyResponse(myCall);
+  }
+
+  // Count retries — if phase didn't advance, increment; if it did, reset
+  if (jtcatQso && jtcatQso.phase === phaseBefore && jtcatQso.phase !== 'done') {
+    jtcatQso.txRetries = (jtcatQso.txRetries || 0) + 1;
+    var max = (jtcatQso.phase === 'cq') ? JTCAT_MAX_CQ_RETRIES : JTCAT_MAX_QSO_RETRIES;
+    if (jtcatQso.txRetries >= max) {
+      console.log('[JTCAT] TX retry limit reached (' + max + ') in phase ' + jtcatQso.phase + ' — giving up');
+      jtcatTxMsgText.textContent = 'No response — TX stopped';
+      jtcatDisableTxUi();
+      jtcatClearQso();
+    }
+  } else if (jtcatQso && jtcatQso.phase !== phaseBefore) {
+    jtcatQso.txRetries = 0; // reset on phase advance
+  }
+}
+
+function jtcatProcessCqResponse(myCall) {
+  var q = jtcatQso;
+
+  if (q.phase === 'cq') {
+    // Waiting for someone to reply: look for "MYCALL THEIRCALL GRID"
+    var reply = jtcatDecodes.find(function(d) {
+      var t = (d.text || '').toUpperCase();
+      // Must contain our call but NOT start with CQ, and not be our own message
+      return t.indexOf(myCall) >= 0 && !t.startsWith('CQ ') && t.indexOf(myCall) !== 0;
+    });
+    if (!reply) return;
+    var text = (reply.text || '').toUpperCase();
+    // Parse "MYCALL THEIRCALL GRID" or "MYCALL THEIRCALL GRID"
+    var m = text.match(new RegExp(myCall.replace(/[/]/g, '\\/') + '\\s+([A-Z0-9/]+)\\s+([A-R]{2}\\d{2})', 'i'));
+    if (!m) return;
+    q.call = m[1];
+    q.grid = m[2];
+    // Send report: "THEIRCALL MYCALL -XX"
+    var rpt = reply.db >= 0 ? '+' + String(reply.db).padStart(2, '0') : String(reply.db).padStart(3, '0');
+    q.sentReport = rpt;
+    q.txMsg = q.call + ' ' + myCall + ' ' + rpt;
+    q.phase = 'cq-report';
+    jtcatSetTxAndSend(q.txMsg);
+    // Set RX freq to their offset
+    jtcatRxFreq = reply.df;
+    jtcatRxFreqInput.value = reply.df;
+    if (jtcatRunning) window.api.jtcatSetRxFreq(reply.df);
+    renderJtcatQsoTracker();
+    console.log('[JTCAT] CQ answered by', q.call, '— sending report:', q.txMsg);
+    return;
+  }
+
+  if (q.phase === 'cq-report') {
+    // Expect "MYCALL THEIRCALL R-XX"
+    var response = jtcatDecodes.find(function(d) {
+      var t = (d.text || '').toUpperCase();
+      return t.indexOf(myCall) >= 0 && t.indexOf(q.call) >= 0;
+    });
+    if (!response) return;
+    var text = (response.text || '').toUpperCase();
+    var rptMatch = text.match(/R([+-]\d{2})/);
+    if (!rptMatch) return;
+    q.report = rptMatch[1];
+    q.txMsg = q.call + ' ' + myCall + ' RR73';
+    q.phase = 'cq-rr73';
+    jtcatSetTxAndSend(q.txMsg);
+    renderJtcatQsoTracker();
+    console.log('[JTCAT] CQ got R+report from', q.call, '— sending RR73');
+    return;
+  }
+
+  if (q.phase === 'cq-rr73') {
+    // QSO complete after we send RR73 (they may send 73 back but we're done)
+    q.phase = 'done';
+    jtcatDisableTxUi();
+    jtcatCallCqBtn.classList.remove('active');
+    jtcatTxMsgText.textContent = 'QSO complete: ' + q.call;
+    renderJtcatQsoTracker();
+    console.log('[JTCAT] CQ QSO complete with', q.call);
+  }
+}
+
+function jtcatProcessReplyResponse(myCall) {
+  var q = jtcatQso;
+  var theirCall = q.call;
+
   var response = jtcatDecodes.find(function(d) {
     var t = (d.text || '').toUpperCase();
     return t.indexOf(myCall) >= 0 && t.indexOf(theirCall) >= 0;
   });
   if (!response) return;
-
   var text = (response.text || '').toUpperCase();
 
-  if (jtcatQso.phase === 'reply') {
-    // Expect their signal report: "MYCALL THEIRCALL R-XX" or "MYCALL THEIRCALL -XX"
+  if (q.phase === 'reply') {
+    // Expect their signal report: "MYCALL THEIRCALL -XX" or "MYCALL THEIRCALL R-XX"
     var rptMatch = text.match(/[R]?([+-]\d{2})/);
-    if (rptMatch) {
-      jtcatQso.report = rptMatch[1];
-      // Send our report back: "THEIRCALL MYCALL R-XX"
-      var ourReport = response.db >= 0 ? '+' + String(response.db).padStart(2, '0') : String(response.db).padStart(3, '0');
-      // If they sent just a report (no R), we send report. If they sent R+report, we send RR73.
-      if (text.indexOf('R' + rptMatch[1]) >= 0 || text.indexOf('R+') >= 0 || text.indexOf('R-') >= 0) {
-        // They sent R+report, we send RR73
-        jtcatQso.txMsg = theirCall + ' ' + myCall + ' RR73';
-        jtcatQso.phase = '73';
-      } else {
-        // They sent just a report, we send R+report
-        jtcatQso.txMsg = theirCall + ' ' + myCall + ' R' + ourReport;
-        jtcatQso.phase = 'r+report';
-      }
-      jtcatTxMsgText.textContent = jtcatQso.txMsg;
-      console.log('[JTCAT] QSO phase:', jtcatQso.phase, '— sending:', jtcatQso.txMsg);
+    if (!rptMatch) return;
+    q.report = rptMatch[1];
+    var ourReport = response.db >= 0 ? '+' + String(response.db).padStart(2, '0') : String(response.db).padStart(3, '0');
+    q.sentReport = ourReport;
+    if (text.indexOf('R' + rptMatch[1]) >= 0 || text.indexOf('R+') >= 0 || text.indexOf('R-') >= 0) {
+      q.txMsg = theirCall + ' ' + myCall + ' RR73';
+      q.phase = '73';
+    } else {
+      q.txMsg = theirCall + ' ' + myCall + ' R' + ourReport;
+      q.phase = 'r+report';
     }
-  } else if (jtcatQso.phase === 'r+report') {
-    // Expect RR73 or RRR or 73
+    jtcatSetTxAndSend(q.txMsg);
+    renderJtcatQsoTracker();
+    console.log('[JTCAT] QSO phase:', q.phase, '— sending:', q.txMsg);
+
+  } else if (q.phase === 'r+report') {
     if (text.indexOf('RR73') >= 0 || text.indexOf('RRR') >= 0 || text.indexOf(' 73') >= 0) {
-      jtcatQso.txMsg = theirCall + ' ' + myCall + ' 73';
-      jtcatQso.phase = '73';
-      jtcatTxMsgText.textContent = jtcatQso.txMsg;
-      console.log('[JTCAT] QSO phase: 73 — sending:', jtcatQso.txMsg);
+      q.txMsg = theirCall + ' ' + myCall + ' 73';
+      q.phase = '73';
+      jtcatSetTxAndSend(q.txMsg);
+      renderJtcatQsoTracker();
+      console.log('[JTCAT] QSO phase: 73 — sending:', q.txMsg);
     }
-  } else if (jtcatQso.phase === '73') {
-    // QSO complete — disable TX
-    jtcatQso.phase = 'done';
-    jtcatEnableTxBtn.classList.remove('active');
-    jtcatEnableTxBtn.textContent = 'Enable TX';
-    window.api.jtcatHaltTx();
+
+  } else if (q.phase === '73') {
+    q.phase = 'done';
+    jtcatDisableTxUi();
     jtcatTxMsgText.textContent = 'QSO complete: ' + theirCall;
+    renderJtcatQsoTracker();
     console.log('[JTCAT] QSO complete with', theirCall);
     // TODO: auto-log the QSO
   }
 }
 
+// --- QSO state broadcast to pop-out ---
+function broadcastJtcatQsoState() {
+  if (!jtcatPopoutOpen) return;
+  if (jtcatQso) {
+    window.api.sendJtcatQsoState({
+      mode: jtcatQso.mode,
+      call: jtcatQso.call,
+      grid: jtcatQso.grid,
+      phase: jtcatQso.phase,
+      txMsg: jtcatQso.txMsg,
+      report: jtcatQso.report,
+      sentReport: jtcatQso.sentReport,
+      myCall: jtcatQso.myCall,
+      myGrid: jtcatQso.myGrid,
+    });
+  } else {
+    window.api.sendJtcatQsoState({ phase: 'idle' });
+  }
+}
+
+// --- QSO Sequence Display ---
+
+function renderJtcatQsoTracker() {
+  broadcastJtcatQsoState();
+  if (!jtcatQso) {
+    jtcatQsoTracker.classList.add('hidden');
+    return;
+  }
+  jtcatQsoTracker.classList.remove('hidden');
+  var q = jtcatQso;
+  var phases = q.mode === 'cq' ? QSO_PHASES_CQ : QSO_PHASES_REPLY;
+
+  // Header
+  if (q.mode === 'cq') {
+    jtcatQsoLabel.textContent = q.call ? 'CQ \u2192 ' + q.call : 'Calling CQ...';
+  } else {
+    jtcatQsoLabel.textContent = 'Reply \u2192 ' + q.call;
+  }
+
+  // Find current phase index
+  var currentIdx = -1;
+  for (var i = 0; i < phases.length; i++) {
+    if (phases[i].key === q.phase) { currentIdx = i; break; }
+  }
+  // For CQ mode, cq-reply is implicit (rx between cq and cq-report)
+  // Map actual phase to display index
+  if (q.mode === 'cq' && q.phase === 'cq-report') currentIdx = 2;
+  if (q.mode === 'cq' && q.phase === 'cq-rr73') currentIdx = 4;
+  if (q.mode === 'cq' && q.phase === 'done') currentIdx = 5;
+  if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;
+  if (q.mode === 'reply' && q.phase === '73') currentIdx = 4;
+  if (q.mode === 'reply' && q.phase === 'done') currentIdx = 5;
+
+  var html = '';
+  for (var i = 0; i < phases.length; i++) {
+    var p = phases[i];
+    var cls = 'jtcat-qso-step';
+    if (i < currentIdx) cls += ' step-done';
+    else if (i === currentIdx) cls += ' step-current step-' + p.dir;
+
+    var dirTag = '';
+    if (p.dir === 'tx') dirTag = '<span class="step-dir">TX</span> ';
+    else if (p.dir === 'rx') dirTag = '<span class="step-dir">RX</span> ';
+
+    if (i > 0) html += '<span class="jtcat-qso-arrow">\u25B6</span>';
+    html += '<span class="' + cls + '">' + dirTag + escJtcat(p.label(q)) + '</span>';
+  }
+  jtcatQsoSteps.innerHTML = html;
+}
+
 function jtcatClearQso() {
   jtcatQso = null;
   jtcatTxMsgText.textContent = '\u2014';
+  jtcatCallCqBtn.classList.remove('active');
+  window.api.jtcatSetTxMsg('');
+  renderJtcatQsoTracker();
 }
+
+// Cancel QSO button
+jtcatQsoCancelBtn.addEventListener('click', function() {
+  jtcatDisableTxUi();
+  jtcatClearQso();
+});
 
 // --- POTA activator lookup ---
 
@@ -10256,6 +10605,216 @@ function getJtcatDecodeClass(d) {
     if (jtcatGetActivatorSpot(words[i])) return 'jtcat-cq'; // green highlight for activators too
   }
   return '';
+}
+
+// --- JTCAT Map ---
+var jtcatMap = null;
+var jtcatMapMarkers = L.layerGroup();  // station dot markers
+var jtcatMapArcs = L.layerGroup();     // animated QSO arcs
+var jtcatMapHome = null;
+var jtcatMapStations = {};  // callsign → {marker, grid, lat, lon, lastSeen}
+var jtcatMapQsos = {};      // "CALL1↔CALL2" → {arc, from, to, lastSeen, dir}
+var JTCAT_ARC_SEGMENTS = 32;
+
+function initJtcatMap() {
+  var myGrid = getMyGrid();
+  var center = [20, 0];
+  var zoom = 2;
+  if (myGrid) {
+    var pos = gridToLatLonLocal(myGrid);
+    if (pos) { center = [pos.lat, pos.lon]; zoom = 4; }
+  }
+  jtcatMap = L.map('jtcat-map', { zoomControl: true, worldCopyJump: true }).setView(center, zoom);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OSM',
+    maxZoom: 18,
+    className: 'dark-tiles',
+  }).addTo(jtcatMap);
+  jtcatMapMarkers.addTo(jtcatMap);
+  jtcatMapArcs.addTo(jtcatMap);
+  updateJtcatMapHome();
+}
+
+function updateJtcatMapHome() {
+  if (jtcatMapHome) { jtcatMap.removeLayer(jtcatMapHome); jtcatMapHome = null; }
+  var myGrid = getMyGrid();
+  if (!myGrid || !jtcatMap) return;
+  var bounds = gridToBoundsLocal(myGrid);
+  if (!bounds) return;
+  jtcatMapHome = L.rectangle(bounds, {
+    fillColor: '#e94560', fillOpacity: 0.35, color: '#e94560', weight: 2,
+  }).addTo(jtcatMap).bindTooltip(getMyCallsign() || 'Home', { permanent: false });
+}
+
+// Register/update a station's grid on the map
+function jtcatMapRegisterStation(call, grid) {
+  if (!jtcatMap || !call || call.length < 3) return;
+  if (!grid || !/^[A-R]{2}[0-9]{2}$/i.test(grid)) return;
+  grid = grid.toUpperCase();
+  var bounds = gridToBoundsLocal(grid);
+  var pos = gridToLatLonLocal(grid);
+  if (!bounds || !pos) return;
+  var existing = jtcatMapStations[call];
+  if (existing) {
+    existing.lastSeen = Date.now();
+    if (grid !== existing.grid) {
+      existing.grid = grid;
+      existing.lat = pos.lat;
+      existing.lon = pos.lon;
+      existing.marker.setBounds(bounds);
+      existing.marker.setTooltipContent(call + ' [' + grid + ']');
+    }
+    return;
+  }
+  var myCall = getMyCallsign();
+  var isMe = myCall && call === myCall;
+  var color = isMe ? '#e94560' : '#4fc3f7';
+  var marker = L.rectangle(bounds, {
+    fillColor: color, fillOpacity: isMe ? 0.35 : 0.25, color: color, weight: 1,
+  }).addTo(jtcatMapMarkers).bindTooltip(call + ' [' + grid + ']', { permanent: false });
+  jtcatMapStations[call] = { marker: marker, grid: grid, lat: pos.lat, lon: pos.lon, lastSeen: Date.now() };
+}
+
+// Compute a curved arc between two lat/lon points (returns array of [lat,lon])
+function jtcatComputeArc(lat1, lon1, lat2, lon2) {
+  var points = [];
+  var n = JTCAT_ARC_SEGMENTS;
+  // Great circle midpoint + offset for curvature
+  var toRad = Math.PI / 180;
+  var toDeg = 180 / Math.PI;
+  var dLat = lat2 - lat1;
+  var dLon = lon2 - lon1;
+  var dist = Math.sqrt(dLat * dLat + dLon * dLon); // approx degree-distance
+  var bulge = dist * 0.2; // arc bulge = 20% of distance
+  // Perpendicular direction (rotate 90 deg)
+  var perpLat = -dLon / (dist || 1);
+  var perpLon = dLat / (dist || 1);
+  for (var i = 0; i <= n; i++) {
+    var t = i / n;
+    // Linear interpolation
+    var lat = lat1 + dLat * t;
+    var lon = lon1 + dLon * t;
+    // Parabolic offset (peaks at t=0.5)
+    var offset = 4 * t * (1 - t) * bulge;
+    lat += perpLat * offset;
+    lon += perpLon * offset;
+    points.push([lat, lon]);
+  }
+  return points;
+}
+
+// Draw or update an animated arc for a QSO
+function jtcatMapDrawQsoArc(fromCall, toCall) {
+  var fromStn = jtcatMapStations[fromCall];
+  var toStn = jtcatMapStations[toCall];
+  if (!fromStn || !toStn) return;
+  var key = [fromCall, toCall].sort().join('\u2194');
+  var existing = jtcatMapQsos[key];
+  var arcPoints = jtcatComputeArc(fromStn.lat, fromStn.lon, toStn.lat, toStn.lon);
+
+  var myCall = getMyCallsign();
+  var involvesMe = (fromCall === myCall || toCall === myCall);
+  var color = involvesMe ? '#e94560' : '#4fc3f7';
+
+  if (existing) {
+    existing.arc.setLatLngs(arcPoints);
+    existing.arc.setTooltipContent(fromCall + ' \u2192 ' + toCall);
+    existing.lastSeen = Date.now();
+    existing.from = fromCall;
+    existing.to = toCall;
+    // Update animation direction
+    jtcatAnimateArc(existing.arc, fromCall, toCall, fromStn, toStn, color);
+    return;
+  }
+  var arc = L.polyline(arcPoints, {
+    color: color, weight: 2, opacity: 0.8,
+    dashArray: '8 6', lineCap: 'round',
+  }).addTo(jtcatMapArcs);
+  arc.bindTooltip(fromCall + ' \u2192 ' + toCall, { sticky: true });
+  jtcatMapQsos[key] = { arc: arc, from: fromCall, to: toCall, lastSeen: Date.now() };
+  // SVG element may not be available immediately after addTo()
+  setTimeout(function() { jtcatAnimateArc(arc, fromCall, toCall, fromStn, toStn, color); }, 0);
+}
+
+// Animate the arc's dash to flow from transmitter → receiver
+function jtcatAnimateArc(arc, fromCall, toCall, fromStn, toStn, color) {
+  var el = arc.getElement();
+  if (!el) return;
+  el.style.stroke = color;
+  // Determine if the arc's geometry goes from→to or to→from
+  // Arc points always go from sorted-first to sorted-second
+  var sorted = [fromCall, toCall].sort();
+  var forward = sorted[0] === fromCall; // true = SVG path goes in TX direction
+  el.classList.remove('jtcat-arc-forward', 'jtcat-arc-reverse');
+  el.classList.add(forward ? 'jtcat-arc-forward' : 'jtcat-arc-reverse');
+}
+
+function jtcatMapPlotDecode(d) {
+  if (!jtcatMap) return;
+  var text = (d.text || '').toUpperCase();
+  var parts = text.split(/\s+/);
+
+  if (text.startsWith('CQ ')) {
+    // CQ [DX] CALL GRID — register the CQ caller
+    var idx = 1;
+    if (parts.length > 3 && parts[1].length <= 3 && !/[0-9]/.test(parts[1])) idx = 2;
+    var call = parts[idx] || '';
+    var grid = parts[idx + 1] || '';
+    jtcatMapRegisterStation(call, grid);
+    // Mark CQ callers green
+    var stn = jtcatMapStations[call];
+    if (stn) {
+      stn.marker.setStyle({ fillColor: '#4ecca3', color: '#4ecca3' });
+    }
+  } else if (parts.length >= 2) {
+    // TOCALL FROMCALL [GRID|REPORT|RR73|73]
+    var toCall = parts[0];
+    var fromCall = parts[1];
+    var payload = parts[2] || '';
+
+    // Learn grid if it's in the message
+    if (/^[A-R]{2}[0-9]{2}$/i.test(payload)) {
+      jtcatMapRegisterStation(fromCall, payload);
+    }
+
+    // Update lastSeen for both
+    if (jtcatMapStations[fromCall]) jtcatMapStations[fromCall].lastSeen = Date.now();
+    if (jtcatMapStations[toCall]) jtcatMapStations[toCall].lastSeen = Date.now();
+
+    // Draw QSO arc if both stations have known positions
+    if (jtcatMapStations[fromCall] && jtcatMapStations[toCall]) {
+      jtcatMapDrawQsoArc(fromCall, toCall);
+    }
+  }
+}
+
+function jtcatMapClearOld() {
+  var now = Date.now();
+  // Remove QSO arcs not seen in last 45 seconds (3 FT8 cycles)
+  var arcCutoff = now - 45000;
+  Object.keys(jtcatMapQsos).forEach(function(key) {
+    var q = jtcatMapQsos[key];
+    if (q.lastSeen < arcCutoff) {
+      jtcatMapArcs.removeLayer(q.arc);
+      delete jtcatMapQsos[key];
+    }
+  });
+  // Remove stations not seen in 3 minutes
+  var stnCutoff = now - 180000;
+  Object.keys(jtcatMapStations).forEach(function(call) {
+    var s = jtcatMapStations[call];
+    if (s.lastSeen < stnCutoff) {
+      jtcatMapMarkers.removeLayer(s.marker);
+      delete jtcatMapStations[call];
+    }
+  });
+}
+
+function jtcatMapClear() {
+  jtcatMapMarkers.clearLayers();
+  jtcatMapArcs.clearLayers();
+  jtcatMapStations = {};
+  jtcatMapQsos = {};
 }
 
 // Waterfall rendering
@@ -10327,14 +10886,111 @@ function jtcatWaterfallLoop() {
   }
   waterfallCtx.putImageData(lineData, 0, 0);
 
+  // Draw frequency markers directly on waterfall canvas
+  var rxX = Math.round(jtcatRxFreq / 3000 * w);
+  var txX = Math.round(jtcatTxFreq / 3000 * w);
+
+  // RX marker (green bar only)
+  if (rxX !== txX) {
+    waterfallCtx.fillStyle = '#000';
+    waterfallCtx.fillRect(rxX - 2, 0, 5, h);
+    waterfallCtx.fillStyle = '#00ff00';
+    waterfallCtx.fillRect(rxX - 1, 0, 3, h);
+  }
+
+  // TX marker (red bar only — freq shown in toolbar)
+  waterfallCtx.fillStyle = '#000';
+  waterfallCtx.fillRect(txX - 2, 0, 5, h);
+  waterfallCtx.fillStyle = '#ff2222';
+  waterfallCtx.fillRect(txX - 1, 0, 3, h);
+
+  // Auto-detect quietest TX frequency — analyze every ~30 frames (~0.5s)
+  jtcatQuietFreqFrame++;
+  if (jtcatQuietFreqFrame % 30 === 0) {
+    // Scan 200–2800 Hz in 50Hz windows (avoid edges)
+    var binHz = 6000 / freqData.length; // ~5.86 Hz per bin
+    var windowBins = Math.round(50 / binHz); // ~8-9 bins per 50Hz window
+    var startBin = Math.round(200 / binHz);
+    var endBin = Math.round(2800 / binHz);
+    var bestEnergy = Infinity;
+    var bestBin = Math.round(1500 / binHz);
+    for (var b = startBin; b <= endBin - windowBins; b++) {
+      var energy = 0;
+      for (var j = 0; j < windowBins; j++) energy += freqData[b + j];
+      if (energy < bestEnergy) {
+        bestEnergy = energy;
+        bestBin = b + Math.floor(windowBins / 2);
+      }
+    }
+    var quietHz = Math.round(bestBin * binHz / 10) * 10; // snap to 10Hz
+    jtcatQuietFreq = Math.max(200, Math.min(2800, quietHz));
+    window.api.jtcatQuietFreq(jtcatQuietFreq);
+  }
+
+  // Send spectrum bins to main process for ECHOCAT/popout (~10fps)
+  jtcatSpectrumFrame++;
+  if (jtcatSpectrumFrame % 6 === 0) {
+    var specBins = new Array(w);
+    for (var sx = 0; sx < w; sx++) {
+      specBins[sx] = freqData[Math.floor(sx * passbandBins / w)];
+    }
+    window.api.jtcatSpectrum(specBins);
+  }
+
   waterfallAnimFrame = requestAnimationFrame(jtcatWaterfallLoop);
 }
+
+// Click waterfall to set TX frequency
+jtcatWaterfall.addEventListener('click', function(e) {
+  var rect = jtcatWaterfall.getBoundingClientRect();
+  var x = e.clientX - rect.left;
+  var freq = Math.round(x / rect.width * 3000);
+  freq = Math.max(100, Math.min(3000, freq));
+  // Snap to nearest 10 Hz
+  freq = Math.round(freq / 10) * 10;
+
+  jtcatTxFreq = freq;
+  jtcatTxFreqInput.value = freq;
+  jtcatTxFreqLabel.textContent = 'TX: ' + freq + ' Hz';
+  if (jtcatRunning) window.api.jtcatSetTxFreq(freq);
+
+  // If no active QSO, also set RX freq to match
+  if (!jtcatQso || jtcatQso.phase === 'done') {
+    jtcatRxFreq = freq;
+    jtcatRxFreqInput.value = freq;
+    jtcatRxFreqLabel.textContent = freq + ' Hz';
+    if (jtcatRunning) window.api.jtcatSetRxFreq(freq);
+  }
+
+  // Update the TX message if there's an active QSO (re-encode at new freq)
+  if (jtcatQso && jtcatQso.txMsg) {
+    window.api.jtcatSetTxMsg(jtcatQso.txMsg);
+  }
+
+  console.log('[JTCAT] Waterfall click — TX freq:', freq, 'Hz');
+});
 
 // JTCAT IPC listeners
 window.api.onJtcatDecode(function(data) {
   jtcatDecodes = data.results || [];
+  // Accumulate into the log
+  if (jtcatDecodes.length > 0) {
+    var now = new Date();
+    var timeStr = String(now.getUTCHours()).padStart(2, '0') + ':' +
+                  String(now.getUTCMinutes()).padStart(2, '0') + ':' +
+                  String(now.getUTCSeconds()).padStart(2, '0');
+    jtcatDecodeLog.push({
+      cycle: data.cycle,
+      time: timeStr,
+      mode: data.mode,
+      results: jtcatDecodes,
+    });
+  }
   jtcatSyncStatus.textContent = 'Sync: OK';
   jtcatSyncStatus.classList.add('jtcat-synced');
+  // Plot decodes on JTCAT map
+  jtcatDecodes.forEach(function(d) { jtcatMapPlotDecode(d); });
+  jtcatMapClearOld();
   renderJtcatDecodes();
 });
 
@@ -10353,6 +11009,93 @@ window.api.onJtcatStatus(function(data) {
     jtcatSyncStatus.textContent = 'Sync: \u2014';
     jtcatSyncStatus.classList.remove('jtcat-synced');
   }
+});
+
+// --- JTCAT TX Audio Playback ---
+var jtcatTxAudioCtx = null;
+var jtcatTxPlaying = false;
+
+async function playJtcatTxAudio(data) {
+  var samplesArray = data.samples || data;
+  var offsetMs = data.offsetMs || 0;
+  if (jtcatTxPlaying) return;
+  jtcatTxPlaying = true;
+  try {
+    var s = await window.api.getSettings();
+    var outputDeviceId = s.remoteAudioOutput || '';
+
+    // Create or reuse TX audio context at 12kHz (FT8 native sample rate)
+    if (!jtcatTxAudioCtx || jtcatTxAudioCtx.state === 'closed') {
+      jtcatTxAudioCtx = new AudioContext({ sampleRate: 12000 });
+    }
+    if (jtcatTxAudioCtx.state === 'suspended') {
+      await jtcatTxAudioCtx.resume();
+    }
+
+    // Route to the configured output device (DAX TX, USB soundcard, digirig, etc.)
+    if (outputDeviceId && jtcatTxAudioCtx.setSinkId) {
+      try {
+        await jtcatTxAudioCtx.setSinkId(outputDeviceId);
+      } catch (e) {
+        console.warn('[JTCAT] Could not set TX audio output device:', e.message);
+      }
+    }
+
+    var samples = new Float32Array(samplesArray);
+    var buffer = jtcatTxAudioCtx.createBuffer(1, samples.length, 12000);
+    buffer.getChannelData(0).set(samples);
+
+    var source = jtcatTxAudioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(jtcatTxAudioCtx.destination);
+
+    source.onended = function() {
+      jtcatTxPlaying = false;
+      window.api.jtcatTxComplete();
+      console.log('[JTCAT] TX audio playback complete');
+    };
+    // Skip into the audio buffer for late-start TX so we stay within the cycle
+    var offsetSec = offsetMs / 1000;
+    var durationSec = buffer.duration - offsetSec;
+    if (durationSec > 0) {
+      source.start(0, offsetSec, durationSec);
+    } else {
+      source.start(0, offsetSec);
+    }
+    console.log('[JTCAT] TX audio playing, offset=' + offsetSec.toFixed(1) + 's, dur=' + durationSec.toFixed(1) + 's, device:', outputDeviceId || 'default');
+  } catch (err) {
+    jtcatTxPlaying = false;
+    window.api.jtcatTxComplete();
+    console.error('[JTCAT] TX audio playback error:', err.message || err);
+  }
+}
+
+window.api.onJtcatTxAudio(function(data) {
+  playJtcatTxAudio(data);
+});
+
+window.api.onJtcatTxStatus(function(data) {
+  if (data.state === 'tx') {
+    jtcatEnableTxBtn.classList.add('jtcat-transmitting');
+    jtcatTxMsgText.textContent = 'TX: ' + (data.message || '');
+    if (jtcatTxIndicator) jtcatTxIndicator.classList.remove('hidden');
+  } else {
+    jtcatEnableTxBtn.classList.remove('jtcat-transmitting');
+    if (jtcatTxIndicator) jtcatTxIndicator.classList.add('hidden');
+  }
+});
+
+// Remote JTCAT: start/stop audio capture when phone activates FT8
+window.api.onJtcatStartForRemote(function() {
+  console.log('[JTCAT] Remote requested audio start');
+  jtcatRemoteActive = true;
+  if (!jtcatAudioCtx) startJtcatAudio();
+});
+window.api.onJtcatStopForRemote(function() {
+  console.log('[JTCAT] Remote requested audio stop');
+  jtcatRemoteActive = false;
+  // Only stop audio if the desktop JTCAT view isn't active
+  if (!jtcatRunning) stopJtcatAudio();
 });
 
 // Sticky table header via JS transform on each th

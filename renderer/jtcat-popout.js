@@ -23,12 +23,15 @@
   var stations = {};   // callsign → {marker, grid, lat, lon, lastSeen}
   var qsoArcs = {};    // "A↔B" → {arc, from, to, lastSeen}
   var ARC_SEGMENTS = 32;
+  var qrzCache = {};   // callsign → {name, fetched}
 
   // Load settings
   window.api.getSettings().then(function(s) {
     myCallsign = (s.myCallsign || '').toUpperCase();
     myGrid = (s.grid || '').toUpperCase().substring(0, 4);
     updateMapHome();
+    // Register own station so QSO arcs can be drawn to/from us
+    if (myCallsign && myGrid) registerStation(myCallsign, myGrid);
   });
 
   var qsoState = null; // current QSO state from main renderer
@@ -109,6 +112,40 @@
     return [[south, west], [south + 1, west + 2]];
   }
 
+  function cleanQrzName(name) {
+    if (!name) return '';
+    // Title-case if all-caps
+    if (name === name.toUpperCase()) name = name.replace(/\w\S*/g, function(w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); });
+    // Drop trailing single-letter initials like "John D."
+    name = name.replace(/\s+[A-Z]\.?$/, '');
+    return name.trim();
+  }
+
+  function stationPopupHtml(call, grid) {
+    var isMe = call === myCallsign;
+    var qrz = qrzCache[call];
+    var nameLine = qrz && qrz.name ? '<div style="color:#aaa;font-size:11px;">' + esc(qrz.name) + '</div>' : '';
+    var qsoBtn = isMe ? '' : '<button class="jp-popup-qso" data-call="' + esc(call) + '" data-grid="' + esc(grid) + '" style="margin-top:4px;padding:3px 10px;border-radius:4px;border:1px solid #4ecca3;background:#4ecca3;color:#000;font-size:11px;font-weight:600;cursor:pointer;">QSO</button>';
+    return '<div style="font-family:monospace;font-size:12px;line-height:1.5;">' +
+      '<b style="color:#fff;">' + esc(call) + '</b> <span style="color:#666;">[' + esc(grid) + ']</span>' +
+      nameLine + qsoBtn + '</div>';
+  }
+
+  function fetchQrzName(call) {
+    if (call === myCallsign || qrzCache[call]) return;
+    qrzCache[call] = { name: '', fetched: true };
+    if (!window.api.qrzLookup) return;
+    window.api.qrzLookup(call).then(function(data) {
+      if (!data) return;
+      var name = cleanQrzName(data.nickname || data.fname || '');
+      if (!name && data.name) name = cleanQrzName(data.fname ? data.fname + ' ' + data.name : data.name);
+      qrzCache[call] = { name: name, fetched: true };
+      // Update popup if station still exists
+      var stn = stations[call];
+      if (stn && stn.marker) stn.marker.setPopupContent(stationPopupHtml(call, stn.grid));
+    }).catch(function() {});
+  }
+
   function registerStation(call, grid) {
     if (!map || !call || !grid || !/^[A-R]{2}[0-9]{2}$/i.test(grid)) return;
     grid = grid.toUpperCase();
@@ -121,7 +158,7 @@
       if (grid !== existing.grid) {
         existing.grid = grid; existing.lat = pos.lat; existing.lon = pos.lon;
         existing.marker.setBounds(bounds);
-        existing.marker.setTooltipContent(call + ' [' + grid + ']');
+        existing.marker.setPopupContent(stationPopupHtml(call, grid));
       }
       return;
     }
@@ -129,8 +166,25 @@
     var color = isMe ? '#e94560' : '#4fc3f7';
     var marker = L.rectangle(bounds, {
       fillColor: color, fillOpacity: isMe ? 0.35 : 0.25, color: color, weight: 1,
-    }).addTo(markerLayer).bindTooltip(call + ' [' + grid + ']', { permanent: false });
+    }).addTo(markerLayer);
+    marker.bindPopup(stationPopupHtml(call, grid), { className: 'jp-station-popup', closeButton: false });
+    marker.on('popupopen', function() {
+      var el = marker.getPopup().getElement();
+      if (!el) return;
+      var btn = el.querySelector('.jp-popup-qso');
+      if (btn) {
+        btn.addEventListener('click', function() {
+          var c = btn.dataset.call, g = btn.dataset.grid;
+          if (c) {
+            window.api.jtcatReply({ call: c, grid: g || '', df: 1500, slot: null });
+            marker.closePopup();
+          }
+        });
+      }
+    });
     stations[call] = { marker: marker, grid: grid, lat: pos.lat, lon: pos.lon, lastSeen: Date.now() };
+    // Fetch QRZ name in background
+    if (!isMe) fetchQrzName(call);
   }
 
   function computeArc(lat1, lon1, lat2, lon2) {
@@ -207,6 +261,7 @@
       if (qsoArcs[key].lastSeen < now - 45000) { arcLayer.removeLayer(qsoArcs[key].arc); delete qsoArcs[key]; }
     });
     Object.keys(stations).forEach(function(call) {
+      if (call === myCallsign) return; // never expire our own station
       if (stations[call].lastSeen < now - 180000) { markerLayer.removeLayer(stations[call].marker); delete stations[call]; }
     });
   }
@@ -282,12 +337,25 @@
         window.api.jtcatReply({ call: call, grid: grid, df: d.df || 1500, slot: d.slot });
       }
     } else if (parts.length >= 2) {
-      // Non-CQ decode: if directed at us, let the state machine handle it
-      // Otherwise set TX freq to their freq
-      console.log('[JTCAT popout] Clicked non-CQ decode, df:', d.df);
-      jpTxFreqHz = d.df || 1500;
-      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
-      window.api.jtcatSetTxFreq(jpTxFreqHz);
+      var toCall = parts[0], fromCall = parts[1], payload = (parts[2] || '');
+      // If this message is directed at me (toCall === myCallsign), pick up the QSO
+      if (toCall === myCallsign && fromCall) {
+        var grid = /^[A-R]{2}[0-9]{2}$/i.test(payload) ? payload : '';
+        var rptMatch = payload.match(/^R?([+-]\d{2})$/);
+        var hasRR73 = payload === 'RR73' || payload === 'RRR' || payload === '73';
+        console.log('[JTCAT popout] Pick up QSO with', fromCall, 'payload:', payload, 'df:', d.df);
+        window.api.jtcatReply({
+          call: fromCall, grid: grid, df: d.df || 1500, slot: d.slot,
+          report: rptMatch ? rptMatch[1] : undefined,
+          rr73: hasRR73 || undefined,
+          snr: d.db,
+        });
+      } else {
+        // Not directed at us — just set TX freq
+        jpTxFreqHz = d.df || 1500;
+        txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+        window.api.jtcatSetTxFreq(jpTxFreqHz);
+      }
     }
   }
 
@@ -434,6 +502,11 @@
       return;
     } else {
       qsoState = data;
+      // Draw arc to QSO partner as soon as the QSO is active
+      if (qsoState.call && myCallsign) {
+        if (qsoState.grid) registerStation(qsoState.call, qsoState.grid);
+        drawQsoArc(myCallsign, qsoState.call);
+      }
     }
     renderQsoTracker();
     // Sync CQ button active state
@@ -487,9 +560,31 @@
     countdownEl.textContent = (remaining < 10 ? remaining.toFixed(1) : Math.ceil(remaining)) + 's';
   }, 200);
 
+  // FT2 dial frequencies (kHz) per band — from IU8LMC published table
+  var FT2_BAND_FREQS = {
+    '160m': 1843, '80m': 3578, '60m': 5360, '40m': 7052, '30m': 10144,
+    '20m': 14084, '17m': 18108, '15m': 21144, '12m': 24923, '10m': 28184,
+  };
+  var FT8_BAND_FREQS = {
+    '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136,
+    '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074,
+    '6m': 50313,
+  };
+  function updateBandFreqs() {
+    var table = modeSelect.value === 'FT2' ? FT2_BAND_FREQS : FT8_BAND_FREQS;
+    document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
+      var band = btn.dataset.band;
+      if (table[band]) btn.dataset.freq = table[band];
+    });
+  }
+
   // --- Mode change ---
   modeSelect.addEventListener('change', function() {
+    updateBandFreqs();
     window.api.jtcatSetMode(modeSelect.value);
+    // Retune to the active band's new frequency for the selected mode
+    var activeBtn = document.querySelector('.jtcat-band-btn.active');
+    if (activeBtn) selectBand(activeBtn, true);
   });
 
   // --- Controls ---
@@ -529,12 +624,14 @@
     btn.classList.add('active');
     // Clear decodes
     decodeLog = [];
-    bandActivity.innerHTML = '<div class="jp-empty">Switching to ' + btn.dataset.band + '...</div>';
+    bandActivity.innerHTML = '<div class="jp-empty">' + (save ? 'Switching to ' + btn.dataset.band + '...' : 'Waiting for signals...') + '</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
     markerLayer.clearLayers();
     arcLayer.clearLayers();
     stations = {};
     qsoArcs = {};
+    // Re-register own station so QSO arcs can draw to/from us
+    if (myCallsign && myGrid && map) registerStation(myCallsign, myGrid);
     if (save) {
       window.api.getSettings().then(function(s) {
         s.jtcatLastBandFreq = freq;

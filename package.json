@@ -28,6 +28,7 @@
       "preload-actmap-popout.js",
       "preload-spots-popout.js",
       "preload-cluster-popout.js",
+      "preload-jtcat-popout.js",
       "preload-remote-audio.js",
       "lib/**/*",
       "renderer/**/*",
@@ -59,7 +60,7 @@
       "include": "build/installer.nsh"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-portable.${ext}"
+      "artifactName": "potacat-jtcat-001-beta-flaming-dumpster.${ext}"
     },
     "mac": {
       "target": "dmg",

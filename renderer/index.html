@@ -153,7 +153,7 @@
     <div class="status-bar">
       <span id="utc-clock" class="utc-clock"></span>
       <span id="cat-status" class="status disconnected">CAT</span>
-      <span id="remote-tx-indicator" class="status hidden" style="background:#e94560;color:#fff;font-weight:bold;animation:tx-blink 1s ease-in-out infinite;">ECHOCAT TX</span>
+      <span id="jtcat-tx-indicator" class="status hidden" style="background:#e94560;color:#fff;font-weight:bold;animation:tx-blink 1s ease-in-out infinite;">JTCAT TX</span>
       <span id="wsjtx-status" class="status disconnected hidden">WSJT-X</span>
       <span id="cw-keyer-status" class="status hidden" style="background:#b8860b;color:#fff;cursor:pointer;">CW</span>
       <span id="cw-text-display" class="hidden" style="font-family:monospace;font-size:11px;color:#4fc3f7;margin-left:4px;max-width:300px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;direction:rtl;text-align:left;"></span>
@@ -394,6 +394,16 @@
             <option value="FT4">FT4</option>
           </select>
         </div>
+        <div id="jtcat-slice-select" class="jtcat-mode-select hidden">
+          <select id="jtcat-slice" title="Flex slice for JTCAT (independent of main CAT slice)">
+            <option value="">Same as CAT</option>
+            <option value="5002">Slice A</option>
+            <option value="5003">Slice B</option>
+            <option value="5004">Slice C</option>
+            <option value="5005">Slice D</option>
+          </select>
+        </div>
+        <span id="jtcat-tx-freq-label" class="jtcat-tx-freq-label">TX: 1500 Hz</span>
         <div class="jtcat-status">
           <span id="jtcat-cycle-indicator" class="jtcat-cycle">&mdash;</span>
           <span id="jtcat-countdown" class="jtcat-countdown">&mdash;</span>
@@ -410,10 +420,10 @@
           </div>
         </div>
 
-        <!-- Decode panels (right) -->
+        <!-- Decode panels (center) -->
         <div class="jtcat-decode-pane">
           <div class="jtcat-decode-section">
-            <div class="jtcat-decode-header">Band Activity</div>
+            <div class="jtcat-decode-header">Band Activity <button id="jtcat-cq-filter" class="jtcat-filter-btn" title="Show only CQ and 73 messages">CQ</button></div>
             <div id="jtcat-band-activity" class="jtcat-decode-list">
               <div class="jtcat-empty">Waiting for decodes...</div>
             </div>
@@ -425,6 +435,20 @@
             </div>
           </div>
         </div>
+
+        <!-- JTCAT Map (right) -->
+        <div class="jtcat-map-pane">
+          <div id="jtcat-map" class="jtcat-map"></div>
+        </div>
+      </div>
+
+      <!-- QSO sequence tracker -->
+      <div id="jtcat-qso-tracker" class="jtcat-qso-tracker hidden">
+        <div class="jtcat-qso-tracker-header">
+          <span id="jtcat-qso-label" class="jtcat-qso-label"></span>
+          <button id="jtcat-qso-cancel" class="jtcat-btn jtcat-halt-btn" title="Cancel QSO">Cancel</button>
+        </div>
+        <div id="jtcat-qso-steps" class="jtcat-qso-steps"></div>
       </div>
 
       <div class="jtcat-controls">
@@ -437,6 +461,7 @@
             <input type="number" id="jtcat-rx-freq" value="1500" min="100" max="3000" step="10">
             <span>Hz</span>
           </label>
+          <button id="jtcat-call-cq" class="jtcat-btn jtcat-cq-btn">CQ</button>
           <button id="jtcat-enable-tx" class="jtcat-btn">Enable TX</button>
           <button id="jtcat-halt-tx" class="jtcat-btn jtcat-halt-btn">Halt TX</button>
           <button id="jtcat-log-qso" class="jtcat-btn">Log QSO</button>

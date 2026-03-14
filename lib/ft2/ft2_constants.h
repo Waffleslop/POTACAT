@@ -73,7 +73,7 @@ static const uint8_t kFT2_XOR_sequence[10] = {
 #define FT2_LDPC_ITERS      25
 #define FT2_MAX_CANDIDATES  120
 #define FT2_MAX_DECODED     50
-#define FT2_MIN_SYNC_SCORE  4       /* minimum sum of 16 Costas correlations */
+#define FT2_MIN_SYNC_SCORE  10      /* minimum sum of 16 Costas correlations */
 #define FT2_FREQ_MIN        200.0f
 #define FT2_FREQ_MAX        3000.0f
 #define FT2_FREQ_STEP       20.0f   /* Hz step for coarse frequency search */

@@ -168,16 +168,19 @@ static void extract_soft_bits(const float* signal, int num_samples,
              * Gray map: 00->0, 01->1, 11->3, 10->2
              * Bit 1 (MSB): P(tone=2 or 3) vs P(tone=0 or 1)
              * Bit 0 (LSB): P(tone=1 or 2) vs P(tone=0 or 3)
+             *
+             * bp_decode convention: positive LLR = bit is 1.
+             * So LLR = log(P(bit=1) / P(bit=0)).
              */
             float p_hi = mag[2] + mag[3]; /* tones where bit1=1 */
             float p_lo = mag[0] + mag[1]; /* tones where bit1=0 */
             float llr_bit1 = (p_lo > 0 && p_hi > 0) ?
-                              logf(p_lo / p_hi) : ((p_lo > p_hi) ? 4.0f : -4.0f);
+                              logf(p_hi / p_lo) : ((p_hi > p_lo) ? 4.0f : -4.0f);
 
             float p_mid = mag[1] + mag[2]; /* tones where bit0=1 (Gray: 01->1, 10->2) */
             float p_out = mag[0] + mag[3]; /* tones where bit0=0 (Gray: 00->0, 11->3) */
             float llr_bit0 = (p_out > 0 && p_mid > 0) ?
-                              logf(p_out / p_mid) : ((p_out > p_mid) ? 4.0f : -4.0f);
+                              logf(p_mid / p_out) : ((p_mid > p_out) ? 4.0f : -4.0f);
 
             /* Clamp LLRs */
             if (llr_bit1 > 6.0f) llr_bit1 = 6.0f;
@@ -221,7 +224,6 @@ void ft2_exec_decode(float* signal, int num_samples, char* results)
     ft2_candidate_t candidates[FT2_MAX_CANDIDATES];
     int n_cand = ft2_find_candidates(signal, num_samples,
                                       candidates, FT2_MAX_CANDIDATES);
-
     /* Decoded message dedup table */
     int num_decoded = 0;
     ftx_message_t decoded[FT2_MAX_DECODED];
@@ -244,7 +246,7 @@ void ft2_exec_decode(float* signal, int num_samples, char* results)
         uint8_t plain[FTX_LDPC_N];
         int ok = 0;
         bp_decode(log174, FT2_LDPC_ITERS, plain, &ok);
-        if (ok != FTX_LDPC_K)
+        if (ok != 0)
             continue;
 
         /* Pack decoded bits into bytes */

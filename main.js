@@ -1512,9 +1512,12 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
       setTxMsg(q.txMsg);
     } else if (q.phase === 'cq-report') {
       const resp = results.find(d => { const t = (d.text || '').toUpperCase(); return t.indexOf(myCall) >= 0 && t.indexOf(q.call) >= 0; });
-      if (!resp) return;
+      if (!resp) { return; }
       const rptM = (resp.text || '').toUpperCase().match(/R([+-]\d{2})/);
-      if (!rptM) return;
+      if (!rptM) {
+        q._heardThisCycle = true; // they responded but haven't sent R+report yet
+        return;
+      }
       q.report = rptM[1];
       q.txMsg = q.call + ' ' + myCall + ' RR73';
       q.phase = 'cq-rr73';
@@ -1581,6 +1584,9 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
         q.txMsg = theirCall + ' ' + myCall + ' 73'; q.phase = '73';
         setTxMsg(q.txMsg);
         onDone();
+      } else {
+        // They're still responding (e.g. repeating report) — mark as heard so retries don't expire
+        q._heardThisCycle = true;
       }
     }
   }
@@ -1629,10 +1635,15 @@ function startJtcat(mode) {
     }
     if (remoteJtcatQso && remoteJtcatQso.phase !== 'done') {
       const phaseBefore = remoteJtcatQso.phase;
+      remoteJtcatQso._heardThisCycle = false;
       processRemoteJtcatQso(data.results || []);
-      // Count retries — if phase didn't advance, increment; if it did, reset
+      // Count retries — only increment when other station was NOT heard at all
       if (remoteJtcatQso && remoteJtcatQso.phase === phaseBefore && remoteJtcatQso.phase !== 'done') {
-        remoteJtcatQso.txRetries = (remoteJtcatQso.txRetries || 0) + 1;
+        if (remoteJtcatQso._heardThisCycle) {
+          remoteJtcatQso.txRetries = 0; // they're still responding, keep trying
+        } else {
+          remoteJtcatQso.txRetries = (remoteJtcatQso.txRetries || 0) + 1;
+        }
         const max = (remoteJtcatQso.phase === 'cq') ? JTCAT_MAX_CQ_RETRIES : JTCAT_MAX_QSO_RETRIES;
         if (remoteJtcatQso.txRetries >= max) {
           console.log('[JTCAT Remote] TX retry limit reached (' + max + ') in phase ' + remoteJtcatQso.phase + ' — giving up');
@@ -1653,9 +1664,14 @@ function startJtcat(mode) {
     // Advance popout QSO state machine
     if (popoutJtcatQso && popoutJtcatQso.phase !== 'done') {
       const phaseBefore = popoutJtcatQso.phase;
+      popoutJtcatQso._heardThisCycle = false;
       processPopoutJtcatQso(data.results || []);
       if (popoutJtcatQso && popoutJtcatQso.phase === phaseBefore && popoutJtcatQso.phase !== 'done') {
-        popoutJtcatQso.txRetries = (popoutJtcatQso.txRetries || 0) + 1;
+        if (popoutJtcatQso._heardThisCycle) {
+          popoutJtcatQso.txRetries = 0; // they're still responding, keep trying
+        } else {
+          popoutJtcatQso.txRetries = (popoutJtcatQso.txRetries || 0) + 1;
+        }
         const max = (popoutJtcatQso.phase === 'cq') ? JTCAT_MAX_CQ_RETRIES : JTCAT_MAX_QSO_RETRIES;
         if (popoutJtcatQso.txRetries >= max) {
           console.log('[JTCAT Popout] TX retry limit reached (' + max + ') in phase ' + popoutJtcatQso.phase + ' — giving up');
@@ -5334,18 +5350,53 @@ app.whenReady().then(() => {
     if (!myCall) return;
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (ft8Engine._txActive) ft8Engine.txComplete();
-    const txMsg = data.call + ' ' + myCall + ' ' + myGrid;
     ft8Engine.setTxFreq(data.df || 1500);
     ft8Engine.setRxFreq(data.df || 1500);
-    // TX on opposite slot from the station we're replying to (use slot from decode data, not stale _lastRxSlot)
+    // TX on opposite slot from the station we're replying to
     const targetSlot = data.slot || ft8Engine._lastRxSlot;
     ft8Engine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
-    popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
-    ft8Engine._txEnabled = true;
-    await ft8Engine.setTxMessage(txMsg);
-    ft8Engine.tryImmediateTx();
+
+    let txMsg, phase;
+    if (data.rr73) {
+      // They sent RR73/73 — send 73 back, log QSO
+      txMsg = data.call + ' ' + myCall + ' 73';
+      phase = '73';
+    } else if (data.report) {
+      // They sent a signal report — pick up at R+report phase
+      const snr = data.snr != null ? data.snr : 0;
+      const ourRpt = snr >= 0 ? '+' + String(Math.round(snr)).padStart(2, '0') : String(Math.round(snr)).padStart(3, '0');
+      txMsg = data.call + ' ' + myCall + ' R' + ourRpt;
+      phase = 'r+report';
+      popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: data.report, sentReport: ourRpt, myCall, myGrid, txRetries: 0 };
+    } else {
+      // Fresh reply to CQ — start from beginning
+      txMsg = data.call + ' ' + myCall + ' ' + myGrid;
+      phase = 'reply';
+    }
+
+    if (phase === '73') {
+      // Send 73 and log
+      popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+      ft8Engine._txEnabled = true;
+      await ft8Engine.setTxMessage(txMsg);
+      ft8Engine.tryImmediateTx();
+      jtcatAutoLog(popoutJtcatQso);
+    } else if (!popoutJtcatQso || popoutJtcatQso.phase !== phase) {
+      // Only set up QSO if not already created above (report case)
+      if (phase === 'reply') {
+        popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+      }
+      ft8Engine._txEnabled = true;
+      await ft8Engine.setTxMessage(txMsg);
+      ft8Engine.tryImmediateTx();
+    } else {
+      ft8Engine._txEnabled = true;
+      await ft8Engine.setTxMessage(txMsg);
+      ft8Engine.tryImmediateTx();
+    }
+
     popoutBroadcastQso();
-    console.log('[JTCAT Popout] Reply to', data.call, '— slot:', ft8Engine._txSlot, '—', txMsg);
+    console.log('[JTCAT Popout] Reply to', data.call, '— phase:', phase, '— slot:', ft8Engine._txSlot, '—', txMsg);
   });
 
   ipcMain.on('jtcat-popout-call-cq', async () => {

@@ -19,7 +19,7 @@ emcc \
   ft2_encode.c $COMMON_C \
   -o wasm/ft2_encode.js \
   -sEXPORTED_FUNCTIONS='["_ft2_exec_encode", "_free", "_malloc"]' \
-  -sEXPORTED_RUNTIME_METHODS=cwrap \
+  -sEXPORTED_RUNTIME_METHODS='["cwrap","HEAPF32","HEAPU8"]' \
   -s ASYNCIFY=1 \
   -s 'ASYNCIFY_IMPORTS=["_ft2_exec_encode"]' \
   --no-entry -flto \
@@ -39,7 +39,7 @@ emcc \
   $FT8_LIB/fft/kiss_fft.c $FT8_LIB/fft/kiss_fftr.c \
   -o wasm/ft2_decode.js \
   -sEXPORTED_FUNCTIONS='["_ft2_init_decode", "_ft2_exec_decode", "_free", "_malloc"]' \
-  -sEXPORTED_RUNTIME_METHODS=cwrap \
+  -sEXPORTED_RUNTIME_METHODS='["cwrap","HEAPF32","HEAPU8"]' \
   -s ASYNCIFY=1 \
   -s 'ASYNCIFY_IMPORTS=["_ft2_exec_decode"]' \
   --no-entry -flto \

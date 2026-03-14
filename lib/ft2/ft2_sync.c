@@ -129,7 +129,7 @@ int ft2_find_candidates(const float* signal, int num_samples,
 
     int n_cand = 0;
     /* Temporary storage: collect all candidates above threshold, then keep best */
-    int max_tmp = max_candidates * 4;
+    int max_tmp = 2000;
     ft2_candidate_t* tmp = (ft2_candidate_t*)calloc(max_tmp, sizeof(ft2_candidate_t));
     if (!tmp) { free(ds_i); free(ds_q); return 0; }
     int n_tmp = 0;

@@ -1,0 +1,50 @@
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  platform: process.platform,
+  // JTCAT engine control
+  jtcatStart: (mode) => ipcRenderer.send('jtcat-start', mode),
+  jtcatStop: () => ipcRenderer.send('jtcat-stop'),
+  jtcatSetMode: (mode) => ipcRenderer.send('jtcat-set-mode', mode),
+  jtcatSetTxFreq: (hz) => ipcRenderer.send('jtcat-set-tx-freq', hz),
+  jtcatSetRxFreq: (hz) => ipcRenderer.send('jtcat-set-rx-freq', hz),
+  jtcatEnableTx: (enabled) => ipcRenderer.send('jtcat-enable-tx', enabled),
+  jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),
+  jtcatSetTxMsg: (text) => ipcRenderer.send('jtcat-set-tx-msg', text),
+  jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
+  jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),
+  jtcatAudio: (buf) => ipcRenderer.send('jtcat-audio', buf),
+  // JTCAT events
+  onJtcatDecode: (cb) => ipcRenderer.on('jtcat-decode', (_e, data) => cb(data)),
+  onJtcatCycle: (cb) => ipcRenderer.on('jtcat-cycle', (_e, data) => cb(data)),
+  onJtcatSpectrum: (cb) => ipcRenderer.on('jtcat-spectrum', (_e, data) => cb(data)),
+  onJtcatStatus: (cb) => ipcRenderer.on('jtcat-status', (_e, data) => cb(data)),
+  onJtcatTxAudio: (cb) => ipcRenderer.on('jtcat-tx-audio', (_e, data) => cb(data)),
+  onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
+  onJtcatQsoState: (cb) => ipcRenderer.on('jtcat-qso-state', (_e, data) => cb(data)),
+  onJtcatQsoLogged: (cb) => ipcRenderer.on('jtcat-qso-logged', (_e, data) => cb(data)),
+  // QSO commands (relayed to main renderer)
+  jtcatReply: (data) => ipcRenderer.send('jtcat-popout-reply', data),
+  jtcatCallCq: () => ipcRenderer.send('jtcat-popout-call-cq'),
+  jtcatCancelQso: () => ipcRenderer.send('jtcat-popout-cancel-qso'),
+  // Map popout
+  jtcatMapPopout: () => ipcRenderer.send('jtcat-map-popout'),
+  // Tuning
+  tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
+  // Settings
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
+  // QRZ lookup
+  qrzLookup: (callsign) => ipcRenderer.invoke('qrz-lookup', callsign),
+  // Theme
+  onPopoutTheme: (cb) => ipcRenderer.on('jtcat-popout-theme', (_e, theme) => cb(theme)),
+  // Focus main window (for QSO editing)
+  focusMain: () => ipcRenderer.send('jtcat-popout-focus-main'),
+  // Window controls
+  minimize: () => ipcRenderer.send('jtcat-popout-minimize'),
+  maximize: () => ipcRenderer.send('jtcat-popout-maximize'),
+  close: () => ipcRenderer.send('jtcat-popout-close'),
+  // Zoom
+  setZoom: (factor) => webFrame.setZoomFactor(factor),
+  getZoom: () => webFrame.getZoomFactor(),
+});

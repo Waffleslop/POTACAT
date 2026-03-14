@@ -243,6 +243,27 @@
   let ft8CqFilter = false;     // CQ-only filter
   let ft8TxFreqHz = 1500;      // TX frequency in Hz (for waterfall marker)
 
+  // FT2 dial frequencies (kHz) per band — from IU8LMC published table
+  const FT2_BAND_FREQS = {
+    '160m': 1843, '80m': 3578, '60m': 5360, '40m': 7052, '30m': 10144,
+    '20m': 14084, '17m': 18108, '15m': 21144, '12m': 24923, '10m': 28184,
+  };
+  // FT8 dial frequencies (kHz) per band
+  const FT8_BAND_FREQS = {
+    '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136,
+    '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074,
+    '6m': 50313, '2m': 144174,
+  };
+
+  /** Update band button data-freq attributes for current mode */
+  function updateBandFreqs() {
+    const table = ft8Mode === 'FT2' ? FT2_BAND_FREQS : FT8_BAND_FREQS;
+    ft8BandBar.querySelectorAll('.ft8-band-btn').forEach(btn => {
+      const band = btn.dataset.band;
+      if (table[band]) btn.dataset.freq = table[band];
+    });
+  }
+
   // FT8 DOM refs
   const ft8View = document.getElementById('ft8-view');
   const ft8BandBar = document.getElementById('ft8-band-bar');
@@ -3229,8 +3250,15 @@
   // --- Mode select ---
   ft8ModeSelect.addEventListener('change', () => {
     ft8Mode = ft8ModeSelect.value;
+    updateBandFreqs();
     ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
     ft8StartCountdown(); // restart with new cycle duration
+    // Retune to the active band's new frequency for the selected mode
+    const activeBtn = ft8BandBar.querySelector('.ft8-band-btn.active');
+    if (activeBtn) {
+      const freqKhz = parseInt(activeBtn.dataset.freq, 10);
+      ft8Send({ type: 'jtcat-set-band', band: activeBtn.dataset.band, freqKhz });
+    }
   });
 
   // --- Band bar ---

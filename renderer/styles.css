@@ -4139,24 +4139,28 @@ body.activator-rbn-on #rbn-view {
 
 .jtcat-band-buttons {
   display: flex;
-  gap: 2px;
+  gap: 4px;
 }
 
 .jtcat-band-btn {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 6px;
   border: 1px solid var(--border-primary);
-  padding: 3px 8px;
-  font-size: 11px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  border-radius: 3px;
+  min-width: 36px;
+  text-align: center;
 }
 .jtcat-band-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .jtcat-band-btn.active {
-  background: var(--accent-blue);
-  color: #000;
-  border-color: var(--accent-blue);
-  font-weight: bold;
+  background: var(--accent-green, #4ecca3);
+  color: #fff;
+  border-color: var(--accent-green, #4ecca3);
+  font-weight: 700;
 }
 
 .jtcat-mode-select select {
@@ -4166,6 +4170,13 @@ body.activator-rbn-on #rbn-view {
   padding: 3px 6px;
   font-size: 12px;
   border-radius: 3px;
+}
+
+.jtcat-tx-freq-label {
+  font-size: 12px;
+  font-weight: bold;
+  color: #ff4444;
+  white-space: nowrap;
 }
 
 .jtcat-status {
@@ -4220,6 +4231,7 @@ body.activator-rbn-on #rbn-view {
   flex: 1;
   width: 100%;
   image-rendering: pixelated;
+  cursor: crosshair;
 }
 
 .jtcat-freq-labels {
@@ -4237,6 +4249,35 @@ body.activator-rbn-on #rbn-view {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* JTCAT Map pane */
+.jtcat-map-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  border-left: 1px solid var(--border-primary);
+}
+.jtcat-map {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+}
+
+/* Animated QSO arcs — dashes flow from TX to RX */
+.jtcat-arc-forward {
+  animation: jtcat-arc-flow 1.5s linear infinite;
+}
+.jtcat-arc-reverse {
+  animation: jtcat-arc-flow-rev 1.5s linear infinite;
+}
+@keyframes jtcat-arc-flow {
+  from { stroke-dashoffset: 28; }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes jtcat-arc-flow-rev {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: 28; }
 }
 
 .jtcat-decode-section {
@@ -4266,6 +4307,21 @@ body.activator-rbn-on #rbn-view {
   color: var(--accent-blue);
   font-family: monospace;
 }
+.jtcat-filter-btn {
+  padding: 1px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-primary);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.jtcat-filter-btn.active {
+  background: var(--accent-green, #4ecca3);
+  color: #fff;
+  border-color: var(--accent-green, #4ecca3);
+}
 
 .jtcat-decode-list {
   flex: 1;
@@ -4276,6 +4332,16 @@ body.activator-rbn-on #rbn-view {
   padding: 2px 0;
   background: var(--bg-primary);
 }
+
+.jtcat-cycle-separator {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border-primary);
+  margin-top: 2px;
+  user-select: none;
+}
+.jtcat-cycle-separator:first-child { border-top: none; margin-top: 0; }
 
 .jtcat-decode-row {
   padding: 1px 8px;
@@ -4360,6 +4426,8 @@ body.activator-rbn-on #rbn-view {
 }
 .jtcat-btn:hover { background: var(--bg-hover); }
 .jtcat-btn.active { background: var(--accent-green); color: #000; border-color: var(--accent-green); }
+.jtcat-btn.jtcat-transmitting { background: var(--accent-red); color: #fff; border-color: var(--accent-red); animation: jtcat-tx-pulse 1s ease-in-out infinite; }
+@keyframes jtcat-tx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
 .jtcat-halt-btn { color: var(--accent-red); border-color: var(--accent-red); }
 .jtcat-halt-btn:hover { background: var(--accent-red); color: #fff; }
@@ -4380,5 +4448,83 @@ body.activator-rbn-on #rbn-view {
   padding: 2px 4px;
   font-size: 11px;
   border-radius: 3px;
+}
+
+/* CQ button */
+.jtcat-cq-btn { color: var(--accent-green); border-color: var(--accent-green); font-weight: bold; }
+.jtcat-cq-btn:hover { background: var(--accent-green); color: #000; }
+.jtcat-cq-btn.active { background: var(--accent-green); color: #000; }
+
+/* QSO sequence tracker */
+.jtcat-qso-tracker {
+  padding: 6px 8px;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+.jtcat-qso-tracker.hidden { display: none; }
+.jtcat-qso-tracker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.jtcat-qso-label {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--text-secondary);
+}
+.jtcat-qso-steps {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+}
+.jtcat-qso-step {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  background: var(--bg-secondary);
+  color: var(--text-dim);
+  border: 1px solid transparent;
+}
+.jtcat-qso-step.step-done {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.jtcat-qso-step.step-current {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+  font-weight: bold;
+}
+.jtcat-qso-step.step-current.step-tx {
+  background: var(--accent-red);
+  border-color: var(--accent-red);
+}
+.jtcat-qso-step.step-current.step-tx.step-pulsing {
+  animation: qso-step-pulse 1s ease-in-out infinite;
+}
+@keyframes qso-step-pulse { 0%,100% { opacity: 1; box-shadow: 0 0 4px var(--accent-red); } 50% { opacity: 0.6; box-shadow: 0 0 12px var(--accent-red); } }
+.jtcat-qso-step.step-current.step-rx {
+  background: var(--accent-green);
+  color: #000;
+  border-color: var(--accent-green);
+}
+.jtcat-qso-step .step-dir {
+  font-size: 9px;
+  font-weight: bold;
+  opacity: 0.8;
+}
+.jtcat-qso-arrow {
+  color: var(--text-dim);
+  font-size: 10px;
+  flex-shrink: 0;
 }
 
