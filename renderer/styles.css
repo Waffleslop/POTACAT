@@ -1277,6 +1277,8 @@ dialog {
 
 #settings-dialog {
   max-width: 420px;
+  width: 420px;
+  overflow-x: hidden;
 }
 
 dialog::backdrop {
@@ -4321,4 +4323,54 @@ body.activator-rbn-on #rbn-view {
 
 /* Settings radio labels */
 .radio-label { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+
+/* Banner Logger */
+.banner-logger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-panel);
+  border-top: 2px solid var(--accent-green);
+  flex-shrink: 0;
+}
+.banner-logger.hidden { display: none; }
+.bl-field {
+  font-size: 12px;
+  font-family: monospace;
+  padding: 3px 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  outline: none;
+}
+.bl-field:focus { border-color: var(--accent-green); }
+.bl-type { width: 72px; font-size: 11px; padding: 3px 2px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; }
+.bl-ref { width: 80px; text-transform: uppercase; }
+.bl-ref.hidden { display: none; }
+.bl-callsign { width: 100px; text-transform: uppercase; }
+.bl-name { width: 100px; color: var(--text-secondary); background: transparent; border-color: transparent; cursor: default; }
+.bl-freq { width: 80px; }
+.bl-notes { flex: 1; min-width: 60px; }
+.bl-respot-label { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
+.bl-respot-label.hidden { display: none; }
+.bl-mode { width: 60px; font-size: 11px; padding: 3px 2px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; }
+.bl-rst-group { display: flex; align-items: center; gap: 2px; }
+.bl-rst-label { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
+.bl-rst { width: 36px; text-align: center; }
+.bl-time { width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.bl-log-btn {
+  font-size: 11px;
+  padding: 3px 12px;
+  background: var(--accent-green-btn);
+  color: #000;
+  border: none;
+  border-radius: 3px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bl-log-btn:hover { filter: brightness(1.15); }
+.bl-log-btn:disabled { opacity: 0.5; cursor: default; }
 
