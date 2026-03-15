@@ -38,6 +38,7 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="70cm"> 70cm</label>
         </div>
       </div>
+      <div class="band-buttons hidden" id="band-buttons"></div>
       <div class="multi-dropdown" id="mode-filter">
         <button class="multi-dropdown-btn" type="button">Mode: <span class="multi-dropdown-text">All</span></button>
         <div class="multi-dropdown-menu">
@@ -1337,6 +1338,8 @@
             <input type="number" id="set-remote-ptt-timeout" min="30" max="600" value="180" style="width:70px;">
           </label>
         </div>
+        <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-remote-cw-enabled"> Enable Remote CW Keyer</label>
+        <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). Requires SmartSDR (FlexRadio).</span>
         <div id="remote-url-display" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
         <span class="help-text">To use ECHOCAT securely outside your home network, install <a href="https://tailscale.com" target="_blank" style="color:#4fc3f7;">Tailscale</a> on both your shack computer and phone. Audio, tuning, and PTT are all encrypted over the Tailscale VPN.</span>
         <!-- Club Station Mode -->

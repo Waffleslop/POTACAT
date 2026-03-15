@@ -449,6 +449,7 @@ const rigRemoteAudioInput = document.getElementById('rig-remote-audio-input');
 const rigRemoteAudioOutput = document.getElementById('rig-remote-audio-output');
 const remoteAudioSummary = document.getElementById('remote-audio-summary');
 const setRemotePttTimeout = document.getElementById('set-remote-ptt-timeout');
+const setRemoteCwEnabled = document.getElementById('set-remote-cw-enabled');
 const remoteUrlDisplay = document.getElementById('remote-url-display');
 const remoteTxIndicator = document.getElementById('remote-tx-indicator');
 // Club Station Mode
@@ -1309,10 +1310,67 @@ function getDropdownValues(container) {
   return new Set(checked.map((cb) => cb.value));
 }
 
-initMultiDropdown(bandFilterEl, 'Band');
+initMultiDropdown(bandFilterEl, 'Band', () => { updateBandButtonsVisibility(); render(); });
 initMultiDropdown(modeFilterEl, 'Mode');
 initMultiDropdown(continentFilterEl, 'Region');
 initMultiDropdown(rbnBandFilterEl, 'Band', rerenderRbn);
+
+// --- Band QSY buttons (shown when Radio band filter is active) ---
+const BAND_QSY_FREQS = {
+  // SSB calling frequencies (kHz) — used for SSB/phone modes
+  ssb: { '160m': 1900, '80m': 3860, '60m': 5357, '40m': 7200, '30m': 10130, '20m': 14260, '17m': 18130, '15m': 21300, '12m': 24960, '10m': 28400, '6m': 50125, '2m': 144200, '70cm': 432100 },
+  // CW calling frequencies
+  cw: { '160m': 1820, '80m': 3530, '60m': 5332, '40m': 7030, '30m': 10110, '20m': 14030, '17m': 18080, '15m': 21030, '12m': 24900, '10m': 28030, '6m': 50090, '2m': 144050, '70cm': 432050 },
+  // Digital/FT8 frequencies
+  digi: { '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '2m': 144174, '70cm': 432065 },
+};
+const BAND_QSY_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '70cm'];
+const BAND_QSY_LABELS = { '160m': '160', '80m': '80', '60m': '60', '40m': '40', '30m': '30', '20m': '20', '17m': '17', '15m': '15', '12m': '12', '10m': '10', '6m': '6', '2m': '2', '70cm': '70cm' };
+const bandButtonsEl = document.getElementById('band-buttons');
+
+function buildBandButtons() {
+  bandButtonsEl.innerHTML = '';
+  for (const band of BAND_QSY_ORDER) {
+    const btn = document.createElement('button');
+    btn.textContent = BAND_QSY_LABELS[band];
+    btn.dataset.band = band;
+    btn.title = `QSY to ${band}`;
+    bandButtonsEl.appendChild(btn);
+  }
+}
+buildBandButtons();
+
+function getBandQsyFreq(band) {
+  const mode = (radioMode || '').toUpperCase();
+  if (mode === 'CW') return BAND_QSY_FREQS.cw[band];
+  if (['FT8', 'FT4', 'FT2', 'RTTY', 'JT65', 'JT9', 'WSPR', 'DIGI'].includes(mode)) return BAND_QSY_FREQS.digi[band];
+  return BAND_QSY_FREQS.ssb[band];
+}
+
+function updateBandButtonActive() {
+  const curBand = radioFreqKhz ? freqToBandActivator(radioFreqKhz) : null;
+  bandButtonsEl.querySelectorAll('button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.band === curBand);
+  });
+}
+
+function updateBandButtonsVisibility() {
+  const radioCb = bandFilterEl.querySelector('input[value="radio"]');
+  const show = radioCb && radioCb.checked;
+  bandButtonsEl.classList.toggle('hidden', !show);
+  if (show) updateBandButtonActive();
+}
+
+bandButtonsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const band = btn.dataset.band;
+  const freq = getBandQsyFreq(band);
+  if (freq) {
+    const mode = radioMode || 'USB';
+    window.api.tune(String(freq), mode);
+  }
+});
 
 // RBN age filter — re-render on change
 rbnMaxAgeInput.addEventListener('change', rerenderRbn);
@@ -1776,6 +1834,7 @@ function restoreFilters() {
 }
 
 restoreFilters();
+updateBandButtonsVisibility();
 
 // Toggle radio sub-panels when radio type changes
 radioTypeBtns.forEach((btn) => {
@@ -6078,6 +6137,7 @@ async function openSettingsDialog() {
   remoteTokenRow.classList.toggle('hidden', !requireToken);
   setRemoteToken.value = s.remoteToken || '';
   setRemotePttTimeout.value = s.remotePttTimeout || 180;
+  setRemoteCwEnabled.checked = !!s.remoteCwEnabled;
   if (enableRemote) {
     populateRemoteURLs();
   }
@@ -6211,6 +6271,7 @@ settingsSave.addEventListener('click', async () => {
   const remoteRequireTokenVal = setRemoteRequireToken.checked;
   const remoteTokenVal = setRemoteToken.value;
   const remotePttTimeoutVal = parseInt(setRemotePttTimeout.value, 10) || 180;
+  const remoteCwEnabledVal = setRemoteCwEnabled.checked;
   const clubModeEnabled = setClubMode.checked;
   const clubCsvPathVal = setClubCsvPath.value || '';
   // Audio comes from the active rig (resolved after selectedRig below)
@@ -6350,6 +6411,7 @@ settingsSave.addEventListener('click', async () => {
     remoteRequireToken: remoteRequireTokenVal,
     remoteToken: remoteTokenVal,
     remotePttTimeout: remotePttTimeoutVal,
+    remoteCwEnabled: remoteCwEnabledVal,
     clubMode: clubModeEnabled,
     clubCsvPath: clubCsvPathVal,
     remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',
@@ -7652,8 +7714,9 @@ window.api.onCatFrequency((hz) => {
   const newBand = freqToBandActivator(newKhz);
   // Update band filter text and re-filter when band changes in Radio mode
   const radioBandCb = bandFilterEl.querySelector('input[value="radio"]');
-  if (radioBandCb && radioBandCb.checked && newBand !== oldBand) {
-    if (bandFilterEl._updateText) bandFilterEl._updateText();
+  if (radioBandCb && radioBandCb.checked) {
+    if (newBand !== oldBand && bandFilterEl._updateText) bandFilterEl._updateText();
+    updateBandButtonActive();
   }
   playTuneClick();
   updateBlFreqFromRadio();

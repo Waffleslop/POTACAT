@@ -234,6 +234,28 @@ header {
   color: var(--accent-blue);
 }
 
+/* Band QSY buttons (visible when Radio band filter active) */
+.band-buttons {
+  display: flex;
+  gap: 0;
+}
+.band-buttons.hidden { display: none; }
+.band-buttons button {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  border-right: none;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.band-buttons button:first-child { border-radius: 4px 0 0 4px; }
+.band-buttons button:last-child { border-right: 1px solid var(--border-secondary); border-radius: 0 4px 4px 0; }
+.band-buttons button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.band-buttons button.active { background: var(--accent-blue); color: #000; border-color: var(--accent-blue); }
+.band-buttons button.active + button { border-left-color: var(--accent-blue); }
+
 .multi-dropdown-menu {
   display: none;
   position: absolute;
