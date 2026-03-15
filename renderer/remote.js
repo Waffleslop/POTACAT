@@ -653,8 +653,7 @@
       modeBadge.textContent = s.mode;
       currentMode = s.mode;
       const m = s.mode.toUpperCase();
-      const isVoice = (m === 'SSB' || m === 'USB' || m === 'LSB' || m === 'FM' || m === 'AM'
-        || m === 'PKTUSB' || m === 'PKTLSB' || m === 'DIGU' || m === 'DIGL');
+      const isVoice = (m === 'SSB' || m === 'USB' || m === 'LSB' || m === 'FM' || m === 'AM');
       pttBtn.classList.toggle('hidden', !isVoice);
       estopBtn.classList.toggle('hidden', !isVoice);
     }
@@ -1351,12 +1350,9 @@
   modeBadge.classList.add('tappable');
   modeBadge.addEventListener('click', () => {
     if (modePicker.classList.contains('hidden')) {
-      // Highlight current mode (normalize DATA mode names for matching)
-      var cm = currentMode;
-      if (cm === 'PKTUSB') cm = 'DIGU';
-      else if (cm === 'PKTLSB') cm = 'DIGL';
+      // Highlight current mode
       modePicker.querySelectorAll('.mp-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.mode === cm);
+        btn.classList.toggle('active', btn.dataset.mode === currentMode);
       });
       modePicker.classList.remove('hidden');
     } else {
