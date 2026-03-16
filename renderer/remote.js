@@ -16,6 +16,28 @@
   let pingInterval = null;
   let lastPingSent = 0;
 
+  // Screen Wake Lock (keep phone screen on while connected)
+  let wakeLock = null;
+
+  async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', function() { wakeLock = null; });
+    } catch (_) { /* user-agent denied or low battery */ }
+  }
+
+  function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release(); wakeLock = null; }
+  }
+
+  // Re-acquire wake lock when page becomes visible again
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && !mainUI.classList.contains('hidden')) {
+      requestWakeLock();
+    }
+  });
+
   // WebRTC
   let pc = null;
   let localAudioStream = null;
@@ -486,6 +508,7 @@
           var sa = msg.scheduleAdvisory;
           showToast(sa.scheduledName + ' (' + sa.scheduledCallsign + ') is scheduled on ' + sa.radio + ' ' + sa.time, 6000);
         }
+        requestWakeLock();
         startPing();
         showWelcome();
         drainOfflineQueue();
@@ -566,6 +589,7 @@
       case 'kicked':
         // Stop reconnect loop — another client took over intentionally
         wasKicked = true;
+        releaseWakeLock();
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         mainUI.classList.add('hidden');
         connectScreen.classList.remove('hidden');
