@@ -2111,7 +2111,14 @@ function disconnectTci() {
 // --- 4O3A Antenna Genius ---
 function connectAntennaGenius() {
   disconnectAntennaGenius();
-  if (!settings.enableAntennaGenius || !settings.agHost) return;
+  if (!settings.enableAntennaGenius) {
+    sendCatLog('[AG] Antenna Genius disabled in settings');
+    return;
+  }
+  if (!settings.agHost) {
+    sendCatLog('[AG] Antenna Genius enabled but no host configured');
+    return;
+  }
   agClient = new AntennaGeniusClient();
   agLastBand = null;
   sendCatLog(`[AG] Connecting to Antenna Genius at ${settings.agHost}:9007`);
