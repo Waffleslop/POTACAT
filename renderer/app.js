@@ -7979,6 +7979,8 @@ function renderDirvNets(search, bandFilter, statusFilter) {
         addDirectoryNetToReminders(net);
         renderDirectoryView();
         renderNetList(currentNetReminders);
+        // Persist immediately so the net reminder survives app restart
+        window.api.saveSettings({ netReminders: currentNetReminders });
       });
     }
 
@@ -8351,6 +8353,8 @@ function renderNetsTable(search) {
         addDirectoryNetToReminders(net);
         renderDirectory();
         renderNetList(currentNetReminders);
+        // Persist immediately so the net reminder survives app restart
+        window.api.saveSettings({ netReminders: currentNetReminders });
       });
     }
     // URL link
