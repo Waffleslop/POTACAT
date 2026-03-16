@@ -752,6 +752,8 @@ async function loadPrefs() {
   if (settings.appVersion) {
     window._appVersion = settings.appVersion;
     updateTitleBar();
+    const verLabel = document.getElementById('settings-version-label');
+    if (verLabel) verLabel.textContent = 'v' + settings.appVersion;
   }
   applyTheme(settings.lightMode === true);
   applyColorblindMode(settings.colorblindMode === true);
