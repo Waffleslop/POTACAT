@@ -470,6 +470,7 @@
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
+        requestWakeLock(); // keep screen on while connected
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
         // Club member info
@@ -566,6 +567,7 @@
       case 'kicked':
         // Stop reconnect loop — another client took over intentionally
         wasKicked = true;
+        releaseWakeLock();
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         mainUI.classList.add('hidden');
         connectScreen.classList.remove('hidden');
@@ -3986,6 +3988,30 @@
       e.preventDefault();
       dahDown = false;
       sendPaddle('dah', 0);
+    }
+  });
+
+  // --- Screen Wake Lock (keep phone screen on while connected) ---
+  var wakeLock = null;
+
+  async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) return; // not supported
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', function() { wakeLock = null; });
+    } catch (e) {
+      // Wake lock request can fail if page is hidden or permission denied
+    }
+  }
+
+  function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release().catch(function() {}); wakeLock = null; }
+  }
+
+  // Re-acquire wake lock when page becomes visible again (OS may release it on tab switch)
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && !mainUI.classList.contains('hidden')) {
+      requestWakeLock();
     }
   });
 
