@@ -40,6 +40,6 @@ The portable version works identically to the installed version. Your settings a
 
 ## Still Having Problems?
 
-- Join the [POTACAT Discord](https://discord.gg/JjdKSshej) for help
+- Join the [POTACAT Discord](https://discord.gg/cuNQpES38C) for help
 - Open an [issue on GitHub](https://github.com/Waffleslop/POTACAT/issues)
 - A diagnostic log file (`potacat-install.log`) is created next to the installer — include it when reporting issues

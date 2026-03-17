@@ -9778,11 +9778,11 @@ document.getElementById('coffee-link').addEventListener('click', (e) => {
 });
 document.getElementById('discord-link').addEventListener('click', (e) => {
   e.preventDefault();
-  window.api.openExternal('https://discord.gg/JjdKSshej');
+  window.api.openExternal('https://discord.gg/cuNQpES38C');
 });
 document.getElementById('welcome-discord-link').addEventListener('click', (e) => {
   e.preventDefault();
-  window.api.openExternal('https://discord.gg/JjdKSshej');
+  window.api.openExternal('https://discord.gg/cuNQpES38C');
 });
 document.getElementById('welcome-coffee-btn').addEventListener('click', () => {
   window.api.openExternal('https://buymeacoffee.com/potacat');
@@ -10031,7 +10031,7 @@ document.getElementById('welcome-radio-help-link').addEventListener('click', (e)
 
 document.getElementById('welcome-radio-discord-link').addEventListener('click', (e) => {
   e.preventDefault();
-  window.api.openExternal('https://discord.gg/JjdKSshej');
+  window.api.openExternal('https://discord.gg/cuNQpES38C');
 });
 
 // Welcome hamlib rig search filter

@@ -129,7 +129,7 @@ POTACAT listens for WSJT-X UDP messages on the default port (2237). When WSJT-X 
 ## Community
 
 - **Website:** [potacat.com](https://potacat.com)
-- **Discord:** [discord.gg/JjdKSshej](https://discord.gg/JjdKSshej)
+- **Discord:** [discord.gg/cuNQpES38C](https://discord.gg/cuNQpES38C)
 - **Support:** [potacat.com/support](https://potacat.com/support)
 
 ## License
