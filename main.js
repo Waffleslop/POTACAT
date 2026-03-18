@@ -126,6 +126,7 @@ let _currentRfGain = 0;
 let _currentTxPower = 0; // 0 = unknown until radio reports actual power
 let _rfGainSuppressBroadcast = 0;  // timestamp: suppress ECHOCAT echo-back until this time
 let _txPowerSuppressBroadcast = 0;
+let _currentSquelch = 0;
 
 // Filter preset tables for rig controls (Hz values)
 const FILTER_PRESETS = {
@@ -181,7 +182,7 @@ function getRigCapabilities(rigType) {
     case 'yaesu':   return { nb: true, atu: true, vfo: true, filter: true, filterType: 'indexed', rfgain: true, txpower: true, power: true };
     case 'kenwood': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'direct', rfgain: true, txpower: true, power: true };
     case 'icom':    return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: true };
-    case 'rigctld': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'passband', rfgain: true, txpower: true, power: true };
+    case 'rigctld': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'passband', rfgain: true, txpower: true, squelch: true, power: true };
     default:        return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: false };
   }
 }
@@ -437,6 +438,7 @@ function broadcastRigState() {
     nb: _currentNbState,
     rfGain: _currentRfGain,
     txPower: _currentTxPower,
+    squelch: _currentSquelch,
     filterWidth: _currentFilterWidth,
     atuActive: _currentAtuState,
     mode: _currentMode,
@@ -2658,6 +2660,17 @@ function connectRemote() {
     });
   });
 
+  remoteServer.on('set-squelch', ({ value }) => {
+    if (cat && cat.connected) {
+      const rigType = detectRigType();
+      if (rigType === 'rigctld') cat.setSquelch(value / 9);
+      else cat.setSquelch(value / 9);
+    }
+    _currentSquelch = value;
+    broadcastRigState();
+    console.log('[Echo CAT] Squelch →', value);
+  });
+
   // Unified rig-control from ECHOCAT phone (same dispatch as desktop IPC)
   remoteServer.on('rig-control', (data) => {
     if (!data || !data.action) return;
@@ -3352,6 +3365,7 @@ function broadcastRemoteRadioStatus() {
     filterWidth: _currentFilterWidth,
     rfgain: rfg,
     txpower: txp,
+    squelch: _currentSquelch,
     capabilities: getRigCapabilities(rigType),
   };
   remoteServer.broadcastRadioStatus(status);

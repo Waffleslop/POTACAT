@@ -335,6 +335,9 @@
   const rcRfGainVal = document.getElementById('rc-rfgain-val');
   const rcTxPowerSlider = document.getElementById('rc-txpower-slider');
   const rcTxPowerVal = document.getElementById('rc-txpower-val');
+  const soSquelchRow = document.getElementById('so-squelch-row');
+  const rcSquelchSlider = document.getElementById('rc-squelch-slider');
+  const rcSquelchVal = document.getElementById('rc-squelch-val');
   const rcVfoA = document.getElementById('rc-vfo-a');
   const rcVfoB = document.getElementById('rc-vfo-b');
   const rcVfoSwap = document.getElementById('rc-vfo-swap');
@@ -874,6 +877,10 @@
       rcTxPowerSlider.value = s.txpower;
       rcTxPowerVal.textContent = s.txpower;
     }
+    if (s.squelch !== undefined) {
+      rcSquelchSlider.value = s.squelch;
+      rcSquelchVal.textContent = s.squelch;
+    }
     if (s.capabilities) {
       rigCapabilities = s.capabilities;
       soFilterRow.classList.toggle('hidden', !s.capabilities.filter);
@@ -881,6 +888,7 @@
       rcAtuGroup.classList.toggle('hidden', !s.capabilities.atu);
       soRfGainRow.classList.toggle('hidden', !s.capabilities.rfgain);
       soTxPowerRow.classList.toggle('hidden', !s.capabilities.txpower);
+      soSquelchRow.classList.toggle('hidden', !s.capabilities.squelch);
       rcVfoGroup.classList.toggle('hidden', !s.capabilities.vfo);
     }
   }
@@ -1794,6 +1802,16 @@
   rcTxPowerSlider.addEventListener('change', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'set-txpower', value: parseInt(rcTxPowerSlider.value) }));
+    }
+  });
+
+  // Squelch slider
+  rcSquelchSlider.addEventListener('input', () => {
+    rcSquelchVal.textContent = rcSquelchSlider.value;
+  });
+  rcSquelchSlider.addEventListener('change', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'set-squelch', value: parseInt(rcSquelchSlider.value) }));
     }
   });
 
