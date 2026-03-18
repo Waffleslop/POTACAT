@@ -1170,6 +1170,62 @@ th.col-drop-right { border-right: 2px solid var(--accent-blue) !important; }
   margin: 0;
 }
 
+/* Hide spot context menu */
+#hide-spot-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px var(--shadow-heavy);
+  min-width: 160px;
+}
+
+.hide-spot-title {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  border-bottom: 1px solid var(--border-primary);
+  margin-bottom: 2px;
+}
+
+.hide-spot-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.hide-spot-btn:hover {
+  background: var(--bg-hover);
+}
+
+.hide-spot-unhide {
+  color: var(--accent-green, #4ecca3);
+  border-top: 1px solid var(--border-primary);
+  margin-top: 2px;
+}
+
+.spots-hidden-badge {
+  font-size: 10px;
+  background: var(--accent-red);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 5px;
+  margin-left: 4px;
+}
+
+.spot-hidden-row {
+  opacity: 0.35;
+}
+
 /* Compact table mode (narrow pane in split view) */
 #spots-table.compact .log-btn {
   padding: 2px 4px;

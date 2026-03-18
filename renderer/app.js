@@ -33,6 +33,30 @@ let enableSolar = false;
 let enableBandActivity = false;
 let licenseClass = 'none';
 let hideOutOfBand = false;
+let showHiddenSpots = false;
+// Hidden spots: { CALLSIGN: expiryMs | Infinity }
+const HIDDEN_SPOTS_KEY = 'pota-cat-hidden-spots';
+let hiddenSpots = {};
+try { hiddenSpots = JSON.parse(localStorage.getItem(HIDDEN_SPOTS_KEY)) || {}; } catch { hiddenSpots = {}; }
+function saveHiddenSpots() { localStorage.setItem(HIDDEN_SPOTS_KEY, JSON.stringify(hiddenSpots)); }
+function pruneHiddenSpots() {
+  const now = Date.now();
+  let changed = false;
+  for (const call of Object.keys(hiddenSpots)) {
+    if (hiddenSpots[call] !== Infinity && hiddenSpots[call] < now) { delete hiddenSpots[call]; changed = true; }
+  }
+  if (changed) saveHiddenSpots();
+}
+function isSpotHidden(callsign) {
+  const exp = hiddenSpots[callsign.toUpperCase()];
+  if (exp == null) return false;
+  if (exp === Infinity) return true;
+  if (exp > Date.now()) return true;
+  delete hiddenSpots[callsign.toUpperCase()];
+  return false;
+}
+// Prune expired entries every 60s
+setInterval(pruneHiddenSpots, 60000);
 let enableLogging = false;
 let enableBannerLogger = false;
 let n1mmRst = false; // N1MM-style single-field RST inputs
@@ -146,6 +170,8 @@ const spotsHideWorked = document.getElementById('spots-hide-worked');
 const spotsHideParks = document.getElementById('spots-hide-parks');
 const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
+const spotsShowHidden = document.getElementById('spots-show-hidden');
+const spotsHiddenCount = document.getElementById('spots-hidden-count');
 const spotsDxcc = document.getElementById('spots-dxcc');
 const settingsBtn = document.getElementById('settings-btn');
 const logbookBtn = document.getElementById('logbook-btn');
@@ -3071,6 +3097,7 @@ function getFiltered() {
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     if (hideWorked && isWorkedSpot(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
+    if (!showHiddenSpots && isSpotHidden(s.callsign)) return false;
     return true;
   });
 }
@@ -5262,6 +5289,17 @@ function render() {
         tr.classList.add('scan-skipped');
       }
 
+      // Mark hidden spots visually when "show hidden" is on
+      if (showHiddenSpots && isSpotHidden(s.callsign)) {
+        tr.classList.add('spot-hidden-row');
+      }
+
+      // Right-click to hide spot
+      tr.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showHideSpotMenu(e.clientX, e.clientY, s.callsign);
+      });
+
       // WSJT-X decode indicator — show if this activator was recently decoded
       const wsjtxDecode = enableWsjtx && wsjtxDecodes.find(d => d.isPota && d.dxCall && d.dxCall.toUpperCase() === s.callsign.toUpperCase());
       if (wsjtxDecode) {
@@ -6018,6 +6056,11 @@ function syncSpotsPanel() {
   spotsHideWorked.checked = hideWorked;
   spotsHideParks.checked = hideWorkedParks;
   spotsHideOob.checked = hideOutOfBand;
+  spotsShowHidden.checked = showHiddenSpots;
+  pruneHiddenSpots();
+  const hiddenCount = Object.keys(hiddenSpots).length;
+  spotsHiddenCount.textContent = hiddenCount;
+  spotsHiddenCount.classList.toggle('hidden', hiddenCount === 0);
   spotsDxcc.checked = enableDxcc;
   spotsHideParksLabel.classList.toggle('hidden', workedParksSet.size === 0);
 }
@@ -6048,6 +6091,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   hideWorked = spotsHideWorked.checked;
   hideWorkedParks = spotsHideParks.checked;
   hideOutOfBand = spotsHideOob.checked;
+  showHiddenSpots = spotsShowHidden.checked;
   enableDxcc = spotsDxcc.checked;
 
   // Sync Settings dialog checkboxes
@@ -6076,6 +6120,53 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
     enableDxcc,
   });
 
+  render();
+});
+
+// --- Hide spot context menu ---
+const hideSpotMenu = document.getElementById('hide-spot-menu');
+const hideSpotCallEl = document.getElementById('hide-spot-call');
+let hideSpotTarget = '';
+
+function showHideSpotMenu(x, y, callsign) {
+  hideSpotTarget = callsign.toUpperCase();
+  hideSpotCallEl.textContent = callsign;
+  // Show unhide button if already hidden
+  const unhideBtn = hideSpotMenu.querySelector('.hide-spot-unhide');
+  unhideBtn.classList.toggle('hidden', !isSpotHidden(callsign));
+  hideSpotMenu.classList.remove('hidden');
+  // Position near click, keep on screen
+  const rect = hideSpotMenu.getBoundingClientRect();
+  hideSpotMenu.style.left = Math.min(x, window.innerWidth - 180) + 'px';
+  hideSpotMenu.style.top = Math.min(y, window.innerHeight - rect.height - 10) + 'px';
+}
+
+function closeHideSpotMenu() {
+  hideSpotMenu.classList.add('hidden');
+}
+
+document.addEventListener('click', (e) => {
+  if (!hideSpotMenu.contains(e.target)) closeHideSpotMenu();
+});
+
+hideSpotMenu.addEventListener('click', (e) => {
+  const btn = e.target.closest('.hide-spot-btn');
+  if (!btn || !hideSpotTarget) return;
+  const dur = btn.dataset.dur;
+  if (dur === 'unhide') {
+    delete hiddenSpots[hideSpotTarget];
+  } else if (dur === 'forever') {
+    hiddenSpots[hideSpotTarget] = Infinity;
+  } else if (dur === 'today') {
+    // End of current UTC day
+    const now = new Date();
+    const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+    hiddenSpots[hideSpotTarget] = endOfDay.getTime();
+  } else {
+    hiddenSpots[hideSpotTarget] = Date.now() + parseInt(dur, 10);
+  }
+  saveHiddenSpots();
+  closeHideSpotMenu();
   render();
 });
 
