@@ -1574,12 +1574,12 @@
         </div>
         <div>
           <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-remote-cw-enabled"> Enable Remote CW Keyer</label>
-          <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). Requires SmartSDR (FlexRadio) or CW Key Port.</span>
+          <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). FlexRadio users need no extra setup — CW keys via SmartSDR automatically.</span>
           <div style="margin-top:6px;margin-left:12px;">
-            <label>CW Key Port (DTR keying):
-              <select id="set-cw-key-port" style="width:220px;"><option value="">(none)</option></select>
+            <label>CW Key Port — optional (DTR keying):
+              <select id="set-cw-key-port" style="width:220px;"><option value="">(none — not needed for FlexRadio)</option></select>
             </label>
-            <span class="help-text" style="display:block;">External USB-serial adapter for DTR CW keying (QMX, etc). Separate from CAT port.</span>
+            <span class="help-text" style="display:block;">Only needed for non-Flex rigs (QMX, etc). Uses a separate USB-serial adapter to key CW via the DTR pin. Leave as "none" for FlexRadio.</span>
           </div>
         </div>
         <div id="remote-url-display" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
