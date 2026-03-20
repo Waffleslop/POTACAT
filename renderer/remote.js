@@ -4025,9 +4025,29 @@
     if (cwGain && cwKeying) cwGain.gain.value = cwSidetoneVol;
   });
 
-  // --- Keyboard paddle input (TinyMIDI Keyboard mode: [ = dit, ] = dah) ---
+  // --- Keyboard paddle input ---
+  // Key mappings per paddle device type
+  var PADDLE_KEYS = {
+    tinymidi: { dit: '[', dah: ']', match: function(e) { return e.key; } },
+    vail:     { dit: 'Control', dah: 'Control', match: function(e) {
+      // Vail/VBand: Left Ctrl = dit, Right Ctrl = dah
+      if (e.key !== 'Control') return null;
+      return e.location === 1 ? 'dit' : e.location === 2 ? 'dah' : null;
+    }},
+  };
+  var paddleType = localStorage.getItem('echocat-paddle-type') || 'tinymidi';
   var ditDown = false;
   var dahDown = false;
+
+  // Init dropdown from saved value
+  var soPaddleType = document.getElementById('so-paddle-type');
+  if (soPaddleType) {
+    soPaddleType.value = paddleType;
+    soPaddleType.addEventListener('change', function() {
+      paddleType = soPaddleType.value;
+      localStorage.setItem('echocat-paddle-type', paddleType);
+    });
+  }
 
   function sendPaddle(contact, state) {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -4035,14 +4055,27 @@
     }
   }
 
+  function matchPaddleKey(e) {
+    var cfg = PADDLE_KEYS[paddleType] || PADDLE_KEYS.tinymidi;
+    if (cfg.match !== PADDLE_KEYS.tinymidi.match) {
+      // Custom match function (Vail/VBand: distinguish L/R Ctrl by location)
+      return cfg.match(e);
+    }
+    // Simple key match (TinyMIDI: [ = dit, ] = dah)
+    if (e.key === cfg.dit) return 'dit';
+    if (e.key === cfg.dah) return 'dah';
+    return null;
+  }
+
   document.addEventListener('keydown', function(e) {
     if (!cwAvailable) return;
     if (e.repeat) return;
     if (isInputFocused()) return;
-    if (e.key === '[') {
+    var contact = matchPaddleKey(e);
+    if (contact === 'dit') {
       e.preventDefault();
       if (!ditDown) { ditDown = true; sendPaddle('dit', 1); }
-    } else if (e.key === ']') {
+    } else if (contact === 'dah') {
       e.preventDefault();
       if (!dahDown) { dahDown = true; sendPaddle('dah', 1); }
     }
@@ -4051,11 +4084,12 @@
   document.addEventListener('keyup', function(e) {
     if (!cwAvailable) return;
     if (isInputFocused()) return;
-    if (e.key === '[') {
+    var contact = matchPaddleKey(e);
+    if (contact === 'dit') {
       e.preventDefault();
       ditDown = false;
       sendPaddle('dit', 0);
-    } else if (e.key === ']') {
+    } else if (contact === 'dah') {
       e.preventDefault();
       dahDown = false;
       sendPaddle('dah', 0);
