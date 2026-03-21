@@ -2383,6 +2383,9 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
     }
+    // Safety: always force RX on disconnect regardless of tracked PTT state
+    // (prevents stuck TX from race conditions, VOX triggering, or stale state)
+    handleRemotePtt(false);
     // CW safety: ensure PTT released on disconnect (keyer.stop() is handled in RemoteServer)
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
       smartSdr.cwPttRelease();
@@ -2395,6 +2398,7 @@ function connectRemote() {
     if (cwKeyPort && cwKeyPort.isOpen) {
       cwKeyPort.set({ dtr: false }, () => {});
     }
+    // Destroy audio window AFTER PTT cleanup to prevent audio artifacts triggering VOX
     destroyRemoteAudioWindow();
     // Safety: disable JTCAT TX if phone was driving a QSO
     if (ft8Engine && remoteJtcatQso) {
