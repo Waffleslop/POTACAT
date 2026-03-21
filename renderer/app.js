@@ -12738,7 +12738,9 @@ var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq update
 var jtcatSpectrumFrame = 0;    // frame counter for throttling spectrum IPC to ~10fps
 
 async function startJtcatAudio() {
+  function jtLog(msg) { console.log(msg); try { window.api.jtcatLog && window.api.jtcatLog(msg); } catch(e){} }
   try {
+    jtLog('[JTCAT AUDIO] startJtcatAudio() called');
     var s = await window.api.getSettings();
     var audioConstraints = {
       channelCount: 1,
@@ -12750,29 +12752,35 @@ async function startJtcatAudio() {
     // Use the same audio input device as ECHOCAT (remoteAudioInput)
     if (s.remoteAudioInput) {
       audioConstraints.deviceId = { exact: s.remoteAudioInput };
-      console.log('[JTCAT] Using configured audio input:', s.remoteAudioInput);
+      jtLog('[JTCAT AUDIO] Using configured audio input: ' + s.remoteAudioInput);
     } else {
-      console.log('[JTCAT] No audio input configured, using default');
+      jtLog('[JTCAT AUDIO] No audio input configured, using default');
     }
+    // List available devices for diagnostics
+    try {
+      var devices = await navigator.mediaDevices.enumerateDevices();
+      var audioInputs = devices.filter(function(d) { return d.kind === 'audioinput'; });
+      jtLog('[JTCAT AUDIO] Available inputs: ' + audioInputs.map(function(d) { return d.label + ' [' + d.deviceId.slice(0,8) + ']'; }).join(', '));
+    } catch(e) { jtLog('[JTCAT AUDIO] enumerateDevices error: ' + e.message); }
     try {
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (e) {
       // Fall back to default device if configured one fails
-      console.warn('[JTCAT] Configured audio input not found, using default:', e.message);
+      jtLog('[JTCAT AUDIO] Configured input failed: ' + e.message + ', trying default');
       delete audioConstraints.deviceId;
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     }
     var audioTrack = jtcatAudioStream.getAudioTracks()[0];
-    console.log('[JTCAT] Got audio track:', audioTrack ? audioTrack.label : 'NONE',
-                'readyState:', audioTrack ? audioTrack.readyState : 'N/A',
-                'enabled:', audioTrack ? audioTrack.enabled : 'N/A');
+    jtLog('[JTCAT AUDIO] Got track: ' + (audioTrack ? audioTrack.label : 'NONE') +
+          ' state=' + (audioTrack ? audioTrack.readyState : 'N/A') +
+          ' enabled=' + (audioTrack ? audioTrack.enabled : 'N/A') +
+          ' muted=' + (audioTrack ? audioTrack.muted : 'N/A'));
 
     jtcatAudioCtx = new AudioContext({ sampleRate: 12000 });
-    console.log('[JTCAT] AudioContext created, state:', jtcatAudioCtx.state,
-                'sampleRate:', jtcatAudioCtx.sampleRate);
+    jtLog('[JTCAT AUDIO] AudioContext state=' + jtcatAudioCtx.state + ' sampleRate=' + jtcatAudioCtx.sampleRate);
     if (jtcatAudioCtx.state === 'suspended') {
       await jtcatAudioCtx.resume();
-      console.log('[JTCAT] AudioContext resumed, state:', jtcatAudioCtx.state);
+      jtLog('[JTCAT AUDIO] After resume: state=' + jtcatAudioCtx.state);
     }
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
 
@@ -12789,20 +12797,20 @@ async function startJtcatAudio() {
       try {
         var samples = e.inputBuffer.getChannelData(0);
         _jtcatAudioCallbackCount++;
-        if (_jtcatAudioCallbackCount <= 3) {
+        if (_jtcatAudioCallbackCount <= 3 || _jtcatAudioCallbackCount % 100 === 0) {
           var maxVal = 0;
           for (var i = 0; i < samples.length; i++) if (Math.abs(samples[i]) > maxVal) maxVal = Math.abs(samples[i]);
-          console.log('[JTCAT] onaudioprocess #' + _jtcatAudioCallbackCount + ' samples:', samples.length, 'peak:', maxVal.toFixed(6));
+          jtLog('[JTCAT AUDIO] onaudioprocess #' + _jtcatAudioCallbackCount + ' len=' + samples.length + ' peak=' + maxVal.toFixed(6));
         }
         // Send copy of buffer to main process for FT8 decode
         window.api.jtcatAudio(Array.from(samples));
       } catch (err) {
-        console.error('[JTCAT] Audio processor error:', err.message || err);
+        jtLog('[JTCAT AUDIO] processor error: ' + (err.message || err));
       }
     };
     source.connect(jtcatAudioProcessor);
     jtcatAudioProcessor.connect(jtcatAudioCtx.destination);
-    console.log('[JTCAT] Audio pipeline connected (source → analyser + processor → destination)');
+    jtLog('[JTCAT AUDIO] Pipeline connected OK');
 
     // Monitor audio stream — some rigs (e.g. Yaesu FT-710) disconnect USB audio during TX
     var audioTrack = jtcatAudioStream.getAudioTracks()[0];

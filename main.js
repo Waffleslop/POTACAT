@@ -7542,6 +7542,9 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
   ipcMain.on('jtcat-tx-complete', () => { if (ft8Engine) ft8Engine.txComplete(); });
+  ipcMain.on('jtcat-log', (_e, msg) => {
+    console.log(msg);
+  });
   ipcMain.on('jtcat-audio', (_e, buf) => {
     if (ft8Engine) ft8Engine.feedAudio(new Float32Array(buf));
   });

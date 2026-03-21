@@ -161,6 +161,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),
   jtcatAudio: (buf) => ipcRenderer.send('jtcat-audio', buf),
+  jtcatLog: (msg) => ipcRenderer.send('jtcat-log', msg),
   jtcatQuietFreq: (hz) => ipcRenderer.send('jtcat-quiet-freq', hz),
   jtcatSpectrum: (bins) => ipcRenderer.send('jtcat-spectrum', bins),
   onJtcatDecode: (cb) => ipcRenderer.on('jtcat-decode', (_e, data) => cb(data)),
