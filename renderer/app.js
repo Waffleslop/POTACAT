@@ -12760,6 +12760,10 @@ async function startJtcatAudio() {
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     }
     jtcatAudioCtx = new AudioContext({ sampleRate: 12000 });
+    // Chromium 142+ (Electron 39): AudioContext starts suspended, must resume explicitly
+    if (jtcatAudioCtx.state === 'suspended') {
+      await jtcatAudioCtx.resume();
+    }
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
 
     // AnalyserNode for waterfall FFT (2048-point → 1024 frequency bins covering 0–6000 Hz)
