@@ -4370,6 +4370,21 @@ document.addEventListener('keydown', (e) => {
     if (onFreqRow) onFreqRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     return;
   }
+  // Enter — tune to selected spot (same as clicking the row)
+  if (e.key === 'Enter' && !e.target.matches('input, select, textarea') && showTable && !scanning && lastTunedSpot) {
+    e.preventDefault();
+    window.api.tune(lastTunedSpot.frequency, lastTunedSpot.mode, lastTunedSpot.bearing);
+    return;
+  }
+  // Arrow Left/Right — nudge frequency ±1 kHz
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.target.matches('input, select, textarea') && showTable && !scanning && lastTunedSpot) {
+    e.preventDefault();
+    const delta = e.key === 'ArrowRight' ? 1000 : -1000;
+    const newFreq = lastTunedSpot.frequency + delta;
+    lastTunedSpot = { ...lastTunedSpot, frequency: newFreq };
+    window.api.tune(newFreq, lastTunedSpot.mode, lastTunedSpot.bearing);
+    return;
+  }
   // S — Toggle split mode
   if (e.key === 's' && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
@@ -9916,6 +9931,67 @@ window.api.onCatStatus((s) => {
     rigPanelBtn.classList.add('hidden');
     if (rigPopoverOpen) closeRigPopover();
   }
+});
+
+// --- Rig Popover Tabs ---
+const rigTabBtns = rigPopover.querySelectorAll('.rig-tab-btn');
+const rigTabControls = document.getElementById('rig-tab-controls');
+const rigTabCustom = document.getElementById('rig-tab-custom');
+
+rigTabBtns.forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const tab = btn.dataset.rigTab;
+    rigTabBtns.forEach(b => b.classList.toggle('active', b === btn));
+    rigTabControls.classList.toggle('hidden', tab !== 'controls');
+    rigTabCustom.classList.toggle('hidden', tab !== 'custom');
+  });
+});
+
+// --- Custom CAT Buttons ---
+const rigCustomSlots = rigTabCustom.querySelectorAll('.rig-custom-slot');
+let customCatButtons = JSON.parse(localStorage.getItem('custom-cat-buttons') || '[]');
+// Ensure we have exactly 5 slots
+while (customCatButtons.length < 5) customCatButtons.push({ name: '', command: '' });
+
+function loadCustomButtons() {
+  rigCustomSlots.forEach((slot, i) => {
+    const nameInput = slot.querySelector('.rig-custom-name');
+    const cmdInput = slot.querySelector('.rig-custom-cmd');
+    nameInput.value = customCatButtons[i].name || '';
+    cmdInput.value = customCatButtons[i].command || '';
+  });
+}
+
+function saveCustomButtons() {
+  localStorage.setItem('custom-cat-buttons', JSON.stringify(customCatButtons));
+}
+
+loadCustomButtons();
+
+rigCustomSlots.forEach((slot, i) => {
+  const nameInput = slot.querySelector('.rig-custom-name');
+  const cmdInput = slot.querySelector('.rig-custom-cmd');
+  const sendBtn = slot.querySelector('.rig-custom-send');
+
+  nameInput.addEventListener('change', () => {
+    customCatButtons[i].name = nameInput.value.trim();
+    saveCustomButtons();
+  });
+
+  cmdInput.addEventListener('change', () => {
+    customCatButtons[i].command = cmdInput.value.trim();
+    saveCustomButtons();
+  });
+
+  sendBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const cmd = cmdInput.value.trim();
+    if (!cmd) return;
+    window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+    sendBtn.style.background = '#2a6e4e';
+    setTimeout(() => { sendBtn.style.background = ''; }, 300);
+  });
 });
 
 // --- Pi Access (The Net easter egg) ---

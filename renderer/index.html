@@ -177,25 +177,38 @@
       </div>
       <span id="rig-panel-btn" class="status hidden" style="background:#2a6e4e;color:#fff;cursor:pointer;">Rig</span>
       <div id="rig-popover" class="rig-popover hidden">
-        <div class="rig-popover-row rig-popover-buttons">
-          <button id="rig-atu-btn" class="rig-btn" title="Start ATU tune cycle">ATU Tune</button>
-          <button id="rig-nb-btn" class="rig-btn" title="Toggle Noise Blanker">NB</button>
-          <button id="rig-power-on-btn" class="rig-btn" title="Power On">Power On</button>
-          <button id="rig-power-off-btn" class="rig-btn rig-btn-danger" title="Power Off">Power Off</button>
+        <div class="rig-popover-tabs">
+          <button class="rig-tab-btn active" data-rig-tab="controls">Controls</button>
+          <button class="rig-tab-btn" data-rig-tab="custom">Custom</button>
         </div>
-        <div class="rig-popover-row">
-          <label>RF Gain</label>
-          <input type="range" id="rig-rfgain" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
-          <span id="rig-rfgain-label">0</span>
+        <div id="rig-tab-controls" class="rig-tab-panel">
+          <div class="rig-popover-row rig-popover-buttons">
+            <button id="rig-atu-btn" class="rig-btn" title="Start ATU tune cycle">ATU Tune</button>
+            <button id="rig-nb-btn" class="rig-btn" title="Toggle Noise Blanker">NB</button>
+            <button id="rig-power-on-btn" class="rig-btn" title="Power On">Power On</button>
+            <button id="rig-power-off-btn" class="rig-btn rig-btn-danger" title="Power Off">Power Off</button>
+          </div>
+          <div class="rig-popover-row">
+            <label>RF Gain</label>
+            <input type="range" id="rig-rfgain" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-rfgain-label">0</span>
+          </div>
+          <div class="rig-popover-row">
+            <label>TX Power</label>
+            <input type="range" id="rig-txpower" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-txpower-label">0W</span>
+          </div>
+          <div class="rig-popover-row">
+            <label>Filter</label>
+            <div id="rig-filter-presets" class="rig-filter-presets"></div>
+          </div>
         </div>
-        <div class="rig-popover-row">
-          <label>TX Power</label>
-          <input type="range" id="rig-txpower" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
-          <span id="rig-txpower-label">0W</span>
-        </div>
-        <div class="rig-popover-row">
-          <label>Filter</label>
-          <div id="rig-filter-presets" class="rig-filter-presets"></div>
+        <div id="rig-tab-custom" class="rig-tab-panel hidden">
+          <div class="rig-custom-slot" data-slot="0"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
+          <div class="rig-custom-slot" data-slot="1"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
+          <div class="rig-custom-slot" data-slot="2"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
+          <div class="rig-custom-slot" data-slot="3"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
+          <div class="rig-custom-slot" data-slot="4"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
         </div>
       </div>
       <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
@@ -1785,6 +1798,8 @@
         <tr><td><kbd>F5</kbd></td><td>Check for updates</td></tr>
         <tr><td><kbd>F11</kbd></td><td>Welcome / setup screen</td></tr>
         <tr><td><kbd>&uarr;&darr;</kbd></td><td>Navigate spots &amp; tune radio</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>Tune to selected spot</td></tr>
+        <tr><td><kbd>&larr;&rarr;</kbd></td><td>Nudge frequency &plusmn;1 kHz</td></tr>
         <tr><td><kbd>Space</kbd></td><td>Start / stop scan</td></tr>
         <tr><td><kbd>S</kbd></td><td>Toggle split mode</td></tr>
         <tr><td><kbd>Ctrl+L</kbd></td><td>Quick Log (unspotted QSO)</td></tr>
