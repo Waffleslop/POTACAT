@@ -6677,6 +6677,29 @@ app.whenReady().then(() => {
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
 
+  // --- Remote Launcher IPC ---
+  ipcMain.handle('install-launcher', () => {
+    try {
+      const script = path.join(__dirname, 'scripts', 'launcher-install.js');
+      const { execSync } = require('child_process');
+      execSync(`"${process.execPath}" "${script}"`, { encoding: 'utf8', timeout: 15000, windowsHide: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('uninstall-launcher', () => {
+    try {
+      const script = path.join(__dirname, 'scripts', 'launcher-install.js');
+      const { execSync } = require('child_process');
+      execSync(`"${process.execPath}" "${script}" --uninstall`, { encoding: 'utf8', timeout: 15000, windowsHide: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // --- ECHOCAT IPC ---
   ipcMain.handle('get-local-ips', () => RemoteServer.getLocalIPs());
 
@@ -6797,8 +6820,11 @@ app.whenReady().then(() => {
   ipcMain.handle('list-rigs', async () => {
     try {
       const rigctldPath = findRigctld();
+      console.log(`[hamlib] Using rigctld at: ${rigctldPath}`);
       return await listRigs(rigctldPath);
-    } catch {
+    } catch (err) {
+      console.error(`[hamlib] Failed to list rigs: ${err.message}`);
+      sendCatLog(`[hamlib] rigctld not found or failed: ${err.message}. On Linux: sudo apt install libhamlib-utils`);
       return [];
     }
   });
