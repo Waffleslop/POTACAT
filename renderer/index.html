@@ -1500,6 +1500,10 @@
           <input type="number" id="set-smartsdr-max-age" min="0" max="120" value="15" style="width:60px;">
         </label>
         <span class="help-text" style="display:block;">0 = no limit (show all spots)</span>
+        <label style="margin-top:8px;">Max spots on panadapter:
+          <input type="number" id="set-smartsdr-max-spots" min="0" max="500" value="0" style="width:60px;">
+        </label>
+        <span class="help-text" style="display:block;">Limit total spots pushed. Reduces audio dropouts on Flex 6500. 0 = no limit.</span>
       </div>
       <label class="checkbox-label">
         <input type="checkbox" id="set-tci-spots"> Push spots to Thetis/TCI panadapter

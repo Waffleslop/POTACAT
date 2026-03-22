@@ -2119,7 +2119,9 @@ function pushSpotsToSmartSdr(spots) {
   const tableMaxAgeMs = ((settings.maxAgeMin != null ? settings.maxAgeMin : 5) * 60000) || 300000;
   const sdrMaxAgeMs = (settings.smartSdrMaxAge != null ? settings.smartSdrMaxAge : 15) * 60000;
   const maxAgeMs = sdrMaxAgeMs > 0 ? Math.min(sdrMaxAgeMs, tableMaxAgeMs) : tableMaxAgeMs;
+  const maxSpots = settings.smartSdrMaxSpots || 0;
 
+  let pushed = 0;
   for (const spot of spots) {
     // Age filter — skip spots older than the effective max age (table age or panadapter age, whichever is smaller)
     if (maxAgeMs > 0 && spot.spotTime) {
@@ -2128,6 +2130,8 @@ function pushSpotsToSmartSdr(spots) {
       if (age > maxAgeMs) continue;
     }
     smartSdr.addSpot(spot);
+    pushed++;
+    if (maxSpots > 0 && pushed >= maxSpots) break;
   }
   // Remove spots no longer in the list (instead of clear+re-add which causes flashing)
   smartSdr.pruneStaleSpots();

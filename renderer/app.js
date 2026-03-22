@@ -546,6 +546,7 @@ const setSmartSdrSpots = document.getElementById('set-smartsdr-spots');
 const smartSdrConfig = document.getElementById('smartsdr-config');
 const setSmartSdrHost = document.getElementById('set-smartsdr-host');
 const setSmartSdrMaxAge = document.getElementById('set-smartsdr-max-age');
+const setSmartSdrMaxSpots = document.getElementById('set-smartsdr-max-spots');
 const setTciSpots = document.getElementById('set-tci-spots');
 const tciConfig = document.getElementById('tci-config');
 const setTciHost = document.getElementById('set-tci-host');
@@ -6732,6 +6733,7 @@ async function openSettingsDialog(tab) {
   setSmartSdrSpots.checked = s.smartSdrSpots === true;
   setSmartSdrHost.value = s.smartSdrHost || '127.0.0.1';
   setSmartSdrMaxAge.value = s.smartSdrMaxAge != null ? s.smartSdrMaxAge : 15;
+  setSmartSdrMaxSpots.value = s.smartSdrMaxSpots != null ? s.smartSdrMaxSpots : 0;
   smartSdrConfig.classList.toggle('hidden', !s.smartSdrSpots);
   setTciSpots.checked = s.tciSpots === true;
   setTciHost.value = s.tciHost || '127.0.0.1';
@@ -6917,6 +6919,7 @@ settingsSave.addEventListener('click', async () => {
   const smartSdrSpotsEnabled = setSmartSdrSpots.checked;
   const smartSdrHostVal = setSmartSdrHost.value.trim() || '127.0.0.1';
   const smartSdrMaxAgeVal = parseInt(setSmartSdrMaxAge.value, 10) || 0;
+  const smartSdrMaxSpotsVal = parseInt(setSmartSdrMaxSpots.value, 10) || 0;
   const tciSpotsEnabled = setTciSpots.checked;
   const tciHostVal = setTciHost.value.trim() || '127.0.0.1';
   const tciPortVal = parseInt(setTciPort.value, 10) || 50001;
@@ -7051,6 +7054,7 @@ settingsSave.addEventListener('click', async () => {
     smartSdrSpots: smartSdrSpotsEnabled,
     smartSdrHost: smartSdrHostVal,
     smartSdrMaxAge: smartSdrMaxAgeVal,
+    smartSdrMaxSpots: smartSdrMaxSpotsVal,
     tciSpots: tciSpotsEnabled,
     tciHost: tciHostVal,
     tciPort: tciPortVal,
