@@ -6841,13 +6841,28 @@ app.whenReady().then(() => {
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
 
-  // --- Remote Launcher IPC (experimental — not yet ready for release) ---
+  // --- Remote Launcher IPC ---
   ipcMain.handle('install-launcher', () => {
-    return { ok: false, error: 'Remote Launcher is not yet available. Coming in a future release.' };
+    try {
+      const script = path.join(__dirname, 'scripts', 'launcher-install.js');
+      const { execSync } = require('child_process');
+      // Use node (not process.execPath which is Electron — that would start a full app and conflict on port 7300)
+      execSync(`node "${script}"`, { encoding: 'utf8', timeout: 15000, windowsHide: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   ipcMain.handle('uninstall-launcher', () => {
-    return { ok: false, error: 'Remote Launcher is not yet available.' };
+    try {
+      const script = path.join(__dirname, 'scripts', 'launcher-install.js');
+      const { execSync } = require('child_process');
+      execSync(`node "${script}" --uninstall`, { encoding: 'utf8', timeout: 15000, windowsHide: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   // --- ECHOCAT IPC ---
