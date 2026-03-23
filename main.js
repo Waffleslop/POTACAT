@@ -572,6 +572,11 @@ async function connectCat() {
   } else {
     cat = new CatClient();
     cat._debug = true;
+    // Set model-specific KY param (FTDX101D uses KY1 for send, others use KY0)
+    const serialModel = getActiveRigModel();
+    if (serialModel && serialModel.cw && serialModel.cw.kyParam != null) {
+      cat._kyParam = serialModel.cw.kyParam;
+    }
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', sendCatFrequency);
