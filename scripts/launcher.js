@@ -73,36 +73,39 @@ function parseArgs() {
 }
 
 // --- Process detection ---
-function isRunning() {
-  try {
-    if (IS_WIN) {
-      const out = execSync(`tasklist /FI "IMAGENAME eq ${PROCESS_NAME}" /NH`, {
-        encoding: 'utf8', timeout: 5000, windowsHide: true,
-      });
-      return out.includes(PROCESS_NAME);
-    } else {
-      execSync(`pgrep -x "${PROCESS_NAME}"`, { timeout: 5000 });
-      return true;
-    }
-  } catch {
-    return false;
-  }
-}
+const MY_PID = process.pid;
 
-function getPid() {
+/** Get all PIDs of POTACAT.exe except our own launcher process */
+function getOtherPids() {
   try {
     if (IS_WIN) {
       const out = execSync(`tasklist /FI "IMAGENAME eq ${PROCESS_NAME}" /FO CSV /NH`, {
         encoding: 'utf8', timeout: 5000, windowsHide: true,
       });
-      const match = out.match(/"[^"]*","(\d+)"/);
-      return match ? parseInt(match[1], 10) : null;
+      const pids = [];
+      const re = /"[^"]*","(\d+)"/g;
+      let m;
+      while ((m = re.exec(out)) !== null) {
+        const pid = parseInt(m[1], 10);
+        if (pid !== MY_PID) pids.push(pid);
+      }
+      return pids;
     } else {
-      return parseInt(execSync(`pgrep -x "${PROCESS_NAME}"`, { encoding: 'utf8', timeout: 5000 }).trim(), 10) || null;
+      const out = execSync(`pgrep -x "${PROCESS_NAME}"`, { encoding: 'utf8', timeout: 5000 });
+      return out.trim().split('\n').map(s => parseInt(s, 10)).filter(p => p && p !== MY_PID);
     }
   } catch {
-    return null;
+    return [];
   }
+}
+
+function isRunning() {
+  return getOtherPids().length > 0;
+}
+
+function getPid() {
+  const pids = getOtherPids();
+  return pids.length > 0 ? pids[0] : null;
 }
 
 // --- ECHOCAT port probe ---
@@ -174,15 +177,19 @@ function startPotacat() {
 }
 
 function stopPotacat() {
-  if (!isRunning()) return { ok: true, already: true };
+  const pids = getOtherPids();
+  if (pids.length === 0) return { ok: true, already: true };
   try {
-    if (IS_WIN) {
-      execSync(`taskkill /IM ${PROCESS_NAME} /F`, { timeout: 10000, windowsHide: true });
-    } else {
-      execSync(`pkill -x "${PROCESS_NAME}"`, { timeout: 10000 });
+    // Kill only GUI POTACAT processes, not our own launcher
+    for (const pid of pids) {
+      if (IS_WIN) {
+        execSync(`taskkill /PID ${pid} /F`, { timeout: 10000, windowsHide: true });
+      } else {
+        execSync(`kill ${pid}`, { timeout: 10000 });
+      }
     }
     startedAt = null;
-    console.log('[Launcher] Stopped POTACAT');
+    console.log('[Launcher] Stopped POTACAT (PIDs:', pids.join(', ') + ')');
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
