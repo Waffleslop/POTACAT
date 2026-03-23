@@ -594,8 +594,11 @@ async function connectCat() {
   } else {
     cat = new CatClient();
     cat._debug = true;
-    // Set model-specific KY param (FTDX101D uses KY1 for send, others use KY0)
+    // Set model-specific CW text mode (FTDX101D uses KM+KY6 write-then-playback)
     const serialModel = getActiveRigModel();
+    if (serialModel && serialModel.cw && serialModel.cw.kyMode) {
+      cat._kyMode = serialModel.cw.kyMode;
+    }
     if (serialModel && serialModel.cw && serialModel.cw.kyParam != null) {
       cat._kyParam = serialModel.cw.kyParam;
     }
