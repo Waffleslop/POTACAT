@@ -2307,6 +2307,7 @@ function connectCwKeyPort() {
     hupcl: false,
   });
   cwKeyPort = port;
+  port._dtrFailed = false; // reset DTR fallback flag on fresh connection
   port.on('open', () => {
     // Force DTR low initially (key up), RTS low too
     port.set({ dtr: false, rts: false }, () => {});
@@ -2468,9 +2469,19 @@ function connectRemote() {
     }
     // Dedicated CW Key Port — DTR keying via external USB-serial adapter (FTDI/CH340/CP2102)
     if (cwKeyPort && cwKeyPort.isOpen) {
-      cwKeyPort.set({ dtr: !!down }, (err) => {
-        if (err) console.log(`[CW Key Port] DTR error: ${err.message}`);
-      });
+      if (!cwKeyPort._dtrFailed) {
+        cwKeyPort.set({ dtr: !!down }, (err) => {
+          if (err) {
+            console.log(`[CW Key Port] DTR error: ${err.message} — falling back to TX/RX keying`);
+            cwKeyPort._dtrFailed = true;
+            // Fall back to TX/RX keying on main CAT port
+            if (cat && cat.connected) cat.setCwKeyTxRx(down);
+          }
+        });
+      } else {
+        // DTR already failed on this port — use TX/RX keying on main CAT port
+        if (cat && cat.connected) cat.setCwKeyTxRx(down);
+      }
     }
   });
 
