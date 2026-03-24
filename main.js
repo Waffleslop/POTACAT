@@ -2568,9 +2568,14 @@ function connectRemote() {
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
       smartSdr.cwPttRelease();
     }
-    // Icom: force DTR low (CW key up) on disconnect
+    // Icom: force key up on disconnect — both DTR and TX/RX methods
     if (detectRigType() === 'icom' && cat && cat.connected) {
       cat.setCwKeyDtr(false);
+      cat.setCwKeyTxRx(false);
+    }
+    // Yaesu/Kenwood: force TX/RX key up on disconnect
+    if ((detectRigType() === 'yaesu' || detectRigType() === 'kenwood') && cat && cat.connected) {
+      cat.setCwKeyTxRx(false);
     }
     // Force CW key port DTR low (key up) on disconnect
     if (cwKeyPort && cwKeyPort.isOpen) {
