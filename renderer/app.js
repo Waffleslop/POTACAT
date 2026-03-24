@@ -10075,47 +10075,48 @@ rigTabBtns.forEach(btn => {
 });
 
 // --- Custom CAT Buttons ---
-const rigCustomSlots = rigTabCustom.querySelectorAll('.rig-custom-slot');
+const rigCustomSlotsContainer = document.getElementById('rig-custom-slots');
+const rigCustomAddBtn = document.getElementById('rig-custom-add');
 let customCatButtons = JSON.parse(localStorage.getItem('custom-cat-buttons') || '[]');
-// Ensure we have exactly 5 slots
-while (customCatButtons.length < 5) customCatButtons.push({ name: '', command: '' });
-
-function loadCustomButtons() {
-  rigCustomSlots.forEach((slot, i) => {
-    const nameInput = slot.querySelector('.rig-custom-name');
-    const cmdInput = slot.querySelector('.rig-custom-cmd');
-    nameInput.value = customCatButtons[i].name || '';
-    cmdInput.value = customCatButtons[i].command || '';
-  });
+// Start with at least 1 blank slot
+if (customCatButtons.length === 0) customCatButtons.push({ name: '', command: '' });
+// Clean up legacy: remove trailing empty slots beyond the last non-empty one
+while (customCatButtons.length > 1 && !customCatButtons[customCatButtons.length - 1].name && !customCatButtons[customCatButtons.length - 1].command) {
+  customCatButtons.pop();
 }
 
-function saveCustomButtons() {
-  localStorage.setItem('custom-cat-buttons', JSON.stringify(customCatButtons));
-  // Persist to settings.json so ECHOCAT can access them
-  window.api.saveSettings({ customCatButtons });
-}
-
-loadCustomButtons();
-// Migrate localStorage buttons to settings.json if not already synced
-if (customCatButtons.some(b => b.name || b.command)) {
-  window.api.saveSettings({ customCatButtons });
-}
-
-rigCustomSlots.forEach((slot, i) => {
-  const nameInput = slot.querySelector('.rig-custom-name');
-  const cmdInput = slot.querySelector('.rig-custom-cmd');
-  const sendBtn = slot.querySelector('.rig-custom-send');
+function createCustomSlot(i) {
+  const slot = document.createElement('div');
+  slot.className = 'rig-custom-slot';
+  slot.dataset.slot = i;
+  const nameInput = document.createElement('input');
+  nameInput.className = 'rig-custom-name';
+  nameInput.placeholder = 'Label';
+  nameInput.maxLength = 12;
+  nameInput.value = customCatButtons[i] ? customCatButtons[i].name || '' : '';
+  const cmdInput = document.createElement('input');
+  cmdInput.className = 'rig-custom-cmd';
+  cmdInput.placeholder = 'CAT command';
+  cmdInput.maxLength = 64;
+  cmdInput.value = customCatButtons[i] ? customCatButtons[i].command || '' : '';
+  const sendBtn = document.createElement('button');
+  sendBtn.className = 'rig-btn rig-custom-send';
+  sendBtn.title = 'Send command';
+  sendBtn.textContent = 'Send';
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'rig-btn rig-custom-remove';
+  removeBtn.title = 'Remove';
+  removeBtn.textContent = '\u00d7';
+  removeBtn.style.cssText = 'padding:2px 5px;font-size:13px;color:#e94560;min-width:auto;';
 
   nameInput.addEventListener('change', () => {
-    customCatButtons[i].name = nameInput.value.trim();
+    if (customCatButtons[i]) customCatButtons[i].name = nameInput.value.trim();
     saveCustomButtons();
   });
-
   cmdInput.addEventListener('change', () => {
-    customCatButtons[i].command = cmdInput.value.trim();
+    if (customCatButtons[i]) customCatButtons[i].command = cmdInput.value.trim();
     saveCustomButtons();
   });
-
   sendBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const cmd = cmdInput.value.trim();
@@ -10124,7 +10125,54 @@ rigCustomSlots.forEach((slot, i) => {
     sendBtn.style.background = '#2a6e4e';
     setTimeout(() => { sendBtn.style.background = ''; }, 300);
   });
-});
+  removeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    customCatButtons.splice(i, 1);
+    if (customCatButtons.length === 0) customCatButtons.push({ name: '', command: '' });
+    saveCustomButtons();
+    renderCustomSlots();
+  });
+
+  slot.appendChild(nameInput);
+  slot.appendChild(cmdInput);
+  slot.appendChild(sendBtn);
+  slot.appendChild(removeBtn);
+  return slot;
+}
+
+function renderCustomSlots() {
+  rigCustomSlotsContainer.innerHTML = '';
+  for (let i = 0; i < customCatButtons.length; i++) {
+    rigCustomSlotsContainer.appendChild(createCustomSlot(i));
+  }
+}
+
+function loadCustomButtons() {
+  renderCustomSlots();
+}
+
+function saveCustomButtons() {
+  localStorage.setItem('custom-cat-buttons', JSON.stringify(customCatButtons));
+  window.api.saveSettings({ customCatButtons });
+}
+
+renderCustomSlots();
+// Migrate localStorage buttons to settings.json if not already synced
+if (customCatButtons.some(b => b.name || b.command)) {
+  window.api.saveSettings({ customCatButtons });
+}
+
+if (rigCustomAddBtn) {
+  rigCustomAddBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    customCatButtons.push({ name: '', command: '' });
+    saveCustomButtons();
+    renderCustomSlots();
+    // Focus the new slot's label input
+    const slots = rigCustomSlotsContainer.querySelectorAll('.rig-custom-name');
+    if (slots.length > 0) slots[slots.length - 1].focus();
+  });
+}
 
 // --- Pi Access (The Net easter egg) ---
 // Ctrl+Shift+Click (Cmd+Shift+Click on Mac) on π unlocks JTCAT + Remote CW

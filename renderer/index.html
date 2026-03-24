@@ -205,11 +205,8 @@
           </div>
         </div>
         <div id="rig-tab-custom" class="rig-tab-panel hidden">
-          <div class="rig-custom-slot" data-slot="0"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
-          <div class="rig-custom-slot" data-slot="1"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
-          <div class="rig-custom-slot" data-slot="2"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
-          <div class="rig-custom-slot" data-slot="3"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
-          <div class="rig-custom-slot" data-slot="4"><input class="rig-custom-name" placeholder="Label" maxlength="12"><input class="rig-custom-cmd" placeholder="CAT command" maxlength="64"><button class="rig-btn rig-custom-send" title="Send command">Send</button></div>
+          <div id="rig-custom-slots"></div>
+          <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add</button>
         </div>
       </div>
       <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
@@ -1606,6 +1603,15 @@
         </div>
         <div id="remote-url-display" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
         <span class="help-text">To use ECHOCAT securely outside your home network, install a VPN such as <a href="https://tailscale.com" target="_blank" style="color:#4fc3f7;">Tailscale</a> (free) on both your shack computer and phone. Audio, tuning, and PTT are all encrypted over the VPN tunnel.</span>
+        <!-- Remote Launcher -->
+        <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-enable-launcher"> Remote Launcher (start POTACAT from your phone)</label>
+          <span class="help-text" style="margin-left:12px;display:block;">Runs a tiny web server at startup so you can start, stop, or restart POTACAT from your phone when you're away from the shack. Uses your callsign as the passphrase.</span>
+          <div id="launcher-config" class="hidden" style="margin-top:6px;margin-left:12px;">
+            <div id="launcher-url-display" style="font-family:monospace;font-size:12px;margin-bottom:6px;word-break:break-all;"></div>
+            <span id="launcher-status" style="font-size:11px;color:#aaa;"></span>
+          </div>
+        </div>
         <!-- Club Station Mode -->
         <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
           <label class="checkbox-label"><input type="checkbox" id="set-club-mode"> Club Station Mode</label>
