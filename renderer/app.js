@@ -13047,33 +13047,11 @@ async function startJtcatAudio() {
 
     try {
       // AudioWorklet: runs on audio thread, reliable in Chromium 134+
-      var workletCode = `
-        class JtcatProcessor extends AudioWorkletProcessor {
-          constructor() { super(); this.buffer = []; this.dsRatio = ${dsRatio.toFixed(6)}; }
-          process(inputs) {
-            var input = inputs[0] && inputs[0][0];
-            if (!input) return true;
-            if (this.dsRatio > 1.01) {
-              var outLen = Math.floor(input.length / this.dsRatio);
-              var ds = new Float32Array(outLen);
-              for (var i = 0; i < outLen; i++) ds[i] = input[Math.round(i * this.dsRatio)];
-              this.buffer.push(...ds);
-            } else {
-              this.buffer.push(...input);
-            }
-            if (this.buffer.length >= 4096) {
-              this.port.postMessage(this.buffer.splice(0, 4096));
-            }
-            return true;
-          }
-        }
-        registerProcessor('jtcat-processor', JtcatProcessor);
-      `;
-      var blob = new Blob([workletCode], { type: 'application/javascript' });
-      var url = URL.createObjectURL(blob);
-      await jtcatAudioCtx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
-      var workletNode = new AudioWorkletNode(jtcatAudioCtx, 'jtcat-processor');
+      // Loaded from file (not blob URL) to satisfy CSP default-src 'self'
+      await jtcatAudioCtx.audioWorklet.addModule('jtcat-audio-worklet.js');
+      var workletNode = new AudioWorkletNode(jtcatAudioCtx, 'jtcat-processor', {
+        processorOptions: { dsRatio: dsRatio },
+      });
       workletNode.port.onmessage = function(e) {
         window.api.jtcatAudio(e.data);
       };
