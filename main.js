@@ -617,6 +617,7 @@ async function connectCat() {
     }
     if (serialModel && serialModel.minPower != null) cat._minPower = serialModel.minPower;
     if (serialModel && serialModel.maxPower != null) cat._maxPower = serialModel.maxPower;
+    if (serialModel && serialModel.atuCmd) cat._atuCmd = serialModel.atuCmd;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', sendCatFrequency);
