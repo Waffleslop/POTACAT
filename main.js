@@ -2647,21 +2647,19 @@ function connectRemote() {
         cat.setCwKeyTxRx(down);
       }
     }
-    // Dedicated CW Key Port — DTR keying via external USB-serial adapter (FTDI/CH340/CP2102)
+    // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter or QMX second port
     if (cwKeyPort && cwKeyPort.isOpen) {
-      if (!cwKeyPort._dtrFailed) {
-        cwKeyPort.set({ dtr: !!down }, (err) => {
-          if (err) {
-            console.log(`[CW Key Port] DTR error: ${err.message} — falling back to TX/RX keying`);
-            cwKeyPort._dtrFailed = true;
-            // Fall back to TX/RX keying on main CAT port
-            if (cat && cat.connected) cat.setCwKeyTxRx(down);
-          }
-        });
-      } else {
-        // DTR already failed on this port — use TX/RX keying on main CAT port
-        if (cat && cat.connected) cat.setCwKeyTxRx(down);
-      }
+      // Use dtrPins from rig model: { dtr: true, rts: true } for QMX, { dtr: true } for most others
+      const pins = cwCaps.dtrPins || { dtr: true };
+      const pinState = {};
+      if (pins.dtr) pinState.dtr = !!down;
+      if (pins.rts) pinState.rts = !!down;
+      cwKeyPort.set(pinState, (err) => {
+        if (err && !cwKeyPort._dtrLoggedError) {
+          console.log(`[CW Key Port] Pin set error: ${err.message} (pins: ${JSON.stringify(pinState)})`);
+          cwKeyPort._dtrLoggedError = true; // log once, don't spam
+        }
+      });
     }
   });
 
