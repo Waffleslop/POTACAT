@@ -949,6 +949,9 @@
       soRfGainRow.classList.toggle('hidden', !s.capabilities.rfgain);
       soTxPowerRow.classList.toggle('hidden', !s.capabilities.txpower);
       rcVfoGroup.classList.toggle('hidden', !s.capabilities.vfo);
+      // Clamp TX power slider to radio's min/max
+      if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
+      if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;
     }
   }
 

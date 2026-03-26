@@ -209,7 +209,13 @@ function getActiveRigModel() {
 function getRigCapabilities(rigType) {
   // Try model-specific capabilities first
   const model = getActiveRigModel();
-  if (model && model.caps) return { ...model.caps };
+  if (model && model.caps) {
+    const caps = { ...model.caps };
+    // Include power limits so UI can clamp sliders
+    if (model.minPower != null) caps.minPower = model.minPower;
+    if (model.maxPower != null) caps.maxPower = model.maxPower;
+    return caps;
+  }
   // Fallback to generic per-type
   switch (rigType) {
     case 'flex':    return { nb: true, atu: true, vfo: false, filter: true, filterType: 'arbitrary', rfgain: true, txpower: true, power: false };

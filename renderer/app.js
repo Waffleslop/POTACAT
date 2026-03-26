@@ -9947,6 +9947,9 @@ function rigApplyCapabilities(caps) {
   rigRfGain.closest('.rig-popover-row').style.display = caps.rfgain ? '' : 'none';
   rigTxPower.closest('.rig-popover-row').style.display = caps.txpower ? '' : 'none';
   rigFilterPresets.closest('.rig-popover-row').style.display = caps.filter ? '' : 'none';
+  // Clamp TX power slider to radio's min/max
+  if (caps.minPower != null) rigTxPower.min = caps.minPower;
+  if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
 }
 
 function positionRigPopover() {
