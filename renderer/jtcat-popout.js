@@ -735,10 +735,8 @@
     // Re-register own station so QSO arcs can draw to/from us
     if (myCallsign && myGrid && map) registerStation(myCallsign, myGrid);
     if (save) {
-      window.api.getSettings().then(function(s) {
-        s.jtcatLastBandFreq = freq;
-        window.api.saveSettings(s);
-      });
+      // Partial save — only save the band freq, don't trigger full CAT reconnect
+      window.api.saveSettings({ jtcatLastBandFreq: freq });
     }
   }
 
