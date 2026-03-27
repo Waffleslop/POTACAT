@@ -69,9 +69,13 @@ const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache,
 const { fetchDxCalExpeditions } = require('./lib/dxcal');
 const { getModel, getModelList } = require('./lib/rig-models');
 const { autoUpdater } = require('electron-updater');
+const { registerCloudIpc } = require('./lib/cloud-ipc');
 
 // --- QRZ.com callsign lookup ---
 let qrz = new QrzClient();
+
+// --- Cloud Sync (initialized in app.whenReady) ---
+let cloudIpc = null;
 
 // --- Parks DB (activator mode) ---
 let parksArray = [];
@@ -1484,7 +1488,11 @@ async function saveQsoRecord(qsoData) {
   }
 
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  if (!qsoData.uuid) qsoData.uuid = require('crypto').randomUUID();
   appendQso(logPath, qsoData);
+
+  // Record in cloud sync journal
+  if (cloudIpc) cloudIpc.journalCreate(qsoData);
 
   // Notify QSO pop-out window
   if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
@@ -1926,7 +1934,11 @@ function popoutBroadcastQso() {
 
 function jtcatAutoLog(qso) {
   const q = qso || remoteJtcatQso;
-  if (!q || !q.call) return;
+  if (!q || !q.call) {
+    sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
+    return;
+  }
+  sendCatLog(`[JTCAT] Auto-logging QSO: ${q.call} report=${q.report || 'none'} sent=${q.sentReport || 'none'}`);
   const now = new Date();
   const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
   const qsoTime = now.toISOString().slice(11, 16).replace(/:/g, '');
@@ -6195,6 +6207,20 @@ app.whenReady().then(() => {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
   }
 
+  // --- Cloud Sync ---
+  cloudIpc = registerCloudIpc({
+    app,
+    win: () => win,
+    getSettings: () => settings,
+    saveSettings: (s) => { Object.assign(settings, s); saveSettings(settings); },
+    getLogPath: () => settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi'),
+    loadWorkedQsos: () => loadWorkedQsos(),
+    sendToRenderer: (channel, data) => {
+      if (win && !win.isDestroyed()) win.webContents.send(channel, data);
+    },
+  });
+  cloudIpc.startBackgroundSync();
+
   // Cold start: check if app was launched via potacat:// URL
   const protocolUrl = process.argv.find(a => a.startsWith('potacat://'));
   if (protocolUrl) {
@@ -8424,6 +8450,7 @@ app.whenReady().then(() => {
       if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
       Object.assign(qsos[idx], fields);
       rewriteAdifFile(logPath, qsos);
+      if (cloudIpc) cloudIpc.journalUpdate(qsos[idx]);
       loadWorkedQsos();
       // Notify other windows about the change
       const sender = event.sender;
@@ -8441,8 +8468,10 @@ app.whenReady().then(() => {
     try {
       const qsos = parseAllRawQsos(logPath);
       if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
+      const deletedQso = { ...qsos[idx] };
       qsos.splice(idx, 1);
       rewriteAdifFile(logPath, qsos);
+      if (cloudIpc) cloudIpc.journalDelete(deletedQso);
       loadWorkedQsos();
       // Notify QSO pop-out about the deletion
       const sender = event.sender;

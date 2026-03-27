@@ -5547,6 +5547,11 @@ function render() {
         prefillDxCommand(s);
         window.api.tune(s.frequency, s.mode, s.bearing);
         if (s.lat != null && s.lon != null) showTuneArc(s.lat, s.lon, s.frequency, s.source);
+        // Auto-open JTCAT popout for digital mode spots
+        const dm = (s.mode || '').toUpperCase();
+        if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2') {
+          window.api.jtcatPopoutOpen();
+        }
         render(); // highlight the clicked row immediately
       });
 
