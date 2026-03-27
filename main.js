@@ -6836,6 +6836,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('jtcat-popout-call-cq', async (_e, modifier) => {
+    sendCatLog(`[JTCAT] CQ button pressed (engine=${!!ft8Engine})`);
     if (!ft8Engine) {
       console.log('[JTCAT Popout] CQ aborted — engine not running');
       sendCatLog('[JTCAT] CQ aborted — engine not running. Open JTCAT first.');
