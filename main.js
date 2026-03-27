@@ -5915,16 +5915,25 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
 
   if (!cat || !cat.connected) return;
 
-  // For non-Flex radios (serial/rigctld), apply CW XIT offset directly to tune frequency
-  // (Flex radios use SmartSDR setSliceXit API instead)
+  // CW XIT: use native TX CLAR commands if radio supports them (Yaesu XT/RU/RD),
+  // otherwise fall back to shifting the VFO frequency
   let tuneFreqHz = freqHz;
-  if (wantXit && !(smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp')) {
+  let nativeXit = null;
+  if (wantXit && cat.hasNativeXit) {
+    // Radio supports native XIT — pass to tune() for auto-apply after freq change
+    nativeXit = settings.cwXit;
+  } else if (wantXit && !(smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp')) {
+    // Fallback: shift VFO frequency
     tuneFreqHz = freqHz + settings.cwXit;
+  }
+  // Clear native XIT when switching away from CW
+  if (shouldClearXit && cat.hasNativeXit) {
+    nativeXit = 0;
   }
 
   const resolvedMode = (mode || '').toUpperCase() === 'SSB' ? (tuneFreqHz >= 10000000 ? 'USB' : 'LSB') : mode;
   sendCatLog(`tune: freq=${freqKhz}kHz → ${tuneFreqHz}Hz mode=${mode}${mode !== resolvedMode ? '→' + resolvedMode : ''} split=${!!settings.enableSplit} filter=${filterWidth}${wantXit ? ` xit=${settings.cwXit}` : ''}`);
-  cat.tune(tuneFreqHz, mode, { split: settings.enableSplit, filterWidth });
+  cat.tune(tuneFreqHz, mode, { split: settings.enableSplit, filterWidth, xit: nativeXit });
 
   // Set or clear XIT via SmartSDR API (works even when tuning via CAT)
   if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {

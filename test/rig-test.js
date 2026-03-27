@@ -523,6 +523,29 @@ test('Yaesu VFO copy B→A → BA;', () => {
   assert.strictEqual(writes[0], 'BA;');
 });
 
+test('Yaesu XIT +80Hz → XT1; RC; RU0080;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
+  codec.setXit(80);
+  assert.strictEqual(writes[0], 'XT1;');
+  assert.strictEqual(writes[1], 'RC;');
+  assert.strictEqual(writes[2], 'RU0080;');
+});
+
+test('Yaesu XIT -50Hz → XT1; RC; RD0050;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
+  codec.setXit(-50);
+  assert.strictEqual(writes[0], 'XT1;');
+  assert.strictEqual(writes[1], 'RC;');
+  assert.strictEqual(writes[2], 'RD0050;');
+});
+
+test('Yaesu XIT off → XT0;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
+  codec.setXit(0);
+  assert.strictEqual(writes[0], 'XT0;');
+  assert.strictEqual(writes.length, 1);
+});
+
 // Kenwood extended (no 0 prefix)
 console.log('\n=== Extended Controls (Kenwood) ===');
 
