@@ -114,6 +114,9 @@ let rigctldProc = null;
 let cluster = null; // legacy — replaced by clusterClients Map
 let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
 let clusterFlushTimer = null; // throttle timer for cluster → renderer updates
+let cwSpotsClient = null;
+let cwSpots = []; // streaming CW club spots (FIFO, max 500)
+let cwSpotsFlushTimer = null; // throttle timer for CW spots → renderer updates
 let rbn = null;
 let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
 let rbnFlushTimer = null; // throttle timer for RBN → renderer updates
@@ -681,6 +684,14 @@ const CLUSTER_PRESETS = [
   { name: 'OH2AQ', host: 'oh2aq.kolumbus.fi', port: 8000 },
 ];
 
+// --- CW Spots (CW club telnet spotters) ---
+
+const CW_SPOTS_PRESETS = [
+  { name: 'CW Club Spotter (all clubs)', host: 'rbn.telegraphy.de', port: 7000, postLogin: ['set/clubs', 'set/nodupes'] },
+  { name: 'FOC Members', host: 'foc.dj1yfk.de', port: 7300, postLogin: [] },
+  { name: 'FOC + Nominees', host: 'foc.dj1yfk.de', port: 7373, postLogin: [] },
+];
+
 // Clean up RBN-style comments for the Name column (strip redundant mode, reorder fields)
 const CLUSTER_COMMENT_RE = /^(\S+)\s+(-?\d+)\s*dB\s+(?:(\d+)\s*WPM\s*)?(.*)$/i;
 const MODE_KEYWORDS = /^(?:CW|SSB|USB|LSB|FM|AM|FT[48]|RTTY|PSK\d*|JS8)\b/i;
@@ -875,6 +886,52 @@ function disconnectCluster() {
   clusterClients.clear();
   clusterSpots = [];
   sendClusterStatus();
+}
+
+// --- CW Spots connect/disconnect ---
+
+function connectCwSpots() {
+  disconnectCwSpots();
+  if (!settings.enableCwSpots || !settings.myCallsign) return;
+  const host = settings.cwSpotsHost || 'rbn.telegraphy.de';
+  const port = settings.cwSpotsPort || 7000;
+  const preset = CW_SPOTS_PRESETS.find(p => p.host === host && p.port === port);
+  const postLogin = preset ? preset.postLogin : ['set/clubs', 'set/nodupes'];
+  const myPos = gridToLatLon(settings.grid);
+  const myEntity = ctyDb ? resolveCallsign(settings.myCallsign, ctyDb) : null;
+
+  cwSpotsClient = new DxClusterClient();
+  cwSpotsClient.on('spot', (raw) => {
+    const spot = buildClusterSpot(raw, myPos, myEntity);
+    spot.source = 'cwspots'; // override source
+    // Dedup by callsign+band
+    const idx = cwSpots.findIndex(s => s.callsign === spot.callsign && s.band === spot.band);
+    if (idx !== -1) cwSpots.splice(idx, 1);
+    cwSpots.push(spot);
+    if (cwSpots.length > 500) cwSpots = cwSpots.slice(-500);
+    // Throttle flush to renderer
+    if (!cwSpotsFlushTimer) {
+      cwSpotsFlushTimer = setTimeout(() => {
+        cwSpotsFlushTimer = null;
+        sendMergedSpots();
+      }, 2000);
+    }
+  });
+  cwSpotsClient.on('status', (s) => {
+    sendCatLog(`[CW Spots] ${s.connected ? 'Connected to' : 'Disconnected from'} ${host}:${port}`);
+    if (win && !win.isDestroyed()) win.webContents.send('cw-spots-status', s);
+  });
+  cwSpotsClient.connect({ host, port, callsign: settings.myCallsign, postLogin });
+}
+
+function disconnectCwSpots() {
+  if (cwSpotsFlushTimer) { clearTimeout(cwSpotsFlushTimer); cwSpotsFlushTimer = null; }
+  if (cwSpotsClient) {
+    cwSpotsClient.disconnect();
+    cwSpotsClient.removeAllListeners();
+    cwSpotsClient = null;
+  }
+  cwSpots = [];
 }
 
 // Migrate legacy clusterHost/clusterPort to clusterNodes array
@@ -4298,7 +4355,7 @@ function getActiveNetSpots() {
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
-  const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...rbnWatchSpots, ...pskrSpots];
+  const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots];
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
   pushSpotsToTci(merged);
@@ -6054,6 +6111,7 @@ app.whenReady().then(() => {
   createWindow();
   if (!settings.enableWsjtx) connectCat();
   if (settings.enableCluster) connectCluster();
+  if (settings.enableCwSpots) connectCwSpots();
   if (settings.enableRbn) connectRbn();
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
@@ -7315,6 +7373,13 @@ app.whenReady().then(() => {
       }
     }
 
+    // Reconnect CW Spots if settings changed
+    const cwSpotsChanged = has('enableCwSpots') || has('cwSpotsHost') || has('cwSpotsPort') ||
+      (has('myCallsign') && settings.enableCwSpots);
+    if (cwSpotsChanged) {
+      if (settings.enableCwSpots) connectCwSpots(); else disconnectCwSpots();
+    }
+
     // Reconnect RBN if settings changed
     if (rbnChanged) {
       if (settings.enableRbn) {
@@ -8471,6 +8536,7 @@ function gracefulCleanup() {
   if (cat) try { cat.disconnect(); } catch {}
   for (const [, entry] of clusterClients) { try { entry.client.disconnect(); } catch {} }
   clusterClients.clear();
+  if (cwSpotsClient) try { cwSpotsClient.disconnect(); } catch {}
   if (rbn) try { rbn.disconnect(); } catch {}
   try { disconnectWsjtx(); } catch {}
   try { disconnectSmartSdr(); } catch {}

@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('api', {
   parseAdif: () => ipcRenderer.invoke('parse-adif'),
   onDxccData: (cb) => ipcRenderer.on('dxcc-data', (_e, data) => cb(data)),
   onClusterStatus: (cb) => ipcRenderer.on('cluster-status', (_e, s) => cb(s)),
+  onCwSpotsStatus: (cb) => ipcRenderer.on('cw-spots-status', (_e, s) => cb(s)),
   onRbnSpots: (cb) => ipcRenderer.on('rbn-spots', (_e, data) => cb(data)),
   onRbnStatus: (cb) => ipcRenderer.on('rbn-status', (_e, s) => cb(s)),
   onPskrStatus: (cb) => ipcRenderer.on('pskr-status', (_e, s) => cb(s)),

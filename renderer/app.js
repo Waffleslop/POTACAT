@@ -25,6 +25,7 @@ let enableWwff = false;
 let enableLlota = false;
 let enableDxcc = false;
 let enableCluster = false;
+let enableCwSpots = false;
 let enableRbn = false;
 let enablePskr = false;
 let enablePskrMap = false;
@@ -195,6 +196,7 @@ const spotsSota = document.getElementById('spots-sota');
 const spotsWwff = document.getElementById('spots-wwff');
 const spotsLlota = document.getElementById('spots-llota');
 const spotsCluster = document.getElementById('spots-cluster');
+const spotsCwSpots = document.getElementById('spots-cwspots');
 const spotsRbn = document.getElementById('spots-rbn');
 const spotsPskr = document.getElementById('spots-pskr');
 const spotsDxe = document.getElementById('spots-dxe');
@@ -308,6 +310,7 @@ const dxccModeSelectEl = document.getElementById('dxcc-mode-select');
 const dxccAwardLabelEl = document.getElementById('dxcc-award-label');
 const dxccChallengeEl = document.getElementById('dxcc-challenge');
 const setEnableCluster = document.getElementById('set-enable-cluster');
+const setEnableCwSpots = document.getElementById('set-enable-cwspots');
 const setEnableRbn = document.getElementById('set-enable-rbn');
 const setEnableWsjtx = document.getElementById('set-enable-wsjtx');
 const wsjtxConfig = document.getElementById('wsjtx-config');
@@ -374,6 +377,11 @@ const CLUSTER_PRESETS = [
   { name: 'WA9PIE', host: 'dxc.wa9pie.net', port: 7373 },
   { name: 'W0MU', host: 'dxc.w0mu.net', port: 7373 },
   { name: 'OH2AQ', host: 'oh2aq.kolumbus.fi', port: 8000 },
+];
+const CW_SPOTS_PRESETS = [
+  { name: 'CW Club Spotter (all clubs)', host: 'rbn.telegraphy.de', port: 7000 },
+  { name: 'FOC Members', host: 'foc.dj1yfk.de', port: 7300 },
+  { name: 'FOC + Nominees', host: 'foc.dj1yfk.de', port: 7373 },
 ];
 let rbnConnected = false;
 let pskrConnected = false;
@@ -875,6 +883,7 @@ async function loadPrefs() {
   enableLlota = settings.enableLlota === true; // default false
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
+  enableCwSpots = settings.enableCwSpots === true; // default false
   showDxBar = settings.showDxBar === true;
   dxCommandPreferredNode = localStorage.getItem('dx-command-node') || '';
   updateDxCommandBar();
@@ -2282,6 +2291,22 @@ setEnableCluster.addEventListener('change', () => {
   clusterConfig.classList.toggle('hidden', !setEnableCluster.checked);
 });
 
+setEnableCwSpots.addEventListener('change', () => {
+  const cfg = document.getElementById('cwspots-config');
+  if (cfg) cfg.classList.toggle('hidden', !setEnableCwSpots.checked);
+});
+
+// CW Spots preset selector
+(function() {
+  const preset = document.getElementById('set-cwspots-preset');
+  const custom = document.getElementById('cwspots-custom-fields');
+  if (preset) {
+    preset.addEventListener('change', () => {
+      custom.classList.toggle('hidden', preset.value !== 'custom');
+    });
+  }
+})();
+
 // --- Cluster node list rendering ---
 function renderClusterNodeList(nodes) {
   clusterNodeList.innerHTML = '';
@@ -3227,6 +3252,7 @@ function getFiltered() {
       (s.source === 'wwff' && !enableWwff) ||
       (s.source === 'llota' && !enableLlota) ||
       (s.source === 'dxc' && !enableCluster) ||
+      (s.source === 'cwspots' && !enableCwSpots) ||
       (s.source === 'rbn' && !enableRbn) ||
       (s.source === 'pskr' && !enablePskr);
     const isWatched = watchlistMatch(watchlist, s.callsign, s.band, s.mode);
@@ -3648,19 +3674,19 @@ L.Icon.Default.mergeOptions({
 // --- Colorblind-safe dual palettes ---
 const SOURCE_COLORS_NORMAL = {
   pota: '#4ecca3', sota: '#f0a500', wwff: '#26a69a',
-  llota: '#42a5f5', dxc: '#e040fb', rbn: '#00bcd4', pskr: '#ff6b6b'
+  llota: '#42a5f5', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#00bcd4', pskr: '#ff6b6b'
 };
 const SOURCE_COLORS_CB = {
   pota: '#4fc3f7', sota: '#ffb300', wwff: '#29b6f6',
-  llota: '#42a5f5', dxc: '#e040fb', rbn: '#81d4fa', pskr: '#ffa726'
+  llota: '#42a5f5', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#81d4fa', pskr: '#ffa726'
 };
 const SOURCE_STROKES_NORMAL = {
   pota: '#3ba882', sota: '#c47f00', wwff: '#1b7a71',
-  llota: '#1e88e5', dxc: '#ab00d9', rbn: '#0097a7', pskr: '#d84343'
+  llota: '#1e88e5', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d84343'
 };
 const SOURCE_STROKES_CB = {
   pota: '#2196f3', sota: '#e6a200', wwff: '#0288d1',
-  llota: '#1e88e5', dxc: '#ab00d9', rbn: '#4fc3f7', pskr: '#e68a00'
+  llota: '#1e88e5', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#4fc3f7', pskr: '#e68a00'
 };
 const RBN_BAND_COLORS_NORMAL = {
   '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3',
@@ -3734,11 +3760,11 @@ function applyColorblindMode(enabled) {
 // WCAG AA high-contrast source palettes
 const SOURCE_COLORS_WCAG = {
   pota: '#5ed8ad', sota: '#f0a500', wwff: '#3cc4b8',
-  llota: '#42a5f5', dxc: '#e87fff', rbn: '#00bcd4', pskr: '#ff9090'
+  llota: '#42a5f5', dxc: '#e87fff', cwspots: '#ffe066', rbn: '#00bcd4', pskr: '#ff9090'
 };
 const SOURCE_STROKES_WCAG = {
   pota: '#42b88a', sota: '#c47f00', wwff: '#2a9e92',
-  llota: '#1e88e5', dxc: '#c040e0', rbn: '#0097a7', pskr: '#d06060'
+  llota: '#1e88e5', dxc: '#c040e0', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d06060'
 };
 
 function applyWcagMode(enabled) {
@@ -4152,8 +4178,8 @@ const PRIVILEGE_RANGES = {
 };
 
 const SOURCE_LABELS = {
-  pota: 'POTA', sota: 'SOTA', dxc: 'DX', rbn: 'RBN',
-  wwff: 'WWFF', llota: 'LLOTA', pskr: 'FreeDV', net: 'NET',
+  pota: 'POTA', sota: 'SOTA', dxc: 'DX', cwspots: 'CW',
+  rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', pskr: 'FreeDV', net: 'NET',
 };
 const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
@@ -5416,6 +5442,7 @@ function render() {
       if (s.source === 'pota') tr.classList.add('spot-pota');
       if (s.source === 'sota') tr.classList.add('spot-sota');
       if (s.source === 'dxc') tr.classList.add('spot-dxc');
+      if (s.source === 'cwspots') tr.classList.add('spot-cwspots');
       if (s.source === 'rbn') tr.classList.add('spot-rbn');
       if (s.source === 'wwff') tr.classList.add('spot-wwff');
       if (s.source === 'llota') tr.classList.add('spot-llota');
@@ -6257,6 +6284,7 @@ function syncSpotsPanel() {
   spotsWwff.checked = enableWwff;
   spotsLlota.checked = enableLlota;
   spotsCluster.checked = enableCluster;
+  spotsCwSpots.checked = enableCwSpots;
   spotsRbn.checked = enableRbn;
   spotsPskr.checked = enablePskr;
   spotsDxe.checked = enableDxe;
@@ -6279,6 +6307,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   enableWwff = spotsWwff.checked;
   enableLlota = spotsLlota.checked;
   enableCluster = spotsCluster.checked;
+  enableCwSpots = spotsCwSpots.checked;
   enableRbn = spotsRbn.checked;
   enablePskr = spotsPskr.checked;
   enableDxe = spotsDxe.checked;
@@ -6288,6 +6317,11 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
     enableCluster = false;
     spotsCluster.checked = false;
     alert('DX Cluster requires a callsign. Please set your callsign in Settings first.');
+  }
+  if (enableCwSpots && !myCallsign) {
+    enableCwSpots = false;
+    spotsCwSpots.checked = false;
+    alert('CW Spots requires a callsign. Please set your callsign in Settings first.');
   }
   if (enableRbn && !myCallsign) {
     enableRbn = false;
@@ -6306,6 +6340,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   setEnableWwff.checked = enableWwff;
   setEnableLlota.checked = enableLlota;
   setEnableCluster.checked = enableCluster;
+  setEnableCwSpots.checked = enableCwSpots;
   setEnableRbn.checked = enableRbn;
   setEnablePskr.checked = enablePskr;
   setHideWorked.checked = hideWorked;
@@ -6321,7 +6356,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   // Save and let main process handle connect/disconnect
   await window.api.saveSettings({
     enablePota, enableSota, enableWwff, enableLlota,
-    enableCluster, enableRbn, enablePskr, enableDxe,
+    enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
     hideWorked, hideWorkedParks, hideOutOfBand,
     enableDxcc,
   });
@@ -6768,6 +6803,24 @@ async function openSettingsDialog(tab) {
   setShowDxBar.checked = s.showDxBar === true;
   showDxBar = s.showDxBar === true;
   updateDxCommandBar();
+  setEnableCwSpots.checked = s.enableCwSpots === true;
+  // CW Spots preset selector
+  const cwSpotsPreset = document.getElementById('set-cwspots-preset');
+  const cwSpotsCustom = document.getElementById('cwspots-custom-fields');
+  const cwSpotsConfig = document.getElementById('cwspots-config');
+  if (cwSpotsPreset) {
+    const h = s.cwSpotsHost || 'rbn.telegraphy.de';
+    const p = s.cwSpotsPort || 7000;
+    const key = h + ':' + p;
+    const match = [...cwSpotsPreset.options].find(o => o.value === key);
+    cwSpotsPreset.value = match ? key : 'custom';
+    if (!match) {
+      document.getElementById('set-cwspots-host').value = h;
+      document.getElementById('set-cwspots-port').value = p;
+      cwSpotsCustom.classList.remove('hidden');
+    }
+  }
+  if (cwSpotsConfig) cwSpotsConfig.classList.toggle('hidden', !s.enableCwSpots);
   setEnableRbn.checked = s.enableRbn === true;
   setMyCallsign.value = s.myCallsign || '';
   // Load cluster nodes (migrate legacy if needed)
@@ -6979,6 +7032,7 @@ settingsSave.addEventListener('click', async () => {
   const qrzApiKeyVal = setQrzApiKey.value.trim();
   const myCallsign = setMyCallsign.value.trim().toUpperCase();
   let clusterEnabled = setEnableCluster.checked;
+  let cwSpotsEnabled = setEnableCwSpots.checked;
   let rbnEnabled = setEnableRbn.checked;
   const pskrEnabled = setEnablePskr.checked;
   const pskrMapEnabled = setEnablePskrMap.checked;
@@ -6988,6 +7042,11 @@ settingsSave.addEventListener('click', async () => {
     clusterEnabled = false;
     setEnableCluster.checked = false;
     alert('DX Cluster requires a callsign. Please enter your callsign above.');
+  }
+  if (cwSpotsEnabled && !myCallsign) {
+    cwSpotsEnabled = false;
+    setEnableCwSpots.checked = false;
+    alert('CW Spots requires a callsign. Please enter your callsign above.');
   }
   if (rbnEnabled && !myCallsign) {
     rbnEnabled = false;
@@ -7119,6 +7178,9 @@ settingsSave.addEventListener('click', async () => {
     qrzLogbook: qrzLogbookEnabled,
     qrzApiKey: qrzApiKeyVal,
     enableCluster: clusterEnabled,
+    enableCwSpots: cwSpotsEnabled,
+    cwSpotsHost: (() => { const p = document.getElementById('set-cwspots-preset'); if (!p || p.value === 'custom') return (document.getElementById('set-cwspots-host') || {}).value || 'rbn.telegraphy.de'; return p.value.split(':')[0]; })(),
+    cwSpotsPort: (() => { const p = document.getElementById('set-cwspots-preset'); if (!p || p.value === 'custom') return parseInt((document.getElementById('set-cwspots-port') || {}).value, 10) || 7000; return parseInt(p.value.split(':')[1], 10) || 7000; })(),
     enableRbn: rbnEnabled,
     enableWsjtx: wsjtxEnabled,
     enablePskr: pskrEnabled,

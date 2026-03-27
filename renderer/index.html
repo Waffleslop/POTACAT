@@ -76,6 +76,7 @@
           <label class="spots-toggle"><input type="checkbox" id="spots-wwff"> <span style="color:#26a69a">WWFF</span></label>
           <label class="spots-toggle"><input type="checkbox" id="spots-llota"> <span style="color:#42a5f5">LLOTA</span></label>
           <label class="spots-toggle"><input type="checkbox" id="spots-cluster"> <span style="color:#e040fb">DX Cluster</span></label>
+          <label class="spots-toggle"><input type="checkbox" id="spots-cwspots"> <span style="color:#ffd740">CW Spots</span></label>
           <label class="spots-toggle"><input type="checkbox" id="spots-rbn"> <span style="color:#00bcd4">RBN</span></label>
           <label class="spots-toggle"><input type="checkbox" id="spots-pskr"> <span style="color:#ff6b6b">FreeDV</span></label>
           <label class="spots-toggle"><input type="checkbox" id="spots-dxe" checked> DX Expeditions</label>
@@ -1115,6 +1116,22 @@
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-show-beacons"> Show /B beacon stations</label>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-show-dx-bar"> Show DX command bar below spot table</label>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-enable-cluster-terminal"> Show DX Cluster Terminal button</label>
+      </div>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-cwspots"> CW Spots (CW club members)</label>
+      <div id="cwspots-config" class="radio-sub hidden">
+        <span class="help-text" style="font-size:12px;">Shows RBN spots filtered by CW club membership (SKCC, CWops, FISTS, FOC, LICW, and 30+ more). Powered by rbn.telegraphy.de.</span>
+        <label>Server:
+          <select id="set-cwspots-preset" style="width:200px;">
+            <option value="rbn.telegraphy.de:7000">CW Club Spotter (all clubs)</option>
+            <option value="foc.dj1yfk.de:7300">FOC Members</option>
+            <option value="foc.dj1yfk.de:7373">FOC + Nominees</option>
+            <option value="custom">Custom...</option>
+          </select>
+        </label>
+        <div id="cwspots-custom-fields" class="hidden" style="margin-top:6px;">
+          <label>Host: <input type="text" id="set-cwspots-host" value="rbn.telegraphy.de" style="width:160px;"></label>
+          <label>Port: <input type="number" id="set-cwspots-port" value="7000" min="1" max="65535" style="width:70px;"></label>
+        </div>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-rbn"> Reverse Beacon Network</label>
       <div id="rbn-config" class="radio-sub hidden">

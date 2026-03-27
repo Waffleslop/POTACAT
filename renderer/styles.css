@@ -1573,6 +1573,11 @@ dialog input, dialog select {
   background: color-mix(in srgb, var(--source-dxc) 6%, transparent);
 }
 
+.spot-cwspots {
+  border-left: 3px solid #ffd740;
+  background: color-mix(in srgb, #ffd740 6%, transparent);
+}
+
 .spot-rbn {
   border-left: 3px solid var(--source-rbn);
   background: color-mix(in srgb, var(--source-rbn) 6%, transparent);
