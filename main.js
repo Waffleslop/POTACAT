@@ -488,6 +488,8 @@ function sendCatFrequency(hz) {
 function sendCatMode(mode) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', mode);
   _currentMode = mode;
+  // Mode confirmed by radio — clear suppress so ECHOCAT gets the real value
+  _modeSuppressUntil = 0;
   broadcastRigState();
 }
 
@@ -3835,9 +3837,11 @@ function broadcastRemoteRadioStatus() {
   // Suppress rfgain/txpower echo-back to ECHOCAT while user is actively adjusting
   const rfg = (typeof _rfGainSuppressBroadcast !== 'undefined' && now < _rfGainSuppressBroadcast) ? undefined : _currentRfGain;
   const txp = (typeof _txPowerSuppressBroadcast !== 'undefined' && now < _txPowerSuppressBroadcast) ? undefined : _currentTxPower;
+  // Suppress stale mode during tune transition — phone has optimistic update, don't overwrite with old mode
+  const modeVal = (now < _modeSuppressUntil) ? undefined : (_currentMode || '');
   const status = {
     freq: _currentFreqHz || 0,
-    mode: _currentMode || '',
+    mode: modeVal,
     catConnected: (cat && cat.connected) || (smartSdr && smartSdr.connected),
     txState: _remoteTxState,
     rigType,
@@ -5935,6 +5939,7 @@ function migrateRigSettings(s) {
 let _lastTuneFreq = 0;
 let _lastTuneTime = 0;
 let _lastTuneBand = null; // for ATU auto-tune on band change
+let _modeSuppressUntil = 0; // suppress stale mode broadcasts to ECHOCAT during tune transition
 
 function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz → Hz
@@ -6024,6 +6029,9 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   }
 
   const resolvedMode = (mode || '').toUpperCase() === 'SSB' ? (tuneFreqHz >= 10000000 ? 'USB' : 'LSB') : mode;
+  // Suppress stale mode broadcasts to ECHOCAT for 2s — prevents flicker when
+  // frequency-triggered status broadcasts include the OLD mode before polling catches up
+  if (mode) _modeSuppressUntil = Date.now() + 2000;
   sendCatLog(`tune: freq=${freqKhz}kHz → ${tuneFreqHz}Hz mode=${mode}${mode !== resolvedMode ? '→' + resolvedMode : ''} split=${!!settings.enableSplit} filter=${filterWidth}${wantXit ? ` xit=${settings.cwXit}` : ''}`);
   cat.tune(tuneFreqHz, mode, { split: settings.enableSplit, filterWidth, xit: nativeXit });
 
