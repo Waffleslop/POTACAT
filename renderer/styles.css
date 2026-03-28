@@ -541,6 +541,50 @@ button:hover {
   background: var(--bg-hover);
 }
 
+/* ── Reusable button system ────────────────────────────────────── */
+
+.btn {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.btn-primary {
+  background: var(--accent-green-btn);
+  border-color: var(--accent-green-btn);
+  color: #000;
+  font-weight: 600;
+}
+.btn-primary:hover { filter: brightness(1.15); background: var(--accent-green-btn); }
+[data-theme="light"][data-wcag] .btn-primary,
+[data-wcag] .btn-primary { color: #000; }
+
+.btn-blue {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #000;
+}
+.btn-blue:hover { filter: brightness(1.15); background: var(--accent-blue); }
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+.btn-danger:hover { background: var(--tint-red); }
+
+.btn-sm { padding: 3px 10px; font-size: 12px; }
+.btn-block { display: block; width: 100%; text-align: center; }
+
 .status-bar {
   display: flex;
   gap: 16px;
@@ -1710,6 +1754,16 @@ dialog input, dialog select {
 
 .conn-pill.connected .conn-dot {
   background: var(--accent-green);
+}
+
+.conn-pill.syncing .conn-dot {
+  background: var(--accent-blue, #42a5f5);
+  animation: cloud-pulse 1s ease-in-out infinite;
+}
+
+@keyframes cloud-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 /* Collapsible fieldset sections */
