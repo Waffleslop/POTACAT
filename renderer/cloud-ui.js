@@ -52,11 +52,15 @@
 
   // ── UI Helpers ────────────────────────────────────────────────────
 
-  function showLogin() {
+  const loginSignout = document.getElementById('cloud-login-signout');
+  const loginSignoutLink = document.getElementById('cloud-login-signout-link');
+
+  function showLogin(hasStaleTokens) {
     loginSection.classList.remove('hidden');
     accountSection.classList.add('hidden');
     isLoggedIn = false;
     updateCloudPill('disconnected');
+    if (loginSignout) loginSignout.classList.toggle('hidden', !hasStaleTokens);
   }
 
   function showAccount(user, subscription) {
@@ -132,7 +136,7 @@
     try {
       const status = await window.api.cloudGetStatus();
       if (!status.loggedIn) {
-        showLogin();
+        showLogin(!!status.error);
         return;
       }
 
@@ -236,6 +240,14 @@
   if (subscribeBtn) {
     subscribeBtn.addEventListener('click', () => {
       window.api.cloudOpenSubscribe();
+    });
+  }
+
+  if (loginSignoutLink) {
+    loginSignoutLink.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await window.api.cloudLogout();
+      showLogin(false);
     });
   }
 
