@@ -561,6 +561,9 @@ async function connectCat() {
   if (cat) {
     cat.removeAllListeners();
     cat.disconnect();
+    // Brief delay to let serial port fully release before reconnecting
+    // (prevents "Resource busy" on macOS when switching rigs)
+    await new Promise(r => setTimeout(r, 300));
   }
   killRigctld();
   const target = settings.catTarget;
