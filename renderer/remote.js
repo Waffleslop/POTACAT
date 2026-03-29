@@ -1042,6 +1042,11 @@
         const da = a.distance != null ? a.distance : 1e9;
         const db = b.distance != null ? b.distance : 1e9;
         return da - db;
+      } else if (spotSort === 'source') {
+        const sa = (a.source || '').localeCompare(b.source || '');
+        if (sa !== 0) return sa;
+        // Within same source, sort by age (newest first)
+        return parseSpotTime(b.spotTime) - parseSpotTime(a.spotTime);
       }
       // default: age (newest first)
       const ta = parseSpotTime(a.spotTime);
