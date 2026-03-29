@@ -1787,6 +1787,62 @@
     </fieldset>
 
     <fieldset class="source-toggles" data-settings-tab="cloud">
+      <legend>Embeddable Widgets</legend>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">Add these to your QRZ page, website, or blog. Copy the embed code and paste it into your page's HTML.</p>
+      <div id="cloud-embeds-section">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;" id="cloud-embed-table">
+          <tr style="color:var(--text-secondary);">
+            <th style="text-align:left;padding:4px 0;font-weight:600;">Widget</th>
+            <th style="text-align:right;padding:4px 0;font-weight:600;"></th>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Activation Card</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="card" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="card" data-height="200" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Latest Activation</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="activation" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="activation" data-height="120" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Stats</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="stats" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="stats" data-height="90" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Recent Activations</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="timeline" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="timeline" data-height="280" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Band/Mode Heatmap</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="heatmap" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="heatmap" data-height="300" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">QSO Sparkline</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="sparkline" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="sparkline" data-height="130" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+        </table>
+        <div id="cloud-embed-copied" class="hidden" style="font-size:11px;color:var(--accent-green);margin-top:6px;"></div>
+      </div>
+    </fieldset>
+
+    <fieldset class="source-toggles" data-settings-tab="cloud">
       <legend>Backup &amp; Recovery</legend>
       <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">Your local ADIF file is always the primary copy. The cloud is an additional backup you can restore from at any time.</p>
       <button type="button" id="cloud-download-adif" class="btn">Download Cloud Log (ADIF)</button>

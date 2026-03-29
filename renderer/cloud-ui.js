@@ -254,6 +254,44 @@
     });
   }
 
+  // ── Embed widgets ──────────────────────────────────────────────────
+
+  const embedBaseUrl = 'https://api.potacat.com/embed';
+  const embedCopiedMsg = document.getElementById('cloud-embed-copied');
+
+  function getCallsignForEmbed() {
+    return (userCallsignSpan && userCallsignSpan.textContent) || '';
+  }
+
+  document.querySelectorAll('.cloud-embed-view').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const cs = getCallsignForEmbed();
+      if (!cs) return;
+      const widget = link.dataset.widget;
+      window.api.openExternal(`${embedBaseUrl}/${widget}/${cs}`);
+    });
+  });
+
+  document.querySelectorAll('.cloud-embed-copy').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const cs = getCallsignForEmbed();
+      if (!cs) return;
+      const widget = link.dataset.widget;
+      const height = link.dataset.height || '150';
+      const embedCode = `<iframe src="${embedBaseUrl}/${widget}/${cs}" style="border:none;width:400px;height:${height}px;" loading="lazy"></iframe>`;
+
+      navigator.clipboard.writeText(embedCode).then(() => {
+        if (embedCopiedMsg) {
+          embedCopiedMsg.textContent = `Copied ${widget} embed to clipboard!`;
+          embedCopiedMsg.classList.remove('hidden');
+          setTimeout(() => embedCopiedMsg.classList.add('hidden'), 3000);
+        }
+      });
+    });
+  });
+
   const clearTokensBtn = document.getElementById('cloud-clear-tokens');
   if (clearTokensBtn) {
     clearTokensBtn.addEventListener('click', async () => {
