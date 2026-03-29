@@ -1968,7 +1968,7 @@ function popoutBroadcastQso() {
   }
 }
 
-function jtcatAutoLog(qso) {
+async function jtcatAutoLog(qso) {
   const q = qso || remoteJtcatQso;
   if (!q || !q.call) {
     sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
@@ -1994,8 +1994,29 @@ function jtcatAutoLog(qso) {
     gridsquare: q.grid || '',
     comment: 'JTCAT ' + mode,
   };
-  saveQsoRecord(qsoData).then(result => {
-    console.log('[JTCAT] Auto-logged QSO:', q.call, result && result.success !== false ? 'OK' : (result && result.error || 'unknown'));
+
+  try {
+    // Activation mode: add park refs so JTCAT QSOs log to the activation logbook
+    const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
+    if (settings.appMode === 'activator' && parkRefs.length > 0) {
+      sendCatLog(`[JTCAT] Activation mode — logging to ${parkRefs.map(p => p.ref).join(', ')}`);
+      for (let i = 0; i < parkRefs.length; i++) {
+        const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
+        if (i > 0) parkQso.skipLogbookForward = true;
+        await saveQsoRecord(parkQso);
+      }
+      // Cross-program refs (WWFF, LLOTA)
+      const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+      for (const xr of crossRefs) {
+        const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '', skipLogbookForward: true };
+        if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+        await saveQsoRecord(xrQso);
+      }
+    } else {
+      await saveQsoRecord(qsoData);
+    }
+
+    console.log('[JTCAT] Auto-logged QSO:', q.call, 'OK');
     // Notify the popout window
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-qso-logged', {
@@ -2007,9 +2028,9 @@ function jtcatAutoLog(qso) {
         rstRcvd: q.report || '',
       });
     }
-  }).catch(err => {
+  } catch (err) {
     console.error('[JTCAT] Auto-log failed:', err.message);
-  });
+  }
 }
 
 // Shared QSO state machine — advance on decodes
