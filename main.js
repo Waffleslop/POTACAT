@@ -28,11 +28,10 @@ if (process.argv.includes('--launcher')) {
       app.quit();
       return;
     }
-    // System tray icon
-    const iconPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'assets', 'icon-256.png')
-      : path.join(__dirname, 'assets', 'icon-256.png');
-    const tray = new Tray(ni.createFromPath(iconPath).resize({ width: 16, height: 16 }));
+    // System tray icon — use .ico on Windows, .png on Mac/Linux
+    const icoFile = process.platform === 'win32' ? 'icon.ico' : 'icon-256.png';
+    const iconPath = path.join(__dirname, 'assets', icoFile);
+    const tray = new Tray(iconPath);
     tray.setToolTip('POTACAT Launcher (port 7301)');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'POTACAT Launcher', enabled: false },
