@@ -1916,7 +1916,7 @@ let ft8Engine = null;
 let remoteJtcatQso = null;
 let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
 const JTCAT_MAX_CQ_RETRIES = 15;
-const JTCAT_MAX_QSO_RETRIES = 6;
+const JTCAT_MAX_QSO_RETRIES = 12; // ~3 minutes of retries at 15s/cycle
 
 // Auto-CQ response state
 let jtcatAutoCqMode = 'off';          // 'off' | 'pota' | 'sota' | 'all'
