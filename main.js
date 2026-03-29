@@ -557,7 +557,11 @@ function sendRotorBearing(azimuth) {
   sendCatLog(`Rotor → ${host}:${port} azimuth=${azimuth}°`);
 }
 
+let _connectCatPending = false;
 async function connectCat() {
+  if (_connectCatPending) return; // prevent concurrent connectCat() calls
+  _connectCatPending = true;
+  try {
   if (cat) {
     cat.removeAllListeners();
     cat.disconnect();
@@ -679,6 +683,9 @@ async function connectCat() {
     cat.on('nb', sendCatNb);
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
+  }
+  } finally {
+    _connectCatPending = false;
   }
 }
 
