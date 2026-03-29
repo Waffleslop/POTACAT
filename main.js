@@ -13,6 +13,7 @@ const HEADLESS = process.argv.includes('--headless');
 // Used by the Windows/macOS/Linux Startup to start/stop POTACAT remotely.
 // No external Node.js required — uses Electron's embedded runtime.
 if (process.argv.includes('--launcher')) {
+  const { Tray, Menu, nativeImage: ni } = require('electron');
   const launcherScript = app.isPackaged
     ? path.join(process.resourcesPath, 'scripts', 'launcher.js')
     : path.join(__dirname, 'scripts', 'launcher.js');
@@ -25,7 +26,20 @@ if (process.argv.includes('--launcher')) {
     } else {
       console.error('[Launcher] Script not found:', launcherScript);
       app.quit();
+      return;
     }
+    // System tray icon
+    const iconPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'assets', 'icon-256.png')
+      : path.join(__dirname, 'assets', 'icon-256.png');
+    const tray = new Tray(ni.createFromPath(iconPath).resize({ width: 16, height: 16 }));
+    tray.setToolTip('POTACAT Launcher (port 7301)');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'POTACAT Launcher', enabled: false },
+      { label: 'Port: 7301', enabled: false },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() },
+    ]));
   });
   return; // skip all GUI initialization below
 }
