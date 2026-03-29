@@ -22,7 +22,11 @@
   let audioEnabled = false;
   let remoteAudio = null; // <video> element for playback
   let audioCtx = null;   // Web Audio context for gain boost
-  let gainNode = null;   // GainNode for volume amplification
+  let gainNode = null;   // GainNode for RX volume
+  let txGainNode = null; // GainNode for TX mic level
+  let rxAnalyser = null; // AnalyserNode for RX metering
+  let txAnalyser = null; // AnalyserNode for TX metering
+  let meterAnimFrame = null; // requestAnimationFrame ID for meter rendering
   let volBoostLevel = 0; // 0=1x, 1=2x, 2=3x
   const VOL_STEPS = [1, 2, 3];
   let sessionKeepAlive = null; // silent <audio> loop for Media Session anchor
@@ -98,6 +102,8 @@
   let currentFreqKhz = 0;
   let currentMode = '';
   let tunedFreqKhz = '';
+  let tunedCallsign = '';
+  let tunedOpName = '';
   let currentNb = false;
   let currentAtu = false;
   let currentVfo = 'A';
@@ -605,6 +611,10 @@
         connectError.classList.remove('hidden');
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
+        break;
+
+      case 'audio-devices':
+        populateAudioDevices(msg.devices, msg.current);
         break;
 
       case 'spots':
@@ -1218,6 +1228,14 @@
     }
     if (mode) modeBadge.textContent = mode;
     tunedFreqKhz = freqKhz;
+    tunedCallsign = callsign;
+    // Look up operator name from QRZ for CW macro {op_firstname}
+    tunedOpName = '';
+    if (callsign && window.api.qrzLookup) {
+      window.api.qrzLookup(callsign.toUpperCase().split('/')[0]).then(function(data) {
+        if (data) tunedOpName = data.nickname || data.fname || '';
+      }).catch(function() {});
+    }
     spotList.querySelectorAll('.spot-card.tuned').forEach(c => c.classList.remove('tuned'));
     card.classList.add('tuned');
 
@@ -1773,6 +1791,7 @@
   // --- Settings Overlay ---
   rigCtrlToggle.addEventListener('click', () => {
     settingsOverlay.classList.remove('hidden');
+    requestAudioDevices(); // refresh device list when settings opens
   });
 
   soClose.addEventListener('click', () => {
@@ -2175,6 +2194,109 @@
     }
   });
 
+  // --- Audio Device Selection ---
+  var rcAudioInput = document.getElementById('rc-audio-input');
+  var rcAudioOutput = document.getElementById('rc-audio-output');
+  var rcAudioRefresh = document.getElementById('rc-audio-refresh');
+
+  function requestAudioDevices() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'get-audio-devices' }));
+    }
+  }
+
+  function populateAudioDevices(devices, current) {
+    rcAudioInput.innerHTML = '<option value="">(System Default)</option>';
+    rcAudioOutput.innerHTML = '<option value="">(System Default)</option>';
+    (devices || []).forEach(function(d) {
+      var opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || d.deviceId.slice(0, 25);
+      if (d.kind === 'audioinput') rcAudioInput.appendChild(opt);
+      else if (d.kind === 'audiooutput') rcAudioOutput.appendChild(opt);
+    });
+    if (current) {
+      rcAudioInput.value = current.input || '';
+      rcAudioOutput.value = current.output || '';
+    }
+  }
+
+  rcAudioInput.addEventListener('change', function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'set-audio-device', kind: 'input', deviceId: rcAudioInput.value }));
+    }
+  });
+  rcAudioOutput.addEventListener('change', function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'set-audio-device', kind: 'output', deviceId: rcAudioOutput.value }));
+    }
+  });
+  rcAudioRefresh.addEventListener('click', requestAudioDevices);
+
+  // --- Audio Level Meters & Gain Controls ---
+  var rxMeterCanvas = document.getElementById('rx-meter');
+  var txMeterCanvas = document.getElementById('tx-meter');
+  var rcRxGain = document.getElementById('rc-rx-gain');
+  var rcRxGainVal = document.getElementById('rc-rx-gain-val');
+  var rcTxGain = document.getElementById('rc-tx-gain');
+  var rcTxGainVal = document.getElementById('rc-tx-gain-val');
+
+  rcRxGain.addEventListener('input', function() {
+    var pct = parseInt(rcRxGain.value, 10);
+    rcRxGainVal.textContent = pct + '%';
+    if (gainNode) gainNode.gain.value = pct / 100;
+  });
+  rcTxGain.addEventListener('input', function() {
+    var pct = parseInt(rcTxGain.value, 10);
+    rcTxGainVal.textContent = pct + '%';
+    if (txGainNode) txGainNode.gain.value = pct / 100;
+  });
+
+  function drawMeter(canvas, analyser) {
+    if (!canvas || !analyser) return;
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    var data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteTimeDomainData(data);
+    // Calculate RMS level
+    var sum = 0;
+    for (var i = 0; i < data.length; i++) {
+      var v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    var rms = Math.sqrt(sum / data.length);
+    var db = rms > 0 ? 20 * Math.log10(rms) : -60;
+    var level = Math.max(0, Math.min(1, (db + 40) / 40)); // -40dB to 0dB → 0-1
+    // Draw bar
+    ctx.clearRect(0, 0, w, h);
+    var barW = Math.round(level * w);
+    // Green → yellow → red gradient
+    if (level < 0.6) ctx.fillStyle = '#4ecca3';
+    else if (level < 0.85) ctx.fillStyle = '#ffd740';
+    else ctx.fillStyle = '#e94560';
+    ctx.fillRect(0, 0, barW, h);
+    // Peak line
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(barW - 1, 0, 1, h);
+  }
+
+  function startMeterRendering() {
+    if (meterAnimFrame) return;
+    function renderMeters() {
+      drawMeter(rxMeterCanvas, rxAnalyser);
+      drawMeter(txMeterCanvas, txAnalyser);
+      meterAnimFrame = requestAnimationFrame(renderMeters);
+    }
+    meterAnimFrame = requestAnimationFrame(renderMeters);
+  }
+
+  function stopMeterRendering() {
+    if (meterAnimFrame) { cancelAnimationFrame(meterAnimFrame); meterAnimFrame = null; }
+    // Clear meters
+    if (rxMeterCanvas) rxMeterCanvas.getContext('2d').clearRect(0, 0, rxMeterCanvas.width, rxMeterCanvas.height);
+    if (txMeterCanvas) txMeterCanvas.getContext('2d').clearRect(0, 0, txMeterCanvas.width, txMeterCanvas.height);
+  }
+
   // --- Audio (WebRTC) ---
   audioBtn.addEventListener('click', async () => {
     if (audioEnabled) {
@@ -2207,9 +2329,23 @@
         // Create AudioContext during user gesture so iOS Safari doesn't block it
         try {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          // RX chain: source → gainNode → rxAnalyser → destination
           gainNode = audioCtx.createGain();
           gainNode.gain.value = VOL_STEPS[volBoostLevel];
-          gainNode.connect(audioCtx.destination);
+          rxAnalyser = audioCtx.createAnalyser();
+          rxAnalyser.fftSize = 256;
+          gainNode.connect(rxAnalyser);
+          rxAnalyser.connect(audioCtx.destination);
+          // TX chain: mic → txGainNode → txAnalyser (metering only, audio sent via WebRTC track)
+          txGainNode = audioCtx.createGain();
+          txGainNode.gain.value = 1.0;
+          txAnalyser = audioCtx.createAnalyser();
+          txAnalyser.fftSize = 256;
+          var micSource = audioCtx.createMediaStreamSource(localAudioStream);
+          micSource.connect(txGainNode);
+          txGainNode.connect(txAnalyser);
+          // Don't connect txAnalyser to destination — we don't want sidetone
+          startMeterRendering();
         } catch (e) {
           console.warn('Web Audio API unavailable:', e.message);
         }
@@ -2293,7 +2429,8 @@
     if (pc) { pc.close(); pc = null; }
     if (localAudioStream) { localAudioStream.getTracks().forEach(t => t.stop()); localAudioStream = null; }
     if (remoteAudio) { remoteAudio.srcObject = null; }
-    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; gainNode = null; }
+    stopMeterRendering();
+    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; gainNode = null; txGainNode = null; rxAnalyser = null; txAnalyser = null; }
     stopSessionKeepAlive();
     audioEnabled = false;
     micReady = false;
@@ -2342,6 +2479,9 @@
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     volBoostBtn.querySelector('.speaker-label').textContent = 'Vol ' + gain + 'x';
     volBoostBtn.classList.toggle('active', volBoostLevel > 0);
+    // Sync RX gain slider
+    rcRxGain.value = Math.round(gain * 100);
+    rcRxGainVal.textContent = Math.round(gain * 100) + '%';
   });
 
   // --- Scan ---
@@ -4381,8 +4521,12 @@
 
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: 'cw-text', text: text }));
-    playCwTextSidetone(text);
+    // Expand macros: {op_firstname} → operator name or "OM", {call} → tuned callsign
+    var expanded = text
+      .replace(/\{op_firstname\}/gi, tunedOpName || '')
+      .replace(/\{call\}/gi, tunedCallsign || '');
+    ws.send(JSON.stringify({ type: 'cw-text', text: expanded }));
+    playCwTextSidetone(expanded);
   }
 
   // --- Macro buttons ---

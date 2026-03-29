@@ -840,6 +840,7 @@
       <span id="conn-pskr" class="conn-pill hidden"><span class="conn-dot"></span> FreeDV</span>
       <span id="conn-pskr-map" class="conn-pill hidden"><span class="conn-dot"></span> PSKReporter</span>
       <span id="conn-remote" class="conn-pill hidden"><span class="conn-dot"></span> Echo CAT</span>
+      <span id="conn-cloud" class="conn-pill hidden"><span class="conn-dot"></span> Cloud</span>
     </div>
     <!-- Settings tab bar -->
     <div class="settings-tab-bar">
@@ -851,6 +852,7 @@
         <button type="button" class="settings-tab" data-tab="logging">Logging</button>
         <button type="button" class="settings-tab" data-tab="network">ECHOCAT</button>
         <button type="button" class="settings-tab" data-tab="display">Display</button>
+        <button type="button" class="settings-tab" data-tab="cloud">Cloud</button>
       </div>
       <input type="text" id="settings-search" class="settings-search" placeholder="Search settings...">
     </div>
@@ -1695,6 +1697,100 @@
       <label class="checkbox-label"><input type="checkbox" id="set-light-icon"> Use light app icon</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Switches the taskbar and title bar icon to a light variant — easier to see on dark desktop panels</span>
     </fieldset>
+    <!-- Cloud Sync Tab -->
+    <fieldset class="source-toggles" data-settings-tab="cloud">
+      <legend>POTACAT Cloud</legend>
+      <div id="cloud-login-section">
+        <div style="margin-bottom:12px;">
+          <p style="font-size:13px;color:var(--text-primary);margin-bottom:8px;">Your log, always backed up and available on every shack computer.</p>
+          <ul style="font-size:12px;color:var(--text-secondary);margin:0 0 8px 16px;padding:0;line-height:1.8;">
+            <li>Automatic cloud backup &mdash; never lose a QSO</li>
+            <li>Sync across multiple computers in real time</li>
+            <li>Restore your log if your PC dies or your file gets corrupted</li>
+            <li>Version history &mdash; undo accidental edits or deletes</li>
+          </ul>
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">Try it free for 30 days. <a href="#" id="cloud-supporter-link" style="color:var(--accent-green);">Become a supporter</a> to keep your subscription.</p>
+        </div>
+        <label style="margin-bottom:4px;">Callsign
+          <input type="text" id="cloud-callsign" placeholder="e.g. K3SBP" style="text-transform:uppercase;">
+        </label>
+        <label style="margin-bottom:4px;">Email
+          <input type="email" id="cloud-email" placeholder="your@email.com">
+        </label>
+        <label style="margin-bottom:4px;">Password
+          <input type="password" id="cloud-password" placeholder="Min 8 characters">
+        </label>
+        <div style="display:flex;gap:6px;">
+          <button type="button" id="cloud-email-register" class="btn btn-primary" style="flex:1;">Start Free Trial</button>
+          <button type="button" id="cloud-email-signin" class="btn" style="flex:1;">Sign In</button>
+        </div>
+        <button type="button" id="cloud-google-signin" class="btn btn-blue btn-block" style="margin-top:6px;">Sign in with Google</button>
+        <p id="cloud-login-error" class="help-text hidden" style="color:var(--accent-red);margin-top:4px;"></p>
+        <p id="cloud-login-signout" class="hidden" style="margin-top:8px;font-size:12px;color:var(--text-secondary);">Having trouble? <a href="#" id="cloud-login-signout-link" style="color:var(--accent-red);">Sign out and start fresh</a></p>
+      </div>
+      <div id="cloud-account-section" class="hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <span><strong id="cloud-user-callsign"></strong> &mdash; <span id="cloud-user-email" style="color:var(--text-secondary);"></span></span>
+          <button type="button" id="cloud-signout-btn" class="btn btn-sm">Sign Out</button>
+        </div>
+        <div style="margin-bottom:6px;">
+          <span id="cloud-sub-status" class="status disconnected">inactive</span>
+          <span id="cloud-sub-level" style="font-size:11px;color:var(--text-secondary);margin-left:4px;"></span>
+          <span id="cloud-trial-info" class="hidden" style="font-size:11px;color:var(--accent-blue);margin-left:4px;"></span>
+        </div>
+        <div id="cloud-subscribe-section">
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Keep your cloud sync active by becoming a POTACAT supporter.</p>
+          <button type="button" id="cloud-subscribe-btn" class="btn btn-primary" style="margin-right:6px;">Become a Supporter</button>
+          <button type="button" id="cloud-verify-btn" class="btn btn-sm">Already a supporter? Verify</button>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset class="source-toggles" data-settings-tab="cloud">
+      <legend>Sync</legend>
+      <label class="checkbox-label"><input type="checkbox" id="cloud-sync-enabled"> Enable QSO Cloud Sync</label>
+      <div id="cloud-sync-controls" style="margin-top:8px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+          <label style="flex:1;">Device Name:
+            <input type="text" id="cloud-device-name" placeholder="My Shack PC">
+          </label>
+          <label>Sync Interval:
+            <select id="cloud-sync-interval">
+              <option value="30">30 sec</option>
+              <option value="60" selected>1 min</option>
+              <option value="300">5 min</option>
+              <option value="600">10 min</option>
+            </select>
+          </label>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+          <button type="button" id="cloud-sync-now" class="btn btn-primary">Sync Now</button>
+          <button type="button" id="cloud-initial-upload" class="btn">Upload Existing Log</button>
+        </div>
+        <div id="cloud-upload-progress" class="hidden" style="margin-bottom:8px;">
+          <progress id="cloud-upload-bar" max="100" value="0" style="width:100%;height:18px;"></progress>
+          <span id="cloud-upload-text" style="font-size:11px;color:var(--text-secondary);"></span>
+        </div>
+        <div id="cloud-sync-stats" style="font-size:11px;color:var(--text-secondary);">
+          <span>Cloud QSOs: <strong id="cloud-qso-count">--</strong></span>
+          <span style="margin-left:12px;">Devices: <strong id="cloud-device-count">--</strong></span>
+          <span style="margin-left:12px;">Pending: <strong id="cloud-pending-count">0</strong></span>
+          <span style="margin-left:12px;">Last sync: <strong id="cloud-last-sync">never</strong></span>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset class="source-toggles" data-settings-tab="cloud">
+      <legend>Backup &amp; Recovery</legend>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">Your local ADIF file is always the primary copy. The cloud is an additional backup you can restore from at any time.</p>
+      <button type="button" id="cloud-download-adif" class="btn">Download Cloud Log (ADIF)</button>
+    </fieldset>
+
+    <fieldset class="source-toggles" data-settings-tab="cloud">
+      <legend>Troubleshooting</legend>
+      <button type="button" id="cloud-clear-tokens" class="btn btn-danger">Sign Out &amp; Clear Cloud Tokens</button>
+      <p class="help-text" style="margin-top:4px;">Clears your saved login. Use this if you're stuck or seeing errors.</p>
+    </fieldset>
     </div><!-- /.settings-scroll-area -->
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
@@ -2110,5 +2206,6 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="app.js"></script>
+  <script src="cloud-ui.js"></script>
 </body>
 </html>

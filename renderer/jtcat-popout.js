@@ -18,6 +18,7 @@
   var txEnabled = false;
   var transmitting = false;
   var jpTxFreqHz = 1500;
+  var jpRxFreqHz = 1500;
   var myCallsign = '';
   var myGrid = '';
   var stations = {};   // callsign → {marker, grid, lat, lon, lastSeen}
@@ -30,6 +31,11 @@
     myCallsign = (s.myCallsign || '').toUpperCase();
     myGrid = (s.grid || '').toUpperCase().substring(0, 4);
     updateMapHome();
+    // Center map on home QTH if grid is available
+    if (myGrid && map) {
+      var pos = gridToLatLon(myGrid);
+      if (pos) map.setView([pos.lat, pos.lon], 4);
+    }
     // Register own station so QSO arcs can be drawn to/from us
     if (myCallsign && myGrid) registerStation(myCallsign, myGrid);
   });
@@ -347,6 +353,7 @@
       var grid = parts[callIdx + 1] || '';
       if (call) {
         jpTxFreqHz = d.df || 1500;
+        jpRxFreqHz = d.df || 1500;
         txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
 
         console.log('[JTCAT popout] Reply to CQ:', call, grid, 'df:', d.df, 'slot:', d.slot);
@@ -718,6 +725,10 @@
     window.api.jtcatSkipPhase();
   });
 
+  document.getElementById('jp-open-log').addEventListener('click', function() {
+    window.api.openQsoLog();
+  });
+
   // Auto-CQ response
   var autoCqSelect = document.getElementById('jp-auto-cq');
   autoCqSelect.addEventListener('change', function() {
@@ -764,6 +775,15 @@
   window.api.getSettings().then(function(s) {
     var lastFreq = s.jtcatLastBandFreq || 14074;
     var bandBtn = document.querySelector('.jtcat-band-btn[data-freq="' + lastFreq + '"]');
+    // If no exact match, find the band button closest to the requested frequency
+    if (!bandBtn) {
+      var bestBtn = null, bestDist = Infinity;
+      document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
+        var d = Math.abs(parseInt(btn.dataset.freq, 10) - lastFreq);
+        if (d < bestDist) { bestDist = d; bestBtn = btn; }
+      });
+      bandBtn = bestBtn;
+    }
     if (!bandBtn) bandBtn = document.querySelector('.jtcat-band-btn[data-band="20m"]');
     if (bandBtn) selectBand(bandBtn, false);
     window.api.jtcatStart(modeSelect.value);
@@ -961,12 +981,18 @@
       }
       jpWfCtx.putImageData(lineData, 0, 0);
 
-      // TX marker
+      // RX marker (green) — always visible, wider so green peeks out when TX overlaps
+      var rxX = Math.round(jpRxFreqHz / 3000 * w);
       var txX = Math.round(jpTxFreqHz / 3000 * w);
       jpWfCtx.fillStyle = '#000';
-      jpWfCtx.fillRect(txX - 2, 0, 5, h);
-      jpWfCtx.fillStyle = '#ff2222';
+      jpWfCtx.fillRect(rxX - 3, 0, 7, h);
+      jpWfCtx.fillStyle = '#4ecca3';
+      jpWfCtx.fillRect(rxX - 2, 0, 5, h);
+      // TX marker (red) — narrower, draws on top. When same position, green edges visible
+      jpWfCtx.fillStyle = '#000';
       jpWfCtx.fillRect(txX - 1, 0, 3, h);
+      jpWfCtx.fillStyle = '#ff2222';
+      jpWfCtx.fillRect(txX, 0, 1, h);
 
       // Auto-detect quietest TX frequency (~every 0.5s)
       popoutQuietFreqFrame++;
@@ -1035,6 +1061,7 @@
     var x = e.clientX - rect.left;
     var hz = Math.round(x / rect.width * 3000 / 10) * 10;
     jpTxFreqHz = hz;
+    jpRxFreqHz = hz;
     txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
     window.api.jtcatSetTxFreq(hz);
     window.api.jtcatSetRxFreq(hz);

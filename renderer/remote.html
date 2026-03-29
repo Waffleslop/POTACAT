@@ -172,6 +172,30 @@
           </div>
         </div>
 
+        <!-- Audio Devices & Levels -->
+        <div class="so-section-label">Audio</div>
+        <div class="so-row">
+          <label class="so-label">Input (RX)</label>
+          <select id="rc-audio-input" class="so-select" style="flex:1;font-size:12px;"></select>
+        </div>
+        <div class="so-row">
+          <label class="so-label">Output (TX)</label>
+          <select id="rc-audio-output" class="so-select" style="flex:1;font-size:12px;"></select>
+        </div>
+        <button type="button" id="rc-audio-refresh" class="ft8-filter-btn" style="margin:4px 0 8px;">Refresh Devices</button>
+        <div class="so-row" style="align-items:center;gap:6px;">
+          <label class="so-label" style="min-width:50px;">RX Level</label>
+          <canvas id="rx-meter" width="120" height="12" style="border-radius:2px;background:#111;flex-shrink:0;"></canvas>
+          <input type="range" id="rc-rx-gain" min="0" max="300" value="100" style="flex:1;min-width:60px;" title="RX Gain %">
+          <span id="rc-rx-gain-val" style="font-size:11px;min-width:30px;text-align:right;">100%</span>
+        </div>
+        <div class="so-row" style="align-items:center;gap:6px;">
+          <label class="so-label" style="min-width:50px;">TX Level</label>
+          <canvas id="tx-meter" width="120" height="12" style="border-radius:2px;background:#111;flex-shrink:0;"></canvas>
+          <input type="range" id="rc-tx-gain" min="0" max="200" value="100" style="flex:1;min-width:60px;" title="TX Gain %">
+          <span id="rc-tx-gain-val" style="font-size:11px;min-width:30px;text-align:right;">100%</span>
+        </div>
+
         <!-- Custom CAT buttons -->
         <div id="rc-custom-cat" class="so-custom-cat">
           <div class="so-section-label">Custom CAT</div>

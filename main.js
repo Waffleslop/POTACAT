@@ -2,6 +2,12 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeI
 const path = require('path');
 const fs = require('fs');
 
+// --- Headless mode: POTACAT --headless ---
+// Runs the full app with a hidden window — no GUI shown.
+// Useful for serving ECHOCAT from a headless server (e.g. Raspberry Pi).
+// All features work: CAT, spots, FT8 engine, ECHOCAT, CW keyer.
+const HEADLESS = process.argv.includes('--headless');
+
 // --- Launcher-only mode: POTACAT.exe --launcher ---
 // Runs the lightweight HTTPS launcher server without any GUI.
 // Used by the Windows/macOS/Linux Startup to start/stop POTACAT remotely.
@@ -69,9 +75,14 @@ const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache,
 const { fetchDxCalExpeditions } = require('./lib/dxcal');
 const { getModel, getModelList } = require('./lib/rig-models');
 const { autoUpdater } = require('electron-updater');
+let registerCloudIpc;
+try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
 
 // --- QRZ.com callsign lookup ---
 let qrz = new QrzClient();
+
+// --- Cloud Sync (initialized in app.whenReady) ---
+let cloudIpc = null;
 
 // --- Parks DB (activator mode) ---
 let parksArray = [];
@@ -550,6 +561,9 @@ async function connectCat() {
   if (cat) {
     cat.removeAllListeners();
     cat.disconnect();
+    // Brief delay to let serial port fully release before reconnecting
+    // (prevents "Resource busy" on macOS when switching rigs)
+    await new Promise(r => setTimeout(r, 300));
   }
   killRigctld();
   const target = settings.catTarget;
@@ -1484,7 +1498,11 @@ async function saveQsoRecord(qsoData) {
   }
 
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  if (!qsoData.uuid) qsoData.uuid = require('crypto').randomUUID();
   appendQso(logPath, qsoData);
+
+  // Record in cloud sync journal
+  if (cloudIpc) cloudIpc.journalCreate(qsoData);
 
   // Notify QSO pop-out window
   if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
@@ -1926,7 +1944,11 @@ function popoutBroadcastQso() {
 
 function jtcatAutoLog(qso) {
   const q = qso || remoteJtcatQso;
-  if (!q || !q.call) return;
+  if (!q || !q.call) {
+    sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
+    return;
+  }
+  sendCatLog(`[JTCAT] Auto-logging QSO: ${q.call} report=${q.report || 'none'} sent=${q.sentReport || 'none'}`);
   const now = new Date();
   const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
   const qsoTime = now.toISOString().slice(11, 16).replace(/:/g, '');
@@ -2090,18 +2112,20 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
 
 // Server-side QSO state machine wrappers
 function processRemoteJtcatQso(results) {
-  advanceJtcatQso(remoteJtcatQso, results, remoteJtcatSetTxMsg, () => {
-    jtcatAutoLog(remoteJtcatQso);
+  const qso = remoteJtcatQso; // capture reference — don't rely on global in callbacks
+  advanceJtcatQso(qso, results, remoteJtcatSetTxMsg, () => {
+    jtcatAutoLog(qso); // use captured ref, not global
     remoteJtcatBroadcastQso();
   });
 }
 
 function processPopoutJtcatQso(results) {
-  advanceJtcatQso(popoutJtcatQso, results, (msg) => {
+  const qso = popoutJtcatQso; // capture reference — don't rely on global in callbacks
+  advanceJtcatQso(qso, results, (msg) => {
     if (ft8Engine) ft8Engine.setTxMessage(msg);
     popoutBroadcastQso();
   }, () => {
-    jtcatAutoLog(popoutJtcatQso);
+    jtcatAutoLog(qso); // use captured ref, not global (global may be replaced by auto-CQ)
     popoutBroadcastQso();
   });
 }
@@ -2339,18 +2363,17 @@ function stopJtcat() {
 
 // --- SmartSDR panadapter spots ---
 function needsSmartSdr() {
-  // Connect SmartSDR API if panadapter spots are enabled, CW keyer is active,
-  // WSJT-X is active with a Flex, ECHOCAT remote needs rig controls,
-  // CW XIT offset is configured, or Flex is the active rig (rig panel needs API
-  // for ATU/NB/RF gain/TX power — Kenwood CAT emulation doesn't support these)
+  // Connect SmartSDR API only when a Flex radio is configured or panadapter spots are enabled.
+  // All Flex-specific features (CW keyer, rig controls, XIT) require catTarget.type === 'tcp'.
+  const isFlex = settings.catTarget && settings.catTarget.type === 'tcp';
   if (settings.smartSdrSpots) return true;
+  if (!isFlex) return false; // non-Flex rigs never need SmartSDR
   if (settings.enableCwKeyer) return true;
   if (settings.enableRemote && settings.remoteCwEnabled) return true;
-  if (settings.enableWsjtx && settings.catTarget && settings.catTarget.type === 'tcp') return true;
-  if (settings.enableRemote && settings.catTarget && settings.catTarget.type === 'tcp') return true;
-  if (settings.cwXit && settings.catTarget && settings.catTarget.type === 'tcp') return true;
-  if (settings.catTarget && settings.catTarget.type === 'tcp') return true;
-  return false;
+  if (settings.enableWsjtx) return true;
+  if (settings.enableRemote) return true;
+  if (settings.cwXit) return true;
+  return true; // Flex rig always needs API for rig panel (ATU/NB/gain/power)
 }
 
 function connectSmartSdr() {
@@ -2808,8 +2831,9 @@ function connectRemote() {
   // CW text macros/freeform from phone — route to radio
   remoteServer.on('cw-text', ({ text }) => {
     if (!text) return;
-    // Substitute {MYCALL} with the user's callsign
-    const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '');
+    // Substitute macros
+    const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '')
+      .replace(/\{mycallsign\}/gi, settings.myCallsign || '');
     console.log(`[Echo CAT] CW text: ${expanded}`);
     // FlexRadio: use SmartSDR `cw send` command
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
@@ -3051,6 +3075,39 @@ function connectRemote() {
       filterWidth: _currentFilterWidth, atuActive: _currentAtuState, mode: _currentMode,
       capabilities: getRigCapabilities(detectRigType()),
     });
+  });
+
+  // Audio device enumeration and selection from ECHOCAT
+  remoteServer.on('get-audio-devices', async () => {
+    try {
+      const devices = await win.webContents.executeJavaScript(`
+        navigator.mediaDevices.enumerateDevices().then(d =>
+          d.filter(x => x.kind === 'audioinput' || x.kind === 'audiooutput')
+           .map(x => ({ deviceId: x.deviceId, label: x.label || x.deviceId.slice(0, 20), kind: x.kind }))
+        )
+      `);
+      const current = {
+        input: settings.remoteAudioInput || '',
+        output: settings.remoteAudioOutput || '',
+      };
+      remoteServer.sendToClient({ type: 'audio-devices', devices, current });
+    } catch (err) {
+      console.error('[Echo CAT] Failed to enumerate audio devices:', err.message);
+    }
+  });
+
+  remoteServer.on('set-audio-device', ({ kind, deviceId }) => {
+    if (kind === 'input') {
+      settings.remoteAudioInput = deviceId;
+    } else if (kind === 'output') {
+      settings.remoteAudioOutput = deviceId;
+    }
+    saveSettings(settings);
+    // Restart remote audio to apply new device (destroy, phone will re-initiate)
+    destroyRemoteAudioWindow();
+    sendCatLog(`[Audio] ${kind} device changed to: ${deviceId || '(default)'}`);
+    // Update desktop UI
+    if (win && !win.isDestroyed()) win.webContents.send('reload-prefs');
   });
 
   // Unified rig-control from ECHOCAT phone (same dispatch as desktop IPC)
@@ -3615,6 +3672,12 @@ function connectRemote() {
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
     if (!myCall) return;
+    // If replacing an active QSO that had reports exchanged, auto-log it before replacing
+    if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.report &&
+        remoteJtcatQso.call.toUpperCase() !== (call || '').toUpperCase()) {
+      sendCatLog(`[JTCAT] Replacing active QSO with ${remoteJtcatQso.call} — auto-logging`);
+      jtcatAutoLog(remoteJtcatQso);
+    }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (ft8Engine._txActive) ft8Engine.txComplete();
     const txMsg = call + ' ' + myCall + ' ' + myGrid;
@@ -5114,7 +5177,7 @@ function createWindow() {
   // Allow MIDI device access for CW keyer
   win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(true));
 
-  win.show();
+  if (!HEADLESS) win.show();
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
@@ -6179,6 +6242,26 @@ app.whenReady().then(() => {
   loadAssociations().catch(err => console.error('Failed to load SOTA associations:', err.message));
 
   createWindow();
+  if (HEADLESS) {
+    // Force ECHOCAT on in headless mode — that's the whole point
+    if (!settings.enableRemote) {
+      settings.enableRemote = true;
+      saveSettings(settings);
+    }
+    const port = settings.remotePort || 7300;
+    console.log('[POTACAT] Running in headless mode — no GUI.');
+    console.log(`[POTACAT] ECHOCAT enabled on port ${port}`);
+    // Print URLs after a short delay to allow network interfaces to be ready
+    setTimeout(() => {
+      const ips = RemoteServer.getLocalIPs();
+      console.log('[POTACAT] Connect via ECHOCAT:');
+      for (const ip of ips) {
+        const label = ip.tailscale ? (ip.tailscaleHostname || 'Tailscale') : ip.name;
+        const host = ip.tailscaleHostname || ip.address;
+        console.log(`  ${label}: https://${host}:${port}`);
+      }
+    }, 1000);
+  }
   if (!settings.enableWsjtx) connectCat();
   if (settings.enableCluster) connectCluster();
   if (settings.enableCwSpots) connectCwSpots();
@@ -6193,6 +6276,22 @@ app.whenReady().then(() => {
   if (settings.enablePskrMap) connectPskrMap();
   if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
+  }
+
+  // --- Cloud Sync (optional — module may not be present in open-source builds) ---
+  if (registerCloudIpc) {
+    cloudIpc = registerCloudIpc({
+      app,
+      win: () => win,
+      getSettings: () => settings,
+      saveSettings: (s) => { Object.assign(settings, s); saveSettings(settings); },
+      getLogPath: () => settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi'),
+      loadWorkedQsos: () => loadWorkedQsos(),
+      sendToRenderer: (channel, data) => {
+        if (win && !win.isDestroyed()) win.webContents.send(channel, data);
+      },
+    });
+    cloudIpc.startBackgroundSync();
   }
 
   // Cold start: check if app was launched via potacat:// URL
@@ -6811,6 +6910,12 @@ app.whenReady().then(() => {
     const myCall = (settings.myCallsign || '').toUpperCase();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall) return;
+    // If replacing an active QSO that had reports exchanged, auto-log it before replacing
+    if (popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.report &&
+        popoutJtcatQso.call.toUpperCase() !== (data.call || '').toUpperCase()) {
+      sendCatLog(`[JTCAT] Replacing active QSO with ${popoutJtcatQso.call} — auto-logging`);
+      jtcatAutoLog(popoutJtcatQso);
+    }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (ft8Engine._txActive) ft8Engine.txComplete();
     ft8Engine.setTxFreq(data.df || 1500);
@@ -7076,12 +7181,14 @@ app.whenReady().then(() => {
         break;
       }
       case 'atu-tune': {
+        const atuOn = !_currentAtuState; // toggle
         if (flexSdr()) {
-          smartSdr.setAtu(true); // 'atu start'
+          smartSdr.setAtu(atuOn);
         } else if (cat && cat.connected) {
-          cat.startTune();
+          if (atuOn) cat.startTune();
+          else cat.stopTune();
         }
-        _currentAtuState = true;
+        _currentAtuState = atuOn;
         broadcastRigState();
         break;
       }
@@ -8424,6 +8531,7 @@ app.whenReady().then(() => {
       if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
       Object.assign(qsos[idx], fields);
       rewriteAdifFile(logPath, qsos);
+      if (cloudIpc) cloudIpc.journalUpdate(qsos[idx]);
       loadWorkedQsos();
       // Notify other windows about the change
       const sender = event.sender;
@@ -8441,8 +8549,10 @@ app.whenReady().then(() => {
     try {
       const qsos = parseAllRawQsos(logPath);
       if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
+      const deletedQso = { ...qsos[idx] };
       qsos.splice(idx, 1);
       rewriteAdifFile(logPath, qsos);
+      if (cloudIpc) cloudIpc.journalDelete(deletedQso);
       loadWorkedQsos();
       // Notify QSO pop-out about the deletion
       const sender = event.sender;
@@ -8634,6 +8744,7 @@ process.on('SIGINT', () => { gracefulCleanup(); process.exit(0); });
 process.on('SIGTERM', () => { gracefulCleanup(); process.exit(0); });
 
 app.on('window-all-closed', () => {
+  if (HEADLESS) return; // keep running in headless mode
   // Fire-and-forget telemetry — don't await; delaying app.quit() causes SIGABRT on macOS
   const sessionSeconds = Math.round((Date.now() - sessionStartTime) / 1000);
   sendTelemetry(sessionSeconds);
