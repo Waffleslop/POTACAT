@@ -6362,46 +6362,41 @@ app.whenReady().then(() => {
     cloudIpc.startBackgroundSync();
   }
 
-  // Auto-install launcher on first run (background service for remote start/stop)
-  if (!settings._launcherAutoInstalled && app.isPackaged) {
+  // Ensure launcher background service is installed and running
+  if (app.isPackaged) {
     try {
-      // Trigger the same install logic as the manual button
-      ipcMain.emit('install-launcher');
-      // Use a simpler direct approach: just install it
-      const os = require('os');
+      const { execSync, spawn } = require('child_process');
       const exePath = process.execPath;
+      const configDir = app.getPath('userData');
+      const configPath = path.join(configDir, 'launcher-config.json');
+      if (!fs.existsSync(configPath)) {
+        fs.writeFileSync(configPath, JSON.stringify({ port: 7301, https: true }, null, 2));
+      }
+
       if (process.platform === 'win32') {
+        // Install to Startup folder if not already there
         const startupDir = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
         const vbsPath = path.join(startupDir, 'POTACAT-Launcher.vbs');
         if (!fs.existsSync(vbsPath)) {
-          const configDir = app.getPath('userData');
-          const configPath = path.join(configDir, 'launcher-config.json');
-          if (!fs.existsSync(configPath)) {
-            fs.writeFileSync(configPath, JSON.stringify({ port: 7301, https: true }, null, 2));
-          }
           fs.writeFileSync(vbsPath, `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run """${exePath}"" --launcher", 0, False\r\n`);
-          console.log('[Launcher] Auto-installed to Windows Startup');
+          console.log('[Launcher] Installed to Windows Startup');
         }
+        // Start the launcher now if not already running
+        spawn(exePath, ['--launcher'], { detached: true, stdio: 'ignore' }).unref();
+        console.log('[Launcher] Started background process');
       } else if (process.platform === 'darwin') {
-        const plistDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
+        const plistDir = path.join(require('os').homedir(), 'Library', 'LaunchAgents');
         const plistPath = path.join(plistDir, 'com.potacat.launcher.plist');
         if (!fs.existsSync(plistPath)) {
           fs.mkdirSync(plistDir, { recursive: true });
-          const configDir = app.getPath('userData');
-          const configPath = path.join(configDir, 'launcher-config.json');
-          if (!fs.existsSync(configPath)) {
-            fs.writeFileSync(configPath, JSON.stringify({ port: 7301, https: true }, null, 2));
-          }
           const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>com.potacat.launcher</string><key>ProgramArguments</key><array><string>${exePath}</string><string>--launcher</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>`;
           fs.writeFileSync(plistPath, plist);
-          try { require('child_process').execSync(`launchctl load "${plistPath}"`, { stdio: 'pipe' }); } catch {}
-          console.log('[Launcher] Auto-installed to macOS LaunchAgents');
+          console.log('[Launcher] Installed to macOS LaunchAgents');
         }
+        try { execSync(`launchctl load "${plistPath}"`, { stdio: 'pipe' }); } catch {}
       }
-      settings._launcherAutoInstalled = true;
-      saveSettings(settings);
     } catch (err) {
-      console.error('[Launcher] Auto-install failed:', err.message);
+      console.error('[Launcher] Auto-start failed:', err.message);
     }
   }
 
