@@ -2365,7 +2365,10 @@
     }
     try {
       setAudioStatus('Wait...');
-      pc = new RTCPeerConnection({ iceServers: [] });
+      // pc = new RTCPeerConnection({ iceServers: [] });
+      // Create peer connection - Support for STUN server for audio connectivity
+      // This may be better as a configuration option for those who don't want to use a VPN
+      pc = new RTCPeerConnection({ iceServers: [{'urls': 'stun:stun.l.google.com:19302'}] });
       for (const track of localAudioStream.getTracks()) {
         pc.addTrack(track, localAudioStream);
       }
