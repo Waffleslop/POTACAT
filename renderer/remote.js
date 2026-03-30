@@ -1940,18 +1940,13 @@
     }
   }
 
-  const XIT_PRESETS = [-200, -100, -50, -20, -10, 0, 10, 20, 50, 100, 200];
   soXitDn.addEventListener('click', () => {
-    const idx = XIT_PRESETS.indexOf(cwXit);
-    if (idx > 0) cwXit = XIT_PRESETS[idx - 1];
-    else if (idx === -1) { cwXit = Math.max(-999, cwXit - 10); }
+    cwXit = Math.max(-999, cwXit - 10);
     soXitVal.textContent = cwXit;
     sendSetting('set-cw-xit', cwXit);
   });
   soXitUp.addEventListener('click', () => {
-    const idx = XIT_PRESETS.indexOf(cwXit);
-    if (idx < XIT_PRESETS.length - 1) cwXit = XIT_PRESETS[idx + 1];
-    else if (idx === -1) { cwXit = Math.min(999, cwXit + 10); }
+    cwXit = Math.min(999, cwXit + 10);
     soXitVal.textContent = cwXit;
     sendSetting('set-cw-xit', cwXit);
   });
