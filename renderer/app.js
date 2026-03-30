@@ -2289,6 +2289,26 @@ setQrzApiKey.addEventListener('blur', async () => {
 setQrzUsername.addEventListener('input', updateQrzLogbookVisibility);
 setQrzPassword.addEventListener('input', updateQrzLogbookVisibility);
 
+// QRZ Logbook download button
+document.getElementById('qrz-download-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('qrz-download-status');
+  statusEl.textContent = 'Downloading...';
+  statusEl.style.color = '';
+  try {
+    const result = await window.api.qrzDownloadLogbook();
+    if (result.ok) {
+      statusEl.textContent = `Imported ${result.imported} new QSOs (${result.total} total in QRZ)`;
+      statusEl.style.color = '#4ecca3';
+    } else {
+      statusEl.textContent = result.error || 'Download failed';
+      statusEl.style.color = '#e94560';
+    }
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+    statusEl.style.color = '#e94560';
+  }
+});
+
 setEnableCluster.addEventListener('change', () => {
   clusterConfig.classList.toggle('hidden', !setEnableCluster.checked);
 });
@@ -6876,6 +6896,9 @@ async function openSettingsDialog(tab) {
   document.querySelectorAll('#cwspots-clubs input[data-club]').forEach(cb => {
     cb.checked = savedClubs.includes(cb.dataset.club);
   });
+  // Restore max WPM
+  const cwMaxWpmEl = document.getElementById('set-cwspots-max-wpm');
+  if (cwMaxWpmEl) cwMaxWpmEl.value = s.cwSpotsMaxWpm || 0;
   // Show/hide club checkboxes based on preset (only for rbn.telegraphy.de)
   const cwClubsDiv = document.getElementById('cwspots-clubs');
   if (cwClubsDiv && cwSpotsPreset) {
@@ -7242,6 +7265,7 @@ settingsSave.addEventListener('click', async () => {
     cwSpotsHost: (() => { const p = document.getElementById('set-cwspots-preset'); if (!p || p.value === 'custom') return (document.getElementById('set-cwspots-host') || {}).value || 'rbn.telegraphy.de'; return p.value.split(':')[0]; })(),
     cwSpotsPort: (() => { const p = document.getElementById('set-cwspots-preset'); if (!p || p.value === 'custom') return parseInt((document.getElementById('set-cwspots-port') || {}).value, 10) || 7000; return parseInt(p.value.split(':')[1], 10) || 7000; })(),
     cwSpotsClubs: [...document.querySelectorAll('#cwspots-clubs input[data-club]:checked')].map(cb => cb.dataset.club),
+    cwSpotsMaxWpm: parseInt((document.getElementById('set-cwspots-max-wpm') || {}).value, 10) || 0,
     enableRbn: rbnEnabled,
     enableWsjtx: wsjtxEnabled,
     enablePskr: pskrEnabled,

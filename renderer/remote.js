@@ -617,6 +617,12 @@
         populateAudioDevices(msg.devices, msg.current);
         break;
 
+      case 'qrz-result':
+        if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
+          tunedOpName = msg.fname || '';
+        }
+        break;
+
       case 'spots':
         spots = msg.data || [];
         renderSpots();
@@ -1042,6 +1048,11 @@
         const da = a.distance != null ? a.distance : 1e9;
         const db = b.distance != null ? b.distance : 1e9;
         return da - db;
+      } else if (spotSort === 'source') {
+        const sa = (a.source || '').localeCompare(b.source || '');
+        if (sa !== 0) return sa;
+        // Within same source, sort by age (newest first)
+        return parseSpotTime(b.spotTime) - parseSpotTime(a.spotTime);
       }
       // default: age (newest first)
       const ta = parseSpotTime(a.spotTime);
@@ -1231,10 +1242,8 @@
     tunedCallsign = callsign;
     // Look up operator name from QRZ for CW macro {op_firstname}
     tunedOpName = '';
-    if (callsign && window.api.qrzLookup) {
-      window.api.qrzLookup(callsign.toUpperCase().split('/')[0]).then(function(data) {
-        if (data) tunedOpName = data.nickname || data.fname || '';
-      }).catch(function() {});
+    if (callsign && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: callsign.toUpperCase().split('/')[0] }));
     }
     spotList.querySelectorAll('.spot-card.tuned').forEach(c => c.classList.remove('tuned'));
     card.classList.add('tuned');
@@ -1435,7 +1444,7 @@
   });
 
   // --- Dial Pad ---
-  const STEP_SIZES = [0.1, 0.5, 1, 5, 10, 25, 100];
+  const STEP_SIZES = [0.01, 0.1, 0.5, 1, 5, 10, 25, 100];
   let dpStepIdx = 2; // default 1 kHz
   let dpInput = '';
 
@@ -1525,7 +1534,7 @@
     const step = STEP_SIZES[dpStepIdx];
     const base = dpInput ? parseFloat(dpInput) : currentFreqKhz;
     if (!base || isNaN(base)) return;
-    const newFreq = Math.round((base + step) * 10) / 10;
+    const newFreq = Math.round((base + step) * 100) / 100;
     dpInput = newFreq.toString();
     updateDpDisplay();
     dpTune(newFreq);
@@ -1535,7 +1544,7 @@
     const step = STEP_SIZES[dpStepIdx];
     const base = dpInput ? parseFloat(dpInput) : currentFreqKhz;
     if (!base || isNaN(base)) return;
-    const newFreq = Math.round((base - step) * 10) / 10;
+    const newFreq = Math.round((base - step) * 100) / 100;
     if (newFreq < 100) return;
     dpInput = newFreq.toString();
     updateDpDisplay();
@@ -1546,14 +1555,14 @@
   freqUpBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const step = STEP_SIZES[dpStepIdx];
-    const newFreq = Math.round((currentFreqKhz + step) * 10) / 10;
+    const newFreq = Math.round((currentFreqKhz + step) * 100) / 100;
     dpTune(newFreq);
   });
 
   freqDownBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const step = STEP_SIZES[dpStepIdx];
-    const newFreq = Math.round((currentFreqKhz - step) * 10) / 10;
+    const newFreq = Math.round((currentFreqKhz - step) * 100) / 100;
     if (newFreq >= 100) dpTune(newFreq);
   });
 

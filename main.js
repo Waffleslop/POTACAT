@@ -13,11 +13,22 @@ const HEADLESS = process.argv.includes('--headless');
 // Used by the Windows/macOS/Linux Startup to start/stop POTACAT remotely.
 // No external Node.js required — uses Electron's embedded runtime.
 if (process.argv.includes('--launcher')) {
+  const { Tray, Menu, nativeImage: ni } = require('electron');
   const launcherScript = app.isPackaged
     ? path.join(process.resourcesPath, 'scripts', 'launcher.js')
     : path.join(__dirname, 'scripts', 'launcher.js');
   // Prevent Electron from quitting when there are no windows
   app.on('window-all-closed', (e) => { /* keep running */ });
+  // Catch EADDRINUSE gracefully — another launcher is already running
+  process.on('uncaughtException', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log('[Launcher] Port already in use — exiting quietly.');
+      app.quit();
+      return;
+    }
+    console.error('[Launcher] Fatal:', err.message);
+    app.quit();
+  });
   app.whenReady().then(() => {
     if (fs.existsSync(launcherScript)) {
       require(launcherScript);
@@ -25,7 +36,23 @@ if (process.argv.includes('--launcher')) {
     } else {
       console.error('[Launcher] Script not found:', launcherScript);
       app.quit();
+      return;
     }
+    // System tray icon — use .ico on Windows, .png on Mac/Linux
+    const icoFile = process.platform === 'win32' ? 'icon.ico' : 'icon-256.png';
+    const iconPath = path.join(__dirname, 'assets', icoFile);
+    const { shell } = require('electron');
+    const tray = new Tray(iconPath);
+    tray.setToolTip('POTACAT Launcher (port 7301)');
+    tray.on('click', () => shell.openExternal('https://localhost:7301'));
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open Launcher', click: () => shell.openExternal('https://localhost:7301') },
+      { type: 'separator' },
+      { label: 'POTACAT Launcher', enabled: false },
+      { label: 'Port: 7301', enabled: false },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() },
+    ]));
   });
   return; // skip all GUI initialization below
 }
@@ -557,7 +584,11 @@ function sendRotorBearing(azimuth) {
   sendCatLog(`Rotor → ${host}:${port} azimuth=${azimuth}°`);
 }
 
+let _connectCatPending = false;
 async function connectCat() {
+  if (_connectCatPending) return; // prevent concurrent connectCat() calls
+  _connectCatPending = true;
+  try {
   if (cat) {
     cat.removeAllListeners();
     cat.disconnect();
@@ -680,6 +711,9 @@ async function connectCat() {
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
   }
+  } finally {
+    _connectCatPending = false;
+  }
 }
 
 // --- DX Cluster ---
@@ -732,6 +766,8 @@ function formatClusterComment(comment) {
 
 // Build a normalized spot from raw cluster data (shared by all cluster clients)
 function buildClusterSpot(raw, myPos, myEntity) {
+  // Extract WPM from RBN-style comment (e.g. "CW 28 dB 29 WPM CQ")
+  const wpmMatch = (raw.comment || '').match(/(\d+)\s*WPM/i);
   const spot = {
     source: 'dxc',
     callsign: raw.callsign,
@@ -746,6 +782,7 @@ function buildClusterSpot(raw, myPos, myEntity) {
     lon: null,
     band: raw.band,
     spotTime: raw.spotTime,
+    wpm: wpmMatch ? parseInt(wpmMatch[1], 10) : null,
   };
 
   if (ctyDb) {
@@ -930,6 +967,12 @@ function connectCwSpots() {
       : [];
 
     client.on('spot', (raw) => {
+      // Filter by max WPM if configured
+      const maxWpm = settings.cwSpotsMaxWpm || 0;
+      if (maxWpm > 0) {
+        const wpmMatch = (raw.comment || '').match(/(\d+)\s*WPM/i);
+        if (wpmMatch && parseInt(wpmMatch[1], 10) > maxWpm) return;
+      }
       const spot = buildClusterSpot(raw, myPos, myEntity);
       spot.source = 'cwspots';
       spot.cwClub = clubTag; // tag with club name for badge display
@@ -1570,6 +1613,23 @@ async function saveQsoRecord(qsoData) {
     }
   }
 
+  // Expand respot comment macros ({op_firstname}, {rst}, {mycallsign}, {QTH})
+  if (qsoData.respotComment) {
+    let opName = '';
+    if (qrz.configured && settings.enableQrz && qsoData.callsign) {
+      try {
+        const qrzData = await qrz.lookup(qsoData.callsign.split('/')[0]);
+        if (qrzData) opName = qrzData.nickname || qrzData.fname || '';
+      } catch { /* QRZ lookup failed — leave blank */ }
+    }
+    qsoData.respotComment = qsoData.respotComment
+      .replace(/\{op_firstname\}/gi, opName)
+      .replace(/\{rst\}/gi, qsoData.rstSent || '59')
+      .replace(/\{mycallsign\}/gi, settings.myCallsign || '')
+      .replace(/\{QTH\}/gi, settings.grid || '')
+      .replace(/\{call\}/gi, qsoData.callsign || '');
+  }
+
   // Re-spot on POTA if requested
   if (qsoData.respot && qsoData.sig === 'POTA' && qsoData.sigInfo && settings.myCallsign) {
     try {
@@ -1890,7 +1950,7 @@ let ft8Engine = null;
 let remoteJtcatQso = null;
 let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
 const JTCAT_MAX_CQ_RETRIES = 15;
-const JTCAT_MAX_QSO_RETRIES = 6;
+const JTCAT_MAX_QSO_RETRIES = 12; // ~3 minutes of retries at 15s/cycle
 
 // Auto-CQ response state
 let jtcatAutoCqMode = 'off';          // 'off' | 'pota' | 'sota' | 'all'
@@ -1942,7 +2002,7 @@ function popoutBroadcastQso() {
   }
 }
 
-function jtcatAutoLog(qso) {
+async function jtcatAutoLog(qso) {
   const q = qso || remoteJtcatQso;
   if (!q || !q.call) {
     sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
@@ -1968,8 +2028,29 @@ function jtcatAutoLog(qso) {
     gridsquare: q.grid || '',
     comment: 'JTCAT ' + mode,
   };
-  saveQsoRecord(qsoData).then(result => {
-    console.log('[JTCAT] Auto-logged QSO:', q.call, result && result.success !== false ? 'OK' : (result && result.error || 'unknown'));
+
+  try {
+    // Activation mode: add park refs so JTCAT QSOs log to the activation logbook
+    const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
+    if (settings.appMode === 'activator' && parkRefs.length > 0) {
+      sendCatLog(`[JTCAT] Activation mode — logging to ${parkRefs.map(p => p.ref).join(', ')}`);
+      for (let i = 0; i < parkRefs.length; i++) {
+        const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
+        if (i > 0) parkQso.skipLogbookForward = true;
+        await saveQsoRecord(parkQso);
+      }
+      // Cross-program refs (WWFF, LLOTA)
+      const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+      for (const xr of crossRefs) {
+        const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '', skipLogbookForward: true };
+        if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+        await saveQsoRecord(xrQso);
+      }
+    } else {
+      await saveQsoRecord(qsoData);
+    }
+
+    console.log('[JTCAT] Auto-logged QSO:', q.call, 'OK');
     // Notify the popout window
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-qso-logged', {
@@ -1981,9 +2062,9 @@ function jtcatAutoLog(qso) {
         rstRcvd: q.report || '',
       });
     }
-  }).catch(err => {
+  } catch (err) {
     console.error('[JTCAT] Auto-log failed:', err.message);
-  });
+  }
 }
 
 // Shared QSO state machine — advance on decodes
@@ -3110,6 +3191,21 @@ function connectRemote() {
     if (win && !win.isDestroyed()) win.webContents.send('reload-prefs');
   });
 
+  // QRZ lookup from ECHOCAT (for CW macro {op_firstname})
+  remoteServer.on('qrz-lookup', async ({ callsign }) => {
+    if (!callsign || !qrz.configured || !settings.enableQrz) {
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '' });
+      return;
+    }
+    try {
+      const data = await qrz.lookup(callsign);
+      const fname = data ? (data.nickname || data.fname || '') : '';
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname });
+    } catch {
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '' });
+    }
+  });
+
   // Unified rig-control from ECHOCAT phone (same dispatch as desktop IPC)
   remoteServer.on('rig-control', (data) => {
     if (!data || !data.action) return;
@@ -3672,8 +3768,9 @@ function connectRemote() {
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
     if (!myCall) return;
-    // If replacing an active QSO that had reports exchanged, auto-log it before replacing
+    // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
     if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.report &&
+        remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done' &&
         remoteJtcatQso.call.toUpperCase() !== (call || '').toUpperCase()) {
       sendCatLog(`[JTCAT] Replacing active QSO with ${remoteJtcatQso.call} — auto-logging`);
       jtcatAutoLog(remoteJtcatQso);
@@ -6294,6 +6391,53 @@ app.whenReady().then(() => {
     cloudIpc.startBackgroundSync();
   }
 
+  // Ensure launcher background service is installed for boot startup.
+  // Only INSTALL (to Startup/LaunchAgents) — don't spawn duplicates on every app launch.
+  // The launcher starts on next boot, or user can enable it manually in Settings.
+  if (app.isPackaged && settings.enableLauncher !== false) {
+    try {
+      const exePath = process.execPath;
+      const configDir = app.getPath('userData');
+      const configPath = path.join(configDir, 'launcher-config.json');
+      if (!fs.existsSync(configPath)) {
+        fs.writeFileSync(configPath, JSON.stringify({ port: 7301, https: true }, null, 2));
+      }
+
+      if (process.platform === 'win32') {
+        const startupDir = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
+        const vbsPath = path.join(startupDir, 'POTACAT-Launcher.vbs');
+        if (!fs.existsSync(vbsPath)) {
+          fs.writeFileSync(vbsPath, `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run """${exePath}"" --launcher", 0, False\r\n`);
+          console.log('[Launcher] Installed to Windows Startup');
+        }
+        // Start launcher only if port 7301 is not already in use
+        const net = require('net');
+        const probe = net.createServer();
+        probe.once('error', () => { /* port in use — launcher already running */ });
+        probe.once('listening', () => {
+          probe.close();
+          // Port is free — start the launcher
+          require('child_process').spawn(exePath, ['--launcher'], { detached: true, stdio: 'ignore' }).unref();
+          console.log('[Launcher] Started background process');
+        });
+        probe.listen(7301, '0.0.0.0');
+      } else if (process.platform === 'darwin') {
+        const plistDir = path.join(require('os').homedir(), 'Library', 'LaunchAgents');
+        const plistPath = path.join(plistDir, 'com.potacat.launcher.plist');
+        if (!fs.existsSync(plistPath)) {
+          fs.mkdirSync(plistDir, { recursive: true });
+          // No KeepAlive — don't respawn endlessly. RunAtLoad starts it on login.
+          const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>com.potacat.launcher</string><key>ProgramArguments</key><array><string>${exePath}</string><string>--launcher</string></array><key>RunAtLoad</key><true/></dict></plist>`;
+          fs.writeFileSync(plistPath, plist);
+          try { require('child_process').execSync(`launchctl load "${plistPath}"`, { stdio: 'pipe' }); } catch {}
+          console.log('[Launcher] Installed to macOS LaunchAgents');
+        }
+      }
+    } catch (err) {
+      console.error('[Launcher] Setup failed:', err.message);
+    }
+  }
+
   // Cold start: check if app was launched via potacat:// URL
   const protocolUrl = process.argv.find(a => a.startsWith('potacat://'));
   if (protocolUrl) {
@@ -6910,8 +7054,9 @@ app.whenReady().then(() => {
     const myCall = (settings.myCallsign || '').toUpperCase();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall) return;
-    // If replacing an active QSO that had reports exchanged, auto-log it before replacing
+    // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
     if (popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.report &&
+        popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done' &&
         popoutJtcatQso.call.toUpperCase() !== (data.call || '').toUpperCase()) {
       sendCatLog(`[JTCAT] Replacing active QSO with ${popoutJtcatQso.call} — auto-logging`);
       jtcatAutoLog(popoutJtcatQso);
@@ -7134,6 +7279,7 @@ app.whenReady().then(() => {
       'https://potacat.com/', 'https://docs.potacat.com/', 'https://buymeacoffee.com/potacat', 'https://docs.google.com/spreadsheets/',
       'https://pota.app/', 'https://www.sotadata.org.uk/', 'https://wwff.co/', 'https://llota.app/',
       'https://tailscale.com', 'https://worldradioleague.com',
+      'https://api.potacat.com/',
     ];
     if (allowed.some(prefix => url.startsWith(prefix))) {
       shell.openExternal(url);
@@ -7560,7 +7706,7 @@ app.whenReady().then(() => {
     }
 
     // Reconnect CW Spots if settings changed
-    const cwSpotsChanged = has('enableCwSpots') || has('cwSpotsHost') || has('cwSpotsPort') || has('cwSpotsClubs') ||
+    const cwSpotsChanged = has('enableCwSpots') || has('cwSpotsHost') || has('cwSpotsPort') || has('cwSpotsClubs') || has('cwSpotsMaxWpm') ||
       (has('myCallsign') && settings.enableCwSpots);
     if (cwSpotsChanged) {
       if (settings.enableCwSpots) connectCwSpots(); else disconnectCwSpots();
@@ -8325,6 +8471,62 @@ app.whenReady().then(() => {
   ipcMain.handle('qrz-verify-api-key', async (_e, key) => {
     if (!key) return { ok: false, message: 'No API key provided' };
     return QrzClient.checkApiKey(key, settings.myCallsign || '');
+  });
+
+  // --- QRZ Logbook Download & Merge ---
+  ipcMain.handle('qrz-download-logbook', async () => {
+    if (!settings.qrzApiKey) return { ok: false, error: 'QRZ API key not configured' };
+    try {
+      sendCatLog('[QRZ] Downloading logbook...');
+      const adifText = await QrzClient.fetchLogbook(settings.qrzApiKey, settings.myCallsign || '');
+      if (!adifText) return { ok: true, imported: 0, message: 'QRZ logbook is empty' };
+
+      // Parse downloaded ADIF records
+      const downloaded = [];
+      const recordRe = /<call:[^>]+>([^<]*)/gi;
+      // Split into individual records by <eor>
+      const records = adifText.split(/<eor>/i).filter(r => r.trim());
+
+      // Parse existing log for dedup
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      let existingQsos = new Set();
+      try {
+        const existing = parseAllRawQsos(logPath);
+        for (const q of existing) {
+          // Dedup key: callsign + date + time + band
+          const key = [q.CALL, q.QSO_DATE, (q.TIME_ON || '').slice(0, 4), q.BAND].join('|').toUpperCase();
+          existingQsos.add(key);
+        }
+      } catch { /* no existing log or parse error */ }
+
+      let imported = 0;
+      for (const record of records) {
+        // Extract key fields for dedup
+        const fields = {};
+        const fieldRe = /<(\w+):\d+(?::\w+)?>([^<]*)/gi;
+        let fm;
+        while ((fm = fieldRe.exec(record)) !== null) {
+          fields[fm[1].toUpperCase()] = fm[2].trim();
+        }
+        if (!fields.CALL) continue;
+
+        const key = [fields.CALL, fields.QSO_DATE, (fields.TIME_ON || '').slice(0, 4), fields.BAND].join('|').toUpperCase();
+        if (existingQsos.has(key)) continue; // already in log
+
+        // Append the raw ADIF record
+        appendRawQso(logPath, record.trim());
+        existingQsos.add(key);
+        imported++;
+      }
+
+      sendCatLog(`[QRZ] Downloaded ${records.length} QSOs, imported ${imported} new`);
+      // Reload worked QSOs to update checkmarks
+      if (imported > 0) loadWorkedQsos();
+      return { ok: true, imported, total: records.length };
+    } catch (err) {
+      sendCatLog(`[QRZ] Logbook download failed: ${err.message}`);
+      return { ok: false, error: err.message };
+    }
   });
 
   // --- Activator Mode: Parks DB IPC ---

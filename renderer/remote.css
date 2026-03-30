@@ -673,7 +673,12 @@ html, body {
   background: var(--bg);
   position: relative;
   z-index: 50;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox */
 }
+#filter-toolbar::-webkit-scrollbar { display: none; }
 
 /* --- Dropdown Container --- */
 .rc-dropdown { position: relative; flex-shrink: 0; }

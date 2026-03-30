@@ -1060,11 +1060,19 @@
     var rect = jpWaterfall.getBoundingClientRect();
     var x = e.clientX - rect.left;
     var hz = Math.round(x / rect.width * 3000 / 10) * 10;
-    jpTxFreqHz = hz;
-    jpRxFreqHz = hz;
-    txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
-    window.api.jtcatSetTxFreq(hz);
-    window.api.jtcatSetRxFreq(hz);
+    if (e.shiftKey) {
+      // Shift+click: set TX only (split TX/RX)
+      jpTxFreqHz = hz;
+      txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
+      window.api.jtcatSetTxFreq(hz);
+    } else {
+      // Normal click: set both RX and TX
+      jpTxFreqHz = hz;
+      jpRxFreqHz = hz;
+      txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
+      window.api.jtcatSetTxFreq(hz);
+      window.api.jtcatSetRxFreq(hz);
+    }
   });
 
   // --- Zoom (Ctrl+/Ctrl-) ---

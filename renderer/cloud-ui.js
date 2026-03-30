@@ -160,7 +160,7 @@
         deviceCountSpan.textContent = '--';
       }
       pendingCountSpan.textContent = status.pendingChanges ?? 0;
-      lastSyncSpan.textContent = formatTimestamp(status.lastSyncTimestamp || status.sync?.lastSyncAt);
+      lastSyncSpan.textContent = formatTimestamp(status.lastSyncAt || status.lastSyncTimestamp || status.sync?.lastSyncAt);
     } catch (err) {
       console.error('Cloud status error:', err);
     }
@@ -254,6 +254,53 @@
     });
   }
 
+  // ── Embed widgets ──────────────────────────────────────────────────
+
+  const embedBaseUrl = 'https://api.potacat.com/embed';
+  const embedCopiedMsg = document.getElementById('cloud-embed-copied');
+
+  async function getCallsignForEmbed() {
+    // Try the UI first, then settings
+    const fromUI = userCallsignSpan && userCallsignSpan.textContent.trim();
+    if (fromUI) return fromUI;
+    try {
+      const settings = await window.api.getSettings();
+      return settings.cloudUser?.callsign || settings.myCallsign || '';
+    } catch { return ''; }
+  }
+
+  document.querySelectorAll('.cloud-embed-view').forEach(link => {
+    link.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const cs = await getCallsignForEmbed();
+      if (!cs) return alert('No callsign found. Sign in to POTACAT Cloud first.');
+      const widget = link.dataset.widget;
+      const extra = link.dataset.extra || '';
+      const url = `${embedBaseUrl}/${widget}/${cs}${extra}`;
+      window.api.openExternal(url);
+    });
+  });
+
+  document.querySelectorAll('.cloud-embed-copy').forEach(link => {
+    link.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const cs = await getCallsignForEmbed();
+      if (!cs) return;
+      const widget = link.dataset.widget;
+      const extra = link.dataset.extra || '';
+      const height = link.dataset.height || '150';
+      const embedCode = `<iframe src="${embedBaseUrl}/${widget}/${cs}${extra}" style="border:none;width:400px;height:${height}px;" loading="lazy"></iframe>`;
+
+      navigator.clipboard.writeText(embedCode).then(() => {
+        if (embedCopiedMsg) {
+          embedCopiedMsg.textContent = `Copied ${widget} embed to clipboard!`;
+          embedCopiedMsg.classList.remove('hidden');
+          setTimeout(() => embedCopiedMsg.classList.add('hidden'), 3000);
+        }
+      });
+    });
+  });
+
   const clearTokensBtn = document.getElementById('cloud-clear-tokens');
   if (clearTokensBtn) {
     clearTokensBtn.addEventListener('click', async () => {
@@ -312,26 +359,44 @@
 
   if (initialUploadBtn) {
     initialUploadBtn.addEventListener('click', async () => {
-      if (!confirm('This will upload your entire local log to the cloud. This may take a few minutes for large logs. Continue?')) return;
-
+      // Step 1: Count QSOs and estimate time
       initialUploadBtn.disabled = true;
-      uploadProgress.classList.remove('hidden');
-      uploadBar.value = 0;
-      uploadText.textContent = 'Preparing...';
+      initialUploadBtn.textContent = 'Scanning log...';
 
       try {
+        const prep = await window.api.cloudBulkPrepare();
+        if (prep.error) {
+          alert('Error reading log: ' + prep.error);
+          return;
+        }
+
+        if (prep.qsoCount === 0) {
+          alert('No QSOs found in your log file.');
+          return;
+        }
+
+        // Step 2: Show estimate and confirm
+        const msg = `Your log has ${prep.qsoCount.toLocaleString()} QSOs.\n\nEstimated upload time: ${prep.estimatedTime}.\n\nUpload to POTACAT Cloud?`;
+        if (!confirm(msg)) return;
+
+        // Step 3: Upload
+        uploadProgress.classList.remove('hidden');
+        uploadBar.value = 0;
+        uploadText.textContent = `Uploading 0 / ${prep.qsoCount.toLocaleString()} QSOs...`;
+
         const result = await window.api.cloudBulkUpload();
         if (result.error) {
           alert('Upload failed: ' + result.error);
         } else {
-          uploadText.textContent = `Done! ${result.imported} QSOs uploaded, ${result.duplicates} duplicates skipped.`;
+          uploadText.textContent = `Done! ${result.imported.toLocaleString()} QSOs uploaded, ${result.duplicates.toLocaleString()} duplicates skipped.`;
           await refreshStatus();
         }
       } catch (err) {
         alert('Upload error: ' + err.message);
       } finally {
         initialUploadBtn.disabled = false;
-        setTimeout(() => uploadProgress.classList.add('hidden'), 5000);
+        initialUploadBtn.textContent = 'Upload Existing Log';
+        setTimeout(() => uploadProgress.classList.add('hidden'), 8000);
       }
     });
   }
@@ -376,7 +441,7 @@
       if (data.phase === 'upload' && data.total > 0) {
         const pct = Math.round((data.current / data.total) * 100);
         uploadBar.value = pct;
-        uploadText.textContent = `Uploading... ${data.current} / ${data.total} (${pct}%)`;
+        uploadText.textContent = `Uploading... chunk ${data.current} of ${data.total} (${pct}%)`;
       }
     });
   }

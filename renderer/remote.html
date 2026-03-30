@@ -59,7 +59,6 @@
       </div>
       <div id="member-badge" class="member-badge hidden"></div>
       <div class="status-right">
-        <button type="button" id="scan-btn" class="scan-status-btn" title="Scan spots">Scan</button>
         <span id="cat-dot" class="cat-dot disconnected" title="Radio disconnected"></span>
         <span id="audio-dot" class="audio-dot hidden" title="Audio"></span>
         <span id="latency">--ms</span>
@@ -524,10 +523,14 @@
         <option value="age">New</option>
         <option value="freq">Freq</option>
         <option value="dist">Near</option>
+        <option value="source">Source</option>
       </select>
 
       <!-- Refresh rate chip -->
       <button id="refresh-rate-btn" type="button" class="refresh-chip" title="Spot refresh rate">30s</button>
+
+      <!-- Scan button (moved from top bar) -->
+      <button type="button" id="scan-btn" class="scan-status-btn" title="Scan spots">Scan</button>
     </div>
 
     <!-- Spot list -->

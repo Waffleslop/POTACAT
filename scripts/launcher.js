@@ -585,6 +585,16 @@ if (config.https) {
   server = http.createServer(handleRequest);
 }
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[Launcher] Port ${config.port} already in use — another launcher is running. Exiting.`);
+    process.exit(0); // exit cleanly, not a crash
+  } else {
+    console.error('[Launcher] Server error:', err.message);
+    process.exit(1);
+  }
+});
+
 server.listen(config.port, '0.0.0.0', () => {
   const proto = config.https ? 'https' : 'http';
   const ips = getLocalIPs();

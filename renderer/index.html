@@ -896,6 +896,8 @@
             </label>
             <span class="help-text" style="display:block;margin-top:4px;">Get your API key from qrz.com &rarr; My Account &rarr; QRZ Logbook Settings</span>
             <div id="qrz-api-status" class="help-text" style="margin-top:4px;"></div>
+            <button type="button" id="qrz-download-btn" style="margin-top:6px;padding:4px 12px;font-size:12px;">Download QRZ Logbook</button>
+            <span id="qrz-download-status" class="help-text" style="margin-left:8px;"></span>
           </div>
         </div>
       </div>
@@ -1167,6 +1169,10 @@
               <label class="checkbox-label" style="font-size:11px;"><input type="checkbox" data-club="QRQCREW"> QRQCREW</label>
             </div>
           </details>
+        </div>
+        <div style="margin-top:6px;">
+          <label style="font-size:12px;">Max CW speed: <input type="number" id="set-cwspots-max-wpm" min="0" max="99" value="0" style="width:50px;"> WPM</label>
+          <span class="help-text" style="display:inline;margin-left:4px;">(0 = no limit)</span>
         </div>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-rbn"> Reverse Beacon Network</label>
@@ -1724,7 +1730,6 @@
           <button type="button" id="cloud-email-register" class="btn btn-primary" style="flex:1;">Start Free Trial</button>
           <button type="button" id="cloud-email-signin" class="btn" style="flex:1;">Sign In</button>
         </div>
-        <button type="button" id="cloud-google-signin" class="btn btn-blue btn-block" style="margin-top:6px;">Sign in with Google</button>
         <p id="cloud-login-error" class="help-text hidden" style="color:var(--accent-red);margin-top:4px;"></p>
         <p id="cloud-login-signout" class="hidden" style="margin-top:8px;font-size:12px;color:var(--text-secondary);">Having trouble? <a href="#" id="cloud-login-signout-link" style="color:var(--accent-red);">Sign out and start fresh</a></p>
       </div>
@@ -1777,6 +1782,77 @@
           <span style="margin-left:12px;">Pending: <strong id="cloud-pending-count">0</strong></span>
           <span style="margin-left:12px;">Last sync: <strong id="cloud-last-sync">never</strong></span>
         </div>
+      </div>
+    </fieldset>
+
+    <fieldset class="source-toggles" data-settings-tab="cloud">
+      <legend>Embeddable Widgets</legend>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Show your POTA activity on your QRZ page, website, or blog.</p>
+      <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">Click <strong>Copy Embed</strong> to copy an iframe tag to your clipboard, then paste it into your page's HTML. Add <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:2px;">?theme=light</code> for light mode or <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:2px;">?display=square</code> for a square layout.</p>
+      <div id="cloud-embeds-section">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;" id="cloud-embed-table">
+          <tr style="color:var(--text-secondary);">
+            <th style="text-align:left;padding:4px 0;font-weight:600;">Widget</th>
+            <th style="text-align:right;padding:4px 0;font-weight:600;"></th>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Latest Activation</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="card" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="card" data-height="200" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Latest Activation (compact)</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="activation" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="activation" data-height="120" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Stats</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="stats" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="stats" data-height="90" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Recent Activations</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="timeline" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="timeline" data-height="280" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Recent POTA Hunts</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="hunted" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="hunted" data-height="200" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">Band/Mode Heatmap</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="heatmap" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="heatmap" data-height="300" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">QSO Sparkline</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="sparkline" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="sparkline" data-height="130" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;color:var(--text-tertiary);">Combo (activation + stats + hunts)</td>
+            <td style="text-align:right;padding:6px 0;">
+              <a href="#" class="cloud-embed-view" data-widget="combo" data-extra="?widgets=activation,stats,hunted" style="color:var(--accent-blue);margin-right:8px;">View</a>
+              <a href="#" class="cloud-embed-copy" data-widget="combo" data-extra="?widgets=activation,stats,hunted" data-height="300" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
+          </tr>
+        </table>
+        <div id="cloud-embed-copied" class="hidden" style="font-size:11px;color:var(--accent-green);margin-top:6px;"></div>
       </div>
     </fieldset>
 

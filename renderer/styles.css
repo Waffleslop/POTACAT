@@ -1959,6 +1959,7 @@ dialog input, dialog select {
 /* My Rigs list */
 #my-rigs-list {
   margin-bottom: 8px;
+  overflow: hidden;
 }
 
 .rig-item {
@@ -1971,6 +1972,8 @@ dialog input, dialog select {
   background: var(--bg-panel);
   border: 1px solid var(--border-secondary);
   cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .rig-item:hover {
