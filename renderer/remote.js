@@ -617,6 +617,12 @@
         populateAudioDevices(msg.devices, msg.current);
         break;
 
+      case 'qrz-result':
+        if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
+          tunedOpName = msg.fname || '';
+        }
+        break;
+
       case 'spots':
         spots = msg.data || [];
         renderSpots();
@@ -1236,10 +1242,8 @@
     tunedCallsign = callsign;
     // Look up operator name from QRZ for CW macro {op_firstname}
     tunedOpName = '';
-    if (callsign && window.api.qrzLookup) {
-      window.api.qrzLookup(callsign.toUpperCase().split('/')[0]).then(function(data) {
-        if (data) tunedOpName = data.nickname || data.fname || '';
-      }).catch(function() {});
+    if (callsign && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: callsign.toUpperCase().split('/')[0] }));
     }
     spotList.querySelectorAll('.spot-card.tuned').forEach(c => c.classList.remove('tuned'));
     card.classList.add('tuned');

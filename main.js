@@ -3191,6 +3191,21 @@ function connectRemote() {
     if (win && !win.isDestroyed()) win.webContents.send('reload-prefs');
   });
 
+  // QRZ lookup from ECHOCAT (for CW macro {op_firstname})
+  remoteServer.on('qrz-lookup', async ({ callsign }) => {
+    if (!callsign || !qrz.configured || !settings.enableQrz) {
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '' });
+      return;
+    }
+    try {
+      const data = await qrz.lookup(callsign);
+      const fname = data ? (data.nickname || data.fname || '') : '';
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname });
+    } catch {
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '' });
+    }
+  });
+
   // Unified rig-control from ECHOCAT phone (same dispatch as desktop IPC)
   remoteServer.on('rig-control', (data) => {
     if (!data || !data.action) return;
