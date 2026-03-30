@@ -2313,8 +2313,7 @@
     }
   });
 
-  const audioLabel = audioBtn.querySelector('.audio-label');
-  function setAudioStatus(text) { audioLabel.textContent = text; }
+  function setAudioStatus(text) { audioBtn.textContent = text; }
 
   let micReady = false;
 
@@ -2442,7 +2441,7 @@
     audioBtn.classList.remove('active');
     volBoostBtn.classList.add('hidden');
     volBoostBtn.classList.remove('active');
-    volBoostBtn.querySelector('.speaker-label').textContent = 'Vol 1x';
+    volBoostBtn.textContent = 'Vol 1x';
     audioDot.classList.add('hidden');
     audioDot.classList.remove('connected');
     setAudioStatus('Audio');
@@ -2481,7 +2480,7 @@
     if (gainNode) gainNode.gain.value = gain;
     // iOS AudioContext may start suspended — resume on user gesture
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-    volBoostBtn.querySelector('.speaker-label').textContent = 'Vol ' + gain + 'x';
+    volBoostBtn.textContent = 'Vol ' + gain + 'x';
     volBoostBtn.classList.toggle('active', volBoostLevel > 0);
     // Sync RX gain slider
     rcRxGain.value = Math.round(gain * 100);

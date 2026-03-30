@@ -747,8 +747,26 @@ html, body {
 #spot-map { flex: 1; min-height: 0; }
 
 /* --- Scan Status Button --- */
-.scan-status-btn { width: 60px; height: 60px; border-radius: 50%; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: #333; color: var(--text-dim); border: 2px solid #555; cursor: pointer; }
-.scan-status-btn.scan-active { background: var(--bg-header); border-color: var(--pota); color: var(--pota); }
+/* Bottom bar: stacked square buttons (Live/Vol) */
+.bb-stack { display: flex; flex-direction: column; gap: 4px; }
+.bb-square-btn {
+  width: 56px; height: 28px; border-radius: 6px;
+  font-size: 11px; font-weight: 700;
+  background: #444; color: var(--text); border: 2px solid #555;
+  cursor: pointer; letter-spacing: 0.5px;
+}
+.bb-square-btn:active, .bb-square-btn.active {
+  background: var(--bg-header); border-color: var(--pota); color: var(--pota);
+}
+/* Bottom bar: round buttons (Scan/STOP) — same style */
+.bb-round-btn {
+  width: 60px; height: 60px; border-radius: 50%;
+  font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  background: #444; color: var(--text); border: 2px solid #555;
+  cursor: pointer;
+}
+.bb-round-btn:active { background: var(--accent); color: white; }
+.bb-round-btn.scan-active { background: var(--bg-header); border-color: var(--pota); color: var(--pota); }
 
 /* --- Refresh Rate Chip --- */
 .refresh-chip { background: none; border: 1px solid #444; color: var(--text-dim); border-radius: 12px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: auto; flex-shrink: 0; }

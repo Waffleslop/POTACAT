@@ -785,17 +785,13 @@
     </div>
 
     <div id="bottom-bar">
-      <button id="audio-btn" type="button" class="audio-button">
-        <span class="audio-icon">&#x1F50A;</span>
-        <span class="audio-label">Audio</span>
-      </button>
-      <button id="vol-boost-btn" type="button" class="speaker-button hidden" title="Volume Boost">
-        <span class="speaker-icon">&#x1F50A;</span>
-        <span class="speaker-label">Vol 1x</span>
-      </button>
-      <button type="button" id="scan-btn" class="scan-status-btn" title="Scan spots">Scan</button>
+      <div class="bb-stack">
+        <button id="audio-btn" type="button" class="bb-square-btn">Live</button>
+        <button id="vol-boost-btn" type="button" class="bb-square-btn hidden" title="Volume Boost">Vol 1x</button>
+      </div>
+      <button type="button" id="scan-btn" class="bb-round-btn" title="Scan spots">Scan</button>
       <button id="ptt-btn" type="button" class="ptt-button">PTT</button>
-      <button id="estop-btn" type="button" class="estop-button">STOP</button>
+      <button id="estop-btn" type="button" class="bb-round-btn">STOP</button>
     </div>
 
     <!-- Log QSO sheet -->
