@@ -207,7 +207,7 @@ const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
 const spotsHideQrt = document.getElementById('spots-hide-qrt');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
-const spotsShowMeter = document.getElementById('spots-show-meter');
+const quickShowMeter = document.getElementById('quick-show-meter');
 const spotsHiddenCount = document.getElementById('spots-hidden-count');
 const spotsDxcc = document.getElementById('spots-dxcc');
 const settingsBtn = document.getElementById('settings-btn');
@@ -6367,7 +6367,7 @@ function syncSpotsPanel() {
   spotsHideOob.checked = hideOutOfBand;
   spotsHideQrt.checked = hideQrt;
   spotsShowHidden.checked = showHiddenSpots;
-  spotsShowMeter.checked = meterBoxVisible;
+  quickShowMeter.checked = meterBoxVisible;
   const hCount = hiddenSpotCount();
   spotsHiddenCount.textContent = hCount;
   spotsHiddenCount.classList.toggle('hidden', hCount === 0);
@@ -6409,9 +6409,6 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   hideOutOfBand = spotsHideOob.checked;
   hideQrt = spotsHideQrt.checked;
   showHiddenSpots = spotsShowHidden.checked;
-  meterBoxVisible = spotsShowMeter.checked;
-  localStorage.setItem('meterBoxVisible', meterBoxVisible);
-  meterBox.classList.toggle('hidden', !meterBoxVisible);
   enableDxcc = spotsDxcc.checked;
 
   // Sync Settings dialog checkboxes
@@ -6575,6 +6572,14 @@ quickHideWorkedParks.addEventListener('change', async () => {
   renderTable();
   renderMap();
   await window.api.saveSettings({ hideWorkedParks });
+});
+
+// S-Meter / SWR quick toggle
+quickShowMeter.addEventListener('change', () => {
+  meterBoxVisible = quickShowMeter.checked;
+  localStorage.setItem('meterBoxVisible', meterBoxVisible);
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  document.getElementById('set-show-meter').checked = meterBoxVisible;
 });
 
 // PSTRotator quick toggle — visible once rotor has been enabled in settings
@@ -7171,7 +7176,7 @@ settingsSave.addEventListener('click', async () => {
   // Sync meter visibility from Settings Display checkbox
   meterBoxVisible = document.getElementById('set-show-meter').checked;
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
-  spotsShowMeter.checked = meterBoxVisible;
+  quickShowMeter.checked = meterBoxVisible;
   meterBox.classList.toggle('hidden', !meterBoxVisible);
   const bandActivityEnabled = setEnableBandActivity.checked;
   const showBearingEnabled = setShowBearing.checked;
