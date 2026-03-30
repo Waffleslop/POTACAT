@@ -3743,8 +3743,9 @@ function connectRemote() {
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
     if (!myCall) return;
-    // If replacing an active QSO that had reports exchanged, auto-log it before replacing
+    // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
     if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.report &&
+        remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done' &&
         remoteJtcatQso.call.toUpperCase() !== (call || '').toUpperCase()) {
       sendCatLog(`[JTCAT] Replacing active QSO with ${remoteJtcatQso.call} — auto-logging`);
       jtcatAutoLog(remoteJtcatQso);
@@ -7028,8 +7029,9 @@ app.whenReady().then(() => {
     const myCall = (settings.myCallsign || '').toUpperCase();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall) return;
-    // If replacing an active QSO that had reports exchanged, auto-log it before replacing
+    // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
     if (popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.report &&
+        popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done' &&
         popoutJtcatQso.call.toUpperCase() !== (data.call || '').toUpperCase()) {
       sendCatLog(`[JTCAT] Replacing active QSO with ${popoutJtcatQso.call} — auto-logging`);
       jtcatAutoLog(popoutJtcatQso);
