@@ -2498,6 +2498,10 @@ function connectSmartSdr() {
   smartSdr.setNeedsBind(!!settings.enableRemote);
   // Log CW auth results
   smartSdr.on('smeter', sendCatSmeter);
+  smartSdr.on('swr-ratio', (swr) => {
+    // Send SWR ratio directly to renderer (bypass RM1 conversion)
+    if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
+  });
 
   smartSdr.on('cw-auth', ({ method, ok }) => {
     console.log(`[SmartSDR] CW auth: method=${method} ok=${ok}`);

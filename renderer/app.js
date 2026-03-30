@@ -9337,6 +9337,16 @@ window.api.onCatSwr((val) => {
   swrTextEl.style.color = color;
 });
 
+// Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
+window.api.onCatSwrRatio((swr) => {
+  meterBox.classList.remove('hidden');
+  const level = Math.min(1, (swr - 1) / 4);
+  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  drawMeterBar(swrBarCanvas, level, color);
+  swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+  swrTextEl.style.color = color;
+});
+
 window.api.onCatStatus((s) => {
   if (!s.connected) meterBox.classList.add('hidden');
 });
