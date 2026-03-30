@@ -767,6 +767,14 @@ html, body {
 }
 .bb-round-btn:active { background: var(--accent); color: white; }
 .bb-round-btn.scan-active { background: #1a3a2e; border-color: var(--pota); color: var(--pota); }
+/* Halt / emergency stop — red accent rectangle */
+.bb-halt-btn {
+  padding: 8px 14px; border-radius: 6px;
+  font-size: 11px; font-weight: 800; letter-spacing: 1px;
+  background: #3a1a1a; color: #e94560; border: 2px solid #e94560;
+  cursor: pointer;
+}
+.bb-halt-btn:active { background: #e94560; color: #fff; }
 
 /* --- Refresh Rate Chip --- */
 .refresh-chip { background: none; border: 1px solid #444; color: var(--text-dim); border-radius: 12px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: auto; flex-shrink: 0; }
