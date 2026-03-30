@@ -607,18 +607,18 @@ button:hover {
   color: var(--accent-green);
 }
 
-/* Floating S-Meter / SWR box */
+/* Floating S-Meter / SWR box — above the banner logger */
 .meter-box {
   position: absolute;
-  bottom: 8px;
+  bottom: 46px; /* above the ~38px banner logger bar */
   right: 8px;
   z-index: 100;
   background: rgba(22, 33, 62, 0.92);
   border: 1px solid #333;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   font-family: monospace;
-  font-size: 12px;
+  font-size: 11px;
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
