@@ -108,6 +108,7 @@ let hideWorked = false;
 let workedParksSet = new Set(); // park references from CSV for fast lookup
 let workedParksData = new Map(); // reference → full park data for stats
 let hideWorkedParks = false;
+let hideQrt = true; // hide spots with QRT in comments (default on)
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
 let respotTemplate = '{rst} in {QTH} 73s {mycallsign} via POTACAT'; // park re-spot comment template
@@ -204,6 +205,7 @@ const spotsHideWorked = document.getElementById('spots-hide-worked');
 const spotsHideParks = document.getElementById('spots-hide-parks');
 const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
+const spotsHideQrt = document.getElementById('spots-hide-qrt');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
 const spotsHiddenCount = document.getElementById('spots-hidden-count');
 const spotsDxcc = document.getElementById('spots-dxcc');
@@ -3336,6 +3338,7 @@ function getFiltered() {
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     if (hideWorked && isWorkedSpot(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
+    if (hideQrt && s.comments && s.comments.toLowerCase().includes('qrt')) return false;
     if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency)) return false;
     return true;
   });
@@ -6361,6 +6364,7 @@ function syncSpotsPanel() {
   spotsHideWorked.checked = hideWorked;
   spotsHideParks.checked = hideWorkedParks;
   spotsHideOob.checked = hideOutOfBand;
+  spotsHideQrt.checked = hideQrt;
   spotsShowHidden.checked = showHiddenSpots;
   const hCount = hiddenSpotCount();
   spotsHiddenCount.textContent = hCount;
@@ -6401,6 +6405,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   hideWorked = spotsHideWorked.checked;
   hideWorkedParks = spotsHideParks.checked;
   hideOutOfBand = spotsHideOob.checked;
+  hideQrt = spotsHideQrt.checked;
   showHiddenSpots = spotsShowHidden.checked;
   enableDxcc = spotsDxcc.checked;
 
