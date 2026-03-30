@@ -607,10 +607,10 @@ button:hover {
   color: var(--accent-green);
 }
 
-/* Floating S-Meter / SWR box — above the banner logger */
+/* Floating S-Meter / SWR box — draggable */
 .meter-box {
   position: absolute;
-  bottom: 46px; /* above the ~38px banner logger bar */
+  bottom: 46px;
   right: 8px;
   z-index: 100;
   background: rgba(22, 33, 62, 0.92);
@@ -620,8 +620,10 @@ button:hover {
   font-family: monospace;
   font-size: 11px;
   backdrop-filter: blur(4px);
-  pointer-events: none;
+  cursor: grab;
+  user-select: none;
 }
+.meter-box.dragging { cursor: grabbing; opacity: 0.8; }
 .meter-box.hidden { display: none; }
 .meter-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 .meter-label { color: #888; font-weight: 600; min-width: 28px; text-align: right; }

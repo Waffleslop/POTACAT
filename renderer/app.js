@@ -207,6 +207,7 @@ const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
 const spotsHideQrt = document.getElementById('spots-hide-qrt');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
+const spotsShowMeter = document.getElementById('spots-show-meter');
 const spotsHiddenCount = document.getElementById('spots-hidden-count');
 const spotsDxcc = document.getElementById('spots-dxcc');
 const settingsBtn = document.getElementById('settings-btn');
@@ -6366,6 +6367,7 @@ function syncSpotsPanel() {
   spotsHideOob.checked = hideOutOfBand;
   spotsHideQrt.checked = hideQrt;
   spotsShowHidden.checked = showHiddenSpots;
+  spotsShowMeter.checked = meterBoxVisible;
   const hCount = hiddenSpotCount();
   spotsHiddenCount.textContent = hCount;
   spotsHiddenCount.classList.toggle('hidden', hCount === 0);
@@ -6407,6 +6409,9 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   hideOutOfBand = spotsHideOob.checked;
   hideQrt = spotsHideQrt.checked;
   showHiddenSpots = spotsShowHidden.checked;
+  meterBoxVisible = spotsShowMeter.checked;
+  localStorage.setItem('meterBoxVisible', meterBoxVisible);
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
   enableDxcc = spotsDxcc.checked;
 
   // Sync Settings dialog checkboxes
@@ -6969,6 +6974,7 @@ async function openSettingsDialog(tab) {
   setWcagMode.checked = s.wcagMode === true;
   setColorRows.checked = s.colorRows !== false; // default true
   setEnableSolar.checked = s.enableSolar === true;
+  document.getElementById('set-show-meter').checked = meterBoxVisible;
   setEnableBandActivity.checked = s.enableBandActivity === true;
   setShowBearing.checked = s.showBearing === true;
   setEnableSplitView.checked = s.enableSplitView !== false;
@@ -7162,6 +7168,11 @@ settingsSave.addEventListener('click', async () => {
   const wcagEnabled = setWcagMode.checked;
   const colorRowsEnabled = setColorRows.checked;
   const solarEnabled = setEnableSolar.checked;
+  // Sync meter visibility from Settings Display checkbox
+  meterBoxVisible = document.getElementById('set-show-meter').checked;
+  localStorage.setItem('meterBoxVisible', meterBoxVisible);
+  spotsShowMeter.checked = meterBoxVisible;
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
   const bandActivityEnabled = setEnableBandActivity.checked;
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
@@ -9286,6 +9297,52 @@ window.api.onCatPower((watts) => {
 
 // --- Floating S-Meter / SWR Box ---
 const meterBox = document.getElementById('meter-box');
+let meterBoxVisible = localStorage.getItem('meterBoxVisible') !== 'false'; // default visible
+
+// Draggable meter box
+(function() {
+  let dragging = false, startX, startY, startLeft, startTop;
+  // Restore saved position
+  const saved = localStorage.getItem('meterBoxPos');
+  if (saved) {
+    try {
+      const pos = JSON.parse(saved);
+      meterBox.style.left = pos.left + 'px';
+      meterBox.style.top = pos.top + 'px';
+      meterBox.style.right = 'auto';
+      meterBox.style.bottom = 'auto';
+    } catch {}
+  }
+  meterBox.addEventListener('mousedown', (e) => {
+    dragging = true;
+    meterBox.classList.add('dragging');
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = meterBox.getBoundingClientRect();
+    const parentRect = meterBox.parentElement.getBoundingClientRect();
+    startLeft = rect.left - parentRect.left;
+    startTop = rect.top - parentRect.top;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    meterBox.style.left = (startLeft + dx) + 'px';
+    meterBox.style.top = (startTop + dy) + 'px';
+    meterBox.style.right = 'auto';
+    meterBox.style.bottom = 'auto';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    meterBox.classList.remove('dragging');
+    localStorage.setItem('meterBoxPos', JSON.stringify({
+      left: parseInt(meterBox.style.left, 10),
+      top: parseInt(meterBox.style.top, 10),
+    }));
+  });
+})();
 const smeterBarCanvas = document.getElementById('smeter-bar');
 const smeterTextEl = document.getElementById('smeter-text');
 const swrBarCanvas = document.getElementById('swr-bar');
@@ -9309,7 +9366,7 @@ function drawMeterBar(canvas, level, color) {
 }
 
 window.api.onCatSmeter((val) => {
-  meterBox.classList.remove('hidden');
+  if (meterBoxVisible) meterBox.classList.remove('hidden');
   const level = val / 255;
   const color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
   drawMeterBar(smeterBarCanvas, level, color);
@@ -9339,7 +9396,7 @@ window.api.onCatSwr((val) => {
 
 // Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
 window.api.onCatSwrRatio((swr) => {
-  meterBox.classList.remove('hidden');
+  if (meterBoxVisible) meterBox.classList.remove('hidden');
   const level = Math.min(1, (swr - 1) / 4);
   const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
   drawMeterBar(swrBarCanvas, level, color);
