@@ -13156,6 +13156,8 @@ var jtcatAudioStream = null;
 var jtcatAudioProcessor = null;
 var jtcatAnalyser = null;
 var jtcatAudioSource = null; // strong ref to prevent GC in Chromium 134+
+var jtcatRxGainNode = null;
+var jtcatMeterAnim = null;
 var jtcatRemoteActive = false; // true when phone is driving JTCAT
 var jtcatQuietFreq = 1500;     // auto-detected quiet TX frequency (Hz)
 var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq updates
@@ -13191,11 +13193,19 @@ async function startJtcatAudio() {
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
     jtcatAudioSource = source; // prevent GC — Chromium 134+ may collect unrooted audio nodes
 
-    // AnalyserNode for waterfall FFT
+    // RX GainNode for level control
+    jtcatRxGainNode = jtcatAudioCtx.createGain();
+    jtcatRxGainNode.gain.value = 1.0;
+    source.connect(jtcatRxGainNode);
+
+    // AnalyserNode for waterfall FFT (after gain so level changes affect waterfall)
     jtcatAnalyser = jtcatAudioCtx.createAnalyser();
     jtcatAnalyser.fftSize = 2048;
     jtcatAnalyser.smoothingTimeConstant = 0.3;
-    source.connect(jtcatAnalyser);
+    jtcatRxGainNode.connect(jtcatAnalyser);
+
+    // Start RX level meter rendering
+    startJtcatMeter();
 
     var nativeRate = jtcatAudioCtx.sampleRate;
     var dsRatio = nativeRate / 12000;
@@ -13210,7 +13220,7 @@ async function startJtcatAudio() {
       workletNode.port.onmessage = function(e) {
         window.api.jtcatAudio(e.data);
       };
-      source.connect(workletNode);
+      jtcatRxGainNode.connect(workletNode);
       workletNode.connect(jtcatAudioCtx.destination);
       jtcatAudioProcessor = workletNode;
       console.log('[JTCAT] Using AudioWorkletNode for audio capture');
@@ -13266,7 +13276,7 @@ async function startJtcatAudio() {
           console.error('[JTCAT] Audio processor error:', err.message || err);
         }
       };
-      source.connect(jtcatAudioProcessor);
+      jtcatRxGainNode.connect(jtcatAudioProcessor);
       jtcatAudioProcessor.connect(jtcatAudioCtx.destination);
     }
 
@@ -13293,13 +13303,50 @@ async function startJtcatAudio() {
   }
 }
 
+// --- JTCAT RX Audio Meter ---
+function startJtcatMeter() {
+  var canvas = document.getElementById('jtcat-rx-meter');
+  if (!canvas || jtcatMeterAnim) return;
+  function render() {
+    if (jtcatAnalyser && canvas) {
+      var ctx = canvas.getContext('2d');
+      var w = canvas.width, h = canvas.height;
+      var data = new Uint8Array(jtcatAnalyser.frequencyBinCount);
+      jtcatAnalyser.getByteTimeDomainData(data);
+      var sum = 0;
+      for (var i = 0; i < data.length; i++) { var v = (data[i] - 128) / 128; sum += v * v; }
+      var rms = Math.sqrt(sum / data.length);
+      var db = rms > 0 ? 20 * Math.log10(rms) : -60;
+      var level = Math.max(0, Math.min(1, (db + 40) / 40));
+      ctx.clearRect(0, 0, w, h);
+      var barW = Math.round(level * w);
+      ctx.fillStyle = level < 0.6 ? '#4ecca3' : level < 0.85 ? '#ffd740' : '#e94560';
+      ctx.fillRect(0, 0, barW, h);
+    }
+    jtcatMeterAnim = requestAnimationFrame(render);
+  }
+  jtcatMeterAnim = requestAnimationFrame(render);
+}
+
+var jtcatRxGainSlider = document.getElementById('jtcat-rx-gain');
+var jtcatRxGainVal = document.getElementById('jtcat-rx-gain-val');
+if (jtcatRxGainSlider) {
+  jtcatRxGainSlider.addEventListener('input', function() {
+    var pct = parseInt(jtcatRxGainSlider.value, 10);
+    jtcatRxGainVal.textContent = pct + '%';
+    if (jtcatRxGainNode) jtcatRxGainNode.gain.value = pct / 100;
+  });
+}
+
 function stopJtcatAudio() {
+  if (jtcatMeterAnim) { cancelAnimationFrame(jtcatMeterAnim); jtcatMeterAnim = null; }
   if (waterfallAnimFrame) {
     cancelAnimationFrame(waterfallAnimFrame);
     waterfallAnimFrame = null;
   }
   jtcatAnalyser = null;
   jtcatAudioSource = null;
+  jtcatRxGainNode = null;
   if (jtcatAudioProcessor) {
     jtcatAudioProcessor.disconnect();
     jtcatAudioProcessor = null;
