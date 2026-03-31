@@ -908,6 +908,18 @@
           ft8AutoCqSelect.style.borderColor = msg.mode !== 'off' ? 'var(--pota)' : '';
         }
         break;
+
+      // Cloud Sync messages
+      case 'cloud-status':
+      case 'cloud-login-result':
+      case 'cloud-register-result':
+      case 'cloud-logout-result':
+      case 'cloud-sync-result':
+      case 'cloud-upload-result':
+      case 'cloud-verify-result':
+      case 'cloud-bmac-result':
+        if (typeof handleCloudMessage === 'function') handleCloudMessage(msg);
+        break;
     }
   }
 
@@ -5701,6 +5713,163 @@
       requestWakeLock();
     }
   });
+
+  // ── Cloud Sync UI (ECHOCAT) ──────────────────────────────────────
+
+  const echoCloudLogin = document.getElementById('echo-cloud-login');
+  const echoCloudAccount = document.getElementById('echo-cloud-account');
+  const echoCloudCallsign = document.getElementById('echo-cloud-callsign');
+  const echoCloudEmail = document.getElementById('echo-cloud-email');
+  const echoCloudPassword = document.getElementById('echo-cloud-password');
+  const echoCloudRegisterBtn = document.getElementById('echo-cloud-register-btn');
+  const echoCloudSigninBtn = document.getElementById('echo-cloud-signin-btn');
+  const echoCloudLoginError = document.getElementById('echo-cloud-login-error');
+  const echoCloudUserCallsign = document.getElementById('echo-cloud-user-callsign');
+  const echoCloudUserEmail = document.getElementById('echo-cloud-user-email');
+  const echoCloudSubStatus = document.getElementById('echo-cloud-sub-status');
+  const echoCloudSyncBtn = document.getElementById('echo-cloud-sync-btn');
+  const echoCloudUploadBtn = document.getElementById('echo-cloud-upload-btn');
+  const echoCloudSyncMsg = document.getElementById('echo-cloud-sync-msg');
+  const echoCloudBmacEmail = document.getElementById('echo-cloud-bmac-email');
+  const echoCloudBmacVerifyBtn = document.getElementById('echo-cloud-bmac-verify-btn');
+  const echoCloudSignoutBtn = document.getElementById('echo-cloud-signout-btn');
+
+  function echoCloudShowLogin() {
+    if (echoCloudLogin) echoCloudLogin.classList.remove('hidden');
+    if (echoCloudAccount) echoCloudAccount.classList.add('hidden');
+  }
+
+  function echoCloudShowAccount(user) {
+    if (echoCloudLogin) echoCloudLogin.classList.add('hidden');
+    if (echoCloudAccount) echoCloudAccount.classList.remove('hidden');
+    if (echoCloudUserCallsign) echoCloudUserCallsign.textContent = user?.callsign || '';
+    if (echoCloudUserEmail) echoCloudUserEmail.textContent = user?.email || '';
+    const status = user?.subscriptionStatus || 'inactive';
+    if (echoCloudSubStatus) {
+      echoCloudSubStatus.textContent = status;
+      echoCloudSubStatus.style.color = (status === 'active' || status === 'trial') ? '#4ecca3' : '#e94560';
+    }
+  }
+
+  function echoCloudShowMsg(text) {
+    if (echoCloudSyncMsg) {
+      echoCloudSyncMsg.textContent = text;
+      echoCloudSyncMsg.classList.remove('hidden');
+      setTimeout(() => echoCloudSyncMsg.classList.add('hidden'), 5000);
+    }
+  }
+
+  function echoCloudShowError(text) {
+    if (echoCloudLoginError) {
+      echoCloudLoginError.textContent = text;
+      echoCloudLoginError.classList.remove('hidden');
+      setTimeout(() => echoCloudLoginError.classList.add('hidden'), 6000);
+    }
+  }
+
+  // Request cloud status when settings overlay opens
+  function echoCloudRefresh() {
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'cloud-get-status' }));
+    }
+  }
+
+  // Handle cloud messages from server
+  function handleCloudMessage(msg) {
+    switch (msg.type) {
+      case 'cloud-status':
+        if (msg.loggedIn) echoCloudShowAccount(msg.user);
+        else echoCloudShowLogin();
+        break;
+      case 'cloud-login-result':
+      case 'cloud-register-result':
+        if (msg.error) echoCloudShowError(msg.error);
+        else if (msg.success) { echoCloudShowAccount(msg.user); echoCloudShowMsg('Signed in!'); }
+        break;
+      case 'cloud-logout-result':
+        echoCloudShowLogin();
+        break;
+      case 'cloud-sync-result':
+        if (msg.error) echoCloudShowMsg('Sync failed: ' + msg.error);
+        else echoCloudShowMsg('Synced! ' + (msg.pushed || 0) + ' pushed, ' + (msg.pulled || 0) + ' pulled');
+        if (echoCloudSyncBtn) { echoCloudSyncBtn.disabled = false; echoCloudSyncBtn.textContent = 'Sync Now'; }
+        break;
+      case 'cloud-upload-result':
+        if (msg.error) echoCloudShowMsg('Upload failed: ' + msg.error);
+        else echoCloudShowMsg('Uploaded ' + (msg.imported || 0) + ' QSOs!');
+        if (echoCloudUploadBtn) { echoCloudUploadBtn.disabled = false; echoCloudUploadBtn.textContent = 'Upload Log'; }
+        break;
+      case 'cloud-verify-result':
+      case 'cloud-bmac-result':
+        if (msg.status === 'active') echoCloudShowMsg('Membership verified!');
+        else echoCloudShowMsg(msg.message || 'Not found');
+        echoCloudRefresh();
+        break;
+    }
+  }
+
+  if (echoCloudRegisterBtn) {
+    echoCloudRegisterBtn.addEventListener('click', function() {
+      const cs = echoCloudCallsign ? echoCloudCallsign.value.trim().toUpperCase() : '';
+      const email = echoCloudEmail ? echoCloudEmail.value.trim() : '';
+      const pass = echoCloudPassword ? echoCloudPassword.value : '';
+      if (!cs || !email || !pass) return echoCloudShowError('Fill in all fields');
+      if (pass.length < 8) return echoCloudShowError('Password must be at least 8 characters');
+      ws.send(JSON.stringify({ type: 'cloud-register', callsign: cs, email: email, password: pass }));
+    });
+  }
+
+  if (echoCloudSigninBtn) {
+    echoCloudSigninBtn.addEventListener('click', function() {
+      const email = echoCloudEmail ? echoCloudEmail.value.trim() : '';
+      const pass = echoCloudPassword ? echoCloudPassword.value : '';
+      if (!email || !pass) return echoCloudShowError('Enter email and password');
+      ws.send(JSON.stringify({ type: 'cloud-login', email: email, password: pass }));
+    });
+  }
+
+  if (echoCloudSignoutBtn) {
+    echoCloudSignoutBtn.addEventListener('click', function() {
+      ws.send(JSON.stringify({ type: 'cloud-logout' }));
+    });
+  }
+
+  if (echoCloudSyncBtn) {
+    echoCloudSyncBtn.addEventListener('click', function() {
+      echoCloudSyncBtn.disabled = true;
+      echoCloudSyncBtn.textContent = 'Syncing...';
+      ws.send(JSON.stringify({ type: 'cloud-sync-now' }));
+    });
+  }
+
+  if (echoCloudUploadBtn) {
+    echoCloudUploadBtn.addEventListener('click', function() {
+      echoCloudUploadBtn.disabled = true;
+      echoCloudUploadBtn.textContent = 'Uploading...';
+      ws.send(JSON.stringify({ type: 'cloud-bulk-upload' }));
+    });
+  }
+
+  if (echoCloudBmacVerifyBtn) {
+    echoCloudBmacVerifyBtn.addEventListener('click', function() {
+      const bmacEmail = echoCloudBmacEmail ? echoCloudBmacEmail.value.trim() : '';
+      if (bmacEmail) {
+        ws.send(JSON.stringify({ type: 'cloud-save-bmac-email', bmacEmail: bmacEmail }));
+      } else {
+        ws.send(JSON.stringify({ type: 'cloud-verify-subscription' }));
+      }
+    });
+  }
+
+  // Refresh cloud status when settings overlay is opened
+  var settingsOverlay = document.getElementById('settings-overlay');
+  if (settingsOverlay) {
+    new MutationObserver(function() {
+      if (!settingsOverlay.classList.contains('hidden')) {
+        echoCloudRefresh();
+      }
+    }).observe(settingsOverlay, { attributes: true, attributeFilter: ['class'] });
+  }
 
   // Auto-connect on page load
   connect('');

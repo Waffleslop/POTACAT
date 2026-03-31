@@ -2980,6 +2980,128 @@ function connectRemote() {
     console.log('[Echo CAT] Custom CAT buttons updated from phone');
   });
 
+  // ── Cloud Sync via ECHOCAT ──────────────────────────────────────
+  remoteServer.on('cloud-login', async (msg, reply) => {
+    const result = await ipcMain.handle('cloud-login', null, msg.email, msg.password).catch(e => ({ error: e.message }));
+    // IPC handles are already registered, invoke them directly
+    reply(result || { error: 'No handler' });
+  });
+
+  // Bridge ECHOCAT cloud messages to the existing IPC handlers
+  const cloudBridge = (event, handler) => {
+    remoteServer.on(event, async (...args) => {
+      const reply = args[args.length - 1]; // last arg is always the reply callback
+      try {
+        const result = await handler(...args.slice(0, -1));
+        reply(result);
+      } catch (err) {
+        reply({ error: err.message });
+      }
+    });
+  };
+
+  // Remove the direct handler above and use the bridge pattern for all cloud events
+  remoteServer.removeAllListeners('cloud-login');
+  cloudBridge('cloud-login', async (msg) => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    const sync = cloudIpc.getCloudSync();
+    const deviceId = (() => { if (!settings.cloudDeviceId) { settings.cloudDeviceId = require('crypto').randomUUID(); saveSettings(settings); } return settings.cloudDeviceId; })();
+    const result = await sync._post('/v1/auth/login', { email: msg.email, password: msg.password, deviceId }, true);
+    settings.cloudAccessToken = result.accessToken;
+    settings.cloudRefreshToken = result.refreshToken;
+    settings.cloudUser = result.user;
+    saveSettings(settings);
+    return { success: true, user: result.user };
+  });
+
+  cloudBridge('cloud-register', async (msg) => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    const sync = cloudIpc.getCloudSync();
+    const deviceId = (() => { if (!settings.cloudDeviceId) { settings.cloudDeviceId = require('crypto').randomUUID(); saveSettings(settings); } return settings.cloudDeviceId; })();
+    const result = await sync._post('/v1/auth/register', { email: msg.email, password: msg.password, callsign: msg.callsign, displayName: msg.callsign, deviceId }, true);
+    settings.cloudAccessToken = result.accessToken;
+    settings.cloudRefreshToken = result.refreshToken;
+    settings.cloudUser = result.user;
+    saveSettings(settings);
+    return { success: true, user: result.user };
+  });
+
+  cloudBridge('cloud-logout', async () => {
+    if (settings.cloudRefreshToken) {
+      try {
+        const sync = cloudIpc.getCloudSync();
+        await sync._post('/v1/auth/logout', { refreshToken: settings.cloudRefreshToken }, true);
+      } catch {}
+    }
+    settings.cloudAccessToken = null;
+    settings.cloudRefreshToken = null;
+    settings.cloudUser = null;
+    settings.cloudLastSyncTimestamp = null;
+    settings.cloudLastSyncAt = null;
+    saveSettings(settings);
+    return { success: true };
+  });
+
+  cloudBridge('cloud-get-status', async () => {
+    if (!settings.cloudAccessToken) return { loggedIn: false };
+    return {
+      loggedIn: true,
+      user: settings.cloudUser,
+      lastSyncAt: settings.cloudLastSyncAt,
+      pendingChanges: cloudIpc ? cloudIpc.journal.length : 0,
+    };
+  });
+
+  cloudBridge('cloud-sync-now', async () => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    const sync = cloudIpc.getCloudSync();
+    const result = await sync.sync(cloudIpc.journal, {
+      onPulled: () => {},
+      onConflicts: () => {},
+    });
+    settings.cloudLastSyncAt = new Date().toISOString();
+    if (sync.lastSyncTimestamp) settings.cloudLastSyncTimestamp = sync.lastSyncTimestamp;
+    saveSettings(settings);
+    return { success: true, pushed: result.pushed, pulled: result.pulled };
+  });
+
+  cloudBridge('cloud-bulk-upload', async () => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    const { parseAllRawQsos } = require('./lib/adif');
+    const { rewriteAdifFile } = require('./lib/adif-writer');
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    const allQsos = parseAllRawQsos(logPath);
+    let needsRewrite = false;
+    for (const qso of allQsos) {
+      if (!qso.APP_POTACAT_UUID) {
+        qso.APP_POTACAT_UUID = require('crypto').randomUUID();
+        qso.APP_POTACAT_VERSION = '1';
+        needsRewrite = true;
+      }
+    }
+    if (needsRewrite) rewriteAdifFile(logPath, allQsos);
+    const sync = cloudIpc.getCloudSync();
+    const result = await sync.bulkUpload(allQsos.map(f => ({ uuid: f.APP_POTACAT_UUID, adifFields: f })));
+    cloudIpc.journal.clear();
+    settings.cloudLastSyncAt = new Date().toISOString();
+    saveSettings(settings);
+    return { success: true, imported: result.imported, duplicates: result.duplicates, total: allQsos.length };
+  });
+
+  cloudBridge('cloud-verify-subscription', async () => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    const sync = cloudIpc.getCloudSync();
+    return await sync.verifySubscription();
+  });
+
+  cloudBridge('cloud-save-bmac-email', async (bmacEmail) => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    settings.cloudBmacEmail = bmacEmail;
+    saveSettings(settings);
+    const sync = cloudIpc.getCloudSync();
+    return await sync._authedRequest('POST', '/v1/subscription/set-bmac-email', { bmacEmail });
+  });
+
   // Enable remote CW if setting is on
   if (settings.remoteCwEnabled) {
     remoteServer.setCwEnabled(true);

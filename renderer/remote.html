@@ -415,6 +415,41 @@
           <p class="so-ssb-hint">Record mic audio to play as voice macros during PTT. Max 30s each.</p>
         </div>
 
+        <!-- Cloud Sync -->
+        <div class="so-section-label">Cloud Sync</div>
+        <div id="echo-cloud-login" class="hidden">
+          <div class="so-row"><label class="so-label" style="flex:1;">Callsign<input type="text" id="echo-cloud-callsign" placeholder="K3SBP" style="text-transform:uppercase;width:100%;margin-top:2px;"></label></div>
+          <div class="so-row"><label class="so-label" style="flex:1;">Email<input type="email" id="echo-cloud-email" placeholder="your@email.com" style="width:100%;margin-top:2px;"></label></div>
+          <div class="so-row"><label class="so-label" style="flex:1;">Password<input type="password" id="echo-cloud-password" placeholder="Min 8 characters" style="width:100%;margin-top:2px;"></label></div>
+          <div class="so-row" style="gap:6px;">
+            <button type="button" id="echo-cloud-register-btn" class="so-step-btn" style="flex:1;padding:6px;">Start Free Trial</button>
+            <button type="button" id="echo-cloud-signin-btn" class="so-step-btn" style="flex:1;padding:6px;">Sign In</button>
+          </div>
+          <div id="echo-cloud-login-error" style="color:#e94560;font-size:11px;margin-top:4px;" class="hidden"></div>
+        </div>
+        <div id="echo-cloud-account" class="hidden">
+          <div class="so-row">
+            <span class="so-label"><strong id="echo-cloud-user-callsign"></strong> &mdash; <span id="echo-cloud-user-email" style="opacity:0.6;"></span></span>
+          </div>
+          <div class="so-row">
+            <span class="so-label">Status: <span id="echo-cloud-sub-status" style="color:#4ecca3;">--</span></span>
+          </div>
+          <div class="so-row" style="gap:6px;">
+            <button type="button" id="echo-cloud-sync-btn" class="so-step-btn" style="flex:1;padding:6px;">Sync Now</button>
+            <button type="button" id="echo-cloud-upload-btn" class="so-step-btn" style="flex:1;padding:6px;">Upload Log</button>
+          </div>
+          <div id="echo-cloud-sync-msg" style="font-size:11px;opacity:0.6;margin-top:4px;" class="hidden"></div>
+          <div class="so-row" style="margin-top:6px;">
+            <label class="so-label" style="flex:1;">BMAC Email <span style="font-size:10px;opacity:0.5;">(if different)</span>
+              <input type="email" id="echo-cloud-bmac-email" placeholder="Leave blank if same" style="width:100%;margin-top:2px;">
+            </label>
+            <button type="button" id="echo-cloud-bmac-verify-btn" class="so-step-btn" style="padding:6px;margin-top:14px;">Verify</button>
+          </div>
+          <div class="so-row" style="margin-top:6px;">
+            <button type="button" id="echo-cloud-signout-btn" class="so-step-btn" style="padding:4px 10px;font-size:11px;opacity:0.6;">Sign Out</button>
+          </div>
+        </div>
+
         <div class="so-footer">
           <div class="so-footer-by">Casey Stanton, K3SBP</div>
           <div class="so-footer-links">
