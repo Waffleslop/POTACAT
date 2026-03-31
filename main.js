@@ -4153,7 +4153,7 @@ function connectRemote() {
   });
 
   const port = settings.remotePort || 7300;
-  const requireToken = settings.remoteRequireToken !== false;
+  const requireToken = settings.remoteRequireToken === true;
   let token = settings.remoteToken;
   if (requireToken && !token) {
     token = RemoteServer.generateToken();
