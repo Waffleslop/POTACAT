@@ -617,6 +617,18 @@
         populateAudioDevices(msg.devices, msg.current);
         break;
 
+      case 'smeter':
+        updateEchoSmeter(msg.value);
+        break;
+
+      case 'swr':
+        updateEchoSwr(msg.value);
+        break;
+
+      case 'swr-ratio':
+        updateEchoSwrRatio(msg.value);
+        break;
+
       case 'qrz-result':
         if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
           tunedOpName = msg.fname || '';
@@ -1262,6 +1274,12 @@
   });
 
   // --- Multi-select dropdown helpers ---
+  var _filterScroll = document.getElementById('filter-toolbar-scroll');
+  function closeAllDropdowns() {
+    document.querySelectorAll('.rc-dropdown.open').forEach(d => d.classList.remove('open'));
+    if (_filterScroll) _filterScroll.style.overflowX = '';
+  }
+
   function initMultiDropdown(container, onChange) {
     const btn = container.querySelector('.rc-dropdown-btn');
     const menu = container.querySelector('.rc-dropdown-menu');
@@ -1276,8 +1294,20 @@
     }
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      document.querySelectorAll('.rc-dropdown.open').forEach(d => { if (d !== container) d.classList.remove('open'); });
+      document.querySelectorAll('.rc-dropdown.open').forEach(d => {
+        if (d !== container) d.classList.remove('open');
+      });
       container.classList.toggle('open');
+      if (container.classList.contains('open')) {
+        _dropdownJustOpened = true;
+        // Remove overflow clipping so position:fixed menus escape on mobile WebKit
+        if (_filterScroll) _filterScroll.style.overflowX = 'visible';
+        const rect = btn.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = (rect.bottom + 4) + 'px';
+      } else {
+        if (_filterScroll) _filterScroll.style.overflowX = '';
+      }
     });
     menu.addEventListener('click', (e) => e.stopPropagation());
     menu.addEventListener('change', (e) => {
@@ -1313,6 +1343,16 @@
     e.stopPropagation();
     document.querySelectorAll('.rc-dropdown.open').forEach(d => { if (d !== spotsDropdown) d.classList.remove('open'); });
     spotsDropdown.classList.toggle('open');
+    if (spotsDropdown.classList.contains('open')) {
+      _dropdownJustOpened = true;
+      if (_filterScroll) _filterScroll.style.overflowX = 'visible';
+      const rect = spotsDropdown.querySelector('.rc-dropdown-btn').getBoundingClientRect();
+      const panel = spotsDropdown.querySelector('.rc-spots-panel');
+      panel.style.left = rect.left + 'px';
+      panel.style.top = (rect.bottom + 4) + 'px';
+    } else {
+      if (_filterScroll) _filterScroll.style.overflowX = '';
+    }
   });
 
   spotsDropdown.querySelector('.rc-spots-panel').addEventListener('click', (e) => e.stopPropagation());
@@ -1337,9 +1377,11 @@
     }
   });
 
-  // Close dropdowns on outside tap
+  // Close dropdowns on outside tap (delay to prevent immediate close on mobile)
+  var _dropdownJustOpened = false;
   document.addEventListener('click', () => {
-    document.querySelectorAll('.rc-dropdown.open').forEach(d => d.classList.remove('open'));
+    if (_dropdownJustOpened) { _dropdownJustOpened = false; return; }
+    closeAllDropdowns();
   });
 
   // --- Filter persistence (sync to desktop settings.json) ---
@@ -1940,18 +1982,13 @@
     }
   }
 
-  const XIT_PRESETS = [-200, -100, -50, -20, -10, 0, 10, 20, 50, 100, 200];
   soXitDn.addEventListener('click', () => {
-    const idx = XIT_PRESETS.indexOf(cwXit);
-    if (idx > 0) cwXit = XIT_PRESETS[idx - 1];
-    else if (idx === -1) { cwXit = Math.max(-999, cwXit - 10); }
+    cwXit = Math.max(-999, cwXit - 10);
     soXitVal.textContent = cwXit;
     sendSetting('set-cw-xit', cwXit);
   });
   soXitUp.addEventListener('click', () => {
-    const idx = XIT_PRESETS.indexOf(cwXit);
-    if (idx < XIT_PRESETS.length - 1) cwXit = XIT_PRESETS[idx + 1];
-    else if (idx === -1) { cwXit = Math.min(999, cwXit + 10); }
+    cwXit = Math.min(999, cwXit + 10);
     soXitVal.textContent = cwXit;
     sendSetting('set-cw-xit', cwXit);
   });
@@ -2242,6 +2279,68 @@
   });
   rcAudioRefresh.addEventListener('click', requestAudioDevices);
 
+  // --- ECHOCAT S-Meter / SWR display ---
+  var echoMeterStrip = document.getElementById('echo-meter-strip');
+  var echoSmeterBar = document.getElementById('echo-smeter-bar');
+  var echoSmeterText = document.getElementById('echo-smeter-text');
+  var echoSwrBar = document.getElementById('echo-swr-bar');
+  var echoSwrText = document.getElementById('echo-swr-text');
+  var echoShowMeter = document.getElementById('echo-show-meter');
+  var echoMeterEnabled = localStorage.getItem('echoMeterEnabled') === 'true';
+
+  echoShowMeter.checked = echoMeterEnabled;
+  if (echoMeterEnabled) echoMeterStrip.classList.remove('hidden');
+
+  echoShowMeter.addEventListener('change', function() {
+    echoMeterEnabled = echoShowMeter.checked;
+    localStorage.setItem('echoMeterEnabled', echoMeterEnabled);
+    echoMeterStrip.classList.toggle('hidden', !echoMeterEnabled);
+  });
+
+  function drawEchoBar(canvas, level, color) {
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, Math.round(Math.max(0, Math.min(1, level)) * w), h);
+  }
+
+  function updateEchoSmeter(val) {
+    if (!echoMeterEnabled) return;
+    echoMeterStrip.classList.remove('hidden');
+    var level = val / 255;
+    var color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
+    drawEchoBar(echoSmeterBar, level, color);
+    if (val <= 120) {
+      echoSmeterText.textContent = 'S' + Math.round(val * 9 / 120);
+    } else {
+      echoSmeterText.textContent = 'S9+' + Math.round((val - 120) * 60 / 135);
+    }
+    echoSmeterText.style.color = color;
+  }
+
+  function updateEchoSwr(val) {
+    if (!echoMeterEnabled || val <= 0) return;
+    var swr = 1.0 + (val / 60);
+    var level = Math.min(1, (swr - 1) / 4);
+    var color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+    drawEchoBar(echoSwrBar, level, color);
+    echoSwrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+    echoSwrText.style.color = color;
+  }
+
+  function updateEchoSwrRatio(swr) {
+    if (!echoMeterEnabled) return;
+    var level = Math.min(1, (swr - 1) / 4);
+    var color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+    drawEchoBar(echoSwrBar, level, color);
+    echoSwrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+    echoSwrText.style.color = color;
+  }
+
   // --- Audio Level Meters & Gain Controls ---
   var rxMeterCanvas = document.getElementById('rx-meter');
   var txMeterCanvas = document.getElementById('tx-meter');
@@ -2307,6 +2406,28 @@
   }
 
   // --- Audio (WebRTC) ---
+  const audioConnectBtn = document.getElementById('audio-connect-btn');
+  const bbControls = document.getElementById('bb-controls');
+
+  function showAudioControls() {
+    audioConnectBtn.classList.add('hidden');
+    bbControls.classList.remove('hidden');
+  }
+  function showConnectPrompt() {
+    audioConnectBtn.textContent = 'Tap to Connect Audio';
+    audioConnectBtn.classList.remove('hidden');
+    bbControls.classList.add('hidden');
+  }
+
+  audioConnectBtn.addEventListener('click', async () => {
+    audioConnectBtn.textContent = 'Connecting...';
+    await startAudio();
+    // If audio didn't fully connect, reset button so user can retry
+    if (!audioEnabled) {
+      audioConnectBtn.textContent = 'Tap to Connect Audio';
+    }
+  });
+
   audioBtn.addEventListener('click', async () => {
     if (audioEnabled) {
       stopAudio();
@@ -2318,8 +2439,7 @@
     }
   });
 
-  const audioLabel = audioBtn.querySelector('.audio-label');
-  function setAudioStatus(text) { audioLabel.textContent = text; }
+  function setAudioStatus(text) { audioBtn.textContent = text; }
 
   let micReady = false;
 
@@ -2423,6 +2543,7 @@
       audioBtn.classList.add('active');
       audioDot.classList.remove('hidden');
       volBoostBtn.classList.remove('hidden');
+      showAudioControls();
       updateSsbPanelVisibility();
       // Activate Media Session so earbud play/pause button works for PTT
       startSessionKeepAlive();
@@ -2449,8 +2570,9 @@
     volBoostLevel = 0;
     audioBtn.classList.remove('active');
     volBoostBtn.classList.add('hidden');
+    showConnectPrompt();
     volBoostBtn.classList.remove('active');
-    volBoostBtn.querySelector('.speaker-label').textContent = 'Vol 1x';
+    volBoostBtn.textContent = 'Vol 1x';
     audioDot.classList.add('hidden');
     audioDot.classList.remove('connected');
     setAudioStatus('Audio');
@@ -2489,7 +2611,7 @@
     if (gainNode) gainNode.gain.value = gain;
     // iOS AudioContext may start suspended — resume on user gesture
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-    volBoostBtn.querySelector('.speaker-label').textContent = 'Vol ' + gain + 'x';
+    volBoostBtn.textContent = 'Vol ' + gain + 'x';
     volBoostBtn.classList.toggle('active', volBoostLevel > 0);
     // Sync RX gain slider
     rcRxGain.value = Math.round(gain * 100);
@@ -2502,10 +2624,12 @@
     if (!list.length) return;
     scanning = true;
     scanIndex = 0;
+    // Start at the NEXT spot after the current frequency
     if (currentFreqKhz) {
       const match = list.findIndex(s => Math.abs(parseFloat(s.frequency) - currentFreqKhz) < 1);
-      if (match !== -1) scanIndex = match;
+      if (match !== -1) scanIndex = match + 1;
     }
+    if (scanIndex >= list.length) scanIndex = 0;
     scanBtn.textContent = 'Stop';
     scanBtn.classList.add('scan-active');
     scanStep();

@@ -607,6 +607,28 @@ button:hover {
   color: var(--accent-green);
 }
 
+/* Floating S-Meter / SWR box — draggable */
+.meter-box {
+  position: absolute;
+  bottom: 46px;
+  right: 8px;
+  z-index: 100;
+  background: rgba(22, 33, 62, 0.92);
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-family: monospace;
+  font-size: 11px;
+  backdrop-filter: blur(4px);
+  cursor: grab;
+  user-select: none;
+}
+.meter-box.dragging { cursor: grabbing; opacity: 0.8; }
+.meter-box.hidden { display: none; }
+.meter-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.meter-label { color: #888; font-weight: 600; min-width: 28px; text-align: right; }
+.meter-val { color: #ccc; min-width: 42px; text-align: right; font-weight: 700; }
+
 .status.disconnected {
   background: var(--tint-red);
   color: var(--accent-red);

@@ -1,0 +1,8 @@
+{
+  "name": "ft8_native",
+  "version": "1.0.0",
+  "description": "Native FT8/FT4 decoder using ft8_lib by YL3JG",
+  "main": "build/Release/ft8_native.node",
+  "private": true,
+  "gypfile": true
+}

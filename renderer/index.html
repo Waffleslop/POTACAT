@@ -85,6 +85,7 @@
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-worked"> Hide worked stations</label>
           <label class="spots-toggle" id="spots-hide-parks-label"><input type="checkbox" id="spots-hide-parks"> Hide worked parks</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
+          <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
           <div class="spots-panel-divider" id="spots-events-divider"></div>
           <div class="spots-panel-section-label" id="spots-events-label">Events &amp; Awards</div>
@@ -142,6 +143,7 @@
           </div>
           <div class="spots-panel-divider"></div>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-hide-worked-parks"> Hide Worked Parks</label>
+          <label class="spots-toggle compact"><input type="checkbox" id="quick-show-meter" checked> S-Meter / SWR</label>
           <div id="quick-rotor-divider" class="spots-panel-divider hidden"></div>
           <label id="quick-rotor-label" class="spots-toggle compact hidden"><input type="checkbox" id="quick-rotor"> PSTRotator</label>
           <div class="spots-panel-divider"></div>
@@ -381,7 +383,20 @@
 
   <main>
     <div id="split-container" class="split-horizontal">
-      <div id="table-pane">
+      <div id="table-pane" style="position:relative;">
+        <!-- Floating S-Meter / SWR box -->
+        <div id="meter-box" class="meter-box hidden">
+          <div class="meter-row">
+            <span class="meter-label">S</span>
+            <canvas id="smeter-bar" width="120" height="14"></canvas>
+            <span id="smeter-text" class="meter-val">—</span>
+          </div>
+          <div class="meter-row">
+            <span class="meter-label">SWR</span>
+            <canvas id="swr-bar" width="120" height="14"></canvas>
+            <span id="swr-text" class="meter-val">—</span>
+          </div>
+        </div>
         <div id="table-scroll-wrap">
           <table id="spots-table">
             <thead>
@@ -492,6 +507,12 @@
           <span id="jtcat-countdown" class="jtcat-countdown">&mdash;</span>
           <span id="jtcat-sync-status" class="jtcat-sync" title="Click to check clock offset">Sync: &mdash;</span>
         </div>
+      </div>
+      <div id="jtcat-audio-strip" style="display:flex;align-items:center;gap:8px;padding:2px 10px;font-size:11px;color:var(--text-dim);background:var(--bg-header);border-bottom:1px solid var(--border);">
+        <span style="flex-shrink:0;">RX</span>
+        <canvas id="jtcat-rx-meter" width="100" height="10" style="border-radius:2px;background:#111;flex-shrink:0;"></canvas>
+        <input type="range" id="jtcat-rx-gain" min="0" max="300" value="100" style="width:80px;" title="RX Gain %">
+        <span id="jtcat-rx-gain-val" style="min-width:32px;text-align:right;">100%</span>
       </div>
 
       <div class="jtcat-main">
@@ -1232,7 +1253,7 @@
         <input type="number" id="set-scan-dwell" min="2" max="30" value="7">
       </label>
       <label>CW XIT Offset (Hz):
-        <input type="number" id="set-cw-xit" min="-999" max="999" step="10" value="0">
+        <input type="number" id="set-cw-xit" min="-999" max="999" step="1" value="0">
       </label>
       <label>CW Filter Width (Hz):
         <input type="number" id="set-cw-filter" min="0" max="3000" step="50" value="0">
@@ -1532,6 +1553,8 @@
       <label class="checkbox-label"><input type="checkbox" id="set-color-rows" checked> Color table rows by spot source</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
+      <label class="checkbox-label"><input type="checkbox" id="set-show-meter" checked> Show S-Meter / SWR overlay</label>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Floating meter box on the table view showing signal strength and SWR. Draggable.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
       <span class="help-text" style="margin-left:12px;display:block;">Displayed on the Map view only</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-split-view" checked> Enable split view</label>

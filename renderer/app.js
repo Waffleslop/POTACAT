@@ -108,6 +108,7 @@ let hideWorked = false;
 let workedParksSet = new Set(); // park references from CSV for fast lookup
 let workedParksData = new Map(); // reference → full park data for stats
 let hideWorkedParks = false;
+let hideQrt = true; // hide spots with QRT in comments (default on)
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
 let respotTemplate = '{rst} in {QTH} 73s {mycallsign} via POTACAT'; // park re-spot comment template
@@ -204,7 +205,9 @@ const spotsHideWorked = document.getElementById('spots-hide-worked');
 const spotsHideParks = document.getElementById('spots-hide-parks');
 const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
+const spotsHideQrt = document.getElementById('spots-hide-qrt');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
+const quickShowMeter = document.getElementById('quick-show-meter');
 const spotsHiddenCount = document.getElementById('spots-hidden-count');
 const spotsDxcc = document.getElementById('spots-dxcc');
 const settingsBtn = document.getElementById('settings-btn');
@@ -3336,6 +3339,7 @@ function getFiltered() {
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     if (hideWorked && isWorkedSpot(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
+    if (hideQrt && s.comments && s.comments.toLowerCase().includes('qrt')) return false;
     if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency)) return false;
     return true;
   });
@@ -6361,7 +6365,9 @@ function syncSpotsPanel() {
   spotsHideWorked.checked = hideWorked;
   spotsHideParks.checked = hideWorkedParks;
   spotsHideOob.checked = hideOutOfBand;
+  spotsHideQrt.checked = hideQrt;
   spotsShowHidden.checked = showHiddenSpots;
+  quickShowMeter.checked = meterBoxVisible;
   const hCount = hiddenSpotCount();
   spotsHiddenCount.textContent = hCount;
   spotsHiddenCount.classList.toggle('hidden', hCount === 0);
@@ -6401,6 +6407,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   hideWorked = spotsHideWorked.checked;
   hideWorkedParks = spotsHideParks.checked;
   hideOutOfBand = spotsHideOob.checked;
+  hideQrt = spotsHideQrt.checked;
   showHiddenSpots = spotsShowHidden.checked;
   enableDxcc = spotsDxcc.checked;
 
@@ -6565,6 +6572,14 @@ quickHideWorkedParks.addEventListener('change', async () => {
   renderTable();
   renderMap();
   await window.api.saveSettings({ hideWorkedParks });
+});
+
+// S-Meter / SWR quick toggle
+quickShowMeter.addEventListener('change', () => {
+  meterBoxVisible = quickShowMeter.checked;
+  localStorage.setItem('meterBoxVisible', meterBoxVisible);
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  document.getElementById('set-show-meter').checked = meterBoxVisible;
 });
 
 // PSTRotator quick toggle — visible once rotor has been enabled in settings
@@ -6964,6 +6979,7 @@ async function openSettingsDialog(tab) {
   setWcagMode.checked = s.wcagMode === true;
   setColorRows.checked = s.colorRows !== false; // default true
   setEnableSolar.checked = s.enableSolar === true;
+  document.getElementById('set-show-meter').checked = meterBoxVisible;
   setEnableBandActivity.checked = s.enableBandActivity === true;
   setShowBearing.checked = s.showBearing === true;
   setEnableSplitView.checked = s.enableSplitView !== false;
@@ -7157,6 +7173,11 @@ settingsSave.addEventListener('click', async () => {
   const wcagEnabled = setWcagMode.checked;
   const colorRowsEnabled = setColorRows.checked;
   const solarEnabled = setEnableSolar.checked;
+  // Sync meter visibility from Settings Display checkbox
+  meterBoxVisible = document.getElementById('set-show-meter').checked;
+  localStorage.setItem('meterBoxVisible', meterBoxVisible);
+  quickShowMeter.checked = meterBoxVisible;
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
   const bandActivityEnabled = setEnableBandActivity.checked;
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
@@ -9277,6 +9298,119 @@ let radioPower = 0; // last known TX power from CAT (watts)
 let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 window.api.onCatPower((watts) => {
   radioPower = watts;
+});
+
+// --- Floating S-Meter / SWR Box ---
+const meterBox = document.getElementById('meter-box');
+let meterBoxVisible = localStorage.getItem('meterBoxVisible') !== 'false'; // default visible
+
+// Draggable meter box
+(function() {
+  let dragging = false, startX, startY, startLeft, startTop;
+  // Restore saved position
+  const saved = localStorage.getItem('meterBoxPos');
+  if (saved) {
+    try {
+      const pos = JSON.parse(saved);
+      meterBox.style.left = pos.left + 'px';
+      meterBox.style.top = pos.top + 'px';
+      meterBox.style.right = 'auto';
+      meterBox.style.bottom = 'auto';
+    } catch {}
+  }
+  meterBox.addEventListener('mousedown', (e) => {
+    dragging = true;
+    meterBox.classList.add('dragging');
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = meterBox.getBoundingClientRect();
+    const parentRect = meterBox.parentElement.getBoundingClientRect();
+    startLeft = rect.left - parentRect.left;
+    startTop = rect.top - parentRect.top;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    meterBox.style.left = (startLeft + dx) + 'px';
+    meterBox.style.top = (startTop + dy) + 'px';
+    meterBox.style.right = 'auto';
+    meterBox.style.bottom = 'auto';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    meterBox.classList.remove('dragging');
+    localStorage.setItem('meterBoxPos', JSON.stringify({
+      left: parseInt(meterBox.style.left, 10),
+      top: parseInt(meterBox.style.top, 10),
+    }));
+  });
+})();
+const smeterBarCanvas = document.getElementById('smeter-bar');
+const smeterTextEl = document.getElementById('smeter-text');
+const swrBarCanvas = document.getElementById('swr-bar');
+const swrTextEl = document.getElementById('swr-text');
+
+function drawMeterBar(canvas, level, color) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, w, h);
+  const barW = Math.round(Math.max(0, Math.min(1, level)) * w);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, barW, h);
+  // Tick marks
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  for (let i = 1; i <= 9; i++) {
+    ctx.fillRect(Math.round(i * w / 12), 0, 1, h);
+  }
+}
+
+window.api.onCatSmeter((val) => {
+  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  const level = val / 255;
+  const color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
+  drawMeterBar(smeterBarCanvas, level, color);
+  if (val <= 120) {
+    smeterTextEl.textContent = 'S' + Math.round(val * 9 / 120);
+  } else {
+    smeterTextEl.textContent = 'S9+' + Math.round((val - 120) * 60 / 135);
+  }
+  smeterTextEl.style.color = color;
+});
+
+window.api.onCatSwr((val) => {
+  if (val <= 0) {
+    drawMeterBar(swrBarCanvas, 0, '#333');
+    swrTextEl.textContent = '—';
+    swrTextEl.style.color = '#666';
+    return;
+  }
+  meterBox.classList.remove('hidden');
+  const swr = 1.0 + (val / 60);
+  const level = Math.min(1, (swr - 1) / 4);
+  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  drawMeterBar(swrBarCanvas, level, color);
+  swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+  swrTextEl.style.color = color;
+});
+
+// Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
+window.api.onCatSwrRatio((swr) => {
+  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  const level = Math.min(1, (swr - 1) / 4);
+  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  drawMeterBar(swrBarCanvas, level, color);
+  swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+  swrTextEl.style.color = color;
+});
+
+window.api.onCatStatus((s) => {
+  if (!s.connected) meterBox.classList.add('hidden');
 });
 
 // --- CAT Log Panel ---
@@ -13156,6 +13290,8 @@ var jtcatAudioStream = null;
 var jtcatAudioProcessor = null;
 var jtcatAnalyser = null;
 var jtcatAudioSource = null; // strong ref to prevent GC in Chromium 134+
+var jtcatRxGainNode = null;
+var jtcatMeterAnim = null;
 var jtcatRemoteActive = false; // true when phone is driving JTCAT
 var jtcatQuietFreq = 1500;     // auto-detected quiet TX frequency (Hz)
 var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq updates
@@ -13191,11 +13327,19 @@ async function startJtcatAudio() {
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
     jtcatAudioSource = source; // prevent GC — Chromium 134+ may collect unrooted audio nodes
 
-    // AnalyserNode for waterfall FFT
+    // RX GainNode for level control
+    jtcatRxGainNode = jtcatAudioCtx.createGain();
+    jtcatRxGainNode.gain.value = 1.0;
+    source.connect(jtcatRxGainNode);
+
+    // AnalyserNode for waterfall FFT (after gain so level changes affect waterfall)
     jtcatAnalyser = jtcatAudioCtx.createAnalyser();
     jtcatAnalyser.fftSize = 2048;
     jtcatAnalyser.smoothingTimeConstant = 0.3;
-    source.connect(jtcatAnalyser);
+    jtcatRxGainNode.connect(jtcatAnalyser);
+
+    // Start RX level meter rendering
+    startJtcatMeter();
 
     var nativeRate = jtcatAudioCtx.sampleRate;
     var dsRatio = nativeRate / 12000;
@@ -13210,7 +13354,7 @@ async function startJtcatAudio() {
       workletNode.port.onmessage = function(e) {
         window.api.jtcatAudio(e.data);
       };
-      source.connect(workletNode);
+      jtcatRxGainNode.connect(workletNode);
       workletNode.connect(jtcatAudioCtx.destination);
       jtcatAudioProcessor = workletNode;
       console.log('[JTCAT] Using AudioWorkletNode for audio capture');
@@ -13266,7 +13410,7 @@ async function startJtcatAudio() {
           console.error('[JTCAT] Audio processor error:', err.message || err);
         }
       };
-      source.connect(jtcatAudioProcessor);
+      jtcatRxGainNode.connect(jtcatAudioProcessor);
       jtcatAudioProcessor.connect(jtcatAudioCtx.destination);
     }
 
@@ -13293,13 +13437,50 @@ async function startJtcatAudio() {
   }
 }
 
+// --- JTCAT RX Audio Meter ---
+function startJtcatMeter() {
+  var canvas = document.getElementById('jtcat-rx-meter');
+  if (!canvas || jtcatMeterAnim) return;
+  function render() {
+    if (jtcatAnalyser && canvas) {
+      var ctx = canvas.getContext('2d');
+      var w = canvas.width, h = canvas.height;
+      var data = new Uint8Array(jtcatAnalyser.frequencyBinCount);
+      jtcatAnalyser.getByteTimeDomainData(data);
+      var sum = 0;
+      for (var i = 0; i < data.length; i++) { var v = (data[i] - 128) / 128; sum += v * v; }
+      var rms = Math.sqrt(sum / data.length);
+      var db = rms > 0 ? 20 * Math.log10(rms) : -60;
+      var level = Math.max(0, Math.min(1, (db + 40) / 40));
+      ctx.clearRect(0, 0, w, h);
+      var barW = Math.round(level * w);
+      ctx.fillStyle = level < 0.6 ? '#4ecca3' : level < 0.85 ? '#ffd740' : '#e94560';
+      ctx.fillRect(0, 0, barW, h);
+    }
+    jtcatMeterAnim = requestAnimationFrame(render);
+  }
+  jtcatMeterAnim = requestAnimationFrame(render);
+}
+
+var jtcatRxGainSlider = document.getElementById('jtcat-rx-gain');
+var jtcatRxGainVal = document.getElementById('jtcat-rx-gain-val');
+if (jtcatRxGainSlider) {
+  jtcatRxGainSlider.addEventListener('input', function() {
+    var pct = parseInt(jtcatRxGainSlider.value, 10);
+    jtcatRxGainVal.textContent = pct + '%';
+    if (jtcatRxGainNode) jtcatRxGainNode.gain.value = pct / 100;
+  });
+}
+
 function stopJtcatAudio() {
+  if (jtcatMeterAnim) { cancelAnimationFrame(jtcatMeterAnim); jtcatMeterAnim = null; }
   if (waterfallAnimFrame) {
     cancelAnimationFrame(waterfallAnimFrame);
     waterfallAnimFrame = null;
   }
   jtcatAnalyser = null;
   jtcatAudioSource = null;
+  jtcatRxGainNode = null;
   if (jtcatAudioProcessor) {
     jtcatAudioProcessor.disconnect();
     jtcatAudioProcessor = null;

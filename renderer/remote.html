@@ -182,6 +182,10 @@
           <select id="rc-audio-output" class="so-select" style="flex:1;font-size:12px;"></select>
         </div>
         <button type="button" id="rc-audio-refresh" class="ft8-filter-btn" style="margin:4px 0 8px;">Refresh Devices</button>
+        <div class="so-section-label">Display</div>
+        <label class="so-label" style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+          <input type="checkbox" id="echo-show-meter"> Show S-Meter / SWR
+        </label>
         <div class="so-row" style="align-items:center;gap:6px;">
           <label class="so-label" style="min-width:50px;">RX Level</label>
           <canvas id="rx-meter" width="120" height="12" style="border-radius:2px;background:#111;flex-shrink:0;"></canvas>
@@ -452,6 +456,7 @@
 
     <!-- Filter toolbar -->
     <div id="filter-toolbar" class="hidden">
+    <div id="filter-toolbar-scroll">
       <!-- Band multi-select dropdown -->
       <div class="rc-dropdown" id="rc-band-filter">
         <button class="rc-dropdown-btn" type="button">Band: <span class="rc-dd-text">All</span></button>
@@ -528,9 +533,17 @@
 
       <!-- Refresh rate chip -->
       <button id="refresh-rate-btn" type="button" class="refresh-chip" title="Spot refresh rate">30s</button>
+    </div><!-- end filter-toolbar-scroll -->
+    </div><!-- end filter-toolbar -->
 
-      <!-- Scan button (moved from top bar) -->
-      <button type="button" id="scan-btn" class="scan-status-btn" title="Scan spots">Scan</button>
+    <!-- S-Meter / SWR strip -->
+    <div id="echo-meter-strip" class="echo-meter-strip hidden">
+      <span class="em-label">S:</span>
+      <canvas id="echo-smeter-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
+      <span id="echo-smeter-text" class="em-val">—</span>
+      <span class="em-label" style="margin-left:8px;">SWR:</span>
+      <canvas id="echo-swr-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
+      <span id="echo-swr-text" class="em-val">—</span>
     </div>
 
     <!-- Spot list -->
@@ -787,16 +800,18 @@
     </div>
 
     <div id="bottom-bar">
-      <button id="audio-btn" type="button" class="audio-button">
-        <span class="audio-icon">&#x1F50A;</span>
-        <span class="audio-label">Audio</span>
-      </button>
-      <button id="vol-boost-btn" type="button" class="speaker-button hidden" title="Volume Boost">
-        <span class="speaker-icon">&#x1F50A;</span>
-        <span class="speaker-label">Vol 1x</span>
-      </button>
-      <button id="ptt-btn" type="button" class="ptt-button">PTT</button>
-      <button id="estop-btn" type="button" class="estop-button">STOP</button>
+      <!-- Initial state: big connect button for new users -->
+      <button id="audio-connect-btn" type="button" class="bb-connect-btn">&#x1F50A; Tap to Connect Audio</button>
+      <!-- Active state: shown after audio connects -->
+      <div id="bb-controls" class="bb-controls hidden">
+        <div class="bb-stack">
+          <button id="audio-btn" type="button" class="bb-square-btn">Live</button>
+          <button id="vol-boost-btn" type="button" class="bb-square-btn hidden" title="Volume Boost">Vol 1x</button>
+        </div>
+        <button type="button" id="scan-btn" class="bb-round-btn" title="Scan spots">Scan</button>
+        <button id="ptt-btn" type="button" class="ptt-button">PTT</button>
+        <button id="estop-btn" type="button" class="bb-halt-btn">HALT</button>
+      </div>
     </div>
 
     <!-- Log QSO sheet -->
