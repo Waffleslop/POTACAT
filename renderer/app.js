@@ -10108,6 +10108,19 @@ setCwMidiDevice.addEventListener('change', () => {
   connectMidiDevice(setCwMidiDevice.value);
 });
 
+// --- Keyboard CW (VBand/Vail: Left Ctrl = dit, Right Ctrl = dah) ---
+document.addEventListener('keydown', (e) => {
+  if (!setEnableCwKeyer.checked) return;
+  if (e.repeat) return; // ignore key repeat
+  if (e.code === 'ControlLeft') { e.preventDefault(); window.api.cwPaddleDit(true); }
+  else if (e.code === 'ControlRight') { e.preventDefault(); window.api.cwPaddleDah(true); }
+});
+document.addEventListener('keyup', (e) => {
+  if (!setEnableCwKeyer.checked) return;
+  if (e.code === 'ControlLeft') { e.preventDefault(); window.api.cwPaddleDit(false); }
+  else if (e.code === 'ControlRight') { e.preventDefault(); window.api.cwPaddleDah(false); }
+});
+
 // Sidetone
 function initSidetone() {
   if (sidetoneCtx) return;
