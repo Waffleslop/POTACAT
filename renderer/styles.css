@@ -635,12 +635,11 @@ button:hover {
   bottom: 46px;
   left: 8px;
   z-index: 100;
-  background: rgba(22, 33, 62, 0.92);
-  border: 1px solid #333;
+  background: #16213e;
+  border: 1px solid #444;
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 11px;
-  backdrop-filter: blur(4px);
   cursor: grab;
   user-select: none;
 }
@@ -652,23 +651,23 @@ button:hover {
   padding: 3px 8px;
   font-size: 11px;
   font-weight: 600;
-  background: var(--header);
-  color: var(--text-secondary);
-  border: 1px solid #444;
+  background: #2a2a3e;
+  color: #ddd;
+  border: 1px solid #555;
   border-radius: 4px;
   cursor: pointer;
   font-family: monospace;
 }
-.cw-macro-btns button:hover { border-color: var(--blue); color: var(--text); }
+.cw-macro-btns button:hover { border-color: var(--blue); color: #fff; }
 .cw-macro-btns button:active { background: var(--bg); border-color: var(--blue); color: var(--blue); }
 .cw-macro-input {
   width: 110px;
   font-size: 11px;
   padding: 3px 6px;
   font-family: monospace;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid #444;
+  background: #1a1a2e;
+  color: #eee;
+  border: 1px solid #555;
   border-radius: 4px;
 }
 .cw-macro-input:focus { border-color: var(--blue); outline: none; }
