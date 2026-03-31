@@ -5736,6 +5736,8 @@
   const echoCloudSyncMsg = document.getElementById('echo-cloud-sync-msg');
   const echoCloudBmacEmail = document.getElementById('echo-cloud-bmac-email');
   const echoCloudBmacVerifyBtn = document.getElementById('echo-cloud-bmac-verify-btn');
+  const echoCloudVerifyToggle = document.getElementById('echo-cloud-verify-toggle');
+  const echoCloudVerifyPanel = document.getElementById('echo-cloud-verify-panel');
   const echoCloudSignoutBtn = document.getElementById('echo-cloud-signout-btn');
 
   function echoCloudShowLogin() {
@@ -5854,6 +5856,12 @@
     });
   }
 
+  if (echoCloudVerifyToggle && echoCloudVerifyPanel) {
+    echoCloudVerifyToggle.addEventListener('click', function() {
+      echoCloudVerifyPanel.classList.toggle('hidden');
+      echoCloudVerifyToggle.textContent = echoCloudVerifyPanel.classList.contains('hidden') ? 'Verify Membership' : 'Cancel';
+    });
+  }
   if (echoCloudBmacVerifyBtn) {
     echoCloudBmacVerifyBtn.addEventListener('click', function() {
       const bmacEmail = echoCloudBmacEmail ? echoCloudBmacEmail.value.trim() : '';
@@ -5862,6 +5870,9 @@
       } else {
         ws.send(JSON.stringify({ type: 'cloud-verify-subscription' }));
       }
+      // Collapse panel after verify
+      if (echoCloudVerifyPanel) echoCloudVerifyPanel.classList.add('hidden');
+      if (echoCloudVerifyToggle) echoCloudVerifyToggle.textContent = 'Verify Membership';
     });
   }
 

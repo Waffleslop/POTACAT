@@ -442,11 +442,15 @@
             <div id="echo-cloud-sync-interval" style="font-size:11px;opacity:0.5;margin-top:4px;">Auto-sync every 5 min</div>
           </div>
           <div id="echo-cloud-sync-msg" style="font-size:11px;opacity:0.6;margin-top:4px;" class="hidden"></div>
+          <!-- Verify Membership — collapsed by default -->
           <div style="margin-top:10px;">
-            <label class="so-label" style="display:block;font-size:12px;">Buy Me a Coffee email <span style="font-size:10px;opacity:0.5;">(if different from account)</span></label>
-            <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
-              <input type="email" id="echo-cloud-bmac-email" placeholder="Leave blank if same" style="flex:1;min-width:140px;height:32px;padding:0 8px;font-size:13px;background:var(--bg-card);color:var(--text);border:1px solid #444;border-radius:6px;">
-              <button type="button" id="echo-cloud-bmac-verify-btn" class="so-step-btn" style="padding:6px 12px;height:32px;border-radius:6px;">Verify</button>
+            <button type="button" id="echo-cloud-verify-toggle" class="so-step-btn" style="padding:4px 12px;font-size:12px;border-radius:6px;opacity:0.7;">Verify Membership</button>
+            <div id="echo-cloud-verify-panel" class="hidden" style="margin-top:8px;">
+              <span style="font-size:11px;opacity:0.5;display:block;margin-bottom:6px;">Enter your Buy Me a Coffee email if it differs from your account email.</span>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <input type="email" id="echo-cloud-bmac-email" placeholder="BMAC email (or blank for account email)" style="flex:1;min-width:140px;height:32px;padding:0 8px;font-size:13px;background:var(--bg-card);color:var(--text);border:1px solid #444;border-radius:6px;">
+                <button type="button" id="echo-cloud-bmac-verify-btn" class="so-step-btn" style="padding:6px 12px;height:32px;border-radius:6px;">Verify</button>
+              </div>
             </div>
           </div>
           <div style="margin-top:12px;text-align:center;">
