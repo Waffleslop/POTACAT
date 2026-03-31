@@ -10183,7 +10183,7 @@ const cwTextDisplay = document.getElementById('cw-text-display');
 window.api.onCwKeyerStatus(({ enabled, cwAuth, winkeyer, version }) => {
   cwKeyerStatusEl.classList.toggle('hidden', !enabled);
   cwTextDisplay.classList.toggle('hidden', !enabled);
-  updateCwMacroBar(enabled);
+  updateCwMacroBar();
   if (!enabled) { cwTextDisplay.textContent = ''; closeCwPopover(); }
   if (winkeyer) {
     cwKeyerStatusEl.textContent = 'WK';
@@ -10260,12 +10260,11 @@ let cwMacroBoxVisible = localStorage.getItem('cwMacroBoxVisible') === 'true';
   });
 })();
 
-function updateCwMacroBar(enabled) {
+function updateCwMacroBar() {
   if (!cwMacroBar) return;
-  const show = enabled && cwMacroBoxVisible;
-  cwMacroBar.classList.toggle('hidden', !show);
+  cwMacroBar.classList.toggle('hidden', !cwMacroBoxVisible);
   if (quickShowCwMacros) quickShowCwMacros.checked = cwMacroBoxVisible;
-  if (!show) return;
+  if (!cwMacroBoxVisible) return;
   cwMacroBtns.innerHTML = '';
   const macros = readCwMacroEditor();
   const list = macros && macros.length ? macros : DEFAULT_CW_MACROS;
@@ -10295,9 +10294,11 @@ if (quickShowCwMacros) {
   quickShowCwMacros.addEventListener('change', () => {
     cwMacroBoxVisible = quickShowCwMacros.checked;
     localStorage.setItem('cwMacroBoxVisible', cwMacroBoxVisible);
-    updateCwMacroBar(!!setEnableCwKeyer.checked);
+    updateCwMacroBar();
   });
 }
+// Render on startup if saved as visible
+updateCwMacroBar();
 if (cwMacroSendBtn) {
   cwMacroSendBtn.addEventListener('click', () => {
     const text = cwMacroInput.value.trim();
