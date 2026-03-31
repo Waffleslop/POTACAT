@@ -176,8 +176,15 @@
         </div>
         <div class="cw-popover-row">
           <label>WPM</label>
-          <input type="number" id="cw-popover-wpm" min="5" max="50" value="20" style="width:50px;">
+          <input type="number" id="cw-popover-wpm" min="5" max="99" value="20" style="width:50px;">
         </div>
+      </div>
+      <!-- CW Macro Bar (desktop) -->
+      <div id="cw-macro-bar" class="hidden" style="display:inline-flex;gap:3px;margin-left:6px;align-items:center;">
+        <div id="cw-macro-btns" style="display:flex;gap:2px;"></div>
+        <input type="text" id="cw-macro-input" placeholder="CW..." style="width:120px;font-size:11px;padding:2px 4px;font-family:monospace;background:#222;color:#eee;border:1px solid #555;border-radius:3px;" spellcheck="false">
+        <button type="button" id="cw-macro-send" style="font-size:10px;padding:1px 6px;background:#b8860b;color:#fff;border:none;border-radius:3px;cursor:pointer;">TX</button>
+        <button type="button" id="cw-macro-cancel" style="font-size:10px;padding:1px 6px;background:#c33;color:#fff;border:none;border-radius:3px;cursor:pointer;">ESC</button>
       </div>
       <span id="rig-panel-btn" class="status hidden" style="background:#2a6e4e;color:#fff;cursor:pointer;">Rig</span>
       <div id="rig-popover" class="rig-popover hidden">
@@ -1608,34 +1615,60 @@
     <!-- 9. CW Keyer -->
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
       <legend>CW Keyer</legend>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-cw-keyer"> CW Keyer (MIDI paddle)</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-cw-keyer"> Enable CW Keyer</label>
       <div id="cw-keyer-config" class="hidden" style="margin-top:6px;margin-left:12px;">
-        <label>Keyer Mode:
-          <select id="set-cw-keyer-mode" style="width:140px;">
-            <option value="iambicB">Iambic B</option>
-            <option value="iambicA">Iambic A</option>
-            <option value="straight">Straight Key</option>
+        <label>Keyer Type:
+          <select id="set-cw-keyer-type" style="width:200px;">
+            <option value="midi">MIDI Paddle (software iambic)</option>
+            <option value="winkeyer">K1EL WinKeyer</option>
           </select>
         </label>
-        <label style="margin-top:6px;">Speed (WPM):
-          <input type="number" id="set-cw-wpm" min="5" max="50" value="20" style="width:60px;">
-        </label>
-        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-swap-paddles"> Swap paddles</label>
-        <label style="margin-top:8px;">MIDI Device:
-          <div style="display:flex;gap:6px;margin-top:4px;">
-            <select id="set-cw-midi-device" style="flex:1;"><option value="">— No MIDI devices —</option></select>
-            <button type="button" id="cw-midi-refresh-btn" style="padding:2px 8px;">Refresh</button>
-          </div>
-        </label>
-        <div style="margin-top:8px;">
-          <span style="font-size:12px;color:var(--text-secondary);">MIDI Note Mapping:</span>
-          <div style="display:flex;gap:12px;margin-top:4px;align-items:center;">
-            <label>Dit: <input type="number" id="set-cw-midi-dit-note" min="0" max="127" value="20" style="width:50px;"></label>
-            <button type="button" class="learn-btn" id="cw-learn-dit-btn">Learn</button>
-            <label>Dah: <input type="number" id="set-cw-midi-dah-note" min="0" max="127" value="21" style="width:50px;"></label>
-            <button type="button" class="learn-btn" id="cw-learn-dah-btn">Learn</button>
+        <!-- MIDI-specific settings -->
+        <div id="cw-midi-config" style="margin-top:6px;">
+          <label>Keyer Mode:
+            <select id="set-cw-keyer-mode" style="width:140px;">
+              <option value="iambicB">Iambic B</option>
+              <option value="iambicA">Iambic A</option>
+              <option value="straight">Straight Key</option>
+            </select>
+          </label>
+          <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-swap-paddles"> Swap paddles</label>
+          <label style="margin-top:8px;">MIDI Device:
+            <div style="display:flex;gap:6px;margin-top:4px;">
+              <select id="set-cw-midi-device" style="flex:1;"><option value="">— No MIDI devices —</option></select>
+              <button type="button" id="cw-midi-refresh-btn" style="padding:2px 8px;">Refresh</button>
+            </div>
+          </label>
+          <div style="margin-top:8px;">
+            <span style="font-size:12px;color:var(--text-secondary);">MIDI Note Mapping:</span>
+            <div style="display:flex;gap:12px;margin-top:4px;align-items:center;">
+              <label>Dit: <input type="number" id="set-cw-midi-dit-note" min="0" max="127" value="20" style="width:50px;"></label>
+              <button type="button" class="learn-btn" id="cw-learn-dit-btn">Learn</button>
+              <label>Dah: <input type="number" id="set-cw-midi-dah-note" min="0" max="127" value="21" style="width:50px;"></label>
+              <button type="button" class="learn-btn" id="cw-learn-dah-btn">Learn</button>
+            </div>
           </div>
         </div>
+        <!-- WinKeyer-specific settings -->
+        <div id="cw-winkeyer-config" class="hidden" style="margin-top:6px;">
+          <label>WinKeyer Port:
+            <select id="set-winkeyer-port" style="width:220px;"><option value="">(select COM port)</option></select>
+          </label>
+          <span id="winkeyer-version" class="help-text" style="display:block;margin-top:2px;"></span>
+          <div style="display:flex;gap:12px;margin-top:6px;">
+            <label>PTT Lead-in (ms):
+              <input type="number" id="set-wk-ptt-leadin" min="0" max="250" value="0" style="width:60px;">
+            </label>
+            <label>PTT Tail (ms):
+              <input type="number" id="set-wk-ptt-tail" min="0" max="250" value="0" style="width:60px;">
+            </label>
+          </div>
+          <span class="help-text" style="display:block;">Connect WinKeyer KEY output to your radio's straight key jack. Paddles plug into the WinKeyer, not the PC.</span>
+        </div>
+        <!-- Shared CW settings -->
+        <label style="margin-top:8px;">Speed (WPM):
+          <input type="number" id="set-cw-wpm" min="5" max="99" value="20" style="width:60px;">
+        </label>
         <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-cw-sidetone"> Local sidetone</label>
         <div style="margin-top:4px;margin-left:24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <label>Pitch (Hz):
@@ -1645,6 +1678,12 @@
             <input type="range" id="set-cw-sidetone-volume" min="0" max="100" value="30" style="width:80px;accent-color:#4fc3f7;">
             <span id="cw-sidetone-volume-label" style="font-size:11px;min-width:28px;">30%</span>
           </label>
+        </div>
+        <!-- CW Macros -->
+        <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
+          <span style="font-size:12px;font-weight:bold;color:var(--text);">CW Macros</span>
+          <span class="help-text" style="display:block;margin-top:2px;">Variables: {MYCALL} {call} {op_firstname} {state}</span>
+          <div id="cw-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
         </div>
       </div>
     </fieldset>

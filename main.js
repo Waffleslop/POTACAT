@@ -86,6 +86,7 @@ const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { IambicKeyer } = require('./lib/keyer');
+const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
 const { WsjtxClient, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
@@ -185,6 +186,7 @@ let pskrMap = null;            // PskrClient for dedicated PSKReporter Map view
 let pskrMapSpots = [];         // receiver spots for PSKReporter Map (FIFO, max 500)
 let pskrMapFlushTimer = null;  // throttle timer for PSKReporter Map → renderer
 let keyer = null;          // IambicKeyer instance for CW MIDI keying
+let winKeyer = null;       // K1EL WinKeyer instance for hardware CW keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
 let cwKeyPort = null;      // Dedicated SerialPort for DTR CW keying (external USB-serial adapter)
 let remoteAudioWin = null; // hidden BrowserWindow for WebRTC audio bridge
@@ -2769,6 +2771,78 @@ function disconnectCwKeyPort() {
   }
 }
 
+function connectWinKeyer() {
+  disconnectWinKeyer();
+  if (settings.cwKeyerType !== 'winkeyer' || !settings.winKeyerPort) return;
+  winKeyer = new WinKeyer();
+  winKeyer.on('connected', ({ version }) => {
+    console.log(`[WinKeyer] Connected, version ${version}`);
+    if (settings.cwWpm) winKeyer.setSpeed(settings.cwWpm);
+    if (settings.wkPttLeadIn) winKeyer.setPttLeadIn(settings.wkPttLeadIn);
+    if (settings.wkPttTail) winKeyer.setPttTail(settings.wkPttTail);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('cw-keyer-status', { enabled: true, winkeyer: true, version });
+    }
+  });
+  winKeyer.on('disconnected', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('cw-keyer-status', { enabled: false });
+    }
+  });
+  winKeyer.on('echo', ({ char }) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('cw-echo', { char });
+    }
+  });
+  winKeyer.on('busy', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('winkeyer-busy', true);
+    }
+  });
+  winKeyer.on('idle', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('winkeyer-busy', false);
+    }
+  });
+  winKeyer.on('breakin', () => {
+    console.log('[WinKeyer] Paddle breakin');
+  });
+  winKeyer.on('error', (err) => {
+    console.log(`[WinKeyer] Error: ${err.message}`);
+  });
+  winKeyer.connect(settings.winKeyerPort);
+}
+
+function disconnectWinKeyer() {
+  if (winKeyer) {
+    winKeyer.disconnect();
+    winKeyer.removeAllListeners();
+    winKeyer = null;
+  }
+}
+
+// Unified CW text send — routes through WinKeyer, SmartSDR, or CAT codec
+function sendCwTextToRadio(text) {
+  if (!text) return;
+  const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '')
+    .replace(/\{mycallsign\}/gi, settings.myCallsign || '');
+  // Note: {call}, {op_firstname}, {state} are expanded client-side before reaching here
+  console.log(`[CW] Text: ${expanded}`);
+  // WinKeyer takes priority — it keys the radio directly via hardware output
+  if (winKeyer && winKeyer.connected) {
+    winKeyer.sendText(expanded);
+    return;
+  }
+  // FlexRadio: use SmartSDR `cw send` command
+  if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
+    smartSdr.sendCwText(expanded);
+  }
+  // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
+  if (cat && cat.connected) {
+    cat.sendCwText(expanded);
+  }
+}
+
 function connectRemote() {
   disconnectRemote();
   if (!settings.enableRemote) return;
@@ -2929,6 +3003,7 @@ function connectRemote() {
 
   // CW config changes from phone (WPM)
   remoteServer.on('cw-config', ({ wpm }) => {
+    if (winKeyer && winKeyer.connected) winKeyer.setSpeed(wpm);
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
       smartSdr.setCwSpeed(wpm);
     }
@@ -2941,18 +3016,7 @@ function connectRemote() {
   // CW text macros/freeform from phone — route to radio
   remoteServer.on('cw-text', ({ text }) => {
     if (!text) return;
-    // Substitute macros
-    const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '')
-      .replace(/\{mycallsign\}/gi, settings.myCallsign || '');
-    console.log(`[Echo CAT] CW text: ${expanded}`);
-    // FlexRadio: use SmartSDR `cw send` command
-    if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
-      smartSdr.sendCwText(expanded);
-    }
-    // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
-    if (cat && cat.connected) {
-      cat.sendCwText(expanded);
-    }
+    sendCwTextToRadio(text);
   });
 
   // Phone requests to toggle remote CW on/off
@@ -3345,15 +3409,16 @@ function connectRemote() {
   // QRZ lookup from ECHOCAT (for CW macro {op_firstname})
   remoteServer.on('qrz-lookup', async ({ callsign }) => {
     if (!callsign || !qrz.configured || !settings.enableQrz) {
-      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '' });
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '', state: '' });
       return;
     }
     try {
       const data = await qrz.lookup(callsign);
       const fname = data ? (data.nickname || data.fname || '') : '';
-      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname });
+      const state = data ? (data.state || '') : '';
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname, state });
     } catch {
-      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '' });
+      remoteServer.sendToClient({ type: 'qrz-result', callsign, fname: '', state: '' });
     }
   });
 
@@ -4274,6 +4339,12 @@ function connectKeyer() {
   disconnectKeyer();
   if (!settings.enableCwKeyer) return;
 
+  // WinKeyer: hardware keyer handles its own iambic timing
+  if (settings.cwKeyerType === 'winkeyer') {
+    connectWinKeyer();
+    return;
+  }
+
   // IambicKeyer generates elements; raw key events sent directly to SmartSDR
   // via `cw key 0|1` + MOX control. Preserves operator's exact fist/timing.
   keyer = new IambicKeyer();
@@ -4315,6 +4386,7 @@ function disconnectKeyer() {
     keyer.removeAllListeners();
     keyer = null;
   }
+  disconnectWinKeyer();
   if (smartSdr) {
     if (smartSdr.connected) smartSdr.cwStop();
     smartSdr.setNeedsCw(false);
@@ -7837,9 +7909,13 @@ app.whenReady().then(() => {
     const iconChanged = has('lightIcon') && newSettings.lightIcon !== settings.lightIcon;
 
     const cwKeyerChanged = (has('enableCwKeyer') && newSettings.enableCwKeyer !== settings.enableCwKeyer) ||
+      (has('cwKeyerType') && newSettings.cwKeyerType !== settings.cwKeyerType) ||
       (has('cwKeyerMode') && newSettings.cwKeyerMode !== settings.cwKeyerMode) ||
       (has('cwWpm') && newSettings.cwWpm !== settings.cwWpm) ||
-      (has('cwSwapPaddles') && newSettings.cwSwapPaddles !== settings.cwSwapPaddles);
+      (has('cwSwapPaddles') && newSettings.cwSwapPaddles !== settings.cwSwapPaddles) ||
+      (has('winKeyerPort') && newSettings.winKeyerPort !== settings.winKeyerPort) ||
+      (has('wkPttLeadIn') && newSettings.wkPttLeadIn !== settings.wkPttLeadIn) ||
+      (has('wkPttTail') && newSettings.wkPttTail !== settings.wkPttTail);
 
     const activatorStateChanged = (has('appMode') && newSettings.appMode !== settings.appMode) ||
       (has('activatorParkRefs') && JSON.stringify(newSettings.activatorParkRefs) !== JSON.stringify(settings.activatorParkRefs));
@@ -9033,9 +9109,21 @@ app.whenReady().then(() => {
   });
   ipcMain.on('cw-set-wpm', (_e, wpm) => {
     if (keyer) keyer.setWpm(wpm);
+    if (winKeyer && winKeyer.connected) winKeyer.setSpeed(wpm);
     if (smartSdr && smartSdr.connected) smartSdr.setCwSpeed(wpm);
   });
   ipcMain.on('cw-stop', () => {
+    if (keyer) keyer.stop();
+    if (winKeyer && winKeyer.connected) winKeyer.cancelText();
+    if (smartSdr && smartSdr.connected) smartSdr.cwStop();
+  });
+  // Desktop CW text sending (macros)
+  ipcMain.on('send-cw-text', (_e, text) => {
+    sendCwTextToRadio(text);
+  });
+  // Desktop CW cancel / abort
+  ipcMain.on('cw-cancel', () => {
+    if (winKeyer && winKeyer.connected) winKeyer.cancelText();
     if (keyer) keyer.stop();
     if (smartSdr && smartSdr.connected) smartSdr.cwStop();
   });

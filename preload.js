@@ -140,6 +140,10 @@ contextBridge.exposeInMainWorld('api', {
   cwPaddleDah: (pressed) => ipcRenderer.send('cw-paddle-dah', pressed),
   cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),
   cwStop: () => ipcRenderer.send('cw-stop'),
+  sendCwText: (text) => ipcRenderer.send('send-cw-text', text),
+  cwCancel: () => ipcRenderer.send('cw-cancel'),
+  onCwEcho: (cb) => ipcRenderer.on('cw-echo', (_e, data) => cb(data)),
+  onWinkeyerBusy: (cb) => ipcRenderer.on('winkeyer-busy', (_e, busy) => cb(busy)),
   // Activator mode — parks DB
   fetchParksDb: (prefix) => ipcRenderer.invoke('fetch-parks-db', prefix),
   searchParks: (query) => ipcRenderer.invoke('search-parks', query),

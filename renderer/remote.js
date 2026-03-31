@@ -104,6 +104,7 @@
   let tunedFreqKhz = '';
   let tunedCallsign = '';
   let tunedOpName = '';
+  let tunedState = '';
   let currentNb = false;
   let currentAtu = false;
   let currentVfo = 'A';
@@ -632,6 +633,7 @@
       case 'qrz-result':
         if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
           tunedOpName = msg.fname || '';
+          tunedState = msg.state || '';
         }
         break;
 
@@ -1264,8 +1266,9 @@
     if (mode) modeBadge.textContent = mode;
     tunedFreqKhz = freqKhz;
     tunedCallsign = callsign;
-    // Look up operator name from QRZ for CW macro {op_firstname}
+    // Look up operator name and state from QRZ for CW macros
     tunedOpName = '';
+    tunedState = '';
     if (callsign && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: callsign.toUpperCase().split('/')[0] }));
     }
@@ -4669,7 +4672,8 @@
     // Expand macros: {op_firstname} → operator name or "OM", {call} → tuned callsign
     var expanded = text
       .replace(/\{op_firstname\}/gi, tunedOpName || '')
-      .replace(/\{call\}/gi, tunedCallsign || '');
+      .replace(/\{call\}/gi, tunedCallsign || '')
+      .replace(/\{state\}/gi, tunedState || '');
     ws.send(JSON.stringify({ type: 'cw-text', text: expanded }));
     playCwTextSidetone(expanded);
   }

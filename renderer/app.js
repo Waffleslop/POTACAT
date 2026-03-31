@@ -566,6 +566,9 @@ const setTciMaxAge = document.getElementById('set-tci-max-age');
 // CW Keyer
 const setEnableCwKeyer = document.getElementById('set-enable-cw-keyer');
 const cwKeyerConfig = document.getElementById('cw-keyer-config');
+const setCwKeyerType = document.getElementById('set-cw-keyer-type');
+const cwMidiConfig = document.getElementById('cw-midi-config');
+const cwWinkeyerConfig = document.getElementById('cw-winkeyer-config');
 const setCwKeyerMode = document.getElementById('set-cw-keyer-mode');
 const setCwWpm = document.getElementById('set-cw-wpm');
 const setCwSwapPaddles = document.getElementById('set-cw-swap-paddles');
@@ -575,11 +578,16 @@ const setCwMidiDitNote = document.getElementById('set-cw-midi-dit-note');
 const setCwMidiDahNote = document.getElementById('set-cw-midi-dah-note');
 const cwLearnDitBtn = document.getElementById('cw-learn-dit-btn');
 const cwLearnDahBtn = document.getElementById('cw-learn-dah-btn');
+const setWinKeyerPort = document.getElementById('set-winkeyer-port');
+const winkeyerVersionEl = document.getElementById('winkeyer-version');
+const setWkPttLeadIn = document.getElementById('set-wk-ptt-leadin');
+const setWkPttTail = document.getElementById('set-wk-ptt-tail');
 const setCwSidetone = document.getElementById('set-cw-sidetone');
 const setCwSidetonePitch = document.getElementById('set-cw-sidetone-pitch');
 const setCwSidetoneVolume = document.getElementById('set-cw-sidetone-volume');
 const cwSidetoneVolumeLabel = document.getElementById('cw-sidetone-volume-label');
 const cwKeyerStatusEl = document.getElementById('cw-keyer-status');
+const cwMacroEditorEl = document.getElementById('cw-macro-editor');
 // ECHOCAT
 const setEnableRemote = document.getElementById('set-enable-remote');
 const remoteConfig = document.getElementById('remote-config');
@@ -3016,9 +3024,64 @@ async function populateRemoteURLs() {
 setEnableCwKeyer.addEventListener('change', () => {
   cwKeyerConfig.classList.toggle('hidden', !setEnableCwKeyer.checked);
   if (setEnableCwKeyer.checked) {
+    updateCwKeyerTypeVisibility();
+    if (setCwKeyerType.value !== 'winkeyer') {
+      populateMidiDevices().then(() => connectMidiDevice(setCwMidiDevice.value));
+    }
+  }
+});
+setCwKeyerType.addEventListener('change', () => {
+  updateCwKeyerTypeVisibility();
+  if (setCwKeyerType.value === 'winkeyer') {
+    populateWinKeyerPorts();
+  } else {
     populateMidiDevices().then(() => connectMidiDevice(setCwMidiDevice.value));
   }
 });
+function updateCwKeyerTypeVisibility() {
+  const isWk = setCwKeyerType.value === 'winkeyer';
+  cwMidiConfig.classList.toggle('hidden', isWk);
+  cwWinkeyerConfig.classList.toggle('hidden', !isWk);
+}
+async function populateWinKeyerPorts() {
+  const ports = await window.api.listPorts();
+  setWinKeyerPort.innerHTML = '<option value="">(select COM port)</option>';
+  ports.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.path;
+    opt.textContent = p.path + (p.manufacturer ? ' — ' + p.manufacturer : '');
+    setWinKeyerPort.appendChild(opt);
+  });
+}
+
+// CW Macro editor
+const DEFAULT_CW_MACROS = [
+  { label: 'CQ', text: 'CQ CQ CQ DE {MYCALL} {MYCALL} K' },
+  { label: '599', text: '{call} UR 599 {state} BK' },
+  { label: '73', text: '{call} TNX {op_firstname} 73 DE {MYCALL} E E' },
+  { label: 'AGN', text: 'AGN AGN PSE' },
+  { label: 'TU', text: 'TU DE {MYCALL} K' },
+];
+function renderCwMacroEditor(macros) {
+  const list = macros && macros.length ? macros : DEFAULT_CW_MACROS;
+  cwMacroEditorEl.innerHTML = '';
+  list.forEach((m, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:4px;align-items:center;';
+    row.innerHTML = `<input type="text" class="cw-macro-label" data-idx="${i}" value="${(m.label || '').replace(/"/g, '&quot;')}" style="width:50px;font-size:11px;padding:2px 4px;" maxlength="6" placeholder="F${i + 1}">` +
+      `<input type="text" class="cw-macro-text" data-idx="${i}" value="${(m.text || '').replace(/"/g, '&quot;')}" style="flex:1;font-size:11px;padding:2px 4px;font-family:monospace;" placeholder="CW text...">`;
+    cwMacroEditorEl.appendChild(row);
+  });
+}
+function readCwMacroEditor() {
+  const labels = cwMacroEditorEl.querySelectorAll('.cw-macro-label');
+  const texts = cwMacroEditorEl.querySelectorAll('.cw-macro-text');
+  const macros = [];
+  labels.forEach((el, i) => {
+    macros.push({ label: el.value.trim(), text: texts[i] ? texts[i].value : '' });
+  });
+  return macros.length ? macros : null;
+}
 
 // Logging checkbox toggles logging config visibility
 setEnableLogging.addEventListener('change', () => {
@@ -7005,21 +7068,32 @@ async function openSettingsDialog(tab) {
   tciConfig.classList.toggle('hidden', !s.tciSpots);
   // CW Keyer
   setEnableCwKeyer.checked = s.enableCwKeyer === true;
+  setCwKeyerType.value = s.cwKeyerType || 'midi';
   setCwKeyerMode.value = s.cwKeyerMode || 'iambicB';
   setCwWpm.value = s.cwWpm || 20;
   setCwSwapPaddles.checked = s.cwSwapPaddles === true;
   setCwMidiDitNote.value = s.cwMidiDitNote != null ? s.cwMidiDitNote : 20;
   setCwMidiDahNote.value = s.cwMidiDahNote != null ? s.cwMidiDahNote : 21;
+  setWkPttLeadIn.value = s.wkPttLeadIn || 0;
+  setWkPttTail.value = s.wkPttTail || 0;
   setCwSidetone.checked = s.cwSidetone === true;
   setCwSidetonePitch.value = s.cwSidetonePitch || 600;
   setCwSidetoneVolume.value = s.cwSidetoneVolume != null ? s.cwSidetoneVolume : 30;
   cwSidetoneVolumeLabel.textContent = setCwSidetoneVolume.value + '%';
   cwKeyerConfig.classList.toggle('hidden', !s.enableCwKeyer);
+  updateCwKeyerTypeVisibility();
+  renderCwMacroEditor(s.cwMacros);
   if (s.enableCwKeyer) {
-    populateMidiDevices().then(() => {
-      if (s.cwMidiDevice) setCwMidiDevice.value = s.cwMidiDevice;
-      connectMidiDevice(setCwMidiDevice.value);
-    });
+    if (s.cwKeyerType === 'winkeyer') {
+      populateWinKeyerPorts().then(() => {
+        if (s.winKeyerPort) setWinKeyerPort.value = s.winKeyerPort;
+      });
+    } else {
+      populateMidiDevices().then(() => {
+        if (s.cwMidiDevice) setCwMidiDevice.value = s.cwMidiDevice;
+        connectMidiDevice(setCwMidiDevice.value);
+      });
+    }
   }
   // ECHOCAT
   enableRemote = s.enableRemote === true;
@@ -7227,15 +7301,20 @@ settingsSave.addEventListener('click', async () => {
   // Audio comes from the active rig (resolved after selectedRig below)
   // CW Keyer
   const cwKeyerEnabled = setEnableCwKeyer.checked;
+  const cwKeyerTypeVal = setCwKeyerType.value;
   const cwKeyerModeVal = setCwKeyerMode.value;
   const cwWpmVal = parseInt(setCwWpm.value, 10) || 20;
   const cwSwapPaddlesVal = setCwSwapPaddles.checked;
   const cwMidiDeviceVal = setCwMidiDevice.value;
   const cwMidiDitNoteVal = parseInt(setCwMidiDitNote.value, 10);
   const cwMidiDahNoteVal = parseInt(setCwMidiDahNote.value, 10);
+  const winKeyerPortVal = setWinKeyerPort.value || '';
+  const wkPttLeadInVal = parseInt(setWkPttLeadIn.value, 10) || 0;
+  const wkPttTailVal = parseInt(setWkPttTail.value, 10) || 0;
   const cwSidetoneVal = setCwSidetone.checked;
   const cwSidetonePitchVal = parseInt(setCwSidetonePitch.value, 10) || 600;
   const cwSidetoneVolumeVal = parseInt(setCwSidetoneVolume.value, 10);
+  const cwMacrosVal = readCwMacroEditor();
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
   const loggingEnabled = setEnableLogging.checked;
@@ -7355,15 +7434,20 @@ settingsSave.addEventListener('click', async () => {
     tciPort: tciPortVal,
     tciMaxAge: tciMaxAgeVal,
     enableCwKeyer: cwKeyerEnabled,
+    cwKeyerType: cwKeyerTypeVal,
     cwKeyerMode: cwKeyerModeVal,
     cwWpm: cwWpmVal,
     cwSwapPaddles: cwSwapPaddlesVal,
     cwMidiDevice: cwMidiDeviceVal,
     cwMidiDitNote: cwMidiDitNoteVal,
     cwMidiDahNote: cwMidiDahNoteVal,
+    winKeyerPort: winKeyerPortVal,
+    wkPttLeadIn: wkPttLeadInVal,
+    wkPttTail: wkPttTailVal,
     cwSidetone: cwSidetoneVal,
     cwSidetonePitch: cwSidetonePitchVal,
     cwSidetoneVolume: cwSidetoneVolumeVal,
+    cwMacros: cwMacrosVal,
     enableRemote: remoteEnabled,
     remotePort: remotePortVal,
     remoteRequireToken: remoteRequireTokenVal,
@@ -10081,16 +10165,99 @@ window.api.onCwKey(({ down }) => {
 
 // CW keyer status
 const cwTextDisplay = document.getElementById('cw-text-display');
-window.api.onCwKeyerStatus(({ enabled, cwAuth }) => {
+window.api.onCwKeyerStatus(({ enabled, cwAuth, winkeyer, version }) => {
   cwKeyerStatusEl.classList.toggle('hidden', !enabled);
   cwTextDisplay.classList.toggle('hidden', !enabled);
+  updateCwMacroBar(enabled);
   if (!enabled) { cwTextDisplay.textContent = ''; closeCwPopover(); }
-  if (cwAuth) {
+  if (winkeyer) {
+    cwKeyerStatusEl.textContent = 'WK';
+    cwKeyerStatusEl.title = `WinKeyer v${version || '?'} connected`;
+    cwKeyerStatusEl.style.background = '#b8860b';
+    if (winkeyerVersionEl) winkeyerVersionEl.textContent = `WinKeyer v${version || '?'} connected`;
+  } else if (cwAuth) {
     cwKeyerStatusEl.textContent = cwAuth === 'bind' ? 'CW' : 'CW (?)';
     cwKeyerStatusEl.title = `CW keyer active — ${cwAuth === 'bind' ? 'bound to SmartSDR' : 'unbound (CW may still work)'}`;
     cwKeyerStatusEl.style.background = '#b8860b';
   }
 });
+// WinKeyer echo — show sent characters in CW text display
+window.api.onCwEcho(({ char }) => {
+  if (cwTextDisplay) {
+    cwTextDisplay.textContent += char;
+    // Keep display from growing too long
+    if (cwTextDisplay.textContent.length > 60) {
+      cwTextDisplay.textContent = cwTextDisplay.textContent.substring(cwTextDisplay.textContent.length - 40);
+    }
+  }
+});
+
+// --- Desktop CW Macro Bar ---
+const cwMacroBar = document.getElementById('cw-macro-bar');
+const cwMacroBtns = document.getElementById('cw-macro-btns');
+const cwMacroInput = document.getElementById('cw-macro-input');
+const cwMacroSendBtn = document.getElementById('cw-macro-send');
+const cwMacroCancelBtn = document.getElementById('cw-macro-cancel');
+
+function updateCwMacroBar(enabled) {
+  if (!cwMacroBar) return;
+  cwMacroBar.classList.toggle('hidden', !enabled);
+  if (!enabled) return;
+  // Render macro buttons from settings or defaults
+  cwMacroBtns.innerHTML = '';
+  const macros = readCwMacroEditor();
+  const list = macros && macros.length ? macros : DEFAULT_CW_MACROS;
+  list.forEach((m) => {
+    if (!m.label && !m.text) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = m.label || '?';
+    btn.title = m.text;
+    btn.style.cssText = 'font-size:10px;padding:1px 6px;background:#333;color:#ddd;border:1px solid #555;border-radius:3px;cursor:pointer;';
+    btn.addEventListener('click', () => {
+      // Expand client-side macros and send
+      const text = expandDesktopCwMacros(m.text);
+      window.api.sendCwText(text);
+    });
+    cwMacroBtns.appendChild(btn);
+  });
+}
+function expandDesktopCwMacros(text) {
+  // {call} and {op_firstname} use whatever is in the log callsign field or the last tuned spot
+  const logCall = document.getElementById('log-callsign');
+  const call = (logCall && logCall.value) ? logCall.value.trim().toUpperCase() : '';
+  return text
+    .replace(/\{call\}/gi, call)
+    .replace(/\{op_firstname\}/gi, '') // name not available on desktop without QRZ lookup
+    .replace(/\{state\}/gi, '');       // state not available on desktop without QRZ lookup
+}
+if (cwMacroSendBtn) {
+  cwMacroSendBtn.addEventListener('click', () => {
+    const text = cwMacroInput.value.trim();
+    if (text) {
+      window.api.sendCwText(expandDesktopCwMacros(text));
+      cwMacroInput.value = '';
+    }
+  });
+}
+if (cwMacroCancelBtn) {
+  cwMacroCancelBtn.addEventListener('click', () => {
+    window.api.cwCancel();
+    cwMacroInput.value = '';
+    if (cwTextDisplay) cwTextDisplay.textContent = '';
+  });
+}
+if (cwMacroInput) {
+  cwMacroInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      cwMacroSendBtn.click();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cwMacroCancelBtn.click();
+    }
+  });
+}
 
 // --- CW Popover (volume/WPM dropdown from CW status pill) ---
 const cwPopover = document.getElementById('cw-popover');
