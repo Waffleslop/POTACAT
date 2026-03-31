@@ -2408,7 +2408,7 @@
       audioConnectBtn.textContent = 'Connecting...';
       await startAudio();
       if (micReady && !audioEnabled) {
-        audioConnectBtn.textContent = '✓ Mic ready — Tap once more to go live';
+        audioConnectBtn.textContent = '✓ Mic — Tap once more';
       }
     }
     if (micReady && !audioEnabled) {

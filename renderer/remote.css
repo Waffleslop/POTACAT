@@ -665,19 +665,22 @@ html, body {
 
 /* --- Filter Toolbar --- */
 #filter-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
   flex-shrink: 0;
   background: var(--bg);
   position: relative;
   z-index: 200;
+  padding: 0;
+}
+#filter-toolbar-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
-#filter-toolbar::-webkit-scrollbar { display: none; }
+#filter-toolbar-scroll::-webkit-scrollbar { display: none; }
 
 /* --- Dropdown Container --- */
 .rc-dropdown { position: relative; flex-shrink: 0; }
