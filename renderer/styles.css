@@ -629,6 +629,72 @@ button:hover {
 .meter-label { color: #888; font-weight: 600; min-width: 28px; text-align: right; }
 .meter-val { color: #ccc; min-width: 42px; text-align: right; font-weight: 700; }
 
+/* Floating CW Macro box — draggable */
+.cw-macro-box {
+  position: absolute;
+  bottom: 46px;
+  left: 8px;
+  z-index: 100;
+  background: rgba(22, 33, 62, 0.92);
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  backdrop-filter: blur(4px);
+  cursor: grab;
+  user-select: none;
+}
+.cw-macro-box.dragging { cursor: grabbing; opacity: 0.8; }
+.cw-macro-box.hidden { display: none; }
+.cw-macro-row { display: flex; align-items: center; gap: 4px; margin: 2px 0; flex-wrap: wrap; }
+.cw-macro-btns { display: flex; gap: 3px; flex-wrap: wrap; }
+.cw-macro-btns button {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--header);
+  color: var(--text-secondary);
+  border: 1px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: monospace;
+}
+.cw-macro-btns button:hover { border-color: var(--blue); color: var(--text); }
+.cw-macro-btns button:active { background: var(--bg); border-color: var(--blue); color: var(--blue); }
+.cw-macro-input {
+  width: 110px;
+  font-size: 11px;
+  padding: 3px 6px;
+  font-family: monospace;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #444;
+  border-radius: 4px;
+}
+.cw-macro-input:focus { border-color: var(--blue); outline: none; }
+.cw-macro-tx {
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--header);
+  color: var(--pota);
+  border: 1px solid var(--pota);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cw-macro-tx:hover { background: var(--pota); color: #fff; }
+.cw-macro-esc {
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--header);
+  color: var(--accent-red);
+  border: 1px solid var(--accent-red);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cw-macro-esc:hover { background: var(--accent-red); color: #fff; }
+
 .status.disconnected {
   background: var(--tint-red);
   color: var(--accent-red);

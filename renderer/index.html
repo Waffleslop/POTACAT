@@ -144,6 +144,7 @@
           <div class="spots-panel-divider"></div>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-hide-worked-parks"> Hide Worked Parks</label>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-show-meter" checked> S-Meter / SWR</label>
+          <label class="spots-toggle compact"><input type="checkbox" id="quick-show-cw-macros"> CW Macros</label>
           <div id="quick-rotor-divider" class="spots-panel-divider hidden"></div>
           <label id="quick-rotor-label" class="spots-toggle compact hidden"><input type="checkbox" id="quick-rotor"> PSTRotator</label>
           <div class="spots-panel-divider"></div>
@@ -178,13 +179,6 @@
           <label>WPM</label>
           <input type="number" id="cw-popover-wpm" min="5" max="99" value="20" style="width:50px;">
         </div>
-      </div>
-      <!-- CW Macro Bar (desktop) -->
-      <div id="cw-macro-bar" class="hidden" style="display:inline-flex;gap:3px;margin-left:6px;align-items:center;">
-        <div id="cw-macro-btns" style="display:flex;gap:2px;"></div>
-        <input type="text" id="cw-macro-input" placeholder="CW..." style="width:120px;font-size:11px;padding:2px 4px;font-family:monospace;background:#222;color:#eee;border:1px solid #555;border-radius:3px;" spellcheck="false">
-        <button type="button" id="cw-macro-send" style="font-size:10px;padding:1px 6px;background:#b8860b;color:#fff;border:none;border-radius:3px;cursor:pointer;">TX</button>
-        <button type="button" id="cw-macro-cancel" style="font-size:10px;padding:1px 6px;background:#c33;color:#fff;border:none;border-radius:3px;cursor:pointer;">ESC</button>
       </div>
       <span id="rig-panel-btn" class="status hidden" style="background:#2a6e4e;color:#fff;cursor:pointer;">Rig</span>
       <div id="rig-popover" class="rig-popover hidden">
@@ -402,6 +396,17 @@
             <span class="meter-label">SWR</span>
             <canvas id="swr-bar" width="120" height="14"></canvas>
             <span id="swr-text" class="meter-val">—</span>
+          </div>
+        </div>
+        <!-- Floating CW Macro box — draggable -->
+        <div id="cw-macro-bar" class="cw-macro-box hidden">
+          <div class="cw-macro-row">
+            <div id="cw-macro-btns" class="cw-macro-btns"></div>
+          </div>
+          <div class="cw-macro-row">
+            <input type="text" id="cw-macro-input" class="cw-macro-input" placeholder="CW text..." spellcheck="false">
+            <button type="button" id="cw-macro-send" class="cw-macro-tx">TX</button>
+            <button type="button" id="cw-macro-cancel" class="cw-macro-esc">ESC</button>
           </div>
         </div>
         <div id="table-scroll-wrap">

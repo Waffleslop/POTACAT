@@ -10207,18 +10207,65 @@ window.api.onCwEcho(({ char }) => {
   }
 });
 
-// --- Desktop CW Macro Bar ---
+// --- Floating CW Macro Box (draggable, like meter box) ---
 const cwMacroBar = document.getElementById('cw-macro-bar');
 const cwMacroBtns = document.getElementById('cw-macro-btns');
 const cwMacroInput = document.getElementById('cw-macro-input');
 const cwMacroSendBtn = document.getElementById('cw-macro-send');
 const cwMacroCancelBtn = document.getElementById('cw-macro-cancel');
+const quickShowCwMacros = document.getElementById('quick-show-cw-macros');
+let cwMacroBoxVisible = localStorage.getItem('cwMacroBoxVisible') === 'true';
+
+// Draggable CW macro box
+(function() {
+  if (!cwMacroBar) return;
+  let dragging = false, startX, startY, startLeft, startTop;
+  const saved = localStorage.getItem('cwMacroBoxPos');
+  if (saved) {
+    try {
+      const pos = JSON.parse(saved);
+      cwMacroBar.style.left = pos.left + 'px';
+      cwMacroBar.style.top = pos.top + 'px';
+      cwMacroBar.style.right = 'auto';
+      cwMacroBar.style.bottom = 'auto';
+    } catch {}
+  }
+  cwMacroBar.addEventListener('mousedown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+    dragging = true;
+    cwMacroBar.classList.add('dragging');
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = cwMacroBar.getBoundingClientRect();
+    const parentRect = cwMacroBar.parentElement.getBoundingClientRect();
+    startLeft = rect.left - parentRect.left;
+    startTop = rect.top - parentRect.top;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    cwMacroBar.style.left = (startLeft + e.clientX - startX) + 'px';
+    cwMacroBar.style.top = (startTop + e.clientY - startY) + 'px';
+    cwMacroBar.style.right = 'auto';
+    cwMacroBar.style.bottom = 'auto';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    cwMacroBar.classList.remove('dragging');
+    localStorage.setItem('cwMacroBoxPos', JSON.stringify({
+      left: parseInt(cwMacroBar.style.left, 10),
+      top: parseInt(cwMacroBar.style.top, 10),
+    }));
+  });
+})();
 
 function updateCwMacroBar(enabled) {
   if (!cwMacroBar) return;
-  cwMacroBar.classList.toggle('hidden', !enabled);
-  if (!enabled) return;
-  // Render macro buttons from settings or defaults
+  const show = enabled && cwMacroBoxVisible;
+  cwMacroBar.classList.toggle('hidden', !show);
+  if (quickShowCwMacros) quickShowCwMacros.checked = cwMacroBoxVisible;
+  if (!show) return;
   cwMacroBtns.innerHTML = '';
   const macros = readCwMacroEditor();
   const list = macros && macros.length ? macros : DEFAULT_CW_MACROS;
@@ -10228,23 +10275,28 @@ function updateCwMacroBar(enabled) {
     btn.type = 'button';
     btn.textContent = m.label || '?';
     btn.title = m.text;
-    btn.style.cssText = 'font-size:10px;padding:1px 6px;background:#333;color:#ddd;border:1px solid #555;border-radius:3px;cursor:pointer;';
     btn.addEventListener('click', () => {
-      // Expand client-side macros and send
-      const text = expandDesktopCwMacros(m.text);
-      window.api.sendCwText(text);
+      window.api.sendCwText(expandDesktopCwMacros(m.text));
     });
     cwMacroBtns.appendChild(btn);
   });
 }
 function expandDesktopCwMacros(text) {
-  // {call} and {op_firstname} use whatever is in the log callsign field or the last tuned spot
   const logCall = document.getElementById('log-callsign');
   const call = (logCall && logCall.value) ? logCall.value.trim().toUpperCase() : '';
   return text
     .replace(/\{call\}/gi, call)
-    .replace(/\{op_firstname\}/gi, '') // name not available on desktop without QRZ lookup
-    .replace(/\{state\}/gi, '');       // state not available on desktop without QRZ lookup
+    .replace(/\{op_firstname\}/gi, '')
+    .replace(/\{state\}/gi, '');
+}
+// Quick Settings toggle
+if (quickShowCwMacros) {
+  quickShowCwMacros.checked = cwMacroBoxVisible;
+  quickShowCwMacros.addEventListener('change', () => {
+    cwMacroBoxVisible = quickShowCwMacros.checked;
+    localStorage.setItem('cwMacroBoxVisible', cwMacroBoxVisible);
+    updateCwMacroBar(!!setEnableCwKeyer.checked);
+  });
 }
 if (cwMacroSendBtn) {
   cwMacroSendBtn.addEventListener('click', () => {
