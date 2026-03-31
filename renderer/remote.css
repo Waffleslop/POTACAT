@@ -666,15 +666,18 @@ html, body {
 /* --- Filter Toolbar --- */
 #filter-toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: 6px;
   padding: 6px 8px;
   flex-shrink: 0;
   background: var(--bg);
   position: relative;
   z-index: 200;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+#filter-toolbar::-webkit-scrollbar { display: none; }
 
 /* --- Dropdown Container --- */
 .rc-dropdown { position: relative; flex-shrink: 0; }
@@ -695,9 +698,7 @@ html, body {
 
 .rc-dropdown-menu, .rc-spots-panel {
   display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
+  position: fixed;
   margin-top: 4px;
   background: var(--bg-card);
   border: 1px solid #444;
