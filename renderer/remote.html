@@ -274,7 +274,7 @@
             <button type="button" class="rc-btn rc-toggle" id="so-atu-auto-btn">ATU Auto</button>
           </div>
           <div class="so-toggle-group">
-            <button type="button" class="rc-btn rc-toggle" id="so-tune-click-btn">Tune Click</button>
+            <button type="button" class="rc-btn rc-toggle" id="so-tune-click-btn" title="Tap a spot to tune the radio">Tap to Tune</button>
           </div>
         </div>
 
@@ -434,19 +434,23 @@
           <div class="so-row">
             <span class="so-label">Status: <span id="echo-cloud-sub-status" style="color:#4ecca3;">--</span></span>
           </div>
-          <div class="so-row" style="gap:6px;">
-            <button type="button" id="echo-cloud-sync-btn" class="so-step-btn" style="flex:1;padding:6px;">Sync Now</button>
-            <button type="button" id="echo-cloud-upload-btn" class="so-step-btn" style="flex:1;padding:6px;">Upload Log</button>
+          <div style="margin-top:6px;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" id="echo-cloud-sync-btn" class="so-step-btn" style="flex:1;min-width:100px;padding:6px;">Sync Now</button>
+              <button type="button" id="echo-cloud-upload-btn" class="so-step-btn" style="flex:1;min-width:100px;padding:6px;" title="Bulk upload your ADIF log to the cloud">Upload Log</button>
+            </div>
+            <div id="echo-cloud-sync-interval" style="font-size:11px;opacity:0.5;margin-top:4px;">Auto-sync every 5 min</div>
           </div>
           <div id="echo-cloud-sync-msg" style="font-size:11px;opacity:0.6;margin-top:4px;" class="hidden"></div>
-          <div class="so-row" style="margin-top:6px;">
-            <label class="so-label" style="flex:1;">BMAC Email <span style="font-size:10px;opacity:0.5;">(if different)</span>
-              <input type="email" id="echo-cloud-bmac-email" placeholder="Leave blank if same" style="width:100%;margin-top:2px;">
-            </label>
-            <button type="button" id="echo-cloud-bmac-verify-btn" class="so-step-btn" style="padding:6px;margin-top:14px;">Verify</button>
+          <div style="margin-top:10px;">
+            <label class="so-label" style="display:block;font-size:12px;">Buy Me a Coffee email <span style="font-size:10px;opacity:0.5;">(if different from account)</span></label>
+            <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+              <input type="email" id="echo-cloud-bmac-email" placeholder="Leave blank if same" style="flex:1;min-width:140px;height:32px;padding:0 8px;font-size:13px;background:var(--bg-card);color:var(--text);border:1px solid #444;border-radius:6px;">
+              <button type="button" id="echo-cloud-bmac-verify-btn" class="so-step-btn" style="padding:6px 12px;height:32px;border-radius:6px;">Verify</button>
+            </div>
           </div>
-          <div class="so-row" style="margin-top:6px;">
-            <button type="button" id="echo-cloud-signout-btn" class="so-step-btn" style="padding:4px 10px;font-size:11px;opacity:0.6;">Sign Out</button>
+          <div style="margin-top:12px;text-align:center;">
+            <button type="button" id="echo-cloud-signout-btn" class="so-step-btn" style="padding:4px 14px;font-size:11px;opacity:0.6;border-radius:6px;">Sign Out</button>
           </div>
         </div>
 

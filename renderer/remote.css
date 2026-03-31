@@ -508,9 +508,12 @@ html, body {
 .so-controls { display: flex; align-items: center; gap: 4px; }
 .so-select {
   background: var(--bg-card); color: var(--text); border: 1px solid #444;
-  border-radius: 6px; height: 36px; font-size: 14px; padding: 0 8px;
+  border-radius: 6px; height: 36px; font-size: 14px; padding: 0 28px 0 8px;
   flex: 1; min-width: 0;
   -webkit-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
 }
 .so-toggles { display: flex; gap: 8px; flex-wrap: wrap; }
 .so-toggle-group { display: flex; gap: 4px; align-items: center; }
@@ -519,14 +522,15 @@ html, body {
 .so-slider-val { font-size: 13px; font-family: monospace; color: var(--text); min-width: 28px; text-align: right; }
 .so-stepper { display: flex; align-items: center; gap: 0; }
 .so-step-btn {
-  width: 36px; height: 36px;
-  font-size: 18px; font-weight: 600;
+  min-width: 36px; height: 36px;
+  font-size: 14px; font-weight: 600;
   background: var(--bg-card); color: var(--text);
-  border: 1px solid #444; cursor: pointer;
+  border: 1px solid #444; cursor: pointer; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
 }
-.so-step-btn:first-child { border-radius: 6px 0 0 6px; }
-.so-step-btn:last-child { border-radius: 0 6px 6px 0; }
+.so-stepper > .so-step-btn { width: 36px; font-size: 18px; border-radius: 0; }
+.so-stepper > .so-step-btn:first-child { border-radius: 6px 0 0 6px; }
+.so-stepper > .so-step-btn:last-child { border-radius: 0 6px 6px 0; }
 .so-step-btn:active { background: var(--bg-header); border-color: var(--pota); color: var(--pota); }
 .so-step-val {
   min-width: 52px; height: 36px;
