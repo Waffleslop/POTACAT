@@ -5866,7 +5866,6 @@
   }
 
   // Refresh cloud status when settings overlay is opened
-  var settingsOverlay = document.getElementById('settings-overlay');
   if (settingsOverlay) {
     new MutationObserver(function() {
       if (!settingsOverlay.classList.contains('hidden')) {
