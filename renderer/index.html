@@ -1334,6 +1334,19 @@
           <span class="help-text" style="display:block;margin-top:4px;">Set antenna position (1-8) for each band. Leave blank to skip switching on that band.</span>
         </div>
       </div>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-n1mm-udp"> N1MM+ RadioInfo UDP broadcast</label>
+      <div id="n1mm-udp-config" class="radio-sub hidden">
+        <span class="help-text" style="font-size:12px;">Broadcasts frequency/mode as N1MM+ RadioInfo XML via UDP. Used by band decoders (FreqEZ, MKII), antenna switches, and logging software.</span>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+          <label>Host:
+            <input type="text" id="set-n1mm-host" placeholder="127.0.0.1" value="127.0.0.1" style="width:140px;">
+          </label>
+          <label>Port:
+            <input type="number" id="set-n1mm-port" value="12060" min="1" max="65535" style="width:80px;">
+          </label>
+        </div>
+        <span class="help-text" style="display:block;margin-top:4px;">Default N1MM+ broadcast port is 12060. Check your device/software documentation for the correct port.</span>
+      </div>
     </fieldset>
     <!-- 7. Logging -->
     <fieldset class="source-toggles" data-settings-tab="logging">

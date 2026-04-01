@@ -247,6 +247,10 @@ const setRotorPort = document.getElementById('set-rotor-port');
 const setEnableAg = document.getElementById('set-enable-ag');
 const agConfig = document.getElementById('ag-config');
 const setAgHost = document.getElementById('set-ag-host');
+const setEnableN1mmUdp = document.getElementById('set-enable-n1mm-udp');
+const n1mmUdpConfig = document.getElementById('n1mm-udp-config');
+const setN1mmHost = document.getElementById('set-n1mm-host');
+const setN1mmPort = document.getElementById('set-n1mm-port');
 const setAgRadioPort = document.getElementById('set-ag-radio-port');
 const agBandMapEl = document.getElementById('ag-band-map');
 const agStatusEl = document.getElementById('ag-status');
@@ -2646,6 +2650,9 @@ setEnableRotor.addEventListener('change', () => {
 // Antenna Genius checkbox toggles config visibility
 setEnableAg.addEventListener('change', () => {
   agConfig.classList.toggle('hidden', !setEnableAg.checked);
+});
+setEnableN1mmUdp.addEventListener('change', () => {
+  n1mmUdpConfig.classList.toggle('hidden', !setEnableN1mmUdp.checked);
 });
 
 // Antenna Genius band map UI
@@ -6909,6 +6916,10 @@ async function openSettingsDialog(tab) {
   setAgRadioPort.value = s.agRadioPort || '1';
   buildAgBandMap(s.agBandMap || {});
   agConfig.classList.toggle('hidden', !s.enableAntennaGenius);
+  setEnableN1mmUdp.checked = s.enableN1mmUdp === true;
+  setN1mmHost.value = s.n1mmHost || '127.0.0.1';
+  setN1mmPort.value = s.n1mmPort || 12060;
+  n1mmUdpConfig.classList.toggle('hidden', !s.enableN1mmUdp);
   setEnableSplit.checked = s.enableSplit === true;
   setEnableAtu.checked = s.enableAtu === true;
   setVerboseLog.checked = s.verboseLog === true;
@@ -7276,6 +7287,9 @@ settingsSave.addEventListener('click', async () => {
   const agHostVal = setAgHost.value.trim();
   const agRadioPortVal = parseInt(setAgRadioPort.value, 10) || 1;
   const agBandMapVal = getAgBandMap();
+  const n1mmUdpEnabled = setEnableN1mmUdp.checked;
+  const n1mmHostVal = setN1mmHost.value.trim() || '127.0.0.1';
+  const n1mmPortVal = parseInt(setN1mmPort.value, 10) || 12060;
   const enableSplitEnabled = setEnableSplit.checked;
   const atuEnabled = setEnableAtu.checked;
   const verboseLogEnabled = setVerboseLog.checked;
@@ -7409,6 +7423,9 @@ settingsSave.addEventListener('click', async () => {
     agHost: agHostVal,
     agRadioPort: agRadioPortVal,
     agBandMap: agBandMapVal,
+    enableN1mmUdp: n1mmUdpEnabled,
+    n1mmHost: n1mmHostVal,
+    n1mmPort: n1mmPortVal,
     enableSplit: enableSplitEnabled,
     enableAtu: atuEnabled,
     verboseLog: verboseLogEnabled,

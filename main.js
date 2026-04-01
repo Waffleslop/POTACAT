@@ -524,6 +524,7 @@ function sendCatFrequency(hz) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   _currentFreqHz = hz;
   broadcastRemoteRadioStatus();
+  sendN1mmRadioInfo();
 }
 
 function sendCatMode(mode) {
@@ -532,6 +533,7 @@ function sendCatMode(mode) {
   // Mode confirmed by radio — clear suppress so ECHOCAT gets the real value
   _modeSuppressUntil = 0;
   broadcastRigState();
+  sendN1mmRadioInfo();
 }
 
 function sendCatPower(watts) {
@@ -596,6 +598,56 @@ function sendRotorBearing(azimuth) {
     if (err) sendCatLog(`Rotor UDP error: ${err.message}`);
   });
   sendCatLog(`Rotor → ${host}:${port} azimuth=${azimuth}°`);
+}
+
+// N1MM+ RadioInfo UDP broadcast — sends frequency/mode to band decoders, antenna switches, etc.
+let n1mmSocket = null;
+let _n1mmLastFreq = 0;
+let _n1mmLastMode = '';
+
+function sendN1mmRadioInfo() {
+  if (!settings.enableN1mmUdp) return;
+  const freq = _currentFreqHz;
+  const mode = _currentMode || '';
+  // Only send when freq or mode actually changed
+  if (freq === _n1mmLastFreq && mode === _n1mmLastMode) return;
+  _n1mmLastFreq = freq;
+  _n1mmLastMode = mode;
+
+  if (!n1mmSocket) n1mmSocket = dgram.createSocket('udp4');
+  const host = settings.n1mmHost || '127.0.0.1';
+  const port = settings.n1mmPort || 12060;
+  // Freq in N1MM+ format: Hz / 10 (14.074 MHz = 1407400)
+  const freqN1mm = Math.round(freq / 10);
+  const call = settings.myCallsign || '';
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<RadioInfo>
+<app>POTACAT</app>
+<StationName></StationName>
+<RadioNr>1</RadioNr>
+<Freq>${freqN1mm}</Freq>
+<TXFreq>${freqN1mm}</TXFreq>
+<Mode>${mode}</Mode>
+<OpCall>${call}</OpCall>
+<IsRunning>False</IsRunning>
+<FocusEntry>0</FocusEntry>
+<EntryWindowHwnd>0</EntryWindowHwnd>
+<Antenna>0</Antenna>
+<Rotors></Rotors>
+<FocusRadioNr>1</FocusRadioNr>
+<IsStereo>False</IsStereo>
+<IsSplit>False</IsSplit>
+<ActiveRadioNr>1</ActiveRadioNr>
+<IsTransmitting>False</IsTransmitting>
+<FunctionKeyCaption></FunctionKeyCaption>
+<RadioName></RadioName>
+<AuxAntSelected>-1</AuxAntSelected>
+<AuxAntSelectedName></AuxAntSelectedName>
+</RadioInfo>`;
+  const msg = Buffer.from(xml);
+  n1mmSocket.send(msg, port, host, (err) => {
+    if (err) sendCatLog(`N1MM UDP error: ${err.message}`);
+  });
 }
 
 let _connectCatPending = false;
