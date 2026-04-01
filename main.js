@@ -4510,19 +4510,33 @@ function processPotaSpots(raw) {
 async function processSotaSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
 
-  // Batch-fetch summit coordinates (cached across refreshes)
-  await fetchSummitCoordsBatch(raw);
+  // New API: summitCode is full ref "W7A/PE-097", split into assoc/code for coord lookup
+  const spotsWithSplit = raw.map(s => {
+    const ref = s.summitCode || '';
+    const slashIdx = ref.indexOf('/');
+    return {
+      ...s,
+      _ref: ref,
+      associationCode: slashIdx > 0 ? ref.slice(0, slashIdx) : '',
+      _summitCode: slashIdx > 0 ? ref.slice(slashIdx + 1) : ref,
+    };
+  });
 
-  const all = raw.filter((s) => {
+  // Batch-fetch summit coordinates (cached across refreshes)
+  await fetchSummitCoordsBatch(spotsWithSplit.map(s => ({
+    associationCode: s.associationCode,
+    summitCode: s._summitCode,
+  })));
+
+  const all = spotsWithSplit.filter((s) => {
     // Skip spots with no frequency (pre-announced activations with no QRG)
     const f = parseFloat(s.frequency);
     return !isNaN(f) && f > 0;
   }).map((s) => {
     const freqMHz = parseFloat(s.frequency);
     const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz → convert to kHz
-    const assoc = s.associationCode || '';
-    const code = s.summitCode || '';
-    const ref = assoc && code ? assoc + '/' + code : '';
+    const ref = s._ref;
+    const assoc = s.associationCode;
 
     // Look up cached summit coordinates
     const coords = ref ? summitCache.get(ref) : null;
@@ -4554,7 +4568,7 @@ async function processSotaSpots(raw) {
       freqMHz,
       mode: (s.mode || '').toUpperCase(),
       reference: ref,
-      parkName: s.summitDetails || '',
+      parkName: s.summitName || s.summitDetails || '',
       locationDesc: getAssociationName(assoc),
       distance,
       bearing: spotBearing,
