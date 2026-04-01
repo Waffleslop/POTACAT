@@ -4386,6 +4386,11 @@ function destroyRemoteAudioWindow() {
     try { remoteAudioWin.webContents.send('remote-audio-stop'); } catch { /* may be destroyed */ }
     try { remoteAudioWin.close(); } catch { /* ignore */ }
   }
+  // After ECHOCAT releases the audio device, tell renderer to restart JTCAT
+  // audio capture if it was running — the shared device may need re-acquisition
+  setTimeout(() => {
+    if (win && !win.isDestroyed()) win.webContents.send('restart-jtcat-audio');
+  }, 500);
 }
 
 let lastTciPush = 0;

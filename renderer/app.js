@@ -13851,6 +13851,15 @@ function stopJtcatAudio() {
   }
 }
 
+// Restart JTCAT audio after ECHOCAT releases the shared audio device
+window.api.onRestartJtcatAudio(() => {
+  if (jtcatRunning && !jtcatRemoteActive && !jtcatPopoutOpen) {
+    console.log('[JTCAT] Restarting audio after ECHOCAT teardown');
+    stopJtcatAudio();
+    startJtcatAudio();
+  }
+});
+
 function startJtcatView() {
   if (jtcatRunning) return;
   jtcatRunning = true;

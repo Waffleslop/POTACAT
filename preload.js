@@ -205,6 +205,7 @@ contextBridge.exposeInMainWorld('api', {
   onRemoteTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
   onRemoteStatus: (cb) => ipcRenderer.on('remote-status', (_e, s) => cb(s)),
   onReloadPrefs: (cb) => ipcRenderer.on('reload-prefs', () => cb()),
+  onRestartJtcatAudio: (cb) => ipcRenderer.on('restart-jtcat-audio', () => cb()),
   // Cloud Sync
   qrzDownloadLogbook: () => ipcRenderer.invoke('qrz-download-logbook'),
   cloudGoogleSignIn: () => ipcRenderer.invoke('cloud-google-signin'),
