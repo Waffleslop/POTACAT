@@ -736,6 +736,13 @@ async function connectCat() {
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
   }
+
+  // Apply user command overrides from settings (Kenwood/Yaesu codec)
+  if (cat && settings.rigCommandOverrides) {
+    const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+    const overrides = activeRig?.model && settings.rigCommandOverrides[activeRig.model];
+    if (overrides) cat.applyCommandOverrides(overrides);
+  }
   } finally {
     _connectCatPending = false;
   }
@@ -2488,6 +2495,13 @@ function connectSmartSdr() {
   smartSdr = new SmartSdrClient();
   smartSdr.on('error', (err) => {
     console.error('SmartSDR:', err.message);
+    sendCatLog(`SmartSDR API error: ${err.message}`);
+  });
+  smartSdr.on('connected', () => {
+    sendCatLog('SmartSDR API connected (port 4992) — rig controls active');
+  });
+  smartSdr.on('disconnected', () => {
+    sendCatLog('SmartSDR API disconnected — rig controls (ATU/filter/gain) unavailable');
   });
   // Generate and store a persistent client_id for GUI registration (needed for CW keying)
   if (!settings.smartSdrClientId) {
@@ -2519,6 +2533,7 @@ function connectSmartSdr() {
   });
   // Use SmartSDR host if configured, else fall back to Flex CAT host, else localhost
   const sdrHost = settings.smartSdrHost || (settings.catTarget && settings.catTarget.host) || '127.0.0.1';
+  sendCatLog(`Connecting SmartSDR API to ${sdrHost}:4992...`);
   smartSdr.connect(sdrHost);
 }
 
@@ -3426,6 +3441,7 @@ function connectRemote() {
   remoteServer.on('rig-control', (data) => {
     if (!data || !data.action) return;
     const rigType = detectRigType();
+    const flexNeedsApi = rigType === 'flex' && !flexSdr();
     switch (data.action) {
       case 'set-nb': {
         const on = !!data.value;
@@ -3436,6 +3452,7 @@ function connectRemote() {
         break;
       }
       case 'atu-tune':
+        if (flexNeedsApi) { sendCatLog('ATU requires SmartSDR API — not connected'); break; }
         if (flexSdr()) smartSdr.setAtu(true);
         else if (cat && cat.connected) cat.startTune();
         _currentAtuState = true;
@@ -3449,6 +3466,7 @@ function connectRemote() {
         if (cat && cat.connected && rigType !== 'flex') cat.setPowerState(false);
         break;
       case 'set-rf-gain': {
+        if (flexNeedsApi) { sendCatLog('RF Gain requires SmartSDR API — not connected'); break; }
         const value = Number(data.value) || 0;
         if (flexSdr()) smartSdr.setRfGain(0, (value * 0.3) - 10);
         else if (cat && cat.connected) {
@@ -3460,6 +3478,7 @@ function connectRemote() {
         break;
       }
       case 'set-tx-power': {
+        if (flexNeedsApi) { sendCatLog('TX Power requires SmartSDR API — not connected'); break; }
         const value = Number(data.value) || 0;
         if (flexSdr()) smartSdr.setTxPower(value);
         else if (cat && cat.connected) {
@@ -3471,6 +3490,7 @@ function connectRemote() {
         break;
       }
       case 'set-filter-width': {
+        if (flexNeedsApi) { sendCatLog('Filter requires SmartSDR API — not connected'); break; }
         const width = Number(data.value) || 0;
         if (width <= 0) break;
         if (flexSdr()) {
@@ -7556,6 +7576,14 @@ app.whenReady().then(() => {
     if (!data || !data.action) return;
     const flexSdr = () => smartSdr && smartSdr.connected;
     const rigType = detectRigType();
+    // Flex radios need SmartSDR API for most controls — Kenwood CAT on port 5002
+    // only supports FA/MD/NB. Warn if SmartSDR is down instead of silently
+    // sending unsupported Kenwood commands that return '?' errors.
+    const flexNeedsApi = rigType === 'flex' && !flexSdr();
+    const _flexWarnOnce = (() => {
+      let _last = 0;
+      return (msg) => { const now = Date.now(); if (now - _last > 5000) { _last = now; sendCatLog(msg); } };
+    })();
     switch (data.action) {
       case 'set-nb': {
         const on = !!data.value;
@@ -7569,6 +7597,7 @@ app.whenReady().then(() => {
         break;
       }
       case 'atu-tune': {
+        if (flexNeedsApi) { sendCatLog('ATU requires SmartSDR API — not connected'); break; }
         const atuOn = !_currentAtuState; // toggle
         if (flexSdr()) {
           smartSdr.setAtu(atuOn);
@@ -7594,6 +7623,7 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-rf-gain': {
+        if (flexNeedsApi) { _flexWarnOnce('RF Gain requires SmartSDR API — not connected'); break; }
         const value = Number(data.value) || 0;
         if (flexSdr()) {
           const dB = (value * 0.3) - 10;
@@ -7610,6 +7640,7 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-tx-power': {
+        if (flexNeedsApi) { _flexWarnOnce('TX Power requires SmartSDR API — not connected'); break; }
         const value = Number(data.value) || 0;
         if (flexSdr()) {
           smartSdr.setTxPower(value);
@@ -7625,6 +7656,7 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-filter-width': {
+        if (flexNeedsApi) { sendCatLog('Filter requires SmartSDR API — not connected'); break; }
         const width = Number(data.value) || 0;
         if (width <= 0) break;
         if (flexSdr()) {
@@ -7672,6 +7704,59 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
+
+  // --- Rig Command Table IPC ---
+  ipcMain.handle('get-rig-commands', () => {
+    const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+    const modelName = activeRig?.model || 'Unknown';
+    // SmartSDR (Flex) path
+    if (smartSdr && smartSdr.connected) {
+      return {
+        commands: smartSdr.getCommandTable(),
+        modelName,
+        protocol: 'smartsdr',
+      };
+    }
+    // RigController (Kenwood/Yaesu/Icom/rigctld) path
+    if (!cat) return { commands: [], modelName: null, protocol: null };
+    return {
+      commands: cat.getCommandTable(),
+      modelName,
+      protocol: cat.protocol || 'unknown',
+    };
+  });
+
+  ipcMain.handle('save-rig-command-override', (_e, { key, value }) => {
+    if (!key || typeof key !== 'string') return;
+    const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+    const modelName = activeRig?.model;
+    if (!modelName) return;
+    // Store overrides per rig model
+    if (!settings.rigCommandOverrides) settings.rigCommandOverrides = {};
+    if (!settings.rigCommandOverrides[modelName]) settings.rigCommandOverrides[modelName] = {};
+    if (value && typeof value === 'string') {
+      settings.rigCommandOverrides[modelName][key] = value;
+    } else {
+      delete settings.rigCommandOverrides[modelName][key];
+    }
+    saveSettings(settings);
+    // Apply override to live codec
+    if (cat && cat.connected) {
+      cat.applyCommandOverrides(settings.rigCommandOverrides[modelName]);
+    }
+  });
+
+  ipcMain.handle('reset-all-rig-commands', () => {
+    const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+    const modelName = activeRig?.model;
+    if (!modelName) return;
+    if (settings.rigCommandOverrides) {
+      delete settings.rigCommandOverrides[modelName];
+      saveSettings(settings);
+    }
+    // Reconnect to rebuild codec with clean defaults
+    if (cat) connectCat();
+  });
 
   // --- Remote Launcher IPC ---
   // Uses POTACAT.exe --launcher to run the launcher server at login.

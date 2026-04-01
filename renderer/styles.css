@@ -3767,6 +3767,60 @@ dialog input, dialog select {
   font-size: 10px !important;
 }
 
+.rig-popover.rig-popover-wide {
+  min-width: 400px;
+}
+
+/* Rig command table */
+.rig-cmd-table {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.rig-cmd-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.rig-cmd-label {
+  min-width: 90px;
+  max-width: 90px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rig-cmd-value {
+  flex: 1;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-primary);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 10px;
+  font-family: monospace;
+}
+
+.rig-cmd-value.rig-cmd-modified {
+  border-color: #f0a500;
+  color: #f0a500;
+}
+
+.rig-cmd-send {
+  padding: 2px 5px !important;
+  font-size: 9px !important;
+}
+
+.rig-cmd-reset {
+  padding: 2px 4px !important;
+  font-size: 11px !important;
+  min-width: auto !important;
+}
+
 /* Hotkeys dialog */
 #hotkeys-dialog {
   max-width: 340px;

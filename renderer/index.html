@@ -185,6 +185,7 @@
         <div class="rig-popover-tabs">
           <button class="rig-tab-btn active" data-rig-tab="controls">Controls</button>
           <button class="rig-tab-btn" data-rig-tab="custom">Custom</button>
+          <button class="rig-tab-btn" data-rig-tab="commands">Commands</button>
         </div>
         <div id="rig-tab-controls" class="rig-tab-panel">
           <div class="rig-popover-row rig-popover-buttons">
@@ -211,6 +212,11 @@
         <div id="rig-tab-custom" class="rig-tab-panel hidden">
           <div id="rig-custom-slots"></div>
           <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add</button>
+        </div>
+        <div id="rig-tab-commands" class="rig-tab-panel hidden">
+          <div id="rig-cmd-header" style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px;"></div>
+          <div id="rig-cmd-table" class="rig-cmd-table"></div>
+          <button class="rig-btn rig-btn-danger" id="rig-cmd-reset-all" style="margin-top:6px;font-size:10px;padding:2px 8px;">Reset All to Rig Defaults</button>
         </div>
       </div>
       <span id="sfi-status" class="status solar-pill hidden">SFI —</span>

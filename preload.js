@@ -198,6 +198,9 @@ contextBridge.exposeInMainWorld('api', {
   uninstallLauncher: () => ipcRenderer.invoke('uninstall-launcher'),
   // Rig Control Panel
   rigControl: (data) => ipcRenderer.invoke('rig-control', data),
+  getRigCommands: () => ipcRenderer.invoke('get-rig-commands'),
+  saveRigCommandOverride: (key, value) => ipcRenderer.invoke('save-rig-command-override', { key, value }),
+  resetAllRigCommands: () => ipcRenderer.invoke('reset-all-rig-commands'),
   onRigState: (cb) => ipcRenderer.on('rig-state', (_e, state) => cb(state)),
   onRemoteTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
   onRemoteStatus: (cb) => ipcRenderer.on('remote-status', (_e, s) => cb(s)),

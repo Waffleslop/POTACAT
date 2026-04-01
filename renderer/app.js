@@ -10588,6 +10588,7 @@ window.api.onCatStatus((s) => {
 const rigTabBtns = rigPopover.querySelectorAll('.rig-tab-btn');
 const rigTabControls = document.getElementById('rig-tab-controls');
 const rigTabCustom = document.getElementById('rig-tab-custom');
+const rigTabCommands = document.getElementById('rig-tab-commands');
 
 rigTabBtns.forEach(btn => {
   btn.addEventListener('click', (e) => {
@@ -10596,6 +10597,9 @@ rigTabBtns.forEach(btn => {
     rigTabBtns.forEach(b => b.classList.toggle('active', b === btn));
     rigTabControls.classList.toggle('hidden', tab !== 'controls');
     rigTabCustom.classList.toggle('hidden', tab !== 'custom');
+    rigTabCommands.classList.toggle('hidden', tab !== 'commands');
+    rigPopover.classList.toggle('rig-popover-wide', tab === 'commands');
+    if (tab === 'commands') loadRigCommandTable();
   });
 });
 
@@ -10696,6 +10700,102 @@ if (rigCustomAddBtn) {
     // Focus the new slot's label input
     const slots = rigCustomSlotsContainer.querySelectorAll('.rig-custom-name');
     if (slots.length > 0) slots[slots.length - 1].focus();
+  });
+}
+
+// --- Rig Command Table ---
+const rigCmdHeader = document.getElementById('rig-cmd-header');
+const rigCmdTable = document.getElementById('rig-cmd-table');
+let rigCmdData = [];  // current command table from main process
+
+async function loadRigCommandTable() {
+  const result = await window.api.getRigCommands();
+  if (!result || !result.commands || result.commands.length === 0) {
+    rigCmdHeader.textContent = 'No rig connected';
+    rigCmdTable.innerHTML = '';
+    return;
+  }
+  rigCmdData = result.commands;
+  const PROTO_LABELS = { civ: 'CI-V', rigctld: 'rigctld', smartsdr: 'SmartSDR', kenwood: 'Kenwood' };
+  const proto = PROTO_LABELS[result.protocol] || result.protocol;
+  rigCmdHeader.textContent = `${result.modelName || 'Unknown'} — ${proto}`;
+  renderRigCommandTable();
+}
+
+function renderRigCommandTable() {
+  rigCmdTable.innerHTML = '';
+  for (const entry of rigCmdData) {
+    const row = document.createElement('div');
+    row.className = 'rig-cmd-row';
+
+    const label = document.createElement('span');
+    label.className = 'rig-cmd-label';
+    label.textContent = entry.label;
+    label.title = entry.key;
+
+    const input = document.createElement('input');
+    input.className = 'rig-cmd-value';
+    input.value = entry.value;
+    input.spellcheck = false;
+    input.dataset.key = entry.key;
+    input.dataset.defaultValue = entry.defaultValue || entry.value;
+
+    // Mark modified commands (value differs from default)
+    if (entry.value !== (entry.defaultValue || entry.value)) input.classList.add('rig-cmd-modified');
+
+    input.addEventListener('change', () => {
+      const newVal = input.value.trim();
+      if (newVal && newVal !== input.dataset.defaultValue) {
+        input.classList.add('rig-cmd-modified');
+        window.api.saveRigCommandOverride(entry.key, newVal);
+      } else {
+        input.classList.remove('rig-cmd-modified');
+        // Clear override (restore default)
+        window.api.saveRigCommandOverride(entry.key, null);
+      }
+    });
+
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'rig-btn rig-cmd-send';
+    sendBtn.textContent = 'Send';
+    sendBtn.title = 'Send this command to the rig';
+    sendBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+      sendBtn.style.background = '#2a6e4e';
+      setTimeout(() => { sendBtn.style.background = ''; }, 300);
+    });
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'rig-btn rig-cmd-reset';
+    resetBtn.textContent = '\u21A9';
+    resetBtn.title = 'Reset to default';
+    resetBtn.style.cssText = 'padding:2px 5px;font-size:12px;min-width:auto;';
+    resetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      input.value = input.dataset.defaultValue;
+      input.classList.remove('rig-cmd-modified');
+      window.api.saveRigCommandOverride(entry.key, null);
+    });
+
+    row.appendChild(label);
+    row.appendChild(input);
+    row.appendChild(sendBtn);
+    row.appendChild(resetBtn);
+    rigCmdTable.appendChild(row);
+  }
+}
+
+// Reset All button
+const rigCmdResetAllBtn = document.getElementById('rig-cmd-reset-all');
+if (rigCmdResetAllBtn) {
+  rigCmdResetAllBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await window.api.resetAllRigCommands();
+    // Brief delay for reconnect to rebuild codec, then reload table
+    setTimeout(() => loadRigCommandTable(), 800);
   });
 }
 
