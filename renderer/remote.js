@@ -810,6 +810,9 @@
       case 'signal':
         handleSignal(msg.data);
         break;
+      case 'stun-config':
+        _useStun = !!msg.useStun;
+        break;
 
       case 'all-qsos':
         logbookQsos = msg.data || [];
@@ -2457,6 +2460,7 @@
   function setAudioStatus(text) { audioBtn.textContent = text; }
 
   let micReady = false;
+  var _useStun = false;
 
   async function startAudio() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -2509,7 +2513,8 @@
     }
     try {
       setAudioStatus('Wait...');
-      pc = new RTCPeerConnection({ iceServers: [] });
+      var iceServers = _useStun ? [{ urls: 'stun:stun.l.google.com:19302' }] : [];
+      pc = new RTCPeerConnection({ iceServers: iceServers });
       for (const track of localAudioStream.getTracks()) {
         pc.addTrack(track, localAudioStream);
       }

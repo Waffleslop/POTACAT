@@ -602,6 +602,7 @@ const rigRemoteAudioOutput = document.getElementById('rig-remote-audio-output');
 const remoteAudioSummary = document.getElementById('remote-audio-summary');
 const setRemotePttTimeout = document.getElementById('set-remote-ptt-timeout');
 const setRemoteCwEnabled = document.getElementById('set-remote-cw-enabled');
+const setRemoteStun = document.getElementById('set-remote-stun');
 const setCwKeyPort = document.getElementById('set-cw-key-port');
 const remoteUrlDisplay = document.getElementById('remote-url-display');
 const remoteTxIndicator = document.getElementById('remote-tx-indicator');
@@ -7108,6 +7109,7 @@ async function openSettingsDialog(tab) {
   setRemoteToken.value = s.remoteToken || '';
   setRemotePttTimeout.value = s.remotePttTimeout || 180;
   setRemoteCwEnabled.checked = !!s.remoteCwEnabled;
+  setRemoteStun.checked = !!s.remoteStun;
   // Populate CW Key Port dropdown
   try {
     const cwPorts = await window.api.listPorts();
@@ -7296,6 +7298,7 @@ settingsSave.addEventListener('click', async () => {
   const remoteTokenVal = setRemoteToken.value;
   const remotePttTimeoutVal = parseInt(setRemotePttTimeout.value, 10) || 180;
   const remoteCwEnabledVal = setRemoteCwEnabled.checked;
+  const remoteStunVal = setRemoteStun.checked;
   const cwKeyPortVal = setCwKeyPort.value || '';
   const launcherEnabled = setEnableLauncher ? setEnableLauncher.checked : false;
   const clubModeEnabled = setClubMode.checked;
@@ -7456,6 +7459,7 @@ settingsSave.addEventListener('click', async () => {
     remoteToken: remoteTokenVal,
     remotePttTimeout: remotePttTimeoutVal,
     remoteCwEnabled: remoteCwEnabledVal,
+    remoteStun: remoteStunVal,
     cwKeyPort: cwKeyPortVal,
     enableLauncher: launcherEnabled,
     clubMode: clubModeEnabled,

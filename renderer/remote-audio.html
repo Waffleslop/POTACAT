@@ -37,8 +37,9 @@ window.api.onStartAudio(async (config) => {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
     }
 
-    // Create peer connection (no STUN/TURN — Tailscale provides direct connectivity)
-    pc = new RTCPeerConnection({ iceServers: [] });
+    // STUN enables NAT traversal for audio without VPN; empty = local/VPN only
+    const iceServers = config.useStun ? [{ urls: 'stun:stun.l.google.com:19302' }] : [];
+    pc = new RTCPeerConnection({ iceServers });
 
     // Add radio RX audio track to send to phone
     for (const track of localStream.getTracks()) {

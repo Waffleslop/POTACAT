@@ -4164,6 +4164,8 @@ function connectRemote() {
 
   remoteServer.on('signal-from-client', (data) => {
     if (data && data.type === 'start-audio') {
+      // Tell phone whether to use STUN before WebRTC negotiation begins
+      remoteServer.sendToClient({ type: 'stun-config', useStun: !!settings.remoteStun });
       // Phone requested audio — create or restart hidden audio window
       startRemoteAudio();
       return;
@@ -4286,6 +4288,7 @@ async function startRemoteAudio() {
     remoteAudioWin.webContents.send('remote-audio-start', {
       inputDeviceId: settings.remoteAudioInput || '',
       outputDeviceId: settings.remoteAudioOutput || '',
+      useStun: !!settings.remoteStun,
     });
     return;
   }
