@@ -312,14 +312,14 @@ html, body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
-  z-index: 199;
+  z-index: 599;
 }
 #dial-pad {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 200;
+  z-index: 600;
   background: var(--bg-card);
   border: 1px solid #444;
   border-radius: 14px;
@@ -751,7 +751,7 @@ html, body {
 .spot-dist { font-size: 11px; font-family: monospace; color: var(--text-dim); min-width: 50px; text-align: right; flex-shrink: 0; }
 
 /* --- Spot Map --- */
-#spot-map { flex: 1; min-height: 0; }
+#spot-map { flex: 1; min-height: 0; position: relative; z-index: 0; }
 
 /* --- Scan Status Button --- */
 /* ECHOCAT S-Meter / SWR strip */
@@ -2185,7 +2185,7 @@ html, body {
 .act-map-back { background: none; border: none; color: var(--text); font-size: 16px; cursor: pointer; padding: 4px 8px; }
 .act-map-title { font-size: 14px; font-weight: 600; color: var(--pota); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act-map-count { font-size: 12px; color: var(--text-dim); }
-.act-map-container { flex: 1; min-height: 0; }
+.act-map-container { flex: 1; min-height: 0; position: relative; z-index: 0; }
 
 /* Dark map tiles */
 .dark-tiles { filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7); }
