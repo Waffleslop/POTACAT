@@ -3180,6 +3180,10 @@ function connectRemote() {
       user: settings.cloudUser,
       lastSyncAt: settings.cloudLastSyncAt,
       pendingChanges: cloudIpc ? cloudIpc.journal.length : 0,
+      sync: {
+        totalQsos: settings.cloudTotalQsos ?? null,
+        deviceCount: settings.cloudDeviceCount ?? null,
+      },
     };
   });
 
@@ -3192,6 +3196,8 @@ function connectRemote() {
     });
     settings.cloudLastSyncAt = new Date().toISOString();
     if (sync.lastSyncTimestamp) settings.cloudLastSyncTimestamp = sync.lastSyncTimestamp;
+    if (result.totalQsos != null) settings.cloudTotalQsos = result.totalQsos;
+    if (result.deviceCount != null) settings.cloudDeviceCount = result.deviceCount;
     saveSettings(settings);
     return { success: true, pushed: result.pushed, pulled: result.pulled };
   });
