@@ -1443,6 +1443,19 @@ html, body {
   border-color: var(--pota);
   color: var(--pota);
 }
+.spot-skip-btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.spot-skip-btn:active { background: var(--bg-header); }
+.spot-card.scan-skipped { opacity: 0.4; }
 
 /* --- Log Sheet --- */
 #log-sheet-backdrop {

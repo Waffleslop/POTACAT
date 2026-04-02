@@ -36,6 +36,8 @@
   let scanIndex = 0;
   let scanTimer = null;
   let scanDwell = 7;
+  var scanSkipped = new Set();
+  var scanForceUnskipped = new Set();
 
   // Refresh rate
   let refreshInterval = 30;
@@ -1107,6 +1109,8 @@
       const workedToday = isWorkedSpot(s);
       const workedEver = !workedToday && hasWorkedCallsign(s);
       const workedClass = workedToday ? ' worked-today' : workedEver ? ' worked' : '';
+      const isSkipped = scanSkipped.has(s.frequency) || (workedToday && !scanForceUnskipped.has(s.frequency));
+      const skipClass = isSkipped ? ' scan-skipped' : '';
       const workedCheck = (workedToday || workedEver) ? '<span class="worked-check">\u2713</span>' : '';
       const refClass = s.source === 'sota' ? 'sota' : s.source === 'dxc' ? 'dxc' : '';
       const ref = s.reference || s.locationDesc || '';
@@ -1116,13 +1120,14 @@
       const src = s.source || 'pota';
       const newBadge = newPark ? '<span class="new-badge">NEW</span>' : '';
       const logBtn = isNet ? '' : '<button type="button" class="spot-log-btn">Log</button>';
-      return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}">
+      const skipBtn = isNet ? '' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'Unskip' : 'Skip'}</button>`;
+      return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}${skipClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}">
         <span class="spot-call">${workedCheck}${esc(s.callsign)}${newBadge}</span>
         <span class="spot-freq">${freqStr}</span>
         <span class="spot-dist">${formatSpotDist(s.distance)}</span>
         <span class="spot-ref ${refClass}">${esc(ref)}</span>
         <span class="spot-age">${age}</span>
-        ${logBtn}
+        ${skipBtn}${logBtn}
       </div>`;
     }).join('');
   }
@@ -1236,6 +1241,19 @@
 
   // --- Tune (tap on spot) or Log ---
   spotList.addEventListener('click', (e) => {
+    const skipTarget = e.target.closest('.spot-skip-btn');
+    if (skipTarget) {
+      const freq = skipTarget.dataset.skipfreq;
+      if (scanSkipped.has(freq)) {
+        scanSkipped.delete(freq);
+        scanForceUnskipped.add(freq);
+      } else {
+        scanSkipped.add(freq);
+        scanForceUnskipped.delete(freq);
+      }
+      renderSpots();
+      return;
+    }
     const logTarget = e.target.closest('.spot-log-btn');
     if (logTarget) {
       const card = logTarget.closest('.spot-card');
@@ -1505,7 +1523,8 @@
 
   // --- Dial Pad ---
   const STEP_SIZES = [0.01, 0.1, 0.5, 1, 5, 10, 25, 100];
-  let dpStepIdx = 2; // default 1 kHz
+  let dpStepIdx = parseInt(localStorage.getItem('echocat-step-idx') || '3', 10); // default 1 kHz
+  if (dpStepIdx < 0 || dpStepIdx >= STEP_SIZES.length) dpStepIdx = 3;
   let dpInput = '';
 
   function openDialPad() {
@@ -1586,6 +1605,7 @@
 
   dpStepSize.addEventListener('click', () => {
     dpStepIdx = (dpStepIdx + 1) % STEP_SIZES.length;
+    localStorage.setItem('echocat-step-idx', dpStepIdx);
     updateStepLabel();
   });
 
@@ -1686,6 +1706,7 @@
   vfoStepSize.addEventListener('click', function() {
     vfoStepIdx = (vfoStepIdx + 1) % STEP_SIZES.length;
     dpStepIdx = vfoStepIdx; // sync with keypad
+    localStorage.setItem('echocat-step-idx', dpStepIdx);
     updateVfoStepLabel();
     updateStepLabel();
   });
@@ -2943,7 +2964,12 @@
 
   function scanStep() {
     if (!scanning) return;
-    const list = getFilteredSpots();
+    const list = getFilteredSpots().filter(function(s) {
+      if (scanSkipped.has(s.frequency)) return false;
+      var workedToday = isWorkedSpot(s);
+      if (workedToday && !scanForceUnskipped.has(s.frequency)) return false;
+      return true;
+    });
     if (!list.length) { stopScan(); return; }
     if (scanIndex >= list.length) scanIndex = 0;
     const spot = list[scanIndex];
@@ -2954,6 +2980,9 @@
     currentFreqKhz = parseFloat(spot.frequency);
     if (spot.mode) currentMode = spot.mode;
     renderSpots();
+    // Auto-scroll the scanned spot into view
+    var tunedCard = spotList.querySelector('.spot-card.tuned');
+    if (tunedCard) tunedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
     scanTimer = setTimeout(() => { scanIndex++; scanStep(); }, scanDwell * 1000);
   }
 
