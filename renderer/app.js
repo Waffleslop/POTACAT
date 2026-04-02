@@ -14857,19 +14857,28 @@ function jtcatWaterfallLoop() {
   var rxX = Math.round(jtcatRxFreq / 3000 * w);
   var txX = Math.round(jtcatTxFreq / 3000 * w);
 
-  // RX marker (green bar only)
+  // RX/TX markers with pulsing glow on the active state
+  var pulse = (Math.sin(Date.now() / 200) + 1) / 2;
+  var rxGlow = !jtcatIsTx ? 2 + pulse * 4 : 0;
+  var txGlow = jtcatIsTx ? 2 + pulse * 4 : 0;
+
+  // RX marker (green)
   if (rxX !== txX) {
+    if (rxGlow > 0) { waterfallCtx.shadowColor = '#4ecca3'; waterfallCtx.shadowBlur = rxGlow; }
     waterfallCtx.fillStyle = '#000';
     waterfallCtx.fillRect(rxX - 2, 0, 5, h);
-    waterfallCtx.fillStyle = '#00ff00';
+    waterfallCtx.fillStyle = '#4ecca3';
     waterfallCtx.fillRect(rxX - 1, 0, 3, h);
+    waterfallCtx.shadowBlur = 0;
   }
 
-  // TX marker (red bar only — freq shown in toolbar)
+  // TX marker (red)
+  if (txGlow > 0) { waterfallCtx.shadowColor = '#ff2222'; waterfallCtx.shadowBlur = txGlow; }
   waterfallCtx.fillStyle = '#000';
   waterfallCtx.fillRect(txX - 2, 0, 5, h);
   waterfallCtx.fillStyle = '#ff2222';
   waterfallCtx.fillRect(txX - 1, 0, 3, h);
+  waterfallCtx.shadowBlur = 0;
 
   // Auto-detect quietest TX frequency — analyze every ~30 frames (~0.5s)
   jtcatQuietFreqFrame++;
@@ -15060,8 +15069,10 @@ window.api.onJtcatTxAudio(function(data) {
   playJtcatTxAudio(data);
 });
 
+var jtcatIsTx = false;
 window.api.onJtcatTxStatus(function(data) {
-  if (data.state === 'tx') {
+  jtcatIsTx = data.state === 'tx';
+  if (jtcatIsTx) {
     jtcatEnableTxBtn.classList.add('jtcat-transmitting');
     jtcatTxMsgText.textContent = 'TX: ' + (data.message || '');
     if (jtcatTxIndicator) jtcatTxIndicator.classList.remove('hidden');

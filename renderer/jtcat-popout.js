@@ -1030,18 +1030,32 @@
       }
       jpWfCtx.putImageData(lineData, 0, 0);
 
-      // RX marker (green) — always visible, wider so green peeks out when TX overlaps
+      // RX marker (green) — pulses when receiving
       var rxX = Math.round(jpRxFreqHz / 3000 * w);
       var txX = Math.round(jpTxFreqHz / 3000 * w);
+      var pulse = (Math.sin(Date.now() / 200) + 1) / 2; // 0-1 oscillation
+      var rxGlow = !transmitting ? 2 + pulse * 4 : 0;
+      var txGlow = transmitting ? 2 + pulse * 4 : 0;
+      // RX line
+      if (rxGlow > 0) {
+        jpWfCtx.shadowColor = '#4ecca3';
+        jpWfCtx.shadowBlur = rxGlow;
+      }
       jpWfCtx.fillStyle = '#000';
       jpWfCtx.fillRect(rxX - 3, 0, 7, h);
       jpWfCtx.fillStyle = '#4ecca3';
       jpWfCtx.fillRect(rxX - 2, 0, 5, h);
-      // TX marker (red) — narrower, draws on top. When same position, green edges visible
+      jpWfCtx.shadowBlur = 0;
+      // TX marker (red) — pulses when transmitting
+      if (txGlow > 0) {
+        jpWfCtx.shadowColor = '#ff2222';
+        jpWfCtx.shadowBlur = txGlow;
+      }
       jpWfCtx.fillStyle = '#000';
-      jpWfCtx.fillRect(txX - 1, 0, 3, h);
+      jpWfCtx.fillRect(txX - 2, 0, 5, h);
       jpWfCtx.fillStyle = '#ff2222';
-      jpWfCtx.fillRect(txX, 0, 1, h);
+      jpWfCtx.fillRect(txX - 1, 0, 3, h);
+      jpWfCtx.shadowBlur = 0;
 
       // Auto-detect quietest TX frequency (~every 0.5s)
       popoutQuietFreqFrame++;
