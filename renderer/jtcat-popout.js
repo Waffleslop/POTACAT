@@ -818,12 +818,13 @@
   // TX Power slider — sends level to main renderer which plays TX audio
   var jpTxGain = document.getElementById('jp-tx-gain');
   var jpTxGainVal = document.getElementById('jp-tx-gain-val');
+  // TX Pwr: square curve for fine low-end control (same as main window)
+  function txPwrToGain(pct) { return (pct / 100) * (pct / 100); }
   if (jpTxGain) {
     jpTxGain.addEventListener('input', function() {
-      var tenths = parseInt(jpTxGain.value, 10);
-      var pct = tenths / 10;
-      jpTxGainVal.textContent = (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
-      popoutTxGainLevel = tenths / 1000;
+      var pct = parseInt(jpTxGain.value, 10);
+      jpTxGainVal.textContent = pct + '%';
+      popoutTxGainLevel = txPwrToGain(pct);
       window.api.jtcatSetTxGain(popoutTxGainLevel);
     });
   }

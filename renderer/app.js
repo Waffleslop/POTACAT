@@ -13840,21 +13840,25 @@ if (jtcatRxGainSlider) {
 var jtcatTxGainSlider = document.getElementById('jtcat-tx-gain');
 var jtcatTxGainVal = document.getElementById('jtcat-tx-gain-val');
 var jtcatTxGainLevel = 1.0;
+// TX Pwr uses a square curve: gain = (pct/100)^2
+// This gives fine control at the low end (FT8 sweet spot ~10-20%)
+// and full range at the top. Slider 14% ≈ 0.02 gain, 20% ≈ 0.04 gain.
+function txPwrToGain(pct) { return (pct / 100) * (pct / 100); }
+function gainToTxPwr(gain) { return Math.round(Math.sqrt(gain) * 100); }
+
 if (jtcatTxGainSlider) {
   jtcatTxGainSlider.addEventListener('input', function() {
-    var tenths = parseInt(jtcatTxGainSlider.value, 10);
-    var pct = tenths / 10;
-    jtcatTxGainVal.textContent = (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
-    jtcatTxGainLevel = tenths / 1000;
+    var pct = parseInt(jtcatTxGainSlider.value, 10);
+    jtcatTxGainVal.textContent = pct + '%';
+    jtcatTxGainLevel = txPwrToGain(pct);
   });
 }
 // Accept TX gain from popout window
 window.api.onJtcatSetTxGain(function(level) {
   jtcatTxGainLevel = level;
   if (jtcatTxGainSlider) {
-    jtcatTxGainSlider.value = Math.round(level * 1000);
-    var pct = Math.round(level * 1000) / 10;
-    jtcatTxGainVal.textContent = (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+    jtcatTxGainSlider.value = gainToTxPwr(level);
+    jtcatTxGainVal.textContent = gainToTxPwr(level) + '%';
   }
 });
 
