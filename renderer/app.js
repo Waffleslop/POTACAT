@@ -180,6 +180,7 @@ let scanning = false;
 let scanTimer = null;
 let scanIndex = 0;
 let scanSkipped = new Set(); // frequencies to skip (as strings)
+let scanForceUnskipped = new Set(); // frequencies force-unskipped by user (overrides worked-today auto-skip)
 let pendingSpots = null;     // buffered spots during scan
 
 const MI_TO_KM = 1.60934;
@@ -4476,7 +4477,7 @@ function bindPopupClickHandlers(mapInstance) {
 // --- Scan ---
 function getScanList() {
   const filtered = sortSpots(getFiltered());
-  return filtered.filter((s) => s.source !== 'net' && !scanSkipped.has(s.frequency) && !isWorkedSpot(s));
+  return filtered.filter((s) => s.source !== 'net' && !scanSkipped.has(s.frequency) && (!isWorkedSpot(s) || scanForceUnskipped.has(s.frequency)));
 }
 
 function startScan() {
@@ -5575,7 +5576,7 @@ function render() {
       const tr = document.createElement('tr');
       const isWorked = workedQsos.has(s.callsign.toUpperCase());
       const isWorkedToday = isWorked && isWorkedSpot(s);
-      const isSkipped = scanSkipped.has(s.frequency) || isWorkedToday;
+      const isSkipped = scanSkipped.has(s.frequency) || (isWorkedToday && !scanForceUnskipped.has(s.frequency));
 
       // Source color-coding
       if (s.source === 'pota') tr.classList.add('spot-pota');
@@ -5857,8 +5858,10 @@ function render() {
         e.stopPropagation();
         if (isSkipped) {
           scanSkipped.delete(s.frequency);
+          scanForceUnskipped.add(s.frequency);
         } else {
           scanSkipped.add(s.frequency);
+          scanForceUnskipped.delete(s.frequency);
         }
         render();
       });
@@ -13654,6 +13657,11 @@ var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq update
 var jtcatSpectrumFrame = 0;    // frame counter for throttling spectrum IPC to ~10fps
 
 async function startJtcatAudio() {
+  // Always stop existing audio first to ensure clean device state
+  // (prevents stale stream after ECHOCAT releases the shared device)
+  stopJtcatAudio();
+  // Brief delay for the OS to fully release the audio device
+  await new Promise(function(r) { setTimeout(r, 300); });
   try {
     var s = await window.api.getSettings();
     var audioConstraints = {
