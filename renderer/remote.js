@@ -1626,6 +1626,245 @@
     if (newFreq >= 100) dpTune(newFreq);
   });
 
+  // --- VFO Dial ---
+  var vfoView = document.getElementById('dp-vfo-view');
+  var keypadView = document.getElementById('dp-keypad-view');
+  var dpModeToggle = document.getElementById('dp-mode-toggle');
+  var vfoFreqEl = document.getElementById('vfo-freq');
+  var vfoStepSize = document.getElementById('vfo-step-size');
+  var vfoCancel = document.getElementById('vfo-cancel');
+  var vfoCanvas = document.getElementById('vfo-dial');
+  var vfoCtx = vfoCanvas.getContext('2d');
+  var vfoMode = localStorage.getItem('echocat-dial-mode') === 'vfo';
+  var vfoAngle = 0;           // current visual rotation (radians)
+  var vfoAccum = 0;           // accumulated angle since last step
+  var vfoStepIdx = dpStepIdx; // share step index with keypad
+  var vfoTouching = false;
+  var vfoLastAngle = 0;
+  var vfoVelocity = 0;
+  var vfoInertiaFrame = null;
+
+  function vfoStepRad() {
+    // Radians per step — bigger steps = more rotation per step
+    return Math.PI / 6; // 30° per step
+  }
+
+  function applyVfoMode() {
+    if (vfoMode) {
+      keypadView.classList.add('hidden');
+      vfoView.classList.remove('hidden');
+      dpModeToggle.innerHTML = '&#x2328;'; // keyboard icon
+      dpModeToggle.title = 'Switch to keypad';
+    } else {
+      vfoView.classList.add('hidden');
+      keypadView.classList.remove('hidden');
+      dpModeToggle.innerHTML = '&#x25CE;'; // dial icon
+      dpModeToggle.title = 'Switch to VFO dial';
+    }
+  }
+  applyVfoMode();
+
+  dpModeToggle.addEventListener('click', function(e) {
+    e.stopPropagation();
+    vfoMode = !vfoMode;
+    localStorage.setItem('echocat-dial-mode', vfoMode ? 'vfo' : 'keypad');
+    applyVfoMode();
+    if (vfoMode) drawVfoDial();
+  });
+
+  function updateVfoFreqDisplay() {
+    if (!currentFreqKhz) { vfoFreqEl.textContent = '---.---.---'; return; }
+    vfoFreqEl.textContent = formatFreq(Math.round(currentFreqKhz * 1000));
+  }
+
+  function updateVfoStepLabel() {
+    var s = STEP_SIZES[vfoStepIdx];
+    vfoStepSize.textContent = s >= 1 ? s + ' kHz' : (s * 1000) + ' Hz';
+  }
+  updateVfoStepLabel();
+
+  vfoStepSize.addEventListener('click', function() {
+    vfoStepIdx = (vfoStepIdx + 1) % STEP_SIZES.length;
+    dpStepIdx = vfoStepIdx; // sync with keypad
+    updateVfoStepLabel();
+    updateStepLabel();
+  });
+
+  vfoCancel.addEventListener('click', closeDialPad);
+
+  // Draw the VFO knob
+  function drawVfoDial() {
+    var w = vfoCanvas.width, h = vfoCanvas.height;
+    var cx = w / 2, cy = h / 2, r = w / 2 - 10;
+    var ctx = vfoCtx;
+    ctx.clearRect(0, 0, w, h);
+
+    // Outer ring — metallic gradient
+    var grad = ctx.createRadialGradient(cx, cy, r * 0.85, cx, cy, r);
+    grad.addColorStop(0, '#2a2a3e');
+    grad.addColorStop(0.5, '#3a3a50');
+    grad.addColorStop(1, '#222236');
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Inner knob face
+    var innerGrad = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, 0, cx, cy, r * 0.82);
+    innerGrad.addColorStop(0, '#3a3a52');
+    innerGrad.addColorStop(1, '#1e1e30');
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.82, 0, Math.PI * 2);
+    ctx.fillStyle = innerGrad;
+    ctx.fill();
+
+    // Tick marks around the edge
+    var numTicks = 36;
+    for (var i = 0; i < numTicks; i++) {
+      var a = (i / numTicks) * Math.PI * 2 + vfoAngle;
+      var isMajor = i % 3 === 0;
+      var innerR = isMajor ? r * 0.7 : r * 0.76;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * innerR, cy + Math.sin(a) * innerR);
+      ctx.lineTo(cx + Math.cos(a) * r * 0.82, cy + Math.sin(a) * r * 0.82);
+      ctx.strokeStyle = isMajor ? '#4ecca3' : 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = isMajor ? 2 : 1;
+      ctx.stroke();
+    }
+
+    // Indicator line (top, fixed)
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r * 0.85);
+    ctx.lineTo(cx - 4, cy - r + 2);
+    ctx.lineTo(cx + 4, cy - r + 2);
+    ctx.closePath();
+    ctx.fillStyle = '#4ecca3';
+    ctx.fill();
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#4ecca3';
+    ctx.fill();
+  }
+  drawVfoDial();
+
+  // Touch handling
+  function vfoTouchAngle(e) {
+    var rect = vfoCanvas.getBoundingClientRect();
+    var cx = rect.left + rect.width / 2;
+    var cy = rect.top + rect.height / 2;
+    var touch = e.touches ? e.touches[0] : e;
+    return Math.atan2(touch.clientY - cy, touch.clientX - cx);
+  }
+
+  function vfoHaptic() {
+    if (navigator.vibrate) navigator.vibrate(8);
+  }
+
+  function vfoProcessDelta(delta) {
+    vfoAngle += delta;
+    vfoAccum += delta;
+    var stepRad = vfoStepRad();
+    var steps = Math.trunc(vfoAccum / stepRad);
+    if (steps !== 0) {
+      vfoAccum -= steps * stepRad;
+      var step = STEP_SIZES[vfoStepIdx];
+      var newFreq = Math.round((currentFreqKhz + steps * step) * 100) / 100;
+      if (newFreq >= 100) {
+        dpTune(newFreq);
+        updateVfoFreqDisplay();
+        vfoHaptic();
+      }
+    }
+    drawVfoDial();
+  }
+
+  vfoCanvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    vfoTouching = true;
+    vfoLastAngle = vfoTouchAngle(e);
+    vfoAccum = 0;
+    vfoVelocity = 0;
+    if (vfoInertiaFrame) { cancelAnimationFrame(vfoInertiaFrame); vfoInertiaFrame = null; }
+  }, { passive: false });
+
+  vfoCanvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    if (!vfoTouching) return;
+    var a = vfoTouchAngle(e);
+    var delta = a - vfoLastAngle;
+    // Handle wrap-around at ±PI
+    if (delta > Math.PI) delta -= Math.PI * 2;
+    if (delta < -Math.PI) delta += Math.PI * 2;
+    vfoVelocity = delta;
+    vfoLastAngle = a;
+    vfoProcessDelta(delta);
+  }, { passive: false });
+
+  vfoCanvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    vfoTouching = false;
+    // Inertia — decelerate the spin
+    if (Math.abs(vfoVelocity) > 0.01) {
+      (function inertia() {
+        vfoVelocity *= 0.92;
+        if (Math.abs(vfoVelocity) < 0.005) { vfoVelocity = 0; vfoInertiaFrame = null; return; }
+        vfoProcessDelta(vfoVelocity);
+        vfoInertiaFrame = requestAnimationFrame(inertia);
+      })();
+    }
+  }, { passive: false });
+
+  // Mouse support (for desktop testing)
+  var vfoMouseDown = false;
+  vfoCanvas.addEventListener('mousedown', function(e) {
+    vfoMouseDown = true;
+    vfoLastAngle = vfoTouchAngle(e);
+    vfoAccum = 0;
+    vfoVelocity = 0;
+    if (vfoInertiaFrame) { cancelAnimationFrame(vfoInertiaFrame); vfoInertiaFrame = null; }
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!vfoMouseDown) return;
+    var a = vfoTouchAngle(e);
+    var delta = a - vfoLastAngle;
+    if (delta > Math.PI) delta -= Math.PI * 2;
+    if (delta < -Math.PI) delta += Math.PI * 2;
+    vfoVelocity = delta;
+    vfoLastAngle = a;
+    vfoProcessDelta(delta);
+  });
+  window.addEventListener('mouseup', function() {
+    if (!vfoMouseDown) return;
+    vfoMouseDown = false;
+    if (Math.abs(vfoVelocity) > 0.01) {
+      (function inertia() {
+        vfoVelocity *= 0.92;
+        if (Math.abs(vfoVelocity) < 0.005) { vfoVelocity = 0; vfoInertiaFrame = null; return; }
+        vfoProcessDelta(vfoVelocity);
+        vfoInertiaFrame = requestAnimationFrame(inertia);
+      })();
+    }
+  });
+
+  // Scroll wheel support
+  vfoCanvas.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var delta = e.deltaY > 0 ? -vfoStepRad() : vfoStepRad();
+    vfoProcessDelta(delta);
+  }, { passive: false });
+
+  // Update VFO display when freq changes externally
+  var _origOpenDialPad = openDialPad;
+  openDialPad = function() {
+    _origOpenDialPad();
+    if (vfoMode) {
+      updateVfoFreqDisplay();
+      drawVfoDial();
+    }
+  };
+
   // --- PTT ---
   function muteRxAudio(mute) {
     if (remoteAudio) remoteAudio.muted = mute;

@@ -444,6 +444,38 @@ html, body {
 .dp-clear:active { background: #444; }
 .dp-go:active { background: #c73a50; }
 
+/* Mode toggle (keypad ↔ VFO) */
+.dp-mode-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: 1px solid #555;
+  color: var(--text-dim);
+  font-size: 16px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.dp-mode-toggle:active { background: #333; }
+
+/* VFO dial */
+.vfo-dial-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  touch-action: none;
+}
+#vfo-dial {
+  border-radius: 50%;
+  touch-action: none;
+}
+
 /* --- Rig Controls Toggle (gear icon in status bar) --- */
 .rig-ctrl-toggle {
   background: none;
@@ -2652,6 +2684,8 @@ html, body {
 [data-theme="light"] .dp-cancel { background: #e0e0e0; color: #555; }
 [data-theme="light"] .dp-clear { background: #e0e0e0; color: #333; }
 [data-theme="light"] #dial-pad-backdrop { background: rgba(0,0,0,0.3); }
+[data-theme="light"] .dp-mode-toggle { border-color: #ccc; color: #666; }
+[data-theme="light"] .dp-mode-toggle:active { background: #e0e0e0; }
 [data-theme="light"] .freq-step-btn { border-color: #ccc; }
 
 /* Settings overlay */
@@ -3087,7 +3121,8 @@ html, body {
   .log-toast { bottom: 70px; }
   #mode-picker { top: 32px; }
   #dial-pad { width: 240px; padding: 10px; }
-  #dp-freq { font-size: 22px; }
+  #dp-freq, #vfo-freq { font-size: 22px; }
+  #vfo-dial { width: 180px; height: 180px; }
   .dp-btn { padding: 8px 0; font-size: 18px; }
   .dp-grid { gap: 5px; margin-bottom: 8px; }
   .dp-step-row { margin-bottom: 8px; }

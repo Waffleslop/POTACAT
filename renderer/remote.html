@@ -79,36 +79,57 @@
       <button class="mp-btn" data-mode="RTTY">RTTY</button>
     </div>
 
-    <!-- Dial pad overlay -->
+    <!-- Dial pad / VFO dial overlay -->
     <div id="dial-pad-backdrop" class="hidden"></div>
     <div id="dial-pad" class="hidden">
-      <div class="dp-freq-row">
-        <span id="dp-freq">---.---.---</span>
-        <span class="dp-unit">kHz</span>
+      <!-- Toggle between keypad and VFO dial -->
+      <button id="dp-mode-toggle" class="dp-mode-toggle" title="Switch keypad / VFO dial">&#x260E;</button>
+      <!-- Keypad view -->
+      <div id="dp-keypad-view">
+        <div class="dp-freq-row">
+          <span id="dp-freq">---.---.---</span>
+          <span class="dp-unit">kHz</span>
+        </div>
+        <div class="dp-grid">
+          <button class="dp-btn" data-val="1">1</button>
+          <button class="dp-btn" data-val="2">2</button>
+          <button class="dp-btn" data-val="3">3</button>
+          <button class="dp-btn" data-val="4">4</button>
+          <button class="dp-btn" data-val="5">5</button>
+          <button class="dp-btn" data-val="6">6</button>
+          <button class="dp-btn" data-val="7">7</button>
+          <button class="dp-btn" data-val="8">8</button>
+          <button class="dp-btn" data-val="9">9</button>
+          <button class="dp-btn dp-del" data-val="del">&#x232B;</button>
+          <button class="dp-btn" data-val="0">0</button>
+          <button class="dp-btn dp-dot" data-val=".">.</button>
+        </div>
+        <div class="dp-step-row">
+          <button class="dp-step-btn" id="dp-step-down" title="Step down">&#x25BC;</button>
+          <button class="dp-step-size" id="dp-step-size" title="Tap to change step">1 kHz</button>
+          <button class="dp-step-btn" id="dp-step-up" title="Step up">&#x25B2;</button>
+        </div>
+        <div class="dp-actions">
+          <button class="dp-cancel" id="dp-cancel">Cancel</button>
+          <button class="dp-clear" id="dp-clear">Clear</button>
+          <button class="dp-go" id="dp-go">Tune</button>
+        </div>
       </div>
-      <div class="dp-grid">
-        <button class="dp-btn" data-val="1">1</button>
-        <button class="dp-btn" data-val="2">2</button>
-        <button class="dp-btn" data-val="3">3</button>
-        <button class="dp-btn" data-val="4">4</button>
-        <button class="dp-btn" data-val="5">5</button>
-        <button class="dp-btn" data-val="6">6</button>
-        <button class="dp-btn" data-val="7">7</button>
-        <button class="dp-btn" data-val="8">8</button>
-        <button class="dp-btn" data-val="9">9</button>
-        <button class="dp-btn dp-del" data-val="del">&#x232B;</button>
-        <button class="dp-btn" data-val="0">0</button>
-        <button class="dp-btn dp-dot" data-val=".">.</button>
-      </div>
-      <div class="dp-step-row">
-        <button class="dp-step-btn" id="dp-step-down" title="Step down">&#x25BC;</button>
-        <button class="dp-step-size" id="dp-step-size" title="Tap to change step">1 kHz</button>
-        <button class="dp-step-btn" id="dp-step-up" title="Step up">&#x25B2;</button>
-      </div>
-      <div class="dp-actions">
-        <button class="dp-cancel" id="dp-cancel">Cancel</button>
-        <button class="dp-clear" id="dp-clear">Clear</button>
-        <button class="dp-go" id="dp-go">Tune</button>
+      <!-- VFO dial view -->
+      <div id="dp-vfo-view" class="hidden">
+        <div class="dp-freq-row">
+          <span id="vfo-freq">---.---.---</span>
+          <span class="dp-unit">kHz</span>
+        </div>
+        <div class="vfo-dial-wrap">
+          <canvas id="vfo-dial" width="220" height="220"></canvas>
+        </div>
+        <div class="dp-step-row">
+          <button class="dp-step-size" id="vfo-step-size" title="Tap to change step">1 kHz</button>
+        </div>
+        <div class="dp-actions">
+          <button class="dp-cancel" id="vfo-cancel">Close</button>
+        </div>
       </div>
     </div>
 
