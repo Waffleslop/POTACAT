@@ -104,6 +104,19 @@
   let currentFreqKhz = 0;
   let currentMode = '';
   let tunedFreqKhz = '';
+
+  // Spot column visibility — persisted in localStorage
+  var colPrefs = JSON.parse(localStorage.getItem('echocat-spot-cols') || '{}');
+  var colShow = {
+    freq: colPrefs.freq !== false,
+    dist: colPrefs.dist !== false,
+    ref: colPrefs.ref !== false,
+    age: colPrefs.age !== false,
+    mode: colPrefs.mode === true, // off by default
+    skip: colPrefs.skip !== false,
+    log: colPrefs.log !== false,
+  };
+  function saveColPrefs() { localStorage.setItem('echocat-spot-cols', JSON.stringify(colShow)); }
   let tunedCallsign = '';
   let tunedOpName = '';
   let tunedState = '';
@@ -1123,11 +1136,12 @@
       const skipBtn = isNet ? '' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'Unskip' : 'Skip'}</button>`;
       return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}${skipClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}">
         <span class="spot-call">${workedCheck}${esc(s.callsign)}${newBadge}</span>
-        <span class="spot-freq">${freqStr}</span>
-        <span class="spot-dist">${formatSpotDist(s.distance)}</span>
-        <span class="spot-ref ${refClass}">${esc(ref)}</span>
-        <span class="spot-age">${age}</span>
-        ${skipBtn}${logBtn}
+        ${colShow.freq ? `<span class="spot-freq">${freqStr}</span>` : ''}
+        ${colShow.mode ? `<span class="spot-mode">${esc(s.mode || '')}</span>` : ''}
+        ${colShow.dist ? `<span class="spot-dist">${formatSpotDist(s.distance)}</span>` : ''}
+        ${colShow.ref ? `<span class="spot-ref ${refClass}">${esc(ref)}</span>` : ''}
+        ${colShow.age ? `<span class="spot-age">${age}</span>` : ''}
+        ${colShow.skip ? skipBtn : ''}${colShow.log ? logBtn : ''}
       </div>`;
     }).join('');
   }
@@ -2623,6 +2637,19 @@
     echoMeterEnabled = echoShowMeter.checked;
     localStorage.setItem('echoMeterEnabled', echoMeterEnabled);
     echoMeterStrip.classList.toggle('hidden', !echoMeterEnabled);
+  });
+
+  // Spot column checkboxes
+  ['freq','dist','ref','age','mode','skip','log'].forEach(function(key) {
+    var cb = document.getElementById('col-' + key);
+    if (cb) {
+      cb.checked = colShow[key];
+      cb.addEventListener('change', function() {
+        colShow[key] = cb.checked;
+        saveColPrefs();
+        renderSpots();
+      });
+    }
   });
 
   function drawEchoBar(canvas, level, color) {
