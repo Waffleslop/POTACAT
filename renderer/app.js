@@ -13828,6 +13828,18 @@ if (jtcatRxGainSlider) {
   });
 }
 
+// TX Power slider — attenuates FT8 tone amplitude before audio output
+var jtcatTxGainSlider = document.getElementById('jtcat-tx-gain');
+var jtcatTxGainVal = document.getElementById('jtcat-tx-gain-val');
+var jtcatTxGainLevel = 1.0;
+if (jtcatTxGainSlider) {
+  jtcatTxGainSlider.addEventListener('input', function() {
+    var pct = parseInt(jtcatTxGainSlider.value, 10);
+    jtcatTxGainVal.textContent = pct + '%';
+    jtcatTxGainLevel = pct / 100;
+  });
+}
+
 function stopJtcatAudio() {
   if (jtcatMeterAnim) { cancelAnimationFrame(jtcatMeterAnim); jtcatMeterAnim = null; }
   if (waterfallAnimFrame) {
@@ -14975,7 +14987,11 @@ async function playJtcatTxAudio(data) {
 
     var source = jtcatTxAudioCtx.createBufferSource();
     source.buffer = buffer;
-    source.connect(jtcatTxAudioCtx.destination);
+    // TX Power gain node — attenuates FT8 tone to prevent ALC overdrive
+    var txGain = jtcatTxAudioCtx.createGain();
+    txGain.gain.value = jtcatTxGainLevel;
+    source.connect(txGain);
+    txGain.connect(jtcatTxAudioCtx.destination);
 
     var txDone = false;
     function finishTx() {
