@@ -49,6 +49,7 @@
 
   let isLoggedIn = false;
   let currentSyncStatus = 'idle';
+  let _refreshingStatus = false;
 
   // ── UI Helpers ────────────────────────────────────────────────────
 
@@ -133,6 +134,8 @@
   }
 
   async function refreshStatus() {
+    if (_refreshingStatus) return;
+    _refreshingStatus = true;
     try {
       const status = await window.api.cloudGetStatus();
       if (!status.loggedIn) {
@@ -163,6 +166,8 @@
       lastSyncSpan.textContent = formatTimestamp(status.lastSyncAt || status.lastSyncTimestamp || status.sync?.lastSyncAt);
     } catch (err) {
       console.error('Cloud status error:', err);
+    } finally {
+      _refreshingStatus = false;
     }
   }
 
