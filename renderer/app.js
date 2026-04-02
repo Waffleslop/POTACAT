@@ -13691,9 +13691,9 @@ async function startJtcatAudio() {
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
     jtcatAudioSource = source; // prevent GC — Chromium 134+ may collect unrooted audio nodes
 
-    // RX GainNode for level control
+    // RX GainNode for level control — use current slider value, not default 1.0
     jtcatRxGainNode = jtcatAudioCtx.createGain();
-    jtcatRxGainNode.gain.value = 1.0;
+    jtcatRxGainNode.gain.value = jtcatRxGainSlider ? parseInt(jtcatRxGainSlider.value, 10) / 100 : 1.0;
     source.connect(jtcatRxGainNode);
 
     // AnalyserNode for waterfall FFT (after gain so level changes affect waterfall)
@@ -13853,7 +13853,15 @@ if (jtcatTxGainSlider) {
     jtcatTxGainLevel = txPwrToGain(pct);
   });
 }
-// Accept TX gain from popout window
+// Accept RX gain from popout or ECHOCAT
+window.api.onJtcatSetRxGain(function(level) {
+  if (jtcatRxGainNode) jtcatRxGainNode.gain.value = level;
+  if (jtcatRxGainSlider) {
+    jtcatRxGainSlider.value = Math.round(level * 100);
+    jtcatRxGainVal.textContent = Math.round(level * 100) + '%';
+  }
+});
+// Accept TX gain from popout or ECHOCAT
 window.api.onJtcatSetTxGain(function(level) {
   jtcatTxGainLevel = level;
   if (jtcatTxGainSlider) {

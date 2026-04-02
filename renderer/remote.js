@@ -4703,6 +4703,32 @@
     ft8CqFilterBtn.classList.toggle('active', ft8CqFilter);
   });
 
+  // FT8 RX/TX gain sliders — relay to desktop via WebSocket
+  var ft8RxGain = document.getElementById('ft8-rx-gain');
+  var ft8RxGainVal = document.getElementById('ft8-rx-gain-val');
+  var ft8TxGain = document.getElementById('ft8-tx-gain');
+  var ft8TxGainVal = document.getElementById('ft8-tx-gain-val');
+  if (ft8RxGain) {
+    ft8RxGain.addEventListener('input', function() {
+      var pct = parseInt(ft8RxGain.value, 10);
+      ft8RxGainVal.textContent = pct + '%';
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'jtcat-rx-gain', value: pct / 100 }));
+      }
+    });
+  }
+  if (ft8TxGain) {
+    ft8TxGain.addEventListener('input', function() {
+      var pct = parseInt(ft8TxGain.value, 10);
+      ft8TxGainVal.textContent = pct + '%';
+      // Square curve — same as desktop JTCAT
+      var gain = (pct / 100) * (pct / 100);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'jtcat-tx-gain', value: gain }));
+      }
+    });
+  }
+
   // Waterfall toggle
   const ft8WfToggle = document.getElementById('ft8-wf-toggle');
   // Waterfall starts hidden — button not active until toggled

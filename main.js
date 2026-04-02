@@ -4122,6 +4122,14 @@ function connectRemote() {
     if (ft8Engine) ft8Engine.setTxSlot(slot);
   });
 
+  // ECHOCAT FT8 gain controls — relay to main renderer
+  remoteServer.on('jtcat-rx-gain', ({ value }) => {
+    if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-rx-gain', value);
+  });
+  remoteServer.on('jtcat-tx-gain', ({ value }) => {
+    if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', value);
+  });
+
   remoteServer.on('jtcat-cancel-qso', () => {
     if (ft8Engine) {
       ft8Engine._txEnabled = false;

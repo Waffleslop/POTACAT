@@ -178,6 +178,7 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatStatus: (cb) => ipcRenderer.on('jtcat-status', (_e, data) => cb(data)),
   onJtcatTxAudio: (cb) => ipcRenderer.on('jtcat-tx-audio', (_e, data) => cb(data)),
   onJtcatSetTxGain: (cb) => ipcRenderer.on('jtcat-set-tx-gain', (_e, level) => cb(level)),
+  onJtcatSetRxGain: (cb) => ipcRenderer.on('jtcat-set-rx-gain', (_e, level) => cb(level)),
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
   onJtcatStartForRemote: (cb) => ipcRenderer.on('jtcat-start-for-remote', () => cb()),
   onJtcatStopForRemote: (cb) => ipcRenderer.on('jtcat-stop-for-remote', () => cb()),
