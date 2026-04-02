@@ -1692,60 +1692,110 @@
 
   vfoCancel.addEventListener('click', closeDialPad);
 
-  // Draw the VFO knob
+  // Draw the VFO knob — round housing with inset rotating dial and finger dimple
   function drawVfoDial() {
     var w = vfoCanvas.width, h = vfoCanvas.height;
-    var cx = w / 2, cy = h / 2, r = w / 2 - 10;
+    var cx = w / 2, cy = h / 2, R = w / 2 - 4;
     var ctx = vfoCtx;
     ctx.clearRect(0, 0, w, h);
 
-    // Outer ring — metallic gradient
-    var grad = ctx.createRadialGradient(cx, cy, r * 0.85, cx, cy, r);
-    grad.addColorStop(0, '#2a2a3e');
-    grad.addColorStop(0.5, '#3a3a50');
-    grad.addColorStop(1, '#222236');
+    // === Housing (fixed, doesn't rotate) ===
+
+    // Outer housing shadow
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
+    ctx.arc(cx, cy + 2, R, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
     ctx.fill();
 
-    // Inner knob face
-    var innerGrad = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, 0, cx, cy, r * 0.82);
-    innerGrad.addColorStop(0, '#3a3a52');
-    innerGrad.addColorStop(1, '#1e1e30');
+    // Housing body — dark brushed metal
+    var housingGrad = ctx.createRadialGradient(cx, cy - R * 0.3, 0, cx, cy, R);
+    housingGrad.addColorStop(0, '#404058');
+    housingGrad.addColorStop(0.7, '#2a2a3a');
+    housingGrad.addColorStop(1, '#1a1a28');
     ctx.beginPath();
-    ctx.arc(cx, cy, r * 0.82, 0, Math.PI * 2);
-    ctx.fillStyle = innerGrad;
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fillStyle = housingGrad;
     ctx.fill();
 
-    // Tick marks around the edge
-    var numTicks = 36;
-    for (var i = 0; i < numTicks; i++) {
-      var a = (i / numTicks) * Math.PI * 2 + vfoAngle;
-      var isMajor = i % 3 === 0;
-      var innerR = isMajor ? r * 0.7 : r * 0.76;
+    // Housing bevel ring — subtle edge highlight
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.stroke();
+
+    // Inner recess shadow (the groove the knob sits in)
+    var knobR = R * 0.78;
+    ctx.beginPath();
+    ctx.arc(cx, cy, knobR + 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fill();
+
+    // Indicator mark on housing (fixed, top center)
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - R + 2);
+    ctx.lineTo(cx, cy - knobR - 5);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#4ecca3';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+
+    // === Rotating knob (rotates with vfoAngle) ===
+
+    // Knob face — slightly convex look with offset highlight
+    var knobGrad = ctx.createRadialGradient(cx - knobR * 0.15, cy - knobR * 0.2, 0, cx, cy, knobR);
+    knobGrad.addColorStop(0, '#4a4a62');
+    knobGrad.addColorStop(0.5, '#353548');
+    knobGrad.addColorStop(1, '#28283a');
+    ctx.beginPath();
+    ctx.arc(cx, cy, knobR, 0, Math.PI * 2);
+    ctx.fillStyle = knobGrad;
+    ctx.fill();
+
+    // Knob edge highlight (top-left rim catch)
+    ctx.beginPath();
+    ctx.arc(cx, cy, knobR, -Math.PI * 0.8, -Math.PI * 0.2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.stroke();
+
+    // Grip ridges around the knob edge (rotate with knob)
+    var numRidges = 48;
+    for (var i = 0; i < numRidges; i++) {
+      var a = (i / numRidges) * Math.PI * 2 + vfoAngle;
+      var r1 = knobR * 0.90;
+      var r2 = knobR * 0.98;
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(a) * innerR, cy + Math.sin(a) * innerR);
-      ctx.lineTo(cx + Math.cos(a) * r * 0.82, cy + Math.sin(a) * r * 0.82);
-      ctx.strokeStyle = isMajor ? '#4ecca3' : 'rgba(255,255,255,0.15)';
-      ctx.lineWidth = isMajor ? 2 : 1;
+      ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.15)';
       ctx.stroke();
     }
 
-    // Indicator line (top, fixed)
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - r * 0.85);
-    ctx.lineTo(cx - 4, cy - r + 2);
-    ctx.lineTo(cx + 4, cy - r + 2);
-    ctx.closePath();
-    ctx.fillStyle = '#4ecca3';
-    ctx.fill();
+    // Finger dimple — inset circle at the edge of the knob
+    var dimpleAngle = vfoAngle - Math.PI / 2; // starts at top
+    var dimpleDist = knobR * 0.62;
+    var dimpleR = knobR * 0.12;
+    var dx = cx + Math.cos(dimpleAngle) * dimpleDist;
+    var dy = cy + Math.sin(dimpleAngle) * dimpleDist;
 
-    // Center dot
+    // Dimple shadow (inset effect)
+    var dimpleGrad = ctx.createRadialGradient(dx - dimpleR * 0.3, dy - dimpleR * 0.3, 0, dx, dy, dimpleR);
+    dimpleGrad.addColorStop(0, '#1a1a2a');
+    dimpleGrad.addColorStop(0.6, '#222234');
+    dimpleGrad.addColorStop(1, '#2e2e42');
     ctx.beginPath();
-    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#4ecca3';
+    ctx.arc(dx, dy, dimpleR, 0, Math.PI * 2);
+    ctx.fillStyle = dimpleGrad;
     ctx.fill();
+    // Dimple rim highlight
+    ctx.beginPath();
+    ctx.arc(dx, dy, dimpleR, 0, Math.PI * 2);
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.stroke();
   }
   drawVfoDial();
 
