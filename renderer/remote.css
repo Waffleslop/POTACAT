@@ -162,7 +162,7 @@ html, body {
   background: var(--bg-card);
   border: 1px solid #444;
   border-radius: 10px;
-  z-index: 60;
+  z-index: 300;
   box-shadow: 0 4px 20px rgba(0,0,0,0.5);
   max-width: 220px;
 }
@@ -465,6 +465,14 @@ html, body {
 .dp-mode-toggle:active { background: #333; }
 
 /* VFO dial */
+#vfo-freq {
+  font-size: 34px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text);
+  min-height: 40px;
+}
 .vfo-dial-wrap {
   display: flex;
   justify-content: center;
