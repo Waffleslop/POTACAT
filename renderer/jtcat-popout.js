@@ -829,7 +829,18 @@
     });
   }
 
+  function stopPopoutAudio() {
+    if (popoutAudioProcessor) { popoutAudioProcessor.disconnect(); popoutAudioProcessor = null; }
+    popoutAnalyser = null;
+    popoutRxGainNode = null;
+    if (popoutAudioCtx) { popoutAudioCtx.close().catch(function() {}); popoutAudioCtx = null; }
+    if (popoutAudioStream) { popoutAudioStream.getTracks().forEach(function(t) { t.stop(); }); popoutAudioStream = null; }
+  }
+
   async function startPopoutAudio(deviceId) {
+    // Clean up any stale audio state (e.g. after ECHOCAT used the same device)
+    stopPopoutAudio();
+    await new Promise(function(r) { setTimeout(r, 300); });
     try {
       var constraints = {
         channelCount: 1,
