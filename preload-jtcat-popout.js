@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),
   jtcatSetTxMsg: (text) => ipcRenderer.send('jtcat-set-tx-msg', text),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
+  jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),
   jtcatAudio: (buf) => ipcRenderer.send('jtcat-audio', buf),
   jtcatQuietFreq: (hz) => ipcRenderer.send('jtcat-quiet-freq', hz),

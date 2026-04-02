@@ -13847,6 +13847,14 @@ if (jtcatTxGainSlider) {
     jtcatTxGainLevel = pct / 100;
   });
 }
+// Accept TX gain from popout window
+window.api.onJtcatSetTxGain(function(level) {
+  jtcatTxGainLevel = level;
+  if (jtcatTxGainSlider) {
+    jtcatTxGainSlider.value = Math.round(level * 100);
+    jtcatTxGainVal.textContent = Math.round(level * 100) + '%';
+  }
+});
 
 function stopJtcatAudio() {
   if (jtcatMeterAnim) { cancelAnimationFrame(jtcatMeterAnim); jtcatMeterAnim = null; }

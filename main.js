@@ -8818,6 +8818,10 @@ app.whenReady().then(() => {
   });
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
+  ipcMain.on('jtcat-set-tx-gain', (_e, level) => {
+    // Relay TX gain from popout to main renderer
+    if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', level);
+  });
   ipcMain.on('jtcat-auto-cq-mode', (_e, mode) => {
     jtcatAutoCqMode = mode || 'off';
     jtcatAutoCqOwner = 'popout';

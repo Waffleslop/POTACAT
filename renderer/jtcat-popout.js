@@ -796,9 +796,36 @@
   var popoutAudioStream = null;
   var popoutAudioProcessor = null;
   var popoutAnalyser = null;
+  var popoutRxGainNode = null;
+  var popoutRxGainLevel = 1.0;
+  var popoutTxGainLevel = 1.0;
   var popoutWaterfallAnim = null;
   var popoutQuietFreqFrame = 0;
   var popoutSpectrumFrame = 0;
+
+  // RX Gain slider
+  var jpRxGain = document.getElementById('jp-rx-gain');
+  var jpRxGainVal = document.getElementById('jp-rx-gain-val');
+  if (jpRxGain) {
+    jpRxGain.addEventListener('input', function() {
+      var pct = parseInt(jpRxGain.value, 10);
+      jpRxGainVal.textContent = pct + '%';
+      popoutRxGainLevel = pct / 100;
+      if (popoutRxGainNode) popoutRxGainNode.gain.value = popoutRxGainLevel;
+    });
+  }
+
+  // TX Power slider — sends level to main renderer which plays TX audio
+  var jpTxGain = document.getElementById('jp-tx-gain');
+  var jpTxGainVal = document.getElementById('jp-tx-gain-val');
+  if (jpTxGain) {
+    jpTxGain.addEventListener('input', function() {
+      var pct = parseInt(jpTxGain.value, 10);
+      jpTxGainVal.textContent = pct + '%';
+      popoutTxGainLevel = pct / 100;
+      window.api.jtcatSetTxGain(popoutTxGainLevel);
+    });
+  }
 
   async function startPopoutAudio(deviceId) {
     try {
@@ -823,10 +850,15 @@
       var source = popoutAudioCtx.createMediaStreamSource(popoutAudioStream);
 
       // AnalyserNode for waterfall FFT (driven locally, no IPC needed)
+      // RX gain node
+      popoutRxGainNode = popoutAudioCtx.createGain();
+      popoutRxGainNode.gain.value = popoutRxGainLevel;
+      source.connect(popoutRxGainNode);
+
       popoutAnalyser = popoutAudioCtx.createAnalyser();
       popoutAnalyser.fftSize = 2048;
       popoutAnalyser.smoothingTimeConstant = 0.3;
-      source.connect(popoutAnalyser);
+      popoutRxGainNode.connect(popoutAnalyser);
 
       console.log('[JTCAT popout] AudioContext sample rate:', nativeRate, 'dsRatio:', dsRatio.toFixed(2));
 
@@ -839,7 +871,7 @@
         workletNode.port.onmessage = function(e) {
           window.api.jtcatAudio(e.data);
         };
-        source.connect(workletNode);
+        popoutRxGainNode.connect(workletNode);
         workletNode.connect(popoutAudioCtx.destination);
         popoutAudioProcessor = workletNode;
         console.log('[JTCAT popout] Using AudioWorkletNode for audio capture');
@@ -895,7 +927,7 @@
             console.error('[JTCAT popout] Audio processor error:', err.message || err);
           }
         };
-        source.connect(popoutAudioProcessor);
+        popoutRxGainNode.connect(popoutAudioProcessor);
         popoutAudioProcessor.connect(popoutAudioCtx.destination);
       }
       console.log('[JTCAT popout] Audio capture started, sample rate:', nativeRate);
