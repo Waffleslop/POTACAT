@@ -3,6 +3,10 @@
   'use strict';
 
   // --- Window controls ---
+  // macOS uses native traffic light buttons (hiddenInset) — hide custom controls
+  if (window.api.platform === 'darwin') {
+    document.querySelector('.titlebar-controls').style.display = 'none';
+  }
   document.getElementById('tb-min').addEventListener('click', () => window.api.minimize());
   document.getElementById('tb-max').addEventListener('click', () => window.api.maximize());
   document.getElementById('tb-close').addEventListener('click', () => window.api.close());
