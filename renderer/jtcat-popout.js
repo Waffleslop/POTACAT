@@ -820,9 +820,10 @@
   var jpTxGainVal = document.getElementById('jp-tx-gain-val');
   if (jpTxGain) {
     jpTxGain.addEventListener('input', function() {
-      var pct = parseInt(jpTxGain.value, 10);
-      jpTxGainVal.textContent = pct + '%';
-      popoutTxGainLevel = pct / 100;
+      var tenths = parseInt(jpTxGain.value, 10);
+      var pct = tenths / 10;
+      jpTxGainVal.textContent = (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+      popoutTxGainLevel = tenths / 1000;
       window.api.jtcatSetTxGain(popoutTxGainLevel);
     });
   }

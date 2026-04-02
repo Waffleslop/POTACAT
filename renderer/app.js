@@ -13842,17 +13842,19 @@ var jtcatTxGainVal = document.getElementById('jtcat-tx-gain-val');
 var jtcatTxGainLevel = 1.0;
 if (jtcatTxGainSlider) {
   jtcatTxGainSlider.addEventListener('input', function() {
-    var pct = parseInt(jtcatTxGainSlider.value, 10);
-    jtcatTxGainVal.textContent = pct + '%';
-    jtcatTxGainLevel = pct / 100;
+    var tenths = parseInt(jtcatTxGainSlider.value, 10);
+    var pct = tenths / 10;
+    jtcatTxGainVal.textContent = (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+    jtcatTxGainLevel = tenths / 1000;
   });
 }
 // Accept TX gain from popout window
 window.api.onJtcatSetTxGain(function(level) {
   jtcatTxGainLevel = level;
   if (jtcatTxGainSlider) {
-    jtcatTxGainSlider.value = Math.round(level * 100);
-    jtcatTxGainVal.textContent = Math.round(level * 100) + '%';
+    jtcatTxGainSlider.value = Math.round(level * 1000);
+    var pct = Math.round(level * 1000) / 10;
+    jtcatTxGainVal.textContent = (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
   }
 });
 
