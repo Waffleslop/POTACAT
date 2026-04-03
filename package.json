@@ -13,6 +13,7 @@
   "scripts": {
     "start": "electron .",
     "build-ft8": "cd lib/ft8_native && node-gyp rebuild",
+    "build-freedv": "cd lib/freedv_native && node-gyp rebuild",
     "build-icon": "node scripts/build-icon.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",

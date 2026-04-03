@@ -1,0 +1,8 @@
+{
+  "name": "freedv_native",
+  "version": "1.0.0",
+  "description": "Native FreeDV codec (codec2) for digital voice on HF",
+  "main": "build/Release/freedv_native.node",
+  "private": true,
+  "gypfile": true
+}

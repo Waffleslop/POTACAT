@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{E8F1620A-C1DC-B6D7-D018-AF815CD95EF5}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>freedv_native</RootNamespace>
+    <IgnoreWarnCompileDuplicatedFilename>true</IgnoreWarnCompileDuplicatedFilename>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+  </PropertyGroup>
+  <PropertyGroup Label="Locals">
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
+  <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props"/>
+  <ImportGroup Label="ExtensionSettings"/>
+  <ImportGroup Label="PropertySheets">
+    <Import Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"/>
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros"/>
+  <PropertyGroup>
+    <ExecutablePath>$(ExecutablePath);$(MSBuildProjectDirectory)\..\bin\;$(MSBuildProjectDirectory)\..\bin\</ExecutablePath>
+    <IgnoreImportLibrary>true</IgnoreImportLibrary>
+    <IntDir>$(Configuration)\obj\$(ProjectName)\</IntDir>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.node</TargetExt>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.node</TargetExt>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.node</TargetExt>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.node</TargetExt>
+    <TargetName>$(ProjectName)</TargetName>
+    <TargetPath>$(OutDir)\$(ProjectName).node</TargetPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\include\node;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\src;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\config;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\openssl\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\uv\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\zlib;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\v8\include;..\codec2_src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/Zc:__cplusplus -std:c++20 /Zm2000 /permissive /Zc:strictStrings- %(AdditionalOptions)</AdditionalOptions>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+      <DisableSpecificWarnings>4244;4267;4996;4576;4351;4355;4800;4251;4275;4244;4267;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MinimalRebuild>false</MinimalRebuild>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <OmitFramePointers>false</OmitFramePointers>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>NODE_GYP_MODULE_NAME=freedv_native;USING_UV_SHARED=1;USING_V8_SHARED=1;V8_DEPRECATION_WARNINGS=1;_GLIBCXX_USE_CXX11_ABI=1;_FILE_OFFSET_BITS=64;WIN32;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE;_HAS_EXCEPTIONS=0;NOMINMAX;OPENSSL_NO_PINSHARED;OPENSSL_THREADS;CODEC2_MODE_EN_WB=0;_USE_MATH_DEFINES;GIT_HASH=&quot;potacat&quot;;BUILDING_NODE_EXTENSION;HOST_BINARY=&quot;node.exe&quot;;DEBUG;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <StringPooling>true</StringPooling>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <WarningLevel>Level3</WarningLevel>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+    </ClCompile>
+    <Lib>
+      <AdditionalOptions>/LTCG:INCREMENTAL %(AdditionalOptions)</AdditionalOptions>
+    </Lib>
+    <Link>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;delayimp.lib;&quot;C:\\Users\\cssta\\AppData\\Local\\node-gyp\\Cache\\24.13.0\\x64\\node.lib&quot;</AdditionalDependencies>
+      <AdditionalOptions>/LTCG:INCREMENTAL /ignore:4199 %(AdditionalOptions)</AdditionalOptions>
+      <DelayLoadDLLs>node.exe;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <OptimizeReferences>true</OptimizeReferences>
+      <OutputFile>$(OutDir)$(ProjectName).node</OutputFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetExt>.node</TargetExt>
+      <TargetMachine>MachineX64</TargetMachine>
+    </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\include\node;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\src;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\config;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\openssl\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\uv\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\zlib;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\v8\include;..\codec2_src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NODE_GYP_MODULE_NAME=freedv_native;USING_UV_SHARED=1;USING_V8_SHARED=1;V8_DEPRECATION_WARNINGS=1;_GLIBCXX_USE_CXX11_ABI=1;_FILE_OFFSET_BITS=64;WIN32;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE;_HAS_EXCEPTIONS=0;NOMINMAX;OPENSSL_NO_PINSHARED;OPENSSL_THREADS;CODEC2_MODE_EN_WB=0;_USE_MATH_DEFINES;GIT_HASH=&quot;potacat&quot;;BUILDING_NODE_EXTENSION;HOST_BINARY=&quot;node.exe&quot;;DEBUG;_DEBUG;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\include\node;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\src;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\config;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\openssl\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\uv\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\zlib;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\v8\include;..\codec2_src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/Zc:__cplusplus -std:c++20 /Zm2000 /permissive /Zc:strictStrings- %(AdditionalOptions)</AdditionalOptions>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+      <DisableSpecificWarnings>4244;4267;4996;4576;4351;4355;4800;4251;4275;4244;4267;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <ExceptionHandling>false</ExceptionHandling>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <OmitFramePointers>true</OmitFramePointers>
+      <Optimization>Full</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>NODE_GYP_MODULE_NAME=freedv_native;USING_UV_SHARED=1;USING_V8_SHARED=1;V8_DEPRECATION_WARNINGS=1;_GLIBCXX_USE_CXX11_ABI=1;_FILE_OFFSET_BITS=64;WIN32;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE;_HAS_EXCEPTIONS=0;NOMINMAX;OPENSSL_NO_PINSHARED;OPENSSL_THREADS;CODEC2_MODE_EN_WB=0;_USE_MATH_DEFINES;GIT_HASH=&quot;potacat&quot;;BUILDING_NODE_EXTENSION;HOST_BINARY=&quot;node.exe&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <StringPooling>true</StringPooling>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <WarningLevel>Level3</WarningLevel>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+    </ClCompile>
+    <Lib>
+      <AdditionalOptions>/LTCG:INCREMENTAL %(AdditionalOptions)</AdditionalOptions>
+    </Lib>
+    <Link>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;delayimp.lib;&quot;C:\\Users\\cssta\\AppData\\Local\\node-gyp\\Cache\\24.13.0\\x64\\node.lib&quot;</AdditionalDependencies>
+      <AdditionalOptions>/LTCG:INCREMENTAL /ignore:4199 %(AdditionalOptions)</AdditionalOptions>
+      <DelayLoadDLLs>node.exe;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <OptimizeReferences>true</OptimizeReferences>
+      <OutputFile>$(OutDir)$(ProjectName).node</OutputFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetExt>.node</TargetExt>
+      <TargetMachine>MachineX64</TargetMachine>
+    </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\include\node;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\src;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\config;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\openssl\openssl\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\uv\include;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\zlib;C:\Users\cssta\AppData\Local\node-gyp\Cache\24.13.0\deps\v8\include;..\codec2_src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NODE_GYP_MODULE_NAME=freedv_native;USING_UV_SHARED=1;USING_V8_SHARED=1;V8_DEPRECATION_WARNINGS=1;_GLIBCXX_USE_CXX11_ABI=1;_FILE_OFFSET_BITS=64;WIN32;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE;_HAS_EXCEPTIONS=0;NOMINMAX;OPENSSL_NO_PINSHARED;OPENSSL_THREADS;CODEC2_MODE_EN_WB=0;_USE_MATH_DEFINES;GIT_HASH=&quot;potacat&quot;;BUILDING_NODE_EXTENSION;HOST_BINARY=&quot;node.exe&quot;;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <None Include="..\binding.gyp"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\freedv_addon.c">
+      <ObjectFileName>$(IntDir)\freedv_addon.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\HRA_112_112.c">
+      <ObjectFileName>$(IntDir)\codec2_src\HRA_112_112.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\HRA_56_56.c">
+      <ObjectFileName>$(IntDir)\codec2_src\HRA_56_56.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\HRAa_1536_512.c">
+      <ObjectFileName>$(IntDir)\codec2_src\HRAa_1536_512.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\HRAb_396_504.c">
+      <ObjectFileName>$(IntDir)\codec2_src\HRAb_396_504.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_1024_2048_4f.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_1024_2048_4f.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_128_256_5.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_128_256_5.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_16200_9720.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_16200_9720.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_2064_516_sparse.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_2064_516_sparse.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_212_158.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_212_158.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_256_512_4.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_256_512_4.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_256_768_22.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_256_768_22.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\H_4096_8192_3d.c">
+      <ObjectFileName>$(IntDir)\codec2_src\H_4096_8192_3d.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codec2.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codec2.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codec2_fft.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codec2_fft.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codec2_fifo.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codec2_fifo.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebookd.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebookd.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebookge.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebookge.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebookjmv.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebookjmv.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebooknewamp1.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebooknewamp1.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebooknewamp1_energy.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebooknewamp1_energy.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebooknewamp2.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebooknewamp2.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebooknewamp2_energy.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebooknewamp2_energy.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\codebook.c">
+      <ObjectFileName>$(IntDir)\codec2_src\codebook.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\cohpsk.c">
+      <ObjectFileName>$(IntDir)\codec2_src\cohpsk.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\dump.c">
+      <ObjectFileName>$(IntDir)\codec2_src\dump.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\fdmdv.c">
+      <ObjectFileName>$(IntDir)\codec2_src\fdmdv.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\filter.c">
+      <ObjectFileName>$(IntDir)\codec2_src\filter.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\fm.c">
+      <ObjectFileName>$(IntDir)\codec2_src\fm.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\fmfsk.c">
+      <ObjectFileName>$(IntDir)\codec2_src\fmfsk.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\freedv_1600.c">
+      <ObjectFileName>$(IntDir)\codec2_src\freedv_1600.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\freedv_700.c">
+      <ObjectFileName>$(IntDir)\codec2_src\freedv_700.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\freedv_api.c">
+      <ObjectFileName>$(IntDir)\codec2_src\freedv_api.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\freedv_data_channel.c">
+      <ObjectFileName>$(IntDir)\codec2_src\freedv_data_channel.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\freedv_fsk.c">
+      <ObjectFileName>$(IntDir)\codec2_src\freedv_fsk.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\freedv_vhf_framing.c">
+      <ObjectFileName>$(IntDir)\codec2_src\freedv_vhf_framing.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\fsk.c">
+      <ObjectFileName>$(IntDir)\codec2_src\fsk.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\golay23.c">
+      <ObjectFileName>$(IntDir)\codec2_src\golay23.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\gp_interleaver.c">
+      <ObjectFileName>$(IntDir)\codec2_src\gp_interleaver.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\interldpc.c">
+      <ObjectFileName>$(IntDir)\codec2_src\interldpc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\interp.c">
+      <ObjectFileName>$(IntDir)\codec2_src\interp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\kiss_fft.c">
+      <ObjectFileName>$(IntDir)\codec2_src\kiss_fft.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\kiss_fftr.c">
+      <ObjectFileName>$(IntDir)\codec2_src\kiss_fftr.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\ldpc_codes.c">
+      <ObjectFileName>$(IntDir)\codec2_src\ldpc_codes.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\linreg.c">
+      <ObjectFileName>$(IntDir)\codec2_src\linreg.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\lpc.c">
+      <ObjectFileName>$(IntDir)\codec2_src\lpc.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\lsp.c">
+      <ObjectFileName>$(IntDir)\codec2_src\lsp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\mbest.c">
+      <ObjectFileName>$(IntDir)\codec2_src\mbest.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\modem_stats.c">
+      <ObjectFileName>$(IntDir)\codec2_src\modem_stats.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\mpdecode_core.c">
+      <ObjectFileName>$(IntDir)\codec2_src\mpdecode_core.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\newamp1.c">
+      <ObjectFileName>$(IntDir)\codec2_src\newamp1.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\nlp.c">
+      <ObjectFileName>$(IntDir)\codec2_src\nlp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\ofdm.c">
+      <ObjectFileName>$(IntDir)\codec2_src\ofdm.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\ofdm_mode.c">
+      <ObjectFileName>$(IntDir)\codec2_src\ofdm_mode.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\pack.c">
+      <ObjectFileName>$(IntDir)\codec2_src\pack.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\phase.c">
+      <ObjectFileName>$(IntDir)\codec2_src\phase.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\phi0.c">
+      <ObjectFileName>$(IntDir)\codec2_src\phi0.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\postfilter.c">
+      <ObjectFileName>$(IntDir)\codec2_src\postfilter.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\quantise.c">
+      <ObjectFileName>$(IntDir)\codec2_src\quantise.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\reliable_text.c">
+      <ObjectFileName>$(IntDir)\codec2_src\reliable_text.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\sine.c">
+      <ObjectFileName>$(IntDir)\codec2_src\sine.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\codec2_src\varicode.c">
+      <ObjectFileName>$(IntDir)\codec2_src\varicode.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="D:\Projects\potacat-dev\node_modules\node-gyp\src\win_delay_load_hook.cc"/>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+  <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets"/>
+  <ImportGroup Label="ExtensionTargets"/>
+</Project>
