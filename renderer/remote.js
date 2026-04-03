@@ -1065,12 +1065,13 @@
   }
 
   // Map spot mode to filter category
-  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'FM', 'RTTY']);
+  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'FM', 'RTTY', 'FREEDV']);
   function spotModeCategory(mode) {
     if (!mode) return 'other';
     var m = mode.toUpperCase();
     if (m === 'USB' || m === 'LSB') return 'SSB';
     if (m === 'AM') return 'other';
+    if (m === 'FREEDV' || m === 'DV' || m.startsWith('FREEDV')) return 'FREEDV';
     if (KNOWN_MODES.has(m)) return m;
     return 'other';
   }

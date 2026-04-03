@@ -160,7 +160,6 @@
         <button id="cluster-terminal-btn" class="view-btn hidden" title="DX Cluster Terminal">Terminal</button>
         <button id="view-directory-btn" class="view-btn hidden" title="HF Nets &amp; SWL Broadcast Directory">Directory</button>
         <button id="view-jtcat-btn" class="view-btn" title="JTCAT — FT8/FT4 Digital Modes">JTCAT</button>
-        <button id="view-freedv-btn" class="view-btn hidden" title="FreeDV — Digital Voice on HF">FreeDV</button>
       </div>
     </div>
     <div class="status-bar">
@@ -220,6 +219,7 @@
           <button class="rig-btn rig-btn-danger" id="rig-cmd-reset-all" style="margin-top:6px;font-size:10px;padding:2px 8px;">Reset All to Rig Defaults</button>
         </div>
       </div>
+      <span id="freedv-sync-indicator" class="status hidden" style="width:10px;height:10px;border-radius:50%;padding:0;min-width:10px;" title="FreeDV"></span>
       <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
       <span id="k-status" class="status solar-pill hidden">K —</span>
       <span id="a-status" class="status solar-pill hidden">A —</span>
@@ -489,33 +489,6 @@
       </div>
     </div>
     <!-- JTCAT View (FT8/FT4 Digital Modes) -->
-    <!-- FreeDV Digital Voice View -->
-    <div id="freedv-view" class="hidden" style="display:flex;flex-direction:column;flex:1;min-height:0;">
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-secondary);border-bottom:1px solid var(--border-primary);flex-shrink:0;">
-        <select id="freedv-mode" style="font-size:12px;padding:3px 6px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);">
-          <option value="700E" selected>700E</option>
-          <option value="700D">700D</option>
-          <option value="700C">700C</option>
-          <option value="1600">1600</option>
-        </select>
-        <span id="freedv-sync-led" style="width:12px;height:12px;border-radius:50%;background:#555;display:inline-block;" title="Sync indicator"></span>
-        <span id="freedv-snr" style="font-family:monospace;font-size:12px;color:var(--text-secondary);min-width:60px;">SNR: --</span>
-        <span style="flex:1;"></span>
-        <button id="freedv-start-btn" class="rig-btn" style="font-size:11px;">Start</button>
-        <button id="freedv-stop-btn" class="rig-btn" style="font-size:11px;" disabled>Stop</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-secondary);border-bottom:1px solid var(--border-primary);flex-shrink:0;">
-        <label style="font-size:11px;color:var(--text-secondary);">Squelch:</label>
-        <input type="range" id="freedv-squelch" min="-5" max="20" value="2" style="width:100px;">
-        <span id="freedv-squelch-val" style="font-size:11px;min-width:30px;">2 dB</span>
-        <span style="flex:1;"></span>
-        <span id="freedv-status-text" style="font-size:11px;color:var(--text-tertiary);">Stopped</span>
-      </div>
-      <div style="flex:1;display:flex;align-items:center;justify-content:center;">
-        <button id="freedv-ptt-btn" style="width:120px;height:120px;border-radius:50%;border:3px solid #555;background:var(--bg-tertiary);color:var(--text-primary);font-size:20px;font-weight:800;cursor:pointer;transition:all 0.15s;" disabled>PTT</button>
-      </div>
-    </div>
-
     <div id="jtcat-view" class="hidden">
       <div class="jtcat-toolbar">
         <div class="jtcat-band-buttons">

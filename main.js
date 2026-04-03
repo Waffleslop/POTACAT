@@ -6625,6 +6625,44 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     filterWidth = _currentFilterWidth;
   }
 
+  // FreeDV: auto-start/stop engine based on spot mode
+  const isFreedvMode = m.startsWith('FREEDV') || m === 'DV';
+  if (isFreedvMode && settings.enableFreedv) {
+    // Start FreeDV engine if not already running
+    if (!freedvEngine) {
+      let codecMode = '700E';
+      if (m.includes('700D')) codecMode = '700D';
+      else if (m.includes('700C')) codecMode = '700C';
+      else if (m.includes('1600')) codecMode = '1600';
+
+      freedvEngine = new FreedvEngine();
+      freedvEngine.on('rx-speech', (data) => {
+        if (win && !win.isDestroyed()) win.webContents.send('freedv-rx-speech', data);
+      });
+      freedvEngine.on('tx-modem', (data) => {
+        if (win && !win.isDestroyed()) win.webContents.send('freedv-tx-modem', data);
+      });
+      freedvEngine.on('sync', (data) => {
+        if (win && !win.isDestroyed()) win.webContents.send('freedv-sync', data);
+        if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'freedv-sync', ...data });
+      });
+      freedvEngine.on('status', (data) => sendCatLog(`[FreeDV] ${data.state} mode=${data.mode}`));
+      freedvEngine.on('error', (data) => sendCatLog(`[FreeDV] Error: ${data.message}`));
+      freedvEngine.start(codecMode);
+      sendCatLog(`[FreeDV] Auto-started for mode ${m} (codec ${codecMode})`);
+      // Tell renderer to start RX audio capture
+      if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
+    }
+    // Override mode to USB for the radio (FreeDV transmits in USB)
+    mode = 'USB';
+  } else if (!isFreedvMode && freedvEngine) {
+    // Tuned away from FreeDV — stop the engine
+    sendCatLog('[FreeDV] Auto-stopped (tuned to non-FreeDV mode)');
+    freedvEngine.stop();
+    freedvEngine = null;
+    if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
+  }
+
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {
     sendRotorBearing(Math.round(brng));
   }
