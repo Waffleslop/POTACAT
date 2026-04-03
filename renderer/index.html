@@ -1339,7 +1339,7 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-tgxl"> FlexRadio TunerGenius 1x3</label>
       <div id="tgxl-config" class="radio-sub hidden">
-        <span class="help-text" style="font-size:12px;">Controls antenna switching on the TunerGenius 1x3 via direct TCP (port 9010). Select which antenna port to use per band.</span>
+        <span class="help-text" style="font-size:12px;">Controls antenna switching on the TunerGenius 1x3 via direct TCP (port 9010).</span>
         <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
           <label>IP Address:
             <input type="text" id="set-tgxl-host" placeholder="10.50.1.149" style="width:140px;">
@@ -1347,10 +1347,21 @@
           <span id="tgxl-status" class="help-text" style="font-weight:bold;"></span>
         </div>
         <div style="margin-top:8px;">
-          <strong style="font-size:12px;">Band &rarr; Antenna Port</strong>
-          <div id="tgxl-band-map" style="display:grid;grid-template-columns:60px 1fr;gap:2px 8px;margin-top:4px;font-size:12px;">
+          <strong style="font-size:12px;">Antenna Labels</strong>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            <label style="font-size:12px;">Ant 1: <input type="text" id="set-tgxl-label-1" placeholder="Ant 1" maxlength="10" style="width:80px;"></label>
+            <label style="font-size:12px;">Ant 2: <input type="text" id="set-tgxl-label-2" placeholder="Ant 2" maxlength="10" style="width:80px;"></label>
+            <label style="font-size:12px;">Ant 3: <input type="text" id="set-tgxl-label-3" placeholder="Ant 3" maxlength="10" style="width:80px;"></label>
           </div>
-          <span class="help-text" style="display:block;margin-top:4px;">Set antenna port (1, 2, or 3) for each band. Leave blank to skip switching on that band.</span>
+          <span class="help-text" style="display:block;margin-top:4px;">Custom names shown on the antenna buttons in ECHOCAT (e.g. "Hex", "DXC", "InvV").</span>
+        </div>
+        <div style="margin-top:8px;">
+          <strong style="font-size:12px;">Switch Antenna</strong>
+          <div id="tgxl-ant-buttons" style="display:flex;gap:6px;margin-top:4px;">
+            <button type="button" class="rig-btn tgxl-ant-btn" data-ant="1">Ant 1</button>
+            <button type="button" class="rig-btn tgxl-ant-btn" data-ant="2">Ant 2</button>
+            <button type="button" class="rig-btn tgxl-ant-btn" data-ant="3">Ant 3</button>
+          </div>
         </div>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-n1mm-udp"> N1MM+ RadioInfo UDP broadcast</label>

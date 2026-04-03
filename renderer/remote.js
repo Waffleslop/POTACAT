@@ -645,6 +645,11 @@
         updateEchoSwrRatio(msg.value);
         break;
 
+      case 'tgxl-status':
+        echoTgxlSection.classList.remove('hidden');
+        echoTgxlUpdateButtons(msg.antenna || 0, msg.labels);
+        break;
+
       case 'qrz-result':
         if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
           tunedOpName = msg.fname || '';
@@ -2446,6 +2451,31 @@
   // --- Custom CAT Buttons ---
   var customCatSection = document.getElementById('rc-custom-cat');
   var customCatBtnsEl = document.getElementById('rc-custom-cat-btns');
+  // --- TunerGenius 1x3 antenna buttons ---
+  var echoTgxlSection = document.getElementById('echo-tgxl-section');
+  var echoTgxlBtns = document.getElementById('echo-tgxl-btns');
+  var echoTgxlActiveAnt = 0;
+
+  function echoTgxlUpdateButtons(activeAnt, labels) {
+    echoTgxlActiveAnt = activeAnt;
+    echoTgxlBtns.querySelectorAll('.echo-tgxl-btn').forEach(function(btn) {
+      var ant = parseInt(btn.dataset.ant, 10);
+      if (labels && labels[ant]) btn.textContent = labels[ant];
+      var isActive = ant === activeAnt;
+      btn.style.background = isActive ? '#2a6e4e' : 'var(--bg)';
+      btn.style.color = isActive ? '#fff' : 'var(--text)';
+      btn.style.borderColor = isActive ? '#2a6e4e' : '#555';
+    });
+  }
+
+  echoTgxlBtns.addEventListener('click', function(e) {
+    var btn = e.target.closest('.echo-tgxl-btn');
+    if (!btn || !ws || ws.readyState !== WebSocket.OPEN) return;
+    var ant = parseInt(btn.dataset.ant, 10);
+    ws.send(JSON.stringify({ type: 'tgxl-select-antenna', port: ant }));
+    echoTgxlUpdateButtons(ant); // optimistic
+  });
+
   var customCatEditBtn = document.getElementById('rc-custom-cat-edit');
   var customCatData = [];
   var customCatEditing = false;

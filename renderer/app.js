@@ -258,8 +258,11 @@ const agStatusEl = document.getElementById('ag-status');
 const setEnableTgxl = document.getElementById('set-enable-tgxl');
 const tgxlConfig = document.getElementById('tgxl-config');
 const setTgxlHost = document.getElementById('set-tgxl-host');
-const tgxlBandMapEl = document.getElementById('tgxl-band-map');
 const tgxlStatusEl = document.getElementById('tgxl-status');
+const setTgxlLabel1 = document.getElementById('set-tgxl-label-1');
+const setTgxlLabel2 = document.getElementById('set-tgxl-label-2');
+const setTgxlLabel3 = document.getElementById('set-tgxl-label-3');
+const tgxlAntButtons = document.getElementById('tgxl-ant-buttons');
 const setVerboseLog = document.getElementById('set-verbose-log');
 const setLightIcon = document.getElementById('set-light-icon');
 const setEnableSplitView = document.getElementById('set-enable-split-view');
@@ -2698,37 +2701,45 @@ function getAgBandMap() {
   return map;
 }
 // IPC: Antenna Genius status + antenna names
-// TunerGenius 1x3 band map
-const TGXL_BANDS = ['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m'];
-function buildTgxlBandMap(bandMap) {
-  tgxlBandMapEl.innerHTML = '';
-  for (const band of TGXL_BANDS) {
-    const label = document.createElement('span');
-    label.textContent = band;
-    label.style.textAlign = 'right';
-    label.style.paddingRight = '4px';
-    const select = document.createElement('select');
-    select.id = `tgxl-band-${band}`;
-    select.style.width = '100%';
-    select.innerHTML = '<option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>';
-    if (bandMap[band]) select.value = String(bandMap[band]);
-    tgxlBandMapEl.appendChild(label);
-    tgxlBandMapEl.appendChild(select);
-  }
+// TunerGenius 1x3 — labels + manual antenna buttons
+function tgxlGetLabels() {
+  return {
+    1: setTgxlLabel1.value.trim() || 'Ant 1',
+    2: setTgxlLabel2.value.trim() || 'Ant 2',
+    3: setTgxlLabel3.value.trim() || 'Ant 3',
+  };
 }
-function getTgxlBandMap() {
-  const map = {};
-  for (const band of TGXL_BANDS) {
-    const sel = document.getElementById(`tgxl-band-${band}`);
-    if (sel && sel.value) map[band] = parseInt(sel.value, 10);
-  }
-  return map;
+
+function tgxlUpdateButtons(activeAnt) {
+  const labels = tgxlGetLabels();
+  tgxlAntButtons.querySelectorAll('.tgxl-ant-btn').forEach(btn => {
+    const ant = parseInt(btn.dataset.ant, 10);
+    btn.textContent = labels[ant] || `Ant ${ant}`;
+    btn.classList.toggle('active', ant === activeAnt);
+  });
 }
+
+// Button clicks
+tgxlAntButtons.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tgxl-ant-btn');
+  if (!btn) return;
+  const ant = parseInt(btn.dataset.ant, 10);
+  window.api.tgxlSelectAntenna(ant);
+});
+
+// Label changes update button text
+[setTgxlLabel1, setTgxlLabel2, setTgxlLabel3].forEach(input => {
+  input.addEventListener('input', () => tgxlUpdateButtons(_tgxlActiveAnt));
+});
+
+var _tgxlActiveAnt = 0;
 // IPC: TunerGenius status
 if (window.api.onTgxlStatus) {
   window.api.onTgxlStatus((status) => {
-    tgxlStatusEl.textContent = status.connected ? `Ant ${status.antenna || '?'}` : '';
+    _tgxlActiveAnt = status.antenna || 0;
+    tgxlStatusEl.textContent = status.connected ? 'Connected' : '';
     tgxlStatusEl.style.color = status.connected ? '#4ecca3' : '';
+    tgxlUpdateButtons(_tgxlActiveAnt);
   });
 }
 
@@ -6963,7 +6974,10 @@ async function openSettingsDialog(tab) {
   agConfig.classList.toggle('hidden', !s.enableAntennaGenius);
   setEnableTgxl.checked = s.enableTgxl === true;
   setTgxlHost.value = s.tgxlHost || '';
-  buildTgxlBandMap(s.tgxlBandMap || {});
+  setTgxlLabel1.value = (s.tgxlLabels && s.tgxlLabels[1]) || '';
+  setTgxlLabel2.value = (s.tgxlLabels && s.tgxlLabels[2]) || '';
+  setTgxlLabel3.value = (s.tgxlLabels && s.tgxlLabels[3]) || '';
+  tgxlUpdateButtons(0);
   tgxlConfig.classList.toggle('hidden', !s.enableTgxl);
   setEnableN1mmUdp.checked = s.enableN1mmUdp === true;
   setN1mmHost.value = s.n1mmHost || '127.0.0.1';
@@ -7338,7 +7352,7 @@ settingsSave.addEventListener('click', async () => {
   const agBandMapVal = getAgBandMap();
   const tgxlEnabled = setEnableTgxl.checked;
   const tgxlHostVal = setTgxlHost.value.trim();
-  const tgxlBandMapVal = getTgxlBandMap();
+  const tgxlLabelsVal = { 1: setTgxlLabel1.value.trim(), 2: setTgxlLabel2.value.trim(), 3: setTgxlLabel3.value.trim() };
   const n1mmUdpEnabled = setEnableN1mmUdp.checked;
   const n1mmHostVal = setN1mmHost.value.trim() || '127.0.0.1';
   const n1mmPortVal = parseInt(setN1mmPort.value, 10) || 12060;
@@ -7477,7 +7491,7 @@ settingsSave.addEventListener('click', async () => {
     agBandMap: agBandMapVal,
     enableTgxl: tgxlEnabled,
     tgxlHost: tgxlHostVal,
-    tgxlBandMap: tgxlBandMapVal,
+    tgxlLabels: tgxlLabelsVal,
     enableN1mmUdp: n1mmUdpEnabled,
     n1mmHost: n1mmHostVal,
     n1mmPort: n1mmPortVal,

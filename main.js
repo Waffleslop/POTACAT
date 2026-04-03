@@ -2744,9 +2744,10 @@ function connectTunerGenius() {
     sendTgxlStatus();
   });
   tgxlClient.on('status', (status) => {
-    if (win && !win.isDestroyed()) win.webContents.send('tgxl-status', status);
+    const labels = settings.tgxlLabels || {};
+    if (win && !win.isDestroyed()) win.webContents.send('tgxl-status', { ...status, labels });
     if (remoteServer && remoteServer.running) {
-      remoteServer.sendToClient({ type: 'tgxl-status', ...status });
+      remoteServer.sendToClient({ type: 'tgxl-status', ...status, labels });
     }
   });
   tgxlClient.on('log', (msg) => sendCatLog(`[TGXL] ${msg}`));
@@ -6602,11 +6603,8 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     agSwitchForFreq(freqKhz);
   }
 
-  // TunerGenius 1x3: switch antenna based on band
-  if (settings.enableTgxl) {
-    const band = freqToBand(parseFloat(freqKhz) / 1000);
-    tgxlSwitchForBand(band);
-  }
+  // TunerGenius 1x3: no auto-switch on tune — TGXL remembers per-band internally.
+  // Manual switching via ECHOCAT / desktop buttons only.
 
   if (settings.enableWsjtx && (!cat || !cat.connected)) {
     if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
@@ -8253,7 +8251,7 @@ app.whenReady().then(() => {
     }
 
     // Reconnect TunerGenius if settings changed
-    const tgxlChanged = has('enableTgxl') || has('tgxlHost') || has('tgxlBandMap');
+    const tgxlChanged = has('enableTgxl') || has('tgxlHost');
     if (tgxlChanged) {
       connectTunerGenius();
     }
