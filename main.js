@@ -3035,6 +3035,11 @@ function connectRemote() {
     if (settings.echoFilters) {
       remoteServer.sendFiltersToClient(settings.echoFilters);
     }
+    // TunerGenius status (labels + active antenna)
+    if (tgxlClient && tgxlClient.connected) {
+      const labels = settings.tgxlLabels || {};
+      remoteServer.sendToClient({ type: 'tgxl-status', antenna: tgxlClient.antenna, connected: true, labels });
+    }
     // Push settings needed by phone (callsign, grid, respot defaults, cluster state)
     updateRemoteSettings();
     if (win && !win.isDestroyed()) {
