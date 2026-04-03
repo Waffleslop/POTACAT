@@ -172,6 +172,7 @@ let agLastBand = null; // last band we switched to (avoid redundant commands)
 let tgxlClient = null; // FlexRadio TunerGenius 1x3 client
 let tgxlLastBand = null;
 let freedvReporter = null; // FreeDV Reporter (qso.freedv.org) client
+let freedvEngine = null;   // FreeDV codec engine (started on tune to FreeDV spot)
 let freedvReporterSpots = []; // accumulates FreeDV spots
 let freedvReporterFlushTimer = null;
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
@@ -9167,7 +9168,6 @@ app.whenReady().then(() => {
   });
 
   // --- FreeDV Digital Voice IPC ---
-  let freedvEngine = null;
 
   ipcMain.on('freedv-start', (_e, mode) => {
     if (freedvEngine) freedvEngine.stop();
