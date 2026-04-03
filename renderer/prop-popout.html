@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.tile.openstreetmap.org; connect-src 'self' https://*.tile.openstreetmap.org;">
+  <title>POTACAT — Propagation</title>
+  <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { display: flex; flex-direction: column; }
+
+    .pp-header { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 12px; flex-wrap: wrap; }
+    .pp-header label { display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+    .pp-header input[type="number"] { width: 50px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 2px 4px; font-size: 12px; }
+    .pp-header select { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; font-size: 12px; }
+    .pp-header button { padding: 2px 8px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); border-radius: 3px; font-size: 11px; cursor: pointer; }
+    .pp-header button:hover { background: var(--bg-hover); }
+    .pp-spot-count { font-family: monospace; color: var(--text-dim); }
+    .pp-legend { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .pp-legend-item { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-dim); }
+    .pp-legend-swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+    .pp-map-container { flex: 1; min-height: 100px; }
+    .pp-map { width: 100%; height: 100%; }
+
+    .pp-splitter { height: 5px; background: var(--bg-secondary); cursor: row-resize; border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
+
+    .pp-table-container { height: 200px; overflow-y: auto; background: var(--bg-primary); flex-shrink: 0; }
+    .pp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .pp-table th { position: sticky; top: 0; background: var(--bg-secondary); padding: 3px 8px; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-primary); }
+    .pp-table td { padding: 3px 8px; border-bottom: 1px solid var(--border-primary); white-space: nowrap; }
+    .pp-table tr:hover { background: var(--bg-hover); }
+    .pp-source-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+    .pp-qrz-link { color: var(--accent-blue, #4fc3f7); text-decoration: none; }
+    .pp-qrz-link:hover { text-decoration: underline; }
+
+    /* Multi-dropdown */
+    .pp-dropdown { position: relative; display: inline-block; }
+    .pp-dropdown-btn { padding: 2px 8px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); border-radius: 3px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+    .pp-dropdown-menu { display: none; position: absolute; top: 100%; left: 0; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 4px; z-index: 100; padding: 4px 0; min-width: 100px; max-height: 300px; overflow-y: auto; }
+    .pp-dropdown.open .pp-dropdown-menu { display: block; }
+    .pp-dropdown-item { display: flex; align-items: center; gap: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .pp-dropdown-item:hover { background: var(--bg-hover); }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-drag">
+      <span class="titlebar-title">POTACAT — Propagation</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+
+  <div class="pp-header">
+    <label><input type="checkbox" id="pp-show-rbn" checked> <span style="color:#4fc3f7">RBN</span></label>
+    <label><input type="checkbox" id="pp-show-pskr" checked> <span style="color:#ff6b6b">PSKReporter</span></label>
+    <div class="pp-dropdown" id="pp-band-filter">
+      <button class="pp-dropdown-btn" type="button">Band: <span class="pp-dropdown-text">All</span></button>
+      <div class="pp-dropdown-menu">
+        <label class="pp-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="160m"> 160m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="80m"> 80m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="60m"> 60m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="40m"> 40m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="30m"> 30m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="20m"> 20m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="17m"> 17m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="15m"> 15m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="12m"> 12m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="10m"> 10m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="6m"> 6m</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="2m"> 2m</label>
+      </div>
+    </div>
+    <div class="pp-dropdown" id="pp-mode-filter">
+      <button class="pp-dropdown-btn" type="button">Mode: <span class="pp-dropdown-text">All</span></button>
+      <div class="pp-dropdown-menu">
+        <label class="pp-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="CW"> CW</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="FT8"> FT8</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="FT4"> FT4</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="FT2"> FT2</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="JS8"> JS8</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="FREEDV"> FreeDV</label>
+        <label class="pp-dropdown-item"><input type="checkbox" value="RTTY"> RTTY</label>
+      </div>
+    </div>
+    <label>Max age:
+      <input type="number" id="pp-max-age" min="1" max="999" value="30">
+      <select id="pp-age-unit"><option value="m">min</option><option value="h">hrs</option></select>
+    </label>
+    <span class="pp-spot-count"><span id="pp-count">0</span> spots</span>
+    <button id="pp-clear-btn" type="button">Clear</button>
+    <div id="pp-legend" class="pp-legend"></div>
+  </div>
+
+  <div class="pp-map-container">
+    <div id="pp-map" class="pp-map"></div>
+  </div>
+  <div class="pp-splitter" id="pp-splitter"></div>
+  <div class="pp-table-container" id="pp-table-container">
+    <table class="pp-table">
+      <thead>
+        <tr>
+          <th>Station</th>
+          <th>Location</th>
+          <th id="pp-dist-header">Dist (mi)</th>
+          <th>Freq</th>
+          <th>Mode</th>
+          <th>SNR</th>
+          <th>Time</th>
+          <th>Seen</th>
+        </tr>
+      </thead>
+      <tbody id="pp-table-body"></tbody>
+    </table>
+  </div>
+
+  <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="prop-popout.js"></script>
+</body>
+</html>

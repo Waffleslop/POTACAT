@@ -293,6 +293,7 @@ const rigEditor = document.getElementById('rig-editor');
 const rigEditorTitle = document.getElementById('rig-editor-title');
 const setRigName = document.getElementById('set-rig-name');
 const rigModelSelect = document.getElementById('set-rig-model-select');
+const setRadioNr = document.getElementById('set-radio-nr');
 const rigSaveBtn = document.getElementById('rig-save-btn');
 const rigCancelBtn = document.getElementById('rig-cancel-btn');
 const setRigModel = document.getElementById('set-rig-model');
@@ -1487,11 +1488,13 @@ async function openRigEditor(mode, rigId) {
       await populateRigAudioDevices(rig.remoteAudioInput, rig.remoteAudioOutput);
       // Restore per-rig CW key port
       if (setCwKeyPort && rig.cwKeyPort) setCwKeyPort.value = rig.cwKeyPort;
+      if (setRadioNr) setRadioNr.value = String(rig.radioNr || 1);
     }
   } else {
     rigEditorTitle.textContent = 'Add Rig';
     setRigName.value = '';
     if (rigModelSelect) rigModelSelect.value = '';
+    if (setRadioNr) setRadioNr.value = '1';
     setRadioType('flex');
     updateRadioSubPanels();
     await populateRigAudioDevices('', '');
@@ -1534,6 +1537,7 @@ rigSaveBtn.addEventListener('click', async () => {
   const rigAudioIn = rigRemoteAudioInput.value || '';
   const rigAudioOut = rigRemoteAudioOutput.value || '';
   const rigCwKeyPortVal = setCwKeyPort ? setCwKeyPort.value || '' : '';
+  const rigRadioNr = setRadioNr ? parseInt(setRadioNr.value, 10) || 1 : 1;
 
   if (rigEditorMode === 'edit' && editingRigId) {
     const rig = currentRigs.find(r => r.id === editingRigId);
@@ -1544,6 +1548,7 @@ rigSaveBtn.addEventListener('click', async () => {
       rig.remoteAudioInput = rigAudioIn;
       rig.remoteAudioOutput = rigAudioOut;
       rig.cwKeyPort = rigCwKeyPortVal;
+      rig.radioNr = rigRadioNr;
     }
   } else {
     const newRig = {
@@ -1554,6 +1559,7 @@ rigSaveBtn.addEventListener('click', async () => {
       remoteAudioInput: rigAudioIn,
       remoteAudioOutput: rigAudioOut,
       cwKeyPort: rigCwKeyPortVal,
+      radioNr: rigRadioNr,
     };
     currentRigs.push(newRig);
   }

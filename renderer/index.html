@@ -817,6 +817,7 @@
         </label>
         <span class="rbn-spot-count"><span id="rbn-count">0</span> spots</span>
         <button id="rbn-clear-btn" type="button">Clear</button>
+        <button id="rbn-popout-btn" type="button" title="Pop out propagation map" style="font-size:14px;padding:0 6px;line-height:1;">&#x2197;</button>
         <div id="rbn-legend" class="rbn-legend"></div>
       </div>
       <div id="rbn-map-container">
@@ -985,6 +986,13 @@
           </select>
         </label>
         <span class="help-text" style="margin-bottom:8px;display:block;">Selecting your model enables model-specific features: CW keying, ATU commands, CI-V address, filter control, and power limits.</span>
+        <label>N1MM Radio #:
+          <select id="set-radio-nr" style="width:80px;">
+            <option value="1">1</option>
+            <option value="2">2</option>
+          </select>
+        </label>
+        <span class="help-text" style="margin-bottom:8px;display:block;">Used in N1MM+ RadioInfo UDP broadcast. Set to 2 for a second radio in SO2R setups (FreqEZ, band decoders).</span>
         <label class="radio-label"><input type="radio" name="radio-type" value="flex" checked> FlexRadio (SmartSDR)</label>
         <div id="flex-config" class="radio-sub hidden">
           <label>Slice: <select id="set-flex-slice">

@@ -36,6 +36,11 @@
     .jp-row.jp-directed .jp-msg { color: #e94560; font-weight: bold; }
     .jp-row.jp-tx { opacity: 0.7; }
     .jp-row.jp-tx .jp-db { color: #e94560; }
+    .jp-row.jp-wanted { background: rgba(255, 215, 64, 0.08); }
+    .jp-badge { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 2px; margin-right: 2px; line-height: 1.4; display: inline-block; vertical-align: baseline; }
+    .jp-badge-dxcc { background: #e94560; color: #fff; }
+    .jp-badge-grid { background: #4fc3f7; color: #000; }
+    .jp-badge-call { background: #f0a500; color: #000; }
 
     /* Controls bar */
     .jp-controls { padding: 6px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 12px; }
@@ -136,7 +141,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;"><button id="jp-cq-filter" class="jtcat-filter-btn" title="CQ/73 only">CQ/73 Only</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;"><button id="jp-cq-filter" class="jtcat-filter-btn" title="CQ/73 only">CQ/73 Only</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>

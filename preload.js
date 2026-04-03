@@ -97,6 +97,9 @@ contextBridge.exposeInMainWorld('api', {
   close: () => ipcRenderer.send('win-close'),
   // Pop-out map
   popoutMapOpen: () => ipcRenderer.send('popout-map-open'),
+  // Pop-out propagation map
+  propPopoutOpen: () => ipcRenderer.send('prop-popout-open'),
+  onPropPopoutStatus: (cb) => ipcRenderer.on('prop-popout-status', (_e, open) => cb(open)),
   popoutMapClose: () => ipcRenderer.send('popout-map-close'),
   sendPopoutSpots: (data) => ipcRenderer.send('popout-map-spots', data),
   sendPopoutTuneArc: (data) => ipcRenderer.send('popout-map-tune-arc', data),

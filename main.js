@@ -634,11 +634,13 @@ function sendN1mmRadioInfo() {
   // Freq in N1MM+ format: Hz / 10 (14.074 MHz = 1407400)
   const freqN1mm = Math.round(freq / 10);
   const call = settings.myCallsign || '';
+  const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+  const radioNr = (activeRig && activeRig.radioNr) || 1;
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <RadioInfo>
 <app>POTACAT</app>
 <StationName></StationName>
-<RadioNr>1</RadioNr>
+<RadioNr>${radioNr}</RadioNr>
 <Freq>${freqN1mm}</Freq>
 <TXFreq>${freqN1mm}</TXFreq>
 <Mode>${mode}</Mode>
@@ -648,10 +650,10 @@ function sendN1mmRadioInfo() {
 <EntryWindowHwnd>0</EntryWindowHwnd>
 <Antenna>0</Antenna>
 <Rotors></Rotors>
-<FocusRadioNr>1</FocusRadioNr>
+<FocusRadioNr>${radioNr}</FocusRadioNr>
 <IsStereo>False</IsStereo>
 <IsSplit>False</IsSplit>
-<ActiveRadioNr>1</ActiveRadioNr>
+<ActiveRadioNr>${radioNr}</ActiveRadioNr>
 <IsTransmitting>False</IsTransmitting>
 <FunctionKeyCaption></FunctionKeyCaption>
 <RadioName></RadioName>

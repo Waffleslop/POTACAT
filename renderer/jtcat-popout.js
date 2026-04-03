@@ -19,6 +19,7 @@
   // --- State ---
   var decodeLog = [];
   var cqFilter = false;
+  var wantedFilter = false;
   var txEnabled = false;
   var transmitting = false;
   var jpTxFreqHz = 1500;
@@ -54,6 +55,7 @@
   var countdownEl = document.getElementById('jp-countdown');
   var syncEl = document.getElementById('jp-sync');
   var cqFilterBtn = document.getElementById('jp-cq-filter');
+  var wantedFilterBtn = document.getElementById('jp-wanted-filter');
   var cqBtn = document.getElementById('jp-cq');
   var enableTxBtn = document.getElementById('jp-enable-tx');
   var haltTxBtn = document.getElementById('jp-halt-tx');
@@ -449,16 +451,25 @@
       var isCq = upper.startsWith('CQ ');
       var isDirected = myCallsign && (upper.indexOf(' ' + myCallsign + ' ') >= 0 || upper.startsWith(myCallsign + ' ') || upper.endsWith(' ' + myCallsign));
       var is73 = upper.indexOf('RR73') >= 0 || upper.indexOf(' 73') >= 0;
+      var isWanted = d.newDxcc || d.newCall || d.newGrid;
 
       if (cqFilter && !isCq && !is73 && !isDirected) return;
+      if (wantedFilter && !isWanted && !isDirected && !is73) return;
+
+      // Build needed badges
+      var badges = '';
+      if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
+      if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
+      if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
 
       var row = document.createElement('div');
-      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '');
+      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '');
       var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
       row.innerHTML =
         '<span class="jp-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
         '<span class="jp-dt">' + dtStr + '</span>' +
         '<span class="jp-df">' + d.df + '</span>' +
+        (badges ? '<span class="jp-badges">' + badges + '</span>' : '') +
         '<span class="jp-msg">' + esc(text) + '</span>';
       row.addEventListener('dblclick', (function(decode) { return function() { onDecodeRowClick(decode); }; })(d));
       bandActivity.appendChild(row);
@@ -693,6 +704,11 @@
   cqFilterBtn.addEventListener('click', function() {
     cqFilter = !cqFilter;
     cqFilterBtn.classList.toggle('active', cqFilter);
+  });
+
+  wantedFilterBtn.addEventListener('click', function() {
+    wantedFilter = !wantedFilter;
+    wantedFilterBtn.classList.toggle('active', wantedFilter);
   });
 
   document.getElementById('jp-clear').addEventListener('click', function() {
