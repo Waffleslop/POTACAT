@@ -514,6 +514,7 @@ const parksStatsToggleBtn = document.getElementById('parks-stats-toggle');
 const parksStatsCloseBtn = document.getElementById('parks-stats-close');
 let parksStatsOpen = false;
 const setEnableDxcc = document.getElementById('set-enable-dxcc');
+const setEnableFreedv = document.getElementById('set-enable-freedv');
 const setSotaUpload = document.getElementById('set-sota-upload');
 const sotaUploadConfig = document.getElementById('sota-upload-config');
 const setSotaUsername = document.getElementById('set-sota-username');
@@ -7126,6 +7127,8 @@ async function openSettingsDialog(tab) {
   splitOrientationConfig.classList.toggle('hidden', !setEnableSplitView.checked);
   document.getElementById('set-split-orientation').value = s.splitOrientation || 'horizontal';
   setEnableDxcc.checked = s.enableDxcc === true;
+  setEnableFreedv.checked = s.enableFreedv === true;
+  if (freedvBtn) freedvBtn.classList.toggle('hidden', !s.enableFreedv);
   setSotaUpload.checked = s.sotaUpload === true;
   setSotaUsername.value = s.sotaUsername || '';
   setSotaPassword.value = s.sotaPassword || '';
@@ -7335,6 +7338,7 @@ settingsSave.addEventListener('click', async () => {
   const enableSplitViewVal = setEnableSplitView.checked;
   const splitOrientationVal = document.getElementById('set-split-orientation').value;
   const dxccEnabled = setEnableDxcc.checked;
+  const freedvEnabled = setEnableFreedv.checked;
   const sotaUploadEnabled = setSotaUpload.checked;
   const sotaUsernameVal = setSotaUsername.value.trim();
   const sotaPasswordVal = setSotaPassword.value;
@@ -7474,6 +7478,7 @@ settingsSave.addEventListener('click', async () => {
     enableSplitView: enableSplitViewVal,
     splitOrientation: splitOrientationVal,
     enableDxcc: dxccEnabled,
+    enableFreedv: freedvEnabled,
     sotaUpload: sotaUploadEnabled,
     sotaUsername: sotaUsernameVal,
     sotaPassword: sotaPasswordVal,
@@ -10912,8 +10917,7 @@ let freedvMicCtx = null;
 let freedvMicProcessor = null;
 let freedvTxOutputCtx = null;  // for playing modem audio to radio
 
-// Show FreeDV button (unhide once feature is accessible)
-if (freedvBtn) freedvBtn.classList.remove('hidden');
+// FreeDV button visibility — controlled by settings (off by default)
 
 if (freedvBtn) {
   freedvBtn.addEventListener('click', () => {
