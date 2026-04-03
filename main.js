@@ -87,6 +87,7 @@ const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
+const { FreedvReporterClient } = require('./lib/freedv-reporter');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
@@ -170,6 +171,9 @@ let agClient = null; // 4O3A Antenna Genius client
 let agLastBand = null; // last band we switched to (avoid redundant commands)
 let tgxlClient = null; // FlexRadio TunerGenius 1x3 client
 let tgxlLastBand = null;
+let freedvReporter = null; // FreeDV Reporter (qso.freedv.org) client
+let freedvReporterSpots = []; // accumulates FreeDV spots
+let freedvReporterFlushTimer = null;
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
 let workedParks = new Map(); // reference → park data from POTA parks CSV
 let wsjtx = null;
@@ -1464,6 +1468,98 @@ function disconnectPskr() {
   }
   pskrSpots = [];
   sendPskrStatus({ connected: false });
+}
+
+// --- FreeDV Reporter (qso.freedv.org) ---
+
+function connectFreedvReporter() {
+  disconnectFreedvReporter();
+  if (!settings.enableFreedv) return;
+
+  freedvReporter = new FreedvReporterClient();
+  const myPos = gridToLatLon(settings.grid);
+
+  freedvReporter.on('connected', () => {
+    sendCatLog('[FreeDV Reporter] Connected to qso.freedv.org');
+  });
+  freedvReporter.on('disconnected', () => {
+    sendCatLog('[FreeDV Reporter] Disconnected');
+  });
+  freedvReporter.on('error', (err) => {
+    sendCatLog(`[FreeDV Reporter] Error: ${err.message}`);
+  });
+
+  freedvReporter.on('spot', (raw) => {
+    if (!raw.callsign || !raw.frequency) return;
+    const freqHz = typeof raw.frequency === 'number' ? raw.frequency : parseInt(raw.frequency, 10);
+    if (!freqHz || freqHz < 100000) return;
+    const freqKhz = freqHz / 1000;
+    const freqMHz = freqHz / 1000000;
+
+    // Resolve mode string for display
+    let mode = 'FREEDV';
+    if (raw.mode && raw.mode !== 'FREEDV') mode = 'FREEDV-' + raw.mode;
+
+    let distance = null;
+    let spotBearing = null;
+    if (myPos && raw.grid && raw.grid.length >= 4) {
+      const pos = gridToLatLon(raw.grid);
+      if (pos) {
+        distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, pos.lat, pos.lon));
+        spotBearing = Math.round(bearing(myPos.lat, myPos.lon, pos.lat, pos.lon));
+      }
+    }
+
+    const spot = {
+      source: 'freedv',
+      callsign: raw.callsign,
+      frequency: String(freqKhz),
+      freqMHz,
+      mode,
+      reference: '',
+      parkName: '',
+      locationDesc: raw.grid || '',
+      distance,
+      bearing: spotBearing,
+      lat: null,
+      lon: null,
+      band: freqToBand(freqMHz),
+      spotTime: new Date().toISOString(),
+      continent: '',
+      snr: raw.snr,
+      transmitting: raw.transmitting,
+    };
+
+    // Dedup by callsign (keep latest)
+    freedvReporterSpots = freedvReporterSpots.filter(s => s.callsign !== spot.callsign);
+    freedvReporterSpots.push(spot);
+    // Cap at 200
+    if (freedvReporterSpots.length > 200) freedvReporterSpots = freedvReporterSpots.slice(-200);
+
+    // Throttle flush to renderer (every 2s)
+    if (!freedvReporterFlushTimer) {
+      freedvReporterFlushTimer = setTimeout(() => {
+        freedvReporterFlushTimer = null;
+        sendMergedSpots();
+      }, 2000);
+    }
+  });
+
+  sendCatLog('[FreeDV Reporter] Connecting to qso.freedv.org...');
+  freedvReporter.connect();
+}
+
+function disconnectFreedvReporter() {
+  if (freedvReporterFlushTimer) {
+    clearTimeout(freedvReporterFlushTimer);
+    freedvReporterFlushTimer = null;
+  }
+  if (freedvReporter) {
+    freedvReporter.disconnect();
+    freedvReporter.removeAllListeners();
+    freedvReporter = null;
+  }
+  freedvReporterSpots = [];
 }
 
 // --- PSKReporter Map view ---
@@ -4999,7 +5095,7 @@ function getActiveNetSpots() {
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
-  const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots];
+  const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
   pushSpotsToTci(merged);
@@ -6873,6 +6969,7 @@ app.whenReady().then(() => {
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr || settings.enableFreedv) connectPskr();
+  if (settings.enableFreedv) connectFreedvReporter();
   if (settings.enablePskrMap) connectPskrMap();
   if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
@@ -8364,6 +8461,12 @@ app.whenReady().then(() => {
       }
     }
 
+    // Reconnect FreeDV Reporter if FreeDV setting changed
+    if (has('enableFreedv')) {
+      if (settings.enableFreedv) connectFreedvReporter();
+      else disconnectFreedvReporter();
+    }
+
     // Reconnect PSKReporter if settings changed (or auto-enable for FreeDV)
     const freedvNeedsPskr = settings.enableFreedv && !settings.enablePskr;
     if (pskrChanged || (has('enableFreedv') && freedvNeedsPskr)) {
@@ -9612,6 +9715,7 @@ function gracefulCleanup() {
   try { disconnectTci(); } catch {}
   try { disconnectAntennaGenius(); } catch {}
   try { disconnectTunerGenius(); } catch {}
+  try { disconnectFreedvReporter(); } catch {}
   try { disconnectRemote(); } catch {}
   try { disconnectKeyer(); } catch {}
   try { stopJtcat(); } catch {}
