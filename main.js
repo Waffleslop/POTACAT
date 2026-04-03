@@ -3132,6 +3132,9 @@ function connectRemote() {
     if (settings.echoFilters) {
       remoteServer.sendFiltersToClient(settings.echoFilters);
     }
+    // FreeDV enabled state
+    remoteServer.sendToClient({ type: 'freedv-enabled', enabled: !!settings.enableFreedv });
+
     // TunerGenius status (labels + active antenna)
     if (tgxlClient && tgxlClient.connected) {
       const labels = settings.tgxlLabels || {};
@@ -4307,6 +4310,19 @@ function connectRemote() {
   });
 
   // ECHOCAT FT8 gain controls — relay to main renderer
+  remoteServer.on('set-freedv', ({ enabled }) => {
+    settings.enableFreedv = enabled;
+    saveSettings(settings);
+    if (enabled) {
+      connectFreedvReporter();
+      connectPskr();
+    } else {
+      disconnectFreedvReporter();
+    }
+    // Send confirmation back so checkbox stays in sync
+    remoteServer.sendToClient({ type: 'freedv-enabled', enabled });
+  });
+
   remoteServer.on('tgxl-select-antenna', ({ port }) => {
     if (tgxlClient && tgxlClient.connected) tgxlClient.selectAntenna(port);
   });

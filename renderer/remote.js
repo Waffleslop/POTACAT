@@ -650,6 +650,10 @@
         echoTgxlUpdateButtons(msg.antenna || 0, msg.labels);
         break;
 
+      case 'freedv-enabled':
+        if (echoFreedvCb) echoFreedvCb.checked = !!msg.enabled;
+        break;
+
       case 'qrz-result':
         if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
           tunedOpName = msg.fname || '';
@@ -2669,6 +2673,16 @@
     localStorage.setItem('echoMeterEnabled', echoMeterEnabled);
     echoMeterStrip.classList.toggle('hidden', !echoMeterEnabled);
   });
+
+  // FreeDV toggle — sends setting to desktop
+  var echoFreedvCb = document.getElementById('echo-enable-freedv');
+  if (echoFreedvCb) {
+    echoFreedvCb.addEventListener('change', function() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'set-freedv', enabled: echoFreedvCb.checked }));
+      }
+    });
+  }
 
   // Spot column checkboxes
   ['freq','dist','ref','age','mode','skip','log'].forEach(function(key) {
