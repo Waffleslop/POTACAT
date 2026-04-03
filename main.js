@@ -86,6 +86,7 @@ const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { TunerGeniusClient } = require('./lib/tuner-genius');
+const { FreedvEngine } = require('./lib/freedv-engine');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
@@ -8980,6 +8981,64 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-spectrum', (_e, bins) => {
     if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatSpectrum(bins);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-spectrum', { bins });
+  });
+
+  // --- FreeDV Digital Voice IPC ---
+  let freedvEngine = null;
+
+  ipcMain.on('freedv-start', (_e, mode) => {
+    if (freedvEngine) freedvEngine.stop();
+    freedvEngine = new FreedvEngine();
+    freedvEngine.on('rx-speech', (data) => {
+      if (win && !win.isDestroyed()) win.webContents.send('freedv-rx-speech', data);
+    });
+    freedvEngine.on('tx-modem', (data) => {
+      if (win && !win.isDestroyed()) win.webContents.send('freedv-tx-modem', data);
+    });
+    freedvEngine.on('sync', (data) => {
+      if (win && !win.isDestroyed()) win.webContents.send('freedv-sync', data);
+      if (remoteServer && remoteServer.running) {
+        remoteServer.sendToClient({ type: 'freedv-sync', ...data });
+      }
+    });
+    freedvEngine.on('status', (data) => {
+      sendCatLog(`[FreeDV] ${data.state} mode=${data.mode}`);
+      if (win && !win.isDestroyed()) win.webContents.send('freedv-status', data);
+    });
+    freedvEngine.on('error', (data) => {
+      sendCatLog(`[FreeDV] Error: ${data.message}`);
+    });
+    freedvEngine.start(mode);
+  });
+
+  ipcMain.on('freedv-stop', () => {
+    if (freedvEngine) { freedvEngine.stop(); freedvEngine = null; }
+  });
+
+  ipcMain.on('freedv-set-mode', (_e, mode) => {
+    if (freedvEngine) freedvEngine.setMode(mode);
+  });
+
+  ipcMain.on('freedv-rx-audio', (_e, buf) => {
+    if (freedvEngine) {
+      const samples = buf instanceof Int16Array ? buf : new Int16Array(buf);
+      freedvEngine.feedRxAudio(samples);
+    }
+  });
+
+  ipcMain.on('freedv-tx-audio', (_e, buf) => {
+    if (freedvEngine) {
+      const samples = buf instanceof Int16Array ? buf : new Int16Array(buf);
+      freedvEngine.feedTxAudio(samples);
+    }
+  });
+
+  ipcMain.on('freedv-set-tx', (_e, enabled) => {
+    if (freedvEngine) freedvEngine.setTxEnabled(enabled);
+  });
+
+  ipcMain.on('freedv-set-squelch', (_e, enabled, threshold) => {
+    if (freedvEngine) freedvEngine.setSquelch(enabled, threshold);
   });
 
   // --- QRZ single callsign lookup (for Quick Log) ---

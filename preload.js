@@ -182,6 +182,18 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
   onJtcatStartForRemote: (cb) => ipcRenderer.on('jtcat-start-for-remote', () => cb()),
   onJtcatStopForRemote: (cb) => ipcRenderer.on('jtcat-stop-for-remote', () => cb()),
+  // FreeDV Digital Voice
+  freedvStart: (mode) => ipcRenderer.send('freedv-start', mode),
+  freedvStop: () => ipcRenderer.send('freedv-stop'),
+  freedvSetMode: (mode) => ipcRenderer.send('freedv-set-mode', mode),
+  freedvRxAudio: (buf) => ipcRenderer.send('freedv-rx-audio', buf),
+  freedvTxAudio: (buf) => ipcRenderer.send('freedv-tx-audio', buf),
+  freedvSetTx: (enabled) => ipcRenderer.send('freedv-set-tx', enabled),
+  freedvSetSquelch: (enabled, threshold) => ipcRenderer.send('freedv-set-squelch', enabled, threshold),
+  onFreedvRxSpeech: (cb) => ipcRenderer.on('freedv-rx-speech', (_e, data) => cb(data)),
+  onFreedvTxModem: (cb) => ipcRenderer.on('freedv-tx-modem', (_e, data) => cb(data)),
+  onFreedvSync: (cb) => ipcRenderer.on('freedv-sync', (_e, data) => cb(data)),
+  onFreedvStatus: (cb) => ipcRenderer.on('freedv-status', (_e, data) => cb(data)),
   // Zoom
   setZoom: (factor) => webFrame.setZoomFactor(factor),
   getZoom: () => webFrame.getZoomFactor(),
