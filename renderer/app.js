@@ -10889,6 +10889,162 @@ if (rigCmdResetAllBtn) {
   });
 }
 
+// --- FreeDV Digital Voice ---
+const freedvView = document.getElementById('freedv-view');
+const freedvBtn = document.getElementById('view-freedv-btn');
+const freedvModeSelect = document.getElementById('freedv-mode');
+const freedvSyncLed = document.getElementById('freedv-sync-led');
+const freedvSnrEl = document.getElementById('freedv-snr');
+const freedvStartBtn = document.getElementById('freedv-start-btn');
+const freedvStopBtn = document.getElementById('freedv-stop-btn');
+const freedvPttBtn = document.getElementById('freedv-ptt-btn');
+const freedvSquelchSlider = document.getElementById('freedv-squelch');
+const freedvSquelchVal = document.getElementById('freedv-squelch-val');
+const freedvStatusText = document.getElementById('freedv-status-text');
+let freedvRunning = false;
+let freedvAudioCtx = null;
+let freedvAudioStream = null;
+let freedvProcessor = null;
+let freedvTxCtx = null;
+let freedvPttActive = false;
+
+// Show FreeDV button (unhide once feature is accessible)
+if (freedvBtn) freedvBtn.classList.remove('hidden');
+
+if (freedvBtn) {
+  freedvBtn.addEventListener('click', () => {
+    // Toggle FreeDV view
+    const showing = !freedvView.classList.contains('hidden');
+    // Hide all other views
+    document.querySelectorAll('.view-content').forEach(v => v.classList.add('hidden'));
+    freedvView.classList.toggle('hidden', showing);
+    freedvBtn.classList.toggle('active', !showing);
+  });
+}
+
+freedvStartBtn.addEventListener('click', async () => {
+  if (freedvRunning) return;
+  freedvRunning = true;
+  freedvStartBtn.disabled = true;
+  freedvStopBtn.disabled = false;
+  freedvPttBtn.disabled = false;
+  freedvStatusText.textContent = 'Starting...';
+
+  // Start engine
+  window.api.freedvStart(freedvModeSelect.value);
+
+  // Start RX audio capture (48kHz → 8kHz → Int16 via AudioWorklet)
+  try {
+    const s = await window.api.getSettings();
+    const constraints = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
+    freedvAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    freedvAudioCtx = new AudioContext();
+    const source = freedvAudioCtx.createMediaStreamSource(freedvAudioStream);
+    const dsRatio = freedvAudioCtx.sampleRate / 8000;
+
+    await freedvAudioCtx.audioWorklet.addModule('freedv-audio-worklet.js');
+    const worklet = new AudioWorkletNode(freedvAudioCtx, 'freedv-processor', {
+      processorOptions: { dsRatio },
+    });
+    worklet.port.onmessage = function(e) {
+      window.api.freedvRxAudio(e.data);
+    };
+    source.connect(worklet);
+    worklet.connect(freedvAudioCtx.destination);
+    freedvProcessor = worklet;
+  } catch (err) {
+    console.error('[FreeDV] Audio capture failed:', err.message);
+    freedvStatusText.textContent = 'Audio error: ' + err.message;
+  }
+});
+
+freedvStopBtn.addEventListener('click', () => {
+  freedvRunning = false;
+  freedvStartBtn.disabled = false;
+  freedvStopBtn.disabled = true;
+  freedvPttBtn.disabled = true;
+  freedvStatusText.textContent = 'Stopped';
+  freedvSyncLed.style.background = '#555';
+  freedvSnrEl.textContent = 'SNR: --';
+  window.api.freedvStop();
+  if (freedvProcessor) { freedvProcessor.disconnect(); freedvProcessor = null; }
+  if (freedvAudioCtx) { freedvAudioCtx.close().catch(() => {}); freedvAudioCtx = null; }
+  if (freedvAudioStream) { freedvAudioStream.getTracks().forEach(t => t.stop()); freedvAudioStream = null; }
+});
+
+freedvModeSelect.addEventListener('change', () => {
+  if (freedvRunning) window.api.freedvSetMode(freedvModeSelect.value);
+});
+
+freedvSquelchSlider.addEventListener('input', () => {
+  const val = parseInt(freedvSquelchSlider.value, 10);
+  freedvSquelchVal.textContent = val + ' dB';
+  window.api.freedvSetSquelch(true, val);
+});
+
+// PTT button — hold to transmit
+freedvPttBtn.addEventListener('mousedown', () => startFreedvPtt());
+freedvPttBtn.addEventListener('mouseup', () => stopFreedvPtt());
+freedvPttBtn.addEventListener('mouseleave', () => stopFreedvPtt());
+freedvPttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startFreedvPtt(); });
+freedvPttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopFreedvPtt(); });
+
+function startFreedvPtt() {
+  if (!freedvRunning || freedvPttActive) return;
+  freedvPttActive = true;
+  freedvPttBtn.style.background = '#e94560';
+  freedvPttBtn.style.borderColor = '#e94560';
+  freedvPttBtn.style.color = '#fff';
+  window.api.freedvSetTx(true);
+  // Also activate radio PTT
+  window.api.rigControl({ action: 'ptt-on' });
+  // TODO: capture mic audio and send as TX speech
+}
+
+function stopFreedvPtt() {
+  if (!freedvPttActive) return;
+  freedvPttActive = false;
+  freedvPttBtn.style.background = '';
+  freedvPttBtn.style.borderColor = '';
+  freedvPttBtn.style.color = '';
+  window.api.freedvSetTx(false);
+  window.api.rigControl({ action: 'ptt-off' });
+}
+
+// FreeDV events from main process
+window.api.onFreedvSync((data) => {
+  freedvSyncLed.style.background = data.sync ? '#4ecca3' : '#f0a500';
+  freedvSnrEl.textContent = 'SNR: ' + (data.snr != null ? data.snr.toFixed(1) + ' dB' : '--');
+});
+
+window.api.onFreedvStatus((data) => {
+  freedvStatusText.textContent = data.state === 'running' ? `Running (${data.mode})` : 'Stopped';
+});
+
+// RX speech playback — play decoded voice through speakers
+window.api.onFreedvRxSpeech(async (data) => {
+  try {
+    if (!freedvTxCtx || freedvTxCtx.state === 'closed') {
+      freedvTxCtx = new AudioContext({ sampleRate: 8000 });
+    }
+    const samples = new Int16Array(data.samples);
+    const floats = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
+    const buffer = freedvTxCtx.createBuffer(1, floats.length, 8000);
+    buffer.getChannelData(0).set(floats);
+    const source = freedvTxCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(freedvTxCtx.destination);
+    source.start();
+  } catch {}
+});
+
+// TX modem playback — play modulated signal to radio USB audio
+window.api.onFreedvTxModem(async (data) => {
+  // TODO: route to radio audio output device (like JTCAT TX audio)
+});
+
 // --- Pi Access (The Net easter egg) ---
 // Ctrl+Shift+Click (Cmd+Shift+Click on Mac) on π unlocks JTCAT + Remote CW
 const piAccessEl = document.getElementById('pi-access');
