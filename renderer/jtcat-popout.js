@@ -795,6 +795,15 @@
     startPopoutAudio(s.remoteAudioInput || '');
   });
 
+  // Silence watchdog: engine detected 3+ cycles of zeros — restart audio capture
+  if (window.api.onRestartPopoutAudio) {
+    window.api.onRestartPopoutAudio(async function() {
+      console.log('[JTCAT popout] Silence watchdog — restarting audio capture');
+      var s = await window.api.getSettings();
+      startPopoutAudio(s.remoteAudioInput || '');
+    });
+  }
+
   // --- Audio capture (runs in the popout window, sends samples to main process) ---
   var popoutAudioCtx = null;
   var popoutAudioStream = null;

@@ -2453,6 +2453,15 @@ function startJtcat(mode) {
     }
   });
 
+  ft8Engine.on('silent', () => {
+    // Audio capture is delivering zeros — tell renderer to restart
+    if (win && !win.isDestroyed()) win.webContents.send('restart-jtcat-audio');
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      // Popout has its own audio — tell it to restart too
+      jtcatPopoutWin.webContents.send('restart-popout-audio');
+    }
+  });
+
   ft8Engine.on('cycle', (data) => {
     if (win && !win.isDestroyed()) {
       win.webContents.send('jtcat-cycle', data);
@@ -8942,12 +8951,25 @@ app.whenReady().then(() => {
   let _jtcatAudioDiag = 0;
   ipcMain.on('jtcat-audio', (_e, buf) => {
     _jtcatAudioDiag++;
-    if (_jtcatAudioDiag <= 3 || _jtcatAudioDiag % 200 === 0) {
-      const arr = buf ? new Float32Array(buf) : null;
-      const max = arr ? Math.max(...arr.slice(0, 100).map(Math.abs)) : 0;
-      console.log(`[JTCAT] audio IPC #${_jtcatAudioDiag} len=${buf ? buf.length : 0} max=${max.toFixed(4)} engine=${!!ft8Engine}`);
+    // Ensure buf is a proper array — IPC serialization on macOS can produce
+    // objects that Float32Array constructor interprets as length instead of data
+    let samples;
+    if (buf instanceof Float32Array) {
+      samples = buf;
+    } else if (ArrayBuffer.isView(buf) || buf instanceof ArrayBuffer) {
+      samples = new Float32Array(buf);
+    } else if (Array.isArray(buf)) {
+      samples = new Float32Array(buf);
+    } else {
+      // Fallback: buf might be an object with numeric keys from structured clone
+      try { samples = new Float32Array(Object.values(buf)); } catch { return; }
     }
-    if (ft8Engine) ft8Engine.feedAudio(new Float32Array(buf));
+    if (_jtcatAudioDiag <= 3 || _jtcatAudioDiag % 200 === 0) {
+      let max = 0;
+      for (let j = 0; j < Math.min(100, samples.length); j++) max = Math.max(max, Math.abs(samples[j]));
+      console.log(`[JTCAT] audio IPC #${_jtcatAudioDiag} len=${samples.length} max=${max.toFixed(4)} engine=${!!ft8Engine}`);
+    }
+    if (ft8Engine) ft8Engine.feedAudio(samples);
   });
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
     jtcatQuietFreq = hz;

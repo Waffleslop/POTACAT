@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatStatus: (cb) => ipcRenderer.on('jtcat-status', (_e, data) => cb(data)),
   onJtcatTxAudio: (cb) => ipcRenderer.on('jtcat-tx-audio', (_e, data) => cb(data)),
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
+  onRestartPopoutAudio: (cb) => ipcRenderer.on('restart-popout-audio', () => cb()),
   onJtcatQsoState: (cb) => ipcRenderer.on('jtcat-qso-state', (_e, data) => cb(data)),
   onJtcatQsoLogged: (cb) => ipcRenderer.on('jtcat-qso-logged', (_e, data) => cb(data)),
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
