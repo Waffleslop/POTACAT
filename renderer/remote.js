@@ -113,10 +113,18 @@
     ref: colPrefs.ref !== false,
     age: colPrefs.age !== false,
     mode: colPrefs.mode === true, // off by default
+    band: colPrefs.band === true, // off by default
+    name: colPrefs.name === true, // off by default — park name / comments
+    src: colPrefs.src === true,   // off by default — source (POTA/SOTA/DXC)
     skip: colPrefs.skip !== false,
     log: colPrefs.log !== false,
   };
-  function saveColPrefs() { localStorage.setItem('echocat-spot-cols', JSON.stringify(colShow)); }
+  // Column ordering — array of column keys in display order
+  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'src', 'age', 'skip', 'log'];
+  var colOrder = colPrefs.order && Array.isArray(colPrefs.order) ? colPrefs.order : defaultColOrder.slice();
+  // Ensure any new columns are present in colOrder
+  for (var k of defaultColOrder) { if (colOrder.indexOf(k) === -1) colOrder.push(k); }
+  function saveColPrefs() { localStorage.setItem('echocat-spot-cols', JSON.stringify({ ...colShow, order: colOrder })); }
   let tunedCallsign = '';
   let tunedOpName = '';
   let tunedState = '';
@@ -288,6 +296,7 @@
   let ft8HuntCall = '';        // callsign we're hunting from spot list
   let ft8UserScrolled = false; // true when user has scrolled up in decode log
   let ft8CqFilter = false;     // CQ-only filter
+  let ft8WantedFilter = false; // Wanted-only filter (new DXCC/grid/call)
   let ft8TxFreqHz = 1500;      // TX frequency in Hz (for waterfall marker)
 
   // FT2 dial frequencies (kHz) per band — from IU8LMC published table
@@ -336,6 +345,7 @@
   const ft8QsoExchange = document.getElementById('ft8-qso-exchange');
   const ft8TxFreqDisplay = document.getElementById('ft8-tx-freq-display');
   const ft8CqFilterBtn = document.getElementById('ft8-cq-filter');
+  const ft8WantedFilterBtn = document.getElementById('ft8-wanted-filter');
 
   // Rig controls elements (now inside settings overlay)
   const rigCtrlToggle = document.getElementById('rig-ctrl-toggle');
@@ -653,6 +663,14 @@
       case 'freedv-enabled':
         if (echoFreedvCb) echoFreedvCb.checked = !!msg.enabled;
         break;
+
+      case 'freedv-sync': {
+        var syncEl = document.getElementById('echo-freedv-sync');
+        var snrEl = document.getElementById('echo-freedv-snr');
+        if (syncEl) syncEl.style.background = msg.sync ? '#4ecca3' : '#f0a500';
+        if (snrEl) snrEl.textContent = 'SNR: ' + (msg.snr != null ? msg.snr.toFixed(1) : '--');
+        break;
+      }
 
       case 'qrz-result':
         if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
@@ -1141,17 +1159,33 @@
       const age = isNet ? (s.comments || '') : formatAge(s.spotTime);
       const freqStr = formatSpotFreq(s.frequency);
       const src = s.source || 'pota';
+      const srcLabel = src.toUpperCase();
       const newBadge = newPark ? '<span class="new-badge">NEW</span>' : '';
       const logBtn = isNet ? '' : '<button type="button" class="spot-log-btn">Log</button>';
       const skipBtn = isNet ? '' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'Unskip' : 'Skip'}</button>`;
+      const spotName = s.parkName || s.comments || '';
+
+      // Build columns in user-defined order
+      const colHtml = colOrder.map(key => {
+        if (!colShow[key]) return '';
+        switch (key) {
+          case 'freq': return `<span class="spot-freq">${freqStr}</span>`;
+          case 'mode': return `<span class="spot-mode">${esc(s.mode || '')}</span>`;
+          case 'band': return `<span class="spot-band">${esc(s.band || '')}</span>`;
+          case 'dist': return `<span class="spot-dist">${formatSpotDist(s.distance)}</span>`;
+          case 'ref': return `<span class="spot-ref ${refClass}">${esc(ref)}</span>`;
+          case 'name': return `<span class="spot-name">${esc(spotName)}</span>`;
+          case 'src': return `<span class="spot-src source-${src}">${srcLabel}</span>`;
+          case 'age': return `<span class="spot-age">${age}</span>`;
+          case 'skip': return isNet ? '' : skipBtn;
+          case 'log': return isNet ? '' : logBtn;
+          default: return '';
+        }
+      }).join('');
+
       return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}${skipClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}">
         <span class="spot-call">${workedCheck}${esc(s.callsign)}${newBadge}</span>
-        ${colShow.freq ? `<span class="spot-freq">${freqStr}</span>` : ''}
-        ${colShow.mode ? `<span class="spot-mode">${esc(s.mode || '')}</span>` : ''}
-        ${colShow.dist ? `<span class="spot-dist">${formatSpotDist(s.distance)}</span>` : ''}
-        ${colShow.ref ? `<span class="spot-ref ${refClass}">${esc(ref)}</span>` : ''}
-        ${colShow.age ? `<span class="spot-age">${age}</span>` : ''}
-        ${colShow.skip ? skipBtn : ''}${colShow.log ? logBtn : ''}
+        ${colHtml}
       </div>`;
     }).join('');
   }
@@ -2684,18 +2718,63 @@
     });
   }
 
-  // Spot column checkboxes
-  ['freq','dist','ref','age','mode','skip','log'].forEach(function(key) {
-    var cb = document.getElementById('col-' + key);
-    if (cb) {
+  // FreeDV squelch slider
+  var echoFreedvSquelch = document.getElementById('echo-freedv-squelch');
+  var echoFreedvSquelchVal = document.getElementById('echo-freedv-squelch-val');
+  if (echoFreedvSquelch) {
+    echoFreedvSquelch.addEventListener('input', function() {
+      var val = parseInt(echoFreedvSquelch.value, 10);
+      echoFreedvSquelchVal.textContent = val + ' dB';
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'freedv-set-squelch', enabled: true, threshold: val }));
+      }
+    });
+  }
+
+  // Spot column order + toggles — dynamic list with up/down buttons
+  var colLabels = { freq: 'Freq', mode: 'Mode', band: 'Band', dist: 'Dist', ref: 'Ref/Park', name: 'Name', src: 'Source', age: 'Age', skip: 'Skip', log: 'Log' };
+  function buildColOrderUI() {
+    var container = document.getElementById('col-order-list');
+    if (!container) return;
+    container.innerHTML = '';
+    colOrder.forEach(function(key, idx) {
+      var row = document.createElement('div');
+      row.className = 'col-order-row';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
       cb.checked = colShow[key];
       cb.addEventListener('change', function() {
         colShow[key] = cb.checked;
         saveColPrefs();
         renderSpots();
       });
-    }
-  });
+      var label = document.createElement('span');
+      label.className = 'col-order-label';
+      label.textContent = colLabels[key] || key;
+      var upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.className = 'col-order-btn';
+      upBtn.textContent = '\u25B2';
+      upBtn.disabled = idx === 0;
+      upBtn.addEventListener('click', function() {
+        if (idx > 0) { colOrder.splice(idx, 1); colOrder.splice(idx - 1, 0, key); saveColPrefs(); renderSpots(); buildColOrderUI(); }
+      });
+      var downBtn = document.createElement('button');
+      downBtn.type = 'button';
+      downBtn.className = 'col-order-btn';
+      downBtn.textContent = '\u25BC';
+      downBtn.disabled = idx === colOrder.length - 1;
+      downBtn.addEventListener('click', function() {
+        if (idx < colOrder.length - 1) { colOrder.splice(idx, 1); colOrder.splice(idx + 1, 0, key); saveColPrefs(); renderSpots(); buildColOrderUI(); }
+      });
+      row.appendChild(cb);
+      row.appendChild(label);
+      row.appendChild(upBtn);
+      row.appendChild(downBtn);
+      container.appendChild(row);
+    });
+  }
+  buildColOrderUI();
 
   function drawEchoBar(canvas, level, color) {
     if (!canvas) return;
@@ -4543,16 +4622,25 @@
 
         // Always show decodes from/to our active QSO partner
         const isQsoPartner = ft8QsoState && ft8QsoState.call && upper.indexOf(ft8QsoState.call.toUpperCase()) >= 0;
+        const isWanted = d.newDxcc || d.newCall || d.newGrid;
 
         // Apply CQ filter — always show CQ, 73, directed-at-me, hunted, and QSO partner
         if (ft8CqFilter && !isCq && !is73 && !isDirected && !isHunt && !isQsoPartner) return;
+        if (ft8WantedFilter && !isWanted && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
+
+        // Build needed badges
+        let badges = '';
+        if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
+        if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
+        if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
 
         const row = document.createElement('div');
-        row.className = 'ft8-row' + (isCq ? ' ft8-cq' : '') + (isDirected ? ' ft8-directed' : '') + (isHunt ? ' ft8-hunt' : '');
+        row.className = 'ft8-row' + (isCq ? ' ft8-cq' : '') + (isDirected ? ' ft8-directed' : '') + (isHunt ? ' ft8-hunt' : '') + (isWanted ? ' ft8-wanted' : '');
         row.innerHTML =
           '<span class="ft8-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
           '<span class="ft8-dt">' + (d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '') + '</span>' +
           '<span class="ft8-df">' + d.df + '</span>' +
+          (badges ? '<span class="ft8-badges">' + badges + '</span>' : '') +
           '<span class="ft8-msg">' + esc(text) + '</span>';
         // Click to reply
         row.addEventListener('click', () => ft8ClickDecode(d));
@@ -4803,6 +4891,14 @@
     ft8CqFilter = !ft8CqFilter;
     ft8CqFilterBtn.classList.toggle('active', ft8CqFilter);
   });
+
+  // Wanted-only filter toggle
+  if (ft8WantedFilterBtn) {
+    ft8WantedFilterBtn.addEventListener('click', () => {
+      ft8WantedFilter = !ft8WantedFilter;
+      ft8WantedFilterBtn.classList.toggle('active', ft8WantedFilter);
+    });
+  }
 
   // FT8 RX/TX gain sliders — relay to desktop via WebSocket
   var ft8RxGain = document.getElementById('ft8-rx-gain');

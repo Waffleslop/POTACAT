@@ -10025,6 +10025,12 @@ rbnClearBtn.addEventListener('click', () => {
   renderRbnTable();
 });
 
+// Pop-out propagation map
+const rbnPopoutBtn = document.getElementById('rbn-popout-btn');
+if (rbnPopoutBtn) {
+  rbnPopoutBtn.addEventListener('click', () => window.api.propPopoutOpen());
+}
+
 // --- RBN IPC listeners ---
 window.api.onRbnSpots((spots) => {
   rbnSpots = spots;
@@ -10917,9 +10923,9 @@ function isFreedvMode(mode) {
 }
 
 async function startFreedvForMode(mode) {
-  if (freedvActive) return;
+  if (freedvActive) { console.log('[FreeDV] Already active, skipping start'); return; }
   const s = await window.api.getSettings();
-  if (!s.enableFreedv) return; // feature not enabled
+  if (!s.enableFreedv) { console.log('[FreeDV] Not enabled in settings, skipping'); return; }
   freedvActive = true;
   console.log('[FreeDV] Auto-starting for mode:', mode);
 

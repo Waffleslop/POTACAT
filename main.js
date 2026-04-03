@@ -91,7 +91,7 @@ const { FreedvReporterClient } = require('./lib/freedv-reporter');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
-const { WsjtxClient, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
+const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const { Ft8Engine } = require('./lib/ft8-engine');
 const { RemoteServer } = require('./lib/remote-server');
@@ -146,6 +146,7 @@ let qsoPopoutWin = null; // pop-out QSO log window
 let actmapPopoutWin = null; // pop-out activation map window
 let spotsPopoutWin = null; // pop-out spots window (activator mode)
 let clusterPopoutWin = null; // pop-out DX cluster terminal window
+let propPopoutWin = null;    // pop-out propagation map window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let jtcatMapPopoutWin = null; // pop-out JTCAT map window
 let popoutJtcatQso = null;   // QSO state for popout (like remoteJtcatQso for ECHOCAT)
@@ -176,6 +177,9 @@ let freedvEngine = null;   // FreeDV codec engine (started on tune to FreeDV spo
 let freedvReporterSpots = []; // accumulates FreeDV spots
 let freedvReporterFlushTimer = null;
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
+let rosterWorkedDxcc = new Set();  // "EntityName|20m" — DXCC entities worked per band
+let rosterWorkedCalls = new Set(); // "K1ABC" — all callsigns ever worked
+let rosterWorkedGrids = new Set(); // "FN42" — all grids ever worked
 let workedParks = new Map(); // reference → park data from POTA parks CSV
 let wsjtx = null;
 let wsjtxStatus = null; // last Status message from WSJT-X
@@ -537,9 +541,10 @@ function sendCatFrequency(hz) {
 }
 
 function sendCatMode(mode) {
-  if (win && !win.isDestroyed()) win.webContents.send('cat-mode', mode);
-  _currentMode = mode;
-  // Mode confirmed by radio — clear suppress so ECHOCAT gets the real value
+  // While FreeDV engine is active, display "FreeDV" instead of the radio's USB/LSB
+  const displayMode = (freedvEngine && (mode === 'USB' || mode === 'LSB')) ? 'FreeDV' : mode;
+  if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
+  _currentMode = mode; // keep real mode internally for CAT
   _modeSuppressUntil = 0;
   broadcastRigState();
   sendN1mmRadioInfo();
@@ -1184,6 +1189,7 @@ function sendRbnStatus(s) {
 
 function sendRbnSpots() {
   if (win && !win.isDestroyed()) win.webContents.send('rbn-spots', rbnSpots);
+  if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.webContents.send('rbn-spots', rbnSpots);
 }
 
 function connectRbn() {
@@ -1570,6 +1576,7 @@ function sendPskrMapStatus(s) {
 
 function sendPskrMapSpots() {
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-spots', pskrMapSpots);
+  if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.webContents.send('pskr-map-spots', pskrMapSpots);
 }
 
 function connectPskrMap() {
@@ -1755,6 +1762,15 @@ async function saveQsoRecord(qsoData) {
     }
     if (remoteServer && remoteServer.running) {
       remoteServer.sendWorkedQsos([...workedQsos.entries()]);
+    }
+    // Update roster needed sets live
+    rosterWorkedCalls.add(call);
+    const grid = (qsoData.grid || '').toUpperCase().substring(0, 4);
+    if (grid && /^[A-R]{2}\d{2}$/.test(grid)) rosterWorkedGrids.add(grid);
+    const band = (qsoData.band || '').toLowerCase();
+    if (band && ctyDb) {
+      const entity = resolveCallsign(call, ctyDb);
+      if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
     }
   }
 
@@ -2405,6 +2421,28 @@ function startJtcat(mode) {
   ft8Engine.setMode(mode || 'FT8');
 
   ft8Engine.on('decode', async (data) => {
+    // Enrich decodes with "needed" flags for call roster
+    if (ctyDb && data.results) {
+      const currentBand = _currentFreqHz ? freqToBand(_currentFreqHz / 1e6) : null;
+      for (const r of data.results) {
+        const { dxCall } = extractCallsigns(r.text || '');
+        if (!dxCall) continue;
+        const uc = dxCall.toUpperCase();
+        const entity = resolveCallsign(uc, ctyDb);
+        r.call = uc;
+        r.entity = entity ? entity.name : '';
+        r.continent = entity ? entity.continent : '';
+        r.newDxcc = !!(entity && currentBand && !rosterWorkedDxcc.has(entity.name + '|' + currentBand));
+        r.newCall = !rosterWorkedCalls.has(uc);
+        // Extract grid from CQ messages (e.g. "CQ K1ABC FN42")
+        const gm = (r.text || '').match(/\b([A-R]{2}\d{2})\s*$/i);
+        if (gm) {
+          r.grid = gm[1].toUpperCase();
+          r.newGrid = !rosterWorkedGrids.has(r.grid);
+        }
+      }
+    }
+
     if (win && !win.isDestroyed()) {
       win.webContents.send('jtcat-decode', data);
     }
@@ -5321,6 +5359,37 @@ function loadWorkedQsos() {
   } catch (err) {
     console.error('Failed to parse worked QSOs:', err.message);
   }
+  buildRosterSets();
+}
+
+// --- Call Roster "needed" sets ---
+function buildRosterSets() {
+  rosterWorkedDxcc.clear();
+  rosterWorkedCalls.clear();
+  rosterWorkedGrids.clear();
+  const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  if (!fs.existsSync(logPath)) return;
+  try {
+    const qsos = isSqliteFile(logPath) ? null : parseAllQsos(logPath);
+    if (!qsos) return; // SQLite logs don't have grids reliably, skip for now
+    for (const q of qsos) {
+      const call = (q.call || '').toUpperCase();
+      if (!call) continue;
+      rosterWorkedCalls.add(call);
+      // Grid
+      const grid = (q.gridsquare || '').toUpperCase().substring(0, 4);
+      if (grid && /^[A-R]{2}\d{2}$/.test(grid)) rosterWorkedGrids.add(grid);
+      // DXCC entity per band
+      const band = (q.band || '').toLowerCase();
+      if (band && ctyDb) {
+        const entity = resolveCallsign(call, ctyDb);
+        if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
+      }
+    }
+    console.log('[Roster] Built needed sets: ' + rosterWorkedDxcc.size + ' dxcc-band, ' + rosterWorkedCalls.size + ' calls, ' + rosterWorkedGrids.size + ' grids');
+  } catch (err) {
+    console.error('Failed to build roster sets:', err.message);
+  }
 }
 
 // --- Worked parks tracking ---
@@ -7171,6 +7240,76 @@ app.whenReady().then(() => {
       popoutWin.webContents.send('popout-home', data);
     }
   });
+
+  // --- Propagation map pop-out ---
+  ipcMain.on('prop-popout-open', () => {
+    if (propPopoutWin && !propPopoutWin.isDestroyed()) {
+      propPopoutWin.focus();
+      return;
+    }
+
+    const isMac = process.platform === 'darwin';
+    propPopoutWin = new BrowserWindow({
+      width: 900,
+      height: 650,
+      title: 'POTACAT — Propagation',
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-prop-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    const saved = settings.propPopoutBounds;
+    if (saved && saved.width > 200 && saved.height > 150 && isOnScreen(saved)) {
+      propPopoutWin.setBounds(clampToWorkArea(saved));
+    }
+    propPopoutWin.show();
+    propPopoutWin.setMenuBarVisibility(false);
+    propPopoutWin.loadFile(path.join(__dirname, 'renderer', 'prop-popout.html'));
+
+    propPopoutWin.on('close', () => {
+      if (propPopoutWin && !propPopoutWin.isDestroyed()) {
+        if (!propPopoutWin.isMaximized() && !propPopoutWin.isMinimized()) {
+          settings.propPopoutBounds = propPopoutWin.getBounds();
+          saveSettings(settings);
+        }
+      }
+    });
+
+    propPopoutWin.on('closed', () => {
+      propPopoutWin = null;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('prop-popout-status', false);
+      }
+    });
+
+    propPopoutWin.webContents.on('did-finish-load', () => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('prop-popout-status', true);
+      }
+      // Send current data to pop-out
+      if (rbnSpots.length > 0) propPopoutWin.webContents.send('rbn-spots', rbnSpots);
+      if (pskrMapSpots.length > 0) propPopoutWin.webContents.send('pskr-map-spots', pskrMapSpots);
+    });
+
+    propPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        propPopoutWin.webContents.toggleDevTools();
+      }
+    });
+  });
+
+  ipcMain.on('prop-popout-minimize', () => { if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.minimize(); });
+  ipcMain.on('prop-popout-maximize', () => {
+    if (propPopoutWin && !propPopoutWin.isDestroyed()) {
+      propPopoutWin.isMaximized() ? propPopoutWin.unmaximize() : propPopoutWin.maximize();
+    }
+  });
+  ipcMain.on('prop-popout-close', () => { if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.close(); });
 
   // Relay colorblind mode to pop-outs and panadapter integrations
   ipcMain.on('colorblind-mode', (_e, enabled) => {

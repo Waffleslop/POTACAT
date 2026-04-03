@@ -221,15 +221,7 @@
         </div>
 
         <div class="so-section-label">Spot Columns</div>
-        <div class="so-row" style="flex-wrap:wrap;gap:6px 12px;">
-          <label class="so-label" style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="col-freq" checked> Freq</label>
-          <label class="so-label" style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="col-dist" checked> Dist</label>
-          <label class="so-label" style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="col-ref" checked> Ref/Park</label>
-          <label class="so-label" style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="col-age" checked> Age</label>
-          <label class="so-label" style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="col-mode" > Mode</label>
-          <label class="so-label" style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="col-skip" checked> Skip</label>
-          <label class="so-label" style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="col-log" checked> Log</label>
-        </div>
+        <div id="col-order-list" class="col-order-list"></div>
 
         <!-- Custom CAT buttons -->
         <div id="rc-custom-cat" class="so-custom-cat">
@@ -253,6 +245,13 @@
         <label class="so-label" style="display:flex;align-items:center;gap:8px;padding:4px 0;">
           <input type="checkbox" id="echo-enable-freedv"> Enable FreeDV Digital Voice
         </label>
+        <div style="display:flex;align-items:center;gap:6px;padding:2px 0;">
+          <span style="font-size:11px;color:var(--text-dim);">Squelch:</span>
+          <input type="range" id="echo-freedv-squelch" min="-5" max="20" value="2" style="width:80px;">
+          <span id="echo-freedv-squelch-val" style="font-size:11px;min-width:28px;">2 dB</span>
+          <span id="echo-freedv-sync" style="width:10px;height:10px;border-radius:50%;background:#555;display:inline-block;margin-left:8px;" title="FreeDV Sync"></span>
+          <span id="echo-freedv-snr" style="font-size:11px;color:var(--text-dim);min-width:50px;">SNR: --</span>
+        </div>
 
         <!-- App settings section -->
         <div class="so-section-label">Spots</div>
@@ -855,6 +854,7 @@
         <span id="ft8-tx-freq-display" class="ft8-tx-freq">TX: 1500 Hz</span>
         <span style="flex:1;"></span>
         <button type="button" id="ft8-cq-filter" class="ft8-filter-btn" title="Show only CQ and 73">CQ/73</button>
+        <button type="button" id="ft8-wanted-filter" class="ft8-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button>
         <button type="button" id="ft8-erase-btn" class="ft8-erase-btn">Erase</button>
       </div>
       <div id="ft8-gain-strip" style="display:flex;align-items:center;gap:6px;padding:2px 10px;font-size:11px;color:var(--text-dim);background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;">
