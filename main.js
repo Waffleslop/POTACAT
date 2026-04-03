@@ -1352,7 +1352,7 @@ function connectPskr() {
   }
   pskrSpots = [];
 
-  if (!settings.enablePskr) {
+  if (!settings.enablePskr && !settings.enableFreedv) {
     sendPskrStatus({ connected: false });
     return;
   }
@@ -6872,7 +6872,7 @@ app.whenReady().then(() => {
   if (settings.enableRemote) connectRemote();
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
-  if (settings.enablePskr) connectPskr();
+  if (settings.enablePskr || settings.enableFreedv) connectPskr();
   if (settings.enablePskrMap) connectPskrMap();
   if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
@@ -8364,9 +8364,10 @@ app.whenReady().then(() => {
       }
     }
 
-    // Reconnect PSKReporter if settings changed
-    if (pskrChanged) {
-      if (settings.enablePskr) {
+    // Reconnect PSKReporter if settings changed (or auto-enable for FreeDV)
+    const freedvNeedsPskr = settings.enableFreedv && !settings.enablePskr;
+    if (pskrChanged || (has('enableFreedv') && freedvNeedsPskr)) {
+      if (settings.enablePskr || settings.enableFreedv) {
         connectPskr();
       } else {
         disconnectPskr();
