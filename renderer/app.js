@@ -255,6 +255,11 @@ const setN1mmPort = document.getElementById('set-n1mm-port');
 const setAgRadioPort = document.getElementById('set-ag-radio-port');
 const agBandMapEl = document.getElementById('ag-band-map');
 const agStatusEl = document.getElementById('ag-status');
+const setEnableTgxl = document.getElementById('set-enable-tgxl');
+const tgxlConfig = document.getElementById('tgxl-config');
+const setTgxlHost = document.getElementById('set-tgxl-host');
+const tgxlBandMapEl = document.getElementById('tgxl-band-map');
+const tgxlStatusEl = document.getElementById('tgxl-status');
 const setVerboseLog = document.getElementById('set-verbose-log');
 const setLightIcon = document.getElementById('set-light-icon');
 const setEnableSplitView = document.getElementById('set-enable-split-view');
@@ -2655,6 +2660,9 @@ setEnableAg.addEventListener('change', () => {
 setEnableN1mmUdp.addEventListener('change', () => {
   n1mmUdpConfig.classList.toggle('hidden', !setEnableN1mmUdp.checked);
 });
+setEnableTgxl.addEventListener('change', () => {
+  tgxlConfig.classList.toggle('hidden', !setEnableTgxl.checked);
+});
 
 // Antenna Genius band map UI
 const AG_BANDS = ['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm'];
@@ -2690,6 +2698,40 @@ function getAgBandMap() {
   return map;
 }
 // IPC: Antenna Genius status + antenna names
+// TunerGenius 1x3 band map
+const TGXL_BANDS = ['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m'];
+function buildTgxlBandMap(bandMap) {
+  tgxlBandMapEl.innerHTML = '';
+  for (const band of TGXL_BANDS) {
+    const label = document.createElement('span');
+    label.textContent = band;
+    label.style.textAlign = 'right';
+    label.style.paddingRight = '4px';
+    const select = document.createElement('select');
+    select.id = `tgxl-band-${band}`;
+    select.style.width = '100%';
+    select.innerHTML = '<option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>';
+    if (bandMap[band]) select.value = String(bandMap[band]);
+    tgxlBandMapEl.appendChild(label);
+    tgxlBandMapEl.appendChild(select);
+  }
+}
+function getTgxlBandMap() {
+  const map = {};
+  for (const band of TGXL_BANDS) {
+    const sel = document.getElementById(`tgxl-band-${band}`);
+    if (sel && sel.value) map[band] = parseInt(sel.value, 10);
+  }
+  return map;
+}
+// IPC: TunerGenius status
+if (window.api.onTgxlStatus) {
+  window.api.onTgxlStatus((status) => {
+    tgxlStatusEl.textContent = status.connected ? `Ant ${status.antenna || '?'}` : '';
+    tgxlStatusEl.style.color = status.connected ? '#4ecca3' : '';
+  });
+}
+
 if (window.api.onAgStatus) {
   window.api.onAgStatus((status) => {
     agStatusEl.textContent = status.connected ? 'Connected' : '';
@@ -6919,6 +6961,10 @@ async function openSettingsDialog(tab) {
   setAgRadioPort.value = s.agRadioPort || '1';
   buildAgBandMap(s.agBandMap || {});
   agConfig.classList.toggle('hidden', !s.enableAntennaGenius);
+  setEnableTgxl.checked = s.enableTgxl === true;
+  setTgxlHost.value = s.tgxlHost || '';
+  buildTgxlBandMap(s.tgxlBandMap || {});
+  tgxlConfig.classList.toggle('hidden', !s.enableTgxl);
   setEnableN1mmUdp.checked = s.enableN1mmUdp === true;
   setN1mmHost.value = s.n1mmHost || '127.0.0.1';
   setN1mmPort.value = s.n1mmPort || 12060;
@@ -7290,6 +7336,9 @@ settingsSave.addEventListener('click', async () => {
   const agHostVal = setAgHost.value.trim();
   const agRadioPortVal = parseInt(setAgRadioPort.value, 10) || 1;
   const agBandMapVal = getAgBandMap();
+  const tgxlEnabled = setEnableTgxl.checked;
+  const tgxlHostVal = setTgxlHost.value.trim();
+  const tgxlBandMapVal = getTgxlBandMap();
   const n1mmUdpEnabled = setEnableN1mmUdp.checked;
   const n1mmHostVal = setN1mmHost.value.trim() || '127.0.0.1';
   const n1mmPortVal = parseInt(setN1mmPort.value, 10) || 12060;
@@ -7426,6 +7475,9 @@ settingsSave.addEventListener('click', async () => {
     agHost: agHostVal,
     agRadioPort: agRadioPortVal,
     agBandMap: agBandMapVal,
+    enableTgxl: tgxlEnabled,
+    tgxlHost: tgxlHostVal,
+    tgxlBandMap: tgxlBandMapVal,
     enableN1mmUdp: n1mmUdpEnabled,
     n1mmHost: n1mmHostVal,
     n1mmPort: n1mmPortVal,

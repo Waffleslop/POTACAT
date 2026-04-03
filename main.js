@@ -85,6 +85,7 @@ const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdif
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
+const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
@@ -166,6 +167,8 @@ let tciClient = null;
 let tciPushTimer = null; // throttle timer for TCI spot pushes
 let agClient = null; // 4O3A Antenna Genius client
 let agLastBand = null; // last band we switched to (avoid redundant commands)
+let tgxlClient = null; // FlexRadio TunerGenius 1x3 client
+let tgxlLastBand = null;
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
 let workedParks = new Map(); // reference → park data from POTA parks CSV
 let wsjtx = null;
@@ -2708,6 +2711,69 @@ function disconnectAntennaGenius() {
   }
 }
 
+// --- TunerGenius 1x3 ---
+
+function connectTunerGenius() {
+  disconnectTunerGenius();
+  if (!settings.enableTgxl) {
+    sendCatLog('[TGXL] TunerGenius disabled in settings');
+    return;
+  }
+  if (!settings.tgxlHost) {
+    sendCatLog('[TGXL] TunerGenius enabled but no IP configured');
+    return;
+  }
+  tgxlClient = new TunerGeniusClient();
+  tgxlLastBand = null;
+  sendCatLog(`[TGXL] Connecting to TunerGenius at ${settings.tgxlHost}:9010`);
+  tgxlClient.on('connected', () => {
+    sendCatLog('[TGXL] Connected to TunerGenius');
+    sendTgxlStatus();
+  });
+  tgxlClient.on('disconnected', () => {
+    sendCatLog('[TGXL] Disconnected from TunerGenius');
+    sendTgxlStatus();
+  });
+  tgxlClient.on('status', (status) => {
+    if (win && !win.isDestroyed()) win.webContents.send('tgxl-status', status);
+    if (remoteServer && remoteServer.running) {
+      remoteServer.sendToClient({ type: 'tgxl-status', ...status });
+    }
+  });
+  tgxlClient.on('log', (msg) => sendCatLog(`[TGXL] ${msg}`));
+  tgxlClient.on('error', (err) => sendCatLog(`[TGXL] Error: ${err.message}`));
+  tgxlClient.connect(settings.tgxlHost, 9010);
+}
+
+function disconnectTunerGenius() {
+  tgxlLastBand = null;
+  if (tgxlClient) {
+    tgxlClient.removeAllListeners();
+    tgxlClient.disconnect();
+    tgxlClient = null;
+  }
+}
+
+function sendTgxlStatus() {
+  const status = {
+    connected: !!(tgxlClient && tgxlClient.connected),
+    antenna: tgxlClient ? tgxlClient.antenna : 0,
+  };
+  if (win && !win.isDestroyed()) win.webContents.send('tgxl-status', status);
+}
+
+function tgxlSwitchForBand(band) {
+  if (!tgxlClient || !tgxlClient.connected) return;
+  if (!band || band === tgxlLastBand) return;
+  tgxlLastBand = band;
+  const bandMap = settings.tgxlBandMap || {};
+  const ant = parseInt(bandMap[band], 10);
+  if (ant >= 1 && ant <= 3) {
+    sendCatLog(`[TGXL] Band ${band} → antenna ${ant}`);
+    tgxlClient.selectAntenna(ant);
+  }
+}
+
 function sendAgStatus() {
   if (win && !win.isDestroyed()) {
     win.webContents.send('ag-status', {
@@ -4129,6 +4195,10 @@ function connectRemote() {
   });
 
   // ECHOCAT FT8 gain controls — relay to main renderer
+  remoteServer.on('tgxl-select-antenna', ({ port }) => {
+    if (tgxlClient && tgxlClient.connected) tgxlClient.selectAntenna(port);
+  });
+
   remoteServer.on('jtcat-rx-gain', ({ value }) => {
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-rx-gain', value);
   });
@@ -6523,6 +6593,12 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     agSwitchForFreq(freqKhz);
   }
 
+  // TunerGenius 1x3: switch antenna based on band
+  if (settings.enableTgxl) {
+    const band = freqToBand(parseFloat(freqKhz) / 1000);
+    tgxlSwitchForBand(band);
+  }
+
   if (settings.enableWsjtx && (!cat || !cat.connected)) {
     if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
       const sliceIndex = (settings.catTarget.port || 5002) - 5002;
@@ -6716,6 +6792,7 @@ app.whenReady().then(() => {
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
   connectAntennaGenius();
+  connectTunerGenius();
   if (settings.enableRemote) connectRemote();
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
@@ -7793,6 +7870,17 @@ app.whenReady().then(() => {
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
 
+  // TunerGenius 1x3 IPC
+  ipcMain.handle('tgxl-select-antenna', (_e, port) => {
+    if (tgxlClient && tgxlClient.connected) {
+      tgxlClient.selectAntenna(port);
+    }
+  });
+  ipcMain.handle('tgxl-get-status', () => ({
+    connected: !!(tgxlClient && tgxlClient.connected),
+    antenna: tgxlClient ? tgxlClient.antenna : 0,
+  }));
+
   // --- Rig Command Table IPC ---
   ipcMain.handle('get-rig-commands', () => {
     const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
@@ -8153,6 +8241,12 @@ app.whenReady().then(() => {
     // Reconnect Antenna Genius if settings changed
     if (agChanged) {
       connectAntennaGenius();
+    }
+
+    // Reconnect TunerGenius if settings changed
+    const tgxlChanged = has('enableTgxl') || has('tgxlHost') || has('tgxlBandMap');
+    if (tgxlChanged) {
+      connectTunerGenius();
     }
 
     // Reconnect ECHOCAT if settings changed
@@ -9369,6 +9463,7 @@ function gracefulCleanup() {
   try { disconnectSmartSdr(); } catch {}
   try { disconnectTci(); } catch {}
   try { disconnectAntennaGenius(); } catch {}
+  try { disconnectTunerGenius(); } catch {}
   try { disconnectRemote(); } catch {}
   try { disconnectKeyer(); } catch {}
   try { stopJtcat(); } catch {}
