@@ -4215,6 +4215,31 @@ function connectRemote() {
     if (tgxlClient && tgxlClient.connected) tgxlClient.selectAntenna(port);
   });
 
+  // FreeDV from ECHOCAT
+  remoteServer.on('freedv-start', ({ mode }) => {
+    if (freedvEngine) freedvEngine.stop();
+    // Trigger the IPC handler via a synthetic event
+    if (win && !win.isDestroyed()) win.webContents.send('freedv-remote-start', mode);
+  });
+  remoteServer.on('freedv-stop', () => {
+    if (win && !win.isDestroyed()) win.webContents.send('freedv-remote-stop');
+  });
+  remoteServer.on('freedv-set-mode', ({ mode }) => {
+    if (freedvEngine) freedvEngine.setMode(mode);
+  });
+  remoteServer.on('freedv-set-tx', ({ enabled }) => {
+    if (freedvEngine) freedvEngine.setTxEnabled(enabled);
+    // PTT via CAT
+    if (enabled) {
+      if (cat && cat.connected) cat.setTransmit(true);
+    } else {
+      if (cat && cat.connected) cat.setTransmit(false);
+    }
+  });
+  remoteServer.on('freedv-set-squelch', ({ enabled, threshold }) => {
+    if (freedvEngine) freedvEngine.setSquelch(enabled, threshold);
+  });
+
   remoteServer.on('jtcat-rx-gain', ({ value }) => {
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-rx-gain', value);
   });

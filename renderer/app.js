@@ -10907,6 +10907,10 @@ let freedvAudioStream = null;
 let freedvProcessor = null;
 let freedvTxCtx = null;
 let freedvPttActive = false;
+let freedvMicStream = null;
+let freedvMicCtx = null;
+let freedvMicProcessor = null;
+let freedvTxOutputCtx = null;  // for playing modem audio to radio
 
 // Show FreeDV button (unhide once feature is accessible)
 if (freedvBtn) freedvBtn.classList.remove('hidden');
@@ -10990,16 +10994,37 @@ freedvPttBtn.addEventListener('mouseleave', () => stopFreedvPtt());
 freedvPttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startFreedvPtt(); });
 freedvPttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopFreedvPtt(); });
 
-function startFreedvPtt() {
+async function startFreedvPtt() {
   if (!freedvRunning || freedvPttActive) return;
   freedvPttActive = true;
   freedvPttBtn.style.background = '#e94560';
   freedvPttBtn.style.borderColor = '#e94560';
   freedvPttBtn.style.color = '#fff';
   window.api.freedvSetTx(true);
-  // Also activate radio PTT
-  window.api.rigControl({ action: 'ptt-on' });
-  // TODO: capture mic audio and send as TX speech
+
+  // Start mic capture — use default mic (not the radio USB audio)
+  try {
+    freedvMicStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    freedvMicCtx = new AudioContext();
+    const micSource = freedvMicCtx.createMediaStreamSource(freedvMicStream);
+    const dsRatio = freedvMicCtx.sampleRate / 8000;
+    await freedvMicCtx.audioWorklet.addModule('freedv-audio-worklet.js');
+    freedvMicProcessor = new AudioWorkletNode(freedvMicCtx, 'freedv-processor', {
+      processorOptions: { dsRatio },
+    });
+    freedvMicProcessor.port.onmessage = function(e) {
+      window.api.freedvTxAudio(e.data);
+    };
+    micSource.connect(freedvMicProcessor);
+    freedvMicProcessor.connect(freedvMicCtx.destination);
+  } catch (err) {
+    console.error('[FreeDV] Mic capture failed:', err.message);
+  }
+
+  // Activate radio PTT via CAT
+  window.api.rigControl({ action: 'send-custom-cat', command: 'TX1;' });
 }
 
 function stopFreedvPtt() {
@@ -11009,7 +11034,14 @@ function stopFreedvPtt() {
   freedvPttBtn.style.borderColor = '';
   freedvPttBtn.style.color = '';
   window.api.freedvSetTx(false);
-  window.api.rigControl({ action: 'ptt-off' });
+
+  // Stop mic capture
+  if (freedvMicProcessor) { freedvMicProcessor.disconnect(); freedvMicProcessor = null; }
+  if (freedvMicCtx) { freedvMicCtx.close().catch(() => {}); freedvMicCtx = null; }
+  if (freedvMicStream) { freedvMicStream.getTracks().forEach(t => t.stop()); freedvMicStream = null; }
+
+  // Release radio PTT
+  window.api.rigControl({ action: 'send-custom-cat', command: 'TX0;' });
 }
 
 // FreeDV events from main process
@@ -11040,9 +11072,34 @@ window.api.onFreedvRxSpeech(async (data) => {
   } catch {}
 });
 
-// TX modem playback — play modulated signal to radio USB audio
+// TX modem playback — play modulated signal to radio USB audio output
 window.api.onFreedvTxModem(async (data) => {
-  // TODO: route to radio audio output device (like JTCAT TX audio)
+  try {
+    if (!freedvPttActive) return; // only play modem audio during TX
+    var s = await window.api.getSettings();
+    var outputDeviceId = s.remoteAudioOutput || '';
+
+    if (!freedvTxOutputCtx || freedvTxOutputCtx.state === 'closed') {
+      freedvTxOutputCtx = new AudioContext({ sampleRate: 8000 });
+    }
+    if (freedvTxOutputCtx.state === 'suspended') {
+      await freedvTxOutputCtx.resume();
+    }
+    // Route to radio's USB audio input
+    if (outputDeviceId && freedvTxOutputCtx.setSinkId) {
+      try { await freedvTxOutputCtx.setSinkId(outputDeviceId); } catch {}
+    }
+
+    var samples = new Int16Array(data.samples);
+    var floats = new Float32Array(samples.length);
+    for (var i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
+    var buffer = freedvTxOutputCtx.createBuffer(1, floats.length, 8000);
+    buffer.getChannelData(0).set(floats);
+    var source = freedvTxOutputCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(freedvTxOutputCtx.destination);
+    source.start();
+  } catch {}
 });
 
 // --- Pi Access (The Net easter egg) ---
