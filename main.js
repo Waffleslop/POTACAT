@@ -4543,9 +4543,23 @@ function disconnectRemote() {
   destroyRemoteAudioWindow();
 }
 
+let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
+
 function handleRemotePtt(state) {
   const target = settings.catTarget;
   const isFlexRig = target && target.type === 'tcp';
+
+  if (state && settings.ssbOverData) {
+    // Switch to DATA mode before TX to prevent local mic bleed
+    const curMode = (_currentMode || '').toUpperCase();
+    if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
+      const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
+      _ssbModeBeforePtt = curMode;
+      sendCatLog(`[PTT] ${curMode} → ${dataMode} (SSB-over-DATA: mic disabled)`);
+      if (cat && cat.connected) cat.tune(_currentFreqHz, dataMode);
+    }
+  }
+
   if (isFlexRig) {
     // FlexRadio: use SmartSDR xmit command (voice PTT, not CW PTT)
     if (smartSdr && smartSdr.connected) {
@@ -4559,6 +4573,14 @@ function handleRemotePtt(state) {
       console.warn('[PTT] Cannot key TX — CAT not connected');
       sendCatLog('PTT FAILED: CAT not connected (TX audio may play but radio will not transmit)');
     }
+  }
+
+  if (!state && _ssbModeBeforePtt) {
+    // Restore original voice mode after PTT release
+    const restoreMode = _ssbModeBeforePtt;
+    _ssbModeBeforePtt = null;
+    sendCatLog(`[PTT] Restoring ${restoreMode} mode`);
+    if (cat && cat.connected) cat.tune(_currentFreqHz, restoreMode);
   }
 
   _remoteTxState = state;
@@ -6815,7 +6837,8 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     // Start FreeDV engine if not already running
     if (!freedvEngine) {
       let codecMode = '700E';
-      if (m.includes('700D')) codecMode = '700D';
+      if (m.includes('RADE')) codecMode = 'RADEV1';
+      else if (m.includes('700D')) codecMode = '700D';
       else if (m.includes('700C')) codecMode = '700C';
       else if (m.includes('1600')) codecMode = '1600';
 
