@@ -120,6 +120,7 @@
     }
   },
   "devDependencies": {
+    "cmake-js": "^8.0.0",
     "electron": "^39.0.0",
     "electron-builder": "^26.7.0",
     "sharp": "^0.34.5"

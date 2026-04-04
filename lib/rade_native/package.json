@@ -1,0 +1,8 @@
+{
+  "name": "rade_native",
+  "version": "1.0.0",
+  "description": "Native RADE V1 codec for FreeDV digital voice (neural network vocoder)",
+  "main": "build/Release/rade_native.node",
+  "private": true,
+  "gypfile": true
+}
