@@ -9366,9 +9366,13 @@ app.whenReady().then(() => {
     if (freedvEngine) freedvEngine.setMode(mode);
   });
 
+  let _freedvRxCount = 0;
   ipcMain.on('freedv-rx-audio', (_e, buf) => {
     if (freedvEngine) {
       const samples = buf instanceof Int16Array ? buf : new Int16Array(buf);
+      if (++_freedvRxCount <= 3 || _freedvRxCount % 200 === 0) {
+        console.log(`[FreeDV] RX audio #${_freedvRxCount} len=${samples.length} engine=${!!freedvEngine}`);
+      }
       freedvEngine.feedRxAudio(samples);
     }
   });
