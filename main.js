@@ -2734,8 +2734,9 @@ function connectSmartSdr() {
       });
     }
   });
-  // Use SmartSDR host if configured, else fall back to Flex CAT host, else localhost
-  const sdrHost = settings.smartSdrHost || (settings.catTarget && settings.catTarget.host) || '127.0.0.1';
+  // Use per-rig flexApiHost if set, else smartSdrHost global, else catTarget host, else localhost
+  const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+  const sdrHost = (activeRig && activeRig.flexApiHost) || settings.smartSdrHost || (settings.catTarget && settings.catTarget.host) || '127.0.0.1';
   sendCatLog(`Connecting SmartSDR API to ${sdrHost}:4992...`);
   smartSdr.connect(sdrHost);
 }
