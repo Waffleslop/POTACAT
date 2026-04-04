@@ -3222,12 +3222,11 @@ function connectRemote() {
       if (cat && cat.connected) cat.setTransmit(false);
       if (smartSdr && smartSdr.connected) smartSdr.setTransmit(false);
     }, 500);
-    // Safety: disable JTCAT TX if phone was driving a QSO
-    if (ft8Engine && remoteJtcatQso) {
-      ft8Engine._txEnabled = false;
-      ft8Engine.setTxMessage('');
-      if (ft8Engine._txActive) ft8Engine.txComplete();
-      console.log('[JTCAT] Phone disconnected — TX disabled, QSO cleared');
+    // Stop JTCAT engine and audio capture if phone was driving FT8
+    if (ft8Engine) {
+      stopJtcat();
+      if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+      console.log('[JTCAT] Phone disconnected — engine stopped, audio released');
     }
     remoteJtcatQso = null;
   });
