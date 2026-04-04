@@ -616,6 +616,7 @@ const rigRemoteAudioInput = document.getElementById('rig-remote-audio-input');
 const rigRemoteAudioOutput = document.getElementById('rig-remote-audio-output');
 const remoteAudioSummary = document.getElementById('remote-audio-summary');
 const setRemotePttTimeout = document.getElementById('set-remote-ptt-timeout');
+const setSsbOverData = document.getElementById('set-ssb-over-data');
 const setRemoteCwEnabled = document.getElementById('set-remote-cw-enabled');
 const setRemoteStun = document.getElementById('set-remote-stun');
 const setCwKeyPort = document.getElementById('set-cw-key-port');
@@ -7191,6 +7192,15 @@ async function openSettingsDialog(tab) {
   remoteTokenRow.classList.toggle('hidden', !requireToken);
   setRemoteToken.value = s.remoteToken || '';
   setRemotePttTimeout.value = s.remotePttTimeout || 180;
+  // Default SSB-over-DATA to ON for non-Flex rigs (prevents local mic bleed)
+  if (s.ssbOverData != null) {
+    setSsbOverData.checked = !!s.ssbOverData;
+  } else {
+    const activeRigForSsb = (s.rigs || []).find(r => r.id === s.activeRigId);
+    const isFlexForSsb = activeRigForSsb && activeRigForSsb.catTarget && activeRigForSsb.catTarget.type === 'tcp' &&
+      [5002, 5003, 5004, 5005].includes(activeRigForSsb.catTarget.port);
+    setSsbOverData.checked = !isFlexForSsb;
+  }
   setRemoteCwEnabled.checked = !!s.remoteCwEnabled;
   setRemoteStun.checked = !!s.remoteStun;
   // Populate CW Key Port dropdown
@@ -7387,6 +7397,7 @@ settingsSave.addEventListener('click', async () => {
   const remoteRequireTokenVal = setRemoteRequireToken.checked;
   const remoteTokenVal = setRemoteToken.value;
   const remotePttTimeoutVal = parseInt(setRemotePttTimeout.value, 10) || 180;
+  const ssbOverDataVal = setSsbOverData.checked;
   const remoteCwEnabledVal = setRemoteCwEnabled.checked;
   const remoteStunVal = setRemoteStun.checked;
   const cwKeyPortVal = setCwKeyPort.value || '';
@@ -7555,6 +7566,7 @@ settingsSave.addEventListener('click', async () => {
     remoteRequireToken: remoteRequireTokenVal,
     remoteToken: remoteTokenVal,
     remotePttTimeout: remotePttTimeoutVal,
+    ssbOverData: ssbOverDataVal,
     remoteCwEnabled: remoteCwEnabledVal,
     remoteStun: remoteStunVal,
     cwKeyPort: cwKeyPortVal,
@@ -9577,7 +9589,7 @@ window.api.onCatSwr((val) => {
     swrTextEl.style.color = '#666';
     return;
   }
-  meterBox.classList.remove('hidden');
+  if (meterBoxVisible) meterBox.classList.remove('hidden');
   const swr = 1.0 + (val / 60);
   const level = Math.min(1, (swr - 1) / 4);
   const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
@@ -10942,9 +10954,7 @@ async function startFreedvForMode(mode) {
   else if (upper.includes('700C')) codecMode = '700C';
   else if (upper.includes('1600')) codecMode = '1600';
 
-  window.api.freedvStart(codecMode);
-
-  // Start RX audio capture (radio USB → 8kHz → FreeDV decoder)
+  // Engine already started by tuneRadio() in main.js — just start RX audio capture
   try {
     const constraints = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
     if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
@@ -10956,7 +10966,13 @@ async function startFreedvForMode(mode) {
     const worklet = new AudioWorkletNode(freedvAudioCtx, 'freedv-processor', {
       processorOptions: { dsRatio },
     });
-    worklet.port.onmessage = function(e) { window.api.freedvRxAudio(e.data); };
+    let _freedvAudioCount = 0;
+    worklet.port.onmessage = function(e) {
+      window.api.freedvRxAudio(e.data);
+      if (++_freedvAudioCount <= 3 || _freedvAudioCount % 200 === 0) {
+        console.log('[FreeDV] RX audio IPC #' + _freedvAudioCount + ' len=' + e.data.length);
+      }
+    };
     source.connect(worklet);
     worklet.connect(freedvAudioCtx.destination);
     freedvProcessor = worklet;
