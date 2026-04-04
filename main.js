@@ -174,7 +174,7 @@ let tgxlClient = null; // FlexRadio TunerGenius 1x3 client
 let tgxlLastBand = null;
 let freedvReporter = null; // FreeDV Reporter (qso.freedv.org) client
 let freedvEngine = null;   // FreeDV codec engine (started on tune to FreeDV spot)
-let _freedvSavedAfGain = null; // saved AF gain level before FreeDV mutes radio
+let _freedvAudioMuted = false; // true when ECHOCAT audio is muted for FreeDV
 let freedvReporterSpots = []; // accumulates FreeDV spots
 let freedvReporterFlushTimer = null;
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
@@ -4594,6 +4594,13 @@ function handleRemotePtt(state) {
   broadcastRemoteRadioStatus();
 }
 
+/** Apply FreeDV audio mute state to ECHOCAT WebRTC — called on state change and audio (re)connect */
+function applyFreedvAudioMute() {
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+    remoteAudioWin.webContents.send('freedv-mute', _freedvAudioMuted);
+  }
+}
+
 function broadcastRemoteRadioStatus() {
   if (!remoteServer || !remoteServer.running) return;
   const rigType = detectRigType();
@@ -4647,6 +4654,8 @@ async function startRemoteAudio() {
       outputDeviceId: settings.remoteAudioOutput || '',
       useStun: !!settings.remoteStun,
     });
+    // Re-apply FreeDV mute after audio restart
+    if (_freedvAudioMuted) setTimeout(() => applyFreedvAudioMute(), 500);
     return;
   }
 
@@ -4678,6 +4687,8 @@ async function startRemoteAudio() {
         inputDeviceId: settings.remoteAudioInput || '',
         outputDeviceId: settings.remoteAudioOutput || '',
       });
+      // Apply FreeDV mute if engine is active (audio window created after FreeDV started)
+      if (_freedvAudioMuted) applyFreedvAudioMute();
     }
   });
 
@@ -6863,10 +6874,9 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       freedvEngine.start(codecMode);
       sendCatLog(`[FreeDV] Auto-started for mode ${m} (codec ${codecMode})`);
       // Mute ECHOCAT audio so user only hears decoded FreeDV speech (not raw USB)
-      if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-        remoteAudioWin.webContents.send('freedv-mute', true);
-        sendCatLog('[FreeDV] Muted ECHOCAT audio');
-      }
+      _freedvAudioMuted = true;
+      applyFreedvAudioMute();
+      sendCatLog('[FreeDV] Muted ECHOCAT audio');
       // Tell renderer to start RX audio capture
       if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
     }
@@ -6879,10 +6889,9 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     freedvEngine = null;
     if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
     // Unmute ECHOCAT audio
-    if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-      remoteAudioWin.webContents.send('freedv-mute', false);
-      sendCatLog('[FreeDV] Unmuted ECHOCAT audio');
-    }
+    _freedvAudioMuted = false;
+    applyFreedvAudioMute();
+    sendCatLog('[FreeDV] Unmuted ECHOCAT audio');
   }
 
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {

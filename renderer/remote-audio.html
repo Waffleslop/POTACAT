@@ -7,6 +7,7 @@
 // Hidden BrowserWindow — WebRTC audio bridge between radio USB audio and phone
 let pc = null;
 let localStream = null;
+let freedvMuted = false; // persisted mute state for FreeDV
 const audioEl = document.getElementById('remote-playback');
 
 window.api.onStartAudio(async (config) => {
@@ -40,6 +41,11 @@ window.api.onStartAudio(async (config) => {
     // STUN enables NAT traversal for audio without VPN; empty = local/VPN only
     const iceServers = config.useStun ? [{ urls: 'stun:stun.l.google.com:19302' }] : [];
     pc = new RTCPeerConnection({ iceServers });
+
+    // Apply FreeDV mute state to new stream (if engine was already active)
+    if (freedvMuted) {
+      localStream.getAudioTracks().forEach(t => { t.enabled = false; });
+    }
 
     // Add radio RX audio track to send to phone
     for (const track of localStream.getTracks()) {
@@ -118,6 +124,7 @@ window.api.onSignal(async (data) => {
 
 // FreeDV mute — disable radio audio track so ECHOCAT hears silence instead of raw USB
 window.api.onFreedvMute((muted) => {
+  freedvMuted = muted;
   if (localStream) {
     localStream.getAudioTracks().forEach(t => { t.enabled = !muted; });
   }
