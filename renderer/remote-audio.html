@@ -116,6 +116,13 @@ window.api.onSignal(async (data) => {
   }
 });
 
+// FreeDV mute — disable radio audio track so ECHOCAT hears silence instead of raw USB
+window.api.onFreedvMute((muted) => {
+  if (localStream) {
+    localStream.getAudioTracks().forEach(t => { t.enabled = !muted; });
+  }
+});
+
 // Cleanup
 window.api.onStopAudio(() => {
   if (pc) { pc.close(); pc = null; }

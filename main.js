@@ -174,6 +174,7 @@ let tgxlClient = null; // FlexRadio TunerGenius 1x3 client
 let tgxlLastBand = null;
 let freedvReporter = null; // FreeDV Reporter (qso.freedv.org) client
 let freedvEngine = null;   // FreeDV codec engine (started on tune to FreeDV spot)
+let _freedvSavedAfGain = null; // saved AF gain level before FreeDV mutes radio
 let freedvReporterSpots = []; // accumulates FreeDV spots
 let freedvReporterFlushTimer = null;
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
@@ -6861,11 +6862,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       freedvEngine.on('error', (data) => sendCatLog(`[FreeDV] Error: ${data.message}`));
       freedvEngine.start(codecMode);
       sendCatLog(`[FreeDV] Auto-started for mode ${m} (codec ${codecMode})`);
-      // Mute radio audio so user only hears decoded FreeDV speech
-      if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
-        const si = (settings.catTarget.port || 5002) - 5002;
-        smartSdr._send(`slice set ${si} audio_mute=1`);
-        sendCatLog(`[FreeDV] Muted slice ${si} audio`);
+      // Mute ECHOCAT audio so user only hears decoded FreeDV speech (not raw USB)
+      if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+        remoteAudioWin.webContents.send('freedv-mute', true);
+        sendCatLog('[FreeDV] Muted ECHOCAT audio');
       }
       // Tell renderer to start RX audio capture
       if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
@@ -6878,11 +6878,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     freedvEngine.stop();
     freedvEngine = null;
     if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
-    // Unmute radio audio
-    if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
-      const si = (settings.catTarget.port || 5002) - 5002;
-      smartSdr._send(`slice set ${si} audio_mute=0`);
-      sendCatLog(`[FreeDV] Unmuted slice ${si} audio`);
+    // Unmute ECHOCAT audio
+    if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+      remoteAudioWin.webContents.send('freedv-mute', false);
+      sendCatLog('[FreeDV] Unmuted ECHOCAT audio');
     }
   }
 

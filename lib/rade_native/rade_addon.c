@@ -33,6 +33,30 @@
 
 #define MAX_HANDLES 2
 
+/* Hilbert transform for real → analytic signal conversion (streaming) */
+#define HILBERT_NTAPS  127
+#define HILBERT_DELAY  ((HILBERT_NTAPS - 1) / 2)  /* 63 samples */
+
+static float hilbert_coeffs[HILBERT_NTAPS];
+static int hilbert_initialized = 0;
+
+static void init_hilbert_coeffs(void) {
+  if (hilbert_initialized) return;
+  int center = HILBERT_DELAY;
+  for (int i = 0; i < HILBERT_NTAPS; i++) {
+    int n = i - center;
+    if (n == 0 || (n & 1) == 0) {
+      hilbert_coeffs[i] = 0.0f;
+    } else {
+      /* h[n] = 2/(pi*n) for odd n, windowed with Hamming */
+      float h = 2.0f / ((float)M_PI * n);
+      float w = 0.54f - 0.46f * cosf(2.0f * (float)M_PI * i / (HILBERT_NTAPS - 1));
+      hilbert_coeffs[i] = h * w;
+    }
+  }
+  hilbert_initialized = 1;
+}
+
 struct rade_handle {
   struct rade *r;
   LPCNetEncState *encoder;    /* speech → features */
@@ -42,6 +66,9 @@ struct rade_handle {
   int nin_max;
   int n_tx_out;
   int fargan_initialized;     /* 1 after first fargan_cont call */
+  /* Hilbert transform delay line for streaming real→IQ */
+  float hilbert_delay[HILBERT_NTAPS];
+  int hilbert_pos;            /* circular write position */
 };
 
 static struct rade_handle handles[MAX_HANDLES] = {0};
@@ -60,6 +87,7 @@ static napi_value Open(napi_env env, napi_callback_info info) {
     rade_initialize();
     rade_initialized = 1;
   }
+  init_hilbert_coeffs();
 
   int slot = find_free_slot();
   if (slot < 0) {
@@ -181,7 +209,7 @@ static napi_value Tx(napi_env env, napi_callback_info info) {
   short *modem_out = (short *)out_data;
 
   for (int i = 0; i < n_written; i++) {
-    float val = tx_out[i].real * 16384.0f;
+    float val = tx_out[i].real * 32768.0f;
     if (val > 32767.0f) val = 32767.0f;
     if (val < -32767.0f) val = -32767.0f;
     modem_out[i] = (short)val;
@@ -218,11 +246,26 @@ static napi_value Rx(napi_env env, napi_callback_info info) {
   }
   short *modem_in = (short *)data;
 
-  /* Convert real 8kHz audio to complex (imaginary = 0) */
+  /* Convert real 8kHz audio to complex IQ via Hilbert transform */
   RADE_COMP *rx_in = (RADE_COMP *)calloc(length, sizeof(RADE_COMP));
   for (size_t i = 0; i < length; i++) {
-    rx_in[i].real = (float)modem_in[i] / 16384.0f;
-    rx_in[i].imag = 0.0f;
+    float sample = (float)modem_in[i] / 32768.0f;
+
+    /* Write sample into circular delay line */
+    h->hilbert_delay[h->hilbert_pos] = sample;
+    h->hilbert_pos = (h->hilbert_pos + 1) % HILBERT_NTAPS;
+
+    /* Real part: delayed by HILBERT_DELAY samples */
+    int delay_idx = (h->hilbert_pos + HILBERT_NTAPS - HILBERT_DELAY - 1) % HILBERT_NTAPS;
+    rx_in[i].real = h->hilbert_delay[delay_idx];
+
+    /* Imaginary part: FIR Hilbert filter convolution */
+    float imag = 0.0f;
+    for (int k = 0; k < HILBERT_NTAPS; k++) {
+      int idx = (h->hilbert_pos + HILBERT_NTAPS - 1 - k) % HILBERT_NTAPS;
+      imag += hilbert_coeffs[k] * h->hilbert_delay[idx];
+    }
+    rx_in[i].imag = imag;
   }
 
   /* Decode modem signal to features */
