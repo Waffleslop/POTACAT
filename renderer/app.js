@@ -4603,7 +4603,10 @@ function scanStep() {
   render();
 
   scanTimer = setTimeout(() => {
+    // Skip past any spots on the same frequency (dwell once per frequency, not per spot)
+    const curFreq = spot.frequency;
     scanIndex++;
+    while (scanIndex < list.length && list[scanIndex].frequency === curFreq) scanIndex++;
     scanStep();
   }, scanDwell * 1000);
 }

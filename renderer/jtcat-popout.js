@@ -832,29 +832,43 @@
   var popoutQuietFreqFrame = 0;
   var popoutSpectrumFrame = 0;
 
-  // RX Gain slider
+  // RX Gain slider — persisted in localStorage
   var jpRxGain = document.getElementById('jp-rx-gain');
   var jpRxGainVal = document.getElementById('jp-rx-gain-val');
+  var savedRxPct = parseInt(localStorage.getItem('jtcat-rx-gain'), 10);
+  if (!isNaN(savedRxPct) && jpRxGain) {
+    jpRxGain.value = savedRxPct;
+    jpRxGainVal.textContent = savedRxPct + '%';
+    popoutRxGainLevel = savedRxPct / 100;
+  }
   if (jpRxGain) {
     jpRxGain.addEventListener('input', function() {
       var pct = parseInt(jpRxGain.value, 10);
       jpRxGainVal.textContent = pct + '%';
       popoutRxGainLevel = pct / 100;
       if (popoutRxGainNode) popoutRxGainNode.gain.value = popoutRxGainLevel;
+      localStorage.setItem('jtcat-rx-gain', pct);
     });
   }
 
-  // TX Power slider — sends level to main renderer which plays TX audio
+  // TX Power slider — persisted in localStorage
   var jpTxGain = document.getElementById('jp-tx-gain');
   var jpTxGainVal = document.getElementById('jp-tx-gain-val');
   // TX Pwr: square curve for fine low-end control (same as main window)
   function txPwrToGain(pct) { return (pct / 100) * (pct / 100); }
+  var savedTxPct = parseInt(localStorage.getItem('jtcat-tx-gain'), 10);
+  if (!isNaN(savedTxPct) && jpTxGain) {
+    jpTxGain.value = savedTxPct;
+    jpTxGainVal.textContent = savedTxPct + '%';
+    popoutTxGainLevel = txPwrToGain(savedTxPct);
+  }
   if (jpTxGain) {
     jpTxGain.addEventListener('input', function() {
       var pct = parseInt(jpTxGain.value, 10);
       jpTxGainVal.textContent = pct + '%';
       popoutTxGainLevel = txPwrToGain(pct);
       window.api.jtcatSetTxGain(popoutTxGainLevel);
+      localStorage.setItem('jtcat-tx-gain', pct);
     });
   }
 

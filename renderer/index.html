@@ -1782,6 +1782,10 @@
             <input type="number" id="set-remote-ptt-timeout" min="30" max="600" value="180" style="width:70px;">
           </label>
         </div>
+        <div style="margin-top:4px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-ssb-over-data"> SSB-over-DATA (prevent local mic bleed)</label>
+          <span class="help-text" style="margin-left:12px;display:block;">Switches radio to DATA-USB/DATA-LSB during ECHOCAT voice PTT so only the DAX/virtual audio is transmitted, not the local mic. Recommended for remote operation.</span>
+        </div>
         <div>
           <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-remote-cw-enabled"> Enable Remote CW Keyer</label>
           <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). FlexRadio users need no extra setup — CW keys via SmartSDR automatically.</span>

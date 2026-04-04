@@ -4601,7 +4601,11 @@ function broadcastRemoteRadioStatus() {
   const rfg = (typeof _rfGainSuppressBroadcast !== 'undefined' && now < _rfGainSuppressBroadcast) ? undefined : _currentRfGain;
   const txp = (typeof _txPowerSuppressBroadcast !== 'undefined' && now < _txPowerSuppressBroadcast) ? undefined : _currentTxPower;
   // Suppress stale mode during tune transition — phone has optimistic update, don't overwrite with old mode
-  const modeVal = (now < _modeSuppressUntil) ? undefined : (_currentMode || '');
+  let modeVal = (now < _modeSuppressUntil) ? undefined : (_currentMode || '');
+  // When FreeDV engine is active, show the FreeDV codec mode instead of raw USB/LSB
+  if (modeVal && freedvEngine && (modeVal === 'USB' || modeVal === 'LSB')) {
+    modeVal = 'FREEDV-' + (freedvEngine.mode || 'RADEV1').toUpperCase();
+  }
   const status = {
     freq: _currentFreqHz || 0,
     mode: modeVal,
@@ -6857,6 +6861,12 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       freedvEngine.on('error', (data) => sendCatLog(`[FreeDV] Error: ${data.message}`));
       freedvEngine.start(codecMode);
       sendCatLog(`[FreeDV] Auto-started for mode ${m} (codec ${codecMode})`);
+      // Mute radio audio so user only hears decoded FreeDV speech
+      if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
+        const si = (settings.catTarget.port || 5002) - 5002;
+        smartSdr._send(`slice set ${si} audio_mute=1`);
+        sendCatLog(`[FreeDV] Muted slice ${si} audio`);
+      }
       // Tell renderer to start RX audio capture
       if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
     }
@@ -6868,6 +6878,12 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     freedvEngine.stop();
     freedvEngine = null;
     if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
+    // Unmute radio audio
+    if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
+      const si = (settings.catTarget.port || 5002) - 5002;
+      smartSdr._send(`slice set ${si} audio_mute=0`);
+      sendCatLog(`[FreeDV] Unmuted slice ${si} audio`);
+    }
   }
 
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {

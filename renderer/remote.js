@@ -618,6 +618,11 @@
           }
         }
         updateCwEnableBtn();
+        // Restore saved JTCAT gain levels to server
+        var restoredRx = parseInt(localStorage.getItem('echocat-ft8-rx-gain'), 10);
+        var restoredTx = parseInt(localStorage.getItem('echocat-ft8-tx-gain'), 10);
+        if (!isNaN(restoredRx)) ft8Send({ type: 'jtcat-rx-gain', value: restoredRx / 100 });
+        if (!isNaN(restoredTx)) ft8Send({ type: 'jtcat-tx-gain', value: (restoredTx / 100) * (restoredTx / 100) });
         break;
 
       case 'tune-blocked':
@@ -977,10 +982,11 @@
       currentFreqKhz = s.freq / 1000;
     }
     if (s.mode) {
-      modeBadge.textContent = s.mode;
       currentMode = s.mode;
-      const m = s.mode.toUpperCase();
-      const isVoice = (m === 'SSB' || m === 'USB' || m === 'LSB' || m === 'FM' || m === 'AM');
+      // Display friendly name for FreeDV modes
+      const mUp = s.mode.toUpperCase();
+      modeBadge.textContent = mUp.startsWith('FREEDV') ? (mUp.includes('RADE') ? 'RADE' : 'FreeDV') : s.mode;
+      const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' || mUp === 'FM' || mUp === 'AM' || mUp.startsWith('FREEDV'));
       pttBtn.classList.toggle('hidden', !isVoice);
       estopBtn.classList.toggle('hidden', !isVoice);
       updateCwPanelVisibility();
@@ -1342,7 +1348,10 @@
       freqDisplay.textContent = formatFreq(hz);
       currentFreqKhz = parseFloat(freqKhz);
     }
-    if (mode) modeBadge.textContent = mode;
+    if (mode) {
+      const mu = mode.toUpperCase();
+      modeBadge.textContent = mu.startsWith('FREEDV') ? (mu.includes('RADE') ? 'RADE' : 'FreeDV') : mode;
+    }
     tunedFreqKhz = freqKhz;
     tunedCallsign = callsign;
     // Look up operator name and state from QRZ for CW macros
@@ -3134,7 +3143,13 @@
     // Auto-scroll the scanned spot into view
     var tunedCard = spotList.querySelector('.spot-card.tuned');
     if (tunedCard) tunedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    scanTimer = setTimeout(() => { scanIndex++; scanStep(); }, scanDwell * 1000);
+    scanTimer = setTimeout(() => {
+      // Skip past spots on the same frequency (dwell once per frequency, not per spot)
+      var curFreq = spot.frequency;
+      scanIndex++;
+      while (scanIndex < list.length && list[scanIndex].frequency === curFreq) scanIndex++;
+      scanStep();
+    }, scanDwell * 1000);
   }
 
   function stopScan() {
@@ -4905,10 +4920,22 @@
   var ft8RxGainVal = document.getElementById('ft8-rx-gain-val');
   var ft8TxGain = document.getElementById('ft8-tx-gain');
   var ft8TxGainVal = document.getElementById('ft8-tx-gain-val');
+  // Restore saved gain levels
+  var savedFt8Rx = parseInt(localStorage.getItem('echocat-ft8-rx-gain'), 10);
+  if (!isNaN(savedFt8Rx) && ft8RxGain) {
+    ft8RxGain.value = savedFt8Rx;
+    ft8RxGainVal.textContent = savedFt8Rx + '%';
+  }
+  var savedFt8Tx = parseInt(localStorage.getItem('echocat-ft8-tx-gain'), 10);
+  if (!isNaN(savedFt8Tx) && ft8TxGain) {
+    ft8TxGain.value = savedFt8Tx;
+    ft8TxGainVal.textContent = savedFt8Tx + '%';
+  }
   if (ft8RxGain) {
     ft8RxGain.addEventListener('input', function() {
       var pct = parseInt(ft8RxGain.value, 10);
       ft8RxGainVal.textContent = pct + '%';
+      localStorage.setItem('echocat-ft8-rx-gain', pct);
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'jtcat-rx-gain', value: pct / 100 }));
       }
@@ -4918,6 +4945,7 @@
     ft8TxGain.addEventListener('input', function() {
       var pct = parseInt(ft8TxGain.value, 10);
       ft8TxGainVal.textContent = pct + '%';
+      localStorage.setItem('echocat-ft8-tx-gain', pct);
       // Square curve — same as desktop JTCAT
       var gain = (pct / 100) * (pct / 100);
       if (ws && ws.readyState === WebSocket.OPEN) {
