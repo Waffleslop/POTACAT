@@ -995,12 +995,16 @@
         <span class="help-text" style="margin-bottom:8px;display:block;">Used in N1MM+ RadioInfo UDP broadcast. Set to 2 for a second radio in SO2R setups (FreqEZ, band decoders).</span>
         <label class="radio-label"><input type="radio" name="radio-type" value="flex" checked> FlexRadio (SmartSDR)</label>
         <div id="flex-config" class="radio-sub hidden">
+          <label>Radio IP:
+            <input type="text" id="set-flex-host" placeholder="127.0.0.1" value="127.0.0.1" style="width:140px;">
+          </label>
           <label>Slice: <select id="set-flex-slice">
             <option value="5002">Slice A (TCP :5002)</option>
             <option value="5003">Slice B (TCP :5003)</option>
             <option value="5004">Slice C (TCP :5004)</option>
             <option value="5005">Slice D (TCP :5005)</option>
           </select></label>
+          <span class="help-text" style="display:block;">Radio IP is used for the SmartSDR API (ATU, NB, SWR meter, S-meter, CW keyer). Use 127.0.0.1 if SmartSDR runs on the same PC, or the radio's IP if connecting directly.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">

@@ -1127,12 +1127,13 @@ async function populateRadioSection(currentTarget) {
   if (!currentTarget) {
     setRadioType('flex');
   } else if (currentTarget.type === 'tcp') {
-    // Check if it matches a standard Flex slice (localhost + 5002-5005)
-    const isFlexSlice = (currentTarget.host === '127.0.0.1' || !currentTarget.host) &&
-      [5002, 5003, 5004, 5005].includes(currentTarget.port);
+    // Check if it matches a standard Flex slice (ports 5002-5005)
+    const isFlexSlice = [5002, 5003, 5004, 5005].includes(currentTarget.port);
     if (isFlexSlice) {
       setRadioType('flex');
       setFlexSlice.value = String(currentTarget.port);
+      const flexHostEl = document.getElementById('set-flex-host');
+      if (flexHostEl) flexHostEl.value = currentTarget.host || '127.0.0.1';
     } else {
       setRadioType('tcpcat');
       setTcpcatHost.value = currentTarget.host || '127.0.0.1';
@@ -1432,7 +1433,8 @@ function renderRigList(rigs, activeRigId) {
 function buildCatTargetFromForm() {
   const radioType = getSelectedRadioType();
   if (radioType === 'flex') {
-    return { type: 'tcp', host: '127.0.0.1', port: parseInt(setFlexSlice.value, 10) };
+    const flexHost = document.getElementById('set-flex-host');
+    return { type: 'tcp', host: (flexHost && flexHost.value.trim()) || '127.0.0.1', port: parseInt(setFlexSlice.value, 10) };
   } else if (radioType === 'tcpcat') {
     return { type: 'tcp', host: setTcpcatHost.value.trim() || '127.0.0.1', port: parseInt(setTcpcatPort.value, 10) || 5002 };
   } else if (radioType === 'serialcat') {
@@ -5381,6 +5383,14 @@ if (viewDirectoryBtn) viewDirectoryBtn.addEventListener('click', () => {
   }
   setView('directory');
 });
+// Show Directory button at startup if enabled (without waiting for Settings dialog)
+(async () => {
+  const s = await window.api.getSettings();
+  if (s.enableDirectory) {
+    setEnableDirectory.checked = true;
+    updateDirectoryButton();
+  }
+})();
 viewJtcatBtn.addEventListener('click', () => {
   window.api.jtcatPopoutOpen();
 });
