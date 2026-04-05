@@ -4469,12 +4469,14 @@ function updateMapMarkers(filtered) {
     const mapEvent = getEventForCallsign(s.callsign);
     const eventBadgeHtml = mapEvent ? ` <span style="background:${mapEvent.badgeColor || '#ff6b00'};color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">${mapEvent.badge || 'EVT'}</span>` : '';
     const wwffBadge = s.wwffReference ? ` <span style="background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">WWFF</span>` : '';
+    const donorBadge = donorCallsigns.has(s.callsign.toUpperCase()) ? ' <span style="font-size:12px;" title="POTACAT Supporter">\uD83D\uDC3E</span>' : '';
+    const creatorBadge = s.callsign.toUpperCase() === 'K3SBP' ? ' <span style="font-size:12px;" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>' : '';
     const wwffRefLine = s.wwffReference ? `<br><b>${s.wwffReference}</b> ${s.wwffParkName || ''} <span style="color:${SOURCE_COLORS_ACTIVE.wwff};font-size:11px;">[WWFF]</span>` : '';
     const qrzOp = qrzData.get(s.callsign.toUpperCase().split('/')[0]);
     const opName = qrzDisplayName(qrzOp);
     const opLine = opName ? `<span style="color:#b0bec5;font-size:11px;">${opName}</span><br>` : '';
     const popupContent = `
-      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${eventBadgeHtml}${newBadge}${wwffBadge}<br>
+      <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b>${donorBadge}${creatorBadge} <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${eventBadgeHtml}${newBadge}${wwffBadge}<br>
       ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}${wwffRefLine}<br>
       ${distStr}<br>
@@ -5804,6 +5806,13 @@ function render() {
         paw.title = 'POTACAT Supporter';
         paw.textContent = '\uD83D\uDC3E';
         callTd.appendChild(paw);
+      }
+      if (s.callsign.toUpperCase() === 'K3SBP') {
+        const cat = document.createElement('span');
+        cat.className = 'donor-paw';
+        cat.title = 'POTACAT Creator';
+        cat.textContent = '\uD83D\uDC08\u200D\u2B1B';
+        callTd.appendChild(cat);
       }
       if (enableDxe && expeditionCallsigns.has(s.callsign.toUpperCase())) {
         const dxp = document.createElement('span');
@@ -7300,6 +7309,19 @@ settingsCancel.addEventListener('click', async () => {
   const s = await window.api.getSettings();
   applyTheme(s.lightMode === true);
   settingsDialog.close();
+});
+
+// Export/Import settings
+document.getElementById('settings-export').addEventListener('click', async () => {
+  const ok = await window.api.exportSettings();
+  if (ok) showLogToast('Settings exported', { duration: 2000 });
+});
+document.getElementById('settings-import').addEventListener('click', async () => {
+  const ok = await window.api.importSettings();
+  if (ok) {
+    showLogToast('Settings imported — restarting...', { duration: 2000 });
+    setTimeout(() => window.api.relaunch(), 1500);
+  }
 });
 
 settingsSave.addEventListener('click', async () => {
@@ -15347,6 +15369,20 @@ function formatJtcatDecode(d) {
       var badge = spot.source === 'pota' ? 'POTA' : 'SOTA';
       var ref = spot.reference || '';
       html += ' <span class="jtcat-pota-badge" title="' + escJtcat(ref + ' ' + (spot.parkName || '')) + '">' + badge + '</span>';
+      break;
+    }
+  }
+  // Check for POTACAT supporter paw badge
+  for (var k = 0; k < words.length; k++) {
+    if (donorCallsigns.has(words[k].toUpperCase())) {
+      html += ' <span class="donor-paw" title="POTACAT Supporter">\uD83D\uDC3E</span>';
+      break;
+    }
+  }
+  // POTACAT creator badge
+  for (var m = 0; m < words.length; m++) {
+    if (words[m].toUpperCase() === 'K3SBP') {
+      html += ' <span class="donor-paw" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>';
       break;
     }
   }

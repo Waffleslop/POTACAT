@@ -2625,6 +2625,8 @@ html, body {
 .ft8-badge-grid { background: #4fc3f7; color: #000; }
 .ft8-badge-call { background: #f0a500; color: #000; }
 .ft8-badge-watch { background: #ff4081; color: #fff; }
+.ft8-badge-donor { background: transparent; font-size: 10px; padding: 0 1px; }
+.donor-paw { margin-left: 3px; cursor: default; font-size: 11px; }
 .ft8-row.ft8-watched { background: rgba(255, 64, 129, 0.12); }
 .ft8-entity { font-size: 10px; color: #666; margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
 

@@ -6,6 +6,7 @@
   // --- State ---
   let ws = null;
   let spots = [];
+  let donorCallsigns = new Set();
   // bandFilter removed — now multi-select dropdown
   let pttDown = false;
   let storedToken = '';
@@ -734,6 +735,11 @@
         if (activeTab === 'dir') renderDirectoryTab();
         break;
 
+      case 'donor-callsigns':
+        donorCallsigns = new Set((msg.callsigns || []).map(function(cs) { return cs.toUpperCase(); }));
+        renderSpots();
+        break;
+
       case 'status':
         updateStatus(msg);
         break;
@@ -1236,7 +1242,7 @@
       }).join('');
 
       return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}${skipClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}">
-        <span class="spot-call">${workedCheck}${esc(s.callsign)}${newBadge}</span>
+        <span class="spot-call">${workedCheck}${esc(s.callsign)}${donorCallsigns.has((s.callsign || '').toUpperCase()) ? '<span class="donor-paw" title="POTACAT Supporter">\uD83D\uDC3E</span>' : ''}${(s.callsign || '').toUpperCase() === 'K3SBP' ? '<span class="donor-paw" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>' : ''}${newBadge}</span>
         ${colHtml}
       </div>`;
     }).join('');
@@ -4733,6 +4739,8 @@
         if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
         if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
         if (d.watched) badges += '<span class="ft8-badge ft8-badge-watch" title="Watchlist">W</span>';
+        if (d.call && donorCallsigns.has(d.call.toUpperCase())) badges += '<span class="ft8-badge ft8-badge-donor" title="POTACAT Supporter">\uD83D\uDC3E</span>';
+        if (d.call && d.call.toUpperCase() === 'K3SBP') badges += '<span class="ft8-badge ft8-badge-donor" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>';
         const entityStr = d.entity ? '<span class="ft8-entity">' + esc(d.entity) + '</span>' : '';
 
         const row = document.createElement('div');

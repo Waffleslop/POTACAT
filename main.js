@@ -6072,6 +6072,7 @@ function createWindow() {
     loadWorkedParks();
     // Fetch donor list (async, non-blocking)
     fetchDonorList();
+    setInterval(fetchDonorList, 24 * 3600000); // refresh supporter list daily
     // Fetch active DX expeditions from Club Log
     fetchExpeditions();
     setInterval(fetchExpeditions, 3600000); // refresh every hour
@@ -6116,15 +6117,19 @@ function createWindow() {
 // --- Donor list ---
 function fetchDonorList() {
   const https = require('https');
-  const req = https.get('https://donors.potacat.com/d/a7f3e9b1c4d2', (res) => {
+  const req = https.get('https://api.potacat.com/v1/supporters', (res) => {
     let body = '';
     res.on('data', (chunk) => { body += chunk; });
     res.on('end', () => {
       try {
         const arr = JSON.parse(body);
-        donorCallsigns = new Set(arr.map(b64 => Buffer.from(b64, 'base64').toString('utf-8')));
+        if (!Array.isArray(arr)) return;
+        donorCallsigns = new Set(arr.map(cs => cs.toUpperCase()));
         if (win && !win.isDestroyed()) {
           win.webContents.send('donor-callsigns', [...donorCallsigns]);
+        }
+        if (remoteServer && remoteServer.running) {
+          remoteServer.broadcastDonorCallsigns([...donorCallsigns]);
         }
       } catch { /* silently ignore parse errors */ }
     });
@@ -8294,8 +8299,50 @@ app.whenReady().then(() => {
 
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
+  ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
+
+  // Export/Import settings
+  ipcMain.handle('export-settings', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Export POTACAT Settings',
+      defaultPath: 'potacat-settings.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePath) return false;
+    // Exclude sensitive data from export
+    const exportData = { ...settings };
+    delete exportData.qrzPassword;
+    delete exportData.remoteToken;
+    delete exportData.smartSdrClientId;
+    fs.writeFileSync(result.filePath, JSON.stringify(exportData, null, 2));
+    return true;
+  });
+
+  ipcMain.handle('import-settings', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Import POTACAT Settings',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || !result.filePaths.length) return false;
+    try {
+      const imported = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf-8'));
+      // Preserve local-only fields
+      imported.smartSdrClientId = settings.smartSdrClientId;
+      if (!imported.remoteToken) imported.remoteToken = settings.remoteToken;
+      if (!imported.qrzPassword) imported.qrzPassword = settings.qrzPassword;
+      settings = { ...settings, ...imported };
+      saveSettings(settings);
+      return true;
+    } catch (err) {
+      console.error('Settings import failed:', err.message);
+      return false;
+    }
+  });
 
   // TunerGenius 1x3 IPC
   ipcMain.handle('tgxl-select-antenna', (_e, port) => {
