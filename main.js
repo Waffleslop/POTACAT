@@ -5586,7 +5586,15 @@ const hamrsBridge = {
         ));
       }
 
-      // Send QSO_LOGGED (type 5) — the primary message most apps listen for
+      // Send LOGGED_ADIF (type 12) FIRST — contains POTA_REF, SIG_INFO, and other
+      // ADIF fields that HAMRS needs for "their park" and program-specific fields.
+      const adifBuf = encodeLoggedAdif(this.id, adifText);
+      this.socket.send(adifBuf, 0, adifBuf.length, this.port, this.host, (err) => {
+        if (err) sendCatLog(`[HamRS] LOGGED_ADIF send error: ${err.message}`);
+        else sendCatLog(`[HamRS] LOGGED_ADIF (type 12) sent (${adifBuf.length} bytes)`);
+      });
+
+      // Then send QSO_LOGGED (type 5) — some apps only listen for this
       const qsoMsg = encodeQsoLogged(this.id, {
         dateTimeOff,
         dateTimeOn: dateTimeOff,
@@ -5604,18 +5612,11 @@ const hamrsBridge = {
         myGrid: qsoData.myGridsquare || '',
       });
       this.socket.send(qsoMsg, 0, qsoMsg.length, this.port, this.host, (err) => {
-        if (err) sendCatLog(`[HamRS] QSO_LOGGED send error: ${err.message}`);
-        else sendCatLog(`[HamRS] QSO_LOGGED (type 5) sent (${qsoMsg.length} bytes)`);
-      });
-
-      // Also send LOGGED_ADIF (type 12) as supplementary
-      const adifBuf = encodeLoggedAdif(this.id, adifText);
-      this.socket.send(adifBuf, 0, adifBuf.length, this.port, this.host, (err) => {
         if (err) {
-          sendCatLog(`[HamRS] LOGGED_ADIF send error: ${err.message}`);
+          sendCatLog(`[HamRS] QSO_LOGGED send error: ${err.message}`);
           reject(err);
         } else {
-          sendCatLog(`[HamRS] LOGGED_ADIF (type 12) sent (${adifBuf.length} bytes)`);
+          sendCatLog(`[HamRS] QSO_LOGGED (type 5) sent (${qsoMsg.length} bytes)`);
           resolve();
         }
       });
