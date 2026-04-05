@@ -948,6 +948,12 @@ html, body {
   white-space: nowrap;
 }
 
+.spot-region {
+  font-size: 11px;
+  color: #4fc3f7;
+  white-space: nowrap;
+}
+
 .spot-src {
   font-size: 9px;
   font-weight: 700;
@@ -2790,6 +2796,7 @@ html, body {
 [data-theme="light"] .spot-call { color: #1a1a2e; }
 [data-theme="light"] .spot-mode { background: #e0e0e0; }
 [data-theme="light"] .spot-band { color: #1565c0; }
+[data-theme="light"] .spot-region { color: #1565c0; }
 [data-theme="light"] .spot-name { color: #555; }
 [data-theme="light"] .col-order-btn { background: #f0f0f0; border-color: #ccc; color: #333; }
 [data-theme="light"] .spot-log-btn { border-color: #bbb; }

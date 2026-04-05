@@ -115,12 +115,13 @@
     mode: colPrefs.mode === true, // off by default
     band: colPrefs.band === true, // off by default
     name: colPrefs.name === true, // off by default — park name / comments
+    region: colPrefs.region === true, // off by default — state/region (e.g. US-CO)
     src: colPrefs.src === true,   // off by default — source (POTA/SOTA/DXC)
     skip: colPrefs.skip !== false,
     log: colPrefs.log !== false,
   };
   // Column ordering — array of column keys in display order
-  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'src', 'age', 'skip', 'log'];
+  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'region', 'src', 'age', 'skip', 'log'];
   var colOrder = colPrefs.order && Array.isArray(colPrefs.order) ? colPrefs.order : defaultColOrder.slice();
   // Ensure any new columns are present in colOrder
   for (var k of defaultColOrder) { if (colOrder.indexOf(k) === -1) colOrder.push(k); }
@@ -1205,6 +1206,7 @@
           case 'dist': return `<span class="spot-dist">${formatSpotDist(s.distance)}</span>`;
           case 'ref': return `<span class="spot-ref ${refClass}">${esc(ref)}</span>`;
           case 'name': return `<span class="spot-name">${esc(spotName)}</span>`;
+          case 'region': return `<span class="spot-region">${esc(s.locationDesc || '')}</span>`;
           case 'src': return `<span class="spot-src source-${src}">${srcLabel}</span>`;
           case 'age': return `<span class="spot-age">${age}</span>`;
           case 'skip': return isNet ? '' : skipBtn;
@@ -2765,7 +2767,7 @@
   }
 
   // Spot column order + toggles — dynamic list with up/down buttons
-  var colLabels = { freq: 'Freq', mode: 'Mode', band: 'Band', dist: 'Dist', ref: 'Ref/Park', name: 'Name', src: 'Source', age: 'Age', skip: 'Skip', log: 'Log' };
+  var colLabels = { freq: 'Freq', mode: 'Mode', band: 'Band', dist: 'Dist', ref: 'Ref/Park', name: 'Name', region: 'Region', src: 'Source', age: 'Age', skip: 'Skip', log: 'Log' };
   function buildColOrderUI() {
     var container = document.getElementById('col-order-list');
     if (!container) return;
