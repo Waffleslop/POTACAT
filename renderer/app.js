@@ -10412,12 +10412,12 @@ async function updateCwMacroBar() {
     _cwMacroCache = s.cwMacros && s.cwMacros.length ? s.cwMacros : DEFAULT_CW_MACROS;
   }
   cwMacroBtns.innerHTML = '';
-  _cwMacroCache.forEach((m) => {
+  _cwMacroCache.forEach((m, i) => {
     if (!m.label && !m.text) return;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = m.label || '?';
-    btn.title = m.text;
+    btn.title = (m.text || '') + ' (Ctrl+F' + (i + 1) + ')';
     btn.addEventListener('click', () => {
       window.api.sendCwText(expandDesktopCwMacros(m.text));
     });
@@ -10575,11 +10575,12 @@ async function updateVoiceMacroBar() {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = voiceMacroLabels[idx] || ('V' + (idx + 1));
+      var fKeyHint = ' (Ctrl+F' + (idx + 6) + ')';
       if (filled.indexOf(idx) === -1) {
         btn.style.opacity = '0.3';
-        btn.title = 'No recording';
+        btn.title = 'No recording' + fKeyHint;
       } else {
-        btn.title = 'Click to play';
+        btn.title = 'Click to play' + fKeyHint;
         btn.addEventListener('click', function() {
           if (voicePlayingIdx === idx) stopVoicePlayback();
           else playVoiceMacro(idx, btn);
@@ -10754,6 +10755,41 @@ updateVoiceMacroBar();
 // Render voice macro editor when Settings opens
 const _origOpenSettingsDialog = openSettingsDialog;
 // (voice macro editor is populated when settings loads — hook into the existing flow)
+
+// --- Macro Hotkeys (Ctrl+F1-F5 = CW, Ctrl+F6-F10 = Voice) ---
+document.addEventListener('keydown', (e) => {
+  // Require Ctrl modifier to avoid conflicts with F1 (help), F12 (devtools), etc.
+  if (!e.ctrlKey) return;
+  // Skip if user is typing in an input/textarea
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  // Skip if settings dialog is open
+  const settingsDialog = document.getElementById('settings-dialog');
+  if (settingsDialog && !settingsDialog.classList.contains('hidden')) return;
+
+  const fKey = e.key.match(/^F(\d+)$/);
+  if (!fKey) return;
+  const num = parseInt(fKey[1], 10);
+
+  if (num >= 1 && num <= 5) {
+    // Ctrl+F1-F5: CW macros
+    e.preventDefault();
+    const idx = num - 1;
+    const macros = _cwMacroCache || [];
+    const list = macros.length ? macros : DEFAULT_CW_MACROS;
+    if (idx < list.length && list[idx].text) {
+      window.api.sendCwText(expandDesktopCwMacros(list[idx].text));
+    }
+  } else if (num >= 6 && num <= 10) {
+    // Ctrl+F6-F10: Voice macros
+    e.preventDefault();
+    const idx = num - 6;
+    if (voicePlayingIdx === idx) {
+      stopVoicePlayback();
+    } else {
+      playVoiceMacro(idx, null);
+    }
+  }
+});
 
 // --- CW Popover (volume/WPM dropdown from CW status pill) ---
 const cwPopover = document.getElementById('cw-popover');
