@@ -1765,18 +1765,22 @@
             <span id="cw-sidetone-volume-label" style="font-size:11px;min-width:28px;">30%</span>
           </label>
         </div>
-        <!-- CW Macros -->
-        <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
-          <span style="font-size:12px;font-weight:bold;color:var(--text);">CW Macros</span>
-          <span class="help-text" style="display:block;margin-top:2px;">Variables: {MYCALL} {call} {op_firstname} {state}</span>
-          <div id="cw-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
-        </div>
-        <!-- Voice Macros -->
-        <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
-          <span style="font-size:12px;font-weight:bold;color:var(--text);">Voice Macros</span>
-          <span class="help-text" style="display:block;margin-top:2px;">Record mic audio to play as voice macros during SSB/FM. Max 30s each. Plays through the rig's TX audio output.</span>
-          <div id="voice-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
-        </div>
+      </div>
+    </fieldset>
+    <!-- 9b. Macros -->
+    <fieldset class="source-toggles collapsible" data-settings-tab="station">
+      <legend>Macros</legend>
+      <!-- CW Macros -->
+      <div>
+        <span style="font-size:12px;font-weight:bold;color:var(--text);">CW Macros</span>
+        <span class="help-text" style="display:block;margin-top:2px;">Variables: {MYCALL} {call} {op_firstname} {state}</span>
+        <div id="cw-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
+      </div>
+      <!-- Voice Macros -->
+      <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
+        <span style="font-size:12px;font-weight:bold;color:var(--text);">Voice Macros</span>
+        <span class="help-text" style="display:block;margin-top:2px;">Record mic audio to play as voice macros during SSB/FM. Max 30s each. Plays through the rig's TX audio output.</span>
+        <div id="voice-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
       </div>
     </fieldset>
     <!-- 10. ECHOCAT -->

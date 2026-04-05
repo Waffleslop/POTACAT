@@ -2598,6 +2598,9 @@ html, body {
 .ft8-badge-dxcc { background: #e94560; color: #fff; }
 .ft8-badge-grid { background: #4fc3f7; color: #000; }
 .ft8-badge-call { background: #f0a500; color: #000; }
+.ft8-badge-watch { background: #ff4081; color: #fff; }
+.ft8-row.ft8-watched { background: rgba(255, 64, 129, 0.12); }
+.ft8-entity { font-size: 10px; color: #666; margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
 
 .ft8-waterfall {
   width: 100%;
@@ -2880,6 +2883,8 @@ html, body {
 [data-theme="light"] .ft8-row.ft8-tx { background: rgba(211, 47, 47, 0.12); }
 [data-theme="light"] .ft8-row.ft8-tx .ft8-msg { color: #c62828; }
 [data-theme="light"] .ft8-row.ft8-wanted { background: rgba(255, 160, 0, 0.08); }
+[data-theme="light"] .ft8-row.ft8-watched { background: rgba(255, 64, 129, 0.08); }
+[data-theme="light"] .ft8-entity { color: #888; }
 [data-theme="light"] #ft8-status-strip { background: var(--bg-card); border-bottom-color: #ddd; }
 [data-theme="light"] #ft8-control-bar { background: var(--bg-card); border-top-color: #ddd; }
 [data-theme="light"] .ft8-ctrl-btn { border-color: #ccc; }

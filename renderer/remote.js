@@ -4667,20 +4667,23 @@
         if (ft8CqFilter && !isCq && !is73 && !isDirected && !isHunt && !isQsoPartner) return;
         if (ft8WantedFilter && !isWanted && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
 
-        // Build needed badges
+        // Build needed badges + entity
         let badges = '';
         if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
         if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
         if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
+        if (d.watched) badges += '<span class="ft8-badge ft8-badge-watch" title="Watchlist">W</span>';
+        const entityStr = d.entity ? '<span class="ft8-entity">' + esc(d.entity) + '</span>' : '';
 
         const row = document.createElement('div');
-        row.className = 'ft8-row' + (isCq ? ' ft8-cq' : '') + (isDirected ? ' ft8-directed' : '') + (isHunt ? ' ft8-hunt' : '') + (isWanted ? ' ft8-wanted' : '');
+        row.className = 'ft8-row' + (isCq ? ' ft8-cq' : '') + (isDirected ? ' ft8-directed' : '') + (isHunt ? ' ft8-hunt' : '') + (isWanted ? ' ft8-wanted' : '') + (d.watched ? ' ft8-watched' : '');
         row.innerHTML =
           '<span class="ft8-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
           '<span class="ft8-dt">' + (d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '') + '</span>' +
-          '<span class="ft8-df">' + d.df + '</span>' +
+          '<span class="ft8-df">' + Math.round(d.df) + '</span>' +
+          '<span class="ft8-msg">' + esc(text) + '</span>' +
           (badges ? '<span class="ft8-badges">' + badges + '</span>' : '') +
-          '<span class="ft8-msg">' + esc(text) + '</span>';
+          entityStr;
         // Click to reply
         row.addEventListener('click', () => ft8ClickDecode(d));
         log.appendChild(row);
@@ -6465,6 +6468,37 @@
       }
     }).observe(settingsOverlay, { attributes: true, attributeFilter: ['class'] });
   }
+
+  // --- Android back button handler ---
+  // Intercept browser back to close overlays instead of exiting ECHOCAT
+  history.replaceState({ echocat: true }, '');
+  history.pushState({ echocat: true }, '');
+
+  window.addEventListener('popstate', function(e) {
+    // Try closing overlays in priority order
+    if (!settingsOverlay.classList.contains('hidden')) {
+      settingsOverlay.classList.add('hidden');
+      history.pushState({ echocat: true }, '');
+      return;
+    }
+    if (!modePicker.classList.contains('hidden')) {
+      modePicker.classList.add('hidden');
+      history.pushState({ echocat: true }, '');
+      return;
+    }
+    if (logSheet && !logSheet.classList.contains('hidden')) {
+      closeLogSheet();
+      history.pushState({ echocat: true }, '');
+      return;
+    }
+    if (quickLogForm && !quickLogForm.classList.contains('hidden')) {
+      quickLogForm.classList.add('hidden');
+      history.pushState({ echocat: true }, '');
+      return;
+    }
+    // Nothing to close — push state back so next press also gets caught
+    history.pushState({ echocat: true }, '');
+  });
 
   // Auto-connect on page load
   connect('');

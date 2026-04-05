@@ -456,21 +456,24 @@
       if (cqFilter && !isCq && !is73 && !isDirected) return;
       if (wantedFilter && !isWanted && !isDirected && !is73) return;
 
-      // Build needed badges
+      // Build needed badges + entity
       var badges = '';
       if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
       if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
       if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
+      if (d.watched) badges += '<span class="jp-badge jp-badge-watch" title="Watchlist">W</span>';
+      var entityStr = d.entity ? '<span class="jp-entity">' + esc(d.entity) + '</span>' : '';
 
       var row = document.createElement('div');
-      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '');
+      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '') + (d.watched ? ' jp-watched' : '');
       var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
       row.innerHTML =
         '<span class="jp-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
         '<span class="jp-dt">' + dtStr + '</span>' +
-        '<span class="jp-df">' + d.df + '</span>' +
+        '<span class="jp-df">' + Math.round(d.df) + '</span>' +
+        '<span class="jp-msg">' + esc(text) + '</span>' +
         (badges ? '<span class="jp-badges">' + badges + '</span>' : '') +
-        '<span class="jp-msg">' + esc(text) + '</span>';
+        entityStr;
       row.addEventListener('dblclick', (function(decode) { return function() { onDecodeRowClick(decode); }; })(d));
       bandActivity.appendChild(row);
 

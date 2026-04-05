@@ -2425,18 +2425,24 @@ function startJtcat(mode) {
 
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
-    if (ctyDb && data.results) {
+    if (data.results) {
       const currentBand = _currentFreqHz ? freqToBand(_currentFreqHz / 1e6) : null;
+      // Parse watchlist for matching
+      const wlStr = (settings.watchlist || '').toUpperCase();
+      const wlCalls = wlStr ? wlStr.split(',').map(s => s.trim().split(':')[0]).filter(Boolean) : [];
       for (const r of data.results) {
         const { dxCall } = extractCallsigns(r.text || '');
         if (!dxCall) continue;
         const uc = dxCall.toUpperCase();
-        const entity = resolveCallsign(uc, ctyDb);
+        if (ctyDb) {
+          const entity = resolveCallsign(uc, ctyDb);
+          r.entity = entity ? entity.name : '';
+          r.continent = entity ? entity.continent : '';
+          r.newDxcc = !!(entity && currentBand && !rosterWorkedDxcc.has(entity.name + '|' + currentBand));
+        }
         r.call = uc;
-        r.entity = entity ? entity.name : '';
-        r.continent = entity ? entity.continent : '';
-        r.newDxcc = !!(entity && currentBand && !rosterWorkedDxcc.has(entity.name + '|' + currentBand));
         r.newCall = !rosterWorkedCalls.has(uc);
+        r.watched = wlCalls.length > 0 && wlCalls.some(w => uc.indexOf(w) >= 0 || w.indexOf(uc) >= 0);
         // Extract grid from CQ messages (e.g. "CQ K1ABC FN42")
         const gm = (r.text || '').match(/\b([A-R]{2}\d{2})\s*$/i);
         if (gm) {
@@ -3205,43 +3211,39 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
     }
-    // Destroy audio window FIRST to stop all outgoing audio (prevents VOX trigger)
-    destroyRemoteAudioWindow();
-    // Clear SSB-over-DATA state so handleRemotePtt doesn't try to restore mode
-    _ssbModeBeforePtt = null;
-    // Safety: force RX on disconnect (only send if we were actually transmitting,
-    // to avoid flooding CI-V bus with unnecessary commands)
-    if (_remoteTxState) {
-      handleRemotePtt(false);
-    }
-    // CW safety: ensure PTT released on disconnect (keyer.stop() is handled in RemoteServer)
-    const rigType = detectRigType();
-    if (rigType === 'flex' && smartSdr && smartSdr.connected) {
-      smartSdr.cwPttRelease();
-    } else if (rigType !== 'icom') {
-      // Icom CI-V: skip duplicate setCwKeyTxRx — handleRemotePtt already sent 0x1C 0x00 [0x00]
-      // Sending redundant commands on half-duplex CI-V can cause bus collisions
-      if (cat && cat.connected) cat.setCwKeyTxRx(false);
-    }
-    // Force CW key port DTR low (key up) on disconnect
-    if (cwKeyPort && cwKeyPort.isOpen) {
-      cwKeyPort.set({ dtr: false }, () => {});
-    }
-    // Delayed safety TX-off: VOX on some radios can re-trigger from audio artifacts
-    // when the WebRTC stream closes. Wait for audio teardown to settle.
-    setTimeout(() => {
-      if (_remoteTxState) {
-        if (cat && cat.connected) cat.setTransmit(false);
-        if (smartSdr && smartSdr.connected) smartSdr.setTransmit(false);
-      }
-    }, 500);
-    // Stop JTCAT engine and audio capture if phone was driving FT8
+    // Stop JTCAT engine FIRST — prevents new TX audio from being generated
     if (ft8Engine) {
       stopJtcat();
       if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
       console.log('[JTCAT] Phone disconnected — engine stopped, audio released');
     }
     remoteJtcatQso = null;
+    // Destroy audio window to stop all outgoing audio (prevents VOX trigger)
+    destroyRemoteAudioWindow();
+    // Clear SSB-over-DATA state so handleRemotePtt doesn't try to restore mode
+    _ssbModeBeforePtt = null;
+    // ALWAYS force RX on disconnect — critical safety to prevent stuck TX
+    // (FT8 may use VOX, PTT state tracking can be stale, radio may be mid-cycle)
+    handleRemotePtt(false);
+    // CW safety: ensure PTT released on disconnect (keyer.stop() is handled in RemoteServer)
+    const rigType = detectRigType();
+    if (rigType === 'flex' && smartSdr && smartSdr.connected) {
+      smartSdr.cwPttRelease();
+    }
+    // Force CW key port DTR low (key up) on disconnect
+    if (cwKeyPort && cwKeyPort.isOpen) {
+      cwKeyPort.set({ dtr: false }, () => {});
+    }
+    // Delayed safety TX-off: catches VOX re-trigger from audio artifacts during teardown,
+    // and any race conditions from FT8 engine shutdown
+    setTimeout(() => {
+      if (cat && cat.connected) cat.setTransmit(false);
+      if (smartSdr && smartSdr.connected) smartSdr.setTransmit(false);
+    }, 500);
+    setTimeout(() => {
+      if (cat && cat.connected) cat.setTransmit(false);
+      if (smartSdr && smartSdr.connected) smartSdr.setTransmit(false);
+    }, 2000);
   });
 
   // CW keyer output: route IambicKeyer key events to radio

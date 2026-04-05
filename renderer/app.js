@@ -10503,6 +10503,50 @@ const voiceMacroRecBtn = document.getElementById('voice-macro-rec');
 const voiceMacroEditor = document.getElementById('voice-macro-editor');
 const quickShowVoiceMacros = document.getElementById('quick-show-voice-macros');
 let voiceMacroBoxVisible = localStorage.getItem('voiceMacroBoxVisible') === 'true';
+
+// Draggable voice macro box
+(function() {
+  if (!voiceMacroBar) return;
+  let dragging = false, startX, startY, startLeft, startTop;
+  const saved = localStorage.getItem('voiceMacroBoxPos');
+  if (saved) {
+    try {
+      const pos = JSON.parse(saved);
+      voiceMacroBar.style.left = pos.left + 'px';
+      voiceMacroBar.style.top = pos.top + 'px';
+      voiceMacroBar.style.right = 'auto';
+      voiceMacroBar.style.bottom = 'auto';
+    } catch {}
+  }
+  voiceMacroBar.addEventListener('mousedown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+    dragging = true;
+    voiceMacroBar.classList.add('dragging');
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = voiceMacroBar.getBoundingClientRect();
+    const parentRect = voiceMacroBar.parentElement.getBoundingClientRect();
+    startLeft = rect.left - parentRect.left;
+    startTop = rect.top - parentRect.top;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    voiceMacroBar.style.left = (startLeft + e.clientX - startX) + 'px';
+    voiceMacroBar.style.top = (startTop + e.clientY - startY) + 'px';
+    voiceMacroBar.style.right = 'auto';
+    voiceMacroBar.style.bottom = 'auto';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    voiceMacroBar.classList.remove('dragging');
+    localStorage.setItem('voiceMacroBoxPos', JSON.stringify({
+      left: parseInt(voiceMacroBar.style.left, 10),
+      top: parseInt(voiceMacroBar.style.top, 10),
+    }));
+  });
+})();
 const VOICE_MACRO_COUNT = 5;
 const VOICE_MAX_DURATION = 30;
 let voiceMacroLabels = ['CQ', 'ID', '73', '', ''];
