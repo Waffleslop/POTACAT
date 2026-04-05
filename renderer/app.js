@@ -4604,6 +4604,8 @@ function scanStep() {
 
   const spot = list[scanIndex];
   lastTunedSpot = spot;
+  cwSpotWpm = spot.wpm || null;
+  updateCwSpotWpm();
   prefillDxCommand(spot);
   window.api.tune(spot.frequency, spot.mode, spot.bearing);
   if (spot.lat != null && spot.lon != null) showTuneArc(spot.lat, spot.lon, spot.frequency, spot.source);
@@ -5722,6 +5724,8 @@ function render() {
       tr.addEventListener('click', () => {
         if (scanning) stopScan(); // clicking a row stops scan
         lastTunedSpot = s;
+        cwSpotWpm = s.wpm || null;
+        updateCwSpotWpm();
         prefillDxCommand(s);
         window.api.tune(s.frequency, s.mode, s.bearing);
         if (s.lat != null && s.lon != null) showTuneArc(s.lat, s.lon, s.frequency, s.source);
@@ -10457,6 +10461,30 @@ function setCwMacroWpm(wpm) {
   if (cwWpmDisplay) cwWpmDisplay.textContent = cwMacroWpm;
   window.api.cwSetWpm(cwMacroWpm);
   window.api.saveSettings({ cwWpm: cwMacroWpm });
+  updateCwSpotWpm(); // refresh sync button state
+}
+
+// Spotted station WPM display + sync
+const cwSpotWpmEl = document.getElementById('cw-spot-wpm');
+const cwWpmSyncBtn = document.getElementById('cw-wpm-sync');
+let cwSpotWpm = null; // WPM of the currently tuned spot
+
+function updateCwSpotWpm() {
+  if (!cwSpotWpmEl || !cwWpmSyncBtn) return;
+  if (cwSpotWpm && cwSpotWpm !== cwMacroWpm) {
+    cwSpotWpmEl.textContent = 'Theirs: ' + cwSpotWpm;
+    cwSpotWpmEl.classList.remove('hidden');
+    cwWpmSyncBtn.classList.remove('hidden');
+  } else {
+    cwSpotWpmEl.classList.add('hidden');
+    cwWpmSyncBtn.classList.add('hidden');
+  }
+}
+
+if (cwWpmSyncBtn) {
+  cwWpmSyncBtn.addEventListener('click', () => {
+    if (cwSpotWpm) setCwMacroWpm(cwSpotWpm);
+  });
 }
 
 if (cwWpmUpBtn) cwWpmUpBtn.addEventListener('click', () => setCwMacroWpm(cwMacroWpm + 1));

@@ -788,7 +788,7 @@ html, body {
 }
 
 /* --- Spot Distance --- */
-.spot-dist { font-size: 11px; font-family: monospace; color: var(--text-dim); min-width: 50px; text-align: right; flex-shrink: 0; }
+.spot-dist { font-size: 11px; font-family: monospace; color: var(--text-dim); min-width: 32px; text-align: right; flex-shrink: 0; }
 
 /* --- Spot Map --- */
 #spot-map { flex: 1; min-height: 0; position: relative; z-index: 0; }
@@ -856,11 +856,13 @@ html, body {
 /* --- Spot List --- */
 #spot-list {
   flex: 1;
-  overflow-y: auto;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
   padding: 4px 8px;
   min-height: 0;
 }
+#spot-list::-webkit-scrollbar { height: 3px; }
+#spot-list::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
 
 .spot-card {
   display: flex;
@@ -873,6 +875,13 @@ html, body {
   border-left: 3px solid #555;
   cursor: pointer;
   transition: background 0.1s;
+  flex-wrap: nowrap;
+  width: max-content;
+  min-width: 100%;
+}
+.spot-card > span, .spot-card > button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .spot-card:active {
@@ -903,7 +912,7 @@ html, body {
   font-family: monospace;
   font-size: 13px;
   color: var(--text);
-  min-width: 70px;
+  min-width: 56px;
 }
 
 .spot-mode {
@@ -917,7 +926,8 @@ html, body {
 .spot-ref {
   font-size: 12px;
   color: var(--pota);
-  flex: 1;
+  min-width: 52px;
+  width: 52px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -930,6 +940,7 @@ html, body {
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
+  min-width: 24px;
 }
 
 .spot-band {
@@ -942,7 +953,8 @@ html, body {
 .spot-name {
   font-size: 11px;
   color: var(--text-dim);
-  flex: 1;
+  min-width: 48px;
+  width: 48px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -952,6 +964,11 @@ html, body {
   font-size: 11px;
   color: #4fc3f7;
   white-space: nowrap;
+  min-width: 32px;
+  width: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
 }
 
 .spot-src {
@@ -1185,6 +1202,9 @@ html, body {
   text-align: center;
   color: var(--text);
 }
+.cw-spot-wpm { font-size: 10px; color: #f0a500; font-family: monospace; white-space: nowrap; margin-left: 4px; }
+.cw-wpm-sync { font-size: 9px; padding: 2px 8px; border-radius: 3px; border: 1px solid #f0a500; background: transparent; color: #f0a500; cursor: pointer; font-weight: 600; margin-left: 2px; }
+.cw-wpm-sync:active { background: #f0a500; color: #000; }
 
 .cw-mode-wrap {
   display: flex;

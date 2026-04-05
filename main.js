@@ -4909,6 +4909,7 @@ function processPotaSpots(raw) {
       continent,
       comments: s.comments || '',
       count: typeof s.count === 'number' ? s.count : null,
+      wpm: (() => { const m = (s.comments || '').match(/(\d+)\s*WPM/i); return m ? parseInt(m[1], 10) : null; })(),
     };
   });
   // Dedupe: keep latest spot per callsign+band (allows multi-band activations)
@@ -5261,6 +5262,14 @@ function sendMergedSpots() {
       }
       if (Object.keys(data).length > 0) {
         win.webContents.send('qrz-data', data);
+        // Forward operator names to ECHOCAT for the Name column
+        if (remoteServer && remoteServer.hasClient()) {
+          const names = {};
+          for (const [cs, info] of Object.entries(data)) {
+            names[cs] = info.nickname || info.fname || '';
+          }
+          remoteServer.sendToClient({ type: 'qrz-names', data: names });
+        }
       }
     }).catch(() => { /* ignore QRZ errors */ });
   }

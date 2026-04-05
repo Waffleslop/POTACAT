@@ -664,6 +664,9 @@ button:hover {
 .cw-wpm-ctrl button { width: 20px; height: 20px; border-radius: 3px; border: 1px solid #555; background: #2a2a3e; color: #ccc; font-size: 14px; font-weight: bold; cursor: pointer; padding: 0; line-height: 1; }
 .cw-wpm-ctrl button:hover { border-color: var(--blue); color: #fff; }
 .cw-wpm-ctrl span { font-size: 11px; font-weight: 600; color: #4fc3f7; min-width: 28px; text-align: center; font-family: monospace; }
+.cw-spot-wpm { font-size: 10px; color: #f0a500; font-family: monospace; white-space: nowrap; margin-left: 4px; }
+.cw-wpm-sync { font-size: 9px; padding: 1px 6px; border-radius: 3px; border: 1px solid #f0a500; background: transparent; color: #f0a500; cursor: pointer; font-weight: 600; margin-left: 2px; }
+.cw-wpm-sync:hover { background: #f0a500; color: #000; }
 .hotkey-row { display: flex; gap: 4px; align-items: center; font-size: 11px; }
 .hotkey-key-btn { min-width: 80px; padding: 3px 6px; font-size: 11px; font-family: monospace; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 3px; cursor: pointer; text-align: center; }
 .hotkey-key-btn:focus { border-color: var(--blue); outline: none; }

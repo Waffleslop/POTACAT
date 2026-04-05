@@ -128,6 +128,7 @@
   function saveColPrefs() { localStorage.setItem('echocat-spot-cols', JSON.stringify({ ...colShow, order: colOrder })); }
   let tunedCallsign = '';
   let tunedOpName = '';
+  var qrzNameCache = {}; // callsign → first name / nickname from QRZ
   let tunedState = '';
   let currentNb = false;
   let currentAtu = false;
@@ -709,6 +710,15 @@
         }
         break;
 
+      case 'qrz-names':
+        if (msg.data) {
+          for (const [cs, name] of Object.entries(msg.data)) {
+            qrzNameCache[cs.toUpperCase()] = name;
+          }
+          if (colShow.name) renderSpots();
+        }
+        break;
+
       case 'spots':
         spots = msg.data || [];
         renderSpots();
@@ -1185,7 +1195,9 @@
       const skipClass = isSkipped ? ' scan-skipped' : '';
       const workedCheck = (workedToday || workedEver) ? '<span class="worked-check">\u2713</span>' : '';
       const refClass = s.source === 'sota' ? 'sota' : s.source === 'dxc' ? 'dxc' : '';
-      const ref = s.reference || s.locationDesc || '';
+      // Ref column: only show actual park/summit references (e.g. K-1234, W7A/PE-097)
+      // locationDesc is a region code like "US-FL" for POTA, or a country name for DXC — don't show country names here
+      const ref = s.reference || '\u2014';
       const isNet = s.source === 'net';
       const age = isNet ? (s.comments || '') : formatAge(s.spotTime);
       const freqStr = formatSpotFreq(s.frequency);
@@ -1194,7 +1206,8 @@
       const newBadge = newPark ? '<span class="new-badge">NEW</span>' : '';
       const logBtn = isNet ? '' : '<button type="button" class="spot-log-btn">Log</button>';
       const skipBtn = isNet ? '' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'Unskip' : 'Skip'}</button>`;
-      const spotName = s.parkName || s.comments || '';
+      const opName = qrzNameCache[(s.callsign || '').toUpperCase()] || '';
+      const spotName = opName || s.parkName || s.comments || '';
 
       // Build columns in user-defined order
       const colHtml = colOrder.map(key => {
@@ -1206,7 +1219,14 @@
           case 'dist': return `<span class="spot-dist">${formatSpotDist(s.distance)}</span>`;
           case 'ref': return `<span class="spot-ref ${refClass}">${esc(ref)}</span>`;
           case 'name': return `<span class="spot-name">${esc(spotName)}</span>`;
-          case 'region': return `<span class="spot-region">${esc(s.locationDesc || '')}</span>`;
+          case 'region': {
+            let rgn = s.locationDesc || '';
+            const fullName = rgn;
+            // POTA region codes like "US-FL" are already short — pass through
+            // Country names need abbreviation
+            if (rgn.length > 6) rgn = abbreviateCountry(rgn);
+            return rgn ? `<span class="spot-region" title="${esc(fullName)}">${esc(rgn)}</span>` : '<span class="spot-region">\u2014</span>';
+          }
           case 'src': return `<span class="spot-src source-${src}">${srcLabel}</span>`;
           case 'age': return `<span class="spot-age">${age}</span>`;
           case 'skip': return isNet ? '' : skipBtn;
@@ -1228,11 +1248,45 @@
     return num.toFixed(1);
   }
 
+  function abbreviateCountry(name) {
+    var map = {
+      'United States':'USA','Canada':'CAN','Mexico':'MEX','Japan':'JPN','China':'CHN',
+      'Australia':'AUS','New Zealand':'NZL','Brazil':'BRA','Argentina':'ARG',
+      'Germany':'DEU','Fed. Rep. of Germany':'DEU','France':'FRA','Italy':'ITA',
+      'Spain':'ESP','United Kingdom':'GBR','England':'ENG','Scotland':'SCO',
+      'Wales':'WAL','Netherlands':'NLD','Belgium':'BEL','Switzerland':'CHE',
+      'Austria':'AUT','Poland':'POL','Sweden':'SWE','Norway':'NOR','Denmark':'DNK',
+      'Finland':'FIN','Portugal':'PRT','Czech Republic':'CZE','Hungary':'HUN',
+      'Romania':'ROU','Greece':'GRC','Turkey':'TUR','Israel':'ISR',
+      'South Korea':'KOR','India':'IND','Russia':'RUS',
+      'European Russia':'RUS','Asiatic Russia':'RUS',
+      'South Africa':'ZAF','Thailand':'THA','Philippines':'PHL',
+      'Indonesia':'IDN','Colombia':'COL','Chile':'CHL','Peru':'PER',
+      'Hawaii':'HI','Alaska':'AK','Puerto Rico':'PR',
+      'Guadeloupe':'GLP','Curacao':'CUR','Bermuda':'BMU',
+      'Turks & Caicos Islands':'TCA','Cayman Islands':'CYM',
+      'US Virgin Islands':'USVI','British Virgin Islands':'BVI',
+      'Trinidad & Tobago':'TTO','Dominican Republic':'DOM',
+      'Costa Rica':'CRI','Panama':'PAN','Venezuela':'VEN',
+      'Ukraine':'UKR','Ireland':'IRL','Croatia':'HRV','Serbia':'SRB',
+      'Bulgaria':'BGR','Slovakia':'SVK','Slovenia':'SVN','Lithuania':'LTU',
+      'Latvia':'LVA','Estonia':'EST','Iceland':'ISL','Luxembourg':'LUX',
+      'Malta':'MLT','Cyprus':'CYP','Taiwan':'TWN','Singapore':'SGP',
+      'Malaysia':'MYS','Vietnam':'VNM','Pakistan':'PAK','Bangladesh':'BGD',
+      'Sri Lanka':'LKA','Egypt':'EGY','Morocco':'MAR','Kenya':'KEN',
+      'Nigeria':'NGA','Ghana':'GHA','Algeria':'DZA','Tunisia':'TUN',
+    };
+    return map[name] || name.slice(0, 4);
+  }
+
   const MI_TO_KM = 1.60934;
   function formatSpotDist(miles) {
     if (miles == null) return '';
     const d = distUnit === 'km' ? Math.round(miles * MI_TO_KM) : Math.round(miles);
-    return d.toLocaleString() + (distUnit === 'km' ? 'km' : 'mi');
+    // Compact: 1.2k mi instead of 1,234 mi
+    if (d >= 10000) return (d / 1000).toFixed(0) + 'k';
+    if (d >= 1000) return (d / 1000).toFixed(1) + 'k';
+    return d + (distUnit === 'km' ? 'km' : 'mi');
   }
 
   const SOURCE_COLORS_MAP = { pota: '#4ecca3', sota: '#f0a500', dxc: '#e040fb', rbn: '#4fc3f7', pskr: '#ff6b6b', net: '#ffd740', wwff: '#26a69a', llota: '#42a5f5' };
@@ -1380,6 +1434,10 @@
     }
     tunedFreqKhz = freqKhz;
     tunedCallsign = callsign;
+    // Update spotted WPM for CW sync
+    const tunedSpot = spots.find(s => s.callsign === callsign && s.frequency === freqKhz);
+    echoSpotWpm = tunedSpot && tunedSpot.wpm ? tunedSpot.wpm : null;
+    updateEchoCwSpotWpm();
     // Look up operator name and state from QRZ for CW macros
     tunedOpName = '';
     tunedState = '';
@@ -5372,12 +5430,42 @@
     cwWpm = Math.max(5, cwWpm - 1);
     cwWpmLabel.textContent = cwWpm + ' WPM';
     sendCwConfig();
+    updateEchoCwSpotWpm();
   });
   cwWpmUp.addEventListener('click', function() {
     cwWpm = Math.min(50, cwWpm + 1);
     cwWpmLabel.textContent = cwWpm + ' WPM';
     sendCwConfig();
+    updateEchoCwSpotWpm();
   });
+
+  // Spotted station WPM display + sync
+  var echoSpotWpm = null;
+  var echoSpotWpmEl = document.getElementById('cw-spot-wpm-echo');
+  var echoWpmSyncBtn = document.getElementById('cw-wpm-sync-echo');
+
+  function updateEchoCwSpotWpm() {
+    if (!echoSpotWpmEl || !echoWpmSyncBtn) return;
+    if (echoSpotWpm && echoSpotWpm !== cwWpm) {
+      echoSpotWpmEl.textContent = 'Theirs: ' + echoSpotWpm;
+      echoSpotWpmEl.classList.remove('hidden');
+      echoWpmSyncBtn.classList.remove('hidden');
+    } else {
+      echoSpotWpmEl.classList.add('hidden');
+      echoWpmSyncBtn.classList.add('hidden');
+    }
+  }
+
+  if (echoWpmSyncBtn) {
+    echoWpmSyncBtn.addEventListener('click', function() {
+      if (echoSpotWpm) {
+        cwWpm = echoSpotWpm;
+        cwWpmLabel.textContent = cwWpm + ' WPM';
+        sendCwConfig();
+        updateEchoCwSpotWpm();
+      }
+    });
+  }
 
   // Mode buttons
   [cwModeB, cwModeA, cwModeStr].forEach(function(btn) {
