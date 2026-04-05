@@ -664,6 +664,14 @@ button:hover {
 .cw-wpm-ctrl button { width: 20px; height: 20px; border-radius: 3px; border: 1px solid #555; background: #2a2a3e; color: #ccc; font-size: 14px; font-weight: bold; cursor: pointer; padding: 0; line-height: 1; }
 .cw-wpm-ctrl button:hover { border-color: var(--blue); color: #fff; }
 .cw-wpm-ctrl span { font-size: 11px; font-weight: 600; color: #4fc3f7; min-width: 28px; text-align: center; font-family: monospace; }
+.hotkey-row { display: flex; gap: 4px; align-items: center; font-size: 11px; }
+.hotkey-key-btn { min-width: 80px; padding: 3px 6px; font-size: 11px; font-family: monospace; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 3px; cursor: pointer; text-align: center; }
+.hotkey-key-btn:focus { border-color: var(--blue); outline: none; }
+.hotkey-key-btn.listening { border-color: var(--red); color: var(--red); animation: hotkey-pulse 0.8s ease-in-out infinite; }
+@keyframes hotkey-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.hotkey-action { font-size: 11px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 2px 4px; }
+.hotkey-param { font-size: 11px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 2px 4px; width: 80px; }
+.hotkey-del { font-size: 12px; color: var(--red); cursor: pointer; background: none; border: none; padding: 0 4px; }
 .cw-macro-input {
   width: 110px;
   font-size: 11px;
