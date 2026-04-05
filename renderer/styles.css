@@ -660,6 +660,10 @@ button:hover {
 }
 .cw-macro-btns button:hover { border-color: var(--blue); color: #fff; }
 .cw-macro-btns button:active { background: var(--bg); border-color: var(--blue); color: var(--blue); }
+.cw-wpm-ctrl { display: flex; align-items: center; gap: 2px; margin-left: 6px; flex-shrink: 0; }
+.cw-wpm-ctrl button { width: 20px; height: 20px; border-radius: 3px; border: 1px solid #555; background: #2a2a3e; color: #ccc; font-size: 14px; font-weight: bold; cursor: pointer; padding: 0; line-height: 1; }
+.cw-wpm-ctrl button:hover { border-color: var(--blue); color: #fff; }
+.cw-wpm-ctrl span { font-size: 11px; font-weight: 600; color: #4fc3f7; min-width: 28px; text-align: center; font-family: monospace; }
 .cw-macro-input {
   width: 110px;
   font-size: 11px;

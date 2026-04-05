@@ -7187,6 +7187,7 @@ async function openSettingsDialog(tab) {
   cwKeyerConfig.classList.toggle('hidden', !s.enableCwKeyer);
   updateCwKeyerTypeVisibility();
   renderCwMacroEditor(s.cwMacros);
+  renderVoiceMacroEditor();
   if (s.enableCwKeyer) {
     if (s.cwKeyerType === 'winkeyer') {
       populateWinKeyerPorts().then(() => {
@@ -7613,6 +7614,8 @@ settingsSave.addEventListener('click', async () => {
   updateWsjtxStatusVisibility();
   updateRbnButton();
   updateDirectoryButton();
+  invalidateCwMacroCache();
+  updateCwMacroBar();
   // Sync rotor quick-toggle visibility
   rotorConfigured = !!rotorEnabledVal;
   quickRotorLabel.classList.toggle('hidden', !rotorConfigured);
@@ -10396,15 +10399,20 @@ let cwMacroBoxVisible = localStorage.getItem('cwMacroBoxVisible') === 'true';
   });
 })();
 
-function updateCwMacroBar() {
+let _cwMacroCache = null; // cached macros from settings (avoids depending on Settings dialog DOM)
+
+async function updateCwMacroBar() {
   if (!cwMacroBar) return;
   cwMacroBar.classList.toggle('hidden', !cwMacroBoxVisible);
   if (quickShowCwMacros) quickShowCwMacros.checked = cwMacroBoxVisible;
   if (!cwMacroBoxVisible) return;
+  // Use cached macros, or load from settings (not from the editor DOM which may be empty)
+  if (!_cwMacroCache) {
+    const s = await window.api.getSettings();
+    _cwMacroCache = s.cwMacros && s.cwMacros.length ? s.cwMacros : DEFAULT_CW_MACROS;
+  }
   cwMacroBtns.innerHTML = '';
-  const macros = readCwMacroEditor();
-  const list = macros && macros.length ? macros : DEFAULT_CW_MACROS;
-  list.forEach((m) => {
+  _cwMacroCache.forEach((m) => {
     if (!m.label && !m.text) return;
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -10416,6 +10424,8 @@ function updateCwMacroBar() {
     cwMacroBtns.appendChild(btn);
   });
 }
+// Invalidate cache when settings are saved so macro bar picks up edits
+function invalidateCwMacroCache() { _cwMacroCache = null; }
 function expandDesktopCwMacros(text) {
   const logCall = document.getElementById('log-callsign');
   const call = (logCall && logCall.value) ? logCall.value.trim().toUpperCase() : '';
@@ -10424,6 +10434,29 @@ function expandDesktopCwMacros(text) {
     .replace(/\{op_firstname\}/gi, '')
     .replace(/\{state\}/gi, '');
 }
+// CW WPM control in macro bar
+const cwWpmDisplay = document.getElementById('cw-wpm-display');
+const cwWpmUpBtn = document.getElementById('cw-wpm-up');
+const cwWpmDownBtn = document.getElementById('cw-wpm-down');
+let cwMacroWpm = 20;
+
+// Load initial WPM from settings
+(async () => {
+  const s = await window.api.getSettings();
+  cwMacroWpm = s.cwWpm || 20;
+  if (cwWpmDisplay) cwWpmDisplay.textContent = cwMacroWpm;
+})();
+
+function setCwMacroWpm(wpm) {
+  cwMacroWpm = Math.max(5, Math.min(60, wpm));
+  if (cwWpmDisplay) cwWpmDisplay.textContent = cwMacroWpm;
+  window.api.cwSetWpm(cwMacroWpm);
+  window.api.saveSettings({ cwWpm: cwMacroWpm });
+}
+
+if (cwWpmUpBtn) cwWpmUpBtn.addEventListener('click', () => setCwMacroWpm(cwMacroWpm + 1));
+if (cwWpmDownBtn) cwWpmDownBtn.addEventListener('click', () => setCwMacroWpm(cwMacroWpm - 1));
+
 // Quick Settings toggle
 if (quickShowCwMacros) {
   quickShowCwMacros.checked = cwMacroBoxVisible;
@@ -10462,6 +10495,221 @@ if (cwMacroInput) {
     }
   });
 }
+
+// --- Voice Macros (desktop) ---
+const voiceMacroBar = document.getElementById('voice-macro-bar');
+const voiceMacroBtns = document.getElementById('voice-macro-btns');
+const voiceMacroRecBtn = document.getElementById('voice-macro-rec');
+const voiceMacroEditor = document.getElementById('voice-macro-editor');
+const quickShowVoiceMacros = document.getElementById('quick-show-voice-macros');
+let voiceMacroBoxVisible = localStorage.getItem('voiceMacroBoxVisible') === 'true';
+const VOICE_MACRO_COUNT = 5;
+const VOICE_MAX_DURATION = 30;
+let voiceMacroLabels = ['CQ', 'ID', '73', '', ''];
+let voicePlayingIdx = -1;
+let voicePlaybackSource = null;
+let voicePlaybackCtx = null;
+let voiceRecorder = null;
+let voiceRecordingIdx = -1;
+
+// Load labels from settings
+(async () => {
+  var s = await window.api.getSettings();
+  if (s.voiceMacroLabels) voiceMacroLabels = s.voiceMacroLabels;
+})();
+
+async function updateVoiceMacroBar() {
+  if (!voiceMacroBar) return;
+  voiceMacroBar.classList.toggle('hidden', !voiceMacroBoxVisible);
+  if (quickShowVoiceMacros) quickShowVoiceMacros.checked = voiceMacroBoxVisible;
+  if (!voiceMacroBoxVisible) return;
+  var filled = await window.api.voiceMacroList();
+  voiceMacroBtns.innerHTML = '';
+  for (var i = 0; i < VOICE_MACRO_COUNT; i++) {
+    if (!voiceMacroLabels[i] && filled.indexOf(i) === -1) continue;
+    (function(idx) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = voiceMacroLabels[idx] || ('V' + (idx + 1));
+      if (filled.indexOf(idx) === -1) {
+        btn.style.opacity = '0.3';
+        btn.title = 'No recording';
+      } else {
+        btn.title = 'Click to play';
+        btn.addEventListener('click', function() {
+          if (voicePlayingIdx === idx) stopVoicePlayback();
+          else playVoiceMacro(idx, btn);
+        });
+      }
+      voiceMacroBtns.appendChild(btn);
+    })(i);
+  }
+}
+
+async function playVoiceMacro(idx, btn) {
+  if (voicePlayingIdx >= 0) stopVoicePlayback();
+  var base64 = await window.api.voiceMacroLoad(idx);
+  if (!base64) return;
+  var binary = atob(base64);
+  var bytes = new Uint8Array(binary.length);
+  for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+
+  var s = await window.api.getSettings();
+  var outputDeviceId = s.remoteAudioOutput || '';
+  voicePlaybackCtx = new AudioContext();
+  if (voicePlaybackCtx.state === 'suspended') await voicePlaybackCtx.resume();
+  if (outputDeviceId && voicePlaybackCtx.setSinkId) {
+    try { await voicePlaybackCtx.setSinkId(outputDeviceId); } catch (e) { console.warn('[Voice] Output device error:', e.message); }
+  }
+  voicePlaybackCtx.decodeAudioData(bytes.buffer, function(audioBuffer) {
+    voicePlayingIdx = idx;
+    if (btn) btn.classList.add('active');
+    voicePlaybackSource = voicePlaybackCtx.createBufferSource();
+    voicePlaybackSource.buffer = audioBuffer;
+    voicePlaybackSource.connect(voicePlaybackCtx.destination);
+    window.api.voiceMacroPtt(true);
+    voicePlaybackSource.start(0);
+    voicePlaybackSource.onended = function() { stopVoicePlayback(); };
+  });
+}
+
+function stopVoicePlayback() {
+  if (voicePlaybackSource) { try { voicePlaybackSource.stop(); } catch(e) {} voicePlaybackSource = null; }
+  if (voicePlaybackCtx) { voicePlaybackCtx.close().catch(function(){}); voicePlaybackCtx = null; }
+  window.api.voiceMacroPtt(false);
+  voicePlayingIdx = -1;
+  if (voiceMacroBtns) voiceMacroBtns.querySelectorAll('button.active').forEach(b => b.classList.remove('active'));
+}
+
+// Voice macro recording UI in Settings
+async function renderVoiceMacroEditor() {
+  if (!voiceMacroEditor) return;
+  voiceMacroEditor.innerHTML = '';
+  var filled = await window.api.voiceMacroList();
+  for (var i = 0; i < VOICE_MACRO_COUNT; i++) {
+    (function(idx) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:4px;align-items:center;';
+      var labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.value = voiceMacroLabels[idx] || '';
+      labelInput.placeholder = 'V' + (idx + 1);
+      labelInput.maxLength = 6;
+      labelInput.style.cssText = 'width:50px;font-size:11px;padding:2px 4px;';
+      labelInput.addEventListener('change', function() {
+        voiceMacroLabels[idx] = labelInput.value.trim();
+        window.api.voiceMacroLabelsSave(voiceMacroLabels);
+        updateVoiceMacroBar();
+      });
+      row.appendChild(labelInput);
+
+      var hasFilled = filled.indexOf(idx) >= 0;
+      var status = document.createElement('span');
+      status.style.cssText = 'font-size:11px;color:' + (hasFilled ? '#4ecca3' : '#666') + ';min-width:60px;';
+      status.textContent = hasFilled ? 'Recorded' : 'Empty';
+      row.appendChild(status);
+
+      var recBtn = document.createElement('button');
+      recBtn.type = 'button';
+      recBtn.textContent = 'Rec';
+      recBtn.style.cssText = 'font-size:10px;padding:2px 6px;cursor:pointer;';
+      recBtn.addEventListener('click', function() { startVoiceRecording(idx, recBtn, status); });
+      row.appendChild(recBtn);
+
+      if (hasFilled) {
+        var delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.textContent = 'Del';
+        delBtn.style.cssText = 'font-size:10px;padding:2px 6px;cursor:pointer;color:#e94560;';
+        delBtn.addEventListener('click', async function() {
+          await window.api.voiceMacroDelete(idx);
+          renderVoiceMacroEditor();
+          updateVoiceMacroBar();
+        });
+        row.appendChild(delBtn);
+      }
+
+      voiceMacroEditor.appendChild(row);
+    })(i);
+  }
+}
+
+async function startVoiceRecording(idx, btn, statusEl) {
+  if (voiceRecorder) { voiceRecorder.stop(); voiceRecorder = null; }
+  try {
+    var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceRecordingIdx = idx;
+    btn.textContent = 'Stop';
+    btn.style.color = '#e94560';
+    statusEl.textContent = 'Recording...';
+    statusEl.style.color = '#e94560';
+    var chunks = [];
+    voiceRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    voiceRecorder.ondataavailable = function(e) { if (e.data.size > 0) chunks.push(e.data); };
+    voiceRecorder.onstop = function() {
+      stream.getTracks().forEach(t => t.stop());
+      var blob = new Blob(chunks, { type: 'audio/webm' });
+      // Convert to base64 and save via main process (shared with ECHOCAT)
+      var reader = new FileReader();
+      reader.onload = async function() {
+        var base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(reader.result)));
+        await window.api.voiceMacroSave(idx, base64);
+        renderVoiceMacroEditor();
+        updateVoiceMacroBar();
+      };
+      reader.readAsArrayBuffer(blob);
+      voiceRecorder = null;
+      voiceRecordingIdx = -1;
+    };
+    voiceRecorder.start();
+    setTimeout(function() { if (voiceRecorder && voiceRecordingIdx === idx) voiceRecorder.stop(); }, VOICE_MAX_DURATION * 1000);
+  } catch (err) {
+    statusEl.textContent = 'Mic error';
+    statusEl.style.color = '#e94560';
+  }
+}
+
+// Refresh when ECHOCAT syncs a macro
+if (window.api.onVoiceMacrosUpdated) {
+  window.api.onVoiceMacrosUpdated(function() {
+    updateVoiceMacroBar();
+  });
+}
+
+// REC button on macro bar — cycles through slots
+if (voiceMacroRecBtn) {
+  voiceMacroRecBtn.addEventListener('click', function() {
+    if (voiceRecorder) {
+      voiceRecorder.stop();
+      voiceMacroRecBtn.textContent = 'REC';
+      voiceMacroRecBtn.style.color = '';
+      return;
+    }
+    // Record into first empty or first slot
+    voiceCheckSlots(function(filled) {
+      var idx = 0;
+      for (var i = 0; i < VOICE_MACRO_COUNT; i++) { if (filled.indexOf(i) === -1) { idx = i; break; } }
+      startVoiceRecording(idx, voiceMacroRecBtn, { textContent: '', style: {} });
+      voiceMacroRecBtn.textContent = 'STOP';
+      voiceMacroRecBtn.style.color = '#e94560';
+    });
+  });
+}
+
+// Quick Settings toggle
+if (quickShowVoiceMacros) {
+  quickShowVoiceMacros.checked = voiceMacroBoxVisible;
+  quickShowVoiceMacros.addEventListener('change', () => {
+    voiceMacroBoxVisible = quickShowVoiceMacros.checked;
+    localStorage.setItem('voiceMacroBoxVisible', voiceMacroBoxVisible);
+    updateVoiceMacroBar();
+  });
+}
+updateVoiceMacroBar();
+
+// Render voice macro editor when Settings opens
+const _origOpenSettingsDialog = openSettingsDialog;
+// (voice macro editor is populated when settings loads — hook into the existing flow)
 
 // --- CW Popover (volume/WPM dropdown from CW status pill) ---
 const cwPopover = document.getElementById('cw-popover');

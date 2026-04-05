@@ -145,6 +145,7 @@
           <label class="spots-toggle compact"><input type="checkbox" id="quick-hide-worked-parks"> Hide Worked Parks</label>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-show-meter" checked> S-Meter / SWR</label>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-show-cw-macros"> CW Macros</label>
+          <label class="spots-toggle compact"><input type="checkbox" id="quick-show-voice-macros"> Voice Macros</label>
           <div id="quick-rotor-divider" class="spots-panel-divider hidden"></div>
           <label id="quick-rotor-label" class="spots-toggle compact hidden"><input type="checkbox" id="quick-rotor"> PSTRotator</label>
           <div class="spots-panel-divider"></div>
@@ -409,11 +410,22 @@
         <div id="cw-macro-bar" class="cw-macro-box hidden">
           <div class="cw-macro-row">
             <div id="cw-macro-btns" class="cw-macro-btns"></div>
+            <div class="cw-wpm-ctrl">
+              <button type="button" id="cw-wpm-down" title="Decrease speed">-</button>
+              <span id="cw-wpm-display" title="CW speed (WPM)">20</span>
+              <button type="button" id="cw-wpm-up" title="Increase speed">+</button>
+            </div>
           </div>
           <div class="cw-macro-row">
             <input type="text" id="cw-macro-input" class="cw-macro-input" placeholder="CW text..." spellcheck="false">
             <button type="button" id="cw-macro-send" class="cw-macro-tx">TX</button>
             <button type="button" id="cw-macro-cancel" class="cw-macro-esc">ESC</button>
+          </div>
+        </div>
+        <div id="voice-macro-bar" class="cw-macro-box hidden">
+          <div class="cw-macro-row">
+            <div id="voice-macro-btns" class="cw-macro-btns"></div>
+            <button type="button" id="voice-macro-rec" class="cw-macro-esc" title="Record a voice macro" style="font-size:10px;">REC</button>
           </div>
         </div>
         <div id="table-scroll-wrap">
@@ -1758,6 +1770,12 @@
           <span style="font-size:12px;font-weight:bold;color:var(--text);">CW Macros</span>
           <span class="help-text" style="display:block;margin-top:2px;">Variables: {MYCALL} {call} {op_firstname} {state}</span>
           <div id="cw-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
+        </div>
+        <!-- Voice Macros -->
+        <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
+          <span style="font-size:12px;font-weight:bold;color:var(--text);">Voice Macros</span>
+          <span class="help-text" style="display:block;margin-top:2px;">Record mic audio to play as voice macros during SSB/FM. Max 30s each. Plays through the rig's TX audio output.</span>
+          <div id="voice-macro-editor" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;"></div>
         </div>
       </div>
     </fieldset>

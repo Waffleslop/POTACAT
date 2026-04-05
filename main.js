@@ -3177,6 +3177,17 @@ function connectRemote() {
     }
     // FreeDV enabled state
     remoteServer.sendToClient({ type: 'freedv-enabled', enabled: !!settings.enableFreedv });
+    // Sync voice macros to phone
+    ensureVoiceMacroDir();
+    const vmLabels = settings.voiceMacroLabels || [];
+    for (let i = 0; i < 5; i++) {
+      const p = voiceMacroPath(i);
+      if (fs.existsSync(p)) {
+        const audio = fs.readFileSync(p).toString('base64');
+        remoteServer.sendToClient({ type: 'voice-macro-sync', idx: i, label: vmLabels[i] || '', audio });
+      }
+    }
+    if (vmLabels.length) remoteServer.sendToClient({ type: 'voice-macro-labels', labels: vmLabels });
 
     // TunerGenius status (labels + active antenna)
     if (tgxlClient && tgxlClient.connected) {
@@ -3194,34 +3205,35 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
     }
-    // Safety: always force RX on disconnect regardless of tracked PTT state
-    // (prevents stuck TX from race conditions, VOX triggering, or stale state)
-    handleRemotePtt(false);
+    // Destroy audio window FIRST to stop all outgoing audio (prevents VOX trigger)
+    destroyRemoteAudioWindow();
+    // Clear SSB-over-DATA state so handleRemotePtt doesn't try to restore mode
+    _ssbModeBeforePtt = null;
+    // Safety: force RX on disconnect (only send if we were actually transmitting,
+    // to avoid flooding CI-V bus with unnecessary commands)
+    if (_remoteTxState) {
+      handleRemotePtt(false);
+    }
     // CW safety: ensure PTT released on disconnect (keyer.stop() is handled in RemoteServer)
-    if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
+    const rigType = detectRigType();
+    if (rigType === 'flex' && smartSdr && smartSdr.connected) {
       smartSdr.cwPttRelease();
-    }
-    // Icom: force key up on disconnect — both DTR and TX/RX methods
-    if (detectRigType() === 'icom' && cat && cat.connected) {
-      cat.setCwKeyDtr(false);
-      cat.setCwKeyTxRx(false);
-    }
-    // Yaesu/Kenwood: force TX/RX key up on disconnect
-    if ((detectRigType() === 'yaesu' || detectRigType() === 'kenwood') && cat && cat.connected) {
-      cat.setCwKeyTxRx(false);
+    } else if (rigType !== 'icom') {
+      // Icom CI-V: skip duplicate setCwKeyTxRx — handleRemotePtt already sent 0x1C 0x00 [0x00]
+      // Sending redundant commands on half-duplex CI-V can cause bus collisions
+      if (cat && cat.connected) cat.setCwKeyTxRx(false);
     }
     // Force CW key port DTR low (key up) on disconnect
     if (cwKeyPort && cwKeyPort.isOpen) {
       cwKeyPort.set({ dtr: false }, () => {});
     }
-    // Destroy audio window to stop all outgoing audio (prevents VOX re-trigger)
-    destroyRemoteAudioWindow();
-    // Delayed safety TX-off: VOX on some radios (e.g. IC-7300 USB audio) can re-trigger
-    // from audio artifacts when the WebRTC stream closes. Send TX-off again after a short
-    // delay to catch any VOX re-key that happened during audio teardown.
+    // Delayed safety TX-off: VOX on some radios can re-trigger from audio artifacts
+    // when the WebRTC stream closes. Wait for audio teardown to settle.
     setTimeout(() => {
-      if (cat && cat.connected) cat.setTransmit(false);
-      if (smartSdr && smartSdr.connected) smartSdr.setTransmit(false);
+      if (_remoteTxState) {
+        if (cat && cat.connected) cat.setTransmit(false);
+        if (smartSdr && smartSdr.connected) smartSdr.setTransmit(false);
+      }
     }, 500);
     // Stop JTCAT engine and audio capture if phone was driving FT8
     if (ft8Engine) {
@@ -4399,6 +4411,26 @@ function connectRemote() {
   });
   remoteServer.on('jtcat-tx-gain', ({ value }) => {
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', value);
+  });
+
+  // Voice macro sync from ECHOCAT phone
+  remoteServer.on('voice-macro-sync', ({ idx, label, audio }) => {
+    ensureVoiceMacroDir();
+    if (audio) fs.writeFileSync(voiceMacroPath(idx), Buffer.from(audio, 'base64'));
+    if (label != null) {
+      if (!settings.voiceMacroLabels) settings.voiceMacroLabels = ['', '', '', '', ''];
+      settings.voiceMacroLabels[idx] = label;
+      saveSettings(settings);
+    }
+    // Notify desktop renderer to refresh
+    if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
+    console.log(`[Voice] Received macro ${idx} from phone`);
+  });
+
+  remoteServer.on('voice-macro-delete', ({ idx }) => {
+    const p = voiceMacroPath(idx);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
   });
 
   remoteServer.on('jtcat-cancel-qso', () => {
@@ -9851,6 +9883,57 @@ app.whenReady().then(() => {
     if (keyer) keyer.stop();
     if (winKeyer && winKeyer.connected) winKeyer.cancelText();
     if (smartSdr && smartSdr.connected) smartSdr.cwStop();
+  });
+  // Desktop voice macro PTT
+  ipcMain.on('voice-macro-ptt', (_e, state) => {
+    handleRemotePtt(!!state);
+  });
+
+  // Voice macro file storage (shared between desktop and ECHOCAT)
+  const VOICE_MACRO_DIR = path.join(app.getPath('userData'), 'voice-macros');
+  function ensureVoiceMacroDir() { if (!fs.existsSync(VOICE_MACRO_DIR)) fs.mkdirSync(VOICE_MACRO_DIR, { recursive: true }); }
+  function voiceMacroPath(idx) { return path.join(VOICE_MACRO_DIR, `macro-${idx}.webm`); }
+
+  ipcMain.handle('voice-macro-save', (_e, idx, base64) => {
+    ensureVoiceMacroDir();
+    fs.writeFileSync(voiceMacroPath(idx), Buffer.from(base64, 'base64'));
+    // Sync to connected ECHOCAT phone
+    if (remoteServer && remoteServer.hasClient()) {
+      const label = (settings.voiceMacroLabels || [])[idx] || '';
+      remoteServer.sendToClient({ type: 'voice-macro-sync', idx, label, audio: base64 });
+    }
+    return true;
+  });
+
+  ipcMain.handle('voice-macro-load', (_e, idx) => {
+    const p = voiceMacroPath(idx);
+    if (!fs.existsSync(p)) return null;
+    return fs.readFileSync(p).toString('base64');
+  });
+
+  ipcMain.handle('voice-macro-delete', (_e, idx) => {
+    const p = voiceMacroPath(idx);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.sendToClient({ type: 'voice-macro-delete', idx });
+    }
+    return true;
+  });
+
+  ipcMain.handle('voice-macro-list', () => {
+    ensureVoiceMacroDir();
+    const filled = [];
+    for (let i = 0; i < 5; i++) { if (fs.existsSync(voiceMacroPath(i))) filled.push(i); }
+    return filled;
+  });
+
+  ipcMain.handle('voice-macro-labels-save', (_e, labels) => {
+    settings.voiceMacroLabels = labels;
+    saveSettings(settings);
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.sendToClient({ type: 'voice-macro-labels', labels });
+    }
+    return true;
   });
   // Desktop CW text sending (macros)
   ipcMain.on('send-cw-text', (_e, text) => {

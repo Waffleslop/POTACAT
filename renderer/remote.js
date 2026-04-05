@@ -669,6 +669,30 @@
         if (echoFreedvCb) echoFreedvCb.checked = !!msg.enabled;
         break;
 
+      case 'voice-macro-sync': {
+        // Incoming voice macro from desktop — store locally
+        var vmBinary = atob(msg.audio);
+        var vmBytes = new Uint8Array(vmBinary.length);
+        for (var vi = 0; vi < vmBinary.length; vi++) vmBytes[vi] = vmBinary.charCodeAt(vi);
+        var vmBlob = new Blob([vmBytes], { type: 'audio/webm' });
+        ssbDbPut(msg.idx, vmBlob, function() { renderSsbMacros(); });
+        if (msg.label != null) {
+          ssbMacroLabels[msg.idx] = msg.label;
+          localStorage.setItem('echocat-ssb-labels', JSON.stringify(ssbMacroLabels));
+        }
+        break;
+      }
+      case 'voice-macro-delete':
+        ssbDbDelete(msg.idx, function() { renderSsbMacros(); });
+        break;
+      case 'voice-macro-labels':
+        if (msg.labels) {
+          ssbMacroLabels = msg.labels;
+          localStorage.setItem('echocat-ssb-labels', JSON.stringify(ssbMacroLabels));
+          renderSsbMacros();
+        }
+        break;
+
       case 'freedv-sync': {
         var syncEl = document.getElementById('echo-freedv-sync');
         var snrEl = document.getElementById('echo-freedv-snr');
@@ -5956,10 +5980,11 @@
             durSpan.textContent = '--';
           }
 
-          // Label auto-save
+          // Label auto-save + sync to desktop
           labelInput.addEventListener('change', function() {
             ssbMacroLabels[idx] = (labelInput.value || '').trim();
             localStorage.setItem('echocat-ssb-labels', JSON.stringify(ssbMacroLabels));
+            ft8Send({ type: 'voice-macro-sync', idx: idx, label: ssbMacroLabels[idx], audio: '' });
             renderSsbMacros();
           });
 
@@ -5987,6 +6012,13 @@
                 ssbDbPut(idx, blob, function() {
                   initSsbMacroEditor();
                   renderSsbMacros();
+                  // Sync to desktop
+                  var syncReader = new FileReader();
+                  syncReader.onload = function() {
+                    var base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(syncReader.result)));
+                    ft8Send({ type: 'voice-macro-sync', idx: idx, label: ssbMacroLabels[idx] || '', audio: base64 });
+                  };
+                  syncReader.readAsArrayBuffer(blob);
                 });
               };
               recBtn.textContent = 'Stop';
