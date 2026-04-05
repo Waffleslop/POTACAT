@@ -5471,6 +5471,11 @@ function buildRosterSets() {
 // Supplemental file for parks worked via POTACAT (persists across restarts)
 const WORKED_PARKS_LOCAL_PATH = path.join(app.getPath('userData'), 'worked-parks-local.json');
 
+// Voice macro file storage (shared between desktop and ECHOCAT)
+const VOICE_MACRO_DIR = path.join(app.getPath('userData'), 'voice-macros');
+function ensureVoiceMacroDir() { if (!fs.existsSync(VOICE_MACRO_DIR)) fs.mkdirSync(VOICE_MACRO_DIR, { recursive: true }); }
+function voiceMacroPath(idx) { return path.join(VOICE_MACRO_DIR, `macro-${idx}.webm`); }
+
 function loadLocalWorkedParks() {
   try {
     if (fs.existsSync(WORKED_PARKS_LOCAL_PATH)) {
@@ -9892,9 +9897,7 @@ app.whenReady().then(() => {
   });
 
   // Voice macro file storage (shared between desktop and ECHOCAT)
-  const VOICE_MACRO_DIR = path.join(app.getPath('userData'), 'voice-macros');
-  function ensureVoiceMacroDir() { if (!fs.existsSync(VOICE_MACRO_DIR)) fs.mkdirSync(VOICE_MACRO_DIR, { recursive: true }); }
-  function voiceMacroPath(idx) { return path.join(VOICE_MACRO_DIR, `macro-${idx}.webm`); }
+  // Voice macro helpers hoisted to module scope (see below)
 
   ipcMain.handle('voice-macro-save', (_e, idx, base64) => {
     ensureVoiceMacroDir();
