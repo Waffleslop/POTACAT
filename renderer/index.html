@@ -1877,6 +1877,14 @@
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Show a log button in the status bar with raw CAT commands and responses</span>
       <label class="checkbox-label"><input type="checkbox" id="set-light-icon"> Use light app icon</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Switches the taskbar and title bar icon to a light variant — easier to see on dark desktop panels</span>
+      <div style="margin-top:12px;border-top:1px solid #333;padding-top:8px;">
+        <span style="font-size:12px;font-weight:bold;color:var(--text);">Settings Transfer</span>
+        <span class="help-text" style="display:block;margin-top:2px;">Export your settings to a file for backup or to import on another computer.</span>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button type="button" id="settings-export" style="font-size:11px;padding:4px 12px;">Export</button>
+          <button type="button" id="settings-import" style="font-size:11px;padding:4px 12px;">Import</button>
+        </div>
+      </div>
     </fieldset>
     <!-- Cloud Sync Tab -->
     <fieldset class="source-toggles" data-settings-tab="cloud">
@@ -2053,10 +2061,6 @@
     <div class="dialog-buttons">
       <button id="settings-save">Save</button>
       <button id="settings-cancel">Cancel</button>
-      <span style="flex:1;"></span>
-      <span style="font-size:10px;color:var(--text-secondary,#888);margin-right:4px;">Settings:</span>
-      <button id="settings-export" style="font-size:11px;padding:4px 10px;opacity:0.7;" title="Export settings to file">Export</button>
-      <button id="settings-import" style="font-size:11px;padding:4px 10px;opacity:0.7;" title="Import settings from file">Import</button>
     </div>
     <div class="settings-footer" style="position:relative;">
       <div class="settings-version"><span id="settings-version-label">v1.0.13</span> &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
