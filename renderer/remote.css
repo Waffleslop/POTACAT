@@ -953,8 +953,8 @@ html, body {
 .spot-name {
   font-size: 11px;
   color: var(--text-dim);
-  min-width: 48px;
-  width: 48px;
+  min-width: 64px;
+  width: 64px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

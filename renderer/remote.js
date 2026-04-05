@@ -1204,8 +1204,8 @@
       const src = s.source || 'pota';
       const srcLabel = src.toUpperCase();
       const newBadge = newPark ? '<span class="new-badge">NEW</span>' : '';
-      const logBtn = isNet ? '' : '<button type="button" class="spot-log-btn">Log</button>';
-      const skipBtn = isNet ? '' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'Unskip' : 'Skip'}</button>`;
+      const logBtn = isNet ? '' : '<button type="button" class="spot-log-btn">L</button>';
+      const skipBtn = isNet ? '' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'U' : 'S'}</button>`;
       const opName = qrzNameCache[(s.callsign || '').toUpperCase()] || '';
       const spotName = opName || s.parkName || s.comments || '';
 
