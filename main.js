@@ -6895,11 +6895,13 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     filterWidth = settings.ssbFilterWidth || 0;
   } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'PKTUSB' || m === 'PKTLSB') {
     filterWidth = settings.digitalFilterWidth || 0;
+  } else if (m === 'FM') {
+    filterWidth = 0; // FM has fixed bandwidth
+  } else if (m === 'AM') {
+    filterWidth = 0; // AM uses radio default
   }
-  // If no per-mode preset but user adjusted filter via live controls, preserve it
-  if (!filterWidth && _currentFilterWidth > 0) {
-    filterWidth = _currentFilterWidth;
-  }
+  // Only preserve live filter adjustment if staying on the same mode category
+  // (prevents CW filter from bleeding into SSB or vice versa)
 
   // FreeDV: auto-start/stop engine based on spot mode
   const isFreedvMode = m.startsWith('FREEDV') || m === 'DV';
