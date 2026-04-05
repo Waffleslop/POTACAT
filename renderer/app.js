@@ -3461,7 +3461,8 @@ function getFiltered() {
       (s.source === 'dxc' && !enableCluster) ||
       (s.source === 'cwspots' && !enableCwSpots) ||
       (s.source === 'rbn' && !enableRbn) ||
-      (s.source === 'pskr' && !enablePskr);
+      (s.source === 'pskr' && !enablePskr) ||
+      (s.source === 'freedv' && !enablePskr);
     const isWatched = watchlistMatch(watchlist, s.callsign, s.band, s.mode);
 
     if (sourceOff) {
@@ -7188,6 +7189,8 @@ async function openSettingsDialog(tab) {
   updateCwKeyerTypeVisibility();
   renderCwMacroEditor(s.cwMacros);
   renderVoiceMacroEditor();
+  if (s.hotkeys && s.hotkeys.length) hotkeyBindings = s.hotkeys;
+  renderHotkeyEditor();
   if (s.enableCwKeyer) {
     if (s.cwKeyerType === 'winkeyer') {
       populateWinKeyerPorts().then(() => {
@@ -7579,6 +7582,7 @@ settingsSave.addEventListener('click', async () => {
     cwSidetonePitch: cwSidetonePitchVal,
     cwSidetoneVolume: cwSidetoneVolumeVal,
     cwMacros: cwMacrosVal,
+    hotkeys: hotkeyBindings,
     enableRemote: remoteEnabled,
     remotePort: remotePortVal,
     remoteRequireToken: remoteRequireTokenVal,
@@ -10417,7 +10421,8 @@ async function updateCwMacroBar() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = m.label || '?';
-    btn.title = (m.text || '') + ' (Ctrl+F' + (i + 1) + ')';
+    const cwHk = hotkeyBindings.find(h => h.action === 'cw-macro-' + (i + 1));
+    btn.title = (m.text || '') + (cwHk && cwHk.key ? ' (' + cwHk.key + ')' : '');
     btn.addEventListener('click', () => {
       window.api.sendCwText(expandDesktopCwMacros(m.text));
     });
@@ -10575,7 +10580,8 @@ async function updateVoiceMacroBar() {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = voiceMacroLabels[idx] || ('V' + (idx + 1));
-      var fKeyHint = ' (Ctrl+F' + (idx + 6) + ')';
+      var voiceHk = hotkeyBindings.find(function(h) { return h.action === 'voice-macro-' + (idx + 1); });
+      var fKeyHint = voiceHk && voiceHk.key ? ' (' + voiceHk.key + ')' : '';
       if (filled.indexOf(idx) === -1) {
         btn.style.opacity = '0.3';
         btn.title = 'No recording' + fKeyHint;
@@ -10756,40 +10762,191 @@ updateVoiceMacroBar();
 const _origOpenSettingsDialog = openSettingsDialog;
 // (voice macro editor is populated when settings loads — hook into the existing flow)
 
-// --- Macro Hotkeys (Ctrl+F1-F5 = CW, Ctrl+F6-F10 = Voice) ---
+// --- Configurable Hotkeys ---
+let hotkeyBindings = [];
+let _hotkeyNbState = false; // local NB toggle tracker for hotkey
+
+const HOTKEY_ACTIONS = {
+  'cw-macro-1': 'CW Macro 1', 'cw-macro-2': 'CW Macro 2', 'cw-macro-3': 'CW Macro 3',
+  'cw-macro-4': 'CW Macro 4', 'cw-macro-5': 'CW Macro 5',
+  'voice-macro-1': 'Voice Macro 1', 'voice-macro-2': 'Voice Macro 2', 'voice-macro-3': 'Voice Macro 3',
+  'voice-macro-4': 'Voice Macro 4', 'voice-macro-5': 'Voice Macro 5',
+  'atu': 'ATU Toggle', 'nb': 'NB Toggle',
+  'tune': 'Tune (freq + mode)',
+};
+
+// Default hotkeys
+const DEFAULT_HOTKEYS = [
+  { key: 'Ctrl+F1', action: 'cw-macro-1' }, { key: 'Ctrl+F2', action: 'cw-macro-2' },
+  { key: 'Ctrl+F3', action: 'cw-macro-3' }, { key: 'Ctrl+F4', action: 'cw-macro-4' },
+  { key: 'Ctrl+F5', action: 'cw-macro-5' },
+  { key: 'Ctrl+F6', action: 'voice-macro-1' }, { key: 'Ctrl+F7', action: 'voice-macro-2' },
+  { key: 'Ctrl+F8', action: 'voice-macro-3' }, { key: 'Ctrl+F9', action: 'voice-macro-4' },
+  { key: 'Ctrl+F10', action: 'voice-macro-5' },
+];
+
+function keyEventToString(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  let key = e.key;
+  if (key === ' ') key = 'Space';
+  else if (key.length === 1) key = key.toUpperCase();
+  if (!['Control', 'Alt', 'Shift', 'Meta'].includes(key)) parts.push(key);
+  return parts.join('+');
+}
+
+function executeHotkeyAction(binding) {
+  const a = binding.action || '';
+  const cwMatch = a.match(/^cw-macro-(\d)$/);
+  if (cwMatch) {
+    const idx = parseInt(cwMatch[1], 10) - 1;
+    const macros = _cwMacroCache || [];
+    const list = macros.length ? macros : DEFAULT_CW_MACROS;
+    if (idx >= 0 && idx < list.length && list[idx].text) {
+      window.api.sendCwText(expandDesktopCwMacros(list[idx].text));
+    }
+    return;
+  }
+  const voiceMatch = a.match(/^voice-macro-(\d)$/);
+  if (voiceMatch) {
+    const idx = parseInt(voiceMatch[1], 10) - 1;
+    if (voicePlayingIdx === idx) stopVoicePlayback();
+    else playVoiceMacro(idx, null);
+    return;
+  }
+  if (a === 'atu') { window.api.rigControl({ action: 'atu-tune' }); return; }
+  if (a === 'nb') {
+    _hotkeyNbState = !_hotkeyNbState;
+    window.api.rigControl({ action: 'set-nb', value: _hotkeyNbState });
+    return;
+  }
+  if (a === 'tune' && binding.param) {
+    const parts = binding.param.split(/\s+/);
+    const freq = parseFloat(parts[0]);
+    const mode = parts[1] || '';
+    if (freq) window.api.tune(String(freq), mode);
+    return;
+  }
+}
+
+// Keyboard listener
 document.addEventListener('keydown', (e) => {
-  // Require Ctrl modifier to avoid conflicts with F1 (help), F12 (devtools), etc.
-  if (!e.ctrlKey) return;
-  // Skip if user is typing in an input/textarea
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-  // Skip if settings dialog is open
   const settingsDialog = document.getElementById('settings-dialog');
   if (settingsDialog && !settingsDialog.classList.contains('hidden')) return;
 
-  const fKey = e.key.match(/^F(\d+)$/);
-  if (!fKey) return;
-  const num = parseInt(fKey[1], 10);
+  const keyStr = keyEventToString(e);
+  if (!keyStr || keyStr === 'Control' || keyStr === 'Alt' || keyStr === 'Shift') return;
 
-  if (num >= 1 && num <= 5) {
-    // Ctrl+F1-F5: CW macros
+  const binding = hotkeyBindings.find(b => b.key === keyStr);
+  if (binding) {
     e.preventDefault();
-    const idx = num - 1;
-    const macros = _cwMacroCache || [];
-    const list = macros.length ? macros : DEFAULT_CW_MACROS;
-    if (idx < list.length && list[idx].text) {
-      window.api.sendCwText(expandDesktopCwMacros(list[idx].text));
-    }
-  } else if (num >= 6 && num <= 10) {
-    // Ctrl+F6-F10: Voice macros
-    e.preventDefault();
-    const idx = num - 6;
-    if (voicePlayingIdx === idx) {
-      stopVoicePlayback();
-    } else {
-      playVoiceMacro(idx, null);
-    }
+    executeHotkeyAction(binding);
   }
 });
+
+// Hotkey editor UI in Settings
+const hotkeyEditorEl = document.getElementById('hotkey-editor');
+const hotkeyAddBtn = document.getElementById('hotkey-add-btn');
+
+function renderHotkeyEditor() {
+  if (!hotkeyEditorEl) return;
+  hotkeyEditorEl.innerHTML = '';
+  hotkeyBindings.forEach((binding, idx) => {
+    const row = document.createElement('div');
+    row.className = 'hotkey-row';
+
+    // Key capture button
+    const keyBtn = document.createElement('button');
+    keyBtn.type = 'button';
+    keyBtn.className = 'hotkey-key-btn';
+    keyBtn.textContent = binding.key || 'Click to set';
+    keyBtn.addEventListener('click', () => {
+      keyBtn.textContent = 'Press key...';
+      keyBtn.classList.add('listening');
+      const handler = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Ignore bare modifier keys — wait for the actual key
+        if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+        const keyStr = keyEventToString(e);
+        if (!keyStr) return;
+        keyBtn.textContent = keyStr;
+        keyBtn.classList.remove('listening');
+        binding.key = keyStr;
+        saveHotkeys();
+        document.removeEventListener('keydown', handler, true);
+      };
+      document.addEventListener('keydown', handler, true);
+    });
+    row.appendChild(keyBtn);
+
+    // Action dropdown
+    const select = document.createElement('select');
+    select.className = 'hotkey-action';
+    for (const [value, label] of Object.entries(HOTKEY_ACTIONS)) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      if (value === binding.action) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => {
+      binding.action = select.value;
+      saveHotkeys();
+      renderHotkeyEditor(); // re-render to show/hide param field
+    });
+    row.appendChild(select);
+
+    // Param field (only for 'tune' action)
+    if (binding.action === 'tune') {
+      const param = document.createElement('input');
+      param.type = 'text';
+      param.className = 'hotkey-param';
+      param.placeholder = '14025 CW';
+      param.value = binding.param || '';
+      param.addEventListener('change', () => {
+        binding.param = param.value.trim();
+        saveHotkeys();
+      });
+      row.appendChild(param);
+    }
+
+    // Delete button
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'hotkey-del';
+    del.textContent = '\u2715';
+    del.addEventListener('click', () => {
+      hotkeyBindings.splice(idx, 1);
+      saveHotkeys();
+      renderHotkeyEditor();
+    });
+    row.appendChild(del);
+
+    hotkeyEditorEl.appendChild(row);
+  });
+}
+
+function saveHotkeys() {
+  window.api.saveSettings({ hotkeys: hotkeyBindings });
+}
+
+if (hotkeyAddBtn) {
+  hotkeyAddBtn.addEventListener('click', () => {
+    hotkeyBindings.push({ key: '', action: 'cw-macro-1', param: '' });
+    renderHotkeyEditor();
+  });
+}
+
+// Load hotkeys from settings on startup
+(async () => {
+  const s = await window.api.getSettings();
+  hotkeyBindings = s.hotkeys && s.hotkeys.length ? s.hotkeys : DEFAULT_HOTKEYS.slice();
+  renderHotkeyEditor();
+})();
 
 // --- CW Popover (volume/WPM dropdown from CW status pill) ---
 const cwPopover = document.getElementById('cw-popover');
