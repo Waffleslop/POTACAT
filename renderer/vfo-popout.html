@@ -447,12 +447,33 @@ freqDisplay.addEventListener('click', () => {
   kpInput.value = '';
 });
 
-// Mode badge click → switch to mode tab
-modeBadge.addEventListener('click', () => {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-  document.querySelector('[data-tab="mode"]').classList.add('active');
-  document.getElementById('tab-mode').classList.add('active');
+// Mode badge click → show inline picker
+modeBadge.addEventListener('click', (e) => {
+  e.stopPropagation();
+  let picker = document.getElementById('mode-picker-popup');
+  if (picker) { picker.remove(); return; }
+  picker = document.createElement('div');
+  picker.id = 'mode-picker-popup';
+  picker.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);top:70px;z-index:100;background:#1e1e36;border:1px solid #4fc3f7;border-radius:8px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center;max-width:280px;box-shadow:0 4px 16px rgba(0,0,0,0.5);';
+  MODES.forEach(m => {
+    const btn = document.createElement('button');
+    btn.className = 'mode-btn' + (currentMode.toUpperCase() === m || (m === 'RADE' && currentMode.toUpperCase().includes('FREEDV')) ? ' active' : '');
+    btn.textContent = m;
+    btn.style.cssText = 'padding:8px 12px;font-size:13px;min-width:52px;';
+    btn.addEventListener('click', () => {
+      const catMode = m === 'RADE' ? 'FREEDV-RADEV1' : m;
+      window.api.setMode(catMode);
+      currentMode = m;
+      _modeSuppressUntil = Date.now() + 2000;
+      updateModeHighlight();
+      updateDisplay();
+      picker.remove();
+    });
+    picker.appendChild(btn);
+  });
+  document.body.appendChild(picker);
+  const dismiss = () => { const p = document.getElementById('mode-picker-popup'); if (p) p.remove(); document.removeEventListener('click', dismiss); };
+  setTimeout(() => document.addEventListener('click', dismiss), 0);
 });
 
 // --- Filter width ---
