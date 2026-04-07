@@ -2198,7 +2198,8 @@ function remoteJtcatBroadcastQso() {
 }
 
 async function remoteJtcatSetTxMsg(msg) {
-  if (ft8Engine) await ft8Engine.setTxMessage(msg);
+  const txEng = jtcatManager ? jtcatManager.txEngine : ft8Engine;
+  if (txEng) await txEng.setTxMessage(msg);
   remoteJtcatBroadcastQso();
 }
 
@@ -2415,7 +2416,8 @@ function processRemoteJtcatQso(results) {
 function processPopoutJtcatQso(results) {
   const qso = popoutJtcatQso; // capture reference — don't rely on global in callbacks
   advanceJtcatQso(qso, results, (msg) => {
-    if (ft8Engine) ft8Engine.setTxMessage(msg);
+    const txEng = jtcatManager ? jtcatManager.txEngine : ft8Engine;
+    if (txEng) txEng.setTxMessage(msg);
     popoutBroadcastQso();
   }, () => {
     jtcatAutoLog(qso); // use captured ref, not global (global may be replaced by auto-CQ)
