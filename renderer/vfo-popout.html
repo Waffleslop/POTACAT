@@ -162,6 +162,13 @@
     }
     .profile-add-row button:hover { background: #3ba882; }
     .profile-empty { text-align: center; color: #555; padding: 20px; font-size: 13px; }
+    .settings-toggle {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 14px; color: #e0e0e0; padding: 8px 4px; cursor: pointer;
+    }
+    .settings-toggle input[type="checkbox"] {
+      width: 18px; height: 18px; accent-color: #4fc3f7; cursor: pointer;
+    }
 
     /* --- Widgets (S-meter, PTT, CW macros) --- */
     .widget-area { padding: 0 8px; }
@@ -195,26 +202,6 @@
       padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
       font-weight: bold;
     }
-    .widget-gear-row {
-      display: flex; justify-content: flex-end; padding: 0 10px 2px; position: relative;
-    }
-    .widget-gear {
-      background: #2a2a4a; border: 1px solid #3a3a5a; color: #4fc3f7; font-size: 16px;
-      cursor: pointer; padding: 3px 8px; border-radius: 4px;
-    }
-    .widget-gear:hover { background: #3a3a5a; color: #fff; }
-    .widget-menu {
-      position: absolute; right: 10px; top: 28px; z-index: 200;
-      background: #1e1e36; border: 1px solid #4fc3f7; border-radius: 6px;
-      padding: 8px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
-    }
-    .widget-menu label {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 13px; color: #e0e0e0; padding: 5px 0; cursor: pointer;
-    }
-    .widget-menu input[type="checkbox"] {
-      width: 16px; height: 16px; accent-color: #4fc3f7; cursor: pointer;
-    }
   </style>
 </head>
 <body>
@@ -237,11 +224,7 @@
     <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
     <span class="filter-badge" id="filter-badge"></span>
   </div>
-  <div class="widget-gear-row">
-    <button class="widget-gear" id="widget-gear" title="Show/hide widgets">&#x2699; Widgets</button>
-  </div>
-
-  <!-- Widgets (toggled via gear menu) -->
+  <!-- Widgets (always visible when enabled) -->
   <div class="widget-area">
     <div class="widget-section" id="widget-smeter">
       <div class="meter-row">
@@ -268,6 +251,7 @@
     <button class="tab-btn active" data-tab="dial">Dial</button>
     <button class="tab-btn" data-tab="keypad">Keypad</button>
     <button class="tab-btn" data-tab="profiles">Profiles</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
   </div>
 
   <!-- Tab content -->
@@ -333,6 +317,14 @@
       <div class="profile-list" id="profile-list">
         <div class="profile-empty">No profiles yet. Tune to a frequency and save it above.</div>
       </div>
+    </div>
+
+    <!-- Settings tab -->
+    <div class="tab-pane" id="tab-settings">
+      <div class="section-label">Widgets</div>
+      <label class="settings-toggle"><input type="checkbox" id="w-smeter"> S-meter / SWR</label>
+      <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT Button</label>
+      <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
     </div>
   </div>
 
@@ -913,6 +905,7 @@ async function loadWidgets() {
   const s = await window.api.getSettings();
   if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
   applyWidgets();
+  syncSettingsCheckboxes();
 }
 
 function applyWidgets() {
@@ -926,37 +919,25 @@ async function saveWidgets() {
   await window.api.saveSettings({ vfoWidgets });
 }
 
-// Gear menu
-document.getElementById('widget-gear').addEventListener('click', (e) => {
-  e.stopPropagation();
-  let menu = document.getElementById('widget-menu');
-  if (menu) { menu.remove(); return; }
-  menu = document.createElement('div');
-  menu.className = 'widget-menu';
-  menu.id = 'widget-menu';
-  const items = [
-    { key: 'smeter', label: 'S-meter / SWR' },
-    { key: 'ptt', label: 'PTT Button' },
-    { key: 'cw', label: 'CW Macros' },
-  ];
-  items.forEach(item => {
-    const lbl = document.createElement('label');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = !!vfoWidgets[item.key];
-    cb.addEventListener('change', () => {
-      vfoWidgets[item.key] = cb.checked;
-      applyWidgets();
-      saveWidgets();
-    });
-    lbl.appendChild(cb);
-    lbl.appendChild(document.createTextNode(item.label));
-    menu.appendChild(lbl);
+// Settings tab widget toggles
+const wSmeter = document.getElementById('w-smeter');
+const wPtt = document.getElementById('w-ptt');
+const wCw = document.getElementById('w-cw');
+
+function syncSettingsCheckboxes() {
+  wSmeter.checked = !!vfoWidgets.smeter;
+  wPtt.checked = !!vfoWidgets.ptt;
+  wCw.checked = !!vfoWidgets.cw;
+}
+
+[wSmeter, wPtt, wCw].forEach(cb => {
+  cb.addEventListener('change', () => {
+    vfoWidgets.smeter = wSmeter.checked;
+    vfoWidgets.ptt = wPtt.checked;
+    vfoWidgets.cw = wCw.checked;
+    applyWidgets();
+    saveWidgets();
   });
-  menu.addEventListener('click', (ev) => ev.stopPropagation());
-  document.body.appendChild(menu);
-  const dismiss = () => { const m = document.getElementById('widget-menu'); if (m) m.remove(); document.removeEventListener('click', dismiss); };
-  setTimeout(() => document.addEventListener('click', dismiss), 0);
 });
 
 // --- S-meter ---
