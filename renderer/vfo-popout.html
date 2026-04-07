@@ -443,6 +443,9 @@
       <label class="settings-toggle"><input type="checkbox" id="w-smeter"> S-meter / SWR</label>
       <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT / LOG Buttons</label>
       <label class="settings-toggle" style="padding-left:28px;"><input type="checkbox" id="w-ptt-mic"> Route mic to radio during PTT</label>
+      <div id="mic-select-row" style="padding-left:28px;padding-bottom:4px;display:none;">
+        <select id="mic-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:12px;"></select>
+      </div>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
       <div class="section-label">Dial Sections</div>
@@ -1070,6 +1073,7 @@ async function loadWidgets() {
   if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
   if (s.vfoHiddenBands) vfoHiddenBands = s.vfoHiddenBands;
   if (s.vfoPttMic != null) pttMicEnabled = s.vfoPttMic;
+  if (s.vfoPttMicDevice) pttMicDeviceId = s.vfoPttMicDevice;
   applyWidgets();
   applySections();
   rebuildAllBandGrids();
@@ -1117,6 +1121,8 @@ function syncSettingsCheckboxes() {
   wSmeter.checked = !!vfoWidgets.smeter;
   wPtt.checked = !!vfoWidgets.ptt;
   wPttMic.checked = pttMicEnabled;
+  micSelectRow.style.display = pttMicEnabled ? '' : 'none';
+  if (pttMicEnabled) populateMicDevices();
   wCw.checked = !!vfoWidgets.cw;
   wVoice.checked = !!vfoWidgets.voice;
   sSolar.checked = !!vfoSections.solar;
@@ -1139,10 +1145,36 @@ function syncSettingsCheckboxes() {
   });
 });
 
+const micSelectRow = document.getElementById('mic-select-row');
+const micSelect = document.getElementById('mic-select');
+let pttMicDeviceId = ''; // '' = system default
+
 wPttMic.addEventListener('change', () => {
   pttMicEnabled = wPttMic.checked;
+  micSelectRow.style.display = pttMicEnabled ? '' : 'none';
+  if (pttMicEnabled) populateMicDevices();
   window.api.saveSettings({ vfoPttMic: pttMicEnabled });
 });
+
+micSelect.addEventListener('change', () => {
+  pttMicDeviceId = micSelect.value;
+  window.api.saveSettings({ vfoPttMicDevice: pttMicDeviceId });
+});
+
+async function populateMicDevices() {
+  try {
+    // Trigger permission prompt if needed
+    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+    tmp.getTracks().forEach(t => t.stop());
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter(d => d.kind === 'audioinput');
+    micSelect.innerHTML = '<option value="">System Default</option>' +
+      inputs.map(d => '<option value="' + d.deviceId + '">' + (d.label || d.deviceId.slice(0, 20)) + '</option>').join('');
+    if (pttMicDeviceId) micSelect.value = pttMicDeviceId;
+  } catch (e) {
+    console.error('[VFO] Cannot enumerate mic devices:', e.message);
+  }
+}
 
 [sSolar, sStep, sBand, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
   cb.addEventListener('change', () => {
@@ -1242,9 +1274,9 @@ async function pttStart() {
   if (pttMicEnabled) {
     try {
       const s = await window.api.getSettings();
-      pttMicStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      });
+      const micConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+      if (pttMicDeviceId) micConstraints.deviceId = { exact: pttMicDeviceId };
+      pttMicStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints });
       pttMicCtx = new AudioContext();
       if (pttMicCtx.state === 'suspended') await pttMicCtx.resume();
       if (s.remoteAudioOutput && pttMicCtx.setSinkId) {
