@@ -189,7 +189,6 @@
   <div class="tabs">
     <button class="tab-btn active" data-tab="dial">Dial</button>
     <button class="tab-btn" data-tab="keypad">Keypad</button>
-    <button class="tab-btn" data-tab="mode">Mode</button>
     <button class="tab-btn" data-tab="profiles">Profiles</button>
   </div>
 
@@ -207,7 +206,14 @@
       <div class="band-grid" id="band-grid-dial"></div>
       <div class="section-label">Filter / Controls</div>
       <div class="step-row filter-quick-shared"></div>
+      <div class="filter-row">
+        <label>BW</label>
+        <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400">
+        <span class="filter-val" id="filter-val">2400 Hz</span>
+      </div>
       <div class="step-row rig-toggles-shared"></div>
+      <div class="section-label" id="custom-cat-label" style="display:none">Custom Commands</div>
+      <div class="step-row" id="custom-cat-btns" style="flex-wrap:wrap"></div>
     </div>
 
     <!-- Keypad tab -->
@@ -236,25 +242,6 @@
       <div class="section-label">Filter / Controls</div>
       <div class="step-row filter-quick-shared"></div>
       <div class="step-row rig-toggles-shared"></div>
-    </div>
-
-    <!-- Mode tab -->
-    <div class="tab-pane" id="tab-mode">
-      <div class="section-label">Mode</div>
-      <div class="mode-grid" id="mode-grid"></div>
-      <div class="section-label">Band</div>
-      <div class="band-grid" id="band-grid-mode"></div>
-      <div class="section-label">Filter Width</div>
-      <div class="step-row" id="filter-quick"></div>
-      <div class="filter-row">
-        <label>BW</label>
-        <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400">
-        <span class="filter-val" id="filter-val">2400 Hz</span>
-      </div>
-      <div class="section-label">Rig Controls</div>
-      <div class="step-row" id="rig-toggles"></div>
-      <div class="section-label" id="custom-cat-label" style="display:none">Custom Commands</div>
-      <div class="step-row" id="custom-cat-btns" style="flex-wrap:wrap"></div>
     </div>
 
     <!-- Profiles tab -->
@@ -403,31 +390,13 @@ function updateBandHighlight() {
 }
 
 buildBandGrid(document.getElementById('band-grid-dial'));
-buildBandGrid(document.getElementById('band-grid-mode'));
+// band-grid-mode removed (Mode tab eliminated)
 
 // --- Modes ---
 const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU', 'DIGL', 'RADE'];
 
-function buildModeGrid() {
-  const grid = document.getElementById('mode-grid');
-  grid.innerHTML = '';
-  for (const m of MODES) {
-    const btn = document.createElement('button');
-    btn.className = 'mode-btn';
-    btn.textContent = m;
-    btn.addEventListener('click', () => {
-      const catMode = m === 'RADE' ? 'FREEDV-RADEV1' : m;
-      window.api.setMode(catMode);
-      currentMode = m;
-      _modeSuppressUntil = Date.now() + 2000;
-      updateModeHighlight();
-      updateDisplay();
-    });
-    grid.appendChild(btn);
-  }
-}
-
 function updateModeHighlight() {
+  // Updates popup picker if open
   document.querySelectorAll('.mode-btn').forEach(btn => {
     const m = currentMode.toUpperCase();
     const bm = btn.textContent;
@@ -438,8 +407,6 @@ function updateModeHighlight() {
     btn.classList.toggle('active', match);
   });
 }
-
-buildModeGrid();
 
 // Frequency display click → switch to keypad tab
 freqDisplay.addEventListener('click', () => {
@@ -486,7 +453,7 @@ const filterVal = document.getElementById('filter-val');
 const FILTER_QUICK = [250, 500, 1000, 1500, 2000, 2400, 3000, 4000];
 
 function buildFilterQuick() {
-  document.querySelectorAll('#filter-quick, .filter-quick-shared').forEach(row => {
+  document.querySelectorAll('.filter-quick-shared').forEach(row => {
     row.innerHTML = '';
     FILTER_QUICK.forEach(hz => {
       const btn = document.createElement('button');
@@ -529,7 +496,7 @@ filterSlider.addEventListener('change', () => {
 let nbOn = false, atuOn = false;
 
 function buildRigToggles() {
-  document.querySelectorAll('#rig-toggles, .rig-toggles-shared').forEach(row => {
+  document.querySelectorAll('.rig-toggles-shared').forEach(row => {
     row.innerHTML = '';
     const nbBtn = document.createElement('button');
     nbBtn.className = 'toggle-btn nb-toggle' + (nbOn ? ' on' : '');
