@@ -921,7 +921,10 @@
 
     // Auto-focus first slice for waterfall
     focusedSlice = multiSliceConfigs[0].sliceId;
-    setTimeout(buildWaterfallSliceBar, 500); // delay to let audio streams init
+    setTimeout(function() {
+      buildWaterfallSliceBar();
+      buildMultiWaterfalls();
+    }, 500); // delay to let audio streams init
   });
 
   if (multiStopBtn) multiStopBtn.addEventListener('click', function() {
@@ -930,10 +933,11 @@
     multiStopBtn.style.display = 'none';
     stopMultiAudio();
     window.api.jtcatStop();
-    // Hide waterfall slice bar
+    // Hide waterfall slice bar and multi-waterfalls
     var wfSliceBar = document.getElementById('jp-wf-slice-bar');
     if (wfSliceBar) { wfSliceBar.classList.add('hidden'); wfSliceBar.innerHTML = ''; }
     focusedSlice = null;
+    buildMultiWaterfalls(); // will hide multi, show single
   });
 
   // Waterfall slice selector — switch which slice's audio drives the waterfall analyser
@@ -974,6 +978,94 @@
       });
       wfSliceBar.appendChild(btn);
     });
+  }
+
+  // Side-by-side waterfalls — one per slice
+  var multiWfPanes = []; // [{sliceId, canvas, ctx, analyser}]
+  var multiWfAnim = null;
+
+  function buildMultiWaterfalls() {
+    var container = document.getElementById('jp-wf-multi');
+    var singleWf = document.getElementById('jp-wf-single');
+    if (!container) return;
+
+    // Stop existing animation
+    if (multiWfAnim) { cancelAnimationFrame(multiWfAnim); multiWfAnim = null; }
+    multiWfPanes = [];
+    container.innerHTML = '';
+
+    if (!multiActive || multiSliceConfigs.length === 0) {
+      container.classList.add('hidden');
+      if (singleWf) singleWf.style.display = '';
+      return;
+    }
+
+    // Hide single waterfall, show multi
+    if (singleWf) singleWf.style.display = 'none';
+    container.classList.remove('hidden');
+
+    multiSliceConfigs.forEach(function(cfg) {
+      var pane = document.createElement('div');
+      pane.className = 'jp-wf-pane';
+
+      // Band label
+      var label = document.createElement('div');
+      label.className = 'jp-wf-label';
+      label.textContent = cfg.band;
+      label.style.background = BAND_COLORS[cfg.band] || '#888';
+      label.style.color = '#000';
+      pane.appendChild(label);
+
+      // Canvas
+      var canvas = document.createElement('canvas');
+      canvas.width = 300;
+      canvas.height = 60;
+      pane.appendChild(canvas);
+
+      container.appendChild(pane);
+
+      // Get analyser from audio stream
+      var entry = multiAudioStreams.get(cfg.sliceId);
+      var analyser = null;
+      if (entry && entry.ctx && entry.stream) {
+        analyser = entry.ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.3;
+        var src = entry.ctx.createMediaStreamSource(entry.stream);
+        src.connect(analyser);
+      }
+
+      multiWfPanes.push({ sliceId: cfg.sliceId, canvas: canvas, ctx: canvas.getContext('2d'), analyser: analyser });
+    });
+
+    // Start waterfall animation loop
+    function drawMultiWf() {
+      for (var p of multiWfPanes) {
+        if (!p.analyser || !p.ctx) continue;
+        var w = p.canvas.width, h = p.canvas.height;
+        // Scroll down
+        var imgData = p.ctx.getImageData(0, 0, w, h - 1);
+        p.ctx.putImageData(imgData, 0, 1);
+        // Draw new line at top
+        var bins = new Uint8Array(p.analyser.frequencyBinCount);
+        p.analyser.getByteFrequencyData(bins);
+        // Map first half of bins (0-6kHz for 12kHz sample rate) to canvas width
+        var useBins = Math.floor(bins.length * 0.5);
+        for (var x = 0; x < w; x++) {
+          var binIdx = Math.floor(x * useBins / w);
+          var val = bins[binIdx];
+          // Color: dark blue → cyan → yellow → red
+          var r, g, b;
+          if (val < 85) { r = 0; g = 0; b = Math.floor(val * 2); }
+          else if (val < 170) { r = 0; g = Math.floor((val - 85) * 3); b = 170; }
+          else { r = Math.floor((val - 170) * 3); g = 255; b = 170 - Math.floor((val - 170) * 2); }
+          p.ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+          p.ctx.fillRect(x, 0, 1, 1);
+        }
+      }
+      multiWfAnim = requestAnimationFrame(drawMultiWf);
+    }
+    multiWfAnim = requestAnimationFrame(drawMultiWf);
   }
 
   document.getElementById('jp-clear').addEventListener('click', function() {

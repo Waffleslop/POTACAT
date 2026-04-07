@@ -4313,7 +4313,7 @@ function connectRemote() {
     // Route TX to correct slice in multi-slice mode
     const targetEngine = (jtcatManager && sliceId) ? jtcatManager.getEngine(sliceId) : ft8Engine;
     if (!targetEngine) return;
-    if (jtcatManager && sliceId) jtcatManager.setTxSlice(sliceId);
+    if (jtcatManager && sliceId) { jtcatManager.setTxSlice(sliceId); jtcatManager.requestTx(sliceId); }
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
     if (!myCall) return;
@@ -7930,7 +7930,7 @@ app.whenReady().then(() => {
     const replySliceId = data.sliceId || 'default';
     const replyEngine = (jtcatManager && data.sliceId) ? jtcatManager.getEngine(data.sliceId) : ft8Engine;
     if (!replyEngine) return;
-    if (jtcatManager && data.sliceId) jtcatManager.setTxSlice(data.sliceId);
+    if (jtcatManager && data.sliceId) { jtcatManager.setTxSlice(data.sliceId); jtcatManager.requestTx(data.sliceId); }
     const myCall = (settings.myCallsign || '').toUpperCase();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall) return;
@@ -9526,8 +9526,23 @@ app.whenReady().then(() => {
                           String(now.getUTCSeconds()).padStart(2, '0');
           remoteServer.broadcastJtcatDecode({ ...data, sliceId: s.sliceId, band: s.band, time: timeStr });
         }
+        // Smart TX scheduling — evaluate priority at each decode cycle
+        const txWinner = jtcatManager.scheduleTx();
+        if (txWinner) {
+          console.log(`[JTCAT] TX scheduler: ${txWinner} wins TX slot`);
+        }
       });
     }
+
+    // Listen for TX slice switches (for SmartSDR slice routing)
+    jtcatManager.on('tx-switch', ({ sliceId }) => {
+      const cfg = slices.find(c => c.sliceId === sliceId);
+      if (cfg && smartSdr && smartSdr.connected) {
+        const sliceIndex = (cfg.slicePort || 5002) - 5002;
+        smartSdr.setTxSlice(sliceIndex);
+        console.log(`[JTCAT] SmartSDR TX switched to slice ${String.fromCharCode(65 + sliceIndex)}`);
+      }
+    });
 
     ft8Engine = jtcatManager.engine; // Phase 0 compat alias
     console.log(`[JTCAT] Multi-slice started: ${slices.map(s => s.sliceId + '/' + s.band).join(', ')}`);
