@@ -594,7 +594,9 @@ button:hover {
   color: var(--text-tertiary);
   position: relative;
 }
-.status-bar > .hidden { display: none; }
+.status-bar > .hidden { display: none !important; }
+.status-bar > .cw-popover,
+.status-bar > .rig-popover { position: absolute; }
 
 .status {
   padding: 2px 8px;
@@ -3579,6 +3581,7 @@ dialog input, dialog select {
 .cw-popover {
   position: absolute;
   top: 100%;
+  right: 0;
   z-index: 10001;
   background: var(--bg-secondary);
   border: 1px solid var(--border-secondary);
