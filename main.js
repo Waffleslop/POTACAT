@@ -5626,6 +5626,8 @@ const hamrsBridge = {
         operatorCall: qsoData.operator || '',
         myCall: qsoData.stationCallsign || '',
         myGrid: qsoData.myGridsquare || '',
+        exchangeSent: qsoData.mySigInfo || '',
+        exchangeReceived: qsoData.sigInfo || '',
       });
       this.socket.send(qsoMsg, 0, qsoMsg.length, this.port, this.host, (err) => {
         if (err) {
