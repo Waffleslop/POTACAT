@@ -4885,6 +4885,8 @@ function disconnectKeyer() {
 }
 
 // --- Solar data ---
+let _cachedSolarData = null;
+
 function fetchSolarData() {
   const https = require('https');
   const req = https.get('https://www.hamqsl.com/solarxml.php', { timeout: 10000 }, (res) => {
@@ -4896,7 +4898,9 @@ function fetchSolarData() {
       const kIndex = (body.match(/<kindex>\s*(\d+)\s*<\/kindex>/) || [])[1];
       if (sfi && aIndex && kIndex) {
         const data = { sfi: parseInt(sfi, 10), aIndex: parseInt(aIndex, 10), kIndex: parseInt(kIndex, 10) };
+        _cachedSolarData = data;
         if (win && !win.isDestroyed()) win.webContents.send('solar-data', data);
+        if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('solar-data', data);
       }
     });
   });
@@ -7907,6 +7911,7 @@ app.whenReady().then(() => {
     vfoPopoutWin.loadFile(path.join(__dirname, 'renderer', 'vfo-popout.html'));
     vfoPopoutWin.webContents.on('did-finish-load', () => {
       sendVfoState();
+      if (_cachedSolarData) vfoPopoutWin.webContents.send('solar-data', _cachedSolarData);
     });
     vfoPopoutWin.on('close', () => {
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed() && !vfoPopoutWin.isMaximized() && !vfoPopoutWin.isMinimized()) {

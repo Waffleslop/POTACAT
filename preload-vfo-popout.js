@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   onSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),
   onTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
+  onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, data) => cb(data)),
   minimize: () => ipcRenderer.send('vfo-popout-minimize'),
   maximize: () => ipcRenderer.send('vfo-popout-maximize'),
   close: () => ipcRenderer.send('vfo-popout-close'),
