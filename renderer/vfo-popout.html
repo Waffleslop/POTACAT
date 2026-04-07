@@ -162,6 +162,53 @@
     }
     .profile-add-row button:hover { background: #3ba882; }
     .profile-empty { text-align: center; color: #555; padding: 20px; font-size: 13px; }
+
+    /* --- Widgets (S-meter, PTT, CW macros) --- */
+    .widget-area { padding: 0 8px; }
+    .widget-section { display: none; }
+    .widget-section.visible { display: block; }
+    .meter-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+    .meter-label { font-size: 10px; color: #888; width: 26px; text-align: right; }
+    .meter-bar-wrap {
+      flex: 1; height: 10px; background: #0d0d1a; border-radius: 3px; overflow: hidden;
+      border: 1px solid #2a2a4a;
+    }
+    .meter-bar { height: 100%; width: 0%; transition: width 0.1s; border-radius: 2px; }
+    .meter-text { font-size: 11px; font-family: monospace; min-width: 42px; text-align: right; }
+    .ptt-btn {
+      display: block; width: 100%; padding: 10px; margin: 4px 0;
+      font-size: 16px; font-weight: bold; border: 2px solid #e94560;
+      background: #2a2a4a; color: #e94560; border-radius: 6px; cursor: pointer;
+      text-align: center; user-select: none;
+    }
+    .ptt-btn:hover { background: #3a3a5a; }
+    .ptt-btn.active { background: #e94560; color: #fff; }
+    .cw-macro-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+    .cw-macro-btn {
+      background: #2a2a4a; border: 1px solid #3a3a5a; color: #ffd740;
+      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+      font-weight: bold;
+    }
+    .cw-macro-btn:hover { background: #3a3a5a; }
+    .cw-cancel-btn {
+      background: #e94560; border: 1px solid #e94560; color: #fff;
+      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+      font-weight: bold;
+    }
+    .widget-gear {
+      background: none; border: none; color: #666; font-size: 14px;
+      cursor: pointer; padding: 2px 4px; -webkit-app-region: no-drag;
+    }
+    .widget-gear:hover { color: #aaa; }
+    .widget-menu {
+      position: absolute; right: 8px; top: 28px; z-index: 200;
+      background: #1e1e36; border: 1px solid #3a3a5a; border-radius: 6px;
+      padding: 6px 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    .widget-menu label {
+      display: block; font-size: 12px; color: #ccc; padding: 3px 0; cursor: pointer;
+    }
+    .widget-menu input { margin-right: 6px; }
   </style>
 </head>
 <body>
@@ -169,6 +216,7 @@
   <div class="titlebar">
     <span>VFO</span>
     <div class="titlebar-btns">
+      <button class="widget-gear" id="widget-gear" title="Show/hide widgets">&#x2699;</button>
       <button onclick="window.api.minimize()">&#x2013;</button>
       <button onclick="window.api.maximize()">&#x25A1;</button>
       <button class="close-btn" onclick="window.api.close()">&#x2715;</button>
@@ -183,6 +231,28 @@
   <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 6px;">
     <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
     <span class="filter-badge" id="filter-badge"></span>
+  </div>
+
+  <!-- Widgets (toggled via gear menu) -->
+  <div class="widget-area">
+    <div class="widget-section" id="widget-smeter">
+      <div class="meter-row">
+        <span class="meter-label">S</span>
+        <div class="meter-bar-wrap"><div class="meter-bar" id="smeter-bar"></div></div>
+        <span class="meter-text" id="smeter-text">---</span>
+      </div>
+      <div class="meter-row">
+        <span class="meter-label">SWR</span>
+        <div class="meter-bar-wrap"><div class="meter-bar" id="swr-bar"></div></div>
+        <span class="meter-text" id="swr-text">&mdash;</span>
+      </div>
+    </div>
+    <div class="widget-section" id="widget-ptt">
+      <button class="ptt-btn" id="ptt-btn">PTT</button>
+    </div>
+    <div class="widget-section" id="widget-cw">
+      <div class="cw-macro-row" id="cw-macro-row"></div>
+    </div>
   </div>
 
   <!-- Tabs -->
@@ -827,8 +897,177 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// --- Widget visibility ---
+const WIDGETS = ['smeter', 'ptt', 'cw'];
+let vfoWidgets = { smeter: false, ptt: false, cw: false };
+
+async function loadWidgets() {
+  const s = await window.api.getSettings();
+  if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
+  applyWidgets();
+}
+
+function applyWidgets() {
+  WIDGETS.forEach(w => {
+    const el = document.getElementById('widget-' + w);
+    if (el) el.classList.toggle('visible', !!vfoWidgets[w]);
+  });
+}
+
+async function saveWidgets() {
+  await window.api.saveSettings({ vfoWidgets });
+}
+
+// Gear menu
+document.getElementById('widget-gear').addEventListener('click', (e) => {
+  e.stopPropagation();
+  let menu = document.getElementById('widget-menu');
+  if (menu) { menu.remove(); return; }
+  menu = document.createElement('div');
+  menu.className = 'widget-menu';
+  menu.id = 'widget-menu';
+  const items = [
+    { key: 'smeter', label: 'S-meter / SWR' },
+    { key: 'ptt', label: 'PTT Button' },
+    { key: 'cw', label: 'CW Macros' },
+  ];
+  items.forEach(item => {
+    const lbl = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!vfoWidgets[item.key];
+    cb.addEventListener('change', () => {
+      vfoWidgets[item.key] = cb.checked;
+      applyWidgets();
+      saveWidgets();
+    });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(item.label));
+    menu.appendChild(lbl);
+  });
+  document.body.appendChild(menu);
+  const dismiss = () => { const m = document.getElementById('widget-menu'); if (m) m.remove(); document.removeEventListener('click', dismiss); };
+  setTimeout(() => document.addEventListener('click', dismiss), 0);
+});
+
+// --- S-meter ---
+const smeterBar = document.getElementById('smeter-bar');
+const smeterText = document.getElementById('smeter-text');
+const swrBar = document.getElementById('swr-bar');
+const swrText = document.getElementById('swr-text');
+
+window.api.onSmeter((val) => {
+  const pct = Math.min(100, (val / 255) * 100);
+  const color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
+  smeterBar.style.width = pct + '%';
+  smeterBar.style.background = color;
+  if (val <= 120) {
+    smeterText.textContent = 'S' + Math.round(val * 9 / 120);
+  } else {
+    smeterText.textContent = 'S9+' + Math.round((val - 120) * 60 / 135);
+  }
+  smeterText.style.color = color;
+});
+
+window.api.onSwr((val) => {
+  if (val <= 0) {
+    swrBar.style.width = '0%';
+    swrText.textContent = '\u2014';
+    swrText.style.color = '#666';
+    return;
+  }
+  const swr = 1.0 + (val / 60);
+  const pct = Math.min(100, ((swr - 1) / 4) * 100);
+  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  swrBar.style.width = pct + '%';
+  swrBar.style.background = color;
+  swrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+  swrText.style.color = color;
+});
+
+window.api.onSwrRatio((swr) => {
+  const pct = Math.min(100, ((swr - 1) / 4) * 100);
+  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  swrBar.style.width = pct + '%';
+  swrBar.style.background = color;
+  swrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+  swrText.style.color = color;
+});
+
+// --- PTT ---
+const pttBtn = document.getElementById('ptt-btn');
+let pttDown = false;
+
+function pttStart() {
+  if (pttDown) return;
+  pttDown = true;
+  pttBtn.classList.add('active');
+  pttBtn.textContent = 'TX';
+  window.api.voiceMacroPtt(true);
+}
+function pttStop() {
+  if (!pttDown) return;
+  pttDown = false;
+  pttBtn.classList.remove('active');
+  pttBtn.textContent = 'PTT';
+  window.api.voiceMacroPtt(false);
+}
+
+pttBtn.addEventListener('mousedown', (e) => { e.preventDefault(); pttStart(); });
+pttBtn.addEventListener('mouseup', (e) => { e.preventDefault(); pttStop(); });
+pttBtn.addEventListener('mouseleave', () => { if (pttDown) pttStop(); });
+
+// TX state from radio (external PTT)
+window.api.onTxState((state) => {
+  if (state) {
+    pttBtn.classList.add('active');
+    pttBtn.textContent = 'TX';
+  } else {
+    pttBtn.classList.remove('active');
+    pttBtn.textContent = 'PTT';
+    pttDown = false;
+  }
+});
+
+// --- CW Macros ---
+async function loadCwMacros() {
+  const s = await window.api.getSettings();
+  const macros = s.cwMacros || [
+    { label: 'CQ', text: 'CQ CQ CQ DE {MYCALL} {MYCALL} K' },
+    { label: '599', text: '{call} UR 599 BK' },
+    { label: '73', text: '73 DE {MYCALL} E E' },
+    { label: 'AGN', text: 'AGN AGN PSE' },
+    { label: 'TU', text: 'TU DE {MYCALL} K' },
+  ];
+  const row = document.getElementById('cw-macro-row');
+  row.innerHTML = '';
+  macros.forEach(m => {
+    if (!m.label && !m.text) return;
+    const btn = document.createElement('button');
+    btn.className = 'cw-macro-btn';
+    btn.textContent = m.label || '?';
+    btn.title = m.text || '';
+    btn.addEventListener('click', () => {
+      // Basic macro expansion
+      let text = m.text || '';
+      text = text.replace(/\{MYCALL\}/gi, s.myCallsign || '');
+      window.api.sendCwText(text);
+    });
+    row.appendChild(btn);
+  });
+  // Cancel button
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'cw-cancel-btn';
+  cancelBtn.textContent = 'STOP';
+  cancelBtn.title = 'Cancel CW transmission';
+  cancelBtn.addEventListener('click', () => window.api.cwCancel());
+  row.appendChild(cancelBtn);
+}
+loadCwMacros();
+
 // --- Init ---
 loadProfiles();
+loadWidgets();
 </script>
 </body>
 </html>

@@ -570,12 +570,14 @@ function sendCatNb(on) {
 
 function sendCatSmeter(val) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-smeter', val);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-smeter', val);
   _currentSmeter = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'smeter', value: val });
 }
 
 function sendCatSwr(val) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-swr', val);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr', val);
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr', value: val });
 }
 
@@ -2743,6 +2745,7 @@ function connectSmartSdr() {
   smartSdr.on('smeter', sendCatSmeter);
   smartSdr.on('swr-ratio', (swr) => {
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: swr });
   });
 
@@ -4659,6 +4662,7 @@ function handleRemotePtt(state) {
   // Broadcast to desktop UI
   if (win && !win.isDestroyed()) {
     win.webContents.send('remote-tx-state', state);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('remote-tx-state', state);
   }
   // Broadcast to phone
   broadcastRemoteRadioStatus();
