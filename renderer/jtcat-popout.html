@@ -58,6 +58,8 @@
     .jp-wf-pane .jp-wf-label { position: absolute; top: 2px; left: 4px; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 2px; pointer-events: none; z-index: 1; }
     .jp-wf-pane .jp-wf-tx-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff2222; box-shadow: 0 0 4px #ff2222; pointer-events: none; z-index: 2; }
     .jp-wf-pane .jp-wf-tx-hz { position: absolute; bottom: 2px; font-size: 8px; font-weight: 700; color: #ff4444; pointer-events: none; z-index: 2; white-space: nowrap; }
+    .jp-wf-pane.wf-tx-active { outline: 2px solid #e94560; outline-offset: -2px; animation: wf-tx-pulse 1s ease-in-out infinite; }
+    @keyframes wf-tx-pulse { 0%,100% { outline-color: #e94560; } 50% { outline-color: #ff8888; } }
     .jp-row.jp-watched { background: rgba(255, 64, 129, 0.12); }
     .jp-entity { font-size: 10px; color: var(--text-dim, #666); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 

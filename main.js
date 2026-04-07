@@ -9649,10 +9649,10 @@ app.whenReady().then(() => {
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
         handleRemotePtt(true);
         if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-          jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq });
+          jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq, sliceId: s.sliceId });
         }
         if (remoteServer && remoteServer.hasClient()) {
-          remoteServer.broadcastJtcatTxStatus({ state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq });
+          remoteServer.broadcastJtcatTxStatus({ state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq, sliceId: s.sliceId });
         }
         // Send TX audio to renderer for playback through DAX TX
         setTimeout(() => {
@@ -9666,7 +9666,7 @@ app.whenReady().then(() => {
         console.log(`[JTCAT Multi] TX end on ${s.sliceId}/${s.band} — PTT off`);
         handleRemotePtt(false);
         if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-          jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'rx' });
+          jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'rx', sliceId: s.sliceId });
         }
         if (remoteServer && remoteServer.hasClient()) {
           remoteServer.broadcastJtcatTxStatus({ state: 'rx' });

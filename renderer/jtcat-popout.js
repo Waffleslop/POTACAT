@@ -570,6 +570,18 @@
     transmitting = data.state === 'tx';
     rxTxEl.textContent = transmitting ? 'TX' : 'RX';
     rxTxEl.style.color = transmitting ? '#e94560' : '';
+    // Highlight the TX waterfall pane in multi-slice mode
+    if (multiActive) {
+      document.querySelectorAll('.jp-wf-pane.wf-tx-active').forEach(function(el) { el.classList.remove('wf-tx-active'); });
+      if (transmitting && data.sliceId) {
+        for (var p of multiWfPanes) {
+          if (p.sliceId === data.sliceId) {
+            p.canvas.parentElement.classList.add('wf-tx-active');
+            break;
+          }
+        }
+      }
+    }
     // Draw TX arc to the station we're working
     if (transmitting && qsoState && qsoState.call && myCallsign) {
       drawQsoArc(myCallsign, qsoState.call);
