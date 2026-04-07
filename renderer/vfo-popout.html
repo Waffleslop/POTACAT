@@ -442,6 +442,7 @@
       <div class="section-label">Widgets</div>
       <label class="settings-toggle"><input type="checkbox" id="w-smeter"> S-meter / SWR</label>
       <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT / LOG Buttons</label>
+      <label class="settings-toggle" style="padding-left:28px;"><input type="checkbox" id="w-ptt-mic"> Route mic to radio during PTT</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
       <div class="section-label">Dial Sections</div>
@@ -1068,6 +1069,7 @@ async function loadWidgets() {
   if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
   if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
   if (s.vfoHiddenBands) vfoHiddenBands = s.vfoHiddenBands;
+  if (s.vfoPttMic != null) pttMicEnabled = s.vfoPttMic;
   applyWidgets();
   applySections();
   rebuildAllBandGrids();
@@ -1100,6 +1102,7 @@ async function saveWidgets() {
 // Settings tab widget toggles
 const wSmeter = document.getElementById('w-smeter');
 const wPtt = document.getElementById('w-ptt');
+const wPttMic = document.getElementById('w-ptt-mic');
 const wCw = document.getElementById('w-cw');
 const wVoice = document.getElementById('w-voice');
 const sSolar = document.getElementById('s-solar');
@@ -1113,6 +1116,7 @@ const sProfilesInline = document.getElementById('s-profiles-inline');
 function syncSettingsCheckboxes() {
   wSmeter.checked = !!vfoWidgets.smeter;
   wPtt.checked = !!vfoWidgets.ptt;
+  wPttMic.checked = pttMicEnabled;
   wCw.checked = !!vfoWidgets.cw;
   wVoice.checked = !!vfoWidgets.voice;
   sSolar.checked = !!vfoSections.solar;
@@ -1133,6 +1137,11 @@ function syncSettingsCheckboxes() {
     applyWidgets();
     saveWidgets();
   });
+});
+
+wPttMic.addEventListener('change', () => {
+  pttMicEnabled = wPttMic.checked;
+  window.api.saveSettings({ vfoPttMic: pttMicEnabled });
 });
 
 [sSolar, sStep, sBand, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
@@ -1220,12 +1229,33 @@ window.api.onSwrRatio((swr) => {
 // --- PTT ---
 const pttBtn = document.getElementById('ptt-btn');
 let pttDown = false;
+let pttMicEnabled = false; // route mic to radio TX during PTT
+let pttMicCtx = null;
+let pttMicStream = null;
 
-function pttStart() {
+async function pttStart() {
   if (pttDown) return;
   pttDown = true;
   pttBtn.classList.add('active');
   pttBtn.textContent = 'TX';
+  // Start mic → radio TX if enabled
+  if (pttMicEnabled) {
+    try {
+      const s = await window.api.getSettings();
+      pttMicStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      pttMicCtx = new AudioContext();
+      if (pttMicCtx.state === 'suspended') await pttMicCtx.resume();
+      if (s.remoteAudioOutput && pttMicCtx.setSinkId) {
+        await pttMicCtx.setSinkId(s.remoteAudioOutput);
+      }
+      const source = pttMicCtx.createMediaStreamSource(pttMicStream);
+      source.connect(pttMicCtx.destination);
+    } catch (e) {
+      console.error('[VFO] Mic PTT failed:', e.message);
+    }
+  }
   window.api.voiceMacroPtt(true);
 }
 function pttStop() {
@@ -1234,6 +1264,9 @@ function pttStop() {
   pttBtn.classList.remove('active');
   pttBtn.textContent = 'PTT';
   window.api.voiceMacroPtt(false);
+  // Stop mic
+  if (pttMicStream) { pttMicStream.getTracks().forEach(t => t.stop()); pttMicStream = null; }
+  if (pttMicCtx) { pttMicCtx.close().catch(() => {}); pttMicCtx = null; }
 }
 
 pttBtn.addEventListener('mousedown', (e) => { e.preventDefault(); pttStart(); });
