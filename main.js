@@ -9552,6 +9552,13 @@ app.whenReady().then(() => {
 
       // Wire TX events — critical for multi-slice PTT and audio playback
       engine.on('tx-start', (data) => {
+        // Only TX if this slice owns the TX slot (prevents two slices TX'ing simultaneously)
+        if (jtcatManager && jtcatManager.txSliceId !== s.sliceId) {
+          console.log(`[JTCAT Multi] TX blocked on ${s.sliceId}/${s.band} — TX owned by ${jtcatManager.txSliceId}`);
+          engine._txEnabled = false;
+          if (engine._txActive) engine.txComplete();
+          return;
+        }
         const catState = cat ? `connected=${cat.connected}` : 'cat=null';
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
