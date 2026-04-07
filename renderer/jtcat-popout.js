@@ -918,6 +918,10 @@
     // Clear decode log
     bandActivity.innerHTML = '<div class="jp-empty">Multi-slice decoding...</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
+
+    // Auto-focus first slice for waterfall
+    focusedSlice = multiSliceConfigs[0].sliceId;
+    setTimeout(buildWaterfallSliceBar, 500); // delay to let audio streams init
   });
 
   if (multiStopBtn) multiStopBtn.addEventListener('click', function() {
@@ -926,7 +930,51 @@
     multiStopBtn.style.display = 'none';
     stopMultiAudio();
     window.api.jtcatStop();
+    // Hide waterfall slice bar
+    var wfSliceBar = document.getElementById('jp-wf-slice-bar');
+    if (wfSliceBar) { wfSliceBar.classList.add('hidden'); wfSliceBar.innerHTML = ''; }
+    focusedSlice = null;
   });
+
+  // Waterfall slice selector — switch which slice's audio drives the waterfall analyser
+  var focusedSlice = null; // sliceId of the slice currently shown in waterfall
+
+  function buildWaterfallSliceBar() {
+    var wfSliceBar = document.getElementById('jp-wf-slice-bar');
+    if (!wfSliceBar || !multiActive) return;
+    wfSliceBar.classList.remove('hidden');
+    wfSliceBar.style.display = 'flex';
+    wfSliceBar.innerHTML = '';
+    multiSliceConfigs.forEach(function(cfg) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = cfg.band + ' (' + SLICE_NAMES[cfg.slicePort] + ')';
+      btn.style.cssText = 'font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid ' +
+        (BAND_COLORS[cfg.band] || '#888') + ';background:' +
+        (focusedSlice === cfg.sliceId ? (BAND_COLORS[cfg.band] || '#888') : 'transparent') +
+        ';color:' + (focusedSlice === cfg.sliceId ? '#000' : (BAND_COLORS[cfg.band] || '#888')) +
+        ';cursor:pointer;font-weight:600;';
+      btn.addEventListener('click', function() {
+        focusedSlice = cfg.sliceId;
+        // Switch the analyser to this slice's audio context
+        var entry = multiAudioStreams.get(cfg.sliceId);
+        if (entry && entry.ctx) {
+          // Create or reuse analyser on this slice's context
+          if (!entry.analyser) {
+            entry.analyser = entry.ctx.createAnalyser();
+            entry.analyser.fftSize = 2048;
+            entry.analyser.smoothingTimeConstant = 0.3;
+            // Connect the source to the analyser
+            var src = entry.ctx.createMediaStreamSource(entry.stream);
+            src.connect(entry.analyser);
+          }
+          popoutAnalyser = entry.analyser;
+        }
+        buildWaterfallSliceBar(); // re-render to update active state
+      });
+      wfSliceBar.appendChild(btn);
+    });
+  }
 
   document.getElementById('jp-clear').addEventListener('click', function() {
     bandActivity.innerHTML = '<div class="jp-empty">Waiting for decodes...</div>';

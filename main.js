@@ -2477,7 +2477,8 @@ function startJtcat(mode) {
       const timeStr = String(now.getUTCHours()).padStart(2, '0') + ':' +
                       String(now.getUTCMinutes()).padStart(2, '0') + ':' +
                       String(now.getUTCSeconds()).padStart(2, '0');
-      remoteServer.broadcastJtcatDecode({ ...data, time: timeStr });
+      const sliceBand = jtcatManager ? jtcatManager.getDialFreq('default').band : '';
+      remoteServer.broadcastJtcatDecode({ ...data, time: timeStr, sliceId: 'default', band: sliceBand });
     }
     // Clean up completed QSOs (re-arms auto-CQ for next cycle)
     if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
@@ -4308,8 +4309,11 @@ function connectRemote() {
     console.log('[JTCAT Remote] CQ:', txMsg, '@ quiet freq', jtcatQuietFreq, 'Hz slot:', nextSlot);
   });
 
-  remoteServer.on('jtcat-reply', async ({ call, grid, df, slot }) => {
-    if (!ft8Engine) return;
+  remoteServer.on('jtcat-reply', async ({ call, grid, df, slot, sliceId }) => {
+    // Route TX to correct slice in multi-slice mode
+    const targetEngine = (jtcatManager && sliceId) ? jtcatManager.getEngine(sliceId) : ft8Engine;
+    if (!targetEngine) return;
+    if (jtcatManager && sliceId) jtcatManager.setTxSlice(sliceId);
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
     if (!myCall) return;
@@ -4321,17 +4325,17 @@ function connectRemote() {
       jtcatAutoLog(remoteJtcatQso);
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
-    if (ft8Engine._txActive) ft8Engine.txComplete();
+    if (targetEngine._txActive) targetEngine.txComplete();
     const txMsg = call + ' ' + myCall + ' ' + myGrid;
-    ft8Engine.setTxFreq(df);
-    ft8Engine.setRxFreq(df);
+    targetEngine.setTxFreq(df);
+    targetEngine.setRxFreq(df);
     // TX on opposite slot from the station we're replying to (use slot from decode data)
-    const targetSlot = slot || ft8Engine._lastRxSlot;
-    ft8Engine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
-    remoteJtcatQso = { mode: 'reply', call, grid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
-    ft8Engine._txEnabled = true;
+    const targetSlot = slot || targetEngine._lastRxSlot;
+    targetEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
+    remoteJtcatQso = { mode: 'reply', call, grid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+    targetEngine._txEnabled = true;
     await remoteJtcatSetTxMsg(txMsg);
-    ft8Engine.tryImmediateTx();
+    targetEngine.tryImmediateTx();
     console.log('[JTCAT Remote] Reply to', call, ':', txMsg, 'slot:', ft8Engine._txSlot);
   });
 
@@ -7922,7 +7926,11 @@ app.whenReady().then(() => {
 
   // --- Popout QSO state machine (drives engine directly, like ECHOCAT) ---
   ipcMain.on('jtcat-popout-reply', async (_e, data) => {
-    if (!ft8Engine) return;
+    // Route TX to correct slice in multi-slice mode
+    const replySliceId = data.sliceId || 'default';
+    const replyEngine = (jtcatManager && data.sliceId) ? jtcatManager.getEngine(data.sliceId) : ft8Engine;
+    if (!replyEngine) return;
+    if (jtcatManager && data.sliceId) jtcatManager.setTxSlice(data.sliceId);
     const myCall = (settings.myCallsign || '').toUpperCase();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall) return;
@@ -7934,12 +7942,12 @@ app.whenReady().then(() => {
       jtcatAutoLog(popoutJtcatQso);
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
-    if (ft8Engine._txActive) ft8Engine.txComplete();
-    ft8Engine.setTxFreq(data.df || 1500);
-    ft8Engine.setRxFreq(data.df || 1500);
+    if (replyEngine._txActive) replyEngine.txComplete();
+    replyEngine.setTxFreq(data.df || 1500);
+    replyEngine.setRxFreq(data.df || 1500);
     // TX on opposite slot from the station we're replying to
-    const targetSlot = data.slot || ft8Engine._lastRxSlot;
-    ft8Engine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
+    const targetSlot = data.slot || replyEngine._lastRxSlot;
+    replyEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
 
     let txMsg, phase;
     if (data.rr73) {
@@ -7967,26 +7975,26 @@ app.whenReady().then(() => {
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
         myCall, myGrid, txRetries: 0 };
-      ft8Engine._txEnabled = true;
-      await ft8Engine.setTxMessage(txMsg);
-      ft8Engine.tryImmediateTx();
+      replyEngine._txEnabled = true;
+      await replyEngine.setTxMessage(txMsg);
+      replyEngine.tryImmediateTx();
       if (!sameCall) jtcatAutoLog(popoutJtcatQso);
     } else if (!popoutJtcatQso || popoutJtcatQso.phase !== phase) {
       // Only set up QSO if not already created above (report case)
       if (phase === 'reply') {
-        popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+        popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: replySliceId };
       }
-      ft8Engine._txEnabled = true;
-      await ft8Engine.setTxMessage(txMsg);
-      ft8Engine.tryImmediateTx();
+      replyEngine._txEnabled = true;
+      await replyEngine.setTxMessage(txMsg);
+      replyEngine.tryImmediateTx();
     } else {
-      ft8Engine._txEnabled = true;
-      await ft8Engine.setTxMessage(txMsg);
-      ft8Engine.tryImmediateTx();
+      replyEngine._txEnabled = true;
+      await replyEngine.setTxMessage(txMsg);
+      replyEngine.tryImmediateTx();
     }
 
     popoutBroadcastQso();
-    console.log('[JTCAT Popout] Reply to', data.call, '— phase:', phase, '— slot:', ft8Engine._txSlot, '—', txMsg);
+    console.log('[JTCAT Popout] Reply to', data.call, '— phase:', phase, '— slot:', replyEngine._txSlot, '—', txMsg);
   });
 
   ipcMain.on('jtcat-popout-call-cq', async (_e, modifier) => {
@@ -9476,7 +9484,9 @@ app.whenReady().then(() => {
     if (!jtcatManager) jtcatManager = new JtcatManager();
 
     for (const s of slices) {
-      const engine = jtcatManager.startSlice({ sliceId: s.sliceId, mode: s.mode || 'FT8', sliceIndex: s.sliceIndex });
+      const freqKhz = s.freqKhz || 14074;
+      const engine = jtcatManager.startSlice({ sliceId: s.sliceId, mode: s.mode || 'FT8', sliceIndex: s.sliceIndex, band: s.band });
+      jtcatManager.setDialFreq(s.sliceId, freqKhz * 1000, s.band);
       // Wire decode enrichment for this slice
       engine.on('decode', (data) => {
         if (data.results) {

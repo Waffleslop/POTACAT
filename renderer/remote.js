@@ -4720,7 +4720,7 @@
           const call = parts[callIdx] || '';
           const grid = parts[callIdx + 1] || '';
           if (call === ft8HuntCall) {
-            ft8Send({ type: 'jtcat-reply', call, grid, df: d.df || 1500 });
+            ft8Send({ type: 'jtcat-reply', call, grid, df: d.df || 1500, sliceId: d.sliceId });
             ft8HuntCall = ''; // clear hunt — we've engaged
           }
         }
@@ -4785,7 +4785,7 @@
       const call = parts[callIdx] || '';
       const grid = parts[callIdx + 1] || '';
       if (call) {
-        ft8Send({ type: 'jtcat-reply', call, grid, df: decode.df || 1500 });
+        ft8Send({ type: 'jtcat-reply', call, grid, df: decode.df || 1500, sliceId: decode.sliceId });
       }
     } else if (myCallsign && text.indexOf(myCallsign.toUpperCase()) >= 0) {
       // Directed at us — parse caller and reply (handles CQ→QSO transition on click)
@@ -4796,7 +4796,7 @@
       const gridOrReport = parts[2] || '';
       const grid = /^[A-R]{2}[0-9]{2}$/i.test(gridOrReport) ? gridOrReport : '';
       if (caller) {
-        ft8Send({ type: 'jtcat-reply', call: caller, grid, df: decode.df || 1500 });
+        ft8Send({ type: 'jtcat-reply', call: caller, grid, df: decode.df || 1500, sliceId: decode.sliceId });
       }
     } else {
       // Click on a non-CQ, non-directed decode — set TX freq to their freq
