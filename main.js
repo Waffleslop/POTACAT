@@ -4275,6 +4275,16 @@ function connectRemote() {
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-start-for-remote');
   });
 
+  // ECHOCAT multi-slice — phone sends config, desktop runs engines + audio
+  remoteServer.on('jtcat-start-multi-remote', ({ slices }) => {
+    if (!Array.isArray(slices) || slices.length === 0) return;
+    // Emit the same IPC event that the desktop popout uses
+    ipcMain.emit('jtcat-start-multi', {}, slices);
+    // Start audio capture in desktop renderer for each slice
+    if (win && !win.isDestroyed()) win.webContents.send('jtcat-start-for-remote');
+    sendCatLog(`[JTCAT] Multi-slice started from ECHOCAT: ${slices.map(s => s.sliceId + '/' + s.band).join(', ')}`);
+  });
+
   remoteServer.on('jtcat-stop', () => {
     stopJtcat();
     remoteJtcatQso = null;

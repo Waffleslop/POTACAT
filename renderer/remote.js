@@ -4758,6 +4758,23 @@
         // Click to reply
         row.addEventListener('click', () => ft8ClickDecode(d));
         log.appendChild(row);
+
+        // Plot on FT8 map
+        ft8PlotDecode(d);
+
+        // Add directed decodes to My Activity
+        if (isDirected) {
+          var myLog = document.getElementById('ft8-my-activity');
+          var myHeader = document.getElementById('ft8-my-activity-header');
+          if (myLog && myHeader) {
+            myHeader.classList.remove('hidden');
+            myLog.classList.remove('hidden');
+            var myRow = row.cloneNode(true);
+            myRow.addEventListener('click', () => ft8ClickDecode(d));
+            myLog.appendChild(myRow);
+            myLog.scrollTop = myLog.scrollHeight;
+          }
+        }
       });
     }
 
@@ -5020,6 +5037,75 @@
       ft8SortSignal = !ft8SortSignal;
       ft8SortSignalBtn.classList.toggle('active', ft8SortSignal);
     });
+  }
+
+  // Multi-slice toggle — tells desktop to start multi-slice engines
+  var ft8MultiBtn = document.getElementById('ft8-multi-btn');
+  var ft8MultiActive = false;
+  if (ft8MultiBtn) {
+    ft8MultiBtn.addEventListener('click', function() {
+      ft8MultiActive = !ft8MultiActive;
+      ft8MultiBtn.classList.toggle('active', ft8MultiActive);
+      if (ft8MultiActive) {
+        // Read saved multi-slice config or use defaults
+        var saved = JSON.parse(localStorage.getItem('echocat-multi-slices') || 'null');
+        var slices = saved || [
+          { sliceId: 'slice-a', band: '20m', slicePort: 5002 },
+          { sliceId: 'slice-b', band: '40m', slicePort: 5003 },
+        ];
+        // Send to desktop — desktop handles audio capture + engines
+        ft8Send({ type: 'jtcat-start-multi-remote', slices: slices.map(function(s) {
+          return { sliceId: s.sliceId, mode: ft8Mode, band: s.band, slicePort: s.slicePort, freqKhz: s.freqKhz || 0 };
+        }) });
+      } else {
+        ft8Send({ type: 'jtcat-stop' });
+      }
+    });
+  }
+
+  // FT8 Map toggle
+  var ft8MapContainer = document.getElementById('ft8-map-container');
+  var ft8MapToggle = document.getElementById('ft8-map-toggle');
+  var ft8Map = null;
+  var ft8MapMarkers = [];
+  var ft8MapVisible = false;
+
+  if (ft8MapToggle) {
+    ft8MapToggle.addEventListener('click', function() {
+      ft8MapVisible = !ft8MapVisible;
+      ft8MapToggle.classList.toggle('active', ft8MapVisible);
+      ft8MapContainer.classList.toggle('hidden', !ft8MapVisible);
+      if (ft8MapVisible && !ft8Map) {
+        ft8Map = L.map(ft8MapContainer, { zoomControl: false, attributionControl: false }).setView([20, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18, className: 'dark-tiles',
+        }).addTo(ft8Map);
+        // Center on home QTH if available
+        if (phoneGrid) {
+          var pos = gridToLatLonLocal(phoneGrid);
+          if (pos) ft8Map.setView([pos.lat, pos.lon], 4);
+        }
+      }
+      if (ft8Map) setTimeout(function() { ft8Map.invalidateSize(); }, 100);
+    });
+  }
+
+  function ft8PlotDecode(d) {
+    if (!ft8Map || !ft8MapVisible) return;
+    if (!d.grid || !d.call) return;
+    var pos = gridToLatLonLocal(d.grid);
+    if (!pos) return;
+    var color = d.newDxcc ? '#e94560' : d.newCall ? '#f0a500' : '#4ecca3';
+    var marker = L.circleMarker([pos.lat, pos.lon], {
+      radius: 6, fillColor: color, color: color, weight: 1, fillOpacity: 0.7,
+    }).bindPopup('<b>' + esc(d.call) + '</b><br>' + (d.entity || '') + '<br>' + (d.grid || ''));
+    marker.addTo(ft8Map);
+    ft8MapMarkers.push(marker);
+    // Cap markers
+    if (ft8MapMarkers.length > 200) {
+      var old = ft8MapMarkers.shift();
+      ft8Map.removeLayer(old);
+    }
   }
 
   // FT8 RX/TX gain sliders — relay to desktop via WebSocket

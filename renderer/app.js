@@ -4518,6 +4518,10 @@ function bindPopupClickHandlers(mapInstance) {
         // Find matching spot in allSpots for quick respot
         const match = allSpots.find(s => s.frequency === btn.dataset.freq && s.callsign && s.mode === btn.dataset.mode);
         if (match) { lastTunedSpot = match; prefillDxCommand(match); }
+        // Activator mode: fill QSO form from spot
+        if (appMode === 'activator' && activationActive && match) {
+          fillActivatorFromSpot(match);
+        }
       });
     });
     container.querySelectorAll('.popup-qrz').forEach((link) => {
@@ -5738,6 +5742,10 @@ function render() {
           const spotFreqKhz = Math.round(parseFloat(s.frequency));
           window.api.saveSettings({ jtcatLastBandFreq: spotFreqKhz });
           window.api.jtcatPopoutOpen();
+        }
+        // Activator mode: fill QSO form from spot (hunter while activating)
+        if (appMode === 'activator' && activationActive) {
+          fillActivatorFromSpot(s);
         }
         render(); // highlight the clicked row immediately
       });
@@ -14152,6 +14160,37 @@ window.api.onCatMode((mode) => {
 function updateActivatorBandLabel(khz) {
   const bandStr = freqToBandActivator(khz);
   activatorBandLabel.textContent = bandStr || '--';
+}
+
+/** Fill activator QSO form from a clicked spot (hunt while activating) */
+function fillActivatorFromSpot(s) {
+  activatorCallsignInput.value = s.callsign || '';
+  // Set mode dropdown — map radio modes to activator modes
+  const spotMode = (s.mode || '').toUpperCase();
+  const modeMap = { 'USB': 'SSB', 'LSB': 'SSB', 'CWR': 'CW' };
+  const mappedMode = modeMap[spotMode] || spotMode;
+  if (activatorModeSelect.querySelector(`option[value="${mappedMode}"]`)) {
+    activatorModeSelect.value = mappedMode;
+  }
+  // Fill hunter park ref if it's a POTA/WWFF spot
+  if (s.reference && (s.source === 'pota' || s.source === 'wwff')) {
+    hunterParkRefs = [{ ref: s.reference, name: s.parkName || '' }];
+    updateHunterParkDisplay();
+  } else {
+    hunterParkRefs = [];
+    updateHunterParkDisplay();
+  }
+  resetActivatorRst();
+  // QRZ lookup for op name and state
+  if (s.callsign) {
+    window.api.qrzLookup(s.callsign).then(info => {
+      if (info) {
+        activatorOpNameEl.textContent = qrzDisplayName(info) || '';
+        if (info.state && activatorStateInput) activatorStateInput.value = info.state;
+      }
+    }).catch(() => {});
+  }
+  activatorCallsignInput.focus();
 }
 
 /** Map a CAT mode string to the activator mode selector */

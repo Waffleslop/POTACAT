@@ -859,6 +859,7 @@
         <button type="button" id="ft8-cq-filter" class="ft8-filter-btn" title="Show only CQ and 73">CQ/73</button>
         <button type="button" id="ft8-wanted-filter" class="ft8-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button>
         <button type="button" id="ft8-sort-signal" class="ft8-filter-btn" title="Sort by signal strength">dB</button>
+        <button type="button" id="ft8-multi-btn" class="ft8-filter-btn" title="Multi-slice decode">Multi</button>
         <button type="button" id="ft8-erase-btn" class="ft8-erase-btn">Erase</button>
       </div>
       <div id="ft8-gain-strip" style="display:flex;align-items:center;gap:6px;padding:2px 10px;font-size:11px;color:var(--text-dim);background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;">
@@ -870,9 +871,18 @@
         <span id="ft8-tx-gain-val" style="min-width:28px;text-align:right;font-size:10px;">100%</span>
       </div>
       <div id="ft8-cycle-progress" style="height:2px;background:var(--bg-header);flex-shrink:0;"><div id="ft8-cycle-bar" style="height:100%;width:0%;background:#4fc3f7;transition:width 0.25s linear;"></div></div>
-      <div id="ft8-decode-log" class="ft8-decode-log">
+      <!-- Band Activity + My Activity split -->
+      <div id="ft8-decode-log" class="ft8-decode-log" style="flex:1;min-height:0;">
         <div class="ft8-empty">Tap a band to start</div>
       </div>
+      <div id="ft8-my-activity-header" class="hidden" style="padding:3px 10px;font-size:10px;font-weight:600;color:var(--text-dim);background:var(--bg-header);border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
+        <span>My Activity</span>
+        <button type="button" id="ft8-map-toggle" class="ft8-filter-btn" style="font-size:9px;padding:1px 6px;">Map</button>
+      </div>
+      <div id="ft8-my-activity" class="ft8-decode-log hidden" style="max-height:120px;overflow-y:auto;flex-shrink:0;border-bottom:1px solid var(--border);">
+      </div>
+      <!-- FT8 Map (decoded stations) -->
+      <div id="ft8-map-container" class="hidden" style="height:150px;flex-shrink:0;border-bottom:1px solid var(--border);"></div>
       <canvas id="ft8-waterfall" class="ft8-waterfall hidden" width="320" height="100"></canvas>
       <div id="ft8-control-bar">
         <button type="button" id="ft8-tx-btn" class="ft8-ctrl-btn ft8-tx-btn">TX</button>
