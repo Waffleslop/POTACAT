@@ -282,20 +282,32 @@
       <div class="dial-wrap">
         <canvas id="vfo-dial" width="200" height="200"></canvas>
       </div>
-      <div style="display:flex;justify-content:center;padding:4px 0;">
-        <select id="step-select" style="background:#2a2a4a;border:1px solid #3a3a5a;color:#4fc3f7;padding:4px 8px;border-radius:4px;font-size:13px;cursor:pointer;"></select>
+      <div class="vfo-section" id="sec-step">
+        <div style="display:flex;justify-content:center;padding:4px 0;">
+          <select id="step-select" style="background:#2a2a4a;border:1px solid #3a3a5a;color:#4fc3f7;padding:4px 8px;border-radius:4px;font-size:13px;cursor:pointer;"></select>
+        </div>
       </div>
-      <div class="section-label">Quick Band</div>
-      <div class="band-grid" id="band-grid-dial"></div>
-      <div class="section-label">Filter</div>
-      <div class="step-row filter-quick-shared"></div>
-      <div class="filter-row">
-        <label>BW</label>
-        <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400">
-        <span class="filter-val" id="filter-val">2400 Hz</span>
+      <div class="vfo-section" id="sec-band">
+        <div class="section-label">Quick Band</div>
+        <div class="band-grid" id="band-grid-dial"></div>
       </div>
-      <div class="section-label">Controls</div>
-      <div class="step-row rig-toggles-shared"></div>
+      <div class="vfo-section" id="sec-filter">
+        <div class="section-label">Filter</div>
+        <div class="step-row filter-quick-shared"></div>
+        <div class="filter-row">
+          <label>BW</label>
+          <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400">
+          <span class="filter-val" id="filter-val">2400 Hz</span>
+        </div>
+      </div>
+      <div class="vfo-section" id="sec-controls">
+        <div class="section-label">Controls</div>
+        <div class="step-row rig-toggles-shared"></div>
+      </div>
+      <div class="vfo-section" id="sec-profiles-inline" style="display:none">
+        <div class="section-label">Profiles</div>
+        <div class="profile-list" id="profile-list-inline"></div>
+      </div>
     </div>
 
     <!-- Keypad tab -->
@@ -321,10 +333,14 @@
       <div style="text-align:center; padding:6px; font-size:11px; color:#666;">
         Enter frequency in MHz (e.g. 14.025)
       </div>
-      <div class="section-label">Filter</div>
-      <div class="step-row filter-quick-shared"></div>
-      <div class="section-label">Controls</div>
-      <div class="step-row rig-toggles-shared"></div>
+      <div class="vfo-section" id="sec-filter-kp">
+        <div class="section-label">Filter</div>
+        <div class="step-row filter-quick-shared"></div>
+      </div>
+      <div class="vfo-section" id="sec-controls-kp">
+        <div class="section-label">Controls</div>
+        <div class="step-row rig-toggles-shared"></div>
+      </div>
     </div>
 
     <!-- Profiles tab -->
@@ -345,6 +361,12 @@
       <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT Button</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
+      <div class="section-label">Dial Sections</div>
+      <label class="settings-toggle"><input type="checkbox" id="s-step" checked> Step Size</label>
+      <label class="settings-toggle"><input type="checkbox" id="s-band" checked> Quick Band</label>
+      <label class="settings-toggle"><input type="checkbox" id="s-filter" checked> Filter</label>
+      <label class="settings-toggle"><input type="checkbox" id="s-controls" checked> Controls</label>
+      <label class="settings-toggle"><input type="checkbox" id="s-profiles-inline"> Profiles (inline)</label>
     </div>
   </div>
 
@@ -874,6 +896,27 @@ function renderProfiles() {
   });
 }
 
+function renderInlineProfiles() {
+  const list = document.getElementById('profile-list-inline');
+  if (!list) return;
+  if (profiles.length === 0) {
+    list.innerHTML = '<div class="profile-empty">No profiles saved.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  profiles.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'profile-item';
+    const freqMhz = p.freqKhz ? (p.freqKhz / 1000).toFixed(3) : '?';
+    item.innerHTML = `
+      <span class="profile-name">${esc(p.name)}</span>
+      <span class="profile-detail">${freqMhz} MHz ${p.mode || ''}${p.filterWidth ? ' BW:' + p.filterWidth : ''}</span>
+    `;
+    item.addEventListener('click', () => applyProfile(p));
+    list.appendChild(item);
+  });
+}
+
 function applyProfile(p) {
   if (p.freqKhz) {
     window.api.tune(p.freqKhz, p.mode);
@@ -897,6 +940,7 @@ function applyProfile(p) {
 
 async function saveProfiles() {
   await window.api.saveSettings({ vfoProfiles: profiles });
+  renderInlineProfiles();
 }
 
 document.getElementById('profile-save-btn').addEventListener('click', async () => {
@@ -922,11 +966,15 @@ function esc(s) {
 // --- Widget visibility ---
 const WIDGETS = ['smeter', 'ptt', 'cw', 'voice'];
 let vfoWidgets = { smeter: false, ptt: false, cw: false, voice: false };
+const SECTIONS = ['step', 'band', 'filter', 'controls', 'profiles-inline'];
+let vfoSections = { step: true, band: true, filter: true, controls: true, 'profiles-inline': false };
 
 async function loadWidgets() {
   const s = await window.api.getSettings();
   if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
+  if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
   applyWidgets();
+  applySections();
   syncSettingsCheckboxes();
 }
 
@@ -937,8 +985,19 @@ function applyWidgets() {
   });
 }
 
+function applySections() {
+  SECTIONS.forEach(s => {
+    // Apply to both Dial and Keypad tab instances
+    document.querySelectorAll('#sec-' + s + ', #sec-' + s + '-kp').forEach(el => {
+      el.style.display = vfoSections[s] ? '' : 'none';
+    });
+  });
+  // Render inline profiles if visible
+  if (vfoSections['profiles-inline']) renderInlineProfiles();
+}
+
 async function saveWidgets() {
-  await window.api.saveSettings({ vfoWidgets });
+  await window.api.saveSettings({ vfoWidgets, vfoSections });
 }
 
 // Settings tab widget toggles
@@ -946,12 +1005,22 @@ const wSmeter = document.getElementById('w-smeter');
 const wPtt = document.getElementById('w-ptt');
 const wCw = document.getElementById('w-cw');
 const wVoice = document.getElementById('w-voice');
+const sStep = document.getElementById('s-step');
+const sBand = document.getElementById('s-band');
+const sFilter = document.getElementById('s-filter');
+const sControls = document.getElementById('s-controls');
+const sProfilesInline = document.getElementById('s-profiles-inline');
 
 function syncSettingsCheckboxes() {
   wSmeter.checked = !!vfoWidgets.smeter;
   wPtt.checked = !!vfoWidgets.ptt;
   wCw.checked = !!vfoWidgets.cw;
   wVoice.checked = !!vfoWidgets.voice;
+  sStep.checked = !!vfoSections.step;
+  sBand.checked = !!vfoSections.band;
+  sFilter.checked = !!vfoSections.filter;
+  sControls.checked = !!vfoSections.controls;
+  sProfilesInline.checked = !!vfoSections['profiles-inline'];
 }
 
 [wSmeter, wPtt, wCw, wVoice].forEach(cb => {
@@ -961,6 +1030,18 @@ function syncSettingsCheckboxes() {
     vfoWidgets.cw = wCw.checked;
     vfoWidgets.voice = wVoice.checked;
     applyWidgets();
+    saveWidgets();
+  });
+});
+
+[sStep, sBand, sFilter, sControls, sProfilesInline].forEach(cb => {
+  cb.addEventListener('change', () => {
+    vfoSections.step = sStep.checked;
+    vfoSections.band = sBand.checked;
+    vfoSections.filter = sFilter.checked;
+    vfoSections.controls = sControls.checked;
+    vfoSections['profiles-inline'] = sProfilesInline.checked;
+    applySections();
     saveWidgets();
   });
 });
