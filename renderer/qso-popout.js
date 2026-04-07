@@ -139,7 +139,7 @@ function updateResendLabel() {
 function clearSelection() {
   selectedIdxs.clear();
   lastClickedIdx = null;
-  tbody.querySelectorAll('tr.selected').forEach(tr => tr.classList.remove('selected'));
+  _virt.invalidate();
   updateResendLabel();
 }
 
@@ -221,9 +221,73 @@ function render() {
     }
   });
 
-  // Build rows
-  const frag = document.createDocumentFragment();
-  for (const q of filtered) {
+  // Virtual scrolling — only render visible rows
+  _virt.filtered = filtered;
+  _virt.renderVisible();
+
+  // Prune selection to only include QSOs still in filtered view
+  for (const idx of selectedIdxs) {
+    if (!filtered.some(q => q.idx === idx)) selectedIdxs.delete(idx);
+  }
+  updateResendLabel();
+
+  updateMap();
+}
+
+// --- Virtual scroll engine ---
+const _virt = {
+  ROW_HEIGHT: 26, // px — matches CSS padding + line-height
+  BUFFER: 20,     // extra rows above/below viewport
+  filtered: [],
+  scrollEl: document.getElementById('qso-body'),
+  topSpacer: null,
+  botSpacer: null,
+  lastStart: -1,
+  lastEnd: -1,
+
+  init() {
+    // Create spacer elements
+    this.topSpacer = document.createElement('tr');
+    this.topSpacer.style.cssText = 'height:0;border:none;padding:0;';
+    this.botSpacer = document.createElement('tr');
+    this.botSpacer.style.cssText = 'height:0;border:none;padding:0;';
+    this.scrollEl.addEventListener('scroll', () => this.renderVisible());
+  },
+
+  renderVisible() {
+    const total = this.filtered.length;
+    if (total === 0) { tbody.innerHTML = ''; return; }
+
+    const scrollTop = this.scrollEl.scrollTop;
+    const viewH = this.scrollEl.clientHeight;
+    const start = Math.max(0, Math.floor(scrollTop / this.ROW_HEIGHT) - this.BUFFER);
+    const end = Math.min(total, Math.ceil((scrollTop + viewH) / this.ROW_HEIGHT) + this.BUFFER);
+
+    // Skip re-render if range unchanged
+    if (start === this.lastStart && end === this.lastEnd) return;
+    this.lastStart = start;
+    this.lastEnd = end;
+
+    const frag = document.createDocumentFragment();
+
+    // Top spacer
+    this.topSpacer.style.height = (start * this.ROW_HEIGHT) + 'px';
+    frag.appendChild(this.topSpacer);
+
+    // Visible rows
+    for (let i = start; i < end; i++) {
+      frag.appendChild(this.buildRow(this.filtered[i]));
+    }
+
+    // Bottom spacer
+    this.botSpacer.style.height = ((total - end) * this.ROW_HEIGHT) + 'px';
+    frag.appendChild(this.botSpacer);
+
+    tbody.innerHTML = '';
+    tbody.appendChild(frag);
+  },
+
+  buildRow(q) {
     const tr = document.createElement('tr');
     tr.dataset.idx = q.idx;
     if (selectedIdxs.has(q.idx)) tr.classList.add('selected');
@@ -247,7 +311,6 @@ function render() {
       tr.appendChild(td);
     }
 
-    // Delete button
     const tdDel = document.createElement('td');
     const btn = document.createElement('button');
     btn.className = 'log-delete-btn';
@@ -256,19 +319,13 @@ function render() {
     tdDel.appendChild(btn);
     tr.appendChild(tdDel);
 
-    frag.appendChild(tr);
-  }
-  tbody.innerHTML = '';
-  tbody.appendChild(frag);
+    return tr;
+  },
 
-  // Prune selection to only include QSOs still in filtered view
-  for (const idx of selectedIdxs) {
-    if (!filtered.some(q => q.idx === idx)) selectedIdxs.delete(idx);
-  }
-  updateResendLabel();
-
-  updateMap();
-}
+  // Force re-render (e.g. after selection change)
+  invalidate() { this.lastStart = -1; this.lastEnd = -1; this.renderVisible(); },
+};
+_virt.init();
 
 // --- Column sorting ---
 table.querySelectorAll('th[data-sort]').forEach(th => {
