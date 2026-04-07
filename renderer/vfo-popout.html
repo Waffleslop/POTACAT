@@ -1205,7 +1205,7 @@ async function loadCwMacros() {
   cancelBtn.addEventListener('click', () => window.api.cwCancel());
   row.appendChild(cancelBtn);
 }
-loadCwMacros();
+loadCwMacros().catch(e => console.error('[VFO] loadCwMacros error:', e));
 
 // --- Voice Macros ---
 let voicePlayingIdx = -1;
@@ -1277,11 +1277,11 @@ function stopVoicePlayback() {
   document.querySelectorAll('.voice-macro-btn.active').forEach(b => b.classList.remove('active'));
 }
 
-loadVoiceMacros();
+loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
 
 // --- Init ---
-loadProfiles();
-loadWidgets();
+loadProfiles().catch(e => console.error('[VFO] loadProfiles error:', e));
+loadWidgets().catch(e => console.error('[VFO] loadWidgets error:', e));
 </script>
 </body>
 </html>
