@@ -6084,12 +6084,14 @@ function createWindow() {
     settings.qsoPopoutOpen = !!(qsoPopoutWin && !qsoPopoutWin.isDestroyed());
     settings.spotsPopoutOpen = !!(spotsPopoutWin && !spotsPopoutWin.isDestroyed());
     settings.clusterPopoutOpen = !!(clusterPopoutWin && !clusterPopoutWin.isDestroyed());
+    settings.vfoPopoutOpen = !!(vfoPopoutWin && !vfoPopoutWin.isDestroyed());
     saveSettings(settings);
     if (popoutWin && !popoutWin.isDestroyed()) popoutWin.close();
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.close();
     if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) spotsPopoutWin.close();
     if (clusterPopoutWin && !clusterPopoutWin.isDestroyed()) clusterPopoutWin.close();
     if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) actmapPopoutWin.close();
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.close();
     if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.close();
   });
 
@@ -6165,6 +6167,10 @@ function createWindow() {
     // Auto-reopen cluster terminal if it was open when the app last closed
     if (settings.clusterPopoutOpen) {
       ipcMain.emit('cluster-popout-open');
+    }
+    // Auto-reopen VFO if it was open when the app last closed
+    if (settings.vfoPopoutOpen) {
+      ipcMain.emit('vfo-popout-open');
     }
   });
 }
