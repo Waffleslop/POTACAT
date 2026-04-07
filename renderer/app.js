@@ -117,6 +117,35 @@ let quickRespotTemplate = 'Heard strong in {QTH}; 73s {callsign} via POTACAT'; /
 let grid = ''; // home grid square for {QTH} template substitution
 let myCallsign = '';
 let lastTunedSpot = null; // last clicked/tuned spot for quick respot
+
+/** Send tuned spot info to VFO popout */
+function notifyVfoTunedSpot(spot) {
+  if (!spot) { window.api.vfoTunedSpot(null); return; }
+  // Check if multiple activators on same frequency
+  const sameFreq = allSpots.filter(s => s.frequency === spot.frequency);
+  if (sameFreq.length > 1) { window.api.vfoTunedSpot(null); return; }
+  // Send essential spot data + trigger QRZ lookup
+  const data = {
+    callsign: spot.callsign || '',
+    reference: spot.reference || '',
+    parkName: spot.parkName || '',
+    source: spot.source || '',
+  };
+  window.api.vfoTunedSpot(data);
+  // QRZ lookup for name/grid/country
+  if (spot.callsign) {
+    window.api.qrzLookup(spot.callsign).then(info => {
+      if (info) {
+        window.api.vfoTunedSpot({
+          ...data,
+          firstName: (info.nickname || info.fname || '').split(' ')[0],
+          grid: info.grid || '',
+          country: info.country || '',
+        });
+      }
+    }).catch(() => {});
+  }
+}
 let popoutOpen = false; // pop-out map window is open
 let qsoPopoutOpen = false; // pop-out QSO log window is open
 let spotsPopoutOpen = false; // pop-out spots window is open
@@ -4528,7 +4557,7 @@ function bindPopupClickHandlers(mapInstance) {
         if (!isNaN(lat) && !isNaN(lon)) showTuneArc(lat, lon, btn.dataset.freq, btn.dataset.source);
         // Find matching spot in allSpots for quick respot
         const match = allSpots.find(s => s.frequency === btn.dataset.freq && s.callsign && s.mode === btn.dataset.mode);
-        if (match) { lastTunedSpot = match; prefillDxCommand(match); }
+        if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); }
         // Activator mode: fill QSO form from spot
         if (appMode === 'activator' && activationActive && match) {
           fillActivatorFromSpot(match);
@@ -4621,6 +4650,7 @@ function scanStep() {
 
   const spot = list[scanIndex];
   lastTunedSpot = spot;
+  notifyVfoTunedSpot(spot);
   cwSpotWpm = spot.wpm || null;
   updateCwSpotWpm();
   prefillDxCommand(spot);
@@ -4700,6 +4730,7 @@ document.addEventListener('keydown', (e) => {
     }
     const spot = filtered[idx];
     lastTunedSpot = spot;
+    notifyVfoTunedSpot(spot);
     prefillDxCommand(spot);
     window.api.tune(spot.frequency, spot.mode, spot.bearing);
     if (spot.lat != null && spot.lon != null) showTuneArc(spot.lat, spot.lon, spot.frequency, spot.source);
@@ -5759,6 +5790,7 @@ function render() {
       tr.addEventListener('click', () => {
         if (scanning) stopScan(); // clicking a row stops scan
         lastTunedSpot = s;
+        notifyVfoTunedSpot(s);
         cwSpotWpm = s.wpm || null;
         updateCwSpotWpm();
         prefillDxCommand(s);

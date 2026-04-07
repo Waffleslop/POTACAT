@@ -7937,6 +7937,12 @@ app.whenReady().then(() => {
   ipcMain.on('vfo-popout-close', () => { if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.close(); });
 
   // VFO mode/filter commands from popout
+  ipcMain.on('vfo-tuned-spot', (_e, spot) => {
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+      vfoPopoutWin.webContents.send('vfo-tuned-spot', spot);
+    }
+  });
+
   ipcMain.on('vfo-set-mode', (_e, mode) => {
     if (!_currentFreqHz) return;
     _lastTuneFreq = 0; // reset rate limiter

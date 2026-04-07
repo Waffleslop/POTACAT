@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('api', {
   onActmapPopoutStatus: (cb) => ipcRenderer.on('actmap-popout-status', (_e, open) => cb(open)),
   // VFO pop-out
   vfoPopoutOpen: () => ipcRenderer.send('vfo-popout-open'),
+  vfoTunedSpot: (spot) => ipcRenderer.send('vfo-tuned-spot', spot),
   onVfoPopoutStatus: (cb) => ipcRenderer.on('vfo-popout-status', (_e, open) => cb(open)),
   // JTCAT pop-out
   jtcatPopoutOpen: () => ipcRenderer.send('jtcat-popout-open'),
