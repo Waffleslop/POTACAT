@@ -324,10 +324,10 @@
         <span class="meter-text" id="swr-text">&mdash;</span>
       </div>
     </div>
-    <div class="widget-section" id="widget-ptt">
+    <div class="widget-section" id="widget-ptt-row" style="display:none;">
       <div class="ptt-log-row">
-        <button class="ptt-btn" id="ptt-btn">PTT</button>
-        <button class="log-btn-vfo" id="log-btn-vfo">LOG</button>
+        <button class="ptt-btn" id="ptt-btn" style="display:none;">PTT</button>
+        <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
       </div>
     </div>
     <div class="widget-section" id="widget-cw">
@@ -441,9 +441,12 @@
     <div class="tab-pane" id="tab-settings">
       <div class="section-label">Widgets</div>
       <label class="settings-toggle"><input type="checkbox" id="w-smeter"> S-meter / SWR</label>
-      <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT / LOG Buttons</label>
-      <label class="settings-toggle" style="padding-left:28px;"><input type="checkbox" id="w-ptt-mic"> Route mic to radio during PTT</label>
+      <div style="display:flex;gap:16px;">
+        <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT</label>
+        <label class="settings-toggle"><input type="checkbox" id="w-log"> LOG</label>
+      </div>
       <div id="mic-select-row" style="padding-left:28px;padding-bottom:4px;display:none;">
+        <label style="font-size:11px;color:var(--text-dim);display:block;padding-bottom:2px;">Microphone</label>
         <select id="mic-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:12px;"></select>
       </div>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
@@ -1062,8 +1065,8 @@ function esc(s) {
 }
 
 // --- Widget visibility ---
-const WIDGETS = ['smeter', 'ptt', 'cw', 'voice'];
-let vfoWidgets = { smeter: false, ptt: false, cw: false, voice: false };
+const WIDGETS = ['smeter', 'ptt', 'log', 'cw', 'voice'];
+let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, voice: false };
 const SECTIONS = ['solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
 let vfoSections = { solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
@@ -1072,7 +1075,6 @@ async function loadWidgets() {
   if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
   if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
   if (s.vfoHiddenBands) vfoHiddenBands = s.vfoHiddenBands;
-  if (s.vfoPttMic != null) pttMicEnabled = s.vfoPttMic;
   if (s.vfoPttMicDevice) pttMicDeviceId = s.vfoPttMicDevice;
   applyWidgets();
   applySections();
@@ -1086,6 +1088,16 @@ function applyWidgets() {
     const el = document.getElementById('widget-' + w);
     if (el) el.classList.toggle('visible', !!vfoWidgets[w]);
   });
+  // PTT/LOG row: show if either is enabled, hide individual buttons
+  const pttRowEl = document.getElementById('widget-ptt-row');
+  const pttBtnEl = document.getElementById('ptt-btn');
+  const logBtnEl = document.getElementById('log-btn-vfo');
+  const eitherOn = vfoWidgets.ptt || vfoWidgets.log;
+  pttRowEl.style.display = eitherOn ? '' : 'none';
+  pttBtnEl.style.display = vfoWidgets.ptt ? '' : 'none';
+  logBtnEl.style.display = vfoWidgets.log ? '' : 'none';
+  micSelectRow.style.display = vfoWidgets.ptt ? '' : 'none';
+  if (vfoWidgets.ptt) populateMicDevices();
 }
 
 function applySections() {
@@ -1106,7 +1118,7 @@ async function saveWidgets() {
 // Settings tab widget toggles
 const wSmeter = document.getElementById('w-smeter');
 const wPtt = document.getElementById('w-ptt');
-const wPttMic = document.getElementById('w-ptt-mic');
+const wLog = document.getElementById('w-log');
 const wCw = document.getElementById('w-cw');
 const wVoice = document.getElementById('w-voice');
 const sSolar = document.getElementById('s-solar');
@@ -1120,9 +1132,7 @@ const sProfilesInline = document.getElementById('s-profiles-inline');
 function syncSettingsCheckboxes() {
   wSmeter.checked = !!vfoWidgets.smeter;
   wPtt.checked = !!vfoWidgets.ptt;
-  wPttMic.checked = pttMicEnabled;
-  micSelectRow.style.display = pttMicEnabled ? '' : 'none';
-  if (pttMicEnabled) populateMicDevices();
+  wLog.checked = !!vfoWidgets.log;
   wCw.checked = !!vfoWidgets.cw;
   wVoice.checked = !!vfoWidgets.voice;
   sSolar.checked = !!vfoSections.solar;
@@ -1134,10 +1144,11 @@ function syncSettingsCheckboxes() {
   sProfilesInline.checked = !!vfoSections['profiles-inline'];
 }
 
-[wSmeter, wPtt, wCw, wVoice].forEach(cb => {
+[wSmeter, wPtt, wLog, wCw, wVoice].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoWidgets.smeter = wSmeter.checked;
     vfoWidgets.ptt = wPtt.checked;
+    vfoWidgets.log = wLog.checked;
     vfoWidgets.cw = wCw.checked;
     vfoWidgets.voice = wVoice.checked;
     applyWidgets();
@@ -1148,13 +1159,6 @@ function syncSettingsCheckboxes() {
 const micSelectRow = document.getElementById('mic-select-row');
 const micSelect = document.getElementById('mic-select');
 let pttMicDeviceId = ''; // '' = system default
-
-wPttMic.addEventListener('change', () => {
-  pttMicEnabled = wPttMic.checked;
-  micSelectRow.style.display = pttMicEnabled ? '' : 'none';
-  if (pttMicEnabled) populateMicDevices();
-  window.api.saveSettings({ vfoPttMic: pttMicEnabled });
-});
 
 micSelect.addEventListener('change', () => {
   pttMicDeviceId = micSelect.value;
@@ -1261,7 +1265,6 @@ window.api.onSwrRatio((swr) => {
 // --- PTT ---
 const pttBtn = document.getElementById('ptt-btn');
 let pttDown = false;
-let pttMicEnabled = false; // route mic to radio TX during PTT
 let pttMicCtx = null;
 let pttMicStream = null;
 
@@ -1270,8 +1273,8 @@ async function pttStart() {
   pttDown = true;
   pttBtn.classList.add('active');
   pttBtn.textContent = 'TX';
-  // Start mic → radio TX if enabled
-  if (pttMicEnabled) {
+  // Start mic → radio TX
+  {
     try {
       const s = await window.api.getSettings();
       const micConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
