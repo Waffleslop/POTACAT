@@ -9543,6 +9543,71 @@ app.whenReady().then(() => {
                           String(now.getUTCSeconds()).padStart(2, '0');
           remoteServer.broadcastJtcatDecode({ ...data, sliceId: s.sliceId, band: s.band, time: timeStr });
         }
+        // Advance QSO state machine from this slice's decodes
+        // (same logic as single-engine path in startJtcat)
+        if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
+          popoutJtcatQso = null;
+          popoutBroadcastQso();
+        }
+        if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
+          remoteJtcatQso = null;
+          remoteJtcatBroadcastQso();
+        }
+        if (popoutJtcatQso && popoutJtcatQso.phase !== 'done') {
+          const phaseBefore = popoutJtcatQso.phase;
+          popoutJtcatQso._heardThisCycle = false;
+          processPopoutJtcatQso(data.results || []);
+          if (popoutJtcatQso && popoutJtcatQso.phase === phaseBefore && popoutJtcatQso.phase !== 'done') {
+            if (popoutJtcatQso._heardThisCycle) {
+              popoutJtcatQso.txRetries = 0;
+            } else {
+              popoutJtcatQso.txRetries = (popoutJtcatQso.txRetries || 0) + 1;
+              const max = (popoutJtcatQso.phase === 'cq') ? JTCAT_MAX_CQ_RETRIES : JTCAT_MAX_QSO_RETRIES;
+              if (popoutJtcatQso.txRetries >= max) {
+                console.log('[JTCAT Multi] Popout TX retry limit — giving up');
+                engine._txEnabled = false;
+                engine.setTxMessage('');
+                if (engine._txActive) engine.txComplete();
+                popoutJtcatQso = null;
+                popoutBroadcastQso();
+                if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+                  jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: 'No response — TX stopped' });
+                }
+              }
+            }
+          } else if (popoutJtcatQso && popoutJtcatQso.phase !== phaseBefore) {
+            popoutJtcatQso.txRetries = 0;
+          }
+          popoutBroadcastQso();
+        }
+        if (remoteJtcatQso && remoteJtcatQso.phase !== 'done') {
+          const phaseBefore = remoteJtcatQso.phase;
+          remoteJtcatQso._heardThisCycle = false;
+          processRemoteJtcatQso(data.results || []);
+          if (remoteJtcatQso && remoteJtcatQso.phase === phaseBefore && remoteJtcatQso.phase !== 'done') {
+            if (remoteJtcatQso._heardThisCycle) {
+              remoteJtcatQso.txRetries = 0;
+            } else {
+              remoteJtcatQso.txRetries = (remoteJtcatQso.txRetries || 0) + 1;
+              const max = (remoteJtcatQso.phase === 'cq') ? JTCAT_MAX_CQ_RETRIES : JTCAT_MAX_QSO_RETRIES;
+              if (remoteJtcatQso.txRetries >= max) {
+                console.log('[JTCAT Multi] Remote TX retry limit — giving up');
+                engine._txEnabled = false;
+                engine.setTxMessage('');
+                if (engine._txActive) engine.txComplete();
+                remoteJtcatQso = null;
+                remoteJtcatBroadcastQso();
+                if (remoteServer.hasClient()) {
+                  remoteServer.broadcastJtcatQsoState({ phase: 'error', error: 'No response — TX stopped' });
+                }
+              }
+            }
+          } else if (remoteJtcatQso && remoteJtcatQso.phase !== phaseBefore) {
+            remoteJtcatQso.txRetries = 0;
+          }
+          remoteJtcatBroadcastQso();
+        }
+
         // Smart TX scheduling — evaluate priority at each decode cycle
         const txWinner = jtcatManager.scheduleTx();
         if (txWinner) {
