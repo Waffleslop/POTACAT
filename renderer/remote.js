@@ -300,6 +300,7 @@
   let ft8UserScrolled = false; // true when user has scrolled up in decode log
   let ft8CqFilter = false;     // CQ-only filter
   let ft8WantedFilter = false; // Wanted-only filter (new DXCC/grid/call)
+  let ft8SortSignal = false;   // Sort decodes by signal strength
   let ft8TxFreqHz = 1500;      // TX frequency in Hz (for waterfall marker)
 
   // FT2 dial frequencies (kHz) per band — from IU8LMC published table
@@ -4704,7 +4705,9 @@
         log.appendChild(row);
       }
     } else {
-      results.forEach(d => {
+      // Sort by signal strength if enabled
+      var sortedResults = ft8SortSignal ? results.slice().sort((a, b) => (b.db || 0) - (a.db || 0)) : results;
+      sortedResults.forEach(d => {
         const text = d.text || '';
         const upper = text.toUpperCase();
         const isCq = upper.startsWith('CQ ');
@@ -5007,6 +5010,15 @@
     ft8WantedFilterBtn.addEventListener('click', () => {
       ft8WantedFilter = !ft8WantedFilter;
       ft8WantedFilterBtn.classList.toggle('active', ft8WantedFilter);
+    });
+  }
+
+  // Sort by signal strength toggle
+  var ft8SortSignalBtn = document.getElementById('ft8-sort-signal');
+  if (ft8SortSignalBtn) {
+    ft8SortSignalBtn.addEventListener('click', () => {
+      ft8SortSignal = !ft8SortSignal;
+      ft8SortSignalBtn.classList.toggle('active', ft8SortSignal);
     });
   }
 

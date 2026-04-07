@@ -20,6 +20,7 @@
   var decodeLog = [];
   var cqFilter = false;
   var wantedFilter = false;
+  var sortBySignal = false;
   var txEnabled = false;
   var transmitting = false;
   var jpTxFreqHz = 1500;
@@ -444,6 +445,11 @@
 
     var myActivityHasSep = false; // only add separator to My Activity if there's a directed decode
 
+    // Sort by signal strength if enabled (strongest first)
+    if (sortBySignal) {
+      results = results.slice().sort(function(a, b) { return (b.db || 0) - (a.db || 0); });
+    }
+
     results.forEach(function(d) {
       d.slot = decodeSlot; // attach slot so click handler knows which slot this station was on
       var text = d.text || '';
@@ -719,6 +725,12 @@
   wantedFilterBtn.addEventListener('click', function() {
     wantedFilter = !wantedFilter;
     wantedFilterBtn.classList.toggle('active', wantedFilter);
+  });
+
+  var sortSignalBtn = document.getElementById('jp-sort-signal');
+  sortSignalBtn.addEventListener('click', function() {
+    sortBySignal = !sortBySignal;
+    sortSignalBtn.classList.toggle('active', sortBySignal);
   });
 
   // --- Multi-slice ---
