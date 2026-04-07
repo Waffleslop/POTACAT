@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   sendCwText: (text) => ipcRenderer.send('send-cw-text', text),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
+  openLogForm: () => ipcRenderer.send('vfo-open-log'),
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),
   voiceMacroLoad: (idx) => ipcRenderer.invoke('voice-macro-load', idx),
   getSettings: () => ipcRenderer.invoke('get-settings'),

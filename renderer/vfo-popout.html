@@ -241,14 +241,22 @@
     }
     .meter-bar { height: 100%; width: 0%; transition: width 0.1s; border-radius: 2px; }
     .meter-text { font-size: 11px; font-family: monospace; min-width: 42px; text-align: right; }
+    .ptt-log-row { display: flex; gap: 6px; padding: 4px 0; }
     .ptt-btn {
-      display: block; width: 100%; padding: 10px; margin: 4px 0;
-      font-size: 16px; font-weight: bold; border: 2px solid #e94560;
-      background: var(--bg-btn); color: #e94560; border-radius: 6px; cursor: pointer;
+      flex: 3; padding: 10px;
+      font-size: 16px; font-weight: bold; border: 2px solid var(--accent-red);
+      background: var(--bg-btn); color: var(--accent-red); border-radius: 6px; cursor: pointer;
       text-align: center; user-select: none;
     }
     .ptt-btn:hover { background: var(--bg-btn-hover); }
-    .ptt-btn.active { background: #e94560; color: #fff; }
+    .ptt-btn.active { background: var(--accent-red); color: #fff; }
+    .log-btn-vfo {
+      flex: 1; padding: 10px;
+      font-size: 14px; font-weight: bold; border: 2px solid var(--accent-green);
+      background: var(--bg-btn); color: var(--accent-green); border-radius: 6px; cursor: pointer;
+      text-align: center; user-select: none;
+    }
+    .log-btn-vfo:hover { background: var(--bg-btn-hover); }
     .macro-row { display: flex; align-items: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
     .macro-label {
       font-size: 10px; font-weight: bold; color: var(--text-dimmer); text-transform: uppercase;
@@ -317,7 +325,10 @@
       </div>
     </div>
     <div class="widget-section" id="widget-ptt">
-      <button class="ptt-btn" id="ptt-btn">PTT</button>
+      <div class="ptt-log-row">
+        <button class="ptt-btn" id="ptt-btn">PTT</button>
+        <button class="log-btn-vfo" id="log-btn-vfo">LOG</button>
+      </div>
     </div>
     <div class="widget-section" id="widget-cw">
       <div class="macro-row"><span class="macro-label">CW</span><div class="cw-macro-row" id="cw-macro-row" style="display:contents"></div></div>
@@ -430,7 +441,7 @@
     <div class="tab-pane" id="tab-settings">
       <div class="section-label">Widgets</div>
       <label class="settings-toggle"><input type="checkbox" id="w-smeter"> S-meter / SWR</label>
-      <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT Button</label>
+      <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT / LOG Buttons</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
       <div class="section-label">Dial Sections</div>
@@ -1228,6 +1239,11 @@ function pttStop() {
 pttBtn.addEventListener('mousedown', (e) => { e.preventDefault(); pttStart(); });
 pttBtn.addEventListener('mouseup', (e) => { e.preventDefault(); pttStop(); });
 pttBtn.addEventListener('mouseleave', () => { if (pttDown) pttStop(); });
+
+// LOG button
+document.getElementById('log-btn-vfo').addEventListener('click', () => {
+  window.api.openLogForm();
+});
 
 // TX state from radio (external PTT)
 window.api.onTxState((state) => {

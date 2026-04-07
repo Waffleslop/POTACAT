@@ -7938,6 +7938,14 @@ app.whenReady().then(() => {
   ipcMain.on('vfo-popout-close', () => { if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.close(); });
 
   // VFO mode/filter commands from popout
+  ipcMain.on('vfo-open-log', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('open-log-form');
+      win.show();
+      win.focus();
+    }
+  });
+
   ipcMain.on('vfo-popout-theme', (_e, theme) => {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('vfo-popout-theme', theme);
   });

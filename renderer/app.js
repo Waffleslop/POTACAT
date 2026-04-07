@@ -11666,6 +11666,12 @@ window.api.onFreedvSync((data) => {
 window.api.onFreedvStatus(() => {});
 
 // Auto-start: main process detected FreeDV mode on tune
+// VFO LOG button → open log form with last tuned spot
+window.api.onOpenLogForm(() => {
+  if (lastTunedSpot) openLogPopup(lastTunedSpot);
+  else openQuickLog();
+});
+
 window.api.onFreedvAutoStart(async (mode) => {
   await startFreedvForMode(mode);
 });

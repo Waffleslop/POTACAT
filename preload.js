@@ -212,6 +212,7 @@ contextBridge.exposeInMainWorld('api', {
   onFreedvTxModem: (cb) => ipcRenderer.on('freedv-tx-modem', (_e, data) => cb(data)),
   onFreedvSync: (cb) => ipcRenderer.on('freedv-sync', (_e, data) => cb(data)),
   onFreedvStatus: (cb) => ipcRenderer.on('freedv-status', (_e, data) => cb(data)),
+  onOpenLogForm: (cb) => ipcRenderer.on('open-log-form', () => cb()),
   onFreedvAutoStart: (cb) => ipcRenderer.on('freedv-auto-start', (_e, mode) => cb(mode)),
   onFreedvAutoStop: (cb) => ipcRenderer.on('freedv-auto-stop', () => cb()),
   // Zoom
