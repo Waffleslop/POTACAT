@@ -380,6 +380,16 @@ function updateModeHighlight() {
 
 buildModeGrid();
 
+// Frequency display click → switch to keypad tab
+freqDisplay.addEventListener('click', () => {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="keypad"]').classList.add('active');
+  document.getElementById('tab-keypad').classList.add('active');
+  kpBuffer = '';
+  kpInput.value = '';
+});
+
 // Mode badge click → switch to mode tab
 modeBadge.addEventListener('click', () => {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
