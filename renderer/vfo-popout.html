@@ -296,8 +296,6 @@
       </div>
       <div class="section-label">Controls</div>
       <div class="step-row rig-toggles-shared"></div>
-      <div class="section-label" id="custom-cat-label" style="display:none">Custom Commands</div>
-      <div class="step-row" id="custom-cat-btns" style="flex-wrap:wrap"></div>
     </div>
 
     <!-- Keypad tab -->
@@ -616,24 +614,26 @@ function buildRigToggles() {
   });
 }
 buildRigToggles();
+// Custom CAT buttons injected after rig toggles since they share the same row
 
 // --- Custom CAT buttons ---
 let customCatButtons = [];
 
 function buildCustomCatBtns() {
-  const container = document.getElementById('custom-cat-btns');
-  const label = document.getElementById('custom-cat-label');
+  // Remove any previously injected custom buttons
+  document.querySelectorAll('.custom-cat-injected').forEach(el => el.remove());
   const btns = customCatButtons.filter(b => b.name && b.command);
-  if (btns.length === 0) { label.style.display = 'none'; container.innerHTML = ''; return; }
-  label.style.display = '';
-  container.innerHTML = '';
-  btns.forEach(b => {
-    const btn = document.createElement('button');
-    btn.className = 'cat-cmd-btn';
-    btn.textContent = b.name;
-    btn.title = b.command;
-    btn.addEventListener('click', () => window.api.sendCustomCat(b.command));
-    container.appendChild(btn);
+  if (btns.length === 0) return;
+  // Append custom CAT buttons into each rig-toggles-shared row
+  document.querySelectorAll('.rig-toggles-shared').forEach(row => {
+    btns.forEach(b => {
+      const btn = document.createElement('button');
+      btn.className = 'cat-cmd-btn custom-cat-injected';
+      btn.textContent = b.name;
+      btn.title = b.command;
+      btn.addEventListener('click', () => window.api.sendCustomCat(b.command));
+      row.appendChild(btn);
+    });
   });
 }
 buildCustomCatBtns();
