@@ -729,8 +729,12 @@
   var multiStartBtn = document.getElementById('jp-multi-start');
   var multiStopBtn = document.getElementById('jp-multi-stop');
   var multiActive = false;
-  var multiSliceConfigs = []; // [{sliceId, slicePort, band, audioDeviceId}]
+  var multiSliceConfigs = JSON.parse(localStorage.getItem('jtcat-multi-slices') || '[]');
   var audioDeviceList = []; // cached device list
+
+  function saveMultiSliceConfigs() {
+    localStorage.setItem('jtcat-multi-slices', JSON.stringify(multiSliceConfigs));
+  }
 
   var BAND_COLORS = {
     '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3',
@@ -743,12 +747,13 @@
   if (multiBtn) multiBtn.addEventListener('click', function() {
     multiPanel.classList.toggle('hidden');
     multiBtn.classList.toggle('active', !multiPanel.classList.contains('hidden'));
-    if (!multiPanel.classList.contains('hidden') && multiSliceConfigs.length === 0) {
-      // Default: 2 slices
-      multiSliceConfigs = [
-        { sliceId: 'slice-a', slicePort: 5002, band: '20m', audioDeviceId: '' },
-        { sliceId: 'slice-b', slicePort: 5003, band: '40m', audioDeviceId: '' },
-      ];
+    if (!multiPanel.classList.contains('hidden')) {
+      if (multiSliceConfigs.length === 0) {
+        multiSliceConfigs = [
+          { sliceId: 'slice-a', slicePort: 5002, band: '20m', audioDeviceId: '' },
+          { sliceId: 'slice-b', slicePort: 5003, band: '40m', audioDeviceId: '' },
+        ];
+      }
       refreshAudioDevices();
     }
   });
@@ -779,6 +784,7 @@
       sliceSel.addEventListener('change', function() {
         cfg.slicePort = parseInt(sliceSel.value, 10);
         cfg.sliceId = 'slice-' + SLICE_NAMES[cfg.slicePort].toLowerCase();
+        saveMultiSliceConfigs();
       });
       row.appendChild(sliceSel);
 
@@ -792,7 +798,7 @@
         if (b === cfg.band) opt.selected = true;
         bandSel.appendChild(opt);
       });
-      bandSel.addEventListener('change', function() { cfg.band = bandSel.value; });
+      bandSel.addEventListener('change', function() { cfg.band = bandSel.value; saveMultiSliceConfigs(); });
       row.appendChild(bandSel);
 
       // Audio device selector
@@ -810,7 +816,7 @@
         if (d.deviceId === cfg.audioDeviceId) opt.selected = true;
         audioSel.appendChild(opt);
       });
-      audioSel.addEventListener('change', function() { cfg.audioDeviceId = audioSel.value; });
+      audioSel.addEventListener('change', function() { cfg.audioDeviceId = audioSel.value; saveMultiSliceConfigs(); });
       row.appendChild(audioSel);
 
       // Remove button
@@ -820,6 +826,7 @@
       delBtn.style.cssText = 'font-size:12px;color:#e94560;background:none;border:none;cursor:pointer;padding:0 4px;';
       delBtn.addEventListener('click', function() {
         multiSliceConfigs.splice(idx, 1);
+        saveMultiSliceConfigs();
         renderMultiSlices();
       });
       row.appendChild(delBtn);
@@ -834,6 +841,7 @@
     var usedBands = multiSliceConfigs.map(function(c) { return c.band; });
     var nextBand = Object.keys(BAND_FREQS).find(function(b) { return usedBands.indexOf(b) === -1; }) || '20m';
     multiSliceConfigs.push({ sliceId: 'slice-' + SLICE_NAMES[nextPort].toLowerCase(), slicePort: nextPort, band: nextBand, audioDeviceId: '' });
+    saveMultiSliceConfigs();
     renderMultiSlices();
   });
 
