@@ -9559,7 +9559,7 @@ app.whenReady().then(() => {
     if (!settings.qrzApiKey) return { ok: false, error: 'QRZ API key not configured' };
     try {
       sendCatLog('[QRZ] Downloading logbook...');
-      const adifText = await QrzClient.fetchLogbook(settings.qrzApiKey, settings.myCallsign || '');
+      const adifText = await QrzClient.fetchLogbook(settings.qrzApiKey, settings.myCallsign || '', (msg) => sendCatLog(msg));
       if (!adifText) return { ok: true, imported: 0, message: 'QRZ logbook is empty' };
 
       // Parse downloaded ADIF records
