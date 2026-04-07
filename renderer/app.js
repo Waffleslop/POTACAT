@@ -137,9 +137,13 @@ function notifyVfoTunedSpot(spot) {
   if (spot.callsign) {
     window.api.qrzLookup(spot.callsign).then(info => {
       if (info) {
+        // Build display name: "Nickname Last" or "First Last"
+        const first = (info.nickname || info.fname || '').trim();
+        const last = (info.name || '').trim();
+        const displayName = [first, last].filter(Boolean).join(' ');
         window.api.vfoTunedSpot({
           ...data,
-          firstName: (info.nickname || info.fname || '').split(' ')[0],
+          displayName,
           grid: info.grid || '',
           country: info.country || '',
         });

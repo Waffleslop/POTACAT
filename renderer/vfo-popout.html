@@ -97,8 +97,9 @@
     .step-btn.active { background: #4fc3f7; color: #1a1a2e; border-color: var(--accent-blue); }
     .op-info {
       font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.5;
-      padding: 0 2px; max-width: 100%;
+      padding: 0 2px; max-width: 100%; margin-bottom: 6px;
     }
+    .op-info:empty { margin-bottom: 0; }
     .op-call { color: var(--accent-blue); font-weight: bold; font-size: 20px; font-family: 'Consolas', monospace; }
     .op-detail { color: var(--text-secondary); font-size: 13px; }
     .op-ref { color: var(--accent-green); font-weight: bold; font-size: 14px; }
@@ -338,19 +339,21 @@
   <div class="tab-content">
     <!-- Dial tab -->
     <div class="tab-pane active" id="tab-dial">
-      <div style="display:flex;align-items:flex-end;justify-content:center;gap:8px;">
+      <div style="display:flex;align-items:stretch;justify-content:center;gap:8px;">
         <div class="dial-wrap">
           <canvas id="vfo-dial" width="200" height="200"></canvas>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;padding-bottom:2px;min-width:80px;">
-          <div class="op-info" id="op-info"></div>
-          <div class="vfo-section solar-pills" id="sec-solar">
-            <div class="solar-pill" title="Solar Flux Index"><span class="solar-label">SFI</span><span class="solar-val" id="sv-sfi">--</span></div>
-            <div class="solar-pill" title="K-Index"><span class="solar-label">K</span><span class="solar-val" id="sv-k">--</span></div>
-            <div class="solar-pill" title="A-Index"><span class="solar-label">A</span><span class="solar-val" id="sv-a">--</span></div>
-          </div>
-          <div class="vfo-section" id="sec-step">
-            <select id="step-select" style="background:var(--bg-btn);border:1px solid var(--border);color:var(--accent-blue);padding:4px 6px;border-radius:4px;font-size:11px;cursor:pointer;"></select>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;min-width:90px;">
+          <div class="op-info" id="op-info" style="padding-top:4px;"></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding-bottom:2px;">
+            <div class="vfo-section solar-pills" id="sec-solar">
+              <div class="solar-pill" title="Solar Flux Index"><span class="solar-label">SFI</span><span class="solar-val" id="sv-sfi">--</span></div>
+              <div class="solar-pill" title="K-Index"><span class="solar-label">K</span><span class="solar-val" id="sv-k">--</span></div>
+              <div class="solar-pill" title="A-Index"><span class="solar-label">A</span><span class="solar-val" id="sv-a">--</span></div>
+            </div>
+            <div class="vfo-section" id="sec-step">
+              <select id="step-select" style="background:var(--bg-btn);border:1px solid var(--border);color:var(--accent-blue);padding:4px 6px;border-radius:4px;font-size:11px;cursor:pointer;"></select>
+            </div>
           </div>
         </div>
       </div>
@@ -1444,13 +1447,20 @@ window.api.onTunedSpot((spot) => {
     return;
   }
   let html = '<span class="op-call">' + esc(spot.callsign) + '</span>';
-  const details = [];
-  if (spot.firstName) details.push(spot.firstName);
-  if (spot.grid) details.push(spot.grid);
-  if (spot.country) details.push(spot.country);
-  if (details.length) html += '<br><span class="op-detail">' + esc(details.join(' / ')) + '</span>';
+  // Name: "Nickname Last" or "First Last"
+  if (spot.displayName) {
+    html += '<br><span class="op-detail">' + esc(spot.displayName) + '</span>';
+  }
+  // Country + Grid on one line
+  const locParts = [];
+  if (spot.country) {
+    locParts.push(spot.country === 'United States' ? 'USA' : spot.country);
+  }
+  if (spot.grid) locParts.push(spot.grid);
+  if (locParts.length) html += '<br><span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
+  // Park ref + name
   if (spot.reference) html += '<br><span class="op-ref">' + esc(spot.reference) + '</span>';
-  if (spot.parkName) html += ' <span class="op-detail">' + esc(spot.parkName) + '</span>';
+  if (spot.parkName) html += '<br><span class="op-detail">' + esc(spot.parkName) + '</span>';
   opInfoEl.innerHTML = html;
 });
 
