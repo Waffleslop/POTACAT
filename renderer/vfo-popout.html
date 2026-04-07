@@ -169,6 +169,16 @@
     .settings-toggle input[type="checkbox"] {
       width: 18px; height: 18px; accent-color: #4fc3f7; cursor: pointer;
     }
+    .band-checkboxes {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 8px;
+    }
+    .band-checkboxes label {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 13px; color: #ccc; padding: 3px 0; cursor: pointer;
+    }
+    .band-checkboxes input[type="checkbox"] {
+      width: 16px; height: 16px; accent-color: #4fc3f7; cursor: pointer;
+    }
 
     /* --- Widgets (S-meter, PTT, CW macros) --- */
     .widget-area { padding: 0 8px; }
@@ -367,6 +377,8 @@
       <label class="settings-toggle"><input type="checkbox" id="s-filter" checked> Filter</label>
       <label class="settings-toggle"><input type="checkbox" id="s-controls" checked> Controls</label>
       <label class="settings-toggle"><input type="checkbox" id="s-profiles-inline"> Profiles (inline)</label>
+      <div class="section-label">Quick Bands</div>
+      <div class="band-checkboxes" id="band-checkboxes"></div>
     </div>
   </div>
 
@@ -484,6 +496,7 @@ function freqToBand(hz) {
 function buildBandGrid(container) {
   container.innerHTML = '';
   for (const b of BANDS) {
+    if (vfoHiddenBands.includes(b.label)) continue;
     const btn = document.createElement('button');
     btn.className = 'band-btn';
     btn.textContent = b.label;
@@ -493,6 +506,11 @@ function buildBandGrid(container) {
     });
     container.appendChild(btn);
   }
+}
+
+function rebuildAllBandGrids() {
+  buildBandGrid(document.getElementById('band-grid-dial'));
+  updateBandHighlight();
 }
 
 function updateBandHighlight() {
@@ -968,13 +986,17 @@ const WIDGETS = ['smeter', 'ptt', 'cw', 'voice'];
 let vfoWidgets = { smeter: false, ptt: false, cw: false, voice: false };
 const SECTIONS = ['step', 'band', 'filter', 'controls', 'profiles-inline'];
 let vfoSections = { step: true, band: true, filter: true, controls: true, 'profiles-inline': false };
+let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
 
 async function loadWidgets() {
   const s = await window.api.getSettings();
   if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
   if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
+  if (s.vfoHiddenBands) vfoHiddenBands = s.vfoHiddenBands;
   applyWidgets();
   applySections();
+  rebuildAllBandGrids();
+  buildBandCheckboxes();
   syncSettingsCheckboxes();
 }
 
@@ -997,7 +1019,7 @@ function applySections() {
 }
 
 async function saveWidgets() {
-  await window.api.saveSettings({ vfoWidgets, vfoSections });
+  await window.api.saveSettings({ vfoWidgets, vfoSections, vfoHiddenBands });
 }
 
 // Settings tab widget toggles
@@ -1045,6 +1067,30 @@ function syncSettingsCheckboxes() {
     saveWidgets();
   });
 });
+
+// --- Band checkboxes in Settings ---
+function buildBandCheckboxes() {
+  const container = document.getElementById('band-checkboxes');
+  container.innerHTML = '';
+  BANDS.forEach(b => {
+    const lbl = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !vfoHiddenBands.includes(b.label);
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        vfoHiddenBands = vfoHiddenBands.filter(x => x !== b.label);
+      } else {
+        if (!vfoHiddenBands.includes(b.label)) vfoHiddenBands.push(b.label);
+      }
+      rebuildAllBandGrids();
+      saveWidgets();
+    });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(b.label));
+    container.appendChild(lbl);
+  });
+}
 
 // --- S-meter ---
 const smeterBar = document.getElementById('smeter-bar');
