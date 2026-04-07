@@ -7011,7 +7011,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     return;
   }
 
-  if (!cat || !cat.connected) return;
+  if (!cat || !cat.connected) {
+    sendCatLog('tune ignored — no radio connected. Check Settings → My Rigs.');
+    return;
+  }
 
   // CW XIT: use native TX CLAR commands if radio supports them (Yaesu XT/RU/RD),
   // otherwise fall back to shifting the VFO frequency
@@ -8184,6 +8187,10 @@ app.whenReady().then(() => {
       const filterWidth = settings.digitalFilterWidth || 0;
       sendCatLog(`JTCAT tune via SmartSDR: slice=${String.fromCharCode(65 + sliceIndex)} freq=${(freqHz / 1e6).toFixed(6)}MHz mode=${flexMode}`);
       smartSdr.tuneSlice(sliceIndex, freqHz / 1e6, flexMode, filterWidth);
+      // Ensure TX is routed to this slice (prevents TX going to a different slice
+      // that was last used by WSJT-X or another app)
+      smartSdr.setTxSlice(sliceIndex);
+      smartSdr.setActiveSlice(sliceIndex);
     } else {
       tuneRadio(frequency, mode, bearing);
     }
