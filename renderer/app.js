@@ -11832,7 +11832,8 @@ document.querySelectorAll('.collapsible-legend').forEach(legend => {
 document.getElementById('hotkeys-dialog-close').addEventListener('click', () => {
   document.getElementById('hotkeys-dialog').close();
 });
-document.getElementById('hotkeys-hint').addEventListener('click', () => {
+const hotkeysHint = document.getElementById('hotkeys-hint');
+if (hotkeysHint) hotkeysHint.addEventListener('click', () => {
   document.getElementById('hotkeys-dialog').showModal();
 });
 document.getElementById('hotkeys-link').addEventListener('click', (e) => {
