@@ -117,6 +117,7 @@ let quickRespotTemplate = 'Heard strong in {QTH}; 73s {callsign} via POTACAT'; /
 let grid = ''; // home grid square for {QTH} template substitution
 let myCallsign = '';
 let lastTunedSpot = null; // last clicked/tuned spot for quick respot
+let activatorSettingsPanelOpen = false; // hoisted to avoid TDZ in closeActivatorSettingsPanel()
 
 /** Send tuned spot info to VFO popout */
 function notifyVfoTunedSpot(spot) {
@@ -12417,7 +12418,6 @@ document.getElementById('activator-logbook-btn').addEventListener('click', () =>
 });
 
 const activatorSettingsPanel = settingsDropdown.querySelector('.settings-dropdown-panel');
-let activatorSettingsPanelOpen = false;
 
 function closeActivatorSettingsPanel() {
   if (!activatorSettingsPanelOpen) return;
