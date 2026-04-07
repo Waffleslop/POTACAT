@@ -324,7 +324,7 @@
         <span class="meter-text" id="swr-text">&mdash;</span>
       </div>
     </div>
-    <div class="widget-section" id="widget-ptt-row" style="display:none;">
+    <div class="widget-section" id="widget-ptt-row">
       <div class="ptt-log-row">
         <button class="ptt-btn" id="ptt-btn" style="display:none;">PTT</button>
         <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
@@ -1085,6 +1085,7 @@ async function loadWidgets() {
 
 function applyWidgets() {
   WIDGETS.forEach(w => {
+    if (w === 'ptt' || w === 'log') return; // handled below
     const el = document.getElementById('widget-' + w);
     if (el) el.classList.toggle('visible', !!vfoWidgets[w]);
   });
@@ -1093,10 +1094,10 @@ function applyWidgets() {
   const pttBtnEl = document.getElementById('ptt-btn');
   const logBtnEl = document.getElementById('log-btn-vfo');
   const eitherOn = vfoWidgets.ptt || vfoWidgets.log;
-  pttRowEl.style.display = eitherOn ? '' : 'none';
+  pttRowEl.classList.toggle('visible', eitherOn);
   pttBtnEl.style.display = vfoWidgets.ptt ? '' : 'none';
   logBtnEl.style.display = vfoWidgets.log ? '' : 'none';
-  micSelectRow.style.display = vfoWidgets.ptt ? '' : 'none';
+  if (micSelectRow) micSelectRow.style.display = vfoWidgets.ptt ? '' : 'none';
   if (vfoWidgets.ptt) populateMicDevices();
 }
 
