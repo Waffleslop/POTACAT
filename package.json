@@ -42,6 +42,7 @@
       "preload-spots-popout.js",
       "preload-cluster-popout.js",
       "preload-jtcat-popout.js",
+      "preload-vfo-popout.js",
       "preload-remote-audio.js",
       "lib/**/*",
       "renderer/**/*",

@@ -147,6 +147,7 @@ let actmapPopoutWin = null; // pop-out activation map window
 let spotsPopoutWin = null; // pop-out spots window (activator mode)
 let clusterPopoutWin = null; // pop-out DX cluster terminal window
 let propPopoutWin = null;    // pop-out propagation map window
+let vfoPopoutWin = null;     // pop-out VFO window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let jtcatMapPopoutWin = null; // pop-out JTCAT map window
 let popoutJtcatQso = null;   // QSO state for popout (like remoteJtcatQso for ECHOCAT)
@@ -537,6 +538,9 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   _currentFreqHz = hz;
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+    vfoPopoutWin.webContents.send('vfo-radio-state', { freq: hz, mode: _currentMode, filterWidth: _currentFilterWidth });
+  }
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
 }
@@ -547,6 +551,9 @@ function sendCatMode(mode) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
   _currentMode = mode; // keep real mode internally for CAT
   _modeSuppressUntil = 0;
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+    vfoPopoutWin.webContents.send('vfo-radio-state', { freq: _currentFreqHz, mode, filterWidth: _currentFilterWidth });
+  }
   broadcastRigState();
   sendN1mmRadioInfo();
 }
@@ -7855,6 +7862,69 @@ app.whenReady().then(() => {
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  // --- VFO Pop-out Window ---
+  ipcMain.on('vfo-popout-open', () => {
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) { vfoPopoutWin.focus(); return; }
+    vfoPopoutWin = new BrowserWindow({
+      width: 340, height: 560, title: 'VFO',
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-vfo-popout.js'),
+        contextIsolation: true, nodeIntegration: false,
+      },
+    });
+    const saved = settings.vfoPopoutBounds;
+    if (saved && saved.width > 200 && saved.height > 150 && isOnScreen(saved)) {
+      vfoPopoutWin.setBounds(clampToWorkArea(saved));
+    }
+    vfoPopoutWin.show();
+    vfoPopoutWin.setMenuBarVisibility(false);
+    vfoPopoutWin.loadFile(path.join(__dirname, 'renderer', 'vfo-popout.html'));
+    vfoPopoutWin.webContents.on('did-finish-load', () => {
+      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+        vfoPopoutWin.webContents.send('vfo-radio-state', {
+          freq: _currentFreqHz || 0,
+          mode: _currentMode || '',
+          filterWidth: _currentFilterWidth || 0,
+        });
+      }
+    });
+    vfoPopoutWin.on('close', () => {
+      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed() && !vfoPopoutWin.isMaximized() && !vfoPopoutWin.isMinimized()) {
+        settings.vfoPopoutBounds = vfoPopoutWin.getBounds();
+        saveSettings(settings);
+      }
+    });
+    vfoPopoutWin.on('closed', () => {
+      vfoPopoutWin = null;
+      if (win && !win.isDestroyed()) win.webContents.send('vfo-popout-status', false);
+    });
+    if (win && !win.isDestroyed()) win.webContents.send('vfo-popout-status', true);
+    vfoPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') vfoPopoutWin.webContents.toggleDevTools();
+    });
+  });
+  ipcMain.on('vfo-popout-minimize', () => { if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.minimize(); });
+  ipcMain.on('vfo-popout-maximize', () => {
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+      vfoPopoutWin.isMaximized() ? vfoPopoutWin.unmaximize() : vfoPopoutWin.maximize();
+    }
+  });
+  ipcMain.on('vfo-popout-close', () => { if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.close(); });
+
+  // VFO mode/filter commands from popout
+  ipcMain.on('vfo-set-mode', (_e, mode) => {
+    if (!_currentFreqHz) return;
+    _lastTuneFreq = 0; // reset rate limiter
+    tuneRadio(_currentFreqHz / 1000, mode);
+  });
+  ipcMain.on('vfo-set-filter-width', (_e, hz) => {
+    if (cat && cat.connected) cat.setFilterWidth(hz);
+    _currentFilterWidth = hz;
   });
 
   // --- JTCAT Pop-out Window ---

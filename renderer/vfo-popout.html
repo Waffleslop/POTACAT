@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>VFO</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #1a1a2e; color: #e0e0e0;
+      overflow: hidden; user-select: none;
+      display: flex; flex-direction: column; height: 100vh;
+    }
+
+    /* --- Title bar (frameless) --- */
+    .titlebar {
+      display: flex; align-items: center; justify-content: space-between;
+      background: #16213e; padding: 4px 8px; -webkit-app-region: drag;
+      font-size: 12px; color: #8888aa; min-height: 28px;
+    }
+    .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 4px; }
+    .titlebar-btns button {
+      background: none; border: none; color: #8888aa; font-size: 14px;
+      cursor: pointer; padding: 2px 6px; border-radius: 3px;
+    }
+    .titlebar-btns button:hover { background: #2a2a4a; color: #fff; }
+    .titlebar-btns .close-btn:hover { background: #e94560; color: #fff; }
+
+    /* --- Frequency display --- */
+    .freq-row {
+      display: flex; align-items: baseline; justify-content: center;
+      padding: 12px 16px 4px; gap: 6px;
+    }
+    .freq-display {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 36px; font-weight: bold; color: #4fc3f7;
+      letter-spacing: 1px; cursor: pointer;
+    }
+    .freq-display.editing { color: #f0a500; }
+    .freq-unit { font-size: 14px; color: #666; }
+    .mode-badge {
+      font-size: 14px; font-weight: bold; padding: 2px 10px;
+      border-radius: 10px; background: #2a2a4a; color: #4ecca3;
+      cursor: pointer;
+    }
+    .filter-badge {
+      font-size: 11px; color: #888; cursor: pointer;
+    }
+
+    /* --- Tabs --- */
+    .tabs {
+      display: flex; gap: 0; padding: 0 8px; border-bottom: 1px solid #2a2a4a;
+    }
+    .tab-btn {
+      background: none; border: none; color: #666; font-size: 12px;
+      padding: 6px 14px; cursor: pointer; border-bottom: 2px solid transparent;
+    }
+    .tab-btn.active { color: #4fc3f7; border-bottom-color: #4fc3f7; }
+    .tab-btn:hover { color: #aaa; }
+
+    /* --- Tab content --- */
+    .tab-content { flex: 1; overflow-y: auto; padding: 8px; }
+    .tab-pane { display: none; height: 100%; }
+    .tab-pane.active { display: flex; flex-direction: column; }
+
+    /* --- VFO Dial tab --- */
+    .dial-wrap { display: flex; justify-content: center; padding: 8px 0; }
+    .step-row { display: flex; justify-content: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
+    .step-btn {
+      background: #2a2a4a; border: 1px solid #3a3a5a; color: #aaa;
+      padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
+    }
+    .step-btn.active { background: #4fc3f7; color: #1a1a2e; border-color: #4fc3f7; }
+
+    /* --- Keypad tab --- */
+    .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 260px; margin: 0 auto; padding: 8px 0; }
+    .kp-btn {
+      background: #2a2a4a; border: 1px solid #3a3a5a; color: #e0e0e0;
+      font-size: 20px; padding: 14px 0; border-radius: 6px; cursor: pointer;
+      text-align: center;
+    }
+    .kp-btn:hover { background: #3a3a5a; }
+    .kp-btn:active { background: #4a4a6a; }
+    .kp-btn.kp-action { font-size: 14px; font-weight: bold; }
+    .kp-btn.kp-go { background: #4ecca3; color: #1a1a2e; border-color: #4ecca3; }
+    .kp-btn.kp-clear { background: #e94560; color: #fff; border-color: #e94560; }
+    .kp-input {
+      grid-column: 1 / -1; text-align: center; font-family: 'Consolas', monospace;
+      font-size: 24px; background: #0d0d1a; border: 1px solid #3a3a5a;
+      color: #f0a500; padding: 8px; border-radius: 4px;
+    }
+
+    /* --- Mode tab --- */
+    .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 0; }
+    .mode-btn {
+      background: #2a2a4a; border: 1px solid #3a3a5a; color: #ccc;
+      padding: 10px 4px; border-radius: 6px; font-size: 13px; cursor: pointer;
+      text-align: center; font-weight: bold;
+    }
+    .mode-btn:hover { background: #3a3a5a; }
+    .mode-btn.active { background: #4ecca3; color: #1a1a2e; border-color: #4ecca3; }
+
+    .section-label { font-size: 11px; color: #666; padding: 8px 0 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+    /* --- Band buttons --- */
+    .band-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 4px 0; }
+    .band-btn {
+      background: #2a2a4a; border: 1px solid #3a3a5a; color: #aaa;
+      padding: 6px 2px; border-radius: 4px; font-size: 12px; cursor: pointer;
+      text-align: center;
+    }
+    .band-btn:hover { background: #3a3a5a; }
+    .band-btn.active { background: #4fc3f7; color: #1a1a2e; border-color: #4fc3f7; }
+
+    /* --- Filter width --- */
+    .filter-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+    .filter-row label { font-size: 12px; color: #888; white-space: nowrap; }
+    .filter-row input[type="range"] { flex: 1; accent-color: #4fc3f7; }
+    .filter-row .filter-val { font-size: 12px; color: #4fc3f7; min-width: 50px; text-align: right; font-family: monospace; }
+
+    /* --- Profiles tab --- */
+    .profile-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; flex: 1; overflow-y: auto; }
+    .profile-item {
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      background: #2a2a4a; border: 1px solid #3a3a5a; border-radius: 6px; cursor: pointer;
+    }
+    .profile-item:hover { background: #3a3a5a; }
+    .profile-name { font-weight: bold; color: #e0e0e0; flex: 1; }
+    .profile-detail { font-size: 11px; color: #888; font-family: monospace; }
+    .profile-del {
+      background: none; border: none; color: #666; font-size: 16px;
+      cursor: pointer; padding: 0 4px;
+    }
+    .profile-del:hover { color: #e94560; }
+    .profile-add-row {
+      display: flex; gap: 6px; padding: 8px 0;
+    }
+    .profile-add-row input {
+      flex: 1; background: #0d0d1a; border: 1px solid #3a3a5a; color: #e0e0e0;
+      padding: 6px 8px; border-radius: 4px; font-size: 13px;
+    }
+    .profile-add-row button {
+      background: #4ecca3; color: #1a1a2e; border: none; padding: 6px 14px;
+      border-radius: 4px; font-size: 13px; font-weight: bold; cursor: pointer;
+    }
+    .profile-add-row button:hover { background: #3ba882; }
+    .profile-empty { text-align: center; color: #555; padding: 20px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <!-- Titlebar -->
+  <div class="titlebar">
+    <span>VFO</span>
+    <div class="titlebar-btns">
+      <button onclick="window.api.minimize()">&#x2013;</button>
+      <button onclick="window.api.maximize()">&#x25A1;</button>
+      <button class="close-btn" onclick="window.api.close()">&#x2715;</button>
+    </div>
+  </div>
+
+  <!-- Frequency + mode display -->
+  <div class="freq-row">
+    <span class="freq-display" id="freq-display" title="Click to type frequency">---.---.---</span>
+    <span class="freq-unit">kHz</span>
+  </div>
+  <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 6px;">
+    <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
+    <span class="filter-badge" id="filter-badge"></span>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="dial">Dial</button>
+    <button class="tab-btn" data-tab="keypad">Keypad</button>
+    <button class="tab-btn" data-tab="mode">Mode</button>
+    <button class="tab-btn" data-tab="profiles">Profiles</button>
+  </div>
+
+  <!-- Tab content -->
+  <div class="tab-content">
+    <!-- Dial tab -->
+    <div class="tab-pane active" id="tab-dial">
+      <div class="dial-wrap">
+        <canvas id="vfo-dial" width="200" height="200"></canvas>
+      </div>
+      <div class="step-row" id="step-row"></div>
+      <div class="section-label">Quick Band</div>
+      <div class="band-grid" id="band-grid-dial"></div>
+    </div>
+
+    <!-- Keypad tab -->
+    <div class="tab-pane" id="tab-keypad">
+      <div class="keypad">
+        <input type="text" class="kp-input" id="kp-input" placeholder="MHz" readonly>
+        <button class="kp-btn" data-digit="1">1</button>
+        <button class="kp-btn" data-digit="2">2</button>
+        <button class="kp-btn" data-digit="3">3</button>
+        <button class="kp-btn" data-digit="4">4</button>
+        <button class="kp-btn" data-digit="5">5</button>
+        <button class="kp-btn" data-digit="6">6</button>
+        <button class="kp-btn" data-digit="7">7</button>
+        <button class="kp-btn" data-digit="8">8</button>
+        <button class="kp-btn" data-digit="9">9</button>
+        <button class="kp-btn kp-action kp-clear" id="kp-clear">CLR</button>
+        <button class="kp-btn" data-digit="0">0</button>
+        <button class="kp-btn kp-action kp-go" id="kp-go">GO</button>
+      </div>
+      <div style="text-align:center; padding:6px; font-size:11px; color:#666;">
+        Enter frequency in MHz (e.g. 14.025)
+      </div>
+    </div>
+
+    <!-- Mode tab -->
+    <div class="tab-pane" id="tab-mode">
+      <div class="section-label">Mode</div>
+      <div class="mode-grid" id="mode-grid"></div>
+      <div class="section-label">Band</div>
+      <div class="band-grid" id="band-grid-mode"></div>
+      <div class="section-label">Filter Width</div>
+      <div class="filter-row">
+        <label>BW</label>
+        <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400">
+        <span class="filter-val" id="filter-val">2400 Hz</span>
+      </div>
+    </div>
+
+    <!-- Profiles tab -->
+    <div class="tab-pane" id="tab-profiles">
+      <div class="profile-add-row">
+        <input type="text" id="profile-name-input" placeholder="Profile name (e.g. 20m CW)">
+        <button id="profile-save-btn">Save Current</button>
+      </div>
+      <div class="profile-list" id="profile-list">
+        <div class="profile-empty">No profiles yet. Tune to a frequency and save it above.</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// --- State ---
+let currentFreqHz = 0;
+let currentMode = '';
+let currentFilterWidth = 0;
+let profiles = [];
+
+const freqDisplay = document.getElementById('freq-display');
+const modeBadge = document.getElementById('mode-badge');
+const filterBadge = document.getElementById('filter-badge');
+
+// --- Tabs ---
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// --- Frequency display ---
+function formatFreqKhz(hz) {
+  if (!hz) return '---.---.---';
+  const khz = hz / 1000;
+  const mhz = Math.floor(khz / 1000);
+  const rem = (khz % 1000).toFixed(2).padStart(6, '0');
+  return `${mhz}.${rem.slice(0, 3)}.${rem.slice(3)}`;
+}
+
+function updateDisplay() {
+  freqDisplay.textContent = formatFreqKhz(currentFreqHz);
+  modeBadge.textContent = currentMode || '---';
+  if (currentFilterWidth > 0) {
+    filterBadge.textContent = currentFilterWidth >= 1000
+      ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
+      : currentFilterWidth + ' Hz';
+  } else {
+    filterBadge.textContent = '';
+  }
+  updateBandHighlight();
+}
+
+// --- Radio state from main process ---
+window.api.onRadioState((s) => {
+  if (s.freq) currentFreqHz = s.freq;
+  if (s.mode) currentMode = s.mode;
+  if (s.filterWidth != null) currentFilterWidth = s.filterWidth;
+  updateDisplay();
+  updateModeHighlight();
+});
+
+// --- Bands ---
+const BANDS = [
+  { label: '160m', freq: 1800 },
+  { label: '80m', freq: 3500 },
+  { label: '60m', freq: 5332 },
+  { label: '40m', freq: 7000 },
+  { label: '30m', freq: 10100 },
+  { label: '20m', freq: 14000 },
+  { label: '17m', freq: 18068 },
+  { label: '15m', freq: 21000 },
+  { label: '12m', freq: 24890 },
+  { label: '10m', freq: 28000 },
+  { label: '6m', freq: 50000 },
+  { label: '2m', freq: 144000 },
+  { label: '70cm', freq: 420000 },
+];
+
+function freqToBand(hz) {
+  const khz = hz / 1000;
+  for (const b of BANDS) {
+    if (b.label === '160m' && khz >= 1800 && khz <= 2000) return b.label;
+    if (b.label === '80m' && khz >= 3500 && khz <= 4000) return b.label;
+    if (b.label === '60m' && khz >= 5300 && khz <= 5500) return b.label;
+    if (b.label === '40m' && khz >= 7000 && khz <= 7300) return b.label;
+    if (b.label === '30m' && khz >= 10100 && khz <= 10150) return b.label;
+    if (b.label === '20m' && khz >= 14000 && khz <= 14350) return b.label;
+    if (b.label === '17m' && khz >= 18068 && khz <= 18168) return b.label;
+    if (b.label === '15m' && khz >= 21000 && khz <= 21450) return b.label;
+    if (b.label === '12m' && khz >= 24890 && khz <= 24990) return b.label;
+    if (b.label === '10m' && khz >= 28000 && khz <= 29700) return b.label;
+    if (b.label === '6m' && khz >= 50000 && khz <= 54000) return b.label;
+    if (b.label === '2m' && khz >= 144000 && khz <= 148000) return b.label;
+    if (b.label === '70cm' && khz >= 420000 && khz <= 450000) return b.label;
+  }
+  return null;
+}
+
+function buildBandGrid(container) {
+  container.innerHTML = '';
+  for (const b of BANDS) {
+    const btn = document.createElement('button');
+    btn.className = 'band-btn';
+    btn.textContent = b.label;
+    btn.dataset.freq = b.freq;
+    btn.addEventListener('click', () => {
+      window.api.tune(b.freq);
+    });
+    container.appendChild(btn);
+  }
+}
+
+function updateBandHighlight() {
+  const cur = freqToBand(currentFreqHz);
+  document.querySelectorAll('.band-btn').forEach(btn => {
+    const b = BANDS.find(b => b.freq === parseInt(btn.dataset.freq));
+    btn.classList.toggle('active', b && b.label === cur);
+  });
+}
+
+buildBandGrid(document.getElementById('band-grid-dial'));
+buildBandGrid(document.getElementById('band-grid-mode'));
+
+// --- Modes ---
+const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU'];
+
+function buildModeGrid() {
+  const grid = document.getElementById('mode-grid');
+  grid.innerHTML = '';
+  for (const m of MODES) {
+    const btn = document.createElement('button');
+    btn.className = 'mode-btn';
+    btn.textContent = m;
+    btn.addEventListener('click', () => {
+      window.api.setMode(m);
+      currentMode = m;
+      updateModeHighlight();
+      updateDisplay();
+    });
+    grid.appendChild(btn);
+  }
+}
+
+function updateModeHighlight() {
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    const m = currentMode.toUpperCase();
+    const bm = btn.textContent;
+    btn.classList.toggle('active', bm === m || (bm === 'USB' && m === 'SSB') || (bm === 'LSB' && m === 'SSB'));
+  });
+}
+
+buildModeGrid();
+
+// Mode badge click → switch to mode tab
+modeBadge.addEventListener('click', () => {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="mode"]').classList.add('active');
+  document.getElementById('tab-mode').classList.add('active');
+});
+
+// --- Filter width slider ---
+const filterSlider = document.getElementById('filter-slider');
+const filterVal = document.getElementById('filter-val');
+let filterTimeout = null;
+
+filterSlider.addEventListener('input', () => {
+  const hz = parseInt(filterSlider.value);
+  filterVal.textContent = hz >= 1000 ? (hz / 1000).toFixed(1) + ' kHz' : hz + ' Hz';
+});
+
+filterSlider.addEventListener('change', () => {
+  const hz = parseInt(filterSlider.value);
+  currentFilterWidth = hz;
+  window.api.setFilterWidth(hz);
+  updateDisplay();
+});
+
+// --- Step sizes for VFO dial ---
+const STEPS = [
+  { label: '10 Hz', hz: 10 },
+  { label: '50 Hz', hz: 50 },
+  { label: '100 Hz', hz: 100 },
+  { label: '500 Hz', hz: 500 },
+  { label: '1 kHz', hz: 1000 },
+  { label: '5 kHz', hz: 5000 },
+  { label: '10 kHz', hz: 10000 },
+  { label: '25 kHz', hz: 25000 },
+];
+let stepIdx = 4; // default 1 kHz
+
+function buildStepRow() {
+  const row = document.getElementById('step-row');
+  row.innerHTML = '';
+  STEPS.forEach((s, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'step-btn' + (i === stepIdx ? ' active' : '');
+    btn.textContent = s.label;
+    btn.addEventListener('click', () => {
+      stepIdx = i;
+      row.querySelectorAll('.step-btn').forEach((b, j) => b.classList.toggle('active', j === i));
+    });
+    row.appendChild(btn);
+  });
+}
+buildStepRow();
+
+// --- VFO Dial (canvas) ---
+const canvas = document.getElementById('vfo-dial');
+const ctx = canvas.getContext('2d');
+const CX = canvas.width / 2, CY = canvas.height / 2;
+const HOUSING_R = 94, KNOB_R = 73;
+let vfoAngle = 0, vfoAccum = 0;
+const STEP_ANGLE = Math.PI / 6; // 30 deg per step
+
+function drawVfoDial() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Housing
+  ctx.beginPath(); ctx.arc(CX, CY + 1, HOUSING_R, 0, Math.PI * 2);
+  ctx.fillStyle = '#222233'; ctx.fill();
+  const hg = ctx.createLinearGradient(CX - HOUSING_R, CY - HOUSING_R, CX + HOUSING_R, CY + HOUSING_R);
+  hg.addColorStop(0, '#404058'); hg.addColorStop(0.5, '#2a2a3a'); hg.addColorStop(1, '#1a1a28');
+  ctx.beginPath(); ctx.arc(CX, CY, HOUSING_R, 0, Math.PI * 2);
+  ctx.fillStyle = hg; ctx.fill();
+  // Bevel
+  ctx.beginPath(); ctx.arc(CX, CY, HOUSING_R - 1, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5; ctx.stroke();
+  // Indicator
+  ctx.beginPath(); ctx.moveTo(CX, CY - HOUSING_R + 2); ctx.lineTo(CX, CY - HOUSING_R + 14);
+  ctx.strokeStyle = '#4ecca3'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
+
+  // Knob
+  const kg = ctx.createRadialGradient(CX - 10, CY - 10, 10, CX, CY, KNOB_R);
+  kg.addColorStop(0, '#4a4a62'); kg.addColorStop(0.7, '#353548'); kg.addColorStop(1, '#28283a');
+  ctx.beginPath(); ctx.arc(CX, CY, KNOB_R, 0, Math.PI * 2);
+  ctx.fillStyle = kg; ctx.fill();
+
+  // Grip ridges
+  const N_RIDGES = 48;
+  for (let i = 0; i < N_RIDGES; i++) {
+    const a = vfoAngle + (i / N_RIDGES) * Math.PI * 2;
+    const r1 = KNOB_R - 2, r2 = KNOB_R - 8;
+    ctx.beginPath();
+    ctx.moveTo(CX + Math.cos(a) * r1, CY + Math.sin(a) * r1);
+    ctx.lineTo(CX + Math.cos(a) * r2, CY + Math.sin(a) * r2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // Finger dimple
+  const da = vfoAngle - Math.PI / 2;
+  const dr = KNOB_R * 0.55;
+  const dx = CX + Math.cos(da) * dr, dy = CY + Math.sin(da) * dr;
+  const dg = ctx.createRadialGradient(dx - 1, dy - 1, 1, dx, dy, 8);
+  dg.addColorStop(0, '#1a1a28'); dg.addColorStop(1, '#2a2a3a');
+  ctx.beginPath(); ctx.arc(dx, dy, 8, 0, Math.PI * 2);
+  ctx.fillStyle = dg; ctx.fill();
+}
+drawVfoDial();
+
+// --- Dial interaction ---
+let dragging = false, lastAngle = 0, velocity = 0, inertiaId = null;
+
+function getAngle(e) {
+  const r = canvas.getBoundingClientRect();
+  const x = (e.clientX || e.touches[0].clientX) - r.left - CX;
+  const y = (e.clientY || e.touches[0].clientY) - r.top - CY;
+  return Math.atan2(y, x);
+}
+
+function processDelta(delta) {
+  vfoAngle += delta;
+  vfoAccum += delta;
+  while (Math.abs(vfoAccum) >= STEP_ANGLE) {
+    const dir = vfoAccum > 0 ? 1 : -1;
+    vfoAccum -= dir * STEP_ANGLE;
+    const stepHz = STEPS[stepIdx].hz * dir;
+    currentFreqHz = Math.max(0, currentFreqHz + stepHz);
+    window.api.tune(currentFreqHz / 1000);
+  }
+  updateDisplay();
+  drawVfoDial();
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  dragging = true; lastAngle = getAngle(e); velocity = 0;
+  if (inertiaId) { cancelAnimationFrame(inertiaId); inertiaId = null; }
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const a = getAngle(e);
+  let delta = a - lastAngle;
+  if (delta > Math.PI) delta -= 2 * Math.PI;
+  if (delta < -Math.PI) delta += 2 * Math.PI;
+  velocity = delta;
+  lastAngle = a;
+  processDelta(delta);
+});
+window.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false;
+  // Inertia
+  const decay = () => {
+    velocity *= 0.92;
+    if (Math.abs(velocity) < 0.001) { inertiaId = null; return; }
+    processDelta(velocity);
+    inertiaId = requestAnimationFrame(decay);
+  };
+  if (Math.abs(velocity) > 0.01) inertiaId = requestAnimationFrame(decay);
+});
+
+// Mouse wheel
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const dir = e.deltaY > 0 ? 1 : -1;
+  const stepHz = STEPS[stepIdx].hz * dir;
+  currentFreqHz = Math.max(0, currentFreqHz + stepHz);
+  vfoAngle += dir * STEP_ANGLE;
+  window.api.tune(currentFreqHz / 1000);
+  updateDisplay();
+  drawVfoDial();
+}, { passive: false });
+
+// --- Keypad ---
+const kpInput = document.getElementById('kp-input');
+let kpBuffer = '';
+
+document.querySelectorAll('.kp-btn[data-digit]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (kpBuffer.length >= 10) return;
+    // Auto-insert decimal after first set of digits if not present
+    if (btn.dataset.digit === '0' && kpBuffer === '') return;
+    kpBuffer += btn.dataset.digit;
+    // Auto-add decimal point if needed
+    if (kpBuffer.length === 2 && !kpBuffer.includes('.') && parseFloat(kpBuffer) >= 14) {
+      kpBuffer += '.';
+    }
+    kpInput.value = kpBuffer;
+  });
+});
+
+// Decimal point via double-tap on 0 or dedicated handling
+document.querySelector('.kp-btn[data-digit="0"]').addEventListener('dblclick', () => {
+  if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpInput.value = kpBuffer; }
+});
+
+document.getElementById('kp-clear').addEventListener('click', () => {
+  kpBuffer = '';
+  kpInput.value = '';
+});
+
+document.getElementById('kp-go').addEventListener('click', () => {
+  let mhz = parseFloat(kpBuffer);
+  if (isNaN(mhz) || mhz <= 0) return;
+  // Heuristic: if > 300, user typed kHz; if > 1000000, Hz
+  if (mhz > 300000) mhz = mhz / 1000000;
+  else if (mhz > 300) mhz = mhz / 1000;
+  const khz = mhz * 1000;
+  window.api.tune(khz);
+  currentFreqHz = khz * 1000;
+  kpBuffer = '';
+  kpInput.value = '';
+  updateDisplay();
+});
+
+// Keyboard support for keypad
+document.addEventListener('keydown', (e) => {
+  if (e.key >= '0' && e.key <= '9') {
+    const btn = document.querySelector(`.kp-btn[data-digit="${e.key}"]`);
+    if (btn) btn.click();
+  } else if (e.key === '.' || e.key === ',') {
+    if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpInput.value = kpBuffer; }
+  } else if (e.key === 'Backspace') {
+    kpBuffer = kpBuffer.slice(0, -1);
+    kpInput.value = kpBuffer;
+  } else if (e.key === 'Enter') {
+    document.getElementById('kp-go').click();
+  } else if (e.key === 'Escape') {
+    document.getElementById('kp-clear').click();
+  }
+});
+
+// --- Profiles ---
+async function loadProfiles() {
+  const s = await window.api.getSettings();
+  profiles = s.vfoProfiles || [];
+  renderProfiles();
+}
+
+function renderProfiles() {
+  const list = document.getElementById('profile-list');
+  if (profiles.length === 0) {
+    list.innerHTML = '<div class="profile-empty">No profiles yet. Tune to a frequency and save it above.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  profiles.forEach((p, i) => {
+    const item = document.createElement('div');
+    item.className = 'profile-item';
+    const freqMhz = p.freqKhz ? (p.freqKhz / 1000).toFixed(3) : '?';
+    item.innerHTML = `
+      <span class="profile-name">${esc(p.name)}</span>
+      <span class="profile-detail">${freqMhz} MHz ${p.mode || ''}${p.filterWidth ? ' BW:' + p.filterWidth : ''}</span>
+      <button class="profile-del" title="Delete profile">&times;</button>
+    `;
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.profile-del')) return;
+      applyProfile(p);
+    });
+    item.querySelector('.profile-del').addEventListener('click', (e) => {
+      e.stopPropagation();
+      profiles.splice(i, 1);
+      saveProfiles();
+      renderProfiles();
+    });
+    list.appendChild(item);
+  });
+}
+
+function applyProfile(p) {
+  if (p.freqKhz) {
+    window.api.tune(p.freqKhz, p.mode);
+    currentFreqHz = p.freqKhz * 1000;
+  }
+  if (p.mode) {
+    currentMode = p.mode;
+    // Mode is set via tune() with mode parameter
+  }
+  if (p.filterWidth) {
+    currentFilterWidth = p.filterWidth;
+    window.api.setFilterWidth(p.filterWidth);
+    filterSlider.value = p.filterWidth;
+    filterVal.textContent = p.filterWidth >= 1000
+      ? (p.filterWidth / 1000).toFixed(1) + ' kHz'
+      : p.filterWidth + ' Hz';
+  }
+  updateDisplay();
+  updateModeHighlight();
+}
+
+async function saveProfiles() {
+  await window.api.saveSettings({ vfoProfiles: profiles });
+}
+
+document.getElementById('profile-save-btn').addEventListener('click', async () => {
+  const name = document.getElementById('profile-name-input').value.trim();
+  if (!name) { document.getElementById('profile-name-input').focus(); return; }
+  profiles.push({
+    name,
+    freqKhz: currentFreqHz / 1000,
+    mode: currentMode,
+    filterWidth: currentFilterWidth,
+  });
+  await saveProfiles();
+  renderProfiles();
+  document.getElementById('profile-name-input').value = '';
+});
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+// --- Init ---
+loadProfiles();
+</script>
+</body>
+</html>

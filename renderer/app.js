@@ -5407,6 +5407,9 @@ if (viewDirectoryBtn) viewDirectoryBtn.addEventListener('click', () => {
 viewJtcatBtn.addEventListener('click', () => {
   window.api.jtcatPopoutOpen();
 });
+document.getElementById('vfo-popout-btn').addEventListener('click', () => {
+  window.api.vfoPopoutOpen();
+});
 dxccBoardBtn.addEventListener('click', () => {
   if (!enableDxcc) {
     enableDxcc = true;

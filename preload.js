@@ -130,6 +130,9 @@ contextBridge.exposeInMainWorld('api', {
   actmapPopoutContact: (data) => ipcRenderer.send('actmap-popout-contact', data),
   actmapPopoutTheme: (theme) => ipcRenderer.send('actmap-popout-theme', theme),
   onActmapPopoutStatus: (cb) => ipcRenderer.on('actmap-popout-status', (_e, open) => cb(open)),
+  // VFO pop-out
+  vfoPopoutOpen: () => ipcRenderer.send('vfo-popout-open'),
+  onVfoPopoutStatus: (cb) => ipcRenderer.on('vfo-popout-status', (_e, open) => cb(open)),
   // JTCAT pop-out
   jtcatPopoutOpen: () => ipcRenderer.send('jtcat-popout-open'),
   jtcatPopoutTheme: (theme) => ipcRenderer.send('jtcat-popout-theme', theme),
