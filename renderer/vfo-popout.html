@@ -389,10 +389,13 @@ let currentMode = '';
 let _modeSuppressUntil = 0; // suppress stale mode from CAT poll after user click
 let currentFilterWidth = 0;
 let profiles = [];
+let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
 
 const freqDisplay = document.getElementById('freq-display');
 const modeBadge = document.getElementById('mode-badge');
 const filterBadge = document.getElementById('filter-badge');
+const filterSlider = document.getElementById('filter-slider');
+const filterVal = document.getElementById('filter-val');
 
 // --- Tabs ---
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -580,8 +583,6 @@ modeBadge.addEventListener('click', (e) => {
 });
 
 // --- Filter width ---
-const filterSlider = document.getElementById('filter-slider');
-const filterVal = document.getElementById('filter-val');
 const FILTER_QUICK = [250, 500, 1000, 1500, 2000, 2400, 3000, 4000];
 
 function buildFilterQuick() {
@@ -986,7 +987,6 @@ const WIDGETS = ['smeter', 'ptt', 'cw', 'voice'];
 let vfoWidgets = { smeter: false, ptt: false, cw: false, voice: false };
 const SECTIONS = ['step', 'band', 'filter', 'controls', 'profiles-inline'];
 let vfoSections = { step: true, band: true, filter: true, controls: true, 'profiles-inline': false };
-let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
 
 async function loadWidgets() {
   const s = await window.api.getSettings();
