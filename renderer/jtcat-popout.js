@@ -1035,7 +1035,7 @@
         src.connect(analyser);
       }
 
-      multiWfPanes.push({ sliceId: cfg.sliceId, canvas: canvas, ctx: canvas.getContext('2d'), analyser: analyser });
+      multiWfPanes.push({ sliceId: cfg.sliceId, canvas: canvas, ctx: canvas.getContext('2d'), analyser: analyser, sampleRate: entry ? entry.ctx.sampleRate : 48000 });
     });
 
     // Start waterfall animation loop
@@ -1049,8 +1049,10 @@
         // Draw new line at top
         var bins = new Uint8Array(p.analyser.frequencyBinCount);
         p.analyser.getByteFrequencyData(bins);
-        // Map first half of bins (0-6kHz for 12kHz sample rate) to canvas width
-        var useBins = Math.floor(bins.length * 0.5);
+        // Map 0-3kHz (FT8 passband) to canvas width
+        // AudioContext sample rate is typically 48kHz, so 3kHz = bins * (3000 / (sampleRate/2))
+        var nyquist = (p.sampleRate || 48000) / 2;
+        var useBins = Math.max(1, Math.floor(bins.length * 3000 / nyquist));
         for (var x = 0; x < w; x++) {
           var binIdx = Math.floor(x * useBins / w);
           var val = bins[binIdx];
