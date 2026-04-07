@@ -205,6 +205,9 @@
       </div>
       <div class="section-label">Quick Band</div>
       <div class="band-grid" id="band-grid-dial"></div>
+      <div class="section-label">Filter / Controls</div>
+      <div class="step-row filter-quick-shared"></div>
+      <div class="step-row rig-toggles-shared"></div>
     </div>
 
     <!-- Keypad tab -->
@@ -230,6 +233,9 @@
       <div style="text-align:center; padding:6px; font-size:11px; color:#666;">
         Enter frequency in MHz (e.g. 14.025)
       </div>
+      <div class="section-label">Filter / Controls</div>
+      <div class="step-row filter-quick-shared"></div>
+      <div class="step-row rig-toggles-shared"></div>
     </div>
 
     <!-- Mode tab -->
@@ -323,13 +329,11 @@ window.api.onRadioState((s) => {
   }
   if (s.nb != null) {
     nbOn = s.nb;
-    const el = document.getElementById('nb-btn');
-    if (el) el.classList.toggle('on', nbOn);
+    document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
   }
   if (s.atu != null) {
     atuOn = s.atu;
-    const el = document.getElementById('atu-btn');
-    if (el) el.classList.toggle('on', atuOn);
+    document.querySelectorAll('.atu-toggle').forEach(b => b.classList.toggle('on', atuOn));
   }
   if (s.customCatButtons) {
     customCatButtons = s.customCatButtons;
@@ -482,27 +486,28 @@ const filterVal = document.getElementById('filter-val');
 const FILTER_QUICK = [250, 500, 1000, 1500, 2000, 2400, 3000, 4000];
 
 function buildFilterQuick() {
-  const row = document.getElementById('filter-quick');
-  row.innerHTML = '';
-  FILTER_QUICK.forEach(hz => {
-    const btn = document.createElement('button');
-    btn.className = 'step-btn' + (currentFilterWidth === hz ? ' active' : '');
-    btn.textContent = hz >= 1000 ? (hz / 1000) + 'k' : hz;
-    btn.addEventListener('click', () => {
-      currentFilterWidth = hz;
-      window.api.setFilterWidth(hz);
-      filterSlider.value = hz;
-      filterVal.textContent = hz >= 1000 ? (hz / 1000).toFixed(1) + ' kHz' : hz + ' Hz';
-      updateFilterQuickHighlight();
-      updateDisplay();
+  document.querySelectorAll('#filter-quick, .filter-quick-shared').forEach(row => {
+    row.innerHTML = '';
+    FILTER_QUICK.forEach(hz => {
+      const btn = document.createElement('button');
+      btn.className = 'step-btn fq-btn' + (currentFilterWidth === hz ? ' active' : '');
+      btn.dataset.hz = hz;
+      btn.textContent = hz >= 1000 ? (hz / 1000) + 'k' : hz;
+      btn.addEventListener('click', () => {
+        currentFilterWidth = hz;
+        window.api.setFilterWidth(hz);
+        filterSlider.value = hz;
+        filterVal.textContent = hz >= 1000 ? (hz / 1000).toFixed(1) + ' kHz' : hz + ' Hz';
+        updateFilterQuickHighlight();
+        updateDisplay();
+      });
+      row.appendChild(btn);
     });
-    row.appendChild(btn);
   });
 }
 function updateFilterQuickHighlight() {
-  document.querySelectorAll('#filter-quick .step-btn').forEach(btn => {
-    const v = btn.textContent.endsWith('k') ? parseFloat(btn.textContent) * 1000 : parseInt(btn.textContent);
-    btn.classList.toggle('active', v === currentFilterWidth);
+  document.querySelectorAll('.fq-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.hz) === currentFilterWidth);
   });
 }
 buildFilterQuick();
@@ -524,31 +529,30 @@ filterSlider.addEventListener('change', () => {
 let nbOn = false, atuOn = false;
 
 function buildRigToggles() {
-  const row = document.getElementById('rig-toggles');
-  row.innerHTML = '';
-  const nbBtn = document.createElement('button');
-  nbBtn.className = 'toggle-btn' + (nbOn ? ' on' : '');
-  nbBtn.textContent = 'NB';
-  nbBtn.title = 'Noise Blanker';
-  nbBtn.id = 'nb-btn';
-  nbBtn.addEventListener('click', () => {
-    nbOn = !nbOn;
-    window.api.rigControl({ action: 'set-nb', on: nbOn });
-    nbBtn.classList.toggle('on', nbOn);
-  });
-  row.appendChild(nbBtn);
+  document.querySelectorAll('#rig-toggles, .rig-toggles-shared').forEach(row => {
+    row.innerHTML = '';
+    const nbBtn = document.createElement('button');
+    nbBtn.className = 'toggle-btn nb-toggle' + (nbOn ? ' on' : '');
+    nbBtn.textContent = 'NB';
+    nbBtn.title = 'Noise Blanker';
+    nbBtn.addEventListener('click', () => {
+      nbOn = !nbOn;
+      window.api.rigControl({ action: 'set-nb', on: nbOn });
+      document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
+    });
+    row.appendChild(nbBtn);
 
-  const atuBtn = document.createElement('button');
-  atuBtn.className = 'toggle-btn' + (atuOn ? ' on' : '');
-  atuBtn.textContent = 'ATU';
-  atuBtn.title = 'Antenna Tuner';
-  atuBtn.id = 'atu-btn';
-  atuBtn.addEventListener('click', () => {
-    atuOn = !atuOn;
-    window.api.rigControl({ action: 'atu-tune', on: atuOn });
-    atuBtn.classList.toggle('on', atuOn);
+    const atuBtn = document.createElement('button');
+    atuBtn.className = 'toggle-btn atu-toggle' + (atuOn ? ' on' : '');
+    atuBtn.textContent = 'ATU';
+    atuBtn.title = 'Antenna Tuner';
+    atuBtn.addEventListener('click', () => {
+      atuOn = !atuOn;
+      window.api.rigControl({ action: 'atu-tune', on: atuOn });
+      document.querySelectorAll('.atu-toggle').forEach(b => b.classList.toggle('on', atuOn));
+    });
+    row.appendChild(atuBtn);
   });
-  row.appendChild(atuBtn);
 }
 buildRigToggles();
 
