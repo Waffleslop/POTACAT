@@ -21,6 +21,7 @@
   var cqFilter = false;
   var wantedFilter = false;
   var sortBySignal = false;
+  var searchFilter = '';
   var txEnabled = false;
   var transmitting = false;
   var jpTxFreqHz = 1500;
@@ -461,6 +462,7 @@
 
       if (cqFilter && !isCq && !is73 && !isDirected) return;
       if (wantedFilter && !isWanted && !isDirected && !is73) return;
+      if (searchFilter && upper.indexOf(searchFilter) === -1) return;
 
       // Build needed badges + entity
       var badges = '';
@@ -743,6 +745,11 @@
   sortSignalBtn.addEventListener('click', function() {
     sortBySignal = !sortBySignal;
     sortSignalBtn.classList.toggle('active', sortBySignal);
+  });
+
+  var searchInput = document.getElementById('jp-search');
+  searchInput.addEventListener('input', function() {
+    searchFilter = searchInput.value.toUpperCase().trim();
   });
 
   // --- Multi-slice ---

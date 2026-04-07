@@ -301,6 +301,7 @@
   let ft8CqFilter = false;     // CQ-only filter
   let ft8WantedFilter = false; // Wanted-only filter (new DXCC/grid/call)
   let ft8SortSignal = false;   // Sort decodes by signal strength
+  let ft8SearchFilter = '';    // Text search filter
   let ft8TxFreqHz = 1500;      // TX frequency in Hz (for waterfall marker)
 
   // FT2 dial frequencies (kHz) per band — from IU8LMC published table
@@ -4735,6 +4736,7 @@
         // Apply CQ filter — always show CQ, 73, directed-at-me, hunted, and QSO partner
         if (ft8CqFilter && !isCq && !is73 && !isDirected && !isHunt && !isQsoPartner) return;
         if (ft8WantedFilter && !isWanted && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
+        if (ft8SearchFilter && upper.indexOf(ft8SearchFilter) === -1) return;
 
         // Build needed badges + entity
         let badges = '';
@@ -5036,6 +5038,14 @@
     ft8SortSignalBtn.addEventListener('click', () => {
       ft8SortSignal = !ft8SortSignal;
       ft8SortSignalBtn.classList.toggle('active', ft8SortSignal);
+    });
+  }
+
+  // Search filter
+  var ft8SearchInput = document.getElementById('ft8-search');
+  if (ft8SearchInput) {
+    ft8SearchInput.addEventListener('input', function() {
+      ft8SearchFilter = ft8SearchInput.value.toUpperCase().trim();
     });
   }
 
