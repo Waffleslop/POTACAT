@@ -200,7 +200,9 @@
       <div class="dial-wrap">
         <canvas id="vfo-dial" width="200" height="200"></canvas>
       </div>
-      <div class="step-row" id="step-row"></div>
+      <div style="display:flex;justify-content:center;padding:4px 0;">
+        <select id="step-select" style="background:#2a2a4a;border:1px solid #3a3a5a;color:#4fc3f7;padding:4px 8px;border-radius:4px;font-size:13px;cursor:pointer;"></select>
+      </div>
       <div class="section-label">Quick Band</div>
       <div class="band-grid" id="band-grid-dial"></div>
     </div>
@@ -563,21 +565,15 @@ const STEPS = [
 ];
 let stepIdx = 4; // default 1 kHz
 
-function buildStepRow() {
-  const row = document.getElementById('step-row');
-  row.innerHTML = '';
-  STEPS.forEach((s, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'step-btn' + (i === stepIdx ? ' active' : '');
-    btn.textContent = s.label;
-    btn.addEventListener('click', () => {
-      stepIdx = i;
-      row.querySelectorAll('.step-btn').forEach((b, j) => b.classList.toggle('active', j === i));
-    });
-    row.appendChild(btn);
-  });
-}
-buildStepRow();
+const stepSelect = document.getElementById('step-select');
+STEPS.forEach((s, i) => {
+  const opt = document.createElement('option');
+  opt.value = i;
+  opt.textContent = 'Step: ' + s.label;
+  if (i === stepIdx) opt.selected = true;
+  stepSelect.appendChild(opt);
+});
+stepSelect.addEventListener('change', () => { stepIdx = parseInt(stepSelect.value); });
 
 // --- VFO Dial (canvas) ---
 const canvas = document.getElementById('vfo-dial');
