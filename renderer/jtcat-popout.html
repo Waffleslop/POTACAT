@@ -52,10 +52,12 @@
     .jp-multi-start { padding: 3px 12px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid var(--accent-green, #4ecca3); background: transparent; color: var(--accent-green, #4ecca3); cursor: pointer; }
     .jp-multi-start:hover { background: var(--accent-green, #4ecca3); color: #000; }
     /* Side-by-side waterfalls */
-    .jp-wf-pane { flex: 1; position: relative; border-right: 1px solid var(--border-primary); min-width: 0; }
+    .jp-wf-pane { flex: 1; position: relative; min-width: 0; border-right: 4px solid var(--bg-secondary, #16213e); }
     .jp-wf-pane:last-child { border-right: none; }
-    .jp-wf-pane canvas { width: 100%; height: 60px; image-rendering: pixelated; display: block; }
+    .jp-wf-pane canvas { width: 100%; height: 60px; image-rendering: pixelated; display: block; cursor: crosshair; }
     .jp-wf-pane .jp-wf-label { position: absolute; top: 2px; left: 4px; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 2px; pointer-events: none; z-index: 1; }
+    .jp-wf-pane .jp-wf-tx-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff2222; box-shadow: 0 0 4px #ff2222; pointer-events: none; z-index: 2; }
+    .jp-wf-pane .jp-wf-tx-hz { position: absolute; bottom: 2px; font-size: 8px; font-weight: 700; color: #ff4444; pointer-events: none; z-index: 2; white-space: nowrap; }
     .jp-row.jp-watched { background: rgba(255, 64, 129, 0.12); }
     .jp-entity { font-size: 10px; color: var(--text-dim, #666); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 

@@ -1030,6 +1030,38 @@
       canvas.height = 60;
       pane.appendChild(canvas);
 
+      // TX marker line
+      var txLine = document.createElement('div');
+      txLine.className = 'jp-wf-tx-line';
+      txLine.style.left = '50%';
+      pane.appendChild(txLine);
+
+      // TX freq label
+      var txHz = document.createElement('div');
+      txHz.className = 'jp-wf-tx-hz';
+      txHz.textContent = '1500';
+      txHz.style.left = '50%';
+      pane.appendChild(txHz);
+
+      // Click to set TX freq on this slice
+      (function(sliceId, canvasEl, txLineEl, txHzEl) {
+        canvasEl.addEventListener('click', function(e) {
+          var rect = canvasEl.getBoundingClientRect();
+          var x = e.clientX - rect.left;
+          var fraction = x / rect.width;
+          var hz = Math.max(100, Math.min(3000, Math.round(fraction * 3000 / 10) * 10));
+          // Update TX marker
+          var pct = (hz / 3000) * 100;
+          txLineEl.style.left = pct + '%';
+          txHzEl.textContent = hz;
+          txHzEl.style.left = pct + '%';
+          // Set TX freq on the engine for this slice
+          window.api.jtcatSetTxFreq(hz);
+          // Focus this slice for TX
+          if (jtcatManager) window.api.saveSettings({ _multiTxSlice: sliceId });
+        });
+      })(cfg.sliceId, canvas, txLine, txHz);
+
       container.appendChild(pane);
 
       // Get analyser from audio stream
@@ -1043,7 +1075,7 @@
         src.connect(analyser);
       }
 
-      multiWfPanes.push({ sliceId: cfg.sliceId, canvas: canvas, ctx: canvas.getContext('2d'), analyser: analyser, sampleRate: entry ? entry.ctx.sampleRate : 48000 });
+      multiWfPanes.push({ sliceId: cfg.sliceId, canvas: canvas, ctx: canvas.getContext('2d'), analyser: analyser, sampleRate: entry ? entry.ctx.sampleRate : 48000, txLine: txLine, txHz: txHz });
     });
 
     // Start waterfall animation loop
