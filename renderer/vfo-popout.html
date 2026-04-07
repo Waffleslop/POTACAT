@@ -790,7 +790,7 @@ function applyProfile(p) {
   }
   if (p.mode) {
     currentMode = p.mode;
-    // Mode is set via tune() with mode parameter
+    _modeSuppressUntil = Date.now() + 2000;
   }
   if (p.filterWidth) {
     currentFilterWidth = p.filterWidth;
