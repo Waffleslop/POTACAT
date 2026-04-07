@@ -9549,6 +9549,51 @@ app.whenReady().then(() => {
           console.log(`[JTCAT] TX scheduler: ${txWinner} wins TX slot`);
         }
       });
+
+      // Wire TX events — critical for multi-slice PTT and audio playback
+      engine.on('tx-start', (data) => {
+        const catState = cat ? `connected=${cat.connected}` : 'cat=null';
+        console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
+        sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
+        handleRemotePtt(true);
+        if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+          jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq });
+        }
+        if (remoteServer && remoteServer.hasClient()) {
+          remoteServer.broadcastJtcatTxStatus({ state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq });
+        }
+        // Send TX audio to renderer for playback through DAX TX
+        setTimeout(() => {
+          if (win && !win.isDestroyed() && engine._txActive) {
+            win.webContents.send('jtcat-tx-audio', { samples: Array.from(data.samples), offsetMs: data.offsetMs || 0 });
+          }
+        }, 200);
+      });
+
+      engine.on('tx-end', () => {
+        console.log(`[JTCAT Multi] TX end on ${s.sliceId}/${s.band} — PTT off`);
+        handleRemotePtt(false);
+        if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+          jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'rx' });
+        }
+        if (remoteServer && remoteServer.hasClient()) {
+          remoteServer.broadcastJtcatTxStatus({ state: 'rx' });
+        }
+      });
+
+      engine.on('cycle', (data) => {
+        if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+          jtcatPopoutWin.webContents.send('jtcat-cycle', { ...data, sliceId: s.sliceId });
+        }
+        if (remoteServer && remoteServer.hasClient()) {
+          remoteServer.broadcastJtcatCycle({ ...data, sliceId: s.sliceId });
+        }
+      });
+
+      engine.on('silent', () => {
+        console.warn(`[JTCAT Multi] Silent audio on ${s.sliceId}/${s.band}`);
+        if (win && !win.isDestroyed()) win.webContents.send('restart-jtcat-audio');
+      });
     }
 
     // Listen for TX slice switches (for SmartSDR slice routing)
