@@ -258,6 +258,7 @@
 // --- State ---
 let currentFreqHz = 0;
 let currentMode = '';
+let _modeSuppressUntil = 0; // suppress stale mode from CAT poll after user click
 let currentFilterWidth = 0;
 let profiles = [];
 
@@ -303,7 +304,7 @@ function updateDisplay() {
 // --- Radio state from main process ---
 window.api.onRadioState((s) => {
   if (s.freq) currentFreqHz = s.freq;
-  if (s.mode) currentMode = s.mode;
+  if (s.mode && Date.now() > _modeSuppressUntil) currentMode = s.mode;
   if (s.filterWidth != null) {
     currentFilterWidth = s.filterWidth;
     filterSlider.value = s.filterWidth || 2400;
@@ -405,6 +406,7 @@ function buildModeGrid() {
       const catMode = m === 'RADE' ? 'FREEDV-RADEV1' : m;
       window.api.setMode(catMode);
       currentMode = m;
+      _modeSuppressUntil = Date.now() + 2000;
       updateModeHighlight();
       updateDisplay();
     });
