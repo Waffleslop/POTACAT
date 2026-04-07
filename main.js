@@ -2150,7 +2150,9 @@ function updateWsjtxHighlights() {
 }
 
 // --- JTCAT (FT8/FT4 native decode engine) ---
-let ft8Engine = null;
+const { JtcatManager } = require('./lib/jtcat-manager');
+let jtcatManager = null; // initialized on first startJtcat()
+let ft8Engine = null;    // alias for jtcatManager.engine (Phase 0 compatibility)
 let remoteJtcatQso = null;
 let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
 const JTCAT_MAX_CQ_RETRIES = 15;
@@ -2426,8 +2428,9 @@ function startJtcat(mode) {
   jtcatAutoCqMode = 'off';
   jtcatAutoCqWorkedSession.clear();
   jtcatAutoCqOwner = null;
-  ft8Engine = new Ft8Engine();
-  ft8Engine.setMode(mode || 'FT8');
+  if (!jtcatManager) jtcatManager = new JtcatManager();
+  jtcatManager.startSlice({ sliceId: 'default', mode: mode || 'FT8' });
+  ft8Engine = jtcatManager.engine; // Phase 0 alias
 
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
@@ -2682,12 +2685,11 @@ function startJtcat(mode) {
 }
 
 function stopJtcat() {
-  if (ft8Engine) {
-    ft8Engine.stop();
-    ft8Engine.removeAllListeners();
-    ft8Engine = null;
-    console.log('[JTCAT] Engine stopped');
+  if (jtcatManager) {
+    jtcatManager.stopAll();
   }
+  ft8Engine = null;
+  console.log('[JTCAT] Engine stopped');
 }
 
 // --- SmartSDR panadapter spots ---
@@ -9452,7 +9454,7 @@ app.whenReady().then(() => {
       for (let j = 0; j < Math.min(100, samples.length); j++) max = Math.max(max, Math.abs(samples[j]));
       console.log(`[JTCAT] audio IPC #${_jtcatAudioDiag} len=${samples.length} max=${max.toFixed(4)} engine=${!!ft8Engine}`);
     }
-    if (ft8Engine) ft8Engine.feedAudio(samples);
+    if (jtcatManager) jtcatManager.feedAudio('default', samples);
   });
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
     jtcatQuietFreq = hz;
