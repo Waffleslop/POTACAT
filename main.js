@@ -2212,6 +2212,12 @@ async function jtcatAutoLog(qso) {
     sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
     return;
   }
+  // When WSJT-X mode is enabled, WSJT-X handles logging via logged-adif (type 12).
+  // Don't double-log from JTCAT's QSO state machine.
+  if (settings.enableWsjtx && wsjtx && wsjtx.connected) {
+    sendCatLog(`[JTCAT] Auto-log skipped — WSJT-X mode handles logging`);
+    return;
+  }
   sendCatLog(`[JTCAT] Auto-logging QSO: ${q.call} report=${q.report || 'none'} sent=${q.sentReport || 'none'}`);
   const now = new Date();
   const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
