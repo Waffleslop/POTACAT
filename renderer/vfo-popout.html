@@ -262,13 +262,16 @@ function formatFreqKhz(hz) {
   if (!hz) return '---.---.---';
   const khz = hz / 1000;
   const mhz = Math.floor(khz / 1000);
-  const rem = (khz % 1000).toFixed(2).padStart(6, '0');
-  return `${mhz}.${rem.slice(0, 3)}.${rem.slice(3)}`;
+  const remainder = khz - mhz * 1000;
+  const whole = Math.floor(remainder);
+  const frac = Math.round((remainder - whole) * 100);
+  return `${mhz}.${String(whole).padStart(3, '0')}.${String(frac).padStart(2, '0')}`;
 }
 
 function updateDisplay() {
   freqDisplay.textContent = formatFreqKhz(currentFreqHz);
-  modeBadge.textContent = currentMode || '---';
+  const m = (currentMode || '').toUpperCase();
+  modeBadge.textContent = m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
   if (currentFilterWidth > 0) {
     filterBadge.textContent = currentFilterWidth >= 1000
       ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
@@ -351,7 +354,7 @@ buildBandGrid(document.getElementById('band-grid-dial'));
 buildBandGrid(document.getElementById('band-grid-mode'));
 
 // --- Modes ---
-const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU'];
+const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU', 'DIGL', 'RADE'];
 
 function buildModeGrid() {
   const grid = document.getElementById('mode-grid');
@@ -361,7 +364,8 @@ function buildModeGrid() {
     btn.className = 'mode-btn';
     btn.textContent = m;
     btn.addEventListener('click', () => {
-      window.api.setMode(m);
+      const catMode = m === 'RADE' ? 'FREEDV-RADEV1' : m;
+      window.api.setMode(catMode);
       currentMode = m;
       updateModeHighlight();
       updateDisplay();
@@ -374,7 +378,11 @@ function updateModeHighlight() {
   document.querySelectorAll('.mode-btn').forEach(btn => {
     const m = currentMode.toUpperCase();
     const bm = btn.textContent;
-    btn.classList.toggle('active', bm === m || (bm === 'USB' && m === 'SSB') || (bm === 'LSB' && m === 'SSB'));
+    const match = bm === m
+      || (bm === 'USB' && m === 'SSB')
+      || (bm === 'LSB' && m === 'SSB')
+      || (bm === 'RADE' && m.includes('FREEDV'));
+    btn.classList.toggle('active', match);
   });
 }
 
