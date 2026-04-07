@@ -587,13 +587,14 @@ button:hover {
 
 .status-bar {
   display: flex;
-  gap: 16px;
+  gap: 6px;
   align-items: center;
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-tertiary);
   position: relative;
 }
+.status-bar > .hidden { display: none; }
 
 .status {
   padding: 2px 8px;
