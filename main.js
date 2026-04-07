@@ -9456,6 +9456,73 @@ app.whenReady().then(() => {
     }
     if (jtcatManager) jtcatManager.feedAudio('default', samples);
   });
+  // Multi-slice audio: tagged with sliceId
+  ipcMain.on('jtcat-slice-audio', (_e, sliceId, buf) => {
+    let samples;
+    if (buf instanceof Float32Array) samples = buf;
+    else if (ArrayBuffer.isView(buf) || buf instanceof ArrayBuffer) samples = new Float32Array(buf);
+    else if (Array.isArray(buf)) samples = new Float32Array(buf);
+    else { try { samples = new Float32Array(Object.values(buf)); } catch { return; } }
+    if (jtcatManager) jtcatManager.feedAudio(sliceId, samples);
+  });
+
+  // Multi-slice start: [{sliceId, mode, band, freqKhz, audioDeviceId, slicePort}]
+  ipcMain.on('jtcat-start-multi', (_e, slices) => {
+    if (!Array.isArray(slices) || slices.length === 0) return;
+    stopJtcat();
+    jtcatAutoCqMode = 'off';
+    jtcatAutoCqWorkedSession.clear();
+    jtcatAutoCqOwner = null;
+    if (!jtcatManager) jtcatManager = new JtcatManager();
+
+    for (const s of slices) {
+      const engine = jtcatManager.startSlice({ sliceId: s.sliceId, mode: s.mode || 'FT8', sliceIndex: s.sliceIndex });
+      // Wire decode enrichment for this slice
+      engine.on('decode', (data) => {
+        if (data.results) {
+          const currentBand = s.freqKhz ? freqToBand(s.freqKhz / 1000) : null;
+          const wlStr = (settings.watchlist || '').toUpperCase();
+          const wlCalls = wlStr ? wlStr.split(',').map(w => w.trim().split(':')[0]).filter(Boolean) : [];
+          for (const r of data.results) {
+            r.sliceId = s.sliceId;
+            r.band = currentBand || s.band || '';
+            const { dxCall } = extractCallsigns(r.text || '');
+            if (!dxCall) continue;
+            const uc = dxCall.toUpperCase();
+            if (ctyDb) {
+              const entity = resolveCallsign(uc, ctyDb);
+              r.entity = entity ? entity.name : '';
+              r.continent = entity ? entity.continent : '';
+              r.newDxcc = !!(entity && currentBand && !rosterWorkedDxcc.has(entity.name + '|' + currentBand));
+            }
+            r.call = uc;
+            r.newCall = !rosterWorkedCalls.has(uc);
+            r.watched = wlCalls.length > 0 && wlCalls.some(w => uc.indexOf(w) >= 0 || w.indexOf(uc) >= 0);
+            const gm = (r.text || '').match(/\b([A-R]{2}\d{2})\s*$/i);
+            if (gm && !(/^RR\d{2}$/i.test(gm[1]))) {
+              r.grid = gm[1].toUpperCase();
+              r.newGrid = !rosterWorkedGrids.has(r.grid);
+            }
+          }
+        }
+        // Forward to popout
+        if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+          jtcatPopoutWin.webContents.send('jtcat-decode', { ...data, sliceId: s.sliceId, band: s.band });
+        }
+        if (remoteServer && remoteServer.hasClient()) {
+          const now = new Date();
+          const timeStr = String(now.getUTCHours()).padStart(2, '0') + ':' +
+                          String(now.getUTCMinutes()).padStart(2, '0') + ':' +
+                          String(now.getUTCSeconds()).padStart(2, '0');
+          remoteServer.broadcastJtcatDecode({ ...data, sliceId: s.sliceId, band: s.band, time: timeStr });
+        }
+      });
+    }
+
+    ft8Engine = jtcatManager.engine; // Phase 0 compat alias
+    console.log(`[JTCAT] Multi-slice started: ${slices.map(s => s.sliceId + '/' + s.band).join(', ')}`);
+  });
+
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
     jtcatQuietFreq = hz;
   });

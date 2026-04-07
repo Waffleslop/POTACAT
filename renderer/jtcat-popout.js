@@ -365,7 +365,7 @@
         console.log('[JTCAT popout] Reply to CQ:', call, grid, 'df:', d.df, 'slot:', d.slot);
         // Add the CQ message to My Activity as the start of the QSO thread
         addToMyActivity(d);
-        window.api.jtcatReply({ call: call, grid: grid, df: d.df || 1500, slot: d.slot });
+        window.api.jtcatReply({ call: call, grid: grid, df: d.df || 1500, slot: d.slot, sliceId: d.sliceId });
       }
     } else if (parts.length >= 2) {
       var toCall = parts[0], fromCall = parts[1], payload = (parts[2] || '');
@@ -467,7 +467,14 @@
       var row = document.createElement('div');
       row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '') + (d.watched ? ' jp-watched' : '');
       var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
+      // Band badge for multi-slice decodes
+      var bandBadge = '';
+      if (d.band && multiActive) {
+        var bColor = BAND_COLORS[d.band] || '#888';
+        bandBadge = '<span class="jp-badge jp-badge-band" style="background:' + bColor + ';color:#000;">' + d.band + '</span>';
+      }
       row.innerHTML =
+        (bandBadge ? bandBadge : '') +
         '<span class="jp-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
         '<span class="jp-dt">' + dtStr + '</span>' +
         '<span class="jp-df">' + Math.round(d.df) + '</span>' +
@@ -712,6 +719,213 @@
   wantedFilterBtn.addEventListener('click', function() {
     wantedFilter = !wantedFilter;
     wantedFilterBtn.classList.toggle('active', wantedFilter);
+  });
+
+  // --- Multi-slice ---
+  var multiPanel = document.getElementById('jp-multi-panel');
+  var multiSlicesEl = document.getElementById('jp-multi-slices');
+  var multiBtn = document.getElementById('jp-multi-btn');
+  var multiAddBtn = document.getElementById('jp-multi-add');
+  var multiStartBtn = document.getElementById('jp-multi-start');
+  var multiStopBtn = document.getElementById('jp-multi-stop');
+  var multiActive = false;
+  var multiSliceConfigs = []; // [{sliceId, slicePort, band, audioDeviceId}]
+  var audioDeviceList = []; // cached device list
+
+  var BAND_COLORS = {
+    '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3',
+    '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
+    '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '2m': '#88ff88',
+  };
+  var BAND_FREQS = { '80m': 3573, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313 };
+  var SLICE_NAMES = { 5002: 'A', 5003: 'B', 5004: 'C', 5005: 'D' };
+
+  if (multiBtn) multiBtn.addEventListener('click', function() {
+    multiPanel.classList.toggle('hidden');
+    multiBtn.classList.toggle('active', !multiPanel.classList.contains('hidden'));
+    if (!multiPanel.classList.contains('hidden') && multiSliceConfigs.length === 0) {
+      // Default: 2 slices
+      multiSliceConfigs = [
+        { sliceId: 'slice-a', slicePort: 5002, band: '20m', audioDeviceId: '' },
+        { sliceId: 'slice-b', slicePort: 5003, band: '40m', audioDeviceId: '' },
+      ];
+      refreshAudioDevices();
+    }
+  });
+
+  function refreshAudioDevices() {
+    window.api.enumerateAudioDevices().then(function(devices) {
+      audioDeviceList = devices;
+      renderMultiSlices();
+    });
+  }
+
+  function renderMultiSlices() {
+    multiSlicesEl.innerHTML = '';
+    multiSliceConfigs.forEach(function(cfg, idx) {
+      var row = document.createElement('div');
+      row.className = 'jp-multi-row';
+
+      // Slice selector
+      var sliceSel = document.createElement('select');
+      sliceSel.title = 'Flex slice';
+      [5002, 5003, 5004, 5005].forEach(function(p) {
+        var opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = 'Slice ' + SLICE_NAMES[p];
+        if (p === cfg.slicePort) opt.selected = true;
+        sliceSel.appendChild(opt);
+      });
+      sliceSel.addEventListener('change', function() {
+        cfg.slicePort = parseInt(sliceSel.value, 10);
+        cfg.sliceId = 'slice-' + SLICE_NAMES[cfg.slicePort].toLowerCase();
+      });
+      row.appendChild(sliceSel);
+
+      // Band selector
+      var bandSel = document.createElement('select');
+      bandSel.title = 'Band';
+      Object.keys(BAND_FREQS).forEach(function(b) {
+        var opt = document.createElement('option');
+        opt.value = b;
+        opt.textContent = b;
+        if (b === cfg.band) opt.selected = true;
+        bandSel.appendChild(opt);
+      });
+      bandSel.addEventListener('change', function() { cfg.band = bandSel.value; });
+      row.appendChild(bandSel);
+
+      // Audio device selector
+      var audioSel = document.createElement('select');
+      audioSel.title = 'Audio input (DAX RX channel)';
+      audioSel.style.width = '160px';
+      var defOpt = document.createElement('option');
+      defOpt.value = '';
+      defOpt.textContent = '(default)';
+      audioSel.appendChild(defOpt);
+      audioDeviceList.forEach(function(d) {
+        var opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || d.deviceId.slice(0, 20);
+        if (d.deviceId === cfg.audioDeviceId) opt.selected = true;
+        audioSel.appendChild(opt);
+      });
+      audioSel.addEventListener('change', function() { cfg.audioDeviceId = audioSel.value; });
+      row.appendChild(audioSel);
+
+      // Remove button
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.textContent = '\u2715';
+      delBtn.style.cssText = 'font-size:12px;color:#e94560;background:none;border:none;cursor:pointer;padding:0 4px;';
+      delBtn.addEventListener('click', function() {
+        multiSliceConfigs.splice(idx, 1);
+        renderMultiSlices();
+      });
+      row.appendChild(delBtn);
+
+      multiSlicesEl.appendChild(row);
+    });
+  }
+
+  if (multiAddBtn) multiAddBtn.addEventListener('click', function() {
+    var usedPorts = multiSliceConfigs.map(function(c) { return c.slicePort; });
+    var nextPort = [5002, 5003, 5004, 5005].find(function(p) { return usedPorts.indexOf(p) === -1; }) || 5005;
+    var usedBands = multiSliceConfigs.map(function(c) { return c.band; });
+    var nextBand = Object.keys(BAND_FREQS).find(function(b) { return usedBands.indexOf(b) === -1; }) || '20m';
+    multiSliceConfigs.push({ sliceId: 'slice-' + SLICE_NAMES[nextPort].toLowerCase(), slicePort: nextPort, band: nextBand, audioDeviceId: '' });
+    renderMultiSlices();
+  });
+
+  // Multi-slice audio capture state
+  var multiAudioStreams = new Map(); // sliceId → { ctx, stream, processor }
+
+  async function startMultiAudio() {
+    stopMultiAudio();
+    for (var cfg of multiSliceConfigs) {
+      try {
+        var constraints = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+        if (cfg.audioDeviceId) constraints.deviceId = { exact: cfg.audioDeviceId };
+        var stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+        var ctx = new AudioContext();
+        if (ctx.state === 'suspended') await ctx.resume();
+        var source = ctx.createMediaStreamSource(stream);
+        var dsRatio = ctx.sampleRate / 12000;
+
+        var sliceId = cfg.sliceId;
+        try {
+          await ctx.audioWorklet.addModule('jtcat-audio-worklet.js');
+          var worklet = new AudioWorkletNode(ctx, 'jtcat-processor', { processorOptions: { dsRatio: dsRatio } });
+          worklet.port.onmessage = (function(id) { return function(e) { window.api.jtcatSliceAudio(id, e.data); }; })(sliceId);
+          source.connect(worklet);
+          worklet.connect(ctx.destination);
+          multiAudioStreams.set(sliceId, { ctx: ctx, stream: stream, processor: worklet });
+        } catch (wErr) {
+          var bufSize = Math.pow(2, Math.ceil(Math.log2(4096 * Math.ceil(dsRatio))));
+          if (bufSize > 16384) bufSize = 16384;
+          var sp = ctx.createScriptProcessor(bufSize, 1, 1);
+          var acc = new Float32Array(0);
+          sp.onaudioprocess = (function(id, ratio) {
+            return function(e) {
+              var input = e.data ? e.data : e.inputBuffer.getChannelData(0);
+              var step = Math.floor(ratio);
+              var out = new Float32Array(Math.floor(input.length / step));
+              for (var i = 0; i < out.length; i++) out[i] = input[i * step];
+              window.api.jtcatSliceAudio(id, out);
+            };
+          })(sliceId, dsRatio);
+          source.connect(sp);
+          sp.connect(ctx.destination);
+          multiAudioStreams.set(sliceId, { ctx: ctx, stream: stream, processor: sp });
+        }
+        console.log('[Multi] Audio started for ' + sliceId + ' device=' + (cfg.audioDeviceId || 'default'));
+      } catch (err) {
+        console.error('[Multi] Audio failed for ' + cfg.sliceId + ':', err.message);
+      }
+    }
+  }
+
+  function stopMultiAudio() {
+    multiAudioStreams.forEach(function(entry) {
+      if (entry.processor) try { entry.processor.disconnect(); } catch(e) {}
+      if (entry.ctx) entry.ctx.close().catch(function() {});
+      if (entry.stream) entry.stream.getTracks().forEach(function(t) { t.stop(); });
+    });
+    multiAudioStreams.clear();
+  }
+
+  if (multiStartBtn) multiStartBtn.addEventListener('click', async function() {
+    if (multiSliceConfigs.length === 0) return;
+    multiActive = true;
+    multiStartBtn.style.display = 'none';
+    multiStopBtn.style.display = '';
+
+    // Tune each slice to its band
+    for (var cfg of multiSliceConfigs) {
+      var freqKhz = BAND_FREQS[cfg.band] || 14074;
+      window.api.tune(String(freqKhz), 'FT8', undefined, cfg.slicePort);
+    }
+
+    // Start engines in main process
+    var sliceData = multiSliceConfigs.map(function(c) {
+      return { sliceId: c.sliceId, mode: modeSelect.value, band: c.band, freqKhz: BAND_FREQS[c.band] || 14074, slicePort: c.slicePort };
+    });
+    window.api.jtcatStartMulti(sliceData);
+
+    // Start audio captures
+    await startMultiAudio();
+
+    // Clear decode log
+    bandActivity.innerHTML = '<div class="jp-empty">Multi-slice decoding...</div>';
+    myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
+  });
+
+  if (multiStopBtn) multiStopBtn.addEventListener('click', function() {
+    multiActive = false;
+    multiStartBtn.style.display = '';
+    multiStopBtn.style.display = 'none';
+    stopMultiAudio();
+    window.api.jtcatStop();
   });
 
   document.getElementById('jp-clear').addEventListener('click', function() {

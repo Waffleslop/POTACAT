@@ -42,6 +42,15 @@
     .jp-badge-grid { background: #4fc3f7; color: #000; }
     .jp-badge-call { background: #f0a500; color: #000; }
     .jp-badge-watch { background: #ff4081; color: #fff; }
+    .jp-badge-band { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 2px; margin-right: 2px; line-height: 1.4; display: inline-block; vertical-align: baseline; }
+    /* Multi-slice config panel */
+    .jp-multi-panel { padding: 6px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 11px; flex-shrink: 0; }
+    .jp-multi-panel.hidden { display: none; }
+    .jp-multi-row { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+    .jp-multi-row select, .jp-multi-row input { font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 2px 4px; }
+    .jp-multi-row select { width: 80px; }
+    .jp-multi-start { padding: 3px 12px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid var(--accent-green, #4ecca3); background: transparent; color: var(--accent-green, #4ecca3); cursor: pointer; }
+    .jp-multi-start:hover { background: var(--accent-green, #4ecca3); color: #000; }
     .jp-row.jp-watched { background: rgba(255, 64, 129, 0.12); }
     .jp-entity { font-size: 10px; color: var(--text-dim, #666); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 
@@ -134,9 +143,20 @@
       <span id="jp-countdown" class="jtcat-countdown">&mdash;</span>
       <span id="jp-sync" class="jtcat-sync">Sync: &mdash;</span>
     </div>
+    <button id="jp-multi-btn" class="jtcat-filter-btn" title="Multi-slice: decode multiple bands simultaneously" style="margin-left:4px;">Multi</button>
     <div style="display:flex;gap:4px;margin-left:auto;">
       <button id="jp-map-toggle" class="jtcat-filter-btn active" title="Toggle map">Map</button>
       <button id="jp-map-popout" class="jtcat-filter-btn" title="Pop out map">&#x2197;</button>
+    </div>
+  </div>
+
+  <!-- Multi-slice config panel -->
+  <div id="jp-multi-panel" class="jp-multi-panel hidden">
+    <div id="jp-multi-slices"></div>
+    <div style="display:flex;gap:6px;margin-top:4px;align-items:center;">
+      <button type="button" id="jp-multi-add" style="font-size:10px;padding:2px 8px;">+ Add Slice</button>
+      <button type="button" id="jp-multi-start" class="jp-multi-start">Start Multi-Slice</button>
+      <button type="button" id="jp-multi-stop" class="jp-multi-start" style="border-color:#e94560;color:#e94560;display:none;">Stop</button>
     </div>
   </div>
 
