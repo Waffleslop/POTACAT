@@ -190,6 +190,11 @@
     }
     .ptt-btn:hover { background: #3a3a5a; }
     .ptt-btn.active { background: #e94560; color: #fff; }
+    .macro-row { display: flex; align-items: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
+    .macro-label {
+      font-size: 10px; font-weight: bold; color: #666; text-transform: uppercase;
+      width: 36px; min-width: 36px; text-align: right; letter-spacing: 1px;
+    }
     .cw-macro-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
     .cw-macro-btn {
       background: #2a2a4a; border: 1px solid #3a3a5a; color: #ffd740;
@@ -255,10 +260,10 @@
       <button class="ptt-btn" id="ptt-btn">PTT</button>
     </div>
     <div class="widget-section" id="widget-cw">
-      <div class="cw-macro-row" id="cw-macro-row"></div>
+      <div class="macro-row"><span class="macro-label">CW</span><div class="cw-macro-row" id="cw-macro-row" style="display:contents"></div></div>
     </div>
     <div class="widget-section" id="widget-voice">
-      <div class="cw-macro-row" id="voice-macro-row"></div>
+      <div class="macro-row"><span class="macro-label">Voice</span><div class="cw-macro-row" id="voice-macro-row" style="display:contents"></div></div>
     </div>
   </div>
 
