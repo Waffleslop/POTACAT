@@ -7867,6 +7867,7 @@ app.whenReady().then(() => {
   // --- VFO Pop-out Window ---
   ipcMain.on('vfo-popout-open', () => {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) { vfoPopoutWin.focus(); return; }
+    const isMac = process.platform === 'darwin';
     vfoPopoutWin = new BrowserWindow({
       width: 340, height: 560, title: 'VFO',
       show: false,
