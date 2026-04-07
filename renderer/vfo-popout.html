@@ -197,6 +197,19 @@
       font-weight: bold;
     }
     .cw-macro-btn:hover { background: #3a3a5a; }
+    .voice-macro-btn {
+      background: #2a2a4a; border: 1px solid #3a3a5a; color: #4fc3f7;
+      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+      font-weight: bold;
+    }
+    .voice-macro-btn:hover { background: #3a3a5a; }
+    .voice-macro-btn.active { background: #4fc3f7; color: #1a1a2e; }
+    .voice-macro-btn.empty { opacity: 0.3; cursor: default; }
+    .voice-stop-btn {
+      background: #e94560; border: 1px solid #e94560; color: #fff;
+      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+      font-weight: bold;
+    }
     .cw-cancel-btn {
       background: #e94560; border: 1px solid #e94560; color: #fff;
       padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
@@ -243,6 +256,9 @@
     </div>
     <div class="widget-section" id="widget-cw">
       <div class="cw-macro-row" id="cw-macro-row"></div>
+    </div>
+    <div class="widget-section" id="widget-voice">
+      <div class="cw-macro-row" id="voice-macro-row"></div>
     </div>
   </div>
 
@@ -325,6 +341,7 @@
       <label class="settings-toggle"><input type="checkbox" id="w-smeter"> S-meter / SWR</label>
       <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT Button</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
+      <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
     </div>
   </div>
 
@@ -898,8 +915,8 @@ function esc(s) {
 }
 
 // --- Widget visibility ---
-const WIDGETS = ['smeter', 'ptt', 'cw'];
-let vfoWidgets = { smeter: false, ptt: false, cw: false };
+const WIDGETS = ['smeter', 'ptt', 'cw', 'voice'];
+let vfoWidgets = { smeter: false, ptt: false, cw: false, voice: false };
 
 async function loadWidgets() {
   const s = await window.api.getSettings();
@@ -923,18 +940,21 @@ async function saveWidgets() {
 const wSmeter = document.getElementById('w-smeter');
 const wPtt = document.getElementById('w-ptt');
 const wCw = document.getElementById('w-cw');
+const wVoice = document.getElementById('w-voice');
 
 function syncSettingsCheckboxes() {
   wSmeter.checked = !!vfoWidgets.smeter;
   wPtt.checked = !!vfoWidgets.ptt;
   wCw.checked = !!vfoWidgets.cw;
+  wVoice.checked = !!vfoWidgets.voice;
 }
 
-[wSmeter, wPtt, wCw].forEach(cb => {
+[wSmeter, wPtt, wCw, wVoice].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoWidgets.smeter = wSmeter.checked;
     vfoWidgets.ptt = wPtt.checked;
     vfoWidgets.cw = wCw.checked;
+    vfoWidgets.voice = wVoice.checked;
     applyWidgets();
     saveWidgets();
   });
@@ -1054,6 +1074,78 @@ async function loadCwMacros() {
   row.appendChild(cancelBtn);
 }
 loadCwMacros();
+
+// --- Voice Macros ---
+let voicePlayingIdx = -1;
+let voicePlaybackSource = null;
+let voicePlaybackCtx = null;
+
+async function loadVoiceMacros() {
+  const s = await window.api.getSettings();
+  const labels = s.voiceMacroLabels || ['CQ', 'ID', '73', '', ''];
+  const filled = await window.api.voiceMacroList();
+  const outputDeviceId = s.remoteAudioOutput || '';
+  const row = document.getElementById('voice-macro-row');
+  row.innerHTML = '';
+  for (let i = 0; i < 5; i++) {
+    if (!labels[i] && filled.indexOf(i) === -1) continue;
+    const btn = document.createElement('button');
+    const hasFill = filled.indexOf(i) >= 0;
+    btn.className = 'voice-macro-btn' + (hasFill ? '' : ' empty');
+    btn.textContent = labels[i] || ('V' + (i + 1));
+    btn.title = hasFill ? 'Click to play' : 'No recording';
+    if (hasFill) {
+      const idx = i;
+      btn.addEventListener('click', () => {
+        if (voicePlayingIdx === idx) { stopVoicePlayback(); return; }
+        playVoiceMacro(idx, btn, outputDeviceId);
+      });
+    }
+    row.appendChild(btn);
+  }
+  // Stop button
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'voice-stop-btn';
+  stopBtn.textContent = 'STOP';
+  stopBtn.title = 'Stop voice playback';
+  stopBtn.addEventListener('click', () => stopVoicePlayback());
+  row.appendChild(stopBtn);
+}
+
+async function playVoiceMacro(idx, btn, outputDeviceId) {
+  stopVoicePlayback();
+  const base64 = await window.api.voiceMacroLoad(idx);
+  if (!base64) return;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+
+  voicePlaybackCtx = new AudioContext();
+  if (voicePlaybackCtx.state === 'suspended') await voicePlaybackCtx.resume();
+  if (outputDeviceId && voicePlaybackCtx.setSinkId) {
+    try { await voicePlaybackCtx.setSinkId(outputDeviceId); } catch {}
+  }
+  voicePlaybackCtx.decodeAudioData(bytes.buffer, (audioBuffer) => {
+    voicePlayingIdx = idx;
+    btn.classList.add('active');
+    voicePlaybackSource = voicePlaybackCtx.createBufferSource();
+    voicePlaybackSource.buffer = audioBuffer;
+    voicePlaybackSource.connect(voicePlaybackCtx.destination);
+    window.api.voiceMacroPtt(true);
+    voicePlaybackSource.start(0);
+    voicePlaybackSource.onended = () => stopVoicePlayback();
+  });
+}
+
+function stopVoicePlayback() {
+  if (voicePlaybackSource) { try { voicePlaybackSource.stop(); } catch {} voicePlaybackSource = null; }
+  if (voicePlaybackCtx) { voicePlaybackCtx.close().catch(() => {}); voicePlaybackCtx = null; }
+  window.api.voiceMacroPtt(false);
+  voicePlayingIdx = -1;
+  document.querySelectorAll('.voice-macro-btn.active').forEach(b => b.classList.remove('active'));
+}
+
+loadVoiceMacros();
 
 // --- Init ---
 loadProfiles();
