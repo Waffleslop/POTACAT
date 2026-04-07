@@ -62,6 +62,14 @@
     .filter-badge {
       font-size: 11px; color: var(--text-dim); cursor: pointer;
     }
+    .audio-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      font-size: 16px; padding: 2px 6px; border-radius: 4px; cursor: pointer;
+      line-height: 1;
+    }
+    .audio-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+    .audio-btn.active { color: var(--accent-green); border-color: var(--accent-green); }
+    .audio-btn.muted { color: var(--accent-red); border-color: var(--accent-red); }
 
     /* --- Tabs --- */
     .tabs {
@@ -288,6 +296,7 @@
     <span class="freq-display" id="freq-display" title="Click to type frequency">---.---.---</span>
     <span class="freq-unit">kHz</span>
     <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
+    <button class="audio-btn" id="audio-btn" title="Radio audio monitor">&#x1F508;</button>
   </div>
   <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 2px;">
     <span class="filter-badge" id="filter-badge"></span>
@@ -1336,6 +1345,90 @@ function stopVoicePlayback() {
 }
 
 loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
+
+// --- Audio Monitor ---
+const audioBtn = document.getElementById('audio-btn');
+let audioMonitorCtx = null;
+let audioMonitorStream = null;
+let audioMonitorGain = null;
+let audioMonitorActive = false;
+let audioMonitorMuted = false;
+
+async function startAudioMonitor() {
+  if (audioMonitorCtx) return;
+  try {
+    const s = await window.api.getSettings();
+    const constraints = {
+      channelCount: 1,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    };
+    if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
+    audioMonitorStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    audioMonitorCtx = new AudioContext();
+    if (audioMonitorCtx.state === 'suspended') await audioMonitorCtx.resume();
+    const source = audioMonitorCtx.createMediaStreamSource(audioMonitorStream);
+    audioMonitorGain = audioMonitorCtx.createGain();
+    audioMonitorGain.gain.value = audioMonitorMuted ? 0 : 1;
+    source.connect(audioMonitorGain);
+    audioMonitorGain.connect(audioMonitorCtx.destination);
+    audioMonitorActive = true;
+    updateAudioBtn();
+  } catch (e) {
+    console.error('[VFO] Audio monitor failed:', e.message);
+    audioMonitorActive = false;
+    updateAudioBtn();
+  }
+}
+
+function stopAudioMonitor() {
+  if (audioMonitorStream) { audioMonitorStream.getTracks().forEach(t => t.stop()); audioMonitorStream = null; }
+  if (audioMonitorCtx) { audioMonitorCtx.close().catch(() => {}); audioMonitorCtx = null; }
+  audioMonitorGain = null;
+  audioMonitorActive = false;
+  updateAudioBtn();
+}
+
+function updateAudioBtn() {
+  if (!audioMonitorActive) {
+    audioBtn.textContent = '\u{1F508}'; // speaker low
+    audioBtn.className = 'audio-btn';
+    audioBtn.title = 'Click to listen to radio audio';
+  } else if (audioMonitorMuted) {
+    audioBtn.textContent = '\u{1F507}'; // speaker muted
+    audioBtn.className = 'audio-btn muted';
+    audioBtn.title = 'Muted — click to unmute';
+  } else {
+    audioBtn.textContent = '\u{1F50A}'; // speaker high
+    audioBtn.className = 'audio-btn active';
+    audioBtn.title = 'Listening — click to mute';
+  }
+}
+
+audioBtn.addEventListener('click', async () => {
+  if (!audioMonitorActive) {
+    // First click: start monitoring
+    await startAudioMonitor();
+  } else if (!audioMonitorMuted) {
+    // Second click: mute
+    audioMonitorMuted = true;
+    if (audioMonitorGain) audioMonitorGain.gain.value = 0;
+    updateAudioBtn();
+  } else {
+    // Third click: unmute
+    audioMonitorMuted = false;
+    if (audioMonitorGain) audioMonitorGain.gain.value = 1;
+    updateAudioBtn();
+  }
+});
+
+// Long press or right-click to stop monitoring entirely
+audioBtn.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  stopAudioMonitor();
+  audioMonitorMuted = false;
+});
 
 // --- Theme ---
 window.api.onTheme((theme) => {
