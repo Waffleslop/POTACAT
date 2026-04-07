@@ -4362,13 +4362,20 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-halt-tx', () => {
-    if (ft8Engine) {
+    if (jtcatManager) {
+      for (const id of jtcatManager.sliceIds) {
+        const eng = jtcatManager.getEngine(id);
+        if (eng) { eng._txEnabled = false; eng.setTxMessage(''); if (eng._txActive) eng.txComplete(); }
+        jtcatManager.releaseTx(id);
+      }
+    } else if (ft8Engine) {
       ft8Engine._txEnabled = false;
       ft8Engine.setTxMessage('');
       if (ft8Engine._txActive) ft8Engine.txComplete();
     }
     remoteJtcatQso = null;
     remoteJtcatBroadcastQso();
+    handleRemotePtt(false);
   });
 
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
@@ -9436,12 +9443,25 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-set-rx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setRxFreq(hz); });
   ipcMain.on('jtcat-enable-tx', (_e, enabled) => { if (ft8Engine) ft8Engine._txEnabled = enabled; });
   ipcMain.on('jtcat-halt-tx', () => {
-    if (ft8Engine) {
-      ft8Engine._txEnabled = false;
-      if (ft8Engine._txActive) {
-        ft8Engine.txComplete(); // force stop if currently transmitting
+    // Halt TX on ALL engines (multi-slice: any engine could be TX'ing)
+    if (jtcatManager) {
+      for (const id of jtcatManager.sliceIds) {
+        const eng = jtcatManager.getEngine(id);
+        if (eng) {
+          eng._txEnabled = false;
+          eng.setTxMessage('');
+          if (eng._txActive) eng.txComplete();
+        }
+        jtcatManager.releaseTx(id);
       }
+    } else if (ft8Engine) {
+      ft8Engine._txEnabled = false;
+      if (ft8Engine._txActive) ft8Engine.txComplete();
     }
+    // Also clear QSO state
+    if (popoutJtcatQso) { popoutJtcatQso = null; popoutBroadcastQso(); }
+    if (remoteJtcatQso) { remoteJtcatQso = null; remoteJtcatBroadcastQso(); }
+    handleRemotePtt(false);
   });
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
