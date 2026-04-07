@@ -7912,6 +7912,7 @@ app.whenReady().then(() => {
     vfoPopoutWin.webContents.on('did-finish-load', () => {
       sendVfoState();
       if (_cachedSolarData) vfoPopoutWin.webContents.send('solar-data', _cachedSolarData);
+      vfoPopoutWin.webContents.send('vfo-popout-theme', settings.lightMode ? 'light' : 'dark');
     });
     vfoPopoutWin.on('close', () => {
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed() && !vfoPopoutWin.isMaximized() && !vfoPopoutWin.isMinimized()) {
@@ -7937,6 +7938,10 @@ app.whenReady().then(() => {
   ipcMain.on('vfo-popout-close', () => { if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.close(); });
 
   // VFO mode/filter commands from popout
+  ipcMain.on('vfo-popout-theme', (_e, theme) => {
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('vfo-popout-theme', theme);
+  });
+
   ipcMain.on('vfo-tuned-spot', (_e, spot) => {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
       vfoPopoutWin.webContents.send('vfo-tuned-spot', spot);

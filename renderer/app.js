@@ -6792,6 +6792,7 @@ quickLightMode.addEventListener('change', async () => {
   if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(light ? 'light' : 'dark');
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(light ? 'light' : 'dark');
   if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(light ? 'light' : 'dark');
+  window.api.vfoPopoutTheme(light ? 'light' : 'dark');
   await window.api.saveSettings({ lightMode: light });
 });
 

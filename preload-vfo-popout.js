@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   onTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
   onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, data) => cb(data)),
   onTunedSpot: (cb) => ipcRenderer.on('vfo-tuned-spot', (_e, spot) => cb(spot)),
+  onTheme: (cb) => ipcRenderer.on('vfo-popout-theme', (_e, theme) => cb(theme)),
   minimize: () => ipcRenderer.send('vfo-popout-minimize'),
   maximize: () => ipcRenderer.send('vfo-popout-maximize'),
   close: () => ipcRenderer.send('vfo-popout-close'),
