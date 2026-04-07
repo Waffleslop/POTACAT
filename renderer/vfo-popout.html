@@ -195,20 +195,26 @@
       padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
       font-weight: bold;
     }
-    .widget-gear {
-      background: none; border: none; color: #666; font-size: 14px;
-      cursor: pointer; padding: 2px 4px; -webkit-app-region: no-drag;
+    .widget-gear-row {
+      display: flex; justify-content: flex-end; padding: 0 10px 2px; position: relative;
     }
-    .widget-gear:hover { color: #aaa; }
+    .widget-gear {
+      background: #2a2a4a; border: 1px solid #3a3a5a; color: #4fc3f7; font-size: 16px;
+      cursor: pointer; padding: 3px 8px; border-radius: 4px;
+    }
+    .widget-gear:hover { background: #3a3a5a; color: #fff; }
     .widget-menu {
-      position: absolute; right: 8px; top: 28px; z-index: 200;
-      background: #1e1e36; border: 1px solid #3a3a5a; border-radius: 6px;
-      padding: 6px 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      position: absolute; right: 10px; top: 28px; z-index: 200;
+      background: #1e1e36; border: 1px solid #4fc3f7; border-radius: 6px;
+      padding: 8px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
     }
     .widget-menu label {
-      display: block; font-size: 12px; color: #ccc; padding: 3px 0; cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: #e0e0e0; padding: 5px 0; cursor: pointer;
     }
-    .widget-menu input { margin-right: 6px; }
+    .widget-menu input[type="checkbox"] {
+      width: 16px; height: 16px; accent-color: #4fc3f7; cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -216,7 +222,6 @@
   <div class="titlebar">
     <span>VFO</span>
     <div class="titlebar-btns">
-      <button class="widget-gear" id="widget-gear" title="Show/hide widgets">&#x2699;</button>
       <button onclick="window.api.minimize()">&#x2013;</button>
       <button onclick="window.api.maximize()">&#x25A1;</button>
       <button class="close-btn" onclick="window.api.close()">&#x2715;</button>
@@ -228,9 +233,12 @@
     <span class="freq-display" id="freq-display" title="Click to type frequency">---.---.---</span>
     <span class="freq-unit">kHz</span>
   </div>
-  <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 6px;">
+  <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 2px;">
     <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
     <span class="filter-badge" id="filter-badge"></span>
+  </div>
+  <div class="widget-gear-row">
+    <button class="widget-gear" id="widget-gear" title="Show/hide widgets">&#x2699; Widgets</button>
   </div>
 
   <!-- Widgets (toggled via gear menu) -->
@@ -945,6 +953,7 @@ document.getElementById('widget-gear').addEventListener('click', (e) => {
     lbl.appendChild(document.createTextNode(item.label));
     menu.appendChild(lbl);
   });
+  menu.addEventListener('click', (ev) => ev.stopPropagation());
   document.body.appendChild(menu);
   const dismiss = () => { const m = document.getElementById('widget-menu'); if (m) m.remove(); document.removeEventListener('click', dismiss); };
   setTimeout(() => document.addEventListener('click', dismiss), 0);
