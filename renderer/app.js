@@ -2272,6 +2272,7 @@ function restoreFilters() {
     // Update dropdown button text
     [bandFilterEl, modeFilterEl, continentFilterEl].forEach((container) => {
       const textEl = container.querySelector('.multi-dropdown-text');
+      if (!textEl) return; // continent filter is inline, no button text
       const allCb = container.querySelector('input[value="all"]');
       const itemCbs = [...container.querySelectorAll('input:not([value="all"])')];
       const checked = itemCbs.filter((cb) => cb.checked);
