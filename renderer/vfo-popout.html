@@ -71,6 +71,7 @@
       padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
     }
     .step-btn.active { background: #4fc3f7; color: #1a1a2e; border-color: #4fc3f7; }
+    .rig-toggles-shared { justify-content: flex-start; }
     .toggle-btn {
       background: #2a2a4a; border: 1px solid #3a3a5a; color: #aaa;
       padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;
@@ -289,12 +290,12 @@
   <div class="tab-content">
     <!-- Dial tab -->
     <div class="tab-pane active" id="tab-dial">
-      <div class="dial-wrap">
-        <canvas id="vfo-dial" width="200" height="200"></canvas>
-      </div>
-      <div class="vfo-section" id="sec-step">
-        <div style="display:flex;justify-content:center;padding:4px 0;">
-          <select id="step-select" style="background:#2a2a4a;border:1px solid #3a3a5a;color:#4fc3f7;padding:4px 8px;border-radius:4px;font-size:13px;cursor:pointer;"></select>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+        <div class="dial-wrap">
+          <canvas id="vfo-dial" width="200" height="200"></canvas>
+        </div>
+        <div class="vfo-section" id="sec-step" style="display:flex;flex-direction:column;align-items:center;">
+          <select id="step-select" style="background:#2a2a4a;border:1px solid #3a3a5a;color:#4fc3f7;padding:4px 6px;border-radius:4px;font-size:11px;cursor:pointer;writing-mode:horizontal-tb;"></select>
         </div>
       </div>
       <div class="vfo-section" id="sec-band">
@@ -304,6 +305,8 @@
       <div class="vfo-section" id="sec-filter">
         <div class="section-label">Filter</div>
         <div class="step-row filter-quick-shared"></div>
+      </div>
+      <div class="vfo-section" id="sec-filter-slider">
         <div class="filter-row">
           <label>BW</label>
           <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400">
@@ -374,7 +377,8 @@
       <div class="section-label">Dial Sections</div>
       <label class="settings-toggle"><input type="checkbox" id="s-step" checked> Step Size</label>
       <label class="settings-toggle"><input type="checkbox" id="s-band" checked> Quick Band</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-filter" checked> Filter</label>
+      <label class="settings-toggle"><input type="checkbox" id="s-filter" checked> Filter Buttons</label>
+      <label class="settings-toggle"><input type="checkbox" id="s-filter-slider" checked> Filter Slider</label>
       <label class="settings-toggle"><input type="checkbox" id="s-controls" checked> Controls</label>
       <label class="settings-toggle"><input type="checkbox" id="s-profiles-inline"> Profiles (inline)</label>
       <div class="section-label">Quick Bands</div>
@@ -985,8 +989,8 @@ function esc(s) {
 // --- Widget visibility ---
 const WIDGETS = ['smeter', 'ptt', 'cw', 'voice'];
 let vfoWidgets = { smeter: false, ptt: false, cw: false, voice: false };
-const SECTIONS = ['step', 'band', 'filter', 'controls', 'profiles-inline'];
-let vfoSections = { step: true, band: true, filter: true, controls: true, 'profiles-inline': false };
+const SECTIONS = ['step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
+let vfoSections = { step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
 async function loadWidgets() {
   const s = await window.api.getSettings();
@@ -1030,6 +1034,7 @@ const wVoice = document.getElementById('w-voice');
 const sStep = document.getElementById('s-step');
 const sBand = document.getElementById('s-band');
 const sFilter = document.getElementById('s-filter');
+const sFilterSlider = document.getElementById('s-filter-slider');
 const sControls = document.getElementById('s-controls');
 const sProfilesInline = document.getElementById('s-profiles-inline');
 
@@ -1041,6 +1046,7 @@ function syncSettingsCheckboxes() {
   sStep.checked = !!vfoSections.step;
   sBand.checked = !!vfoSections.band;
   sFilter.checked = !!vfoSections.filter;
+  sFilterSlider.checked = !!vfoSections['filter-slider'];
   sControls.checked = !!vfoSections.controls;
   sProfilesInline.checked = !!vfoSections['profiles-inline'];
 }
@@ -1056,11 +1062,12 @@ function syncSettingsCheckboxes() {
   });
 });
 
-[sStep, sBand, sFilter, sControls, sProfilesInline].forEach(cb => {
+[sStep, sBand, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoSections.step = sStep.checked;
     vfoSections.band = sBand.checked;
     vfoSections.filter = sFilter.checked;
+    vfoSections['filter-slider'] = sFilterSlider.checked;
     vfoSections.controls = sControls.checked;
     vfoSections['profiles-inline'] = sProfilesInline.checked;
     applySections();
