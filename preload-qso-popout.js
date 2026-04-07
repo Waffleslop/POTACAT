@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   resolveCallsignLocations: (callsigns) => ipcRenderer.invoke('resolve-callsign-locations', callsigns),
   getPark: (ref) => ipcRenderer.invoke('get-park', ref),
   resendQsosToLogbook: (qsos) => ipcRenderer.invoke('resend-qsos-to-logbook', qsos),
+  saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   minimize: () => ipcRenderer.send('qso-popout-minimize'),
   maximize: () => ipcRenderer.send('qso-popout-maximize'),

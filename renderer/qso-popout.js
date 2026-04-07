@@ -681,6 +681,79 @@ tbody.addEventListener('click', async (e) => {
   }
 });
 
+// --- New QSO form ---
+const newQsoBtn = document.getElementById('qso-new');
+const newQsoForm = document.getElementById('qso-new-form');
+const newQsoCall = document.getElementById('qso-new-call');
+const newQsoFreq = document.getElementById('qso-new-freq');
+const newQsoMode = document.getElementById('qso-new-mode');
+const newQsoRstS = document.getElementById('qso-new-rst-s');
+const newQsoRstR = document.getElementById('qso-new-rst-r');
+const newQsoPark = document.getElementById('qso-new-park');
+const newQsoComment = document.getElementById('qso-new-comment');
+
+newQsoBtn.addEventListener('click', () => {
+  newQsoForm.classList.toggle('hidden');
+  if (!newQsoForm.classList.contains('hidden')) newQsoCall.focus();
+});
+
+document.getElementById('qso-new-cancel').addEventListener('click', () => {
+  newQsoForm.classList.add('hidden');
+});
+
+document.getElementById('qso-new-save').addEventListener('click', async () => {
+  const call = newQsoCall.value.trim().toUpperCase();
+  if (!call) { newQsoCall.focus(); return; }
+  const now = new Date();
+  const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const timeOn = now.toISOString().slice(11, 16).replace(/:/g, '');
+  const freqKhz = newQsoFreq.value.trim();
+  const freqMhz = freqKhz ? (parseFloat(freqKhz) / 1000).toFixed(6) : '';
+  const mode = newQsoMode.value;
+  const park = newQsoPark.value.trim().toUpperCase();
+
+  const qsoData = {
+    callsign: call,
+    frequency: freqKhz,
+    mode,
+    qsoDate,
+    timeOn,
+    rstSent: newQsoRstS.value.trim() || '59',
+    rstRcvd: newQsoRstR.value.trim() || '59',
+    comment: newQsoComment.value.trim(),
+  };
+  if (park) {
+    qsoData.sig = 'POTA';
+    qsoData.sigInfo = park;
+  }
+  // Get station callsign from settings
+  const s = await window.api.getSettings();
+  if (s.myCallsign) qsoData.stationCallsign = s.myCallsign.toUpperCase();
+  if (s.grid) qsoData.myGridsquare = s.grid;
+
+  await window.api.saveQso(qsoData);
+
+  // Clear form and refresh
+  newQsoCall.value = '';
+  newQsoFreq.value = '';
+  newQsoRstS.value = '59';
+  newQsoRstR.value = '59';
+  newQsoPark.value = '';
+  newQsoComment.value = '';
+  newQsoForm.classList.add('hidden');
+
+  // Reload QSOs
+  allQsos = await window.api.getAllQsos();
+  allQsos.forEach((q, i) => { q.idx = i; });
+  render();
+  showToast('QSO logged: ' + call);
+});
+
+// Enter key in callsign field submits
+newQsoCall.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('qso-new-save').click();
+});
+
 // --- Import ADIF ---
 document.getElementById('qso-import').addEventListener('click', async () => {
   try {
