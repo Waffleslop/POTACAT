@@ -1440,6 +1440,21 @@ thead th {
   border-color: var(--accent-red);
 }
 
+.view-menu-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.view-menu-item:hover {
+  background: var(--bg-header);
+}
+
 .popout-btn {
   font-size: 14px;
   padding: 2px 8px;

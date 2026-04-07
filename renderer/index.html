@@ -55,18 +55,6 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="FREEDV"> FreeDV</label>
         </div>
       </div>
-      <div class="multi-dropdown" id="continent-filter">
-        <button class="multi-dropdown-btn" type="button">Region: <span class="multi-dropdown-text">All</span></button>
-        <div class="multi-dropdown-menu">
-          <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
-          <label class="multi-dropdown-item"><input type="checkbox" value="AF"> Africa</label>
-          <label class="multi-dropdown-item"><input type="checkbox" value="AS"> Asia</label>
-          <label class="multi-dropdown-item"><input type="checkbox" value="EU"> Europe</label>
-          <label class="multi-dropdown-item"><input type="checkbox" value="NA"> North America</label>
-          <label class="multi-dropdown-item"><input type="checkbox" value="OC"> Oceania</label>
-          <label class="multi-dropdown-item"><input type="checkbox" value="SA"> South America</label>
-        </div>
-      </div>
       <div class="multi-dropdown" id="spots-dropdown">
         <button class="multi-dropdown-btn" type="button" id="spots-btn">Spots</button>
         <div class="spots-dropdown-panel">
@@ -87,6 +75,17 @@
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
+          <div class="spots-panel-divider"></div>
+          <div class="spots-panel-section-label">Region</div>
+          <div id="continent-filter" class="multi-dropdown-menu" style="position:static;box-shadow:none;background:transparent;padding:0;">
+            <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="AF"> Africa</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="AS"> Asia</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="EU"> Europe</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="NA"> North America</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="OC"> Oceania</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="SA"> South America</label>
+          </div>
           <div class="spots-panel-divider" id="spots-events-divider"></div>
           <div class="spots-panel-section-label" id="spots-events-label">Events &amp; Awards</div>
           <div id="spots-events-container"></div>
@@ -157,10 +156,15 @@
         <button id="view-table-btn" class="view-btn active" title="Table view">Table</button>
         <button id="view-map-btn" class="view-btn" title="Map view">Map</button>
         <button id="popout-map-btn" class="view-btn popout-btn" title="Pop-out map window">&#x2197;</button>
-        <button id="view-rbn-btn" class="view-btn hidden" title="Propagation — RBN &amp; PSKReporter">Propagation</button>
-        <button id="cluster-terminal-btn" class="view-btn hidden" title="DX Cluster Terminal">Terminal</button>
-        <button id="view-directory-btn" class="view-btn hidden" title="HF Nets &amp; SWL Broadcast Directory">Directory</button>
-        <button id="view-jtcat-btn" class="view-btn" title="JTCAT — FT8/FT4 Digital Modes">JTCAT</button>
+        <div class="multi-dropdown" id="views-dropdown">
+          <button class="multi-dropdown-btn view-btn" type="button" id="views-btn">More &#x25BE;</button>
+          <div class="multi-dropdown-menu" style="min-width:140px;">
+            <button class="view-menu-item" id="view-jtcat-btn">JTCAT</button>
+            <button class="view-menu-item" id="view-rbn-btn">Propagation</button>
+            <button class="view-menu-item" id="cluster-terminal-btn">Terminal</button>
+            <button class="view-menu-item" id="view-directory-btn">Directory</button>
+          </div>
+        </div>
         <button id="vfo-popout-btn" class="view-btn" title="VFO — Frequency dial, keypad, modes, profiles">VFO</button>
       </div>
     </div>

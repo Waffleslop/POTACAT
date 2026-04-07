@@ -1674,7 +1674,18 @@ function getDropdownValues(container) {
 
 initMultiDropdown(bandFilterEl, 'Band', () => { updateBandButtonsVisibility(); render(); });
 initMultiDropdown(modeFilterEl, 'Mode');
-initMultiDropdown(continentFilterEl, 'Region');
+// Continent filter is now inline in Spots panel — wire "All" toggle manually
+if (continentFilterEl) {
+  continentFilterEl.addEventListener('change', (e) => {
+    const allCb = continentFilterEl.querySelector('input[value="all"]');
+    if (e.target.value === 'all') {
+      continentFilterEl.querySelectorAll('input:not([value="all"])').forEach(cb => { cb.checked = false; });
+    } else {
+      allCb.checked = ![...continentFilterEl.querySelectorAll('input:not([value="all"])')].some(cb => cb.checked);
+    }
+    render();
+  });
+}
 initMultiDropdown(rbnBandFilterEl, 'Band', rerenderRbn);
 initMultiDropdown(propModeFilterEl, 'Mode', rerenderRbn);
 
@@ -5404,6 +5415,21 @@ if (viewDirectoryBtn) viewDirectoryBtn.addEventListener('click', () => {
     updateDirectoryButton();
   }
 })();
+// "More" views dropdown toggle
+const viewsDropdown = document.getElementById('views-dropdown');
+if (viewsDropdown) {
+  const viewsBtn = document.getElementById('views-btn');
+  viewsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.multi-dropdown.open').forEach(d => { if (d !== viewsDropdown) d.classList.remove('open'); });
+    viewsDropdown.classList.toggle('open');
+  });
+  // Close dropdown when a view item is clicked
+  viewsDropdown.querySelectorAll('.view-menu-item').forEach(item => {
+    item.addEventListener('click', () => { viewsDropdown.classList.remove('open'); });
+  });
+}
+
 viewJtcatBtn.addEventListener('click', () => {
   window.api.jtcatPopoutOpen();
 });
