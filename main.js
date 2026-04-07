@@ -538,9 +538,7 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   _currentFreqHz = hz;
-  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
-    vfoPopoutWin.webContents.send('vfo-radio-state', { freq: hz, mode: _currentMode, filterWidth: _currentFilterWidth });
-  }
+  sendVfoState();
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
 }
@@ -551,9 +549,7 @@ function sendCatMode(mode) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
   _currentMode = mode; // keep real mode internally for CAT
   _modeSuppressUntil = 0;
-  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
-    vfoPopoutWin.webContents.send('vfo-radio-state', { freq: _currentFreqHz, mode, filterWidth: _currentFilterWidth });
-  }
+  sendVfoState();
   broadcastRigState();
   sendN1mmRadioInfo();
 }
@@ -597,6 +593,7 @@ function broadcastRigState() {
     capabilities: caps,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
+  sendVfoState();
   broadcastRemoteRadioStatus();
 }
 
@@ -4668,6 +4665,19 @@ function handleRemotePtt(state) {
 }
 
 /** Apply FreeDV audio mute state to ECHOCAT WebRTC — called on state change and audio (re)connect */
+/** Send full radio state to VFO popout */
+function sendVfoState() {
+  if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
+  vfoPopoutWin.webContents.send('vfo-radio-state', {
+    freq: _currentFreqHz || 0,
+    mode: _currentMode || '',
+    filterWidth: _currentFilterWidth || 0,
+    nb: _currentNbState,
+    atu: _currentAtuState,
+    customCatButtons: settings.customCatButtons || [],
+  });
+}
+
 function applyFreedvAudioMute() {
   if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
     remoteAudioWin.webContents.send('freedv-mute', _freedvAudioMuted);
@@ -7886,13 +7896,7 @@ app.whenReady().then(() => {
     vfoPopoutWin.setMenuBarVisibility(false);
     vfoPopoutWin.loadFile(path.join(__dirname, 'renderer', 'vfo-popout.html'));
     vfoPopoutWin.webContents.on('did-finish-load', () => {
-      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
-        vfoPopoutWin.webContents.send('vfo-radio-state', {
-          freq: _currentFreqHz || 0,
-          mode: _currentMode || '',
-          filterWidth: _currentFilterWidth || 0,
-        });
-      }
+      sendVfoState();
     });
     vfoPopoutWin.on('close', () => {
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed() && !vfoPopoutWin.isMaximized() && !vfoPopoutWin.isMinimized()) {
