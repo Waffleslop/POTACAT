@@ -86,7 +86,7 @@
     .cat-cmd-btn:active { background: #4a4a6a; }
 
     /* --- Keypad tab --- */
-    .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 260px; margin: 0 auto; padding: 8px 0; }
+    .keypad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 300px; margin: 0 auto; padding: 8px 0; }
     .kp-btn {
       background: #2a2a4a; border: 1px solid #3a3a5a; color: #e0e0e0;
       font-size: 20px; padding: 14px 0; border-radius: 6px; cursor: pointer;
@@ -101,6 +101,10 @@
       grid-column: 1 / -1; text-align: center; font-family: 'Consolas', monospace;
       font-size: 24px; background: #0d0d1a; border: 1px solid #3a3a5a;
       color: #f0a500; padding: 8px; border-radius: 4px;
+    }
+    .kp-digits {
+      grid-column: 1 / -1;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
     }
 
     /* --- Mode tab --- */
@@ -205,17 +209,20 @@
     <div class="tab-pane" id="tab-keypad">
       <div class="keypad">
         <input type="text" class="kp-input" id="kp-input" placeholder="MHz" readonly>
-        <button class="kp-btn" data-digit="1">1</button>
-        <button class="kp-btn" data-digit="2">2</button>
-        <button class="kp-btn" data-digit="3">3</button>
-        <button class="kp-btn" data-digit="4">4</button>
-        <button class="kp-btn" data-digit="5">5</button>
-        <button class="kp-btn" data-digit="6">6</button>
-        <button class="kp-btn" data-digit="7">7</button>
-        <button class="kp-btn" data-digit="8">8</button>
-        <button class="kp-btn" data-digit="9">9</button>
+        <div class="kp-digits">
+          <button class="kp-btn" data-digit="1">1</button>
+          <button class="kp-btn" data-digit="2">2</button>
+          <button class="kp-btn" data-digit="3">3</button>
+          <button class="kp-btn" data-digit="4">4</button>
+          <button class="kp-btn" data-digit="5">5</button>
+          <button class="kp-btn" data-digit="6">6</button>
+          <button class="kp-btn" data-digit="7">7</button>
+          <button class="kp-btn" data-digit="8">8</button>
+          <button class="kp-btn" data-digit="9">9</button>
+        </div>
         <button class="kp-btn kp-action kp-clear" id="kp-clear">CLR</button>
         <button class="kp-btn" data-digit="0">0</button>
+        <button class="kp-btn" id="kp-dot">.</button>
         <button class="kp-btn kp-action kp-go" id="kp-go">GO</button>
       </div>
       <div style="text-align:center; padding:6px; font-size:11px; color:#666;">
@@ -694,19 +701,12 @@ let kpBuffer = '';
 document.querySelectorAll('.kp-btn[data-digit]').forEach(btn => {
   btn.addEventListener('click', () => {
     if (kpBuffer.length >= 10) return;
-    // Auto-insert decimal after first set of digits if not present
-    if (btn.dataset.digit === '0' && kpBuffer === '') return;
     kpBuffer += btn.dataset.digit;
-    // Auto-add decimal point if needed
-    if (kpBuffer.length === 2 && !kpBuffer.includes('.') && parseFloat(kpBuffer) >= 14) {
-      kpBuffer += '.';
-    }
     kpInput.value = kpBuffer;
   });
 });
 
-// Decimal point via double-tap on 0 or dedicated handling
-document.querySelector('.kp-btn[data-digit="0"]').addEventListener('dblclick', () => {
+document.getElementById('kp-dot').addEventListener('click', () => {
   if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpInput.value = kpBuffer; }
 });
 
@@ -716,11 +716,20 @@ document.getElementById('kp-clear').addEventListener('click', () => {
 });
 
 document.getElementById('kp-go').addEventListener('click', () => {
-  let mhz = parseFloat(kpBuffer);
-  if (isNaN(mhz) || mhz <= 0) return;
-  // Heuristic: if > 300, user typed kHz; if > 1000000, Hz
-  if (mhz > 300000) mhz = mhz / 1000000;
-  else if (mhz > 300) mhz = mhz / 1000;
+  const val = parseFloat(kpBuffer);
+  if (isNaN(val) || val <= 0) return;
+  // If the input has a decimal point, treat as MHz (user was explicit)
+  // Otherwise: > 300 = kHz, > 300000 = Hz, else MHz
+  let mhz;
+  if (kpBuffer.includes('.')) {
+    mhz = val;
+  } else if (val > 300000) {
+    mhz = val / 1000000;
+  } else if (val > 300) {
+    mhz = val / 1000;
+  } else {
+    mhz = val;
+  }
   const khz = mhz * 1000;
   window.api.tune(khz);
   currentFreqHz = khz * 1000;
