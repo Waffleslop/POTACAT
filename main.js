@@ -2451,7 +2451,8 @@ function startJtcat(mode) {
         r.watched = wlCalls.length > 0 && wlCalls.some(w => uc.indexOf(w) >= 0 || w.indexOf(uc) >= 0);
         // Extract grid from CQ messages (e.g. "CQ K1ABC FN42")
         const gm = (r.text || '').match(/\b([A-R]{2}\d{2})\s*$/i);
-        if (gm) {
+        // Exclude FT8 exchanges that look like grids (RR73, RR99, etc.)
+        if (gm && !(/^RR\d{2}$/i.test(gm[1]))) {
           r.grid = gm[1].toUpperCase();
           r.newGrid = !rosterWorkedGrids.has(r.grid);
         }
