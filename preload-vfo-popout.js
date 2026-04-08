@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   sendCustomCat: (cmd) => ipcRenderer.send('rig-control', { action: 'send-custom-cat', command: cmd }),
   sendCwText: (text) => ipcRenderer.send('send-cw-text', text),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
+  cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
   openLogForm: () => ipcRenderer.send('vfo-open-log'),
   setAlwaysOnTop: (on) => ipcRenderer.send('vfo-set-always-on-top', on),

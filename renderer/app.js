@@ -131,6 +131,7 @@ function notifyVfoTunedSpot(spot) {
     reference: spot.reference || '',
     parkName: spot.parkName || '',
     source: spot.source || '',
+    wpm: spot.wpm || null,
   };
   window.api.vfoTunedSpot(data);
   // QRZ lookup for name/grid/country

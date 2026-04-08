@@ -263,6 +263,36 @@
       width: 36px; min-width: 36px; text-align: right; letter-spacing: 1px;
     }
     .cw-macro-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+    .cw-ctrl-row {
+      display: flex; align-items: center; gap: 6px; padding: 2px 0 2px 40px;
+    }
+    .cw-wpm-btn {
+      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-primary);
+      width: 26px; height: 26px; border-radius: 4px; font-size: 16px; font-weight: bold;
+      cursor: pointer; text-align: center; line-height: 1;
+    }
+    .cw-wpm-btn:hover { background: var(--bg-btn-hover); }
+    .cw-wpm-val { font-family: monospace; font-size: 16px; font-weight: bold; color: var(--accent-gold); min-width: 24px; text-align: center; }
+    .cw-wpm-unit { font-size: 10px; color: var(--text-dimmer); }
+    .cw-spot-wpm { font-size: 11px; color: var(--text-dim); margin-left: 4px; }
+    .cw-sync-btn {
+      background: var(--accent-blue); border: none; color: #fff; font-size: 10px;
+      padding: 2px 8px; border-radius: 3px; cursor: pointer; font-weight: bold;
+    }
+    .cw-sync-btn:hover { opacity: 0.8; }
+    .cw-text-row {
+      display: flex; gap: 4px; padding: 2px 0 4px 40px;
+    }
+    .cw-text-input {
+      flex: 1; background: var(--bg-input); border: 1px solid var(--border);
+      color: var(--text-primary); padding: 4px 8px; border-radius: 4px;
+      font-family: monospace; font-size: 13px; text-transform: uppercase;
+    }
+    .cw-send-btn {
+      background: var(--accent-gold); border: none; color: #1a1a2e; font-weight: bold;
+      padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    .cw-send-btn:hover { opacity: 0.8; }
     .cw-macro-btn {
       background: var(--bg-btn); border: 1px solid var(--border); color: var(--accent-gold);
       padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
@@ -332,6 +362,20 @@
     </div>
     <div class="widget-section" id="widget-cw">
       <div class="macro-row"><span class="macro-label">CW</span><div class="cw-macro-row" id="cw-macro-row" style="display:contents"></div></div>
+    </div>
+    <div class="widget-section" id="widget-cw-controls">
+      <div class="cw-ctrl-row">
+        <button class="cw-wpm-btn" id="vfo-cw-down" title="Decrease WPM">-</button>
+        <span class="cw-wpm-val" id="vfo-cw-wpm">20</span>
+        <span class="cw-wpm-unit">WPM</span>
+        <button class="cw-wpm-btn" id="vfo-cw-up" title="Increase WPM">+</button>
+        <span class="cw-spot-wpm" id="vfo-cw-spot-wpm"></span>
+        <button class="cw-sync-btn hidden" id="vfo-cw-sync" title="Match their speed">Sync</button>
+      </div>
+      <div class="cw-text-row">
+        <input type="text" class="cw-text-input" id="vfo-cw-input" placeholder="Type CW text..." spellcheck="false" autocomplete="off">
+        <button class="cw-send-btn" id="vfo-cw-send">TX</button>
+      </div>
     </div>
     <div class="widget-section" id="widget-voice">
       <div class="macro-row"><span class="macro-label">Voice</span><div class="cw-macro-row" id="voice-macro-row" style="display:contents"></div></div>
@@ -450,6 +494,7 @@
         <select id="mic-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:12px;"></select>
       </div>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
+      <label class="settings-toggle"><input type="checkbox" id="w-cw-controls"> CW Speed / Text Input</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
       <div class="section-label">Window</div>
       <label class="settings-toggle"><input type="checkbox" id="s-always-on-top" checked> Always on top</label>
@@ -1068,8 +1113,8 @@ function esc(s) {
 }
 
 // --- Widget visibility ---
-const WIDGETS = ['smeter', 'ptt', 'log', 'cw', 'voice'];
-let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, voice: false };
+const WIDGETS = ['smeter', 'ptt', 'log', 'cw', 'cw-controls', 'voice'];
+let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, 'cw-controls': false, voice: false };
 const SECTIONS = ['dial', 'solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
 let vfoSections = { dial: true, solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
@@ -1125,6 +1170,7 @@ const wSmeter = document.getElementById('w-smeter');
 const wPtt = document.getElementById('w-ptt');
 const wLog = document.getElementById('w-log');
 const wCw = document.getElementById('w-cw');
+const wCwControls = document.getElementById('w-cw-controls');
 const wVoice = document.getElementById('w-voice');
 const sAlwaysOnTop = document.getElementById('s-always-on-top');
 const sDial = document.getElementById('s-dial');
@@ -1141,6 +1187,7 @@ function syncSettingsCheckboxes() {
   wPtt.checked = !!vfoWidgets.ptt;
   wLog.checked = !!vfoWidgets.log;
   wCw.checked = !!vfoWidgets.cw;
+  wCwControls.checked = !!vfoWidgets['cw-controls'];
   wVoice.checked = !!vfoWidgets.voice;
   sDial.checked = !!vfoSections.dial;
   sSolar.checked = !!vfoSections.solar;
@@ -1152,12 +1199,13 @@ function syncSettingsCheckboxes() {
   sProfilesInline.checked = !!vfoSections['profiles-inline'];
 }
 
-[wSmeter, wPtt, wLog, wCw, wVoice].forEach(cb => {
+[wSmeter, wPtt, wLog, wCw, wCwControls, wVoice].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoWidgets.smeter = wSmeter.checked;
     vfoWidgets.ptt = wPtt.checked;
     vfoWidgets.log = wLog.checked;
     vfoWidgets.cw = wCw.checked;
+    vfoWidgets['cw-controls'] = wCwControls.checked;
     vfoWidgets.voice = wVoice.checked;
     applyWidgets();
     saveWidgets();
@@ -1446,6 +1494,57 @@ function stopVoicePlayback() {
 
 loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
 
+// --- CW Speed / Text Controls ---
+const vfoCwWpm = document.getElementById('vfo-cw-wpm');
+const vfoCwUp = document.getElementById('vfo-cw-up');
+const vfoCwDown = document.getElementById('vfo-cw-down');
+const vfoCwInput = document.getElementById('vfo-cw-input');
+const vfoCwSend = document.getElementById('vfo-cw-send');
+const vfoCwSpotWpm = document.getElementById('vfo-cw-spot-wpm');
+const vfoCwSync = document.getElementById('vfo-cw-sync');
+let cwWpm = 20;
+let cwSpotWpmVal = null;
+
+(async () => {
+  const s = await window.api.getSettings();
+  cwWpm = s.cwWpm || 20;
+  vfoCwWpm.textContent = cwWpm;
+})();
+
+function setCwWpm(wpm) {
+  cwWpm = Math.max(5, Math.min(60, wpm));
+  vfoCwWpm.textContent = cwWpm;
+  window.api.cwSetWpm(cwWpm);
+  window.api.saveSettings({ cwWpm });
+  updateCwSyncBtn();
+}
+
+function updateCwSyncBtn() {
+  if (cwSpotWpmVal && cwSpotWpmVal !== cwWpm) {
+    vfoCwSpotWpm.textContent = 'Theirs: ' + cwSpotWpmVal;
+    vfoCwSpotWpm.style.display = '';
+    vfoCwSync.classList.remove('hidden');
+  } else {
+    vfoCwSpotWpm.style.display = 'none';
+    vfoCwSync.classList.add('hidden');
+  }
+}
+
+vfoCwUp.addEventListener('click', () => setCwWpm(cwWpm + 1));
+vfoCwDown.addEventListener('click', () => setCwWpm(cwWpm - 1));
+vfoCwSync.addEventListener('click', () => { if (cwSpotWpmVal) setCwWpm(cwSpotWpmVal); });
+
+vfoCwSend.addEventListener('click', () => {
+  const text = vfoCwInput.value.trim();
+  if (text) { window.api.sendCwText(text); vfoCwInput.value = ''; }
+});
+vfoCwInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { vfoCwSend.click(); e.preventDefault(); }
+  if (e.key === 'Escape') { window.api.cwCancel(); vfoCwInput.value = ''; }
+});
+
+// CW spot WPM is updated from the existing onTunedSpot handler below
+
 // --- Audio Monitor ---
 const audioBtn = document.getElementById('audio-btn');
 let audioMonitorCtx = null;
@@ -1559,6 +1658,9 @@ window.api.onTunedSpot((spot) => {
   if (spot.reference) html += '<br><span class="op-ref">' + esc(spot.reference) + '</span>';
   if (spot.parkName) html += '<br><span class="op-detail">' + esc(spot.parkName) + '</span>';
   opInfoEl.innerHTML = html;
+  // Update CW spot WPM
+  cwSpotWpmVal = spot.wpm || null;
+  updateCwSyncBtn();
 });
 
 // --- Solar data ---
