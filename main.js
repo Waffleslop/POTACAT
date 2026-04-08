@@ -7892,9 +7892,11 @@ app.whenReady().then(() => {
   ipcMain.on('vfo-popout-open', () => {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) { vfoPopoutWin.focus(); return; }
     const isMac = process.platform === 'darwin';
+    const vfoAlwaysOnTop = settings.vfoAlwaysOnTop !== false; // default true
     vfoPopoutWin = new BrowserWindow({
       width: 340, height: 560, title: 'VFO',
       show: false,
+      alwaysOnTop: vfoAlwaysOnTop,
       ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
       icon: getIconPath(),
       webPreferences: {
@@ -7944,6 +7946,12 @@ app.whenReady().then(() => {
       win.show();
       win.focus();
     }
+  });
+
+  ipcMain.on('vfo-set-always-on-top', (_e, on) => {
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.setAlwaysOnTop(on);
+    settings.vfoAlwaysOnTop = on;
+    saveSettings(settings);
   });
 
   ipcMain.on('vfo-popout-theme', (_e, theme) => {

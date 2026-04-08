@@ -351,7 +351,7 @@
     <!-- Dial tab -->
     <div class="tab-pane active" id="tab-dial">
       <div style="display:flex;align-items:stretch;justify-content:center;gap:8px;">
-        <div class="dial-wrap">
+        <div class="dial-wrap vfo-section" id="sec-dial">
           <canvas id="vfo-dial" width="200" height="200"></canvas>
         </div>
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;min-width:90px;">
@@ -451,7 +451,10 @@
       </div>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
+      <div class="section-label">Window</div>
+      <label class="settings-toggle"><input type="checkbox" id="s-always-on-top" checked> Always on top</label>
       <div class="section-label">Dial Sections</div>
+      <label class="settings-toggle"><input type="checkbox" id="s-dial" checked> VFO Knob</label>
       <label class="settings-toggle"><input type="checkbox" id="s-solar" checked> Solar (SFI/K/A)</label>
       <label class="settings-toggle"><input type="checkbox" id="s-step" checked> Step Size</label>
       <label class="settings-toggle"><input type="checkbox" id="s-band" checked> Quick Band</label>
@@ -1067,8 +1070,8 @@ function esc(s) {
 // --- Widget visibility ---
 const WIDGETS = ['smeter', 'ptt', 'log', 'cw', 'voice'];
 let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, voice: false };
-const SECTIONS = ['solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
-let vfoSections = { solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
+const SECTIONS = ['dial', 'solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
+let vfoSections = { dial: true, solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
 async function loadWidgets() {
   const s = await window.api.getSettings();
@@ -1076,6 +1079,7 @@ async function loadWidgets() {
   if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
   if (s.vfoHiddenBands) vfoHiddenBands = s.vfoHiddenBands;
   if (s.vfoPttMicDevice) pttMicDeviceId = s.vfoPttMicDevice;
+  sAlwaysOnTop.checked = s.vfoAlwaysOnTop !== false; // default true
   applyWidgets();
   applySections();
   rebuildAllBandGrids();
@@ -1122,6 +1126,8 @@ const wPtt = document.getElementById('w-ptt');
 const wLog = document.getElementById('w-log');
 const wCw = document.getElementById('w-cw');
 const wVoice = document.getElementById('w-voice');
+const sAlwaysOnTop = document.getElementById('s-always-on-top');
+const sDial = document.getElementById('s-dial');
 const sSolar = document.getElementById('s-solar');
 const sStep = document.getElementById('s-step');
 const sBand = document.getElementById('s-band');
@@ -1136,6 +1142,7 @@ function syncSettingsCheckboxes() {
   wLog.checked = !!vfoWidgets.log;
   wCw.checked = !!vfoWidgets.cw;
   wVoice.checked = !!vfoWidgets.voice;
+  sDial.checked = !!vfoSections.dial;
   sSolar.checked = !!vfoSections.solar;
   sStep.checked = !!vfoSections.step;
   sBand.checked = !!vfoSections.band;
@@ -1166,6 +1173,10 @@ micSelect.addEventListener('change', () => {
   window.api.saveSettings({ vfoPttMicDevice: pttMicDeviceId });
 });
 
+sAlwaysOnTop.addEventListener('change', () => {
+  window.api.setAlwaysOnTop(sAlwaysOnTop.checked);
+});
+
 async function populateMicDevices() {
   try {
     // Trigger permission prompt if needed
@@ -1181,8 +1192,9 @@ async function populateMicDevices() {
   }
 }
 
-[sSolar, sStep, sBand, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
+[sDial, sSolar, sStep, sBand, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
   cb.addEventListener('change', () => {
+    vfoSections.dial = sDial.checked;
     vfoSections.solar = sSolar.checked;
     vfoSections.step = sStep.checked;
     vfoSections.band = sBand.checked;
