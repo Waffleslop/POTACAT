@@ -100,9 +100,9 @@
       padding: 0 2px; max-width: 100%; margin-bottom: 6px;
     }
     .op-info:empty { margin-bottom: 0; }
-    .op-call { color: var(--accent-blue); font-weight: bold; font-size: 20px; font-family: 'Consolas', monospace; }
-    .op-detail { color: var(--text-secondary); font-size: 13px; }
-    .op-ref { color: var(--accent-green); font-weight: bold; font-size: 14px; }
+    .op-call { color: var(--accent-blue); font-weight: bold; font-size: 20px; font-family: 'Consolas', monospace; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-detail { color: var(--text-secondary); font-size: 13px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-ref { color: var(--accent-green); font-weight: bold; font-size: 14px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .solar-pills {
       display: flex; flex-direction: row; gap: 3px;
     }
@@ -395,11 +395,11 @@
     <!-- Dial tab -->
     <div class="tab-pane active" id="tab-dial">
       <div style="display:flex;align-items:stretch;justify-content:center;gap:8px;">
-        <div class="dial-wrap vfo-section" id="sec-dial">
+        <div class="dial-wrap vfo-section" id="sec-dial" style="flex-shrink:0;">
           <canvas id="vfo-dial" width="200" height="200"></canvas>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;min-width:90px;">
-          <div class="op-info" id="op-info" style="padding-top:4px;"></div>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;width:90px;max-width:90px;flex-shrink:0;">
+          <div class="op-info" id="op-info" style="padding-top:4px;max-width:90px;overflow:hidden;"></div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding-bottom:2px;">
             <div class="vfo-section solar-pills" id="sec-solar">
               <div class="solar-pill" title="Solar Flux Index"><span class="solar-label">SFI</span><span class="solar-val" id="sv-sfi">--</span></div>
