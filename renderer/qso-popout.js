@@ -46,7 +46,7 @@ function gridToLatLonLocal(grid) {
 
 // --- Editable columns ---
 const EDITABLE = {
-  2: 'CALL', 3: 'FREQ', 4: 'MODE',
+  0: 'QSO_DATE', 1: 'TIME_ON', 2: 'CALL', 3: 'FREQ', 4: 'MODE',
   6: 'RST_SENT', 7: 'RST_RCVD', 8: 'SIG_INFO', 9: 'COMMENT',
 };
 
@@ -577,18 +577,30 @@ tbody.addEventListener('dblclick', (e) => {
   const original = td.textContent;
 
   const input = document.createElement('input');
-  input.type = 'text';
-  input.value = original;
+  if (field === 'QSO_DATE') {
+    input.type = 'date';
+    input.value = original; // already YYYY-MM-DD display format
+  } else if (field === 'TIME_ON') {
+    input.type = 'time';
+    input.value = original; // already HH:MM display format
+  } else {
+    input.type = 'text';
+    input.value = original;
+  }
   td.textContent = '';
   td.appendChild(input);
   input.focus();
-  input.select();
+  if (input.type === 'text') input.select();
 
   function cancel() { td.textContent = original; }
 
   async function save() {
-    const newVal = input.value.trim();
+    let newVal = input.value.trim();
     if (newVal === original) { cancel(); return; }
+
+    // Convert display formats back to storage formats
+    if (field === 'QSO_DATE') newVal = newVal.replace(/-/g, ''); // YYYY-MM-DD → YYYYMMDD
+    if (field === 'TIME_ON') newVal = newVal.replace(/:/g, '') + '00'; // HH:MM → HHMM00
 
     const fields = { [field]: newVal };
     if (field === 'FREQ') fields.BAND = freqMhzToBandLocal(newVal);
