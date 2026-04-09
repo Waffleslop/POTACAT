@@ -2040,14 +2040,13 @@ function connectWsjtx() {
         const allQsoData = [];
         for (let i = 0; i < parkRefs.length; i++) {
           const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
-          if (i > 0) parkQso.skipLogbookForward = true; // only forward first record
           allQsoData.push(parkQso);
           await saveQsoRecord(parkQso);
         }
         // Cross-program references (WWFF, LLOTA for same park)
         const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
         for (const xr of crossRefs) {
-          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '', skipLogbookForward: true };
+          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '' };
           if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
           allQsoData.push(xrQso);
           await saveQsoRecord(xrQso);
@@ -2258,13 +2257,12 @@ async function jtcatAutoLog(qso) {
       sendCatLog(`[JTCAT] Activation mode — logging to ${parkRefs.map(p => p.ref).join(', ')}`);
       for (let i = 0; i < parkRefs.length; i++) {
         const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
-        if (i > 0) parkQso.skipLogbookForward = true;
         await saveQsoRecord(parkQso);
       }
       // Cross-program refs (WWFF, LLOTA)
       const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
       for (const xr of crossRefs) {
-        const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '', skipLogbookForward: true };
+        const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '' };
         if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
         await saveQsoRecord(xrQso);
       }
