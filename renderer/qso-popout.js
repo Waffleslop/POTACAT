@@ -223,6 +223,7 @@ function render() {
 
   // Virtual scrolling — only render visible rows
   _virt.filtered = filtered;
+  _virt.lastStart = -1; // invalidate cache so renderVisible() always re-renders on data change
   _virt.renderVisible();
 
   // Prune selection to only include QSOs still in filtered view
