@@ -340,6 +340,8 @@ header {
   border-radius: 0 0 6px 6px;
   padding: 10px 14px;
   min-width: 260px;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
   z-index: 1000;
   box-shadow: 0 4px 12px var(--shadow-heavy);
 }

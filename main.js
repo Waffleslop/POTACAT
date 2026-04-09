@@ -1802,6 +1802,8 @@ async function saveQsoRecord(qsoData) {
   // Forward to external logbook if enabled
   // skipLogbookForward: multi-park activations send one ADIF record per park ref,
   // but external logbooks only need one QSO per physical contact
+  let logbookError, qrzError;
+
   if (settings.sendToLogbook && settings.logbookType && !qsoData.skipLogbookForward) {
     try {
       sendCatLog(`[Logbook] Forwarding QSO to ${settings.logbookType}: ${qsoData.callsign} ${qsoData.frequency}kHz ${qsoData.mode}`);
@@ -1810,7 +1812,7 @@ async function saveQsoRecord(qsoData) {
     } catch (fwdErr) {
       sendCatLog(`[Logbook] Forwarding failed: ${fwdErr.message}`);
       console.error('Logbook forwarding failed:', fwdErr.message);
-      return { success: true, logbookError: fwdErr.message };
+      logbookError = fwdErr.message;
     }
   }
 
@@ -1820,7 +1822,7 @@ async function saveQsoRecord(qsoData) {
       await sendToQrzLogbook(qsoData);
     } catch (qrzErr) {
       console.error('QRZ Logbook upload failed:', qrzErr.message);
-      return { success: true, qrzError: qrzErr.message };
+      qrzError = qrzErr.message;
     }
   }
 
@@ -1936,7 +1938,7 @@ async function saveQsoRecord(qsoData) {
   }
 
   const didRespot = (qsoData.respot && qsoData.sig === 'POTA') || qsoData.wwffRespot || qsoData.llotaRespot || qsoData.dxcRespot;
-  return { success: true, resposted: didRespot || false };
+  return { success: true, resposted: didRespot || false, logbookError, qrzError };
 }
 
 // --- WSJT-X integration ---
