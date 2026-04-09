@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   onTheme: (cb) => ipcRenderer.on('spots-popout-theme', (_e, theme) => cb(theme)),
   onColorblindMode: (cb) => ipcRenderer.on('colorblind-mode', (_e, enabled) => cb(enabled)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
+  onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   openLogDialog: (spot) => ipcRenderer.send('spots-popout-open-log', spot),
   getSettings: () => ipcRenderer.invoke('get-settings'),

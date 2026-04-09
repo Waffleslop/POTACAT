@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
+  setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
+  onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),
+  onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   setMode: (mode) => ipcRenderer.send('vfo-set-mode', mode),
   setFilterWidth: (hz) => ipcRenderer.send('vfo-set-filter-width', hz),
   rigControl: (data) => ipcRenderer.send('rig-control', data),

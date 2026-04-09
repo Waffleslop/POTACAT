@@ -70,6 +70,27 @@
     .audio-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
     .audio-btn.active { color: var(--accent-green); border-color: var(--accent-green); }
     .audio-btn.muted { color: var(--accent-red); border-color: var(--accent-red); }
+    .vfo-lock-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      font-size: 16px; padding: 2px 6px; border-radius: 4px; cursor: pointer;
+      line-height: 1; white-space: nowrap; transition: all 0.15s ease;
+    }
+    .vfo-lock-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+    .vfo-lock-btn.locked {
+      background: var(--accent-red); border-color: var(--accent-red); color: #fff;
+      font-weight: bold; animation: lock-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes lock-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .vfo-lock-toast {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: var(--accent-red); color: #fff; padding: 12px 24px; border-radius: 8px;
+      font-size: 15px; font-weight: bold; z-index: 9999; pointer-events: none;
+      box-shadow: 0 4px 20px rgba(233, 69, 96, 0.5); opacity: 0; transition: opacity 0.2s;
+    }
+    .vfo-lock-toast.show { opacity: 1; }
 
     /* --- Tabs --- */
     .tabs {
@@ -88,7 +109,7 @@
     .tab-pane.active { display: flex; flex-direction: column; }
 
     /* --- VFO Dial tab --- */
-    .dial-wrap { display: flex; justify-content: center; padding: 8px 0; }
+    .dial-wrap { display: flex; justify-content: center; padding: 8px 0; width: 200px; height: 200px; flex-shrink: 0; }
     .step-row { display: flex; justify-content: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
     .step-btn {
       background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-secondary);
@@ -96,13 +117,13 @@
     }
     .step-btn.active { background: #4fc3f7; color: #1a1a2e; border-color: var(--accent-blue); }
     .op-info {
-      font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.5;
-      padding: 0 2px; max-width: 100%; margin-bottom: 6px;
+      font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.3;
+      padding: 0 2px; margin-bottom: 6px; overflow: hidden;
     }
     .op-info:empty { margin-bottom: 0; }
-    .op-call { color: var(--accent-blue); font-weight: bold; font-size: 20px; font-family: 'Consolas', monospace; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .op-detail { color: var(--text-secondary); font-size: 13px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .op-ref { color: var(--accent-green); font-weight: bold; font-size: 14px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-call { color: var(--accent-blue); font-weight: bold; font-size: 28px; font-family: 'Consolas', monospace; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-detail { color: var(--text-secondary); font-size: 16px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-ref { color: var(--accent-green); font-weight: bold; font-size: 17px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .solar-pills {
       display: flex; flex-direction: row; gap: 3px;
     }
@@ -336,6 +357,7 @@
     <span class="freq-unit">kHz</span>
     <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
     <button class="audio-btn" id="audio-btn" title="Radio audio monitor">&#x1F508;</button>
+    <button class="vfo-lock-btn" id="vfo-lock-btn" title="Click to lock VFO">&#x1F513;</button>
   </div>
   <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 2px;">
     <span class="filter-badge" id="filter-badge"></span>
@@ -395,11 +417,11 @@
     <!-- Dial tab -->
     <div class="tab-pane active" id="tab-dial">
       <div style="display:flex;align-items:stretch;justify-content:center;gap:8px;">
-        <div class="dial-wrap vfo-section" id="sec-dial" style="flex-shrink:0;">
+        <div class="dial-wrap vfo-section" id="sec-dial">
           <canvas id="vfo-dial" width="200" height="200"></canvas>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;width:90px;max-width:90px;flex-shrink:0;">
-          <div class="op-info" id="op-info" style="padding-top:4px;max-width:90px;overflow:hidden;"></div>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;flex:1;min-width:0;">
+          <div class="op-info" id="op-info" style="padding-top:4px;width:100%;max-width:100%;overflow:hidden;"></div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding-bottom:2px;">
             <div class="vfo-section solar-pills" id="sec-solar">
               <div class="solar-pill" title="Solar Flux Index"><span class="solar-label">SFI</span><span class="solar-val" id="sv-sfi">--</span></div>
@@ -511,6 +533,7 @@
       <div class="band-checkboxes" id="band-checkboxes"></div>
     </div>
   </div>
+  <div class="vfo-lock-toast" id="vfo-lock-toast">🔒 VFO Locked — Unlock VFO to change frequency</div>
 
 <script>
 // --- State ---
@@ -520,10 +543,45 @@ let _modeSuppressUntil = 0; // suppress stale mode from CAT poll after user clic
 let currentFilterWidth = 0;
 let profiles = [];
 let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
+let vfoLocked = false;
 
 const freqDisplay = document.getElementById('freq-display');
 const modeBadge = document.getElementById('mode-badge');
 const filterBadge = document.getElementById('filter-badge');
+
+// --- VFO Lock ---
+const vfoLockBtn = document.getElementById('vfo-lock-btn');
+const vfoLockToast = document.getElementById('vfo-lock-toast');
+let _lockToastTimer = null;
+
+function updateLockBtn() {
+  if (vfoLocked) {
+    vfoLockBtn.innerHTML = '&#x1F512;';
+    vfoLockBtn.classList.add('locked');
+    vfoLockBtn.title = 'VFO Locked — click to unlock';
+  } else {
+    vfoLockBtn.innerHTML = '&#x1F513;';
+    vfoLockBtn.classList.remove('locked');
+    vfoLockBtn.title = 'Click to lock VFO';
+  }
+}
+
+vfoLockBtn.addEventListener('click', () => {
+  vfoLocked = !vfoLocked;
+  window.api.setVfoLock(vfoLocked);
+  updateLockBtn();
+});
+
+window.api.onVfoLockState((locked) => {
+  vfoLocked = locked;
+  updateLockBtn();
+});
+
+window.api.onTuneBlocked((msg) => {
+  vfoLockToast.classList.add('show');
+  clearTimeout(_lockToastTimer);
+  _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 2000);
+});
 const filterSlider = document.getElementById('filter-slider');
 const filterVal = document.getElementById('filter-val');
 
@@ -635,6 +693,7 @@ function buildBandGrid(container) {
     btn.textContent = b.label;
     btn.dataset.freq = b.freq;
     btn.addEventListener('click', () => {
+      if (vfoLocked) return;
       window.api.tune(b.freq);
     });
     container.appendChild(btn);
@@ -895,6 +954,7 @@ function getAngle(e) {
 }
 
 function processDelta(delta) {
+  if (vfoLocked) return;
   vfoAngle += delta;
   vfoAccum += delta;
   while (Math.abs(vfoAccum) >= STEP_ANGLE) {
@@ -938,6 +998,7 @@ window.addEventListener('mouseup', () => {
 // Mouse wheel
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (vfoLocked) return;
   const dir = e.deltaY > 0 ? 1 : -1;
   const stepHz = STEPS[stepIdx].hz * dir;
   currentFreqHz = Math.max(0, currentFreqHz + stepHz);
@@ -969,6 +1030,7 @@ document.getElementById('kp-clear').addEventListener('click', () => {
 });
 
 document.getElementById('kp-go').addEventListener('click', () => {
+  if (vfoLocked) return;
   const val = parseFloat(kpBuffer);
   if (isNaN(val) || val <= 0) return;
   // If the input has a decimal point, treat as MHz (user was explicit)
@@ -1067,6 +1129,7 @@ function renderInlineProfiles() {
 }
 
 function applyProfile(p) {
+  if (vfoLocked) return;
   if (p.freqKhz) {
     window.api.tune(p.freqKhz, p.mode);
     currentFreqHz = p.freqKhz * 1000;
@@ -1638,28 +1701,32 @@ window.api.onTheme((theme) => {
 const opInfoEl = document.getElementById('op-info');
 
 window.api.onTunedSpot((spot) => {
-  if (!spot || !spot.callsign) {
+  // Support new { ops: [...] } format and legacy single-spot format
+  const ops = spot && spot.ops ? spot.ops : (spot && spot.callsign ? [spot] : []);
+  if (!ops.length) {
     opInfoEl.innerHTML = '';
+    cwSpotWpmVal = null;
+    updateCwSyncBtn();
     return;
   }
-  let html = '<span class="op-call">' + esc(spot.callsign) + '</span>';
-  // Name: "Nickname Last" or "First Last"
-  if (spot.displayName) {
-    html += '<br><span class="op-detail">' + esc(spot.displayName) + '</span>';
+  let html = '';
+  const single = ops.length === 1;
+  for (const op of ops) {
+    html += '<span class="op-call">' + esc(op.callsign) + '</span>';
+    if (op.displayName) html += '<span class="op-detail">' + esc(op.displayName) + '</span>';
+    if (single) {
+      // Full detail for single operator
+      const locParts = [];
+      if (op.country) locParts.push(op.country === 'United States' ? 'USA' : op.country);
+      if (op.grid) locParts.push(op.grid);
+      if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
+      if (op.reference) html += '<span class="op-ref">' + esc(op.reference) + '</span>';
+      if (op.parkName) html += '<span class="op-detail">' + esc(op.parkName) + '</span>';
+    }
   }
-  // Country + Grid on one line
-  const locParts = [];
-  if (spot.country) {
-    locParts.push(spot.country === 'United States' ? 'USA' : spot.country);
-  }
-  if (spot.grid) locParts.push(spot.grid);
-  if (locParts.length) html += '<br><span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
-  // Park ref + name
-  if (spot.reference) html += '<br><span class="op-ref">' + esc(spot.reference) + '</span>';
-  if (spot.parkName) html += '<br><span class="op-detail">' + esc(spot.parkName) + '</span>';
   opInfoEl.innerHTML = html;
-  // Update CW spot WPM
-  cwSpotWpmVal = spot.wpm || null;
+  // Use first op's WPM for CW sync
+  cwSpotWpmVal = ops[0].wpm || null;
   updateCwSyncBtn();
 });
 

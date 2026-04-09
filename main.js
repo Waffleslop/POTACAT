@@ -215,6 +215,7 @@ let _currentVfo = 'A';
 let _currentFilterWidth = 0;
 let _currentRfGain = 0;
 let _currentTxPower = 0; // 0 = unknown until radio reports actual power
+let _vfoLocked = false;  // VFO lock — blocks tune requests from spots/table/map
 let _rfGainSuppressBroadcast = 0;  // timestamp: suppress ECHOCAT echo-back until this time
 let _txPowerSuppressBroadcast = 0;
 
@@ -4630,6 +4631,9 @@ function handleRemotePtt(state) {
       const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
       _ssbModeBeforePtt = curMode;
       sendCatLog(`[PTT] ${curMode} → ${dataMode} (SSB-over-DATA: mic disabled)`);
+      // Suppress mode broadcasts so ECHOCAT doesn't see the transient DATA mode
+      // (which would hide the PTT button and release TX)
+      _modeSuppressUntil = Date.now() + 5000;
       if (cat && cat.connected) cat.tune(_currentFreqHz, dataMode);
     }
   }
@@ -4654,6 +4658,8 @@ function handleRemotePtt(state) {
     const restoreMode = _ssbModeBeforePtt;
     _ssbModeBeforePtt = null;
     sendCatLog(`[PTT] Restoring ${restoreMode} mode`);
+    // Suppress mode broadcasts during restore so ECHOCAT doesn't flicker
+    _modeSuppressUntil = Date.now() + 2000;
     if (cat && cat.connected) cat.tune(_currentFreqHz, restoreMode);
   }
 
@@ -8311,8 +8317,20 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.on('vfo-set-lock', (_e, locked) => {
+    _vfoLocked = !!locked;
+    // Broadcast lock state to all windows
+    for (const wc of require('electron').webContents.getAllWebContents()) {
+      wc.send('vfo-lock-state', _vfoLocked);
+    }
+  });
+
   ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort }) => {
     markUserActive();
+    if (_vfoLocked) {
+      _e.sender.send('tune-blocked', 'VFO Locked — Unlock VFO to change frequency');
+      return;
+    }
     if (slicePort && smartSdr && smartSdr.connected) {
       // JTCAT on a separate Flex slice
       const sliceIndex = slicePort - 5002;

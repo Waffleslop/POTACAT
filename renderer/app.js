@@ -122,35 +122,34 @@ let activatorSettingsPanelOpen = false; // hoisted to avoid TDZ in closeActivato
 /** Send tuned spot info to VFO popout */
 function notifyVfoTunedSpot(spot) {
   if (!spot) { window.api.vfoTunedSpot(null); return; }
-  // Check if multiple activators on same frequency
+  // Find all activators on same frequency
   const sameFreq = allSpots.filter(s => s.frequency === spot.frequency);
-  if (sameFreq.length > 1) { window.api.vfoTunedSpot(null); return; }
-  // Send essential spot data + trigger QRZ lookup
-  const data = {
-    callsign: spot.callsign || '',
-    reference: spot.reference || '',
-    parkName: spot.parkName || '',
-    source: spot.source || '',
-    wpm: spot.wpm || null,
-  };
-  window.api.vfoTunedSpot(data);
-  // QRZ lookup for name/grid/country
-  if (spot.callsign) {
-    window.api.qrzLookup(spot.callsign).then(info => {
+  const spots = sameFreq.length > 0 ? sameFreq : [spot];
+  // Build array of operator data
+  const ops = spots.map(s => ({
+    callsign: s.callsign || '',
+    reference: s.reference || '',
+    parkName: s.parkName || '',
+    source: s.source || '',
+    wpm: s.wpm || null,
+  }));
+  window.api.vfoTunedSpot({ ops });
+  // QRZ lookup for each operator
+  const pending = ops.map((op, i) => {
+    if (!op.callsign) return Promise.resolve();
+    return window.api.qrzLookup(op.callsign).then(info => {
       if (info) {
-        // Build display name: "Nickname Last" or "First Last"
         const first = (info.nickname || info.fname || '').trim();
         const last = (info.name || '').trim();
-        const displayName = [first, last].filter(Boolean).join(' ');
-        window.api.vfoTunedSpot({
-          ...data,
-          displayName,
-          grid: info.grid || '',
-          country: info.country || '',
-        });
+        ops[i].displayName = [first, last].filter(Boolean).join(' ');
+        ops[i].grid = info.grid || '';
+        ops[i].country = info.country || '';
       }
     }).catch(() => {});
-  }
+  });
+  Promise.all(pending).then(() => {
+    window.api.vfoTunedSpot({ ops });
+  });
 }
 let popoutOpen = false; // pop-out map window is open
 let qsoPopoutOpen = false; // pop-out QSO log window is open
@@ -214,8 +213,8 @@ let radioMode = null;
 let scanning = false;
 let scanTimer = null;
 let scanIndex = 0;
-let scanSkipped = new Set(); // frequencies to skip (as strings)
-let scanForceUnskipped = new Set(); // frequencies force-unskipped by user (overrides worked-today auto-skip)
+let scanSkipped = new Set(); // "callsign\tfrequency" keys to skip
+let scanForceUnskipped = new Set(); // "callsign\tfrequency" keys force-unskipped by user
 let pendingSpots = null;     // buffered spots during scan
 
 const MI_TO_KM = 1.60934;
@@ -3551,6 +3550,9 @@ function sortSpots(spots) {
     if (sortCol === 'grid') {
       va = (a.lat != null && a.lon != null) ? latLonToGridLocal(a.lat, a.lon).slice(0, 4) : null;
       vb = (b.lat != null && b.lon != null) ? latLonToGridLocal(b.lat, b.lon).slice(0, 4) : null;
+    } else if (sortCol === 'frequency') {
+      va = parseFloat(a.frequency) || 0;
+      vb = parseFloat(b.frequency) || 0;
     } else {
       va = a[sortCol];
       vb = b[sortCol];
@@ -4599,7 +4601,8 @@ function bindPopupClickHandlers(mapInstance) {
 // --- Scan ---
 function getScanList() {
   const filtered = sortSpots(getFiltered());
-  return filtered.filter((s) => s.source !== 'net' && !scanSkipped.has(s.frequency) && (!isWorkedSpot(s) || scanForceUnskipped.has(s.frequency)));
+  const skipKey = (s) => s.callsign + '\t' + s.frequency;
+  return filtered.filter((s) => s.source !== 'net' && !scanSkipped.has(skipKey(s)) && (!isWorkedSpot(s) || scanForceUnskipped.has(skipKey(s))));
 }
 
 function startScan() {
@@ -5731,7 +5734,8 @@ function render() {
       const tr = document.createElement('tr');
       const isWorked = workedQsos.has(s.callsign.toUpperCase());
       const isWorkedToday = isWorked && isWorkedSpot(s);
-      const isSkipped = scanSkipped.has(s.frequency) || (isWorkedToday && !scanForceUnskipped.has(s.frequency));
+      const spotSkipKey = s.callsign + '\t' + s.frequency;
+      const isSkipped = scanSkipped.has(spotSkipKey) || (isWorkedToday && !scanForceUnskipped.has(spotSkipKey));
 
       // Source color-coding
       if (s.source === 'pota') tr.classList.add('spot-pota');
@@ -6026,11 +6030,11 @@ function render() {
       skipButton.addEventListener('click', (e) => {
         e.stopPropagation();
         if (isSkipped) {
-          scanSkipped.delete(s.frequency);
-          scanForceUnskipped.add(s.frequency);
+          scanSkipped.delete(spotSkipKey);
+          scanForceUnskipped.add(spotSkipKey);
         } else {
-          scanSkipped.add(s.frequency);
-          scanForceUnskipped.delete(s.frequency);
+          scanSkipped.add(spotSkipKey);
+          scanForceUnskipped.delete(spotSkipKey);
         }
         render();
       });
@@ -6515,6 +6519,21 @@ function showLogToast(message, opts) {
     setTimeout(() => { if (toast.parentNode) toast.remove(); }, duration);
   }
 }
+
+// --- VFO Lock: tune-blocked toast ---
+window.api.onTuneBlocked((msg) => {
+  let t = document.getElementById('tune-blocked-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'tune-blocked-toast';
+    t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#e94560;color:#fff;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:bold;z-index:10001;pointer-events:none;box-shadow:0 4px 20px rgba(233,69,96,0.5);opacity:0;transition:opacity 0.2s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg || 'VFO Locked — Unlock VFO to change frequency';
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2000);
+});
 
 // --- Cat Celebration ---
 const QSO_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 500];

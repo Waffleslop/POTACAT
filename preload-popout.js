@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   onColorblindMode: (cb) => ipcRenderer.on('colorblind-mode', (_e, enabled) => cb(enabled)),
   onWcagMode: (cb) => ipcRenderer.on('wcag-mode', (_e, enabled) => cb(enabled)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
+  onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   openLogDialog: (spot) => ipcRenderer.send('popout-open-log', spot),

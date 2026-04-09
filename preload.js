@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   onSpotsError: (cb) => ipcRenderer.on('spots-error', (_e, msg) => cb(msg)),
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
+  onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   rotateTo: (azimuth) => ipcRenderer.send('rotate-to', azimuth),
   refresh: () => ipcRenderer.send('refresh'),
   getSettings: () => ipcRenderer.invoke('get-settings'),

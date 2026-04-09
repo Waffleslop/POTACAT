@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatMapPopout: () => ipcRenderer.send('jtcat-map-popout'),
   // Tuning
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
+  onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
