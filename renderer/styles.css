@@ -1116,6 +1116,16 @@ thead th.sort-desc::after {
   content: " \25BC";
 }
 
+thead th.sort2-asc::after {
+  content: " \25B3";
+  opacity: 0.5;
+}
+
+thead th.sort2-desc::after {
+  content: " \25BD";
+  opacity: 0.5;
+}
+
 tbody tr {
   cursor: pointer;
   border-bottom: 1px solid var(--border-primary);

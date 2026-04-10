@@ -4,6 +4,8 @@
 let allSpots = [];
 let sortCol = 'distance';
 let sortAsc = true;
+let sortCol2 = '';     // secondary sort column (Shift+click)
+let sortAsc2 = true;
 
 // Expose for DevTools console debugging
 window._debug = { get spots() { return allSpots; }, get qrz() { return qrzData; }, get expeditions() { return expeditionCallsigns; }, render() { render(); } };
@@ -1083,6 +1085,8 @@ async function loadPrefs() {
     if (viewState) {
       if (viewState.sortCol) { sortCol = viewState.sortCol; }
       if (typeof viewState.sortAsc === 'boolean') { sortAsc = viewState.sortAsc; }
+      if (viewState.sortCol2) { sortCol2 = viewState.sortCol2; }
+      if (typeof viewState.sortAsc2 === 'boolean') { sortAsc2 = viewState.sortAsc2; }
       if (viewState.lastView === 'jtcat') {
         // JTCAT is always a pop-out now; restore to default table view
         setView('table');
@@ -3536,6 +3540,33 @@ function getFiltered() {
 }
 
 // --- Sorting ---
+function _compareCol(a, b, col, asc) {
+  let va, vb;
+  if (col === 'grid') {
+    va = (a.lat != null && a.lon != null) ? latLonToGridLocal(a.lat, a.lon).slice(0, 4) : null;
+    vb = (b.lat != null && b.lon != null) ? latLonToGridLocal(b.lat, b.lon).slice(0, 4) : null;
+  } else if (col === 'frequency') {
+    va = parseFloat(a.frequency) || 0;
+    vb = parseFloat(b.frequency) || 0;
+  } else {
+    va = a[col];
+    vb = b[col];
+  }
+  if (va == null && vb == null) return 0;
+  if (va == null) return 1;
+  if (vb == null) return -1;
+  if (typeof va === 'number' && typeof vb === 'number') {
+    return asc ? va - vb : vb - va;
+  }
+  const na = Number(va), nb = Number(vb);
+  if (!isNaN(na) && !isNaN(nb)) {
+    return asc ? na - nb : nb - na;
+  }
+  va = String(va);
+  vb = String(vb);
+  return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+}
+
 function sortSpots(spots) {
   return spots.slice().sort((a, b) => {
     // Pin net spots above everything
@@ -3547,31 +3578,9 @@ function sortSpots(spots) {
     const bExp = enableDxe && expeditionCallsigns.has(b.callsign.toUpperCase()) ? 1 : 0;
     if (aExp !== bExp) return bExp - aExp;
 
-    let va, vb;
-    if (sortCol === 'grid') {
-      va = (a.lat != null && a.lon != null) ? latLonToGridLocal(a.lat, a.lon).slice(0, 4) : null;
-      vb = (b.lat != null && b.lon != null) ? latLonToGridLocal(b.lat, b.lon).slice(0, 4) : null;
-    } else if (sortCol === 'frequency') {
-      va = parseFloat(a.frequency) || 0;
-      vb = parseFloat(b.frequency) || 0;
-    } else {
-      va = a[sortCol];
-      vb = b[sortCol];
-    }
-    if (va == null && vb == null) return 0;
-    if (va == null) return 1;
-    if (vb == null) return -1;
-    if (typeof va === 'number' && typeof vb === 'number') {
-      return sortAsc ? va - vb : vb - va;
-    }
-    // Numeric strings (e.g. frequency "7268") — compare as numbers
-    const na = Number(va), nb = Number(vb);
-    if (!isNaN(na) && !isNaN(nb)) {
-      return sortAsc ? na - nb : nb - na;
-    }
-    va = String(va);
-    vb = String(vb);
-    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    const primary = _compareCol(a, b, sortCol, sortAsc);
+    if (primary !== 0 || !sortCol2) return primary;
+    return _compareCol(a, b, sortCol2, sortAsc2);
   });
 }
 
@@ -5382,6 +5391,8 @@ function saveViewState() {
     showMap,
     sortCol,
     sortAsc,
+    sortCol2,
+    sortAsc2,
   }));
 }
 
@@ -6059,9 +6070,11 @@ function render() {
 
     // Update sort indicators
     document.querySelectorAll('thead th').forEach((th) => {
-      th.classList.remove('sort-asc', 'sort-desc');
+      th.classList.remove('sort-asc', 'sort-desc', 'sort2-asc', 'sort2-desc');
       if (th.dataset.sort === sortCol) {
         th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+      } else if (th.dataset.sort === sortCol2) {
+        th.classList.add(sortAsc2 ? 'sort2-asc' : 'sort2-desc');
       }
     });
   }
@@ -6761,15 +6774,28 @@ hideSpotMenu.addEventListener('click', (e) => {
   render();
 });
 
-// Column sorting
+// Column sorting — click for primary, Shift+click for secondary
 document.querySelectorAll('thead th[data-sort]').forEach((th) => {
-  th.addEventListener('click', () => {
+  th.addEventListener('click', (e) => {
     const col = th.dataset.sort;
-    if (sortCol === col) {
-      sortAsc = !sortAsc;
+    if (e.shiftKey) {
+      // Shift+click: set or toggle secondary sort
+      if (col === sortCol) return; // can't secondary-sort on same column as primary
+      if (sortCol2 === col) {
+        sortAsc2 = !sortAsc2;
+      } else {
+        sortCol2 = col;
+        sortAsc2 = col === 'distance' || col === 'bearing';
+      }
     } else {
-      sortCol = col;
-      sortAsc = col === 'distance' || col === 'bearing';
+      // Regular click: set primary sort, clear secondary
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = col === 'distance' || col === 'bearing';
+      }
+      sortCol2 = '';
     }
     saveViewState();
     render();
