@@ -121,9 +121,21 @@
       padding: 0 2px; margin-bottom: 6px; overflow: hidden;
     }
     .op-info:empty { margin-bottom: 0; }
+    .op-photo {
+      width: 80px; height: 80px; border-radius: 6px; object-fit: cover;
+      border: 2px solid var(--border); display: block; margin: 0 auto 4px;
+    }
     .op-call { color: var(--accent-blue); font-weight: bold; font-size: 28px; font-family: 'Consolas', monospace; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-detail { color: var(--text-secondary); font-size: 16px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-ref { color: var(--accent-green); font-weight: bold; font-size: 17px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 2-3 ops: one line per op */
+    .op-multi-line { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
+    .op-multi-line .op-ml-call { color: var(--accent-blue); font-weight: bold; font-family: 'Consolas', monospace; }
+    .op-multi-line .op-ml-name { color: var(--text-secondary); margin-left: 4px; }
+    /* 4+ ops: inline comma-separated */
+    .op-crowd { font-size: 13px; line-height: 1.6; }
+    .op-crowd-call { color: var(--accent-blue); font-weight: bold; font-family: 'Consolas', monospace; }
+    .op-crowd-more { color: var(--text-dim); font-style: italic; }
     .solar-pills {
       display: flex; flex-direction: row; gap: 3px;
     }
@@ -515,6 +527,7 @@
         <label style="font-size:11px;color:var(--text-dim);display:block;padding-bottom:2px;">Microphone</label>
         <select id="mic-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:12px;"></select>
       </div>
+      <label class="settings-toggle"><input type="checkbox" id="w-op-photo"> Operator Photo (QRZ)</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw-controls"> CW Speed / Text Input</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
@@ -1232,6 +1245,7 @@ async function saveWidgets() {
 const wSmeter = document.getElementById('w-smeter');
 const wPtt = document.getElementById('w-ptt');
 const wLog = document.getElementById('w-log');
+const wOpPhoto = document.getElementById('w-op-photo');
 const wCw = document.getElementById('w-cw');
 const wCwControls = document.getElementById('w-cw-controls');
 const wVoice = document.getElementById('w-voice');
@@ -1249,6 +1263,7 @@ function syncSettingsCheckboxes() {
   wSmeter.checked = !!vfoWidgets.smeter;
   wPtt.checked = !!vfoWidgets.ptt;
   wLog.checked = !!vfoWidgets.log;
+  wOpPhoto.checked = !!vfoWidgets['op-photo'];
   wCw.checked = !!vfoWidgets.cw;
   wCwControls.checked = !!vfoWidgets['cw-controls'];
   wVoice.checked = !!vfoWidgets.voice;
@@ -1262,11 +1277,12 @@ function syncSettingsCheckboxes() {
   sProfilesInline.checked = !!vfoSections['profiles-inline'];
 }
 
-[wSmeter, wPtt, wLog, wCw, wCwControls, wVoice].forEach(cb => {
+[wSmeter, wPtt, wLog, wOpPhoto, wCw, wCwControls, wVoice].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoWidgets.smeter = wSmeter.checked;
     vfoWidgets.ptt = wPtt.checked;
     vfoWidgets.log = wLog.checked;
+    vfoWidgets['op-photo'] = wOpPhoto.checked;
     vfoWidgets.cw = wCw.checked;
     vfoWidgets['cw-controls'] = wCwControls.checked;
     vfoWidgets.voice = wVoice.checked;
@@ -1710,19 +1726,36 @@ window.api.onTunedSpot((spot) => {
     return;
   }
   let html = '';
-  const single = ops.length === 1;
-  for (const op of ops) {
+  const n = ops.length;
+  if (n === 1) {
+    // Single operator: full detail with optional photo
+    const op = ops[0];
+    if (vfoWidgets['op-photo'] && op.image) {
+      html += '<img class="op-photo" src="' + esc(op.image) + '" onerror="this.style.display=\'none\'">';
+    }
     html += '<span class="op-call">' + esc(op.callsign) + '</span>';
     if (op.displayName) html += '<span class="op-detail">' + esc(op.displayName) + '</span>';
-    if (single) {
-      // Full detail for single operator
-      const locParts = [];
-      if (op.country) locParts.push(op.country === 'United States' ? 'USA' : op.country);
-      if (op.grid) locParts.push(op.grid);
-      if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
-      if (op.reference) html += '<span class="op-ref">' + esc(op.reference) + '</span>';
-      if (op.parkName) html += '<span class="op-detail">' + esc(op.parkName) + '</span>';
+    const locParts = [];
+    if (op.country) locParts.push(op.country === 'United States' ? 'USA' : op.country);
+    if (op.grid) locParts.push(op.grid);
+    if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
+    if (op.reference) html += '<span class="op-ref">' + esc(op.reference) + '</span>';
+    if (op.parkName) html += '<span class="op-detail">' + esc(op.parkName) + '</span>';
+  } else if (n <= 3) {
+    // 2-3 ops: one line per op — callsign + name
+    for (const op of ops) {
+      html += '<span class="op-multi-line"><span class="op-ml-call">' + esc(op.callsign) + '</span>';
+      if (op.displayName) html += '<span class="op-ml-name">' + esc(op.displayName) + '</span>';
+      html += '</span>';
     }
+  } else {
+    // 4+ ops: inline comma-separated, cap at 6
+    const CAP = 6;
+    const shown = ops.slice(0, CAP);
+    html += '<span class="op-crowd">';
+    html += shown.map(op => '<span class="op-crowd-call">' + esc(op.callsign) + '</span>').join(', ');
+    if (n > CAP) html += ' <span class="op-crowd-more">+' + (n - CAP) + ' more</span>';
+    html += '</span>';
   }
   opInfoEl.innerHTML = html;
   // Use first op's WPM for CW sync

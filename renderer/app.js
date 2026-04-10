@@ -139,11 +139,12 @@ function notifyVfoTunedSpot(spot) {
     if (!op.callsign) return Promise.resolve();
     return window.api.qrzLookup(op.callsign).then(info => {
       if (info) {
-        const first = (info.nickname || info.fname || '').trim();
-        const last = (info.name || '').trim();
+        const first = cleanQrzName(info.nickname) || cleanQrzName(info.fname);
+        const last = cleanQrzName(info.name);
         ops[i].displayName = [first, last].filter(Boolean).join(' ');
         ops[i].grid = info.grid || '';
         ops[i].country = info.country || '';
+        ops[i].image = info.image || '';
       }
     }).catch(() => {});
   });
@@ -9624,6 +9625,17 @@ window.api.onCatFrequency((hz) => {
   }
   playTuneClick();
   updateBlFreqFromRadio();
+  // Track which spot matches the current frequency
+  const onSpot = allSpots.find(s => Math.abs(parseFloat(s.frequency) - newKhz) < 0.5);
+  if (onSpot) {
+    if (!lastTunedSpot || onSpot.callsign !== lastTunedSpot.callsign || onSpot.frequency !== lastTunedSpot.frequency) {
+      lastTunedSpot = onSpot;
+      notifyVfoTunedSpot(onSpot);
+    }
+  } else if (lastTunedSpot) {
+    lastTunedSpot = null;
+    notifyVfoTunedSpot(null);
+  }
   if (showTable || showMap) render();
 });
 

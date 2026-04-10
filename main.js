@@ -3242,6 +3242,7 @@ function connectRemote() {
     destroyRemoteAudioWindow();
     // Clear SSB-over-DATA state so handleRemotePtt doesn't try to restore mode
     _ssbModeBeforePtt = null;
+    _ssbFreqBeforePtt = 0;
     // ALWAYS force RX on disconnect — critical safety to prevent stuck TX
     // (FT8 may use VOX, PTT state tracking can be stale, radio may be mid-cycle)
     handleRemotePtt(false);
@@ -4619,6 +4620,7 @@ function disconnectRemote() {
 }
 
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
+let _ssbFreqBeforePtt = 0;   // original frequency saved during DATA-mode PTT workaround
 
 function handleRemotePtt(state) {
   const target = settings.catTarget;
@@ -4630,10 +4632,11 @@ function handleRemotePtt(state) {
     if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
       const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
       _ssbModeBeforePtt = curMode;
+      _ssbFreqBeforePtt = _currentFreqHz;
       sendCatLog(`[PTT] ${curMode} → ${dataMode} (SSB-over-DATA: mic disabled)`);
-      // Suppress mode broadcasts so ECHOCAT doesn't see the transient DATA mode
-      // (which would hide the PTT button and release TX)
-      _modeSuppressUntil = Date.now() + 5000;
+      // Suppress mode broadcasts for the entire PTT duration + restore.
+      // Set high — will be reset to a shorter window on PTT release.
+      _modeSuppressUntil = Date.now() + 120000;
       if (cat && cat.connected) cat.tune(_currentFreqHz, dataMode);
     }
   }
@@ -4654,13 +4657,16 @@ function handleRemotePtt(state) {
   }
 
   if (!state && _ssbModeBeforePtt) {
-    // Restore original voice mode after PTT release
+    // Restore original voice mode and frequency after PTT release
+    // (DATA mode carrier offset shifts the frequency — restore the original)
     const restoreMode = _ssbModeBeforePtt;
+    const restoreFreq = _ssbFreqBeforePtt || _currentFreqHz;
     _ssbModeBeforePtt = null;
-    sendCatLog(`[PTT] Restoring ${restoreMode} mode`);
+    _ssbFreqBeforePtt = 0;
+    sendCatLog(`[PTT] Restoring ${restoreMode} mode at ${restoreFreq}Hz`);
     // Suppress mode broadcasts during restore so ECHOCAT doesn't flicker
     _modeSuppressUntil = Date.now() + 2000;
-    if (cat && cat.connected) cat.tune(_currentFreqHz, restoreMode);
+    if (cat && cat.connected) cat.tune(restoreFreq, restoreMode);
   }
 
   _remoteTxState = state;
