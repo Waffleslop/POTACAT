@@ -198,6 +198,22 @@ function cleanQrzName(raw) {
   return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
 }
 
+/** Auto-prepend POTA country prefix to bare park numbers based on callsign.
+ *  e.g. callsign "W1AW" + ref "1234" → "US-1234", "VE3ABC" + "5678" → "VE-5678" */
+function autoPotaPrefix(ref, callsign) {
+  if (!ref) return ref;
+  // Already has a prefix (contains letters before a dash)
+  if (/^[A-Z]/.test(ref)) return ref;
+  // Bare number — try to determine prefix from callsign
+  const call = (callsign || '').toUpperCase().replace(/\/.*$/, '');
+  if (!call) return ref;
+  // US callsigns: start with K, W, N, or A followed by a digit
+  if (/^[KWNA]\d/.test(call) || /^A[A-L]\d/.test(call)) return 'US-' + ref;
+  // Canadian callsigns: VE, VA, VY, VO, CY, CF, CG, CI, CJ, CK
+  if (/^V[AEOY]\d/.test(call) || /^C[FGIJK]\d/.test(call)) return 'VE-' + ref;
+  return ref;
+}
+
 /** Build display name from QRZ info, respecting full-name setting.
  *  Prefers nickname over fname when available. */
 function qrzDisplayName(info) {
@@ -1973,7 +1989,7 @@ blType.addEventListener('change', () => {
   const type = blType.value;
   const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota';
   blRef.classList.toggle('hidden', !needsRef);
-  blRef.placeholder = type === 'pota' ? 'K-1234' : type === 'sota' ? 'W4C/CM-001' : type === 'wwff' ? 'KFF-1234' : type === 'llota' ? 'US-0001' : 'Ref';
+  blRef.placeholder = type === 'pota' ? '1234 or 1234, 5678' : type === 'sota' ? 'W4C/CM-001' : type === 'wwff' ? 'KFF-1234' : type === 'llota' ? 'US-0001' : 'Ref';
   if (needsRef) blRef.focus();
   updateBlRespotVisibility();
 });
@@ -2007,14 +2023,14 @@ blCallsign.addEventListener('input', () => {
 
 // Save QSO from banner logger
 async function saveBannerQso() {
-  const callsign = blCallsign.value.trim().toUpperCase();
-  if (!callsign) { blCallsign.focus(); return; }
+  const rawCallsign = blCallsign.value.trim().toUpperCase();
+  if (!rawCallsign) { blCallsign.focus(); return; }
   const frequency = blFreq.value.trim();
   if (!frequency) { blFreq.focus(); return; }
   const type = blType.value;
-  const ref = blRef.value.trim().toUpperCase();
+  const rawRef = blRef.value.trim().toUpperCase();
   const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota';
-  if (needsRef && !ref) { blRef.focus(); return; }
+  if (needsRef && !rawRef) { blRef.focus(); return; }
   const mode = blMode.value;
   const rstSent = blRstSent.value.trim() || '59';
   const rstRcvd = blRstRcvd.value.trim() || '59';
@@ -2026,14 +2042,26 @@ async function saveBannerQso() {
   const freqMhz = parseFloat(frequency);
   const freqKhz = freqMhz * 1000;
   const band = freqToBandActivator(freqKhz) || '';
-  const qrzInfo = qrzData.get(callsign.split('/')[0]);
+
+  // Support comma-separated callsigns (multiple activators)
+  const callsigns = rawCallsign.split(',').map(c => c.trim()).filter(Boolean);
+  if (!callsigns.length) { blCallsign.focus(); return; }
+  const callsign = callsigns[0];
+
+  // Parse comma-separated refs with auto country prefix for POTA
+  let allRefs = rawRef ? rawRef.split(',').map(r => r.trim()).filter(Boolean) : [''];
+  if (type === 'pota') {
+    allRefs = allRefs.map(r => autoPotaPrefix(r, callsign));
+  }
+  const primaryRef = allRefs[0] || '';
+  const addlRefs = allRefs.slice(1);
 
   // Build sig/sigInfo/ref fields based on type
   let sig = '', sigInfo = '', potaRef = '', sotaRef = '', wwffRef = '';
-  if (type === 'pota' && ref) { sig = 'POTA'; potaRef = ref; sigInfo = ref; }
-  else if (type === 'sota' && ref) { sig = 'SOTA'; sotaRef = ref; sigInfo = ref; }
-  else if (type === 'wwff' && ref) { sig = 'WWFF'; wwffRef = ref; sigInfo = ref; }
-  else if (type === 'llota' && ref) { sig = 'LLOTA'; sigInfo = ref; }
+  if (type === 'pota' && primaryRef) { sig = 'POTA'; potaRef = primaryRef; sigInfo = primaryRef; }
+  else if (type === 'sota' && primaryRef) { sig = 'SOTA'; sotaRef = primaryRef; sigInfo = primaryRef; }
+  else if (type === 'wwff' && primaryRef) { sig = 'WWFF'; wwffRef = primaryRef; sigInfo = primaryRef; }
+  else if (type === 'llota' && primaryRef) { sig = 'LLOTA'; sigInfo = primaryRef; }
   const notes = blNotes.value.trim();
   const commentBase = [notes, sigInfo ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' ');
 
@@ -2060,44 +2088,69 @@ async function saveBannerQso() {
     } catch {}
   }
 
-  const qsoData = {
-    callsign,
-    frequency: String(freqKhz),
-    mode,
-    qsoDate,
-    timeOn,
-    rstSent,
-    rstRcvd,
-    txPower: String(defaultPower),
-    band,
-    sig,
-    sigInfo,
-    potaRef,
-    sotaRef,
-    wwffRef,
-    name: qrzInfo ? [cleanQrzName(qrzInfo.nickname) || cleanQrzName(qrzInfo.fname), cleanQrzName(qrzInfo.name)].filter(Boolean).join(' ') : '',
-    state: parkLocState || (!sig && qrzInfo ? (qrzInfo.state || '') : ''),
-    county: !parkLocState && !sig && qrzInfo && qrzInfo.state && qrzInfo.county ? `${qrzInfo.state},${qrzInfo.county}` : '',
-    gridsquare: parkLocGrid || (qrzInfo ? (qrzInfo.grid || '') : ''),
-    country: qrzInfo ? (qrzInfo.country || '') : '',
-    comment: commentBase,
-    // Include activation context if activator mode is running
-    ...(appMode === 'activator' && activationActive && activatorParkRefs.length > 0
-      ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
-      : {}),
-    respot: wantsRespot && type === 'pota',
-    wwffRespot: wantsRespot && type === 'wwff',
-    wwffReference: wantsRespot && type === 'wwff' ? ref : '',
-    llotaRespot: wantsRespot && type === 'llota',
-    llotaReference: wantsRespot && type === 'llota' ? ref : '',
-    dxcRespot: wantsRespot && type === '' && clusterConnected,
-    respotComment: wantsRespot ? respotCommentText : '',
-  };
-
   blLogBtn.disabled = true;
   blLogBtn.textContent = 'Saving\u2026';
+  let lastResult = null;
   try {
-    const result = await window.api.saveQso(qsoData);
+    for (let ci = 0; ci < callsigns.length; ci++) {
+      const cs = callsigns[ci];
+      const qrzInfo = qrzData.get(cs.split('/')[0]);
+      const qsoData = {
+        callsign: cs,
+        frequency: String(freqKhz),
+        mode,
+        qsoDate,
+        timeOn,
+        rstSent,
+        rstRcvd,
+        txPower: String(defaultPower),
+        band,
+        sig,
+        sigInfo,
+        potaRef,
+        sotaRef,
+        wwffRef,
+        name: qrzInfo ? [cleanQrzName(qrzInfo.nickname) || cleanQrzName(qrzInfo.fname), cleanQrzName(qrzInfo.name)].filter(Boolean).join(' ') : '',
+        state: parkLocState || (!sig && qrzInfo ? (qrzInfo.state || '') : ''),
+        county: !parkLocState && !sig && qrzInfo && qrzInfo.state && qrzInfo.county ? `${qrzInfo.state},${qrzInfo.county}` : '',
+        gridsquare: parkLocGrid || (qrzInfo ? (qrzInfo.grid || '') : ''),
+        country: qrzInfo ? (qrzInfo.country || '') : '',
+        comment: commentBase,
+        // Include activation context if activator mode is running
+        ...(appMode === 'activator' && activationActive && activatorParkRefs.length > 0
+          ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
+          : {}),
+        // Only respot on the first callsign
+        respot: ci === 0 && wantsRespot && type === 'pota',
+        wwffRespot: ci === 0 && wantsRespot && type === 'wwff',
+        wwffReference: ci === 0 && wantsRespot && type === 'wwff' ? primaryRef : '',
+        llotaRespot: ci === 0 && wantsRespot && type === 'llota',
+        llotaReference: ci === 0 && wantsRespot && type === 'llota' ? primaryRef : '',
+        dxcRespot: ci === 0 && wantsRespot && type === '' && clusterConnected,
+        respotComment: ci === 0 && wantsRespot ? respotCommentText : '',
+      };
+
+      lastResult = await window.api.saveQso(qsoData);
+      if (!lastResult || !lastResult.success) break;
+
+      // Save additional park records (two-fer / three-fer)
+      for (const addlRef of addlRefs) {
+        const addlComment = [notes, `[${sig} ${addlRef}]`].filter(Boolean).join(' ');
+        const addlData = {
+          ...qsoData,
+          sigInfo: addlRef,
+          potaRef: sig === 'POTA' ? addlRef : qsoData.potaRef,
+          wwffRef: sig === 'WWFF' ? addlRef : qsoData.wwffRef,
+          comment: addlComment,
+          respot: false, wwffRespot: false, llotaRespot: false, dxcRespot: false, respotComment: '',
+        };
+        const addlResult = await window.api.saveQso(addlData);
+        if (!addlResult || !addlResult.success) { lastResult = addlResult; break; }
+      }
+      if (lastResult && !lastResult.success) break;
+    }
+
+    const result = lastResult;
     if (result && result.success) {
       // Keep type and ref sticky across QSOs (user is likely logging same park)
       blCallsign.value = '';
@@ -3174,12 +3227,13 @@ function updateCwKeyerTypeVisibility() {
 }
 async function populateWinKeyerPorts() {
   const ports = await window.api.listPorts();
-  setWinKeyerPort.innerHTML = '<option value="">(select COM port)</option>';
+  const dl = document.getElementById('winkeyer-port-list');
+  dl.innerHTML = '';
   ports.forEach(p => {
     const opt = document.createElement('option');
     opt.value = p.path;
-    opt.textContent = p.path + (p.manufacturer ? ' — ' + p.manufacturer : '');
-    setWinKeyerPort.appendChild(opt);
+    opt.label = p.path + (p.manufacturer ? ' — ' + p.manufacturer : '');
+    dl.appendChild(opt);
   });
 }
 
@@ -5061,7 +5115,7 @@ document.getElementById('dx-command-send').addEventListener('click', sendDxComma
 
 // --- Log Type Picker ---
 const LOG_TYPE_SOURCE_MAP = { pota: 'pota', sota: 'sota', wwff: 'wwff', llota: 'llota', dx: 'dxc' };
-const LOG_TYPE_PLACEHOLDERS = { pota: 'e.g. US-1234 or US-1234, US-5678', sota: 'e.g. W6/CT-001', wwff: 'e.g. KFF-1234 or KFF-1234, KFF-5678', llota: 'e.g. US-0001 or US-0001, US-0002' };
+const LOG_TYPE_PLACEHOLDERS = { pota: 'e.g. 1234 or 1234, 5678 (auto-prefix from call)', sota: 'e.g. W6/CT-001', wwff: 'e.g. KFF-1234 or KFF-1234, KFF-5678', llota: 'e.g. US-0001 or US-0001, US-0002' };
 
 function selectLogType(type) {
   logSelectedType = type;
@@ -6127,10 +6181,14 @@ function freqKhzToBand(khz) {
 let currentLogSpot = null;
 
 /** Parse comma-separated park refs from the reference input.
+ *  Auto-prepends POTA country prefix for bare numbers based on callsign.
  *  Returns { primary, additional } where additional is the 2nd+ refs. */
-function parseRefParks() {
+function parseRefParks(callsign) {
   const raw = logRefInput.value.trim().toUpperCase();
-  const refs = raw.split(',').map(r => r.trim()).filter(Boolean);
+  let refs = raw.split(',').map(r => r.trim()).filter(Boolean);
+  if (logSelectedType === 'pota') {
+    refs = refs.map(r => autoPotaPrefix(r, callsign));
+  }
   return { primary: refs[0] || '', additional: refs.slice(1) };
 }
 
@@ -6312,7 +6370,7 @@ logSaveBtn.addEventListener('click', async () => {
   let potaRef = '';
   let sotaRef = '';
   let wwffRef = '';
-  const { primary: typedRef, additional: addlParks } = parseRefParks();
+  const { primary: typedRef, additional: addlParks } = parseRefParks(callsign);
   if (logSelectedType && typedRef) {
     if (logSelectedType === 'pota') { sig = 'POTA'; potaRef = typedRef; }
     else if (logSelectedType === 'sota') { sig = 'SOTA'; sotaRef = typedRef; }
@@ -7360,17 +7418,18 @@ async function openSettingsDialog(tab) {
   }
   setRemoteCwEnabled.checked = !!s.remoteCwEnabled;
   setRemoteStun.checked = !!s.remoteStun;
-  // Populate CW Key Port dropdown
+  // Populate CW Key Port datalist
   try {
     const cwPorts = await window.api.listPorts();
-    setCwKeyPort.innerHTML = '<option value="">(none)</option>';
+    const cwDl = document.getElementById('cw-key-port-list');
+    cwDl.innerHTML = '';
     for (const p of cwPorts) {
       const opt = document.createElement('option');
       opt.value = p.path;
-      opt.textContent = `${p.path} — ${p.friendlyName}`;
-      if (s.cwKeyPort === p.path) opt.selected = true;
-      setCwKeyPort.appendChild(opt);
+      opt.label = `${p.path} — ${p.friendlyName}`;
+      cwDl.appendChild(opt);
     }
+    if (s.cwKeyPort) setCwKeyPort.value = s.cwKeyPort;
   } catch { /* ports unavailable */ }
   if (enableRemote) {
     populateRemoteURLs();

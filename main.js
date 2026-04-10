@@ -4632,8 +4632,9 @@ function handleRemotePtt(state) {
   const target = settings.catTarget;
   const isFlexRig = target && target.type === 'tcp';
 
-  if (state && settings.ssbOverData) {
+  if (state && settings.ssbOverData && !ft8Engine) {
     // Switch to DATA mode before TX to prevent local mic bleed
+    // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
     if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
       const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
