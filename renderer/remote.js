@@ -1464,7 +1464,7 @@
       // Clear decode log for fresh start
       ft8DecodeLog = [];
       ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">Hunting ' + esc(ft8HuntCall) + '...</div>';
-      switchTab('ft8');
+      switchTab('ft8', { freqKhz: freqKhz });
     }
   });
 
@@ -3701,7 +3701,7 @@
     switchTab(tab.dataset.tab);
   });
 
-  function switchTab(tab) {
+  function switchTab(tab, opts) {
     activeTab = tab;
     tabBar.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     // Hide all content areas
@@ -3761,11 +3761,26 @@
       if (!ft8Running) {
         ft8Send({ type: 'jtcat-start', mode: ft8Mode });
       }
-      // Tune radio to the active band with DIGU mode
-      var selectedOpt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
-      if (selectedOpt) {
-        var freqKhz = parseInt(selectedOpt.dataset.freq, 10);
-        ft8Send({ type: 'jtcat-set-band', band: selectedOpt.value, freqKhz: freqKhz });
+      // If coming from a spot click with a specific frequency, select the matching band
+      // and skip the default band tune (the spot already tuned the radio)
+      var spotFreq = opts && opts.freqKhz ? parseFloat(opts.freqKhz) : 0;
+      if (spotFreq > 0) {
+        // Select the band dropdown option matching the spot frequency
+        for (var oi = 0; oi < ft8BandSelect.options.length; oi++) {
+          var optFreq = parseInt(ft8BandSelect.options[oi].dataset.freq, 10);
+          if (Math.abs(optFreq - spotFreq) < 2) {
+            ft8BandSelect.selectedIndex = oi;
+            break;
+          }
+        }
+        // Don't send jtcat-set-band — the spot tune already set the frequency
+      } else {
+        // Normal tab switch — tune to the active band
+        var selectedOpt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
+        if (selectedOpt) {
+          var freqKhz = parseInt(selectedOpt.dataset.freq, 10);
+          ft8Send({ type: 'jtcat-set-band', band: selectedOpt.value, freqKhz: freqKhz });
+        }
       }
       ft8StartCountdown();
     } else if (tab === 'dir') {
@@ -5193,6 +5208,8 @@
     if (opt) {
       const freqKhz = parseFloat(opt.dataset.freq);
       ft8Send({ type: 'jtcat-set-band', band: opt.value, freqKhz });
+      const hz = freqKhz * 1000;
+      if (hz > 100000) { freqDisplay.textContent = formatFreq(hz); currentFreqKhz = freqKhz; }
     }
   });
 
@@ -5202,6 +5219,9 @@
     const band = opt.value;
     const freqKhz = parseFloat(opt.dataset.freq);
     ft8Send({ type: 'jtcat-set-band', band, freqKhz });
+    // Immediately update frequency display (don't wait for CAT poll)
+    const hz = freqKhz * 1000;
+    if (hz > 100000) { freqDisplay.textContent = formatFreq(hz); currentFreqKhz = freqKhz; }
     // Clear decode log on band change
     ft8DecodeLog = [];
     ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">Switching to ' + band + '...</div>';
