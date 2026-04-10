@@ -38,11 +38,17 @@ if (process.argv.includes('--launcher')) {
       app.quit();
       return;
     }
-    // System tray icon — use .ico on Windows, .png on Mac/Linux
-    const icoFile = process.platform === 'win32' ? 'icon.ico' : 'icon-256.png';
-    const iconPath = path.join(__dirname, 'assets', icoFile);
+    // System tray icon — use .ico on Windows, resized png on Mac/Linux
     const { shell } = require('electron');
-    const tray = new Tray(iconPath);
+    let trayIcon;
+    if (process.platform === 'win32') {
+      trayIcon = path.join(__dirname, 'assets', 'icon.ico');
+    } else {
+      // macOS menu bar icons must be 16x16 (or 32x32 @2x) — resize from 256px
+      const img = ni.createFromPath(path.join(__dirname, 'assets', 'icon-256.png'));
+      trayIcon = img.resize({ width: 16, height: 16 });
+    }
+    const tray = new Tray(trayIcon);
     tray.setToolTip('POTACAT Launcher (port 7301)');
     tray.on('click', () => shell.openExternal('https://localhost:7301'));
     tray.setContextMenu(Menu.buildFromTemplate([
