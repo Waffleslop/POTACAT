@@ -555,7 +555,8 @@ function sendCatMode(mode) {
   const displayMode = (freedvEngine && (mode === 'USB' || mode === 'LSB')) ? 'FreeDV' : mode;
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
   _currentMode = mode; // keep real mode internally for CAT
-  _modeSuppressUntil = 0;
+  // Don't clear mode suppress — handleRemotePtt sets a long suppress during
+  // SSB-over-DATA transitions to prevent ECHOCAT from seeing transient DATA modes
   sendVfoState();
   broadcastRigState();
   sendN1mmRadioInfo();
