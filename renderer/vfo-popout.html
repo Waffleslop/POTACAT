@@ -1008,8 +1008,8 @@ window.addEventListener('mouseup', () => {
   if (Math.abs(velocity) > 0.01) inertiaId = requestAnimationFrame(decay);
 });
 
-// Mouse wheel
-canvas.addEventListener('wheel', (e) => {
+// Mouse wheel — works on both VFO knob and frequency display
+function handleFreqWheel(e) {
   e.preventDefault();
   if (vfoLocked) return;
   const dir = e.deltaY > 0 ? 1 : -1;
@@ -1019,7 +1019,9 @@ canvas.addEventListener('wheel', (e) => {
   window.api.tune(currentFreqHz / 1000);
   updateDisplay();
   drawVfoDial();
-}, { passive: false });
+}
+canvas.addEventListener('wheel', handleFreqWheel, { passive: false });
+freqDisplay.addEventListener('wheel', handleFreqWheel, { passive: false });
 
 // --- Keypad ---
 const kpInput = document.getElementById('kp-input');
