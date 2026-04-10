@@ -3321,27 +3321,36 @@ html, body {
 
 .dir-empty { text-align: center; color: var(--text-dim); padding: 40px 0; font-size: 14px; }
 
-/* ── Speakermic Button ── */
-.bb-mic-btn {
-  position: relative;
+/* ── Speakermic Button (stacked above HALT) ── */
+.bb-halt-stack {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.bb-mic-btn {
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 6px;
   font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
   color: var(--text-dim);
   background: #1a1a2e;
   border: 2px solid #2a2a4a;
+  cursor: pointer;
   transition: border-color 0.3s, color 0.3s;
 }
-.bb-mic-btn #speakermic-icon { font-size: 18px; line-height: 1; }
-.bb-mic-btn #speakermic-label { font-size: 10px; }
+.bb-mic-btn.hidden { display: none; }
+.bb-mic-btn #speakermic-icon { font-size: 14px; line-height: 1; }
+.bb-mic-btn #speakermic-label { font-size: 11px; }
 .bb-mic-btn.mic-connected {
   border-color: var(--pota);
   color: var(--pota);
 }
-.bb-mic-btn.mic-connected #speakermic-label { font-size: 9px; }
 .bb-mic-btn.mic-connecting {
   border-color: #4a9eff;
   animation: mic-pulse 1.5s infinite;

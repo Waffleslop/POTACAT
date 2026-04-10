@@ -4582,6 +4582,12 @@ function connectRemote() {
 
   remoteServer.on('signal-from-client', (data) => {
     if (data && data.type === 'start-audio') {
+      // Safety: release PTT if active — audio reconnect means phone lost state
+      if (remoteServer._pttActive) {
+        console.log('[Echo CAT] Audio restart while TX — forcing RX');
+        remoteServer.forcePttRelease();
+        handleRemotePtt(false);
+      }
       // Tell phone whether to use STUN before WebRTC negotiation begins
       remoteServer.sendToClient({ type: 'stun-config', useStun: !!settings.remoteStun });
       // Phone requested audio — create or restart hidden audio window

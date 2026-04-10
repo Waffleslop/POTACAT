@@ -968,12 +968,14 @@
           <button id="vol-boost-btn" type="button" class="bb-square-btn hidden" title="Volume Boost">Vol 1x</button>
         </div>
         <button type="button" id="scan-btn" class="bb-round-btn" title="Scan spots">Scan</button>
-        <button type="button" id="speakermic-btn" class="bb-round-btn bb-mic-btn hidden" title="Connect Speakermic">
-          <span id="speakermic-icon">&#x1F399;</span>
-          <span id="speakermic-label">Mic</span>
-        </button>
         <button id="ptt-btn" type="button" class="ptt-button">PTT</button>
-        <button id="estop-btn" type="button" class="bb-halt-btn">HALT</button>
+        <div class="bb-halt-stack">
+          <button type="button" id="speakermic-btn" class="bb-mic-btn hidden" title="Connect Speakermic">
+            <span id="speakermic-icon">&#x1F399;</span>
+            <span id="speakermic-label">Mic</span>
+          </button>
+          <button id="estop-btn" type="button" class="bb-halt-btn">HALT</button>
+        </div>
       </div>
     </div>
 

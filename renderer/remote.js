@@ -3006,7 +3006,10 @@
   audioConnectBtn.addEventListener('click', async () => {
     audioConnectBtn.textContent = 'Connecting...';
     await startAudio();
-    // If audio didn't fully connect, reset button so user can retry
+    // First startAudio() gets mic permission; second connects WebRTC
+    if (micReady && !audioEnabled) {
+      await startAudio();
+    }
     if (!audioEnabled) {
       audioConnectBtn.textContent = 'Tap to Connect Audio';
     }
