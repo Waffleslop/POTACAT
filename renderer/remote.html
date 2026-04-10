@@ -204,6 +204,50 @@
           <select id="rc-audio-output" class="so-select" style="flex:1;font-size:12px;"></select>
         </div>
         <button type="button" id="rc-audio-refresh" class="ft8-filter-btn" style="margin:4px 0 8px;">Refresh Devices</button>
+
+        <!-- Speakermic -->
+        <div class="so-section-label">Speakermic</div>
+        <div class="so-row">
+          <label class="so-label">Enable</label>
+          <div class="so-controls">
+            <button type="button" class="rc-btn rc-toggle" id="so-speakermic-enable">Off</button>
+            <span style="font-size:11px;color:var(--text-dim);margin-left:6px;">Shows Mic in toolbar</span>
+          </div>
+        </div>
+        <div id="so-speakermic-settings" style="display:none;">
+          <div class="so-row">
+            <label class="so-label">Device</label>
+            <div class="so-controls">
+              <button type="button" class="rc-btn" id="so-speakermic-connect" style="min-width:90px;">Connect</button>
+              <span id="so-speakermic-status" style="font-size:12px;color:var(--text-dim);margin-left:6px;">Not connected</span>
+            </div>
+          </div>
+          <div class="so-row" id="so-speakermic-details" style="display:none;">
+            <label class="so-label">Battery</label>
+            <div class="so-controls">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div style="width:80px;height:10px;background:#2a2a4a;border-radius:4px;overflow:hidden;">
+                  <div id="so-speakermic-batt-fill" style="height:100%;width:100%;background:var(--pota);border-radius:4px;transition:width 0.5s;"></div>
+                </div>
+                <span id="so-speakermic-batt-pct" style="font-size:12px;color:var(--text-dim);">--%</span>
+              </div>
+            </div>
+          </div>
+          <div class="so-row" id="so-speakermic-vol-row" style="display:none;">
+            <label class="so-label">Speaker Vol</label>
+            <div class="so-controls">
+              <input type="range" id="so-speakermic-vol" min="0" max="100" value="70" style="width:100px;">
+              <span id="so-speakermic-vol-label" style="font-size:12px;color:var(--text-dim);margin-left:4px;min-width:30px;">70%</span>
+            </div>
+          </div>
+          <div class="so-row">
+            <label class="so-label">Auto-Reconnect</label>
+            <div class="so-controls">
+              <button type="button" class="rc-btn rc-toggle active" id="so-speakermic-reconnect">On</button>
+            </div>
+          </div>
+        </div>
+
         <div class="so-section-label">Display</div>
         <label class="so-label" style="display:flex;align-items:center;gap:8px;padding:4px 0;">
           <input type="checkbox" id="echo-show-meter"> Show S-Meter / SWR
@@ -924,6 +968,10 @@
           <button id="vol-boost-btn" type="button" class="bb-square-btn hidden" title="Volume Boost">Vol 1x</button>
         </div>
         <button type="button" id="scan-btn" class="bb-round-btn" title="Scan spots">Scan</button>
+        <button type="button" id="speakermic-btn" class="bb-round-btn bb-mic-btn hidden" title="Connect Speakermic">
+          <span id="speakermic-icon">&#x1F399;</span>
+          <span id="speakermic-label">Mic</span>
+        </button>
         <button id="ptt-btn" type="button" class="ptt-button">PTT</button>
         <button id="estop-btn" type="button" class="bb-halt-btn">HALT</button>
       </div>

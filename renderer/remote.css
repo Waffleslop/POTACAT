@@ -3320,3 +3320,37 @@ html, body {
 .dir-card-freq { font-family: monospace; }
 
 .dir-empty { text-align: center; color: var(--text-dim); padding: 40px 0; font-size: 14px; }
+
+/* ── Speakermic Button ── */
+.bb-mic-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: #1a1a2e;
+  border: 2px solid #2a2a4a;
+  transition: border-color 0.3s, color 0.3s;
+}
+.bb-mic-btn #speakermic-icon { font-size: 18px; line-height: 1; }
+.bb-mic-btn #speakermic-label { font-size: 10px; }
+.bb-mic-btn.mic-connected {
+  border-color: var(--pota);
+  color: var(--pota);
+}
+.bb-mic-btn.mic-connected #speakermic-label { font-size: 9px; }
+.bb-mic-btn.mic-connecting {
+  border-color: #4a9eff;
+  animation: mic-pulse 1.5s infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { border-color: #4a9eff; }
+  50% { border-color: #1a3a6e; }
+}
+.bb-mic-btn.mic-error {
+  border-color: var(--accent);
+  color: var(--accent);
+}
