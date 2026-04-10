@@ -3275,6 +3275,7 @@ function connectRemote() {
 
   // CW keyer output: route IambicKeyer key events to radio
   let _cwPollResumeTimer = null;
+  let _cwKeyLoggedRoute = false;
   remoteServer.setCwKeyerOutput(({ down }) => {
     // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
@@ -3303,13 +3304,18 @@ function connectRemote() {
       // Route keying based on model's preferred paddle method
       // Icom default: txrx (CI-V PTT 0x1C) — universal, no DTR config needed
       // Models with DTR keying support can override via cw.paddleKey: 'dtr'
-      const paddleMethod = cwCaps.paddleKey || 'txrx';
+      let paddleMethod = cwCaps.paddleKey || 'txrx';
+      // DTR keying only works with a dedicated CW key port (external USB-serial adapter).
+      // Without one, fall back to txrx (CI-V PTT) so USB CI-V rigs still key.
+      if (paddleMethod === 'dtr' && !(cwKeyPort && cwKeyPort.isOpen)) {
+        paddleMethod = 'txrx';
+      }
+      if (!_cwKeyLoggedRoute) {
+        _cwKeyLoggedRoute = true;
+        sendCatLog(`[CW] Keying route: ${paddleMethod}${cwKeyPort && cwKeyPort.isOpen ? ' + dedicated key port' : ''} (model: ${rigModel?.brand || '?'})`);
+      }
       if (paddleMethod === 'dtr') {
-        // If dedicated CW Key Port handles DTR, skip DTR on main CAT port
-        // (QMX/IC-705 CAT ports don't support DTR on Linux CDC-ACM)
-        if (!(cwKeyPort && cwKeyPort.isOpen)) {
-          cat.setCwKeyDtr(down, cwCaps.dtrPins);
-        }
+        // Dedicated CW Key Port is handling DTR — skip main CAT port
       } else if (paddleMethod === 'ta' && cwCaps.taKey) {
         cat.setCwKeyTa(down);
       } else {
