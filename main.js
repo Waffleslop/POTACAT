@@ -8357,10 +8357,14 @@ app.whenReady().then(() => {
   let kiwiClient = null;
   let kiwiActive = false;
 
-  ipcMain.on('kiwi-connect', (_e, { host, port, password }) => {
+  ipcMain.on('kiwi-connect', (_e, { host: rawHost, port: rawPort, password }) => {
+    // Sanitize host — strip http://, https://, trailing slashes
+    const host = (rawHost || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const port = rawPort || 8073;
+    if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
     kiwiClient = new KiwiSdrClient();
-    const kiwiFullHost = host + ':' + (port || 8073);
+    const kiwiFullHost = host + ':' + port;
     kiwiClient.on('connected', () => {
       kiwiActive = true;
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
@@ -8434,12 +8438,16 @@ app.whenReady().then(() => {
   // ECHOCAT → KiwiSDR bridge (phone requests connect/disconnect)
   if (remoteServer) {
     remoteServer.on('kiwi-connect', (msg) => {
-      // Use station from message, or fall back to configured primary station
-      const hostStr = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || '';
-      const parts = hostStr.split(':');
+      const raw = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || '';
+      // Strip http:// and trailing slashes before parsing host:port
+      const clean = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      sendCatLog(`[WebSDR] ECHOCAT requested connect: "${clean}"`);
+      const parts = clean.split(':');
       if (parts[0]) {
         const evt = { sender: { send: () => {} } };
         require('electron').ipcMain.emit('kiwi-connect', evt, { host: parts[0], port: parseInt(parts[1], 10) || 8073, password: msg.password });
+      } else {
+        sendCatLog('[WebSDR] No host configured — cannot connect');
       }
     });
     remoteServer.on('kiwi-disconnect', () => {
