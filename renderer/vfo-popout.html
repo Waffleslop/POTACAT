@@ -1486,9 +1486,11 @@ async function loadCwMacros() {
     btn.textContent = m.label || '?';
     btn.title = m.text || '';
     btn.addEventListener('click', () => {
-      // Basic macro expansion
       let text = m.text || '';
-      text = text.replace(/\{MYCALL\}/gi, s.myCallsign || '');
+      text = text.replace(/\{MYCALL\}/gi, s.myCallsign || '')
+        .replace(/\{call\}/gi, cwTunedCall)
+        .replace(/\{op_firstname\}/gi, cwTunedOpName)
+        .replace(/\{state\}/gi, '');
       window.api.sendCwText(text);
     });
     row.appendChild(btn);
@@ -1585,6 +1587,8 @@ const vfoCwSpotWpm = document.getElementById('vfo-cw-spot-wpm');
 const vfoCwSync = document.getElementById('vfo-cw-sync');
 let cwWpm = 20;
 let cwSpotWpmVal = null;
+let cwTunedCall = '';     // current tuned callsign for CW macro {call}
+let cwTunedOpName = '';   // current tuned op name for CW macro {op_firstname}
 
 (async () => {
   const s = await window.api.getSettings();
@@ -1724,9 +1728,13 @@ window.api.onTunedSpot((spot) => {
   if (!ops.length) {
     opInfoEl.innerHTML = '';
     cwSpotWpmVal = null;
+    cwTunedCall = '';
+    cwTunedOpName = '';
     updateCwSyncBtn();
     return;
   }
+  cwTunedCall = ops[0].callsign || '';
+  cwTunedOpName = ops[0].displayName ? ops[0].displayName.split(' ')[0] : '';
   let html = '';
   const n = ops.length;
   if (n === 1) {

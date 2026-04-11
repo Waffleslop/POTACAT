@@ -10651,12 +10651,20 @@ async function updateCwMacroBar() {
 // Invalidate cache when settings are saved so macro bar picks up edits
 function invalidateCwMacroCache() { _cwMacroCache = null; }
 function expandDesktopCwMacros(text) {
+  // {call} — tuned spot callsign (from log dialog or last tuned spot)
   const logCall = document.getElementById('log-callsign');
-  const call = (logCall && logCall.value) ? logCall.value.trim().toUpperCase() : '';
+  const call = (logCall && logCall.value) ? logCall.value.trim().toUpperCase()
+    : (lastTunedSpot ? lastTunedSpot.callsign : '');
+  // {op_firstname} — nickname (preferred) or first name from QRZ
+  const bareCall = call.split('/')[0];
+  const qrzOp = bareCall ? qrzData.get(bareCall) : null;
+  const opName = (qrzOp && (cleanQrzName(qrzOp.nickname) || cleanQrzName(qrzOp.fname))) || '';
+  // {state} — state from QRZ
+  const opState = (qrzOp && qrzOp.state) || '';
   return text
     .replace(/\{call\}/gi, call)
-    .replace(/\{op_firstname\}/gi, '')
-    .replace(/\{state\}/gi, '');
+    .replace(/\{op_firstname\}/gi, opName)
+    .replace(/\{state\}/gi, opState);
 }
 // CW WPM control in macro bar
 const cwWpmDisplay = document.getElementById('cw-wpm-display');
