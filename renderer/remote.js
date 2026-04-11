@@ -6813,6 +6813,7 @@
       var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
       if (st && ws && ws.readyState === WebSocket.OPEN) {
         var kiwiMsg = JSON.stringify({ type: 'kiwi-connect', host: st.fullHost });
+        try { ws.send(kiwiMsg); } catch (e) {}
         _kiwiConnecting = true;
         kiwiConnectedHostE = st.fullHost;
         kiwiSdrBtn.classList.add('kiwi-connecting');
