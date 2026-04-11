@@ -2131,7 +2131,7 @@
     pttDown = false;
     pttBtn.classList.remove('active');
     txBanner.classList.add('hidden');
-    muteRxAudio(false);
+    muteRxAudio(typeof kiwiRxConnected !== 'undefined' && kiwiRxConnected); // stay muted if SDR active
     // Re-mute mic track to prevent VOX/feedback TX cycling
     if (localAudioStream) localAudioStream.getAudioTracks().forEach(t => { t.enabled = false; });
     if (typeof smConnected !== 'undefined' && smConnected && smMicTrack) smMicTrack.enabled = false;
@@ -6800,6 +6800,7 @@
       kiwiRxConnected = false;
       kiwiConnectedHostE = '';
       kiwiNextPlayTime = 0;
+      muteRxAudio(false); // restore local radio audio
       kiwiUpdateSdrBtn();
     } else {
       var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
@@ -6893,6 +6894,8 @@
       _kiwiConnecting = false;
       if (msg.host) kiwiConnectedHostE = msg.host;
       if (!msg.connected) kiwiConnectedHostE = '';
+      // Mute local radio RX when SDR is active, unmute when off
+      muteRxAudio(msg.connected);
       kiwiUpdateSdrBtn();
       var kiwiBadge = document.getElementById('kiwi-rx-badge');
       if (kiwiBadge) kiwiBadge.style.display = msg.connected ? '' : 'none';
