@@ -547,10 +547,8 @@
         } else if (authMode === 'none') {
           tokenLoginDiv.classList.add('hidden');
           clubLoginDiv.classList.add('hidden');
-          // Auto-connect when no token required
-          connectBtn.textContent = 'Connecting...';
-          connectBtn.disabled = true;
-          connect('');
+          // Server auto-authenticates when no token required — just hide the form
+          // (the initial connect('') on page load already opened the WebSocket)
         } else {
           tokenLoginDiv.classList.remove('hidden');
           clubLoginDiv.classList.add('hidden');
