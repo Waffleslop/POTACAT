@@ -3173,6 +3173,7 @@ function connectRemote() {
   if (settings.colorblindMode) remoteServer.setColorblindMode(true);
 
   remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
+    try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] TUNE: freq=${freqKhz} mode=${mode} kiwiActive=${kiwiActive} kiwiClient=${!!kiwiClient}\n`); } catch {}
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
     tuneRadio(freqKhz, mode, bearing, { clearXit: !mode });
@@ -6984,6 +6985,15 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   if (freqHz === _lastTuneFreq && now - _lastTuneTime < 300) return;
   _lastTuneFreq = freqHz;
   _lastTuneTime = now;
+
+  // Auto-tune KiwiSDR WebSDR to follow
+  if (kiwiActive && kiwiClient && kiwiClient.connected && freqHz > 100000) {
+    const fKhz = freqHz / 1000;
+    const m = (mode || _currentMode || 'USB').toLowerCase()
+      .replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb')
+      .replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', fKhz >= 10000 ? 'usb' : 'lsb');
+    kiwiClient.tune(fKhz, m);
+  }
 
   // CW XIT: use radio's XIT (TX offset only) instead of shifting tune frequency
   const wantXit = !clearXit && (mode === 'CW') && settings.cwXit;
