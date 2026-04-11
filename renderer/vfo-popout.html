@@ -1804,16 +1804,19 @@ let kiwiConnectedHost = '';
 let kiwiAudioCtx = null;
 let kiwiStations = []; // [{label, host, port}]
 
+function kiwiCleanHost(h) { return (h || '').replace(/^https?:\/\//, '').replace(/\/+$/, ''); }
+
 function buildKiwiStationList(s) {
   kiwiStations = [];
   const hosts = [s.kiwiSdrHost1 || s.kiwiSdrHost || '', s.kiwiSdrHost2 || '', s.kiwiSdrHost3 || ''];
   const labels = [s.kiwiSdrLabel1 || '', s.kiwiSdrLabel2 || '', s.kiwiSdrLabel3 || ''];
   hosts.forEach((h, i) => {
-    if (!h) return;
-    const parts = h.split(':');
+    const clean = kiwiCleanHost(h);
+    if (!clean) return;
+    const parts = clean.split(':');
     const host = parts[0];
     const port = parseInt(parts[1], 10) || 8073;
-    kiwiStations.push({ label: labels[i] || host, host, port, fullHost: h });
+    kiwiStations.push({ label: labels[i] || host, host, port, fullHost: clean });
   });
   // Build select (for settings reference)
   kiwiStationSelect.innerHTML = '<option value="">-- select station --</option>';

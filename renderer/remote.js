@@ -6803,8 +6803,9 @@
     } else {
       var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
       if (st && ws && ws.readyState === WebSocket.OPEN) {
-        console.log('[ECHOCAT-Kiwi] connecting to: ' + st.fullHost);
-        ws.send(JSON.stringify({ type: 'kiwi-connect', host: st.fullHost }));
+        var kiwiMsg = JSON.stringify({ type: 'kiwi-connect', host: st.fullHost });
+        console.log('[ECHOCAT-Kiwi] sending: ' + kiwiMsg);
+        try { ws.send(kiwiMsg); } catch (e) { console.error('[ECHOCAT-Kiwi] send error:', e); }
         kiwiConnectedHostE = st.fullHost;
         kiwiSdrBtn.classList.add('kiwi-connecting');
         kiwiSdrBtn.textContent = st.label + '...';
@@ -6827,14 +6828,19 @@
     }
   }
 
+  function kiwiSanitizeHost(h) {
+    return (h || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  }
+
   function kiwiLoadStationsE(s) {
     kiwiStationListE = [];
     var hosts = [s.kiwiSdrHost1 || s.kiwiSdrHost || '', s.kiwiSdrHost2 || '', s.kiwiSdrHost3 || ''];
     var labels = [s.kiwiSdrLabel1 || '', s.kiwiSdrLabel2 || '', s.kiwiSdrLabel3 || ''];
     hosts.forEach(function (h, i) {
-      if (!h) return;
-      var parts = h.split(':');
-      kiwiStationListE.push({ label: labels[i] || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: h });
+      var clean = kiwiSanitizeHost(h);
+      if (!clean) return;
+      var parts = clean.split(':');
+      kiwiStationListE.push({ label: labels[i] || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: clean });
     });
     for (var n = 1; n <= 3; n++) {
       var lbl = document.getElementById('so-kiwi-label-' + n);
