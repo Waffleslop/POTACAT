@@ -374,6 +374,7 @@
   </div>
   <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 2px;">
     <span class="filter-badge" id="filter-badge"></span>
+    <span id="kiwi-rx-badge" style="display:none;font-size:10px;font-weight:bold;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;letter-spacing:0.5px;">SDR RX</span>
   </div>
   <!-- Widgets (always visible when enabled) -->
   <div class="widget-area">
@@ -535,7 +536,10 @@
       <div class="section-label">WebSDR (KiwiSDR)</div>
       <label class="settings-toggle"><input type="checkbox" id="w-kiwi"> Enable WebSDR RX</label>
       <div id="kiwi-config" style="padding-left:24px;display:none;">
-        <input type="text" id="kiwi-host" placeholder="host:port (e.g. rx.kiwisdr.com:8073)" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px;margin:4px 0;">
+        <select id="kiwi-station-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px;margin:4px 0;">
+          <option value="">-- select station --</option>
+        </select>
+        <span style="font-size:10px;color:var(--text-dim);display:block;">Configure stations in POTACAT Settings → WebSDR</span>
       </div>
       <div class="section-label">Window</div>
       <label class="settings-toggle"><input type="checkbox" id="s-always-on-top" checked> Always on top</label>
@@ -1783,10 +1787,29 @@ window.api.onTunedSpot((spot) => {
 const kiwiBtn = document.getElementById('kiwi-btn');
 const wKiwiCb = document.getElementById('w-kiwi');
 const kiwiConfig = document.getElementById('kiwi-config');
-const kiwiHostInput = document.getElementById('kiwi-host');
+const kiwiStationSelect = document.getElementById('kiwi-station-select');
 let kiwiEnabled = false;
 let kiwiConnected = false;
 let kiwiAudioCtx = null;
+let kiwiStations = []; // [{label, host, port}]
+
+function buildKiwiStationList(s) {
+  kiwiStations = [];
+  const hosts = [s.kiwiSdrHost1 || s.kiwiSdrHost || '', s.kiwiSdrHost2 || '', s.kiwiSdrHost3 || ''];
+  const labels = ['Primary', 'Secondary', 'Tertiary'];
+  hosts.forEach((h, i) => {
+    if (!h) return;
+    const parts = h.split(':');
+    kiwiStations.push({ label: labels[i] + ': ' + h, host: parts[0], port: parseInt(parts[1], 10) || 8073 });
+  });
+  kiwiStationSelect.innerHTML = '<option value="">-- select station --</option>';
+  kiwiStations.forEach((st, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = st.label;
+    kiwiStationSelect.appendChild(opt);
+  });
+}
 
 wKiwiCb.addEventListener('change', async () => {
   kiwiEnabled = wKiwiCb.checked;
@@ -1798,23 +1821,31 @@ wKiwiCb.addEventListener('change', async () => {
     kiwiBtn.style.color = '';
     kiwiBtn.style.borderColor = '';
   }
-  await window.api.saveSettings({ kiwiSdrEnabled: kiwiEnabled, kiwiSdrHost: kiwiHostInput.value.trim() });
+  await window.api.saveSettings({ kiwiSdrEnabled: kiwiEnabled });
 });
 
-kiwiHostInput.addEventListener('change', async () => {
-  await window.api.saveSettings({ kiwiSdrHost: kiwiHostInput.value.trim() });
-});
-
+// Click: connect to selected station / disconnect
 kiwiBtn.addEventListener('click', () => {
   if (kiwiConnected) {
     window.api.kiwiDisconnect();
   } else {
-    const hostVal = kiwiHostInput.value.trim();
-    if (!hostVal) return;
-    const parts = hostVal.split(':');
-    const host = parts[0];
-    const port = parseInt(parts[1], 10) || 8073;
-    window.api.kiwiConnect({ host, port });
+    const idx = parseInt(kiwiStationSelect.value, 10);
+    const st = kiwiStations[idx] || kiwiStations[0];
+    if (st) window.api.kiwiConnect({ host: st.host, port: st.port });
+  }
+});
+
+// Right-click: cycle to next station
+kiwiBtn.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (kiwiStations.length < 2) return;
+  let cur = parseInt(kiwiStationSelect.value, 10) || 0;
+  cur = (cur + 1) % kiwiStations.length;
+  kiwiStationSelect.value = String(cur);
+  // If connected, reconnect to new station
+  if (kiwiConnected) {
+    const st = kiwiStations[cur];
+    if (st) window.api.kiwiConnect({ host: st.host, port: st.port });
   }
 });
 
@@ -1823,6 +1854,7 @@ window.api.onKiwiStatus((s) => {
   kiwiBtn.style.color = s.connected ? 'var(--accent-green)' : '';
   kiwiBtn.style.borderColor = s.connected ? 'var(--accent-green)' : '';
   kiwiBtn.title = s.connected ? 'WebSDR connected — click to disconnect' : 'Click to connect WebSDR';
+  document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
 });
 
 window.api.onKiwiAudio((d) => {
@@ -1847,7 +1879,8 @@ window.api.onKiwiAudio((d) => {
     kiwiConfig.style.display = '';
     kiwiBtn.style.display = '';
   }
-  if (s.kiwiSdrHost) kiwiHostInput.value = s.kiwiSdrHost;
+  buildKiwiStationList(s);
+  if (kiwiStations.length > 0) kiwiStationSelect.value = '0';
 })();
 
 // --- Solar data ---

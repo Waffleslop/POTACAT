@@ -6783,6 +6783,8 @@
         kiwiRxBtn.style.borderColor = msg.connected ? 'var(--pota)' : '';
         kiwiRxBtn.style.color = msg.connected ? 'var(--pota)' : '';
       }
+      var kiwiBadge = document.getElementById('kiwi-rx-badge');
+      if (kiwiBadge) kiwiBadge.style.display = msg.connected ? '' : 'none';
       if (!msg.connected) { kiwiNextPlayTime = 0; }
     }
     if (msg.type === 'kiwi-audio' && kiwiRxConnected) {

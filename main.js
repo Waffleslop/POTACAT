@@ -8424,11 +8424,10 @@ app.whenReady().then(() => {
   // ECHOCAT → KiwiSDR bridge (phone requests connect/disconnect)
   if (remoteServer) {
     remoteServer.on('kiwi-connect', (msg) => {
-      // Reuse the same IPC connect logic
-      const host = msg.host || settings.kiwiSdrHost || '';
-      const parts = host.split(':');
+      // Use station from message, or fall back to configured primary station
+      const hostStr = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || '';
+      const parts = hostStr.split(':');
       if (parts[0]) {
-        // Trigger the same connect flow as the desktop IPC
         const evt = { sender: { send: () => {} } };
         require('electron').ipcMain.emit('kiwi-connect', evt, { host: parts[0], port: parseInt(parts[1], 10) || 8073, password: msg.password });
       }

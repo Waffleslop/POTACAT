@@ -626,6 +626,9 @@ const smartSdrConfig = document.getElementById('smartsdr-config');
 const setSmartSdrHost = document.getElementById('set-smartsdr-host');
 const setSmartSdrMaxAge = document.getElementById('set-smartsdr-max-age');
 const setSmartSdrMaxSpots = document.getElementById('set-smartsdr-max-spots');
+const setKiwiHost1 = document.getElementById('set-kiwi-host-1');
+const setKiwiHost2 = document.getElementById('set-kiwi-host-2');
+const setKiwiHost3 = document.getElementById('set-kiwi-host-3');
 const setTciSpots = document.getElementById('set-tci-spots');
 const tciConfig = document.getElementById('tci-config');
 const setTciHost = document.getElementById('set-tci-host');
@@ -7361,6 +7364,9 @@ async function openSettingsDialog(tab) {
   setSmartSdrMaxSpots.value = s.smartSdrMaxSpots != null ? s.smartSdrMaxSpots : 0;
   smartSdrConfig.classList.toggle('hidden', !s.smartSdrSpots);
   setTciSpots.checked = s.tciSpots === true;
+  if (setKiwiHost1) setKiwiHost1.value = s.kiwiSdrHost1 || s.kiwiSdrHost || '';
+  if (setKiwiHost2) setKiwiHost2.value = s.kiwiSdrHost2 || '';
+  if (setKiwiHost3) setKiwiHost3.value = s.kiwiSdrHost3 || '';
   setTciHost.value = s.tciHost || '127.0.0.1';
   setTciPort.value = s.tciPort || 50001;
   setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
@@ -7771,6 +7777,9 @@ settingsSave.addEventListener('click', async () => {
     smartSdrHost: smartSdrHostVal,
     smartSdrMaxAge: smartSdrMaxAgeVal,
     smartSdrMaxSpots: smartSdrMaxSpotsVal,
+    kiwiSdrHost1: setKiwiHost1 ? setKiwiHost1.value.trim() : '',
+    kiwiSdrHost2: setKiwiHost2 ? setKiwiHost2.value.trim() : '',
+    kiwiSdrHost3: setKiwiHost3 ? setKiwiHost3.value.trim() : '',
     tciSpots: tciSpotsEnabled,
     tciHost: tciHostVal,
     tciPort: tciPortVal,
