@@ -402,7 +402,9 @@
         <button class="ptt-btn" id="ptt-btn" style="display:none;">PTT</button>
         <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
       </div>
-      <div class="ptt-log-row" id="kiwi-btn-row" style="display:none;"></div>
+    </div>
+    <div class="widget-section" id="widget-kiwi" style="display:none;">
+      <div class="ptt-log-row" id="kiwi-btn-row"></div>
     </div>
     <div class="widget-section" id="widget-cw-controls">
       <div class="cw-ctrl-row">
@@ -1858,7 +1860,7 @@ function updateKiwiButtonStates() {
 wKiwiCb.addEventListener('change', async () => {
   kiwiEnabled = wKiwiCb.checked;
   kiwiConfig.style.display = kiwiEnabled ? '' : 'none';
-  kiwiBtnRow.style.display = kiwiEnabled && kiwiStations.length > 0 ? '' : 'none';
+  document.getElementById('widget-kiwi').style.display = kiwiEnabled && kiwiStations.length > 0 ? '' : 'none';
   if (!kiwiEnabled && kiwiConnected) {
     window.api.kiwiDisconnect();
     kiwiConnected = false;
@@ -1899,7 +1901,7 @@ window.api.onKiwiAudio((d) => {
   }
   buildKiwiStationList(s);
   if (kiwiStations.length > 0) kiwiStationSelect.value = '0';
-  kiwiBtnRow.style.display = kiwiEnabled && kiwiStations.length > 0 ? '' : 'none';
+  document.getElementById('widget-kiwi').style.display = kiwiEnabled && kiwiStations.length > 0 ? '' : 'none';
 })();
 
 // --- Solar data ---
