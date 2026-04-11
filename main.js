@@ -8360,9 +8360,10 @@ app.whenReady().then(() => {
   ipcMain.on('kiwi-connect', (_e, { host, port, password }) => {
     if (kiwiClient) kiwiClient.disconnect();
     kiwiClient = new KiwiSdrClient();
+    const kiwiFullHost = host + ':' + (port || 8073);
     kiwiClient.on('connected', () => {
       kiwiActive = true;
-      sendCatLog(`[WebSDR] Connected to ${host}:${port || 8073}`);
+      sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
       // Auto-tune to current frequency
       if (_currentFreqHz > 0 && _currentMode) {
         const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
@@ -8370,13 +8371,15 @@ app.whenReady().then(() => {
       }
       kiwiClient.setAgc(true);
       for (const wc of require('electron').webContents.getAllWebContents()) {
-        wc.send('kiwi-status', { connected: true, host });
+        wc.send('kiwi-status', { connected: true, host: kiwiFullHost });
       }
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
-        remoteServer.sendToClient({ type: 'kiwi-status', connected: true, host });
+        remoteServer.sendToClient({ type: 'kiwi-status', connected: true, host: kiwiFullHost });
       }
     });
+    let _kiwiAudioCount = 0;
     kiwiClient.on('audio', (pcmFloat, sampleRate) => {
+      if (++_kiwiAudioCount === 1) sendCatLog(`[WebSDR] First audio packet: ${pcmFloat.length} samples @ ${sampleRate}Hz`);
       // Forward audio to VFO popout and main window
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
         vfoPopoutWin.webContents.send('kiwi-audio', { pcm: Array.from(pcmFloat), sampleRate });

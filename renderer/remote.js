@@ -6780,6 +6780,10 @@
       btn.title = st.fullHost;
       btn.dataset.idx = i;
       btn.addEventListener('click', function () {
+        // Create AudioContext on user gesture (required by mobile browsers)
+        if (!kiwiAudioCtx) {
+          try { kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 12000 }); } catch (e) {}
+        }
         if (kiwiRxConnected && kiwiConnectedHostE === st.fullHost) {
           ws.send(JSON.stringify({ type: 'kiwi-disconnect' }));
         } else {
