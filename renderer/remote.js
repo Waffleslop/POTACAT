@@ -6812,17 +6812,6 @@
     }
   }
 
-  function kiwiCycleStation() {
-    if (kiwiStationListE.length < 2) return;
-    kiwiSelectedIdx = (kiwiSelectedIdx + 1) % kiwiStationListE.length;
-    var st = kiwiStationListE[kiwiSelectedIdx];
-    kiwiSdrBtn.textContent = st ? st.label : 'SDR';
-    // If connected, reconnect to new station
-    if (kiwiRxConnected && st) {
-      ws.send(JSON.stringify({ type: 'kiwi-connect', host: st.fullHost }));
-      kiwiConnectedHostE = st.fullHost;
-    }
-  }
 
   function kiwiSanitizeHost(h) {
     return (h || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
@@ -6838,6 +6827,19 @@
       var parts = clean.split(':');
       kiwiStationListE.push({ label: labels[i] || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: clean });
     });
+    // Populate active station selector
+    var sel = document.getElementById('so-kiwi-active');
+    if (sel) {
+      sel.innerHTML = '';
+      kiwiStationListE.forEach(function (st, i) {
+        var opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = st.label + ' (' + st.fullHost + ')';
+        sel.appendChild(opt);
+      });
+      sel.value = String(kiwiSelectedIdx);
+      sel.addEventListener('change', function () { kiwiSelectedIdx = parseInt(sel.value, 10) || 0; kiwiUpdateSdrBtn(); });
+    }
     for (var n = 1; n <= 3; n++) {
       var lbl = document.getElementById('so-kiwi-label-' + n);
       var hst = document.getElementById('so-kiwi-host-' + n);
