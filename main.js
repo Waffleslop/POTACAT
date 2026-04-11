@@ -7204,11 +7204,11 @@ app.on('open-url', (event, url) => {
   handleProtocolUrl(url);
 });
 
-app.whenReady().then(() => {
-  // KiwiSDR state (declared early for access by remoteServer.on('tune') handler)
-  let kiwiClient = null;
-  let kiwiActive = false;
+// KiwiSDR state (module scope for access from connectRemote and whenReady)
+let kiwiClient = null;
+let kiwiActive = false;
 
+app.whenReady().then(() => {
   // Add Referer header for OpenStreetMap tile requests (required by OSM usage policy)
   const { session } = require('electron');
   session.defaultSession.webRequest.onBeforeSendHeaders(
