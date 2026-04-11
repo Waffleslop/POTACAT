@@ -841,16 +841,12 @@ html, body {
 }
 .bb-round-btn:active { background: var(--accent); color: white; }
 .bb-round-btn.scan-active { background: #1a3a2e; border-color: var(--pota); color: var(--pota); }
-/* WebSDR station buttons (bottom bar row) */
-.kiwi-station-btn {
-  padding: 5px 12px; border-radius: 4px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
-  background: #2a2a3e; color: var(--accent-gold, #ffd740); border: 2px solid var(--accent-gold, #ffd740);
-  cursor: pointer; flex: 1; text-align: center;
+/* WebSDR button in bb-stack */
+.bb-square-btn.kiwi-active {
+  background: #1a3a2e; border-color: var(--pota); color: var(--pota);
 }
-.kiwi-station-btn:active { opacity: 0.7; }
-.kiwi-station-btn.active {
-  background: var(--accent-gold, #ffd740); color: #1a1a2e;
+.bb-square-btn.kiwi-connecting {
+  border-color: var(--accent-gold, #ffd740); color: var(--accent-gold, #ffd740);
 }
 /* Halt / emergency stop — red accent rectangle */
 .bb-halt-btn {

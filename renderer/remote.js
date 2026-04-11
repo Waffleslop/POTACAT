@@ -3002,14 +3002,14 @@
     audioConnectBtn.classList.add('hidden');
     bbControls.classList.remove('hidden');
     if (typeof smEnabled !== 'undefined' && smEnabled) document.getElementById('speakermic-btn').classList.remove('hidden');
-    if (typeof kiwiRxEnabled !== 'undefined' && kiwiRxEnabled) kiwiUpdateBtnRowE();
+    if (typeof kiwiRxEnabled !== 'undefined' && kiwiRxEnabled) kiwiUpdateSdrBtn();
   }
   function showConnectPrompt() {
     audioConnectBtn.textContent = 'Tap to Connect Audio';
     audioConnectBtn.classList.remove('hidden');
     bbControls.classList.add('hidden');
     document.getElementById('speakermic-btn').classList.add('hidden');
-    if (kiwiBtnRowE) kiwiBtnRowE.classList.add('hidden');
+    if (kiwiSdrBtn) kiwiSdrBtn.classList.add('hidden');
   }
 
   audioConnectBtn.addEventListener('click', async () => {
@@ -6745,7 +6745,7 @@
   });
 
   // ── WebSDR (KiwiSDR) RX ──────────────────────────────────
-  var kiwiBtnRowE = document.getElementById('kiwi-btn-row');
+  var kiwiSdrBtn = document.getElementById('kiwi-sdr-btn');
   var soKiwiEnable = document.getElementById('so-kiwi-enable');
   var soKiwiStations = document.getElementById('so-kiwi-stations');
   var soKiwiSave = document.getElementById('so-kiwi-save');
@@ -6755,6 +6755,7 @@
   var kiwiAudioCtx = null;
   var kiwiNextPlayTime = 0;
   var kiwiStationListE = [];
+  var kiwiSelectedIdx = 0;
 
   function kiwiSetEnabled(on) {
     kiwiRxEnabled = on;
@@ -6762,47 +6763,63 @@
     soKiwiEnable.classList.toggle('active', on);
     soKiwiEnable.textContent = on ? 'On' : 'Off';
     if (soKiwiStations) soKiwiStations.style.display = on ? '' : 'none';
-    kiwiUpdateBtnRowE();
+    kiwiUpdateSdrBtn();
   }
 
-  function kiwiUpdateBtnRowE() {
-    if (!kiwiBtnRowE) return;
-    kiwiBtnRowE.innerHTML = '';
-    if (!kiwiRxEnabled || kiwiStationListE.length === 0) {
-      kiwiBtnRowE.classList.add('hidden');
-      return;
+  function kiwiUpdateSdrBtn() {
+    if (!kiwiSdrBtn) return;
+    if (kiwiRxEnabled && kiwiStationListE.length > 0 && audioEnabled) {
+      kiwiSdrBtn.classList.remove('hidden');
+    } else {
+      kiwiSdrBtn.classList.add('hidden');
     }
-    kiwiBtnRowE.classList.remove('hidden');
-    kiwiStationListE.forEach(function (st, i) {
-      var btn = document.createElement('button');
-      btn.className = 'kiwi-station-btn';
-      btn.textContent = st.label;
-      btn.title = st.fullHost;
-      btn.dataset.idx = i;
-      btn.addEventListener('click', function () {
-        // Create AudioContext on user gesture (required by mobile browsers)
-        if (!kiwiAudioCtx) {
-          try { kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 12000 }); } catch (e) {}
-        }
-        if (kiwiRxConnected && kiwiConnectedHostE === st.fullHost) {
-          ws.send(JSON.stringify({ type: 'kiwi-disconnect' }));
-        } else {
-          ws.send(JSON.stringify({ type: 'kiwi-connect', host: st.fullHost }));
-          kiwiConnectedHostE = st.fullHost;
-        }
-      });
-      kiwiBtnRowE.appendChild(btn);
-    });
-    kiwiUpdateBtnStatesE();
+    kiwiSdrBtn.classList.remove('kiwi-active', 'kiwi-connecting');
+    if (kiwiRxConnected) {
+      kiwiSdrBtn.classList.add('kiwi-active');
+      var connSt = kiwiStationListE.find(function (s) { return s.fullHost === kiwiConnectedHostE; });
+      kiwiSdrBtn.textContent = connSt ? connSt.label : 'SDR';
+    } else {
+      var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
+      kiwiSdrBtn.textContent = st ? st.label : 'SDR';
+    }
   }
 
-  function kiwiUpdateBtnStatesE() {
-    if (!kiwiBtnRowE) return;
-    kiwiBtnRowE.querySelectorAll('.kiwi-station-btn').forEach(function (btn) {
-      var idx = parseInt(btn.dataset.idx, 10);
-      var st = kiwiStationListE[idx];
-      btn.classList.toggle('active', kiwiRxConnected && st && kiwiConnectedHostE === st.fullHost);
-    });
+  // Tap: connect/disconnect. Long-press: cycle to next station.
+  if (kiwiSdrBtn) {
+    var _kiwiLongPress = null;
+    kiwiSdrBtn.addEventListener('mousedown', function () { _kiwiLongPress = setTimeout(function () { _kiwiLongPress = 'long'; kiwiCycleStation(); }, 600); });
+    kiwiSdrBtn.addEventListener('mouseup', function () { if (_kiwiLongPress !== 'long') { clearTimeout(_kiwiLongPress); kiwiToggleConnect(); } _kiwiLongPress = null; });
+    kiwiSdrBtn.addEventListener('touchstart', function (e) { _kiwiLongPress = setTimeout(function () { _kiwiLongPress = 'long'; kiwiCycleStation(); }, 600); }, { passive: true });
+    kiwiSdrBtn.addEventListener('touchend', function (e) { if (_kiwiLongPress !== 'long') { clearTimeout(_kiwiLongPress); kiwiToggleConnect(); } _kiwiLongPress = null; e.preventDefault(); });
+  }
+
+  function kiwiToggleConnect() {
+    if (!kiwiAudioCtx) {
+      try { kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 12000 }); } catch (e) {}
+    }
+    if (kiwiRxConnected) {
+      ws.send(JSON.stringify({ type: 'kiwi-disconnect' }));
+    } else {
+      var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
+      if (st) {
+        ws.send(JSON.stringify({ type: 'kiwi-connect', host: st.fullHost }));
+        kiwiConnectedHostE = st.fullHost;
+        kiwiSdrBtn.classList.add('kiwi-connecting');
+        kiwiSdrBtn.textContent = st.label + '...';
+      }
+    }
+  }
+
+  function kiwiCycleStation() {
+    if (kiwiStationListE.length < 2) return;
+    kiwiSelectedIdx = (kiwiSelectedIdx + 1) % kiwiStationListE.length;
+    var st = kiwiStationListE[kiwiSelectedIdx];
+    kiwiSdrBtn.textContent = st ? st.label : 'SDR';
+    // If connected, reconnect to new station
+    if (kiwiRxConnected && st) {
+      ws.send(JSON.stringify({ type: 'kiwi-connect', host: st.fullHost }));
+      kiwiConnectedHostE = st.fullHost;
+    }
   }
 
   function kiwiLoadStationsE(s) {
@@ -6820,7 +6837,7 @@
       if (lbl) lbl.value = labels[n - 1] || '';
       if (hst) hst.value = hosts[n - 1] || '';
     }
-    kiwiUpdateBtnRowE();
+    kiwiUpdateSdrBtn();
   }
 
   if (soKiwiEnable) {
@@ -6845,7 +6862,7 @@
         var parts = h.split(':');
         kiwiStationListE.push({ label: data['kiwiSdrLabel' + m] || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: h });
       }
-      kiwiUpdateBtnRowE();
+      kiwiUpdateSdrBtn();
       soKiwiSave.textContent = 'Saved!';
       setTimeout(function () { soKiwiSave.textContent = 'Save Stations'; }, 1500);
     });
@@ -6856,7 +6873,7 @@
       kiwiRxConnected = msg.connected;
       if (msg.host) kiwiConnectedHostE = msg.host;
       if (!msg.connected) kiwiConnectedHostE = '';
-      kiwiUpdateBtnStatesE();
+      kiwiUpdateSdrBtn();
       var kiwiBadge = document.getElementById('kiwi-rx-badge');
       if (kiwiBadge) kiwiBadge.style.display = msg.connected ? '' : 'none';
       if (!msg.connected) { kiwiNextPlayTime = 0; }
