@@ -475,7 +475,7 @@
       connectClub(call, pass);
     } else {
       var token = tokenInput.value.trim().toUpperCase();
-      if (!token) return;
+      if (authMode !== 'none' && !token) return;
       storedToken = token;
       connectError.classList.add('hidden');
       connectBtn.textContent = 'Connecting...';
@@ -547,6 +547,10 @@
         } else if (authMode === 'none') {
           tokenLoginDiv.classList.add('hidden');
           clubLoginDiv.classList.add('hidden');
+          // Auto-connect when no token required
+          connectBtn.textContent = 'Connecting...';
+          connectBtn.disabled = true;
+          connect('');
         } else {
           tokenLoginDiv.classList.remove('hidden');
           clubLoginDiv.classList.add('hidden');
