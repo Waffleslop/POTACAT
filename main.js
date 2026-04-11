@@ -8402,8 +8402,9 @@ app.whenReady().then(() => {
     }
   });
 
-  // --- KiwiSDR WebSDR integration ---
+  // --- KiwiSDR / WebSDR.org integration ---
   const { KiwiSdrClient } = require('./lib/kiwisdr');
+  const { WebSdrClient } = require('./lib/websdr');
   // kiwiClient and kiwiActive declared near top of whenReady for global access
 
   ipcMain.on('kiwi-connect', (_e, { host: rawHost, port: rawPort, password }) => {
@@ -8412,17 +8413,24 @@ app.whenReady().then(() => {
     const port = rawPort || 8073;
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
-    kiwiClient = new KiwiSdrClient();
+    // Auto-detect: port 8073 = KiwiSDR, other ports = WebSDR.org
+    const isWebSdr = port !== 8073;
+    if (isWebSdr) {
+      kiwiClient = new WebSdrClient();
+      sendCatLog(`[WebSDR] Using WebSDR.org protocol for ${host}:${port}`);
+    } else {
+      kiwiClient = new KiwiSdrClient();
+    }
     const kiwiFullHost = host + ':' + port;
     kiwiClient.on('connected', () => {
       kiwiActive = true;
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
-      // Auto-tune to current frequency
-      if (_currentFreqHz > 0 && _currentMode) {
+      // Auto-tune to current frequency (KiwiSDR needs tune after connect; WebSDR tunes at connect)
+      if (!isWebSdr && _currentFreqHz > 0 && _currentMode) {
         const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
         kiwiClient.tune(_currentFreqHz / 1000, mode);
       }
-      kiwiClient.setAgc(true);
+      if (kiwiClient.setAgc) kiwiClient.setAgc(true);
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: true, host: kiwiFullHost });
       }
@@ -8470,7 +8478,13 @@ app.whenReady().then(() => {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
-    kiwiClient.connect(host, port, password);
+    if (isWebSdr) {
+      const freqKhz = _currentFreqHz > 0 ? _currentFreqHz / 1000 : 7200;
+      const mode = (_currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
+      kiwiClient.connect(host, port, freqKhz, mode);
+    } else {
+      kiwiClient.connect(host, port, password);
+    }
   });
 
   ipcMain.on('kiwi-disconnect', () => {
