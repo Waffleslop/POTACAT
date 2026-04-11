@@ -8500,6 +8500,14 @@ app.whenReady().then(() => {
     } else {
       tuneRadio(frequency, mode, bearing);
     }
+    // Auto-tune KiwiSDR to match
+    if (kiwiActive && kiwiClient && kiwiClient.connected) {
+      const freqKhz = parseFloat(frequency);
+      if (freqKhz > 100) {
+        const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', freqKhz >= 10000 ? 'usb' : 'lsb');
+        kiwiClient.tune(freqKhz, m);
+      }
+    }
   });
 
   // --- Rig Control Panel IPC ---

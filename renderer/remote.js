@@ -6902,6 +6902,10 @@
       if (!msg.connected) { kiwiNextPlayTime = 0; }
     }
     if (msg.type === 'kiwi-audio' && kiwiRxConnected) {
+      if (!window._kiwiAudioRx) window._kiwiAudioRx = 0;
+      window._kiwiAudioRx++;
+      if (window._kiwiAudioRx <= 3) console.log('[ECHOCAT-Kiwi] audio packet #' + window._kiwiAudioRx + ' len=' + (msg.pcm ? msg.pcm.length : 0));
+      if (window._kiwiAudioRx === 1 && kiwiSdrBtn) kiwiSdrBtn.textContent = 'Audio!';
       try {
         // Use default sample rate (44100/48000) — browser resamples from 12kHz
         if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
