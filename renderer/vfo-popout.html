@@ -290,6 +290,14 @@
       text-align: center; user-select: none;
     }
     .log-btn-vfo:hover { background: var(--bg-btn-hover); }
+    .sdr-btn-vfo {
+      flex: 1; padding: 10px;
+      font-size: 14px; font-weight: bold; border: 2px solid var(--accent-gold);
+      background: var(--bg-btn); color: var(--accent-gold); border-radius: 6px; cursor: pointer;
+      text-align: center; user-select: none; display: none;
+    }
+    .sdr-btn-vfo:hover { background: var(--bg-btn-hover); }
+    .sdr-btn-vfo.active { background: var(--accent-gold); color: #1a1a2e; }
     .macro-row { display: flex; align-items: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
     .macro-label {
       font-size: 10px; font-weight: bold; color: var(--text-dimmer); text-transform: uppercase;
@@ -370,7 +378,6 @@
     <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
     <button class="audio-btn" id="audio-btn" title="Radio audio monitor">&#x1F508;</button>
     <button class="vfo-lock-btn" id="vfo-lock-btn" title="Click to lock VFO">&#x1F513;</button>
-    <button class="vfo-lock-btn" id="kiwi-btn" title="WebSDR RX" style="display:none;">&#x1F4E1;</button>
   </div>
   <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 2px;">
     <span class="filter-badge" id="filter-badge"></span>
@@ -392,6 +399,7 @@
     </div>
     <div class="widget-section" id="widget-ptt-row">
       <div class="ptt-log-row">
+        <button class="sdr-btn-vfo" id="kiwi-btn" title="WebSDR RX">SDR</button>
         <button class="ptt-btn" id="ptt-btn" style="display:none;">PTT</button>
         <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
       </div>
@@ -1818,8 +1826,7 @@ wKiwiCb.addEventListener('change', async () => {
   if (!kiwiEnabled && kiwiConnected) {
     window.api.kiwiDisconnect();
     kiwiConnected = false;
-    kiwiBtn.style.color = '';
-    kiwiBtn.style.borderColor = '';
+    kiwiBtn.classList.remove('active');
   }
   await window.api.saveSettings({ kiwiSdrEnabled: kiwiEnabled });
 });
@@ -1851,8 +1858,7 @@ kiwiBtn.addEventListener('contextmenu', (e) => {
 
 window.api.onKiwiStatus((s) => {
   kiwiConnected = s.connected;
-  kiwiBtn.style.color = s.connected ? 'var(--accent-green)' : '';
-  kiwiBtn.style.borderColor = s.connected ? 'var(--accent-green)' : '';
+  kiwiBtn.classList.toggle('active', s.connected);
   kiwiBtn.title = s.connected ? 'WebSDR connected — click to disconnect' : 'Click to connect WebSDR';
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
 });
