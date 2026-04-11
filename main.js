@@ -8375,7 +8375,7 @@ app.whenReady().then(() => {
       'https://pota.app/', 'https://www.sotadata.org.uk/', 'https://wwff.co/', 'https://llota.app/',
       'https://tailscale.com', 'https://worldradioleague.com',
       'https://api.potacat.com/',
-      'http://rx.linkfanel.net/', 'http://kiwisdr.com/',
+      'http://rx.linkfanel.net', 'http://kiwisdr.com',
     ];
     if (allowed.some(prefix => url.startsWith(prefix))) {
       shell.openExternal(url);
