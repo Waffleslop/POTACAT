@@ -3155,8 +3155,11 @@ function sendCwTextToRadio(text) {
     winKeyer.sendText(expanded);
     return;
   }
-  // FlexRadio: use SmartSDR `cw send` command
+  // FlexRadio: ensure active/TX slice is set to POTACAT's slice before sending CW
   if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
+    const sliceIndex = (settings.catTarget.port || 5002) - 5002;
+    smartSdr.setActiveSlice(sliceIndex);
+    smartSdr.setTxSlice(sliceIndex);
     smartSdr.sendCwText(expanded);
   }
   // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
@@ -4690,8 +4693,11 @@ function handleRemotePtt(state) {
   }
 
   if (isFlexRig) {
-    // FlexRadio: use SmartSDR xmit command (voice PTT, not CW PTT)
+    // FlexRadio: ensure TX goes to POTACAT's slice, not whatever slice was last active
     if (smartSdr && smartSdr.connected) {
+      const sliceIndex = (settings.catTarget.port || 5002) - 5002;
+      smartSdr.setActiveSlice(sliceIndex);
+      smartSdr.setTxSlice(sliceIndex);
       smartSdr.setTransmit(state);
     }
   } else {
