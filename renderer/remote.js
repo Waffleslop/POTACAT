@@ -6797,15 +6797,20 @@
     if (!kiwiAudioCtx) {
       try { kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 12000 }); } catch (e) {}
     }
+    console.log('[ECHOCAT-Kiwi] toggle: connected=' + kiwiRxConnected + ' stations=' + kiwiStationListE.length + ' idx=' + kiwiSelectedIdx);
     if (kiwiRxConnected) {
       ws.send(JSON.stringify({ type: 'kiwi-disconnect' }));
     } else {
       var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
-      if (st) {
+      if (st && ws && ws.readyState === WebSocket.OPEN) {
+        console.log('[ECHOCAT-Kiwi] connecting to: ' + st.fullHost);
         ws.send(JSON.stringify({ type: 'kiwi-connect', host: st.fullHost }));
         kiwiConnectedHostE = st.fullHost;
         kiwiSdrBtn.classList.add('kiwi-connecting');
         kiwiSdrBtn.textContent = st.label + '...';
+      } else {
+        console.log('[ECHOCAT-Kiwi] no station or ws not open: st=' + !!st + ' ws=' + (ws ? ws.readyState : 'null'));
+        kiwiSdrBtn.textContent = st ? 'Retry' : 'No SDR';
       }
     }
   }

@@ -8361,6 +8361,7 @@ app.whenReady().then(() => {
     // Sanitize host — strip http://, https://, trailing slashes
     const host = (rawHost || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const port = rawPort || 8073;
+    require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] kiwi-connect: host="${host}" port=${port} raw="${rawHost}"\n`);
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
     kiwiClient = new KiwiSdrClient();
@@ -8442,6 +8443,7 @@ app.whenReady().then(() => {
       // Strip http:// and trailing slashes before parsing host:port
       const clean = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
       sendCatLog(`[WebSDR] ECHOCAT requested connect: "${clean}"`);
+      require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] echocat-connect: raw="${raw}" clean="${clean}"\n`);
       const parts = clean.split(':');
       if (parts[0]) {
         const evt = { sender: { send: () => {} } };
