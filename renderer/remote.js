@@ -1015,6 +1015,11 @@
       case 'cloud-bmac-result':
         if (typeof handleCloudMessage === 'function') handleCloudMessage(msg);
         break;
+
+      case 'kiwi-status':
+      case 'kiwi-audio':
+        if (typeof handleKiwiMessage === 'function') handleKiwiMessage(msg);
+        break;
     }
   }
 
@@ -2995,12 +3000,14 @@
     audioConnectBtn.classList.add('hidden');
     bbControls.classList.remove('hidden');
     if (typeof smEnabled !== 'undefined' && smEnabled) document.getElementById('speakermic-btn').classList.remove('hidden');
+    if (typeof kiwiRxEnabled !== 'undefined' && kiwiRxEnabled) document.getElementById('kiwi-rx-btn').classList.remove('hidden');
   }
   function showConnectPrompt() {
     audioConnectBtn.textContent = 'Tap to Connect Audio';
     audioConnectBtn.classList.remove('hidden');
     bbControls.classList.add('hidden');
     document.getElementById('speakermic-btn').classList.add('hidden');
+    document.getElementById('kiwi-rx-btn').classList.add('hidden');
   }
 
   audioConnectBtn.addEventListener('click', async () => {
@@ -6734,6 +6741,68 @@
     // Nothing to close — push state back so next press also gets caught
     history.pushState({ echocat: true }, '');
   });
+
+  // ── WebSDR (KiwiSDR) RX ──────────────────────────────────
+  var kiwiRxBtn = document.getElementById('kiwi-rx-btn');
+  var soKiwiEnable = document.getElementById('so-kiwi-enable');
+  var kiwiRxEnabled = localStorage.getItem('echocat-kiwi-enabled') === 'true';
+  var kiwiRxConnected = false;
+  var kiwiAudioCtx = null;
+  var kiwiNextPlayTime = 0;
+
+  function kiwiSetEnabled(on) {
+    kiwiRxEnabled = on;
+    localStorage.setItem('echocat-kiwi-enabled', on);
+    soKiwiEnable.classList.toggle('active', on);
+    soKiwiEnable.textContent = on ? 'On' : 'Off';
+    if (on && audioEnabled) kiwiRxBtn.classList.remove('hidden');
+    else kiwiRxBtn.classList.add('hidden');
+  }
+
+  if (soKiwiEnable) {
+    kiwiSetEnabled(kiwiRxEnabled);
+    soKiwiEnable.addEventListener('click', function () { kiwiSetEnabled(!kiwiRxEnabled); });
+  }
+
+  if (kiwiRxBtn) {
+    kiwiRxBtn.addEventListener('click', function () {
+      if (kiwiRxConnected) {
+        ws.send(JSON.stringify({ type: 'kiwi-disconnect' }));
+      } else {
+        ws.send(JSON.stringify({ type: 'kiwi-connect', host: '' }));
+      }
+    });
+  }
+
+  // Handle KiwiSDR messages from server
+  function handleKiwiMessage(msg) {
+    if (msg.type === 'kiwi-status') {
+      kiwiRxConnected = msg.connected;
+      if (kiwiRxBtn) {
+        kiwiRxBtn.style.background = msg.connected ? '#1a3a2e' : '';
+        kiwiRxBtn.style.borderColor = msg.connected ? 'var(--pota)' : '';
+        kiwiRxBtn.style.color = msg.connected ? 'var(--pota)' : '';
+      }
+      if (!msg.connected) { kiwiNextPlayTime = 0; }
+    }
+    if (msg.type === 'kiwi-audio' && kiwiRxConnected) {
+      try {
+        if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: msg.sampleRate || 12000 });
+        var sr = msg.sampleRate || 12000;
+        var pcm = new Float32Array(msg.pcm);
+        var buf = kiwiAudioCtx.createBuffer(1, pcm.length, sr);
+        buf.getChannelData(0).set(pcm);
+        var src = kiwiAudioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(kiwiAudioCtx.destination);
+        // Schedule seamless playback
+        var now = kiwiAudioCtx.currentTime;
+        if (kiwiNextPlayTime < now) kiwiNextPlayTime = now;
+        src.start(kiwiNextPlayTime);
+        kiwiNextPlayTime += pcm.length / sr;
+      } catch (e) {}
+    }
+  }
 
   // ── POTACAT Speakermic ────────────────────────────────────
   // BLE-connected speaker/microphone for hands-free operation.

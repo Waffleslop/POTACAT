@@ -205,6 +205,16 @@
         </div>
         <button type="button" id="rc-audio-refresh" class="ft8-filter-btn" style="margin:4px 0 8px;">Refresh Devices</button>
 
+        <!-- WebSDR -->
+        <div class="so-section-label">WebSDR (KiwiSDR)</div>
+        <div class="so-row">
+          <label class="so-label">Enable</label>
+          <div class="so-controls">
+            <button type="button" class="rc-btn rc-toggle" id="so-kiwi-enable">Off</button>
+            <span style="font-size:11px;color:var(--text-dim);margin-left:6px;">Shows SDR button</span>
+          </div>
+        </div>
+
         <!-- Speakermic -->
         <div class="so-section-label">Speakermic</div>
         <div class="so-row">
@@ -967,6 +977,7 @@
           <button id="audio-btn" type="button" class="bb-square-btn">Live</button>
           <button id="vol-boost-btn" type="button" class="bb-square-btn hidden" title="Volume Boost">Vol 1x</button>
         </div>
+        <button type="button" id="kiwi-rx-btn" class="bb-square-btn hidden" title="WebSDR RX">&#x1F4E1; SDR</button>
         <button type="button" id="scan-btn" class="bb-round-btn" title="Scan spots">Scan</button>
         <button id="ptt-btn" type="button" class="ptt-button">PTT</button>
         <div class="bb-halt-stack">

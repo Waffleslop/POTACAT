@@ -8365,6 +8365,9 @@ app.whenReady().then(() => {
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: true, host });
       }
+      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        remoteServer.sendToClient({ type: 'kiwi-status', connected: true, host });
+      }
     });
     kiwiClient.on('audio', (pcmFloat, sampleRate) => {
       // Forward audio to VFO popout and main window
@@ -8373,6 +8376,10 @@ app.whenReady().then(() => {
       }
       if (win && !win.isDestroyed()) {
         win.webContents.send('kiwi-audio', { pcm: Array.from(pcmFloat), sampleRate });
+      }
+      // Forward to ECHOCAT phone via WebSocket
+      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        remoteServer.sendToClient({ type: 'kiwi-audio', pcm: Array.from(pcmFloat), sampleRate });
       }
     });
     kiwiClient.on('smeter', (dbm) => {
@@ -8386,11 +8393,17 @@ app.whenReady().then(() => {
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: false });
       }
+      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        remoteServer.sendToClient({ type: 'kiwi-status', connected: false });
+      }
     });
     kiwiClient.on('error', (msg) => {
       sendCatLog(`[WebSDR] Error: ${msg}`);
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: false, error: msg });
+      }
+      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
     kiwiClient.connect(host, port, password);
@@ -8407,6 +8420,24 @@ app.whenReady().then(() => {
       kiwiClient.tune(freqKhz, m);
     }
   });
+
+  // ECHOCAT → KiwiSDR bridge (phone requests connect/disconnect)
+  if (remoteServer) {
+    remoteServer.on('kiwi-connect', (msg) => {
+      // Reuse the same IPC connect logic
+      const host = msg.host || settings.kiwiSdrHost || '';
+      const parts = host.split(':');
+      if (parts[0]) {
+        // Trigger the same connect flow as the desktop IPC
+        const evt = { sender: { send: () => {} } };
+        require('electron').ipcMain.emit('kiwi-connect', evt, { host: parts[0], port: parseInt(parts[1], 10) || 8073, password: msg.password });
+      }
+    });
+    remoteServer.on('kiwi-disconnect', () => {
+      if (kiwiClient) { kiwiClient.disconnect(); kiwiClient = null; }
+      kiwiActive = false;
+    });
+  }
 
   // Auto-tune KiwiSDR when radio frequency changes
   const _origSendCatFrequency = sendCatFrequency;
