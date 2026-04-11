@@ -543,7 +543,7 @@
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw-controls"> CW Speed / Text Input</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
-      <div class="section-label">WebSDR (KiwiSDR)</div>
+      <div class="section-label">WebSDR</div>
       <label class="settings-toggle"><input type="checkbox" id="w-kiwi"> Enable WebSDR RX</label>
       <div id="kiwi-config" style="padding-left:24px;display:none;">
         <select id="kiwi-station-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px;margin:4px 0;">
@@ -1793,7 +1793,7 @@ window.api.onTunedSpot((spot) => {
   updateCwSyncBtn();
 });
 
-// --- WebSDR (KiwiSDR) ---
+// --- WebSDR ---
 const kiwiBtnRow = document.getElementById('kiwi-btn-row');
 const wKiwiCb = document.getElementById('w-kiwi');
 const kiwiConfig = document.getElementById('kiwi-config');
