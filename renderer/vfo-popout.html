@@ -399,10 +399,10 @@
     </div>
     <div class="widget-section" id="widget-ptt-row">
       <div class="ptt-log-row">
-        <button class="sdr-btn-vfo" id="kiwi-btn" title="WebSDR RX">SDR</button>
         <button class="ptt-btn" id="ptt-btn" style="display:none;">PTT</button>
         <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
       </div>
+      <div class="ptt-log-row" id="kiwi-btn-row" style="display:none;"></div>
     </div>
     <div class="widget-section" id="widget-cw-controls">
       <div class="cw-ctrl-row">
@@ -1792,74 +1792,87 @@ window.api.onTunedSpot((spot) => {
 });
 
 // --- WebSDR (KiwiSDR) ---
-const kiwiBtn = document.getElementById('kiwi-btn');
+const kiwiBtnRow = document.getElementById('kiwi-btn-row');
 const wKiwiCb = document.getElementById('w-kiwi');
 const kiwiConfig = document.getElementById('kiwi-config');
 const kiwiStationSelect = document.getElementById('kiwi-station-select');
 let kiwiEnabled = false;
 let kiwiConnected = false;
+let kiwiConnectedHost = '';
 let kiwiAudioCtx = null;
 let kiwiStations = []; // [{label, host, port}]
 
 function buildKiwiStationList(s) {
   kiwiStations = [];
   const hosts = [s.kiwiSdrHost1 || s.kiwiSdrHost || '', s.kiwiSdrHost2 || '', s.kiwiSdrHost3 || ''];
-  const labels = ['Primary', 'Secondary', 'Tertiary'];
+  const labels = [s.kiwiSdrLabel1 || '', s.kiwiSdrLabel2 || '', s.kiwiSdrLabel3 || ''];
   hosts.forEach((h, i) => {
     if (!h) return;
     const parts = h.split(':');
-    kiwiStations.push({ label: labels[i] + ': ' + h, host: parts[0], port: parseInt(parts[1], 10) || 8073 });
+    const host = parts[0];
+    const port = parseInt(parts[1], 10) || 8073;
+    kiwiStations.push({ label: labels[i] || host, host, port, fullHost: h });
   });
+  // Build select (for settings reference)
   kiwiStationSelect.innerHTML = '<option value="">-- select station --</option>';
   kiwiStations.forEach((st, i) => {
     const opt = document.createElement('option');
     opt.value = String(i);
-    opt.textContent = st.label;
+    opt.textContent = st.label + ' (' + st.fullHost + ')';
     kiwiStationSelect.appendChild(opt);
+  });
+  // Build button row
+  buildKiwiButtons();
+}
+
+function buildKiwiButtons() {
+  kiwiBtnRow.innerHTML = '';
+  kiwiStations.forEach((st, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'sdr-btn-vfo';
+    btn.style.display = '';
+    btn.textContent = st.label;
+    btn.title = st.fullHost;
+    btn.dataset.idx = i;
+    btn.addEventListener('click', () => {
+      if (kiwiConnected && kiwiConnectedHost === st.fullHost) {
+        window.api.kiwiDisconnect();
+      } else {
+        window.api.kiwiConnect({ host: st.host, port: st.port });
+        kiwiConnectedHost = st.fullHost;
+      }
+    });
+    kiwiBtnRow.appendChild(btn);
+  });
+  updateKiwiButtonStates();
+}
+
+function updateKiwiButtonStates() {
+  kiwiBtnRow.querySelectorAll('.sdr-btn-vfo').forEach(btn => {
+    const idx = parseInt(btn.dataset.idx, 10);
+    const st = kiwiStations[idx];
+    btn.classList.toggle('active', kiwiConnected && st && kiwiConnectedHost === st.fullHost);
   });
 }
 
 wKiwiCb.addEventListener('change', async () => {
   kiwiEnabled = wKiwiCb.checked;
   kiwiConfig.style.display = kiwiEnabled ? '' : 'none';
-  kiwiBtn.style.display = kiwiEnabled ? '' : 'none';
+  kiwiBtnRow.style.display = kiwiEnabled && kiwiStations.length > 0 ? '' : 'none';
   if (!kiwiEnabled && kiwiConnected) {
     window.api.kiwiDisconnect();
     kiwiConnected = false;
-    kiwiBtn.classList.remove('active');
+    kiwiConnectedHost = '';
+    updateKiwiButtonStates();
   }
   await window.api.saveSettings({ kiwiSdrEnabled: kiwiEnabled });
 });
 
-// Click: connect to selected station / disconnect
-kiwiBtn.addEventListener('click', () => {
-  if (kiwiConnected) {
-    window.api.kiwiDisconnect();
-  } else {
-    const idx = parseInt(kiwiStationSelect.value, 10);
-    const st = kiwiStations[idx] || kiwiStations[0];
-    if (st) window.api.kiwiConnect({ host: st.host, port: st.port });
-  }
-});
-
-// Right-click: cycle to next station
-kiwiBtn.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  if (kiwiStations.length < 2) return;
-  let cur = parseInt(kiwiStationSelect.value, 10) || 0;
-  cur = (cur + 1) % kiwiStations.length;
-  kiwiStationSelect.value = String(cur);
-  // If connected, reconnect to new station
-  if (kiwiConnected) {
-    const st = kiwiStations[cur];
-    if (st) window.api.kiwiConnect({ host: st.host, port: st.port });
-  }
-});
-
 window.api.onKiwiStatus((s) => {
   kiwiConnected = s.connected;
-  kiwiBtn.classList.toggle('active', s.connected);
-  kiwiBtn.title = s.connected ? 'WebSDR connected — click to disconnect' : 'Click to connect WebSDR';
+  if (s.host) kiwiConnectedHost = s.host;
+  if (!s.connected) kiwiConnectedHost = '';
+  updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
 });
 
@@ -1883,10 +1896,10 @@ window.api.onKiwiAudio((d) => {
     kiwiEnabled = true;
     wKiwiCb.checked = true;
     kiwiConfig.style.display = '';
-    kiwiBtn.style.display = '';
   }
   buildKiwiStationList(s);
   if (kiwiStations.length > 0) kiwiStationSelect.value = '0';
+  kiwiBtnRow.style.display = kiwiEnabled && kiwiStations.length > 0 ? '' : 'none';
 })();
 
 // --- Solar data ---

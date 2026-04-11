@@ -3039,6 +3039,12 @@ function updateRemoteSettings() {
     remoteCwEnabled: !!settings.remoteCwEnabled,
     remoteCwMacros: settings.remoteCwMacros || null,
     customCatButtons: settings.customCatButtons || null,
+    kiwiSdrHost1: settings.kiwiSdrHost1 || settings.kiwiSdrHost || '',
+    kiwiSdrHost2: settings.kiwiSdrHost2 || '',
+    kiwiSdrHost3: settings.kiwiSdrHost3 || '',
+    kiwiSdrLabel1: settings.kiwiSdrLabel1 || '',
+    kiwiSdrLabel2: settings.kiwiSdrLabel2 || '',
+    kiwiSdrLabel3: settings.kiwiSdrLabel3 || '',
   });
 }
 
@@ -8436,6 +8442,11 @@ app.whenReady().then(() => {
     remoteServer.on('kiwi-disconnect', () => {
       if (kiwiClient) { kiwiClient.disconnect(); kiwiClient = null; }
       kiwiActive = false;
+    });
+    remoteServer.on('save-settings', (partial) => {
+      Object.assign(settings, partial);
+      saveSettings(settings);
+      console.log('[Echo CAT] Settings updated from phone:', Object.keys(partial).join(', '));
     });
   }
 
