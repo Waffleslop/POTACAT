@@ -6795,7 +6795,12 @@
     }
     console.log('[ECHOCAT-Kiwi] toggle: connected=' + kiwiRxConnected + ' stations=' + kiwiStationListE.length + ' idx=' + kiwiSelectedIdx);
     if (kiwiRxConnected) {
-      ws.send(JSON.stringify({ type: 'kiwi-disconnect' }));
+      try { ws.send(JSON.stringify({ type: 'kiwi-disconnect' })); } catch (e) {}
+      // Immediately update local state so button responds
+      kiwiRxConnected = false;
+      kiwiConnectedHostE = '';
+      kiwiNextPlayTime = 0;
+      kiwiUpdateSdrBtn();
     } else {
       var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
       if (st && ws && ws.readyState === WebSocket.OPEN) {
