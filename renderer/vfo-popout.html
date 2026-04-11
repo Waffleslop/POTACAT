@@ -1720,9 +1720,9 @@ audioBtn.addEventListener('click', async () => {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
     updateAudioBtn();
   } else {
-    // Third click: unmute
+    // Third click: unmute (but keep muted if SDR is active)
     audioMonitorMuted = false;
-    if (audioMonitorGain) audioMonitorGain.gain.value = 1;
+    if (audioMonitorGain) audioMonitorGain.gain.value = kiwiConnected ? 0 : 1;
     updateAudioBtn();
   }
 });
@@ -1879,6 +1879,12 @@ window.api.onKiwiStatus((s) => {
   if (!s.connected) kiwiConnectedHost = '';
   updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
+  // Mute local radio audio monitor when SDR active, restore when off
+  if (s.connected) {
+    if (audioMonitorGain) audioMonitorGain.gain.value = 0;
+  } else {
+    if (audioMonitorGain && !audioMonitorMuted) audioMonitorGain.gain.value = 1;
+  }
 });
 
 window.api.onKiwiAudio((d) => {
