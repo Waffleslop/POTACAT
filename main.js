@@ -3173,7 +3173,7 @@ function connectRemote() {
   if (settings.colorblindMode) remoteServer.setColorblindMode(true);
 
   remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
-    try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] TUNE: freq=${freqKhz} mode=${mode} kiwiActive=${kiwiActive} kiwiClient=${!!kiwiClient}\n`); } catch {}
+    try { require('fs').appendFileSync('C:/Users/cssta/AppData/Roaming/potacat/kiwi-debug.log', `[${new Date().toISOString()}] TUNE-EVENT: freq=${freqKhz}\n`); } catch (e) { console.error('LOG ERR:', e); }
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
     tuneRadio(freqKhz, mode, bearing, { clearXit: !mode });
@@ -4637,6 +4637,25 @@ function connectRemote() {
     pttSafetyTimeout: settings.remotePttTimeout || 180,
     rendererPath: path.join(app.getAppPath(), 'renderer'),
     certDir: app.getPath('userData'),
+  });
+
+  // KiwiSDR bridge — must be inside connectRemote() so listeners survive reconnect
+  remoteServer.on('kiwi-connect', (msg) => {
+    const raw = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || '';
+    const clean = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    sendCatLog(`[WebSDR] ECHOCAT connect: "${clean}"`);
+    const parts = clean.split(':');
+    if (parts[0]) {
+      require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: parts[0], port: parseInt(parts[1], 10) || 8073, password: msg.password });
+    }
+  });
+  remoteServer.on('kiwi-disconnect', () => {
+    if (kiwiClient) { kiwiClient.disconnect(); kiwiClient = null; }
+    kiwiActive = false;
+  });
+  remoteServer.on('save-settings', (partial) => {
+    Object.assign(settings, partial);
+    saveSettings(settings);
   });
 }
 
@@ -6987,6 +7006,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   _lastTuneTime = now;
 
   // Auto-tune KiwiSDR WebSDR to follow
+  try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] tuneRadio: freq=${freqHz}Hz kiwiActive=${kiwiActive} client=${!!kiwiClient} connected=${kiwiClient?kiwiClient.connected:'N/A'}\n`); } catch {}
   if (kiwiActive && kiwiClient && kiwiClient.connected && freqHz > 100000) {
     const fKhz = freqHz / 1000;
     const m = (mode || _currentMode || 'USB').toLowerCase()
@@ -8387,6 +8407,7 @@ app.whenReady().then(() => {
     const kiwiFullHost = host + ':' + port;
     kiwiClient.on('connected', () => {
       kiwiActive = true;
+      try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] kiwiActive=TRUE connected to ${kiwiFullHost}\n`); } catch {}
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
       // Auto-tune to current frequency
       if (_currentFreqHz > 0 && _currentMode) {
@@ -8456,32 +8477,7 @@ app.whenReady().then(() => {
     }
   });
 
-  // ECHOCAT → KiwiSDR bridge (phone requests connect/disconnect)
-  if (remoteServer) {
-    remoteServer.on('kiwi-connect', (msg) => {
-      const raw = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || '';
-      // Strip http:// and trailing slashes before parsing host:port
-      const clean = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-      sendCatLog(`[WebSDR] ECHOCAT requested connect: "${clean}"`);
-      require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] echocat-connect: raw="${raw}" clean="${clean}"\n`);
-      const parts = clean.split(':');
-      if (parts[0]) {
-        const evt = { sender: { send: () => {} } };
-        require('electron').ipcMain.emit('kiwi-connect', evt, { host: parts[0], port: parseInt(parts[1], 10) || 8073, password: msg.password });
-      } else {
-        sendCatLog('[WebSDR] No host configured — cannot connect');
-      }
-    });
-    remoteServer.on('kiwi-disconnect', () => {
-      if (kiwiClient) { kiwiClient.disconnect(); kiwiClient = null; }
-      kiwiActive = false;
-    });
-    remoteServer.on('save-settings', (partial) => {
-      Object.assign(settings, partial);
-      saveSettings(settings);
-      console.log('[Echo CAT] Settings updated from phone:', Object.keys(partial).join(', '));
-    });
-  }
+  // KiwiSDR bridge listeners are now inside connectRemote()
 
   // Auto-tune KiwiSDR when radio frequency changes
   const _origSendCatFrequency = sendCatFrequency;
