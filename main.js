@@ -4688,7 +4688,10 @@ function handleRemotePtt(state) {
       // Suppress mode broadcasts for the entire PTT duration + restore.
       _modeSuppressUntil = Date.now() + 120000;
       // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown)
-      if (cat && cat.connected) cat.setModeOnly(dataMode);
+      if (cat && cat.connected) {
+        if (cat.setModeOnly) cat.setModeOnly(dataMode);
+        else if (_currentFreqHz) cat.tune(_currentFreqHz, dataMode);
+      }
     }
   }
 
@@ -4717,7 +4720,10 @@ function handleRemotePtt(state) {
     sendCatLog(`[PTT] Restoring ${restoreMode} mode`);
     // Suppress mode broadcasts during restore so ECHOCAT doesn't flicker
     _modeSuppressUntil = Date.now() + 2000;
-    if (cat && cat.connected) cat.setModeOnly(restoreMode);
+    if (cat && cat.connected) {
+      if (cat.setModeOnly) cat.setModeOnly(restoreMode);
+      else if (_currentFreqHz) cat.tune(_currentFreqHz, restoreMode);
+    }
   }
 
   _remoteTxState = state;
