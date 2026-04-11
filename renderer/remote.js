@@ -6807,6 +6807,7 @@
         var kiwiMsg = JSON.stringify({ type: 'kiwi-connect', host: st.fullHost });
         console.log('[ECHOCAT-Kiwi] sending: ' + kiwiMsg);
         try { ws.send(kiwiMsg); } catch (e) { console.error('[ECHOCAT-Kiwi] send error:', e); }
+        _kiwiConnecting = true;
         kiwiConnectedHostE = st.fullHost;
         kiwiSdrBtn.classList.add('kiwi-connecting');
         kiwiSdrBtn.textContent = st.label + '...';
@@ -6882,9 +6883,14 @@
     });
   }
 
+  var _kiwiConnecting = false;
+
   function handleKiwiMessage(msg) {
     if (msg.type === 'kiwi-status') {
+      // Ignore transient disconnect during reconnect to a different station
+      if (!msg.connected && _kiwiConnecting) return;
       kiwiRxConnected = msg.connected;
+      _kiwiConnecting = false;
       if (msg.host) kiwiConnectedHostE = msg.host;
       if (!msg.connected) kiwiConnectedHostE = '';
       kiwiUpdateSdrBtn();
