@@ -370,6 +370,7 @@
     <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
     <button class="audio-btn" id="audio-btn" title="Radio audio monitor">&#x1F508;</button>
     <button class="vfo-lock-btn" id="vfo-lock-btn" title="Click to lock VFO">&#x1F513;</button>
+    <button class="vfo-lock-btn" id="kiwi-btn" title="WebSDR RX" style="display:none;">&#x1F4E1;</button>
   </div>
   <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 2px;">
     <span class="filter-badge" id="filter-badge"></span>
@@ -531,6 +532,11 @@
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw-controls"> CW Speed / Text Input</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
+      <div class="section-label">WebSDR (KiwiSDR)</div>
+      <label class="settings-toggle"><input type="checkbox" id="w-kiwi"> Enable WebSDR RX</label>
+      <div id="kiwi-config" style="padding-left:24px;display:none;">
+        <input type="text" id="kiwi-host" placeholder="host:port (e.g. rx.kiwisdr.com:8073)" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px;margin:4px 0;">
+      </div>
       <div class="section-label">Window</div>
       <label class="settings-toggle"><input type="checkbox" id="s-always-on-top" checked> Always on top</label>
       <div class="section-label">Dial Sections</div>
@@ -1772,6 +1778,77 @@ window.api.onTunedSpot((spot) => {
   cwSpotWpmVal = ops[0].wpm || null;
   updateCwSyncBtn();
 });
+
+// --- WebSDR (KiwiSDR) ---
+const kiwiBtn = document.getElementById('kiwi-btn');
+const wKiwiCb = document.getElementById('w-kiwi');
+const kiwiConfig = document.getElementById('kiwi-config');
+const kiwiHostInput = document.getElementById('kiwi-host');
+let kiwiEnabled = false;
+let kiwiConnected = false;
+let kiwiAudioCtx = null;
+
+wKiwiCb.addEventListener('change', async () => {
+  kiwiEnabled = wKiwiCb.checked;
+  kiwiConfig.style.display = kiwiEnabled ? '' : 'none';
+  kiwiBtn.style.display = kiwiEnabled ? '' : 'none';
+  if (!kiwiEnabled && kiwiConnected) {
+    window.api.kiwiDisconnect();
+    kiwiConnected = false;
+    kiwiBtn.style.color = '';
+    kiwiBtn.style.borderColor = '';
+  }
+  await window.api.saveSettings({ kiwiSdrEnabled: kiwiEnabled, kiwiSdrHost: kiwiHostInput.value.trim() });
+});
+
+kiwiHostInput.addEventListener('change', async () => {
+  await window.api.saveSettings({ kiwiSdrHost: kiwiHostInput.value.trim() });
+});
+
+kiwiBtn.addEventListener('click', () => {
+  if (kiwiConnected) {
+    window.api.kiwiDisconnect();
+  } else {
+    const hostVal = kiwiHostInput.value.trim();
+    if (!hostVal) return;
+    const parts = hostVal.split(':');
+    const host = parts[0];
+    const port = parseInt(parts[1], 10) || 8073;
+    window.api.kiwiConnect({ host, port });
+  }
+});
+
+window.api.onKiwiStatus((s) => {
+  kiwiConnected = s.connected;
+  kiwiBtn.style.color = s.connected ? 'var(--accent-green)' : '';
+  kiwiBtn.style.borderColor = s.connected ? 'var(--accent-green)' : '';
+  kiwiBtn.title = s.connected ? 'WebSDR connected — click to disconnect' : 'Click to connect WebSDR';
+});
+
+window.api.onKiwiAudio((d) => {
+  if (!kiwiConnected) return;
+  try {
+    if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: d.sampleRate || 12000 });
+    const buf = kiwiAudioCtx.createBuffer(1, d.pcm.length, d.sampleRate || 12000);
+    buf.getChannelData(0).set(new Float32Array(d.pcm));
+    const src = kiwiAudioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(kiwiAudioCtx.destination);
+    src.start();
+  } catch {}
+});
+
+// Load saved settings
+(async () => {
+  const s = await window.api.getSettings();
+  if (s.kiwiSdrEnabled) {
+    kiwiEnabled = true;
+    wKiwiCb.checked = true;
+    kiwiConfig.style.display = '';
+    kiwiBtn.style.display = '';
+  }
+  if (s.kiwiSdrHost) kiwiHostInput.value = s.kiwiSdrHost;
+})();
 
 // --- Solar data ---
 window.api.onSolarData((d) => {

@@ -8345,6 +8345,82 @@ app.whenReady().then(() => {
     }
   });
 
+  // --- KiwiSDR WebSDR integration ---
+  const { KiwiSdrClient } = require('./lib/kiwisdr');
+  let kiwiClient = null;
+  let kiwiActive = false;
+
+  ipcMain.on('kiwi-connect', (_e, { host, port, password }) => {
+    if (kiwiClient) kiwiClient.disconnect();
+    kiwiClient = new KiwiSdrClient();
+    kiwiClient.on('connected', () => {
+      kiwiActive = true;
+      sendCatLog(`[WebSDR] Connected to ${host}:${port || 8073}`);
+      // Auto-tune to current frequency
+      if (_currentFreqHz > 0 && _currentMode) {
+        const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
+        kiwiClient.tune(_currentFreqHz / 1000, mode);
+      }
+      kiwiClient.setAgc(true);
+      for (const wc of require('electron').webContents.getAllWebContents()) {
+        wc.send('kiwi-status', { connected: true, host });
+      }
+    });
+    kiwiClient.on('audio', (pcmFloat, sampleRate) => {
+      // Forward audio to VFO popout and main window
+      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+        vfoPopoutWin.webContents.send('kiwi-audio', { pcm: Array.from(pcmFloat), sampleRate });
+      }
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('kiwi-audio', { pcm: Array.from(pcmFloat), sampleRate });
+      }
+    });
+    kiwiClient.on('smeter', (dbm) => {
+      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+        vfoPopoutWin.webContents.send('kiwi-smeter', dbm);
+      }
+    });
+    kiwiClient.on('disconnected', () => {
+      kiwiActive = false;
+      sendCatLog('[WebSDR] Disconnected');
+      for (const wc of require('electron').webContents.getAllWebContents()) {
+        wc.send('kiwi-status', { connected: false });
+      }
+    });
+    kiwiClient.on('error', (msg) => {
+      sendCatLog(`[WebSDR] Error: ${msg}`);
+      for (const wc of require('electron').webContents.getAllWebContents()) {
+        wc.send('kiwi-status', { connected: false, error: msg });
+      }
+    });
+    kiwiClient.connect(host, port, password);
+  });
+
+  ipcMain.on('kiwi-disconnect', () => {
+    if (kiwiClient) { kiwiClient.disconnect(); kiwiClient = null; }
+    kiwiActive = false;
+  });
+
+  ipcMain.on('kiwi-tune', (_e, { freqKhz, mode }) => {
+    if (kiwiClient && kiwiClient.connected) {
+      const m = (mode || 'usb').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
+      kiwiClient.tune(freqKhz, m);
+    }
+  });
+
+  // Auto-tune KiwiSDR when radio frequency changes
+  const _origSendCatFrequency = sendCatFrequency;
+  function sendCatFrequencyWithKiwi(hz) {
+    _origSendCatFrequency(hz);
+    if (kiwiActive && kiwiClient && kiwiClient.connected && hz > 100000) {
+      const mode = (_currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
+      kiwiClient.tune(hz / 1000, mode);
+    }
+  }
+  // Patch the frequency callback
+  if (cat) cat.removeAllListeners('frequency');
+  if (cat) cat.on('frequency', sendCatFrequencyWithKiwi);
+
   ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort }) => {
     markUserActive();
     if (_vfoLocked) {
