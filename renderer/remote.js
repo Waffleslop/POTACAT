@@ -1806,14 +1806,14 @@
   });
 
   // Status bar up/down buttons — quick step without opening dial pad
-  freqUpBtn.addEventListener('click', (e) => {
+  if (freqUpBtn) freqUpBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const step = STEP_SIZES[dpStepIdx];
     const newFreq = Math.round((currentFreqKhz + step) * 100) / 100;
     dpTune(newFreq);
   });
 
-  freqDownBtn.addEventListener('click', (e) => {
+  if (freqDownBtn) freqDownBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const step = STEP_SIZES[dpStepIdx];
     const newFreq = Math.round((currentFreqKhz - step) * 100) / 100;
@@ -6801,7 +6801,6 @@
     if (!kiwiAudioCtx) {
       try { kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
     }
-    console.log('[ECHOCAT-Kiwi] toggle: connected=' + kiwiRxConnected + ' stations=' + kiwiStationListE.length + ' idx=' + kiwiSelectedIdx);
     if (kiwiRxConnected) {
       try { ws.send(JSON.stringify({ type: 'kiwi-disconnect' })); } catch (e) {}
       // Immediately update local state so button responds
@@ -6814,14 +6813,11 @@
       var st = kiwiStationListE[kiwiSelectedIdx] || kiwiStationListE[0];
       if (st && ws && ws.readyState === WebSocket.OPEN) {
         var kiwiMsg = JSON.stringify({ type: 'kiwi-connect', host: st.fullHost });
-        console.log('[ECHOCAT-Kiwi] sending: ' + kiwiMsg);
-        try { ws.send(kiwiMsg); } catch (e) { console.error('[ECHOCAT-Kiwi] send error:', e); }
         _kiwiConnecting = true;
         kiwiConnectedHostE = st.fullHost;
         kiwiSdrBtn.classList.add('kiwi-connecting');
         kiwiSdrBtn.textContent = st.label + '...';
       } else {
-        console.log('[ECHOCAT-Kiwi] no station or ws not open: st=' + !!st + ' ws=' + (ws ? ws.readyState : 'null'));
         kiwiSdrBtn.textContent = st ? 'Retry' : 'No SDR';
       }
     }
@@ -6910,9 +6906,6 @@
       if (!msg.connected) { kiwiNextPlayTime = 0; }
     }
     if (msg.type === 'kiwi-audio' && kiwiRxConnected) {
-      if (!window._kiwiAudioRx) window._kiwiAudioRx = 0;
-      window._kiwiAudioRx++;
-      if (window._kiwiAudioRx <= 3) console.log('[ECHOCAT-Kiwi] audio packet #' + window._kiwiAudioRx + ' len=' + (msg.pcm ? msg.pcm.length : 0));
       try {
         // Use default sample rate (44100/48000) — browser resamples from 12kHz
         if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -6929,7 +6922,6 @@
         src.start(kiwiNextPlayTime);
         kiwiNextPlayTime += pcm.length / sr;
       } catch (e) {
-        console.error('[ECHOCAT-Kiwi] audio error:', e);
       }
     }
   }

@@ -3173,7 +3173,6 @@ function connectRemote() {
   if (settings.colorblindMode) remoteServer.setColorblindMode(true);
 
   remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
-    try { require('fs').appendFileSync('C:/Users/cssta/AppData/Roaming/potacat/kiwi-debug.log', `[${new Date().toISOString()}] TUNE-EVENT: freq=${freqKhz}\n`); } catch (e) { console.error('LOG ERR:', e); }
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
     tuneRadio(freqKhz, mode, bearing, { clearXit: !mode });
@@ -7006,7 +7005,6 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   _lastTuneTime = now;
 
   // Auto-tune KiwiSDR WebSDR to follow
-  try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] tuneRadio: freq=${freqHz}Hz kiwiActive=${kiwiActive} client=${!!kiwiClient} connected=${kiwiClient?kiwiClient.connected:'N/A'}\n`); } catch {}
   if (kiwiActive && kiwiClient && kiwiClient.connected && freqHz > 100000) {
     const fKhz = freqHz / 1000;
     const m = (mode || _currentMode || 'USB').toLowerCase()
@@ -8400,14 +8398,12 @@ app.whenReady().then(() => {
     // Sanitize host — strip http://, https://, trailing slashes
     const host = (rawHost || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const port = rawPort || 8073;
-    require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] kiwi-connect: host="${host}" port=${port} raw="${rawHost}"\n`);
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
     kiwiClient = new KiwiSdrClient();
     const kiwiFullHost = host + ':' + port;
     kiwiClient.on('connected', () => {
       kiwiActive = true;
-      try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] kiwiActive=TRUE connected to ${kiwiFullHost}\n`); } catch {}
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
       // Auto-tune to current frequency
       if (_currentFreqHz > 0 && _currentMode) {
@@ -8516,13 +8512,11 @@ app.whenReady().then(() => {
       tuneRadio(frequency, mode, bearing);
     }
     // Auto-tune KiwiSDR to match
-    try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] tune-ipc: freq=${frequency} kiwiActive=${kiwiActive} client=${!!kiwiClient} connected=${kiwiClient ? kiwiClient.connected : 'n/a'}\n`); } catch {}
     if (kiwiActive && kiwiClient && kiwiClient.connected) {
       const freqKhz = parseFloat(frequency);
       if (freqKhz > 100) {
         const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', freqKhz >= 10000 ? 'usb' : 'lsb');
         sendCatLog(`[WebSDR] Auto-tune: ${freqKhz} kHz mode=${m}`);
-        try { require('fs').appendFileSync(require('path').join(app.getPath('userData'), 'kiwi-debug.log'), `[${new Date().toISOString()}] auto-tune: freq=${freqKhz}kHz mode=${m}\n`); } catch {}
         kiwiClient.tune(freqKhz, m);
       }
     }
