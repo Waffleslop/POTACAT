@@ -3000,7 +3000,10 @@
     audioConnectBtn.classList.add('hidden');
     bbControls.classList.remove('hidden');
     if (typeof smEnabled !== 'undefined' && smEnabled) document.getElementById('speakermic-btn').classList.remove('hidden');
-    if (typeof kiwiRxEnabled !== 'undefined' && kiwiRxEnabled) document.getElementById('kiwi-rx-btn').classList.remove('hidden');
+    if (typeof kiwiRxEnabled !== 'undefined' && kiwiRxEnabled) {
+      document.getElementById('kiwi-rx-btn').classList.remove('hidden');
+      document.querySelector('.bb-scan-stack').classList.add('has-sdr');
+    }
   }
   function showConnectPrompt() {
     audioConnectBtn.textContent = 'Tap to Connect Audio';
@@ -3008,6 +3011,7 @@
     bbControls.classList.add('hidden');
     document.getElementById('speakermic-btn').classList.add('hidden');
     document.getElementById('kiwi-rx-btn').classList.add('hidden');
+    document.querySelector('.bb-scan-stack').classList.remove('has-sdr');
   }
 
   audioConnectBtn.addEventListener('click', async () => {
@@ -6755,8 +6759,14 @@
     localStorage.setItem('echocat-kiwi-enabled', on);
     soKiwiEnable.classList.toggle('active', on);
     soKiwiEnable.textContent = on ? 'On' : 'Off';
-    if (on && audioEnabled) kiwiRxBtn.classList.remove('hidden');
-    else kiwiRxBtn.classList.add('hidden');
+    var scanStack = document.querySelector('.bb-scan-stack');
+    if (on && audioEnabled) {
+      kiwiRxBtn.classList.remove('hidden');
+      if (scanStack) scanStack.classList.add('has-sdr');
+    } else {
+      kiwiRxBtn.classList.add('hidden');
+      if (scanStack) scanStack.classList.remove('has-sdr');
+    }
   }
 
   if (soKiwiEnable) {

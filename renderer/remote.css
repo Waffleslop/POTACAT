@@ -841,6 +841,17 @@ html, body {
 }
 .bb-round-btn:active { background: var(--accent); color: white; }
 .bb-round-btn.scan-active { background: #1a3a2e; border-color: var(--pota); color: var(--pota); }
+/* Scan + SDR stack (rectangular when SDR is visible) */
+.bb-scan-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.bb-scan-stack.has-sdr .bb-round-btn {
+  width: auto; height: auto; border-radius: 6px;
+  padding: 8px 14px;
+}
 /* Halt / emergency stop — red accent rectangle */
 .bb-halt-btn {
   padding: 8px 14px; border-radius: 6px;
