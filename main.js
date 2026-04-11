@@ -8394,6 +8394,7 @@ app.whenReady().then(() => {
       }
       // Forward to ECHOCAT phone via WebSocket
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        if (_kiwiAudioCount === 10) sendCatLog(`[WebSDR] Streaming audio to ECHOCAT (${pcmFloat.length} samples/packet)`);
         remoteServer.sendToClient({ type: 'kiwi-audio', pcm: Array.from(pcmFloat), sampleRate });
       }
     });

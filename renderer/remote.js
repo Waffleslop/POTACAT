@@ -6791,7 +6791,7 @@
 
   function kiwiToggleConnect() {
     if (!kiwiAudioCtx) {
-      try { kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 12000 }); } catch (e) {}
+      try { kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
     }
     console.log('[ECHOCAT-Kiwi] toggle: connected=' + kiwiRxConnected + ' stations=' + kiwiStationListE.length + ' idx=' + kiwiSelectedIdx);
     if (kiwiRxConnected) {
@@ -6903,9 +6903,11 @@
     }
     if (msg.type === 'kiwi-audio' && kiwiRxConnected) {
       try {
-        if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: msg.sampleRate || 12000 });
+        // Use default sample rate (44100/48000) — browser resamples from 12kHz
+        if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
         var sr = msg.sampleRate || 12000;
         var pcm = new Float32Array(msg.pcm);
+        // Create buffer at the KiwiSDR's native sample rate — browser handles resampling
         var buf = kiwiAudioCtx.createBuffer(1, pcm.length, sr);
         buf.getChannelData(0).set(pcm);
         var src = kiwiAudioCtx.createBufferSource();
@@ -6915,7 +6917,9 @@
         if (kiwiNextPlayTime < now) kiwiNextPlayTime = now;
         src.start(kiwiNextPlayTime);
         kiwiNextPlayTime += pcm.length / sr;
-      } catch (e) {}
+      } catch (e) {
+        console.error('[ECHOCAT-Kiwi] audio error:', e);
+      }
     }
   }
 
