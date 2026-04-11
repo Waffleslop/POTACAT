@@ -6784,13 +6784,9 @@
     }
   }
 
-  // Tap: connect/disconnect. Long-press: cycle to next station.
+  // Tap: connect/disconnect
   if (kiwiSdrBtn) {
-    var _kiwiLongPress = null;
-    kiwiSdrBtn.addEventListener('mousedown', function () { _kiwiLongPress = setTimeout(function () { _kiwiLongPress = 'long'; kiwiCycleStation(); }, 600); });
-    kiwiSdrBtn.addEventListener('mouseup', function () { if (_kiwiLongPress !== 'long') { clearTimeout(_kiwiLongPress); kiwiToggleConnect(); } _kiwiLongPress = null; });
-    kiwiSdrBtn.addEventListener('touchstart', function (e) { _kiwiLongPress = setTimeout(function () { _kiwiLongPress = 'long'; kiwiCycleStation(); }, 600); }, { passive: true });
-    kiwiSdrBtn.addEventListener('touchend', function (e) { if (_kiwiLongPress !== 'long') { clearTimeout(_kiwiLongPress); kiwiToggleConnect(); } _kiwiLongPress = null; e.preventDefault(); });
+    kiwiSdrBtn.addEventListener('click', function () { kiwiToggleConnect(); });
   }
 
   function kiwiToggleConnect() {
