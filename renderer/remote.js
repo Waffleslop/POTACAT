@@ -12,7 +12,7 @@
   let storedToken = '';
   let reconnectTimer = null;
   let wasKicked = false;
-  let authMode = 'token'; // 'token' | 'club' | 'none'
+  let authMode = window.__authMode || 'token'; // 'token' | 'club' | 'none' — injected by server
   let clubMember = null;  // { callsign, firstname, role, licenseClass }
   let pingInterval = null;
   let lastPingSent = 0;
@@ -49,6 +49,12 @@
   const connectBtn = document.getElementById('connect-btn');
   const connectError = document.getElementById('connect-error');
   const mainUI = document.getElementById('main-ui');
+
+  // Pre-hide connect screen when no token required (server injects __authMode)
+  if (authMode === 'none') {
+    connectScreen.classList.add('hidden');
+    mainUI.classList.remove('hidden');
+  }
   const freqDisplay = document.getElementById('freq-display');
   const modeBadge = document.getElementById('mode-badge');
   const catDot = document.getElementById('cat-dot');
