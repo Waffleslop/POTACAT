@@ -4363,6 +4363,11 @@ function connectRemote() {
   // --- JTCAT remote control (event handlers — helpers are at file level) ---
 
   remoteServer.on('jtcat-start', ({ mode }) => {
+    // Close JTCAT popout if open — only one platform at a time
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      sendCatLog('[JTCAT] Closing popout — ECHOCAT taking over FT8');
+      jtcatPopoutWin.close();
+    }
     startJtcat(mode);
     // Start audio capture in desktop renderer
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-start-for-remote');
@@ -8115,6 +8120,15 @@ app.whenReady().then(() => {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.focus();
       return;
+    }
+    // Stop ECHOCAT JTCAT if running — only one platform at a time
+    if (remoteJtcatQso) {
+      remoteJtcatQso = null;
+      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        remoteServer.broadcastJtcatQsoState({ phase: 'idle' });
+        remoteServer.broadcastJtcatStatus({ running: false });
+      }
+      sendCatLog('[JTCAT] Stopping ECHOCAT FT8 — popout taking over');
     }
     const isMac = process.platform === 'darwin';
     jtcatPopoutWin = new BrowserWindow({
