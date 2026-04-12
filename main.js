@@ -2097,6 +2097,48 @@ function connectWsjtx() {
         txFrequency: qso.txFrequency,
       });
     }
+    // Match callsign to a spotted POTA/SOTA activator and mark park as worked
+    const call = (qso.dxCall || '').toUpperCase();
+    if (call) {
+      const spot = lastPotaSotaSpots.find(s => s.callsign.toUpperCase() === call);
+      const freqHz = qso.txFrequency || 0;
+      const freqKhz = freqHz > 100000 ? freqHz / 1000 : freqHz; // WSJT-X sends Hz
+      const band = freqKhz ? (freqToBand(freqKhz / 1000) || '') : '';
+      const mode = (qso.mode || '').toUpperCase();
+      const now = new Date();
+      const qsoDate = now.getUTCFullYear().toString() +
+        String(now.getUTCMonth() + 1).padStart(2, '0') +
+        String(now.getUTCDate()).padStart(2, '0');
+      // Update workedQsos (callsign tracking)
+      const entry = { date: qsoDate, ref: spot ? (spot.reference || '').toUpperCase() : '', band, mode };
+      if (!workedQsos.has(call)) workedQsos.set(call, []);
+      workedQsos.get(call).push(entry);
+      if (win && !win.isDestroyed()) win.webContents.send('worked-qsos', [...workedQsos.entries()]);
+      if (remoteServer && remoteServer.running) remoteServer.sendWorkedQsos([...workedQsos.entries()]);
+      // Update roster needed sets
+      rosterWorkedCalls.add(call);
+      const grid = (qso.dxGrid || '').toUpperCase().substring(0, 4);
+      if (grid && /^[A-R]{2}\d{2}$/.test(grid)) rosterWorkedGrids.add(grid);
+      if (band && ctyDb) {
+        const entity = resolveCallsign(call, ctyDb);
+        if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
+      }
+      // Update workedParks if activator was at a park
+      if (spot && spot.reference) {
+        const parkRef = spot.reference.toUpperCase();
+        if (!workedParks.has(parkRef)) {
+          workedParks.set(parkRef, { reference: parkRef });
+          saveLocalWorkedPark(parkRef);
+          if (win && !win.isDestroyed()) win.webContents.send('worked-parks', [...workedParks.entries()]);
+          if (remoteServer && remoteServer.running) remoteServer.sendWorkedParks([...workedParks.keys()]);
+          sendCatLog(`[WSJT-X] QSO logged: ${call} → park ${parkRef} marked as worked`);
+        } else {
+          sendCatLog(`[WSJT-X] QSO logged: ${call} at ${parkRef} (already worked)`);
+        }
+      } else {
+        sendCatLog(`[WSJT-X] QSO logged: ${call} (no park match in spots)`);
+      }
+    }
   });
 
   const port = parseInt(settings.wsjtxPort, 10) || 2237;
