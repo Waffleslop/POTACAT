@@ -9812,6 +9812,8 @@ const smeterBarCanvas = document.getElementById('smeter-bar');
 const smeterTextEl = document.getElementById('smeter-text');
 const swrBarCanvas = document.getElementById('swr-bar');
 const swrTextEl = document.getElementById('swr-text');
+const alcBarCanvas = document.getElementById('alc-bar');
+const alcTextEl = document.getElementById('alc-text');
 
 function drawMeterBar(canvas, level, color) {
   if (!canvas) return;
@@ -9867,6 +9869,15 @@ window.api.onCatSwrRatio((swr) => {
   drawMeterBar(swrBarCanvas, level, color);
   swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrTextEl.style.color = color;
+});
+
+window.api.onCatAlc((val) => {
+  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  const pct = Math.min(1, val / 100);
+  const color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
+  drawMeterBar(alcBarCanvas, pct, pct <= 0 ? '#333' : color);
+  alcTextEl.textContent = Math.round(pct * 100) + '%';
+  alcTextEl.style.color = color;
 });
 
 window.api.onCatStatus((s) => {
