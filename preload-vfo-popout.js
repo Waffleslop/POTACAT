@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   onSmeter: (cb) => ipcRenderer.on('cat-smeter', (_e, val) => cb(val)),
   onSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),
+  onAlc: (cb) => ipcRenderer.on('cat-alc', (_e, val) => cb(val)),
   onTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
   onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, data) => cb(data)),
   onTunedSpot: (cb) => ipcRenderer.on('vfo-tuned-spot', (_e, spot) => cb(spot)),

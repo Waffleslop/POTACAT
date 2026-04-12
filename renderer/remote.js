@@ -675,6 +675,10 @@
         updateEchoSwrRatio(msg.value);
         break;
 
+      case 'alc':
+        updateEchoAlc(msg.value);
+        break;
+
       case 'tgxl-status':
         echoTgxlSection.classList.remove('hidden');
         echoTgxlUpdateButtons(msg.antenna || 0, msg.labels);
@@ -2814,6 +2818,8 @@
   var echoSmeterText = document.getElementById('echo-smeter-text');
   var echoSwrBar = document.getElementById('echo-swr-bar');
   var echoSwrText = document.getElementById('echo-swr-text');
+  var echoAlcBar = document.getElementById('echo-alc-bar');
+  var echoAlcText = document.getElementById('echo-alc-text');
   var echoShowMeter = document.getElementById('echo-show-meter');
   var echoMeterEnabled = localStorage.getItem('echoMeterEnabled') === 'true';
 
@@ -2936,6 +2942,15 @@
     drawEchoBar(echoSwrBar, level, color);
     echoSwrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
     echoSwrText.style.color = color;
+  }
+
+  function updateEchoAlc(val) {
+    if (!echoMeterEnabled || val <= 0) return;
+    var pct = Math.min(1, val / 60);
+    var color = pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
+    drawEchoBar(echoAlcBar, pct, color);
+    echoAlcText.textContent = Math.round(pct * 100) + '%';
+    echoAlcText.style.color = color;
   }
 
   // --- Audio Level Meters & Gain Controls ---
