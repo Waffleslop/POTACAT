@@ -4851,15 +4851,22 @@
         ft8Send({ type: 'jtcat-reply', call, grid, df: decode.df || 1500, sliceId: decode.sliceId });
       }
     } else if (myCallsign && text.indexOf(myCallsign.toUpperCase()) >= 0) {
-      // Directed at us — parse caller and reply (handles CQ→QSO transition on click)
+      // Directed at us — parse caller, detect report/RR73, pick up QSO mid-exchange
       const parts = text.split(/\s+/);
       const mc = myCallsign.toUpperCase();
       // Format: MYCALL THEIRCALL PAYLOAD — caller is the part that isn't our callsign
-      const caller = parts.find(p => p !== mc && /^[A-Z0-9]{3,}/.test(p));
-      const gridOrReport = parts[2] || '';
-      const grid = /^[A-R]{2}[0-9]{2}$/i.test(gridOrReport) ? gridOrReport : '';
+      const caller = parts.find(p => p !== mc && /^[A-Z0-9/]{2,}/.test(p));
+      const payload = parts[2] || '';
+      const grid = /^[A-R]{2}[0-9]{2}$/i.test(payload) ? payload : '';
+      const rptMatch = payload.match(/^R?([+-]\d{2})$/);
+      const hasRR73 = payload === 'RR73' || payload === 'RRR' || payload === '73';
       if (caller) {
-        ft8Send({ type: 'jtcat-reply', call: caller, grid, df: decode.df || 1500, sliceId: decode.sliceId });
+        ft8Send({
+          type: 'jtcat-reply', call: caller, grid, df: decode.df || 1500, sliceId: decode.sliceId,
+          report: rptMatch ? rptMatch[1] : undefined,
+          rr73: hasRR73 || undefined,
+          snr: decode.db,
+        });
       }
     } else {
       // Click on a non-CQ, non-directed decode — set TX freq to their freq
