@@ -294,7 +294,7 @@
       flex: 1; padding: 10px;
       font-size: 14px; font-weight: bold; border: 2px solid var(--accent-gold);
       background: var(--bg-btn); color: var(--accent-gold); border-radius: 6px; cursor: pointer;
-      text-align: center; user-select: none; display: none;
+      text-align: center; user-select: none;
     }
     .sdr-btn-vfo:hover { background: var(--bg-btn-hover); }
     .sdr-btn-vfo.active { background: var(--accent-gold); color: #1a1a2e; }
@@ -395,11 +395,6 @@
         <span class="meter-label">SWR</span>
         <div class="meter-bar-wrap"><div class="meter-bar" id="swr-bar"></div></div>
         <span class="meter-text" id="swr-text">&mdash;</span>
-      </div>
-      <div class="meter-row">
-        <span class="meter-label">ALC</span>
-        <div class="meter-bar-wrap"><div class="meter-bar" id="alc-bar"></div></div>
-        <span class="meter-text" id="alc-text">&mdash;</span>
       </div>
     </div>
     <div class="widget-section" id="widget-ptt-row">
@@ -548,7 +543,7 @@
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw-controls"> CW Speed / Text Input</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
-      <div class="section-label">WebSDR (KiwiSDR)</div>
+      <div class="section-label">WebSDR</div>
       <label class="settings-toggle"><input type="checkbox" id="w-kiwi"> Enable WebSDR RX</label>
       <div id="kiwi-config" style="padding-left:24px;display:none;">
         <select id="kiwi-station-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px;margin:4px 0;">
@@ -1390,8 +1385,6 @@ const smeterBar = document.getElementById('smeter-bar');
 const smeterText = document.getElementById('smeter-text');
 const swrBar = document.getElementById('swr-bar');
 const swrText = document.getElementById('swr-text');
-const alcBar = document.getElementById('alc-bar');
-const alcText = document.getElementById('alc-text');
 
 window.api.onSmeter((val) => {
   const pct = Math.min(100, (val / 255) * 100);
@@ -1429,21 +1422,6 @@ window.api.onSwrRatio((swr) => {
   swrBar.style.background = color;
   swrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrText.style.color = color;
-});
-
-window.api.onAlc((val) => {
-  if (val <= 0) {
-    alcBar.style.width = '0%';
-    alcText.textContent = '\u2014';
-    alcText.style.color = '#666';
-    return;
-  }
-  const pct = Math.min(100, (val / 60) * 100);
-  const color = pct < 40 ? '#4ecca3' : pct < 70 ? '#ffd740' : pct < 90 ? '#f0a500' : '#e94560';
-  alcBar.style.width = pct + '%';
-  alcBar.style.background = color;
-  alcText.textContent = Math.round(pct) + '%';
-  alcText.style.color = color;
 });
 
 // --- PTT ---
@@ -1815,7 +1793,7 @@ window.api.onTunedSpot((spot) => {
   updateCwSyncBtn();
 });
 
-// --- WebSDR (KiwiSDR) ---
+// --- WebSDR ---
 const kiwiBtnRow = document.getElementById('kiwi-btn-row');
 const wKiwiCb = document.getElementById('w-kiwi');
 const kiwiConfig = document.getElementById('kiwi-config');

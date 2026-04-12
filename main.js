@@ -2108,6 +2108,48 @@ function connectWsjtx() {
         txFrequency: qso.txFrequency,
       });
     }
+    // Match callsign to a spotted POTA/SOTA activator and mark park as worked
+    const call = (qso.dxCall || '').toUpperCase();
+    if (call) {
+      const spot = lastPotaSotaSpots.find(s => s.callsign.toUpperCase() === call);
+      const freqHz = qso.txFrequency || 0;
+      const freqKhz = freqHz > 100000 ? freqHz / 1000 : freqHz; // WSJT-X sends Hz
+      const band = freqKhz ? (freqToBand(freqKhz / 1000) || '') : '';
+      const mode = (qso.mode || '').toUpperCase();
+      const now = new Date();
+      const qsoDate = now.getUTCFullYear().toString() +
+        String(now.getUTCMonth() + 1).padStart(2, '0') +
+        String(now.getUTCDate()).padStart(2, '0');
+      // Update workedQsos (callsign tracking)
+      const entry = { date: qsoDate, ref: spot ? (spot.reference || '').toUpperCase() : '', band, mode };
+      if (!workedQsos.has(call)) workedQsos.set(call, []);
+      workedQsos.get(call).push(entry);
+      if (win && !win.isDestroyed()) win.webContents.send('worked-qsos', [...workedQsos.entries()]);
+      if (remoteServer && remoteServer.running) remoteServer.sendWorkedQsos([...workedQsos.entries()]);
+      // Update roster needed sets
+      rosterWorkedCalls.add(call);
+      const grid = (qso.dxGrid || '').toUpperCase().substring(0, 4);
+      if (grid && /^[A-R]{2}\d{2}$/.test(grid)) rosterWorkedGrids.add(grid);
+      if (band && ctyDb) {
+        const entity = resolveCallsign(call, ctyDb);
+        if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
+      }
+      // Update workedParks if activator was at a park
+      if (spot && spot.reference) {
+        const parkRef = spot.reference.toUpperCase();
+        if (!workedParks.has(parkRef)) {
+          workedParks.set(parkRef, { reference: parkRef });
+          saveLocalWorkedPark(parkRef);
+          if (win && !win.isDestroyed()) win.webContents.send('worked-parks', [...workedParks.entries()]);
+          if (remoteServer && remoteServer.running) remoteServer.sendWorkedParks([...workedParks.keys()]);
+          sendCatLog(`[WSJT-X] QSO logged: ${call} → park ${parkRef} marked as worked`);
+        } else {
+          sendCatLog(`[WSJT-X] QSO logged: ${call} at ${parkRef} (already worked)`);
+        }
+      } else {
+        sendCatLog(`[WSJT-X] QSO logged: ${call} (no park match in spots)`);
+      }
+    }
   });
 
   const port = parseInt(settings.wsjtxPort, 10) || 2237;
@@ -2241,6 +2283,17 @@ async function jtcatAutoLog(qso) {
     sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
     return;
   }
+  // Prevent logging incomplete QSOs (no signal reports exchanged)
+  if (!q.report && !q.sentReport) {
+    sendCatLog(`[JTCAT] Auto-log skipped — no signal reports exchanged for ${q.call}`);
+    return;
+  }
+  // Prevent double-logging the same QSO
+  if (q._logged) {
+    sendCatLog(`[JTCAT] Auto-log skipped — already logged ${q.call}`);
+    return;
+  }
+  q._logged = true;
   // When WSJT-X mode is enabled, WSJT-X handles logging via logged-adif (type 12).
   // Don't double-log from JTCAT's QSO state machine.
   if (settings.enableWsjtx && wsjtx && wsjtx.connected) {
@@ -2262,8 +2315,8 @@ async function jtcatAutoLog(qso) {
     band,
     qsoDate,
     timeOn: qsoTime,
-    rstSent: q.sentReport || '-00',
-    rstRcvd: q.report || '-00',
+    rstSent: q.sentReport || '',
+    rstRcvd: q.report || '',
     gridsquare: q.grid || '',
     comment: 'JTCAT ' + mode,
   };
@@ -2345,7 +2398,7 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
     } else if (q.phase === 'cq-report') {
       const resp = results.find(d => { const t = (d.text || '').toUpperCase(); return t.indexOf(myCall) >= 0 && t.indexOf(q.call) >= 0; });
       if (!resp) { return; }
-      const rptM = (resp.text || '').toUpperCase().match(/R([+-]\d{2})/);
+      const rptM = (resp.text || '').toUpperCase().match(/R?([+-]\d{2})/);
       if (!rptM) {
         q._heardThisCycle = true; // they responded but haven't sent R+report yet
         return;
@@ -2416,7 +2469,7 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
         setTxMsg(q.txMsg);
       }
     } else if (q.phase === 'r+report') {
-      if (text.indexOf('RR73') >= 0 || text.indexOf('RRR') >= 0 || text.indexOf(' 73') >= 0) {
+      if (/\bRR73\b/.test(text) || /\bRRR\b/.test(text) || /\s73$/.test(text)) {
         // They confirmed — QSO complete. Send 73 as courtesy, log now.
         q.txMsg = theirCall + ' ' + myCall + ' 73'; q.phase = '73';
         setTxMsg(q.txMsg);
@@ -2432,20 +2485,20 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
 // Server-side QSO state machine wrappers
 function processRemoteJtcatQso(results) {
   const qso = remoteJtcatQso; // capture reference — don't rely on global in callbacks
-  advanceJtcatQso(qso, results, remoteJtcatSetTxMsg, () => {
-    jtcatAutoLog(qso); // use captured ref, not global
+  advanceJtcatQso(qso, results, remoteJtcatSetTxMsg, async () => {
+    await jtcatAutoLog(qso); // use captured ref, not global
     remoteJtcatBroadcastQso();
   });
 }
 
 function processPopoutJtcatQso(results) {
   const qso = popoutJtcatQso; // capture reference — don't rely on global in callbacks
-  advanceJtcatQso(qso, results, (msg) => {
+  advanceJtcatQso(qso, results, async (msg) => {
     const txEng = jtcatManager ? jtcatManager.txEngine : ft8Engine;
-    if (txEng) txEng.setTxMessage(msg);
+    if (txEng) await txEng.setTxMessage(msg);
     popoutBroadcastQso();
-  }, () => {
-    jtcatAutoLog(qso); // use captured ref, not global (global may be replaced by auto-CQ)
+  }, async () => {
+    await jtcatAutoLog(qso); // use captured ref, not global (global may be replaced by auto-CQ)
     popoutBroadcastQso();
   });
 }
@@ -2458,6 +2511,11 @@ function startJtcat(mode) {
   if (!jtcatManager) jtcatManager = new JtcatManager();
   jtcatManager.startSlice({ sliceId: 'default', mode: mode || 'FT8' });
   ft8Engine = jtcatManager.engine; // Phase 0 alias
+
+  // Remove any stale listeners from a previous startJtcat() cycle
+  ft8Engine.removeAllListeners('decode');
+  ft8Engine.removeAllListeners('tx-start');
+  ft8Engine.removeAllListeners('tx-end');
 
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
@@ -2480,6 +2538,7 @@ function startJtcat(mode) {
         r.newCall = !rosterWorkedCalls.has(uc);
         r.watched = wlCalls.length > 0 && wlCalls.some(w => uc.indexOf(w) >= 0 || w.indexOf(uc) >= 0);
         // Extract grid from CQ messages (e.g. "CQ K1ABC FN42")
+        // Maidenhead grids: longitude field A-R, latitude field A-J, then 2 digits
         const gm = (r.text || '').match(/\b([A-R]{2}\d{2})\s*$/i);
         // Exclude FT8 exchanges that look like grids (RR73, RR99, etc.)
         if (gm && !(/^RR\d{2}$/i.test(gm[1]))) {
@@ -2713,6 +2772,19 @@ function startJtcat(mode) {
 }
 
 function stopJtcat() {
+  // Clean up any active QSOs to prevent stuck state
+  if (remoteJtcatQso) {
+    remoteJtcatQso = null;
+    if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+      remoteServer.broadcastJtcatQsoState({ phase: 'idle' });
+    }
+  }
+  if (popoutJtcatQso) {
+    popoutJtcatQso = null;
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'idle' });
+    }
+  }
   if (jtcatManager) {
     jtcatManager.stopAll();
   }
@@ -4319,6 +4391,11 @@ function connectRemote() {
   // --- JTCAT remote control (event handlers — helpers are at file level) ---
 
   remoteServer.on('jtcat-start', ({ mode }) => {
+    // Close JTCAT popout if open — only one platform at a time
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      sendCatLog('[JTCAT] Closing popout — ECHOCAT taking over FT8');
+      jtcatPopoutWin.close();
+    }
     startJtcat(mode);
     // Start audio capture in desktop renderer
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-start-for-remote');
@@ -4362,8 +4439,8 @@ function connectRemote() {
     const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : (ft8Engine._lastRxSlot === 'odd' ? 'even' : 'even');
     ft8Engine.setTxSlot(nextSlot);
     remoteJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+    await remoteJtcatSetTxMsg(txMsg); // encode first, then enable TX
     ft8Engine._txEnabled = true;
-    await remoteJtcatSetTxMsg(txMsg);
     ft8Engine.tryImmediateTx();
     console.log('[JTCAT Remote] CQ:', txMsg, '@ quiet freq', jtcatQuietFreq, 'Hz slot:', nextSlot);
   });
@@ -4381,7 +4458,7 @@ function connectRemote() {
         remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done' &&
         remoteJtcatQso.call.toUpperCase() !== (call || '').toUpperCase()) {
       sendCatLog(`[JTCAT] Replacing active QSO with ${remoteJtcatQso.call} — auto-logging`);
-      jtcatAutoLog(remoteJtcatQso);
+      await jtcatAutoLog(remoteJtcatQso);
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (targetEngine._txActive) targetEngine.txComplete();
@@ -4392,10 +4469,10 @@ function connectRemote() {
     const targetSlot = slot || targetEngine._lastRxSlot;
     targetEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
     remoteJtcatQso = { mode: 'reply', call, grid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+    await remoteJtcatSetTxMsg(txMsg); // encode first, then enable TX
     targetEngine._txEnabled = true;
-    await remoteJtcatSetTxMsg(txMsg);
     targetEngine.tryImmediateTx();
-    console.log('[JTCAT Remote] Reply to', call, ':', txMsg, 'slot:', ft8Engine._txSlot);
+    console.log('[JTCAT Remote] Reply to', call, ':', txMsg, 'slot:', targetEngine._txSlot, 'locked:', targetEngine._lockedTxSlot);
   });
 
   remoteServer.on('jtcat-enable-tx', ({ enabled }) => {
@@ -4525,19 +4602,17 @@ function connectRemote() {
     remoteJtcatBroadcastQso();
   });
 
-  remoteServer.on('jtcat-skip-phase', () => {
+  remoteServer.on('jtcat-skip-phase', async () => {
     if (!remoteJtcatQso || remoteJtcatQso.phase === 'done' || remoteJtcatQso.phase === 'idle') return;
     const q = remoteJtcatQso;
     const myCall = q.myCall;
+    const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq') {
-      if (q.phase === 'cq-report') {
-        q.txMsg = q.call + ' ' + myCall + ' RR73';
-        q.phase = 'cq-rr73';
-      } else if (q.phase === 'cq-rr73') {
+      if (q.phase === 'cq' || q.phase === 'cq-report') {
+        q.txMsg = validCall ? (q.call + ' ' + myCall + ' RR73') : '';
+        q.phase = validCall ? 'cq-rr73' : 'done';
+      } else {
         q.phase = 'done';
-        ft8Engine._txEnabled = false;
-        ft8Engine.setTxMessage('');
-        ft8Engine.setTxSlot('auto');
       }
     } else {
       if (q.phase === 'reply') {
@@ -4547,16 +4622,18 @@ function connectRemote() {
       } else if (q.phase === 'r+report') {
         q.txMsg = q.call + ' ' + myCall + ' RR73';
         q.phase = '73';
-      } else if (q.phase === '73') {
+      } else {
         q.phase = 'done';
-        ft8Engine._txEnabled = false;
-        ft8Engine.setTxMessage('');
-        ft8Engine.setTxSlot('auto');
       }
+    }
+    if (q.phase === 'done') {
+      ft8Engine._txEnabled = false;
+      ft8Engine.setTxMessage('');
+      ft8Engine.setTxSlot('auto');
     }
     q.txRetries = 0;
     if (q.txMsg && q.phase !== 'done') {
-      remoteJtcatSetTxMsg(q.txMsg);
+      await remoteJtcatSetTxMsg(q.txMsg);
     }
     remoteJtcatBroadcastQso();
     console.log('[JTCAT] Remote skip to phase:', q.phase, '— TX:', q.txMsg);
@@ -4699,7 +4776,10 @@ function handleRemotePtt(state) {
       // Suppress mode broadcasts for the entire PTT duration + restore.
       _modeSuppressUntil = Date.now() + 120000;
       // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown)
-      if (cat && cat.connected) cat.setModeOnly(dataMode);
+      if (cat && cat.connected) {
+        if (cat.setModeOnly) cat.setModeOnly(dataMode);
+        else if (_currentFreqHz) cat.tune(_currentFreqHz, dataMode);
+      }
     }
   }
 
@@ -4728,7 +4808,10 @@ function handleRemotePtt(state) {
     sendCatLog(`[PTT] Restoring ${restoreMode} mode`);
     // Suppress mode broadcasts during restore so ECHOCAT doesn't flicker
     _modeSuppressUntil = Date.now() + 2000;
-    if (cat && cat.connected) cat.setModeOnly(restoreMode);
+    if (cat && cat.connected) {
+      if (cat.setModeOnly) cat.setModeOnly(restoreMode);
+      else if (_currentFreqHz) cat.tune(_currentFreqHz, restoreMode);
+    }
   }
 
   _remoteTxState = state;
@@ -7378,25 +7461,6 @@ app.whenReady().then(() => {
           try { require('child_process').execSync(`launchctl load "${plistPath}"`, { stdio: 'pipe' }); } catch {}
           console.log('[Launcher] Installed to macOS LaunchAgents');
         }
-      } else {
-        // Linux: write autostart .desktop if not present, then spawn immediately if port is free
-        const autostartDir = path.join(require('os').homedir(), '.config', 'autostart');
-        const desktopPath = path.join(autostartDir, 'potacat-launcher.desktop');
-        if (!fs.existsSync(desktopPath)) {
-          fs.mkdirSync(autostartDir, { recursive: true });
-          fs.writeFileSync(desktopPath, `[Desktop Entry]\nType=Application\nName=POTACAT Launcher\nExec=${exePath} --launcher\nHidden=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n`);
-          console.log('[Launcher] Installed to Linux autostart');
-        }
-        // Start launcher only if port 7301 is not already in use
-        const net = require('net');
-        const probe = net.createServer();
-        probe.once('error', () => { /* port in use — launcher already running */ });
-        probe.once('listening', () => {
-          probe.close();
-          require('child_process').spawn(exePath, ['--launcher'], { detached: true, stdio: 'ignore' }).unref();
-          console.log('[Launcher] Started background process');
-        });
-        probe.listen(7301, '0.0.0.0');
       }
     } catch (err) {
       console.error('[Launcher] Setup failed:', err.message);
@@ -8086,6 +8150,21 @@ app.whenReady().then(() => {
       jtcatPopoutWin.focus();
       return;
     }
+    // Stop ECHOCAT JTCAT if running — only one platform at a time
+    if (remoteJtcatQso) {
+      remoteJtcatQso = null;
+      // Halt TX on the engine so it doesn't keep transmitting
+      if (ft8Engine) {
+        ft8Engine._txEnabled = false;
+        ft8Engine.setTxMessage('');
+        ft8Engine.setTxSlot('auto');
+      }
+      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        remoteServer.broadcastJtcatQsoState({ phase: 'idle' });
+        remoteServer.broadcastJtcatStatus({ running: false });
+      }
+      sendCatLog('[JTCAT] Stopping ECHOCAT FT8 — popout taking over');
+    }
     const isMac = process.platform === 'darwin';
     jtcatPopoutWin = new BrowserWindow({
       width: 1100,
@@ -8118,6 +8197,15 @@ app.whenReady().then(() => {
     });
     jtcatPopoutWin.on('closed', () => {
       jtcatPopoutWin = null;
+      // Clear popout QSO state and halt TX so engine doesn't keep transmitting
+      if (popoutJtcatQso) {
+        popoutJtcatQso = null;
+        if (ft8Engine) {
+          ft8Engine._txEnabled = false;
+          ft8Engine.setTxMessage('');
+          ft8Engine.setTxSlot('auto');
+        }
+      }
       if (win && !win.isDestroyed()) {
         win.webContents.send('jtcat-popout-status', false);
       }
@@ -8184,7 +8272,7 @@ app.whenReady().then(() => {
         popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done' &&
         popoutJtcatQso.call.toUpperCase() !== (data.call || '').toUpperCase()) {
       sendCatLog(`[JTCAT] Replacing active QSO with ${popoutJtcatQso.call} — auto-logging`);
-      jtcatAutoLog(popoutJtcatQso);
+      await jtcatAutoLog(popoutJtcatQso);
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (replyEngine._txActive) replyEngine.txComplete();
@@ -8205,7 +8293,7 @@ app.whenReady().then(() => {
       const ourRpt = snr >= 0 ? '+' + String(Math.round(snr)).padStart(2, '0') : '-' + String(Math.abs(Math.round(snr))).padStart(2, '0');
       txMsg = data.call + ' ' + myCall + ' R' + ourRpt;
       phase = 'r+report';
-      popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: data.report, sentReport: ourRpt, myCall, myGrid, txRetries: 0 };
+      popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: data.report, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: replySliceId };
     } else {
       // Fresh reply to CQ — start from beginning
       txMsg = data.call + ' ' + myCall + ' ' + myGrid;
@@ -8219,11 +8307,11 @@ app.whenReady().then(() => {
       popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid || (sameCall ? prev.grid : ''), phase, txMsg,
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
-        myCall, myGrid, txRetries: 0 };
+        myCall, myGrid, txRetries: 0, sliceId: replySliceId };
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
-      if (!sameCall) jtcatAutoLog(popoutJtcatQso);
+      if (!sameCall) await jtcatAutoLog(popoutJtcatQso);
     } else if (!popoutJtcatQso || popoutJtcatQso.phase !== phase) {
       // Only set up QSO if not already created above (report case)
       if (phase === 'reply') {
@@ -8283,19 +8371,19 @@ app.whenReady().then(() => {
     console.log('[JTCAT Popout] Auto-CQ mode:', mode);
   });
 
-  ipcMain.on('jtcat-popout-skip-phase', () => {
+  ipcMain.on('jtcat-popout-skip-phase', async () => {
     if (!popoutJtcatQso || popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;
     const q = popoutJtcatQso;
+    const eng = (q.sliceId && jtcatManager) ? jtcatManager.getEngine(q.sliceId) : ft8Engine;
+    if (!eng) return;
     const myCall = q.myCall;
+    const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq') {
-      if (q.phase === 'cq-report') {
-        q.txMsg = q.call + ' ' + myCall + ' RR73';
-        q.phase = 'cq-rr73';
-      } else if (q.phase === 'cq-rr73') {
+      if (q.phase === 'cq' || q.phase === 'cq-report') {
+        q.txMsg = validCall ? (q.call + ' ' + myCall + ' RR73') : '';
+        q.phase = validCall ? 'cq-rr73' : 'done';
+      } else {
         q.phase = 'done';
-        ft8Engine._txEnabled = false;
-        ft8Engine.setTxMessage('');
-        ft8Engine.setTxSlot('auto');
       }
     } else {
       if (q.phase === 'reply') {
@@ -8305,28 +8393,32 @@ app.whenReady().then(() => {
       } else if (q.phase === 'r+report') {
         q.txMsg = q.call + ' ' + myCall + ' RR73';
         q.phase = '73';
-      } else if (q.phase === '73') {
+      } else {
         q.phase = 'done';
-        ft8Engine._txEnabled = false;
-        ft8Engine.setTxMessage('');
-        ft8Engine.setTxSlot('auto');
       }
+    }
+    if (q.phase === 'done') {
+      eng._txEnabled = false;
+      eng.setTxMessage('');
+      eng.setTxSlot('auto');
     }
     q.txRetries = 0;
     if (q.txMsg && q.phase !== 'done') {
-      if (ft8Engine) ft8Engine.setTxMessage(q.txMsg);
+      await eng.setTxMessage(q.txMsg);
     }
     popoutBroadcastQso();
     console.log('[JTCAT Popout] Skip to phase:', q.phase, '— TX:', q.txMsg);
   });
 
   ipcMain.on('jtcat-popout-cancel-qso', () => {
+    const q = popoutJtcatQso;
     popoutJtcatQso = null;
-    if (ft8Engine) {
-      ft8Engine._txEnabled = false;
-      ft8Engine.setTxMessage('');
-      ft8Engine.setTxSlot('auto');
-      if (ft8Engine._txActive) ft8Engine.txComplete();
+    const eng = (q && q.sliceId && jtcatManager) ? jtcatManager.getEngine(q.sliceId) : ft8Engine;
+    if (eng) {
+      eng._txEnabled = false;
+      eng.setTxMessage('');
+      eng.setTxSlot('auto');
+      if (eng._txActive) eng.txComplete();
     }
     popoutBroadcastQso();
     console.log('[JTCAT Popout] QSO cancelled');
@@ -8405,7 +8497,7 @@ app.whenReady().then(() => {
       'https://pota.app/', 'https://www.sotadata.org.uk/', 'https://wwff.co/', 'https://llota.app/',
       'https://tailscale.com', 'https://worldradioleague.com',
       'https://api.potacat.com/',
-      'http://rx.linkfanel.net/', 'http://kiwisdr.com/',
+      'http://rx.linkfanel.net', 'http://kiwisdr.com', 'http://websdr.org',
     ];
     if (allowed.some(prefix => url.startsWith(prefix))) {
       shell.openExternal(url);
@@ -8426,8 +8518,9 @@ app.whenReady().then(() => {
     }
   });
 
-  // --- KiwiSDR WebSDR integration ---
+  // --- KiwiSDR / WebSDR.org integration ---
   const { KiwiSdrClient } = require('./lib/kiwisdr');
+  const { WebSdrClient } = require('./lib/websdr');
   // kiwiClient and kiwiActive declared near top of whenReady for global access
 
   ipcMain.on('kiwi-connect', (_e, { host: rawHost, port: rawPort, password }) => {
@@ -8436,17 +8529,24 @@ app.whenReady().then(() => {
     const port = rawPort || 8073;
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
-    kiwiClient = new KiwiSdrClient();
+    // Auto-detect: port 8073 = KiwiSDR, other ports = WebSDR.org
+    const isWebSdr = port !== 8073;
+    if (isWebSdr) {
+      kiwiClient = new WebSdrClient();
+      sendCatLog(`[WebSDR] Using WebSDR.org protocol for ${host}:${port}`);
+    } else {
+      kiwiClient = new KiwiSdrClient();
+    }
     const kiwiFullHost = host + ':' + port;
     kiwiClient.on('connected', () => {
       kiwiActive = true;
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
-      // Auto-tune to current frequency
-      if (_currentFreqHz > 0 && _currentMode) {
+      // Auto-tune to current frequency (KiwiSDR needs tune after connect; WebSDR tunes at connect)
+      if (!isWebSdr && _currentFreqHz > 0 && _currentMode) {
         const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
         kiwiClient.tune(_currentFreqHz / 1000, mode);
       }
-      kiwiClient.setAgc(true);
+      if (kiwiClient.setAgc) kiwiClient.setAgc(true);
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: true, host: kiwiFullHost });
       }
@@ -8494,7 +8594,13 @@ app.whenReady().then(() => {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
-    kiwiClient.connect(host, port, password);
+    if (isWebSdr) {
+      const freqKhz = _currentFreqHz > 0 ? _currentFreqHz / 1000 : 7200;
+      const mode = (_currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
+      kiwiClient.connect(host, port, freqKhz, mode);
+    } else {
+      kiwiClient.connect(host, port, password);
+    }
   });
 
   ipcMain.on('kiwi-disconnect', () => {
@@ -8833,15 +8939,6 @@ app.whenReady().then(() => {
         const autostartDir = path.join(os.homedir(), '.config', 'autostart');
         fs.mkdirSync(autostartDir, { recursive: true });
         fs.writeFileSync(path.join(autostartDir, 'potacat-launcher.desktop'), `[Desktop Entry]\nType=Application\nName=POTACAT Launcher\nExec=${exePath} --launcher\nHidden=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n`);
-        // Spawn immediately (same as Windows) — port probe prevents duplicate
-        const net = require('net');
-        const probe = net.createServer();
-        probe.once('error', () => { /* port in use — already running */ });
-        probe.once('listening', () => {
-          probe.close();
-          require('child_process').spawn(exePath, ['--launcher'], { detached: true, stdio: 'ignore' }).unref();
-        });
-        probe.listen(7301, '0.0.0.0');
       }
       return { ok: true };
     } catch (err) {

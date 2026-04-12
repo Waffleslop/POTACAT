@@ -1706,8 +1706,8 @@
     </fieldset>
     <!-- 8b. WebSDR (KiwiSDR) -->
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
-      <legend>WebSDR (KiwiSDR)</legend>
-      <span class="help-text">Listen through a remote KiwiSDR receiver while transmitting on your local radio. Useful for local QRM.</span>
+      <legend>WebSDR</legend>
+      <span class="help-text">Listen through a remote receiver (KiwiSDR or WebSDR.org) while transmitting on your local radio. Useful for local QRM. Port 8073 = KiwiSDR, other ports = WebSDR.org.</span>
       <div style="display:flex;gap:6px;margin-top:8px;">
         <label style="flex:1;">Label: <input type="text" id="set-kiwi-label-1" placeholder="K3FEF" style="width:100%;max-width:80px;"></label>
         <label style="flex:3;">Host: <input type="text" id="set-kiwi-host-1" placeholder="host:port (e.g. k3fef.com:8073)" style="width:100%;max-width:260px;"></label>
@@ -1720,7 +1720,7 @@
         <label style="flex:1;">Label: <input type="text" id="set-kiwi-label-3" placeholder="VE3" style="width:100%;max-width:80px;"></label>
         <label style="flex:3;">Host: <input type="text" id="set-kiwi-host-3" placeholder="host:port (optional)" style="width:100%;max-width:260px;"></label>
       </div>
-      <span class="help-text" style="display:block;margin-top:4px;">Find public KiwiSDR stations at <a href="#" onclick="window.api.openExternal('http://rx.linkfanel.net');return false;" style="color:var(--accent-blue);">rx.linkfanel.net</a></span>
+      <span class="help-text" style="display:block;margin-top:4px;">Find stations: <a href="#" onclick="window.api.openExternal('http://rx.linkfanel.net');return false;" style="color:var(--accent-blue);">KiwiSDR</a> &middot; <a href="#" onclick="window.api.openExternal('http://websdr.org');return false;" style="color:var(--accent-blue);">WebSDR.org</a></span>
     </fieldset>
     <!-- 9. CW Keyer -->
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
