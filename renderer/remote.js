@@ -586,6 +586,14 @@
         startPing();
         showWelcome();
         drainOfflineQueue();
+        // Reset JTCAT state on reconnect — desktop may have stopped the engine while we were away
+        ft8Running = false;
+        // If already on FT8 tab, restart engine + tune to the active band
+        if (activeTab === 'ft8') {
+          ft8Send({ type: 'jtcat-start', mode: ft8Mode });
+          var selOpt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
+          if (selOpt) ft8Send({ type: 'jtcat-set-band', band: selOpt.value, freqKhz: parseInt(selOpt.dataset.freq, 10) });
+        }
         if (activeTab === 'spots' || activeTab === 'map') {
           filterToolbar.classList.remove('hidden');
         }

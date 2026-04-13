@@ -2506,6 +2506,13 @@ function startJtcat(mode) {
   ft8Engine.removeAllListeners('tx-start');
   ft8Engine.removeAllListeners('tx-end');
 
+  // Catch engine errors (e.g. missing FT4/FT2 decoder on some platforms)
+  ft8Engine.on('error', (data) => {
+    const msg = data.message || String(data);
+    sendCatLog('[JTCAT] Engine error: ' + msg);
+    console.error('[JTCAT] Engine error:', msg);
+  });
+
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
     if (data.results) {

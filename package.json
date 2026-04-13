@@ -56,6 +56,14 @@
       "!node_modules/electron-builder/**/*",
       "!node_modules/sharp/**/*"
     ],
+    "asarUnpack": [
+      "lib/ft8-worker.js",
+      "lib/ft4/**/*",
+      "lib/ft2/**/*",
+      "lib/ft8_native/**/*",
+      "lib/freedv_native/**/*",
+      "lib/rade_native/**/*"
+    ],
     "win": {
       "icon": "assets/icon.ico",
       "target": [

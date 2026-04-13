@@ -16176,7 +16176,8 @@ window.api.onJtcatTxStatus(function(data) {
 window.api.onJtcatStartForRemote(function() {
   console.log('[JTCAT] Remote requested audio start');
   jtcatRemoteActive = true;
-  if (!jtcatAudioCtx) startJtcatAudio();
+  // Always restart audio — previous stream may be stale after phone disconnect/reconnect
+  startJtcatAudio();
 });
 window.api.onJtcatStopForRemote(function() {
   console.log('[JTCAT] Remote requested audio stop');
