@@ -56,6 +56,17 @@
   var cycleEl = document.getElementById('jp-cycle');
   var countdownEl = document.getElementById('jp-countdown');
   var syncEl = document.getElementById('jp-sync');
+  var utcClockEl = document.getElementById('jp-utc-clock');
+
+  // UTC clock — updates every second
+  function updateUtcClock() {
+    var now = new Date();
+    var d = now.toISOString().slice(0, 10);
+    var t = now.toISOString().slice(11, 19);
+    utcClockEl.textContent = d + ' ' + t + 'Z';
+  }
+  updateUtcClock();
+  setInterval(updateUtcClock, 1000);
   var cqFilterBtn = document.getElementById('jp-cq-filter');
   var wantedFilterBtn = document.getElementById('jp-wanted-filter');
   var cqBtn = document.getElementById('jp-cq');
