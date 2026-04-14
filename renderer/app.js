@@ -14938,6 +14938,7 @@ if (jtcatTxGainSlider) {
     var pct = parseInt(jtcatTxGainSlider.value, 10);
     jtcatTxGainVal.textContent = pct + '%';
     jtcatTxGainLevel = txPwrToGain(pct);
+    if (jtcatTxGainNode) jtcatTxGainNode.gain.value = jtcatTxGainLevel;
   });
 }
 // Accept RX gain from popout or ECHOCAT
@@ -14951,6 +14952,7 @@ window.api.onJtcatSetRxGain(function(level) {
 // Accept TX gain from popout or ECHOCAT
 window.api.onJtcatSetTxGain(function(level) {
   jtcatTxGainLevel = level;
+  if (jtcatTxGainNode) jtcatTxGainNode.gain.value = level;
   if (jtcatTxGainSlider) {
     jtcatTxGainSlider.value = gainToTxPwr(level);
     jtcatTxGainVal.textContent = gainToTxPwr(level) + '%';
@@ -16094,6 +16096,7 @@ window.api.onJtcatStatus(function(data) {
 // --- JTCAT TX Audio Playback ---
 var jtcatTxAudioCtx = null;
 var jtcatTxPlaying = false;
+var jtcatTxGainNode = null; // live GainNode during TX — updated by slider in real time
 
 async function playJtcatTxAudio(data) {
   var samplesArray = data.samples || data;
@@ -16128,16 +16131,17 @@ async function playJtcatTxAudio(data) {
     var source = jtcatTxAudioCtx.createBufferSource();
     source.buffer = buffer;
     // TX Power gain node — attenuates FT8 tone to prevent ALC overdrive
-    var txGain = jtcatTxAudioCtx.createGain();
-    txGain.gain.value = jtcatTxGainLevel;
-    source.connect(txGain);
-    txGain.connect(jtcatTxAudioCtx.destination);
+    jtcatTxGainNode = jtcatTxAudioCtx.createGain();
+    jtcatTxGainNode.gain.value = jtcatTxGainLevel;
+    source.connect(jtcatTxGainNode);
+    jtcatTxGainNode.connect(jtcatTxAudioCtx.destination);
 
     var txDone = false;
     function finishTx() {
       if (txDone) return;
       txDone = true;
       jtcatTxPlaying = false;
+      jtcatTxGainNode = null;
       window.api.jtcatTxComplete();
       console.log('[JTCAT] TX audio playback complete');
     }
