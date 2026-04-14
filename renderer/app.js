@@ -20,6 +20,7 @@ let distUnit = 'mi';    // 'mi' or 'km'
 let watchlist = []; // parsed watchlist rules: [{ callsign, band, mode }]
 let maxAgeMin = 5;       // max spot age in minutes
 let sotaMaxAgeMin = 30;  // SOTA max spot age in minutes
+let maxDistMi = 0;       // max distance in miles (0 = no limit)
 let scanDwell = 7;       // seconds per frequency during scan
 let enablePota = true;
 let enableSota = false;
@@ -272,6 +273,8 @@ const settingsCancel = document.getElementById('settings-cancel');
 const setGrid = document.getElementById('set-grid');
 const setDistUnit = document.getElementById('set-dist-unit');
 const setMaxAge = document.getElementById('set-max-age');
+const setMaxDist = document.getElementById('set-max-dist');
+const setMaxDistUnit = document.getElementById('set-max-dist-unit');
 const setSotaMaxAge = document.getElementById('set-sota-max-age');
 const setRefreshInterval = document.getElementById('set-refresh-interval');
 const setScanDwell = document.getElementById('set-scan-dwell');
@@ -1097,6 +1100,7 @@ async function loadPrefs() {
     else { maxAgeMin = parseInt(settings.maxAgeMin, 10) || 5; }
   } catch { maxAgeMin = parseInt(settings.maxAgeMin, 10) || 5; }
   sotaMaxAgeMin = parseInt(settings.sotaMaxAge, 10) || 30;
+  maxDistMi = parseInt(settings.maxDist, 10) || 0;
   updateHeaders();
 
   // Restore view state
@@ -3595,6 +3599,11 @@ function getFiltered() {
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
     if (hideQrt && s.comments && s.comments.toLowerCase().includes('qrt')) return false;
     if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency)) return false;
+    if (maxDistMi > 0 && s.distance != null) {
+      // maxDistMi is stored in the user's chosen unit; s.distance is always in miles
+      const limitMi = distUnit === 'km' ? maxDistMi / MI_TO_KM : maxDistMi;
+      if (s.distance > limitMi) return false;
+    }
     return true;
   });
 }
@@ -7173,6 +7182,8 @@ async function openSettingsDialog(tab) {
   setGrid.value = s.grid || '';
   setDistUnit.value = s.distUnit || 'mi';
   setMaxAge.value = s.maxAgeMin || 5;
+  setMaxDist.value = s.maxDist || 0;
+  setMaxDistUnit.textContent = (s.distUnit || 'mi') === 'km' ? 'km' : 'miles';
   setSotaMaxAge.value = s.sotaMaxAge || 30;
   setRefreshInterval.value = s.refreshInterval || 30;
   setScanDwell.value = s.scanDwell || 7;
@@ -7521,6 +7532,7 @@ document.getElementById('settings-import').addEventListener('click', async () =>
 settingsSave.addEventListener('click', async () => {
   const watchlistRaw = setWatchlist.value.trim();
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
+  const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
   const sotaMaxAgeVal = parseInt(setSotaMaxAge.value, 10) || 30;
   const refreshIntervalVal = Math.max(15, parseInt(setRefreshInterval.value, 10) || 30);
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
@@ -7686,6 +7698,7 @@ settingsSave.addEventListener('click', async () => {
     grid: setGrid.value.trim() || 'FN20jb',
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
+    maxDist: maxDistVal,
     sotaMaxAge: sotaMaxAgeVal,
     refreshInterval: refreshIntervalVal,
     scanDwell: dwellVal,
@@ -7828,6 +7841,7 @@ settingsSave.addEventListener('click', async () => {
   grid = setGrid.value.trim();
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
+  maxDistMi = maxDistVal;
   sotaMaxAgeMin = sotaMaxAgeVal;
   scanDwell = dwellVal;
   watchlist = parseWatchlist(watchlistRaw);
