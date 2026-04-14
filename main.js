@@ -10687,6 +10687,7 @@ app.whenReady().then(() => {
     if (keyer) keyer.setWpm(wpm);
     if (winKeyer && winKeyer.connected) winKeyer.setSpeed(wpm);
     if (smartSdr && smartSdr.connected) smartSdr.setCwSpeed(wpm);
+    if (cat && cat.connected) cat.setCwSpeed(wpm);
   });
   ipcMain.on('cw-stop', () => {
     if (keyer) keyer.stop();
