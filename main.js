@@ -2517,6 +2517,13 @@ function startJtcat(mode) {
   ft8Engine.removeAllListeners('tx-start');
   ft8Engine.removeAllListeners('tx-end');
 
+  // Catch engine errors (e.g. missing FT4/FT2 decoder on some platforms)
+  ft8Engine.on('error', (data) => {
+    const msg = data.message || String(data);
+    sendCatLog('[JTCAT] Engine error: ' + msg);
+    console.error('[JTCAT] Engine error:', msg);
+  });
+
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
     if (data.results) {
@@ -4445,7 +4452,7 @@ function connectRemote() {
     console.log('[JTCAT Remote] CQ:', txMsg, '@ quiet freq', jtcatQuietFreq, 'Hz slot:', nextSlot);
   });
 
-  remoteServer.on('jtcat-reply', async ({ call, grid, df, slot, sliceId }) => {
+  remoteServer.on('jtcat-reply', async ({ call, grid, df, slot, sliceId, report, rr73, snr }) => {
     // Route TX to correct slice in multi-slice mode
     const targetEngine = (jtcatManager && sliceId) ? jtcatManager.getEngine(sliceId) : ft8Engine;
     if (!targetEngine) return;
@@ -4462,17 +4469,56 @@ function connectRemote() {
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (targetEngine._txActive) targetEngine.txComplete();
-    const txMsg = call + ' ' + myCall + ' ' + myGrid;
     targetEngine.setTxFreq(df);
     targetEngine.setRxFreq(df);
     // TX on opposite slot from the station we're replying to (use slot from decode data)
     const targetSlot = slot || targetEngine._lastRxSlot;
     targetEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
-    remoteJtcatQso = { mode: 'reply', call, grid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
-    await remoteJtcatSetTxMsg(txMsg); // encode first, then enable TX
-    targetEngine._txEnabled = true;
-    targetEngine.tryImmediateTx();
-    console.log('[JTCAT Remote] Reply to', call, ':', txMsg, 'slot:', targetEngine._txSlot, 'locked:', targetEngine._lockedTxSlot);
+
+    let txMsg, phase;
+    if (rr73) {
+      // They sent RR73/73 — send 73 back, log QSO
+      txMsg = call + ' ' + myCall + ' 73';
+      phase = '73';
+    } else if (report) {
+      // They sent a signal report — pick up at R+report phase
+      const ourSnr = snr != null ? snr : 0;
+      const ourRpt = ourSnr >= 0 ? '+' + String(Math.round(ourSnr)).padStart(2, '0') : '-' + String(Math.abs(Math.round(ourSnr))).padStart(2, '0');
+      txMsg = call + ' ' + myCall + ' R' + ourRpt;
+      phase = 'r+report';
+      remoteJtcatQso = { mode: 'reply', call, grid, phase, txMsg, report, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+    } else {
+      // Fresh reply to CQ — start from beginning
+      txMsg = call + ' ' + myCall + ' ' + myGrid;
+      phase = 'reply';
+    }
+
+    if (phase === '73') {
+      // Send 73 courtesy — preserve reports from existing QSO if same call
+      const prev = remoteJtcatQso;
+      const sameCall = prev && prev.call && prev.call.toUpperCase() === call.toUpperCase();
+      remoteJtcatQso = { mode: 'reply', call, grid: grid || (sameCall ? prev.grid : ''), phase, txMsg,
+        report: sameCall ? prev.report : null,
+        sentReport: sameCall ? prev.sentReport : null,
+        myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+      await remoteJtcatSetTxMsg(txMsg);
+      targetEngine._txEnabled = true;
+      targetEngine.tryImmediateTx();
+      if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
+    } else if (phase === 'r+report') {
+      // QSO already created above with reports populated
+      await remoteJtcatSetTxMsg(txMsg);
+      targetEngine._txEnabled = true;
+      targetEngine.tryImmediateTx();
+    } else {
+      // Fresh reply
+      remoteJtcatQso = { mode: 'reply', call, grid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+      await remoteJtcatSetTxMsg(txMsg);
+      targetEngine._txEnabled = true;
+      targetEngine.tryImmediateTx();
+    }
+    remoteJtcatBroadcastQso();
+    console.log('[JTCAT Remote] Reply to', call, ':', txMsg, 'phase:', phase, 'slot:', targetEngine._txSlot, 'locked:', targetEngine._lockedTxSlot);
   });
 
   remoteServer.on('jtcat-enable-tx', ({ enabled }) => {
@@ -8346,8 +8392,8 @@ app.whenReady().then(() => {
     }
     const mod = (modifier || '').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4);
     const txMsg = mod ? 'CQ ' + mod + ' ' + myCall + ' ' + myGrid : 'CQ ' + myCall + ' ' + myGrid;
-    // TX on next available slot (opposite of last decoded, or 'auto' if no decodes yet)
-    const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : (ft8Engine._lastRxSlot === 'odd' ? 'even' : 'auto');
+    // TX on opposite slot from last decode; default to 'even' if no decodes yet
+    const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
     ft8Engine.setTxSlot(nextSlot);
     popoutJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
     ft8Engine._txEnabled = true;

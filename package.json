@@ -1,6 +1,6 @@
 {
   "name": "potacat",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "Amateur radio spot aggregator with CAT control, QSO logging, and panadapter integration",
   "author": {
     "name": "Casey Stanton",
@@ -55,6 +55,14 @@
       "!node_modules/electron/**/*",
       "!node_modules/electron-builder/**/*",
       "!node_modules/sharp/**/*"
+    ],
+    "asarUnpack": [
+      "lib/ft8-worker.js",
+      "lib/ft4/**/*",
+      "lib/ft2/**/*",
+      "lib/ft8_native/**/*",
+      "lib/freedv_native/**/*",
+      "lib/rade_native/**/*"
     ],
     "win": {
       "icon": "assets/icon.ico",

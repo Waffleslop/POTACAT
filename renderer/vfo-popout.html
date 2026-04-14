@@ -1422,15 +1422,6 @@ window.api.onSwr((val) => {
   swrText.style.color = color;
 });
 
-window.api.onAlc((val) => {
-  const pct = Math.min(100, (val / 100) * 100);
-  const color = pct <= 0 ? '#666' : pct < 40 ? '#4ecca3' : pct < 70 ? '#ffd740' : pct < 90 ? '#f0a500' : '#e94560';
-  alcBar.style.width = pct + '%';
-  alcBar.style.background = pct <= 0 ? '#333' : color;
-  alcText.textContent = pct <= 0 ? '\u2014' : Math.round(pct) + '%';
-  alcText.style.color = color;
-});
-
 window.api.onSwrRatio((swr) => {
   const pct = Math.min(100, ((swr - 1) / 4) * 100);
   const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
@@ -1438,6 +1429,15 @@ window.api.onSwrRatio((swr) => {
   swrBar.style.background = color;
   swrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrText.style.color = color;
+});
+
+window.api.onAlc((val) => {
+  const pct = Math.min(100, (val / 100) * 100);
+  const color = pct <= 0 ? '#666' : pct < 40 ? '#4ecca3' : pct < 70 ? '#ffd740' : pct < 90 ? '#f0a500' : '#e94560';
+  alcBar.style.width = pct + '%';
+  alcBar.style.background = pct <= 0 ? '#333' : color;
+  alcText.textContent = pct <= 0 ? '\u2014' : Math.round(pct) + '%';
+  alcText.style.color = color;
 });
 
 // --- PTT ---
