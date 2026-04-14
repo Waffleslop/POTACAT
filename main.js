@@ -8381,8 +8381,8 @@ app.whenReady().then(() => {
     }
     const mod = (modifier || '').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4);
     const txMsg = mod ? 'CQ ' + mod + ' ' + myCall + ' ' + myGrid : 'CQ ' + myCall + ' ' + myGrid;
-    // TX on next available slot (opposite of last decoded, or 'auto' if no decodes yet)
-    const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : (ft8Engine._lastRxSlot === 'odd' ? 'even' : 'auto');
+    // TX on opposite slot from last decode; default to 'even' if no decodes yet
+    const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
     ft8Engine.setTxSlot(nextSlot);
     popoutJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
     ft8Engine._txEnabled = true;
