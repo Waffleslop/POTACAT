@@ -1210,8 +1210,15 @@ async function startRxAudio() {
       feedWaterfall(e.data);
     };
 
+    // Report actual sample rate to the engine (may differ from requested 48000)
+    const actualRate = sstvAudioCtx.sampleRate;
+    if (actualRate !== 48000) {
+      console.warn('[SSTV] Audio sample rate: ' + actualRate + ' Hz (expected 48000)');
+    }
+    window.api.sstvSetSampleRate(actualRate);
+
     rxInfo.textContent = 'Listening...';
-    statusBar.textContent = 'RX audio started';
+    statusBar.textContent = 'RX audio started (' + actualRate + ' Hz)';
   } catch (err) {
     console.error('[SSTV] RX audio start error:', err);
     rxInfo.textContent = 'No audio input';

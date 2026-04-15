@@ -8605,6 +8605,11 @@ app.whenReady().then(() => {
   }
 
   // SSTV IPC handlers
+  ipcMain.on('sstv-set-sample-rate', (_e, rate) => {
+    if (sstvEngine) sstvEngine.setSampleRate(rate);
+    console.log('[SSTV] Audio sample rate set to ' + rate + ' Hz');
+  });
+
   ipcMain.on('sstv-audio', (_e, buf) => {
     if (!sstvEngine) return;
     let samples;

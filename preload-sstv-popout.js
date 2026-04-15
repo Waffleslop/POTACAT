@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   sstvStop: () => ipcRenderer.send('sstv-stop'),
   sstvTxComplete: () => ipcRenderer.send('sstv-tx-complete'),
   sstvAudio: (buf) => ipcRenderer.send('sstv-audio', buf),
+  sstvSetSampleRate: (rate) => ipcRenderer.send('sstv-set-sample-rate', rate),
   sstvWfBins: (bins) => ipcRenderer.send('sstv-wf-bins', bins),
   // Multi-slice
   sstvStartMulti: (slices) => ipcRenderer.send('sstv-start-multi', slices),
