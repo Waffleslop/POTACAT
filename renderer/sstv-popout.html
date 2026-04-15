@@ -206,23 +206,23 @@
     <div class="sstv-spacer"></div>
     <select id="freq-select" class="sstv-freq-select" title="SSTV Frequency">
       <optgroup label="80m">
-        <option value="3730">3.730 (EU)</option>
-        <option value="3845">3.845 (NA)</option>
+        <option value="3730" data-mode="LSB">3.730 (EU)</option>
+        <option value="3845" data-mode="LSB">3.845 (NA)</option>
       </optgroup>
       <optgroup label="40m">
-        <option value="7165">7.165</option>
-        <option value="7171">7.171 (calling)</option>
+        <option value="7165" data-mode="LSB">7.165</option>
+        <option value="7171" data-mode="LSB">7.171 (calling)</option>
       </optgroup>
       <optgroup label="20m">
-        <option value="14227">14.227</option>
-        <option value="14230" selected>14.230 (calling)</option>
-        <option value="14233">14.233</option>
+        <option value="14227" data-mode="USB">14.227</option>
+        <option value="14230" data-mode="USB" selected>14.230 (calling)</option>
+        <option value="14233" data-mode="USB">14.233</option>
       </optgroup>
-      <optgroup label="17m"><option value="18161">18.161</option></optgroup>
-      <optgroup label="15m"><option value="21340">21.340 (calling)</option></optgroup>
-      <optgroup label="12m"><option value="24975">24.975</option></optgroup>
-      <optgroup label="10m"><option value="28680">28.680 (calling)</option></optgroup>
-      <optgroup label="6m"><option value="50680">50.680</option></optgroup>
+      <optgroup label="17m"><option value="18161" data-mode="USB">18.161</option></optgroup>
+      <optgroup label="15m"><option value="21340" data-mode="USB">21.340 (calling)</option></optgroup>
+      <optgroup label="12m"><option value="24975" data-mode="USB">24.975</option></optgroup>
+      <optgroup label="10m"><option value="28680" data-mode="USB">28.680 (calling)</option></optgroup>
+      <optgroup label="6m"><option value="50680" data-mode="USB">50.680</option></optgroup>
     </select>
     <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz" title="Custom frequency — press Enter">
     <button class="sstv-btn" id="tune-btn" title="Tune to selected frequency">Tune</button>

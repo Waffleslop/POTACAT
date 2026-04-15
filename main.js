@@ -161,6 +161,10 @@ let sstvPopoutWin = null;    // pop-out SSTV window
 let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
 let sstvManager = null;      // SSTV multi-slice manager
 let openSstvPopout = null;   // function — assigned in second whenReady block
+const SSTV_GALLERY_DIR = path.join(app.getPath('userData'), 'sstv-gallery');
+function ensureSstvGalleryDir() {
+  if (!fs.existsSync(SSTV_GALLERY_DIR)) fs.mkdirSync(SSTV_GALLERY_DIR, { recursive: true });
+}
 let jtcatMapPopoutWin = null; // pop-out JTCAT map window
 let popoutJtcatQso = null;   // QSO state for popout (like remoteJtcatQso for ECHOCAT)
 let cat = null;
@@ -4618,7 +4622,9 @@ function connectRemote() {
 
   // SSTV from ECHOCAT phone — open desktop SSTV popout
   remoteServer.on('sstv-open', () => {
+    console.log('[SSTV] ECHOCAT sstv-open received, openSstvPopout=' + (typeof openSstvPopout));
     if (openSstvPopout) openSstvPopout();
+    else console.warn('[SSTV] openSstvPopout not yet assigned — second whenReady block not run?');
   });
 
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
@@ -7034,11 +7040,12 @@ function getSunTimes(lat, lon, date) {
 
 function getSstvAutoFreq() {
   const pos = gridToLatLon(settings.grid);
-  if (!pos) return 14230;
+  if (!pos) return { freqKhz: 14230, mode: 'USB' };
   const now = new Date();
   const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
   const sun = getSunTimes(pos.lat, pos.lon, now);
-  return (utcH >= sun.sunrise && utcH < sun.sunset) ? 14230 : 7171;
+  const daytime = utcH >= sun.sunrise && utcH < sun.sunset;
+  return daytime ? { freqKhz: 14230, mode: 'USB' } : { freqKhz: 7171, mode: 'LSB' };
 }
 
 function startAutoSstvTimer() {
@@ -7052,10 +7059,10 @@ function startAutoSstvTimer() {
     }
     // If already active, check for band change at sunrise/sunset
     if (autoSstvActive) {
-      const newFreq = getSstvAutoFreq();
-      if (newFreq !== autoSstvCurrentFreq) {
-        autoSstvCurrentFreq = newFreq;
-        if (cat && cat.connected) cat.tune(newFreq * 1000, 'USB');
+      const newBand = getSstvAutoFreq();
+      if (newBand.freqKhz !== autoSstvCurrentFreq) {
+        autoSstvCurrentFreq = newBand.freqKhz;
+        if (cat && cat.connected) cat.tune(newBand.freqKhz * 1000, newBand.mode);
         console.log('[Auto-SSTV] Band switch to ' + newFreq + ' kHz');
       }
     }
@@ -7071,8 +7078,9 @@ function triggerAutoSstv() {
   autoSstvActive = true;
   autoSstvPrevFreq = _currentFreqHz;
   autoSstvPrevMode = _currentMode;
-  autoSstvCurrentFreq = getSstvAutoFreq();
-  if (cat && cat.connected) cat.tune(autoSstvCurrentFreq * 1000, 'USB');
+  const autoSstvBand = getSstvAutoFreq();
+  autoSstvCurrentFreq = autoSstvBand.freqKhz;
+  if (cat && cat.connected) cat.tune(autoSstvBand.freqKhz * 1000, autoSstvBand.mode);
   if (openSstvPopout) openSstvPopout();
   sendCatLog('[Auto-SSTV] Activated — tuned to ' + autoSstvCurrentFreq + ' kHz');
   if (remoteServer && remoteServer.hasClient()) {
@@ -8452,10 +8460,6 @@ app.whenReady().then(() => {
   });
 
   // === SSTV Pop-out Window ================================================
-  const SSTV_GALLERY_DIR = path.join(app.getPath('userData'), 'sstv-gallery');
-  function ensureSstvGalleryDir() {
-    if (!fs.existsSync(SSTV_GALLERY_DIR)) fs.mkdirSync(SSTV_GALLERY_DIR, { recursive: true });
-  }
 
   function startSstv() {
     if (sstvEngine) return;
@@ -8685,7 +8689,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('sstv-open-gallery-folder', () => {
     ensureSstvGalleryDir();
-    shell.openPath(SSTV_GALLERY_DIR);
+    require('electron').shell.openPath(SSTV_GALLERY_DIR);
   });
 
   // SSTV pop-out window

@@ -139,15 +139,21 @@ const freqSelect = document.getElementById('freq-select');
 const freqInput = document.getElementById('freq-input');
 const tuneBtn = document.getElementById('tune-btn');
 
-function tuneToFreq(freq) {
-  window.api.tune(freq, 'USB');
-  statusBar.textContent = 'Tuned to ' + freq + ' kHz USB';
+function getFreqMode(freqKhz) {
+  return parseInt(freqKhz) < 10000 ? 'LSB' : 'USB';
 }
 
-// Dropdown change QSYs immediately
+function tuneToFreq(freq, mode) {
+  const m = mode || getFreqMode(freq);
+  window.api.tune(freq, m);
+  statusBar.textContent = 'Tuned to ' + freq + ' kHz ' + m;
+}
+
+// Dropdown change QSYs immediately with correct mode
 freqSelect.addEventListener('change', () => {
   freqInput.value = '';
-  tuneToFreq(freqSelect.value);
+  const opt = freqSelect.options[freqSelect.selectedIndex];
+  tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
 });
 
 // Tune button: for custom frequency input
@@ -1217,14 +1223,14 @@ let multiAudioDeviceList = [];
 const SLICE_NAMES = { 5002: 'A', 5003: 'B', 5004: 'C', 5005: 'D' };
 
 const SSTV_FREQS_OPTIONS = `
-  <optgroup label="80m"><option value="3730">3.730 (EU)</option><option value="3845">3.845 (NA)</option></optgroup>
-  <optgroup label="40m"><option value="7165">7.165</option><option value="7171">7.171</option></optgroup>
-  <optgroup label="20m"><option value="14227">14.227</option><option value="14230">14.230</option><option value="14233">14.233</option></optgroup>
-  <optgroup label="17m"><option value="18161">18.161</option></optgroup>
-  <optgroup label="15m"><option value="21340">21.340</option></optgroup>
-  <optgroup label="12m"><option value="24975">24.975</option></optgroup>
-  <optgroup label="10m"><option value="28680">28.680</option></optgroup>
-  <optgroup label="6m"><option value="50680">50.680</option></optgroup>`;
+  <optgroup label="80m"><option value="3730" data-mode="LSB">3.730 (EU)</option><option value="3845" data-mode="LSB">3.845 (NA)</option></optgroup>
+  <optgroup label="40m"><option value="7165" data-mode="LSB">7.165</option><option value="7171" data-mode="LSB">7.171</option></optgroup>
+  <optgroup label="20m"><option value="14227" data-mode="USB">14.227</option><option value="14230" data-mode="USB">14.230</option><option value="14233" data-mode="USB">14.233</option></optgroup>
+  <optgroup label="17m"><option value="18161" data-mode="USB">18.161</option></optgroup>
+  <optgroup label="15m"><option value="21340" data-mode="USB">21.340</option></optgroup>
+  <optgroup label="12m"><option value="24975" data-mode="USB">24.975</option></optgroup>
+  <optgroup label="10m"><option value="28680" data-mode="USB">28.680</option></optgroup>
+  <optgroup label="6m"><option value="50680" data-mode="USB">50.680</option></optgroup>`;
 
 function saveMultiSliceConfigs() {
   localStorage.setItem('sstv-multi-slices', JSON.stringify(multiSliceConfigs));
@@ -1342,7 +1348,7 @@ multiStartBtn.addEventListener('click', async () => {
 
   // Tune each Flex slice to its SSTV frequency (creates the slice if needed)
   for (const cfg of multiSliceConfigs) {
-    window.api.tune(String(cfg.freqKhz), 'USB', undefined, cfg.slicePort);
+    window.api.tune(String(cfg.freqKhz), cfg.freqKhz < 10000 ? 'LSB' : 'USB', undefined, cfg.slicePort);
   }
 
   // Build decode panes

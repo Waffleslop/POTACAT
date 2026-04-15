@@ -3880,7 +3880,7 @@
     } else if (tab === 'sstv') {
       if (sstvView) { sstvView.classList.remove('hidden'); sstvView.style.display = 'flex'; }
       // Open SSTV on desktop + fetch recent decodes
-      send({ type: 'sstv-open' });
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-open' }));
       sstvPhoneRequestGallery(10, 0);
     }
   }
@@ -7536,8 +7536,10 @@
   // Frequency dropdown — QSY on change + save
   if (sstvFreqPhone) {
     sstvFreqPhone.addEventListener('change', function() {
-      send({ type: 'tune', frequency: sstvFreqPhone.value, mode: 'USB' });
-      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'QSY ' + sstvFreqPhone.value + ' kHz';
+      var opt = sstvFreqPhone.options[sstvFreqPhone.selectedIndex];
+      var mode = (opt && opt.dataset.mode) || (parseInt(sstvFreqPhone.value) < 10000 ? 'LSB' : 'USB');
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: sstvFreqPhone.value, mode: mode }));
+      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'QSY ' + sstvFreqPhone.value + ' kHz ' + mode;
       try { localStorage.setItem('sstv-phone-freq', sstvFreqPhone.value); } catch (e) {}
     });
   }
@@ -8040,7 +8042,7 @@
       var dataUrl = sstvPhoneCompose.toDataURL('image/jpeg', 0.9);
       var modeEl = document.getElementById('sstv-mode-phone');
       var mode = modeEl ? modeEl.value : 'martin1';
-      send({ type: 'sstv-photo', image: dataUrl, mode: mode });
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-photo', image: dataUrl, mode: mode }));
       if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Sending...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
     });
   }
@@ -8053,7 +8055,7 @@
   var sstvPhoneLoadMoreBtn = document.getElementById('sstv-phone-load-more');
 
   function sstvPhoneRequestGallery(limit, offset) {
-    send({ type: 'sstv-get-gallery', limit: limit || 10, offset: offset || 0 });
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-get-gallery', limit: limit || 10, offset: offset || 0 }));
   }
 
   function sstvPhoneHandleGallery(msg) {
