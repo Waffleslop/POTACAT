@@ -70,47 +70,57 @@ const MODE_RES = {
 
 // --- Init ---
 (async function init() {
-  settings = await window.api.getSettings();
+  try {
+    settings = await window.api.getSettings();
+  } catch (e) {
+    console.error('[SSTV] Failed to load settings:', e);
+    settings = {};
+  }
   callsign = settings.myCallsign || '';
   grid = settings.grid || '';
-  if (settings.sstvMode) modeSelect.value = settings.sstvMode;
-  txGainSlider.value = Math.round((settings.sstvTxGain || 0.5) * 100);
+  try { if (settings.sstvMode) modeSelect.value = settings.sstvMode; } catch {}
+  try { txGainSlider.value = Math.round((settings.sstvTxGain || 0.5) * 100); } catch {}
 
   // Restore saved text elements if available
-  if (settings.sstvTextElements && settings.sstvTextElements.length) {
-    textElements = settings.sstvTextElements;
-    userTextCounter = textElements.filter(t => t.key.startsWith('user-')).length;
-  }
+  try {
+    if (settings.sstvTextElements && settings.sstvTextElements.length) {
+      textElements = settings.sstvTextElements;
+      userTextCounter = textElements.filter(t => t.key.startsWith('user-')).length;
+    }
+  } catch (e) { console.error('[SSTV] Text elements restore error:', e); }
 
   // Load saved templates
-  templates = settings.sstvTemplates || [];
-  renderTemplateStrip();
+  try {
+    templates = settings.sstvTemplates || [];
+    renderTemplateStrip();
+  } catch (e) { console.error('[SSTV] Template restore error:', e); }
 
   // Fill auto-labels (call/grid use current settings, not saved values)
-  syncAutoLabels();
-  renderTextLayers();
+  try { syncAutoLabels(); renderTextLayers(); } catch (e) { console.error('[SSTV] Text layers error:', e); }
 
   // Update canvas size for mode
-  updateCanvasSize();
+  try { updateCanvasSize(); } catch {}
 
   // Generate initial random pattern
-  generateRandomPattern();
+  try { generateRandomPattern(); } catch (e) { console.error('[SSTV] Pattern error:', e); }
 
   // Populate audio devices
-  await populateAudioDevices();
+  try { await populateAudioDevices(); } catch (e) { console.error('[SSTV] Audio device error:', e); }
 
   // Start RX audio capture
-  await startRxAudio();
+  try { await startRxAudio(); } catch (e) { console.error('[SSTV] RX audio error:', e); }
 
   // Load gallery
-  await loadGallery();
+  try { await loadGallery(); } catch (e) { console.error('[SSTV] Gallery load error:', e); }
 
   // Set theme
-  applyTheme(settings.lightMode ? 'light' : 'dark');
+  try { applyTheme(settings.lightMode ? 'light' : 'dark'); } catch {}
 
   // Auto-QSY to the selected SSTV frequency on open
-  const initOpt = freqSelect.options[freqSelect.selectedIndex];
-  tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
+  try {
+    const initOpt = freqSelect.options[freqSelect.selectedIndex];
+    tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
+  } catch (e) { console.error('[SSTV] Auto-QSY error:', e); }
 })();
 
 // --- Radio frequency sync ---
