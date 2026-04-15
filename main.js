@@ -93,6 +93,8 @@ const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
+const { SstvEngine } = require('./lib/sstv-engine');
+const { SstvManager } = require('./lib/sstv-manager');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
@@ -155,6 +157,9 @@ let clusterPopoutWin = null; // pop-out DX cluster terminal window
 let propPopoutWin = null;    // pop-out propagation map window
 let vfoPopoutWin = null;     // pop-out VFO window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
+let sstvPopoutWin = null;    // pop-out SSTV window
+let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
+let sstvManager = null;      // SSTV multi-slice manager
 let jtcatMapPopoutWin = null; // pop-out JTCAT map window
 let popoutJtcatQso = null;   // QSO state for popout (like remoteJtcatQso for ECHOCAT)
 let cat = null;
@@ -3124,6 +3129,10 @@ function updateRemoteSettings() {
     kiwiSdrLabel1: settings.kiwiSdrLabel1 || '',
     kiwiSdrLabel2: settings.kiwiSdrLabel2 || '',
     kiwiSdrLabel3: settings.kiwiSdrLabel3 || '',
+    sstvTemplates: settings.sstvTemplates || [],
+    sstvTextElements: settings.sstvTextElements || [],
+    enableAutoSstv: !!settings.enableAutoSstv,
+    autoSstvInactivityMin: settings.autoSstvInactivityMin || 90,
   });
 }
 
@@ -4604,6 +4613,70 @@ function connectRemote() {
   });
   remoteServer.on('jtcat-tx-gain', ({ value }) => {
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', value);
+  });
+
+  // SSTV from ECHOCAT phone — open desktop SSTV popout
+  remoteServer.on('sstv-open', () => {
+    ipcMain.emit('sstv-popout-open');
+  });
+
+  // SSTV from ECHOCAT phone — receive photo, encode, transmit
+  remoteServer.on('sstv-photo', ({ image, mode }) => {
+    if (!sstvEngine) startSstv();
+    try {
+      const { nativeImage } = require('electron');
+      // Decode base64 JPEG/PNG from phone
+      const base64 = image.replace(/^data:image\/\w+;base64,/, '');
+      const img = nativeImage.createFromBuffer(Buffer.from(base64, 'base64'));
+      const size = img.getSize();
+      if (size.width === 0 || size.height === 0) {
+        console.error('[SSTV] ECHOCAT: invalid image');
+        return;
+      }
+      const bitmap = img.toBitmap(); // BGRA format
+      // Convert BGRA to RGBA
+      const rgba = new Uint8ClampedArray(bitmap.length);
+      for (let i = 0; i < bitmap.length; i += 4) {
+        rgba[i]     = bitmap[i + 2]; // R
+        rgba[i + 1] = bitmap[i + 1]; // G
+        rgba[i + 2] = bitmap[i];     // B
+        rgba[i + 3] = bitmap[i + 3]; // A
+      }
+      console.log(`[SSTV] ECHOCAT photo received: ${size.width}x${size.height}, mode=${mode}`);
+      sstvEngine.encode(rgba, size.width, size.height, mode);
+    } catch (err) {
+      console.error('[SSTV] ECHOCAT photo error:', err.message);
+    }
+  });
+  remoteServer.on('sstv-stop', () => {
+    if (sstvEngine) sstvEngine.stop();
+  });
+
+  remoteServer.on('sstv-get-gallery', ({ limit, offset, requestId }) => {
+    ensureSstvGalleryDir();
+    try {
+      const files = fs.readdirSync(SSTV_GALLERY_DIR)
+        .filter(f => f.endsWith('.png'))
+        .sort((a, b) => b.localeCompare(a));
+      const total = files.length;
+      const slice = files.slice(offset || 0, (offset || 0) + (limit || 10));
+      const images = slice.map(f => {
+        const filePath = path.join(SSTV_GALLERY_DIR, f);
+        const stat = fs.statSync(filePath);
+        const data = fs.readFileSync(filePath);
+        const parts = f.replace('.png', '').split('_');
+        return {
+          filename: f,
+          dataUrl: 'data:image/png;base64,' + data.toString('base64'),
+          mode: parts[1] || '',
+          timestamp: stat.mtimeMs,
+        };
+      });
+      remoteServer.sendSstvGallery(images, requestId, total);
+    } catch (err) {
+      console.error('[SSTV] Gallery fetch for ECHOCAT error:', err.message);
+      remoteServer.sendSstvGallery([], requestId, 0);
+    }
   });
 
   // Voice macro sync from ECHOCAT phone
@@ -6289,6 +6362,9 @@ function createWindow() {
     if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) actmapPopoutWin.close();
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.close();
     if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.close();
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.close();
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.close();
+    if (jtcatMapPopoutWin && !jtcatMapPopoutWin.isDestroyed()) jtcatMapPopoutWin.close();
   });
 
   // Once the renderer is actually ready to listen, send current state
@@ -6929,8 +7005,90 @@ const TELEMETRY_URL = 'https://telemetry.potacat.com/ping';
 let sessionStartTime = Date.now();
 let lastActivityTime = Date.now(); // tracks meaningful user actions for active/idle detection
 
-function markUserActive() { lastActivityTime = Date.now(); }
+function markUserActive() {
+  lastActivityTime = Date.now();
+  if (autoSstvActive) cancelAutoSstv();
+}
 function isUserActive() { return (Date.now() - lastActivityTime) < 1800000; } // active within 30 min
+
+// --- Auto-SSTV: idle-triggered SSTV decode ---
+let autoSstvTimer = null;
+let autoSstvActive = false;
+let autoSstvPrevFreq = null;
+let autoSstvPrevMode = null;
+let autoSstvCurrentFreq = 0;
+
+function getSunTimes(lat, lon, date) {
+  const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
+  const declination = -23.45 * Math.cos(2 * Math.PI / 365 * (dayOfYear + 10));
+  const decRad = declination * Math.PI / 180;
+  const latRad = lat * Math.PI / 180;
+  const cosHA = -(Math.sin(latRad) * Math.sin(decRad)) / (Math.cos(latRad) * Math.cos(decRad));
+  if (cosHA > 1) return { sunrise: 12, sunset: 12 };   // polar night
+  if (cosHA < -1) return { sunrise: 0, sunset: 24 };   // midnight sun
+  const ha = Math.acos(cosHA) * 180 / Math.PI;
+  const noon = 12 - lon / 15;
+  return { sunrise: noon - ha / 15, sunset: noon + ha / 15 };
+}
+
+function getSstvAutoFreq() {
+  const pos = gridToLatLon(settings.grid);
+  if (!pos) return 14230;
+  const now = new Date();
+  const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const sun = getSunTimes(pos.lat, pos.lon, now);
+  return (utcH >= sun.sunrise && utcH < sun.sunset) ? 14230 : 7171;
+}
+
+function startAutoSstvTimer() {
+  stopAutoSstvTimer();
+  if (!settings.enableAutoSstv) return;
+  const thresholdMs = (settings.autoSstvInactivityMin || 90) * 60 * 1000;
+  autoSstvTimer = setInterval(() => {
+    const idle = Date.now() - lastActivityTime;
+    if (!autoSstvActive && idle >= thresholdMs) {
+      triggerAutoSstv();
+    }
+    // If already active, check for band change at sunrise/sunset
+    if (autoSstvActive) {
+      const newFreq = getSstvAutoFreq();
+      if (newFreq !== autoSstvCurrentFreq) {
+        autoSstvCurrentFreq = newFreq;
+        if (cat && cat.connected) cat.tune(newFreq * 1000, 'USB');
+        console.log('[Auto-SSTV] Band switch to ' + newFreq + ' kHz');
+      }
+    }
+  }, 30000);
+  console.log('[Auto-SSTV] Timer started (' + (settings.autoSstvInactivityMin || 90) + ' min threshold)');
+}
+
+function stopAutoSstvTimer() {
+  if (autoSstvTimer) { clearInterval(autoSstvTimer); autoSstvTimer = null; }
+}
+
+function triggerAutoSstv() {
+  autoSstvActive = true;
+  autoSstvPrevFreq = _currentFreqHz;
+  autoSstvPrevMode = _currentMode;
+  autoSstvCurrentFreq = getSstvAutoFreq();
+  if (cat && cat.connected) cat.tune(autoSstvCurrentFreq * 1000, 'USB');
+  ipcMain.emit('sstv-popout-open');
+  sendCatLog('[Auto-SSTV] Activated — tuned to ' + autoSstvCurrentFreq + ' kHz');
+  if (remoteServer && remoteServer.hasClient()) {
+    remoteServer.broadcastSstvTxStatus({ state: 'auto-rx', freqKhz: autoSstvCurrentFreq });
+  }
+}
+
+function cancelAutoSstv() {
+  if (!autoSstvActive) return;
+  autoSstvActive = false;
+  if (autoSstvPrevFreq && cat && cat.connected) {
+    cat.tune(autoSstvPrevFreq, autoSstvPrevMode || 'USB');
+  }
+  sendCatLog('[Auto-SSTV] Cancelled — restored ' + (autoSstvPrevFreq ? (autoSstvPrevFreq / 1000) + ' kHz' : 'previous frequency'));
+  autoSstvPrevFreq = null;
+  autoSstvPrevMode = null;
+}
 
 function generateTelemetryId() {
   // Random UUID v4 — not tied to any user identity
@@ -8292,6 +8450,409 @@ app.whenReady().then(() => {
     }
   });
 
+  // === SSTV Pop-out Window ================================================
+  const SSTV_GALLERY_DIR = path.join(app.getPath('userData'), 'sstv-gallery');
+  function ensureSstvGalleryDir() {
+    if (!fs.existsSync(SSTV_GALLERY_DIR)) fs.mkdirSync(SSTV_GALLERY_DIR, { recursive: true });
+  }
+
+  function startSstv() {
+    if (sstvEngine) return;
+    sstvEngine = new SstvEngine();
+
+    sstvEngine.on('encode-complete', (data) => {
+      // Ensure popout is open for audio playback — open it if needed
+      if (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) {
+        ipcMain.emit('sstv-popout-open');
+      }
+      // Key PTT
+      handleRemotePtt(true);
+      // Send audio to popout for playback after PTT settles (extra delay if popout just opened)
+      const delay = (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) ? 1500 : 200;
+      setTimeout(() => {
+        if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+          sstvPopoutWin.webContents.send('sstv-tx-audio', {
+            samples: Array.from(data.samples),
+            durationSec: data.durationSec,
+          });
+        } else {
+          // Failsafe: release PTT if popout never opened
+          handleRemotePtt(false);
+        }
+      }, delay);
+      // Notify ECHOCAT with duration so phone can show progress
+      if (remoteServer && remoteServer.hasClient()) {
+        remoteServer.broadcastSstvTxStatus({ state: 'tx', durationSec: data.durationSec });
+      }
+    });
+
+    sstvEngine.on('rx-vis', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-vis', data);
+      }
+    });
+
+    sstvEngine.on('rx-line', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-line', {
+          line: data.line,
+          totalLines: data.totalLines,
+          rgba: Array.from(data.rgba),
+        });
+      }
+      // Throttled progress to ECHOCAT (every 10 lines)
+      if (remoteServer && remoteServer.hasClient() && data.line % 10 === 0) {
+        remoteServer.broadcastSstvProgress({
+          progress: data.line / data.totalLines,
+          line: data.line,
+          totalLines: data.totalLines,
+          mode: sstvEngine._decoding ? 'decoding' : '',
+        });
+      }
+    });
+
+    sstvEngine.on('rx-image', (data) => {
+      // Save to gallery
+      saveSstvImage(data);
+      // Send to popout
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-image', {
+          imageData: Array.from(data.imageData),
+          width: data.width,
+          height: data.height,
+          mode: data.mode,
+        });
+      }
+      // Send to ECHOCAT phone
+      if (remoteServer && remoteServer.hasClient()) {
+        try {
+          const { nativeImage } = require('electron');
+          const rgba = new Uint8ClampedArray(data.imageData);
+          const bgra = Buffer.alloc(rgba.length);
+          for (let i = 0; i < rgba.length; i += 4) {
+            bgra[i] = rgba[i + 2]; bgra[i + 1] = rgba[i + 1];
+            bgra[i + 2] = rgba[i]; bgra[i + 3] = rgba[i + 3];
+          }
+          const img = nativeImage.createFromBitmap(bgra, { width: data.width, height: data.height });
+          const base64 = img.toPNG().toString('base64');
+          remoteServer.broadcastSstvRxImage({
+            base64: 'data:image/png;base64,' + base64,
+            mode: data.mode,
+            width: data.width,
+            height: data.height,
+          });
+        } catch (err) {
+          console.error('[SSTV] ECHOCAT broadcast error:', err.message);
+        }
+      }
+    });
+
+    sstvEngine.on('status', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-status', data);
+      }
+    });
+
+    sstvEngine.on('rx-debug', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-debug', data);
+      }
+    });
+
+    sstvEngine.on('error', (data) => {
+      console.error('[SSTV] Engine error:', data.message);
+    });
+
+    sstvEngine.start();
+    console.log('[SSTV] Engine started');
+  }
+
+  function stopSstv() {
+    if (sstvEngine) {
+      sstvEngine.stop();
+      sstvEngine = null;
+      console.log('[SSTV] Engine stopped');
+    }
+  }
+
+  function saveSstvImage(data) {
+    try {
+      ensureSstvGalleryDir();
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
+      const filename = `sstv_${data.mode}_${ts}.png`;
+      const { nativeImage } = require('electron');
+      // ImageData is RGBA, nativeImage expects BGRA — convert
+      const rgba = new Uint8ClampedArray(data.imageData);
+      const bgra = Buffer.alloc(rgba.length);
+      for (let i = 0; i < rgba.length; i += 4) {
+        bgra[i]     = rgba[i + 2]; // B
+        bgra[i + 1] = rgba[i + 1]; // G
+        bgra[i + 2] = rgba[i];     // R
+        bgra[i + 3] = rgba[i + 3]; // A
+      }
+      const img = nativeImage.createFromBitmap(bgra, { width: data.width, height: data.height });
+      fs.writeFileSync(path.join(SSTV_GALLERY_DIR, filename), img.toPNG());
+      console.log('[SSTV] Saved decoded image:', filename);
+    } catch (err) {
+      console.error('[SSTV] Save image error:', err.message);
+    }
+  }
+
+  // SSTV IPC handlers
+  ipcMain.on('sstv-audio', (_e, buf) => {
+    if (!sstvEngine) return;
+    let samples;
+    if (buf instanceof Float32Array) samples = buf;
+    else if (Array.isArray(buf)) samples = new Float32Array(buf);
+    else { try { samples = new Float32Array(Object.values(buf)); } catch { return; } }
+    sstvEngine.feedAudio(samples);
+  });
+
+  ipcMain.on('sstv-encode', (_e, data) => {
+    if (!sstvEngine) startSstv();
+    const imageData = new Uint8ClampedArray(data.imageData);
+    sstvEngine.encode(imageData, data.width, data.height, data.mode);
+  });
+
+  ipcMain.on('sstv-tx-complete', () => {
+    handleRemotePtt(false);
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx' });
+    }
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastSstvTxStatus({ state: 'rx' });
+    }
+  });
+
+  ipcMain.on('sstv-wf-bins', (_e, bins) => {
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastSstvWfBins(bins);
+    }
+  });
+
+  ipcMain.on('sstv-stop', () => {
+    if (sstvEngine) sstvEngine.stop();
+  });
+
+  ipcMain.handle('sstv-get-gallery', async () => {
+    ensureSstvGalleryDir();
+    try {
+      const files = fs.readdirSync(SSTV_GALLERY_DIR)
+        .filter(f => f.endsWith('.png'))
+        .sort((a, b) => b.localeCompare(a)); // newest first
+      const results = [];
+      for (const f of files.slice(0, 50)) { // limit to 50 most recent
+        const filePath = path.join(SSTV_GALLERY_DIR, f);
+        const stat = fs.statSync(filePath);
+        const data = fs.readFileSync(filePath);
+        const dataUrl = 'data:image/png;base64,' + data.toString('base64');
+        // Parse mode from filename: sstv_MODE_DATE.png
+        const parts = f.replace('.png', '').split('_');
+        const mode = parts[1] || '';
+        results.push({ filename: f, dataUrl, mode, timestamp: stat.mtimeMs, width: 320, height: 256 });
+      }
+      return results;
+    } catch (err) {
+      console.error('[SSTV] Gallery read error:', err.message);
+      return [];
+    }
+  });
+
+  ipcMain.handle('sstv-delete-image', async (_e, filename) => {
+    try {
+      const filePath = path.join(SSTV_GALLERY_DIR, path.basename(filename));
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      return true;
+    } catch { return false; }
+  });
+
+  ipcMain.handle('sstv-load-file', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(sstvPopoutWin || win, {
+      title: 'Select Image for SSTV',
+      filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'webp'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    const filePath = result.filePaths[0];
+    const data = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase().replace('.', '');
+    const mime = ext === 'jpg' ? 'jpeg' : ext;
+    const dataUrl = `data:image/${mime};base64,${data.toString('base64')}`;
+    return { dataUrl, filePath };
+  });
+
+  ipcMain.on('sstv-open-gallery-folder', () => {
+    ensureSstvGalleryDir();
+    shell.openPath(SSTV_GALLERY_DIR);
+  });
+
+  // SSTV pop-out window
+  ipcMain.on('sstv-popout-open', () => {
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.focus();
+      return;
+    }
+    const isMac = process.platform === 'darwin';
+    sstvPopoutWin = new BrowserWindow({
+      width: 900,
+      height: 700,
+      title: 'POTACAT — SSTV',
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-sstv-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        autoplayPolicy: 'no-user-gesture-required',
+      },
+    });
+    const saved = settings.sstvPopoutBounds;
+    if (saved && saved.width > 400 && saved.height > 300 && isOnScreen(saved)) {
+      sstvPopoutWin.setBounds(clampToWorkArea(saved));
+    }
+    sstvPopoutWin.show();
+    sstvPopoutWin.setMenuBarVisibility(false);
+    sstvPopoutWin.loadFile(path.join(__dirname, 'renderer', 'sstv-popout.html'));
+    sstvPopoutWin.on('close', () => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        if (!sstvPopoutWin.isMaximized() && !sstvPopoutWin.isMinimized()) {
+          settings.sstvPopoutBounds = sstvPopoutWin.getBounds();
+          saveSettings(settings);
+        }
+      }
+    });
+    sstvPopoutWin.on('closed', () => {
+      sstvPopoutWin = null;
+      stopSstv();
+    });
+    sstvPopoutWin.webContents.on('did-finish-load', () => {
+      // Send theme
+      const theme = settings.lightMode ? 'light' : 'dark';
+      sstvPopoutWin.webContents.send('sstv-popout-theme', theme);
+      // Start SSTV engine when popout opens
+      startSstv();
+    });
+    sstvPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        sstvPopoutWin.webContents.toggleDevTools();
+      }
+    });
+  });
+
+  ipcMain.on('sstv-popout-theme', (_e, theme) => {
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.webContents.send('sstv-popout-theme', theme);
+    }
+  });
+  ipcMain.on('sstv-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
+  ipcMain.on('sstv-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
+  ipcMain.on('sstv-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
+
+  // --- SSTV Multi-Slice ---
+
+  function stopSstvMulti() {
+    if (sstvManager) {
+      sstvManager.stopAll();
+      sstvManager = null;
+      console.log('[SSTV] Multi-slice stopped');
+    }
+  }
+
+  ipcMain.on('sstv-start-multi', (_e, slices) => {
+    if (!Array.isArray(slices) || slices.length === 0) return;
+    stopSstvMulti();
+    sstvManager = new SstvManager();
+
+    // Wire events from all slices
+    sstvManager.on('rx-vis', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-vis', data);
+      }
+    });
+
+    sstvManager.on('rx-line', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-line', {
+          line: data.line, totalLines: data.totalLines,
+          rgba: Array.from(data.rgba), sliceId: data.sliceId,
+        });
+      }
+    });
+
+    sstvManager.on('rx-image', (data) => {
+      saveSstvImage(data);
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-image', {
+          imageData: Array.from(data.imageData),
+          width: data.width, height: data.height,
+          mode: data.mode, sliceId: data.sliceId,
+        });
+      }
+      if (remoteServer && remoteServer.hasClient()) {
+        try {
+          const { nativeImage } = require('electron');
+          const rgba = new Uint8ClampedArray(data.imageData);
+          const bgra = Buffer.alloc(rgba.length);
+          for (let i = 0; i < rgba.length; i += 4) {
+            bgra[i] = rgba[i + 2]; bgra[i + 1] = rgba[i + 1];
+            bgra[i + 2] = rgba[i]; bgra[i + 3] = rgba[i + 3];
+          }
+          const img = nativeImage.createFromBitmap(bgra, { width: data.width, height: data.height });
+          const base64 = img.toPNG().toString('base64');
+          remoteServer.broadcastSstvRxImage({
+            base64: 'data:image/png;base64,' + base64,
+            mode: data.mode, width: data.width, height: data.height,
+          });
+        } catch (err) { console.error('[SSTV] Multi broadcast error:', err.message); }
+      }
+    });
+
+    sstvManager.on('status', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-status', data);
+      }
+    });
+
+    sstvManager.on('rx-debug', (data) => {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-debug', data);
+      }
+    });
+
+    // Start each slice
+    for (const s of slices) {
+      sstvManager.startSlice(s);
+      // Tune the Flex slice if slicePort is set
+      if (s.slicePort && smartSdr && smartSdr.connected) {
+        const sliceIndex = s.slicePort - 5002;
+        smartSdr.tuneSlice(sliceIndex, s.freqKhz / 1000, 'USB');
+        smartSdr.setSliceFilter(sliceIndex, 100, 2800);
+      }
+    }
+
+    console.log('[SSTV] Multi-slice started: ' + slices.map(s => s.sliceId + '@' + s.freqKhz).join(', '));
+  });
+
+  ipcMain.on('sstv-stop-multi', () => {
+    stopSstvMulti();
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.webContents.send('sstv-status', { state: 'stopped', multi: false });
+    }
+  });
+
+  ipcMain.on('sstv-slice-audio', (_e, sliceId, buf) => {
+    if (!sstvManager) return;
+    let samples;
+    if (buf instanceof Float32Array) samples = buf;
+    else if (Array.isArray(buf)) samples = new Float32Array(buf);
+    else { try { samples = new Float32Array(Object.values(buf)); } catch { return; } }
+    sstvManager.feedAudio(sliceId, samples);
+  });
+
+  // === End SSTV ============================================================
+
   // --- Popout QSO state machine (drives engine directly, like ECHOCAT) ---
   ipcMain.on('jtcat-popout-reply', async (_e, data) => {
     // Route TX to correct slice in multi-slice mode
@@ -8504,6 +9065,9 @@ app.whenReady().then(() => {
 
   // Start solar data fetching (every 10 minutes)
   solarTimer = setInterval(fetchSolarData, 600000);
+
+  // Start auto-SSTV idle timer
+  startAutoSstvTimer();
 
   // Check for updates (after a short delay so the window is ready)
   if (!settings.disableAutoUpdate) {
@@ -9360,6 +9924,11 @@ app.whenReady().then(() => {
     // Reconfigure SOTA uploader if credentials changed
     if (newSettings.sotaUpload && newSettings.sotaUsername) {
       sotaUploader.configure(newSettings.sotaUsername, newSettings.sotaPassword || '');
+    }
+
+    // Restart auto-SSTV timer if settings changed
+    if (has('enableAutoSstv') || has('autoSstvInactivityMin')) {
+      startAutoSstvTimer();
     }
 
     return settings;
@@ -10818,6 +11387,9 @@ function gracefulCleanup() {
   try { disconnectRemote(); } catch {}
   try { disconnectKeyer(); } catch {}
   try { stopJtcat(); } catch {}
+  try { stopSstv(); } catch {}
+  try { stopSstvMulti(); } catch {}
+  try { stopAutoSstvTimer(); } catch {}
   try { hamrsBridge.stop(); } catch {}
   killRigctld();
 }

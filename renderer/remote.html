@@ -615,6 +615,7 @@
       <button class="tab" data-tab="activate">Act <span id="tab-activate-badge" class="tab-badge hidden">0</span></button>
       <button class="tab" data-tab="ft8">FT8</button>
       <button class="tab hidden" data-tab="dir" id="dir-tab-btn">Dir</button>
+      <button class="tab" data-tab="sstv">SSTV</button>
     </div>
 
     <!-- Filter toolbar -->
@@ -986,6 +987,126 @@
       <div id="dir-list" class="dir-list"></div>
     </div>
 
+    <!-- SSTV view (compose, templates, text editor, gallery) -->
+    <div id="sstv-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
+      <!-- Mode + frequency + status bar -->
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;">
+        <select id="sstv-mode-phone" style="font-size:13px;padding:3px 6px;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+          <option value="martin1">Martin M1</option>
+          <option value="scottie1">Scottie S1</option>
+          <option value="robot36">Robot 36</option>
+          <option value="robot72">Robot 72</option>
+        </select>
+        <select id="sstv-freq-phone" style="font-size:13px;padding:3px 6px;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+          <optgroup label="80m">
+            <option value="3730">3.730 (EU)</option>
+            <option value="3845">3.845 (NA)</option>
+          </optgroup>
+          <optgroup label="40m">
+            <option value="7165">7.165</option>
+            <option value="7171">7.171</option>
+          </optgroup>
+          <optgroup label="20m">
+            <option value="14227">14.227</option>
+            <option value="14230" selected>14.230</option>
+            <option value="14233">14.233</option>
+          </optgroup>
+          <optgroup label="17m"><option value="18161">18.161</option></optgroup>
+          <optgroup label="15m"><option value="21340">21.340</option></optgroup>
+          <optgroup label="12m"><option value="24975">24.975</option></optgroup>
+          <optgroup label="10m"><option value="28680">28.680</option></optgroup>
+          <optgroup label="6m"><option value="50680">50.680</option></optgroup>
+        </select>
+        <span style="flex:1"></span>
+        <button type="button" id="sstv-phone-wf-toggle" style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-dim);">WF</button>
+        <span id="sstv-phone-status" style="font-size:12px;color:var(--text-dim)">Ready</span>
+      </div>
+
+      <!-- TX progress bar -->
+      <div id="sstv-phone-tx-bar" style="display:none;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+          <span style="font-size:13px;font-weight:700;color:var(--accent);">TRANSMITTING</span>
+          <span style="flex:1"></span>
+          <span id="sstv-phone-tx-time" style="font-size:13px;font-family:monospace;color:var(--text);">0:00 / 0:00</span>
+        </div>
+        <div style="height:6px;background:var(--bg-card);border-radius:3px;overflow:hidden;">
+          <div id="sstv-phone-tx-progress" style="height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width 0.5s;"></div>
+        </div>
+      </div>
+
+      <!-- Waterfall (hidden by default) -->
+      <div id="sstv-phone-wf-wrap" style="display:none;background:#000;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <canvas id="sstv-phone-wf" width="320" height="50" style="width:100%;height:50px;display:block;image-rendering:pixelated;"></canvas>
+        <div style="display:flex;justify-content:space-between;padding:0 6px;font-size:9px;color:var(--text-dim);"><span>1.1k</span><span>1.7k</span><span>2.3k</span></div>
+      </div>
+
+      <!-- Scrollable content -->
+      <div style="flex:1;overflow-y:auto;min-height:0;">
+
+        <!-- Templates from desktop -->
+        <div id="sstv-phone-tpl-section" style="padding:6px 10px;border-bottom:1px solid var(--border);display:none;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-dim);margin-bottom:4px;">Templates</div>
+          <div id="sstv-phone-tpl-strip" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;"></div>
+        </div>
+
+        <!-- Compose canvas -->
+        <div style="position:relative;background:#000;flex-shrink:0;text-align:center;">
+          <video id="sstv-camera-preview" autoplay playsinline muted style="width:100%;max-height:240px;display:none;"></video>
+          <canvas id="sstv-phone-compose" width="320" height="256" style="width:100%;height:auto;image-rendering:pixelated;"></canvas>
+        </div>
+
+        <!-- Image zoom/pan controls -->
+        <div id="sstv-phone-crop-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:var(--bg-header);border-top:1px solid var(--border);flex-shrink:0;font-size:12px;color:var(--text-dim);">
+          <span>Crop</span>
+          <button type="button" id="sstv-phone-zoom-out" style="width:28px;height:28px;font-size:16px;font-weight:700;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text);">-</button>
+          <span id="sstv-phone-zoom-label" style="min-width:36px;text-align:center;font-family:monospace;">1.0x</span>
+          <button type="button" id="sstv-phone-zoom-in" style="width:28px;height:28px;font-size:16px;font-weight:700;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text);">+</button>
+          <span style="flex:1"></span>
+          <button type="button" id="sstv-phone-crop-reset" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-dim);">Reset</button>
+          <span style="font-size:10px;color:var(--text-dim);">drag to pan</span>
+        </div>
+
+        <!-- Image source buttons -->
+        <div style="display:flex;gap:6px;padding:6px 10px;background:var(--bg-header);border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-shrink:0;">
+          <button type="button" id="sstv-camera-btn" style="flex:1;padding:8px;font-size:13px;font-weight:600;border:1px solid var(--pota);background:transparent;color:var(--pota);border-radius:6px;">Camera</button>
+          <button type="button" id="sstv-gallery-pick-btn" style="flex:1;padding:8px;font-size:13px;font-weight:600;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;">Photo</button>
+          <button type="button" id="sstv-random-phone-btn" style="flex:1;padding:8px;font-size:13px;font-weight:600;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;">Random</button>
+          <button type="button" id="sstv-send-btn" style="flex:1;padding:8px;font-size:13px;font-weight:700;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;">SEND</button>
+        </div>
+
+        <!-- Text layers (tap to edit) -->
+        <div style="padding:6px 10px;border-bottom:1px solid var(--border);">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="font-size:12px;font-weight:700;color:var(--text-dim);">Text Layers</span>
+            <span style="flex:1"></span>
+            <button type="button" id="sstv-phone-add-text" style="font-size:12px;padding:2px 8px;border:1px dashed var(--border);border-radius:4px;background:transparent;color:var(--text-dim);">+ Add</button>
+          </div>
+          <div id="sstv-phone-text-layers" style="display:flex;flex-direction:column;gap:3px;"></div>
+          <!-- Inline text editor (shown when a layer is tapped) -->
+          <div id="sstv-phone-text-editor" style="display:none;padding:6px 0;display:none;flex-wrap:wrap;gap:6px;align-items:center;">
+            <input type="text" id="sstv-phone-te-text" placeholder="Text..." style="flex:1;min-width:80px;font-size:13px;padding:4px 6px;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <input type="number" id="sstv-phone-te-size" min="8" max="40" value="18" style="width:48px;font-size:13px;padding:4px;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:4px;text-align:center;">
+            <button type="button" id="sstv-phone-te-bold" style="font-size:14px;font-weight:900;width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-dim);">B</button>
+            <button type="button" id="sstv-phone-te-italic" style="font-size:14px;font-style:italic;width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-dim);">I</button>
+            <input type="color" id="sstv-phone-te-color" value="#ffffff" style="width:28px;height:28px;border:1px solid var(--border);border-radius:4px;padding:0;background:none;">
+          </div>
+        </div>
+
+        <!-- Received images -->
+        <div style="padding:6px 10px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="font-size:12px;font-weight:700;color:var(--text-dim);">Received</span>
+            <span id="sstv-phone-decode-status" style="font-size:11px;color:var(--pota);display:none;"></span>
+            <span style="flex:1"></span>
+            <span id="sstv-phone-gallery-count" style="font-size:11px;color:var(--text-dim);"></span>
+          </div>
+          <div id="sstv-phone-gallery" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+          <button type="button" id="sstv-phone-load-more" style="display:none;width:100%;margin-top:6px;padding:8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-dim);">Load more</button>
+        </div>
+
+      </div><!-- end scrollable -->
+    </div>
+
     <div id="bottom-bar">
       <!-- Initial state: big connect button for new users -->
       <button id="audio-connect-btn" type="button" class="bb-connect-btn">&#x1F50A; Tap to Connect Audio</button>
@@ -1113,6 +1234,8 @@
   </div>
 
   <!-- leaflet-js -->
+  <!-- Hidden file input for SSTV photo picker -->
+  <input type="file" id="sstv-phone-file-input" accept="image/*" style="display:none">
   <script src="remote.js"></script>
 </body>
 </html>

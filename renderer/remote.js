@@ -337,6 +337,21 @@
     });
   }
 
+  // SSTV DOM refs
+  var echoSettings = null; // full settings object — used for SSTV templates
+  const sstvView = document.getElementById('sstv-view');
+  const sstvCameraPreview = document.getElementById('sstv-camera-preview');
+  const sstvPhoneCompose = document.getElementById('sstv-phone-compose');
+  const sstvPhoneComposeCtx = sstvPhoneCompose ? sstvPhoneCompose.getContext('2d') : null;
+  const sstvPhoneGallery = document.getElementById('sstv-phone-gallery');
+  const sstvPhoneStatus = document.getElementById('sstv-phone-status');
+  let sstvCameraStream = null;
+  let sstvPhoneBg = null; // current background (canvas or video frame)
+  let sstvPhoneBgZoom = 1.0;    // zoom factor (1 = fit, >1 = zoomed in)
+  let sstvPhoneBgPanX = 0;      // pan offset in source image pixels
+  let sstvPhoneBgPanY = 0;
+  let sstvPhoneGalleryItems = [];
+
   // FT8 DOM refs
   const ft8View = document.getElementById('ft8-view');
   const ft8BandSelect = document.getElementById('ft8-band-select');
@@ -603,6 +618,7 @@
         updateCwPanelVisibility();
         updateSsbPanelVisibility();
         if (msg.settings) {
+          echoSettings = msg.settings;
           myCallsign = msg.settings.myCallsign || '';
           phoneGrid = msg.settings.grid || phoneGrid;
           clusterConnected = !!msg.settings.clusterConnected;
@@ -895,6 +911,11 @@
           if (msg.settings.remoteCwMacros) syncMacrosFromSettings(msg.settings.remoteCwMacros);
           if (msg.settings.customCatButtons) loadCustomCatButtons(msg.settings.customCatButtons);
           syncTuningUI();
+          // Sync SSTV templates if updated
+          if (msg.settings.sstvTemplates || msg.settings.sstvTextElements) {
+            echoSettings = Object.assign(echoSettings || {}, msg.settings);
+            sstvPhoneLoadSettings();
+          }
         }
         break;
 
@@ -1037,6 +1058,50 @@
       case 'kiwi-status':
       case 'kiwi-audio':
         if (typeof handleKiwiMessage === 'function') handleKiwiMessage(msg);
+        break;
+
+      // --- SSTV ---
+      case 'sstv-tx-status':
+        sstvPhoneRxActive = false;
+        if (msg.state === 'tx') {
+          sstvPhoneStartTxProgress(msg.durationSec || 0);
+          if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Transmitting...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
+        } else if (msg.state === 'auto-rx') {
+          if (sstvPhoneStatus) {
+            sstvPhoneStatus.textContent = 'Auto-SSTV ' + (msg.freqKhz ? (msg.freqKhz / 1000).toFixed(3) : '') + ' MHz';
+            sstvPhoneStatus.style.color = 'var(--pota)';
+          }
+        } else {
+          sstvPhoneStopTxProgress();
+          if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+        }
+        sstvPhoneUpdateSendBtn();
+        break;
+      case 'sstv-rx-progress': {
+        var pct = Math.round((msg.progress || 0) * 100);
+        sstvPhoneRxActive = true;
+        if (sstvPhoneStatus) {
+          sstvPhoneStatus.textContent = 'Receiving ' + pct + '%';
+          sstvPhoneStatus.style.color = 'var(--pota)';
+        }
+        if (sstvPhoneDecodeStatus) {
+          sstvPhoneDecodeStatus.style.display = '';
+          sstvPhoneDecodeStatus.textContent = 'Decoding ' + (msg.line || 0) + '/' + (msg.totalLines || '?') + ' (' + pct + '%)';
+        }
+        sstvPhoneUpdateSendBtn();
+        break;
+      }
+      case 'sstv-rx-image':
+        sstvPhoneRxActive = false;
+        if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+        sstvPhoneUpdateSendBtn();
+        sstvPhoneAddRxImage(msg);
+        break;
+      case 'sstv-gallery':
+        sstvPhoneHandleGallery(msg);
+        break;
+      case 'sstv-wf-bins':
+        sstvPhoneDrawWfLine(msg.bins);
         break;
     }
   }
@@ -3738,13 +3803,14 @@
     logbookView.classList.add('hidden');
     ft8View.classList.add('hidden');
     if (dirView) dirView.classList.add('hidden');
+    if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
     if (scanning) stopScan();
-    // Show/hide PTT button — hide when FT8 tab is active
-    pttBtn.style.display = tab === 'ft8' ? 'none' : '';
-    // Hide entire bottom bar (Audio/PTT/STOP) on FT8 tab — no voice audio needed
-    bottomBar.style.display = tab === 'ft8' ? 'none' : '';
-    // Hide Scan button and freq step arrows on FT8 tab — not relevant
-    scanBtn.style.display = tab === 'ft8' ? 'none' : '';
+    // Show/hide PTT button — hide when FT8/SSTV tab is active
+    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv') ? 'none' : '';
+    // Hide entire bottom bar on FT8/SSTV tab
+    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv') ? 'none' : '';
+    // Hide Scan button and freq step arrows on FT8/SSTV tab
+    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv') ? 'none' : '';
     var freqStepBtns = document.getElementById('freq-step-btns');
     if (freqStepBtns) freqStepBtns.style.display = tab === 'ft8' ? 'none' : '';
     // Hide CW/SSB panels on tabs where they're not relevant
@@ -3811,6 +3877,11 @@
     } else if (tab === 'dir') {
       if (dirView) dirView.classList.remove('hidden');
       renderDirectoryTab();
+    } else if (tab === 'sstv') {
+      if (sstvView) { sstvView.classList.remove('hidden'); sstvView.style.display = 'flex'; }
+      // Open SSTV on desktop + fetch recent decodes
+      send({ type: 'sstv-open' });
+      sstvPhoneRequestGallery(10, 0);
     }
   }
 
@@ -7370,6 +7441,718 @@
   }
 
   // ── End Speakermic ───────────────────────────────────────
+
+  // ── SSTV Phone Logic ────────────────────────────────────
+
+  var sstvPhoneRxActive = false;
+  var sstvPhoneTxBar = document.getElementById('sstv-phone-tx-bar');
+  var sstvPhoneTxProgress = document.getElementById('sstv-phone-tx-progress');
+  var sstvPhoneTxTime = document.getElementById('sstv-phone-tx-time');
+  var sstvPhoneTxTimer = null;
+  var sstvPhoneTxStart = 0;
+  var sstvPhoneTxDuration = 0;
+
+  function formatSec(s) {
+    var m = Math.floor(s / 60);
+    var sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+
+  function sstvPhoneStartTxProgress(durationSec) {
+    sstvPhoneTxDuration = durationSec;
+    sstvPhoneTxStart = Date.now();
+    if (sstvPhoneTxBar) sstvPhoneTxBar.style.display = '';
+    if (sstvPhoneTxProgress) sstvPhoneTxProgress.style.width = '0%';
+    if (sstvPhoneTxTime) sstvPhoneTxTime.textContent = '0:00 / ' + formatSec(durationSec);
+    if (sstvPhoneTxTimer) clearInterval(sstvPhoneTxTimer);
+    sstvPhoneTxTimer = setInterval(function() {
+      var elapsed = (Date.now() - sstvPhoneTxStart) / 1000;
+      var pct = sstvPhoneTxDuration > 0 ? Math.min(100, elapsed / sstvPhoneTxDuration * 100) : 0;
+      var remaining = Math.max(0, sstvPhoneTxDuration - elapsed);
+      if (sstvPhoneTxProgress) sstvPhoneTxProgress.style.width = pct + '%';
+      if (sstvPhoneTxTime) sstvPhoneTxTime.textContent = formatSec(elapsed) + ' / ' + formatSec(sstvPhoneTxDuration);
+      if (elapsed >= sstvPhoneTxDuration + 2) sstvPhoneStopTxProgress();
+    }, 500);
+  }
+
+  function sstvPhoneStopTxProgress() {
+    if (sstvPhoneTxTimer) { clearInterval(sstvPhoneTxTimer); sstvPhoneTxTimer = null; }
+    if (sstvPhoneTxBar) sstvPhoneTxBar.style.display = 'none';
+    if (sstvPhoneTxProgress) sstvPhoneTxProgress.style.width = '0%';
+  }
+  var sstvPhoneWfCanvas = document.getElementById('sstv-phone-wf');
+  var sstvPhoneWfCtx = sstvPhoneWfCanvas ? sstvPhoneWfCanvas.getContext('2d') : null;
+  var sstvPhoneWfWrap = document.getElementById('sstv-phone-wf-wrap');
+  var sstvPhoneWfToggle = document.getElementById('sstv-phone-wf-toggle');
+  var sstvPhoneWfVisible = false;
+
+  if (sstvPhoneWfToggle) {
+    sstvPhoneWfToggle.addEventListener('click', function() {
+      sstvPhoneWfVisible = !sstvPhoneWfVisible;
+      if (sstvPhoneWfWrap) sstvPhoneWfWrap.style.display = sstvPhoneWfVisible ? '' : 'none';
+      sstvPhoneWfToggle.style.background = sstvPhoneWfVisible ? 'var(--accent)' : 'transparent';
+      sstvPhoneWfToggle.style.color = sstvPhoneWfVisible ? '#fff' : 'var(--text-dim)';
+    });
+  }
+
+  function sstvPhoneDrawWfLine(bins) {
+    if (!sstvPhoneWfVisible || !sstvPhoneWfCtx || !bins) return;
+    var w = sstvPhoneWfCanvas.width, h = sstvPhoneWfCanvas.height;
+    // Scroll down
+    var imgData = sstvPhoneWfCtx.getImageData(0, 0, w, h);
+    sstvPhoneWfCtx.putImageData(imgData, 0, 1);
+    // Draw new line
+    var lineData = sstvPhoneWfCtx.createImageData(w, 1);
+    var d = lineData.data;
+    var binCount = bins.length;
+    for (var x = 0; x < w; x++) {
+      var bi = Math.floor(x * binCount / w);
+      var v = Math.max(0, Math.min(1, (bins[bi] || 0) / 255));
+      var r, g, b;
+      if (v < 0.2)      { r = 0; g = 0; b = Math.round(v / 0.2 * 180); }
+      else if (v < 0.4) { r = 0; g = Math.round((v-0.2)/0.2*200); b = 180; }
+      else if (v < 0.6) { r = 0; g = 200; b = Math.round(180-(v-0.4)/0.2*180); }
+      else if (v < 0.8) { r = Math.round((v-0.6)/0.2*255); g = 200+Math.round((v-0.6)/0.2*55); b = 0; }
+      else              { r = 255; g = 255; b = Math.round((v-0.8)/0.2*255); }
+      var idx = x * 4;
+      d[idx] = r; d[idx+1] = g; d[idx+2] = b; d[idx+3] = 255;
+    }
+    sstvPhoneWfCtx.putImageData(lineData, 0, 0);
+  }
+
+  var sstvFreqPhone = document.getElementById('sstv-freq-phone');
+  var sstvModePhone = document.getElementById('sstv-mode-phone');
+  var sstvCameraBtn = document.getElementById('sstv-camera-btn');
+  var sstvGalleryPickBtn = document.getElementById('sstv-gallery-pick-btn');
+
+  // Restore saved SSTV preferences
+  try {
+    var savedFreq = localStorage.getItem('sstv-phone-freq');
+    var savedMode = localStorage.getItem('sstv-phone-mode');
+    if (savedFreq && sstvFreqPhone) sstvFreqPhone.value = savedFreq;
+    if (savedMode && sstvModePhone) sstvModePhone.value = savedMode;
+  } catch (e) {}
+
+  // Frequency dropdown — QSY on change + save
+  if (sstvFreqPhone) {
+    sstvFreqPhone.addEventListener('change', function() {
+      send({ type: 'tune', frequency: sstvFreqPhone.value, mode: 'USB' });
+      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'QSY ' + sstvFreqPhone.value + ' kHz';
+      try { localStorage.setItem('sstv-phone-freq', sstvFreqPhone.value); } catch (e) {}
+    });
+  }
+
+  // Mode dropdown — save on change
+  if (sstvModePhone) {
+    sstvModePhone.addEventListener('change', function() {
+      try { localStorage.setItem('sstv-phone-mode', sstvModePhone.value); } catch (e) {}
+    });
+  }
+  var sstvRandomPhoneBtn = document.getElementById('sstv-random-phone-btn');
+  var sstvSendBtn = document.getElementById('sstv-send-btn');
+  var sstvPhoneAddTextBtn = document.getElementById('sstv-phone-add-text');
+  var sstvPhoneTextLayersEl = document.getElementById('sstv-phone-text-layers');
+  var sstvPhoneTextEditor = document.getElementById('sstv-phone-text-editor');
+  var sstvPhoneTplStrip = document.getElementById('sstv-phone-tpl-strip');
+  var sstvPhoneTplSection = document.getElementById('sstv-phone-tpl-section');
+  var sstvFileInput = document.getElementById('sstv-phone-file-input');
+
+  // Text elements — synced from desktop templates/settings, editable on phone
+  var sstvPhoneTexts = [
+    { key: 'cq', label: 'CQ SSTV', x: 8, y: 22, fontSize: 18, bold: true, italic: false, color: '#ffffff', rotation: 0, visible: true },
+    { key: 'call', label: '', x: 8, y: 44, fontSize: 20, bold: true, italic: false, color: '#ffffff', rotation: 0, visible: true },
+    { key: 'grid', label: '', x: 8, y: 66, fontSize: 14, bold: false, italic: false, color: '#ffffff', rotation: 0, visible: true },
+  ];
+  var sstvPhoneSelectedText = null;
+  var sstvPhoneTemplates = [];
+  var sstvPhoneUserTextCount = 0;
+
+  // Load templates + text elements from settings received on auth
+  function sstvPhoneLoadSettings() {
+    if (!echoSettings) return;
+    if (echoSettings.sstvTemplates && echoSettings.sstvTemplates.length) {
+      sstvPhoneTemplates = echoSettings.sstvTemplates;
+      sstvPhoneRenderTemplates();
+    }
+    if (echoSettings.sstvTextElements && echoSettings.sstvTextElements.length) {
+      sstvPhoneTexts = echoSettings.sstvTextElements.map(function(t) {
+        return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
+      });
+      sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key.indexOf('user-') === 0; }).length;
+    }
+    // Fill auto-labels
+    var callEl = sstvPhoneTexts.find(function(t) { return t.key === 'call'; });
+    if (callEl) callEl.label = myCallsign ? 'de ' + myCallsign.toUpperCase() : '';
+    var gridEl = sstvPhoneTexts.find(function(t) { return t.key === 'grid'; });
+    if (gridEl) gridEl.label = myGrid ? myGrid.toUpperCase() : '';
+    sstvPhoneRenderTextLayers();
+    sstvRenderPhoneCompose();
+  }
+
+  // --- Templates strip ---
+  function sstvPhoneRenderTemplates() {
+    if (!sstvPhoneTplStrip) return;
+    sstvPhoneTplStrip.innerHTML = '';
+    if (sstvPhoneTemplates.length === 0) { if (sstvPhoneTplSection) sstvPhoneTplSection.style.display = 'none'; return; }
+    if (sstvPhoneTplSection) sstvPhoneTplSection.style.display = '';
+    for (var i = 0; i < sstvPhoneTemplates.length; i++) {
+      (function(idx) {
+        var tpl = sstvPhoneTemplates[idx];
+        var div = document.createElement('div');
+        div.style.cssText = 'flex-shrink:0;border:2px solid transparent;border-radius:4px;overflow:hidden;cursor:pointer;';
+        var img = document.createElement('img');
+        img.src = tpl.thumbnail || '';
+        img.style.cssText = 'display:block;height:50px;width:auto;';
+        div.appendChild(img);
+        div.addEventListener('click', function() { sstvPhoneLoadTemplate(idx); });
+        sstvPhoneTplStrip.appendChild(div);
+      })(i);
+    }
+  }
+
+  function sstvPhoneLoadTemplate(idx) {
+    var tpl = sstvPhoneTemplates[idx];
+    if (!tpl) return;
+    // Restore text elements
+    sstvPhoneTexts = tpl.texts.map(function(t) {
+      return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
+    });
+    // Fill auto-labels with current callsign/grid
+    var callEl = sstvPhoneTexts.find(function(t) { return t.key === 'call'; });
+    if (callEl) callEl.label = myCallsign ? 'de ' + myCallsign.toUpperCase() : '';
+    var gridEl = sstvPhoneTexts.find(function(t) { return t.key === 'grid'; });
+    if (gridEl) gridEl.label = myGrid ? myGrid.toUpperCase() : '';
+    sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key.indexOf('user-') === 0; }).length;
+    // Restore background
+    sstvPhoneResetCrop();
+    if (tpl.bgDataUrl) {
+      var img = new Image();
+      img.onload = function() { sstvPhoneSetBg(img, true); };
+      img.src = tpl.bgDataUrl;
+    } else if (tpl.bgParams) {
+      sstvPhoneGeneratePattern(tpl.bgParams);
+      if (sstvCropBar) sstvCropBar.style.display = 'none';
+    }
+    sstvPhoneSelectedText = null;
+    sstvPhoneRenderTextLayers();
+    sstvPhoneHideEditor();
+    sstvRenderPhoneCompose();
+    if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template loaded';
+  }
+
+  // --- Text layer list ---
+  function sstvPhoneRenderTextLayers() {
+    if (!sstvPhoneTextLayersEl) return;
+    sstvPhoneTextLayersEl.innerHTML = '';
+    for (var i = 0; i < sstvPhoneTexts.length; i++) {
+      (function(idx) {
+        var t = sstvPhoneTexts[idx];
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:4px;font-size:13px;cursor:pointer;border:1px solid ' + (t === sstvPhoneSelectedText ? 'var(--accent)' : 'transparent') + ';background:' + (t === sstvPhoneSelectedText ? 'rgba(79,195,247,0.1)' : 'transparent') + ';';
+        // Visibility checkbox
+        var vis = document.createElement('input');
+        vis.type = 'checkbox'; vis.checked = t.visible;
+        vis.style.cssText = 'width:16px;height:16px;';
+        vis.addEventListener('change', function() { t.visible = vis.checked; sstvRenderPhoneCompose(); });
+        row.appendChild(vis);
+        // Color swatch
+        var sw = document.createElement('span');
+        sw.style.cssText = 'width:12px;height:12px;border-radius:2px;border:1px solid rgba(255,255,255,0.2);flex-shrink:0;background:' + (t.color || '#fff') + ';';
+        row.appendChild(sw);
+        // Label
+        var lbl = document.createElement('span');
+        lbl.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);';
+        var name = t.key === 'call' ? 'Callsign' : t.key === 'grid' ? 'Grid' : t.key === 'cq' ? 'CQ SSTV' : (t.label || '(empty)');
+        var style = (t.bold ? 'B' : '') + (t.italic ? 'I' : '');
+        lbl.textContent = name + (style ? ' [' + style + ']' : '') + ' ' + t.fontSize + 'px';
+        row.appendChild(lbl);
+        // Delete (user-created only)
+        if (t.key.indexOf('user-') === 0) {
+          var del = document.createElement('button');
+          del.textContent = '\u2715';
+          del.style.cssText = 'background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;padding:0 3px;';
+          del.addEventListener('click', function(e) {
+            e.stopPropagation();
+            sstvPhoneTexts.splice(idx, 1);
+            if (sstvPhoneSelectedText === t) { sstvPhoneSelectedText = null; sstvPhoneHideEditor(); }
+            sstvPhoneRenderTextLayers(); sstvRenderPhoneCompose();
+          });
+          row.appendChild(del);
+        }
+        row.addEventListener('click', function(e) {
+          if (e.target === vis) return;
+          sstvPhoneSelectedText = t;
+          sstvPhoneRenderTextLayers();
+          sstvPhoneShowEditor(t);
+        });
+        sstvPhoneTextLayersEl.appendChild(row);
+      })(i);
+    }
+  }
+
+  // --- Text property editor ---
+  function sstvPhoneShowEditor(t) {
+    if (!sstvPhoneTextEditor) return;
+    sstvPhoneTextEditor.style.display = 'flex';
+    var textIn = document.getElementById('sstv-phone-te-text');
+    var sizeIn = document.getElementById('sstv-phone-te-size');
+    var boldBtn = document.getElementById('sstv-phone-te-bold');
+    var italicBtn = document.getElementById('sstv-phone-te-italic');
+    var colorIn = document.getElementById('sstv-phone-te-color');
+    var isAuto = (t.key === 'call' || t.key === 'grid');
+    textIn.value = isAuto ? '' : t.label;
+    textIn.placeholder = isAuto ? (t.key === 'call' ? 'Callsign (auto)' : 'Grid (auto)') : 'Text...';
+    textIn.disabled = isAuto;
+    textIn.style.opacity = isAuto ? '0.5' : '1';
+    sizeIn.value = t.fontSize;
+    boldBtn.style.background = t.bold ? 'var(--accent)' : 'transparent';
+    boldBtn.style.color = t.bold ? '#000' : 'var(--text-dim)';
+    italicBtn.style.background = t.italic ? 'var(--accent)' : 'transparent';
+    italicBtn.style.color = t.italic ? '#000' : 'var(--text-dim)';
+    colorIn.value = t.color || '#ffffff';
+    // Wire events (remove old listeners by replacing elements)
+    var newText = textIn.cloneNode(true);
+    textIn.parentNode.replaceChild(newText, textIn);
+    newText.addEventListener('input', function() { t.label = newText.value; sstvRenderPhoneCompose(); });
+    var newSize = sizeIn.cloneNode(true);
+    sizeIn.parentNode.replaceChild(newSize, sizeIn);
+    newSize.addEventListener('change', function() { t.fontSize = Math.max(8, Math.min(40, parseInt(newSize.value) || 14)); sstvPhoneRenderTextLayers(); sstvRenderPhoneCompose(); });
+    var newBold = boldBtn.cloneNode(true);
+    boldBtn.parentNode.replaceChild(newBold, boldBtn);
+    newBold.addEventListener('click', function() { t.bold = !t.bold; sstvPhoneShowEditor(t); sstvPhoneRenderTextLayers(); sstvRenderPhoneCompose(); });
+    var newItalic = italicBtn.cloneNode(true);
+    italicBtn.parentNode.replaceChild(newItalic, italicBtn);
+    newItalic.addEventListener('click', function() { t.italic = !t.italic; sstvPhoneShowEditor(t); sstvPhoneRenderTextLayers(); sstvRenderPhoneCompose(); });
+    var newColor = colorIn.cloneNode(true);
+    colorIn.parentNode.replaceChild(newColor, colorIn);
+    newColor.addEventListener('input', function() { t.color = newColor.value; sstvPhoneRenderTextLayers(); sstvRenderPhoneCompose(); });
+  }
+
+  function sstvPhoneHideEditor() {
+    if (sstvPhoneTextEditor) sstvPhoneTextEditor.style.display = 'none';
+  }
+
+  // Add text layer
+  if (sstvPhoneAddTextBtn) {
+    sstvPhoneAddTextBtn.addEventListener('click', function() {
+      sstvPhoneUserTextCount++;
+      var newY = sstvPhoneTexts.length > 0 ? sstvPhoneTexts[sstvPhoneTexts.length - 1].y + 20 : 22;
+      var t = { key: 'user-' + sstvPhoneUserTextCount, label: 'Text', x: 8, y: Math.min(newY, 240), fontSize: 14, bold: false, italic: false, color: '#ffffff', rotation: 0, visible: true };
+      sstvPhoneTexts.push(t);
+      sstvPhoneSelectedText = t;
+      sstvPhoneRenderTextLayers();
+      sstvPhoneShowEditor(t);
+      sstvRenderPhoneCompose();
+    });
+  }
+
+  // --- Canvas touch drag for text repositioning ---
+  if (sstvPhoneCompose) {
+    sstvPhoneCompose.addEventListener('touchstart', function(e) {
+      var touch = e.touches[0];
+      var rect = sstvPhoneCompose.getBoundingClientRect();
+      var sx = sstvPhoneCompose.width / rect.width;
+      var sy = sstvPhoneCompose.height / rect.height;
+      var mx = (touch.clientX - rect.left) * sx;
+      var my = (touch.clientY - rect.top) * sy;
+      // Hit test text elements
+      for (var i = sstvPhoneTexts.length - 1; i >= 0; i--) {
+        var t = sstvPhoneTexts[i];
+        if (!t.visible || !t.label) continue;
+        sstvPhoneComposeCtx.font = (t.italic ? 'italic ' : '') + (t.bold ? 'bold ' : '') + t.fontSize + 'px sans-serif';
+        var metrics = sstvPhoneComposeCtx.measureText(t.label);
+        if (mx >= t.x && mx <= t.x + metrics.width && my >= t.y - t.fontSize && my <= t.y + 2) {
+          sstvPhoneSelectedText = t;
+          sstvPhoneSelectedText._dragOx = mx - t.x;
+          sstvPhoneSelectedText._dragOy = my - t.y;
+          sstvPhoneRenderTextLayers();
+          sstvPhoneShowEditor(t);
+          e.preventDefault();
+          return;
+        }
+      }
+    }, { passive: false });
+
+    sstvPhoneCompose.addEventListener('touchmove', function(e) {
+      if (!sstvPhoneSelectedText || !sstvPhoneSelectedText._dragOx) return;
+      var touch = e.touches[0];
+      var rect = sstvPhoneCompose.getBoundingClientRect();
+      var sx = sstvPhoneCompose.width / rect.width;
+      var sy = sstvPhoneCompose.height / rect.height;
+      var mx = (touch.clientX - rect.left) * sx;
+      var my = (touch.clientY - rect.top) * sy;
+      sstvPhoneSelectedText.x = Math.max(0, Math.min(sstvPhoneCompose.width - 10, mx - sstvPhoneSelectedText._dragOx));
+      sstvPhoneSelectedText.y = Math.max(sstvPhoneSelectedText.fontSize, Math.min(sstvPhoneCompose.height, my - sstvPhoneSelectedText._dragOy));
+      sstvRenderPhoneCompose();
+      e.preventDefault();
+    }, { passive: false });
+
+    sstvPhoneCompose.addEventListener('touchend', function() {
+      if (sstvPhoneSelectedText) delete sstvPhoneSelectedText._dragOx;
+    });
+  }
+
+  // --- Camera ---
+  if (sstvCameraBtn) {
+    sstvCameraBtn.addEventListener('click', async function() {
+      try {
+        if (sstvCameraStream) { sstvCaptureFrame(); return; }
+        sstvCameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+        });
+        sstvCameraPreview.srcObject = sstvCameraStream;
+        sstvCameraPreview.style.display = 'block';
+        sstvCameraBtn.textContent = 'Capture';
+      } catch (err) {
+        if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Camera error: ' + err.message;
+      }
+    });
+  }
+
+  function sstvCaptureFrame() {
+    if (!sstvCameraStream || !sstvCameraPreview.videoWidth) return;
+    var c = document.createElement('canvas');
+    c.width = sstvCameraPreview.videoWidth; c.height = sstvCameraPreview.videoHeight;
+    c.getContext('2d').drawImage(sstvCameraPreview, 0, 0);
+    sstvCameraStream.getTracks().forEach(function(t) { t.stop(); });
+    sstvCameraStream = null;
+    sstvCameraPreview.style.display = 'none';
+    sstvCameraBtn.textContent = 'Camera';
+    sstvPhoneSetBg(c, true);
+  }
+
+  // --- Image crop/zoom/pan ---
+  var sstvCropBar = document.getElementById('sstv-phone-crop-bar');
+  var sstvZoomLabel = document.getElementById('sstv-phone-zoom-label');
+
+  function sstvPhoneResetCrop() {
+    sstvPhoneBgZoom = 1.0;
+    sstvPhoneBgPanX = 0;
+    sstvPhoneBgPanY = 0;
+    sstvPhoneUpdateCropUI();
+  }
+
+  function sstvPhoneSetBg(imgOrCanvas, showCrop) {
+    sstvPhoneBg = imgOrCanvas;
+    sstvPhoneResetCrop();
+    if (sstvCropBar) sstvCropBar.style.display = showCrop ? 'flex' : 'none';
+    sstvRenderPhoneCompose();
+  }
+
+  function sstvPhoneUpdateCropUI() {
+    if (sstvZoomLabel) sstvZoomLabel.textContent = sstvPhoneBgZoom.toFixed(1) + 'x';
+  }
+
+  // Zoom buttons
+  var zoomInBtn = document.getElementById('sstv-phone-zoom-in');
+  var zoomOutBtn = document.getElementById('sstv-phone-zoom-out');
+  var cropResetBtn = document.getElementById('sstv-phone-crop-reset');
+  if (zoomInBtn) zoomInBtn.addEventListener('click', function() {
+    sstvPhoneBgZoom = Math.min(5.0, sstvPhoneBgZoom + 0.2);
+    sstvPhoneUpdateCropUI(); sstvRenderPhoneCompose();
+  });
+  if (zoomOutBtn) zoomOutBtn.addEventListener('click', function() {
+    sstvPhoneBgZoom = Math.max(0.5, sstvPhoneBgZoom - 0.2);
+    sstvPhoneUpdateCropUI(); sstvRenderPhoneCompose();
+  });
+  if (cropResetBtn) cropResetBtn.addEventListener('click', function() {
+    sstvPhoneResetCrop(); sstvRenderPhoneCompose();
+  });
+
+  // Touch pan on compose canvas (when dragging background, not text)
+  var _bgPanActive = false;
+  var _bgPanLastX = 0, _bgPanLastY = 0;
+
+  if (sstvPhoneCompose) {
+    // Pan starts if touch doesn't hit text — fires after text touchstart handler
+    // Uses a tiny delay so text handler's preventDefault() can claim the touch first
+    sstvPhoneCompose.addEventListener('touchstart', function(e) {
+      if (!sstvPhoneBg || sstvPhoneBgZoom <= 1.0) return;
+      // If text drag is already active, don't start pan
+      if (sstvPhoneSelectedText && sstvPhoneSelectedText._dragOx != null) return;
+      var touch = e.touches[0];
+      _bgPanActive = true;
+      _bgPanLastX = touch.clientX;
+      _bgPanLastY = touch.clientY;
+    }, { passive: true });
+
+    sstvPhoneCompose.addEventListener('touchmove', function(e) {
+      if (!_bgPanActive) return;
+      var touch = e.touches[0];
+      var rect = sstvPhoneCompose.getBoundingClientRect();
+      // Convert screen pixel delta to source image pixel delta
+      var srcW = sstvPhoneBg.width || sstvPhoneBg.naturalWidth || 320;
+      var srcH = sstvPhoneBg.height || sstvPhoneBg.naturalHeight || 256;
+      var baseScale = Math.max(320 / srcW, 256 / srcH);
+      var effectiveScale = baseScale * sstvPhoneBgZoom;
+      // How many source pixels per screen pixel
+      var screenToSrc = 1 / (effectiveScale * (rect.width / 320));
+      var dx = (touch.clientX - _bgPanLastX) * screenToSrc;
+      var dy = (touch.clientY - _bgPanLastY) * screenToSrc;
+      sstvPhoneBgPanX -= dx;
+      sstvPhoneBgPanY -= dy;
+      _bgPanLastX = touch.clientX;
+      _bgPanLastY = touch.clientY;
+      sstvRenderPhoneCompose();
+      e.preventDefault();
+    }, { passive: false });
+
+    sstvPhoneCompose.addEventListener('touchend', function() {
+      _bgPanActive = false;
+    });
+  }
+
+  // --- Photo picker (from phone gallery) ---
+  if (sstvGalleryPickBtn && sstvFileInput) {
+    sstvGalleryPickBtn.addEventListener('click', function() { sstvFileInput.click(); });
+    sstvFileInput.addEventListener('change', function() {
+      var file = sstvFileInput.files && sstvFileInput.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        var img = new Image();
+        img.onload = function() { sstvPhoneSetBg(img, true); };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+      sstvFileInput.value = '';
+    });
+  }
+
+  // --- Random pattern ---
+  if (sstvRandomPhoneBtn) {
+    sstvRandomPhoneBtn.addEventListener('click', function() {
+      sstvPhoneGeneratePattern(null);
+      sstvPhoneResetCrop();
+      if (sstvCropBar) sstvCropBar.style.display = 'none'; // patterns don't need crop
+      sstvRenderPhoneCompose();
+    });
+  }
+
+  function sstvPhoneGeneratePattern(params) {
+    var c = document.createElement('canvas');
+    c.width = 320; c.height = 256;
+    var ctx2 = c.getContext('2d');
+    var imgData = ctx2.createImageData(320, 256);
+    var d = imgData.data;
+    var f1 = params ? params.seed.f1 : 0.02 + Math.random() * 0.04;
+    var f2 = params ? params.seed.f2 : 0.02 + Math.random() * 0.04;
+    var f3 = params ? params.seed.f3 : 0.01 + Math.random() * 0.03;
+    var p1 = params ? (params.seed.p1 || 0) : Math.random() * Math.PI * 2;
+    var p2 = params ? (params.seed.p2 || 0) : Math.random() * Math.PI * 2;
+    var p3 = params ? (params.seed.p3 || 0) : Math.random() * Math.PI * 2;
+    var hueBase = params ? params.seed.hue : Math.random() * 360;
+    for (var y = 0; y < 256; y++) {
+      for (var x = 0; x < 320; x++) {
+        var v = (Math.sin(x * f1 + p1) + Math.sin(y * f2 + p2) + Math.sin((x + y) * f3 + p3)) / 3;
+        var hue = (hueBase + v * 120 + 360) % 360;
+        var sat = 0.7, lit = 0.35 + v * 0.2;
+        var q2 = lit < 0.5 ? lit * (1 + sat) : lit + sat - lit * sat;
+        var pp = 2 * lit - q2;
+        var hh = hue / 360;
+        var rr = hue2rgb(pp, q2, hh + 1/3);
+        var gg = hue2rgb(pp, q2, hh);
+        var bb = hue2rgb(pp, q2, hh - 1/3);
+        var idx = (y * 320 + x) * 4;
+        d[idx] = Math.round(rr * 255); d[idx+1] = Math.round(gg * 255);
+        d[idx+2] = Math.round(bb * 255); d[idx+3] = 255;
+      }
+    }
+    ctx2.putImageData(imgData, 0, 0);
+    sstvPhoneBg = c;
+  }
+
+  function hue2rgb(p, q, t) {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q - p) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+    return p;
+  }
+
+  // --- Canvas compose (background + text layers) ---
+  function sstvRenderPhoneCompose() {
+    if (!sstvPhoneComposeCtx) return;
+    var w = 320, h = 256;
+    sstvPhoneCompose.width = w; sstvPhoneCompose.height = h;
+    // Background with zoom/pan
+    if (sstvPhoneBg) {
+      var srcW = sstvPhoneBg.width || sstvPhoneBg.naturalWidth || w;
+      var srcH = sstvPhoneBg.height || sstvPhoneBg.naturalHeight || h;
+      // Base scale: cover-crop
+      var baseScale = Math.max(w / srcW, h / srcH);
+      // Apply user zoom (higher zoom = see less of image = more zoomed in)
+      var effectiveScale = baseScale * sstvPhoneBgZoom;
+      // Source region size (how much of the source image is visible)
+      var sw = w / effectiveScale;
+      var sh = h / effectiveScale;
+      // Center + apply pan offset (clamped to image bounds)
+      var sx = (srcW - sw) / 2 + sstvPhoneBgPanX;
+      var sy = (srcH - sh) / 2 + sstvPhoneBgPanY;
+      // Clamp to source image bounds
+      sx = Math.max(0, Math.min(srcW - sw, sx));
+      sy = Math.max(0, Math.min(srcH - sh, sy));
+      sstvPhoneComposeCtx.drawImage(sstvPhoneBg, sx, sy, sw, sh, 0, 0, w, h);
+    } else {
+      sstvPhoneComposeCtx.fillStyle = '#0a0a18';
+      sstvPhoneComposeCtx.fillRect(0, 0, w, h);
+    }
+    // Text layers
+    for (var i = 0; i < sstvPhoneTexts.length; i++) {
+      var t = sstvPhoneTexts[i];
+      if (!t.visible || !t.label) continue;
+      sstvPhoneComposeCtx.save();
+      sstvPhoneComposeCtx.shadowColor = '#000';
+      sstvPhoneComposeCtx.shadowBlur = 3;
+      sstvPhoneComposeCtx.shadowOffsetX = 1;
+      sstvPhoneComposeCtx.shadowOffsetY = 1;
+      sstvPhoneComposeCtx.fillStyle = t.color || '#ffffff';
+      sstvPhoneComposeCtx.font = (t.italic ? 'italic ' : '') + (t.bold ? 'bold ' : '') + t.fontSize + 'px sans-serif';
+      if (t.rotation) {
+        sstvPhoneComposeCtx.translate(t.x, t.y);
+        sstvPhoneComposeCtx.rotate(t.rotation);
+        sstvPhoneComposeCtx.fillText(t.label, 0, 0);
+      } else {
+        sstvPhoneComposeCtx.fillText(t.label, t.x, t.y);
+      }
+      sstvPhoneComposeCtx.restore();
+    }
+  }
+
+  // --- Send ---
+  function sstvPhoneUpdateSendBtn() {
+    if (!sstvSendBtn) return;
+    if (sstvPhoneRxActive) {
+      sstvSendBtn.style.opacity = '0.4';
+      sstvSendBtn.style.pointerEvents = 'none';
+      sstvSendBtn.textContent = 'RX...';
+    } else {
+      sstvSendBtn.style.opacity = '';
+      sstvSendBtn.style.pointerEvents = '';
+      sstvSendBtn.textContent = 'SEND';
+    }
+  }
+
+  if (sstvSendBtn) {
+    sstvSendBtn.addEventListener('click', function() {
+      if (sstvPhoneRxActive) return;
+      sstvRenderPhoneCompose();
+      var dataUrl = sstvPhoneCompose.toDataURL('image/jpeg', 0.9);
+      var modeEl = document.getElementById('sstv-mode-phone');
+      var mode = modeEl ? modeEl.value : 'martin1';
+      send({ type: 'sstv-photo', image: dataUrl, mode: mode });
+      if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Sending...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
+    });
+  }
+
+  // --- Gallery fetch from POTACAT ---
+  var sstvPhoneGalleryLoaded = 0;  // how many gallery images loaded so far
+  var sstvPhoneGalleryTotal = 0;   // total images on POTACAT
+  var sstvPhoneDecodeStatus = document.getElementById('sstv-phone-decode-status');
+  var sstvPhoneGalleryCountEl = document.getElementById('sstv-phone-gallery-count');
+  var sstvPhoneLoadMoreBtn = document.getElementById('sstv-phone-load-more');
+
+  function sstvPhoneRequestGallery(limit, offset) {
+    send({ type: 'sstv-get-gallery', limit: limit || 10, offset: offset || 0 });
+  }
+
+  function sstvPhoneHandleGallery(msg) {
+    var images = msg.images || [];
+    sstvPhoneGalleryTotal = msg.total || 0;
+    if (!msg.requestId) {
+      // Initial load or load-more (not a refresh)
+      for (var i = 0; i < images.length; i++) {
+        sstvPhoneAddGalleryImage(images[i]);
+      }
+    }
+    sstvPhoneGalleryLoaded = sstvPhoneGallery ? sstvPhoneGallery.children.length : 0;
+    if (sstvPhoneGalleryCountEl) {
+      sstvPhoneGalleryCountEl.textContent = sstvPhoneGalleryLoaded + ' of ' + sstvPhoneGalleryTotal;
+    }
+    if (sstvPhoneLoadMoreBtn) {
+      sstvPhoneLoadMoreBtn.style.display = sstvPhoneGalleryLoaded < sstvPhoneGalleryTotal ? '' : 'none';
+    }
+  }
+
+  function sstvPhoneAddGalleryImage(img) {
+    if (!sstvPhoneGallery) return;
+    var div = document.createElement('div');
+    div.style.cssText = 'flex-shrink:0;border:1px solid var(--border);border-radius:4px;overflow:hidden;position:relative;cursor:pointer;';
+    var imgEl = document.createElement('img');
+    imgEl.src = img.dataUrl || img.image || '';
+    imgEl.style.cssText = 'display:block;width:120px;height:auto;';
+    div.appendChild(imgEl);
+    var info = document.createElement('div');
+    info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
+    var ts = img.timestamp ? new Date(img.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    info.textContent = (img.mode || '') + ' ' + ts;
+    div.appendChild(info);
+    // Tap to view full size
+    div.addEventListener('click', function() {
+      sstvPhoneViewImage(img.dataUrl || img.image);
+    });
+    sstvPhoneGallery.appendChild(div);
+  }
+
+  // Full-size image viewer overlay
+  function sstvPhoneViewImage(src) {
+    if (!src) return;
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+    var img = document.createElement('img');
+    img.src = src;
+    img.style.cssText = 'max-width:95%;max-height:95%;image-rendering:pixelated;border-radius:4px;';
+    overlay.appendChild(img);
+    overlay.addEventListener('click', function() { overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
+  if (sstvPhoneLoadMoreBtn) {
+    sstvPhoneLoadMoreBtn.addEventListener('click', function() {
+      var offset = sstvPhoneGallery ? sstvPhoneGallery.children.length : 0;
+      sstvPhoneRequestGallery(10, offset);
+    });
+  }
+
+  // --- Receive decoded SSTV image (live from POTACAT decoder) ---
+  function sstvPhoneAddRxImage(msg) {
+    if (!sstvPhoneGallery) return;
+    var imgSrc = msg.image || msg.dataUrl || '';
+    if (!imgSrc) return;
+    // Prepend new live decode to gallery
+    var div = document.createElement('div');
+    div.style.cssText = 'flex-shrink:0;border:2px solid var(--pota);border-radius:4px;overflow:hidden;position:relative;cursor:pointer;';
+    var img = document.createElement('img');
+    img.src = imgSrc;
+    img.style.cssText = 'display:block;width:120px;height:auto;';
+    div.appendChild(img);
+    var info = document.createElement('div');
+    info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
+    info.textContent = 'NEW ' + (msg.mode || '') + ' ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    div.appendChild(info);
+    div.addEventListener('click', function() { sstvPhoneViewImage(imgSrc); });
+    sstvPhoneGallery.insertBefore(div, sstvPhoneGallery.firstChild);
+    sstvPhoneGalleryItems.unshift({ src: imgSrc, mode: msg.mode });
+    // Fade the green border after 5 seconds
+    setTimeout(function() { div.style.borderColor = 'var(--border)'; }, 5000);
+    // Update count
+    sstvPhoneGalleryTotal++;
+    sstvPhoneGalleryLoaded = sstvPhoneGallery.children.length;
+    if (sstvPhoneGalleryCountEl) sstvPhoneGalleryCountEl.textContent = sstvPhoneGalleryLoaded + ' of ' + sstvPhoneGalleryTotal;
+    // Show decode status
+    if (sstvPhoneDecodeStatus) {
+      sstvPhoneDecodeStatus.style.display = '';
+      sstvPhoneDecodeStatus.textContent = 'New image decoded!';
+      setTimeout(function() { sstvPhoneDecodeStatus.style.display = 'none'; }, 4000);
+    }
+    if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Image received';
+  }
+
+  // Load SSTV settings when auth completes
+  // (echoSettings is set earlier in the auth-ok handler)
+  setTimeout(sstvPhoneLoadSettings, 500);
+
+  // ── End SSTV ─────────────────────────────────────────────
 
   // Auto-connect on page load
   connect('');

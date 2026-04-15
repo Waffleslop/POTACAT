@@ -5555,6 +5555,9 @@ if (viewsDropdown) {
 viewJtcatBtn.addEventListener('click', () => {
   window.api.jtcatPopoutOpen();
 });
+document.getElementById('view-sstv-btn').addEventListener('click', () => {
+  window.api.sstvPopoutOpen();
+});
 document.getElementById('vfo-popout-btn').addEventListener('click', () => {
   window.api.vfoPopoutOpen();
 });
@@ -6918,6 +6921,7 @@ quickLightMode.addEventListener('change', async () => {
   if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(light ? 'light' : 'dark');
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(light ? 'light' : 'dark');
   if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(light ? 'light' : 'dark');
+  window.api.sstvPopoutTheme(light ? 'light' : 'dark');
   window.api.vfoPopoutTheme(light ? 'light' : 'dark');
   await window.api.saveSettings({ lightMode: light });
 });
@@ -7365,6 +7369,8 @@ async function openSettingsDialog(tab) {
   document.getElementById('set-split-orientation').value = s.splitOrientation || 'horizontal';
   setEnableDxcc.checked = s.enableDxcc === true;
   setEnableFreedv.checked = s.enableFreedv === true;
+  document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
+  document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
   setSotaUpload.checked = s.sotaUpload === true;
   setSotaUsername.value = s.sotaUsername || '';
   setSotaPassword.value = s.sotaPassword || '';
@@ -7750,6 +7756,8 @@ settingsSave.addEventListener('click', async () => {
     splitOrientation: splitOrientationVal,
     enableDxcc: dxccEnabled,
     enableFreedv: freedvEnabled,
+    enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
+    autoSstvInactivityMin: parseInt(document.getElementById('set-auto-sstv-min').value) || 90,
     sotaUpload: sotaUploadEnabled,
     sotaUsername: sotaUsernameVal,
     sotaPassword: sotaPasswordVal,
@@ -7900,6 +7908,7 @@ settingsSave.addEventListener('click', async () => {
   if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(lightModeEnabled ? 'light' : 'dark');
+  window.api.sstvPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;

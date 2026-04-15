@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:;">
+  <title>POTACAT — SSTV</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { display: flex; flex-direction: column; }
+
+    /* Titlebar */
+    .sstv-titlebar { display: flex; align-items: center; padding: 0 8px; height: 32px; background: var(--bg-header); border-bottom: 1px solid var(--border-primary); -webkit-app-region: drag; flex-shrink: 0; user-select: none; }
+    .sstv-titlebar-title { font-size: 12px; font-weight: 700; color: var(--text-primary); flex: 1; }
+    .sstv-titlebar-btn { -webkit-app-region: no-drag; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 8px; line-height: 1; }
+    .sstv-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
+    .sstv-titlebar-btn.close:hover { background: #e94560; color: #fff; }
+
+    /* Scrollable content area */
+    .sstv-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+
+    /* Image panes */
+    .sstv-panes { display: flex; gap: 12px; padding: 12px; align-items: flex-start; flex-shrink: 0; }
+    .sstv-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .sstv-pane-label { font-size: 12px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sstv-canvas-wrap { position: relative; background: #000; border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; }
+    .sstv-canvas-wrap canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+    .sstv-decode-info { position: absolute; bottom: 4px; left: 6px; font-size: 11px; color: #ccc; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 3px; pointer-events: none; }
+
+    /* RX waterfall */
+    .sstv-waterfall-wrap { margin-top: 4px; border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; background: #000; }
+    .sstv-waterfall-wrap canvas { display: block; width: 100%; height: 60px; image-rendering: pixelated; }
+    .sstv-wf-labels { display: flex; justify-content: space-between; padding: 1px 4px; font-size: 9px; color: var(--text-dim); }
+
+    /* Controls bar */
+    .sstv-controls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; flex-wrap: wrap; }
+    .sstv-controls select, .sstv-controls input { font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 6px; }
+    .sstv-controls select { min-width: 110px; }
+    .sstv-controls label { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
+    .sstv-btn { padding: 5px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-primary); cursor: pointer; white-space: nowrap; }
+    .sstv-btn:hover { background: var(--bg-hover); }
+    .sstv-btn-tx { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); min-width: 110px; font-size: 14px; }
+    .sstv-btn-tx:hover { background: var(--accent-green, #4ecca3); color: #000; }
+    .sstv-btn-tx.transmitting { background: #e94560; border-color: #e94560; color: #fff; animation: tx-pulse 1s ease-in-out infinite; }
+    @keyframes tx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    .sstv-btn-tx.reply-mode { border-color: #4fc3f7; color: #4fc3f7; }
+    .sstv-btn-tx.reply-mode:hover { background: #4fc3f7; color: #000; }
+    .sstv-spacer { flex: 1; }
+
+    /* Band buttons */
+    .sstv-bands { display: flex; gap: 3px; align-items: center; }
+    .sstv-band-btn { font-size: 13px; font-weight: 600; padding: 5px 10px; border: 1px solid var(--border-primary); border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
+    .sstv-band-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .sstv-band-btn.active { background: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); color: #000; }
+    .sstv-freq-select { font-size: 13px; min-width: 140px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    .sstv-freq-input { width: 70px; font-size: 12px; font-family: monospace; text-align: center; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    .sstv-freq-input:focus { border-color: var(--accent-blue, #4fc3f7); outline: none; }
+
+    /* Progress bar */
+    .sstv-progress { height: 3px; background: var(--bg-primary); flex-shrink: 0; }
+    .sstv-progress-bar { height: 100%; background: var(--accent-green, #4ecca3); width: 0%; transition: width 0.3s; }
+    .sstv-progress-bar.tx { background: #e94560; }
+
+    /* Gallery */
+    .sstv-gallery-wrap { flex-shrink: 0; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); min-height: 100px; max-height: 180px; display: flex; flex-direction: column; }
+    .sstv-gallery-header { font-size: 13px; font-weight: 700; color: var(--text-secondary); padding: 5px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
+    .sstv-gallery-header span { font-weight: 400; color: var(--text-dim); }
+    .sstv-gallery { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; overflow-y: hidden; flex: 1; align-items: flex-start; }
+    .sstv-gallery::-webkit-scrollbar { height: 6px; }
+    .sstv-gallery::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 3px; }
+    .sstv-thumb { flex-shrink: 0; cursor: pointer; position: relative; border: 2px solid transparent; border-radius: 4px; overflow: hidden; transition: border-color 0.15s; }
+    .sstv-thumb:hover { border-color: var(--accent-blue, #4fc3f7); }
+    .sstv-thumb.selected { border-color: var(--accent-blue, #4fc3f7); }
+    .sstv-thumb img { display: block; height: 80px; width: auto; image-rendering: pixelated; }
+    .sstv-thumb-info { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); font-size: 10px; color: #ccc; padding: 1px 4px; text-align: center; }
+
+    /* Template strip */
+    .sstv-tpl-wrap { flex-shrink: 0; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); }
+    .sstv-tpl-header { font-size: 13px; font-weight: 700; color: var(--text-secondary); padding: 5px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
+    .sstv-tpl-strip { display: flex; gap: 6px; padding: 6px 12px; overflow-x: auto; align-items: flex-start; }
+    .sstv-tpl-strip::-webkit-scrollbar { height: 6px; }
+    .sstv-tpl-strip::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 3px; }
+    .sstv-tpl { flex-shrink: 0; cursor: pointer; position: relative; border: 2px solid transparent; border-radius: 4px; overflow: hidden; transition: border-color 0.15s; }
+    .sstv-tpl:hover { border-color: var(--accent-blue, #4fc3f7); }
+    .sstv-tpl.active { border-color: var(--accent-green, #4ecca3); }
+    .sstv-tpl img { display: block; height: 56px; width: auto; image-rendering: pixelated; }
+    .sstv-tpl-del { position: absolute; top: 1px; right: 1px; background: rgba(0,0,0,0.7); color: #e94560; font-size: 12px; border: none; cursor: pointer; padding: 0 3px; border-radius: 2px; line-height: 1.2; display: none; }
+    .sstv-tpl:hover .sstv-tpl-del { display: block; }
+    .sstv-tpl-add { flex-shrink: 0; width: 50px; height: 56px; border: 2px dashed var(--border-primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-dim); font-size: 22px; transition: all 0.15s; }
+    .sstv-tpl-add:hover { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
+
+    /* TX canvas interaction */
+    .sstv-canvas-wrap canvas.draggable { cursor: crosshair; }
+
+    /* Multi-slice panel */
+    .sstv-multi-panel { padding: 6px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 13px; }
+    .sstv-multi-panel.hidden { display: none; }
+    .sstv-multi-row { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+    .sstv-multi-row select, .sstv-multi-row input { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; }
+    .sstv-multi-row select { min-width: 60px; }
+    .sstv-multi-row .multi-freq { min-width: 120px; }
+    .sstv-multi-row .multi-audio { min-width: 130px; max-width: 200px; }
+    .sstv-multi-row .multi-del { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 0 4px; }
+    .sstv-multi-row .multi-del:hover { color: #e94560; }
+    .sstv-multi-btns { display: flex; gap: 6px; margin-top: 4px; }
+    .sstv-multi-start { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid var(--accent-green, #4ecca3); background: transparent; color: var(--accent-green, #4ecca3); cursor: pointer; }
+    .sstv-multi-start:hover { background: var(--accent-green, #4ecca3); color: #000; }
+    .sstv-multi-stop { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid #e94560; background: transparent; color: #e94560; cursor: pointer; }
+    .sstv-multi-stop:hover { background: #e94560; color: #fff; }
+
+    /* Multi-decode grid */
+    .sstv-rx-grid { display: grid; gap: 8px; padding: 8px 12px; flex-shrink: 0; }
+    .sstv-rx-grid.cols-1 { grid-template-columns: 1fr; }
+    .sstv-rx-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+    .sstv-rx-pane { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; }
+    .sstv-rx-pane-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); padding: 3px 6px; background: var(--bg-primary); border-bottom: 1px solid var(--border-primary); }
+    .sstv-rx-pane canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+    .sstv-rx-pane .sstv-wf-mini { height: 40px; }
+    .sstv-rx-pane-status { font-size: 11px; color: var(--text-dim); padding: 2px 6px; }
+
+    /* Settings row */
+    .sstv-settings { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 12px; color: var(--text-secondary); background: var(--bg-primary); border-top: 1px solid var(--border-primary); flex-shrink: 0; flex-wrap: wrap; }
+    .sstv-settings select { font-size: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; max-width: 220px; }
+
+    /* Text layer editor */
+    .sstv-text-editor { padding: 6px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
+    .sstv-text-layers { display: flex; flex-direction: column; gap: 2px; max-height: 130px; overflow-y: auto; }
+    .sstv-text-layer { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
+    .sstv-text-layer:hover { background: var(--bg-hover); }
+    .sstv-text-layer.selected { border-color: var(--accent-blue, #4fc3f7); background: rgba(79,195,247,0.1); }
+    .sstv-text-layer .tl-vis { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-green, #4ecca3); }
+    .sstv-text-layer .tl-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+    .sstv-text-layer .tl-del { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 0 3px; line-height: 1; }
+    .sstv-text-layer .tl-del:hover { color: #e94560; }
+    .sstv-text-props { display: flex; align-items: center; gap: 6px; padding: 5px 0; flex-wrap: wrap; }
+    .sstv-text-props input[type="text"] { flex: 1; min-width: 100px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 6px; }
+    .sstv-text-props input[type="number"] { width: 48px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 5px; text-align: center; }
+    .sstv-text-props input[type="color"] { width: 26px; height: 26px; border: 1px solid var(--border-primary); border-radius: 3px; padding: 0; cursor: pointer; background: none; }
+    .sstv-text-props select { font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; }
+    .sstv-text-props .tp-toggle { font-size: 13px; font-weight: 700; width: 26px; height: 26px; border: 1px solid var(--border-primary); border-radius: 3px; background: transparent; color: var(--text-secondary); cursor: pointer; padding: 0; line-height: 24px; text-align: center; }
+    .sstv-text-props .tp-toggle.active { background: var(--accent-blue, #4fc3f7); color: #000; border-color: var(--accent-blue, #4fc3f7); }
+    .sstv-add-text-btn { font-size: 13px; padding: 4px 12px; border: 1px dashed var(--border-primary); border-radius: 4px; background: transparent; color: var(--text-dim); cursor: pointer; margin-top: 4px; }
+    .sstv-add-text-btn:hover { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
+
+    /* Decode log */
+    .sstv-log-wrap { flex-shrink: 0; border-top: 1px solid var(--border-primary); max-height: 100px; display: flex; flex-direction: column; }
+    .sstv-log-wrap.hidden { display: none; }
+    .sstv-log-header { font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 3px 12px; display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; cursor: pointer; }
+    .sstv-log { flex: 1; overflow-y: auto; font-family: monospace; font-size: 11px; line-height: 1.5; padding: 2px 12px; background: var(--bg-primary); color: var(--text-dim); }
+    .sstv-log::-webkit-scrollbar { width: 5px; }
+    .sstv-log::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 3px; }
+    .sstv-log .log-state { color: var(--accent-blue, #4fc3f7); font-weight: 700; }
+    .sstv-log .log-freq { color: var(--accent-green, #4ecca3); }
+    .sstv-log .log-warn { color: #f0a500; }
+    .sstv-log .log-event { color: #e040fb; font-weight: 700; }
+
+    /* Status */
+    .sstv-status { font-size: 12px; color: var(--text-dim); padding: 4px 12px; flex-shrink: 0; border-top: 1px solid var(--border-primary); }
+  </style>
+</head>
+<body>
+  <!-- Titlebar -->
+  <div class="sstv-titlebar">
+    <span class="sstv-titlebar-title">POTACAT — SSTV</span>
+    <button class="sstv-titlebar-btn" id="min-btn" title="Minimize">&#x2013;</button>
+    <button class="sstv-titlebar-btn" id="max-btn" title="Maximize">&#x25A1;</button>
+    <button class="sstv-titlebar-btn close" id="close-btn" title="Close">&#x2715;</button>
+  </div>
+
+  <!-- Scrollable content -->
+  <div class="sstv-scroll">
+
+  <!-- Image panes -->
+  <div class="sstv-panes">
+    <div class="sstv-pane">
+      <div class="sstv-pane-label">RX Decode</div>
+      <div class="sstv-canvas-wrap">
+        <canvas id="rx-canvas" width="320" height="256"></canvas>
+        <div class="sstv-decode-info" id="rx-info">Idle</div>
+      </div>
+      <div class="sstv-waterfall-wrap">
+        <canvas id="wf-canvas" width="320" height="60"></canvas>
+        <div class="sstv-wf-labels"><span>1.1 kHz</span><span>1.7 kHz</span><span>2.3 kHz</span></div>
+      </div>
+    </div>
+    <div class="sstv-pane">
+      <div class="sstv-pane-label">TX Compose <span style="font-weight:400;color:var(--text-dim);font-size:10px">(drag text to reposition)</span></div>
+      <div class="sstv-canvas-wrap">
+        <canvas id="tx-canvas" width="320" height="256" class="draggable"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="sstv-controls">
+    <select id="mode-select" title="SSTV Mode">
+      <option value="martin1">Martin M1</option>
+      <option value="scottie1">Scottie S1</option>
+      <option value="robot36">Robot 36</option>
+      <option value="robot72">Robot 72</option>
+    </select>
+    <button class="sstv-btn" id="load-btn" title="Load image from file">Choose Photo</button>
+    <button class="sstv-btn" id="random-btn" title="Generate random pattern">Random</button>
+    <button class="sstv-btn" id="multi-btn" title="Multi-slice monitoring">Multi</button>
+    <button class="sstv-btn" id="clear-reply-btn" style="display:none" title="Clear reply image">Clear Reply</button>
+    <div class="sstv-spacer"></div>
+    <select id="freq-select" class="sstv-freq-select" title="SSTV Frequency">
+      <optgroup label="80m">
+        <option value="3730">3.730 (EU)</option>
+        <option value="3845">3.845 (NA)</option>
+      </optgroup>
+      <optgroup label="40m">
+        <option value="7165">7.165</option>
+        <option value="7171">7.171 (calling)</option>
+      </optgroup>
+      <optgroup label="20m">
+        <option value="14227">14.227</option>
+        <option value="14230" selected>14.230 (calling)</option>
+        <option value="14233">14.233</option>
+      </optgroup>
+      <optgroup label="17m"><option value="18161">18.161</option></optgroup>
+      <optgroup label="15m"><option value="21340">21.340 (calling)</option></optgroup>
+      <optgroup label="12m"><option value="24975">24.975</option></optgroup>
+      <optgroup label="10m"><option value="28680">28.680 (calling)</option></optgroup>
+      <optgroup label="6m"><option value="50680">50.680</option></optgroup>
+    </select>
+    <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz" title="Custom frequency — press Enter">
+    <button class="sstv-btn" id="tune-btn" title="Tune to selected frequency">Tune</button>
+    <div class="sstv-spacer"></div>
+    <button class="sstv-btn sstv-btn-tx" id="tx-btn">TRANSMIT</button>
+  </div>
+
+  <!-- Multi-slice config panel (hidden by default) -->
+  <div class="sstv-multi-panel hidden" id="multi-panel">
+    <div id="multi-slices"></div>
+    <div class="sstv-multi-btns">
+      <button class="sstv-btn" id="multi-add" style="font-size:12px;padding:3px 10px">+ Add Slice</button>
+      <div class="sstv-spacer"></div>
+      <button class="sstv-multi-start" id="multi-start">Start Monitoring</button>
+      <button class="sstv-multi-stop" id="multi-stop" style="display:none">Stop</button>
+    </div>
+  </div>
+
+  <!-- Multi-decode grid (shown when multi is active, replaces single RX pane) -->
+  <div class="sstv-rx-grid hidden" id="rx-grid"></div>
+
+  <!-- Progress -->
+  <div class="sstv-progress"><div class="sstv-progress-bar" id="progress-bar"></div></div>
+
+  <!-- Text layer editor -->
+  <div class="sstv-text-editor">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+      <span style="font-size:11px;font-weight:700;color:var(--text-secondary)">Text Layers</span>
+      <div class="sstv-spacer"></div>
+      <label style="font-size:11px;color:var(--text-secondary)">TX Gain <input type="range" id="tx-gain" min="0" max="100" value="50" style="width:60px;vertical-align:middle"></label>
+    </div>
+    <div class="sstv-text-layers" id="text-layers"></div>
+    <div class="sstv-text-props" id="text-props" style="display:none"></div>
+    <button class="sstv-add-text-btn" id="add-text-btn">+ Add Text</button>
+  </div>
+
+  <!-- Template strip -->
+  <div class="sstv-tpl-wrap">
+    <div class="sstv-tpl-header">
+      Templates
+      <span style="font-weight:400;color:var(--text-dim)" id="tpl-count"></span>
+    </div>
+    <div class="sstv-tpl-strip" id="tpl-strip">
+      <div class="sstv-tpl-add" id="tpl-save-btn" title="Save current as template">+</div>
+    </div>
+  </div>
+
+  <!-- Gallery -->
+  <div class="sstv-gallery-wrap">
+    <div class="sstv-gallery-header">
+      Received Images <span id="gallery-count"></span>
+      <div class="sstv-spacer"></div>
+      <button class="sstv-btn" id="open-folder-btn" style="font-size:10px;padding:2px 8px">Open Folder</button>
+    </div>
+    <div class="sstv-gallery" id="gallery"></div>
+  </div>
+
+  <!-- Decode log -->
+  <div class="sstv-log-wrap" id="log-wrap">
+    <div class="sstv-log-header" id="log-toggle">Decode Log <span style="font-weight:400;color:var(--text-dim);font-size:11px">(click to hide)</span></div>
+    <div class="sstv-log" id="decode-log"></div>
+  </div>
+
+  <!-- Audio settings -->
+  <div class="sstv-settings">
+    <span>Audio In:</span>
+    <select id="audio-input"></select>
+    <span>Audio Out:</span>
+    <select id="audio-output"></select>
+  </div>
+
+  </div><!-- end sstv-scroll -->
+
+  <!-- Status -->
+  <div class="sstv-status" id="status-bar">Ready</div>
+
+  <script src="sstv-popout.js"></script>
+</body>
+</html>

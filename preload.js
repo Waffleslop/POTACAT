@@ -144,6 +144,9 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatPopoutCallCq: (cb) => ipcRenderer.on('jtcat-popout-call-cq', () => cb()),
   onJtcatPopoutCancelQso: (cb) => ipcRenderer.on('jtcat-popout-cancel-qso', () => cb()),
   sendJtcatQsoState: (state) => ipcRenderer.send('jtcat-qso-state-update', state),
+  // SSTV pop-out
+  sstvPopoutOpen: () => ipcRenderer.send('sstv-popout-open'),
+  sstvPopoutTheme: (theme) => ipcRenderer.send('sstv-popout-theme', theme),
   // CW Keyer
   cwPaddleDit: (pressed) => ipcRenderer.send('cw-paddle-dit', pressed),
   cwPaddleDah: (pressed) => ipcRenderer.send('cw-paddle-dah', pressed),

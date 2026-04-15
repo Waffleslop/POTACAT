@@ -160,6 +160,7 @@
           <button class="multi-dropdown-btn view-btn" type="button" id="views-btn">More &#x25BE;</button>
           <div class="multi-dropdown-menu" style="min-width:140px;">
             <button class="view-menu-item" id="view-jtcat-btn">JTCAT FT8</button>
+            <button class="view-menu-item" id="view-sstv-btn">SSTV</button>
             <button class="view-menu-item" id="view-rbn-btn">Propagation</button>
             <button class="view-menu-item" id="cluster-terminal-btn">Terminal</button>
             <button class="view-menu-item" id="view-directory-btn">SWL/HF Net Directory</button>
@@ -986,6 +987,11 @@
       </label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-freedv"> FreeDV Digital Voice</label>
       <span class="help-text" style="margin-left:12px;display:block;">Enables FreeDV digital voice. Click a FreeDV spot to auto-decode; PTT encodes FreeDV. No extra setup — works over any SSB radio's USB audio.</span>
+      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> Auto-SSTV on idle</label>
+      <span class="help-text" style="margin-left:12px;display:block;">
+        When idle, automatically opens SSTV and decodes on 20m (day) or 40m (night) based on your grid square.
+        <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="480" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
+      </span>
       </div>
     </fieldset>
     <!-- 2. Radio -->
