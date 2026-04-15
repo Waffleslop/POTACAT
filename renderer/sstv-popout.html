@@ -62,7 +62,7 @@
     .sstv-progress-bar.tx { background: #e94560; }
 
     /* Gallery */
-    .sstv-gallery-wrap { flex-shrink: 0; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); min-height: 100px; max-height: 180px; display: flex; flex-direction: column; }
+    .sstv-gallery-wrap { flex: 1; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); min-height: 100px; display: flex; flex-direction: column; }
     .sstv-gallery-header { font-size: 13px; font-weight: 700; color: var(--text-secondary); padding: 5px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
     .sstv-gallery-header span { font-weight: 400; color: var(--text-dim); }
     .sstv-gallery { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; overflow-y: hidden; flex: 1; align-items: flex-start; }
@@ -142,17 +142,11 @@
     .sstv-add-text-btn { font-size: 13px; padding: 4px 12px; border: 1px dashed var(--border-primary); border-radius: 4px; background: transparent; color: var(--text-dim); cursor: pointer; margin-top: 4px; }
     .sstv-add-text-btn:hover { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
 
-    /* Decode log */
-    .sstv-log-wrap { flex-shrink: 0; border-top: 1px solid var(--border-primary); max-height: 100px; display: flex; flex-direction: column; }
+    /* Decode log — fixed height panel like POTACAT verbose log */
+    .sstv-log-wrap { border-top: 1px solid var(--border-primary); height: 150px; flex-shrink: 0; display: flex; flex-direction: column; }
     .sstv-log-wrap.hidden { display: none; }
-    .sstv-log-header { font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 3px 12px; display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; cursor: pointer; }
-    .sstv-log { flex: 1; overflow-y: auto; font-family: monospace; font-size: 11px; line-height: 1.5; padding: 2px 12px; background: var(--bg-primary); color: var(--text-dim); }
-    .sstv-log::-webkit-scrollbar { width: 5px; }
-    .sstv-log::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 3px; }
-    .sstv-log .log-state { color: var(--accent-blue, #4fc3f7); font-weight: 700; }
-    .sstv-log .log-freq { color: var(--accent-green, #4ecca3); }
-    .sstv-log .log-warn { color: #f0a500; }
-    .sstv-log .log-event { color: #e040fb; font-weight: 700; }
+    .sstv-log-header { font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 3px 12px; display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
+    .sstv-log-textarea { flex: 1; width: 100%; resize: none; border: none; outline: none; background: var(--bg-primary); color: var(--text-dim); font-family: Consolas, "Courier New", monospace; font-size: 11px; padding: 4px 12px; line-height: 1.5; }
 
     /* Status */
     .sstv-status { font-size: 12px; color: var(--text-dim); padding: 4px 12px; flex-shrink: 0; border-top: 1px solid var(--border-primary); }
@@ -282,8 +276,12 @@
 
   <!-- Decode log -->
   <div class="sstv-log-wrap" id="log-wrap">
-    <div class="sstv-log-header" id="log-toggle">Decode Log <span style="font-weight:400;color:var(--text-dim);font-size:11px">(click to hide)</span></div>
-    <div class="sstv-log" id="decode-log"></div>
+    <div class="sstv-log-header">
+      <span id="log-toggle" style="cursor:pointer">Decode Log <span style="font-weight:400;color:var(--text-dim);font-size:11px">(click to hide)</span></span>
+      <div class="sstv-spacer"></div>
+      <button class="sstv-btn" id="log-copy-btn" style="font-size:11px;padding:2px 8px">Copy</button>
+    </div>
+    <textarea class="sstv-log-textarea" id="decode-log" readonly></textarea>
   </div>
 
   <!-- Audio settings -->

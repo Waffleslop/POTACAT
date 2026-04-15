@@ -8093,14 +8093,26 @@
     div.appendChild(imgEl);
     var info = document.createElement('div');
     info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
-    var ts = img.timestamp ? new Date(img.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    info.textContent = (img.mode || '') + ' ' + ts;
+    var d = img.timestamp ? new Date(img.timestamp) : null;
+    var dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    info.textContent = (img.mode || '') + ' ' + dateStr;
     div.appendChild(info);
+    div.dataset.timestamp = img.timestamp || 0;
     // Tap to view full size
     div.addEventListener('click', function() {
       sstvPhoneViewImage(img.dataUrl || img.image);
     });
-    sstvPhoneGallery.appendChild(div);
+    // Insert in sorted position (newest first = leftmost)
+    var inserted = false;
+    var children = sstvPhoneGallery.children;
+    for (var ci = 0; ci < children.length; ci++) {
+      if ((img.timestamp || 0) > (parseFloat(children[ci].dataset.timestamp) || 0)) {
+        sstvPhoneGallery.insertBefore(div, children[ci]);
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted) sstvPhoneGallery.appendChild(div);
   }
 
   // Full-size image viewer overlay
@@ -8137,8 +8149,10 @@
     div.appendChild(img);
     var info = document.createElement('div');
     info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
-    info.textContent = 'NEW ' + (msg.mode || '') + ' ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    var now = new Date();
+    info.textContent = 'NEW ' + (msg.mode || '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     div.appendChild(info);
+    div.dataset.timestamp = Date.now();
     div.addEventListener('click', function() { sstvPhoneViewImage(imgSrc); });
     sstvPhoneGallery.insertBefore(div, sstvPhoneGallery.firstChild);
     sstvPhoneGalleryItems.unshift({ src: imgSrc, mode: msg.mode });

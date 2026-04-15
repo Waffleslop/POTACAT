@@ -36,6 +36,7 @@ let isTx = false;
 let bgImage = null;       // loaded/generated background Image or ImageData
 let bgParams = null;      // pattern generator params (for template save)
 let replyImage = null;    // received image for PiP reply (ImageData)
+let replyInset = { x: -1, y: -1, scale: 0.28, rotation: 0 }; // -1 = auto position (bottom-right)
 let galleryImages = [];   // [{filename, timestamp, mode, dataUrl}]
 let sstvAudioCtx = null;
 let sstvStream = null;
@@ -579,22 +580,38 @@ function renderTxPreview() {
     }
   }
 
-  // Reply inset (PiP) — bottom-right corner
+  // Reply inset (PiP) — draggable, resizable, rotatable
   if (replyImage) {
-    const insetW = Math.round(w * 0.28);
-    const insetH = Math.round(h * 0.28);
+    const insetW = Math.round(w * replyInset.scale);
+    const insetH = Math.round(h * replyInset.scale);
     const margin = 6;
-    const ix = w - insetW - margin;
-    const iy = h - insetH - margin;
-    const tmpC = document.createElement('canvas');
-    tmpC.width = replyImage.width;
-    tmpC.height = replyImage.height;
-    const tmpCtx = tmpC.getContext('2d');
-    const iData = new ImageData(new Uint8ClampedArray(replyImage.data), replyImage.width, replyImage.height);
-    tmpCtx.putImageData(iData, 0, 0);
-    txCtx.fillStyle = '#ffffff';
-    txCtx.fillRect(ix - 2, iy - 2, insetW + 4, insetH + 4);
-    txCtx.drawImage(tmpC, 0, 0, replyImage.width, replyImage.height, ix, iy, insetW, insetH);
+    // Auto-position if not set
+    const ix = replyInset.x >= 0 ? replyInset.x : w - insetW - margin;
+    const iy = replyInset.y >= 0 ? replyInset.y : h - insetH - margin;
+    // Cache for hit testing
+    replyInset._drawX = ix; replyInset._drawY = iy;
+    replyInset._drawW = insetW; replyInset._drawH = insetH;
+    // Create temp canvas from ImageData
+    if (!replyInset._canvas || replyInset._canvasDirty) {
+      const tmpC = document.createElement('canvas');
+      tmpC.width = replyImage.width; tmpC.height = replyImage.height;
+      tmpC.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(replyImage.data), replyImage.width, replyImage.height), 0, 0);
+      replyInset._canvas = tmpC;
+      replyInset._canvasDirty = false;
+    }
+    txCtx.save();
+    if (replyInset.rotation) {
+      txCtx.translate(ix + insetW / 2, iy + insetH / 2);
+      txCtx.rotate(replyInset.rotation);
+      txCtx.fillStyle = '#ffffff';
+      txCtx.fillRect(-insetW / 2 - 2, -insetH / 2 - 2, insetW + 4, insetH + 4);
+      txCtx.drawImage(replyInset._canvas, 0, 0, replyImage.width, replyImage.height, -insetW / 2, -insetH / 2, insetW, insetH);
+    } else {
+      txCtx.fillStyle = '#ffffff';
+      txCtx.fillRect(ix - 2, iy - 2, insetW + 4, insetH + 4);
+      txCtx.drawImage(replyInset._canvas, 0, 0, replyImage.width, replyImage.height, ix, iy, insetW, insetH);
+    }
+    txCtx.restore();
   }
 
   // Draw draggable text elements
@@ -722,9 +739,26 @@ function hitTestText(mx, my) {
   return null;
 }
 
+let replyDrag = false;
+
+function hitTestReplyInset(mx, my) {
+  if (!replyImage || replyInset._drawW == null) return false;
+  return mx >= replyInset._drawX && mx <= replyInset._drawX + replyInset._drawW &&
+         my >= replyInset._drawY && my <= replyInset._drawY + replyInset._drawH;
+}
+
 txCanvas.addEventListener('mousedown', (e) => {
   if (isTx) return;
   const pos = canvasToImageCoords(e);
+
+  // Check reply inset drag
+  if (hitTestReplyInset(pos.x, pos.y)) {
+    replyDrag = true;
+    dragOffsetX = pos.x - replyInset._drawX;
+    dragOffsetY = pos.y - replyInset._drawY;
+    e.preventDefault();
+    return;
+  }
 
   // Check rotation handle first (only for selected element)
   if (hitTestRotateHandle(pos.x, pos.y)) {
@@ -755,8 +789,14 @@ txCanvas.addEventListener('mousedown', (e) => {
 txCanvas.addEventListener('mousemove', (e) => {
   const pos = canvasToImageCoords(e);
 
+  if (replyDrag) {
+    replyInset.x = Math.max(0, Math.min(txCanvas.width - replyInset._drawW, pos.x - dragOffsetX));
+    replyInset.y = Math.max(0, Math.min(txCanvas.height - replyInset._drawH, pos.y - dragOffsetY));
+    renderTxPreview();
+    return;
+  }
+
   if (rotateTarget) {
-    // Calculate angle from text anchor to mouse
     const dx = pos.x - rotateTarget.x;
     const dy = pos.y - rotateTarget.y;
     rotateTarget.rotation = Math.atan2(dy, dx);
@@ -770,7 +810,9 @@ txCanvas.addEventListener('mousemove', (e) => {
     renderTxPreview();
   } else {
     // Cursor feedback
-    if (hitTestRotateHandle(pos.x, pos.y)) {
+    if (hitTestReplyInset(pos.x, pos.y)) {
+      txCanvas.style.cursor = 'move';
+    } else if (hitTestRotateHandle(pos.x, pos.y)) {
       txCanvas.style.cursor = 'grab';
     } else {
       const hit = hitTestText(pos.x, pos.y);
@@ -780,6 +822,7 @@ txCanvas.addEventListener('mousemove', (e) => {
 });
 
 txCanvas.addEventListener('mouseup', () => {
+  if (replyDrag) { replyDrag = false; return; }
   if (rotateTarget) {
     rotateTarget = null;
     onTextChanged();
@@ -794,9 +837,21 @@ txCanvas.addEventListener('mouseup', () => {
   }
 });
 
+// Scroll to resize reply inset
+txCanvas.addEventListener('wheel', (e) => {
+  if (!replyImage) return;
+  const pos = canvasToImageCoords(e);
+  if (hitTestReplyInset(pos.x, pos.y)) {
+    e.preventDefault();
+    replyInset.scale = Math.max(0.1, Math.min(0.8, replyInset.scale + (e.deltaY < 0 ? 0.03 : -0.03)));
+    renderTxPreview();
+  }
+}, { passive: false });
+
 txCanvas.addEventListener('mouseleave', () => {
   dragTarget = null;
   rotateTarget = null;
+  replyDrag = false;
 });
 
 // ===== TEMPLATES ===========================================================
@@ -925,7 +980,19 @@ function renderTemplateStrip() {
 // ===== TX ==================================================================
 
 txBtn.addEventListener('click', () => {
-  if (isTx) return; // already transmitting
+  if (isTx) {
+    // Cancel TX — stop audio playback and release PTT
+    if (txAudioCtx) { try { txAudioCtx.close(); } catch {} txAudioCtx = null; }
+    txPlaying = false;
+    isTx = false;
+    window.api.sstvTxComplete();
+    txBtn.textContent = replyImage ? 'REPLY' : 'TRANSMIT';
+    txBtn.classList.remove('transmitting');
+    progressBar.classList.remove('tx');
+    progressBar.style.width = '0%';
+    statusBar.textContent = 'TX cancelled';
+    return;
+  }
   const mode = modeSelect.value;
   const res = MODE_RES[mode] || { w: 320, h: 256 };
   // Get final composited image data from TX canvas
@@ -947,6 +1014,13 @@ txBtn.addEventListener('click', () => {
 
 // TX audio received — play it
 window.api.onSstvTxAudio(async (data) => {
+  // Mark TX active — stops decoder from hearing our own audio
+  isTx = true;
+  txBtn.textContent = 'TRANSMITTING...';
+  txBtn.classList.add('transmitting');
+  progressBar.style.width = '0%';
+  progressBar.classList.add('tx');
+
   const samplesArray = data.samples || data;
   const gainLevel = (txGainSlider.value / 100) || 0.5;
 
@@ -1075,6 +1149,8 @@ async function loadGallery() {
 
 function renderGallery() {
   gallery.innerHTML = '';
+  // Sort by timestamp descending (newest first)
+  galleryImages.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   galleryCount.textContent = '(' + galleryImages.length + ')';
   for (let i = 0; i < galleryImages.length; i++) {
     const entry = galleryImages[i];
@@ -1086,20 +1162,76 @@ function renderGallery() {
     thumb.appendChild(img);
     const info = document.createElement('div');
     info.className = 'sstv-thumb-info';
-    const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    info.textContent = time + ' ' + (entry.mode || '');
+    const d = entry.timestamp ? new Date(entry.timestamp) : null;
+    const dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    info.textContent = dateStr + ' ' + (entry.mode || '');
     thumb.appendChild(info);
 
+    // Click to view fullscreen
+    thumb.addEventListener('click', () => viewImageFullscreen(entry.dataUrl));
     // Double-click to set as reply
-    thumb.addEventListener('dblclick', () => {
-      setReplyImage(entry);
-    });
+    thumb.addEventListener('dblclick', (e) => { e.stopPropagation(); setReplyImage(entry); });
+    // Right-click to delete
+    thumb.addEventListener('contextmenu', ((idx, fn) => (e) => {
+      e.preventDefault();
+      showImageContextMenu(e.clientX, e.clientY, idx, fn);
+    })(i, entry.filename));
 
     gallery.appendChild(thumb);
   }
 }
 
+function showImageContextMenu(x, y, idx, filename) {
+  // Remove any existing context menu
+  const old = document.getElementById('sstv-ctx-menu');
+  if (old) old.remove();
+
+  const menu = document.createElement('div');
+  menu.id = 'sstv-ctx-menu';
+  menu.style.cssText = 'position:fixed;z-index:10000;background:var(--bg-secondary);border:1px solid var(--border-primary);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.4);padding:4px 0;min-width:120px;';
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+
+  const deleteItem = document.createElement('div');
+  deleteItem.textContent = 'Delete';
+  deleteItem.style.cssText = 'padding:6px 14px;font-size:13px;color:#e94560;cursor:pointer;';
+  deleteItem.addEventListener('mouseenter', () => { deleteItem.style.background = 'var(--bg-hover)'; });
+  deleteItem.addEventListener('mouseleave', () => { deleteItem.style.background = ''; });
+  deleteItem.addEventListener('click', async () => {
+    menu.remove();
+    if (filename) await window.api.sstvDeleteImage(filename);
+    galleryImages.splice(idx, 1);
+    renderGallery();
+    statusBar.textContent = 'Image deleted';
+  });
+  menu.appendChild(deleteItem);
+
+  document.body.appendChild(menu);
+  // Close on click outside
+  setTimeout(() => {
+    document.addEventListener('click', function closeCtx() {
+      menu.remove();
+      document.removeEventListener('click', closeCtx);
+    }, { once: true });
+  }, 10);
+}
+
+function viewImageFullscreen(src) {
+  if (!src) return;
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+  const img = document.createElement('img');
+  img.src = src;
+  img.style.cssText = 'max-width:95%;max-height:95%;image-rendering:pixelated;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,0.5);';
+  overlay.appendChild(img);
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
 function setReplyImage(entry) {
+  // Reset inset position/scale for new reply
+  replyInset.x = -1; replyInset.y = -1; replyInset.scale = 0.28; replyInset.rotation = 0;
+  replyInset._canvasDirty = true;
   if (entry.imageData) {
     replyImage = {
       data: new Uint8ClampedArray(entry.imageData),
@@ -1204,8 +1336,8 @@ async function startRxAudio() {
     sstvWorkletNode.connect(sstvAudioCtx.destination); // needed to keep processing
 
     sstvWorkletNode.port.onmessage = (e) => {
-      // Send audio samples to main process for SSTV decoder
-      window.api.sstvAudio(e.data);
+      // Send audio samples to main process for SSTV decoder (skip during TX to avoid self-decode)
+      if (!isTx) window.api.sstvAudio(e.data);
       // Feed waterfall
       feedWaterfall(e.data);
     };
@@ -1789,16 +1921,23 @@ let logVisible = true;
 
 logToggle.addEventListener('click', () => {
   logVisible = !logVisible;
-  decodeLog.style.display = logVisible ? '' : 'none';
+  logWrap.classList.toggle('hidden', !logVisible);
   logToggle.querySelector('span').textContent = logVisible ? '(click to hide)' : '(click to show)';
 });
 
-function addLogEntry(html) {
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  decodeLog.appendChild(div);
-  // Keep max 200 lines
-  while (decodeLog.children.length > 200) decodeLog.removeChild(decodeLog.firstChild);
+document.getElementById('log-copy-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(decodeLog.value).then(() => {
+    statusBar.textContent = 'Decode log copied to clipboard';
+  });
+});
+
+const logLines = [];
+const LOG_MAX = 300;
+
+function addLogEntry(text) {
+  logLines.push(text);
+  if (logLines.length > LOG_MAX) logLines.shift();
+  decodeLog.value = logLines.join('\n');
   decodeLog.scrollTop = decodeLog.scrollHeight;
 }
 
@@ -1807,18 +1946,10 @@ function logTime() {
 }
 
 window.api.onSstvRxDebug((data) => {
-  const sliceTag = data.sliceId ? '<span class="log-state">[' + data.sliceId + ']</span> ' : '';
-  const stateTag = '<span class="log-state">' + data.state + '</span>';
-  const freqTag = data.avgFreq ? ' <span class="log-freq">' + data.avgFreq + ' Hz</span>' : '';
+  const sliceTag = data.sliceId ? '[' + data.sliceId + '] ' : '';
+  const freqTag = data.avgFreq ? ' ' + data.avgFreq + ' Hz' : '';
   const detail = data.detail ? ' ' + data.detail : '';
-
-  // Highlight key events
-  let cls = '';
-  if (detail.includes('detected') || detail.includes('Start bit')) cls = 'log-event';
-  else if (detail.includes('lost') || detail.includes('Unknown VIS')) cls = 'log-warn';
-
-  const detailHtml = cls ? '<span class="' + cls + '">' + detail + '</span>' : detail;
-  addLogEntry(logTime() + ' ' + sliceTag + stateTag + freqTag + detailHtml);
+  addLogEntry(logTime() + ' ' + sliceTag + data.state + freqTag + detail);
 });
 
 // ===== KEYBOARD ============================================================
