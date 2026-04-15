@@ -554,6 +554,7 @@ function sendCatFrequency(hz) {
   }
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
   _currentFreqHz = hz;
   sendVfoState();
   broadcastRemoteRadioStatus();

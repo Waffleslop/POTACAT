@@ -106,7 +106,25 @@ const MODE_RES = {
 
   // Set theme
   applyTheme(settings.lightMode ? 'light' : 'dark');
+
+  // Auto-QSY to the selected SSTV frequency on open
+  const initOpt = freqSelect.options[freqSelect.selectedIndex];
+  tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
 })();
+
+// --- Radio frequency sync ---
+window.api.onCatFrequency((hz) => {
+  const khz = Math.round(hz / 1000);
+  // Update dropdown if a matching option exists
+  for (let i = 0; i < freqSelect.options.length; i++) {
+    if (parseInt(freqSelect.options[i].value) === khz) {
+      freqSelect.selectedIndex = i;
+      return;
+    }
+  }
+  // No exact match — show in custom input
+  freqInput.value = khz;
+});
 
 // --- Theme ---
 function applyTheme(theme) {

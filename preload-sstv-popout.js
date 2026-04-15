@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('api', {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
+  // Radio frequency updates
+  onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   // Theme
   onPopoutTheme: (cb) => ipcRenderer.on('sstv-popout-theme', (_e, theme) => cb(theme)),
   // Window controls

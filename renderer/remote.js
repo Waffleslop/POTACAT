@@ -1111,6 +1111,16 @@
     if (s.freq > 100000) { // ignore bogus values below 100 kHz
       freqDisplay.textContent = formatFreq(s.freq);
       currentFreqKhz = s.freq / 1000;
+      // Sync SSTV phone frequency dropdown
+      if (sstvFreqPhone) {
+        var khz = Math.round(s.freq / 1000);
+        for (var i = 0; i < sstvFreqPhone.options.length; i++) {
+          if (parseInt(sstvFreqPhone.options[i].value) === khz) {
+            sstvFreqPhone.selectedIndex = i;
+            break;
+          }
+        }
+      }
     }
     if (s.mode) {
       currentMode = s.mode;
@@ -7525,11 +7535,9 @@
   var sstvCameraBtn = document.getElementById('sstv-camera-btn');
   var sstvGalleryPickBtn = document.getElementById('sstv-gallery-pick-btn');
 
-  // Restore saved SSTV preferences
+  // Restore saved SSTV decode mode preference (not frequency — radio is source of truth)
   try {
-    var savedFreq = localStorage.getItem('sstv-phone-freq');
     var savedMode = localStorage.getItem('sstv-phone-mode');
-    if (savedFreq && sstvFreqPhone) sstvFreqPhone.value = savedFreq;
     if (savedMode && sstvModePhone) sstvModePhone.value = savedMode;
   } catch (e) {}
 
@@ -7539,7 +7547,6 @@
       var opt = sstvFreqPhone.options[sstvFreqPhone.selectedIndex];
       var mode = (opt && opt.dataset.mode) || (parseInt(sstvFreqPhone.value) < 10000 ? 'LSB' : 'USB');
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: sstvFreqPhone.value, mode: mode }));
-      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'QSY ' + sstvFreqPhone.value + ' kHz ' + mode;
       try { localStorage.setItem('sstv-phone-freq', sstvFreqPhone.value); } catch (e) {}
     });
   }
