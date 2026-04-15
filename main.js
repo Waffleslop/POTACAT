@@ -7064,7 +7064,7 @@ function startAutoSstvTimer() {
       if (newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
         if (cat && cat.connected) cat.tune(newBand.freqKhz * 1000, newBand.mode);
-        console.log('[Auto-SSTV] Band switch to ' + newFreq + ' kHz');
+        console.log('[Auto-SSTV] Band switch to ' + newBand.freqKhz + ' kHz');
       }
     }
   }, 30000);
