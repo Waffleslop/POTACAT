@@ -160,6 +160,7 @@ let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
 let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
 let sstvManager = null;      // SSTV multi-slice manager
+let openSstvPopout = null;   // function — assigned in second whenReady block
 let jtcatMapPopoutWin = null; // pop-out JTCAT map window
 let popoutJtcatQso = null;   // QSO state for popout (like remoteJtcatQso for ECHOCAT)
 let cat = null;
@@ -4617,7 +4618,7 @@ function connectRemote() {
 
   // SSTV from ECHOCAT phone — open desktop SSTV popout
   remoteServer.on('sstv-open', () => {
-    ipcMain.emit('sstv-popout-open');
+    if (openSstvPopout) openSstvPopout();
   });
 
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
@@ -7072,7 +7073,7 @@ function triggerAutoSstv() {
   autoSstvPrevMode = _currentMode;
   autoSstvCurrentFreq = getSstvAutoFreq();
   if (cat && cat.connected) cat.tune(autoSstvCurrentFreq * 1000, 'USB');
-  ipcMain.emit('sstv-popout-open');
+  if (openSstvPopout) openSstvPopout();
   sendCatLog('[Auto-SSTV] Activated — tuned to ' + autoSstvCurrentFreq + ' kHz');
   if (remoteServer && remoteServer.hasClient()) {
     remoteServer.broadcastSstvTxStatus({ state: 'auto-rx', freqKhz: autoSstvCurrentFreq });
@@ -8463,7 +8464,7 @@ app.whenReady().then(() => {
     sstvEngine.on('encode-complete', (data) => {
       // Ensure popout is open for audio playback — open it if needed
       if (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) {
-        ipcMain.emit('sstv-popout-open');
+        openSstvPopout();
       }
       // Key PTT
       handleRemotePtt(true);
@@ -8688,7 +8689,7 @@ app.whenReady().then(() => {
   });
 
   // SSTV pop-out window
-  ipcMain.on('sstv-popout-open', () => {
+  openSstvPopout = function() {
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       sstvPopoutWin.focus();
       return;
@@ -8739,7 +8740,9 @@ app.whenReady().then(() => {
         sstvPopoutWin.webContents.toggleDevTools();
       }
     });
-  });
+  };
+
+  ipcMain.on('sstv-popout-open', () => openSstvPopout());
 
   ipcMain.on('sstv-popout-theme', (_e, theme) => {
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
