@@ -1471,6 +1471,10 @@
             </label>
             <div id="logbook-help" class="help-text" style="margin-top:4px;"></div>
           </div>
+          <div id="logbook-log4om-config" class="hidden" style="margin-top:6px;">
+            <label class="checkbox-label"><input type="checkbox" id="set-log4om-wsjtx-binary"> Use WSJT-X binary protocol (required for QRZ/Clublog propagation)</label>
+            <div class="help-text" style="margin-top:4px;line-height:1.5;">Log4OM treats plain ADIF UDP as a batch import and will not propagate those QSOs to QRZ/Clublog. Enable this to send QSOs in WSJT-X binary format instead — Log4OM will then propagate them like a manually-logged QSO. In Log4OM, change the UDP Inbound entry's Type from "ADIF-MESSAGE" to "WSJT-X" (same port).</div>
+          </div>
           <div id="logbook-wavelog-config" class="hidden" style="margin-top:6px;">
             <label>Wavelog URL:
               <input type="text" id="set-wavelog-url" placeholder="https://log.example.com">

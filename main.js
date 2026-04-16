@@ -6010,6 +6010,18 @@ function forwardToLogbook(qsoData) {
   const port = parseInt(settings.logbookPort, 10);
 
   if (type === 'log4om') {
+    // Optional: send via WSJT-X binary protocol. Required for Log4OM to
+    // propagate QSOs to QRZ/Clublog (plain ADIF UDP is treated as a batch
+    // import and skips upstream sync hooks).
+    if (settings.log4omWsjtxBinary) {
+      const record = buildAdifRecord(qsoData);
+      const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
+      const hp = port || 2237;
+      if (!hamrsBridge.socket || hamrsBridge.host !== host || hamrsBridge.port !== hp) {
+        hamrsBridge.start(host, hp);
+      }
+      return hamrsBridge.sendQso(qsoData, adifText);
+    }
     return sendUdpAdif(qsoData, host, port || 2237);
   }
   if (type === 'hamrs') {

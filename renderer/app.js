@@ -605,6 +605,8 @@ const setLogbookHost = document.getElementById('set-logbook-host');
 const setLogbookPort = document.getElementById('set-logbook-port');
 const logbookHelp = document.getElementById('logbook-help');
 const logbookWavelogConfig = document.getElementById('logbook-wavelog-config');
+const logbookLog4omConfig = document.getElementById('logbook-log4om-config');
+const setLog4omWsjtxBinary = document.getElementById('set-log4om-wsjtx-binary');
 const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
@@ -3305,6 +3307,7 @@ const LOGBOOK_DEFAULTS = {
 function updateLogbookPortConfig() {
   const type = setLogbookType.value;
   const defaults = LOGBOOK_DEFAULTS[type];
+  logbookLog4omConfig.classList.toggle('hidden', type !== 'log4om');
   if (defaults && defaults.fileWatch) {
     logbookInstructions.innerHTML = defaults.instructions;
     logbookInstructions.classList.remove('hidden');
@@ -7351,6 +7354,7 @@ async function openSettingsDialog(tab) {
   setLogbookType.value = s.logbookType || '';
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
   setLogbookPort.value = s.logbookPort || '';
+  setLog4omWsjtxBinary.checked = s.log4omWsjtxBinary === true;
   setWavelogUrl.value = s.wavelogUrl || '';
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
@@ -7794,6 +7798,7 @@ settingsSave.addEventListener('click', async () => {
     logbookType: logbookTypeVal,
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
+    log4omWsjtxBinary: setLog4omWsjtxBinary.checked,
     wavelogUrl: setWavelogUrl.value.trim(),
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),
