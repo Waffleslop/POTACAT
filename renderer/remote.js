@@ -3892,6 +3892,9 @@
       // Open SSTV on desktop + fetch recent decodes
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-open' }));
       sstvPhoneRequestGallery(10, 0);
+      // Paint the compose canvas immediately — otherwise it sits blank until
+      // the user taps it (which triggers a redraw via the touch handlers).
+      if (typeof sstvRenderPhoneCompose === 'function') sstvRenderPhoneCompose();
     }
   }
 
