@@ -18,8 +18,9 @@ let enableSplitView = true; // allow Table+Map simultaneously
 // User preferences (loaded from settings)
 let distUnit = 'mi';    // 'mi' or 'km'
 let watchlist = []; // parsed watchlist rules: [{ callsign, band, mode }]
-let maxAgeMin = 5;       // max spot age in minutes
+let maxAgeMin = 5;       // max spot age in minutes (POTA, LLOTA, WWFF)
 let sotaMaxAgeMin = 30;  // SOTA max spot age in minutes
+let dxcMaxAgeMin = 15;   // DX cluster max spot age in minutes — DX spots aren't re-posted like POTA
 let maxDistMi = 0;       // max distance in miles (0 = no limit)
 let scanDwell = 7;       // seconds per frequency during scan
 let enablePota = true;
@@ -276,6 +277,7 @@ const setMaxAge = document.getElementById('set-max-age');
 const setMaxDist = document.getElementById('set-max-dist');
 const setMaxDistUnit = document.getElementById('set-max-dist-unit');
 const setSotaMaxAge = document.getElementById('set-sota-max-age');
+const setDxcMaxAge = document.getElementById('set-dxc-max-age');
 const setRefreshInterval = document.getElementById('set-refresh-interval');
 const setScanDwell = document.getElementById('set-scan-dwell');
 const setWatchlist = document.getElementById('set-watchlist');
@@ -1102,6 +1104,7 @@ async function loadPrefs() {
     else { maxAgeMin = parseInt(settings.maxAgeMin, 10) || 5; }
   } catch { maxAgeMin = parseInt(settings.maxAgeMin, 10) || 5; }
   sotaMaxAgeMin = parseInt(settings.sotaMaxAge, 10) || 30;
+  dxcMaxAgeMin = parseInt(settings.dxcMaxAge, 10) || 15;
   maxDistMi = parseInt(settings.maxDist, 10) || 0;
   updateHeaders();
 
@@ -3591,6 +3594,10 @@ function getFiltered() {
     } else if (s.source === 'sota') {
       // SOTA spots are posted once by a human (not re-spotted like POTA)
       if (spotAgeSecs(s.spotTime) > sotaMaxAgeMin * 60) return false;
+    } else if (s.source === 'dxc') {
+      // DX cluster spots are one-shot — an operator can be in a pileup
+      // for many minutes without a fresh spot, so give DX its own window.
+      if (spotAgeSecs(s.spotTime) > dxcMaxAgeMin * 60) return false;
     } else {
       if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
     }
@@ -7192,6 +7199,7 @@ async function openSettingsDialog(tab) {
   setMaxDist.value = s.maxDist || 0;
   setMaxDistUnit.textContent = (s.distUnit || 'mi') === 'km' ? 'km' : 'miles';
   setSotaMaxAge.value = s.sotaMaxAge || 30;
+  setDxcMaxAge.value = s.dxcMaxAge || 15;
   setRefreshInterval.value = s.refreshInterval || 30;
   setScanDwell.value = s.scanDwell || 7;
   setCwXit.value = s.cwXit || 0;
@@ -7544,6 +7552,7 @@ settingsSave.addEventListener('click', async () => {
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
   const sotaMaxAgeVal = parseInt(setSotaMaxAge.value, 10) || 30;
+  const dxcMaxAgeVal = parseInt(setDxcMaxAge.value, 10) || 15;
   const refreshIntervalVal = Math.max(15, parseInt(setRefreshInterval.value, 10) || 30);
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
   const cwXitVal = parseInt(setCwXit.value, 10) || 0;
@@ -7710,6 +7719,7 @@ settingsSave.addEventListener('click', async () => {
     maxAgeMin: maxAgeVal,
     maxDist: maxDistVal,
     sotaMaxAge: sotaMaxAgeVal,
+    dxcMaxAge: dxcMaxAgeVal,
     refreshInterval: refreshIntervalVal,
     scanDwell: dwellVal,
     cwXit: cwXitVal,
@@ -7856,6 +7866,7 @@ settingsSave.addEventListener('click', async () => {
   maxAgeMin = maxAgeVal;
   maxDistMi = maxDistVal;
   sotaMaxAgeMin = sotaMaxAgeVal;
+  dxcMaxAgeMin = dxcMaxAgeVal;
   scanDwell = dwellVal;
   watchlist = parseWatchlist(watchlistRaw);
   enablePota = potaEnabled;

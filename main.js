@@ -5562,15 +5562,20 @@ function sendMergedSpots() {
   // Forward to ECHOCAT — all modes (phone-side Mode dropdown handles filtering), respect max spot age
   if (remoteServer && remoteServer.running) {
     const maxAgeMs = ((settings.maxAgeMin != null ? settings.maxAgeMin : 5) * 60000) || 300000;
+    const dxcMaxAgeMs = ((settings.dxcMaxAge != null ? settings.dxcMaxAge : 15) * 60000) || 900000;
+    const sotaMaxAgeMs = ((settings.sotaMaxAge != null ? settings.sotaMaxAge : 30) * 60000) || 1800000;
     const now = Date.now();
     const echoSpots = merged.filter(s => {
       // Net spots always pass through to ECHOCAT
       if (s.source === 'net') return true;
-      // Age filter
+      // Age filter — pick per-source window
       if (s.spotTime) {
         const t = s.spotTime.endsWith('Z') ? s.spotTime : s.spotTime + 'Z';
         const age = now - new Date(t).getTime();
-        if (age > maxAgeMs) return false;
+        let limit = maxAgeMs;
+        if (s.source === 'dxc') limit = dxcMaxAgeMs;
+        else if (s.source === 'sota') limit = sotaMaxAgeMs;
+        if (age > limit) return false;
       }
       return true;
     });

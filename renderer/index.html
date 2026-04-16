@@ -1287,10 +1287,14 @@
       <legend>Spot Filters</legend>
       <label>Max Spot Age (minutes):
         <input type="number" id="set-max-age" min="1" max="120" value="5">
-        <span class="help-text">POTA, LLOTA, WWFF, DX</span>
+        <span class="help-text">POTA, LLOTA, WWFF</span>
       </label>
       <label>SOTA Max Spot Age (minutes):
         <input type="number" id="set-sota-max-age" min="5" max="120" value="30">
+      </label>
+      <label>DX Cluster Max Spot Age (minutes):
+        <input type="number" id="set-dxc-max-age" min="1" max="120" value="15">
+        <span class="help-text">DX spots aren't re-posted like POTA — longer window helps during pileups</span>
       </label>
       <label>Refresh Interval (seconds):
         <input type="number" id="set-refresh-interval" min="15" max="300" step="15" value="30">
