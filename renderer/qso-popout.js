@@ -45,9 +45,13 @@ function gridToLatLonLocal(grid) {
 }
 
 // --- Editable columns ---
+// Indices match the cells[] order in buildRow()
 const EDITABLE = {
   0: 'QSO_DATE', 1: 'TIME_ON', 2: 'CALL', 3: 'FREQ', 4: 'MODE',
-  6: 'RST_SENT', 7: 'RST_RCVD', 8: 'SIG_INFO', 9: 'COMMENT',
+  6: 'TX_PWR',
+  7: 'RST_SENT', 8: 'RST_RCVD', 9: 'SIG_INFO',
+  10: 'GRIDSQUARE', 11: 'STATE', 12: 'COUNTRY',
+  13: 'COMMENT',
 };
 
 // --- State ---
@@ -298,8 +302,12 @@ const _virt = {
 
     const cells = [
       date, time, q.CALL || '', q.FREQ || '', q.MODE || '',
-      q.BAND || '', q.RST_SENT || '', q.RST_RCVD || '',
-      q.SIG_INFO || '', q.COMMENT || '',
+      q.BAND || '',
+      q.TX_PWR || '',
+      q.RST_SENT || '', q.RST_RCVD || '',
+      q.SIG_INFO || '',
+      q.GRIDSQUARE || '', q.STATE || '', q.COUNTRY || '',
+      q.COMMENT || '',
     ];
 
     for (let i = 0; i < cells.length; i++) {
