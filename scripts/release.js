@@ -43,7 +43,7 @@ function main() {
 
   // --- Windows ---
   const installerName = `POTACAT-Setup-${version}.exe`;
-  const portableName = `POTACAT-${version}-portable.exe`;
+  const portableName = `POTACAT-Portable-${version}.exe`;
   if (tryAdd(assets, installerName)) {
     platforms.push('win');
     tryAdd(assets, portableName);
@@ -55,9 +55,11 @@ function main() {
   // electron-builder may also produce arm64 variant
   const appImageArm64 = `POTACAT-${version}-arm64.AppImage`;
   const debName = `potacat_${version}_amd64.deb`;
+  const rpmName = `potacat-${version}.x86_64.rpm`;
   if (tryAdd(assets, appImageName)) platforms.push('linux');
   tryAdd(assets, appImageArm64);
   tryAdd(assets, debName);
+  tryAdd(assets, rpmName);
   tryAdd(assets, 'latest-linux.yml', { hash: false });
 
   // --- macOS ---

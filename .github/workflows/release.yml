@@ -1,0 +1,249 @@
+name: Build & Release
+
+# Triggers on a v*.*.* tag push or manual dispatch.
+# To release: bump package.json, commit, tag, push tag:
+#   git tag v1.6.0 && git push origin v1.6.0
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 1.6.0). Must match package.json.'
+        required: true
+        type: string
+
+permissions:
+  contents: write # needed to create the GitHub release and upload assets
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Parallel platform builds
+  # --------------------------------------------------------------------------
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install
+      - name: Build native addons
+        run: npm run build-natives
+        continue-on-error: true # native build failures don't block the release
+      - name: Build Windows installers
+        run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: |
+            dist/POTACAT-Setup-*.exe
+            dist/POTACAT-Portable-*.exe
+            dist/latest.yml
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install
+      - name: Build native addons
+        run: npm run build-natives
+        continue-on-error: true
+      - name: Bundle hamlib into assets/hamlib/
+        # Replaces the committed Windows rigctld.exe with a Mac build + its
+        # hamlib/libusb dylibs, rewriting install-names to @loader_path so the
+        # binary finds its own libs relative to itself inside the packaged app.
+        run: |
+          set -e
+          brew install hamlib
+          HAMLIB_PREFIX=$(brew --prefix hamlib)
+          rm -f assets/hamlib/*.dll assets/hamlib/*.exe
+          cp "$HAMLIB_PREFIX/bin/rigctld" assets/hamlib/rigctld
+          chmod +x assets/hamlib/rigctld
+          copy_deps() {
+            local bin="$1"
+            for dep in $(otool -L "$bin" | awk 'NR>1 && /\.dylib/ {print $1}' | grep -E "(hamlib|libusb)" | grep -v "$(basename $bin)" || true); do
+              local name=$(basename "$dep")
+              if [ ! -f "assets/hamlib/$name" ]; then
+                cp "$dep" "assets/hamlib/$name" 2>/dev/null || continue
+                chmod +w "assets/hamlib/$name"
+                copy_deps "assets/hamlib/$name"
+              fi
+              install_name_tool -change "$dep" "@loader_path/$name" "$bin" || true
+            done
+          }
+          copy_deps assets/hamlib/rigctld
+          # Make each dylib reference its siblings via @loader_path as well
+          for lib in assets/hamlib/*.dylib; do
+            install_name_tool -id "@loader_path/$(basename $lib)" "$lib" || true
+          done
+          ls -la assets/hamlib/
+      - name: Build macOS dmg
+        run: npm run dist:mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: |
+            dist/POTACAT-*.dmg
+            dist/POTACAT-*-mac.zip
+            dist/latest-mac.yml
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install system build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 libudev-dev cmake rpm libhamlib-utils libhamlib4 patchelf
+      - name: Install dependencies
+        run: npm install
+      - name: Build native addons
+        run: npm run build-natives
+        continue-on-error: true
+      - name: Bundle hamlib into assets/hamlib/
+        # Replaces Windows binaries with a Linux rigctld + its hamlib/libusb
+        # deps, rewriting RPATH to $ORIGIN so libs resolve next to the binary.
+        run: |
+          set -e
+          rm -f assets/hamlib/*.dll assets/hamlib/*.exe
+          cp /usr/bin/rigctld assets/hamlib/rigctld
+          chmod +x assets/hamlib/rigctld
+          for dep in $(ldd /usr/bin/rigctld | awk '/(hamlib|libusb)/ {print $3}'); do
+            if [ -f "$dep" ]; then
+              cp -L "$dep" "assets/hamlib/$(basename $dep)"
+            fi
+          done
+          patchelf --set-rpath '$ORIGIN' assets/hamlib/rigctld
+          for lib in assets/hamlib/*.so*; do
+            [ -f "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
+          done
+          ls -la assets/hamlib/
+      - name: Build Linux packages
+        run: npm run dist:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: |
+            dist/POTACAT-*.AppImage
+            dist/potacat_*.deb
+            dist/potacat-*.rpm
+            dist/latest-linux.yml
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # Collect artifacts + create the GitHub release
+  # --------------------------------------------------------------------------
+
+  create-release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so gh can auto-generate notes
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building release for v$VERSION"
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-download
+          merge-multiple: true
+      - name: Stage artifacts in dist/
+        run: |
+          mkdir -p dist
+          cp -v dist-download/* dist/ || true
+          ls -la dist/
+      - name: Create GitHub release with auto-generated notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          # If a release notes file is checked in at release-notes/vX.Y.Z.md, use it.
+          # Otherwise let gh auto-generate from commits since the previous tag.
+          NOTES_FILE="release-notes/${TAG}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              dist/POTACAT-Setup-*.exe dist/POTACAT-Portable-*.exe \
+              dist/POTACAT-*.dmg \
+              dist/POTACAT-*.AppImage dist/potacat_*.deb dist/potacat-*.rpm \
+              dist/latest*.yml 2>/dev/null || \
+            gh release upload "$TAG" \
+              dist/POTACAT-Setup-*.exe dist/POTACAT-Portable-*.exe \
+              dist/POTACAT-*.dmg \
+              dist/POTACAT-*.AppImage dist/potacat_*.deb dist/potacat-*.rpm \
+              dist/latest*.yml --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              dist/POTACAT-Setup-*.exe dist/POTACAT-Portable-*.exe \
+              dist/POTACAT-*.dmg \
+              dist/POTACAT-*.AppImage dist/potacat_*.deb dist/potacat-*.rpm \
+              dist/latest*.yml 2>/dev/null || \
+            gh release upload "$TAG" \
+              dist/POTACAT-Setup-*.exe dist/POTACAT-Portable-*.exe \
+              dist/POTACAT-*.dmg \
+              dist/POTACAT-*.AppImage dist/potacat_*.deb dist/potacat-*.rpm \
+              dist/latest*.yml --clobber
+          fi
+
+  # --------------------------------------------------------------------------
+  # Update the website to point at the new installers
+  # --------------------------------------------------------------------------
+
+  update-website:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout POTACAT (for the update script)
+        uses: actions/checkout@v4
+        with:
+          path: potacat
+      - name: Checkout potacat-website
+        uses: actions/checkout@v4
+        with:
+          repository: Waffleslop/potacat-website
+          token: ${{ secrets.WEBSITE_UPDATE_TOKEN }}
+          path: website
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Update download links in index.html
+        run: node potacat/scripts/update-website-links.js "${{ needs.create-release.outputs.version }}" website/index.html
+      - name: Commit and push
+        working-directory: website
+        run: |
+          git config user.name "POTACAT Release Bot"
+          git config user.email "noreply@potacat.com"
+          if git diff --quiet; then
+            echo "No website changes (already up to date)"
+            exit 0
+          fi
+          git add index.html
+          git commit -m "Update download links to v${{ needs.create-release.outputs.version }}"
+          git push
