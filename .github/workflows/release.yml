@@ -35,7 +35,10 @@ jobs:
         run: npm run build-natives
         continue-on-error: true # native build failures don't block the release
       - name: Build Windows installers
-        run: npm run dist:win
+        # --publish never: electron-builder sees the git tag and otherwise
+        # tries to auto-publish to GitHub. The create-release job handles
+        # uploads explicitly so we disable the implicit behavior here.
+        run: npx electron-builder --win --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: dist-windows
@@ -87,7 +90,7 @@ jobs:
           done
           ls -la assets/hamlib/
       - name: Build macOS dmg
-        run: npm run dist:mac
+        run: npx electron-builder --mac --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos
@@ -132,7 +135,7 @@ jobs:
           done
           ls -la assets/hamlib/
       - name: Build Linux packages
-        run: npm run dist:linux
+        run: npx electron-builder --linux --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: dist-linux
