@@ -1833,26 +1833,29 @@ function fft(re, im) {
   }
 }
 
-const WF_FFT_SIZE = 1024;
+const WF_FFT_SIZE = 4096;  // larger FFT = better frequency resolution (~12 Hz/bin)
 const WF_SAMPLE_RATE = 48000;
-// SSTV frequency range: 1100-2300 Hz
+// SSTV frequency range: 1000-2500 Hz
 const WF_FREQ_LO = 1000;
 const WF_FREQ_HI = 2500;
 const WF_BIN_LO = Math.floor(WF_FREQ_LO * WF_FFT_SIZE / WF_SAMPLE_RATE);
 const WF_BIN_HI = Math.ceil(WF_FREQ_HI * WF_FFT_SIZE / WF_SAMPLE_RATE);
 const WF_BIN_COUNT = WF_BIN_HI - WF_BIN_LO;
+// Adaptive noise floor for waterfall contrast
+let wfNoiseFloor = 0;      // running estimate of noise floor magnitude
+let wfPeakLevel = 1;       // running estimate of peak signal magnitude
 let wfAccum = [];
 let wfImageData = null;
 
 // Color map: black -> blue -> cyan -> green -> yellow -> white
 function wfColor(val) {
-  // val: 0-1
+  // val: 0-1, dark blue → blue → cyan → yellow → white
   const v = Math.max(0, Math.min(1, val));
-  if (v < 0.2)  return [0, 0, Math.round(v / 0.2 * 180)];
-  if (v < 0.4)  return [0, Math.round((v - 0.2) / 0.2 * 200), 180];
-  if (v < 0.6)  return [0, 200, Math.round(180 - (v - 0.4) / 0.2 * 180)];
-  if (v < 0.8)  return [Math.round((v - 0.6) / 0.2 * 255), 200 + Math.round((v - 0.6) / 0.2 * 55), 0];
-  return [255, 255, Math.round((v - 0.8) / 0.2 * 255)];
+  if (v < 0.15) return [0, 0, Math.round(v / 0.15 * 100 + 10)];                     // black → dark blue
+  if (v < 0.35) return [0, Math.round((v - 0.15) / 0.2 * 160), Math.round(100 + (v - 0.15) / 0.2 * 155)]; // dark blue → cyan
+  if (v < 0.55) return [0, Math.round(160 + (v - 0.35) / 0.2 * 95), Math.round(255 - (v - 0.35) / 0.2 * 80)]; // cyan → green
+  if (v < 0.75) return [Math.round((v - 0.55) / 0.2 * 255), 255, Math.round(175 - (v - 0.55) / 0.2 * 175)]; // green → yellow
+  return [255, 255, Math.round((v - 0.75) / 0.25 * 255)];                            // yellow → white
 }
 
 function feedWaterfall(samples) {
@@ -1899,22 +1902,31 @@ function drawWaterfallLine(mags, maxMag) {
   const w = wfCanvas.width;
   const h = wfCanvas.height;
 
+  // Adapt noise floor and peak level slowly for good contrast
+  // Median magnitude as noise floor estimate
+  const sorted = Array.from(mags).sort((a, b) => a - b);
+  const medianMag = sorted[Math.floor(sorted.length * 0.5)];
+  wfNoiseFloor = wfNoiseFloor * 0.95 + medianMag * 0.05;  // slow tracking
+  wfPeakLevel = Math.max(wfPeakLevel * 0.98, maxMag);       // fast attack, slow decay
+  const range = Math.max(wfPeakLevel - wfNoiseFloor, wfNoiseFloor * 0.5 || 1);
+
   // Scroll existing waterfall down by 1 pixel
-  if (!wfImageData) {
-    wfImageData = wfCtx.getImageData(0, 0, w, h);
-  } else {
-    wfImageData = wfCtx.getImageData(0, 0, w, h);
-  }
-  wfCtx.putImageData(wfImageData, 0, 1);
+  wfCtx.drawImage(wfCanvas, 0, 0, w, h, 0, 1, w, h - 1);
 
   // Draw new line at top
   const lineData = wfCtx.createImageData(w, 1);
   const d = lineData.data;
-  const norm = maxMag > 0 ? maxMag : 1;
   for (let x = 0; x < w; x++) {
-    // Map x to frequency bin
-    const binIdx = Math.floor(x * WF_BIN_COUNT / w);
-    const val = Math.log10(1 + mags[binIdx] / norm * 9); // log scale 0-1
+    // Interpolate between bins for smoother display
+    const binF = x * WF_BIN_COUNT / w;
+    const bin0 = Math.floor(binF);
+    const bin1 = Math.min(bin0 + 1, WF_BIN_COUNT - 1);
+    const frac = binF - bin0;
+    const mag = mags[bin0] * (1 - frac) + mags[bin1] * frac;
+    // Normalize against adaptive range
+    const normalized = Math.max(0, (mag - wfNoiseFloor) / range);
+    // Apply log scale with more contrast
+    const val = Math.pow(normalized, 0.4); // gamma curve for better contrast
     const [r, g, b] = wfColor(val);
     const idx = x * 4;
     d[idx] = r; d[idx + 1] = g; d[idx + 2] = b; d[idx + 3] = 255;

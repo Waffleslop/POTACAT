@@ -29,7 +29,7 @@
 
     /* RX waterfall */
     .sstv-waterfall-wrap { margin-top: 4px; border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; background: #000; }
-    .sstv-waterfall-wrap canvas { display: block; width: 100%; height: 60px; image-rendering: pixelated; }
+    .sstv-waterfall-wrap canvas { display: block; width: 100%; height: 80px; }
     .sstv-wf-labels { display: flex; justify-content: space-between; padding: 1px 4px; font-size: 9px; color: var(--text-dim); }
 
     /* Controls bar */
@@ -173,7 +173,7 @@
         <div class="sstv-decode-info" id="rx-info">Idle</div>
       </div>
       <div class="sstv-waterfall-wrap">
-        <canvas id="wf-canvas" width="320" height="60"></canvas>
+        <canvas id="wf-canvas" width="640" height="100"></canvas>
         <div class="sstv-wf-labels"><span>1.1 kHz</span><span>1.7 kHz</span><span>2.3 kHz</span></div>
       </div>
     </div>
