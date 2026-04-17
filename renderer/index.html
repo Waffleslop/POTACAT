@@ -1034,7 +1034,7 @@
           <label>SmartSDR API Host:
             <input type="text" id="set-flex-api-host" placeholder="127.0.0.1" value="" style="width:140px;">
           </label>
-          <span class="help-text" style="display:block;">IP of your FlexRadio for the SmartSDR API (ATU, NB, SWR, S-meter, CW keyer). Leave blank if SmartSDR runs on the same PC. Set to the radio's IP for direct connection (e.g. Flex 8600).</span>
+          <span class="help-text" style="display:block;">Enter your FlexRadio's IP address — not localhost. SmartSDR exposes only CAT on 127.0.0.1 (ports 5002&ndash;5005); the SmartSDR API (ATU, NB, SWR, S-meter, CW keyer, SSB/DIGU TX) lives on port 4992 of the radio itself. Find the IP in SmartSDR's status bar or under Settings &rarr; Network.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">
