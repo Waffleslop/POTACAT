@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
+  onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),
   rotateTo: (azimuth) => ipcRenderer.send('rotate-to', azimuth),
   refresh: () => ipcRenderer.send('refresh'),
   getSettings: () => ipcRenderer.invoke('get-settings'),

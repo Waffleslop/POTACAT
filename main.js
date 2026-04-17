@@ -2826,15 +2826,33 @@ function connectSmartSdr() {
   disconnectSmartSdr();
   if (!needsSmartSdr()) return;
   smartSdr = new SmartSdrClient();
+  let _sdrErrorLogged = false;
   smartSdr.on('error', (err) => {
     console.error('SmartSDR:', err.message);
-    sendCatLog(`SmartSDR API error: ${err.message}`);
+    // Only log the first error in a failure sequence — the retry loop will
+    // otherwise spam the CAT log every 5-20 s. The 'give-up' handler below
+    // surfaces a final, actionable message.
+    if (!_sdrErrorLogged) {
+      sendCatLog(`SmartSDR API error: ${err.message}`);
+      _sdrErrorLogged = true;
+    }
   });
   smartSdr.on('connected', () => {
+    _sdrErrorLogged = false;
     sendCatLog('SmartSDR API connected (port 4992) — rig controls active');
   });
   smartSdr.on('disconnected', () => {
     sendCatLog('SmartSDR API disconnected — rig controls (ATU/filter/gain) unavailable');
+  });
+  smartSdr.on('give-up', ({ host, attempts }) => {
+    const isLocal = host === '127.0.0.1' || host === 'localhost';
+    const hint = isLocal
+      ? `Set "SmartSDR API Host" in your Rig settings to your Flex's IP address (e.g. 192.168.1.100). SmartSDR only exposes CAT on localhost; the API (ATU, NB, SWR, S-meter, CW keyer, SSB/DIGU TX) lives on port 4992 of the radio itself.`
+      : `Check that the radio is on the network, reachable at ${host}, and SmartSDR is connected to it.`;
+    sendCatLog(`SmartSDR API unreachable at ${host}:4992 after ${attempts} attempts — giving up. ${hint}`);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('smartsdr-unreachable', { host, hint });
+    }
   });
   // Generate and store a persistent client_id for GUI registration (needed for CW keying)
   if (!settings.smartSdrClientId) {

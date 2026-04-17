@@ -6658,6 +6658,30 @@ function showLogToast(message, opts) {
   }
 }
 
+// --- SmartSDR API unreachable banner ---
+// Fires once after the SmartSDR client gives up retrying (3 failed attempts).
+// Common cause: user configured Flex Radio but left "SmartSDR API Host" blank,
+// so POTACAT tried 127.0.0.1:4992 instead of the radio's actual IP.
+window.api.onSmartSdrUnreachable(({ host, hint }) => {
+  let b = document.getElementById('smartsdr-banner');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'smartsdr-banner';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c24150;color:#fff;padding:10px 16px;font-size:13px;z-index:10000;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+    document.body.appendChild(b);
+  }
+  b.innerHTML = `
+    <strong>SmartSDR API unreachable at ${host}:4992.</strong>
+    <span style="flex:1">${hint} Retries paused — save the Rig settings to try again.</span>
+    <button type="button" id="smartsdr-banner-settings" style="background:#fff;color:#c24150;border:none;padding:4px 10px;border-radius:3px;font-weight:600;cursor:pointer;font-size:12px;">Open Rig Settings</button>
+    <button type="button" id="smartsdr-banner-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:12px;" aria-label="Dismiss">&times;</button>`;
+  b.querySelector('#smartsdr-banner-close').onclick = () => b.remove();
+  b.querySelector('#smartsdr-banner-settings').onclick = () => {
+    b.remove();
+    openSettingsDialog('radio');
+  };
+});
+
 // --- VFO Lock: tune-blocked toast ---
 window.api.onTuneBlocked((msg) => {
   let t = document.getElementById('tune-blocked-toast');
