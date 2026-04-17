@@ -48,57 +48,10 @@ jobs:
             dist/latest.yml
           if-no-files-found: error
 
-  # macOS is split by arch: each runner builds native addons and hamlib for
-  # its own CPU, producing a DMG that runs natively on that arch. Intel runs
-  # on macos-13 (last x64 image), Apple Silicon on macos-latest (arm64).
-  build-macos-x64:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Install dependencies
-        run: npm install
-      - name: Build native addons
-        run: npm run build-natives
-        continue-on-error: true
-      - name: Bundle hamlib into assets/hamlib/
-        run: |
-          set -e
-          brew install hamlib
-          HAMLIB_PREFIX=$(brew --prefix hamlib)
-          rm -f assets/hamlib/*.dll assets/hamlib/*.exe
-          cp "$HAMLIB_PREFIX/bin/rigctld" assets/hamlib/rigctld
-          chmod +x assets/hamlib/rigctld
-          copy_deps() {
-            local bin="$1"
-            for dep in $(otool -L "$bin" | awk 'NR>1 && /\.dylib/ {print $1}' | grep -E "(hamlib|libusb)" | grep -v "$(basename $bin)" || true); do
-              local name=$(basename "$dep")
-              if [ ! -f "assets/hamlib/$name" ]; then
-                cp "$dep" "assets/hamlib/$name" 2>/dev/null || continue
-                chmod +w "assets/hamlib/$name"
-                copy_deps "assets/hamlib/$name"
-              fi
-              install_name_tool -change "$dep" "@loader_path/$name" "$bin" || true
-            done
-          }
-          copy_deps assets/hamlib/rigctld
-          for lib in assets/hamlib/*.dylib; do
-            install_name_tool -id "@loader_path/$(basename $lib)" "$lib" || true
-          done
-          ls -la assets/hamlib/
-      - name: Build macOS dmg (x64)
-        run: npx electron-builder --mac --x64 --publish never
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist-macos-x64
-          path: |
-            dist/POTACAT-*.dmg
-            dist/latest-mac.yml
-          if-no-files-found: error
-
-  build-macos-arm64:
+  # Apple Silicon only for now. Intel support is a follow-up: the proper
+  # fix is a universal DMG where each native addon is built twice and lipo'd
+  # into a fat binary — tracked as a Phase-2 workflow rewrite.
+  build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -139,7 +92,7 @@ jobs:
         run: npx electron-builder --mac --arm64 --publish never
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-macos-arm64
+          name: dist-macos
           path: |
             dist/POTACAT-*.dmg
             dist/latest-mac.yml
@@ -196,7 +149,7 @@ jobs:
   # --------------------------------------------------------------------------
 
   create-release:
-    needs: [build-windows, build-macos-x64, build-macos-arm64, build-linux]
+    needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
