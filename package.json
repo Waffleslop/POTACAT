@@ -85,7 +85,10 @@
       "artifactName": "${productName}-Portable-${version}.${ext}"
     },
     "mac": {
-      "target": "dmg",
+      "target": {
+        "target": "dmg",
+        "arch": "universal"
+      },
       "category": "public.app-category.utilities",
       "identity": null,
       "entitlements": null,
