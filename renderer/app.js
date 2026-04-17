@@ -2468,6 +2468,26 @@ document.getElementById('qrz-download-btn').addEventListener('click', async () =
   }
 });
 
+// QRZ debug dump — captures the raw HTTP response so we can diagnose parser issues
+document.getElementById('qrz-debug-dump-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('qrz-download-status');
+  statusEl.textContent = 'Saving raw response...';
+  statusEl.style.color = '';
+  try {
+    const result = await window.api.qrzDebugDump();
+    if (result.ok) {
+      statusEl.textContent = `Saved ${result.bytes} bytes to ${result.path}`;
+      statusEl.style.color = '#4ecca3';
+    } else {
+      statusEl.textContent = result.error || 'Debug dump failed';
+      statusEl.style.color = '#e94560';
+    }
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+    statusEl.style.color = '#e94560';
+  }
+});
+
 setEnableCluster.addEventListener('change', () => {
   clusterConfig.classList.toggle('hidden', !setEnableCluster.checked);
 });
@@ -6243,8 +6263,9 @@ function openLogPopup(spot) {
   logDate.value = now.toISOString().slice(0, 10);
   logTime.value = now.toISOString().slice(11, 16);
 
-  // Pre-fill power: use last-entered value if set, otherwise CAT reading, otherwise default
-  logPower.value = lastLogPower > 0 ? lastLogPower : (radioPower > 0 ? radioPower : (defaultPower || 100));
+  // Pre-fill power: prefer the live CAT reading (matches the TX Power slider),
+  // fall back to the user's last-entered value, then the settings default.
+  logPower.value = radioPower > 0 ? radioPower : (lastLogPower > 0 ? lastLogPower : (defaultPower || 100));
 
   // Pre-fill RST based on mode
   const isCwDigi = CW_DIGI_MODES_SET.has(mode);

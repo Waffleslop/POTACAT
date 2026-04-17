@@ -1731,6 +1731,14 @@ async function saveQsoRecord(qsoData) {
     qsoData.operator = settings.myCallsign.toUpperCase();
   }
 
+  // Auto-fill TX power from the live CAT reading (matches the TX Power slider)
+  // when the caller didn't supply one — typical for the Logbook pop-out's
+  // "+ New QSO" form which has no power field.
+  if (!qsoData.txPower) {
+    if (_currentTxPower > 0) qsoData.txPower = String(_currentTxPower);
+    else if (settings.defaultPower) qsoData.txPower = String(settings.defaultPower);
+  }
+
   // Enrich COMMENT with park name + location for POTA/WWFF/LLOTA QSOs
   const parkRef = qsoData.potaRef || qsoData.wwffRef || (qsoData.sig && qsoData.sigInfo ? qsoData.sigInfo : '');
   if (parkRef) {
