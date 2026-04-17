@@ -7404,6 +7404,8 @@ async function openSettingsDialog(tab) {
   setEnableFreedv.checked = s.enableFreedv === true;
   document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
   document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
+  document.getElementById('set-enable-idle-pause').checked = s.enableIdlePause !== false;
+  document.getElementById('set-idle-pause-min').value = s.idlePauseMin || 20;
   setSotaUpload.checked = s.sotaUpload === true;
   setSotaUsername.value = s.sotaUsername || '';
   setSotaPassword.value = s.sotaPassword || '';
@@ -7793,6 +7795,8 @@ settingsSave.addEventListener('click', async () => {
     enableFreedv: freedvEnabled,
     enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
     autoSstvInactivityMin: parseInt(document.getElementById('set-auto-sstv-min').value) || 90,
+    enableIdlePause: document.getElementById('set-enable-idle-pause').checked,
+    idlePauseMin: parseInt(document.getElementById('set-idle-pause-min').value) || 20,
     sotaUpload: sotaUploadEnabled,
     sotaUsername: sotaUsernameVal,
     sotaPassword: sotaPasswordVal,

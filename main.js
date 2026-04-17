@@ -7041,8 +7041,40 @@ let lastActivityTime = Date.now(); // tracks meaningful user actions for active/
 function markUserActive() {
   lastActivityTime = Date.now();
   if (autoSstvActive) cancelAutoSstv();
+  // If CAT polling was paused for inactivity, resume it now — user is back
+  if (idlePolePaused && cat && cat.resumePolling) {
+    cat.resumePolling();
+    idlePolePaused = false;
+  }
 }
 function isUserActive() { return (Date.now() - lastActivityTime) < 1800000; } // active within 30 min
+
+// --- Idle CAT-polling pause ---
+// Polling keeps some radios from entering their screensaver / sleep mode
+// (W3AVP report on FT-710). After N minutes of POTACAT inactivity we pause
+// the poll timer; any user action in POTACAT resumes it via markUserActive().
+// The user loses frequency/mode updates while paused — acceptable tradeoff
+// for long idle periods where they explicitly want the radio to sleep.
+let idlePauseTimer = null;
+let idlePolePaused = false;
+function startIdlePauseTimer() {
+  stopIdlePauseTimer();
+  if (settings.enableIdlePause === false) return; // explicit opt-out
+  const thresholdMs = (settings.idlePauseMin || 20) * 60 * 1000;
+  idlePauseTimer = setInterval(() => {
+    if (idlePolePaused) return;
+    if (!cat || !cat.pausePolling || !cat.connected) return;
+    const idle = Date.now() - lastActivityTime;
+    if (idle >= thresholdMs) {
+      cat.pausePolling();
+      idlePolePaused = true;
+      console.log('[IdlePause] CAT polling paused after ' + Math.round(idle / 60000) + ' min idle');
+    }
+  }, 30000); // check every 30s
+}
+function stopIdlePauseTimer() {
+  if (idlePauseTimer) { clearInterval(idlePauseTimer); idlePauseTimer = null; }
+}
 
 // --- Auto-SSTV: idle-triggered SSTV decode ---
 let autoSstvTimer = null;
@@ -9107,6 +9139,9 @@ app.whenReady().then(() => {
   // Start auto-SSTV idle timer
   startAutoSstvTimer();
 
+  // Start idle CAT-polling pause timer
+  startIdlePauseTimer();
+
   // Check for updates (after a short delay so the window is ready)
   if (!settings.disableAutoUpdate) {
     setTimeout(checkForUpdates, 5000);
@@ -9967,6 +10002,11 @@ app.whenReady().then(() => {
     // Restart auto-SSTV timer if settings changed
     if (has('enableAutoSstv') || has('autoSstvInactivityMin')) {
       startAutoSstvTimer();
+    }
+
+    // Restart idle-pause timer if settings changed
+    if (has('enableIdlePause') || has('idlePauseMin')) {
+      startIdlePauseTimer();
     }
 
     return settings;

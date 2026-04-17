@@ -139,7 +139,7 @@ window.api.onCatFrequency((hz) => {
 
 // --- Theme ---
 function applyTheme(theme) {
-  document.body.classList.toggle('light-mode', theme === 'light');
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
 }
 window.api.onPopoutTheme(applyTheme);
 
@@ -296,9 +296,9 @@ function renderTextProps() {
   sizeInput.type = 'number';
   sizeInput.value = t.fontSize;
   sizeInput.min = 8;
-  sizeInput.max = 40;
+  sizeInput.max = 100;
   sizeInput.title = 'Font size';
-  sizeInput.addEventListener('change', () => { t.fontSize = Math.max(8, Math.min(40, parseInt(sizeInput.value) || 14)); onTextChanged(); renderTextLayers(); });
+  sizeInput.addEventListener('change', () => { t.fontSize = Math.max(8, Math.min(100, parseInt(sizeInput.value) || 14)); onTextChanged(); renderTextLayers(); });
   textPropsEl.appendChild(sizeInput);
 
   // Bold toggle

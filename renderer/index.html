@@ -960,6 +960,7 @@
             <span class="help-text" style="display:block;margin-top:4px;">Get your API key from qrz.com &rarr; My Account &rarr; QRZ Logbook Settings</span>
             <div id="qrz-api-status" class="help-text" style="margin-top:4px;"></div>
             <button type="button" id="qrz-download-btn" style="margin-top:6px;padding:4px 12px;font-size:12px;">Download QRZ Logbook</button>
+            <button type="button" id="qrz-debug-dump-btn" style="margin-top:6px;margin-left:6px;padding:4px 12px;font-size:12px;" title="Save the raw QRZ response to a file in your Documents folder so the developer can diagnose download problems.">Save Raw Response (debug)</button>
             <span id="qrz-download-status" class="help-text" style="margin-left:8px;"></span>
           </div>
         </div>
@@ -991,6 +992,11 @@
       <span class="help-text" style="margin-left:12px;display:block;">
         When idle, automatically opens SSTV and decodes on 20m (day) or 40m (night) based on your grid square.
         <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="480" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
+      </span>
+      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-idle-pause" checked> Pause CAT polling when idle</label>
+      <span class="help-text" style="margin-left:12px;display:block;">
+        Lets the radio's screensaver kick in during long idle periods. Polling resumes automatically on any POTACAT activity.
+        <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-idle-pause-min" min="5" max="120" value="20" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
       </span>
       </div>
     </fieldset>

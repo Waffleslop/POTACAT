@@ -250,6 +250,7 @@ contextBridge.exposeInMainWorld('api', {
   onRestartJtcatAudio: (cb) => ipcRenderer.on('restart-jtcat-audio', () => cb()),
   // Cloud Sync
   qrzDownloadLogbook: () => ipcRenderer.invoke('qrz-download-logbook'),
+  qrzDebugDump: () => ipcRenderer.invoke('qrz-debug-dump'),
   cloudGoogleSignIn: () => ipcRenderer.invoke('cloud-google-signin'),
   cloudLogin: (email, password) => ipcRenderer.invoke('cloud-login', email, password),
   cloudRegister: (email, password, callsign) => ipcRenderer.invoke('cloud-register', email, password, callsign),
