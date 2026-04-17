@@ -3147,17 +3147,34 @@ function renderClubSchedule(data) {
 }
 
 async function populateRigAudioDevices(restoreIn, restoreOut) {
+  // getUserMedia is used purely to unlock device labels. If it fails (mic
+  // blocked in Windows privacy settings, no mic present, etc.) we still want
+  // to enumerate — devices will show with empty labels but the user can at
+  // least see and pick them. Without this fallback, the Flex DAX devices
+  // never appeared in POTACAT while WSJT-X (which uses native WASAPI, not
+  // the Chromium media API) showed them all.
+  let getUserMediaError = null;
   try {
-    await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach(t => t.stop());
+  } catch (e) {
+    getUserMediaError = e;
+    console.warn('getUserMedia failed — device labels may be hidden:', e.message);
+  }
+  try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs = devices.filter(d => d.kind === 'audioinput');
     const outputs = devices.filter(d => d.kind === 'audiooutput');
+    const optLabel = d => d.label || d.deviceId.slice(0, 12) + '…';
     rigRemoteAudioInput.innerHTML = '<option value="">-- system default --</option>' +
-      inputs.map(d => `<option value="${d.deviceId}">${d.label || d.deviceId.slice(0, 20)}</option>`).join('');
+      inputs.map(d => `<option value="${d.deviceId}">${optLabel(d)}</option>`).join('');
     rigRemoteAudioOutput.innerHTML = '<option value="">-- system default --</option>' +
-      outputs.map(d => `<option value="${d.deviceId}">${d.label || d.deviceId.slice(0, 20)}</option>`).join('');
+      outputs.map(d => `<option value="${d.deviceId}">${optLabel(d)}</option>`).join('');
     if (restoreIn) rigRemoteAudioInput.value = restoreIn;
     if (restoreOut) rigRemoteAudioOutput.value = restoreOut;
+    if (getUserMediaError && inputs.length > 0 && !inputs[0].label) {
+      console.warn('Device labels hidden because microphone permission was denied. Check Windows Settings → Privacy & security → Microphone → Let desktop apps access your microphone.');
+    }
   } catch (e) {
     console.warn('Could not enumerate audio devices:', e.message);
   }
@@ -7039,15 +7056,24 @@ async function refreshEchoCatInfo() {
 }
 
 async function populateQuickAudioDevices(restoreIn, restoreOut) {
+  // See populateRigAudioDevices() for rationale — getUserMedia failure must
+  // not prevent the enumerateDevices call or the dropdown will be stuck on
+  // "System Default" while every other app (WSJT-X etc.) sees the devices.
   try {
-    await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach(t => t.stop());
+  } catch (e) {
+    console.warn('getUserMedia failed — device labels may be hidden:', e.message);
+  }
+  try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs = devices.filter(d => d.kind === 'audioinput');
     const outputs = devices.filter(d => d.kind === 'audiooutput');
+    const optLabel = d => d.label || d.deviceId.slice(0, 12) + '…';
     quickAudioInput.innerHTML = '<option value="">System Default</option>' +
-      inputs.map(d => `<option value="${d.deviceId}">${d.label || d.deviceId.slice(0, 20)}</option>`).join('');
+      inputs.map(d => `<option value="${d.deviceId}">${optLabel(d)}</option>`).join('');
     quickAudioOutput.innerHTML = '<option value="">System Default</option>' +
-      outputs.map(d => `<option value="${d.deviceId}">${d.label || d.deviceId.slice(0, 20)}</option>`).join('');
+      outputs.map(d => `<option value="${d.deviceId}">${optLabel(d)}</option>`).join('');
     if (restoreIn) quickAudioInput.value = restoreIn;
     if (restoreOut) quickAudioOutput.value = restoreOut;
   } catch (e) {
