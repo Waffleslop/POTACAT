@@ -84,7 +84,7 @@ const { getTuneQuirks } = require('./lib/rig-models');
 const { gridToLatLon, haversineDistanceMiles, bearing } = require('./lib/grid');
 const { freqToBand } = require('./lib/bands');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
-const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
+const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -10945,50 +10945,58 @@ app.whenReady().then(() => {
       const adifText = await QrzClient.fetchLogbook(settings.qrzApiKey, settings.myCallsign || '', (msg) => sendCatLog(msg));
       if (!adifText) return { ok: true, imported: 0, message: 'QRZ logbook is empty' };
 
-      // Parse downloaded ADIF records
-      const downloaded = [];
-      const recordRe = /<call:[^>]+>([^<]*)/gi;
-      // Split into individual records by <eor>
-      const records = adifText.split(/<eor>/i).filter(r => r.trim());
+      // Length-respecting parser handles ADIF with or without <EOR> separators
+      // (QRZ's responses may omit <EOR> between records).
+      const records = parseAdifStream(adifText);
+      sendCatLog(`[QRZ] Parsed ${records.length} records from ${adifText.length} bytes of ADIF`);
 
-      // Parse existing log for dedup
+      // Dedup against existing log
       const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-      let existingQsos = new Set();
+      const existingQsos = new Set();
       try {
         const existing = parseAllRawQsos(logPath);
         for (const q of existing) {
-          // Dedup key: callsign + date + time + band
           const key = [q.CALL, q.QSO_DATE, (q.TIME_ON || '').slice(0, 4), q.BAND].join('|').toUpperCase();
           existingQsos.add(key);
         }
       } catch { /* no existing log or parse error */ }
 
       let imported = 0;
-      for (const record of records) {
-        // Extract key fields for dedup
-        const fields = {};
-        const fieldRe = /<(\w+):\d+(?::\w+)?>([^<]*)/gi;
-        let fm;
-        while ((fm = fieldRe.exec(record)) !== null) {
-          fields[fm[1].toUpperCase()] = fm[2].trim();
-        }
-        if (!fields.CALL) continue;
-
+      let skipped = 0;
+      for (const fields of records) {
         const key = [fields.CALL, fields.QSO_DATE, (fields.TIME_ON || '').slice(0, 4), fields.BAND].join('|').toUpperCase();
-        if (existingQsos.has(key)) continue; // already in log
-
-        // Append the raw ADIF record
-        appendRawQso(logPath, record.trim());
+        if (existingQsos.has(key)) { skipped++; continue; }
+        // appendRawQso expects a fields object — pass the parsed map directly
+        // (the previous code passed a raw string here, which corrupted the log)
+        appendRawQso(logPath, fields);
         existingQsos.add(key);
         imported++;
       }
 
-      sendCatLog(`[QRZ] Downloaded ${records.length} QSOs, imported ${imported} new`);
-      // Reload worked QSOs to update checkmarks
+      sendCatLog(`[QRZ] Downloaded ${records.length} QSOs, imported ${imported} new, skipped ${skipped} duplicates`);
       if (imported > 0) loadWorkedQsos();
-      return { ok: true, imported, total: records.length };
+      return { ok: true, imported, total: records.length, skipped };
     } catch (err) {
       sendCatLog(`[QRZ] Logbook download failed: ${err.message}`);
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Diagnostic: dump one raw QRZ Logbook response to a file for ground-truth
+  // analysis. Used when a download produces unexpected results — we save what
+  // QRZ actually sent so we can see the wire format instead of guessing.
+  ipcMain.handle('qrz-debug-dump', async () => {
+    if (!settings.qrzApiKey) return { ok: false, error: 'QRZ API key not configured' };
+    try {
+      sendCatLog('[QRZ] Capturing raw response for diagnosis...');
+      const raw = await QrzClient.fetchLogbookRaw(settings.qrzApiKey, settings.myCallsign || '', 5);
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const outPath = path.join(app.getPath('documents'), `potacat-qrz-debug-${ts}.txt`);
+      fs.writeFileSync(outPath, raw, 'utf-8');
+      sendCatLog(`[QRZ] Raw response saved (${raw.length} bytes): ${outPath}`);
+      return { ok: true, path: outPath, bytes: raw.length };
+    } catch (err) {
+      sendCatLog(`[QRZ] Debug dump failed: ${err.message}`);
       return { ok: false, error: err.message };
     }
   });
