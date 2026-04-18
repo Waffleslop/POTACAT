@@ -135,6 +135,9 @@
   function saveColPrefs() { localStorage.setItem('echocat-spot-cols', JSON.stringify({ ...colShow, order: colOrder })); }
   let tunedCallsign = '';
   let tunedOpName = '';
+  let tunedCountry = '';
+  let tunedRef = '';
+  let tunedSig = '';
   var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
   let tunedState = '';
   let currentNb = false;
@@ -747,8 +750,10 @@
 
       case 'qrz-result':
         if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
-          tunedOpName = msg.fname || '';
+          // Prefer nickname over fname (matches desktop QRZ display logic)
+          tunedOpName = msg.nickname || msg.fname || '';
           tunedState = msg.state || '';
+          tunedCountry = msg.country || '';
         }
         break;
 
@@ -1552,9 +1557,13 @@
     const tunedSpot = spots.find(s => s.callsign === callsign && s.frequency === freqKhz);
     echoSpotWpm = tunedSpot && tunedSpot.wpm ? tunedSpot.wpm : null;
     updateEchoCwSpotWpm();
-    // Look up operator name and state from QRZ for CW macros
+    // Look up operator name and state from QRZ for CW macros / VFO op-info
     tunedOpName = '';
     tunedState = '';
+    tunedCountry = '';
+    // Park ref + program (POTA/SOTA/WWFF/LLOTA) come from the spot card itself
+    tunedRef = (card.dataset.ref || '').toUpperCase();
+    tunedSig = (typeof srcToSig === 'function' ? srcToSig(card.dataset.src) : '') || '';
     if (callsign && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: callsign.toUpperCase().split('/')[0] }));
     }
@@ -8366,7 +8375,12 @@
     const vfStepPill = document.getElementById('vf-step-pill');
     const vfPttBtn = document.getElementById('vf-ptt');
     const vfPttRow = vfPttBtn ? vfPttBtn.parentElement : null;
-    const vfOpInfo = document.getElementById('vf-op-info');
+    const vfOpCard = document.getElementById('vf-op-card');
+    const vfOpCall = document.getElementById('vf-op-call');
+    const vfOpName = document.getElementById('vf-op-name');
+    const vfOpLoc = document.getElementById('vf-op-loc');
+    const vfOpRef = document.getElementById('vf-op-ref');
+    const vfLogBtn = document.getElementById('vf-log-btn');
     const vfDial = document.getElementById('vf-dial');
     if (!fullview || !toggleBtn) return;
 
@@ -8409,15 +8423,26 @@
         const inBand = khz > 0 && Math.abs(khz - bandKhz) < bandKhz * 0.10;
         btn.classList.toggle('active', inBand);
       });
-      // Op info — show whoever is currently tuned. Falls back to a hint.
-      if (vfOpInfo) {
+      // Op info — rich card with big call/name + meta + Log button.
+      if (vfOpCard) {
         if (tunedCallsign) {
-          const parts = [tunedCallsign];
-          if (tunedOpName) parts.push(tunedOpName);
-          if (tunedState) parts.push(tunedState);
-          vfOpInfo.textContent = parts.join(' \u00B7 ');
+          vfOpCard.classList.remove('vf-op-empty');
+          if (vfOpCall) vfOpCall.textContent = tunedCallsign;
+          if (vfOpName) vfOpName.textContent = tunedOpName || '';
+          // Location: prefer "US-XX" for US ops (matches POTACAT convention),
+          // fall back to country name for DX, then bare state if neither.
+          let loc = '';
+          if (tunedState && /^united states|^usa$/i.test(tunedCountry || '')) {
+            loc = 'US-' + tunedState.toUpperCase();
+          } else if (tunedCountry) {
+            loc = tunedCountry;
+          } else if (tunedState) {
+            loc = tunedState;
+          }
+          if (vfOpLoc) vfOpLoc.textContent = loc;
+          if (vfOpRef) vfOpRef.textContent = tunedRef ? (tunedSig ? `${tunedSig} ${tunedRef}` : tunedRef) : '';
         } else {
-          vfOpInfo.textContent = 'Tap a spot or band to begin';
+          vfOpCard.classList.add('vf-op-empty');
         }
       }
       // Hide PTT in non-voice modes (CW/digital) — same logic as main pttBtn.
@@ -8589,6 +8614,22 @@
         if (khz > 0) dpTune(khz);
       });
     });
+
+    // --- Log QSO button — opens the existing log sheet pre-filled from
+    // tuned-spot context. The log-sheet's existing 'log-ok' handler closes
+    // the sheet on success, which leaves the user back in the VFO view.
+    if (vfLogBtn) {
+      vfLogBtn.addEventListener('click', () => {
+        if (!tunedCallsign) return;
+        openLogSheet({
+          callsign: tunedCallsign,
+          freqKhz: currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '',
+          mode: currentMode || '',
+          sig: tunedSig || '',
+          sigInfo: tunedRef || '',
+        });
+      });
+    }
 
     // Re-render whenever the radio state changes — patch updateStatus by
     // wrapping it. Simpler than wiring 5 separate listeners.

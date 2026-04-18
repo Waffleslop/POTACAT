@@ -151,18 +151,31 @@
         <canvas id="vf-dial" width="280" height="280"></canvas>
       </div>
       <div class="vf-bands">
-        <button type="button" class="vf-band" data-khz="1840">1.8</button>
-        <button type="button" class="vf-band" data-khz="3573">3.5</button>
-        <button type="button" class="vf-band" data-khz="7074">7</button>
-        <button type="button" class="vf-band" data-khz="10136">10</button>
-        <button type="button" class="vf-band" data-khz="14074">14</button>
-        <button type="button" class="vf-band" data-khz="18100">18</button>
-        <button type="button" class="vf-band" data-khz="21074">21</button>
-        <button type="button" class="vf-band" data-khz="24915">24</button>
-        <button type="button" class="vf-band" data-khz="28074">28</button>
-        <button type="button" class="vf-band" data-khz="50313">50</button>
+        <button type="button" class="vf-band" data-khz="1840">160m</button>
+        <button type="button" class="vf-band" data-khz="3573">80m</button>
+        <button type="button" class="vf-band" data-khz="7074">40m</button>
+        <button type="button" class="vf-band" data-khz="10136">30m</button>
+        <button type="button" class="vf-band" data-khz="14074">20m</button>
+        <button type="button" class="vf-band" data-khz="18100">17m</button>
+        <button type="button" class="vf-band" data-khz="21074">15m</button>
+        <button type="button" class="vf-band" data-khz="24915">12m</button>
+        <button type="button" class="vf-band" data-khz="28074">10m</button>
+        <button type="button" class="vf-band" data-khz="50313">6m</button>
       </div>
-      <div id="vf-op-info" class="vf-op-info">Tap a spot or band to begin</div>
+      <div id="vf-op-card" class="vf-op-card vf-op-empty">
+        <div class="vf-op-empty-text">Tap a spot or band to begin</div>
+        <div class="vf-op-rich" hidden>
+          <div class="vf-op-headline">
+            <span id="vf-op-call" class="vf-op-call">---</span>
+            <span id="vf-op-name" class="vf-op-name"></span>
+          </div>
+          <div class="vf-op-meta">
+            <span id="vf-op-loc" class="vf-op-loc"></span>
+            <span id="vf-op-ref" class="vf-op-ref"></span>
+          </div>
+          <button type="button" id="vf-log-btn" class="vf-log-btn">Log QSO</button>
+        </div>
+      </div>
       <div class="vf-ptt-row">
         <button type="button" id="vf-ptt" class="vf-ptt-btn">PTT</button>
       </div>

@@ -3501,6 +3501,77 @@ html, body {
   min-height: 18px;
 }
 
+/* Rich op-info card with big call/name + meta line + Log button */
+.vf-op-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  text-align: center;
+}
+.vf-op-card.vf-op-empty {
+  padding: 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.vf-op-empty-text { display: block; }
+.vf-op-card:not(.vf-op-empty) .vf-op-empty-text { display: none; }
+.vf-op-card.vf-op-empty .vf-op-rich { display: none !important; }
+.vf-op-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.vf-op-call {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--pota);
+  font-family: 'Courier New', monospace;
+}
+.vf-op-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+.vf-op-meta {
+  font-size: 13px;
+  color: var(--text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  min-height: 16px;
+}
+.vf-op-loc { font-weight: 600; }
+.vf-op-ref {
+  background: rgba(78, 204, 163, 0.15);
+  color: var(--pota);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.vf-op-ref:empty { display: none; }
+.vf-log-btn {
+  background: var(--pota);
+  color: #000;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 22px;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  -webkit-tap-highlight-color: transparent;
+}
+.vf-log-btn:hover { filter: brightness(1.1); }
+.vf-log-btn:active { transform: scale(0.97); }
+
 /* PTT bar — fixed to viewport bottom so it stays reachable regardless of
    how much the user has scrolled in the VFO view. Hidden completely when
    the radio is not in a voice mode (CW etc — there's no use for software PTT). */
