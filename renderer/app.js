@@ -10022,6 +10022,113 @@ catLogClearBtn.addEventListener('click', () => {
   catLogOutput.value = '';
 });
 
+// --- Report a Bug flow ---
+// One-click path that guides users through capturing a verbose log and
+// packaging it with diagnostic metadata for Discord #bug-report.
+// Replaces the manual "open settings, toggle verbose, save, find the log
+// button, reproduce, copy" sequence.
+(function setupReportBug() {
+  const btn = document.getElementById('report-bug-btn');
+  if (!btn) return;
+
+  async function buildReport() {
+    const s = await window.api.getSettings();
+    const rigs = s.rigs || [];
+    const activeRig = rigs.find(r => r.id === s.activeRigId) || rigs[0];
+    const rigDesc = activeRig
+      ? [activeRig.name, activeRig.model, activeRig.catTarget && activeRig.catTarget.type,
+         activeRig.catTarget && (activeRig.catTarget.host ? activeRig.catTarget.host + ':' + activeRig.catTarget.port : activeRig.catTarget.path)]
+        .filter(Boolean).join(' / ')
+      : '(none configured)';
+    const enabled = [
+      s.enablePota && 'POTA', s.enableSota && 'SOTA', s.enableWwff && 'WWFF', s.enableLlota && 'LLOTA',
+      s.enableCluster && 'DX-Cluster', s.enableCwSpots && 'CW-Spots', s.enableRbn && 'RBN',
+      s.enablePskr && 'PSKR', s.enableDxcc && 'DXCC', s.enableFreedv && 'FreeDV',
+      s.enableAutoSstv && 'Auto-SSTV',
+    ].filter(Boolean).join(', ') || '(none)';
+    const md = {
+      version: window._appVersion || s.appVersion || 'unknown',
+      platform: window.api.platform,
+      rig: rigDesc,
+      callsign: (s.myCallsign || '(not set)').toUpperCase(),
+      grid: s.grid || '(not set)',
+      features: enabled,
+    };
+    const log = catLogLines.join('\n') || '(log is empty — verbose logging may not have captured anything during the repro)';
+    return [
+      '## POTACAT Bug Report',
+      '',
+      '**Version:** v' + md.version,
+      '**Platform:** ' + md.platform,
+      '**Rig:** ' + md.rig,
+      '**Callsign:** ' + md.callsign + '  |  **Grid:** ' + md.grid,
+      '**Features enabled:** ' + md.features,
+      '',
+      '### What I tried to do',
+      '<!-- fill in: the steps you took -->',
+      '',
+      '### What happened',
+      '<!-- fill in: what went wrong, what you expected -->',
+      '',
+      '### Verbose log',
+      '```',
+      log,
+      '```',
+    ].join('\n');
+  }
+
+  async function startBugReport() {
+    // 1. Enable verbose logging in settings if not already
+    const s = await window.api.getSettings();
+    if (!s.verboseLog) {
+      await window.api.saveSettings({ verboseLog: true });
+      // Re-sync local UI state — show the Verbose Log toggle button
+      if (setVerboseLog) setVerboseLog.checked = true;
+      if (catLogToggleBtn) catLogToggleBtn.classList.remove('hidden');
+    }
+    // 2. Show the log panel + clear existing lines
+    catLogLines.length = 0;
+    catLogOutput.value = '';
+    if (catLogPanel.classList.contains('hidden')) {
+      catLogPanel.classList.remove('hidden');
+      catLogToggleBtn.classList.add('active');
+      document.body.classList.add('cat-log-open');
+    }
+    // 3. Float a recording banner with Copy + Cancel
+    let banner = document.getElementById('bug-report-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'bug-report-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c24150;color:#fff;padding:10px 16px;font-size:13px;z-index:10000;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+      document.body.appendChild(banner);
+    }
+    banner.innerHTML = [
+      '<strong>🐞 Recording bug report…</strong>',
+      '<span style="flex:1">Now reproduce the problem. When the log below contains what you need, click Copy &amp; Post.</span>',
+      '<button type="button" id="bug-report-copy" style="background:#fff;color:#c24150;border:none;padding:5px 12px;border-radius:3px;font-weight:700;cursor:pointer;font-size:12px;">Copy &amp; Post to Discord</button>',
+      '<button type="button" id="bug-report-cancel" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Cancel</button>',
+    ].join('');
+    banner.querySelector('#bug-report-cancel').onclick = () => banner.remove();
+    banner.querySelector('#bug-report-copy').onclick = async () => {
+      const report = await buildReport();
+      try {
+        await navigator.clipboard.writeText(report);
+      } catch {
+        // Fallback: put it in the log textarea so user can copy manually
+        catLogOutput.value = report;
+        catLogOutput.select();
+      }
+      banner.innerHTML = '<strong>✅ Copied to clipboard!</strong><span style="flex:1">Opening Discord #bug-report — paste there. Fill in the "What I tried" and "What happened" sections.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>';
+      banner.querySelector('#bug-report-close').onclick = () => banner.remove();
+      window.api.openExternal('https://discord.gg/cuNQpES38C');
+      // Auto-dismiss after 15 s so it doesn't linger forever
+      setTimeout(() => banner.remove(), 15000);
+    };
+  }
+
+  btn.addEventListener('click', startBugReport);
+})();
+
 // --- Solar data listener ---
 function updateSolarVisibility() {
   const method = enableSolar ? 'remove' : 'add';
