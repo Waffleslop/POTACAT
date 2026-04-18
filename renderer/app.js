@@ -10110,18 +10110,21 @@ catLogClearBtn.addEventListener('click', () => {
     banner.querySelector('#bug-report-cancel').onclick = () => banner.remove();
     banner.querySelector('#bug-report-copy').onclick = async () => {
       const report = await buildReport();
+      // Use main-process clipboard via IPC — navigator.clipboard.writeText
+      // silently fails in some Electron focus/permission contexts.
       let copied = false;
       try {
-        await navigator.clipboard.writeText(report);
-        copied = true;
-      } catch {
-        // Fallback: put the report in the log textarea so user can copy manually
+        const result = await window.api.copyToClipboard(report);
+        copied = !!(result && result.ok);
+      } catch { copied = false; }
+      if (!copied) {
+        // Last-ditch fallback: drop the report in the log textarea + select it
         catLogOutput.value = report;
         catLogOutput.select();
       }
       banner.innerHTML = copied
         ? '<strong>✅ Copied to clipboard.</strong><span style="flex:1">Paste it into Discord #bug-report. Fill in the "What I tried" and "What happened" sections before sending.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>'
-        : '<strong>⚠ Clipboard access denied.</strong><span style="flex:1">The report is shown in the log below — select all, copy manually, paste in Discord.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>';
+        : '<strong>⚠ Clipboard write failed.</strong><span style="flex:1">The report is shown in the log below — select all, copy manually, paste in Discord.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>';
       banner.querySelector('#bug-report-close').onclick = () => banner.remove();
       // Auto-dismiss after 20 s so the banner doesn't linger forever
       setTimeout(() => banner.remove(), 20000);

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -9199,6 +9199,19 @@ app.whenReady().then(() => {
 
 
   // IPC handlers
+
+  // Reliable clipboard write via main-process Electron API.
+  // The renderer's navigator.clipboard.writeText silently fails in some
+  // contexts (focus loss, permissions) — main-process clipboard always works.
+  ipcMain.handle('copy-to-clipboard', (_e, text) => {
+    try {
+      clipboard.writeText(String(text || ''));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   ipcMain.on('open-external', (_e, url) => {
     const { shell } = require('electron');
     // Allow opening local log files
