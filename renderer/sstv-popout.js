@@ -1184,6 +1184,23 @@ window.api.onSstvTxStatus((data) => {
   }
 });
 
+// Paint the TX canvas when ECHOCAT sends a photo — so the operator at the
+// desktop sees what their phone is transmitting. This replaces any local
+// compose with the phone's rendered image for the duration of the TX.
+window.api.onSstvTxImage((data) => {
+  try {
+    const w = data.width, h = data.height;
+    txCanvas.width = w; txCanvas.height = h;
+    const rgba = new Uint8ClampedArray(data.imageData);
+    const imgData = new ImageData(rgba, w, h);
+    txCtx.putImageData(imgData, 0, 0);
+    statusBar.textContent = 'ECHOCAT TX: ' + data.mode + ' (' + w + 'x' + h + ')';
+    rxInfo.textContent = 'TX from phone — ' + data.mode;
+  } catch (err) {
+    console.error('[SSTV] TX image display error:', err);
+  }
+});
+
 // ===== RX ==================================================================
 // RX event handlers are registered in the MULTI-SLICE section below,
 // which handles both single-slice and multi-slice routing.

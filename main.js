@@ -4741,6 +4741,10 @@ function connectRemote() {
       console.error('[SSTV] ECHOCAT photo received but SSTV not initialized');
       return;
     }
+    // Open the desktop popout so the operator can see what's being sent. The
+    // popout also owns TX audio playback for the Flex audio path.
+    const popoutWasOpen = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed());
+    if (!popoutWasOpen && openSstvPopout) openSstvPopout();
     try {
       const { nativeImage } = require('electron');
       // Decode base64 JPEG/PNG from phone
@@ -4761,6 +4765,24 @@ function connectRemote() {
         rgba[i + 3] = bitmap[i + 3]; // A
       }
       console.log(`[SSTV] ECHOCAT photo received: ${size.width}x${size.height}, mode=${mode}`);
+      // Show the outgoing image on the desktop popout's TX canvas so the op
+      // can see what their phone is sending. Send immediately if popout was
+      // already open; otherwise wait for it to finish loading.
+      const pushTxImage = () => {
+        if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+          sstvPopoutWin.webContents.send('sstv-tx-image', {
+            imageData: Array.from(rgba),
+            width: size.width,
+            height: size.height,
+            mode,
+          });
+        }
+      };
+      if (popoutWasOpen) {
+        pushTxImage();
+      } else {
+        setTimeout(pushTxImage, 1500);
+      }
       sstvEngine.encode(rgba, size.width, size.height, mode);
     } catch (err) {
       console.error('[SSTV] ECHOCAT photo error:', err.message);
@@ -8742,6 +8764,10 @@ app.whenReady().then(() => {
   }
 
   function stopSstv() {
+    // SAFETY: always release PTT. If a TX was in progress when the popout/app
+    // closed, the Flex would otherwise keep keyed after we stopped feeding it
+    // audio — an FCC problem (silent carrier).
+    try { handleRemotePtt(false); } catch {}
     if (sstvEngine) {
       sstvEngine.stop();
       sstvEngine = null;
@@ -11593,6 +11619,12 @@ let cleanupDone = false;
 function gracefulCleanup() {
   if (cleanupDone) return;
   cleanupDone = true;
+  // SAFETY FIRST: release PTT before we tear down any rig connections. If the
+  // user shut down during an SSTV/FT8/CW transmission, we must stop TX on the
+  // radio before the SmartSDR/CAT/keyer connections close — otherwise the
+  // radio can stay keyed with no audio (a silent-carrier FCC issue).
+  try { handleRemotePtt(false); } catch {}
+  try { if (sstvEngine) sstvEngine.stop(); } catch {}
   // Save QRZ cache to disk
   try {
     const qrzCachePath = path.join(app.getPath('userData'), 'qrz-cache.json');
