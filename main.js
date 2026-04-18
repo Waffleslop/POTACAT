@@ -4938,12 +4938,21 @@ function handleRemotePtt(state) {
   }
 
   if (isFlexRig) {
-    // FlexRadio: ensure TX goes to POTACAT's slice, not whatever slice was last active
+    // FlexRadio: prefer SmartSDR API so TX is pinned to POTACAT's slice. If
+    // the SmartSDR API isn't available, fall back to the TS-2000 TX;/RX;
+    // command via the TCP CAT shim — slice selection is lost but the radio
+    // will at least key (W0MET silent-PTT report 2026-04-18).
     if (smartSdr && smartSdr.connected) {
       const sliceIndex = (settings.catTarget.port || 5002) - 5002;
       smartSdr.setActiveSlice(sliceIndex);
       smartSdr.setTxSlice(sliceIndex);
       smartSdr.setTransmit(state);
+    } else if (cat && cat.connected) {
+      if (state) sendCatLog('[PTT] SmartSDR API unavailable — falling back to TS-2000 TX; command (slice selection skipped)');
+      cat.setTransmit(state);
+    } else if (state) {
+      console.warn('[PTT] Cannot key TX — neither SmartSDR API nor CAT TCP is connected');
+      sendCatLog('PTT FAILED: neither SmartSDR API nor CAT TCP is connected');
     }
   } else {
     // Non-Flex rig (serial or rigctld): use TX;/RX; or T 1/T 0
