@@ -8876,6 +8876,9 @@ app.whenReady().then(() => {
   // SSTV pop-out window
   openSstvPopout = function() {
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      // Popout already open — ask it to re-QSY to the selected SSTV freq so the
+      // radio moves back from whatever POTA spot the user last tuned to.
+      try { sstvPopoutWin.webContents.send('sstv-refocus-qsy'); } catch {}
       sstvPopoutWin.focus();
       return;
     }

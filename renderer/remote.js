@@ -3922,6 +3922,16 @@
         // user already built (background image + text layers). Desktop replies
         // with an 'sstv-compose-state' message.
         ws.send(JSON.stringify({ type: 'sstv-get-compose' }));
+        // QSY the radio to the phone's selected SSTV freq — otherwise it stays
+        // on whatever POTA spot was last tuned.
+        try {
+          var freqEl = document.getElementById('sstv-freq-phone');
+          if (freqEl && freqEl.value) {
+            var fOpt = freqEl.options[freqEl.selectedIndex];
+            var fMode = (fOpt && fOpt.dataset.mode) || (parseInt(freqEl.value) < 10000 ? 'LSB' : 'USB');
+            ws.send(JSON.stringify({ type: 'tune', freqKhz: freqEl.value, mode: fMode }));
+          }
+        } catch (e) {}
       }
       sstvPhoneRequestGallery(10, 0);
       // Paint the compose canvas immediately — otherwise it sits blank until
@@ -7616,8 +7626,8 @@
     if (!echoSettings) return;
     if (echoSettings.sstvTemplates && echoSettings.sstvTemplates.length) {
       sstvPhoneTemplates = echoSettings.sstvTemplates;
-      sstvPhoneRenderTemplates();
     }
+    sstvPhoneRenderTemplates();
     if (echoSettings.sstvTextElements && echoSettings.sstvTextElements.length) {
       sstvPhoneTexts = echoSettings.sstvTextElements.map(function(t) {
         return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
@@ -7637,22 +7647,102 @@
   function sstvPhoneRenderTemplates() {
     if (!sstvPhoneTplStrip) return;
     sstvPhoneTplStrip.innerHTML = '';
-    if (sstvPhoneTemplates.length === 0) { if (sstvPhoneTplSection) sstvPhoneTplSection.style.display = 'none'; return; }
     if (sstvPhoneTplSection) sstvPhoneTplSection.style.display = '';
+    if (sstvPhoneTemplates.length === 0) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'font-size:11px;color:var(--text-dim);padding:16px 4px;';
+      empty.textContent = 'No templates yet — tap + Save to store the current compose.';
+      sstvPhoneTplStrip.appendChild(empty);
+      return;
+    }
     for (var i = 0; i < sstvPhoneTemplates.length; i++) {
       (function(idx) {
         var tpl = sstvPhoneTemplates[idx];
         var div = document.createElement('div');
-        div.style.cssText = 'flex-shrink:0;border:2px solid transparent;border-radius:4px;overflow:hidden;cursor:pointer;';
+        div.style.cssText = 'position:relative;flex-shrink:0;border:2px solid transparent;border-radius:4px;overflow:hidden;cursor:pointer;';
         var img = document.createElement('img');
         img.src = tpl.thumbnail || '';
         img.style.cssText = 'display:block;height:50px;width:auto;';
         div.appendChild(img);
         div.addEventListener('click', function() { sstvPhoneLoadTemplate(idx); });
+        // Long-press (or right-click) to delete
+        var delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.textContent = 'x';
+        delBtn.title = 'Delete template';
+        delBtn.style.cssText = 'position:absolute;top:1px;right:1px;width:16px;height:16px;padding:0;line-height:14px;font-size:11px;border:0;border-radius:8px;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;';
+        delBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          sstvPhoneDeleteTemplate(idx);
+        });
+        div.appendChild(delBtn);
         sstvPhoneTplStrip.appendChild(div);
       })(i);
     }
   }
+
+  // --- Save current compose as template ---
+  function sstvPhoneSaveTemplate() {
+    if (sstvPhoneTemplates.length >= 12) {
+      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Max 12 templates — delete one first';
+      return;
+    }
+    if (!sstvPhoneCompose) return;
+    // Thumbnail from the current compose canvas (includes bg + text)
+    var thumbC = document.createElement('canvas');
+    var thumbScale = 70 / sstvPhoneCompose.width;
+    thumbC.width = 70;
+    thumbC.height = Math.round(sstvPhoneCompose.height * thumbScale);
+    thumbC.getContext('2d').drawImage(sstvPhoneCompose, 0, 0, thumbC.width, thumbC.height);
+    var thumbnail = thumbC.toDataURL('image/png');
+    // Background — render the cropped bg only (no text) to a 320x256 canvas so
+    // the phone/desktop can re-apply it without re-running the crop math.
+    var bgDataUrl = null;
+    if (sstvPhoneBg) {
+      var bgC = document.createElement('canvas');
+      bgC.width = 320; bgC.height = 256;
+      var bgCtx = bgC.getContext('2d');
+      var srcW = sstvPhoneBg.width || sstvPhoneBg.naturalWidth || 320;
+      var srcH = sstvPhoneBg.height || sstvPhoneBg.naturalHeight || 256;
+      var fitScale = Math.max(320 / srcW, 256 / srcH);
+      var totalScale = fitScale * sstvPhoneBgZoom;
+      var visW = 320 / totalScale;
+      var visH = 256 / totalScale;
+      var cx = srcW / 2 + sstvPhoneBgPanX;
+      var cy = srcH / 2 + sstvPhoneBgPanY;
+      var sx = Math.max(0, Math.min(srcW - visW, cx - visW / 2));
+      var sy = Math.max(0, Math.min(srcH - visH, cy - visH / 2));
+      bgCtx.drawImage(sstvPhoneBg, sx, sy, visW, visH, 0, 0, 320, 256);
+      bgDataUrl = bgC.toDataURL('image/jpeg', 0.85);
+    }
+    var tpl = {
+      bgParams: null,
+      bgDataUrl: bgDataUrl,
+      texts: sstvPhoneTexts.map(function(t) {
+        return { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label };
+      }),
+      thumbnail: thumbnail,
+    };
+    sstvPhoneTemplates.push(tpl);
+    sstvPhoneRenderTemplates();
+    // Persist to desktop settings so both sides stay in sync
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'save-settings', settings: { sstvTemplates: sstvPhoneTemplates } }));
+    }
+    if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template saved (' + sstvPhoneTemplates.length + ')';
+  }
+
+  function sstvPhoneDeleteTemplate(idx) {
+    if (idx < 0 || idx >= sstvPhoneTemplates.length) return;
+    sstvPhoneTemplates.splice(idx, 1);
+    sstvPhoneRenderTemplates();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'save-settings', settings: { sstvTemplates: sstvPhoneTemplates } }));
+    }
+  }
+
+  var sstvPhoneTplSaveBtn = document.getElementById('sstv-phone-tpl-save');
+  if (sstvPhoneTplSaveBtn) sstvPhoneTplSaveBtn.addEventListener('click', sstvPhoneSaveTemplate);
 
   function sstvPhoneLoadTemplate(idx) {
     var tpl = sstvPhoneTemplates[idx];

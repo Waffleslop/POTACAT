@@ -1094,10 +1094,13 @@
       <!-- Scrollable content -->
       <div style="flex:1;overflow-y:auto;min-height:0;">
 
-        <!-- Templates from desktop -->
-        <div id="sstv-phone-tpl-section" style="padding:6px 10px;border-bottom:1px solid var(--border);display:none;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-dim);margin-bottom:4px;">Templates</div>
-          <div id="sstv-phone-tpl-strip" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;"></div>
+        <!-- Templates (synced with desktop) -->
+        <div id="sstv-phone-tpl-section" style="padding:6px 10px;border-bottom:1px solid var(--border);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <div style="font-size:12px;font-weight:700;color:var(--text-dim);">Templates</div>
+            <button type="button" id="sstv-phone-tpl-save" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text);">+ Save</button>
+          </div>
+          <div id="sstv-phone-tpl-strip" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;min-height:54px;"></div>
         </div>
 
         <!-- Compose canvas -->

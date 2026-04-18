@@ -125,6 +125,16 @@ const MODE_RES = {
 
 })();
 
+// --- Refocus from main (user re-opened SSTV from the view menu) ---
+// Re-tune to the currently selected SSTV frequency so the radio QSYs back
+// from whatever spot the user last clicked.
+window.api.onRefocusQsy(() => {
+  try {
+    const opt = freqSelect.options[freqSelect.selectedIndex];
+    tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
+  } catch (e) { console.error('[SSTV] Refocus QSY error:', e); }
+});
+
 // --- Radio frequency sync ---
 window.api.onCatFrequency((hz) => {
   const khz = Math.round(hz / 1000);
