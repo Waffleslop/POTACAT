@@ -36,6 +36,7 @@ let isTx = false;
 let bgImage = null;       // loaded/generated background Image or ImageData
 let bgParams = null;      // pattern generator params (for template save)
 let replyImage = null;    // received image for PiP reply (ImageData)
+let lastRxImage = null;   // most recent decode, for the "Reply with this" button on rx-canvas
 let replyInset = { x: -1, y: -1, scale: 0.28, rotation: 0 }; // -1 = auto position (bottom-right)
 let galleryImages = [];   // [{filename, timestamp, mode, dataUrl}]
 let sstvAudioCtx = null;
@@ -1187,6 +1188,20 @@ function renderGallery() {
       showImageContextMenu(e.clientX, e.clientY, idx, fn);
     })(i, entry.filename));
 
+    // Reply button — overlaid on the thumbnail so the feature is discoverable
+    // without relying on the double-click shortcut
+    const replyBtn = document.createElement('button');
+    replyBtn.type = 'button';
+    replyBtn.textContent = '↩ Reply';
+    replyBtn.title = 'Use this as the PiP reply inset on your next TX';
+    replyBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:rgba(233,69,96,0.92);color:#fff;border:none;border-radius:3px;font-size:10px;font-weight:700;padding:3px 6px;cursor:pointer;z-index:2;';
+    replyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setReplyImage(entry);
+    });
+    thumb.style.position = thumb.style.position || 'relative';
+    thumb.appendChild(replyBtn);
+
     gallery.appendChild(thumb);
   }
 }
@@ -1283,6 +1298,20 @@ clearReplyBtn.addEventListener('click', () => {
   txBtn.classList.remove('reply-mode');
   renderTxPreview();
 });
+
+// On-canvas "Reply with this" button — uses the latest decode directly
+const rxReplyBtnEl = document.getElementById('rx-reply-btn');
+if (rxReplyBtnEl) {
+  rxReplyBtnEl.addEventListener('click', () => {
+    if (!lastRxImage) return;
+    setReplyImage({
+      imageData: lastRxImage.imageData,
+      width: lastRxImage.width,
+      height: lastRxImage.height,
+      mode: lastRxImage.mode,
+    });
+  });
+}
 
 openFolderBtn.addEventListener('click', () => window.api.sstvOpenGalleryFolder());
 
@@ -1777,6 +1806,15 @@ window.api.onSstvRxImage((data) => {
     progressBar.style.width = '100%';
     setTimeout(() => { progressBar.style.width = '0%'; }, 2000);
     statusBar.textContent = 'Image decoded: ' + data.mode;
+    // Stash the latest decode so the on-canvas Reply button can grab it
+    lastRxImage = {
+      imageData: new Uint8ClampedArray(data.imageData),
+      width: data.width,
+      height: data.height,
+      mode: data.mode,
+    };
+    const rxReplyBtn = document.getElementById('rx-reply-btn');
+    if (rxReplyBtn) rxReplyBtn.style.display = '';
   }
 
   // Add to gallery regardless of mode

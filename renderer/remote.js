@@ -351,6 +351,11 @@
   let sstvPhoneBgPanX = 0;      // pan offset in source image pixels
   let sstvPhoneBgPanY = 0;
   let sstvPhoneGalleryItems = [];
+  // PiP reply inset — draws the received image over the outgoing compose so
+  // the standard "reply with your image + their image overlaid" workflow
+  // works on the phone. See desktop sstv-popout.js for the matching feature.
+  let sstvPhoneReplyImage = null;              // HTMLImageElement or null
+  let sstvPhoneReplyInset = { x: -1, y: -1, scale: 0.28 }; // -1 = auto (bottom-right)
 
   // FT8 DOM refs
   const ft8View = document.getElementById('ft8-view');
@@ -7758,8 +7763,9 @@
     });
   }
 
-  // --- Canvas touch drag for text repositioning ---
+  // --- Canvas touch drag for text repositioning + reply inset ---
   if (sstvPhoneCompose) {
+    let insetDrag = null; // { ox, oy } when dragging the reply inset
     sstvPhoneCompose.addEventListener('touchstart', function(e) {
       var touch = e.touches[0];
       var rect = sstvPhoneCompose.getBoundingClientRect();
@@ -7767,6 +7773,18 @@
       var sy = sstvPhoneCompose.height / rect.height;
       var mx = (touch.clientX - rect.left) * sx;
       var my = (touch.clientY - rect.top) * sy;
+      // Reply inset takes hit-test priority — it's drawn on top
+      if (sstvPhoneReplyImage && sstvPhoneReplyInset._drawW) {
+        var ix = sstvPhoneReplyInset._drawX;
+        var iy = sstvPhoneReplyInset._drawY;
+        var iw = sstvPhoneReplyInset._drawW;
+        var ih = sstvPhoneReplyInset._drawH;
+        if (mx >= ix && mx <= ix + iw && my >= iy && my <= iy + ih) {
+          insetDrag = { ox: mx - ix, oy: my - iy };
+          e.preventDefault();
+          return;
+        }
+      }
       // Hit test text elements
       for (var i = sstvPhoneTexts.length - 1; i >= 0; i--) {
         var t = sstvPhoneTexts[i];
@@ -7786,13 +7804,20 @@
     }, { passive: false });
 
     sstvPhoneCompose.addEventListener('touchmove', function(e) {
-      if (!sstvPhoneSelectedText || !sstvPhoneSelectedText._dragOx) return;
       var touch = e.touches[0];
       var rect = sstvPhoneCompose.getBoundingClientRect();
       var sx = sstvPhoneCompose.width / rect.width;
       var sy = sstvPhoneCompose.height / rect.height;
       var mx = (touch.clientX - rect.left) * sx;
       var my = (touch.clientY - rect.top) * sy;
+      if (insetDrag) {
+        sstvPhoneReplyInset.x = Math.max(0, Math.min(sstvPhoneCompose.width - sstvPhoneReplyInset._drawW, mx - insetDrag.ox));
+        sstvPhoneReplyInset.y = Math.max(0, Math.min(sstvPhoneCompose.height - sstvPhoneReplyInset._drawH, my - insetDrag.oy));
+        sstvRenderPhoneCompose();
+        e.preventDefault();
+        return;
+      }
+      if (!sstvPhoneSelectedText || !sstvPhoneSelectedText._dragOx) return;
       sstvPhoneSelectedText.x = Math.max(0, Math.min(sstvPhoneCompose.width - 10, mx - sstvPhoneSelectedText._dragOx));
       sstvPhoneSelectedText.y = Math.max(sstvPhoneSelectedText.fontSize, Math.min(sstvPhoneCompose.height, my - sstvPhoneSelectedText._dragOy));
       sstvRenderPhoneCompose();
@@ -7800,6 +7825,7 @@
     }, { passive: false });
 
     sstvPhoneCompose.addEventListener('touchend', function() {
+      insetDrag = null;
       if (sstvPhoneSelectedText) delete sstvPhoneSelectedText._dragOx;
     });
   }
@@ -8029,6 +8055,78 @@
       }
       sstvPhoneComposeCtx.restore();
     }
+    // PiP reply inset (drawn last so it sits above text)
+    if (sstvPhoneReplyImage && sstvPhoneReplyImage.complete && sstvPhoneReplyImage.naturalWidth > 0) {
+      var insetW = Math.round(w * sstvPhoneReplyInset.scale);
+      var insetH = Math.round(insetW * (sstvPhoneReplyImage.naturalHeight / sstvPhoneReplyImage.naturalWidth));
+      var margin = 8;
+      var ix = sstvPhoneReplyInset.x >= 0 ? sstvPhoneReplyInset.x : w - insetW - margin;
+      var iy = sstvPhoneReplyInset.y >= 0 ? sstvPhoneReplyInset.y : h - insetH - margin;
+      // Cache draw rect so touch handlers can hit-test
+      sstvPhoneReplyInset._drawX = ix;
+      sstvPhoneReplyInset._drawY = iy;
+      sstvPhoneReplyInset._drawW = insetW;
+      sstvPhoneReplyInset._drawH = insetH;
+      sstvPhoneComposeCtx.save();
+      sstvPhoneComposeCtx.shadowColor = 'rgba(0,0,0,0.7)';
+      sstvPhoneComposeCtx.shadowBlur = 4;
+      sstvPhoneComposeCtx.shadowOffsetX = 1;
+      sstvPhoneComposeCtx.shadowOffsetY = 2;
+      sstvPhoneComposeCtx.drawImage(sstvPhoneReplyImage, ix, iy, insetW, insetH);
+      sstvPhoneComposeCtx.shadowColor = 'transparent';
+      sstvPhoneComposeCtx.strokeStyle = '#fff';
+      sstvPhoneComposeCtx.lineWidth = 1.5;
+      sstvPhoneComposeCtx.strokeRect(ix, iy, insetW, insetH);
+      sstvPhoneComposeCtx.restore();
+    }
+  }
+
+  // --- Reply-image helpers -------------------------------------------------
+  function sstvPhoneSetReplyImage(src) {
+    if (!src) return;
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function() {
+      sstvPhoneReplyImage = img;
+      sstvPhoneReplyInset.x = -1;
+      sstvPhoneReplyInset.y = -1;
+      sstvPhoneReplyInset.scale = 0.28;
+      sstvRenderPhoneCompose();
+      sstvPhoneUpdateReplyUI();
+    };
+    img.onerror = function() {
+      console.warn('[SSTV] Reply image failed to load');
+    };
+    img.src = src;
+  }
+  function sstvPhoneClearReply() {
+    sstvPhoneReplyImage = null;
+    sstvRenderPhoneCompose();
+    sstvPhoneUpdateReplyUI();
+  }
+  function sstvPhoneUpdateReplyUI() {
+    // Update the SEND button label + visibility of the Clear-reply chip
+    if (sstvSendBtn) {
+      sstvSendBtn.textContent = sstvPhoneReplyImage ? 'REPLY' : 'SEND';
+    }
+    var chip = document.getElementById('sstv-phone-reply-chip');
+    if (sstvPhoneReplyImage) {
+      if (!chip) {
+        chip = document.createElement('button');
+        chip.id = 'sstv-phone-reply-chip';
+        chip.type = 'button';
+        chip.textContent = '↩ Clear reply inset';
+        chip.style.cssText = 'display:block;margin:4px 10px 0;padding:5px 10px;font-size:11px;border:1px solid var(--accent);background:rgba(233,69,96,0.1);color:var(--accent);border-radius:4px;cursor:pointer;';
+        chip.addEventListener('click', sstvPhoneClearReply);
+        var composeCanvas = document.getElementById('sstv-phone-compose');
+        if (composeCanvas && composeCanvas.parentNode) {
+          composeCanvas.parentNode.parentNode.insertBefore(chip, composeCanvas.parentNode.nextSibling);
+        }
+      }
+      chip.style.display = 'block';
+    } else if (chip) {
+      chip.style.display = 'none';
+    }
   }
 
   // --- Send ---
@@ -8100,6 +8198,17 @@
     var dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     info.textContent = (img.mode || '') + ' ' + dateStr;
     div.appendChild(info);
+    // Reply button — overlays the thumb, taps set this image as PiP reply inset
+    var replyBtn = document.createElement('button');
+    replyBtn.type = 'button';
+    replyBtn.textContent = '↩';
+    replyBtn.title = 'Reply with this image';
+    replyBtn.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(233,69,96,0.95);color:#fff;border:none;border-radius:3px;font-size:13px;font-weight:700;padding:2px 6px;cursor:pointer;z-index:2;';
+    replyBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      sstvPhoneSetReplyImage(img.dataUrl || img.image);
+    });
+    div.appendChild(replyBtn);
     div.dataset.timestamp = img.timestamp || 0;
     // Tap to view full size
     div.addEventListener('click', function() {
@@ -8122,12 +8231,33 @@
   function sstvPhoneViewImage(src) {
     if (!src) return;
     var overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;';
     var img = document.createElement('img');
     img.src = src;
-    img.style.cssText = 'max-width:95%;max-height:95%;image-rendering:pixelated;border-radius:4px;';
+    img.style.cssText = 'max-width:95%;max-height:85%;image-rendering:pixelated;border-radius:4px;';
     overlay.appendChild(img);
-    overlay.addEventListener('click', function() { overlay.remove(); });
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:12px;margin-top:14px;';
+    var replyBtn = document.createElement('button');
+    replyBtn.type = 'button';
+    replyBtn.textContent = '↩ Reply with this';
+    replyBtn.style.cssText = 'padding:10px 18px;font-size:14px;font-weight:700;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;';
+    replyBtn.addEventListener('click', function() {
+      sstvPhoneSetReplyImage(src);
+      overlay.remove();
+    });
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'padding:10px 18px;font-size:14px;border:1px solid #888;border-radius:6px;background:transparent;color:#fff;cursor:pointer;';
+    closeBtn.addEventListener('click', function() { overlay.remove(); });
+    actions.appendChild(replyBtn);
+    actions.appendChild(closeBtn);
+    overlay.appendChild(actions);
+    // Click on backdrop (not buttons) to close
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay || e.target === img) overlay.remove();
+    });
     document.body.appendChild(overlay);
   }
 
@@ -8155,6 +8285,15 @@
     var now = new Date();
     info.textContent = 'NEW ' + (msg.mode || '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     div.appendChild(info);
+    // Reply button on live decode — most valuable placement since this is the
+    // thumbnail users reach for first right after receiving
+    var replyBtn = document.createElement('button');
+    replyBtn.type = 'button';
+    replyBtn.textContent = '↩';
+    replyBtn.title = 'Reply with this image';
+    replyBtn.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(233,69,96,0.95);color:#fff;border:none;border-radius:3px;font-size:13px;font-weight:700;padding:2px 6px;cursor:pointer;z-index:2;';
+    replyBtn.addEventListener('click', function(e) { e.stopPropagation(); sstvPhoneSetReplyImage(imgSrc); });
+    div.appendChild(replyBtn);
     div.dataset.timestamp = Date.now();
     div.addEventListener('click', function() { sstvPhoneViewImage(imgSrc); });
     sstvPhoneGallery.insertBefore(div, sstvPhoneGallery.firstChild);
