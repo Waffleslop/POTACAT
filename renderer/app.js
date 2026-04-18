@@ -9027,7 +9027,7 @@ function renderDirvNets(search, bandFilter, statusFilter) {
       r.name === net.name && String(r.frequency) === String(net.frequency)
     );
     const actionCell = alreadyAdded
-      ? '<span class="dir-added-label">\u2713</span>'
+      ? '<button class="dir-remove-btn" type="button" title="Remove from My Net Reminders">\u2713 Remove</button>'
       : '<button class="dir-add-btn" type="button">+ Add</button>';
 
     tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
@@ -9076,6 +9076,21 @@ function renderDirvNets(search, bandFilter, statusFilter) {
         renderDirectoryView();
         renderNetList(currentNetReminders);
         // Persist immediately so the net reminder survives app restart
+        window.api.saveSettings({ netReminders: currentNetReminders });
+      });
+    }
+    // Remove button — undoes a previous Add. Removes any reminder matching
+    // name+frequency, so works whether the row is a community-directory entry
+    // or a user-fabricated entry (_src === 'user').
+    const removeBtn = tr.querySelector('.dir-remove-btn');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentNetReminders = currentNetReminders.filter(r =>
+          !(r.name === net.name && String(r.frequency) === String(net.frequency))
+        );
+        renderDirectoryView();
+        renderNetList(currentNetReminders);
         window.api.saveSettings({ netReminders: currentNetReminders });
       });
     }
@@ -9420,7 +9435,7 @@ function renderNetsTable(search) {
       r.name === net.name && r.frequency === net.frequency
     );
     const actionCell = alreadyAdded
-      ? '<span class="dir-added-label">Added</span>'
+      ? '<button class="dir-remove-btn" type="button" title="Remove from My Net Reminders">\u2713 Remove</button>'
       : '<button class="dir-add-btn" type="button">+ Add</button>';
     tr.innerHTML = `<td class="dir-status-col">${dot}</td>`
       + `<td class="dir-name-col">${nameCell}</td>`
@@ -9450,6 +9465,18 @@ function renderNetsTable(search) {
         renderDirectory();
         renderNetList(currentNetReminders);
         // Persist immediately so the net reminder survives app restart
+        window.api.saveSettings({ netReminders: currentNetReminders });
+      });
+    }
+    // Remove from My Nets — undoes a previous Add
+    const removeBtn = tr.querySelector('.dir-remove-btn');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', () => {
+        currentNetReminders = currentNetReminders.filter(r =>
+          !(r.name === net.name && String(r.frequency) === String(net.frequency))
+        );
+        renderDirectory();
+        renderNetList(currentNetReminders);
         window.api.saveSettings({ netReminders: currentNetReminders });
       });
     }

@@ -5046,6 +5046,21 @@ body.activator-rbn-on #rbn-view {
   padding: 2px 8px;
 }
 .dir-add-btn:hover { background: rgba(79, 195, 247, 0.15); }
+.dir-remove-btn {
+  background: none;
+  border: 1px solid #4ecca3;
+  border-radius: 3px;
+  color: #4ecca3;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.dir-remove-btn:hover {
+  border-color: #e94560;
+  color: #e94560;
+  background: rgba(233, 69, 96, 0.12);
+}
 .dir-added-label {
   font-size: 10px;
   color: var(--text-tertiary);
