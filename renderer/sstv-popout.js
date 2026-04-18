@@ -123,10 +123,6 @@ const MODE_RES = {
     tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
   } catch (e) { console.error('[SSTV] Auto-QSY error:', e); }
 
-  // Push compose state once init settles, so a phone that's already on the
-  // SSTV tab sees the desktop's current compose right after the popout opens.
-  // Main.js/remote-server drops it if no client is connected.
-  setTimeout(() => { try { pushComposeStateNow(); } catch {} }, 600);
 })();
 
 // --- Radio frequency sync ---
@@ -465,7 +461,6 @@ loadBtn.addEventListener('click', async () => {
       activeTemplateIdx = -1;
       renderTemplateStrip();
       renderTxPreview();
-      schedulePushComposeState();
     };
     img.src = result.dataUrl;
   }
@@ -528,7 +523,6 @@ function generateRandomPattern(params) {
   bgParams = { type: patternType, seed };
   bgImage = offscreen;
   renderTxPreview();
-  schedulePushComposeState();
 }
 
 function generatePlasma(ctx, w, h, s) {
@@ -997,7 +991,7 @@ function loadTemplate(idx) {
     generateRandomPattern(tpl.bgParams);
   } else if (tpl.bgDataUrl) {
     const img = new Image();
-    img.onload = () => { bgImage = img; bgParams = null; renderTxPreview(); schedulePushComposeState(); };
+    img.onload = () => { bgImage = img; bgParams = null; renderTxPreview(); };
     img.src = tpl.bgDataUrl;
   }
 
