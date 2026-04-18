@@ -1981,7 +1981,10 @@ let logVisible = true;
 
 logToggle.addEventListener('click', () => {
   logVisible = !logVisible;
-  logWrap.classList.toggle('hidden', !logVisible);
+  // Only collapse the textarea — the header (with this toggle) stays visible
+  // so users can click it again to re-open. Previously the whole log-wrap
+  // was hidden, which also hid the toggle itself.
+  logWrap.classList.toggle('collapsed', !logVisible);
   logToggle.querySelector('span').textContent = logVisible ? '(click to hide)' : '(click to show)';
 });
 

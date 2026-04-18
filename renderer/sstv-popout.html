@@ -144,7 +144,8 @@
 
     /* Decode log — fixed height panel like POTACAT verbose log */
     .sstv-log-wrap { border-top: 1px solid var(--border-primary); height: 150px; flex-shrink: 0; display: flex; flex-direction: column; }
-    .sstv-log-wrap.hidden { display: none; }
+    .sstv-log-wrap.collapsed { height: auto; }
+    .sstv-log-wrap.collapsed .sstv-log-textarea { display: none; }
     .sstv-log-header { font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 3px 12px; display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
     .sstv-log-textarea { flex: 1; width: 100%; resize: none; border: none; outline: none; background: var(--bg-primary); color: var(--text-dim); font-family: Consolas, "Courier New", monospace; font-size: 11px; padding: 4px 12px; line-height: 1.5; }
 
