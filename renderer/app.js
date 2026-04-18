@@ -112,6 +112,7 @@ let hideWorked = false;
 let workedParksSet = new Set(); // park references from CSV for fast lookup
 let workedParksData = new Map(); // reference -> full park data for stats
 let hideWorkedParks = false;
+let prioritizeNewParks = false; // sort unworked-park spots to the top of the table
 let hideQrt = true; // hide spots with QRT in comments (default on)
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
@@ -260,6 +261,8 @@ const spotsDxe = document.getElementById('spots-dxe');
 const spotsHideWorked = document.getElementById('spots-hide-worked');
 const spotsHideParks = document.getElementById('spots-hide-parks');
 const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
+const spotsPrioritizeNew = document.getElementById('spots-prioritize-new');
+const spotsPrioritizeNewLabel = document.getElementById('spots-prioritize-new-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
 const spotsHideQrt = document.getElementById('spots-hide-qrt');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
@@ -1017,6 +1020,7 @@ async function loadPrefs() {
   hideOutOfBand = settings.hideOutOfBand === true;
   hideWorked = settings.hideWorked === true;
   hideWorkedParks = settings.hideWorkedParks === true;
+  prioritizeNewParks = settings.prioritizeNewParks === true;
   respotDefault = settings.respotDefault !== false; // default true
   if (settings.respotTemplate != null) respotTemplate = settings.respotTemplate;
   if (settings.dxRespotTemplate != null) dxRespotTemplate = settings.dxRespotTemplate;
@@ -1570,6 +1574,13 @@ async function openRigEditor(mode, rigId) {
       if (setRadioNr) setRadioNr.value = String(rig.radioNr || 1);
       const flexApiHostEl = document.getElementById('set-flex-api-host');
       if (flexApiHostEl) flexApiHostEl.value = rig.flexApiHost || '';
+      // External ATU (LDG / MFJ) — RF-sensing auto-tuner config
+      const extAtuEl = document.getElementById('set-external-atu');
+      const extAtuWattsEl = document.getElementById('set-external-atu-watts');
+      const extAtuSecsEl = document.getElementById('set-external-atu-seconds');
+      if (extAtuEl) extAtuEl.value = rig.externalAtu || '';
+      if (extAtuWattsEl) extAtuWattsEl.value = rig.externalAtuWatts || 10;
+      if (extAtuSecsEl) extAtuSecsEl.value = rig.externalAtuSeconds || 4;
     }
   } else {
     rigEditorTitle.textContent = 'Add Rig';
@@ -1621,6 +1632,12 @@ rigSaveBtn.addEventListener('click', async () => {
   const rigRadioNr = setRadioNr ? parseInt(setRadioNr.value, 10) || 1 : 1;
   const flexApiHostEl = document.getElementById('set-flex-api-host');
   const rigFlexApiHost = flexApiHostEl ? flexApiHostEl.value.trim() : '';
+  const extAtuEl = document.getElementById('set-external-atu');
+  const extAtuWattsEl = document.getElementById('set-external-atu-watts');
+  const extAtuSecsEl = document.getElementById('set-external-atu-seconds');
+  const rigExternalAtu = extAtuEl ? extAtuEl.value : '';
+  const rigExternalAtuWatts = extAtuWattsEl ? Math.max(5, Math.min(25, parseInt(extAtuWattsEl.value, 10) || 10)) : 10;
+  const rigExternalAtuSeconds = extAtuSecsEl ? Math.max(1, Math.min(15, parseFloat(extAtuSecsEl.value) || 4)) : 4;
 
   if (rigEditorMode === 'edit' && editingRigId) {
     const rig = currentRigs.find(r => r.id === editingRigId);
@@ -1633,6 +1650,9 @@ rigSaveBtn.addEventListener('click', async () => {
       rig.cwKeyPort = rigCwKeyPortVal;
       rig.radioNr = rigRadioNr;
       rig.flexApiHost = rigFlexApiHost;
+      rig.externalAtu = rigExternalAtu;
+      rig.externalAtuWatts = rigExternalAtuWatts;
+      rig.externalAtuSeconds = rigExternalAtuSeconds;
     }
   } else {
     const newRig = {
@@ -1645,6 +1665,9 @@ rigSaveBtn.addEventListener('click', async () => {
       cwKeyPort: rigCwKeyPortVal,
       radioNr: rigRadioNr,
       flexApiHost: rigFlexApiHost,
+      externalAtu: rigExternalAtu,
+      externalAtuWatts: rigExternalAtuWatts,
+      externalAtuSeconds: rigExternalAtuSeconds,
     };
     currentRigs.push(newRig);
   }
@@ -3701,6 +3724,15 @@ function sortSpots(spots) {
     const aExp = enableDxe && expeditionCallsigns.has(a.callsign.toUpperCase()) ? 1 : 0;
     const bExp = enableDxe && expeditionCallsigns.has(b.callsign.toUpperCase()) ? 1 : 0;
     if (aExp !== bExp) return bExp - aExp;
+
+    // KW4FM request: when enabled, group unworked POTA/WWFF parks at the top.
+    // Within the new-park group (and within the rest), the user's column sort
+    // still applies, so this layers on top of every other sort cleanly.
+    if (prioritizeNewParks && workedParksSet.size > 0) {
+      const aNew = (a.source === 'pota' || a.source === 'wwff') && a.reference && !workedParksSet.has(a.reference) ? 1 : 0;
+      const bNew = (b.source === 'pota' || b.source === 'wwff') && b.reference && !workedParksSet.has(b.reference) ? 1 : 0;
+      if (aNew !== bNew) return bNew - aNew;
+    }
 
     const primary = _compareCol(a, b, sortCol, sortAsc);
     if (primary !== 0 || !sortCol2) return primary;
@@ -6798,6 +6830,7 @@ function syncSpotsPanel() {
   spotsDxe.checked = enableDxe;
   spotsHideWorked.checked = hideWorked;
   spotsHideParks.checked = hideWorkedParks;
+  spotsPrioritizeNew.checked = prioritizeNewParks;
   spotsHideOob.checked = hideOutOfBand;
   spotsHideQrt.checked = hideQrt;
   spotsShowHidden.checked = showHiddenSpots;
@@ -6807,6 +6840,7 @@ function syncSpotsPanel() {
   spotsHiddenCount.classList.toggle('hidden', hCount === 0);
   spotsDxcc.checked = enableDxcc;
   spotsHideParksLabel.classList.toggle('hidden', workedParksSet.size === 0);
+  spotsPrioritizeNewLabel.classList.toggle('hidden', workedParksSet.size === 0);
 }
 
 document.querySelector('.spots-dropdown-panel').addEventListener('click', (e) => e.stopPropagation());
@@ -6840,6 +6874,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   }
   hideWorked = spotsHideWorked.checked;
   hideWorkedParks = spotsHideParks.checked;
+  prioritizeNewParks = spotsPrioritizeNew.checked;
   hideOutOfBand = spotsHideOob.checked;
   hideQrt = spotsHideQrt.checked;
   showHiddenSpots = spotsShowHidden.checked;
@@ -6868,7 +6903,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   await window.api.saveSettings({
     enablePota, enableSota, enableWwff, enableLlota,
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
-    hideWorked, hideWorkedParks, hideOutOfBand,
+    hideWorked, hideWorkedParks, prioritizeNewParks, hideOutOfBand,
     enableDxcc,
   });
 

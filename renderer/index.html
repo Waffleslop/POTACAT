@@ -72,6 +72,7 @@
           <div class="spots-panel-section-label">Filters</div>
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-worked"> Hide worked stations</label>
           <label class="spots-toggle" id="spots-hide-parks-label"><input type="checkbox" id="spots-hide-parks"> Hide worked parks</label>
+          <label class="spots-toggle" id="spots-prioritize-new-label"><input type="checkbox" id="spots-prioritize-new"> Show NEW parks at top</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
           <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
@@ -1154,6 +1155,26 @@
           <label>Host: <input type="text" id="set-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="set-rigctldnet-port" min="1" max="65535" value="4532"></label>
         </div>
+        <details id="rig-external-atu-details" style="margin-top:8px;">
+          <summary style="cursor:pointer;font-size:13px;color:#4fc3f7;">External ATU (optional)</summary>
+          <div style="margin-top:6px;margin-left:4px;">
+            <label>External ATU type:
+              <select id="set-external-atu" style="margin-top:2px;">
+                <option value="">None (use internal tuner)</option>
+                <option value="rf-sense">LDG / MFJ (RF-sense auto-tuner)</option>
+              </select>
+            </label>
+            <div id="external-atu-config" style="margin-top:6px;">
+              <label>Tune carrier power (W):
+                <input type="number" id="set-external-atu-watts" min="5" max="25" value="10" style="width:70px;">
+              </label>
+              <label style="margin-left:8px;">Carrier duration (s):
+                <input type="number" id="set-external-atu-seconds" min="1" max="15" step="0.5" value="4" style="width:60px;">
+              </label>
+              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power CW carrier so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards.</span>
+            </div>
+          </div>
+        </details>
         <details id="rig-audio-details" style="margin-top:8px;">
           <summary style="cursor:pointer;font-size:13px;color:#4fc3f7;">ECHOCAT Audio (optional)</summary>
           <div style="margin-top:6px;margin-left:4px;">
