@@ -8365,10 +8365,15 @@
     const vfFilterPill = document.getElementById('vf-filter-pill');
     const vfStepPill = document.getElementById('vf-step-pill');
     const vfPttBtn = document.getElementById('vf-ptt');
+    const vfPttRow = vfPttBtn ? vfPttBtn.parentElement : null;
+    const vfOpInfo = document.getElementById('vf-op-info');
     const vfDial = document.getElementById('vf-dial');
     if (!fullview || !toggleBtn) return;
 
     let isOpen = false;
+    // Visual rotation of the dial (radians) — accumulates as the user drags so
+    // they can SEE motion. Each ~30° of rotation = one frequency step.
+    let dialRotation = 0;
 
     function show() {
       isOpen = true;
@@ -8404,17 +8409,38 @@
         const inBand = khz > 0 && Math.abs(khz - bandKhz) < bandKhz * 0.10;
         btn.classList.toggle('active', inBand);
       });
+      // Op info — show whoever is currently tuned. Falls back to a hint.
+      if (vfOpInfo) {
+        if (tunedCallsign) {
+          const parts = [tunedCallsign];
+          if (tunedOpName) parts.push(tunedOpName);
+          if (tunedState) parts.push(tunedState);
+          vfOpInfo.textContent = parts.join(' \u00B7 ');
+        } else {
+          vfOpInfo.textContent = 'Tap a spot or band to begin';
+        }
+      }
+      // Hide PTT in non-voice modes (CW/digital) — same logic as main pttBtn.
+      if (vfPttRow) {
+        const mUp = (currentMode || '').toUpperCase();
+        const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' ||
+                         mUp === 'FM' || mUp === 'AM' || mUp.startsWith('FREEDV'));
+        vfPttRow.classList.toggle('hidden', !isVoice);
+      }
     }
 
-    // Draw a smaller mirror of the existing jog dial — shares state with the
-    // dial-pad VFO so step size / freq stays consistent across both views.
+    // Draw the jog dial. The HOUSING (outer ring + center label) is fixed; the
+    // tick marks rotate by `dialRotation` so the user sees motion as they spin
+    // it. A bright "indicator notch" marks the 12 o'clock position to make the
+    // rotation obvious even at small angles.
     function drawDial() {
       if (!vfDial || !isOpen) return;
       const ctx = vfDial.getContext('2d');
       const w = vfDial.width, h = vfDial.height;
       const cx = w / 2, cy = h / 2, R = w / 2 - 6;
       ctx.clearRect(0, 0, w, h);
-      // Outer ring
+
+      // Housing (fixed)
       const grad = ctx.createRadialGradient(cx, cy - R * 0.3, 0, cx, cy, R);
       grad.addColorStop(0, '#404058');
       grad.addColorStop(0.7, '#2a2a3a');
@@ -8426,19 +8452,50 @@
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
       ctx.stroke();
-      // Tick marks
+
+      // Rotating tick marks + finger dimple — drawn in a rotated transform so
+      // the entire pattern visibly spins as the user drags.
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(dialRotation);
       for (let i = 0; i < 24; i++) {
         const a = (i / 24) * Math.PI * 2;
-        const r1 = R - 12, r2 = R - 4;
+        const r1 = R - 14, r2 = R - 4;
         ctx.beginPath();
-        ctx.moveTo(cx + r1 * Math.cos(a), cy + r1 * Math.sin(a));
-        ctx.lineTo(cx + r2 * Math.cos(a), cy + r2 * Math.sin(a));
-        ctx.lineWidth = i % 6 === 0 ? 2 : 1;
-        ctx.strokeStyle = i % 6 === 0 ? 'rgba(78,204,163,0.7)' : 'rgba(255,255,255,0.25)';
+        ctx.moveTo(r1 * Math.cos(a), r1 * Math.sin(a));
+        ctx.lineTo(r2 * Math.cos(a), r2 * Math.sin(a));
+        ctx.lineWidth = i % 6 === 0 ? 2.5 : 1;
+        ctx.strokeStyle = i % 6 === 0 ? 'rgba(78,204,163,0.85)' : 'rgba(255,255,255,0.35)';
         ctx.stroke();
       }
+      // Finger dimple — a darker recessed circle near the edge that ALSO
+      // rotates so it's the most obvious motion cue
+      const dimpleR = R * 0.12;
+      const dimpleOffset = R * 0.6;
+      ctx.beginPath();
+      ctx.arc(0, -dimpleOffset, dimpleR, 0, Math.PI * 2);
+      const dimpleGrad = ctx.createRadialGradient(0, -dimpleOffset - dimpleR * 0.3, 0, 0, -dimpleOffset, dimpleR);
+      dimpleGrad.addColorStop(0, 'rgba(0,0,0,0.55)');
+      dimpleGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
+      ctx.fillStyle = dimpleGrad;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.stroke();
+      ctx.restore();
+
+      // Fixed indicator notch at 12 o'clock — gives the user a reference
+      // point so even small rotations are clearly visible.
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - R - 2);
+      ctx.lineTo(cx - 5, cy - R + 6);
+      ctx.lineTo(cx + 5, cy - R + 6);
+      ctx.closePath();
+      ctx.fillStyle = '#ff5252';
+      ctx.fill();
+
       // Center label — current step size for context
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -8473,6 +8530,10 @@
       while (delta < -Math.PI) delta += 2 * Math.PI;
       dragAccumRad += delta;
       dragStartAngle = a;
+      // Visual rotation tracks the cumulative drag so the dial's tick marks
+      // and finger dimple SPIN with the user's finger — without this the dial
+      // looks static even while it's tuning.
+      dialRotation += delta;
       const stepRad = Math.PI / 6; // 30° per step
       while (Math.abs(dragAccumRad) >= stepRad) {
         const dir = dragAccumRad > 0 ? 1 : -1;
@@ -8481,6 +8542,7 @@
         if (next >= 100) dpTune(next);
         dragAccumRad -= dir * stepRad;
       }
+      drawDial();
     }
     function dialEnd() { dragStartAngle = null; }
     vfDial.addEventListener('touchstart', dialStart, { passive: false });
