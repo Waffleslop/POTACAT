@@ -1762,9 +1762,18 @@
     sendFilters();
   });
 
-  // --- Frequency direct input (legacy — kept for keyboard fallback) ---
+  // --- Frequency direct input ---
+  // Tapping the status-bar frequency opens the new Full VFO view (dial,
+  // bands, op info, PTT). The old dial-pad keypad is still reachable via
+  // the freq display INSIDE the VFO view for direct kHz entry.
   freqDisplay.addEventListener('click', () => {
-    openDialPad();
+    const vfo = document.getElementById('vfo-fullview');
+    const vfoBtn = document.getElementById('vfo-fullview-btn');
+    if (vfo && vfoBtn && vfo.classList.contains('hidden')) {
+      vfoBtn.click();
+    } else {
+      openDialPad();
+    }
   });
 
   function submitFreq() {
@@ -8579,11 +8588,21 @@
 
     // --- Pill interactions ---
     vfFreq.addEventListener('click', () => {
-      // Use existing dial-pad keypad for typing
+      // Force the dial-pad's keypad sub-view (the user just tapped a frequency
+      // — they want to type numbers, not see the small jog dial).
       const dialPad = document.getElementById('dial-pad');
       const dialPadBackdrop = document.getElementById('dial-pad-backdrop');
-      if (dialPad) { dialPad.classList.remove('hidden'); }
-      if (dialPadBackdrop) { dialPadBackdrop.classList.remove('hidden'); }
+      const dpKeypad = document.getElementById('dp-keypad-view');
+      const dpVfoView = document.getElementById('dp-vfo-view');
+      const dpModeToggle = document.getElementById('dp-mode-toggle');
+      if (dpKeypad) dpKeypad.classList.remove('hidden');
+      if (dpVfoView) dpVfoView.classList.add('hidden');
+      if (dpModeToggle) {
+        dpModeToggle.innerHTML = '&#x25CE;';
+        dpModeToggle.title = 'Switch to VFO dial';
+      }
+      if (dialPad) dialPad.classList.remove('hidden');
+      if (dialPadBackdrop) dialPadBackdrop.classList.remove('hidden');
     });
     vfModePill.addEventListener('click', (e) => {
       e.stopPropagation();
