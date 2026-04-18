@@ -1108,6 +1108,9 @@
       case 'sstv-wf-bins':
         sstvPhoneDrawWfLine(msg.bins);
         break;
+      case 'sstv-compose-state':
+        sstvPhoneApplyComposeState(msg);
+        break;
     }
   }
 
@@ -3895,7 +3898,13 @@
     } else if (tab === 'sstv') {
       if (sstvView) { sstvView.classList.remove('hidden'); sstvView.style.display = 'flex'; }
       // Open SSTV on desktop + fetch recent decodes
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-open' }));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'sstv-open' }));
+        // Ask desktop to push its current compose so the phone mirrors what the
+        // user already built (background image + text layers). Desktop replies
+        // with an 'sstv-compose-state' message.
+        ws.send(JSON.stringify({ type: 'sstv-get-compose' }));
+      }
       sstvPhoneRequestGallery(10, 0);
       // Paint the compose canvas immediately — otherwise it sits blank until
       // the user taps it (which triggers a redraw via the touch handlers).
@@ -7875,6 +7884,31 @@
     sstvPhoneResetCrop();
     if (sstvCropBar) sstvCropBar.style.display = showCrop ? 'flex' : 'none';
     sstvRenderPhoneCompose();
+  }
+
+  // Receive live compose state from desktop POTACAT (background + texts)
+  function sstvPhoneApplyComposeState(msg) {
+    if (msg.texts && Array.isArray(msg.texts)) {
+      sstvPhoneTexts = msg.texts.map(function(t) {
+        return {
+          key: t.key, label: t.label || '',
+          x: t.x, y: t.y, fontSize: t.fontSize || 14,
+          bold: !!t.bold, italic: !!t.italic,
+          color: t.color || '#ffffff', rotation: t.rotation || 0,
+          visible: t.visible !== false,
+        };
+      });
+      sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key && t.key.indexOf('user-') === 0; }).length;
+      sstvPhoneRenderTextLayers();
+    }
+    if (msg.bgDataUrl) {
+      var img = new Image();
+      img.onload = function() { sstvPhoneSetBg(img, false); };
+      img.src = msg.bgDataUrl;
+    } else {
+      // Desktop has no background currently — keep whatever the phone has
+      sstvRenderPhoneCompose();
+    }
   }
 
   function sstvPhoneUpdateCropUI() {

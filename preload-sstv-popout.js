@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('api', {
   sstvAudio: (buf) => ipcRenderer.send('sstv-audio', buf),
   sstvSetSampleRate: (rate) => ipcRenderer.send('sstv-set-sample-rate', rate),
   sstvWfBins: (bins) => ipcRenderer.send('sstv-wf-bins', bins),
+  // Live compose sync to ECHOCAT mobile
+  sstvComposeState: (state) => ipcRenderer.send('sstv-compose-state', state),
+  onSstvSendComposeState: (cb) => ipcRenderer.on('sstv-send-compose-state', () => cb()),
   // Multi-slice
   sstvStartMulti: (slices) => ipcRenderer.send('sstv-start-multi', slices),
   sstvStopMulti: () => ipcRenderer.send('sstv-stop-multi'),

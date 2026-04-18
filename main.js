@@ -4652,6 +4652,18 @@ function connectRemote() {
     console.log('[SSTV] ECHOCAT sstv-open received, openSstvPopout=' + (typeof openSstvPopout));
     if (openSstvPopout) openSstvPopout();
     else console.warn('[SSTV] openSstvPopout not yet assigned — second whenReady block not run?');
+    // Ask the popout to push its current compose to the phone. Popout may not
+    // exist yet on first open; the ipc handler tolerates that.
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.webContents.send('sstv-send-compose-state');
+    }
+  });
+
+  // Phone asked for the current compose explicitly (on tab open etc.)
+  remoteServer.on('sstv-get-compose', () => {
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.webContents.send('sstv-send-compose-state');
+    }
   });
 
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
@@ -8713,6 +8725,13 @@ app.whenReady().then(() => {
   ipcMain.on('sstv-wf-bins', (_e, bins) => {
     if (remoteServer && remoteServer.hasClient()) {
       remoteServer.broadcastSstvWfBins(bins);
+    }
+  });
+
+  // Desktop popout pushes its current compose to the phone for live sync
+  ipcMain.on('sstv-compose-state', (_e, state) => {
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastSstvComposeState(state);
     }
   });
 

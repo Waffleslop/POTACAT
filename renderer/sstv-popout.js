@@ -122,6 +122,11 @@ const MODE_RES = {
     const initOpt = freqSelect.options[freqSelect.selectedIndex];
     tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
   } catch (e) { console.error('[SSTV] Auto-QSY error:', e); }
+
+  // Push compose state once init settles, so a phone that's already on the
+  // SSTV tab sees the desktop's current compose right after the popout opens.
+  // Main.js/remote-server drops it if no client is connected.
+  setTimeout(() => { try { pushComposeStateNow(); } catch {} }, 600);
 })();
 
 // --- Radio frequency sync ---
@@ -367,6 +372,53 @@ function onTextChanged() {
   renderTemplateStrip();
   renderTxPreview();
   saveTextElements();
+  schedulePushComposeState();
+}
+
+// --- Live compose sync to ECHOCAT phone ---
+// Serialize the current TX compose (background + text layers) and push it
+// over the WebSocket via main.js so the phone's compose view mirrors what
+// the user built here. Debounced because text edits fire a lot.
+let _pushComposeTimer = null;
+function schedulePushComposeState() {
+  if (_pushComposeTimer) clearTimeout(_pushComposeTimer);
+  _pushComposeTimer = setTimeout(pushComposeStateNow, 400);
+}
+function pushComposeStateNow() {
+  _pushComposeTimer = null;
+  if (!window.api || !window.api.sstvComposeState) return;
+  let bgDataUrl = null;
+  if (bgImage) {
+    try {
+      const srcW = bgImage.width || bgImage.naturalWidth || 320;
+      const srcH = bgImage.height || bgImage.naturalHeight || 256;
+      const c = document.createElement('canvas');
+      c.width = srcW;
+      c.height = srcH;
+      const cc = c.getContext('2d');
+      if (bgImage instanceof ImageData) {
+        cc.putImageData(bgImage, 0, 0);
+      } else {
+        cc.drawImage(bgImage, 0, 0);
+      }
+      // JPEG at 0.82 quality — ~15-40 kB for 320×256, fits comfortably over WS
+      bgDataUrl = c.toDataURL('image/jpeg', 0.82);
+    } catch (e) {
+      console.warn('[SSTV] bg serialize error:', e.message);
+    }
+  }
+  const texts = textElements.map(t => ({
+    key: t.key, label: t.label || '',
+    x: t.x, y: t.y, fontSize: t.fontSize,
+    bold: !!t.bold, italic: !!t.italic,
+    color: t.color, rotation: t.rotation || 0,
+    visible: t.visible !== false,
+  }));
+  window.api.sstvComposeState({ bgDataUrl, texts, mode: modeSelect.value });
+}
+// Main asks for current state (triggered by phone sstv-open / sstv-get-compose)
+if (window.api && window.api.onSstvSendComposeState) {
+  window.api.onSstvSendComposeState(() => pushComposeStateNow());
 }
 
 function saveTextElements() {
@@ -411,6 +463,7 @@ loadBtn.addEventListener('click', async () => {
       activeTemplateIdx = -1;
       renderTemplateStrip();
       renderTxPreview();
+      schedulePushComposeState();
     };
     img.src = result.dataUrl;
   }
@@ -473,6 +526,7 @@ function generateRandomPattern(params) {
   bgParams = { type: patternType, seed };
   bgImage = offscreen;
   renderTxPreview();
+  schedulePushComposeState();
 }
 
 function generatePlasma(ctx, w, h, s) {
@@ -941,7 +995,7 @@ function loadTemplate(idx) {
     generateRandomPattern(tpl.bgParams);
   } else if (tpl.bgDataUrl) {
     const img = new Image();
-    img.onload = () => { bgImage = img; bgParams = null; renderTxPreview(); };
+    img.onload = () => { bgImage = img; bgParams = null; renderTxPreview(); schedulePushComposeState(); };
     img.src = tpl.bgDataUrl;
   }
 
