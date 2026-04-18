@@ -111,7 +111,7 @@ function main() {
     installSections.push(`### macOS
 1. Download **\`${macFile}\`**
 2. Open the .dmg and drag POTACAT to Applications
-3. On first launch: right-click → Open (Gatekeeper will block double-click)`);
+3. On first launch: right-click -> Open (Gatekeeper will block double-click)`);
   }
 
   const body = `${whatsNew}

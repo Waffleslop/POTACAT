@@ -372,7 +372,9 @@ function onTextChanged() {
   renderTemplateStrip();
   renderTxPreview();
   saveTextElements();
-  schedulePushComposeState();
+  // No automatic push to the phone — the phone pulls the current compose
+  // state when its SSTV tab opens. Auto-pushing would race against phone-
+  // side actions (template taps, manual edits) and overwrite them.
 }
 
 // --- Live compose sync to ECHOCAT phone ---
@@ -1466,8 +1468,8 @@ const txPane = document.querySelector('.sstv-panes .sstv-pane:last-child');
 
 let multiActive = false;
 let multiSliceConfigs = JSON.parse(localStorage.getItem('sstv-multi-slices') || '[]');
-let multiAudioStreams = new Map(); // sliceId → {ctx, stream, worklet}
-let multiRxPanes = new Map();     // sliceId → {canvas, ctx, wfCanvas, wfCtx, statusEl}
+let multiAudioStreams = new Map(); // sliceId -> {ctx, stream, worklet}
+let multiRxPanes = new Map();     // sliceId -> {canvas, ctx, wfCanvas, wfCtx, statusEl}
 let multiAudioDeviceList = [];
 
 const SLICE_NAMES = { 5002: 'A', 5003: 'B', 5004: 'C', 5005: 'D' };
@@ -1753,7 +1755,7 @@ function stopMultiAudio() {
 }
 
 // Route multi-slice waterfall data (per-slice accumulator)
-const sliceWfAccum = new Map(); // sliceId → []
+const sliceWfAccum = new Map(); // sliceId -> []
 
 function feedSliceWaterfall(sliceId, samples) {
   const pane = multiRxPanes.get(sliceId);
@@ -1941,13 +1943,13 @@ let wfImageData = null;
 
 // Color map: black -> blue -> cyan -> green -> yellow -> white
 function wfColor(val) {
-  // val: 0-1, dark blue → blue → cyan → yellow → white
+  // val: 0-1, dark blue -> blue -> cyan -> yellow -> white
   const v = Math.max(0, Math.min(1, val));
-  if (v < 0.15) return [0, 0, Math.round(v / 0.15 * 100 + 10)];                     // black → dark blue
-  if (v < 0.35) return [0, Math.round((v - 0.15) / 0.2 * 160), Math.round(100 + (v - 0.15) / 0.2 * 155)]; // dark blue → cyan
-  if (v < 0.55) return [0, Math.round(160 + (v - 0.35) / 0.2 * 95), Math.round(255 - (v - 0.35) / 0.2 * 80)]; // cyan → green
-  if (v < 0.75) return [Math.round((v - 0.55) / 0.2 * 255), 255, Math.round(175 - (v - 0.55) / 0.2 * 175)]; // green → yellow
-  return [255, 255, Math.round((v - 0.75) / 0.25 * 255)];                            // yellow → white
+  if (v < 0.15) return [0, 0, Math.round(v / 0.15 * 100 + 10)];                     // black -> dark blue
+  if (v < 0.35) return [0, Math.round((v - 0.15) / 0.2 * 160), Math.round(100 + (v - 0.15) / 0.2 * 155)]; // dark blue -> cyan
+  if (v < 0.55) return [0, Math.round(160 + (v - 0.35) / 0.2 * 95), Math.round(255 - (v - 0.35) / 0.2 * 80)]; // cyan -> green
+  if (v < 0.75) return [Math.round((v - 0.55) / 0.2 * 255), 255, Math.round(175 - (v - 0.55) / 0.2 * 175)]; // green -> yellow
+  return [255, 255, Math.round((v - 0.75) / 0.25 * 255)];                            // yellow -> white
 }
 
 function feedWaterfall(samples) {

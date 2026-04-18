@@ -487,7 +487,7 @@ function showArcsForCall(call, toLat, toLon) {
   clearHoverArcs();
   const qsos = filtered.filter(q => (q.CALL || '').toUpperCase() === call);
   // Collect unique origins
-  const origins = new Map(); // key → {lat,lon}
+  const origins = new Map(); // key -> {lat,lon}
   for (const q of qsos) {
     const origin = getQsoOrigin(q);
     if (!origin) continue;
@@ -608,8 +608,8 @@ tbody.addEventListener('dblclick', (e) => {
     if (newVal === original) { cancel(); return; }
 
     // Convert display formats back to storage formats
-    if (field === 'QSO_DATE') newVal = newVal.replace(/-/g, ''); // YYYY-MM-DD → YYYYMMDD
-    if (field === 'TIME_ON') newVal = newVal.replace(/:/g, '') + '00'; // HH:MM → HHMM00
+    if (field === 'QSO_DATE') newVal = newVal.replace(/-/g, ''); // YYYY-MM-DD -> YYYYMMDD
+    if (field === 'TIME_ON') newVal = newVal.replace(/:/g, '') + '00'; // HH:MM -> HHMM00
 
     const fields = { [field]: newVal };
     if (field === 'FREQ') fields.BAND = freqMhzToBandLocal(newVal);

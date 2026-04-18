@@ -84,53 +84,53 @@ test('Yaesu setFrequency pads to 9 digits', () => {
   assert.strictEqual(writes[0], 'FA014074000;');
 });
 
-test('Yaesu setMode FT8 → MD0C (hex)', () => {
+test('Yaesu setMode FT8 -> MD0C (hex)', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setMode('FT8', 14074000);
   assert.strictEqual(writes[0], 'MD0C;');
   assert.strictEqual(writes.length, 1); // no DA command for Yaesu
 });
 
-test('Yaesu setMode CW → MD03', () => {
+test('Yaesu setMode CW -> MD03', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setMode('CW', 7042000);
   assert.strictEqual(writes[0], 'MD03;');
 });
 
-test('Yaesu setMode SSB@7MHz → MD01 (LSB)', () => {
+test('Yaesu setMode SSB@7MHz -> MD01 (LSB)', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setMode('SSB', 7260000);
   assert.strictEqual(writes[0], 'MD01;');
 });
 
-test('Yaesu setMode SSB@14MHz → MD02 (USB)', () => {
+test('Yaesu setMode SSB@14MHz -> MD02 (USB)', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setMode('SSB', 14270000);
   assert.strictEqual(writes[0], 'MD02;');
 });
 
-test('Yaesu setTransmit on → TX1;', () => {
+test('Yaesu setTransmit on -> TX1;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setTransmit(true);
   assert.strictEqual(writes[0], 'TX1;');
 });
 
-test('Yaesu setTransmit off → TX0;', () => {
+test('Yaesu setTransmit off -> TX0;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setTransmit(false);
   assert.strictEqual(writes[0], 'TX0;');
 });
 
-test('Yaesu setNb on → NB01;', () => {
+test('Yaesu setNb on -> NB01;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setNb(true);
   assert.strictEqual(writes[0], 'NB01;');
 });
 
-test('Yaesu setRfGain 50% → RG0128; (50*2.55=127.5→128)', () => {
+test('Yaesu setRfGain 50% -> RG0128; (50*2.55=127.5->128)', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setRfGain(50);
-  // 50 * 2.55 = 127.5 → Math.round = 128... but implementation truncates slightly
+  // 50 * 2.55 = 127.5 -> Math.round = 128... but implementation truncates slightly
   assert.ok(writes[0] === 'RG0127;' || writes[0] === 'RG0128;', `Got: ${writes[0]}`);
 });
 
@@ -169,7 +169,7 @@ test('Yaesu parse FA response (9 digits)', () => {
   assert.strictEqual(freq, 14074000);
 });
 
-test('Yaesu parse MD0C response → DIGU', () => {
+test('Yaesu parse MD0C response -> DIGU', () => {
   const { codec } = captureWrites(KenwoodCodec, FT891_MODEL);
   let mode = '';
   codec.on('mode', (m) => { mode = m; });
@@ -193,33 +193,33 @@ test('Kenwood setFrequency pads to 11 digits', () => {
   assert.strictEqual(writes[0], 'FA00014074000;');
 });
 
-test('Kenwood setMode FT8 → MD2 + DA1', () => {
+test('Kenwood setMode FT8 -> MD2 + DA1', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setMode('FT8', 14074000);
   assert.strictEqual(writes[0], 'MD2;');
   assert.strictEqual(writes[1], 'DA1;');
 });
 
-test('Kenwood setMode CW → MD3 (no DA)', () => {
+test('Kenwood setMode CW -> MD3 (no DA)', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setMode('CW', 14050000);
   assert.strictEqual(writes[0], 'MD3;');
   assert.strictEqual(writes.length, 1);
 });
 
-test('Kenwood setTransmit on → TX;', () => {
+test('Kenwood setTransmit on -> TX;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setTransmit(true);
   assert.strictEqual(writes[0], 'TX;');
 });
 
-test('Kenwood setNb on → NB1;', () => {
+test('Kenwood setNb on -> NB1;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setNb(true);
   assert.strictEqual(writes[0], 'NB1;');
 });
 
-test('Kenwood setRfGain → RG127/128; (no 0 prefix)', () => {
+test('Kenwood setRfGain -> RG127/128; (no 0 prefix)', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setRfGain(50);
   assert.ok(writes[0] === 'RG127;' || writes[0] === 'RG128;', `Got: ${writes[0]}`);
@@ -239,7 +239,7 @@ test('Kenwood parse FA response (11 digits)', () => {
   assert.strictEqual(freq, 14074000);
 });
 
-test('Kenwood parse MD2 response → USB', () => {
+test('Kenwood parse MD2 response -> USB', () => {
   const { codec } = captureWrites(KenwoodCodec, TS590_MODEL);
   let mode = '';
   codec.on('mode', (m) => { mode = m; });
@@ -257,7 +257,7 @@ const QMX_MODEL = {
   atuCmd: false, maxPower: 5, digiMd: 6,
 };
 
-test('QMX setMode FT8 → MD6 (digiMd override)', () => {
+test('QMX setMode FT8 -> MD6 (digiMd override)', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, QMX_MODEL);
   codec.setMode('FT8', 14074000);
   assert.strictEqual(writes[0], 'MD6;'); // QRP Labs is not Yaesu, no MD0 prefix
@@ -278,25 +278,25 @@ test('rigctld setFrequency', () => {
   assert.strictEqual(writes[0], 'F 14074000\n');
 });
 
-test('rigctld setMode FT8 → M PKTUSB', () => {
+test('rigctld setMode FT8 -> M PKTUSB', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
   codec.setMode('FT8', 14074000);
   assert.strictEqual(writes[0], 'M PKTUSB 0\n');
 });
 
-test('rigctld setTransmit on → T 1', () => {
+test('rigctld setTransmit on -> T 1', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
   codec.setTransmit(true);
   assert.strictEqual(writes[0], 'T 1\n');
 });
 
-test('rigctld setNb (non-Yaesu) → U NB 1', () => {
+test('rigctld setNb (non-Yaesu) -> U NB 1', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
   codec.setNb(true);
   assert.strictEqual(writes[0], 'U NB 1\n');
 });
 
-test('rigctld ATU (non-Yaesu) → U TUNER 1', () => {
+test('rigctld ATU (non-Yaesu) -> U TUNER 1', () => {
   const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
   const seq = codec.getAtuStartSequence();
   assert.strictEqual(seq[0].cmd, 'U TUNER 1\n');
@@ -336,25 +336,25 @@ const RIGCTLD_YAESU_MODEL = {
   atuCmd: 'ft891', minPower: 5, maxPower: 100,
 };
 
-test('rigctld Yaesu NB → raw passthrough w NB01;', () => {
+test('rigctld Yaesu NB -> raw passthrough w NB01;', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_YAESU_MODEL);
   codec.setNb(true);
   assert.strictEqual(writes[0], 'w NB01;\n');
 });
 
-test('rigctld Yaesu RF gain → raw passthrough w RG0128;', () => {
+test('rigctld Yaesu RF gain -> raw passthrough w RG0128;', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_YAESU_MODEL);
   codec.setRfGain(0.5);
   assert.strictEqual(writes[0], 'w RG0128;\n');
 });
 
-test('rigctld Yaesu TX power → raw passthrough w PC050;', () => {
+test('rigctld Yaesu TX power -> raw passthrough w PC050;', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_YAESU_MODEL);
   codec.setTxPower(0.5);
   assert.strictEqual(writes[0], 'w PC050;\n');
 });
 
-test('rigctld Yaesu ATU ft891 → raw passthrough', () => {
+test('rigctld Yaesu ATU ft891 -> raw passthrough', () => {
   const { codec } = captureWrites(RigctldCodec, RIGCTLD_YAESU_MODEL);
   const seq = codec.getAtuStartSequence();
   assert.strictEqual(seq[0].cmd, 'w AC001;\n');
@@ -379,21 +379,21 @@ test('CIV setFrequency builds correct BCD frame', () => {
   assert.ok(hex.endsWith('fd'), `Expected FD terminator, got: ${hex}`);
 });
 
-test('CIV setTransmit on → 1C 00 01', () => {
+test('CIV setTransmit on -> 1C 00 01', () => {
   const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
   codec.setTransmit(true);
   const hex = writes[0];
   assert.ok(hex.includes('1c0001'), `Expected PTT on, got: ${hex}`);
 });
 
-test('CIV setTransmit off → 1C 00 00', () => {
+test('CIV setTransmit off -> 1C 00 00', () => {
   const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
   codec.setTransmit(false);
   const hex = writes[0];
   assert.ok(hex.includes('1c0000'), `Expected PTT off, got: ${hex}`);
 });
 
-test('CIV setNb on → 16 22 01', () => {
+test('CIV setNb on -> 16 22 01', () => {
   const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
   codec.setNb(true);
   const hex = writes[0];
@@ -447,7 +447,7 @@ const FTDX3000_MODEL = {
   atuCmd: 'ac002', maxPower: 100,
 };
 
-test('FTdx3000 ATU → single AC002;', () => {
+test('FTdx3000 ATU -> single AC002;', () => {
   const { codec } = captureWrites(KenwoodCodec, FTDX3000_MODEL);
   const seq = codec.getAtuStartSequence();
   assert.strictEqual(seq.length, 1);
@@ -463,67 +463,67 @@ const FT891_EXT = {
   cw: {}, atuCmd: 'ft891', minPower: 5, maxPower: 100, maxNbLevel: 10,
 };
 
-test('Yaesu NB level 5 → NL0005;', () => {
+test('Yaesu NB level 5 -> NL0005;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setNbLevel(5);
   assert.strictEqual(writes[0], 'NL0005;');
 });
 
-test('Yaesu NB level 10 → NL0010;', () => {
+test('Yaesu NB level 10 -> NL0010;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setNbLevel(10);
   assert.strictEqual(writes[0], 'NL0010;');
 });
 
-test('Yaesu AF gain 100% → AG0255;', () => {
+test('Yaesu AF gain 100% -> AG0255;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setAfGain(100);
   assert.strictEqual(writes[0], 'AG0255;');
 });
 
-test('Yaesu AF gain 0% → AG0000;', () => {
+test('Yaesu AF gain 0% -> AG0000;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setAfGain(0);
   assert.strictEqual(writes[0], 'AG0000;');
 });
 
-test('Yaesu preamp on → PA01;', () => {
+test('Yaesu preamp on -> PA01;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setPreamp(true);
   assert.strictEqual(writes[0], 'PA01;');
 });
 
-test('Yaesu preamp off → PA00;', () => {
+test('Yaesu preamp off -> PA00;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setPreamp(false);
   assert.strictEqual(writes[0], 'PA00;');
 });
 
-test('Yaesu attenuator on → RA01;', () => {
+test('Yaesu attenuator on -> RA01;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setAttenuator(true);
   assert.strictEqual(writes[0], 'RA01;');
 });
 
-test('Yaesu attenuator off → RA00;', () => {
+test('Yaesu attenuator off -> RA00;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setAttenuator(false);
   assert.strictEqual(writes[0], 'RA00;');
 });
 
-test('Yaesu VFO copy A→B → AB;', () => {
+test('Yaesu VFO copy A->B -> AB;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.vfoCopyAB();
   assert.strictEqual(writes[0], 'AB;');
 });
 
-test('Yaesu VFO copy B→A → BA;', () => {
+test('Yaesu VFO copy B->A -> BA;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.vfoCopyBA();
   assert.strictEqual(writes[0], 'BA;');
 });
 
-test('Yaesu XIT +80Hz → XT1; RC; RU0080;', () => {
+test('Yaesu XIT +80Hz -> XT1; RC; RU0080;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setXit(80);
   assert.strictEqual(writes[0], 'XT1;');
@@ -531,7 +531,7 @@ test('Yaesu XIT +80Hz → XT1; RC; RU0080;', () => {
   assert.strictEqual(writes[2], 'RU0080;');
 });
 
-test('Yaesu XIT -50Hz → XT1; RC; RD0050;', () => {
+test('Yaesu XIT -50Hz -> XT1; RC; RD0050;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setXit(-50);
   assert.strictEqual(writes[0], 'XT1;');
@@ -539,7 +539,7 @@ test('Yaesu XIT -50Hz → XT1; RC; RD0050;', () => {
   assert.strictEqual(writes[2], 'RD0050;');
 });
 
-test('Yaesu XIT off → XT0;', () => {
+test('Yaesu XIT off -> XT0;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_EXT);
   codec.setXit(0);
   assert.strictEqual(writes[0], 'XT0;');
@@ -549,19 +549,19 @@ test('Yaesu XIT off → XT0;', () => {
 // Kenwood extended (no 0 prefix)
 console.log('\n=== Extended Controls (Kenwood) ===');
 
-test('Kenwood NB level 5 → NL005;', () => {
+test('Kenwood NB level 5 -> NL005;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setNbLevel(5);
   assert.strictEqual(writes[0], 'NL005;');
 });
 
-test('Kenwood preamp on → PA1;', () => {
+test('Kenwood preamp on -> PA1;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setPreamp(true);
   assert.strictEqual(writes[0], 'PA1;');
 });
 
-test('Kenwood attenuator on → RA1;', () => {
+test('Kenwood attenuator on -> RA1;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setAttenuator(true);
   assert.strictEqual(writes[0], 'RA1;');

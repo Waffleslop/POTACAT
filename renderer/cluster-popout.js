@@ -158,7 +158,7 @@
   });
 
   // --- Node list updates ---
-  const announcedState = new Map(); // nodeId → last announced connected state
+  const announcedState = new Map(); // nodeId -> last announced connected state
   window.api.onNodes((newNodes) => {
     nodes = newNodes;
     // Auto-select first node if nothing selected or current node removed

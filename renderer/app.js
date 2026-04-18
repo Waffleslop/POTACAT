@@ -44,7 +44,7 @@ let showHiddenSpots = false;
 const HIDDEN_SPOTS_KEY = 'pota-cat-hidden-spots';
 let hiddenSpots = {};
 try { hiddenSpots = JSON.parse(localStorage.getItem(HIDDEN_SPOTS_KEY)) || {}; } catch { hiddenSpots = {}; }
-// Migrate legacy format (bare number/Infinity → { "*": value })
+// Migrate legacy format (bare number/Infinity -> { "*": value })
 for (const call of Object.keys(hiddenSpots)) {
   if (typeof hiddenSpots[call] === 'number' || hiddenSpots[call] === Infinity) {
     hiddenSpots[call] = { '*': hiddenSpots[call] };
@@ -101,16 +101,16 @@ let defaultPower = 100;
 let tuneClick = false;
 let enableSplit = false;
 let activeRigName = ''; // name of the currently active rig profile
-let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log
+let workedQsos = new Map(); // callsign -> [{date, ref}] from QSO log
 let donorCallsigns = new Set(); // supporter callsigns from potacat.com
 let expeditionCallsigns = new Set(); // active DX expeditions from Club Log + danplanet
-let expeditionMeta = new Map(); // callsign → { entity, startDate, endDate, description }
+let expeditionMeta = new Map(); // callsign -> { entity, startDate, endDate, description }
 let activeEvents = [];                // events from remote endpoint
-let eventCallsignMap = new Map();     // callsign pattern → event id (for badge matching)
+let eventCallsignMap = new Map();     // callsign pattern -> event id (for badge matching)
 let eventOverlayOpen = false;
 let hideWorked = false;
 let workedParksSet = new Set(); // park references from CSV for fast lookup
-let workedParksData = new Map(); // reference → full park data for stats
+let workedParksData = new Map(); // reference -> full park data for stats
 let hideWorkedParks = false;
 let hideQrt = true; // hide spots with QRT in comments (default on)
 let showBearing = false;
@@ -166,7 +166,7 @@ let dxccData = null;  // { entities: [...] } from main process
 let enableWsjtx = false;
 let wsjtxDecodes = []; // recent decodes from WSJT-X (FIFO, max 50)
 let wsjtxState = null; // last WSJT-X status (freq, mode, etc.)
-const qrzData = new Map(); // callsign → { fname, name, addr2, state, country }
+const qrzData = new Map(); // callsign -> { fname, name, addr2, state, country }
 let qrzFullName = false; // show first+last or just first
 
 // --- Activator Mode State ---
@@ -191,7 +191,7 @@ function primaryParkName() { return activatorParkRefs[0]?.name || ''; }
 function cleanQrzName(raw) {
   if (!raw) return '';
   const parts = raw.trim().split(/\s+/);
-  // Drop trailing single-letter initial (e.g. "Larry P" → "Larry", "Larry P." → "Larry")
+  // Drop trailing single-letter initial (e.g. "Larry P" -> "Larry", "Larry P." -> "Larry")
   // But keep leading single letter (e.g. "J Doug" stays)
   if (parts.length > 1 && /^[A-Za-z]\.?$/.test(parts[parts.length - 1])) {
     parts.pop();
@@ -201,7 +201,7 @@ function cleanQrzName(raw) {
 }
 
 /** Auto-prepend POTA country prefix to bare park numbers based on callsign.
- *  e.g. callsign "W1AW" + ref "1234" → "US-1234", "VE3ABC" + "5678" → "VE-5678" */
+ *  e.g. callsign "W1AW" + ref "1234" -> "US-1234", "VE3ABC" + "5678" -> "VE-5678" */
 function autoPotaPrefix(ref, callsign) {
   if (!ref) return ref;
   // Already has a prefix (contains letters before a dash)
@@ -556,7 +556,7 @@ let jtcatCurrentBand = '20m';
 let jtcatCqFilter = false;
 // QSO state machine
 let jtcatQso = null; // { call, grid, phase, txMsg, report, rrReport, txRetries }
-// phase: 'reply' → 'report' → 'r+report' → '73' → 'done'
+// phase: 'reply' -> 'report' -> 'r+report' -> '73' -> 'done'
 var JTCAT_MAX_CQ_RETRIES = 15;   // ~3.75 min of CQ on FT8 before giving up
 var JTCAT_MAX_QSO_RETRIES = 6;   // per-phase retry limit during QSO exchange
 const setPotaParksPath = document.getElementById('set-pota-parks-path');
@@ -754,8 +754,8 @@ function getRstDigits(id, fallback) {
 }
 
 function applyRstMode() {
-  // n1mmRst=true → show split-digit boxes, hide single fields
-  // n1mmRst=false (default) → show single fields, hide split-digit boxes
+  // n1mmRst=true -> show split-digit boxes, hide single fields
+  // n1mmRst=false (default) -> show single fields, hide split-digit boxes
   document.querySelectorAll('.rst-split-mode').forEach(el => el.classList.toggle('hidden', !n1mmRst));
   document.querySelectorAll('.rst-n1mm-mode').forEach(el => el.classList.toggle('hidden', n1mmRst));
 }
@@ -1701,7 +1701,7 @@ function initMultiDropdown(container, label, onChange) {
         allCb.checked = false;
         itemCbs.forEach((c) => { c.checked = false; });
       } else {
-        // Unchecking Radio with nothing else → fall back to All
+        // Unchecking Radio with nothing else -> fall back to All
         allCb.checked = true;
       }
     } else {
@@ -2214,7 +2214,7 @@ async function saveBannerQso() {
 
 blLogBtn.addEventListener('click', saveBannerQso);
 
-// Enter key flow: callsign → RST Sent → RST Rcvd → save
+// Enter key flow: callsign -> RST Sent -> RST Rcvd -> save
 blCallsign.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); blRstSent.focus(); blRstSent.select(); }
 });
@@ -3173,7 +3173,7 @@ async function populateRigAudioDevices(restoreIn, restoreOut) {
     if (restoreIn) rigRemoteAudioInput.value = restoreIn;
     if (restoreOut) rigRemoteAudioOutput.value = restoreOut;
     if (getUserMediaError && inputs.length > 0 && !inputs[0].label) {
-      console.warn('Device labels hidden because microphone permission was denied. Check Windows Settings → Privacy & security → Microphone → Let desktop apps access your microphone.');
+      console.warn('Device labels hidden because microphone permission was denied. Check Windows Settings -> Privacy & security -> Microphone -> Let desktop apps access your microphone.');
     }
   } catch (e) {
     console.warn('Could not enumerate audio devices:', e.message);
@@ -3569,7 +3569,7 @@ function radioModeToFilter(catMode) {
   if (m === 'FT8') return 'FT8';
   if (m === 'FT4') return 'FT4';
   if (m === 'FREEDV') return 'FREEDV';
-  // DATA modes (DIGU/PKTUSB/DIGL/PKTLSB) → show all digital spots
+  // DATA modes (DIGU/PKTUSB/DIGL/PKTLSB) -> show all digital spots
   if (m === 'DIGU' || m === 'PKTUSB' || m === 'DIGL' || m === 'PKTLSB') return 'DIGI';
   return null;
 }
@@ -4500,7 +4500,7 @@ function gridToBoundsLocal(grid) {
   return [[south, west], [south + 1, west + 2]];
 }
 
-// Lightweight lat/lon → Maidenhead grid for the renderer (no require of Node module)
+// Lightweight lat/lon -> Maidenhead grid for the renderer (no require of Node module)
 function latLonToGridLocal(lat, lon) {
   let lng = lon + 180;
   let la = lat + 90;
@@ -5514,7 +5514,7 @@ function saveViewState() {
 
 viewTableBtn.addEventListener('click', () => {
   if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat' || currentView === 'directory') {
-    // Switching from exclusive view → table only
+    // Switching from exclusive view -> table only
     if (currentView === 'jtcat') stopJtcatView();
     currentView = 'table';
     showTable = true;
@@ -5545,7 +5545,7 @@ viewMapBtn.addEventListener('click', () => {
     return;
   }
   if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat' || currentView === 'directory') {
-    // Switching from exclusive view → map only
+    // Switching from exclusive view -> map only
     if (currentView === 'jtcat') stopJtcatView();
     currentView = 'map';
     showTable = false;
@@ -6226,7 +6226,7 @@ function formatAge(isoStr) {
 // --- QSO Logging ---
 const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 
-// Band lookup for ADIF (frequency in kHz → band string)
+// Band lookup for ADIF (frequency in kHz -> band string)
 const BAND_RANGES = [
   [1800, 2000, '160m'], [3500, 4000, '80m'], [5330, 5410, '60m'],
   [7000, 7300, '40m'], [10100, 10150, '30m'], [14000, 14350, '20m'],
@@ -10078,7 +10078,7 @@ function renderBandActivity() {
   });
 
   // Aggregate by band × continent
-  const counts = {}; // key: "band|continent" → count
+  const counts = {}; // key: "band|continent" -> count
   for (const s of recentSpots) {
     if (!s.band || !s.continent) continue;
     const key = `${s.band}|${s.continent}`;
@@ -10663,7 +10663,7 @@ setCwWpm.addEventListener('change', () => {
   }
 });
 
-// CW key events from main process → sidetone
+// CW key events from main process -> sidetone
 window.api.onCwKey(({ down }) => {
   console.log(`[Sidetone] key down=${down} checked=${setCwSidetone.checked} ctx=${!!sidetoneCtx}`);
   if (setCwSidetone.checked) {
@@ -11924,7 +11924,7 @@ window.api.onFreedvSync((data) => {
 window.api.onFreedvStatus(() => {});
 
 // Auto-start: main process detected FreeDV mode on tune
-// VFO LOG button → open log form with last tuned spot
+// VFO LOG button -> open log form with last tuned spot
 window.api.onOpenLogForm(() => {
   if (lastTunedSpot) openLogPopup(lastTunedSpot);
   else openQuickLog();
@@ -12003,7 +12003,7 @@ piAccessEl.addEventListener('click', (e) => {
   e.stopPropagation();
   const mod = e.ctrlKey || e.metaKey;
   if (!mod || !e.shiftKey) return;
-  // Ctrl+Alt+Shift+Click (Cmd+Alt+Shift on Mac) → revoke access
+  // Ctrl+Alt+Shift+Click (Cmd+Alt+Shift on Mac) -> revoke access
   if (e.altKey && piUnlocked) {
     const txt = piOverlay.querySelector('.pi-overlay-text');
     txt.textContent = 'ACCESS: REVOKED';
@@ -12020,7 +12020,7 @@ piAccessEl.addEventListener('click', (e) => {
     window.api.saveSettings({ piAccess: false });
     return;
   }
-  // Ctrl+Shift+Click (Cmd+Shift on Mac) → grant access
+  // Ctrl+Shift+Click (Cmd+Shift on Mac) -> grant access
   if (piUnlocked) return;
   piOverlay.classList.remove('hidden');
   setTimeout(() => {
@@ -12452,7 +12452,7 @@ function formatReleaseNotes(md) {
   // Strip any "Generated with" / Claude / Anthropic footer lines
   md = md.replace(/^.*(?:generated with|claude|anthropic).*$/gim, '').trim();
 
-  // Simple markdown → HTML for release notes
+  // Simple markdown -> HTML for release notes
   return md
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/^## (.+)$/gm, '<h4 style="margin:12px 0 6px;color:var(--text-primary);">$1</h4>')
@@ -14536,7 +14536,7 @@ function updateActivatorModeFromCat(mode) {
   else if (m === 'RTTY') activatorModeSelect.value = 'RTTY';
 }
 
-// Frequency input: Enter or blur → tune radio
+// Frequency input: Enter or blur -> tune radio
 if (activatorFreqInput) {
   activatorFreqInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -14560,7 +14560,7 @@ function tuneActivatorFreq() {
   window.api.tune(khz, activatorModeSelect.value);
 }
 
-// Mode selector change → tune radio to same freq with new mode
+// Mode selector change -> tune radio to same freq with new mode
 if (activatorModeSelect) {
   activatorModeSelect.addEventListener('change', () => {
     resetActivatorRst();
@@ -14592,7 +14592,7 @@ if (activatorCallsignInput) {
   });
 }
 
-/** Simple freq → band for activator. Input in kHz. */
+/** Simple freq -> band for activator. Input in kHz. */
 function freqToBandActivator(khz) {
   if (khz >= 1800 && khz <= 2000) return '160m';
   if (khz >= 3500 && khz <= 4000) return '80m';
@@ -15335,8 +15335,8 @@ function onJtcatDecodeClick(e) {
 // --- QSO State Machine ---
 //
 // Two flows:
-//   CQ caller:   cq → cq-report → cq-rr73 → done
-//   Responder:   reply → r+report → 73 → done
+//   CQ caller:   cq -> cq-report -> cq-rr73 -> done
+//   Responder:   reply -> r+report -> 73 -> done
 //
 // Each phase has a direction (tx/rx) and a message template.
 
@@ -15781,8 +15781,8 @@ var jtcatMap = null;
 var jtcatMapMarkers = L.layerGroup();  // station dot markers
 var jtcatMapArcs = L.layerGroup();     // animated QSO arcs
 var jtcatMapHome = null;
-var jtcatMapStations = {};  // callsign → {marker, grid, lat, lon, lastSeen}
-var jtcatMapQsos = {};      // "CALL1↔CALL2" → {arc, from, to, lastSeen, dir}
+var jtcatMapStations = {};  // callsign -> {marker, grid, lat, lon, lastSeen}
+var jtcatMapQsos = {};      // "CALL1↔CALL2" -> {arc, from, to, lastSeen, dir}
 var JTCAT_ARC_SEGMENTS = 32;
 
 function initJtcatMap() {
@@ -15905,12 +15905,12 @@ function jtcatMapDrawQsoArc(fromCall, toCall) {
   setTimeout(function() { jtcatAnimateArc(arc, fromCall, toCall, fromStn, toStn, color); }, 0);
 }
 
-// Animate the arc's dash to flow from transmitter → receiver
+// Animate the arc's dash to flow from transmitter -> receiver
 function jtcatAnimateArc(arc, fromCall, toCall, fromStn, toStn, color) {
   var el = arc.getElement();
   if (!el) return;
   el.style.stroke = color;
-  // Determine if the arc's geometry goes from→to or to→from
+  // Determine if the arc's geometry goes from->to or to->from
   // Arc points always go from sorted-first to sorted-second
   var sorted = [fromCall, toCall].sort();
   var forward = sorted[0] === fromCall; // true = SVG path goes in TX direction
@@ -16015,7 +16015,7 @@ function jtcatWaterfallLoop() {
     var binIdx = Math.floor(x * passbandBins / w);
     var val = freqData[binIdx]; // 0–255
 
-    // Color map: dark blue → cyan → yellow → red → white
+    // Color map: dark blue -> cyan -> yellow -> red -> white
     var norm = val / 255;
     var r, g, b;
     if (norm < 0.2) {

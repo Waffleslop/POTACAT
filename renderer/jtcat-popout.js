@@ -28,10 +28,10 @@
   var jpRxFreqHz = 1500;
   var myCallsign = '';
   var myGrid = '';
-  var stations = {};   // callsign → {marker, grid, lat, lon, lastSeen}
-  var qsoArcs = {};    // "A↔B" → {arc, from, to, lastSeen}
+  var stations = {};   // callsign -> {marker, grid, lat, lon, lastSeen}
+  var qsoArcs = {};    // "A↔B" -> {arc, from, to, lastSeen}
   var ARC_SEGMENTS = 32;
-  var qrzCache = {};   // callsign → {name, fetched}
+  var qrzCache = {};   // callsign -> {name, fetched}
 
   // Load settings
   window.api.getSettings().then(function(s) {
@@ -257,7 +257,7 @@
     el.style.stroke = color;
     // Arc geometry is always drawn from fromStn to toStn.
     // But we reuse the same polyline (keyed by sorted callsigns), so the
-    // underlying point order might not match the current from→to direction.
+    // underlying point order might not match the current from->to direction.
     // Compare the first point of the polyline with fromStn's position to
     // determine if the polyline direction matches the intended direction.
     var fromStn = stations[fromCall];
@@ -644,8 +644,8 @@
       // Draw arc to QSO partner — direction based on current phase
       if (qsoState.call && myCallsign) {
         if (qsoState.grid) registerStation(qsoState.call, qsoState.grid);
-        // RX phases mean we just heard them → arc goes them→us
-        // TX phases mean we're about to send → arc goes us→them
+        // RX phases mean we just heard them -> arc goes them->us
+        // TX phases mean we're about to send -> arc goes us->them
         var rxPhases = { 'cq-reply': 1, 'cq-r+rpt': 1, 'rpt-rx': 1, 'rr73-rx': 1 };
         var theyAreSource = rxPhases[qsoState.phase];
         if (theyAreSource) {
@@ -888,7 +888,7 @@
   });
 
   // Multi-slice audio capture state
-  var multiAudioStreams = new Map(); // sliceId → { ctx, stream, processor }
+  var multiAudioStreams = new Map(); // sliceId -> { ctx, stream, processor }
 
   async function startMultiAudio() {
     stopMultiAudio();
@@ -1138,7 +1138,7 @@
         for (var x = 0; x < w; x++) {
           var binIdx = Math.floor(x * useBins / w);
           var val = bins[binIdx];
-          // Color: dark blue → cyan → yellow → red
+          // Color: dark blue -> cyan -> yellow -> red
           var r, g, b;
           if (val < 85) { r = 0; g = 0; b = Math.floor(val * 2); }
           else if (val < 170) { r = 0; g = Math.floor((val - 85) * 3); b = 170; }

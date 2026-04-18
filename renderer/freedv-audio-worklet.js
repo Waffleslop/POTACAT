@@ -66,7 +66,7 @@ class FreedvProcessor extends AudioWorkletProcessor {
             val += history[idx] * coeffs[t];
             idx = (idx + 1) % numTaps;
           }
-          // Float32 → Int16 (clamp to ±32767)
+          // Float32 -> Int16 (clamp to ±32767)
           this.buffer.push(Math.max(-32767, Math.min(32767, Math.round(val * 32767))));
         }
       }

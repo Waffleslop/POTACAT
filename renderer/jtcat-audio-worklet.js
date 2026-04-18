@@ -36,7 +36,7 @@ class JtcatProcessor extends AudioWorkletProcessor {
     if (this.dsRatio > 1.01) {
       // Design anti-alias low-pass filter
       // Cutoff at 0.45 * (1/dsRatio) of Nyquist to prevent aliasing
-      // (slightly below 6kHz for 48kHz→12kHz to leave transition band)
+      // (slightly below 6kHz for 48kHz->12kHz to leave transition band)
       const cutoffRatio = 0.45 / this.dsRatio;
       const numTaps = Math.max(31, Math.round(this.dsRatio * 16) | 1); // odd number
       this.filterCoeffs = designLowPass(cutoffRatio, numTaps);

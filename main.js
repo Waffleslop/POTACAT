@@ -173,13 +173,13 @@ let solarTimer = null;
 let rigctldProc = null;
 let cluster = null; // legacy — replaced by clusterClients Map
 let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
-let clusterFlushTimer = null; // throttle timer for cluster → renderer updates
-let cwSpotsClients = new Map(); // club → DxClusterClient (one per checked club, or single for all)
+let clusterFlushTimer = null; // throttle timer for cluster -> renderer updates
+let cwSpotsClients = new Map(); // club -> DxClusterClient (one per checked club, or single for all)
 let cwSpots = []; // streaming CW club spots (FIFO, max 500)
-let cwSpotsFlushTimer = null; // throttle timer for CW spots → renderer updates
+let cwSpotsFlushTimer = null; // throttle timer for CW spots -> renderer updates
 let rbn = null;
 let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
-let rbnFlushTimer = null; // throttle timer for RBN → renderer updates
+let rbnFlushTimer = null; // throttle timer for RBN -> renderer updates
 let rbnWatchSpots = []; // RBN spots for watchlist callsigns, merged into main table
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
@@ -194,17 +194,17 @@ let freedvEngine = null;   // FreeDV codec engine (started on tune to FreeDV spo
 let _freedvAudioMuted = false; // true when ECHOCAT audio is muted for FreeDV
 let freedvReporterSpots = []; // accumulates FreeDV spots
 let freedvReporterFlushTimer = null;
-let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
+let workedQsos = new Map(); // callsign -> [{date, ref}] from QSO log (all QSOs, not just confirmed)
 let rosterWorkedDxcc = new Set();  // "EntityName|20m" — DXCC entities worked per band
 let rosterWorkedCalls = new Set(); // "K1ABC" — all callsigns ever worked
 let rosterWorkedGrids = new Set(); // "FN42" — all grids ever worked
-let workedParks = new Map(); // reference → park data from POTA parks CSV
+let workedParks = new Map(); // reference -> park data from POTA parks CSV
 let wsjtx = null;
 let wsjtxStatus = null; // last Status message from WSJT-X
 let wsjtxHighlightTimer = null; // throttle timer for highlight updates
 let donorCallsigns = new Set(); // supporter callsigns from potacat.com
 let expeditionCallsigns = new Set(); // active DX expeditions from Club Log + danplanet iCal
-let expeditionMeta = new Map(); // callsign → { entity, startDate, endDate, description }
+let expeditionMeta = new Map(); // callsign -> { entity, startDate, endDate, description }
 let activeEvents = [];                // events fetched from remote endpoint
 const EVENTS_CACHE_PATH = path.join(app.getPath('userData'), 'events-cache.json');
 let directoryNets = [];               // HF nets from community Google Sheet
@@ -212,10 +212,10 @@ let directorySwl = [];                // SWL broadcasts from community Google Sh
 const DIRECTORY_CACHE_PATH = path.join(app.getPath('userData'), 'directory-cache.json');
 let pskr = null;
 let pskrSpots = [];       // streaming PSKReporter FreeDV spots (FIFO, max 500)
-let pskrFlushTimer = null; // throttle timer for PSKReporter → renderer updates
+let pskrFlushTimer = null; // throttle timer for PSKReporter -> renderer updates
 let pskrMap = null;            // PskrClient for dedicated PSKReporter Map view
 let pskrMapSpots = [];         // receiver spots for PSKReporter Map (FIFO, max 500)
-let pskrMapFlushTimer = null;  // throttle timer for PSKReporter Map → renderer
+let pskrMapFlushTimer = null;  // throttle timer for PSKReporter Map -> renderer
 let keyer = null;          // IambicKeyer instance for CW MIDI keying
 let winKeyer = null;       // K1EL WinKeyer instance for hardware CW keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
@@ -304,7 +304,7 @@ function getRigCapabilities(rigType) {
 }
 
 // --- Watchlist notifications ---
-const recentNotifications = new Map(); // callsign → timestamp for dedup (5-min window)
+const recentNotifications = new Map(); // callsign -> timestamp for dedup (5-min window)
 
 // Parse watchlist string into array of { callsign, band, mode } rules.
 // Format: "K3SBP, K4SWL:20m, KI6NAZ:CW, W1AW:40m:SSB"
@@ -637,7 +637,7 @@ function sendRotorBearing(azimuth) {
   rotorSocket.send(msg, port, host, (err) => {
     if (err) sendCatLog(`Rotor UDP error: ${err.message}`);
   });
-  sendCatLog(`Rotor → ${host}:${port} azimuth=${azimuth}°`);
+  sendCatLog(`Rotor -> ${host}:${port} azimuth=${azimuth}°`);
 }
 
 // N1MM+ RadioInfo UDP broadcast — sends frequency/mode to band decoders, antenna switches, etc.
@@ -930,7 +930,7 @@ function buildClusterSpot(raw, myPos, myEntity) {
   return spot;
 }
 
-let clusterClients = new Map(); // id → { client, nodeConfig }
+let clusterClients = new Map(); // id -> { client, nodeConfig }
 
 function sendClusterStatus() {
   const nodes = [];
@@ -1237,7 +1237,7 @@ function connectRbn() {
   const myPos = gridToLatLon(settings.grid);
 
   rbn.on('spot', (raw) => {
-    // Strip skimmer suffix (e.g. KM3T-# → KM3T)
+    // Strip skimmer suffix (e.g. KM3T-# -> KM3T)
     const spotter = raw.spotter.replace(/-[#\d]+$/, '');
 
     const spot = {
@@ -2150,7 +2150,7 @@ function connectWsjtx() {
           saveLocalWorkedPark(parkRef);
           if (win && !win.isDestroyed()) win.webContents.send('worked-parks', [...workedParks.entries()]);
           if (remoteServer && remoteServer.running) remoteServer.sendWorkedParks([...workedParks.keys()]);
-          sendCatLog(`[WSJT-X] QSO logged: ${call} → park ${parkRef} marked as worked`);
+          sendCatLog(`[WSJT-X] QSO logged: ${call} -> park ${parkRef} marked as worked`);
         } else {
           sendCatLog(`[WSJT-X] QSO logged: ${call} at ${parkRef} (already worked)`);
         }
@@ -3068,7 +3068,7 @@ function tgxlSwitchForBand(band) {
   const bandMap = settings.tgxlBandMap || {};
   const ant = parseInt(bandMap[band], 10);
   if (ant >= 1 && ant <= 3) {
-    sendCatLog(`[TGXL] Band ${band} → antenna ${ant}`);
+    sendCatLog(`[TGXL] Band ${band} -> antenna ${ant}`);
     tgxlClient.selectAntenna(ant);
   }
 }
@@ -3113,7 +3113,7 @@ function agSwitchForFreq(freqKhz) {
   }
 
   const radioPort = settings.agRadioPort || 1;
-  sendCatLog(`[AG] Band ${band} → antenna ${antenna} (port ${radioPort === 1 ? 'A' : 'B'})`);
+  sendCatLog(`[AG] Band ${band} -> antenna ${antenna} (port ${radioPort === 1 ? 'A' : 'B'})`);
   agClient.selectAntenna(radioPort, antenna);
 }
 
@@ -3750,7 +3750,7 @@ function connectRemote() {
     if (direction === 'wider' && idx < presets.length - 1) idx++;
     else if (direction === 'narrower' && idx > 0) idx--;
     applyFilter(presets[idx]);
-    console.log('[Echo CAT] Filter step:', direction, '→', presets[idx], 'Hz');
+    console.log('[Echo CAT] Filter step:', direction, '->', presets[idx], 'Hz');
   });
 
   remoteServer.on('set-nb', ({ on }) => {
@@ -3799,7 +3799,7 @@ function connectRemote() {
     }
     _currentVfo = newVfo;
     broadcastRigState();
-    console.log('[Echo CAT] Swap VFO →', newVfo);
+    console.log('[Echo CAT] Swap VFO ->', newVfo);
   });
 
   // RF Gain from ECHOCAT — debounce to avoid serial command flooding and feedback loops
@@ -4029,7 +4029,7 @@ function connectRemote() {
     saveSettings(settings);
     if (spotTimer) clearInterval(spotTimer);
     spotTimer = setInterval(refreshSpots, val * 1000);
-    console.log('[Echo CAT] Refresh interval →', val, 's');
+    console.log('[Echo CAT] Refresh interval ->', val, 's');
   });
 
   remoteServer.on('set-mode', ({ mode }) => {
@@ -4038,7 +4038,7 @@ function connectRemote() {
       console.log('[Echo CAT] Set mode ignored — no frequency from radio yet');
       return;
     }
-    console.log('[Echo CAT] Set mode →', mode);
+    console.log('[Echo CAT] Set mode ->', mode);
     // Reset rate limiter so mode-only change goes through
     _lastTuneFreq = 0;
     tuneRadio(_currentFreqHz / 1000, mode);
@@ -4048,7 +4048,7 @@ function connectRemote() {
     settings.rotorActive = enabled;
     saveSettings(settings);
     updateRemoteSettings(); // push updated state back to phone
-    console.log('[Echo CAT] Rotor →', enabled ? 'ON' : 'OFF');
+    console.log('[Echo CAT] Rotor ->', enabled ? 'ON' : 'OFF');
   });
 
   remoteServer.on('set-scan-dwell', ({ value }) => {
@@ -4056,7 +4056,7 @@ function connectRemote() {
     settings.scanDwell = val;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] Scan dwell →', val, 's');
+    console.log('[Echo CAT] Scan dwell ->', val, 's');
   });
 
   remoteServer.on('set-max-age', ({ value }) => {
@@ -4064,7 +4064,7 @@ function connectRemote() {
     settings.maxAgeMin = val;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] Max spot age →', val, 'm');
+    console.log('[Echo CAT] Max spot age ->', val, 'm');
   });
 
   remoteServer.on('set-dist-unit', ({ value }) => {
@@ -4072,7 +4072,7 @@ function connectRemote() {
       settings.distUnit = value;
       saveSettings(settings);
       updateRemoteSettings();
-      console.log('[Echo CAT] Distance unit →', value);
+      console.log('[Echo CAT] Distance unit ->', value);
     }
   });
 
@@ -4081,7 +4081,7 @@ function connectRemote() {
     settings.cwXit = val;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] CW XIT →', val, 'Hz');
+    console.log('[Echo CAT] CW XIT ->', val, 'Hz');
   });
 
   remoteServer.on('set-cw-filter', ({ value }) => {
@@ -4089,7 +4089,7 @@ function connectRemote() {
     settings.cwFilterWidth = val;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] CW Filter →', val, 'Hz');
+    console.log('[Echo CAT] CW Filter ->', val, 'Hz');
   });
 
   remoteServer.on('set-ssb-filter', ({ value }) => {
@@ -4097,7 +4097,7 @@ function connectRemote() {
     settings.ssbFilterWidth = val;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] SSB Filter →', val, 'Hz');
+    console.log('[Echo CAT] SSB Filter ->', val, 'Hz');
   });
 
   remoteServer.on('set-digital-filter', ({ value }) => {
@@ -4105,28 +4105,28 @@ function connectRemote() {
     settings.digitalFilterWidth = val;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] Digital Filter →', val, 'Hz');
+    console.log('[Echo CAT] Digital Filter ->', val, 'Hz');
   });
 
   remoteServer.on('set-enable-split', ({ value }) => {
     settings.enableSplit = !!value;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] Split →', value ? 'ON' : 'OFF');
+    console.log('[Echo CAT] Split ->', value ? 'ON' : 'OFF');
   });
 
   remoteServer.on('set-enable-atu', ({ value }) => {
     settings.enableAtu = !!value;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] ATU Auto →', value ? 'ON' : 'OFF');
+    console.log('[Echo CAT] ATU Auto ->', value ? 'ON' : 'OFF');
   });
 
   remoteServer.on('set-tune-click', ({ value }) => {
     settings.tuneClick = !!value;
     saveSettings(settings);
     updateRemoteSettings();
-    console.log('[Echo CAT] Tune Click →', value ? 'ON' : 'OFF');
+    console.log('[Echo CAT] Tune Click ->', value ? 'ON' : 'OFF');
   });
 
   remoteServer.on('lookup-call', async ({ callsign }) => {
@@ -4926,7 +4926,7 @@ function handleRemotePtt(state) {
     if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
       const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
       _ssbModeBeforePtt = curMode;
-      sendCatLog(`[PTT] ${curMode} → ${dataMode} (SSB-over-DATA: mic disabled)`);
+      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (SSB-over-DATA: mic disabled)`);
       // Suppress mode broadcasts for the entire PTT duration + restore.
       _modeSuppressUntil = Date.now() + 120000;
       // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown)
@@ -5313,7 +5313,7 @@ async function processSotaSpots(raw) {
     return !isNaN(f) && f > 0;
   }).map((s) => {
     const freqMHz = parseFloat(s.frequency);
-    const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz → convert to kHz
+    const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz -> convert to kHz
     const ref = s._ref;
     const assoc = s.associationCode;
 
@@ -5743,7 +5743,7 @@ async function buildDxccData() {
       ? await parseSqliteConfirmed(logPath)
       : parseAdifFile(logPath, { confirmedOnly: false });
 
-    // Build confirmation map: entityIndex → { band → Set<mode> }
+    // Build confirmation map: entityIndex -> { band -> Set<mode> }
     const confirmMap = new Map();
 
     for (const qso of qsos) {
@@ -5928,7 +5928,7 @@ const hamrsBridge = {
     // Send heartbeat immediately, then every 15 seconds
     this._sendHeartbeat();
     this.heartbeatTimer = setInterval(() => this._sendHeartbeat(), 15000);
-    console.log(`[HamRS] Bridge started → ${this.host}:${this.port}`);
+    console.log(`[HamRS] Bridge started -> ${this.host}:${this.port}`);
   },
 
   stop() {
@@ -5955,7 +5955,7 @@ const hamrsBridge = {
         return;
       }
       const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
-      sendCatLog(`[HamRS] Sending QSO: ${qsoData.callsign} ${freqHz}Hz ${qsoData.mode} → ${this.host}:${this.port}`);
+      sendCatLog(`[HamRS] Sending QSO: ${qsoData.callsign} ${freqHz}Hz ${qsoData.mode} -> ${this.host}:${this.port}`);
 
       // Build proper Date objects from qsoData date/time fields
       let dateTimeOff;
@@ -6018,7 +6018,7 @@ function rawQsoToQsoData(raw) {
   const freqMhz = parseFloat(raw.FREQ || '0');
   return {
     callsign: raw.CALL || '',
-    frequency: (freqMhz * 1000).toFixed(1), // MHz → kHz
+    frequency: (freqMhz * 1000).toFixed(1), // MHz -> kHz
     mode: raw.MODE || '',
     qsoDate: raw.QSO_DATE || '',
     timeOn: raw.TIME_ON || '',
@@ -7388,7 +7388,7 @@ let _lastTuneBand = null; // for ATU auto-tune on band change
 let _modeSuppressUntil = 0; // suppress stale mode broadcasts to ECHOCAT during tune transition
 
 function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
-  let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz → Hz
+  let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz -> Hz
   const now = Date.now();
   if (freqHz === _lastTuneFreq && now - _lastTuneTime < 300) return;
   _lastTuneFreq = freqHz;
@@ -7491,7 +7491,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB')
         ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
         : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
-      sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}→${flexMode} filter=${filterWidth}`);
+      sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}->${flexMode} filter=${filterWidth}`);
       smartSdr.tuneSlice(sliceIndex, freqMhz, flexMode, filterWidth);
       // Set or clear XIT on the slice
       if (wantXit) {
@@ -7506,7 +7506,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
         if (tuneBandSdr && tuneBandSdr !== _lastTuneBand) {
           _lastTuneBand = tuneBandSdr;
           setTimeout(() => {
-            sendCatLog(`[ATU] Band changed to ${tuneBandSdr} → starting SmartSDR ATU tune`);
+            sendCatLog(`[ATU] Band changed to ${tuneBandSdr} -> starting SmartSDR ATU tune`);
             smartSdr.setAtu(true);
           }, 1500);
         } else if (!_lastTuneBand && tuneBandSdr) {
@@ -7518,7 +7518,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   }
 
   if (!cat || !cat.connected) {
-    sendCatLog('tune ignored — no radio connected. Check Settings → My Rigs.');
+    sendCatLog('tune ignored — no radio connected. Check Settings -> My Rigs.');
     return;
   }
 
@@ -7542,7 +7542,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   // Suppress stale mode broadcasts to ECHOCAT for 2s — prevents flicker when
   // frequency-triggered status broadcasts include the OLD mode before polling catches up
   if (mode) _modeSuppressUntil = Date.now() + 2000;
-  sendCatLog(`tune: freq=${freqKhz}kHz → ${tuneFreqHz}Hz mode=${mode}${mode !== resolvedMode ? '→' + resolvedMode : ''} split=${!!settings.enableSplit} filter=${filterWidth}${wantXit ? ` xit=${settings.cwXit}` : ''}`);
+  sendCatLog(`tune: freq=${freqKhz}kHz -> ${tuneFreqHz}Hz mode=${mode}${mode !== resolvedMode ? '->' + resolvedMode : ''} split=${!!settings.enableSplit} filter=${filterWidth}${wantXit ? ` xit=${settings.cwXit}` : ''}`);
   cat.tune(tuneFreqHz, mode, { split: settings.enableSplit, filterWidth, xit: nativeXit });
 
   // Set or clear XIT via SmartSDR API (works even when tuning via CAT)
@@ -7564,10 +7564,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       // Delay ATU trigger to let the radio settle on the new frequency first
       setTimeout(() => {
         if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} → starting SmartSDR ATU tune`);
+          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
           smartSdr.setAtu(true);
         } else if (cat && cat.connected) {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} → starting ATU tune`);
+          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting ATU tune`);
           cat.startTune();
         }
       }, 1500);
@@ -7584,7 +7584,7 @@ if (!app.isDefaultProtocolClient('potacat')) {
 }
 
 function handleProtocolUrl(url) {
-  // potacat://tune/14074/USB → tune to 14074 kHz USB
+  // potacat://tune/14074/USB -> tune to 14074 kHz USB
   try {
     const parsed = new URL(url);
     if (parsed.hostname === 'tune' || parsed.pathname.startsWith('//tune')) {
@@ -11333,7 +11333,7 @@ app.whenReady().then(() => {
         if (qDate !== dateMatch) return true;
         if (qTime !== timeMatch.substring(0, 4)) return true;
         if (match.frequency) {
-          const qFreq = parseFloat(q.FREQ || 0) * 1000; // FREQ in MHz → kHz
+          const qFreq = parseFloat(q.FREQ || 0) * 1000; // FREQ in MHz -> kHz
           const mFreq = parseFloat(match.frequency);
           if (Math.abs(qFreq - mFreq) > 1) return true;
         }
@@ -11368,7 +11368,7 @@ app.whenReady().then(() => {
   });
 
   // --- CW Keyer IPC ---
-  // Paddle events go through IambicKeyer, which generates key events → xmit 1/0
+  // Paddle events go through IambicKeyer, which generates key events -> xmit 1/0
   ipcMain.on('cw-paddle-dit', (_e, pressed) => {
     if (keyer) keyer.paddleDit(pressed);
   });

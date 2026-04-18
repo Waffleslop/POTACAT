@@ -135,7 +135,7 @@
   function saveColPrefs() { localStorage.setItem('echocat-spot-cols', JSON.stringify({ ...colShow, order: colOrder })); }
   let tunedCallsign = '';
   let tunedOpName = '';
-  var qrzNameCache = {}; // callsign → first name / nickname from QRZ
+  var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
   let tunedState = '';
   let currentNb = false;
   let currentAtu = false;
@@ -191,7 +191,7 @@
   let searchDebounce = null;
   let workedParksSet = new Set();  // park refs from CSV for new-to-me filter
   let showNewOnly = false;
-  let workedQsos = new Map();     // callsign → [{date, ref, band, mode}]
+  let workedQsos = new Map();     // callsign -> [{date, ref, band, mode}]
   let hideWorked = false;
   let clusterConnected = false;
   let myCallsign = '';
@@ -1561,7 +1561,7 @@
     spotList.querySelectorAll('.spot-card.tuned').forEach(c => c.classList.remove('tuned'));
     card.classList.add('tuned');
 
-    // FT8/FT4 spot → switch to FT8 tab and hunt the station
+    // FT8/FT4 spot -> switch to FT8 tab and hunt the station
     const modeUpper = (mode || '').toUpperCase();
     if ((modeUpper === 'FT8' || modeUpper === 'FT4' || modeUpper === 'FT2') && callsign) {
       ft8Mode = modeUpper;
@@ -2322,7 +2322,7 @@
     }
 
     // --- Method 3: Keyboard media key events ---
-    // Android translates BT HFP buttons to KEYCODE_MEDIA_PLAY_PAUSE → 'MediaPlayPause'
+    // Android translates BT HFP buttons to KEYCODE_MEDIA_PLAY_PAUSE -> 'MediaPlayPause'
     document.addEventListener('keydown', btPttKeyHandler);
 
     btPttUpdateStatus('Listening...');
@@ -3062,11 +3062,11 @@
     }
     var rms = Math.sqrt(sum / data.length);
     var db = rms > 0 ? 20 * Math.log10(rms) : -60;
-    var level = Math.max(0, Math.min(1, (db + 40) / 40)); // -40dB to 0dB → 0-1
+    var level = Math.max(0, Math.min(1, (db + 40) / 40)); // -40dB to 0dB -> 0-1
     // Draw bar
     ctx.clearRect(0, 0, w, h);
     var barW = Math.round(level * w);
-    // Green → yellow → red gradient
+    // Green -> yellow -> red gradient
     if (level < 0.6) ctx.fillStyle = '#4ecca3';
     else if (level < 0.85) ctx.fillStyle = '#ffd740';
     else ctx.fillStyle = '#e94560';
@@ -3154,14 +3154,14 @@
         // Create AudioContext during user gesture so iOS Safari doesn't block it
         try {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          // RX chain: source → gainNode → rxAnalyser → destination
+          // RX chain: source -> gainNode -> rxAnalyser -> destination
           gainNode = audioCtx.createGain();
           gainNode.gain.value = VOL_STEPS[volBoostLevel];
           rxAnalyser = audioCtx.createAnalyser();
           rxAnalyser.fftSize = 256;
           gainNode.connect(rxAnalyser);
           rxAnalyser.connect(audioCtx.destination);
-          // TX chain: mic → txGainNode → txAnalyser (metering only, audio sent via WebRTC track)
+          // TX chain: mic -> txGainNode -> txAnalyser (metering only, audio sent via WebRTC track)
           txGainNode = audioCtx.createGain();
           txGainNode.gain.value = 1.0;
           txAnalyser = audioCtx.createAnalyser();
@@ -3300,7 +3300,7 @@
     }
   }
 
-  // --- Volume Boost (cycles 1x → 2x → 3x) ---
+  // --- Volume Boost (cycles 1x -> 2x -> 3x) ---
   volBoostBtn.addEventListener('click', () => {
     volBoostLevel = (volBoostLevel + 1) % VOL_STEPS.length;
     var gain = VOL_STEPS[volBoostLevel];
@@ -3541,10 +3541,10 @@
     selectLtType(chip.dataset.type);
   });
 
-  // Log tab ref input → update respot
+  // Log tab ref input -> update respot
   ltRefInput.addEventListener('input', updateLtRespot);
 
-  // Log tab mode change → update RST defaults + respot
+  // Log tab mode change -> update RST defaults + respot
   ltMode.addEventListener('change', () => {
     const rst = defaultRst(ltMode.value);
     ltRstSent.value = rst;
@@ -5025,7 +5025,7 @@
     const rows = [];
     const myCall = q.myCall || myCallsign || '';
     if (q.mode === 'cq') {
-      // CQ flow: CQ(tx) → reply(rx) → report(tx) → R+rpt(rx) → RR73(tx)
+      // CQ flow: CQ(tx) -> reply(rx) -> report(tx) -> R+rpt(rx) -> RR73(tx)
       rows.push({ tx: true, text: 'CQ ' + myCall + ' ' + (q.myGrid || ''), done: true, active: q.phase === 'cq' });
       if (q.call) {
         rows.push({ tx: false, text: q.call + ' ' + myCall + ' ' + (q.grid || ''), directed: true, done: q.phase !== 'cq', active: false });
@@ -5036,7 +5036,7 @@
         rows.push({ tx: true, text: q.call + ' ' + myCall + ' RR73', done: q.phase === 'done', active: q.phase === 'cq-rr73' });
       }
     } else {
-      // Reply flow: reply(tx) → rpt(rx) → R+rpt(tx) → RR73(rx) → 73(tx)
+      // Reply flow: reply(tx) -> rpt(rx) -> R+rpt(tx) -> RR73(rx) -> 73(tx)
       const theirCall = q.call || '';
       rows.push({ tx: true, text: theirCall + ' ' + myCall + ' ' + (q.myGrid || ''), done: true, active: q.phase === 'reply' });
       if (q.report) {
@@ -5095,7 +5095,7 @@
     for (let x = 0; x < w; x++) {
       const idx = Math.floor(x * step);
       const val = bins[idx] || 0;
-      // Map 0-255 to color (blue→cyan→yellow→red)
+      // Map 0-255 to color (blue->cyan->yellow->red)
       const r = val > 170 ? 255 : val > 85 ? (val - 85) * 3 : 0;
       const g = val > 170 ? 255 - (val - 170) * 3 : val > 85 ? 255 : val * 3;
       const b = val > 85 ? 0 : 255 - val * 3;
@@ -5124,7 +5124,7 @@
     }
   });
 
-  // Slot cycle: auto → even → odd → auto
+  // Slot cycle: auto -> even -> odd -> auto
   ft8SlotBtn.addEventListener('click', () => {
     if (ft8TxSlot === 'auto') ft8TxSlot = 'even';
     else if (ft8TxSlot === 'even') ft8TxSlot = 'odd';
@@ -5580,7 +5580,7 @@
 
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    // Expand macros: {op_firstname} → operator name or "OM", {call} → tuned callsign
+    // Expand macros: {op_firstname} -> operator name or "OM", {call} -> tuned callsign
     var expanded = text
       .replace(/\{op_firstname\}/gi, tunedOpName || '')
       .replace(/\{call\}/gi, tunedCallsign || '')
@@ -6197,7 +6197,7 @@
           ssbPlayingIdx = idx;
           if (btn) btn.classList.add('playing');
 
-          // Create playback graph: AudioBuffer → MediaStreamDestination
+          // Create playback graph: AudioBuffer -> MediaStreamDestination
           ssbPlaybackDest = ctx.createMediaStreamDestination();
           ssbPlaybackSource = ctx.createBufferSource();
           ssbPlaybackSource.buffer = audioBuffer;
