@@ -10104,29 +10104,36 @@ catLogClearBtn.addEventListener('click', () => {
     }
     banner.innerHTML = [
       '<strong>🐞 Recording bug report…</strong>',
-      '<span style="flex:1">Now reproduce the problem. When the log below contains what you need, click Copy &amp; Post.</span>',
-      '<button type="button" id="bug-report-copy" style="background:#fff;color:#c24150;border:none;padding:5px 12px;border-radius:3px;font-weight:700;cursor:pointer;font-size:12px;">Copy &amp; Post to Discord</button>',
+      '<span style="flex:1">Now reproduce the problem. When the log below contains what you need, click Copy Report.</span>',
+      '<button type="button" id="bug-report-copy" style="background:#fff;color:#c24150;border:none;padding:5px 12px;border-radius:3px;font-weight:700;cursor:pointer;font-size:12px;">Copy Report</button>',
       '<button type="button" id="bug-report-cancel" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Cancel</button>',
     ].join('');
     banner.querySelector('#bug-report-cancel').onclick = () => banner.remove();
     banner.querySelector('#bug-report-copy').onclick = async () => {
       const report = await buildReport();
+      let copied = false;
       try {
         await navigator.clipboard.writeText(report);
+        copied = true;
       } catch {
-        // Fallback: put it in the log textarea so user can copy manually
+        // Fallback: put the report in the log textarea so user can copy manually
         catLogOutput.value = report;
         catLogOutput.select();
       }
-      banner.innerHTML = '<strong>✅ Copied to clipboard!</strong><span style="flex:1">Opening Discord #bug-report — paste there. Fill in the "What I tried" and "What happened" sections.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>';
+      banner.innerHTML = copied
+        ? '<strong>✅ Copied to clipboard.</strong><span style="flex:1">Paste it into Discord #bug-report. Fill in the "What I tried" and "What happened" sections before sending.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>'
+        : '<strong>⚠ Clipboard access denied.</strong><span style="flex:1">The report is shown in the log below — select all, copy manually, paste in Discord.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>';
       banner.querySelector('#bug-report-close').onclick = () => banner.remove();
-      window.api.openExternal('https://discord.gg/cuNQpES38C');
-      // Auto-dismiss after 15 s so it doesn't linger forever
-      setTimeout(() => banner.remove(), 15000);
+      // Auto-dismiss after 20 s so the banner doesn't linger forever
+      setTimeout(() => banner.remove(), 20000);
     };
   }
 
-  btn.addEventListener('click', startBugReport);
+  btn.addEventListener('click', () => {
+    // Close the Quick Settings dropdown so the banner isn't hidden behind it
+    if (settingsDropdown) settingsDropdown.classList.remove('open');
+    startBugReport();
+  });
 })();
 
 // --- Solar data listener ---
