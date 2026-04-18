@@ -112,6 +112,7 @@ let hideWorked = false;
 let workedParksSet = new Set(); // park references from CSV for fast lookup
 let workedParksData = new Map(); // reference -> full park data for stats
 let hideWorkedParks = false;
+let hideWorkedCallRef = false; // strict: hide only when CALL + REF + UTC-date + BAND + MODE all match a logged QSO
 let prioritizeNewParks = false; // sort unworked-park spots to the top of the table
 let hideQrt = true; // hide spots with QRT in comments (default on)
 let showBearing = false;
@@ -280,6 +281,8 @@ const spotsDxe = document.getElementById('spots-dxe');
 const spotsHideWorked = document.getElementById('spots-hide-worked');
 const spotsHideParks = document.getElementById('spots-hide-parks');
 const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
+const spotsHideCallRef = document.getElementById('spots-hide-callref');
+const spotsHideCallRefLabel = document.getElementById('spots-hide-callref-label');
 const spotsPrioritizeNew = document.getElementById('spots-prioritize-new');
 const spotsPrioritizeNewLabel = document.getElementById('spots-prioritize-new-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
@@ -1039,6 +1042,7 @@ async function loadPrefs() {
   hideOutOfBand = settings.hideOutOfBand === true;
   hideWorked = settings.hideWorked === true;
   hideWorkedParks = settings.hideWorkedParks === true;
+  hideWorkedCallRef = settings.hideWorkedCallRef === true;
   prioritizeNewParks = settings.prioritizeNewParks === true;
   // Banner logger scale (W9TEF wanted to make it bigger independent of app)
   const savedScale = parseFloat(settings.bannerScale);
@@ -3693,6 +3697,29 @@ function isWorkedSpot(spot) {
   return true;
 }
 
+/** Strict 5-field worked-spot match: CALL + REF + UTC-date + BAND + MODE.
+ *  Only matches OTA spots (those with a reference). A roving activator at a
+ *  new park stays visible because the REF differs. K8IKO request — used by
+ *  the "Hide worked CALL+park combos" filter. */
+function isWorkedSpotStrict(spot) {
+  if (!spot.reference) return false;
+  const entries = workedQsos.get(spot.callsign.toUpperCase());
+  if (!entries || entries.length === 0) return false;
+  const now = new Date();
+  const todayUtc = now.getUTCFullYear().toString() +
+    String(now.getUTCMonth() + 1).padStart(2, '0') +
+    String(now.getUTCDate()).padStart(2, '0');
+  const spotRef = spot.reference.toUpperCase();
+  const spotBand = (spot.band || '').toUpperCase();
+  const spotMode = (spot.mode || '').toUpperCase();
+  return entries.some(e =>
+    e.date === todayUtc &&
+    (e.ref || '').toUpperCase() === spotRef &&
+    (!spotBand || e.band === spotBand) &&
+    (!spotMode || e.mode === spotMode)
+  );
+}
+
 function getFiltered() {
   const bands = getDropdownValues(bandFilterEl);
   const modes = getDropdownValues(modeFilterEl);
@@ -3733,6 +3760,7 @@ function getFiltered() {
     if (continents && !continents.has(s.continent)) return false;
     if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     if (hideWorked && isWorkedSpot(s)) return false;
+    if (hideWorkedCallRef && isWorkedSpotStrict(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
     if (hideQrt && s.comments && s.comments.toLowerCase().includes('qrt')) return false;
     if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency)) return false;
@@ -6927,6 +6955,7 @@ function syncSpotsPanel() {
   spotsDxe.checked = enableDxe;
   spotsHideWorked.checked = hideWorked;
   spotsHideParks.checked = hideWorkedParks;
+  spotsHideCallRef.checked = hideWorkedCallRef;
   spotsPrioritizeNew.checked = prioritizeNewParks;
   spotsHideOob.checked = hideOutOfBand;
   spotsHideQrt.checked = hideQrt;
@@ -6938,6 +6967,9 @@ function syncSpotsPanel() {
   spotsDxcc.checked = enableDxcc;
   spotsHideParksLabel.classList.toggle('hidden', workedParksSet.size === 0);
   spotsPrioritizeNewLabel.classList.toggle('hidden', workedParksSet.size === 0);
+  // Strict CALL+REF filter only makes sense once the user has logged QSOs;
+  // hide the toggle entirely when there's nothing in the worked-QSO map.
+  spotsHideCallRefLabel.classList.toggle('hidden', workedQsos.size === 0);
 }
 
 document.querySelector('.spots-dropdown-panel').addEventListener('click', (e) => e.stopPropagation());
@@ -6971,6 +7003,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   }
   hideWorked = spotsHideWorked.checked;
   hideWorkedParks = spotsHideParks.checked;
+  hideWorkedCallRef = spotsHideCallRef.checked;
   prioritizeNewParks = spotsPrioritizeNew.checked;
   hideOutOfBand = spotsHideOob.checked;
   hideQrt = spotsHideQrt.checked;
@@ -7000,7 +7033,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   await window.api.saveSettings({
     enablePota, enableSota, enableWwff, enableLlota,
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
-    hideWorked, hideWorkedParks, prioritizeNewParks, hideOutOfBand,
+    hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, hideOutOfBand,
     enableDxcc,
   });
 
