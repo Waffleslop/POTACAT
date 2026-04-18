@@ -7747,31 +7747,49 @@
   function sstvPhoneLoadTemplate(idx) {
     var tpl = sstvPhoneTemplates[idx];
     if (!tpl) return;
-    // Restore text elements
-    sstvPhoneTexts = tpl.texts.map(function(t) {
-      return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
-    });
-    // Fill auto-labels with current callsign/grid
-    var callEl = sstvPhoneTexts.find(function(t) { return t.key === 'call'; });
-    if (callEl) callEl.label = myCallsign ? 'de ' + myCallsign.toUpperCase() : '';
-    var gridEl = sstvPhoneTexts.find(function(t) { return t.key === 'grid'; });
-    if (gridEl) gridEl.label = myGrid ? myGrid.toUpperCase() : '';
-    sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key.indexOf('user-') === 0; }).length;
-    // Restore background
-    sstvPhoneResetCrop();
-    if (tpl.bgDataUrl) {
-      var img = new Image();
-      img.onload = function() { sstvPhoneSetBg(img, true); };
-      img.src = tpl.bgDataUrl;
-    } else if (tpl.bgParams) {
-      sstvPhoneGeneratePattern(tpl.bgParams);
-      if (sstvCropBar) sstvCropBar.style.display = 'none';
+    try {
+      // Restore text elements
+      if (Array.isArray(tpl.texts)) {
+        sstvPhoneTexts = tpl.texts.map(function(t) {
+          return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
+        });
+      }
+      // Fill auto-labels with current callsign/grid
+      var callEl = sstvPhoneTexts.find(function(t) { return t.key === 'call'; });
+      if (callEl) callEl.label = myCallsign ? 'de ' + myCallsign.toUpperCase() : '';
+      var gridEl = sstvPhoneTexts.find(function(t) { return t.key === 'grid'; });
+      if (gridEl) gridEl.label = myGrid ? myGrid.toUpperCase() : '';
+      sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key.indexOf('user-') === 0; }).length;
+      sstvPhoneSelectedText = null;
+      sstvPhoneRenderTextLayers();
+      sstvPhoneHideEditor();
+      // Restore background — render text layers first so the user gets instant
+      // feedback, then update bg asynchronously if it's a data URL.
+      sstvPhoneResetCrop();
+      if (tpl.bgDataUrl) {
+        var img = new Image();
+        img.onload = function() { sstvPhoneSetBg(img, true); };
+        img.onerror = function() {
+          console.error('[SSTV] Template bg image failed to load');
+          sstvRenderPhoneCompose();
+        };
+        img.src = tpl.bgDataUrl;
+        // Paint texts now so the user sees the template took effect even before
+        // the bg image decode finishes.
+        sstvRenderPhoneCompose();
+      } else if (tpl.bgParams) {
+        sstvPhoneGeneratePattern(tpl.bgParams);
+        if (sstvCropBar) sstvCropBar.style.display = 'none';
+        sstvRenderPhoneCompose();
+      } else {
+        // Template has no bg — just repaint with the new text layers
+        sstvRenderPhoneCompose();
+      }
+      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template ' + (idx + 1) + ' loaded';
+    } catch (err) {
+      console.error('[SSTV] Template load failed:', err);
+      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template load failed — see console';
     }
-    sstvPhoneSelectedText = null;
-    sstvPhoneRenderTextLayers();
-    sstvPhoneHideEditor();
-    sstvRenderPhoneCompose();
-    if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template loaded';
   }
 
   // --- Text layer list ---
@@ -8115,13 +8133,17 @@
     var ctx2 = c.getContext('2d');
     var imgData = ctx2.createImageData(320, 256);
     var d = imgData.data;
-    var f1 = params ? params.seed.f1 : 0.02 + Math.random() * 0.04;
-    var f2 = params ? params.seed.f2 : 0.02 + Math.random() * 0.04;
-    var f3 = params ? params.seed.f3 : 0.01 + Math.random() * 0.03;
-    var p1 = params ? (params.seed.p1 || 0) : Math.random() * Math.PI * 2;
-    var p2 = params ? (params.seed.p2 || 0) : Math.random() * Math.PI * 2;
-    var p3 = params ? (params.seed.p3 || 0) : Math.random() * Math.PI * 2;
-    var hueBase = params ? params.seed.hue : Math.random() * 360;
+    // Only plasma params are supported on the phone. For other desktop pattern
+    // types (gradient/waves/geometric), fall back to a random plasma instead
+    // of producing garbage from undefined seed fields.
+    var seed = (params && params.seed && typeof params.seed.f1 === 'number') ? params.seed : null;
+    var f1 = seed ? seed.f1 : 0.02 + Math.random() * 0.04;
+    var f2 = seed ? seed.f2 : 0.02 + Math.random() * 0.04;
+    var f3 = seed ? seed.f3 : 0.01 + Math.random() * 0.03;
+    var p1 = seed ? (seed.p1 || 0) : Math.random() * Math.PI * 2;
+    var p2 = seed ? (seed.p2 || 0) : Math.random() * Math.PI * 2;
+    var p3 = seed ? (seed.p3 || 0) : Math.random() * Math.PI * 2;
+    var hueBase = seed ? seed.hue : Math.random() * 360;
     for (var y = 0; y < 256; y++) {
       for (var x = 0; x < 320; x++) {
         var v = (Math.sin(x * f1 + p1) + Math.sin(y * f2 + p2) + Math.sin((x + y) * f3 + p3)) / 3;
