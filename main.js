@@ -161,6 +161,7 @@ let sstvPopoutWin = null;    // pop-out SSTV window
 let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
 let sstvManager = null;      // SSTV multi-slice manager
 let openSstvPopout = null;   // function — assigned in second whenReady block
+let startSstv = null;        // function — assigned in second whenReady block (same reason)
 const SSTV_GALLERY_DIR = path.join(app.getPath('userData'), 'sstv-gallery');
 function ensureSstvGalleryDir() {
   if (!fs.existsSync(SSTV_GALLERY_DIR)) fs.mkdirSync(SSTV_GALLERY_DIR, { recursive: true });
@@ -4735,7 +4736,11 @@ function connectRemote() {
 
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
   remoteServer.on('sstv-photo', ({ image, mode }) => {
-    if (!sstvEngine) startSstv();
+    if (!sstvEngine && startSstv) startSstv();
+    if (!sstvEngine) {
+      console.error('[SSTV] ECHOCAT photo received but SSTV not initialized');
+      return;
+    }
     try {
       const { nativeImage } = require('electron');
       // Decode base64 JPEG/PNG from phone
@@ -8625,7 +8630,7 @@ app.whenReady().then(() => {
 
   // === SSTV Pop-out Window ================================================
 
-  function startSstv() {
+  startSstv = function startSstv() {
     if (sstvEngine) return;
     sstvEngine = new SstvEngine();
 
