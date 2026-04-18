@@ -10051,7 +10051,6 @@ catLogClearBtn.addEventListener('click', () => {
       platform: window.api.platform,
       rig: rigDesc,
       callsign: (s.myCallsign || '(not set)').toUpperCase(),
-      grid: s.grid || '(not set)',
       features: enabled,
     };
     const log = catLogLines.join('\n') || '(log is empty — verbose logging may not have captured anything during the repro)';
@@ -10061,7 +10060,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Version:** v' + md.version,
       '**Platform:** ' + md.platform,
       '**Rig:** ' + md.rig,
-      '**Callsign:** ' + md.callsign + '  |  **Grid:** ' + md.grid,
+      '**Callsign:** ' + md.callsign,
       '**Features enabled:** ' + md.features,
       '',
       '### What I tried to do',
