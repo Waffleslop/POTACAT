@@ -227,6 +227,25 @@ function qrzDisplayName(info) {
   return [first, last].filter(Boolean).join(' ');
 }
 
+/** Display name with a location suffix for the bottom banner logger.
+ *  US ops get " · US-NY", DX ops get " · Germany", etc. (W9TEF request) */
+function qrzNameAndLocation(info) {
+  const name = qrzDisplayName(info);
+  if (!info) return name;
+  const country = (info.country || '').trim();
+  const state = (info.state || '').trim();
+  let loc = '';
+  if (state && /^united states|^usa$/i.test(country)) {
+    loc = `US-${state.toUpperCase()}`;
+  } else if (country) {
+    loc = country;
+  } else if (state) {
+    loc = state;
+  }
+  if (!loc) return name;
+  return name ? `${name} \u00B7 ${loc}` : loc;
+}
+
 // --- Scan state ---
 // --- Radio frequency tracking ---
 let radioFreqKhz = null;
@@ -1021,6 +1040,10 @@ async function loadPrefs() {
   hideWorked = settings.hideWorked === true;
   hideWorkedParks = settings.hideWorkedParks === true;
   prioritizeNewParks = settings.prioritizeNewParks === true;
+  // Banner logger scale (W9TEF wanted to make it bigger independent of app)
+  const savedScale = parseFloat(settings.bannerScale);
+  blScale = (isFinite(savedScale) && savedScale >= 0.8 && savedScale <= 3.0) ? savedScale : 1.0;
+  document.documentElement.style.setProperty('--bl-scale', String(blScale));
   respotDefault = settings.respotDefault !== false; // default true
   if (settings.respotTemplate != null) respotTemplate = settings.respotTemplate;
   if (settings.dxRespotTemplate != null) dxRespotTemplate = settings.dxRespotTemplate;
@@ -1972,6 +1995,8 @@ const blNotes = document.getElementById('bl-notes');
 const blRespot = document.getElementById('bl-respot');
 const blRespotLabel = document.getElementById('bl-respot-label');
 const blLogBtn = document.getElementById('bl-log-btn');
+const blResizeHandle = document.getElementById('bl-resize-handle');
+let blScale = 1.0; // banner size scale (1.0 = default, persisted across sessions)
 let blFreqEdited = false;  // user manually edited freq — don't auto-fill
 let blModeEdited = false;  // user manually edited mode — don't auto-fill
 let blTimeEdited = false;  // user manually edited time — don't auto-fill
@@ -2040,6 +2065,40 @@ blType.addEventListener('change', () => {
   updateBlRespotVisibility();
 });
 
+// Banner resize: drag the top-edge handle up to enlarge / down to shrink.
+// 1px of vertical drag = 0.01 change in scale. Scale clamped 0.8x-3.0x.
+// Persists to settings.bannerScale on mouseup.
+(function setupBannerResize() {
+  if (!blResizeHandle) return;
+  let startY = 0;
+  let startScale = 1.0;
+  let dragging = false;
+  function onMove(e) {
+    if (!dragging) return;
+    const delta = startY - e.clientY; // up is positive
+    const newScale = Math.max(0.8, Math.min(3.0, startScale + delta * 0.01));
+    blScale = newScale;
+    document.documentElement.style.setProperty('--bl-scale', String(newScale));
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    blResizeHandle.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    window.api.saveSettings({ bannerScale: blScale });
+  }
+  blResizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startScale = blScale;
+    blResizeHandle.classList.add('dragging');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
+
 // User-edit flags: reset after each QSO save
 blFreq.addEventListener('input', () => { blFreqEdited = true; });
 blMode.addEventListener('change', () => {
@@ -2056,12 +2115,12 @@ blCallsign.addEventListener('input', () => {
   if (cs.length < 3) { blName.value = ''; return; }
   blLookupTimer = setTimeout(async () => {
     const cached = qrzData.get(cs.split('/')[0]);
-    if (cached) { blName.value = qrzDisplayName(cached); return; }
+    if (cached) { blName.value = qrzNameAndLocation(cached); return; }
     try {
       const result = await window.api.qrzLookup(cs);
       if (result && blCallsign.value.trim().toUpperCase() === cs) {
         qrzData.set(cs.split('/')[0], result);
-        blName.value = qrzDisplayName(result);
+        blName.value = qrzNameAndLocation(result);
       }
     } catch {}
   }, 400);

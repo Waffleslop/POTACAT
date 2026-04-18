@@ -5799,13 +5799,29 @@ body.activator-rbn-on #rbn-view {
 .banner-logger {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: calc(6px * var(--bl-scale, 1));
+  padding: calc(4px * var(--bl-scale, 1)) 8px;
   background: var(--bg-panel);
   border-top: 2px solid var(--accent-green);
   flex-shrink: 0;
+  position: relative;
 }
 .banner-logger.hidden { display: none; }
+
+/* Drag-to-resize strip on the top edge — W9TEF wanted a way to make the
+   banner physically larger. Drag up = bigger, drag down = smaller; the
+   --bl-scale CSS var drives every banner element's font/padding. */
+.bl-resize-handle {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 5;
+}
+.bl-resize-handle:hover { background: rgba(78, 204, 163, 0.35); }
+.bl-resize-handle.dragging { background: rgba(78, 204, 163, 0.55); }
 
 /* Push overlays above the banner logger when it's visible */
 main.banner-logger-active #parks-stats-overlay,
@@ -5813,9 +5829,9 @@ main.banner-logger-active #event-progress-overlay {
   bottom: 48px;
 }
 .bl-field {
-  font-size: 12px;
+  font-size: calc(12px * var(--bl-scale, 1));
   font-family: monospace;
-  padding: 3px 5px;
+  padding: calc(3px * var(--bl-scale, 1)) calc(5px * var(--bl-scale, 1));
   background: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border-primary);
@@ -5823,23 +5839,23 @@ main.banner-logger-active #event-progress-overlay {
   outline: none;
 }
 .bl-field:focus { border-color: var(--accent-green); }
-.bl-type { width: 72px; font-size: 11px; padding: 3px 2px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; }
-.bl-ref { width: 80px; text-transform: uppercase; }
+.bl-type { width: calc(72px * var(--bl-scale, 1)); font-size: calc(11px * var(--bl-scale, 1)); padding: calc(3px * var(--bl-scale, 1)) 2px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; }
+.bl-ref { width: calc(80px * var(--bl-scale, 1)); text-transform: uppercase; }
 .bl-ref.hidden { display: none; }
-.bl-callsign { width: 100px; text-transform: uppercase; }
-.bl-name { width: 100px; color: var(--text-secondary); background: transparent; border-color: transparent; cursor: default; }
-.bl-freq { width: 80px; }
+.bl-callsign { width: calc(100px * var(--bl-scale, 1)); text-transform: uppercase; }
+.bl-name { width: calc(200px * var(--bl-scale, 1)); color: var(--text-secondary); background: transparent; border-color: transparent; cursor: default; }
+.bl-freq { width: calc(80px * var(--bl-scale, 1)); }
 .bl-notes { flex: 1; min-width: 60px; }
-.bl-respot-label { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
+.bl-respot-label { font-size: calc(11px * var(--bl-scale, 1)); color: var(--text-secondary); display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
 .bl-respot-label.hidden { display: none; }
-.bl-mode { width: 60px; font-size: 11px; padding: 3px 2px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; }
+.bl-mode { width: calc(60px * var(--bl-scale, 1)); font-size: calc(11px * var(--bl-scale, 1)); padding: calc(3px * var(--bl-scale, 1)) 2px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; }
 .bl-rst-group { display: flex; align-items: center; gap: 2px; }
-.bl-rst-label { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
-.bl-rst { width: 36px; text-align: center; }
-.bl-time { width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.bl-rst-label { font-size: calc(10px * var(--bl-scale, 1)); color: var(--text-tertiary); font-weight: 600; }
+.bl-rst { width: calc(36px * var(--bl-scale, 1)); text-align: center; }
+.bl-time { width: calc(52px * var(--bl-scale, 1)); text-align: center; font-variant-numeric: tabular-nums; }
 .bl-log-btn {
-  font-size: 11px;
-  padding: 3px 12px;
+  font-size: calc(11px * var(--bl-scale, 1));
+  padding: calc(3px * var(--bl-scale, 1)) calc(12px * var(--bl-scale, 1));
   background: var(--accent-green-btn);
   color: #000;
   border: none;
