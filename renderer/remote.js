@@ -7503,9 +7503,20 @@
   var sstvPhoneTxBar = document.getElementById('sstv-phone-tx-bar');
   var sstvPhoneTxProgress = document.getElementById('sstv-phone-tx-progress');
   var sstvPhoneTxTime = document.getElementById('sstv-phone-tx-time');
+  var sstvPhoneHaltBtn = document.getElementById('sstv-phone-halt-btn');
   var sstvPhoneTxTimer = null;
   var sstvPhoneTxStart = 0;
   var sstvPhoneTxDuration = 0;
+
+  if (sstvPhoneHaltBtn) {
+    sstvPhoneHaltBtn.addEventListener('click', function() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'sstv-halt-tx' }));
+      }
+      if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'HALTing TX...'; sstvPhoneStatus.style.color = '#e94560'; }
+      sstvPhoneStopTxProgress();
+    });
+  }
 
   function formatSec(s) {
     var m = Math.floor(s / 60);
@@ -7768,15 +7779,28 @@
       sstvPhoneResetCrop();
       if (tpl.bgDataUrl) {
         var img = new Image();
-        img.onload = function() { sstvPhoneSetBg(img, true); };
-        img.onerror = function() {
-          console.error('[SSTV] Template bg image failed to load');
-          sstvRenderPhoneCompose();
-        };
-        img.src = tpl.bgDataUrl;
-        // Paint texts now so the user sees the template took effect even before
-        // the bg image decode finishes.
+        img.crossOrigin = 'anonymous';
+        // Paint texts with the (still-old) bg immediately so the user sees the
+        // template took effect. The bg swaps in when the image decodes.
         sstvRenderPhoneCompose();
+        var applyBg = function() { try { sstvPhoneSetBg(img, true); } catch (e) { console.error('[SSTV] setBg failed:', e); } };
+        var decodeFail = function(err) {
+          console.error('[SSTV] Template bg image failed to load:', err);
+          if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template bg decode failed';
+        };
+        // Prefer Image.decode() on iOS — onload is unreliable with large data URLs
+        if (typeof img.decode === 'function') {
+          img.src = tpl.bgDataUrl;
+          img.decode().then(applyBg).catch(function(err) {
+            // Fall back to onload in case decode() rejected on an early race
+            img.onload = applyBg;
+            img.onerror = function() { decodeFail(err); };
+          });
+        } else {
+          img.onload = applyBg;
+          img.onerror = function() { decodeFail(new Error('onerror')); };
+          img.src = tpl.bgDataUrl;
+        }
       } else if (tpl.bgParams) {
         sstvPhoneGeneratePattern(tpl.bgParams);
         if (sstvCropBar) sstvCropBar.style.display = 'none';
@@ -7785,7 +7809,10 @@
         // Template has no bg — just repaint with the new text layers
         sstvRenderPhoneCompose();
       }
-      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template ' + (idx + 1) + ' loaded';
+      if (sstvPhoneStatus) {
+        sstvPhoneStatus.style.color = 'var(--pota)';
+        sstvPhoneStatus.textContent = 'Template ' + (idx + 1) + ' loaded';
+      }
     } catch (err) {
       console.error('[SSTV] Template load failed:', err);
       if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template load failed — see console';

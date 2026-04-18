@@ -1050,18 +1050,36 @@ function renderTemplateStrip() {
 
 // ===== TX ==================================================================
 
+// Abort the current TX: stop audio, release PTT, reset UI. Used both when
+// the operator taps HALT on the desktop and when ECHOCAT halts remotely.
+function abortTxLocal(reason) {
+  if (txAudioCtx) { try { txAudioCtx.close(); } catch {} txAudioCtx = null; }
+  txPlaying = false;
+  isTx = false;
+  try { window.api.sstvTxComplete(); } catch {}
+  txBtn.textContent = replyImage ? 'REPLY' : 'TRANSMIT';
+  txBtn.classList.remove('transmitting');
+  progressBar.classList.remove('tx');
+  progressBar.style.width = '0%';
+  statusBar.textContent = reason || 'TX cancelled';
+}
+
+// Remote abort from ECHOCAT: tear down audio here without re-calling PTT
+// release (main already did that).
+window.api.onSstvAbortTx(() => {
+  if (txAudioCtx) { try { txAudioCtx.close(); } catch {} txAudioCtx = null; }
+  txPlaying = false;
+  isTx = false;
+  txBtn.textContent = replyImage ? 'REPLY' : 'TRANSMIT';
+  txBtn.classList.remove('transmitting');
+  progressBar.classList.remove('tx');
+  progressBar.style.width = '0%';
+  statusBar.textContent = 'TX halted by ECHOCAT';
+});
+
 txBtn.addEventListener('click', () => {
   if (isTx) {
-    // Cancel TX — stop audio playback and release PTT
-    if (txAudioCtx) { try { txAudioCtx.close(); } catch {} txAudioCtx = null; }
-    txPlaying = false;
-    isTx = false;
-    window.api.sstvTxComplete();
-    txBtn.textContent = replyImage ? 'REPLY' : 'TRANSMIT';
-    txBtn.classList.remove('transmitting');
-    progressBar.classList.remove('tx');
-    progressBar.style.width = '0%';
-    statusBar.textContent = 'TX cancelled';
+    abortTxLocal('TX halted');
     return;
   }
   const mode = modeSelect.value;
@@ -1076,7 +1094,7 @@ txBtn.addEventListener('click', () => {
     mode: mode,
   });
   isTx = true;
-  txBtn.textContent = 'TRANSMITTING...';
+  txBtn.textContent = 'HALT TX';
   txBtn.classList.add('transmitting');
   progressBar.style.width = '0%';
   progressBar.classList.add('tx');
@@ -1087,7 +1105,7 @@ txBtn.addEventListener('click', () => {
 window.api.onSstvTxAudio(async (data) => {
   // Mark TX active — stops decoder from hearing our own audio
   isTx = true;
-  txBtn.textContent = 'TRANSMITTING...';
+  txBtn.textContent = 'HALT TX';
   txBtn.classList.add('transmitting');
   progressBar.style.width = '0%';
   progressBar.classList.add('tx');

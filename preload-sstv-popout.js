@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   onSstvTxAudio: (cb) => ipcRenderer.on('sstv-tx-audio', (_e, d) => cb(d)),
   onSstvTxStatus: (cb) => ipcRenderer.on('sstv-tx-status', (_e, d) => cb(d)),
   onSstvTxImage: (cb) => ipcRenderer.on('sstv-tx-image', (_e, d) => cb(d)),
+  onSstvAbortTx: (cb) => ipcRenderer.on('sstv-abort-tx', () => cb()),
   onSstvRxImage: (cb) => ipcRenderer.on('sstv-rx-image', (_e, d) => cb(d)),
   onSstvRxLine: (cb) => ipcRenderer.on('sstv-rx-line', (_e, d) => cb(d)),
   onSstvRxVis: (cb) => ipcRenderer.on('sstv-rx-vis', (_e, d) => cb(d)),

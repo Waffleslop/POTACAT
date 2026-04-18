@@ -4792,6 +4792,20 @@ function connectRemote() {
     if (sstvEngine) sstvEngine.stop();
   });
 
+  // Phone requested an immediate TX abort.
+  // Release PTT FIRST (FCC safety — don't leave the Flex keyed), then tell
+  // the popout to stop audio playback, then notify all clients.
+  remoteServer.on('sstv-halt-tx', () => {
+    console.log('[SSTV] ECHOCAT requested TX halt');
+    try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); }
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.webContents.send('sstv-abort-tx');
+    }
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastSstvTxStatus({ state: 'rx' });
+    }
+  });
+
   remoteServer.on('sstv-get-gallery', ({ limit, offset, requestId }) => {
     ensureSstvGalleryDir();
     try {
