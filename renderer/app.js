@@ -6698,6 +6698,44 @@ function showLogToast(message, opts) {
   }
 }
 
+// --- External ATU tune progress modal ---
+// Shown while POTACAT emits a low-power CW carrier for an RF-sensing tuner
+// (LDG Z-100plus, MFJ, etc.). Stop button aborts the TX cycle early.
+(function setupExternalAtuModal() {
+  let modal = null;
+  let countdownTimer = null;
+  window.api.onExternalAtuStart(({ seconds }) => {
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'external-atu-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--bg-header,#16213e);color:#fff;padding:24px 28px;border-radius:8px;max-width:340px;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,0.5);';
+    let remaining = seconds;
+    card.innerHTML = [
+      '<div style="font-size:28px;margin-bottom:10px;">📡</div>',
+      '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">Tuning external ATU</div>',
+      '<div id="ext-atu-countdown" style="font-size:28px;font-family:monospace;margin-bottom:6px;color:#e94560;">' + remaining.toFixed(1) + 's</div>',
+      '<div style="font-size:12px;color:#ccc;margin-bottom:16px;">Low-power CW carrier out — the tuner\'s relays will click as it matches.</div>',
+      '<button type="button" id="ext-atu-stop" style="padding:8px 18px;background:#c24150;color:#fff;border:none;border-radius:4px;font-weight:700;cursor:pointer;">Stop</button>',
+    ].join('');
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+    card.querySelector('#ext-atu-stop').addEventListener('click', () => window.api.externalAtuCancel());
+    const tick = 0.1;
+    countdownTimer = setInterval(() => {
+      remaining -= tick;
+      const el = document.getElementById('ext-atu-countdown');
+      if (el) el.textContent = Math.max(0, remaining).toFixed(1) + 's';
+      if (remaining <= 0) { clearInterval(countdownTimer); countdownTimer = null; }
+    }, tick * 1000);
+  });
+  window.api.onExternalAtuComplete(() => {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    if (modal) { modal.remove(); modal = null; }
+  });
+})();
+
 // --- SmartSDR API unreachable banner ---
 // Fires once after the SmartSDR client gives up retrying (3 failed attempts).
 // Common cause: user configured Flex Radio but left "SmartSDR API Host" blank,

@@ -3900,6 +3900,61 @@ function connectRemote() {
     }
   });
 
+  // --- External ATU (LDG Z-100plus, MFJ, other RF-sensing tuners) ---
+  // These tuners have no CAT — they sense carrier on the feedline and match
+  // autonomously. We emit a low-power CW carrier so the tuner has something
+  // to detect, then restore the rig's previous mode and power.
+  let _externalAtuActive = false;
+  let _externalAtuCancel = false;
+  async function runExternalAtuTune() {
+    if (_externalAtuActive) return true; // already running
+    const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+    if (!activeRig || activeRig.externalAtu !== 'rf-sense') return false;
+    if (!cat || !cat.connected) {
+      sendCatLog('[ExtATU] CAT not connected — cannot trigger external tuner');
+      return true;
+    }
+    const watts = Math.max(5, Math.min(25, parseInt(activeRig.externalAtuWatts, 10) || 10));
+    const seconds = Math.max(1, Math.min(15, parseFloat(activeRig.externalAtuSeconds) || 4));
+    _externalAtuActive = true;
+    _externalAtuCancel = false;
+    const restoreMode = _currentMode || 'USB';
+    const restorePower = _currentTxPower > 0 ? _currentTxPower : (settings.defaultPower || 100);
+    sendCatLog(`[ExtATU] Firing ${watts} W CW carrier for ${seconds}s (mode ${restoreMode} → CW, power ${restorePower}W → ${watts}W)`);
+    if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
+    try {
+      if (cat.setModeOnly) cat.setModeOnly('CW');
+      else if (cat.setMode) cat.setMode('CW');
+      cat.setTxPower(watts);
+      await new Promise(r => setTimeout(r, 300));
+      if (_externalAtuCancel) throw new Error('cancelled');
+      cat.setTransmit(true);
+      // Wait in ~250ms slices so cancel can interrupt mid-burst
+      const endAt = Date.now() + seconds * 1000;
+      while (Date.now() < endAt) {
+        if (_externalAtuCancel) break;
+        await new Promise(r => setTimeout(r, 250));
+      }
+      cat.setTransmit(false);
+    } catch (err) {
+      try { cat.setTransmit(false); } catch {}
+      sendCatLog(`[ExtATU] ${err.message}`);
+    } finally {
+      await new Promise(r => setTimeout(r, 200));
+      try {
+        if (cat.setModeOnly) cat.setModeOnly(restoreMode);
+        else if (cat.setMode) cat.setMode(restoreMode);
+        cat.setTxPower(restorePower);
+      } catch {}
+      _externalAtuActive = false;
+      _externalAtuCancel = false;
+      sendCatLog('[ExtATU] Tune complete — restored mode and power');
+      if (win && !win.isDestroyed()) win.webContents.send('external-atu-complete');
+    }
+    return true;
+  }
+  ipcMain.on('external-atu-cancel', () => { _externalAtuCancel = true; });
+
   // Unified rig-control from ECHOCAT phone (same dispatch as desktop IPC)
   remoteServer.on('rig-control', (data) => {
     if (!data || !data.action) return;
@@ -3914,13 +3969,25 @@ function connectRemote() {
         broadcastRigState();
         break;
       }
-      case 'atu-tune':
-        if (flexNeedsApi) { sendCatLog('ATU requires SmartSDR API — not connected'); break; }
-        if (flexSdr()) smartSdr.setAtu(true);
-        else if (cat && cat.connected) cat.startTune();
-        _currentAtuState = true;
-        broadcastRigState();
+      case 'atu-tune': {
+        // RF-sensing external tuner (LDG Z-100plus, MFJ, etc.) — fire carrier
+        // burst instead of CAT's internal AC011.
+        const rig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+        if (rig && rig.externalAtu === 'rf-sense') {
+          runExternalAtuTune(); // async, fire-and-forget
+        } else if (flexNeedsApi) {
+          sendCatLog('ATU requires SmartSDR API — not connected');
+        } else if (flexSdr()) {
+          smartSdr.setAtu(true);
+          _currentAtuState = true;
+          broadcastRigState();
+        } else if (cat && cat.connected) {
+          cat.startTune();
+          _currentAtuState = true;
+          broadcastRigState();
+        }
         break;
+      }
       case 'power-on':
         // Power-on: radio may be off, so don't require cat.connected — just need transport open
         if (cat && rigType !== 'flex') cat.setPowerState(true);
@@ -9421,6 +9488,14 @@ app.whenReady().then(() => {
         break;
       }
       case 'atu-tune': {
+        // External RF-sensing tuner (LDG Z-100plus / MFJ) path — emits a low-
+        // power CW carrier so the tuner can match. Internal CAT tune is used
+        // only when no external tuner is configured on the active rig.
+        const rig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+        if (rig && rig.externalAtu === 'rf-sense') {
+          runExternalAtuTune(); // async fire-and-forget
+          break;
+        }
         if (flexNeedsApi) { sendCatLog('ATU requires SmartSDR API — not connected'); break; }
         const atuOn = !_currentAtuState; // toggle
         if (flexSdr()) {
