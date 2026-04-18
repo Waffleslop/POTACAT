@@ -3397,9 +3397,8 @@ html, body {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  /* Bottom padding clears the fixed PTT bar (~80px + safe-area) so the
-     Log QSO button at the end of the op-card never lands behind it. */
-  padding: 10px 12px calc(110px + env(safe-area-inset-bottom, 0px));
+  /* Bottom padding clears the fixed PTT bar (~80px + safe-area). */
+  padding: 10px 12px calc(90px + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
   gap: 10px;
   -webkit-overflow-scrolling: touch;
@@ -3505,51 +3504,65 @@ html, body {
   min-height: 18px;
 }
 
-/* Rich op-info card with big call/name + meta line + Log button */
+/* Rich op-info card — two-column: text on the left, Log button on the right.
+   Horizontal layout keeps short-screen phones from pushing the Log button
+   under the fixed PTT bar at the bottom. */
 .vf-op-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 14px;
-  text-align: center;
 }
 .vf-op-card.vf-op-empty {
   padding: 14px;
   color: var(--text-dim);
   font-size: 13px;
+  text-align: center;
 }
 .vf-op-empty-text { display: block; }
 .vf-op-card:not(.vf-op-empty) .vf-op-empty-text { display: none; }
 .vf-op-card.vf-op-empty .vf-op-rich { display: none !important; }
+.vf-op-rich {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vf-op-text {
+  flex: 1;
+  min-width: 0;
+}
 .vf-op-headline {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 2px;
 }
 .vf-op-call {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 800;
   letter-spacing: 1px;
   color: var(--pota);
   font-family: 'Courier New', monospace;
+  line-height: 1.1;
 }
 .vf-op-name {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .vf-op-meta {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-dim);
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 10px;
-  min-height: 16px;
+  align-items: center;
+  gap: 6px;
+  min-height: 14px;
 }
 .vf-op-loc { font-weight: 600; }
 .vf-op-ref {
@@ -3558,20 +3571,22 @@ html, body {
   padding: 2px 8px;
   border-radius: 999px;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
 }
 .vf-op-ref:empty { display: none; }
 .vf-log-btn {
+  flex-shrink: 0;
   background: var(--pota);
   color: #000;
   border: none;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  padding: 10px 22px;
+  padding: 12px 16px;
   border-radius: 8px;
   cursor: pointer;
   letter-spacing: 0.5px;
   -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
 }
 .vf-log-btn:hover { filter: brightness(1.1); }
 .vf-log-btn:active { transform: scale(0.97); }
