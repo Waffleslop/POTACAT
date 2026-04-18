@@ -2098,7 +2098,10 @@ dialog input, dialog select {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  /* Right padding reserves a fixed lane for .rig-item-actions (Edit + ×).
+     Buttons are absolutely positioned so they can never be pushed off-screen
+     by long names/paths. Adjust together with .rig-item-actions { right }. */
+  padding: 6px 78px 6px 10px;
   margin-bottom: 4px;
   border-radius: 4px;
   background: var(--bg-panel);
@@ -2106,6 +2109,18 @@ dialog input, dialog select {
   cursor: pointer;
   max-width: 100%;
   overflow: hidden;
+  position: relative;
+  min-width: 0;
+}
+
+.rig-item-actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 2px;
+  align-items: center;
 }
 
 .rig-item:hover {

@@ -1484,10 +1484,18 @@ function renderRigList(rigs, activeRigId) {
       deleteRig(rig.id);
     });
 
+    // Wrap the action buttons so they can be pinned to the right edge of the
+    // rig-item, independent of how wide the name/description ends up. Long
+    // Mac/Linux serial paths used to push these buttons off-screen where
+    // settings-dialog's overflow-x: hidden made them unclickable.
+    const actions = document.createElement('div');
+    actions.className = 'rig-item-actions';
+    actions.appendChild(editBtn);
+    actions.appendChild(deleteBtn);
+
     item.appendChild(radio);
     item.appendChild(info);
-    item.appendChild(editBtn);
-    item.appendChild(deleteBtn);
+    item.appendChild(actions);
 
     item.addEventListener('click', () => {
       radio.checked = true;
