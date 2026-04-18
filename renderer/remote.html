@@ -60,6 +60,7 @@
         <span id="cat-dot" class="cat-dot disconnected" title="Radio disconnected"></span>
         <span id="audio-dot" class="audio-dot hidden" title="Audio"></span>
         <span id="latency">--ms</span>
+        <button type="button" id="vfo-fullview-btn" class="vfo-fullview-toggle" title="Full VFO View">&#x1F4FB;</button>
         <button type="button" id="rig-ctrl-toggle" class="rig-ctrl-toggle" title="Rig Controls">&#x2699;</button>
       </div>
     </div>
@@ -129,6 +130,41 @@
         <div class="dp-actions">
           <button class="dp-cancel" id="vfo-cancel">Close</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Full VFO View — opt-in operator interface mirroring the desktop popout. -->
+    <div id="vfo-fullview" class="vfo-fullview hidden">
+      <div class="vf-header">
+        <button type="button" id="vf-back" class="vf-back-btn" title="Back to spots">&larr;</button>
+        <div class="vf-freq-block">
+          <span id="vf-freq" class="vf-freq" title="Tap to type frequency">---.---.---</span>
+          <span class="vf-unit">kHz</span>
+        </div>
+      </div>
+      <div class="vf-pills">
+        <button type="button" id="vf-mode-pill" class="vf-pill vf-mode-pill">---</button>
+        <button type="button" id="vf-filter-pill" class="vf-pill vf-filter-pill">--- Hz</button>
+        <button type="button" id="vf-step-pill" class="vf-pill vf-step-pill">1 kHz</button>
+      </div>
+      <div class="vf-dial-wrap">
+        <canvas id="vf-dial" width="280" height="280"></canvas>
+      </div>
+      <div class="vf-bands">
+        <button type="button" class="vf-band" data-khz="1840">1.8</button>
+        <button type="button" class="vf-band" data-khz="3573">3.5</button>
+        <button type="button" class="vf-band" data-khz="7074">7</button>
+        <button type="button" class="vf-band" data-khz="10136">10</button>
+        <button type="button" class="vf-band" data-khz="14074">14</button>
+        <button type="button" class="vf-band" data-khz="18100">18</button>
+        <button type="button" class="vf-band" data-khz="21074">21</button>
+        <button type="button" class="vf-band" data-khz="24915">24</button>
+        <button type="button" class="vf-band" data-khz="28074">28</button>
+        <button type="button" class="vf-band" data-khz="50313">50</button>
+      </div>
+      <div id="vf-op-info" class="vf-op-info">Tap a spot or band to begin</div>
+      <div class="vf-ptt-row">
+        <button type="button" id="vf-ptt" class="vf-ptt-btn">PTT</button>
       </div>
     </div>
 

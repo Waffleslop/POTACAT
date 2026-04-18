@@ -8353,6 +8353,191 @@
 
   // ── End SSTV ─────────────────────────────────────────────
 
+  // ===== Full VFO View — opt-in operator interface =====
+  // Mirrors the desktop VFO popout (freq/mode/dial/bands/PTT) on phone screens.
+  // Phase 1: dial + bands + mode picker + PTT. Op info / S-meter / macros TBD.
+  (function setupVfoFullview() {
+    const fullview = document.getElementById('vfo-fullview');
+    const toggleBtn = document.getElementById('vfo-fullview-btn');
+    const backBtn = document.getElementById('vf-back');
+    const vfFreq = document.getElementById('vf-freq');
+    const vfModePill = document.getElementById('vf-mode-pill');
+    const vfFilterPill = document.getElementById('vf-filter-pill');
+    const vfStepPill = document.getElementById('vf-step-pill');
+    const vfPttBtn = document.getElementById('vf-ptt');
+    const vfDial = document.getElementById('vf-dial');
+    if (!fullview || !toggleBtn) return;
+
+    let isOpen = false;
+
+    function show() {
+      isOpen = true;
+      fullview.classList.remove('hidden');
+      toggleBtn.classList.add('active');
+      renderAll();
+      drawDial();
+    }
+    function hide() {
+      isOpen = false;
+      fullview.classList.add('hidden');
+      toggleBtn.classList.remove('active');
+    }
+
+    toggleBtn.addEventListener('click', () => isOpen ? hide() : show());
+    backBtn.addEventListener('click', hide);
+
+    // --- Render: pull from existing shared state, push to view ---
+    function renderAll() {
+      vfFreq.textContent = currentFreqKhz ? formatFreq(Math.round(currentFreqKhz * 1000)) : '---.---.---';
+      vfModePill.textContent = currentMode || '---';
+      // Filter pill — read from existing CW/SSB filter state if available
+      vfFilterPill.textContent = (typeof currentFilterWidth !== 'undefined' && currentFilterWidth)
+        ? currentFilterWidth + ' Hz' : '--- Hz';
+      vfStepPill.textContent = STEP_SIZES[dpStepIdx] >= 1
+        ? STEP_SIZES[dpStepIdx] + ' kHz'
+        : (STEP_SIZES[dpStepIdx] * 1000) + ' Hz';
+      // Highlight band button matching current frequency
+      const khz = currentFreqKhz ? Math.round(currentFreqKhz) : 0;
+      fullview.querySelectorAll('.vf-band').forEach((btn) => {
+        const bandKhz = parseInt(btn.dataset.khz, 10);
+        // Within ~10% of the band-edge marker counts as "active"
+        const inBand = khz > 0 && Math.abs(khz - bandKhz) < bandKhz * 0.10;
+        btn.classList.toggle('active', inBand);
+      });
+    }
+
+    // Draw a smaller mirror of the existing jog dial — shares state with the
+    // dial-pad VFO so step size / freq stays consistent across both views.
+    function drawDial() {
+      if (!vfDial || !isOpen) return;
+      const ctx = vfDial.getContext('2d');
+      const w = vfDial.width, h = vfDial.height;
+      const cx = w / 2, cy = h / 2, R = w / 2 - 6;
+      ctx.clearRect(0, 0, w, h);
+      // Outer ring
+      const grad = ctx.createRadialGradient(cx, cy - R * 0.3, 0, cx, cy, R);
+      grad.addColorStop(0, '#404058');
+      grad.addColorStop(0.7, '#2a2a3a');
+      grad.addColorStop(1, '#1a1a28');
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.stroke();
+      // Tick marks
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2;
+        const r1 = R - 12, r2 = R - 4;
+        ctx.beginPath();
+        ctx.moveTo(cx + r1 * Math.cos(a), cy + r1 * Math.sin(a));
+        ctx.lineTo(cx + r2 * Math.cos(a), cy + r2 * Math.sin(a));
+        ctx.lineWidth = i % 6 === 0 ? 2 : 1;
+        ctx.strokeStyle = i % 6 === 0 ? 'rgba(78,204,163,0.7)' : 'rgba(255,255,255,0.25)';
+        ctx.stroke();
+      }
+      // Center label — current step size for context
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const stepLabel = STEP_SIZES[dpStepIdx] >= 1
+        ? STEP_SIZES[dpStepIdx] + ' kHz/step'
+        : (STEP_SIZES[dpStepIdx] * 1000) + ' Hz/step';
+      ctx.fillText(stepLabel, cx, cy);
+    }
+
+    // Drag the dial to tune. Each ~30° of rotation = 1 step (matches existing dial).
+    let dragStartAngle = null;
+    let dragAccumRad = 0;
+    function dialAngle(e) {
+      const rect = vfDial.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const t = e.touches ? e.touches[0] : e;
+      return Math.atan2(t.clientY - cy, t.clientX - cx);
+    }
+    function dialStart(e) {
+      e.preventDefault();
+      dragStartAngle = dialAngle(e);
+      dragAccumRad = 0;
+    }
+    function dialMove(e) {
+      if (dragStartAngle == null || !currentFreqKhz) return;
+      e.preventDefault();
+      let a = dialAngle(e);
+      let delta = a - dragStartAngle;
+      // Normalize to (-PI, PI]
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      while (delta < -Math.PI) delta += 2 * Math.PI;
+      dragAccumRad += delta;
+      dragStartAngle = a;
+      const stepRad = Math.PI / 6; // 30° per step
+      while (Math.abs(dragAccumRad) >= stepRad) {
+        const dir = dragAccumRad > 0 ? 1 : -1;
+        const step = STEP_SIZES[dpStepIdx];
+        const next = Math.round((currentFreqKhz + dir * step) * 100) / 100;
+        if (next >= 100) dpTune(next);
+        dragAccumRad -= dir * stepRad;
+      }
+    }
+    function dialEnd() { dragStartAngle = null; }
+    vfDial.addEventListener('touchstart', dialStart, { passive: false });
+    vfDial.addEventListener('touchmove', dialMove, { passive: false });
+    vfDial.addEventListener('touchend', dialEnd);
+    vfDial.addEventListener('mousedown', dialStart);
+    document.addEventListener('mousemove', (e) => { if (isOpen) dialMove(e); });
+    document.addEventListener('mouseup', dialEnd);
+
+    // --- Pill interactions ---
+    vfFreq.addEventListener('click', () => {
+      // Use existing dial-pad keypad for typing
+      const dialPad = document.getElementById('dial-pad');
+      const dialPadBackdrop = document.getElementById('dial-pad-backdrop');
+      if (dialPad) { dialPad.classList.remove('hidden'); }
+      if (dialPadBackdrop) { dialPadBackdrop.classList.remove('hidden'); }
+    });
+    vfModePill.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Reuse existing mode picker — just trigger its open logic
+      modeBadge.click();
+    });
+    vfStepPill.addEventListener('click', () => {
+      dpStepIdx = (dpStepIdx + 1) % STEP_SIZES.length;
+      try { localStorage.setItem('echocat-step-idx', dpStepIdx); } catch {}
+      renderAll();
+      drawDial();
+    });
+
+    // --- PTT (delegate to existing pttStart/pttStop so all state stays in sync) ---
+    function vfPttDown(e) { e.preventDefault(); vfPttBtn.classList.add('active'); pttStart(); }
+    function vfPttUp(e) { e.preventDefault(); vfPttBtn.classList.remove('active'); pttStop(); }
+    vfPttBtn.addEventListener('touchstart', vfPttDown, { passive: false });
+    vfPttBtn.addEventListener('touchend', vfPttUp, { passive: false });
+    vfPttBtn.addEventListener('touchcancel', vfPttUp);
+    vfPttBtn.addEventListener('mousedown', vfPttDown);
+    vfPttBtn.addEventListener('mouseup', vfPttUp);
+    vfPttBtn.addEventListener('mouseleave', (e) => { if (vfPttBtn.classList.contains('active')) vfPttUp(e); });
+
+    // --- Band quick-tune ---
+    fullview.querySelectorAll('.vf-band').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const khz = parseInt(btn.dataset.khz, 10);
+        if (khz > 0) dpTune(khz);
+      });
+    });
+
+    // Re-render whenever the radio state changes — patch updateStatus by
+    // wrapping it. Simpler than wiring 5 separate listeners.
+    const originalUpdateStatus = updateStatus;
+    window._wrappedStatusForVfo = true;
+    // Replace the symbol in the closure isn't easy — instead, use a polling
+    // tick while the view is open. Cheap and avoids touching updateStatus.
+    setInterval(() => { if (isOpen) renderAll(); }, 500);
+  })();
+  // ===== End Full VFO View =====
+
   // Auto-connect on page load
   connect('');
 })();
