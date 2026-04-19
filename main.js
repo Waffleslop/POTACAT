@@ -578,6 +578,8 @@ function sendCatMode(mode) {
 
 function sendCatPower(watts) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-power', watts);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-power', watts);
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'power', value: watts });
   _currentTxPower = watts;
   broadcastRigState();
 }

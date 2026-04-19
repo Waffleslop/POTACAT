@@ -735,6 +735,10 @@
         updateEchoSwrRatio(msg.value);
         break;
 
+      case 'power':
+        updateEchoPower(msg.value);
+        break;
+
       case 'tgxl-status':
         echoTgxlSection.classList.remove('hidden');
         echoTgxlUpdateButtons(msg.antenna || 0, msg.labels);
@@ -2951,6 +2955,11 @@
   var echoSmeterText = document.getElementById('echo-smeter-text');
   var echoSwrBar = document.getElementById('echo-swr-bar');
   var echoSwrText = document.getElementById('echo-swr-text');
+  var echoPwrBar = document.getElementById('echo-pwr-bar');
+  var echoPwrText = document.getElementById('echo-pwr-text');
+  // Track the highest watt value seen this session so the bar auto-scales for
+  // QRP (5W), 100W, and amp (1500W) users without needing per-rig config.
+  var echoPwrMaxSeen = 100;
   var echoShowMeter = document.getElementById('echo-show-meter');
   var echoMeterEnabled = localStorage.getItem('echoMeterEnabled') === 'true';
 
@@ -3073,6 +3082,22 @@
     drawEchoBar(echoSwrBar, level, color);
     echoSwrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
     echoSwrText.style.color = color;
+  }
+
+  function updateEchoPower(watts) {
+    if (!echoMeterEnabled) return;
+    var w = Math.max(0, +watts || 0);
+    if (w > echoPwrMaxSeen) echoPwrMaxSeen = w;
+    var level = Math.min(1, w / echoPwrMaxSeen);
+    // Color hot when within 90% of the highest TX seen this session — gives
+    // useful visual feedback regardless of QRP / 100W / amp setup.
+    var color = w === 0 ? '#4ecca3'
+              : level < 0.5 ? '#4ecca3'
+              : level < 0.9 ? '#ffd740'
+              : '#e94560';
+    drawEchoBar(echoPwrBar, level, color);
+    echoPwrText.textContent = w >= 100 ? Math.round(w) + 'W' : w.toFixed(1) + 'W';
+    echoPwrText.style.color = color;
   }
 
   // --- Audio Level Meters & Gain Controls ---
