@@ -35,6 +35,15 @@ const {
 const {
   encodeFacCells, encodeMscCells, assembleSuperframe,
 } = require('../lib/hamdrm/hamdrm-frame');
+const {
+  fft1152, ifft1152, refDFT,
+} = require('../lib/hamdrm/hamdrm-fft');
+const {
+  modulateSuperframe, SYMBOL_BLOCK, FFT_SIZE, GUARD_SIZE, IDX_DC,
+} = require('../lib/hamdrm/hamdrm-ofdm');
+const {
+  encodeImage,
+} = require('../lib/hamdrm/hamdrm-encoder');
 
 function hex(bytes) {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
@@ -188,6 +197,96 @@ function endToEndSuites() {
   return fails;
 }
 
+function fftSuites() {
+  let fails = 0;
+  console.log('\n-- FFT --');
+  // 1152-pt accuracy vs. direct DFT
+  const N = 1152;
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let i = 0; i < N; i++) { re[i] = Math.cos(0.01 * i); im[i] = Math.sin(0.03 * i); }
+  const ref = refDFT(new Float64Array(re), new Float64Array(im), false);
+  fft1152(re, im);
+  let maxErr = 0;
+  for (let i = 0; i < N; i++) {
+    maxErr = Math.max(maxErr, Math.abs(re[i] - ref.re[i]), Math.abs(im[i] - ref.im[i]));
+  }
+  fails += assertEq('FFT 1152 matches ref DFT (err < 1e-9)', maxErr < 1e-9, true);
+
+  // Roundtrip
+  const r2 = new Float64Array(N), i2 = new Float64Array(N);
+  for (let i = 0; i < N; i++) { r2[i] = Math.random(); i2[i] = Math.random(); }
+  const orig = { re: new Float64Array(r2), im: new Float64Array(i2) };
+  fft1152(r2, i2); ifft1152(r2, i2);
+  let maxRT = 0;
+  for (let i = 0; i < N; i++) {
+    maxRT = Math.max(maxRT, Math.abs(r2[i] - orig.re[i]), Math.abs(i2[i] - orig.im[i]));
+  }
+  fails += assertEq('FFT 1152 roundtrip (err < 1e-12)', maxRT < 1e-12, true);
+  return fails;
+}
+
+function ofdmSuites() {
+  let fails = 0;
+  console.log('\n-- OFDM modulator --');
+  const cellTable = buildCellMappingModeA_SO1();
+  const facBlocks = [0, 1, 2].map(idx => buildFACBlock({ frameIdx: idx, label: 'K3SBP' }));
+  const mscByteLen = Math.ceil(mscPuncParams(cellTable.iNumUsefMSCCellsPerFrame).iNumInBitsPartB / 8);
+  const mscBytes = [0, 1, 2].map(f => {
+    const b = new Uint8Array(mscByteLen);
+    for (let i = 0; i < b.length; i++) b[i] = (i * 17 + f * 41) & 0xFF;
+    return b;
+  });
+  const grid = assembleSuperframe({ facBlocks, mscBytes, cellTable });
+  const audio = modulateSuperframe(grid, cellTable.kMin, cellTable.kMax);
+
+  fails += assertEq('audio length == 45*1280', audio.length, 45 * SYMBOL_BLOCK);
+  let hasNaN = false, peak = 0;
+  for (let i = 0; i < audio.length; i++) {
+    if (Number.isNaN(audio[i])) hasNaN = true;
+    const a = Math.abs(audio[i]);
+    if (a > peak) peak = a;
+  }
+  fails += assertEq('no NaN samples',         hasNaN, false);
+  fails += assertEq('peak > 0',               peak > 0, true);
+
+  // Spectrum check on symbol 0: active-carrier energy should be ~50%
+  // (other half is the conjugate mirror at N-k).
+  const sym0 = audio.subarray(GUARD_SIZE, GUARD_SIZE + FFT_SIZE);
+  const specRe = new Float64Array(FFT_SIZE);
+  const specIm = new Float64Array(FFT_SIZE);
+  for (let i = 0; i < FFT_SIZE; i++) specRe[i] = sym0[i];
+  fft1152(specRe, specIm);
+  let activeE = 0, totE = 0;
+  for (let k = 0; k < FFT_SIZE; k++) {
+    const e = specRe[k] * specRe[k] + specIm[k] * specIm[k];
+    totE += e;
+    if (k >= IDX_DC + cellTable.kMin && k <= IDX_DC + cellTable.kMax) activeE += e;
+  }
+  const frac = activeE / totE;
+  fails += assertEq('active-bin energy ≥ 45%', frac >= 0.45, true);
+  return fails;
+}
+
+function encoderSuites() {
+  let fails = 0;
+  console.log('\n-- End-to-end encoder --');
+  const fake = new Uint8Array(500);
+  for (let i = 0; i < fake.length; i++) fake[i] = (i * 31 + 17) & 0xFF;
+  const r = encodeImage({ jpegBytes: fake, filename: 'test.jpg', label: 'K3SBP' });
+  fails += assertEq('iN_mux = 740',                   r.iN_mux, 740);
+  fails += assertEq('transportId matches week-1',     r.transportId, 0x2f45);
+  fails += assertEq('superframes > 0',                r.superframes > 0, true);
+  fails += assertEq('audio length = sf * 57600',      r.audio.length, r.superframes * 57600);
+  fails += assertEq('sample rate = 48 kHz',           r.sampleRate, 48000);
+  let peak = 0;
+  for (let i = 0; i < r.audio.length; i++) {
+    const a = Math.abs(r.audio[i]);
+    if (a > peak) peak = a;
+  }
+  fails += assertEq('peak normalised to 0.8 ± 0.02', Math.abs(peak - 0.8) < 0.02, true);
+  return fails;
+}
+
 (function main() {
   let fails = 0;
   fails += crcSuites();
@@ -197,6 +296,9 @@ function endToEndSuites() {
   fails += interleaverSuites();
   fails += cellMapSuites();
   fails += endToEndSuites();
+  fails += fftSuites();
+  fails += ofdmSuites();
+  fails += encoderSuites();
   if (fails === 0) {
     console.log('\nAll HamDRM regression canaries passed.');
     process.exit(0);
