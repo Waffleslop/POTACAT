@@ -278,6 +278,34 @@
   const ltRespotLabel = document.getElementById('lt-respot-label');
   const ltRespotCommentWrap = document.getElementById('lt-respot-comment-wrap');
   const ltRespotComment = document.getElementById('lt-respot-comment');
+
+  // Persistent custom respot text — survives between contacts (KE4WLE bug).
+  // Two slots: one for OTA respots (POTA/WWFF/LLOTA share the same template)
+  // and one for DX-cluster spots. Saved as raw text WITH placeholders intact
+  // so {rst}/{QTH}/{mycallsign} stay dynamic on each render.
+  const respotPersist = {
+    get(isDxc) {
+      try {
+        const v = localStorage.getItem(isDxc ? 'echocat-respot-dxc' : 'echocat-respot-ota');
+        return v != null ? v : null;
+      } catch { return null; }
+    },
+    set(isDxc, text) {
+      try { localStorage.setItem(isDxc ? 'echocat-respot-dxc' : 'echocat-respot-ota', text); } catch {}
+    },
+  };
+  // Save user edits as soon as they leave the field (one-time blur is enough —
+  // input event would write on every keystroke). Safe even when the wrap is
+  // hidden because the listener is bound once and fields are stable elements.
+  function bindRespotPersist(el) {
+    if (!el) return;
+    el.addEventListener('change', () => {
+      const isDxc = el.dataset.dxc === '1';
+      respotPersist.set(isDxc, el.value);
+    });
+  }
+  bindRespotPersist(logRespotComment);
+  bindRespotPersist(ltRespotComment);
   const ltSave = document.getElementById('lt-save');
   const ltNotes = document.getElementById('lt-notes');
   const logNotes = document.getElementById('log-notes');
@@ -3479,15 +3507,21 @@
     cb.addEventListener('change', () => {
       logRespotCommentWrap.classList.toggle('hidden', !cb.checked);
     });
-    // Pre-fill comment template
-    const tmpl = targets.includes('dxc') ? dxRespotTemplate : respotTemplate;
+    // Pre-fill comment — prefer the user's last-customized value if any,
+    // otherwise fall back to the configured template. Placeholder substitution
+    // applies to BOTH so {rst}/{QTH}/{mycallsign} stay dynamic regardless.
+    const isDxc = targets.includes('dxc');
+    const tmpl = isDxc ? dxRespotTemplate : respotTemplate;
+    const saved = respotPersist.get(isDxc);
+    const base = saved != null ? saved : tmpl;
     const rstVal = logRstSent.value || '59';
-    logRespotComment.value = tmpl
+    logRespotComment.value = base
       .replace(/\{rst\}/gi, rstVal)
       .replace(/\{QTH\}/gi, phoneGrid || '')
       .replace(/\{mycallsign\}/gi, myCallsign || '');
-    // Store targets for submit
+    // Store targets for submit + persist
     logRespotSection.dataset.targets = targets.join(',');
+    logRespotComment.dataset.dxc = isDxc ? '1' : '';
   }
 
   // =============================================
@@ -3543,13 +3577,17 @@
     cb.addEventListener('change', () => {
       ltRespotCommentWrap.classList.toggle('hidden', !cb.checked);
     });
-    const tmpl = targets.includes('dxc') ? dxRespotTemplate : respotTemplate;
+    const isDxc = targets.includes('dxc');
+    const tmpl = isDxc ? dxRespotTemplate : respotTemplate;
+    const saved = respotPersist.get(isDxc);
+    const base = saved != null ? saved : tmpl;
     const rstVal = ltRstSent.value || '59';
-    ltRespotComment.value = tmpl
+    ltRespotComment.value = base
       .replace(/\{rst\}/gi, rstVal)
       .replace(/\{QTH\}/gi, phoneGrid || '')
       .replace(/\{mycallsign\}/gi, myCallsign || '');
     ltRespotSection.dataset.targets = targets.join(',');
+    ltRespotComment.dataset.dxc = isDxc ? '1' : '';
   }
 
   // Log tab type picker
