@@ -1515,7 +1515,7 @@ const SLICE_NAMES = { 5002: 'A', 5003: 'B', 5004: 'C', 5005: 'D' };
 
 const SSTV_FREQS_OPTIONS = `
   <optgroup label="80m"><option value="3730" data-mode="LSB">3.730 (EU)</option><option value="3845" data-mode="LSB">3.845 (NA)</option></optgroup>
-  <optgroup label="40m"><option value="7165" data-mode="LSB">7.165</option><option value="7171" data-mode="LSB">7.171</option></optgroup>
+  <optgroup label="40m"><option value="7165" data-mode="USB">7.165</option><option value="7171" data-mode="USB">7.171</option></optgroup>
   <optgroup label="20m"><option value="14227" data-mode="USB">14.227</option><option value="14230" data-mode="USB">14.230</option><option value="14233" data-mode="USB">14.233</option></optgroup>
   <optgroup label="17m"><option value="18161" data-mode="USB">18.161</option></optgroup>
   <optgroup label="15m"><option value="21340" data-mode="USB">21.340</option></optgroup>

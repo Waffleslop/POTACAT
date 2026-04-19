@@ -7639,7 +7639,9 @@
   if (sstvFreqPhone) {
     sstvFreqPhone.addEventListener('change', function() {
       var opt = sstvFreqPhone.options[sstvFreqPhone.selectedIndex];
-      var mode = (opt && opt.dataset.mode) || (parseInt(sstvFreqPhone.value) < 10000 ? 'LSB' : 'USB');
+      // SSTV is USB on all HF bands by convention — never default to LSB here
+      // even if the option somehow lacks an explicit data-mode attribute.
+      var mode = (opt && opt.dataset.mode) || 'USB';
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: sstvFreqPhone.value, mode: mode }));
       try { localStorage.setItem('sstv-phone-freq', sstvFreqPhone.value); } catch (e) {}
     });

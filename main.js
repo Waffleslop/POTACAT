@@ -7252,7 +7252,7 @@ function getSstvAutoFreq() {
   const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
   const sun = getSunTimes(pos.lat, pos.lon, now);
   const daytime = utcH >= sun.sunrise && utcH < sun.sunset;
-  return daytime ? { freqKhz: 14230, mode: 'USB' } : { freqKhz: 7171, mode: 'LSB' };
+  return daytime ? { freqKhz: 14230, mode: 'USB' } : { freqKhz: 7171, mode: 'USB' };
 }
 
 function startAutoSstvTimer() {
