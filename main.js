@@ -1847,6 +1847,27 @@ async function saveQsoRecord(qsoData) {
     }
   }
 
+  // Optional: also fire the QSO at a user-defined extra UDP destination
+  // (parallel to the main logbook). For users who want GridTracker / JTAlert
+  // / etc. to see logged QSOs without going through Log4OM as a middleman.
+  if (settings.extraUdpEnabled && !qsoData.skipLogbookForward) {
+    const host = settings.extraUdpHost || '127.0.0.1';
+    const port = parseInt(settings.extraUdpPort, 10) || 2237;
+    const format = settings.extraUdpFormat || 'wsjtx';
+    try {
+      sendCatLog(`[Extra UDP] Broadcasting QSO to ${host}:${port} (${format})`);
+      if (format === 'wsjtx') {
+        await sendExtraUdpWsjtx(qsoData, host, port);
+      } else {
+        await sendUdpAdif(qsoData, host, port);
+      }
+      sendCatLog(`[Extra UDP] Sent`);
+    } catch (extraErr) {
+      sendCatLog(`[Extra UDP] Send failed: ${extraErr.message}`);
+      console.error('Extra UDP send failed:', extraErr.message);
+    }
+  }
+
   // Upload to QRZ Logbook if enabled (independent of logbook forwarding)
   if (settings.qrzLogbook && settings.qrzApiKey && !qsoData.skipLogbookForward) {
     try {
@@ -6243,6 +6264,54 @@ function sendUdpAdif(qsoData, host, port) {
       if (err) reject(err);
       else resolve();
     });
+  });
+}
+
+/**
+ * Send a QSO to a user-defined extra UDP destination using the WSJT-X binary
+ * protocol (LOGGED_ADIF type 12 + QSO_LOGGED type 5). One-shot ephemeral
+ * socket per send so it doesn't conflict with hamrsBridge's long-lived
+ * socket — the extra destination is independent of the main logbook.
+ */
+function sendExtraUdpWsjtx(qsoData, host, port) {
+  return new Promise((resolve, reject) => {
+    const dgram = require('dgram');
+    const id = 'POTACAT';
+    const record = buildAdifRecord(qsoData);
+    const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
+
+    const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
+    let dateTimeOff;
+    if (qsoData.qsoDate) {
+      const d = qsoData.qsoDate;
+      const t = qsoData.timeOn || '0000';
+      dateTimeOff = new Date(Date.UTC(
+        parseInt(d.slice(0, 4), 10), parseInt(d.slice(4, 6), 10) - 1, parseInt(d.slice(6, 8), 10),
+        parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
+      ));
+    }
+
+    const adifBuf = encodeLoggedAdif(id, adifText);
+    const qsoMsg = encodeQsoLogged(id, {
+      dateTimeOff, dateTimeOn: dateTimeOff,
+      dxCall: qsoData.callsign || '', dxGrid: qsoData.gridsquare || '',
+      txFrequency: freqHz, mode: qsoData.mode || '',
+      reportSent: qsoData.rstSent || '59', reportReceived: qsoData.rstRcvd || '59',
+      txPower: qsoData.txPower || '', comments: qsoData.comment || '',
+      name: qsoData.name || '', operatorCall: qsoData.operator || '',
+      myCall: qsoData.stationCallsign || '', myGrid: qsoData.myGridsquare || '',
+      exchangeSent: qsoData.mySigInfo || '', exchangeReceived: qsoData.sigInfo || '',
+    });
+
+    const client = dgram.createSocket('udp4');
+    let sent = 0;
+    const done = (err) => {
+      if (err) { client.close(); reject(err); return; }
+      sent++;
+      if (sent === 2) { client.close(); resolve(); }
+    };
+    client.send(adifBuf, 0, adifBuf.length, port, host, done);
+    client.send(qsoMsg, 0, qsoMsg.length, port, host, done);
   });
 }
 

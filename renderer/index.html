@@ -1522,6 +1522,25 @@
             <div id="logbook-wavelog-help" class="help-text" style="margin-top:4px;">In Wavelog: go to API Keys and create a key with read-write access. The Station Profile ID is in the URL when editing a station profile (e.g. /stationsetup/edit/1 means ID is 1).</div>
           </div>
         </div>
+        <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-extra-udp"> Also broadcast each QSO to an extra UDP port</label>
+          <span class="help-text" style="margin-left:12px;display:block;">Fires in parallel to the main logbook above. Useful for sending QSOs directly to GridTracker, JTAlert, or other UDP-listening tools without going through Log4OM as a middleman.</span>
+          <div id="extra-udp-config" class="hidden" style="margin-left:12px;margin-top:6px;">
+            <label>Host:
+              <input type="text" id="set-extra-udp-host" placeholder="127.0.0.1" value="127.0.0.1">
+            </label>
+            <label>Port:
+              <input type="number" id="set-extra-udp-port" min="1" max="65535" value="2237">
+            </label>
+            <label>Format:
+              <select id="set-extra-udp-format">
+                <option value="wsjtx">WSJT-X binary (GridTracker, JTAlert, HamRS)</option>
+                <option value="adif">Plain ADIF UDP</option>
+              </select>
+            </label>
+            <div class="help-text" style="margin-top:4px;line-height:1.5;">For GridTracker: enable WSJT-X binary, point at the host/port GridTracker is listening on (default 2237). For older ADIF-only tools: switch the format to Plain ADIF.</div>
+          </div>
+        </div>
       </div>
       <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
         <label class="checkbox-label"><input type="checkbox" id="set-sota-upload"> Auto-upload SOTA chaser QSOs to SOTAdata</label>
