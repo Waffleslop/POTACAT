@@ -159,6 +159,8 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
 let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
+let _sstvLastActivityMs = 0; // last VIS/image timestamp — for heartbeat log
+let _sstvHeartbeatTimer = null;
 let sstvManager = null;      // SSTV multi-slice manager
 let openSstvPopout = null;   // function — assigned in second whenReady block
 let startSstv = null;        // function — assigned in second whenReady block (same reason)
@@ -8697,6 +8699,8 @@ app.whenReady().then(() => {
     });
 
     sstvEngine.on('rx-vis', (data) => {
+      sendCatLog(`[SSTV] VIS detected: ${data.modeName} (mode 0x${(data.mode || 0).toString(16)}) — locking onto signal`);
+      _sstvLastActivityMs = Date.now();
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-vis', data);
       }
@@ -8722,6 +8726,8 @@ app.whenReady().then(() => {
     });
 
     sstvEngine.on('rx-image', (data) => {
+      sendCatLog(`[SSTV] Image decoded: ${data.width}x${data.height} ${data.mode} — saving to gallery`);
+      _sstvLastActivityMs = Date.now();
       // Save to gallery
       saveSstvImage(data);
       // Send to popout
@@ -8771,10 +8777,21 @@ app.whenReady().then(() => {
 
     sstvEngine.on('error', (data) => {
       console.error('[SSTV] Engine error:', data.message);
+      sendCatLog(`[SSTV] Engine error: ${data.message}`);
     });
 
     sstvEngine.start();
     console.log('[SSTV] Engine started');
+    sendCatLog('[SSTV] Decoder started — listening for VIS headers');
+    _sstvLastActivityMs = Date.now();
+    // Heartbeat: every 5 minutes, if nothing has been detected, log a line
+    // so the user can see the decoder is still alive vs silently dead.
+    if (_sstvHeartbeatTimer) clearInterval(_sstvHeartbeatTimer);
+    _sstvHeartbeatTimer = setInterval(() => {
+      if (!sstvEngine) return;
+      const idleMin = Math.round((Date.now() - _sstvLastActivityMs) / 60000);
+      sendCatLog(`[SSTV] Decoder alive — no VIS / image in last ${idleMin} min (radio mode must be USB on all bands for SSTV)`);
+    }, 5 * 60 * 1000);
   }
 
   function stopSstv() {
@@ -8786,6 +8803,11 @@ app.whenReady().then(() => {
       sstvEngine.stop();
       sstvEngine = null;
       console.log('[SSTV] Engine stopped');
+      sendCatLog('[SSTV] Decoder stopped');
+    }
+    if (_sstvHeartbeatTimer) {
+      clearInterval(_sstvHeartbeatTimer);
+      _sstvHeartbeatTimer = null;
     }
   }
 
