@@ -8,8 +8,14 @@
 #
 # Idempotent: safe to re-run. Won't re-download / re-compile what already exists.
 #
+# Override the QSSTV fork/branch via environment:
+#   QSSTV_REPO=https://github.com/willardharris/QSSTV bash rpi-setup.sh
+#   QSSTV_BRANCH=master bash rpi-setup.sh
+# sbitx operators: the stock ON4QZ build can't drive sbitx's custom audio
+# backend — use the willardharris fork above (HA3HZ 2026-04-19).
+#
 # After this script:
-#   ~/qsstv/            — cloned QSSTV source (main branch) with our patches
+#   ~/qsstv/            — cloned QSSTV source with our instrumentation patch
 #   ~/qsstv/qsstv       — built binary, in PATH via a symlink at ~/.local/bin
 #   ~/POTACAT/          — cloned POTACAT so you can run diff-dumps.js here
 #   /tmp/qsstv-dump/    — where the instrumented QSSTV writes layer dumps
@@ -17,7 +23,8 @@
 
 set -euo pipefail
 
-QSSTV_REPO="https://github.com/ON4QZ/QSSTV"
+QSSTV_REPO="${QSSTV_REPO:-https://github.com/ON4QZ/QSSTV}"
+QSSTV_BRANCH="${QSSTV_BRANCH:-main}"
 QSSTV_DIR="${HOME}/qsstv"
 POTACAT_REPO="https://github.com/Waffleslop/POTACAT"
 POTACAT_DIR="${HOME}/POTACAT"
@@ -35,23 +42,48 @@ sudo apt install -y \
   libopenjp2-7-dev libv4l-dev libusb-1.0-0-dev \
   python3 curl
 
-# Node 18+ (for our test harness). If already installed with a high-enough
-# version, skip; otherwise use the NodeSource repo.
-if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed 's/v//;s/\..*//')" -lt 18 ]]; then
-  bold "  installing Node.js 20.x from NodeSource"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt install -y nodejs
+# Node 14+ (our scripts only use ES2019 features). Prefer the distro's own
+# package on armhf / other non-mainstream arches since NodeSource only
+# ships amd64 + arm64 builds. On amd64/arm64 we use NodeSource for a newer
+# LTS.
+ARCH="$(dpkg --print-architecture 2>/dev/null || echo unknown)"
+NODE_MIN_MAJOR=14
+need_node=1
+if command -v node >/dev/null 2>&1; then
+  cur="$(node -v | sed 's/v//;s/\..*//')"
+  if [[ "$cur" -ge "$NODE_MIN_MAJOR" ]]; then
+    need_node=0
+  fi
+fi
+if [[ "$need_node" = 1 ]]; then
+  case "$ARCH" in
+    amd64|arm64)
+      bold "  installing Node.js 20.x from NodeSource (arch: $ARCH)"
+      curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+      sudo apt install -y nodejs
+      ;;
+    *)
+      bold "  installing distro nodejs (arch: $ARCH — NodeSource doesn't ship here)"
+      sudo apt install -y nodejs npm
+      ;;
+  esac
+fi
+if ! command -v node >/dev/null 2>&1; then
+  echo "  node install failed — apt install nodejs manually" >&2
+  exit 1
 fi
 bold "  node: $(node -v)"
 
 hr; bold "[2/5] Cloning QSSTV + POTACAT"
+bold "  QSSTV repo:   $QSSTV_REPO"
+bold "  QSSTV branch: $QSSTV_BRANCH"
 if [[ -d "$QSSTV_DIR" ]]; then
-  bold "  QSSTV already cloned at $QSSTV_DIR — pulling latest main"
-  git -C "$QSSTV_DIR" fetch origin main
-  git -C "$QSSTV_DIR" checkout main
+  bold "  QSSTV already cloned at $QSSTV_DIR — pulling latest $QSSTV_BRANCH"
+  git -C "$QSSTV_DIR" fetch origin "$QSSTV_BRANCH"
+  git -C "$QSSTV_DIR" checkout "$QSSTV_BRANCH"
   git -C "$QSSTV_DIR" pull --ff-only
 else
-  git clone --depth 1 --branch main "$QSSTV_REPO" "$QSSTV_DIR"
+  git clone --depth 1 --branch "$QSSTV_BRANCH" "$QSSTV_REPO" "$QSSTV_DIR"
 fi
 
 if [[ -d "$POTACAT_DIR" ]]; then
