@@ -645,6 +645,14 @@
           var selOpt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
           if (selOpt) ft8Send({ type: 'jtcat-set-band', band: selOpt.value, freqKhz: parseInt(selOpt.dataset.freq, 10) });
         }
+        // If already on SSTV tab, refresh the gallery — any images decoded
+        // while we were backgrounded / asleep would have broadcast to a dead
+        // socket and been lost. Replace-style request drops stale thumbnails
+        // and pulls the newest 10 from disk. (Tab-switch already covers the
+        // case where the user navigates to SSTV fresh.)
+        if (activeTab === 'sstv' && typeof sstvPhoneRequestGallery === 'function') {
+          sstvPhoneRequestGallery(10, 0, true);
+        }
         if (activeTab === 'spots' || activeTab === 'map') {
           filterToolbar.classList.remove('hidden');
         }
@@ -6237,10 +6245,19 @@
     ssbPanel.classList.toggle('hidden', !show);
   }
 
-  // Render SSB macro buttons in the panel
+  // Render SSB macro buttons in the panel.
+  // ssbCheckSlots is async (IndexedDB) and this function can be called in
+  // rapid succession (one per incoming voice-macro-sync message). Without a
+  // guard, overlapping callbacks each append their own full set of buttons,
+  // so the row ends up with N copies of every macro. Use a generation token
+  // so only the latest render's callback actually mutates the DOM.
+  var ssbRenderGen = 0;
   function renderSsbMacros() {
+    var gen = ++ssbRenderGen;
     ssbMacroRow.innerHTML = '';
     ssbCheckSlots(function(filled) {
+      if (gen !== ssbRenderGen) return; // superseded by a later render
+      ssbMacroRow.innerHTML = ''; // clear again in case a racing callback slipped in
       for (var i = 0; i < SSB_MACRO_COUNT; i++) {
         if (!ssbMacroLabels[i] && filled.indexOf(i) === -1) continue;
         (function(idx) {
@@ -8418,15 +8435,27 @@
   var sstvPhoneGalleryCountEl = document.getElementById('sstv-phone-gallery-count');
   var sstvPhoneLoadMoreBtn = document.getElementById('sstv-phone-load-more');
 
-  function sstvPhoneRequestGallery(limit, offset) {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-get-gallery', limit: limit || 10, offset: offset || 0 }));
+  // Refresh flag carries between request and response since the server doesn't
+  // echo our request fields back. Set to true for replace-style loads (initial,
+  // reconnect, manual refresh); false for append-style Load More.
+  var sstvPhoneGalleryNextIsRefresh = true;
+
+  function sstvPhoneRequestGallery(limit, offset, isRefresh) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    sstvPhoneGalleryNextIsRefresh = isRefresh !== false && (offset || 0) === 0;
+    ws.send(JSON.stringify({ type: 'sstv-get-gallery', limit: limit || 10, offset: offset || 0 }));
   }
 
   function sstvPhoneHandleGallery(msg) {
     var images = msg.images || [];
     sstvPhoneGalleryTotal = msg.total || 0;
     if (!msg.requestId) {
-      // Initial load or load-more (not a refresh)
+      // Refresh (replace) vs Load More (append). Clearing the DOM on refresh
+      // is what makes reconnect pick up images decoded while we were away —
+      // live broadcasts are fire-and-forget and get lost if Safari is asleep.
+      if (sstvPhoneGalleryNextIsRefresh && sstvPhoneGallery) {
+        sstvPhoneGallery.innerHTML = '';
+      }
       for (var i = 0; i < images.length; i++) {
         sstvPhoneAddGalleryImage(images[i]);
       }
@@ -8442,6 +8471,16 @@
 
   function sstvPhoneAddGalleryImage(img) {
     if (!sstvPhoneGallery) return;
+    // Dedup: if a thumbnail with the same timestamp is already in the DOM
+    // (added by a prior refresh or by the live rx-image broadcast that wrote
+    // this same file), skip — inserting again would duplicate.
+    var ts = String(img.timestamp || 0);
+    if (ts !== '0') {
+      var existing = sstvPhoneGallery.children;
+      for (var ei = 0; ei < existing.length; ei++) {
+        if (existing[ei].dataset.timestamp === ts) return;
+      }
+    }
     var div = document.createElement('div');
     div.style.cssText = 'flex-shrink:0;border:1px solid var(--border);border-radius:4px;overflow:hidden;position:relative;cursor:pointer;';
     var imgEl = document.createElement('img');
@@ -8529,7 +8568,14 @@
     if (!sstvPhoneGallery) return;
     var imgSrc = msg.image || msg.dataUrl || '';
     if (!imgSrc) return;
-    // Prepend new live decode to gallery
+    // Dedup against anything already on screen — same thumbnail could arrive
+    // via both the live broadcast and a gallery refresh that saw the same PNG
+    // on disk. Prefer the server-supplied timestamp so keys match the refresh.
+    var liveTs = String(msg.timestamp || Date.now());
+    var existingKids = sstvPhoneGallery.children;
+    for (var ek = 0; ek < existingKids.length; ek++) {
+      if (existingKids[ek].dataset.timestamp === liveTs) return;
+    }
     var div = document.createElement('div');
     div.style.cssText = 'flex-shrink:0;border:2px solid var(--pota);border-radius:4px;overflow:hidden;position:relative;cursor:pointer;';
     var img = document.createElement('img');
@@ -8550,7 +8596,7 @@
     replyBtn.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(233,69,96,0.95);color:#fff;border:none;border-radius:3px;font-size:13px;font-weight:700;padding:2px 6px;cursor:pointer;z-index:2;';
     replyBtn.addEventListener('click', function(e) { e.stopPropagation(); sstvPhoneSetReplyImage(imgSrc); });
     div.appendChild(replyBtn);
-    div.dataset.timestamp = Date.now();
+    div.dataset.timestamp = liveTs;
     div.addEventListener('click', function() { sstvPhoneViewImage(imgSrc); });
     sstvPhoneGallery.insertBefore(div, sstvPhoneGallery.firstChild);
     sstvPhoneGalleryItems.unshift({ src: imgSrc, mode: msg.mode });

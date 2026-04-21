@@ -65,6 +65,7 @@ let userTextCounter = 0;
 const MODE_RES = {
   martin1:  { w: 320, h: 256 },
   scottie1: { w: 320, h: 256 },
+  scottie2: { w: 320, h: 256 },
   robot36:  { w: 320, h: 240 },
   robot72:  { w: 320, h: 240 },
 };

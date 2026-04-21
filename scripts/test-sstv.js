@@ -209,7 +209,7 @@ function main() {
   const argv = process.argv.slice(2);
   const quick = argv.includes('--quick');
   const selectedMode = argv.find(a => !a.startsWith('--'));
-  const allModes = ['martin1', 'scottie1', 'robot36', 'robot72'];
+  const allModes = ['martin1', 'scottie1', 'scottie2', 'robot36', 'robot72'];
   const modes = selectedMode ? [selectedMode] : allModes;
 
   console.log('SSTV decoder regression tests');
