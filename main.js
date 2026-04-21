@@ -1857,7 +1857,14 @@ async function saveQsoRecord(qsoData) {
     try {
       sendCatLog(`[Extra UDP] Broadcasting QSO to ${host}:${port} (${format})`);
       if (format === 'wsjtx') {
-        await sendExtraUdpWsjtx(qsoData, host, port);
+        // Reuse the persistent bridge so heartbeats have already registered
+        // "POTACAT" as a source with GridTracker before the first QSO.
+        if (!extraUdpBridge.socket || extraUdpBridge.host !== host || extraUdpBridge.port !== port) {
+          extraUdpBridge.start(host, port);
+        }
+        const record = buildAdifRecord(qsoData);
+        const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
+        await extraUdpBridge.sendQso(qsoData, adifText);
       } else {
         await sendUdpAdif(qsoData, host, port);
       }
@@ -6048,107 +6055,114 @@ function loadWorkedParks() {
   }
 }
 
-// --- HamRS bridge (WSJT-X binary protocol) ---
-// HamRS expects WSJT-X binary UDP messages, not plain ADIF text.
-// We send periodic heartbeats so HamRS shows "connected", and Logged ADIF (type 12) for QSOs.
-const hamrsBridge = {
-  socket: null,
-  heartbeatTimer: null,
-  host: '127.0.0.1',
-  port: 2237,
-  id: 'POTACAT',
+// --- WSJT-X UDP bridge factory ---
+// Many receivers (HamRS, GridTracker, JTAlert) track WSJT-X instances by id
+// and require a HEARTBEAT to register the source before they'll accept
+// QSO_LOGGED / LOGGED_ADIF messages. A long-lived socket sending periodic
+// heartbeats solves this. Used by both the main logbook path (HamRS/Log4OM/
+// MacLoggerDX) and the parallel Extra UDP destination (GridTracker direct).
+function createWsjtxUdpBridge(label) {
+  return {
+    label,
+    socket: null,
+    heartbeatTimer: null,
+    host: '127.0.0.1',
+    port: 2237,
+    id: 'POTACAT',
 
-  start(host, port) {
-    this.stop();
-    this.host = host || '127.0.0.1';
-    this.port = port || 2237;
-    const dgram = require('dgram');
-    this.socket = dgram.createSocket('udp4');
-    this.socket.on('error', (err) => {
-      console.error('[HamRS] UDP error:', err.message);
-    });
-    // Send heartbeat immediately, then every 15 seconds
-    this._sendHeartbeat();
-    this.heartbeatTimer = setInterval(() => this._sendHeartbeat(), 15000);
-    console.log(`[HamRS] Bridge started -> ${this.host}:${this.port}`);
-  },
-
-  stop() {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
-    if (this.socket) {
-      try { this.socket.close(); } catch { /* ignore */ }
-      this.socket = null;
-    }
-  },
-
-  _sendHeartbeat() {
-    if (!this.socket) return;
-    const buf = encodeHeartbeat(this.id, 3);
-    this.socket.send(buf, 0, buf.length, this.port, this.host);
-  },
-
-  sendQso(qsoData, adifText) {
-    return new Promise((resolve, reject) => {
-      if (!this.socket) {
-        reject(new Error('HamRS bridge not started'));
-        return;
-      }
-      const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
-      sendCatLog(`[HamRS] Sending QSO: ${qsoData.callsign} ${freqHz}Hz ${qsoData.mode} -> ${this.host}:${this.port}`);
-
-      // Build proper Date objects from qsoData date/time fields
-      let dateTimeOff;
-      if (qsoData.qsoDate) {
-        const d = qsoData.qsoDate; // YYYYMMDD
-        const t = qsoData.timeOn || '0000'; // HHMM or HHMMSS
-        dateTimeOff = new Date(Date.UTC(
-          parseInt(d.slice(0, 4), 10), parseInt(d.slice(4, 6), 10) - 1, parseInt(d.slice(6, 8), 10),
-          parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
-        ));
-      }
-
-      // Send LOGGED_ADIF (type 12) FIRST — contains POTA_REF, SIG_INFO, and other
-      // ADIF fields that HAMRS needs for "their park" and program-specific fields.
-      const adifBuf = encodeLoggedAdif(this.id, adifText);
-      this.socket.send(adifBuf, 0, adifBuf.length, this.port, this.host, (err) => {
-        if (err) sendCatLog(`[HamRS] LOGGED_ADIF send error: ${err.message}`);
-        else sendCatLog(`[HamRS] LOGGED_ADIF (type 12) sent (${adifBuf.length} bytes)`);
+    start(host, port) {
+      this.stop();
+      this.host = host || '127.0.0.1';
+      this.port = port || 2237;
+      const dgram = require('dgram');
+      this.socket = dgram.createSocket('udp4');
+      this.socket.on('error', (err) => {
+        console.error(`[${this.label}] UDP error:`, err.message);
       });
+      this._sendHeartbeat();
+      this.heartbeatTimer = setInterval(() => this._sendHeartbeat(), 15000);
+      console.log(`[${this.label}] Bridge started -> ${this.host}:${this.port}`);
+    },
 
-      // Then send QSO_LOGGED (type 5) — some apps only listen for this
-      const qsoMsg = encodeQsoLogged(this.id, {
-        dateTimeOff,
-        dateTimeOn: dateTimeOff,
-        dxCall: qsoData.callsign || '',
-        dxGrid: qsoData.gridsquare || '',
-        txFrequency: freqHz,
-        mode: qsoData.mode || '',
-        reportSent: qsoData.rstSent || '59',
-        reportReceived: qsoData.rstRcvd || '59',
-        txPower: qsoData.txPower || '',
-        comments: qsoData.comment || '',
-        name: qsoData.name || '',
-        operatorCall: qsoData.operator || '',
-        myCall: qsoData.stationCallsign || '',
-        myGrid: qsoData.myGridsquare || '',
-        exchangeSent: qsoData.mySigInfo || '',
-        exchangeReceived: qsoData.sigInfo || '',
-      });
-      this.socket.send(qsoMsg, 0, qsoMsg.length, this.port, this.host, (err) => {
-        if (err) {
-          sendCatLog(`[HamRS] QSO_LOGGED send error: ${err.message}`);
-          reject(err);
-        } else {
-          sendCatLog(`[HamRS] QSO_LOGGED (type 5) sent (${qsoMsg.length} bytes)`);
-          resolve();
+    stop() {
+      if (this.heartbeatTimer) {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+      }
+      if (this.socket) {
+        try { this.socket.close(); } catch { /* ignore */ }
+        this.socket = null;
+      }
+    },
+
+    _sendHeartbeat() {
+      if (!this.socket) return;
+      const buf = encodeHeartbeat(this.id, 3);
+      this.socket.send(buf, 0, buf.length, this.port, this.host);
+    },
+
+    sendQso(qsoData, adifText) {
+      return new Promise((resolve, reject) => {
+        if (!this.socket) {
+          reject(new Error(`${this.label} bridge not started`));
+          return;
         }
+        const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
+        sendCatLog(`[${this.label}] Sending QSO: ${qsoData.callsign} ${freqHz}Hz ${qsoData.mode} -> ${this.host}:${this.port}`);
+
+        let dateTimeOff;
+        if (qsoData.qsoDate) {
+          const d = qsoData.qsoDate; // YYYYMMDD
+          const t = qsoData.timeOn || '0000'; // HHMM or HHMMSS
+          dateTimeOff = new Date(Date.UTC(
+            parseInt(d.slice(0, 4), 10), parseInt(d.slice(4, 6), 10) - 1, parseInt(d.slice(6, 8), 10),
+            parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
+          ));
+        }
+
+        // LOGGED_ADIF (type 12) first — carries POTA_REF, SIG_INFO, and other
+        // program-specific fields. Then QSO_LOGGED (type 5) for apps that
+        // only listen for the structured message.
+        const adifBuf = encodeLoggedAdif(this.id, adifText);
+        this.socket.send(adifBuf, 0, adifBuf.length, this.port, this.host, (err) => {
+          if (err) sendCatLog(`[${this.label}] LOGGED_ADIF send error: ${err.message}`);
+          else sendCatLog(`[${this.label}] LOGGED_ADIF (type 12) sent (${adifBuf.length} bytes)`);
+        });
+
+        const qsoMsg = encodeQsoLogged(this.id, {
+          dateTimeOff,
+          dateTimeOn: dateTimeOff,
+          dxCall: qsoData.callsign || '',
+          dxGrid: qsoData.gridsquare || '',
+          txFrequency: freqHz,
+          mode: qsoData.mode || '',
+          reportSent: qsoData.rstSent || '59',
+          reportReceived: qsoData.rstRcvd || '59',
+          txPower: qsoData.txPower || '',
+          comments: qsoData.comment || '',
+          name: qsoData.name || '',
+          operatorCall: qsoData.operator || '',
+          myCall: qsoData.stationCallsign || '',
+          myGrid: qsoData.myGridsquare || '',
+          exchangeSent: qsoData.mySigInfo || '',
+          exchangeReceived: qsoData.sigInfo || '',
+        });
+        this.socket.send(qsoMsg, 0, qsoMsg.length, this.port, this.host, (err) => {
+          if (err) {
+            sendCatLog(`[${this.label}] QSO_LOGGED send error: ${err.message}`);
+            reject(err);
+          } else {
+            sendCatLog(`[${this.label}] QSO_LOGGED (type 5) sent (${qsoMsg.length} bytes)`);
+            resolve();
+          }
+        });
       });
-    });
-  },
-};
+    },
+  };
+}
+
+const hamrsBridge = createWsjtxUdpBridge('HamRS');
+const extraUdpBridge = createWsjtxUdpBridge('Extra UDP');
 
 // --- Logbook forwarding ---
 
@@ -6264,54 +6278,6 @@ function sendUdpAdif(qsoData, host, port) {
       if (err) reject(err);
       else resolve();
     });
-  });
-}
-
-/**
- * Send a QSO to a user-defined extra UDP destination using the WSJT-X binary
- * protocol (LOGGED_ADIF type 12 + QSO_LOGGED type 5). One-shot ephemeral
- * socket per send so it doesn't conflict with hamrsBridge's long-lived
- * socket — the extra destination is independent of the main logbook.
- */
-function sendExtraUdpWsjtx(qsoData, host, port) {
-  return new Promise((resolve, reject) => {
-    const dgram = require('dgram');
-    const id = 'POTACAT';
-    const record = buildAdifRecord(qsoData);
-    const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
-
-    const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
-    let dateTimeOff;
-    if (qsoData.qsoDate) {
-      const d = qsoData.qsoDate;
-      const t = qsoData.timeOn || '0000';
-      dateTimeOff = new Date(Date.UTC(
-        parseInt(d.slice(0, 4), 10), parseInt(d.slice(4, 6), 10) - 1, parseInt(d.slice(6, 8), 10),
-        parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
-      ));
-    }
-
-    const adifBuf = encodeLoggedAdif(id, adifText);
-    const qsoMsg = encodeQsoLogged(id, {
-      dateTimeOff, dateTimeOn: dateTimeOff,
-      dxCall: qsoData.callsign || '', dxGrid: qsoData.gridsquare || '',
-      txFrequency: freqHz, mode: qsoData.mode || '',
-      reportSent: qsoData.rstSent || '59', reportReceived: qsoData.rstRcvd || '59',
-      txPower: qsoData.txPower || '', comments: qsoData.comment || '',
-      name: qsoData.name || '', operatorCall: qsoData.operator || '',
-      myCall: qsoData.stationCallsign || '', myGrid: qsoData.myGridsquare || '',
-      exchangeSent: qsoData.mySigInfo || '', exchangeReceived: qsoData.sigInfo || '',
-    });
-
-    const client = dgram.createSocket('udp4');
-    let sent = 0;
-    const done = (err) => {
-      if (err) { client.close(); reject(err); return; }
-      sent++;
-      if (sent === 2) { client.close(); resolve(); }
-    };
-    client.send(adifBuf, 0, adifBuf.length, port, host, done);
-    client.send(qsoMsg, 0, qsoMsg.length, port, host, done);
   });
 }
 
@@ -7882,6 +7848,12 @@ app.whenReady().then(() => {
   if (settings.enablePskrMap) connectPskrMap();
   if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
+  }
+  if (settings.extraUdpEnabled && (settings.extraUdpFormat || 'wsjtx') === 'wsjtx') {
+    extraUdpBridge.start(
+      settings.extraUdpHost || '127.0.0.1',
+      parseInt(settings.extraUdpPort, 10) || 2237
+    );
   }
 
   // --- Cloud Sync (optional — module may not be present in open-source builds) ---
@@ -10246,6 +10218,17 @@ app.whenReady().then(() => {
       hamrsBridge.stop();
     }
 
+    // Start/stop Extra UDP bridge — heartbeats register POTACAT with GridTracker
+    if (settings.extraUdpEnabled && (settings.extraUdpFormat || 'wsjtx') === 'wsjtx') {
+      const ep = parseInt(settings.extraUdpPort, 10) || 2237;
+      const eh = settings.extraUdpHost || '127.0.0.1';
+      if (!extraUdpBridge.socket || extraUdpBridge.host !== eh || extraUdpBridge.port !== ep) {
+        extraUdpBridge.start(eh, ep);
+      }
+    } else {
+      extraUdpBridge.stop();
+    }
+
     // Auto-parse ADIF and send DXCC data if enabled
     if (settings.enableDxcc) {
       sendDxccData();
@@ -11758,6 +11741,7 @@ function gracefulCleanup() {
   try { stopSstvMulti(); } catch {}
   try { stopAutoSstvTimer(); } catch {}
   try { hamrsBridge.stop(); } catch {}
+  try { extraUdpBridge.stop(); } catch {}
   killRigctld();
 }
 
