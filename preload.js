@@ -272,5 +272,13 @@ contextBridge.exposeInMainWorld('api', {
   cloudGetSettings: () => ipcRenderer.invoke('cloud-get-settings'),
   cloudPutSettings: (data) => ipcRenderer.invoke('cloud-put-settings', data),
   onCloudSyncStatus: (cb) => ipcRenderer.on('cloud-sync-status', (_e, data) => cb(data)),
+  // POTA.app Sync (parks-worked CSV auto-import)
+  potaSyncStatus: () => ipcRenderer.invoke('pota-sync-status'),
+  potaSyncConnect: () => ipcRenderer.invoke('pota-sync-connect'),
+  potaSyncDisconnect: () => ipcRenderer.invoke('pota-sync-disconnect'),
+  potaSyncNow: () => ipcRenderer.invoke('pota-sync-now'),
+  potaSyncSetEnabled: (v) => ipcRenderer.invoke('pota-sync-set-enabled', v),
+  potaSyncSetInterval: (v) => ipcRenderer.invoke('pota-sync-set-interval', v),
+  onPotaSyncStatus: (cb) => ipcRenderer.on('pota-sync-status', (_e, data) => cb(data)),
   onCloudUploadProgress: (cb) => ipcRenderer.on('cloud-upload-progress', (_e, data) => cb(data)),
 });

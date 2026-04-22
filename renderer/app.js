@@ -2804,7 +2804,10 @@ netCancelBtn.addEventListener('click', () => {
 
 netSaveBtn.addEventListener('click', () => {
   const name = setNetName.value.trim();
-  const freq = parseInt(setNetFreq.value, 10);
+  // parseFloat + round to 1 decimal so users can enter fractional kHz like
+  // 18157.5 without it being truncated to 18157 by parseInt.
+  const freqRaw = parseFloat(setNetFreq.value);
+  const freq = Number.isFinite(freqRaw) ? Math.round(freqRaw * 10) / 10 : NaN;
   if (!name || !freq) { alert('Name and frequency are required.'); return; }
 
   const schedType = document.querySelector('input[name="net-schedule"]:checked').value;
@@ -10149,6 +10152,9 @@ let radioPower = 0; // last known TX power from CAT (watts)
 let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 window.api.onCatPower((watts) => {
   radioPower = watts;
+  // Feed the TX-but-no-RF detector: any non-zero power within the arm window
+  // proves the rig is actually producing RF.
+  if (_cwRfTimer && watts > 0) _cwRfSeenPower = true;
 });
 
 // --- Floating S-Meter / SWR Box ---
@@ -11063,7 +11069,47 @@ window.api.onCwKey(({ down }) => {
     initSidetone();
     sidetoneKey(down);
   }
+  // "Keying but no RF" diagnostic — if the operator is sending CW through
+  // POTACAT but the rig reports zero forward power for 2+ seconds, the most
+  // common causes are: wrong CW key source on the rig (USB vs. paddle jack),
+  // CW power turned to 0 in rig menu, or the rig is in TUNE/lock-out.
+  if (down) noteCwKeyDown();
 });
+
+// TX-but-no-RF detector. Arm a 2.5 s watcher on each key-down; if we see any
+// non-zero power report during the window, the rig is happy. Otherwise, the
+// watcher fires and emits a throttled toast pointing at the usual suspects.
+let _cwRfArmedAt = 0;
+let _cwRfSeenPower = false;
+let _cwRfTimer = null;
+let _cwRfLastToast = 0;
+function noteCwKeyDown() {
+  _cwRfArmedAt = Date.now();
+  _cwRfSeenPower = false;
+  if (_cwRfTimer) clearTimeout(_cwRfTimer);
+  _cwRfTimer = setTimeout(() => {
+    _cwRfTimer = null;
+    if (_cwRfSeenPower) return;
+    const now = Date.now();
+    if (now - _cwRfLastToast < 10 * 60 * 1000) return; // throttle per 10 min
+    _cwRfLastToast = now;
+    showTuneBlockedToast('Radio is keying CW but reporting no RF. Check the rig\u2019s CW key source (paddle jack vs. USB), CW power level, and that the rig isn\u2019t in TUNE or menu mode.');
+  }, 2500);
+}
+function showTuneBlockedToast(msg) {
+  // Reuse the tune-blocked-toast DOM node for any transient notification.
+  let t = document.getElementById('tune-blocked-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'tune-blocked-toast';
+    t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#e94560;color:#fff;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:bold;z-index:10001;pointer-events:none;box-shadow:0 4px 20px rgba(233,69,96,0.5);opacity:0;transition:opacity 0.2s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; }, 5000);
+}
 
 // CW keyer status
 const cwTextDisplay = document.getElementById('cw-text-display');

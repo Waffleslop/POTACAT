@@ -99,6 +99,7 @@ const { FreedvReporterClient } = require('./lib/freedv-reporter');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
+const { PotaSync } = require('./lib/pota-sync');
 const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const { Ft8Engine } = require('./lib/ft8-engine');
@@ -122,6 +123,7 @@ let qrz = new QrzClient();
 
 // --- Cloud Sync (initialized in app.whenReady) ---
 let cloudIpc = null;
+let potaSync = null; // lib/pota-sync.js instance — created lazily on first access
 
 // --- Parks DB (activator mode) ---
 let parksArray = [];
@@ -1829,6 +1831,8 @@ async function saveQsoRecord(qsoData) {
       remoteServer.sendWorkedParks([...workedParks.keys()]);
     }
   }
+  // Debounced POTA.app pull — no-ops unless the user has enabled auto-sync.
+  if (loggedParkRef && potaSync) { try { potaSync.noteQsoLogged(); } catch {} }
 
   // Forward to external logbook if enabled
   // skipLogbookForward: multi-park activations send one ADIF record per park ref,
@@ -7872,6 +7876,45 @@ app.whenReady().then(() => {
     cloudIpc.startBackgroundSync();
   }
 
+  // --- POTA.app Sync (parks-worked CSV auto-import) ---
+  potaSync = new PotaSync({
+    settings,
+    onSettingsChange: async () => { saveSettings(settings); },
+    onParksUpdated: (parks) => {
+      // Merge the freshly-pulled CSV into the existing workedParks Map and
+      // re-add locally-logged entries that the pota.app CSV doesn't know
+      // about yet. Mirrors the merge path in loadWorkedParks().
+      for (const [ref, info] of parks.entries()) workedParks.set(ref, info);
+      try {
+        const localParks = loadLocalWorkedParks();
+        for (const ref of localParks) {
+          if (!workedParks.has(ref)) workedParks.set(ref, { reference: ref });
+        }
+      } catch {}
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('worked-parks', [...workedParks.entries()]);
+      }
+      if (remoteServer && remoteServer.running) {
+        remoteServer.sendWorkedParks([...workedParks.keys()]);
+      }
+    },
+    logger: (msg) => { try { sendCatLog('[pota-sync] ' + msg); } catch { console.log('[pota-sync]', msg); } },
+  });
+  potaSync.on('status', (s) => {
+    if (win && !win.isDestroyed()) win.webContents.send('pota-sync-status', s);
+  });
+  // Resume scheduler if previously enabled
+  if (settings.potaSync && settings.potaSync.enabled && settings.potaSync.connectedAt) {
+    potaSync.start();
+  }
+
+  ipcMain.handle('pota-sync-status', () => potaSync.status());
+  ipcMain.handle('pota-sync-connect', async () => potaSync.connect());
+  ipcMain.handle('pota-sync-disconnect', async () => { await potaSync.disconnect(); return potaSync.status(); });
+  ipcMain.handle('pota-sync-now', async () => potaSync.pull());
+  ipcMain.handle('pota-sync-set-enabled', async (_e, v) => { await potaSync.setEnabled(!!v); return potaSync.status(); });
+  ipcMain.handle('pota-sync-set-interval', async (_e, v) => { await potaSync.setIntervalMin(v); return potaSync.status(); });
+
   // Ensure launcher background service is installed for boot startup.
   // Only INSTALL (to Startup/LaunchAgents) — don't spawn duplicates on every app launch.
   // The launcher starts on next boot, or user can enable it manually in Settings.
@@ -11749,6 +11792,7 @@ function gracefulCleanup() {
   try { stopAutoSstvTimer(); } catch {}
   try { hamrsBridge.stop(); } catch {}
   try { extraUdpBridge.stop(); } catch {}
+  try { if (potaSync) potaSync.stop(); } catch {}
   killRigctld();
 }
 

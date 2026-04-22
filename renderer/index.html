@@ -909,6 +909,7 @@
       <span id="conn-pskr-map" class="conn-pill hidden"><span class="conn-dot"></span> PSKReporter</span>
       <span id="conn-remote" class="conn-pill hidden"><span class="conn-dot"></span> Echo CAT</span>
       <span id="conn-cloud" class="conn-pill hidden"><span class="conn-dot"></span> Cloud</span>
+      <span id="conn-pota" class="conn-pill hidden" title="POTA.app sync"><span class="conn-dot"></span> POTA</span>
     </div>
     <!-- Settings tab bar -->
     <div class="settings-tab-bar">
@@ -1578,7 +1579,7 @@
         </label>
         <div style="display:flex;gap:8px;">
           <label style="flex:1;">Frequency (kHz):
-            <input type="number" id="set-net-freq" placeholder="7268" min="1" max="999999" step="1">
+            <input type="number" id="set-net-freq" placeholder="7268" min="1" max="999999" step="0.1">
           </label>
           <label style="width:90px;">Mode:
             <select id="set-net-mode">
@@ -1978,6 +1979,43 @@
         </div>
       </div>
     </fieldset>
+    <!-- POTA.app Sync — Cloud-subscriber feature; keeps the Parks Worked
+         list in sync with pota.app so new-park badges stay accurate. -->
+    <fieldset class="source-toggles" data-settings-tab="cloud">
+      <legend>POTA.app Sync <span style="font-size:10px;color:var(--text-tertiary);font-weight:normal;">(Cloud subscribers)</span></legend>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">
+        Auto-download your Parks Worked list from pota.app. Sign in once in a POTACAT window &mdash; no password stored on our side.
+      </p>
+      <div id="pota-sync-disconnected">
+        <button type="button" id="pota-sync-connect" class="btn btn-primary">Connect POTA.app</button>
+        <p id="pota-sync-gate-msg" class="help-text hidden" style="margin-top:4px;color:var(--text-tertiary);">Requires an active POTACAT Cloud subscription.</p>
+      </div>
+      <div id="pota-sync-connected" class="hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <span>Signed in as <strong id="pota-sync-user">&mdash;</strong></span>
+          <button type="button" id="pota-sync-disconnect" class="btn btn-sm">Disconnect</button>
+        </div>
+        <label class="checkbox-label"><input type="checkbox" id="pota-sync-enabled"> Enable auto-sync</label>
+        <div id="pota-sync-controls" class="hidden" style="margin-top:6px;">
+          <label>Interval:
+            <select id="pota-sync-interval">
+              <option value="15">15 min</option>
+              <option value="30">30 min</option>
+              <option value="60" selected>1 hour</option>
+              <option value="240">4 hours</option>
+              <option value="1440">Daily</option>
+            </select>
+          </label>
+          <button type="button" id="pota-sync-now" class="btn btn-sm" style="margin-left:8px;">Sync Now</button>
+          <div id="pota-sync-stats" style="font-size:11px;color:var(--text-secondary);margin-top:6px;">
+            <span>Last pull: <strong id="pota-sync-last">never</strong></span>
+            <span style="margin-left:12px;">Parks: <strong id="pota-sync-count">&mdash;</strong></span>
+          </div>
+          <p id="pota-sync-error" class="hidden" style="color:var(--accent-red);font-size:11px;margin-top:4px;"></p>
+        </div>
+      </div>
+    </fieldset>
+
     <!-- Cloud Sync Tab -->
     <fieldset class="source-toggles" data-settings-tab="cloud">
       <legend>POTACAT Cloud</legend>
@@ -2565,5 +2603,6 @@
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="app.js"></script>
   <script src="cloud-ui.js"></script>
+  <script src="pota-sync-ui.js"></script>
 </body>
 </html>

@@ -492,6 +492,10 @@
             </select>
           </div>
         </div>
+        <!-- Inline help — populated at runtime with platform-specific setup
+             notes (desktop / Android / iOS) and a Web MIDI availability
+             warning when the browser doesn't support navigator.requestMIDIAccess. -->
+        <div id="paddle-help" class="hidden" style="margin:6px 0 10px;padding:8px 10px;background:var(--bg-card);border-left:3px solid var(--pota);border-radius:4px;font-size:11px;line-height:1.4;color:var(--text-dim);"></div>
         <div id="so-midi-config" class="hidden">
           <div class="so-row">
             <label class="so-label">MIDI Device</label>
@@ -1290,7 +1294,7 @@
     <div id="welcome-overlay" class="hidden">
       <div class="welcome-card">
         <h2 class="welcome-title">Welcome to ECHOCAT</h2>
-        <p class="welcome-text">To connect to your radio's audio, press <b>Tap to Connect Audio</b>. You'll be asked to approve ECHOCAT to use your microphone. Once approved, click <b>Connecting</b> and it will finalize the connection process.</p>
+        <p class="welcome-text">Tap <b>Tap to Connect Audio</b> and approve the microphone prompt. If the button reads <b>Tap once more to finish</b> afterward, tap it again to open the audio channel.</p>
         <label class="welcome-check"><input type="checkbox" id="welcome-hide"> Don't show this again</label>
         <button type="button" id="welcome-ok" class="welcome-ok">Ok, great!</button>
       </div>

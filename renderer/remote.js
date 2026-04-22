@@ -3336,25 +3336,39 @@
     if (txGainNode) txGainNode.gain.value = pct / 100;
   });
 
+  // RX clipping telemetry — when samples hit ±full-scale the ADC is pinning
+  // and POTACAT's sliders can't rescue the signal. Throttled to one toast per
+  // 5 minutes so it stays informative rather than nagging.
+  let _rxClipUntil = 0;      // timestamp: show the on-meter CLIP pip until then
+  let _lastRxClipToast = 0;
+
   function drawMeter(canvas, analyser) {
     if (!canvas || !analyser) return;
     var ctx = canvas.getContext('2d');
     var w = canvas.width, h = canvas.height;
     var data = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteTimeDomainData(data);
-    // Calculate RMS level
+    // Calculate RMS level + peak sample (peak catches transient clipping that
+    // RMS smears away)
     var sum = 0;
+    var peak = 0;
     for (var i = 0; i < data.length; i++) {
       var v = (data[i] - 128) / 128;
       sum += v * v;
+      var a = v < 0 ? -v : v;
+      if (a > peak) peak = a;
     }
     var rms = Math.sqrt(sum / data.length);
     var db = rms > 0 ? 20 * Math.log10(rms) : -60;
     var level = Math.max(0, Math.min(1, (db + 40) / 40)); // -40dB to 0dB -> 0-1
+    var clipping = canvas === rxMeterCanvas && peak >= 0.985;
+    if (clipping) {
+      _rxClipUntil = Date.now() + 600; // keep the indicator up for 600 ms
+      maybeShowClipToast();
+    }
     // Draw bar
     ctx.clearRect(0, 0, w, h);
     var barW = Math.round(level * w);
-    // Green -> yellow -> red gradient
     if (level < 0.6) ctx.fillStyle = '#4ecca3';
     else if (level < 0.85) ctx.fillStyle = '#ffd740';
     else ctx.fillStyle = '#e94560';
@@ -3362,6 +3376,21 @@
     // Peak line
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.fillRect(barW - 1, 0, 1, h);
+    // Clipping pip — a bright red "CLIP" block at the far right of the RX
+    // meter when recent peaks hit full-scale
+    if (canvas === rxMeterCanvas && Date.now() < _rxClipUntil) {
+      ctx.fillStyle = '#ff1744';
+      ctx.fillRect(w - 3, 0, 3, h);
+    }
+  }
+
+  function maybeShowClipToast() {
+    var now = Date.now();
+    if (now - _lastRxClipToast < 5 * 60 * 1000) return;
+    _lastRxClipToast = now;
+    if (typeof showToast === 'function') {
+      showToast('RX audio is clipping — lower your rig\u2019s USB AF Output (Icom: Menu \u2192 Set \u2192 Connectors \u2192 USB AF Output Level) or your OS Recording level. POTACAT\u2019s RX slider cannot undo ADC clipping.', 7000, true);
+    }
   }
 
   function startMeterRendering() {
@@ -3401,13 +3430,28 @@
 
   audioConnectBtn.addEventListener('click', async () => {
     audioConnectBtn.textContent = 'Connecting...';
-    await startAudio();
-    // First startAudio() gets mic permission; second connects WebRTC
-    if (micReady && !audioEnabled) {
+    // Watchdog: if the first tap only managed to grant mic permission but the
+    // audio channel didn't finish opening (common on iOS Safari / some
+    // Chromium builds where the post-getUserMedia continuation loses its
+    // "user gesture" status, so AudioContext / media play() won't start),
+    // relabel the button so the user knows exactly what to do next instead
+    // of staring at "Connecting..." forever.
+    const watchdog = setTimeout(() => {
+      if (!audioEnabled && !audioConnectBtn.classList.contains('hidden')) {
+        audioConnectBtn.textContent = micReady ? 'Tap once more to finish' : 'Tap to retry';
+      }
+    }, 2000);
+    try {
       await startAudio();
-    }
-    if (!audioEnabled) {
-      audioConnectBtn.textContent = 'Tap to Connect Audio';
+      // First startAudio() gets mic permission; second connects WebRTC
+      if (micReady && !audioEnabled) {
+        await startAudio();
+      }
+    } finally {
+      clearTimeout(watchdog);
+      if (!audioEnabled && !audioConnectBtn.classList.contains('hidden')) {
+        audioConnectBtn.textContent = micReady ? 'Tap once more to finish' : 'Tap to Connect Audio';
+      }
     }
   });
 
@@ -6129,8 +6173,47 @@
       paddleType = soPaddleType.value;
       localStorage.setItem('echocat-paddle-type', paddleType);
       updateMidiConfigVisibility();
+      updatePaddleHelp();
     });
   }
+
+  // Platform-aware paddle setup help. Three real-world pain points this tries
+  // to head off (from the KM4CFT thread, 2026-04-20):
+  //   1. Users on iOS don't get MIDI support at all — say so up front.
+  //   2. Android users need a BLE-to-WebMIDI bridge app; point them at one.
+  //   3. Safari / older browsers without Web MIDI need a Chromium browser.
+  function updatePaddleHelp() {
+    var helpEl = document.getElementById('paddle-help');
+    if (!helpEl) return;
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isAndroid = /Android/.test(ua);
+    var hasWebMidi = !!navigator.requestMIDIAccess;
+    var bits = [];
+    if (!hasWebMidi) {
+      if (isIOS) {
+        bits.push('<b>MIDI paddles are not supported on iOS.</b> For paddle use, switch to a desktop / Android browser with Web MIDI (Chrome or Edge).');
+      } else {
+        bits.push('<b>This browser doesn\u2019t support Web MIDI.</b> Switch to Chrome, Edge, or another Chromium browser for USB / Bluetooth MIDI paddles.');
+      }
+    } else if (paddleType === 'midi') {
+      if (isAndroid) {
+        bits.push('<b>Android:</b> install a MIDI bridge like <i>MIDI BLE Connect</i> (Play Store) to expose your Bluetooth paddle to Chrome\u2019s Web MIDI.');
+      } else if (isIOS) {
+        bits.push('<b>iOS:</b> MIDI paddles aren\u2019t supported in mobile Safari. Use a Chromium browser on desktop or Android.');
+      } else {
+        bits.push('<b>Desktop:</b> install <a href="https://potacat.com/tinymidi" target="_blank" rel="noopener" style="color:var(--pota);">TinyMIDI</a> (or your paddle\u2019s own helper app) so ECHOCAT can see the device. If your paddle disconnects after a few seconds, re-open this tab after pairing.');
+      }
+    } else if (paddleType === 'tinymidi') {
+      bits.push('<b>Keyboard mode:</b> paddle sends <code>[</code> (dit) and <code>]</code> (dah). Works in every browser — no MIDI required.');
+    } else if (paddleType === 'vail') {
+      bits.push('<b>Vail / VBand:</b> uses Left/Right Ctrl for dit/dah.');
+    }
+    if (bits.length === 0) { helpEl.classList.add('hidden'); return; }
+    helpEl.innerHTML = bits.join('<br>');
+    helpEl.classList.remove('hidden');
+  }
+  updatePaddleHelp();
 
   function sendPaddle(contact, state) {
     if (ws && ws.readyState === WebSocket.OPEN) {
