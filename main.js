@@ -9421,13 +9421,20 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.on('vfo-set-lock', (_e, locked) => {
+  function applyVfoLock(locked) {
     _vfoLocked = !!locked;
-    // Broadcast lock state to all windows
+    // Broadcast lock state to all Electron windows (desktop VFO popout etc.)
     for (const wc of require('electron').webContents.getAllWebContents()) {
       wc.send('vfo-lock-state', _vfoLocked);
     }
-  });
+    // Sync to ECHOCAT clients over WS so the lock pill there stays in sync.
+    if (remoteServer && typeof remoteServer.setVfoLocked === 'function') {
+      remoteServer.setVfoLocked(_vfoLocked);
+    }
+  }
+  ipcMain.on('vfo-set-lock', (_e, locked) => applyVfoLock(locked));
+  // ECHOCAT clients toggle via WS; remote-server emits this event.
+  if (remoteServer) remoteServer.on('vfo-set-lock', (locked) => applyVfoLock(locked));
 
   // --- KiwiSDR / WebSDR.org integration ---
   const { KiwiSdrClient } = require('./lib/kiwisdr');

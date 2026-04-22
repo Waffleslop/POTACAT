@@ -872,7 +872,8 @@ html, body {
 #spot-list::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
 
 .spot-card {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--spot-grid, 120px 80px 60px 84px 52px 40px 40px);
   align-items: center;
   gap: 8px;
   padding: 10px 10px;
@@ -882,23 +883,34 @@ html, body {
   border-left: 3px solid #555;
   cursor: pointer;
   transition: background 0.1s;
-  flex-wrap: nowrap;
   width: max-content;
   min-width: 100%;
 }
 .spot-card > span, .spot-card > button {
-  flex-shrink: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  /* Override explicit widths on .spot-ref/.spot-name/.spot-region so every
+     cell fills its grid track instead of shrinking to a hard-coded px width. */
+  width: auto;
 }
+/* Empty placeholder for skip/log in net spots — keeps grid tracks aligned. */
+.spot-card .spot-btn-empty { display: block; }
 
 .spot-card:active {
   background: #1e2d50;
 }
 
 .spot-card.tuned {
-  background: rgba(79, 195, 247, 0.12);
-  outline: 2px solid #4fc3f7;
-  outline-offset: -2px;
+  background: rgba(79, 195, 247, 0.2);
+  /* Bold double-ring frame: white seam (2px) inside a black outline (3px).
+     Works against any source-color left border and any theme, including the
+     net/SOTA/DXC/RBN colors which already tint the card left edge. */
+  outline: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 5px #000;
+  position: relative;
+  z-index: 1;
 }
 
 .spot-card.source-pota { border-left-color: var(--pota); }
@@ -1518,8 +1530,8 @@ html, body {
 }
 .spot-skip-btn {
   flex-shrink: 0;
-  padding: 3px 8px;
-  font-size: 10px;
+  padding: 4px 10px;
+  font-size: 11px;
   font-weight: 600;
   background: transparent;
   border: 1px solid #555;
@@ -1529,6 +1541,20 @@ html, body {
 }
 .spot-skip-btn:active { background: var(--bg-header); }
 .spot-card.scan-skipped { opacity: 0.4; }
+
+/* Hide button — identical footprint to Skip so the S/H/L trio aligns. */
+.spot-hide-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.spot-hide-btn:active { background: var(--bg-header); border-color: var(--accent); color: var(--accent); }
 
 /* --- Log Sheet --- */
 #log-sheet-backdrop {
@@ -2995,7 +3021,9 @@ html, body {
   .spot-ref { font-size: 14px; }
   .spot-age { font-size: 12px; }
   .spot-dist { font-size: 12px; }
-  .spot-log-btn { padding: 6px 14px; font-size: 13px; }
+  .spot-log-btn,
+  .spot-skip-btn,
+  .spot-hide-btn { padding: 6px 14px; font-size: 13px; }
   .spot-empty { font-size: 16px; }
   .new-badge { font-size: 10px; padding: 2px 6px; }
 
@@ -3242,7 +3270,9 @@ html, body {
   .dp-cancel, .dp-clear, .dp-go { padding: 8px 0; font-size: 13px; }
   .dp-freq-row { padding: 4px 0 8px; margin-bottom: 8px; }
   #spot-list { padding: 2px 8px; padding-left: calc(8px + env(safe-area-inset-left, 0px)); padding-right: calc(8px + env(safe-area-inset-right, 0px)); }
-  .spot-log-btn { padding: 2px 8px; font-size: 10px; }
+  .spot-log-btn,
+  .spot-skip-btn,
+  .spot-hide-btn { padding: 2px 8px; font-size: 10px; }
   #settings-overlay { padding-top: 4px; }
   .so-section-label { margin: 8px 0 4px; font-size: 10px; }
   .so-row { padding: 6px 0; }
@@ -3317,6 +3347,13 @@ html, body {
 .dir-card:active { opacity: 0.7; }
 .dir-card.dir-live { border-left-color: #4ecca3; background: rgba(78, 204, 163, 0.08); }
 .dir-card.dir-soon { border-left-color: #ffd740; }
+.dir-card.tuned {
+  /* Same bold double-ring frame as .spot-card.tuned so the currently tuned
+     net/broadcast stands out from the merely on-air ones. */
+  box-shadow: 0 0 0 2px #fff, 0 0 0 5px #000;
+  position: relative;
+  z-index: 1;
+}
 
 .dir-card-row { display: flex; justify-content: space-between; align-items: baseline; }
 .dir-card-name { font-size: 14px; font-weight: 600; color: var(--text); }
@@ -3421,6 +3458,33 @@ html, body {
   flex-shrink: 0;
 }
 .vf-back-btn:hover { background: var(--bg-hover); }
+
+.vf-lock-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 18px;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.vf-lock-btn:hover { background: var(--bg-hover); color: var(--text); }
+.vf-lock-btn.locked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  animation: vf-lock-pulse 1.5s ease-in-out infinite;
+}
+@keyframes vf-lock-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
 .vf-freq-block {
   flex: 1;
   text-align: center;
@@ -3545,6 +3609,17 @@ html, body {
   color: var(--pota);
   font-family: 'Courier New', monospace;
   line-height: 1.1;
+  /* Clamp to a single ellipsised line — long HF Net names would otherwise
+     wrap to 4-5 lines in the narrow iPad sidebar and push the op-card tall
+     enough that the sticky PTT row floats over it awkwardly. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  /* 0-grow so short callsigns don't get stretched with blank trailing space,
+     1-shrink so long net names clamp to sidebar width and trigger ellipsis. */
+  flex: 0 1 auto;
 }
 .vf-op-name {
   font-size: 16px;
@@ -3625,4 +3700,100 @@ html, body {
 .vf-ptt-btn.active {
   background: #ff1744;
   box-shadow: 0 0 16px rgba(255, 23, 68, 0.6);
+}
+
+/* ===== iPad / large-tablet split view =====
+   At >=1000px (iPad landscape & iPad Pro portrait) the VFO fullview is
+   permanently docked on one side, spot list fills the rest. PTT lives only
+   in the VFO panel — the bottom-bar PTT is hidden in this mode. */
+@media (min-width: 1000px) {
+  #main-ui[data-split="right"],
+  #main-ui[data-split="left"] {
+    position: relative;
+  }
+  #main-ui[data-split="right"] { padding-right: 380px; }
+  #main-ui[data-split="left"]  { padding-left: 380px; }
+
+  .vfo-fullview.vfo-docked {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    width: 380px;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+    z-index: 100;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 10px;
+  }
+  .vfo-fullview.vfo-docked.hidden { display: flex; }
+  #main-ui[data-split="right"] .vfo-fullview.vfo-docked {
+    right: 0;
+    border-left: 1px solid #333;
+  }
+  #main-ui[data-split="left"] .vfo-fullview.vfo-docked {
+    left: 0;
+    border-right: 1px solid #333;
+  }
+
+  /* Back button is pointless when the panel is always visible. */
+  .vfo-fullview.vfo-docked .vf-back-btn { display: none; }
+
+  /* Freq + dial shrink to fit narrower column. */
+  .vfo-fullview.vfo-docked .vf-freq { font-size: 30px; }
+  .vfo-fullview.vfo-docked .vf-dial-wrap canvas {
+    max-width: 260px;
+    max-height: 260px;
+  }
+
+  /* PTT sticks to bottom of the sidebar, not the viewport. */
+  .vfo-fullview.vfo-docked .vf-ptt-row {
+    position: sticky;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    margin: auto -14px 0;
+    padding: 8px 14px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Status-bar VFO toggle is redundant when the panel is always visible. */
+  #main-ui[data-split="right"] #vfo-fullview-btn,
+  #main-ui[data-split="left"]  #vfo-fullview-btn { display: none; }
+
+  /* Bottom-bar PTT hidden — PTT lives in the VFO panel only. */
+  #main-ui[data-split="right"] #bottom-bar #ptt-btn,
+  #main-ui[data-split="left"]  #bottom-bar #ptt-btn { display: none; }
+
+  /* Status bar is redundant in docked mode — frequency/mode are in the VFO,
+     and latency + gear are relocated into the VFO panel by JS. Hiding the
+     whole row lets the tab bar move up and gives the spot table more height. */
+  #main-ui[data-split="right"] #status-bar,
+  #main-ui[data-split="left"]  #status-bar { display: none; }
+
+  /* Gear button relocated into the VFO header (to the right of the freq). */
+  .vfo-fullview.vfo-docked .vf-header #rig-ctrl-toggle {
+    flex-shrink: 0;
+    font-size: 22px;
+    padding: 4px 8px;
+  }
+
+  /* Latency pill relocated into the dial wrap — top-right corner of the dial
+     area, in the unused space between the canvas and the panel edge. */
+  .vfo-fullview.vfo-docked .vf-dial-wrap {
+    position: relative;
+  }
+  .vfo-fullview.vfo-docked .vf-dial-wrap #latency {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: rgba(0, 0, 0, 0.4);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
 }

@@ -63,7 +63,7 @@ function pruneHiddenSpots() {
   }
   if (changed) saveHiddenSpots();
 }
-function isSpotHidden(callsign, freqStr) {
+function isSpotHidden(callsign, freqStr, band) {
   const entry = hiddenSpots[callsign.toUpperCase()];
   if (!entry) return false;
   const now = Date.now();
@@ -75,6 +75,13 @@ function isSpotHidden(callsign, freqStr) {
     const fKey = String(Math.round(parseFloat(freqStr)));
     const fExp = entry[fKey];
     if (fExp === Infinity || (fExp && fExp > now)) return true;
+  }
+  // Check band-specific hide (set by the Hide button — survives a QSY within
+  // the same band but auto-lifts the moment the station appears on a different
+  // band, which is what activators asked for).
+  if (band) {
+    const bExp = entry['band:' + band];
+    if (bExp === Infinity || (bExp && bExp > now)) return true;
   }
   return false;
 }
@@ -131,18 +138,23 @@ function notifyVfoTunedSpot(spot) {
   // Find all activators on same frequency
   const sameFreq = allSpots.filter(s => s.frequency === spot.frequency);
   const spots = sameFreq.length > 0 ? sameFreq : [spot];
-  // Build array of operator data
+  // Build array of operator data. For net spots we also forward band/mode/
+  // comments so the popout can render an HF NET card instead of a QRZ card.
   const ops = spots.map(s => ({
     callsign: s.callsign || '',
     reference: s.reference || '',
     parkName: s.parkName || '',
     source: s.source || '',
     wpm: s.wpm || null,
+    // Net-only fields (harmless on other sources; popout keys off source==='net')
+    band: s.band || '',
+    mode: s.mode || '',
+    comments: s.comments || '',
   }));
   window.api.vfoTunedSpot({ ops });
-  // QRZ lookup for each operator
+  // QRZ lookup for each real operator (skip nets — their callsign is the net name).
   const pending = ops.map((op, i) => {
-    if (!op.callsign) return Promise.resolve();
+    if (!op.callsign || op.source === 'net') return Promise.resolve();
     return window.api.qrzLookup(op.callsign).then(info => {
       if (info) {
         const first = cleanQrzName(info.nickname) || cleanQrzName(info.fname);
@@ -3773,7 +3785,7 @@ function getFiltered() {
     if (hideWorkedCallRef && isWorkedSpotStrict(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
     if (hideQrt && s.comments && s.comments.toLowerCase().includes('qrt')) return false;
-    if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency)) return false;
+    if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency, s.band)) return false;
     if (maxDistMi > 0 && s.distance != null) {
       // maxDistMi is stored in the user's chosen unit; s.distance is always in miles
       const limitMi = distUnit === 'km' ? maxDistMi / MI_TO_KM : maxDistMi;
@@ -3853,6 +3865,7 @@ const HIDEABLE_COLUMNS = [
   { key: 'spotTime', label: 'Age' },
   { key: 'comments', label: 'Comments' },
   { key: 'skip', label: 'Skip' },
+  { key: 'hide', label: 'Hide' },
 ];
 
 let hiddenColumns = new Set();
@@ -3994,7 +4007,7 @@ mapResizeObserver.observe(mapPaneEl);
 const COL_ORDER_KEY = 'pota-cat-col-order-v1';
 const DEFAULT_COL_ORDER = [
   'log','callsign','operator','frequency','mode','source','reference',
-  'parkName','locationDesc','grid','distance','bearing','spotTime','comments','skip'
+  'parkName','locationDesc','grid','distance','bearing','spotTime','comments','skip','hide'
 ];
 
 function loadColOrder() {
@@ -4043,7 +4056,7 @@ const COL_WIDTHS_KEY = 'pota-cat-col-pct-v10';
 const COL_WIDTHS_KEY_V9 = 'pota-cat-col-pct-v9';
 const DEFAULT_COL_PCT_OBJ = {
   log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, source: 5, reference: 6,
-  parkName: 14, locationDesc: 7, grid: 5, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4
+  parkName: 14, locationDesc: 7, grid: 5, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4, hide: 4
 };
 
 function loadColWidths() {
@@ -6050,7 +6063,7 @@ function render() {
       }
 
       // Mark hidden spots visually when "show hidden" is on
-      if (showHiddenSpots && isSpotHidden(s.callsign, s.frequency)) {
+      if (showHiddenSpots && isSpotHidden(s.callsign, s.frequency, s.band)) {
         tr.classList.add('spot-hidden-row');
       }
 
@@ -6308,6 +6321,41 @@ function render() {
       });
       skipTd.appendChild(skipButton);
       cellMap.set('skip', skipTd);
+
+      // Hide button cell — one-click band-scoped hide. Auto-lifts when the
+      // spot reappears on a different band (see isSpotHidden band check).
+      const hideTd = document.createElement('td');
+      hideTd.className = 'hide-cell';
+      hideTd.setAttribute('data-col', 'hide');
+      const isBandHidden = !!(s.band && hiddenSpots[s.callsign.toUpperCase()]
+        && hiddenSpots[s.callsign.toUpperCase()]['band:' + s.band]
+        && (hiddenSpots[s.callsign.toUpperCase()]['band:' + s.band] === Infinity
+          || hiddenSpots[s.callsign.toUpperCase()]['band:' + s.band] > Date.now()));
+      const hideButton = document.createElement('button');
+      hideButton.className = 'hide-btn' + (isBandHidden ? ' hidden-on' : '');
+      hideButton.textContent = isBandHidden ? 'Unhide' : 'Hide';
+      hideButton.title = isBandHidden
+        ? `Unhide ${s.callsign} on ${s.band || 'this band'}`
+        : `Hide ${s.callsign} on ${s.band || 'this band'} until they QSY to a different band`;
+      hideButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!s.band) return; // safety — nothing to key off
+        const callKey = s.callsign.toUpperCase();
+        const bandKey = 'band:' + s.band;
+        if (isBandHidden) {
+          // Drop just the band entry; leave any other scopes the user set
+          if (hiddenSpots[callKey]) {
+            delete hiddenSpots[callKey][bandKey];
+            if (Object.keys(hiddenSpots[callKey]).length === 0) delete hiddenSpots[callKey];
+            saveHiddenSpots();
+          }
+        } else {
+          hideSpotEntry(callKey, bandKey, Infinity);
+        }
+        render();
+      });
+      hideTd.appendChild(hideButton);
+      cellMap.set('hide', hideTd);
 
       // Append cells in user-configured column order
       for (const col of colOrder) {
@@ -9204,6 +9252,10 @@ function renderDirvNets(search, bandFilter, statusFilter) {
     const cd = net._cd;
     if (cd.status === 'live') tr.classList.add('dirv-on-air');
     else if (cd.status === 'soon') tr.classList.add('dirv-upcoming');
+    // Frame the currently tuned net (same tolerance as the spot-row match).
+    if (net.frequency && radioFreqKhz !== null && Math.abs(parseFloat(net.frequency) - radioFreqKhz) < 0.5) {
+      tr.classList.add('dirv-tuned');
+    }
 
     const statusBadge = cd.status === 'live' ? '<span class="dirv-status-badge live">Live</span>'
       : cd.status === 'soon' ? '<span class="dirv-status-badge soon">Soon</span>'
@@ -9340,6 +9392,10 @@ function renderDirvSwl(search, bandFilter, statusFilter) {
     const cd = entry._cd;
     if (cd.status === 'live') tr.classList.add('dirv-on-air');
     else if (cd.status === 'soon') tr.classList.add('dirv-upcoming');
+    // Frame the currently tuned broadcast (same logic as the nets table).
+    if (entry.frequency && radioFreqKhz !== null && Math.abs(parseFloat(entry.frequency) - radioFreqKhz) < 0.5) {
+      tr.classList.add('dirv-tuned');
+    }
 
     const statusBadge = cd.status === 'live' ? '<span class="dirv-status-badge live">Live</span>'
       : cd.status === 'soon' ? '<span class="dirv-status-badge soon">Soon</span>'
@@ -10073,6 +10129,8 @@ window.api.onCatFrequency((hz) => {
     notifyVfoTunedSpot(null);
   }
   if (showTable || showMap) render();
+  // Keep the directory view's tuned-row frame in sync when spinning the VFO.
+  if (currentView === 'directory') renderDirectoryView();
 });
 
 window.api.onCatMode((mode) => {

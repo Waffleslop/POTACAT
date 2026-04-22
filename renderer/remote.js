@@ -40,6 +40,45 @@
   var scanSkipped = new Set();
   var scanForceUnskipped = new Set();
 
+  // Hidden-by-band (CALLSIGN -> Set of band labels). Clicking the row Hide
+  // button adds the spot's band; spots on that band for that callsign are
+  // filtered out of the list until they reappear on a different band.
+  // Persisted so refreshes don't surface the same repeat-callers again.
+  const ECHO_HIDDEN_KEY = 'echocat-hidden-bands';
+  var hiddenByBand = {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(ECHO_HIDDEN_KEY) || '{}');
+    for (const k of Object.keys(raw)) {
+      if (Array.isArray(raw[k])) hiddenByBand[k] = new Set(raw[k]);
+    }
+  } catch { hiddenByBand = {}; }
+  function saveHiddenByBand() {
+    const out = {};
+    for (const k of Object.keys(hiddenByBand)) {
+      if (hiddenByBand[k].size > 0) out[k] = Array.from(hiddenByBand[k]);
+    }
+    try { localStorage.setItem(ECHO_HIDDEN_KEY, JSON.stringify(out)); } catch {}
+  }
+  function isCallBandHidden(call, band) {
+    if (!call || !band) return false;
+    const set = hiddenByBand[call.toUpperCase()];
+    return !!(set && set.has(band));
+  }
+  function toggleCallBandHidden(call, band) {
+    if (!call || !band) return false;
+    const key = call.toUpperCase();
+    if (!hiddenByBand[key]) hiddenByBand[key] = new Set();
+    if (hiddenByBand[key].has(band)) {
+      hiddenByBand[key].delete(band);
+      if (hiddenByBand[key].size === 0) delete hiddenByBand[key];
+      saveHiddenByBand();
+      return false;
+    }
+    hiddenByBand[key].add(band);
+    saveHiddenByBand();
+    return true;
+  }
+
   // Refresh rate
   let refreshInterval = 30;
 
@@ -126,9 +165,10 @@
     src: colPrefs.src === true,   // off by default — source (POTA/SOTA/DXC)
     skip: colPrefs.skip !== false,
     log: colPrefs.log !== false,
+    hide: colPrefs.hide !== false,
   };
   // Column ordering — array of column keys in display order
-  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'region', 'src', 'age', 'skip', 'log'];
+  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'region', 'src', 'age', 'skip', 'hide', 'log'];
   var colOrder = colPrefs.order && Array.isArray(colPrefs.order) ? colPrefs.order : defaultColOrder.slice();
   // Ensure any new columns are present in colOrder
   for (var k of defaultColOrder) { if (colOrder.indexOf(k) === -1) colOrder.push(k); }
@@ -138,6 +178,8 @@
   let tunedCountry = '';
   let tunedRef = '';
   let tunedSig = '';
+  // VFO Lock — mirrors desktop _vfoLocked, synced via WS.
+  let vfoLocked = false;
   var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
   let tunedState = '';
   let currentNb = false;
@@ -514,6 +556,97 @@
   soThemeDark.addEventListener('click', () => applyTheme(false));
   soThemeLight.addEventListener('click', () => applyTheme(true));
 
+  // --- Split layout (iPad-sized screens: dock the VFO panel on a side) ---
+  // Modes: 'right' (default), 'left', 'off'. Only actually engages when the
+  // viewport is >= 1000px wide — below that the phone stacked layout is used
+  // regardless of the saved preference.
+  const SPLIT_MQ = window.matchMedia('(min-width: 1000px)');
+  const soLayoutLeft = document.getElementById('so-layout-left');
+  const soLayoutRight = document.getElementById('so-layout-right');
+  const soLayoutOff = document.getElementById('so-layout-off');
+  let splitMode = localStorage.getItem('echocat-split-layout') || 'right';
+  if (splitMode !== 'left' && splitMode !== 'right' && splitMode !== 'off') splitMode = 'right';
+
+  // Remember the original DOM parents/positions of elements we relocate into
+  // the VFO panel when docked, so we can restore them exactly when undocking.
+  const _relocHomes = { latency: null, gear: null };
+  function _captureReloc() {
+    const latency = document.getElementById('latency');
+    const gear = document.getElementById('rig-ctrl-toggle');
+    if (latency && latency.parentNode && !_relocHomes.latency) {
+      _relocHomes.latency = { parent: latency.parentNode, next: latency.nextSibling };
+    }
+    if (gear && gear.parentNode && !_relocHomes.gear) {
+      _relocHomes.gear = { parent: gear.parentNode, next: gear.nextSibling };
+    }
+  }
+
+  function applySplitLayout() {
+    const mainUI = document.getElementById('main-ui');
+    const fullview = document.getElementById('vfo-fullview');
+    const toggleBtn = document.getElementById('vfo-fullview-btn');
+    if (!mainUI || !fullview || !toggleBtn) return;
+    _captureReloc();
+
+    const wantDocked = (splitMode === 'left' || splitMode === 'right') && SPLIT_MQ.matches;
+    const wasDocked = fullview.classList.contains('vfo-docked');
+
+    if (wantDocked) {
+      mainUI.setAttribute('data-split', splitMode);
+      fullview.classList.add('vfo-docked');
+      // Force the fullview into "open" state so its render/draw loop runs.
+      if (fullview.classList.contains('hidden')) toggleBtn.click();
+
+      // Relocate latency into the dial wrap (top-right floater) and the gear
+      // button into the VFO header (right of the frequency display).
+      const latency = document.getElementById('latency');
+      const gear = document.getElementById('rig-ctrl-toggle');
+      const dialWrap = fullview.querySelector('.vf-dial-wrap');
+      const vfHeader = fullview.querySelector('.vf-header');
+      if (latency && dialWrap && latency.parentNode !== dialWrap) dialWrap.appendChild(latency);
+      if (gear && vfHeader && gear.parentNode !== vfHeader) vfHeader.appendChild(gear);
+    } else {
+      mainUI.removeAttribute('data-split');
+      fullview.classList.remove('vfo-docked');
+      // If we were the ones keeping it open (docked), close it now.
+      if (wasDocked && !fullview.classList.contains('hidden')) toggleBtn.click();
+
+      // Put latency and gear back where they started (insertBefore with a null
+      // next-sibling appends at end, matching the original tail position).
+      const latency = document.getElementById('latency');
+      const gear = document.getElementById('rig-ctrl-toggle');
+      if (latency && _relocHomes.latency && latency.parentNode !== _relocHomes.latency.parent) {
+        _relocHomes.latency.parent.insertBefore(latency, _relocHomes.latency.next);
+      }
+      if (gear && _relocHomes.gear && gear.parentNode !== _relocHomes.gear.parent) {
+        _relocHomes.gear.parent.insertBefore(gear, _relocHomes.gear.next);
+      }
+    }
+
+    if (soLayoutLeft)  soLayoutLeft.classList.toggle('active',  splitMode === 'left');
+    if (soLayoutRight) soLayoutRight.classList.toggle('active', splitMode === 'right');
+    if (soLayoutOff)   soLayoutOff.classList.toggle('active',   splitMode === 'off');
+  }
+
+  function setSplitLayout(mode) {
+    splitMode = mode;
+    try { localStorage.setItem('echocat-split-layout', mode); } catch {}
+    applySplitLayout();
+  }
+
+  if (soLayoutLeft)  soLayoutLeft.addEventListener('click',  () => setSplitLayout('left'));
+  if (soLayoutRight) soLayoutRight.addEventListener('click', () => setSplitLayout('right'));
+  if (soLayoutOff)   soLayoutOff.addEventListener('click',   () => setSplitLayout('off'));
+
+  // Re-evaluate when the viewport crosses the breakpoint (rotation, resize).
+  if (SPLIT_MQ.addEventListener) SPLIT_MQ.addEventListener('change', applySplitLayout);
+  else if (SPLIT_MQ.addListener) SPLIT_MQ.addListener(applySplitLayout);
+
+  // Apply once on load. The VFO IIFE runs later on auth-ok so we also
+  // re-apply there (see setupVfoFullview) to cover cold-load ordering.
+  applySplitLayout();
+  window.__echocatApplySplitLayout = applySplitLayout;
+
   // --- Connect ---
   var clubCallInput = document.getElementById('club-callsign');
   var clubPassInput = document.getElementById('club-password');
@@ -620,6 +753,10 @@
         requestWakeLock(); // keep screen on while connected
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
+        // Adopt the current VFO lock state so the button paints correctly
+        // on reconnect / page reload.
+        vfoLocked = !!msg.vfoLocked;
+        updateVfoLockUi();
         // Club member info
         if (msg.member) {
           clubMember = msg.member;
@@ -710,6 +847,11 @@
 
       case 'tune-blocked':
         showToast(msg.reason || 'Tune blocked by license restrictions', 4000);
+        break;
+
+      case 'vfo-lock-state':
+        vfoLocked = !!msg.locked;
+        updateVfoLockUi();
         break;
 
       case 'rig-blocked':
@@ -1163,7 +1305,13 @@
   function updateStatus(s) {
     if (s.freq > 100000) { // ignore bogus values below 100 kHz
       freqDisplay.textContent = formatFreq(s.freq);
+      const prevFreqKhz = currentFreqKhz;
       currentFreqKhz = s.freq / 1000;
+      // Repaint the Dir list so the tuned net/broadcast ring tracks the radio
+      // (e.g. someone spinning the VFO on desktop while ECHOCAT shows Dir).
+      if (activeTab === 'dir' && Math.abs(currentFreqKhz - prevFreqKhz) > 0.05) {
+        renderDirectoryTab();
+      }
       // Sync SSTV phone frequency dropdown
       if (sstvFreqPhone) {
         var khz = Math.round(s.freq / 1000);
@@ -1308,6 +1456,9 @@
       if (regions && s.continent && !regions.has(s.continent)) return false;
       if (showNewOnly && !isNewPark(s)) return false;
       if (hideWorked && isWorkedSpot(s)) return false;
+      // Band-scoped hide (Hide button on each row). Drops out as soon as the
+      // spot appears on a different band.
+      if (isCallBandHidden(s.callsign, s.band)) return false;
       return true;
     });
     filtered.sort((a, b) => {
@@ -1334,6 +1485,25 @@
     return filtered;
   }
 
+  // Per-column grid-track widths (px). Callsign is always the first column.
+  // These widths are what drive row alignment: every .spot-card shares the
+  // same grid-template-columns so callsign/freq/dist/buttons stack in the
+  // same X coordinates regardless of content length.
+  const SPOT_COL_WIDTHS = {
+    call: 120, freq: 80, mode: 56, band: 48,
+    dist: 60, ref: 84, name: 150, region: 56,
+    src: 56, age: 52, skip: 40, hide: 40, log: 40
+  };
+  function computeSpotGrid() {
+    const parts = [SPOT_COL_WIDTHS.call + 'px'];
+    for (const key of colOrder) {
+      if (!colShow[key]) continue;
+      const w = SPOT_COL_WIDTHS[key];
+      if (w) parts.push(w + 'px');
+    }
+    return parts.join(' ');
+  }
+
   function renderSpots() {
     const filtered = getFilteredSpots();
 
@@ -1341,6 +1511,10 @@
       spotList.innerHTML = '<div class="spot-empty">No spots</div>';
       return;
     }
+
+    // Grid template shared by every card — recomputed each render in case
+    // the user toggled column visibility or reordered columns in Settings.
+    spotList.style.setProperty('--spot-grid', computeSpotGrid());
 
     spotList.innerHTML = filtered.map(s => {
       const srcClass = 'source-' + (s.source || 'pota');
@@ -1362,9 +1536,12 @@
       const freqStr = formatSpotFreq(s.frequency);
       const src = s.source || 'pota';
       const srcLabel = src.toUpperCase();
-      const newBadge = newPark ? '<span class="new-badge">NEW</span>' : '';
-      const logBtn = isNet ? '' : '<button type="button" class="spot-log-btn">L</button>';
-      const skipBtn = isNet ? '' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'U' : 'S'}</button>`;
+      const newBadge = newPark ? '<span class="new-badge">N</span>' : '';
+      const logBtn = isNet ? '<span class="spot-btn-empty"></span>' : '<button type="button" class="spot-log-btn">L</button>';
+      const skipBtn = isNet ? '<span class="spot-btn-empty"></span>' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'U' : 'S'}</button>`;
+      const hideBtn = (isNet || !s.band)
+        ? '<span class="spot-btn-empty"></span>'
+        : `<button type="button" class="spot-hide-btn" data-hidecall="${esc(s.callsign)}" data-hideband="${esc(s.band)}" title="Hide ${esc(s.callsign)} on ${esc(s.band)} until QSY">H</button>`;
       const opName = qrzNameCache[(s.callsign || '').toUpperCase()] || '';
       const spotName = opName || s.parkName || s.comments || '';
 
@@ -1388,8 +1565,9 @@
           }
           case 'src': return `<span class="spot-src source-${src}">${srcLabel}</span>`;
           case 'age': return `<span class="spot-age">${age}</span>`;
-          case 'skip': return isNet ? '' : skipBtn;
-          case 'log': return isNet ? '' : logBtn;
+          case 'skip': return skipBtn;
+          case 'log': return logBtn;
+          case 'hide': return hideBtn;
           default: return '';
         }
       }).join('');
@@ -1557,6 +1735,12 @@
       renderSpots();
       return;
     }
+    const hideTarget = e.target.closest('.spot-hide-btn');
+    if (hideTarget) {
+      toggleCallBandHidden(hideTarget.dataset.hidecall, hideTarget.dataset.hideband);
+      renderSpots();
+      return;
+    }
     const logTarget = e.target.closest('.spot-log-btn');
     if (logTarget) {
       const card = logTarget.closest('.spot-card');
@@ -1573,6 +1757,12 @@
     }
     const card = e.target.closest('.spot-card');
     if (!card || !ws || ws.readyState !== WebSocket.OPEN) return;
+    // Lock stops the whole selection flow: no tune, no highlight, no VFO
+    // op-info update. Skip/log buttons above still work.
+    if (vfoLocked) {
+      showToast('VFO Locked — Unlock VFO to change frequency', 2000);
+      return;
+    }
     const freqKhz = card.dataset.freq;
     const mode = card.dataset.mode;
     const callsign = card.dataset.call || '';
@@ -1881,6 +2071,10 @@
 
   function dpTune(freqKhz) {
     if (!freqKhz || isNaN(freqKhz) || freqKhz < 100 || freqKhz > 500000) return;
+    if (vfoLocked) {
+      showToast('VFO Locked — Unlock VFO to change frequency', 2000);
+      return;
+    }
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'tune', freqKhz: freqKhz.toString(), mode: '' }));
     }
@@ -1888,6 +2082,21 @@
     const hz = Math.round(freqKhz * 1000);
     freqDisplay.textContent = formatFreq(hz);
     currentFreqKhz = freqKhz;
+  }
+
+  // Shared between WS handler and button click — updates the lock pill visual.
+  function updateVfoLockUi() {
+    const btn = document.getElementById('vf-lock-btn');
+    if (!btn) return;
+    if (vfoLocked) {
+      btn.innerHTML = '&#x1F512;';
+      btn.classList.add('locked');
+      btn.title = 'VFO Locked — tap to unlock';
+    } else {
+      btn.innerHTML = '&#x1F513;';
+      btn.classList.remove('locked');
+      btn.title = 'Tap to lock VFO';
+    }
   }
 
   // Number button clicks
@@ -6652,7 +6861,8 @@
       var e = entries[i], n = e.n, cd = e.cd;
       if (cd.status === 'off') continue;
       var card = document.createElement('div');
-      card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '');
+      var isTunedNet = n.frequency && currentFreqKhz && Math.abs(parseFloat(n.frequency) - currentFreqKhz) < 0.5;
+      card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedNet ? ' tuned' : '');
       var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
       card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (n.name || 'Unknown') + '</span>' + statusHtml + '</div>' +
         '<div class="dir-card-detail"><span class="dir-card-freq">' + (n.frequency || '?') + ' kHz</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
@@ -6660,14 +6870,41 @@
       (function(net, band) {
         card.addEventListener('click', function() {
           if (!net.frequency) return;
+          if (vfoLocked) {
+            showToast('VFO Locked — Unlock VFO to change frequency', 2000);
+            return;
+          }
           var mode = (net.mode || '').toUpperCase();
           if (mode === 'SSB') {
             var lsbBands = { '160m': 1, '80m': 1, '60m': 1, '40m': 1 };
             mode = lsbBands[band] ? 'LSB' : 'USB';
           }
+          var freqStr = String(net.frequency);
           if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'tune', freqKhz: String(net.frequency), mode: mode }));
+            ws.send(JSON.stringify({ type: 'tune', freqKhz: freqStr, mode: mode }));
           }
+          // Local state update so (a) the matching net row in the spots
+          // table gets the .tuned highlight when the user switches back,
+          // and (b) the VFO op-card shows the net name instead of staying
+          // on the last op/park. Net spots land in `spots` with
+          // source:'net' and frequency matching net.frequency.
+          var hz = parseFloat(freqStr) * 1000;
+          if (hz > 100000) {
+            freqDisplay.textContent = formatFreq(hz);
+            currentFreqKhz = parseFloat(freqStr);
+          }
+          if (mode) modeBadge.textContent = mode;
+          tunedFreqKhz = freqStr;
+          tunedCallsign = net.name || 'HF Net';
+          tunedOpName = '';
+          tunedRef = 'HF NET';
+          tunedSig = '';
+          tunedState = '';
+          tunedCountry = '';
+          renderSpots();
+          // Repaint the Dir list immediately so THIS net gets the tuned
+          // ring (don't wait for the server's freq echo to round-trip).
+          renderDirectoryTab();
         });
       })(n, e.band);
       dirList.appendChild(card);
@@ -6694,7 +6931,8 @@
       var e = entries[i], s = e.s, cd = e.cd;
       if (cd.status === 'off') continue;
       var card = document.createElement('div');
-      card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '');
+      var isTunedSwl = s.frequency && currentFreqKhz && Math.abs(parseFloat(s.frequency) - currentFreqKhz) < 0.5;
+      card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedSwl ? ' tuned' : '');
       var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
       card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (s.station || 'Unknown') + '</span>' + statusHtml + '</div>' +
         '<div class="dir-card-detail"><span class="dir-card-freq">' + (s.frequency || '?') + ' kHz</span>' +
@@ -6703,6 +6941,10 @@
       (function(swl) {
         card.addEventListener('click', function() {
           if (!swl.frequency) return;
+          if (vfoLocked) {
+            showToast('VFO Locked — Unlock VFO to change frequency', 2000);
+            return;
+          }
           var mode = (swl.mode || 'AM').toUpperCase();
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'tune', freqKhz: String(swl.frequency), mode: mode }));
@@ -7731,7 +7973,7 @@
     var callEl = sstvPhoneTexts.find(function(t) { return t.key === 'call'; });
     if (callEl) callEl.label = myCallsign ? 'de ' + myCallsign.toUpperCase() : '';
     var gridEl = sstvPhoneTexts.find(function(t) { return t.key === 'grid'; });
-    if (gridEl) gridEl.label = myGrid ? myGrid.toUpperCase() : '';
+    if (gridEl) gridEl.label = phoneGrid ? phoneGrid.toUpperCase() : '';
     sstvPhoneRenderTextLayers();
     sstvRenderPhoneCompose();
   }
@@ -7851,7 +8093,7 @@
       var callEl = sstvPhoneTexts.find(function(t) { return t.key === 'call'; });
       if (callEl) callEl.label = myCallsign ? 'de ' + myCallsign.toUpperCase() : '';
       var gridEl = sstvPhoneTexts.find(function(t) { return t.key === 'grid'; });
-      if (gridEl) gridEl.label = myGrid ? myGrid.toUpperCase() : '';
+      if (gridEl) gridEl.label = phoneGrid ? phoneGrid.toUpperCase() : '';
       sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key.indexOf('user-') === 0; }).length;
       sstvPhoneSelectedText = null;
       sstvPhoneRenderTextLayers();
@@ -7897,7 +8139,7 @@
       }
     } catch (err) {
       console.error('[SSTV] Template load failed:', err);
-      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template load failed — see console';
+      if (sstvPhoneStatus) sstvPhoneStatus.textContent = 'Template load failed: ' + (err && err.message ? err.message : String(err));
     }
   }
 
@@ -8664,6 +8906,24 @@
     toggleBtn.addEventListener('click', () => isOpen ? hide() : show());
     backBtn.addEventListener('click', hide);
 
+    // VFO Lock button — toggles the global lock state on the desktop host.
+    // The server echoes a vfo-lock-state message back, which drives the UI
+    // update, so desktop and all ECHOCAT clients stay in sync.
+    const vfLockBtn = document.getElementById('vf-lock-btn');
+    if (vfLockBtn) {
+      vfLockBtn.addEventListener('click', () => {
+        const next = !vfoLocked;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'vfo-set-lock', locked: next }));
+        }
+        // Optimistic update so the button responds immediately; the WS echo
+        // from the server will confirm (or correct) it.
+        vfoLocked = next;
+        updateVfoLockUi();
+      });
+      updateVfoLockUi();
+    }
+
     // --- Render: pull from existing shared state, push to view ---
     function renderAll() {
       vfFreq.textContent = currentFreqKhz ? formatFreq(Math.round(currentFreqKhz * 1000)) : '---.---.---';
@@ -8907,6 +9167,13 @@
     // Replace the symbol in the closure isn't easy — instead, use a polling
     // tick while the view is open. Cheap and avoids touching updateStatus.
     setInterval(() => { if (isOpen) renderAll(); }, 500);
+
+    // If the split layout was applied before this IIFE bound click handlers,
+    // the initial toggleBtn.click() was a no-op. Re-apply now so a docked
+    // sidebar actually enters open state and its render loop runs.
+    if (typeof window.__echocatApplySplitLayout === 'function') {
+      window.__echocatApplySplitLayout();
+    }
   })();
   // ===== End Full VFO View =====
 

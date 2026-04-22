@@ -1237,6 +1237,31 @@ a.park-link:hover {
   border-color: var(--accent-red);
 }
 
+.hide-cell {
+  text-align: center;
+}
+
+.hide-btn {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  cursor: pointer;
+}
+
+.hide-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.hide-btn.hidden-on {
+  background: var(--tint-red);
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
 th.no-sort {
   cursor: default;
 }
@@ -5223,6 +5248,20 @@ body.activator-rbn-on #rbn-view {
 
 .directory-view-table tbody tr.dirv-upcoming:hover {
   background: rgba(240, 165, 0, 0.18);
+}
+
+/* Currently tuned net — bold white frame around the row so it stands out
+   from merely on-air/upcoming rows. Applied via inset shadows on each <td>
+   because <tr> can't carry its own outline reliably across browsers. */
+.directory-view-table tbody tr.dirv-tuned td {
+  background: rgba(79, 195, 247, 0.25) !important;
+  box-shadow: inset 0 2px 0 #fff, inset 0 -2px 0 #fff;
+}
+.directory-view-table tbody tr.dirv-tuned td:first-child {
+  box-shadow: inset 4px 0 0 #fff, inset 0 2px 0 #fff, inset 0 -2px 0 #fff;
+}
+.directory-view-table tbody tr.dirv-tuned td:last-child {
+  box-shadow: inset -4px 0 0 #fff, inset 0 2px 0 #fff, inset 0 -2px 0 #fff;
 }
 
 /* Light mode: stronger contrast for highlighted rows */

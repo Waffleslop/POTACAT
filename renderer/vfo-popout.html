@@ -128,6 +128,9 @@
     .op-call { color: var(--accent-blue); font-weight: bold; font-size: 28px; font-family: 'Consolas', monospace; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-detail { color: var(--text-secondary); font-size: 16px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-ref { color: var(--accent-green); font-weight: bold; font-size: 17px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* HF Net card — distinctive pill to separate from operator/park info. */
+    .op-net-name { color: #ffd740; font-weight: bold; font-size: 22px; font-family: inherit; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-net-badge { display: inline-block; background: #ffd740; color: #000; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 2px 8px; border-radius: 999px; margin-top: 2px; }
     /* 2-3 ops: one line per op */
     .op-multi-line { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
     .op-multi-line .op-ml-call { color: var(--accent-blue); font-weight: bold; font-family: 'Consolas', monospace; }
@@ -1760,17 +1763,26 @@ window.api.onTunedSpot((spot) => {
   if (n === 1) {
     // Single operator: full detail with optional photo
     const op = ops[0];
-    if (vfoWidgets['op-photo'] && op.image) {
-      html += '<img class="op-photo" src="' + esc(op.image) + '" onerror="this.style.display=\'none\'">';
+    if (op.source === 'net') {
+      // HF Net — render as net card: net name + HF NET badge + band/mode/status
+      html += '<span class="op-net-name">' + esc(op.callsign) + '</span>';
+      html += '<span class="op-net-badge">HF NET</span>';
+      const netDetail = [op.band, op.mode].filter(Boolean).join(' \u00b7 ');
+      if (netDetail) html += '<span class="op-detail">' + esc(netDetail) + '</span>';
+      if (op.comments) html += '<span class="op-detail">' + esc(op.comments) + '</span>';
+    } else {
+      if (vfoWidgets['op-photo'] && op.image) {
+        html += '<img class="op-photo" src="' + esc(op.image) + '" onerror="this.style.display=\'none\'">';
+      }
+      html += '<span class="op-call">' + esc(op.callsign) + '</span>';
+      if (op.displayName) html += '<span class="op-detail">' + esc(op.displayName) + '</span>';
+      const locParts = [];
+      if (op.country) locParts.push(op.country === 'United States' ? 'USA' : op.country);
+      if (op.grid) locParts.push(op.grid);
+      if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
+      if (op.reference) html += '<span class="op-ref">' + esc(op.reference) + '</span>';
+      if (op.parkName) html += '<span class="op-detail">' + esc(op.parkName) + '</span>';
     }
-    html += '<span class="op-call">' + esc(op.callsign) + '</span>';
-    if (op.displayName) html += '<span class="op-detail">' + esc(op.displayName) + '</span>';
-    const locParts = [];
-    if (op.country) locParts.push(op.country === 'United States' ? 'USA' : op.country);
-    if (op.grid) locParts.push(op.grid);
-    if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
-    if (op.reference) html += '<span class="op-ref">' + esc(op.reference) + '</span>';
-    if (op.parkName) html += '<span class="op-detail">' + esc(op.parkName) + '</span>';
   } else if (n <= 3) {
     // 2-3 ops: one line per op — callsign + name
     for (const op of ops) {

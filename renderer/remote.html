@@ -141,6 +141,7 @@
           <span id="vf-freq" class="vf-freq" title="Tap to type frequency">---.---.---</span>
           <span class="vf-unit">kHz</span>
         </div>
+        <button type="button" id="vf-lock-btn" class="vf-lock-btn" title="Click to lock VFO">&#x1F513;</button>
       </div>
       <div class="vf-pills">
         <button type="button" id="vf-mode-pill" class="vf-pill vf-mode-pill">---</button>
@@ -464,6 +465,14 @@
             <button type="button" class="rc-btn rc-toggle" id="so-theme-light">Light</button>
           </div>
         </div>
+        <div class="so-row" title="Dock the VFO panel on one side at iPad size (&ge; 1000px). PTT moves from the bottom bar into the VFO panel.">
+          <label class="so-label">VFO Panel</label>
+          <div class="so-controls">
+            <button type="button" class="rc-btn rc-toggle" id="so-layout-left">Left</button>
+            <button type="button" class="rc-btn rc-toggle active" id="so-layout-right">Right</button>
+            <button type="button" class="rc-btn rc-toggle" id="so-layout-off">Off</button>
+          </div>
+        </div>
 
         <!-- CW Keyer settings -->
         <div class="so-section-label">CW Keyer</div>
@@ -613,19 +622,17 @@
             <div id="echo-cloud-sync-interval" style="font-size:11px;opacity:0.5;margin-top:4px;">Auto-sync every 5 min</div>
           </div>
           <div id="echo-cloud-sync-msg" style="font-size:11px;opacity:0.6;margin-top:4px;" class="hidden"></div>
-          <!-- Verify Membership — collapsed by default -->
-          <div style="margin-top:10px;">
-            <button type="button" id="echo-cloud-verify-toggle" class="so-step-btn" style="padding:4px 12px;font-size:12px;border-radius:6px;opacity:0.7;">Verify Membership</button>
-            <div id="echo-cloud-verify-panel" class="hidden" style="margin-top:8px;">
-              <span style="font-size:11px;opacity:0.5;display:block;margin-bottom:6px;">Enter your Buy Me a Coffee email if it differs from your account email.</span>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <input type="email" id="echo-cloud-bmac-email" placeholder="BMAC email (or blank for account email)" style="flex:1;min-width:140px;height:32px;padding:0 8px;font-size:13px;background:var(--bg-card);color:var(--text);border:1px solid #444;border-radius:6px;">
-                <button type="button" id="echo-cloud-bmac-verify-btn" class="so-step-btn" style="padding:6px 12px;height:32px;border-radius:6px;">Verify</button>
-              </div>
-            </div>
+          <!-- Account actions: Verify Membership + Sign Out side-by-side -->
+          <div style="display:flex;gap:6px;margin-top:10px;">
+            <button type="button" id="echo-cloud-verify-toggle" class="so-step-btn" style="flex:1;min-width:0;padding:8px;font-size:12px;border-radius:6px;opacity:0.8;">Verify Membership</button>
+            <button type="button" id="echo-cloud-signout-btn" class="so-step-btn" style="flex:1;min-width:0;padding:8px;font-size:12px;border-radius:6px;opacity:0.7;">Sign Out</button>
           </div>
-          <div style="margin-top:12px;text-align:center;">
-            <button type="button" id="echo-cloud-signout-btn" class="so-step-btn" style="padding:4px 14px;font-size:11px;opacity:0.6;border-radius:6px;">Sign Out</button>
+          <div id="echo-cloud-verify-panel" class="hidden" style="margin-top:8px;">
+            <span style="font-size:11px;opacity:0.5;display:block;margin-bottom:6px;">Enter your Buy Me a Coffee email if it differs from your account email.</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <input type="email" id="echo-cloud-bmac-email" placeholder="BMAC email (or blank for account email)" style="flex:1;min-width:140px;height:32px;padding:0 8px;font-size:13px;background:var(--bg-card);color:var(--text);border:1px solid #444;border-radius:6px;">
+              <button type="button" id="echo-cloud-bmac-verify-btn" class="so-step-btn" style="padding:6px 12px;height:32px;border-radius:6px;">Verify</button>
+            </div>
           </div>
         </div>
 
