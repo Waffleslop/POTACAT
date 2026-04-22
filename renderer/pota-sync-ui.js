@@ -186,15 +186,21 @@
     window.api.onPotaSyncStatus((st) => render(st));
   }
 
-  // Refresh subscription gate + status whenever the Cloud settings tab becomes
-  // visible (same pattern cloud-ui.js uses for its own refresh).
-  const obs = new MutationObserver(() => {
-    const cloudFieldsets = document.querySelectorAll('[data-settings-tab="cloud"]');
-    if (cloudFieldsets.length > 0 && !cloudFieldsets[0].classList.contains('hidden')) {
-      refresh();
+  // Refresh the subscription gate + status when the Cloud settings tab
+  // becomes visible. Watch ONLY the fieldsets themselves — an earlier
+  // revision observed document.body with subtree:true + a 'class' filter,
+  // which fired thousands of times at startup (every spot-row highlight /
+  // panel toggle is a class change) and kicked two IPC round-trips per fire,
+  // producing app-wide lag.
+  const cloudFieldsets = document.querySelectorAll('[data-settings-tab="cloud"]');
+  if (cloudFieldsets.length > 0) {
+    const obs = new MutationObserver(() => {
+      if (!cloudFieldsets[0].classList.contains('hidden')) refresh();
+    });
+    for (const fs of cloudFieldsets) {
+      obs.observe(fs, { attributes: true, attributeFilter: ['class'] });
     }
-  });
-  obs.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'] });
+  }
 
   // Initial load (and paint the pill if already enabled + connected)
   refresh();

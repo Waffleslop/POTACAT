@@ -3934,6 +3934,18 @@ function showColContextMenu(x, y) {
   });
   colContextMenu.appendChild(resetItem);
 
+  const resetWidthsItem = document.createElement('div');
+  resetWidthsItem.className = 'col-ctx-item';
+  resetWidthsItem.style.cssText = 'cursor:pointer;padding:4px 8px;';
+  resetWidthsItem.textContent = 'Reset Column Widths';
+  resetWidthsItem.addEventListener('click', () => {
+    const defaults = { ...DEFAULT_COL_PCT_OBJ };
+    saveColWidths(defaults);
+    applyColWidths(defaults);
+    colContextMenu.classList.add('hidden');
+  });
+  colContextMenu.appendChild(resetWidthsItem);
+
   // Position within viewport
   colContextMenu.classList.remove('hidden');
   const menuW = colContextMenu.offsetWidth;
@@ -4063,19 +4075,27 @@ const DEFAULT_COL_PCT_OBJ = {
 };
 
 function loadColWidths() {
+  // Forward-migrate: any key added to DEFAULT_COL_PCT_OBJ later (e.g. 'hide')
+  // should pick up a sensible default instead of rendering with no width at
+  // all — otherwise table-layout gives it the entire leftover track, which
+  // reads as a massive column in the UI.
+  const fillMissing = (obj) => {
+    let changed = false;
+    for (const col of DEFAULT_COL_ORDER) {
+      if (obj[col] == null) { obj[col] = DEFAULT_COL_PCT_OBJ[col] || 5; changed = true; }
+    }
+    if (changed) saveColWidths(obj);
+    return obj;
+  };
   try {
     const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY));
-    if (saved && typeof saved === 'object' && !Array.isArray(saved)) return saved;
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) return fillMissing(saved);
   } catch { /* ignore */ }
   // Migrate from v9 object format — add missing columns with defaults
   try {
     const v9 = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY_V9));
     if (v9 && typeof v9 === 'object' && !Array.isArray(v9)) {
-      for (const col of DEFAULT_COL_ORDER) {
-        if (v9[col] == null) v9[col] = DEFAULT_COL_PCT_OBJ[col] || 5;
-      }
-      saveColWidths(v9);
-      return v9;
+      return fillMissing(v9);
     }
   } catch { /* ignore */ }
   return { ...DEFAULT_COL_PCT_OBJ };
