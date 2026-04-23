@@ -276,6 +276,8 @@ contextBridge.exposeInMainWorld('api', {
   // highlighting (Tyler K0OTC feature request, 2026-04-22).
   jtcatSpotsHighlight: (data) => ipcRenderer.send('jtcat-spots-highlight', data),
   // POTA.app Sync (parks-worked CSV auto-import)
+  // Per-spot history lookup (POTA/WWFF via POTA.app, DXC/RBN via local buffers)
+  potaSpotHistory: (data) => ipcRenderer.invoke('pota-spot-history', data),
   potaSyncStatus: () => ipcRenderer.invoke('pota-sync-status'),
   potaSyncConnect: () => ipcRenderer.invoke('pota-sync-connect'),
   potaSyncDisconnect: () => ipcRenderer.invoke('pota-sync-disconnect'),

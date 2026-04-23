@@ -6256,6 +6256,27 @@ function render() {
         evBadge.textContent = matchedEvent.badge || 'EVT';
         callTd.appendChild(evBadge);
       }
+      // Spot history ⓘ — POTA/WWFF use POTA.app's spot/comments endpoint;
+      // DXC/RBN use POTACAT's local non-deduped history buffers. Net spots
+      // and other sources don't have history available, so no icon.
+      if (s.source === 'pota' || s.source === 'wwff' || s.source === 'dxc' || s.source === 'rbn') {
+        const histBtn = document.createElement('span');
+        histBtn.className = 'spot-history-btn';
+        histBtn.textContent = '\u24D8'; // ⓘ
+        histBtn.title = 'Show spot history';
+        histBtn.dataset.histSource = s.source;
+        histBtn.dataset.histCall = s.callsign;
+        histBtn.dataset.histRef = s.reference || '';
+        histBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // don't tune from icon click
+          showSpotHistoryPopover(histBtn, {
+            source: s.source,
+            callsign: s.callsign,
+            reference: s.reference || '',
+          });
+        });
+        callTd.appendChild(histBtn);
+      }
       cellMap.set('callsign', callTd);
 
       // Operator name cell (from QRZ lookup)
@@ -6978,6 +6999,88 @@ window.api.onTuneBlocked((msg) => {
 const QSO_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 500];
 const celebratedMilestones = new Set();
 let lastKnownDailyQsoCount = 0;
+
+// --- Spot history popover -------------------------------------------------
+// Anchored popover next to the row's ⓘ icon. Fetches recent prior spots for
+// the callsign + reference and lists time / spotter / freq+mode / comments.
+let _spotHistoryEl = null;
+function _hideSpotHistory() {
+  if (_spotHistoryEl) { _spotHistoryEl.remove(); _spotHistoryEl = null; }
+}
+document.addEventListener('click', (e) => {
+  if (!_spotHistoryEl) return;
+  if (_spotHistoryEl.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains('spot-history-btn')) return;
+  _hideSpotHistory();
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _hideSpotHistory(); });
+
+function _fmtSpotAgo(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso.endsWith('Z') ? iso : iso + 'Z');
+  if (isNaN(t)) return '';
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm ago';
+  return Math.floor(sec / 86400) + 'd ago';
+}
+
+async function showSpotHistoryPopover(anchorEl, { source, callsign, reference }) {
+  _hideSpotHistory();
+  const pop = document.createElement('div');
+  pop.className = 'spot-history-popover';
+  pop.innerHTML = `<div class="sh-header">
+      <strong>${callsign}</strong>${reference ? ' · <span class="sh-ref">' + reference + '</span>' : ''}
+      <span class="sh-source">${(source || '').toUpperCase()}</span>
+    </div>
+    <div class="sh-body"><div class="sh-loading">Loading\u2026</div></div>`;
+  document.body.appendChild(pop);
+  _spotHistoryEl = pop;
+
+  // Position near the icon, kept on screen
+  const rect = anchorEl.getBoundingClientRect();
+  pop.style.left = Math.min(rect.left, window.innerWidth - 380) + 'px';
+  pop.style.top = Math.min(rect.bottom + 4, window.innerHeight - 280) + 'px';
+
+  let res;
+  try {
+    res = await window.api.potaSpotHistory({ source, callsign, reference });
+  } catch (err) {
+    res = { ok: false, error: err.message || String(err), entries: [] };
+  }
+  if (!_spotHistoryEl) return; // user closed it while we waited
+  const body = pop.querySelector('.sh-body');
+  if (!res || !res.ok) {
+    body.innerHTML = '<div class="sh-empty">' + (res && res.error ? esc(res.error) : 'Failed to load history') + '</div>';
+    return;
+  }
+  const entries = res.entries || [];
+  if (entries.length === 0) {
+    body.innerHTML = '<div class="sh-empty">No prior spots found.</div>';
+    return;
+  }
+  // Render entries — newest first. POTA returns spotTime ISO; DXC/RBN
+  // entries we built locally also carry spotTime.
+  body.innerHTML = '';
+  for (const e of entries) {
+    const row = document.createElement('div');
+    row.className = 'sh-row';
+    const spotter = e.spotter || e.de || '';
+    const freq = e.frequency != null ? parseFloat(e.frequency).toFixed(1) : '';
+    const mode = e.mode || '';
+    const comments = e.comments || e.comment || '';
+    row.innerHTML = `
+      <div class="sh-row-line1">
+        <span class="sh-time">${esc(_fmtSpotAgo(e.spotTime))}</span>
+        <span class="sh-spotter">${esc(spotter)}</span>
+        <span class="sh-fm">${esc(freq)}${mode ? ' · ' + esc(mode) : ''}</span>
+      </div>
+      ${comments ? '<div class="sh-comments">' + esc(comments) + '</div>' : ''}
+    `;
+    body.appendChild(row);
+  }
+}
 
 function showCatCelebration(message) {
   const existing = document.querySelector('.cat-celebration');

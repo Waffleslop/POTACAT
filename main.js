@@ -70,7 +70,7 @@ process.stderr?.on('error', () => {});
 // Allow AudioContext to play without user gesture (required for JTCAT audio capture in Chromium 142+)
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 const { execFile, spawn } = require('child_process');
-const { fetchSpots: fetchPotaSpots } = require('./lib/pota');
+const { fetchSpots: fetchPotaSpots, fetchSpotHistory: fetchPotaSpotHistory } = require('./lib/pota');
 const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader } = require('./lib/sota');
 const sotaUploader = new SotaUploader();
 const { CatClient, RigctldClient, CivClient, listSerialPorts } = require('./lib/cat');
@@ -178,6 +178,14 @@ let solarTimer = null;
 let rigctldProc = null;
 let cluster = null; // legacy — replaced by clusterClients Map
 let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
+// Non-deduped spot histories so the "spot history" popover can show prior
+// spots of the same callsign (clusterSpots itself is deduped per call+band so
+// it can't show history). Cap at 2000 entries each — ~1 hour at typical
+// rates. Each entry: { callsign, frequency, mode, spotter, comments, source,
+// spotTime, band }.
+let _dxcSpotHistory = [];
+let _rbnSpotHistory = [];
+const _SPOT_HISTORY_CAP = 2000;
 let clusterFlushTimer = null; // throttle timer for cluster -> renderer updates
 let cwSpotsClients = new Map(); // club -> DxClusterClient (one per checked club, or single for all)
 let cwSpots = []; // streaming CW club spots (FIFO, max 500)
@@ -1030,6 +1038,12 @@ function connectCluster() {
       if (clusterSpots.length > 500) {
         clusterSpots = clusterSpots.slice(-500);
       }
+      // Append to non-deduped history so the spot-history popover can show
+      // prior spots from different nodes / earlier times.
+      _dxcSpotHistory.push(spot);
+      if (_dxcSpotHistory.length > _SPOT_HISTORY_CAP) {
+        _dxcSpotHistory = _dxcSpotHistory.slice(-_SPOT_HISTORY_CAP);
+      }
 
       if (!clusterFlushTimer) {
         clusterFlushTimer = setTimeout(() => {
@@ -1346,6 +1360,12 @@ function connectRbn() {
       );
       rbnWatchSpots.push(mainSpot);
       if (rbnWatchSpots.length > 50) rbnWatchSpots = rbnWatchSpots.slice(-50);
+      // Non-deduped history for the spot-history popover (different reverse
+      // beacons + spot times for the same call).
+      _rbnSpotHistory.push({ ...mainSpot, spotter: raw.skimmer || raw.spotter || '' });
+      if (_rbnSpotHistory.length > _SPOT_HISTORY_CAP) {
+        _rbnSpotHistory = _rbnSpotHistory.slice(-_SPOT_HISTORY_CAP);
+      }
     }
 
     // Throttle: flush to renderer at most once every 2s
@@ -7972,6 +7992,38 @@ app.whenReady().then(() => {
   ipcMain.handle('pota-sync-now', async () => potaSync.pull());
   ipcMain.handle('pota-sync-set-enabled', async (_e, v) => { await potaSync.setEnabled(!!v); return potaSync.status(); });
   ipcMain.handle('pota-sync-set-interval', async (_e, v) => { await potaSync.setIntervalMin(v); return potaSync.status(); });
+
+  // Spot history (per-callsign list of recent prior spots) for the new
+  // ⓘ popover on the desktop spots table. POTA/WWFF hit POTA.app's public
+  // spot/comments endpoint; DXC/RBN are served from local non-deduped
+  // history buffers.
+  ipcMain.handle('pota-spot-history', async (_e, { source, callsign, reference } = {}) => {
+    const call = (callsign || '').toUpperCase();
+    if (!call) return { ok: false, error: 'Missing callsign', entries: [] };
+    const src = (source || '').toLowerCase();
+    try {
+      if (src === 'pota' || src === 'wwff') {
+        if (!reference) return { ok: false, error: 'Missing park reference', entries: [] };
+        const entries = await fetchPotaSpotHistory(call, reference);
+        return { ok: true, source: src, entries };
+      }
+      if (src === 'dxc') {
+        const entries = _dxcSpotHistory
+          .filter(s => (s.callsign || '').toUpperCase() === call)
+          .slice(-25).reverse(); // newest first
+        return { ok: true, source: src, entries };
+      }
+      if (src === 'rbn') {
+        const entries = _rbnSpotHistory
+          .filter(s => (s.callsign || '').toUpperCase() === call)
+          .slice(-25).reverse();
+        return { ok: true, source: src, entries };
+      }
+      return { ok: false, error: 'Unsupported source: ' + src, entries: [] };
+    } catch (err) {
+      return { ok: false, error: err.message || String(err), entries: [] };
+    }
+  });
 
   // Ensure launcher background service is installed for boot startup.
   // Only INSTALL (to Startup/LaunchAgents) — don't spawn duplicates on every app launch.
