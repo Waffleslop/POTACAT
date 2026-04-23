@@ -3211,6 +3211,20 @@ function connectCwKeyPort() {
   // CW key port for external DTR keying
   const portPath = settings.cwKeyPort;
   if (!portPath) return;
+  // Refuse to open the same serial port as the CAT target. Windows serial
+  // ports are exclusive, so if rigctld already has it (or the direct serial
+  // CAT client does), opening a second handle causes both openers to keep
+  // evicting each other — a ~4 s ECONNRESET reconnect storm that presents as
+  // the CAT/Rig tabs flashing. Reported by AB9AI 2026-04-23 with FTdx3000
+  // configured as serialPort=COM5 + cwKeyPort=COM5.
+  const catTarget = settings.catTarget || {};
+  const catPath = catTarget.serialPort || catTarget.path || '';
+  if (catPath && portPath.toLowerCase() === catPath.toLowerCase()) {
+    sendCatLog(`[CW Key Port] Skipping ${portPath} — same as CAT serial port. ` +
+      `To use dedicated DTR keying you need a second USB-serial adapter on a different COM port; ` +
+      `otherwise leave cwKeyPort blank and POTACAT will key via CI-V / rig protocol.`);
+    return;
+  }
   const { SerialPort } = require('serialport');
   const port = new SerialPort({
     path: portPath,
