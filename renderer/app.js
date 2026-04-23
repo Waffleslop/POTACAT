@@ -7304,6 +7304,10 @@ quickHideWorkedParks.addEventListener('change', async () => {
 quickShowMeter.addEventListener('change', () => {
   meterBoxVisible = quickShowMeter.checked;
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
+  // Mirror to settings.json — localStorage can be reset across app updates
+  // (Electron session partition), which made the checkbox spring back to
+  // enabled for users who disabled it. Reported by bjh 2026-04-23.
+  window.api.saveSettings({ showMeterBox: meterBoxVisible });
   meterBox.classList.toggle('hidden', !meterBoxVisible);
   document.getElementById('set-show-meter').checked = meterBoxVisible;
 });
@@ -7734,6 +7738,15 @@ async function openSettingsDialog(tab) {
   setWcagMode.checked = s.wcagMode === true;
   setColorRows.checked = s.colorRows !== false; // default true
   setEnableSolar.checked = s.enableSolar === true;
+  // Reconcile meter-box visibility: settings.json is authoritative (durable
+  // across app updates). Fall back to localStorage only when settings.json
+  // has no value yet (fresh install / pre-fix version).
+  if (typeof s.showMeterBox === 'boolean') {
+    meterBoxVisible = s.showMeterBox;
+    localStorage.setItem('meterBoxVisible', meterBoxVisible);
+    quickShowMeter.checked = meterBoxVisible;
+    meterBox.classList.toggle('hidden', !meterBoxVisible);
+  }
   document.getElementById('set-show-meter').checked = meterBoxVisible;
   setEnableBandActivity.checked = s.enableBandActivity === true;
   setShowBearing.checked = s.showBearing === true;
@@ -7979,7 +7992,9 @@ settingsSave.addEventListener('click', async () => {
   const wcagEnabled = setWcagMode.checked;
   const colorRowsEnabled = setColorRows.checked;
   const solarEnabled = setEnableSolar.checked;
-  // Sync meter visibility from Settings Display checkbox
+  // Sync meter visibility from Settings Display checkbox — persist to both
+  // localStorage (fast path on next start) and settings.json (durable across
+  // app updates; localStorage can reset when Electron bumps session partition).
   meterBoxVisible = document.getElementById('set-show-meter').checked;
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
   quickShowMeter.checked = meterBoxVisible;
@@ -8127,6 +8142,7 @@ settingsSave.addEventListener('click', async () => {
     wcagMode: wcagEnabled,
     colorRows: colorRowsEnabled,
     enableSolar: solarEnabled,
+    showMeterBox: meterBoxVisible,
     enableBandActivity: bandActivityEnabled,
     showBearing: showBearingEnabled,
     enableSplitView: enableSplitViewVal,

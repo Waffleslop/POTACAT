@@ -1732,7 +1732,51 @@ function disconnectPskrMap() {
 
 // --- Shared QSO save logic ---
 // Module-scoped so WSJT-X, Echo CAT, and IPC handlers can all use it
+// Recent-save dedup window. Catches runaway callers (stacked listeners, stuck
+// retry loops, renderer races) that try to save the same QSO dozens of times
+// in a few hundred ms. Reported by bjh 2026-04-23: one Log click produced
+// 200-300 duplicate ADIF entries + a cascade of "100/150/200 QSOs" milestone
+// popups. A legitimate two-fer/three-fer save uses distinct sigInfo refs so
+// it's not caught by this dedup.
+const _qsoSaveHistory = new Map(); // key -> lastSavedTs
+const _QSO_DEDUP_WINDOW_MS = 2000;
+let _qsoSaveDupWarningLogged = false;
+function _qsoDedupKey(q) {
+  return [
+    (q.callsign || '').toUpperCase(),
+    q.qsoDate || '',
+    q.timeOn || '',
+    (q.sigInfo || '').toUpperCase(),
+    (q.band || '').toUpperCase(),
+    (q.mode || '').toUpperCase(),
+  ].join('|');
+}
+
 async function saveQsoRecord(qsoData) {
+  // Duplicate-save guard — see _qsoSaveHistory comment above.
+  const dedupKey = _qsoDedupKey(qsoData);
+  const now = Date.now();
+  const lastTs = _qsoSaveHistory.get(dedupKey);
+  if (lastTs && now - lastTs < _QSO_DEDUP_WINDOW_MS) {
+    if (!_qsoSaveDupWarningLogged) {
+      _qsoSaveDupWarningLogged = true;
+      sendCatLog(`[QSO] SUPPRESSED duplicate save within ${_QSO_DEDUP_WINDOW_MS}ms: ${dedupKey}. ` +
+        `Something upstream (spot-log form, WSJT-X bridge, ECHOCAT log-qso, etc.) is firing saveQsoRecord repeatedly. ` +
+        `Subsequent suppressions are silent to avoid log spam.`);
+      // Reset the warning flag after 30 s so we'll still log a fresh warning
+      // if the same thing happens again in a separate operating session.
+      setTimeout(() => { _qsoSaveDupWarningLogged = false; }, 30_000);
+    }
+    return { success: false, suppressed: true, error: 'Duplicate save suppressed' };
+  }
+  _qsoSaveHistory.set(dedupKey, now);
+  // Prune history older than the window to keep the Map small.
+  if (_qsoSaveHistory.size > 100) {
+    for (const [k, ts] of _qsoSaveHistory) {
+      if (now - ts > _QSO_DEDUP_WINDOW_MS * 2) _qsoSaveHistory.delete(k);
+    }
+  }
+
   // Inject operator callsign from settings
   if (settings.myCallsign && !qsoData.operator) {
     qsoData.operator = settings.myCallsign.toUpperCase();
