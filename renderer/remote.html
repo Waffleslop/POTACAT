@@ -179,6 +179,64 @@
           <button type="button" id="vf-log-btn" class="vf-log-btn">Log QSO</button>
         </div>
       </div>
+      <!-- Optional widgets — each toggleable from Settings → VFO Panel.
+           All start hidden; user opts in per-widget so the panel doesn't
+           crowd by default. -->
+      <div id="vf-widgets" class="vf-widgets">
+        <!-- Meters: S-meter, SWR, TX power -->
+        <div class="vf-widget hidden" data-vf-widget="meter">
+          <div class="vf-meter-pills">
+            <span class="vf-meter-pill" id="vf-smeter-pill" title="S-meter">S--</span>
+            <span class="vf-meter-pill" id="vf-swr-pill" title="SWR">SWR --</span>
+            <span class="vf-meter-pill" id="vf-pwr-pill" title="TX power">--W</span>
+          </div>
+        </div>
+        <!-- Rig controls: ATU + NB toggles, RF Gain + TX Power sliders -->
+        <div class="vf-widget hidden" data-vf-widget="rigctl">
+          <div class="vf-rig-row">
+            <button type="button" id="vf-atu-btn" class="vf-rig-btn">ATU</button>
+            <button type="button" id="vf-nb-btn" class="vf-rig-btn">NB</button>
+          </div>
+          <div class="vf-rig-slider-row">
+            <label>RF</label>
+            <input type="range" id="vf-rfgain-slider" min="0" max="100" value="50">
+            <span id="vf-rfgain-val">50</span>
+          </div>
+          <div class="vf-rig-slider-row">
+            <label>TX</label>
+            <input type="range" id="vf-txpower-slider" min="0" max="100" value="50">
+            <span id="vf-txpower-val">50</span>
+          </div>
+        </div>
+        <!-- Filter bandwidth stepper -->
+        <div class="vf-widget hidden" data-vf-widget="filter">
+          <div class="vf-rig-row vf-bw-row">
+            <button type="button" id="vf-bw-dn" class="vf-rig-btn">&#x25C0;</button>
+            <span id="vf-bw-label" class="vf-bw-label">Filter --</span>
+            <button type="button" id="vf-bw-up" class="vf-rig-btn">&#x25B6;</button>
+          </div>
+        </div>
+        <!-- CW: WPM stepper + text-to-send input -->
+        <div class="vf-widget hidden" data-vf-widget="cw">
+          <div class="vf-rig-row">
+            <button type="button" id="vf-cw-wpm-dn" class="vf-rig-btn">&minus;</button>
+            <span id="vf-cw-wpm" class="vf-cw-wpm">20 wpm</span>
+            <button type="button" id="vf-cw-wpm-up" class="vf-rig-btn">+</button>
+          </div>
+          <div class="vf-cw-row">
+            <input type="text" id="vf-cw-input" placeholder="Type CW to send" autocomplete="off" autocapitalize="characters">
+            <button type="button" id="vf-cw-send" class="vf-rig-btn">TX</button>
+          </div>
+        </div>
+        <!-- Voice macros (SSB) -->
+        <div class="vf-widget hidden" data-vf-widget="voice">
+          <div id="vf-voice-row" class="vf-macro-row"></div>
+        </div>
+        <!-- Custom CAT buttons -->
+        <div class="vf-widget hidden" data-vf-widget="customcat">
+          <div id="vf-customcat-row" class="vf-macro-row"></div>
+        </div>
+      </div>
       <div class="vf-ptt-row">
         <button type="button" id="vf-ptt" class="vf-ptt-btn">PTT</button>
       </div>
@@ -472,6 +530,31 @@
             <button type="button" class="rc-btn rc-toggle active" id="so-layout-right">Right</button>
             <button type="button" class="rc-btn rc-toggle" id="so-layout-off">Off</button>
           </div>
+        </div>
+        <div class="so-section-label">VFO Panel Widgets</div>
+        <div class="so-row" title="Show S-meter, SWR, and TX power pills inside the VFO panel.">
+          <label class="so-label">Meters</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-meter">Off</button></div>
+        </div>
+        <div class="so-row" title="ATU + Noise Blanker toggles, RF Gain + TX Power sliders.">
+          <label class="so-label">Rig Controls</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-rigctl">Off</button></div>
+        </div>
+        <div class="so-row" title="Filter bandwidth stepper (mode-aware: CW / SSB / Digi widths).">
+          <label class="so-label">Filter Width</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-filter">Off</button></div>
+        </div>
+        <div class="so-row" title="CW WPM stepper + type-to-send text input.">
+          <label class="so-label">CW Keyer</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-cw">Off</button></div>
+        </div>
+        <div class="so-row" title="Voice macro buttons (SSB / FM / AM voice playback).">
+          <label class="so-label">Voice Macros</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-voice">Off</button></div>
+        </div>
+        <div class="so-row" title="Custom CAT command buttons (configure in the Custom CAT settings below).">
+          <label class="so-label">Custom CAT</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-customcat">Off</button></div>
         </div>
 
         <!-- CW Keyer settings -->

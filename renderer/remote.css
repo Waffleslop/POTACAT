@@ -3702,6 +3702,119 @@ html, body {
   box-shadow: 0 0 16px rgba(255, 23, 68, 0.6);
 }
 
+/* ===== VFO panel widgets =====
+   Modular blocks rendered inside the docked / fullscreen VFO. Each widget
+   has its own toggle in Settings → VFO Panel Widgets and starts hidden so
+   the panel stays compact for users who don't want them. */
+.vf-widgets { display: flex; flex-direction: column; gap: 6px; }
+.vf-widget {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.vf-widget.hidden { display: none; }
+.vf-meter-pills {
+  display: flex;
+  gap: 6px;
+  justify-content: space-around;
+}
+.vf-meter-pill {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 10px;
+  background: var(--bg);
+  border-radius: 999px;
+  min-width: 56px;
+  text-align: center;
+  color: var(--text);
+}
+.vf-rig-row, .vf-rig-slider-row, .vf-cw-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+}
+.vf-rig-row { justify-content: center; }
+.vf-rig-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.vf-rig-btn:hover { background: var(--bg-hover); }
+.vf-rig-btn.active {
+  background: var(--pota);
+  color: #000;
+  border-color: var(--pota);
+}
+.vf-rig-slider-row label {
+  min-width: 28px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.vf-rig-slider-row input[type="range"] { flex: 1; }
+.vf-rig-slider-row span {
+  min-width: 36px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.vf-bw-label {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  min-width: 100px;
+  text-align: center;
+  color: var(--text);
+}
+.vf-cw-wpm {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  min-width: 70px;
+  text-align: center;
+  color: var(--text);
+}
+.vf-cw-row input[type="text"] {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+}
+.vf-macro-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.vf-macro-btn {
+  flex: 1 1 30%;
+  min-width: 60px;
+  padding: 8px 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  -webkit-tap-highlight-color: transparent;
+}
+.vf-macro-btn:active { background: var(--bg-hover); }
+.vf-macro-btn.empty { opacity: 0.4; }
+
 /* ===== iPad / large-tablet split view =====
    At >=1000px (iPad landscape & iPad Pro portrait) the VFO fullview is
    permanently docked on one side, spot list fills the rest. PTT lives only

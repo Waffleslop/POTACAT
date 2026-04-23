@@ -1013,7 +1013,11 @@
         break;
 
       case 'cw-config-ack':
-        if (msg.wpm) { cwWpm = msg.wpm; cwWpmLabel.textContent = cwWpm + ' WPM'; }
+        if (msg.wpm) {
+          cwWpm = msg.wpm;
+          cwWpmLabel.textContent = cwWpm + ' WPM';
+          if (window.__vfSyncCw) window.__vfSyncCw();
+        }
         if (msg.mode) {
           cwMode = msg.mode;
           cwModeB.classList.toggle('active', cwMode === 'iambicB');
@@ -1388,6 +1392,8 @@
       if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
       if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;
     }
+    // Mirror the same state into the optional VFO panel widgets.
+    if (window.__vfUpdateRig) window.__vfUpdateRig(s);
   }
 
   function formatBw(hz) {
@@ -3027,6 +3033,8 @@
     // Always show section — Edit button allows creating buttons from ECHOCAT
     // Re-render editor if open
     if (customCatEditing) renderCustomCatEditor();
+    // Mirror to the optional VFO Custom CAT widget if it's enabled.
+    if (window.__vfRenderCustomCat) window.__vfRenderCustomCat();
   }
 
   function renderCustomCatEditor() {
@@ -3269,6 +3277,8 @@
   }
 
   function updateEchoSmeter(val) {
+    // VFO panel pill mirror (no-op when widget hidden / not initialised)
+    if (window.__vfSetMeter) window.__vfSetMeter(val);
     if (!echoMeterEnabled) return;
     echoMeterStrip.classList.remove('hidden');
     var level = val / 255;
@@ -3283,6 +3293,7 @@
   }
 
   function updateEchoSwr(val) {
+    if (val > 0 && window.__vfSetSwr) window.__vfSetSwr(1.0 + val / 60);
     if (!echoMeterEnabled || val <= 0) return;
     var swr = 1.0 + (val / 60);
     var level = Math.min(1, (swr - 1) / 4);
@@ -3293,6 +3304,7 @@
   }
 
   function updateEchoSwrRatio(swr) {
+    if (window.__vfSetSwr) window.__vfSetSwr(swr);
     if (!echoMeterEnabled) return;
     var level = Math.min(1, (swr - 1) / 4);
     var color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
@@ -3302,6 +3314,7 @@
   }
 
   function updateEchoPower(watts) {
+    if (window.__vfSetPwr) window.__vfSetPwr(watts);
     if (!echoMeterEnabled) return;
     var w = Math.max(0, +watts || 0);
     if (w > echoPwrMaxSeen) echoPwrMaxSeen = w;
@@ -6058,12 +6071,14 @@
     cwWpmLabel.textContent = cwWpm + ' WPM';
     sendCwConfig();
     updateEchoCwSpotWpm();
+    if (window.__vfSyncCw) window.__vfSyncCw();
   });
   cwWpmUp.addEventListener('click', function() {
     cwWpm = Math.min(50, cwWpm + 1);
     cwWpmLabel.textContent = cwWpm + ' WPM';
     sendCwConfig();
     updateEchoCwSpotWpm();
+    if (window.__vfSyncCw) window.__vfSyncCw();
   });
 
   // Spotted station WPM display + sync
@@ -6598,6 +6613,7 @@
           ssbMacroRow.appendChild(btn);
         })(i);
       }
+      if (window.__vfRenderVoiceMacros) window.__vfRenderVoiceMacros();
     });
   }
 
@@ -9279,6 +9295,205 @@
     }
   })();
   // ===== End Full VFO View =====
+
+  // ===== VFO Widgets (opt-in modular blocks inside the VFO panel) =====
+  // Each widget shows/hides based on settings persisted to localStorage.
+  // Implementations either listen to existing state vars (currentNb, currentAtu,
+  // currentFilterWidth, etc.) and incoming WS messages, or delegate clicks to
+  // the existing rc-* / cw-* / ssb-macro / custom-cat handlers in the Settings
+  // overlay so we don't duplicate complex audio/playback logic.
+  (function setupVfoWidgets() {
+    const VFO_WIDGETS_KEY = 'echocat-vfo-widgets';
+    const WIDGET_IDS = ['meter', 'rigctl', 'filter', 'cw', 'voice', 'customcat'];
+    let widgetState = {};
+    try { widgetState = JSON.parse(localStorage.getItem(VFO_WIDGETS_KEY) || '{}') || {}; } catch { widgetState = {}; }
+
+    function applyVisibility() {
+      WIDGET_IDS.forEach((id) => {
+        const el = document.querySelector(`.vf-widget[data-vf-widget="${id}"]`);
+        if (el) el.classList.toggle('hidden', !widgetState[id]);
+        const tgl = document.getElementById('so-vfw-' + id);
+        if (tgl) {
+          tgl.classList.toggle('active', !!widgetState[id]);
+          tgl.textContent = widgetState[id] ? 'On' : 'Off';
+        }
+      });
+    }
+    function setWidget(id, on) {
+      widgetState[id] = !!on;
+      try { localStorage.setItem(VFO_WIDGETS_KEY, JSON.stringify(widgetState)); } catch {}
+      applyVisibility();
+      // Re-render content for widgets that need a refresh on enable
+      if (on && id === 'voice') renderVfVoice();
+      if (on && id === 'customcat') renderVfCustomCat();
+      if (on && id === 'cw') vfCwSync();
+    }
+
+    // Wire toggles
+    WIDGET_IDS.forEach((id) => {
+      const tgl = document.getElementById('so-vfw-' + id);
+      if (tgl) tgl.addEventListener('click', () => setWidget(id, !widgetState[id]));
+    });
+
+    // ----- Meter widget: S-meter / SWR / TX-power pills -----
+    const vfSmeterPill = document.getElementById('vf-smeter-pill');
+    const vfSwrPill = document.getElementById('vf-swr-pill');
+    const vfPwrPill = document.getElementById('vf-pwr-pill');
+    function vfSetMeter(val) {
+      if (!vfSmeterPill) return;
+      const color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
+      vfSmeterPill.style.color = color;
+      vfSmeterPill.textContent = val <= 120
+        ? 'S' + Math.round(val * 9 / 120)
+        : 'S9+' + Math.round((val - 120) * 60 / 135);
+    }
+    function vfSetSwr(swr) {
+      if (!vfSwrPill || swr <= 0) return;
+      const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+      vfSwrPill.style.color = color;
+      vfSwrPill.textContent = swr < 10 ? swr.toFixed(1) : '>10';
+    }
+    function vfSetPwr(w) {
+      if (!vfPwrPill) return;
+      vfPwrPill.textContent = w >= 100 ? Math.round(w) + 'W' : (+w).toFixed(1) + 'W';
+    }
+    // Expose update functions on window so the existing locally-declared
+    // updateEcho* functions (which run in the IIFE's lexical scope and can't
+    // be reassigned from out here) can call us via explicit hooks. The
+    // hooks are added inline at the call sites in the main handler/update
+    // functions — see updateEchoSmeter / updateEchoSwr / updateEchoPower.
+    window.__vfSetMeter = vfSetMeter;
+    window.__vfSetSwr = vfSetSwr;
+    window.__vfSetPwr = vfSetPwr;
+
+    // ----- Rig-control widget: ATU / NB toggles + RF Gain / TX Power sliders -----
+    const vfAtuBtn = document.getElementById('vf-atu-btn');
+    const vfNbBtn = document.getElementById('vf-nb-btn');
+    const vfRfGainSlider = document.getElementById('vf-rfgain-slider');
+    const vfRfGainVal = document.getElementById('vf-rfgain-val');
+    const vfTxPowerSlider = document.getElementById('vf-txpower-slider');
+    const vfTxPowerVal = document.getElementById('vf-txpower-val');
+    if (vfAtuBtn) vfAtuBtn.addEventListener('click', () => { if (rcAtuBtn) rcAtuBtn.click(); });
+    if (vfNbBtn) vfNbBtn.addEventListener('click', () => { if (rcNbBtn) rcNbBtn.click(); });
+    if (vfRfGainSlider) {
+      vfRfGainSlider.addEventListener('input', () => {
+        vfRfGainVal.textContent = vfRfGainSlider.value;
+        if (rcRfGainSlider) {
+          rcRfGainSlider.value = vfRfGainSlider.value;
+          if (gainNode) {} // no-op; mirroring just for display
+        }
+      });
+      vfRfGainSlider.addEventListener('change', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'set-rfgain', value: parseInt(vfRfGainSlider.value, 10) }));
+        }
+      });
+    }
+    if (vfTxPowerSlider) {
+      vfTxPowerSlider.addEventListener('input', () => {
+        vfTxPowerVal.textContent = vfTxPowerSlider.value;
+      });
+      vfTxPowerSlider.addEventListener('change', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'set-txpower', value: parseInt(vfTxPowerSlider.value, 10) }));
+        }
+      });
+    }
+
+    // ----- Filter widget: BW stepper -----
+    const vfBwLabel = document.getElementById('vf-bw-label');
+    const vfBwDn = document.getElementById('vf-bw-dn');
+    const vfBwUp = document.getElementById('vf-bw-up');
+    if (vfBwDn) vfBwDn.addEventListener('click', () => { if (rcBwDn) rcBwDn.click(); });
+    if (vfBwUp) vfBwUp.addEventListener('click', () => { if (rcBwUp) rcBwUp.click(); });
+
+    // ----- CW widget: WPM stepper + text-to-send input -----
+    const vfCwWpm = document.getElementById('vf-cw-wpm');
+    const vfCwWpmDn = document.getElementById('vf-cw-wpm-dn');
+    const vfCwWpmUp = document.getElementById('vf-cw-wpm-up');
+    const vfCwInput = document.getElementById('vf-cw-input');
+    const vfCwSend = document.getElementById('vf-cw-send');
+    if (vfCwWpmDn) vfCwWpmDn.addEventListener('click', () => { if (cwWpmDn) cwWpmDn.click(); vfCwSync(); });
+    if (vfCwWpmUp) vfCwWpmUp.addEventListener('click', () => { if (cwWpmUp) cwWpmUp.click(); vfCwSync(); });
+    if (vfCwSend) vfCwSend.addEventListener('click', () => {
+      const t = vfCwInput.value.trim();
+      if (t) { sendCwText(t); vfCwInput.value = ''; }
+    });
+    if (vfCwInput) vfCwInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); vfCwSend.click(); }
+    });
+    function vfCwSync() {
+      if (vfCwWpm && typeof cwWpm === 'number') vfCwWpm.textContent = cwWpm + ' wpm';
+    }
+
+    // ----- Voice macros: mirror buttons from the Settings overlay's row -----
+    const vfVoiceRow = document.getElementById('vf-voice-row');
+    function renderVfVoice() {
+      if (!vfVoiceRow) return;
+      vfVoiceRow.innerHTML = '';
+      const src = document.getElementById('ssb-macro-row');
+      if (!src) return;
+      Array.from(src.querySelectorAll('button')).forEach((srcBtn) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vf-macro-btn';
+        btn.textContent = srcBtn.textContent;
+        btn.title = srcBtn.title || '';
+        if (srcBtn.style.opacity && parseFloat(srcBtn.style.opacity) < 1) btn.classList.add('empty');
+        btn.addEventListener('click', () => srcBtn.click());
+        vfVoiceRow.appendChild(btn);
+      });
+    }
+
+    // ----- Custom CAT: mirror buttons from the Settings overlay's row -----
+    const vfCustomCatRow = document.getElementById('vf-customcat-row');
+    function renderVfCustomCat() {
+      if (!vfCustomCatRow) return;
+      vfCustomCatRow.innerHTML = '';
+      const src = document.getElementById('rc-custom-cat-btns');
+      if (!src) return;
+      Array.from(src.querySelectorAll('button')).forEach((srcBtn) => {
+        const name = (srcBtn.textContent || '').trim();
+        if (!name) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vf-macro-btn';
+        btn.textContent = name;
+        btn.addEventListener('click', () => srcBtn.click());
+        vfCustomCatRow.appendChild(btn);
+      });
+    }
+
+    // ----- Hook exports -----
+    // Expose VFO widget update entrypoints for the existing in-scope
+    // functions (updateRigControls / updateEchoSwr / updateEchoPower /
+    // renderSsbMacros / renderCustomCatButtons) to call via explicit hook
+    // invocations. Adding hook calls at the call sites is more reliable than
+    // monkey-patching across the IIFE boundary.
+    window.__vfUpdateRig = function(s) {
+      if (s.nb !== undefined && vfNbBtn) vfNbBtn.classList.toggle('active', s.nb);
+      if (s.atu !== undefined && vfAtuBtn) vfAtuBtn.classList.toggle('active', s.atu);
+      if (s.filterWidth !== undefined && vfBwLabel) vfBwLabel.textContent = 'Filter ' + (typeof formatBw === 'function' ? formatBw(s.filterWidth) : s.filterWidth);
+      if (s.rfgain !== undefined && vfRfGainSlider) {
+        vfRfGainSlider.value = s.rfgain;
+        if (vfRfGainVal) vfRfGainVal.textContent = s.rfgain;
+      }
+      if (s.txpower !== undefined && vfTxPowerSlider) {
+        vfTxPowerSlider.value = s.txpower;
+        if (vfTxPowerVal) vfTxPowerVal.textContent = s.txpower;
+      }
+    };
+    window.__vfRenderVoiceMacros = renderVfVoice;
+    window.__vfRenderCustomCat = renderVfCustomCat;
+    window.__vfSyncCw = vfCwSync;
+
+    // First paint
+    applyVisibility();
+    vfCwSync();
+    if (widgetState.voice) renderVfVoice();
+    if (widgetState.customcat) renderVfCustomCat();
+  })();
+  // ===== End VFO Widgets =====
 
   // Auto-connect on page load
   connect('');
