@@ -272,6 +272,9 @@ contextBridge.exposeInMainWorld('api', {
   cloudGetSettings: () => ipcRenderer.invoke('cloud-get-settings'),
   cloudPutSettings: (data) => ipcRenderer.invoke('cloud-put-settings', data),
   onCloudSyncStatus: (cb) => ipcRenderer.on('cloud-sync-status', (_e, data) => cb(data)),
+  // Main -> JTCAT popout: push currently-visible spot calls for decode-row
+  // highlighting (Tyler K0OTC feature request, 2026-04-22).
+  jtcatSpotsHighlight: (data) => ipcRenderer.send('jtcat-spots-highlight', data),
   // POTA.app Sync (parks-worked CSV auto-import)
   potaSyncStatus: () => ipcRenderer.invoke('pota-sync-status'),
   potaSyncConnect: () => ipcRenderer.invoke('pota-sync-connect'),

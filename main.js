@@ -8639,6 +8639,18 @@ app.whenReady().then(() => {
     _currentFilterWidth = hz;
   });
 
+  // Relay visible-spot callsigns from the main renderer's filtered spot
+  // table into any open JTCAT window so decode rows can be highlighted for
+  // POTA spots the user currently has in view.
+  ipcMain.on('jtcat-spots-highlight', (_e, data) => {
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-spots-highlight', data);
+    }
+    if (jtcatMapPopoutWin && !jtcatMapPopoutWin.isDestroyed()) {
+      jtcatMapPopoutWin.webContents.send('jtcat-spots-highlight', data);
+    }
+  });
+
   // --- JTCAT Pop-out Window ---
   ipcMain.on('jtcat-popout-open', () => {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {

@@ -52,6 +52,10 @@ contextBridge.exposeInMainWorld('api', {
   qrzLookup: (callsign) => ipcRenderer.invoke('qrz-lookup', callsign),
   // Theme
   onPopoutTheme: (cb) => ipcRenderer.on('jtcat-popout-theme', (_e, theme) => cb(theme)),
+  // Spot-list highlight — receives the currently-visible POTA/WWFF callsigns
+  // from the main renderer so JTCAT can color-match decode rows that match
+  // what's in the filtered spot table.
+  onJtcatSpotsHighlight: (cb) => ipcRenderer.on('jtcat-spots-highlight', (_e, data) => cb(data)),
   // Focus main window (for QSO editing)
   focusMain: () => ipcRenderer.send('jtcat-popout-focus-main'),
   // Window controls

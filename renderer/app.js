@@ -132,6 +132,36 @@ let myCallsign = '';
 let lastTunedSpot = null; // last clicked/tuned spot for quick respot
 let activatorSettingsPanelOpen = false; // hoisted to avoid TDZ in closeActivatorSettingsPanel()
 
+// Cache of the last set we pushed to JTCAT — short "call|new?" signature so
+// we can skip no-op sends. render() runs on every tick and spot update, but
+// the filtered set usually only changes a few times a minute.
+let _lastJtcatHighlightSig = '';
+
+function pushJtcatSpotsHighlight(filtered) {
+  if (!window.api || !window.api.jtcatSpotsHighlight) return;
+  const calls = [];
+  const seen = new Set();
+  for (const s of filtered) {
+    // POTA/WWFF only — JTCAT highlight is about activator calls, not DX
+    // cluster spots or RBN watch hits.
+    if (s.source !== 'pota' && s.source !== 'wwff') continue;
+    const call = (s.callsign || '').toUpperCase();
+    if (!call || seen.has(call)) continue;
+    seen.add(call);
+    calls.push({
+      call,
+      reference: s.reference || '',
+      isNewPark: (s.source === 'pota' || s.source === 'wwff')
+        && s.reference && workedParksSet.size > 0 && !workedParksSet.has(s.reference),
+    });
+  }
+  // Cheap signature for dedup
+  const sig = calls.map(c => c.call + (c.isNewPark ? '!' : '')).join(',');
+  if (sig === _lastJtcatHighlightSig) return;
+  _lastJtcatHighlightSig = sig;
+  try { window.api.jtcatSpotsHighlight({ calls }); } catch {}
+}
+
 /** Send tuned spot info to VFO popout */
 function notifyVfoTunedSpot(spot) {
   if (!spot) { window.api.vfoTunedSpot(null); return; }
@@ -6020,6 +6050,7 @@ function render() {
 
   spotCountEl.textContent = `${filtered.length} spots`;
   updateParksStatsOverlay();
+  pushJtcatSpotsHighlight(filtered);
 
   if (showTable) {
     tbody.innerHTML = '';

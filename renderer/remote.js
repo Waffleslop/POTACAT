@@ -6215,9 +6215,29 @@
   }
   updatePaddleHelp();
 
+  // Per-contact "release safety" — if we told the server a paddle was pressed
+  // but never got around to telling it released (browser keyup lost, MIDI
+  // note-off dropped on Android Bluetooth, tab backgrounded mid-press, etc.),
+  // fire an unconditional release after 8 s. Server has a 1.5 s watchdog too;
+  // this is an extra belt in case spurious keydowns keep resetting it while
+  // the true release is missing.
+  var _paddleReleaseTimer = { dit: null, dah: null };
   function sendPaddle(contact, state) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
+    }
+    if (_paddleReleaseTimer[contact]) {
+      clearTimeout(_paddleReleaseTimer[contact]);
+      _paddleReleaseTimer[contact] = null;
+    }
+    if (state) {
+      _paddleReleaseTimer[contact] = setTimeout(function() {
+        _paddleReleaseTimer[contact] = null;
+        if (contact === 'dit') ditDown = false; else dahDown = false;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 0 }));
+        }
+      }, 8000);
     }
   }
 

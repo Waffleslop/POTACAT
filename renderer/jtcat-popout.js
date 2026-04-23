@@ -32,6 +32,10 @@
   var qsoArcs = {};    // "A↔B" -> {arc, from, to, lastSeen}
   var ARC_SEGMENTS = 32;
   var qrzCache = {};   // callsign -> {name, fetched}
+  // Map of UPPERCASE callsign -> {isNewPark, reference} for calls currently
+  // visible in POTACAT's main filtered spot list. Pushed from main renderer
+  // on each render(); drives the .jp-spotted / .jp-new-park row classes.
+  var spottedCalls = new Map();
 
   // Load settings
   window.api.getSettings().then(function(s) {
@@ -484,7 +488,13 @@
       var entityStr = d.entity ? '<span class="jp-entity">' + esc(d.entity) + '</span>' : '';
 
       var row = document.createElement('div');
-      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '') + (d.watched ? ' jp-watched' : '');
+      // Spot-list highlight — match on the decoded DX call. isNewPark bumps
+      // the styling from a subtle stripe to a stronger green tint so the op
+      // can spot unworked parks at a glance during multi-slice operating.
+      var spotMatch = d.call ? spottedCalls.get(String(d.call).toUpperCase()) : null;
+      var spotClass = spotMatch ? (spotMatch.isNewPark ? ' jp-new-park' : ' jp-spotted') : '';
+      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '') + (d.watched ? ' jp-watched' : '') + spotClass;
+      if (spotMatch && spotMatch.reference) row.title = 'Spotted at ' + spotMatch.reference + (spotMatch.isNewPark ? ' (new park)' : '');
       var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
       // Band badge for multi-slice decodes
       var bandBadge = '';
@@ -536,6 +546,43 @@
     syncEl.textContent = 'Sync: OK';
     syncEl.classList.add('jtcat-synced');
   });
+
+  // Spot-list highlight push from the main renderer. Rebuild the Map, then
+  // re-tag already-rendered rows in place so existing decodes recolor
+  // instantly when the user flips a filter in the main spot table.
+  if (window.api.onJtcatSpotsHighlight) {
+    window.api.onJtcatSpotsHighlight(function(data) {
+      spottedCalls.clear();
+      var calls = (data && data.calls) || [];
+      for (var i = 0; i < calls.length; i++) {
+        var c = calls[i];
+        if (!c || !c.call) continue;
+        spottedCalls.set(String(c.call).toUpperCase(), { isNewPark: !!c.isNewPark, reference: c.reference || '' });
+      }
+      // Repaint existing rows — iterate both band-activity and my-activity
+      // because both may hold matching decodes.
+      [bandActivity, myActivity].forEach(function(container) {
+        if (!container) return;
+        var rows = container.querySelectorAll('.jp-row');
+        rows.forEach(function(row) {
+          var msg = row.querySelector('.jp-msg');
+          if (!msg) return;
+          // Extract the DX call from the message (token 1 for CQ, token 1
+          // for direct — good enough heuristic for FT8/FT4 grammar).
+          var parts = (msg.textContent || '').trim().split(/\s+/);
+          var dxCall = '';
+          if (parts[0] === 'CQ') dxCall = parts[1] === 'DX' ? parts[2] : parts[1];
+          else dxCall = parts[1] || '';
+          if (!dxCall) { row.classList.remove('jp-spotted', 'jp-new-park'); return; }
+          var match = spottedCalls.get(dxCall.toUpperCase());
+          row.classList.toggle('jp-spotted', !!(match && !match.isNewPark));
+          row.classList.toggle('jp-new-park', !!(match && match.isNewPark));
+          if (match && match.reference) row.title = 'Spotted at ' + match.reference + (match.isNewPark ? ' (new park)' : '');
+          else if (!match) row.removeAttribute('title');
+        });
+      });
+    });
+  }
 
   window.api.onJtcatCycle(function(data) {
     if (data.mode === 'FT2') {
