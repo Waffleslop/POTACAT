@@ -2090,6 +2090,8 @@ let blScale = 1.0; // banner size scale (1.0 = default, persisted across session
 let blFreqEdited = false;  // user manually edited freq — don't auto-fill
 let blModeEdited = false;  // user manually edited mode — don't auto-fill
 let blTimeEdited = false;  // user manually edited time — don't auto-fill
+let blRstSentEdited = false; // user manually edited RST Sent — don't clobber with default
+let blRstRcvdEdited = false; // user manually edited RST Rcvd — don't clobber with default
 let blClockTimer = null;
 let blLookupTimer = null;
 
@@ -2129,12 +2131,16 @@ function updateBlModeFromRadio() {
   if (mapped !== prev) updateBlRstDefaults(mapped);
 }
 
-/** Set RST defaults: 59 for phone, 599 for CW/digital */
+/** Set RST defaults: 59 for phone, 599 for CW/digital. Skips any field the
+ *  user has already typed into — fixes RaptorOO report where Sent/Rcvd
+ *  values appeared to "instantly revert to 59" because a stray mode-change
+ *  event (e.g. brief CAT poll flip through an unmapped mode like DIGU that
+ *  falls back to SSB) triggered this reset while the user was mid-typing. */
 function updateBlRstDefaults(mode) {
   const isPhone = mode === 'SSB' || mode === 'USB' || mode === 'LSB' || mode === 'FM' || mode === 'AM';
   const def = isPhone ? '59' : '599';
-  blRstSent.value = def;
-  blRstRcvd.value = def;
+  if (!blRstSentEdited) blRstSent.value = def;
+  if (!blRstRcvdEdited) blRstRcvd.value = def;
 }
 
 function updateBlRespotVisibility() {
@@ -2193,9 +2199,15 @@ blType.addEventListener('change', () => {
 blFreq.addEventListener('input', () => { blFreqEdited = true; });
 blMode.addEventListener('change', () => {
   blModeEdited = true;
+  // User is actively picking a mode — that's an explicit intent, so allow the
+  // RST default to refresh even if they'd typed a value earlier.
+  blRstSentEdited = false;
+  blRstRcvdEdited = false;
   updateBlRstDefaults(blMode.value);
 });
 blTime.addEventListener('input', () => { blTimeEdited = true; });
+blRstSent.addEventListener('input', () => { blRstSentEdited = true; });
+blRstRcvd.addEventListener('input', () => { blRstRcvdEdited = true; });
 
 // QRZ lookup on callsign input (debounced)
 blCallsign.addEventListener('input', () => {
@@ -2354,9 +2366,14 @@ async function saveBannerQso() {
       blFreqEdited = false;
       blModeEdited = false;
       blTimeEdited = false;
+      // Clear RST edit flags so the next QSO gets fresh defaults from the current mode.
+      blRstSentEdited = false;
+      blRstRcvdEdited = false;
       updateBlFreqFromRadio();
       updateBlModeFromRadio();
       updateBlClock();
+      // Re-apply RST defaults now that the per-QSO edit flags are cleared.
+      updateBlRstDefaults(blMode.value);
       blCallsign.focus();
       // If in activator mode, add to activation log so it shows immediately
       if (appMode === 'activator' && activationActive && activatorParkRefs.length > 0) {
