@@ -3608,10 +3608,13 @@ function connectRemote() {
       // Icom default: txrx (CI-V PTT 0x1C) — universal, no DTR config needed
       // Models with DTR keying support can override via cw.paddleKey: 'dtr'
       let paddleMethod = cwCaps.paddleKey || 'txrx';
-      // DTR keying only works with a dedicated CW key port (external USB-serial adapter).
-      // Without one, fall back to txrx (CI-V PTT) so USB CI-V rigs still key.
+      // DTR keying without a dedicated CW key port: fall back to toggling DTR on
+      // the main CAT serial port. This is what the radio's "USB Keying (CW) = USB(A) DTR"
+      // menu actually reads, and it produces real RF rather than silent PTT.
+      // Falling back to txrx would send CI-V 0x1C 0x00 (PTT only) — on an IC-7300 that
+      // keys the transmitter with no CW output (KM4CFT, 2026-04-21).
       if (paddleMethod === 'dtr' && !(cwKeyPort && cwKeyPort.isOpen)) {
-        paddleMethod = 'txrx';
+        paddleMethod = 'main-dtr';
       }
       if (!_cwKeyLoggedRoute) {
         _cwKeyLoggedRoute = true;
@@ -3619,6 +3622,10 @@ function connectRemote() {
       }
       if (paddleMethod === 'dtr') {
         // Dedicated CW Key Port is handling DTR — skip main CAT port
+      } else if (paddleMethod === 'main-dtr') {
+        // Toggle DTR/RTS on the main CAT serial port (no second adapter).
+        // Requires the radio's "USB Keying (CW)" menu to be set to USB(A) DTR/RTS.
+        if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwCaps.dtrPins || { dtr: true });
       } else if (paddleMethod === 'ta' && cwCaps.taKey) {
         cat.setCwKeyTa(down);
       } else {
