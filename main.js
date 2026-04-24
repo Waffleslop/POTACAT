@@ -160,6 +160,7 @@ let propPopoutWin = null;    // pop-out propagation map window
 let vfoPopoutWin = null;     // pop-out VFO window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
+let bandspreadPopoutWin = null; // pop-out bandspread window
 let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
 let _sstvLastActivityMs = 0; // last VIS/image timestamp — for heartbeat log
 let _sstvHeartbeatTimer = null;
@@ -824,7 +825,17 @@ async function connectCat() {
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     sendCatLog(`Connecting to Icom on ${target.path}`);
-    transport.connect({ path: target.path, baudRate: target.baudRate || 19200, dtrOff: target.dtrOff });
+    // Default DTR/RTS to LOW on the main CAT port. USB-CDC serial defaults
+    // DTR high at open, but many Icom rigs (IC-7300, MK II, etc.) can be
+    // configured to use DTR as a CW key source (Menu → SET → Connectors →
+    // USB Keying (CW) = USB(A) DTR). In that mode, idle-high DTR means the
+    // rig sees CW keyed-down any time it's in CW mode, and the moment the
+    // user switches to CW the tone goes out. Forcing DTR low on connect
+    // avoids that. POTACAT's CW keying uses CI-V 0x1C 0x01 for paddle
+    // elements (or a dedicated cwKeyPort for DTR-keying workflows) so this
+    // safety is always correct. Reported by KM4CFT 2026-04-24.
+    const dtrOff = target.dtrOff !== false; // default true
+    transport.connect({ path: target.path, baudRate: target.baudRate || 19200, dtrOff });
 
   } else if (target.type === 'civ-tcp') {
     // Raw CI-V frames over TCP. Works with:
@@ -5896,6 +5907,10 @@ function sendMergedSpots() {
   if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) {
     spotsPopoutWin.webContents.send('spots-popout-data', merged);
   }
+  // Forward to bandspread pop-out if open (reuses 'spots' channel)
+  if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+    bandspreadPopoutWin.webContents.send('spots', merged);
+  }
   // Trigger QRZ lookups for new callsigns (async, non-blocking)
   if (qrz.configured && settings.enableQrz) {
     const callsigns = [...new Set(merged.map(s => s.callsign))];
@@ -8589,6 +8604,83 @@ app.whenReady().then(() => {
       clusterPopoutWin.webContents.send('cluster-popout-theme', theme);
     }
   });
+
+  // --- Bandspread Pop-out ---
+  ipcMain.on('bandspread-popout-open', () => {
+    if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+      bandspreadPopoutWin.focus();
+      return;
+    }
+    const isMac = process.platform === 'darwin';
+    bandspreadPopoutWin = new BrowserWindow({
+      width: 900,
+      height: 320,
+      title: 'Bandspread',
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-bandspread-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    const saved = settings.bandspreadPopoutBounds;
+    if (saved && saved.width > 300 && saved.height > 120 && isOnScreen(saved)) {
+      bandspreadPopoutWin.setBounds(clampToWorkArea(saved));
+    }
+    bandspreadPopoutWin.show();
+    bandspreadPopoutWin.setMenuBarVisibility(false);
+    bandspreadPopoutWin.loadFile(path.join(__dirname, 'renderer', 'bandspread-popout.html'));
+
+    bandspreadPopoutWin.on('close', () => {
+      if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+        if (!bandspreadPopoutWin.isMaximized() && !bandspreadPopoutWin.isMinimized()) {
+          settings.bandspreadPopoutBounds = bandspreadPopoutWin.getBounds();
+          saveSettings(settings);
+        }
+      }
+    });
+    bandspreadPopoutWin.on('closed', () => {
+      bandspreadPopoutWin = null;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('bandspread-popout-status', false);
+      }
+    });
+    bandspreadPopoutWin.webContents.on('did-finish-load', () => {
+      const theme = settings.lightMode ? 'light' : 'dark';
+      bandspreadPopoutWin.webContents.send('bandspread-popout-theme', theme);
+      // Push current spot snapshot so the strip renders immediately instead of waiting for the next refresh cycle.
+      try {
+        const netSpots = getActiveNetSpots();
+        const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
+        bandspreadPopoutWin.webContents.send('spots', merged);
+      } catch { /* ignore if any source array isn't ready yet */ }
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('bandspread-popout-status', true);
+      }
+    });
+    bandspreadPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        bandspreadPopoutWin.webContents.toggleDevTools();
+      }
+    });
+  });
+
+  ipcMain.on('bandspread-popout-minimize', () => { if (bandspreadPopoutWin) bandspreadPopoutWin.minimize(); });
+  ipcMain.on('bandspread-popout-maximize', () => {
+    if (!bandspreadPopoutWin) return;
+    if (bandspreadPopoutWin.isMaximized()) bandspreadPopoutWin.unmaximize();
+    else bandspreadPopoutWin.maximize();
+  });
+  ipcMain.on('bandspread-popout-close', () => { if (bandspreadPopoutWin) bandspreadPopoutWin.close(); });
+
+  ipcMain.on('bandspread-popout-theme', (_e, theme) => {
+    if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+      bandspreadPopoutWin.webContents.send('bandspread-popout-theme', theme);
+    }
+  });
+
 
   // --- Activation Map Pop-out ---
   ipcMain.on('actmap-popout-open', () => {
