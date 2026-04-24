@@ -2524,10 +2524,15 @@
     </label>
 
     <div class="welcome-section-label">Receive SSTV</div>
-    <label class="checkbox-label" style="margin-bottom:8px;">
+    <label class="checkbox-label" style="margin-bottom:4px;">
       <input type="checkbox" id="welcome-enable-auto-sstv" checked>
       Automatically switch to the 40 m &amp; 20 m SSTV calling frequencies and download images when the radio is idle
     </label>
+    <div style="margin-left:22px;margin-bottom:8px;display:flex;align-items:center;gap:6px;font-size:13px;">
+      <span>Switch after</span>
+      <input type="number" id="welcome-auto-sstv-min" min="5" max="600" value="90" style="width:60px;">
+      <span>minutes of no CAT activity</span>
+    </div>
 
     <div class="welcome-section-label">QRZ Lookup (optional)</div>
     <span class="help-text" style="display:block;margin-bottom:6px;">Shows operator name, location, and callsign details on spots. Requires a QRZ account.</span>

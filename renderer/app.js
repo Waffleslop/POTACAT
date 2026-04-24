@@ -13046,6 +13046,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   const licenseClassVal = document.getElementById('welcome-license-class').value;
   const hideOobChecked = document.getElementById('welcome-hide-oob').checked;
   const autoSstvChecked = document.getElementById('welcome-enable-auto-sstv').checked;
+  const autoSstvMinVal = Math.max(5, Math.min(600, parseInt(document.getElementById('welcome-auto-sstv-min').value, 10) || 90));
   const lightModeEnabled = welcomeLightMode.checked;
   const qrzUser = (document.getElementById('welcome-qrz-user')?.value || '').trim().toUpperCase();
   const qrzPass = document.getElementById('welcome-qrz-pass')?.value || '';
@@ -13060,6 +13061,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     licenseClass: licenseClassVal,
     hideOutOfBand: hideOobChecked,
     enableAutoSstv: autoSstvChecked,
+    autoSstvInactivityMin: autoSstvMinVal,
     firstRun: false,
     lastVersion: currentSettings.appVersion,
     lightMode: lightModeEnabled,
@@ -13111,6 +13113,7 @@ async function checkFirstRun(force = false) {
       // attribute handles that); on re-open we reflect whatever the user
       // has saved — `!== false` so undefined stays ON.
       document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv !== false;
+      document.getElementById('welcome-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
       const welcomeQrzUser = document.getElementById('welcome-qrz-user');
       const welcomeQrzPass = document.getElementById('welcome-qrz-pass');
       if (welcomeQrzUser) welcomeQrzUser.value = s.qrzUsername || '';
