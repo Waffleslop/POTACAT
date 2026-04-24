@@ -2328,8 +2328,14 @@ async function saveBannerQso() {
         gridsquare: parkLocGrid || (qrzInfo ? (qrzInfo.grid || '') : ''),
         country: qrzInfo ? (qrzInfo.country || '') : '',
         comment: commentBase,
-        // Include activation context if activator mode is running
-        ...(appMode === 'activator' && activationActive && activatorParkRefs.length > 0
+        // Include activation context whenever an activation is running, even
+        // if the user has switched the UI to Hunter mode to use the banner
+        // logger. Dean N7VBN / Bob N7FQT report: "when I start an activation
+        // then hunt a P2P, my park info is dropped from the log." Gate only
+        // on activationActive — appMode is a UI-view choice, not a log
+        // semantic. The activation ends with endActivation(), which clears
+        // the flag and stops the auto-inject.
+        ...(activationActive && activatorParkRefs.length > 0
           ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
           : {}),
         // Only respot on the first callsign
@@ -2380,8 +2386,9 @@ async function saveBannerQso() {
       // Re-apply RST defaults now that the per-QSO edit flags are cleared.
       updateBlRstDefaults(blMode.value);
       blCallsign.focus();
-      // If in activator mode, add to activation log so it shows immediately
-      if (appMode === 'activator' && activationActive && activatorParkRefs.length > 0) {
+      // If an activation is running (even from hunter-mode banner), append
+      // to the activator contacts list so totals/UI reflect the contact.
+      if (activationActive && activatorParkRefs.length > 0) {
         const contact = {
           callsign,
           frequency: String(freqKhz),
@@ -6878,8 +6885,10 @@ logSaveBtn.addEventListener('click', async () => {
         gridsquare: parkLocGrid || (logQrzInfo ? logQrzInfo.grid : ''),
         country: logQrzInfo ? logQrzInfo.country : '',
         comment: commentBase,
-        // Include activation context if activator mode is running
-        ...(appMode === 'activator' && activationActive && activatorParkRefs.length > 0
+        // Include activation context whenever an activation is running —
+        // see the banner-logger comment above (Dean/Bob report). Gate is
+        // activationActive only, not appMode.
+        ...(activationActive && activatorParkRefs.length > 0
           ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
           : {}),
         // Only respot on the first callsign
@@ -6920,8 +6929,9 @@ logSaveBtn.addEventListener('click', async () => {
     const displayCalls = callsigns.join(', ');
     if (lastResult && lastResult.success) {
       logDialog.close();
-      // If in activator mode, add to activation log so it shows immediately
-      if (appMode === 'activator' && activationActive && activatorParkRefs.length > 0) {
+      // If an activation is running (regardless of UI mode), append to the
+      // activator contacts list so the live activation log stays complete.
+      if (activationActive && activatorParkRefs.length > 0) {
         for (const cs of callsigns) {
           const contact = {
             callsign: cs,
