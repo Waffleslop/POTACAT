@@ -177,6 +177,18 @@ test('Yaesu parse MD0C response -> DIGU', () => {
   assert.strictEqual(mode, 'DIGU');
 });
 
+test('Yaesu setSplit(true) -> ST1;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
+  codec.setSplit(true);
+  assert.strictEqual(writes[0], 'ST1;');
+});
+
+test('Yaesu setSplit(false) -> ST0;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
+  codec.setSplit(false);
+  assert.strictEqual(writes[0], 'ST0;');
+});
+
 // =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
@@ -229,6 +241,18 @@ test('Kenwood filter FW direct Hz', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
   codec.setFilterWidth(500);
   assert.strictEqual(writes[0], 'FW0500;');
+});
+
+test('Kenwood setSplit(true) -> FT1;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
+  codec.setSplit(true);
+  assert.strictEqual(writes[0], 'FT1;');
+});
+
+test('Kenwood setSplit(false) -> FT0;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
+  codec.setSplit(false);
+  assert.strictEqual(writes[0], 'FT0;');
 });
 
 test('Kenwood parse FA response (11 digits)', () => {
@@ -300,6 +324,18 @@ test('rigctld setTransmit on -> T 1', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
   codec.setTransmit(true);
   assert.strictEqual(writes[0], 'T 1\n');
+});
+
+test('rigctld setSplit(true) -> S 1 VFOB', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.setSplit(true);
+  assert.strictEqual(writes[0], 'S 1 VFOB\n');
+});
+
+test('rigctld setSplit(false) -> S 0 VFOA', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.setSplit(false);
+  assert.strictEqual(writes[0], 'S 0 VFOA\n');
 });
 
 test('rigctld setNb (non-Yaesu) -> U NB 1', () => {
