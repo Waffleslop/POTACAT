@@ -1216,7 +1216,8 @@
             <label style="margin-top:4px;display:block;">Audio Output (phone &rarr; radio TX):
               <select id="rig-remote-audio-output" style="width:100%;margin-top:2px;"><option value="">-- system default --</option></select>
             </label>
-            <span class="help-text" style="margin-top:4px;display:block;">Set per-rig audio devices for ECHOCAT remote operation</span>
+            <span class="help-text" style="margin-top:4px;display:block;">Set per-rig audio devices for ECHOCAT remote operation.<br>
+              <b>Only hearing audio in DIGU / DIGL (USB-Data / LSB-Data)?</b> Your rig is probably routing RX to a separate USB audio stream for DATA modes. Pick the <i>main</i> USB Audio codec (not the "data" variant), and/or change your rig's menu so RX flows to the main USB audio in voice modes too — Yaesu: <code>USB Audio Mode</code> = AUTO, Icom: <code>USB AF Output</code> = AF, Kenwood: <code>Menu 75</code>. See docs/radio-setup-guide.md.</span>
           </div>
         </details>
         <div class="rig-editor-buttons">

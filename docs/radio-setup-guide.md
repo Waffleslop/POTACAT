@@ -534,3 +534,31 @@ Serial ports can only be used by one program at a time. If POTACAT can't connect
 ### CW XIT Offset
 
 When tuning to CW spots, you can set a transmit offset in Settings (CW XIT Offset, in Hz). This shifts your tune frequency so your transmit signal lands at the correct offset from the activator's frequency. Typical values are 0 to 700 Hz.
+
+---
+
+## ECHOCAT audio: RX only in DIGU/DIGL (not USB/LSB)?
+
+If your phone hears radio audio only when the rig is in **USB-Data / LSB-Data (DIGU/DIGL)** and goes silent in voice USB/LSB, the problem is almost always the radio's per-mode USB audio routing, not POTACAT. POTACAT captures whatever Windows/macOS exposes as the selected Audio Input device — it never switches streams on a mode change.
+
+Modern rigs with a built-in USB codec often expose *two* audio streams and route differently per mode. You need to either (a) pick the main USB audio device in POTACAT's Settings → ECHOCAT Audio Input, or (b) set the rig's menu so the main USB audio carries RX audio in voice modes too.
+
+**Yaesu (FT-891 / FT-710 / FTDX10 / FTDX101D/MP)**
+- Menu → *RADIO SETTING → USB Audio Mode* (older models: *EXT MIC GAIN* group) — set to **AUTO** so the main USB audio carries voice-mode RX.
+- Some firmware revisions also expose *Audio REAR/USB* — set to **REAR/USB**.
+- In Windows Device Manager the rig normally exposes a single "USB Audio CODEC" — select that in POTACAT.
+
+**Icom (IC-705 / IC-7300 / IC-7610 / IC-9700)**
+- Menu → SET → Connectors → *USB AF/IF Output* → **AF** (not "IF"), and *AF Output Level* non-zero.
+- If you see two CODECs listed ("USB Audio CODEC" and "USB Audio CODEC 2"), pick the one whose name matches the rig in Windows' Sound panel while you're on voice USB — that's the main path.
+- On the IC-7610, *USB SEND* / *USB Keying* should be left untouched — those are TX paths.
+
+**Kenwood (TS-480 / TS-590 / TS-890 / TS-990)**
+- *Menu 75: USB Audio Input/Output Selection* → **USB** (not ACC2) so voice RX flows on the USB codec.
+- *Menu 76: USB audio level* — ensure non-zero.
+
+**Digirig / SignaLink / external USB interfaces**
+These only tap the rig's Data IN/OUT lines. They cannot carry voice-mode audio unless your rig's menu is set to route the main RX onto the same jack. Expect to either reconfigure the rig or use the rig's built-in USB codec for voice.
+
+### How to verify from POTACAT
+Open Settings → ECHOCAT Audio, pick a device, then switch the rig between USB and DIGU while watching ECHOCAT's speaker indicator on your phone. If audio drops on USB but returns on DIGU with the selected device, that device only carries the DATA path — pick a different one, or change the rig's menu.
