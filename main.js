@@ -3632,6 +3632,23 @@ function connectRemote() {
       if (!_cwKeyLoggedRoute) {
         _cwKeyLoggedRoute = true;
         sendCatLog(`[CW] Keying route: ${paddleMethod}${cwKeyPort && cwKeyPort.isOpen ? ' + dedicated key port' : ''} (model: ${rigModel?.brand || '?'})`);
+        // Actionable hint when we're toggling DTR on the main CAT port — a
+        // very common "radio doesn't key" gotcha is the rig menu not being
+        // set to read DTR. (KQ3Q on IC-7300.)
+        if (paddleMethod === 'main-dtr') {
+          const brand = (rigModel?.brand || '').toLowerCase();
+          let hint;
+          if (brand === 'icom') {
+            hint = 'IC-7300/705/7610: SET > Connectors > USB SEND = DTR (or USB Keying (CW) = USB(A) DTR).';
+          } else if (brand === 'yaesu') {
+            hint = 'Yaesu: OPERATION SETTING > TUNING > CAT PORT setup + CW KEYING source = DTR.';
+          } else if (brand === 'kenwood') {
+            hint = 'Kenwood: Menu > PC Port / USB > CW Keying = DTR.';
+          } else {
+            hint = 'Check your rig menu — "USB Keying (CW) = DTR" (or equivalent) must be set or the DTR pulses POTACAT sends will not key the radio.';
+          }
+          sendCatLog(`[CW] If the radio isn't keying, verify the rig menu: ${hint}`);
+        }
       }
       if (paddleMethod === 'dtr') {
         // Dedicated CW Key Port is handling DTR — skip main CAT port
