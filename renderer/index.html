@@ -2487,9 +2487,15 @@
     </div>
 
     <div class="welcome-section-label">Station</div>
-    <label class="welcome-field">Callsign: <input type="text" id="welcome-callsign" maxlength="10" placeholder="WB6ACU" style="text-transform:uppercase;"></label>
-    <label class="welcome-field">QTH Grid Square: <input type="text" id="welcome-grid" maxlength="6" placeholder="FN20jb"></label>
-    <span class="help-text" style="margin-top:-4px;margin-bottom:8px;display:block;">Used for distance calculation, DX Cluster login, and QSO logging</span>
+    <div style="display:flex;gap:8px;align-items:flex-end;">
+      <label class="welcome-field" style="margin-bottom:0;">Callsign:
+        <input type="text" id="welcome-callsign" maxlength="10" placeholder="WB6ACU" style="text-transform:uppercase;width:140px;">
+      </label>
+      <label class="welcome-field" style="margin-bottom:0;">QTH Grid Square:
+        <input type="text" id="welcome-grid" maxlength="6" placeholder="FN20jb" style="width:110px;">
+      </label>
+    </div>
+    <span class="help-text" style="margin-top:4px;margin-bottom:8px;display:block;">Used for distance calculation, DX Cluster login, and QSO logging</span>
     <div style="display:flex;gap:8px;">
       <label class="welcome-field" style="flex:1;">Distance Unit:
         <select id="welcome-dist-unit">
@@ -2513,12 +2519,14 @@
         </select>
       </label>
     </div>
-    <label class="checkbox-label" style="margin-top:4px;margin-bottom:4px;">
+    <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;">
       <input type="checkbox" id="welcome-hide-oob"> Hide out-of-privilege spots
     </label>
+
+    <div class="welcome-section-label">Receive SSTV</div>
     <label class="checkbox-label" style="margin-bottom:8px;">
       <input type="checkbox" id="welcome-enable-auto-sstv" checked>
-      Turn on SSTV RX to automatically switch to 40m &amp; 20m calling frequencies and download SSTV images when the radio is not in use
+      Automatically switch to the 40 m &amp; 20 m SSTV calling frequencies and download images when the radio is idle
     </label>
 
     <div class="welcome-section-label">QRZ Lookup (optional)</div>
