@@ -1261,6 +1261,8 @@ function updateRadioSubPanels() {
   tcpcatConfig.classList.toggle('hidden', type !== 'tcpcat');
   serialcatConfig.classList.toggle('hidden', type !== 'serialcat');
   icomConfig.classList.toggle('hidden', type !== 'icom');
+  const civTcpConfig = document.getElementById('civ-tcp-config');
+  if (civTcpConfig) civTcpConfig.classList.toggle('hidden', type !== 'civ-tcp');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
   if (type === 'serialcat' && !serialcatPortsLoaded) {
@@ -1299,6 +1301,15 @@ async function populateRadioSection(currentTarget) {
     setRadioType('icom');
     icomPortsLoaded = true;
     await loadIcomPorts(currentTarget);
+  } else if (currentTarget.type === 'civ-tcp') {
+    setRadioType('civ-tcp');
+    document.getElementById('set-civ-tcp-host').value = currentTarget.host || '127.0.0.1';
+    document.getElementById('set-civ-tcp-port').value = currentTarget.port || 50001;
+    const modelSelect = document.getElementById('set-civ-tcp-model');
+    if (modelSelect && currentTarget.civAddress != null) {
+      const hex = '0x' + currentTarget.civAddress.toString(16).toUpperCase();
+      modelSelect.value = hex;
+    }
   } else if (currentTarget.type === 'rigctld') {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
@@ -1609,6 +1620,16 @@ function buildCatTargetFromForm() {
       type: 'icom',
       path: getEffectiveIcomPort(),
       baudRate: parseInt(document.getElementById('set-icom-baud').value, 10) || 115200,
+      civAddress: parseInt(modelSelect.value, 16),
+      civModel: modelSelect.options[modelSelect.selectedIndex].text,
+    };
+  } else if (radioType === 'civ-tcp') {
+    const modelSelect = document.getElementById('set-civ-tcp-model');
+    return {
+      type: 'civ-tcp',
+      host: (document.getElementById('set-civ-tcp-host').value || '').trim() || '127.0.0.1',
+      port: parseInt(document.getElementById('set-civ-tcp-port').value, 10) || 50001,
+      civAddr: parseInt(modelSelect.value, 16),
       civAddress: parseInt(modelSelect.value, 16),
       civModel: modelSelect.options[modelSelect.selectedIndex].text,
     };

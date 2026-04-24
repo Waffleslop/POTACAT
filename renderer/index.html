@@ -1115,6 +1115,33 @@
           </div>
           <span class="help-text" style="margin-top:6px;display:block;">For CW paddle keying via ECHOCAT, set your radio menu: SET > Connectors > USB SEND/Keying > USB Keying (CW) = DTR</span>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="civ-tcp"> Icom CI-V over TCP</label>
+        <div id="civ-tcp-config" class="radio-sub hidden">
+          <span class="help-text" style="font-size:12px;">Raw CI-V frames over TCP. Works with (a) the IC-7300 MK II / IC-705 MK II / IC-7610 MK II native Network CI-V over LAN, or (b) a <code>ser2net</code> / <code>socat</code> bridge on a radio-adjacent box that exposes a USB CI-V port as a TCP listener.</span>
+          <label>Radio Model:
+            <select id="set-civ-tcp-model">
+              <option value="0x94">IC-7300</option>
+              <option value="0xB6" selected>IC-7300 MK II</option>
+              <option value="0xA4">IC-705</option>
+              <option value="0x98">IC-7610</option>
+              <option value="0x88">IC-7100</option>
+              <option value="0x7A">IC-7600</option>
+              <option value="0x8E">IC-7851</option>
+              <option value="0xA2">IC-9700</option>
+            </select>
+          </label>
+          <label>Host / IP:
+            <input type="text" id="set-civ-tcp-host" placeholder="192.168.1.50" value="127.0.0.1">
+          </label>
+          <label>Port:
+            <input type="number" id="set-civ-tcp-port" min="1" max="65535" value="50001">
+          </label>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="civ-tcp-test-btn">Test Connection</button>
+            <span id="civ-tcp-test-result" style="font-size:12px;"></span>
+          </div>
+          <span class="help-text" style="margin-top:6px;display:block;">IC-7300 MK II default port is <code>50001</code>. For <code>ser2net</code>, whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW paddle keying works the same as direct USB CI-V — the codec sends the same CW key command (0x1C 0x01) over the TCP transport.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">
           <label>Rig Model:

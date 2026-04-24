@@ -274,7 +274,7 @@ function findNearestPreset(presets, currentWidth) {
 function detectRigType() {
   const target = settings.catTarget;
   if (!target) return 'unknown';
-  if (target.type === 'icom') return 'icom';
+  if (target.type === 'icom' || target.type === 'civ-tcp') return 'icom';
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
   if (target.type === 'tcp') return 'flex'; // TCP CAT ports 5002-5005 are always FlexRadio
   if (target.type === 'serial') {
@@ -825,6 +825,33 @@ async function connectCat() {
     cat.on('swr', sendCatSwr);
     sendCatLog(`Connecting to Icom on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 19200, dtrOff: target.dtrOff });
+
+  } else if (target.type === 'civ-tcp') {
+    // Raw CI-V frames over TCP. Works with:
+    //   - ser2net / socat bridging a USB-serial CI-V port on a remote box
+    //   - IC-7300 MK II's built-in "Network CI-V" mode (LAN, port 50001 by
+    //     default — gateway to the same CI-V frame format over the wire)
+    //   - any other ser2net-style raw passthrough
+    // Same codec as the direct-serial 'icom' branch — CivCodec doesn't care
+    // what transport carries the bytes.
+    transport = new TcpTransport();
+    const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: target.civAddr || 0x94, caps: {}, cw: {} };
+    model.tune = getTuneQuirks(model);
+    codec = new CivCodec(model, (data) => transport.write(data));
+    cat = new RigController(model, transport, codec);
+    cat._debug = true;
+    cat.on('log', sendCatLog);
+    cat.on('status', sendCatStatus);
+    cat.on('frequency', sendCatFrequency);
+    cat.on('mode', sendCatMode);
+    cat.on('power', sendCatPower);
+    cat.on('nb', sendCatNb);
+    cat.on('smeter', sendCatSmeter);
+    cat.on('swr', sendCatSwr);
+    const host = target.host || '127.0.0.1';
+    const port = target.port || 50001;
+    sendCatLog(`Connecting to Icom CI-V over TCP on ${host}:${port}`);
+    transport.connect({ host, port });
 
   } else {
     // Kenwood/Yaesu serial
