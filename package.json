@@ -45,6 +45,7 @@
       "preload-vfo-popout.js",
       "preload-remote-audio.js",
       "preload-sstv-popout.js",
+      "preload-bandspread-popout.js",
       "lib/**/*",
       "renderer/**/*",
       "assets/icon.png",
