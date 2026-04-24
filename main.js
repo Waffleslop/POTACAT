@@ -3551,6 +3551,21 @@ function connectRemote() {
           cat.resumePolling();
         }, 1500);
       }
+      // Rigctld has no per-element CW keying command — its "T 1"/"T 0" only
+      // toggles the mic PTT line, so the radio TX-keys with zero CW output
+      // (KM4CFT IC-7300 MK II via rigctld, 2026-04-23). Refuse paddle keying
+      // in that mode and log a one-time explainer rather than leaving the
+      // radio in silent TX. The CW text widget still works — it uses
+      // hamlib's `\send_morse` to have the radio's internal keyer send text.
+      const isRigctld = settings.catTarget && settings.catTarget.type === 'rigctld';
+      if (isRigctld) {
+        if (!_cwKeyLoggedRoute) {
+          _cwKeyLoggedRoute = true;
+          sendCatLog('[CW] Paddle keying is not supported over rigctld — hamlib has no per-element CW keying command, only mic PTT (T 1/T 0). The radio would TX with no CW output. ' +
+            'Workarounds: (1) type text in the CW widget\'s text box — that uses hamlib\'s send_morse and works correctly; (2) switch CAT to direct serial CI-V in Settings for paddle keying.');
+        }
+        return;
+      }
       // Route keying based on model's preferred paddle method
       // Icom default: txrx (CI-V PTT 0x1C) — universal, no DTR config needed
       // Models with DTR keying support can override via cw.paddleKey: 'dtr'
