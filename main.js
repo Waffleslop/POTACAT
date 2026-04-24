@@ -5232,6 +5232,7 @@ function disconnectRemote() {
 }
 
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
+let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
 
 function handleRemotePtt(state) {
   const target = settings.catTarget;
@@ -5245,6 +5246,19 @@ function handleRemotePtt(state) {
       const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
       _ssbModeBeforePtt = curMode;
       sendCatLog(`[PTT] ${curMode} -> ${dataMode} (SSB-over-DATA: mic disabled)`);
+      // Yaesu rigs have a "DATA MODE" menu that controls whether DIGL/DIGU
+      // behave as mic-disabled SSB (DATA MODE = Others/STD — carrier freq
+      // unchanged) or as a subcarrier-offset PSK mode (DATA MODE = PSK —
+      // actual RF shifts several hundred Hz below the dial). If the rig is
+      // in PSK mode, SSB-over-DATA will put TX ~1 kHz off where the user
+      // dialed it (AE4XO on FTDX10, 2026-04). Warn once per session.
+      if (!_ssbOverDataYaesuWarned) {
+        const activeRig = getActiveRigModel();
+        if (activeRig && activeRig.brand === 'Yaesu') {
+          _ssbOverDataYaesuWarned = true;
+          sendCatLog('[PTT] Yaesu + SSB-over-DATA: verify the rig menu "DATA MODE" = Others (or DATA-STD), not PSK. PSK shifts the TX carrier by the subcarrier offset (~1500 Hz below the dial freq) and your TX will land off-frequency.');
+        }
+      }
       // Suppress mode broadcasts for the entire PTT duration + restore.
       _modeSuppressUntil = Date.now() + 120000;
       // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown)
