@@ -911,6 +911,7 @@ const CLUSTER_PRESETS = [
   { name: 'WA9PIE', host: 'dxc.wa9pie.net', port: 7373 },
   { name: 'W0MU', host: 'dxc.w0mu.net', port: 7373 },
   { name: 'OH2AQ', host: 'oh2aq.kolumbus.fi', port: 8000 },
+  { name: 'S50CLX', host: 's50clx.si', port: 41112 },
 ];
 
 // --- CW Spots (CW club telnet spotters) ---

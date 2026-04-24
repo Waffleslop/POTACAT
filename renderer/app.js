@@ -520,6 +520,7 @@ const CLUSTER_PRESETS = [
   { name: 'WA9PIE', host: 'dxc.wa9pie.net', port: 7373 },
   { name: 'W0MU', host: 'dxc.w0mu.net', port: 7373 },
   { name: 'OH2AQ', host: 'oh2aq.kolumbus.fi', port: 8000 },
+  { name: 'S50CLX', host: 's50clx.si', port: 41112 },
 ];
 const CW_SPOTS_PRESETS = [
   { name: 'CW Club Spotter (all clubs)', host: 'rbn.telegraphy.de', port: 7000 },
