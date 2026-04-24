@@ -399,6 +399,11 @@
         <div class="meter-bar-wrap"><div class="meter-bar" id="swr-bar"></div></div>
         <span class="meter-text" id="swr-text">&mdash;</span>
       </div>
+      <div class="meter-row">
+        <span class="meter-label">ALC</span>
+        <div class="meter-bar-wrap"><div class="meter-bar" id="alc-bar"></div></div>
+        <span class="meter-text" id="alc-text">&mdash;</span>
+      </div>
     </div>
     <div class="widget-section" id="widget-ptt-row">
       <div class="ptt-log-row">
@@ -1388,6 +1393,8 @@ const smeterBar = document.getElementById('smeter-bar');
 const smeterText = document.getElementById('smeter-text');
 const swrBar = document.getElementById('swr-bar');
 const swrText = document.getElementById('swr-text');
+const alcBar = document.getElementById('alc-bar');
+const alcText = document.getElementById('alc-text');
 
 window.api.onSmeter((val) => {
   const pct = Math.min(100, (val / 255) * 100);
@@ -1425,6 +1432,15 @@ window.api.onSwrRatio((swr) => {
   swrBar.style.background = color;
   swrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrText.style.color = color;
+});
+
+window.api.onAlc((val) => {
+  const pct = Math.min(1, val / 255);
+  const color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
+  alcBar.style.width = (pct * 100) + '%';
+  alcBar.style.background = pct <= 0 ? '#333' : color;
+  alcText.textContent = pct <= 0 ? '\u2014' : Math.round(pct * 100) + '%';
+  alcText.style.color = color;
 });
 
 // --- PTT ---

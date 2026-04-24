@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   onCatSmeter: (cb) => ipcRenderer.on('cat-smeter', (_e, val) => cb(val)),
   onCatSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onCatSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),
+  onCatAlc: (cb) => ipcRenderer.on('cat-alc', (_e, val) => cb(val)),
   qrzLookup: (callsign) => ipcRenderer.invoke('qrz-lookup', callsign),
   qrzCheckSub: (force) => ipcRenderer.invoke('qrz-check-sub', force),
   qrzVerifyApiKey: (key) => ipcRenderer.invoke('qrz-verify-api-key', key),

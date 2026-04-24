@@ -616,6 +616,12 @@ function sendCatSwr(val) {
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr', value: val });
 }
 
+function sendCatAlc(val) {
+  if (win && !win.isDestroyed()) win.webContents.send('cat-alc', val);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-alc', val);
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'alc', value: val });
+}
+
 // Broadcast full rig control state to renderer and ECHOCAT
 function broadcastRigState() {
   const rigType = detectRigType();
@@ -743,6 +749,7 @@ async function connectCat() {
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
     cat.connect(target);
     return;
   }
@@ -783,6 +790,7 @@ async function connectCat() {
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
     sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
     transport.connect({ host: '127.0.0.1', port: rigctldPort });
 
@@ -804,6 +812,7 @@ async function connectCat() {
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
     const host = target.host || '127.0.0.1';
     const port = target.port || 4532;
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
@@ -824,6 +833,7 @@ async function connectCat() {
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
     sendCatLog(`Connecting to Icom on ${target.path}`);
     // Default DTR/RTS to LOW on the main CAT port. USB-CDC serial defaults
     // DTR high at open, but many Icom rigs (IC-7300, MK II, etc.) can be
@@ -859,6 +869,7 @@ async function connectCat() {
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
     const host = target.host || '127.0.0.1';
     const port = target.port || 50001;
     sendCatLog(`Connecting to Icom CI-V over TCP on ${host}:${port}`);
@@ -880,6 +891,7 @@ async function connectCat() {
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
   }
@@ -8146,6 +8158,26 @@ app.whenReady().then(() => {
           try { require('child_process').execSync(`launchctl load "${plistPath}"`, { stdio: 'pipe' }); } catch {}
           console.log('[Launcher] Installed to macOS LaunchAgents');
         }
+      } else {
+        // Linux: write XDG autostart .desktop so the launcher runs on next login,
+        // and (if port 7301 is free) spawn it immediately for this session too.
+        const os = require('os');
+        const autostartDir = path.join(os.homedir(), '.config', 'autostart');
+        const desktopPath = path.join(autostartDir, 'potacat-launcher.desktop');
+        if (!fs.existsSync(desktopPath)) {
+          fs.mkdirSync(autostartDir, { recursive: true });
+          fs.writeFileSync(desktopPath, `[Desktop Entry]\nType=Application\nName=POTACAT Launcher\nExec=${exePath} --launcher\nHidden=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n`);
+          console.log('[Launcher] Installed to Linux autostart');
+        }
+        const net = require('net');
+        const probe = net.createServer();
+        probe.once('error', () => { /* port in use — launcher already running */ });
+        probe.once('listening', () => {
+          probe.close();
+          require('child_process').spawn(exePath, ['--launcher'], { detached: true, stdio: 'ignore' }).unref();
+          console.log('[Launcher] Started background process');
+        });
+        probe.listen(7301, '0.0.0.0');
       }
     } catch (err) {
       console.error('[Launcher] Setup failed:', err.message);

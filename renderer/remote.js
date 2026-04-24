@@ -992,6 +992,10 @@
         updateEchoSwrRatio(msg.value);
         break;
 
+      case 'alc':
+        updateEchoAlc(msg.value);
+        break;
+
       case 'power':
         updateEchoPower(msg.value);
         break;
@@ -3355,6 +3359,8 @@
   var echoSmeterText = document.getElementById('echo-smeter-text');
   var echoSwrBar = document.getElementById('echo-swr-bar');
   var echoSwrText = document.getElementById('echo-swr-text');
+  var echoAlcBar = document.getElementById('echo-alc-bar');
+  var echoAlcText = document.getElementById('echo-alc-text');
   var echoPwrBar = document.getElementById('echo-pwr-bar');
   var echoPwrText = document.getElementById('echo-pwr-text');
   // Track the highest watt value seen this session so the bar auto-scales for
@@ -3486,6 +3492,15 @@
     drawEchoBar(echoSwrBar, level, color);
     echoSwrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
     echoSwrText.style.color = color;
+  }
+
+  function updateEchoAlc(val) {
+    if (!echoMeterEnabled) return;
+    var pct = Math.min(1, val / 255);
+    var color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
+    drawEchoBar(echoAlcBar, pct, pct <= 0 ? '#333' : color);
+    echoAlcText.textContent = pct <= 0 ? '\u2014' : Math.round(pct * 100) + '%';
+    echoAlcText.style.color = color;
   }
 
   function updateEchoPower(watts) {
