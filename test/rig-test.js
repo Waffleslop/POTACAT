@@ -278,10 +278,22 @@ test('rigctld setFrequency', () => {
   assert.strictEqual(writes[0], 'F 14074000\n');
 });
 
-test('rigctld setMode FT8 -> M PKTUSB', () => {
+test('rigctld setMode FT8 -> M PKTUSB 3000 (wide for digital)', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
   codec.setMode('FT8', 14074000);
-  assert.strictEqual(writes[0], 'M PKTUSB 0\n');
+  assert.strictEqual(writes[0], 'M PKTUSB 3000\n');
+});
+
+test('rigctld setMode CW -> M CW 500', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.setMode('CW', 14050000);
+  assert.strictEqual(writes[0], 'M CW 500\n');
+});
+
+test('rigctld setMode SSB below 10 MHz -> M LSB 2400', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.setMode('SSB', 7200000);
+  assert.strictEqual(writes[0], 'M LSB 2400\n');
 });
 
 test('rigctld setTransmit on -> T 1', () => {
