@@ -3545,6 +3545,7 @@ const LOGBOOK_DEFAULTS = {
   n3fjp: { port: 1100, help: 'In N3FJP: Settings > Application Program Interface > check "TCP API Enabled". Set the port to 1100 (default). N3FJP must be running to receive QSOs. When using with WSJT-X, open WSJT-X first, then POTACAT, then N3FJP.' },
   hrd: { port: 2333, help: 'In HRD Logbook: Tools > Configure > QSO Forwarding. Under UDP Receive, check "Receive QSO notifications using UDP9/ADIF from other logging programs (eg. WSJT-X)". Set the receive port to 2333 and select your target database. POTACAT and WSJT-X can both send to this port simultaneously.' },
   macloggerdx: { port: 2237, help: 'In MacLoggerDX: Settings > enable "Receive and log WSJT-X UDP broadcasts" and set the port to 2237. POTACAT speaks the WSJT-X binary protocol. MacLoggerDX must be running to receive QSOs.' },
+  logger32: { port: 2237, help: 'In Logger32: Setup > WSJT-X Settings (or File > Setup > WSJT-X Interface, depending on version). Enable "Log QSOs received from WSJT-X" and set the UDP Server port to 2237. POTACAT speaks the WSJT-X binary protocol so Logger32 sees QSOs as if they came from WSJT-X. Logger32 must be running to receive.' },
   wavelog: { apiConfig: true },
   wrl: { port: 12060, help: 'Requires WRL Cat Control running on this computer. Download it from worldradioleague.com. WRL Cat receives QSOs via the N1MM UDP protocol. In WRL Cat: enable N1MM integration and set the UDP port to 12060. QSOs logged in POTACAT will appear in your WRL logbook automatically.' },
 };

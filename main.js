@@ -6442,6 +6442,18 @@ function forwardToLogbook(qsoData) {
     }
     return hamrsBridge.sendQso(qsoData, adifText);
   }
+  if (type === 'logger32') {
+    // Logger32's "Log QSOs received from WSJT-X" feature accepts the standard
+    // WSJT-X binary QSO datagram on its configured UDP port (default 2237).
+    // Reuse the same bridge we use for HamRS/MacLoggerDX/Log4OM-binary.
+    const record = buildAdifRecord(qsoData);
+    const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
+    const hp = port || 2237;
+    if (!hamrsBridge.socket || hamrsBridge.host !== host || hamrsBridge.port !== hp) {
+      hamrsBridge.start(host, hp);
+    }
+    return hamrsBridge.sendQso(qsoData, adifText);
+  }
   if (type === 'n3fjp') {
     return sendN3fjpTcp(qsoData, host, port || 1100);
   }
@@ -8057,7 +8069,7 @@ app.whenReady().then(() => {
   if (settings.enablePskr || settings.enableFreedv) connectPskr();
   if (settings.enableFreedv) connectFreedvReporter();
   if (settings.enablePskrMap) connectPskrMap();
-  if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
+  if (settings.sendToLogbook && (settings.logbookType === 'hamrs' || settings.logbookType === 'logger32')) {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
   }
   if (settings.extraUdpEnabled && (settings.extraUdpFormat || 'wsjtx') === 'wsjtx') {
@@ -10630,8 +10642,12 @@ app.whenReady().then(() => {
       updateRemoteSettings();
     }
 
-    // Start/stop HamRS bridge (WSJT-X binary heartbeats)
-    if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
+    // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX and
+    // Log4OM-binary all share this path — they recognize POTACAT as a
+    // WSJT-X peer via periodic status heartbeats.
+    const wsjtxBinaryLoggers = new Set(['hamrs', 'logger32', 'macloggerdx']);
+    const log4omBinary = settings.logbookType === 'log4om' && settings.log4omWsjtxBinary;
+    if (settings.sendToLogbook && (wsjtxBinaryLoggers.has(settings.logbookType) || log4omBinary)) {
       const hp = parseInt(settings.logbookPort, 10) || 2237;
       const hh = settings.logbookHost || '127.0.0.1';
       if (!hamrsBridge.socket || hamrsBridge.host !== hh || hamrsBridge.port !== hp) {
