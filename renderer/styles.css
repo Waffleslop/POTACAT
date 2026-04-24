@@ -309,10 +309,56 @@ header {
   background: var(--bg-secondary);
   border: 1px solid var(--border-secondary);
   border-radius: 4px;
-  padding: 6px 0;
+  padding: 4px 0;
   margin-top: 2px;
-  min-width: 180px;
+  min-width: 160px;
   box-shadow: 0 4px 12px var(--shadow-heavy);
+}
+
+/* Top-level category row inside the Spots dropdown. Hovering the row reveals
+   its flyout submenu to the right (.spots-submenu). */
+.spots-category {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 6px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: default;
+  white-space: nowrap;
+  user-select: none;
+}
+.spots-category:hover {
+  background: var(--bg-hover);
+}
+.spots-category-label { flex: 1; }
+.spots-category-arrow {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  margin-left: 12px;
+}
+.spots-category:hover .spots-category-arrow {
+  color: var(--text-primary);
+}
+.spots-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;   /* flush with the parent panel's right edge — no hover gap */
+  top: -5px;    /* align with parent panel's top padding */
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  padding: 6px 0;
+  min-width: 180px;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px var(--shadow-heavy);
+  z-index: 10001;
+}
+.spots-category:hover > .spots-submenu,
+.spots-category:focus-within > .spots-submenu {
+  display: block;
 }
 
 .multi-dropdown.open .spots-dropdown-panel,

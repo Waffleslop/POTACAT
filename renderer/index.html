@@ -58,42 +58,63 @@
       <div class="multi-dropdown" id="spots-dropdown">
         <button class="multi-dropdown-btn" type="button" id="spots-btn">Spots</button>
         <div class="spots-dropdown-panel">
-          <div class="spots-panel-section-label">Spot Sources</div>
-          <label class="spots-toggle"><input type="checkbox" id="spots-pota"> <span style="color:#4ecca3">POTA</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-sota"> <span style="color:#f0a500">SOTA</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-wwff"> <span style="color:#26a69a">WWFF</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-llota"> <span style="color:#42a5f5">LLOTA</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-cluster"> <span style="color:#e040fb">DX Cluster</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-cwspots"> <span style="color:#ffd740">CW Spots</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-rbn"> <span style="color:#00bcd4">RBN</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-pskr"> <span style="color:#ff6b6b">FreeDV</span></label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-dxe" checked> DX Expeditions</label>
-          <div class="spots-panel-divider"></div>
-          <div class="spots-panel-section-label">Filters</div>
-          <label class="spots-toggle"><input type="checkbox" id="spots-hide-worked"> Hide worked stations</label>
-          <label class="spots-toggle" id="spots-hide-parks-label"><input type="checkbox" id="spots-hide-parks"> Hide worked parks</label>
-          <label class="spots-toggle" id="spots-hide-callref-label" title="Hide a spot only if you've already worked the same call AT THE SAME park today on the same band/mode. A roving activator at a new park stays visible."><input type="checkbox" id="spots-hide-callref"> Hide worked CALL+park combos</label>
-          <label class="spots-toggle" id="spots-prioritize-new-label"><input type="checkbox" id="spots-prioritize-new"> Show NEW parks at top</label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
-          <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
-          <div class="spots-panel-divider"></div>
-          <div class="spots-panel-section-label">Region</div>
-          <div id="continent-filter" class="multi-dropdown-menu" style="position:static;box-shadow:none;background:transparent;padding:0;">
-            <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="AF"> Africa</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="AS"> Asia</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="EU"> Europe</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="NA"> North America</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="OC"> Oceania</label>
-            <label class="multi-dropdown-item"><input type="checkbox" value="SA"> South America</label>
+          <!-- Top-level category list. Each category reveals a flyout submenu
+               on hover/focus. IDs on inner checkboxes are preserved so all
+               existing app.js wiring keeps working. -->
+          <div class="spots-category">
+            <span class="spots-category-label">Spot Sources</span>
+            <span class="spots-category-arrow">&#x25B8;</span>
+            <div class="spots-submenu">
+              <label class="spots-toggle"><input type="checkbox" id="spots-pota"> <span style="color:#4ecca3">POTA</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-sota"> <span style="color:#f0a500">SOTA</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-wwff"> <span style="color:#26a69a">WWFF</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-llota"> <span style="color:#42a5f5">LLOTA</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-cluster"> <span style="color:#e040fb">DX Cluster</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-cwspots"> <span style="color:#ffd740">CW Spots</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-rbn"> <span style="color:#00bcd4">RBN</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-pskr"> <span style="color:#ff6b6b">FreeDV</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-dxe" checked> DX Expeditions</label>
+            </div>
           </div>
-          <div class="spots-panel-divider" id="spots-events-divider"></div>
-          <div class="spots-panel-section-label" id="spots-events-label">Events &amp; Awards</div>
-          <div id="spots-events-container"></div>
-          <div class="spots-toggle" style="display:flex;align-items:center;justify-content:space-between;">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="spots-dxcc"> DXCC Tracker</label>
-            <button type="button" id="dxcc-board-btn" class="event-overlay-btn" style="font-size:10px;padding:1px 6px;">Board</button>
+          <div class="spots-category">
+            <span class="spots-category-label">Filters</span>
+            <span class="spots-category-arrow">&#x25B8;</span>
+            <div class="spots-submenu">
+              <label class="spots-toggle"><input type="checkbox" id="spots-hide-worked"> Hide worked stations</label>
+              <label class="spots-toggle" id="spots-hide-parks-label"><input type="checkbox" id="spots-hide-parks"> Hide worked parks</label>
+              <label class="spots-toggle" id="spots-hide-callref-label" title="Hide a spot only if you've already worked the same call AT THE SAME park today on the same band/mode. A roving activator at a new park stays visible."><input type="checkbox" id="spots-hide-callref"> Hide worked CALL+park combos</label>
+              <label class="spots-toggle" id="spots-prioritize-new-label"><input type="checkbox" id="spots-prioritize-new"> Show NEW parks at top</label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
+            </div>
+          </div>
+          <div class="spots-category">
+            <span class="spots-category-label">Region</span>
+            <span class="spots-category-arrow">&#x25B8;</span>
+            <div class="spots-submenu">
+              <div id="continent-filter" class="multi-dropdown-menu" style="position:static;box-shadow:none;background:transparent;padding:0;border:0;">
+                <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+                <label class="multi-dropdown-item"><input type="checkbox" value="AF"> Africa</label>
+                <label class="multi-dropdown-item"><input type="checkbox" value="AS"> Asia</label>
+                <label class="multi-dropdown-item"><input type="checkbox" value="EU"> Europe</label>
+                <label class="multi-dropdown-item"><input type="checkbox" value="NA"> North America</label>
+                <label class="multi-dropdown-item"><input type="checkbox" value="OC"> Oceania</label>
+                <label class="multi-dropdown-item"><input type="checkbox" value="SA"> South America</label>
+              </div>
+            </div>
+          </div>
+          <div class="spots-category" id="spots-events-category">
+            <span class="spots-category-label" id="spots-events-label">Events &amp; Awards</span>
+            <span class="spots-category-arrow">&#x25B8;</span>
+            <div class="spots-submenu">
+              <div id="spots-events-container"></div>
+              <div class="spots-panel-divider" id="spots-events-divider"></div>
+              <div class="spots-toggle" style="display:flex;align-items:center;justify-content:space-between;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="spots-dxcc"> DXCC Tracker</label>
+                <button type="button" id="dxcc-board-btn" class="event-overlay-btn" style="font-size:10px;padding:1px 6px;">Board</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
