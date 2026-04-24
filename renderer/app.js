@@ -5834,18 +5834,20 @@ if (viewsDropdown) {
   });
 }
 
-viewJtcatBtn.addEventListener('click', () => {
-  window.api.jtcatPopoutOpen();
+// Null-safe wiring: missing DOM elements (e.g. from a partial pull / merge
+// conflict on index.html) must not blow up the rest of the renderer init.
+// A single uncaught TypeError here brought down Jonathan (KM4CFT)'s whole
+// window — no clicks anywhere worked because every later addEventListener
+// in this file never ran.
+function bindClick(el, handler) {
+  if (el && typeof el.addEventListener === 'function') el.addEventListener('click', handler);
+}
+bindClick(viewJtcatBtn, () => window.api.jtcatPopoutOpen());
+bindClick(document.getElementById('view-sstv-btn'), () => window.api.sstvPopoutOpen());
+bindClick(document.getElementById('view-bandspread-btn'), () => {
+  if (window.api.bandspreadPopoutOpen) window.api.bandspreadPopoutOpen();
 });
-document.getElementById('view-sstv-btn').addEventListener('click', () => {
-  window.api.sstvPopoutOpen();
-});
-document.getElementById('view-bandspread-btn').addEventListener('click', () => {
-  window.api.bandspreadPopoutOpen();
-});
-document.getElementById('vfo-popout-btn').addEventListener('click', () => {
-  window.api.vfoPopoutOpen();
-});
+bindClick(document.getElementById('vfo-popout-btn'), () => window.api.vfoPopoutOpen());
 dxccBoardBtn.addEventListener('click', () => {
   if (!enableDxcc) {
     enableDxcc = true;
