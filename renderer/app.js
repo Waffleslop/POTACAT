@@ -13045,6 +13045,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   const distUnitVal = document.getElementById('welcome-dist-unit').value;
   const licenseClassVal = document.getElementById('welcome-license-class').value;
   const hideOobChecked = document.getElementById('welcome-hide-oob').checked;
+  const autoSstvChecked = document.getElementById('welcome-enable-auto-sstv').checked;
   const lightModeEnabled = welcomeLightMode.checked;
   const qrzUser = (document.getElementById('welcome-qrz-user')?.value || '').trim().toUpperCase();
   const qrzPass = document.getElementById('welcome-qrz-pass')?.value || '';
@@ -13058,6 +13059,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     distUnit: distUnitVal,
     licenseClass: licenseClassVal,
     hideOutOfBand: hideOobChecked,
+    enableAutoSstv: autoSstvChecked,
     firstRun: false,
     lastVersion: currentSettings.appVersion,
     lightMode: lightModeEnabled,
@@ -13105,6 +13107,10 @@ async function checkFirstRun(force = false) {
       if (s.distUnit) document.getElementById('welcome-dist-unit').value = s.distUnit;
       if (s.licenseClass) document.getElementById('welcome-license-class').value = s.licenseClass;
       document.getElementById('welcome-hide-oob').checked = s.hideOutOfBand === true;
+      // Auto-SSTV default is ON for fresh installs (the HTML `checked`
+      // attribute handles that); on re-open we reflect whatever the user
+      // has saved — `!== false` so undefined stays ON.
+      document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv !== false;
       const welcomeQrzUser = document.getElementById('welcome-qrz-user');
       const welcomeQrzPass = document.getElementById('welcome-qrz-pass');
       if (welcomeQrzUser) welcomeQrzUser.value = s.qrzUsername || '';
