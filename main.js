@@ -10394,9 +10394,12 @@ app.whenReady().then(() => {
     }
 
     const parentWin = win;
+    const startDir = (settings.lastAdifExportDir && fs.existsSync(settings.lastAdifExportDir))
+      ? settings.lastAdifExportDir
+      : app.getPath('documents');
     const result = await dialog.showSaveDialog(parentWin, {
       title: `Export ${event.name} ADIF for LOTW`,
-      defaultPath: path.join(app.getPath('documents'), `potacat_${eventId}.adi`),
+      defaultPath: path.join(startDir, `potacat_${eventId}.adi`),
       filters: [
         { name: 'ADIF Files', extensions: ['adi', 'adif'] },
         { name: 'All Files', extensions: ['*'] },
@@ -10413,6 +10416,12 @@ app.whenReady().then(() => {
       content += '\n' + parts.join(' ') + ' <EOR>\n';
     }
     fs.writeFileSync(result.filePath, content, 'utf-8');
+    // Remember folder for the next export
+    const dir = path.dirname(result.filePath);
+    if (dir && dir !== settings.lastAdifExportDir) {
+      settings.lastAdifExportDir = dir;
+      saveSettings(settings);
+    }
     return { success: true, filePath: result.filePath, count: records.length };
   });
 
@@ -10842,12 +10851,33 @@ app.whenReady().then(() => {
     return result.filePath;
   });
 
+  // --- Sticky ADIF export directory --------------------------------------
+  // Remembers the folder the user picked last time they exported an ADIF so
+  // the next Save dialog defaults there instead of forcing them back to
+  // Documents. Falls back to Documents if we haven't seen a save yet or the
+  // saved path no longer exists. (SP5GB request, 2026-04-17.)
+  function adifExportDefaultDir() {
+    const saved = settings.lastAdifExportDir;
+    if (saved) {
+      try { if (fs.existsSync(saved) && fs.statSync(saved).isDirectory()) return saved; } catch {}
+    }
+    return app.getPath('documents');
+  }
+  function rememberAdifExportDir(filePath) {
+    if (!filePath) return;
+    const dir = path.dirname(filePath);
+    if (dir && dir !== settings.lastAdifExportDir) {
+      settings.lastAdifExportDir = dir;
+      saveSettings(settings);
+    }
+  }
+
   ipcMain.handle('export-adif', async (event, qsos) => {
     try {
       const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
       const result = await dialog.showSaveDialog(parentWin, {
         title: 'Export ADIF',
-        defaultPath: path.join(app.getPath('documents'), 'potacat_export.adi'),
+        defaultPath: path.join(adifExportDefaultDir(), 'potacat_export.adi'),
         filters: [
           { name: 'ADIF Files', extensions: ['adi', 'adif'] },
           { name: 'All Files', extensions: ['*'] },
@@ -10864,6 +10894,7 @@ app.whenReady().then(() => {
         content += '\n' + parts.join(' ') + ' <EOR>\n';
       }
       fs.writeFileSync(result.filePath, content, 'utf-8');
+      rememberAdifExportDir(result.filePath);
       return { success: true, filePath: result.filePath, count: qsos.length };
     } catch (err) {
       return { success: false, error: err.message };
@@ -11707,7 +11738,7 @@ app.whenReady().then(() => {
       const defaultName = `${activatorCall || 'POTACAT'}@${parkRef || 'PARK'}-${dateStr}.adi`;
       const result = await dialog.showSaveDialog(parentWin, {
         title: 'Export Activation ADIF',
-        defaultPath: path.join(app.getPath('documents'), defaultName),
+        defaultPath: path.join(adifExportDefaultDir(), defaultName),
         filters: [
           { name: 'ADIF Files', extensions: ['adi', 'adif'] },
           { name: 'All Files', extensions: ['*'] },
@@ -11715,6 +11746,7 @@ app.whenReady().then(() => {
       });
       if (result.canceled) return { success: false };
       writeActivationAdifRaw(result.filePath, qsos);
+      rememberAdifExportDir(result.filePath);
       return { success: true, path: result.filePath };
     } catch (err) {
       return { success: false, error: err.message };
@@ -11729,10 +11761,16 @@ app.whenReady().then(() => {
       const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
       const result = await dialog.showOpenDialog(parentWin, {
         title: 'Choose folder for per-park ADIF files',
+        defaultPath: adifExportDefaultDir(),
         properties: ['openDirectory', 'createDirectory'],
       });
       if (result.canceled || !result.filePaths.length) return { success: false };
       const folder = result.filePaths[0];
+      // The folder itself is what the user picked — remember it as-is.
+      if (folder && folder !== settings.lastAdifExportDir) {
+        settings.lastAdifExportDir = folder;
+        saveSettings(settings);
+      }
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
       let fileCount = 0;
