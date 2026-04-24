@@ -941,6 +941,17 @@
             rotorEnabled = !!msg.settings.rotorActive;
             updateRotorBtn();
           }
+          // Sync local iambic keyer with desktop's keyer config. Mode is
+          // usually phone-driven (user toggles it here), but the desktop
+          // owns paddle-swap so we have to learn it from settings.
+          if (msg.settings.cwKeyerMode) {
+            cwMode = msg.settings.cwKeyerMode;
+            localCwKeyer.setMode(cwMode);
+          }
+          if (typeof msg.settings.cwSwapPaddles === 'boolean') {
+            cwSwapPaddles = msg.settings.cwSwapPaddles;
+            localCwKeyer.setSwap(cwSwapPaddles);
+          }
         }
         updateCwEnableBtn();
         // Load WebSDR stations from settings
@@ -1119,22 +1130,30 @@
         break;
 
       case 'cw-state':
-        stopCwTextSidetone(); // cancel text playback if paddle keying arrives
+        // Sidetone is driven locally (see createLocalCwKeyer) — server echo
+        // here just reflects what the radio is actually keying, used for
+        // the visual indicator. Text-macro sidetone still yields to paddle.
+        stopCwTextSidetone();
         cwIndicator.classList.toggle('active', !!msg.keying);
-        handleCwSidetone(!!msg.keying);
         break;
 
       case 'cw-config-ack':
         if (msg.wpm) {
           cwWpm = msg.wpm;
           cwWpmLabel.textContent = cwWpm + ' WPM';
+          localCwKeyer.setWpm(msg.wpm);
           if (window.__vfSyncCw) window.__vfSyncCw();
         }
         if (msg.mode) {
           cwMode = msg.mode;
+          localCwKeyer.setMode(msg.mode);
           cwModeB.classList.toggle('active', cwMode === 'iambicB');
           cwModeA.classList.toggle('active', cwMode === 'iambicA');
           cwModeStr.classList.toggle('active', cwMode === 'straight');
+        }
+        if (typeof msg.swap === 'boolean') {
+          cwSwapPaddles = msg.swap;
+          localCwKeyer.setSwap(msg.swap);
         }
         break;
 
@@ -1218,6 +1237,14 @@
           if (msg.settings.enableRotor != null) { rotorConfigured = !!msg.settings.enableRotor; rotorEnabled = !!msg.settings.rotorActive; updateRotorBtn(); }
           if (msg.settings.remoteCwMacros) syncMacrosFromSettings(msg.settings.remoteCwMacros);
           if (msg.settings.customCatButtons) loadCustomCatButtons(msg.settings.customCatButtons);
+          if (msg.settings.cwKeyerMode) {
+            cwMode = msg.settings.cwKeyerMode;
+            localCwKeyer.setMode(cwMode);
+          }
+          if (typeof msg.settings.cwSwapPaddles === 'boolean') {
+            cwSwapPaddles = msg.settings.cwSwapPaddles;
+            localCwKeyer.setSwap(cwSwapPaddles);
+          }
           syncTuningUI();
           // Sync SSTV templates if updated
           if (msg.settings.sstvTemplates || msg.settings.sstvTextElements) {
@@ -5941,12 +5968,116 @@
   let cwAvailable = false;
   let cwWpm = 20;
   let cwMode = 'iambicB';
+  let cwSwapPaddles = false;
   let cwSidetoneFreq = 600;
   let cwSidetoneVol = 0.8;
   let cwAudioCtx = null;
   let cwOsc = null;
   let cwGain = null;
   let cwKeying = false;
+
+  // --- Local iambic CW keyer ---
+  // Runs in the browser in parallel with the desktop's keyer. The desktop
+  // still does the real radio keying; this one only drives phone sidetone,
+  // so paddle → tone has zero network round-trip. As long as WPM / mode /
+  // swap stay in sync (server echoes via cw-config-ack), the two produce
+  // identical element patterns from identical paddle inputs.
+  function createLocalCwKeyer(onKey) {
+    var IDLE = 0, TONE = 1, IES = 2;
+    var state = IDLE;
+    var wpm = 20, mode = 'iambicB', swap = false;
+    var ditPressed = false, dahPressed = false;
+    var ditLatch = false, dahLatch = false;
+    var currentIsDit = false;
+    var bothAtStart = false;
+    var toneTimer = null, iesTimer = null;
+    var ditPressStart = 0, dahPressStart = 0;
+    var GHOST_MS = 12;
+    function ditMs() { return Math.round(1200 / wpm); }
+    function dahMs() { return ditMs() * 3; }
+    function clearTimers() {
+      if (toneTimer) { clearTimeout(toneTimer); toneTimer = null; }
+      if (iesTimer)  { clearTimeout(iesTimer);  iesTimer  = null; }
+    }
+    function startElement(isDit) {
+      state = TONE;
+      currentIsDit = isDit;
+      bothAtStart = ditPressed && dahPressed;
+      ditLatch = false; dahLatch = false;
+      onKey(true);
+      clearTimers();
+      toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
+    }
+    function onToneEnd() {
+      toneTimer = null;
+      onKey(false);
+      state = IES;
+      iesTimer = setTimeout(onIesEnd, ditMs());
+    }
+    function onIesEnd() {
+      iesTimer = null;
+      var oppLatch = currentIsDit ? dahLatch : ditLatch;
+      var oppDown  = currentIsDit ? dahPressed : ditPressed;
+      var sameLatch = currentIsDit ? ditLatch : dahLatch;
+      var sameDown  = currentIsDit ? ditPressed : dahPressed;
+      if (oppLatch || oppDown) { startElement(!currentIsDit); return; }
+      if (sameLatch || sameDown) { startElement(currentIsDit); return; }
+      if (mode === 'iambicB' && bothAtStart && !ditPressed && !dahPressed) {
+        bothAtStart = false;
+        startElement(!currentIsDit);
+        return;
+      }
+      state = IDLE;
+    }
+    function handleDit(pressed) {
+      ditPressed = pressed;
+      if (mode === 'straight') { onKey(pressed); return; }
+      if (pressed) {
+        ditPressStart = Date.now();
+        if (state === IDLE) startElement(true);
+        else ditLatch = true;
+      } else {
+        // Ghost-press cleanup (Android BT MIDI etc. — matches server keyer)
+        var held = Date.now() - ditPressStart;
+        if (ditLatch && held < GHOST_MS && state !== IDLE) ditLatch = false;
+      }
+    }
+    function handleDah(pressed) {
+      dahPressed = pressed;
+      if (mode === 'straight') return;
+      if (pressed) {
+        dahPressStart = Date.now();
+        if (state === IDLE) startElement(false);
+        else dahLatch = true;
+      } else {
+        var held = Date.now() - dahPressStart;
+        if (dahLatch && held < GHOST_MS && state !== IDLE) dahLatch = false;
+      }
+    }
+    return {
+      paddleDit: function(pressed) { swap ? handleDah(pressed) : handleDit(pressed); },
+      paddleDah: function(pressed) { swap ? handleDit(pressed) : handleDah(pressed); },
+      setWpm: function(v) { wpm = Math.max(5, Math.min(50, v | 0)); },
+      setMode: function(m) {
+        if (m === 'iambicA' || m === 'iambicB' || m === 'straight') {
+          mode = m;
+          if (state !== IDLE) { clearTimers(); state = IDLE; onKey(false); }
+        }
+      },
+      setSwap: function(b) { swap = !!b; },
+      stop: function() {
+        clearTimers();
+        ditPressed = dahPressed = ditLatch = dahLatch = false;
+        if (state !== IDLE) { state = IDLE; onKey(false); }
+      },
+    };
+  }
+  var localCwKeyer = createLocalCwKeyer(function(down) {
+    // Phone-side sidetone is now driven by the local keyer, not by the
+    // server's cw-state echo. The indicator class toggle still comes from
+    // cw-state so it reflects what the server/radio actually keyed.
+    handleCwSidetone(down);
+  });
 
   // Default macros — overridden by server settings if configured
   var DEFAULT_CW_MACROS = [
@@ -6430,6 +6561,11 @@
   // the true release is missing.
   var _paddleReleaseTimer = { dit: null, dah: null };
   function sendPaddle(contact, state) {
+    // Drive the local iambic keyer first (zero-latency sidetone) then forward
+    // to the server over WS (which does the real radio keying).
+    ensureCwAudioCtx();
+    if (contact === 'dit') localCwKeyer.paddleDit(!!state);
+    else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
     }
@@ -6440,7 +6576,8 @@
     if (state) {
       _paddleReleaseTimer[contact] = setTimeout(function() {
         _paddleReleaseTimer[contact] = null;
-        if (contact === 'dit') ditDown = false; else dahDown = false;
+        if (contact === 'dit') { ditDown = false; localCwKeyer.paddleDit(false); }
+        else { dahDown = false; localCwKeyer.paddleDah(false); }
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 0 }));
         }

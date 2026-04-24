@@ -3317,6 +3317,12 @@ function updateRemoteSettings() {
     sstvTextElements: settings.sstvTextElements || [],
     enableAutoSstv: !!settings.enableAutoSstv,
     autoSstvInactivityMin: settings.autoSstvInactivityMin || 90,
+    // Forwarded so ECHOCAT's phone-side iambic keyer stays in sync with the
+    // desktop's. The phone owns the mode selector so this is mostly a fresh-
+    // connect snapshot; swap is desktop-only, so the phone needs it to
+    // produce the right local sidetone pattern.
+    cwKeyerMode: settings.cwKeyerMode || 'iambicB',
+    cwSwapPaddles: !!settings.cwSwapPaddles,
   });
 }
 
