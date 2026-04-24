@@ -298,6 +298,11 @@ let scanning = false;
 let scanTimer = null;
 let scanIndex = 0;
 let scanSkipped = new Set(); // "callsign\tfrequency" keys to skip
+// Frequencies dwelled on in the current pass through the scan list. Lets us
+// skip a second 14304 spot lower in the list when we already dwelled on an
+// earlier 14304 spot this cycle (atvfool issue #23). Cleared when the pass
+// wraps back to the top, or when scan stops/starts.
+let scanVisitedFreqs = new Set();
 let scanForceUnskipped = new Set(); // "callsign\tfrequency" keys force-unskipped by user
 let pendingSpots = null;     // buffered spots during scan
 
@@ -5001,6 +5006,7 @@ function startScan() {
   const list = getScanList();
   if (list.length === 0) return;
   scanning = true;
+  scanVisitedFreqs.clear();
   // Resume from the spot matching the radio's current frequency, or start at 0
   scanIndex = 0;
   if (radioFreqKhz !== null) {
@@ -5016,6 +5022,7 @@ function startScan() {
 function stopScan() {
   scanning = false;
   if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+  scanVisitedFreqs.clear();
   // Flush any buffered spots so table shows latest data
   if (pendingSpots) {
     allSpots = pendingSpots;
@@ -5033,14 +5040,17 @@ function scanStep() {
   // Apply buffered spot updates between dwell steps
   if (pendingSpots) {
     const prevList = getScanList();
-    const prevFreq = prevList.length > 0 && scanIndex < prevList.length
-      ? prevList[scanIndex].frequency : null;
+    const prevSpot = (prevList.length > 0 && scanIndex < prevList.length)
+      ? prevList[scanIndex] : null;
     allSpots = pendingSpots;
     pendingSpots = null;
-    // Re-find position in updated list
-    if (prevFreq) {
+    // Re-find the same spot in the updated list. Match on (callsign, frequency)
+    // rather than frequency alone — if two spots share a frequency, a freq-only
+    // match would snap back to the first of them, stranding the scan. (issue #23)
+    if (prevSpot) {
       const newList = getScanList();
-      const idx = newList.findIndex(s => s.frequency === prevFreq);
+      const idx = newList.findIndex(s =>
+        s.frequency === prevSpot.frequency && s.callsign === prevSpot.callsign);
       if (idx >= 0) scanIndex = idx;
       // if not found, scanIndex stays — will be clamped below
     }
@@ -5048,7 +5058,10 @@ function scanStep() {
 
   const list = getScanList();
   if (list.length === 0) { stopScan(); return; }
-  if (scanIndex >= list.length) scanIndex = 0;
+  if (scanIndex >= list.length) {
+    scanIndex = 0;
+    scanVisitedFreqs.clear(); // wrapping to top starts a fresh pass
+  }
 
   const spot = list[scanIndex];
   lastTunedSpot = spot;
@@ -5061,10 +5074,14 @@ function scanStep() {
   render();
 
   scanTimer = setTimeout(() => {
-    // Skip past any spots on the same frequency (dwell once per frequency, not per spot)
-    const curFreq = spot.frequency;
+    // Dwell once per frequency per pass — record the freq we just dwelled on
+    // and skip any subsequent spots on the same freq, whether adjacent in the
+    // list or several rows apart. Cleared on wrap so the next pass starts clean.
+    scanVisitedFreqs.add(spot.frequency);
     scanIndex++;
-    while (scanIndex < list.length && list[scanIndex].frequency === curFreq) scanIndex++;
+    while (scanIndex < list.length && scanVisitedFreqs.has(list[scanIndex].frequency)) {
+      scanIndex++;
+    }
     scanStep();
   }, scanDwell * 1000);
 }
