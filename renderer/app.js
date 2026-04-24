@@ -215,10 +215,10 @@ let qrzFullName = false; // show first+last or just first
 
 // --- Activator Mode State ---
 let appMode = 'hunter'; // 'hunter' or 'activator'
-let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP'}, ...]  max 3
+let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP'}, ...]  max MAX_N_FER
 let activatorCrossRefs = [];  // [{program:'WWFF', ref:'KFF-1234'}, {program:'LLOTA', ref:'US-0001'}]
 let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
-let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF'}]  max 3, resets per QSO
+let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF'}]  max MAX_N_FER, resets per QSO
 let activatorContacts = []; // in-memory QSO list for current activation session
 let activatorFreqKhz = 0;  // from CAT
 let activationActive = false; // true while activation is running
@@ -353,6 +353,7 @@ const setEnableSota = document.getElementById('set-enable-sota');
 const setEnableWwff = document.getElementById('set-enable-wwff');
 const setEnableLlota = document.getElementById('set-enable-llota');
 const setCwXit = document.getElementById('set-cw-xit');
+const setCwXitShiftVfo = document.getElementById('set-cw-xit-shift-vfo');
 const setCwFilter = document.getElementById('set-cw-filter');
 const setSsbFilter = document.getElementById('set-ssb-filter');
 const setDigitalFilter = document.getElementById('set-digital-filter');
@@ -7704,6 +7705,7 @@ async function openSettingsDialog(tab) {
   setRefreshInterval.value = s.refreshInterval || 30;
   setScanDwell.value = s.scanDwell || 7;
   setCwXit.value = s.cwXit || 0;
+  setCwXitShiftVfo.checked = !!s.cwXitShiftVfo;
   setCwFilter.value = s.cwFilterWidth || 0;
   setSsbFilter.value = s.ssbFilterWidth || 0;
   setDigitalFilter.value = s.digitalFilterWidth || 0;
@@ -8073,6 +8075,7 @@ settingsSave.addEventListener('click', async () => {
   const refreshIntervalVal = Math.max(15, parseInt(setRefreshInterval.value, 10) || 30);
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
   const cwXitVal = parseInt(setCwXit.value, 10) || 0;
+  const cwXitShiftVfoVal = setCwXitShiftVfo.checked;
   const cwFilterVal = parseInt(setCwFilter.value, 10) || 0;
   const ssbFilterVal = parseInt(setSsbFilter.value, 10) || 0;
   const digitalFilterVal = parseInt(setDigitalFilter.value, 10) || 0;
@@ -8242,6 +8245,7 @@ settingsSave.addEventListener('click', async () => {
     refreshInterval: refreshIntervalVal,
     scanDwell: dwellVal,
     cwXit: cwXitVal,
+    cwXitShiftVfo: cwXitShiftVfoVal,
     cwFilterWidth: cwFilterVal,
     ssbFilterWidth: ssbFilterVal,
     digitalFilterWidth: digitalFilterVal,
@@ -15259,6 +15263,9 @@ function freqToBandActivator(khz) {
 }
 
 // --- Multi-Park Dialog ---
+// Max number of park references per side (activator's own or hunter's).
+// 4-fers and 5-fers are common in EU; 6 leaves headroom.
+const MAX_N_FER = 6;
 let multiparkContext = null; // 'my' or 'hunter'
 const multiparkDialog = document.getElementById('multipark-dialog');
 const multiparkTitle = document.getElementById('multipark-title');
@@ -15273,24 +15280,37 @@ function openMultiparkDialog(context) {
   multiparkTitle.textContent = context === 'my' ? 'My Parks (MY_SIG_INFO)' : "Hunter's Parks (SIG_INFO)";
   const refs = context === 'my' ? activatorParkRefs : hunterParkRefs;
   multiparkSlots.innerHTML = '';
-  // Populate existing slots
-  if (refs.length === 0) {
+
+  // Seed from the corresponding single-input field if the refs array is empty
+  // but the user has typed something into it — lets Ctrl+M pick up the in-progress
+  // ref without forcing the user to re-type it as slot 1.
+  const singleInputId = context === 'my' ? 'activator-park-ref' : 'activator-hunter-park';
+  const singleInput = document.getElementById(singleInputId);
+  const typed = (singleInput && singleInput.value || '').trim().toUpperCase();
+  const seeded = refs.length === 0 && typed ? [{ ref: typed, name: '' }] : null;
+
+  // Populate slots from existing refs (or the seeded one)
+  const source = seeded || refs;
+  for (const p of source) {
+    addMultiparkSlot(p.ref, p.name);
+  }
+  // Always append one empty slot and focus it — this is the "I just typed park A,
+  // now I want to type park B" flow. If we're already at the cap, skip.
+  const currentCount = multiparkSlots.querySelectorAll('.multipark-slot').length;
+  if (currentCount < MAX_N_FER) {
     addMultiparkSlot('', '');
-  } else {
-    for (const p of refs) {
-      addMultiparkSlot(p.ref, p.name);
-    }
   }
   updateMultiparkAddBtn();
   multiparkDialog.showModal();
-  // Focus first input
-  const first = multiparkSlots.querySelector('.multipark-ref-input');
-  if (first) first.focus();
+  // Focus the last slot (the empty one, or the only slot if already at cap)
+  const slots = multiparkSlots.querySelectorAll('.multipark-ref-input');
+  const focusTarget = slots[slots.length - 1];
+  if (focusTarget) focusTarget.focus();
 }
 
 function addMultiparkSlot(ref, name) {
   const slotCount = multiparkSlots.querySelectorAll('.multipark-slot').length;
-  if (slotCount >= 3) return;
+  if (slotCount >= MAX_N_FER) return;
   const slot = document.createElement('div');
   slot.className = 'multipark-slot';
   slot.innerHTML = `
@@ -15361,7 +15381,7 @@ function addMultiparkSlot(ref, name) {
 
 function updateMultiparkAddBtn() {
   const slotCount = multiparkSlots.querySelectorAll('.multipark-slot').length;
-  multiparkAddBtn.style.display = slotCount >= 3 ? 'none' : '';
+  multiparkAddBtn.style.display = slotCount >= MAX_N_FER ? 'none' : '';
 }
 
 if (multiparkAddBtn) {

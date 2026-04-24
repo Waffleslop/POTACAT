@@ -152,6 +152,11 @@ contextBridge.exposeInMainWorld('api', {
   // SSTV pop-out
   sstvPopoutOpen: () => ipcRenderer.send('sstv-popout-open'),
   sstvPopoutTheme: (theme) => ipcRenderer.send('sstv-popout-theme', theme),
+  // Bandspread pop-out
+  bandspreadPopoutOpen: () => ipcRenderer.send('bandspread-popout-open'),
+  bandspreadPopoutClose: () => ipcRenderer.send('bandspread-popout-close'),
+  sendBandspreadPopoutTheme: (theme) => ipcRenderer.send('bandspread-popout-theme', theme),
+  onBandspreadPopoutStatus: (cb) => ipcRenderer.on('bandspread-popout-status', (_e, open) => cb(open)),
   // CW Keyer
   cwPaddleDit: (pressed) => ipcRenderer.send('cw-paddle-dit', pressed),
   cwPaddleDah: (pressed) => ipcRenderer.send('cw-paddle-dah', pressed),

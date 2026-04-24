@@ -191,11 +191,16 @@
             <span class="vf-meter-pill" id="vf-pwr-pill" title="TX power">--W</span>
           </div>
         </div>
-        <!-- Rig controls: ATU + NB toggles, RF Gain + TX Power sliders -->
+        <!-- Rig controls: ATU + NB toggles, Rig On/Off, RF Gain + TX Power sliders -->
         <div class="vf-widget hidden" data-vf-widget="rigctl">
           <div class="vf-rig-row">
             <button type="button" id="vf-atu-btn" class="vf-rig-btn">ATU</button>
             <button type="button" id="vf-nb-btn" class="vf-rig-btn">NB</button>
+          </div>
+          <!-- Rig On/Off — only shown when the connected rig's capabilities.power is true -->
+          <div class="vf-rig-row hidden" id="vf-power-row">
+            <button type="button" id="vf-power-on-btn" class="vf-rig-btn" style="color:#4ecca3;">Rig On</button>
+            <button type="button" id="vf-power-off-btn" class="vf-rig-btn" style="color:#e94560;">Rig Off</button>
           </div>
           <div class="vf-rig-slider-row">
             <label>RF</label>
@@ -841,6 +846,9 @@
         <option value="source">Source</option>
       </select>
 
+      <!-- Open map in its own window (visible only on Map tab in non-popout windows) -->
+      <button id="map-popout-btn" class="map-popout-btn main-only hidden" type="button" title="Open map in a new window">&#x2197;</button>
+
       <!-- Refresh rate chip -->
       <button id="refresh-rate-btn" type="button" class="refresh-chip" title="Spot refresh rate">30s</button>
     </div><!-- end filter-toolbar-scroll -->
@@ -864,6 +872,14 @@
 
     <!-- Spot map -->
     <div id="spot-map" class="hidden"></div>
+
+    <!-- Popout-only status strip (replaces status-bar in popout windows) -->
+    <div id="popout-banner" class="popout-only hidden">
+      <span id="popout-freq">---.---.---</span>
+      <span id="popout-mode" class="popout-mode-badge">---</span>
+      <span id="popout-conn" class="popout-conn-dot" title="Connection to main window"></span>
+      <span id="popout-msg" class="popout-msg"></span>
+    </div>
 
     <!-- Log tab view (standalone logging form) -->
     <div id="log-tab-view" class="hidden">

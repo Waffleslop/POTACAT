@@ -3,6 +3,21 @@
 (function () {
   'use strict';
 
+  // --- Popout mode ---
+  // A popout window opens via /?view=<tabname>. It shares the main tab's WebSocket
+  // state by listening to BroadcastChannel('echocat') instead of authenticating its
+  // own WS. User actions (e.g. click-to-tune on the map) are posted back to main
+  // as { kind: 'forward', message: {...} } and main forwards them to the server.
+  const _popoutParams = new URLSearchParams(location.search);
+  const popoutView = _popoutParams.get('view');
+  const isPopout = !!popoutView;
+  if (isPopout) {
+    document.body.classList.add('popout-mode');
+    if (popoutView) document.body.classList.add('popout-mode-' + popoutView);
+  }
+  let bc = null;
+  const _popoutClientId = Math.random().toString(36).slice(2, 10);
+
   // --- State ---
   let ws = null;
   let spots = [];
@@ -131,6 +146,18 @@
   const dirSearch = document.getElementById('dir-search');
   const sortSelect = document.getElementById('sort-select');
   const spotMapEl = document.getElementById('spot-map');
+  const mapPopoutBtn = document.getElementById('map-popout-btn');
+  if (mapPopoutBtn) {
+    mapPopoutBtn.addEventListener('click', () => {
+      // Shared window name makes a second click focus the existing popout rather than duplicate it
+      const popup = window.open('/?view=map', 'echocat-map', 'width=900,height=700,resizable=yes');
+      // Switch main tab to Spots so the user isn't looking at two maps
+      if (popup) {
+        try { switchTab('spots'); } catch {}
+        try { popup.focus(); } catch {}
+      }
+    });
+  }
   const dialPad = document.getElementById('dial-pad');
   const dialPadBackdrop = document.getElementById('dial-pad-backdrop');
   const dpFreq = document.getElementById('dp-freq');
@@ -147,6 +174,16 @@
   let spotMapLayer = null;
   let spotTuneArcLayer = null;
   let spotMapHasFit = false;
+  // Callsign whose map-marker popup should stay open across re-renders. Cleared
+  // when the user clicks empty map area or clicks a different spot. Null means
+  // "no sticky popup".
+  let _openPopupCall = null;
+  // Differential marker cache for renderMapSpots — lets us update spots without
+  // clearLayers/re-add (which would destroy any open popup and flicker the map).
+  // Keys: "<callsign>|<frequency>". Also tracks the home-QTH marker separately.
+  const _mapMarkers = {};
+  let _mapHomeMarker = null;
+  let _mapHomeGrid = null;
   let currentFreqKhz = 0;
   let currentMode = '';
   let tunedFreqKhz = '';
@@ -684,6 +721,72 @@
     if (e.key === 'Enter') connectBtn.click();
   });
 
+  // --- BroadcastChannel (main-window side) ---
+  // Opens a BC so any popout windows opened from this session can mirror state.
+  // Called after auth succeeds; safe to call multiple times (idempotent).
+  function setupMainBroadcastChannel() {
+    if (isPopout || bc) return;
+    try { bc = new BroadcastChannel('echocat'); } catch { return; }
+    bc.addEventListener('message', (ev) => {
+      const m = ev.data;
+      if (!m || !m.kind) return;
+      if (m.kind === 'hello') {
+        sendStateSnapshot();
+      } else if (m.kind === 'forward' && m.message) {
+        // Log forwards so issues (e.g. WS disconnected when a popout click arrives)
+        // are visible in DevTools.
+        const wsOpen = !!(ws && ws.readyState === WebSocket.OPEN);
+        console.log('[BC main] forward', m.message && m.message.type, 'wsOpen=', wsOpen, m.message);
+        if (wsOpen) {
+          try { ws.send(JSON.stringify(m.message)); } catch (err) { console.warn('[BC main] forward send failed', err); }
+        }
+      }
+    });
+  }
+
+  function sendStateSnapshot() {
+    if (!bc) return;
+    try {
+      bc.postMessage({
+        kind: 'state-snapshot',
+        spots: spots,
+        currentFreqKhz: currentFreqKhz,
+        mode: modeBadge ? modeBadge.textContent : '',
+        clubMember: clubMember,
+        phoneGrid: phoneGrid,
+        distUnit: distUnit,
+        online: !!(ws && ws.readyState === WebSocket.OPEN),
+      });
+    } catch {}
+  }
+
+  // Unified send helper — main mode sends over WS; popout mode forwards via BC.
+  function sendToServer(message) {
+    if (isPopout) {
+      if (bc) {
+        console.log('[BC popout] forward', message && message.type, message);
+        try { bc.postMessage({ kind: 'forward', message: message }); } catch (err) {
+          console.warn('[BC popout] postMessage failed', err);
+        }
+      } else {
+        console.warn('[BC popout] no BroadcastChannel — dropping', message);
+      }
+      return;
+    }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify(message)); } catch {}
+    }
+  }
+
+  // Notify any popouts that this (main) window is going away. Popouts will show
+  // a "disconnected from main" banner until a new main window opens and answers
+  // their retried `hello`.
+  window.addEventListener('beforeunload', () => {
+    if (!isPopout && bc) {
+      try { bc.postMessage({ kind: 'main-closing' }); } catch {}
+    }
+  });
+
   function openWs(onOpen) {
     wasKicked = false;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -700,6 +803,7 @@
     ws.onclose = function() {
       clearInterval(pingInterval);
       pingInterval = null;
+      if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
       if (wasKicked) return;
       if (mainUI.classList.contains('hidden')) {
         connectBtn.textContent = 'Connect';
@@ -750,6 +854,9 @@
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
+        // Open BroadcastChannel so any popout windows opened from this session mirror our state
+        setupMainBroadcastChannel();
+        if (bc) { try { bc.postMessage({ kind: 'connection', online: true }); sendStateSnapshot(); } catch {} }
         requestWakeLock(); // keep screen on while connected
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
@@ -952,6 +1059,7 @@
         spots = msg.data || [];
         renderSpots();
         if (activeTab === 'map') renderMapSpots();
+        if (bc) { try { bc.postMessage({ kind: 'spots', data: spots }); } catch {} }
         break;
 
       case 'directory':
@@ -1311,6 +1419,7 @@
       freqDisplay.textContent = formatFreq(s.freq);
       const prevFreqKhz = currentFreqKhz;
       currentFreqKhz = s.freq / 1000;
+      if (bc) { try { bc.postMessage({ kind: 'vfo', freqKhz: currentFreqKhz, mode: (modeBadge && modeBadge.textContent) || '' }); } catch {} }
       // Repaint the Dir list so the tuned net/broadcast ring tracks the radio
       // (e.g. someone spinning the VFO on desktop while ECHOCAT shows Dir).
       if (activeTab === 'dir' && Math.abs(currentFreqKhz - prevFreqKhz) > 0.05) {
@@ -1388,6 +1497,12 @@
       soRfGainRow.classList.toggle('hidden', !s.capabilities.rfgain);
       soTxPowerRow.classList.toggle('hidden', !s.capabilities.txpower);
       rcVfoGroup.classList.toggle('hidden', !s.capabilities.vfo);
+      // Rig On/Off — show wherever the radio's CAT set supports PS0/PS1, 0x18, or equivalent.
+      // Applies to both the Settings-overlay group and the VFO widget row.
+      const rcPowerGroup = document.getElementById('rc-power');
+      if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !s.capabilities.power);
+      const vfPowerRow = document.getElementById('vf-power-row');
+      if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !s.capabilities.power);
       // Clamp TX power slider to radio's min/max
       if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
       if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;
@@ -1659,45 +1774,94 @@
     }
   }
 
+  // Call once per spotMap instance — wires the map-level click handler that
+  // clears the sticky popup when the user clicks an empty area.
+  function wireSpotMapClicks(map) {
+    if (!map || map._popoutClickWired) return;
+    map._popoutClickWired = true;
+    map.on('click', () => {
+      _openPopupCall = null;
+    });
+  }
+
   function renderMapSpots() {
     if (!spotMap) return;
-    if (spotMapLayer) spotMapLayer.clearLayers();
-    else spotMapLayer = L.layerGroup().addTo(spotMap);
+    wireSpotMapClicks(spotMap);
+    if (!spotMapLayer) spotMapLayer = L.layerGroup().addTo(spotMap);
 
     const filtered = getFilteredSpots();
     const bounds = [];
+    const initialRender = !spotMapHasFit;
 
+    // Home-QTH marker — reuse across renders unless the grid changed (no flicker).
     if (phoneGrid) {
       const home = gridToLatLonLocal(phoneGrid);
       if (home) {
-        L.circleMarker([home.lat, home.lon], { radius: 8, color: '#e94560', fillColor: '#e94560', fillOpacity: 1 })
-          .bindPopup('Home QTH').addTo(spotMapLayer);
+        if (_mapHomeGrid !== phoneGrid) {
+          if (_mapHomeMarker) { try { spotMapLayer.removeLayer(_mapHomeMarker); } catch {} }
+          _mapHomeMarker = L.circleMarker([home.lat, home.lon], { radius: 8, color: '#e94560', fillColor: '#e94560', fillOpacity: 1 })
+            .bindPopup('Home QTH');
+          _mapHomeMarker.addTo(spotMapLayer);
+          _mapHomeGrid = phoneGrid;
+        }
         bounds.push([home.lat, home.lon]);
       }
+    } else if (_mapHomeMarker) {
+      try { spotMapLayer.removeLayer(_mapHomeMarker); } catch {}
+      _mapHomeMarker = null;
+      _mapHomeGrid = null;
     }
 
+    // Differential spot markers — update existing, add new, remove missing.
+    // Keeps any open popup intact across the ~2s spot-push cycle.
+    const presentKeys = new Set();
     filtered.forEach(s => {
       if (!s.lat || !s.lon) return;
+      const key = s.callsign + '|' + s.frequency;
+      presentKeys.add(key);
       const color = SOURCE_COLORS_MAP[s.source] || '#888';
       const dist = formatSpotDist(s.distance);
       const ref = s.reference || s.locationDesc || '';
-      const marker = L.circleMarker([s.lat, s.lon], {
+      const popupHtml = '<b>' + esc(s.callsign) + '</b><br>' + esc(ref) + '<br>' + formatSpotFreq(s.frequency) + ' ' + dist;
+      let marker = _mapMarkers[key];
+      if (marker) {
+        // Existing marker — refresh popup content (distance/time) without recreating.
+        try { marker.setPopupContent(popupHtml); } catch {}
+        bounds.push([s.lat, s.lon]);
+        return;
+      }
+      marker = L.circleMarker([s.lat, s.lon], {
         radius: 7, color, fillColor: color, fillOpacity: 0.8, weight: 1
       });
-      marker.bindPopup('<b>' + esc(s.callsign) + '</b><br>' + esc(ref) + '<br>' + formatSpotFreq(s.frequency) + ' ' + dist);
-      marker.on('click', () => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'tune', freqKhz: s.frequency, mode: s.mode, bearing: s.bearing ? parseFloat(s.bearing) : undefined }));
-        }
+      marker.bindPopup(popupHtml, { autoClose: false, closeOnClick: false });
+      marker.on('click', (ev) => {
+        _openPopupCall = s.callsign;
+        sendToServer({ type: 'tune', freqKhz: s.frequency, mode: s.mode, bearing: s.bearing ? parseFloat(s.bearing) : undefined });
         tunedFreqKhz = s.frequency;
         drawSpotTuneArc(s.lat, s.lon, s.source);
+        // Prevent the click from bubbling up to the map's click handler (which
+        // would clear _openPopupCall immediately).
+        if (ev && ev.originalEvent && L && L.DomEvent) L.DomEvent.stopPropagation(ev.originalEvent);
       });
       marker.addTo(spotMapLayer);
+      _mapMarkers[key] = marker;
+      // If this is the sticky-popup spot and it just appeared, open its popup.
+      if (_openPopupCall && s.callsign === _openPopupCall && !marker.isPopupOpen()) {
+        setTimeout(() => { try { marker.openPopup(); } catch {} }, 0);
+      }
       bounds.push([s.lat, s.lon]);
     });
 
+    // Remove markers that dropped out of the filter.
+    for (const key of Object.keys(_mapMarkers)) {
+      if (!presentKeys.has(key)) {
+        try { spotMapLayer.removeLayer(_mapMarkers[key]); } catch {}
+        delete _mapMarkers[key];
+      }
+    }
+
     // Only auto-zoom on first render; subsequent updates preserve user's pan/zoom
-    if (!spotMapHasFit) {
+    if (initialRender) {
       if (bounds.length > 1) spotMap.fitBounds(bounds, { padding: [30, 30] });
       else if (bounds.length === 1) spotMap.setView(bounds[0], 5);
       spotMapHasFit = true;
@@ -4177,6 +4341,8 @@
     ft8View.classList.add('hidden');
     if (dirView) dirView.classList.add('hidden');
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
+    // Popout trigger: visible only on the Map tab, and only in non-popout windows
+    if (mapPopoutBtn) mapPopoutBtn.classList.toggle('hidden', isPopout || tab !== 'map');
     if (scanning) stopScan();
     // Show/hide PTT button — hide when FT8/SSTV tab is active
     pttBtn.style.display = (tab === 'ft8' || tab === 'sstv') ? 'none' : '';
@@ -9366,15 +9532,23 @@
     window.__vfSetSwr = vfSetSwr;
     window.__vfSetPwr = vfSetPwr;
 
-    // ----- Rig-control widget: ATU / NB toggles + RF Gain / TX Power sliders -----
+    // ----- Rig-control widget: ATU / NB toggles + Rig On/Off + RF Gain / TX Power sliders -----
     const vfAtuBtn = document.getElementById('vf-atu-btn');
     const vfNbBtn = document.getElementById('vf-nb-btn');
+    const vfPowerOnBtn = document.getElementById('vf-power-on-btn');
+    const vfPowerOffBtn = document.getElementById('vf-power-off-btn');
     const vfRfGainSlider = document.getElementById('vf-rfgain-slider');
     const vfRfGainVal = document.getElementById('vf-rfgain-val');
     const vfTxPowerSlider = document.getElementById('vf-txpower-slider');
     const vfTxPowerVal = document.getElementById('vf-txpower-val');
     if (vfAtuBtn) vfAtuBtn.addEventListener('click', () => { if (rcAtuBtn) rcAtuBtn.click(); });
     if (vfNbBtn) vfNbBtn.addEventListener('click', () => { if (rcNbBtn) rcNbBtn.click(); });
+    if (vfPowerOnBtn) vfPowerOnBtn.addEventListener('click', () => {
+      sendToServer({ type: 'rig-control', data: { action: 'power-on' } });
+    });
+    if (vfPowerOffBtn) vfPowerOffBtn.addEventListener('click', () => {
+      sendToServer({ type: 'rig-control', data: { action: 'power-off' } });
+    });
     if (vfRfGainSlider) {
       vfRfGainSlider.addEventListener('input', () => {
         vfRfGainVal.textContent = vfRfGainSlider.value;
@@ -9495,6 +9669,117 @@
   })();
   // ===== End VFO Widgets =====
 
-  // Auto-connect on page load
-  connect('');
+  // --- Popout bootstrap (view=<tab>) ---
+  // Popout windows don't authenticate or open a WebSocket. They mirror the
+  // main tab's state over BroadcastChannel, and post user actions back as
+  // { kind: 'forward', ... } for the main tab to forward on the real WS.
+  function bootstrapPopout() {
+    // Reveal main UI without auth.
+    connectScreen.classList.add('hidden');
+    mainUI.classList.remove('hidden');
+
+    const popoutBanner = document.getElementById('popout-banner');
+    const popoutFreq = document.getElementById('popout-freq');
+    const popoutModeEl = document.getElementById('popout-mode');
+    const popoutMsg = document.getElementById('popout-msg');
+    if (popoutBanner) popoutBanner.classList.remove('hidden');
+
+    function setStatus(connected, message) {
+      if (!popoutBanner) return;
+      popoutBanner.classList.toggle('disconnected', !connected);
+      if (popoutMsg) popoutMsg.textContent = message || (connected ? '' : 'Disconnected from main window');
+    }
+
+    function setVfo(freqKhz, modeStr) {
+      if (popoutFreq && freqKhz) popoutFreq.textContent = formatFreq(freqKhz * 1000);
+      if (popoutModeEl && modeStr) popoutModeEl.textContent = modeStr;
+    }
+
+    // Initialize Leaflet the same way switchTab('map') does for the main window.
+    if (popoutView === 'map') {
+      spotMap = L.map('spot-map', {
+        zoomControl: true,
+        maxBounds: [[-85, -300], [85, 300]],
+        maxBoundsViscosity: 1.0,
+        minZoom: 2,
+      }).setView([39.8, -98.5], 4);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OSM',
+        className: 'dark-tiles',
+        noWrap: true,
+      }).addTo(spotMap);
+      // Give CSS a tick to settle, then ask Leaflet to remeasure.
+      // Do it several times — Leaflet needs the container size to be accurate
+      // at the moment renderMapSpots() runs, and initial layout in popouts is
+      // sometimes reported as 0x0 on the first RAF.
+      const remeasure = () => { try { spotMap.invalidateSize(); } catch {} };
+      requestAnimationFrame(remeasure);
+      setTimeout(remeasure, 100);
+      setTimeout(remeasure, 500);
+      window.addEventListener('resize', remeasure);
+    }
+
+    // Open BroadcastChannel and hook handlers.
+    try { bc = new BroadcastChannel('echocat'); } catch {
+      setStatus(false, 'BroadcastChannel unavailable in this browser');
+      return;
+    }
+
+    let snapshotReceived = false;
+    bc.addEventListener('message', (ev) => {
+      const m = ev.data;
+      if (!m || !m.kind) return;
+      switch (m.kind) {
+        case 'state-snapshot':
+          snapshotReceived = true;
+          setStatus(m.online !== false, '');
+          spots = Array.isArray(m.spots) ? m.spots : [];
+          if (m.currentFreqKhz != null) currentFreqKhz = m.currentFreqKhz;
+          if (typeof m.phoneGrid === 'string') phoneGrid = m.phoneGrid;
+          if (typeof m.distUnit === 'string') distUnit = m.distUnit;
+          setVfo(currentFreqKhz, m.mode || '');
+          console.log('[BC popout] state-snapshot', spots.length, 'spots, vfo=', currentFreqKhz);
+          if (popoutView === 'map' && spotMap) { try { spotMap.invalidateSize(); } catch {} ; renderMapSpots(); }
+          break;
+        case 'spots':
+          spots = Array.isArray(m.data) ? m.data : [];
+          console.log('[BC popout] spots pushed:', spots.length);
+          if (popoutView === 'map' && spotMap) renderMapSpots();
+          break;
+        case 'vfo':
+          if (m.freqKhz != null) currentFreqKhz = m.freqKhz;
+          setVfo(currentFreqKhz, m.mode || '');
+          break;
+        case 'connection':
+          setStatus(!!m.online, m.online ? '' : (m.reason === 'kicked' ? 'Main window lost connection' : 'Main window disconnected'));
+          break;
+        case 'main-closing':
+          setStatus(false, 'Main window closed — reopen POTACAT Remote to resync');
+          break;
+      }
+    });
+
+    // Say hello — the main window (if open) responds with a state-snapshot.
+    // Retry every 2s until a snapshot arrives so the popout auto-recovers if
+    // the main tab was opened after the popout.
+    const sayHello = () => {
+      try { bc.postMessage({ kind: 'hello', view: popoutView, id: _popoutClientId }); } catch {}
+    };
+    sayHello();
+    const helloTimer = setInterval(() => {
+      if (snapshotReceived) { clearInterval(helloTimer); return; }
+      sayHello();
+    }, 2000);
+    // After ~1.5s with no snapshot, surface the "open main first" hint.
+    setTimeout(() => {
+      if (!snapshotReceived) setStatus(false, 'Waiting for main POTACAT Remote window…');
+    }, 1500);
+  }
+
+  // Auto-connect on page load (or bootstrap popout view)
+  if (isPopout) {
+    bootstrapPopout();
+  } else {
+    connect('');
+  }
 })();

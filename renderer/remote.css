@@ -3910,3 +3910,88 @@ html, body {
     pointer-events: none;
   }
 }
+
+/* ============================================================
+   Popout windows (?view=<tab>) — subset-of-page presentations
+   that share state via BroadcastChannel with the main tab.
+   ============================================================ */
+
+/* Toolbar "open in new window" button — lives in #filter-toolbar-scroll, right
+   of the Spots dropdown. switchTab() toggles .hidden on non-Map tabs. */
+.map-popout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  margin-left: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.map-popout-btn:hover { background: var(--bg-header); }
+
+/* Popout mode — only the requested view and its chrome are visible */
+body.popout-mode #connect-screen,
+body.popout-mode #tab-bar,
+body.popout-mode #filter-toolbar,
+body.popout-mode #status-bar,
+body.popout-mode #bottom-bar,
+body.popout-mode #ssb-panel,
+body.popout-mode #cw-panel,
+body.popout-mode #pskr-panel,
+body.popout-mode #activator-toolbar,
+body.popout-mode .main-only { display: none !important; }
+
+body.popout-mode #main-ui { display: flex !important; flex-direction: column; height: 100vh; }
+
+/* Hide every view-div by default; the per-view CSS below re-shows just one. */
+body.popout-mode #spot-list,
+body.popout-mode #log-tab-view,
+body.popout-mode #log-view,
+body.popout-mode #logbook-view,
+body.popout-mode #ft8-view,
+body.popout-mode #dir-view,
+body.popout-mode #sstv-view { display: none !important; }
+
+/* Map popout */
+body.popout-mode-map #spot-map {
+  display: block !important;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+}
+
+/* Popout status strip — only visible in popout windows */
+.popout-only { display: none; }
+body.popout-mode .popout-only { display: flex; }
+
+#popout-banner {
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+#popout-banner.disconnected { background: var(--accent); color: #fff; }
+#popout-banner #popout-freq { font-family: 'Consolas', 'Courier New', monospace; font-weight: 600; font-size: 14px; }
+#popout-banner .popout-mode-badge { color: var(--text-dim); font-size: 11px; }
+#popout-banner .popout-conn-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--pota);
+  margin-left: auto;
+}
+#popout-banner.disconnected .popout-conn-dot { background: #fff; }
+#popout-banner .popout-msg { color: var(--text); font-size: 11px; }
+#popout-banner.disconnected .popout-msg { color: #fff; }
+

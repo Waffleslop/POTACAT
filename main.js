@@ -7707,8 +7707,16 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
 
   // CW XIT: use radio's XIT (TX offset only) instead of shifting tune frequency
   const wantXit = !clearXit && (mode === 'CW') && settings.cwXit;
+  // User pref: apply XIT by shifting the VFO (legacy behavior) — overrides native XIT.
+  // Useful for operators who want the VFO display to reflect the offset.
+  const legacyShift = !!settings.cwXitShiftVfo;
+  const useNativeXit = wantXit && !legacyShift;
+  const useVfoShift  = wantXit && legacyShift;
   // Clear XIT when tuning to a non-CW spot (don't leave stale XIT from a previous CW tune)
   const shouldClearXit = clearXit || (!wantXit && mode && mode !== 'CW');
+  // Also disable any prior native XIT when the user has asked for the VFO-shift path
+  // — otherwise the rig's native XIT would double-apply on top of the shifted VFO.
+  const shouldDisableNativeXit = shouldClearXit || useVfoShift;
 
   const m = (mode || '').toUpperCase();
   let filterWidth = 0;
@@ -7788,17 +7796,19 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   if (settings.enableWsjtx && (!cat || !cat.connected)) {
     if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
       const sliceIndex = (settings.catTarget.port || 5002) - 5002;
-      const freqMhz = freqHz / 1e6;
+      const wsjtxTuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
+      const freqMhz = wsjtxTuneHz / 1e6;
       const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
       const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB')
         ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
         : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
-      sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}->${flexMode} filter=${filterWidth}`);
+      sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}->${flexMode} filter=${filterWidth}${useVfoShift ? ` (VFO shifted +${settings.cwXit}Hz for XIT)` : ''}`);
       smartSdr.tuneSlice(sliceIndex, freqMhz, flexMode, filterWidth);
-      // Set or clear XIT on the slice
-      if (wantXit) {
+      // Set or clear XIT on the slice. When the user has chosen VFO-shift mode,
+      // we actively disable native slice XIT so offsets don't double up.
+      if (useNativeXit) {
         smartSdr.setSliceXit(sliceIndex, true, settings.cwXit);
-      } else if (shouldClearXit) {
+      } else if (shouldDisableNativeXit) {
         smartSdr.setSliceXit(sliceIndex, false);
       }
       // ATU: auto-tune on band change (SmartSDR-only path)
@@ -7824,19 +7834,22 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     return;
   }
 
-  // CW XIT: use native TX CLAR commands if radio supports them (Yaesu XT/RU/RD),
-  // otherwise fall back to shifting the VFO frequency
+  // CW XIT dispatch:
+  //   - useNativeXit: ask the rig (Yaesu XT/RU/RD or SmartSDR slice XIT) for a TX-only offset.
+  //   - useVfoShift: legacy — add the offset to the VFO itself and disable any native XIT.
+  //   - Otherwise (radio has no native XIT and SmartSDR isn't handling it): fall back to VFO shift.
   let tuneFreqHz = freqHz;
   let nativeXit = null;
-  if (wantXit && cat.hasNativeXit) {
-    // Radio supports native XIT — pass to tune() for auto-apply after freq change
+  if (useNativeXit && cat.hasNativeXit) {
     nativeXit = settings.cwXit;
+  } else if (useVfoShift) {
+    tuneFreqHz = freqHz + settings.cwXit;
   } else if (wantXit && !(smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp')) {
-    // Fallback: shift VFO frequency
+    // Automatic fallback for rigs with no native XIT and no SmartSDR
     tuneFreqHz = freqHz + settings.cwXit;
   }
-  // Clear native XIT when switching away from CW
-  if (shouldClearXit && cat.hasNativeXit) {
+  // Disable native XIT when we don't want it active (switching to non-CW OR using VFO-shift)
+  if (shouldDisableNativeXit && cat.hasNativeXit) {
     nativeXit = 0;
   }
 
@@ -7844,15 +7857,17 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   // Suppress stale mode broadcasts to ECHOCAT for 2s — prevents flicker when
   // frequency-triggered status broadcasts include the OLD mode before polling catches up
   if (mode) _modeSuppressUntil = Date.now() + 2000;
-  sendCatLog(`tune: freq=${freqKhz}kHz -> ${tuneFreqHz}Hz mode=${mode}${mode !== resolvedMode ? '->' + resolvedMode : ''} split=${!!settings.enableSplit} filter=${filterWidth}${wantXit ? ` xit=${settings.cwXit}` : ''}`);
+  const xitTag = wantXit ? ` xit=${settings.cwXit}${useVfoShift ? ' (VFO shift)' : ''}` : '';
+  sendCatLog(`tune: freq=${freqKhz}kHz -> ${tuneFreqHz}Hz mode=${mode}${mode !== resolvedMode ? '->' + resolvedMode : ''} split=${!!settings.enableSplit} filter=${filterWidth}${xitTag}`);
   cat.tune(tuneFreqHz, mode, { split: settings.enableSplit, filterWidth, xit: nativeXit });
 
-  // Set or clear XIT via SmartSDR API (works even when tuning via CAT)
+  // Set or clear XIT via SmartSDR API (works even when tuning via CAT).
+  // When legacy VFO-shift is active, force slice XIT off so the offset isn't double-applied.
   if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
     const sliceIndex = (settings.catTarget.port || 5002) - 5002;
-    if (wantXit) {
+    if (useNativeXit) {
       smartSdr.setSliceXit(sliceIndex, true, settings.cwXit);
-    } else if (shouldClearXit) {
+    } else if (shouldDisableNativeXit) {
       smartSdr.setSliceXit(sliceIndex, false);
     }
   }
@@ -8640,7 +8655,23 @@ app.whenReady().then(() => {
     bandspreadPopoutWin.setMenuBarVisibility(false);
     bandspreadPopoutWin.loadFile(path.join(__dirname, 'renderer', 'bandspread-popout.html'));
 
+    // Persist bounds on resize/move as well as close, so the last known position
+    // survives unclean exits (task-manager kill, power loss, etc.).
+    let bandspreadBoundsSaveTimer = null;
+    const saveBandspreadBounds = () => {
+      if (!bandspreadPopoutWin || bandspreadPopoutWin.isDestroyed()) return;
+      if (bandspreadPopoutWin.isMaximized() || bandspreadPopoutWin.isMinimized()) return;
+      if (bandspreadBoundsSaveTimer) clearTimeout(bandspreadBoundsSaveTimer);
+      bandspreadBoundsSaveTimer = setTimeout(() => {
+        if (!bandspreadPopoutWin || bandspreadPopoutWin.isDestroyed()) return;
+        settings.bandspreadPopoutBounds = bandspreadPopoutWin.getBounds();
+        saveSettings(settings);
+      }, 400);
+    };
+    bandspreadPopoutWin.on('resize', saveBandspreadBounds);
+    bandspreadPopoutWin.on('move', saveBandspreadBounds);
     bandspreadPopoutWin.on('close', () => {
+      if (bandspreadBoundsSaveTimer) clearTimeout(bandspreadBoundsSaveTimer);
       if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
         if (!bandspreadPopoutWin.isMaximized() && !bandspreadPopoutWin.isMinimized()) {
           settings.bandspreadPopoutBounds = bandspreadPopoutWin.getBounds();

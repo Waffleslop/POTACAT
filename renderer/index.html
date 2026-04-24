@@ -164,6 +164,7 @@
           <div class="multi-dropdown-menu" style="min-width:140px;">
             <button class="view-menu-item" id="view-jtcat-btn">JTCAT FT8</button>
             <button class="view-menu-item" id="view-sstv-btn">SSTV</button>
+            <button class="view-menu-item" id="view-bandspread-btn">Bandspread</button>
             <button class="view-menu-item" id="view-rbn-btn">Propagation</button>
             <button class="view-menu-item" id="cluster-terminal-btn">Terminal</button>
             <button class="view-menu-item" id="view-directory-btn">SWL/HF Net Directory</button>
@@ -1381,6 +1382,9 @@
       </label>
       <label>CW XIT Offset (Hz):
         <input type="number" id="set-cw-xit" min="-999" max="999" step="1" value="0">
+      </label>
+      <label class="checkbox-label" style="margin-top:4px;" title="When on, CW XIT adds the offset to the VFO itself (legacy behavior — VFO display shifts). When off, POTACAT uses the radio's native TX-only XIT (Flex slice XIT, Yaesu TX CLAR) so the VFO stays on the spot's true frequency.">
+        <input type="checkbox" id="set-cw-xit-shift-vfo"> Shift VFO for CW XIT (legacy)
       </label>
       <label>CW Filter Width (Hz):
         <input type="number" id="set-cw-filter" min="0" max="3000" step="50" value="0">

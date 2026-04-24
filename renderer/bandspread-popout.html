@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>Bandspread</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); }
+    /* --bs-scale drives both HTML chrome sizes and the canvas text size. JS sets it on <body>. */
+    body { --bs-scale: 1; display: flex; flex-direction: column; color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: calc(12px * var(--bs-scale)); }
+
+    .bs-toolbar {
+      display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+      background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary);
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .bs-band-select {
+      padding: 3px 22px 3px 8px; background: var(--bg-input);
+      border: 1px solid var(--border-primary); border-radius: 3px;
+      color: var(--text-primary); cursor: pointer;
+      font-size: calc(11px * var(--bs-scale)); font-weight: 600;
+      appearance: none; -webkit-appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
+                        linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+      background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+    }
+    .bs-band-select:focus { outline: none; border-color: var(--accent-blue); }
+    .bs-band-select:hover { background-color: var(--bg-hover); }
+
+    .bs-sep { width: 1px; height: 16px; background: var(--border-primary); margin: 0 4px; }
+
+    .bs-src-row { display: flex; gap: 8px; align-items: center; font-size: calc(11px * var(--bs-scale)); color: var(--text-secondary); }
+    .bs-src-row label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; user-select: none; }
+    .bs-src-row input[type=checkbox] { margin: 0; cursor: pointer; }
+    .bs-src-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+
+    .bs-zoom-row { display: flex; gap: 2px; align-items: center; }
+    .bs-zoom-btn {
+      width: 22px; height: 22px; padding: 0; line-height: 1;
+      background: var(--bg-input); border: 1px solid var(--border-primary);
+      border-radius: 3px; color: var(--text-secondary); cursor: pointer;
+      font-size: 13px; font-weight: 600;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .bs-zoom-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .bs-zoom-val { font-size: calc(10px * var(--bs-scale)); color: var(--text-tertiary); min-width: 32px; text-align: center; }
+
+    .bs-info { margin-left: auto; font-size: calc(11px * var(--bs-scale)); color: var(--text-tertiary); padding-right: 6px; }
+
+    .bs-canvas-wrap {
+      flex: 1; min-height: 0; position: relative;
+      background: var(--bg-primary);
+    }
+    #bs-canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+    .bs-tooltip {
+      position: absolute; pointer-events: none;
+      background: var(--bg-panel); border: 1px solid var(--border-secondary);
+      border-radius: 3px; padding: 4px 7px; font-size: calc(11px * var(--bs-scale));
+      color: var(--text-primary); box-shadow: 0 2px 8px var(--shadow-heavy);
+      white-space: nowrap; z-index: 10;
+      opacity: 0; transition: opacity 0.08s;
+    }
+    .bs-tooltip.visible { opacity: 1; }
+    .bs-tooltip b { color: var(--accent-blue); }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-title">Bandspread</div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+  <div class="bs-toolbar">
+    <select class="bs-band-select" id="bs-band-select" title="Band"></select>
+    <div class="bs-sep"></div>
+    <div class="bs-zoom-row" title="Font size (Ctrl+scroll, Ctrl +/-, Ctrl 0 resets)">
+      <button class="bs-zoom-btn" id="bs-font-dec" title="Smaller">A&minus;</button>
+      <span class="bs-zoom-val" id="bs-font-val">100%</span>
+      <button class="bs-zoom-btn" id="bs-font-inc" title="Larger">A+</button>
+    </div>
+    <div class="bs-info" id="bs-info">0 spots</div>
+  </div>
+  <div class="bs-canvas-wrap" id="bs-canvas-wrap">
+    <canvas id="bs-canvas"></canvas>
+    <div class="bs-tooltip" id="bs-tooltip"></div>
+  </div>
+
+  <script src="bandspread-popout.js"></script>
+</body>
+</html>
