@@ -3774,9 +3774,21 @@ function isWorkedSpot(spot) {
     String(now.getUTCDate()).padStart(2, '0');
   const todayQsos = entries.filter(e => e.date === todayUtc);
   if (todayQsos.length === 0) return false;
-  // Match on band + mode — only hide if worked on same band AND mode today
   const spotBand = (spot.band || '').toUpperCase();
   const spotMode = (spot.mode || '').toUpperCase();
+  const spotRef = (spot.reference || '').toUpperCase();
+  // If the spot carries a park/summit reference, require that exact ref to
+  // count as "worked today" — a roving activator at a new park must not be
+  // grayed out because the operator already worked them at a different park
+  // earlier in the day. (NG9P report, 2026-04)
+  if (spotRef) {
+    return todayQsos.some(e =>
+      (e.ref || '').toUpperCase() === spotRef &&
+      (!spotBand || e.band === spotBand) &&
+      (!spotMode || e.mode === spotMode)
+    );
+  }
+  // No reference (e.g. plain DX cluster spot) — fall back to call + band + mode.
   if (spotBand || spotMode) {
     return todayQsos.some(e =>
       (!spotBand || e.band === spotBand) &&

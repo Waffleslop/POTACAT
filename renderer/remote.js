@@ -1542,6 +1542,17 @@
     if (todayQsos.length === 0) return false;
     const spotBand = (s.band || '').toUpperCase();
     const spotMode = (s.mode || '').toUpperCase();
+    const spotRef = (s.reference || '').toUpperCase();
+    // Same roving-activator fix as the desktop: match on the park/summit
+    // reference too when the spot has one, otherwise a different park for a
+    // previously-worked call would be falsely grayed. (NG9P report, 2026-04)
+    if (spotRef) {
+      return todayQsos.some(e =>
+        (e.ref || '').toUpperCase() === spotRef &&
+        (!spotBand || e.band === spotBand) &&
+        (!spotMode || e.mode === spotMode)
+      );
+    }
     if (spotBand || spotMode) {
       return todayQsos.some(e =>
         (!spotBand || e.band === spotBand) &&
