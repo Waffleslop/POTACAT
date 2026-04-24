@@ -2033,6 +2033,13 @@ dialog input, dialog select {
   border-radius: 4px;
   padding: 8px 12px;
   margin-bottom: 12px;
+  /* Same <fieldset> min-content quirk as .radio-config — long unbreakable
+     content inside would otherwise refuse to shrink past its intrinsic
+     width and push the fieldset past the 460px dialog. */
+  min-inline-size: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .source-toggles legend {
@@ -2156,6 +2163,16 @@ dialog input, dialog select {
   border-radius: 4px;
   padding: 8px 12px;
   margin-bottom: 12px;
+  /* <fieldset> defaults to min-inline-size: min-content, which makes the
+     element refuse to shrink below the widest unbreakable string inside —
+     a long /dev/serial/by-id/... path would push the fieldset wider than
+     the dialog and carry the absolutely-positioned rig-item × buttons off
+     the screen. Force 0 min-width so the text-overflow: ellipsis on the
+     rig-item-desc can actually engage. Reported by KM4CFT 2026-04-23. */
+  min-inline-size: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .radio-config legend {

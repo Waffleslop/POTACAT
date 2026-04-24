@@ -1485,6 +1485,17 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
   if (!setRigName.value.trim()) setRigName.value = modelName;
 });
 
+// Linux /dev/serial/by-id/ paths are 80+ chars and overwhelm the rig-list row.
+// Strip the long prefix and truncate the middle so the path stays recognizable
+// (keeps the vendor/model + interface suffix the user actually typed).
+function shortSerialPath(path) {
+  if (!path) return '?';
+  let p = path;
+  if (p.startsWith('/dev/serial/by-id/')) p = p.slice(18);
+  if (p.length > 32) p = p.slice(0, 14) + '…' + p.slice(-14);
+  return p;
+}
+
 function describeRigTarget(target) {
   if (!target) return 'Not configured';
   if (target.type === 'tcp') {
@@ -1497,10 +1508,10 @@ function describeRigTarget(target) {
     return `TCP ${host}:${port}`;
   }
   if (target.type === 'serial') {
-    return `Serial CAT on ${target.path || '?'} @ ${target.baudRate || 9600}`;
+    return `Serial CAT on ${shortSerialPath(target.path)} @ ${target.baudRate || 9600}`;
   }
   if (target.type === 'icom') {
-    return `${target.civModel || 'Icom'} CI-V on ${target.path || '?'} @ ${target.baudRate || 115200}`;
+    return `${target.civModel || 'Icom'} CI-V on ${shortSerialPath(target.path)} @ ${target.baudRate || 115200}`;
   }
   if (target.type === 'rigctld') {
     const comPort = target.serialPort || '?';
@@ -5829,6 +5840,9 @@ viewJtcatBtn.addEventListener('click', () => {
 document.getElementById('view-sstv-btn').addEventListener('click', () => {
   window.api.sstvPopoutOpen();
 });
+document.getElementById('view-bandspread-btn').addEventListener('click', () => {
+  window.api.bandspreadPopoutOpen();
+});
 document.getElementById('vfo-popout-btn').addEventListener('click', () => {
   window.api.vfoPopoutOpen();
 });
@@ -7404,6 +7418,7 @@ quickLightMode.addEventListener('change', async () => {
   if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(light ? 'light' : 'dark');
   window.api.sstvPopoutTheme(light ? 'light' : 'dark');
   window.api.vfoPopoutTheme(light ? 'light' : 'dark');
+  window.api.sendBandspreadPopoutTheme(light ? 'light' : 'dark');
   await window.api.saveSettings({ lightMode: light });
 });
 
@@ -8434,6 +8449,7 @@ settingsSave.addEventListener('click', async () => {
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   window.api.sstvPopoutTheme(lightModeEnabled ? 'light' : 'dark');
+  window.api.sendBandspreadPopoutTheme(lightModeEnabled ? 'light' : 'dark');
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
