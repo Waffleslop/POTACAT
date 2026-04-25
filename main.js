@@ -3399,8 +3399,38 @@ function connectCwKeyPort() {
   cwKeyPort = port;
   port._dtrFailed = false; // reset DTR fallback flag on fresh connection
   port.on('open', () => {
-    // Force DTR low initially (key up), RTS low too
-    port.set({ dtr: false, rts: false }, () => {});
+    // Force DTR low initially (key up), RTS low too. On Linux cdc_acm the
+    // kernel raises DTR/RTS during open() and our drop runs ASYNC after —
+    // there's a ~10–50ms window where the radio sees key-down. Worse, on
+    // some kernels TIOCMSET silently fails for cdc_acm and the line stays
+    // raised forever ("constant DAAAAH" reported by Phil/FT-710). So we
+    // (a) log the result of the first drop, (b) re-issue the drop 150ms
+    // later as belt-and-suspenders, and (c) log a clear hint if either
+    // call returns an error so the user knows to check radio menu / OS
+    // permissions instead of staring at a quiet log.
+    const dropPins = (label) => {
+      try {
+        port.set({ dtr: false, rts: false }, (err) => {
+          if (err) {
+            console.log(`[CW Key Port] ${label} pin drop failed: ${err.message}`);
+            sendCatLog(`[CW Key Port] Could not pull DTR/RTS low (${err.message}). ` +
+              `If the radio is keying continuously, set OPERATION SETTING -> ` +
+              `CAT/LINEAR/TUNER -> USB Keying (CW) = OFF on the radio until this is resolved. ` +
+              `On Linux this often means cdc_acm doesn't honor TIOCMSET — try a powered USB hub ` +
+              `or a different USB-serial adapter.`);
+          } else {
+            console.log(`[CW Key Port] ${label} DTR/RTS dropped`);
+          }
+        });
+      } catch (e) {
+        console.log(`[CW Key Port] ${label} pin drop threw: ${e.message}`);
+      }
+    };
+    dropPins('initial');
+    // Reassert at 50ms (catches drivers that need a settle delay) and 250ms
+    // (catches the case where the kernel re-raises DTR after open completes).
+    setTimeout(() => { if (cwKeyPort === port && port.isOpen) dropPins('settle'); }, 50);
+    setTimeout(() => { if (cwKeyPort === port && port.isOpen) dropPins('reassert'); }, 250);
     console.log(`[CW Key Port] Opened ${portPath} for DTR keying`);
   });
   port.on('error', (err) => {
@@ -3420,8 +3450,10 @@ function connectCwKeyPort() {
 
 function disconnectCwKeyPort() {
   if (cwKeyPort) {
-    // Force key up before closing
-    try { cwKeyPort.set({ dtr: false }, () => {}); } catch {}
+    // Force key up before closing — drop BOTH lines, since the rig menu may
+    // be set to either DTR or RTS for keying. Leaving the wrong one raised
+    // would key the radio after disconnect.
+    try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch {}
     if (cwKeyPort.isOpen) cwKeyPort.close();
     cwKeyPort = null;
   }
