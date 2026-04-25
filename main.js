@@ -3394,7 +3394,11 @@ function connectCwKeyPort() {
     baudRate: 38400, // CDC-ACM ignores baud, but match QMX default just in case
     autoOpen: false,
     rtscts: false,
-    hupcl: false,
+    // hupcl: true so the OS drops DTR/RTS on close — without this, if our
+    // explicit pin-drop ever fails to take, the line stays raised forever
+    // (DA2PK reported tone continuing after POTACAT exited). Worth more
+    // than the legacy "keep state across reopen" reason hupcl:false had.
+    hupcl: true,
   });
   cwKeyPort = port;
   port._dtrFailed = false; // reset DTR fallback flag on fresh connection
@@ -3449,13 +3453,24 @@ function connectCwKeyPort() {
 }
 
 function disconnectCwKeyPort() {
-  if (cwKeyPort) {
-    // Force key up before closing — drop BOTH lines, since the rig menu may
-    // be set to either DTR or RTS for keying. Leaving the wrong one raised
-    // would key the radio after disconnect.
-    try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch {}
-    if (cwKeyPort.isOpen) cwKeyPort.close();
-    cwKeyPort = null;
+  if (!cwKeyPort) return;
+  const port = cwKeyPort;
+  cwKeyPort = null;
+  if (!port.isOpen) return;
+  // Wait for the explicit pin-drop to land BEFORE closing — set() and close()
+  // race on some Linux drivers and a fire-and-forget set followed by an
+  // immediate close left DTR raised (DA2PK report). hupcl:true on the port
+  // gives us an OS-level safety net too, but issuing the explicit drop first
+  // makes the typical case clean.
+  const finishClose = () => { try { port.close(); } catch {} };
+  try {
+    port.set({ dtr: false, rts: false }, (err) => {
+      if (err) console.log(`[CW Key Port] Final pin drop failed: ${err.message}`);
+      finishClose();
+    });
+  } catch (e) {
+    console.log(`[CW Key Port] Final pin drop threw: ${e.message}`);
+    finishClose();
   }
 }
 
