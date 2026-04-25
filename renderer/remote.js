@@ -6132,24 +6132,36 @@
   function handleCwSidetone(keying) {
     cwKeying = keying;
     if (!cwAudioCtx) ensureCwAudioCtx();
+    var now = cwAudioCtx.currentTime;
+    var ramp = 0.003; // 3ms attack/decay (matches text sidetone path)
     if (keying) {
       if (cwOsc) return; // already playing
       cwOsc = cwAudioCtx.createOscillator();
       cwOsc.type = 'sine';
       cwOsc.frequency.value = cwSidetoneFreq;
       cwGain = cwAudioCtx.createGain();
-      cwGain.gain.value = 0;
+      // Anchor the ramp start so the attack is a precise 0→vol slope.
+      // Without setValueAtTime, the implicit start of linearRampToValueAtTime
+      // is browser-dependent and produced clicks / clipped attacks on phones.
+      cwGain.gain.setValueAtTime(0, now);
+      cwGain.gain.linearRampToValueAtTime(cwSidetoneVol, now + ramp);
       cwOsc.connect(cwGain);
       cwGain.connect(cwAudioCtx.destination);
-      cwOsc.start();
-      cwGain.gain.linearRampToValueAtTime(cwSidetoneVol, cwAudioCtx.currentTime + 0.005);
+      cwOsc.start(now);
     } else {
       if (cwGain) {
-        cwGain.gain.linearRampToValueAtTime(0, cwAudioCtx.currentTime + 0.005);
+        // Freeze whatever the gain is right now, then ramp down — otherwise
+        // a still-rising attack ramp would override our decay target.
+        var v = cwGain.gain.value;
+        cwGain.gain.cancelScheduledValues(now);
+        cwGain.gain.setValueAtTime(v, now);
+        cwGain.gain.linearRampToValueAtTime(0, now + ramp);
       }
       if (cwOsc) {
-        var osc = cwOsc;
-        setTimeout(function() { try { osc.stop(); } catch(e){} }, 10);
+        // Stop on the audio clock, not setTimeout — keeps element gaps clean
+        // when the JS event loop is busy (the bug that produced clipped /
+        // truncated sidetone on phones).
+        try { cwOsc.stop(now + ramp + 0.001); } catch (e) {}
         cwOsc = null;
         cwGain = null;
       }
