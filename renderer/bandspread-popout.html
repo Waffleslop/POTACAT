@@ -15,20 +15,13 @@
       background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary);
       flex-shrink: 0; flex-wrap: wrap;
     }
-    .bs-band-select {
-      padding: 3px 22px 3px 8px; background: var(--bg-input);
-      border: 1px solid var(--border-primary); border-radius: 3px;
-      color: var(--text-primary); cursor: pointer;
+    /* Bandspread now slaves to Table View; the band label is informational
+       only (used to be a <select> users could change). */
+    .bs-band-label {
+      padding: 3px 8px; color: var(--text-primary);
       font-size: calc(11px * var(--bs-scale)); font-weight: 600;
-      appearance: none; -webkit-appearance: none;
-      background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
-                        linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
-      background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%;
-      background-size: 5px 5px, 5px 5px;
-      background-repeat: no-repeat;
+      letter-spacing: 0.3px;
     }
-    .bs-band-select:focus { outline: none; border-color: var(--accent-blue); }
-    .bs-band-select:hover { background-color: var(--bg-hover); }
 
     .bs-sep { width: 1px; height: 16px; background: var(--border-primary); margin: 0 4px; }
 
@@ -78,7 +71,7 @@
     </div>
   </div>
   <div class="bs-toolbar">
-    <select class="bs-band-select" id="bs-band-select" title="Band"></select>
+    <span class="bs-band-label" id="bs-band-label" title="Bandspread follows Table View's band">—</span>
     <div class="bs-sep"></div>
     <div class="bs-zoom-row" title="Font size (Ctrl+scroll, Ctrl +/-, Ctrl 0 resets)">
       <button class="bs-zoom-btn" id="bs-font-dec" title="Smaller">A&minus;</button>

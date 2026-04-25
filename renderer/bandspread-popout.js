@@ -53,9 +53,6 @@ const PRIVILEGE_MAP = {
   ],
 };
 
-// Band selector order (UI order, not object order)
-const BAND_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '70cm'];
-
 let settings = null;
 let selectedBand = '20m';
 let licenseClass = 'none';
@@ -77,7 +74,7 @@ const ctx = canvas.getContext('2d');
 const wrap = document.getElementById('bs-canvas-wrap');
 const infoEl = document.getElementById('bs-info');
 const tooltipEl = document.getElementById('bs-tooltip');
-const bandSelectEl = document.getElementById('bs-band-select');
+const bandLabelEl = document.getElementById('bs-band-label');
 
 // --- Titlebar controls ---
 document.getElementById('tb-min').addEventListener('click', () => window.api.minimize());
@@ -111,27 +108,19 @@ window.api.onTuneBlocked((msg) => {
   }, 2200);
 });
 
-// --- Band selector dropdown ---
-function buildBandSelect() {
-  bandSelectEl.innerHTML = '';
-  for (const name of BAND_ORDER) {
-    const o = document.createElement('option');
-    o.value = name;
-    o.textContent = name;
-    bandSelectEl.appendChild(o);
-  }
-  bandSelectEl.value = selectedBand;
-  bandSelectEl.addEventListener('change', () => selectBand(bandSelectEl.value));
-}
-
-function selectBand(name) {
+// Bandspread is a slave to Table View — the band is set entirely by pushes
+// from the main renderer (or the radio freq when Table is multi-band).
+function setBand(name) {
   if (!BANDS[name] || name === selectedBand) return;
   selectedBand = name;
   viewLo = null;
   viewHi = null;
-  if (bandSelectEl.value !== name) bandSelectEl.value = name;
+  updateBandLabel();
   persistState();
-  draw();
+}
+
+function updateBandLabel() {
+  if (bandLabelEl) bandLabelEl.textContent = selectedBand || '—';
 }
 
 function resetZoom() {
@@ -208,13 +197,7 @@ if (window.api.onView) {
     allSpots = Array.isArray(payload && payload.spots) ? payload.spots : [];
     // Auto-follow the band the main window is "on" (single visible band, or
     // the band of the current radio freq when Table is multi-band).
-    if (payload && payload.band && BANDS[payload.band] && payload.band !== selectedBand) {
-      selectedBand = payload.band;
-      viewLo = null;
-      viewHi = null;
-      if (bandSelectEl && bandSelectEl.value !== selectedBand) bandSelectEl.value = selectedBand;
-      persistState();
-    }
+    if (payload && payload.band) setBand(payload.band);
     draw();
   });
 }
@@ -893,8 +876,7 @@ ro.observe(wrap);
   const savedScale = parseFloat(settings.bandspreadFontScale);
   applyFontScale(isFinite(savedScale) && savedScale > 0 ? savedScale : 1.0, { persist: false });
 
-  buildBandSelect();
-
+  updateBandLabel();
   updateSpotCount(0);
   draw();
 })();
