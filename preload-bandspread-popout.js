@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('api', {
   onView: (cb) => ipcRenderer.on('bandspread-popout-view', (_e, payload) => cb(payload)),
   onTheme: (cb) => ipcRenderer.on('bandspread-popout-theme', (_e, theme) => cb(theme)),
   onFrequencyUpdate: (cb) => ipcRenderer.on('bandspread-popout-freq', (_e, freqKhz) => cb(freqKhz)),
+  onModeUpdate: (cb) => ipcRenderer.on('bandspread-popout-mode', (_e, mode) => cb(mode)),
+  // Notify the main renderer that the user QSY'd by clicking a spot in the
+  // bandspread, so the table can highlight the same row it would for a
+  // table-side click.
+  notifyTunedSpot: (payload) => ipcRenderer.send('bandspread-popout-tuned-spot', payload),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),

@@ -1868,6 +1868,12 @@ dialog input, dialog select {
 .source-badge-llota { background: var(--source-llota); color: #000; }
 .source-badge-pskr { background: var(--source-pskr); color: #000; }
 .source-badge-net  { background: var(--source-net); color: #000; }
+.source-badge-cwspots { background: #ffd740; color: #000; }
+/* When the same call+freq is reported by multiple sources, the primary
+   (highest-priority) badge keeps its full size and any follow-on badges
+   render smaller next to it so the row clearly shows it was multi-source. */
+.source-badge + .source-badge { margin-left: 3px; }
+.source-badge-secondary { font-size: 9px; padding: 1px 3px; opacity: 0.85; }
 
 /* When row tinting is disabled, remove backgrounds but keep left borders */
 .no-source-tint .spot-pota,

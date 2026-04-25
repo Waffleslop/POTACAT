@@ -5690,6 +5690,27 @@ window.api.onBandspreadPopoutStatus((open) => {
   }
 });
 
+// Bandspread-side click-to-tune: match the spot in our list and run the same
+// "tune from table" path so the row gets the .on-freq highlight, scroll-into-
+// view, and prefilled DX command — same UX as a freq-cell click here.
+if (window.api.onBandspreadTunedSpot) {
+  window.api.onBandspreadTunedSpot((payload) => {
+    if (!payload || !payload.callsign) return;
+    const wantCall = payload.callsign.toUpperCase();
+    const wantFreq = parseFloat(payload.frequency);
+    const match = allSpots.find(s =>
+      (s.callsign || '').toUpperCase() === wantCall &&
+      Math.abs(parseFloat(s.frequency) - wantFreq) < 0.5);
+    if (!match) return;
+    lastTunedSpot = match;
+    notifyVfoTunedSpot(match);
+    if (typeof prefillDxCommand === 'function') prefillDxCommand(match);
+    render();
+    const onFreqRow = tbody && tbody.querySelector('.on-freq');
+    if (onFreqRow) onFreqRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+}
+
 // --- JTCAT Pop-out ---
 window.api.onJtcatPopoutStatus((open) => {
   jtcatPopoutOpen = open;
@@ -6431,13 +6452,20 @@ function render() {
       const refDisplay = s.wwffReference ? s.reference + ' / ' + s.wwffReference : s.reference;
       const parkDisplay = s.wwffReference ? s.parkName : s.parkName;
 
-      // Source badge cell
+      // Source badge cell — main.js dedupes the same activator+freq across
+      // POTA/SOTA/LLOTA/WWFF/CW/DX into one row, so render every source that
+      // reported it. The first entry is the highest-priority source (the row's
+      // "primary" — drives row color elsewhere), the rest are shown as
+      // smaller follow-on badges.
       const sourceTd = document.createElement('td');
       sourceTd.setAttribute('data-col', 'source');
-      const sourceBadge = document.createElement('span');
-      sourceBadge.className = 'source-badge source-badge-' + (s.source || 'pota');
-      sourceBadge.textContent = (s.source === 'cwspots' && s.cwClub && s.cwClub !== 'CW') ? s.cwClub : (SOURCE_LABELS[s.source] || s.source || '');
-      sourceTd.appendChild(sourceBadge);
+      const srcList = (Array.isArray(s.sources) && s.sources.length > 0) ? s.sources : [s.source];
+      srcList.forEach((src, i) => {
+        const badge = document.createElement('span');
+        badge.className = 'source-badge source-badge-' + (src || 'pota') + (i > 0 ? ' source-badge-secondary' : '');
+        badge.textContent = (src === 'cwspots' && s.cwClub && s.cwClub !== 'CW') ? s.cwClub : (SOURCE_LABELS[src] || src || '');
+        sourceTd.appendChild(badge);
+      });
       cellMap.set('source', sourceTd);
 
       const cells = [

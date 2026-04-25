@@ -58,6 +58,7 @@ let selectedBand = '20m';
 let licenseClass = 'none';
 let allSpots = [];
 let currentVfoKhz = 0;
+let currentMode = '';
 // Zoom/pan state — viewport in kHz, a subset of the current band's edges.
 // null values mean "use full band range"; set to finite numbers when zoomed/panned.
 let viewLo = null;
@@ -83,6 +84,35 @@ document.getElementById('tb-close').addEventListener('click', () => window.api.c
 
 document.getElementById('bs-font-dec').addEventListener('click', () => nudgeFontScale(-1));
 document.getElementById('bs-font-inc').addEventListener('click', () => nudgeFontScale(1));
+
+// Band-zoom buttons — same anchored zoom the wheel does, but for users
+// without a scroll wheel. Anchors at the center of the current view so the
+// VFO cursor (if visible there) stays centered through repeat clicks.
+function nudgeBandZoom(direction) {
+  const view = currentView();
+  if (!view) return;
+  const factor = direction > 0 ? 0.7 : 1.4; // in = shrink span, out = grow
+  const anchor = (view.lo + view.hi) / 2;
+  let newLo = anchor - (anchor - view.lo) * factor;
+  let newHi = anchor + (view.hi - anchor) * factor;
+  if (newHi - newLo < MIN_ZOOM_SPAN_KHZ) {
+    newLo = anchor - MIN_ZOOM_SPAN_KHZ / 2;
+    newHi = anchor + MIN_ZOOM_SPAN_KHZ / 2;
+  }
+  if (newLo < view.bandLo) { newHi += (view.bandLo - newLo); newLo = view.bandLo; }
+  if (newHi > view.bandHi) { newLo -= (newHi - view.bandHi); newHi = view.bandHi; }
+  newLo = Math.max(view.bandLo, newLo);
+  newHi = Math.min(view.bandHi, newHi);
+  if (newLo <= view.bandLo && newHi >= view.bandHi) {
+    viewLo = null; viewHi = null;
+  } else {
+    viewLo = newLo; viewHi = newHi;
+  }
+  draw();
+}
+document.getElementById('bs-band-zoom-in').addEventListener('click', () => nudgeBandZoom(1));
+document.getElementById('bs-band-zoom-out').addEventListener('click', () => nudgeBandZoom(-1));
+document.getElementById('bs-band-zoom-reset').addEventListener('click', () => resetZoom());
 
 // Ctrl/Cmd + '+' / '-' / '0' for font size (matches most apps).
 window.addEventListener('keydown', (e) => {
@@ -206,6 +236,13 @@ window.api.onFrequencyUpdate((freqKhz) => {
   currentVfoKhz = parseFloat(freqKhz) || 0;
   draw();
 });
+
+if (window.api.onModeUpdate) {
+  window.api.onModeUpdate((mode) => {
+    currentMode = (mode || '').toString();
+    draw();
+  });
+}
 
 // --- Geometry / drawing ---
 // Layout plan:
@@ -364,14 +401,16 @@ function layoutLabels(spots, xForFreq, ctx, labelText) {
 
 function sourceColor(src) {
   switch (src) {
-    case 'pota': return cssVar('--source-pota');
-    case 'sota': return cssVar('--source-sota');
-    case 'dxc':  return cssVar('--source-dxc');
-    case 'rbn':  return cssVar('--source-rbn');
-    case 'net':  return cssVar('--source-net');
-    case 'wwff': return cssVar('--source-wwff');
-    case 'pskr': return cssVar('--source-pskr');
-    default:     return cssVar('--text-secondary');
+    case 'pota':    return cssVar('--source-pota');
+    case 'sota':    return cssVar('--source-sota');
+    case 'llota':   return cssVar('--source-llota');
+    case 'wwff':    return cssVar('--source-wwff');
+    case 'cwspots': return '#ffd740'; // matches .spot-cwspots row tint
+    case 'dxc':     return cssVar('--source-dxc');
+    case 'rbn':     return cssVar('--source-rbn');
+    case 'net':     return cssVar('--source-net');
+    case 'pskr':    return cssVar('--source-pskr');
+    default:        return cssVar('--text-secondary');
   }
 }
 
@@ -551,16 +590,24 @@ function draw() {
       return true;
     })();
 
+    // "On freq" — the radio is currently parked on this spot. Override the
+    // source color with a high-contrast accent so the user can spot which
+    // row they're tuned to at a glance.
+    const tunedColor = cssVar('--accent-yellow') || '#ffd740';
+    const spotKhz = parseFloat(it.spot.frequency);
+    const isTuned = currentVfoKhz > 0 && Math.abs(spotKhz - currentVfoKhz) < 0.5;
+    const drawColor = isTuned ? tunedColor : color;
+
     ctx.globalAlpha = oop ? 0.45 : 1;
     // Vertical tick
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = drawColor;
+    ctx.lineWidth = isTuned ? 2 : 1;
     ctx.beginPath();
     ctx.moveTo(it.x + 0.5, labelBaseY + 1);
     ctx.lineTo(it.x + 0.5, spotsBottomY - 1);
     ctx.stroke();
     // Triangle just above ruler
-    ctx.fillStyle = color;
+    ctx.fillStyle = drawColor;
     ctx.beginPath();
     ctx.moveTo(it.x, spotsBottomY - MARKER_HEAD);
     ctx.lineTo(it.x - 3, spotsBottomY);
@@ -575,8 +622,10 @@ function draw() {
     ctx.fillRect(tx, labelBaseY - LABEL_ROW_H, tw, LABEL_ROW_H);
     ctx.globalAlpha = oop ? 0.45 : 1;
     // Label text
-    ctx.fillStyle = color;
+    ctx.fillStyle = drawColor;
+    if (isTuned) ctx.font = 'bold ' + LABEL_FONT + 'px -apple-system, sans-serif';
     ctx.fillText(it.text, it.x, labelBaseY - 1);
+    if (isTuned) ctx.font = LABEL_FONT + 'px -apple-system, sans-serif';
     if (oop) {
       // strike-through
       ctx.strokeStyle = color;
@@ -598,35 +647,41 @@ function draw() {
   }
   lastLayout = { spots: layoutItems, lo, hi, left, right, spotsBottomY };
 
-  // 6. VFO cursor — solid red line through the whole strip plus a small
-  // pennant at the top so the user can see exactly where the radio is tuned
-  // even when the cursor sits between two spot ticks.
+  // 6. VFO cursor — solid red line through the whole strip plus a labeled
+  // pennant at the top showing freq + mode so the user can see exactly
+  // where the radio is tuned. The line starts BELOW the pennant box so the
+  // text never gets bisected by it.
   if (currentVfoKhz >= lo && currentVfoKhz <= hi) {
     const x = xOf(currentVfoKhz);
     const xs = Math.round(x) + 0.5;
-    ctx.strokeStyle = cssVar('--accent-red');
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(xs, 0);
-    ctx.lineTo(xs, modeStripY + MODE_STRIP_H);
-    ctx.stroke();
-
-    // Pennant: small filled rectangle at the top with the freq in MHz.
-    const label = (currentVfoKhz / 1000).toFixed(3);
-    ctx.font = (RULER_FONT + 1) + 'px -apple-system, sans-serif';
+    const label = (currentVfoKhz / 1000).toFixed(3) + (currentMode ? ' ' + currentMode : '');
+    ctx.font = 'bold ' + (RULER_FONT + 1) + 'px -apple-system, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    const padX = 4;
+    const padX = 5;
     const padY = 2;
     const tw = ctx.measureText(label).width;
     const boxW = tw + padX * 2;
-    const boxH = RULER_FONT + padY * 2 + 2;
-    let bx = xs;
-    if (bx + boxW > right) bx = xs - boxW; // flip left at right edge
+    const boxH = RULER_FONT + padY * 2 + 3;
+    let bx = xs - 1;
+    if (bx + boxW > right) bx = xs - boxW + 1; // flip left at right edge
+
+    // Line: starts at the bottom of the pennant box and runs through the
+    // full strip including the ruler and mode legend.
+    ctx.strokeStyle = cssVar('--accent-red');
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(xs, boxH);
+    ctx.lineTo(xs, modeStripY + MODE_STRIP_H);
+    ctx.stroke();
+
+    // Pennant on top
     ctx.fillStyle = cssVar('--accent-red');
     ctx.fillRect(bx, 0, boxW, boxH);
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, bx + padX, padY);
+    ctx.fillText(label, bx + padX, padY + 1);
+    // Reset font so subsequent draws aren't affected
+    ctx.font = LABEL_FONT + 'px -apple-system, sans-serif';
   }
 
   // 7. Border around the whole spots area
@@ -726,6 +781,16 @@ window.addEventListener('mouseup', (e) => {
       if (hit) {
         const freq = parseFloat(hit.spot.frequency);
         window.api.tune(freq, hit.spot.mode || '');
+        // Tell the main window which spot we just tuned so it can highlight
+        // the matching row in Table View — same UX as clicking the freq cell
+        // there directly.
+        if (window.api.notifyTunedSpot) {
+          window.api.notifyTunedSpot({
+            callsign: hit.spot.callsign,
+            frequency: freq,
+            mode: hit.spot.mode || '',
+          });
+        }
       }
     }
   }

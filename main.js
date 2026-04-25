@@ -593,6 +593,9 @@ function sendCatMode(mode) {
   // While FreeDV engine is active, display "FreeDV" instead of the radio's USB/LSB
   const displayMode = (freedvEngine && (mode === 'USB' || mode === 'LSB')) ? 'FreeDV' : mode;
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
+  if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+    bandspreadPopoutWin.webContents.send('bandspread-popout-mode', displayMode);
+  }
   _currentMode = mode; // keep real mode internally for CAT
   // Don't clear mode suppress — handleRemotePtt sets a long suppress during
   // SSB-over-DATA transitions to prevent ECHOCAT from seeing transient DATA modes
@@ -5995,10 +5998,57 @@ function getActiveNetSpots() {
   return spots;
 }
 
+// Priority order for cross-source dedup. Same callsign + same kHz across these
+// sources is the same activator; we collapse to one row whose `source` is the
+// highest-priority hit (drives the badge color + bandspread color), with a
+// `sources` array listing every source that reported it. Sources outside this
+// map (rbn / pskr / freedv / net) pass through untouched — they're per-skimmer
+// reception reports, not "the same spot from another spotter".
+const _DEDUPE_PRIORITY = { pota: 0, sota: 1, llota: 2, wwff: 3, cwspots: 4, dxc: 5 };
+
+function dedupeCrossSource(spots) {
+  const groups = new Map();
+  const passthrough = [];
+  for (const s of spots) {
+    if (_DEDUPE_PRIORITY[s.source] == null) { passthrough.push(s); continue; }
+    const fkhz = Math.round(parseFloat(s.frequency) || 0);
+    const key = (s.callsign || '').toUpperCase() + '_' + fkhz;
+    if (!key || fkhz === 0) { passthrough.push(s); continue; }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+  const collapsed = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      // Still tag with sources:[s.source] so renderer code has a single path.
+      const s = group[0];
+      collapsed.push(s.sources ? s : { ...s, sources: [s.source] });
+      continue;
+    }
+    group.sort((a, b) => _DEDUPE_PRIORITY[a.source] - _DEDUPE_PRIORITY[b.source]);
+    const sources = [];
+    const seen = new Set();
+    for (const s of group) {
+      // Honor a pre-existing sources array (the POTA↔WWFF dual-park merge
+      // already tags the survivor with ['pota','wwff']) so we don't drop the
+      // WWFF tag when a DX/CW spot also matches the same call+freq.
+      const tagged = Array.isArray(s.sources) && s.sources.length > 0 ? s.sources : [s.source];
+      for (const src of tagged) {
+        if (!seen.has(src)) { seen.add(src); sources.push(src); }
+      }
+    }
+    // Clone the survivor so we don't mutate the source-of-truth arrays
+    // (lastPotaSotaSpots / clusterSpots / cwSpots).
+    collapsed.push({ ...group[0], sources });
+  }
+  return [...passthrough, ...collapsed];
+}
+
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
-  const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
+  const raw = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
+  const merged = dedupeCrossSource(raw);
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
   pushSpotsToTci(merged);
@@ -6093,6 +6143,7 @@ async function refreshSpots() {
         if (match) {
           p.wwffReference = match.reference;
           p.wwffParkName = match.parkName;
+          p.sources = ['pota', 'wwff']; // dedupeCrossSource() honors this
           matchedWwffKeys.add(key);
         }
       }
@@ -8834,6 +8885,9 @@ app.whenReady().then(() => {
       if (typeof _currentFreqHz === 'number' && _currentFreqHz > 0) {
         bandspreadPopoutWin.webContents.send('bandspread-popout-freq', _currentFreqHz / 1000);
       }
+      if (typeof _currentMode === 'string' && _currentMode) {
+        bandspreadPopoutWin.webContents.send('bandspread-popout-mode', _currentMode);
+      }
     });
     bandspreadPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') {
@@ -8863,6 +8917,15 @@ app.whenReady().then(() => {
   ipcMain.on('bandspread-popout-push', (_e, payload) => {
     if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
       bandspreadPopoutWin.webContents.send('bandspread-popout-view', payload);
+    }
+  });
+
+  // Bandspread-side click-to-tune sends the spot here so the main window can
+  // mark it as the active tuned spot — same highlight + scroll behavior as
+  // clicking the freq cell in Table View.
+  ipcMain.on('bandspread-popout-tuned-spot', (_e, payload) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('bandspread-tuned-spot', payload);
     }
   });
 
