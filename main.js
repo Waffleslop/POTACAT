@@ -3470,6 +3470,63 @@ function disconnectWinKeyer() {
 }
 
 // Unified CW text send — routes through WinKeyer, SmartSDR, or CAT codec
+// Local morse encoder for the "key via DTR pin" text path. Only used when a
+// rig model opts in (cw.textMethod === 'dtr-key-port') and a dedicated CW key
+// port is open — the radio just sees a hand-key on its CW jack and times the
+// elements itself, so this is a reliable fallback when CAT-side KY auto-key
+// is unreliable (FT-710 report 2026-04: KY+TX1 sequence enters TX but the
+// internal keyer never plays out the buffered text).
+const _MORSE_TABLE = {
+  'A':'.-','B':'-...','C':'-.-.','D':'-..','E':'.','F':'..-.','G':'--.','H':'....',
+  'I':'..','J':'.---','K':'-.-','L':'.-..','M':'--','N':'-.','O':'---','P':'.--.',
+  'Q':'--.-','R':'.-.','S':'...','T':'-','U':'..-','V':'...-','W':'.--','X':'-..-',
+  'Y':'-.--','Z':'--..','0':'-----','1':'.----','2':'..---','3':'...--','4':'....-',
+  '5':'.....','6':'-....','7':'--...','8':'---..','9':'----.','?':'..--..','=':'-...-',
+  '/':'-..-.','.':'.-.-.-',',':'--..--','+':'.-.-.','-':'-....-',
+};
+let _cwDtrSendTimers = []; // outstanding setTimeout ids so a new send can cancel an in-flight one
+let _cwDtrEndTimer = null;
+
+function sendCwTextViaDtrKey(text, wpm, dtrPins) {
+  if (!cwKeyPort || !cwKeyPort.isOpen) return false;
+  const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
+  if (!cleaned) return false;
+  // Cancel any in-flight DTR keying so re-sending mid-message starts clean.
+  for (const t of _cwDtrSendTimers) clearTimeout(t);
+  _cwDtrSendTimers = [];
+  if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+
+  const unitMs = 1200 / Math.max(5, Math.min(60, wpm || 20));
+  const pins = dtrPins || { dtr: true };
+  const setKey = (down) => {
+    if (!cwKeyPort || !cwKeyPort.isOpen) return;
+    const state = {};
+    if (pins.dtr) state.dtr = !!down;
+    if (pins.rts) state.rts = !!down;
+    cwKeyPort.set(state, () => {});
+  };
+
+  let t = 0;
+  for (const ch of cleaned) {
+    if (ch === ' ') { t += 4 * unitMs; continue; } // word gap (3 already added after prev char)
+    const morse = _MORSE_TABLE[ch];
+    if (!morse) continue;
+    for (let i = 0; i < morse.length; i++) {
+      const dur = (morse[i] === '.' ? 1 : 3) * unitMs;
+      const downAt = t;
+      const upAt = t + dur;
+      _cwDtrSendTimers.push(setTimeout(() => setKey(true), downAt));
+      _cwDtrSendTimers.push(setTimeout(() => setKey(false), upAt));
+      t = upAt + unitMs; // intra-character gap (1 unit)
+    }
+    t += 2 * unitMs; // inter-character gap = 3 units total (1 already added)
+  }
+  // Final safety pulse: force key-up after total duration. Belt-and-suspenders
+  // in case the last setKey(false) somehow didn't land (port blip, etc.).
+  _cwDtrEndTimer = setTimeout(() => { setKey(false); _cwDtrEndTimer = null; }, t + 100);
+  return true;
+}
+
 function sendCwTextToRadio(text) {
   if (!text) return;
   const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '')
@@ -3487,6 +3544,19 @@ function sendCwTextToRadio(text) {
     smartSdr.setActiveSlice(sliceIndex);
     smartSdr.setTxSlice(sliceIndex);
     smartSdr.sendCwText(expanded);
+  }
+  // DTR-key-port text path: rig models can opt in via cw.textMethod when
+  // their CAT KY auto-key is unreliable. We generate morse locally and pulse
+  // the dedicated CW key port — same effect as plugging a straight key into
+  // the radio's CW jack, so it bypasses CAT-side keyer quirks entirely.
+  const rigModel = getActiveRigModel();
+  const cwCaps = rigModel?.cw || {};
+  if (cwCaps.textMethod === 'dtr-key-port' && cwKeyPort && cwKeyPort.isOpen) {
+    const wpm = (cat && cat._cwWpm) || 20;
+    if (sendCwTextViaDtrKey(expanded, wpm, cwCaps.dtrPins)) {
+      sendCatLog(`[CW] Text via DTR keyer @ ${wpm} wpm: ${expanded}`);
+      return;
+    }
   }
   // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
   if (cat && cat.connected) {
