@@ -3371,6 +3371,7 @@ function updateRemoteSettings() {
 // --- CW Key Port (dedicated DTR keying via external USB-serial adapter) ---
 function connectCwKeyPort() {
   disconnectCwKeyPort();
+  _cwKeyPortPathForPython = null; // forget any stale Python fallback target
   // CW key port for external DTR keying
   const portPath = settings.cwKeyPort;
   if (!portPath) return;
@@ -3419,23 +3420,25 @@ function connectCwKeyPort() {
         port.set({ dtr: false, rts: false }, (err) => {
           if (err) {
             console.log(`[CW Key Port] ${label} pin drop failed: ${err.message}`);
-            // ENOTTY / "Inappropriate ioctl" = the driver (Linux cdc_acm on
-            // most kernels) doesn't support TIOCMSET on this device. Userspace
-            // can't lower DTR no matter how many times we try, and the kernel
-            // raised it to HIGH on open() — so the radio sits in continuous
-            // key-down for as long as the port is open. Bail out: close the
-            // port (hupcl:true makes the OS drop DTR) and tell the user what
-            // their options are. Retrying would just keep keying the radio.
+            // ENOTTY / "Inappropriate ioctl" = node-serialport's TIOCMSET path
+            // is rejected by the driver (Linux cdc_acm being the typical case
+            // on Yaesu USB tty). pyserial works on the same device because it
+            // uses TIOCMBIS/TIOCMBIC (set/clear individual modem bits) rather
+            // than TIOCMSET (full state including read-only input bits). We
+            // can't change which ioctl node-serialport uses, but we CAN shell
+            // out to Python to do the keying. Mark the port for the Python
+            // fallback and close our handle (hupcl:true drops DTR) so the
+            // radio isn't stuck. sendCwTextViaPython picks it up from there.
             const ioctlErr = /inappropriate ioctl|ENOTTY|not supported/i.test(err.message);
             if (ioctlErr && !_ioctlUnsupported) {
               _ioctlUnsupported = true;
-              sendCatLog(`[CW Key Port] This serial driver does not support DTR/RTS control ` +
-                `("${err.message}"). On Linux this is usually cdc_acm — the FT-710's built-in ` +
-                `USB tty can't be used for DTR keying. Closing the port now so the radio stops ` +
-                `keying. CW text-send via POTACAT will not work on this radio over this driver. ` +
-                `Workarounds: (1) plug an external USB-serial adapter (FTDI / CH340) into the ` +
-                `radio's rear CW KEY jack and set "CW Key Port" to that adapter's tty, or ` +
-                `(2) use a hardware CW keyer (e.g. WinKeyer).`);
+              _cwKeyPortPathForPython = portPath;
+              sendCatLog(`[CW Key Port] This driver doesn't honor TIOCMSET ("${err.message}") ` +
+                `— closing the port so the radio stops keying. CW text-send will fall back to a ` +
+                `Python helper (requires python3 + pyserial). If that's not installed: install ` +
+                `pyserial (e.g. "pip install pyserial" or distro package "python3-pyserial"), ` +
+                `or wire an external USB-serial adapter (FTDI / CH340) to the radio's rear CW ` +
+                `KEY jack and point "CW Key Port" at that adapter instead.`);
               try { port.close(); } catch {}
             } else if (!ioctlErr) {
               sendCatLog(`[CW Key Port] Could not pull DTR/RTS low (${err.message}). ` +
@@ -3561,6 +3564,75 @@ const _MORSE_TABLE = {
 };
 let _cwDtrSendTimers = []; // outstanding setTimeout ids so a new send can cancel an in-flight one
 let _cwDtrEndTimer = null;
+// When node-serialport hits ENOTTY on TIOCMSET (Linux cdc_acm), we close our
+// handle and remember the port path here so sendCwTextViaPython can take over.
+// pyserial uses TIOCMBIS/TIOCMBIC which the same driver accepts, so spawning
+// python3 -c "..." per message is a working escape hatch.
+let _cwKeyPortPathForPython = null;
+let _cwPythonProc = null;
+function sendCwTextViaPython(text, wpm) {
+  if (!_cwKeyPortPathForPython) return false;
+  const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
+  if (!cleaned) return false;
+  // Cancel an in-flight Python send so re-sending mid-message starts clean.
+  if (_cwPythonProc) {
+    try { _cwPythonProc.kill('SIGTERM'); } catch {}
+    _cwPythonProc = null;
+  }
+  const morseJson = JSON.stringify(_MORSE_TABLE);
+  const portPath = _cwKeyPortPathForPython.replace(/'/g, "\\'");
+  // Inline Python — opens the tty (4800 matches the user's working script;
+  // baud is irrelevant for cdc_acm but pyserial requires one), keys via
+  // setDTR which uses TIOCMBIS/TIOCMBIC. Always drops DTR in finally so a
+  // SIGTERM mid-message can't leave the radio stuck.
+  const script =
+    'import sys, json, time, serial\n' +
+    `port = serial.Serial('${portPath}', 4800)\n` +
+    `MORSE = json.loads('${morseJson.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')\n` +
+    `WPM = ${Math.max(5, Math.min(60, wpm | 0)) || 20}\n` +
+    'DIT = 1.2 / WPM\n' +
+    'DAH = 3 * DIT\n' +
+    'try:\n' +
+    '    for ch in sys.stdin.read():\n' +
+    '        if ch == " ":\n' +
+    '            time.sleep(7 * DIT); continue\n' +
+    '        if ch not in MORSE: continue\n' +
+    '        for sym in MORSE[ch]:\n' +
+    '            port.setDTR(True)\n' +
+    '            time.sleep(DIT if sym == "." else DAH)\n' +
+    '            port.setDTR(False)\n' +
+    '            time.sleep(DIT)\n' +
+    '        time.sleep(2 * DIT)\n' +
+    'finally:\n' +
+    '    try: port.setDTR(False)\n' +
+    '    except Exception: pass\n' +
+    '    port.close()\n';
+  const { spawn } = require('child_process');
+  try {
+    _cwPythonProc = spawn('python3', ['-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (err) {
+    sendCatLog(`[CW] Python fallback spawn failed: ${err.message}. Install python3 + pyserial.`);
+    return false;
+  }
+  _cwPythonProc.on('error', (err) => {
+    sendCatLog(`[CW] python3 not available (${err.code || err.message}). Install python3 and pyserial to use CW text-send on this driver.`);
+    _cwPythonProc = null;
+  });
+  let stderr = '';
+  _cwPythonProc.stderr.on('data', (d) => { stderr += d.toString(); });
+  _cwPythonProc.on('exit', (code) => {
+    if (code !== 0) {
+      const tip = /no module named serial|ModuleNotFoundError/i.test(stderr)
+        ? ' (pyserial not installed — try "pip install pyserial" or your distro\'s python3-pyserial package)'
+        : '';
+      sendCatLog(`[CW] Python helper exited with code ${code}${tip}${stderr ? ': ' + stderr.split('\n')[0] : ''}`);
+    }
+    _cwPythonProc = null;
+  });
+  _cwPythonProc.stdin.write(cleaned);
+  _cwPythonProc.stdin.end();
+  return true;
+}
 
 function sendCwTextViaDtrKey(text, wpm, dtrPins) {
   if (!cwKeyPort || !cwKeyPort.isOpen) return false;
@@ -3626,11 +3698,20 @@ function sendCwTextToRadio(text) {
   // the radio's CW jack, so it bypasses CAT-side keyer quirks entirely.
   const rigModel = getActiveRigModel();
   const cwCaps = rigModel?.cw || {};
-  if (cwCaps.textMethod === 'dtr-key-port' && cwKeyPort && cwKeyPort.isOpen) {
+  if (cwCaps.textMethod === 'dtr-key-port') {
     const wpm = (cat && cat._cwWpm) || 20;
-    if (sendCwTextViaDtrKey(expanded, wpm, cwCaps.dtrPins)) {
-      sendCatLog(`[CW] Text via DTR keyer @ ${wpm} wpm: ${expanded}`);
-      return;
+    if (cwKeyPort && cwKeyPort.isOpen) {
+      if (sendCwTextViaDtrKey(expanded, wpm, cwCaps.dtrPins)) {
+        sendCatLog(`[CW] Text via DTR keyer @ ${wpm} wpm: ${expanded}`);
+        return;
+      }
+    } else if (_cwKeyPortPathForPython) {
+      // node-serialport's TIOCMSET was rejected on this driver; pyserial uses
+      // TIOCMBIS/TIOCMBIC which works on the same device. See dropPins above.
+      if (sendCwTextViaPython(expanded, wpm)) {
+        sendCatLog(`[CW] Text via Python pyserial fallback @ ${wpm} wpm: ${expanded}`);
+        return;
+      }
     }
   }
   // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
