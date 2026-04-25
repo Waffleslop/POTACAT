@@ -1699,6 +1699,13 @@ dialog {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 100px;
+  /* Reserve scrollbar gutter so async content (audio device enumeration,
+     opening the rig editor, etc.) can't trigger a "scrollbar appears ->
+     content shifts a few px" reflow. On tiling Wayland compositors like
+     Hyprland that reflow can animate the whole window left/right by ~12px
+     and looks like the window is sliding off-screen. Reported by Phil on
+     Arch / Hyprland 2026-04. */
+  scrollbar-gutter: stable;
 }
 
 /* Tab-based visibility: hide fieldsets not on the active tab */
