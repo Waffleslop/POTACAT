@@ -6,5 +6,8 @@ contextBridge.exposeInMainWorld('api', {
   onSignal: (cb) => ipcRenderer.on('remote-audio-signal', (_e, data) => cb(data)),
   sendSignal: (data) => ipcRenderer.send('remote-audio-send-signal', data),
   sendAudioStatus: (status) => ipcRenderer.send('remote-audio-status', status),
+  // PC-side TX peak (0..1) for the VFO popout's TX meter — lets the user see
+  // whether ECHOCAT phone audio is reaching the radio's USB CODEC.
+  sendTxMeter: (peak) => ipcRenderer.send('remote-audio-tx-meter', peak),
   onFreedvMute: (cb) => ipcRenderer.on('freedv-mute', (_e, muted) => cb(muted)),
 });

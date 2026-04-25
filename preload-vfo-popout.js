@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('api', {
   onSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),
   onAlc: (cb) => ipcRenderer.on('cat-alc', (_e, val) => cb(val)),
+  // PC-side TX peak forwarded from the hidden remote-audio bridge — lets the
+  // VFO popout's TX meter cover ECHOCAT phone audio in addition to the local
+  // voice-macro / PTT-Mic paths it already meters directly.
+  onTxMeter: (cb) => ipcRenderer.on('vfo-popout-tx-meter', (_e, peak) => cb(peak)),
   onTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
   onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, data) => cb(data)),
   onTunedSpot: (cb) => ipcRenderer.on('vfo-tuned-spot', (_e, spot) => cb(spot)),

@@ -1404,57 +1404,80 @@ const txPeakBar = document.getElementById('tx-peak-bar');
 const txPeakText = document.getElementById('tx-peak-text');
 
 // --- PC-side TX peak meter ---
-// Inserts an AnalyserNode in the audio graph between source and destination so
-// the user can see exactly what level POTACAT is feeding to the audio device.
-// Compared with the radio-side ALC bar, this isolates "PC isn't sending audio"
-// from "radio's USB MOD LEVEL is too low" — exactly the question that comes up
-// when an IC-7300 user reports quiet TX audio.
+// Two feeds are mixed (max wins) into one bar:
+//  1. Local analyser  — voice macro / PTT-Mic, attached on TX start.
+//  2. Remote IPC peak — ECHOCAT phone audio, pushed every ~30ms by the
+//     hidden remote-audio bridge through main.js.
+// The bar is driven by a single render loop with peak-hold + decay so brief
+// peaks remain readable, and so the meter falls back to "—" when both feeds
+// stop. Compared with the radio-side ALC bar, this isolates "PC isn't sending
+// audio" from "radio's USB MOD LEVEL is too low" — exactly the question that
+// comes up when an IC-7300 user reports quiet TX audio.
 let _txMeterAnalyser = null;
+let _txMeterAnalyserBuf = null;
+let _txMeterRemotePeak = 0;
+let _txMeterRemoteUntil = 0;
 let _txMeterRaf = null;
 let _txMeterPeakHold = 0;
 let _txMeterPeakHoldUntil = 0;
+function _txMeterTick() {
+  const now = performance.now();
+  let peak = 0;
+  if (_txMeterAnalyser) {
+    _txMeterAnalyser.getFloatTimeDomainData(_txMeterAnalyserBuf);
+    for (let i = 0; i < _txMeterAnalyserBuf.length; i++) {
+      const v = Math.abs(_txMeterAnalyserBuf[i]);
+      if (v > peak) peak = v;
+    }
+  }
+  if (now < _txMeterRemoteUntil && _txMeterRemotePeak > peak) peak = _txMeterRemotePeak;
+  if (peak >= _txMeterPeakHold) { _txMeterPeakHold = peak; _txMeterPeakHoldUntil = now + 800; }
+  else if (now > _txMeterPeakHoldUntil) { _txMeterPeakHold *= 0.92; }
+  const pct = Math.min(1, _txMeterPeakHold);
+  const color = pct < 0.005 ? '#666' : pct < 0.5 ? '#4ecca3' : pct < 0.85 ? '#ffd740' : '#e94560';
+  txPeakBar.style.width = (pct * 100) + '%';
+  txPeakBar.style.background = pct < 0.005 ? '#333' : color;
+  txPeakText.textContent = pct < 0.005 ? '—' : Math.round(pct * 100) + '%';
+  txPeakText.style.color = color;
+  // Keep ticking while either source is alive or while peak-hold is decaying.
+  if (_txMeterAnalyser || now < _txMeterRemoteUntil + 1500 || _txMeterPeakHold > 0.005) {
+    _txMeterRaf = requestAnimationFrame(_txMeterTick);
+  } else {
+    _txMeterRaf = null;
+  }
+}
+function _txMeterEnsureRunning() {
+  if (!_txMeterRaf) _txMeterRaf = requestAnimationFrame(_txMeterTick);
+}
 function attachTxMeter(audioCtx, source) {
   if (!audioCtx || !source) return null;
-  // Tear down any prior analyser/RAF — back-to-back voice macros otherwise
-  // pile up animation loops and the meter can't tell which one to honor.
-  if (_txMeterRaf) { cancelAnimationFrame(_txMeterRaf); _txMeterRaf = null; }
+  // Drop any prior analyser — back-to-back voice macros otherwise pile up.
   _txMeterAnalyser = null;
-  // Reuse one analyser per session to keep the DSP cheap.
+  _txMeterAnalyserBuf = null;
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 1024;
-  analyser.smoothingTimeConstant = 0.0; // peaks should react instantly
+  analyser.smoothingTimeConstant = 0.0;
   source.connect(analyser);
   _txMeterAnalyser = analyser;
-  _txMeterPeakHold = 0;
-  _txMeterPeakHoldUntil = 0;
-  const buf = new Float32Array(analyser.fftSize);
-  const tick = () => {
-    if (!_txMeterAnalyser) return;
-    _txMeterAnalyser.getFloatTimeDomainData(buf);
-    let peak = 0;
-    for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > peak) peak = v; }
-    const now = performance.now();
-    if (peak >= _txMeterPeakHold) { _txMeterPeakHold = peak; _txMeterPeakHoldUntil = now + 800; }
-    else if (now > _txMeterPeakHoldUntil) { _txMeterPeakHold *= 0.92; }
-    const pct = Math.min(1, _txMeterPeakHold);
-    const color = pct <= 0 ? '#666' : pct < 0.5 ? '#4ecca3' : pct < 0.85 ? '#ffd740' : '#e94560';
-    txPeakBar.style.width = (pct * 100) + '%';
-    txPeakBar.style.background = pct <= 0 ? '#333' : color;
-    txPeakText.textContent = pct <= 0 ? '—' : Math.round(pct * 100) + '%';
-    txPeakText.style.color = color;
-    _txMeterRaf = requestAnimationFrame(tick);
-  };
-  _txMeterRaf = requestAnimationFrame(tick);
+  _txMeterAnalyserBuf = new Float32Array(analyser.fftSize);
+  _txMeterEnsureRunning();
   return analyser;
 }
 function releaseTxMeter() {
-  if (_txMeterRaf) { cancelAnimationFrame(_txMeterRaf); _txMeterRaf = null; }
   _txMeterAnalyser = null;
-  // Drain to "—" so an idle meter doesn't confuse the user.
-  txPeakBar.style.width = '0%';
-  txPeakBar.style.background = '#333';
-  txPeakText.textContent = '—';
-  txPeakText.style.color = '';
+  _txMeterAnalyserBuf = null;
+  // Don't blank the bar here — the render loop's decay handles fade-out, and
+  // a remote feed may still be active when a voice macro ends.
+  _txMeterEnsureRunning();
+}
+// Remote feed (ECHOCAT phone audio via remote-audio bridge).
+if (window.api && window.api.onTxMeter) {
+  window.api.onTxMeter((peak) => {
+    const v = Math.max(0, Math.min(1, Number(peak) || 0));
+    _txMeterRemotePeak = v;
+    _txMeterRemoteUntil = performance.now() + 200; // peak is fresh for 200ms
+    _txMeterEnsureRunning();
+  });
 }
 
 window.api.onSmeter((val) => {

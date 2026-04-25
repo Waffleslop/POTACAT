@@ -63,6 +63,13 @@ window.api.onStartAudio(async (config) => {
           window.api.sendAudioStatus({ error: 'Failed to set output device: ' + e.message });
         }
       }
+      // PC-side TX peak meter — tap the incoming stream with an AnalyserNode
+      // and push peaks to the VFO popout via main. The audio still plays
+      // through the <audio> element above; this AudioContext is a parallel
+      // analysis branch with a muted sink so the analyser pulls samples
+      // without producing a second audible output.
+      try { startTxMeter(event.streams[0]); }
+      catch (e) { console.warn('[remote-audio] TX meter init failed:', e.message); }
     };
 
     // ICE candidates — relay to phone via main process
@@ -130,6 +137,45 @@ window.api.onFreedvMute((muted) => {
   }
 });
 
+// --- TX peak meter (PC-side) ---
+// Taps the WebRTC track with an AnalyserNode in a parallel AudioContext. The
+// analyser is connected to a 0-gain sink so it actually pulls samples without
+// double-playing the audio (which the <audio> element already does). Peaks
+// are pushed to main every 30ms and forwarded to the VFO popout's TX meter.
+let _txMeterCtx = null;
+let _txMeterTimer = null;
+let _txMeterAnalyser = null;
+function startTxMeter(stream) {
+  stopTxMeter();
+  if (!stream || !window.api.sendTxMeter) return;
+  _txMeterCtx = new AudioContext();
+  const source = _txMeterCtx.createMediaStreamSource(stream);
+  const analyser = _txMeterCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0;
+  const muted = _txMeterCtx.createGain();
+  muted.gain.value = 0;
+  source.connect(analyser);
+  analyser.connect(muted);
+  muted.connect(_txMeterCtx.destination);
+  _txMeterAnalyser = analyser;
+  const buf = new Float32Array(analyser.fftSize);
+  _txMeterTimer = setInterval(() => {
+    if (!_txMeterAnalyser) return;
+    _txMeterAnalyser.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > peak) peak = v; }
+    window.api.sendTxMeter(peak);
+  }, 30);
+}
+function stopTxMeter() {
+  if (_txMeterTimer) { clearInterval(_txMeterTimer); _txMeterTimer = null; }
+  _txMeterAnalyser = null;
+  if (_txMeterCtx) { _txMeterCtx.close().catch(() => {}); _txMeterCtx = null; }
+  // Final 0 so the VFO popout's bar drops to idle on disconnect.
+  if (window.api.sendTxMeter) window.api.sendTxMeter(0);
+}
+
 // Cleanup
 window.api.onStopAudio(() => {
   if (pc) { pc.close(); pc = null; }
@@ -138,6 +184,7 @@ window.api.onStopAudio(() => {
     localStream = null;
   }
   audioEl.srcObject = null;
+  stopTxMeter();
   window.api.sendAudioStatus({ status: 'stopped' });
 });
 </script>
