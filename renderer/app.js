@@ -6352,8 +6352,11 @@ function render() {
       // Spot history ⓘ — POTA/WWFF use POTA.app's spot/comments endpoint;
       // DXC/RBN use POTACAT's local non-deduped history buffers. Net spots
       // and other sources don't have history available, so no icon.
+      // Built up-front so the cells-loop below can attach it to the Reference
+      // cell (moved off the Callsign cell per user request).
+      let histBtn = null;
       if (s.source === 'pota' || s.source === 'wwff' || s.source === 'dxc' || s.source === 'rbn') {
-        const histBtn = document.createElement('span');
+        histBtn = document.createElement('span');
         histBtn.className = 'spot-history-btn';
         histBtn.textContent = '\u24D8'; // ⓘ
         histBtn.title = 'Show spot history';
@@ -6366,9 +6369,12 @@ function render() {
             source: s.source,
             callsign: s.callsign,
             reference: s.reference || '',
+            // POTA's /spot/activator response includes a `count` per spot —
+            // total spots logged for this activation. Carry it through so the
+            // popover can show context even when our local buffer is sparse.
+            activationCount: typeof s.count === 'number' ? s.count : null,
           });
         });
-        callTd.appendChild(histBtn);
       }
       cellMap.set('callsign', callTd);
 
@@ -6466,6 +6472,12 @@ function render() {
           td.appendChild(badge);
         }
         cellMap.set(cell.col, td);
+      }
+
+      // Attach the spot-history ⓘ to the Reference cell now that it exists.
+      if (histBtn) {
+        const refCell = cellMap.get('reference');
+        if (refCell) refCell.appendChild(histBtn);
       }
 
       // Skip button cell
@@ -7122,7 +7134,7 @@ function _fmtSpotAgo(iso) {
   return Math.floor(sec / 86400) + 'd ago';
 }
 
-async function showSpotHistoryPopover(anchorEl, { source, callsign, reference }) {
+async function showSpotHistoryPopover(anchorEl, { source, callsign, reference, activationCount }) {
   _hideSpotHistory();
   const pop = document.createElement('div');
   pop.className = 'spot-history-popover';
@@ -7152,13 +7164,22 @@ async function showSpotHistoryPopover(anchorEl, { source, callsign, reference })
     return;
   }
   const entries = res.entries || [];
+  // For POTA the spot's `count` field is the total spots reported on pota.app
+  // for this activation. Surface it so the user knows there's history that
+  // exists upstream even when our local rolling buffer is sparse (e.g.
+  // POTACAT just started — the buffer fills in as new polls arrive).
+  const summary = activationCount != null && activationCount > 0
+    ? '<div class="sh-summary">' + activationCount + ' spot' + (activationCount === 1 ? '' : 's') +
+      ' on pota.app for this activation · ' + entries.length + ' captured locally</div>'
+    : '';
   if (entries.length === 0) {
-    body.innerHTML = '<div class="sh-empty">No prior spots found.</div>';
+    body.innerHTML = summary +
+      '<div class="sh-empty">No prior spots captured yet — local history fills in as new spots arrive.</div>';
     return;
   }
   // Render entries — newest first. POTA returns spotTime ISO; DXC/RBN
   // entries we built locally also carry spotTime.
-  body.innerHTML = '';
+  body.innerHTML = summary;
   for (const e of entries) {
     const row = document.createElement('div');
     row.className = 'sh-row';

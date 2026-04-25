@@ -70,7 +70,7 @@ process.stderr?.on('error', () => {});
 // Allow AudioContext to play without user gesture (required for JTCAT audio capture in Chromium 142+)
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 const { execFile, spawn } = require('child_process');
-const { fetchSpots: fetchPotaSpots, fetchSpotHistory: fetchPotaSpotHistory } = require('./lib/pota');
+const { fetchSpots: fetchPotaSpots } = require('./lib/pota');
 const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader } = require('./lib/sota');
 const sotaUploader = new SotaUploader();
 const { CatClient, RigctldClient, CivClient, listSerialPorts } = require('./lib/cat');
@@ -186,6 +186,15 @@ let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
 // spotTime, band }.
 let _dxcSpotHistory = [];
 let _rbnSpotHistory = [];
+// POTA/WWFF have no usable public spot-history endpoint — pota.app's
+// /spot/comments/{ref}/{call} returns empty arrays even for activators with
+// dozens of spots in their current activation. We accumulate raw spots from
+// the standard /spot/activator polls instead, deduped by spotId so the same
+// spot appearing across successive polls only lands in the buffer once.
+let _potaSpotHistory = [];
+let _wwffSpotHistory = [];
+const _potaSpotIds = new Set();
+const _wwffSpotIds = new Set();
 const _SPOT_HISTORY_CAP = 2000;
 let clusterFlushTimer = null; // throttle timer for cluster -> renderer updates
 let cwSpotsClients = new Map(); // club -> DxClusterClient (one per checked club, or single for all)
@@ -5561,6 +5570,31 @@ function fetchSolarData() {
 
 // --- Spot processing ---
 function processPotaSpots(raw) {
+  // Snapshot raw spots into the rolling history buffer (deduped by spotId)
+  // before any per-callsign+band dedupe collapses them down to one row each.
+  for (const s of raw) {
+    const id = 'pota:' + (s.spotId != null
+      ? s.spotId
+      : (s.activator || '') + '|' + s.frequency + '|' + s.spotTime + '|' + (s.spotter || ''));
+    if (_potaSpotIds.has(id)) continue;
+    _potaSpotIds.add(id);
+    _potaSpotHistory.push({
+      _key: id,
+      callsign: s.activator || '',
+      reference: s.reference || '',
+      frequency: s.frequency,
+      mode: (s.mode || '').toUpperCase(),
+      spotter: s.spotter || '',
+      comments: s.comments || '',
+      source: 'pota',
+      spotTime: s.spotTime || '',
+    });
+  }
+  if (_potaSpotHistory.length > _SPOT_HISTORY_CAP) {
+    const dropped = _potaSpotHistory.splice(0, _potaSpotHistory.length - _SPOT_HISTORY_CAP);
+    for (const e of dropped) _potaSpotIds.delete(e._key);
+  }
+
   const myPos = gridToLatLon(settings.grid);
   const all = raw.map((s) => {
     const freqMHz = parseFloat(s.frequency) / 1000; // API gives kHz
@@ -5706,6 +5740,31 @@ async function processSotaSpots(raw) {
 }
 
 function processWwffSpots(raw) {
+  // Mirror processPotaSpots — snapshot raw WWFF spots into history before
+  // dedupe collapses them. WWFF has no spotId so we build a composite key
+  // from activator + freq + spot_time.
+  for (const s of raw) {
+    const id = 'wwff:' + (s.activator || '') + '|' + s.frequency_khz + '|' + s.spot_time + '|' + (s.spotter || '');
+    if (_wwffSpotIds.has(id)) continue;
+    _wwffSpotIds.add(id);
+    const spotTimeIso = s.spot_time ? new Date(s.spot_time * 1000).toISOString() : '';
+    _wwffSpotHistory.push({
+      _key: id,
+      callsign: s.activator || '',
+      reference: s.reference || '',
+      frequency: String(s.frequency_khz),
+      mode: (s.mode || '').toUpperCase(),
+      spotter: s.spotter || '',
+      comments: s.comments || '',
+      source: 'wwff',
+      spotTime: spotTimeIso,
+    });
+  }
+  if (_wwffSpotHistory.length > _SPOT_HISTORY_CAP) {
+    const dropped = _wwffSpotHistory.splice(0, _wwffSpotHistory.length - _SPOT_HISTORY_CAP);
+    for (const e of dropped) _wwffSpotIds.delete(e._key);
+  }
+
   const myPos = gridToLatLon(settings.grid);
   const all = raw.map((s) => {
     const freqKhz = s.frequency_khz;
@@ -8134,36 +8193,25 @@ app.whenReady().then(() => {
   ipcMain.handle('pota-sync-set-enabled', async (_e, v) => { await potaSync.setEnabled(!!v); return potaSync.status(); });
   ipcMain.handle('pota-sync-set-interval', async (_e, v) => { await potaSync.setIntervalMin(v); return potaSync.status(); });
 
-  // Spot history (per-callsign list of recent prior spots) for the new
-  // ⓘ popover on the desktop spots table. POTA/WWFF hit POTA.app's public
-  // spot/comments endpoint; DXC/RBN are served from local non-deduped
-  // history buffers.
+  // Spot history (per-callsign list of recent prior spots) for the ⓘ popover
+  // on the desktop spots table. All sources are served from local rolling
+  // history buffers — pota.app's /spot/comments endpoint returns empty even
+  // for activators with dozens of spots, so we accumulate from the standard
+  // /spot/activator polls (deduped by spotId) instead.
   ipcMain.handle('pota-spot-history', async (_e, { source, callsign, reference } = {}) => {
     const call = (callsign || '').toUpperCase();
     if (!call) return { ok: false, error: 'Missing callsign', entries: [] };
     const src = (source || '').toLowerCase();
-    try {
-      if (src === 'pota' || src === 'wwff') {
-        if (!reference) return { ok: false, error: 'Missing park reference', entries: [] };
-        const entries = await fetchPotaSpotHistory(call, reference);
-        return { ok: true, source: src, entries };
-      }
-      if (src === 'dxc') {
-        const entries = _dxcSpotHistory
-          .filter(s => (s.callsign || '').toUpperCase() === call)
-          .slice(-25).reverse(); // newest first
-        return { ok: true, source: src, entries };
-      }
-      if (src === 'rbn') {
-        const entries = _rbnSpotHistory
-          .filter(s => (s.callsign || '').toUpperCase() === call)
-          .slice(-25).reverse();
-        return { ok: true, source: src, entries };
-      }
-      return { ok: false, error: 'Unsupported source: ' + src, entries: [] };
-    } catch (err) {
-      return { ok: false, error: err.message || String(err), entries: [] };
-    }
+    const buffer = src === 'pota' ? _potaSpotHistory
+      : src === 'wwff' ? _wwffSpotHistory
+      : src === 'dxc'  ? _dxcSpotHistory
+      : src === 'rbn'  ? _rbnSpotHistory
+      : null;
+    if (!buffer) return { ok: false, error: 'Unsupported source: ' + src, entries: [] };
+    const entries = buffer
+      .filter(s => (s.callsign || '').toUpperCase() === call)
+      .slice(-25).reverse(); // newest first
+    return { ok: true, source: src, entries };
   });
 
   // Ensure launcher background service is installed for boot startup.

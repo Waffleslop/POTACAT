@@ -1974,6 +1974,13 @@ dialog input, dialog select {
   flex: 1;
   min-height: 40px;
 }
+.spot-history-popover .sh-summary {
+  font-size: 11px;
+  padding: 4px 0 6px;
+  color: var(--text-secondary, #ccc);
+  border-bottom: 1px dashed rgba(128, 128, 128, 0.2);
+  margin-bottom: 4px;
+}
 .spot-history-popover .sh-loading,
 .spot-history-popover .sh-empty {
   text-align: center;
