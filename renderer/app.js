@@ -137,6 +137,24 @@ let activatorSettingsPanelOpen = false; // hoisted to avoid TDZ in closeActivato
 // the filtered set usually only changes a few times a minute.
 let _lastJtcatHighlightSig = '';
 
+// Mirrors Table View's filtered spots into the bandspread popout, plus a
+// hint about which band the user is "on": the band of the only band present
+// in filtered, or the band of the current radio frequency if multi-band.
+// Cheap no-op when the popout isn't open.
+let _bandspreadPopoutOpen = false;
+function pushBandspreadView(filtered) {
+  if (!_bandspreadPopoutOpen || !window.api || !window.api.bandspreadPopoutPush) return;
+  const bands = new Set();
+  for (const s of filtered) if (s.band) bands.add(s.band);
+  let band = null;
+  if (bands.size === 1) {
+    band = bands.values().next().value;
+  } else if (typeof radioFreqKhz === 'number' && radioFreqKhz > 0) {
+    band = freqToBandActivator(radioFreqKhz) || null;
+  }
+  try { window.api.bandspreadPopoutPush({ spots: filtered, band }); } catch {}
+}
+
 function pushJtcatSpotsHighlight(filtered) {
   if (!window.api || !window.api.jtcatSpotsHighlight) return;
   const calls = [];
@@ -5662,6 +5680,16 @@ window.api.onActmapPopoutStatus((open) => {
   }
 });
 
+// --- Bandspread Pop-out ---
+window.api.onBandspreadPopoutStatus((open) => {
+  _bandspreadPopoutOpen = open;
+  if (open) {
+    // Send the current filtered view immediately so the popout doesn't have
+    // to wait for the next spot refresh / filter change to populate.
+    pushBandspreadView(sortSpots(getFiltered()));
+  }
+});
+
 // --- JTCAT Pop-out ---
 window.api.onJtcatPopoutStatus((open) => {
   jtcatPopoutOpen = open;
@@ -6144,6 +6172,7 @@ function render() {
   spotCountEl.textContent = `${filtered.length} spots`;
   updateParksStatsOverlay();
   pushJtcatSpotsHighlight(filtered);
+  pushBandspreadView(filtered);
 
   if (showTable) {
     tbody.innerHTML = '';
@@ -10410,6 +10439,10 @@ window.api.onCatFrequency((hz) => {
     if (newBand !== oldBand && bandFilterEl._updateText) bandFilterEl._updateText();
     updateBandButtonActive();
   }
+  // Bandspread auto-follows the radio's band when the table is multi-band, so
+  // a band-crossing tune needs a fresh push. The cursor itself updates via
+  // bandspread-popout-freq which sendCatFrequency already fires.
+  if (newBand !== oldBand) pushBandspreadView(sortSpots(getFiltered()));
   playTuneClick();
   updateBlFreqFromRadio();
   // Track which spot matches the current frequency

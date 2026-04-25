@@ -578,6 +578,11 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
+  // Bandspread expects kHz, not Hz, so it can draw the VFO cursor at the
+  // right x-coordinate without needing CAT plumbing of its own.
+  if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+    bandspreadPopoutWin.webContents.send('bandspread-popout-freq', hz / 1000);
+  }
   _currentFreqHz = hz;
   sendVfoState();
   broadcastRemoteRadioStatus();
@@ -8818,14 +8823,16 @@ app.whenReady().then(() => {
     bandspreadPopoutWin.webContents.on('did-finish-load', () => {
       const theme = settings.lightMode ? 'light' : 'dark';
       bandspreadPopoutWin.webContents.send('bandspread-popout-theme', theme);
-      // Push current spot snapshot so the strip renders immediately instead of waiting for the next refresh cycle.
-      try {
-        const netSpots = getActiveNetSpots();
-        const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
-        bandspreadPopoutWin.webContents.send('spots', merged);
-      } catch { /* ignore if any source array isn't ready yet */ }
+      // Tell the main renderer the popout is up so it can push the filtered
+      // view (spots + active band) immediately. We no longer push an initial
+      // unfiltered snapshot from main — the renderer is the source of truth.
       if (win && !win.isDestroyed()) {
         win.webContents.send('bandspread-popout-status', true);
+      }
+      // Also push the current frequency right away so the cursor draws on
+      // first paint, instead of waiting for the next CAT poll.
+      if (typeof _currentFreqHz === 'number' && _currentFreqHz > 0) {
+        bandspreadPopoutWin.webContents.send('bandspread-popout-freq', _currentFreqHz / 1000);
       }
     });
     bandspreadPopoutWin.webContents.on('before-input-event', (_e, input) => {
@@ -8846,6 +8853,16 @@ app.whenReady().then(() => {
   ipcMain.on('bandspread-popout-theme', (_e, theme) => {
     if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
       bandspreadPopoutWin.webContents.send('bandspread-popout-theme', theme);
+    }
+  });
+
+  // Forwards the main window's filtered spot list + active-band hint to the
+  // bandspread popout. The popout used to receive raw `spots` and run its own
+  // (frequency-only) filter, which meant disabled sources / age limits / mode
+  // filters / watchlist all leaked into the bandspread.
+  ipcMain.on('bandspread-popout-push', (_e, payload) => {
+    if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+      bandspreadPopoutWin.webContents.send('bandspread-popout-view', payload);
     }
   });
 

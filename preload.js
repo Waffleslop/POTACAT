@@ -158,6 +158,9 @@ contextBridge.exposeInMainWorld('api', {
   bandspreadPopoutClose: () => ipcRenderer.send('bandspread-popout-close'),
   sendBandspreadPopoutTheme: (theme) => ipcRenderer.send('bandspread-popout-theme', theme),
   onBandspreadPopoutStatus: (cb) => ipcRenderer.on('bandspread-popout-status', (_e, open) => cb(open)),
+  // Push the main window's filtered spot list + a band hint to the bandspread
+  // popout so it mirrors what Table View is showing.
+  bandspreadPopoutPush: (payload) => ipcRenderer.send('bandspread-popout-push', payload),
   // CW Keyer
   cwPaddleDit: (pressed) => ipcRenderer.send('cw-paddle-dit', pressed),
   cwPaddleDah: (pressed) => ipcRenderer.send('cw-paddle-dah', pressed),

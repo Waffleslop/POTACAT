@@ -192,10 +192,32 @@ function persistState() {
 }
 
 // --- Data pipelines ---
+// onSpots is the legacy unfiltered feed (kept for safety). Once the main
+// renderer reports in via onView, we stop honoring onSpots so the user's
+// active filters / source toggles aren't quietly bypassed here.
+let _haveFilteredView = false;
 window.api.onSpots((data) => {
+  if (_haveFilteredView) return;
   allSpots = Array.isArray(data) ? data : [];
   draw();
 });
+
+if (window.api.onView) {
+  window.api.onView((payload) => {
+    _haveFilteredView = true;
+    allSpots = Array.isArray(payload && payload.spots) ? payload.spots : [];
+    // Auto-follow the band the main window is "on" (single visible band, or
+    // the band of the current radio freq when Table is multi-band).
+    if (payload && payload.band && BANDS[payload.band] && payload.band !== selectedBand) {
+      selectedBand = payload.band;
+      viewLo = null;
+      viewHi = null;
+      if (bandSelectEl && bandSelectEl.value !== selectedBand) bandSelectEl.value = selectedBand;
+      persistState();
+    }
+    draw();
+  });
+}
 
 window.api.onFrequencyUpdate((freqKhz) => {
   currentVfoKhz = parseFloat(freqKhz) || 0;
@@ -593,17 +615,35 @@ function draw() {
   }
   lastLayout = { spots: layoutItems, lo, hi, left, right, spotsBottomY };
 
-  // 6. VFO cursor
+  // 6. VFO cursor — solid red line through the whole strip plus a small
+  // pennant at the top so the user can see exactly where the radio is tuned
+  // even when the cursor sits between two spot ticks.
   if (currentVfoKhz >= lo && currentVfoKhz <= hi) {
     const x = xOf(currentVfoKhz);
+    const xs = Math.round(x) + 0.5;
     ctx.strokeStyle = cssVar('--accent-red');
-    ctx.globalAlpha = 0.85;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(x + 0.5, 0);
-    ctx.lineTo(x + 0.5, rulerY);
+    ctx.moveTo(xs, 0);
+    ctx.lineTo(xs, modeStripY + MODE_STRIP_H);
     ctx.stroke();
-    ctx.globalAlpha = 1;
+
+    // Pennant: small filled rectangle at the top with the freq in MHz.
+    const label = (currentVfoKhz / 1000).toFixed(3);
+    ctx.font = (RULER_FONT + 1) + 'px -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const padX = 4;
+    const padY = 2;
+    const tw = ctx.measureText(label).width;
+    const boxW = tw + padX * 2;
+    const boxH = RULER_FONT + padY * 2 + 2;
+    let bx = xs;
+    if (bx + boxW > right) bx = xs - boxW; // flip left at right edge
+    ctx.fillStyle = cssVar('--accent-red');
+    ctx.fillRect(bx, 0, boxW, boxH);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, bx + padX, padY);
   }
 
   // 7. Border around the whole spots area
