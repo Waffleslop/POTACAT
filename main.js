@@ -1846,6 +1846,17 @@ function _qsoDedupKey(q) {
   ].join('|');
 }
 
+// Mirrors renderer/app.js:cleanQrzName so phone-logged (ECHOCAT) QSOs format
+// the operator name the same way as desktop-logged ones (drops trailing
+// middle-initial, title-cases). Kept here so we can enrich qsoData on the
+// main side before forwarding to N3FJP / ADIF.
+function cleanQrzName(raw) {
+  if (!raw) return '';
+  const parts = String(raw).trim().split(/\s+/);
+  if (parts.length > 1 && /^[A-Za-z]\.?$/.test(parts[parts.length - 1])) parts.pop();
+  return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+}
+
 async function saveQsoRecord(qsoData) {
   // Duplicate-save guard — see _qsoSaveHistory comment above.
   const dedupKey = _qsoDedupKey(qsoData);
@@ -4589,6 +4600,29 @@ function connectRemote() {
       else if (sigInfo) comment = `[${sig} ${sigInfo}]`;
       else comment = userComment;
 
+      // QRZ + park enrichment — mirror the desktop banner-logger so a phone-
+      // logged QSO carries the same name/state/grid/country into N3FJP and
+      // ADIF as the same contact logged from the desktop. Without this,
+      // KK4DF reported phone-logged QSOs landed in N3FJP with empty operator
+      // fields while desktop-logged ones were fully populated.
+      let qrzInfo = null;
+      if (qrz.configured && settings.enableQrz) {
+        try { qrzInfo = await qrz.lookup(data.callsign.split('/')[0]); }
+        catch { /* QRZ failed — leave qrzInfo null and emit empty fields */ }
+      }
+      let parkLocState = '', parkLocGrid = '';
+      if (sig === 'POTA' && sigInfo) {
+        const park = getParkDb(parksMap, sigInfo);
+        if (park) {
+          const locParts = (park.locationDesc || '').split('-');
+          if (locParts.length >= 2) parkLocState = locParts.slice(1).join('-');
+          parkLocGrid = park.grid || '';
+        }
+      }
+      const qrzName = qrzInfo
+        ? [cleanQrzName(qrzInfo.nickname) || cleanQrzName(qrzInfo.fname), cleanQrzName(qrzInfo.name)].filter(Boolean).join(' ')
+        : '';
+
       const qsoData = {
         callsign: data.callsign.toUpperCase(),
         frequency: String(freqKhz),
@@ -4601,6 +4635,14 @@ function connectRemote() {
         sig,
         sigInfo,
         comment,
+        // QRZ-derived fields. The state/county branch suppresses the worked
+        // op's home QTH on POTA contacts (the park's state goes there
+        // instead) — matches desktop banner-logger semantics.
+        name: qrzName,
+        state: parkLocState || (!sig && qrzInfo ? (qrzInfo.state || '') : ''),
+        county: !parkLocState && !sig && qrzInfo && qrzInfo.state && qrzInfo.county ? `${qrzInfo.state},${qrzInfo.county}` : '',
+        gridsquare: parkLocGrid || (qrzInfo ? (qrzInfo.grid || '') : ''),
+        country: qrzInfo ? (qrzInfo.country || '') : '',
       };
 
       // Pass through respot flags from phone
