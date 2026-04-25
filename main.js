@@ -10595,11 +10595,15 @@ app.whenReady().then(() => {
 
   // PC-side TX peak from the ECHOCAT remote-audio bridge — forward to the VFO
   // popout so its TX meter shows whether phone audio is actually reaching the
-  // radio's USB CODEC. The bridge lives in a hidden window, so without this
-  // hop the user has no way to see the level at all.
+  // radio's USB CODEC. Also pushed to the phone so users on small screens who
+  // can't see the desktop VFO can monitor their own TX level from the phone
+  // Settings panel.
   ipcMain.on('remote-audio-tx-meter', (_e, peak) => {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
       vfoPopoutWin.webContents.send('vfo-popout-tx-meter', peak);
+    }
+    if (remoteServer && remoteServer.running) {
+      remoteServer.sendToClient({ type: 'tx-meter', value: peak });
     }
   });
 

@@ -1011,6 +1011,10 @@
         updateEchoPower(msg.value);
         break;
 
+      case 'tx-meter':
+        updateEchoTxMeter(msg.value);
+        break;
+
       case 'tgxl-status':
         echoTgxlSection.classList.remove('hidden');
         echoTgxlUpdateButtons(msg.antenna || 0, msg.labels);
@@ -3390,6 +3394,46 @@
   var echoAlcText = document.getElementById('echo-alc-text');
   var echoPwrBar = document.getElementById('echo-pwr-bar');
   var echoPwrText = document.getElementById('echo-pwr-text');
+  var echoTxBar = document.getElementById('echo-tx-bar');
+  var echoTxText = document.getElementById('echo-tx-text');
+  var soTxBar = document.getElementById('so-tx-bar');
+  var soTxText = document.getElementById('so-tx-text');
+  // PC-side TX peak pushed from the desktop's remote-audio bridge (ECHOCAT
+  // phone audio reaching the radio's USB CODEC). Peaks arrive every ~30ms;
+  // local peak-hold + decay drives the bar so brief peaks stay readable and
+  // the bar fades to "—" when transmission stops.
+  var _txPeakHold = 0;
+  var _txPeakHoldUntil = 0;
+  var _txLastPeak = 0;
+  var _txLastPeakAt = 0;
+  var _txDecayRaf = null;
+  function _drawTxBars(pct, color) {
+    var bg = pct < 0.005 ? '#333' : color;
+    if (echoTxBar) drawEchoBar(echoTxBar, pct, bg);
+    if (soTxBar) drawEchoBar(soTxBar, pct, bg);
+    var txt = pct < 0.005 ? '—' : Math.round(pct * 100) + '%';
+    if (echoTxText) { echoTxText.textContent = txt; echoTxText.style.color = color; }
+    if (soTxText) { soTxText.textContent = txt; soTxText.style.color = color; }
+  }
+  function _txDecayTick() {
+    var now = Date.now();
+    var raw = (now - _txLastPeakAt < 200) ? _txLastPeak : 0;
+    if (raw >= _txPeakHold) { _txPeakHold = raw; _txPeakHoldUntil = now + 800; }
+    else if (now > _txPeakHoldUntil) { _txPeakHold *= 0.92; }
+    var pct = Math.min(1, _txPeakHold);
+    var color = pct < 0.005 ? '#666' : pct < 0.5 ? '#4ecca3' : pct < 0.85 ? '#ffd740' : '#e94560';
+    _drawTxBars(pct, color);
+    if (raw > 0.005 || _txPeakHold > 0.005) {
+      _txDecayRaf = requestAnimationFrame(_txDecayTick);
+    } else {
+      _txDecayRaf = null;
+    }
+  }
+  function updateEchoTxMeter(peak) {
+    _txLastPeak = Math.max(0, Math.min(1, +peak || 0));
+    _txLastPeakAt = Date.now();
+    if (!_txDecayRaf) _txDecayRaf = requestAnimationFrame(_txDecayTick);
+  }
   // Track the highest watt value seen this session so the bar auto-scales for
   // QRP (5W), 100W, and amp (1500W) users without needing per-rig config.
   var echoPwrMaxSeen = 100;
