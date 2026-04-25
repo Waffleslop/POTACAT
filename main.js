@@ -566,6 +566,14 @@ function sendCatStatus(s) {
       win.webContents.send('remote-tx-state', false);
     }
   }
+  // CAT just (re)connected — if a CW key port is configured but isn't open
+  // (typical: radio was unplugged at startup, both ttyUSB ports went away
+  // together, then it came back), try to open it now. Without this the
+  // cwKeyPort stays null after a transient unplug and CW text falls back
+  // to the unreliable CAT KY path.
+  if (s.connected && settings.cwKeyPort && !(cwKeyPort && cwKeyPort.isOpen)) {
+    connectCwKeyPort();
+  }
   // Broadcast rig state on connect/disconnect so the Rig panel updates
   broadcastRigState();
 }
