@@ -13177,6 +13177,10 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   }
 
   await window.api.saveSettings(saveData);
+  // Mirror lastVersion into localStorage too — see checkFirstRun for why.
+  if (saveData.lastVersion) {
+    try { localStorage.setItem('whatsNewSeenVersion', saveData.lastVersion); } catch {}
+  }
 
   welcomeDialog.close();
   // Reload prefs so the main UI reflects welcome choices
@@ -13185,7 +13189,14 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
 
 async function checkFirstRun(force = false) {
   const s = await window.api.getSettings();
-  const isNewVersion = s.appVersion && s.lastVersion !== s.appVersion;
+  // Track "What's New seen" in BOTH settings.json (lastVersion) AND localStorage
+  // (whatsNewSeenVersion). The localStorage backup catches at least two ways
+  // settings.json can fail to persist the lastVersion update on slow disks /
+  // forced exits / partial saves overlapping startup. Either source counts as
+  // "seen" — we only show What's New when neither matches the current version.
+  const seenLs = (() => { try { return localStorage.getItem('whatsNewSeenVersion'); } catch { return null; } })();
+  const versionAlreadySeen = (s.lastVersion === s.appVersion) || (seenLs === s.appVersion);
+  const isNewVersion = s.appVersion && !versionAlreadySeen;
 
   if (force || s.firstRun) {
     // Reset welcome rig state
@@ -13222,7 +13233,11 @@ async function checkFirstRun(force = false) {
     }
     welcomeDialog.showModal();
   } else if (isNewVersion) {
-    // Version changed — show "What's New" release notes, not the welcome screen
+    // Version changed — show "What's New" release notes, not the welcome screen.
+    // Mark "seen" in localStorage FIRST (synchronous, can't race) so even if
+    // the settings.json write below loses (slow disk, force-quit, overlapping
+    // partial save), we still won't re-show on next launch.
+    try { localStorage.setItem('whatsNewSeenVersion', s.appVersion); } catch {}
     await window.api.saveSettings({ lastVersion: s.appVersion });
     showWhatsNew(s.appVersion);
   }
