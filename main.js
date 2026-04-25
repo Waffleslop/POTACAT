@@ -3412,16 +3412,36 @@ function connectCwKeyPort() {
     // later as belt-and-suspenders, and (c) log a clear hint if either
     // call returns an error so the user knows to check radio menu / OS
     // permissions instead of staring at a quiet log.
+    let _ioctlUnsupported = false;
     const dropPins = (label) => {
+      if (_ioctlUnsupported) return; // already gave up — don't spam retries
       try {
         port.set({ dtr: false, rts: false }, (err) => {
           if (err) {
             console.log(`[CW Key Port] ${label} pin drop failed: ${err.message}`);
-            sendCatLog(`[CW Key Port] Could not pull DTR/RTS low (${err.message}). ` +
-              `If the radio is keying continuously, set OPERATION SETTING -> ` +
-              `CAT/LINEAR/TUNER -> USB Keying (CW) = OFF on the radio until this is resolved. ` +
-              `On Linux this often means cdc_acm doesn't honor TIOCMSET — try a powered USB hub ` +
-              `or a different USB-serial adapter.`);
+            // ENOTTY / "Inappropriate ioctl" = the driver (Linux cdc_acm on
+            // most kernels) doesn't support TIOCMSET on this device. Userspace
+            // can't lower DTR no matter how many times we try, and the kernel
+            // raised it to HIGH on open() — so the radio sits in continuous
+            // key-down for as long as the port is open. Bail out: close the
+            // port (hupcl:true makes the OS drop DTR) and tell the user what
+            // their options are. Retrying would just keep keying the radio.
+            const ioctlErr = /inappropriate ioctl|ENOTTY|not supported/i.test(err.message);
+            if (ioctlErr && !_ioctlUnsupported) {
+              _ioctlUnsupported = true;
+              sendCatLog(`[CW Key Port] This serial driver does not support DTR/RTS control ` +
+                `("${err.message}"). On Linux this is usually cdc_acm — the FT-710's built-in ` +
+                `USB tty can't be used for DTR keying. Closing the port now so the radio stops ` +
+                `keying. CW text-send via POTACAT will not work on this radio over this driver. ` +
+                `Workarounds: (1) plug an external USB-serial adapter (FTDI / CH340) into the ` +
+                `radio's rear CW KEY jack and set "CW Key Port" to that adapter's tty, or ` +
+                `(2) use a hardware CW keyer (e.g. WinKeyer).`);
+              try { port.close(); } catch {}
+            } else if (!ioctlErr) {
+              sendCatLog(`[CW Key Port] Could not pull DTR/RTS low (${err.message}). ` +
+                `If the radio is keying continuously, set OPERATION SETTING -> ` +
+                `CAT/LINEAR/TUNER -> USB Keying (CW) = OFF on the radio until this is resolved.`);
+            }
           } else {
             console.log(`[CW Key Port] ${label} DTR/RTS dropped`);
           }
