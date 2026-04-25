@@ -404,6 +404,11 @@
         <div class="meter-bar-wrap"><div class="meter-bar" id="alc-bar"></div></div>
         <span class="meter-text" id="alc-text">&mdash;</span>
       </div>
+      <div class="meter-row" title="PC-side peak audio level being sent to the radio's USB CODEC. If this rises during voice macros / PTT-Mic but ALC stays flat, the radio's USB MOD LEVEL needs to be raised. If both stay flat, check Windows audio output device + the radio's AF Output Level menu.">
+        <span class="meter-label">TX</span>
+        <div class="meter-bar-wrap"><div class="meter-bar" id="tx-peak-bar"></div></div>
+        <span class="meter-text" id="tx-peak-text">&mdash;</span>
+      </div>
     </div>
     <div class="widget-section" id="widget-ptt-row">
       <div class="ptt-log-row">
@@ -1395,6 +1400,62 @@ const swrBar = document.getElementById('swr-bar');
 const swrText = document.getElementById('swr-text');
 const alcBar = document.getElementById('alc-bar');
 const alcText = document.getElementById('alc-text');
+const txPeakBar = document.getElementById('tx-peak-bar');
+const txPeakText = document.getElementById('tx-peak-text');
+
+// --- PC-side TX peak meter ---
+// Inserts an AnalyserNode in the audio graph between source and destination so
+// the user can see exactly what level POTACAT is feeding to the audio device.
+// Compared with the radio-side ALC bar, this isolates "PC isn't sending audio"
+// from "radio's USB MOD LEVEL is too low" — exactly the question that comes up
+// when an IC-7300 user reports quiet TX audio.
+let _txMeterAnalyser = null;
+let _txMeterRaf = null;
+let _txMeterPeakHold = 0;
+let _txMeterPeakHoldUntil = 0;
+function attachTxMeter(audioCtx, source) {
+  if (!audioCtx || !source) return null;
+  // Tear down any prior analyser/RAF — back-to-back voice macros otherwise
+  // pile up animation loops and the meter can't tell which one to honor.
+  if (_txMeterRaf) { cancelAnimationFrame(_txMeterRaf); _txMeterRaf = null; }
+  _txMeterAnalyser = null;
+  // Reuse one analyser per session to keep the DSP cheap.
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.0; // peaks should react instantly
+  source.connect(analyser);
+  _txMeterAnalyser = analyser;
+  _txMeterPeakHold = 0;
+  _txMeterPeakHoldUntil = 0;
+  const buf = new Float32Array(analyser.fftSize);
+  const tick = () => {
+    if (!_txMeterAnalyser) return;
+    _txMeterAnalyser.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > peak) peak = v; }
+    const now = performance.now();
+    if (peak >= _txMeterPeakHold) { _txMeterPeakHold = peak; _txMeterPeakHoldUntil = now + 800; }
+    else if (now > _txMeterPeakHoldUntil) { _txMeterPeakHold *= 0.92; }
+    const pct = Math.min(1, _txMeterPeakHold);
+    const color = pct <= 0 ? '#666' : pct < 0.5 ? '#4ecca3' : pct < 0.85 ? '#ffd740' : '#e94560';
+    txPeakBar.style.width = (pct * 100) + '%';
+    txPeakBar.style.background = pct <= 0 ? '#333' : color;
+    txPeakText.textContent = pct <= 0 ? '—' : Math.round(pct * 100) + '%';
+    txPeakText.style.color = color;
+    _txMeterRaf = requestAnimationFrame(tick);
+  };
+  _txMeterRaf = requestAnimationFrame(tick);
+  return analyser;
+}
+function releaseTxMeter() {
+  if (_txMeterRaf) { cancelAnimationFrame(_txMeterRaf); _txMeterRaf = null; }
+  _txMeterAnalyser = null;
+  // Drain to "—" so an idle meter doesn't confuse the user.
+  txPeakBar.style.width = '0%';
+  txPeakBar.style.background = '#333';
+  txPeakText.textContent = '—';
+  txPeakText.style.color = '';
+}
 
 window.api.onSmeter((val) => {
   const pct = Math.min(100, (val / 255) * 100);
@@ -1468,6 +1529,7 @@ async function pttStart() {
       }
       const source = pttMicCtx.createMediaStreamSource(pttMicStream);
       source.connect(pttMicCtx.destination);
+      attachTxMeter(pttMicCtx, source);
     } catch (e) {
       console.error('[VFO] Mic PTT failed:', e.message);
     }
@@ -1483,6 +1545,7 @@ function pttStop() {
   // Stop mic
   if (pttMicStream) { pttMicStream.getTracks().forEach(t => t.stop()); pttMicStream = null; }
   if (pttMicCtx) { pttMicCtx.close().catch(() => {}); pttMicCtx = null; }
+  releaseTxMeter();
 }
 
 pttBtn.addEventListener('mousedown', (e) => { e.preventDefault(); pttStart(); });
@@ -1620,6 +1683,7 @@ async function playVoiceMacro(idx, btn, outputDeviceId) {
     voicePlaybackSource = voicePlaybackCtx.createBufferSource();
     voicePlaybackSource.buffer = audioBuffer;
     voicePlaybackSource.connect(voicePlaybackCtx.destination);
+    attachTxMeter(voicePlaybackCtx, voicePlaybackSource);
     window.api.voiceMacroPtt(true);
     voicePlaybackSource.start(0);
     voicePlaybackSource.onended = () => stopVoicePlayback();
@@ -1632,6 +1696,7 @@ function stopVoicePlayback() {
   window.api.voiceMacroPtt(false);
   voicePlayingIdx = -1;
   document.querySelectorAll('.voice-macro-btn.active').forEach(b => b.classList.remove('active'));
+  releaseTxMeter();
 }
 
 loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
