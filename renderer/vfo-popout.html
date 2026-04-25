@@ -1582,6 +1582,26 @@ async function loadVoiceMacros() {
 }
 
 async function playVoiceMacro(idx, btn, outputDeviceId) {
+  // Pre-flight: voice macros need (a) a voice-capable mode and (b) audio
+  // routed to the radio's TX path. Without either, PTT keys but nothing
+  // goes on-air — exactly what K0OTC reported (FLEX 8600 in CW: TX bit
+  // flips, log shows no CW key activity, voice never reaches the radio).
+  const m = (currentMode || '').toUpperCase();
+  const voiceOk = !m || m === 'USB' || m === 'LSB' || m === 'SSB' || m === 'FM' || m === 'AM' ||
+    m.includes('DIG') || m.includes('PKT') || m.includes('DATA') || m.includes('FREEDV');
+  if (!voiceOk) {
+    alert('Voice macros need a voice-capable mode (USB/LSB/AM/FM or a DATA/DIGI mode). ' +
+      'The radio is currently in ' + currentMode + ' — keying PTT in CW will put the radio in TX, ' +
+      'but no audio reaches the air. Switch to a voice mode and try again.');
+    return;
+  }
+  if (!outputDeviceId) {
+    const ok = confirm('Voice macros play audio through the system audio output and need that ' +
+      'output routed to the radio (FLEX DAX-IN, a virtual audio cable, etc.). No output device is ' +
+      'currently selected in Settings → Remote Audio Output, so the macro will play through your ' +
+      'default speakers and not reach the radio.\n\nPlay anyway?');
+    if (!ok) return;
+  }
   stopVoicePlayback();
   const base64 = await window.api.voiceMacroLoad(idx);
   if (!base64) return;
