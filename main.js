@@ -919,6 +919,12 @@ async function connectCat() {
     const overrides = activeRig?.model && settings.rigCommandOverrides[activeRig.model];
     if (overrides) cat.applyCommandOverrides(overrides);
   }
+  // Surface model-specific gotchas to the CAT log so users see them on
+  // connect (FT-710 ATU + CAT timeout, etc.) without having to dig through
+  // docs. Keep this generic — any model entry can declare a `notes` array.
+  if (rigModel && Array.isArray(rigModel.notes)) {
+    for (const note of rigModel.notes) sendCatLog(note);
+  }
   } finally {
     _connectCatPending = false;
   }
