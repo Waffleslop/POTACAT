@@ -2115,8 +2115,18 @@
   spotsDropdown.querySelector('.rc-spots-panel').addEventListener('change', (e) => {
     const cb = e.target;
     if (cb.dataset.src) {
+      // Desktop's set-sources handler keys on settings-flag names
+      // (enable<Foo> minus the prefix), and the receive path on this side
+      // already translates `cluster` → `dxc` so the DOM checkbox uses `dxc`.
+      // The send path was missing the reverse — phone shipped {..., dxc:true}
+      // and the desktop's map skipped the unknown key, so the DX Cluster
+      // toggle was a no-op. AA6C report. Mirror the existing receive map.
+      const SRC_DOM_TO_WIRE = { dxc: 'cluster' };
       const sources = {};
-      spotsDropdown.querySelectorAll('[data-src]').forEach(c => { sources[c.dataset.src] = c.checked; });
+      spotsDropdown.querySelectorAll('[data-src]').forEach(c => {
+        const wireKey = SRC_DOM_TO_WIRE[c.dataset.src] || c.dataset.src;
+        sources[wireKey] = c.checked;
+      });
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set-sources', sources }));
       }
