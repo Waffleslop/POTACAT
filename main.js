@@ -3443,11 +3443,31 @@ function connectCwKeyPort() {
               _ioctlUnsupported = true;
               _cwKeyPortPathForPython = portPath;
               sendCatLog(`[CW Key Port] This driver doesn't honor TIOCMSET ("${err.message}") ` +
-                `— closing the port so the radio stops keying. CW text-send will fall back to a ` +
-                `Python helper (requires python3 + pyserial). If that's not installed: install ` +
-                `pyserial (e.g. "pip install pyserial" or distro package "python3-pyserial"), ` +
-                `or wire an external USB-serial adapter (FTDI / CH340) to the radio's rear CW ` +
-                `KEY jack and point "CW Key Port" at that adapter instead.`);
+                `— dropping DTR/RTS via Python helper, then closing the node-serialport handle. ` +
+                `CW text-send will use the Python pyserial path (requires python3 + pyserial — ` +
+                `install via pip or your distro's python3-pyserial package).`);
+              // Drop DTR/RTS via pyserial (TIOCMBIS/BIC) BEFORE closing our
+              // node-serialport handle. The kernel hupcl on close was racing
+              // with the moment we needed DTR low — DA2PK reported the radio
+              // back on continuous carrier in v1.5.5 even though the same
+              // logical code path "worked" in his earlier pull. Doing the
+              // active drop guarantees DTR is low regardless of hupcl timing.
+              try {
+                const { spawn } = require('child_process');
+                const escPath = portPath.replace(/'/g, "\\'");
+                const dropProc = spawn('python3', ['-c',
+                  `import serial; p = serial.Serial('${escPath}', 4800); p.setDTR(False); p.setRTS(False); p.close()`
+                ], { stdio: ['ignore', 'pipe', 'pipe'] });
+                let dropErr = '';
+                dropProc.stderr.on('data', (d) => { dropErr += d.toString(); });
+                dropProc.on('error', (e) => sendCatLog(`[CW Key Port] Python pin-drop spawn failed: ${e.code || e.message}`));
+                dropProc.on('exit', (code) => {
+                  if (code === 0) sendCatLog('[CW Key Port] DTR/RTS dropped via pyserial');
+                  else sendCatLog(`[CW Key Port] Python pin-drop exited code ${code}${dropErr ? ': ' + dropErr.split('\n')[0] : ''}`);
+                });
+              } catch (e) {
+                sendCatLog(`[CW Key Port] Python pin-drop threw: ${e.message}`);
+              }
               try { port.close(); } catch {}
             } else if (!ioctlErr) {
               sendCatLog(`[CW Key Port] Could not pull DTR/RTS low (${err.message}). ` +
