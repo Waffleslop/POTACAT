@@ -2443,10 +2443,19 @@ function matchesAutoCqFilter(text, filterMode) {
 }
 
 function parseCqMessage(text) {
-  const parts = (text || '').toUpperCase().split(/\s+/);
-  // CQ [MODIFIER] CALLSIGN GRID — modifier is optional (POTA, SOTA, DX, etc.)
-  let callIdx = 1;
-  if (parts.length > 3 && parts[1].length <= 5 && !/[0-9]/.test(parts[1])) callIdx = 2;
+  const parts = (text || '').toUpperCase().split(/\s+/).filter(Boolean);
+  // CQ [MODIFIER]* CALLSIGN [GRID]. Modifiers (POTA, SOTA, DX, NA, EU, ...)
+  // are letter-only — they never match callsign shape. Match the first
+  // callsign-shaped token after CQ instead of the previous "if length>3
+  // and parts[1] looks like a modifier" heuristic, which broke for shorter
+  // messages like "CQ POTA W1AW" (no grid). The old code treated POTA as
+  // the callsign and replied with "POTA MYCALL MYGRID". (IU7RAL report.)
+  const isCallsign = (s) => /^[A-Z0-9]{1,3}[0-9][A-Z]{1,4}$/.test((s || '').split('/')[0]);
+  let callIdx = -1;
+  for (let i = 1; i < parts.length; i++) {
+    if (isCallsign(parts[i])) { callIdx = i; break; }
+  }
+  if (callIdx === -1) callIdx = 1; // nothing callsign-shaped — keep prior fallback
   return { call: parts[callIdx] || '', grid: parts[callIdx + 1] || '' };
 }
 
@@ -8218,8 +8227,12 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       // Tell renderer to start RX audio capture
       if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
     }
-    // Override mode to USB for the radio (FreeDV transmits in USB)
-    mode = 'USB';
+    // Override mode to the radio's voice sideband for the band — FreeDV
+    // transmits in plain SSB, so it uses LSB on the low bands (40m and
+    // below) and USB on the high bands. This matches the FreeDV app's own
+    // behavior. (Chris/M0XYZ report: was always selecting USB regardless
+    // of band.)
+    mode = freqHz < 10_000_000 ? 'LSB' : 'USB';
   } else if (!isFreedvMode && freedvEngine) {
     // Tuned away from FreeDV — stop the engine
     sendCatLog('[FreeDV] Auto-stopped (tuned to non-FreeDV mode)');

@@ -6686,13 +6686,25 @@ function openLogPopup(spot) {
   logOpName.value = logQrz ? [cleanQrzName(logQrz.nickname) || cleanQrzName(logQrz.fname), cleanQrzName(logQrz.name)].filter(Boolean).join(' ') : '';
   logFrequency.value = parseFloat(spot.frequency).toFixed(1);
 
-  // Set mode dropdown
-  const mode = (spot.mode || '').toUpperCase();
+  // Set mode dropdown. Map common radio CAT mode names to the dropdown's
+  // ADIF-style options — without this, modes coming straight from CAT (e.g.
+  // PKTUSB/DIGU when running FT8) didn't match any option and silently
+  // fell back to SSB, which was the bug KD2TJU reported on the VFO popout
+  // LOG button after we started using radioMode there.
+  const rawMode = (spot.mode || '').toUpperCase();
+  const modeAliases = {
+    PKTUSB: 'FT8', PKTLSB: 'FT8', DIGU: 'FT8', DIGL: 'FT8',
+    DATA: 'FT8', DATAU: 'FT8', DATAL: 'FT8',
+    'USB-D': 'FT8', 'LSB-D': 'FT8',
+    SSB: 'SSB', // explicit so we don't lose it
+  };
+  let mode = rawMode;
+  if (modeAliases[mode]) mode = modeAliases[mode];
   const modeOption = logMode.querySelector(`option[value="${mode}"]`);
   if (modeOption) {
     logMode.value = mode;
-  } else if (mode === 'USB' || mode === 'LSB') {
-    logMode.value = mode;
+  } else if (rawMode === 'USB' || rawMode === 'LSB') {
+    logMode.value = rawMode;
   } else {
     logMode.value = 'SSB';
   }
@@ -12729,10 +12741,22 @@ window.api.onFreedvSync((data) => {
 window.api.onFreedvStatus(() => {});
 
 // Auto-start: main process detected FreeDV mode on tune
-// VFO LOG button -> open log form with last tuned spot
+// VFO LOG button -> open log form. Use the radio's CURRENT freq + mode
+// rather than whatever lastTunedSpot was set to — by the time the user is
+// pressing the popout's LOG button they may have spun the VFO away from
+// the original spot, and KD2TJU reported the modal opening with a stale
+// (or worst-case missing) mode in v1.5.5. We still keep the spot's
+// callsign / reference / source so the form is usefully pre-filled.
 window.api.onOpenLogForm(() => {
-  if (lastTunedSpot) openLogPopup(lastTunedSpot);
-  else openQuickLog();
+  if (lastTunedSpot) {
+    openLogPopup({
+      ...lastTunedSpot,
+      frequency: radioFreqKhz ? String(radioFreqKhz) : lastTunedSpot.frequency,
+      mode: radioMode || lastTunedSpot.mode,
+    });
+  } else {
+    openQuickLog();
+  }
 });
 
 window.api.onFreedvAutoStart(async (mode) => {
