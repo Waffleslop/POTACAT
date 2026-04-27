@@ -217,6 +217,45 @@
   let tunedSig = '';
   let tunedBearing = null; // degrees, computed by main from grid → grid haversine
   let showVfoBearing = localStorage.getItem('echocat-show-vfo-bearing') === 'true';
+  let tunedDupe = null; // {callsign, timeUtc, freqKhz, mode} when current tune matches a session contact
+
+  // Phone-side POTA dupe check — same call + same band + same mode anywhere
+  // in the current activation's sessionContacts. The session resets when an
+  // activation starts/stops on the desktop, so "today UTC" is implicit; we
+  // compare on call+band+mode only. Mirrors the desktop's isActivatorDupe.
+  function findEchoSessionDupe(call, freqKhz, mode) {
+    if (!call || !sessionContacts || !sessionContacts.length) return null;
+    const upper = String(call).toUpperCase().trim();
+    if (!upper) return null;
+    const norm = (x) => {
+      const u = (x || '').toUpperCase();
+      if (u === 'USB' || u === 'LSB') return 'SSB';
+      return u;
+    };
+    const targetMode = norm(mode);
+    const targetBand = freqKhz ? freqToBandLocal(parseFloat(freqKhz)) : null;
+    for (const c of sessionContacts) {
+      if (!c.callsign || c.callsign.toUpperCase() !== upper) continue;
+      if (targetMode && c.mode && norm(c.mode) !== targetMode) continue;
+      if (targetBand && c.band && c.band !== targetBand) continue;
+      return c;
+    }
+    return null;
+  }
+  function freqToBandLocal(khz) {
+    if (khz >= 1800 && khz <= 2000) return '160m';
+    if (khz >= 3500 && khz <= 4000) return '80m';
+    if (khz >= 5330 && khz <= 5410) return '60m';
+    if (khz >= 7000 && khz <= 7300) return '40m';
+    if (khz >= 10100 && khz <= 10150) return '30m';
+    if (khz >= 14000 && khz <= 14350) return '20m';
+    if (khz >= 18068 && khz <= 18168) return '17m';
+    if (khz >= 21000 && khz <= 21450) return '15m';
+    if (khz >= 24890 && khz <= 24990) return '12m';
+    if (khz >= 28000 && khz <= 29700) return '10m';
+    if (khz >= 50000 && khz <= 54000) return '6m';
+    return null;
+  }
   // VFO Lock — mirrors desktop _vfoLocked, synced via WS.
   let vfoLocked = false;
   var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
@@ -1207,6 +1246,12 @@
         sessionContacts = msg.contacts || [];
         renderContacts();
         updateLogBadge();
+        // Re-check the currently tuned spot — a freshly logged contact could
+        // turn the current tune into a dupe.
+        if (tunedCallsign) {
+          tunedDupe = findEchoSessionDupe(tunedCallsign, tunedFreqKhz, currentMode);
+          if (typeof window.__vfRenderAll === 'function') window.__vfRenderAll();
+        }
         break;
 
       case 'worked-parks':
@@ -2019,6 +2064,9 @@
       const b = parseFloat(card.dataset.bearing);
       tunedBearing = isFinite(b) ? b : null;
     }
+    // POTA dupe check — flag if this call+band+mode is already in the
+    // activation's session contacts.
+    tunedDupe = findEchoSessionDupe(callsign, freqKhz, mode);
     if (callsign && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: callsign.toUpperCase().split('/')[0] }));
     }
@@ -9420,6 +9468,7 @@
     const vfOpLoc = document.getElementById('vf-op-loc');
     const vfOpRef = document.getElementById('vf-op-ref');
     const vfOpBearing = document.getElementById('vf-op-bearing');
+    const vfOpDupe = document.getElementById('vf-op-dupe');
     const vfLogBtn = document.getElementById('vf-log-btn');
     const vfDial = document.getElementById('vf-dial');
     if (!fullview || !toggleBtn) return;
@@ -9505,6 +9554,20 @@
               vfOpBearing.textContent = 'Beam: ' + String(b).padStart(3, '0') + '°';
             } else {
               vfOpBearing.textContent = '';
+            }
+          }
+          if (vfOpDupe) {
+            if (tunedDupe) {
+              const d = tunedDupe;
+              const parts = [];
+              if (d.timeUtc) parts.push(d.timeUtc.slice(0, 2) + ':' + d.timeUtc.slice(2, 4) + ' UTC');
+              if (d.freqKhz) parts.push((parseFloat(d.freqKhz) / 1000).toFixed(3) + ' MHz');
+              if (d.mode) parts.push(d.mode);
+              vfOpDupe.textContent = 'DUPE';
+              vfOpDupe.title = parts.length ? 'Already worked: ' + parts.join(' · ') : 'Already worked this activation';
+            } else {
+              vfOpDupe.textContent = '';
+              vfOpDupe.title = '';
             }
           }
         } else {

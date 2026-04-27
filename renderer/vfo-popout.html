@@ -128,6 +128,7 @@
     .op-call { color: var(--accent-blue); font-weight: bold; font-size: 28px; font-family: 'Consolas', monospace; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-detail { color: var(--text-secondary); font-size: 16px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-ref { color: var(--accent-green); font-weight: bold; font-size: 17px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-dupe { display: inline-block; background: var(--accent-red, #e94560); color: #fff; font-weight: 800; font-size: 12px; letter-spacing: 0.6px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle; cursor: help; }
     /* HF Net card — distinctive pill to separate from operator/park info. */
     .op-net-name { color: #ffd740; font-weight: bold; font-size: 22px; font-family: inherit; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-net-badge { display: inline-block; background: #ffd740; color: #000; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 2px 8px; border-radius: 999px; margin-top: 2px; }
@@ -1907,6 +1908,17 @@ function renderOpInfo(spot) {
         html += '<img class="op-photo" src="' + esc(op.image) + '" onerror="this.style.display=\'none\'">';
       }
       html += '<span class="op-call">' + esc(op.callsign) + '</span>';
+      if (op.isDupe) {
+        // POTA dupe in this activation today — show a red DUPE chip next to
+        // the callsign so the activator catches it before keying. Tooltip
+        // surfaces the previous QSO's freq/mode/time.
+        const d = op.dupeDetail || {};
+        const ts = d.when ? new Date(d.when) : null;
+        const hhmm = ts ? String(ts.getUTCHours()).padStart(2,'0') + ':' + String(ts.getUTCMinutes()).padStart(2,'0') : '';
+        const fMHz = d.freq ? (parseFloat(d.freq) / 1000).toFixed(3) : '';
+        const detail = [hhmm && (hhmm + ' UTC'), fMHz && (fMHz + ' MHz'), d.mode].filter(Boolean).join(' · ');
+        html += '<span class="op-dupe" title="' + esc(detail ? 'Already worked: ' + detail : 'Already worked this activation today') + '">DUPE</span>';
+      }
       if (op.displayName) html += '<span class="op-detail">' + esc(op.displayName) + '</span>';
       const locParts = [];
       if (op.country) locParts.push(op.country === 'United States' ? 'USA' : op.country);

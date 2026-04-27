@@ -3656,6 +3656,22 @@ html, body {
   color: var(--accent-blue, #4fc3f7);
 }
 .vf-op-bearing:empty { display: none; }
+/* DUPE chip on the VFO op-card — POTA dupe in current activation. Bright
+   red so the activator catches it before keying. */
+.vf-op-dupe {
+  display: inline-flex;
+  align-items: center;
+  background: var(--accent-red, #e94560);
+  color: #fff;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: help;
+  user-select: none;
+}
+.vf-op-dupe:empty { display: none; }
 .vf-log-btn {
   flex-shrink: 0;
   background: var(--pota);

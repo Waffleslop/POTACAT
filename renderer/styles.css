@@ -6054,6 +6054,23 @@ main.banner-logger-active #event-progress-overlay {
 .bl-notes { flex: 1; min-width: 60px; }
 .bl-respot-label { font-size: calc(11px * var(--bl-scale, 1)); color: var(--text-secondary); display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
 .bl-respot-label.hidden { display: none; }
+/* DUPE chip — POTA dupe detection during an activation. Bright red so it
+   reads at a glance during a pileup; native title= tooltip carries the
+   "worked at HH:MM on FF.FFF MHz CW" detail. */
+.bl-dupe {
+  display: inline-flex;
+  align-items: center;
+  font-size: calc(10px * var(--bl-scale, 1));
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: calc(2px * var(--bl-scale, 1)) calc(6px * var(--bl-scale, 1));
+  border-radius: 3px;
+  background: var(--accent-red, #e94560);
+  color: #fff;
+  cursor: help;
+  user-select: none;
+}
+.bl-dupe.hidden { display: none; }
 .bl-mode { width: calc(60px * var(--bl-scale, 1)); font-size: calc(11px * var(--bl-scale, 1)); padding: calc(3px * var(--bl-scale, 1)) 2px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; }
 .bl-rst-group { display: flex; align-items: center; gap: 2px; }
 .bl-rst-label { font-size: calc(10px * var(--bl-scale, 1)); color: var(--text-tertiary); font-weight: 600; }

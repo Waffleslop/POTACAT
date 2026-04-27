@@ -188,18 +188,31 @@ function notifyVfoTunedSpot(spot) {
   const spots = sameFreq.length > 0 ? sameFreq : [spot];
   // Build array of operator data. For net spots we also forward band/mode/
   // comments so the popout can render an HF NET card instead of a QRZ card.
-  const ops = spots.map(s => ({
-    callsign: s.callsign || '',
-    reference: s.reference || '',
-    parkName: s.parkName || '',
-    source: s.source || '',
-    wpm: s.wpm || null,
-    bearing: (typeof s.bearing === 'number' && isFinite(s.bearing)) ? s.bearing : null,
-    // Net-only fields (harmless on other sources; popout keys off source==='net')
-    band: s.band || '',
-    mode: s.mode || '',
-    comments: s.comments || '',
-  }));
+  const ops = spots.map(s => {
+    // Activator dupe check — same call + band + mode + UTC day already in
+    // this activation's contact list. POTA scoring counts each combination
+    // once, so flagging it on the popout op-card lets the activator skip
+    // the QSO instead of logging it twice. (Rohnboy request.)
+    const dupe = isActivatorDupe(s.callsign, parseFloat(s.frequency), s.mode);
+    return {
+      callsign: s.callsign || '',
+      reference: s.reference || '',
+      parkName: s.parkName || '',
+      source: s.source || '',
+      wpm: s.wpm || null,
+      bearing: (typeof s.bearing === 'number' && isFinite(s.bearing)) ? s.bearing : null,
+      isDupe: !!dupe,
+      dupeDetail: dupe ? {
+        when: dupe.timestamp || '',
+        freq: dupe.frequency || '',
+        mode: dupe.mode || '',
+      } : null,
+      // Net-only fields (harmless on other sources; popout keys off source==='net')
+      band: s.band || '',
+      mode: s.mode || '',
+      comments: s.comments || '',
+    };
+  });
   window.api.vfoTunedSpot({ ops });
   // QRZ lookup for each real operator (skip nets — their callsign is the net name).
   const pending = ops.map((op, i) => {
@@ -239,6 +252,52 @@ let activatorCrossRefs = [];  // [{program:'WWFF', ref:'KFF-1234'}, {program:'LL
 let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
 let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF'}]  max MAX_N_FER, resets per QSO
 let activatorContacts = []; // in-memory QSO list for current activation session
+
+// Look up whether `call` would be a POTA dupe in the current activation —
+// same call + same band + same mode + same UTC day. Returns the matching
+// contact entry (with timestamp / frequency / mode for the tooltip) or null.
+// Only meaningful while activationActive; outside an activation we never flag
+// dupes so plain-hunting users don't see false alarms. (Rohnboy request)
+function isActivatorDupe(call, freqKhz, mode) {
+  if (!activationActive || !call) return null;
+  if (!activatorContacts.length) return null;
+  const upper = String(call).toUpperCase().trim();
+  if (!upper) return null;
+  const band = freqKhz ? freqToBandActivator(Math.round(parseFloat(freqKhz))) : null;
+  const m = (mode || '').toUpperCase();
+  // Treat USB / LSB as SSB for dupe purposes — POTA's submission resolves all
+  // three to the same SSB row, and operators frequently log one as the other.
+  const normalizeMode = (x) => {
+    const u = (x || '').toUpperCase();
+    if (u === 'USB' || u === 'LSB') return 'SSB';
+    return u;
+  };
+  const targetMode = normalizeMode(m);
+  const now = new Date();
+  const todayUtc = now.getUTCFullYear().toString() +
+    String(now.getUTCMonth() + 1).padStart(2, '0') +
+    String(now.getUTCDate()).padStart(2, '0');
+  for (const c of activatorContacts) {
+    if (!c.callsign || c.callsign.toUpperCase() !== upper) continue;
+    // Compare modes (normalized)
+    if (targetMode && c.mode && normalizeMode(c.mode) !== targetMode) continue;
+    // Compare bands (derived from the stored kHz frequency)
+    if (band && c.frequency) {
+      const cb = freqToBandActivator(Math.round(parseFloat(c.frequency)));
+      if (cb !== band) continue;
+    }
+    // Compare UTC date
+    const ts = c.timestamp ? new Date(c.timestamp) : null;
+    if (ts) {
+      const ud = ts.getUTCFullYear().toString() +
+        String(ts.getUTCMonth() + 1).padStart(2, '0') +
+        String(ts.getUTCDate()).padStart(2, '0');
+      if (ud !== todayUtc) continue;
+    }
+    return c;
+  }
+  return null;
+}
 let activatorFreqKhz = 0;  // from CAT
 let activationActive = false; // true while activation is running
 let activationStartTime = 0;  // Date.now() when activation started
@@ -2234,8 +2293,32 @@ blRstSent.addEventListener('input', () => { blRstSentEdited = true; });
 blRstRcvd.addEventListener('input', () => { blRstRcvdEdited = true; });
 
 // QRZ lookup on callsign input (debounced)
+// DUPE chip — reflects whether the call+band+mode the user is currently
+// typing into the banner is already in this activation's contact list for
+// today UTC. Updates on every input, freq, or mode change.
+const blDupeChip = document.getElementById('bl-dupe');
+function updateBlDupeChip() {
+  if (!blDupeChip) return;
+  const cs = blCallsign.value.trim();
+  if (cs.length < 3) { blDupeChip.classList.add('hidden'); return; }
+  const freqKhz = parseFloat(blFreq.value) * 1000;
+  const dupe = isActivatorDupe(cs, freqKhz, blMode.value);
+  if (dupe) {
+    const ts = dupe.timestamp ? new Date(dupe.timestamp) : null;
+    const hhmm = ts ? `${String(ts.getUTCHours()).padStart(2, '0')}:${String(ts.getUTCMinutes()).padStart(2, '0')}` : '';
+    const fMHz = dupe.frequency ? (parseFloat(dupe.frequency) / 1000).toFixed(3) : '';
+    const detail = [hhmm && `${hhmm} UTC`, fMHz && `${fMHz} MHz`, dupe.mode].filter(Boolean).join(' · ');
+    blDupeChip.title = detail ? `Already worked: ${detail}` : 'Already worked this activation today';
+    blDupeChip.classList.remove('hidden');
+  } else {
+    blDupeChip.classList.add('hidden');
+    blDupeChip.title = '';
+  }
+}
+
 blCallsign.addEventListener('input', () => {
   blCallsign.value = blCallsign.value.toUpperCase();
+  updateBlDupeChip();
   clearTimeout(blLookupTimer);
   const cs = blCallsign.value.trim();
   if (cs.length < 3) { blName.value = ''; return; }
@@ -2251,6 +2334,10 @@ blCallsign.addEventListener('input', () => {
     } catch {}
   }, 400);
 });
+// Re-check on freq / mode change too — a band-switch can drop a dupe and
+// vice versa, and the user expects the chip to track those edits live.
+blFreq.addEventListener('input', updateBlDupeChip);
+blMode.addEventListener('change', updateBlDupeChip);
 
 // Save QSO from banner logger
 async function saveBannerQso() {
@@ -2420,6 +2507,14 @@ async function saveBannerQso() {
         activatorContacts.push(contact);
         renderActivatorLog();
         updateActivatorCounter();
+        // Refresh the VFO popout's op-card so its DUPE chip catches the
+        // contact we just logged — if the user is still sitting on the
+        // same spot, the op-card needs to flip from "no dupe" to "DUPE".
+        if (lastTunedSpot) notifyVfoTunedSpot(lastTunedSpot);
+        // And re-evaluate the banner DUPE chip itself for the same reason
+        // (next call entered will pick this up via its own input handler,
+        // but if the user re-enters a recent call, the chip should react).
+        updateBlDupeChip();
         window.api.qrzLookup(callsign).then(info => {
           if (info) {
             contact.name = qrzDisplayName(info);
