@@ -215,6 +215,8 @@
   let tunedCountry = '';
   let tunedRef = '';
   let tunedSig = '';
+  let tunedBearing = null; // degrees, computed by main from grid → grid haversine
+  let showVfoBearing = localStorage.getItem('echocat-show-vfo-bearing') === 'true';
   // VFO Lock — mirrors desktop _vfoLocked, synced via WS.
   let vfoLocked = false;
   var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
@@ -2010,6 +2012,13 @@
     // Park ref + program (POTA/SOTA/WWFF/LLOTA) come from the spot card itself
     tunedRef = (card.dataset.ref || '').toUpperCase();
     tunedSig = (typeof srcToSig === 'function' ? srcToSig(card.dataset.src) : '') || '';
+    // Beam heading from main's haversine on the spot — present on every
+    // spot that has lat/lon/grid resolution (most POTA/SOTA/WWFF/LLOTA, plus
+    // RBN/cluster after cty.dat lookup). Card data-bearing is the source.
+    {
+      const b = parseFloat(card.dataset.bearing);
+      tunedBearing = isFinite(b) ? b : null;
+    }
     if (callsign && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: callsign.toUpperCase().split('/')[0] }));
     }
@@ -3458,6 +3467,21 @@
     localStorage.setItem('echoMeterEnabled', echoMeterEnabled);
     echoMeterStrip.classList.toggle('hidden', !echoMeterEnabled);
   });
+
+  // Beam heading toggle on the VFO operator card. Hidden by default; users
+  // who want to swing a beam to a station can flip it on (KM4CFT request).
+  var echoShowBearing = document.getElementById('echo-show-bearing');
+  if (echoShowBearing) {
+    echoShowBearing.checked = showVfoBearing;
+    echoShowBearing.addEventListener('change', function() {
+      showVfoBearing = echoShowBearing.checked;
+      localStorage.setItem('echocat-show-vfo-bearing', showVfoBearing);
+      // Re-render the op-card so bearing shows/hides immediately. The full-
+      // view's renderAll is the only path that reads showVfoBearing, and
+      // it's safe to call when fullview is closed (no-ops gracefully).
+      if (typeof window.__vfRenderAll === 'function') window.__vfRenderAll();
+    });
+  }
 
   // FreeDV toggle — sends setting to desktop
   var echoFreedvCb = document.getElementById('echo-enable-freedv');
@@ -9395,6 +9419,7 @@
     const vfOpName = document.getElementById('vf-op-name');
     const vfOpLoc = document.getElementById('vf-op-loc');
     const vfOpRef = document.getElementById('vf-op-ref');
+    const vfOpBearing = document.getElementById('vf-op-bearing');
     const vfLogBtn = document.getElementById('vf-log-btn');
     const vfDial = document.getElementById('vf-dial');
     if (!fullview || !toggleBtn) return;
@@ -9474,6 +9499,14 @@
           }
           if (vfOpLoc) vfOpLoc.textContent = loc;
           if (vfOpRef) vfOpRef.textContent = tunedRef ? (tunedSig ? `${tunedSig} ${tunedRef}` : tunedRef) : '';
+          if (vfOpBearing) {
+            if (showVfoBearing && typeof tunedBearing === 'number' && isFinite(tunedBearing)) {
+              const b = ((Math.round(tunedBearing) % 360) + 360) % 360;
+              vfOpBearing.textContent = 'Beam: ' + String(b).padStart(3, '0') + '°';
+            } else {
+              vfOpBearing.textContent = '';
+            }
+          }
         } else {
           vfOpCard.classList.add('vf-op-empty');
         }
@@ -9760,6 +9793,7 @@
     window.__vfSetMeter = vfSetMeter;
     window.__vfSetSwr = vfSetSwr;
     window.__vfSetPwr = vfSetPwr;
+    window.__vfRenderAll = renderAll;
 
     // ----- Rig-control widget: ATU / NB toggles + Rig On/Off + RF Gain / TX Power sliders -----
     const vfAtuBtn = document.getElementById('vf-atu-btn');

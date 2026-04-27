@@ -3649,6 +3649,13 @@ html, body {
   font-size: 11px;
 }
 .vf-op-ref:empty { display: none; }
+.vf-op-bearing {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--accent-blue, #4fc3f7);
+}
+.vf-op-bearing:empty { display: none; }
 .vf-log-btn {
   flex-shrink: 0;
   background: var(--pota);

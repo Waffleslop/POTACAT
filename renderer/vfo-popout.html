@@ -553,6 +553,7 @@
         <select id="mic-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:12px;"></select>
       </div>
       <label class="settings-toggle"><input type="checkbox" id="w-op-photo"> Operator Photo (QRZ)</label>
+      <label class="settings-toggle"><input type="checkbox" id="w-bearing"> Beam Heading (bearing to spot)</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
       <label class="settings-toggle"><input type="checkbox" id="w-cw-controls"> CW Speed / Text Input</label>
       <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
@@ -1225,7 +1226,7 @@ function esc(s) {
 
 // --- Widget visibility ---
 const WIDGETS = ['smeter', 'ptt', 'log', 'cw', 'cw-controls', 'voice'];
-let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, 'cw-controls': false, voice: false };
+let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, 'cw-controls': false, voice: false, bearing: false };
 const SECTIONS = ['dial', 'solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
 let vfoSections = { dial: true, solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
@@ -1281,6 +1282,7 @@ const wSmeter = document.getElementById('w-smeter');
 const wPtt = document.getElementById('w-ptt');
 const wLog = document.getElementById('w-log');
 const wOpPhoto = document.getElementById('w-op-photo');
+const wBearing = document.getElementById('w-bearing');
 const wCw = document.getElementById('w-cw');
 const wCwControls = document.getElementById('w-cw-controls');
 const wVoice = document.getElementById('w-voice');
@@ -1299,6 +1301,7 @@ function syncSettingsCheckboxes() {
   wPtt.checked = !!vfoWidgets.ptt;
   wLog.checked = !!vfoWidgets.log;
   wOpPhoto.checked = !!vfoWidgets['op-photo'];
+  wBearing.checked = !!vfoWidgets.bearing;
   wCw.checked = !!vfoWidgets.cw;
   wCwControls.checked = !!vfoWidgets['cw-controls'];
   wVoice.checked = !!vfoWidgets.voice;
@@ -1312,17 +1315,21 @@ function syncSettingsCheckboxes() {
   sProfilesInline.checked = !!vfoSections['profiles-inline'];
 }
 
-[wSmeter, wPtt, wLog, wOpPhoto, wCw, wCwControls, wVoice].forEach(cb => {
+[wSmeter, wPtt, wLog, wOpPhoto, wBearing, wCw, wCwControls, wVoice].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoWidgets.smeter = wSmeter.checked;
     vfoWidgets.ptt = wPtt.checked;
     vfoWidgets.log = wLog.checked;
     vfoWidgets['op-photo'] = wOpPhoto.checked;
+    vfoWidgets.bearing = wBearing.checked;
     vfoWidgets.cw = wCw.checked;
     vfoWidgets['cw-controls'] = wCwControls.checked;
     vfoWidgets.voice = wVoice.checked;
     applyWidgets();
     saveWidgets();
+    // Re-render the currently displayed op-card so bearing / op-photo
+    // toggles take effect without waiting for the next tuned-spot push.
+    if (_lastOpsPayload) renderOpInfo(_lastOpsPayload);
   });
 });
 
@@ -1869,7 +1876,8 @@ window.api.onTheme((theme) => {
 // --- Operator info (tuned spot) ---
 const opInfoEl = document.getElementById('op-info');
 
-window.api.onTunedSpot((spot) => {
+let _lastOpsPayload = null;
+function renderOpInfo(spot) {
   // Support new { ops: [...] } format and legacy single-spot format
   const ops = spot && spot.ops ? spot.ops : (spot && spot.callsign ? [spot] : []);
   if (!ops.length) {
@@ -1906,6 +1914,13 @@ window.api.onTunedSpot((spot) => {
       if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
       if (op.reference) html += '<span class="op-ref">' + esc(op.reference) + '</span>';
       if (op.parkName) html += '<span class="op-detail">' + esc(op.parkName) + '</span>';
+      // Beam heading — opt-in via Settings → Widgets → Beam Heading. Underneath
+      // the park name per KM4CFT request. Padded to 3 digits for visual stability
+      // when the radio's panning across an arc (e.g. "Beam: 042°" not "42°").
+      if (vfoWidgets.bearing && typeof op.bearing === 'number' && isFinite(op.bearing)) {
+        const bDeg = ((Math.round(op.bearing) % 360) + 360) % 360;
+        html += '<span class="op-detail">Beam: ' + String(bDeg).padStart(3, '0') + '°</span>';
+      }
     }
   } else if (n <= 3) {
     // 2-3 ops: one line per op — callsign + name
@@ -1927,6 +1942,10 @@ window.api.onTunedSpot((spot) => {
   // Use first op's WPM for CW sync
   cwSpotWpmVal = ops[0].wpm || null;
   updateCwSyncBtn();
+}
+window.api.onTunedSpot((spot) => {
+  _lastOpsPayload = spot;
+  renderOpInfo(spot);
 });
 
 // --- WebSDR ---

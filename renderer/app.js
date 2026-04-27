@@ -194,6 +194,7 @@ function notifyVfoTunedSpot(spot) {
     parkName: s.parkName || '',
     source: s.source || '',
     wpm: s.wpm || null,
+    bearing: (typeof s.bearing === 'number' && isFinite(s.bearing)) ? s.bearing : null,
     // Net-only fields (harmless on other sources; popout keys off source==='net')
     band: s.band || '',
     mode: s.mode || '',
