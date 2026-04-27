@@ -6342,7 +6342,21 @@ function dedupeCrossSource(spots) {
     }
     // Clone the survivor so we don't mutate the source-of-truth arrays
     // (lastPotaSotaSpots / clusterSpots / cwSpots).
-    collapsed.push({ ...group[0], sources });
+    const survivor = { ...group[0], sources };
+    // Preserve secondary program references on the survivor so the log
+    // dialog (and ADIF writer) can include them on a dual-program contact.
+    // KK4DF report: K4FR was spotted on both POTA AND SOTA; without this,
+    // the dedup kept only the POTA reference and the SOTA ref vanished.
+    for (const s of group) {
+      if (s.source === 'pota' && s.reference && !survivor.potaReference) survivor.potaReference = s.reference;
+      if (s.source === 'sota' && s.reference && !survivor.sotaReference) survivor.sotaReference = s.reference;
+      if (s.source === 'llota' && s.reference && !survivor.llotaReference) survivor.llotaReference = s.reference;
+      if (s.source === 'wwff' && s.reference && !survivor.wwffReference) survivor.wwffReference = s.reference;
+      // Park names too, for the info display in the log dialog.
+      if (s.source === 'sota' && s.parkName && !survivor.sotaParkName) survivor.sotaParkName = s.parkName;
+      if (s.source === 'llota' && s.parkName && !survivor.llotaParkName) survivor.llotaParkName = s.parkName;
+    }
+    collapsed.push(survivor);
   }
   return [...passthrough, ...collapsed];
 }

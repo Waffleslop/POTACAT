@@ -5489,6 +5489,7 @@ const LOG_TYPE_SOURCE_MAP = { pota: 'pota', sota: 'sota', wwff: 'wwff', llota: '
 const LOG_TYPE_PLACEHOLDERS = { pota: 'e.g. 1234 or 1234, 5678 (auto-prefix from call)', sota: 'e.g. W6/CT-001', wwff: 'e.g. KFF-1234 or KFF-1234, KFF-5678', llota: 'e.g. US-0001 or US-0001, US-0002' };
 
 function selectLogType(type) {
+  const prevType = logSelectedType;
   logSelectedType = type;
   logTypePicker.querySelectorAll('.log-type-chip').forEach(chip => {
     const ct = chip.dataset.type;
@@ -5512,6 +5513,25 @@ function selectLogType(type) {
   if (!showRef) {
     logRefInput.value = '';
     logRefName.textContent = '';
+  } else if (prevType && prevType !== type) {
+    // User switched between programs (e.g. POTA → SOTA on a dual-program
+    // spot). Don't carry the old program's reference into the new field —
+    // KK4DF saw "incorrect SOTA reference" because the POTA ref stayed in
+    // the input after switching to SOTA. Auto-fill from the spot's
+    // preserved <type>Reference if one exists, otherwise clear.
+    const refField = type + 'Reference';
+    const nameField = type + 'ParkName';
+    if (currentLogSpot && currentLogSpot[refField]) {
+      logRefInput.value = currentLogSpot[refField];
+      logRefName.textContent = currentLogSpot[nameField] || '';
+    } else if (currentLogSpot && type === currentLogSpot.source && currentLogSpot.reference) {
+      // Spot's primary reference matches the new type
+      logRefInput.value = currentLogSpot.reference;
+      logRefName.textContent = currentLogSpot.parkName || '';
+    } else {
+      logRefInput.value = '';
+      logRefName.textContent = '';
+    }
   }
   updateLogRespot();
 }
@@ -6735,8 +6755,16 @@ function openLogPopup(spot) {
   // Pre-fill reference before selectLogType so respot can see it
   logRefInput.value = spot.reference || '';
   logRefName.textContent = spot.parkName || '';
-  if (spot.wwffReference) {
-    logRefName.textContent += (logRefName.textContent ? '\n' : '') + 'WWFF: ' + spot.wwffReference + (spot.wwffParkName ? ' — ' + spot.wwffParkName : '');
+  // Surface every secondary program ref the dedup tagged the spot with —
+  // user can see at a glance that K4FR is on POTA *and* SOTA, both refs go
+  // into the ADIF on save regardless of which chip the user picks.
+  const extraRefs = [];
+  if (spot.wwffReference && spot.source !== 'wwff') extraRefs.push(`WWFF: ${spot.wwffReference}${spot.wwffParkName ? ' — ' + spot.wwffParkName : ''}`);
+  if (spot.sotaReference && spot.source !== 'sota') extraRefs.push(`SOTA: ${spot.sotaReference}${spot.sotaParkName ? ' — ' + spot.sotaParkName : ''}`);
+  if (spot.llotaReference && spot.source !== 'llota') extraRefs.push(`LLOTA: ${spot.llotaReference}${spot.llotaParkName ? ' — ' + spot.llotaParkName : ''}`);
+  if (spot.potaReference && spot.source !== 'pota') extraRefs.push(`POTA: ${spot.potaReference}`);
+  if (extraRefs.length) {
+    logRefName.textContent += (logRefName.textContent ? '\n' : '') + extraRefs.join('\n');
   }
   selectLogType(mappedType);
 
@@ -6878,9 +6906,16 @@ logSaveBtn.addEventListener('click', async () => {
     else if (logSelectedType === 'llota') sig = 'LLOTA';
     sigInfo = typedRef;
   }
-  // Dual-park: POTA spot that's also a WWFF park
-  if (currentLogSpot && currentLogSpot.wwffReference) {
-    wwffRef = currentLogSpot.wwffReference;
+  // Dual-program: pull every additional program reference the spot was
+  // tagged with during cross-source dedup. The user only chip-picks ONE
+  // primary program (e.g. POTA), but a K4FR-style POTA+SOTA spot needs
+  // BOTH refs in the ADIF (sigInfo + potaRef from POTA, sotaRef from
+  // SOTA). KK4DF report — without this, picking the SOTA chip silently
+  // dropped the POTA reference even though it was right there on the spot.
+  if (currentLogSpot) {
+    if (!potaRef && currentLogSpot.potaReference) potaRef = currentLogSpot.potaReference;
+    if (!sotaRef && currentLogSpot.sotaReference) sotaRef = currentLogSpot.sotaReference;
+    if (!wwffRef && currentLogSpot.wwffReference) wwffRef = currentLogSpot.wwffReference;
   }
 
   // Re-spot state from stored targets
