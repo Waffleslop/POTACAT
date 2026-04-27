@@ -8261,12 +8261,13 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       // Tell renderer to start RX audio capture
       if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
     }
-    // Override mode to the radio's voice sideband for the band — FreeDV
-    // transmits in plain SSB, so it uses LSB on the low bands (40m and
-    // below) and USB on the high bands. This matches the FreeDV app's own
-    // behavior. (Chris/M0XYZ report: was always selecting USB regardless
-    // of band.)
-    mode = freqHz < 10_000_000 ? 'LSB' : 'USB';
+    // Override mode to the radio's DATA sideband — FreeDV transmits via
+    // the USB CODEC, so the radio needs DATA-USB / DATA-LSB to route audio
+    // from the codec instead of the mic. DATA-LSB on the low bands (40m
+    // and below), DATA-USB above. Matches the FreeDV app's own behavior
+    // (IU7RAL report). The codec layer maps DIGU/DIGL to PKTUSB/PKTLSB on
+    // rigctld and uses model.digiMd overrides on direct-serial rigs.
+    mode = freqHz < 10_000_000 ? 'DIGL' : 'DIGU';
   } else if (!isFreedvMode && freedvEngine) {
     // Tuned away from FreeDV — stop the engine
     sendCatLog('[FreeDV] Auto-stopped (tuned to non-FreeDV mode)');

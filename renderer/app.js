@@ -10890,14 +10890,20 @@ catLogClearBtn.addEventListener('click', () => {
     if (!banner) {
       banner = document.createElement('div');
       banner.id = 'bug-report-banner';
-      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c24150;color:#fff;padding:10px 16px;font-size:13px;z-index:10000;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+      // KF8ELA report: buttons had a tiny clickable strip on macOS — the
+      // native button height was getting clipped by the flex parent's
+      // align-items:center under certain content widths. Explicit min-height,
+      // -webkit-appearance:none on the buttons, and flex-shrink:0 so the
+      // layout can't compress them.
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c24150;color:#fff;padding:12px 16px;font-size:13px;z-index:10000;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,0.4);min-height:50px;';
       document.body.appendChild(banner);
     }
+    const btnBase = 'flex-shrink:0;-webkit-appearance:none;appearance:none;border-radius:4px;cursor:pointer;font-size:13px;line-height:1.2;min-height:32px;padding:8px 16px;';
     banner.innerHTML = [
-      '<strong>🐞 Recording bug report…</strong>',
-      '<span style="flex:1">Now reproduce the problem. When the log below contains what you need, click Copy Report.</span>',
-      '<button type="button" id="bug-report-copy" style="background:#fff;color:#c24150;border:none;padding:5px 12px;border-radius:3px;font-weight:700;cursor:pointer;font-size:12px;">Copy Report</button>',
-      '<button type="button" id="bug-report-cancel" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Cancel</button>',
+      '<strong style="flex-shrink:0;">🐞 Recording bug report…</strong>',
+      '<span style="flex:1;min-width:0;">Now reproduce the problem. When the log below contains what you need, click Copy Report.</span>',
+      `<button type="button" id="bug-report-copy" style="${btnBase}background:#fff;color:#c24150;border:none;font-weight:700;">Copy Report</button>`,
+      `<button type="button" id="bug-report-cancel" style="${btnBase}background:transparent;color:#fff;border:1px solid #fff;">Cancel</button>`,
     ].join('');
     banner.querySelector('#bug-report-cancel').onclick = () => banner.remove();
     banner.querySelector('#bug-report-copy').onclick = async () => {
