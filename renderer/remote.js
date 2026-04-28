@@ -9818,6 +9818,11 @@
     if (typeof window.__echocatApplySplitLayout === 'function') {
       window.__echocatApplySplitLayout();
     }
+
+    // Expose renderAll so other IIFEs (notably setupVfoWidgets, and the
+    // beam-heading + dupe toggle change handlers in the Settings overlay)
+    // can request a re-render without sharing this lexical scope.
+    window.__vfRenderAll = renderAll;
   })();
   // ===== End Full VFO View =====
 
@@ -9890,7 +9895,10 @@
     window.__vfSetMeter = vfSetMeter;
     window.__vfSetSwr = vfSetSwr;
     window.__vfSetPwr = vfSetPwr;
-    window.__vfRenderAll = renderAll;
+    // window.__vfRenderAll is set from inside setupVfoFullview where
+    // renderAll lives — referencing it here was a ReferenceError that
+    // halted the whole IIFE before the spots panel finished setting up
+    // (KK4DF / KM4CFT v1.5.7 "table won't load" reports).
 
     // ----- Rig-control widget: ATU / NB toggles + Rig On/Off + RF Gain / TX Power sliders -----
     const vfAtuBtn = document.getElementById('vf-atu-btn');
