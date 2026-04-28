@@ -6,20 +6,93 @@
 // diagnose a broken renderer (KK4DF / KM4CFT / "table won't load"
 // reports on v1.5.7 came in with no actionable info because the IIFE
 // threw silently and the page rendered partially).
+//
+// Banner contains a selectable <pre> + a "Copy" button so users on
+// phones can ship the stack to support without retyping it.
 (function installErrorBanner() {
+  function buildBanner() {
+    const el = document.createElement('div');
+    el.id = 'echocat-fatal-banner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e94560;color:#fff;padding:8px 12px;font:12px/1.4 monospace;max-height:50vh;overflow:auto;border-bottom:2px solid #fff;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+
+    const title = document.createElement('span');
+    title.textContent = 'ECHOCAT JS error';
+    title.style.cssText = 'font-weight:bold;flex:1;';
+    header.appendChild(title);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = 'Copy';
+    copyBtn.style.cssText = 'background:#fff;color:#e94560;border:0;padding:4px 10px;border-radius:3px;font:bold 11px monospace;cursor:pointer;flex-shrink:0;';
+    copyBtn.addEventListener('click', () => {
+      const txt = pre.textContent || '';
+      const done = () => {
+        const old = copyBtn.textContent;
+        copyBtn.textContent = 'Copied';
+        setTimeout(() => { copyBtn.textContent = old; }, 1500);
+      };
+      // Modern path. Fall back to a hidden textarea + execCommand for
+      // browsers / contexts where clipboard.writeText isn't available
+      // (older Safari, non-HTTPS pages, etc.).
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(done, () => fallback(txt, done));
+      } else {
+        fallback(txt, done);
+      }
+    });
+    header.appendChild(copyBtn);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = 'Reload';
+    closeBtn.style.cssText = 'background:#fff;color:#e94560;border:0;padding:4px 10px;border-radius:3px;font:bold 11px monospace;cursor:pointer;flex-shrink:0;';
+    closeBtn.addEventListener('click', () => location.reload());
+    header.appendChild(closeBtn);
+
+    el.appendChild(header);
+
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text;cursor:text;';
+    el.appendChild(pre);
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'margin-top:6px;font-size:11px;opacity:0.85;';
+    footer.textContent = 'Tap Copy and email to casey@potacat.com, then Reload.';
+    el.appendChild(footer);
+
+    return { el, pre };
+  }
+
+  function fallback(txt, done) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.cssText = 'position:fixed;top:-9999px;left:0;opacity:0;';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (ok && done) done();
+    } catch { /* nothing more we can do */ }
+  }
+
+  let cached = null;
   function show(msg, src) {
     try {
-      let el = document.getElementById('echocat-fatal-banner');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'echocat-fatal-banner';
-        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e94560;color:#fff;padding:8px 12px;font:12px/1.4 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #fff;';
-        if (document.body) document.body.appendChild(el);
-        else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(el));
+      if (!cached) {
+        cached = buildBanner();
+        const append = () => { if (cached && document.body) document.body.appendChild(cached.el); };
+        if (document.body) append();
+        else document.addEventListener('DOMContentLoaded', append);
       }
-      el.textContent = `ECHOCAT JS error — ${src}\n${msg}\n(reload to retry; report this text to casey@potacat.com)`;
+      cached.pre.textContent = `${src}\n\n${msg}`;
     } catch (_) { /* don't recurse */ }
   }
+
   window.addEventListener('error', (e) => {
     show((e.error && (e.error.stack || e.error.message)) || e.message || 'unknown',
          (e.filename || '') + ':' + (e.lineno || '?'));
