@@ -6946,6 +6946,29 @@ function sendWrlUdp(qsoData, host, port) {
     const grid = qsoData.gridsquare || '';
     const contestName = qsoData.sig || '';
     const contestNr = qsoData.sigInfo || '';
+    // The base N1MM ContactInfo schema doesn't carry STATE / SIG / SIG_INFO
+    // and only ships the contest pair (contestname / contestnr). WRL Cat
+    // Control's listener doesn't translate those back to ADIF SIG / SIG_INFO
+    // on the way to the cloud logbook, so POTA hunts had no SIG fields and
+    // none of the QSOs carried STATE (W7DB report). Emit the ADIF-style
+    // tags alongside the legacy ones — N1MM ignores unknown tags, and WRL
+    // picks them up directly into the ADIF record. Only emit when we have
+    // a value so we don't pollute the packet with empty elements.
+    const adifField = (name, val) => val ? `  <${name}>${escXml(val)}</${name}>\n` : '';
+    const state = qsoData.state || '';
+    const county = qsoData.county || '';
+    const country = qsoData.country || '';
+    const name = qsoData.name || '';
+    const sig = qsoData.sig || '';
+    const sigInfo = qsoData.sigInfo || '';
+    const potaRef = qsoData.potaRef || '';
+    const sotaRef = qsoData.sotaRef || '';
+    const wwffRef = qsoData.wwffRef || '';
+    const txPower = qsoData.txPower || '';
+    const stationCallsign = qsoData.stationCallsign || mycall;
+    const myGridsquare = qsoData.myGridsquare || settings.grid || '';
+    const mySig = qsoData.mySig || '';
+    const mySigInfo = qsoData.mySigInfo || '';
 
     const xml = `<?xml version="1.0" encoding="utf-8"?>\n<contactinfo>\n`
       + `  <app>POTACAT</app>\n`
@@ -6962,6 +6985,20 @@ function sendWrlUdp(qsoData, host, port) {
       + `  <snt>${escXml(snt)}</snt>\n`
       + `  <rcv>${escXml(rcv)}</rcv>\n`
       + `  <gridsquare>${escXml(grid)}</gridsquare>\n`
+      + adifField('state', state)
+      + adifField('cnty', county)
+      + adifField('country', country)
+      + adifField('name', name)
+      + adifField('sig', sig)
+      + adifField('sig_info', sigInfo)
+      + adifField('pota_ref', potaRef)
+      + adifField('sota_ref', sotaRef)
+      + adifField('wwff_ref', wwffRef)
+      + adifField('tx_pwr', txPower)
+      + adifField('station_callsign', stationCallsign)
+      + adifField('my_gridsquare', myGridsquare)
+      + adifField('my_sig', mySig)
+      + adifField('my_sig_info', mySigInfo)
       + `  <comment>${escXml(comment)}</comment>\n`
       + `</contactinfo>\n`;
 
