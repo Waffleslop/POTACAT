@@ -1,5 +1,35 @@
 // ECHOCAT — Phone-side client
 // Runs in Safari/Chrome, no Electron dependencies
+
+// Top-level error trap — paints any uncaught error or rejected promise
+// onto the page in a fixed banner so users don't need DevTools to
+// diagnose a broken renderer (KK4DF / KM4CFT / "table won't load"
+// reports on v1.5.7 came in with no actionable info because the IIFE
+// threw silently and the page rendered partially).
+(function installErrorBanner() {
+  function show(msg, src) {
+    try {
+      let el = document.getElementById('echocat-fatal-banner');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'echocat-fatal-banner';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e94560;color:#fff;padding:8px 12px;font:12px/1.4 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #fff;';
+        if (document.body) document.body.appendChild(el);
+        else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(el));
+      }
+      el.textContent = `ECHOCAT JS error — ${src}\n${msg}\n(reload to retry; report this text to casey@potacat.com)`;
+    } catch (_) { /* don't recurse */ }
+  }
+  window.addEventListener('error', (e) => {
+    show((e.error && (e.error.stack || e.error.message)) || e.message || 'unknown',
+         (e.filename || '') + ':' + (e.lineno || '?'));
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e.reason || {};
+    show(r.stack || r.message || String(r), 'unhandledrejection');
+  });
+})();
+
 (function () {
   'use strict';
 
