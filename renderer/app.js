@@ -10948,9 +10948,20 @@ catLogClearBtn.addEventListener('click', () => {
   }
 
   async function startBugReport() {
-    // 1. Enable verbose logging in settings if not already
+    // Snapshot the pre-flow state so we can restore it on dismiss. The
+    // user expects "Report a Bug" to be a one-shot diagnostic — if they
+    // had Verbose Log off before, they want it off after, and the toggle
+    // button hidden again. Without this, every bug report leaves the
+    // user staring at a Verbose Log button they didn't ask for and don't
+    // know how to remove. (Casey report 2026-04-28.)
     const s = await window.api.getSettings();
-    if (!s.verboseLog) {
+    const priorVerboseLog = !!s.verboseLog;
+    const priorLogPanelHidden = catLogPanel.classList.contains('hidden');
+    let weEnabledVerbose = false;
+
+    // 1. Enable verbose logging in settings if not already
+    if (!priorVerboseLog) {
+      weEnabledVerbose = true;
       await window.api.saveSettings({ verboseLog: true });
       // Re-sync local UI state — show the Verbose Log toggle button
       if (setVerboseLog) setVerboseLog.checked = true;
@@ -10959,7 +10970,7 @@ catLogClearBtn.addEventListener('click', () => {
     // 2. Show the log panel + clear existing lines
     catLogLines.length = 0;
     catLogOutput.value = '';
-    if (catLogPanel.classList.contains('hidden')) {
+    if (priorLogPanelHidden) {
       catLogPanel.classList.remove('hidden');
       catLogToggleBtn.classList.add('active');
       document.body.classList.add('cat-log-open');
@@ -10984,7 +10995,57 @@ catLogClearBtn.addEventListener('click', () => {
       `<button type="button" id="bug-report-copy" style="${btnBase}background:#fff;color:#c24150;border:none;font-weight:700;">Copy Report</button>`,
       `<button type="button" id="bug-report-cancel" style="${btnBase}background:transparent;color:#fff;border:1px solid #fff;">Cancel</button>`,
     ].join('');
-    banner.querySelector('#bug-report-cancel').onclick = () => banner.remove();
+
+    // Push page content down so the menu bar isn't covered by the banner.
+    // Use a ResizeObserver because the banner can wrap to two/three lines
+    // on narrow windows — a fixed padding value would either over- or
+    // under-shoot. (Casey report 2026-04-28: banner overlays the Table
+    // View menu and makes the page hard to navigate.)
+    const applyBannerOffset = () => {
+      if (banner && banner.isConnected) {
+        document.body.style.paddingTop = banner.offsetHeight + 'px';
+      } else {
+        document.body.style.paddingTop = '';
+      }
+    };
+    let bannerRO = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      bannerRO = new ResizeObserver(applyBannerOffset);
+      bannerRO.observe(banner);
+    }
+    applyBannerOffset();
+
+    let dismissed = false;
+    let autoDismissTimer = null;
+    async function dismissBanner() {
+      if (dismissed) return;
+      dismissed = true;
+      if (autoDismissTimer) { clearTimeout(autoDismissTimer); autoDismissTimer = null; }
+      if (bannerRO) { try { bannerRO.disconnect(); } catch {} bannerRO = null; }
+      banner.remove();
+      document.body.style.paddingTop = '';
+
+      // Restore prior verbose-log state — but only if WE turned it on AND
+      // it's still on (don't undo a user who manually toggled it off
+      // mid-flow). Same defensive read for the panel.
+      if (weEnabledVerbose) {
+        try {
+          const cur = await window.api.getSettings();
+          if (cur.verboseLog === true) {
+            await window.api.saveSettings({ verboseLog: false });
+            if (setVerboseLog) setVerboseLog.checked = false;
+            if (catLogToggleBtn) catLogToggleBtn.classList.add('hidden');
+          }
+        } catch {}
+      }
+      if (priorLogPanelHidden && !catLogPanel.classList.contains('hidden')) {
+        catLogPanel.classList.add('hidden');
+        if (catLogToggleBtn) catLogToggleBtn.classList.remove('active');
+        document.body.classList.remove('cat-log-open');
+      }
+    }
+
+    banner.querySelector('#bug-report-cancel').onclick = dismissBanner;
     banner.querySelector('#bug-report-copy').onclick = async () => {
       const report = await buildReport();
       // Use main-process clipboard via IPC — navigator.clipboard.writeText
@@ -11002,9 +11063,10 @@ catLogClearBtn.addEventListener('click', () => {
       banner.innerHTML = copied
         ? '<strong>✅ Copied to clipboard.</strong><span style="flex:1">Paste it into Discord #bug-report. Fill in the "What I tried" and "What happened" sections before sending.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>'
         : '<strong>⚠ Clipboard write failed.</strong><span style="flex:1">The report is shown in the log below — select all, copy manually, paste in Discord.</span><button type="button" id="bug-report-close" style="background:transparent;color:#fff;border:1px solid #fff;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;">Close</button>';
-      banner.querySelector('#bug-report-close').onclick = () => banner.remove();
+      banner.querySelector('#bug-report-close').onclick = dismissBanner;
+      applyBannerOffset();
       // Auto-dismiss after 20 s so the banner doesn't linger forever
-      setTimeout(() => banner.remove(), 20000);
+      autoDismissTimer = setTimeout(dismissBanner, 20000);
     };
   }
 
