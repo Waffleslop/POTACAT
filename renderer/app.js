@@ -14429,6 +14429,7 @@ async function showPastActivations() {
       detail.innerHTML = `
         <div class="activator-history-actions">
           <button class="act-hist-export-btn" title="Export this activation as ADIF">Export ADIF</button>
+          <button class="act-hist-pota-upload-btn" title="Save ADIF and open POTA.app upload page">Upload to POTA.app</button>
           <button class="act-hist-map-btn" title="Show contacts on map">Map</button>
           <button class="act-hist-share-btn" title="Save map as shareable image">Share Image</button>
           <button class="act-hist-delete-btn" title="Delete this activation">Delete</button>
@@ -14454,6 +14455,13 @@ async function showPastActivations() {
       detail.querySelector('.act-hist-export-btn').addEventListener('click', (e) => {
         e.stopPropagation();
         exportPastActivation(act);
+      });
+      // Upload to POTA.app button — saves ADIF to a known location, opens
+      // pota.app's upload page, and reveals the file in the OS file
+      // manager so the user can drag-drop it onto the upload UI.
+      detail.querySelector('.act-hist-pota-upload-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        uploadPastActivationToPota(act);
       });
       // Map button
       detail.querySelector('.act-hist-map-btn').addEventListener('click', (e) => {
@@ -14491,9 +14499,10 @@ async function showPastActivations() {
   }
 }
 
-/** Export a past activation's QSOs as ADIF */
-async function exportPastActivation(act) {
-  const qsos = act.contacts.map(c => ({
+/** Build the ADIF-shaped QSO list for one of `getPastActivations()`'s entries.
+ *  Shared between the "Export ADIF" and "Upload to POTA.app" paths. */
+function buildActivationAdifQsos(act) {
+  return act.contacts.map(c => ({
     callsign: c.callsign,
     frequency: c.freq ? String(Math.round(parseFloat(c.freq) * 1000)) : '',
     mode: c.mode || '',
@@ -14511,6 +14520,11 @@ async function exportPastActivation(act) {
     sigInfo: c.sigInfo || '',
     myGridsquare: c.myGridsquare || '',
   }));
+}
+
+/** Export a past activation's QSOs as ADIF */
+async function exportPastActivation(act) {
+  const qsos = buildActivationAdifQsos(act);
   try {
     const result = await window.api.exportActivationAdif({ qsos, parkRef: act.parkRef, myCallsign: myCallsign || '' });
     if (result && result.success) {
@@ -14518,6 +14532,39 @@ async function exportPastActivation(act) {
     }
   } catch (err) {
     console.error('[Activator] Export failed:', err);
+  }
+}
+
+/** One-click upload to POTA.app: writes ADIF to a known POTACAT folder,
+ *  opens pota.app's upload page in the user's browser, and reveals the
+ *  file in Explorer/Finder so the user can drag-drop it on the page.
+ *  Until POTA v3 ships real API keys, this is the sanctioned upload path
+ *  (per Dan WD4DAN, who's on the POTA dev team — current API is private).
+ */
+async function uploadPastActivationToPota(act) {
+  const qsos = buildActivationAdifQsos(act);
+  if (!qsos.length) {
+    showLogToast('No QSOs in this activation', { warn: true });
+    return;
+  }
+  try {
+    const result = await window.api.uploadActivationToPota({
+      qsos, parkRef: act.parkRef, myCallsign: myCallsign || '',
+    });
+    if (result && result.success) {
+      // POTACAT just opened: (1) the upload page in the browser, and
+      // (2) the OS file manager pointed at the ADIF. Tell the user
+      // the simple drag-drop step that completes the workflow.
+      showLogToast(
+        `${result.qsoCount} QSOs ready — drag ${result.fileName} onto the POTA.app upload page`,
+        { duration: 8000 }
+      );
+    } else {
+      showLogToast('Upload prep failed: ' + (result?.error || 'unknown'), { warn: true });
+    }
+  } catch (err) {
+    console.error('[Activator] POTA upload failed:', err);
+    showLogToast('Upload prep failed: ' + err.message, { warn: true });
   }
 }
 

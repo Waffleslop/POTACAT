@@ -12392,6 +12392,39 @@ app.whenReady().then(() => {
     }
   });
 
+  // One-click "Upload to POTA.app": writes the activation ADIF to a known
+  // userData path, reveals the file in the OS file manager, and opens
+  // pota.app's upload page in the user's browser. The user drags the file
+  // from the file manager onto the upload page. We deliberately don't try
+  // to POST the ADIF to pota.app's API — that endpoint is IAM-authorized
+  // (SigV4) on a deliberately-private API (per WD4DAN, who's on the POTA
+  // dev team), and v3 will ship real API keys "next year-ish". Until then
+  // this manual-but-streamlined flow is the only sanctioned path.
+  ipcMain.handle('upload-activation-to-pota', async (_e, data) => {
+    const { writeActivationAdifRaw } = require('./lib/adif-writer');
+    const { qsos, parkRef, myCallsign: activatorCall } = data || {};
+    if (!qsos || !qsos.length) return { success: false, error: 'No contacts to upload' };
+    try {
+      const dir = path.join(app.getPath('userData'), 'pota-uploads');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const safeCall = (activatorCall || 'POTACAT').replace(/[^A-Za-z0-9_-]/g, '_');
+      const safeRef = (parkRef || 'PARK').replace(/[^A-Za-z0-9_-]/g, '_');
+      const fileName = `${safeCall}@${safeRef}-${dateStr}.adi`;
+      const filePath = path.join(dir, fileName);
+      writeActivationAdifRaw(filePath, qsos);
+      // Reveal the file in Explorer/Finder so the user can drag-drop it
+      // onto the upload page. Then open the upload page itself.
+      const { shell } = require('electron');
+      try { shell.showItemInFolder(filePath); } catch {}
+      try { shell.openExternal('https://pota.app/#/upload'); } catch {}
+      return { success: true, path: filePath, fileName, qsoCount: qsos.length };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('export-activation-adif-perpark', async (event, data) => {
     const { writeActivationAdifRaw } = require('./lib/adif-writer');
     const { qsosByPark, myCallsign: activatorCall } = data;
