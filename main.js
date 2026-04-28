@@ -6708,6 +6708,37 @@ function loadLocalWorkedParks() {
   return [];
 }
 
+// Walk the user's main ADIF log and pull every POTA reference out. Used
+// to seed workedParks from imported logs (N3FJP/HRD/HAMRS/etc.) without
+// needing pota.app's CSV download — that endpoint is IAM-authorized via
+// SigV4 and POTACAT's Cognito JWT can't hit it. The local log is the
+// authoritative source anyway: any QSO the user has logged is a park
+// they've worked, regardless of whether pota.app has ingested the QSO yet.
+//
+// Scans both standard ADIF (SIG=POTA + SIG_INFO=<ref>) and the de-facto
+// POTA_REF custom field that most major loggers also write. Comma-or-
+// space-separated refs (n-fers) are split into individual references.
+function harvestParksFromLog(logPath) {
+  try {
+    if (!logPath || !fs.existsSync(logPath)) return [];
+    const qsos = parseAllRawQsos(logPath);
+    const refs = new Set();
+    for (const q of qsos) {
+      const potaRef = (q.POTA_REF || '').trim().toUpperCase();
+      if (potaRef) for (const r of potaRef.split(/[,\s]+/)) if (r) refs.add(r);
+      const sig = (q.SIG || '').trim().toUpperCase();
+      const sigInfo = (q.SIG_INFO || '').trim().toUpperCase();
+      if (sig === 'POTA' && sigInfo) {
+        for (const r of sigInfo.split(/[,\s]+/)) if (r) refs.add(r);
+      }
+    }
+    return [...refs];
+  } catch (err) {
+    console.error('harvestParksFromLog failed:', err.message);
+    return [];
+  }
+}
+
 function saveLocalWorkedPark(ref) {
   try {
     const existing = loadLocalWorkedParks();
@@ -6738,6 +6769,22 @@ function loadWorkedParks() {
       workedParks.set(ref, { reference: ref });
     }
   }
+  // Merge in parks harvested from the user's main QSO log file. This is
+  // how imported logs (N3FJP/HRD/HAMRS/etc., 12k+ QSOs in some cases)
+  // get their park refs into workedParks without depending on pota.app's
+  // IAM-authorized CSV endpoint. The harvest runs once per call here; the
+  // file walk on a 13k-record log takes ~200-500ms so we keep this
+  // out of the hot path and just rely on the in-memory Map afterward.
+  const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  const harvested = harvestParksFromLog(logPath);
+  let added = 0;
+  for (const ref of harvested) {
+    if (!workedParks.has(ref)) {
+      workedParks.set(ref, { reference: ref });
+      added++;
+    }
+  }
+  if (added > 0) sendCatLog(`[worked-parks] harvested ${added} new refs from QSO log`);
   if (win && !win.isDestroyed()) {
     win.webContents.send('worked-parks', [...workedParks.entries()]);
   }
@@ -11353,6 +11400,11 @@ app.whenReady().then(() => {
 
     // Reload worked callsigns from updated log and push to renderer
     loadWorkedQsos();
+    // Re-harvest parks from the now-larger log so imported QSOs' park
+    // refs flow into workedParks for new-park / hide-worked-parks
+    // detection — without this, freshly imported logs wouldn't influence
+    // the spots view until next app start.
+    loadWorkedParks();
     // Scan imported QSOs for event matches
     scanLogForEvents();
 
