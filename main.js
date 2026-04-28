@@ -8322,13 +8322,22 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       // Tell renderer to start RX audio capture
       if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
     }
-    // Override mode to the radio's DATA sideband — FreeDV transmits via
-    // the USB CODEC, so the radio needs DATA-USB / DATA-LSB to route audio
-    // from the codec instead of the mic. DATA-LSB on the low bands (40m
-    // and below), DATA-USB above. Matches the FreeDV app's own behavior
-    // (IU7RAL report). The codec layer maps DIGU/DIGL to PKTUSB/PKTLSB on
-    // rigctld and uses model.digiMd overrides on direct-serial rigs.
-    mode = freqHz < 10_000_000 ? 'DIGL' : 'DIGU';
+    // Override mode for the radio. Default: DATA sideband (DIGU/DIGL,
+    // mapped to PKTUSB/PKTLSB on rigctld). FreeDV transmits via the USB
+    // CODEC, so most rigs need DATA mode to route audio from the codec
+    // instead of the mic (FT-991A, FT-710, IC-7300, etc.).
+    //
+    // Some older rigs (FTDX3000, others) cap DATA-mode IF bandwidth at
+    // 2.4 kHz, which clips FreeDV / FT8 audio (~3 kHz needed). For those,
+    // setting freedvUseDataMode=false in Settings keeps the radio in
+    // plain USB/LSB where the bandwidth is wider — the operator routes
+    // audio at the radio's mic-vs-USB level. (AB9AI report on FTDX3000.)
+    const useData = settings.freedvUseDataMode !== false; // default true
+    if (useData) {
+      mode = freqHz < 10_000_000 ? 'DIGL' : 'DIGU';
+    } else {
+      mode = freqHz < 10_000_000 ? 'LSB' : 'USB';
+    }
   } else if (!isFreedvMode && freedvEngine) {
     // Tuned away from FreeDV — stop the engine
     sendCatLog('[FreeDV] Auto-stopped (tuned to non-FreeDV mode)');

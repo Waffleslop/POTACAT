@@ -8251,6 +8251,7 @@ async function openSettingsDialog(tab) {
   document.getElementById('set-split-orientation').value = s.splitOrientation || 'horizontal';
   setEnableDxcc.checked = s.enableDxcc === true;
   setEnableFreedv.checked = s.enableFreedv === true;
+  document.getElementById('set-freedv-use-data-mode').checked = s.freedvUseDataMode !== false; // default true
   document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
   document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
   document.getElementById('set-enable-idle-pause').checked = s.enableIdlePause !== false;
@@ -8502,6 +8503,7 @@ settingsSave.addEventListener('click', async () => {
   const splitOrientationVal = document.getElementById('set-split-orientation').value;
   const dxccEnabled = setEnableDxcc.checked;
   const freedvEnabled = setEnableFreedv.checked;
+  const freedvUseDataModeVal = document.getElementById('set-freedv-use-data-mode').checked;
   const sotaUploadEnabled = setSotaUpload.checked;
   const sotaUsernameVal = setSotaUsername.value.trim();
   const sotaPasswordVal = setSotaPassword.value;
@@ -8647,6 +8649,7 @@ settingsSave.addEventListener('click', async () => {
     splitOrientation: splitOrientationVal,
     enableDxcc: dxccEnabled,
     enableFreedv: freedvEnabled,
+    freedvUseDataMode: freedvUseDataModeVal,
     enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
     autoSstvInactivityMin: parseInt(document.getElementById('set-auto-sstv-min').value) || 90,
     enableIdlePause: document.getElementById('set-enable-idle-pause').checked,

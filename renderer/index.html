@@ -1022,6 +1022,8 @@
       </label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-freedv"> FreeDV Digital Voice</label>
       <span class="help-text" style="margin-left:12px;display:block;">Enables FreeDV digital voice. Click a FreeDV spot to auto-decode; PTT encodes FreeDV. No extra setup — works over any SSB radio's USB audio.</span>
+      <label class="checkbox-label" style="margin-left:12px;"><input type="checkbox" id="set-freedv-use-data-mode" checked> Switch radio to DATA mode (DIGU/DIGL) for FreeDV</label>
+      <span class="help-text" style="margin-left:24px;display:block;">Uncheck for older Yaesu rigs (FTDX3000, FT-450, etc.) where DATA mode caps IF bandwidth at 2.4 kHz — FreeDV needs ~3 kHz. Off keeps the radio in plain USB/LSB; route USB CODEC audio at the rig.</span>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> Auto-SSTV on idle</label>
       <span class="help-text" style="margin-left:12px;display:block;">
         When idle, automatically opens SSTV and decodes on 20m (day) or 40m (night) based on your grid square.
