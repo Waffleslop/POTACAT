@@ -6340,12 +6340,39 @@
 
   // Unlock AudioContext on first user interaction (Chromium autoplay policy)
   var cwAudioUnlocked = false;
+
+  // iOS Safari (and to a lesser extent Android Chrome) takes 1-3 seconds
+  // after AudioContext.resume() before the audio thread is actually
+  // producing samples. Events scheduled inside that warmup window are
+  // silently dropped, so the first part of any oscillator-based sidetone
+  // (CW macro, paddle) gets eaten — KM4CFT on v1.5.8 reported ~3s of
+  // silence before sidetone begins, with a "click" right before. The
+  // standard iOS unlock trick is to schedule a 1-sample silent
+  // buffer-source play immediately after creating/resuming — it forces
+  // the audio thread to actually spin up so the next real schedule is
+  // on a warm engine.
+  function primeCwAudio() {
+    if (!cwAudioCtx) return;
+    try {
+      var buf = cwAudioCtx.createBuffer(1, 1, cwAudioCtx.sampleRate);
+      var src = cwAudioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(cwAudioCtx.destination);
+      src.start(0);
+    } catch (e) { /* nothing more we can do */ }
+  }
+
   function ensureCwAudioCtx() {
     if (!cwAudioCtx) {
       cwAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      primeCwAudio();
     }
     if (cwAudioCtx.state === 'suspended') {
-      cwAudioCtx.resume();
+      // resume() is async on Safari — fire-and-forget is fine because the
+      // prime below kicks the engine awake regardless of when the promise
+      // settles.
+      try { cwAudioCtx.resume(); } catch (e) {}
+      primeCwAudio();
     }
     return cwAudioCtx;
   }
