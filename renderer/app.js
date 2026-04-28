@@ -3973,6 +3973,16 @@ function getFiltered() {
   return allSpots.filter((s) => {
     // Net spots always pass through all filters
     if (s.source === 'net') return true;
+    // Pinned spot — the user clicked this row to tune to it. Keep it
+    // visible regardless of age, source toggles, band/mode/region filters,
+    // hide-worked, etc. They're working it, possibly a weak station that
+    // pota.app's spotters can't hear — so the spot will time out from the
+    // upstream feed long before the QSO is logged. (N5SKT report: tuned
+    // spots disappearing mid-QSO forced manual log entry.) The pin clears
+    // automatically when the user clicks a different spot or logs the QSO.
+    if (lastTunedSpot &&
+        s.callsign === lastTunedSpot.callsign &&
+        s.frequency === lastTunedSpot.frequency) return true;
     const sourceOff =
       (s.source === 'pota' && !enablePota) ||
       (s.source === 'sota' && !enableSota) ||
@@ -5276,9 +5286,10 @@ document.addEventListener('keydown', (e) => {
     window.api.tune(spot.frequency, spot.mode, spot.bearing);
     if (spot.lat != null && spot.lon != null) showTuneArc(spot.lat, spot.lon, spot.frequency, spot.source);
     render();
-    // Scroll the tuned row into view
+    // Scroll the tuned row to the center of the table viewport so the user
+    // doesn't have to hunt for it as new spots reflow above/below. (N5SKT.)
     const onFreqRow = tbody.querySelector('.on-freq');
-    if (onFreqRow) onFreqRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (onFreqRow) onFreqRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
   // Enter — tune to selected spot (same as clicking the row)
@@ -5823,7 +5834,7 @@ if (window.api.onBandspreadTunedSpot) {
     if (typeof prefillDxCommand === 'function') prefillDxCommand(match);
     render();
     const onFreqRow = tbody && tbody.querySelector('.on-freq');
-    if (onFreqRow) onFreqRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (onFreqRow) onFreqRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
   });
 }
 
@@ -6723,6 +6734,23 @@ function render() {
     if (scanning) {
       const highlighted = tbody.querySelector('.scan-highlight');
       if (highlighted) highlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    // Tuned-spot keep-in-view: if the user has a pinned spot and a render
+    // would have pushed it off-screen (new spots arriving + sort reflow),
+    // pull it back to center. Only fires when the row is actually
+    // off-screen so we don't fight a user who's scrolling around to look
+    // at other spots. (N5SKT request — second half of "keep it centered".)
+    if (!scanning && lastTunedSpot) {
+      const tunedRow = tbody.querySelector('tr.on-freq');
+      if (tunedRow) {
+        const scroller = tbody.parentElement;
+        if (scroller) {
+          const rRect = tunedRow.getBoundingClientRect();
+          const sRect = scroller.getBoundingClientRect();
+          const offscreen = rRect.bottom <= sRect.top || rRect.top >= sRect.bottom;
+          if (offscreen) tunedRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      }
     }
 
     // Update sort indicators
