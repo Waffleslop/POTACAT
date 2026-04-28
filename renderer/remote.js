@@ -6362,10 +6362,37 @@
     } catch (e) { /* nothing more we can do */ }
   }
 
+  // Perpetual silent anchor — a zero-gain oscillator that runs forever
+  // (until tab close) to keep the audio thread from going to sleep
+  // between bursts of activity. The 1-sample prime above wakes the
+  // engine but iOS will doze it again after ~30s of silence; for paddle
+  // keying that meant the FIRST dit after a quiet pause hit the cold-
+  // start window all over again (KM4CFT: macros work, TinyMIDI paddle
+  // has a pause before sidetone — the macro's multi-second sequence
+  // keeps the engine awake, a single brief dit doesn't). Connecting a
+  // continuously-running oscillator at gain 0 prevents the doze
+  // entirely, so every paddle event lands on a fully-warm engine.
+  // Battery cost is negligible (gain 0 = no actual audio output).
+  var cwAnchorOsc = null;
+  function ensureCwAnchor() {
+    if (!cwAudioCtx || cwAnchorOsc) return;
+    try {
+      var osc = cwAudioCtx.createOscillator();
+      osc.frequency.value = 1;        // anything; gain is 0 so it's silent
+      var g = cwAudioCtx.createGain();
+      g.gain.value = 0;
+      osc.connect(g);
+      g.connect(cwAudioCtx.destination);
+      osc.start();
+      cwAnchorOsc = osc;
+    } catch (e) { /* skip on platforms that refuse */ }
+  }
+
   function ensureCwAudioCtx() {
     if (!cwAudioCtx) {
       cwAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       primeCwAudio();
+      ensureCwAnchor();
     }
     if (cwAudioCtx.state === 'suspended') {
       // resume() is async on Safari — fire-and-forget is fine because the
@@ -6373,6 +6400,7 @@
       // settles.
       try { cwAudioCtx.resume(); } catch (e) {}
       primeCwAudio();
+      ensureCwAnchor(); // re-arm in case the anchor was torn down on suspend
     }
     return cwAudioCtx;
   }
