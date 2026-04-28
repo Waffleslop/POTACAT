@@ -511,6 +511,8 @@ const setRigPortManual = document.getElementById('set-rig-port-manual');
 const setRigBaud = document.getElementById('set-rig-baud');
 const setRigDtrOff = document.getElementById('set-rig-dtr-off');
 const setRigctldPort = document.getElementById('set-rigctld-port');
+const setRigPttPort = document.getElementById('set-rig-ptt-port');
+const setRigPttPortManual = document.getElementById('set-rig-ptt-port-manual');
 const setRigSearch = document.getElementById('set-rig-search');
 const hamlibTestBtn = document.getElementById('hamlib-test-btn');
 const hamlibTestResult = document.getElementById('hamlib-test-result');
@@ -1127,6 +1129,24 @@ async function loadPrefs() {
     const verLabel = document.getElementById('settings-version-label');
     if (verLabel) verLabel.textContent = 'v' + settings.appVersion;
   }
+  // Meter-box visibility is mirrored to settings.json so it survives
+  // localStorage resets across app updates. Reconcile here at startup —
+  // settings.json wins when present (durable on disk in userData), so a
+  // user who unchecked Show S-Meter / SWR doesn't see it pop back on
+  // first open after an installer update. Without this, the var is
+  // already set to its localStorage default before settings.json was
+  // even read. (bjh report on v1.5.7 — earlier 5230570 fix only
+  // reconciled inside openSettingsDialog, which the user never opened.)
+  if (typeof settings.showMeterBox === 'boolean') {
+    meterBoxVisible = settings.showMeterBox;
+    try { localStorage.setItem('meterBoxVisible', meterBoxVisible); } catch {}
+    if (typeof meterBox !== 'undefined' && meterBox) {
+      meterBox.classList.toggle('hidden', !meterBoxVisible);
+    }
+    if (typeof quickShowMeter !== 'undefined' && quickShowMeter) {
+      quickShowMeter.checked = meterBoxVisible;
+    }
+  }
   applyTheme(settings.lightMode === true);
   applyColorblindMode(settings.colorblindMode === true);
   applyWcagMode(settings.wcagMode === true);
@@ -1465,6 +1485,27 @@ async function populateHamlibFields(savedTarget) {
 
   // Restore rigctld port
   setRigctldPort.value = (savedTarget && savedTarget.rigctldPort) || 4532;
+
+  // Populate PTT-port dropdown with the same serial-port list, plus restore
+  // any saved value. If the saved port isn't enumerated (radio unplugged),
+  // fall back to the manual text field so users don't lose their setting.
+  if (setRigPttPort) {
+    setRigPttPort.innerHTML = '<option value="">-- none (PTT via CAT) --</option>';
+    // Reuse the port list already fetched above for the CAT serial dropdown.
+    for (const p of ports) {
+      const opt = document.createElement('option');
+      opt.value = p.path;
+      opt.textContent = `${p.path} — ${p.friendlyName}`;
+      if (savedTarget && savedTarget.pttPort === p.path) opt.selected = true;
+      setRigPttPort.appendChild(opt);
+    }
+    const savedPtt = savedTarget && savedTarget.pttPort;
+    if (savedPtt && !detectedPaths.has(savedPtt) && setRigPttPortManual) {
+      setRigPttPortManual.value = savedPtt;
+    } else if (setRigPttPortManual) {
+      setRigPttPortManual.value = '';
+    }
+  }
 }
 
 let icomPortsLoaded = false;
@@ -1730,6 +1771,10 @@ function buildCatTargetFromForm() {
       civModel: modelSelect.options[modelSelect.selectedIndex].text,
     };
   } else if (radioType === 'hamlib') {
+    // PTT Port: dropdown selection wins, fall back to manual text. Empty
+    // string means "no separate PTT port — let rigctld PTT via CAT".
+    const pttManual = (setRigPttPortManual && setRigPttPortManual.value || '').trim();
+    const pttPort = pttManual || (setRigPttPort && setRigPttPort.value) || '';
     return {
       type: 'rigctld',
       rigId: parseInt(setRigModel.value, 10),
@@ -1737,6 +1782,7 @@ function buildCatTargetFromForm() {
       baudRate: parseInt(setRigBaud.value, 10) || 9600,
       dtrOff: setRigDtrOff.checked,
       rigctldPort: parseInt(setRigctldPort.value, 10) || 4532,
+      pttPort: pttPort || undefined,
     };
   } else if (radioType === 'rigctldnet') {
     return {

@@ -505,6 +505,17 @@ function spawnRigctld(target, portOverride) {
       '-s', String(target.baudRate || 9600),
       '-t', port,
     ];
+    // Separate PTT port (DigiRig / SignaLink / etc.) — when configured we
+    // tell rigctld to drive PTT via DTR on the supplied serial port instead
+    // of the rig's own CAT command. Required for older rigs whose CAT PTT
+    // doesn't switch the audio path to the USB CODEC, but whose USB-audio
+    // adapter has a separate DTR-keyed PTT line. (N4RDX on IC-706MKIIG +
+    // DigiRig — TX worked in WSJT-X but not POTACAT because POTACAT was
+    // PTT'ing via CAT only.)
+    if (target.pttPort) {
+      args.push('--ptt-type=DTR');
+      args.push('--ptt-file=' + target.pttPort);
+    }
     if (target.dtrOff) args.push('--set-conf=dtr_state=OFF,rts_state=OFF');
     if (target.verbose) args.push('-vvvv');
 

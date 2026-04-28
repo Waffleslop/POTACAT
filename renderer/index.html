@@ -1207,6 +1207,13 @@
             <input type="number" id="set-rigctld-port" min="1024" max="65535" value="4532" style="width:80px;">
           </label>
           <span class="help-text" style="margin-top:2px;display:block;">Default 4532. Change if another app is using that port.</span>
+          <label style="margin-top:6px;display:block;">PTT Port (optional):
+            <div style="display:flex;gap:6px;margin-top:4px;">
+              <select id="set-rig-ptt-port" style="flex:1;"><option value="">-- none (PTT via CAT) --</option></select>
+              <input type="text" id="set-rig-ptt-port-manual" placeholder="or type COM port" style="width:120px;">
+            </div>
+          </label>
+          <span class="help-text" style="margin-top:2px;display:block;">For DigiRig / SignaLink / similar interfaces that key PTT via DTR on a separate USB-serial port. Leave blank for rigs that PTT over CAT (most modern Yaesu / Icom radios).</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="hamlib-test-btn">Test Connection</button>
             <span id="hamlib-test-result" style="font-size:12px;"></span>
