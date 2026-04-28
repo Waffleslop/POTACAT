@@ -8691,44 +8691,32 @@ app.whenReady().then(() => {
     cloudIpc.startBackgroundSync();
   }
 
-  // --- POTA.app Sync (parks-worked CSV auto-import) ---
+  // --- POTA.app Profile (display-only; no CSV sync) ---
+  // The previous CSV-pull design depended on an IAM-authorized endpoint
+  // that POTACAT's Cognito User Pool JWT can't reach. The worked-parks
+  // list is now harvested directly from the user's own ADIF log
+  // (loadWorkedParks → harvestParksFromLog), so this module exists
+  // solely to surface the user's pota.app profile counts (parks
+  // hunted/activated, QSOs, awards, endorsements). No scheduler, no
+  // QSO-debounced auto-pull. Sign-in only fires when the user clicks
+  // Connect; refresh only when they click Refresh.
   potaSync = new PotaSync({
     settings,
     onSettingsChange: async () => { saveSettings(settings); },
-    onParksUpdated: (parks) => {
-      // Merge the freshly-pulled CSV into the existing workedParks Map and
-      // re-add locally-logged entries that the pota.app CSV doesn't know
-      // about yet. Mirrors the merge path in loadWorkedParks().
-      for (const [ref, info] of parks.entries()) workedParks.set(ref, info);
-      try {
-        const localParks = loadLocalWorkedParks();
-        for (const ref of localParks) {
-          if (!workedParks.has(ref)) workedParks.set(ref, { reference: ref });
-        }
-      } catch {}
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('worked-parks', [...workedParks.entries()]);
-      }
-      if (remoteServer && remoteServer.running) {
-        remoteServer.sendWorkedParks([...workedParks.keys()]);
-      }
-    },
     logger: (msg) => { try { sendCatLog('[pota-sync] ' + msg); } catch { console.log('[pota-sync]', msg); } },
   });
   potaSync.on('status', (s) => {
     if (win && !win.isDestroyed()) win.webContents.send('pota-sync-status', s);
   });
-  // Resume scheduler if previously enabled
-  if (settings.potaSync && settings.potaSync.enabled && settings.potaSync.connectedAt) {
-    potaSync.start();
-  }
 
   ipcMain.handle('pota-sync-status', () => potaSync.status());
   ipcMain.handle('pota-sync-connect', async () => potaSync.connect());
   ipcMain.handle('pota-sync-disconnect', async () => { await potaSync.disconnect(); return potaSync.status(); });
   ipcMain.handle('pota-sync-now', async () => potaSync.pull());
-  ipcMain.handle('pota-sync-set-enabled', async (_e, v) => { await potaSync.setEnabled(!!v); return potaSync.status(); });
-  ipcMain.handle('pota-sync-set-interval', async (_e, v) => { await potaSync.setIntervalMin(v); return potaSync.status(); });
+  // Kept as no-op compatibility shims — old preload still wires them, and
+  // a stale renderer build calling them shouldn't error.
+  ipcMain.handle('pota-sync-set-enabled', async () => potaSync.status());
+  ipcMain.handle('pota-sync-set-interval', async () => potaSync.status());
 
   // Spot history (per-callsign list of recent prior spots) for the ⓘ popover
   // on the desktop spots table. All sources are served from local rolling

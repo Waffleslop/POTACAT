@@ -1,9 +1,10 @@
-// POTA.app Sync — Settings tab UI + status-bar pill.
+// POTA.app Profile — Settings tab UI.
 //
-// Mirrors the Cloud-Sync UI pattern (settings persisted via IPC; status pushed
-// from main on every pull/toggle). Gated on an active POTACAT Cloud
-// subscription — the Connect button disables with an explanatory message when
-// the user isn't subscribed.
+// Reduced from the old "auto-sync the parks-worked CSV" feature to just
+// signing in and displaying the user's pota.app activator/hunter counts.
+// The actual worked-parks list is now built from the local QSO log
+// (lib/pota-sync.js comment for the long story). No scheduler, no
+// auto-pull, no error nag — just a sign-in + Refresh.
 (function () {
   'use strict';
 
@@ -11,35 +12,25 @@
   if (!connectBtn) return; // settings tab isn't in the DOM — nothing to wire
 
   const disconnectBtn = document.getElementById('pota-sync-disconnect');
-  const enabledCheck = document.getElementById('pota-sync-enabled');
-  const intervalSel = document.getElementById('pota-sync-interval');
-  const syncNowBtn = document.getElementById('pota-sync-now');
+  const refreshBtn = document.getElementById('pota-sync-now');
   const disconnectedBlock = document.getElementById('pota-sync-disconnected');
   const connectedBlock = document.getElementById('pota-sync-connected');
-  const controlsBlock = document.getElementById('pota-sync-controls');
   const userSpan = document.getElementById('pota-sync-user');
   const lastSpan = document.getElementById('pota-sync-last');
-  const countSpan = document.getElementById('pota-sync-count');
   const errSpan = document.getElementById('pota-sync-error');
   const gateMsg = document.getElementById('pota-sync-gate-msg');
   const pill = document.getElementById('conn-pota');
-  const pillDot = pill ? pill.querySelector('.conn-dot') : null;
+
+  // Profile-stat fields
+  const hunterParksEl = document.getElementById('pota-sync-hunter-parks');
+  const hunterQsosEl  = document.getElementById('pota-sync-hunter-qsos');
+  const actParksEl    = document.getElementById('pota-sync-act-parks');
+  const actQsosEl     = document.getElementById('pota-sync-act-qsos');
+  const actRunsEl     = document.getElementById('pota-sync-act-runs');
+  const awardsEl      = document.getElementById('pota-sync-awards');
+  const endorsementsEl = document.getElementById('pota-sync-endorsements');
 
   // ── Helpers ──────────────────────────────────────────────────────────────
-  // Returns: 'active' | 'trial' | 'inactive' | 'unknown' (cloud not reachable).
-  // We fail-open on 'unknown' so users can connect even when the cloud module
-  // isn't available (open-source builds) or the user isn't signed in yet.
-  async function getSubState() {
-    try {
-      if (!window.api.cloudGetStatus) return 'unknown';
-      const st = await window.api.cloudGetStatus();
-      const sub = st && st.subscription;
-      if (!sub) return 'unknown';
-      if (sub.status === 'active' || sub.status === 'trial') return sub.status;
-      return 'inactive';
-    } catch { return 'unknown'; }
-  }
-
   function fmtAgo(ts) {
     if (!ts) return 'never';
     const diff = Date.now() - ts;
@@ -49,9 +40,12 @@
     return Math.floor(diff / 86_400_000) + 'd ago';
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
-  let subState = 'unknown'; // 'active' | 'trial' | 'inactive' | 'unknown'
+  function setVal(el, v) {
+    if (!el) return;
+    el.textContent = (v == null) ? '—' : (typeof v === 'number' ? v.toLocaleString() : String(v));
+  }
 
+  // ── Render ───────────────────────────────────────────────────────────────
   function render(st) {
     if (!st) return;
 
@@ -59,12 +53,22 @@
       disconnectedBlock.classList.add('hidden');
       connectedBlock.classList.remove('hidden');
       userSpan.textContent = st.connectedAs || 'POTA.app user';
-      enabledCheck.checked = !!st.enabled;
-      controlsBlock.classList.toggle('hidden', !st.enabled);
-      intervalSel.value = String(st.intervalMin || 60);
-      lastSpan.textContent = fmtAgo(st.lastPullAt);
-      countSpan.textContent = st.lastCount || '—';
+      lastSpan.textContent = fmtAgo(st.lastRefreshAt);
+
+      const p = st.profile || {};
+      const h = p.hunter || {};
+      const a = p.activator || {};
+      setVal(hunterParksEl, h.parks);
+      setVal(hunterQsosEl, h.qsos);
+      setVal(actParksEl, a.parks);
+      setVal(actQsosEl, a.qsos);
+      setVal(actRunsEl, a.activations);
+      setVal(awardsEl, p.awards);
+      setVal(endorsementsEl, p.endorsements);
+
       if (st.lastError) {
+        // Soft error — yellow-ish accent (set in CSS), not red. Worked-parks
+        // detection from the local log keeps working regardless.
         errSpan.textContent = st.lastError;
         errSpan.classList.remove('hidden');
       } else {
@@ -73,43 +77,24 @@
     } else {
       disconnectedBlock.classList.remove('hidden');
       connectedBlock.classList.add('hidden');
-      // Fail-open: button is only hard-disabled when we got a definite
-      // 'inactive' response. 'unknown' leaves it enabled and shows a warning.
-      const hardBlock = subState === 'inactive';
-      connectBtn.disabled = hardBlock;
-      if (hardBlock) {
-        gateMsg.textContent = 'Requires an active POTACAT Cloud subscription.';
-        gateMsg.classList.remove('hidden');
-      } else if (subState === 'unknown') {
-        gateMsg.textContent = 'Cloud subscription could not be verified — you can still try.';
-        gateMsg.classList.remove('hidden');
-      } else {
-        gateMsg.classList.add('hidden');
-      }
+      gateMsg.classList.add('hidden');
     }
 
-    // Status-bar pill
+    // Status-bar pill — only show when connected; tooltip shows last-refresh.
     if (!pill) return;
-    if (st.connected && st.enabled) {
+    if (st.connected) {
       pill.classList.remove('hidden');
       pill.classList.toggle('syncing', !!st.syncing);
-      if (st.lastError) {
-        pill.classList.remove('connected');
-        pill.classList.add('disconnected');
-        pill.title = 'POTA.app: ' + st.lastError;
-      } else {
-        pill.classList.add('connected');
-        pill.classList.remove('disconnected');
-        pill.title = 'POTA.app synced ' + fmtAgo(st.lastPullAt) +
-          (st.lastCount ? ' (' + st.lastCount + ' parks)' : '');
-      }
+      pill.classList.add('connected');
+      pill.classList.remove('disconnected');
+      pill.title = 'POTA.app: ' + (st.connectedAs || 'connected') +
+        ' (refreshed ' + fmtAgo(st.lastRefreshAt) + ')';
     } else {
       pill.classList.add('hidden');
     }
   }
 
   async function refresh() {
-    subState = await getSubState();
     try {
       const st = await window.api.potaSyncStatus();
       render(st);
@@ -120,30 +105,24 @@
 
   // ── Event wiring ─────────────────────────────────────────────────────────
   connectBtn.addEventListener('click', async () => {
-    console.log('[pota-sync-ui] Connect clicked; subState =', subState);
-    if (subState === 'inactive') {
-      alert('POTA.app Sync requires an active POTACAT Cloud subscription.');
-      return;
-    }
     connectBtn.disabled = true;
     const orig = connectBtn.textContent;
     connectBtn.textContent = 'Signing in…';
     try {
       if (!window.api.potaSyncConnect) {
-        alert('POTA.app Sync is unavailable: the desktop IPC method is missing. Please restart POTACAT.');
+        alert('POTA.app sign-in is unavailable: the desktop IPC method is missing. Please restart POTACAT.');
         return;
       }
-      console.log('[pota-sync-ui] Invoking pota-sync-connect …');
       const res = await window.api.potaSyncConnect();
-      console.log('[pota-sync-ui] Connect returned:', res);
       if (!res || !res.ok) {
-        alert('Could not connect to POTA.app: ' + ((res && res.error) || 'sign-in not completed'));
-      } else if (!res.pullOk) {
-        alert('Connected, but initial sync failed: ' + (res.pullError || 'unknown') + '\n\nTry clicking Sync Now after confirming you are signed in.');
+        alert('Could not sign in to POTA.app: ' + ((res && res.error) || 'sign-in not completed'));
       }
+      // We deliberately don't show an alert if profile fetch fails — the
+      // worked-parks list comes from the local log either way, and the
+      // soft error in the panel is enough.
     } catch (err) {
       console.error('[pota-sync-ui] Connect threw:', err);
-      alert('POTA.app connect failed: ' + (err && err.message ? err.message : String(err)));
+      alert('POTA.app sign-in failed: ' + (err && err.message ? err.message : String(err)));
     } finally {
       connectBtn.textContent = orig;
       connectBtn.disabled = false;
@@ -152,46 +131,35 @@
   });
 
   disconnectBtn.addEventListener('click', async () => {
-    if (!confirm('Disconnect POTA.app? You will need to sign in again to resume syncing.')) return;
+    if (!confirm('Sign out of POTA.app?')) return;
     await window.api.potaSyncDisconnect();
     await refresh();
   });
 
-  enabledCheck.addEventListener('change', async () => {
-    await window.api.potaSyncSetEnabled(enabledCheck.checked);
-    await refresh();
-  });
-
-  intervalSel.addEventListener('change', async () => {
-    await window.api.potaSyncSetInterval(parseInt(intervalSel.value, 10));
-    await refresh();
-  });
-
-  syncNowBtn.addEventListener('click', async () => {
-    syncNowBtn.disabled = true;
-    const orig = syncNowBtn.textContent;
-    syncNowBtn.textContent = 'Syncing…';
+  refreshBtn.addEventListener('click', async () => {
+    refreshBtn.disabled = true;
+    const orig = refreshBtn.textContent;
+    refreshBtn.textContent = 'Refreshing…';
     try {
-      const res = await window.api.potaSyncNow();
-      if (!res || !res.ok) alert('Sync failed: ' + ((res && res.error) || 'unknown'));
+      // Don't alert on failure — error is shown softly in the panel.
+      // pota.app being briefly unreachable shouldn't yank a modal in
+      // front of the user.
+      await window.api.potaSyncNow();
     } finally {
-      syncNowBtn.textContent = orig;
-      syncNowBtn.disabled = false;
+      refreshBtn.textContent = orig;
+      refreshBtn.disabled = false;
       await refresh();
     }
   });
 
-  // Push updates from main — recompute pill + panel instantly on every pull
+  // Push updates from main — re-render panel + pill on every status change
   if (window.api.onPotaSyncStatus) {
     window.api.onPotaSyncStatus((st) => render(st));
   }
 
-  // Refresh the subscription gate + status when the Cloud settings tab
-  // becomes visible. Watch ONLY the fieldsets themselves — an earlier
-  // revision observed document.body with subtree:true + a 'class' filter,
-  // which fired thousands of times at startup (every spot-row highlight /
-  // panel toggle is a class change) and kicked two IPC round-trips per fire,
-  // producing app-wide lag.
+  // Refresh when the Cloud settings tab becomes visible. Watch the
+  // fieldsets only (not document.body) — observing the body fired
+  // thousands of class-change events at startup and produced lag.
   const cloudFieldsets = document.querySelectorAll('[data-settings-tab="cloud"]');
   if (cloudFieldsets.length > 0) {
     const obs = new MutationObserver(() => {
@@ -202,6 +170,6 @@
     }
   }
 
-  // Initial load (and paint the pill if already enabled + connected)
+  // Initial paint
   refresh();
 })();
