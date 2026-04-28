@@ -522,6 +522,14 @@ function spawnRigctld(target, portOverride) {
     if (!portOverride) killRigctld();
     rigctldStderr = '';
 
+    // Surface the args so users (and bug reporters) can confirm exactly
+    // what flags hamlib received — necessary for debugging PTT-Port and
+    // similar issues that depend on rigctld being spawned with the right
+    // configuration. (N4RDX report on v1.5.8: PTT Port set but TX still
+    // not working — without this log line we couldn't tell whether the
+    // setting reached spawn.)
+    sendCatLog('rigctld spawn: ' + args.map((a) => /\s/.test(a) ? '"' + a + '"' : a).join(' '));
+
     const proc = spawn(rigctldPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     if (!portOverride) rigctldProc = proc;
 
