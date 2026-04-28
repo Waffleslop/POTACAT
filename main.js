@@ -5236,6 +5236,8 @@ function connectRemote() {
   });
   remoteServer.on('freedv-set-squelch', ({ enabled, threshold }) => {
     if (freedvEngine) freedvEngine.setSquelch(enabled, threshold);
+    settings.freedvSquelch = { enabled: !!enabled, threshold: Number(threshold) };
+    saveSettings(settings);
   });
 
   remoteServer.on('jtcat-rx-gain', ({ value }) => {
@@ -8290,6 +8292,9 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       freedvEngine.on('status', (data) => sendCatLog(`[FreeDV] ${data.state} mode=${data.mode}`));
       freedvEngine.on('error', (data) => sendCatLog(`[FreeDV] Error: ${data.message}`));
       freedvEngine.start(codecMode);
+      if (settings.freedvSquelch) {
+        freedvEngine.setSquelch(!!settings.freedvSquelch.enabled, Number(settings.freedvSquelch.threshold));
+      }
       sendCatLog(`[FreeDV] Auto-started for mode ${m} (codec ${codecMode})`);
       // Mute ECHOCAT audio so user only hears decoded FreeDV speech (not raw USB)
       _freedvAudioMuted = true;
@@ -12090,6 +12095,9 @@ app.whenReady().then(() => {
       sendCatLog(`[FreeDV] Error: ${data.message}`);
     });
     freedvEngine.start(mode);
+    if (settings.freedvSquelch) {
+      freedvEngine.setSquelch(!!settings.freedvSquelch.enabled, Number(settings.freedvSquelch.threshold));
+    }
   });
 
   ipcMain.on('freedv-stop', () => {
@@ -12124,6 +12132,8 @@ app.whenReady().then(() => {
 
   ipcMain.on('freedv-set-squelch', (_e, enabled, threshold) => {
     if (freedvEngine) freedvEngine.setSquelch(enabled, threshold);
+    settings.freedvSquelch = { enabled: !!enabled, threshold: Number(threshold) };
+    saveSettings(settings);
   });
 
   // --- QRZ single callsign lookup (for Quick Log) ---

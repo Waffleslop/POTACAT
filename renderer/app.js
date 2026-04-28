@@ -8860,7 +8860,12 @@ window.api.onUpdateAvailable((data) => {
   const dismissBtn = document.getElementById('update-dismiss');
 
   const version = data.version;
-  const headline = data.releaseName || data.headline || '';
+  const rawHeadline = data.releaseName || data.headline || '';
+  // GitHub release titles are often just "v1.5.7" (no prose headline) —
+  // showing "v1.5.7: v1.5.7" reads as a typo (bjh report). Strip the
+  // headline if it's effectively the version string itself.
+  const versionRe = new RegExp('^v?' + version.replace(/\./g, '\\.') + '\\s*$');
+  const headline = versionRe.test(rawHeadline.trim()) ? '' : rawHeadline;
   message.textContent = headline
     ? `v${version}: ${headline}`
     : `POTACAT v${version} is available!`;

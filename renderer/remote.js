@@ -1523,7 +1523,16 @@
       // Display friendly name for FreeDV modes
       const mUp = s.mode.toUpperCase();
       modeBadge.textContent = mUp.startsWith('FREEDV') ? (mUp.includes('RADE') ? 'RADE' : 'FreeDV') : s.mode;
-      const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' || mUp === 'FM' || mUp === 'AM' || mUp.startsWith('FREEDV'));
+      // PKTUSB / PKTLSB / DIGU / DIGL are SSB sub-band positions used for
+      // FT8/FT4/FreeDV — they're voice-capable carriers, not CW. Without
+      // these, FreeDV (which lands the rig on PKTLSB on lower bands and
+      // PKTUSB on upper) hides the PTT button on phones. (G7-Chris report.)
+      const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' ||
+                       mUp === 'FM' || mUp === 'AM' ||
+                       mUp === 'PKTUSB' || mUp === 'PKTLSB' ||
+                       mUp === 'DIGU' || mUp === 'DIGL' ||
+                       mUp === 'USB-D' || mUp === 'LSB-D' ||
+                       mUp.startsWith('FREEDV'));
       pttBtn.classList.toggle('hidden', !isVoice);
       estopBtn.classList.toggle('hidden', !isVoice);
       updateCwPanelVisibility();
@@ -2964,25 +2973,15 @@
     sessionKeepAlive = null;
   }
 
-  function mediaTogglePtt() {
-    if (!audioEnabled) return;
-    if (pttDown) pttStop(); else pttStart();
-    // Re-assert playing state so the next button press fires again
-    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-    if (sessionKeepAlive) sessionKeepAlive.play().catch(() => {});
-  }
-
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('pause', mediaTogglePtt);
-    navigator.mediaSession.setActionHandler('play', mediaTogglePtt);
-    // Some devices/OS versions fire 'stop' instead of 'pause'
-    try { navigator.mediaSession.setActionHandler('stop', mediaTogglePtt); } catch (_) {}
-  }
-
-  // Wired earbud play/pause button — fires as a keyboard event on Android
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'MediaPlayPause') { e.preventDefault(); mediaTogglePtt(); }
-  });
+  // NOTE: previously we registered Media Session play/pause/stop handlers
+  // unconditionally so wired earbuds could toggle PTT. That made every
+  // EarPod / wired-headset play-pause press hijack PTT regardless of
+  // whether the user wanted it (G7-Chris report). The explicit "BT PTT"
+  // toggle in Settings is the opt-in path for headset-button PTT — it
+  // registers the same handlers via btPttStart() and tears them down on
+  // disable. The unconditional registration that lived here has been
+  // removed; the silent session-keepalive (used as a Media Session anchor
+  // by audio start) remains, since it doesn't itself bind any handlers.
 
   // --- Settings Overlay ---
   rigCtrlToggle.addEventListener('click', () => {
@@ -7027,10 +7026,15 @@
     });
   }
 
-  // Voice mode detection
+  // Voice mode detection — includes data sub-bands (PKTUSB/PKTLSB/DIGU/DIGL)
+  // and USB-D/LSB-D which are voice-capable SSB carriers used for FT8/
+  // FreeDV/etc. Keeping these as "voice" lets the SSB macro panel and PTT
+  // button work in FreeDV mode.
   function isVoiceMode(mode) {
     var m = (mode || '').toUpperCase();
-    return m === 'USB' || m === 'LSB' || m === 'SSB' || m === 'FM' || m === 'AM';
+    return m === 'USB' || m === 'LSB' || m === 'SSB' || m === 'FM' || m === 'AM' ||
+           m === 'PKTUSB' || m === 'PKTLSB' || m === 'DIGU' || m === 'DIGL' ||
+           m === 'USB-D' || m === 'LSB-D' || m.indexOf('FREEDV') === 0;
   }
 
   function updateSsbPanelVisibility() {
