@@ -3756,6 +3756,14 @@ function connectRemote() {
   remoteServer = new RemoteServer();
   if (settings.colorblindMode) remoteServer.setColorblindMode(true);
 
+  // Surface ECHOCAT lifecycle events (server bind, request errors, client
+  // connect/disconnect) into the Verbose log so users can tell whether
+  // their phone is reaching the desktop. Until v1.5.7 these were
+  // console.log only, which is invisible in installed builds — Walt KK4DF
+  // and Jonathan KM4CFT reported "Page does not load. Nothing in Verbose
+  // log." in v1.5.7 with no further information possible.
+  remoteServer.on('log', (msg) => sendCatLog('[Echo CAT] ' + msg));
+
   remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
