@@ -1,6 +1,6 @@
 {
   "name": "potacat",
-  "version": "1.5.5",
+  "version": "1.5.7",
   "description": "Amateur radio spot aggregator with CAT control, QSO logging, and panadapter integration",
   "author": {
     "name": "Casey Stanton",

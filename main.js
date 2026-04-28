@@ -11652,7 +11652,9 @@ app.whenReady().then(() => {
             const line = data.trim().split('\n')[0];
             // rigctld returns frequency in Hz as a number, or RPRT -N on error
             if (line.startsWith('RPRT')) {
-              reject(new Error(`rigctld error: ${line}`));
+              const { rprtMessage } = require('./lib/codecs/rigctld-codec');
+              const meaning = rprtMessage(line);
+              reject(new Error(meaning ? `${meaning} (${line})` : `rigctld error: ${line}`));
             } else {
               resolve(line);
             }
