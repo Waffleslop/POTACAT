@@ -543,7 +543,12 @@
   const ft8BandSelect = document.getElementById('ft8-band-select');
   const ft8ModeSelect = document.getElementById('ft8-mode-select');
   const ft8RxTxBadge = document.getElementById('ft8-rx-tx-badge');
-  const ft8CycleIndicator = document.getElementById('ft8-cycle-indicator');
+  // ft8-cycle-indicator was a separate "E"/"O" letter badge that was
+  // replaced by the ft8-cycle-bar progress strip — the element no longer
+  // exists in remote.html but the const + the textContent assignment in
+  // the jtcat-cycle handler below were left behind. Stale getElementById
+  // returns null, then setting textContent on null throws and kills the
+  // WS handler. Removed.
   const ft8Countdown = document.getElementById('ft8-countdown');
   const ft8SyncStatus = document.getElementById('ft8-sync-status');
   const ft8EraseBtn = document.getElementById('ft8-erase-btn');
@@ -1408,7 +1413,6 @@
 
       case 'jtcat-cycle':
         ft8CycleSlot = msg.slot || '--';
-        ft8CycleIndicator.textContent = msg.slot === 'even' ? 'E' : msg.slot === 'odd' ? 'O' : '--';
         ft8CycleBoundary = Date.now();
         ft8StartCountdown();
         break;
