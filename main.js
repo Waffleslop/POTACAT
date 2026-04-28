@@ -243,6 +243,7 @@ let keyer = null;          // IambicKeyer instance for CW MIDI keying
 let winKeyer = null;       // K1EL WinKeyer instance for hardware CW keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
 let cwKeyPort = null;      // Dedicated SerialPort for DTR CW keying (external USB-serial adapter)
+let _cwKeyPortEverOpened = false; // Becomes true after the first successful open this session — gates startup vs reconnect auto-open
 let remoteAudioWin = null; // hidden BrowserWindow for WebRTC audio bridge
 let _currentFreqHz = 0;    // tracked for remote radio status
 let _currentMode = '';
@@ -585,12 +586,14 @@ function sendCatStatus(s) {
       win.webContents.send('remote-tx-state', false);
     }
   }
-  // CAT just (re)connected — if a CW key port is configured but isn't open
-  // (typical: radio was unplugged at startup, both ttyUSB ports went away
-  // together, then it came back), try to open it now. Without this the
-  // cwKeyPort stays null after a transient unplug and CW text falls back
-  // to the unreliable CAT KY path.
-  if (s.connected && settings.cwKeyPort && !(cwKeyPort && cwKeyPort.isOpen)) {
+  // CAT (re)connected — if a CW key port is configured AND we've already
+  // opened it once this session (i.e., this is a recovery from a transient
+  // unplug, not the initial connect), try to open it again. The
+  // "ever-opened" flag is what lets us skip the auto-open at very first
+  // startup (avoids the WD4DAN spurious-dit) while still recovering from
+  // a CW operator's mid-session USB-serial unplug.
+  if (s.connected && settings.cwKeyPort && _cwKeyPortEverOpened &&
+      !(cwKeyPort && cwKeyPort.isOpen)) {
     connectCwKeyPort();
   }
   // Broadcast rig state on connect/disconnect so the Rig panel updates
@@ -3397,6 +3400,17 @@ function updateRemoteSettings() {
 }
 
 // --- CW Key Port (dedicated DTR keying via external USB-serial adapter) ---
+// Trigger an open ONLY if the port is configured AND not already open or
+// opening. Used by the lazy-open paths (first paddle event, first CW
+// text-send) so the inevitable open-time DTR pulse merges into a moment
+// the operator is intentionally keying. (WD4DAN report: spurious dit at
+// app launch was the OS asserting DTR at serial open before our drop ran.)
+function ensureCwKeyPortLazyOpen() {
+  if (!settings.cwKeyPort) return;
+  if (cwKeyPort) return; // already open or in-flight; connectCwKeyPort sets this synchronously
+  connectCwKeyPort();
+}
+
 function connectCwKeyPort() {
   disconnectCwKeyPort();
   _cwKeyPortPathForPython = null; // forget any stale Python fallback target
@@ -3507,6 +3521,8 @@ function connectCwKeyPort() {
     setTimeout(() => { if (cwKeyPort === port && port.isOpen) dropPins('settle'); }, 50);
     setTimeout(() => { if (cwKeyPort === port && port.isOpen) dropPins('reassert'); }, 250);
     console.log(`[CW Key Port] Opened ${portPath} for DTR keying`);
+    sendCatLog(`[CW Key Port] Opened ${portPath} (lazy)`);
+    _cwKeyPortEverOpened = true;
   });
   port.on('error', (err) => {
     console.log(`[CW Key Port] Error: ${err.message}`);
@@ -3748,6 +3764,11 @@ function sendCwTextToRadio(text) {
   const cwCaps = rigModel?.cw || {};
   if (cwCaps.textMethod === 'dtr-key-port') {
     const wpm = (cat && cat._cwWpm) || 20;
+    // Trigger the lazy open so subsequent text sends in this session use
+    // the dedicated key port. This first send falls through to the
+    // alternate path (cat.sendCwText) below — acceptable cost vs. the
+    // startup-dit it avoids. (WD4DAN.)
+    if (!cwKeyPort) ensureCwKeyPortLazyOpen();
     if (cwKeyPort && cwKeyPort.isOpen) {
       if (sendCwTextViaDtrKey(expanded, wpm, cwCaps.dtrPins)) {
         sendCatLog(`[CW] Text via DTR keyer @ ${wpm} wpm: ${expanded}`);
@@ -3943,6 +3964,15 @@ function connectRemote() {
       // Icom default: txrx (CI-V PTT 0x1C) — universal, no DTR config needed
       // Models with DTR keying support can override via cw.paddleKey: 'dtr'
       let paddleMethod = cwCaps.paddleKey || 'txrx';
+      // First paddle event of the session is the right moment to open
+      // the dedicated CW key port if the user has one configured but
+      // we deferred its open at startup (WD4DAN: avoids spurious dit on
+      // launch). The open is async; THIS first event falls back to
+      // main-dtr (still real RF on most CAT cables), subsequent events
+      // pick up the now-open cwKeyPort.
+      if (down && cwCaps.paddleKey === 'dtr' && !cwKeyPort) {
+        ensureCwKeyPortLazyOpen();
+      }
       // DTR keying without a dedicated CW key port: fall back to toggling DTR on
       // the main CAT serial port. This is what the radio's "USB Keying (CW) = USB(A) DTR"
       // menu actually reads, and it produces real RF rather than silent PTT.
@@ -4177,10 +4207,14 @@ function connectRemote() {
     if (smartSdr) smartSdr.setNeedsCw(true);
   }
 
-  // Open dedicated CW Key Port if configured
-  if (settings.cwKeyPort) {
-    connectCwKeyPort();
-  }
+  // Dedicated CW Key Port — opens lazily on first CW activity rather
+  // than at app startup. Opening a serial port asserts DTR at the OS
+  // level for ~5–50 ms before our user-space drop runs; on a radio with
+  // "USB Keying (CW) = DTR" set in the menu, that brief assertion sends
+  // a spurious dit on the air every time POTACAT launches. (WD4DAN
+  // report 2026-04-28.) Lazy open moves the unavoidable pulse into the
+  // moment the operator is already intentionally keying, where it
+  // merges into their first dit instead of being a surprise.
 
   remoteServer.on('set-sources', (sources) => {
     if (!sources) return;
