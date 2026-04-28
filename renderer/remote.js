@@ -6896,11 +6896,28 @@
     return null;
   }
 
+  // Throttled diagnostic: log once per minute when a paddle key arrives
+  // but cwAvailable is false. KM4CFT on Android: TinyMIDI paddle had
+  // delayed sidetone + radio not keying. If the keydown is silently
+  // dropped here we never see it; surfacing it tells us the desktop
+  // hasn't enabled CW for this client.
+  var _paddleDropLogTs = 0;
+  function logPaddleDrop(reason) {
+    var now = Date.now();
+    if (now - _paddleDropLogTs < 60_000) return;
+    _paddleDropLogTs = now;
+    console.warn('[CW paddle] Ignoring key — ' + reason);
+  }
+
   document.addEventListener('keydown', function(e) {
-    if (!cwAvailable) return;
     if (e.repeat) return;
     if (isInputFocused()) return;
     var contact = matchPaddleKey(e);
+    if (!contact) return;
+    if (!cwAvailable) {
+      logPaddleDrop('cwAvailable is false (desktop hasn\'t enabled CW for this session)');
+      return;
+    }
     if (contact === 'dit') {
       e.preventDefault();
       if (!ditDown) { ditDown = true; sendPaddle('dit', 1); }
