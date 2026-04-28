@@ -106,23 +106,50 @@ jobs:
         with:
           node-version: '22'
       - name: Install system build deps
+        # Ubuntu-latest (24.04) ships hamlib 4.5.5, which predates FTX-1
+        # support (added in hamlib 4.6, Sept 2024 — royw3888 report).
+        # We build hamlib from source below to guarantee a current backend
+        # set in the bundled rigctld.
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libudev-dev cmake rpm libhamlib-utils libhamlib4 patchelf
+          sudo apt-get install -y \
+            build-essential python3 libudev-dev cmake rpm patchelf \
+            autoconf automake libtool texinfo pkg-config \
+            libusb-1.0-0-dev libreadline-dev libxml2-dev
+      - name: Build hamlib from source
+        env:
+          HAMLIB_VERSION: '4.7.1'
+        run: |
+          set -e
+          curl -fsSL "https://github.com/Hamlib/Hamlib/archive/refs/tags/${HAMLIB_VERSION}.tar.gz" -o /tmp/hamlib.tar.gz
+          mkdir -p /tmp/hamlib-src
+          tar -xzf /tmp/hamlib.tar.gz -C /tmp/hamlib-src --strip-components=1
+          cd /tmp/hamlib-src
+          ./bootstrap
+          ./configure --prefix=/usr/local --disable-static --enable-shared \
+            --without-cxx-binding --disable-doxygen-doc
+          make -j"$(nproc)"
+          sudo make install
+          sudo ldconfig
+          /usr/local/bin/rigctld --version
+          # Sanity check — fail the build if FTX-1 isn't in the model list,
+          # which is the whole point of building from source.
+          /usr/local/bin/rigctl --list | grep -i 'FTX-1' || (echo "FTX-1 missing from rigctl --list" && exit 1)
       - name: Install dependencies
         run: npm install
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true
       - name: Bundle hamlib into assets/hamlib/
-        # Replaces Windows binaries with a Linux rigctld + its hamlib/libusb
-        # deps, rewriting RPATH to $ORIGIN so libs resolve next to the binary.
+        # Replaces Windows binaries with the freshly-built Linux rigctld
+        # + its hamlib/libusb deps, rewriting RPATH to $ORIGIN so libs
+        # resolve next to the binary.
         run: |
           set -e
           rm -f assets/hamlib/*.dll assets/hamlib/*.exe
-          cp /usr/bin/rigctld assets/hamlib/rigctld
+          cp /usr/local/bin/rigctld assets/hamlib/rigctld
           chmod +x assets/hamlib/rigctld
-          for dep in $(ldd /usr/bin/rigctld | awk '/(hamlib|libusb)/ {print $3}'); do
+          for dep in $(ldd /usr/local/bin/rigctld | awk '/(hamlib|libusb)/ {print $3}'); do
             if [ -f "$dep" ]; then
               cp -L "$dep" "assets/hamlib/$(basename $dep)"
             fi
