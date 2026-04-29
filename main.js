@@ -77,6 +77,7 @@ const { CatClient, RigctldClient, CivClient, listSerialPorts } = require('./lib/
 // New rig abstraction layer
 const { RigController } = require('./lib/rig-controller');
 const { TcpTransport, SerialTransport } = require('./lib/transport');
+const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 const { CivCodec } = require('./lib/codecs/civ-codec');
@@ -285,7 +286,7 @@ function findNearestPreset(presets, currentWidth) {
 function detectRigType() {
   const target = settings.catTarget;
   if (!target) return 'unknown';
-  if (target.type === 'icom' || target.type === 'civ-tcp') return 'icom';
+  if (target.type === 'icom' || target.type === 'civ-tcp' || target.type === 'icom-network') return 'icom';
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
   if (target.type === 'tcp') return 'flex'; // TCP CAT ports 5002-5005 are always FlexRadio
   if (target.type === 'serial') {
@@ -794,6 +795,10 @@ async function connectCat() {
     // (prevents "Resource busy" on macOS when switching rigs)
     await new Promise(r => setTimeout(r, 300));
   }
+  // Optimistic reset of the paddle-availability flag for the new rig —
+  // if the transport later emits 'pin-unsupported' (Linux cdc_acm),
+  // the flag drops to false and the phone stops generating sidetone.
+  _setCwPaddleAvailability(true, 'rig-changed');
   killRigctld();
   const target = settings.catTarget;
   if (!target) return;
@@ -943,6 +948,43 @@ async function connectCat() {
     sendCatLog(`Connecting to Icom CI-V over TCP on ${host}:${port}`);
     transport.connect({ host, port });
 
+  } else if (target.type === 'icom-network') {
+    // Icom RS-BA1 protocol over UDP. Works with:
+    //   - wfserver (wfview's headless GPLv3 server) bridging a USB-attached
+    //     Icom (IC-7300/MK II, IC-7100, etc.) onto the network
+    //   - IP-native Icoms with built-in network: IC-705, IC-9700, IC-7610,
+    //     IC-7851, IC-R8600
+    // Wraps CI-V bytes in RS-BA1 data frames; CivCodec is unchanged from
+    // the serial / civ-tcp paths.
+    transport = new RsBa1Transport();
+    const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: target.civAddr || 0x94, caps: {}, cw: {} };
+    model.tune = getTuneQuirks(model);
+    codec = new CivCodec(model, (data) => transport.write(data));
+    cat = new RigController(model, transport, codec);
+    cat._debug = true;
+    cat.on('log', sendCatLog);
+    cat.on('status', sendCatStatus);
+    cat.on('frequency', sendCatFrequency);
+    cat.on('mode', sendCatMode);
+    cat.on('power', sendCatPower);
+    cat.on('nb', sendCatNb);
+    cat.on('smeter', sendCatSmeter);
+    cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
+    transport.on('log', (m) => sendCatLog(m));
+    const host = target.host || '127.0.0.1';
+    const controlPort = target.controlPort || target.port || 50001;
+    const civPort = target.civPort || null; // null = use whatever the radio reports in Status
+    sendCatLog(`Connecting to Icom Network on ${host}:${controlPort} (RS-BA1 protocol)`);
+    transport.connect({
+      host,
+      controlPort,
+      civPort,
+      username: target.username || '',
+      password: target.password || '',
+      compName: target.compName || 'POTACAT',
+    });
+
   } else {
     // Kenwood/Yaesu serial
     transport = new SerialTransport();
@@ -969,6 +1011,31 @@ async function connectCat() {
     const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
     const overrides = activeRig?.model && settings.rigCommandOverrides[activeRig.model];
     if (overrides) cat.applyCommandOverrides(overrides);
+  }
+  // Linux cdc_acm radios reject TIOCMSET, so node-serialport's port.set()
+  // call to flip DTR for paddle keying fails on the first try and every try
+  // after. The transport emits 'pin-unsupported' once per connection — we
+  // catch it here and spin up a long-running pyserial subprocess that
+  // toggles DTR/RTS via TIOCMBIS/TIOCMBIC, the per-bit ioctl that cdc_acm
+  // does honor. Both processes hold the same /dev/ttyACM* fd in parallel
+  // (Linux allows it, modem bits are driver-level not per-fd) so node-
+  // serialport keeps doing CAT polling while the helper drives the key.
+  if (transport && typeof transport.on === 'function') {
+    transport.on('pin-unsupported', ({ path, error }) => {
+      // Linux cdc_acm rejects TIOCMSET on USB-CDC radios — the kernel
+      // driver simply doesn't honor `port.set({ dtr, rts })` from
+      // node-serialport. We can't fix this from JS; the workaround is
+      // an external USB-UART (FTDI/CH340) on the radio's CW KEY jack.
+      // Notify the phone so its local CW keyer stops generating sidetone
+      // for keys that produce no RF — the prior behavior misled users
+      // into bug reports about "ECHOCAT broken" (KM4CFT 2026-04-29).
+      sendCatLog(
+        `[CW paddle] DTR keying not supported on ${path} (${error}) — phone-side paddle disabled. ` +
+        'Macros/text-send (CI-V 0x17, hamlib send_morse) still work. ' +
+        'For a working paddle: wire an external FTDI/CH340 to the radio\'s CW KEY jack and set it as "CW Key Port" in Settings → Rig.'
+      );
+      _setCwPaddleAvailability(false, 'tiocmset-unsupported');
+    });
   }
   // Surface model-specific gotchas to the CAT log so users see them on
   // connect (FT-710 ATU + CAT timeout, etc.) without having to dig through
@@ -3723,6 +3790,19 @@ function sendCwTextViaPython(text, wpm) {
   return true;
 }
 
+// Notify phone whether paddle keying actually reaches the radio. Macros
+// and text-send go through different code paths (CI-V 0x17, hamlib
+// send_morse) and stay enabled regardless — only the iambic-keyer paddle
+// is gated by this. Used to suppress phone-side local sidetone when the
+// transport reports DTR keying isn't available (e.g. Linux cdc_acm
+// rejecting TIOCMSET on the IC-7300's USB tty), so the user doesn't get
+// phantom tones with no RF and assume POTACAT is broken (KM4CFT report).
+function _setCwPaddleAvailability(available, reason) {
+  if (remoteServer && typeof remoteServer.setCwPaddleAvailable === 'function') {
+    remoteServer.setCwPaddleAvailable(available, reason);
+  }
+}
+
 function sendCwTextViaDtrKey(text, wpm, dtrPins) {
   if (!cwKeyPort || !cwKeyPort.isOpen) return false;
   const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
@@ -4032,6 +4112,10 @@ function connectRemote() {
       } else if (paddleMethod === 'main-dtr') {
         // Toggle DTR/RTS on the main CAT serial port (no second adapter).
         // Requires the radio's "USB Keying (CW)" menu to be set to USB(A) DTR/RTS.
+        // On Linux cdc_acm radios this fails silently — the transport emits
+        // 'pin-unsupported' on first try and we drop phone-side sidetone via
+        // _setCwPaddleAvailability(false). Subsequent calls here are no-ops
+        // since rig-controller latches `_dtrUnsupported` after the first error.
         if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwCaps.dtrPins || { dtr: true });
       } else if (paddleMethod === 'ta' && cwCaps.taKey) {
         cat.setCwKeyTa(down);
@@ -11475,8 +11559,15 @@ app.whenReady().then(() => {
     // Re-harvest parks from the now-larger log so imported QSOs' park
     // refs flow into workedParks for new-park / hide-worked-parks
     // detection — without this, freshly imported logs wouldn't influence
-    // the spots view until next app start.
+    // the spots view until next app start. Snapshot the worked-parks
+    // count before/after so the import-result dialog can lead with the
+    // bridge between "import" and "filter" — KE4WLE saw v1.5.9's
+    // worked-parks-from-log change land but couldn't tell from the UI
+    // that running Import Log here was the action that wires it up.
+    const parksBefore = workedParks ? workedParks.size : 0;
     loadWorkedParks();
+    const parksAfter = workedParks ? workedParks.size : 0;
+    const parksAdded = Math.max(0, parksAfter - parksBefore);
     // Scan imported QSOs for event matches
     scanLogForEvents();
 
@@ -11487,14 +11578,31 @@ app.whenReady().then(() => {
     }
 
     const fileList = fileNames.join(', ');
+    const detailLines = [
+      `${totalImported.toLocaleString()} QSOs (${uniqueCalls.size.toLocaleString()} unique callsigns) added.`,
+    ];
+    if (parksAdded > 0) {
+      detailLines.push('');
+      detailLines.push(`Worked-parks list now has ${parksAfter.toLocaleString()} references (${parksAdded.toLocaleString()} new from this import).`);
+      detailLines.push('Use “Hide worked parks” in Settings → Spots or Quick Settings to filter the spots table by them.');
+    } else if (parksAfter > 0) {
+      detailLines.push('');
+      detailLines.push(`Worked-parks list has ${parksAfter.toLocaleString()} references (no new park refs in this import).`);
+    }
     dialog.showMessageBox(parentWin, {
       type: 'info',
       title: 'Import Complete',
       message: `Successfully imported ${fileList}`,
-      detail: `${totalImported} QSOs (${uniqueCalls.size} unique callsigns) added.`,
+      detail: detailLines.join('\n'),
     });
 
-    return { success: true, imported: totalImported, unique: uniqueCalls.size };
+    return {
+      success: true,
+      imported: totalImported,
+      unique: uniqueCalls.size,
+      parksTotal: parksAfter,
+      parksAdded,
+    };
   });
 
   // --- QSO Logging IPC ---

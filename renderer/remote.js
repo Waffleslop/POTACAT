@@ -1063,6 +1063,9 @@
         if (msg.colorblindMode) applyRemoteColorblind(true);
         // CW keyer availability
         cwAvailable = !!msg.cwAvailable;
+        // Default to true when not specified — desktop only sends false when
+        // it's actively determined paddle keying can't reach the radio.
+        cwPaddleAvailable = msg.cwPaddleAvailable !== false;
         updateCwPanelVisibility();
         updateSsbPanelVisibility();
         if (msg.settings) {
@@ -1299,6 +1302,21 @@
         cwAvailable = !!msg.enabled;
         updateCwPanelVisibility();
         updateCwEnableBtn();
+        break;
+
+      case 'cw-paddle-available':
+        // Desktop reports whether paddle keying can actually reach the
+        // radio. False = TIOCMSET unsupported AND no pyserial fallback;
+        // suppress local sidetone so the user doesn't get confused by
+        // tone with no RF (KM4CFT 2026-04-29).
+        cwPaddleAvailable = msg.available !== false;
+        if (!cwPaddleAvailable) {
+          // Stop any in-progress paddle sidetone immediately
+          if (typeof localCwKeyer !== 'undefined' && localCwKeyer) {
+            try { localCwKeyer.paddleDit(false); localCwKeyer.paddleDah(false); } catch (e) {}
+          }
+        }
+        updatePaddleHelp();
         break;
 
       case 'cw-state':
@@ -6248,6 +6266,7 @@
   }
 
   let cwAvailable = false;
+  let cwPaddleAvailable = true;
   let cwWpm = 20;
   let cwMode = 'iambicB';
   let cwSwapPaddles = false;
@@ -6889,6 +6908,22 @@
     var isAndroid = /Android/.test(ua);
     var hasWebMidi = !!navigator.requestMIDIAccess;
     var bits = [];
+    // Highest-priority message: desktop has reported paddle keying can't
+    // reach the radio. This trumps every other tip — the user needs to
+    // know paddle won't work at all until they fix it on the desktop.
+    if (!cwPaddleAvailable) {
+      bits.push(
+        '<b style="color:var(--accent-red, #e94560);">Paddle keying is currently disabled.</b> ' +
+        'POTACAT Desktop reported it can’t reach the radio’s key line — this happens on Linux ' +
+        'with USB-CDC radios (IC-7300, FT-710, QMX/QDX, etc.) where the kernel’s cdc_acm driver ' +
+        'rejects DTR control. Workaround: wire an external USB-UART adapter (FTDI / CH340) to ' +
+        'the radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings → Rig. ' +
+        'CW macros and text-send still work without it — only paddle is affected.'
+      );
+      helpEl.innerHTML = bits.join('<br>');
+      helpEl.classList.remove('hidden');
+      return;
+    }
     if (!hasWebMidi) {
       if (isIOS) {
         bits.push('<b>MIDI paddles are not supported on iOS.</b> For paddle use, switch to a desktop / Android browser with Web MIDI (Chrome or Edge).');
@@ -6923,7 +6958,11 @@
   var _paddleReleaseTimer = { dit: null, dah: null };
   function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
-    // to the server over WS (which does the real radio keying).
+    // to the server over WS (which does the real radio keying). Skip both
+    // sides when desktop has reported paddle keying can't reach the radio
+    // (cwPaddleAvailable=false) — playing sidetone for keys that don't
+    // produce RF was misleading users into thinking POTACAT was broken.
+    if (!cwPaddleAvailable) return;
     ensureCwAudioCtx();
     if (contact === 'dit') localCwKeyer.paddleDit(!!state);
     else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
@@ -6978,6 +7017,10 @@
     if (!contact) return;
     if (!cwAvailable) {
       logPaddleDrop('cwAvailable is false (desktop hasn\'t enabled CW for this session)');
+      return;
+    }
+    if (!cwPaddleAvailable) {
+      logPaddleDrop('cwPaddleAvailable is false (desktop has determined paddle keying can\'t reach the radio — see verbose log for cause)');
       return;
     }
     if (contact === 'dit') {

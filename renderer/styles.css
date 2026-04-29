@@ -385,9 +385,18 @@ header {
   border: 1px solid var(--border-primary);
   border-radius: 0 0 6px 6px;
   padding: 10px 14px;
-  min-width: 260px;
+  /* Fixed width — anchored on the right of the Settings button. Without this
+     the panel grew to accommodate long audio-device names and pushed its
+     left edge off the screen on narrower windows (and on Linux/Windows when
+     enumerated USB audio devices have verbose names). The 280px floor was
+     chosen as the smallest value that fits ECHOCAT URL + Token + audio
+     dropdowns without truncation on a typical layout. */
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
   max-height: calc(100vh - 60px);
   overflow-y: auto;
+  overflow-x: hidden;
   z-index: 1000;
   box-shadow: 0 4px 12px var(--shadow-heavy);
 }
@@ -485,8 +494,13 @@ header {
   text-align: center;
 }
 .echo-cat-audio-select {
-  flex: 1;
-  min-width: 0;
+  /* `width: 0` (instead of `min-width: 0`) is the reliable way to make a
+     <select> shrink below its intrinsic-content width inside a flex row.
+     Chromium ignores `min-width: 0` for native form controls, so without
+     this an audio-device name like "Microphone (Realtek High Definition
+     Audio Device 12345)" would push the entire Settings panel wider. */
+  flex: 1 1 0;
+  width: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
   border: 1px solid var(--border-primary);
@@ -496,6 +510,7 @@ header {
   height: 22px;
   -webkit-appearance: none;
   appearance: none;
+  text-overflow: ellipsis;
 }
 .echo-cat-audio-select:focus { border-color: var(--accent-green); outline: none; }
 .echo-cat-token-row {

@@ -165,6 +165,7 @@
           </div>
           <div class="spots-panel-divider"></div>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-hide-worked-parks"> Hide Worked Parks</label>
+          <button type="button" id="quick-import-logs-btn" class="settings-dropdown-link" style="font-size:11px;padding:4px 6px;margin:2px 0 4px;color:var(--text-secondary);" title="Import ADIF/SQLite logs from N3FJP, HRD, HAMRS, Log4OM, etc. — populates the Worked Parks filter">Import existing logs…</button>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-show-meter" checked> S-Meter / SWR</label>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-show-cw-macros"> CW Macros</label>
           <label class="spots-toggle compact"><input type="checkbox" id="quick-show-voice-macros"> Voice Macros</label>
@@ -1184,6 +1185,38 @@
           </div>
           <span class="help-text" style="margin-top:6px;display:block;">IC-7300 MK II default port is <code>50001</code>. For <code>ser2net</code>, whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW paddle keying works the same as direct USB CI-V — the codec sends the same CW key command (0x1C 0x01) over the TCP transport.</span>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="icom-network"> Icom (Network / RS-BA1) <span style="font-size:10px;color:var(--text-tertiary);">— experimental</span></label>
+        <div id="icom-network-config" class="radio-sub hidden">
+          <span class="help-text" style="font-size:12px;">RS-BA1 protocol over UDP. Connect to (a) <code>wfserver</code> (wfview's headless server) running on a Linux/Mac/Pi adjacent to a USB-attached Icom — typical setup for IC-7300 / IC-7100 / FT-710 — or (b) directly to an IP-native Icom (IC-705, IC-9700, IC-7610, IC-7851, IC-R8600). Username/password come from whatever you set in wfserver's <code>--setup</code>, or in the radio's own <strong>Network User</strong> menu.</span>
+          <label>Radio Model:
+            <select id="set-icom-network-model">
+              <option value="0xB6" selected>IC-7300 MK II</option>
+              <option value="0x94">IC-7300</option>
+              <option value="0xA4">IC-705</option>
+              <option value="0x98">IC-7610</option>
+              <option value="0x88">IC-7100</option>
+              <option value="0xA2">IC-9700</option>
+              <option value="0x8E">IC-7851</option>
+              <option value="0x96">IC-R8600</option>
+            </select>
+          </label>
+          <label>Host / IP:
+            <input type="text" id="set-icom-network-host" placeholder="192.168.1.50">
+          </label>
+          <label>Control port:
+            <input type="number" id="set-icom-network-control-port" min="1" max="65535" value="50001">
+          </label>
+          <label>Civ port (optional):
+            <input type="number" id="set-icom-network-civ-port" min="0" max="65535" placeholder="auto">
+          </label>
+          <label>Username:
+            <input type="text" id="set-icom-network-username" autocomplete="off" spellcheck="false">
+          </label>
+          <label>Password:
+            <input type="password" id="set-icom-network-password" autocomplete="off">
+          </label>
+          <span class="help-text" style="margin-top:6px;display:block;">Phase 1: CAT only (frequency, mode, CW text). No audio yet — bridge audio separately if needed (Mumble, virtual cable). For wfserver setup, see <code>WFSERVER.md</code> in the wfview repo.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">
           <label>Rig Model:
@@ -1295,6 +1328,11 @@
         </label>
         <span class="help-text" style="display:block;margin-top:4px;">Go to pota.app/#/user/stats, under Hunted Parks, click "Export CSV"</span>
         <label class="checkbox-label" style="margin-top:4px;"><input type="checkbox" id="set-hide-worked-parks"> Hide already-worked parks</label>
+        <div id="worked-parks-import-row" style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+          <button type="button" id="worked-parks-import-btn">Import existing logs…</button>
+          <span id="worked-parks-import-result" class="help-text"></span>
+        </div>
+        <span class="help-text" style="display:block;margin-top:4px;">POTACAT builds the worked-parks list from your QSO log (any QSO with POTA_REF or SIG=POTA + SIG_INFO counts). To pull in history from N3FJP / HRD Logbook / HAMRS / Log4OM / etc., import the ADIF (.adi) or SQLite export here — it goes through the same flow as Settings → Logging → Import Log.</span>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-sota"> Enable SOTA</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-wwff"> Enable WWFF</label>
@@ -1562,7 +1600,7 @@
           <strong style="display:block;margin-bottom:4px;">Import Log</strong>
           <button type="button" id="adif-import-btn">Import Log</button>
           <span id="adif-import-result" class="help-text" style="margin-left:8px;"></span>
-          <span class="help-text" style="display:block;margin-top:4px;">Import QSO history from ADIF (.adi) or Log4OM SQLite (.sqlite) files. They will be added to your POTACAT logfile.</span>
+          <span class="help-text" style="display:block;margin-top:4px;">Import QSOs from N3FJP, HRD Logbook, HAMRS, Log4OM, or any other ADIF (.adi) or SQLite (.sqlite) export. Imported QSOs are merged into your POTACAT log; any park references they carry (POTA_REF or SIG=POTA + SIG_INFO) populate the <strong>worked-parks</strong> filter — that's what drives "Hide worked parks" / "Show NEW parks at top" in the spots table.</span>
         </div>
         <label style="margin-top:10px;">Default TX Power (W):
           <input type="number" id="set-default-power" min="1" max="5000" value="100">

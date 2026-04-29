@@ -1369,6 +1369,8 @@ function updateRadioSubPanels() {
   icomConfig.classList.toggle('hidden', type !== 'icom');
   const civTcpConfig = document.getElementById('civ-tcp-config');
   if (civTcpConfig) civTcpConfig.classList.toggle('hidden', type !== 'civ-tcp');
+  const icomNetworkConfig = document.getElementById('icom-network-config');
+  if (icomNetworkConfig) icomNetworkConfig.classList.toggle('hidden', type !== 'icom-network');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
   if (type === 'serialcat' && !serialcatPortsLoaded) {
@@ -1415,6 +1417,18 @@ async function populateRadioSection(currentTarget) {
     if (modelSelect && currentTarget.civAddress != null) {
       const hex = '0x' + currentTarget.civAddress.toString(16).toUpperCase();
       modelSelect.value = hex;
+    }
+  } else if (currentTarget.type === 'icom-network') {
+    setRadioType('icom-network');
+    document.getElementById('set-icom-network-host').value = currentTarget.host || '';
+    document.getElementById('set-icom-network-control-port').value = currentTarget.controlPort || currentTarget.port || 50001;
+    document.getElementById('set-icom-network-civ-port').value = currentTarget.civPort || '';
+    document.getElementById('set-icom-network-username').value = currentTarget.username || '';
+    document.getElementById('set-icom-network-password').value = currentTarget.password || '';
+    const inModelSelect = document.getElementById('set-icom-network-model');
+    if (inModelSelect && currentTarget.civAddress != null) {
+      const hex = '0x' + currentTarget.civAddress.toString(16).toUpperCase();
+      inModelSelect.value = hex;
     }
   } else if (currentTarget.type === 'rigctld') {
     setRadioType('hamlib');
@@ -1775,6 +1789,20 @@ function buildCatTargetFromForm() {
       civAddr: parseInt(modelSelect.value, 16),
       civAddress: parseInt(modelSelect.value, 16),
       civModel: modelSelect.options[modelSelect.selectedIndex].text,
+    };
+  } else if (radioType === 'icom-network') {
+    const inModelSelect = document.getElementById('set-icom-network-model');
+    const civPortVal = parseInt(document.getElementById('set-icom-network-civ-port').value, 10);
+    return {
+      type: 'icom-network',
+      host: (document.getElementById('set-icom-network-host').value || '').trim(),
+      controlPort: parseInt(document.getElementById('set-icom-network-control-port').value, 10) || 50001,
+      civPort: Number.isFinite(civPortVal) && civPortVal > 0 ? civPortVal : null,
+      username: document.getElementById('set-icom-network-username').value || '',
+      password: document.getElementById('set-icom-network-password').value || '',
+      civAddr: parseInt(inModelSelect.value, 16),
+      civAddress: parseInt(inModelSelect.value, 16),
+      civModel: inModelSelect.options[inModelSelect.selectedIndex].text,
     };
   } else if (radioType === 'hamlib') {
     // PTT Port: dropdown selection wins, fall back to manual text. Empty
@@ -3782,26 +3810,60 @@ adifLogBrowseBtn.addEventListener('click', async () => {
   }
 });
 
-// ADIF import
-adifImportBtn.addEventListener('click', async () => {
-  adifImportResult.textContent = 'Importing...';
-  adifImportResult.style.color = '';
+// ADIF import — shared by three entry points: Settings → Logging → Import
+// Log, Settings → Spots → Import existing logs (right next to Hide Worked
+// Parks, where the question "how do I get my parks in here?" naturally
+// surfaces), and Quick Settings → Import existing logs (same logic).
+async function runAdifImport(resultEl) {
+  if (resultEl) {
+    resultEl.textContent = 'Importing…';
+    resultEl.style.color = '';
+  }
   try {
     const result = await window.api.importAdif();
+    if (!resultEl) return result;
     if (!result) {
-      adifImportResult.textContent = '';
+      resultEl.textContent = '';
     } else if (result.success) {
-      adifImportResult.textContent = `${result.imported} QSOs imported`;
-      adifImportResult.style.color = SOURCE_COLORS_ACTIVE.pota;
+      const parts = [`${result.imported.toLocaleString()} QSOs imported`];
+      if (result.parksAdded > 0) {
+        parts.push(`${result.parksAdded.toLocaleString()} new park ref${result.parksAdded === 1 ? '' : 's'}`);
+      }
+      resultEl.textContent = parts.join(' · ');
+      resultEl.style.color = SOURCE_COLORS_ACTIVE.pota;
     } else {
-      adifImportResult.textContent = 'Import failed';
-      adifImportResult.style.color = '#e94560';
+      resultEl.textContent = 'Import failed';
+      resultEl.style.color = '#e94560';
     }
+    return result;
   } catch (err) {
-    adifImportResult.textContent = 'Import failed';
-    adifImportResult.style.color = '#e94560';
+    if (resultEl) {
+      resultEl.textContent = 'Import failed';
+      resultEl.style.color = '#e94560';
+    }
+    return null;
   }
-});
+}
+
+adifImportBtn.addEventListener('click', () => runAdifImport(adifImportResult));
+
+const workedParksImportBtn = document.getElementById('worked-parks-import-btn');
+const workedParksImportResult = document.getElementById('worked-parks-import-result');
+if (workedParksImportBtn) {
+  workedParksImportBtn.addEventListener('click', () => runAdifImport(workedParksImportResult));
+}
+
+const quickImportLogsBtn = document.getElementById('quick-import-logs-btn');
+if (quickImportLogsBtn) {
+  quickImportLogsBtn.addEventListener('click', async () => {
+    // Collapse the Quick Settings popover so the dialog is unobstructed.
+    // The dropdown var isn't in scope yet at this point in module init —
+    // resolve lazily by ID.
+    const dd = document.getElementById('settings-dropdown');
+    if (dd) dd.classList.remove('open');
+    await runAdifImport(null);
+  });
+}
 
 potaParksBrowseBtn.addEventListener('click', async () => {
   const filePath = await window.api.choosePotaParksFile();
