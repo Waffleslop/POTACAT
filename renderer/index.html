@@ -1215,7 +1215,7 @@
               <input type="text" id="set-rig-ptt-port-manual" placeholder="or type COM port" style="width:120px;">
             </div>
           </label>
-          <span class="help-text" style="margin-top:2px;display:block;">For DigiRig / SignaLink / similar interfaces that key PTT via DTR on a separate USB-serial port. Leave blank for rigs that PTT over CAT (most modern Yaesu / Icom radios).</span>
+          <span class="help-text" style="margin-top:2px;display:block;">For DigiRig / SignaLink / similar interfaces that key PTT via DTR. <strong>Must be a different COM port than the CAT port above</strong> &mdash; these adapters present two virtual COM ports (one for CI-V data, one for DTR-keyed PTT). Check Device Manager for the second port. Leave blank for rigs that PTT over CAT (most modern Yaesu / Icom).</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="hamlib-test-btn">Test Connection</button>
             <span id="hamlib-test-result" style="font-size:12px;"></span>

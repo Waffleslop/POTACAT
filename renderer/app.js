@@ -1868,6 +1868,20 @@ rigSaveBtn.addEventListener('click', async () => {
   const catTarget = buildCatTargetFromForm();
   const model = rigModelSelect ? rigModelSelect.value || null : null;
 
+  // Catch the DigiRig same-port misconfiguration before save. PTT Port
+  // and CAT port MUST be different — DigiRig and similar adapters
+  // present two virtual COM ports (one for CI-V data, one for DTR-keyed
+  // PTT). N4RDX on v1.5.9 set both to COM4 and TX silently broke.
+  if (catTarget && catTarget.type === 'rigctld' && catTarget.pttPort &&
+      String(catTarget.pttPort).toLowerCase() === String(catTarget.serialPort || '').toLowerCase()) {
+    alert('PTT Port (' + catTarget.pttPort + ') must be a different COM port than your CAT serial port.\n\n' +
+          'DigiRig, SignaLink, and similar adapters present TWO virtual COM ports — one for CI-V data ' +
+          '(your CAT port) and a second one wired to the rig\'s PTT line via DTR (your PTT port).\n\n' +
+          'Open Windows Device Manager and look for the second COM port that appeared when you plugged ' +
+          'in the adapter. Pick that one for PTT Port, or leave PTT Port blank if your rig PTT-keys over CAT.');
+    return; // don't save until they fix it
+  }
+
   const rigAudioIn = rigRemoteAudioInput.value || '';
   const rigAudioOut = rigRemoteAudioOutput.value || '';
   const rigCwKeyPortVal = setCwKeyPort ? setCwKeyPort.value || '' : '';

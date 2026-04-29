@@ -513,9 +513,30 @@ function spawnRigctld(target, portOverride) {
     // adapter has a separate DTR-keyed PTT line. (N4RDX on IC-706MKIIG +
     // DigiRig — TX worked in WSJT-X but not POTACAT because POTACAT was
     // PTT'ing via CAT only.)
+    //
+    // Common configuration error: user picks the SAME COM port for both
+    // CAT and PTT. DigiRig presents two virtual COM ports — one for CI-V
+    // data, one wired to the rig's PTT line via DTR. Setting both to the
+    // same port silently breaks TX (rigctld asserts DTR on the data
+    // port, but the PTT line is on the OTHER port's DTR). N4RDX hit this
+    // on v1.5.9 — set PTT Port = COM4 with CAT also on COM4. Refuse to
+    // spawn with a same-port config and tell the user clearly.
     if (target.pttPort) {
-      args.push('--ptt-type=DTR');
-      args.push('--ptt-file=' + target.pttPort);
+      const ptt = String(target.pttPort).trim().toLowerCase();
+      const cat = String(target.serialPort || '').trim().toLowerCase();
+      if (ptt && ptt === cat) {
+        sendCatLog(`[rigctld] CONFIG ERROR: PTT Port (${target.pttPort}) is the same as the CAT serial port. ` +
+          `These must be different COM ports — DigiRig and similar interfaces present TWO virtual ` +
+          `COM ports (one for CI-V data, one for DTR-keyed PTT). Check Device Manager for the second ` +
+          `port. Falling back to PTT-via-CAT for this connection (TX may not work on this rig).`);
+        // Skip --ptt-type=DTR — falls back to default PTT-via-CAT (the
+        // pre-1.5.8 behavior that Chris reported as "TX doesn't work").
+        // Better that the user sees the explicit log line than silently
+        // breaks every TX attempt.
+      } else {
+        args.push('--ptt-type=DTR');
+        args.push('--ptt-file=' + target.pttPort);
+      }
     }
     if (target.dtrOff) args.push('--set-conf=dtr_state=OFF,rts_state=OFF');
     if (target.verbose) args.push('-vvvv');
