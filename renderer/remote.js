@@ -5442,13 +5442,23 @@
   const welcomeOk = document.getElementById('welcome-ok');
 
   function showWelcome() {
+    // Check both: phone localStorage (fast path) AND server-pushed flag
+    // (survives Safari ITP wiping localStorage on the phone). The server
+    // flag is set in echoSettings via auth-ok handshake.
     if (localStorage.getItem('echocat-welcome-dismissed')) return;
+    if (echoSettings && echoSettings.echocatWelcomeDismissed) return;
     welcomeOverlay.classList.remove('hidden');
   }
 
   welcomeOk.addEventListener('click', () => {
     if (welcomeHide.checked) {
       localStorage.setItem('echocat-welcome-dismissed', '1');
+      // Mirror to desktop so it survives a phone-side localStorage wipe
+      // (Safari ITP, browser cache clear, etc.). The user shouldn't have
+      // to dismiss this every login.
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'save-echo-pref', key: 'echocatWelcomeDismissed', value: true }));
+      }
     }
     welcomeOverlay.classList.add('hidden');
   });
@@ -6658,6 +6668,15 @@
     }
     cwMacros = newMacros;
     localStorage.setItem('echocat-cw-macros', JSON.stringify(cwMacros));
+    // Push to desktop so the user's edits survive a phone-side
+    // localStorage wipe (Safari ITP and similar). Without this push,
+    // a localStorage clear on the phone took the macros down with it
+    // because the desktop's settings.remoteCwMacros was only ever
+    // received by the phone, never sent. (User report: "every time I
+    // log in via ECHOCAT I must adjust the macros again.")
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'save-cw-macros', macros: cwMacros }));
+    }
     renderCwMacros();
   }
 
@@ -6675,15 +6694,18 @@
     });
   }
 
-  // Sync macros from server settings (if configured on desktop)
+  // Sync macros from server settings. Server is now authoritative —
+  // when the user edits on the phone we push to the desktop, so the
+  // server-pushed copy is always the user's most recent edits (or
+  // defaults if they've never edited). Always trust server. Without
+  // this, a stale-defaults localStorage on the phone outranked the
+  // user's actual edits sitting on the desktop after a localStorage
+  // wipe brought back the defaults file.
   function syncMacrosFromSettings(serverMacros) {
     if (serverMacros && Array.isArray(serverMacros) && serverMacros.length > 0) {
-      // Only overwrite if user hasn't customized locally
-      var localCustom = localStorage.getItem('echocat-cw-macros');
-      if (!localCustom) {
-        cwMacros = serverMacros;
-        renderCwMacros();
-      }
+      cwMacros = serverMacros;
+      try { localStorage.setItem('echocat-cw-macros', JSON.stringify(cwMacros)); } catch {}
+      renderCwMacros();
     }
   }
 

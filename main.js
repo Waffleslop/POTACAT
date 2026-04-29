@@ -3400,6 +3400,10 @@ function updateRemoteSettings() {
     rotorActive: settings.rotorActive !== false,
     remoteCwEnabled: !!settings.remoteCwEnabled,
     remoteCwMacros: settings.remoteCwMacros || null,
+    // Phone-stored prefs that we persist server-side so they survive
+    // localStorage wipes on the phone (Safari ITP, cache clears).
+    // Currently: echocatWelcomeDismissed.
+    echocatWelcomeDismissed: !!(settings.echocatPrefs && settings.echocatPrefs.echocatWelcomeDismissed),
     customCatButtons: settings.customCatButtons || null,
     kiwiSdrHost1: settings.kiwiSdrHost1 || settings.kiwiSdrHost || '',
     kiwiSdrHost2: settings.kiwiSdrHost2 || '',
@@ -5445,6 +5449,29 @@ function connectRemote() {
       console.error('[SSTV] Gallery fetch for ECHOCAT error:', err.message);
       remoteServer.sendSstvGallery([], requestId, 0);
     }
+  });
+
+  // CW macros pushed from ECHOCAT phone — phone localStorage gets
+  // wiped periodically by Safari ITP and similar; the desktop is the
+  // durable home for the user's macros. We persist to
+  // settings.remoteCwMacros (which is already pushed to the phone via
+  // the auth-ok handshake) and trigger a re-push so other connected
+  // clients see the update too.
+  remoteServer.on('save-cw-macros', ({ macros }) => {
+    settings.remoteCwMacros = macros;
+    saveSettings(settings);
+    updateRemoteSettings();
+    sendCatLog(`[Echo CAT] Saved ${macros.length} CW macros from phone`);
+  });
+
+  // ECHOCAT prefs from phone (welcome-banner dismissed, etc.) — same
+  // localStorage-survivability story as the CW macros.
+  remoteServer.on('save-echo-pref', ({ key, value }) => {
+    if (!settings.echocatPrefs) settings.echocatPrefs = {};
+    settings.echocatPrefs[key] = value;
+    saveSettings(settings);
+    updateRemoteSettings();
+    sendCatLog(`[Echo CAT] Saved phone pref ${key}=${JSON.stringify(value)}`);
   });
 
   // Voice macro sync from ECHOCAT phone
