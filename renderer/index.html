@@ -1984,7 +1984,7 @@
         </div>
         <div style="margin-top:4px;">
           <label class="checkbox-label"><input type="checkbox" id="set-ssb-over-data"> SSB-over-DATA (prevent local mic bleed)</label>
-          <span class="help-text" style="margin-left:12px;display:block;">Switches radio to DATA-USB/DATA-LSB during ECHOCAT voice PTT so only the DAX/virtual audio is transmitted, not the local mic. Recommended for remote operation.<br>
+          <span class="help-text" style="margin-left:12px;display:block;">Switches radio to DATA-USB/DATA-LSB during PTT <b>when audio is being sent through the rig's USB CODEC</b> &mdash; i.e. ECHOCAT phone audio bridge active, voice macros playing, or FreeDV running. <b>Naked PTT (mic-in-hand or hardware footswitch) leaves the mode alone</b>, so the rig's own mic still works. Recommended on for remote operation, harmless for everyone else.<br>
           <b>Yaesu (FT-991/710/DX10/etc.):</b> set the rig menu <code>DATA MODE = Others</code> (or DATA-STD). The default <code>PSK</code> setting makes DIGL/DIGU shift the TX carrier ~1500 Hz below the dial and your transmission will land off-frequency.</span>
         </div>
         <div>

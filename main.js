@@ -5638,11 +5638,30 @@ function disconnectRemote() {
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
 let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
 
-function handleRemotePtt(state) {
+function handleRemotePtt(state, opts = {}) {
   const target = settings.catTarget;
   const isFlexRig = target && target.type === 'tcp';
 
-  if (state && settings.ssbOverData && !ft8Engine) {
+  // SSB-over-DATA only makes sense when audio is being sent to the rig
+  // through the USB CODEC (voice macro, ECHOCAT audio bridge, FT8 modem,
+  // SSTV, FreeDV). For naked PTT — user keying with a hand mic from
+  // the desktop UI or phone — switching to DATA mode disables the rig's
+  // own mic and produces silence on the air. KL7AC on TS-890S v1.5.9:
+  // hit PTT in USB, rig went to PKTUSB and TX was dead. Caller now
+  // declares whether the PTT carries audio (default: no).
+  //
+  // Special case: when the caller doesn't pass `audio` explicitly we
+  // peek at known audio-active conditions (voice macro currently
+  // playing, ECHOCAT audio bridge alive, FreeDV engine running) so
+  // that legacy callers / older paths don't lose the auto-switch
+  // behavior they depended on.
+  const audioActive = (opts.audio === true) ||
+    (opts.audio === undefined && (
+      (remoteAudioWin && !remoteAudioWin.isDestroyed()) ||
+      (typeof freedvEngine !== 'undefined' && freedvEngine)
+    ));
+
+  if (state && settings.ssbOverData && audioActive && !ft8Engine) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
@@ -12752,9 +12771,11 @@ app.whenReady().then(() => {
     if (winKeyer && winKeyer.connected) winKeyer.cancelText();
     if (smartSdr && smartSdr.connected) smartSdr.cwStop();
   });
-  // Desktop voice macro PTT
+  // Desktop voice macro PTT — voice macros play audio through the rig's
+  // USB CODEC, so SSB-over-DATA's mode switch IS appropriate here when
+  // the user has it enabled.
   ipcMain.on('voice-macro-ptt', (_e, state) => {
-    handleRemotePtt(!!state);
+    handleRemotePtt(!!state, { audio: true });
   });
 
   // Voice macro file storage (shared between desktop and ECHOCAT)
