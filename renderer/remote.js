@@ -1030,6 +1030,17 @@
         startPing();
         showWelcome();
         drainOfflineQueue();
+        // Re-upload any voice macros we have locally that the desktop
+        // may not have received. If the user records a voice macro
+        // while WS is briefly disconnected (network blip, desktop
+        // restart), the original ft8Send silently drops the upload —
+        // the phone has the recording in IndexedDB but the desktop
+        // doesn't. Later when phone IndexedDB clears (Safari ITP),
+        // the recording is gone. Re-uploading on every connect catches
+        // that case. Server's "if audio is non-empty, write file" is
+        // idempotent, so re-pushes of recordings the desktop already
+        // has are harmless.
+        try { reuploadLocalVoiceMacros(); } catch (e) { console.warn('voice-macro reupload failed:', e); }
         // Reset JTCAT state on reconnect — desktop may have stopped the engine while we were away
         ft8Running = false;
         // If already on FT8 tab, restart engine + tune to the active band
@@ -1174,15 +1185,23 @@
         break;
 
       case 'voice-macro-sync': {
-        // Incoming voice macro from desktop — store locally
-        var vmBinary = atob(msg.audio);
-        var vmBytes = new Uint8Array(vmBinary.length);
-        for (var vi = 0; vi < vmBinary.length; vi++) vmBytes[vi] = vmBinary.charCodeAt(vi);
-        var vmBlob = new Blob([vmBytes], { type: 'audio/webm' });
-        ssbDbPut(msg.idx, vmBlob, function() { renderSsbMacros(); });
+        // Incoming voice macro from desktop — store locally. Guard
+        // against empty audio: a label-only update with audio:'' would
+        // otherwise put an empty blob into IndexedDB and wipe the
+        // existing recording. Today's desktop never sends with empty
+        // audio (3rd-party / future paths might), but the cost of the
+        // guard is zero so let's be safe.
+        if (msg.audio) {
+          var vmBinary = atob(msg.audio);
+          var vmBytes = new Uint8Array(vmBinary.length);
+          for (var vi = 0; vi < vmBinary.length; vi++) vmBytes[vi] = vmBinary.charCodeAt(vi);
+          var vmBlob = new Blob([vmBytes], { type: 'audio/webm' });
+          ssbDbPut(msg.idx, vmBlob, function() { renderSsbMacros(); });
+        }
         if (msg.label != null) {
           ssbMacroLabels[msg.idx] = msg.label;
           localStorage.setItem('echocat-ssb-labels', JSON.stringify(ssbMacroLabels));
+          if (!msg.audio) renderSsbMacros();
         }
         break;
       }
@@ -7199,6 +7218,35 @@
       var tx = db.transaction('clips', 'readwrite');
       tx.objectStore('clips').delete(idx);
       tx.oncomplete = function() { cb && cb(); };
+    });
+  }
+
+  // Re-upload every voice-macro recording we have locally to the
+  // desktop. Called on auth-ok so any recording the user made while
+  // the WS was disconnected (and ft8Send silently dropped) finally
+  // makes its way to the desktop's persistent storage.
+  function reuploadLocalVoiceMacros() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ssbCheckSlots(function (filled) {
+      if (!filled || !filled.length) return;
+      filled.forEach(function (idx) {
+        ssbDbGet(idx, function (blob) {
+          if (!blob) return;
+          var reader = new FileReader();
+          reader.onload = function () {
+            try {
+              var b64 = btoa(String.fromCharCode.apply(null, new Uint8Array(reader.result)));
+              ft8Send({
+                type: 'voice-macro-sync',
+                idx: idx,
+                label: ssbMacroLabels[idx] || '',
+                audio: b64,
+              });
+            } catch (e) { /* swallow — best-effort */ }
+          };
+          reader.readAsArrayBuffer(blob);
+        });
+      });
     });
   }
 
