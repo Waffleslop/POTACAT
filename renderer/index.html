@@ -1218,12 +1218,19 @@
           </label>
           <span class="help-text" style="margin-top:2px;display:block;">Default 4532. Change if another app is using that port.</span>
           <label style="margin-top:6px;display:block;">PTT Port (optional):
-            <div style="display:flex;gap:6px;margin-top:4px;">
+            <div style="display:flex;gap:6px;margin-top:4px;align-items:center;">
               <select id="set-rig-ptt-port" style="flex:1;"><option value="">-- none (PTT via CAT) --</option></select>
               <input type="text" id="set-rig-ptt-port-manual" placeholder="or type COM port" style="width:120px;">
+              <select id="set-rig-ptt-type" style="width:70px;" title="Pin used for PTT">
+                <option value="DTR">DTR</option>
+                <option value="RTS">RTS</option>
+              </select>
             </div>
           </label>
-          <span class="help-text" style="margin-top:2px;display:block;">For DigiRig / SignaLink / similar interfaces that key PTT via DTR. <strong>Must be a different COM port than the CAT port above</strong> &mdash; these adapters present two virtual COM ports (one for CI-V data, one for DTR-keyed PTT). Check Device Manager for the second port. Leave blank for rigs that PTT over CAT (most modern Yaesu / Icom).</span>
+          <span class="help-text" style="margin-top:2px;display:block;">For DigiRig / SignaLink / similar interfaces that key PTT via DTR or RTS.<br>
+          <strong>Two-port adapters</strong> (full-size DigiRig): pick the SECOND COM port (the one without CI-V data); usually DTR.<br>
+          <strong>Single-port adapters</strong> (DigiRig Mobile): pick the SAME port as CAT above; pin depends on the model — try DTR first, switch to RTS if PTT doesn't key.<br>
+          Leave blank for rigs that PTT over CAT (most modern Yaesu / Icom).</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="hamlib-test-btn">Test Connection</button>
             <span id="hamlib-test-result" style="font-size:12px;"></span>

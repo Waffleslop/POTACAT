@@ -513,6 +513,7 @@ const setRigDtrOff = document.getElementById('set-rig-dtr-off');
 const setRigctldPort = document.getElementById('set-rigctld-port');
 const setRigPttPort = document.getElementById('set-rig-ptt-port');
 const setRigPttPortManual = document.getElementById('set-rig-ptt-port-manual');
+const setRigPttType = document.getElementById('set-rig-ptt-type');
 const setRigSearch = document.getElementById('set-rig-search');
 const hamlibTestBtn = document.getElementById('hamlib-test-btn');
 const hamlibTestResult = document.getElementById('hamlib-test-result');
@@ -1505,6 +1506,11 @@ async function populateHamlibFields(savedTarget) {
     } else if (setRigPttPortManual) {
       setRigPttPortManual.value = '';
     }
+    // Restore PTT pin (DTR or RTS). Default DTR if nothing saved.
+    if (setRigPttType) {
+      const t = (savedTarget && savedTarget.pttType) || 'DTR';
+      setRigPttType.value = (t.toUpperCase() === 'RTS') ? 'RTS' : 'DTR';
+    }
   }
 }
 
@@ -1775,6 +1781,7 @@ function buildCatTargetFromForm() {
     // string means "no separate PTT port — let rigctld PTT via CAT".
     const pttManual = (setRigPttPortManual && setRigPttPortManual.value || '').trim();
     const pttPort = pttManual || (setRigPttPort && setRigPttPort.value) || '';
+    const pttType = (setRigPttType && setRigPttType.value) || 'DTR';
     return {
       type: 'rigctld',
       rigId: parseInt(setRigModel.value, 10),
@@ -1783,6 +1790,7 @@ function buildCatTargetFromForm() {
       dtrOff: setRigDtrOff.checked,
       rigctldPort: parseInt(setRigctldPort.value, 10) || 4532,
       pttPort: pttPort || undefined,
+      pttType: pttPort ? pttType : undefined,
     };
   } else if (radioType === 'rigctldnet') {
     return {
@@ -1868,18 +1876,21 @@ rigSaveBtn.addEventListener('click', async () => {
   const catTarget = buildCatTargetFromForm();
   const model = rigModelSelect ? rigModelSelect.value || null : null;
 
-  // Catch the DigiRig same-port misconfiguration before save. PTT Port
-  // and CAT port MUST be different — DigiRig and similar adapters
-  // present two virtual COM ports (one for CI-V data, one for DTR-keyed
-  // PTT). N4RDX on v1.5.9 set both to COM4 and TX silently broke.
+  // Same-port CAT+PTT is correct for single-port adapters (DigiRig
+  // Mobile etc.) and incorrect for full-size DigiRig (two virtual
+  // COM ports, one of which carries the PTT line). We can't tell
+  // which shape the user has — just confirm before save. (N4RDX:
+  // initial guard refused same-port outright, which broke single-
+  // port adapters; reverted to a soft confirm.)
   if (catTarget && catTarget.type === 'rigctld' && catTarget.pttPort &&
       String(catTarget.pttPort).toLowerCase() === String(catTarget.serialPort || '').toLowerCase()) {
-    alert('PTT Port (' + catTarget.pttPort + ') must be a different COM port than your CAT serial port.\n\n' +
-          'DigiRig, SignaLink, and similar adapters present TWO virtual COM ports — one for CI-V data ' +
-          '(your CAT port) and a second one wired to the rig\'s PTT line via DTR (your PTT port).\n\n' +
-          'Open Windows Device Manager and look for the second COM port that appeared when you plugged ' +
-          'in the adapter. Pick that one for PTT Port, or leave PTT Port blank if your rig PTT-keys over CAT.');
-    return; // don't save until they fix it
+    const ok = confirm(
+      'PTT Port (' + catTarget.pttPort + ') is the same as your CAT serial port.\n\n' +
+      'This is CORRECT for single-port adapters like DigiRig Mobile (one COM port carries CI-V + DTR/RTS PTT).\n\n' +
+      'This is WRONG for full-size DigiRig and similar two-port adapters — those have a SECOND COM port for PTT, you should pick that one instead.\n\n' +
+      'Save with same port?'
+    );
+    if (!ok) return;
   }
 
   const rigAudioIn = rigRemoteAudioInput.value || '';
