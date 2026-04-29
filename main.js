@@ -8478,21 +8478,38 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       // Tell renderer to start RX audio capture
       if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
     }
-    // Override mode for the radio. Default: DATA sideband (DIGU/DIGL,
-    // mapped to PKTUSB/PKTLSB on rigctld). FreeDV transmits via the USB
-    // CODEC, so most rigs need DATA mode to route audio from the codec
-    // instead of the mic (FT-991A, FT-710, IC-7300, etc.).
+    // Override mode for the radio. Two independent dimensions:
     //
-    // Some older rigs (FTDX3000, others) cap DATA-mode IF bandwidth at
-    // 2.4 kHz, which clips FreeDV / FT8 audio (~3 kHz needed). For those,
-    // setting freedvUseDataMode=false in Settings keeps the radio in
-    // plain USB/LSB where the bandwidth is wider — the operator routes
-    // audio at the radio's mic-vs-USB level. (AB9AI report on FTDX3000.)
-    const useData = settings.freedvUseDataMode !== false; // default true
+    //  freedvUseDataMode (default true): DATA sideband (DIGU/DIGL,
+    //    mapped to PKTUSB/PKTLSB on rigctld) vs plain SSB (USB/LSB).
+    //    FreeDV transmits via the USB CODEC, so most modern rigs need
+    //    DATA mode to route audio from the codec instead of the mic
+    //    (FT-991A, FT-710, IC-7300, etc.). On older rigs that cap
+    //    DATA-mode IF bandwidth at 2.4 kHz (FTDX3000, others), setting
+    //    this false keeps the radio in plain USB/LSB where the IF is
+    //    wider — operator routes audio at the rig level. (AB9AI report
+    //    on FTDX3000 v1.5.7.)
+    //
+    //  freedvForceSideband (default '', i.e. auto):
+    //    ''      → band-based: LSB <10 MHz, USB >=10 MHz. Matches
+    //              voice SSB convention. (IU7RAL fix.)
+    //    'upper' → always USB-side, regardless of band
+    //    'lower' → always LSB-side, regardless of band
+    //
+    //  Operators on FTDX3000 / older Yaesus often want
+    //  forceSideband='upper' so 40m FreeDV lands in plain USB (4 kHz
+    //  IF instead of the band's natural LSB 2.4 kHz DATA path).
+    //  (AB9AI report on v1.5.10.)
+    const useData = settings.freedvUseDataMode !== false;
+    const forceSb = settings.freedvForceSideband || '';
+    let upperSideband;
+    if (forceSb === 'upper') upperSideband = true;
+    else if (forceSb === 'lower') upperSideband = false;
+    else upperSideband = freqHz >= 10_000_000;
     if (useData) {
-      mode = freqHz < 10_000_000 ? 'DIGL' : 'DIGU';
+      mode = upperSideband ? 'DIGU' : 'DIGL';
     } else {
-      mode = freqHz < 10_000_000 ? 'LSB' : 'USB';
+      mode = upperSideband ? 'USB' : 'LSB';
     }
   } else if (!isFreedvMode && freedvEngine) {
     // Tuned away from FreeDV — stop the engine
