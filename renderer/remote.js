@@ -4469,11 +4469,32 @@
   // Update respot comment when ref changes
   logRefInput.addEventListener('input', updateLogRespot);
 
+  // Map a CAT-reported mode to one of the log-sheet dropdown options.
+  // The phone log dropdown only carries ADIF-style modes (SSB / CW /
+  // FT8 / etc.) — without this, modes coming straight from CAT (USB /
+  // LSB / PKTUSB / PKTLSB / DIGU / DIGL / USB-D / LSB-D) didn't match
+  // any option and the dropdown rendered blank. The spots-table "L"
+  // button worked because spot data already carries normalized ADIF
+  // modes; the VFO full-view LOG button used currentMode directly,
+  // which is what the rig reports.
+  const LOG_MODE_OPTIONS = ['SSB','CW','FT8','FT4','FT2','FM','RTTY','AM'];
+  function aliasModeForLogSheet(rawMode) {
+    const m = (rawMode || '').toUpperCase();
+    if (!m) return 'SSB';
+    if (LOG_MODE_OPTIONS.indexOf(m) !== -1) return m;
+    if (m === 'USB' || m === 'LSB') return 'SSB';
+    if (m === 'PKTUSB' || m === 'PKTLSB' || m === 'DIGU' || m === 'DIGL' ||
+        m === 'USB-D' || m === 'LSB-D' || m === 'DATA' || m === 'DATAU' || m === 'DATAL') {
+      return 'FT8';
+    }
+    return 'SSB';
+  }
+
   function openLogSheet(prefill) {
     const p = prefill || {};
     logCall.value = p.callsign || '';
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
-    const mode = p.mode || currentMode || 'SSB';
+    const mode = aliasModeForLogSheet(p.mode || currentMode);
     logMode.value = mode;
     logRstSent.value = p.rstSent || defaultRst(mode);
     logRstRcvd.value = p.rstRcvd || defaultRst(mode);
