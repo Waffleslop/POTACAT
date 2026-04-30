@@ -528,20 +528,27 @@
 
   // ── Init ──────────────────────────────────────────────────────────
 
-  // Load saved settings and refresh status when Cloud tab is shown
-  const observer = new MutationObserver(() => {
-    const cloudFieldsets = document.querySelectorAll('[data-settings-tab="cloud"]');
+  // Load saved settings and refresh status when Cloud tab is shown.
+  // Scope the observer narrowly: watching the dialog with subtree:true caused
+  // a feedback loop because refreshStatus() mutates class attributes inside
+  // the dialog (status pill, sub-status span, etc.), retriggering the observer.
+  const cloudFieldsets = document.querySelectorAll('[data-settings-tab="cloud"]');
+  const onCloudVisible = () => {
     if (cloudFieldsets.length > 0 && !cloudFieldsets[0].classList.contains('hidden') &&
         cloudFieldsets[0].offsetParent !== null) {
       loadCloudSettings();
       refreshStatus();
     }
-  });
+  };
+  const observer = new MutationObserver(onCloudVisible);
 
   const settingsDialog = document.getElementById('settings-dialog');
   if (settingsDialog) {
-    observer.observe(settingsDialog, { attributes: true, subtree: true, attributeFilter: ['class', 'open'] });
+    observer.observe(settingsDialog, { attributes: true, attributeFilter: ['open'] });
   }
+  cloudFieldsets.forEach(fs => {
+    observer.observe(fs, { attributes: true, attributeFilter: ['class'] });
+  });
 
   // Initial load
   setTimeout(() => { loadCloudSettings(); refreshStatus(); }, 2000);
