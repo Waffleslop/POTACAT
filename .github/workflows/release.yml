@@ -97,11 +97,13 @@ jobs:
             dist/latest-mac.yml
           if-no-files-found: error
 
-  # macOS Intel (x86_64). macos-13 is the last Intel-image GitHub provides;
-  # macos-14 and macos-latest moved to Apple Silicon. If macos-13 ever gets
-  # retired, the path forward is a universal DMG cross-compiled from arm64.
+  # macOS Intel (x86_64). The bare `macos-N` labels (no `-arm64` suffix) are
+  # Intel; `macos-N-arm64` and `macos-latest` are Apple Silicon. macos-13 was
+  # retired in early 2026; macos-14 is the current Intel image and is itself
+  # scheduled for full deprecation by Nov 2026, after which the path forward
+  # is a universal DMG cross-compiled from arm64.
   build-macos-x64:
-    runs-on: macos-13 # Intel x86_64
+    runs-on: macos-14 # Intel x86_64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
