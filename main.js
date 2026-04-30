@@ -4740,7 +4740,7 @@ function connectRemote() {
     sendCatLog(`[ExtATU] Firing ${watts} W CW carrier for ${seconds}s (mode ${restoreMode} → CW, power ${restorePower}W → ${watts}W)`);
     if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
     try {
-      if (cat.setModeOnly) cat.setModeOnly('CW');
+      if (cat.setModeOnly) cat.setModeOnly('CW', _currentFreqHz);
       else if (cat.setMode) cat.setMode('CW');
       cat.setTxPower(watts);
       await new Promise(r => setTimeout(r, 300));
@@ -4759,7 +4759,7 @@ function connectRemote() {
     } finally {
       await new Promise(r => setTimeout(r, 200));
       try {
-        if (cat.setModeOnly) cat.setModeOnly(restoreMode);
+        if (cat.setModeOnly) cat.setModeOnly(restoreMode, _currentFreqHz);
         else if (cat.setMode) cat.setMode(restoreMode);
         cat.setTxPower(restorePower);
       } catch {}
@@ -5971,9 +5971,11 @@ function handleRemotePtt(state, opts = {}) {
       }
       // Suppress mode broadcasts for the entire PTT duration + restore.
       _modeSuppressUntil = Date.now() + 120000;
-      // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown)
+      // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown).
+      // Pass current freq so setModeOnly can re-anchor the VFO after the mode
+      // change (Yaesu drifts by the filter-width diff on every mode swap).
       if (cat && cat.connected) {
-        if (cat.setModeOnly) cat.setModeOnly(dataMode);
+        if (cat.setModeOnly) cat.setModeOnly(dataMode, _currentFreqHz);
         else if (_currentFreqHz) cat.tune(_currentFreqHz, dataMode);
       }
     }
@@ -6014,7 +6016,7 @@ function handleRemotePtt(state, opts = {}) {
     // Suppress mode broadcasts during restore so ECHOCAT doesn't flicker
     _modeSuppressUntil = Date.now() + 2000;
     if (cat && cat.connected) {
-      if (cat.setModeOnly) cat.setModeOnly(restoreMode);
+      if (cat.setModeOnly) cat.setModeOnly(restoreMode, _currentFreqHz);
       else if (_currentFreqHz) cat.tune(_currentFreqHz, restoreMode);
     }
   }
