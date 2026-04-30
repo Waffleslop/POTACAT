@@ -5250,7 +5250,8 @@ function connectRemote() {
     console.log('[JTCAT Remote] CQ:', txMsg, '@ quiet freq', jtcatQuietFreq, 'Hz slot:', nextSlot);
   });
 
-  remoteServer.on('jtcat-reply', async ({ call, grid, df, slot, sliceId, report, rr73, snr }) => {
+  remoteServer.on('jtcat-reply', async (data) => {
+    const { call, df, slot, sliceId, snr } = data;
     // Route TX to correct slice in multi-slice mode
     const targetEngine = (jtcatManager && sliceId) ? jtcatManager.getEngine(sliceId) : ft8Engine;
     if (!targetEngine) return;
@@ -5273,50 +5274,78 @@ function connectRemote() {
     const targetSlot = slot || targetEngine._lastRxSlot;
     targetEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
 
+    // Compute next TX message from the explicit `nextStep` set by phone-side
+    // FT8 click handler. Falls back to legacy `rr73`/`report` flags for any
+    // older client. Same fix as jtcat-popout-reply — see comment block there
+    // (Chris N4RDX 2026-04-29).
+    let nextStep = data.nextStep;
+    if (!nextStep) {
+      if (data.rr73) nextStep = 'send-73';
+      else if (data.report) nextStep = 'send-r-report';
+      else nextStep = 'reply-cq';
+    }
+    const ourRpt = (() => {
+      const v = Math.round(snr || 0);
+      return v >= 0 ? '+' + String(v).padStart(2, '0') : '-' + String(Math.abs(v)).padStart(2, '0');
+    })();
+    const theirGrid = data.theirGrid || data.grid || '';
+    const theirReport = data.theirReport || data.report;
+    const sliceKey = sliceId || 'default';
+
     let txMsg, phase;
-    if (rr73) {
-      // They sent RR73/73 — send 73 back, log QSO
+    if (nextStep === 'send-73') {
       txMsg = call + ' ' + myCall + ' 73';
       phase = '73';
-    } else if (report) {
-      // They sent a signal report — pick up at R+report phase
-      const ourSnr = snr != null ? snr : 0;
-      const ourRpt = ourSnr >= 0 ? '+' + String(Math.round(ourSnr)).padStart(2, '0') : '-' + String(Math.abs(Math.round(ourSnr))).padStart(2, '0');
+    } else if (nextStep === 'send-rr73') {
+      txMsg = call + ' ' + myCall + ' RR73';
+      phase = 'rr73';
+      const sameCall = remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.call.toUpperCase() === call.toUpperCase();
+      remoteJtcatQso = {
+        mode: 'reply', call,
+        grid: theirGrid || (sameCall ? remoteJtcatQso.grid : ''),
+        phase, txMsg,
+        report: theirReport || (sameCall ? remoteJtcatQso.report : null),
+        sentReport: (sameCall ? remoteJtcatQso.sentReport : null) || ourRpt,
+        myCall, myGrid, txRetries: 0, sliceId: sliceKey,
+      };
+    } else if (nextStep === 'send-r-report') {
       txMsg = call + ' ' + myCall + ' R' + ourRpt;
       phase = 'r+report';
-      remoteJtcatQso = { mode: 'reply', call, grid, phase, txMsg, report, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+      remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase, txMsg, report: theirReport, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
+    } else if (nextStep === 'send-report') {
+      txMsg = call + ' ' + myCall + ' ' + ourRpt;
+      phase = 'report';
+      remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase, txMsg, report: null, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
     } else {
-      // Fresh reply to CQ — start from beginning
       txMsg = call + ' ' + myCall + ' ' + myGrid;
       phase = 'reply';
     }
 
     if (phase === '73') {
-      // Send 73 courtesy — preserve reports from existing QSO if same call
       const prev = remoteJtcatQso;
       const sameCall = prev && prev.call && prev.call.toUpperCase() === call.toUpperCase();
-      remoteJtcatQso = { mode: 'reply', call, grid: grid || (sameCall ? prev.grid : ''), phase, txMsg,
+      remoteJtcatQso = { mode: 'reply', call, grid: theirGrid || (sameCall ? prev.grid : ''), phase, txMsg,
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
-        myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+        myCall, myGrid, txRetries: 0, sliceId: sliceKey };
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       targetEngine.tryImmediateTx();
       if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
-    } else if (phase === 'r+report') {
-      // QSO already created above with reports populated
+    } else if (phase === 'reply') {
+      // Fresh reply with our grid — set up new QSO entry.
+      remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       targetEngine.tryImmediateTx();
     } else {
-      // Fresh reply
-      remoteJtcatQso = { mode: 'reply', call, grid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: sliceId || 'default' };
+      // QSO already populated above by send-report / send-r-report / send-rr73.
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       targetEngine.tryImmediateTx();
     }
     remoteJtcatBroadcastQso();
-    console.log('[JTCAT Remote] Reply to', call, ':', txMsg, 'phase:', phase, 'slot:', targetEngine._txSlot, 'locked:', targetEngine._lockedTxSlot);
+    console.log('[JTCAT Remote]', nextStep, '→', call, ':', txMsg, 'phase:', phase, 'slot:', targetEngine._txSlot, 'locked:', targetEngine._lockedTxSlot);
   });
 
   remoteServer.on('jtcat-enable-tx', ({ enabled }) => {
@@ -10358,20 +10387,74 @@ app.whenReady().then(() => {
     const targetSlot = data.slot || replyEngine._lastRxSlot;
     replyEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
 
+    // Helper: render a signal report for our SNR field (e.g. -10, +05).
+    const fmtSnr = (snr) => {
+      const v = Math.round(snr || 0);
+      return v >= 0 ? '+' + String(v).padStart(2, '0') : '-' + String(Math.abs(v)).padStart(2, '0');
+    };
+
+    // Renderer (popout / phone) now sends an explicit `nextStep` so we can
+    // distinguish step 3 (their plain signal report → we send R+report) from
+    // step 4 (their R-prefixed report → we send RR73), and step 2 (their
+    // grid reply to our CQ → we send signal report) from step 1 (we are
+    // replying with our grid to their CQ). Old `data.rr73` / `data.report`
+    // are kept as fallbacks for any caller that hasn't been updated yet.
+    // Chris N4RDX sequencing report 2026-04-29.
+    let nextStep = data.nextStep;
+    if (!nextStep) {
+      if (data.rr73) nextStep = 'send-73';
+      else if (data.report) nextStep = 'send-r-report'; // legacy: assumed plain signal
+      else nextStep = 'reply-cq';
+    }
+
     let txMsg, phase;
-    if (data.rr73) {
-      // They sent RR73/73 — send 73 back, log QSO
+    const ourRpt = fmtSnr(data.snr);
+    if (nextStep === 'send-73') {
       txMsg = data.call + ' ' + myCall + ' 73';
       phase = '73';
-    } else if (data.report) {
-      // They sent a signal report — pick up at R+report phase
-      const snr = data.snr != null ? data.snr : 0;
-      const ourRpt = snr >= 0 ? '+' + String(Math.round(snr)).padStart(2, '0') : '-' + String(Math.abs(Math.round(snr))).padStart(2, '0');
+    } else if (nextStep === 'send-rr73') {
+      // Their step 4 (R+signal) → we send step 5 (RR73). Carry any prior
+      // QSO state if it's the same caller, otherwise create a new entry.
+      txMsg = data.call + ' ' + myCall + ' RR73';
+      phase = 'rr73';
+      const sameCall = popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.call.toUpperCase() === data.call.toUpperCase();
+      popoutJtcatQso = {
+        mode: 'reply', call: data.call,
+        grid: (data.theirGrid || data.grid || (sameCall ? popoutJtcatQso.grid : '')),
+        phase, txMsg,
+        report: data.theirReport || data.report || (sameCall ? popoutJtcatQso.report : null),
+        sentReport: (sameCall ? popoutJtcatQso.sentReport : null) || ourRpt,
+        myCall, myGrid, txRetries: 0, sliceId: replySliceId,
+      };
+    } else if (nextStep === 'send-r-report') {
+      // Their step 3 (plain signal report) → we send step 4 (R+ourReport).
       txMsg = data.call + ' ' + myCall + ' R' + ourRpt;
       phase = 'r+report';
-      popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: data.report, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: replySliceId };
+      popoutJtcatQso = {
+        mode: 'reply', call: data.call,
+        grid: data.theirGrid || data.grid || '',
+        phase, txMsg,
+        report: data.theirReport || data.report,
+        sentReport: ourRpt,
+        myCall, myGrid, txRetries: 0, sliceId: replySliceId,
+      };
+    } else if (nextStep === 'send-report') {
+      // Their step 2 (grid reply) → we send step 3 (plain signal report).
+      // Old code treated this as a fresh CQ-reply (sending OUR grid back),
+      // which rolled back the QSO whenever a stale step-2 message was
+      // double-clicked after we'd already advanced.
+      txMsg = data.call + ' ' + myCall + ' ' + ourRpt;
+      phase = 'report';
+      popoutJtcatQso = {
+        mode: 'reply', call: data.call,
+        grid: data.theirGrid || data.grid || '',
+        phase, txMsg,
+        report: null,
+        sentReport: ourRpt,
+        myCall, myGrid, txRetries: 0, sliceId: replySliceId,
+      };
     } else {
-      // Fresh reply to CQ — start from beginning
+      // 'reply-cq' — fresh reply with our grid (step 1 → step 2).
       txMsg = data.call + ' ' + myCall + ' ' + myGrid;
       phase = 'reply';
     }

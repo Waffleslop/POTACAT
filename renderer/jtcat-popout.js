@@ -366,49 +366,92 @@
     qsoSteps.innerHTML = html;
   }
 
-  function onDecodeRowClick(d) {
-    var text = (d.text || '').toUpperCase();
+  // Decide the *next* TX message based on the CONTENT of a received decode.
+  // Standard FT8 sequence:
+  //   1. CQ <call> <grid>            (we hear)
+  //   2. <us> <them> <their grid>     (we hear, after our CQ)
+  //   3. <us> <them> <-SNR>           (we hear, signal report — no R prefix)
+  //   4. <us> <them> R<-SNR>          (we hear, R-rogered report — distinct from 3!)
+  //   5. <us> <them> RR73 / RRR
+  //   6. <us> <them> 73
+  //
+  // Old code conflated steps 3 and 4 (`R?[+-]\d{2}` matched both, lost the R)
+  // and treated step 2 (their grid reply) the same as a fresh CQ-reply,
+  // causing double-clicks on a stale step-2 message after we'd already
+  // advanced to send a signal report to roll the QSO back to step 2 (us
+  // sending grid again). Chris N4RDX 2026-04-29.
+  //
+  // Returns { step, call, theirGrid?, theirReport? } or null when the
+  // message isn't actionable (not a CQ, not addressed to us).
+  function inferReplyStep(decode, myCall) {
+    var text = (decode.text || '').toUpperCase();
     var parts = text.split(/\s+/);
-    if (text.startsWith('CQ ')) {
+    var me = (myCall || '').toUpperCase();
+
+    if (text.indexOf('CQ ') === 0) {
       var callIdx = 1;
       if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) callIdx = 2;
       var call = parts[callIdx] || '';
-      var grid = parts[callIdx + 1] || '';
-      if (call) {
-        jpTxFreqHz = d.df || 1500;
-        jpRxFreqHz = d.df || 1500;
-        txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
-
-        console.log('[JTCAT popout] Reply to CQ:', call, grid, 'df:', d.df, 'slot:', d.slot);
-        // Add the CQ message to My Activity as the start of the QSO thread
-        addToMyActivity(d);
-        window.api.jtcatReply({ call: call, grid: grid, df: d.df || 1500, slot: d.slot, sliceId: d.sliceId });
-      }
-    } else if (parts.length >= 2) {
-      var toCall = parts[0], fromCall = parts[1], payload = (parts[2] || '');
-      // If this message is directed at me (toCall === myCallsign), pick up the QSO
-      if (toCall === myCallsign && fromCall) {
-        var grid = /^[A-R]{2}[0-9]{2}$/i.test(payload) ? payload : '';
-        var rptMatch = payload.match(/^R?([+-]\d{2})$/);
-        var hasRR73 = payload === 'RR73' || payload === 'RRR' || payload === '73';
-        jpTxFreqHz = d.df || 1500;
-        txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
-
-        console.log('[JTCAT popout] Pick up QSO with', fromCall, 'payload:', payload, 'df:', d.df);
-        window.api.jtcatReply({
-          call: fromCall, grid: grid, df: d.df || 1500, slot: d.slot,
-          report: rptMatch ? rptMatch[1] : undefined,
-          rr73: hasRR73 || undefined,
-          snr: d.db,
-        });
-      } else {
-        // Not directed at us — just set TX freq
-        jpTxFreqHz = d.df || 1500;
-        txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
-        window.api.jtcatSetTxFreq(jpTxFreqHz);
-
-      }
+      var theirGrid = parts[callIdx + 1] || '';
+      if (!call) return null;
+      return { step: 'reply-cq', call: call, theirGrid: theirGrid };
     }
+
+    if (parts.length >= 2 && me && parts[0] === me && parts[1]) {
+      var fromCall = parts[1];
+      var payload = parts[2] || '';
+
+      if (payload === 'RR73' || payload === 'RRR' || payload === '73') {
+        return { step: 'send-73', call: fromCall };
+      }
+      // Step 4: their R-prefixed report — we send RR73 next.
+      var rRpt = payload.match(/^R([+-]\d{2})$/);
+      if (rRpt) return { step: 'send-rr73', call: fromCall, theirReport: rRpt[1] };
+      // Step 3: plain signal report — we send R+ourReport next.
+      var plainRpt = payload.match(/^([+-]\d{2})$/);
+      if (plainRpt) return { step: 'send-r-report', call: fromCall, theirReport: plainRpt[1] };
+      // Step 2: they replied to our CQ with their grid — we send a signal report next.
+      if (/^[A-R]{2}[0-9]{2}$/i.test(payload)) {
+        return { step: 'send-report', call: fromCall, theirGrid: payload };
+      }
+      // Anything else directed at us — fall back to a fresh-reply pattern.
+      return { step: 'reply-cq', call: fromCall };
+    }
+
+    return null;
+  }
+
+  function onDecodeRowClick(d) {
+    var action = inferReplyStep(d, myCallsign);
+    if (!action) {
+      // Not a CQ, not addressed to us — just retune.
+      jpTxFreqHz = d.df || 1500;
+      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+      window.api.jtcatSetTxFreq(jpTxFreqHz);
+      return;
+    }
+
+    jpTxFreqHz = d.df || 1500;
+    jpRxFreqHz = d.df || 1500;
+    txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+
+    console.log('[JTCAT popout]', action.step, '→', action.call, 'df:', d.df, 'slot:', d.slot, 'theirReport:', action.theirReport, 'theirGrid:', action.theirGrid);
+    if (action.step === 'reply-cq') addToMyActivity(d);
+
+    window.api.jtcatReply({
+      call: action.call,
+      df: d.df || 1500,
+      slot: d.slot,
+      sliceId: d.sliceId,
+      snr: d.db,
+      nextStep: action.step,
+      theirGrid: action.theirGrid,
+      theirReport: action.theirReport,
+      // Legacy fields for back-compat with any older main.js handler:
+      grid: action.theirGrid || '',
+      report: action.theirReport,
+      rr73: action.step === 'send-73' || undefined,
+    });
   }
 
   // --- Decode rendering ---

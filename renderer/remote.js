@@ -5826,44 +5826,62 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  function ft8ClickDecode(decode) {
-    // If it's a CQ, reply to it
+  // Same FT8 next-step inference as renderer/jtcat-popout.js — see the
+  // comment block there for the why. Conflating steps 3 and 4 (R-prefixed
+  // signal report vs plain signal report) and treating their step-2 grid
+  // reply as a fresh CQ-reply caused double-click sequencing to roll back
+  // the QSO. Chris N4RDX 2026-04-29.
+  function ft8InferReplyStep(decode, myCall) {
     const text = (decode.text || '').toUpperCase();
-    if (text.startsWith('CQ ')) {
-      // Parse: CQ [optional dx/na/etc] CALLSIGN GRID
-      const parts = text.split(/\s+/);
+    const parts = text.split(/\s+/);
+    const me = (myCall || '').toUpperCase();
+    if (text.indexOf('CQ ') === 0) {
       let callIdx = 1;
-      // Skip CQ modifiers (CQ DX, CQ NA, etc.)
       if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) callIdx = 2;
       const call = parts[callIdx] || '';
-      const grid = parts[callIdx + 1] || '';
-      if (call) {
-        ft8Send({ type: 'jtcat-reply', call, grid, df: decode.df || 1500, sliceId: decode.sliceId });
-      }
-    } else if (myCallsign && text.indexOf(myCallsign.toUpperCase()) >= 0) {
-      // Directed at us — parse caller, detect report/RR73, pick up QSO mid-exchange
-      const parts = text.split(/\s+/);
-      const mc = myCallsign.toUpperCase();
-      // Format: MYCALL THEIRCALL PAYLOAD — caller is the part that isn't our callsign
-      const caller = parts.find(p => p !== mc && /^[A-Z0-9/]{2,}/.test(p));
-      const payload = parts[2] || '';
-      const grid = /^[A-R]{2}[0-9]{2}$/i.test(payload) ? payload : '';
-      const rptMatch = payload.match(/^R?([+-]\d{2})$/);
-      const hasRR73 = payload === 'RR73' || payload === 'RRR' || payload === '73';
-      if (caller) {
-        ft8Send({
-          type: 'jtcat-reply', call: caller, grid, df: decode.df || 1500, sliceId: decode.sliceId,
-          report: rptMatch ? rptMatch[1] : undefined,
-          rr73: hasRR73 || undefined,
-          snr: decode.db,
-        });
-      }
-    } else {
-      // Click on a non-CQ, non-directed decode — set TX freq to their freq
-      if (decode.df) {
-        ft8Send({ type: 'jtcat-set-tx-freq', hz: decode.df });
-      }
+      const theirGrid = parts[callIdx + 1] || '';
+      if (!call) return null;
+      return { step: 'reply-cq', call, theirGrid };
     }
+    if (parts.length >= 2 && me && parts[0] === me && parts[1]) {
+      const fromCall = parts[1];
+      const payload = parts[2] || '';
+      if (payload === 'RR73' || payload === 'RRR' || payload === '73') {
+        return { step: 'send-73', call: fromCall };
+      }
+      const rRpt = payload.match(/^R([+-]\d{2})$/);
+      if (rRpt) return { step: 'send-rr73', call: fromCall, theirReport: rRpt[1] };
+      const plainRpt = payload.match(/^([+-]\d{2})$/);
+      if (plainRpt) return { step: 'send-r-report', call: fromCall, theirReport: plainRpt[1] };
+      if (/^[A-R]{2}[0-9]{2}$/i.test(payload)) {
+        return { step: 'send-report', call: fromCall, theirGrid: payload };
+      }
+      return { step: 'reply-cq', call: fromCall };
+    }
+    return null;
+  }
+
+  function ft8ClickDecode(decode) {
+    const action = ft8InferReplyStep(decode, myCallsign);
+    if (!action) {
+      // Not a CQ, not addressed to us — just retune.
+      if (decode.df) ft8Send({ type: 'jtcat-set-tx-freq', hz: decode.df });
+      return;
+    }
+    ft8Send({
+      type: 'jtcat-reply',
+      call: action.call,
+      df: decode.df || 1500,
+      sliceId: decode.sliceId,
+      snr: decode.db,
+      nextStep: action.step,
+      theirGrid: action.theirGrid,
+      theirReport: action.theirReport,
+      // Legacy fields for back-compat:
+      grid: action.theirGrid || '',
+      report: action.theirReport,
+      rr73: action.step === 'send-73' || undefined,
+    });
   }
 
   // --- QSO Exchange display ---
