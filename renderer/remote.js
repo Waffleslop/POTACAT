@@ -10369,6 +10369,11 @@
         const detailSpan = document.createElement('span');
         detailSpan.className = 'vf-profile-item-detail';
         detailSpan.textContent = detail;
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'vf-profile-item-edit';
+        editBtn.title = 'Rename';
+        editBtn.innerHTML = '&#x270E;';
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'vf-profile-item-del';
@@ -10376,10 +10381,16 @@
         delBtn.textContent = '×';
         item.appendChild(nameSpan);
         item.appendChild(detailSpan);
+        item.appendChild(editBtn);
         item.appendChild(delBtn);
         item.addEventListener('click', (e) => {
-          if (e.target === delBtn) return;
+          if (e.target === delBtn || e.target === editBtn) return;
+          if (item.classList.contains('editing')) return;
           applyProfile(p);
+        });
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          beginVfProfileRename(item, nameSpan, p, i);
         });
         delBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -10389,6 +10400,41 @@
         });
         vfProfileList.appendChild(item);
       });
+    }
+
+    // Inline rename — same pattern as the desktop popout. Replace the name
+    // span with an input, commit on blur/Enter, cancel on Esc. Tap-to-apply
+    // is suppressed via the .editing class so an accidental tap during edit
+    // doesn't immediately tune.
+    function beginVfProfileRename(item, nameEl, profile, index) {
+      if (item.classList.contains('editing')) return;
+      item.classList.add('editing');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'vf-profile-item-name-edit';
+      input.value = profile.name || '';
+      input.maxLength = 64;
+      nameEl.replaceWith(input);
+      input.focus();
+      input.select();
+      let committed = false;
+      const finish = (commit) => {
+        if (committed) return;
+        committed = true;
+        const newName = (input.value || '').trim();
+        if (commit && newName && newName !== profile.name) {
+          vfoProfiles[index] = Object.assign({}, profile, { name: newName });
+          renderVfProfiles();
+          pushProfilesToDesktop();
+        } else {
+          renderVfProfiles();
+        }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      input.addEventListener('blur', () => finish(true));
     }
 
     function applyProfile(p) {

@@ -230,11 +230,19 @@
     .profile-item:hover { background: var(--bg-btn-hover); }
     .profile-name { font-weight: bold; color: var(--text-primary); flex: 1; }
     .profile-detail { font-size: 11px; color: var(--text-dim); font-family: monospace; }
-    .profile-del {
-      background: none; border: none; color: var(--text-dimmer); font-size: 16px;
+    .profile-del, .profile-edit {
+      background: none; border: none; color: var(--text-dimmer); font-size: 14px;
       cursor: pointer; padding: 0 4px;
     }
     .profile-del:hover { color: #e94560; }
+    .profile-edit:hover { color: var(--accent-blue, #4fc3f7); }
+    .profile-name-edit {
+      flex: 1; background: var(--bg-input); border: 1px solid var(--accent-blue, #4fc3f7);
+      color: var(--text-primary); padding: 2px 6px; border-radius: 3px; font-size: 13px;
+      font-family: inherit; min-width: 0;
+    }
+    .profile-item.editing { background: var(--bg-btn-hover); }
+    .profile-item.editing:hover { background: var(--bg-btn-hover); }
     .profile-add-row {
       display: flex; gap: 6px; padding: 8px 0;
     }
@@ -1141,11 +1149,19 @@ function renderProfiles() {
     item.innerHTML = `
       <span class="profile-name">${esc(p.name)}</span>
       <span class="profile-detail">${freqMhz} MHz ${p.mode || ''}${p.filterWidth ? ' BW:' + p.filterWidth : ''}</span>
+      <button class="profile-edit" title="Rename profile">&#x270E;</button>
       <button class="profile-del" title="Delete profile">&times;</button>
     `;
+    const nameEl = item.querySelector('.profile-name');
     item.addEventListener('click', (e) => {
       if (e.target.closest('.profile-del')) return;
+      if (e.target.closest('.profile-edit')) return;
+      if (item.classList.contains('editing')) return;
       applyProfile(p);
+    });
+    item.querySelector('.profile-edit').addEventListener('click', (e) => {
+      e.stopPropagation();
+      beginRenameProfile(item, nameEl, p, i);
     });
     item.querySelector('.profile-del').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1155,6 +1171,37 @@ function renderProfiles() {
     });
     list.appendChild(item);
   });
+}
+
+// Inline rename: replace the name span with an input, commit on blur/Enter,
+// cancel on Esc. Click-to-apply is suppressed via the .editing class.
+function beginRenameProfile(item, nameEl, profile, index) {
+  if (item.classList.contains('editing')) return;
+  item.classList.add('editing');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'profile-name-edit';
+  input.value = profile.name || '';
+  input.maxLength = 64;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let committed = false;
+  const finish = (commit) => {
+    if (committed) return;
+    committed = true;
+    const newName = (input.value || '').trim();
+    if (commit && newName && newName !== profile.name) {
+      profiles[index] = { ...profile, name: newName };
+      saveProfiles();
+    }
+    renderProfiles();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
 }
 
 function renderInlineProfiles() {
