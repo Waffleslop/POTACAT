@@ -162,6 +162,11 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
 let bandspreadPopoutWin = null; // pop-out bandspread window
+let lastMergedSpots = [];        // most recent dedupe'd spot list, cached so the
+                                 // bandspread-popout-push handler can substitute
+                                 // the renderer's table-filtered payload with the
+                                 // panadapter's allowlist when "Sync with Table
+                                 // View" is off (K0OTC 2026-04-30).
 let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
 let _sstvLastActivityMs = 0; // last VIS/image timestamp — for heartbeat log
 let _sstvHeartbeatTimer = null;
@@ -1177,7 +1182,11 @@ function connectCluster() {
   clusterClients.clear();
   clusterSpots = [];
 
-  if (!settings.enableCluster || !settings.myCallsign) {
+  // Source fetches if either the table side wants it or the panadapter
+  // has independently asked for it (Sync with Table View off + Cluster
+  // checked under Settings → Panadapter & Bandscope). K0OTC 2026-04-30.
+  const wantCluster = settings.enableCluster === true || panadapterWantsSource('dxc');
+  if (!wantCluster || !settings.myCallsign) {
     sendClusterStatus();
     return;
   }
@@ -1284,7 +1293,8 @@ function disconnectCluster() {
 
 function connectCwSpots() {
   disconnectCwSpots();
-  if (!settings.enableCwSpots || !settings.myCallsign) return;
+  const wantCwSpots = settings.enableCwSpots === true || panadapterWantsSource('cwspots');
+  if (!wantCwSpots || !settings.myCallsign) return;
   const host = settings.cwSpotsHost || 'rbn.telegraphy.de';
   const port = settings.cwSpotsPort || 7000;
   const clubs = settings.cwSpotsClubs || [];
@@ -1441,7 +1451,8 @@ function connectRbn() {
   }
   rbnSpots = [];
 
-  if (!settings.enableRbn || !settings.myCallsign) {
+  const wantRbn = settings.enableRbn === true || panadapterWantsSource('rbn');
+  if (!wantRbn || !settings.myCallsign) {
     sendRbnStatus({ connected: false });
     return;
   }
@@ -1610,7 +1621,9 @@ function connectPskr() {
   }
   pskrSpots = [];
 
-  if (!settings.enablePskr && !settings.enableFreedv) {
+  const wantPskr = settings.enablePskr === true || settings.enableFreedv === true ||
+    panadapterWantsSource('pskr');
+  if (!wantPskr) {
     sendPskrStatus({ connected: false });
     return;
   }
@@ -3217,6 +3230,84 @@ function disconnectSmartSdr() {
 
 let lastSmartSdrPush = 0;
 
+// ---------------------------------------------------------------------------
+// Panadapter / Bandscope spot routing
+// ---------------------------------------------------------------------------
+// The same merged spot list flows to three "frequency-overlay" destinations:
+// the SmartSDR panadapter, the TCI panadapter, and the bandscope popout.
+// These three should behave identically — operators don't think of them as
+// separate things, they think of "the panadapter" (Casey to Tyler 2026-04-30).
+//
+// Two modes:
+//
+//   * Sync with Table View (default ON) — reuse the table's source toggles
+//     (settings.enablePota / enableSota / enableWwff / enableLlota /
+//     enableCluster / enableCwSpots / enableRbn / enablePskr) so whatever
+//     the operator sees in the table is what overlays on the panadapter.
+//
+//   * Independent (sync OFF) — the panadapter has its own per-source
+//     allowlist (settings.panadapterPota / Sota / Wwff / Llota / Cluster /
+//     Rbn / CwSpots / Pskr / Wsjtx). When this mode is on, the *fetch*
+//     decision in refreshSpots / connectCluster / etc. ORs in these
+//     toggles too so a source enabled only here still pulls traffic.
+//     Required for K0OTC's "DX-only-panadapter, POTA-only-table" scenario.
+//
+// Helper used by all three push sites + the bandspread popout payload.
+function panadapterAllowsSource(source) {
+  if (settings.panadapterSyncTable !== false) {
+    // Sync mode (default) — mirror the table's source set.
+    switch (source) {
+      case 'pota':    return settings.enablePota !== false; // default true
+      case 'sota':    return settings.enableSota === true;
+      case 'wwff':    return settings.enableWwff === true;
+      case 'llota':   return settings.enableLlota === true;
+      case 'dxc':     return settings.enableCluster === true;
+      case 'rbn':     return settings.enableRbn === true;
+      case 'cwspots': return settings.enableCwSpots === true;
+      case 'pskr':    return settings.enablePskr === true;
+      case 'freedv':  return settings.enableFreedv === true;
+      case 'wsjtx':   return true; // local overlays — operator owns the WSJT-X UI
+      default:        return true;
+    }
+  }
+  // Independent mode — explicit per-source picks for the panadapter.
+  switch (source) {
+    case 'pota':    return settings.panadapterPota === true;
+    case 'sota':    return settings.panadapterSota === true;
+    case 'wwff':    return settings.panadapterWwff === true;
+    case 'llota':   return settings.panadapterLlota === true;
+    case 'dxc':     return settings.panadapterCluster === true;
+    case 'rbn':     return settings.panadapterRbn === true;
+    case 'cwspots': return settings.panadapterCwSpots === true;
+    case 'pskr':    return settings.panadapterPskr === true;
+    case 'freedv':  return settings.panadapterPskr === true;
+    case 'wsjtx':   return settings.panadapterWsjtx === true;
+    default:        return true;
+  }
+}
+
+function spotsForPanadapter(merged) {
+  return merged.filter(s => panadapterAllowsSource(s.source));
+}
+
+// True when the user has independently selected a source for the panadapter.
+// Used by fetch gates: if the table-side enable* says no, we still pull
+// the source if the panadapter asked for it (and we're in independent mode).
+function panadapterWantsSource(source) {
+  if (settings.panadapterSyncTable !== false) return false; // sync mode adds nothing extra
+  switch (source) {
+    case 'pota':    return settings.panadapterPota === true;
+    case 'sota':    return settings.panadapterSota === true;
+    case 'wwff':    return settings.panadapterWwff === true;
+    case 'llota':   return settings.panadapterLlota === true;
+    case 'dxc':     return settings.panadapterCluster === true;
+    case 'rbn':     return settings.panadapterRbn === true;
+    case 'cwspots': return settings.panadapterCwSpots === true;
+    case 'pskr':    return settings.panadapterPskr === true;
+    default:        return false;
+  }
+}
+
 function pushSpotsToSmartSdr(spots) {
   if (!smartSdr || !smartSdr.connected) return;
   if (!settings.smartSdrSpots) return; // only push spots when explicitly enabled
@@ -3228,6 +3319,9 @@ function pushSpotsToSmartSdr(spots) {
   const sdrMaxAgeMs = (settings.smartSdrMaxAge != null ? settings.smartSdrMaxAge : 15) * 60000;
   const maxAgeMs = sdrMaxAgeMs > 0 ? Math.min(sdrMaxAgeMs, tableMaxAgeMs) : tableMaxAgeMs;
   const maxSpots = settings.smartSdrMaxSpots || 0;
+
+  // Apply the user's panadapter-source allowlist (sync-with-table or independent).
+  spots = spotsForPanadapter(spots);
 
   let pushed = 0;
   for (const spot of spots) {
@@ -6076,6 +6170,11 @@ function pushSpotsToTci(spots) {
   const tciMaxAgeMs = (settings.tciMaxAge != null ? settings.tciMaxAge : 15) * 60000;
   const maxAgeMs = tciMaxAgeMs > 0 ? Math.min(tciMaxAgeMs, tableMaxAgeMs) : tableMaxAgeMs;
 
+  // Apply the user's panadapter-source allowlist — TCI is treated as a
+  // panadapter destination (Casey: "what is good for the panadapter is
+  // good for the bandscope" — same applies here).
+  spots = spotsForPanadapter(spots);
+
   for (const spot of spots) {
     // Age filter — skip spots older than the effective max age (table age or panadapter age, whichever is smaller)
     if (maxAgeMs > 0 && spot.spotTime) {
@@ -6662,6 +6761,7 @@ function sendMergedSpots() {
   const netSpots = getActiveNetSpots();
   const raw = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
   const merged = dedupeCrossSource(raw);
+  lastMergedSpots = merged; // cached for the bandspread-popout-push override
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
   pushSpotsToTci(merged);
@@ -6691,9 +6791,11 @@ function sendMergedSpots() {
   if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) {
     spotsPopoutWin.webContents.send('spots-popout-data', merged);
   }
-  // Forward to bandspread pop-out if open (reuses 'spots' channel)
+  // Forward to bandspread pop-out if open (reuses 'spots' channel) — apply
+  // the same panadapter-source filter so bandspread mirrors the panadapter
+  // (sync-with-table by default, or the operator's independent picks).
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
-    bandspreadPopoutWin.webContents.send('spots', merged);
+    bandspreadPopoutWin.webContents.send('spots', spotsForPanadapter(merged));
   }
   // Trigger QRZ lookups for new callsigns (async, non-blocking)
   if (qrz.configured && settings.enableQrz) {
@@ -6722,10 +6824,14 @@ function sendMergedSpots() {
 
 async function refreshSpots() {
   try {
-    const enablePota = settings.enablePota !== false; // default true
-    const enableSota = settings.enableSota === true;  // default false
-    const enableWwff = settings.enableWwff === true;   // default false
-    const enableLlota = settings.enableLlota === true; // default false
+    // A source fetches if either the table side wants it (settings.enableX)
+    // or the panadapter has independently asked for it. Without the OR-in
+    // there's no way to feed "DX on panadapter only / POTA on table only"
+    // workflows (K0OTC 2026-04-30).
+    const enablePota = settings.enablePota !== false || panadapterWantsSource('pota');
+    const enableSota = settings.enableSota === true   || panadapterWantsSource('sota');
+    const enableWwff = settings.enableWwff === true   || panadapterWantsSource('wwff');
+    const enableLlota = settings.enableLlota === true || panadapterWantsSource('llota');
 
     const fetches = [];
     if (enablePota) fetches.push(fetchPotaSpots().then(processPotaSpots));
@@ -9635,6 +9741,14 @@ app.whenReady().then(() => {
   // filters / watchlist all leaked into the bandspread.
   ipcMain.on('bandspread-popout-push', (_e, payload) => {
     if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+      // When the operator has chosen an independent panadapter source set,
+      // substitute the renderer's table-filtered payload with the
+      // panadapter allowlist so DX-only-panadapter / POTA-only-table
+      // setups actually behave that way for the bandspread too.
+      if (settings.panadapterSyncTable === false) {
+        const panaSpots = spotsForPanadapter(lastMergedSpots);
+        payload = Object.assign({}, payload || {}, { spots: panaSpots });
+      }
       bandspreadPopoutWin.webContents.send('bandspread-popout-view', payload);
     }
   });
@@ -11440,6 +11554,33 @@ app.whenReady().then(() => {
       if (spotTimer) clearInterval(spotTimer);
       const newRefreshMs = Math.max(15, settings.refreshInterval || 30) * 1000;
       spotTimer = setInterval(refreshSpots, newRefreshMs);
+    }
+
+    // Panadapter source-set changes (Settings → Panadapter & Bandscope) may
+    // alter fetch decisions: enabling a source for the panadapter while it's
+    // still off in the table needs to spin up its connection, and turning
+    // it off may let us tear it down. Re-evaluate streaming sources by
+    // calling connect* — those functions now consult both table and
+    // panadapter sides via panadapterWantsSource(). Polled sources
+    // (POTA/SOTA/WWFF/LLOTA) pick up the new gate on the next refreshSpots.
+    const panadapterChanged = has('panadapterSyncTable') || has('panadapterPota') ||
+      has('panadapterSota') || has('panadapterWwff') || has('panadapterLlota') ||
+      has('panadapterCluster') || has('panadapterRbn') || has('panadapterCwSpots') ||
+      has('panadapterPskr') || has('panadapterWsjtx');
+    if (panadapterChanged) {
+      // connectX() and disconnectX() are idempotent — they tear down before
+      // (re)gating, so calling them when the gate is now false is the safe
+      // way to disconnect a source that was previously enabled only via the
+      // panadapter side.
+      connectCluster();
+      connectRbn();
+      connectCwSpots();
+      connectPskr();
+      // Trigger a fresh push so the new allowlist takes effect immediately
+      // (without waiting for the next refresh tick).
+      if (typeof sendMergedSpots === 'function') {
+        try { sendMergedSpots(); } catch { /* ignore */ }
+      }
     }
 
     // Reconnect cluster if settings changed

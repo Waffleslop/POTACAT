@@ -1863,7 +1863,23 @@
     </fieldset>
     <!-- Panadapter Spots -->
     <fieldset class="source-toggles" data-settings-tab="spots">
-      <legend>Panadapter Spots</legend>
+      <legend>Panadapter &amp; Bandscope</legend>
+      <span class="help-text" style="display:block;margin-bottom:6px;">Controls what spots overlay on the SmartSDR panadapter, the Thetis/TCI panadapter, and the Bandscope pop-out. The spot table is unaffected — its sources are configured in the Spots filter dropdown above the table.</span>
+      <label class="checkbox-label">
+        <input type="checkbox" id="set-panadapter-sync-table" checked> Sync with Spot Table View
+      </label>
+      <span class="help-text" style="display:block;margin-bottom:6px;">When checked, the panadapter / TCI / bandscope show whatever sources you have visible in the spot table. Uncheck to pick an independent set below — useful for "DX cluster on the panadapter only, POTA on the table only" workflows. Sources enabled below will fetch from the network even if disabled in the Spots filter.</span>
+      <div id="panadapter-sources" class="hidden" style="display:grid;grid-template-columns:repeat(2, minmax(140px, 1fr));gap:4px 12px;margin:6px 0 12px 18px;">
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-pota"> POTA</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-sota"> SOTA</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-wwff"> WWFF</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-llota"> LLOTA</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-cluster"> DX Cluster</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-rbn"> RBN</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-cwspots"> CW Spots</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-pskr"> PSK Reporter</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-wsjtx"> WSJT-X overlays</label>
+      </div>
       <label class="checkbox-label">
         <input type="checkbox" id="set-smartsdr-spots"> Push spots to SmartSDR panadapter
       </label>

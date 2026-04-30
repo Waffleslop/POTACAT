@@ -805,6 +805,29 @@ const setQrzLogbook = document.getElementById('set-qrz-logbook');
 const qrzLogbookConfig = document.getElementById('qrz-logbook-config');
 const setQrzApiKey = document.getElementById('set-qrz-api-key');
 const qrzApiStatus = document.getElementById('qrz-api-status');
+// Panadapter & Bandscope source-set controls. Sync toggle reveals/hides the
+// per-source picks; the picks only matter when sync is off. See main.js
+// `panadapterAllowsSource` for the routing logic.
+const setPanadapterSyncTable = document.getElementById('set-panadapter-sync-table');
+const panadapterSourcesEl    = document.getElementById('panadapter-sources');
+const setPanadapterPota      = document.getElementById('set-panadapter-pota');
+const setPanadapterSota      = document.getElementById('set-panadapter-sota');
+const setPanadapterWwff      = document.getElementById('set-panadapter-wwff');
+const setPanadapterLlota     = document.getElementById('set-panadapter-llota');
+const setPanadapterCluster   = document.getElementById('set-panadapter-cluster');
+const setPanadapterRbn       = document.getElementById('set-panadapter-rbn');
+const setPanadapterCwSpots   = document.getElementById('set-panadapter-cwspots');
+const setPanadapterPskr      = document.getElementById('set-panadapter-pskr');
+const setPanadapterWsjtx     = document.getElementById('set-panadapter-wsjtx');
+function updatePanadapterSourcesVisibility() {
+  if (panadapterSourcesEl) {
+    panadapterSourcesEl.classList.toggle('hidden', !!setPanadapterSyncTable.checked);
+  }
+}
+if (setPanadapterSyncTable) {
+  setPanadapterSyncTable.addEventListener('change', updatePanadapterSourcesVisibility);
+}
+
 const setSmartSdrSpots = document.getElementById('set-smartsdr-spots');
 const smartSdrConfig = document.getElementById('smartsdr-config');
 const setSmartSdrHost = document.getElementById('set-smartsdr-host');
@@ -8363,6 +8386,19 @@ async function openSettingsDialog(tab) {
   setPotaParksPath.value = s.potaParksPath || '';
   potaParksClearBtn.style.display = s.potaParksPath ? '' : 'none';
   setHideWorkedParks.checked = s.hideWorkedParks === true;
+  // Panadapter & Bandscope source-set: sync defaults true (matches today's
+  // behavior). Per-source picks default false (only consulted when sync is off).
+  setPanadapterSyncTable.checked = s.panadapterSyncTable !== false;
+  setPanadapterPota.checked      = s.panadapterPota === true;
+  setPanadapterSota.checked      = s.panadapterSota === true;
+  setPanadapterWwff.checked      = s.panadapterWwff === true;
+  setPanadapterLlota.checked     = s.panadapterLlota === true;
+  setPanadapterCluster.checked   = s.panadapterCluster === true;
+  setPanadapterRbn.checked       = s.panadapterRbn === true;
+  setPanadapterCwSpots.checked   = s.panadapterCwSpots === true;
+  setPanadapterPskr.checked      = s.panadapterPskr === true;
+  setPanadapterWsjtx.checked     = s.panadapterWsjtx === true;
+  updatePanadapterSourcesVisibility();
   setSmartSdrSpots.checked = s.smartSdrSpots === true;
   setSmartSdrHost.value = s.smartSdrHost || '127.0.0.1';
   setSmartSdrMaxAge.value = s.smartSdrMaxAge != null ? s.smartSdrMaxAge : 15;
@@ -8803,6 +8839,16 @@ settingsSave.addEventListener('click', async () => {
     disableAutoUpdate: disableAutoUpdate,
     enableTelemetry: telemetryEnabled,
     lightMode: lightModeEnabled,
+    panadapterSyncTable: setPanadapterSyncTable.checked,
+    panadapterPota:      setPanadapterPota.checked,
+    panadapterSota:      setPanadapterSota.checked,
+    panadapterWwff:      setPanadapterWwff.checked,
+    panadapterLlota:     setPanadapterLlota.checked,
+    panadapterCluster:   setPanadapterCluster.checked,
+    panadapterRbn:       setPanadapterRbn.checked,
+    panadapterCwSpots:   setPanadapterCwSpots.checked,
+    panadapterPskr:      setPanadapterPskr.checked,
+    panadapterWsjtx:     setPanadapterWsjtx.checked,
     smartSdrSpots: smartSdrSpotsEnabled,
     smartSdrHost: smartSdrHostVal,
     smartSdrMaxAge: smartSdrMaxAgeVal,
