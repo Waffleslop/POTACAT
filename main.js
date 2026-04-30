@@ -4050,34 +4050,45 @@ function connectRemote() {
           cat.resumePolling();
         }, 1500);
       }
+      // Lazy-open the dedicated CW Key Port (if configured) on the first
+      // paddle event of the session. Originally gated on `paddleKey === 'dtr'`
+      // models (Icom-style USB-A DTR keying) but rigctld users with a Yaesu
+      // FTDx10 (`paddleKey: 'txrx'`) ALSO need a dedicated key port to do
+      // paddle CW at all — see rigctld branch below — so always try the lazy
+      // open. If they don't have one configured, ensureCwKeyPortLazyOpen()
+      // is a no-op.
+      if (down && !cwKeyPort) {
+        ensureCwKeyPortLazyOpen();
+      }
       // Rigctld has no per-element CW keying command — its "T 1"/"T 0" only
       // toggles the mic PTT line, so the radio TX-keys with zero CW output
-      // (KM4CFT IC-7300 MK II via rigctld, 2026-04-23). Refuse paddle keying
-      // in that mode and log a one-time explainer rather than leaving the
-      // radio in silent TX. The CW text widget still works — it uses
-      // hamlib's `\send_morse` to have the radio's internal keyer send text.
+      // (KM4CFT IC-7300 MK II via rigctld, 2026-04-23). The dedicated CW Key
+      // Port path below DOES work over rigctld (it uses node-serialport DTR
+      // directly, bypassing rigctld). So skip the cat-side keying for
+      // rigctld users but fall through to the cwKeyPort handler.
       const isRigctld = settings.catTarget && settings.catTarget.type === 'rigctld';
       if (isRigctld) {
+        const dedicatedAvail = cwKeyPort && cwKeyPort.isOpen;
         if (!_cwKeyLoggedRoute) {
           _cwKeyLoggedRoute = true;
-          sendCatLog('[CW] Paddle keying is not supported over rigctld — hamlib has no per-element CW keying command, only mic PTT (T 1/T 0). The radio would TX with no CW output. ' +
-            'Workarounds: (1) type text in the CW widget\'s text box — that uses hamlib\'s send_morse and works correctly; (2) switch CAT to direct serial CI-V in Settings for paddle keying.');
+          if (dedicatedAvail) {
+            sendCatLog('[CW] Rigctld backend can\'t key per-element — paddle keying via dedicated CW Key Port (DTR) instead.');
+          } else {
+            sendCatLog('[CW] Paddle keying is not supported over rigctld — hamlib has no per-element CW keying command, only mic PTT (T 1/T 0). The radio would TX with no CW output. ' +
+              'Workarounds: (1) type text in the CW widget\'s text box — that uses hamlib\'s send_morse and works correctly; (2) wire an external USB-UART (FTDI / CH340) to the rig\'s CW KEY jack and set it as "CW Key Port" in Settings → Rig.');
+            // Tell the phone its paddle won\'t make RF — suppresses local
+            // sidetone and shows a red banner with the workaround. G5HOW
+            // FTDx10 + Hamlib v1.5.11 2026-04-30.
+            _setCwPaddleAvailability(false, 'rigctld-no-per-element-cw');
+          }
         }
-        return;
-      }
+        // Skip the cat-side keying methods. Fall through to the cwKeyPort
+        // block at the bottom of the callback — it handles the real keying.
+      } else {
       // Route keying based on model's preferred paddle method
       // Icom default: txrx (CI-V PTT 0x1C) — universal, no DTR config needed
       // Models with DTR keying support can override via cw.paddleKey: 'dtr'
       let paddleMethod = cwCaps.paddleKey || 'txrx';
-      // First paddle event of the session is the right moment to open
-      // the dedicated CW key port if the user has one configured but
-      // we deferred its open at startup (WD4DAN: avoids spurious dit on
-      // launch). The open is async; THIS first event falls back to
-      // main-dtr (still real RF on most CAT cables), subsequent events
-      // pick up the now-open cwKeyPort.
-      if (down && cwCaps.paddleKey === 'dtr' && !cwKeyPort) {
-        ensureCwKeyPortLazyOpen();
-      }
       // DTR keying without a dedicated CW key port: fall back to toggling DTR on
       // the main CAT serial port. This is what the radio's "USB Keying (CW) = USB(A) DTR"
       // menu actually reads, and it produces real RF rather than silent PTT.
@@ -4122,6 +4133,7 @@ function connectRemote() {
       } else {
         cat.setCwKeyTxRx(down);
       }
+      } // end non-rigctld branch
     }
     // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter or QMX second port
     if (cwKeyPort && cwKeyPort.isOpen) {

@@ -6932,10 +6932,12 @@
     if (!cwPaddleAvailable) {
       bits.push(
         '<b style="color:var(--accent-red, #e94560);">Paddle keying is currently disabled.</b> ' +
-        'POTACAT Desktop reported it can’t reach the radio’s key line — this happens on Linux ' +
-        'with USB-CDC radios (IC-7300, FT-710, QMX/QDX, etc.) where the kernel’s cdc_acm driver ' +
-        'rejects DTR control. Workaround: wire an external USB-UART adapter (FTDI / CH340) to ' +
-        'the radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings → Rig. ' +
+        'POTACAT Desktop reported it can’t reach the radio’s key line per element. ' +
+        'Common causes: (a) Linux + USB-CDC radio (IC-7300, FT-710, QMX/QDX) where the cdc_acm ' +
+        'kernel driver rejects DTR control; (b) connecting via Hamlib / rigctld, which has ' +
+        'no per-element CW command in its protocol — only mic PTT. ' +
+        'Workaround for either case: wire an external USB-UART adapter (FTDI / CH340) to the ' +
+        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings → Rig. ' +
         'CW macros and text-send still work without it — only paddle is affected.'
       );
       helpEl.innerHTML = bits.join('<br>');
