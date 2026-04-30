@@ -3822,6 +3822,54 @@ html, body {
   gap: 4px;
   flex-wrap: wrap;
 }
+.vf-profile-add { display: flex; gap: 4px; margin-bottom: 4px; }
+.vf-profile-add input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  font-size: 13px;
+}
+.vf-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.vf-profile-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.vf-profile-item:active { background: var(--bg-hover); }
+.vf-profile-item-name { flex: 1; font-weight: bold; color: var(--text-primary); }
+.vf-profile-item-detail { color: var(--text-dim); font-family: monospace; font-size: 11px; }
+.vf-profile-item-del {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.vf-profile-item-del:hover { color: #e94560; }
+.vf-profile-empty {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 16px 8px;
+  font-size: 12px;
+}
 .vf-macro-btn {
   flex: 1 1 30%;
   min-width: 60px;

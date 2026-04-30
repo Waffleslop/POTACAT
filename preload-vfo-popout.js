@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('api', {
   onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
   onKiwiAudio: (cb) => ipcRenderer.on('kiwi-audio', (_e, d) => cb(d)),
   onTheme: (cb) => ipcRenderer.on('vfo-popout-theme', (_e, theme) => cb(theme)),
+  // Live profile-list updates pushed by main when ECHOCAT phone (or another
+  // window) edits settings.vfoProfiles. Fires after a save() or delete on
+  // the phone-side widget; lets the popout re-render without a manual reload.
+  onVfoProfilesChanged: (cb) => ipcRenderer.on('vfo-profiles-changed', (_e, list) => cb(list)),
   minimize: () => ipcRenderer.send('vfo-popout-minimize'),
   maximize: () => ipcRenderer.send('vfo-popout-maximize'),
   close: () => ipcRenderer.send('vfo-popout-close'),

@@ -1205,6 +1205,18 @@ async function saveProfiles() {
   renderInlineProfiles();
 }
 
+// Listen for profile-list changes initiated elsewhere (typically the
+// ECHOCAT phone's VFO Profiles widget). Re-render both the tab and the
+// inline collapsed view so the user sees the phone's add/delete here
+// immediately without a manual reload.
+if (window.api && typeof window.api.onVfoProfilesChanged === 'function') {
+  window.api.onVfoProfilesChanged((list) => {
+    profiles = Array.isArray(list) ? list : [];
+    renderProfiles();
+    renderInlineProfiles();
+  });
+}
+
 document.getElementById('profile-save-btn').addEventListener('click', async () => {
   const name = document.getElementById('profile-name-input').value.trim();
   if (!name) { document.getElementById('profile-name-input').focus(); return; }

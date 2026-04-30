@@ -3959,6 +3959,9 @@ function connectRemote() {
     }
     // FreeDV enabled state
     remoteServer.sendToClient({ type: 'freedv-enabled', enabled: !!settings.enableFreedv });
+    // VFO Profiles — send current list so phone's profiles widget can render
+    // immediately. Phone edits push back via 'vfo-profiles-update'.
+    remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
     // Sync voice macros to phone
     ensureVoiceMacroDir();
     const vmLabels = settings.voiceMacroLabels || [];
@@ -4167,6 +4170,44 @@ function connectRemote() {
   remoteServer.on('cw-text', ({ text }) => {
     if (!text) return;
     sendCwTextToRadio(text);
+  });
+
+  // Phone updated the VFO profile list — single source of truth is
+  // `settings.vfoProfiles`. Save, then echo back to BOTH the phone (so its
+  // local list is the canonical persisted version) and the desktop VFO
+  // popout (live refresh of its inline list + Profiles tab).
+  remoteServer.on('vfo-profiles-update', ({ profiles }) => {
+    settings.vfoProfiles = Array.isArray(profiles) ? profiles : [];
+    saveSettings(settings);
+    remoteServer.sendVfoProfiles(settings.vfoProfiles);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+      vfoPopoutWin.webContents.send('vfo-profiles-changed', settings.vfoProfiles);
+    }
+    // Also nudge the main window's renderer in case it's holding a stale
+    // copy in memory (Settings panel etc.).
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('vfo-profiles-changed', settings.vfoProfiles);
+    }
+    console.log(`[VFO Profiles] Phone updated list — ${settings.vfoProfiles.length} profile(s)`);
+  });
+
+  // Phone tapped a profile — apply freq + mode + filter through the same
+  // code path the desktop popout uses (existing `tune` handler + filter
+  // setter), but bundled so the phone doesn't have to ship three messages.
+  remoteServer.on('apply-vfo-profile', ({ profile }) => {
+    if (!profile || !profile.freqKhz) return;
+    const freqHz = profile.freqKhz * 1000;
+    if (cat && cat.connected) {
+      cat.tune(freqHz, profile.mode || _currentMode);
+      if (profile.filterWidth && cat.setFilterWidth) {
+        cat.setFilterWidth(profile.filterWidth);
+      }
+    }
+    // Mirror to the desktop popout so its label/dial reflect the new state.
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+      vfoPopoutWin.webContents.send('vfo-profile-applied', profile);
+    }
+    console.log(`[VFO Profiles] Phone applied "${profile.name || ''}" — ${profile.freqKhz} kHz ${profile.mode || ''}`);
   });
 
   // Phone requests to toggle remote CW on/off
@@ -11459,6 +11500,14 @@ app.whenReady().then(() => {
     // Push activator state to phone when park refs or app mode change
     if (activatorStateChanged) {
       pushActivatorStateToPhone();
+    }
+
+    // VFO Profiles changed (typically from the desktop popout's Save / Delete
+    // buttons) — push to ECHOCAT phone so its widget reflects the new list.
+    // Phone-initiated changes go through `vfo-profiles-update` event handler
+    // and don't hit this path, so no echo loop.
+    if (has('vfoProfiles') && remoteServer && remoteServer.running) {
+      remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
     }
 
     // Reconnect CW keyer if settings changed

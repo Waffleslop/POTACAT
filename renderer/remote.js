@@ -1218,6 +1218,13 @@
           renderSsbMacros();
         }
         break;
+      case 'vfo-profiles':
+        // Desktop pushed the current profile list (initial or after a change).
+        // Hand off to the VFO widget IIFE — it owns the rendering.
+        if (typeof window.__vfReceiveProfiles === 'function') {
+          window.__vfReceiveProfiles(Array.isArray(msg.profiles) ? msg.profiles : []);
+        }
+        break;
 
       case 'freedv-sync': {
         var syncEl = document.getElementById('echo-freedv-sync');
@@ -10137,7 +10144,7 @@
   // overlay so we don't duplicate complex audio/playback logic.
   (function setupVfoWidgets() {
     const VFO_WIDGETS_KEY = 'echocat-vfo-widgets';
-    const WIDGET_IDS = ['meter', 'rigctl', 'filter', 'cw', 'voice', 'customcat'];
+    const WIDGET_IDS = ['meter', 'rigctl', 'filter', 'cw', 'voice', 'customcat', 'profiles'];
     let widgetState = {};
     try { widgetState = JSON.parse(localStorage.getItem(VFO_WIDGETS_KEY) || '{}') || {}; } catch { widgetState = {}; }
 
@@ -10160,6 +10167,7 @@
       if (on && id === 'voice') renderVfVoice();
       if (on && id === 'customcat') renderVfCustomCat();
       if (on && id === 'cw') vfCwSync();
+      if (on && id === 'profiles') renderVfProfiles();
     }
 
     // Wire toggles
@@ -10332,11 +10340,110 @@
     window.__vfRenderCustomCat = renderVfCustomCat;
     window.__vfSyncCw = vfCwSync;
 
+    // ----- Profiles widget: bidirectional sync with desktop VFO popout -----
+    // Profiles live in `settings.vfoProfiles` on the desktop. The desktop
+    // pushes the current list via { type: 'vfo-profiles', profiles } on
+    // auth-ok and on every change. The phone sends edits back via
+    // { type: 'vfo-profiles-update', profiles } — the desktop saves to
+    // settings and broadcasts back so both UIs stay in sync.
+    let vfoProfiles = [];
+    const vfProfileList = document.getElementById('vf-profile-list');
+    const vfProfileNameInput = document.getElementById('vf-profile-name');
+    const vfProfileSaveBtn = document.getElementById('vf-profile-save');
+
+    function renderVfProfiles() {
+      if (!vfProfileList) return;
+      if (!vfoProfiles.length) {
+        vfProfileList.innerHTML = '<div class="vf-profile-empty">No profiles. Tune somewhere, name it, tap Save.</div>';
+        return;
+      }
+      vfProfileList.innerHTML = '';
+      vfoProfiles.forEach((p, i) => {
+        const item = document.createElement('div');
+        item.className = 'vf-profile-item';
+        const freqMhz = p.freqKhz ? (p.freqKhz / 1000).toFixed(3) : '?';
+        const detail = freqMhz + ' MHz ' + (p.mode || '') + (p.filterWidth ? ' BW:' + p.filterWidth : '');
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'vf-profile-item-name';
+        nameSpan.textContent = p.name || '(unnamed)';
+        const detailSpan = document.createElement('span');
+        detailSpan.className = 'vf-profile-item-detail';
+        detailSpan.textContent = detail;
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'vf-profile-item-del';
+        delBtn.title = 'Delete';
+        delBtn.textContent = '×';
+        item.appendChild(nameSpan);
+        item.appendChild(detailSpan);
+        item.appendChild(delBtn);
+        item.addEventListener('click', (e) => {
+          if (e.target === delBtn) return;
+          applyProfile(p);
+        });
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          vfoProfiles.splice(i, 1);
+          renderVfProfiles();
+          pushProfilesToDesktop();
+        });
+        vfProfileList.appendChild(item);
+      });
+    }
+
+    function applyProfile(p) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      // Desktop's apply path tunes to freq+mode then sets a generic
+      // filter width. We piggy-back on the existing tune message and add
+      // a separate apply-vfo-profile message that the desktop dispatches
+      // through its existing applyProfile equivalent.
+      ws.send(JSON.stringify({
+        type: 'apply-vfo-profile',
+        profile: { name: p.name, freqKhz: p.freqKhz, mode: p.mode, filterWidth: p.filterWidth },
+      }));
+    }
+
+    function pushProfilesToDesktop() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'vfo-profiles-update', profiles: vfoProfiles }));
+    }
+
+    if (vfProfileSaveBtn) {
+      vfProfileSaveBtn.addEventListener('click', () => {
+        const name = (vfProfileNameInput && vfProfileNameInput.value || '').trim();
+        if (!name) {
+          if (vfProfileNameInput) vfProfileNameInput.focus();
+          return;
+        }
+        // Snapshot current VFO state. currentFilterWidth may be 0 if the rig
+        // hasn't reported one yet — store undefined in that case so apply
+        // doesn't attempt to set a 0-Hz filter.
+        const freqKhz = currentFreqHz ? Math.round(currentFreqHz / 1000) : 0;
+        if (!freqKhz) return;
+        vfoProfiles.push({
+          name, freqKhz,
+          mode: currentMode || '',
+          filterWidth: currentFilterWidth > 0 ? currentFilterWidth : undefined,
+        });
+        if (vfProfileNameInput) vfProfileNameInput.value = '';
+        renderVfProfiles();
+        pushProfilesToDesktop();
+      });
+    }
+
+    // Expose hook so the WS message dispatcher (declared earlier) can hand
+    // us new profile lists arriving from the desktop.
+    window.__vfReceiveProfiles = function(list) {
+      vfoProfiles = Array.isArray(list) ? list.slice() : [];
+      renderVfProfiles();
+    };
+
     // First paint
     applyVisibility();
     vfCwSync();
     if (widgetState.voice) renderVfVoice();
     if (widgetState.customcat) renderVfCustomCat();
+    if (widgetState.profiles) renderVfProfiles();
   })();
   // ===== End VFO Widgets =====
 

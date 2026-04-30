@@ -243,6 +243,16 @@
         <div class="vf-widget hidden" data-vf-widget="customcat">
           <div id="vf-customcat-row" class="vf-macro-row"></div>
         </div>
+        <!-- Profiles — saved freq+mode+filter snapshots, synced bidirectionally
+             with the desktop VFO popout. Tap a profile to apply it; tap Save
+             to capture the current VFO state under a name. -->
+        <div class="vf-widget hidden" data-vf-widget="profiles">
+          <div class="vf-profile-add">
+            <input type="text" id="vf-profile-name" placeholder="Profile name (e.g. 20m CW)" autocomplete="off">
+            <button type="button" id="vf-profile-save" class="vf-rig-btn">Save</button>
+          </div>
+          <div id="vf-profile-list" class="vf-profile-list"></div>
+        </div>
       </div>
       <div class="vf-ptt-row">
         <button type="button" id="vf-ptt" class="vf-ptt-btn">PTT</button>
@@ -572,6 +582,10 @@
         <div class="so-row" title="Custom CAT command buttons (configure in the Custom CAT settings below).">
           <label class="so-label">Custom CAT</label>
           <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-customcat">Off</button></div>
+        </div>
+        <div class="so-row" title="Saved frequency/mode/filter profiles. Tap to apply; saves sync to the desktop VFO popout.">
+          <label class="so-label">Profiles</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-profiles">Off</button></div>
         </div>
 
         <!-- CW Keyer settings -->
