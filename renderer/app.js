@@ -107,6 +107,18 @@ let n1mmRst = false; // N1MM-style single-field RST inputs
 let defaultPower = 100;
 let tuneClick = false;
 let enableSplit = false;
+
+// Status-bar SPLIT indicator. Visible whenever enableSplit is true so the
+// operator notices the state — accidental enables (e.g. KQ4MHD's stuck-on-
+// across-sessions report 2026-04-30) are otherwise silent. Click prompts to
+// disable; legitimate split users still have Settings → Spots → Enable
+// split mode.
+function updateSplitIndicator() {
+  const el = document.getElementById('split-indicator');
+  if (!el) return;
+  el.classList.toggle('hidden', !enableSplit);
+}
+
 let activeRigName = ''; // name of the currently active rig profile
 let workedQsos = new Map(); // callsign -> [{date, ref}] from QSO log
 let donorCallsigns = new Set(); // supporter callsigns from potacat.com
@@ -1213,6 +1225,7 @@ async function loadPrefs() {
   myCallsign = settings.myCallsign || '';
   tuneClick = settings.tuneClick === true;
   enableSplit = settings.enableSplit === true;
+  updateSplitIndicator();
   catLogToggleBtn.classList.toggle('hidden', settings.verboseLog !== true);
   // Resolve active rig name
   const rigs = settings.rigs || [];
@@ -5440,14 +5453,13 @@ document.addEventListener('keydown', (e) => {
     window.api.tune(newFreq, lastTunedSpot.mode, lastTunedSpot.bearing);
     return;
   }
-  // S — Toggle split mode
-  if (e.key === 's' && !e.target.matches('input, select, textarea')) {
-    e.preventDefault();
-    enableSplit = !enableSplit;
-    window.api.saveSettings({ enableSplit });
-    showLogToast(enableSplit ? 'Split mode ON' : 'Split mode OFF', { duration: 1500 });
-    return;
-  }
+  // (Removed: `S` toggle for split mode. The shortcut's `target.matches`
+  // guard only excluded form inputs, not buttons — clicking a button left
+  // it focused, so a stray `s` keystroke flipped split silently. Multiple
+  // operators ended up with split persisted on across sessions and didn't
+  // know why their TX was on a different VFO. Toggle is now Settings-only,
+  // and a status-bar SPLIT pill makes the state obvious when it's enabled.
+  // KQ4MHD report 2026-04-30.)
   // Ctrl+A — Prevent select-all
   if (e.key.toLowerCase() === 'a' && (e.ctrlKey || e.metaKey) && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
@@ -8909,6 +8921,7 @@ settingsSave.addEventListener('click', async () => {
   hideWorkedParks = hideWorkedParksEnabled;
   tuneClick = tuneClickEnabled;
   enableSplit = enableSplitEnabled;
+  updateSplitIndicator();
   catLogToggleBtn.classList.toggle('hidden', !verboseLogEnabled);
   if (!verboseLogEnabled) {
     catLogPanel.classList.add('hidden');
@@ -10957,6 +10970,22 @@ const catLogOutput = document.getElementById('cat-log-output');
 const catLogCopyBtn = document.getElementById('cat-log-copy');
 const catLogClearBtn = document.getElementById('cat-log-clear');
 const catLogToggleBtn = document.getElementById('cat-log-toggle');
+
+// SPLIT pill: click to disable. Confirm so legitimate split users don't
+// lose their setting on a stray click. Settings → Spots stays the only
+// place to enable split (no UI here for turning it ON).
+const splitIndicatorBtn = document.getElementById('split-indicator');
+if (splitIndicatorBtn) {
+  splitIndicatorBtn.addEventListener('click', async () => {
+    if (!enableSplit) return;
+    if (!confirm('Disable Split mode? RX and TX will return to the same VFO.')) return;
+    enableSplit = false;
+    setEnableSplit.checked = false;
+    await window.api.saveSettings({ enableSplit: false });
+    updateSplitIndicator();
+    showLogToast('Split mode OFF', { duration: 1500 });
+  });
+}
 const catLogLines = [];
 const CAT_LOG_MAX = 500;
 

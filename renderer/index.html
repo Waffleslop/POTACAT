@@ -198,6 +198,10 @@
     <div class="status-bar">
       <span id="utc-clock" class="utc-clock"></span>
       <span id="cat-status" class="status disconnected">CAT</span>
+      <!-- Split-mode indicator. Hidden by default; shown when settings.enableSplit
+           is true. Click to disable (asks for confirmation since some operators
+           do use split legitimately). KQ4MHD report 2026-04-30. -->
+      <span id="split-indicator" class="status hidden" style="background:#f0a500;color:#1a1a2e;font-weight:bold;cursor:pointer;" title="Split mode is ON — RX and TX are on different VFOs. Click to disable.">SPLIT</span>
       <span id="jtcat-tx-indicator" class="status hidden" style="background:#e94560;color:#fff;font-weight:bold;animation:tx-blink 1s ease-in-out infinite;">JTCAT TX</span>
       <span id="wsjtx-status" class="status disconnected hidden">WSJT-X</span>
       <span id="cw-keyer-status" class="status hidden" style="background:#b8860b;color:#fff;cursor:pointer;">CW</span>
@@ -2480,7 +2484,6 @@
         <tr><td><kbd>Enter</kbd></td><td>Tune to selected spot</td></tr>
         <tr><td><kbd>&larr;&rarr;</kbd></td><td>Nudge frequency &plusmn;1 kHz</td></tr>
         <tr><td><kbd>Space</kbd></td><td>Start / stop scan</td></tr>
-        <tr><td><kbd>S</kbd></td><td>Toggle split mode</td></tr>
         <tr><td><kbd>Ctrl+L</kbd></td><td>Quick Log (unspotted QSO)</td></tr>
         <tr><td><kbd>Ctrl+M</kbd></td><td>Multi-park dialog (activator)</td></tr>
         <tr><td><kbd>Alt+R</kbd></td><td>Reload last entry (activator)</td></tr>
