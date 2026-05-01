@@ -11170,6 +11170,7 @@ app.whenReady().then(() => {
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
+  ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
 
   // Export/Import settings
   ipcMain.handle('export-settings', async () => {

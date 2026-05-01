@@ -1,16 +1,9 @@
 const { contextBridge, ipcRenderer, shell, webFrame } = require('electron');
-const path = require('path');
 
-// Load the SDR directory once at preload time. Lazy `require()` inside the
-// contextBridge function fails — the relative path resolves against the
-// renderer's CWD, not preload's, when called from the renderer side. Using
-// __dirname pins the lookup to wherever preload.js actually lives.
-let SDR_DIRECTORY = [];
-try {
-  ({ STATIONS: SDR_DIRECTORY } = require(path.join(__dirname, 'lib', 'sdr-directory')));
-} catch (err) {
-  console.error('[preload] failed to load sdr-directory:', err.message);
-}
+// Note: preload runs sandboxed (Electron default with contextIsolation +
+// nodeIntegration:false). Only the `electron` module is requireable —
+// Node built-ins like `path`, `fs`, `http` are NOT available here. Anything
+// that needs those has to live in main and reach the renderer via IPC.
 
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
@@ -27,7 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   externalAtuCancel: () => ipcRenderer.send('external-atu-cancel'),
   rotateTo: (azimuth) => ipcRenderer.send('rotate-to', azimuth),
   refresh: () => ipcRenderer.send('refresh'),
-  getSdrDirectory: () => SDR_DIRECTORY,
+  getSdrDirectory: () => ipcRenderer.invoke('get-sdr-directory'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),

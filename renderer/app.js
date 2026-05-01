@@ -17700,6 +17700,21 @@ window.api.onJtcatStopForRemote(function() {
   // Active slot we're filling. Set when a Browse button is clicked.
   let targetSlot = 1;
 
+  // Cache the directory after first fetch so repeated opens are instant.
+  // The IPC round-trip is fine for the first click but we don't need to
+  // do it every time the user changes a filter.
+  let stationsCache = null;
+  async function loadStations() {
+    if (stationsCache) return stationsCache;
+    try {
+      stationsCache = (await window.api.getSdrDirectory()) || [];
+    } catch (err) {
+      console.error('[kiwi-picker] getSdrDirectory failed:', err);
+      stationsCache = [];
+    }
+    return stationsCache;
+  }
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -17716,7 +17731,7 @@ window.api.onJtcatStopForRemote(function() {
   }
 
   function render() {
-    const stations = (window.api.getSdrDirectory && window.api.getSdrDirectory()) || [];
+    const stations = stationsCache || [];
     const matches = stations.filter(matchesFilters);
     if (matches.length === 0) {
       list.innerHTML = '<div class="kiwi-empty">No stations match those filters. Try widening them, or use the directory links below the slots to find more.</div>';
@@ -17778,13 +17793,16 @@ window.api.onJtcatStopForRemote(function() {
 
   // Wire up the Browse buttons next to each slot.
   document.querySelectorAll('.kiwi-browse-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       targetSlot = parseInt(btn.dataset.slot, 10) || 1;
       slotLabel.textContent = `(slot ${targetSlot})`;
       // Reset filters each time so the user always sees the full list initially.
       regionFilter.value = '';
       coverageFilter.value = '';
       searchInput.value = '';
+      // Fetch directory from main (sandboxed preload can't load Node modules
+      // directly). Cached after the first call.
+      await loadStations();
       render();
       // showModal() can fail when a parent <dialog> is already modal in some
       // older Chromium builds. Fall back to non-modal show() — same effect
