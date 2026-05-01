@@ -6105,3 +6105,19 @@ main.banner-logger-active #event-progress-overlay {
 .bl-log-btn:hover { filter: brightness(1.15); }
 .bl-log-btn:disabled { opacity: 0.5; cursor: default; }
 
+
+/* ── WebSDR station picker (Settings → WebSDR → Browse...) ───────────── */
+#kiwi-picker-list .kiwi-station-row { display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;margin:4px 0;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary,#0f1419);transition:background 0.1s; }
+#kiwi-picker-list .kiwi-station-row:hover { background:var(--bg-input,#16213e); }
+#kiwi-picker-list .kiwi-station-row.recommended { border-left:3px solid var(--accent-gold,#f0a500); }
+#kiwi-picker-list .kiwi-station-meta { flex:1;min-width:0; }
+#kiwi-picker-list .kiwi-station-name { font-weight:600;font-size:13px; }
+#kiwi-picker-list .kiwi-station-name .kiwi-recommend-badge { display:inline-block;font-size:10px;font-weight:normal;color:var(--accent-gold,#f0a500);margin-left:6px;padding:1px 6px;border:1px solid var(--accent-gold,#f0a500);border-radius:8px; }
+#kiwi-picker-list .kiwi-station-loc { font-size:11px;color:var(--text-muted);margin-top:2px; }
+#kiwi-picker-list .kiwi-station-tech { font-size:11px;color:var(--text-muted);font-family:monospace;margin-top:2px; }
+#kiwi-picker-list .kiwi-station-notes { font-size:11px;color:var(--text-muted);font-style:italic;margin-top:2px; }
+#kiwi-picker-list .kiwi-section { font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin:14px 0 4px;padding-bottom:2px;border-bottom:1px solid var(--border); }
+#kiwi-picker-list .kiwi-section:first-child { margin-top:6px; }
+#kiwi-picker-list .kiwi-use-btn { background:var(--accent-blue,#4fc3f7);color:#000;border:none;padding:5px 12px;border-radius:3px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap; }
+#kiwi-picker-list .kiwi-use-btn:hover { background:#80d8ff; }
+#kiwi-picker-list .kiwi-empty { padding:20px;text-align:center;color:var(--text-muted);font-size:12px; }

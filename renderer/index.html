@@ -1935,35 +1935,6 @@
       </div>
       <span class="help-text" style="display:block;margin-top:4px;">Live directories with current listings: <a href="#" onclick="window.api.openExternal('http://rx.linkfanel.net');return false;" style="color:var(--accent-blue);">KiwiSDR</a> &middot; <a href="#" onclick="window.api.openExternal('http://websdr.org');return false;" style="color:var(--accent-blue);">WebSDR.org</a></span>
     </fieldset>
-    <!-- WebSDR station picker modal — populated dynamically from lib/sdr-directory.js -->
-    <dialog id="kiwi-picker-dialog" style="max-width:680px;width:90%;padding:0;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:baseline;">
-        <h3 style="margin:0;font-size:15px;">Choose an SDR Station <span id="kiwi-picker-slot-label" style="font-size:11px;font-weight:normal;color:var(--text-muted);"></span></h3>
-        <button type="button" id="kiwi-picker-close" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 4px;">&times;</button>
-      </div>
-      <div style="padding:10px 18px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <label style="font-size:12px;">Region: <select id="kiwi-picker-region" style="font-size:12px;"><option value="">All</option><option>USA</option><option>Europe</option><option>Asia/Pacific</option></select></label>
-        <label style="font-size:12px;">Coverage: <select id="kiwi-picker-coverage" style="font-size:12px;"><option value="">All</option><option value="HF">HF</option><option value="VHF">VHF/UHF</option></select></label>
-        <input type="search" id="kiwi-picker-search" placeholder="Filter by name or location…" style="flex:1;min-width:160px;font-size:12px;padding:3px 6px;">
-      </div>
-      <div id="kiwi-picker-list" style="max-height:60vh;overflow-y:auto;padding:6px 18px 14px;"></div>
-      <style>
-        #kiwi-picker-list .kiwi-station-row { display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;margin:4px 0;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary,#0f1419);transition:background 0.1s; }
-        #kiwi-picker-list .kiwi-station-row:hover { background:var(--bg-input,#16213e); }
-        #kiwi-picker-list .kiwi-station-row.recommended { border-left:3px solid var(--accent-gold,#f0a500); }
-        #kiwi-picker-list .kiwi-station-meta { flex:1;min-width:0; }
-        #kiwi-picker-list .kiwi-station-name { font-weight:600;font-size:13px; }
-        #kiwi-picker-list .kiwi-station-name .kiwi-recommend-badge { display:inline-block;font-size:10px;font-weight:normal;color:var(--accent-gold,#f0a500);margin-left:6px;padding:1px 6px;border:1px solid var(--accent-gold,#f0a500);border-radius:8px; }
-        #kiwi-picker-list .kiwi-station-loc { font-size:11px;color:var(--text-muted);margin-top:2px; }
-        #kiwi-picker-list .kiwi-station-tech { font-size:11px;color:var(--text-muted);font-family:monospace;margin-top:2px; }
-        #kiwi-picker-list .kiwi-station-notes { font-size:11px;color:var(--text-muted);font-style:italic;margin-top:2px; }
-        #kiwi-picker-list .kiwi-section { font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin:14px 0 4px;padding-bottom:2px;border-bottom:1px solid var(--border); }
-        #kiwi-picker-list .kiwi-section:first-child { margin-top:6px; }
-        #kiwi-picker-list .kiwi-use-btn { background:var(--accent-blue,#4fc3f7);color:#000;border:none;padding:5px 12px;border-radius:3px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap; }
-        #kiwi-picker-list .kiwi-use-btn:hover { background:#80d8ff; }
-        #kiwi-picker-list .kiwi-empty { padding:20px;text-align:center;color:var(--text-muted);font-size:12px; }
-      </style>
-    </dialog>
     <!-- 9. CW Keyer -->
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
       <legend>CW Keyer</legend>
@@ -2390,6 +2361,22 @@
   <div id="pi-overlay" class="pi-overlay hidden">
     <div class="pi-overlay-text">ACCESS: AUTHORIZED</div>
   </div>
+
+  <!-- WebSDR station picker — at top level (not nested inside settings-dialog)
+       so showModal() can open it on top of the settings dialog. Populated
+       dynamically by initKiwiPicker() in renderer/app.js. -->
+  <dialog id="kiwi-picker-dialog" style="max-width:680px;width:90%;padding:0;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:baseline;">
+      <h3 style="margin:0;font-size:15px;">Choose an SDR Station <span id="kiwi-picker-slot-label" style="font-size:11px;font-weight:normal;color:var(--text-muted);"></span></h3>
+      <button type="button" id="kiwi-picker-close" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 4px;">&times;</button>
+    </div>
+    <div style="padding:10px 18px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:12px;">Region: <select id="kiwi-picker-region" style="font-size:12px;"><option value="">All</option><option>USA</option><option>Europe</option><option>Asia/Pacific</option></select></label>
+      <label style="font-size:12px;">Coverage: <select id="kiwi-picker-coverage" style="font-size:12px;"><option value="">All</option><option value="HF">HF</option><option value="VHF">VHF/UHF</option></select></label>
+      <input type="search" id="kiwi-picker-search" placeholder="Filter by name or location…" style="flex:1;min-width:160px;font-size:12px;padding:3px 6px;">
+    </div>
+    <div id="kiwi-picker-list" style="max-height:60vh;overflow-y:auto;padding:6px 18px 14px;"></div>
+  </dialog>
 
   <!-- Log QSO dialog -->
   <dialog id="log-dialog">

@@ -17786,8 +17786,16 @@ window.api.onJtcatStopForRemote(function() {
       coverageFilter.value = '';
       searchInput.value = '';
       render();
-      dialog.showModal();
-      searchInput.focus();
+      // showModal() can fail when a parent <dialog> is already modal in some
+      // older Chromium builds. Fall back to non-modal show() — same effect
+      // for our purposes (the picker is on top, click-outside still closes).
+      try {
+        dialog.showModal();
+      } catch (err) {
+        console.warn('[kiwi-picker] showModal failed, falling back to show():', err);
+        try { dialog.show(); } catch (e2) { console.error('[kiwi-picker] show also failed:', e2); }
+      }
+      try { searchInput.focus(); } catch {}
     });
   });
 })();
