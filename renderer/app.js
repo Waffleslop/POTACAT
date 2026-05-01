@@ -17681,3 +17681,113 @@ window.api.onJtcatStopForRemote(function() {
     }
   });
 })();
+
+// =============================================================================
+// WebSDR / KiwiSDR station picker — populates Settings → WebSDR slots from
+// the curated directory in lib/sdr-directory.js. Manual entry still works
+// for any station not in the list (the directory's just a quick-pick).
+// =============================================================================
+(function initKiwiPicker() {
+  const dialog = document.getElementById('kiwi-picker-dialog');
+  if (!dialog) return; // markup not present (older builds)
+  const list = document.getElementById('kiwi-picker-list');
+  const slotLabel = document.getElementById('kiwi-picker-slot-label');
+  const closeBtn = document.getElementById('kiwi-picker-close');
+  const regionFilter = document.getElementById('kiwi-picker-region');
+  const coverageFilter = document.getElementById('kiwi-picker-coverage');
+  const searchInput = document.getElementById('kiwi-picker-search');
+
+  // Active slot we're filling. Set when a Browse button is clicked.
+  let targetSlot = 1;
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function matchesFilters(station) {
+    const region = regionFilter.value;
+    const coverage = coverageFilter.value;
+    const q = searchInput.value.trim().toLowerCase();
+    if (region && station.region !== region) return false;
+    if (coverage === 'HF' && /VHF|UHF/i.test(station.coverage) && !/HF/i.test(station.coverage)) return false;
+    if (coverage === 'VHF' && !/VHF|UHF/i.test(station.coverage)) return false;
+    if (q && !(`${station.label} ${station.location} ${station.host} ${station.notes || ''}`.toLowerCase().includes(q))) return false;
+    return true;
+  }
+
+  function render() {
+    const stations = (window.api.getSdrDirectory && window.api.getSdrDirectory()) || [];
+    const matches = stations.filter(matchesFilters);
+    if (matches.length === 0) {
+      list.innerHTML = '<div class="kiwi-empty">No stations match those filters. Try widening them, or use the directory links below the slots to find more.</div>';
+      return;
+    }
+    // Group: Recommended first, then by region.
+    const groups = new Map();
+    const recommended = matches.filter((s) => s.recommended);
+    if (recommended.length) groups.set('★ Recommended', recommended);
+    for (const s of matches) {
+      if (s.recommended) continue;
+      const key = s.region || 'Other';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    }
+    const html = [];
+    for (const [section, items] of groups) {
+      html.push(`<div class="kiwi-section">${escapeHtml(section)}</div>`);
+      for (const s of items) {
+        html.push(`
+          <div class="kiwi-station-row${s.recommended ? ' recommended' : ''}">
+            <div class="kiwi-station-meta">
+              <div class="kiwi-station-name">${escapeHtml(s.label)}${s.recommended ? '<span class="kiwi-recommend-badge">Recommended</span>' : ''}</div>
+              <div class="kiwi-station-loc">${escapeHtml(s.location)} &middot; ${escapeHtml(s.coverage)}</div>
+              <div class="kiwi-station-tech">${escapeHtml(s.host)}:${s.port} &middot; ${escapeHtml(s.type)}</div>
+              ${s.notes ? `<div class="kiwi-station-notes">${escapeHtml(s.notes)}</div>` : ''}
+            </div>
+            <button class="kiwi-use-btn" data-host="${escapeHtml(s.host)}" data-port="${s.port}" data-label="${escapeHtml(s.label)}">Use &rarr;</button>
+          </div>`);
+      }
+    }
+    list.innerHTML = html.join('');
+  }
+
+  // Use-button click — fill the target slot's inputs and close the dialog.
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('.kiwi-use-btn');
+    if (!btn) return;
+    const host = btn.dataset.host;
+    const port = btn.dataset.port;
+    const label = btn.dataset.label;
+    const labelInput = document.getElementById(`set-kiwi-label-${targetSlot}`);
+    const hostInput = document.getElementById(`set-kiwi-host-${targetSlot}`);
+    if (labelInput) labelInput.value = label;
+    if (hostInput) hostInput.value = `${host}:${port}`;
+    // Trigger 'change' / 'input' so any save-on-change handlers run.
+    if (labelInput) labelInput.dispatchEvent(new Event('input', { bubbles: true }));
+    if (hostInput) hostInput.dispatchEvent(new Event('input', { bubbles: true }));
+    dialog.close();
+  });
+
+  // Filter inputs trigger re-render.
+  for (const el of [regionFilter, coverageFilter]) el.addEventListener('change', render);
+  searchInput.addEventListener('input', render);
+
+  closeBtn.addEventListener('click', () => dialog.close());
+  // Click backdrop to dismiss (the <dialog> ::backdrop pseudo-element).
+  dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+
+  // Wire up the Browse buttons next to each slot.
+  document.querySelectorAll('.kiwi-browse-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      targetSlot = parseInt(btn.dataset.slot, 10) || 1;
+      slotLabel.textContent = `(slot ${targetSlot})`;
+      // Reset filters each time so the user always sees the full list initially.
+      regionFilter.value = '';
+      coverageFilter.value = '';
+      searchInput.value = '';
+      render();
+      dialog.showModal();
+      searchInput.focus();
+    });
+  });
+})();

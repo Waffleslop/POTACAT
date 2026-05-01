@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   externalAtuCancel: () => ipcRenderer.send('external-atu-cancel'),
   rotateTo: (azimuth) => ipcRenderer.send('rotate-to', azimuth),
   refresh: () => ipcRenderer.send('refresh'),
+  getSdrDirectory: () => require('./lib/sdr-directory').STATIONS,
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
