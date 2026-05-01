@@ -10883,20 +10883,17 @@ app.whenReady().then(() => {
     const port = rawPort || 8073;
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
-    // WebSDR.org support is currently disabled — our client uses raw HTTP
-    // against a guessed URL and the protocol is fundamentally different
-    // (real WebSDR.org sites use a custom WebSocket audio stream). Reverse-
-    // engineering against a packet capture is on the roadmap. For now,
-    // fail with a clear message so users know to use a KiwiSDR (port 8073).
+    // Port-based protocol selection: 8073 = KiwiSDR, anything else = WebSDR.org.
+    // WebSDR.org has its own byte-tagged binary protocol over a WebSocket at
+    // /~~stream — see lib/websdr.js. Both clients share the same EventEmitter
+    // shape so the wiring below works for either.
     const isWebSdr = port !== 8073;
     if (isWebSdr) {
-      sendCatLog(`[WebSDR] WebSDR.org (port ${port}) is not yet supported — only KiwiSDRs (port 8073) work today. Pick a KiwiSDR station from the list.`);
-      for (const wc of require('electron').webContents.getAllWebContents()) {
-        wc.send('kiwi-status', { connected: false, error: 'WebSDR.org not supported yet — use a KiwiSDR (port 8073)' });
-      }
-      return;
+      kiwiClient = new WebSdrClient();
+      sendCatLog(`[WebSDR] Using WebSDR.org protocol for ${host}:${port}`);
+    } else {
+      kiwiClient = new KiwiSdrClient();
     }
-    kiwiClient = new KiwiSdrClient();
     const kiwiFullHost = host + ':' + port;
     kiwiClient.on('log', (msg) => sendCatLog(`[WebSDR] ${msg}`));
     kiwiClient.on('connected', () => {
@@ -10955,10 +10952,21 @@ app.whenReady().then(() => {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
-    // KiwiSDR connect: pass myCallsign through so the client can both
-    // identify (SET ident_user) and authenticate as a real ham (SET auth p=)
-    // for extended listener time on tlimit-restricted kiwis.
-    kiwiClient.connect(host, port, password, settings.myCallsign || '');
+    if (isWebSdr) {
+      // WebSDR.org: connect signature is (host, port, freqKhz, mode, options).
+      // We send an initial tune at connect time so the receiver has a valid
+      // frequency before any audio flows. Subsequent QSYs use kiwiClient.tune().
+      const freqKhz = _currentFreqHz > 0 ? _currentFreqHz / 1000 : 7200;
+      const mode = (_currentMode || 'USB').toLowerCase()
+        .replace('digu', 'usb').replace('digl', 'lsb')
+        .replace('pktusb', 'usb').replace('pktlsb', 'lsb');
+      kiwiClient.connect(host, port, freqKhz, mode, { callsign: settings.myCallsign || '' });
+    } else {
+      // KiwiSDR connect: pass myCallsign through so the client can both
+      // identify (SET ident_user) and authenticate as a real ham (SET auth p=)
+      // for extended listener time on tlimit-restricted kiwis.
+      kiwiClient.connect(host, port, password, settings.myCallsign || '');
+    }
   });
 
   ipcMain.on('kiwi-disconnect', () => {
