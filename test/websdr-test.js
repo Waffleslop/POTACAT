@@ -316,6 +316,58 @@ test('tune() resets predictor', () => {
   assert.strictEqual(c._desiredMode, 'cw');
 });
 
+console.log('\n=== Band picker ===');
+
+test('pickBand: no bandinfo yet → falls back to constructor default', () => {
+  const c = newClient();
+  c._band = 2;
+  assert.strictEqual(c._pickBand(14074), 2);
+});
+
+test('pickBand: single HF band covers everything (Twente layout)', () => {
+  const c = newClient();
+  c._bands = [
+    { centerfreq: 14579.8, samplerate: 29159.6, halfwidth: 14579.8, name: 'hf', index: 0 },
+  ];
+  c._bandsFetched = true;
+  assert.strictEqual(c._pickBand(880), 0, '880 kHz AM');
+  assert.strictEqual(c._pickBand(7200), 0, '40m');
+  assert.strictEqual(c._pickBand(14313), 0, '20m');
+  assert.strictEqual(c._pickBand(28074), 0, '10m FT8');
+});
+
+test('pickBand: per-band-segment layout (kfsdr-like)', () => {
+  const c = newClient();
+  c._bands = [
+    { centerfreq: 3700, samplerate: 768, halfwidth: 384, name: '80M', index: 0 },
+    { centerfreq: 7125, samplerate: 768, halfwidth: 384, name: '40M', index: 1 },
+    { centerfreq: 14150, samplerate: 768, halfwidth: 384, name: '20M', index: 2 },
+    { centerfreq: 21200, samplerate: 768, halfwidth: 384, name: '15M', index: 3 },
+  ];
+  c._bandsFetched = true;
+  assert.strictEqual(c._pickBand(3850), 0, '80m phone');
+  assert.strictEqual(c._pickBand(7200), 1, '40m phone');
+  assert.strictEqual(c._pickBand(14313), 2, '20m phone');
+  assert.strictEqual(c._pickBand(21300), 3, '15m phone');
+});
+
+test('pickBand: VHF-only site (na5b-like) — HF freq triggers warning + nearest', () => {
+  const c = newClient();
+  c._bands = [
+    { centerfreq: 51024, samplerate: 2048, halfwidth: 1024, name: '6m', index: 0 },
+    { centerfreq: 145000, samplerate: 4000, halfwidth: 2000, name: '2m', index: 1 },
+  ];
+  c._bandsFetched = true;
+  let warn = null;
+  c.on('log', (m) => { if (m.startsWith('WARN')) warn = m; });
+  // 880 kHz is way outside both bands; nearest is 6m (50000 vs 145000)
+  const idx = c._pickBand(880);
+  assert.strictEqual(idx, 0);
+  assert.ok(warn, 'a WARN log fires');
+  assert.ok(warn.includes('880'), 'log mentions the freq');
+  assert.ok(warn.includes('6m'), 'log names the fallback band');
+});
+
 console.log('\n=== Diagnostic ===');
 
 test('first 3 frames produce diag log lines, rest are silent', () => {
