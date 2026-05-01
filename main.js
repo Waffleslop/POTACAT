@@ -10883,20 +10883,27 @@ app.whenReady().then(() => {
     const port = rawPort || 8073;
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
-    // Auto-detect: port 8073 = KiwiSDR, other ports = WebSDR.org
+    // WebSDR.org support is currently disabled — our client uses raw HTTP
+    // against a guessed URL and the protocol is fundamentally different
+    // (real WebSDR.org sites use a custom WebSocket audio stream). Reverse-
+    // engineering against a packet capture is on the roadmap. For now,
+    // fail with a clear message so users know to use a KiwiSDR (port 8073).
     const isWebSdr = port !== 8073;
     if (isWebSdr) {
-      kiwiClient = new WebSdrClient();
-      sendCatLog(`[WebSDR] Using WebSDR.org protocol for ${host}:${port}`);
-    } else {
-      kiwiClient = new KiwiSdrClient();
+      sendCatLog(`[WebSDR] WebSDR.org (port ${port}) is not yet supported — only KiwiSDRs (port 8073) work today. Pick a KiwiSDR station from the list.`);
+      for (const wc of require('electron').webContents.getAllWebContents()) {
+        wc.send('kiwi-status', { connected: false, error: 'WebSDR.org not supported yet — use a KiwiSDR (port 8073)' });
+      }
+      return;
     }
+    kiwiClient = new KiwiSdrClient();
     const kiwiFullHost = host + ':' + port;
+    kiwiClient.on('log', (msg) => sendCatLog(`[WebSDR] ${msg}`));
     kiwiClient.on('connected', () => {
       kiwiActive = true;
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
-      // Auto-tune to current frequency (KiwiSDR needs tune after connect; WebSDR tunes at connect)
-      if (!isWebSdr && _currentFreqHz > 0 && _currentMode) {
+      // Auto-tune to current rig frequency on connect.
+      if (_currentFreqHz > 0 && _currentMode) {
         const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
         kiwiClient.tune(_currentFreqHz / 1000, mode);
       }
@@ -10948,13 +10955,10 @@ app.whenReady().then(() => {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
-    if (isWebSdr) {
-      const freqKhz = _currentFreqHz > 0 ? _currentFreqHz / 1000 : 7200;
-      const mode = (_currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
-      kiwiClient.connect(host, port, freqKhz, mode);
-    } else {
-      kiwiClient.connect(host, port, password);
-    }
+    // KiwiSDR connect: pass myCallsign through so the client can both
+    // identify (SET ident_user) and authenticate as a real ham (SET auth p=)
+    // for extended listener time on tlimit-restricted kiwis.
+    kiwiClient.connect(host, port, password, settings.myCallsign || '');
   });
 
   ipcMain.on('kiwi-disconnect', () => {
@@ -10971,18 +10975,16 @@ app.whenReady().then(() => {
 
   // KiwiSDR bridge listeners are now inside connectRemote()
 
-  // Auto-tune KiwiSDR when radio frequency changes
-  const _origSendCatFrequency = sendCatFrequency;
-  function sendCatFrequencyWithKiwi(hz) {
-    _origSendCatFrequency(hz);
-    if (kiwiActive && kiwiClient && kiwiClient.connected && hz > 100000) {
-      const mode = (_currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
-      kiwiClient.tune(hz / 1000, mode);
-    }
-  }
-  // Patch the frequency callback
-  if (cat) cat.removeAllListeners('frequency');
-  if (cat) cat.on('frequency', sendCatFrequencyWithKiwi);
+  // (Earlier this block wrapped sendCatFrequency to also retune the kiwi on
+  // every cat 'frequency' poll response. That race-conditioned with the
+  // spot-click path: the rig takes ~500 ms to process FA<new>, so the next
+  // poll responds with the OLD frequency, and the wrapper would yank the
+  // kiwi back to the previous tuning every second. tuneRadio() and the
+  // 'tune' / 'apply-vfo-profile' IPC handlers already retune the kiwi
+  // directly with the authoritative spot data, so the wrapper was strictly
+  // harmful and is removed. External rig tunes (knob, SmartSDR app) no
+  // longer auto-follow the kiwi — acceptable; that path needs a real
+  // race-protection design before re-introducing.)
 
   ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort }) => {
     markUserActive();

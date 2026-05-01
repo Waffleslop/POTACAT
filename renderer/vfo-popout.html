@@ -427,6 +427,11 @@
     </div>
     <div class="widget-section" id="widget-kiwi">
       <div class="ptt-log-row" id="kiwi-btn-row"></div>
+      <div id="kiwi-volume-row" style="display:none;align-items:center;gap:8px;padding:4px 8px;font-size:11px;color:var(--text-muted);">
+        <span style="min-width:42px;">Volume</span>
+        <input type="range" id="kiwi-volume" min="0" max="150" value="80" style="flex:1;">
+        <span id="kiwi-volume-val" style="min-width:32px;text-align:right;">80%</span>
+      </div>
     </div>
     <div class="widget-section" id="widget-cw-controls">
       <div class="cw-ctrl-row">
@@ -2028,6 +2033,9 @@ let kiwiEnabled = false;
 let kiwiConnected = false;
 let kiwiConnectedHost = '';
 let kiwiAudioCtx = null;
+let kiwiGainNode = null;
+let kiwiNextPlayTime = 0; // running cursor so packets play back-to-back instead of all at currentTime
+let kiwiVolume = 0.8; // 0..1.5; loaded from localStorage below
 let kiwiStations = []; // [{label, host, port}]
 
 function kiwiCleanHost(h) { return (h || '').replace(/^https?:\/\//, '').replace(/\/+$/, ''); }
@@ -2102,9 +2110,10 @@ wKiwiCb.addEventListener('change', async () => {
 window.api.onKiwiStatus((s) => {
   kiwiConnected = s.connected;
   if (s.host) kiwiConnectedHost = s.host;
-  if (!s.connected) kiwiConnectedHost = '';
+  if (!s.connected) { kiwiConnectedHost = ''; kiwiNextPlayTime = 0; }
   updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
+  document.getElementById('kiwi-volume-row').style.display = s.connected ? 'flex' : 'none';
   // Mute local radio audio monitor when SDR active, restore when off
   if (s.connected) {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
@@ -2116,15 +2125,55 @@ window.api.onKiwiStatus((s) => {
 window.api.onKiwiAudio((d) => {
   if (!kiwiConnected) return;
   try {
-    if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: d.sampleRate || 12000 });
-    const buf = kiwiAudioCtx.createBuffer(1, d.pcm.length, d.sampleRate || 12000);
-    buf.getChannelData(0).set(new Float32Array(d.pcm));
+    // Default-rate AudioContext, buffer at the source rate — let the browser
+    // resample on the output side. Forcing a 12 kHz context made packets
+    // render at lower output quality and was unreliable across browsers.
+    if (!kiwiAudioCtx) {
+      kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      kiwiGainNode = kiwiAudioCtx.createGain();
+      kiwiGainNode.gain.value = kiwiVolume;
+      kiwiGainNode.connect(kiwiAudioCtx.destination);
+    }
+    const sr = d.sampleRate || 12000;
+    const pcm = new Float32Array(d.pcm);
+    const buf = kiwiAudioCtx.createBuffer(1, pcm.length, sr);
+    buf.getChannelData(0).set(pcm);
     const src = kiwiAudioCtx.createBufferSource();
     src.buffer = buf;
-    src.connect(kiwiAudioCtx.destination);
-    src.start();
+    src.connect(kiwiGainNode);
+    // Schedule packets back-to-back. Without this each src.start() runs at
+    // currentTime, so consecutive packets overlap or leave gaps depending on
+    // jitter — which sounds like garbled audio with clicks.
+    // Cap the cursor at 500 ms ahead of now: a network burst can deliver a
+    // backlog that pushes kiwiNextPlayTime seconds into the future, which
+    // would make a QSY take that many seconds to be heard. If the cursor
+    // drifts beyond the cap, snap it back to now — the user gets a tiny
+    // glitch instead of multi-second latency.
+    const now = kiwiAudioCtx.currentTime;
+    if (kiwiNextPlayTime < now || kiwiNextPlayTime > now + 0.5) kiwiNextPlayTime = now;
+    src.start(kiwiNextPlayTime);
+    kiwiNextPlayTime += pcm.length / sr;
   } catch {}
 });
+
+// Volume slider — wired to the persistent GainNode that sits between every
+// audio packet and the output. Persisted so the next connect doesn't blast.
+(function () {
+  const slider = document.getElementById('kiwi-volume');
+  const label = document.getElementById('kiwi-volume-val');
+  if (!slider) return;
+  const saved = parseInt(localStorage.getItem('kiwiVolume') || '80', 10);
+  slider.value = saved;
+  label.textContent = saved + '%';
+  kiwiVolume = saved / 100;
+  slider.addEventListener('input', () => {
+    const pct = parseInt(slider.value, 10);
+    label.textContent = pct + '%';
+    kiwiVolume = pct / 100;
+    localStorage.setItem('kiwiVolume', String(pct));
+    if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
+  });
+})();
 
 // Load saved settings
 (async () => {
