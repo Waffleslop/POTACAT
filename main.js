@@ -9631,10 +9631,10 @@ app.whenReady().then(() => {
     logPopoutWin.on('closed', () => { logPopoutWin = null; });
 
     logPopoutWin.webContents.on('did-finish-load', () => {
-      // Send initial prefill once the renderer is ready.
-      if (logPopoutWin && !logPopoutWin.isDestroyed() && prefill) {
-        logPopoutWin.webContents.send('log-popout-prefill', prefill);
-      }
+      if (!logPopoutWin || logPopoutWin.isDestroyed()) return;
+      // Send theme + prefill once the renderer is ready.
+      logPopoutWin.webContents.send('log-popout-theme', settings.lightMode ? 'light' : 'dark');
+      if (prefill) logPopoutWin.webContents.send('log-popout-prefill', prefill);
     });
 
     // F12 toggles DevTools, mirroring other pop-outs.
@@ -9648,6 +9648,13 @@ app.whenReady().then(() => {
   // Frameless window controls for the log pop-out.
   ipcMain.on('log-popout-minimize', () => { if (logPopoutWin) logPopoutWin.minimize(); });
   ipcMain.on('log-popout-close', () => { if (logPopoutWin) logPopoutWin.close(); });
+
+  // Theme relay — fired by app.js whenever the user toggles light mode.
+  ipcMain.on('log-popout-theme', (_e, theme) => {
+    if (logPopoutWin && !logPopoutWin.isDestroyed()) {
+      logPopoutWin.webContents.send('log-popout-theme', theme);
+    }
+  });
 
   // Relay theme to QSO pop-out
   ipcMain.on('qso-popout-theme', (_e, theme) => {

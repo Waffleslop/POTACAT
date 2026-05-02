@@ -453,6 +453,17 @@
       // open so a user toggling activation on/off mid-session sees consistent
       // behavior.
       activationCtx = p.activationCtx || null;
+      // Pre-fill from a currently-tuned spot: jump callsign in, then skip
+      // straight to RST Sent so the operator can type the signal report
+      // without an extra click. (W9TEF: "the call should pre-fill, and it
+      // should be on RST Sent so I can quickly type in the RST".)
+      if (p.callsign && !callInput.value) {
+        callInput.value = String(p.callsign).toUpperCase();
+        // Trigger the callsign lookup so QTH/past QSOs populate.
+        scheduleLookup();
+        rstSentInput.focus();
+        rstSentInput.select();
+      }
     });
   }
 
@@ -471,4 +482,54 @@
   selectChip('dx');
   startClock();
   callInput.focus();
+
+  // ── Theme (light / dark) ────────────────────────────────────────────────
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  }
+  if (window.api.onTheme) window.api.onTheme(applyTheme);
+  // Hydrate from settings on first open in case the IPC race lets the
+  // window paint dark before the did-finish-load broadcast lands.
+  (async () => {
+    try {
+      const s = await window.api.getSettings();
+      if (s && s.lightMode) applyTheme('light');
+    } catch {}
+  })();
+
+  // ── Zoom (Ctrl+= / Ctrl+- / Ctrl+0) ─────────────────────────────────────
+  // Persisted per-window in localStorage so a user's preferred zoom survives
+  // close/reopen. Keys are independent of the main window's zoom.
+  const ZOOM_KEY = 'potacat-log-popout-zoom';
+  const ZOOM_MIN = 0.7, ZOOM_MAX = 2.0, ZOOM_STEP = 0.1;
+  function setZoom(z) {
+    const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    window.api.setZoom(clamped);
+    try { localStorage.setItem(ZOOM_KEY, clamped.toFixed(2)); } catch {}
+  }
+  // Restore saved zoom on init.
+  try {
+    const saved = parseFloat(localStorage.getItem(ZOOM_KEY) || '1');
+    if (isFinite(saved) && saved >= ZOOM_MIN && saved <= ZOOM_MAX) setZoom(saved);
+  } catch {}
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === '=' || e.key === '+') {
+      e.preventDefault();
+      setZoom((window.api.getZoom() || 1) + ZOOM_STEP);
+    } else if (e.key === '-') {
+      e.preventDefault();
+      setZoom((window.api.getZoom() || 1) - ZOOM_STEP);
+    } else if (e.key === '0') {
+      e.preventDefault();
+      setZoom(1);
+    }
+  });
+  // Also support Ctrl+wheel zoom (matches every browser convention).
+  document.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const dir = e.deltaY < 0 ? 1 : -1;
+    setZoom((window.api.getZoom() || 1) + dir * ZOOM_STEP);
+  }, { passive: false });
 })();

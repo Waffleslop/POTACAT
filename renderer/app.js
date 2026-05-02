@@ -5902,7 +5902,14 @@ function openQuickLog() {
   const activationCtx = (activationActive && activatorParkRefs.length > 0)
     ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
     : null;
+  // If a spot is currently tuned (user QSY'd via the table), pre-fill the
+  // callsign from that spot — operator hits Ctrl+L right after tuning,
+  // expects to start typing RST immediately. The popout sees `callsign`
+  // in the prefill and skips its callsign-input focus, jumping straight
+  // to RST Sent.
+  const tunedCall = (lastTunedSpot && lastTunedSpot.callsign) ? lastTunedSpot.callsign : '';
   window.api.openLogPopout({
+    callsign: tunedCall,
     freqKhz: radioFreqKhz || null,
     mode: radioMode || null,
     power: radioPower || lastLogPower || null,
@@ -7887,6 +7894,7 @@ quickLightMode.addEventListener('change', async () => {
   setLightMode.checked = light;
   if (popoutOpen) window.api.sendPopoutTheme(light ? 'light' : 'dark');
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(light ? 'light' : 'dark');
+  window.api.logPopoutTheme(light ? 'light' : 'dark');
   if (actmapPopoutOpen) window.api.actmapPopoutTheme(light ? 'light' : 'dark');
   if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(light ? 'light' : 'dark');
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(light ? 'light' : 'dark');

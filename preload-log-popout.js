@@ -7,7 +7,7 @@
 // has to live in main and reach the renderer via IPC.
 //
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   // --- Window controls (frameless title bar) ---
@@ -31,6 +31,13 @@ contextBridge.exposeInMainWorld('api', {
   // --- CAT live updates ---
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
+
+  // --- Theme propagation (light / dark) ---
+  onTheme: (cb) => ipcRenderer.on('log-popout-theme', (_e, theme) => cb(theme)),
+
+  // --- Zoom (Ctrl+= / Ctrl+- / Ctrl+0) ---
+  setZoom: (factor) => webFrame.setZoomFactor(factor),
+  getZoom: () => webFrame.getZoomFactor(),
 
   // --- Pop-out lifecycle ---
   onPrefill: (cb) => ipcRenderer.on('log-popout-prefill', (_e, p) => cb(p)),
