@@ -375,6 +375,94 @@ test('rigctld passband not eaten as frequency', () => {
   assert.strictEqual(freqs[0], 14074000);
 });
 
+// AB9AI regression: poll order is freq -> mode -> smeter, all fired in
+// the same tick. Responses arrive in order. The freq response is a large
+// integer that previously cleared _expectSmeter, so the actual S-meter
+// response was silently dropped. The fix leaves _expectSmeter set until
+// either an in-range value or an RPRT clears it.
+test('rigctld smeter survives interleaved freq+mode poll (AB9AI)', () => {
+  const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  let smeter = -1;
+  codec.on('smeter', (v) => { smeter = v; });
+  codec.getFrequency();
+  codec.getMode();
+  codec.getSmeter();
+  // Responses in order: freq, mode, passband, smeter (-12 dB rel S9)
+  codec.onData('14074000\nUSB\n3000\n-12\n');
+  // -12 dB -> (-12 + 54) * 255 / 114 ~= 94
+  assert.strictEqual(smeter, 94);
+});
+
+test('rigctld smeter alone parses correctly', () => {
+  const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  let smeter = -1;
+  codec.on('smeter', (v) => { smeter = v; });
+  codec.getSmeter();
+  codec.onData('0\n'); // S9
+  // 0 dB -> 54 * 255 / 114 ~= 121
+  assert.strictEqual(smeter, 121);
+});
+
+test('rigctld getSwr writes "l SWR"', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.getSwr();
+  assert.strictEqual(writes[0], 'l SWR\n');
+});
+
+test('rigctld getAlc writes "l ALC"', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.getAlc();
+  assert.strictEqual(writes[0], 'l ALC\n');
+});
+
+test('rigctld parse SWR 1.5 -> 30 (UI scale)', () => {
+  const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  let swr = -1;
+  codec.on('swr', (v) => { swr = v; });
+  codec.getSwr();
+  codec.onData('1.5\n');
+  // (1.5 - 1.0) * 60 = 30
+  assert.strictEqual(swr, 30);
+});
+
+test('rigctld parse ALC 0.5 -> 128', () => {
+  const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  let alc = -1;
+  codec.on('alc', (v) => { alc = v; });
+  codec.getAlc();
+  codec.onData('0.5\n');
+  // 0.5 * 255 = 127.5 -> 128
+  assert.strictEqual(alc, 128);
+});
+
+test('rigctld swr survives interleaved freq response', () => {
+  const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  let swr = -1;
+  codec.on('swr', (v) => { swr = v; });
+  codec.getFrequency();
+  codec.getSwr();
+  codec.onData('14074000\n2.0\n');
+  // (2.0 - 1.0) * 60 = 60
+  assert.strictEqual(swr, 60);
+});
+
+test('rigctld RPRT -11 clears all expectations (function not available)', () => {
+  const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  let smeter = -1, swr = -1, alc = -1;
+  codec.on('smeter', (v) => { smeter = v; });
+  codec.on('swr', (v) => { swr = v; });
+  codec.on('alc', (v) => { alc = v; });
+  codec.getSmeter();
+  codec.getSwr();
+  codec.getAlc();
+  codec.onData('RPRT -11\n');
+  // No subsequent integer should land on smeter/swr/alc
+  codec.onData('14074000\n');
+  assert.strictEqual(smeter, -1);
+  assert.strictEqual(swr, -1);
+  assert.strictEqual(alc, -1);
+});
+
 // =========================================================================
 console.log('\n=== RigctldCodec (Yaesu via rigctld) ===');
 
