@@ -622,6 +622,37 @@ tbody.addEventListener('dblclick', (e) => {
     if (field === 'QSO_DATE') newVal = newVal.replace(/-/g, ''); // YYYY-MM-DD -> YYYYMMDD
     if (field === 'TIME_ON') newVal = newVal.replace(/:/g, '') + '00'; // HH:MM -> HHMM00
 
+    // AG5B: pasting "US-1595, US-4567, US-4581, US-4582" into the SIG_INFO
+    // cell is a request to split a 1-park QSO into the N-fer it actually
+    // was. POTA needs separate records to credit each park. Offer the
+    // split; on No, save the comma list as-is (legacy behavior).
+    if (field === 'SIG_INFO' && newVal.includes(',')) {
+      const refs = newVal.split(',').map(r => r.trim().toUpperCase()).filter(Boolean);
+      if (refs.length >= 2) {
+        const ok = confirm(
+          `Split this QSO into ${refs.length} POTA records?\n\n` +
+          refs.map(r => `  • ${r}`).join('\n') +
+          '\n\nOK = create ' + (refs.length - 1) + ' additional QSO row' +
+          (refs.length - 1 === 1 ? '' : 's') + '.\nCancel = save as a single row.'
+        );
+        if (ok) {
+          const result = await window.api.expandQsoMultipark({ idx, refs });
+          if (result.success) {
+            allQsos = await window.api.getAllQsos();
+            render();
+            toast(`Split into ${refs.length} QSOs`);
+          } else {
+            cancel();
+            toast('Split failed: ' + (result.error || 'unknown error'));
+          }
+          return;
+        }
+        // User chose "save as single row" — fall through and write the
+        // raw comma string. Uppercase the input for consistency.
+        newVal = refs.join(',');
+      }
+    }
+
     const fields = { [field]: newVal };
     if (field === 'FREQ') fields.BAND = freqMhzToBandLocal(newVal);
 

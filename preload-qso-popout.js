@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
   getAllQsos: () => ipcRenderer.invoke('get-all-qsos'),
   updateQso: (data) => ipcRenderer.invoke('update-qso', data),
+  expandQsoMultipark: (data) => ipcRenderer.invoke('expand-qso-multipark', data),
   deleteQso: (idx) => ipcRenderer.invoke('delete-qso', idx),
   exportAdif: (qsos) => ipcRenderer.invoke('export-adif', qsos),
   importAdif: () => ipcRenderer.invoke('import-adif'),

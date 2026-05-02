@@ -7196,16 +7196,26 @@ function saveLocalWorkedPark(ref) {
 }
 
 function loadWorkedParks() {
-  if (!settings.potaParksPath) {
-    workedParks = new Map();
-  } else {
+  // Two sources, kept separate so the renderer can pick which one to
+  // use for ATNO detection:
+  //   creditedParks — POTA hunter CSV only (parks pota.app says you have
+  //                   credit for). Empty if no CSV is loaded.
+  //   workedParks   — credited + parks logged locally + parks harvested
+  //                   from the user's ADIF log. This is what we've always
+  //                   used; K0OTC pointed out that local-only QSOs that
+  //                   never reached pota.app shouldn't suppress an ATNO
+  //                   alert for the same park, so the strict-mode toggle
+  //                   in the renderer can switch to creditedParks.
+  let creditedParks = new Map();
+  if (settings.potaParksPath) {
     try {
-      workedParks = parsePotaParksCSV(settings.potaParksPath);
+      creditedParks = parsePotaParksCSV(settings.potaParksPath);
     } catch (err) {
       console.error('Failed to parse POTA parks CSV:', err.message);
-      workedParks = new Map();
     }
   }
+  workedParks = new Map(creditedParks);
+
   // Merge in parks worked via POTACAT's own logger (persisted locally)
   const localParks = loadLocalWorkedParks();
   for (const ref of localParks) {
@@ -7231,6 +7241,7 @@ function loadWorkedParks() {
   if (added > 0) sendCatLog(`[worked-parks] harvested ${added} new refs from QSO log`);
   if (win && !win.isDestroyed()) {
     win.webContents.send('worked-parks', [...workedParks.entries()]);
+    win.webContents.send('credited-parks', [...creditedParks.keys()]);
   }
   if (remoteServer && remoteServer.running) {
     remoteServer.sendWorkedParks([...workedParks.keys()]);
@@ -13296,6 +13307,64 @@ app.whenReady().then(() => {
         qsoPopoutWin.webContents.send('qso-popout-updated', { idx, fields });
       }
       return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // AG5B: when the user pastes "US-1595, US-4567, ..." into the SIG_INFO
+  // cell of an existing QSO in the logbook, offer to split it into N
+  // separate POTA records (each park needs its own QSO for credit). The
+  // first ref stays on the original row; each additional ref clones the
+  // row with TIME_ON +N seconds so dupe-detection in downstream loggers
+  // doesn't merge them.
+  ipcMain.handle('expand-qso-multipark', async (event, { idx, refs }) => {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    try {
+      const qsos = parseAllRawQsos(logPath);
+      if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
+      const cleanRefs = (refs || [])
+        .map(r => String(r || '').trim().toUpperCase())
+        .filter(Boolean);
+      if (cleanRefs.length < 2) return { success: false, error: 'Need at least two refs to split' };
+
+      const base = qsos[idx];
+      base.SIG = 'POTA';
+      base.SIG_INFO = cleanRefs[0];
+      base.POTA_REF = cleanRefs[0];
+
+      // Build clones for refs[1..N-1]. TIME_ON is HHMMSS in ADIF; bump the
+      // seconds field by i so each row has a unique timestamp. If the bump
+      // crosses 60s we just keep going — major loggers tolerate non-rollover
+      // times in this range, and 4-park n-fers logged at the same minute
+      // are realistic.
+      const baseTime = (base.TIME_ON || '000000').padEnd(6, '0').slice(0, 6);
+      const baseHms = parseInt(baseTime, 10) || 0;
+      const clones = [];
+      for (let i = 1; i < cleanRefs.length; i++) {
+        const newHms = String(baseHms + i).padStart(6, '0');
+        const clone = { ...base };
+        clone.SIG = 'POTA';
+        clone.SIG_INFO = cleanRefs[i];
+        clone.POTA_REF = cleanRefs[i];
+        clone.TIME_ON = newHms;
+        if (clone.TIME_OFF) clone.TIME_OFF = newHms;
+        clones.push(clone);
+      }
+      qsos.splice(idx + 1, 0, ...clones);
+      rewriteAdifFile(logPath, qsos);
+      if (cloudIpc) {
+        cloudIpc.journalUpdate(base);
+        for (const c of clones) cloudIpc.journalUpdate(c);
+      }
+      loadWorkedQsos();
+      // Notify the QSO pop-out to reload from disk so its indices realign —
+      // splice shifted everything after idx.
+      const sender = event.sender;
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
+        qsoPopoutWin.webContents.send('qso-popout-refresh');
+      }
+      return { success: true, added: clones.length };
     } catch (err) {
       return { success: false, error: err.message };
     }

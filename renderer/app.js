@@ -130,6 +130,18 @@ let eventOverlayOpen = false;
 let hideWorked = false;
 let workedParksSet = new Set(); // park references from CSV for fast lookup
 let workedParksData = new Map(); // reference -> full park data for stats
+let creditedParksSet = new Set(); // POTA-credited subset (from pota.app CSV only)
+let strictAtno = false; // K0OTC: when true, NEW = absent from creditedParks (POTA CSV) rather than worked
+// True if the spot's park hasn't been credited (or worked, in default mode) by the user.
+// Centralizes the rule the 7+ call sites used to inline: workedParksSet.size > 0 && !workedParksSet.has(ref).
+function isAtnoRef(ref) {
+  if (!ref) return false;
+  // Strict mode only meaningful when the POTA CSV actually loaded —
+  // otherwise the user has no credited set to compare against and we'd
+  // mark every park NEW. Fall back to the workedParks behavior.
+  if (strictAtno && creditedParksSet.size > 0) return !creditedParksSet.has(ref);
+  return workedParksSet.size > 0 && !workedParksSet.has(ref);
+}
 let hideWorkedParks = false;
 let hideWorkedCallRef = false; // strict: hide only when CALL + REF + UTC-date + BAND + MODE all match a logged QSO
 let prioritizeNewParks = false; // sort unworked-park spots to the top of the table
@@ -181,8 +193,7 @@ function pushJtcatSpotsHighlight(filtered) {
     calls.push({
       call,
       reference: s.reference || '',
-      isNewPark: (s.source === 'pota' || s.source === 'wwff')
-        && s.reference && workedParksSet.size > 0 && !workedParksSet.has(s.reference),
+      isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
     });
   }
   // Cheap signature for dedup
@@ -422,6 +433,8 @@ const spotsHideCallRef = document.getElementById('spots-hide-callref');
 const spotsHideCallRefLabel = document.getElementById('spots-hide-callref-label');
 const spotsPrioritizeNew = document.getElementById('spots-prioritize-new');
 const spotsPrioritizeNewLabel = document.getElementById('spots-prioritize-new-label');
+const spotsStrictAtno = document.getElementById('spots-strict-atno');
+const spotsStrictAtnoLabel = document.getElementById('spots-strict-atno-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
 const spotsHideQrt = document.getElementById('spots-hide-qrt');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
@@ -1237,6 +1250,7 @@ async function loadPrefs() {
   hideWorkedParks = settings.hideWorkedParks === true;
   hideWorkedCallRef = settings.hideWorkedCallRef === true;
   prioritizeNewParks = settings.prioritizeNewParks === true;
+  strictAtno = settings.strictAtno === true;
   // Banner logger scale (W9TEF wanted to make it bigger independent of app)
   const savedScale = parseFloat(settings.bannerScale);
   blScale = (isFinite(savedScale) && savedScale >= 0.8 && savedScale <= 3.0) ? savedScale : 1.0;
@@ -4239,9 +4253,9 @@ function sortSpots(spots) {
     // KW4FM request: when enabled, group unworked POTA/WWFF parks at the top.
     // Within the new-park group (and within the rest), the user's column sort
     // still applies, so this layers on top of every other sort cleanly.
-    if (prioritizeNewParks && workedParksSet.size > 0) {
-      const aNew = (a.source === 'pota' || a.source === 'wwff') && a.reference && !workedParksSet.has(a.reference) ? 1 : 0;
-      const bNew = (b.source === 'pota' || b.source === 'wwff') && b.reference && !workedParksSet.has(b.reference) ? 1 : 0;
+    if (prioritizeNewParks) {
+      const aNew = (a.source === 'pota' || a.source === 'wwff') && isAtnoRef(a.reference) ? 1 : 0;
+      const bNew = (b.source === 'pota' || b.source === 'wwff') && isAtnoRef(b.reference) ? 1 : 0;
       if (aNew !== bNew) return bNew - aNew;
     }
 
@@ -5208,7 +5222,7 @@ function updateMapMarkers(filtered) {
     const logBtnHtml = enableLogging
       ? ` <button class="log-popup-btn" data-call="${s.callsign}" data-freq="${s.frequency}" data-mode="${s.mode}" data-ref="${s.reference || ''}" data-name="${(s.parkName || '').replace(/"/g, '&quot;')}" data-source="${s.source || ''}" data-wwff-ref="${s.wwffReference || ''}" data-wwff-name="${(s.wwffParkName || '').replace(/"/g, '&quot;')}">Log</button>`
       : '';
-    const mapNewPark = workedParksSet.size > 0 && (s.source === 'pota' || s.source === 'wwff') && s.reference && !workedParksSet.has(s.reference);
+    const mapNewPark = (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference);
     const newBadge = mapNewPark ? ` <span style="background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">NEW</span>` : '';
     const expMeta = expeditionMeta.get(s.callsign.toUpperCase());
     const expTitle = expMeta ? `DX Expedition: ${expMeta.entity}` : 'DX Expedition';
@@ -6315,7 +6329,7 @@ function enrichSpotsForPopout(filtered) {
     isWorkedToday: workedQsos.has(s.callsign.toUpperCase()) && isWorkedSpot(s),
     isExpedition: enableDxe && expeditionCallsigns.has(s.callsign.toUpperCase()),
     expeditionEntity: (expeditionMeta.get(s.callsign.toUpperCase()) || {}).entity || '',
-    isNewPark: workedParksSet.size > 0 && (s.source === 'pota' || s.source === 'wwff') && s.reference && !workedParksSet.has(s.reference),
+    isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
     isOop: isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
     isWatched: watchlistMatch(watchlist, s.callsign, s.band, s.mode),
     opName: qrzDisplayName(qrzData.get(s.callsign.toUpperCase().split('/')[0])),
@@ -6539,7 +6553,7 @@ function render() {
       }
 
       // New park indicator (POTA/WWFF spot with a reference not in worked parks)
-      const isNewPark = workedParksSet.size > 0 && (s.source === 'pota' || s.source === 'wwff') && s.reference && !workedParksSet.has(s.reference);
+      const isNewPark = (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference);
       if (isNewPark) {
         tr.classList.add('new-park');
       }
@@ -7689,6 +7703,7 @@ function syncSpotsPanel() {
   spotsHideParks.checked = hideWorkedParks;
   spotsHideCallRef.checked = hideWorkedCallRef;
   spotsPrioritizeNew.checked = prioritizeNewParks;
+  spotsStrictAtno.checked = strictAtno;
   spotsHideOob.checked = hideOutOfBand;
   spotsHideQrt.checked = hideQrt;
   spotsShowHidden.checked = showHiddenSpots;
@@ -7699,6 +7714,9 @@ function syncSpotsPanel() {
   spotsDxcc.checked = enableDxcc;
   spotsHideParksLabel.classList.toggle('hidden', workedParksSet.size === 0);
   spotsPrioritizeNewLabel.classList.toggle('hidden', workedParksSet.size === 0);
+  // Strict ATNO is only meaningful when the POTA hunter CSV is loaded —
+  // without it there's nothing to compare against.
+  spotsStrictAtnoLabel.classList.toggle('hidden', creditedParksSet.size === 0);
   // Strict CALL+REF filter only makes sense once the user has logged QSOs;
   // hide the toggle entirely when there's nothing in the worked-QSO map.
   spotsHideCallRefLabel.classList.toggle('hidden', workedQsos.size === 0);
@@ -7737,6 +7755,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   hideWorkedParks = spotsHideParks.checked;
   hideWorkedCallRef = spotsHideCallRef.checked;
   prioritizeNewParks = spotsPrioritizeNew.checked;
+  strictAtno = spotsStrictAtno.checked;
   hideOutOfBand = spotsHideOob.checked;
   hideQrt = spotsHideQrt.checked;
   showHiddenSpots = spotsShowHidden.checked;
@@ -7765,7 +7784,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   await window.api.saveSettings({
     enablePota, enableSota, enableWwff, enableLlota,
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
-    hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, hideOutOfBand,
+    hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, strictAtno, hideOutOfBand,
     enableDxcc,
   });
 
@@ -10683,6 +10702,11 @@ window.api.onWorkedParks((entries) => {
   render();
 });
 
+window.api.onCreditedParks((refs) => {
+  creditedParksSet = new Set(refs || []);
+  render();
+});
+
 function updateParksStatsOverlay() {
   if (!parksStatsOverlay) return;
 
@@ -10713,13 +10737,14 @@ function updateParksStatsOverlay() {
   parksStatsQsos.textContent = totalQsos.toLocaleString();
   parksStatsLocations.textContent = locations.size.toLocaleString();
 
-  // New parks on air right now — POTA spots whose reference is NOT in worked set
+  // New parks on air right now — POTA spots flagged ATNO by the same rule
+  // the table uses (respects strictAtno setting).
   let newOnAir = 0;
   const seenRefs = new Set();
   for (const s of allSpots) {
     if (s.source === 'pota' && s.reference && !seenRefs.has(s.reference)) {
       seenRefs.add(s.reference);
-      if (!workedParksSet.has(s.reference)) newOnAir++;
+      if (isAtnoRef(s.reference)) newOnAir++;
     }
   }
   parksStatsNewNow.textContent = newOnAir;

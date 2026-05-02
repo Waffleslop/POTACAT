@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('api', {
   onCatLog: (cb) => ipcRenderer.on('cat-log', (_e, msg) => cb(msg)),
   onWorkedQsos: (cb) => ipcRenderer.on('worked-qsos', (_e, data) => cb(data)),
   onWorkedParks: (cb) => ipcRenderer.on('worked-parks', (_e, data) => cb(data)),
+  onCreditedParks: (cb) => ipcRenderer.on('credited-parks', (_e, refs) => cb(refs)),
   choosePotaParksFile: () => ipcRenderer.invoke('choose-pota-parks-file'),
   onWsjtxStatus: (cb) => ipcRenderer.on('wsjtx-status', (_e, s) => cb(s)),
   onWsjtxState: (cb) => ipcRenderer.on('wsjtx-state', (_e, s) => cb(s)),
