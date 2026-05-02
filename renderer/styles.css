@@ -5920,6 +5920,10 @@ body.activator-rbn-on #rbn-view {
 .jtcat-halt-btn { color: var(--accent-red); border-color: var(--accent-red); }
 .jtcat-halt-btn:hover { background: var(--accent-red); color: #fff; }
 
+.jtcat-tune-btn { color: var(--accent-orange, #f0a500); border-color: var(--accent-orange, #f0a500); }
+.jtcat-tune-btn:hover { background: var(--accent-orange, #f0a500); color: #000; }
+.jtcat-tune-btn.active { background: var(--accent-red); color: #fff; border-color: var(--accent-red); animation: jtcat-tx-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
+
 .jtcat-tx-message {
   display: flex;
   align-items: center;

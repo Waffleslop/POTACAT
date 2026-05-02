@@ -76,6 +76,7 @@
   var cqBtn = document.getElementById('jp-cq');
   var enableTxBtn = document.getElementById('jp-enable-tx');
   var haltTxBtn = document.getElementById('jp-halt-tx');
+  var tuneBtn = document.getElementById('jp-tune');
   var txMsgEl = document.getElementById('jp-tx-msg');
   var rxTxEl = document.getElementById('jp-rx-tx');
   var txFreqLabel = document.getElementById('jp-tx-freq-label');
@@ -1266,6 +1267,20 @@
     enableTxBtn.textContent = 'Enable TX';
     window.api.jtcatCancelQso();
     txMsgEl.textContent = '--';
+  });
+
+  if (tuneBtn) {
+    tuneBtn.addEventListener('click', function() { window.api.jtcatTuneToggle(); });
+  }
+  window.api.onJtcatTuneState(function(state) {
+    if (!tuneBtn) return;
+    if (state.active) {
+      tuneBtn.classList.add('active');
+      tuneBtn.textContent = 'Tune ' + state.secondsRemaining;
+    } else {
+      tuneBtn.classList.remove('active');
+      tuneBtn.textContent = 'Tune';
+    }
   });
 
   qsoCancelBtn.addEventListener('click', function() {

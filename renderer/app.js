@@ -714,6 +714,7 @@ const jtcatTxFreqInput = document.getElementById('jtcat-tx-freq');
 const jtcatRxFreqInput = document.getElementById('jtcat-rx-freq');
 const jtcatEnableTxBtn = document.getElementById('jtcat-enable-tx');
 const jtcatHaltTxBtn = document.getElementById('jtcat-halt-tx');
+const jtcatTuneBtn = document.getElementById('jtcat-tune');
 const jtcatLogQsoBtn = document.getElementById('jtcat-log-qso');
 const jtcatTxMsgText = document.getElementById('jtcat-tx-msg-text');
 const jtcatTxSlotSelect = document.getElementById('jtcat-tx-slot');
@@ -16593,6 +16594,22 @@ jtcatHaltTxBtn.addEventListener('click', function() {
   jtcatClearQso();
 });
 
+if (jtcatTuneBtn) {
+  jtcatTuneBtn.addEventListener('click', function() {
+    window.api.jtcatTuneToggle();
+  });
+}
+window.api.onJtcatTuneState(function(state) {
+  if (!jtcatTuneBtn) return;
+  if (state.active) {
+    jtcatTuneBtn.classList.add('active');
+    jtcatTuneBtn.textContent = 'Tune ' + state.secondsRemaining;
+  } else {
+    jtcatTuneBtn.classList.remove('active');
+    jtcatTuneBtn.textContent = 'Tune';
+  }
+});
+
 // CQ-only filter toggle
 jtcatCqFilterBtn.addEventListener('click', function() {
   jtcatCqFilter = !jtcatCqFilter;
@@ -17664,6 +17681,44 @@ async function playJtcatTxAudio(data) {
 window.api.onJtcatTxAudio(function(data) {
   playJtcatTxAudio(data);
 });
+
+// --- JTCAT Tune (steady-tone for power/ALC tuning) ---
+// Re-uses the same AudioContext + sinkId as FT8 TX audio so the tone exits
+// through the rig USB CODEC the user already configured for FT8.
+var jtcatTuneOsc = null;
+var jtcatTuneGain = null;
+async function startJtcatTuneAudio() {
+  try {
+    var s = await window.api.getSettings();
+    var outputDeviceId = s.remoteAudioOutput || '';
+    if (!jtcatTxAudioCtx || jtcatTxAudioCtx.state === 'closed') {
+      jtcatTxAudioCtx = new AudioContext({ sampleRate: 12000 });
+    }
+    if (jtcatTxAudioCtx.state === 'suspended') await jtcatTxAudioCtx.resume();
+    if (outputDeviceId && jtcatTxAudioCtx.setSinkId) {
+      try { await jtcatTxAudioCtx.setSinkId(outputDeviceId); } catch {}
+    }
+    stopJtcatTuneAudio();
+    jtcatTuneOsc = jtcatTxAudioCtx.createOscillator();
+    jtcatTuneOsc.type = 'sine';
+    // 1500 Hz matches WSJT-X's tune tone — sits in the middle of an SSB
+    // passband regardless of which sideband is active.
+    jtcatTuneOsc.frequency.value = 1500;
+    jtcatTuneGain = jtcatTxAudioCtx.createGain();
+    jtcatTuneGain.gain.value = jtcatTxGainLevel;
+    jtcatTuneOsc.connect(jtcatTuneGain);
+    jtcatTuneGain.connect(jtcatTxAudioCtx.destination);
+    jtcatTuneOsc.start();
+  } catch (err) {
+    console.error('[JTCAT] Tune audio start failed:', err.message || err);
+  }
+}
+function stopJtcatTuneAudio() {
+  if (jtcatTuneOsc) { try { jtcatTuneOsc.stop(); } catch {} try { jtcatTuneOsc.disconnect(); } catch {} jtcatTuneOsc = null; }
+  if (jtcatTuneGain) { try { jtcatTuneGain.disconnect(); } catch {} jtcatTuneGain = null; }
+}
+window.api.onJtcatTuneAudioStart(function() { startJtcatTuneAudio(); });
+window.api.onJtcatTuneAudioStop(function() { stopJtcatTuneAudio(); });
 
 var jtcatIsTx = false;
 window.api.onJtcatTxStatus(function(data) {

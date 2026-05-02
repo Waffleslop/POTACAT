@@ -75,6 +75,10 @@
     .jp-btn:hover { background: var(--bg-hover); }
     .jp-btn.active { background: var(--accent-green, #4ecca3); color: #fff; border-color: var(--accent-green, #4ecca3); }
     .jp-btn.jp-halt { background: #e94560; color: #fff; border-color: #e94560; }
+    .jp-btn.jp-tune { color: #f0a500; border-color: #f0a500; }
+    .jp-btn.jp-tune:hover { background: #f0a500; color: #000; }
+    .jp-btn.jp-tune.active { background: #e94560; color: #fff; border-color: #e94560; animation: jp-tune-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
+    @keyframes jp-tune-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     .jp-tx-msg { flex: 1; font-family: monospace; color: var(--accent-blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .jp-status { font-family: monospace; color: var(--text-dim); font-size: 11px; }
 
@@ -246,6 +250,7 @@
     </select>
     <button id="jp-enable-tx" class="jp-btn">Enable TX</button>
     <button id="jp-halt-tx" class="jp-btn jp-halt">Halt TX</button>
+    <button id="jp-tune" class="jp-btn jp-tune" title="WSJT-X-style 90s steady-tone tune (click again to stop early)">Tune</button>
     <button id="jp-open-log" class="jp-btn" title="Open QSO log" style="margin-left:auto;">Log</button>
     <span id="jp-tx-msg" class="jp-tx-msg">&mdash;</span>
     <span id="jp-rx-tx" class="jp-status">RX</span>

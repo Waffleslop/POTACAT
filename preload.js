@@ -212,6 +212,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetRxFreq: (hz) => ipcRenderer.send('jtcat-set-rx-freq', hz),
   jtcatEnableTx: (enabled) => ipcRenderer.send('jtcat-enable-tx', enabled),
   jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),
+  jtcatTuneToggle: () => ipcRenderer.send('jtcat-tune-toggle'),
   jtcatSetTxMsg: (text) => ipcRenderer.send('jtcat-set-tx-msg', text),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),
@@ -227,6 +228,9 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatSetTxGain: (cb) => ipcRenderer.on('jtcat-set-tx-gain', (_e, level) => cb(level)),
   onJtcatSetRxGain: (cb) => ipcRenderer.on('jtcat-set-rx-gain', (_e, level) => cb(level)),
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
+  onJtcatTuneState: (cb) => ipcRenderer.on('jtcat-tune-state', (_e, data) => cb(data)),
+  onJtcatTuneAudioStart: (cb) => ipcRenderer.on('jtcat-tune-audio-start', () => cb()),
+  onJtcatTuneAudioStop: (cb) => ipcRenderer.on('jtcat-tune-audio-stop', () => cb()),
   onJtcatStartForRemote: (cb) => ipcRenderer.on('jtcat-start-for-remote', () => cb()),
   onJtcatStopForRemote: (cb) => ipcRenderer.on('jtcat-stop-for-remote', () => cb()),
   // FreeDV Digital Voice

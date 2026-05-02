@@ -3126,6 +3126,50 @@ function startJtcat(mode) {
   console.log('[JTCAT] Engine started, mode:', mode || 'FT8');
 }
 
+// --- JTCAT Tune (WSJT-X-style steady-tone for power/ALC tuning) ---
+const JTCAT_TUNE_DURATION_S = 90;
+const jtcatTuneState = {
+  active: false,
+  endsAt: 0,        // wall-clock ms when it auto-stops
+  endTimer: null,   // setTimeout ref
+  tickTimer: null,  // setInterval ref for countdown broadcast
+};
+
+function broadcastJtcatTuneState() {
+  const remaining = jtcatTuneState.active
+    ? Math.max(0, Math.ceil((jtcatTuneState.endsAt - Date.now()) / 1000))
+    : 0;
+  const payload = { active: jtcatTuneState.active, secondsRemaining: remaining };
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-tune-state', payload);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-tune-state', payload);
+}
+
+function startJtcatTune() {
+  if (jtcatTuneState.active) return;
+  jtcatTuneState.active = true;
+  jtcatTuneState.endsAt = Date.now() + JTCAT_TUNE_DURATION_S * 1000;
+  // Audio is genuinely going to the rig USB CODEC, so audio:true triggers
+  // SSB-over-DATA where appropriate (USB -> DIGU mute the rig mic during
+  // the tone). The 90s timer auto-releases.
+  handleRemotePtt(true, { audio: true });
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-tune-audio-start');
+  jtcatTuneState.endTimer = setTimeout(() => stopJtcatTune(), JTCAT_TUNE_DURATION_S * 1000);
+  jtcatTuneState.tickTimer = setInterval(broadcastJtcatTuneState, 1000);
+  broadcastJtcatTuneState();
+  sendCatLog(`[JTCAT] Tune ON (${JTCAT_TUNE_DURATION_S}s)`);
+}
+
+function stopJtcatTune() {
+  if (!jtcatTuneState.active) return;
+  jtcatTuneState.active = false;
+  if (jtcatTuneState.endTimer) { clearTimeout(jtcatTuneState.endTimer); jtcatTuneState.endTimer = null; }
+  if (jtcatTuneState.tickTimer) { clearInterval(jtcatTuneState.tickTimer); jtcatTuneState.tickTimer = null; }
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-tune-audio-stop');
+  handleRemotePtt(false);
+  broadcastJtcatTuneState();
+  sendCatLog('[JTCAT] Tune OFF');
+}
+
 function stopJtcat() {
   // Clean up any active QSOs to prevent stuck state
   if (remoteJtcatQso) {
@@ -3143,6 +3187,7 @@ function stopJtcat() {
   if (jtcatManager) {
     jtcatManager.stopAll();
   }
+  if (jtcatTuneState.active) stopJtcatTune();
   ft8Engine = null;
   console.log('[JTCAT] Engine stopped');
 }
@@ -12640,10 +12685,21 @@ app.whenReady().then(() => {
       ft8Engine._txEnabled = false;
       if (ft8Engine._txActive) ft8Engine.txComplete();
     }
+    // Halt also kills any active tune
+    if (jtcatTuneState.active) stopJtcatTune();
     // Also clear QSO state
     if (popoutJtcatQso) { popoutJtcatQso = null; popoutBroadcastQso(); }
     if (remoteJtcatQso) { remoteJtcatQso = null; remoteJtcatBroadcastQso(); }
     handleRemotePtt(false);
+  });
+
+  // KD2TJU: WSJT-X-style Tune button — keys PTT and plays a steady tone
+  // through the rig USB CODEC for up to 90s, so the user can dial in TX
+  // power and ALC without juggling Enable TX timing. Click again to stop
+  // early. Halt TX also kills it.
+  ipcMain.on('jtcat-tune-toggle', () => {
+    if (jtcatTuneState.active) stopJtcatTune();
+    else startJtcatTune();
   });
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
