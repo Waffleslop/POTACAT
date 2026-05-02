@@ -1610,6 +1610,7 @@ async function pttStart() {
   pttDown = true;
   pttBtn.classList.add('active');
   pttBtn.textContent = 'TX';
+  if (kiwiGainNode) kiwiGainNode.gain.value = 0;
   // Start mic → radio TX
   {
     try {
@@ -1637,6 +1638,7 @@ function pttStop() {
   pttBtn.classList.remove('active');
   pttBtn.textContent = 'PTT';
   window.api.voiceMacroPtt(false);
+  if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   // Stop mic
   if (pttMicStream) { pttMicStream.getTracks().forEach(t => t.stop()); pttMicStream = null; }
   if (pttMicCtx) { pttMicCtx.close().catch(() => {}); pttMicCtx = null; }
@@ -1657,10 +1659,14 @@ window.api.onTxState((state) => {
   if (state) {
     pttBtn.classList.add('active');
     pttBtn.textContent = 'TX';
+    // VK3AWA: cut SDR audio while transmitting so the user doesn't hear
+    // their own TX through the remote receiver.
+    if (kiwiGainNode) kiwiGainNode.gain.value = 0;
   } else {
     pttBtn.classList.remove('active');
     pttBtn.textContent = 'PTT';
     pttDown = false;
+    if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   }
 });
 

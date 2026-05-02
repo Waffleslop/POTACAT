@@ -1704,6 +1704,9 @@
         pttBtn.classList.remove('active');
         muteRxAudio(false);
       }
+      // VK3AWA: cut SDR audio while transmitting so the operator doesn't
+      // hear themselves through the remote receiver.
+      if (kiwiGainNodeE) kiwiGainNodeE.gain.value = s.txState ? 0 : 1;
     }
     // Rig controls state
     if (s.nb !== undefined) {
@@ -2927,6 +2930,7 @@
     pttBtn.classList.add('active');
     txBanner.classList.remove('hidden');
     muteRxAudio(true);
+    if (kiwiGainNodeE) kiwiGainNodeE.gain.value = 0;
     // Unmute mic track so audio reaches radio modulator
     if (localAudioStream) localAudioStream.getAudioTracks().forEach(t => { t.enabled = true; });
     if (typeof smConnected !== 'undefined' && smConnected && smMicTrack) smMicTrack.enabled = true;
@@ -2941,6 +2945,7 @@
     pttBtn.classList.remove('active');
     txBanner.classList.add('hidden');
     muteRxAudio(typeof kiwiRxConnected !== 'undefined' && kiwiRxConnected); // stay muted if SDR active
+    if (kiwiGainNodeE) kiwiGainNodeE.gain.value = 1;
     // Re-mute mic track to prevent VOX/feedback TX cycling
     if (localAudioStream) localAudioStream.getAudioTracks().forEach(t => { t.enabled = false; });
     if (typeof smConnected !== 'undefined' && smConnected && smMicTrack) smMicTrack.enabled = false;
@@ -8154,6 +8159,7 @@
   var kiwiRxConnected = false;
   var kiwiConnectedHostE = '';
   var kiwiAudioCtx = null;
+  var kiwiGainNodeE = null;
   var kiwiNextPlayTime = 0;
   var kiwiStationListE = [];
   var kiwiSelectedIdx = 0;
@@ -8303,6 +8309,13 @@
       try {
         // Use default sample rate (44100/48000) — browser resamples from 12kHz
         if (!kiwiAudioCtx) kiwiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!kiwiGainNodeE) {
+          // Persistent gain node so TX-mute (VK3AWA) can cut the SDR audio
+          // without tearing down the context.
+          kiwiGainNodeE = kiwiAudioCtx.createGain();
+          kiwiGainNodeE.gain.value = txState ? 0 : 1;
+          kiwiGainNodeE.connect(kiwiAudioCtx.destination);
+        }
         var sr = msg.sampleRate || 12000;
         var pcm = new Float32Array(msg.pcm);
         // Create buffer at the KiwiSDR's native sample rate — browser handles resampling
@@ -8310,7 +8323,7 @@
         buf.getChannelData(0).set(pcm);
         var src = kiwiAudioCtx.createBufferSource();
         src.buffer = buf;
-        src.connect(kiwiAudioCtx.destination);
+        src.connect(kiwiGainNodeE);
         var now = kiwiAudioCtx.currentTime;
         if (kiwiNextPlayTime < now) kiwiNextPlayTime = now;
         src.start(kiwiNextPlayTime);
