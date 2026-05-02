@@ -162,6 +162,7 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
 let bandspreadPopoutWin = null; // pop-out bandspread window
+let logPopoutWin = null;     // pop-out Log QSO window (W9TEF "ragchew logger" feature)
 let lastMergedSpots = [];        // most recent dedupe'd spot list, cached so the
                                  // bandspread-popout-push handler can substitute
                                  // the renderer's table-filtered payload with the
@@ -224,6 +225,14 @@ let _freedvAudioMuted = false; // true when ECHOCAT audio is muted for FreeDV
 let freedvReporterSpots = []; // accumulates FreeDV spots
 let freedvReporterFlushTimer = null;
 let workedQsos = new Map(); // callsign -> [{date, ref}] from QSO log (all QSOs, not just confirmed)
+// Richer per-callsign QSO history used by the "ragchew logger" pop-out
+// (W9TEF feature: show past QSOs when typing a callsign in the log form).
+// Keyed by callsign uppercase, /SUFFIX stripped. Each value is an array of
+// QSOs sorted newest-first. We keep this separate from `workedQsos` (which
+// only tracks date+ref for the "hide already worked" filter) because the
+// log form wants mode/freq/band/comment too. Built from parseAllRawQsos at
+// startup and on log-path change; appended to incrementally on each save.
+let qsoDetails = new Map(); // callsign -> [{date, time, mode, freq, band, comment, ref}, ...]
 let rosterWorkedDxcc = new Set();  // "EntityName|20m" — DXCC entities worked per band
 let rosterWorkedCalls = new Set(); // "K1ABC" — all callsigns ever worked
 let rosterWorkedGrids = new Set(); // "FN42" — all grids ever worked
@@ -635,6 +644,7 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
+  if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-frequency', hz);
   // Bandspread expects kHz, not Hz, so it can draw the VFO cursor at the
   // right x-coordinate without needing CAT plumbing of its own.
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
@@ -653,6 +663,7 @@ function sendCatMode(mode) {
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-mode', displayMode);
   }
+  if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-mode', mode);
   _currentMode = mode; // keep real mode internally for CAT
   // Don't clear mode suppress — handleRemotePtt sets a long suppress during
   // SSB-over-DATA transitions to prevent ECHOCAT from seeing transient DATA modes
@@ -2080,6 +2091,9 @@ async function saveQsoRecord(qsoData) {
     const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: (qsoData.mode || '').toUpperCase() };
     if (!workedQsos.has(call)) workedQsos.set(call, []);
     workedQsos.get(call).push(entry);
+    // Mirror into the richer ragchew-logger index so a freshly-saved QSO
+    // appears in "Past QSOs with <call>" without a full log re-parse.
+    appendToQsoDetailsIndex(qsoData);
     if (win && !win.isDestroyed()) {
       win.webContents.send('worked-qsos', [...workedQsos.entries()]);
     }
@@ -6996,7 +7010,96 @@ function loadWorkedQsos() {
   } catch (err) {
     console.error('Failed to parse worked QSOs:', err.message);
   }
+  buildQsoDetailsIndex();
   buildRosterSets();
+}
+
+// --- qsoDetails index — for the ragchew log pop-out ---
+
+/** Strip a /SUFFIX so K3SBP/4 and K3SBP both index under K3SBP. */
+function normalizeCallForIndex(call) {
+  return String(call || '').toUpperCase().split('/')[0].trim();
+}
+
+/** Pick the best-available reference from an ADIF record (POTA/SOTA/WWFF/etc). */
+function adifRef(rec) {
+  if (rec.SIG && rec.SIG_INFO) return `${rec.SIG.toUpperCase()} ${rec.SIG_INFO.toUpperCase()}`;
+  if (rec.POTA_REF) return `POTA ${rec.POTA_REF.toUpperCase()}`;
+  if (rec.SOTA_REF) return `SOTA ${rec.SOTA_REF.toUpperCase()}`;
+  if (rec.WWFF_REF) return `WWFF ${rec.WWFF_REF.toUpperCase()}`;
+  return '';
+}
+
+/** Convert ADIF FREQ (MHz string) to integer kHz, e.g. "14.074" → 14074. */
+function adifFreqToKhz(freq) {
+  if (!freq) return null;
+  const mhz = parseFloat(freq);
+  if (!isFinite(mhz)) return null;
+  return Math.round(mhz * 1000);
+}
+
+/** Build qsoDetails Map by parsing the full ADIF log. */
+function buildQsoDetailsIndex() {
+  qsoDetails = new Map();
+  if (!settings.adifLogPath || !fs.existsSync(settings.adifLogPath)) return;
+  try {
+    const all = parseAllRawQsos(settings.adifLogPath);
+    for (const rec of all) {
+      const key = normalizeCallForIndex(rec.CALL);
+      if (!key) continue;
+      const entry = {
+        call: rec.CALL || key,
+        date: rec.QSO_DATE || '',
+        time: rec.TIME_ON || '',
+        mode: rec.MODE || '',
+        freq: adifFreqToKhz(rec.FREQ),
+        band: rec.BAND || '',
+        comment: rec.COMMENT || '',
+        ref: adifRef(rec),
+      };
+      if (!qsoDetails.has(key)) qsoDetails.set(key, []);
+      qsoDetails.get(key).push(entry);
+    }
+    // Newest-first within each callsign's list.
+    for (const list of qsoDetails.values()) {
+      list.sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+    }
+  } catch (err) {
+    console.error('[qsoDetails] failed to build index:', err.message);
+  }
+}
+
+/** Push a freshly-saved QSO into the in-memory index without re-parsing the log. */
+function appendToQsoDetailsIndex(qsoData) {
+  if (!qsoData || !qsoData.callsign) return;
+  const key = normalizeCallForIndex(qsoData.callsign);
+  if (!key) return;
+  // qsoData fields come from the renderer's save form. Frequency arrives as
+  // string kHz; we store as integer kHz for consistency with parsed records.
+  const freq = qsoData.frequency != null ? Math.round(parseFloat(qsoData.frequency)) : null;
+  const ref = qsoData.sig && qsoData.sigInfo
+    ? `${String(qsoData.sig).toUpperCase()} ${String(qsoData.sigInfo).toUpperCase()}`
+    : (qsoData.potaRef ? `POTA ${qsoData.potaRef}` : '');
+  const entry = {
+    call: qsoData.callsign,
+    date: (qsoData.qsoDate || '').replace(/-/g, ''),
+    time: (qsoData.timeOn || '').replace(/:/g, ''),
+    mode: qsoData.mode || '',
+    freq: isFinite(freq) ? freq : null,
+    band: qsoData.band || '',
+    comment: qsoData.comment || '',
+    ref,
+  };
+  if (!qsoDetails.has(key)) qsoDetails.set(key, []);
+  // Insert at front (newest-first invariant).
+  qsoDetails.get(key).unshift(entry);
+}
+
+/** Look up past QSOs for a callsign. Optional `limit` caps the result. */
+function lookupPastQsos(call, limit) {
+  const key = normalizeCallForIndex(call);
+  const list = qsoDetails.get(key) || [];
+  return limit ? list.slice(0, limit) : list.slice();
 }
 
 // --- Call Roster "needed" sets ---
@@ -9464,6 +9567,88 @@ app.whenReady().then(() => {
   });
   ipcMain.on('qso-popout-close', () => { if (qsoPopoutWin) qsoPopoutWin.close(); });
 
+  // Open the QSO pop-out (logbook) and set its search input to a callsign.
+  // Used by "View all in Logbook →" link in the ragchew log pop-out.
+  ipcMain.on('qso-popout-search-call', (_e, call) => {
+    const search = String(call || '').trim();
+    if (!search) return;
+    const fire = () => {
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+        qsoPopoutWin.webContents.send('qso-popout-set-search', search);
+      }
+    };
+    if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+      qsoPopoutWin.focus();
+      fire();
+    } else {
+      ipcMain.emit('qso-popout-open');
+      // Window's renderer needs to load before it can accept the search msg.
+      setTimeout(fire, 600);
+    }
+  });
+
+  // ── Ragchew log pop-out (Ctrl+L) ──────────────────────────────────────
+  ipcMain.on('log-popout-open', (_e, prefill) => {
+    if (logPopoutWin && !logPopoutWin.isDestroyed()) {
+      logPopoutWin.focus();
+      // Re-send prefill so the open form picks up the latest CAT freq/mode
+      // even if the user is reopening from a different state.
+      if (prefill) logPopoutWin.webContents.send('log-popout-prefill', prefill);
+      return;
+    }
+    const isMac = process.platform === 'darwin';
+    logPopoutWin = new BrowserWindow({
+      width: 540,
+      height: 740,
+      minWidth: 460,
+      minHeight: 560,
+      title: 'Log QSO',
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-log-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    const saved = settings.logPopoutBounds;
+    if (saved && saved.width > 200 && saved.height > 150 && isOnScreen(saved)) {
+      logPopoutWin.setBounds(clampToWorkArea(saved));
+    }
+    logPopoutWin.show();
+    logPopoutWin.setMenuBarVisibility(false);
+    logPopoutWin.loadFile(path.join(__dirname, 'renderer', 'log-popout.html'));
+
+    logPopoutWin.on('close', () => {
+      if (logPopoutWin && !logPopoutWin.isDestroyed()) {
+        if (!logPopoutWin.isMaximized() && !logPopoutWin.isMinimized()) {
+          settings.logPopoutBounds = logPopoutWin.getBounds();
+          saveSettings(settings);
+        }
+      }
+    });
+    logPopoutWin.on('closed', () => { logPopoutWin = null; });
+
+    logPopoutWin.webContents.on('did-finish-load', () => {
+      // Send initial prefill once the renderer is ready.
+      if (logPopoutWin && !logPopoutWin.isDestroyed() && prefill) {
+        logPopoutWin.webContents.send('log-popout-prefill', prefill);
+      }
+    });
+
+    // F12 toggles DevTools, mirroring other pop-outs.
+    logPopoutWin.webContents.on('before-input-event', (_e2, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        logPopoutWin.webContents.toggleDevTools();
+      }
+    });
+  });
+
+  // Frameless window controls for the log pop-out.
+  ipcMain.on('log-popout-minimize', () => { if (logPopoutWin) logPopoutWin.minimize(); });
+  ipcMain.on('log-popout-close', () => { if (logPopoutWin) logPopoutWin.close(); });
+
   // Relay theme to QSO pop-out
   ipcMain.on('qso-popout-theme', (_e, theme) => {
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
@@ -11171,6 +11356,25 @@ app.whenReady().then(() => {
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
   ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
+
+  // Ragchew log pop-out: combined callsign lookup. Returns the QRZ result
+  // (live network call) AND the past-QSO history from the in-memory index in
+  // a single round-trip so the pop-out only debounces one IPC.
+  ipcMain.handle('log-popout-callsign-info', async (_e, call, limit) => {
+    const trimmed = String(call || '').trim().toUpperCase();
+    if (!trimmed) return { qrz: null, pastQsos: [], totalQsos: 0 };
+    let qrzInfo = null;
+    try {
+      // Reuse the existing QRZ lookup pipeline. Strip /SUFFIX so the lookup
+      // hits the base callsign (QRZ doesn't index portable variants).
+      if (qrz.configured && settings.enableQrz) {
+        qrzInfo = await qrz.lookup(trimmed.split('/')[0]);
+      }
+    } catch {}
+    const all = lookupPastQsos(trimmed);
+    const pastQsos = limit ? all.slice(0, limit) : all;
+    return { qrz: qrzInfo, pastQsos, totalQsos: all.length };
+  });
 
   // Export/Import settings
   ipcMain.handle('export-settings', async () => {

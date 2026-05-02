@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Log QSO</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Frameless title bar — matches other pop-outs (vfo-popout, qso-popout) */
+    .lp-titlebar {
+      -webkit-app-region: drag;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: var(--bg-header, #16213e);
+      border-bottom: 1px solid var(--border, #333);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary, #e0e0e0);
+    }
+    .lp-titlebar .lp-titlebar-controls {
+      -webkit-app-region: no-drag;
+      display: flex;
+      gap: 4px;
+    }
+    .lp-titlebar button {
+      background: none;
+      border: 1px solid var(--border, #333);
+      color: var(--text-muted, #888);
+      width: 22px;
+      height: 22px;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      border-radius: 3px;
+    }
+    .lp-titlebar button:hover { background: var(--bg-input, #0f1419); color: var(--text-primary); }
+
+    /* Body sections */
+    body { background: var(--bg-primary, #1a1a2e); color: var(--text-primary, #e0e0e0); margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; }
+    .lp-body { padding: 10px 14px 14px; }
+    .lp-row { display: flex; gap: 8px; margin-top: 6px; }
+    .lp-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-muted); }
+    .lp-row > label > input,
+    .lp-row > label > select { margin-top: 3px; padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; }
+    .lp-row > label > input[readonly] { color: var(--text-muted); background: transparent; border-color: #333; }
+
+    /* Callsign + QRZ row */
+    .lp-call-row { display: flex; gap: 8px; align-items: flex-end; }
+    .lp-call-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-muted); }
+    .lp-call-row > label > input { margin-top: 3px; padding: 4px 6px; font-size: 14px; font-weight: 600; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; text-transform: uppercase; }
+    #lp-qrz-link { padding: 5px 10px; font-size: 12px; font-weight: 600; background: var(--accent-blue, #4fc3f7); color: #000; border: none; border-radius: 3px; cursor: pointer; opacity: 0.5; pointer-events: none; transition: opacity 0.15s; }
+    #lp-qrz-link.active { opacity: 1; pointer-events: auto; }
+    #lp-qrz-link:hover.active { background: #80d8ff; }
+
+    /* Identity row (Name · Country/State) */
+    #lp-identity { font-size: 12px; color: var(--accent-green, #4ecca3); min-height: 16px; margin-top: 4px; padding-left: 2px; }
+    #lp-identity .lp-loc { color: var(--text-muted); margin-left: 4px; }
+
+    /* Type chips */
+    .lp-chips { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+    .lp-chip { padding: 4px 12px; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-muted); font-size: 12px; border-radius: 14px; cursor: pointer; }
+    .lp-chip:hover { background: #16213e; color: var(--text-primary); }
+    .lp-chip.active { background: var(--accent-red, #e94560); color: #fff; border-color: var(--accent-red); }
+
+    .lp-ref-section { margin-top: 6px; }
+    .lp-ref-section.hidden { display: none; }
+
+    .lp-rst-input { width: 100%; padding: 4px 6px; font-size: 13px; font-variant-numeric: tabular-nums; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; }
+    .lp-notes-input { width: 100%; padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; box-sizing: border-box; }
+
+    /* Buttons */
+    .lp-buttons { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+    .lp-buttons button { padding: 6px 14px; font-size: 13px; border: 1px solid var(--border, #333); background: var(--bg-input, #0f1419); color: var(--text-primary); border-radius: 3px; cursor: pointer; }
+    .lp-buttons button:hover { background: #16213e; }
+    #lp-save { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green); font-weight: 600; }
+    #lp-save:hover { background: #6dd9b0; }
+    #lp-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Toast (saved confirmation) */
+    #lp-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--accent-green, #4ecca3); color: #000; padding: 8px 18px; font-size: 13px; font-weight: 600; border-radius: 4px; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 100; }
+    #lp-toast.visible { opacity: 1; }
+
+    /* Past QSOs panel */
+    .lp-past { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border, #333); }
+    .lp-past-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+    .lp-past-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+    .lp-past-title .lp-count { color: var(--text-muted); font-weight: normal; margin-left: 4px; }
+    .lp-past-link { font-size: 11px; color: var(--accent-blue, #4fc3f7); cursor: pointer; text-decoration: none; }
+    .lp-past-link:hover { text-decoration: underline; }
+    .lp-past-empty { font-size: 12px; color: var(--text-muted); font-style: italic; padding: 4px 0; }
+    .lp-past-table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .lp-past-table td { padding: 3px 6px 3px 0; border-bottom: 1px solid #1f1f2e; color: var(--text-primary); white-space: nowrap; vertical-align: top; }
+    .lp-past-table td.lp-past-comment { white-space: normal; color: var(--text-muted); font-style: italic; }
+    .lp-past-table tr:last-child td { border-bottom: none; }
+    .lp-past-table .lp-past-mode { color: var(--accent-blue); }
+    .lp-past-table .lp-past-ref { color: var(--accent-gold, #f0a500); }
+  </style>
+</head>
+<body>
+  <div class="lp-titlebar">
+    <span>Log QSO</span>
+    <div class="lp-titlebar-controls">
+      <button id="lp-min" title="Minimize">&minus;</button>
+      <button id="lp-close" title="Close">&times;</button>
+    </div>
+  </div>
+
+  <div class="lp-body">
+    <!-- Callsign + name + QRZ link -->
+    <div class="lp-call-row">
+      <label>Callsign
+        <input type="text" id="lp-callsign" maxlength="60" autocomplete="off" spellcheck="false" placeholder="e.g. K0OTC">
+      </label>
+      <label style="flex:1.4;">Name
+        <input type="text" id="lp-name" readonly tabindex="-1">
+      </label>
+      <button id="lp-qrz-link" type="button" title="Open QRZ.com page">QRZ&#8599;</button>
+    </div>
+    <div id="lp-identity"></div>
+
+    <!-- Type chips -->
+    <div class="lp-chips">
+      <button type="button" class="lp-chip active" data-type="dx">DX</button>
+      <button type="button" class="lp-chip" data-type="pota">POTA</button>
+      <button type="button" class="lp-chip" data-type="sota">SOTA</button>
+      <button type="button" class="lp-chip" data-type="wwff">WWFF</button>
+      <button type="button" class="lp-chip" data-type="llota">LLOTA</button>
+    </div>
+    <div id="lp-ref-section" class="lp-ref-section hidden">
+      <label style="font-size:11px;color:var(--text-muted);">Reference
+        <input type="text" id="lp-ref" placeholder="e.g. US-1234" autocomplete="off" spellcheck="false" style="text-transform:uppercase;width:100%;padding:4px 6px;font-size:13px;background:var(--bg-input,#0f1419);border:1px solid var(--border,#333);color:var(--text-primary);border-radius:3px;box-sizing:border-box;margin-top:3px;">
+      </label>
+    </div>
+
+    <!-- Frequency / mode -->
+    <div class="lp-row">
+      <label>Frequency (kHz)
+        <input type="text" id="lp-frequency" inputmode="decimal">
+      </label>
+      <label>Mode
+        <select id="lp-mode">
+          <option value="CW">CW</option>
+          <option value="SSB">SSB</option>
+          <option value="USB">USB</option>
+          <option value="LSB">LSB</option>
+          <option value="FT8">FT8</option>
+          <option value="FT4">FT4</option>
+          <option value="FM">FM</option>
+          <option value="AM">AM</option>
+          <option value="RTTY">RTTY</option>
+        </select>
+      </label>
+    </div>
+
+    <!-- Date / time -->
+    <div class="lp-row">
+      <label>Date (UTC)
+        <input type="date" id="lp-date">
+      </label>
+      <label>Time (UTC)
+        <input type="text" id="lp-time" placeholder="HH:MM" maxlength="5" pattern="\d{2}:\d{2}" style="font-variant-numeric:tabular-nums;">
+      </label>
+    </div>
+
+    <!-- Power -->
+    <div class="lp-row">
+      <label>Power (W)
+        <input type="number" id="lp-power" min="1" max="5000">
+      </label>
+      <label>RST Sent
+        <input type="text" class="lp-rst-input" id="lp-rst-sent" maxlength="3" inputmode="numeric" value="59">
+      </label>
+      <label>RST Rcvd
+        <input type="text" class="lp-rst-input" id="lp-rst-rcvd" maxlength="3" inputmode="numeric" value="59">
+      </label>
+    </div>
+
+    <!-- Notes -->
+    <label style="display:block;margin-top:6px;font-size:11px;color:var(--text-muted);">Notes
+      <input type="text" class="lp-notes-input" id="lp-notes" placeholder="Optional" autocomplete="off" spellcheck="true" style="margin-top:3px;">
+    </label>
+
+    <!-- Buttons -->
+    <div class="lp-buttons">
+      <button type="button" id="lp-clear">Clear</button>
+      <button type="button" id="lp-save">Save QSO</button>
+    </div>
+
+    <!-- Past QSOs -->
+    <div class="lp-past">
+      <div class="lp-past-header">
+        <div class="lp-past-title">Past QSOs <span id="lp-past-count" class="lp-count"></span></div>
+        <a href="#" id="lp-past-view-all" class="lp-past-link" style="display:none;">View all in Logbook &rarr;</a>
+      </div>
+      <div id="lp-past-body">
+        <div class="lp-past-empty">Type a callsign to see prior QSOs from your log.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="lp-toast"></div>
+
+  <script src="log-popout.js"></script>
+</body>
+</html>

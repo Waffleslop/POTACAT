@@ -26,7 +26,7 @@
     "dist:linux:appimage": "electron-builder --linux AppImage",
     "release": "node scripts/release.js",
     "launcher": "node scripts/launcher.js",
-    "test": "node test/rig-test.js && node test/websdr-test.js",
+    "test": "node test/rig-test.js && node test/websdr-test.js && node test/ragchew-test.js",
     "test:websdr-live": "node test/websdr-test.js",
     "launcher:install": "node scripts/launcher-install.js",
     "launcher:uninstall": "node scripts/launcher-install.js --uninstall"

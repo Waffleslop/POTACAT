@@ -5893,24 +5893,21 @@ function openQuickLog() {
     showLogToast('Enable QSO Logging in Settings first', { warn: true, duration: 3000 });
     return;
   }
-  // Build a synthetic spot from the radio's current frequency/mode
-  const freqKhz = radioFreqKhz || 14074;
-  const mode = radioMode || 'SSB';
-  const syntheticSpot = {
-    callsign: '',
-    frequency: String(freqKhz),
-    mode: mode,
-    source: '',
-    reference: '',
-    parkName: '',
-  };
-  openLogPopup(syntheticSpot);
-  // Clear callsign and name fields, make callsign editable & focused
-  logCallsign.value = '';
-  logCallsign.readOnly = false;
-  logOpName.value = '';
-  selectLogType('');
-  logCallsign.focus();
+  // W9TEF "ragchew logger" — Ctrl+L now opens the persistent log pop-out
+  // window (renderer/log-popout.html) instead of the modal dialog. The
+  // spot-click → openLogPopup() path is unchanged: that flow has richer
+  // pre-fill (park name, source, etc.) that the ragchew form doesn't need.
+  // Pass current rig freq/mode + any active activation context so a ragchew
+  // during an activation is still tagged with mySig/mySigInfo on save.
+  const activationCtx = (activationActive && activatorParkRefs.length > 0)
+    ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
+    : null;
+  window.api.openLogPopout({
+    freqKhz: radioFreqKhz || null,
+    mode: radioMode || null,
+    power: radioPower || lastLogPower || null,
+    activationCtx,
+  });
 }
 
 // Debounced QRZ name lookup when typing callsign in Quick Log mode

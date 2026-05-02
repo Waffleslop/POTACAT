@@ -352,6 +352,17 @@ searchInput.addEventListener('input', () => {
   render();
 });
 
+// External search trigger — used by the ragchew log pop-out's
+// "View all in Logbook →" link. Sets the search box and re-renders.
+if (window.api && window.api.onSetSearch) {
+  window.api.onSetSearch((q) => {
+    searchInput.value = q || '';
+    searchText = (q || '').trim();
+    render();
+    searchInput.focus();
+  });
+}
+
 // --- Filter bar events ---
 filterBandEl.addEventListener('change', () => { filterBand = filterBandEl.value; render(); });
 filterModeEl.addEventListener('change', () => { filterMode = filterModeEl.value; render(); });
