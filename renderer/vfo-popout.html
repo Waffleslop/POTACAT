@@ -1630,14 +1630,18 @@ async function pttStart() {
       console.error('[VFO] Mic PTT failed:', e.message);
     }
   }
-  window.api.voiceMacroPtt(true);
+  // Use nakedPtt so SSB-over-DATA doesn't fire — this button just keys TX,
+  // it does not pump audio to the rig's USB CODEC. K4GDJ on FTDX101MP:
+  // hitting PTT in USB flipped the rig to PKTUSB, killing the rig mic and
+  // shifting the dial by the filter-width diff. (2026-05.)
+  window.api.nakedPtt(true);
 }
 function pttStop() {
   if (!pttDown) return;
   pttDown = false;
   pttBtn.classList.remove('active');
   pttBtn.textContent = 'PTT';
-  window.api.voiceMacroPtt(false);
+  window.api.nakedPtt(false);
   if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   // Stop mic
   if (pttMicStream) { pttMicStream.getTracks().forEach(t => t.stop()); pttMicStream = null; }

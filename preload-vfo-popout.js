@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('api', {
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
+  // Naked PTT (manual PTT button, no audio bridge). Distinct from
+  // voiceMacroPtt so SSB-over-DATA doesn't disable the rig's hand mic
+  // when the user is just keying TX from the popout button.
+  nakedPtt: (state) => ipcRenderer.send('naked-ptt', state),
   openLogForm: () => ipcRenderer.send('vfo-open-log'),
   setAlwaysOnTop: (on) => ipcRenderer.send('vfo-set-always-on-top', on),
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),

@@ -13508,6 +13508,16 @@ app.whenReady().then(() => {
     handleRemotePtt(!!state, { audio: true });
   });
 
+  // VFO popout's manual PTT button — naked TX key with no audio bridge to
+  // the rig. K4GDJ on FTDX101MP (2026-05): voice-macro-ptt's audio:true
+  // triggered SSB-over-DATA on every press, flipping USB to PKTUSB and
+  // disabling the rig mic. The popout's mic capture (if any) goes to the
+  // user's local speaker / sinkId, not necessarily the rig — so the
+  // mode-switch assumption is wrong. Treat this as audio:false.
+  ipcMain.on('naked-ptt', (_e, state) => {
+    handleRemotePtt(!!state, { audio: false });
+  });
+
   // Voice macro file storage (shared between desktop and ECHOCAT)
   // Voice macro helpers hoisted to module scope (see below)
 
