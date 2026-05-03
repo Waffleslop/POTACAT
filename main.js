@@ -8,6 +8,39 @@ const fs = require('fs');
 // All features work: CAT, spots, FT8 engine, ECHOCAT, CW keyer.
 const HEADLESS = process.argv.includes('--headless');
 
+// --- Print TLS cert fingerprint and exit ---
+// `POTACAT --print-cert-fingerprint` prints the SHA-256 fingerprint of the
+// active ECHOCAT TLS cert and exits. The mobile app pairs by pinning this
+// fingerprint, so users / devs need a way to read it out-of-band when the
+// QR-pair flow isn't available (e.g. headless server boxes).
+if (process.argv.includes('--print-cert-fingerprint')) {
+  const crypto = require('crypto');
+  // Resolve the same certDir RemoteServer uses. Electron's userData isn't
+  // available before app.whenReady, so we wait for it.
+  app.whenReady().then(() => {
+    const certPath = path.join(app.getPath('userData'), 'remote-cert.pem');
+    if (!fs.existsSync(certPath)) {
+      console.error(`No cert found at ${certPath}.`);
+      console.error('Run POTACAT once with ECHOCAT enabled to generate one, then re-run this command.');
+      app.exit(1);
+      return;
+    }
+    try {
+      const pem = fs.readFileSync(certPath, 'utf8');
+      const cert = new crypto.X509Certificate(pem);
+      // fingerprint256 is "AA:BB:CC:..." — that's the format the mobile
+      // app pins against. Print it on its own line so scripts can grep
+      // and slice without parsing.
+      process.stdout.write(cert.fingerprint256 + '\n');
+      app.exit(0);
+    } catch (err) {
+      console.error('Failed to read or parse cert:', err.message);
+      app.exit(1);
+    }
+  });
+  return;
+}
+
 // --- Launcher-only mode: POTACAT.exe --launcher ---
 // Runs the lightweight HTTPS launcher server without any GUI.
 // Used by the Windows/macOS/Linux Startup to start/stop POTACAT remotely.
@@ -4052,6 +4085,25 @@ function connectRemote() {
   if (!settings.enableRemote) return;
 
   remoteServer = new RemoteServer();
+  // Surface our package version in the v1 protocol `hello` so connected
+  // clients can show "POTACAT desktop 1.5.13" and decide whether to
+  // suggest an update.
+  try { remoteServer._serverVersion = String(app.getVersion() || ''); } catch {}
+  // Hydrate paired-devices list from settings.json. The list survives
+  // across desktop restarts; revoking from settings UI removes a device.
+  try { remoteServer.setPairedDevices(settings.pairedDevices || []); } catch {}
+  // When the server adds or revokes a device, persist the new list.
+  remoteServer.on('paired-devices-changed', () => {
+    try {
+      settings.pairedDevices = remoteServer.exportPairedDevices();
+      saveSettings(settings);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('echocat-paired-devices', remoteServer.listPairedDevices());
+      }
+    } catch (err) {
+      console.error('[Echo CAT] paired-devices persist failed:', err.message);
+    }
+  });
   if (settings.colorblindMode) remoteServer.setColorblindMode(true);
 
   // Surface ECHOCAT lifecycle events (server bind, request errors, client
@@ -11419,6 +11471,73 @@ app.whenReady().then(() => {
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
   ipcMain.handle('get-rig-models', () => getModelList());
   ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
+
+  // --- Mobile-app pairing IPC ---
+  // The desktop UI calls these from the Settings → ECHOCAT → "Pair
+  // Mobile App" section. The QR is generated server-side so the
+  // renderer doesn't need to pull a QR lib.
+  ipcMain.handle('echocat-create-pairing-qr', async (_e, opts = {}) => {
+    if (!remoteServer || !remoteServer.running) {
+      return { error: 'ECHOCAT server is not running. Enable it in Settings first.' };
+    }
+    let qrcode;
+    try { qrcode = require('qrcode'); }
+    catch (err) {
+      return { error: 'qrcode module not installed. Run npm install in the POTACAT repo.' };
+    }
+    const pairingToken = remoteServer.createPairingToken({ deviceLabel: opts.deviceLabel || '' });
+    let fingerprint = '';
+    try {
+      if (remoteServer._tlsCertPem) {
+        const x509 = new (require('crypto').X509Certificate)(remoteServer._tlsCertPem);
+        fingerprint = x509.fingerprint256 || '';
+      }
+    } catch {}
+    // Use the LAN IP if we can find one; fall back to localhost. The
+    // mobile app uses mDNS to discover, but the QR also embeds an
+    // explicit URL as a safety net for users on weird networks.
+    const os = require('os');
+    let host = '127.0.0.1';
+    try {
+      for (const addrs of Object.values(os.networkInterfaces())) {
+        for (const a of addrs) {
+          if (a.family === 'IPv4' && !a.internal) { host = a.address; break; }
+        }
+        if (host !== '127.0.0.1') break;
+      }
+    } catch {}
+    const port = remoteServer._port || 7300;
+    const wsUrl = `wss://${host}:${port}`;
+    const hostname = (() => { try { return os.hostname(); } catch { return 'POTACAT'; } })();
+    const qrParams = new URLSearchParams({
+      host: wsUrl,
+      token: pairingToken,
+      fp: fingerprint,
+      name: hostname,
+    });
+    const qrText = `potacat://pair?${qrParams.toString()}`;
+    const dataUrl = await qrcode.toDataURL(qrText, { errorCorrectionLevel: 'M', width: 320, margin: 2 });
+    return {
+      qrText,
+      dataUrl,
+      pairingToken,
+      fingerprint,
+      host: wsUrl,
+      hostname,
+      ttlSeconds: 5 * 60,
+    };
+  });
+
+  ipcMain.handle('echocat-list-paired-devices', () => {
+    if (!remoteServer) return [];
+    return remoteServer.listPairedDevices();
+  });
+
+  ipcMain.handle('echocat-revoke-device', (_e, deviceId) => {
+    if (!remoteServer) return { ok: false, error: 'server not running' };
+    const ok = remoteServer.revokeDevice(String(deviceId || ''));
+    return { ok };
+  });
 
   // Ragchew log pop-out: combined callsign lookup. Returns the QRZ result
   // (live network call) AND the past-QSO history from the in-memory index in

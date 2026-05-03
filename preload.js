@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('api', {
   rotateTo: (azimuth) => ipcRenderer.send('rotate-to', azimuth),
   refresh: () => ipcRenderer.send('refresh'),
   getSdrDirectory: () => ipcRenderer.invoke('get-sdr-directory'),
+  // ECHOCAT mobile-app pairing
+  echocatCreatePairingQr: (opts) => ipcRenderer.invoke('echocat-create-pairing-qr', opts || {}),
+  echocatListPairedDevices: () => ipcRenderer.invoke('echocat-list-paired-devices'),
+  echocatRevokeDevice: (deviceId) => ipcRenderer.invoke('echocat-revoke-device', deviceId),
+  onEchocatPairedDevices: (cb) => ipcRenderer.on('echocat-paired-devices', (_e, list) => cb(list)),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),

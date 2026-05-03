@@ -901,6 +901,13 @@ const setRemoteCwEnabled = document.getElementById('set-remote-cw-enabled');
 const setRemoteStun = document.getElementById('set-remote-stun');
 const setCwKeyPort = document.getElementById('set-cw-key-port');
 const remoteUrlDisplay = document.getElementById('remote-url-display');
+// Mobile-app pairing UI (Phase 0 of native app)
+const echocatPairBtn = document.getElementById('echocat-pair-btn');
+const echocatPairQr = document.getElementById('echocat-pair-qr');
+const echocatPairQrImg = document.getElementById('echocat-pair-qr-img');
+const echocatPairQrText = document.getElementById('echocat-pair-qr-text');
+const echocatPairQrTtl = document.getElementById('echocat-pair-qr-ttl');
+const echocatPairedList = document.getElementById('echocat-paired-list');
 const remoteTxIndicator = document.getElementById('remote-tx-indicator');
 const jtcatTxIndicator = document.getElementById('jtcat-tx-indicator');
 // Club Station Mode
@@ -3464,6 +3471,85 @@ remoteRegenToken.addEventListener('click', () => {
   crypto.getRandomValues(arr);
   setRemoteToken.value = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 });
+
+// --- Mobile-app pairing (Phase 0) ---
+let _echocatPairTtlInterval = null;
+async function echocatRefreshPairedList() {
+  if (!echocatPairedList || !window.api.echocatListPairedDevices) return;
+  let list = [];
+  try { list = await window.api.echocatListPairedDevices(); } catch {}
+  echocatPairedList.innerHTML = '';
+  if (!list || list.length === 0) {
+    const li = document.createElement('li');
+    li.style.color = '#888';
+    li.textContent = 'No devices paired yet.';
+    echocatPairedList.appendChild(li);
+    return;
+  }
+  for (const d of list) {
+    const li = document.createElement('li');
+    li.style.cssText = 'display:flex;align-items:center;gap:8px;margin:3px 0;';
+    const meta = document.createElement('span');
+    const lastSeen = d.lastSeen ? `last seen ${new Date(d.lastSeen).toLocaleString()}` : 'never connected';
+    meta.textContent = `${d.name || '(unnamed)'} — ${d.platform || 'unknown'} — ${lastSeen}`;
+    meta.style.flex = '1';
+    const revoke = document.createElement('button');
+    revoke.type = 'button';
+    revoke.textContent = 'Revoke';
+    revoke.style.cssText = 'padding:2px 8px;font-size:11px;';
+    revoke.addEventListener('click', async () => {
+      if (!confirm(`Revoke "${d.name}"? The device will need to pair again.`)) return;
+      try { await window.api.echocatRevokeDevice(d.id); } catch {}
+      echocatRefreshPairedList();
+    });
+    li.appendChild(meta);
+    li.appendChild(revoke);
+    echocatPairedList.appendChild(li);
+  }
+}
+if (echocatPairBtn) {
+  echocatPairBtn.addEventListener('click', async () => {
+    echocatPairBtn.disabled = true;
+    echocatPairBtn.textContent = 'Generating…';
+    try {
+      const r = await window.api.echocatCreatePairingQr({});
+      if (r && r.error) {
+        alert(r.error);
+        return;
+      }
+      echocatPairQr.classList.remove('hidden');
+      echocatPairQrImg.src = r.dataUrl;
+      echocatPairQrText.textContent = r.qrText;
+      let remaining = r.ttlSeconds || 300;
+      if (_echocatPairTtlInterval) clearInterval(_echocatPairTtlInterval);
+      function tick() {
+        if (remaining <= 0) {
+          echocatPairQrTtl.textContent = 'Expired — click again to regenerate.';
+          clearInterval(_echocatPairTtlInterval);
+          _echocatPairTtlInterval = null;
+          echocatPairQrImg.style.opacity = '0.3';
+          return;
+        }
+        const m = Math.floor(remaining / 60);
+        const s = String(remaining % 60).padStart(2, '0');
+        echocatPairQrTtl.textContent = `Expires in ${m}:${s}`;
+        remaining--;
+      }
+      echocatPairQrImg.style.opacity = '1';
+      tick();
+      _echocatPairTtlInterval = setInterval(tick, 1000);
+    } catch (err) {
+      alert('Pairing QR failed: ' + (err.message || err));
+    } finally {
+      echocatPairBtn.disabled = false;
+      echocatPairBtn.textContent = 'Show pairing QR';
+    }
+  });
+}
+if (window.api.onEchocatPairedDevices) {
+  window.api.onEchocatPairedDevices(() => echocatRefreshPairedList());
+}
+echocatRefreshPairedList();
 
 // Club Station Mode event handlers
 setClubMode.addEventListener('change', () => {

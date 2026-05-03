@@ -943,7 +943,21 @@
     }
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host);
-    ws.onopen = onOpen;
+    ws.onopen = function() {
+      // v1 protocol: send `hello` first so the server knows our
+      // capabilities. Legacy servers (pre-v1.5.14) treat it as an
+      // unknown message and ignore it; the rest of the flow is
+      // unchanged for them.
+      try {
+        ws.send(JSON.stringify({
+          type: 'hello',
+          protocolVersion: 1,
+          clientVersion: 'web',
+          clientPlatform: 'web',
+        }));
+      } catch {}
+      onOpen();
+    };
     ws.onmessage = function(event) {
       var msg;
       try { msg = JSON.parse(event.data); } catch { return; }
@@ -980,6 +994,15 @@
 
   function handleMessage(msg) {
     switch (msg.type) {
+      case 'hello':
+        // Server's protocol-version + version banner. Store on the ws
+        // for later UI use; no behavior change today.
+        try {
+          ws._serverProtocolVersion = msg.protocolVersion | 0;
+          ws._serverVersion = String(msg.serverVersion || '');
+          ws._serverCapabilities = Array.isArray(msg.capabilities) ? msg.capabilities : [];
+        } catch {}
+        break;
       case 'auth-mode':
         // Server tells us which login form to show
         authMode = msg.mode || 'token';

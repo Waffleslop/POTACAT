@@ -2081,6 +2081,27 @@
           <span class="help-text" style="margin-left:12px;display:block;">Uses Google's public STUN server to discover your public IP, enabling WebRTC audio across the internet without a VPN. Only needed if you can't use Tailscale or both devices aren't on the same network.</span>
         </div>
         <div id="remote-url-display" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
+        <!-- Mobile-app pairing (Phase 0 of native app) -->
+        <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <div>
+              <strong>Pair Mobile App</strong>
+              <span class="help-text" style="display:block;">Scan this QR from the POTACAT mobile app to pair without typing IP/token.</span>
+            </div>
+            <button type="button" id="echocat-pair-btn" style="padding:4px 12px;">Show pairing QR</button>
+          </div>
+          <div id="echocat-pair-qr" class="hidden" style="margin-top:8px;text-align:center;background:#fff;padding:8px;border-radius:6px;display:inline-block;">
+            <img id="echocat-pair-qr-img" alt="POTACAT pairing QR" style="display:block;width:280px;height:280px;">
+            <div id="echocat-pair-qr-text" style="font-family:monospace;font-size:10px;color:#222;word-break:break-all;margin-top:6px;max-width:280px;"></div>
+            <div id="echocat-pair-qr-ttl" style="font-size:11px;color:#444;margin-top:4px;"></div>
+          </div>
+          <div style="margin-top:10px;">
+            <strong style="font-size:12px;">Paired devices:</strong>
+            <ul id="echocat-paired-list" style="list-style:none;padding:0;margin:6px 0 0;font-size:12px;">
+              <li style="color:#888;">No devices paired yet.</li>
+            </ul>
+          </div>
+        </div>
         <span class="help-text">To use ECHOCAT securely outside your home network, install a VPN such as <a href="https://tailscale.com" target="_blank" style="color:#4fc3f7;">Tailscale</a> (free) on both your shack computer and phone. Audio, tuning, and PTT are all encrypted over the VPN tunnel.</span>
         <!-- Remote Launcher -->
         <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
