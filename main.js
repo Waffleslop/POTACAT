@@ -15,9 +15,10 @@ function logStartupStage(name) {
   const total = now - _startupTs;
   const delta = now - _lastStageTs;
   _lastStageTs = now;
-  // Pad to align — matches console output of subsequent calls so the
-  // visual scan picks out the slow stage immediately.
-  console.error(`[startup] +${String(total).padStart(5, ' ')}ms (Δ${String(delta).padStart(5, ' ')}ms): ${name}`);
+  // Pad to align so the visual scan picks out the slow stage immediately.
+  // ASCII-only: Windows cmd (CP437/850) mangles Greek delta and em-dash
+  // into mojibake. Format reads as "total +Xms, delta +Yms".
+  console.error(`[startup] +${String(total).padStart(5, ' ')}ms (+${String(delta).padStart(5, ' ')}ms): ${name}`);
 }
 
 const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard } = require('electron');
@@ -9259,7 +9260,7 @@ app.whenReady().then(() => {
   connectAntennaGenius();
   connectTunerGenius();
   if (settings.enableRemote) connectRemote();
-  logStartupStage('all connect* dispatched (most async — actual connections may still be pending)');
+  logStartupStage('all connect* dispatched (most async, actual connections may still be pending)');
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr || settings.enableFreedv) connectPskr();
