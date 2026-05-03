@@ -1,6 +1,29 @@
+// --- Startup timing instrumentation ---
+// `npm start --startup-timing` (or POTACAT_STARTUP_TIMING=1) prints a
+// `[startup] +Nms : <stage>` line at every checkpoint below. Helps
+// diagnose the "sometimes opens fast, sometimes 3-5s lag" symptom:
+// the slow run will have one stage that visibly jumps (typically AV
+// scan, native module load, or a network call at boot).
+const _startupTs = Date.now();
+const _startupTiming = process.argv.includes('--startup-timing') ||
+  process.argv.includes('--startup-debug') ||
+  process.env.POTACAT_STARTUP_TIMING === '1';
+let _lastStageTs = _startupTs;
+function logStartupStage(name) {
+  if (!_startupTiming) return;
+  const now = Date.now();
+  const total = now - _startupTs;
+  const delta = now - _lastStageTs;
+  _lastStageTs = now;
+  // Pad to align — matches console output of subsequent calls so the
+  // visual scan picks out the slow stage immediately.
+  console.error(`[startup] +${String(total).padStart(5, ' ')}ms (Δ${String(delta).padStart(5, ' ')}ms): ${name}`);
+}
+
 const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
+logStartupStage('electron + path + fs required');
 
 // --- Headless mode: POTACAT --headless ---
 // Runs the full app with a hidden window — no GUI shown.
@@ -151,6 +174,7 @@ const { getModel, getModelList } = require('./lib/rig-models');
 const { autoUpdater } = require('electron-updater');
 let registerCloudIpc;
 try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
+logStartupStage('top-level requires complete');
 
 // --- QRZ.com callsign lookup ---
 let qrz = new QrzClient();
@@ -7889,6 +7913,7 @@ function createWindow() {
   win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(true));
 
   if (!HEADLESS) win.show();
+  logStartupStage('win.show() (window visible)');
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
@@ -7927,6 +7952,7 @@ function createWindow() {
 
   // Once the renderer is actually ready to listen, send current state
   win.webContents.on('did-finish-load', () => {
+    logStartupStage('main window did-finish-load (renderer ready)');
     if (cat) {
       sendCatStatus({ connected: cat.connected, target: cat._target });
     }
@@ -9171,6 +9197,7 @@ let kiwiClient = null;
 let kiwiActive = false;
 
 app.whenReady().then(() => {
+  logStartupStage('app.whenReady fired');
   // Add Referer header for OpenStreetMap tile requests (required by OSM usage policy)
   const { session } = require('electron');
   session.defaultSession.webRequest.onBeforeSendHeaders(
@@ -9184,6 +9211,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   settings = loadSettings();
   migrateRigSettings(settings);
+  logStartupStage('settings loaded');
   if (settings.colorblindMode) {
     setSmartSdrColorblind(true);
     setTciColorblindMode(true);
@@ -9195,11 +9223,13 @@ app.whenReady().then(() => {
   } catch (err) {
     console.error('Failed to load cty.dat:', err.message);
   }
+  logStartupStage('cty.dat loaded');
 
   // Load SOTA association names (async, non-blocking — falls back to codes if it fails)
   loadAssociations().catch(err => console.error('Failed to load SOTA associations:', err.message));
 
   createWindow();
+  logStartupStage('createWindow returned (BrowserWindow constructed)');
   if (HEADLESS) {
     // Force ECHOCAT on in headless mode — that's the whole point
     if (!settings.enableRemote) {
@@ -9229,6 +9259,7 @@ app.whenReady().then(() => {
   connectAntennaGenius();
   connectTunerGenius();
   if (settings.enableRemote) connectRemote();
+  logStartupStage('all connect* dispatched (most async — actual connections may still be pending)');
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr || settings.enableFreedv) connectPskr();
