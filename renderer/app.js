@@ -332,17 +332,21 @@ function primaryParkRef() { return activatorParkRefs[0]?.ref || ''; }
 /** Get primary activator park name */
 function primaryParkName() { return activatorParkRefs[0]?.name || ''; }
 
-/** Clean up QRZ name: title-case, drop trailing single-letter initial */
+/** Clean up QRZ name: title-case fully-uppercase / fully-lowercase
+ *  input, drop trailing single-letter middle initial, preserve names
+ *  that already have mixed case (McDonald, O'Brien, diSilva).
+ *  Mirrors lib/qrz.js's cleanQrzName — source-of-truth lives there. */
 function cleanQrzName(raw) {
   if (!raw) return '';
   const parts = raw.trim().split(/\s+/);
-  // Drop trailing single-letter initial (e.g. "Larry P" -> "Larry", "Larry P." -> "Larry")
-  // But keep leading single letter (e.g. "J Doug" stays)
   if (parts.length > 1 && /^[A-Za-z]\.?$/.test(parts[parts.length - 1])) {
     parts.pop();
   }
-  // Title-case each part: first letter upper, rest lower
-  return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+  const joined = parts.join(' ');
+  const hasLower = /[a-z]/.test(joined);
+  const hasUpper = /[A-Z]/.test(joined);
+  if (hasLower && hasUpper) return joined;
+  return joined.toLowerCase().replace(/(^|[\s\-'])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
 }
 
 /** Auto-prepend POTA country prefix to bare park numbers based on callsign.

@@ -2050,11 +2050,19 @@ function _qsoDedupKey(q) {
 // the operator name the same way as desktop-logged ones (drops trailing
 // middle-initial, title-cases). Kept here so we can enrich qsoData on the
 // main side before forwarding to N3FJP / ADIF.
+// Mirrors lib/qrz.js's cleanQrzName. Source-of-truth lives there; this
+// copy is kept for callers that get a name from a non-QRZ path (e.g. an
+// ADIF import or a manual entry). Only re-cases fully-uppercase / fully-
+// lowercase input so "McDonald" / "O'Brien" survive.
 function cleanQrzName(raw) {
   if (!raw) return '';
   const parts = String(raw).trim().split(/\s+/);
   if (parts.length > 1 && /^[A-Za-z]\.?$/.test(parts[parts.length - 1])) parts.pop();
-  return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+  const joined = parts.join(' ');
+  const hasLower = /[a-z]/.test(joined);
+  const hasUpper = /[A-Z]/.test(joined);
+  if (hasLower && hasUpper) return joined;
+  return joined.toLowerCase().replace(/(^|[\s\-'])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
 }
 
 async function saveQsoRecord(qsoData) {
