@@ -2919,6 +2919,19 @@ function processPopoutJtcatQso(results) {
 
 function startJtcat(mode) {
   stopJtcat();
+  // SSTV and JTCAT can't share the audio input device — getUserMedia
+  // from the SSTV popout holds it (or downgrades JTCAT to the laptop
+  // mic via the default-device fallback, which silently produces zero
+  // decodes). When the user starts JTCAT, tear down any SSTV first so
+  // JTCAT gets a clean grab of the configured rig audio device.
+  // Casey on 2026-05-03: came back from Auto-SSTV, opened JTCAT on 20m,
+  // got zero decodes; restart fixed it because SSTV was no longer
+  // running.
+  cancelAutoSstv();
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+    sendCatLog('[JTCAT] Closing SSTV popout — JTCAT and SSTV can\'t share the audio input');
+    try { sstvPopoutWin.close(); } catch {}
+  }
   jtcatAutoCqMode = 'off';
   jtcatAutoCqWorkedSession.clear();
   jtcatAutoCqOwner = null;
@@ -12874,7 +12887,12 @@ app.whenReady().then(() => {
     console.log('[JTCAT] Auto-CQ mode:', mode);
   });
   ipcMain.on('jtcat-tx-complete', () => { if (ft8Engine) ft8Engine.txComplete(); });
-  ipcMain.on('jtcat-log', (_e, msg) => console.log(msg));
+  ipcMain.on('jtcat-log', (_e, msg) => {
+    console.log(msg);
+    // Also surface in the Verbose CAT log so users diagnosing JTCAT
+    // audio capture issues can see warnings without opening DevTools.
+    sendCatLog(String(msg));
+  });
   let _jtcatAudioDiag = 0;
   ipcMain.on('jtcat-audio', (_e, buf) => {
     _jtcatAudioDiag++;
@@ -12912,6 +12930,13 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-start-multi', (_e, slices) => {
     if (!Array.isArray(slices) || slices.length === 0) return;
     stopJtcat();
+    // Same audio-device contention fix as startJtcat: tear down SSTV
+    // first so it doesn't hold the input device away from JTCAT.
+    cancelAutoSstv();
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sendCatLog('[JTCAT] Closing SSTV popout — JTCAT and SSTV can\'t share the audio input');
+      try { sstvPopoutWin.close(); } catch {}
+    }
     jtcatAutoCqMode = 'off';
     jtcatAutoCqWorkedSession.clear();
     jtcatAutoCqOwner = null;

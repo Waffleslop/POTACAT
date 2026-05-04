@@ -16350,8 +16350,14 @@ async function startJtcatAudio() {
     try {
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (e) {
-      // Fall back to default device if configured one fails
-      console.warn('[JTCAT] Configured audio input not found, using default:', e.message);
+      // Fall back to default device if configured one fails. Silent
+      // fallback used to mask "JTCAT silently decodes nothing" bugs
+      // (e.g. Casey 2026-05-03 — SSTV popout held the rig audio device,
+      // JTCAT got the laptop mic and produced zero decodes), so surface
+      // this loud in the CAT log too.
+      const warn = `[JTCAT] Configured audio input failed (${e.message}). Falling back to default device — decoding may not work if your rig audio is on a different input.`;
+      console.warn(warn);
+      if (window.api.jtcatLog) window.api.jtcatLog(warn);
       delete audioConstraints.deviceId;
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     }
