@@ -10981,14 +10981,21 @@ window.api.onCatFrequency((hz) => {
   if (newBand !== oldBand) pushBandspreadView(sortSpots(getFiltered()));
   playTuneClick();
   updateBlFreqFromRadio();
-  // Track which spot matches the current frequency
+  // Track which spot matches the current frequency. lastTunedSpot is also
+  // a "pin" that bypasses every spot filter (mode/band/age/region) so the
+  // user can keep a clicked activator visible mid-QSO. Auto-PINNING from
+  // rig poll events is unsafe — when WSJT-X / fldigi / a manual dial drag
+  // moves the rig to a busy digital freq, this would pin a random PSKR/FT8
+  // spot that happens to share the freq, leaking ONE FT8 row into a
+  // user's "SSB only" filter (Zac KF8ELA 2026-05-04). Now we only refresh
+  // the VFO popout's tuned-spot info; the actual pin still updates on
+  // user-initiated click/tune (line 5478). And we still un-pin when the
+  // rig moves AWAY from a previously-pinned freq.
   const onSpot = allSpots.find(s => Math.abs(parseFloat(s.frequency) - newKhz) < 0.5);
   if (onSpot) {
-    if (!lastTunedSpot || onSpot.callsign !== lastTunedSpot.callsign || onSpot.frequency !== lastTunedSpot.frequency) {
-      lastTunedSpot = onSpot;
-      notifyVfoTunedSpot(onSpot);
-    }
-  } else if (lastTunedSpot) {
+    notifyVfoTunedSpot(onSpot);
+  } else if (lastTunedSpot && Math.abs(parseFloat(lastTunedSpot.frequency) - newKhz) >= 0.5) {
+    // Rig moved off the pinned spot's freq — drop the pin.
     lastTunedSpot = null;
     notifyVfoTunedSpot(null);
   }
