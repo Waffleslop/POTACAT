@@ -7175,34 +7175,68 @@ async function refreshSpots() {
       .filter((r) => r.status === 'fulfilled')
       .flatMap((r) => r.value);
 
-    // Cross-reference POTA ↔ WWFF: same callsign + same frequency = dual-park
-    const potaSpots = allSpots.filter(s => s.source === 'pota');
-    const wwffSpots = allSpots.filter(s => s.source === 'wwff');
-    const otherSpots = allSpots.filter(s => s.source !== 'pota' && s.source !== 'wwff');
+    // Cross-reference all program sources (POTA/SOTA/WWFF/LLOTA/Tiles):
+    // when the same callsign appears at the same frequency from multiple
+    // program APIs, that's one operator activating multiple programs at
+    // once (very common — a park is often also a WWFF site, and lately
+    // also a Tiles square). Collapse the duplicates into one row whose
+    // primary `reference` is the highest-priority program's ref, with the
+    // others decorated as <source>Reference / <source>ParkName.
+    //
+    // Priority order is "what the operator most likely cares about
+    // logging first": POTA > SOTA > WWFF > LLOTA > Tiles. Adjust here
+    // if community usage shifts. (Casey 2026-05-04.)
+    const PROGRAM_PRIORITY = ['pota', 'sota', 'wwff', 'llota', 'tiles'];
+    const SECONDARY_FIELDS = {
+      pota: { ref: 'potaReference', name: 'potaParkName' },
+      sota: { ref: 'sotaReference', name: 'sotaParkName' },
+      wwff: { ref: 'wwffReference', name: 'wwffParkName' },
+      llota: { ref: 'llotaReference', name: 'llotaParkName' },
+      tiles: { ref: 'tilesReference', name: 'tilesParkName' },
+    };
+    const programSpots = allSpots.filter(s => PROGRAM_PRIORITY.includes(s.source));
+    const otherSpots = allSpots.filter(s => !PROGRAM_PRIORITY.includes(s.source));
 
-    if (wwffSpots.length > 0 && potaSpots.length > 0) {
-      const wwffMap = new Map();
-      for (const w of wwffSpots) {
-        const key = w.callsign.toUpperCase() + '_' + String(Math.round(parseFloat(w.frequency)));
-        wwffMap.set(key, w);
+    if (programSpots.length > 0) {
+      const groups = new Map();
+      for (const s of programSpots) {
+        const key = (s.callsign || '').toUpperCase() + '|' + String(Math.round(parseFloat(s.frequency || 0)));
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(s);
       }
-      const matchedWwffKeys = new Set();
-      for (const p of potaSpots) {
-        const key = p.callsign.toUpperCase() + '_' + String(Math.round(parseFloat(p.frequency)));
-        const match = wwffMap.get(key);
-        if (match) {
-          p.wwffReference = match.reference;
-          p.wwffParkName = match.parkName;
-          p.sources = ['pota', 'wwff']; // dedupeCrossSource() honors this
-          matchedWwffKeys.add(key);
+      const dropped = new Set();
+      const merged = [];
+      for (const group of groups.values()) {
+        // Sort by priority — primary is the first program in the order
+        group.sort((a, b) => PROGRAM_PRIORITY.indexOf(a.source) - PROGRAM_PRIORITY.indexOf(b.source));
+        const primary = group[0];
+        if (group.length > 1) {
+          primary.sources = group.map(s => s.source);
+          for (let i = 1; i < group.length; i++) {
+            const sec = group[i];
+            const fields = SECONDARY_FIELDS[sec.source];
+            if (fields) {
+              primary[fields.ref] = sec.reference;
+              primary[fields.name] = sec.parkName || '';
+            }
+            dropped.add(sec);
+          }
         }
+        // Tiles spots can ALSO carry pota_ref/sota_ref baked into the API
+        // payload itself (the Tiles back-end records the cross-program
+        // tags on the spot). Fold those into `sources` too so badges
+        // render correctly even when no separate POTA/SOTA fetch matched.
+        if (primary.source === 'tiles') {
+          if (primary.potaReference && !primary.sources) primary.sources = ['tiles', 'pota'];
+          else if (primary.potaReference && primary.sources && !primary.sources.includes('pota')) primary.sources.push('pota');
+          if (primary.sotaReference && !primary.sources) primary.sources = ['tiles', 'sota'];
+          else if (primary.sotaReference && primary.sources && !primary.sources.includes('sota')) primary.sources.push('sota');
+        }
+        merged.push(primary);
       }
-      // Only keep unmatched WWFF spots as standalone rows
-      const unmatchedWwff = wwffSpots.filter(w => {
-        const key = w.callsign.toUpperCase() + '_' + String(Math.round(parseFloat(w.frequency)));
-        return !matchedWwffKeys.has(key);
-      });
-      lastPotaSotaSpots = [...potaSpots, ...otherSpots, ...unmatchedWwff];
+      // Anything we didn't drop made it into `merged`; otherSpots are
+      // non-program (RBN/cluster/PSKR/etc.) which dedupe should leave alone.
+      lastPotaSotaSpots = [...merged.filter(s => !dropped.has(s)), ...otherSpots];
     } else {
       lastPotaSotaSpots = allSpots;
     }

@@ -5245,7 +5245,7 @@ const PRIVILEGE_RANGES = {
 
 const SOURCE_LABELS = {
   pota: 'POTA', sota: 'SOTA', dxc: 'DX', cwspots: 'CW',
-  rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', pskr: 'FreeDV', net: 'NET',
+  rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', tiles: 'Tiles', pskr: 'FreeDV', net: 'NET',
 };
 const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
@@ -7169,6 +7169,7 @@ function openLogPopup(spot) {
   if (spot.sotaReference && spot.source !== 'sota') extraRefs.push(`SOTA: ${spot.sotaReference}${spot.sotaParkName ? ' — ' + spot.sotaParkName : ''}`);
   if (spot.llotaReference && spot.source !== 'llota') extraRefs.push(`LLOTA: ${spot.llotaReference}${spot.llotaParkName ? ' — ' + spot.llotaParkName : ''}`);
   if (spot.potaReference && spot.source !== 'pota') extraRefs.push(`POTA: ${spot.potaReference}`);
+  if (spot.tilesReference && spot.source !== 'tiles') extraRefs.push(`Tiles: ${spot.tilesReference}`);
   if (extraRefs.length) {
     logRefName.textContent += (logRefName.textContent ? '\n' : '') + extraRefs.join('\n');
   }
