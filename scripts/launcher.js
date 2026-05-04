@@ -38,7 +38,16 @@ const PROCESS_NAME = IS_WIN ? 'POTACAT.exe' : 'POTACAT';
 const RATE_LIMIT_WINDOW = 60000;
 const RATE_LIMIT_MAX = 20;
 
-let config = { port: DEFAULT_PORT, potacatPath: 'auto', https: true };
+// https defaults to false: the launcher's self-signed cert is rejected by
+// iOS fetch (and Android's underlying URLConnection) even with
+// NSAllowsArbitraryLoads set, so ECHOCAT mobile can't reach an HTTPS
+// launcher without cert-pinning support — that's still on the mobile-side
+// roadmap. The launcher stays auth'd by callsign-as-Bearer-token over HTTP,
+// which is acceptable for LAN / Tailscale surfaces. Flip back to true for a
+// packaged-cert future or for browser-only usage; users who prefer HTTPS
+// today can still set "https": true in launcher-config.json explicitly.
+// (Mobile dev report 2026-05-04.)
+let config = { port: DEFAULT_PORT, potacatPath: 'auto', https: false };
 let startedAt = null;
 
 // --- Load config ---

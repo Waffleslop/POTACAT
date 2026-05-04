@@ -2950,7 +2950,19 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
 }
 
 // Server-side QSO state machine wrappers
+//
+// When the engine's _autoSeq flag is false, skip the auto-advance entirely.
+// The user drives phases manually via Skip (jtcat-skip-phase). Decodes still
+// flow to clients via the normal jtcat-decode broadcast — only the
+// state-machine call is gated. (Gap 12, 2026-05-04.)
+function _autoSeqEnabled() {
+  const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
+  // Default to true when no engine yet — matches the engine's own default.
+  return !eng || eng._autoSeq !== false;
+}
+
 function processRemoteJtcatQso(results) {
+  if (!_autoSeqEnabled()) return;
   const qso = remoteJtcatQso; // capture reference — don't rely on global in callbacks
   advanceJtcatQso(qso, results, remoteJtcatSetTxMsg, async () => {
     await jtcatAutoLog(qso); // use captured ref, not global
@@ -2959,6 +2971,7 @@ function processRemoteJtcatQso(results) {
 }
 
 function processPopoutJtcatQso(results) {
+  if (!_autoSeqEnabled()) return;
   const qso = popoutJtcatQso; // capture reference — don't rely on global in callbacks
   advanceJtcatQso(qso, results, async (msg) => {
     const txEng = jtcatManager ? jtcatManager.txEngine : ft8Engine;
@@ -3279,6 +3292,11 @@ function broadcastJtcatTuneState() {
   const payload = { active: jtcatTuneState.active, secondsRemaining: remaining };
   if (win && !win.isDestroyed()) win.webContents.send('jtcat-tune-state', payload);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-tune-state', payload);
+  // Mobile FT8 screen reads this so the Tune button reflects state +
+  // countdown. (Gap 11.)
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    remoteServer.sendToClient({ type: 'jtcat-tune-state', ...payload });
+  }
 }
 
 function startJtcatTune() {
@@ -4270,6 +4288,21 @@ function connectRemote() {
     }
     // FreeDV enabled state
     remoteServer.sendToClient({ type: 'freedv-enabled', enabled: !!settings.enableFreedv });
+    // JTCAT Tune + Auto Seq state (Gap 11 + Gap 12, 2026-05-04) — phone
+    // FT8 screen renders these controls and needs to reflect current
+    // server state on reconnect. Tune state defaults to {active:false}
+    // when nothing's running; auto-seq defaults to true.
+    {
+      const remaining = jtcatTuneState.active
+        ? Math.max(0, Math.ceil((jtcatTuneState.endsAt - Date.now()) / 1000))
+        : 0;
+      remoteServer.sendToClient({ type: 'jtcat-tune-state', active: jtcatTuneState.active, secondsRemaining: remaining });
+    }
+    {
+      const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
+      const enabled = !eng || eng._autoSeq !== false;
+      remoteServer.sendToClient({ type: 'jtcat-auto-seq-state', enabled });
+    }
     // VFO Profiles — send current list so phone's profiles widget can render
     // immediately. Phone edits push back via 'vfo-profiles-update'.
     remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
@@ -5573,6 +5606,24 @@ function connectRemote() {
     // confirm. (Gap 9, mobile dev report 2026-05-03.)
     if (remoteServer.hasClient()) {
       remoteServer.broadcastJtcatStatus({ state: 'running', mode: mode || 'FT8' });
+    }
+  });
+
+  // Phone tap on Tune button — same code path as the local desktop button.
+  // (Gap 11, 2026-05-04.)
+  remoteServer.on('jtcat-tune-toggle', () => {
+    if (jtcatTuneState.active) stopJtcatTune();
+    else startJtcatTune();
+  });
+
+  // Phone tap on Auto Seq pill — flip the engine flag and broadcast new
+  // state so any other connected client (or reconnect) sees it. (Gap 12.)
+  remoteServer.on('jtcat-set-auto-seq', ({ enabled }) => {
+    const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
+    if (eng) eng._autoSeq = !!enabled;
+    sendCatLog(`[JTCAT] Auto Seq ${enabled ? 'ON' : 'OFF'} (set by ECHOCAT)`);
+    if (remoteServer.hasClient()) {
+      remoteServer.sendToClient({ type: 'jtcat-auto-seq-state', enabled: !!enabled });
     }
   });
 
