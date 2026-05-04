@@ -4,6 +4,7 @@ CLAUDE.md
 .claude/
 *.png
 !assets/*.png
+!icon/POTACAT-icon-1024-AppStore.png
 lib/rade_native/opus_build_tmp/
 lib/rade_native/opus_lib/macos/
 lib/rade_native/opus_lib/linux/
