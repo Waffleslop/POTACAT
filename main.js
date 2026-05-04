@@ -323,6 +323,13 @@ let _currentMode = '';
 let _remoteTxState = false;
 let _currentNbState = false;
 let _currentSmeter = 0;
+// Stored alongside _currentSmeter so broadcastRemoteRadioStatus() can include
+// them in the status snapshot — mobile reads status.swr / status.alc / .power
+// from the snapshot. Discrete {type:'smeter'|'swr'|'alc'} messages still fire
+// for live meter updates. (Gap 10, mobile dev report 2026-05-03.)
+let _currentSwr = 0;
+let _currentAlc = 0;
+let _currentPower = 0; // live wattmeter reading from the rig (during TX)
 let _currentAtuState = false;
 let _currentVfo = 'A';
 let _currentFilterWidth = 0;
@@ -735,6 +742,7 @@ function sendCatPower(watts) {
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-power', watts);
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'power', value: watts });
   _currentTxPower = watts;
+  _currentPower = watts;
   broadcastRigState();
 }
 
@@ -756,12 +764,14 @@ function sendCatSmeter(val) {
 function sendCatSwr(val) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-swr', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr', val);
+  _currentSwr = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr', value: val });
 }
 
 function sendCatAlc(val) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-alc', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-alc', val);
+  _currentAlc = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'alc', value: val });
 }
 
@@ -5550,6 +5560,12 @@ function connectRemote() {
     startJtcat(mode);
     // Start audio capture in desktop renderer
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-start-for-remote');
+    // Push a confirmed jtcat-status to the phone so its UI doesn't have to
+    // optimistically flip the running flag and wait for the first decode to
+    // confirm. (Gap 9, mobile dev report 2026-05-03.)
+    if (remoteServer.hasClient()) {
+      remoteServer.broadcastJtcatStatus({ state: 'running', mode: mode || 'FT8' });
+    }
   });
 
   // ECHOCAT multi-slice — phone sends config, desktop runs engines + audio
@@ -6276,6 +6292,15 @@ function broadcastRemoteRadioStatus() {
     filterWidth: _currentFilterWidth,
     rfgain: rfg,
     txpower: txp,
+    // Live meter readings — mobile VFO screen reads these from the
+    // status snapshot. (Gap 10.) These are also sent as discrete
+    // {type:'smeter'|'swr'|'alc'|'power'} frames for real-time updates;
+    // including them on the snapshot ensures clients that connect mid-
+    // session see the current values without waiting for the next poll.
+    smeter: _currentSmeter,
+    swr: _currentSwr,
+    alc: _currentAlc,
+    power: _currentPower,
     capabilities: getRigCapabilities(rigType),
   };
   remoteServer.broadcastRadioStatus(status);
@@ -7010,11 +7035,16 @@ function sendMergedSpots() {
       }
       if (Object.keys(data).length > 0) {
         win.webContents.send('qrz-data', data);
-        // Forward operator names to ECHOCAT for the Name column
+        // Forward operator names to ECHOCAT for the Name column. Compose
+        // first + last so the phone gets "Casey Stanton" instead of just
+        // "Casey" — short names alone are ambiguous in spot rows. Falls
+        // back to first-only when the QRZ entry has no surname. (Gap 8.)
         if (remoteServer && remoteServer.hasClient()) {
           const names = {};
           for (const [cs, info] of Object.entries(data)) {
-            names[cs] = info.nickname || info.fname || '';
+            const first = (info.nickname || info.fname || '').trim();
+            const last = (info.name || '').trim();
+            names[cs] = last && first ? `${first} ${last}` : first;
           }
           remoteServer.sendToClient({ type: 'qrz-names', data: names });
         }

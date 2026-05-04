@@ -95,12 +95,13 @@ test('validate accepts both-direction messages from either side', () => {
   assert.strictEqual(protocol.validate({ type: 'signal', data: {} }, protocol.Dir.C2S).ok, true);
 });
 
-test('validate type-checks: number vs string', () => {
-  // tune.frequency must be a number
-  assert.strictEqual(protocol.validate({ type: 'tune', frequency: 14250000 }).ok, true);
-  const bad = protocol.validate({ type: 'tune', frequency: '14250000' });
+test('validate type-checks: string vs number', () => {
+  // tune.freqKhz must be a string (the wire format the server actually
+  // parses — see Gap 5 in echocat-protocol-gaps.md).
+  assert.strictEqual(protocol.validate({ type: 'tune', freqKhz: '14250.000' }).ok, true);
+  const bad = protocol.validate({ type: 'tune', freqKhz: 14250000 });
   assert.strictEqual(bad.ok, false);
-  assert.strictEqual(bad.field, 'frequency');
+  assert.strictEqual(bad.field, 'freqKhz');
 });
 
 test('validate type-checks: integer vs float', () => {

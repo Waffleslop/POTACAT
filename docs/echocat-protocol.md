@@ -28,6 +28,15 @@ keeps the existing browser path working unchanged. See
 `lib/echocat-protocol.js > LEGACY_FIRST_MESSAGE_TYPES` for the allowed
 legacy first messages.
 
+> **Live-desktop caveat:** the v1 server hello only fires on a desktop
+> running a build that includes commits `62bec7e` + `44c1aac` or later.
+> A desktop running an older binary still serves the legacy v0 path
+> (no server `hello` is sent). If your client connects and times out
+> waiting for the server's `hello`, check that the desktop has been
+> restarted onto the new build. Don't assume v1 capabilities just
+> because the desktop repo is on v1 — the running process still
+> matters. (Gap 4, mobile dev report 2026-05-03.)
+
 ## Connection lifecycle
 
 ```
@@ -74,10 +83,39 @@ Format: each row is `name — direction — purpose`. Directions:
 
 ### Rig control / VFO
 
+The `status` message is a kitchen-sink snapshot. The canonical fields are:
+
+| Field | Type | Notes |
+|---|---|---|
+| `freq` | number | Hz. **Not `frequency`.** |
+| `mode` | string | "USB", "LSB", "CW", "PKTUSB", "FREEDV-RADEV1", … |
+| `band` | string | "20m", "40m", … (derived from freq) |
+| `catConnected` | boolean | true when CAT or SmartSDR is up |
+| `txState` | boolean | true while transmitting |
+| `rigType` | string | "flex", "yaesu", "icom", "kenwood", "rigctld", "wsjtx" |
+| `nb` | boolean | Noise blanker on/off |
+| `atu` | boolean | ATU enabled |
+| `vfo` | string | "A" or "B" |
+| `filterWidth` | number | Hz |
+| `rfgain` | number | 0–255 |
+| `txpower` | number | TX power *setting* (slider) |
+| `smeter` | number | live S-meter (Gap 10) |
+| `swr` | number | live SWR (Gap 10) |
+| `alc` | number | live ALC (Gap 10) |
+| `power` | number | live wattmeter (Gap 10) |
+| `capabilities` | object | per-rig feature flags (filter, nb, atu, vfo, rfgain, txpower, power) |
+| `vfoLocked` | boolean | VFO lock active |
+| `audioState` | string | WebRTC connection state (when ECHOCAT audio bridge is up) |
+
+**`tune` C→S sends `freqKhz` (string), not `frequency` (number)**.
+The kHz-as-string format is the legacy wire shape and the desktop
+parses it as a float — see Gap 5 in `potacat-app/docs/echocat-protocol-gaps.md`
+for the history.
+
 | Message | Dir | Purpose |
 |---|---|---|
-| `status` | S→C | Full radio status snapshot (freq, mode, band, S-meter, RF gain, TX power, ATU, NB, …). |
-| `tune` | C→S | Tune VFO to a frequency / mode (often from a spot tap). |
+| `status` | S→C | Full radio status snapshot. See field table above. |
+| `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor). |
 | `tune-blocked` | S→C | Tune was rejected (VFO locked, out of band, etc.). |
 | `set-mode` | C→S | Change mode without retuning frequency. |
 | `set-vfo` | C→S | Switch VFO A/B. |
@@ -207,6 +245,7 @@ Format: each row is `name — direction — purpose`. Directions:
 | `freedv-set-tx` | C→S | TX enable. |
 | `freedv-set-squelch` | C→S | Squelch level. |
 | `set-freedv` | C→S | Master FreeDV on/off toggle. |
+| `freedv-enabled` | S→C | Server tells client whether the FreeDV master toggle is on (sent at startup + on changes). |
 
 ### CW (paddle / keyer / macros)
 
@@ -275,12 +314,14 @@ the broader `status` message; no dedicated S→C envelope today.)
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `voice-macro-sync` | C→S | Push a recording from phone to desktop storage. |
+| `voice-macro-sync` | ↔ | Voice-macro recording. C→S: phone uploads. S→C: desktop pushes existing recordings to a new client. Fields: `idx`, `label`, `audio` (base64 WebM). |
 | `voice-macro-delete` | C→S | Remove a stored recording. |
+| `voice-macro-labels` | S→C | Five-slot label array for voice-macro buttons (sent on connect + on changes). |
 | `save-echo-pref` | C→S | Persist an ECHOCAT-only preference (no settings.json round-trip). |
 | `save-custom-cat-buttons` | C→S | Save user-defined raw-CAT buttons for the Rig table. |
 | `colorblind-mode` | S→C | Server says colorblind mode is on (affects accent colors). |
 | `cluster-state` | S→C | DX-cluster connection state for the cluster badge. |
+| `qrz-names` | S→C | `{CALLSIGN: 'First Last'}` map after a batch QRZ lookup — drives the spot-row Name column. |
 
 ### Pairing (new in v1, see Phase 0 plan)
 
