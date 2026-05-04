@@ -1967,11 +1967,15 @@ dialog input, dialog select {
   min-width: 320px;
   max-width: 380px;
   max-height: 280px;
-  background: var(--bg-card, #16213e);
+  /* --bg-card and --bg aren't defined in either theme — they were always
+     falling back to the hardcoded dark color, leaving the popover unreadable
+     in light mode (N7FQT, 2026-05-03). Use --bg-secondary / --bg-primary
+     which ARE themed so this swaps cleanly. */
+  background: var(--bg-secondary, #16213e);
   color: var(--text-primary, #fff);
   border: 1px solid var(--border-primary, #2a3856);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px var(--shadow-heavy, rgba(0, 0, 0, 0.5));
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
@@ -1992,7 +1996,7 @@ dialog input, dialog select {
   margin-left: auto;
   font-size: 9px;
   font-weight: 700;
-  background: var(--bg, #0f1729);
+  background: var(--bg-primary, #0f1729);
   padding: 1px 5px;
   border-radius: 3px;
   color: var(--text-secondary, #ccc);
