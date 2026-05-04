@@ -3457,7 +3457,7 @@ function panadapterAllowsSource(source) {
       case 'sota':    return settings.enableSota === true;
       case 'wwff':    return settings.enableWwff === true;
       case 'llota':   return settings.enableLlota === true;
-      case 'tiles':   return settings.enableTiles === true;
+      case 'tiles':   return settings.enableTiles !== false; // default true
       case 'dxc':     return settings.enableCluster === true;
       case 'rbn':     return settings.enableRbn === true;
       case 'cwspots': return settings.enableCwSpots === true;
@@ -4248,7 +4248,7 @@ function connectRemote() {
       sota: settings.enableSota === true,
       wwff: settings.enableWwff === true,
       llota: settings.enableLlota === true,
-      tiles: settings.enableTiles === true,
+      tiles: settings.enableTiles !== false,
       cluster: settings.enableCluster === true,
     });
     // Send rig list so phone can switch rigs
@@ -7161,7 +7161,7 @@ async function refreshSpots() {
     const enableSota = settings.enableSota === true   || panadapterWantsSource('sota');
     const enableWwff = settings.enableWwff === true   || panadapterWantsSource('wwff');
     const enableLlota = settings.enableLlota === true || panadapterWantsSource('llota');
-    const enableTiles = settings.enableTiles === true || panadapterWantsSource('tiles');
+    const enableTiles = settings.enableTiles !== false || panadapterWantsSource('tiles');
 
     const fetches = [];
     if (enablePota) fetches.push(fetchPotaSpots().then(processPotaSpots));

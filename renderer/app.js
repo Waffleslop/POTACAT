@@ -1222,7 +1222,7 @@ async function loadPrefs() {
   enableSota = settings.enableSota === true;  // default false
   enableWwff = settings.enableWwff === true;  // default false
   enableLlota = settings.enableLlota === true; // default false
-  enableTiles = settings.enableTiles === true; // default false
+  enableTiles = settings.enableTiles !== false; // default true (Tiles is fresh — show new users)
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
   enableCwSpots = settings.enableCwSpots === true; // default false
@@ -8345,7 +8345,7 @@ async function openSettingsDialog(tab) {
   setEnableSota.checked = s.enableSota === true;
   setEnableWwff.checked = s.enableWwff === true;
   setEnableLlota.checked = s.enableLlota === true;
-  if (setEnableTiles) setEnableTiles.checked = s.enableTiles === true;
+  if (setEnableTiles) setEnableTiles.checked = s.enableTiles !== false;
   setEnableQrz.checked = s.enableQrz === true;
   setQrzUsername.value = s.qrzUsername || '';
   setQrzPassword.value = s.qrzPassword || '';
