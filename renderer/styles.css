@@ -694,6 +694,7 @@ button:hover {
 .meter-box.hidden { display: none; }
 .meter-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 .meter-label { color: #888; font-weight: 600; min-width: 28px; text-align: right; }
+.meter-tx-hint { color: #555; font-weight: 400; font-size: 9px; margin-left: 2px; vertical-align: middle; }
 .meter-val { color: #ccc; min-width: 42px; text-align: right; font-weight: 700; }
 
 /* Floating CW Macro box — draggable */
