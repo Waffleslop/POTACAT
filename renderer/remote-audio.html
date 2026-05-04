@@ -6,7 +6,13 @@
 <script>
 // Hidden BrowserWindow — WebRTC audio bridge between radio USB audio and phone
 let pc = null;
-let localStream = null;
+let localStream = null;     // rig USB audio MediaStream (getUserMedia)
+let kiwiStream = null;      // synthesized MediaStream from KiwiSDR/WebSDR PCM
+let kiwiCtx = null;         // AudioContext for the Kiwi audio graph
+let kiwiDest = null;        // MediaStreamAudioDestinationNode → kiwiStream source
+let kiwiNextPlayTime = 0;   // back-to-back scheduling cursor
+let audioSender = null;     // RTCRtpSender for the audio track (used for replaceTrack)
+let kiwiActive = false;     // mobile path: true → peer plays Kiwi audio
 let freedvMuted = false; // persisted mute state for FreeDV
 const audioEl = document.getElementById('remote-playback');
 
@@ -47,9 +53,22 @@ window.api.onStartAudio(async (config) => {
       localStream.getAudioTracks().forEach(t => { t.enabled = false; });
     }
 
-    // Add radio RX audio track to send to phone
+    // Add radio RX audio track to send to phone. Remember the sender so we
+    // can replaceTrack() later when KiwiSDR/WebSDR audio takes over without
+    // having to renegotiate. (Gap 20a.)
+    audioSender = null;
     for (const track of localStream.getTracks()) {
-      pc.addTrack(track, localStream);
+      const sender = pc.addTrack(track, localStream);
+      if (track.kind === 'audio' && !audioSender) audioSender = sender;
+    }
+    // If Kiwi was already active when WebRTC started, swap immediately.
+    if (kiwiActive && audioSender) {
+      const kiwiTrack = ensureKiwiTrack();
+      if (kiwiTrack) {
+        audioSender.replaceTrack(kiwiTrack).catch((e) => {
+          window.api.sendAudioStatus({ error: 'Initial Kiwi track replace failed: ' + e.message });
+        });
+      }
     }
 
     // When phone's mic audio arrives, route to radio's USB audio input
@@ -183,9 +202,97 @@ window.api.onStopAudio(() => {
     localStream.getTracks().forEach(t => t.stop());
     localStream = null;
   }
+  tearDownKiwiGraph();
+  audioSender = null;
   audioEl.srcObject = null;
   stopTxMeter();
   window.api.sendAudioStatus({ status: 'stopped' });
+});
+
+// --- KiwiSDR / WebSDR audio routing (Gap 20a) ---
+// When the user connects to a Kiwi/WebSDR receiver, the desktop forwards
+// PCM frames here. We feed them into a MediaStreamAudioDestinationNode and
+// swap the WebRTC sender's track from rig audio → Kiwi stream so the phone
+// hears SDR audio over the same WebRTC bridge it already uses for rig audio.
+// No native Web Audio API needed on the mobile side.
+function ensureKiwiTrack() {
+  if (kiwiStream && kiwiDest) {
+    const tracks = kiwiStream.getAudioTracks();
+    if (tracks.length) return tracks[0];
+  }
+  // Lazy-create on first frame so we don't open an AudioContext if nobody
+  // ever connects an SDR. Default rate AudioContext + per-frame buffer
+  // sample rate handles the variable Kiwi/WebSDR rates (8000–14238 Hz).
+  if (!kiwiCtx) {
+    kiwiCtx = new AudioContext();
+  }
+  if (!kiwiDest) {
+    kiwiDest = kiwiCtx.createMediaStreamDestination();
+  }
+  kiwiStream = kiwiDest.stream;
+  return kiwiStream.getAudioTracks()[0] || null;
+}
+
+function tearDownKiwiGraph() {
+  kiwiNextPlayTime = 0;
+  if (kiwiDest) {
+    try { kiwiDest.disconnect(); } catch {}
+    kiwiDest = null;
+  }
+  if (kiwiCtx) {
+    kiwiCtx.close().catch(() => {});
+    kiwiCtx = null;
+  }
+  kiwiStream = null;
+}
+
+window.api.onKiwiActive((active) => {
+  kiwiActive = !!active;
+  if (!pc || !audioSender) return; // peer not ready — handled in onStartAudio
+  if (active) {
+    const kiwiTrack = ensureKiwiTrack();
+    if (kiwiTrack) {
+      audioSender.replaceTrack(kiwiTrack).catch((e) => {
+        window.api.sendAudioStatus({ error: 'Kiwi track replace failed: ' + e.message });
+      });
+    }
+  } else {
+    // Restore the rig audio track. localStream still holds it because we
+    // only swapped at the sender, not the source.
+    const rigTrack = localStream && localStream.getAudioTracks()[0];
+    if (rigTrack) {
+      audioSender.replaceTrack(rigTrack).catch((e) => {
+        window.api.sendAudioStatus({ error: 'Rig track restore failed: ' + e.message });
+      });
+    }
+  }
+});
+
+window.api.onKiwiAudioFrame((frame) => {
+  if (!frame || !frame.pcm || !frame.pcm.length) return;
+  const track = ensureKiwiTrack();
+  if (!track || !kiwiCtx) return;
+  // Cold-start: AudioContext can sit suspended until a user gesture in some
+  // browsers. The remote-audio window is hidden — no gesture is coming —
+  // but Electron's renderer doesn't enforce that policy. resume() is cheap.
+  if (kiwiCtx.state === 'suspended') {
+    kiwiCtx.resume().catch(() => {});
+  }
+  const sr = frame.sampleRate || 12000;
+  const pcm = new Float32Array(frame.pcm);
+  const buf = kiwiCtx.createBuffer(1, pcm.length, sr);
+  buf.getChannelData(0).set(pcm);
+  const src = kiwiCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(kiwiDest);
+  // Schedule packets back-to-back. Cap the cursor at 500 ms ahead of now —
+  // a network burst can otherwise leave us seconds behind real time.
+  const now = kiwiCtx.currentTime;
+  if (kiwiNextPlayTime < now || kiwiNextPlayTime > now + 0.5) {
+    kiwiNextPlayTime = now;
+  }
+  src.start(kiwiNextPlayTime);
+  kiwiNextPlayTime += pcm.length / sr;
 });
 </script>
 </body>

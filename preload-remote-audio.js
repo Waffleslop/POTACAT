@@ -10,4 +10,10 @@ contextBridge.exposeInMainWorld('api', {
   // whether ECHOCAT phone audio is reaching the radio's USB CODEC.
   sendTxMeter: (peak) => ipcRenderer.send('remote-audio-tx-meter', peak),
   onFreedvMute: (cb) => ipcRenderer.on('freedv-mute', (_e, muted) => cb(muted)),
+  // KiwiSDR / WebSDR audio routed through the WebRTC bridge so mobile clients
+  // (which don't have Web Audio) hear SDR audio over the same path as rig
+  // audio. Main process sends `kiwi-active` (start/stop) and streams PCM
+  // frames via `kiwi-audio-frame`.
+  onKiwiActive: (cb) => ipcRenderer.on('kiwi-active', (_e, active) => cb(active)),
+  onKiwiAudioFrame: (cb) => ipcRenderer.on('kiwi-audio-frame', (_e, frame) => cb(frame)),
 });

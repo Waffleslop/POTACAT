@@ -6555,6 +6555,11 @@ async function startRemoteAudio() {
       });
       // Apply FreeDV mute if engine is active (audio window created after FreeDV started)
       if (_freedvAudioMuted) applyFreedvAudioMute();
+      // If Kiwi is already streaming when the bridge starts, tell the window
+      // to swap immediately so the phone hears SDR audio without delay.
+      if (kiwiActive) {
+        remoteAudioWin.webContents.send('kiwi-active', true);
+      }
     }
   });
 
@@ -11672,21 +11677,37 @@ app.whenReady().then(() => {
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: true, host: kiwiFullHost });
       }
+      // Tell the WebRTC bridge to swap the peer's audio track from rig audio
+      // to the Kiwi-fed MediaStreamDestination so mobile clients (which can't
+      // decode raw PCM) hear SDR audio over the existing voice path. (Gap 20a.)
+      if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+        remoteAudioWin.webContents.send('kiwi-active', true);
+      }
     });
     let _kiwiAudioCount = 0;
     kiwiClient.on('audio', (pcmFloat, sampleRate) => {
       if (++_kiwiAudioCount === 1) sendCatLog(`[WebSDR] First audio packet: ${pcmFloat.length} samples @ ${sampleRate}Hz`);
+      const pcmArr = Array.from(pcmFloat); // serialize once, share across recipients
       // Forward audio to VFO popout and main window
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
-        vfoPopoutWin.webContents.send('kiwi-audio', { pcm: Array.from(pcmFloat), sampleRate });
+        vfoPopoutWin.webContents.send('kiwi-audio', { pcm: pcmArr, sampleRate });
       }
       if (win && !win.isDestroyed()) {
-        win.webContents.send('kiwi-audio', { pcm: Array.from(pcmFloat), sampleRate });
+        win.webContents.send('kiwi-audio', { pcm: pcmArr, sampleRate });
       }
-      // Forward to ECHOCAT phone via WebSocket
+      // Forward to the WebRTC bridge so mobile clients hear SDR audio over
+      // the WebRTC peer (no Web Audio on RN). The browser ECHOCAT mutes
+      // remoteAudio while Kiwi is active and decodes raw PCM directly, so
+      // double-playback isn't an issue. (Gap 20a.)
+      if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+        remoteAudioWin.webContents.send('kiwi-audio-frame', { pcm: pcmArr, sampleRate });
+      }
+      // Forward to ECHOCAT phone via WebSocket — kept for the browser ECHOCAT
+      // path (Web Audio decoder); mobile ignores this and uses the WebRTC
+      // track that the bridge above feeds.
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
-        if (_kiwiAudioCount === 10) sendCatLog(`[WebSDR] Streaming audio to ECHOCAT (${pcmFloat.length} samples/packet)`);
-        remoteServer.sendToClient({ type: 'kiwi-audio', pcm: Array.from(pcmFloat), sampleRate });
+        if (_kiwiAudioCount === 10) sendCatLog(`[WebSDR] Streaming audio to ECHOCAT (${pcmArr.length} samples/packet)`);
+        remoteServer.sendToClient({ type: 'kiwi-audio', pcm: pcmArr, sampleRate });
       }
     });
     kiwiClient.on('smeter', (dbm) => {
@@ -11699,6 +11720,10 @@ app.whenReady().then(() => {
       sendCatLog('[WebSDR] Disconnected');
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: false });
+      }
+      // Restore rig audio on the WebRTC peer.
+      if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+        remoteAudioWin.webContents.send('kiwi-active', false);
       }
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false });
