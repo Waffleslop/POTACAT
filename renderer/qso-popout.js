@@ -752,12 +752,77 @@ const newQsoFreq = document.getElementById('qso-new-freq');
 const newQsoMode = document.getElementById('qso-new-mode');
 const newQsoRstS = document.getElementById('qso-new-rst-s');
 const newQsoRstR = document.getElementById('qso-new-rst-r');
-const newQsoPark = document.getElementById('qso-new-park');
 const newQsoComment = document.getElementById('qso-new-comment');
+const newQsoTypeChips = document.getElementById('qso-new-type-chips');
+const newQsoRef = document.getElementById('qso-new-ref');
+const newQsoRespotLabel = document.getElementById('qso-new-respot-label');
+const newQsoRespot = document.getElementById('qso-new-respot');
+const newQsoRespotHint = document.getElementById('qso-new-respot-hint');
+
+// Per-type ref placeholder + which programs have a respot endpoint.
+// Respot is hidden for SOTA/Tiles/DX (no public spot-submit API today —
+// SOTAwatch requires a registered spotter account, Tiles back-end is
+// activator-only, DX cluster respots go through a different flow).
+const NEW_QSO_TYPE_META = {
+  dx:    { placeholder: '',                   canRespot: false, respotHint: '' },
+  pota:  { placeholder: 'e.g. US-1234',       canRespot: true,  respotHint: '' },
+  sota:  { placeholder: 'e.g. W6/CT-001',     canRespot: false, respotHint: 'SOTA respot needs a registered spotter — submit on sotawatch.org' },
+  wwff:  { placeholder: 'e.g. KFF-1234',      canRespot: true,  respotHint: '' },
+  llota: { placeholder: 'e.g. US-0001',       canRespot: true,  respotHint: '' },
+  tiles: { placeholder: 'Maidenhead grid',    canRespot: false, respotHint: 'Tiles spot-submit API not yet available' },
+};
+let newQsoSelectedType = 'dx';
+
+function updateNewQsoTypeUI() {
+  const meta = NEW_QSO_TYPE_META[newQsoSelectedType] || NEW_QSO_TYPE_META.dx;
+  // Ref input shown for any non-DX type
+  if (newQsoSelectedType === 'dx') {
+    newQsoRef.classList.add('hidden');
+    newQsoRef.value = '';
+  } else {
+    newQsoRef.classList.remove('hidden');
+    newQsoRef.placeholder = meta.placeholder;
+  }
+  // Respot UI visibility — only meaningful for programs we can actually
+  // submit spots to. Default-checked stays sticky across type switches
+  // so toggling DX→POTA→DX→POTA doesn't keep resetting it.
+  if (meta.canRespot) {
+    newQsoRespotLabel.classList.remove('hidden');
+    newQsoRespotHint.classList.add('hidden');
+  } else if (newQsoSelectedType !== 'dx') {
+    newQsoRespotLabel.classList.add('hidden');
+    if (meta.respotHint) {
+      newQsoRespotHint.textContent = meta.respotHint;
+      newQsoRespotHint.classList.remove('hidden');
+    } else {
+      newQsoRespotHint.classList.add('hidden');
+    }
+  } else {
+    newQsoRespotLabel.classList.add('hidden');
+    newQsoRespotHint.classList.add('hidden');
+  }
+  // Update chip active state
+  for (const chip of newQsoTypeChips.querySelectorAll('.qnt-chip')) {
+    chip.classList.toggle('active', chip.dataset.type === newQsoSelectedType);
+  }
+}
+
+newQsoTypeChips.addEventListener('click', (e) => {
+  const chip = e.target.closest('.qnt-chip');
+  if (!chip) return;
+  newQsoSelectedType = chip.dataset.type;
+  updateNewQsoTypeUI();
+  // Move focus into the ref input when a program type is picked so the
+  // operator can keep typing without grabbing the mouse.
+  if (newQsoSelectedType !== 'dx') newQsoRef.focus();
+});
 
 newQsoBtn.addEventListener('click', () => {
   newQsoForm.classList.toggle('hidden');
-  if (!newQsoForm.classList.contains('hidden')) newQsoCall.focus();
+  if (!newQsoForm.classList.contains('hidden')) {
+    updateNewQsoTypeUI();
+    newQsoCall.focus();
+  }
 });
 
 document.getElementById('qso-new-cancel').addEventListener('click', () => {
@@ -771,9 +836,10 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
   const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
   const timeOn = now.toISOString().slice(11, 16).replace(/:/g, '');
   const freqKhz = newQsoFreq.value.trim();
-  const freqMhz = freqKhz ? (parseFloat(freqKhz) / 1000).toFixed(6) : '';
   const mode = newQsoMode.value;
-  const park = newQsoPark.value.trim().toUpperCase();
+  const ref = newQsoRef.value.trim().toUpperCase();
+  const type = newQsoSelectedType;
+  const respotChecked = newQsoRespot && newQsoRespot.checked;
 
   const qsoData = {
     callsign: call,
@@ -785,31 +851,64 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
     rstRcvd: newQsoRstR.value.trim() || '59',
     comment: newQsoComment.value.trim(),
   };
-  if (park) {
-    qsoData.sig = 'POTA';
-    qsoData.sigInfo = park;
+  // Map the type chip + ref to the ADIF SIG/SIG_INFO + the per-program
+  // respot fields saveQsoRecord() understands. POTA uses the canonical
+  // sig/sigInfo path (sig:'POTA' + qsoData.respot triggers postPotaRespot).
+  // WWFF/LLOTA/Tiles are tracked as their own SIG and have separate
+  // <type>Respot / <type>Reference fields — see main.js:saveQsoRecord.
+  if (ref) {
+    if (type === 'pota') {
+      qsoData.sig = 'POTA';
+      qsoData.sigInfo = ref;
+      qsoData.respot = !!respotChecked;
+    } else if (type === 'sota') {
+      qsoData.sig = 'SOTA';
+      qsoData.sigInfo = ref;
+    } else if (type === 'wwff') {
+      qsoData.sig = 'WWFF';
+      qsoData.sigInfo = ref;
+      qsoData.wwffReference = ref;
+      qsoData.wwffRespot = !!respotChecked;
+    } else if (type === 'llota') {
+      qsoData.sig = 'LLOTA';
+      qsoData.sigInfo = ref;
+      qsoData.llotaReference = ref;
+      qsoData.llotaRespot = !!respotChecked;
+    } else if (type === 'tiles') {
+      qsoData.sig = 'TILES';
+      qsoData.sigInfo = ref; // grid square is the activation reference
+    }
   }
   // Get station callsign from settings
   const s = await window.api.getSettings();
   if (s.myCallsign) qsoData.stationCallsign = s.myCallsign.toUpperCase();
   if (s.grid) qsoData.myGridsquare = s.grid;
 
-  await window.api.saveQso(qsoData);
+  const result = await window.api.saveQso(qsoData);
 
   // Clear form and refresh
   newQsoCall.value = '';
   newQsoFreq.value = '';
   newQsoRstS.value = '59';
   newQsoRstR.value = '59';
-  newQsoPark.value = '';
+  newQsoRef.value = '';
   newQsoComment.value = '';
+  newQsoSelectedType = 'dx';
+  updateNewQsoTypeUI();
   newQsoForm.classList.add('hidden');
 
   // Reload QSOs
   allQsos = await window.api.getAllQsos();
   allQsos.forEach((q, i) => { q.idx = i; });
   render();
-  showToast('QSO logged: ' + call);
+  // Surface respot errors via the toast so the user knows the QSO was
+  // saved but the spot didn't post (rate limit, network, etc.).
+  if (result && (result.respotError || result.wwffRespotError || result.llotaRespotError)) {
+    const which = result.respotError ? 'POTA' : result.wwffRespotError ? 'WWFF' : 'LLOTA';
+    showToast(`QSO logged — ${which} respot failed: ${result.respotError || result.wwffRespotError || result.llotaRespotError}`);
+  } else {
+    showToast('QSO logged: ' + call);
+  }
 });
 
 // Enter key in callsign field submits

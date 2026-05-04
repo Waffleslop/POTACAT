@@ -129,19 +129,53 @@
   </div>
 
   <!-- New QSO inline form -->
-  <div id="qso-new-form" class="hidden" style="padding:6px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border-primary);display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;">
-    <input type="text" id="qso-new-call" placeholder="Callsign" style="width:80px;font-size:11px;padding:2px 4px;text-transform:uppercase;" spellcheck="false" autocomplete="off">
-    <input type="text" id="qso-new-freq" placeholder="Freq kHz" style="width:70px;font-size:11px;padding:2px 4px;">
-    <select id="qso-new-mode" style="font-size:11px;padding:2px 4px;">
-      <option>SSB</option><option>CW</option><option>FT8</option><option>FT4</option><option>FM</option><option>AM</option><option>RTTY</option><option>DIGI</option>
-    </select>
-    <input type="text" id="qso-new-rst-s" placeholder="RST S" value="59" style="width:40px;font-size:11px;padding:2px 4px;">
-    <input type="text" id="qso-new-rst-r" placeholder="RST R" value="59" style="width:40px;font-size:11px;padding:2px 4px;">
-    <input type="text" id="qso-new-park" placeholder="Park (K-1234)" style="width:80px;font-size:11px;padding:2px 4px;text-transform:uppercase;" spellcheck="false">
-    <input type="text" id="qso-new-comment" placeholder="Notes" style="width:100px;font-size:11px;padding:2px 4px;">
-    <button type="button" id="qso-new-save" style="font-size:11px;padding:2px 10px;background:var(--accent-green,#4ecca3);color:#000;border:none;border-radius:3px;font-weight:600;cursor:pointer;">Log</button>
-    <button type="button" id="qso-new-cancel" style="font-size:11px;padding:2px 8px;background:none;color:var(--text-dim);border:1px solid var(--border-primary);border-radius:3px;cursor:pointer;">Cancel</button>
+  <div id="qso-new-form" class="hidden" style="padding:6px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border-primary);font-size:11px;">
+    <!-- Row 1: Callsign / Freq / Mode / RST -->
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <input type="text" id="qso-new-call" placeholder="Callsign" style="width:80px;font-size:11px;padding:2px 4px;text-transform:uppercase;" spellcheck="false" autocomplete="off">
+      <input type="text" id="qso-new-freq" placeholder="Freq kHz" style="width:70px;font-size:11px;padding:2px 4px;">
+      <select id="qso-new-mode" style="font-size:11px;padding:2px 4px;">
+        <option>SSB</option><option>CW</option><option>FT8</option><option>FT4</option><option>FM</option><option>AM</option><option>RTTY</option><option>DIGI</option>
+      </select>
+      <input type="text" id="qso-new-rst-s" placeholder="RST S" value="59" style="width:40px;font-size:11px;padding:2px 4px;">
+      <input type="text" id="qso-new-rst-r" placeholder="RST R" value="59" style="width:40px;font-size:11px;padding:2px 4px;">
+      <input type="text" id="qso-new-comment" placeholder="Notes" style="flex:1;min-width:120px;font-size:11px;padding:2px 4px;">
+    </div>
+    <!-- Row 2: Type chips / Reference / Respot -->
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+      <div id="qso-new-type-chips" style="display:flex;gap:3px;">
+        <button type="button" class="qnt-chip active" data-type="dx">DX</button>
+        <button type="button" class="qnt-chip" data-type="pota">POTA</button>
+        <button type="button" class="qnt-chip" data-type="sota">SOTA</button>
+        <button type="button" class="qnt-chip" data-type="wwff">WWFF</button>
+        <button type="button" class="qnt-chip" data-type="llota">LLOTA</button>
+        <button type="button" class="qnt-chip" data-type="tiles">Tiles</button>
+      </div>
+      <input type="text" id="qso-new-ref" placeholder="Reference" class="hidden" style="width:110px;font-size:11px;padding:2px 4px;text-transform:uppercase;" spellcheck="false" autocomplete="off">
+      <label id="qso-new-respot-label" class="hidden" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer;">
+        <input type="checkbox" id="qso-new-respot" checked style="margin:0;">
+        Re-spot on save
+      </label>
+      <span id="qso-new-respot-hint" class="hidden" style="font-size:10px;color:var(--text-tertiary);font-style:italic;"></span>
+      <span style="flex:1;"></span>
+      <button type="button" id="qso-new-save" style="font-size:11px;padding:2px 10px;background:var(--accent-green-btn,#4ecca3);color:#000;border:none;border-radius:3px;font-weight:600;cursor:pointer;">Log</button>
+      <button type="button" id="qso-new-cancel" style="font-size:11px;padding:2px 8px;background:none;color:var(--text-secondary);border:1px solid var(--border-primary);border-radius:3px;cursor:pointer;">Cancel</button>
+    </div>
   </div>
+  <style>
+    .qnt-chip {
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--bg-input);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: 11px;
+      cursor: pointer;
+    }
+    .qnt-chip:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .qnt-chip.active { background: var(--accent-red); color: #fff; border-color: var(--accent-red); }
+  </style>
 
   <div class="qso-filter-bar" id="qso-filter-bar">
     <label>Band</label>
