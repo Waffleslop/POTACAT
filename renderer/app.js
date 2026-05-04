@@ -2267,7 +2267,12 @@ function updateWsjtxStatusVisibility() {
 }
 
 function updateSettingsConnBar() {
-  const anyVisible = enableCluster || enableRbn || enablePskr || enablePskrMap || enableRemote;
+  // RBN and PSKReporter Map auto-run whenever myCallsign is set (they push
+  // data to the Propagation popout regardless of the legacy enable* flags),
+  // so their chips reflect actual connection state — visible whenever a
+  // callsign is configured. K3SBP 2026-05-04.
+  const propRunning = !!myCallsign;
+  const anyVisible = enableCluster || propRunning || enablePskr || enableRemote;
   connBar.classList.toggle('hidden', !anyVisible);
   connCluster.classList.toggle('hidden', !enableCluster);
   connCluster.classList.toggle('connected', clusterConnected);
@@ -2277,11 +2282,11 @@ function updateSettingsConnBar() {
   } else {
     connCluster.title = '';
   }
-  connRbn.classList.toggle('hidden', !enableRbn);
+  connRbn.classList.toggle('hidden', !propRunning);
   connRbn.classList.toggle('connected', rbnConnected);
   connPskr.classList.toggle('hidden', !enablePskr);
   connPskr.classList.toggle('connected', pskrConnected);
-  connPskrMap.classList.toggle('hidden', !enablePskrMap);
+  connPskrMap.classList.toggle('hidden', !propRunning);
   connPskrMap.classList.toggle('connected', pskrMapConnected);
   connRemote.classList.toggle('hidden', !enableRemote);
   connRemote.classList.toggle('connected', remoteConnected);
@@ -8708,7 +8713,10 @@ settingsSave.addEventListener('click', async () => {
   const qrzFullNameEnabled = setQrzFullName.checked;
   const qrzLogbookEnabled = setQrzLogbook.checked;
   const qrzApiKeyVal = setQrzApiKey.value.trim();
-  const myCallsign = setMyCallsign.value.trim().toUpperCase();
+  // Reassign the module-scoped myCallsign directly (no `const` shadow), so
+  // updateSettingsConnBar() picks up the new value when it runs further
+  // down. The chip bar's RBN/PSKR visibility now keys off myCallsign.
+  myCallsign = setMyCallsign.value.trim().toUpperCase();
   let clusterEnabled = setEnableCluster.checked;
   let cwSpotsEnabled = setEnableCwSpots.checked;
   let rbnEnabled = setEnableRbn.checked;
@@ -9043,6 +9051,7 @@ settingsSave.addEventListener('click', async () => {
   enableWsjtx = wsjtxEnabled;
   updateWsjtxStatusVisibility();
   updateRbnButton();
+  updateSettingsConnBar(); // myCallsign change can flip RBN/PSKR chip visibility
   updateDirectoryButton();
   invalidateCwMacroCache();
   updateCwMacroBar();
