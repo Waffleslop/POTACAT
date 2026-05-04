@@ -17828,14 +17828,22 @@ async function playJtcatTxAudio(data) {
     } else {
       source.start(0, offsetSec);
     }
-    // Safety: force TX complete if onended never fires (device glitch, etc.)
-    var safetyDur = Math.max(durationSec, buffer.duration) + 2;
+    // Fire tx-complete based on the AudioContext clock + small grace,
+    // not onended. On Web Audio sinks with deep output buffers (WebRTC-
+    // routed devices, USB CODECs with large jitter buffers) onended can
+    // lag 1–2s after the audio actually finishes playing. That extra
+    // PTT-on time bleeds carrier into the next slot — observed by the
+    // mobile dev as a missed responder reply when the rig's TX→RX
+    // changeover transient stranded the decoder's Costas sync (K3SBP
+    // 2026-05-04, FT8 to WV4F: PTT held :30.000→:44.855 for a 12.64s
+    // envelope, decoder caught 5 spots that cycle but not WV4F's reply).
+    // 150 ms grace lets the rig push the last FT8 symbols out before
+    // PTT releases — short enough that the next slot's RX gets a clean
+    // start. onended remains as a fast-path if it fires earlier.
+    var GRACE_MS = 150;
     setTimeout(function() {
-      if (!txDone) {
-        console.warn('[JTCAT] TX audio safety timeout — forcing tx-complete');
-        finishTx();
-      }
-    }, safetyDur * 1000);
+      if (!txDone) finishTx();
+    }, durationSec * 1000 + GRACE_MS);
     console.log('[JTCAT] TX audio playing, samples=' + samples.length + ', bufDur=' + buffer.duration.toFixed(2) + 's, offset=' + offsetSec.toFixed(1) + 's, dur=' + durationSec.toFixed(1) + 's, device:', outputDeviceId || 'default');
   } catch (err) {
     jtcatTxPlaying = false;
