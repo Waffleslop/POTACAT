@@ -3814,10 +3814,25 @@ function ensureCwKeyPortLazyOpen() {
 
 function connectCwKeyPort() {
   disconnectCwKeyPort();
-  _cwKeyPortPathForPython = null; // forget any stale Python fallback target
-  // CW key port for external DTR keying
+  // Only clear the Python fallback target if the configured port has
+  // actually changed. DA2PK 2026-05-05: on Linux cdc_acm + FT-710 the
+  // node-serialport open intentionally closes itself after the ENOTTY
+  // ioctl rejection, leaving _cwKeyPortPathForPython set so subsequent
+  // text-sends go through pyserial. The next sendCwText would call
+  // ensureCwKeyPortLazyOpen → connectCwKeyPort, which used to wipe the
+  // fallback target before the new open had even completed — leaving
+  // the synchronous text-send caller to fall through to the unreliable
+  // Yaesu KY command (carrier rises but no Morse). Preserving the
+  // path across reconnects of the same device keeps the working path
+  // alive.
   const portPath = settings.cwKeyPort;
-  if (!portPath) return;
+  if (_cwKeyPortPathForPython && _cwKeyPortPathForPython !== portPath) {
+    _cwKeyPortPathForPython = null;
+  }
+  if (!portPath) {
+    _cwKeyPortPathForPython = null;
+    return;
+  }
   // Refuse to open the same serial port as the CAT target. Windows serial
   // ports are exclusive, so if rigctld already has it (or the direct serial
   // CAT client does), opening a second handle causes both openers to keep
@@ -4178,6 +4193,16 @@ function sendCwTextToRadio(text) {
   const cwCaps = rigModel?.cw || {};
   if (cwCaps.textMethod === 'dtr-key-port') {
     const wpm = (cat && cat._cwWpm) || 20;
+    // If a previous open already proved this driver rejects TIOCMSET, skip
+    // straight to the pyserial fallback — re-opening node-serialport just to
+    // hit ENOTTY again would race the close-handler against the in-flight
+    // text-send and spam the log on every key press. DA2PK 2026-05-05.
+    if (_cwKeyPortPathForPython) {
+      if (sendCwTextViaPython(expanded, wpm)) {
+        sendCatLog(`[CW] Text via Python pyserial fallback @ ${wpm} wpm: ${expanded}`);
+        return;
+      }
+    }
     // Trigger the lazy open so subsequent text sends in this session use
     // the dedicated key port. This first send falls through to the
     // alternate path (cat.sendCwText) below — acceptable cost vs. the
