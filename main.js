@@ -165,6 +165,7 @@ const { RemoteServer } = require('./lib/remote-server');
 const { loadClubUsers, hashPasswords, hasPlaintextPasswords } = require('./lib/club-users');
 const { createAuditLogger } = require('./lib/club-audit');
 const { fetchSpots: fetchWwffSpots } = require('./lib/wwff');
+const { fetchSpots: fetchTilesSpots, resetCursor: resetTilesCursor, parseFreqKhz: parseTilesFreqKhz } = require('./lib/tiles');
 const { fetchSpots: fetchLlotaSpots } = require('./lib/llota');
 const { postWwffRespot } = require('./lib/wwff-respot');
 const { fetchNets: fetchDirectoryNets, fetchSwl: fetchDirectorySwl } = require('./lib/directory');
@@ -3456,6 +3457,7 @@ function panadapterAllowsSource(source) {
       case 'sota':    return settings.enableSota === true;
       case 'wwff':    return settings.enableWwff === true;
       case 'llota':   return settings.enableLlota === true;
+      case 'tiles':   return settings.enableTiles === true;
       case 'dxc':     return settings.enableCluster === true;
       case 'rbn':     return settings.enableRbn === true;
       case 'cwspots': return settings.enableCwSpots === true;
@@ -4246,6 +4248,7 @@ function connectRemote() {
       sota: settings.enableSota === true,
       wwff: settings.enableWwff === true,
       llota: settings.enableLlota === true,
+      tiles: settings.enableTiles === true,
       cluster: settings.enableCluster === true,
     });
     // Send rig list so phone can switch rigs
@@ -4688,7 +4691,7 @@ function connectRemote() {
 
   remoteServer.on('set-sources', (sources) => {
     if (!sources) return;
-    const map = { pota: 'enablePota', sota: 'enableSota', wwff: 'enableWwff', llota: 'enableLlota', cluster: 'enableCluster' };
+    const map = { pota: 'enablePota', sota: 'enableSota', wwff: 'enableWwff', llota: 'enableLlota', tiles: 'enableTiles', cluster: 'enableCluster' };
     const newSettings = {};
     for (const [key, settingKey] of Object.entries(map)) {
       if (key in sources) newSettings[settingKey] = !!sources[key];
@@ -6759,6 +6762,96 @@ function processWwffSpots(raw) {
   return [...seen.values()];
 }
 
+// History buffer for Tiles (mirrors _wwffSpotIds / _wwffSpotHistory pattern).
+const _tilesSpotIds = new Set();
+const _tilesSpotHistory = [];
+const _SPOT_HISTORY_CAP_TILES = 500;
+
+// Tiles API spot envelope:
+//   { id, call_sign, frequency, mode, maidenhead_grid, latitude, longitude,
+//     notes, pota_ref, sota_ref, created_at }
+// Activation reference IS the maidenhead grid (no separate "tile id").
+// Spots can also carry pota_ref / sota_ref for cross-program activations.
+function processTilesSpots(raw) {
+  if (!Array.isArray(raw)) return [];
+
+  // Snapshot raw spots into history before dedupe collapses them. The id
+  // field is a UUID so it's unique enough to use as the dedupe key.
+  for (const s of raw) {
+    const id = 'tiles:' + (s.id || '');
+    if (_tilesSpotIds.has(id)) continue;
+    _tilesSpotIds.add(id);
+    const freqKhz = parseTilesFreqKhz(s.frequency);
+    _tilesSpotHistory.push({
+      _key: id,
+      callsign: s.call_sign || '',
+      reference: s.maidenhead_grid || '',
+      frequency: String(freqKhz),
+      mode: (s.mode || '').toUpperCase(),
+      spotter: '', // Tiles API doesn't expose the spotter
+      comments: s.notes || '',
+      source: 'tiles',
+      spotTime: s.created_at || '',
+    });
+  }
+  if (_tilesSpotHistory.length > _SPOT_HISTORY_CAP_TILES) {
+    const dropped = _tilesSpotHistory.splice(0, _tilesSpotHistory.length - _SPOT_HISTORY_CAP_TILES);
+    for (const e of dropped) _tilesSpotIds.delete(e._key);
+  }
+
+  const myPos = gridToLatLon(settings.grid);
+  return raw.map((s) => {
+    const freqKhz = parseTilesFreqKhz(s.frequency);
+    const freqMHz = freqKhz / 1000;
+    const callsign = s.call_sign || '';
+    const grid = s.maidenhead_grid || '';
+    const lat = (s.latitude != null && !isNaN(parseFloat(s.latitude))) ? parseFloat(s.latitude) : null;
+    const lon = (s.longitude != null && !isNaN(parseFloat(s.longitude))) ? parseFloat(s.longitude) : null;
+
+    let distance = null;
+    if (myPos && lat != null && lon != null) {
+      distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, lat, lon));
+    }
+
+    let continent = '', locationDesc = '';
+    if (ctyDb && callsign) {
+      const entity = resolveCallsign(callsign, ctyDb);
+      if (entity) {
+        continent = entity.continent || '';
+        locationDesc = entity.name || '';
+      }
+    }
+
+    let spotBearing = null;
+    if (myPos && lat != null && lon != null) {
+      spotBearing = Math.round(bearing(myPos.lat, myPos.lon, lat, lon));
+    }
+
+    return {
+      source: 'tiles',
+      callsign,
+      frequency: String(freqKhz),
+      freqMHz,
+      mode: (s.mode || '').toUpperCase(),
+      reference: grid,        // activation ref IS the grid square
+      parkName: '',           // no separate tile name
+      grid,                   // also surfaced for the map / grid column
+      // Cross-program tags so the table can show "POTA US-9787" alongside
+      // a Tiles spot when the activator is also doing POTA.
+      potaReference: s.pota_ref || '',
+      sotaReference: s.sota_ref || '',
+      locationDesc,
+      distance,
+      bearing: spotBearing,
+      lat, lon,
+      band: freqToBand(freqMHz),
+      spotTime: s.created_at || '',
+      continent,
+      comments: s.notes || '',
+    };
+  });
+}
+
 function processLlotaSpots(raw) {
   const myPos = gridToLatLon(settings.grid);
   const all = raw.filter(s => s.is_active !== false).map((s) => {
@@ -7068,12 +7161,14 @@ async function refreshSpots() {
     const enableSota = settings.enableSota === true   || panadapterWantsSource('sota');
     const enableWwff = settings.enableWwff === true   || panadapterWantsSource('wwff');
     const enableLlota = settings.enableLlota === true || panadapterWantsSource('llota');
+    const enableTiles = settings.enableTiles === true || panadapterWantsSource('tiles');
 
     const fetches = [];
     if (enablePota) fetches.push(fetchPotaSpots().then(processPotaSpots));
     if (enableSota) fetches.push(fetchSotaSpots().then(processSotaSpots));
     if (enableWwff) fetches.push(fetchWwffSpots().then(processWwffSpots));
     if (enableLlota) fetches.push(fetchLlotaSpots().then(processLlotaSpots));
+    if (enableTiles) fetches.push(fetchTilesSpots().then(processTilesSpots));
 
     const results = await Promise.allSettled(fetches);
     const allSpots = results

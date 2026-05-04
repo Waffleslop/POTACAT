@@ -27,6 +27,7 @@ let enablePota = true;
 let enableSota = false;
 let enableWwff = false;
 let enableLlota = false;
+let enableTiles = false;
 let enableDxcc = false;
 let enableCluster = false;
 let enableCwSpots = false;
@@ -425,6 +426,7 @@ const spotsPota = document.getElementById('spots-pota');
 const spotsSota = document.getElementById('spots-sota');
 const spotsWwff = document.getElementById('spots-wwff');
 const spotsLlota = document.getElementById('spots-llota');
+const spotsTiles = document.getElementById('spots-tiles');
 const spotsCluster = document.getElementById('spots-cluster');
 const spotsCwSpots = document.getElementById('spots-cwspots');
 const spotsRbn = document.getElementById('spots-rbn');
@@ -464,6 +466,7 @@ const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setEnableWwff = document.getElementById('set-enable-wwff');
 const setEnableLlota = document.getElementById('set-enable-llota');
+const setEnableTiles = document.getElementById('set-enable-tiles');
 const setCwXit = document.getElementById('set-cw-xit');
 const setCwXitShiftVfo = document.getElementById('set-cw-xit-shift-vfo');
 const setCwFilter = document.getElementById('set-cw-filter');
@@ -1219,6 +1222,7 @@ async function loadPrefs() {
   enableSota = settings.enableSota === true;  // default false
   enableWwff = settings.enableWwff === true;  // default false
   enableLlota = settings.enableLlota === true; // default false
+  enableTiles = settings.enableTiles === true; // default false
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
   enableCwSpots = settings.enableCwSpots === true; // default false
@@ -4262,6 +4266,7 @@ function getFiltered() {
       (s.source === 'sota' && !enableSota) ||
       (s.source === 'wwff' && !enableWwff) ||
       (s.source === 'llota' && !enableLlota) ||
+      (s.source === 'tiles' && !enableTiles) ||
       (s.source === 'dxc' && !enableCluster) ||
       (s.source === 'cwspots' && !enableCwSpots) ||
       (s.source === 'rbn' && !enableRbn) ||
@@ -4735,19 +4740,19 @@ L.Icon.Default.mergeOptions({
 // --- Colorblind-safe dual palettes ---
 const SOURCE_COLORS_NORMAL = {
   pota: '#4ecca3', sota: '#f0a500', wwff: '#26a69a',
-  llota: '#42a5f5', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#00bcd4', pskr: '#ff6b6b', freedv: '#00e5ff'
+  llota: '#42a5f5', tiles: '#ab47bc', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#00bcd4', pskr: '#ff6b6b', freedv: '#00e5ff'
 };
 const SOURCE_COLORS_CB = {
   pota: '#4fc3f7', sota: '#ffb300', wwff: '#29b6f6',
-  llota: '#42a5f5', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#81d4fa', pskr: '#ffa726', freedv: '#00e5ff'
+  llota: '#42a5f5', tiles: '#ce93d8', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#81d4fa', pskr: '#ffa726', freedv: '#00e5ff'
 };
 const SOURCE_STROKES_NORMAL = {
   pota: '#3ba882', sota: '#c47f00', wwff: '#1b7a71',
-  llota: '#1e88e5', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d84343', freedv: '#00acc1'
+  llota: '#1e88e5', tiles: '#7b1fa2', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d84343', freedv: '#00acc1'
 };
 const SOURCE_STROKES_CB = {
   pota: '#2196f3', sota: '#e6a200', wwff: '#0288d1',
-  llota: '#1e88e5', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#4fc3f7', pskr: '#e68a00', freedv: '#00acc1'
+  llota: '#1e88e5', tiles: '#9c27b0', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#4fc3f7', pskr: '#e68a00', freedv: '#00acc1'
 };
 const RBN_BAND_COLORS_NORMAL = {
   '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3',
@@ -4808,7 +4813,7 @@ function applyColorblindMode(enabled) {
   }
   // Update inline source label colors in Spots dropdown
   const srcLabels = { pota: '#spots-pota', sota: '#spots-sota', wwff: '#spots-wwff',
-    llota: '#spots-llota', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr' };
+    llota: '#spots-llota', tiles: '#spots-tiles', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr' };
   for (const [src, sel] of Object.entries(srcLabels)) {
     const span = document.querySelector(sel + ' + span') || document.querySelector(sel)?.parentElement?.querySelector('span');
     if (span) span.style.color = SOURCE_COLORS_ACTIVE[src];
@@ -4821,11 +4826,11 @@ function applyColorblindMode(enabled) {
 // WCAG AA high-contrast source palettes
 const SOURCE_COLORS_WCAG = {
   pota: '#5ed8ad', sota: '#f0a500', wwff: '#3cc4b8',
-  llota: '#42a5f5', dxc: '#e87fff', cwspots: '#ffe066', rbn: '#00bcd4', pskr: '#ff9090', freedv: '#00e5ff'
+  llota: '#42a5f5', tiles: '#ce93d8', dxc: '#e87fff', cwspots: '#ffe066', rbn: '#00bcd4', pskr: '#ff9090', freedv: '#00e5ff'
 };
 const SOURCE_STROKES_WCAG = {
   pota: '#42b88a', sota: '#c47f00', wwff: '#2a9e92',
-  llota: '#1e88e5', dxc: '#c040e0', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d06060', freedv: '#00acc1'
+  llota: '#1e88e5', tiles: '#9c27b0', dxc: '#c040e0', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d06060', freedv: '#00acc1'
 };
 
 function applyWcagMode(enabled) {
@@ -4854,7 +4859,7 @@ function applyWcagMode(enabled) {
     root.style.setProperty('--source-' + src, color);
   }
   const srcLabels = { pota: '#spots-pota', sota: '#spots-sota', wwff: '#spots-wwff',
-    llota: '#spots-llota', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr' };
+    llota: '#spots-llota', tiles: '#spots-tiles', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr' };
   for (const [src, sel] of Object.entries(srcLabels)) {
     const span = document.querySelector(sel + ' + span') || document.querySelector(sel)?.parentElement?.querySelector('span');
     if (span) span.style.color = SOURCE_COLORS_ACTIVE[src];
@@ -7785,6 +7790,7 @@ function syncSpotsPanel() {
   spotsSota.checked = enableSota;
   spotsWwff.checked = enableWwff;
   spotsLlota.checked = enableLlota;
+  if (spotsTiles) spotsTiles.checked = enableTiles;
   spotsCluster.checked = enableCluster;
   spotsCwSpots.checked = enableCwSpots;
   spotsRbn.checked = enableRbn;
@@ -7820,6 +7826,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   enableSota = spotsSota.checked;
   enableWwff = spotsWwff.checked;
   enableLlota = spotsLlota.checked;
+  enableTiles = spotsTiles ? spotsTiles.checked : enableTiles;
   enableCluster = spotsCluster.checked;
   enableCwSpots = spotsCwSpots.checked;
   enableRbn = spotsRbn.checked;
@@ -7857,6 +7864,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   setEnableSota.checked = enableSota;
   setEnableWwff.checked = enableWwff;
   setEnableLlota.checked = enableLlota;
+  if (setEnableTiles) setEnableTiles.checked = enableTiles;
   setEnableCluster.checked = enableCluster;
   setEnableCwSpots.checked = enableCwSpots;
   setEnableRbn.checked = enableRbn;
@@ -7873,7 +7881,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
 
   // Save and let main process handle connect/disconnect
   await window.api.saveSettings({
-    enablePota, enableSota, enableWwff, enableLlota,
+    enablePota, enableSota, enableWwff, enableLlota, enableTiles,
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
     hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, strictAtno, hideOutOfBand,
     enableDxcc,
@@ -8337,6 +8345,7 @@ async function openSettingsDialog(tab) {
   setEnableSota.checked = s.enableSota === true;
   setEnableWwff.checked = s.enableWwff === true;
   setEnableLlota.checked = s.enableLlota === true;
+  if (setEnableTiles) setEnableTiles.checked = s.enableTiles === true;
   setEnableQrz.checked = s.enableQrz === true;
   setQrzUsername.value = s.qrzUsername || '';
   setQrzPassword.value = s.qrzPassword || '';
@@ -8691,6 +8700,7 @@ settingsSave.addEventListener('click', async () => {
   const sotaEnabled = setEnableSota.checked;
   const wwffEnabled = setEnableWwff.checked;
   const llotaEnabled = setEnableLlota.checked;
+  const tilesEnabled = setEnableTiles ? setEnableTiles.checked : enableTiles;
   const qrzEnabled = setEnableQrz.checked;
   const qrzUsername = setQrzUsername.value.trim().toUpperCase();
   const qrzPassword = setQrzPassword.value;
@@ -8864,6 +8874,7 @@ settingsSave.addEventListener('click', async () => {
     enableSota: sotaEnabled,
     enableWwff: wwffEnabled,
     enableLlota: llotaEnabled,
+    enableTiles: tilesEnabled,
     enableQrz: qrzEnabled,
     qrzUsername: qrzUsername,
     qrzPassword: qrzPassword,
@@ -9022,6 +9033,7 @@ settingsSave.addEventListener('click', async () => {
   enableSota = sotaEnabled;
   enableWwff = wwffEnabled;
   enableLlota = llotaEnabled;
+  enableTiles = tilesEnabled;
   enableCluster = clusterEnabled;
   enableRbn = rbnEnabled;
   enablePskr = pskrEnabled;
