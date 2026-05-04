@@ -2775,21 +2775,38 @@ async function jtcatAutoLog(qso) {
 // Shared QSO state machine — advance on decodes
 // setTxMsg: fn(msg) to set TX message and broadcast state
 // onDone: fn() called when QSO completes
+//
+// Diagnostic logging: every call emits one [JTCAT QSO] line summarizing
+// what the state machine saw and what it did. Helps answer "why did POTACAT
+// repeat my last TX instead of advancing?" — the typical answer is the FT8
+// engine missed the partner's reply on that cycle (a normal ~2-3% miss rate
+// at low SNR). The log line shows whether a matching decode was actually in
+// the cycle's results — if yes, it's a state-machine bug; if no, it's a
+// decoder miss and the next cycle should pick it up. (K3SBP 2026-05-03.)
 function advanceJtcatQso(q, results, setTxMsg, onDone) {
   if (!q || q.phase === 'done' || q.phase === 'idle') return;
   const myCall = q.myCall;
+  const _phaseBefore = q.phase;
+  function _qsoLog(action, extra) {
+    try {
+      const head = `[JTCAT QSO] phase=${_phaseBefore}${q.phase !== _phaseBefore ? '->' + q.phase : ''} call=${q.call || '-'} mode=${q.mode} results=${results.length}`;
+      sendCatLog(extra ? `${head} ${action} ${extra}` : `${head} ${action}`);
+    } catch {}
+  }
 
   if (q.mode === 'cq') {
     // Final courtesy TX: wait one decode cycle so the RR73 has a chance to transmit
     if (q.phase === 'cq-rr73') {
       if (!q._courtesySent) {
         q._courtesySent = true;
+        _qsoLog('courtesy-RR73 wait (first cycle in cq-rr73)');
         return; // first decode in this phase — TX boundary hasn't fired yet
       }
       q.phase = 'done';
       ft8Engine._txEnabled = false;
       ft8Engine.setTxMessage('');
       ft8Engine.setTxSlot('auto');
+      _qsoLog('QSO done (courtesy RR73 sent)');
       return;
     }
 
@@ -2798,9 +2815,15 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
         const t = (d.text || '').toUpperCase();
         return t.indexOf(myCall) >= 0 && !t.startsWith('CQ ');
       });
-      if (!reply) return;
+      if (!reply) {
+        _qsoLog('no advance', `(no decode containing ${myCall} that isn't a CQ)`);
+        return;
+      }
       const m = (reply.text || '').toUpperCase().match(new RegExp(myCall.replace(/[/]/g, '\\/') + '\\s+([A-Z0-9/]+)\\s+([A-R]{2}\\d{2})', 'i'));
-      if (!m) return;
+      if (!m) {
+        _qsoLog('no advance', `(decode "${reply.text}" matched ${myCall} but didn't parse <call> <grid>)`);
+        return;
+      }
       q.call = m[1]; q.grid = m[2];
       const dbRounded = Math.round(reply.db);
       const rpt = dbRounded >= 0 ? '+' + String(dbRounded).padStart(2, '0') : '-' + String(Math.abs(dbRounded)).padStart(2, '0');
@@ -2809,12 +2832,17 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
       q.phase = 'cq-report';
       ft8Engine.setRxFreq(reply.df);
       setTxMsg(q.txMsg);
+      _qsoLog('advance to cq-report', `("${reply.text}" -> tx "${q.txMsg}")`);
     } else if (q.phase === 'cq-report') {
       const resp = results.find(d => { const t = (d.text || '').toUpperCase(); return t.indexOf(myCall) >= 0 && t.indexOf(q.call) >= 0; });
-      if (!resp) { return; }
+      if (!resp) {
+        _qsoLog('no advance', `(no decode containing ${myCall}+${q.call})`);
+        return;
+      }
       const rptM = (resp.text || '').toUpperCase().match(/R?([+-]\d{2})/);
       if (!rptM) {
         q._heardThisCycle = true; // they responded but haven't sent R+report yet
+        _qsoLog('heard but no advance', `(decode "${resp.text}" had no R-report yet)`);
         return;
       }
       q.report = rptM[1];
@@ -2823,6 +2851,7 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
       setTxMsg(q.txMsg);
       // QSO confirmed — both reports exchanged. Log now, send RR73 as courtesy.
       onDone();
+      _qsoLog('advance to cq-rr73 + log', `("${resp.text}" -> tx "${q.txMsg}")`);
     }
   } else {
     // Reply mode
@@ -2832,12 +2861,14 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
     if (q.phase === '73') {
       if (!q._courtesySent) {
         q._courtesySent = true;
+        _qsoLog('courtesy-73 wait (first cycle in 73)');
         return; // first decode in this phase — TX boundary hasn't fired yet
       }
       q.phase = 'done';
       ft8Engine._txEnabled = false;
       ft8Engine.setTxMessage('');
       ft8Engine.setTxSlot('auto');
+      _qsoLog('QSO done (courtesy 73 sent)');
       return;
     }
 
@@ -2860,15 +2891,22 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
       ft8Engine.setTxMessage('');
       ft8Engine.setTxSlot('auto');
       if (ft8Engine._txActive) ft8Engine.txComplete();
+      _qsoLog('aborted', `(${theirCall} replied to "${theyPickedOther.text}" instead of us)`);
       return;
     }
 
     const resp = results.find(d => { const t = (d.text || '').toUpperCase(); return t.indexOf(myCall) >= 0 && t.indexOf(theirCall) >= 0; });
-    if (!resp) return;
+    if (!resp) {
+      _qsoLog('no advance', `(no decode containing ${myCall}+${theirCall} -- decoder probably missed their reply this cycle)`);
+      return;
+    }
     const text = (resp.text || '').toUpperCase();
     if (q.phase === 'reply') {
       const rptM = text.match(/[R]?([+-]\d{2})/);
-      if (!rptM) return;
+      if (!rptM) {
+        _qsoLog('no advance', `(decode "${resp.text}" had no signal report yet)`);
+        return;
+      }
       q.report = rptM[1];
       const dbRounded = Math.round(resp.db);
       const ourRpt = dbRounded >= 0 ? '+' + String(dbRounded).padStart(2, '0') : '-' + String(Math.abs(dbRounded)).padStart(2, '0');
@@ -2878,9 +2916,11 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
         q.txMsg = theirCall + ' ' + myCall + ' RR73'; q.phase = '73';
         setTxMsg(q.txMsg);
         onDone();
+        _qsoLog('advance to 73 + log', `("${resp.text}" had R-report -> tx "${q.txMsg}")`);
       } else {
         q.txMsg = theirCall + ' ' + myCall + ' R' + ourRpt; q.phase = 'r+report';
         setTxMsg(q.txMsg);
+        _qsoLog('advance to r+report', `("${resp.text}" -> tx "${q.txMsg}")`);
       }
     } else if (q.phase === 'r+report') {
       if (/\bRR73\b/.test(text) || /\bRRR\b/.test(text) || /\s73$/.test(text)) {
@@ -2888,9 +2928,11 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
         q.txMsg = theirCall + ' ' + myCall + ' 73'; q.phase = '73';
         setTxMsg(q.txMsg);
         onDone();
+        _qsoLog('advance to 73 + log', `("${resp.text}" had RR73 -> tx "${q.txMsg}")`);
       } else {
         // They're still responding (e.g. repeating report) — mark as heard so retries don't expire
         q._heardThisCycle = true;
+        _qsoLog('heard but no advance', `(decode "${resp.text}" — still waiting for RR73)`);
       }
     }
   }
