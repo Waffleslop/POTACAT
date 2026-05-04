@@ -1525,8 +1525,10 @@ function sendRbnSpots() {
   // Mirror the full RBN array to ECHOCAT clients so the mobile Prop tab has
   // the same data the desktop popout sees. The existing `spots` channel only
   // carries the watchlist-matched subset, hence a dedicated message type.
-  // (Gap 19.)
-  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+  // (Gap 19.) Match broadcastSpots() — sendToClient() already guards on
+  // readyState; gating on hasClient() here added an _authenticated check
+  // that silently dropped on some auto-auth (no-token LAN) connections.
+  if (remoteServer) {
     remoteServer.sendToClient({ type: 'rbn-prop-spots', spots: rbnSpots });
   }
   sendPropStatus();
@@ -1945,7 +1947,9 @@ function disconnectFreedvReporter() {
 // --- PSKReporter Map view ---
 function sendPskrMapStatus(s) {
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-status', s);
-  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+  // sendToClient() guards on readyState; mirror broadcastSpots() rather than
+  // hasClient() to avoid the silent-drop on auto-auth connections.
+  if (remoteServer) {
     remoteServer.sendToClient({ type: 'pskr-map-status', ...s });
   }
   sendPropStatus();
@@ -1955,7 +1959,7 @@ function sendPskrMapSpots() {
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-spots', pskrMapSpots);
   if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.webContents.send('pskr-map-spots', pskrMapSpots);
   // Forward to mobile Prop tab. (Gap 15.)
-  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+  if (remoteServer) {
     remoteServer.sendToClient({ type: 'pskr-map-spots', spots: pskrMapSpots });
   }
   sendPropStatus();
