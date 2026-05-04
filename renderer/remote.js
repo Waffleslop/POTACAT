@@ -551,6 +551,12 @@
   let ft8TxSlot = 'auto';      // 'auto' | 'even' | 'odd'
   let ft8Transmitting = false;  // true when actively transmitting
   let ft8TxMsg = '';
+  // K3SBP 2026-05-03: when a cycle is spent transmitting, the engine's
+  // jtcat-decode for that cycle arrives with results=[] (you can't decode
+  // while you're transmitting), and the cycle's slot in the decode log
+  // ended up blank. Defer the TX row from tx-status to the cycle-decode
+  // handler so it lands AFTER the cycle separator instead of before.
+  let ft8PendingTxMsg = '';
   let ft8QsoState = null;       // {mode, call, grid, phase, txMsg, report, sentReport} or null
   let ft8CycleSlot = '--';
   let ft8CountdownTimer = null;
@@ -1569,7 +1575,12 @@
           ft8TxFreqDisplay.textContent = 'TX: ' + msg.txFreq + ' Hz';
         }
         if (ft8Transmitting && ft8TxMsg) {
-          ft8AddTxRow(ft8TxMsg);
+          // Remember what we're sending so the cycle-decode handler can
+          // render this in the correct cycle slot once the engine reports
+          // results=[] for the TX cycle. Don't render directly here — by
+          // the time the cycle decode arrives (~14s later), live append
+          // would land in the *previous* cycle's section.
+          ft8PendingTxMsg = ft8TxMsg;
         }
         break;
 
@@ -5760,12 +5771,17 @@
     log.appendChild(sep);
 
     if (results.length === 0) {
-      if (ft8Transmitting && ft8TxMsg) {
+      if (ft8PendingTxMsg) {
+        // We transmitted during this cycle — show what we sent in the
+        // history so the operator can see "what step did I send" without
+        // looking at the QSO tracker. Cleared after rendering so the
+        // next quiet cycle shows "No decodes" again.
         const row = document.createElement('div');
         row.className = 'ft8-row ft8-tx';
-        row.innerHTML = '<span class="ft8-db">TX</span><span class="ft8-msg">' + esc(ft8TxMsg) + '</span>';
+        row.innerHTML = '<span class="ft8-db">TX</span><span class="ft8-msg">' + esc(ft8PendingTxMsg) + '</span>';
         log.appendChild(row);
-      } else if (!ft8Transmitting) {
+        ft8PendingTxMsg = '';
+      } else {
         const row = document.createElement('div');
         row.className = 'ft8-row';
         row.innerHTML = '<span class="ft8-msg" style="color:#666">No decodes</span>';
