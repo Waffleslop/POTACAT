@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   echocatListPairedDevices: () => ipcRenderer.invoke('echocat-list-paired-devices'),
   echocatRevokeDevice: (deviceId) => ipcRenderer.invoke('echocat-revoke-device', deviceId),
   onEchocatPairedDevices: (cb) => ipcRenderer.on('echocat-paired-devices', (_e, list) => cb(list)),
+  pairPopoutOpen: () => ipcRenderer.send('pair-popout-open'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),

@@ -910,10 +910,6 @@ const setCwKeyPort = document.getElementById('set-cw-key-port');
 const remoteUrlDisplay = document.getElementById('remote-url-display');
 // Mobile-app pairing UI (Phase 0 of native app)
 const echocatPairBtn = document.getElementById('echocat-pair-btn');
-const echocatPairQr = document.getElementById('echocat-pair-qr');
-const echocatPairQrImg = document.getElementById('echocat-pair-qr-img');
-const echocatPairQrText = document.getElementById('echocat-pair-qr-text');
-const echocatPairQrTtl = document.getElementById('echocat-pair-qr-ttl');
 const echocatPairedList = document.getElementById('echocat-paired-list');
 const remoteTxIndicator = document.getElementById('remote-tx-indicator');
 const jtcatTxIndicator = document.getElementById('jtcat-tx-indicator');
@@ -3486,7 +3482,6 @@ remoteRegenToken.addEventListener('click', () => {
 });
 
 // --- Mobile-app pairing (Phase 0) ---
-let _echocatPairTtlInterval = null;
 async function echocatRefreshPairedList() {
   if (!echocatPairedList || !window.api.echocatListPairedDevices) return;
   let list = [];
@@ -3521,42 +3516,11 @@ async function echocatRefreshPairedList() {
   }
 }
 if (echocatPairBtn) {
-  echocatPairBtn.addEventListener('click', async () => {
-    echocatPairBtn.disabled = true;
-    echocatPairBtn.textContent = 'Generating…';
-    try {
-      const r = await window.api.echocatCreatePairingQr({});
-      if (r && r.error) {
-        alert(r.error);
-        return;
-      }
-      echocatPairQr.classList.remove('hidden');
-      echocatPairQrImg.src = r.dataUrl;
-      echocatPairQrText.textContent = r.qrText;
-      let remaining = r.ttlSeconds || 300;
-      if (_echocatPairTtlInterval) clearInterval(_echocatPairTtlInterval);
-      function tick() {
-        if (remaining <= 0) {
-          echocatPairQrTtl.textContent = 'Expired — click again to regenerate.';
-          clearInterval(_echocatPairTtlInterval);
-          _echocatPairTtlInterval = null;
-          echocatPairQrImg.style.opacity = '0.3';
-          return;
-        }
-        const m = Math.floor(remaining / 60);
-        const s = String(remaining % 60).padStart(2, '0');
-        echocatPairQrTtl.textContent = `Expires in ${m}:${s}`;
-        remaining--;
-      }
-      echocatPairQrImg.style.opacity = '1';
-      tick();
-      _echocatPairTtlInterval = setInterval(tick, 1000);
-    } catch (err) {
-      alert('Pairing QR failed: ' + (err.message || err));
-    } finally {
-      echocatPairBtn.disabled = false;
-      echocatPairBtn.textContent = 'Show pairing QR';
-    }
+  // Opens a dedicated window with the QR at a comfortable scanning size —
+  // the Settings dialog is too cramped to point a phone at. The popout owns
+  // its own QR generation + TTL countdown.
+  echocatPairBtn.addEventListener('click', () => {
+    window.api.pairPopoutOpen();
   });
 }
 if (window.api.onEchocatPairedDevices) {

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <title>POTACAT — Pair Mobile App</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { display: flex; flex-direction: column; }
+
+    .pp-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 16px; gap: 12px; overflow-y: auto; }
+    .pp-instruction { text-align: center; font-size: 13px; color: var(--text-secondary); max-width: 460px; line-height: 1.4; }
+    .pp-qr-card { background: #fff; padding: 16px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .pp-qr-img { display: block; width: 360px; height: 360px; }
+    .pp-qr-text { font-family: monospace; font-size: 10px; color: #222; word-break: break-all; max-width: 360px; text-align: center; }
+    .pp-ttl { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .pp-ttl.expired { color: #e94560; font-weight: 600; }
+
+    .pp-actions { display: flex; gap: 8px; }
+    .pp-actions button { padding: 6px 14px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); border-radius: 4px; font-size: 13px; cursor: pointer; }
+    .pp-actions button:hover { background: var(--bg-hover); }
+    .pp-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .pp-error { color: #e94560; font-size: 13px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-drag">
+      <span class="titlebar-title">POTACAT — Pair Mobile App</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+
+  <div class="pp-body">
+    <div class="pp-instruction">
+      Scan this QR from the POTACAT mobile app to pair without typing IP / token. The token is single-use and expires in 5 minutes.
+    </div>
+    <div class="pp-qr-card" id="pp-qr-card">
+      <img id="pp-qr-img" class="pp-qr-img" alt="POTACAT pairing QR">
+      <div id="pp-qr-text" class="pp-qr-text"></div>
+      <div id="pp-qr-ttl" class="pp-ttl"></div>
+    </div>
+    <div id="pp-error" class="pp-error" style="display:none;"></div>
+    <div class="pp-actions">
+      <button type="button" id="pp-regen-btn">Regenerate</button>
+      <button type="button" id="pp-close-btn">Close</button>
+    </div>
+  </div>
+
+  <script src="pair-popout.js"></script>
+</body>
+</html>

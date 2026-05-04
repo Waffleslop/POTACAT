@@ -217,6 +217,7 @@ let actmapPopoutWin = null; // pop-out activation map window
 let spotsPopoutWin = null; // pop-out spots window (activator mode)
 let clusterPopoutWin = null; // pop-out DX cluster terminal window
 let propPopoutWin = null;    // pop-out propagation map window
+let pairPopoutWin = null;    // pop-out ECHOCAT pairing QR window
 let vfoPopoutWin = null;     // pop-out VFO window
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
@@ -10031,6 +10032,42 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.on('prop-popout-close', () => { if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.close(); });
+
+  // --- ECHOCAT pairing QR popout ---
+  // Settings → ECHOCAT → "Open pairing QR" opens a small dedicated window
+  // sized for the QR + URL + countdown. The Settings dialog is too cramped
+  // for a comfortable scan target. (K3SBP 2026-05-04.)
+  ipcMain.on('pair-popout-open', () => {
+    if (pairPopoutWin && !pairPopoutWin.isDestroyed()) {
+      pairPopoutWin.focus();
+      return;
+    }
+    const isMac = process.platform === 'darwin';
+    pairPopoutWin = new BrowserWindow({
+      width: 500,
+      height: 600,
+      title: 'POTACAT — Pair Mobile App',
+      show: false,
+      resizable: true,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-pair-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    pairPopoutWin.show();
+    pairPopoutWin.setMenuBarVisibility(false);
+    pairPopoutWin.loadFile(path.join(__dirname, 'renderer', 'pair-popout.html'));
+    pairPopoutWin.on('closed', () => { pairPopoutWin = null; });
+    pairPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        pairPopoutWin.webContents.toggleDevTools();
+      }
+    });
+  });
+  ipcMain.on('pair-popout-close', () => { if (pairPopoutWin && !pairPopoutWin.isDestroyed()) pairPopoutWin.close(); });
 
   // Relay colorblind mode to pop-outs and panadapter integrations
   ipcMain.on('colorblind-mode', (_e, enabled) => {
