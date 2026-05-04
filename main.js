@@ -1522,6 +1522,13 @@ function sendRbnStatus(s) {
 function sendRbnSpots() {
   if (win && !win.isDestroyed()) win.webContents.send('rbn-spots', rbnSpots);
   if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.webContents.send('rbn-spots', rbnSpots);
+  // Mirror the full RBN array to ECHOCAT clients so the mobile Prop tab has
+  // the same data the desktop popout sees. The existing `spots` channel only
+  // carries the watchlist-matched subset, hence a dedicated message type.
+  // (Gap 19.)
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    remoteServer.sendToClient({ type: 'rbn-prop-spots', spots: rbnSpots });
+  }
   sendPropStatus();
 }
 
@@ -1938,12 +1945,19 @@ function disconnectFreedvReporter() {
 // --- PSKReporter Map view ---
 function sendPskrMapStatus(s) {
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-status', s);
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    remoteServer.sendToClient({ type: 'pskr-map-status', ...s });
+  }
   sendPropStatus();
 }
 
 function sendPskrMapSpots() {
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-spots', pskrMapSpots);
   if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.webContents.send('pskr-map-spots', pskrMapSpots);
+  // Forward to mobile Prop tab. (Gap 15.)
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    remoteServer.sendToClient({ type: 'pskr-map-spots', spots: pskrMapSpots });
+  }
   sendPropStatus();
 }
 
@@ -4372,6 +4386,25 @@ function connectRemote() {
     }
     if (vmLabels.length) remoteServer.sendToClient({ type: 'voice-macro-labels', labels: vmLabels });
 
+    // Propagation snapshots — RBN spots and PSKReporter Map spots/status.
+    // Mobile Prop tab needs these to render immediately on connect rather
+    // than waiting for the next streaming push (RBN throttles to 2s, PSKR
+    // polls every 5 min). (Gaps 15, 16, 19.)
+    if (rbnSpots && rbnSpots.length > 0) {
+      remoteServer.sendToClient({ type: 'rbn-prop-spots', spots: rbnSpots });
+    }
+    if (pskrMapSpots && pskrMapSpots.length > 0) {
+      remoteServer.sendToClient({ type: 'pskr-map-spots', spots: pskrMapSpots });
+    }
+    if (pskrMap) {
+      remoteServer.sendToClient({
+        type: 'pskr-map-status',
+        connected: !!pskrMap.connected,
+        spotCount: pskrMapSpots.length,
+        nextPollAt: pskrMap.nextPollAt || null,
+      });
+    }
+
     // TunerGenius status (labels + active antenna)
     if (tgxlClient && tgxlClient.connected) {
       const labels = settings.tgxlLabels || {};
@@ -5998,6 +6031,25 @@ function connectRemote() {
     if (sstvEngine) sstvEngine.stop();
   });
 
+  // Phone tapped the AUTO-SSTV banner to disable the idle-trigger feature.
+  // Persist the flag, cancel any active auto-SSTV session, and broadcast a
+  // fresh sstv-tx-status so the banner clears on the phone. (Gap 14.)
+  remoteServer.on('sstv-set-auto-enabled', ({ enabled }) => {
+    if (settings.enableAutoSstv === enabled) return;
+    settings.enableAutoSstv = !!enabled;
+    saveSettings(settings);
+    if (!enabled) {
+      stopAutoSstvTimer();
+      if (autoSstvActive) cancelAutoSstv();
+    } else {
+      startAutoSstvTimer();
+    }
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+    }
+    sendCatLog(`[Echo CAT] Phone toggled auto-SSTV: ${enabled ? 'enabled' : 'disabled'}`);
+  });
+
   // Phone requested an immediate TX abort.
   // Release PTT FIRST (FCC safety — don't leave the Flex keyed), then tell
   // the popout to stop audio playback, then notify all clients.
@@ -6080,6 +6132,21 @@ function connectRemote() {
     const p = voiceMacroPath(idx);
     if (fs.existsSync(p)) fs.unlinkSync(p);
     if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
+  });
+
+  // Phone-tapped a voice macro slot. Audio playback owns the rig's USB CODEC
+  // path which lives in the desktop renderer, so we relay the request there
+  // — the renderer's playVoiceMacro() is the same code path a local click
+  // takes, and it already handles PTT-on / play / PTT-off via voice-macro-ptt.
+  // (Gap 18.)
+  remoteServer.on('voice-macro-play', ({ idx }) => {
+    if (typeof idx !== 'number' || idx < 0 || idx > 4) return;
+    if (!win || win.isDestroyed()) {
+      sendCatLog(`[Echo CAT] voice-macro-play idx=${idx} ignored — desktop window not available`);
+      return;
+    }
+    win.webContents.send('play-voice-macro', idx);
+    sendCatLog(`[Echo CAT] Playing voice macro ${idx + 1} from phone`);
   });
 
   remoteServer.on('jtcat-cancel-qso', () => {
@@ -6233,6 +6300,17 @@ function connectRemote() {
   remoteServer.on('kiwi-disconnect', () => {
     if (kiwiClient) { kiwiClient.disconnect(); kiwiClient = null; }
     kiwiActive = false;
+  });
+  // QSY the SDR receiver mid-session. (Gap 20b.)
+  remoteServer.on('kiwi-tune', ({ freqKhz, mode }) => {
+    if (!kiwiClient || !kiwiActive) return;
+    const fKhz = parseFloat(freqKhz);
+    if (!isFinite(fKhz) || fKhz <= 0) return;
+    const m = (mode || _currentMode || 'usb').toLowerCase()
+      .replace('digu', 'usb').replace('digl', 'lsb')
+      .replace('pktusb', 'usb').replace('pktlsb', 'lsb');
+    kiwiClient.tune(fKhz, m);
+    sendCatLog(`[WebSDR] ECHOCAT QSY: ${fKhz} kHz ${m.toUpperCase()}`);
   });
   remoteServer.on('save-settings', (partial) => {
     Object.assign(settings, partial);
@@ -9016,7 +9094,20 @@ function stopAutoSstvTimer() {
   if (autoSstvTimer) { clearInterval(autoSstvTimer); autoSstvTimer = null; }
 }
 
+// Defer auto-SSTV when JTCAT is actively decoding — locally OR via a remote
+// ECHOCAT client. SSTV grabs the audio device and would silence the FT8
+// engine, which a phone-only operator wouldn't notice for the rest of the
+// idle window. (Gap 17.)
+function autoSstvBlockedByJtcat() {
+  if (ft8Engine && ft8Engine._running) return true;
+  return false;
+}
+
 function triggerAutoSstv() {
+  if (autoSstvBlockedByJtcat()) {
+    sendCatLog('[Auto-SSTV] Deferred — JTCAT is decoding');
+    return;
+  }
   autoSstvActive = true;
   autoSstvPrevFreq = _currentFreqHz;
   autoSstvPrevMode = _currentMode;

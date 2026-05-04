@@ -12375,6 +12375,7 @@ async function updateVoiceMacroBar() {
     (function(idx) {
       var btn = document.createElement('button');
       btn.type = 'button';
+      btn.dataset.idx = String(idx);
       btn.textContent = voiceMacroLabels[idx] || ('V' + (idx + 1));
       var voiceHk = hotkeyBindings.find(function(h) { return h.action === 'voice-macro-' + (idx + 1); });
       var fKeyHint = voiceHk && voiceHk.key ? ' (' + voiceHk.key + ')' : '';
@@ -12427,6 +12428,16 @@ function stopVoicePlayback() {
   voicePlayingIdx = -1;
   if (voiceMacroBtns) voiceMacroBtns.querySelectorAll('button.active').forEach(b => b.classList.remove('active'));
 }
+
+// Phone-tapped a macro slot — same path as a local button press. The button
+// reference is best-effort (we look up the rendered button so the active
+// styling matches local clicks); falls back to null if the macro bar is
+// hidden, which playVoiceMacro tolerates.
+window.api.onPlayVoiceMacro((idx) => {
+  if (typeof playVoiceMacro !== 'function') return;
+  const btn = voiceMacroBtns ? voiceMacroBtns.querySelector(`button[data-idx="${idx}"]`) : null;
+  playVoiceMacro(idx, btn);
+});
 
 // Voice macro recording UI in Settings
 async function renderVoiceMacroEditor() {

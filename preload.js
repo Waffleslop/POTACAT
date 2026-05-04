@@ -192,6 +192,9 @@ contextBridge.exposeInMainWorld('api', {
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),
   voiceMacroLabelsSave: (labels) => ipcRenderer.invoke('voice-macro-labels-save', labels),
   onVoiceMacrosUpdated: (cb) => ipcRenderer.on('voice-macros-updated', () => cb()),
+  // Phone-tapped macro slot — main relays here so the renderer's playback
+  // chain (which owns the audio path) handles it the same as a local click.
+  onPlayVoiceMacro: (cb) => ipcRenderer.on('play-voice-macro', (_e, idx) => cb(idx)),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   onCwEcho: (cb) => ipcRenderer.on('cw-echo', (_e, data) => cb(data)),
   onWinkeyerBusy: (cb) => ipcRenderer.on('winkeyer-busy', (_e, busy) => cb(busy)),
