@@ -16365,7 +16365,20 @@ async function startJtcatAudio() {
     // Use native sample rate and downsample properly to 12kHz for FT8 decoder.
     jtcatAudioCtx = new AudioContext();
     if (jtcatAudioCtx.state === 'suspended') {
-      await jtcatAudioCtx.resume();
+      try { await jtcatAudioCtx.resume(); } catch (e) { console.warn('[JTCAT] resume failed:', e.message); }
+    }
+    // K3SBP 2026-05-04: phone-triggered START on a cold-start desktop
+    // sometimes left the AudioContext suspended even after resume() — the
+    // page hadn't received a user gesture, and despite the
+    // 'autoplay-policy=no-user-gesture-required' switch in main.js,
+    // Chromium can still leave the context in a non-running state. When
+    // that happens, getUserMedia returns a real stream but the worklet /
+    // ScriptProcessor never fires (silent capture). Surface this loud so
+    // the user knows to click the desktop window once.
+    if (jtcatAudioCtx.state !== 'running') {
+      const warn = `[JTCAT] AudioContext state is "${jtcatAudioCtx.state}" after resume() — audio capture will be silent. Click the POTACAT desktop window once to grant audio permission, or restart POTACAT.`;
+      console.warn(warn);
+      if (window.api.jtcatLog) window.api.jtcatLog(warn);
     }
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
     jtcatAudioSource = source; // prevent GC — Chromium 134+ may collect unrooted audio nodes
@@ -16460,14 +16473,31 @@ async function startJtcatAudio() {
     // Monitor audio stream — some rigs (e.g. Yaesu FT-710) disconnect USB audio during TX
     var audioTrack = jtcatAudioStream.getAudioTracks()[0];
     if (audioTrack) {
+      // Surface the device label that getUserMedia actually grabbed — useful
+      // when the configured device fell through to the system default.
+      try {
+        var deviceLabel = audioTrack.label || '(no label)';
+        var notice = `[JTCAT] Audio capture device: ${deviceLabel}${audioTrack.muted ? ' (MUTED at start — Chromium will not deliver samples)' : ''}`;
+        console.log(notice);
+        if (window.api.jtcatLog) window.api.jtcatLog(notice);
+      } catch {}
       audioTrack.addEventListener('ended', function() {
         console.warn('[JTCAT] Audio track ended (device disconnected?) — restarting capture in 2s');
+        if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio track ended (device disconnected?) — restarting capture in 2s');
         setTimeout(function() {
           if (jtcatRunning || jtcatRemoteActive) {
             stopJtcatAudio();
             startJtcatAudio();
           }
         }, 2000);
+      });
+      audioTrack.addEventListener('mute', function() {
+        var w = '[JTCAT] Audio track muted by the OS — silent capture until unmuted';
+        console.warn(w);
+        if (window.api.jtcatLog) window.api.jtcatLog(w);
+      });
+      audioTrack.addEventListener('unmute', function() {
+        if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio track unmuted');
       });
     }
 
