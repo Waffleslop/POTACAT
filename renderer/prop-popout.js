@@ -438,6 +438,67 @@
     render();
   });
 
+  // --- Status bar (RBN + PSKR connection state) ---
+  var rbnDotEl = document.getElementById('pp-rbn-dot');
+  var rbnDetailEl = document.getElementById('pp-rbn-detail');
+  var pskrDotEl = document.getElementById('pp-pskr-dot');
+  var pskrDetailEl = document.getElementById('pp-pskr-detail');
+  var callsignWarnEl = document.getElementById('pp-callsign-warn');
+  var lastPropStatus = null;
+
+  function fmtCountdown(targetMs) {
+    if (!targetMs) return '';
+    var secs = Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
+    if (secs >= 60) {
+      var m = Math.floor(secs / 60);
+      var s = secs % 60;
+      return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    return secs + 's';
+  }
+
+  function renderPropStatus() {
+    var st = lastPropStatus;
+    if (!st) return;
+
+    var hasCall = !!st.myCallsign;
+    callsignWarnEl.style.display = hasCall ? 'none' : '';
+
+    // RBN
+    if (!hasCall) {
+      rbnDotEl.className = 'pp-status-dot idle';
+      rbnDetailEl.textContent = 'no callsign';
+    } else if (st.rbn.connected) {
+      rbnDotEl.className = 'pp-status-dot connected';
+      rbnDetailEl.textContent = st.rbn.spotCount + ' spots cached for ' + st.myCallsign;
+    } else {
+      rbnDotEl.className = 'pp-status-dot disconnected';
+      rbnDetailEl.textContent = 'reconnecting…';
+    }
+
+    // PSKReporter
+    if (!hasCall) {
+      pskrDotEl.className = 'pp-status-dot idle';
+      pskrDetailEl.textContent = 'no callsign';
+    } else if (st.pskr.connected) {
+      pskrDotEl.className = 'pp-status-dot connected';
+      var nextStr = st.pskr.nextPollAt ? ' · next poll ' + fmtCountdown(st.pskr.nextPollAt) : '';
+      pskrDetailEl.textContent = st.pskr.spotCount + ' spots' + nextStr;
+    } else {
+      pskrDotEl.className = 'pp-status-dot disconnected';
+      pskrDetailEl.textContent = 'polling…';
+    }
+  }
+
+  window.api.onPropStatus(function(data) {
+    lastPropStatus = data;
+    renderPropStatus();
+  });
+
+  // Re-render countdown every second so the "next poll in 4:32" ticks down
+  // smoothly without needing main.js to push a status event every second.
+  setInterval(renderPropStatus, 1000);
+
   // --- Splitter ---
   var splitter = document.getElementById('pp-splitter');
   splitter.addEventListener('mousedown', function(e) {

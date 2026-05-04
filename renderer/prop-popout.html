@@ -17,6 +17,14 @@
     .pp-header button { padding: 2px 8px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); border-radius: 3px; font-size: 11px; cursor: pointer; }
     .pp-header button:hover { background: var(--bg-hover); }
     .pp-spot-count { font-family: monospace; color: var(--text-dim); }
+    .pp-status-bar { display: flex; align-items: center; gap: 14px; padding: 3px 10px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 11px; color: var(--text-dim); flex-wrap: wrap; }
+    .pp-status-item { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .pp-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #777; flex-shrink: 0; }
+    .pp-status-dot.connected { background: #4ecca3; box-shadow: 0 0 4px #4ecca3; }
+    .pp-status-dot.disconnected { background: #e94560; }
+    .pp-status-dot.idle { background: #777; }
+    .pp-status-label { font-weight: 600; color: var(--text-secondary); }
+    .pp-status-detail { font-family: monospace; }
     .pp-legend { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
     .pp-legend-item { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-dim); }
     .pp-legend-swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
@@ -53,6 +61,22 @@
       <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
       <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
       <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+
+  <div class="pp-status-bar" id="pp-status-bar">
+    <div class="pp-status-item">
+      <span class="pp-status-dot idle" id="pp-rbn-dot"></span>
+      <span class="pp-status-label" style="color:#4fc3f7">RBN</span>
+      <span class="pp-status-detail" id="pp-rbn-detail">starting…</span>
+    </div>
+    <div class="pp-status-item">
+      <span class="pp-status-dot idle" id="pp-pskr-dot"></span>
+      <span class="pp-status-label" style="color:#ff6b6b">PSKReporter</span>
+      <span class="pp-status-detail" id="pp-pskr-detail">starting…</span>
+    </div>
+    <div class="pp-status-item" id="pp-callsign-warn" style="display:none; color:#e94560;">
+      Set your callsign in Settings to receive propagation reports.
     </div>
   </div>
 

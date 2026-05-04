@@ -1516,11 +1516,32 @@ function getCallAreaCoords(callsign, entityName) {
 // --- Reverse Beacon Network ---
 function sendRbnStatus(s) {
   if (win && !win.isDestroyed()) win.webContents.send('rbn-status', s);
+  sendPropStatus();
 }
 
 function sendRbnSpots() {
   if (win && !win.isDestroyed()) win.webContents.send('rbn-spots', rbnSpots);
   if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.webContents.send('rbn-spots', rbnSpots);
+  sendPropStatus();
+}
+
+// Single status payload for the Propagation popout — combines RBN and
+// PSKReporter Map state so the popout can render a "RBN ● connected · PSKR
+// next poll 4:32" header without piecing it together from multiple events.
+function sendPropStatus() {
+  if (!propPopoutWin || propPopoutWin.isDestroyed()) return;
+  propPopoutWin.webContents.send('prop-status', {
+    myCallsign: settings.myCallsign || '',
+    rbn: {
+      connected: !!(rbn && rbn.connected),
+      spotCount: rbnSpots.length,
+    },
+    pskr: {
+      connected: !!(pskrMap && pskrMap.connected),
+      spotCount: pskrMapSpots.length,
+      nextPollAt: pskrMap ? pskrMap.nextPollAt : null,
+    },
+  });
 }
 
 function connectRbn() {
@@ -1531,8 +1552,13 @@ function connectRbn() {
   }
   rbnSpots = [];
 
-  const wantRbn = settings.enableRbn === true || panadapterWantsSource('rbn');
-  if (!wantRbn || !settings.myCallsign) {
+  // Auto-connect whenever a callsign is configured. RBN is the source of
+  // truth for "where am I being heard" — gating it on a separate enableRbn
+  // toggle meant a user who never flipped that toggle saw nothing in the
+  // Propagation popout. K3SBP 2026-05-04: collect propagation passively
+  // regardless of the popout being open. ~1–15 KB/s + light regex parse,
+  // well below "major consumer".
+  if (!settings.myCallsign) {
     sendRbnStatus({ connected: false });
     return;
   }
@@ -1912,11 +1938,13 @@ function disconnectFreedvReporter() {
 // --- PSKReporter Map view ---
 function sendPskrMapStatus(s) {
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-status', s);
+  sendPropStatus();
 }
 
 function sendPskrMapSpots() {
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-spots', pskrMapSpots);
   if (propPopoutWin && !propPopoutWin.isDestroyed()) propPopoutWin.webContents.send('pskr-map-spots', pskrMapSpots);
+  sendPropStatus();
 }
 
 function connectPskrMap() {
@@ -1927,7 +1955,8 @@ function connectPskrMap() {
   }
   pskrMapSpots = [];
 
-  if (!settings.enablePskrMap || !settings.myCallsign) {
+  // Auto-connect whenever a callsign is configured. See connectRbn() rationale.
+  if (!settings.myCallsign) {
     sendPskrMapStatus({ connected: false });
     return;
   }
@@ -9557,7 +9586,10 @@ app.whenReady().then(() => {
   if (!settings.enableWsjtx) connectCat();
   if (settings.enableCluster) connectCluster();
   if (settings.enableCwSpots) connectCwSpots();
-  if (settings.enableRbn) connectRbn();
+  // RBN auto-connects when myCallsign is set — passively collected so the
+  // Propagation popout always has data, regardless of whether enableRbn was
+  // ever flipped on by the user.
+  if (settings.myCallsign) connectRbn();
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
   connectAntennaGenius();
@@ -9568,7 +9600,9 @@ app.whenReady().then(() => {
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr || settings.enableFreedv) connectPskr();
   if (settings.enableFreedv) connectFreedvReporter();
-  if (settings.enablePskrMap) connectPskrMap();
+  // PSKReporter Map (5-min poll for "where am I being heard on FT8/digital")
+  // — auto-connects with myCallsign for the same reason as RBN.
+  if (settings.myCallsign) connectPskrMap();
   if (settings.sendToLogbook && (settings.logbookType === 'hamrs' || settings.logbookType === 'logger32')) {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
   }
@@ -9880,6 +9914,7 @@ app.whenReady().then(() => {
       // Send current data to pop-out
       if (rbnSpots.length > 0) propPopoutWin.webContents.send('rbn-spots', rbnSpots);
       if (pskrMapSpots.length > 0) propPopoutWin.webContents.send('pskr-map-spots', pskrMapSpots);
+      sendPropStatus();
     });
 
     propPopoutWin.webContents.on('before-input-event', (_e, input) => {
@@ -12333,9 +12368,10 @@ app.whenReady().then(() => {
       if (settings.enableCwSpots) connectCwSpots(); else disconnectCwSpots();
     }
 
-    // Reconnect RBN if settings changed
+    // Reconnect RBN if settings changed. RBN auto-runs whenever myCallsign
+    // is set; connectRbn() returns early if it isn't.
     if (rbnChanged) {
-      if (settings.enableRbn) {
+      if (settings.myCallsign) {
         connectRbn();
       } else {
         disconnectRbn();
@@ -12426,9 +12462,10 @@ app.whenReady().then(() => {
       }
     }
 
-    // Reconnect PSKReporter Map if settings changed
+    // Reconnect PSKReporter Map if settings changed. Like RBN, this auto-runs
+    // whenever myCallsign is set; connectPskrMap() returns early if it isn't.
     if (pskrMapChanged) {
-      if (settings.enablePskrMap) {
+      if (settings.myCallsign) {
         connectPskrMap();
       } else {
         disconnectPskrMap();
