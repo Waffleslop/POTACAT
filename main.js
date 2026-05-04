@@ -3003,6 +3003,11 @@ function startJtcat(mode) {
     console.error('[JTCAT] Engine error:', msg);
   });
 
+  // Surface engine-level info (which decoder is in use, etc.) in the
+  // Verbose CAT log so the user can verify ft8_lib (native) is loaded
+  // without opening DevTools / Node console.
+  ft8Engine.on('log', (line) => sendCatLog('[JTCAT] ' + line));
+
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
     if (data.results) {
