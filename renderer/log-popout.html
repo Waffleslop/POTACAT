@@ -6,6 +6,16 @@
   <title>Log QSO</title>
   <link rel="stylesheet" href="styles.css">
   <style>
+    /* All var() references use names that ARE defined in styles.css for both
+       dark and light themes:
+         --bg-secondary / --bg-primary / --bg-input / --bg-hover
+         --border-primary / --border-secondary
+         --text-primary / --text-secondary / --text-tertiary
+         --accent-blue / --accent-green-btn / --accent-red / --source-sota
+       Earlier this file used --bg-header, --border, --text-muted, --accent-gold —
+       none defined anywhere — so the fallbacks (dark hexes) painted regardless
+       of theme and the popout looked dark in light mode. Casey 2026-05-03. */
+
     /* Frameless title bar — matches other pop-outs (vfo-popout, qso-popout) */
     .lp-titlebar {
       -webkit-app-region: drag;
@@ -14,8 +24,8 @@
       align-items: center;
       justify-content: space-between;
       padding: 6px 10px;
-      background: var(--bg-header, #16213e);
-      border-bottom: 1px solid var(--border, #333);
+      background: var(--bg-secondary, #16213e);
+      border-bottom: 1px solid var(--border-primary, #333);
       font-size: 12px;
       font-weight: 600;
       color: var(--text-primary, #e0e0e0);
@@ -27,8 +37,8 @@
     }
     .lp-titlebar button {
       background: none;
-      border: 1px solid var(--border, #333);
-      color: var(--text-muted, #888);
+      border: 1px solid var(--border-primary, #333);
+      color: var(--text-secondary, #888);
       width: 22px;
       height: 22px;
       cursor: pointer;
@@ -36,67 +46,73 @@
       line-height: 1;
       border-radius: 3px;
     }
-    .lp-titlebar button:hover { background: var(--bg-input, #0f1419); color: var(--text-primary); }
+    .lp-titlebar button:hover { background: var(--bg-hover); color: var(--text-primary); }
 
     /* Body sections */
     body { background: var(--bg-primary, #1a1a2e); color: var(--text-primary, #e0e0e0); margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; }
     .lp-body { padding: 10px 14px 14px; }
     .lp-row { display: flex; gap: 8px; margin-top: 6px; }
-    .lp-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-muted); }
+    .lp-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-secondary); }
     .lp-row > label > input,
-    .lp-row > label > select { margin-top: 3px; padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; }
-    .lp-row > label > input[readonly] { color: var(--text-muted); background: transparent; border-color: #333; }
+    .lp-row > label > select { margin-top: 3px; padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; }
+    .lp-row > label > input[readonly] { color: var(--text-tertiary); background: transparent; border-color: var(--border-primary); }
 
     /* Callsign + QRZ row */
     .lp-call-row { display: flex; gap: 8px; align-items: flex-end; }
-    .lp-call-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-muted); }
-    .lp-call-row > label > input { margin-top: 3px; padding: 4px 6px; font-size: 14px; font-weight: 600; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; text-transform: uppercase; }
+    .lp-call-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-secondary); }
+    .lp-call-row > label > input { margin-top: 3px; padding: 4px 6px; font-size: 14px; font-weight: 600; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; text-transform: uppercase; }
+    /* QRZ button — black text passes contrast on both themes (13:1 against
+       light-cyan dark-mode #4fc3f7, 5:1 against royal-blue light-mode #1976d2). */
     #lp-qrz-link { padding: 5px 10px; font-size: 12px; font-weight: 600; background: var(--accent-blue, #4fc3f7); color: #000; border: none; border-radius: 3px; cursor: pointer; opacity: 0.5; pointer-events: none; transition: opacity 0.15s; }
     #lp-qrz-link.active { opacity: 1; pointer-events: auto; }
-    #lp-qrz-link:hover.active { background: #80d8ff; }
+    #lp-qrz-link:hover.active { filter: brightness(1.1); }
 
     /* Identity row (Name · Country/State) */
     #lp-identity { font-size: 12px; color: var(--accent-green, #4ecca3); min-height: 16px; margin-top: 4px; padding-left: 2px; }
-    #lp-identity .lp-loc { color: var(--text-muted); margin-left: 4px; }
+    #lp-identity .lp-loc { color: var(--text-secondary); margin-left: 4px; }
 
     /* Type chips */
     .lp-chips { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
-    .lp-chip { padding: 4px 12px; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-muted); font-size: 12px; border-radius: 14px; cursor: pointer; }
-    .lp-chip:hover { background: #16213e; color: var(--text-primary); }
+    .lp-chip { padding: 4px 12px; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-secondary); font-size: 12px; border-radius: 14px; cursor: pointer; }
+    .lp-chip:hover { background: var(--bg-hover); color: var(--text-primary); }
     .lp-chip.active { background: var(--accent-red, #e94560); color: #fff; border-color: var(--accent-red); }
 
     .lp-ref-section { margin-top: 6px; }
     .lp-ref-section.hidden { display: none; }
 
-    .lp-rst-input { width: 100%; padding: 4px 6px; font-size: 13px; font-variant-numeric: tabular-nums; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; }
-    .lp-notes-input { width: 100%; padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); border: 1px solid var(--border, #333); color: var(--text-primary); border-radius: 3px; box-sizing: border-box; }
+    .lp-rst-input { width: 100%; padding: 4px 6px; font-size: 13px; font-variant-numeric: tabular-nums; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; }
+    .lp-notes-input { width: 100%; padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; box-sizing: border-box; }
 
     /* Buttons */
     .lp-buttons { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
-    .lp-buttons button { padding: 6px 14px; font-size: 13px; border: 1px solid var(--border, #333); background: var(--bg-input, #0f1419); color: var(--text-primary); border-radius: 3px; cursor: pointer; }
-    .lp-buttons button:hover { background: #16213e; }
-    #lp-save { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green); font-weight: 600; }
-    #lp-save:hover { background: #6dd9b0; }
+    .lp-buttons button { padding: 6px 14px; font-size: 13px; border: 1px solid var(--border-primary, #333); background: var(--bg-input, #0f1419); color: var(--text-primary); border-radius: 3px; cursor: pointer; }
+    .lp-buttons button:hover { background: var(--bg-hover); }
+    /* Save QSO — use --accent-green-btn (the non-themed mint #4ecca3) so the
+       button looks the same on both themes and black text passes contrast. The
+       previous --accent-green is dark forest in light mode and made the button
+       unreadable. */
+    #lp-save { background: var(--accent-green-btn, #4ecca3); color: #000; border-color: var(--accent-green-btn, #4ecca3); font-weight: 600; }
+    #lp-save:hover { filter: brightness(1.1); }
     #lp-save:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* Toast (saved confirmation) */
-    #lp-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--accent-green, #4ecca3); color: #000; padding: 8px 18px; font-size: 13px; font-weight: 600; border-radius: 4px; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 100; }
+    #lp-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--accent-green-btn, #4ecca3); color: #000; padding: 8px 18px; font-size: 13px; font-weight: 600; border-radius: 4px; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 100; }
     #lp-toast.visible { opacity: 1; }
 
     /* Past QSOs panel */
-    .lp-past { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border, #333); }
+    .lp-past { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border-primary, #333); }
     .lp-past-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
     .lp-past-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-    .lp-past-title .lp-count { color: var(--text-muted); font-weight: normal; margin-left: 4px; }
+    .lp-past-title .lp-count { color: var(--text-secondary); font-weight: normal; margin-left: 4px; }
     .lp-past-link { font-size: 11px; color: var(--accent-blue, #4fc3f7); cursor: pointer; text-decoration: none; }
     .lp-past-link:hover { text-decoration: underline; }
-    .lp-past-empty { font-size: 12px; color: var(--text-muted); font-style: italic; padding: 4px 0; }
+    .lp-past-empty { font-size: 12px; color: var(--text-secondary); font-style: italic; padding: 4px 0; }
     .lp-past-table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
-    .lp-past-table td { padding: 3px 6px 3px 0; border-bottom: 1px solid #1f1f2e; color: var(--text-primary); white-space: nowrap; vertical-align: top; }
-    .lp-past-table td.lp-past-comment { white-space: normal; color: var(--text-muted); font-style: italic; }
+    .lp-past-table td { padding: 3px 6px 3px 0; border-bottom: 1px solid var(--border-secondary, #1f1f2e); color: var(--text-primary); white-space: nowrap; vertical-align: top; }
+    .lp-past-table td.lp-past-comment { white-space: normal; color: var(--text-secondary); font-style: italic; }
     .lp-past-table tr:last-child td { border-bottom: none; }
     .lp-past-table .lp-past-mode { color: var(--accent-blue); }
-    .lp-past-table .lp-past-ref { color: var(--accent-gold, #f0a500); }
+    .lp-past-table .lp-past-ref { color: var(--source-sota, #f0a500); }
   </style>
 </head>
 <body>
@@ -130,8 +146,8 @@
       <button type="button" class="lp-chip" data-type="llota">LLOTA</button>
     </div>
     <div id="lp-ref-section" class="lp-ref-section hidden">
-      <label style="font-size:11px;color:var(--text-muted);">Reference
-        <input type="text" id="lp-ref" placeholder="e.g. US-1234" autocomplete="off" spellcheck="false" style="text-transform:uppercase;width:100%;padding:4px 6px;font-size:13px;background:var(--bg-input,#0f1419);border:1px solid var(--border,#333);color:var(--text-primary);border-radius:3px;box-sizing:border-box;margin-top:3px;">
+      <label style="font-size:11px;color:var(--text-secondary);">Reference
+        <input type="text" id="lp-ref" placeholder="e.g. US-1234" autocomplete="off" spellcheck="false" style="text-transform:uppercase;width:100%;padding:4px 6px;font-size:13px;background:var(--bg-input,#0f1419);border:1px solid var(--border-primary,#333);color:var(--text-primary);border-radius:3px;box-sizing:border-box;margin-top:3px;">
       </label>
     </div>
 
@@ -179,7 +195,7 @@
     </div>
 
     <!-- Notes -->
-    <label style="display:block;margin-top:6px;font-size:11px;color:var(--text-muted);">Notes
+    <label style="display:block;margin-top:6px;font-size:11px;color:var(--text-secondary);">Notes
       <input type="text" class="lp-notes-input" id="lp-notes" placeholder="Optional" autocomplete="off" spellcheck="true" style="margin-top:3px;">
     </label>
 
