@@ -94,8 +94,21 @@
   }
 
   window.addEventListener('error', (e) => {
-    show((e.error && (e.error.stack || e.error.message)) || e.message || 'unknown',
-         (e.filename || '') + ':' + (e.lineno || '?'));
+    // Suppress Safari's "Script error." cross-origin mask. When an async
+    // error fires from a script Safari can't fully introspect (CORS-less
+    // resource, certain ITP states, transient cert-pinning hiccup) the
+    // browser reports `message="Script error."` with empty filename and
+    // empty lineno — no stack, no source, no actionable info. The
+    // banner ends up showing ":?" / "Script error." which confuses
+    // users (cssta@cmox.co 2026-05-05: iOS Safari at the login screen,
+    // Reload clears it). Drop it on the floor; the next reload runs
+    // clean. Real same-origin errors come through with a stack and
+    // useful filename so they still surface.
+    const filename = e.filename || '';
+    const msg = e.message || '';
+    if (!filename && !e.lineno && msg === 'Script error.') return;
+    show((e.error && (e.error.stack || e.error.message)) || msg || 'unknown',
+         filename + ':' + (e.lineno || '?'));
   });
   window.addEventListener('unhandledrejection', (e) => {
     const r = e.reason || {};
