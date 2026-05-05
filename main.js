@@ -724,8 +724,25 @@ function sendCatFrequency(hz) {
 }
 
 function sendCatMode(mode) {
-  // While FreeDV engine is active, display "FreeDV" instead of the radio's USB/LSB
-  const displayMode = (freedvEngine && (mode === 'USB' || mode === 'LSB')) ? 'FreeDV' : mode;
+  // While FreeDV engine is active, display the codec name (FREEDV-RADEV1
+  // / FREEDV-700E / etc.) instead of the radio's actual carrier mode.
+  // The rig HAS to be in a digital sideband for FreeDV to work, but the
+  // sideband choice depends on freedvUseDataMode + freedvForceSideband:
+  //   - default freedvUseDataMode=true → DIGU/DIGL → rigctld remaps to
+  //     PKTUSB/PKTLSB on Yaesu/etc.
+  //   - freedvUseDataMode=false → plain USB/LSB
+  // The old display check only caught USB/LSB, so default-config users
+  // saw the renderer flip to "PKTUSB" right after tuning a RADE spot
+  // and assumed FreeDV had reverted. (mac OS 26 v1.5.13 user 2026-05-05.)
+  const isFreedvSideband = mode === 'USB' || mode === 'LSB' ||
+    mode === 'DIGU' || mode === 'DIGL' ||
+    mode === 'PKTUSB' || mode === 'PKTLSB' ||
+    mode === 'USB-D' || mode === 'LSB-D';
+  let displayMode = mode;
+  if (freedvEngine && isFreedvSideband) {
+    const codec = String(freedvEngine.mode || 'RADEV1').toUpperCase();
+    displayMode = 'FREEDV-' + codec;
+  }
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-mode', displayMode);
