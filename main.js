@@ -10185,6 +10185,7 @@ app.whenReady().then(() => {
   // sized for the QR + URL + countdown. The Settings dialog is too cramped
   // for a comfortable scan target. (K3SBP 2026-05-04.)
   ipcMain.on('pair-popout-open', () => {
+    sendCatLog('[Pair QR] Opening pairing popout window…');
     if (pairPopoutWin && !pairPopoutWin.isDestroyed()) {
       pairPopoutWin.focus();
       return;
@@ -12151,7 +12152,9 @@ app.whenReady().then(() => {
   // Mobile App" section. The QR is generated server-side so the
   // renderer doesn't need to pull a QR lib.
   ipcMain.handle('echocat-create-pairing-qr', async (_e, opts = {}) => {
+    sendCatLog('[Pair QR] Generating pairing token + QR…');
     if (!remoteServer || !remoteServer.running) {
+      sendCatLog('[Pair QR] FAILED — ECHOCAT server is not running. User needs to enable it in Settings → ECHOCAT.');
       return { error: 'ECHOCAT server is not running. Enable it in Settings first.' };
     }
     let qrcode;
@@ -12165,6 +12168,7 @@ app.whenReady().then(() => {
       // does. If you hit this, you almost certainly downloaded the
       // packaged .dmg/.exe — which already bundles qrcode — so the
       // safer suggestion is to use the installer.
+      sendCatLog('[Pair QR] FAILED — qrcode module missing: ' + (err.message || err));
       return { error: 'Pairing QR generator missing. If you\'re running POTACAT from source, run exactly: npm install (no other arguments) in the POTACAT directory. If you installed via .dmg / .exe / .AppImage, this should never happen — please file a bug report.' };
     }
     let pairingToken;
@@ -12172,9 +12176,11 @@ app.whenReady().then(() => {
       pairingToken = remoteServer.createPairingToken({ deviceLabel: opts.deviceLabel || '' });
     } catch (err) {
       console.error('[Echo CAT] createPairingToken failed:', err.message);
+      sendCatLog('[Pair QR] FAILED — createPairingToken threw: ' + (err.message || err));
       return { error: 'Could not mint a pairing token: ' + (err.message || 'unknown error') + '. Try restarting POTACAT.' };
     }
     if (!pairingToken) {
+      sendCatLog('[Pair QR] FAILED — createPairingToken returned empty.');
       return { error: 'Pairing token came back empty. ECHOCAT may not be fully started yet — wait a moment and tap Regenerate.' };
     }
     let fingerprint = '';
@@ -12223,14 +12229,17 @@ app.whenReady().then(() => {
       svg = await qrcode.toString(qrText, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
     } catch (err) {
       console.error('[Echo CAT] QR SVG generation failed:', err.message);
+      sendCatLog('[Pair QR] SVG render failed: ' + err.message);
       qrError = err.message;
     }
     try {
       dataUrl = await qrcode.toDataURL(qrText, { errorCorrectionLevel: 'M', width: 320, margin: 2 });
     } catch (err) {
       console.error('[Echo CAT] QR PNG generation failed:', err.message);
+      sendCatLog('[Pair QR] PNG render failed: ' + err.message);
       if (!qrError) qrError = err.message;
     }
+    sendCatLog(`[Pair QR] OK — host=${wsUrl} fp=${fingerprint ? fingerprint.slice(0, 16) + '…' : 'none'} svg=${svg ? 'yes' : 'no'} png=${dataUrl ? 'yes' : 'no'}${qrError && !(svg || dataUrl) ? ' qrError=' + qrError : ''}`);
     return {
       qrText,
       dataUrl,
