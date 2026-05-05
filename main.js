@@ -12193,14 +12193,33 @@ app.whenReady().then(() => {
     // Use the LAN IP if we can find one; fall back to localhost. The
     // mobile app uses mDNS to discover, but the QR also embeds an
     // explicit URL as a safety net for users on weird networks.
+    //
+    // Prefer RFC1918 private LAN ranges (192.168/16, 10/8, 172.16/12)
+    // over Tailscale CGNAT (100.64/10), since a phone on the home
+    // Wi-Fi can't reach a 100.x address unless it's also on the
+    // Tailnet. K0OTC 2026-05-05: his QR pinned 100.78.85.87, which
+    // works for him on Tailnet but would silently fail for a guest
+    // phone on the same LAN.
     const os = require('os');
+    function rankAddr(addr) {
+      const a = addr.split('.').map(Number);
+      // Lower rank = more preferred.
+      if (a[0] === 192 && a[1] === 168) return 0;
+      if (a[0] === 10) return 0;
+      if (a[0] === 172 && a[1] >= 16 && a[1] <= 31) return 0;
+      if (a[0] === 100 && a[1] >= 64 && a[1] <= 127) return 2; // Tailscale / CGNAT
+      if (a[0] === 169 && a[1] === 254) return 3; // link-local
+      return 1; // public / unknown
+    }
     let host = '127.0.0.1';
+    let bestRank = 99;
     try {
       for (const addrs of Object.values(os.networkInterfaces())) {
         for (const a of addrs) {
-          if (a.family === 'IPv4' && !a.internal) { host = a.address; break; }
+          if (a.family !== 'IPv4' || a.internal) continue;
+          const r = rankAddr(a.address);
+          if (r < bestRank) { bestRank = r; host = a.address; }
         }
-        if (host !== '127.0.0.1') break;
       }
     } catch {}
     const port = remoteServer._port || 7300;

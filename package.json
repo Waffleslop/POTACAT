@@ -1,6 +1,6 @@
 {
   "name": "potacat",
-  "version": "1.5.14",
+  "version": "1.5.15",
   "description": "Amateur radio spot aggregator with CAT control, QSO logging, and panadapter integration",
   "author": {
     "name": "Casey Stanton",
@@ -48,6 +48,9 @@
       "preload-remote-audio.js",
       "preload-sstv-popout.js",
       "preload-bandspread-popout.js",
+      "preload-pair-popout.js",
+      "preload-prop-popout.js",
+      "preload-log-popout.js",
       "lib/**/*",
       "renderer/**/*",
       "assets/icon.png",

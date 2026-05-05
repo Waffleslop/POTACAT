@@ -7,6 +7,29 @@
 (function() {
   'use strict';
 
+  // Defensive: if the preload script failed to load (e.g. omitted from
+  // the .asar bundle as in v1.5.14), window.api is undefined and every
+  // subsequent line silently crashes. Show a visible error instead so
+  // packaging regressions don't look like "QR is just broken".
+  // (DavidWest 2026-05-05 hit this — preload-pair-popout.js was missing
+  // from the v1.5.14 installer's app.asar. Fixed in package.json files
+  // list, but this guard stays so the next missing preload is loud.)
+  if (!window.api) {
+    var errBanner = document.getElementById('pp-error');
+    if (errBanner) {
+      errBanner.style.display = '';
+      errBanner.innerHTML = '';
+      var m = document.createElement('div');
+      m.textContent = 'Pairing window failed to initialize (preload script not loaded).';
+      errBanner.appendChild(m);
+      var h = document.createElement('div');
+      h.className = 'pp-error-hint';
+      h.textContent = 'This is a packaging bug — please update to the latest POTACAT release. If you\'re already on the latest, file a bug report at github.com/Waffleslop/POTACAT/issues with your version.';
+      errBanner.appendChild(h);
+    }
+    return;
+  }
+
   if (window.api.platform === 'darwin') {
     var ctrls = document.querySelector('.titlebar-controls');
     if (ctrls) ctrls.style.display = 'none';
