@@ -1714,6 +1714,7 @@
       // PKTUSB on upper) hides the PTT button on phones. (G7-Chris report.)
       const isVoice = (mUp === 'SSB' || mUp === 'USB' || mUp === 'LSB' ||
                        mUp === 'FM' || mUp === 'AM' ||
+                       mUp === 'AMN' || mUp === 'FMN' ||
                        mUp === 'PKTUSB' || mUp === 'PKTLSB' ||
                        mUp === 'DIGU' || mUp === 'DIGL' ||
                        mUp === 'USB-D' || mUp === 'LSB-D' ||
