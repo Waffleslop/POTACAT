@@ -17832,14 +17832,20 @@ async function playJtcatTxAudio(data) {
       console.log('[JTCAT] TX audio playback complete');
     }
     source.onended = finishTx;
-    // Skip into the audio buffer for late-start TX so we stay within the cycle
-    var offsetSec = offsetMs / 1000;
-    var durationSec = buffer.duration - offsetSec;
-    if (durationSec > 0) {
-      source.start(0, offsetSec, durationSec);
-    } else {
-      source.start(0, offsetSec);
-    }
+    // Pad with leading silence so the FT8 envelope starts at slot+500ms,
+    // regardless of whether we fired at slot+0 (boundary TX) or slot+365ms
+    // (an Immediate TX after a late phone click). The previous "skip into
+    // the buffer by offsetSec" approach lost the leading Costas sync
+    // tones, which receivers need to acquire timing — K3SBP 2026-05-05:
+    // K8LDX never replied to a 365ms-late Immediate TX because the first
+    // 365ms of symbols (containing the start-of-message Costas array)
+    // were missing. Padding instead keeps the envelope intact and gives
+    // the rig PTT relay time to fully settle before audio starts.
+    var SLOT_AUDIO_START_MS = 500; // WSJT-X convention
+    var leadingDelaySec = Math.max(0, (SLOT_AUDIO_START_MS - offsetMs) / 1000);
+    var startTime = jtcatTxAudioCtx.currentTime + leadingDelaySec;
+    source.start(startTime, 0, buffer.duration);
+    var totalPlaySec = leadingDelaySec + buffer.duration;
     // Fire tx-complete based on the AudioContext clock + small grace,
     // not onended. On Web Audio sinks with deep output buffers (WebRTC-
     // routed devices, USB CODECs with large jitter buffers) onended can
@@ -17847,16 +17853,15 @@ async function playJtcatTxAudio(data) {
     // PTT-on time bleeds carrier into the next slot — observed by the
     // mobile dev as a missed responder reply when the rig's TX→RX
     // changeover transient stranded the decoder's Costas sync (K3SBP
-    // 2026-05-04, FT8 to WV4F: PTT held :30.000→:44.855 for a 12.64s
-    // envelope, decoder caught 5 spots that cycle but not WV4F's reply).
+    // 2026-05-04, FT8 to WV4F).
     // 150 ms grace lets the rig push the last FT8 symbols out before
     // PTT releases — short enough that the next slot's RX gets a clean
     // start. onended remains as a fast-path if it fires earlier.
     var GRACE_MS = 150;
     setTimeout(function() {
       if (!txDone) finishTx();
-    }, durationSec * 1000 + GRACE_MS);
-    console.log('[JTCAT] TX audio playing, samples=' + samples.length + ', bufDur=' + buffer.duration.toFixed(2) + 's, offset=' + offsetSec.toFixed(1) + 's, dur=' + durationSec.toFixed(1) + 's, device:', outputDeviceId || 'default');
+    }, totalPlaySec * 1000 + GRACE_MS);
+    console.log('[JTCAT] TX audio playing, samples=' + samples.length + ', bufDur=' + buffer.duration.toFixed(2) + 's, offsetMs=' + offsetMs + ' leadingDelay=' + leadingDelaySec.toFixed(3) + 's totalPlay=' + totalPlaySec.toFixed(2) + 's, device:', outputDeviceId || 'default');
   } catch (err) {
     jtcatTxPlaying = false;
     window.api.jtcatTxComplete();
