@@ -12157,7 +12157,15 @@ app.whenReady().then(() => {
     let qrcode;
     try { qrcode = require('qrcode'); }
     catch (err) {
-      return { error: 'qrcode module not installed. Run npm install in the POTACAT repo.' };
+      // Wording matters here — earlier copy ("Run npm install in the
+      // POTACAT repo") led at least one user (Mallory 2026-05-05) to
+      // type literal extra arguments ("npm install qrcode module"),
+      // which on a too-old Node downgraded a bunch of dependencies and
+      // bricked the install. Spell out the exact command and what it
+      // does. If you hit this, you almost certainly downloaded the
+      // packaged .dmg/.exe — which already bundles qrcode — so the
+      // safer suggestion is to use the installer.
+      return { error: 'Pairing QR generator missing. If you\'re running POTACAT from source, run exactly: npm install (no other arguments) in the POTACAT directory. If you installed via .dmg / .exe / .AppImage, this should never happen — please file a bug report.' };
     }
     const pairingToken = remoteServer.createPairingToken({ deviceLabel: opts.deviceLabel || '' });
     let fingerprint = '';
