@@ -37,8 +37,21 @@
   const pastBodyEl = document.getElementById('lp-past-body');
   const pastViewAllEl = document.getElementById('lp-past-view-all');
   const toastEl = document.getElementById('lp-toast');
+  const respotSectionEl = document.getElementById('lp-respot-section');
+  const respotCheckEl = document.getElementById('lp-respot');
+  const respotCommentEl = document.getElementById('lp-respot-comment');
+
+  // Per-type respot endpoint availability — mirrors qso-popout.js's
+  // NEW_QSO_TYPE_META so behavior is consistent across all logging paths.
+  // SOTA / Tiles / DX (without active cluster) have no public spot-submit
+  // path so we hide the toggle for them.
+  const RESPOT_ELIGIBLE = { pota: true, wwff: true, llota: true };
 
   let selectedType = 'dx';
+  let respotDefaultPref = true; // hydrated from settings on init
+  let respotTemplatePref = '{rst} in {QTH} 73s {mycallsign} via POTACAT';
+  let myCallsignPref = ''; // for {mycallsign} substitution in respot comment
+  let myGridPref = '';     // for {QTH} substitution
   let lastQrzInfo = null;
   let lastLookupCall = '';
   let lookupTimer = null;
@@ -216,6 +229,15 @@
     chipsEl.forEach((c) => c.classList.toggle('active', c.dataset.type === type));
     refSection.classList.toggle('hidden', type === 'dx');
     if (type === 'dx') refInput.value = '';
+    // Show the respot toggle only for types with a public spot-submit
+    // endpoint. Default-checked state is the user's persisted preference,
+    // not always true — if they unchecked last time, stay unchecked.
+    const eligible = !!RESPOT_ELIGIBLE[type];
+    respotSectionEl.classList.toggle('hidden', !eligible);
+    if (eligible) {
+      respotCheckEl.checked = !!respotDefaultPref;
+      if (!respotCommentEl.value) respotCommentEl.value = respotTemplatePref;
+    }
   }
 
   /** Live-clock the date/time fields until the user edits them. */
@@ -314,6 +336,22 @@
       else if (selectedType === 'sota') sotaRef = ref;
       else if (selectedType === 'wwff') wwffRef = ref;
     }
+    // Re-spot: pick up the checkbox + comment when the chip's a respottable
+    // type. Mirrors the spot-row Log dialog flag-set so saveQsoRecord on
+    // main runs the same postPotaRespot / wwff / llota paths.
+    let respotFields = {};
+    const wantsRespot = !!respotCheckEl.checked && !!RESPOT_ELIGIBLE[selectedType] && !!ref;
+    if (wantsRespot) {
+      const tmpl = respotCommentEl.value.trim() || respotTemplatePref;
+      const respotComment = tmpl
+        .replace(/\{rst\}/gi, (rstSentInput.value || '59').slice(0, 3))
+        .replace(/\{QTH\}/gi, myGridPref)
+        .replace(/\{mycallsign\}/gi, myCallsignPref)
+        .replace(/\{op_firstname\}/gi, '');
+      if (selectedType === 'pota') respotFields = { respot: true, respotComment };
+      else if (selectedType === 'wwff') respotFields = { wwffRespot: true, wwffReference: ref, respotComment };
+      else if (selectedType === 'llota') respotFields = { llotaRespot: true, llotaReference: ref, respotComment };
+    }
     const info = lastQrzInfo;
     const data = {
       callsign: callsignRaw,
@@ -341,6 +379,10 @@
       ...(activationCtx && activationCtx.mySig
         ? { mySig: activationCtx.mySig, mySigInfo: activationCtx.mySigInfo }
         : {}),
+      // Re-spot fields (only when chip is POTA/WWFF/LLOTA and checkbox
+      // is checked). saveQsoRecord on main reads these and triggers the
+      // appropriate postPotaRespot / postWwffRespot / postLlotaRespot.
+      ...respotFields,
     };
     return { data };
   }
@@ -489,8 +531,36 @@
       if (settings && settings.defaultPower != null && powerInput.value === '') {
         powerInput.value = String(settings.defaultPower);
       }
+      // Re-spot prefs hydrated from the same settings keys the spot-row
+      // Log dialog and Bottom Banner Logger use, so all three desktop
+      // logging paths agree on default state and comment template.
+      if (settings) {
+        respotDefaultPref = settings.respotDefault !== false; // default true
+        if (settings.respotTemplate) respotTemplatePref = settings.respotTemplate;
+        myCallsignPref = (settings.myCallsign || '').toUpperCase();
+        myGridPref = (settings.grid || '').toUpperCase();
+      }
+      // Apply hydrated defaults to the (currently DX-by-default) chip.
+      // selectChip() runs before this resolves, so push the values now.
+      respotCheckEl.checked = respotDefaultPref;
+      respotCommentEl.value = respotTemplatePref;
     } catch {}
   })();
+
+  // Persist the user's checkbox + comment edits back to settings so
+  // future log popouts (and the spot-row Log dialog / BL) start with
+  // the same state. Ditto for the comment template.
+  respotCheckEl.addEventListener('change', () => {
+    respotDefaultPref = !!respotCheckEl.checked;
+    try { window.api.saveSettings({ respotDefault: respotDefaultPref }); } catch {}
+  });
+  respotCommentEl.addEventListener('change', () => {
+    const v = respotCommentEl.value.trim();
+    if (v) {
+      respotTemplatePref = v;
+      try { window.api.saveSettings({ respotTemplate: v }); } catch {}
+    }
+  });
 
   selectChip('dx');
   startClock();

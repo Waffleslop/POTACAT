@@ -37,6 +37,7 @@ const apiSurface = {
 
   // --- Settings ---
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
 
   // --- QSO save (reuses the same handler as the main window) ---
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),

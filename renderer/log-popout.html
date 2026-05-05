@@ -151,6 +151,18 @@
       </label>
     </div>
 
+    <!-- Re-spot section — visible only for types with a respot endpoint
+         (POTA / WWFF / LLOTA). Default checked (mirrors the spot-row Log
+         dialog and BL); user can uncheck for one-off logs that shouldn't
+         spam the network. Comment template persists between logs. -->
+    <div id="lp-respot-section" class="hidden" style="margin-top:6px;border-top:1px solid var(--border-primary,#333);padding-top:6px;">
+      <label class="lp-respot-label" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
+        <input type="checkbox" id="lp-respot" checked>
+        Re-spot the activator on the network
+      </label>
+      <input type="text" id="lp-respot-comment" placeholder="Comment for the spot" style="width:100%;padding:4px 6px;font-size:12px;background:var(--bg-input,#0f1419);border:1px solid var(--border-primary,#333);color:var(--text-primary);border-radius:3px;box-sizing:border-box;margin-top:4px;">
+    </div>
+
     <!-- Frequency / mode -->
     <div class="lp-row">
       <label>Frequency (kHz)
