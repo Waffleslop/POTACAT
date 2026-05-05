@@ -9,12 +9,29 @@
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     body { display: flex; flex-direction: column; }
 
-    .pp-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 16px; gap: 12px; overflow-y: auto; }
+    .pp-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 16px; gap: 14px; overflow-y: auto; }
     .pp-instruction { text-align: center; font-size: 13px; color: var(--text-secondary); max-width: 460px; line-height: 1.4; }
+
+    /* Manual-pairing fields — at the top so they're never hidden by a
+       broken QR. KD2TJU on Linux Mint 22.3 saw the QR card render broken
+       and the URL was inside the card, so he had no path forward. Now the
+       values live here, always visible. */
+    .pp-manual { width: 100%; max-width: 480px; border: 1px solid var(--border-primary); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--bg-secondary); }
+    .pp-manual h3 { margin: 0; font-size: 13px; color: var(--text-primary); }
+    .pp-manual-help { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+    .pp-manual-row { display: flex; flex-direction: column; gap: 4px; }
+    .pp-manual-row label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .pp-manual-row .pp-manual-value { display: flex; gap: 6px; }
+    .pp-manual-row input { flex: 1; font-family: monospace; font-size: 11px; padding: 4px 6px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; word-break: break-all; min-width: 0; }
+    .pp-manual-row button { padding: 4px 10px; font-size: 11px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); border-radius: 3px; cursor: pointer; flex-shrink: 0; }
+    .pp-manual-row button:hover { background: var(--bg-hover); }
+
+    /* QR convenience block — below the manual fields. Best-effort render;
+       broken QRs no longer block pairing because the manual fields are
+       always available above. */
     .pp-qr-card { background: #fff; padding: 16px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-    .pp-qr-img { display: block; width: 360px; height: 360px; }
+    .pp-qr-img { display: block; width: 320px; height: 320px; }
     #pp-qr-svg svg { width: 100%; height: 100%; display: block; }
-    .pp-qr-text { font-family: monospace; font-size: 10px; color: #222; word-break: break-all; max-width: 360px; text-align: center; }
     .pp-ttl { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
     .pp-ttl.expired { color: #e94560; font-weight: 600; }
 
@@ -23,20 +40,8 @@
     .pp-actions button:hover { background: var(--bg-hover); }
     .pp-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .pp-error { color: #e94560; font-size: 13px; text-align: center; }
-
-    /* Manual-pairing fields — for when scanning the QR isn't an option
-       (Linux Electron QR rendering hiccup, phone camera busy, etc.).
-       Each field is selectable and has its own Copy button. */
-    .pp-manual { width: 100%; max-width: 460px; border: 1px solid var(--border-primary); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--bg-secondary); }
-    .pp-manual h3 { margin: 0; font-size: 13px; color: var(--text-primary); }
-    .pp-manual-row { display: flex; flex-direction: column; gap: 4px; }
-    .pp-manual-row label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
-    .pp-manual-row .pp-manual-value { display: flex; gap: 6px; }
-    .pp-manual-row input { flex: 1; font-family: monospace; font-size: 11px; padding: 4px 6px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; word-break: break-all; }
-    .pp-manual-row button { padding: 4px 10px; font-size: 11px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); border-radius: 3px; cursor: pointer; flex-shrink: 0; }
-    .pp-manual-row button:hover { background: var(--bg-hover); }
-    .pp-manual-help { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+    .pp-error { color: #e94560; font-size: 12px; text-align: center; max-width: 460px; }
+    .pp-qr-fallback-note { font-size: 11px; color: var(--text-dim); text-align: center; max-width: 320px; }
   </style>
 </head>
 <body>
@@ -51,21 +56,20 @@
 
   <div class="pp-body">
     <div class="pp-instruction">
-      Scan this QR from the POTACAT mobile app to pair without typing IP / token. The token is single-use and expires in 5 minutes.
+      Open the POTACAT mobile app and either scan the QR below, or paste any of these values into the manual-pair screen. The token is single-use and expires in 5 minutes.
     </div>
-    <div class="pp-qr-card" id="pp-qr-card">
-      <div id="pp-qr-svg" class="pp-qr-img" style="display:none;"></div>
-      <img id="pp-qr-img" class="pp-qr-img" alt="POTACAT pairing QR">
-      <div id="pp-qr-text" class="pp-qr-text"></div>
-      <div id="pp-qr-ttl" class="pp-ttl"></div>
-    </div>
-    <div id="pp-error" class="pp-error" style="display:none;"></div>
 
     <div class="pp-manual">
-      <h3>Pair manually (no QR)</h3>
+      <h3>Pair manually (or via the QR below)</h3>
       <div class="pp-manual-help">
-        If the QR won't scan or render, type these into the mobile app's manual-pair screen.
-        Each value is also tap-to-copy.
+        The full pairing URL contains everything the app needs. If you'd rather type the fields one at a time, those are listed too.
+      </div>
+      <div class="pp-manual-row">
+        <label for="pp-manual-url">Full pairing URL <span style="color:var(--accent-blue);">(easiest — paste this)</span></label>
+        <div class="pp-manual-value">
+          <input type="text" id="pp-manual-url" readonly>
+          <button type="button" data-copy="pp-manual-url">Copy</button>
+        </div>
       </div>
       <div class="pp-manual-row">
         <label for="pp-manual-host">Host</label>
@@ -88,12 +92,16 @@
           <button type="button" data-copy="pp-manual-fp">Copy</button>
         </div>
       </div>
-      <div class="pp-manual-row">
-        <label for="pp-manual-url">Full pairing URL</label>
-        <div class="pp-manual-value">
-          <input type="text" id="pp-manual-url" readonly>
-          <button type="button" data-copy="pp-manual-url">Copy</button>
-        </div>
+      <div id="pp-ttl" class="pp-ttl"></div>
+    </div>
+
+    <div id="pp-error" class="pp-error" style="display:none;"></div>
+
+    <div class="pp-qr-card" id="pp-qr-card">
+      <div id="pp-qr-svg" class="pp-qr-img" style="display:none;"></div>
+      <img id="pp-qr-img" class="pp-qr-img" alt="POTACAT pairing QR">
+      <div class="pp-qr-fallback-note" id="pp-qr-fallback-note" style="display:none;">
+        QR image didn't render on this build — use the fields above to pair manually.
       </div>
     </div>
 

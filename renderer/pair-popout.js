@@ -1,6 +1,9 @@
 // Pair Mobile App popout — generates a fresh pairing QR via IPC and shows it
-// at a comfortable scanning size. A dedicated window so the user doesn't have
-// to wrestle the Settings dialog's scrollbar to point a phone at it.
+// at a comfortable scanning size, with the same data also exposed as
+// copyable fields above the QR. The fields are the source of truth: the QR
+// is just a convenience layered on top, so a broken QR rendering doesn't
+// block pairing. (KD2TJU on Linux Mint 22.3 v1.5.14 hit this — broken-image
+// icon and no other path forward.)
 (function() {
   'use strict';
 
@@ -11,8 +14,8 @@
 
   var imgEl = document.getElementById('pp-qr-img');
   var svgEl = document.getElementById('pp-qr-svg');
-  var textEl = document.getElementById('pp-qr-text');
-  var ttlEl = document.getElementById('pp-qr-ttl');
+  var fallbackNoteEl = document.getElementById('pp-qr-fallback-note');
+  var ttlEl = document.getElementById('pp-ttl');
   var errEl = document.getElementById('pp-error');
   var cardEl = document.getElementById('pp-qr-card');
   var regenBtn = document.getElementById('pp-regen-btn');
@@ -29,22 +32,19 @@
   function showError(msg) {
     errEl.textContent = msg;
     errEl.style.display = '';
-    cardEl.style.display = 'none';
   }
-
   function hideError() {
     errEl.style.display = 'none';
-    cardEl.style.display = '';
+    errEl.textContent = '';
   }
 
-  // Hide the QR card and lean on the manual fields. Used when SVG fails to
-  // mount (rare Linux Electron + Mint 22.3 case 2026-05-05) so the user
-  // still has a clear path: copy the URL or the individual fields.
-  function showManualOnly(reason) {
+  function showFallbackNote() {
     cardEl.style.display = 'none';
-    errEl.textContent = reason ||
-      'QR rendering failed on this platform. Use the manual-pairing fields below.';
-    errEl.style.display = '';
+    fallbackNoteEl.style.display = '';
+  }
+  function hideFallbackNote() {
+    cardEl.style.display = '';
+    fallbackNoteEl.style.display = 'none';
   }
 
   async function generate() {
@@ -53,60 +53,69 @@
     regenBtn.textContent = 'Generating…';
     try {
       var r = await window.api.echocatCreatePairingQr({});
-      if (r && r.error) { showError(r.error); return; }
+      if (r && r.error) {
+        showError(r.error);
+        // Empty out manual fields so the user doesn't paste a stale value.
+        manualUrlEl.value = manualHostEl.value = manualTokenEl.value = manualFpEl.value = '';
+        return;
+      }
       hideError();
 
-      // Always populate the manual-pair fields, even when the QR renders.
-      // Users may want to share the values via text/email rather than scan.
+      // Always populate the manual-pair fields first, regardless of QR
+      // outcome. These are the source of truth.
+      manualUrlEl.value = r.qrText || '';
       manualHostEl.value = r.host || '';
       manualTokenEl.value = r.pairingToken || '';
       manualFpEl.value = r.fingerprint || '';
-      manualUrlEl.value = r.qrText || '';
 
-      // Prefer SVG: inline markup, no PNG codec, no data: URL — same
-      // result on Win/macOS/Linux. KD2TJU on Linux Mint 22.3 saw a
-      // broken-image icon because the dataUrl path produced an
-      // unreadable PNG on Chromium's image decoder for that distro.
-      // Fall back to the PNG dataUrl if for some reason SVG didn't
-      // generate (e.g., older qrcode build).
+      // Best-effort QR render. Try SVG first (no PNG codec, no data: URL),
+      // verify it actually mounted, fall through to PNG dataUrl, fall
+      // through to a "use the fields above" note. Pairing works regardless.
+      hideFallbackNote();
       var qrShown = false;
       if (r.svg) {
-        svgEl.innerHTML = r.svg;
-        svgEl.style.display = '';
-        imgEl.style.display = 'none';
-        // Verify the SVG actually mounted — in rare cases (Linux Electron
-        // Chromium quirks) inline SVG via innerHTML doesn't paint. If
-        // there's no <svg> child after we set innerHTML, fall through
-        // to the PNG path or surface a manual-only message.
-        if (svgEl.querySelector('svg')) qrShown = true;
+        try {
+          svgEl.innerHTML = r.svg;
+          if (svgEl.querySelector('svg')) {
+            svgEl.style.display = '';
+            imgEl.style.display = 'none';
+            qrShown = true;
+          }
+        } catch (svgErr) {
+          // Fall through to PNG / fallback below.
+          console.warn('[pair-popout] SVG inject failed:', svgErr.message);
+        }
       }
       if (!qrShown && r.dataUrl) {
-        // Wire onerror so a failing PNG decode also collapses to manual-only.
+        // Wire onerror so a failing PNG decode collapses to fallback note.
+        imgEl.onload = function() { /* nothing — visible by class */ };
         imgEl.onerror = function() {
           imgEl.onerror = null;
-          showManualOnly('QR image failed to render. Type the values below into your mobile app to pair manually.');
+          imgEl.onload = null;
+          showFallbackNote();
         };
         imgEl.src = r.dataUrl;
         imgEl.style.display = '';
         svgEl.style.display = 'none';
-        qrShown = true;
+        qrShown = true; // optimistic; onerror flips to fallback if it fails
       }
       if (!qrShown) {
-        showManualOnly('No QR formats generated. Type the values below into your mobile app to pair manually.');
+        showFallbackNote();
       }
 
       imgEl.style.opacity = '1';
       svgEl.style.opacity = '1';
-      textEl.textContent = r.qrText;
+
       var remaining = r.ttlSeconds || 300;
       ttlEl.classList.remove('expired');
       function tick() {
         if (remaining <= 0) {
-          ttlEl.textContent = 'Expired — click Regenerate.';
+          ttlEl.textContent = 'Token expired — click Regenerate.';
           ttlEl.classList.add('expired');
           imgEl.style.opacity = '0.3';
           svgEl.style.opacity = '0.3';
-          // Empty out manual fields too so the user doesn't paste a stale token.
+          // Clear the per-token fields so the user can't paste a stale
+          // value. Host + fingerprint stay (those don't expire).
           manualTokenEl.value = '';
           manualUrlEl.value = '';
           clearInterval(ttlInterval);
@@ -115,7 +124,7 @@
         }
         var m = Math.floor(remaining / 60);
         var s = String(remaining % 60).padStart(2, '0');
-        ttlEl.textContent = 'Expires in ' + m + ':' + s;
+        ttlEl.textContent = 'Token expires in ' + m + ':' + s;
         remaining--;
       }
       tick();
@@ -128,9 +137,8 @@
     }
   }
 
-  // Tap-to-copy buttons next to each manual field. Standard navigator.clipboard
-  // path with a hidden-textarea + execCommand fallback for older Electron
-  // builds where clipboard API isn't exposed.
+  // Tap-to-copy. Uses navigator.clipboard with a hidden-textarea fallback
+  // for older Electron builds that don't expose the modern API.
   function copyText(text, btn) {
     function done() {
       var prev = btn.textContent;
