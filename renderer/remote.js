@@ -1496,6 +1496,22 @@
             echoSettings = Object.assign(echoSettings || {}, msg.settings);
             sstvPhoneLoadSettings();
           }
+          // Re-hydrate the WebSDR / KiwiSDR station list. Without this, an
+          // auth-ok that arrived before the desktop's _remoteSettings was
+          // fully populated leaves the station selector empty for the rest
+          // of the session — only a fresh reconnect (or an unrelated
+          // settings round-trip) ever brings the list back. KO6M
+          // 2026-05-05 ("did it once and now it shows nothing").
+          if (typeof kiwiLoadStationsE === 'function' && (
+              'kiwiSdrHost1' in msg.settings ||
+              'kiwiSdrHost2' in msg.settings ||
+              'kiwiSdrHost3' in msg.settings ||
+              'kiwiSdrLabel1' in msg.settings ||
+              'kiwiSdrLabel2' in msg.settings ||
+              'kiwiSdrLabel3' in msg.settings ||
+              'kiwiSdrHost' in msg.settings)) {
+            kiwiLoadStationsE(msg.settings);
+          }
         }
         break;
 

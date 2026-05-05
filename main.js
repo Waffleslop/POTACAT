@@ -6340,6 +6340,16 @@ function connectRemote() {
     remoteServer.setClubMode(true, settings.clubCsvPath, auditLogger, settings.rigs || [], settings.activeRigId);
   }
 
+  // Populate _remoteSettings BEFORE the server starts listening so the
+  // very first phone to connect gets a full auth-ok payload. Without this,
+  // _remoteSettings starts as {} and a phone that connects before the
+  // first updateRemoteSettings() call (cluster-state push, settings save,
+  // etc.) sees an empty kiwiSdrHost1/2/3 list. KO6M 2026-05-05 saw the
+  // station list show "once and now it shows nothing" because the path
+  // that populates the list (kiwiLoadStationsE) ran on auth-ok with
+  // empty settings, and settings-update wasn't refreshing the list.
+  updateRemoteSettings();
+
   remoteServer.start(port, token, {
     requireToken: settings.clubMode ? true : requireToken, // club mode always requires auth
     pttSafetyTimeout: settings.remotePttTimeout || 180,
