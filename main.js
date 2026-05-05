@@ -13915,6 +13915,7 @@ app.whenReady().then(() => {
           rstSent: q.RST_SENT || '',
           rstRcvd: q.RST_RCVD || '',
           name: q.NAME || '',
+          state: q.STATE || '',
           sig: q.SIG || '',
           sigInfo: q.SIG_INFO || '',
           myGridsquare: q.MY_GRIDSQUARE || '',

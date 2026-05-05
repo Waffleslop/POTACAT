@@ -14408,13 +14408,31 @@ function updateActivatorCounter() {
 
 function renderActivatorLog() {
   activatorLogBody.innerHTML = '';
+  // Pre-compute the filter for the PREV badge: a call counts as "worked
+  // before" only if it has at least one QSO entry that ISN'T from this
+  // activation (today, this park ref). Without this filter, every call
+  // logged in the current session shows PREV the moment it's saved
+  // — the freshly-written QSO is already in workedQsos before we render
+  // (Casey: "every call has PREV by it. I know I've not worked every
+  // call previously.").
+  const todayUtc = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const currentRefs = activatorParkRefs.map(p => (p.ref || '').toUpperCase());
+  function isPriorWork(call) {
+    const entries = workedQsos.get(call) || [];
+    return entries.some((e) => {
+      // Skip entries from today at any of this activation's park refs.
+      const sameDay = e.date === todayUtc;
+      const sameRef = currentRefs.includes((e.ref || '').toUpperCase());
+      return !(sameDay && sameRef);
+    });
+  }
   // Newest on top
   for (let i = activatorContacts.length - 1; i >= 0; i--) {
     const c = activatorContacts[i];
     const tr = document.createElement('tr');
     tr.dataset.idx = i;
-    // Check if this callsign has been worked before (from main logbook)
-    const workedBefore = workedQsos.has(c.callsign.toUpperCase());
+    // Check if this callsign has been worked before (excluding this activation's own QSOs)
+    const workedBefore = isPriorWork(c.callsign.toUpperCase());
     const dupeFlag = workedBefore ? '<span class="act-log-dupe" title="Worked before">PREV</span>' : '';
     const p2pBadge = (c.theirParks && c.theirParks.length > 0) ? `<span class="act-log-p2p" title="P2P: ${c.theirParks.join(', ')}">P2P</span>` : '';
     tr.innerHTML = `
@@ -15330,6 +15348,12 @@ async function activatorLogContact() {
 
   // Log each callsign as a separate QSO with identical fields
   for (const callsign of callsigns) {
+    // Pull the operator name from the QRZ cache so it lands in the ADIF
+    // <NAME> field and shows in the in-memory activator log row. The top-bar
+    // display is a span (no value to read), but qrzData has the source
+    // record from when the lookup ran.
+    const qrzInfo = qrzData.get(callsign.split('/')[0].toUpperCase());
+    const opName = qrzInfo ? qrzDisplayName(qrzInfo) : '';
     const baseFields = {
       callsign,
       frequency: freqKhz ? String(freqKhz) : '',
@@ -15340,6 +15364,7 @@ async function activatorLogContact() {
       rstSent,
       rstRcvd,
       txPower: defaultPower ? String(defaultPower) : '',
+      name: opName,
       state: stateVal,
       stationCallsign: myCallsign || '',
       operator: myCallsign || '',
