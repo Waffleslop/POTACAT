@@ -3053,6 +3053,18 @@ function startJtcat(mode) {
   jtcatManager.startSlice({ sliceId: 'default', mode: mode || 'FT8' });
   ft8Engine = jtcatManager.engine; // Phase 0 alias
 
+  // Apply persisted JTCAT calibration to the freshly-started engine.
+  // jtcatAudioLatencyMs: WSJT-X-style soundcard time delay correction.
+  // jtcatHoldTxFreq: pin TX freq across QSO state machine advances.
+  if (ft8Engine) {
+    if (typeof ft8Engine.setAudioLatencyMs === 'function') {
+      ft8Engine.setAudioLatencyMs(settings.jtcatAudioLatencyMs || 0);
+    }
+    if (typeof ft8Engine.setHoldTxFreq === 'function') {
+      ft8Engine.setHoldTxFreq(!!settings.jtcatHoldTxFreq);
+    }
+  }
+
   // Remove any stale listeners from a previous startJtcat() cycle
   ft8Engine.removeAllListeners('decode');
   ft8Engine.removeAllListeners('tx-start');
@@ -4376,6 +4388,9 @@ function connectRemote() {
       const enabled = !eng || eng._autoSeq !== false;
       remoteServer.sendToClient({ type: 'jtcat-auto-seq-state', enabled });
     }
+    // Hold TX Freq state (K0OTC 2026-05-04). Persisted in settings so
+    // reconnects show the same state.
+    remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!settings.jtcatHoldTxFreq });
     // VFO Profiles — send current list so phone's profiles widget can render
     // immediately. Phone edits push back via 'vfo-profiles-update'.
     remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
@@ -5716,6 +5731,21 @@ function connectRemote() {
     sendCatLog(`[JTCAT] Auto Seq ${enabled ? 'ON' : 'OFF'} (set by ECHOCAT)`);
     if (remoteServer.hasClient()) {
       remoteServer.sendToClient({ type: 'jtcat-auto-seq-state', enabled: !!enabled });
+    }
+  });
+
+  // Phone toggle for "Hold TX Freq" — when on, the engine's setTxFreq()
+  // becomes a no-op so QSO state machine / replies don't drag the user's
+  // pinned TX freq around. RX freq still tracks responders. (K0OTC
+  // 2026-05-04 — fixed-freq park operation.) Persisted so a reconnect
+  // restores the same state.
+  remoteServer.on('jtcat-set-hold-tx-freq', ({ enabled }) => {
+    const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
+    if (eng) eng.setHoldTxFreq(!!enabled);
+    settings.jtcatHoldTxFreq = !!enabled;
+    saveSettings(settings);
+    if (remoteServer.hasClient()) {
+      remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!enabled });
     }
   });
 
@@ -13316,6 +13346,26 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-set-mode', (_e, mode) => { if (ft8Engine) ft8Engine.setMode(mode); });
   ipcMain.on('jtcat-set-tx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setTxFreq(hz); });
   ipcMain.on('jtcat-set-rx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setRxFreq(hz); });
+
+  ipcMain.on('jtcat-set-audio-latency-ms', (_e, ms) => {
+    settings.jtcatAudioLatencyMs = parseInt(ms, 10) || 0;
+    saveSettings(settings);
+    if (ft8Engine && typeof ft8Engine.setAudioLatencyMs === 'function') {
+      ft8Engine.setAudioLatencyMs(settings.jtcatAudioLatencyMs);
+    }
+    sendCatLog(`[JTCAT] Soundcard latency calibration: ${settings.jtcatAudioLatencyMs} ms`);
+  });
+
+  ipcMain.on('jtcat-set-hold-tx-freq', (_e, enabled) => {
+    settings.jtcatHoldTxFreq = !!enabled;
+    saveSettings(settings);
+    if (ft8Engine && typeof ft8Engine.setHoldTxFreq === 'function') {
+      ft8Engine.setHoldTxFreq(settings.jtcatHoldTxFreq);
+    }
+    if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+      remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: settings.jtcatHoldTxFreq });
+    }
+  });
   ipcMain.on('jtcat-enable-tx', (_e, enabled) => { if (ft8Engine) ft8Engine._txEnabled = enabled; });
   ipcMain.on('jtcat-halt-tx', () => {
     // Halt TX on ALL engines (multi-slice: any engine could be TX'ing)

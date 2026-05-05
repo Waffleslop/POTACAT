@@ -16734,6 +16734,29 @@ jtcatRxFreqInput.addEventListener('change', function() {
   jtcatRxFreqLabel.textContent = jtcatRxFreq + ' Hz';
   if (jtcatRunning) window.api.jtcatSetRxFreq(jtcatRxFreq);
 });
+
+// Hold TX Freq + soundcard latency calibration (K0OTC 2026-05-04).
+// Settings persist via main; engine values are re-applied on every JTCAT
+// start, so a flip here takes effect immediately for a running engine
+// and survives a stop/start cycle.
+const jtcatHoldTxFreqEl = document.getElementById('jtcat-hold-tx-freq');
+const jtcatAudioLatencyMsEl = document.getElementById('jtcat-audio-latency-ms');
+if (jtcatHoldTxFreqEl) {
+  jtcatHoldTxFreqEl.addEventListener('change', function() {
+    window.api.jtcatSetHoldTxFreq(jtcatHoldTxFreqEl.checked);
+  });
+}
+if (jtcatAudioLatencyMsEl) {
+  jtcatAudioLatencyMsEl.addEventListener('change', function() {
+    const ms = parseInt(jtcatAudioLatencyMsEl.value, 10) || 0;
+    window.api.jtcatSetAudioLatencyMs(ms);
+  });
+}
+// Hydrate from settings on load
+window.api.getSettings().then(function(s) {
+  if (jtcatHoldTxFreqEl) jtcatHoldTxFreqEl.checked = !!s.jtcatHoldTxFreq;
+  if (jtcatAudioLatencyMsEl) jtcatAudioLatencyMsEl.value = String(s.jtcatAudioLatencyMs || 0);
+});
 jtcatTxSlotSelect.addEventListener('change', function() {
   window.api.jtcatSetTxSlot(jtcatTxSlotSelect.value);
 });

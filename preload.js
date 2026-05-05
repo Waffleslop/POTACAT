@@ -219,6 +219,8 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetMode: (mode) => ipcRenderer.send('jtcat-set-mode', mode),
   jtcatSetTxFreq: (hz) => ipcRenderer.send('jtcat-set-tx-freq', hz),
   jtcatSetRxFreq: (hz) => ipcRenderer.send('jtcat-set-rx-freq', hz),
+  jtcatSetAudioLatencyMs: (ms) => ipcRenderer.send('jtcat-set-audio-latency-ms', ms),
+  jtcatSetHoldTxFreq: (enabled) => ipcRenderer.send('jtcat-set-hold-tx-freq', !!enabled),
   jtcatEnableTx: (enabled) => ipcRenderer.send('jtcat-enable-tx', enabled),
   jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),
   jtcatTuneToggle: () => ipcRenderer.send('jtcat-tune-toggle'),
