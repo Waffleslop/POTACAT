@@ -16746,16 +16746,39 @@ if (jtcatHoldTxFreqEl) {
     window.api.jtcatSetHoldTxFreq(jtcatHoldTxFreqEl.checked);
   });
 }
+const jtcatAudioLatencyAutoBtn = document.getElementById('jtcat-audio-latency-auto');
 if (jtcatAudioLatencyMsEl) {
   jtcatAudioLatencyMsEl.addEventListener('change', function() {
     const ms = parseInt(jtcatAudioLatencyMsEl.value, 10) || 0;
-    window.api.jtcatSetAudioLatencyMs(ms);
+    // Manual entry pins the value and disables auto-calibration.
+    window.api.jtcatSetAudioLatencyMs({ ms, auto: false });
+    jtcatAudioLatencyMsEl.classList.remove('jtcat-auto');
+  });
+}
+if (jtcatAudioLatencyAutoBtn) {
+  jtcatAudioLatencyAutoBtn.addEventListener('click', function() {
+    window.api.jtcatSetAudioLatencyMs({ ms: 0, auto: true });
+    jtcatAudioLatencyMsEl.classList.add('jtcat-auto');
+  });
+}
+// Live updates from the engine's auto-calibration loop — paint the input
+// without disturbing the manual-vs-auto flag.
+if (window.api.onJtcatAudioLatency) {
+  window.api.onJtcatAudioLatency(function(payload) {
+    if (!jtcatAudioLatencyMsEl) return;
+    if (typeof payload.ms === 'number') {
+      jtcatAudioLatencyMsEl.value = String(payload.ms);
+    }
+    if (payload.auto) jtcatAudioLatencyMsEl.classList.add('jtcat-auto');
   });
 }
 // Hydrate from settings on load
 window.api.getSettings().then(function(s) {
   if (jtcatHoldTxFreqEl) jtcatHoldTxFreqEl.checked = !!s.jtcatHoldTxFreq;
-  if (jtcatAudioLatencyMsEl) jtcatAudioLatencyMsEl.value = String(s.jtcatAudioLatencyMs || 0);
+  if (jtcatAudioLatencyMsEl) {
+    jtcatAudioLatencyMsEl.value = String(s.jtcatAudioLatencyMs || 0);
+    if (!s.jtcatAudioLatencyManual) jtcatAudioLatencyMsEl.classList.add('jtcat-auto');
+  }
 });
 jtcatTxSlotSelect.addEventListener('change', function() {
   window.api.jtcatSetTxSlot(jtcatTxSlotSelect.value);

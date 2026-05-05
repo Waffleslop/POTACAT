@@ -5909,6 +5909,9 @@ body.activator-rbn-on #rbn-view {
   border-radius: 3px;
 }
 .jtcat-tx-label span { color: var(--text-dim); font-size: 10px; }
+/* Auto-calibrating soundcard latency: muted text + dotted underline so the
+   user can see the value is being tracked rather than pinned by them. */
+.jtcat-tx-label input.jtcat-auto { color: var(--text-dim); font-style: italic; }
 
 .jtcat-btn {
   background: var(--bg-tertiary);

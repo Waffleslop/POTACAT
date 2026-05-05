@@ -3054,15 +3054,40 @@ function startJtcat(mode) {
   ft8Engine = jtcatManager.engine; // Phase 0 alias
 
   // Apply persisted JTCAT calibration to the freshly-started engine.
-  // jtcatAudioLatencyMs: WSJT-X-style soundcard time delay correction.
+  // Soundcard latency: by default the engine auto-calibrates from the
+  // median of decoded DTs (most stations have NTP-tight clocks, so the
+  // population median is the local pipeline lag). When the user has
+  // manually pinned a value via the UI we use that instead and the
+  // engine's auto loop stays off.
   // jtcatHoldTxFreq: pin TX freq across QSO state machine advances.
   if (ft8Engine) {
-    if (typeof ft8Engine.setAudioLatencyMs === 'function') {
-      ft8Engine.setAudioLatencyMs(settings.jtcatAudioLatencyMs || 0);
+    if (typeof ft8Engine.setAudioLatencyAuto === 'function' &&
+        typeof ft8Engine.setAudioLatencyMs === 'function') {
+      if (settings.jtcatAudioLatencyManual && typeof settings.jtcatAudioLatencyMs === 'number') {
+        ft8Engine.setAudioLatencyMs(settings.jtcatAudioLatencyMs);
+      } else {
+        ft8Engine.setAudioLatencyAuto(true);
+      }
     }
     if (typeof ft8Engine.setHoldTxFreq === 'function') {
       ft8Engine.setHoldTxFreq(!!settings.jtcatHoldTxFreq);
     }
+  }
+
+  // Persist the auto-derived latency so a fresh start can apply it
+  // immediately (before the auto loop has gathered enough samples).
+  if (ft8Engine && typeof ft8Engine.on === 'function') {
+    ft8Engine.removeAllListeners('audio-latency-changed');
+    ft8Engine.on('audio-latency-changed', ({ ms, auto }) => {
+      if (auto && settings.jtcatAudioLatencyMs !== ms) {
+        settings.jtcatAudioLatencyMs = ms;
+        // Don't flip the manual flag — auto stays on across runs.
+        saveSettings(settings);
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('jtcat-audio-latency', { ms, auto: true });
+        }
+      }
+    });
   }
 
   // Remove any stale listeners from a previous startJtcat() cycle
@@ -13347,13 +13372,35 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-set-tx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setTxFreq(hz); });
   ipcMain.on('jtcat-set-rx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setRxFreq(hz); });
 
-  ipcMain.on('jtcat-set-audio-latency-ms', (_e, ms) => {
-    settings.jtcatAudioLatencyMs = parseInt(ms, 10) || 0;
-    saveSettings(settings);
-    if (ft8Engine && typeof ft8Engine.setAudioLatencyMs === 'function') {
-      ft8Engine.setAudioLatencyMs(settings.jtcatAudioLatencyMs);
+  ipcMain.on('jtcat-set-audio-latency-ms', (_e, payload) => {
+    // Payload can be a number (legacy: pin to N ms, manual mode) or
+    // { ms, auto } object (new: explicit manual/auto flag). When auto is
+    // requested we don't preserve the prior ms — the engine starts its
+    // rolling-median learn-in fresh.
+    let ms = 0;
+    let auto = false;
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      ms = parseInt(payload.ms, 10) || 0;
+      auto = !!payload.auto;
+    } else {
+      ms = parseInt(payload, 10) || 0;
     }
-    sendCatLog(`[JTCAT] Soundcard latency calibration: ${settings.jtcatAudioLatencyMs} ms`);
+    if (auto) {
+      settings.jtcatAudioLatencyManual = false;
+      saveSettings(settings);
+      if (ft8Engine && typeof ft8Engine.setAudioLatencyAuto === 'function') {
+        ft8Engine.setAudioLatencyAuto(true);
+      }
+      sendCatLog('[JTCAT] Soundcard latency: auto-calibrate (median of decoded DTs)');
+    } else {
+      settings.jtcatAudioLatencyMs = ms;
+      settings.jtcatAudioLatencyManual = true;
+      saveSettings(settings);
+      if (ft8Engine && typeof ft8Engine.setAudioLatencyMs === 'function') {
+        ft8Engine.setAudioLatencyMs(ms);
+      }
+      sendCatLog(`[JTCAT] Soundcard latency: pinned to ${ms} ms (manual)`);
+    }
   });
 
   ipcMain.on('jtcat-set-hold-tx-freq', (_e, enabled) => {

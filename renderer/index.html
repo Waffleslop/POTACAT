@@ -650,10 +650,11 @@
           <label class="jtcat-tx-label" title="When on, TX freq is pinned — auto-replies and the QSO state machine won't drag it to the responder's freq. RX still tracks them.">
             <input type="checkbox" id="jtcat-hold-tx-freq"> Hold TX
           </label>
-          <label class="jtcat-tx-label" title="WSJT-X-style soundcard time delay. Tune until JTCAT's reported DT matches WSJT-X on the same audio. Positive ms = subtract from now (capture is delayed).">
+          <label class="jtcat-tx-label" title="Soundcard time delay calibration. Auto: derived from the median of decoded DTs (assumes most stations have NTP-tight clocks). Type a value to pin manually; clear (or click Auto) to re-enable adaptive tuning.">
             Latency:
             <input type="number" id="jtcat-audio-latency-ms" value="0" min="-3000" max="3000" step="100" style="width:64px;">
             <span>ms</span>
+            <button type="button" id="jtcat-audio-latency-auto" class="jtcat-btn" style="padding:2px 8px;font-size:11px;" title="Re-enable auto-calibration">Auto</button>
           </label>
           <button id="jtcat-call-cq" class="jtcat-btn jtcat-cq-btn">CQ</button>
           <button id="jtcat-enable-tx" class="jtcat-btn">Enable TX</button>
