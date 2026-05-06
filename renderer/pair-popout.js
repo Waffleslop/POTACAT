@@ -40,10 +40,25 @@
   var fallbackNoteEl = document.getElementById('pp-qr-fallback-note');
   var ttlEl = document.getElementById('pp-ttl');
   var errEl = document.getElementById('pp-error');
+  var progressEl = document.getElementById('pp-progress');
   var cardEl = document.getElementById('pp-qr-card');
   var regenBtn = document.getElementById('pp-regen-btn');
   var closeBtnHeader = document.getElementById('tb-close');
   var closeBtnFooter = document.getElementById('pp-close-btn');
+
+  // Progress events fire from main during the cert-setup phase of
+  // pair-QR generation (issuing Tailscale cert, restarting ECHOCAT).
+  // The user sees live status instead of a stalled "Generating…".
+  if (window.api.onPairQrProgress) {
+    window.api.onPairQrProgress(function(msg) {
+      if (!progressEl) return;
+      progressEl.style.display = '';
+      progressEl.textContent = msg;
+    });
+  }
+  function hideProgress() {
+    if (progressEl) { progressEl.style.display = 'none'; progressEl.textContent = ''; }
+  }
 
   var manualHostEl = document.getElementById('pp-manual-host');
   var manualTokenEl = document.getElementById('pp-manual-token');
@@ -144,6 +159,20 @@
       }
       hideError();
       cardEl.style.display = '';
+
+      // Cert setup finished (or wasn't needed); hide the progress
+      // banner. Soft warnings (e.g. "Tailscale not detected") show
+      // a non-blocking banner above the QR so the user still gets
+      // the pair fields and can try anyway (browser pairing might
+      // still work).
+      hideProgress();
+      if (r.warn && errEl) {
+        errEl.innerHTML = '';
+        var wmain = document.createElement('div');
+        wmain.textContent = r.warn;
+        errEl.appendChild(wmain);
+        errEl.style.display = '';
+      }
 
       // Populate the manual-pair fields FIRST, before any rendering work.
       // These are the source of truth: even if both QR formats fail to

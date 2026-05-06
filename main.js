@@ -12153,11 +12153,55 @@ app.whenReady().then(() => {
   ipcMain.handle('get-rig-models', () => getModelList());
   ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
 
+  // Ensure ECHOCAT is serving a Tailscale-issued LE cert before we
+  // hand a pair URL to the user. iOS rejects self-signed certs at
+  // the trust evaluation (NSAllowsLocalNetworking neuters
+  // NSAllowsArbitraryLoads in the current iOS app build), so any
+  // pair attempt against self-signed dies with "network request
+  // failed". This makes the cert step transparent: first pair
+  // click on a Tailscale-enabled machine issues the cert + restarts
+  // the server in-line; subsequent clicks are instant because the
+  // cached cert is reused.
+  //
+  // progressCb is invoked with short status strings so the popout
+  // can show what's happening during the (potentially 10-60s) cert
+  // issuance. Returns {error} on hard failure, {warn} on a soft
+  // problem (e.g. Tailscale missing — pair will likely fail but we
+  // still show the QR), or null on success.
+  async function ensureTailscaleCertReady(progressCb) {
+    const { tailscaleStatus, loadCachedTailscaleCert, issueTailscaleCert } = require('./lib/remote-server');
+    const certDir = app.getPath('userData');
+    if (loadCachedTailscaleCert(certDir)) return null; // already set up
+    const ts = tailscaleStatus();
+    if (!ts) {
+      return { warn: 'Tailscale not detected. iOS pair will likely fail with "network request failed". Install Tailscale and enable HTTPS in your admin console to fix.' };
+    }
+    progressCb(`Issuing TLS cert for ${ts.hostname} (first time can take ~30s)…`);
+    try {
+      issueTailscaleCert(certDir, ts.hostname);
+    } catch (err) {
+      return { error: err.message };
+    }
+    progressCb('Reloading ECHOCAT with new cert…');
+    if (remoteServer && remoteServer.running) {
+      try { await remoteServer.stop(); } catch {}
+      connectRemote();
+      // connectRemote starts the server async via .listen() callback;
+      // wait briefly for it to come up so the next createPairingToken
+      // call hits the new instance.
+      for (let i = 0; i < 50; i++) {
+        if (remoteServer && remoteServer.running) break;
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+    return null;
+  }
+
   // --- Tailscale TLS cert IPC ---
-  // Settings → ECHOCAT shows a "Set up secure connection via
-  // Tailscale" button. Click runs `tailscale cert <hostname>` and
-  // caches the result; pairing then uses a publicly-trusted LE cert
-  // that iOS accepts natively (no pinning, no ATS quirks).
+  // Status query and (legacy) explicit-issue handler. The pair-QR
+  // flow now does the cert setup automatically, but the IPCs stay
+  // for the Settings UI status display and as a manual "renew"
+  // hook when a user wants to force a refresh.
   ipcMain.handle('echocat-tailscale-status', async () => {
     const { tailscaleStatus, loadCachedTailscaleCert } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
@@ -12208,6 +12252,28 @@ app.whenReady().then(() => {
       sendCatLog('[Pair QR] FAILED — ECHOCAT server is not running. User needs to enable it in Settings → ECHOCAT.');
       return { error: 'ECHOCAT server is not running. Enable it in Settings first.' };
     }
+
+    // Make sure we have a Tailscale-issued LE cert before showing
+    // the QR. Sends progress to the popout so the user sees a
+    // status line during cert issuance.
+    const sendProgress = (msg) => {
+      sendCatLog('[Pair QR] ' + msg);
+      if (pairPopoutWin && !pairPopoutWin.isDestroyed()) {
+        try { pairPopoutWin.webContents.send('pair-qr-progress', msg); } catch {}
+      }
+    };
+    let softWarn = '';
+    try {
+      const certResult = await ensureTailscaleCertReady(sendProgress);
+      if (certResult && certResult.error) {
+        return { error: certResult.error };
+      }
+      if (certResult && certResult.warn) softWarn = certResult.warn;
+    } catch (err) {
+      sendCatLog('[Pair QR] Cert setup threw: ' + (err.message || err));
+      // Continue with whatever cert we have — don't block pair-QR generation.
+    }
+
     let qrcode;
     try { qrcode = require('qrcode'); }
     catch (err) {
@@ -12303,6 +12369,7 @@ app.whenReady().then(() => {
       host: wsUrl,
       hostname,
       ttlSeconds: 5 * 60,
+      warn: softWarn || '',
     };
   });
 

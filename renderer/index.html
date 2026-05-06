@@ -2112,15 +2112,12 @@
           <span class="help-text" style="margin-left:12px;display:block;">Uses Google's public STUN server to discover your public IP, enabling WebRTC audio across the internet without a VPN. Only needed if you can't use Tailscale or both devices aren't on the same network.</span>
         </div>
         <div id="remote-url-display" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
-        <!-- Tailscale TLS cert -->
+        <!-- Tailscale TLS cert (status only — setup happens
+             transparently as part of the pair-QR flow) -->
         <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-            <div>
-              <strong>Secure connection (Tailscale)</strong>
-              <span class="help-text" style="display:block;">Issues a publicly-trusted TLS certificate via Tailscale so the iOS app can pair without certificate-trust errors. Required before scanning the QR.</span>
-              <div id="echocat-ts-status" style="font-size:12px;margin-top:6px;color:#aaa;font-family:monospace;">Checking…</div>
-            </div>
-            <button type="button" id="echocat-ts-cert-btn" style="padding:4px 12px;" disabled>Set up</button>
+          <div>
+            <strong>Secure connection (Tailscale)</strong>
+            <div id="echocat-ts-status" style="font-size:12px;margin-top:4px;color:#aaa;font-family:monospace;">Checking…</div>
           </div>
         </div>
 
