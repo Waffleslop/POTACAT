@@ -13203,6 +13203,19 @@ app.whenReady().then(() => {
     return result.filePath;
   });
 
+  // Generic file picker for the advanced ECHOCAT settings (TLS
+  // cert + key path inputs). Open dialog only — these are existing
+  // files the user manages outside POTACAT.
+  ipcMain.handle('echocat-pick-file', async (_e, opts = {}) => {
+    const result = await dialog.showOpenDialog(win, {
+      title: opts.title || 'Choose file',
+      filters: opts.filters || [{ name: 'All Files', extensions: ['*'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return result.filePaths[0];
+  });
+
   ipcMain.handle('choose-log-file', async (_e, currentPath) => {
     const defaultPath = currentPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     const result = await dialog.showSaveDialog(win, {

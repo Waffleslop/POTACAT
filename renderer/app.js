@@ -3545,6 +3545,57 @@ echocatRefreshPairedList();
 // pair-QR handler issues a Tailscale-managed LE cert on first run
 // and caches it.
 const echocatTsStatus = document.getElementById('echocat-ts-status');
+
+// Advanced ECHOCAT controls (in the <details> block). Hidden by
+// default; useful for users with non-Tailscale cert setups, custom
+// reverse proxies, or unusual interface picker outcomes.
+const setEchocatPairHost = document.getElementById('set-echocat-pair-host');
+const setEchocatTlsCertPath = document.getElementById('set-echocat-tls-cert-path');
+const setEchocatTlsKeyPath = document.getElementById('set-echocat-tls-key-path');
+const echocatTlsCertBrowse = document.getElementById('echocat-tls-cert-browse');
+const echocatTlsKeyBrowse = document.getElementById('echocat-tls-key-browse');
+const echocatTsRenewBtn = document.getElementById('echocat-ts-renew-btn');
+const echocatTsRenewStatus = document.getElementById('echocat-ts-renew-status');
+
+if (echocatTlsCertBrowse) {
+  echocatTlsCertBrowse.addEventListener('click', async () => {
+    const p = await window.api.echocatPickFile({
+      title: 'Select TLS certificate file',
+      filters: [{ name: 'Certificates', extensions: ['pem', 'crt', 'cer'] }, { name: 'All files', extensions: ['*'] }],
+    });
+    if (p) setEchocatTlsCertPath.value = p;
+  });
+}
+if (echocatTlsKeyBrowse) {
+  echocatTlsKeyBrowse.addEventListener('click', async () => {
+    const p = await window.api.echocatPickFile({
+      title: 'Select TLS private key file',
+      filters: [{ name: 'Keys', extensions: ['key', 'pem'] }, { name: 'All files', extensions: ['*'] }],
+    });
+    if (p) setEchocatTlsKeyPath.value = p;
+  });
+}
+if (echocatTsRenewBtn) {
+  echocatTsRenewBtn.addEventListener('click', async () => {
+    echocatTsRenewBtn.disabled = true;
+    const prev = echocatTsRenewBtn.textContent;
+    echocatTsRenewBtn.textContent = 'Renewing…';
+    if (echocatTsRenewStatus) echocatTsRenewStatus.textContent = 'Issuing fresh cert via Tailscale (can take up to a minute)…';
+    try {
+      const r = await window.api.echocatIssueTailscaleCert();
+      if (!r.ok) {
+        if (echocatTsRenewStatus) echocatTsRenewStatus.textContent = 'Failed: ' + r.error;
+      } else {
+        if (echocatTsRenewStatus) echocatTsRenewStatus.textContent = 'Done. ECHOCAT restarted with new cert.';
+        await echocatRefreshTailscaleStatus();
+      }
+    } catch (err) {
+      if (echocatTsRenewStatus) echocatTsRenewStatus.textContent = 'Failed: ' + (err.message || err);
+    }
+    echocatTsRenewBtn.disabled = false;
+    echocatTsRenewBtn.textContent = prev;
+  });
+}
 async function echocatRefreshTailscaleStatus() {
   if (!echocatTsStatus) return;
   let s;
@@ -8597,6 +8648,9 @@ async function openSettingsDialog(tab) {
   remoteTokenRow.classList.toggle('hidden', !requireToken);
   setRemoteToken.value = s.remoteToken || '';
   setRemotePttTimeout.value = s.remotePttTimeout || 180;
+  if (setEchocatPairHost) setEchocatPairHost.value = s.echocatPairHost || '';
+  if (setEchocatTlsCertPath) setEchocatTlsCertPath.value = s.echocatTlsCertPath || '';
+  if (setEchocatTlsKeyPath) setEchocatTlsKeyPath.value = s.echocatTlsKeyPath || '';
   // Default SSB-over-DATA to ON for non-Flex rigs (prevents local mic bleed)
   if (s.ssbOverData != null) {
     setSsbOverData.checked = !!s.ssbOverData;
@@ -9033,6 +9087,9 @@ settingsSave.addEventListener('click', async () => {
     remoteRequireToken: remoteRequireTokenVal,
     remoteToken: remoteTokenVal,
     remotePttTimeout: remotePttTimeoutVal,
+    echocatPairHost: setEchocatPairHost ? setEchocatPairHost.value.trim() : '',
+    echocatTlsCertPath: setEchocatTlsCertPath ? setEchocatTlsCertPath.value.trim() : '',
+    echocatTlsKeyPath: setEchocatTlsKeyPath ? setEchocatTlsKeyPath.value.trim() : '',
     ssbOverData: ssbOverDataVal,
     remoteCwEnabled: remoteCwEnabledVal,
     remoteStun: remoteStunVal,

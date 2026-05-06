@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   echocatRevokeDevice: (deviceId) => ipcRenderer.invoke('echocat-revoke-device', deviceId),
   echocatTailscaleStatus: () => ipcRenderer.invoke('echocat-tailscale-status'),
   echocatIssueTailscaleCert: () => ipcRenderer.invoke('echocat-issue-tailscale-cert'),
+  echocatPickFile: (opts) => ipcRenderer.invoke('echocat-pick-file', opts || {}),
   onEchocatPairedDevices: (cb) => ipcRenderer.on('echocat-paired-devices', (_e, list) => cb(list)),
   pairPopoutOpen: () => ipcRenderer.send('pair-popout-open'),
   getSettings: () => ipcRenderer.invoke('get-settings'),

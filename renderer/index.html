@@ -2138,6 +2138,39 @@
           </div>
         </div>
         <span class="help-text">To use ECHOCAT securely outside your home network, install a VPN such as <a href="https://tailscale.com" target="_blank" style="color:#4fc3f7;">Tailscale</a> (free) on both your shack computer and phone. Audio, tuning, and PTT are all encrypted over the VPN tunnel.</span>
+
+        <!-- Advanced ECHOCAT settings — for users with non-default
+             network or TLS setups. Hidden behind a disclosure so the
+             default panel stays uncluttered. -->
+        <details style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
+          <summary style="cursor:pointer;font-size:13px;color:#aaa;outline:none;user-select:none;">Advanced ECHOCAT settings</summary>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <label for="set-echocat-pair-host" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">Pair host override</label>
+              <input type="text" id="set-echocat-pair-host" placeholder="e.g. shack.example.com or 192.168.1.50" style="width:100%;font-family:monospace;font-size:12px;padding:4px 6px;">
+              <span class="help-text" style="display:block;margin-top:3px;">Force a specific hostname or IP into the pairing QR instead of letting POTACAT auto-pick. Leave blank to auto-detect (Tailscale MagicDNS first, then LAN).</span>
+            </div>
+            <div>
+              <label for="set-echocat-tls-cert-path" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">TLS certificate file</label>
+              <div style="display:flex;gap:6px;">
+                <input type="text" id="set-echocat-tls-cert-path" placeholder="leave blank to use Tailscale-issued cert" style="flex:1;font-family:monospace;font-size:12px;padding:4px 6px;min-width:0;">
+                <button type="button" id="echocat-tls-cert-browse" style="padding:4px 10px;font-size:12px;flex-shrink:0;">Browse…</button>
+              </div>
+            </div>
+            <div>
+              <label for="set-echocat-tls-key-path" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">TLS private key file</label>
+              <div style="display:flex;gap:6px;">
+                <input type="text" id="set-echocat-tls-key-path" placeholder="(matches the cert above)" style="flex:1;font-family:monospace;font-size:12px;padding:4px 6px;min-width:0;">
+                <button type="button" id="echocat-tls-key-browse" style="padding:4px 10px;font-size:12px;flex-shrink:0;">Browse…</button>
+              </div>
+              <span class="help-text" style="display:block;margin-top:3px;">Use a cert you manage yourself (corporate CA, mkcert, public DNS + Let's Encrypt, reverse proxy chain). When both paths are set and readable, POTACAT skips its self-signed and Tailscale-cert paths and serves these.</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <button type="button" id="echocat-ts-renew-btn" style="padding:4px 12px;">Force-renew Tailscale cert</button>
+              <span id="echocat-ts-renew-status" class="help-text" style="margin:0;"></span>
+            </div>
+          </div>
+        </details>
         <!-- Remote Launcher -->
         <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
           <label class="checkbox-label"><input type="checkbox" id="set-enable-launcher"> Remote Launcher (start POTACAT from your phone)</label>
