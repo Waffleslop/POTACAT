@@ -12190,38 +12190,21 @@ app.whenReady().then(() => {
         fingerprint = x509.fingerprint256 || '';
       }
     } catch {}
-    // Use the LAN IP if we can find one; fall back to localhost. The
-    // mobile app uses mDNS to discover, but the QR also embeds an
-    // explicit URL as a safety net for users on weird networks.
-    //
-    // Prefer RFC1918 private LAN ranges (192.168/16, 10/8, 172.16/12)
-    // over Tailscale CGNAT (100.64/10), since a phone on the home
-    // Wi-Fi can't reach a 100.x address unless it's also on the
-    // Tailnet. K0OTC 2026-05-05: his QR pinned 100.78.85.87, which
-    // works for him on Tailnet but would silently fail for a guest
-    // phone on the same LAN.
+    // Pick the host for the QR. Reuses RemoteServer.getLocalIPs() so the
+    // pairing flow stays in sync with the network UI in Settings: same
+    // detection, same ordering, same Tailscale awareness. The helper
+    // already returns Tailscale interfaces first and surfaces the
+    // MagicDNS hostname when present, which is what we want for the QR
+    // — a stable name that survives IP changes and works for users
+    // pairing over a Tailnet from anywhere. Falls back to the IP if no
+    // MagicDNS name. Falls back to 127.0.0.1 only if the machine has
+    // literally no non-internal IPv4 interfaces.
     const os = require('os');
-    function rankAddr(addr) {
-      const a = addr.split('.').map(Number);
-      // Lower rank = more preferred.
-      if (a[0] === 192 && a[1] === 168) return 0;
-      if (a[0] === 10) return 0;
-      if (a[0] === 172 && a[1] >= 16 && a[1] <= 31) return 0;
-      if (a[0] === 100 && a[1] >= 64 && a[1] <= 127) return 2; // Tailscale / CGNAT
-      if (a[0] === 169 && a[1] === 254) return 3; // link-local
-      return 1; // public / unknown
-    }
+    const ips = RemoteServer.getLocalIPs();
     let host = '127.0.0.1';
-    let bestRank = 99;
-    try {
-      for (const addrs of Object.values(os.networkInterfaces())) {
-        for (const a of addrs) {
-          if (a.family !== 'IPv4' || a.internal) continue;
-          const r = rankAddr(a.address);
-          if (r < bestRank) { bestRank = r; host = a.address; }
-        }
-      }
-    } catch {}
+    if (ips.length > 0) {
+      host = ips[0].tailscaleHostname || ips[0].address;
+    }
     const port = remoteServer._port || 7300;
     const wsUrl = `wss://${host}:${port}`;
     const hostname = (() => { try { return os.hostname(); } catch { return 'POTACAT'; } })();
