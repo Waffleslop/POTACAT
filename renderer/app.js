@@ -3605,18 +3605,45 @@ async function echocatRefreshTailscaleStatus() {
     echocatTsStatus.textContent = 'Tailscale: status check failed.';
     return;
   }
+  // Each branch points the user at exactly the next thing to fix.
+  // Deep links go straight to the correct admin page so users
+  // don't have to hunt through Tailscale's docs.
   if (!s.installed) {
-    echocatTsStatus.innerHTML = 'Tailscale not detected. <a href="https://tailscale.com/download" target="_blank" style="color:#4fc3f7;">Install Tailscale</a> and enable HTTPS Certificates in your <a href="https://login.tailscale.com/admin/dns" target="_blank" style="color:#4fc3f7;">admin console</a> for the iOS app to pair.';
+    echocatTsStatus.innerHTML =
+      'Tailscale not detected. <a href="https://tailscale.com/download" target="_blank" style="color:#4fc3f7;">Install Tailscale</a> for iOS app pairing.';
+    return;
+  }
+  if (!s.loggedIn) {
+    echocatTsStatus.innerHTML =
+      'Tailscale is installed but not signed in. Open the Tailscale app and sign in.';
+    return;
+  }
+  if (!s.magicDNS) {
+    echocatTsStatus.innerHTML =
+      'Tailscale connected, but <strong>MagicDNS is off</strong>. Enable it at <a href="https://login.tailscale.com/admin/dns" target="_blank" style="color:#4fc3f7;">admin → DNS</a> (toggle MagicDNS on, then HTTPS Certificates).';
     return;
   }
   if (!s.certCached) {
-    echocatTsStatus.textContent = `Tailscale: ${s.hostname}. Cert will be issued automatically when you open the pairing QR.`;
+    echocatTsStatus.innerHTML =
+      `Tailscale: <code>${s.hostname}</code>. Tap "Open pairing QR" to issue a TLS cert. ` +
+      `If issuance fails, enable HTTPS Certificates at <a href="https://login.tailscale.com/admin/dns" target="_blank" style="color:#4fc3f7;">admin → DNS</a>.`;
     return;
   }
   const expiry = s.certExpiresAt ? s.certExpiresAt.slice(0, 10) : 'unknown';
-  echocatTsStatus.textContent = `Tailscale: ${s.hostname}. TLS cert ready, expires ${expiry} (${s.daysLeft} days).`;
+  echocatTsStatus.innerHTML =
+    `Tailscale: <code>${s.hostname}</code>. TLS cert ready, expires ${expiry} (${s.daysLeft} days).`;
 }
 echocatRefreshTailscaleStatus();
+// Refresh whenever the user opens the Settings dialog so a state
+// change (just signed in, just enabled MagicDNS) is reflected
+// without a POTACAT restart.
+if (typeof settingsDialog !== 'undefined' && settingsDialog) {
+  const origShow = settingsDialog.showModal.bind(settingsDialog);
+  settingsDialog.showModal = function() {
+    echocatRefreshTailscaleStatus();
+    return origShow();
+  };
+}
 
 // Club Station Mode event handlers
 setClubMode.addEventListener('change', () => {

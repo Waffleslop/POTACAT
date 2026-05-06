@@ -152,6 +152,15 @@
           hint = 'Open Settings → ECHOCAT → check "Enable ECHOCAT remote access" (the box at the top), then come back here and tap Regenerate.';
         } else if (/qrcode module/i.test(r.error)) {
           hint = 'If you installed via .dmg / .exe / .AppImage, please file a bug report — this should never happen on a packaged build.';
+        } else if (/HTTPS.*not enabled|HTTPS Certificates/i.test(r.error)) {
+          // Deep link straight to Tailscale's DNS admin page where
+          // the toggle lives. The user enables HTTPS Certificates,
+          // then re-clicks Regenerate.
+          hint = 'Open https://login.tailscale.com/admin/dns and toggle "HTTPS Certificates" on (under DNS). Then tap Regenerate.';
+        } else if (/MagicDNS is disabled/i.test(r.error)) {
+          hint = 'Open https://login.tailscale.com/admin/dns and toggle "MagicDNS" on. Then tap Regenerate.';
+        } else if (/not signed in/i.test(r.error)) {
+          hint = 'Open the Tailscale app on this computer and sign in to your tailnet. Then tap Regenerate.';
         }
         showError(r.error, hint);
         manualUrlEl.value = manualHostEl.value = manualTokenEl.value = manualFpEl.value = '';

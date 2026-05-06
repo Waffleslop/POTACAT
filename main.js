@@ -12174,7 +12174,13 @@ app.whenReady().then(() => {
     if (loadCachedTailscaleCert(certDir)) return null; // already set up
     const ts = tailscaleStatus();
     if (!ts) {
-      return { warn: 'Tailscale not detected. iOS pair will likely fail with "network request failed". Install Tailscale and enable HTTPS in your admin console to fix.' };
+      return { warn: 'Tailscale not detected. iOS pair will likely fail. Install Tailscale to fix.' };
+    }
+    if (!ts.loggedIn) {
+      return { warn: 'Tailscale is installed but not signed in. Open the Tailscale app and sign in to your tailnet, then try again.' };
+    }
+    if (!ts.magicDNS) {
+      return { warn: 'Tailscale MagicDNS is disabled in your tailnet. Enable it at https://login.tailscale.com/admin/dns (DNS → MagicDNS) and try again.' };
     }
     progressCb(`Issuing TLS cert for ${ts.hostname} (first time can take ~30s)…`);
     try {
@@ -12209,7 +12215,9 @@ app.whenReady().then(() => {
     const cached = loadCachedTailscaleCert(certDir);
     return {
       installed: !!ts,
-      hostname: ts ? ts.hostname : null,
+      loggedIn: ts ? !!ts.loggedIn : false,
+      magicDNS: ts ? !!ts.magicDNS : false,
+      hostname: ts && ts.hostname ? ts.hostname : null,
       backendState: ts ? ts.backendState : null,
       certCached: !!cached,
       certExpiresAt: cached ? cached.validTo.toISOString() : null,
@@ -12222,7 +12230,13 @@ app.whenReady().then(() => {
     const certDir = app.getPath('userData');
     const ts = tailscaleStatus();
     if (!ts) {
-      return { ok: false, error: 'Tailscale is not running. Install Tailscale and sign in, then try again.' };
+      return { ok: false, error: 'Tailscale CLI not found. Install Tailscale and sign in, then try again.' };
+    }
+    if (!ts.loggedIn) {
+      return { ok: false, error: 'Tailscale is not signed in. Open the Tailscale app and sign in to your tailnet, then try again.' };
+    }
+    if (!ts.magicDNS) {
+      return { ok: false, error: 'MagicDNS is disabled in your tailnet. Enable it at admin/dns, then try again.' };
     }
     sendCatLog(`[Tailscale] Issuing cert for ${ts.hostname}…`);
     try {
