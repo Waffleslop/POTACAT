@@ -1486,6 +1486,13 @@
       <label>Watchlist (comma-separated, optional band:mode filter):
         <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL:CW, K0BUF:20m, W1AW:40m:SSB">
       </label>
+      <label>Re-spot template (POTA / WWFF / LLOTA):
+        <input type="text" id="set-respot-template" placeholder="{rst} in {QTH} 73s {mycallsign} via POTACAT">
+        <span class="help-text" style="display:block;">Placeholders: <code>{rst}</code>, <code>{QTH}</code>, <code>{mycallsign}</code>, <code>{op_firstname}</code>. Used when re-spotting an activator after logging a contact.</span>
+      </label>
+      <label>Re-spot template (DX cluster):
+        <input type="text" id="set-dx-respot-template" placeholder="Heard in {QTH} 73s {mycallsign} via POTACAT">
+      </label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
       <label>Notification duration (seconds):

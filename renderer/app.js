@@ -462,6 +462,8 @@ const setDxcMaxAge = document.getElementById('set-dxc-max-age');
 const setRefreshInterval = document.getElementById('set-refresh-interval');
 const setScanDwell = document.getElementById('set-scan-dwell');
 const setWatchlist = document.getElementById('set-watchlist');
+const setRespotTemplate = document.getElementById('set-respot-template');
+const setDxRespotTemplate = document.getElementById('set-dx-respot-template');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setEnableWwff = document.getElementById('set-enable-wwff');
@@ -5861,14 +5863,10 @@ document.getElementById('respot-send').addEventListener('click', async () => {
   const commentText = document.getElementById('respot-comment').value.trim();
   const sendBtn = document.getElementById('respot-send');
 
-  // Persist template based on network type
-  if (targets.includes('dxc')) {
-    dxRespotTemplate = commentText || dxRespotTemplate;
-    window.api.saveSettings({ dxRespotTemplate });
-  } else {
-    respotTemplate = commentText || respotTemplate;
-    window.api.saveSettings({ respotTemplate });
-  }
+  // The user's per-spot comment is one-shot. The re-spot template
+  // lives in Settings → Spots and is only changed there. (Was a
+  // bug: typing "QRT" once into a re-spot turned that into the
+  // user's permanent template until they hand-edited settings.json.)
 
   const data = {
     callsign: s.callsign,
@@ -7461,17 +7459,14 @@ logSaveBtn.addEventListener('click', async () => {
   const wantsLlotaRespot = respotCheckbox.checked && logTargets.includes('llota');
   const wantsDxcRespot = respotCheckbox.checked && logTargets.includes('dxc');
 
-  // Persist re-spot preference and template
+  // Persist the re-spot toggle preference. The comment text itself
+  // is one-shot — template lives in Settings → Spots. (Earlier
+  // builds saved the user's per-spot edit as the new template,
+  // which surprised users who'd typed something situational like
+  // "QRT" into a single re-spot and then watched it stick.)
   if (!respotSection.classList.contains('hidden')) {
     respotDefault = respotCheckbox.checked;
-    const tmplText = respotComment.value.trim();
-    if (logTargets.includes('dxc')) {
-      dxRespotTemplate = tmplText || dxRespotTemplate;
-      window.api.saveSettings({ respotDefault: respotCheckbox.checked, dxRespotTemplate });
-    } else {
-      respotTemplate = tmplText || respotTemplate;
-      window.api.saveSettings({ respotDefault: respotCheckbox.checked, respotTemplate });
-    }
+    window.api.saveSettings({ respotDefault: respotCheckbox.checked });
   }
 
   // Determine WWFF reference for respot
@@ -8435,6 +8430,8 @@ async function openSettingsDialog(tab) {
   setSsbFilter.value = s.ssbFilterWidth || 0;
   setDigitalFilter.value = s.digitalFilterWidth || 0;
   setWatchlist.value = s.watchlist || '';
+  if (setRespotTemplate) setRespotTemplate.value = s.respotTemplate || '';
+  if (setDxRespotTemplate) setDxRespotTemplate.value = s.dxRespotTemplate || '';
   setNotifyPopup.checked = s.notifyPopup !== false;
   setNotifySound.checked = s.notifySound !== false;
   setNotifyTimeout.value = s.notifyTimeout || 10;
@@ -8819,6 +8816,8 @@ document.getElementById('settings-import').addEventListener('click', async () =>
 
 settingsSave.addEventListener('click', async () => {
   const watchlistRaw = setWatchlist.value.trim();
+  const respotTemplateVal = setRespotTemplate ? setRespotTemplate.value.trim() : '';
+  const dxRespotTemplateVal = setDxRespotTemplate ? setDxRespotTemplate.value.trim() : '';
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
   const sotaMaxAgeVal = parseInt(setSotaMaxAge.value, 10) || 30;
@@ -9007,6 +9006,8 @@ settingsSave.addEventListener('click', async () => {
     ssbFilterWidth: ssbFilterVal,
     digitalFilterWidth: digitalFilterVal,
     watchlist: watchlistRaw,
+    respotTemplate: respotTemplateVal,
+    dxRespotTemplate: dxRespotTemplateVal,
     notifyPopup: notifyPopupEnabled,
     notifySound: notifySoundEnabled,
     notifyTimeout: notifyTimeoutVal,
