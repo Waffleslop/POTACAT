@@ -4284,6 +4284,11 @@ document.addEventListener('click', () => {
 const DIGI_MODES = new Set(['FT8', 'FT4', 'FT2', 'RTTY', 'FREEDV', 'JT65', 'JT9', 'PSK31', 'OLIVIA', 'MFSK', 'DATA', 'DIGU', 'DIGL']);
 function modeMatches(spotMode, selectedModes) {
   if (!selectedModes) return true;
+  // Some POTA activators only spot a frequency, not a mode. Those spots
+  // arrive with mode === '' and used to vanish the moment a user
+  // unticked any individual mode. Now they bucket under "unknown" so
+  // the user can untick FreeDV (etc.) and still see no-mode spots.
+  if (!spotMode) return selectedModes.has('unknown');
   if (selectedModes.has(spotMode)) return true;
   if (selectedModes.has('SSB') && (spotMode === 'USB' || spotMode === 'LSB')) return true;
   if (selectedModes.has('DIGI') && DIGI_MODES.has(spotMode)) return true;

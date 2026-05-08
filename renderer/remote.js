@@ -1878,7 +1878,10 @@
   // Map spot mode to filter category
   var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'JS8', 'FM', 'RTTY', 'PSK31', 'FREEDV']);
   function spotModeCategory(mode) {
-    if (!mode) return 'other';
+    // Distinguish "no mode listed" (some POTA activators only spot a
+    // freq) from "mode listed but exotic" (AM, etc.). Lets users untick
+    // FreeDV/Other while keeping no-mode activations visible.
+    if (!mode) return 'unknown';
     var m = mode.toUpperCase();
     if (m === 'USB' || m === 'LSB') return 'SSB';
     if (m === 'AM') return 'other';

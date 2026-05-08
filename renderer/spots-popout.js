@@ -110,7 +110,9 @@ function getFilteredSpots() {
     if (band !== 'all' && freqToBand(s.frequency) !== band) return false;
     if (mode !== 'all') {
       const sm = (s.mode || '').toUpperCase();
-      if (mode === 'SSB') {
+      if (mode === 'unknown') {
+        if (sm) return false; // only match spots with no mode listed
+      } else if (mode === 'SSB') {
         if (sm !== 'SSB' && sm !== 'USB' && sm !== 'LSB') return false;
       } else if (sm !== mode) return false;
     }
