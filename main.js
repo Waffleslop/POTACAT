@@ -3749,8 +3749,22 @@ function startSmartSdrAudio() {
     stopSmartSdrAudio();
   });
   const daxChannel = parseInt(settings.audioDaxChannel, 10) || 1;
-  sendCatLog(`[SmartSDR-Audio] Starting non-GUI audio client → ${sdrHost}:4992 (DAX RX ${daxChannel})`);
-  smartSdrAudio.start(sdrHost, daxChannel);
+  // Reach into the primary client for the GUI client UUID it
+  // already discovered. The dedicated audio TCP needs to bind to the
+  // SAME existing GUI client (not register a new one) — that's what
+  // licenses it to receive audio. Without this bind, `stream create
+  // type=dax_rx` succeeds but no audio packets ever route to us.
+  const guiClientId = (smartSdr && smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients[0]) || null;
+  if (!guiClientId) {
+    sendCatLog('[SmartSDR-Audio] No GUI client discovered yet on primary connection — cannot bind audio client.');
+    if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+      remoteAudioWin.webContents.send('smartsdr-audio-fallback');
+    }
+    smartSdrAudio = null;
+    return;
+  }
+  sendCatLog(`[SmartSDR-Audio] Starting audio client → ${sdrHost}:4992 (DAX RX ${daxChannel}, bind ${guiClientId})`);
+  smartSdrAudio.start(sdrHost, daxChannel, guiClientId);
 }
 
 function stopSmartSdrAudio() {
