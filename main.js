@@ -400,6 +400,11 @@ let remoteAudioWin = null; // hidden BrowserWindow for WebRTC audio bridge
 // the WebSocket; the foreground-reconnect on unlock brings it back
 // fast enough that we shouldn't restart everything every time.
 let _clientDisconnectGraceTimer = null;
+// Audio-bridge silence tracker, fed by remote-audio-health IPC from
+// the hidden audio bridge window. Used to populate audio-health
+// pushes and the audioOk flag on the periodic status snapshot.
+let _audioBridgeSilent = false;
+let _audioBridgeSilentSince = 0;
 let _currentFreqHz = 0;    // tracked for remote radio status
 let _currentMode = '';
 let _remoteTxState = false;
@@ -6766,6 +6771,19 @@ function broadcastRemoteRadioStatus() {
     alc: _currentAlc,
     power: _currentPower,
     capabilities: getRigCapabilities(rigType),
+    // Audio bridge health. audioOk = "is audio actually flowing right
+    // now"; audioExpected = "should audio be flowing" (CAT connected,
+    // not TX, not FreeDV-muted, ECHOCAT enabled). iOS uses both: it
+    // only auto-restarts when audioExpected && !audioOk, suppressing
+    // false positives during legitimate silence (TX, codec mute, etc.).
+    audioOk: !_audioBridgeSilent,
+    audioExpected: !!(
+      settings.enableRemote &&
+      ((cat && cat.connected) || (smartSdr && smartSdr.connected)) &&
+      !_remoteTxState &&
+      !_freedvAudioMuted &&
+      remoteAudioWin && !remoteAudioWin.isDestroyed()
+    ),
   };
   remoteServer.broadcastRadioStatus(status);
 }
@@ -6846,6 +6864,11 @@ function destroyRemoteAudioWindow() {
     try { remoteAudioWin.webContents.send('remote-audio-stop'); } catch { /* may be destroyed */ }
     try { remoteAudioWin.close(); } catch { /* ignore */ }
   }
+  // Reset health tracker so the rebuilt bridge starts fresh — otherwise
+  // a stale "silent" from before the teardown would suppress the
+  // recovered transition until the next zero-peak sample.
+  _audioBridgeSilent = false;
+  _audioBridgeSilentSince = 0;
   // After ECHOCAT releases the audio device, tell renderer to restart JTCAT
   // audio capture if it was running — the shared device may need re-acquisition
   setTimeout(() => {
@@ -12883,6 +12906,26 @@ app.whenReady().then(() => {
     if (remoteServer && remoteServer.running) {
       remoteServer.sendToClient({ type: 'tx-meter', value: peak });
     }
+  });
+
+  // Audio-health state from the bridge. _audioBridgeSilent reflects what
+  // the bridge's peak monitor is reporting; broadcastRemoteRadioStatus
+  // also picks this up to populate audioOk on the periodic status push.
+  ipcMain.on('remote-audio-health', (_e, state) => {
+    const newSilent = !!(state && state.silent);
+    const reason = (state && state.reason) || '';
+    if (_audioBridgeSilent === newSilent) return;
+    _audioBridgeSilent = newSilent;
+    _audioBridgeSilentSince = newSilent ? Date.now() : 0;
+    sendCatLog(`[Echo CAT] Audio-bridge health: ${newSilent ? 'SILENT (' + reason + ')' : 'OK (recovered)'}`);
+    if (remoteServer && remoteServer.running) {
+      const payload = newSilent
+        ? { type: 'audio-health', ok: false, reason: reason || 'peak-zero', since: _audioBridgeSilentSince }
+        : { type: 'audio-health', ok: true };
+      remoteServer.sendToClient(payload);
+    }
+    // Refresh status so audioOk reflects the new state immediately.
+    broadcastRemoteRadioStatus();
   });
 
   // --- Directory IPC ---

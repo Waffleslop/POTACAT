@@ -61,6 +61,12 @@ window.api.onStartAudio(async (config) => {
       const sender = pc.addTrack(track, localStream);
       if (track.kind === 'audio' && !audioSender) audioSender = sender;
     }
+
+    // Start the audio-health monitor on the rig→phone stream so the
+    // desktop can push audio-health: { ok: false } when the source
+    // goes silent for ~5s. iOS auto-restarts on that signal.
+    try { startHealthMonitor(localStream); }
+    catch (e) { console.warn('[remote-audio] health monitor init failed:', e.message); }
     // If Kiwi was already active when WebRTC started, swap immediately.
     if (kiwiActive && audioSender) {
       const kiwiTrack = ensureKiwiTrack();
@@ -195,6 +201,71 @@ function stopTxMeter() {
   if (window.api.sendTxMeter) window.api.sendTxMeter(0);
 }
 
+// --- Audio health monitor ---
+// Watches the rig audio coming OUT of the bridge to the phone. If the
+// peak energy stays at zero for 5 consecutive 1-second samples while
+// audio is expected to be flowing, signal "silent" to main; main
+// pushes audio-health to the iOS app so it can offer a Restart button
+// (or auto-restart with the circuit breaker as backstop). On the next
+// non-zero sample, signal "recovered".
+//
+// The TX meter already taps the same stream with 30 ms granularity for
+// the VFO popout's TX bar; this is a separate, lower-frequency tap so
+// the two don't fight.
+let _healthCtx = null;
+let _healthAnalyser = null;
+let _healthTimer = null;
+let _healthSilentCount = 0;
+let _healthState = 'unknown'; // 'ok' | 'silent' | 'unknown'
+const HEALTH_SILENT_THRESHOLD = 5; // 5 × 1s = 5 s of zero before flagging
+const HEALTH_PEAK_FLOOR = 0.0005;  // below this is "no audio"
+
+function startHealthMonitor(stream) {
+  stopHealthMonitor();
+  if (!stream || !window.api.sendAudioHealth) return;
+  _healthCtx = new AudioContext();
+  const source = _healthCtx.createMediaStreamSource(stream);
+  _healthAnalyser = _healthCtx.createAnalyser();
+  _healthAnalyser.fftSize = 1024;
+  _healthAnalyser.smoothingTimeConstant = 0;
+  const muted = _healthCtx.createGain();
+  muted.gain.value = 0;
+  source.connect(_healthAnalyser);
+  _healthAnalyser.connect(muted);
+  muted.connect(_healthCtx.destination);
+
+  const buf = new Float32Array(_healthAnalyser.fftSize);
+  _healthTimer = setInterval(() => {
+    if (!_healthAnalyser) return;
+    _healthAnalyser.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = Math.abs(buf[i]);
+      if (v > peak) peak = v;
+    }
+    if (peak < HEALTH_PEAK_FLOOR) {
+      _healthSilentCount++;
+      if (_healthSilentCount >= HEALTH_SILENT_THRESHOLD && _healthState !== 'silent') {
+        _healthState = 'silent';
+        window.api.sendAudioHealth({ silent: true, reason: 'peak-zero-while-rx' });
+      }
+    } else {
+      _healthSilentCount = 0;
+      if (_healthState !== 'ok') {
+        _healthState = 'ok';
+        window.api.sendAudioHealth({ silent: false });
+      }
+    }
+  }, 1000);
+}
+function stopHealthMonitor() {
+  if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; }
+  _healthAnalyser = null;
+  if (_healthCtx) { _healthCtx.close().catch(() => {}); _healthCtx = null; }
+  _healthSilentCount = 0;
+  _healthState = 'unknown';
+}
+
 // Cleanup
 window.api.onStopAudio(() => {
   if (pc) { pc.close(); pc = null; }
@@ -206,6 +277,7 @@ window.api.onStopAudio(() => {
   audioSender = null;
   audioEl.srcObject = null;
   stopTxMeter();
+  stopHealthMonitor();
   window.api.sendAudioStatus({ status: 'stopped' });
 });
 

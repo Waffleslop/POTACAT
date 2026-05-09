@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   // PC-side TX peak (0..1) for the VFO popout's TX meter — lets the user see
   // whether ECHOCAT phone audio is reaching the radio's USB CODEC.
   sendTxMeter: (peak) => ipcRenderer.send('remote-audio-tx-meter', peak),
+  sendAudioHealth: (state) => ipcRenderer.send('remote-audio-health', state),
   onFreedvMute: (cb) => ipcRenderer.on('freedv-mute', (_e, muted) => cb(muted)),
   // KiwiSDR / WebSDR audio routed through the WebRTC bridge so mobile clients
   // (which don't have Web Audio) hear SDR audio over the same path as rig
