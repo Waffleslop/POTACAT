@@ -2253,6 +2253,18 @@ html, body {
 
 /* --- Log Reference / Additional Parks / Respot --- */
 .log-ref-name { font-size: 12px; color: var(--pota); margin-top: 4px; }
+/* Multi-OTA chip strip — visible above the comment field on a multi-type
+   spot (POTA + SOTA on same activator). Read-only display; the refs ride
+   along on the log-qso payload to land in all of POTA_REF / SOTA_REF /
+   WWFF_REF / LLOTA_REF in the ADIF. */
+.log-multi-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.log-multi-chip { padding: 4px 8px; font-size: 11px; font-weight: 600;
+  border-radius: 6px; border: 1px solid var(--chip-color, #444);
+  color: var(--chip-color, var(--text-dim)); background: var(--bg-header); }
+.log-multi-chip[data-type="pota"]  { --chip-color: var(--pota); }
+.log-multi-chip[data-type="sota"]  { --chip-color: var(--sota); }
+.log-multi-chip[data-type="wwff"]  { --chip-color: #26a69a; }
+.log-multi-chip[data-type="llota"] { --chip-color: #42a5f5; }
 .log-respot-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px;
   color: var(--pota); margin: 8px 0 4px; cursor: pointer; }
 #log-respot-comment { width: 100%; padding: 8px 10px; font-size: 14px;

@@ -2016,7 +2016,14 @@
         }
       }).join('');
 
-      return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}${skipClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}">
+      // Secondary refs from cross-source dedup. Multi-type spots
+      // (POTA + SOTA on the same activator) carry these so the log
+      // popup can display + forward all programs without a re-query.
+      const potaRefAttr  = s.potaReference  ? ` data-pota-ref="${esc(s.potaReference)}"`   : '';
+      const sotaRefAttr  = s.sotaReference  ? ` data-sota-ref="${esc(s.sotaReference)}"`   : '';
+      const wwffRefAttr  = s.wwffReference  ? ` data-wwff-ref="${esc(s.wwffReference)}"`   : '';
+      const llotaRefAttr = s.llotaReference ? ` data-llota-ref="${esc(s.llotaReference)}"` : '';
+      return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}${skipClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}"${potaRefAttr}${sotaRefAttr}${wwffRefAttr}${llotaRefAttr}>
         <span class="spot-call">${workedCheck}${esc(s.callsign)}${donorCallsigns.has((s.callsign || '').toUpperCase()) ? '<span class="donor-paw" title="POTACAT Supporter">\uD83D\uDC3E</span>' : ''}${(s.callsign || '').toUpperCase() === 'K3SBP' ? '<span class="donor-paw" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>' : ''}${newBadge}</span>
         ${colHtml}
       </div>`;
@@ -2244,6 +2251,11 @@
           mode: card.dataset.mode || '',
           sig: srcToSig(card.dataset.src),
           sigInfo: card.dataset.ref || '',
+          // Multi-type cross-program refs from the spot card.
+          potaRef:  card.dataset.potaRef  || '',
+          sotaRef:  card.dataset.sotaRef  || '',
+          wwffRef:  card.dataset.wwffRef  || '',
+          llotaRef: card.dataset.llotaRef || '',
         });
       }
       return;
@@ -4587,6 +4599,25 @@
     return 'SSB';
   }
 
+  // Multi-OTA refs from the spot card. Held while the log sheet is open
+  // and forwarded on the log-qso payload so the desktop can populate
+  // POTA_REF / SOTA_REF / WWFF_REF / LLOTA_REF independently in ADIF.
+  let logMultiRefs = { pota: '', sota: '', wwff: '', llota: '' };
+  const logMultiChipsEl = document.getElementById('log-multi-chips');
+
+  function renderMultiChips() {
+    const order = ['pota', 'sota', 'wwff', 'llota'];
+    const labels = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA' };
+    const parts = [];
+    for (const t of order) {
+      if (logMultiRefs[t]) {
+        parts.push(`<span class="log-multi-chip" data-type="${t}">${labels[t]} ${logMultiRefs[t]}</span>`);
+      }
+    }
+    logMultiChipsEl.innerHTML = parts.join('');
+    logMultiChipsEl.classList.toggle('hidden', parts.length === 0);
+  }
+
   function openLogSheet(prefill) {
     const p = prefill || {};
     logCall.value = p.callsign || '';
@@ -4610,6 +4641,24 @@
     // Pre-fill reference from spot
     logRefInput.value = p.sigInfo || '';
     logRefName.textContent = '';
+
+    // Capture multi-OTA secondary refs from the spot card data
+    // attributes (set by the spot list renderer when cross-source
+    // dedup tagged the spot with multiple programs). Casey decision
+    // #3 — show them visibly without an expand click.
+    logMultiRefs = {
+      pota:  (p.potaRef  || '').toUpperCase(),
+      sota:  (p.sotaRef  || '').toUpperCase(),
+      wwff:  (p.wwffRef  || '').toUpperCase(),
+      llota: (p.llotaRef || '').toUpperCase(),
+    };
+    // The primary type's ref came in via sigInfo; absorb it into the
+    // matching multi-ref slot so the chip strip + payload are the
+    // single source of truth on which programs apply to this QSO.
+    if (type && type !== 'dx' && p.sigInfo) {
+      logMultiRefs[type] = p.sigInfo.toUpperCase();
+    }
+    renderMultiChips();
 
     // Reset respot
     logRespotComment.value = '';
@@ -4671,6 +4720,21 @@
         sigInfo,
       };
       if (logSheetComment) baseData.userComment = logSheetComment;
+
+      // Multi-OTA: forward every program ref the spot was tagged with
+      // (or that the user typed into the primary input). Desktop's
+      // log-qso handler accepts these and writes them to POTA_REF /
+      // SOTA_REF / WWFF_REF / LLOTA_REF independently in ADIF. The
+      // primary type's typed ref overrides whatever came from the
+      // spot card (n-fer support: comma-separated values flow as-is).
+      const liveMulti = Object.assign({}, logMultiRefs);
+      if (logSelectedType && logSelectedType !== 'dx' && rawRef) {
+        liveMulti[logSelectedType] = rawRef;
+      }
+      if (liveMulti.pota)  baseData.potaRef  = liveMulti.pota;
+      if (liveMulti.sota)  baseData.sotaRef  = liveMulti.sota;
+      if (liveMulti.wwff)  baseData.wwffRef  = liveMulti.wwff;
+      if (liveMulti.llota) baseData.llotaRef = liveMulti.llota;
 
       // Respot flags
       const respotCb = document.getElementById('log-respot-cb');
