@@ -149,9 +149,20 @@ let prioritizeNewParks = false; // sort unworked-park spots to the top of the ta
 let hideQrt = true; // hide spots with QRT in comments (default on)
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
-let respotTemplate = '{rst} in {QTH} 73s {mycallsign} via POTACAT'; // park re-spot comment template
-let dxRespotTemplate = 'Heard in {QTH} 73s {mycallsign} via POTACAT'; // DX cluster spot comment template
+// Per-network re-spot templates (Chris NR9Q request). Empty WWFF/LLOTA fall back
+// to the POTA template so a single-template user keeps prior behavior.
+let respotTemplate = '{rst} in {QTH} 73s {mycallsign} via POTACAT'; // POTA template (also fallback)
+let wwffRespotTemplate = ''; // empty = use respotTemplate
+let llotaRespotTemplate = ''; // empty = use respotTemplate
+let dxRespotTemplate = 'Heard in {QTH} 73s {mycallsign} via POTACAT'; // DX cluster
 let quickRespotTemplate = 'Heard strong in {QTH}; 73s {callsign} via POTACAT'; // legacy — migrated below
+function respotTemplateFor(network) {
+  // network: 'pota' | 'wwff' | 'llota' | 'dxc'
+  if (network === 'dxc') return dxRespotTemplate;
+  if (network === 'wwff') return wwffRespotTemplate || respotTemplate;
+  if (network === 'llota') return llotaRespotTemplate || respotTemplate;
+  return respotTemplate; // pota or default
+}
 let grid = ''; // home grid square for {QTH} template substitution
 let myCallsign = '';
 let lastTunedSpot = null; // last clicked/tuned spot for quick respot
@@ -463,6 +474,8 @@ const setRefreshInterval = document.getElementById('set-refresh-interval');
 const setScanDwell = document.getElementById('set-scan-dwell');
 const setWatchlist = document.getElementById('set-watchlist');
 const setRespotTemplate = document.getElementById('set-respot-template');
+const setWwffRespotTemplate = document.getElementById('set-wwff-respot-template');
+const setLlotaRespotTemplate = document.getElementById('set-llota-respot-template');
 const setDxRespotTemplate = document.getElementById('set-dx-respot-template');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
@@ -1312,6 +1325,8 @@ async function loadPrefs() {
   document.documentElement.style.setProperty('--bl-scale', String(blScale));
   respotDefault = settings.respotDefault !== false; // default true
   if (settings.respotTemplate != null) respotTemplate = settings.respotTemplate;
+  if (settings.wwffRespotTemplate != null) wwffRespotTemplate = settings.wwffRespotTemplate;
+  if (settings.llotaRespotTemplate != null) llotaRespotTemplate = settings.llotaRespotTemplate;
   if (settings.dxRespotTemplate != null) dxRespotTemplate = settings.dxRespotTemplate;
   if (settings.quickRespotTemplate != null) quickRespotTemplate = settings.quickRespotTemplate;
   myCallsign = settings.myCallsign || '';
@@ -2632,7 +2647,8 @@ async function saveBannerQso() {
   const opFirstname = (opQrz && (cleanQrzName(opQrz.nickname) || cleanQrzName(opQrz.fname))) || 'OM';
   let respotCommentText = '';
   if (wantsRespot) {
-    const tmpl = (type === '' && clusterConnected) ? dxRespotTemplate : respotTemplate;
+    const tmplNetwork = (type === '' && clusterConnected) ? 'dxc' : (type === 'wwff' ? 'wwff' : type === 'llota' ? 'llota' : 'pota');
+    const tmpl = respotTemplateFor(tmplNetwork);
     respotCommentText = tmpl.replace(/\{rst\}/gi, rstSent).replace(/\{QTH\}/gi, grid).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
   }
 
@@ -5906,9 +5922,14 @@ async function openQuickRespot() {
   bar.style.color = SOURCE_COLORS_ACTIVE[targets[0]];
   dlg.dataset.targets = JSON.stringify(targets);
 
-  // Comment template — pick based on network type
+  // Comment template — pick based on network type (first target wins).
   const commentField = document.getElementById('respot-comment');
-  const tmpl = targets.includes('dxc') ? dxRespotTemplate : respotTemplate;
+  const tmplNetwork = targets.includes('dxc') ? 'dxc'
+    : targets.includes('pota') ? 'pota'
+    : targets.includes('wwff') ? 'wwff'
+    : targets.includes('llota') ? 'llota'
+    : 'pota';
+  const tmpl = respotTemplateFor(tmplNetwork);
   const spotQrz = s.callsign ? qrzData.get(s.callsign.toUpperCase().split('/')[0]) : null;
   const spotFirstname = (spotQrz && (cleanQrzName(spotQrz.nickname) || cleanQrzName(spotQrz.fname))) || 'OM';
   commentField.value = tmpl
@@ -6187,7 +6208,12 @@ function updateLogRespot() {
     labelTextNode.textContent = ' ' + verb + labelNames;
     respotLabel.style.color = SOURCE_COLORS_ACTIVE[targets[0]];
     respotCheckbox.checked = respotDefault;
-    respotComment.value = targets.includes('dxc') ? dxRespotTemplate : respotTemplate;
+    const tmplNetwork = targets.includes('dxc') ? 'dxc'
+      : targets.includes('pota') ? 'pota'
+      : targets.includes('wwff') ? 'wwff'
+      : targets.includes('llota') ? 'llota'
+      : 'pota';
+    respotComment.value = respotTemplateFor(tmplNetwork);
     respotCommentLabel.style.display = respotCheckbox.checked ? '' : 'none';
     respotCheckbox.onchange = () => { respotCommentLabel.style.display = respotCheckbox.checked ? '' : 'none'; };
   } else {
@@ -8591,6 +8617,8 @@ async function openSettingsDialog(tab) {
   setDigitalFilter.value = s.digitalFilterWidth || 0;
   setWatchlist.value = s.watchlist || '';
   if (setRespotTemplate) setRespotTemplate.value = s.respotTemplate || '';
+  if (setWwffRespotTemplate) setWwffRespotTemplate.value = s.wwffRespotTemplate || '';
+  if (setLlotaRespotTemplate) setLlotaRespotTemplate.value = s.llotaRespotTemplate || '';
   if (setDxRespotTemplate) setDxRespotTemplate.value = s.dxRespotTemplate || '';
   setNotifyPopup.checked = s.notifyPopup !== false;
   setNotifySound.checked = s.notifySound !== false;
@@ -8978,6 +9006,8 @@ document.getElementById('settings-import').addEventListener('click', async () =>
 settingsSave.addEventListener('click', async () => {
   const watchlistRaw = setWatchlist.value.trim();
   const respotTemplateVal = setRespotTemplate ? setRespotTemplate.value.trim() : '';
+  const wwffRespotTemplateVal = setWwffRespotTemplate ? setWwffRespotTemplate.value.trim() : '';
+  const llotaRespotTemplateVal = setLlotaRespotTemplate ? setLlotaRespotTemplate.value.trim() : '';
   const dxRespotTemplateVal = setDxRespotTemplate ? setDxRespotTemplate.value.trim() : '';
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
@@ -9169,6 +9199,8 @@ settingsSave.addEventListener('click', async () => {
     digitalFilterWidth: digitalFilterVal,
     watchlist: watchlistRaw,
     respotTemplate: respotTemplateVal,
+    wwffRespotTemplate: wwffRespotTemplateVal,
+    llotaRespotTemplate: llotaRespotTemplateVal,
     dxRespotTemplate: dxRespotTemplateVal,
     notifyPopup: notifyPopupEnabled,
     notifySound: notifySoundEnabled,

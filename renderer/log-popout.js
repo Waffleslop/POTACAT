@@ -49,9 +49,21 @@
 
   let selectedType = 'dx';
   let respotDefaultPref = true; // hydrated from settings on init
-  let respotTemplatePref = '{rst} in {QTH} 73s {mycallsign} via POTACAT';
+  // Per-network templates (Chris NR9Q). Empty WWFF/LLOTA fall back to POTA.
+  let potaTemplatePref  = '{rst} in {QTH} 73s {mycallsign} via POTACAT';
+  let wwffTemplatePref  = '';
+  let llotaTemplatePref = '';
+  function templateFor(type) {
+    if (type === 'wwff')  return wwffTemplatePref  || potaTemplatePref;
+    if (type === 'llota') return llotaTemplatePref || potaTemplatePref;
+    return potaTemplatePref;
+  }
   let myCallsignPref = ''; // for {mycallsign} substitution in respot comment
   let myGridPref = '';     // for {QTH} substitution
+  // True while the comment field holds the rendered default for the current
+  // type. Flips to false as soon as the user types into the field — at which
+  // point the "Use default" checkbox auto-unchecks. Re-checking restores it.
+  let respotCommentIsDefault = true;
   let lastQrzInfo = null;
   let lastLookupCall = '';
   let lookupTimer = null;
@@ -236,7 +248,12 @@
     respotSectionEl.classList.toggle('hidden', !eligible);
     if (eligible) {
       respotCheckEl.checked = !!respotDefaultPref;
-      if (!respotCommentEl.value) respotCommentEl.value = respotTemplatePref;
+      // Always refresh the comment to the *current network's* template when
+      // switching chips, unless the user has already typed a custom comment
+      // for this QSO (respotCommentIsDefault === false).
+      if (respotCommentIsDefault) {
+        respotCommentEl.value = templateFor(type);
+      }
     }
   }
 
@@ -264,6 +281,10 @@
     notesInput.value = '';
     rstSentInput.value = '59';
     rstRcvdInput.value = '59';
+    // Next QSO starts fresh: comment field reverts to current network's
+    // template, "Use default" checkbox returns to the user's saved pref.
+    respotCommentIsDefault = true;
+    respotCheckEl.checked = !!respotDefaultPref;
     selectChip('dx');
     identityEl.innerHTML = '';
     qrzBtn.classList.remove('active');
@@ -342,7 +363,7 @@
     let respotFields = {};
     const wantsRespot = !!respotCheckEl.checked && !!RESPOT_ELIGIBLE[selectedType] && !!ref;
     if (wantsRespot) {
-      const tmpl = respotCommentEl.value.trim() || respotTemplatePref;
+      const tmpl = respotCommentEl.value.trim() || templateFor(selectedType);
       const respotComment = tmpl
         .replace(/\{rst\}/gi, (rstSentInput.value || '59').slice(0, 3))
         .replace(/\{QTH\}/gi, myGridPref)
@@ -536,29 +557,44 @@
       // logging paths agree on default state and comment template.
       if (settings) {
         respotDefaultPref = settings.respotDefault !== false; // default true
-        if (settings.respotTemplate) respotTemplatePref = settings.respotTemplate;
+        if (settings.respotTemplate)      potaTemplatePref  = settings.respotTemplate;
+        if (settings.wwffRespotTemplate)  wwffTemplatePref  = settings.wwffRespotTemplate;
+        if (settings.llotaRespotTemplate) llotaTemplatePref = settings.llotaRespotTemplate;
         myCallsignPref = (settings.myCallsign || '').toUpperCase();
         myGridPref = (settings.grid || '').toUpperCase();
       }
       // Apply hydrated defaults to the (currently DX-by-default) chip.
       // selectChip() runs before this resolves, so push the values now.
       respotCheckEl.checked = respotDefaultPref;
-      respotCommentEl.value = respotTemplatePref;
+      respotCommentEl.value = templateFor(selectedType);
+      respotCommentIsDefault = true;
     } catch {}
   })();
 
-  // Persist the user's checkbox + comment edits back to settings so
-  // future log popouts (and the spot-row Log dialog / BL) start with
-  // the same state. Ditto for the comment template.
+  // Persist the *checkbox state* across popouts. The per-QSO comment text
+  // is one-shot — never saved as the template. (Chris NR9Q: earlier builds
+  // overwrote settings.respotTemplate whenever a user typed a situational
+  // note like "Rare park!" into the comment, wiping their saved default.)
+  // The saved template only changes from Settings → Spots.
+  //
+  // "Use default" behavior: checkbox checked → comment shows the current
+  // network's templated text. As soon as the user types, the box auto-
+  // unchecks and their custom text is preserved. Re-checking restores the
+  // template (overwriting the custom text).
   respotCheckEl.addEventListener('change', () => {
     respotDefaultPref = !!respotCheckEl.checked;
+    if (respotCheckEl.checked) {
+      respotCommentEl.value = templateFor(selectedType);
+      respotCommentIsDefault = true;
+    } else {
+      respotCommentIsDefault = false;
+    }
     try { window.api.saveSettings({ respotDefault: respotDefaultPref }); } catch {}
   });
-  respotCommentEl.addEventListener('change', () => {
-    const v = respotCommentEl.value.trim();
-    if (v) {
-      respotTemplatePref = v;
-      try { window.api.saveSettings({ respotTemplate: v }); } catch {}
+  respotCommentEl.addEventListener('input', () => {
+    if (respotCommentEl.value !== templateFor(selectedType)) {
+      respotCommentIsDefault = false;
+      if (respotCheckEl.checked) respotCheckEl.checked = false;
     }
   });
 
