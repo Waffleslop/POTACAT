@@ -4563,6 +4563,73 @@ function sendCwTextToRadio(text) {
   }
 }
 
+// --- Audio-bridge restart helper (module scope) ---------------------------
+// Tears down + rebuilds the ECHOCAT WebRTC audio bridge AND the JTCAT
+// audio capture in one go. Fixes the RDP audio-shuffle problem: when
+// Windows enters/leaves an RDP session it can swap the default audio
+// device and invalidate handles, leaving apps pointing at the now-stale
+// device. Same shape hits WSJT-X. K3SBP 2026-05-08.
+//
+// Both the desktop button (ipcMain.handle below) and the iOS app
+// (remoteServer 'restart-audio' WS message, wired inside connectRemote())
+// drive this same helper.
+//
+// MUST live at module scope so `connectRemote()` (called from
+// app.whenReady before the IPC handler block runs) can reference it.
+// Previously this lived inside app.whenReady, and the `remoteServer.on(
+// 'restart-audio')` line tried to register on a null remoteServer when
+// ECHOCAT was disabled — that threw a TypeError that aborted every
+// subsequent ipcMain.handle registration in the .then() block, producing
+// the "No handler registered" errors for save-settings / save-qso /
+// QRZ lookup / rig switching reported in v1.5.17.
+let _restartInFlight = null;
+const _restartHistory = [];
+const RESTART_CIRCUIT_LIMIT = 3;
+const RESTART_CIRCUIT_WINDOW_MS = 60_000;
+async function restartEchoAudio(source) {
+  if (_restartInFlight) return _restartInFlight;
+
+  const now = Date.now();
+  while (_restartHistory.length && now - _restartHistory[0] > RESTART_CIRCUIT_WINDOW_MS) {
+    _restartHistory.shift();
+  }
+  if (_restartHistory.length >= RESTART_CIRCUIT_LIMIT) {
+    const tag = source === 'mobile' ? '[Echo CAT/mobile]' : '[Echo CAT]';
+    const note = `${_restartHistory.length} restarts in last 60s; aborting auto-recovery`;
+    sendCatLog(`${tag} Audio restart suppressed: ${note}`);
+    return {
+      ok: false,
+      error: 'audio bridge keeps failing — check DAX configuration',
+      note,
+    };
+  }
+  _restartHistory.push(now);
+
+  _restartInFlight = (async () => {
+    const tag = source === 'mobile' ? '[Echo CAT/mobile]' : '[Echo CAT]';
+    sendCatLog(`${tag} Audio reset requested — tearing down bridge + JTCAT capture`);
+    destroyRemoteAudioWindow();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    if (settings.enableRemote) {
+      try {
+        await startRemoteAudio();
+        sendCatLog(`${tag} Audio bridge rebuilt.`);
+        return { ok: true };
+      } catch (err) {
+        sendCatLog(`${tag} Audio bridge rebuild failed: ` + (err.message || err));
+        return { ok: false, error: err.message || String(err) };
+      }
+    }
+    return { ok: true, note: 'ECHOCAT not enabled — JTCAT audio kicked, no bridge rebuilt.' };
+  })();
+
+  try {
+    return await _restartInFlight;
+  } finally {
+    _restartInFlight = null;
+  }
+}
+
 function connectRemote() {
   disconnectRemote();
   if (!settings.enableRemote) return;
@@ -6602,6 +6669,23 @@ function connectRemote() {
 
   remoteServer.on('error', (err) => {
     console.error('[Echo CAT] Error:', err.message);
+  });
+
+  // Mobile-triggered audio restart. Phone sends { type: 'restart-audio' };
+  // desktop runs the shared helper and replies with restart-audio-result.
+  // Must live here (inside connectRemote) — registering on null at
+  // app.whenReady time used to crash the whole IPC handler block when
+  // ECHOCAT was disabled.
+  remoteServer.on('restart-audio', async () => {
+    const r = await restartEchoAudio('mobile');
+    if (remoteServer && remoteServer.running) {
+      remoteServer.sendToClient({
+        type: 'restart-audio-result',
+        ok: !!r.ok,
+        error: r.error || '',
+        note: r.note || '',
+      });
+    }
   });
 
   const port = settings.remotePort || 7300;
@@ -12684,89 +12768,13 @@ app.whenReady().then(() => {
     return { ok };
   });
 
-  // Reset audio devices — tears down + rebuilds the ECHOCAT WebRTC
-  // bridge AND the JTCAT audio capture in one go. Fixes the RDP
-  // audio-shuffle problem: when Windows enters/leaves an RDP session,
-  // it can swap the default audio device and invalidate handles, but
-  // running apps keep pointing at the now-stale device. Same shape
-  // hits WSJT-X. The "fix" used to be "drive home and restart everything";
-  // this is the remote equivalent. K3SBP 2026-05-08.
-  //
-  // Both the desktop button (IPC) and the iOS app (WebSocket
-  // 'restart-audio' message) drive this same helper.
-  // Idempotent across racing triggers (desktop button, mobile WS,
-  // future auto-restart on health signal): if a restart is already in
-  // flight, all callers get the same eventual result.
-  let _restartInFlight = null;
-
-  // Circuit breaker. Three restarts inside 60 seconds means the
-  // underlying device is genuinely broken (DAX misconfigured, sound
-  // driver dead, etc.) — restarting again won't fix it and will burn
-  // phone battery. Abort with a diagnostic error the iOS app can
-  // surface to the user.
-  const _restartHistory = [];
-  const RESTART_CIRCUIT_LIMIT = 3;
-  const RESTART_CIRCUIT_WINDOW_MS = 60_000;
-
-  async function restartEchoAudio(source) {
-    if (_restartInFlight) return _restartInFlight;
-
-    const now = Date.now();
-    while (_restartHistory.length && now - _restartHistory[0] > RESTART_CIRCUIT_WINDOW_MS) {
-      _restartHistory.shift();
-    }
-    if (_restartHistory.length >= RESTART_CIRCUIT_LIMIT) {
-      const tag = source === 'mobile' ? '[Echo CAT/mobile]' : '[Echo CAT]';
-      const note = `${_restartHistory.length} restarts in last 60s; aborting auto-recovery`;
-      sendCatLog(`${tag} Audio restart suppressed: ${note}`);
-      return {
-        ok: false,
-        error: 'audio bridge keeps failing — check DAX configuration',
-        note,
-      };
-    }
-    _restartHistory.push(now);
-
-    _restartInFlight = (async () => {
-      const tag = source === 'mobile' ? '[Echo CAT/mobile]' : '[Echo CAT]';
-      sendCatLog(`${tag} Audio reset requested — tearing down bridge + JTCAT capture`);
-      destroyRemoteAudioWindow();
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      if (settings.enableRemote) {
-        try {
-          await startRemoteAudio();
-          sendCatLog(`${tag} Audio bridge rebuilt.`);
-          return { ok: true };
-        } catch (err) {
-          sendCatLog(`${tag} Audio bridge rebuild failed: ` + (err.message || err));
-          return { ok: false, error: err.message || String(err) };
-        }
-      }
-      return { ok: true, note: 'ECHOCAT not enabled — JTCAT audio kicked, no bridge rebuilt.' };
-    })();
-
-    try {
-      return await _restartInFlight;
-    } finally {
-      _restartInFlight = null;
-    }
-  }
-
+  // Desktop "Reset audio devices" button → restartEchoAudio helper (defined
+  // at module scope). The mobile-triggered WS 'restart-audio' listener
+  // lives inside connectRemote() so it only registers when remoteServer
+  // exists — registering it here threw "Cannot read properties of null
+  // (reading 'on')" whenever ECHOCAT was disabled, aborting every
+  // subsequent ipcMain.handle in this block (the v1.5.17 regression).
   ipcMain.handle('echocat-restart-audio', () => restartEchoAudio('desktop'));
-
-  // Mobile-triggered restart. Phone sends { type: 'restart-audio' };
-  // desktop runs the same helper and replies with restart-audio-result.
-  remoteServer.on('restart-audio', async () => {
-    const r = await restartEchoAudio('mobile');
-    if (remoteServer && remoteServer.running) {
-      remoteServer.sendToClient({
-        type: 'restart-audio-result',
-        ok: !!r.ok,
-        error: r.error || '',
-        note: r.note || '',
-      });
-    }
-  });
 
   // Ragchew log pop-out: combined callsign lookup. Returns the QRZ result
   // (live network call) AND the past-QSO history from the in-memory index in
