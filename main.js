@@ -1339,6 +1339,9 @@ function sendClusterStatus() {
   }
   const s = { nodes };
   if (win && !win.isDestroyed()) win.webContents.send('cluster-status', s);
+  // Mirror to the log pop-out so its "Spot this DX on the cluster" toggle
+  // can show/hide in real time as cluster nodes connect/disconnect.
+  if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cluster-status', s);
   // Push cluster state to ECHOCAT phone
   if (remoteServer && remoteServer.running) {
     const anyConnected = nodes.some(n => n.connected);
@@ -4113,7 +4116,12 @@ function updateRemoteSettings() {
     enableRotor: !!settings.enableRotor,
     rotorActive: settings.rotorActive !== false,
     remoteCwEnabled: !!settings.remoteCwEnabled,
-    remoteCwMacros: settings.remoteCwMacros || null,
+    // Fall back to the desktop POTACAT CW macros when the phone hasn't
+    // customized its own (settings.remoteCwMacros only gets written when
+    // the phone pushes 'save-cw-macros'). Walt KK4DF v1.5.18: desktop
+    // showed his custom macros but ECHOCAT showed defaults because the
+    // phone copy was never seeded. Phone-edited macros still win when set.
+    remoteCwMacros: settings.remoteCwMacros || settings.cwMacros || null,
     // Phone-stored prefs that we persist server-side so they survive
     // localStorage wipes on the phone (Safari ITP, cache clears).
     // Currently: echocatWelcomeDismissed.
@@ -4511,12 +4519,27 @@ function sendCwTextToRadio(text) {
     .replace(/\{mycallsign\}/gi, settings.myCallsign || '');
   // Note: {call}, {op_firstname}, {state} are expanded client-side before reaching here
   console.log(`[CW] Text: ${expanded}`);
-  // WinKeyer takes priority — it keys the radio directly via hardware output
+  // FlexRadio first when SmartSDR-CW is bound: a Flex user's WinKeyer is
+  // very often plugged in for paddle work only (USB on COM24, not wired
+  // to the radio's KEY jack), so routing macros through WinKeyer silently
+  // eats them. SmartSDR's cwx path keys the same radio the user is
+  // already tuning — if it's available, it's the right answer. K3SBP
+  // 2026-05-13 caught this exact case. WinKeyer remains the default for
+  // non-Flex rigs (CI-V / Yaesu / Kenwood / rigctld) where CAT-side CW
+  // has firmware quirks WinKeyer reliably avoids.
+  if (detectRigType() === 'flex' && smartSdr && smartSdr.connected && smartSdr.cwBound) {
+    const sliceIndex = (settings.catTarget.port || 5002) - 5002;
+    smartSdr.setActiveSlice(sliceIndex);
+    smartSdr.setTxSlice(sliceIndex);
+    smartSdr.sendCwText(expanded);
+    return;
+  }
+  // WinKeyer takes priority for non-Flex (or Flex with no CW bind).
   if (winKeyer && winKeyer.connected) {
     winKeyer.sendText(expanded);
     return;
   }
-  // FlexRadio: ensure active/TX slice is set to POTACAT's slice before sending CW
+  // Flex without a CW client-bind still tries SmartSDR cwx (older path).
   if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
     const sliceIndex = (settings.catTarget.port || 5002) - 5002;
     smartSdr.setActiveSlice(sliceIndex);
@@ -4563,6 +4586,58 @@ function sendCwTextToRadio(text) {
   // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
   if (cat && cat.connected) {
     cat.sendCwText(expanded);
+  }
+}
+
+// Aborts any in-flight CW text send across every dispatch path. Mirrors
+// the shape of sendCwTextToRadio so we catch every backend. AA6C asked
+// for a cancel button on the ECHOCAT CW pane (2026-05-05); the existing
+// desktop ESC handler covered WinKeyer / paddle keyer / SmartSDR but not
+// pyserial / DTR-timer / CAT, so users on those rigs had no way to stop
+// a mis-clicked macro. Idempotent: safe to call when nothing is keying.
+function cancelAllCwSends() {
+  // 1. Hardware WinKeyer — flushes the WK1/WK3 buffer.
+  if (winKeyer && winKeyer.connected) {
+    try { winKeyer.cancelText(); } catch {}
+  }
+  // 2. Local iambic paddle keyer (audio sidetone / DTR).
+  if (keyer) {
+    try { keyer.stop(); } catch {}
+  }
+  // 3. FlexRadio SmartSDR — "cwx clear" drops everything queued.
+  if (smartSdr && smartSdr.connected) {
+    try { smartSdr.cwStop(); } catch {}
+  }
+  // 4. Python pyserial fallback — SIGTERM kicks the script's finally
+  //    block which drops DTR before closing the port.
+  if (_cwPythonProc) {
+    try { _cwPythonProc.kill('SIGTERM'); } catch {}
+    _cwPythonProc = null;
+  }
+  // 5. Node-serialport DTR-key-port timer queue — clear pending dits/dahs
+  //    AND force key-up so a half-sent character doesn't strand the rig in
+  //    TX. Final safety pulse fires 50 ms later in case the immediate
+  //    set() didn't land.
+  if (_cwDtrSendTimers.length) {
+    for (const t of _cwDtrSendTimers) clearTimeout(t);
+    _cwDtrSendTimers = [];
+  }
+  if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  if (cwKeyPort && cwKeyPort.isOpen) {
+    try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch {}
+    setTimeout(() => {
+      if (cwKeyPort && cwKeyPort.isOpen) {
+        try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch {}
+      }
+    }, 50);
+  }
+  // 6. Serial CAT — CatClient (CI-V) has stopCwText (0x17 0xFF); the
+  //    newer RigController has a unified stopCwText (clears its KY drop
+  //    timer + drops PTT, which aborts Kenwood KY buffer and Yaesu auto-
+  //    keying). Both paths feature-detect so an older `cat` object that
+  //    doesn't have the method is just skipped.
+  if (cat && typeof cat.stopCwText === 'function') {
+    try { cat.stopCwText(); } catch {}
   }
 }
 
@@ -4977,6 +5052,12 @@ function connectRemote() {
   });
 
   // CW text macros/freeform from phone — route to radio
+  // ECHOCAT phone tapped its CW Stop button — abort any in-flight macro
+  // text via the same backend-agnostic path the desktop ESC button uses.
+  remoteServer.on('cw-cancel-text', () => {
+    cancelAllCwSends();
+  });
+
   remoteServer.on('cw-text', ({ text }) => {
     if (!text) return;
     sendCwTextToRadio(text);
@@ -8830,6 +8911,7 @@ function createWindow() {
     settings.spotsPopoutOpen = !!(spotsPopoutWin && !spotsPopoutWin.isDestroyed());
     settings.clusterPopoutOpen = !!(clusterPopoutWin && !clusterPopoutWin.isDestroyed());
     settings.vfoPopoutOpen = !!(vfoPopoutWin && !vfoPopoutWin.isDestroyed());
+    settings.logPopoutOpen = !!(logPopoutWin && !logPopoutWin.isDestroyed());
     saveSettings(settings);
     if (popoutWin && !popoutWin.isDestroyed()) popoutWin.close();
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.close();
@@ -8837,6 +8919,7 @@ function createWindow() {
     if (clusterPopoutWin && !clusterPopoutWin.isDestroyed()) clusterPopoutWin.close();
     if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) actmapPopoutWin.close();
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.close();
+    if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.close();
     if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.close();
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.close();
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.close();
@@ -8920,6 +9003,12 @@ function createWindow() {
     // Auto-reopen VFO if it was open when the app last closed
     if (settings.vfoPopoutOpen) {
       ipcMain.emit('vfo-popout-open');
+    }
+    // Auto-reopen Log QSO pop-out if it was open when the app last closed
+    // (W9TEF 2026-05-08). No prefill: the user gets the live-clock /
+    // CAT-fed default state, same as a manual reopen.
+    if (settings.logPopoutOpen) {
+      ipcMain.emit('log-popout-open');
     }
   });
 }
@@ -10758,8 +10847,12 @@ app.whenReady().then(() => {
     logPopoutWin = new BrowserWindow({
       width: 540,
       height: 740,
-      minWidth: 460,
-      minHeight: 560,
+      // Loosened min size (W9TEF 2026-05-07): the form now flex-wraps so a
+      // 360-wide column is usable. minHeight still has to clear the title bar
+      // + callsign row + a couple form rows so the user can see what they're
+      // typing.
+      minWidth: 360,
+      minHeight: 420,
       title: 'Log QSO',
       show: false,
       ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
@@ -10793,6 +10886,13 @@ app.whenReady().then(() => {
       // Send theme + prefill once the renderer is ready.
       logPopoutWin.webContents.send('log-popout-theme', settings.lightMode ? 'light' : 'dark');
       if (prefill) logPopoutWin.webContents.send('log-popout-prefill', prefill);
+      // Replay current cluster status so the DX-spot toggle hydrates on
+      // open without waiting for the next status broadcast.
+      const nodes = [];
+      for (const [id, entry] of clusterClients) {
+        nodes.push({ id, name: entry.nodeConfig.name, host: entry.nodeConfig.host, connected: entry.client.connected });
+      }
+      logPopoutWin.webContents.send('cluster-status', { nodes });
     });
 
     // F12 toggles DevTools, mirroring other pop-outs.
@@ -13436,7 +13536,9 @@ app.whenReady().then(() => {
     }
 
     // Push updated settings to ECHOCAT phone
-    if (has('rotorActive') || has('enableRotor') || has('customCatButtons')) {
+    // cwMacros: desktop edits should propagate to the phone so the
+    // ECHOCAT keyer pane shows the user's custom macros (Walt KK4DF).
+    if (has('rotorActive') || has('enableRotor') || has('customCatButtons') || has('cwMacros')) {
       updateRemoteSettings();
     }
 
@@ -15155,11 +15257,10 @@ app.whenReady().then(() => {
   ipcMain.on('send-cw-text', (_e, text) => {
     sendCwTextToRadio(text);
   });
-  // Desktop CW cancel / abort
+  // Desktop CW cancel / abort — fires from the ESC button in the main
+  // window's CW macro bar and from the VFO popout's cancel button.
   ipcMain.on('cw-cancel', () => {
-    if (winKeyer && winKeyer.connected) winKeyer.cancelText();
-    if (keyer) keyer.stop();
-    if (smartSdr && smartSdr.connected) smartSdr.cwStop();
+    cancelAllCwSends();
   });
 });
 

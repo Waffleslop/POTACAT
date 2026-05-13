@@ -1353,6 +1353,21 @@ html, body {
 
 .cw-text-send:active { opacity: 0.8; }
 
+/* Cancel/Stop button — distinct color from Send so the operator can't
+   easily confuse the two when a macro is mid-flight. AA6C 2026-05-05. */
+.cw-text-stop {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #c62828;
+  color: white;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cw-text-stop:active { opacity: 0.8; }
+[data-theme="light"] .cw-text-stop { background: #d32f2f; }
+
 /* CW Macro editor in settings */
 .so-cw-macros { padding: 0 0 4px 0; }
 

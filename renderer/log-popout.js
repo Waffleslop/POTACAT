@@ -33,6 +33,9 @@
   const clearBtn = document.getElementById('lp-clear');
   const minBtn = document.getElementById('lp-min');
   const closeBtn = document.getElementById('lp-close');
+  const pastEl = document.getElementById('lp-past');
+  const pastTitleEl = document.getElementById('lp-past-title');
+  const pastCaretEl = document.getElementById('lp-past-caret');
   const pastCountEl = document.getElementById('lp-past-count');
   const pastBodyEl = document.getElementById('lp-past-body');
   const pastViewAllEl = document.getElementById('lp-past-view-all');
@@ -40,23 +43,39 @@
   const respotSectionEl = document.getElementById('lp-respot-section');
   const respotCheckEl = document.getElementById('lp-respot');
   const respotCommentEl = document.getElementById('lp-respot-comment');
+  const respotTextEl = document.getElementById('lp-respot-text');
 
   // Per-type respot endpoint availability — mirrors qso-popout.js's
   // NEW_QSO_TYPE_META so behavior is consistent across all logging paths.
-  // SOTA / Tiles / DX (without active cluster) have no public spot-submit
-  // path so we hide the toggle for them.
+  // SOTA has no public spot-submit path so it never shows the toggle.
+  // DX is eligible only when at least one cluster node is connected
+  // (sendSpot would silently no-op otherwise) — that's checked separately
+  // via spotEligible() rather than baked into this constant.
   const RESPOT_ELIGIBLE = { pota: true, wwff: true, llota: true };
 
   let selectedType = 'dx';
   let respotDefaultPref = true; // hydrated from settings on init
+  let clusterConnected = false; // hydrated via onClusterStatus; gates DX toggle
   // Per-network templates (Chris NR9Q). Empty WWFF/LLOTA fall back to POTA.
   let potaTemplatePref  = '{rst} in {QTH} 73s {mycallsign} via POTACAT';
   let wwffTemplatePref  = '';
   let llotaTemplatePref = '';
+  // DX template is a separate setting (settings.dxRespotTemplate) — the
+  // wording differs from a park re-spot because we're spotting *this DX*
+  // for other hunters, not telling the cluster the activator is still on
+  // frequency. Same default as updateRemoteSettings() in main.
+  let dxTemplatePref = 'Heard in {QTH} 73s {mycallsign} via POTACAT';
   function templateFor(type) {
     if (type === 'wwff')  return wwffTemplatePref  || potaTemplatePref;
     if (type === 'llota') return llotaTemplatePref || potaTemplatePref;
+    if (type === 'dx')    return dxTemplatePref;
     return potaTemplatePref;
+  }
+  // True if the current chip can show a spot/respot toggle. POTA/WWFF/LLOTA
+  // always can; DX only when at least one cluster node is connected.
+  function spotEligible(type) {
+    if (type === 'dx') return clusterConnected;
+    return !!RESPOT_ELIGIBLE[type];
   }
   let myCallsignPref = ''; // for {mycallsign} substitution in respot comment
   let myGridPref = '';     // for {QTH} substitution
@@ -76,6 +95,41 @@
   let activationCtx = null;
 
   // ── Helpers ─────────────────────────────────────────────────────────────
+
+  // Maidenhead → lat/lon and great-circle bearing — duplicated here because
+  // the renderer can't require() lib/grid.js (contextIsolation strips node
+  // access). Kept tiny on purpose; KM4CFT 2026-05-07 asked for beam heading
+  // so he doesn't have to bounce out to QRZ for it.
+  function gridToLatLonLocal(grid) {
+    if (!grid || grid.length < 4) return null;
+    const g = grid.toUpperCase();
+    let lon = (g.charCodeAt(0) - 65) * 20 + parseInt(g[2], 10) * 2 - 180;
+    let lat = (g.charCodeAt(1) - 65) * 10 + parseInt(g[3], 10) * 1 - 90;
+    if (grid.length >= 6) {
+      lon += (g.charCodeAt(4) - 65) * (2 / 24) + (1 / 24);
+      lat += (g.charCodeAt(5) - 65) * (1 / 24) + (1 / 48);
+    } else { lon += 1; lat += 0.5; }
+    if (!isFinite(lat) || !isFinite(lon)) return null;
+    return { lat, lon };
+  }
+  function bearingDeg(lat1, lon1, lat2, lon2) {
+    const toRad = (d) => d * Math.PI / 180;
+    const toDeg = (r) => r * 180 / Math.PI;
+    const phi1 = toRad(lat1), phi2 = toRad(lat2);
+    const dLon = toRad(lon2 - lon1);
+    const y = Math.sin(dLon) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+  /** Short-path bearing from user's grid to target's grid, or null if either
+   *  grid is missing/invalid. Returns a 0–359° integer. */
+  function computeBeam(targetGrid) {
+    if (!myGridPref || !targetGrid) return null;
+    const me = gridToLatLonLocal(myGridPref);
+    const them = gridToLatLonLocal(targetGrid);
+    if (!me || !them) return null;
+    return Math.round(bearingDeg(me.lat, me.lon, them.lat, them.lon));
+  }
 
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -171,7 +225,7 @@
       const comment = q.comment || '';
       return `
         <tr>
-          <td>${escapeHtml(when)}</td>
+          <td class="lp-past-when">${escapeHtml(when)}</td>
           <td>${escapeHtml(band)}</td>
           <td class="lp-past-mode">${escapeHtml(mode)}</td>
           <td>${escapeHtml(freq)}</td>
@@ -179,7 +233,7 @@
           ${comment ? `<td class="lp-past-comment">${escapeHtml(comment)}</td>` : ''}
         </tr>`;
     }).join('');
-    pastBodyEl.innerHTML = `<table class="lp-past-table"><tbody>${rows}</tbody></table>`;
+    pastBodyEl.innerHTML = `<div class="lp-past-scroll"><table class="lp-past-table"><tbody>${rows}</tbody></table></div>`;
   }
 
   /** Update the QRZ button + identity row from a lookup result. */
@@ -193,9 +247,15 @@
     if (info) {
       const { name, loc } = qrzNameAndLocation(info);
       nameInput.value = name || '';
-      identityEl.innerHTML = name
-        ? (loc ? `${escapeHtml(name)}<span class="lp-loc"> · ${escapeHtml(loc)}</span>` : escapeHtml(name))
-        : (loc ? `<span class="lp-loc">${escapeHtml(loc)}</span>` : '');
+      const beam = computeBeam(info.grid);
+      const beamHtml = beam != null
+        ? `<span class="lp-beam">· Beam ${String(beam).padStart(3, '0')}°</span>`
+        : '';
+      let html = '';
+      if (name) html += escapeHtml(name);
+      if (loc) html += `<span class="lp-loc">${name ? ' · ' : ''}${escapeHtml(loc)}</span>`;
+      html += beamHtml;
+      identityEl.innerHTML = html;
     } else {
       nameInput.value = '';
       identityEl.innerHTML = '';
@@ -241,13 +301,22 @@
     chipsEl.forEach((c) => c.classList.toggle('active', c.dataset.type === type));
     refSection.classList.toggle('hidden', type === 'dx');
     if (type === 'dx') refInput.value = '';
-    // Show the respot toggle only for types with a public spot-submit
-    // endpoint. Default-checked state is the user's persisted preference,
-    // not always true — if they unchecked last time, stay unchecked.
-    const eligible = !!RESPOT_ELIGIBLE[type];
+    // Show the spot/respot toggle when the chip can spot at all. DX is
+    // gated on a live cluster connection (see spotEligible); POTA/WWFF/LLOTA
+    // always show. Default-checked state honors the user's persisted
+    // preference so unchecking once sticks across chip switches.
+    const eligible = spotEligible(type);
     respotSectionEl.classList.toggle('hidden', !eligible);
     if (eligible) {
       respotCheckEl.checked = !!respotDefaultPref;
+      // Toggle label reads differently for DX vs an activator re-spot —
+      // see W9TEF 2026-05-02 thread, this is a *new* spot the user is
+      // putting on the cluster, not a re-spot of someone else.
+      if (respotTextEl) {
+        respotTextEl.textContent = (type === 'dx')
+          ? 'Spot this DX on the cluster'
+          : 'Re-spot the activator on the network';
+      }
       // Always refresh the comment to the *current network's* template when
       // switching chips, unless the user has already typed a custom comment
       // for this QSO (respotCommentIsDefault === false).
@@ -357,11 +426,15 @@
       else if (selectedType === 'sota') sotaRef = ref;
       else if (selectedType === 'wwff') wwffRef = ref;
     }
-    // Re-spot: pick up the checkbox + comment when the chip's a respottable
-    // type. Mirrors the spot-row Log dialog flag-set so saveQsoRecord on
-    // main runs the same postPotaRespot / wwff / llota paths.
+    // Re-spot: pick up the checkbox + comment when the chip can spot.
+    // Mirrors the spot-row Log dialog flag-set so saveQsoRecord on main
+    // runs the same postPotaRespot / wwff / llota / dxc paths. POTA/WWFF/
+    // LLOTA require a reference; DX cluster spots don't.
     let respotFields = {};
-    const wantsRespot = !!respotCheckEl.checked && !!RESPOT_ELIGIBLE[selectedType] && !!ref;
+    const wantsRespot =
+      !!respotCheckEl.checked &&
+      spotEligible(selectedType) &&
+      (selectedType === 'dx' ? true : !!ref);
     if (wantsRespot) {
       const tmpl = respotCommentEl.value.trim() || templateFor(selectedType);
       const respotComment = tmpl
@@ -372,6 +445,7 @@
       if (selectedType === 'pota') respotFields = { respot: true, respotComment };
       else if (selectedType === 'wwff') respotFields = { wwffRespot: true, wwffReference: ref, respotComment };
       else if (selectedType === 'llota') respotFields = { llotaRespot: true, llotaReference: ref, respotComment };
+      else if (selectedType === 'dx') respotFields = { dxcRespot: true, respotComment };
     }
     const info = lastQrzInfo;
     const data = {
@@ -476,6 +550,27 @@
     if (call) window.api.searchInLogbook(call);
   });
 
+  // Past QSOs collapsible (W9TEF 2026-05-02). State is per-window in
+  // localStorage so the user's preference persists across close/reopen but
+  // doesn't fight any other UI surface.
+  const PAST_COLLAPSED_KEY = 'potacat-log-popout-past-collapsed';
+  function applyPastCollapsed(collapsed) {
+    pastEl.classList.toggle('collapsed', !!collapsed);
+    pastCaretEl.innerHTML = collapsed ? '&#9656;' : '&#9662;'; // ▸ / ▾
+  }
+  try {
+    applyPastCollapsed(localStorage.getItem(PAST_COLLAPSED_KEY) === '1');
+  } catch { applyPastCollapsed(false); }
+  function togglePastCollapsed() {
+    const next = !pastEl.classList.contains('collapsed');
+    applyPastCollapsed(next);
+    try { localStorage.setItem(PAST_COLLAPSED_KEY, next ? '1' : '0'); } catch {}
+  }
+  pastTitleEl.addEventListener('click', togglePastCollapsed);
+  pastTitleEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePastCollapsed(); }
+  });
+
   // Field-edit detection — once the user touches a field, stop auto-filling
   // it from CAT updates / live clock.
   timeInput.addEventListener('input', () => { timeUserEdited = true; });
@@ -560,6 +655,7 @@
         if (settings.respotTemplate)      potaTemplatePref  = settings.respotTemplate;
         if (settings.wwffRespotTemplate)  wwffTemplatePref  = settings.wwffRespotTemplate;
         if (settings.llotaRespotTemplate) llotaTemplatePref = settings.llotaRespotTemplate;
+        if (settings.dxRespotTemplate)    dxTemplatePref    = settings.dxRespotTemplate;
         myCallsignPref = (settings.myCallsign || '').toUpperCase();
         myGridPref = (settings.grid || '').toUpperCase();
       }
@@ -597,6 +693,31 @@
       if (respotCheckEl.checked) respotCheckEl.checked = false;
     }
   });
+
+  // Cluster status drives the DX-chip "Spot this DX on the cluster" toggle.
+  // Listener only re-evaluates the DX path so a pota/wwff/llota user's
+  // checkbox state isn't reset when a cluster node reconnects mid-form.
+  if (window.api.onClusterStatus) {
+    window.api.onClusterStatus((s) => {
+      const anyConnected = !!(s && Array.isArray(s.nodes) && s.nodes.some((n) => n && n.connected))
+        || !!(s && s.connected === true);
+      if (anyConnected === clusterConnected) return;
+      clusterConnected = anyConnected;
+      if (selectedType === 'dx') {
+        // Show or hide the section without resetting unrelated state. If
+        // the cluster just connected, populate the default template + use
+        // the persisted default-checked preference. If it just dropped,
+        // hide the section but keep the user's typed comment cached in
+        // case they reconnect within the same QSO.
+        const eligible = spotEligible('dx');
+        respotSectionEl.classList.toggle('hidden', !eligible);
+        if (eligible) {
+          if (respotTextEl) respotTextEl.textContent = 'Spot this DX on the cluster';
+          if (respotCommentIsDefault) respotCommentEl.value = templateFor('dx');
+        }
+      }
+    });
+  }
 
   selectChip('dx');
   startClock();

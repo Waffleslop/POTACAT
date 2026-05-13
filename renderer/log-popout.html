@@ -51,15 +51,19 @@
     /* Body sections */
     body { background: var(--bg-primary, #1a1a2e); color: var(--text-primary, #e0e0e0); margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; }
     .lp-body { padding: 10px 14px 14px; }
-    .lp-row { display: flex; gap: 8px; margin-top: 6px; }
-    .lp-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-secondary); }
+    /* flex-wrap lets the side-by-side fields stack on narrow widths so the
+       window can be shrunk well below the form's natural width without
+       clipping (W9TEF feedback 2026-05-07). min-width on labels keeps each
+       field at a usable size before it forces the next field to a new row. */
+    .lp-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    .lp-row > label { flex: 1 1 120px; min-width: 110px; display: flex; flex-direction: column; font-size: 11px; color: var(--text-secondary); }
     .lp-row > label > input,
     .lp-row > label > select { margin-top: 3px; padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; }
     .lp-row > label > input[readonly] { color: var(--text-tertiary); background: transparent; border-color: var(--border-primary); }
 
     /* Callsign + QRZ row */
-    .lp-call-row { display: flex; gap: 8px; align-items: flex-end; }
-    .lp-call-row > label { flex: 1; display: flex; flex-direction: column; font-size: 11px; color: var(--text-secondary); }
+    .lp-call-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+    .lp-call-row > label { flex: 1 1 140px; min-width: 120px; display: flex; flex-direction: column; font-size: 11px; color: var(--text-secondary); }
     .lp-call-row > label > input { margin-top: 3px; padding: 4px 6px; font-size: 14px; font-weight: 600; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; text-transform: uppercase; }
     /* QRZ button — black text passes contrast on both themes (13:1 against
        light-cyan dark-mode #4fc3f7, 5:1 against royal-blue light-mode #1976d2). */
@@ -67,9 +71,10 @@
     #lp-qrz-link.active { opacity: 1; pointer-events: auto; }
     #lp-qrz-link:hover.active { filter: brightness(1.1); }
 
-    /* Identity row (Name · Country/State) */
+    /* Identity row (Name · Country/State · Beam 087°) */
     #lp-identity { font-size: 12px; color: var(--accent-green, #4ecca3); min-height: 16px; margin-top: 4px; padding-left: 2px; }
     #lp-identity .lp-loc { color: var(--text-secondary); margin-left: 4px; }
+    #lp-identity .lp-beam { color: var(--accent-blue, #4fc3f7); margin-left: 6px; font-variant-numeric: tabular-nums; }
 
     /* Type chips */
     .lp-chips { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
@@ -99,16 +104,24 @@
     #lp-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--accent-green-btn, #4ecca3); color: #000; padding: 8px 18px; font-size: 13px; font-weight: 600; border-radius: 4px; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 100; }
     #lp-toast.visible { opacity: 1; }
 
-    /* Past QSOs panel */
+    /* Past QSOs panel — collapsible header (W9TEF 2026-05-02). The whole
+       title row is clickable; a caret glyph signals current state. Body is
+       wrapped in an overflow-x:auto container so a narrow window scrolls
+       the table horizontally instead of clipping the date/time column. */
     .lp-past { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border-primary, #333); }
-    .lp-past-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-    .lp-past-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+    .lp-past-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; gap: 8px; }
+    .lp-past-title { font-size: 12px; font-weight: 600; color: var(--text-primary); cursor: pointer; user-select: none; flex: 1; }
+    .lp-past-title:hover { color: var(--accent-blue, #4fc3f7); }
+    .lp-past-title .lp-caret { display: inline-block; width: 10px; color: var(--text-secondary); margin-right: 2px; }
     .lp-past-title .lp-count { color: var(--text-secondary); font-weight: normal; margin-left: 4px; }
+    .lp-past.collapsed #lp-past-body { display: none; }
     .lp-past-link { font-size: 11px; color: var(--accent-blue, #4fc3f7); cursor: pointer; text-decoration: none; }
     .lp-past-link:hover { text-decoration: underline; }
     .lp-past-empty { font-size: 12px; color: var(--text-secondary); font-style: italic; padding: 4px 0; }
+    .lp-past-scroll { overflow-x: auto; }
     .lp-past-table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
     .lp-past-table td { padding: 3px 6px 3px 0; border-bottom: 1px solid var(--border-secondary, #1f1f2e); color: var(--text-primary); white-space: nowrap; vertical-align: top; }
+    .lp-past-table td.lp-past-when { padding-right: 10px; }
     .lp-past-table td.lp-past-comment { white-space: normal; color: var(--text-secondary); font-style: italic; }
     .lp-past-table tr:last-child td { border-bottom: none; }
     .lp-past-table .lp-past-mode { color: var(--accent-blue); }
@@ -158,7 +171,7 @@
     <div id="lp-respot-section" class="hidden" style="margin-top:6px;border-top:1px solid var(--border-primary,#333);padding-top:6px;">
       <label class="lp-respot-label" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
         <input type="checkbox" id="lp-respot" checked>
-        Re-spot the activator on the network
+        <span id="lp-respot-text">Re-spot the activator on the network</span>
       </label>
       <input type="text" id="lp-respot-comment" placeholder="Comment for the spot" style="width:100%;padding:4px 6px;font-size:12px;background:var(--bg-input,#0f1419);border:1px solid var(--border-primary,#333);color:var(--text-primary);border-radius:3px;box-sizing:border-box;margin-top:4px;">
     </div>
@@ -218,9 +231,11 @@
     </div>
 
     <!-- Past QSOs -->
-    <div class="lp-past">
+    <div class="lp-past" id="lp-past">
       <div class="lp-past-header">
-        <div class="lp-past-title">Past QSOs <span id="lp-past-count" class="lp-count"></span></div>
+        <div class="lp-past-title" id="lp-past-title" role="button" tabindex="0" title="Show or hide past QSOs">
+          <span class="lp-caret" id="lp-past-caret">&#9662;</span>Past QSOs <span id="lp-past-count" class="lp-count"></span>
+        </div>
         <a href="#" id="lp-past-view-all" class="lp-past-link" style="display:none;">View all in Logbook &rarr;</a>
       </div>
       <div id="lp-past-body">

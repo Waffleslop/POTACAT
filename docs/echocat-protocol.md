@@ -257,7 +257,7 @@ for the history.
 | `cw-config-ack` | S→C | Config accepted. |
 | `cw-state` | S→C | Keying down/up live. |
 | `cw-text` | C→S | Send a CW string. |
-| `cw-stop` | C→S | Cancel CW transmission. |
+| `cw-stop` | C→S | Cancel CW transmission. Halts the iambic paddle keyer and aborts any in-flight macro / freeform text on the rig (KY buffer flush, SmartSDR cwx clear, pyserial SIGTERM, DTR-timer clear, CAT 0x17 0xFF). |
 | `cw-enable` | C→S | Enable/disable the CW key port. |
 | `paddle` | C→S | Phone paddle event (dot/dash/space). |
 | `save-cw-macros` | C→S | Persist CW macro set. |

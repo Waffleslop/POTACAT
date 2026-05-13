@@ -5763,20 +5763,28 @@ scanBtn.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  // Don't intercept F-keys that are part of a modifier combo — those are
+  // owned by the user-defined hotkey table below (Ctrl+F1, Alt+F2, etc.).
+  // N4BJH 2026-05-12: Ctrl+F1 was getting swallowed by the F1 help handler
+  // because this listener didn't check modifiers, and the user-defined
+  // tune binding never reached the rig.
+  const bareFKey = !e.ctrlKey && !e.altKey && !e.metaKey;
   // F1 — Hotkeys help
-  if (e.key === 'F1' && !e.target.matches('input, select, textarea')) {
+  if (e.key === 'F1' && bareFKey && !e.shiftKey && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     document.getElementById('hotkeys-dialog').showModal();
     return;
   }
   // F2 — QSO Log pop-out window
-  if (e.key === 'F2' && !e.target.matches('input, select, textarea')) {
+  if (e.key === 'F2' && bareFKey && !e.shiftKey && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     window.api.qsoPopoutOpen(); // opens or focuses existing pop-out
     return;
   }
-  // F4 — Test cat celebration animation (Shift+F4 for mega)
-  if (e.key === 'F4' && !e.target.matches('input, select, textarea')) {
+  // F4 — Test cat celebration animation (Shift+F4 for mega). Shift is
+  // an intentional in-handler branch, but Ctrl/Alt+F4 belong to user
+  // bindings and must fall through.
+  if (e.key === 'F4' && bareFKey && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     if (e.shiftKey) {
       showMegaCelebration('500 QSOs today! You are UNSTOPPABLE!');
@@ -5786,14 +5794,14 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // F5 — Check for updates
-  if (e.key === 'F5' && !e.target.matches('input, select, textarea')) {
+  if (e.key === 'F5' && bareFKey && !e.shiftKey && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     window.api.checkForUpdates();
     showLogToast('Checking for updates...', { duration: 2000 });
     return;
   }
   // F11 — Welcome screen
-  if (e.key === 'F11' && !e.target.matches('input, select, textarea')) {
+  if (e.key === 'F11' && bareFKey && !e.shiftKey && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     checkFirstRun(true);
     return;

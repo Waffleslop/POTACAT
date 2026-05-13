@@ -52,6 +52,9 @@ const apiSurface = {
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
 
+  // --- Cluster connection status (drives DX-chip "Spot on cluster" toggle) ---
+  onClusterStatus: (cb) => ipcRenderer.on('cluster-status', (_e, s) => cb(s)),
+
   // --- Theme propagation (light / dark) ---
   onTheme: (cb) => ipcRenderer.on('log-popout-theme', (_e, theme) => cb(theme)),
 

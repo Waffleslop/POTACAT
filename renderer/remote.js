@@ -6848,6 +6848,20 @@
     }
   });
 
+  // Stop / cancel any CW macro mid-flight. AA6C 2026-05-05: tapping the
+  // wrong macro button used to mean waiting it out — the desktop already
+  // had ESC, ECHOCAT didn't. Uses the existing cw-stop WS message; the
+  // server now both halts the paddle keyer locally AND emits cw-cancel-text
+  // so main.js aborts the macro across every CW backend.
+  var cwTextStop = document.getElementById('cw-text-stop');
+  if (cwTextStop) {
+    cwTextStop.addEventListener('click', function() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'cw-stop' }));
+      stopCwTextSidetone();
+    });
+  }
+
   // --- Settings: CW enable toggle ---
   function updateCwEnableBtn() {
     soCwEnable.textContent = cwAvailable ? 'On' : 'Off';
