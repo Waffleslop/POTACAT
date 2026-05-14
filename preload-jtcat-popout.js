@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
   onJtcatTuneState: (cb) => ipcRenderer.on('jtcat-tune-state', (_e, data) => cb(data)),
   onRestartPopoutAudio: (cb) => ipcRenderer.on('restart-popout-audio', () => cb()),
+  // VITA-49 dax_rx frames forwarded from main when on "SmartSDR Direct" —
+  // the pop-out builds a synthetic MediaStream from these to drive its
+  // waterfall, same as the main window does. K3SBP 2026-05-14.
+  onJtcatVita49Audio: (cb) => ipcRenderer.on('jtcat-vita49-audio', (_e, frame) => cb(frame)),
   onJtcatQsoState: (cb) => ipcRenderer.on('jtcat-qso-state', (_e, data) => cb(data)),
   onJtcatQsoLogged: (cb) => ipcRenderer.on('jtcat-qso-logged', (_e, data) => cb(data)),
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),

@@ -353,6 +353,8 @@ let rbnWatchSpots = []; // RBN spots for watchlist callsigns, merged into main t
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
 let smartSdrAudio = null;     // separate non-GUI TCP for slice audio (DAX-free path)
+let _smartAudioResubscribing = false; // guard against re-entrant dax_rx re-subscribe
+let _lastSmartResubscribeMs = 0;      // rate-limit dax_rx re-subscribes to avoid thrash
 let tciClient = null;
 let tciPushTimer = null; // throttle timer for TCI spot pushes
 let agClient = null; // 4O3A Antenna Genius client
@@ -3187,6 +3189,51 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
       return;
     }
 
+    // Phase 'waiting' — the station we called started a QSO with someone
+    // else (see the theyPickedOther branch below). Rather than abort, we
+    // hold here with TX disabled (slot lock kept intact) and watch for
+    // them to come free: a fresh CQ from them, or them signing off their
+    // other QSO as the sender (RR73/73/RRR). When either appears we
+    // re-arm the reply and re-send. Gives up after MAX_WAIT_CYCLES if
+    // they never return. K3SBP 2026-05-14 — replaces the old hard abort.
+    if (q.phase === 'waiting') {
+      // _heardThisCycle keeps the caller's TX-retry-limit logic from
+      // expiring us — we ARE hearing the station, just not to us yet.
+      q._heardThisCycle = true;
+      q.waitCycles = (q.waitCycles || 0) + 1;
+      const MAX_WAIT_CYCLES = 12; // ~3 min — a full FT8 QSO plus a CQ
+      const free = results.find(d => {
+        const t = (d.text || '').toUpperCase();
+        const parts = t.split(/\s+/);
+        // Fresh CQ from them: "CQ THEIRCALL ..." / "CQ DX THEIRCALL ..."
+        if (t.startsWith('CQ ') && parts.indexOf(theirCall) >= 0) return true;
+        // Them signing off their other QSO as the sender: "<other> THEIRCALL RR73/73/RRR"
+        if (parts.length >= 3 && parts[1] === theirCall && /\b(RR?73|RRR)\b/.test(t)) return true;
+        return false;
+      });
+      if (free) {
+        q.phase = 'reply';
+        q.waitCycles = 0;
+        ft8Engine._txEnabled = true;
+        setTxMsg(q.txMsg); // q.txMsg still holds "THEIRCALL MYCALL <grid>"
+        if (ft8Engine.tryImmediateTx) ft8Engine.tryImmediateTx();
+        _qsoLog('re-arming reply', `(${theirCall} free again — "${free.text}")`);
+        return;
+      }
+      if (q.waitCycles >= MAX_WAIT_CYCLES) {
+        q.phase = 'done';
+        q.error = theirCall + ' never returned';
+        ft8Engine._txEnabled = false;
+        ft8Engine.setTxMessage('');
+        ft8Engine.setTxSlot('auto');
+        if (ft8Engine._txActive) ft8Engine.txComplete();
+        _qsoLog('aborted', `(${theirCall} didn't return within ${MAX_WAIT_CYCLES} cycles)`);
+        return;
+      }
+      _qsoLog('waiting', `(${theirCall} working another station — cycle ${q.waitCycles}/${MAX_WAIT_CYCLES})`);
+      return;
+    }
+
     // Detect if the station we're calling started a QSO with someone else.
     // e.g. we're calling K3SBP but we decode "W1ABC K3SBP FN20" or "W1ABC K3SBP R-12" — K3SBP picked someone else.
     const theyPickedOther = results.find(d => {
@@ -3199,14 +3246,20 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
       return parts.length >= 2 && parts[1] === theirCall;
     });
     if (theyPickedOther) {
-      console.log('[JTCAT] Station', theirCall, 'started QSO with someone else:', theyPickedOther.text, '— aborting');
-      q.phase = 'done';
-      q.error = theirCall + ' picked another station';
+      // Don't abort — hold and wait for them to come free. The 'waiting'
+      // phase above watches for their next CQ or their sign-off and
+      // re-arms our reply. TX is disabled but we deliberately keep the
+      // slot lock (no setTxSlot('auto')) so re-arming is a clean flip.
+      const otherStation = (theyPickedOther.text || '').toUpperCase().split(/\s+/)[0] || '';
+      console.log('[JTCAT] Station', theirCall, 'started QSO with', otherStation || 'someone else', '— holding our reply');
+      q.phase = 'waiting';
+      q.waitCycles = 0;
+      q.waitingPartner = otherStation;
       ft8Engine._txEnabled = false;
-      ft8Engine.setTxMessage('');
-      ft8Engine.setTxSlot('auto');
       if (ft8Engine._txActive) ft8Engine.txComplete();
-      _qsoLog('aborted', `(${theirCall} replied to "${theyPickedOther.text}" instead of us)`);
+      q._heardThisCycle = true;
+      setTxMsg(''); // clear the engine TX message + broadcast the 'waiting' phase
+      _qsoLog('waiting', `(${theirCall} replied to "${theyPickedOther.text}" — holding for them to finish)`);
       return;
     }
 
@@ -3828,6 +3881,39 @@ function startSmartSdrAudio() {
         sampleRate,
       });
     }
+    // When the user picked "SmartSDR Direct" as the audio source, FT8/JTCAT
+    // should decode from THIS VITA-49 stream too — not the separate Windows
+    // "DAX Audio RX 1" device the renderer captures. On a SmartSDR-Direct
+    // setup that Windows device is frequently silent (the radio routes
+    // audio to our direct dax_rx subscription; the DAX *program* feeding
+    // the Windows device may not have the channel running), which left FT8
+    // sitting at max=0.0000 / 0 decodes — it never honored the audio-source
+    // setting. The FT8 engine wants 12 kHz mono; dax_rx is 24 kHz, so
+    // average sample pairs (cheap 2-tap LP + 2:1 decimate). K3SBP 2026-05-14.
+    if (settings.audioSource === 'smartsdr' && jtcatManager && jtcatManager.running) {
+      const src = (pcm instanceof Float32Array) ? pcm : new Float32Array(pcm);
+      const out = new Float32Array(src.length >> 1);
+      for (let i = 0, j = 0; j < out.length; i += 2, j++) {
+        out[j] = (src[i] + src[i + 1]) * 0.5;
+      }
+      jtcatManager.feedAudio('default', out);
+      // Also forward the raw 24 kHz frame to whichever JTCAT renderer is
+      // live so the waterfall can render. Each renderer builds a synthetic
+      // MediaStream from these frames and runs its normal gain → analyser
+      // pipeline — without this the waterfall is blank on SmartSDR Direct
+      // since the Windows DAX device it would otherwise capture is bypassed.
+      // Send to both the main window and the pop-out: only the one that
+      // actually ran its startJtcatAudio (built jtcatVita49Ctx) acts on it;
+      // the other no-ops. The main window suppresses its own capture while
+      // the pop-out is open, so exactly one is ever live.
+      const vita49Frame = { pcm: Array.from(src), sampleRate };
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('jtcat-vita49-audio', vita49Frame);
+      }
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        jtcatPopoutWin.webContents.send('jtcat-vita49-audio', vita49Frame);
+      }
+    }
   });
   smartSdrAudio.on('audio-fallback', ({ reason }) => {
     sendCatLog(`[SmartSDR-Audio] Falling back to DAX path (${reason}).`);
@@ -3837,6 +3923,36 @@ function startSmartSdrAudio() {
     // Tear the dedicated TCP/UDP down — no point holding it open if
     // we've fallen back. User can re-toggle the setting to retry.
     stopSmartSdrAudio();
+  });
+  // dax_rx stalled mid-session. Casey K3SBP 2026-05-14: the Flex slice
+  // RX is muted during CW/FT8/voice TX, and the dax_rx stream often
+  // doesn't resume on the TX→RX edge without a re-subscribe — leaving
+  // the iOS audio bridge permanently silent after a CW macro. Neither
+  // the iOS Audio toggle nor "Restart audio bridge" rebuilt this VITA-49
+  // subscriber; only a full SmartSDR reconnect did. Now: re-subscribe
+  // automatically, but ONLY when the rig is in RX — a stall *during* TX
+  // is expected (slice RX muted) and the liveness check re-emits every
+  // few seconds, so a genuinely-dead stream still surfaces once TX ends.
+  smartSdrAudio.on('stall', ({ silentMs }) => {
+    if (_isEffectivelyTransmitting()) return; // expected — RX muted during TX
+    if (_smartAudioResubscribing) return;     // re-subscribe already in flight
+    // Rate-limit: a fresh subscribe takes a moment to get its first
+    // frame; don't thrash if the stream is pathologically flaky. The
+    // 5s subscribe watchdog in SmartSdrAudio handles the genuinely-dead
+    // case by falling back, so this just paces retries.
+    const now = Date.now();
+    if (now - _lastSmartResubscribeMs < 10000) return;
+    _lastSmartResubscribeMs = now;
+    _smartAudioResubscribing = true;
+    sendCatLog(`[SmartSDR-Audio] dax_rx stalled ${(silentMs / 1000).toFixed(1)}s with rig in RX — re-subscribing`);
+    stopSmartSdrAudio();
+    setTimeout(() => {
+      startSmartSdrAudio();
+      _smartAudioResubscribing = false;
+    }, 300);
+  });
+  smartSdrAudio.on('recovered', () => {
+    sendCatLog('[SmartSDR-Audio] dax_rx stream recovered');
   });
   const daxChannel = parseInt(settings.audioDaxChannel, 10) || 1;
   // Reach into the primary client for the GUI client UUID it
@@ -4800,10 +4916,19 @@ async function restartEchoAudio(source) {
     const tag = source === 'mobile' ? '[Echo CAT/mobile]' : '[Echo CAT]';
     sendCatLog(`${tag} Audio reset requested — tearing down bridge + JTCAT capture`);
     destroyRemoteAudioWindow();
+    // destroyRemoteAudioWindow() only closes the WebRTC bridge window —
+    // it does NOT touch smartSdrAudio, the separate VITA-49 dax_rx
+    // subscriber. Without this teardown, "Restart audio bridge" couldn't
+    // recover a stalled dax_rx stream (the iOS audio toggle can only
+    // rebuild the phone's half). K3SBP 2026-05-14. Rebuilt below after
+    // the settle delay, alongside startRemoteAudio().
+    const rebuildSmartAudio = settings.audioSource === 'smartsdr' && smartSdr && smartSdr.connected;
+    if (rebuildSmartAudio) stopSmartSdrAudio();
     await new Promise((resolve) => setTimeout(resolve, 600));
     if (settings.enableRemote) {
       try {
         await startRemoteAudio();
+        if (rebuildSmartAudio) startSmartSdrAudio();
         sendCatLog(`${tag} Audio bridge rebuilt.`);
         return { ok: true };
       } catch (err) {
@@ -14501,6 +14626,11 @@ app.whenReady().then(() => {
   });
   let _jtcatAudioDiag = 0;
   ipcMain.on('jtcat-audio', (_e, buf) => {
+    // On "SmartSDR Direct", JTCAT audio is fed from the VITA-49 stream in
+    // startSmartSdrAudio's audio-frame handler. Drop the renderer's
+    // Windows-DAX-device capture so the (often silent) device can't
+    // double-feed or overwrite the good VITA-49 audio. K3SBP 2026-05-14.
+    if (settings.audioSource === 'smartsdr' && smartSdrAudio) return;
     _jtcatAudioDiag++;
     // Ensure buf is a proper array — IPC serialization on macOS can produce
     // objects that Float32Array constructor interprets as length instead of data

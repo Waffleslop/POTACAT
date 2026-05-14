@@ -337,7 +337,14 @@
     var phases = q.mode === 'cq' ? QSO_PHASES_CQ : QSO_PHASES_REPLY;
 
     // Header
-    if (q.mode === 'cq') {
+    if (q.phase === 'waiting') {
+      // The station we called started a QSO with someone else \u2014 POTACAT is
+      // holding our reply until they're free again (their next CQ or their
+      // sign-off to the other station). K3SBP 2026-05-14.
+      qsoLabel.textContent = '\u23f8 ' + q.call + ' is working '
+        + (q.waitingPartner ? q.waitingPartner : 'another station')
+        + ' \u2014 waiting to reply';
+    } else if (q.mode === 'cq') {
       qsoLabel.textContent = q.call ? 'CQ \u2192 ' + q.call : 'Calling CQ...';
     } else {
       qsoLabel.textContent = 'Reply \u2192 ' + q.call;
@@ -354,6 +361,8 @@
     if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;
     if (q.mode === 'reply' && q.phase === '73') currentIdx = 4;
     if (q.mode === 'reply' && q.phase === 'done') currentIdx = 5;
+    // 'waiting' holds at the reply step \u2014 we're stuck before sending our reply.
+    if (q.phase === 'waiting') currentIdx = 0;
 
     var html = '';
     for (var i = 0; i < phases.length; i++) {
@@ -1380,7 +1389,7 @@
     if (bandBtn) selectBand(bandBtn, false);
     window.api.jtcatStart(modeSelect.value);
     // Start audio capture directly in the popout window
-    startPopoutAudio(s.remoteAudioInput || '');
+    startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
   });
 
   // Silence watchdog: engine detected 3+ cycles of zeros — restart audio capture
@@ -1388,7 +1397,7 @@
     window.api.onRestartPopoutAudio(async function() {
       console.log('[JTCAT popout] Silence watchdog — restarting audio capture');
       var s = await window.api.getSettings();
-      startPopoutAudio(s.remoteAudioInput || '');
+      startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
     });
   }
 
@@ -1403,6 +1412,37 @@
   var popoutWaterfallAnim = null;
   var popoutQuietFreqFrame = 0;
   var popoutSpectrumFrame = 0;
+
+  // --- SmartSDR Direct: synthetic audio stream for the pop-out waterfall ---
+  // On "SmartSDR Direct" the pop-out's audio is VITA-49 dax_rx frames
+  // forwarded by main, not a Windows DAX device. Schedule them into a
+  // MediaStreamAudioDestinationNode and hand its .stream to
+  // startPopoutAudio() where getUserMedia's stream would go — the rest
+  // of the pipeline (gain, analyser, waterfall, worklet) is unchanged.
+  // Mirrors the main-window fix in app.js. K3SBP 2026-05-14.
+  var popoutVita49Ctx = null;
+  var popoutVita49Dest = null;
+  var popoutVita49NextPlay = 0;
+
+  if (window.api.onJtcatVita49Audio) {
+    window.api.onJtcatVita49Audio(function (frame) {
+      if (!popoutVita49Ctx || !popoutVita49Dest || !frame || !frame.pcm || !frame.pcm.length) return;
+      if (popoutVita49Ctx.state === 'suspended') popoutVita49Ctx.resume().catch(function () {});
+      var sr = frame.sampleRate || 24000;
+      var pcm = new Float32Array(frame.pcm);
+      var buf = popoutVita49Ctx.createBuffer(1, pcm.length, sr);
+      buf.getChannelData(0).set(pcm);
+      var src = popoutVita49Ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(popoutVita49Dest);
+      var now = popoutVita49Ctx.currentTime;
+      if (popoutVita49NextPlay < now || popoutVita49NextPlay > now + 0.5) {
+        popoutVita49NextPlay = now;
+      }
+      src.start(popoutVita49NextPlay);
+      popoutVita49NextPlay += pcm.length / sr;
+    });
+  }
 
   // RX Gain slider — persisted in localStorage
   var jpRxGain = document.getElementById('jp-rx-gain');
@@ -1450,26 +1490,46 @@
     popoutRxGainNode = null;
     if (popoutAudioCtx) { popoutAudioCtx.close().catch(function() {}); popoutAudioCtx = null; }
     if (popoutAudioStream) { popoutAudioStream.getTracks().forEach(function(t) { t.stop(); }); popoutAudioStream = null; }
+    // SmartSDR Direct synthetic-stream context — the frame handler no-ops
+    // once popoutVita49Ctx is null, cleanly stopping the synthetic feed.
+    if (popoutVita49Ctx) { popoutVita49Ctx.close().catch(function() {}); popoutVita49Ctx = null; }
+    popoutVita49Dest = null;
+    popoutVita49NextPlay = 0;
   }
 
-  async function startPopoutAudio(deviceId) {
+  async function startPopoutAudio(deviceId, audioSource) {
     // Clean up any stale audio state (e.g. after ECHOCAT used the same device)
     stopPopoutAudio();
     await new Promise(function(r) { setTimeout(r, 300); });
     try {
-      var constraints = {
-        channelCount: 1,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      };
-      if (deviceId) constraints.deviceId = { exact: deviceId };
-      try {
-        popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-      } catch (e) {
-        console.warn('[JTCAT popout] Configured input failed, using default:', e.message);
-        delete constraints.deviceId;
-        popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+      if (audioSource === 'smartsdr') {
+        // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
+        // forwards as 'jtcat-vita49-audio' frames. Build a synthetic
+        // MediaStream from those frames so everything below is unchanged
+        // from the getUserMedia path — only the source object differs.
+        popoutVita49Ctx = new AudioContext();
+        if (popoutVita49Ctx.state === 'suspended') {
+          try { await popoutVita49Ctx.resume(); } catch (e) { /* logged below if it bites */ }
+        }
+        popoutVita49Dest = popoutVita49Ctx.createMediaStreamDestination();
+        popoutVita49NextPlay = 0;
+        popoutAudioStream = popoutVita49Dest.stream;
+        console.log('[JTCAT popout] Audio source: SmartSDR Direct (VITA-49 dax_rx)');
+      } else {
+        var constraints = {
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        };
+        if (deviceId) constraints.deviceId = { exact: deviceId };
+        try {
+          popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+        } catch (e) {
+          console.warn('[JTCAT popout] Configured input failed, using default:', e.message);
+          delete constraints.deviceId;
+          popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+        }
       }
       popoutAudioCtx = new AudioContext();
       if (popoutAudioCtx.state === 'suspended') await popoutAudioCtx.resume();

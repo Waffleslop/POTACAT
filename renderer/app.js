@@ -16795,6 +16795,37 @@ var jtcatQuietFreq = 1500;     // auto-detected quiet TX frequency (Hz)
 var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq updates
 var jtcatSpectrumFrame = 0;    // frame counter for throttling spectrum IPC to ~10fps
 
+// --- SmartSDR Direct: synthetic JTCAT audio stream ---
+// On "SmartSDR Direct" the JTCAT audio doesn't come from a Windows DAX
+// device — it comes from VITA-49 dax_rx frames forwarded by main. We
+// schedule those frames into a MediaStreamAudioDestinationNode and hand
+// its .stream to startJtcatAudio() exactly where getUserMedia's stream
+// would go, so the entire downstream pipeline (gain, analyser, waterfall,
+// worklet) is byte-identical to the Windows-device path. K3SBP 2026-05-14.
+var jtcatVita49Ctx = null;
+var jtcatVita49Dest = null;
+var jtcatVita49NextPlay = 0;
+
+window.api.onJtcatVita49Audio(function (frame) {
+  if (!jtcatVita49Ctx || !jtcatVita49Dest || !frame || !frame.pcm || !frame.pcm.length) return;
+  if (jtcatVita49Ctx.state === 'suspended') jtcatVita49Ctx.resume().catch(function () {});
+  var sr = frame.sampleRate || 24000;
+  var pcm = new Float32Array(frame.pcm);
+  var buf = jtcatVita49Ctx.createBuffer(1, pcm.length, sr);
+  buf.getChannelData(0).set(pcm);
+  var src = jtcatVita49Ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(jtcatVita49Dest);
+  // Schedule packets back-to-back; cap the cursor 500 ms ahead of now so
+  // a network/IPC burst can't strand playback seconds behind real time.
+  var now = jtcatVita49Ctx.currentTime;
+  if (jtcatVita49NextPlay < now || jtcatVita49NextPlay > now + 0.5) {
+    jtcatVita49NextPlay = now;
+  }
+  src.start(jtcatVita49NextPlay);
+  jtcatVita49NextPlay += pcm.length / sr;
+});
+
 async function startJtcatAudio() {
   // Always stop existing audio first to ensure clean device state
   // (prevents stale stream after ECHOCAT releases the shared device)
@@ -16803,29 +16834,47 @@ async function startJtcatAudio() {
   await new Promise(function(r) { setTimeout(r, 300); });
   try {
     var s = await window.api.getSettings();
-    var audioConstraints = {
-      channelCount: 1,
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-    };
-    // Use the same audio input device as ECHOCAT (remoteAudioInput)
-    if (s.remoteAudioInput) {
-      audioConstraints.deviceId = { exact: s.remoteAudioInput };
-    }
-    try {
-      jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-    } catch (e) {
-      // Fall back to default device if configured one fails. Silent
-      // fallback used to mask "JTCAT silently decodes nothing" bugs
-      // (e.g. Casey 2026-05-03 — SSTV popout held the rig audio device,
-      // JTCAT got the laptop mic and produced zero decodes), so surface
-      // this loud in the CAT log too.
-      const warn = `[JTCAT] Configured audio input failed (${e.message}). Falling back to default device — decoding may not work if your rig audio is on a different input.`;
-      console.warn(warn);
-      if (window.api.jtcatLog) window.api.jtcatLog(warn);
-      delete audioConstraints.deviceId;
-      jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+
+    if (s.audioSource === 'smartsdr') {
+      // SmartSDR Direct: JTCAT audio is the VITA-49 dax_rx stream that
+      // main forwards as 'jtcat-vita49-audio' frames — not a Windows
+      // audio device. Build a synthetic MediaStream from those frames so
+      // everything below this point (createMediaStreamSource, gain,
+      // analyser, waterfall, worklet) runs unchanged. The frame handler
+      // at module scope schedules incoming PCM into jtcatVita49Dest.
+      jtcatVita49Ctx = new AudioContext();
+      if (jtcatVita49Ctx.state === 'suspended') {
+        try { await jtcatVita49Ctx.resume(); } catch (e) { /* logged below if it bites */ }
+      }
+      jtcatVita49Dest = jtcatVita49Ctx.createMediaStreamDestination();
+      jtcatVita49NextPlay = 0;
+      jtcatAudioStream = jtcatVita49Dest.stream;
+      if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio source: SmartSDR Direct (VITA-49 dax_rx)');
+    } else {
+      var audioConstraints = {
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      };
+      // Use the same audio input device as ECHOCAT (remoteAudioInput)
+      if (s.remoteAudioInput) {
+        audioConstraints.deviceId = { exact: s.remoteAudioInput };
+      }
+      try {
+        jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      } catch (e) {
+        // Fall back to default device if configured one fails. Silent
+        // fallback used to mask "JTCAT silently decodes nothing" bugs
+        // (e.g. Casey 2026-05-03 — SSTV popout held the rig audio device,
+        // JTCAT got the laptop mic and produced zero decodes), so surface
+        // this loud in the CAT log too.
+        const warn = `[JTCAT] Configured audio input failed (${e.message}). Falling back to default device — decoding may not work if your rig audio is on a different input.`;
+        console.warn(warn);
+        if (window.api.jtcatLog) window.api.jtcatLog(warn);
+        delete audioConstraints.deviceId;
+        jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      }
     }
 
     // Use native sample rate and downsample properly to 12kHz for FT8 decoder.
@@ -17066,6 +17115,14 @@ function stopJtcatAudio() {
     jtcatAudioStream.getTracks().forEach(function(t) { t.stop(); });
     jtcatAudioStream = null;
   }
+  // SmartSDR Direct synthetic-stream context — frame handler no-ops once
+  // jtcatVita49Ctx is null, so this cleanly stops the synthetic feed.
+  if (jtcatVita49Ctx) {
+    jtcatVita49Ctx.close().catch(function() {});
+    jtcatVita49Ctx = null;
+  }
+  jtcatVita49Dest = null;
+  jtcatVita49NextPlay = 0;
 }
 
 // Restart JTCAT audio after ECHOCAT releases the shared audio device
@@ -17727,7 +17784,13 @@ function renderJtcatQsoTracker() {
   var phases = q.mode === 'cq' ? QSO_PHASES_CQ : QSO_PHASES_REPLY;
 
   // Header
-  if (q.mode === 'cq') {
+  if (q.phase === 'waiting') {
+    // Station we called started a QSO with someone else \u2014 POTACAT is
+    // holding our reply until they're free (their next CQ or sign-off).
+    jtcatQsoLabel.textContent = '\u23f8 ' + q.call + ' is working '
+      + (q.waitingPartner ? q.waitingPartner : 'another station')
+      + ' \u2014 waiting to reply';
+  } else if (q.mode === 'cq') {
     jtcatQsoLabel.textContent = q.call ? 'CQ \u2192 ' + q.call : 'Calling CQ...';
   } else {
     jtcatQsoLabel.textContent = 'Reply \u2192 ' + q.call;
@@ -17746,6 +17809,8 @@ function renderJtcatQsoTracker() {
   if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;
   if (q.mode === 'reply' && q.phase === '73') currentIdx = 4;
   if (q.mode === 'reply' && q.phase === 'done') currentIdx = 5;
+  // 'waiting' holds at the reply step \u2014 stuck before sending our reply.
+  if (q.phase === 'waiting') currentIdx = 0;
 
   var html = '';
   for (var i = 0; i < phases.length; i++) {

@@ -74,6 +74,8 @@ window.api.onStartAudio(async (config) => {
         audioSender.replaceTrack(kiwiTrack).catch((e) => {
           window.api.sendAudioStatus({ error: 'Initial Kiwi track replace failed: ' + e.message });
         });
+        // Health monitor follows the sender, not localStream.
+        try { startHealthMonitor(kiwiStream); } catch {}
       }
     }
 
@@ -363,6 +365,8 @@ window.api.onKiwiActive((active) => {
       audioSender.replaceTrack(kiwiTrack).catch((e) => {
         window.api.sendAudioStatus({ error: 'Kiwi track replace failed: ' + e.message });
       });
+      // Health monitor follows the sender — see the DAX-free swap above.
+      try { startHealthMonitor(kiwiStream); } catch {}
     }
   } else {
     // Restore the rig audio track. localStream still holds it because we
@@ -372,6 +376,7 @@ window.api.onKiwiActive((active) => {
       audioSender.replaceTrack(rigTrack).catch((e) => {
         window.api.sendAudioStatus({ error: 'Rig track restore failed: ' + e.message });
       });
+      try { startHealthMonitor(localStream); } catch {}
     }
   }
 });
@@ -494,6 +499,14 @@ window.api.onSmartSdrAudioFrame((frame) => {
       window.api.sendAudioStatus({ error: 'SmartSDR track replace failed: ' + e.message });
       smartActive = false;
     });
+    // Re-point the health monitor at the stream the sender now carries.
+    // It defaulted to localStream — but on the DAX-free path localStream
+    // is the getUserMedia capture of the Windows "DAX Audio RX 1" device,
+    // which is often silent (the radio routes audio to our direct VITA-49
+    // subscription, not necessarily to the DAX-program-fed Windows device).
+    // Watching localStream while the sender carries smartStream caused a
+    // false peak-zero-while-rx → restart loop. K3SBP 2026-05-14.
+    try { startHealthMonitor(smartStream); } catch {}
   }
 
   if (smartCtx.state === 'suspended') smartCtx.resume().catch(() => {});
@@ -523,6 +536,8 @@ window.api.onSmartSdrAudioFallback(() => {
     const rigTrack = localStream.getAudioTracks()[0];
     if (rigTrack) {
       audioSender.replaceTrack(rigTrack).catch(() => {});
+      // Sender is back on localStream — point the health monitor there too.
+      try { startHealthMonitor(localStream); } catch {}
     }
   }
 });
