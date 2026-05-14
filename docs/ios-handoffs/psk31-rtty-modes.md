@@ -1,7 +1,8 @@
 # PSK31 + RTTY mode parity for the iOS app
 
-Status: open
+Status: shipped
 Filed: 2026-05-06
+Shipped: 2026-05-06
 Repo for changes: D:\Projects\potacat-app
 
 ## Context
@@ -68,3 +69,27 @@ The desktop diff is ~25 lines across `lib/rig-utils.js`, `lib/dxcluster.js`, `re
 ## Open question to confirm with the user
 
 Is there a "Digital (all)" group filter that selects PSK31, RTTY, FT8, FT4, JS8 in one click? The desktop doesn't have it yet (deferred). If iOS users would benefit from a one-tap "all digital" mode filter, propose it.
+
+## Resolution
+
+Shipped iOS-side 2026-05-06. Four small edits:
+
+- **`src/state/spotsFilters.ts`** — `ALL_MODES` now includes `'PSK31'` (RTTY was already there). Surfaces as a chip in the spot mode-filter UI.
+- **`src/utils/spotsFilter.ts`** — `spotModeCategory()` now classifies `PSK31` and bare `PSK` as the `'PSK31'` bucket so spots aren't routed to "Other."
+- **`src/components/LogQuickSheet.tsx`** — `defaultRst()` extended to recognize PSK / PSK31 / FT2 as 599-class modes (uses `.includes()` so any prefix variant works).
+- **`src/screens/VfoScreen.tsx`** — rig mode picker (the MODE card) now lists `RTTY` and `PSK31` alongside the existing LSB/USB/CW/CW-R/AM/FM/DIGU/DIGL. Tapping sends `set-mode { mode: 'PSK31' }` verbatim; desktop's rig-utils translates per backend (PKTUSB / Icom 0x01 / Flex MD9 / Yaesu DATA-USB).
+
+The spot tap path passes `spot.mode` through unchanged (`SpotsScreen.tsx` line 120 — `...(spot.mode ? { mode: spot.mode } : {})`), so a PSK31 spot tunes the rig to PSK31 with no extra change.
+
+`utils/modes.ts` already had PSK31 and bare PSK in `isDigitalMode()` from earlier work; no edit needed.
+
+**"Digital (all)" group filter — RESOLVED 2026-05-06.** Casey said "Add it." Done iOS-side:
+- `DIGITAL_MODE_GROUP = ['FT8', 'FT4', 'RTTY', 'PSK31', 'JS8']` exported from `src/state/spotsFilters.ts`. CW omitted (Morse classification debate); FREEDV omitted (digitally-encoded voice, treated as voice elsewhere); SSTV omitted (image, separate workflow).
+- `FilterDropdown` extended with a `presets` prop — array of `{ label, values }`. Tap toggles the preset's values into the current selection: if all already set, removes; else adds (preserves any other modes already chosen).
+- `SpotsScreen` Mode dropdown now passes `presets={[{ label: 'Digital (all)', values: DIGITAL_MODE_GROUP }]}`.
+- JS8 is now in `ALL_MODES` (was missing from spots filter; `PropScreen` already had it in its own list, no harm in unifying).
+- `spotModeCategory()` now classifies `JS8` and `JS8CALL` as the `'JS8'` bucket.
+
+UX: tap **Mode** filter pill → dropdown opens → "Digital (all)" preset chip at the top — tap to set FT8/FT4/RTTY/PSK31/JS8 in one action; tap again to clear them.
+
+iOS testcheck: `npx tsc --noEmit` clean, all 28 protocol tests pass.

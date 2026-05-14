@@ -12998,6 +12998,7 @@ function keyEventToString(e) {
 
 function executeHotkeyAction(binding) {
   const a = binding.action || '';
+  console.log('[Hotkey] execute', a, binding.param || '');
   const cwMatch = a.match(/^cw-macro-(\d)$/);
   if (cwMatch) {
     const idx = parseInt(cwMatch[1], 10) - 1;
@@ -13040,6 +13041,7 @@ document.addEventListener('keydown', (e) => {
   if (!keyStr || keyStr === 'Control' || keyStr === 'Alt' || keyStr === 'Shift') return;
 
   const binding = hotkeyBindings.find(b => b.key === keyStr);
+  console.log('[Hotkey] keydown', JSON.stringify(keyStr), binding ? '→ ' + binding.action : '(no binding)');
   if (binding) {
     e.preventDefault();
     executeHotkeyAction(binding);

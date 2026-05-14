@@ -7530,6 +7530,18 @@ function fetchSolarData() {
 }
 
 // --- Spot processing ---
+
+// POTA spots sometimes arrive with an empty mode field (the spotter omitted it,
+// or the spot came from an auto-spotting source). The mode is frequently still
+// present in the free-text comment — backfill from there. K3SBP 2026-05-14.
+const COMMENT_MODE_RE = /\b(FT8|FT4|JS8|RTTY|PSK31|PSK63|PSK|SSTV|CW|SSB|USB|LSB|FM|AM)\b/i;
+function inferModeFromComment(comment) {
+  const m = (comment || '').match(COMMENT_MODE_RE);
+  if (!m) return '';
+  const mode = m[1].toUpperCase();
+  if (mode === 'USB' || mode === 'LSB') return 'SSB';
+  return mode;
+}
 function processPotaSpots(raw) {
   // Snapshot raw spots into the rolling history buffer (deduped by spotId)
   // before any per-callsign+band dedupe collapses them down to one row each.
@@ -7544,7 +7556,7 @@ function processPotaSpots(raw) {
       callsign: s.activator || '',
       reference: s.reference || '',
       frequency: s.frequency,
-      mode: (s.mode || '').toUpperCase(),
+      mode: (s.mode || '').toUpperCase() || inferModeFromComment(s.comments),
       spotter: s.spotter || '',
       comments: s.comments || '',
       source: 'pota',
@@ -7600,7 +7612,7 @@ function processPotaSpots(raw) {
       callsign,
       frequency: s.frequency,
       freqMHz,
-      mode: (s.mode || '').toUpperCase(),
+      mode: (s.mode || '').toUpperCase() || inferModeFromComment(s.comments),
       reference: s.reference || '',
       parkName: s.name || s.parkName || '',
       locationDesc: s.locationDesc || '',
