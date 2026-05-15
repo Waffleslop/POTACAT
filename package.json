@@ -58,6 +58,7 @@
       "assets/icon-256.png",
       "assets/icon-light.png",
       "assets/cty.dat",
+      "scripts/test-alsa.js",
       "node_modules/**/*",
       "!node_modules/electron/**/*",
       "!node_modules/electron-builder/**/*",
@@ -69,7 +70,9 @@
       "lib/ft8_native/**/*",
       "lib/freedv_native/**/*",
       "lib/rade_native/**/*",
-      "lib/alsa_native/**/*"
+      "lib/alsa_native/**/*",
+      "lib/alsa.js",
+      "scripts/test-alsa.js"
     ],
     "win": {
       "icon": "assets/icon.ico",
