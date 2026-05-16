@@ -6244,12 +6244,21 @@ main.banner-logger-active #event-progress-overlay {
   font-size:9px;color:var(--text-secondary);font-family:monospace;
   line-height:1.1;
 }
+/* Warn yellow needs to be bright + dense to read at hero font sizes on
+   dark backgrounds — original #ffd75a was perceptually washed out. Using
+   a pure lemon yellow with a subtle dark text-shadow for edge definition.
+   Bad/Good keep their accent vars (already high-contrast). */
 .cond-hero.good .hero-value { color:var(--accent-green); }
-.cond-hero.warn .hero-value { color:#ffd75a; }
+.cond-hero.warn .hero-value { color:#ffe933; text-shadow:0 0 1px rgba(0,0,0,0.4); }
 .cond-hero.bad  .hero-value { color:var(--accent-red); }
+.cond-hero.good .hero-sub   { color:var(--accent-green);font-weight:600; }
+.cond-hero.warn .hero-sub   { color:#ffe933;            font-weight:600; }
+.cond-hero.bad  .hero-sub   { color:var(--accent-red);  font-weight:600; }
 .cond-hero.good { border-color:var(--accent-green); box-shadow:inset 0 0 0 1px rgba(78,204,163,0.15); }
-.cond-hero.warn { border-color:#ffd75a;            box-shadow:inset 0 0 0 1px rgba(255,215,90,0.15); }
+.cond-hero.warn { border-color:#ffe933;            box-shadow:inset 0 0 0 1px rgba(255,233,51,0.18); }
 .cond-hero.bad  { border-color:var(--accent-red);  box-shadow:inset 0 0 0 1px rgba(233,69,96,0.18); }
+/* Subtle help cursor on every hero so the tooltips are discoverable. */
+.cond-hero { cursor:help; }
 
 /* Secondary metrics — small two-column key/value strip. */
 .cond-kv {
@@ -6268,7 +6277,7 @@ main.banner-logger-active #event-progress-overlay {
   font-weight:600;
 }
 .cond-kv .kv-value.good { color:var(--accent-green); }
-.cond-kv .kv-value.warn { color:#ffd75a; }
+.cond-kv .kv-value.warn { color:#ffe933; }
 .cond-kv .kv-value.bad  { color:var(--accent-red); }
 .cond-kv .kv-value.dim  { color:var(--text-tertiary);font-weight:normal; }
 
@@ -6297,7 +6306,7 @@ main.banner-logger-active #event-progress-overlay {
   text-transform:uppercase;letter-spacing:0.5px;min-width:42px;text-align:center;
 }
 .cond-cell.good    { background:rgba(78,204,163,0.18); color:var(--accent-green); }
-.cond-cell.fair    { background:rgba(255,215,90,0.18); color:#ffd75a; }
+.cond-cell.fair    { background:rgba(255,233,51,0.20); color:#ffe933; }
 .cond-cell.poor    { background:rgba(233,69,96,0.18);  color:var(--accent-red); }
 .cond-cell.open    { background:rgba(78,204,163,0.18); color:var(--accent-green); }
 .cond-cell.closed  { background:rgba(160,160,180,0.10); color:var(--text-dim); }

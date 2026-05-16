@@ -12033,7 +12033,39 @@ function renderConditions(payload) {
   const kClass   = p.kIndex <= 2 ? 'good' : p.kIndex <= 4 ? 'warn' : 'bad';
   const aClass   = p.aIndex <= 7 ? 'good' : p.aIndex <= 20 ? 'warn' : 'bad';
 
+  // X-Ray flare class. A and B = background / quiet; C = minor flare;
+  // M = moderate (R1-R2 radio blackout possible); X = major (R3+).
+  // hamqsl renders as a class letter + magnitude like "B1.2" or "M2.5".
+  const xrayLetter = (p.xray || '').trim().charAt(0).toUpperCase();
+  const xrayClass = (xrayLetter === 'A' || xrayLetter === 'B') ? 'good'
+                  : (xrayLetter === 'C') ? 'warn'
+                  : (xrayLetter === 'M' || xrayLetter === 'X') ? 'bad' : '';
+
+  // 304Å EUV drives F-layer ionization. Higher = better HF DX.
+  // Rough bands: >150 strong, 100-150 moderate, <100 weak.
+  const heNum = parseInt(p.heliumLine, 10);
+  const heClass = !Number.isNaN(heNum)
+    ? (heNum >= 150 ? 'good' : heNum >= 100 ? 'warn' : 'bad') : '';
+
+  // Solar wind speed — lower is calmer. <400 nominal, 400-600 elevated,
+  // >600 high (storm risk). Color is inverted from the others (high = bad).
+  const swNum = parseInt(p.solarWind, 10);
+  const swClass = !Number.isNaN(swNum)
+    ? (swNum < 400 ? 'good' : swNum < 600 ? 'warn' : 'bad') : '';
+
+  // Bz (IMF Z-component, nT) drives geomagnetic coupling. Positive Bz
+  // is benign; strong negative Bz reconnects with Earth's field and
+  // triggers storms. >0 good, 0 to -5 mild, -5 to -10 warn, <-10 bad.
+  const bzNum = parseFloat(p.magneticField);
+  const bzClass = !Number.isNaN(bzNum)
+    ? (bzNum >= 0 ? 'good' : bzNum > -5 ? 'warn' : 'bad') : '';
+
   const sfiSub = p.sfi >= 120 ? 'strong' : p.sfi >= 90 ? 'moderate' : p.sfi >= 70 ? 'weak' : 'very weak';
+  const snSub  = (p.sunspots ?? 0) >= 100 ? 'high' : (p.sunspots ?? 0) >= 40 ? 'moderate' : 'low';
+  const xraySub = xrayLetter === 'X' ? 'major flare' : xrayLetter === 'M' ? 'moderate' : xrayLetter === 'C' ? 'minor' : 'quiet';
+  const heSub  = !Number.isNaN(heNum) ? (heNum >= 150 ? 'strong' : heNum >= 100 ? 'moderate' : 'weak') : 'helium';
+  const swSub  = !Number.isNaN(swNum) ? (swNum < 400 ? 'calm' : swNum < 600 ? 'elevated' : 'high') : 'km/s';
+  const bzSub  = !Number.isNaN(bzNum) ? (bzNum >= 0 ? 'northward' : bzNum > -5 ? 'mild south' : 'storm-prone') : 'nT';
   const kSub   = p.kIndex <= 1 ? 'very quiet' : p.kIndex <= 2 ? 'quiet'
                : p.kIndex <= 3 ? 'unsettled' : p.kIndex <= 4 ? 'active'
                : p.kIndex <= 5 ? 'minor storm' : p.kIndex <= 6 ? 'moderate storm'
@@ -12042,39 +12074,63 @@ function renderConditions(payload) {
                : p.aIndex <= 30 ? 'active' : p.aIndex <= 50 ? 'minor storm'
                : 'major storm';
 
+  // Tooltips — these are the "what is this number?" explanations every
+  // ham asks when they first see the panel. Plain text so the browser's
+  // native title tooltip can show them.
+  const TIP = {
+    sfi:    'Solar Flux Index — 10.7 cm radio flux from the Sun, a proxy for ionization. >120 supports good HF DX; <90 means weak F-layer.',
+    sn:     'International Sunspot Number — Wolf number. Higher = more solar activity = better HF propagation.',
+    xray:   'Background X-ray flux class. A/B = quiet, C = minor flare, M = moderate (R1–R2 blackout possible), X = major (R3+).',
+    he304:  '304 Å EUV emission (helium II). Drives F-layer ionization that bends HF signals back to Earth. >150 strong.',
+    muf:    'Maximum Usable Frequency — highest frequency that reflects off the F-layer for a typical 3000 km hop right now.',
+    fof2:   'F2 critical frequency — highest signal a vertical wave will reflect back. Sets your local NVIS ceiling.',
+    proton: 'Proton flux (≥10 MeV). Elevated levels indicate a solar particle event and may cause polar HF blackouts.',
+    electron:'Electron flux (≥2 MeV). Elevated levels stress satellites and can degrade VHF/UHF satellite QSOs.',
+    snoise: 'Estimated band noise floor in S-units. Higher = more atmospheric / geomagnetic QRN.',
+    norm:   'Hamqsl normalization factor used in the band conditions calculation.',
+    k:      'Planetary K-index — 3-hour geomagnetic activity (0–9 quasi-log scale). 0–2 quiet, 5+ storm.',
+    a:      'Planetary A-index — daily linear-scale geomagnetic activity. <7 quiet, >30 storm.',
+    sw:     'Solar wind speed at L1 (km/s). <400 nominal, >600 elevated and likely to disturb the geomagnetic field.',
+    bz:     'Bz — Z-component of the interplanetary magnetic field (nT). Strong negative Bz couples with Earth\'s field and triggers storms.',
+    field:  'Geomagnetic field state — N0NBH descriptor (quiet / unsettled / active / storm).',
+    aurora: 'Aurora activity level (0–10). Higher = stronger oval = more chance of VHF aurora and HF polar blackouts.',
+    auroraLat:'Estimated southernmost latitude where the aurora oval is currently visible.',
+    kpnt:   'Estimated near-real-time Kp from N0NBH (NoaaTec) — finer-grained companion to the planetary K above.',
+  };
+
   // -- Solar card (hero metrics + secondary KV) -----------------------------
   const solarCard = `
     <div class="cond-card card-solar">
       <h3>Solar Activity</h3>
       <div class="cond-hero-row">
-        <div class="cond-hero ${sfiClass}">
+        <div class="cond-hero ${sfiClass}" title="${TIP.sfi}">
           <div class="hero-label">SFI</div>
           <div class="hero-value">${p.sfi}</div>
           <div class="hero-sub">${sfiSub}</div>
         </div>
-        <div class="cond-hero ${snClass}">
+        <div class="cond-hero ${snClass}" title="${TIP.sn}">
           <div class="hero-label">Sunspots</div>
           <div class="hero-value">${p.sunspots ?? '—'}</div>
-          <div class="hero-sub">SN R</div>
+          <div class="hero-sub">${snSub}</div>
         </div>
-        <div class="cond-hero">
+        <div class="cond-hero ${xrayClass}" title="${TIP.xray}">
           <div class="hero-label">X-Ray</div>
           <div class="hero-value" style="font-size:18px">${p.xray ?? '—'}</div>
-          <div class="hero-sub">class</div>
+          <div class="hero-sub">${xraySub}</div>
         </div>
-        <div class="cond-hero">
+        <div class="cond-hero ${heClass}" title="${TIP.he304}">
           <div class="hero-label">304 Å</div>
           <div class="hero-value" style="font-size:18px">${p.heliumLine ?? '—'}</div>
-          <div class="hero-sub">helium</div>
+          <div class="hero-sub">${heSub}</div>
         </div>
       </div>
       <div class="cond-kv">
-        <div class="kv-row"><span class="kv-label">MUF</span><span class="kv-value">${p.muf ? p.muf + ' MHz' : '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">foF2</span><span class="kv-value">${p.fof2 ? p.fof2 + ' MHz' : '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">Proton flux</span><span class="kv-value dim">${p.protonFlux ?? '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">Electron flux</span><span class="kv-value dim">${p.electronFlux ?? '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">Signal noise</span><span class="kv-value">${p.signalNoise ?? '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">Normalization</span><span class="kv-value dim">${p.normalization ?? '—'}</span></div>
+        <div class="kv-row" title="${TIP.muf}"><span class="kv-label">MUF</span><span class="kv-value">${p.muf ? p.muf + ' MHz' : '—'}</span></div>
+        <div class="kv-row" title="${TIP.fof2}"><span class="kv-label">foF2</span><span class="kv-value">${p.fof2 ? p.fof2 + ' MHz' : '—'}</span></div>
+        <div class="kv-row" title="${TIP.proton}"><span class="kv-label">Proton flux</span><span class="kv-value dim">${p.protonFlux ?? '—'}</span></div>
+        <div class="kv-row" title="${TIP.electron}"><span class="kv-label">Electron flux</span><span class="kv-value dim">${p.electronFlux ?? '—'}</span></div>
+        <div class="kv-row" title="${TIP.snoise}"><span class="kv-label">Signal noise</span><span class="kv-value">${p.signalNoise ?? '—'}</span></div>
+        <div class="kv-row" title="${TIP.norm}"><span class="kv-label">Normalization</span><span class="kv-value dim">${p.normalization ?? '—'}</span></div>
       </div>
     </div>`;
 
@@ -12083,32 +12139,32 @@ function renderConditions(payload) {
     <div class="cond-card card-geo">
       <h3>Geomagnetic</h3>
       <div class="cond-hero-row">
-        <div class="cond-hero ${kClass}">
+        <div class="cond-hero ${kClass}" title="${TIP.k}">
           <div class="hero-label">K-index</div>
           <div class="hero-value">${p.kIndex}</div>
           <div class="hero-sub">${kSub}</div>
         </div>
-        <div class="cond-hero ${aClass}">
+        <div class="cond-hero ${aClass}" title="${TIP.a}">
           <div class="hero-label">A-index</div>
           <div class="hero-value">${p.aIndex}</div>
           <div class="hero-sub">${aSub}</div>
         </div>
-        <div class="cond-hero">
+        <div class="cond-hero ${swClass}" title="${TIP.sw}">
           <div class="hero-label">SW Speed</div>
           <div class="hero-value" style="font-size:18px">${p.solarWind ?? '—'}</div>
-          <div class="hero-sub">km/s</div>
+          <div class="hero-sub">${swSub}</div>
         </div>
-        <div class="cond-hero">
+        <div class="cond-hero ${bzClass}" title="${TIP.bz}">
           <div class="hero-label">Bz</div>
           <div class="hero-value" style="font-size:18px">${p.magneticField ?? '—'}</div>
-          <div class="hero-sub">nT</div>
+          <div class="hero-sub">${bzSub}</div>
         </div>
       </div>
       <div class="cond-kv">
-        <div class="kv-row"><span class="kv-label">Field state</span><span class="kv-value">${p.geomagField ?? '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">Aurora</span><span class="kv-value">${p.aurora ?? '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">Aurora limit</span><span class="kv-value">${p.latDegree ? p.latDegree + '°' : '—'}</span></div>
-        <div class="kv-row"><span class="kv-label">Kp (NT)</span><span class="kv-value dim">${p.kIndexNt ?? '—'}</span></div>
+        <div class="kv-row" title="${TIP.field}"><span class="kv-label">Field state</span><span class="kv-value">${p.geomagField ?? '—'}</span></div>
+        <div class="kv-row" title="${TIP.aurora}"><span class="kv-label">Aurora</span><span class="kv-value">${p.aurora ?? '—'}</span></div>
+        <div class="kv-row" title="${TIP.auroraLat}"><span class="kv-label">Aurora limit</span><span class="kv-value">${p.latDegree ? p.latDegree + '°' : '—'}</span></div>
+        <div class="kv-row" title="${TIP.kpnt}"><span class="kv-label">Kp (NT)</span><span class="kv-value dim">${p.kIndexNt ?? '—'}</span></div>
       </div>
     </div>`;
 
