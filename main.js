@@ -12185,6 +12185,10 @@ app.whenReady().then(() => {
     conditionsPopoutWin.loadFile(path.join(__dirname, 'renderer', 'conditions-popout.html'));
     conditionsPopoutWin.webContents.on('did-finish-load', () => {
       conditionsPopoutWin.webContents.send('conditions-popout-theme', settings.lightMode ? 'light' : 'dark');
+      // Restore the user's last zoom level so Ctrl+ "sticks" across
+      // reopens. Default 0 = 100%. Electron clamps -8..+8 internally.
+      const savedZoom = typeof settings.conditionsPopoutZoom === 'number' ? settings.conditionsPopoutZoom : 0;
+      try { conditionsPopoutWin.webContents.setZoomLevel(savedZoom); } catch { /* ignore */ }
       // Push whatever's in cache so the panel paints instantly. If
       // nothing cached yet, kick a refresh — keeps cold-open from
       // staring at "Loading…" for up to 10 minutes.
@@ -12195,12 +12199,28 @@ app.whenReady().then(() => {
       if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed()
           && !conditionsPopoutWin.isMaximized() && !conditionsPopoutWin.isMinimized()) {
         settings.conditionsPopoutBounds = conditionsPopoutWin.getBounds();
+        try { settings.conditionsPopoutZoom = conditionsPopoutWin.webContents.getZoomLevel(); } catch { /* ignore */ }
         saveSettings(settings);
       }
     });
     conditionsPopoutWin.on('closed', () => { conditionsPopoutWin = null; });
+    // Ctrl/Cmd + = / + / - / 0 → zoom in / out / reset. Electron's
+    // built-in browser shortcuts don't fire when the menu bar is hidden,
+    // so wire them up here. Each step is 0.5 zoom-levels which roughly
+    // matches Chromium's default 110% → 125% → 150% progression.
     conditionsPopoutWin.webContents.on('before-input-event', (_e, input) => {
-      if (input.key === 'F12' && input.type === 'keyDown') conditionsPopoutWin.webContents.toggleDevTools();
+      if (input.type !== 'keyDown') return;
+      const wc = conditionsPopoutWin.webContents;
+      if (input.key === 'F12') { wc.toggleDevTools(); return; }
+      const mod = input.control || input.meta;
+      if (!mod) return;
+      if (input.key === '=' || input.key === '+') {
+        wc.setZoomLevel(Math.min(8, wc.getZoomLevel() + 0.5));
+      } else if (input.key === '-' || input.key === '_') {
+        wc.setZoomLevel(Math.max(-3, wc.getZoomLevel() - 0.5));
+      } else if (input.key === '0') {
+        wc.setZoomLevel(0);
+      }
     });
   });
   ipcMain.on('conditions-popout-minimize', () => { if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed()) conditionsPopoutWin.minimize(); });
