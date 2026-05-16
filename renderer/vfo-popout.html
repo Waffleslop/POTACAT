@@ -428,16 +428,63 @@
            is on; the actual DSP only fires while PTT is held + the mic
            is open. State is shared with Settings dialog + ECHOCAT iOS
            via the tx-eq-update broadcast. -->
-      <div class="vfo-tx-eq-row" id="vfo-tx-eq-row" style="display:none;padding:4px 8px;font-size:11px;color:var(--text-muted);align-items:center;gap:6px;">
+      <div class="vfo-tx-eq-row" id="vfo-tx-eq-row" style="display:none;padding:4px 8px;font-size:11px;color:var(--text-muted);align-items:center;gap:6px;flex-wrap:wrap;">
         <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
           <input type="checkbox" id="vfo-tx-eq-enabled">
           <span>TX EQ</span>
         </label>
-        <select id="vfo-tx-eq-preset" style="flex:1;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:2px 4px;border-radius:3px;font-size:11px;">
+        <select id="vfo-tx-eq-preset" style="flex:1;min-width:90px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:2px 4px;border-radius:3px;font-size:11px;">
           <option value="ragchew">Ragchew</option>
           <option value="pileup">Pileup</option>
           <option value="dx">DX</option>
+          <option value="custom">Custom</option>
         </select>
+        <button id="vfo-tx-eq-rig-default-btn" type="button" title="Save current EQ as the default for the currently-active rig profile" style="font-size:10px;padding:2px 6px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);border-radius:3px;cursor:pointer;">Save as rig default</button>
+        <!-- VU meter — pre (post-EQ, pre-comp) vs post (post-makeup).
+             Visible only when EQ is enabled; the gap between the two
+             bars is the gain reduction the compressor is applying. -->
+        <div id="vfo-tx-eq-meter" style="display:none;flex-basis:100%;align-items:center;gap:6px;padding-top:4px;">
+          <span style="font-size:9px;color:var(--text-dim);min-width:24px;">Pre</span>
+          <div style="flex:1;height:6px;background:var(--bg-input);border:1px solid var(--border);border-radius:2px;overflow:hidden;">
+            <div id="vfo-tx-eq-pre-bar" style="height:100%;width:0%;background:var(--accent-blue);transition:width 0.05s linear;"></div>
+          </div>
+          <span style="font-size:9px;color:var(--text-dim);min-width:24px;">Post</span>
+          <div style="flex:1;height:6px;background:var(--bg-input);border:1px solid var(--border);border-radius:2px;overflow:hidden;">
+            <div id="vfo-tx-eq-post-bar" style="height:100%;width:0%;background:var(--accent-green);transition:width 0.05s linear;"></div>
+          </div>
+        </div>
+        <!-- Custom sliders. Shown only when preset === 'custom'. Each
+             change is persisted live via setTxEq so muscle-memory tweaks
+             stick across PTT cycles. -->
+        <details id="vfo-tx-eq-custom" style="display:none;flex-basis:100%;margin-top:4px;">
+          <summary style="cursor:pointer;font-size:10px;color:var(--text-dim);">Custom EQ + Compressor</summary>
+          <div class="vfo-tx-eq-sliders" style="display:grid;grid-template-columns:auto 1fr auto;column-gap:6px;row-gap:3px;margin-top:4px;font-size:10px;color:var(--text-dim);">
+            <span title="Low shelf gain at 120 Hz">Low (120 Hz)</span>
+            <input type="range" id="vfo-tx-eq-low" min="-12" max="12" step="0.5" value="0">
+            <span id="vfo-tx-eq-low-val">0 dB</span>
+            <span title="High shelf gain at 2 kHz">High (2 kHz)</span>
+            <input type="range" id="vfo-tx-eq-high" min="-12" max="12" step="0.5" value="0">
+            <span id="vfo-tx-eq-high-val">0 dB</span>
+            <span title="Compressor threshold — below this is uncompressed">Threshold</span>
+            <input type="range" id="vfo-tx-eq-thr" min="-60" max="0" step="1" value="-24">
+            <span id="vfo-tx-eq-thr-val">-24 dB</span>
+            <span title="Compression ratio (inputs above threshold are reduced by this factor)">Ratio</span>
+            <input type="range" id="vfo-tx-eq-ratio" min="1" max="20" step="0.5" value="2">
+            <span id="vfo-tx-eq-ratio-val">2:1</span>
+            <span title="Attack time in ms (how fast comp kicks in)">Attack</span>
+            <input type="range" id="vfo-tx-eq-attack" min="0" max="100" step="1" value="3">
+            <span id="vfo-tx-eq-attack-val">3 ms</span>
+            <span title="Release time in ms (how fast comp lets go)">Release</span>
+            <input type="range" id="vfo-tx-eq-release" min="10" max="1000" step="10" value="250">
+            <span id="vfo-tx-eq-release-val">250 ms</span>
+            <span title="Soft-knee width in dB (smooths the comp curve around threshold)">Knee</span>
+            <input type="range" id="vfo-tx-eq-knee" min="0" max="40" step="1" value="30">
+            <span id="vfo-tx-eq-knee-val">30 dB</span>
+            <span title="Make-up gain after compression — compensates for level lost to comp">Makeup</span>
+            <input type="range" id="vfo-tx-eq-makeup" min="0" max="24" step="0.5" value="0">
+            <span id="vfo-tx-eq-makeup-val">0 dB</span>
+          </div>
+        </details>
       </div>
     </div>
     <div class="widget-section" id="widget-kiwi">
@@ -1635,7 +1682,13 @@ let pttDaxWorklet = null;     // AudioWorkletNode that emits 24 kHz mono chunks
 let pttDaxCtx = null;          // AudioContext sized at 24 kHz when on daxTxDirect
 let pttSourceNode = null;      // active MediaStreamSource (held so live EQ updates can re-wire it)
 const pttEqChain = TxEqChain.create();
-let pttTxEqState = { enabled: false, preset: 'ragchew' };
+let pttTxEqState = { enabled: false, preset: 'ragchew', customParams: null };
+// Pre + post compressor AnalyserNodes for the VU meter. Created lazily
+// once when PTT starts and kept across re-wires so the meter sample
+// loop has stable refs. Polled every 50 ms while PTT held.
+let pttPreTap = null;
+let pttPostTap = null;
+let pttMeterTimer = null;
 
 async function pttStart() {
   if (pttDown) return;
@@ -1670,7 +1723,9 @@ async function pttStart() {
         pttDaxWorklet.port.onmessage = (ev) => {
           if (ev.data) window.api.daxTxChunk(ev.data);
         };
-        TxEqChain.wire(pttEqChain, pttDaxCtx, pttSourceNode, pttDaxWorklet, pttTxEqState);
+        if (!pttPreTap)  { pttPreTap  = pttDaxCtx.createAnalyser(); pttPreTap.fftSize  = 1024; pttPreTap.smoothingTimeConstant = 0; }
+        if (!pttPostTap) { pttPostTap = pttDaxCtx.createAnalyser(); pttPostTap.fftSize = 1024; pttPostTap.smoothingTimeConstant = 0; }
+        TxEqChain.wire(pttEqChain, pttDaxCtx, pttSourceNode, pttDaxWorklet, { ...pttTxEqState, preTap: pttPreTap, postTap: pttPostTap });
         // Keep the graph scheduled by terminating at a (muted) destination.
         pttDaxWorklet.connect(pttDaxCtx.destination);
         attachTxMeter(pttDaxCtx, pttSourceNode);
@@ -1683,13 +1738,21 @@ async function pttStart() {
           await pttMicCtx.setSinkId(s.remoteAudioOutput);
         }
         pttSourceNode = pttMicCtx.createMediaStreamSource(pttMicStream);
-        TxEqChain.wire(pttEqChain, pttMicCtx, pttSourceNode, pttMicCtx.destination, pttTxEqState);
+        if (!pttPreTap)  { pttPreTap  = pttMicCtx.createAnalyser(); pttPreTap.fftSize  = 1024; pttPreTap.smoothingTimeConstant = 0; }
+        if (!pttPostTap) { pttPostTap = pttMicCtx.createAnalyser(); pttPostTap.fftSize = 1024; pttPostTap.smoothingTimeConstant = 0; }
+        TxEqChain.wire(pttEqChain, pttMicCtx, pttSourceNode, pttMicCtx.destination, { ...pttTxEqState, preTap: pttPreTap, postTap: pttPostTap });
         attachTxMeter(pttMicCtx, pttSourceNode);
       }
     } catch (e) {
       console.error('[VFO] Mic PTT failed:', e.message);
     }
   }
+  // Start the VU meter loop. Polls pre + post taps every 50 ms and
+  // updates the meter bars in the EQ widget. Only fires while a tap
+  // exists (i.e. EQ enabled AND PTT held).
+  if (pttMeterTimer) clearInterval(pttMeterTimer);
+  pttMeterTimer = setInterval(_updateVfoTxEqMeter, 50);
+
   // Use nakedPtt so SSB-over-DATA doesn't fire — this button just keys TX,
   // it does not pump audio to the rig's USB CODEC. K4GDJ on FTDX101MP:
   // hitting PTT in USB flipped the rig to PKTUSB, killing the rig mic and
@@ -1707,6 +1770,20 @@ function pttStop() {
   if (pttMicStream) { pttMicStream.getTracks().forEach(t => t.stop()); pttMicStream = null; }
   if (pttSourceNode) { try { pttSourceNode.disconnect(); } catch {} pttSourceNode = null; }
   if (pttDaxWorklet) { try { pttDaxWorklet.disconnect(); } catch {} pttDaxWorklet = null; }
+  if (pttMeterTimer) { clearInterval(pttMeterTimer); pttMeterTimer = null; }
+  // Drop meter back to idle so the visible bars don't stick at last
+  // peak after PTT release.
+  const meterEl = document.getElementById('vfo-tx-eq-meter');
+  const preBar  = document.getElementById('vfo-tx-eq-pre-bar');
+  const postBar = document.getElementById('vfo-tx-eq-post-bar');
+  if (meterEl) meterEl.style.display = 'none';
+  if (preBar)  preBar.style.width = '0%';
+  if (postBar) postBar.style.width = '0%';
+  // AnalyserNodes are owned by the context they were created in — closing
+  // the context implicitly frees them. Clear refs so a fresh PTT cycle
+  // creates new ones (a node from a closed context throws on connect).
+  pttPreTap = null;
+  pttPostTap = null;
   if (pttDaxCtx) { pttDaxCtx.close().catch(() => {}); pttDaxCtx = null; }
   if (pttMicCtx) { pttMicCtx.close().catch(() => {}); pttMicCtx = null; }
   releaseTxMeter();
@@ -1724,10 +1801,11 @@ function applyVfoTxEqUiState() {
 // MediaStreamSource per change (which would leak a node per click).
 function _rewireVfoTxEqLive() {
   if (!pttSourceNode) return; // PTT not held — picked up on next pttStart
+  const wireOpts = { ...pttTxEqState, preTap: pttPreTap, postTap: pttPostTap };
   if (pttDaxCtx && pttDaxWorklet) {
-    TxEqChain.wire(pttEqChain, pttDaxCtx, pttSourceNode, pttDaxWorklet, pttTxEqState);
+    TxEqChain.wire(pttEqChain, pttDaxCtx, pttSourceNode, pttDaxWorklet, wireOpts);
   } else if (pttMicCtx) {
-    TxEqChain.wire(pttEqChain, pttMicCtx, pttSourceNode, pttMicCtx.destination, pttTxEqState);
+    TxEqChain.wire(pttEqChain, pttMicCtx, pttSourceNode, pttMicCtx.destination, wireOpts);
   }
 }
 if (vfoTxEqEnabled) {
@@ -1749,9 +1827,126 @@ if (vfoTxEqPreset) {
     pttTxEqState = {
       enabled: vfoTxEqEnabled ? vfoTxEqEnabled.checked : false,
       preset:  vfoTxEqPreset.value,
+      customParams: pttTxEqState.customParams,
     };
+    _toggleVfoTxEqCustomPanel();
     _rewireVfoTxEqLive();
     window.api.setTxEq(pttTxEqState);
+  });
+}
+
+// --- Custom EQ sliders ---
+const vfoTxEqCustomDetails = document.getElementById('vfo-tx-eq-custom');
+const _customSliderIds = {
+  low: 'vfo-tx-eq-low', high: 'vfo-tx-eq-high', thr: 'vfo-tx-eq-thr',
+  ratio: 'vfo-tx-eq-ratio', attack: 'vfo-tx-eq-attack', release: 'vfo-tx-eq-release',
+  knee: 'vfo-tx-eq-knee', makeup: 'vfo-tx-eq-makeup',
+};
+function _toggleVfoTxEqCustomPanel() {
+  // Custom-only block visible when the preset dropdown is on 'custom'.
+  if (vfoTxEqCustomDetails) {
+    vfoTxEqCustomDetails.style.display = (pttTxEqState.preset === 'custom') ? '' : 'none';
+  }
+}
+function _hydrateCustomSliders() {
+  // Populate slider DOM from pttTxEqState.customParams (or zero-defaults
+  // when never set). Called any time customParams changes from outside
+  // (Settings, iOS WS, etc.) so the UI mirrors truth.
+  const p = pttTxEqState.customParams || TxEqChain.CUSTOM_DEFAULTS;
+  const setSliderValue = (id, value, suffix) => {
+    const el = document.getElementById(id);
+    const lbl = document.getElementById(id + '-val');
+    if (el) el.value = String(value);
+    if (lbl) lbl.textContent = String(value) + (suffix || '');
+  };
+  setSliderValue(_customSliderIds.low,     p.lowGainDb,  ' dB');
+  setSliderValue(_customSliderIds.high,    p.highGainDb, ' dB');
+  setSliderValue(_customSliderIds.thr,     p.threshold,  ' dB');
+  setSliderValue(_customSliderIds.ratio,   p.ratio,      ':1');
+  // attack + release stored in seconds; UI in ms for readability.
+  setSliderValue(_customSliderIds.attack,  Math.round(p.attack * 1000),  ' ms');
+  setSliderValue(_customSliderIds.release, Math.round(p.release * 1000), ' ms');
+  setSliderValue(_customSliderIds.knee,    p.knee,    ' dB');
+  setSliderValue(_customSliderIds.makeup,  p.makeupDb, ' dB');
+}
+function _readCustomSliders() {
+  // Build a customParams object from the current slider values.
+  const num = (id) => {
+    const el = document.getElementById(id);
+    return el ? parseFloat(el.value) : 0;
+  };
+  return {
+    lowGainDb:  num(_customSliderIds.low),
+    highGainDb: num(_customSliderIds.high),
+    threshold:  num(_customSliderIds.thr),
+    ratio:      num(_customSliderIds.ratio),
+    attack:     num(_customSliderIds.attack)  / 1000, // ms → s
+    release:    num(_customSliderIds.release) / 1000, // ms → s
+    knee:       num(_customSliderIds.knee),
+    makeupDb:   num(_customSliderIds.makeup),
+  };
+}
+// Wire a single 'input' handler per slider so dragging updates DSP in
+// real time. Also re-renders the readout label next to the slider.
+Object.keys(_customSliderIds).forEach((key) => {
+  const id = _customSliderIds[key];
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', () => {
+    pttTxEqState = {
+      enabled: vfoTxEqEnabled ? vfoTxEqEnabled.checked : false,
+      preset:  vfoTxEqPreset ? vfoTxEqPreset.value : 'custom',
+      customParams: _readCustomSliders(),
+    };
+    // Update the slider's value label without re-hydrating the whole
+    // panel (that would yank the slider out from under the user's
+    // drag).
+    const lbl = document.getElementById(id + '-val');
+    if (lbl) {
+      const unit = (key === 'attack' || key === 'release') ? ' ms'
+                 : (key === 'ratio') ? ':1' : ' dB';
+      lbl.textContent = el.value + unit;
+    }
+    _rewireVfoTxEqLive();
+    window.api.setTxEq(pttTxEqState);
+  });
+});
+
+// --- VU meter ---
+function _updateVfoTxEqMeter() {
+  if (!pttPreTap || !pttPostTap) return;
+  const meterEl = document.getElementById('vfo-tx-eq-meter');
+  const preBar  = document.getElementById('vfo-tx-eq-pre-bar');
+  const postBar = document.getElementById('vfo-tx-eq-post-bar');
+  if (!meterEl || !preBar || !postBar) return;
+  // Show meter while EQ is enabled. Hidden state is set in CSS.
+  meterEl.style.display = pttTxEqState.enabled ? 'flex' : 'none';
+  if (!pttTxEqState.enabled) return;
+  const buf = new Float32Array(pttPreTap.fftSize);
+  let prePeak = 0, postPeak = 0;
+  pttPreTap.getFloatTimeDomainData(buf);
+  for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > prePeak) prePeak = v; }
+  pttPostTap.getFloatTimeDomainData(buf);
+  for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > postPeak) postPeak = v; }
+  preBar.style.width  = Math.min(100, prePeak * 100).toFixed(0) + '%';
+  postBar.style.width = Math.min(100, postPeak * 100).toFixed(0) + '%';
+}
+
+// --- "Save as rig default" button ---
+const vfoTxEqRigDefaultBtn = document.getElementById('vfo-tx-eq-rig-default-btn');
+if (vfoTxEqRigDefaultBtn) {
+  vfoTxEqRigDefaultBtn.addEventListener('click', async () => {
+    // Mark the currently-active rig's profile so it auto-restores this
+    // EQ state every time the user switches to it. main owns the rigs
+    // array; just send the current state and have main decide which
+    // rig is active.
+    try {
+      await window.api.saveTxEqRigDefault(pttTxEqState);
+      vfoTxEqRigDefaultBtn.textContent = 'Saved ✓';
+      setTimeout(() => { vfoTxEqRigDefaultBtn.textContent = 'Save as rig default'; }, 1500);
+    } catch (e) {
+      console.warn('[VFO] saveTxEqRigDefault failed:', e && e.message);
+    }
   });
 }
 // Push from main — initial state on did-finish-load, and any change
@@ -1762,8 +1957,11 @@ if (window.api.onTxEqUpdate) {
     const next = {
       enabled: !!eq.enabled,
       preset:  eq.preset || 'ragchew',
+      customParams: eq.customParams || pttTxEqState.customParams || null,
     };
-    const changed = next.enabled !== pttTxEqState.enabled || next.preset !== pttTxEqState.preset;
+    const changed = next.enabled !== pttTxEqState.enabled
+                 || next.preset !== pttTxEqState.preset
+                 || JSON.stringify(next.customParams) !== JSON.stringify(pttTxEqState.customParams);
     pttTxEqState = next;
     if (vfoTxEqEnabled && vfoTxEqEnabled.checked !== pttTxEqState.enabled) {
       vfoTxEqEnabled.checked = pttTxEqState.enabled;
@@ -1772,6 +1970,8 @@ if (window.api.onTxEqUpdate) {
       vfoTxEqPreset.value = pttTxEqState.preset;
     }
     applyVfoTxEqUiState();
+    _toggleVfoTxEqCustomPanel();
+    _hydrateCustomSliders();
     // Apply live if PTT is currently held (e.g. iOS user flips preset
     // while desktop op is transmitting).
     if (changed) _rewireVfoTxEqLive();

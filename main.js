@@ -5326,6 +5326,7 @@ function connectRemote() {
       remoteServer.broadcastTxEqState({
         enabled: !!settings.txEqEnabled,
         preset:  settings.txEqPreset || 'ragchew',
+        customParams: settings.txEqCustomParams || null,
       });
     } catch { /* ignore */ }
     // Send worked parks for new-to-me filter
@@ -5847,6 +5848,7 @@ function connectRemote() {
     settings.catTarget = rig.catTarget;
     settings.remoteAudioInput = rig.remoteAudioInput || '';
     settings.remoteAudioOutput = rig.remoteAudioOutput || '';
+    _applyRigEqDefault(rig);
     // Per-rig CW key port
     if (rig.cwKeyPort !== undefined) {
       settings.cwKeyPort = rig.cwKeyPort || '';
@@ -6120,6 +6122,7 @@ function connectRemote() {
         remoteServer.broadcastTxEqState({
           enabled: !!settings.txEqEnabled,
           preset:  settings.txEqPreset || 'ragchew',
+          customParams: settings.txEqCustomParams || null,
         });
       } catch { /* ignore */ }
     }
@@ -7680,8 +7683,27 @@ function _buildAudioBridgeConfig() {
     txEq: {
       enabled: !!settings.txEqEnabled,
       preset:  settings.txEqPreset || 'ragchew',
+      customParams: settings.txEqCustomParams || null,
     },
   };
+}
+
+// Apply per-rig TX EQ defaults if the rig profile has any. No-op when
+// the rig entry has no overrides (txEqEnabled === undefined). Funnels
+// through the tx-eq-set IPC so persistence + broadcasts to desktop UIs,
+// the ECHOCAT bridge, and mobile WS clients all happen in one place —
+// same channel a manual change uses. Called from both the mobile
+// switch-rig handler and the desktop save-settings activeRigId change
+// path.
+function _applyRigEqDefault(rig) {
+  if (!rig) return;
+  if (rig.txEqEnabled === undefined && rig.txEqPreset === undefined) return;
+  ipcMain.emit('tx-eq-set', null, {
+    enabled: !!rig.txEqEnabled,
+    preset:  rig.txEqPreset || 'ragchew',
+    customParams: rig.txEqCustomParams || null,
+  });
+  sendCatLog(`[TX EQ] Restored rig default for "${rig.name || rig.id}": ${rig.txEqPreset || 'ragchew'}${rig.txEqEnabled ? '' : ' (off)'}`);
 }
 
 async function startRemoteAudio() {
@@ -12203,6 +12225,7 @@ app.whenReady().then(() => {
       vfoPopoutWin.webContents.send('tx-eq-update', {
         enabled: !!settings.txEqEnabled,
         preset:  settings.txEqPreset || 'ragchew',
+        customParams: settings.txEqCustomParams || null,
       });
     });
     vfoPopoutWin.on('close', () => {
@@ -13885,15 +13908,48 @@ app.whenReady().then(() => {
   // TX EQ live update — push from app.js settings UI to the audio bridge
   // without tearing down WebRTC. The bridge maintains an active filter
   // chain; this just retargets its filter params + compressor knobs.
+  // Per-rig defaults — stamp the current EQ state onto the active rig
+  // profile so switching rigs auto-restores it. Each rig entry gets:
+  //   { txEqEnabled, txEqPreset, txEqCustomParams }
+  // (all optional — missing fields mean "no rig override; use the
+  // global setting"). Triggered from the VFO popout's "Save as rig
+  // default" button. On rig switch, _applyRigEqDefault (below) reads
+  // these back and emits a tx-eq-set so the global EQ state matches.
+  ipcMain.handle('tx-eq-save-rig-default', (_e, eqConfig) => {
+    if (!eqConfig || typeof eqConfig !== 'object') return { ok: false, reason: 'no-config' };
+    const rigs = Array.isArray(settings.rigs) ? settings.rigs : [];
+    const activeId = settings.activeRigId;
+    if (!activeId) return { ok: false, reason: 'no-active-rig' };
+    const idx = rigs.findIndex((r) => r && r.id === activeId);
+    if (idx < 0) return { ok: false, reason: 'rig-not-found' };
+    rigs[idx] = {
+      ...rigs[idx],
+      txEqEnabled: !!eqConfig.enabled,
+      txEqPreset:  eqConfig.preset || 'ragchew',
+      txEqCustomParams: eqConfig.customParams || rigs[idx].txEqCustomParams || null,
+    };
+    settings.rigs = rigs;
+    saveSettings(settings);
+    sendCatLog(`[TX EQ] Saved as default for rig "${rigs[idx].name || activeId}": ${rigs[idx].txEqPreset}${rigs[idx].txEqEnabled ? '' : ' (off)'}`);
+    return { ok: true, rigName: rigs[idx].name || activeId };
+  });
+
   ipcMain.on('tx-eq-set', (_e, eqConfig) => {
     if (eqConfig && typeof eqConfig === 'object') {
       if (typeof eqConfig.enabled === 'boolean') settings.txEqEnabled = eqConfig.enabled;
       if (typeof eqConfig.preset === 'string')   settings.txEqPreset = eqConfig.preset;
+      // customParams is the user-tuned slider state; only persist when
+      // the caller actually sent one (so toggling a built-in preset
+      // doesn't wipe the user's saved Custom config).
+      if (eqConfig.customParams && typeof eqConfig.customParams === 'object') {
+        settings.txEqCustomParams = eqConfig.customParams;
+      }
       saveSettings(settings);
     }
     const payload = {
       enabled: !!settings.txEqEnabled,
       preset:  settings.txEqPreset || 'ragchew',
+      customParams: settings.txEqCustomParams || null,
     };
     if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
       remoteAudioWin.webContents.send('tx-eq-update', payload);
@@ -14345,6 +14401,12 @@ app.whenReady().then(() => {
     const netRemindersChanged = has('netReminders') &&
       JSON.stringify(newSettings.netReminders) !== JSON.stringify(settings.netReminders);
 
+    // Active rig changed (desktop "switch to rig X" path) — apply that
+    // rig's TX EQ defaults if it has any. Mobile switch-rig fires the
+    // same helper from its own handler; this path covers the case
+    // where the user picks a different rig from the desktop rig list.
+    const activeRigChanged = has('activeRigId') && newSettings.activeRigId !== settings.activeRigId;
+
     const isPartialSave = !has('enablePota'); // hotkey saves only send 1-2 keys
 
     settings = { ...settings, ...newSettings };
@@ -14404,6 +14466,13 @@ app.whenReady().then(() => {
     // directoryNets/directorySwl arrays — only userNets is recomputed.
     if (netRemindersChanged) {
       pushDirectoryToRenderer();
+    }
+
+    // Per-rig TX EQ defaults (desktop rig switch). Mobile switch-rig
+    // fires the same helper directly; this is the desktop path.
+    if (activeRigChanged) {
+      const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+      if (rig) _applyRigEqDefault(rig);
     }
 
     // Reconnect CW Spots if settings changed

@@ -26,6 +26,32 @@
     pileup:  { lowGainDb: -3, highGainDb: 6,  threshold: -18, ratio: 4, attack: 0.003, release: 0.15, knee: 20, makeupDb: 4 },
     dx:      { lowGainDb: -6, highGainDb: 9,  threshold: -16, ratio: 6, attack: 0.001, release: 0.10, knee: 15, makeupDb: 6 },
   };
+  // Default values for "Custom" if user opens it without ever tweaking.
+  // Same shape as a preset; the renderer treats them identically.
+  const CUSTOM_DEFAULTS = { lowGainDb: 0, highGainDb: 0, threshold: -24, ratio: 2, attack: 0.003, release: 0.25, knee: 30, makeupDb: 0 };
+
+  // Range constraints for the UI sliders. Hard-clamped here so a bad
+  // value over the WS bridge or a typo in a custom preset can't blow up
+  // the Web Audio nodes (DynamicsCompressor throws on out-of-range).
+  const PARAM_RANGES = {
+    lowGainDb:  { min: -12, max: 12,  step: 0.5 },
+    highGainDb: { min: -12, max: 12,  step: 0.5 },
+    threshold:  { min: -60, max: 0,   step: 1   },
+    ratio:      { min: 1,   max: 20,  step: 0.5 },
+    attack:     { min: 0,   max: 1,   step: 0.001 },
+    release:    { min: 0,   max: 1,   step: 0.01  },
+    knee:       { min: 0,   max: 40,  step: 1   },
+    makeupDb:   { min: 0,   max: 24,  step: 0.5 },
+  };
+  function clampParams(p) {
+    const out = { ...CUSTOM_DEFAULTS, ...(p || {}) };
+    for (const k of Object.keys(PARAM_RANGES)) {
+      const r = PARAM_RANGES[k];
+      const v = Number(out[k]);
+      out[k] = Number.isFinite(v) ? Math.max(r.min, Math.min(r.max, v)) : CUSTOM_DEFAULTS[k];
+    }
+    return out;
+  }
   const LOW_HZ  = 120;
   const HIGH_HZ = 2000;
 
@@ -52,7 +78,12 @@
     }
 
     const presetName = opts.preset || 'ragchew';
-    const p = PRESETS[presetName] || PRESETS.ragchew;
+    // "custom" preset uses opts.customParams (whatever the user dialed
+    // in) rather than a baked PRESETS entry. Other preset names fall
+    // back to PRESETS lookup, with ragchew as last resort.
+    const p = (presetName === 'custom')
+      ? clampParams(opts.customParams)
+      : (PRESETS[presetName] || PRESETS.ragchew);
 
     chain.lowShelf = ctx.createBiquadFilter();
     chain.lowShelf.type = 'lowshelf';
@@ -74,6 +105,20 @@
     chain.makeup = ctx.createGain();
     chain.makeup.gain.value = dbToLinear(p.makeupDb);
 
+    // If caller provided meter taps, fan out at the appropriate points.
+    // Pre-comp tap reads the input to the compressor (= post-EQ); post-
+    // comp tap reads the output after makeup gain. Difference is the
+    // gain reduction the user is asking the compressor for. Both taps
+    // are AnalyserNodes the caller pre-created and owns.
+    if (opts.preTap) {
+      try { opts.preTap.disconnect(); } catch (_) {}
+      chain.highShelf.connect(opts.preTap);
+    }
+    if (opts.postTap) {
+      try { opts.postTap.disconnect(); } catch (_) {}
+      chain.makeup.connect(opts.postTap);
+    }
+
     source.connect(chain.lowShelf);
     chain.lowShelf.connect(chain.highShelf);
     chain.highShelf.connect(chain.compressor);
@@ -81,5 +126,5 @@
     chain.makeup.connect(dest);
   }
 
-  root.TxEqChain = { PRESETS, create, wire };
+  root.TxEqChain = { PRESETS, CUSTOM_DEFAULTS, PARAM_RANGES, clampParams, create, wire };
 })(typeof window !== 'undefined' ? window : globalThis);

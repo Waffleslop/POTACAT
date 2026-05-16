@@ -59,4 +59,8 @@ contextBridge.exposeInMainWorld('api', {
   // iOS WS, this popout's own controls).
   setTxEq: (eqConfig) => ipcRenderer.send('tx-eq-set', eqConfig),
   onTxEqUpdate: (cb) => ipcRenderer.on('tx-eq-update', (_e, eqConfig) => cb(eqConfig)),
+  // Persist the current EQ state as the per-rig default for whichever
+  // rig profile is active right now. Main looks at settings.activeRigId
+  // and stamps the EQ fields onto that rig entry in settings.rigs.
+  saveTxEqRigDefault: (eqConfig) => ipcRenderer.invoke('tx-eq-save-rig-default', eqConfig),
 });

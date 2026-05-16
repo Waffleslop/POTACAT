@@ -31,7 +31,25 @@ Single message type, used in both directions.
 ### Mobile → desktop (set)
 
 ```jsonc
-{ "type": "tx-eq-set", "enabled": true, "preset": "pileup" }
+{
+  "type":    "tx-eq-set",
+  "enabled": true,
+  "preset":  "pileup",
+  // Optional. Required only when preset === "custom" so desktop knows
+  // which slider values to apply. Omit (or send null) when changing to
+  // a built-in preset — desktop preserves the previously-saved custom
+  // values across preset switches.
+  "customParams": {
+    "lowGainDb":  -3,    // -12 .. 12 dB, low shelf @ 120 Hz
+    "highGainDb": 6,     // -12 .. 12 dB, high shelf @ 2 kHz
+    "threshold":  -18,   // -60 .. 0 dBFS
+    "ratio":      4,     // 1 .. 20
+    "attack":     0.003, // 0 .. 1 seconds
+    "release":    0.15,  // 0 .. 1 seconds
+    "knee":       20,    // 0 .. 40 dB
+    "makeupDb":   4      // 0 .. 24 dB
+  }
+}
 ```
 
 Desktop persists to `settings.txEqEnabled` / `settings.txEqPreset`,
@@ -52,7 +70,16 @@ poll. Useful for a manual refresh button if you want one.
 ### Desktop → mobile (state)
 
 ```jsonc
-{ "type": "tx-eq-state", "enabled": true, "preset": "pileup" }
+{
+  "type":         "tx-eq-state",
+  "enabled":      true,
+  "preset":       "pileup",
+  // null when the user has never customized. Otherwise the saved
+  // slider values that "Custom" would apply if selected. Mobile UI
+  // can hydrate its own slider widgets from this when the preset
+  // dropdown is on Custom.
+  "customParams": { "lowGainDb": -3, "highGainDb": 6, /* ... */ }
+}
 ```
 
 Pushed:
@@ -87,15 +114,22 @@ authoritative — overwrite local UI state even if it was just changed
 by the user (debounce to suppress the visible flicker if the echo
 arrives within ~100 ms of the change).
 
-## What desktop does NOT do
+## What desktop now does (Phase 3–4 shipped)
 
-- **Per-rig defaults** — Phase 3 on the desktop side. The single
-  preset applies regardless of which rig is connected. iOS UI
-  doesn't need to worry about this.
-- **Custom slider knobs** — Phase 2 on the desktop side. iOS UI
-  just needs the 3 presets for v1.
-- **VU meter / spectrum** — not in v1. Could be a follow-up if you
-  want pre/post compressor metering.
+- **Custom preset + slider state** — see `customParams` above. iOS
+  can add slider widgets if you want full parity; otherwise just
+  show the preset name and let the user dial it in from desktop.
+- **Per-rig defaults** — desktop's VFO popout has a "Save as rig
+  default" button that stamps the current EQ onto the active rig
+  profile (`settings.rigs[i].txEq*`). When the user switches rigs
+  (via desktop UI or `switch-rig` over WS), the saved EQ
+  auto-applies and a fresh `tx-eq-state` push hits all connected
+  clients. No mobile-side change needed — your UI will just see the
+  EQ change on rig switch.
+- **VU meter** — desktop's VFO popout shows a pre/post compressor
+  level meter while PTT is held. Mobile equivalent isn't in the
+  protocol; could be a follow-up if mobile ops want metering during
+  their own TX.
 
 ## How to verify
 
