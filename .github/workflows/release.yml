@@ -204,6 +204,22 @@ jobs:
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true
+      # Same hard-fail check as the arm64 job — see comments there.
+      - name: Confirm alsa_native built + loads + can openCapture
+        run: |
+          set -e
+          ls -la lib/alsa_native/build/Release/
+          file lib/alsa_native/build/Release/alsa_native.node
+          node -e "
+            const a = require('./lib/alsa');
+            console.log('alsa available:', a.isAvailable(), 'version:', a._alsaVersion());
+            if (!a.isAvailable()) { console.error('alsa_native loaded but not available'); process.exit(1); }
+            const native = require('./lib/alsa_native/build/Release/alsa_native.node');
+            const cap = native.openCapture('null', { rate: 48000, channels: 1, periodFrames: 1024, bufferFrames: 4096 });
+            console.log('openCapture(null) ok — handle=', cap.handle, 'rate=', cap.rate);
+            native.closeCapture(cap.handle);
+            console.log('closeCapture ok');
+          "
       - name: Bundle hamlib into assets/hamlib/
         # Replaces Windows binaries with the freshly-built Linux rigctld
         # + its hamlib/libusb deps, rewriting RPATH to $ORIGIN so libs
@@ -276,6 +292,27 @@ jobs:
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true
+      # alsa_native is critical for the arm64 build's primary audience
+      # (Raspberry Pi / sBitx users). build-natives has continue-on-error
+      # for optional addons (FreeDV codec2 etc.), which silently shipped
+      # v1.6.0 without the alsa addon when a binding.gyp parse error
+      # broke the build. Explicit hard-fail here means a regression in
+      # alsa_native blocks the release instead of slipping through.
+      - name: Confirm alsa_native built + loads + can openCapture
+        run: |
+          set -e
+          ls -la lib/alsa_native/build/Release/
+          file lib/alsa_native/build/Release/alsa_native.node
+          node -e "
+            const a = require('./lib/alsa');
+            console.log('alsa available:', a.isAvailable(), 'version:', a._alsaVersion());
+            if (!a.isAvailable()) { console.error('alsa_native loaded but not available'); process.exit(1); }
+            const native = require('./lib/alsa_native/build/Release/alsa_native.node');
+            const cap = native.openCapture('null', { rate: 48000, channels: 1, periodFrames: 1024, bufferFrames: 4096 });
+            console.log('openCapture(null) ok — handle=', cap.handle, 'rate=', cap.rate);
+            native.closeCapture(cap.handle);
+            console.log('closeCapture ok');
+          "
       - name: Bundle hamlib into assets/hamlib/
         run: |
           set -e
