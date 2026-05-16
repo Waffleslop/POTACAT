@@ -72,7 +72,8 @@
       "lib/rade_native/**/*",
       "lib/alsa_native/**/*",
       "lib/alsa.js",
-      "scripts/test-alsa.js"
+      "scripts/test-alsa.js",
+      "node_modules/@discordjs/opus/**/*"
     ],
     "win": {
       "icon": "assets/icon.ico",
@@ -148,6 +149,7 @@
     "sharp": "^0.34.5"
   },
   "dependencies": {
+    "@discordjs/opus": "^0.10.0",
     "bonjour-service": "^1.3.0",
     "electron-updater": "^6.8.3",
     "ft8js": "^0.0.3",

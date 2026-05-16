@@ -1063,6 +1063,14 @@ async function connectCat() {
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
+    // Phase 4: K4 audio over the same TCP socket. type-0x01 frames carry
+    // Opus-encoded RX audio (stereo, L=MAIN, R=SUB, 12 kHz). Decode and
+    // route through the same pipelines SmartSDR Direct uses so ECHOCAT
+    // iOS bridge, SSTV waterfall, and FT8 decoder all get audio without
+    // any rig-side audio device. K3SBP 2026-05-16.
+    if (target.type === 'k4-network') {
+      cat.on('k4-audio', (frame) => handleK4AudioFrame(frame));
+    }
     cat.connect(target);
     return;
   }
@@ -4091,6 +4099,179 @@ function stopSmartSdrAudio() {
   if (!smartSdrAudio) return;
   try { smartSdrAudio.stop(); } catch {}
   smartSdrAudio = null;
+}
+
+// ---------------------------------------------------------------------------
+// K4 Network audio (Phase 4): Opus codec for the K4's TCP audio stream.
+// ---------------------------------------------------------------------------
+// The K4 multiplexes RX audio (and accepts mic audio for TX) on the same
+// TCP socket it uses for CAT. Frames carry 12 kHz stereo Opus (L=MAIN,
+// R=SUB). Decoder + encoder are lazy-loaded so a user who doesn't pick
+// k4-network audio never touches @discordjs/opus. K3SBP 2026-05-16.
+let _k4OpusDecoderStereo = null; // for incoming RX (stereo)
+let _k4OpusEncoderMono   = null; // for outgoing TX (mono mic)
+let _k4AudioFrameCount   = 0;
+function _getK4OpusDecoder() {
+  if (_k4OpusDecoderStereo) return _k4OpusDecoderStereo;
+  try {
+    const { OpusEncoder } = require('@discordjs/opus');
+    _k4OpusDecoderStereo = new OpusEncoder(12000, 2);
+    sendCatLog('[K4-Audio] Opus decoder (12 kHz stereo) ready');
+  } catch (err) {
+    sendCatLog('[K4-Audio] Failed to load @discordjs/opus: ' + err.message);
+  }
+  return _k4OpusDecoderStereo;
+}
+function _getK4OpusEncoder() {
+  if (_k4OpusEncoderMono) return _k4OpusEncoderMono;
+  try {
+    const { OpusEncoder } = require('@discordjs/opus');
+    _k4OpusEncoderMono = new OpusEncoder(12000, 1);
+    sendCatLog('[K4-Audio] Opus encoder (12 kHz mono) ready');
+  } catch (err) {
+    sendCatLog('[K4-Audio] Failed to load @discordjs/opus: ' + err.message);
+  }
+  return _k4OpusEncoderMono;
+}
+
+function handleK4AudioFrame(frame) {
+  if (!frame || !frame.data || !frame.data.length) return;
+  // We asked for EM3 (Opus Float). RAW modes (EM0/EM1) shouldn't arrive
+  // unless the radio is set in some unusual way; drop them with a warning
+  // rather than try to decode mid-stream.
+  if (frame.encodeMode !== 2 && frame.encodeMode !== 3) {
+    if (_k4AudioFrameCount === 0) {
+      sendCatLog(`[K4-Audio] Got encodeMode=${frame.encodeMode} (not Opus). RAW audio not yet supported — re-sending EM3;`);
+      if (cat && cat.transport && typeof cat.transport.write === 'function') {
+        try { cat.transport.write('EM3;'); } catch { /* ignore */ }
+      }
+    }
+    return;
+  }
+  const decoder = _getK4OpusDecoder();
+  if (!decoder) return;
+  let stereoInt16;
+  try {
+    stereoInt16 = decoder.decode(frame.data); // Int16 stereo interleaved at 12 kHz
+  } catch (err) {
+    if (_k4AudioFrameCount < 5) sendCatLog('[K4-Audio] decode error: ' + err.message);
+    return;
+  }
+  _k4AudioFrameCount++;
+  // Convert to mono Float32 (take L = MAIN RX; SUB if active comes through
+  // as R but we drop it for now to match the single-mono-channel pipelines
+  // every downstream consumer is built for). Boost slightly to make up for
+  // K4's reduced output level on Opus-encoded streams — QK4 multiplies by
+  // 32 for float decode; for int16 the equivalent gain has already been
+  // applied so just convert / 32768 to [-1, 1].
+  const stereoFrames = stereoInt16.length / 2;
+  const monoF32 = new Float32Array(stereoFrames);
+  for (let i = 0; i < stereoFrames; i++) {
+    monoF32[i] = stereoInt16[i * 2] / 32768; // L channel only
+  }
+  // 1) ECHOCAT iOS bridge: reuse the smartsdr-audio-frame IPC (the
+  //    renderer's onSmartSdrAudioFrame handles arbitrary sample rates
+  //    via frame.sampleRate). The bridge has no awareness of which rig
+  //    it is — it just wants PCM frames.
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+    remoteAudioWin.webContents.send('smartsdr-audio-frame', {
+      pcm: Array.from(monoF32),
+      sampleRate: 12000,
+    });
+  }
+  // 2) JTCAT (FT8) — engine wants 12 kHz mono, which is exactly what we have.
+  if (settings.audioSource === 'k4-network' && jtcatManager && jtcatManager.running) {
+    jtcatManager.feedAudio('default', monoF32);
+  }
+  // 3) SSTV — engine + waterfall both expect 48 kHz, so 4x linear-interp
+  //    upsample. Same pattern as the SmartSDR Direct path; minor since
+  //    SSTV is an occasional workflow.
+  if (settings.audioSource === 'k4-network' && sstvEngine) {
+    const out = new Float32Array(monoF32.length * 4);
+    for (let i = 0; i < monoF32.length; i++) {
+      const s0 = monoF32[i];
+      const s1 = (i + 1 < monoF32.length) ? monoF32[i + 1] : s0;
+      const a = s0;
+      const b = s0 + (s1 - s0) * 0.25;
+      const c = s0 + (s1 - s0) * 0.50;
+      const d = s0 + (s1 - s0) * 0.75;
+      out[i * 4]     = a;
+      out[i * 4 + 1] = b;
+      out[i * 4 + 2] = c;
+      out[i * 4 + 3] = d;
+    }
+    sstvEngine.feedAudio(out);
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sstvPopoutWin.webContents.send('sstv-vita49-audio', { pcm: Array.from(out), sampleRate: 48000 });
+    }
+  }
+  // Diagnostic: log first frame + periodic heartbeat (~every 5 s at 720
+  // samples/frame, 12 kHz → ~16.7 fps).
+  if (_k4AudioFrameCount === 1 || _k4AudioFrameCount % 80 === 0) {
+    let peak = 0;
+    for (let i = 0; i < monoF32.length; i++) {
+      const v = Math.abs(monoF32[i]); if (v > peak) peak = v;
+    }
+    sendCatLog(`[K4-Audio] RX frame #${_k4AudioFrameCount}: ${monoF32.length} samples @ 12 kHz, peak=${peak.toFixed(4)}`);
+  }
+}
+
+// K4 TX accumulator: dax-tx-chunk arrives as 24 kHz mono Float32 in
+// 128-sample chunks (one VITA packet's worth). For K4 we need 12 kHz
+// mono in 720-sample frames (60 ms @ 12 kHz, matches our SL3 session
+// setup). 2:1 decimate with a simple 2-tap average, then fill 720-sample
+// frames; emit each via Opus encoder. K3SBP 2026-05-16.
+const _K4_TX_FRAME_SAMPLES = 720; // 60 ms @ 12 kHz
+let _k4TxBuf = new Float32Array(_K4_TX_FRAME_SAMPLES);
+let _k4TxBufPos = 0;
+let _k4TxFrameCount = 0;
+let _k4TxLastVoiceLogMs = 0;
+function _pushK4TxSamples(samples24) {
+  const enc = _getK4OpusEncoder();
+  if (!enc) return;
+  // 2:1 decimate with 2-tap average (cheap lowpass + decimate). Input is
+  // 24 kHz mono Float32 in [-1, 1]; output stays Float32 in [-1, 1].
+  const halfLen = Math.floor(samples24.length / 2);
+  for (let i = 0; i < halfLen; i++) {
+    const sample = (samples24[i * 2] + samples24[i * 2 + 1]) * 0.5;
+    _k4TxBuf[_k4TxBufPos++] = sample;
+    if (_k4TxBufPos >= _K4_TX_FRAME_SAMPLES) {
+      // Convert Float32 [-1, 1] -> Int16 for Opus encoder
+      const int16 = new Int16Array(_K4_TX_FRAME_SAMPLES);
+      let peak = 0;
+      for (let j = 0; j < _K4_TX_FRAME_SAMPLES; j++) {
+        const v = _k4TxBuf[j];
+        if (Math.abs(v) > peak) peak = Math.abs(v);
+        const clamped = Math.max(-1, Math.min(1, v));
+        int16[j] = (clamped * 32767) | 0;
+      }
+      try {
+        const opusBuf = enc.encode(Buffer.from(int16.buffer, int16.byteOffset, int16.byteLength));
+        if (cat && typeof cat.sendK4Audio === 'function') {
+          cat.sendK4Audio(opusBuf, _K4_TX_FRAME_SAMPLES);
+        }
+        _k4TxFrameCount++;
+        if (_k4TxFrameCount === 1 || _k4TxFrameCount % 50 === 0) {
+          sendCatLog(`[K4-Audio] TX frame #${_k4TxFrameCount}: encoded ${opusBuf.length} bytes, peak=${peak.toFixed(3)}`);
+        }
+        if (peak > 0.02) {
+          const now = Date.now();
+          if (now - _k4TxLastVoiceLogMs > 1000) {
+            _k4TxLastVoiceLogMs = now;
+            sendCatLog(`[K4-Audio] TX voice: peak=${peak.toFixed(3)} (${(20 * Math.log10(peak)).toFixed(0)} dBFS)`);
+          }
+        }
+      } catch (err) {
+        sendCatLog('[K4-Audio] TX encode error: ' + err.message);
+      }
+      _k4TxBufPos = 0;
+    }
+  }
+}
+function _resetK4TxBuf() {
+  _k4TxBufPos = 0;
+  _k4TxFrameCount = 0;
+  if (cat && typeof cat.resetK4TxSeq === 'function') cat.resetK4TxSeq();
 }
 
 let lastSmartSdrPush = 0;
@@ -7281,8 +7462,14 @@ function handleRemotePtt(state, opts = {}) {
       sendCatLog('PTT FAILED: neither SmartSDR API nor CAT TCP is connected');
     }
   } else {
-    // Non-Flex rig (serial or rigctld): use TX;/RX; or T 1/T 0
+    // Non-Flex rig (serial or rigctld or K4-network): use TX;/RX; or T 1/T 0
     if (cat && cat.connected) {
+      // K4-network: reset Opus TX sequence counter on every PTT down so each
+      // transmission starts at seq=0 (the radio uses the seq to detect lost
+      // frames; restarting mid-stream after a TX gap looks like packet loss).
+      if (state && target && target.type === 'k4-network') {
+        try { _resetK4TxBuf(); } catch {}
+      }
       cat.setTransmit(state);
     } else if (state) {
       console.warn('[PTT] Cannot key TX — CAT not connected');
@@ -7462,7 +7649,8 @@ async function startRemoteAudio() {
       outputDeviceId: settings.remoteAudioOutput || '',
       useStun: !!settings.remoteStun,
       audioSource: settings.audioSource || 'dax',
-      daxTxDirect: settings.audioSource === 'smartsdr' && smartSdrAudio && smartSdrAudio.txReady,
+      daxTxDirect: (settings.audioSource === 'smartsdr' && smartSdrAudio && smartSdrAudio.txReady) ||
+                   (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected),
     });
     // Re-apply FreeDV mute after audio restart
     if (_freedvAudioMuted) setTimeout(() => applyFreedvAudioMute(), 500);
@@ -7497,7 +7685,8 @@ async function startRemoteAudio() {
         inputDeviceId: settings.remoteAudioInput || '',
         outputDeviceId: settings.remoteAudioOutput || '',
         audioSource: settings.audioSource || 'dax',
-        daxTxDirect: settings.audioSource === 'smartsdr' && smartSdrAudio && smartSdrAudio.txReady,
+        daxTxDirect: (settings.audioSource === 'smartsdr' && smartSdrAudio && smartSdrAudio.txReady) ||
+                   (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected),
       });
       // Apply FreeDV mute if engine is active (audio window created after FreeDV started)
       if (_freedvAudioMuted) applyFreedvAudioMute();
@@ -12189,6 +12378,8 @@ app.whenReady().then(() => {
     // handler. Drop the renderer's (silent on this path) Windows-DAX-RX
     // capture so the same audio isn't double-fed at the decoder.
     if (settings.audioSource === 'smartsdr' && smartSdrAudio) return;
+    // K4 network: SSTV is fed by handleK4AudioFrame's 4x upsample.
+    if (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected) return;
     let samples;
     if (buf instanceof Float32Array) samples = buf;
     else if (Array.isArray(buf)) samples = new Float32Array(buf);
@@ -14817,8 +15008,17 @@ app.whenReady().then(() => {
         sendCatLog(`[SmartSDR-Audio] DAX TX voice: peak=${peak.toFixed(3)} (${(20 * Math.log10(peak)).toFixed(0)} dBFS)`);
       }
     }
-    try { smartSdrAudio.pushTxAudioChunk(samples); } catch (e) {
-      console.warn('[SmartSDR-Audio] pushTxAudioChunk error:', e.message);
+    if (smartSdrAudio && smartSdrAudio.txReady) {
+      try { smartSdrAudio.pushTxAudioChunk(samples); } catch (e) {
+        console.warn('[SmartSDR-Audio] pushTxAudioChunk error:', e.message);
+      }
+    }
+    // K4 network audio (Phase 4): the same renderer chunks feed K4 too,
+    // but at 12 kHz mono Opus. Renderer sends 24 kHz mono Float32 in
+    // 128-sample chunks; decimate 2:1 then accumulate to 720-sample
+    // (60 ms @ 12 kHz) frames before encoding.
+    if (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected) {
+      _pushK4TxSamples(samples);
     }
   });
   ipcMain.on('jtcat-log', (_e, msg) => {
@@ -14834,6 +15034,11 @@ app.whenReady().then(() => {
     // Windows-DAX-device capture so the (often silent) device can't
     // double-feed or overwrite the good VITA-49 audio. K3SBP 2026-05-14.
     if (settings.audioSource === 'smartsdr' && smartSdrAudio) return;
+    // Same story for K4 network: handleK4AudioFrame feeds jtcatManager
+    // directly from the Opus-decoded stream, so the renderer's Windows-
+    // DAX capture (which on a K4-network setup would just be silence or
+    // mis-routed audio anyway) must not double-feed. K3SBP 2026-05-16.
+    if (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected) return;
     _jtcatAudioDiag++;
     // Ensure buf is a proper array — IPC serialization on macOS can produce
     // objects that Float32Array constructor interprets as length instead of data
