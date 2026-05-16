@@ -12233,6 +12233,16 @@ app.whenReady().then(() => {
   ipcMain.on('conditions-popout-theme', (_e, theme) => {
     if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed()) conditionsPopoutWin.webContents.send('conditions-popout-theme', theme);
   });
+  // Renderer-driven zoom step (Ctrl+wheel). The renderer can't call
+  // webContents.setZoomLevel itself with contextIsolation on, so it
+  // emits a +1 / -1 hint and main applies the actual delta.
+  ipcMain.on('conditions-popout-zoom-by', (_e, delta) => {
+    if (!conditionsPopoutWin || conditionsPopoutWin.isDestroyed()) return;
+    const wc = conditionsPopoutWin.webContents;
+    const step = delta > 0 ? 0.5 : -0.5;
+    const next = Math.max(-3, Math.min(8, wc.getZoomLevel() + step));
+    wc.setZoomLevel(next);
+  });
 
   ipcMain.on('vfo-tuned-spot', (_e, spot) => {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {

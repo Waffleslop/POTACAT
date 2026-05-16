@@ -19,4 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   minimize: () => ipcRenderer.send('conditions-popout-minimize'),
   maximize: () => ipcRenderer.send('conditions-popout-maximize'),
   close: () => ipcRenderer.send('conditions-popout-close'),
+  // Ctrl+wheel zoom — renderer intercepts the wheel event so Chromium's
+  // own pinch-zoom logic doesn't double-fire, then asks main to bump
+  // setZoomLevel in the same direction (+1 in / -1 out).
+  zoomBy: (delta) => ipcRenderer.send('conditions-popout-zoom-by', delta),
 });

@@ -24,6 +24,16 @@
   // Esc closes — Conditions is read-only so there's no save-on-close gotcha.
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.api.close(); });
 
+  // Ctrl/Cmd + wheel → zoom step. preventDefault stops Chromium's own
+  // pinch-zoom (which would scale the page in addition to our IPC step
+  // and feel sluggish). passive:false is required for preventDefault.
+  window.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    if (e.deltaY === 0) return;
+    window.api.zoomBy(e.deltaY < 0 ? +1 : -1);
+  }, { passive: false });
+
   // ---------------------------------------------------------------------
   // Theme — hydrate from settings, then live updates
   // ---------------------------------------------------------------------
