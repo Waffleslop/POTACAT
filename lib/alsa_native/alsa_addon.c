@@ -53,6 +53,7 @@
 
 #include <node_api.h>
 #include <alsa/asoundlib.h>
+#include <alloca.h>  /* explicit — some glibc builds only declare alloca here */
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -316,34 +317,47 @@ static napi_value OpenCapture(napi_env env, napi_callback_info info) {
    * count. snd_pcm_hw_params_set_rate_near and ..._set_channels_near
    * negotiate down if the device can't exactly satisfy us; that's
    * what `plughw:` is for in the user-facing setup, but the bare hw:
-   * path still benefits from the near-match fallback. */
-  snd_pcm_hw_params_t *hw;
-  snd_pcm_hw_params_alloca(&hw);
+   * path still benefits from the near-match fallback.
+   *
+   * Heap-allocate hw via snd_pcm_hw_params_malloc rather than the
+   * stack-allocating snd_pcm_hw_params_alloca macro: the macro
+   * expands to alloca(), and HA3HZ on a Raspberry Pi hit "undefined
+   * symbol: alloca" at .node dlopen time — some libc builds don't
+   * export alloca as a real symbol. Heap alloc removes that fragile
+   * dependency entirely. Paired with snd_pcm_hw_params_free below
+   * on every exit path. K3SBP 2026-05-16. */
+  snd_pcm_hw_params_t *hw = NULL;
+  if ((err = snd_pcm_hw_params_malloc(&hw)) < 0) {
+    snd_pcm_close(pcm); free_handle(idx);
+    char msg[384];
+    snprintf(msg, sizeof(msg), "snd_pcm_hw_params_malloc failed: %s", snd_strerror(err));
+    return throw_error(env, msg);
+  }
   snd_pcm_hw_params_any(pcm, hw);
 
   if ((err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0 ||
       (err = snd_pcm_hw_params_set_format(pcm, hw, SND_PCM_FORMAT_S16_LE)) < 0) {
-    snd_pcm_close(pcm); free_handle(idx);
+    snd_pcm_hw_params_free(hw); snd_pcm_close(pcm); free_handle(idx);
     char msg[384];
     snprintf(msg, sizeof(msg), "snd_pcm hw_params (access/format) failed for %s: %s — try plughw:X,Y instead of hw:X,Y", name, snd_strerror(err));
     return throw_error(env, msg);
   }
   unsigned int actual_rate = rate;
   if ((err = snd_pcm_hw_params_set_rate_near(pcm, hw, &actual_rate, 0)) < 0) {
-    snd_pcm_close(pcm); free_handle(idx);
+    snd_pcm_hw_params_free(hw); snd_pcm_close(pcm); free_handle(idx);
     char msg[384];
     snprintf(msg, sizeof(msg), "snd_pcm_hw_params_set_rate_near(%u) failed: %s", rate, snd_strerror(err));
     return throw_error(env, msg);
   }
   unsigned int actual_channels = channels;
   if ((err = snd_pcm_hw_params_set_channels_near(pcm, hw, &actual_channels)) < 0) {
-    snd_pcm_close(pcm); free_handle(idx);
+    snd_pcm_hw_params_free(hw); snd_pcm_close(pcm); free_handle(idx);
     char msg[384];
     snprintf(msg, sizeof(msg), "snd_pcm_hw_params_set_channels_near(%u) failed: %s", channels, snd_strerror(err));
     return throw_error(env, msg);
   }
   if (actual_channels > MAX_INTERLEAVED_CHANNELS) {
-    snd_pcm_close(pcm); free_handle(idx);
+    snd_pcm_hw_params_free(hw); snd_pcm_close(pcm); free_handle(idx);
     return throw_error(env, "openCapture: device requires more channels than addon supports (8 max)");
   }
   snd_pcm_uframes_t actual_period = period_frames;
@@ -352,11 +366,16 @@ static napi_value OpenCapture(napi_env env, napi_callback_info info) {
   snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &actual_buffer);
 
   if ((err = snd_pcm_hw_params(pcm, hw)) < 0) {
-    snd_pcm_close(pcm); free_handle(idx);
+    snd_pcm_hw_params_free(hw); snd_pcm_close(pcm); free_handle(idx);
     char msg[384];
     snprintf(msg, sizeof(msg), "snd_pcm_hw_params commit failed for %s: %s", name, snd_strerror(err));
     return throw_error(env, msg);
   }
+  /* hw_params is committed — the params object is no longer needed.
+   * Free here so subsequent exit paths don't have to remember to. */
+  snd_pcm_hw_params_free(hw);
+  hw = NULL;
+
   if ((err = snd_pcm_prepare(pcm)) < 0) {
     snd_pcm_close(pcm); free_handle(idx);
     char msg[384];

@@ -69,9 +69,25 @@ jobs:
           set -e
           ls -la lib/alsa_native/build/Release/
           file lib/alsa_native/build/Release/alsa_native.node
-          # Cheap loadability check — Node will throw a useful linker
-          # error if libasound symbols are unresolved.
-          node -e "const a=require('./lib/alsa'); console.log('alsa available:', a.isAvailable(), 'version:', a._alsaVersion(), 'platform:', a._platform());"
+          # Three-stage smoke test:
+          #   1) dlopen the addon (catches libasound link failures)
+          #   2) enumerate devices (exercises the read side of the addon)
+          #   3) openCapture against the always-present "null" PCM
+          #      (exercises snd_pcm_hw_params_* — where HA3HZ's
+          #      "undefined symbol: alloca" lived in v1.5.25). Without
+          #      this third step, alloca was lazy-bound and the
+          #      validate workflow never demanded the symbol.
+          node -e "
+            const a = require('./lib/alsa');
+            console.log('alsa available:', a.isAvailable(), 'version:', a._alsaVersion(), 'platform:', a._platform());
+            const devs = a.getDevices();
+            console.log('enumerated', devs.length, 'devices');
+            const native = require('./lib/alsa_native/build/Release/alsa_native.node');
+            const cap = native.openCapture('null', { rate: 48000, channels: 1, periodFrames: 1024, bufferFrames: 4096 });
+            console.log('openCapture(null) ok — handle=', cap.handle, 'rate=', cap.rate, 'channels=', cap.channels);
+            native.closeCapture(cap.handle);
+            console.log('closeCapture ok');
+          "
 
       - name: Bundle hamlib into assets/hamlib/
         run: |
