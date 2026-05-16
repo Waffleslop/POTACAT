@@ -162,7 +162,11 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    runs-on: ubuntu-latest
+    # Pinned to 22.04 (glibc 2.35) so the alsa_native addon doesn't
+    # require a glibc symbol newer than what Raspberry Pi OS Bookworm
+    # (glibc 2.36) and similar LTS distros ship. HA3HZ on Pi 5 Bookworm
+    # hit GLIBC_2.38 not-found from a 24.04-built v1.6.1 binary.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -210,6 +214,23 @@ jobs:
           set -e
           ls -la lib/alsa_native/build/Release/
           file lib/alsa_native/build/Release/alsa_native.node
+          # GLIBC compatibility floor — Pi OS Bookworm ships glibc 2.36,
+          # and we want the addon to load on any distro >= that. The 22.04
+          # runners we use have glibc 2.35, so a clean build will only
+          # require <= 2.35 symbols. Anything higher is a regression
+          # (e.g. a newer build host slipping in, or a dependency dragging
+          # in a 2.36+ symbol). HA3HZ v1.6.1 example: GLIBC_2.38.
+          ADDON=lib/alsa_native/build/Release/alsa_native.node
+          MAX_GLIBC=$(objdump -T "$ADDON" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -1)
+          echo "Highest GLIBC symbol required by addon: ${MAX_GLIBC:-none}"
+          # 2.35 is what 22.04 provides; require <= that.
+          if [ -n "$MAX_GLIBC" ]; then
+            MAX_NUM=$(echo "$MAX_GLIBC" | sed 's/GLIBC_//')
+            if [ "$(printf '%s\n%s\n' "$MAX_NUM" "2.35" | sort -V | tail -1)" != "2.35" ]; then
+              echo "FAIL: addon requires $MAX_GLIBC > GLIBC_2.35 — won't load on Bookworm-class distros"
+              exit 1
+            fi
+          fi
           node -e "
             const a = require('./lib/alsa');
             console.log('alsa available:', a.isAvailable(), 'version:', a._alsaVersion());
@@ -256,7 +277,10 @@ jobs:
   # Modern Raspberry Pi OS is 64-bit, so arm64 is the right (and only) ARM
   # target — Electron no longer ships 32-bit armv7l Linux binaries.
   build-linux-arm64:
-    runs-on: ubuntu-24.04-arm
+    # 22.04-arm (glibc 2.35) — see comment on build-linux. v1.6.1 shipped
+    # against 24.04's glibc 2.39, which won't load on Pi OS Bookworm
+    # (2.36) or any LTS distro older than ~mid-2024.
+    runs-on: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -303,6 +327,23 @@ jobs:
           set -e
           ls -la lib/alsa_native/build/Release/
           file lib/alsa_native/build/Release/alsa_native.node
+          # GLIBC compatibility floor — Pi OS Bookworm ships glibc 2.36,
+          # and we want the addon to load on any distro >= that. The 22.04
+          # runners we use have glibc 2.35, so a clean build will only
+          # require <= 2.35 symbols. Anything higher is a regression
+          # (e.g. a newer build host slipping in, or a dependency dragging
+          # in a 2.36+ symbol). HA3HZ v1.6.1 example: GLIBC_2.38.
+          ADDON=lib/alsa_native/build/Release/alsa_native.node
+          MAX_GLIBC=$(objdump -T "$ADDON" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -1)
+          echo "Highest GLIBC symbol required by addon: ${MAX_GLIBC:-none}"
+          # 2.35 is what 22.04 provides; require <= that.
+          if [ -n "$MAX_GLIBC" ]; then
+            MAX_NUM=$(echo "$MAX_GLIBC" | sed 's/GLIBC_//')
+            if [ "$(printf '%s\n%s\n' "$MAX_NUM" "2.35" | sort -V | tail -1)" != "2.35" ]; then
+              echo "FAIL: addon requires $MAX_GLIBC > GLIBC_2.35 — won't load on Bookworm-class distros"
+              exit 1
+            fi
+          fi
           node -e "
             const a = require('./lib/alsa');
             console.log('alsa available:', a.isAvailable(), 'version:', a._alsaVersion());

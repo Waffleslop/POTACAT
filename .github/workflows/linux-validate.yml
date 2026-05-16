@@ -21,7 +21,10 @@ permissions:
 
 jobs:
   build-linux-validate:
-    runs-on: ubuntu-latest
+    # 22.04 (glibc 2.35) so validation matches the release runner — the
+    # alsa_native addon needs to load on Raspberry Pi OS Bookworm
+    # (glibc 2.36), which means it can only require symbols <= 2.35.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -69,6 +72,16 @@ jobs:
           set -e
           ls -la lib/alsa_native/build/Release/
           file lib/alsa_native/build/Release/alsa_native.node
+          ADDON=lib/alsa_native/build/Release/alsa_native.node
+          MAX_GLIBC=$(objdump -T "$ADDON" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -1)
+          echo "Highest GLIBC symbol required by addon: ${MAX_GLIBC:-none}"
+          if [ -n "$MAX_GLIBC" ]; then
+            MAX_NUM=$(echo "$MAX_GLIBC" | sed 's/GLIBC_//')
+            if [ "$(printf '%s\n%s\n' "$MAX_NUM" "2.35" | sort -V | tail -1)" != "2.35" ]; then
+              echo "FAIL: addon requires $MAX_GLIBC > GLIBC_2.35 — won't load on Bookworm-class distros"
+              exit 1
+            fi
+          fi
           # Three-stage smoke test:
           #   1) dlopen the addon (catches libasound link failures)
           #   2) enumerate devices (exercises the read side of the addon)
