@@ -652,6 +652,7 @@ const CLUSTER_PRESETS = [
   { name: 'W6CUA', host: 'w6cua.no-ip.org', port: 7300 },
   { name: 'G6NHU', host: 'dxspider.co.uk', port: 7300 },
   { name: 'EA4RCH', host: 'dxfun.com', port: 8000 },
+  { name: 'EA2CW',  host: 'cluster.gautxori.com', port: 7373 },
   { name: 'DA0BCC', host: 'dx.da0bcc.de', port: 7300 },
   { name: 'PI4CC', host: 'dxc.pi4cc.nl', port: 8000 },
   { name: 'WA9PIE', host: 'dxc.wa9pie.net', port: 7373 },
