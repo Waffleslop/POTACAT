@@ -13252,6 +13252,19 @@ app.whenReady().then(() => {
   // Start solar / propagation data fetching (every 10 minutes)
   solarTimer = setInterval(fetchAllSolar, 600000);
 
+  // Heap telemetry — log main-process heap usage every 60s so leaks
+  // surface as a visible upward trend in the CAT log instead of an
+  // out-of-nowhere "JavaScript heap out of memory" crash 40 min in.
+  // K3SBP saw exactly that on 2026-05-18 (heap reached 1.7 GB before
+  // V8 aborted). Numbers in MB; RSS gives the OS-level total, heap is
+  // V8's portion. External tracks Buffer / ArrayBuffer allocations
+  // outside V8 (audio frames, native addons).
+  setInterval(() => {
+    const m = process.memoryUsage();
+    const mb = (n) => (n / 1024 / 1024).toFixed(1);
+    sendCatLog(`[Mem] heap=${mb(m.heapUsed)}/${mb(m.heapTotal)}MB rss=${mb(m.rss)}MB ext=${mb(m.external)}MB ab=${mb(m.arrayBuffers)}MB`);
+  }, 60000);
+
   // Start auto-SSTV idle timer
   startAutoSstvTimer();
 
