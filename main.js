@@ -3976,13 +3976,16 @@ function startSmartSdrAudio() {
   smartSdrAudio.on('log', (msg) => sendCatLog('[SmartSDR-Audio] ' + msg));
   smartSdrAudio.on('audio-frame', ({ pcm, sampleRate }) => {
     if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-      // Send the underlying ArrayBuffer so structured-clone doesn't
-      // copy it through layers. The renderer wraps it back into a
-      // Float32Array on the other side. Mirrors the kiwi pattern.
-      remoteAudioWin.webContents.send('smartsdr-audio-frame', {
-        pcm: Array.from(pcm),
-        sampleRate,
-      });
+      // Send the Float32Array directly. Electron's structured clone
+      // preserves TypedArrays, and the receiver already wraps via
+      // `new Float32Array(payload.pcm)`. The previous Array.from(pcm)
+      // converted to a plain JS Array — each sample becomes a 24-byte
+      // HeapNumber (6x bloat vs the 4-byte raw float), and at ~100
+      // frames/sec across 4 audio-frame consumers the throwaway garbage
+      // overwhelmed V8's incremental marking. Main process OOM'd at
+      // ~1.7 GB after ~46 min of normal operation (K3SBP 2026-05-18 and
+      // 2026-05-20 reports, both crashed at identical heap ceiling).
+      remoteAudioWin.webContents.send('smartsdr-audio-frame', { pcm, sampleRate });
     }
     // When the user picked "SmartSDR Direct" as the audio source, FT8/JTCAT
     // should decode from THIS VITA-49 stream too — not the separate Windows
@@ -4015,7 +4018,7 @@ function startSmartSdrAudio() {
       // the old order) crashed with "%TypedArray%.prototype.values on
       // a detached ArrayBuffer". K3SBP 2026-05-16.
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
-        sstvPopoutWin.webContents.send('sstv-vita49-audio', { pcm: Array.from(upsampled), sampleRate: 48000 });
+        sstvPopoutWin.webContents.send('sstv-vita49-audio', { pcm: upsampled, sampleRate: 48000 });
       }
       sstvEngine.feedAudio(upsampled);
     }
@@ -4035,7 +4038,7 @@ function startSmartSdrAudio() {
       // actually ran its startJtcatAudio (built jtcatVita49Ctx) acts on it;
       // the other no-ops. The main window suppresses its own capture while
       // the pop-out is open, so exactly one is ever live.
-      const vita49Frame = { pcm: Array.from(src), sampleRate };
+      const vita49Frame = { pcm: src, sampleRate };
       if (win && !win.isDestroyed()) {
         win.webContents.send('jtcat-vita49-audio', vita49Frame);
       }
@@ -4181,10 +4184,7 @@ function handleK4AudioFrame(frame) {
   //    via frame.sampleRate). The bridge has no awareness of which rig
   //    it is — it just wants PCM frames.
   if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-    remoteAudioWin.webContents.send('smartsdr-audio-frame', {
-      pcm: Array.from(monoF32),
-      sampleRate: 12000,
-    });
+    remoteAudioWin.webContents.send('smartsdr-audio-frame', { pcm: monoF32, sampleRate: 12000 });
   }
   // 2) JTCAT (FT8) — engine wants 12 kHz mono, which is exactly what we have.
   if (settings.audioSource === 'k4-network' && jtcatManager && jtcatManager.running) {
@@ -4213,7 +4213,7 @@ function handleK4AudioFrame(frame) {
     // the main thread. Array.from on a detached buffer crashes the
     // main process.
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
-      sstvPopoutWin.webContents.send('sstv-vita49-audio', { pcm: Array.from(out), sampleRate: 48000 });
+      sstvPopoutWin.webContents.send('sstv-vita49-audio', { pcm: out, sampleRate: 48000 });
     }
     sstvEngine.feedAudio(out);
   }
@@ -13401,20 +13401,25 @@ app.whenReady().then(() => {
     let _kiwiAudioCount = 0;
     kiwiClient.on('audio', (pcmFloat, sampleRate) => {
       if (++_kiwiAudioCount === 1) sendCatLog(`[WebSDR] First audio packet: ${pcmFloat.length} samples @ ${sampleRate}Hz`);
-      const pcmArr = Array.from(pcmFloat); // serialize once, share across recipients
+      // Send the Float32Array directly to each recipient — Electron's
+      // structured clone preserves TypedArrays. The previous
+      // Array.from(pcmFloat) boxed every sample as a 24-byte HeapNumber
+      // (vs 4 raw bytes), creating ~6x more garbage per frame and
+      // contributing to the main-process OOM that crashed K3SBP
+      // twice at the 1.7 GB heap ceiling.
       // Forward audio to VFO popout and main window
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
-        vfoPopoutWin.webContents.send('kiwi-audio', { pcm: pcmArr, sampleRate });
+        vfoPopoutWin.webContents.send('kiwi-audio', { pcm: pcmFloat, sampleRate });
       }
       if (win && !win.isDestroyed()) {
-        win.webContents.send('kiwi-audio', { pcm: pcmArr, sampleRate });
+        win.webContents.send('kiwi-audio', { pcm: pcmFloat, sampleRate });
       }
       // Forward to the WebRTC bridge so mobile clients hear SDR audio over
       // the WebRTC peer (no Web Audio on RN). The browser ECHOCAT mutes
       // remoteAudio while Kiwi is active and decodes raw PCM directly, so
       // double-playback isn't an issue. (Gap 20a.)
       if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-        remoteAudioWin.webContents.send('kiwi-audio-frame', { pcm: pcmArr, sampleRate });
+        remoteAudioWin.webContents.send('kiwi-audio-frame', { pcm: pcmFloat, sampleRate });
       }
       // Forward to ECHOCAT phone via WebSocket — kept for the browser ECHOCAT
       // path (Web Audio decoder); mobile ignores this and uses the WebRTC
