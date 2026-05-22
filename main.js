@@ -13462,6 +13462,17 @@ app.whenReady().then(() => {
     const m = process.memoryUsage();
     const mb = (n) => (n / 1024 / 1024).toFixed(1);
     sendCatLog(`[Mem] heap=${mb(m.heapUsed)}/${mb(m.heapTotal)}MB rss=${mb(m.rss)}MB ext=${mb(m.external)}MB ab=${mb(m.arrayBuffers)}MB`);
+    // process.memoryUsage() only sees the MAIN process. The ~1.7 GB OOM
+    // crashes a *child* (a renderer/worker) — so also log every Electron
+    // process's working set. Over a long run, whichever line climbs names
+    // the leaking process. workingSetSize is in KB. See
+    // docs/desktop-handoffs/oom-flex-audio.md.
+    try {
+      const procs = app.getAppMetrics()
+        .map((p) => `${p.type}${p.name ? '(' + p.name + ')' : ''}=${(p.memory.workingSetSize / 1024).toFixed(0)}`)
+        .join(' ');
+      sendCatLog(`[Mem] procs(MB) ${procs}`);
+    } catch (e) { /* getAppMetrics unavailable — ignore */ }
   }, 60000);
 
   // Start auto-SSTV idle timer
