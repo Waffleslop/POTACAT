@@ -671,20 +671,22 @@
 let currentFreqHz = 0;
 let currentMode = '';
 let _modeSuppressUntil = 0; // suppress stale mode from CAT poll after user click
-// Same pattern for freq — a CAT poll completed mid-spin returns the rig's
-// freq from ~one wheel-tick ago and overwrites currentFreqHz, making the
-// dial visibly "snap backwards" while the user is still scrolling. W8IJW
-// 2026-05-24 (IC-7300): wheel spin to 14.281 → display reverts to 14.280
-// repeatedly. After a user-initiated tune, ignore incoming s.freq for
-// ~1.2 s — long enough for the rig to settle and the next poll to reflect
-// what we actually asked for, short enough that external knob spins still
-// flow in promptly.
-let _freqSuppressUntil = 0;
+// Match-based freq suppression. A CAT poll completed mid-spin returns the
+// rig's freq from ~one wheel-tick ago and overwrites currentFreqHz, making
+// the dial snap backwards. A fixed time window wasn't enough (W8IJW v1.7.2
+// re-report 2026-05-24): if the rig hadn't physically caught up to the
+// target by the time the timer expired, the next polled freq still landed
+// stale. Now we hold the optimistic display UNTIL the polled freq matches
+// the user's target (within 25 Hz) — or a 3 s hard timeout fires as a
+// safety net if the rig just refuses to confirm.
+let _freqSuppressTarget = 0;   // last tune target in Hz (0 = no suppression armed)
+let _freqSuppressDeadline = 0; // hard timeout (ms) as a final fallback
 // Every user-initiated tune from the popout (wheel / drag / keypad / band /
-// profile) goes through this so the suppress window can't drift out of sync
+// profile) goes through this so the suppress state can't drift out of sync
 // with the IPC call.
 function tuneFromPopout(freqKhz, mode, bearing, slicePort) {
-  _freqSuppressUntil = Date.now() + 1200;
+  _freqSuppressTarget = Math.round(freqKhz * 1000);
+  _freqSuppressDeadline = Date.now() + 3000;
   window.api.tune(freqKhz, mode, bearing, slicePort);
 }
 let currentFilterWidth = 0;
@@ -769,7 +771,25 @@ function updateDisplay() {
 
 // --- Radio state from main process ---
 window.api.onRadioState((s) => {
-  if (s.freq && Date.now() > _freqSuppressUntil) currentFreqHz = s.freq;
+  if (s.freq) {
+    const now = Date.now();
+    const armed = _freqSuppressTarget > 0 && now < _freqSuppressDeadline;
+    if (!armed) {
+      // Normal flow — accept the rig's polled freq (covers external knob spins).
+      currentFreqHz = s.freq;
+    } else if (Math.abs(s.freq - _freqSuppressTarget) <= 25) {
+      // Rig confirmed it reached our target — accept and release.
+      currentFreqHz = s.freq;
+      _freqSuppressTarget = 0;
+      _freqSuppressDeadline = 0;
+    } else if (now >= _freqSuppressDeadline) {
+      // Hard-timeout fallback — rig never confirmed; accept reality.
+      currentFreqHz = s.freq;
+      _freqSuppressTarget = 0;
+      _freqSuppressDeadline = 0;
+    }
+    // Otherwise: still waiting for the rig to catch up — keep optimistic value.
+  }
   if (s.mode && Date.now() > _modeSuppressUntil) currentMode = s.mode;
   if (s.filterWidth != null) {
     currentFilterWidth = s.filterWidth;
