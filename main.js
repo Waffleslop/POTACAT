@@ -24,6 +24,12 @@ function logStartupStage(name) {
 const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
+// `app.name` defaults to package.json's `name` field, which is the
+// lowercase "potacat" used as the npm package name. Electron's native
+// confirm() / alert() dialogs put app.name in their title bar, so without
+// this override the WSJT-X confirm shows "potacat" in lowercase.
+// K3SBP 2026-05-25.
+app.setName('POTACAT');
 logStartupStage('electron + path + fs required');
 
 // --- Headless mode: POTACAT --headless ---
