@@ -20,7 +20,20 @@ contextBridge.exposeInMainWorld('api', {
   // SmartSDR DAX-free audio path. Opus frames arrive as Buffer; the
   // bridge decodes via WebCodecs and feeds a synthetic MediaStream to
   // the WebRTC peer.
-  onSmartSdrAudioFrame: (cb) => ipcRenderer.on('smartsdr-audio-frame', (_e, frame) => cb(frame)),
+  onSmartSdrAudioFrame: (cb) => {
+    // Batch-ack received frames so main's audioSafeSend can apply
+    // backpressure — see main.js audioBus. Without these acks the
+    // backlog counter never decrements and we'd be throttled after
+    // AUDIO_MAX_BACKLOG frames.
+    let _ackCount = 0;
+    ipcRenderer.on('smartsdr-audio-frame', (_e, frame) => {
+      cb(frame);
+      if (++_ackCount >= 20) {
+        ipcRenderer.send('audio-ack', { channel: 'smartsdr-audio-frame', count: _ackCount });
+        _ackCount = 0;
+      }
+    });
+  },
   onSmartSdrAudioFallback: (cb) => ipcRenderer.on('smartsdr-audio-fallback', () => cb()),
   // TX state — used to mute Kiwi audio while transmitting so the
   // mobile listener doesn't hear their own TX echoed through the

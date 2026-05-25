@@ -29,7 +29,17 @@ contextBridge.exposeInMainWorld('api', {
   // SmartSDR Direct: VITA-49 audio frames forwarded from main so the SSTV
   // waterfall can render without depending on a Windows DAX RX device
   // (which is silent on the SmartSDR Direct path). K3SBP 2026-05-15.
-  onSstvVita49Audio: (cb) => ipcRenderer.on('sstv-vita49-audio', (_e, frame) => cb(frame)),
+  onSstvVita49Audio: (cb) => {
+    // Batch-ack so main can bound the IPC backlog. See main.js audioBus.
+    let _ackCount = 0;
+    ipcRenderer.on('sstv-vita49-audio', (_e, frame) => {
+      cb(frame);
+      if (++_ackCount >= 20) {
+        ipcRenderer.send('audio-ack', { channel: 'sstv-vita49-audio', count: _ackCount });
+        _ackCount = 0;
+      }
+    });
+  },
   // Gallery
   sstvGetGallery: () => ipcRenderer.invoke('sstv-get-gallery'),
   sstvOpenGalleryFolder: () => ipcRenderer.send('sstv-open-gallery-folder'),

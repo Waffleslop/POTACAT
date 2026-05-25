@@ -40,7 +40,17 @@ contextBridge.exposeInMainWorld('api', {
   kiwiDisconnect: () => ipcRenderer.send('kiwi-disconnect'),
   onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
   onKiwiAudio: (cb) => ipcRenderer.on('kiwi-audio', (_e, d) => cb(d)),
-  onSmartSdrAudio: (cb) => ipcRenderer.on('smartsdr-audio-frame', (_e, d) => cb(d)),
+  onSmartSdrAudio: (cb) => {
+    // Batch-ack so main can bound the IPC backlog. See main.js audioBus.
+    let _ackCount = 0;
+    ipcRenderer.on('smartsdr-audio-frame', (_e, d) => {
+      cb(d);
+      if (++_ackCount >= 20) {
+        ipcRenderer.send('audio-ack', { channel: 'smartsdr-audio-frame', count: _ackCount });
+        _ackCount = 0;
+      }
+    });
+  },
   onTheme: (cb) => ipcRenderer.on('vfo-popout-theme', (_e, theme) => cb(theme)),
   // Live profile-list updates pushed by main when ECHOCAT phone (or another
   // window) edits settings.vfoProfiles. Fires after a save() or delete on

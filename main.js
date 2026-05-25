@@ -324,6 +324,74 @@ let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
 // stops accumulating doomed frames. Recovery: stop+start the SSTV view,
 // or restart POTACAT.
 let _sstvFeedPaused = false;
+
+// =====================================================================
+// Bounded audio IPC fan-out — see audioSafeSend below.
+//
+// The Mojo pipe between main and each renderer is unbounded by default,
+// so a single slow renderer (audio worklet stall, GC pause, hidden-tab
+// throttling, anything that delays IPC drain) accumulates undelivered
+// payloads on MAIN's side of the pipe — those bytes live in main's RSS.
+// At ~190 VITA-49 audio frames/sec × 5 audio consumers that backs up
+// fast: K3SBP 2026-05-25 hit 2.2 GB main RSS in ~30 min on SmartSDR
+// Direct, with JS heap a flat 46 MB. The leak was entirely native IPC
+// buffers, not JS heap.
+//
+// Fix: every audio consumer is treated as a bounded queue. Renderers
+// batch-ack received frames over IPC; main tracks (sent − acked) per
+// consumer; if backlog ≥ AUDIO_MAX_BACKLOG, the new frame is dropped
+// for that consumer (others still get it). Brief garble on a stalled
+// consumer is acceptable; OOM is not.
+// =====================================================================
+const _audioBus = new Map(); // wcId+':'+channel -> { sent, acked, dropped, lastDropLogMs }
+const AUDIO_MAX_BACKLOG = 40; // frames; ~210 ms at 190 fps — survives a
+                              // GC pause without garbling, well below
+                              // the multi-second backlog that leaks.
+
+function audioSafeSend(wc, channel, payload) {
+  if (!wc || wc.isDestroyed()) return;
+  const key = wc.id + ':' + channel;
+  let info = _audioBus.get(key);
+  if (!info) {
+    info = { sent: 0, acked: 0, dropped: 0, lastDropLogMs: 0 };
+    _audioBus.set(key, info);
+  }
+  if (info.sent - info.acked >= AUDIO_MAX_BACKLOG) {
+    info.dropped++;
+    const now = Date.now();
+    if (now - info.lastDropLogMs >= 10_000) {
+      try {
+        // Single CAT log line every 10 s when a consumer is sustaining
+        // a backlog — enough signal to diagnose, no flood.
+        sendCatLog(`[Audio] Backpressure on ${channel}: ${info.dropped} frames dropped (renderer not keeping up)`);
+      } catch {}
+      info.dropped = 0;
+      info.lastDropLogMs = now;
+    }
+    return;
+  }
+  info.sent++;
+  wc.send(channel, payload);
+}
+
+ipcMain.on('audio-ack', (e, msg) => {
+  const channel = msg && msg.channel;
+  const count = (msg && msg.count) | 0;
+  if (!channel || count <= 0) return;
+  const key = e.sender.id + ':' + channel;
+  const info = _audioBus.get(key);
+  if (info) info.acked += count;
+});
+
+// Periodic sweep — drop entries whose webContents was destroyed so the
+// map doesn't grow unboundedly across popout open/close cycles.
+setInterval(() => {
+  for (const [key, info] of _audioBus) {
+    const wcId = parseInt(key.split(':')[0], 10);
+    const wc = require('electron').webContents.fromId(wcId);
+    if (!wc || wc.isDestroyed()) _audioBus.delete(key);
+  }
+}, 30_000);
 let _sstvLastActivityMs = 0; // last VIS/image timestamp — for heartbeat log
 let _sstvHeartbeatTimer = null;
 let sstvManager = null;      // SSTV multi-slice manager
@@ -4072,23 +4140,18 @@ function startSmartSdrAudio() {
   smartSdrAudio = new SmartSdrAudio();
   smartSdrAudio.on('log', (msg) => sendCatLog('[SmartSDR-Audio] ' + msg));
   smartSdrAudio.on('audio-frame', ({ pcm, sampleRate }) => {
-    if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-      // Send the Float32Array directly. Electron's structured clone
-      // preserves TypedArrays, and the receiver already wraps via
-      // `new Float32Array(payload.pcm)`. The previous Array.from(pcm)
-      // converted to a plain JS Array — each sample becomes a 24-byte
-      // HeapNumber (6x bloat vs the 4-byte raw float), and at ~100
-      // frames/sec across 4 audio-frame consumers the throwaway garbage
-      // overwhelmed V8's incremental marking. Main process OOM'd at
-      // ~1.7 GB after ~46 min of normal operation (K3SBP 2026-05-18 and
-      // 2026-05-20 reports, both crashed at identical heap ceiling).
-      remoteAudioWin.webContents.send('smartsdr-audio-frame', { pcm, sampleRate });
+    // Send the Float32Array directly. Electron's structured clone preserves
+    // TypedArrays, and the receiver already wraps via `new Float32Array(...)`.
+    // Both calls below are routed through audioSafeSend so a stalled
+    // consumer can't grow main's IPC backlog into a leak.
+    if (remoteAudioWin) {
+      audioSafeSend(remoteAudioWin.webContents, 'smartsdr-audio-frame', { pcm, sampleRate });
     }
     // VFO popout: local "Radio audio monitor" playback for SmartSDR Direct —
     // the Windows DAX RX device the monitor would otherwise capture is silent
     // (no DAX program is running), so the popout plays these frames instead.
-    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
-      vfoPopoutWin.webContents.send('smartsdr-audio-frame', { pcm, sampleRate });
+    if (vfoPopoutWin) {
+      audioSafeSend(vfoPopoutWin.webContents, 'smartsdr-audio-frame', { pcm, sampleRate });
     }
     // When the user picked "SmartSDR Direct" as the audio source, FT8/JTCAT
     // should decode from THIS VITA-49 stream too — not the separate Windows
@@ -4120,8 +4183,8 @@ function startSmartSdrAudio() {
       // thread. Touching `upsampled` after the transfer (Array.from in
       // the old order) crashed with "%TypedArray%.prototype.values on
       // a detached ArrayBuffer". K3SBP 2026-05-16.
-      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
-        sstvPopoutWin.webContents.send('sstv-vita49-audio', { pcm: upsampled, sampleRate: 48000 });
+      if (sstvPopoutWin) {
+        audioSafeSend(sstvPopoutWin.webContents, 'sstv-vita49-audio', { pcm: upsampled, sampleRate: 48000 });
       }
       sstvEngine.feedAudio(upsampled);
     }
@@ -4142,11 +4205,9 @@ function startSmartSdrAudio() {
       // the other no-ops. The main window suppresses its own capture while
       // the pop-out is open, so exactly one is ever live.
       const vita49Frame = { pcm: src, sampleRate };
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('jtcat-vita49-audio', vita49Frame);
-      }
-      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-        jtcatPopoutWin.webContents.send('jtcat-vita49-audio', vita49Frame);
+      if (win) audioSafeSend(win.webContents, 'jtcat-vita49-audio', vita49Frame);
+      if (jtcatPopoutWin) {
+        audioSafeSend(jtcatPopoutWin.webContents, 'jtcat-vita49-audio', vita49Frame);
       }
     }
   });
@@ -4291,8 +4352,8 @@ function handleK4AudioFrame(frame) {
   //    renderer's onSmartSdrAudioFrame handles arbitrary sample rates
   //    via frame.sampleRate). The bridge has no awareness of which rig
   //    it is — it just wants PCM frames.
-  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-    remoteAudioWin.webContents.send('smartsdr-audio-frame', { pcm: monoF32, sampleRate: 12000 });
+  if (remoteAudioWin) {
+    audioSafeSend(remoteAudioWin.webContents, 'smartsdr-audio-frame', { pcm: monoF32, sampleRate: 12000 });
   }
   // 2) JTCAT (FT8) — engine wants 12 kHz mono, which is exactly what we have.
   if (settings.audioSource === 'k4-network' && jtcatManager && jtcatManager.running) {
@@ -4320,8 +4381,8 @@ function handleK4AudioFrame(frame) {
     // the ArrayBuffer to its worker thread, which detaches `out` on
     // the main thread. Array.from on a detached buffer crashes the
     // main process.
-    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
-      sstvPopoutWin.webContents.send('sstv-vita49-audio', { pcm: out, sampleRate: 48000 });
+    if (sstvPopoutWin) {
+      audioSafeSend(sstvPopoutWin.webContents, 'sstv-vita49-audio', { pcm: out, sampleRate: 48000 });
     }
     sstvEngine.feedAudio(out);
   }

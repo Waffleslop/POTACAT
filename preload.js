@@ -329,7 +329,17 @@ contextBridge.exposeInMainWorld('api', {
   // "SmartSDR Direct" — the renderer builds a synthetic MediaStream from
   // these to drive the JTCAT waterfall, since the Windows DAX device it
   // would normally capture is bypassed in that mode. K3SBP 2026-05-14.
-  onJtcatVita49Audio: (cb) => ipcRenderer.on('jtcat-vita49-audio', (_e, frame) => cb(frame)),
+  onJtcatVita49Audio: (cb) => {
+    // Batch-ack so main can bound the IPC backlog. See main.js audioBus.
+    let _ackCount = 0;
+    ipcRenderer.on('jtcat-vita49-audio', (_e, frame) => {
+      cb(frame);
+      if (++_ackCount >= 20) {
+        ipcRenderer.send('audio-ack', { channel: 'jtcat-vita49-audio', count: _ackCount });
+        _ackCount = 0;
+      }
+    });
+  },
   // Cloud Sync
   qrzDownloadLogbook: () => ipcRenderer.invoke('qrz-download-logbook'),
   qrzDebugDump: () => ipcRenderer.invoke('qrz-debug-dump'),
