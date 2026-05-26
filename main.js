@@ -544,6 +544,7 @@ let _currentNbLevel = 0;
 let _currentVoxLevel = 0;
 let _currentMonState = false;
 let _currentMonLevel = 0;
+let _currentRitState = false;
 
 // Filter preset tables for rig controls (Hz values)
 const FILTER_PRESETS = {
@@ -1032,6 +1033,7 @@ function broadcastRigState() {
     voxLevel: _currentVoxLevel,
     mon: _currentMonState,
     monLevel: _currentMonLevel,
+    rit: _currentRitState,
     capabilities: caps,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
@@ -14378,6 +14380,15 @@ app.whenReady().then(() => {
         if (flexSdr()) smartSdr.setMonLevel(pct);
         else if (cat && cat.connected && typeof cat.setMonLevel === 'function') cat.setMonLevel(pct);
         _currentMonLevel = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-rit': {
+        if (flexNeedsApi) { _flexWarnOnce('RIT requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) smartSdr.setRit(0, on);
+        else if (cat && cat.connected && typeof cat.setRit === 'function') cat.setRit(on);
+        _currentRitState = on;
         broadcastRigState();
         break;
       }

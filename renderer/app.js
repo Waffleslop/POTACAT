@@ -13839,6 +13839,7 @@ const rigVoxLevelLabel = document.getElementById('rig-voxlevel-label');
 const rigMonBtn        = document.getElementById('rig-mon-btn');
 const rigMonLevel      = document.getElementById('rig-monlevel');
 const rigMonLevelLabel = document.getElementById('rig-monlevel-label');
+const rigRitBtn        = document.getElementById('rig-rit-btn');
 let rigPopoverOpen = false;
 let rigCurrentCaps = {};
 let rigCurrentMode = '';
@@ -13909,8 +13910,12 @@ function rigApplyCapabilities(caps) {
   setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel);
   setRowDisplay('rig-nblevel-row',  !!caps.nbLevel);
   setRowDisplay('rig-voxlevel-row', !!caps.voxLevel);
-  setRowDisplay('rig-mon-row',      !!caps.mon);
   setRowDisplay('rig-monlevel-row', !!caps.monLevel);
+  // Mon and RIT share a row — show it if either is supported, and hide
+  // individual buttons by their own caps.
+  if (rigMonBtn) rigMonBtn.style.display = caps.mon ? '' : 'none';
+  if (rigRitBtn) rigRitBtn.style.display = caps.rit ? '' : 'none';
+  setRowDisplay('rig-mon-row', !!(caps.mon || caps.rit));
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
@@ -14015,6 +14020,7 @@ _bindLevelSlider(rigNbLevel,  rigNbLevelLabel,  'set-nb-level',  '');
 _bindLevelSlider(rigVoxLevel, rigVoxLevelLabel, 'set-vox-level', '');
 _bindLevelSlider(rigMonLevel, rigMonLevelLabel, 'set-mon-level', '');
 _bindModifierBtn(rigMonBtn, 'set-mon');
+_bindModifierBtn(rigRitBtn, 'set-rit');
 
 // Slider handlers
 // Throttle rig control sliders to prevent flooding serial port
@@ -14062,6 +14068,7 @@ window.api.onRigState((state) => {
   _syncModBtn(rigAnfBtn,    state.anf);
   _syncModBtn(rigVoxBtn,    state.vox);
   _syncModBtn(rigMonBtn,    state.mon);
+  _syncModBtn(rigRitBtn,    state.rit);
   if (rigAgcSelect && state.agc != null && rigAgcSelect.value !== state.agc) {
     rigAgcSelect.value = state.agc || '';
   }
