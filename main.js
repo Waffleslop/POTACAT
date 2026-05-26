@@ -546,6 +546,13 @@ let _currentMonState = false;
 let _currentMonLevel = 0;
 let _currentRitState = false;
 let _currentCwSidetoneState = true; // Flex default is sidetone ON; we mirror that.
+// WinKeyer-driven sidetone mute. Tracks whether the *WinKeyer activity*
+// path is currently holding the Flex sidetone off, plus the state we
+// last saw before the mute kicked in so we restore exactly that on
+// idle (not blindly back to "on"). Lets the user keep a manual mute
+// in place across WK busy/idle cycles.
+let _flexCwSidetoneMutedByWk = false;
+let _flexCwSidetonePreWkState = true;
 
 // Filter preset tables for rig controls (Hz values)
 const FILTER_PRESETS = {
@@ -4111,18 +4118,6 @@ function connectSmartSdr() {
       sendCatLog(`SmartSDR API ready — bound to existing GUI client, following slice ${index}`);
       sendCatStatus({ connected: true });
     }
-    // Apply the "mute Flex CW sidetone on connect" setting if the user
-    // has it enabled — solves the two-sidetones problem (external
-    // keyer + radio both playing tone) without requiring a manual
-    // toggle each session.
-    if (settings.muteFlexCwSidetoneOnConnect) {
-      try {
-        smartSdr.setCwSidetone(false);
-        _currentCwSidetoneState = false;
-        broadcastRigState();
-        sendCatLog('[CW] Flex sidetone muted (per Settings → CW).');
-      } catch { /* radio may be mid-handshake; harmless */ }
-    }
   });
   // Mirror the self-hosted slice's frequency/mode to the UI when there is no
   // SmartSDR-Win CAT shim (port 5002) feeding `cat`.
@@ -5047,6 +5042,45 @@ function disconnectCwKeyPort() {
   }
 }
 
+/**
+ * Toggle the Flex's local CW sidetone in response to WinKeyer busy/idle
+ * edges, when the user has opted in via settings.muteFlexCwSidetoneOnWinKeyer.
+ *
+ * Background: K3SBP keys via WinKeyer in the same room as a Flex 8600M.
+ * Both devices play sidetone — the WK's local tone AND the Flex's monitor
+ * — and the doubled audio makes it hard to send. POTACAT muting the
+ * Flex side just-in-time gives the operator the WK's tone alone.
+ *
+ * Only fires for paddle / WK-buffer keying. POTACAT CW macros and
+ * SmartSDR's own CWX go through `cwx send` directly and never raise the
+ * WK's busy event, so they keep the Flex sidetone audible — same for
+ * HaliKey MIDI / vBand paddles which route through the iambic keyer's
+ * cwKey path, also bypassing the WK device entirely.
+ *
+ * Idempotent across rapid busy/idle cycles. Restores whatever state the
+ * sidetone was in BEFORE the WK muted it, so an operator who manually
+ * muted via the rig-popover stays muted across keying sessions.
+ */
+function _maybeMuteFlexCwSidetoneForWinKeyer(wkActive) {
+  if (!settings.muteFlexCwSidetoneOnWinKeyer) return;
+  const flexUp = detectRigType() === 'flex' && smartSdr && smartSdr.connected;
+  if (!flexUp) return;
+  if (wkActive) {
+    if (_flexCwSidetoneMutedByWk) return;
+    _flexCwSidetonePreWkState = _currentCwSidetoneState;
+    try { smartSdr.setCwSidetone(false); } catch { return; }
+    _currentCwSidetoneState = false;
+    _flexCwSidetoneMutedByWk = true;
+    broadcastRigState();
+  } else {
+    if (!_flexCwSidetoneMutedByWk) return;
+    try { smartSdr.setCwSidetone(_flexCwSidetonePreWkState); } catch { return; }
+    _currentCwSidetoneState = _flexCwSidetonePreWkState;
+    _flexCwSidetoneMutedByWk = false;
+    broadcastRigState();
+  }
+}
+
 function connectWinKeyer() {
   disconnectWinKeyer();
   if (settings.cwKeyerType !== 'winkeyer' || !settings.winKeyerPort) return;
@@ -5090,14 +5124,20 @@ function connectWinKeyer() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('winkeyer-busy', true);
     }
+    _maybeMuteFlexCwSidetoneForWinKeyer(true);
   });
   winKeyer.on('idle', () => {
     if (win && !win.isDestroyed()) {
       win.webContents.send('winkeyer-busy', false);
     }
+    _maybeMuteFlexCwSidetoneForWinKeyer(false);
   });
   winKeyer.on('breakin', () => {
     console.log('[WinKeyer] Paddle breakin');
+    // breakin = paddle touched mid-buffer-send; the keyer is now actively
+    // emitting paddle CW. Treat as a 'busy' edge so the mute kicks in
+    // even when the WK never explicitly transitions through idle->busy.
+    _maybeMuteFlexCwSidetoneForWinKeyer(true);
   });
   winKeyer.on('error', (err) => {
     console.log(`[WinKeyer] Error: ${err.message}`);
@@ -5111,6 +5151,9 @@ function disconnectWinKeyer() {
     winKeyer.removeAllListeners();
     winKeyer = null;
   }
+  // Restore the Flex sidetone if the WK had it muted — otherwise an
+  // unplug-while-keying or settings-toggle leaves the radio stuck silent.
+  _maybeMuteFlexCwSidetoneForWinKeyer(false);
 }
 
 // Unified CW text send — routes through WinKeyer, SmartSDR, or CAT codec

@@ -551,7 +551,7 @@ const setEnableLlota = document.getElementById('set-enable-llota');
 const setEnableTiles = document.getElementById('set-enable-tiles');
 const setCwXit = document.getElementById('set-cw-xit');
 const setCwXitShiftVfo = document.getElementById('set-cw-xit-shift-vfo');
-const setMuteFlexCwSidetone = document.getElementById('set-mute-flex-cw-sidetone');
+const setMuteFlexCwSidetoneWk = document.getElementById('set-mute-flex-cw-sidetone-wk');
 const setCwFilter = document.getElementById('set-cw-filter');
 const setSsbFilter = document.getElementById('set-ssb-filter');
 const setDigitalFilter = document.getElementById('set-digital-filter');
@@ -9103,7 +9103,7 @@ async function openSettingsDialog(tab) {
   setScanDwell.value = s.scanDwell || 7;
   setCwXit.value = s.cwXit || 0;
   setCwXitShiftVfo.checked = !!s.cwXitShiftVfo;
-  if (setMuteFlexCwSidetone) setMuteFlexCwSidetone.checked = !!s.muteFlexCwSidetoneOnConnect;
+  if (setMuteFlexCwSidetoneWk) setMuteFlexCwSidetoneWk.checked = !!s.muteFlexCwSidetoneOnWinKeyer;
   setCwFilter.value = s.cwFilterWidth || 0;
   setSsbFilter.value = s.ssbFilterWidth || 0;
   setDigitalFilter.value = s.digitalFilterWidth || 0;
@@ -9771,7 +9771,7 @@ settingsSave.addEventListener('click', async () => {
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
   const cwXitVal = parseInt(setCwXit.value, 10) || 0;
   const cwXitShiftVfoVal = setCwXitShiftVfo.checked;
-  const muteFlexCwSidetoneVal = setMuteFlexCwSidetone ? setMuteFlexCwSidetone.checked : false;
+  const muteFlexCwSidetoneWkVal = setMuteFlexCwSidetoneWk ? setMuteFlexCwSidetoneWk.checked : false;
   const cwFilterVal = parseInt(setCwFilter.value, 10) || 0;
   const ssbFilterVal = parseInt(setSsbFilter.value, 10) || 0;
   const digitalFilterVal = parseInt(setDigitalFilter.value, 10) || 0;
@@ -9955,7 +9955,7 @@ settingsSave.addEventListener('click', async () => {
     scanDwell: dwellVal,
     cwXit: cwXitVal,
     cwXitShiftVfo: cwXitShiftVfoVal,
-    muteFlexCwSidetoneOnConnect: muteFlexCwSidetoneVal,
+    muteFlexCwSidetoneOnWinKeyer: muteFlexCwSidetoneWkVal,
     cwFilterWidth: cwFilterVal,
     ssbFilterWidth: ssbFilterVal,
     digitalFilterWidth: digitalFilterVal,

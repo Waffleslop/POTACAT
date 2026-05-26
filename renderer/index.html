@@ -1678,8 +1678,8 @@
       <label class="checkbox-label" style="margin-top:4px;" title="When on, CW XIT adds the offset to the VFO itself (legacy behavior — VFO display shifts). When off, POTACAT uses the radio's native TX-only XIT (Flex slice XIT, Yaesu TX CLAR) so the VFO stays on the spot's true frequency.">
         <input type="checkbox" id="set-cw-xit-shift-vfo"> Shift VFO for CW XIT (legacy)
       </label>
-      <label class="checkbox-label" style="margin-top:4px;" title="Flex only: sends `cw sidetone=0` after each SmartSDR connect so the radio doesn't play its own CW tone during keying. Use this when you key through an external device (WinKeyer / WK Keyboard) that already has its own sidetone — stops the doubled-tone effect when the radio sits in the same room. TX is unaffected. You can also toggle this per-session via the CW ST button in the rig popover.">
-        <input type="checkbox" id="set-mute-flex-cw-sidetone"> Mute Flex CW sidetone on connect
+      <label class="checkbox-label" style="margin-top:4px;" title="Flex only: temporarily mutes the radio's own CW sidetone only WHILE the WinKeyer is keying (busy / paddle breakin). Restores when the WK goes idle. Use this when the WinKeyer has its own sidetone and the radio sits in the same room — stops the doubled-tone effect without affecting POTACAT CW macros, SmartSDR CWX, HaliKey MIDI, or vBand keying (those all bypass the WK device and keep the Flex sidetone on).">
+        <input type="checkbox" id="set-mute-flex-cw-sidetone-wk"> Mute Flex CW sidetone while WinKeyer is keying
       </label>
       <label>CW Filter Width (Hz):
         <input type="number" id="set-cw-filter" min="0" max="3000" step="50" value="0">
