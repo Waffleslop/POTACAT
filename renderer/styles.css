@@ -872,61 +872,6 @@ button:hover {
   display: none;
 }
 
-/* Startup greeting — shown once per session right after the UI loads,
- * fades in/out over ~4.5 s. Sits high in the window so it doesn't
- * cover the spot table, on top of the update banner if both exist.
- *
- * v1.7.5 redesign (K3SBP feedback): the original was a thin pill in
- * --bg-header which blended into the surrounding dark chrome and
- * looked weak. New look is a proper card — solid panel, bold serif
- * text, real shadow, accent-bar top stripe.
- */
-.greeting-toast {
-  position: fixed;
-  top: 64px;
-  left: 50%;
-  transform: translateX(-50%) translateY(-12px);
-  z-index: 9999;
-  /* Solid card surface. --bg-tertiary on dark (#0f3460, a saturated
-   * mid-blue) pops cleanly against the --bg-primary navy behind it;
-   * on light it's a slightly off-white that still reads as elevated
-   * thanks to the heavier border + shadow below. */
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  /* Thicker accent-green frame so the card has a clear edge even on
-   * the dark theme where the bg-tertiary blue can otherwise feel
-   * unbounded. */
-  border: 2px solid var(--accent-green);
-  border-radius: 10px;
-  padding: 22px 36px;
-  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
-  font-size: 24px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  line-height: 1.25;
-  text-align: center;
-  /* Layered shadow: tight inner dark + spread outer accent glow so
-   * the card both sits on the page AND announces itself. */
-  box-shadow:
-    0 12px 36px rgba(0, 0, 0, 0.6),
-    0 4px 8px rgba(0, 0, 0, 0.35),
-    0 0 0 4px rgba(78, 204, 163, 0.08);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 350ms ease, transform 350ms ease;
-  pointer-events: auto;
-  /* Cap the width so very long greetings still wrap nicely instead
-   * of stretching across the whole window. */
-  max-width: min(560px, 86vw);
-}
-.greeting-toast.greeting-toast-in {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-.greeting-toast.greeting-toast-leaving {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-12px);
-}
 
 #update-link {
   color: var(--accent-blue);

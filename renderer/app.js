@@ -14977,14 +14977,6 @@ async function checkFirstRun(force = false) {
     try { sessionStorage.setItem('whatsNewShownThisSession', s.appVersion); } catch {}
     await window.api.saveSettings({ lastVersion: s.appVersion });
     showWhatsNew(s.appVersion);
-  } else {
-    // No dialog to show — quick friendly greeting toast. Skipped when
-    // welcome / What's New is opening so we don't stack visuals on the
-    // very first launch after install or upgrade. The greeting itself
-    // is one-shot-per-session — see renderer/greetings.js.
-    if (typeof window.showStartupGreeting === 'function') {
-      window.showStartupGreeting(s.myCallsign);
-    }
   }
 }
 
