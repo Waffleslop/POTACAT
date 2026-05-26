@@ -97,21 +97,19 @@ treat it as the three defaults above with empty `name` and empty `callsigns`.
 The desktop validates `color` against `/^#[0-9a-f]{6}$/i` before saving — if a
 malformed value somehow reaches mobile, fall back to the defaults per index.
 
-## Prerequisite: desktop change first
+## Desktop-side wiring (done)
 
-`updateRemoteSettings()` at `main.js:4800-4852` is an explicit allowlist of
-which settings keys go to ECHOCAT clients. As shipped, `watchlistGroups` is
-not in the list, so mobile's `auth-ok.settings.watchlistGroups` arrives
-`undefined` regardless of what's persisted on disk.
+`updateRemoteSettings()` in `main.js` now includes `watchlistGroups` in the
+allowlist pushed to ECHOCAT clients (same shape persisted on disk —
+including each group's `remoteEntries` cache, `lastFetchedAt`, and
+`lastFetchError`). Mobile reads from `auth-ok.settings.watchlistGroups` on
+connect and via subsequent settings-broadcast frames.
 
-Add one line, matching the pattern `customCatButtons` follows:
-
-```js
-watchlistGroups: settings.watchlistGroups || null,
-```
-
-Without this, mobile builds against a contract the desktop doesn't fulfill.
-Verify on the next desktop release before mobile starts implementing.
+`_broadcastWatchlistGroups()` (which runs after every Ham2K PoLo fetch —
+boot, settings save when URL changed, manual Refresh) calls
+`updateRemoteSettings()` too, so fresh `remoteEntries` propagate to the
+phone within the same fetch cycle without waiting for an unrelated
+settings change.
 
 ## What mobile needs to build
 

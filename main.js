@@ -4832,6 +4832,11 @@ function updateRemoteSettings() {
     // Currently: echocatWelcomeDismissed.
     echocatWelcomeDismissed: !!(settings.echocatPrefs && settings.echocatPrefs.echocatWelcomeDismissed),
     customCatButtons: settings.customCatButtons || null,
+    // Watchlist groups — three color-coded buckets with optional emoji
+    // badges and Ham2K PoLo URL subscriptions. The whole array including
+    // each group's remoteEntries cache rides this push so mobile decorates
+    // matching spots without having to fetch URLs itself.
+    watchlistGroups: settings.watchlistGroups || null,
     kiwiSdrHost1: settings.kiwiSdrHost1 || settings.kiwiSdrHost || '',
     kiwiSdrHost2: settings.kiwiSdrHost2 || '',
     kiwiSdrHost3: settings.kiwiSdrHost3 || '',
@@ -10337,6 +10342,10 @@ function _broadcastWatchlistGroups() {
   if (win && !win.isDestroyed()) {
     win.webContents.send('watchlist-groups-updated', settings.watchlistGroups || []);
   }
+  // Mirror to ECHOCAT clients so phones pick up fresh remoteEntries
+  // without waiting for the next unrelated settings change. Cheap —
+  // setRemoteSettings is just a struct-replace on the server side.
+  try { updateRemoteSettings(); } catch { /* server not up yet */ }
 }
 
 function fetchWatchlistGroupUrl(idx) {
