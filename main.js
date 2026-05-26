@@ -538,6 +538,12 @@ let _currentNrState = false;
 let _currentAnfState = false;
 let _currentVoxState = false;
 let _currentAgcMode = '';
+// Phase-2 levels + monitor (rig-popover continuous controls).
+let _currentNrLevel = 0;
+let _currentNbLevel = 0;
+let _currentVoxLevel = 0;
+let _currentMonState = false;
+let _currentMonLevel = 0;
 
 // Filter preset tables for rig controls (Hz values)
 const FILTER_PRESETS = {
@@ -1021,6 +1027,11 @@ function broadcastRigState() {
     anf: _currentAnfState,
     vox: _currentVoxState,
     agc: _currentAgcMode,
+    nrLevel: _currentNrLevel,
+    nbLevel: _currentNbLevel,
+    voxLevel: _currentVoxLevel,
+    mon: _currentMonState,
+    monLevel: _currentMonLevel,
     capabilities: caps,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
@@ -14322,6 +14333,51 @@ app.whenReady().then(() => {
           cat.setAgc(mode);
         }
         _currentAgcMode = mode;
+        broadcastRigState();
+        break;
+      }
+      case 'set-nr-level': {
+        if (flexNeedsApi) { _flexWarnOnce('NR level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setNrLevel(0, pct);
+        else if (cat && cat.connected && typeof cat.setNrLevel === 'function') cat.setNrLevel(pct);
+        _currentNrLevel = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-nb-level': {
+        if (flexNeedsApi) { _flexWarnOnce('NB level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setNbLevel(0, pct);
+        else if (cat && cat.connected && typeof cat.setNbLevel === 'function') cat.setNbLevel(pct);
+        _currentNbLevel = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-vox-level': {
+        if (flexNeedsApi) { _flexWarnOnce('VOX level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setVoxLevel(pct);
+        else if (cat && cat.connected && typeof cat.setVoxLevel === 'function') cat.setVoxLevel(pct);
+        _currentVoxLevel = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-mon': {
+        if (flexNeedsApi) { _flexWarnOnce('Monitor requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) smartSdr.setMonitor(on);
+        else if (cat && cat.connected && typeof cat.setMonitor === 'function') cat.setMonitor(on);
+        _currentMonState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-mon-level': {
+        if (flexNeedsApi) { _flexWarnOnce('Monitor level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setMonLevel(pct);
+        else if (cat && cat.connected && typeof cat.setMonLevel === 'function') cat.setMonLevel(pct);
+        _currentMonLevel = pct;
         broadcastRigState();
         break;
       }

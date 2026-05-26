@@ -13829,6 +13829,16 @@ const rigNrBtn     = document.getElementById('rig-nr-btn');
 const rigAnfBtn    = document.getElementById('rig-anf-btn');
 const rigVoxBtn    = document.getElementById('rig-vox-btn');
 const rigAgcSelect = document.getElementById('rig-agc-select');
+// Phase-2: continuous levels + monitor.
+const rigNrLevel       = document.getElementById('rig-nrlevel');
+const rigNrLevelLabel  = document.getElementById('rig-nrlevel-label');
+const rigNbLevel       = document.getElementById('rig-nblevel');
+const rigNbLevelLabel  = document.getElementById('rig-nblevel-label');
+const rigVoxLevel      = document.getElementById('rig-voxlevel');
+const rigVoxLevelLabel = document.getElementById('rig-voxlevel-label');
+const rigMonBtn        = document.getElementById('rig-mon-btn');
+const rigMonLevel      = document.getElementById('rig-monlevel');
+const rigMonLevelLabel = document.getElementById('rig-monlevel-label');
 let rigPopoverOpen = false;
 let rigCurrentCaps = {};
 let rigCurrentMode = '';
@@ -13889,6 +13899,18 @@ function rigApplyCapabilities(caps) {
   if (modRow) modRow.style.display = anyModifier ? '' : 'none';
   const agcRow = document.getElementById('rig-agc-row');
   if (agcRow) agcRow.style.display = caps.agc ? '' : 'none';
+  // Phase-2 level + monitor rows — each gated by its own cap so a rig
+  // that has NR but no NR-level (none we ship today, but possible) gets
+  // the toggle without the slider.
+  const setRowDisplay = (id, show) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = show ? '' : 'none';
+  };
+  setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel);
+  setRowDisplay('rig-nblevel-row',  !!caps.nbLevel);
+  setRowDisplay('rig-voxlevel-row', !!caps.voxLevel);
+  setRowDisplay('rig-mon-row',      !!caps.mon);
+  setRowDisplay('rig-monlevel-row', !!caps.monLevel);
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
@@ -13977,6 +13999,23 @@ if (rigAgcSelect) {
   });
 }
 
+// Phase-2 level sliders share the existing 80 ms throttle pattern with
+// RF Gain / TX Power so dragging the slider doesn't flood the serial /
+// SmartSDR pipe.
+function _bindLevelSlider(slider, label, action, unit) {
+  if (!slider) return;
+  slider.addEventListener('input', () => {
+    const v = parseInt(slider.value, 10);
+    if (label) label.textContent = v + (unit || '');
+    throttledRigControl(action, v);
+  });
+}
+_bindLevelSlider(rigNrLevel,  rigNrLevelLabel,  'set-nr-level',  '');
+_bindLevelSlider(rigNbLevel,  rigNbLevelLabel,  'set-nb-level',  '');
+_bindLevelSlider(rigVoxLevel, rigVoxLevelLabel, 'set-vox-level', '');
+_bindLevelSlider(rigMonLevel, rigMonLevelLabel, 'set-mon-level', '');
+_bindModifierBtn(rigMonBtn, 'set-mon');
+
 // Slider handlers
 // Throttle rig control sliders to prevent flooding serial port
 let rigSliderTimer = null;
@@ -14022,9 +14061,22 @@ window.api.onRigState((state) => {
   _syncModBtn(rigNrBtn,     state.nr);
   _syncModBtn(rigAnfBtn,    state.anf);
   _syncModBtn(rigVoxBtn,    state.vox);
+  _syncModBtn(rigMonBtn,    state.mon);
   if (rigAgcSelect && state.agc != null && rigAgcSelect.value !== state.agc) {
     rigAgcSelect.value = state.agc || '';
   }
+  // Phase-2 level sliders — same "don't clobber while user is dragging"
+  // guard as RF Gain / TX Power above.
+  function _syncLevel(slider, label, val, unit) {
+    if (!slider || val == null) return;
+    if (document.activeElement === slider) return;
+    slider.value = val;
+    if (label) label.textContent = val + (unit || '');
+  }
+  _syncLevel(rigNrLevel,  rigNrLevelLabel,  state.nrLevel,  '');
+  _syncLevel(rigNbLevel,  rigNbLevelLabel,  state.nbLevel,  '');
+  _syncLevel(rigVoxLevel, rigVoxLevelLabel, state.voxLevel, '');
+  _syncLevel(rigMonLevel, rigMonLevelLabel, state.monLevel, '');
   // Update sliders (only if user is not actively dragging)
   if (document.activeElement !== rigRfGain && state.rfGain != null) {
     rigRfGain.value = state.rfGain;
