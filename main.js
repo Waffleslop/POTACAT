@@ -553,6 +553,7 @@ let _currentCwSidetoneState = true; // Flex default is sidetone ON; we mirror th
 // in place across WK busy/idle cycles.
 let _flexCwSidetoneMutedByWk = false;
 let _flexCwSidetonePreWkState = true;
+let _wkEchoIdleTimer = null; // watchdog: 500 ms after last paddle echo, restore
 
 // Filter preset tables for rig controls (Hz values)
 const FILTER_PRESETS = {
@@ -5062,21 +5063,41 @@ function disconnectCwKeyPort() {
  * muted via the rig-popover stays muted across keying sessions.
  */
 function _maybeMuteFlexCwSidetoneForWinKeyer(wkActive) {
-  if (!settings.muteFlexCwSidetoneOnWinKeyer) return;
+  if (!settings.muteFlexCwSidetoneOnWinKeyer) {
+    sendCatLog(`[WK-mute] skip wkActive=${wkActive} — setting OFF`);
+    return;
+  }
   const flexUp = detectRigType() === 'flex' && smartSdr && smartSdr.connected;
-  if (!flexUp) return;
+  if (!flexUp) {
+    sendCatLog(`[WK-mute] skip wkActive=${wkActive} — rigType=${detectRigType()} smartSdrConn=${!!(smartSdr && smartSdr.connected)}`);
+    return;
+  }
   if (wkActive) {
-    if (_flexCwSidetoneMutedByWk) return;
+    if (_flexCwSidetoneMutedByWk) {
+      sendCatLog('[WK-mute] busy edge but already muted — skip');
+      return;
+    }
     _flexCwSidetonePreWkState = _currentCwSidetoneState;
-    try { smartSdr.setCwSidetone(false); } catch { return; }
+    try { smartSdr.setCwSidetone(false); } catch (e) {
+      sendCatLog(`[WK-mute] setCwSidetone(off) threw: ${e.message}`);
+      return;
+    }
     _currentCwSidetoneState = false;
     _flexCwSidetoneMutedByWk = true;
+    sendCatLog(`[WK-mute] MUTED Flex CW sidetone (was ${_flexCwSidetonePreWkState ? 'ON' : 'OFF'})`);
     broadcastRigState();
   } else {
-    if (!_flexCwSidetoneMutedByWk) return;
-    try { smartSdr.setCwSidetone(_flexCwSidetonePreWkState); } catch { return; }
+    if (!_flexCwSidetoneMutedByWk) {
+      sendCatLog('[WK-mute] idle edge but we did not mute — skip');
+      return;
+    }
+    try { smartSdr.setCwSidetone(_flexCwSidetonePreWkState); } catch (e) {
+      sendCatLog(`[WK-mute] setCwSidetone(restore) threw: ${e.message}`);
+      return;
+    }
     _currentCwSidetoneState = _flexCwSidetonePreWkState;
     _flexCwSidetoneMutedByWk = false;
+    sendCatLog(`[WK-mute] RESTORED Flex CW sidetone (back to ${_flexCwSidetonePreWkState ? 'ON' : 'OFF'})`);
     broadcastRigState();
   }
 }
@@ -5119,21 +5140,34 @@ function connectWinKeyer() {
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
       smartSdr.sendCwText(char);
     }
+    // Defensive: some WK3 host configs don't reliably emit a 'busy' status
+    // byte at the START of paddle keying — only when buffer sending or
+    // XOFF flips. 'echo' fires per decoded paddle character regardless,
+    // so we treat each echo as an active edge and extend a watchdog
+    // timer to restore once paddling stops (no character for 500 ms).
+    _maybeMuteFlexCwSidetoneForWinKeyer(true);
+    if (_wkEchoIdleTimer) clearTimeout(_wkEchoIdleTimer);
+    _wkEchoIdleTimer = setTimeout(() => {
+      _wkEchoIdleTimer = null;
+      _maybeMuteFlexCwSidetoneForWinKeyer(false);
+    }, 500);
   });
   winKeyer.on('busy', () => {
+    sendCatLog('[WK-event] busy');
     if (win && !win.isDestroyed()) {
       win.webContents.send('winkeyer-busy', true);
     }
     _maybeMuteFlexCwSidetoneForWinKeyer(true);
   });
   winKeyer.on('idle', () => {
+    sendCatLog('[WK-event] idle');
     if (win && !win.isDestroyed()) {
       win.webContents.send('winkeyer-busy', false);
     }
     _maybeMuteFlexCwSidetoneForWinKeyer(false);
   });
   winKeyer.on('breakin', () => {
-    console.log('[WinKeyer] Paddle breakin');
+    sendCatLog('[WK-event] breakin');
     // breakin = paddle touched mid-buffer-send; the keyer is now actively
     // emitting paddle CW. Treat as a 'busy' edge so the mute kicks in
     // even when the WK never explicitly transitions through idle->busy.
