@@ -1,8 +1,33 @@
 # WebSDR.org audio through WebRTC track-swap
 
-Status: open
+Status: shipped (verified 2026-05-26 — wiring already in place since `da62b46`, 2026-05-01)
 Filed: 2026-05-06
 Repo for changes: d:/projects/potacat-dev
+
+## Resolution
+
+The premise of this handoff is incorrect — both clients share the same
+audio path. `ipcMain.on('kiwi-connect', ...)` at `main.js:14185-14299`
+instantiates either `WebSdrClient` (lib/websdr.js) or `KiwiSdrClient`
+(lib/kiwisdr.js) based on port (8073 → Kiwi, anything else → WebSDR),
+and both emit `'connected'` / `'audio'` (Float32Array pcm, sampleRate)
+/ `'disconnected'`. The same handler then forwards to:
+
+- `remoteAudioWin.webContents.send('kiwi-active', true/false)` on
+  connect/disconnect, which triggers `audioSender.replaceTrack()` in
+  `renderer/remote-audio.html:467-490`.
+- `remoteAudioWin.webContents.send('kiwi-audio-frame', { pcm, sampleRate })`
+  on every audio frame, queued through the `kiwiCtx` AudioContext at
+  `renderer/remote-audio.html:492-518`.
+
+The "kiwi" naming is historical — the path serves both SDR families.
+The real WebSDR.org client (PA3FWM byte-tagged protocol) landed in
+`da62b46` on 2026-05-01, five days before this handoff was filed.
+
+If WebSDR audio still appears silent on the phone, the regression is
+elsewhere (PCM decoding in `lib/websdr.js`, AudioContext resample at
+the 7350 Hz default sample rate, etc.) — not the routing. Reopen with
+a concrete repro before scoping further desktop work.
 
 ## Context
 

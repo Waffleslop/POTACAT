@@ -18,7 +18,6 @@ This folder is the mirror of `docs/ios-handoffs/`. The iOS app at `D:\Projects\p
 - [pd-mode-sstv-encoder.md](pd-mode-sstv-encoder.md) — Accept PD90/120/160/180/240 mode strings in `sstv-photo` and route to a PD encoder. iOS UI advertises these modes already.
 - [sstv-cw-id.md](sstv-cw-id.md) — Honor the `sstvCwId` settings flag (already round-trippable) by appending FSK Morse callsign at the end of every SSTV transmission.
 - [sstv-auto-toggle-handler.md](sstv-auto-toggle-handler.md) — Add a handler for `sstv-set-auto-enabled` so the iOS Auto-SSTV banner toggle actually flips state remotely. (Gap 14.)
-- [websdr-audio-routing.md](websdr-audio-routing.md) — Pipe WebSDR.org PCM audio through the same WebRTC track-swap that KiwiSDR uses (Gap 20a's fix didn't cover the WebSDR code path).
 - [heartbeat-timeout-investigation.md](heartbeat-timeout-investigation.md) — Investigate why the heartbeat timeout kills the JTCAT engine when a phone backgrounds, and consider decoupling engine lifetime from client presence.
 - [waterfall-phase2.md](waterfall-phase2.md) — Unified waterfall project, **resume point**. Phase 1 (the WebGL `Waterfall` component) shipped; Phase 2 = audio-FFT adapter + main-view integration + click-to-tune + spot overlay. Canonical plan: `docs/waterfall-plan.md`.
 - [oom-flex-audio.md](oom-flex-audio.md) — Recurring OOM crash: POTACAT exits at ~1.7 GB after ~50 min of Flex Direct audio. Not root-caused. Suspect: a renderer buffering audio frames unbounded. **HIGH priority — crashes the app.**
@@ -26,3 +25,4 @@ This folder is the mirror of `docs/ios-handoffs/`. The iOS app at `D:\Projects\p
 ## Shipped
 
 - [jtcat-replay-on-reconnect.md](jtcat-replay-on-reconnect.md) — Cached-state replay on auth (decode buffer + status snapshots). Buffer now clears on engine stop so stale decodes don't reappear on a later reconnect.
+- [websdr-audio-routing.md](websdr-audio-routing.md) — Wiring was already in place since `da62b46` (2026-05-01); WebSDR and KiwiSDR share the same `kiwi-active` / `kiwi-audio-frame` path into the WebRTC track-swap. Handoff doc was based on outdated info.
