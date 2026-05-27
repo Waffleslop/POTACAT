@@ -281,6 +281,17 @@ for the history.
 
 ### Cloud (cross-device QSO sync via Cognito)
 
+> **Scope:** These messages exist solely for the in-browser ECHOCAT UI
+> (`renderer/remote.html` Settings → Cloud Sync, wired in
+> `renderer/remote.js:8132-8289`), which piggybacks on the desktop's
+> cloud session over WebSocket. The iOS and Android apps do **not** use
+> these — they speak to `api.potacat.com` directly over HTTPS via their
+> own `CloudAuth` / `CloudSync` clients. Don't infer from the protocol
+> registry that mobile is expected to send them; that path was never
+> wired on the native apps and was retired from the mobile protocol
+> registry in the 2026-05-27 cleanup. The desktop-side handlers stay in
+> place to serve the browser ECHOCAT.
+
 | Message | Dir | Purpose |
 |---|---|---|
 | `cloud-login` | C→S | Log in to POTACAT cloud account. |
