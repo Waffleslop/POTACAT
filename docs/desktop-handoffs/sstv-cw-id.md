@@ -1,8 +1,28 @@
 # SSTV CW ID after TX
 
-Status: open
+Status: shipped (2026-05-26)
 Filed: 2026-05-06
 Repo for changes: d:/projects/potacat-dev
+
+## Resolution
+
+- `generateMorseSamples()` already lives at `main.js:224` (Float32Array
+  output, PARIS timing, 5 ms attack/decay ramp, 60% peak amplitude).
+- SSTV encode-complete handler at `main.js:13290-13346` already appends
+  the Morse tail when `settings.sstvCwId && settings.myCallsign`:
+  - 250 ms silence between image end and CW ID
+  - 20 WPM, 800 Hz, sampled at `SSTV_SAMPLE_RATE`
+  - merged length feeds the recomputed `durationSec` so
+    `broadcastSstvTxStatus({ state: 'tx', durationSec })` reflects the
+    real TX length and iOS's countdown banner stays accurate.
+- The `save-settings` handler at `main.js:7883` is a generic
+  `Object.assign(settings, partial)`, so mobile's `save-settings
+  { sstvCwId }` write is persisted on the desktop.
+
+Closed the one remaining gap on 2026-05-26: `updateRemoteSettings()`
+now includes `sstvCwId` in the `setRemoteSettings(...)` snapshot so a
+mobile client reconnecting sees the persisted desktop state instead of
+falling back to the `false` default in its local store.
 
 ## Context
 

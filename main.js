@@ -4857,6 +4857,12 @@ function updateRemoteSettings() {
     sstvTextElements: settings.sstvTextElements || [],
     enableAutoSstv: !!settings.enableAutoSstv,
     autoSstvInactivityMin: settings.autoSstvInactivityMin || 90,
+    // CW ID appended to every SSTV transmission — required by regulators
+    // in UK/parts of EU, good practice everywhere. Mobile owns the toggle
+    // in its SSTV settings; desktop honors it via the encode-complete
+    // hook in startSstv (main.js, generateMorseSamples). Including it
+    // here so reconnecting mobiles see the persisted state.
+    sstvCwId: !!settings.sstvCwId,
     // Forwarded so ECHOCAT's phone-side iambic keyer stays in sync with the
     // desktop's. The phone owns the mode selector so this is mostly a fresh-
     // connect snapshot; swap is desktop-only, so the phone needs it to
