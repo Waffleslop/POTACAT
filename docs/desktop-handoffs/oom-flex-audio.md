@@ -1,9 +1,32 @@
 # OOM crash — Flex Direct audio, ~1.7 GB after ~50 min
 
-Status: open — recurring, not root-caused
+Status: ROOT-CAUSED + fixed 2026-05-28 (cd1d74a) — pending long-run confirmation
 Filed: 2026-05-22
 Repo: POTACAT desktop (`D:\Projects\potacat-dev`)
 Reporter: K3SBP (Casey) — and prior reports 2026-05-18, 2026-05-20
+
+## Resolution (2026-05-28)
+
+Two leaks, both in the audio path, now addressed:
+
+1. **main→renderer RX fan-out native IPC buffers** — fixed earlier by
+   `audioSafeSend` bounded per-consumer queues (`be1051f`).
+2. **dax_tx mic stream running during RX** (this commit, `cd1d74a`) —
+   the real remaining leak. When the iOS app's WebRTC audio is connected,
+   `startDaxTxTap` (remote-audio.html) runs an AudioWorklet that forwards
+   the phone mic to the radio's `dax_tx` stream **continuously at ~188
+   packets/sec, regardless of TX/RX**. So just *listening* on ECHOCAT
+   pumped a nonstop silent TX stream — churning IPC + native buffers on
+   both renderer and main until OOM. K3SBP's crash log showed the pipe at
+   chunk #40000, peak 0.0000 (silence) during an RX-only listen.
+
+   Fix: gate the dax_tx mic forwarding on TX state — renderer only posts
+   chunks when `kiwiTxMuted` (the remote-tx-state broadcast) is set; main
+   drops any chunk unless `_isEffectivelyTransmitting()`. Voice TX from the
+   phone still flows (PTT sets `_remoteTxState`).
+
+Confirm with a 50+ min ECHOCAT-connected RX listen and the per-process
+`[Mem]` heartbeat — no process should climb now.
 
 ## Symptom
 
