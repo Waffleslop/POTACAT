@@ -51,6 +51,14 @@ The rig popover now exposes FTX-1-aware controls for:
 - the SWR discrepancy seen in AM carrier versus SSB testing
 - HF/50 `AMP2` UI exposure
 
+## Outstanding work
+
+- ECHOCAT rig-control parity: the remote rig-control handler still does not support many of the newer desktop-only FTX-1 actions
+- VFO-panel advanced controls: the VFO popout still exposes only a smaller subset of rig controls
+- true independent MAIN/SUB preamp state
+- HF/50 `AMP2` UI exposure
+- SWR investigation for AM-carrier behavior versus SSB
+
 ## Validation status
 
 Real-radio testing reported working for:
