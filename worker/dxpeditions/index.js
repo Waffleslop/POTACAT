@@ -25,18 +25,25 @@ const SCHEMA_VERSION = '1';
 const FEED_TTL_DAYS = 60; // drop records this many days after first seen
 const USER_AGENT = 'POTACAT-DXpeditions/1.0 (+https://potacat.com)';
 
-// Callsign in DX-World titles. Same shape as donors worker's regex but
-// broadened: any prefix letter set, optional second letter, region digit,
-// 1-4 suffix letters, optional /portable suffix. Anchored at word
-// boundaries so we don't grab fragments inside dates / regular words.
-const CALLSIGN_RE = /\b([A-Z][A-Z0-9]?[0-9][A-Z]{1,4})(\/[A-Z0-9]+)?\b/g;
-
 // Words that look like callsigns but aren't. RSS titles tend to include
 // expedition codenames like "AS-104" (IOTA) or "EU-013" — filter out.
 const BLOCKLIST = new Set([
   'IOTA', 'SOTA', 'POTA', 'WWFF', 'DXCC', 'CQWW', 'DXing', 'IARU',
   'ITU', 'WPX', 'ARRL', 'YOTA', 'OQRS',
 ]);
+
+// Bare callsign shapes:
+//   1) Letter[Letter|Digit] Digit [Letter]{1,4}    — K3SBP, M0CFW, DL2SBY, WF2A
+//   2) Digit Letter[Letter|Digit] [Digit] [Letter]{1,4}
+//      — 3G0Z, 3B9KW, 4U1ITU, 9V1AB
+// Two patterns rather than one mega-alternation so each is readable.
+const BARE_CALL_RE_1 = /^[A-Z][A-Z0-9]?\d[A-Z]{1,4}$/;
+const BARE_CALL_RE_2 = /^\d[A-Z][A-Z0-9]?\d?[A-Z]{1,4}$/;
+
+function isBareCall(s) {
+  if (!s || s.length < 3 || s.length > 8) return false;
+  return BARE_CALL_RE_1.test(s) || BARE_CALL_RE_2.test(s);
+}
 
 // ---------- DX-World fetch + parse ----------
 
@@ -69,29 +76,63 @@ function parseRss(xml) {
 }
 
 function textOf(body, tag) {
-  // Strip CDATA wrappers, decode the small set of named entities RSS uses.
   const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i');
   const m = body.match(re);
   if (!m) return '';
   let s = m[1].trim();
   s = s.replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '').trim();
-  s = s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#8217;/g, "'").replace(/&#8211;/g, '–');
-  return s;
+  return decodeEntities(s);
 }
 
-function extractCallsign(title) {
-  // DX-World titles usually lead with the callsign: "FT4WC – Crozet Island…"
-  // or "Vietnam – XV9NPS, XV9XJP". Pull the first plausible callsign that
-  // contains at least one digit AND at least one letter AFTER the digit
-  // (a real callsign suffix), and isn't on the blocklist.
-  const matches = title.toUpperCase().matchAll(CALLSIGN_RE);
-  for (const m of matches) {
-    const base = m[1];
-    if (BLOCKLIST.has(base)) continue;
-    if (!/[A-Z]\d[A-Z]/.test(base)) continue; // require letter-digit-letter pattern
-    return base;
+// Decode the entity zoo WordPress / DX-World actually emits. The first
+// pass missed numeric entities (DX-World writes "&#038;" for ampersand,
+// "&#8217;" for ’, "&#8211;" for –) so titles like "V6AIU &#038; V63JX"
+// stayed raw — breaking tokenization on the &.
+function decodeEntities(s) {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => {
+      const code = parseInt(n, 10);
+      return Number.isFinite(code) ? String.fromCharCode(code) : '';
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+// Extract every plausible operating callsign from a DX-World title.
+//
+// Returns an array because real DXpedition posts routinely list multiple
+// calls ("V6AIU & V63JX", "3G0Z & XR0Z", "3B9KW & 3B9/M0CFW") and we want
+// to highlight any of them when they appear in cluster spots.
+//
+// Slash forms (FP/WF2A, HB0/DL2SBY, 3B9/M0CFW, EI9KA/MM, W1AW/4) are
+// preserved verbatim AND each bare-callsign component is emitted
+// separately — clusters carry the call in whichever form the spotter
+// typed, so we have to recognize both.
+function extractCallsigns(title) {
+  if (!title) return [];
+  const out = new Set();
+  const tokens = title.toUpperCase().split(/[^A-Z0-9/]+/);
+  for (let tok of tokens) {
+    if (!tok || tok.length < 3 || tok.length > 12) continue;
+    if (BLOCKLIST.has(tok)) continue;
+    if (tok.includes('/')) {
+      const parts = tok.split('/').filter(Boolean);
+      if (parts.length < 2 || parts.length > 3) continue;
+      // Require at least one piece to look like a real bare call so we
+      // don't grab arbitrary "URL/path" debris.
+      const hasBareCall = parts.some(isBareCall);
+      if (!hasBareCall) continue;
+      out.add(tok);
+      for (const p of parts) if (isBareCall(p)) out.add(p);
+    } else if (isBareCall(tok)) {
+      out.add(tok);
+    }
   }
-  return null;
+  return [...out];
 }
 
 // ---------- Normalize / merge ----------
@@ -99,17 +140,19 @@ function extractCallsign(title) {
 function normalize(items, sourceName, now) {
   const out = [];
   for (const it of items) {
-    const call = extractCallsign(it.title);
-    if (!call) continue;
+    const calls = extractCallsigns(it.title);
+    if (!calls.length) continue;
     const published = parseDate(it.pubDate) || now;
-    out.push({
-      call,
-      title: it.title,
-      link: it.link || '',
-      publishedAt: new Date(published).toISOString(),
-      source: sourceName,
-      firstSeen: now,
-    });
+    for (const call of calls) {
+      out.push({
+        call,
+        title: it.title,
+        link: it.link || '',
+        publishedAt: new Date(published).toISOString(),
+        source: sourceName,
+        firstSeen: now,
+      });
+    }
   }
   return out;
 }

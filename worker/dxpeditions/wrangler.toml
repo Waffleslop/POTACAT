@@ -10,7 +10,7 @@ route = { pattern = "dxpeditions.potacat.com/*", zone_name = "potacat.com" }
 #   wrangler kv:namespace create DXPEDITIONS
 # (preview namespace optional — fine to share the same id locally)
 kv_namespaces = [
-  { binding = "DXPEDITIONS", id = "REPLACE_WITH_KV_NAMESPACE_ID" }
+  { binding = "DXPEDITIONS", id = "0d7aae5f5f0c4719a5b9cd5f51c9fce8" }
 ]
 
 # Refresh four times a day. DX-World's RSS updates a few times per day
