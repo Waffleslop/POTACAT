@@ -18455,6 +18455,18 @@ function renderJtcatDecodes() {
   }
 }
 
+// Heuristic: is this token shaped like an FT8 callsign? Used to skip grids
+// (FN20), reports (-12, +05, R-05), and acks (RR73/RRR/73/CQ/DE) when
+// picking the target call from a tail-end-style decode.
+function _looksLikeCallsign(tok) {
+  if (!tok || tok.length < 3 || tok.length > 11) return false;
+  if (/^(CQ|DE|RR73|RRR|73|TU|TNX|QRZ)$/i.test(tok)) return false;
+  if (/^R?[+-]\d{2}$/.test(tok)) return false;          // signal report
+  if (/^[A-R]{2}\d{2}([A-X]{2})?$/i.test(tok)) return false; // grid 4 or 6
+  if (!/[A-Z]/i.test(tok) || !/\d/.test(tok)) return false;
+  return /^[A-Z0-9/]+$/i.test(tok);
+}
+
 function onJtcatDecodeClick(e) {
   var row = e.currentTarget;
   var df = parseInt(row.dataset.df, 10);
@@ -18478,6 +18490,20 @@ function onJtcatDecodeClick(e) {
   // If it's directed at me (MYCALL THEIRCALL PAYLOAD), pick up the QSO
   else if (myCall) {
     var parts = upper.split(/\s+/);
+    // Tail-end / call-anyone: <TO> <FROM> <payload> where neither is us.
+    // WSJT-X behavior: clicking such a decode targets the SENDER (FROM —
+    // the right-hand callsign). Without this branch the desktop popout
+    // only responded to CQ-prefixed decodes or messages addressed to us,
+    // which is what NA7C/Ted reported as a deal-breaker. K3SBP 2026-05-29.
+    if (parts.length >= 2 && parts[0] !== myCall && parts[0] !== 'CQ' && _looksLikeCallsign(parts[1]) && parts[1] !== myCall) {
+      jtcatStartQso(parts[1], '', df);
+      jtcatTxFreq = df;
+      jtcatTxFreqInput.value = df;
+      jtcatTxFreqLabel.textContent = 'TX: ' + df + ' Hz';
+      if (jtcatRunning) window.api.jtcatSetTxFreq(df);
+      renderJtcatDecodes();
+      return;
+    }
     if (parts.length >= 2 && parts[0] === myCall) {
       var fromCall = parts[1];
       var payload = parts[2] || '';

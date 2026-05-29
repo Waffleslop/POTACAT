@@ -428,7 +428,24 @@
       return { step: 'reply-cq', call: fromCall };
     }
 
+    // Tail-end / call-anyone: <TO> <FROM> <payload> where neither is us.
+    // WSJT-X behavior is to target the SENDER (FROM — right-hand callsign).
+    // Without this the popout only responded to CQs or messages addressed
+    // to us; NA7C reported that as a deal-breaker. K3SBP 2026-05-29.
+    if (parts.length >= 2 && parts[0] !== 'CQ' && parts[0] !== me && parts[1] && parts[1] !== me && _jpLooksLikeCallsign(parts[1])) {
+      return { step: 'reply-cq', call: parts[1] };
+    }
+
     return null;
+  }
+
+  function _jpLooksLikeCallsign(tok) {
+    if (!tok || tok.length < 3 || tok.length > 11) return false;
+    if (/^(CQ|DE|RR73|RRR|73|TU|TNX|QRZ)$/i.test(tok)) return false;
+    if (/^R?[+-]\d{2}$/.test(tok)) return false;
+    if (/^[A-R]{2}\d{2}([A-X]{2})?$/i.test(tok)) return false;
+    if (!/[A-Z]/i.test(tok) || !/\d/.test(tok)) return false;
+    return /^[A-Z0-9/]+$/i.test(tok);
   }
 
   function onDecodeRowClick(d) {
