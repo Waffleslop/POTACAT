@@ -534,6 +534,7 @@ let _txPowerSuppressBroadcast = 0;
 let _currentPreampState = false;
 let _currentAttState = false;
 let _currentCompState = false;
+let _currentCompLevel = 0;
 let _currentNrState = false;
 let _currentAnfState = false;
 let _currentVoxState = false;
@@ -544,7 +545,13 @@ let _currentNbLevel = 0;
 let _currentVoxLevel = 0;
 let _currentMonState = false;
 let _currentMonLevel = 0;
+let _currentMicGain = 0;
+let _currentBreakInState = false;
+let _currentBreakInDelay = 0;
 let _currentRitState = false;
+let _currentTxClarState = false;
+let _currentClarFreq = 0;
+let _currentPreampTarget = 'auto';
 
 // Filter preset tables for rig controls (Hz values)
 const FILTER_PRESETS = {
@@ -912,6 +919,9 @@ function sendCatStatus(s) {
       !(cwKeyPort && cwKeyPort.isOpen)) {
     connectCwKeyPort();
   }
+  if (s.connected && cat && typeof cat.setPreampTarget === 'function') {
+    cat.setPreampTarget(_currentPreampTarget);
+  }
   // Broadcast rig state on connect/disconnect so the Rig panel updates
   broadcastRigState();
 }
@@ -931,6 +941,7 @@ function sendCatFrequency(hz) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-freq', hz / 1000);
   }
   _currentFreqHz = hz;
+  broadcastRigState();
   sendVfoState();
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
@@ -978,11 +989,110 @@ function sendCatPower(watts) {
   broadcastRigState();
 }
 
+function sendCatRfGain(pct) {
+  if (typeof pct !== 'number' || !isFinite(pct)) return;
+  _currentRfGain = Math.max(0, Math.min(100, Math.round(pct)));
+  broadcastRigState();
+}
+
 function sendCatNb(on) {
-  // For Flex rigs, NB is controlled via SmartSDR API — ignore Kenwood CAT NB poll
-  // responses which can fight with the API state (stale/different values)
   if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) return;
   _currentNbState = on;
+  broadcastRigState();
+}
+
+function sendCatNbLevel(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentNbLevel = Math.max(0, Math.round(val));
+  _currentNbState = _currentNbLevel > 0;
+  broadcastRigState();
+}
+
+function sendCatNr(on) {
+  _currentNrState = !!on;
+  broadcastRigState();
+}
+
+function sendCatNrLevel(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentNrLevel = Math.max(0, Math.round(val));
+  _currentNrState = _currentNrLevel > 0;
+  broadcastRigState();
+}
+
+function sendCatVox(on) {
+  _currentVoxState = !!on;
+  broadcastRigState();
+}
+
+function sendCatVoxLevel(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentVoxLevel = Math.max(0, Math.round(val));
+  broadcastRigState();
+}
+
+function sendCatAgc(mode) {
+  _currentAgcMode = String(mode || '');
+  broadcastRigState();
+}
+
+function sendCatComp(on) {
+  _currentCompState = !!on;
+  broadcastRigState();
+}
+
+function sendCatCompLevel(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentCompLevel = Math.max(0, Math.round(val));
+  broadcastRigState();
+}
+
+function sendCatAnf(on) {
+  _currentAnfState = !!on;
+  broadcastRigState();
+}
+
+function sendCatMon(on) {
+  _currentMonState = !!on;
+  broadcastRigState();
+}
+
+function sendCatMonLevel(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentMonLevel = Math.max(0, Math.round(val));
+  broadcastRigState();
+}
+
+function sendCatMicGain(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentMicGain = Math.max(0, Math.round(val));
+  broadcastRigState();
+}
+
+function sendCatBreakIn(on) {
+  _currentBreakInState = !!on;
+  broadcastRigState();
+}
+
+function sendCatBreakInDelay(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentBreakInDelay = Math.max(0, Math.round(val));
+  broadcastRigState();
+}
+
+function sendCatRit(on) {
+  _currentRitState = !!on;
+  broadcastRigState();
+}
+
+function sendCatTxClar(on) {
+  _currentTxClarState = !!on;
+  broadcastRigState();
+}
+
+function sendCatClarFreq(val) {
+  if (typeof val !== 'number' || !isFinite(val)) return;
+  _currentClarFreq = Math.max(-9999, Math.min(9999, Math.round(val)));
   broadcastRigState();
 }
 
@@ -1007,6 +1117,34 @@ function sendCatAlc(val) {
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'alc', value: val });
 }
 
+function wireCommonRigEvents(catInstance) {
+  catInstance.on('frequency', sendCatFrequency);
+  catInstance.on('mode', sendCatMode);
+  catInstance.on('power', sendCatPower);
+  catInstance.on('rfgain', sendCatRfGain);
+  catInstance.on('nb', sendCatNb);
+  catInstance.on('nbLevel', sendCatNbLevel);
+  catInstance.on('nr', sendCatNr);
+  catInstance.on('nrLevel', sendCatNrLevel);
+  catInstance.on('vox', sendCatVox);
+  catInstance.on('voxLevel', sendCatVoxLevel);
+  catInstance.on('agc', sendCatAgc);
+  catInstance.on('comp', sendCatComp);
+  catInstance.on('compLevel', sendCatCompLevel);
+  catInstance.on('anf', sendCatAnf);
+  catInstance.on('mon', sendCatMon);
+  catInstance.on('monLevel', sendCatMonLevel);
+  catInstance.on('micGain', sendCatMicGain);
+  catInstance.on('breakIn', sendCatBreakIn);
+  catInstance.on('breakInDelay', sendCatBreakInDelay);
+  catInstance.on('rit', sendCatRit);
+  catInstance.on('txClar', sendCatTxClar);
+  catInstance.on('clarFreq', sendCatClarFreq);
+  catInstance.on('smeter', sendCatSmeter);
+  catInstance.on('swr', sendCatSwr);
+  catInstance.on('alc', sendCatAlc);
+}
+
 // Broadcast full rig control state to renderer and ECHOCAT
 function broadcastRigState() {
   const rigType = detectRigType();
@@ -1018,12 +1156,14 @@ function broadcastRigState() {
     filterWidth: _currentFilterWidth,
     atuActive: _currentAtuState,
     mode: _currentMode,
+    frequencyHz: _currentFreqHz,
     // Phase-1 expanded modifiers — the renderer keeps these in sync so the
     // popover toggles reflect the actual rig state instead of just the
     // last user click.
     preamp: _currentPreampState,
     att: _currentAttState,
     comp: _currentCompState,
+    compLevel: _currentCompLevel,
     nr: _currentNrState,
     anf: _currentAnfState,
     vox: _currentVoxState,
@@ -1033,7 +1173,13 @@ function broadcastRigState() {
     voxLevel: _currentVoxLevel,
     mon: _currentMonState,
     monLevel: _currentMonLevel,
+    micGain: _currentMicGain,
+    breakIn: _currentBreakInState,
+    breakInDelay: _currentBreakInDelay,
     rit: _currentRitState,
+    txClar: _currentTxClarState,
+    clarFreq: _currentClarFreq,
+    preampTarget: _currentPreampTarget,
     capabilities: caps,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
@@ -1182,13 +1328,7 @@ async function connectCat() {
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('status', (s) => checkFlexHandoff(!!s.connected));
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
-    cat.on('power', sendCatPower);
-    cat.on('nb', sendCatNb);
-    cat.on('smeter', sendCatSmeter);
-    cat.on('swr', sendCatSwr);
-    cat.on('alc', sendCatAlc);
+    wireCommonRigEvents(cat);
     // Phase 4: K4 audio over the same TCP socket. type-0x01 frames carry
     // Opus-encoded RX audio (stereo, L=MAIN, R=SUB, 12 kHz). Decode and
     // route through the same pipelines SmartSDR Direct uses so ECHOCAT
@@ -1232,12 +1372,7 @@ async function connectCat() {
       sendCatLog(`rigctld status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
     });
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
-    cat.on('nb', sendCatNb);
-    cat.on('smeter', sendCatSmeter);
-    cat.on('swr', sendCatSwr);
-    cat.on('alc', sendCatAlc);
+    wireCommonRigEvents(cat);
     sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
     transport.connect({ host: '127.0.0.1', port: rigctldPort });
 
@@ -1254,12 +1389,7 @@ async function connectCat() {
       sendCatLog(`rigctld-net status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
     });
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
-    cat.on('nb', sendCatNb);
-    cat.on('smeter', sendCatSmeter);
-    cat.on('swr', sendCatSwr);
-    cat.on('alc', sendCatAlc);
+    wireCommonRigEvents(cat);
     const host = target.host || '127.0.0.1';
     const port = target.port || 4532;
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
@@ -1274,13 +1404,7 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
-    cat.on('power', sendCatPower);
-    cat.on('nb', sendCatNb);
-    cat.on('smeter', sendCatSmeter);
-    cat.on('swr', sendCatSwr);
-    cat.on('alc', sendCatAlc);
+    wireCommonRigEvents(cat);
     sendCatLog(`Connecting to Icom on ${target.path}`);
     // Default DTR/RTS to LOW on the main CAT port. USB-CDC serial defaults
     // DTR high at open, but many Icom rigs (IC-7300, MK II, etc.) can be
@@ -1310,13 +1434,7 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
-    cat.on('power', sendCatPower);
-    cat.on('nb', sendCatNb);
-    cat.on('smeter', sendCatSmeter);
-    cat.on('swr', sendCatSwr);
-    cat.on('alc', sendCatAlc);
+    wireCommonRigEvents(cat);
     const host = target.host || '127.0.0.1';
     const port = target.port || 50001;
     sendCatLog(`Connecting to Icom CI-V over TCP on ${host}:${port}`);
@@ -1338,13 +1456,7 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
-    cat.on('power', sendCatPower);
-    cat.on('nb', sendCatNb);
-    cat.on('smeter', sendCatSmeter);
-    cat.on('swr', sendCatSwr);
-    cat.on('alc', sendCatAlc);
+    wireCommonRigEvents(cat);
     transport.on('log', (m) => sendCatLog(m));
     const host = target.host || '127.0.0.1';
     const controlPort = target.controlPort || target.port || 50001;
@@ -1369,13 +1481,7 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
-    cat.on('power', sendCatPower);
-    cat.on('nb', sendCatNb);
-    cat.on('smeter', sendCatSmeter);
-    cat.on('swr', sendCatSwr);
-    cat.on('alc', sendCatAlc);
+    wireCommonRigEvents(cat);
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
   }
@@ -14292,6 +14398,7 @@ app.whenReady().then(() => {
     if (!data || !data.action) return;
     const flexSdr = () => smartSdr && smartSdr.connected;
     const rigType = detectRigType();
+    const rigCaps = getRigCapabilities(rigType);
     // Flex radios need SmartSDR API for most controls — Kenwood CAT on port 5002
     // only supports FA/MD/NB. Warn if SmartSDR is down instead of silently
     // sending unsupported Kenwood commands that return '?' errors.
@@ -14309,6 +14416,8 @@ app.whenReady().then(() => {
           cat.setNb(on);
         }
         _currentNbState = on;
+        if (on && _currentNbLevel <= 0) _currentNbLevel = 1;
+        if (!on) _currentNbLevel = 0;
         broadcastRigState();
         break;
       }
@@ -14420,6 +14529,14 @@ app.whenReady().then(() => {
         broadcastRigState();
         break;
       }
+      case 'set-preamp-target': {
+        const target = String(data.value || '').toLowerCase();
+        if (!['auto', 'hf', 'vhf', 'uhf'].includes(target)) break;
+        _currentPreampTarget = target;
+        if (cat && cat.connected && typeof cat.setPreampTarget === 'function') cat.setPreampTarget(target);
+        broadcastRigState();
+        break;
+      }
       case 'set-att': {
         if (flexNeedsApi) { _flexWarnOnce('Attenuator requires SmartSDR API — not connected'); break; }
         const on = !!data.value;
@@ -14437,12 +14554,22 @@ app.whenReady().then(() => {
         broadcastRigState();
         break;
       }
+      case 'set-comp-level': {
+        if (flexNeedsApi) { _flexWarnOnce('Compressor level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (cat && cat.connected && typeof cat.setCompLevel === 'function') cat.setCompLevel(pct);
+        _currentCompLevel = pct;
+        broadcastRigState();
+        break;
+      }
       case 'set-nr': {
         if (flexNeedsApi) { _flexWarnOnce('NR requires SmartSDR API — not connected'); break; }
         const on = !!data.value;
         if (flexSdr()) smartSdr.setNoiseReduction(0, on);
         else if (cat && cat.connected && typeof cat.setNoiseReduction === 'function') cat.setNoiseReduction(on);
         _currentNrState = on;
+        if (on && _currentNrLevel <= 0) _currentNrLevel = 1;
+        if (!on) _currentNrLevel = 0;
         broadcastRigState();
         break;
       }
@@ -14467,7 +14594,7 @@ app.whenReady().then(() => {
       case 'set-agc': {
         if (flexNeedsApi) { _flexWarnOnce('AGC requires SmartSDR API — not connected'); break; }
         const mode = String(data.value || '').toLowerCase();
-        if (!['off', 'fast', 'med', 'slow'].includes(mode)) break;
+        if (!['off', 'fast', 'med', 'slow', 'auto'].includes(mode)) break;
         if (flexSdr()) smartSdr.setAgc(0, mode);
         else if (cat && cat.connected && typeof cat.setAgc === 'function') {
           // Older Icom (706/7100/7200/9100) supports fast/slow only; the
@@ -14480,25 +14607,27 @@ app.whenReady().then(() => {
       }
       case 'set-nr-level': {
         if (flexNeedsApi) { _flexWarnOnce('NR level requires SmartSDR API — not connected'); break; }
-        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        const pct = Math.max(0, Math.min(Math.max(1, Number(rigCaps.maxNrLevel) || 100), Number(data.value) || 0));
         if (flexSdr()) smartSdr.setNrLevel(0, pct);
         else if (cat && cat.connected && typeof cat.setNrLevel === 'function') cat.setNrLevel(pct);
         _currentNrLevel = pct;
+        _currentNrState = pct > 0;
         broadcastRigState();
         break;
       }
       case 'set-nb-level': {
         if (flexNeedsApi) { _flexWarnOnce('NB level requires SmartSDR API — not connected'); break; }
-        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        const pct = Math.max(0, Math.min(Math.max(1, Number(rigCaps.maxNbLevel) || 100), Number(data.value) || 0));
         if (flexSdr()) smartSdr.setNbLevel(0, pct);
         else if (cat && cat.connected && typeof cat.setNbLevel === 'function') cat.setNbLevel(pct);
         _currentNbLevel = pct;
+        _currentNbState = pct > 0;
         broadcastRigState();
         break;
       }
       case 'set-vox-level': {
         if (flexNeedsApi) { _flexWarnOnce('VOX level requires SmartSDR API — not connected'); break; }
-        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        const pct = Math.max(0, Math.min(Math.max(1, Number(rigCaps.maxVoxLevel) || 100), Number(data.value) || 0));
         if (flexSdr()) smartSdr.setVoxLevel(pct);
         else if (cat && cat.connected && typeof cat.setVoxLevel === 'function') cat.setVoxLevel(pct);
         _currentVoxLevel = pct;
@@ -14523,13 +14652,50 @@ app.whenReady().then(() => {
         broadcastRigState();
         break;
       }
+      case 'set-mic-gain': {
+        if (flexNeedsApi) { _flexWarnOnce('Mic gain requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (cat && cat.connected && typeof cat.setMicGain === 'function') cat.setMicGain(pct);
+        _currentMicGain = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-break-in': {
+        if (flexNeedsApi) { _flexWarnOnce('Break-in requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (cat && cat.connected && typeof cat.setBreakIn === 'function') cat.setBreakIn(on);
+        _currentBreakInState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-break-in-delay': {
+        if (flexNeedsApi) { _flexWarnOnce('Break-in delay requires SmartSDR API — not connected'); break; }
+        const ms = Math.max(30, Math.min(3000, Number(data.value) || 0));
+        if (cat && cat.connected && typeof cat.setBreakInDelay === 'function') cat.setBreakInDelay(ms);
+        _currentBreakInDelay = ms;
+        broadcastRigState();
+        break;
+      }
       case 'set-rit': {
         if (flexNeedsApi) { _flexWarnOnce('RIT requires SmartSDR API — not connected'); break; }
         const on = !!data.value;
         if (flexSdr()) smartSdr.setRit(0, on);
         else if (cat && cat.connected && typeof cat.setRit === 'function') cat.setRit(on);
-        _currentRitState = on;
-        broadcastRigState();
+        sendCatRit(on);
+        break;
+      }
+      case 'set-clar-tx': {
+        if (flexNeedsApi) { _flexWarnOnce('TX clarifier requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (cat && cat.connected && typeof cat.setClarTx === 'function') cat.setClarTx(on);
+        sendCatTxClar(on);
+        break;
+      }
+      case 'set-clar-freq': {
+        if (flexNeedsApi) { _flexWarnOnce('Clarifier offset requires SmartSDR API — not connected'); break; }
+        const hz = Math.max(-9999, Math.min(9999, Number(data.value) || 0));
+        if (cat && cat.connected && typeof cat.setClarFreq === 'function') cat.setClarFreq(hz);
+        sendCatClarFreq(hz);
         break;
       }
       case 'send-custom-cat': {

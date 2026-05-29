@@ -78,6 +78,63 @@ const FT891_MODEL = {
   atuCmd: 'ft891', minPower: 5, maxPower: 100,
 };
 
+const FTX1_OPTIMA_MODEL = {
+  brand: 'Yaesu', protocol: 'kenwood',
+  caps: {
+    nb: true, nbLevel: true, maxNbLevel: 10,
+    nr: true, nrLevel: true, maxNrLevel: 10,
+    filter: true, filterType: 'indexed', rfgain: true, txpower: true,
+    preamp: true, vox: true, voxLevel: true, maxVoxLevel: 100,
+    compLevel: true, micGain: true, breakIn: true, breakInDelay: true, agcAutoCollapsed: true,
+    ftx1Preamp: true, rit: true, maxClarHz: 9999, ftx1Clar: true,
+  },
+  cw: { text: 'ky1', textChunk: 50, speed: 'ks', paddleKey: 'txrx', kyMode: 'km', kyPlayCmd: 'KY05;' },
+  atuCmd: 'ac103', minPower: 5, maxPower: 100,
+  rmSwr: 6, rmAlc: 4, pcPrefix: 2, ftx1Preamp: true,
+  ssbBw: [300,400,600,850,1100,1200,1500,1650,1800,1950,2100,2250,2400,2450,2500,2600,2700,2800,2900,3000,3200,3500,4000],
+  cwBw: [50,100,150,200,250,300,350,400,450,500,600,800,1200,1400,1700,2000,2400,3000,3200,3500,4000],
+  commands: {
+    getPtt: 'TX;',
+    getRfGain: 'RG0;',
+    setCompOn: 'PR02;',
+    setCompOff: 'PR01;',
+    getCompLevel: 'PL;',
+    setCompLevel: 'PL{val:pad3};',
+    setAutoNotchOn: 'BC01;',
+    setAutoNotchOff: 'BC00;',
+    getNbLevel: 'NL0;',
+    setNbOn: 'NL0001;',
+    setNbOff: 'NL0000;',
+    setPower: 'PC2{val:pad3};',
+    setFilter: 'SH00{val:pad2};',
+    setAutoInfoOn: 'AI1;',
+    setAutoInfoOff: 'AI0;',
+    getAgc: 'GT0;',
+    setVoxOn: 'VX1;',
+    setVoxOff: 'VX0;',
+    getVox: 'VX;',
+    setVoxLevel: 'VG{val:pad3};',
+    getVoxLevel: 'VG;',
+    setMonitorOn: 'ML0001;',
+    setMonitorOff: 'ML0000;',
+    setMonLevel: 'ML1{val:pad3};',
+    getMonitor: 'ML;',
+    getMicGain: 'MG;',
+    setMicGain: 'MG{val:pad3};',
+    getBreakIn: 'BI;',
+    getBreakInDelay: 'SD;',
+    setBreakInOn: 'BI1;',
+    setBreakInOff: 'BI0;',
+    setBreakInDelay: 'SD{val:pad2};',
+    getClarState: 'CF00;',
+    getClarFreq: 'CF01;',
+    getNoiseReductionLevel: 'RL0;',
+    setNoiseReductionLevel: 'RL0{val:pad2};',
+    setNoiseReductionOn: 'RL001;',
+    setNoiseReductionOff: 'RL000;',
+  },
+};
+
 test('Yaesu setFrequency pads to 9 digits', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setFrequency(14074000);
@@ -187,6 +244,274 @@ test('Yaesu setSplit(false) -> ST0;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setSplit(false);
   assert.strictEqual(writes[0], 'ST0;');
+});
+
+// =========================================================================
+console.log('\n=== KenwoodCodec (Yaesu FTX-1 Optima) ===');
+
+test('FTX-1 Optima setTxPower uses PC2 prefix', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setTxPower(42);
+  assert.strictEqual(writes[0], 'PC2042;');
+});
+
+test('FTX-1 Optima parses PC2 power response', () => {
+  const { codec } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  let power = 0;
+  codec.on('power', (w) => { power = w; });
+  codec.onData('PC2100;');
+  assert.strictEqual(power, 100);
+});
+
+test('FTX-1 Optima filter uses SH00 indexed command', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.lastMode = 'USB';
+  codec.setFilterWidth(3000);
+  assert.ok(writes[0].startsWith('SH00'));
+});
+
+test('FTX-1 Optima getPtt polls TX', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.getPtt();
+  assert.strictEqual(writes[0], 'TX;');
+});
+
+test('FTX-1 Optima TX2 response emits PTT on', () => {
+  const { codec } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  let ptt = false;
+  codec.on('ptt', (on) => { ptt = on; });
+  codec.onData('TX2;');
+  assert.strictEqual(ptt, true);
+});
+
+test('FTX-1 Optima RM6 routes to SWR and RM4 to ALC', () => {
+  const { codec } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  let swr = -1;
+  let alc = -1;
+  codec.on('swr', (v) => { swr = v; });
+  codec.on('alc', (v) => { alc = v; });
+  codec.onData('RM6007000;');
+  codec.onData('RM4009000;');
+  assert.strictEqual(swr, 7);
+  assert.strictEqual(alc, 9);
+});
+
+test('FTX-1 Optima VOX on/off uses VX commands', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setVox(true);
+  codec.setVox(false);
+  assert.deepStrictEqual(writes, ['VX1;', 'VX0;']);
+});
+
+test('FTX-1 Optima VOX level uses VG percentage', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setVoxLevel(73);
+  assert.strictEqual(writes[0], 'VG073;');
+});
+
+test('FTX-1 Optima AGC uses GT0 command family', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setAgc('fast');
+  codec.setAgc('med');
+  codec.setAgc('slow');
+  assert.deepStrictEqual(writes, ['GT01;', 'GT02;', 'GT03;']);
+});
+
+test('FTX-1 Optima AGC AUTO uses GT04', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setAgc('auto');
+  assert.deepStrictEqual(writes, ['GT04;']);
+});
+
+test('FTX-1 Optima compressor uses PR command family', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setCompressor(true);
+  codec.setCompressor(false);
+  assert.deepStrictEqual(writes, ['PR02;', 'PR01;']);
+});
+
+test('FTX-1 Optima auto-notch uses BC command family', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setAutoNotch(true);
+  codec.setAutoNotch(false);
+  assert.deepStrictEqual(writes, ['BC01;', 'BC00;']);
+});
+
+test('FTX-1 Optima monitor uses ML command family', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setMonitor(true);
+  codec.setMonitor(false);
+  codec.setMonLevel(64);
+  assert.deepStrictEqual(writes, ['ML0001;', 'ML0000;', 'ML1064;']);
+});
+
+test('FTX-1 Optima compressor level uses PL', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setCompLevel(55);
+  assert.deepStrictEqual(writes, ['PL055;']);
+});
+
+test('FTX-1 Optima mic gain uses MG', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setMicGain(61);
+  assert.deepStrictEqual(writes, ['MG061;']);
+});
+
+test('FTX-1 Optima break-in uses BI', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setBreakIn(true);
+  codec.setBreakIn(false);
+  assert.deepStrictEqual(writes, ['BI1;', 'BI0;']);
+});
+
+test('FTX-1 Optima break-in delay maps milliseconds to SD codes', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setBreakInDelay(30);
+  codec.setBreakInDelay(250);
+  codec.setBreakInDelay(300);
+  codec.setBreakInDelay(900);
+  assert.deepStrictEqual(writes, ['SD00;', 'SD05;', 'SD06;', 'SD12;']);
+});
+
+test('FTX-1 Optima DNR level uses RL', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setNrLevel(7);
+  assert.strictEqual(writes[0], 'RL007;');
+});
+
+test('FTX-1 Optima CLAR toggle uses CF setting mode', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setRit(true);
+  codec.setRit(false);
+  assert.deepStrictEqual(writes, ['CF00010000;', 'CF00000000;']);
+});
+
+test('FTX-1 Optima TX CLAR toggle uses CF setting mode', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setClarTx(true);
+  codec.setClarTx(false);
+  assert.deepStrictEqual(writes, ['CF00001000;', 'CF00000000;']);
+});
+
+test('FTX-1 Optima CLAR frequency uses CF frequency mode', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setClarFreq(500);
+  codec.setClarFreq(-250);
+  assert.deepStrictEqual(writes, ['CF001+0500;', 'CF001-0250;']);
+});
+
+test('FTX-1 Optima CW XIT uses TX clarifier commands', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setXit(80);
+  codec.setXit(0);
+  assert.deepStrictEqual(writes, ['CF00001000;', 'CF001+0080;', 'CF00000000;']);
+});
+
+test('FTX-1 Optima NB on/off uses NL commands', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setNb(true);
+  codec.setNb(false);
+  assert.deepStrictEqual(writes, ['NL0001;', 'NL0000;']);
+});
+
+test('FTX-1 Optima NB level uses NL command', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setNbLevel(5);
+  assert.strictEqual(writes[0], 'NL0005;');
+});
+
+test('FTX-1 Optima RF gain readback parses to percent', () => {
+  const { codec } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  let rfGain = -1;
+  codec.on('rfgain', (v) => { rfGain = v; });
+  codec.onData('RG0255;');
+  assert.strictEqual(rfGain, 100);
+});
+
+test('FTX-1 Optima parses state readbacks for AGC, monitor, processor, levels', () => {
+  const { codec } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  const got = {};
+  codec.on('agc', (v) => { got.agc = v; });
+  codec.on('mon', (v) => { got.mon = v; });
+  codec.on('comp', (v) => { got.comp = v; });
+  codec.on('compLevel', (v) => { got.compLevel = v; });
+  codec.on('micGain', (v) => { got.micGain = v; });
+  codec.on('breakIn', (v) => { got.breakIn = v; });
+  codec.on('breakInDelay', (v) => { got.breakInDelay = v; });
+  codec.on('nbLevel', (v) => { got.nbLevel = v; });
+  codec.on('nrLevel', (v) => { got.nrLevel = v; });
+  codec.on('vox', (v) => { got.vox = v; });
+  codec.on('voxLevel', (v) => { got.voxLevel = v; });
+  codec.on('rit', (v) => { got.rit = v; });
+  codec.on('txClar', (v) => { got.txClar = v; });
+  codec.on('clarFreq', (v) => { got.clarFreq = v; });
+  codec.onData('GT05;');
+  codec.onData('ML0001;');
+  codec.onData('PR02;');
+  codec.onData('PL067;');
+  codec.onData('MG072;');
+  codec.onData('BI1;');
+  codec.onData('SD12;');
+  codec.onData('CF00010000;');
+  codec.onData('CF001+0500;');
+  codec.onData('NL0008;');
+  codec.onData('RL010;');
+  codec.onData('VX1;');
+  codec.onData('VG044;');
+  assert.deepStrictEqual(got, {
+    agc: 'auto',
+    mon: true,
+    comp: true,
+    compLevel: 67,
+    micGain: 72,
+    breakIn: true,
+    breakInDelay: 900,
+    rit: true,
+    txClar: false,
+    clarFreq: 500,
+    nbLevel: 8,
+    nrLevel: 10,
+    vox: true,
+    voxLevel: 44,
+  });
+});
+
+test('FTX-1 Optima HF preamp maps to IPO/AMP1', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.onData('FA014074000;');
+  codec.setPreamp(false);
+  codec.setPreamp(true);
+  assert.deepStrictEqual(writes.slice(-2), ['PA00;', 'PA01;']);
+});
+
+test('FTX-1 Optima VHF preamp maps to PA10/PA11', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.onData('FA144300000;');
+  codec.setPreamp(false);
+  codec.setPreamp(true);
+  assert.deepStrictEqual(writes.slice(-2), ['PA10;', 'PA11;']);
+});
+
+test('FTX-1 Optima UHF preamp maps to PA20/PA21', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.onData('FA433920000;');
+  codec.setPreamp(false);
+  codec.setPreamp(true);
+  assert.deepStrictEqual(writes.slice(-2), ['PA20;', 'PA21;']);
+});
+
+test('FTX-1 Optima explicit preamp target can override MAIN-side family', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.onData('FA014074000;');
+  codec.setPreampTarget('uhf');
+  codec.setPreamp(true);
+  assert.strictEqual(writes[writes.length - 1], 'PA21;');
+});
+
+test('FTX-1 Optima KM playback uses KY05', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.sendCwText('CQ');
+  assert.deepStrictEqual(writes, ['KM5CQ;', 'KY05;']);
 });
 
 // =========================================================================

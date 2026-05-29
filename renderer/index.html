@@ -242,15 +242,30 @@
             <button id="rig-anf-btn" class="rig-btn" title="Auto Notch Filter">ANF</button>
             <button id="rig-vox-btn" class="rig-btn" title="Voice-Operated Transmit">VOX</button>
           </div>
+          <div class="rig-popover-row" id="rig-preamp-target-row">
+            <label>Pre Target</label>
+            <select id="rig-preamp-target" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;">
+              <option value="auto">Auto (MAIN)</option>
+              <option value="hf">HF/50</option>
+              <option value="vhf">VHF</option>
+              <option value="uhf">UHF</option>
+            </select>
+          </div>
           <div class="rig-popover-row" id="rig-agc-row">
             <label>AGC</label>
             <select id="rig-agc-select" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;">
               <option value="">—</option>
               <option value="off">Off</option>
+              <option value="auto">Auto</option>
               <option value="fast">Fast</option>
               <option value="med">Medium</option>
               <option value="slow">Slow</option>
             </select>
+          </div>
+          <div class="rig-popover-row" id="rig-complevel-row">
+            <label>Comp Lvl</label>
+            <input type="range" id="rig-complevel" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-complevel-label">0</span>
           </div>
           <div class="rig-popover-row" id="rig-nrlevel-row">
             <label>NR Lvl</label>
@@ -271,10 +286,32 @@
             <button id="rig-mon-btn" class="rig-btn" title="TX Monitor (hear your own audio)">Mon</button>
             <button id="rig-rit-btn" class="rig-btn" title="RIT (Receiver Incremental Tuning) — offset RX freq without changing TX">RIT</button>
           </div>
+          <div class="rig-popover-row rig-popover-buttons" id="rig-clar-row">
+            <button id="rig-clarrx-btn" class="rig-btn" title="FTX-1 RX clarifier on/off">CLAR RX</button>
+            <button id="rig-clartx-btn" class="rig-btn" title="FTX-1 TX clarifier on/off">CLAR TX</button>
+          </div>
           <div class="rig-popover-row" id="rig-monlevel-row">
             <label>Mon Lvl</label>
             <input type="range" id="rig-monlevel" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
             <span id="rig-monlevel-label">0</span>
+          </div>
+          <div class="rig-popover-row" id="rig-clarfreq-row">
+            <label>CLAR Hz</label>
+            <input type="number" id="rig-clarfreq" min="-9999" max="9999" step="1" value="0" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 6px;font-size:12px;">
+            <span id="rig-clarfreq-label">shared</span>
+          </div>
+          <div class="rig-popover-row" id="rig-micgain-row">
+            <label>Mic Gain</label>
+            <input type="range" id="rig-micgain" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-micgain-label">0</span>
+          </div>
+          <div class="rig-popover-row rig-popover-buttons" id="rig-breakin-row">
+            <button id="rig-breakin-btn" class="rig-btn" title="CW break-in on/off">BK-IN</button>
+          </div>
+          <div class="rig-popover-row" id="rig-breakindelay-row">
+            <label>BK Delay</label>
+            <select id="rig-breakindelay" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;"></select>
+            <span id="rig-breakindelay-label">—</span>
           </div>
           <div class="rig-popover-row">
             <label>RF Gain</label>

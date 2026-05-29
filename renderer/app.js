@@ -14174,25 +14174,56 @@ const rigAnfBtn    = document.getElementById('rig-anf-btn');
 const rigVoxBtn    = document.getElementById('rig-vox-btn');
 const rigAgcSelect = document.getElementById('rig-agc-select');
 // Phase-2: continuous levels + monitor.
+const rigCompLevel     = document.getElementById('rig-complevel');
+const rigCompLevelLabel = document.getElementById('rig-complevel-label');
 const rigNrLevel       = document.getElementById('rig-nrlevel');
 const rigNrLevelLabel  = document.getElementById('rig-nrlevel-label');
 const rigNbLevel       = document.getElementById('rig-nblevel');
 const rigNbLevelLabel  = document.getElementById('rig-nblevel-label');
 const rigVoxLevel      = document.getElementById('rig-voxlevel');
 const rigVoxLevelLabel = document.getElementById('rig-voxlevel-label');
+const rigPreampTarget  = document.getElementById('rig-preamp-target');
 const rigMonBtn        = document.getElementById('rig-mon-btn');
 const rigMonLevel      = document.getElementById('rig-monlevel');
 const rigMonLevelLabel = document.getElementById('rig-monlevel-label');
+const rigClarRxBtn     = document.getElementById('rig-clarrx-btn');
+const rigClarTxBtn     = document.getElementById('rig-clartx-btn');
+const rigClarFreq      = document.getElementById('rig-clarfreq');
+const rigClarFreqLabel = document.getElementById('rig-clarfreq-label');
+const rigMicGain       = document.getElementById('rig-micgain');
+const rigMicGainLabel  = document.getElementById('rig-micgain-label');
+const rigBreakInBtn    = document.getElementById('rig-breakin-btn');
+const rigBreakInDelay  = document.getElementById('rig-breakindelay');
+const rigBreakInDelayLabel = document.getElementById('rig-breakindelay-label');
 const rigRitBtn        = document.getElementById('rig-rit-btn');
 let rigPopoverOpen = false;
 let rigCurrentCaps = {};
 let rigCurrentMode = '';
+let rigCurrentFrequencyHz = 0;
+let rigCurrentPreampTarget = 'auto';
 
 const RIG_FILTER_PRESETS = {
   SSB: [1800, 2100, 2400, 2700, 3000, 3600],
   CW:  [50, 100, 200, 500, 1000, 1500, 2400],
   DIG: [500, 1000, 2000, 3000, 4000],
 };
+const FTX1_BREAKIN_DELAYS = [30, 50, 100, 150, 200, 250];
+for (let ms = 300; ms <= 3000; ms += 100) FTX1_BREAKIN_DELAYS.push(ms);
+
+function initFtx1BreakInDelayOptions() {
+  if (!rigBreakInDelay || rigBreakInDelay.options.length) return;
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '—';
+  rigBreakInDelay.appendChild(placeholder);
+  for (const ms of FTX1_BREAKIN_DELAYS) {
+    const opt = document.createElement('option');
+    opt.value = String(ms);
+    opt.textContent = `${ms} ms`;
+    rigBreakInDelay.appendChild(opt);
+  }
+}
+initFtx1BreakInDelayOptions();
 
 function formatFilterWidth(hz) {
   return hz >= 1000 ? (hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 1) + 'k' : hz + '';
@@ -14251,18 +14282,66 @@ function rigApplyCapabilities(caps) {
     const el = document.getElementById(id);
     if (el) el.style.display = show ? '' : 'none';
   };
+  setRowDisplay('rig-preamp-target-row', !!caps.ftx1Preamp);
+  setRowDisplay('rig-complevel-row', !!caps.compLevel);
   setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel);
   setRowDisplay('rig-nblevel-row',  !!caps.nbLevel);
   setRowDisplay('rig-voxlevel-row', !!caps.voxLevel);
   setRowDisplay('rig-monlevel-row', !!caps.monLevel);
+  setRowDisplay('rig-clar-row', !!caps.ftx1Clar);
+  setRowDisplay('rig-clarfreq-row', !!caps.ftx1Clar);
+  setRowDisplay('rig-micgain-row', !!caps.micGain);
+  setRowDisplay('rig-breakin-row', !!caps.breakIn);
+  setRowDisplay('rig-breakindelay-row', !!caps.breakInDelay);
+  if (rigNrLevel) rigNrLevel.max = caps.maxNrLevel || 100;
+  if (rigNbLevel) rigNbLevel.max = caps.maxNbLevel || 100;
+  if (rigVoxLevel) rigVoxLevel.max = caps.maxVoxLevel || 100;
   // Mon and RIT share a row — show it if either is supported, and hide
   // individual buttons by their own caps.
   if (rigMonBtn) rigMonBtn.style.display = caps.mon ? '' : 'none';
-  if (rigRitBtn) rigRitBtn.style.display = caps.rit ? '' : 'none';
-  setRowDisplay('rig-mon-row', !!(caps.mon || caps.rit));
+  if (rigRitBtn) rigRitBtn.style.display = (caps.rit && !caps.ftx1Clar) ? '' : 'none';
+  setRowDisplay('rig-mon-row', !!(caps.mon || (caps.rit && !caps.ftx1Clar)));
+  if (rigRitBtn) {
+    if (caps.ftx1Clar) {
+      rigRitBtn.textContent = 'CLAR';
+      rigRitBtn.title = 'Legacy CLAR alias for FTX-1 RX clarifier.';
+    } else {
+      rigRitBtn.textContent = 'RIT';
+      rigRitBtn.title = 'RIT (Receiver Incremental Tuning) — offset RX freq without changing TX';
+    }
+  }
+  if (rigClarRxBtn) rigClarRxBtn.style.display = caps.ftx1Clar ? '' : 'none';
+  if (rigClarTxBtn) rigClarTxBtn.style.display = caps.ftx1Clar ? '' : 'none';
+  if (rigClarFreq) rigClarFreq.title = caps.ftx1Clar ? 'FTX-1 uses one shared clarifier offset value for RX and TX. The RX/TX buttons choose which side uses that offset.' : '';
+  if (rigClarFreqLabel) rigClarFreqLabel.title = caps.ftx1Clar ? 'Shared RX/TX offset on FTX-1.' : '';
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
+  rigUpdatePreampButton();
+}
+
+function rigFtx1BandFamily(freqHz) {
+  if (!freqHz || freqHz <= 0) return 'hf';
+  if (freqHz >= 300000000) return 'uhf';
+  if (freqHz >= 30000000) return 'vhf';
+  return 'hf';
+}
+
+function rigUpdatePreampButton() {
+  if (!rigPreampBtn) return;
+  rigPreampBtn.textContent = 'Pre';
+  rigPreampBtn.title = 'Preamp';
+  if (!rigCurrentCaps || !rigCurrentCaps.ftx1Preamp) return;
+  const family = rigCurrentPreampTarget === 'auto' ? rigFtx1BandFamily(rigCurrentFrequencyHz) : rigCurrentPreampTarget;
+  const targetLabel = rigCurrentPreampTarget === 'auto' ? 'Auto (MAIN-side)' : family.toUpperCase();
+  if (family === 'hf') {
+    const on = rigPreampBtn.classList.contains('active');
+    rigPreampBtn.textContent = on ? 'AMP1' : 'IPO';
+    rigPreampBtn.title = `FTX-1 HF/50 preamp. Target: ${targetLabel}. AMP2 still needs a dedicated UI.`;
+    return;
+  }
+  rigPreampBtn.textContent = 'Pre';
+  rigPreampBtn.title = `FTX-1 ${family.toUpperCase()} preamp. Target: ${targetLabel}. Use Pre Target when the SUB side is the band you need to control.`;
 }
 
 function positionRigPopover() {
@@ -14339,6 +14418,15 @@ _bindModifierBtn(rigCompBtn,   'set-comp');
 _bindModifierBtn(rigNrBtn,     'set-nr');
 _bindModifierBtn(rigAnfBtn,    'set-anf');
 _bindModifierBtn(rigVoxBtn,    'set-vox');
+_bindModifierBtn(rigBreakInBtn, 'set-break-in');
+
+if (rigPreampTarget) {
+  rigPreampTarget.addEventListener('change', () => {
+    rigCurrentPreampTarget = rigPreampTarget.value || 'auto';
+    rigUpdatePreampButton();
+    window.api.rigControl({ action: 'set-preamp-target', value: rigCurrentPreampTarget });
+  });
+}
 
 if (rigAgcSelect) {
   rigAgcSelect.addEventListener('change', () => {
@@ -14359,12 +14447,38 @@ function _bindLevelSlider(slider, label, action, unit) {
     throttledRigControl(action, v);
   });
 }
+
+function _bindClarFreqInput(input, action) {
+  if (!input) return;
+  const submit = () => {
+    const raw = Number(input.value);
+    if (!Number.isFinite(raw)) return;
+    const v = Math.max(-9999, Math.min(9999, Math.round(raw)));
+    if (String(v) !== input.value) input.value = String(v);
+    throttledRigControl(action, v);
+  };
+  input.addEventListener('input', submit);
+  input.addEventListener('change', submit);
+}
+_bindLevelSlider(rigCompLevel, rigCompLevelLabel, 'set-comp-level', '');
 _bindLevelSlider(rigNrLevel,  rigNrLevelLabel,  'set-nr-level',  '');
 _bindLevelSlider(rigNbLevel,  rigNbLevelLabel,  'set-nb-level',  '');
 _bindLevelSlider(rigVoxLevel, rigVoxLevelLabel, 'set-vox-level', '');
 _bindLevelSlider(rigMonLevel, rigMonLevelLabel, 'set-mon-level', '');
+_bindClarFreqInput(rigClarFreq, 'set-clar-freq');
+_bindLevelSlider(rigMicGain, rigMicGainLabel, 'set-mic-gain', '');
 _bindModifierBtn(rigMonBtn, 'set-mon');
 _bindModifierBtn(rigRitBtn, 'set-rit');
+_bindModifierBtn(rigClarRxBtn, 'set-rit');
+_bindModifierBtn(rigClarTxBtn, 'set-clar-tx');
+if (rigBreakInDelay) {
+  rigBreakInDelay.addEventListener('change', () => {
+    const ms = parseInt(rigBreakInDelay.value, 10);
+    if (!Number.isFinite(ms)) return;
+    if (rigBreakInDelayLabel) rigBreakInDelayLabel.textContent = `${ms} ms`;
+    window.api.rigControl({ action: 'set-break-in-delay', value: ms });
+  });
+}
 
 // Slider handlers
 // Throttle rig control sliders to prevent flooding serial port
@@ -14412,7 +14526,16 @@ window.api.onRigState((state) => {
   _syncModBtn(rigAnfBtn,    state.anf);
   _syncModBtn(rigVoxBtn,    state.vox);
   _syncModBtn(rigMonBtn,    state.mon);
+  _syncModBtn(rigBreakInBtn, state.breakIn);
   _syncModBtn(rigRitBtn,    state.rit);
+  _syncModBtn(rigClarRxBtn, state.rit);
+  _syncModBtn(rigClarTxBtn, state.txClar);
+  if (state.frequencyHz != null) rigCurrentFrequencyHz = state.frequencyHz;
+  if (state.preampTarget) {
+    rigCurrentPreampTarget = state.preampTarget;
+    if (rigPreampTarget && document.activeElement !== rigPreampTarget) rigPreampTarget.value = state.preampTarget;
+  }
+  rigUpdatePreampButton();
   if (rigAgcSelect && state.agc != null && rigAgcSelect.value !== state.agc) {
     rigAgcSelect.value = state.agc || '';
   }
@@ -14424,10 +14547,20 @@ window.api.onRigState((state) => {
     slider.value = val;
     if (label) label.textContent = val + (unit || '');
   }
+  _syncLevel(rigCompLevel, rigCompLevelLabel, state.compLevel, '');
   _syncLevel(rigNrLevel,  rigNrLevelLabel,  state.nrLevel,  '');
   _syncLevel(rigNbLevel,  rigNbLevelLabel,  state.nbLevel,  '');
   _syncLevel(rigVoxLevel, rigVoxLevelLabel, state.voxLevel, '');
   _syncLevel(rigMonLevel, rigMonLevelLabel, state.monLevel, '');
+  if (rigClarFreq && state.clarFreq != null && document.activeElement !== rigClarFreq) {
+    rigClarFreq.value = String(state.clarFreq);
+  }
+  _syncLevel(rigMicGain, rigMicGainLabel, state.micGain, '');
+  if (rigBreakInDelay && state.breakInDelay != null && document.activeElement !== rigBreakInDelay) {
+    const val = String(state.breakInDelay);
+    if ([...rigBreakInDelay.options].some((opt) => opt.value === val)) rigBreakInDelay.value = val;
+    if (rigBreakInDelayLabel) rigBreakInDelayLabel.textContent = `${state.breakInDelay} ms`;
+  }
   // Update sliders (only if user is not actively dragging)
   if (document.activeElement !== rigRfGain && state.rfGain != null) {
     rigRfGain.value = state.rfGain;
