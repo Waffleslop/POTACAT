@@ -8677,6 +8677,10 @@ function showHideSpotMenu(x, y, callsign, frequency) {
   // Show unhide button if already hidden
   const unhideBtn = hideSpotMenu.querySelector('.hide-spot-unhide');
   unhideBtn.classList.toggle('hidden', !isSpotHidden(callsign, frequency));
+  // Render the watchlist buttons every open so newly-renamed groups (and the
+  // current member-or-not state) reflect immediately. Each button writes
+  // directly to settings + rebuilds the lookup, no settings-dialog round-trip.
+  renderWatchlistAddButtons(hideSpotTarget);
   hideSpotMenu.classList.remove('hidden');
   // Position near click, keep on screen
   const rect = hideSpotMenu.getBoundingClientRect();
@@ -8716,6 +8720,117 @@ hideSpotMenu.addEventListener('click', (e) => {
   closeHideSpotMenu();
   render();
 });
+
+// --- Right-click "Add to watchlist" buttons ---
+// Renders one button for the general watchlist plus one per named group.
+// Empty/unnamed group slots are skipped. If the callsign is already in a
+// list we show "Remove from <name>" instead so the menu is symmetric.
+function _hasInGeneralWatchlist(callsign) {
+  const raw = (settings && settings.watchlist) || '';
+  const up = callsign.toUpperCase();
+  return raw.split(/[\s,;]+/).map(s => s.split(':')[0].trim().toUpperCase()).includes(up);
+}
+
+function _hasInGroupCallsigns(idx, callsign) {
+  const g = watchlistGroups[idx];
+  if (!g) return false;
+  return _parseCallsignList(g.callsigns).includes(callsign.toUpperCase());
+}
+
+function _addToGeneralWatchlist(callsign) {
+  const raw = (settings && settings.watchlist) || '';
+  const sep = raw && !raw.endsWith(',') && !raw.endsWith('\n') ? ', ' : '';
+  const next = (raw + sep + callsign).replace(/^[,\s]+/, '');
+  settings.watchlist = next;
+  watchlist = parseWatchlist(next);
+  // Keep the Settings textarea in sync in case it's open behind the menu.
+  if (setWatchlist) setWatchlist.value = next;
+  window.api.saveSettings({ watchlist: next });
+}
+
+function _removeFromGeneralWatchlist(callsign) {
+  const up = callsign.toUpperCase();
+  const raw = (settings && settings.watchlist) || '';
+  // Preserve original separator style (commas/newlines) by splitting on a
+  // capturing group, keeping non-matching tokens + their following separator.
+  const parts = raw.split(/([\s,;]+)/);
+  let next = '';
+  for (let i = 0; i < parts.length; i += 2) {
+    const tok = parts[i] || '';
+    const sep = parts[i + 1] || '';
+    if (tok.split(':')[0].trim().toUpperCase() === up) continue; // drop this token + its sep
+    next += tok + sep;
+  }
+  next = next.replace(/^[,\s]+|[,\s]+$/g, '');
+  settings.watchlist = next;
+  watchlist = parseWatchlist(next);
+  if (setWatchlist) setWatchlist.value = next;
+  window.api.saveSettings({ watchlist: next });
+}
+
+function _addToGroupCallsigns(idx, callsign) {
+  const g = watchlistGroups[idx];
+  if (!g) return;
+  const cur = g.callsigns || '';
+  const sep = cur && !cur.endsWith(',') && !cur.endsWith('\n') ? ', ' : '';
+  g.callsigns = (cur + sep + callsign).replace(/^[,\s]+/, '');
+  rebuildWatchlistGroupLookup();
+  const partial = JSON.parse(JSON.stringify(watchlistGroups));
+  window.api.saveSettings({ watchlistGroups: partial });
+}
+
+function _removeFromGroupCallsigns(idx, callsign) {
+  const g = watchlistGroups[idx];
+  if (!g) return;
+  const up = callsign.toUpperCase();
+  const parts = (g.callsigns || '').split(/([\s,;]+)/);
+  let next = '';
+  for (let i = 0; i < parts.length; i += 2) {
+    const tok = parts[i] || '';
+    const sep = parts[i + 1] || '';
+    if (tok.split(':')[0].trim().toUpperCase() === up) continue;
+    next += tok + sep;
+  }
+  g.callsigns = next.replace(/^[,\s]+|[,\s]+$/g, '');
+  rebuildWatchlistGroupLookup();
+  const partial = JSON.parse(JSON.stringify(watchlistGroups));
+  window.api.saveSettings({ watchlistGroups: partial });
+}
+
+function renderWatchlistAddButtons(callsign) {
+  const host = document.getElementById('hide-spot-watch-buttons');
+  if (!host) return;
+  host.innerHTML = '';
+  const mkBtn = (label, color, onClick) => {
+    const b = document.createElement('button');
+    b.className = 'hide-spot-btn';
+    b.textContent = label;
+    if (color) b.style.borderLeft = `3px solid ${color}`;
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      onClick();
+      closeHideSpotMenu();
+      render();
+    });
+    host.appendChild(b);
+  };
+  // General watchlist
+  if (_hasInGeneralWatchlist(callsign)) {
+    mkBtn(`Remove from Watchlist`, '', () => _removeFromGeneralWatchlist(callsign));
+  } else {
+    mkBtn(`Add to Watchlist`, '', () => _addToGeneralWatchlist(callsign));
+  }
+  // Per group (skip empty / unnamed slots)
+  for (let i = 0; i < watchlistGroups.length; i++) {
+    const g = watchlistGroups[i];
+    if (!g || !g.name) continue;
+    if (_hasInGroupCallsigns(i, callsign)) {
+      mkBtn(`Remove from ${g.name}`, g.color, () => _removeFromGroupCallsigns(i, callsign));
+    } else {
+      mkBtn(`Add to ${g.name}`, g.color, () => _addToGroupCallsigns(i, callsign));
+    }
+  }
+}
 
 // Column sorting — click for primary, Shift+click for secondary
 document.querySelectorAll('thead th[data-sort]').forEach((th) => {
