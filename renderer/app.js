@@ -18503,8 +18503,24 @@ function onJtcatDecodeClick(e) {
         jtcatSetTxAndSend(txMsg);
         jtcatEnableTxUi();
         renderJtcatQsoTracker();
+      } else if (grid) {
+        // They ANSWERED OUR CQ with their grid ("MYCALL THEIRCALL GRID").
+        // They've given us their grid, so we owe them a signal report —
+        // "THEIRCALL MYCALL -NN" — NOT our own grid. jtcatStartQso sends
+        // our grid (the pattern for when WE answer THEIR CQ), which rolled
+        // the QSO back a step and never advanced. Mirror the auto-CQ
+        // responder (jtcatProcessCqResponse) + the popout's 'send-report'.
+        // K3SBP 2026-05-29.
+        var ourReport = snr >= 0 ? '+' + String(snr).padStart(2, '0') : '-' + String(Math.abs(snr)).padStart(2, '0');
+        var txMsg = fromCall + ' ' + myCall + ' ' + ourReport;
+        jtcatQso = { mode: 'reply', call: fromCall, grid: grid, phase: 'report',
+          txMsg: txMsg, report: null, sentReport: ourReport, myCall: myCall, myGrid: getMyGrid(), txRetries: 0 };
+        jtcatSetTxAndSend(txMsg);
+        jtcatEnableTxUi();
+        renderJtcatQsoTracker();
       } else {
-        // They sent grid or other — start normal reply QSO
+        // Directed at us but no grid/report/RR73 payload — answer with our
+        // grid as a fresh reply (e.g. a bare "MYCALL THEIRCALL").
         jtcatStartQso(fromCall, grid, df);
       }
       // Set TX freq to their freq
