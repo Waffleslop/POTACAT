@@ -551,6 +551,7 @@ const setEnableLlota = document.getElementById('set-enable-llota');
 const setEnableTiles = document.getElementById('set-enable-tiles');
 const setCwXit = document.getElementById('set-cw-xit');
 const setCwXitShiftVfo = document.getElementById('set-cw-xit-shift-vfo');
+const setMuteFlexCwSidetoneWk = document.getElementById('set-mute-flex-cw-sidetone-wk');
 const setCwFilter = document.getElementById('set-cw-filter');
 const setSsbFilter = document.getElementById('set-ssb-filter');
 const setDigitalFilter = document.getElementById('set-digital-filter');
@@ -9102,6 +9103,7 @@ async function openSettingsDialog(tab) {
   setScanDwell.value = s.scanDwell || 7;
   setCwXit.value = s.cwXit || 0;
   setCwXitShiftVfo.checked = !!s.cwXitShiftVfo;
+  if (setMuteFlexCwSidetoneWk) setMuteFlexCwSidetoneWk.checked = !!s.muteFlexCwSidetoneOnWinKeyer;
   setCwFilter.value = s.cwFilterWidth || 0;
   setSsbFilter.value = s.ssbFilterWidth || 0;
   setDigitalFilter.value = s.digitalFilterWidth || 0;
@@ -9769,6 +9771,7 @@ settingsSave.addEventListener('click', async () => {
   const dwellVal = parseInt(setScanDwell.value, 10) || 7;
   const cwXitVal = parseInt(setCwXit.value, 10) || 0;
   const cwXitShiftVfoVal = setCwXitShiftVfo.checked;
+  const muteFlexCwSidetoneWkVal = setMuteFlexCwSidetoneWk ? setMuteFlexCwSidetoneWk.checked : false;
   const cwFilterVal = parseInt(setCwFilter.value, 10) || 0;
   const ssbFilterVal = parseInt(setSsbFilter.value, 10) || 0;
   const digitalFilterVal = parseInt(setDigitalFilter.value, 10) || 0;
@@ -9952,6 +9955,7 @@ settingsSave.addEventListener('click', async () => {
     scanDwell: dwellVal,
     cwXit: cwXitVal,
     cwXitShiftVfo: cwXitShiftVfoVal,
+    muteFlexCwSidetoneOnWinKeyer: muteFlexCwSidetoneWkVal,
     cwFilterWidth: cwFilterVal,
     ssbFilterWidth: ssbFilterVal,
     digitalFilterWidth: digitalFilterVal,
@@ -14196,6 +14200,7 @@ const rigBreakInBtn    = document.getElementById('rig-breakin-btn');
 const rigBreakInDelay  = document.getElementById('rig-breakindelay');
 const rigBreakInDelayLabel = document.getElementById('rig-breakindelay-label');
 const rigRitBtn        = document.getElementById('rig-rit-btn');
+const rigCwStBtn       = document.getElementById('rig-cwst-btn');
 let rigPopoverOpen = false;
 let rigCurrentCaps = {};
 let rigCurrentMode = '';
@@ -14296,11 +14301,12 @@ function rigApplyCapabilities(caps) {
   if (rigNrLevel) rigNrLevel.max = caps.maxNrLevel || 100;
   if (rigNbLevel) rigNbLevel.max = caps.maxNbLevel || 100;
   if (rigVoxLevel) rigVoxLevel.max = caps.maxVoxLevel || 100;
-  // Mon and RIT share a row — show it if either is supported, and hide
-  // individual buttons by their own caps.
-  if (rigMonBtn) rigMonBtn.style.display = caps.mon ? '' : 'none';
-  if (rigRitBtn) rigRitBtn.style.display = (caps.rit && !caps.ftx1Clar) ? '' : 'none';
-  setRowDisplay('rig-mon-row', !!(caps.mon || (caps.rit && !caps.ftx1Clar)));
+  // Mon / RIT / CW ST share a row — show it if any is supported, and
+  // hide individual buttons by their own caps.
+  if (rigMonBtn)   rigMonBtn.style.display   = caps.mon         ? '' : 'none';
+  if (rigRitBtn)   rigRitBtn.style.display   = (caps.rit && !caps.ftx1Clar) ? '' : 'none';
+  if (rigCwStBtn)  rigCwStBtn.style.display  = caps.cwSidetone  ? '' : 'none';
+  setRowDisplay('rig-mon-row', !!(caps.mon || (caps.rit && !caps.ftx1Clar) || caps.cwSidetone));
   if (rigRitBtn) {
     if (caps.ftx1Clar) {
       rigRitBtn.textContent = 'CLAR';
@@ -14314,6 +14320,9 @@ function rigApplyCapabilities(caps) {
   if (rigClarTxBtn) rigClarTxBtn.style.display = caps.ftx1Clar ? '' : 'none';
   if (rigClarFreq) rigClarFreq.title = caps.ftx1Clar ? 'FTX-1 uses one shared clarifier offset value for RX and TX. The RX/TX buttons choose which side uses that offset.' : '';
   if (rigClarFreqLabel) rigClarFreqLabel.title = caps.ftx1Clar ? 'Shared RX/TX offset on FTX-1.' : '';
+  if (rigNrLevel) rigNrLevel.max = caps.maxNrLevel || 100;
+  if (rigNbLevel) rigNbLevel.max = caps.maxNbLevel || 100;
+  if (rigVoxLevel) rigVoxLevel.max = caps.maxVoxLevel || 100;
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
@@ -14479,6 +14488,7 @@ if (rigBreakInDelay) {
     window.api.rigControl({ action: 'set-break-in-delay', value: ms });
   });
 }
+_bindModifierBtn(rigCwStBtn, 'set-cw-sidetone');
 
 // Slider handlers
 // Throttle rig control sliders to prevent flooding serial port
@@ -14530,6 +14540,14 @@ window.api.onRigState((state) => {
   _syncModBtn(rigRitBtn,    state.rit);
   _syncModBtn(rigClarRxBtn, state.rit);
   _syncModBtn(rigClarTxBtn, state.txClar);
+  if (state.frequencyHz != null) rigCurrentFrequencyHz = state.frequencyHz;
+  if (state.preampTarget) {
+    rigCurrentPreampTarget = state.preampTarget;
+    if (rigPreampTarget && document.activeElement !== rigPreampTarget) rigPreampTarget.value = state.preampTarget;
+  }
+  rigUpdatePreampButton();
+  _syncModBtn(rigCwStBtn,   state.cwSidetone);
+  _syncModBtn(rigCwStBtn,   state.cwSidetone);
   if (state.frequencyHz != null) rigCurrentFrequencyHz = state.frequencyHz;
   if (state.preampTarget) {
     rigCurrentPreampTarget = state.preampTarget;

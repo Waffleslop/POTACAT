@@ -283,8 +283,9 @@
             <span id="rig-voxlevel-label">0</span>
           </div>
           <div class="rig-popover-row rig-popover-buttons" id="rig-mon-row">
-            <button id="rig-mon-btn" class="rig-btn" title="TX Monitor (hear your own audio)">Mon</button>
+            <button id="rig-mon-btn" class="rig-btn" title="TX Monitor (hear your own voice audio)">Mon</button>
             <button id="rig-rit-btn" class="rig-btn" title="RIT (Receiver Incremental Tuning) — offset RX freq without changing TX">RIT</button>
+            <button id="rig-cwst-btn" class="rig-btn" title="Flex CW Sidetone — toggle the radio's local sidetone playback during keying. Off = no radio-side tone (useful when external keyer has its own sidetone). TX is unaffected.">CW ST</button>
           </div>
           <div class="rig-popover-row rig-popover-buttons" id="rig-clar-row">
             <button id="rig-clarrx-btn" class="rig-btn" title="FTX-1 RX clarifier on/off">CLAR RX</button>
@@ -2220,6 +2221,9 @@
             </label>
           </div>
           <span class="help-text" style="display:block;">Connect WinKeyer KEY output to your radio's straight key jack. Paddles plug into the WinKeyer, not the PC.</span>
+          <label class="checkbox-label" style="margin-top:6px;" title="Flex only: temporarily mutes the radio's own CW sidetone only WHILE the WinKeyer is keying (busy / paddle breakin). Restores when the WK goes idle. Use this when the WinKeyer has its own sidetone and the radio sits in the same room — stops the doubled-tone effect without affecting POTACAT CW macros, SmartSDR CWX, HaliKey MIDI, or vBand keying (those all bypass the WK device and keep the Flex sidetone on).">
+            <input type="checkbox" id="set-mute-flex-cw-sidetone-wk"> Mute Flex CW sidetone while WinKeyer is keying
+          </label>
         </div>
         <!-- Keyboard config -->
         <div id="cw-keyboard-config" class="hidden" style="margin-top:6px;">
