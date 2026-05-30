@@ -10684,10 +10684,16 @@ async function fetchExpeditions() {
   const meta = new Map();
 
   // Club Log: bare callsigns of ops who uploaded logs in the last 7 days.
-  // No metadata — just membership in the set so the spot table can flag
-  // them as "actively on the air."
+  // Tag each with source='clublog' in meta so the renderer can offer
+  // per-source visibility toggles in the Spots dropdown alongside the
+  // community-feed sources. POTACAT-side merge below may overwrite the
+  // metadata with a richer entry; in that case we union the source list.
   if (clubLogResult.status === 'fulfilled') {
-    for (const cs of clubLogResult.value) merged.add(cs);
+    for (const cs of clubLogResult.value) {
+      const upper = String(cs).toUpperCase();
+      merged.add(upper);
+      meta.set(upper, { entity: '', description: '', startDate: '', endDate: '', sources: 'clublog', link: '' });
+    }
   }
 
   // POTACAT community feed: structured records with title / source list /
@@ -10698,10 +10704,17 @@ async function fetchExpeditions() {
       if (!rec || !rec.call) continue;
       const upper = String(rec.call).toUpperCase();
       merged.add(upper);
-      // Only set metadata if this is the first record for the call; the
-      // worker already deduped + chose the freshest title server-side, so
-      // we don't need to compare publishedAt here.
-      if (!meta.has(upper)) meta.set(upper, _summarizePotacatRecord(rec));
+      const summary = _summarizePotacatRecord(rec);
+      // If we already have a Club Log entry, merge the sources lists so the
+      // renderer's per-source visibility toggles can see ALL contributing
+      // feeds. Worker title/entity/link beat Club Log's empty fields.
+      const prev = meta.get(upper);
+      if (prev) {
+        const prevSources = new Set(String(prev.sources || '').split(',').filter(Boolean));
+        for (const s of String(summary.sources || '').split(',').filter(Boolean)) prevSources.add(s);
+        summary.sources = [...prevSources].sort().join(',');
+      }
+      meta.set(upper, summary);
     }
   }
 

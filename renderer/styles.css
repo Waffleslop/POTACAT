@@ -608,6 +608,20 @@ header {
   accent-color: var(--accent-red);
 }
 
+/* Child toggles (the per-source DXpedition rows nested under "DX
+   Expeditions"): smaller, slightly dimmer, and grayed out when the
+   parent toggle is off so it's clear they have no effect. */
+.spots-toggle-child {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+.spots-toggle-child.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .filters label {
   display: flex;
   align-items: center;

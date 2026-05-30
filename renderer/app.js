@@ -102,6 +102,31 @@ let enableRbn = false;
 let enablePskr = false;
 let enablePskrMap = false;
 let enableDxe = true;
+// Per-source visibility toggles inside the DX Expeditions group. When the
+// master enableDxe is on, a call is shown as an expedition only if at
+// LEAST ONE of its contributing sources is enabled here. Default all on.
+// Source keys match what main.js writes into expeditionMeta[call].sources:
+//   'clublog', 'dx-world', 'dxnews', 'ng3k'
+const DXE_SOURCE_KEYS = ['clublog', 'dx-world', 'dxnews', 'ng3k'];
+let enableDxeSources = { clublog: true, 'dx-world': true, dxnews: true, ng3k: true };
+
+// True iff a callsign's expedition status should be honored in the UI.
+// Centralizes the per-source visibility check so every existing site that
+// asked "is this call an expedition?" gets the same answer.
+function isExpeditionVisible(callsign) {
+  if (!enableDxe) return false;
+  const up = String(callsign || '').toUpperCase();
+  if (!expeditionCallsigns.has(up)) return false;
+  const m = expeditionMeta.get(up);
+  // If we have no meta (shouldn't happen after this commit — Club Log
+  // entries are tagged too — but be defensive against old IPC payloads),
+  // treat the call as visible so we don't silently hide a real DXpedition.
+  if (!m || !m.sources) return true;
+  for (const s of String(m.sources).split(',')) {
+    if (enableDxeSources[s]) return true;
+  }
+  return false;
+}
 let enableSolar = false;
 let enableBandActivity = false;
 let licenseClass = 'none';
@@ -510,6 +535,12 @@ const spotsCwSpots = document.getElementById('spots-cwspots');
 const spotsRbn = document.getElementById('spots-rbn');
 const spotsPskr = document.getElementById('spots-pskr');
 const spotsDxe = document.getElementById('spots-dxe');
+const spotsDxeChildren = {
+  clublog:    document.getElementById('spots-dxe-clublog'),
+  'dx-world': document.getElementById('spots-dxe-dxworld'),
+  dxnews:     document.getElementById('spots-dxe-dxnews'),
+  ng3k:       document.getElementById('spots-dxe-ng3k'),
+};
 const spotsHideWorked = document.getElementById('spots-hide-worked');
 const spotsHideParks = document.getElementById('spots-hide-parks');
 const spotsHideParksLabel = document.getElementById('spots-hide-parks-label');
@@ -1401,6 +1432,12 @@ async function loadPrefs() {
   enablePskr = settings.enablePskr === true; // default false
   enablePskrMap = settings.enablePskrMap === true; // default false
   enableDxe = settings.enableDxe !== false; // default true
+  // Per-source visibility under enableDxe. Default each source ON.
+  if (settings.enableDxeSources && typeof settings.enableDxeSources === 'object') {
+    for (const k of DXE_SOURCE_KEYS) {
+      enableDxeSources[k] = settings.enableDxeSources[k] !== false;
+    }
+  }
   enableSolar = settings.enableSolar === true;   // default false
   // PSTRotator — show quick-toggle when rotor is configured
   rotorConfigured = !!settings.enableRotor;
@@ -4918,8 +4955,8 @@ function sortSpots(spots) {
     const bNet = b.source === 'net' ? 1 : 0;
     if (aNet !== bNet) return bNet - aNet;
     // Pin DX expeditions to the top (only when DXE display enabled)
-    const aExp = enableDxe && expeditionCallsigns.has(a.callsign.toUpperCase()) ? 1 : 0;
-    const bExp = enableDxe && expeditionCallsigns.has(b.callsign.toUpperCase()) ? 1 : 0;
+    const aExp = isExpeditionVisible(a.callsign) ? 1 : 0;
+    const bExp = isExpeditionVisible(b.callsign) ? 1 : 0;
     if (aExp !== bExp) return bExp - aExp;
 
     // KW4FM request: when enabled, group unworked POTA/WWFF parks at the top.
@@ -5916,7 +5953,7 @@ function updateMapMarkers(filtered) {
     const newBadge = mapNewPark ? ` <span style="background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">NEW</span>` : '';
     const expMeta = expeditionMeta.get(s.callsign.toUpperCase());
     const expTitle = expMeta ? `DX Expedition: ${expMeta.entity}` : 'DX Expedition';
-    const expeditionBadge = enableDxe && expeditionCallsigns.has(s.callsign.toUpperCase()) ? ` <span style="background:#ff1744;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">DXP</span>` : '';
+    const expeditionBadge = isExpeditionVisible(s.callsign) ? ` <span style="background:#ff1744;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">DXP</span>` : '';
     const mapEvent = getEventForCallsign(s.callsign);
     const eventBadgeHtml = mapEvent ? ` <span style="background:${mapEvent.badgeColor || '#ff6b00'};color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">${mapEvent.badge || 'EVT'}</span>` : '';
     const wwffBadge = s.wwffReference ? ` <span style="background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">WWFF</span>` : '';
@@ -5937,7 +5974,7 @@ function updateMapMarkers(filtered) {
     // Pin color matches source: POTA green, SOTA orange, DXC purple, etc.
     const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
     const worked = workedQsos.has(s.callsign.toUpperCase());
-    const isExpedition = enableDxe && expeditionCallsigns.has(s.callsign.toUpperCase());
+    const isExpedition = isExpeditionVisible(s.callsign);
     const sourceIcon = sourceIcons[s.source] || sourceIcons.pota;
     const markerOptions = isExpedition
       ? { icon: expeditionIcon, zIndexOffset: 500 }
@@ -7135,7 +7172,7 @@ function enrichSpotsForPopout(filtered) {
     ...s,
     isWorked: workedQsos.has(s.callsign.toUpperCase()),
     isWorkedToday: workedQsos.has(s.callsign.toUpperCase()) && isWorkedSpot(s),
-    isExpedition: enableDxe && expeditionCallsigns.has(s.callsign.toUpperCase()),
+    isExpedition: isExpeditionVisible(s.callsign),
     expeditionEntity: (expeditionMeta.get(s.callsign.toUpperCase()) || {}).entity || '',
     isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
     isOop: isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
@@ -7355,7 +7392,7 @@ function render() {
         const wlName = (watchlistGroups[wlMatch.idx] && watchlistGroups[wlMatch.idx].name) || '';
         if (wlName) tr.title = `Watchlist: ${wlName}`;
       }
-      if (enableDxe && expeditionCallsigns.has(s.callsign.toUpperCase())) tr.classList.add('spot-expedition');
+      if (isExpeditionVisible(s.callsign)) tr.classList.add('spot-expedition');
       if (s.comments && /POTA.?CAT/i.test(s.comments)) tr.classList.add('potacat-respot');
 
       // License privilege check
@@ -7514,7 +7551,7 @@ function render() {
         cat.textContent = '\uD83D\uDC08\u200D\u2B1B';
         callTd.appendChild(cat);
       }
-      if (enableDxe && expeditionCallsigns.has(s.callsign.toUpperCase())) {
+      if (isExpeditionVisible(s.callsign)) {
         const dxp = document.createElement('span');
         dxp.className = 'expedition-badge';
         const meta = expeditionMeta.get(s.callsign.toUpperCase());
@@ -8568,6 +8605,14 @@ function syncSpotsPanel() {
   spotsRbn.checked = enableRbn;
   spotsPskr.checked = enablePskr;
   spotsDxe.checked = enableDxe;
+  // Sync per-source children + gray them out when master is off.
+  for (const k of DXE_SOURCE_KEYS) {
+    const el = spotsDxeChildren[k];
+    if (!el) continue;
+    el.checked = !!enableDxeSources[k];
+    const row = el.closest('.spots-toggle');
+    if (row) row.classList.toggle('disabled', !enableDxe);
+  }
   spotsHideWorked.checked = hideWorked;
   spotsHideParks.checked = hideWorkedParks;
   spotsHideCallRef.checked = hideWorkedCallRef;
@@ -8604,6 +8649,18 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   enableRbn = spotsRbn.checked;
   enablePskr = spotsPskr.checked;
   enableDxe = spotsDxe.checked;
+  for (const k of DXE_SOURCE_KEYS) {
+    const el = spotsDxeChildren[k];
+    if (el) enableDxeSources[k] = el.checked;
+  }
+  // Re-gray children whenever master flips. (syncSpotsPanel handles this
+  // on open; we mirror here so toggling the master while the menu is open
+  // updates the visual state immediately.)
+  for (const k of DXE_SOURCE_KEYS) {
+    const el = spotsDxeChildren[k];
+    const row = el && el.closest('.spots-toggle');
+    if (row) row.classList.toggle('disabled', !enableDxe);
+  }
 
   // DX Cluster and RBN require a callsign
   if (enableCluster && !myCallsign) {
@@ -8655,6 +8712,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   await window.api.saveSettings({
     enablePota, enableSota, enableWwff, enableLlota, enableTiles,
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
+    enableDxeSources: { ...enableDxeSources },
     hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, strictAtno, hideOutOfBand,
     enableDxcc,
   });
