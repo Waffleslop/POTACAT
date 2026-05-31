@@ -1191,6 +1191,10 @@
         When idle, automatically opens SSTV and decodes on 20m (day) or 40m (night) based on your grid square.
         <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="480" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
       </span>
+      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-sstv-post-process" checked> Polish decoded SSTV images (MMSSTV-style)</label>
+      <span class="help-text" style="margin-left:12px;display:block;">
+        Applies unsharp mask + saturation boost to decoded images before they're saved. Matches MMSSTV's default-on behavior. Disable for pixel-faithful captures.
+      </span>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-idle-pause" checked> Pause CAT polling when idle</label>
       <span class="help-text" style="margin-left:12px;display:block;">
         Lets the radio's screensaver kick in during long idle periods. Polling resumes automatically on any POTACAT activity.

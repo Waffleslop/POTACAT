@@ -25,6 +25,7 @@
 
 const modes = require('../lib/sstv-modes');
 const { SstvDecoder, encodeImage } = require('../lib/sstv-worker');
+const sstvPost = require('../lib/sstv-post');
 
 let pass = 0;
 let fail = 0;
@@ -322,6 +323,81 @@ section('Template + textElement structure round-trip');
     { myCallsign: 'K3SBP' },
   );
   assertEq(userOverride[0].label, 'NA1SS', 'user-provided label preserved over auto-populate');
+}
+
+// =====================================================================
+// 6b. Post-processing (sstv-post) — pure-function unit tests
+// =====================================================================
+section('Post-processing pure functions');
+{
+  // 4×4 test image: solid mid-gray
+  function gray(w, h) {
+    const a = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      a[i * 4] = 128; a[i * 4 + 1] = 128; a[i * 4 + 2] = 128; a[i * 4 + 3] = 255;
+    }
+    return a;
+  }
+  // unsharp on uniform image: no change (no high-frequency detail)
+  const u = sstvPost.unsharpMask(gray(4, 4), 4, 4, 1.0);
+  assertEq(u[0], 128, 'unsharp on uniform image preserves value');
+  assertEq(u[1 * 4], 128, 'unsharp uniform pixel 1');
+
+  // unsharp 0 strength = identity
+  const u0 = sstvPost.unsharpMask(gray(4, 4), 4, 4, 0);
+  assertEq(u0[0], 128, 'unsharp 0-strength is identity');
+
+  // unsharp on edge image — should INCREASE contrast at the edge.
+  // Build a 4×4 with left half black, right half white.
+  const edge = new Uint8ClampedArray(4 * 4 * 4);
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      const i = (y * 4 + x) * 4;
+      const v = x < 2 ? 0 : 255;
+      edge[i] = v; edge[i + 1] = v; edge[i + 2] = v; edge[i + 3] = 255;
+    }
+  }
+  const sharp = sstvPost.unsharpMask(edge, 4, 4, 1.0);
+  // The dark side of the edge should get DARKER (lift below 0 clamped),
+  // bright side should get BRIGHTER. Check pixel (1,1) on the dark
+  // side — original 0, sharpened should still be 0 (already at floor).
+  // Pixel (2,1) on bright side — original 255, should stay 255.
+  assertEq(sharp[(1 * 4 + 1) * 4], 0, 'unsharp on edge: dark side stays at floor');
+  assertEq(sharp[(1 * 4 + 2) * 4], 255, 'unsharp on edge: bright side stays at ceiling');
+
+  // saturationBoost factor 1.0 = identity
+  const s1 = sstvPost.saturationBoost(gray(4, 4), 4, 4, 1.0);
+  assertEq(s1[0], 128, 'saturationBoost 1.0 is identity');
+  // Pure red, saturation 1.5 — chroma boosted. R increases (toward 255),
+  // G/B decrease toward luma. Luma of (255,0,0) = 76.245. R = 76+(255-76)*1.5 = 76+269 = 345 → 255.
+  const red = new Uint8ClampedArray([255, 0, 0, 255]);
+  const sBoost = sstvPost.saturationBoost(red, 1, 1, 1.5);
+  assertEq(sBoost[0], 255, 'saturation 1.5: red R clamps at 255');
+  assertEq(sBoost[1], 0, 'saturation 1.5: red G clamps at 0');
+  assertEq(sBoost[2], 0, 'saturation 1.5: red B clamps at 0');
+
+  // gammaCorrect 1.0 = identity
+  const g1 = sstvPost.gammaCorrect(gray(4, 4), 4, 4, 1.0);
+  assertEq(g1[0], 128, 'gamma 1.0 is identity');
+  // Convention in this impl: lut applies pow(v, 1/gamma). So:
+  //   gamma > 1  → 1/gamma < 1 → LIFTS midtones
+  //   gamma < 1  → 1/gamma > 1 → DARKENS midtones
+  // (Matches Photoshop's "Levels" gamma slider: drag right = lift.)
+  const g05 = sstvPost.gammaCorrect(gray(4, 4), 4, 4, 0.5);
+  assert(g05[0] < 128, 'gamma 0.5 darkens midtones (this impl uses pow(v, 1/gamma))');
+  const g2 = sstvPost.gammaCorrect(gray(4, 4), 4, 4, 2.0);
+  assert(g2[0] > 128, 'gamma 2.0 lifts midtones');
+  // Black and white invariant under any gamma
+  const blackWhite = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]);
+  const gbw = sstvPost.gammaCorrect(blackWhite, 2, 1, 0.5);
+  assertEq(gbw[0], 0, 'gamma: 0 stays 0');
+  assertEq(gbw[4], 255, 'gamma: 255 stays 255');
+
+  // postProcess: chained call, default opts, returns new buffer (not aliased)
+  const src = gray(4, 4);
+  const dst = sstvPost.postProcess(src, 4, 4);
+  assert(dst !== src, 'postProcess returns a NEW buffer');
+  assertEq(dst.length, src.length, 'postProcess preserves length');
 }
 
 // =====================================================================

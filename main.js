@@ -160,6 +160,7 @@ const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine } = require('./lib/sstv-engine');
 const { SstvManager } = require('./lib/sstv-manager');
+const sstvPost = require('./lib/sstv-post');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
@@ -13447,6 +13448,7 @@ app.whenReady().then(() => {
     sstvEngine.on('rx-image', (data) => {
       sendCatLog(`[SSTV] Image decoded: ${data.width}x${data.height} ${data.mode} — saving to gallery`);
       _sstvLastActivityMs = Date.now();
+      applySstvPostProcess(data);
       // Save to gallery
       saveSstvImage(data);
       // Send to popout
@@ -13571,6 +13573,27 @@ app.whenReady().then(() => {
     if (_sstvHeartbeatTimer) {
       clearInterval(_sstvHeartbeatTimer);
       _sstvHeartbeatTimer = null;
+    }
+  }
+
+  // Apply MMSSTV-style post-processing (unsharp + saturation + gamma) to a
+  // decoded RGBA buffer in-place on the data object. Gated on
+  // settings.sstvPostProcess (default on — matches MMSSTV's default).
+  // Settings (with safe defaults if unset):
+  //   sstvPostUnsharp:    0..2 (default 0.6)
+  //   sstvPostSaturation: 0..2 (default 1.15)
+  //   sstvPostGamma:      0.5..2 (default 1.0)
+  function applySstvPostProcess(data) {
+    if (settings.sstvPostProcess === false) return;
+    try {
+      const out = sstvPost.postProcess(data.imageData, data.width, data.height, {
+        unsharpStrength: settings.sstvPostUnsharp != null ? settings.sstvPostUnsharp : 0.6,
+        saturation:      settings.sstvPostSaturation != null ? settings.sstvPostSaturation : 1.15,
+        gamma:           settings.sstvPostGamma != null ? settings.sstvPostGamma : 1.0,
+      });
+      data.imageData = out;
+    } catch (err) {
+      console.error('[SSTV] Post-process error:', err.message);
     }
   }
 
@@ -13813,6 +13836,7 @@ app.whenReady().then(() => {
     });
 
     sstvManager.on('rx-image', (data) => {
+      applySstvPostProcess(data);
       saveSstvImage(data);
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-image', {

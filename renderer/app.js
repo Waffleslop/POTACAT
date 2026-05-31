@@ -9822,6 +9822,7 @@ async function openSettingsDialog(tab) {
   document.getElementById('set-freedv-force-sideband').value = s.freedvForceSideband || '';
   document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
   document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
+  document.getElementById('set-sstv-post-process').checked = s.sstvPostProcess !== false; // default on
   document.getElementById('set-enable-idle-pause').checked = s.enableIdlePause !== false;
   document.getElementById('set-idle-pause-min').value = s.idlePauseMin || 20;
   setSotaUpload.checked = s.sotaUpload === true;
@@ -10484,6 +10485,7 @@ settingsSave.addEventListener('click', async () => {
     freedvForceSideband: freedvForceSidebandVal,
     enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
     autoSstvInactivityMin: parseInt(document.getElementById('set-auto-sstv-min').value) || 90,
+    sstvPostProcess: document.getElementById('set-sstv-post-process').checked,
     enableIdlePause: document.getElementById('set-enable-idle-pause').checked,
     idlePauseMin: parseInt(document.getElementById('set-idle-pause-min').value) || 20,
     sotaUpload: sotaUploadEnabled,
