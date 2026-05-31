@@ -570,6 +570,18 @@ let _flexCwSidetoneMutedByWk = false;
 let _flexCwSidetonePreWkState = true;
 let _wkEchoIdleTimer = null; // watchdog: 500 ms after last paddle echo, restore
 
+// CWX-text-driven Flex sidetone mute (mirror of the WK-mute pair but
+// duration-based instead of busy-event-based). When the user fires a
+// POTACAT macro via the SmartSDR CWX path, the rig's hardware
+// sidetone keeps playing through DAX RX into the audio bridge and
+// arrives on ECHOCAT mobile ~200 ms after the phone's own local
+// sidetone fires — audible echo. We mute the Flex sidetone for the
+// macro's duration plus a small tail and then restore the prior
+// state. Casey K3SBP 2026-05-31.
+let _flexCwSidetoneMutedByCwx = false;
+let _flexCwSidetonePreCwxState = true;
+let _flexCwSidetoneCwxRestoreTimer = null;
+
 // Filter preset tables for rig controls (Hz values)
 const FILTER_PRESETS = {
   SSB: [1800, 2100, 2400, 2700, 3000, 3600],
@@ -4979,6 +4991,44 @@ function _maybeMuteFlexCwSidetoneForWinKeyer(wkActive) {
   }
 }
 
+/**
+ * Mute the Flex CW sidetone for the duration of a CWX text macro,
+ * then restore the prior state. Gated on the same setting as the
+ * WinKeyer mute so users who keep the Flex sidetone audible during
+ * paddle work also keep it audible during macros (and users who
+ * mute paddle keying get the same behavior during macros — the
+ * common case for ECHOCAT remote operators who otherwise hear an
+ * echo on iOS from the desktop's DAX RX bridge of their own
+ * sidetone). Idempotent across overlapping macros: a second call
+ * before the restore timer fires extends the timer instead of
+ * double-saving the pre-state. Casey K3SBP 2026-05-31.
+ *
+ * @param {number} durationMs — how long to keep the sidetone muted.
+ */
+function _muteFlexCwSidetoneForCwx(durationMs) {
+  if (!settings.muteFlexCwSidetoneOnWinKeyer) return;
+  const flexUp = detectRigType() === 'flex' && smartSdr && smartSdr.connected;
+  if (!flexUp) return;
+  if (!_flexCwSidetoneMutedByCwx) {
+    _flexCwSidetonePreCwxState = _currentCwSidetoneState;
+    try { smartSdr.setCwSidetone(false); } catch { return; }
+    _currentCwSidetoneState = false;
+    _flexCwSidetoneMutedByCwx = true;
+    console.log(`[CWX-mute] muted Flex CW sidetone for ${durationMs}ms (was ${_flexCwSidetonePreCwxState ? 'on' : 'off'})`);
+    broadcastRigState();
+  }
+  if (_flexCwSidetoneCwxRestoreTimer) clearTimeout(_flexCwSidetoneCwxRestoreTimer);
+  _flexCwSidetoneCwxRestoreTimer = setTimeout(() => {
+    _flexCwSidetoneCwxRestoreTimer = null;
+    if (!_flexCwSidetoneMutedByCwx) return;
+    try { smartSdr.setCwSidetone(_flexCwSidetonePreCwxState); } catch { return; }
+    _currentCwSidetoneState = _flexCwSidetonePreCwxState;
+    _flexCwSidetoneMutedByCwx = false;
+    console.log(`[CWX-mute] restored Flex CW sidetone (back to ${_flexCwSidetonePreCwxState ? 'on' : 'off'})`);
+    broadcastRigState();
+  }, durationMs);
+}
+
 function connectWinKeyer() {
   disconnectWinKeyer();
   if (settings.cwKeyerType !== 'winkeyer' || !settings.winKeyerPort) return;
@@ -5256,6 +5306,12 @@ function sendCwTextToRadio(text) {
     const sliceIndex = (settings.catTarget.port || 5002) - 5002;
     smartSdr.setActiveSlice(sliceIndex);
     smartSdr.setTxSlice(sliceIndex);
+    // Mute the Flex hardware sidetone for the macro's duration so
+    // it doesn't bleed through DAX RX into ECHOCAT mobile and
+    // echo with the phone's own local sidetone. K3SBP 2026-05-31.
+    _muteFlexCwSidetoneForCwx(
+      Math.ceil((expanded.length * 12000) / Math.max(5, cwLockoutWpm)) + 1500,
+    );
     smartSdr.sendCwText(expanded);
     return;
   }
@@ -5269,6 +5325,9 @@ function sendCwTextToRadio(text) {
     const sliceIndex = (settings.catTarget.port || 5002) - 5002;
     smartSdr.setActiveSlice(sliceIndex);
     smartSdr.setTxSlice(sliceIndex);
+    _muteFlexCwSidetoneForCwx(
+      Math.ceil((expanded.length * 12000) / Math.max(5, cwLockoutWpm)) + 1500,
+    );
     smartSdr.sendCwText(expanded);
   }
   // DTR-key-port text path: rig models can opt in via cw.textMethod when
