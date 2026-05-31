@@ -152,18 +152,22 @@ const BASELINES = [
   // ceiling is content-dependent. Floors here lock in "the decoder
   // produces a recognizable image" — future improvements to
   // chroma upsampling or per-pixel sampling will raise these.
-  { mode: 'pd90',  drift: 0, baseline: 12.0 },
-  { mode: 'pd120', drift: 0, baseline:  9.9 },
-  { mode: 'pd160', drift: 0, baseline: 12.9 },
-  { mode: 'pd180', drift: 0, baseline: 12.3 },
-  { mode: 'pd240', drift: 0, baseline: 14.8 },
+  // Baselines ratcheted up 2026-05-31 after MAD-based slant
+  // regressor pass (4σ residual rejection in sstv-dsp.js) lifted
+  // PD/Martin/Robot24 by 1–3 dB. Lock-in matrix: any future change
+  // that drops these floors fails CI.
+  { mode: 'pd90',  drift: 0, baseline: 13.4 },
+  { mode: 'pd120', drift: 0, baseline: 11.8 },
+  { mode: 'pd160', drift: 0, baseline: 13.8 },
+  { mode: 'pd180', drift: 0, baseline: 14.2 },
+  { mode: 'pd240', drift: 0, baseline: 14.9 },
   // Additional modes (added 2026-05-31). Martin M2/M3/M4, Scottie
   // DX, Robot 24 — reuse existing decoders, just new entries.
-  { mode: 'martin2',   drift: 0, baseline: 28.0 },
+  { mode: 'martin2',   drift: 0, baseline: 30.1 },
   { mode: 'martin3',   drift: 0, baseline: 50.0 },  // small image, encode round-trips perfectly
-  { mode: 'martin4',   drift: 0, baseline: 38.0 },
+  { mode: 'martin4',   drift: 0, baseline: 41.2 },
   { mode: 'scottieDx', drift: 0, baseline: 50.0 },  // slow scan, near-perfect
-  { mode: 'robot24',   drift: 0, baseline: 22.0 },
+  { mode: 'robot24',   drift: 0, baseline: 24.3 },
 ];
 
 function fmtDrift(d) {
