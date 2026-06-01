@@ -13459,8 +13459,32 @@ app.whenReady().then(() => {
             sstvPopoutWin.webContents.send('sstv-tx-audio', { samples: [], durationSec: outDurSec, daxTx: true });
           }
           smartSdrAudio.sendTxAudio(dn, 500)
-            .then(() => { handleRemotePtt(false); sendCatLog('[SSTV] TX complete (dax_tx)'); })
-            .catch((err) => { handleRemotePtt(false); sendCatLog(`[SSTV] dax_tx send failed: ${err.message}`); });
+            .then(() => {
+              handleRemotePtt(false);
+              sendCatLog('[SSTV] TX complete (dax_tx)');
+              // Tell mobile we're back to RX — without this, the
+              // ECHOCAT TRANSMITTING banner sticks forever because
+              // only the popout-driven path fires the equivalent
+              // broadcast (via sstv-tx-complete IPC at the bottom
+              // of this file). K3SBP 2026-05-31.
+              if (remoteServer && remoteServer.hasClient()) {
+                remoteServer.broadcastSstvTxStatus({
+                  state: autoSstvActive ? 'auto-rx' : 'rx',
+                });
+              }
+            })
+            .catch((err) => {
+              handleRemotePtt(false);
+              sendCatLog(`[SSTV] dax_tx send failed: ${err.message}`);
+              // Same banner-clear on failure — leaving mobile stuck
+              // on TRANSMITTING after an error would be worse than
+              // dropping back to RX without a notification.
+              if (remoteServer && remoteServer.hasClient()) {
+                remoteServer.broadcastSstvTxStatus({
+                  state: autoSstvActive ? 'auto-rx' : 'rx',
+                });
+              }
+            });
         } else if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
           sstvPopoutWin.webContents.send('sstv-tx-audio', {
             samples: Array.from(outSamples),
