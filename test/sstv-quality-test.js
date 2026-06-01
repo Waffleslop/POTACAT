@@ -301,7 +301,46 @@ for (const cell of BASELINES) {
 // specific gate. Don't relax it to make it pass without thinking.
 console.log('\nNon-SSTV audio false-emit guard:');
 {
+  // Load the real SmartSDR Direct VITA-49 capture that caused the
+  // original ~3-week SSTV-no-decode regression. Stored as raw int16 LE
+  // PCM @ 24 kHz mono, 10 s.
+  //
+  // Verified 2026-05-31 via scripts/probe-capture.js: this fixture
+  // exercises the bd7c629 leader-purity gate. At 2.0 s and 7.9 s into
+  // the capture, the gate fires with "mean=1759Hz std=532Hz" — exactly
+  // matching the bd7c629 commit's recorded values ("band noise:
+  // mean≈1747 Hz, std≈537 Hz"). The fixture is the genuine article.
+  //
+  // Note that the test is a SYSTEM-level guard, not a single-gate
+  // guard: today's decoder has additional downstream defenses (MAD
+  // slant regressor, width-validated sync, drift-detector gating)
+  // beyond the May 28 leader-purity fix. To fail this test, a
+  // regression would have to defeat ALL the gates that combine to
+  // reject this specific real-world noise pattern. That's actually
+  // the right shape: defense in depth. Don't tune the fixture or
+  // weaken the assertion to make a regression pass.
+  function loadRadioCapture() {
+    const fs = require('fs');
+    const path = require('path');
+    const file = path.join(__dirname, 'fixtures', 'sstv-smartsdr-direct-noise-24k.pcm');
+    const pcm = fs.readFileSync(file);
+    const inLen = pcm.length / 2;
+    // Upsample 24 kHz → 48 kHz via linear interp (factor 2) — same
+    // upsampler the main app uses for SmartSDR Direct audio.
+    const out = new Float32Array(inLen * 2);
+    for (let i = 0; i < inLen; i++) {
+      const s0 = pcm.readInt16LE(i * 2) / 32768;
+      const s1 = i + 1 < inLen ? pcm.readInt16LE((i + 1) * 2) / 32768 : s0;
+      out[i * 2]     = s0;
+      out[i * 2 + 1] = (s0 + s1) * 0.5;
+    }
+    return out;
+  }
   const checks = [
+    {
+      name: 'real SmartSDR Direct band-noise capture (10 s, the bd7c629 regression)',
+      generate: loadRadioCapture,
+    },
     {
       name: 'pure white Gaussian noise (rms 0.5, 30 s, seed=1)',
       generate: () => {
