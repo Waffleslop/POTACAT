@@ -41,6 +41,8 @@ jobs:
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true # native build failures don't block the release
+      - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
+        run: node scripts/fetch-cloudflared.js --platform=win
       - name: Build Windows installers
         # --publish never: electron-builder sees the git tag and otherwise
         # tries to auto-publish to GitHub. The create-release job handles
@@ -93,6 +95,8 @@ jobs:
             install_name_tool -id "@loader_path/$(basename $lib)" "$lib" || true
           done
           ls -la assets/hamlib/
+      - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
+        run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
       - name: Build macOS dmg (arm64)
         run: npx electron-builder --mac --arm64 --publish never
       - uses: actions/upload-artifact@v4
@@ -148,6 +152,8 @@ jobs:
             install_name_tool -id "@loader_path/$(basename $lib)" "$lib" || true
           done
           ls -la assets/hamlib/
+      - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
+        run: node scripts/fetch-cloudflared.js --platform=mac --arch=x64
       - name: Build macOS dmg (x64)
         # electron-builder writes a separate latest-mac-x64.yml so the
         # auto-updater can serve the right binary per host arch.
@@ -260,6 +266,8 @@ jobs:
             [ -f "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
           done
           ls -la assets/hamlib/
+      - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
+        run: node scripts/fetch-cloudflared.js --platform=linux --arch=x64
       - name: Build Linux packages
         run: npx electron-builder --linux --publish never
       - uses: actions/upload-artifact@v4
@@ -370,6 +378,8 @@ jobs:
             [ -f "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
           done
           ls -la assets/hamlib/
+      - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
+        run: node scripts/fetch-cloudflared.js --platform=linux --arch=arm64
       - name: Build Linux packages (arm64)
         run: npx electron-builder --linux --arm64 --publish never
       - uses: actions/upload-artifact@v4

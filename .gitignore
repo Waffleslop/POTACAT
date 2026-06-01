@@ -8,3 +8,5 @@ CLAUDE.md
 lib/rade_native/opus_build_tmp/
 lib/rade_native/opus_lib/macos/
 lib/rade_native/opus_lib/linux/
+# cloudflared binaries are fetched per-build by scripts/fetch-cloudflared.js
+resources/cloudflared/

@@ -29,7 +29,11 @@
     "test": "node test/rig-test.js && node test/websdr-test.js && node test/ragchew-test.js && node test/echocat-protocol.test.js && node test/jtcat-test.js && node test/sstv-test.js && node test/sstv-quality-test.js",
     "test:websdr-live": "node test/websdr-test.js",
     "launcher:install": "node scripts/launcher-install.js",
-    "launcher:uninstall": "node scripts/launcher-install.js --uninstall"
+    "launcher:uninstall": "node scripts/launcher-install.js --uninstall",
+    "fetch:cloudflared": "node scripts/fetch-cloudflared.js",
+    "predist:win": "node scripts/fetch-cloudflared.js --platform=win",
+    "predist:mac": "node scripts/fetch-cloudflared.js --platform=mac --arch=arm64",
+    "predist:linux": "node scripts/fetch-cloudflared.js --platform=linux --arch=x64"
   },
   "build": {
     "appId": "com.waffleslop.potacat",
@@ -81,6 +85,12 @@
       "target": [
         "nsis",
         "portable"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/cloudflared/win/cloudflared.exe",
+          "to": "cloudflared.exe"
+        }
       ]
     },
     "nsis": {
@@ -105,7 +115,13 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "POTACAT needs microphone access for ECHOCAT remote audio.",
         "NSCameraUsageDescription": "POTACAT does not use the camera but WebRTC requires this permission."
-      }
+      },
+      "extraResources": [
+        {
+          "from": "resources/cloudflared/mac/cloudflared",
+          "to": "cloudflared"
+        }
+      ]
     },
     "linux": {
       "target": [
@@ -113,7 +129,13 @@
         "deb",
         "rpm"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "extraResources": [
+        {
+          "from": "resources/cloudflared/linux/cloudflared",
+          "to": "cloudflared"
+        }
+      ]
     },
     "protocols": [
       {
