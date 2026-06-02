@@ -713,7 +713,7 @@ const FTX1_FIELD_MODEL = {
   brand: 'Yaesu', protocol: 'kenwood',
   caps: {
     nb: true, atu: true, filter: true, filterType: 'indexed', rfgain: true,
-    txpower: true, vfo: true, comp: true, compLevel: true, nr: true,
+    txpower: true, vfo: true, comp: false, compLevel: false, nr: true,
     nrLevel: false, dnrLevel: true, anf: true, vox: true, voxLevel: true,
     agc: true, rit: false, mon: true, monLevel: true, micGain: true,
     clarRx: true, clarTx: true, clarOffset: true, breakIn: true,
@@ -726,7 +726,6 @@ const FTX1_FIELD_MODEL = {
     setNbOn: 'NL0001;', setNbOff: 'NL0000;', getNb: 'NL0;', setNbLevel: 'NL0{val:pad3};',
     getRfGain: 'RG0;', getAgc: 'GT0;',
     setNoiseReductionOn: 'RL001;', setNoiseReductionOff: 'RL000;', getDnrLevel: 'RL0;', setDnrLevel: 'RL0{val:pad2};',
-    setCompOn: 'PR02;', setCompOff: 'PR01;', getComp: 'PR;', getCompLevel: 'PL;',
     getMicGain: 'MG;', getVox: 'VX;', getVoxLevel: 'VG;', getAutoNotch: 'BC0;',
     getMonitor: 'ML;', getClarState: 'CF000;', getClarOffset: 'CF001;',
   },
@@ -887,24 +886,11 @@ test('FTX-1 GT reply parses Auto correctly', () => {
   assert.strictEqual(agc, 'auto');
 });
 
-test('FTX-1 PROC toggle uses PR plus PL restore/off commands', () => {
-  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
-  codec.setCompLevel(35);
-  codec.setCompressor(true);
-  codec.setCompressor(false);
-  assert.deepStrictEqual(writes, ['PL035;', 'PR02;', 'PL035;', 'PR01;', 'PL000;']);
-});
-
-test('FTX-1 PR/PL replies drive PROC state and level', () => {
-  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
-  let comp = null, level = null;
-  codec.on('comp', (v) => { comp = v; });
-  codec.on('compLevel', (v) => { level = v; });
-  codec.onData(Buffer.from('PR02;PL050;'));
-  assert.strictEqual(comp, true);
-  assert.strictEqual(level, 50);
-  codec.onData(Buffer.from('PL000;'));
-  assert.strictEqual(comp, false);
+test('FTX-1 does not expose PROC controls in POTACAT', () => {
+  assert.strictEqual(FTX1_FIELD_MODEL.caps.comp, false);
+  assert.strictEqual(FTX1_FIELD_MODEL.caps.compLevel, false);
+  assert.strictEqual(FTX1_FIELD_MODEL.commands.setCompOn, undefined);
+  assert.strictEqual(FTX1_FIELD_MODEL.commands.getCompLevel, undefined);
 });
 
 test('FTX-1 RF gain reply maps raw 255 to 100%', () => {
