@@ -399,8 +399,23 @@
       try {
         const res = await window.api.cloudForgotPassword(email);
         if (res && res.error) {
+          // Status-coded errors get tailored copy. Cloud added 404/409
+          // 2026-06-01 so older builds silently returned 200 — the
+          // sub-300 LOC reformat below means a typo no longer looks
+          // like a working flow that just doesn't send mail.
+          let msg;
+          if (res.status === 404) {
+            msg = "No POTACAT Cloud account uses that email. Double-check the spelling, or sign up.";
+          } else if (res.status === 409) {
+            const provider = res.provider === 'apple' ? 'Apple' : (res.provider === 'google' ? 'Google' : 'a sign-in provider');
+            msg = res.message || `That account uses Sign in with ${provider} — there's no password to reset. Sign in with ${provider} directly.`;
+          } else if (res.error === 'network') {
+            msg = 'No connection. Check your network and try again.';
+          } else {
+            msg = res.message || ('Error: ' + res.error);
+          }
           if (forgotStatus) {
-            forgotStatus.textContent = 'Error: ' + res.error;
+            forgotStatus.textContent = msg;
             forgotStatus.style.color = 'var(--accent-red)';
           }
           forgotSendBtn.disabled = false;
