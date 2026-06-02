@@ -713,13 +713,23 @@ const FTX1_FIELD_MODEL = {
   brand: 'Yaesu', protocol: 'kenwood',
   caps: {
     nb: true, atu: true, filter: true, filterType: 'indexed', rfgain: true,
-    txpower: true, vfo: true, comp: true, nr: true, anf: true, vox: true,
+    txpower: true, vfo: true, comp: true, compLevel: true, nr: true,
+    nrLevel: false, dnrLevel: true, anf: true, vox: true, voxLevel: true,
     agc: true, rit: true, mon: true, monLevel: true, micGain: true,
     clarRx: true, clarTx: true, clarOffset: true, breakIn: true,
     breakInDelay: true, ftx1Clar: true,
   },
   cw: { text: 'ky1', textChunk: 50, speed: 'ks', paddleKey: 'txrx', kyMode: 'km' },
-  atuCmd: 'standard', minPower: 5, maxPower: 100, maxNbLevel: 10,
+  atuCmd: 'standard', minPower: 5, maxPower: 100, maxNbLevel: 10, maxDnrLevel: 10,
+  agcMap: { off: 0, fast: 1, med: 2, mid: 2, slow: 3, auto: 4 },
+  commands: {
+    setNbOn: 'NL0001;', setNbOff: 'NL0000;', getNb: 'NL0;', setNbLevel: 'NL0{val:pad3};',
+    getRfGain: 'RG0;', getAgc: 'GT0;',
+    setNoiseReductionOn: 'RL001;', setNoiseReductionOff: 'RL000;', getDnrLevel: 'RL0;', setDnrLevel: 'RL0{val:pad2};',
+    setCompOn: 'PR02;', setCompOff: 'PR01;', getComp: 'PR;', getCompLevel: 'PL;',
+    getMicGain: 'MG;', getVox: 'VX;', getVoxLevel: 'VG;', getAutoNotch: 'BC0;',
+    getMonitor: 'ML;', getClarState: 'CF000;', getClarOffset: 'CF001;',
+  },
   pcPrefix: 1, rmSwr: 6, rmAlc: 4,
 };
 const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
@@ -808,6 +818,100 @@ test('FTX-1 TX0 reply emits ptt=false', () => {
   codec.on('ptt', (v) => { ptt = v; });
   codec.onData(Buffer.from('TX0;'));
   assert.strictEqual(ptt, false);
+});
+
+test('FTX-1 NB toggle uses NL level off/on commands', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setNb(true);
+  codec.setNb(false);
+  assert.deepStrictEqual(writes, ['NL0001;', 'NL0000;']);
+});
+
+test('FTX-1 NB level clamps to 0..10', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setNbLevel(10);
+  codec.setNbLevel(99);
+  assert.deepStrictEqual(writes, ['NL0010;', 'NL0010;']);
+});
+
+test('FTX-1 NL reply drives NB state and level', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let state = null, level = null;
+  codec.on('nb', (v) => { state = v; });
+  codec.on('nbLevel', (v) => { level = v; });
+  codec.onData(Buffer.from('NL0008;'));
+  assert.strictEqual(state, true);
+  assert.strictEqual(level, 8);
+});
+
+test('FTX-1 DNR level 0..10 uses RL000..RL010', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setDnrLevel(0);
+  codec.setDnrLevel(10);
+  codec.setDnrLevel(99);
+  assert.deepStrictEqual(writes, ['RL000;', 'RL010;', 'RL010;']);
+});
+
+test('FTX-1 DNR toggle uses RL000/RL001', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setNoiseReduction(false);
+  codec.setNoiseReduction(true);
+  assert.deepStrictEqual(writes, ['RL000;', 'RL001;']);
+});
+
+test('FTX-1 RL reply drives DNR state and level', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let state = null, level = null;
+  codec.on('nr', (v) => { state = v; });
+  codec.on('dnrLevel', (v) => { level = v; });
+  codec.onData(Buffer.from('RL010;'));
+  assert.strictEqual(state, true);
+  assert.strictEqual(level, 10);
+});
+
+test('FTX-1 AGC mapping matches OFF/AUTO/FAST/MID/SLOW', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setAgc('off');
+  codec.setAgc('auto');
+  codec.setAgc('fast');
+  codec.setAgc('med');
+  codec.setAgc('slow');
+  assert.deepStrictEqual(writes, ['GT00;', 'GT04;', 'GT01;', 'GT02;', 'GT03;']);
+});
+
+test('FTX-1 GT reply parses Auto correctly', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let agc = null;
+  codec.on('agc', (v) => { agc = v; });
+  codec.onData(Buffer.from('GT04;'));
+  assert.strictEqual(agc, 'auto');
+});
+
+test('FTX-1 PROC toggle uses PR02 on / PR01 off', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setCompressor(true);
+  codec.setCompressor(false);
+  assert.deepStrictEqual(writes, ['PR02;', 'PR01;']);
+});
+
+test('FTX-1 PR/PL replies drive PROC state and level', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let comp = null, level = null;
+  codec.on('comp', (v) => { comp = v; });
+  codec.on('compLevel', (v) => { level = v; });
+  codec.onData(Buffer.from('PR02;PL050;'));
+  assert.strictEqual(comp, true);
+  assert.strictEqual(level, 50);
+  codec.onData(Buffer.from('PR01;'));
+  assert.strictEqual(comp, false);
+});
+
+test('FTX-1 RF gain reply maps raw 255 to 100%', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let rf = null;
+  codec.on('rfgain', (v) => { rf = v; });
+  codec.onData(Buffer.from('RG0255;'));
+  assert.strictEqual(rf, 100);
 });
 
 // Monitor: channel 0 carries enable bit, channel 1 carries level.

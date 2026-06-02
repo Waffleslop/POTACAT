@@ -258,13 +258,37 @@
             <button id="rig-anf-btn" class="rig-btn" title="Auto Notch Filter">ANF</button>
             <button id="rig-vox-btn" class="rig-btn" title="Voice-Operated Transmit">VOX</button>
           </div>
+          <div class="rig-popover-row">
+            <label>RF Gain</label>
+            <input type="range" id="rig-rfgain" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-rfgain-label">0</span>
+          </div>
+          <div class="rig-popover-row">
+            <label>TX Power</label>
+            <input type="range" id="rig-txpower" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-txpower-label">0W</span>
+          </div>
+          <div class="rig-popover-row" id="rig-preamp-target-row">
+            <label>Pre Target</label>
+            <select id="rig-preamp-target-select" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;">
+              <option value="hf50">HF / 50 MHz</option>
+              <option value="vhf">VHF</option>
+              <option value="uhf">UHF</option>
+            </select>
+            <select id="rig-preamp-level-select" title="Preamp level - IPO bypass, AMP1, AMP2 (HF/50 only)" style="background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;">
+              <option value="0">IPO</option>
+              <option value="1">AMP1</option>
+              <option value="2">AMP2</option>
+            </select>
+          </div>
           <div class="rig-popover-row" id="rig-agc-row">
             <label>AGC</label>
             <select id="rig-agc-select" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;">
               <option value="">—</option>
               <option value="off">Off</option>
+              <option value="auto">Auto</option>
               <option value="fast">Fast</option>
-              <option value="med">Medium</option>
+              <option value="med">Mid</option>
               <option value="slow">Slow</option>
             </select>
           </div>
@@ -308,8 +332,8 @@
           </div>
           <div class="rig-popover-row" id="rig-dnrlevel-row">
             <label>DNR Lvl</label>
-            <input type="range" id="rig-dnrlevel" min="1" max="15" value="1" style="flex:1;accent-color:#4ecca3;">
-            <span id="rig-dnrlevel-label">1</span>
+            <input type="range" id="rig-dnrlevel" min="0" max="10" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-dnrlevel-label">0</span>
           </div>
           <div class="rig-popover-row rig-popover-buttons" id="rig-clar-row">
             <button id="rig-clarrx-btn" class="rig-btn" title="CLAR RX — enable the receive clarifier (offset RX only)">CLAR RX</button>
@@ -340,29 +364,6 @@
               <option value="2000">2000 ms</option>
               <option value="3000">3000 ms</option>
             </select>
-          </div>
-          <div class="rig-popover-row" id="rig-preamp-target-row">
-            <label>Pre Target</label>
-            <select id="rig-preamp-target-select" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;">
-              <option value="hf50">HF / 50 MHz</option>
-              <option value="vhf">VHF</option>
-              <option value="uhf">UHF</option>
-            </select>
-            <select id="rig-preamp-level-select" title="Preamp level — IPO bypass, AMP1, AMP2 (HF/50 only)" style="background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;">
-              <option value="0">IPO</option>
-              <option value="1">AMP1</option>
-              <option value="2">AMP2</option>
-            </select>
-          </div>
-          <div class="rig-popover-row">
-            <label>RF Gain</label>
-            <input type="range" id="rig-rfgain" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
-            <span id="rig-rfgain-label">0</span>
-          </div>
-          <div class="rig-popover-row">
-            <label>TX Power</label>
-            <input type="range" id="rig-txpower" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
-            <span id="rig-txpower-label">0W</span>
           </div>
           <div class="rig-popover-row">
             <label>Filter</label>

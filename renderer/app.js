@@ -16344,6 +16344,7 @@ function rigBuildFilterPresets(mode, currentWidth) {
 
 function rigApplyCapabilities(caps) {
   rigCurrentCaps = caps || {};
+  const isFtx1 = !!(caps.dnrLevel || caps.clarRx || caps.clarTx || caps.preampTarget);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
   rigPowerOnBtn.style.display = caps.power ? '' : 'none';
@@ -16361,6 +16362,18 @@ function rigApplyCapabilities(caps) {
   if (rigNrBtn)     rigNrBtn.style.display     = caps.nr     ? '' : 'none';
   if (rigAnfBtn)    rigAnfBtn.style.display    = caps.anf    ? '' : 'none';
   if (rigVoxBtn)    rigVoxBtn.style.display    = caps.vox    ? '' : 'none';
+  if (rigCompBtn) {
+    rigCompBtn.textContent = isFtx1 ? 'PROC' : 'Comp';
+    rigCompBtn.title = isFtx1 ? 'Speech Processor (PROC)' : 'Speech Compressor (TX)';
+  }
+  if (rigNrBtn) {
+    rigNrBtn.textContent = isFtx1 ? 'DNR' : 'NR';
+    rigNrBtn.title = isFtx1 ? 'Digital Noise Reduction' : 'Noise Reduction';
+  }
+  if (rigAnfBtn) {
+    rigAnfBtn.textContent = isFtx1 ? 'DNF' : 'ANF';
+    rigAnfBtn.title = isFtx1 ? 'Digital Notch Filter' : 'Auto Notch Filter';
+  }
   const anyModifier = caps.preamp || caps.att || caps.comp || caps.nr || caps.anf || caps.vox;
   const modRow = document.getElementById('rig-modifiers-row');
   if (modRow) modRow.style.display = anyModifier ? '' : 'none';
@@ -16373,7 +16386,7 @@ function rigApplyCapabilities(caps) {
     const el = document.getElementById(id);
     if (el) el.style.display = show ? '' : 'none';
   };
-  setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel);
+  setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel && !caps.dnrLevel);
   setRowDisplay('rig-nblevel-row',  !!caps.nbLevel);
   setRowDisplay('rig-voxlevel-row', !!caps.voxLevel);
   setRowDisplay('rig-monlevel-row', !!caps.monLevel);
@@ -16400,6 +16413,16 @@ function rigApplyCapabilities(caps) {
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
+  if (rigNbLevel && caps.maxNbLevel != null) {
+    rigNbLevel.min = 0;
+    rigNbLevel.max = caps.maxNbLevel;
+    rigNbLevel.step = 1;
+  }
+  if (rigDnrLevel && caps.maxDnrLevel != null) {
+    rigDnrLevel.min = 0;
+    rigDnrLevel.max = caps.maxDnrLevel;
+    rigDnrLevel.step = 1;
+  }
 }
 
 function positionRigPopover() {

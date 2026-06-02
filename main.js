@@ -815,6 +815,8 @@ function getRigCapabilities(rigType) {
     // Include power limits so UI can clamp sliders
     if (model.minPower != null) caps.minPower = model.minPower;
     if (model.maxPower != null) caps.maxPower = model.maxPower;
+    if (model.maxNbLevel != null) caps.maxNbLevel = model.maxNbLevel;
+    if (model.maxDnrLevel != null) caps.maxDnrLevel = model.maxDnrLevel;
     return caps;
   }
   // Fallback to generic per-type
@@ -1198,6 +1200,42 @@ function sendCatNb(on) {
   if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) return;
   _currentNbState = on;
   broadcastRigState();
+}
+
+function sendCatRfGain(val) { _currentRfGain = val; broadcastRigState(); }
+function sendCatNbLevel(val) { _currentNbLevel = val; _currentNbState = val > 0; broadcastRigState(); }
+function sendCatNr(on) { _currentNrState = on; broadcastRigState(); }
+function sendCatNrLevel(val) { _currentNrLevel = val; broadcastRigState(); }
+function sendCatDnrLevel(val) { _currentDnrLevel = val; _currentNrState = val > 0; broadcastRigState(); }
+function sendCatComp(on) { _currentCompState = on; broadcastRigState(); }
+function sendCatCompLevel(val) { _currentCompLevel = val; broadcastRigState(); }
+function sendCatAgc(mode) { _currentAgcMode = mode; broadcastRigState(); }
+function sendCatAnf(on) { _currentAnfState = on; broadcastRigState(); }
+function sendCatVox(on) { _currentVoxState = on; broadcastRigState(); }
+function sendCatVoxLevel(val) { _currentVoxLevel = val; broadcastRigState(); }
+function sendCatMon(on) { _currentMonState = on; broadcastRigState(); }
+function sendCatMonLevel(val) { _currentMonLevel = val; broadcastRigState(); }
+function sendCatMicGain(val) { _currentMicGain = val; broadcastRigState(); }
+function sendCatBreakIn(on) { _currentBreakInState = on; broadcastRigState(); }
+
+function bindRigStateEvents(controller) {
+  if (!controller || controller._potacatRigStateEventsBound) return;
+  controller._potacatRigStateEventsBound = true;
+  controller.on('rfgain', sendCatRfGain);
+  controller.on('nbLevel', sendCatNbLevel);
+  controller.on('nr', sendCatNr);
+  controller.on('nrLevel', sendCatNrLevel);
+  controller.on('dnrLevel', sendCatDnrLevel);
+  controller.on('comp', sendCatComp);
+  controller.on('compLevel', sendCatCompLevel);
+  controller.on('agc', sendCatAgc);
+  controller.on('anf', sendCatAnf);
+  controller.on('vox', sendCatVox);
+  controller.on('voxLevel', sendCatVoxLevel);
+  controller.on('mon', sendCatMon);
+  controller.on('monLevel', sendCatMonLevel);
+  controller.on('micGain', sendCatMicGain);
+  controller.on('breakIn', sendCatBreakIn);
 }
 
 function sendCatSmeter(val) {
@@ -1604,6 +1642,8 @@ async function connectCat() {
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
   }
+
+  bindRigStateEvents(cat);
 
   // Apply user command overrides from settings (Kenwood/Yaesu codec)
   if (cat && settings.rigCommandOverrides) {
@@ -15452,7 +15492,7 @@ app.whenReady().then(() => {
       case 'set-agc': {
         if (flexNeedsApi) { _flexWarnOnce('AGC requires SmartSDR API — not connected'); break; }
         const mode = String(data.value || '').toLowerCase();
-        if (!['off', 'fast', 'med', 'slow'].includes(mode)) break;
+        if (!['off', 'auto', 'fast', 'med', 'slow'].includes(mode)) break;
         if (flexSdr()) smartSdr.setAgc(0, mode);
         else if (cat && cat.connected && typeof cat.setAgc === 'function') {
           // Older Icom (706/7100/7200/9100) supports fast/slow only; the
@@ -15474,10 +15514,13 @@ app.whenReady().then(() => {
       }
       case 'set-nb-level': {
         if (flexNeedsApi) { _flexWarnOnce('NB level requires SmartSDR API — not connected'); break; }
-        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
-        if (flexSdr()) smartSdr.setNbLevel(0, pct);
-        else if (cat && cat.connected && typeof cat.setNbLevel === 'function') cat.setNbLevel(pct);
-        _currentNbLevel = pct;
+        const caps = getRigCapabilities(rigType);
+        const max = caps.maxNbLevel != null ? caps.maxNbLevel : 100;
+        const level = Math.max(0, Math.min(max, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setNbLevel(0, level);
+        else if (cat && cat.connected && typeof cat.setNbLevel === 'function') cat.setNbLevel(level);
+        _currentNbLevel = level;
+        _currentNbState = level > 0;
         broadcastRigState();
         break;
       }
@@ -15557,9 +15600,13 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-dnr-level': {
-        const level = Math.max(1, Math.min(15, Number(data.value) || 1));
+        const caps = getRigCapabilities(rigType);
+        const max = caps.maxDnrLevel != null ? caps.maxDnrLevel : 15;
+        const min = caps.maxDnrLevel != null ? 0 : 1;
+        const level = Math.max(min, Math.min(max, Number(data.value) || 0));
         if (cat && cat.connected && typeof cat.setDnrLevel === 'function') cat.setDnrLevel(level);
         _currentDnrLevel = level;
+        _currentNrState = level > 0;
         broadcastRigState();
         break;
       }
