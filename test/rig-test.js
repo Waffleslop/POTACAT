@@ -733,6 +733,11 @@ const FTX1_FIELD_MODEL = {
 };
 const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
   atuCmd: 'ac103', pcPrefix: 2,
+  caps: Object.assign({}, FTX1_FIELD_MODEL.caps, { antennaPort: true }),
+  commands: Object.assign({}, FTX1_FIELD_MODEL.commands, {
+    setAntennaPort: 'EX030704{val};',
+    getAntennaPort: 'EX030704;',
+  }),
 });
 
 // Power: model-prefixed PC parsing (PC1xxx Field, PC2xxx Optima).
@@ -907,6 +912,25 @@ test('FTX-1 preamp allows AMP2 only on HF/50', () => {
   codec.setPreampTarget('vhf', 2);
   codec.setPreampTarget('uhf', 2);
   assert.deepStrictEqual(writes, ['PA02;', 'PA11;', 'PA21;']);
+});
+
+test('FTX-1 Optima antenna select writes EX0307040/1; only on Optima', () => {
+  const optima = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  optima.codec.setAntennaPort(1);
+  optima.codec.setAntennaPort(2);
+  assert.deepStrictEqual(optima.writes, ['EX0307040;', 'EX0307041;']);
+
+  const field = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  field.codec.setAntennaPort(2);
+  assert.deepStrictEqual(field.writes, []);
+});
+
+test('FTX-1 Optima antenna readback parses EX0307040/1 to ANT 1/2', () => {
+  const codec = new KenwoodCodec(FTX1_OPTIMA_MODEL, () => {});
+  const ports = [];
+  codec.on('antennaPort', (v) => { ports.push(v); });
+  codec.onData(Buffer.from('EX0307040;EX0307041;'));
+  assert.deepStrictEqual(ports, [1, 2]);
 });
 
 // Monitor: channel 0 carries enable bit, channel 1 carries level.

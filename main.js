@@ -738,6 +738,7 @@ let _currentBreakInState = false;
 let _currentBreakInDelay = 100; // ms
 let _currentPreampTarget = 'hf50';
 let _currentPreampLevel = 0;
+let _currentAntennaPort = 1;
 let _currentCwSidetoneState = true; // Flex default is sidetone ON; we mirror that.
 // WinKeyer-driven sidetone mute. Tracks whether the *WinKeyer activity*
 // path is currently holding the Flex sidetone off, plus the state we
@@ -1219,6 +1220,7 @@ function sendCatMon(on) { _currentMonState = on; broadcastRigState(); }
 function sendCatMonLevel(val) { _currentMonLevel = val; broadcastRigState(); }
 function sendCatMicGain(val) { _currentMicGain = val; broadcastRigState(); }
 function sendCatBreakIn(on) { _currentBreakInState = on; broadcastRigState(); }
+function sendCatAntennaPort(val) { _currentAntennaPort = val; broadcastRigState(); }
 
 function bindRigStateEvents(controller) {
   if (!controller || controller._potacatRigStateEventsBound) return;
@@ -1238,6 +1240,7 @@ function bindRigStateEvents(controller) {
   controller.on('monLevel', sendCatMonLevel);
   controller.on('micGain', sendCatMicGain);
   controller.on('breakIn', sendCatBreakIn);
+  controller.on('antennaPort', sendCatAntennaPort);
 }
 
 function sendCatSmeter(val) {
@@ -1299,6 +1302,7 @@ function broadcastRigState() {
     breakInDelay: _currentBreakInDelay,
     preampTarget: _currentPreampTarget,
     preampLevel: _currentPreampLevel,
+    antennaPort: _currentAntennaPort,
     capabilities: caps,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
@@ -15680,6 +15684,15 @@ app.whenReady().then(() => {
         if (cat && cat.connected && typeof cat.setPreampTarget === 'function') cat.setPreampTarget(target, level);
         _currentPreampTarget = target;
         _currentPreampLevel = level;
+        broadcastRigState();
+        break;
+      }
+      case 'set-antenna-port': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.antennaPort) break;
+        const port = Math.max(1, Math.min(2, Math.round(Number(data.value) || 1)));
+        if (cat && cat.connected && typeof cat.setAntennaPort === 'function') cat.setAntennaPort(port);
+        _currentAntennaPort = port;
         broadcastRigState();
         break;
       }

@@ -16306,6 +16306,7 @@ const rigBreakInBtn       = document.getElementById('rig-breakin-btn');
 const rigBreakInDelaySel  = document.getElementById('rig-breakin-delay-select');
 const rigPreampTargetSel  = document.getElementById('rig-preamp-target-select');
 const rigPreampLevelSel   = document.getElementById('rig-preamp-level-select');
+const rigAntennaPortSel   = document.getElementById('rig-antenna-port-select');
 let rigPopoverOpen = false;
 let rigCurrentCaps = {};
 let rigCurrentMode = '';
@@ -16452,6 +16453,7 @@ function rigApplyCapabilities(caps) {
   setRowDisplay('rig-breakin-row',       !!caps.breakIn);
   setRowDisplay('rig-breakindelay-row',  !!caps.breakInDelay);
   setRowDisplay('rig-preamp-target-row', !!caps.preampTarget);
+  setRowDisplay('rig-antenna-port-row',  !!caps.antennaPort);
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
@@ -16612,6 +16614,12 @@ function _sendPreampTarget() {
 }
 if (rigPreampTargetSel) rigPreampTargetSel.addEventListener('change', _sendPreampTarget);
 if (rigPreampLevelSel)  rigPreampLevelSel.addEventListener('change', _sendPreampTarget);
+if (rigAntennaPortSel) {
+  rigAntennaPortSel.addEventListener('change', () => {
+    const port = parseInt(rigAntennaPortSel.value, 10) || 1;
+    window.api.rigControl({ action: 'set-antenna-port', value: port });
+  });
+}
 
 // Slider handlers
 // Throttle rig control sliders to prevent flooding serial port
@@ -16702,6 +16710,9 @@ window.api.onRigState((state) => {
   }
   if (rigPreampLevelSel && state.preampLevel != null && document.activeElement !== rigPreampLevelSel) {
     rigPreampLevelSel.value = String(state.preampLevel);
+  }
+  if (rigAntennaPortSel && state.antennaPort != null && document.activeElement !== rigAntennaPortSel) {
+    rigAntennaPortSel.value = String(state.antennaPort);
   }
   // Update sliders (only if user is not actively dragging)
   if (document.activeElement !== rigRfGain && state.rfGain != null) {
