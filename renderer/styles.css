@@ -1700,14 +1700,46 @@ dialog {
   min-width: 300px;
 }
 
+/* Settings dialog
+   ────────────────────────────────────────────────────────────────
+   Responsive shell (2026-06-02). Used to be a fixed 460×85vh box,
+   which wasted space on ultrawides and clipped Save on 1366×768.
+
+   Now: default width tracks viewport up to 1100px; user can drag
+   the bottom-right corner to resize; .settings-shell holds the
+   layout, with container queries swapping it from a 1-col column
+   (narrow) to a sidebar grid (≥720px). Compact mode kicks in at
+   short heights for old laptops / RPi screens.
+
+   container-type: size lets descendants query both width AND
+   height — needed because we want a sidebar at wide widths AND a
+   compact spacing at short heights, independently. The "settings"
+   container name scopes the queries below.
+
+   resize: both requires overflow != visible. Hidden gives the
+   resize grip and forces scrolling into .settings-scroll-area. */
 #settings-dialog {
-  max-width: 460px;
-  width: 460px;
-  overflow-x: hidden;
-  max-height: 85vh;
+  width: min(1100px, calc(100vw - 32px));
+  height: min(900px, calc(100vh - 32px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  min-width: 360px;
+  min-height: 360px;
+  overflow: hidden;
+  resize: both;
+  container-type: size;
+  container-name: settings;
+  padding: 16px 20px;
 }
 
 #settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-shell {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1809,6 +1841,889 @@ dialog {
   font-size: 13px;
 }
 
+/* ────────────────────────────────────────────────────────────────
+   Sidebar layout at ≥720px wide.
+   Tabs become a left rail; search pins above the content; the
+   Save/Cancel row sits under the scroll area on the right; the
+   version/links footer spans the full width.
+
+   .settings-tab-bar is set to `display: contents` so the tabs row
+   and the search input can land in different grid cells without
+   restructuring the markup (they were originally siblings inside
+   one tab-bar wrapper for the top-tab layout). */
+@container settings (min-width: 720px) {
+  .settings-shell {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "header  header"
+      "conn    conn"
+      "tabs    search"
+      "tabs    content"
+      "tabs    buttons"
+      "footer  footer";
+    column-gap: 20px;
+    row-gap: 4px;
+  }
+  .settings-shell > h3 {
+    grid-area: header;
+    margin-bottom: 6px;
+  }
+  .settings-shell > #settings-conn-status {
+    grid-area: conn;
+  }
+  .settings-shell > .settings-tab-bar {
+    display: contents;
+  }
+  .settings-tab-bar > .settings-tabs-row {
+    grid-area: tabs;
+    flex-direction: column;
+    border-bottom: none;
+    border-right: 2px solid var(--border-secondary);
+    align-self: stretch;
+    padding-top: 4px;
+  }
+  .settings-tab-bar > .settings-tabs-row > .settings-tab {
+    flex: 0 0 auto;
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 12px;
+    border-bottom: none;
+    border-right: 2px solid transparent;
+    margin-bottom: 0;
+    margin-right: -2px;
+    border-radius: 4px 0 0 4px;
+  }
+  .settings-tab-bar > .settings-tabs-row > .settings-tab.active {
+    border-bottom-color: transparent;
+    border-right-color: var(--accent-blue);
+  }
+  .settings-tab-bar > .settings-search {
+    grid-area: search;
+    margin-top: 0;
+    margin-bottom: 6px;
+  }
+  .settings-shell > .settings-scroll-area {
+    grid-area: content;
+    min-height: 0;
+  }
+  .settings-shell > .dialog-buttons {
+    grid-area: buttons;
+    margin-top: 8px;
+  }
+  .settings-shell > .settings-footer {
+    grid-area: footer;
+    margin-top: 12px;
+    border-top: 1px solid var(--border-secondary);
+    padding-top: 10px;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────
+   At very wide widths (user dragged the dialog out on an ultrawide)
+   keep the scroll-area readable — lines of help text become hard
+   to scan past ~900px wide. The sidebar gets to use the rest. A
+   real 2-col form layout for short fieldsets is a follow-up that
+   needs per-fieldset markup work (auto-2-col on every fieldset
+   would break label/help-text pairings). */
+@container settings (min-width: 1100px) {
+  .settings-shell > .settings-scroll-area {
+    max-width: 900px;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Summary tab — landing dashboard with Operator / Logbook /
+   POTACAT Cloud / ECHOCAT / POTA.app cards.
+
+   Each card is a self-contained box with a head row (title left,
+   status pill right) and a body. Stats use a horizontal flex grid
+   that wraps at narrow widths. */
+.summary-tab-content {
+  /* Card grid replaces the fieldset's normal label layout. The
+     legend is hidden because each card has its own title. */
+  padding: 0;
+  border: none;
+}
+.summary-tab-content > legend {
+  display: none;
+}
+.summary-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Operator + Logbook share a row on wider dialogs; stacks below 720px
+   container width so a narrow Settings dialog still looks fine. */
+.summary-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@container settings (max-width: 720px) {
+  .summary-pair { grid-template-columns: 1fr; }
+}
+/* Quick settings — collapsible blocks below the main cards. Light
+   chrome (no border on the wrapper, just a subtle header), so they
+   read as secondary to the status cards above. */
+.summary-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.summary-quick-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+.summary-quick-section {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.summary-quick-section[open] {
+  padding-bottom: 12px;
+}
+.summary-quick-summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  list-style: none;
+}
+.summary-quick-summary::-webkit-details-marker { display: none; }
+.summary-quick-summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+}
+.summary-quick-section[open] .summary-quick-summary::before {
+  transform: rotate(90deg);
+}
+.summary-quick-state {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.summary-quick-state.on { color: var(--accent-green); }
+.summary-quick-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+/* Override the global `dialog input, dialog select { display:block;
+   width:100% }` rule for everything inside the quick-settings body.
+   That rule expects label-on-top-of-stacked-input layout (used
+   elsewhere in Settings), but quick settings want compact inline
+   rows. Without these overrides, checkboxes became 100%-wide blocks
+   and pushed their labels across the row. */
+.summary-quick-body input,
+.summary-quick-body select {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+}
+.summary-quick-body label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font-size: inherit;
+}
+.summary-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  flex-wrap: wrap;
+}
+/* Checkbox rows: tight pairing — checkbox sized like UA default, no
+   weird offsetting. */
+.summary-quick-body input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent-blue);
+}
+/* Inline controls (numbers, selects, range) get their own visual
+   styling so they don't inherit the heavy fieldset look. */
+.summary-quick-body select,
+.summary-quick-body input[type="number"],
+.summary-quick-body input[type="text"] {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12px;
+  height: auto;
+}
+.summary-quick-body input[type="range"] {
+  vertical-align: middle;
+}
+/* Indented sub-row (sidetone pitch + volume) sits under its parent
+   checkbox visually. Left-padding mirrors the checkbox + gap width. */
+.summary-quick-row-indent {
+  padding-left: 22px;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.summary-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.summary-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.summary-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.summary-card-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.summary-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.summary-pill.ok {
+  background: color-mix(in srgb, var(--accent-green) 18%, transparent);
+  color: var(--accent-green);
+  border-color: color-mix(in srgb, var(--accent-green) 40%, transparent);
+}
+.summary-pill.warn {
+  background: color-mix(in srgb, #f0a500 18%, transparent);
+  color: #f0a500;
+  border-color: color-mix(in srgb, #f0a500 40%, transparent);
+}
+.summary-pill.bad {
+  background: color-mix(in srgb, var(--accent-red) 18%, transparent);
+  color: var(--accent-red);
+  border-color: color-mix(in srgb, var(--accent-red) 40%, transparent);
+}
+.summary-card-body {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.summary-line {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+.summary-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+.summary-help {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+.summary-help a {
+  color: var(--accent-blue);
+  text-decoration: none;
+}
+.summary-help a:hover { text-decoration: underline; }
+
+/* Operator card */
+.summary-op-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.summary-op-call {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  letter-spacing: 0.5px;
+  font-family: monospace;
+}
+.summary-op-select {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  font-family: monospace;
+  background: var(--bg-input);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  letter-spacing: 0.5px;
+  min-width: 140px;
+  cursor: pointer;
+}
+.summary-op-grid {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: monospace;
+}
+.summary-card-link {
+  font-size: 11px;
+  color: var(--accent-blue);
+  text-decoration: none;
+}
+.summary-card-link:hover { text-decoration: underline; }
+
+/* ────────────────────────────────────────────────────────────────
+   Share Your Rig dialog — Guest Pass owner-side issuance.
+   Re-skins the gp-* form so the share LINK is the headline (most
+   operators email the link, scanning the QR is the rare path). */
+#share-rig-dialog {
+  width: min(600px, calc(100vw - 32px));
+  max-width: 680px;
+  max-height: 88vh;
+}
+.share-rig-intro {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-bottom: 14px;
+}
+.share-rig-notice {
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border-left: 3px solid var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.share-rig-notice.warn {
+  border-left-color: #f0a500;
+  background: color-mix(in srgb, #f0a500 8%, transparent);
+}
+.share-rig-notice a {
+  color: var(--accent-blue);
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+.share-rig-notice a:hover { text-decoration: underline; }
+
+.share-rig-extlink {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.share-rig-extlink:hover { color: #81d4fa; }
+.share-rig-section {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-secondary);
+}
+.share-rig-section:last-child { border-bottom: none; }
+.share-rig-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+.share-rig-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.share-rig-preset {
+  font-size: 12px;
+  padding: 5px 12px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 16px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.share-rig-preset:hover { background: var(--bg-hover); color: var(--text-primary); }
+.share-rig-preset.active {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.share-rig-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.share-rig-row label { margin: 0; display: inline-flex; align-items: baseline; gap: 6px; }
+.share-rig-num {
+  width: 70px;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+}
+.share-rig-select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+.share-rig-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-bottom: 4px;
+}
+.share-rig-grid label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.share-rig-grid input {
+  font-family: monospace;
+  text-transform: uppercase;
+  padding: 5px 8px;
+  font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+}
+
+/* Generated view */
+.share-rig-link-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-blue);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+.share-rig-link-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-blue);
+  margin-bottom: 6px;
+}
+.share-rig-link {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  word-break: break-all;
+  background: var(--bg-secondary);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  user-select: all;
+}
+.share-rig-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.share-rig-link-actions button {
+  font-size: 12px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.share-rig-link-actions button.primary {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.share-rig-link-actions button:hover {
+  background: var(--bg-hover);
+}
+.share-rig-link-actions button.primary:hover {
+  background: color-mix(in srgb, var(--accent-blue) 80%, #fff);
+}
+.share-rig-summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.7;
+}
+.share-rig-summary strong { color: var(--text-primary); }
+.share-rig-code {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-green);
+  user-select: all;
+}
+.share-rig-qr-block {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.share-rig-qr-block summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.share-rig-qr {
+  display: block;
+  margin: 8px auto 0;
+  width: 240px;
+  height: 240px;
+  background: #fff;
+  padding: 8px;
+  border-radius: 4px;
+}
+#share-rig-dialog button.danger {
+  background: var(--bg-secondary);
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+#share-rig-dialog button.danger:hover {
+  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+}
+
+/* My passes list */
+.share-rig-mypasses { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-secondary); }
+.share-rig-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.share-rig-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  font-size: 11px;
+}
+.share-rig-list .lst-code { font-family: monospace; font-weight: 700; color: var(--text-primary); }
+.share-rig-list .lst-meta { color: var(--text-tertiary); flex: 1; margin-left: 6px; }
+.share-rig-list .lst-status { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 1px 6px; border-radius: 8px; }
+.share-rig-list .lst-status.active { background: color-mix(in srgb, var(--accent-green) 20%, transparent); color: var(--accent-green); }
+.share-rig-list .lst-status.expired,
+.share-rig-list .lst-status.revoked { background: var(--bg-secondary); color: var(--text-tertiary); }
+.share-rig-list .lst-revoke {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.share-rig-list .lst-revoke:hover { color: var(--accent-red); border-color: var(--accent-red); }
+.share-rig-list-empty { padding: 16px 0; text-align: center; color: var(--text-tertiary); font-size: 12px; font-style: italic; }
+.share-rig-link-btn {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--accent-blue);
+  cursor: pointer;
+  padding: 0;
+}
+.share-rig-link-btn:hover { text-decoration: underline; }
+
+/* Manage Operators dialog */
+#operators-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-width: 540px;
+}
+.operators-help {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.operators-help code {
+  background: var(--bg-primary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.operators-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.operators-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+}
+.operators-row.active {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+}
+.operators-row-name {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.operators-row-tag {
+  font-size: 10px;
+  color: var(--accent-blue);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-left: 6px;
+}
+.operators-row button {
+  font-size: 11px;
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.operators-row button:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+.operators-empty {
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: 20px 0;
+  font-size: 12px;
+}
+
+/* Stat grid (Logbook card) */
+.summary-stat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  margin-bottom: 10px;
+}
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 48px;
+}
+.summary-stat-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.summary-stat-key {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 2px;
+}
+
+/* Action button row (every card uses this) */
+.summary-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.summary-card-actions button,
+.summary-card-actions a.summary-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: inherit;
+}
+.summary-card-actions button:hover,
+.summary-card-actions a.summary-btn:hover {
+  background: var(--bg-hover);
+}
+.summary-card-actions .primary {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.summary-card-actions .primary:hover {
+  background: color-mix(in srgb, var(--accent-blue) 80%, #fff);
+}
+
+/* ECHOCAT device list */
+.summary-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.summary-device {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  font-size: 11px;
+}
+.summary-device-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.summary-device-meta {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+.summary-device-actions {
+  display: flex;
+  gap: 4px;
+}
+.summary-device-actions button {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.summary-device-actions button:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+.summary-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+/* POTA stats */
+.summary-pota-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.summary-pota-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-secondary);
+  font-size: 12px;
+}
+.summary-pota-row:last-child { border-bottom: none; }
+.summary-pota-role {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.summary-pota-vals {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Compact mode at short heights (RPi displays, 1366×768 laptops
+   with an expanded accordion). Tightens padding and pins the
+   Save/Cancel bar to the bottom so it never gets pushed off-screen
+   when a sub-section expands. */
+@container settings (max-height: 680px) {
+  .settings-shell > h3 {
+    margin-bottom: 6px;
+    font-size: 14px;
+  }
+  .settings-shell > #settings-conn-status {
+    padding: 2px 4px;
+    font-size: 10px;
+  }
+  .settings-scroll-area > fieldset {
+    padding: 6px 10px;
+    margin-bottom: 8px;
+  }
+  .settings-scroll-area > fieldset > legend {
+    font-size: 12px;
+  }
+  .settings-scroll-area label {
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+  .settings-shell > .dialog-buttons {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-secondary);
+    padding: 6px 0 0;
+    border-top: 1px solid var(--border-secondary);
+    margin-top: 0;
+  }
+  .settings-shell > .settings-footer {
+    font-size: 10px;
+    margin-top: 6px;
+  }
+}
+
 dialog::backdrop {
   background: var(--backdrop);
 }
@@ -1818,7 +2733,7 @@ dialog h3 {
   color: var(--accent-red);
 }
 
-#settings-dialog > h3 {
+#settings-dialog .settings-shell > h3 {
   flex-shrink: 0;
 }
 
@@ -1843,7 +2758,7 @@ dialog input, dialog select {
   margin-top: 16px;
 }
 
-#settings-dialog > .dialog-buttons {
+#settings-dialog .settings-shell > .dialog-buttons {
   flex-shrink: 0;
 }
 
@@ -4399,9 +5314,125 @@ tr.wl-group-2 td:last-child {
 }
 
 #whats-new-dialog {
-  max-width: 500px;
-  width: 90vw;
+  max-width: 640px;
+  width: min(640px, calc(100vw - 32px));
+  padding: 22px 26px 18px;
 }
+#whats-new-dialog h3 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--accent-blue);
+  margin: 0 0 4px 0;
+}
+
+/* Release-notes content typography (rendered by formatReleaseNotes).
+   Goal: read like a polished changelog, not the raw markdown that
+   shipped from GitHub. */
+#whats-new-body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.rn-head {
+  border-bottom: 1px solid var(--border-secondary);
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+}
+.rn-h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+  margin-bottom: 6px;
+  line-height: 1.25;
+}
+.rn-lead {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-style: italic;
+  line-height: 1.5;
+}
+.rn-h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 18px 0 6px;
+  letter-spacing: 0.1px;
+  border-bottom: 1px solid var(--border-secondary);
+  padding-bottom: 3px;
+}
+.rn-h4 {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 14px 0 4px;
+}
+.rn-h5 {
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+  margin: 10px 0 2px;
+}
+.rn-p {
+  margin: 8px 0;
+}
+.rn-p:first-child { margin-top: 0; }
+.rn-ul {
+  margin: 6px 0 12px;
+  padding-left: 22px;
+}
+.rn-ul li {
+  margin: 4px 0;
+}
+.rn-ul li::marker {
+  color: var(--accent-blue);
+}
+.rn-code {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 0.9em;
+  color: var(--accent-green);
+  white-space: nowrap;
+}
+.rn-pre {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 5px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.rn-pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  white-space: pre;
+}
+.rn-hr {
+  border: none;
+  border-top: 1px solid var(--border-secondary);
+  margin: 16px 0;
+}
+#whats-new-body a {
+  color: var(--accent-blue);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent-blue);
+}
+#whats-new-body a:hover {
+  color: #81d4fa;
+  border-bottom-color: #81d4fa;
+}
+#whats-new-body strong { color: var(--text-primary); font-weight: 600; }
+#whats-new-body em { color: var(--text-primary); font-style: italic; }
 
 .hotkeys-table {
   width: 100%;

@@ -173,8 +173,6 @@ const { RemoteServer } = require('./lib/remote-server');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
 // and every other call is a stable no-op — safe to require unconditionally.
 const alsa = require('./lib/alsa');
-const { loadClubUsers, hashPasswords, hasPlaintextPasswords } = require('./lib/club-users');
-const { createAuditLogger } = require('./lib/club-audit');
 const { fetchSpots: fetchWwffSpots } = require('./lib/wwff');
 const { fetchSpots: fetchTilesSpots, parseFreqKhz: parseTilesFreqKhz } = require('./lib/tiles');
 const { fetchSpots: fetchLlotaSpots } = require('./lib/llota');
@@ -292,18 +290,190 @@ function generateMorseSamples(text, opts = {}) {
 }
 
 // --- Settings ---
+//
+// Multi-operator storage layout (2026-06-02):
+//
+//   userData/
+//     settings.json                ← global (machine-scoped)
+//     profiles/
+//       K3SBP/
+//         settings.json            ← per-operator (everything else)
+//         potacat_qso_log.adi      ← default log path for new operators
+//       WB6ACU/...
+//       _archived/
+//         W9GLS-2026-07-15T12-00-00Z/
+//
+// loadSettings reads the global file + the active profile's file and
+// merges them so consumers downstream see one flat `settings` object
+// exactly as before — no consumer code changes. saveSettings reverses
+// the split and writes both files. activeProfile is a global pointer.
+//
+// GLOBAL_KEYS is the closed list of machine-scoped fields; anything
+// not on the list is treated as operator-scoped. Conservative on
+// purpose — if we add a new global feature later, add the key here.
+// See [[multi-op-profiles]] memory for the design discussion.
 const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
+const PROFILES_DIR = path.join(app.getPath('userData'), 'profiles');
+const PROFILES_ARCHIVE_DIR = path.join(PROFILES_DIR, '_archived');
+const GLOBAL_KEYS = new Set([
+  'activeProfile',     // pointer to current operator
+  'profiles',          // (reserved — currently unused but reserved against name collision)
+  'rigs',              // rig hardware definitions
+  'activeRigId',       // last-selected rig (global default)
+  'pairedDevices',     // ECHOCAT paired-device tokens
+  'cloudTunnelToken',  // CF Tunnel credential (machine-scoped)
+  'firstRun',          // first-time-launch flag
+  'piAccess',          // easter egg unlock
+  'lightMode',         // theme
+  'updateChannel',     // auto-update channel
+  'telemetry',         // telemetry opt-in
+  'windowState',       // window geometry
+  'n1mmUdpPort',       // N1MM broadcast port
+  'audioInputDeviceId', 'audioOutputDeviceId',  // OS audio device picks
+  'mainMicDeviceId', 'mainPlaybackDeviceId',
+  'echocatPort',       // ECHOCAT server port
+  'echocatToken',      // ECHOCAT legacy single shared token (machine)
+  'enableEchoCat',     // ECHOCAT server enable (machine-level)
+]);
+
+function profileDir(callsign) {
+  return path.join(PROFILES_DIR, String(callsign || '').toUpperCase());
+}
+function profileSettingsPath(callsign) {
+  return path.join(profileDir(callsign), 'settings.json');
+}
+
+function _readJsonSafe(p, fallback) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf-8')); }
+  catch { return fallback; }
+}
+function _writeJsonAtomic(p, obj) {
+  try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch {}
+  fs.writeFileSync(p, JSON.stringify(obj, null, 2));
+}
 
 function loadSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
-  } catch {
+  const global = _readJsonSafe(SETTINGS_PATH, null);
+  if (!global) {
+    // Truly fresh install: return defaults, no profile yet.
     return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, firstRun: true, watchlist: 'K3SBP' };
   }
+  // Migration path: legacy settings.json (no activeProfile) gets migrated
+  // when it has a myCallsign. We do this lazily on first save rather than
+  // here so the migration writes happen at a deterministic point with the
+  // app already initialized.
+  if (!global.activeProfile) return global;
+  const profile = _readJsonSafe(profileSettingsPath(global.activeProfile), {});
+  // Profile values lose to global values on key collision — global is
+  // always authoritative for machine-scoped fields.
+  return Object.assign({}, profile, global);
+}
+
+function _splitSettings(s) {
+  const globalOut = {};
+  const profileOut = {};
+  for (const [k, v] of Object.entries(s || {})) {
+    if (GLOBAL_KEYS.has(k)) globalOut[k] = v;
+    else profileOut[k] = v;
+  }
+  return { global: globalOut, profile: profileOut };
 }
 
 function saveSettings(s) {
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s, null, 2));
+  // Auto-migrate on first save if we're in legacy single-file mode and
+  // a callsign exists. Picks up users upgrading from a pre-multi-op build.
+  if (!s.activeProfile && s.myCallsign) {
+    const call = String(s.myCallsign).toUpperCase();
+    s.activeProfile = call;
+    console.log('[multi-op] migrating legacy settings.json → profiles/' + call + '/');
+  }
+  if (!s.activeProfile) {
+    // Still no profile (no callsign yet). Write as flat global so we don't
+    // create an orphan profile dir.
+    _writeJsonAtomic(SETTINGS_PATH, s);
+    return;
+  }
+  const { global, profile } = _splitSettings(s);
+  _writeJsonAtomic(SETTINGS_PATH, global);
+  _writeJsonAtomic(profileSettingsPath(global.activeProfile), profile);
+}
+
+// Profile management — used by IPC handlers below to back the
+// Settings → Summary → Operator dropdown.
+function listProfiles() {
+  try {
+    if (!fs.existsSync(PROFILES_DIR)) return [];
+    return fs.readdirSync(PROFILES_DIR)
+      .filter(n => n !== '_archived' && !n.startsWith('_'))
+      .filter(n => {
+        try { return fs.statSync(path.join(PROFILES_DIR, n)).isDirectory(); }
+        catch { return false; }
+      })
+      .sort();
+  } catch { return []; }
+}
+
+function addProfile(callsign) {
+  const call = String(callsign || '').toUpperCase().trim();
+  if (!call || !/^[A-Z0-9/]{3,12}$/.test(call)) {
+    return { ok: false, error: 'Invalid callsign. Use 3–12 chars: A-Z, 0-9, /.' };
+  }
+  const dir = profileDir(call);
+  if (fs.existsSync(dir)) return { ok: false, error: 'Operator ' + call + ' already exists.' };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    // Seed with a minimal profile — empty operator state, separate log path
+    // by default so each operator has their own logbook. CW XIT/scan dwell
+    // etc. all default to global defaults on first read.
+    const seed = {
+      myCallsign: call,
+      grid: '',
+      watchlist: '',
+      adifLogPath: path.join(dir, 'potacat_qso_log.adi'),
+    };
+    _writeJsonAtomic(profileSettingsPath(call), seed);
+    return { ok: true, callsign: call };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+function switchProfile(callsign) {
+  const call = String(callsign || '').toUpperCase().trim();
+  if (!call) return { ok: false, error: 'No callsign specified.' };
+  if (!fs.existsSync(profileDir(call))) return { ok: false, error: 'Operator ' + call + ' does not exist.' };
+  // Save current operator's state (so any unsaved field changes persist),
+  // flip the activeProfile pointer in the global file, then we relaunch.
+  // Live-reload (re-init cluster/RBN/PSKR/POTA sync/Cloud auth/etc.
+  // against the new operator's settings) is a follow-up — too many cached
+  // subsystems to chase down in one PR. Restart is one click and
+  // guarantees correctness.
+  try {
+    settings.activeProfile = call;
+    saveSettings(settings);
+  } catch (err) {
+    return { ok: false, error: 'Failed to save before switching: ' + err.message };
+  }
+  return { ok: true, callsign: call, restartRequired: true };
+}
+
+function archiveProfile(callsign) {
+  const call = String(callsign || '').toUpperCase().trim();
+  if (!call) return { ok: false, error: 'No callsign specified.' };
+  const src = profileDir(call);
+  if (!fs.existsSync(src)) return { ok: false, error: 'Operator ' + call + ' does not exist.' };
+  if (settings && settings.activeProfile === call) {
+    return { ok: false, error: 'Cannot archive the currently-active operator. Switch first, then archive.' };
+  }
+  try {
+    fs.mkdirSync(PROFILES_ARCHIVE_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const dest = path.join(PROFILES_ARCHIVE_DIR, call + '-' + stamp);
+    fs.renameSync(src, dest);
+    return { ok: true, archivedAs: dest };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 let settings = null;
@@ -6342,8 +6512,6 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('reload-prefs');
     }
-    // Track active rig for club schedule advisory
-    if (remoteServer._clubMode) remoteServer._activeRigId = rig.id;
     // Confirm back to phone
     const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name }));
     remoteServer.sendRigsToClient(rigs, rig.id);
@@ -7076,13 +7244,6 @@ function connectRemote() {
       // Add station fields from settings
       if (settings.myCallsign) {
         qsoData.stationCallsign = settings.myCallsign.toUpperCase();
-      }
-      // Club mode: OPERATOR = individual member callsign
-      if (settings.clubMode && remoteServer) {
-        const member = remoteServer.getAuthenticatedMember();
-        if (member) {
-          qsoData.operator = member.callsign;
-        }
       }
       if (settings.txPower) {
         qsoData.txPower = String(settings.txPower);
@@ -7836,14 +7997,6 @@ function connectRemote() {
     settings.remoteToken = token;
     saveSettings(settings);
   }
-  // Club Station Mode
-  if (settings.clubMode && settings.clubCsvPath) {
-    const auditPath = settings.clubAuditPath ||
-      path.join(app.getPath('userData'), 'club-audit.csv');
-    const auditLogger = createAuditLogger(auditPath);
-    remoteServer.setClubMode(true, settings.clubCsvPath, auditLogger, settings.rigs || [], settings.activeRigId);
-  }
-
   // Populate _remoteSettings BEFORE the server starts listening so the
   // very first phone to connect gets a full auth-ok payload. Without this,
   // _remoteSettings starts as {} and a phone that connects before the
@@ -7855,7 +8008,7 @@ function connectRemote() {
   updateRemoteSettings();
 
   remoteServer.start(port, token, {
-    requireToken: settings.clubMode ? true : requireToken, // club mode always requires auth
+    requireToken,
     pttSafetyTimeout: settings.remotePttTimeout || 180,
     rendererPath: path.join(app.getAppPath(), 'renderer'),
     certDir: app.getPath('userData'),
@@ -12187,6 +12340,22 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   settings = loadSettings();
   migrateRigSettings(settings);
+  // Multi-op profile migration. If we loaded a legacy settings.json (one
+  // with myCallsign but no activeProfile pointer), save it through the
+  // splitter to create profiles/<myCallsign>/settings.json + a slimmed
+  // global file. Idempotent on subsequent runs because activeProfile is
+  // now set.
+  if (settings.myCallsign && !settings.activeProfile) {
+    try {
+      saveSettings(settings);
+      // Reload so the merged-shape `settings` matches what every
+      // consumer expects after migration.
+      settings = loadSettings();
+      console.log('[multi-op] migration complete; activeProfile=' + settings.activeProfile);
+    } catch (err) {
+      console.error('[multi-op] migration failed:', err.message);
+    }
+  }
   logStartupStage('settings loaded');
   if (settings.colorblindMode) {
     setSmartSdrColorblind(true);
@@ -12393,6 +12562,23 @@ app.whenReady().then(() => {
       return { ok: true, state };
     } catch (err) {
       sendCatLog('[cloud-tunnel] disable failed: ' + (err.message || err));
+      return { error: err.message || String(err) };
+    }
+  });
+
+  // Diagnostics: hits the cloud's /v1/cloud-tunnel/diagnostics route
+  // and surfaces the verbose state dump (DB row, CF tunnel + DNS
+  // existence, env presence) so the Settings UI can show what's stuck
+  // when provision is failing. Requires Cloud sign-in.
+  ipcMain.handle('cloud-tunnel-diagnostics', async () => {
+    try {
+      // Reuse the existing cloud-sync client so we get auth + token
+      // refresh for free instead of re-implementing a Bearer request.
+      const sync = cloudIpc ? cloudIpc.getCloudSync() : null;
+      if (!sync) return { error: 'auth-required' };
+      const result = await sync._authedRequest('GET', '/v1/cloud-tunnel/diagnostics');
+      return { ok: true, result };
+    } catch (err) {
       return { error: err.message || String(err) };
     }
   });
@@ -15668,9 +15854,70 @@ app.whenReady().then(() => {
     return remoteServer.listPairedDevices();
   });
 
+  // Multi-operator profiles — back the Settings → Summary → Operator
+  // dropdown + Manage Operators dialog. Returning shape matches what
+  // the renderer expects: array of strings for list, status object for
+  // switch/add/archive.
+  ipcMain.handle('profiles-list', () => {
+    return {
+      active: settings && settings.activeProfile ? String(settings.activeProfile).toUpperCase() : null,
+      profiles: listProfiles(),
+    };
+  });
+  ipcMain.handle('profiles-add', (_e, callsign) => addProfile(callsign));
+  ipcMain.handle('profiles-switch', (_e, callsign) => {
+    const r = switchProfile(callsign);
+    if (r.ok) {
+      // Restart cleanly so every cached subsystem rebinds to the new
+      // operator's settings. setImmediate gives the IPC response time
+      // to land in the renderer before the window goes away.
+      setImmediate(() => {
+        app.relaunch();
+        app.exit(0);
+      });
+    }
+    return r;
+  });
+  ipcMain.handle('profiles-archive', (_e, callsign) => archiveProfile(callsign));
+
+  // QSO counts grouped by mode-family — feeds the Settings → Summary
+  // Logbook card. Falls back to zeros if the log file is missing
+  // (fresh install) rather than throwing.
+  ipcMain.handle('get-qso-counts', () => {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    const out = { total: 0, ssb: 0, cw: 0, digital: 0, sstv: 0, other: 0, logPath };
+    try {
+      if (!fs.existsSync(logPath)) return out;
+      const qsos = isSqliteFile(logPath) ? (parseSqliteFile(logPath) || []) : parseAllRawQsos(logPath);
+      out.total = qsos.length;
+      for (const q of qsos) {
+        const mode = (q.MODE || q.mode || '').toUpperCase();
+        const submode = (q.SUBMODE || q.submode || '').toUpperCase();
+        // SubMode wins when MODE is a generic container (e.g. MODE=DATA,
+        // SUBMODE=FT8 from WSJT-X). Fall back to MODE otherwise.
+        const m = submode || mode;
+        if (!m) { out.other++; continue; }
+        if (m === 'CW') out.cw++;
+        else if (/^(USB|LSB|SSB|AM|FM|NFM|WFM|DIGITALVOICE)$/.test(m)) out.ssb++;
+        else if (/^(FT8|FT4|JT9|JT65|JS8|MFSK|JT4|FST4|Q65|RTTY|PSK|PSK31|PSK63|OLIVIA|MT63|DOMINO|HELL|THOR|CONTESTI|VARA|PACTOR|DSTAR|C4FM|DMR|D-STAR|DATA)$/.test(m)) out.digital++;
+        else if (m === 'SSTV') out.sstv++;
+        else out.other++;
+      }
+    } catch (err) {
+      console.error('[get-qso-counts]', err.message);
+    }
+    return out;
+  });
+
   ipcMain.handle('echocat-revoke-device', (_e, deviceId) => {
     if (!remoteServer) return { ok: false, error: 'server not running' };
     const ok = remoteServer.revokeDevice(String(deviceId || ''));
+    return { ok };
+  });
+
+  ipcMain.handle('echocat-rename-device', (_e, deviceId, newName) => {
+    if (!remoteServer) return { ok: false, error: 'server not running' };
+    const ok = remoteServer.renameDevice(String(deviceId || ''), String(newName || ''));
     return { ok };
   });
 
@@ -16160,8 +16407,6 @@ app.whenReady().then(() => {
       (has('remotePort') && newSettings.remotePort !== settings.remotePort) ||
       (has('remoteToken') && newSettings.remoteToken !== settings.remoteToken) ||
       (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken) ||
-      (has('clubMode') && newSettings.clubMode !== settings.clubMode) ||
-      (has('clubCsvPath') && newSettings.clubCsvPath !== settings.clubCsvPath) ||
       (has('remoteCwEnabled') && newSettings.remoteCwEnabled !== settings.remoteCwEnabled) ||
       (has('cwKeyPort') && newSettings.cwKeyPort !== settings.cwKeyPort);
 
@@ -16634,57 +16879,6 @@ app.whenReady().then(() => {
   // --- QSO Logging IPC ---
   ipcMain.handle('get-default-log-path', () => {
     return path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-  });
-
-  // --- Club Station Mode IPC ---
-  ipcMain.handle('choose-club-csv-file', async () => {
-    const result = await dialog.showOpenDialog(win, {
-      title: 'Choose Club Users CSV',
-      filters: [
-        { name: 'CSV Files', extensions: ['csv'] },
-        { name: 'All Files', extensions: ['*'] },
-      ],
-      properties: ['openFile'],
-    });
-    if (result.canceled || !result.filePaths.length) return null;
-    return result.filePaths[0];
-  });
-
-  ipcMain.handle('preview-club-csv', async (_e, csvPath) => {
-    if (!csvPath) return { members: [], radioColumns: [], errors: ['No file path'] };
-    return loadClubUsers(csvPath);
-  });
-
-  ipcMain.handle('hash-club-passwords', async (_e, csvPath) => {
-    if (!csvPath) return { hashed: 0, alreadyHashed: 0, error: 'No file path' };
-    return hashPasswords(csvPath);
-  });
-
-  ipcMain.handle('create-club-csv', async (_e, rigNames) => {
-    // Default to same directory as the logbook file
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-    const logDir = path.dirname(logPath);
-    const defaultPath = path.join(logDir, 'club_users.csv');
-    const result = await dialog.showSaveDialog(win, {
-      title: 'Create Club Users CSV',
-      defaultPath,
-      filters: [
-        { name: 'CSV Files', extensions: ['csv'] },
-        { name: 'All Files', extensions: ['*'] },
-      ],
-    });
-    if (result.canceled) return null;
-    // Build header with fixed columns + rig names + schedule
-    const fixed = ['firstname', 'lastname', 'callsign', 'passwd', 'license', 'admin', 'user'];
-    const header = fixed.concat(rigNames || []).concat(['schedule']).join(',');
-    // Write header + one example row
-    const rigXs = (rigNames || []).map(() => 'x').join(',');
-    const exampleSched = rigNames && rigNames.length > 0
-      ? '"Mon 19:00-21:00 ' + rigNames[0] + '"'
-      : '""';
-    const example = 'Jane,Doe,W1AW,changeme,Extra,x,,' + rigXs + ',' + exampleSched;
-    fs.writeFileSync(result.filePath, header + '\n' + example + '\n');
-    return result.filePath;
   });
 
   // Generic file picker for the advanced ECHOCAT settings (TLS

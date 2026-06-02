@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   echocatCreatePairingQr: (opts) => ipcRenderer.invoke('echocat-create-pairing-qr', opts || {}),
   echocatListPairedDevices: () => ipcRenderer.invoke('echocat-list-paired-devices'),
   echocatRevokeDevice: (deviceId) => ipcRenderer.invoke('echocat-revoke-device', deviceId),
+  echocatRenameDevice: (deviceId, name) => ipcRenderer.invoke('echocat-rename-device', deviceId, name),
   echocatTailscaleStatus: () => ipcRenderer.invoke('echocat-tailscale-status'),
   echocatIssueTailscaleCert: () => ipcRenderer.invoke('echocat-issue-tailscale-cert'),
   echocatPickFile: (opts) => ipcRenderer.invoke('echocat-pick-file', opts || {}),
@@ -61,6 +62,7 @@ contextBridge.exposeInMainWorld('api', {
   cloudTunnelGetState: () => ipcRenderer.invoke('cloud-tunnel-get-state'),
   cloudTunnelEnable: () => ipcRenderer.invoke('cloud-tunnel-enable'),
   cloudTunnelDisable: () => ipcRenderer.invoke('cloud-tunnel-disable'),
+  cloudTunnelDiagnostics: () => ipcRenderer.invoke('cloud-tunnel-diagnostics'),
   onCloudTunnelState: (cb) => {
     const handler = (_e, state) => cb(state);
     ipcRenderer.on('cloud-tunnel-state', handler);
@@ -355,11 +357,6 @@ contextBridge.exposeInMainWorld('api', {
   onCwText: (cb) => ipcRenderer.on('cw-text', (_e, data) => cb(data)),
   // Remote Access
   getLocalIPs: () => ipcRenderer.invoke('get-local-ips'),
-  // Club Station Mode
-  chooseClubCsvFile: () => ipcRenderer.invoke('choose-club-csv-file'),
-  previewClubCsv: (csvPath) => ipcRenderer.invoke('preview-club-csv', csvPath),
-  hashClubPasswords: (csvPath) => ipcRenderer.invoke('hash-club-passwords', csvPath),
-  createClubCsv: (rigNames) => ipcRenderer.invoke('create-club-csv', rigNames),
   // Remote Launcher
   installLauncher: () => ipcRenderer.invoke('install-launcher'),
   uninstallLauncher: () => ipcRenderer.invoke('uninstall-launcher'),
@@ -435,4 +432,11 @@ contextBridge.exposeInMainWorld('api', {
   potaSyncSetInterval: (v) => ipcRenderer.invoke('pota-sync-set-interval', v),
   onPotaSyncStatus: (cb) => ipcRenderer.on('pota-sync-status', (_e, data) => cb(data)),
   onCloudUploadProgress: (cb) => ipcRenderer.on('cloud-upload-progress', (_e, data) => cb(data)),
+  // Settings → Summary card data
+  getQsoCounts: () => ipcRenderer.invoke('get-qso-counts'),
+  // Multi-operator profiles
+  profilesList: () => ipcRenderer.invoke('profiles-list'),
+  profilesAdd: (callsign) => ipcRenderer.invoke('profiles-add', callsign),
+  profilesSwitch: (callsign) => ipcRenderer.invoke('profiles-switch', callsign),
+  profilesArchive: (callsign) => ipcRenderer.invoke('profiles-archive', callsign),
 });

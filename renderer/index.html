@@ -1095,6 +1095,7 @@
 
   <!-- Settings dialog -->
   <dialog id="settings-dialog">
+    <div class="settings-shell">
     <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Settings <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
     <!-- 0. Connection Status (only visible when sources are enabled) -->
     <div id="settings-conn-status" class="settings-conn-bar hidden">
@@ -1109,7 +1110,8 @@
     <!-- Settings tab bar -->
     <div class="settings-tab-bar">
       <div class="settings-tabs-row">
-        <button type="button" class="settings-tab active" data-tab="station">Station</button>
+        <button type="button" class="settings-tab active" data-tab="summary">Summary</button>
+        <button type="button" class="settings-tab" data-tab="station">Station</button>
         <button type="button" class="settings-tab" data-tab="radio">Radio</button>
         <button type="button" class="settings-tab" data-tab="spots">Spots</button>
         <button type="button" class="settings-tab" data-tab="tuning">Tuning</button>
@@ -1121,6 +1123,131 @@
       <input type="text" id="settings-search" class="settings-search" placeholder="Search settings...">
     </div>
     <div class="settings-scroll-area">
+    <!-- 0. Summary (landing tab) -->
+    <fieldset class="source-toggles summary-tab-content" data-settings-tab="summary">
+      <legend>Summary</legend>
+      <div class="summary-cards">
+        <!-- Operator + Logbook share a row. At narrow widths the
+             .summary-pair grid collapses to a single column. -->
+        <div class="summary-pair">
+          <!-- Operator card -->
+          <div class="summary-card" id="summary-card-operator">
+            <div class="summary-card-head">
+              <span class="summary-card-title">Operator</span>
+              <a href="#" class="summary-card-link" id="summary-op-manage">Manage&hellip;</a>
+            </div>
+            <div class="summary-card-body">
+              <div class="summary-op-row">
+                <select id="summary-op-select" class="summary-op-select" title="Switch operator">
+                  <option value="">(no operators yet)</option>
+                </select>
+                <span class="summary-op-grid" id="summary-op-grid"></span>
+              </div>
+              <div class="summary-card-actions">
+                <button type="button" id="summary-op-add">+ Add operator</button>
+              </div>
+              <div class="summary-help">Each operator has their own callsign, grid, watchlist, logbook, macros, and Cloud account. Switching restarts POTACAT.</div>
+            </div>
+          </div>
+
+          <!-- Logbook card -->
+          <div class="summary-card" id="summary-card-logbook">
+            <div class="summary-card-head">
+              <span class="summary-card-title">Logbook</span>
+              <span class="summary-card-sub" id="summary-log-conn"></span>
+            </div>
+            <div class="summary-card-body">
+              <div class="summary-stat-grid" id="summary-log-stats">
+                <div class="summary-stat"><span class="summary-stat-val" id="summary-log-total">&mdash;</span><span class="summary-stat-key">Total</span></div>
+                <div class="summary-stat"><span class="summary-stat-val" id="summary-log-ssb">&mdash;</span><span class="summary-stat-key">SSB</span></div>
+                <div class="summary-stat"><span class="summary-stat-val" id="summary-log-cw">&mdash;</span><span class="summary-stat-key">CW</span></div>
+                <div class="summary-stat"><span class="summary-stat-val" id="summary-log-digi">&mdash;</span><span class="summary-stat-key">FT8/4/2</span></div>
+                <div class="summary-stat"><span class="summary-stat-val" id="summary-log-sstv">&mdash;</span><span class="summary-stat-key">SSTV</span></div>
+              </div>
+              <div class="summary-card-actions">
+                <button type="button" id="summary-log-open">Open Logbook</button>
+                <button type="button" id="summary-log-import">Import&hellip;</button>
+                <button type="button" id="summary-log-export">Export ADIF</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick settings — collapsible blocks for the few things
+             operators tend to flip on/off mid-session. Each input has
+             data-mirror="ID-of-canonical-input" so the existing save
+             flow (which reads from the Station tab IDs) keeps working
+             without changes. -->
+        <div class="summary-quick">
+          <div class="summary-quick-title">Quick settings</div>
+          <details class="summary-quick-section">
+            <summary class="summary-quick-summary">
+              <span>CW Keyer</span>
+              <span class="summary-quick-state" id="quick-cw-state">off</span>
+            </summary>
+            <div class="summary-quick-body">
+              <label class="summary-quick-row">
+                <input type="checkbox" id="quick-cw-enabled" data-mirror="set-enable-cw-keyer">
+                <span>Enable CW Keyer</span>
+              </label>
+              <label class="summary-quick-row">
+                <span>Keyer type:</span>
+                <select id="quick-cw-type" data-mirror="set-cw-keyer-type">
+                  <option value="keyboard">Keyboard (VBand / Vail)</option>
+                  <option value="midi">MIDI Paddle (software iambic)</option>
+                  <option value="winkeyer">K1EL WinKeyer</option>
+                </select>
+              </label>
+              <label class="summary-quick-row">
+                <input type="checkbox" id="quick-cw-sidetone" data-mirror="set-cw-sidetone">
+                <span>Local sidetone</span>
+              </label>
+              <div class="summary-quick-row summary-quick-row-indent">
+                <label>Pitch (Hz):
+                  <input type="number" id="quick-cw-sidetone-pitch" min="300" max="1000" data-mirror="set-cw-sidetone-pitch" style="width:64px;">
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;">Vol:
+                  <input type="range" id="quick-cw-sidetone-volume" min="0" max="100" data-mirror="set-cw-sidetone-volume" style="width:90px;accent-color:#4fc3f7;">
+                  <span id="quick-cw-sidetone-volume-label" style="font-size:11px;min-width:28px;">30%</span>
+                </label>
+              </div>
+              <div class="summary-help">Full keyer options (mode, paddles, MIDI/WinKeyer setup) live under Settings &rarr; Station &rarr; CW Keyer.</div>
+            </div>
+          </details>
+        </div>
+
+        <!-- Cloud card host — filled by _renderSummaryCloud(). Same
+             host markup also lives in the ECHOCAT settings tab. -->
+        <div class="summary-card" id="summary-card-cloud" data-summary-card="cloud"></div>
+
+        <!-- ECHOCAT card host — filled by _renderSummaryEchocat().
+             Same host markup also lives in the ECHOCAT settings tab. -->
+        <div class="summary-card" id="summary-card-echocat" data-summary-card="echocat"></div>
+
+        <!-- POTA.app card -->
+        <div class="summary-card" id="summary-card-pota">
+          <div class="summary-card-head">
+            <span class="summary-card-title">POTA.app</span>
+            <span class="summary-pill" id="summary-pota-pill">&mdash;</span>
+          </div>
+          <div class="summary-card-body">
+            <div class="summary-line" id="summary-pota-signed"></div>
+            <div class="summary-pota-stats" id="summary-pota-stats">
+              <div class="summary-pota-row"><span class="summary-pota-role">Hunter</span>
+                <span class="summary-pota-vals"><span id="summary-pota-h-parks">&mdash;</span> parks &middot; <span id="summary-pota-h-qsos">&mdash;</span> QSOs &middot; <span id="summary-pota-h-awards">&mdash;</span> awards &middot; <span id="summary-pota-h-endorse">&mdash;</span> endorsements</span>
+              </div>
+              <div class="summary-pota-row"><span class="summary-pota-role">Activator</span>
+                <span class="summary-pota-vals"><span id="summary-pota-a-acts">&mdash;</span> activations &middot; <span id="summary-pota-a-parks">&mdash;</span> parks &middot; <span id="summary-pota-a-qsos">&mdash;</span> QSOs</span>
+              </div>
+            </div>
+            <div class="summary-card-actions" id="summary-pota-actions">
+              <button type="button" id="summary-pota-refresh">Refresh</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </fieldset>
+
     <!-- 0.5 App Mode -->
     <fieldset class="source-toggles" data-settings-tab="station">
       <legend>App Mode</legend>
@@ -2335,336 +2462,169 @@
         <button type="button" id="hotkey-add-btn" style="margin-top:6px;font-size:11px;padding:3px 10px;cursor:pointer;">+ Add Hotkey</button>
       </div>
     </fieldset>
-    <!-- 10. ECHOCAT -->
-    <!-- Section order: Cloud Tunnel banner → Pair Mobile App →
-         Tailscale → Remote CW Keyer → Connection / Audio & PTT /
-         Sharing → Advanced. The Cloud Tunnel banner mirrors state
-         from the canonical control panel on the Cloud tab. -->
+    <!-- 10. ECHOCAT — daily ops mirror the Summary tab cards (Cloud,
+         ECHOCAT) at the top; below them, the technical setup knobs
+         live in their own sections. The old Cloud Tunnel banner,
+         Pair Mobile App section, paired-devices list, and Guest Pass
+         form were removed 2026-06-02 — those flows now live in the
+         Summary cards + Share My Rig dialog. -->
     <fieldset class="source-toggles" data-settings-tab="network">
       <legend>ECHOCAT</legend>
 
-      <!-- (1) POTACAT Cloud Tunnel — primary remote path. Canonical
-           controls live on the Cloud tab; this banner reflects state
-           and links there. Sits OUTSIDE #remote-config so it shows
-           even when ECHOCAT is disabled. -->
-      <div id="echocat-cloud-banner" class="echocat-cloud-banner">
-        <div class="echocat-cloud-banner-head">
-          <div class="echocat-cloud-banner-text">
-            <div>
-              <strong>POTACAT Cloud Tunnel</strong>
-              <span id="echocat-cloud-banner-pill" class="status disconnected" style="margin-left:8px;">LAN only</span>
-            </div>
-            <span class="help-text" style="display:block;margin-top:3px;">One-tap remote &mdash; reach your rig from anywhere, no Tailscale or port forwarding.</span>
-          </div>
-          <button type="button" id="echocat-cloud-banner-manage" class="btn">Manage in Cloud tab</button>
+      <!-- Mirrors of the Summary Cloud + ECHOCAT cards. Rendered by
+           _renderSummaryCloud / _renderSummaryEchocat into every
+           [data-summary-card] host on every refreshSummaryCard tick. -->
+      <div class="summary-card" data-summary-card="cloud" style="margin-bottom:12px;"></div>
+      <div class="summary-card" data-summary-card="echocat" style="margin-bottom:14px;"></div>
+
+      <!-- Remote CW Keyer -->
+      <div class="pair-section">
+        <strong>Remote CW Keyer</strong>
+        <div style="margin-top:6px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-remote-cw-enabled"> Enable Remote CW Keyer</label>
+          <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). FlexRadio users need no extra setup &mdash; CW keys via SmartSDR automatically.</span>
         </div>
-        <div id="echocat-cloud-banner-host" style="font-family:monospace;font-size:12px;color:var(--accent-blue);margin-top:6px;word-break:break-all;"></div>
+        <div style="margin-top:6px;margin-left:12px;">
+          <label>CW Key Port &mdash; optional (DTR keying):
+            <input list="cw-key-port-list" id="set-cw-key-port" style="width:220px;background:var(--bg-input);border:1px solid var(--border-primary);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:13px;" placeholder="None, or type COM port">
+            <datalist id="cw-key-port-list"></datalist>
+          </label>
+          <span class="help-text" style="display:block;">Only needed for non-Flex rigs (QMX, etc). Uses a separate USB-serial adapter to key CW via the DTR pin. Leave as "none" for FlexRadio.</span>
+        </div>
       </div>
 
-      <div id="remote-config" class="radio-sub" style="margin-top:14px;margin-left:0;">
+      <!-- Audio & PTT — PTT safety timeout, SSB-over-DATA, Restart
+           Audio Bridge, TX EQ + Compression. -->
+      <div class="pair-section">
+        <strong>Audio &amp; PTT</strong>
+        <div id="remote-audio-display" style="margin-top:6px;font-size:12px;color:#aaa;">
+          Audio: <span id="remote-audio-summary">not configured</span>
+          <a href="#" id="remote-audio-edit-link" style="margin-left:8px;font-size:11px;color:#4fc3f7;cursor:pointer;">Edit in Radio tab</a>
+        </div>
+        <span class="help-text" style="display:block;margin-top:2px;">Audio source (DAX vs. SmartSDR Direct) is set per-rig under Settings &rarr; Radio &rarr; your Flex rig.</span>
+        <div style="margin-top:8px;">
+          <label>PTT Safety Timeout (seconds):
+            <input type="number" id="set-remote-ptt-timeout" min="30" max="600" value="180" style="width:70px;">
+          </label>
+        </div>
+        <div style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-ssb-over-data"> SSB-over-DATA (prevent local mic bleed)</label>
+          <span class="help-text" style="margin-left:12px;display:block;">Switches radio to DATA-USB/DATA-LSB during PTT <b>when audio is being sent through the rig's USB CODEC</b> &mdash; i.e. ECHOCAT phone audio bridge active, voice macros playing, or FreeDV running. <b>Naked PTT (mic-in-hand or hardware footswitch) leaves the mode alone</b>, so the rig's own mic still works. Recommended on for remote operation, harmless for everyone else.<br>
+          <b>Yaesu (FT-991/710/DX10/etc.):</b> set the rig menu <code>DATA MODE = Others</code> (or DATA-STD). The default <code>PSK</code> setting makes DIGL/DIGU shift the TX carrier ~1500 Hz below the dial and your transmission will land off-frequency.</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <div>
+            <strong>Restart audio bridge</strong>
+            <span class="help-text" style="display:block;">Rebuilds the ECHOCAT audio bridge and re-grabs the rig audio device. Fixes the RDP audio-shuffle issue where the phone hears silence after you Remote-Desktop into the shack PC.</span>
+            <span id="echocat-restart-audio-status" class="help-text" style="display:block;color:var(--accent-blue);"></span>
+          </div>
+          <button type="button" id="echocat-restart-audio-btn" style="padding:4px 12px;">Restart audio</button>
+        </div>
+        <!-- TX EQ + Compressor — direct audio paths only (SmartSDR
+             Direct, K4 network). DAX-device path bypasses Web Audio. -->
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <div style="flex:1;min-width:280px;">
+            <strong>TX EQ + Compression <span style="color:#888;font-weight:normal;font-size:11px;">(SmartSDR Direct &amp; K4 network)</span></strong>
+            <span class="help-text" style="display:block;">Compensates for radios that disable internal EQ + compression in DATA mode (IC-7300 and similar). Applied to mic audio before it reaches the rig.</span>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="set-tx-eq-enabled">
+            <span>Enable</span>
+          </label>
+        </div>
+        <div id="set-tx-eq-preset-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;padding-left:6px;">
+          <span style="font-size:12px;color:#aaa;">Preset</span>
+          <select id="set-tx-eq-preset" style="padding:4px;min-width:150px;">
+            <option value="ragchew">Ragchew &mdash; flat, light comp</option>
+            <option value="pileup">Pileup &mdash; +6 dB @ 2 kHz, 4:1 comp</option>
+            <option value="dx">DX &mdash; +9 dB @ 2 kHz, 6:1 comp</option>
+            <option value="custom">Custom (configure in VFO popout)</option>
+          </select>
+        </div>
+      </div>
 
-        <!-- (2) Pair Mobile App — the primary call-to-action once
-             ECHOCAT is enabled. State display is populated by JS
-             from cloud auth + entitlement + tunnel state. -->
-        <div class="pair-section" style="margin-top:0;border-top:none;padding-top:0;">
-          <div class="pair-header">
-            <div>
-              <strong>Pair Mobile App</strong>
-              <span class="help-text">Connect the POTACAT mobile app to this rig from anywhere &mdash; preferably via POTACAT Cloud Tunnel.</span>
+      <!-- Remote Launcher — separate background process that lets the
+           phone restart POTACAT after a crash / hang. Lives outside
+           POTACAT itself so it survives POTACAT dying. -->
+      <div class="pair-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:280px;">
+            <strong>Remote Launcher <span id="launcher-status-pill" class="help-text" style="font-weight:normal;margin-left:6px;color:#888;">checking&hellip;</span></strong>
+            <span class="help-text" style="display:block;">Starts a tiny background server (port 7301) so the phone app can start/restart POTACAT when it crashes or you close it accidentally. Auto-launches at login.</span>
+            <span id="launcher-status-detail" class="help-text" style="display:block;color:#888;font-size:11px;"></span>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button type="button" id="launcher-install-btn" style="padding:4px 12px;">Install</button>
+            <button type="button" id="launcher-uninstall-btn" style="padding:4px 12px;" class="hidden">Uninstall</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tailscale — alternative remote path. Collapsed by default;
+           operators only see the install steps when they need them. -->
+      <details class="pair-section">
+        <summary style="cursor:pointer;"><strong>Tailscale (alternative VPN)</strong></summary>
+        <span class="help-text" style="display:block;margin-top:6px;">Use Tailscale (free) on both your computer and phone if POTACAT Cloud isn't an option. Audio, tuning, and PTT are encrypted over the VPN tunnel.</span>
+        <ol class="pair-tailscale-steps" style="margin-top:8px;">
+          <li>Install <a href="https://tailscale.com/download" data-external="1">Tailscale</a> on this computer and your phone; sign both in to the same tailnet.</li>
+          <li>Open <a href="https://login.tailscale.com/admin/dns" data-external="1">login.tailscale.com/admin/dns</a> and turn on <strong>MagicDNS</strong> AND <strong>HTTPS Certificates</strong>.</li>
+          <li>POTACAT will detect Tailscale and issue a TLS cert automatically — pair from the ECHOCAT card above.</li>
+        </ol>
+        <div class="pair-tailscale-status">
+          <strong>Tailscale status: </strong>
+          <span id="echocat-ts-status">Checking&hellip;</span>
+        </div>
+      </details>
+
+      <!-- Advanced — non-default network / TLS setups. Also holds the
+           Connection knobs (port, token, STUN) since the defaults work
+           for everyone running stock ECHOCAT. -->
+      <details style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
+        <summary style="cursor:pointer;font-size:13px;color:#aaa;outline:none;user-select:none;">Advanced ECHOCAT settings</summary>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+          <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">Connection</label>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;">
+              <label>Port:
+                <input type="number" id="set-remote-port" placeholder="7300" min="1024" max="65535" value="7300" style="width:80px;">
+              </label>
+              <label class="checkbox-label" style="margin:0;"><input type="checkbox" id="set-remote-require-token"> Require access token</label>
             </div>
-            <button type="button" id="echocat-pair-btn" class="btn">Open pairing QR</button>
-          </div>
-          <div id="pair-state-display" class="pair-state-display"></div>
-          <div id="remote-url-display" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
-          <div style="margin-top:10px;">
-            <strong style="font-size:12px;">Paired devices:</strong>
-            <ul id="echocat-paired-list" style="list-style:none;padding:0;margin:6px 0 0;font-size:12px;">
-              <li style="color:#888;">No devices paired yet.</li>
-            </ul>
-          </div>
-        </div>
-
-        <!-- (3) Tailscale — own section, no longer collapsible.
-             Recommended when POTACAT Cloud isn't an option. -->
-        <div class="pair-section">
-          <strong>Tailscale (alternative VPN)</strong>
-          <span class="help-text" style="display:block;margin-top:2px;">Use Tailscale (free) on both your computer and phone if POTACAT Cloud isn't an option. Audio, tuning, and PTT are encrypted over the VPN tunnel.</span>
-          <ol class="pair-tailscale-steps" style="margin-top:8px;">
-            <li>Install <a href="https://tailscale.com/download" target="_blank">Tailscale</a> on this computer and your phone; sign both in to the same tailnet.</li>
-            <li>Open <a href="https://login.tailscale.com/admin/dns" target="_blank">login.tailscale.com/admin/dns</a> and turn on <strong>MagicDNS</strong> AND <strong>HTTPS Certificates</strong>.</li>
-            <li>Click <em>Open pairing QR</em> above. POTACAT will issue a TLS cert and show the QR.</li>
-          </ol>
-          <div class="pair-tailscale-status">
-            <strong>Tailscale status: </strong>
-            <span id="echocat-ts-status">Checking&hellip;</span>
-          </div>
-        </div>
-
-        <!-- (4) Remote CW Keyer — promoted to its own section. -->
-        <div class="pair-section">
-          <strong>Remote CW Keyer</strong>
-          <div style="margin-top:6px;">
-            <label class="checkbox-label"><input type="checkbox" id="set-remote-cw-enabled"> Enable Remote CW Keyer</label>
-            <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). FlexRadio users need no extra setup &mdash; CW keys via SmartSDR automatically.</span>
-          </div>
-          <div style="margin-top:6px;margin-left:12px;">
-            <label>CW Key Port &mdash; optional (DTR keying):
-              <input list="cw-key-port-list" id="set-cw-key-port" style="width:220px;background:var(--bg-input);border:1px solid var(--border-primary);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:13px;" placeholder="None, or type COM port">
-              <datalist id="cw-key-port-list"></datalist>
-            </label>
-            <span class="help-text" style="display:block;">Only needed for non-Flex rigs (QMX, etc). Uses a separate USB-serial adapter to key CW via the DTR pin. Leave as "none" for FlexRadio.</span>
-          </div>
-        </div>
-
-        <!-- (5) Connection — port, token, STUN. -->
-        <div class="pair-section">
-          <strong>Connection</strong>
-          <div style="margin-top:6px;">
-            <label>Port:
-              <input type="number" id="set-remote-port" placeholder="7300" min="1024" max="65535" value="7300" style="width:80px;">
-            </label>
-          </div>
-          <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-remote-require-token"> Require access token</label>
-          <div id="remote-token-row" class="hidden" style="margin-top:6px;display:flex;align-items:center;gap:8px;">
-            <label>Token:
-              <input type="text" id="set-remote-token" style="width:120px;font-family:monospace;letter-spacing:1px;text-transform:uppercase;" placeholder="e.g. K3SBP" autocomplete="off" spellcheck="false">
-            </label>
-            <button type="button" id="remote-regen-token" style="padding:2px 8px;">Random</button>
-          </div>
-          <span class="help-text" style="display:block;margin-top:4px;">Your VPN may be plenty secure. Add a remote log-in token if you want added security.</span>
-          <div style="margin-top:10px;">
-            <label class="checkbox-label"><input type="checkbox" id="set-remote-stun"> Enable STUN (audio without VPN)</label>
+            <div id="remote-token-row" class="hidden" style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+              <label>Token:
+                <input type="text" id="set-remote-token" style="width:120px;font-family:monospace;letter-spacing:1px;text-transform:uppercase;" placeholder="e.g. K3SBP" autocomplete="off" spellcheck="false">
+              </label>
+              <button type="button" id="remote-regen-token" style="padding:2px 8px;">Random</button>
+            </div>
+            <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-remote-stun"> Enable STUN (audio without VPN)</label>
             <span class="help-text" style="margin-left:12px;display:block;">Uses Google's public STUN server to discover your public IP, enabling WebRTC audio across the internet without a VPN. Only needed if you can't use Tailscale or both devices aren't on the same network.</span>
           </div>
-        </div>
-
-        <!-- (6) Audio & PTT — everything that touches the audio
-             bridge or transmit path. -->
-        <div class="pair-section">
-          <strong>Audio &amp; PTT</strong>
-          <div id="remote-audio-display" style="margin-top:6px;font-size:12px;color:#aaa;">
-            Audio: <span id="remote-audio-summary">not configured</span>
-            <a href="#" id="remote-audio-edit-link" style="margin-left:8px;font-size:11px;color:#4fc3f7;cursor:pointer;">Edit in Radio tab</a>
+          <div>
+            <label for="set-echocat-pair-host" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">Pair host override</label>
+            <input type="text" id="set-echocat-pair-host" placeholder="e.g. shack.example.com or 192.168.1.50" style="width:100%;font-family:monospace;font-size:12px;padding:4px 6px;">
+            <span class="help-text" style="display:block;margin-top:3px;">Force a specific hostname or IP into the pairing QR instead of letting POTACAT auto-pick. Leave blank to auto-detect (Tailscale MagicDNS first, then LAN).</span>
           </div>
-          <span class="help-text" style="display:block;margin-top:2px;">Audio source (DAX vs. SmartSDR Direct) is set per-rig under Settings &rarr; Radio &rarr; your Flex rig.</span>
-          <div style="margin-top:8px;">
-            <label>PTT Safety Timeout (seconds):
-              <input type="number" id="set-remote-ptt-timeout" min="30" max="600" value="180" style="width:70px;">
-            </label>
-          </div>
-          <div style="margin-top:8px;">
-            <label class="checkbox-label"><input type="checkbox" id="set-ssb-over-data"> SSB-over-DATA (prevent local mic bleed)</label>
-            <span class="help-text" style="margin-left:12px;display:block;">Switches radio to DATA-USB/DATA-LSB during PTT <b>when audio is being sent through the rig's USB CODEC</b> &mdash; i.e. ECHOCAT phone audio bridge active, voice macros playing, or FreeDV running. <b>Naked PTT (mic-in-hand or hardware footswitch) leaves the mode alone</b>, so the rig's own mic still works. Recommended on for remote operation, harmless for everyone else.<br>
-            <b>Yaesu (FT-991/710/DX10/etc.):</b> set the rig menu <code>DATA MODE = Others</code> (or DATA-STD). The default <code>PSK</code> setting makes DIGL/DIGU shift the TX carrier ~1500 Hz below the dial and your transmission will land off-frequency.</span>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px;">
-            <div>
-              <strong>Restart audio</strong>
-              <span class="help-text" style="display:block;">Rebuilds the ECHOCAT audio bridge and re-grabs the rig audio device. Fixes the RDP audio-shuffle issue where the phone hears silence after you Remote-Desktop into the shack PC.</span>
-              <span id="echocat-restart-audio-status" class="help-text" style="display:block;color:var(--accent-blue);"></span>
-            </div>
-            <button type="button" id="echocat-restart-audio-btn" style="padding:4px 12px;">Restart audio</button>
-          </div>
-          <!-- TX EQ + Compressor (Phase 1). Only applies to the
-               direct audio paths (SmartSDR Direct + K4 network) where
-               we have Web Audio in the chain — the legacy DAX-device
-               path goes straight to a sink element with no place to
-               splice DSP. Off by default. -->
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px;">
-            <div style="flex:1;min-width:280px;">
-              <strong>TX EQ + Compression <span style="color:#888;font-weight:normal;font-size:11px;">(SmartSDR Direct &amp; K4 network)</span></strong>
-              <span class="help-text" style="display:block;">Compensates for radios that disable internal EQ + compression in DATA mode (IC-7300 and similar). Applied to mic audio before it reaches the rig.</span>
-            </div>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-              <input type="checkbox" id="set-tx-eq-enabled">
-              <span>Enable</span>
-            </label>
-          </div>
-          <div id="set-tx-eq-preset-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;padding-left:6px;">
-            <span style="font-size:12px;color:#aaa;">Preset</span>
-            <select id="set-tx-eq-preset" style="padding:4px;min-width:150px;">
-              <option value="ragchew">Ragchew &mdash; flat, light comp</option>
-              <option value="pileup">Pileup &mdash; +6 dB @ 2 kHz, 4:1 comp</option>
-              <option value="dx">DX &mdash; +9 dB @ 2 kHz, 6:1 comp</option>
-              <option value="custom">Custom (configure in VFO popout)</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- (7) Sharing — Remote Launcher (canonical), Guest Pass, Club Mode. -->
-        <div class="pair-section">
-          <strong>Sharing &amp; Recovery</strong>
-
-          <!-- Remote Launcher — separate process that lets the phone
-               restart POTACAT after a crash / hang. Lives outside
-               POTACAT itself so it survives POTACAT dying. -->
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px;">
-            <div style="flex:1;min-width:280px;">
-              <strong>Remote Launcher <span id="launcher-status-pill" class="help-text" style="font-weight:normal;margin-left:6px;color:#888;">checking&hellip;</span></strong>
-              <span class="help-text" style="display:block;">Starts a tiny background server (port 7301) so the phone app can start/restart POTACAT when it crashes or you close it accidentally. Auto-launches at login.</span>
-              <span id="launcher-status-detail" class="help-text" style="display:block;color:#888;font-size:11px;"></span>
-            </div>
+          <div>
+            <label for="set-echocat-tls-cert-path" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">TLS certificate file</label>
             <div style="display:flex;gap:6px;">
-              <button type="button" id="launcher-install-btn" style="padding:4px 12px;">Install</button>
-              <button type="button" id="launcher-uninstall-btn" style="padding:4px 12px;" class="hidden">Uninstall</button>
+              <input type="text" id="set-echocat-tls-cert-path" placeholder="leave blank to use Tailscale-issued cert" style="flex:1;font-family:monospace;font-size:12px;padding:4px 6px;min-width:0;">
+              <button type="button" id="echocat-tls-cert-browse" style="padding:4px 10px;font-size:12px;flex-shrink:0;">Browse…</button>
             </div>
           </div>
-
-          <!-- Guest Pass (Phase 2 — desktop UI for rig swap). Lets
-               the owner generate a time-boxed, privilege-limited access
-               pass right from the desktop. Issuance and revoke hit the
-               same cloud endpoints the mobile app uses. -->
-          <div class="gp-section">
-            <div class="gp-row-header">
-              <div>
-                <strong>Guest Pass</strong>
-                <span class="help-text">Hand the rig to a friend for a fixed window, with guardrails. Out-of-band tunes blocked, TX power clamped, session auto-ends at expiry. They log to their own logbook.</span>
-              </div>
-              <button type="button" id="gp-toggle-btn" class="btn">Open Guest Pass</button>
+          <div>
+            <label for="set-echocat-tls-key-path" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">TLS private key file</label>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="set-echocat-tls-key-path" placeholder="(matches the cert above)" style="flex:1;font-family:monospace;font-size:12px;padding:4px 6px;min-width:0;">
+              <button type="button" id="echocat-tls-key-browse" style="padding:4px 10px;font-size:12px;flex-shrink:0;">Browse…</button>
             </div>
-            <div id="gp-form-wrap" class="gp-form-wrap hidden">
-
-              <div class="gp-grid">
-                <label class="gp-label" for="gp-start-dt">Start</label>
-                <div class="gp-input-row">
-                  <input type="datetime-local" id="gp-start-dt" class="gp-input">
-                  <button type="button" class="btn btn-sm" id="gp-now-btn">Now</button>
-                </div>
-
-                <label class="gp-label" for="gp-end-dt">End</label>
-                <div class="gp-input-row gp-end-row">
-                  <input type="datetime-local" id="gp-end-dt" class="gp-input">
-                  <div class="gp-bump-buttons">
-                    <span class="gp-bump-label">Day</span>
-                    <button type="button" class="btn btn-sm gp-bump" data-unit="day" data-sign="-1">&minus;</button>
-                    <button type="button" class="btn btn-sm gp-bump" data-unit="day" data-sign="1">+</button>
-                    <span class="gp-bump-label">Hr</span>
-                    <button type="button" class="btn btn-sm gp-bump" data-unit="hour" data-sign="-1">&minus;</button>
-                    <button type="button" class="btn btn-sm gp-bump" data-unit="hour" data-sign="1">+</button>
-                    <span class="gp-bump-label">Min</span>
-                    <button type="button" class="btn btn-sm gp-bump" data-unit="minute" data-sign="-15">&minus;15</button>
-                    <button type="button" class="btn btn-sm gp-bump" data-unit="minute" data-sign="15">+15</button>
-                  </div>
-                </div>
-
-                <label class="gp-label">Time zone</label>
-                <div class="gp-input-row">
-                  <label class="gp-tz-toggle"><input type="radio" name="gp-tz" value="local" checked> <span id="gp-tz-local-label">Local</span></label>
-                  <label class="gp-tz-toggle"><input type="radio" name="gp-tz" value="utc"> UTC</label>
-                  <span id="gp-duration-label" class="help-text"></span>
-                </div>
-
-                <label class="gp-label" for="gp-class">License class</label>
-                <select id="gp-class" class="gp-input">
-                  <option value="tech">Technician</option>
-                  <option value="general" selected>General</option>
-                  <option value="extra">Extra</option>
-                </select>
-
-                <label class="gp-label" for="gp-power">Max TX power</label>
-                <div class="gp-input-row">
-                  <input type="number" id="gp-power" min="1" max="1500" value="100" class="gp-input gp-input-narrow">
-                  <span class="help-text">watts (1&ndash;1500)</span>
-                </div>
-
-                <label class="gp-label" for="gp-station-call">Station call</label>
-                <input type="text" id="gp-station-call" class="gp-input gp-input-call" autocomplete="off" spellcheck="false">
-
-                <label class="gp-label" for="gp-operator-call">Operator call</label>
-                <input type="text" id="gp-operator-call" class="gp-input gp-input-call" placeholder="(guest's call)" autocomplete="off" spellcheck="false">
-
-                <label class="gp-label" for="gp-control-op">Control op</label>
-                <input type="text" id="gp-control-op" class="gp-input gp-input-call" placeholder="(optional)" autocomplete="off" spellcheck="false">
-              </div>
-
-              <span class="help-text gp-disclaimer">
-                You decide how <code>STATION_CALLSIGN</code>, <code>OPERATOR</code>, and the control operator are filled per
-                <a href="https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-B/section-97.119" target="_blank">&sect;97.119</a>.
-                POTACAT records what you set &mdash; no hard-coded legal stance.
-              </span>
-
-              <div class="gp-actions">
-                <button type="button" id="gp-issue-btn" class="btn btn-primary">Generate pass</button>
-                <button type="button" id="gp-refresh-btn" class="btn">My passes</button>
-                <span id="gp-status" class="help-text"></span>
-              </div>
-
-              <div id="gp-result" class="gp-result hidden">
-                <div class="gp-result-code" id="gp-result-code"></div>
-                <div id="gp-result-meta" class="help-text"></div>
-                <div class="gp-result-share">
-                  <img id="gp-result-qr" class="gp-result-qr" alt="QR">
-                  <div class="gp-result-share-text">
-                    <div class="gp-label">Share URL</div>
-                    <div id="gp-result-url" class="gp-result-url"></div>
-                    <div class="gp-result-buttons">
-                      <button type="button" id="gp-result-copy-code" class="btn btn-sm">Copy code</button>
-                      <button type="button" id="gp-result-copy-url" class="btn btn-sm">Copy URL</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div id="gp-list-wrap" class="gp-list-wrap hidden">
-                <div class="gp-label">My recent passes</div>
-                <ul id="gp-list" class="gp-list"></ul>
-              </div>
-            </div>
+            <span class="help-text" style="display:block;margin-top:3px;">Use a cert you manage yourself (corporate CA, mkcert, public DNS + Let's Encrypt, reverse proxy chain). When both paths are set and readable, POTACAT skips its self-signed and Tailscale-cert paths and serves these.</span>
           </div>
-
-          <!-- Club Station Mode -->
-          <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
-            <label class="checkbox-label"><input type="checkbox" id="set-club-mode"> Club Station Mode</label>
-            <span class="help-text" style="margin-left:12px;display:block;">Members log in with callsign + password. Band enforcement by license class. Audit logging.</span>
-            <div id="club-config" class="hidden" style="margin-top:8px;margin-left:12px;">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                <label>Members CSV:
-                  <input type="text" id="set-club-csv-path" readonly placeholder="Choose file..." style="width:200px;cursor:pointer;">
-                </label>
-                <button type="button" id="club-csv-browse" style="padding:2px 8px;">Browse</button>
-                <button type="button" id="club-csv-create" style="padding:2px 8px;">Create New</button>
-              </div>
-              <button type="button" id="club-hash-passwords" style="padding:2px 10px;margin-bottom:8px;">Hash Passwords</button>
-              <span id="club-hash-status" style="font-size:11px;color:#aaa;margin-left:8px;"></span>
-              <div id="club-preview" style="margin-top:8px;max-height:180px;overflow-y:auto;font-size:11px;"></div>
-              <div id="club-schedule" style="margin-top:10px;"></div>
-            </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button type="button" id="echocat-ts-renew-btn" style="padding:4px 12px;">Force-renew Tailscale cert</button>
+            <span id="echocat-ts-renew-status" class="help-text" style="margin:0;"></span>
           </div>
         </div>
-
-        <!-- (8) Advanced — for users with non-default network or
-             TLS setups. Hidden behind a disclosure so the default
-             panel stays uncluttered. -->
-        <details style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
-          <summary style="cursor:pointer;font-size:13px;color:#aaa;outline:none;user-select:none;">Advanced ECHOCAT settings</summary>
-          <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
-            <div>
-              <label for="set-echocat-pair-host" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">Pair host override</label>
-              <input type="text" id="set-echocat-pair-host" placeholder="e.g. shack.example.com or 192.168.1.50" style="width:100%;font-family:monospace;font-size:12px;padding:4px 6px;">
-              <span class="help-text" style="display:block;margin-top:3px;">Force a specific hostname or IP into the pairing QR instead of letting POTACAT auto-pick. Leave blank to auto-detect (Tailscale MagicDNS first, then LAN).</span>
-            </div>
-            <div>
-              <label for="set-echocat-tls-cert-path" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">TLS certificate file</label>
-              <div style="display:flex;gap:6px;">
-                <input type="text" id="set-echocat-tls-cert-path" placeholder="leave blank to use Tailscale-issued cert" style="flex:1;font-family:monospace;font-size:12px;padding:4px 6px;min-width:0;">
-                <button type="button" id="echocat-tls-cert-browse" style="padding:4px 10px;font-size:12px;flex-shrink:0;">Browse…</button>
-              </div>
-            </div>
-            <div>
-              <label for="set-echocat-tls-key-path" style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">TLS private key file</label>
-              <div style="display:flex;gap:6px;">
-                <input type="text" id="set-echocat-tls-key-path" placeholder="(matches the cert above)" style="flex:1;font-family:monospace;font-size:12px;padding:4px 6px;min-width:0;">
-                <button type="button" id="echocat-tls-key-browse" style="padding:4px 10px;font-size:12px;flex-shrink:0;">Browse…</button>
-              </div>
-              <span class="help-text" style="display:block;margin-top:3px;">Use a cert you manage yourself (corporate CA, mkcert, public DNS + Let's Encrypt, reverse proxy chain). When both paths are set and readable, POTACAT skips its self-signed and Tailscale-cert paths and serves these.</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;">
-              <button type="button" id="echocat-ts-renew-btn" style="padding:4px 12px;">Force-renew Tailscale cert</button>
-              <span id="echocat-ts-renew-status" class="help-text" style="margin:0;"></span>
-            </div>
-          </div>
-        </details>
-      </div>
+      </details>
     </fieldset>
     <!-- 11. About (merged Privacy + Diagnostics) -->
     <fieldset class="source-toggles" data-settings-tab="display">
@@ -2943,6 +2903,165 @@
         <a href="#" id="check-update-link">Check for Updates</a>
       </div>
       <span id="pi-access" class="pi-access">&pi;</span>
+    </div>
+    </div><!-- /.settings-shell -->
+  </dialog>
+
+  <!-- Cloud Tunnel diagnostics dialog -->
+  <dialog id="tunnel-diag-dialog">
+    <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Cloud Tunnel Diagnostics <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
+    <p class="help-text" style="margin-bottom:10px;">Live state of your POTACAT Cloud tunnel — DB row, Cloudflare tunnel + DNS records, env vars on the cloud server. Use this when "Turn on tunnel" fails to see which step is stuck.</p>
+    <div id="tunnel-diag-status" class="help-text" style="margin-bottom:8px;"></div>
+    <div id="tunnel-diag-summary" style="font-size:12px;line-height:1.7;margin-bottom:10px;"></div>
+    <pre id="tunnel-diag-raw" style="background:var(--bg-primary);border:1px solid var(--border-secondary);border-radius:4px;padding:10px;font-size:11px;color:var(--text-secondary);max-height:300px;overflow:auto;font-family:monospace;white-space:pre-wrap;word-break:break-word;"></pre>
+    <div class="dialog-buttons">
+      <button type="button" id="tunnel-diag-refresh">Refresh</button>
+      <button type="button" id="tunnel-diag-copy">Copy JSON</button>
+      <button type="button" id="tunnel-diag-close">Close</button>
+    </div>
+  </dialog>
+
+  <!-- Share My Rig dialog (Guest Pass owner-side issuance).
+       Cloud-backed: codes come from api.potacat.com/v1/passes.
+       This is a re-skin of the gp-* form buried in ECHOCAT settings,
+       restructured so the share LINK is the headline (most operators
+       email it rather than scan a QR) and the privilege constraints
+       are obvious before issuing. -->
+  <dialog id="share-rig-dialog">
+    <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Share Your Rig <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
+    <div id="share-rig-form-view">
+      <!-- Network-reach notice. Populated by _shareRigUpdateReachNotice()
+           based on cloud-tunnel + Tailscale state. Hidden when the
+           Cloud Tunnel is live (the unrestricted reach case). -->
+      <div id="share-rig-reach-notice" class="share-rig-notice hidden"></div>
+      <p class="share-rig-intro">Generate a time-boxed access pass for a friend. POTACAT enforces the privilege class, power cap, and expiry on this end — out-of-band tunes are blocked, TX power is clamped, the session auto-ends when the timer runs out.</p>
+
+      <div class="share-rig-section">
+        <div class="share-rig-section-title">Duration</div>
+        <div class="share-rig-presets" id="share-rig-duration-presets">
+          <button type="button" class="share-rig-preset" data-hours="1">1 hour</button>
+          <button type="button" class="share-rig-preset" data-hours="4">4 hours</button>
+          <button type="button" class="share-rig-preset active" data-hours="24">1 day</button>
+          <button type="button" class="share-rig-preset" data-hours="168">7 days</button>
+        </div>
+        <div class="share-rig-row">
+          <label>Custom: <input type="number" id="share-rig-custom-hours" min="1" max="720" value="24" class="share-rig-num"> hours</label>
+          <span class="help-text">Max 720 (30 days). Most operators email the link, so longer is fine.</span>
+        </div>
+      </div>
+
+      <div class="share-rig-section">
+        <div class="share-rig-section-title">License privileges</div>
+        <select id="share-rig-class" class="share-rig-select">
+          <optgroup label="United States">
+            <option value="tech" data-bands="6m+, 10m HF voice only">US Technician</option>
+            <option value="general" selected data-bands="most HF bands, voice + digital">US General</option>
+            <option value="extra" data-bands="all amateur bands, all modes">US Extra (full HF)</option>
+          </optgroup>
+          <optgroup label="Canada">
+            <option value="tech" data-bands="all bands above 30 MHz">Canadian Basic</option>
+            <option value="extra" data-bands="all amateur bands, all modes">Canadian Basic with Honours / Advanced</option>
+          </optgroup>
+          <optgroup label="Unrestricted">
+            <option value="extra" data-bands="all amateur bands, all modes">Unmetered / all-access (treats as Extra)</option>
+          </optgroup>
+        </select>
+        <span class="help-text" id="share-rig-class-detail">Subject to: most HF bands, voice + digital</span>
+      </div>
+
+      <div class="share-rig-section">
+        <div class="share-rig-section-title">Max TX power</div>
+        <div class="share-rig-presets" id="share-rig-power-presets">
+          <button type="button" class="share-rig-preset" data-watts="5">5 W</button>
+          <button type="button" class="share-rig-preset" data-watts="25">25 W</button>
+          <button type="button" class="share-rig-preset active" data-watts="100">100 W</button>
+          <button type="button" class="share-rig-preset" data-watts="500">500 W</button>
+          <button type="button" class="share-rig-preset" data-watts="1500">1500 W</button>
+        </div>
+        <div class="share-rig-row">
+          <label>Custom: <input type="number" id="share-rig-custom-watts" min="1" max="1500" value="100" class="share-rig-num"> watts</label>
+          <span class="help-text">Rigs that can't report TX power over CAT get TX disabled instead — failsafe.</span>
+        </div>
+      </div>
+
+      <div class="share-rig-section">
+        <div class="share-rig-section-title">§97.119 callsigns</div>
+        <div class="share-rig-grid">
+          <label>Station callsign <input type="text" id="share-rig-station" autocomplete="off" spellcheck="false"></label>
+          <label>Operator callsign <input type="text" id="share-rig-operator" placeholder="(left blank → guest's call)" autocomplete="off" spellcheck="false"></label>
+          <label>Control operator <input type="text" id="share-rig-control" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <span class="help-text">POTACAT writes whatever you set into the QSO's ADIF — see <a href="https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-B/section-97.119" id="share-rig-97119-link" data-external="1" class="share-rig-extlink">&sect;97.119</a>. We don't interpret the rule for you.</span>
+      </div>
+
+      <div class="dialog-buttons">
+        <button type="button" class="primary" id="share-rig-issue">Generate share link</button>
+        <button type="button" id="share-rig-close">Cancel</button>
+        <span class="help-text" id="share-rig-status"></span>
+      </div>
+    </div>
+
+    <!-- Generated view — shown after a successful issue -->
+    <div id="share-rig-result-view" class="hidden">
+      <p class="share-rig-intro">Pass generated. Send the link below to your friend — they don't need a POTACAT Cloud subscription, just to be signed in to POTACAT (free trial counts).</p>
+
+      <div class="share-rig-link-box">
+        <div class="share-rig-link-label">Share link</div>
+        <div class="share-rig-link" id="share-rig-result-url"></div>
+        <div class="share-rig-link-actions">
+          <button type="button" class="primary" id="share-rig-copy-url">Copy link</button>
+          <button type="button" id="share-rig-copy-code">Copy code only</button>
+          <button type="button" id="share-rig-mailto">Email it…</button>
+        </div>
+      </div>
+
+      <div class="share-rig-summary">
+        <div><strong>Code:</strong> <span id="share-rig-result-code" class="share-rig-code"></span></div>
+        <div><strong>Expires:</strong> <span id="share-rig-result-expires"></span></div>
+        <div><strong>Privileges:</strong> <span id="share-rig-result-priv"></span></div>
+      </div>
+
+      <details class="share-rig-qr-block">
+        <summary>Show QR (for in-person scans)</summary>
+        <img id="share-rig-result-qr" class="share-rig-qr" alt="QR">
+      </details>
+
+      <div class="dialog-buttons">
+        <button type="button" id="share-rig-issue-another">Issue another pass</button>
+        <button type="button" id="share-rig-revoke" class="danger">Revoke this pass</button>
+        <button type="button" id="share-rig-done">Done</button>
+      </div>
+    </div>
+
+    <!-- My passes list -->
+    <div class="share-rig-section share-rig-mypasses">
+      <div class="share-rig-section-title" style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span>My recent passes</span>
+        <button type="button" class="share-rig-link-btn" id="share-rig-refresh-list">Refresh</button>
+      </div>
+      <ul id="share-rig-list" class="share-rig-list"></ul>
+    </div>
+  </dialog>
+
+  <!-- Generic prompt dialog (Electron blocks window.prompt(),
+       so anything needing a string from the user opens this instead) -->
+  <dialog id="ask-prompt-dialog">
+    <h3 id="ask-prompt-title" style="margin-bottom:8px;color:var(--text-primary);">Enter value</h3>
+    <p id="ask-prompt-message" style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;"></p>
+    <input type="text" id="ask-prompt-input" style="width:100%;padding:6px 8px;font-size:14px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border-secondary);border-radius:4px;">
+    <div class="dialog-buttons" style="margin-top:12px;">
+      <button id="ask-prompt-ok">OK</button>
+      <button id="ask-prompt-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- Manage Operators dialog (multi-op profiles) -->
+  <dialog id="operators-dialog">
+    <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Manage Operators <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
+    <div class="operators-help">Archive removes an operator from the dropdown but keeps their logbook + settings on disk under <code>profiles/_archived/</code>. The currently-active operator can't be archived &mdash; switch first.</div>
+    <div class="operators-list" id="operators-list"></div>
+    <div class="dialog-buttons">
+      <button id="operators-close">Close</button>
     </div>
   </dialog>
 

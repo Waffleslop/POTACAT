@@ -1092,16 +1092,6 @@ const echocatPairBtn = document.getElementById('echocat-pair-btn');
 const echocatPairedList = document.getElementById('echocat-paired-list');
 const remoteTxIndicator = document.getElementById('remote-tx-indicator');
 const jtcatTxIndicator = document.getElementById('jtcat-tx-indicator');
-// Club Station Mode
-const setClubMode = document.getElementById('set-club-mode');
-const clubConfig = document.getElementById('club-config');
-const setClubCsvPath = document.getElementById('set-club-csv-path');
-const clubCsvBrowse = document.getElementById('club-csv-browse');
-const clubHashPasswords = document.getElementById('club-hash-passwords');
-const clubCsvCreate = document.getElementById('club-csv-create');
-const clubHashStatus = document.getElementById('club-hash-status');
-const clubPreview = document.getElementById('club-preview');
-const clubSchedule = document.getElementById('club-schedule');
 const logDialog = document.getElementById('log-dialog');
 const logCallsign = document.getElementById('log-callsign');
 const logOpName = document.getElementById('log-op-name');
@@ -4531,8 +4521,1161 @@ if (typeof settingsDialog !== 'undefined' && settingsDialog) {
   settingsDialog.showModal = function() {
     echocatRefreshTailscaleStatus();
     if (typeof _pairRefreshCloudStatus === 'function') _pairRefreshCloudStatus();
+    _restoreSettingsDialogSize();
+    // Summary tab cards: refresh on every open so QSO counts, cloud
+    // sub status, and POTA stats reflect anything that changed while
+    // the dialog was closed.
+    if (typeof refreshSummaryCard === 'function') {
+      setTimeout(refreshSummaryCard, 0);
+    }
+    // Quick-settings inputs (data-mirror) read their values from the
+    // canonical Station-tab inputs. The canonical values aren't
+    // populated until restoreSettings() runs (which fires during the
+    // openSettings flow elsewhere), so defer the sync one tick.
+    setTimeout(_syncQuickSettingsFromCanonical, 50);
     return origShow();
   };
+}
+
+// ── Quick-settings mirror layer ─────────────────────────────────────
+// Each element with data-mirror="<canonical-id>" is the Summary-tab
+// twin of an existing Station-tab input. We pull values in (canonical
+// → quick) on dialog open, and push values out (quick → canonical) on
+// every change. The canonical input's own listeners (visibility
+// toggles, save flow) keep working unchanged — we just fire its
+// `change` and `input` events after writing.
+function _syncQuickSettingsFromCanonical() {
+  const mirrors = document.querySelectorAll('[data-mirror]');
+  for (const quick of mirrors) {
+    const canonical = document.getElementById(quick.dataset.mirror);
+    if (!canonical) continue;
+    if (quick.type === 'checkbox' || quick.type === 'radio') {
+      quick.checked = !!canonical.checked;
+    } else {
+      quick.value = canonical.value;
+    }
+  }
+  _updateQuickCwState();
+  _updateQuickCwVolumeLabel();
+}
+
+function _updateQuickCwState() {
+  const enabled = document.getElementById('quick-cw-enabled');
+  const state = document.getElementById('quick-cw-state');
+  if (!enabled || !state) return;
+  const on = enabled.checked;
+  state.textContent = on ? 'on' : 'off';
+  state.classList.toggle('on', on);
+}
+
+function _updateQuickCwVolumeLabel() {
+  const vol = document.getElementById('quick-cw-sidetone-volume');
+  const label = document.getElementById('quick-cw-sidetone-volume-label');
+  if (!vol || !label) return;
+  label.textContent = (vol.value || 0) + '%';
+}
+
+(function _wireQuickSettingsMirrors() {
+  // Push quick → canonical on any change, and fire the canonical's
+  // change event so existing handlers (cw-keyer-config visibility,
+  // type-specific sub-section toggles, etc.) react correctly.
+  document.addEventListener('change', (e) => {
+    const quick = e.target.closest('[data-mirror]');
+    if (!quick) return;
+    const canonical = document.getElementById(quick.dataset.mirror);
+    if (!canonical) return;
+    if (quick.type === 'checkbox' || quick.type === 'radio') {
+      canonical.checked = quick.checked;
+    } else {
+      canonical.value = quick.value;
+    }
+    canonical.dispatchEvent(new Event('change', { bubbles: true }));
+    if (quick.id === 'quick-cw-enabled') _updateQuickCwState();
+  });
+  // Live-update for range slider feedback.
+  document.addEventListener('input', (e) => {
+    const quick = e.target.closest('[data-mirror]');
+    if (!quick) return;
+    const canonical = document.getElementById(quick.dataset.mirror);
+    if (canonical && (quick.type === 'range' || quick.type === 'number' || quick.type === 'text')) {
+      canonical.value = quick.value;
+      canonical.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (quick.id === 'quick-cw-sidetone-volume') _updateQuickCwVolumeLabel();
+  });
+  // Reverse direction: if the canonical input changes (user is in
+  // Station tab editing the full setting), reflect back to the quick
+  // mirror so reopening Summary doesn't show stale values.
+  document.addEventListener('change', (e) => {
+    if (!e.target || !e.target.id) return;
+    const quick = document.querySelector('[data-mirror="' + e.target.id + '"]');
+    if (!quick || quick === e.target) return;
+    if (quick.type === 'checkbox' || quick.type === 'radio') {
+      quick.checked = !!e.target.checked;
+    } else {
+      quick.value = e.target.value;
+    }
+    if (quick.id === 'quick-cw-enabled') _updateQuickCwState();
+    if (quick.id === 'quick-cw-sidetone-volume') _updateQuickCwVolumeLabel();
+  });
+})();
+
+// Persist Settings dialog size across launches.
+// CSS gives a sensible default (min(1100px, calc(100vw - 32px))) but the
+// user can drag the bottom-right grip to resize. We save what they pick
+// and restore it on next open, clamped to the current viewport so a
+// 4K-sized dialog doesn't reopen off-screen on a 1366×768 laptop.
+const SETTINGS_SIZE_KEY = 'potacat-settings-dialog-size';
+function _restoreSettingsDialogSize() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_SIZE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (!saved || typeof saved.w !== 'number' || typeof saved.h !== 'number') return;
+    const w = Math.max(360, Math.min(saved.w, window.innerWidth - 16));
+    const h = Math.max(360, Math.min(saved.h, window.innerHeight - 16));
+    settingsDialog.style.width = w + 'px';
+    settingsDialog.style.height = h + 'px';
+  } catch {}
+}
+if (typeof settingsDialog !== 'undefined' && settingsDialog && typeof ResizeObserver !== 'undefined') {
+  let _saveSizeTimer = null;
+  const _ro = new ResizeObserver(() => {
+    if (!settingsDialog.open) return;
+    clearTimeout(_saveSizeTimer);
+    _saveSizeTimer = setTimeout(() => {
+      try {
+        const r = settingsDialog.getBoundingClientRect();
+        if (r.width < 100 || r.height < 100) return;
+        localStorage.setItem(SETTINGS_SIZE_KEY, JSON.stringify({
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+        }));
+      } catch {}
+    }, 200);
+  });
+  _ro.observe(settingsDialog);
+}
+
+// ── Settings → Summary tab cards ────────────────────────────────────
+// Landing dashboard that reads existing data sources (logbook on
+// disk, cloud-get-status, ECHOCAT pair list, pota-sync cache) and
+// renders five cards: Operator / Logbook / Cloud / ECHOCAT / POTA.app.
+// Refresh fires on dialog open, on tab switch into Summary, and on
+// any of the relevant state-change events.
+let _summaryWired = false;
+function refreshSummaryCard() {
+  if (!document.getElementById('summary-card-operator')) return;
+  _wireSummaryCardActionsOnce();
+  _renderSummaryOperator();
+  _renderSummaryLogbook();
+  _renderSummaryCloud();
+  _renderSummaryEchocat();
+  _renderSummaryPota();
+}
+
+async function _renderSummaryOperator() {
+  try {
+    const s = await window.api.getSettings();
+    const grid = (s && s.grid) ? String(s.grid) : '';
+    const myCall = (s && s.myCallsign) ? String(s.myCallsign).toUpperCase() : '';
+    const sel = document.getElementById('summary-op-select');
+    const gridEl = document.getElementById('summary-op-grid');
+    if (gridEl) gridEl.textContent = grid ? grid : '';
+    if (!sel) return;
+    let activeCall = myCall;
+    let list = [];
+    try {
+      const r = await window.api.profilesList();
+      activeCall = (r && r.active) || myCall;
+      list = (r && Array.isArray(r.profiles)) ? r.profiles : [];
+    } catch {}
+    // If no profile exists yet (pre-migration), show the legacy
+    // single-operator label so the user sees their callsign at minimum.
+    if (list.length === 0) {
+      sel.innerHTML = '<option value="' + (activeCall || '') + '">' + (activeCall || '(not set)') + '</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    sel.innerHTML = list.map(c => {
+      const sel = c === activeCall ? ' selected' : '';
+      return '<option value="' + c + '"' + sel + '>' + c + '</option>';
+    }).join('');
+  } catch {}
+}
+
+// Document-level external-link delegation. Catches any anchor with a
+// data-external attribute anywhere in the renderer and routes it
+// through window.api.openExternal so it opens in the user's default
+// browser (not inside the Electron renderer, which would try to
+// navigate the whole app away). Bound unconditionally at script load —
+// independent of any IIFE state — because the §97.119 link inside the
+// Share Your Rig dialog was reported as not firing in production.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-external]');
+  if (!a || !a.href) return;
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('[external-link] intercepted click, href=', a.href);
+  if (window.api && window.api.openExternal) {
+    window.api.openExternal(a.href);
+  } else {
+    console.warn('[external-link] window.api.openExternal not available');
+  }
+}, true); // capture phase so dialog children can't swallow it first
+
+// ── Cloud Tunnel diagnostics dialog ─────────────────────────────────
+// Surfaces the verbose state from GET /v1/cloud-tunnel/diagnostics so
+// the user can see WHICH step (DB row / CF tunnel / CF DNS / env) is
+// stuck when "Turn on tunnel" returns a 500. Triggered from the
+// Settings → Summary → ECHOCAT → Diagnostics button.
+function _summaryTunnelDiagOpen() {
+  const dlg = document.getElementById('tunnel-diag-dialog');
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  _summaryTunnelDiagRefresh();
+}
+
+async function _summaryTunnelDiagRefresh() {
+  const status = document.getElementById('tunnel-diag-status');
+  const summary = document.getElementById('tunnel-diag-summary');
+  const raw = document.getElementById('tunnel-diag-raw');
+  if (!status || !summary || !raw) return;
+  status.textContent = 'Loading…';
+  summary.innerHTML = '';
+  raw.textContent = '';
+  try {
+    const r = await window.api.cloudTunnelDiagnostics();
+    if (!r || r.error) {
+      status.textContent = 'Error: ' + (r && r.error ? r.error : 'unknown');
+      return;
+    }
+    const d = r.result || {};
+    status.textContent = '';
+    // Verdict row — what each step would find right now.
+    const ok = (b) => b ? '✓' : '✗';
+    const dim = (s) => '<span style="color:var(--text-tertiary);">' + s + '</span>';
+    const lines = [];
+    if (d.user && d.user.callsign) {
+      lines.push('<div><strong>User:</strong> ' + _esc(d.user.callsign) + ' (id ' + _esc(d.user.id) + ')</div>');
+    }
+    if (d.db) {
+      lines.push('<div><strong>DB row:</strong> tunnelId=' + (d.db.cloudTunnelId ? _esc(d.db.cloudTunnelId.slice(0, 8) + '…') : dim('null')) + ' host=' + (d.db.cloudHost ? _esc(d.db.cloudHost) : dim('null')) + ' sub=' + _esc(d.db.subscriptionStatus || 'none') + '</div>');
+    }
+    if (d.expectedHost) {
+      lines.push('<div><strong>Would create at:</strong> ' + _esc(d.expectedHost) + '</div>');
+    }
+    if (d.cfEnv) {
+      lines.push('<div><strong>CF env:</strong> token ' + ok(d.cfEnv.token) + '  account ' + ok(d.cfEnv.account) + '  zone ' + ok(d.cfEnv.zone) + '</div>');
+    }
+    if (d.cfTunnel && d.cfTunnel.checked) {
+      const tail = d.cfTunnel.error ? dim(' — ' + _esc(d.cfTunnel.error)) : (d.cfTunnel.status ? dim(' (' + _esc(d.cfTunnel.status) + ')') : '');
+      lines.push('<div><strong>CF tunnel record:</strong> found ' + ok(d.cfTunnel.found) + tail + '</div>');
+    }
+    if (d.cfDns && d.cfDns.checked) {
+      const tail = d.cfDns.error ? dim(' — ' + _esc(d.cfDns.error)) : (d.cfDns.content ? dim(' → ' + _esc(d.cfDns.content)) : '');
+      lines.push('<div><strong>CF DNS record:</strong> found ' + ok(d.cfDns.found) + tail + '</div>');
+    }
+    summary.innerHTML = lines.join('');
+    raw.textContent = JSON.stringify(d, null, 2);
+  } catch (err) {
+    status.textContent = 'Error: ' + (err.message || err);
+  }
+}
+
+(function _summaryTunnelDiagWire() {
+  const dlg = document.getElementById('tunnel-diag-dialog');
+  if (!dlg) return;
+  const closeBtn = document.getElementById('tunnel-diag-close');
+  if (closeBtn) closeBtn.addEventListener('click', () => dlg.close());
+  const refreshBtn = document.getElementById('tunnel-diag-refresh');
+  if (refreshBtn) refreshBtn.addEventListener('click', _summaryTunnelDiagRefresh);
+  const copyBtn = document.getElementById('tunnel-diag-copy');
+  if (copyBtn) copyBtn.addEventListener('click', () => {
+    const raw = document.getElementById('tunnel-diag-raw');
+    if (raw && raw.textContent) {
+      window.api.copyToClipboard(raw.textContent);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy JSON'; }, 1500);
+    }
+  });
+})();
+
+// ── Share Your Rig dialog (Guest Pass owner-side) ───────────────────
+// Standalone modal for issuing time-boxed access passes. Talks to the
+// cloud via the existing passes-issue / passes-list / passes-revoke /
+// passes-qr-png IPC. Replaces the role of opening pair-popout with
+// share:true (which is just a longer-TTL paired-device token, not a
+// privilege-gated cloud pass).
+function _shareRigOpen() {
+  const dlg = document.getElementById('share-rig-dialog');
+  if (!dlg) return;
+  // Reset to form view, pre-fill callsigns from current settings.
+  _shareRigShowFormView();
+  _shareRigPrefillCallsigns();
+  _shareRigUpdateClassDetail();
+  _shareRigUpdateReachNotice();
+  _shareRigRefreshList();
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+}
+
+// Sets the notice banner at the top of the form based on the user's
+// network reach state. Goal: never let an operator generate a pass
+// expecting "share anywhere" when they're actually on LAN-only and
+// the recipient won't be able to reach them.
+async function _shareRigUpdateReachNotice() {
+  const box = document.getElementById('share-rig-reach-notice');
+  if (!box) return;
+  let mode = 'lan';
+  let detail = '';
+  try {
+    const ts = await window.api.cloudTunnelGetState();
+    if (ts && (ts.status === 'live' || ts.status === 'connecting' || ts.status === 'provisioning' || ts.status === 'reconnecting')) {
+      mode = 'cloud';
+    }
+  } catch {}
+  if (mode === 'lan') {
+    try {
+      const tail = await window.api.echocatTailscaleStatus();
+      if (tail && tail.installed && tail.loggedIn) {
+        mode = 'tailscale';
+        detail = tail.hostname ? (' (' + tail.hostname + ')') : '';
+      }
+    } catch {}
+  }
+  if (mode === 'cloud') {
+    // Cloud Tunnel is live — recipient can reach the rig from anywhere.
+    // Hide the notice; the form's intro is enough.
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  box.classList.remove('hidden');
+  box.classList.toggle('warn', true);
+  if (mode === 'tailscale') {
+    box.innerHTML = '<strong>You\'re on Tailscale' + _esc(detail) + '.</strong> '
+      + 'You can only share with someone who is also on your tailnet. '
+      + '<a href="#" data-act="open-cloud-signup">Join POTACAT Cloud</a> to share with anyone, anywhere.';
+  } else {
+    box.innerHTML = '<strong>You\'re on LAN mode.</strong> '
+      + 'You can only share with someone on the same local network as your shack. '
+      + '<a href="#" data-act="open-cloud-signup">Join POTACAT Cloud</a> to share with anyone, anywhere.';
+  }
+}
+
+function _shareRigShowFormView() {
+  document.getElementById('share-rig-form-view').classList.remove('hidden');
+  document.getElementById('share-rig-result-view').classList.add('hidden');
+  document.getElementById('share-rig-status').textContent = '';
+}
+function _shareRigShowResultView() {
+  document.getElementById('share-rig-form-view').classList.add('hidden');
+  document.getElementById('share-rig-result-view').classList.remove('hidden');
+}
+
+async function _shareRigPrefillCallsigns() {
+  try {
+    const s = await window.api.getSettings();
+    const my = (s && s.myCallsign) ? String(s.myCallsign).toUpperCase() : '';
+    const station = document.getElementById('share-rig-station');
+    const control = document.getElementById('share-rig-control');
+    if (station && !station.value && my) station.value = my;
+    if (control && !control.value && my) control.value = my;
+  } catch {}
+}
+
+function _shareRigUpdateClassDetail() {
+  const sel = document.getElementById('share-rig-class');
+  const detail = document.getElementById('share-rig-class-detail');
+  if (!sel || !detail) return;
+  const opt = sel.options[sel.selectedIndex];
+  const bands = opt && opt.dataset.bands ? opt.dataset.bands : '';
+  detail.textContent = bands ? ('Subject to: ' + bands) : '';
+}
+
+function _shareRigSelectedHours() {
+  const active = document.querySelector('#share-rig-duration-presets .share-rig-preset.active');
+  if (active) return parseInt(active.dataset.hours, 10) || 1;
+  const custom = document.getElementById('share-rig-custom-hours');
+  return Math.max(1, Math.min(720, parseInt(custom && custom.value, 10) || 24));
+}
+function _shareRigSelectedWatts() {
+  const active = document.querySelector('#share-rig-power-presets .share-rig-preset.active');
+  if (active) return parseInt(active.dataset.watts, 10) || 100;
+  const custom = document.getElementById('share-rig-custom-watts');
+  return Math.max(1, Math.min(1500, parseInt(custom && custom.value, 10) || 100));
+}
+
+async function _shareRigIssue() {
+  const status = document.getElementById('share-rig-status');
+  const btn = document.getElementById('share-rig-issue');
+  const hours = _shareRigSelectedHours();
+  const watts = _shareRigSelectedWatts();
+  const cls = document.getElementById('share-rig-class').value || 'general';
+  const station = (document.getElementById('share-rig-station').value || '').toUpperCase().trim() || null;
+  const operator = (document.getElementById('share-rig-operator').value || '').toUpperCase().trim() || null;
+  const control = (document.getElementById('share-rig-control').value || '').toUpperCase().trim() || null;
+  const body = {
+    duration_seconds: hours * 3600,
+    privilege_class: cls,
+    max_power_w: watts,
+    allowed_modes: null,
+    station_callsign: station,
+    operator_callsign: operator,
+    control_operator_callsign: control,
+  };
+  btn.disabled = true;
+  status.textContent = 'Generating…';
+  try {
+    const res = await window.api.passesIssue(body);
+    if (!res || res.error) {
+      const errMap = {
+        subscription_required: 'POTACAT Cloud subscription required to share your rig. Sign up from the Cloud card.',
+        unauthorized: 'Sign in to POTACAT Cloud first.',
+      };
+      status.textContent = errMap[res && res.error] || ('Error: ' + (res && res.error ? res.error : 'unknown'));
+      return;
+    }
+    _shareRigShowResultView();
+    document.getElementById('share-rig-result-code').textContent = res.code || '';
+    document.getElementById('share-rig-result-url').textContent = res.share_url || '';
+    const expiresAt = res.expires_at ? new Date(res.expires_at) : null;
+    document.getElementById('share-rig-result-expires').textContent = expiresAt ? expiresAt.toLocaleString() : '?';
+    const privTxt = (res.privilege_class || cls).toString().toUpperCase()
+      + ' · ' + (res.max_power_w || watts) + ' W max · ' + hours + (hours === 1 ? ' hour' : ' hours');
+    document.getElementById('share-rig-result-priv').textContent = privTxt;
+    // QR is optional / collapsed — we set src lazily anyway so it's
+    // there if the user expands the <details>.
+    try {
+      const qr = await window.api.passesQrPng(res.share_url || res.code);
+      if (qr && !qr.error) document.getElementById('share-rig-result-qr').src = qr;
+    } catch {}
+    // Stash the active code on the Revoke button so the handler knows
+    // which pass to kill without round-tripping.
+    document.getElementById('share-rig-revoke').dataset.code = res.code || '';
+    _shareRigRefreshList();
+  } catch (err) {
+    status.textContent = 'Error: ' + (err.message || err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function _shareRigRevoke() {
+  const btn = document.getElementById('share-rig-revoke');
+  const code = btn && btn.dataset.code;
+  if (!code) return;
+  if (!confirm('Revoke pass ' + code + '? The guest will be kicked from the rig immediately.')) return;
+  btn.disabled = true;
+  try {
+    const r = await window.api.passesRevoke(code);
+    if (r && r.error) {
+      alert('Revoke failed: ' + r.error);
+      btn.disabled = false;
+      return;
+    }
+    _shareRigShowFormView();
+    _shareRigRefreshList();
+  } catch (err) {
+    alert('Revoke failed: ' + (err.message || err));
+    btn.disabled = false;
+  }
+}
+
+async function _shareRigRefreshList() {
+  const ul = document.getElementById('share-rig-list');
+  if (!ul) return;
+  ul.innerHTML = '<li class="share-rig-list-empty">Loading…</li>';
+  try {
+    const res = await window.api.passesList();
+    if (res && res.error) {
+      ul.innerHTML = '<li class="share-rig-list-empty">Could not load passes: ' + _esc(res.error) + '</li>';
+      return;
+    }
+    const passes = (res && res.passes) || [];
+    if (!passes.length) {
+      ul.innerHTML = '<li class="share-rig-list-empty">No passes issued yet.</li>';
+      return;
+    }
+    ul.innerHTML = passes.map(p => {
+      const expires = p.expires_at ? new Date(p.expires_at).toLocaleString() : '?';
+      const cls = p.privilege_class ? p.privilege_class.toUpperCase() : '';
+      const watts = p.max_power_w || '?';
+      const st = (p.status || 'unknown').toLowerCase();
+      const stCls = st === 'active' ? 'active' : (st === 'expired' ? 'expired' : 'revoked');
+      const sessions = (p.activeSessionCount || p.active_session_count || 0);
+      const sessionLine = sessions > 0 ? '<span class="lst-meta" style="color:var(--accent-green);">· ' + sessions + ' guest connected now</span>' : '';
+      const revokeBtn = (st === 'active')
+        ? '<button type="button" class="lst-revoke" data-act="lst-revoke" data-code="' + _esc(p.code) + '">Revoke</button>'
+        : '';
+      return '<li>'
+        + '<span class="lst-code">' + _esc(p.code) + '</span>'
+        + '<span class="lst-meta">' + cls + ' · ' + watts + 'W · expires ' + _esc(expires) + '</span>'
+        + sessionLine
+        + '<span class="lst-status ' + stCls + '">' + st + '</span>'
+        + revokeBtn
+        + '</li>';
+    }).join('');
+  } catch (err) {
+    ul.innerHTML = '<li class="share-rig-list-empty">Could not load passes: ' + _esc(err.message || String(err)) + '</li>';
+  }
+}
+
+function _esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// Wire dialog interactions once at load time. Defensive: the dialog's
+// HTML may not exist on older builds, so each binding null-checks.
+(function _shareRigWire() {
+  const dlg = document.getElementById('share-rig-dialog');
+  if (!dlg) return;
+
+  // Duration presets — clicking activates one, also writes hours into
+  // the custom field so the two stay coherent. Typing in custom field
+  // clears the active preset.
+  const durRow = document.getElementById('share-rig-duration-presets');
+  const durCustom = document.getElementById('share-rig-custom-hours');
+  if (durRow) durRow.addEventListener('click', (e) => {
+    const b = e.target.closest('.share-rig-preset');
+    if (!b) return;
+    durRow.querySelectorAll('.share-rig-preset').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    if (durCustom) durCustom.value = b.dataset.hours;
+  });
+  if (durCustom) durCustom.addEventListener('input', () => {
+    durRow.querySelectorAll('.share-rig-preset').forEach(x => x.classList.remove('active'));
+  });
+
+  const pwrRow = document.getElementById('share-rig-power-presets');
+  const pwrCustom = document.getElementById('share-rig-custom-watts');
+  if (pwrRow) pwrRow.addEventListener('click', (e) => {
+    const b = e.target.closest('.share-rig-preset');
+    if (!b) return;
+    pwrRow.querySelectorAll('.share-rig-preset').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    if (pwrCustom) pwrCustom.value = b.dataset.watts;
+  });
+  if (pwrCustom) pwrCustom.addEventListener('input', () => {
+    pwrRow.querySelectorAll('.share-rig-preset').forEach(x => x.classList.remove('active'));
+  });
+
+  const clsSel = document.getElementById('share-rig-class');
+  if (clsSel) clsSel.addEventListener('change', _shareRigUpdateClassDetail);
+
+  // Per-element binding for the §97.119 link (kept for compat).
+  // The unconditional document-level handler below is the real safety net.
+  const link97 = document.getElementById('share-rig-97119-link');
+  if (link97) link97.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[share-rig] §97.119 link clicked (per-id), href=', link97.href);
+    if (window.api && window.api.openExternal) window.api.openExternal(link97.href);
+  });
+
+  // "Join POTACAT Cloud" link inside the reach-notice banner.
+  const notice = document.getElementById('share-rig-reach-notice');
+  if (notice) notice.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-act="open-cloud-signup"]');
+    if (!a) return;
+    e.preventDefault();
+    window.api.cloudOpenSubscribe();
+  });
+
+  const issueBtn = document.getElementById('share-rig-issue');
+  if (issueBtn) issueBtn.addEventListener('click', _shareRigIssue);
+
+  const closeBtn = document.getElementById('share-rig-close');
+  if (closeBtn) closeBtn.addEventListener('click', () => dlg.close());
+  const doneBtn = document.getElementById('share-rig-done');
+  if (doneBtn) doneBtn.addEventListener('click', () => dlg.close());
+
+  const issueAnother = document.getElementById('share-rig-issue-another');
+  if (issueAnother) issueAnother.addEventListener('click', _shareRigShowFormView);
+
+  const revokeBtn = document.getElementById('share-rig-revoke');
+  if (revokeBtn) revokeBtn.addEventListener('click', _shareRigRevoke);
+
+  // Copy link, copy code, email — all hit the clipboard / mailto.
+  const copyUrl = document.getElementById('share-rig-copy-url');
+  if (copyUrl) copyUrl.addEventListener('click', () => {
+    const url = document.getElementById('share-rig-result-url').textContent;
+    if (!url) return;
+    window.api.copyToClipboard(url);
+    copyUrl.textContent = 'Copied!';
+    setTimeout(() => { copyUrl.textContent = 'Copy link'; }, 1500);
+  });
+  const copyCode = document.getElementById('share-rig-copy-code');
+  if (copyCode) copyCode.addEventListener('click', () => {
+    const code = document.getElementById('share-rig-result-code').textContent;
+    if (!code) return;
+    window.api.copyToClipboard(code);
+    copyCode.textContent = 'Copied!';
+    setTimeout(() => { copyCode.textContent = 'Copy code only'; }, 1500);
+  });
+  const mailto = document.getElementById('share-rig-mailto');
+  if (mailto) mailto.addEventListener('click', () => {
+    const url = document.getElementById('share-rig-result-url').textContent;
+    const code = document.getElementById('share-rig-result-code').textContent;
+    const expires = document.getElementById('share-rig-result-expires').textContent;
+    const priv = document.getElementById('share-rig-result-priv').textContent;
+    const subject = encodeURIComponent('You can use my rig: ' + code);
+    const body = encodeURIComponent(
+      "Hey,\n\nYou're cleared to operate my rig until " + expires + ".\n\n"
+      + 'Open this link in POTACAT to connect:\n' + url + "\n\n"
+      + 'Pass code: ' + code + "\n"
+      + 'Privileges: ' + priv + "\n\n"
+      + 'You\'ll need POTACAT installed and signed in (free trial is fine for guests).'
+    );
+    window.api.openExternal('mailto:?subject=' + subject + '&body=' + body);
+  });
+
+  const refresh = document.getElementById('share-rig-refresh-list');
+  if (refresh) refresh.addEventListener('click', _shareRigRefreshList);
+
+  // Per-row revoke in My recent passes
+  const list = document.getElementById('share-rig-list');
+  if (list) list.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-act="lst-revoke"]');
+    if (!btn) return;
+    const code = btn.dataset.code;
+    if (!code || !confirm('Revoke pass ' + code + '?')) return;
+    btn.disabled = true;
+    try {
+      const r = await window.api.passesRevoke(code);
+      if (r && r.error) { alert('Revoke failed: ' + r.error); btn.disabled = false; return; }
+      _shareRigRefreshList();
+    } catch (err) {
+      alert('Revoke failed: ' + (err.message || err));
+      btn.disabled = false;
+    }
+  });
+})();
+
+// Electron renderers block window.prompt(). This is a Promise-based
+// drop-in: opens a small modal with an input, returns the trimmed value
+// on OK or null on Cancel / Esc / backdrop click.
+function _summaryPrompt({ title, message, defaultValue = '', placeholder = '', upper = false }) {
+  return new Promise((resolve) => {
+    const dlg = document.getElementById('ask-prompt-dialog');
+    const titleEl = document.getElementById('ask-prompt-title');
+    const msgEl = document.getElementById('ask-prompt-message');
+    const input = document.getElementById('ask-prompt-input');
+    const okBtn = document.getElementById('ask-prompt-ok');
+    const cancelBtn = document.getElementById('ask-prompt-cancel');
+    if (!dlg || !input) { resolve(null); return; }
+    titleEl.textContent = title || 'Enter value';
+    msgEl.textContent = message || '';
+    msgEl.style.display = message ? 'block' : 'none';
+    input.value = defaultValue || '';
+    input.placeholder = placeholder || '';
+    input.style.textTransform = upper ? 'uppercase' : 'none';
+
+    let done = false;
+    const cleanup = (val) => {
+      if (done) return;
+      done = true;
+      input.removeEventListener('keydown', onKey);
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      dlg.removeEventListener('close', onClose);
+      try { dlg.close(); } catch {}
+      resolve(val);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); onOk(); }
+      else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+    };
+    const onOk = () => {
+      const v = String(input.value || '').trim();
+      cleanup(v || null);
+    };
+    const onCancel = () => cleanup(null);
+    const onClose = () => cleanup(null);
+
+    input.addEventListener('keydown', onKey);
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    dlg.addEventListener('close', onClose);
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
+    setTimeout(() => { try { input.focus(); input.select(); } catch {} }, 0);
+  });
+}
+
+async function _summaryOpAddPrompt() {
+  const input = await _summaryPrompt({
+    title: 'Add operator',
+    message: 'Enter the operator’s callsign. POTACAT will create a fresh profile and switch to it.',
+    placeholder: 'WB6ACU',
+    upper: true,
+  });
+  if (input == null) return;
+  const call = String(input).toUpperCase().trim();
+  if (!call) return;
+  const r = await window.api.profilesAdd(call);
+  if (!r || !r.ok) {
+    alert('Could not add operator: ' + (r && r.error ? r.error : 'unknown error'));
+    return;
+  }
+  // Switch into the new profile so the user can finish filling out grid,
+  // QRZ creds, etc. with a clean slate. Switch triggers a restart.
+  const sw = await window.api.profilesSwitch(call);
+  if (!sw || !sw.ok) {
+    alert('Operator added, but switching failed: ' + (sw && sw.error ? sw.error : 'unknown'));
+    refreshSummaryCard();
+  }
+  // On success, app is about to relaunch — no need to refresh.
+}
+
+async function _summaryOpSwitch(call) {
+  if (!call) return;
+  if (!confirm('Switch to operator ' + call + '? POTACAT will restart to apply.')) {
+    // Revert the dropdown to the active value
+    refreshSummaryCard();
+    return;
+  }
+  const r = await window.api.profilesSwitch(call);
+  if (!r || !r.ok) {
+    alert('Could not switch operator: ' + (r && r.error ? r.error : 'unknown'));
+    refreshSummaryCard();
+  }
+  // On success, app is about to relaunch.
+}
+
+async function _summaryOpOpenManage() {
+  const dlg = document.getElementById('operators-dialog');
+  if (!dlg) return;
+  await _summaryOpRenderManageList();
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+}
+
+async function _summaryOpRenderManageList() {
+  const list = document.getElementById('operators-list');
+  if (!list) return;
+  let active = '';
+  let profiles = [];
+  try {
+    const r = await window.api.profilesList();
+    active = (r && r.active) || '';
+    profiles = (r && r.profiles) || [];
+  } catch {}
+  if (profiles.length === 0) {
+    list.innerHTML = '<div class="operators-empty">No operators yet. Use "+ Add operator" on the Summary tab.</div>';
+    return;
+  }
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  list.innerHTML = profiles.map(c => {
+    const isActive = c === active;
+    return '<div class="operators-row' + (isActive ? ' active' : '') + '">'
+      + '<div><span class="operators-row-name">' + esc(c) + '</span>'
+      + (isActive ? '<span class="operators-row-tag">Active</span>' : '')
+      + '</div>'
+      + (isActive
+          ? '<span class="summary-card-sub">Switch first to archive</span>'
+          : '<button type="button" data-act="op-archive" data-call="' + esc(c) + '">Archive</button>')
+      + '</div>';
+  }).join('');
+}
+
+async function _renderSummaryLogbook() {
+  const totalEl = document.getElementById('summary-log-total');
+  const ssbEl = document.getElementById('summary-log-ssb');
+  const cwEl = document.getElementById('summary-log-cw');
+  const digiEl = document.getElementById('summary-log-digi');
+  const sstvEl = document.getElementById('summary-log-sstv');
+  const connEl = document.getElementById('summary-log-conn');
+  if (!totalEl) return;
+  try {
+    const c = await window.api.getQsoCounts();
+    const fmt = (n) => (n || 0).toLocaleString();
+    totalEl.textContent = fmt(c.total);
+    ssbEl.textContent = fmt(c.ssb);
+    cwEl.textContent = fmt(c.cw);
+    digiEl.textContent = fmt(c.digital);
+    sstvEl.textContent = fmt(c.sstv);
+    if (connEl) {
+      const s = await window.api.getSettings();
+      const call = s && s.myCallsign ? String(s.myCallsign).toUpperCase() : '';
+      connEl.textContent = call ? 'Connected: ' + call : '';
+    }
+  } catch {
+    totalEl.textContent = '—';
+  }
+}
+
+// Multi-host renderer: the Cloud card is shown both on Summary AND on
+// the ECHOCAT settings tab (Casey wants the same control surface in
+// both places). Builds the inner HTML once from a single fetch, then
+// injects into every `[data-summary-card="cloud"]` host.
+async function _renderSummaryCloud() {
+  const hosts = document.querySelectorAll('[data-summary-card="cloud"]');
+  if (hosts.length === 0) return;
+  let html = '';
+  try {
+    const status = await window.api.cloudGetStatus();
+    html = _buildCloudCardHTML(status);
+  } catch (err) {
+    html = _buildCloudCardHTML(null);
+  }
+  for (const host of hosts) host.innerHTML = html;
+}
+
+function _buildCloudCardHTML(status) {
+  if (!status) {
+    return _summaryCardChrome('POTACAT Cloud', '—', '',
+      '<div class="summary-line">(Cloud status unavailable)</div>', '');
+  }
+  const loggedIn = !!status.loggedIn;
+  const sub = status.subscription || null;
+  const subStatus = sub && sub.status ? String(sub.status).toLowerCase() : '';
+  const trial = !!(sub && (sub.trialActive === true || subStatus === 'trial'));
+  const active = subStatus === 'active' || trial;
+  // "Manage subscription" is honest about where the button goes —
+  // cloud-open-manage opens the BMAC membership page.
+  const syncActions = '<button type="button" class="primary" data-act="cloud-sync-now">Sync now</button>'
+    + '<button type="button" data-act="cloud-manage">Manage subscription</button>';
+  let pillTxt, pillCls, backupTxt, metaTxt, actions;
+  if (!loggedIn) {
+    pillTxt = 'Inactive'; pillCls = 'bad';
+    backupTxt = 'Your logbook is NOT backed up to the POTACAT Cloud.';
+    metaTxt = 'Sign up for a free trial to enable QSO + settings backup.';
+    actions = '<button type="button" class="primary" data-act="cloud-signup">Sign up — Free trial</button>';
+  } else if (trial) {
+    pillTxt = 'Free Trial'; pillCls = 'warn';
+    backupTxt = 'Your logbook is backed up to the POTACAT Cloud.';
+    metaTxt = _summaryFormatLastSync(status);
+    actions = syncActions;
+  } else if (active) {
+    pillTxt = 'Active'; pillCls = 'ok';
+    backupTxt = 'Your logbook is backed up to the POTACAT Cloud.';
+    metaTxt = _summaryFormatLastSync(status);
+    actions = syncActions;
+  } else {
+    pillTxt = 'Signed in'; pillCls = '';
+    backupTxt = 'Your logbook is NOT backed up — no active subscription.';
+    metaTxt = '';
+    actions = '<button type="button" class="primary" data-act="cloud-signup">Subscribe</button>';
+  }
+  const body = '<div class="summary-line">' + _esc(backupTxt) + '</div>'
+    + '<div class="summary-sub">' + _esc(metaTxt) + '</div>'
+    + '<div class="summary-card-actions">' + actions + '</div>';
+  return _summaryCardChrome('POTACAT Cloud', pillTxt, pillCls, body);
+}
+
+// Tiny helper to keep card head HTML consistent across all builders.
+function _summaryCardChrome(title, pillText, pillCls, bodyHTML) {
+  const pill = pillText
+    ? '<span class="summary-pill ' + (pillCls || '') + '">' + _esc(pillText) + '</span>'
+    : '';
+  return '<div class="summary-card-head">'
+    + '<span class="summary-card-title">' + _esc(title) + '</span>'
+    + pill
+    + '</div>'
+    + '<div class="summary-card-body">' + bodyHTML + '</div>';
+}
+
+function _summaryFormatLastSync(status) {
+  // Source priority: lastSyncAt (set on manual Sync Now) → lastSyncTimestamp
+  // (the journal cursor — updated on auto-sync) → status.sync.lastSyncAt
+  // (server-reported, present even when local cache is empty after a
+  // fresh install). Falls back to "No sync yet" only when truly nothing.
+  let ts = 0;
+  if (status) {
+    ts = status.lastSyncAt || status.lastSyncTimestamp || 0;
+    if (!ts && status.sync && (status.sync.lastSyncAt || status.sync.lastSyncTimestamp)) {
+      ts = status.sync.lastSyncAt || status.sync.lastSyncTimestamp;
+    }
+  }
+  if (!ts) return 'No sync yet on this device.';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  const ago = Date.now() - d.getTime();
+  if (ago < 60000) return 'Last sync: just now.';
+  if (ago < 3600000) return 'Last sync: ' + Math.floor(ago / 60000) + ' min ago.';
+  if (ago < 86400000) return 'Last sync: ' + Math.floor(ago / 3600000) + ' h ago.';
+  return 'Last sync: ' + d.toLocaleDateString();
+}
+
+// Multi-host renderer: ECHOCAT card lives on Summary + ECHOCAT tabs.
+async function _renderSummaryEchocat() {
+  const hosts = document.querySelectorAll('[data-summary-card="echocat"]');
+  if (hosts.length === 0) return;
+  // Fetch state once; render to all hosts.
+  let tunnel = null;
+  let tail = null;
+  let devices = [];
+  try { tunnel = await window.api.cloudTunnelGetState(); } catch {}
+  try { tail = await window.api.echocatTailscaleStatus(); } catch {}
+  try { devices = await window.api.echocatListPairedDevices(); } catch {}
+  const html = _buildEchocatCardHTML(tunnel, tail, devices);
+  for (const host of hosts) host.innerHTML = html;
+}
+
+function _buildEchocatCardHTML(tunnel, tail, devices) {
+  // Tunnel + Tailscale state. cloud-tunnel state lives on `.status`,
+  // not `.state`. Possible values: off | provisioning | connecting |
+  // live | reconnecting | error (see lib/cloud-tunnel.js).
+  let pillTxt = 'LAN only';
+  let pillCls = '';
+  let detail = '';
+  let tunnelEnabled = false;
+  let tunnelState = 'off';
+  if (tunnel) {
+    tunnelEnabled = !!tunnel.enabled;
+    tunnelState = String(tunnel.status || 'off');
+    if (tunnelState === 'live') {
+      pillTxt = 'Cloud Tunnel'; pillCls = 'ok';
+      detail = 'Available remotely via POTACAT Cloud tunnel.';
+    } else if (tunnelState === 'connecting' || tunnelState === 'provisioning' || tunnelState === 'reconnecting') {
+      pillTxt = tunnelState === 'provisioning' ? 'Provisioning…' : 'Connecting…';
+      pillCls = 'warn';
+      detail = 'POTACAT Cloud tunnel is ' + tunnelState + '.';
+    } else if (tunnelState === 'error') {
+      pillTxt = 'Tunnel error'; pillCls = 'bad';
+      detail = tunnel.lastError ? ('Tunnel error: ' + tunnel.lastError) : 'POTACAT Cloud tunnel reported an error.';
+    }
+  }
+  if (pillCls === '' && tail && tail.installed && tail.loggedIn) {
+    pillTxt = 'Tailscale'; pillCls = 'ok';
+    detail = tail.hostname
+      ? 'Available remotely via Tailscale (' + tail.hostname + ').'
+      : 'Available remotely via Tailscale (tailnet connected; MagicDNS off, use the device IP).';
+  } else if (pillCls === '' && tail && tail.installed && !tail.loggedIn) {
+    detail = 'Tailscale is installed but not connected. Sign in to your tailnet, or enable POTACAT Cloud Tunnel.';
+  }
+  if (pillCls === '' && !detail) {
+    detail = 'Available only on the local network. Enable POTACAT Cloud Tunnel or connect to your tailnet for remote access.';
+  }
+  // Tunnel toggle button text — reflects user-intent (enabled) not the
+  // momentary status, so it doesn't flicker mid-startup.
+  const tunnelEffectivelyOn = tunnelEnabled
+    || tunnelState === 'live' || tunnelState === 'connecting'
+    || tunnelState === 'provisioning' || tunnelState === 'reconnecting';
+  const tunnelBtn = tunnelEffectivelyOn
+    ? '<button type="button" data-act="tunnel-off">Turn off tunnel</button>'
+    : '<button type="button" class="primary" data-act="tunnel-on">Turn on Cloud Tunnel</button>';
+  const body = '<div class="summary-line">' + _esc(detail) + '</div>'
+    + '<div class="summary-sub" style="margin-top:6px;font-weight:600;">My devices</div>'
+    + '<div class="summary-device-list">' + _summaryDeviceListHTML(devices) + '</div>'
+    + '<div class="summary-card-actions">'
+    + '<button type="button" data-act="echo-pair">Pair my device&hellip;</button>'
+    + '<button type="button" data-act="echo-share">Share your rig&hellip;</button>'
+    + tunnelBtn
+    + '<button type="button" data-act="echo-diagnostics" title="Cloud Tunnel diagnostics">Diagnostics</button>'
+    + '</div>';
+  return _summaryCardChrome('ECHOCAT', pillTxt, pillCls, body);
+}
+
+function _summaryDeviceListHTML(devices) {
+  if (!Array.isArray(devices) || devices.length === 0) {
+    return '<div class="summary-empty">No paired devices. Tap "Pair device" to connect a phone or tablet.</div>';
+  }
+  const fmtAge = (ts) => {
+    if (!ts) return 'never';
+    const ago = Date.now() - new Date(ts).getTime();
+    if (ago < 60000) return 'just now';
+    if (ago < 3600000) return Math.floor(ago / 60000) + 'm ago';
+    if (ago < 86400000) return Math.floor(ago / 3600000) + 'h ago';
+    return Math.floor(ago / 86400000) + 'd ago';
+  };
+  return devices.map(d => {
+    const name = _esc(d.name || d.label || 'Unnamed device');
+    const created = d.createdAt ? new Date(d.createdAt).toLocaleDateString() : '';
+    const seen = fmtAge(d.lastSeen);
+    return '<div class="summary-device">'
+      + '<div>'
+      + '<div class="summary-device-name">' + name + '</div>'
+      + '<div class="summary-device-meta">paired ' + _esc(created) + ' · last seen ' + _esc(seen) + '</div>'
+      + '</div>'
+      + '<div class="summary-device-actions">'
+      + '<button type="button" data-act="device-rename" data-id="' + _esc(d.id || '') + '" data-name="' + _esc(d.name || '') + '">Rename</button>'
+      + '<button type="button" data-act="device-revoke" data-id="' + _esc(d.id || '') + '">Revoke</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+async function _renderSummaryPota() {
+  const pill = document.getElementById('summary-pota-pill');
+  const signed = document.getElementById('summary-pota-signed');
+  const actions = document.getElementById('summary-pota-actions');
+  const hParks = document.getElementById('summary-pota-h-parks');
+  const hQ = document.getElementById('summary-pota-h-qsos');
+  const hAwards = document.getElementById('summary-pota-h-awards');
+  const hEndorse = document.getElementById('summary-pota-h-endorse');
+  const aActs = document.getElementById('summary-pota-a-acts');
+  const aParks = document.getElementById('summary-pota-a-parks');
+  const aQ = document.getElementById('summary-pota-a-qsos');
+  if (!pill) return;
+  try {
+    const st = await window.api.potaSyncStatus();
+    pill.classList.remove('ok', 'warn', 'bad');
+    if (!st || !st.connected) {
+      pill.textContent = 'Signed out';
+      signed.textContent = 'Sign in to display your POTA.app activity.';
+      hParks.textContent = '—'; hQ.textContent = '—'; hAwards.textContent = '—'; hEndorse.textContent = '—';
+      aActs.textContent = '—'; aParks.textContent = '—'; aQ.textContent = '—';
+      actions.innerHTML = '<button type="button" class="primary" data-act="pota-connect">Sign in to POTA.app</button>';
+      return;
+    }
+    pill.textContent = 'Signed in';
+    pill.classList.add('ok');
+    signed.textContent = 'Signed in as ' + (st.connectedAs || '—');
+    const p = st.profile || {};
+    const h = p.hunter || {};
+    const a = p.activator || {};
+    // awards + endorsements are top-level (not split between hunter/activator)
+    // per the api.pota.app/stats/user response shape. Casey's sketch puts
+    // them on the Hunter row.
+    const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+    hParks.textContent = fmt(h.parks);
+    hQ.textContent = fmt(h.qsos);
+    hAwards.textContent = fmt(p.awards);
+    hEndorse.textContent = fmt(p.endorsements);
+    aActs.textContent = fmt(a.activations);
+    aParks.textContent = fmt(a.parks);
+    aQ.textContent = fmt(a.qsos);
+    actions.innerHTML = '<button type="button" data-act="pota-refresh">Refresh</button>';
+  } catch {
+    pill.textContent = '—';
+  }
+}
+
+function _wireSummaryCardActionsOnce() {
+  if (_summaryWired) return;
+  const card = document.getElementById('summary-card-operator')?.parentElement;
+  if (!card) return;
+  _summaryWired = true;
+
+  // Operator dropdown — switch on change (with confirm).
+  const opSel = document.getElementById('summary-op-select');
+  if (opSel) opSel.addEventListener('change', (e) => _summaryOpSwitch(e.target.value));
+  const opAdd = document.getElementById('summary-op-add');
+  if (opAdd) opAdd.addEventListener('click', _summaryOpAddPrompt);
+  const opManage = document.getElementById('summary-op-manage');
+  if (opManage) opManage.addEventListener('click', (e) => { e.preventDefault(); _summaryOpOpenManage(); });
+  // Manage Operators dialog wiring
+  const opsDlg = document.getElementById('operators-dialog');
+  const opsClose = document.getElementById('operators-close');
+  const opsList = document.getElementById('operators-list');
+  if (opsClose && opsDlg) opsClose.addEventListener('click', () => opsDlg.close());
+  if (opsList) opsList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-act="op-archive"]');
+    if (!btn) return;
+    const call = btn.dataset.call;
+    if (!call) return;
+    if (!confirm('Archive operator ' + call + '? Their logbook and settings move to profiles/_archived/ and disappear from the dropdown. You can restore by moving the folder back later.')) return;
+    const r = await window.api.profilesArchive(call);
+    if (!r || !r.ok) {
+      alert('Could not archive: ' + (r && r.error ? r.error : 'unknown'));
+      return;
+    }
+    await _summaryOpRenderManageList();
+    refreshSummaryCard();
+  });
+
+  // Logbook card buttons
+  const openBtn = document.getElementById('summary-log-open');
+  const importBtn = document.getElementById('summary-log-import');
+  const exportBtn = document.getElementById('summary-log-export');
+  if (openBtn) openBtn.addEventListener('click', () => window.api.qsoPopoutOpen());
+  if (importBtn) importBtn.addEventListener('click', () => {
+    // Delegate to existing handler — preserves the result-text update flow
+    // that lives on the Logging tab's adif-import-btn click handler.
+    const real = document.getElementById('adif-import-btn');
+    if (real) real.click();
+    else window.api.importAdif();
+  });
+  if (exportBtn) exportBtn.addEventListener('click', () => window.api.qsoPopoutOpen());
+
+  // Document-level delegation. The Cloud and ECHOCAT cards are
+  // duplicated in the Summary tab AND the ECHOCAT settings tab, so a
+  // single top-level handler covers both. Action ids are owned by the
+  // card builders above (data-act="cloud-signup" etc.) — adding a new
+  // action here means adding it to the appropriate _build*HTML.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    // Only act on data-act inside known Summary surfaces or hosts.
+    const inSummaryHost = btn.closest('[data-summary-card], #summary-card-operator, #summary-card-logbook, #summary-card-pota, #operators-dialog');
+    if (!inSummaryHost) return;
+    const act = btn.dataset.act;
+    try {
+      if (act === 'cloud-signup') await window.api.cloudOpenSubscribe();
+      else if (act === 'cloud-manage') await window.api.cloudOpenManage();
+      else if (act === 'cloud-sync-now') {
+        btn.disabled = true;
+        btn.textContent = 'Syncing…';
+        const r = await window.api.cloudSyncNow();
+        if (r && r.error) alert('Sync failed: ' + r.error);
+      }
+      else if (act === 'tunnel-on') {
+        const r = await window.api.cloudTunnelEnable();
+        if (r && r.error) {
+          const map = {
+            'entitlement-required': 'POTACAT Cloud Tunnel requires an active POTACAT Cloud subscription. Sign up from the Cloud card above to enable it.',
+            'cloudflared-missing': 'POTACAT can\'t find the cloudflared helper. Reinstall POTACAT (the installer bundles it).',
+            'auth-required': 'You need to sign in to POTACAT Cloud first. Use the Cloud card above to sign in.',
+          };
+          alert(map[r.error] || ('Could not turn on the tunnel: ' + r.error));
+        }
+      }
+      else if (act === 'tunnel-off') await window.api.cloudTunnelDisable();
+      else if (act === 'echo-pair') window.api.pairPopoutOpen();
+      else if (act === 'echo-share') _shareRigOpen();
+      else if (act === 'echo-diagnostics') _summaryTunnelDiagOpen();
+      else if (act === 'pota-connect') await window.api.potaSyncConnect();
+      else if (act === 'pota-refresh') await window.api.potaSyncNow();
+      else if (act === 'device-revoke') {
+        const id = btn.dataset.id;
+        if (!id) return;
+        if (!confirm('Revoke this paired device? It will need to scan a new QR code to reconnect.')) return;
+        await window.api.echocatRevokeDevice(id);
+      }
+      else if (act === 'device-rename') {
+        const id = btn.dataset.id;
+        const current = btn.dataset.name || '';
+        if (!id) return;
+        const next = await _summaryPrompt({
+          title: 'Rename device',
+          message: 'Pick a name you’ll recognize when you see it in the device list.',
+          defaultValue: current,
+        });
+        if (next == null) return;
+        const trimmed = next.trim();
+        if (!trimmed || trimmed === current) return;
+        await window.api.echocatRenameDevice(id, trimmed);
+      }
+      else return; // unrelated data-act somewhere else in the dialog
+    } catch (err) {
+      console.warn('[summary]', act, err);
+    }
+    setTimeout(refreshSummaryCard, 200);
+  });
+
+  // Subscribe to push events that should trigger a re-render
+  if (window.api.onEchocatPairedDevices) {
+    window.api.onEchocatPairedDevices(() => {
+      if (settingsDialog.open) _renderSummaryEchocat();
+    });
+  }
+  if (window.api.onCloudTunnelState) {
+    window.api.onCloudTunnelState(() => {
+      if (settingsDialog.open) _renderSummaryEchocat();
+    });
+  }
+  if (window.api.onCloudSyncStatus) {
+    window.api.onCloudSyncStatus(() => {
+      if (settingsDialog.open) _renderSummaryCloud();
+    });
+  }
+  if (window.api.onPotaSyncStatus) {
+    window.api.onPotaSyncStatus(() => {
+      if (settingsDialog.open) _renderSummaryPota();
+    });
+  }
 }
 
 // ── POTACAT Cloud Tunnel pair state machine ─────────────────────────
@@ -4688,163 +5831,6 @@ async function _pairRefreshCloudStatus() {
 // Returns 'cloud' or 'lan' so the pair-QR popout knows which payload
 // shape to request when the user opens it.
 window.potacatPairMode = function () { return _pairCurrentMode; };
-
-// Club Station Mode event handlers
-setClubMode.addEventListener('change', () => {
-  clubConfig.classList.toggle('hidden', !setClubMode.checked);
-  if (setClubMode.checked && setClubCsvPath.value) {
-    refreshClubPreview(setClubCsvPath.value);
-  }
-});
-
-clubCsvBrowse.addEventListener('click', async () => {
-  const filePath = await window.api.chooseClubCsvFile();
-  if (filePath) {
-    setClubCsvPath.value = filePath;
-    refreshClubPreview(filePath);
-  }
-});
-
-clubCsvCreate.addEventListener('click', async () => {
-  // Get rig names from current settings to use as CSV radio columns
-  const s = await window.api.getSettings();
-  const rigNames = (s.rigs || []).map(r => r.name).filter(Boolean);
-  const filePath = await window.api.createClubCsv(rigNames);
-  if (filePath) {
-    setClubCsvPath.value = filePath;
-    refreshClubPreview(filePath);
-  }
-});
-
-clubHashPasswords.addEventListener('click', async () => {
-  const csvPath = setClubCsvPath.value;
-  if (!csvPath) return;
-  if (!confirm('This will hash all plaintext passwords in the CSV file. A .bak backup will be created. Continue?')) return;
-  clubHashStatus.textContent = 'Hashing...';
-  const result = await window.api.hashClubPasswords(csvPath);
-  if (result.error) {
-    clubHashStatus.textContent = 'Error: ' + result.error;
-    clubHashStatus.style.color = '#e94560';
-  } else {
-    clubHashStatus.textContent = result.hashed + ' hashed, ' + result.alreadyHashed + ' already hashed';
-    clubHashStatus.style.color = '#4ecca3';
-    refreshClubPreview(csvPath);
-  }
-});
-
-let clubScheduleDay = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date().getDay()];
-let lastClubData = null;
-
-async function refreshClubPreview(csvPath) {
-  if (!csvPath) { clubPreview.innerHTML = ''; clubSchedule.innerHTML = ''; return; }
-  const data = await window.api.previewClubCsv(csvPath);
-  lastClubData = data;
-  if (data.errors && data.errors.length > 0) {
-    clubPreview.innerHTML = '<div style="color:#e94560">' + data.errors.join('<br>') + '</div>';
-    clubSchedule.innerHTML = '';
-    return;
-  }
-  if (!data.members || data.members.length === 0) {
-    clubPreview.innerHTML = '<div style="color:#aaa">No members found</div>';
-    clubSchedule.innerHTML = '';
-    return;
-  }
-  const radioCols = data.radioColumns || [];
-  let html = '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
-  html += '<tr style="border-bottom:1px solid #444;"><th style="text-align:left;padding:2px 4px;">Call</th>';
-  html += '<th style="text-align:left;padding:2px 4px;">Name</th>';
-  html += '<th style="text-align:left;padding:2px 4px;">License</th>';
-  html += '<th style="text-align:left;padding:2px 4px;">Role</th>';
-  for (const rc of radioCols) {
-    html += '<th style="text-align:center;padding:2px 4px;">' + rc + '</th>';
-  }
-  html += '</tr>';
-  for (const m of data.members) {
-    html += '<tr>';
-    html += '<td style="padding:2px 4px;color:#4fc3f7;">' + m.callsign + '</td>';
-    html += '<td style="padding:2px 4px;">' + m.firstname + ' ' + m.lastname + '</td>';
-    html += '<td style="padding:2px 4px;">' + m.license + '</td>';
-    html += '<td style="padding:2px 4px;">' + m.role + '</td>';
-    for (const rc of radioCols) {
-      const has = m.radios && m.radios[rc];
-      html += '<td style="text-align:center;padding:2px 4px;">' + (has ? '\u2713' : '') + '</td>';
-    }
-    html += '</tr>';
-  }
-  html += '</table>';
-  clubPreview.innerHTML = html;
-
-  // Schedule view
-  if (data.hasSchedule) {
-    renderClubSchedule(data);
-  } else {
-    clubSchedule.innerHTML = '';
-  }
-}
-
-function renderClubSchedule(data) {
-  if (!data || !data.members) { clubSchedule.innerHTML = ''; return; }
-  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const todayName = days[new Date().getDay()];
-  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-
-  // Day picker tabs
-  let html = '<div style="margin-top:4px;font-size:12px;font-weight:600;color:#aaa;">Schedule</div>';
-  html += '<div style="display:flex;gap:2px;margin:4px 0;">';
-  for (const d of days) {
-    const active = d === clubScheduleDay;
-    const isToday = d === todayName;
-    const bg = active ? '#4fc3f7' : 'transparent';
-    const fg = active ? '#000' : (isToday ? '#4fc3f7' : '#aaa');
-    const border = isToday && !active ? '1px solid #4fc3f7' : '1px solid transparent';
-    html += `<button type="button" class="club-day-btn" data-day="${d}" style="padding:2px 6px;font-size:11px;border-radius:4px;cursor:pointer;background:${bg};color:${fg};border:${border};font-weight:${active ? '700' : '400'}">${d}</button>`;
-  }
-  html += '</div>';
-
-  // Collect slots for selected day
-  const slots = [];
-  for (const m of data.members) {
-    if (!m.schedule) continue;
-    for (const s of m.schedule) {
-      if (s.day === clubScheduleDay) {
-        slots.push({ callsign: m.callsign, firstname: m.firstname, ...s });
-      }
-    }
-  }
-  slots.sort((a, b) => (a.startH * 60 + a.startM) - (b.startH * 60 + b.startM));
-
-  if (slots.length === 0) {
-    html += '<div style="font-size:11px;color:#666;padding:4px 0;">No slots scheduled for ' + clubScheduleDay + '</div>';
-  } else {
-    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:2px;">';
-    html += '<tr style="border-bottom:1px solid #444;"><th style="text-align:left;padding:2px 4px;">Time</th><th style="text-align:left;padding:2px 4px;">Radio</th><th style="text-align:left;padding:2px 4px;">Operator</th></tr>';
-    for (const s of slots) {
-      const startStr = String(s.startH).padStart(2, '0') + ':' + String(s.startM).padStart(2, '0');
-      const endStr = String(s.endH).padStart(2, '0') + ':' + String(s.endM).padStart(2, '0');
-      const slotStart = s.startH * 60 + s.startM;
-      const slotEnd = s.endH * 60 + s.endM;
-      const isNow = clubScheduleDay === todayName && nowMin >= slotStart && nowMin < slotEnd;
-      const rowStyle = isNow ? 'background:rgba(79,195,247,0.15);' : '';
-      const nowDot = isNow ? '<span style="color:#4ecca3;margin-right:3px;" title="Active now">\u25CF</span>' : '';
-      html += `<tr style="${rowStyle}">`;
-      html += `<td style="padding:2px 4px;">${nowDot}${startStr}\u2013${endStr}</td>`;
-      html += `<td style="padding:2px 4px;">${s.radio}</td>`;
-      html += `<td style="padding:2px 4px;color:#4fc3f7;">${s.callsign} <span style="color:#aaa;">${s.firstname}</span></td>`;
-      html += '</tr>';
-    }
-    html += '</table>';
-  }
-
-  clubSchedule.innerHTML = html;
-
-  // Day picker click handlers
-  clubSchedule.querySelectorAll('.club-day-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      clubScheduleDay = btn.dataset.day;
-      renderClubSchedule(data);
-    });
-  });
-}
 
 // Merge ALSA hw:/plughw: devices (Linux only, via the alsa_native addon)
 // into Chromium's enumerateDevices output. Adds an "ALSA hardware" group
@@ -10049,6 +11035,12 @@ function switchSettingsTab(tabName) {
   try { localStorage.setItem('settings-active-tab', tabName); } catch {}
   // Scroll to top of the new tab
   settingsScrollArea.scrollTop = 0;
+  // Refresh Summary cards every time the user lands on the tab so
+  // QSO counts / cloud / POTA stats are current without waiting for
+  // the next state-change event.
+  if (tabName === 'summary' && typeof refreshSummaryCard === 'function') {
+    refreshSummaryCard();
+  }
 }
 
 if (settingsTabBar) {
@@ -10627,17 +11619,6 @@ async function openSettingsDialog(tab) {
       if (launcherStatus) { launcherStatus.textContent = 'Installed'; launcherStatus.style.color = '#4ecca3'; }
     }
   }
-  // Club Station Mode
-  setClubMode.checked = s.clubMode === true;
-  setClubCsvPath.value = s.clubCsvPath || '';
-  clubConfig.classList.toggle('hidden', !s.clubMode);
-  clubHashStatus.textContent = '';
-  if (s.clubMode && s.clubCsvPath) {
-    refreshClubPreview(s.clubCsvPath);
-  } else {
-    clubPreview.innerHTML = '';
-    clubSchedule.innerHTML = '';
-  }
   updateSettingsConnBar();
   setDisableAutoUpdate.checked = s.disableAutoUpdate === true;
   setEnableTelemetry.checked = s.enableTelemetry === true;
@@ -10657,7 +11638,7 @@ async function openSettingsDialog(tab) {
   if (typeof applyPiAccess === 'function') applyPiAccess(!!s.piAccess);
   // Restore settings tab (or navigate to specified tab)
   if (settingsSearch) settingsSearch.value = '';
-  const targetTab = _openSettingsTab || localStorage.getItem('settings-active-tab') || 'station';
+  const targetTab = _openSettingsTab || localStorage.getItem('settings-active-tab') || 'summary';
   _openSettingsTab = null;
   switchSettingsTab(targetTab);
   settingsDialog.showModal();
@@ -11043,8 +12024,6 @@ settingsSave.addEventListener('click', async () => {
   const audioSourceVal = setAudioSource ? setAudioSource.value : 'dax';
   const cwKeyPortVal = setCwKeyPort.value || '';
   const launcherEnabled = setEnableLauncher ? setEnableLauncher.checked : false;
-  const clubModeEnabled = setClubMode.checked;
-  const clubCsvPathVal = setClubCsvPath.value || '';
   // Audio comes from the active rig (resolved after selectedRig below)
   // CW Keyer
   const cwKeyerEnabled = setEnableCwKeyer.checked;
@@ -11265,8 +12244,6 @@ settingsSave.addEventListener('click', async () => {
     audioSource: audioSourceVal,
     cwKeyPort: cwKeyPortVal,
     enableLauncher: launcherEnabled,
-    clubMode: clubModeEnabled,
-    clubCsvPath: clubCsvPathVal,
     remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',
     remoteAudioOutput: selectedRig ? (selectedRig.remoteAudioOutput || '') : '',
     appMode: document.querySelector('input[name="set-app-mode"]:checked')?.value || 'hunter',
@@ -16588,24 +17565,97 @@ async function showWhatsNew(version) {
   }
 }
 
+// Render GitHub-flavored release notes to clean HTML for the
+// What's New dialog. The previous implementation just bolded
+// `**Headline:**`, leaving the literal word on-screen and skipping
+// inline code, italics, links, and paragraph breaks. This version
+// is a small focused markdown renderer plus pre-processing for the
+// project's release-notes conventions (`**Headline:** …`, signoff,
+// CI-asset footers).
 function formatReleaseNotes(md) {
-  // Strip everything from download/install/checksum/smartscreen sections onward
-  md = md.replace(/\n---[\s\S]*/m, '').trim();
-  md = md.replace(/\n#{1,4} *(Install|Download|Checksum|SHA-?256|SmartScreen)[\s\S]*/i, '').trim();
-  // Strip any "Generated with" / Claude / Anthropic footer lines
+  // ── Pre-processing ──────────────────────────────────────────────
+  // Trim download / install / checksum / smartscreen tail.
+  md = md.replace(/\n---+[\s\S]*?(?:sudo |SmartScreen|`shasum|`sha256sum|Download |latest-(?:mac|linux|win))[\s\S]*/im, '\n---\n').trim();
+  md = md.replace(/\n#{1,4} *(Install|Download|Checksum|SHA-?256|SmartScreen|Assets)[\s\S]*/i, '').trim();
+  // Strip Claude / Anthropic attribution if it leaked through.
   md = md.replace(/^.*(?:generated with|claude|anthropic).*$/gim, '').trim();
+  // Pull the H1 title — we render it as the lead heading at the top.
+  let h1 = '';
+  md = md.replace(/^# +(.+)$/m, (_m, h) => { h1 = h.trim(); return ''; }).trim();
+  // The `**Headline:** <prose>` convention introduces a lead paragraph.
+  // Extract it so we can render it visually distinct (lighter, larger),
+  // then strip the literal word "Headline:" so it doesn't appear inline.
+  let lead = '';
+  md = md.replace(/^\*\*Headline:\*\*\s*(.+)$/m, (_m, prose) => { lead = prose.trim(); return ''; }).trim();
+  // Strip the standalone `73.` signoff if it's the very last line —
+  // we render it ourselves in the chrome instead.
+  md = md.replace(/\n+73\.?\s*$/i, '').trim();
+  // Strip horizontal rules that now bracket empty regions.
+  md = md.replace(/(^|\n)---+\s*$/g, '$1').trim();
 
-  // Simple markdown -> HTML for release notes
-  return md
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^## (.+)$/gm, '<h4 style="margin:12px 0 6px;color:var(--text-primary);">$1</h4>')
-    .replace(/^### (.+)$/gm, '<h5 style="margin:10px 0 4px;color:var(--text-primary);">$1</h5>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>\n?)+/g, (m) => '<ul style="margin:4px 0;padding-left:20px;">' + m + '</ul>')
-    .replace(/```[\s\S]*?```/g, (m) => '<pre style="background:var(--bg-primary);padding:8px;border-radius:4px;font-size:11px;overflow-x:auto;">' + m.replace(/```\w*\n?/g, '').trim() + '</pre>')
-    .replace(/\n\n/g, '<br>')
-    .replace(/\n/g, '\n');
+  // ── Block-level rendering ───────────────────────────────────────
+  // Pull code fences out first so their contents aren't re-escaped.
+  const codeBlocks = [];
+  md = md.replace(/```([a-z]*)\n([\s\S]*?)```/gi, (_m, _lang, body) => {
+    const idx = codeBlocks.push(body.trim()) - 1;
+    return `CODEBLOCK${idx}`;
+  });
+  // HTML-escape everything else.
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  md = esc(md);
+
+  // Headings (in descending order so ## doesn't eat ###).
+  md = md.replace(/^#### +(.+)$/gm, '<h5 class="rn-h5">$1</h5>');
+  md = md.replace(/^### +(.+)$/gm, '<h4 class="rn-h4">$1</h4>');
+  md = md.replace(/^## +(.+)$/gm, '<h3 class="rn-h3">$1</h3>');
+  md = md.replace(/^---+\s*$/gm, '<hr class="rn-hr">');
+
+  // Inline transforms (run before list/paragraph wrapping so lists pick
+  // up the rendered text).
+  // Inline code (backticks). Single backticks only — code fences are
+  // already extracted above.
+  md = md.replace(/`([^`\n]+)`/g, '<code class="rn-code">$1</code>');
+  // Bold / italic. Bold first so the asterisk-counting works.
+  md = md.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  md = md.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  md = md.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+  // Links: [text](url)
+  md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" data-external="1">$1</a>');
+
+  // Lists: turn consecutive `- ` lines into a <ul>. Indented nested
+  // lines (4 spaces, "  - " or "  * ") aren't handled — release notes
+  // don't use them.
+  md = md.replace(/(^|\n)((?:[ \t]*[-*+] +.+(?:\n|$))+)/g, (_m, pre, block) => {
+    const items = block.split(/\n/).filter(Boolean).map(line =>
+      '<li>' + line.replace(/^[ \t]*[-*+] +/, '') + '</li>'
+    ).join('');
+    return pre + '<ul class="rn-ul">' + items + '</ul>';
+  });
+
+  // Paragraphs: split on blank lines, wrap text-only chunks in <p>.
+  // Leave anything that's already HTML alone.
+  const blocks = md.split(/\n{2,}/);
+  const out = blocks.map(b => {
+    const trimmed = b.trim();
+    if (!trimmed) return '';
+    if (/^<(h\d|ul|pre|hr|blockquote)/.test(trimmed)) return trimmed;
+    // Soft line breaks inside a paragraph become <br>.
+    return '<p class="rn-p">' + trimmed.replace(/\n/g, '<br>') + '</p>';
+  }).join('\n');
+
+  // ── Reinsert code blocks ────────────────────────────────────────
+  let html = out.replace(/CODEBLOCK(\d+)/g, (_m, idx) => {
+    return '<pre class="rn-pre"><code>' + esc(codeBlocks[+idx]) + '</code></pre>';
+  });
+
+  // ── Compose final ──────────────────────────────────────────────
+  const head = (h1 || lead)
+    ? '<div class="rn-head">'
+      + (h1 ? '<div class="rn-h1">' + esc(h1) + '</div>' : '')
+      + (lead ? '<div class="rn-lead">' + esc(lead) + '</div>' : '')
+      + '</div>'
+    : '';
+  return head + html;
 }
 
 // =============================================================================
