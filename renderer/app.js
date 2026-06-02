@@ -16315,6 +16315,8 @@ const RIG_FILTER_PRESETS = {
   CW:  [50, 100, 200, 500, 1000, 1500, 2400],
   DIG: [500, 1000, 2000, 3000, 4000],
 };
+const RIG_DEFAULT_AGC_MODES = ['off', 'fast', 'med', 'slow'];
+const RIG_AGC_LABELS = { off: 'Off', auto: 'Auto', fast: 'Fast', med: 'Mid', mid: 'Mid', slow: 'Slow' };
 
 function formatFilterWidth(hz) {
   return hz >= 1000 ? (hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 1) + 'k' : hz + '';
@@ -16342,20 +16344,49 @@ function rigBuildFilterPresets(mode, currentWidth) {
   }
 }
 
-function rigPlaceMonitorNearCwControls() {
+function rigPopulateAgcOptions(caps) {
+  if (!rigAgcSelect) return;
+  const previous = rigAgcSelect.value === 'mid' ? 'med' : rigAgcSelect.value;
+  const rawModes = Array.isArray(caps.agcModes) && caps.agcModes.length
+    ? caps.agcModes
+    : RIG_DEFAULT_AGC_MODES;
+  const modes = [];
+  for (const mode of rawModes) {
+    const normalized = mode === 'mid' ? 'med' : mode;
+    if (!modes.includes(normalized)) modes.push(normalized);
+  }
+
+  rigAgcSelect.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '—';
+  rigAgcSelect.appendChild(empty);
+  for (const mode of modes) {
+    const opt = document.createElement('option');
+    opt.value = mode;
+    opt.textContent = RIG_AGC_LABELS[mode] || mode.toUpperCase();
+    rigAgcSelect.appendChild(opt);
+  }
+  rigAgcSelect.value = modes.includes(previous) ? previous : '';
+}
+
+function rigPlaceMonitorNearCwControls(isFtx1) {
   const delayRow = document.getElementById('rig-breakindelay-row');
+  const defaultAnchor = document.getElementById('rig-voxlevel-row');
   const monRow = document.getElementById('rig-mon-row');
   const monLevelRow = document.getElementById('rig-monlevel-row');
-  if (!delayRow || !monRow || !monLevelRow || monRow.dataset.movedToCw === '1') return;
-  delayRow.insertAdjacentElement('afterend', monLevelRow);
-  delayRow.insertAdjacentElement('afterend', monRow);
-  monRow.dataset.movedToCw = '1';
+  const anchor = isFtx1 ? delayRow : defaultAnchor;
+  if (!anchor || !monRow || !monLevelRow) return;
+  anchor.insertAdjacentElement('afterend', monLevelRow);
+  anchor.insertAdjacentElement('afterend', monRow);
 }
 
 function rigApplyCapabilities(caps) {
-  rigCurrentCaps = caps || {};
-  rigPlaceMonitorNearCwControls();
+  caps = caps || {};
+  rigCurrentCaps = caps;
   const isFtx1 = !!(caps.dnrLevel || caps.clarRx || caps.clarTx || caps.preampTarget);
+  rigPlaceMonitorNearCwControls(isFtx1);
+  rigPopulateAgcOptions(caps);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
   rigPowerOnBtn.style.display = caps.power ? '' : 'none';

@@ -901,6 +901,14 @@ test('FTX-1 RF gain reply maps raw 255 to 100%', () => {
   assert.strictEqual(rf, 100);
 });
 
+test('FTX-1 preamp allows AMP2 only on HF/50', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setPreampTarget('hf50', 2);
+  codec.setPreampTarget('vhf', 2);
+  codec.setPreampTarget('uhf', 2);
+  assert.deepStrictEqual(writes, ['PA02;', 'PA11;', 'PA21;']);
+});
+
 // Monitor: channel 0 carries enable bit, channel 1 carries level.
 test('FTX-1 setMonitor(true) writes ML0001;', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
