@@ -715,7 +715,7 @@ const FTX1_FIELD_MODEL = {
     nb: true, atu: true, filter: true, filterType: 'indexed', rfgain: true,
     txpower: true, vfo: true, comp: true, compLevel: true, nr: true,
     nrLevel: false, dnrLevel: true, anf: true, vox: true, voxLevel: true,
-    agc: true, rit: true, mon: true, monLevel: true, micGain: true,
+    agc: true, rit: false, mon: true, monLevel: true, micGain: true,
     clarRx: true, clarTx: true, clarOffset: true, breakIn: true,
     breakInDelay: true, ftx1Clar: true,
   },
@@ -730,7 +730,7 @@ const FTX1_FIELD_MODEL = {
     getMicGain: 'MG;', getVox: 'VX;', getVoxLevel: 'VG;', getAutoNotch: 'BC0;',
     getMonitor: 'ML;', getClarState: 'CF000;', getClarOffset: 'CF001;',
   },
-  pcPrefix: 1, rmSwr: 6, rmAlc: 4,
+  pcPrefix: 1, rmSwr: 6, rmAlc: 4, pollTxMetersAlways: true, powerPollEvery: 2,
 };
 const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
   atuCmd: 'ac103', pcPrefix: 2,
@@ -887,11 +887,12 @@ test('FTX-1 GT reply parses Auto correctly', () => {
   assert.strictEqual(agc, 'auto');
 });
 
-test('FTX-1 PROC toggle uses PR02 on / PR01 off', () => {
+test('FTX-1 PROC toggle uses PR plus PL restore/off commands', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setCompLevel(35);
   codec.setCompressor(true);
   codec.setCompressor(false);
-  assert.deepStrictEqual(writes, ['PR02;', 'PR01;']);
+  assert.deepStrictEqual(writes, ['PL035;', 'PR02;', 'PL035;', 'PR01;', 'PL000;']);
 });
 
 test('FTX-1 PR/PL replies drive PROC state and level', () => {
@@ -902,7 +903,7 @@ test('FTX-1 PR/PL replies drive PROC state and level', () => {
   codec.onData(Buffer.from('PR02;PL050;'));
   assert.strictEqual(comp, true);
   assert.strictEqual(level, 50);
-  codec.onData(Buffer.from('PR01;'));
+  codec.onData(Buffer.from('PL000;'));
   assert.strictEqual(comp, false);
 });
 

@@ -16342,8 +16342,19 @@ function rigBuildFilterPresets(mode, currentWidth) {
   }
 }
 
+function rigPlaceMonitorNearCwControls() {
+  const delayRow = document.getElementById('rig-breakindelay-row');
+  const monRow = document.getElementById('rig-mon-row');
+  const monLevelRow = document.getElementById('rig-monlevel-row');
+  if (!delayRow || !monRow || !monLevelRow || monRow.dataset.movedToCw === '1') return;
+  delayRow.insertAdjacentElement('afterend', monLevelRow);
+  delayRow.insertAdjacentElement('afterend', monRow);
+  monRow.dataset.movedToCw = '1';
+}
+
 function rigApplyCapabilities(caps) {
   rigCurrentCaps = caps || {};
+  rigPlaceMonitorNearCwControls();
   const isFtx1 = !!(caps.dnrLevel || caps.clarRx || caps.clarTx || caps.preampTarget);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
