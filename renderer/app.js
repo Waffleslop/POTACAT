@@ -85,7 +85,7 @@ function lookupWatchlistGroup(callsign) {
   if (!callsign) return null;
   return watchlistGroupLookup.get(callsign.toUpperCase()) || null;
 }
-let maxAgeMin = 5;       // max spot age in minutes (POTA, LLOTA, WWFF)
+let maxAgeMin = 5;       // max spot age in minutes (POTA, LLOTA, WWFF, WWBOTA)
 let sotaMaxAgeMin = 30;  // SOTA max spot age in minutes
 let dxcMaxAgeMin = 15;   // DX cluster max spot age in minutes — DX spots aren't re-posted like POTA
 let maxDistMi = 0;       // max distance in miles (0 = no limit)
@@ -94,6 +94,7 @@ let enablePota = true;
 let enableSota = false;
 let enableWwff = false;
 let enableLlota = false;
+let enableWwbota = true;
 let enableTiles = false;
 let enableDxcc = false;
 let enableCluster = false;
@@ -272,18 +273,20 @@ let prioritizeNewParks = false; // sort unworked-park spots to the top of the ta
 let hideQrt = true; // hide spots with QRT in comments (default on)
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
-// Per-network re-spot templates (Chris NR9Q request). Empty WWFF/LLOTA fall back
-// to the POTA template so a single-template user keeps prior behavior.
+// Per-network re-spot templates (Chris NR9Q request). Empty WWFF/LLOTA/WWBOTA
+// fall back to the POTA template so a single-template user keeps prior behavior.
 let respotTemplate = '{rst} in {QTH} 73s {mycallsign} via POTACAT'; // POTA template (also fallback)
 let wwffRespotTemplate = ''; // empty = use respotTemplate
 let llotaRespotTemplate = ''; // empty = use respotTemplate
+let wwbotaRespotTemplate = ''; // empty = use respotTemplate
 let dxRespotTemplate = 'Heard in {QTH} 73s {mycallsign} via POTACAT'; // DX cluster
 let quickRespotTemplate = 'Heard strong in {QTH}; 73s {callsign} via POTACAT'; // legacy — migrated below
 function respotTemplateFor(network) {
-  // network: 'pota' | 'wwff' | 'llota' | 'dxc'
+  // network: 'pota' | 'wwff' | 'llota' | 'wwbota' | 'dxc'
   if (network === 'dxc') return dxRespotTemplate;
   if (network === 'wwff') return wwffRespotTemplate || respotTemplate;
   if (network === 'llota') return llotaRespotTemplate || respotTemplate;
+  if (network === 'wwbota') return wwbotaRespotTemplate || respotTemplate;
   return respotTemplate; // pota or default
 }
 let grid = ''; // home grid square for {QTH} template substitution
@@ -560,6 +563,7 @@ const spotsPota = document.getElementById('spots-pota');
 const spotsSota = document.getElementById('spots-sota');
 const spotsWwff = document.getElementById('spots-wwff');
 const spotsLlota = document.getElementById('spots-llota');
+const spotsWwbota = document.getElementById('spots-wwbota');
 const spotsTiles = document.getElementById('spots-tiles');
 const spotsCluster = document.getElementById('spots-cluster');
 const spotsCwSpots = document.getElementById('spots-cwspots');
@@ -605,11 +609,13 @@ const setWatchlist = document.getElementById('set-watchlist');
 const setRespotTemplate = document.getElementById('set-respot-template');
 const setWwffRespotTemplate = document.getElementById('set-wwff-respot-template');
 const setLlotaRespotTemplate = document.getElementById('set-llota-respot-template');
+const setWwbotaRespotTemplate = document.getElementById('set-wwbota-respot-template');
 const setDxRespotTemplate = document.getElementById('set-dx-respot-template');
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setEnableWwff = document.getElementById('set-enable-wwff');
 const setEnableLlota = document.getElementById('set-enable-llota');
+const setEnableWwbota = document.getElementById('set-enable-wwbota');
 const setEnableTiles = document.getElementById('set-enable-tiles');
 const setCwXit = document.getElementById('set-cw-xit');
 const setCwXitShiftVfo = document.getElementById('set-cw-xit-shift-vfo');
@@ -1001,6 +1007,7 @@ const setPanadapterPota      = document.getElementById('set-panadapter-pota');
 const setPanadapterSota      = document.getElementById('set-panadapter-sota');
 const setPanadapterWwff      = document.getElementById('set-panadapter-wwff');
 const setPanadapterLlota     = document.getElementById('set-panadapter-llota');
+const setPanadapterWwbota    = document.getElementById('set-panadapter-wwbota');
 const setPanadapterCluster   = document.getElementById('set-panadapter-cluster');
 const setPanadapterRbn       = document.getElementById('set-panadapter-rbn');
 const setPanadapterCwSpots   = document.getElementById('set-panadapter-cwspots');
@@ -1158,19 +1165,21 @@ function applyRstMode() {
 const logTypePicker = document.getElementById('log-type-picker');
 const logMultiRefSection = document.getElementById('log-multi-ref-section');
 // Per-program ref inputs — multi-type spots show multiple rows simultaneously.
-// Order here matches priority for SIG/SIG_INFO selection (POTA > SOTA > WWFF > LLOTA).
-const LOG_OTA_TYPES = ['pota', 'sota', 'wwff', 'llota'];
+// Order here matches priority for SIG/SIG_INFO selection (POTA > SOTA > WWFF > LLOTA > WWBOTA).
+const LOG_OTA_TYPES = ['pota', 'sota', 'wwff', 'llota', 'wwbota'];
 const logRefInputs = {
   pota: document.getElementById('log-ref-pota'),
   sota: document.getElementById('log-ref-sota'),
   wwff: document.getElementById('log-ref-wwff'),
   llota: document.getElementById('log-ref-llota'),
+  wwbota: document.getElementById('log-ref-wwbota'),
 };
 const logRefNames = {
   pota: document.getElementById('log-ref-name-pota'),
   sota: document.getElementById('log-ref-name-sota'),
   wwff: document.getElementById('log-ref-name-wwff'),
   llota: document.getElementById('log-ref-name-llota'),
+  wwbota: document.getElementById('log-ref-name-wwbota'),
 };
 const logRefRows = {};
 LOG_OTA_TYPES.forEach(t => {
@@ -1459,6 +1468,7 @@ async function loadPrefs() {
   enableSota = settings.enableSota === true;  // default false
   enableWwff = settings.enableWwff === true;  // default false
   enableLlota = settings.enableLlota === true; // default false
+  enableWwbota = settings.enableWwbota !== false; // default true (Casey 2026-06-01)
   enableTiles = settings.enableTiles !== false; // default true (Tiles is fresh — show new users)
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
@@ -1519,6 +1529,7 @@ async function loadPrefs() {
   if (settings.respotTemplate != null) respotTemplate = settings.respotTemplate;
   if (settings.wwffRespotTemplate != null) wwffRespotTemplate = settings.wwffRespotTemplate;
   if (settings.llotaRespotTemplate != null) llotaRespotTemplate = settings.llotaRespotTemplate;
+  if (settings.wwbotaRespotTemplate != null) wwbotaRespotTemplate = settings.wwbotaRespotTemplate;
   if (settings.dxRespotTemplate != null) dxRespotTemplate = settings.dxRespotTemplate;
   if (settings.quickRespotTemplate != null) quickRespotTemplate = settings.quickRespotTemplate;
   myCallsign = settings.myCallsign || '';
@@ -1562,9 +1573,10 @@ async function loadPrefs() {
       // Restore cross-program references
       if (settings.activatorCrossRefs && Array.isArray(settings.activatorCrossRefs)) {
         activatorCrossRefs = settings.activatorCrossRefs;
-        if (crossRefSota)  for (const xr of activatorCrossRefs) { if (xr.program === 'SOTA')  crossRefSota.value  = xr.ref; }
-        if (crossRefWwff)  for (const xr of activatorCrossRefs) { if (xr.program === 'WWFF')  crossRefWwff.value  = xr.ref; }
-        if (crossRefLlota) for (const xr of activatorCrossRefs) { if (xr.program === 'LLOTA') crossRefLlota.value = xr.ref; }
+        if (crossRefSota)   for (const xr of activatorCrossRefs) { if (xr.program === 'SOTA')   crossRefSota.value   = xr.ref; }
+        if (crossRefWwff)   for (const xr of activatorCrossRefs) { if (xr.program === 'WWFF')   crossRefWwff.value   = xr.ref; }
+        if (crossRefLlota)  for (const xr of activatorCrossRefs) { if (xr.program === 'LLOTA')  crossRefLlota.value  = xr.ref; }
+        if (crossRefWwbota) for (const xr of activatorCrossRefs) { if (xr.program === 'WWBOTA') crossRefWwbota.value = xr.ref; }
         updateCrossRefToggle();
       }
       // Resolve names and grid if missing
@@ -2715,7 +2727,7 @@ function updateBlRstDefaults(mode) {
 function updateBlRespotVisibility() {
   const type = blType.value;
   // Show respot checkbox for park/summit types or DX cluster contacts
-  const canRespot = (type === 'pota' || type === 'wwff' || type === 'llota') ||
+  const canRespot = (type === 'pota' || type === 'wwff' || type === 'llota' || type === 'wwbota') ||
                     (type === '' && clusterConnected);
   blRespotLabel.classList.toggle('hidden', !canRespot);
 }
@@ -2723,9 +2735,9 @@ function updateBlRespotVisibility() {
 // Type dropdown: show/hide ref field, update respot visibility
 blType.addEventListener('change', () => {
   const type = blType.value;
-  const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota';
+  const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota' || type === 'wwbota';
   blRef.classList.toggle('hidden', !needsRef);
-  blRef.placeholder = type === 'pota' ? '1234 or 1234, 5678' : type === 'sota' ? 'W4C/CM-001' : type === 'wwff' ? 'KFF-1234' : type === 'llota' ? 'US-0001' : 'Ref';
+  blRef.placeholder = type === 'pota' ? '1234 or 1234, 5678' : type === 'sota' ? 'W4C/CM-001' : type === 'wwff' ? 'KFF-1234' : type === 'llota' ? 'US-0001' : type === 'wwbota' ? 'B/G-2392' : 'Ref';
   if (needsRef) blRef.focus();
   updateBlRespotVisibility();
 });
@@ -2850,7 +2862,7 @@ async function saveBannerQso() {
   if (!frequency) { blFreq.focus(); return; }
   const type = blType.value;
   const rawRef = blRef.value.trim().toUpperCase();
-  const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota';
+  const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota' || type === 'wwbota';
   if (needsRef && !rawRef) { blRef.focus(); return; }
   const mode = blMode.value;
   const rstSent = blRstSent.value.trim() || '59';
@@ -2891,11 +2903,12 @@ async function saveBannerQso() {
   const addlRefs = allRefs.slice(1);
 
   // Build sig/sigInfo/ref fields based on type
-  let sig = '', sigInfo = '', potaRef = '', sotaRef = '', wwffRef = '', llotaRef = '';
+  let sig = '', sigInfo = '', potaRef = '', sotaRef = '', wwffRef = '', llotaRef = '', wwbotaRef = '';
   if (type === 'pota' && primaryRef) { sig = 'POTA'; potaRef = primaryRef; sigInfo = primaryRef; }
   else if (type === 'sota' && primaryRef) { sig = 'SOTA'; sotaRef = primaryRef; sigInfo = primaryRef; }
   else if (type === 'wwff' && primaryRef) { sig = 'WWFF'; wwffRef = primaryRef; sigInfo = primaryRef; }
   else if (type === 'llota' && primaryRef) { sig = 'LLOTA'; llotaRef = primaryRef; sigInfo = primaryRef; }
+  else if (type === 'wwbota' && primaryRef) { sig = 'WWBOTA'; wwbotaRef = primaryRef; sigInfo = primaryRef; }
   const notes = blNotes.value.trim();
   const commentBase = [notes, sigInfo ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' ');
 
@@ -2905,7 +2918,7 @@ async function saveBannerQso() {
   const opFirstname = (opQrz && (cleanQrzName(opQrz.nickname) || cleanQrzName(opQrz.fname))) || 'OM';
   let respotCommentText = '';
   if (wantsRespot) {
-    const tmplNetwork = (type === '' && clusterConnected) ? 'dxc' : (type === 'wwff' ? 'wwff' : type === 'llota' ? 'llota' : 'pota');
+    const tmplNetwork = (type === '' && clusterConnected) ? 'dxc' : (type === 'wwff' ? 'wwff' : type === 'llota' ? 'llota' : type === 'wwbota' ? 'wwbota' : 'pota');
     const tmpl = respotTemplateFor(tmplNetwork);
     respotCommentText = tmpl.replace(/\{rst\}/gi, rstSent).replace(/\{QTH\}/gi, grid).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
   }
@@ -2946,6 +2959,7 @@ async function saveBannerQso() {
         sotaRef,
         wwffRef,
         llotaRef,
+        wwbotaRef,
         name: qrzInfo ? [cleanQrzName(qrzInfo.nickname) || cleanQrzName(qrzInfo.fname), cleanQrzName(qrzInfo.name)].filter(Boolean).join(' ') : '',
         state: parkLocState || (!sig && qrzInfo ? (qrzInfo.state || '') : ''),
         county: !parkLocState && !sig && qrzInfo && qrzInfo.state && qrzInfo.county ? `${qrzInfo.state},${qrzInfo.county}` : '',
@@ -2968,6 +2982,8 @@ async function saveBannerQso() {
         wwffReference: ci === 0 && wantsRespot && type === 'wwff' ? primaryRef : '',
         llotaRespot: ci === 0 && wantsRespot && type === 'llota',
         llotaReference: ci === 0 && wantsRespot && type === 'llota' ? primaryRef : '',
+        wwbotaRespot: ci === 0 && wantsRespot && type === 'wwbota',
+        wwbotaReference: ci === 0 && wantsRespot && type === 'wwbota' ? primaryRef : '',
         dxcRespot: ci === 0 && wantsRespot && type === '' && clusterConnected,
         respotComment: ci === 0 && wantsRespot ? respotCommentText : '',
       };
@@ -2985,8 +3001,9 @@ async function saveBannerQso() {
           sotaRef: sig === 'SOTA' ? addlRef : qsoData.sotaRef,
           wwffRef: sig === 'WWFF' ? addlRef : qsoData.wwffRef,
           llotaRef: sig === 'LLOTA' ? addlRef : qsoData.llotaRef,
+          wwbotaRef: sig === 'WWBOTA' ? addlRef : qsoData.wwbotaRef,
           comment: addlComment,
-          respot: false, wwffRespot: false, llotaRespot: false, dxcRespot: false, respotComment: '',
+          respot: false, wwffRespot: false, llotaRespot: false, wwbotaRespot: false, dxcRespot: false, respotComment: '',
         };
         const addlResult = await window.api.saveQso(addlData);
         if (!addlResult || !addlResult.success) { lastResult = addlResult; break; }
@@ -5440,6 +5457,7 @@ function getFiltered() {
       (s.source === 'sota' && !enableSota) ||
       (s.source === 'wwff' && !enableWwff) ||
       (s.source === 'llota' && !enableLlota) ||
+      (s.source === 'wwbota' && !enableWwbota) ||
       (s.source === 'tiles' && !enableTiles) ||
       (s.source === 'dxc' && !enableCluster) ||
       (s.source === 'cwspots' && !enableCwSpots) ||
@@ -6870,6 +6888,8 @@ function getRespotTargets(s) {
     targets.push('wwff');
   } else if (s.source === 'llota' && s.reference) {
     targets.push('llota');
+  } else if (s.source === 'wwbota' && s.reference) {
+    targets.push('wwbota');
   } else if (clusterConnected) {
     targets.push('dxc');
   }
@@ -6907,6 +6927,7 @@ async function openQuickRespot() {
   if (s.source === 'pota' && s.reference) refText = 'POTA: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
   else if (s.source === 'wwff') refText = 'WWFF: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
   else if (s.source === 'llota') refText = 'LLOTA: ' + s.reference + (s.parkName ? ' \u2014 ' + s.parkName : '');
+  else if (s.source === 'wwbota') refText = 'WWBOTA: ' + (s.wwbotaRefsLabel || s.reference) + (s.parkName ? ' \u2014 ' + s.parkName : '');
   else if (s.source === 'dxc') refText = s.callsign + (s.locationDesc ? ' \u2014 ' + s.locationDesc : '');
   document.getElementById('respot-ref').textContent = refText;
 
@@ -6964,6 +6985,8 @@ document.getElementById('respot-send').addEventListener('click', async () => {
     wwffReference: s.wwffReference || (s.source === 'wwff' ? s.reference : ''),
     llotaRespot: targets.includes('llota'),
     llotaReference: s.source === 'llota' ? s.reference : '',
+    wwbotaRespot: targets.includes('wwbota'),
+    wwbotaReference: s.source === 'wwbota' ? s.reference : '',
     dxcRespot: targets.includes('dxc'),
   };
 
@@ -8180,6 +8203,7 @@ function render() {
       if (s.source === 'rbn') tr.classList.add('spot-rbn');
       if (s.source === 'wwff') tr.classList.add('spot-wwff');
       if (s.source === 'llota') tr.classList.add('spot-llota');
+      if (s.source === 'wwbota') tr.classList.add('spot-wwbota');
       if (s.source === 'pskr') tr.classList.add('spot-pskr');
       if (s.source === 'net') tr.classList.add('spot-net');
       // Watchlist group — color the whole row when the activator's call
@@ -8486,6 +8510,7 @@ function render() {
           if (s.source === 'sota') url = `https://www.sotadata.org.uk/en/summit/${s.reference}`;
           else if (s.source === 'wwff') url = `https://wwff.co/directory/?showRef=${s.reference}`;
           else if (s.source === 'llota') url = `https://llota.app/lighthouse/${s.reference}`;
+          else if (s.source === 'wwbota') url = `https://wwbota.net/cluster-2/`;
           else url = `https://pota.app/#/park/${s.reference}`;
           const a = document.createElement('a');
           a.textContent = cell.val;
@@ -9025,6 +9050,7 @@ logSaveBtn.addEventListener('click', async () => {
         sotaRef,
         wwffRef,
         llotaRef,
+        wwbotaRef,
         name: logQrzInfo ? [cleanQrzName(logQrzInfo.nickname) || cleanQrzName(logQrzInfo.fname), cleanQrzName(logQrzInfo.name)].filter(Boolean).join(' ') : '',
         // For park/summit activators, use park location instead of QRZ home QTH
         // For POTA activators, use the park's state/grid instead of QRZ home QTH
@@ -9418,6 +9444,7 @@ function syncSpotsPanel() {
   spotsSota.checked = enableSota;
   spotsWwff.checked = enableWwff;
   spotsLlota.checked = enableLlota;
+  if (spotsWwbota) spotsWwbota.checked = enableWwbota;
   if (spotsTiles) spotsTiles.checked = enableTiles;
   spotsCluster.checked = enableCluster;
   spotsCwSpots.checked = enableCwSpots;
@@ -9462,6 +9489,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   enableSota = spotsSota.checked;
   enableWwff = spotsWwff.checked;
   enableLlota = spotsLlota.checked;
+  enableWwbota = spotsWwbota ? spotsWwbota.checked : enableWwbota;
   enableTiles = spotsTiles ? spotsTiles.checked : enableTiles;
   enableCluster = spotsCluster.checked;
   enableCwSpots = spotsCwSpots.checked;
@@ -9512,6 +9540,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   setEnableSota.checked = enableSota;
   setEnableWwff.checked = enableWwff;
   setEnableLlota.checked = enableLlota;
+  if (setEnableWwbota) setEnableWwbota.checked = enableWwbota;
   if (setEnableTiles) setEnableTiles.checked = enableTiles;
   setEnableCluster.checked = enableCluster;
   setEnableCwSpots.checked = enableCwSpots;
@@ -9529,7 +9558,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
 
   // Save and let main process handle connect/disconnect
   await window.api.saveSettings({
-    enablePota, enableSota, enableWwff, enableLlota, enableTiles,
+    enablePota, enableSota, enableWwff, enableLlota, enableWwbota, enableTiles,
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
     enableDxeSources: { ...enableDxeSources },
     hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, strictAtno, hideOutOfBand,
@@ -10245,6 +10274,7 @@ async function openSettingsDialog(tab) {
   if (setRespotTemplate) setRespotTemplate.value = s.respotTemplate || '';
   if (setWwffRespotTemplate) setWwffRespotTemplate.value = s.wwffRespotTemplate || '';
   if (setLlotaRespotTemplate) setLlotaRespotTemplate.value = s.llotaRespotTemplate || '';
+  if (setWwbotaRespotTemplate) setWwbotaRespotTemplate.value = s.wwbotaRespotTemplate || '';
   if (setDxRespotTemplate) setDxRespotTemplate.value = s.dxRespotTemplate || '';
   setNotifyPopup.checked = s.notifyPopup !== false;
   setNotifySound.checked = s.notifySound !== false;
@@ -10283,6 +10313,7 @@ async function openSettingsDialog(tab) {
   setEnableSota.checked = s.enableSota === true;
   setEnableWwff.checked = s.enableWwff === true;
   setEnableLlota.checked = s.enableLlota === true;
+  if (setEnableWwbota) setEnableWwbota.checked = s.enableWwbota !== false;
   if (setEnableTiles) setEnableTiles.checked = s.enableTiles !== false;
   setEnableQrz.checked = s.enableQrz === true;
   setQrzUsername.value = s.qrzUsername || '';
@@ -10475,6 +10506,7 @@ async function openSettingsDialog(tab) {
   setPanadapterSota.checked      = s.panadapterSota === true;
   setPanadapterWwff.checked      = s.panadapterWwff === true;
   setPanadapterLlota.checked     = s.panadapterLlota === true;
+  if (setPanadapterWwbota) setPanadapterWwbota.checked = s.panadapterWwbota === true;
   setPanadapterCluster.checked   = s.panadapterCluster === true;
   setPanadapterRbn.checked       = s.panadapterRbn === true;
   setPanadapterCwSpots.checked   = s.panadapterCwSpots === true;
@@ -10865,6 +10897,7 @@ settingsSave.addEventListener('click', async () => {
   const respotTemplateVal = setRespotTemplate ? setRespotTemplate.value.trim() : '';
   const wwffRespotTemplateVal = setWwffRespotTemplate ? setWwffRespotTemplate.value.trim() : '';
   const llotaRespotTemplateVal = setLlotaRespotTemplate ? setLlotaRespotTemplate.value.trim() : '';
+  const wwbotaRespotTemplateVal = setWwbotaRespotTemplate ? setWwbotaRespotTemplate.value.trim() : '';
   const dxRespotTemplateVal = setDxRespotTemplate ? setDxRespotTemplate.value.trim() : '';
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
@@ -10885,6 +10918,7 @@ settingsSave.addEventListener('click', async () => {
   const sotaEnabled = setEnableSota.checked;
   const wwffEnabled = setEnableWwff.checked;
   const llotaEnabled = setEnableLlota.checked;
+  const wwbotaEnabled = setEnableWwbota ? setEnableWwbota.checked : enableWwbota;
   const tilesEnabled = setEnableTiles ? setEnableTiles.checked : enableTiles;
   const qrzEnabled = setEnableQrz.checked;
   const qrzUsername = setQrzUsername.value.trim().toUpperCase();
@@ -11068,6 +11102,7 @@ settingsSave.addEventListener('click', async () => {
     respotTemplate: respotTemplateVal,
     wwffRespotTemplate: wwffRespotTemplateVal,
     llotaRespotTemplate: llotaRespotTemplateVal,
+    wwbotaRespotTemplate: wwbotaRespotTemplateVal,
     dxRespotTemplate: dxRespotTemplateVal,
     notifyPopup: notifyPopupEnabled,
     notifySound: notifySoundEnabled,
@@ -11076,6 +11111,7 @@ settingsSave.addEventListener('click', async () => {
     enableSota: sotaEnabled,
     enableWwff: wwffEnabled,
     enableLlota: llotaEnabled,
+    enableWwbota: wwbotaEnabled,
     enableTiles: tilesEnabled,
     enableQrz: qrzEnabled,
     qrzUsername: qrzUsername,
@@ -11180,6 +11216,7 @@ settingsSave.addEventListener('click', async () => {
     panadapterSota:      setPanadapterSota.checked,
     panadapterWwff:      setPanadapterWwff.checked,
     panadapterLlota:     setPanadapterLlota.checked,
+    panadapterWwbota:    setPanadapterWwbota ? setPanadapterWwbota.checked : undefined,
     panadapterCluster:   setPanadapterCluster.checked,
     panadapterRbn:       setPanadapterRbn.checked,
     panadapterCwSpots:   setPanadapterCwSpots.checked,
@@ -13478,7 +13515,7 @@ catLogClearBtn.addEventListener('click', () => {
         .filter(Boolean).join(' / ')
       : '(none configured)';
     const enabled = [
-      s.enablePota && 'POTA', s.enableSota && 'SOTA', s.enableWwff && 'WWFF', s.enableLlota && 'LLOTA',
+      s.enablePota && 'POTA', s.enableSota && 'SOTA', s.enableWwff && 'WWFF', s.enableLlota && 'LLOTA', s.enableWwbota && 'WWBOTA',
       s.enableCluster && 'DX-Cluster', s.enableCwSpots && 'CW-Spots', s.enableRbn && 'RBN',
       s.enablePskr && 'PSKR', s.enableDxcc && 'DXCC', s.enableFreedv && 'FreeDV',
       s.enableAutoSstv && 'Auto-SSTV',
@@ -17704,6 +17741,7 @@ if (activatorParkRefInput) {
       activatorCrossRefs = [];
       if (crossRefWwff) crossRefWwff.value = '';
       if (crossRefLlota) crossRefLlota.value = '';
+      if (crossRefWwbota) crossRefWwbota.value = '';
       updateParkExtraBadge();
       return;
     }
@@ -17946,15 +17984,18 @@ const crossRefPopover = document.getElementById('activator-crossref-popover');
 const crossRefSota = document.getElementById('activator-crossref-sota');
 const crossRefWwff = document.getElementById('activator-crossref-wwff');
 const crossRefLlota = document.getElementById('activator-crossref-llota');
+const crossRefWwbota = document.getElementById('activator-crossref-wwbota');
 
 function rebuildCrossRefs() {
   activatorCrossRefs = [];
   const sotaVal = crossRefSota ? crossRefSota.value.trim().toUpperCase() : '';
   const wwffVal = crossRefWwff ? crossRefWwff.value.trim().toUpperCase() : '';
   const llotaVal = crossRefLlota ? crossRefLlota.value.trim().toUpperCase() : '';
+  const wwbotaVal = crossRefWwbota ? crossRefWwbota.value.trim().toUpperCase() : '';
   if (sotaVal) activatorCrossRefs.push({ program: 'SOTA', ref: sotaVal });
   if (wwffVal) activatorCrossRefs.push({ program: 'WWFF', ref: wwffVal });
   if (llotaVal) activatorCrossRefs.push({ program: 'LLOTA', ref: llotaVal });
+  if (wwbotaVal) activatorCrossRefs.push({ program: 'WWBOTA', ref: wwbotaVal });
   window.api.saveSettings({ activatorCrossRefs });
   updateCrossRefToggle();
 }
@@ -17982,6 +18023,7 @@ if (crossRefToggle) {
 if (crossRefSota) crossRefSota.addEventListener('blur', rebuildCrossRefs);
 if (crossRefWwff) crossRefWwff.addEventListener('blur', rebuildCrossRefs);
 if (crossRefLlota) crossRefLlota.addEventListener('blur', rebuildCrossRefs);
+if (crossRefWwbota) crossRefWwbota.addEventListener('blur', rebuildCrossRefs);
 
 // --- Quick Log ---
 async function activatorLogContact() {
@@ -19055,29 +19097,20 @@ var jtcatSpectrumFrame = 0;    // frame counter for throttling spectrum IPC to ~
 // worklet) is byte-identical to the Windows-device path. K3SBP 2026-05-14.
 var jtcatVita49Ctx = null;
 var jtcatVita49Dest = null;
-var jtcatVita49NextPlay = 0;
+var jtcatVita49Node = null; // single AudioWorkletNode — replaces per-frame BufferSource churn
 
 window.api.onJtcatVita49Audio(function (frame) {
   // Return false so the preload acks immediately when we're not the
   // active consumer — keeps main's IPC backlog at 0 for this window
   // while the JTCAT popout is the live audio sink.
-  if (!jtcatVita49Ctx || !jtcatVita49Dest || !frame || !frame.pcm || !frame.pcm.length) return false;
-  if (jtcatVita49Ctx.state === 'suspended') jtcatVita49Ctx.resume().catch(function () {});
-  var sr = frame.sampleRate || 24000;
-  var pcm = new Float32Array(frame.pcm);
-  var buf = jtcatVita49Ctx.createBuffer(1, pcm.length, sr);
-  buf.getChannelData(0).set(pcm);
-  var src = jtcatVita49Ctx.createBufferSource();
-  src.buffer = buf;
-  src.connect(jtcatVita49Dest);
-  // Schedule packets back-to-back; cap the cursor 500 ms ahead of now so
-  // a network/IPC burst can't strand playback seconds behind real time.
-  var now = jtcatVita49Ctx.currentTime;
-  if (jtcatVita49NextPlay < now || jtcatVita49NextPlay > now + 0.5) {
-    jtcatVita49NextPlay = now;
-  }
-  src.start(jtcatVita49NextPlay);
-  jtcatVita49NextPlay += pcm.length / sr;
+  if (!jtcatVita49Node || !frame || !frame.pcm || !frame.pcm.length) return false;
+  if (jtcatVita49Ctx && jtcatVita49Ctx.state === 'suspended') jtcatVita49Ctx.resume().catch(function () {});
+  // Hand the raw PCM frame to the worklet's port. The worklet maintains
+  // a single ring buffer + linear-interp resampler — no per-frame Web
+  // Audio node allocation. The IPC-deserialized typed array may not be
+  // a Float32Array; coerce so the worklet sees uniform shape.
+  var pcm = (frame.pcm instanceof Float32Array) ? frame.pcm : new Float32Array(frame.pcm);
+  jtcatVita49Node.port.postMessage(pcm);
   return true;
 });
 
@@ -19095,16 +19128,36 @@ async function startJtcatAudio() {
       // main forwards as 'jtcat-vita49-audio' frames — not a Windows
       // audio device. Build a synthetic MediaStream from those frames so
       // everything below this point (createMediaStreamSource, gain,
-      // analyser, waterfall, worklet) runs unchanged. The frame handler
-      // at module scope schedules incoming PCM into jtcatVita49Dest.
+      // analyser, waterfall, worklet) runs unchanged.
+      //
+      // A SINGLE AudioWorkletNode owns the ring buffer + linear-interp
+      // resampler and pumps samples into a MediaStreamDestination. The
+      // module-scope `onJtcatVita49Audio` handler just port.postMessages
+      // raw PCM at it — no per-frame BufferSource creation, no Web Audio
+      // scheduler churn. K3SBP 2026-06-02 — replaces the previous
+      // createBuffer+createBufferSource-per-frame path that drove the
+      // "renderer not keeping up" backpressure spiral.
       jtcatVita49Ctx = new AudioContext();
       if (jtcatVita49Ctx.state === 'suspended') {
         try { await jtcatVita49Ctx.resume(); } catch (e) { /* logged below if it bites */ }
       }
+      try {
+        await jtcatVita49Ctx.audioWorklet.addModule('jtcat-vita49-source-worklet.js');
+      } catch (e) {
+        console.error('[JTCAT] failed to load VITA-49 source worklet:', e);
+        if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] VITA-49 source worklet load failed: ' + (e.message || e));
+        throw e;
+      }
+      jtcatVita49Node = new AudioWorkletNode(jtcatVita49Ctx, 'jtcat-vita49-source', {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: { sourceRate: 24000 },
+      });
       jtcatVita49Dest = jtcatVita49Ctx.createMediaStreamDestination();
-      jtcatVita49NextPlay = 0;
+      jtcatVita49Node.connect(jtcatVita49Dest);
       jtcatAudioStream = jtcatVita49Dest.stream;
-      if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio source: SmartSDR Direct (VITA-49 dax_rx)');
+      if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio source: SmartSDR Direct (VITA-49 dax_rx via AudioWorklet)');
     } else {
       var audioConstraints = {
         channelCount: 1,
@@ -19371,13 +19424,16 @@ function stopJtcatAudio() {
     jtcatAudioStream = null;
   }
   // SmartSDR Direct synthetic-stream context — frame handler no-ops once
-  // jtcatVita49Ctx is null, so this cleanly stops the synthetic feed.
+  // jtcatVita49Node is null, so this cleanly stops the synthetic feed.
+  if (jtcatVita49Node) {
+    try { jtcatVita49Node.disconnect(); } catch (e) { /* already gone */ }
+    jtcatVita49Node = null;
+  }
   if (jtcatVita49Ctx) {
     jtcatVita49Ctx.close().catch(function() {});
     jtcatVita49Ctx = null;
   }
   jtcatVita49Dest = null;
-  jtcatVita49NextPlay = 0;
 }
 
 // Restart JTCAT audio after ECHOCAT releases the shared audio device

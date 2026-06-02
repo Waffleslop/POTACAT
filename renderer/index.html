@@ -83,6 +83,7 @@
               <label class="spots-toggle"><input type="checkbox" id="spots-sota"> <span style="color:#f0a500">SOTA</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-wwff"> <span style="color:#26a69a">WWFF</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-llota"> <span style="color:#42a5f5">LLOTA</span></label>
+              <label class="spots-toggle"><input type="checkbox" id="spots-wwbota"> <span style="color:#78909c">WWBOTA</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-tiles"> <span style="color:#ab47bc">Tiles</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-cluster"> <span style="color:#e040fb">DX Cluster</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-cwspots"> <span style="color:#ffd740">CW Spots</span></label>
@@ -443,6 +444,7 @@
           <div class="crossref-row"><label class="crossref-label">SOTA</label><input type="text" id="activator-crossref-sota" class="crossref-input" placeholder="W6/CT-001" maxlength="20" spellcheck="false" autocomplete="off"></div>
           <div class="crossref-row"><label class="crossref-label">WWFF</label><input type="text" id="activator-crossref-wwff" class="crossref-input" placeholder="KFF-1234" maxlength="20" spellcheck="false" autocomplete="off"></div>
           <div class="crossref-row"><label class="crossref-label">LLOTA</label><input type="text" id="activator-crossref-llota" class="crossref-input" placeholder="US-0001" maxlength="20" spellcheck="false" autocomplete="off"></div>
+          <div class="crossref-row"><label class="crossref-label">WWBOTA</label><input type="text" id="activator-crossref-wwbota" class="crossref-input" placeholder="B/G-2392" maxlength="20" spellcheck="false" autocomplete="off"></div>
         </div>
       </div>
       <div class="activator-freq-group">
@@ -641,6 +643,7 @@
             <option value="sota">SOTA</option>
             <option value="wwff">WWFF</option>
             <option value="llota">LLOTA</option>
+            <option value="wwbota">WWBOTA</option>
           </select>
           <input type="text" id="bl-ref" class="bl-field bl-ref hidden" placeholder="Ref" maxlength="60" spellcheck="false" autocomplete="off" style="text-transform:uppercase;">
           <input type="text" id="bl-callsign" class="bl-field bl-callsign" placeholder="Callsign" maxlength="20" spellcheck="false" autocomplete="off" autocapitalize="characters">
@@ -1545,6 +1548,7 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-sota"> Enable SOTA</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-wwff"> Enable WWFF</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-llota"> Enable LLOTA</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-wwbota"> Enable WWBOTA <span class="help-text" style="margin-left:8px;font-weight:normal;">Worldwide Bunkers on the Air</span></label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-tiles"> Enable Tiles on the Air</label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-cluster"> Enable DX Cluster</label>
       <div id="cluster-config" class="radio-sub hidden">
@@ -1752,6 +1756,9 @@
       </label>
       <label>Re-spot template (LLOTA):
         <input type="text" id="set-llota-respot-template" placeholder="(blank = use POTA template)">
+      </label>
+      <label>Re-spot template (WWBOTA):
+        <input type="text" id="set-wwbota-respot-template" placeholder="(blank = use POTA template)">
       </label>
       <label>Re-spot template (DX cluster):
         <input type="text" id="set-dx-respot-template" placeholder="Heard in {QTH} 73s {mycallsign} via POTACAT">
@@ -2181,6 +2188,7 @@
         <label class="checkbox-label"><input type="checkbox" id="set-panadapter-sota"> SOTA</label>
         <label class="checkbox-label"><input type="checkbox" id="set-panadapter-wwff"> WWFF</label>
         <label class="checkbox-label"><input type="checkbox" id="set-panadapter-llota"> LLOTA</label>
+        <label class="checkbox-label"><input type="checkbox" id="set-panadapter-wwbota"> WWBOTA</label>
         <label class="checkbox-label"><input type="checkbox" id="set-panadapter-cluster"> DX Cluster</label>
         <label class="checkbox-label"><input type="checkbox" id="set-panadapter-rbn"> RBN</label>
         <label class="checkbox-label"><input type="checkbox" id="set-panadapter-cwspots"> CW Spots</label>
@@ -3004,6 +3012,12 @@
           <input type="text" id="log-ref-llota" placeholder="e.g. US-0001" style="text-transform:uppercase;" spellcheck="false" autocomplete="off">
         </label>
         <div id="log-ref-name-llota" style="font-size:12px;color:var(--accent-green);margin-top:2px;min-height:16px;white-space:pre-line;"></div>
+      </div>
+      <div class="log-ref-row" data-type="wwbota" style="display:none;">
+        <label style="display:block;">WWBOTA Refs <span style="color:#888;font-weight:normal;font-size:11px;">(comma-separated for n-fer)</span>:
+          <input type="text" id="log-ref-wwbota" placeholder="e.g. B/G-2392" style="text-transform:uppercase;" spellcheck="false" autocomplete="off">
+        </label>
+        <div id="log-ref-name-wwbota" style="font-size:12px;color:var(--accent-green);margin-top:2px;min-height:16px;white-space:pre-line;"></div>
       </div>
     </div>
     <div style="display:flex;gap:8px;">

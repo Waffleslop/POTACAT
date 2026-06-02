@@ -21,6 +21,7 @@
   --source-sota: #f0a500;
   --source-wwff: #26a69a;
   --source-llota: #42a5f5;
+  --source-wwbota: #78909c;
   --source-tiles: #ab47bc;
   --source-dxc: #e040fb;
   --source-rbn: #00bcd4;
@@ -116,6 +117,7 @@
   --source-dxc: #e87fff;
   --source-pskr: #ff9090;
   --source-wwff: #3cc4b8;
+  --source-wwbota: #90a4ae;
 }
 
 /* WCAG AA — light theme overrides */
@@ -136,6 +138,7 @@
   --source-dxc: #8a1aaf;
   --source-pskr: #b82020;
   --source-wwff: #1a7a6e;
+  --source-wwbota: #4a5c66;
   --source-rbn: #00757a;
 }
 
@@ -2118,6 +2121,11 @@ tr.wl-group-2 td:last-child {
   background: color-mix(in srgb, var(--source-llota) 6%, transparent);
 }
 
+.spot-wwbota {
+  border-left: 3px solid var(--source-wwbota);
+  background: color-mix(in srgb, var(--source-wwbota) 6%, transparent);
+}
+
 .spot-pskr {
   border-left: 3px solid var(--source-pskr);
   background: color-mix(in srgb, var(--source-pskr) 6%, transparent);
@@ -2144,6 +2152,7 @@ tr.wl-group-2 td:last-child {
 .source-badge-rbn  { background: var(--source-rbn); color: #000; }
 .source-badge-wwff { background: var(--source-wwff); color: #000; }
 .source-badge-llota { background: var(--source-llota); color: #000; }
+.source-badge-wwbota { background: var(--source-wwbota); color: #fff; }
 .source-badge-tiles { background: var(--source-tiles); color: #fff; }
 .source-badge-pskr { background: var(--source-pskr); color: #000; }
 .source-badge-net  { background: var(--source-net); color: #000; }
@@ -2161,6 +2170,7 @@ tr.wl-group-2 td:last-child {
 .no-source-tint .spot-rbn,
 .no-source-tint .spot-wwff,
 .no-source-tint .spot-llota,
+.no-source-tint .spot-wwbota,
 .no-source-tint .spot-pskr,
 .no-source-tint .spot-net {
   background: transparent;
