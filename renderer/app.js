@@ -16323,6 +16323,13 @@ function formatFilterWidth(hz) {
   return hz >= 1000 ? (hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 1) + 'k' : hz + '';
 }
 
+function rigFormatPower(watts) {
+  const decimals = Math.max(0, parseInt(rigCurrentCaps.powerDecimals || 0, 10));
+  const numeric = Number(watts);
+  if (!Number.isFinite(numeric)) return watts + 'W';
+  return numeric.toFixed(decimals) + 'W';
+}
+
 function rigGetFilterPresets(mode) {
   const m = (mode || '').toUpperCase();
   if (m === 'CW') return RIG_FILTER_PRESETS.CW;
@@ -16369,6 +16376,36 @@ function rigPopulateAgcOptions(caps) {
     rigAgcSelect.appendChild(opt);
   }
   rigAgcSelect.value = modes.includes(previous) ? previous : '';
+}
+
+function rigRefreshPreampLevelOptions() {
+  if (!rigPreampTargetSel || !rigPreampLevelSel) return;
+  const target = rigPreampTargetSel.value || 'hf50';
+  const previous = parseInt(rigPreampLevelSel.value || '0', 10);
+  const options = target === 'hf50'
+    ? [
+        { value: '0', label: 'IPO' },
+        { value: '1', label: 'AMP1' },
+        { value: '2', label: 'AMP2' },
+      ]
+    : [
+        { value: '0', label: 'Off' },
+        { value: '1', label: 'On' },
+      ];
+
+  rigPreampLevelSel.innerHTML = '';
+  for (const optDef of options) {
+    const opt = document.createElement('option');
+    opt.value = optDef.value;
+    opt.textContent = optDef.label;
+    rigPreampLevelSel.appendChild(opt);
+  }
+
+  const clamped = Math.min(previous, target === 'hf50' ? 2 : 1);
+  rigPreampLevelSel.value = String(clamped);
+  rigPreampLevelSel.title = target === 'hf50'
+    ? 'HF/50 preamp level: IPO, AMP1, or AMP2'
+    : 'VHF/UHF preamp: Off or On';
 }
 
 function rigPlaceMonitorNearCwControls(isFtx1) {
@@ -16457,6 +16494,9 @@ function rigApplyCapabilities(caps) {
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
+  rigTxPower.step = caps.powerStep != null ? caps.powerStep : 1;
+  if (rigTxPowerLabel) rigTxPowerLabel.textContent = rigFormatPower(rigTxPower.value);
+  rigRefreshPreampLevelOptions();
   if (rigNbLevel && caps.maxNbLevel != null) {
     rigNbLevel.min = 0;
     rigNbLevel.max = caps.maxNbLevel;
@@ -16605,6 +16645,7 @@ if (rigBreakInDelaySel) {
 // the radio always sees a coherent (target, level) pair.
 function _sendPreampTarget() {
   const target = (rigPreampTargetSel && rigPreampTargetSel.value) || 'hf50';
+  rigRefreshPreampLevelOptions();
   const level = parseInt((rigPreampLevelSel && rigPreampLevelSel.value) || '0', 10);
   // AMP2 is only valid on HF/50 — clamp away on VHF/UHF rather than
   // silently sending an out-of-range value.
@@ -16639,14 +16680,17 @@ rigRfGain.addEventListener('input', () => {
 });
 
 rigTxPower.addEventListener('input', () => {
-  const val = parseInt(rigTxPower.value, 10);
-  rigTxPowerLabel.textContent = val + 'W';
+  const val = parseFloat(rigTxPower.value);
+  rigTxPowerLabel.textContent = rigFormatPower(val);
   throttledRigControl('set-tx-power', val);
 });
 
 // Listen for rig state updates from main process
 window.api.onRigState((state) => {
   if (!state) return;
+  // Apply model capabilities before syncing values so Field-specific power
+  // decimals/limits and target-specific preamp labels are already in place.
+  if (state.capabilities) rigApplyCapabilities(state.capabilities);
   // Update NB button
   if (state.nb) {
     rigNbBtn.classList.add('active');
@@ -16707,8 +16751,10 @@ window.api.onRigState((state) => {
   }
   if (rigPreampTargetSel && state.preampTarget != null && document.activeElement !== rigPreampTargetSel) {
     rigPreampTargetSel.value = state.preampTarget;
+    rigRefreshPreampLevelOptions();
   }
   if (rigPreampLevelSel && state.preampLevel != null && document.activeElement !== rigPreampLevelSel) {
+    rigRefreshPreampLevelOptions();
     rigPreampLevelSel.value = String(state.preampLevel);
   }
   if (rigAntennaPortSel && state.antennaPort != null && document.activeElement !== rigAntennaPortSel) {
@@ -16721,13 +16767,11 @@ window.api.onRigState((state) => {
   }
   if (document.activeElement !== rigTxPower && state.txPower != null) {
     rigTxPower.value = state.txPower;
-    rigTxPowerLabel.textContent = state.txPower + 'W';
+    rigTxPowerLabel.textContent = rigFormatPower(state.txPower);
   }
   // Update filter presets
   if (state.mode) rigCurrentMode = state.mode;
   rigBuildFilterPresets(state.mode || rigCurrentMode, state.filterWidth);
-  // Update capabilities (show/hide controls)
-  if (state.capabilities) rigApplyCapabilities(state.capabilities);
 });
 
 // Show/hide rig panel button based on CAT connection status

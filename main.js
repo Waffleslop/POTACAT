@@ -816,6 +816,8 @@ function getRigCapabilities(rigType) {
     // Include power limits so UI can clamp sliders
     if (model.minPower != null) caps.minPower = model.minPower;
     if (model.maxPower != null) caps.maxPower = model.maxPower;
+    if (model.powerStep != null) caps.powerStep = model.powerStep;
+    if (model.powerDecimals != null) caps.powerDecimals = model.powerDecimals;
     if (model.maxNbLevel != null) caps.maxNbLevel = model.maxNbLevel;
     if (model.maxDnrLevel != null) caps.maxDnrLevel = model.maxDnrLevel;
     if (Array.isArray(model.agcModes)) caps.agcModes = model.agcModes.slice();

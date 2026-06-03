@@ -720,7 +720,8 @@ const FTX1_FIELD_MODEL = {
     breakInDelay: true, ftx1Clar: true,
   },
   cw: { text: 'ky1', textChunk: 50, speed: 'ks', paddleKey: 'txrx', kyMode: 'km' },
-  atuCmd: 'ac103', minPower: 5, maxPower: 100, maxNbLevel: 10, maxDnrLevel: 10,
+  atuCmd: 'ac103', minPower: 0.1, maxPower: 10, powerScale: 10,
+  powerStep: 0.1, powerDecimals: 1, maxNbLevel: 10, maxDnrLevel: 10,
   agcMap: { off: 0, fast: 1, med: 2, mid: 2, slow: 3, auto: 4 },
   commands: {
     setNbOn: 'NL0001;', setNbOff: 'NL0000;', getNb: 'NL0;', setNbLevel: 'NL0{val:pad3};',
@@ -732,7 +733,8 @@ const FTX1_FIELD_MODEL = {
   pcPrefix: 1, rmSwr: 6, rmAlc: 4, pollTxMetersAlways: true, powerPollEvery: 2,
 };
 const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
-  atuCmd: 'ac103', pcPrefix: 2,
+  atuCmd: 'ac103', minPower: 5, maxPower: 100, powerScale: 1,
+  powerStep: 1, powerDecimals: 0, pcPrefix: 2,
   caps: Object.assign({}, FTX1_FIELD_MODEL.caps, { antennaPort: true }),
   commands: Object.assign({}, FTX1_FIELD_MODEL.commands, {
     setAntennaPort: 'EX030704{val};',
@@ -740,13 +742,14 @@ const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
   }),
 });
 
-// Power: model-prefixed PC parsing (PC1xxx Field, PC2xxx Optima).
-test('FTX-1 Field: PC1100 reply parses as 100 W (prefix stripped)', () => {
+// Power: model-prefixed PC parsing (PC1xxx Field, PC2xxx Optima). Field uses
+// tenths of a watt, so PC1100 means prefix=1 + 10.0 W.
+test('FTX-1 Field: PC1100 reply parses as 10.0 W (prefix stripped, tenths scale)', () => {
   const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
   let captured = null;
   codec.on('power', (w) => { captured = w; });
   codec.onData(Buffer.from('PC1100;'));
-  assert.strictEqual(captured, 100);
+  assert.strictEqual(captured, 10);
 });
 
 test('FTX-1 Optima: PC2100 reply parses as 100 W (prefix stripped)', () => {
@@ -765,6 +768,14 @@ test('FTX-1 Optima: PC1100 (wrong prefix) parses as 1100 (no strip)', () => {
   codec.on('power', (w) => { captured = w; });
   codec.onData(Buffer.from('PC1100;'));
   assert.strictEqual(captured, 1100);
+});
+
+test('FTX-1 Field: setTxPower emits tenths-scaled PC payload and clamps at 10W', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setTxPower(9.7);
+  codec.setTxPower(100);
+  assert.strictEqual(writes[0], 'PC097;');
+  assert.strictEqual(writes[1], 'PC100;');
 });
 
 test('FTX-1 Field native tuner uses external ATU start command AC103;', () => {
