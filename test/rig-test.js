@@ -720,7 +720,7 @@ const FTX1_FIELD_MODEL = {
     breakInDelay: true, ftx1Clar: true,
   },
   cw: { text: 'ky1', textChunk: 50, speed: 'ks', paddleKey: 'txrx', kyMode: 'km' },
-  atuCmd: 'standard', minPower: 5, maxPower: 100, maxNbLevel: 10, maxDnrLevel: 10,
+  atuCmd: 'ac103', minPower: 5, maxPower: 100, maxNbLevel: 10, maxDnrLevel: 10,
   agcMap: { off: 0, fast: 1, med: 2, mid: 2, slow: 3, auto: 4 },
   commands: {
     setNbOn: 'NL0001;', setNbOff: 'NL0000;', getNb: 'NL0;', setNbLevel: 'NL0{val:pad3};',
@@ -765,6 +765,12 @@ test('FTX-1 Optima: PC1100 (wrong prefix) parses as 1100 (no strip)', () => {
   codec.on('power', (w) => { captured = w; });
   codec.onData(Buffer.from('PC1100;'));
   assert.strictEqual(captured, 1100);
+});
+
+test('FTX-1 Field native tuner uses external ATU start command AC103;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.startTune();
+  assert.deepStrictEqual(writes, ['AC103;']);
 });
 
 // Meter channel routing (FTX-1 = RM6 SWR, RM4 ALC).
