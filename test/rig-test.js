@@ -720,9 +720,9 @@ const FTX1_FIELD_MODEL = {
     breakInDelay: true, ftx1Clar: true,
   },
   cw: { text: 'ky1', textChunk: 50, speed: 'ks', paddleKey: 'txrx', kyMode: 'km' },
-  atuCmd: 'ac103', minPower: 5, maxPower: 10, powerStep: 1,
-  powerChoices: [5, 10],
-  powerMap: { 5: 5, 10: 10 },
+  atuCmd: 'ac103', minPower: 1, maxPower: 10, powerStep: 1,
+  powerChoices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  powerMap: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10 },
   maxNbLevel: 10, maxDnrLevel: 10,
   agcMap: { off: 0, fast: 1, med: 2, mid: 2, slow: 3, auto: 4 },
   commands: {
@@ -747,13 +747,13 @@ const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
 });
 
 // Power: model-prefixed PC set/read (PC1xxx Field, PC2xxx Optima). Field
-// hardware has confirmed two reliable CAT setpoints so far: 5W and 10W.
-test('FTX-1 Field: PC1005 reply maps back to observed 5 W', () => {
+// hardware confirms whole-watt CAT values: PC1001 -> 1W ... PC1010 -> 10W.
+test('FTX-1 Field: PC1004 reply maps back to observed 4 W', () => {
   const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
   let captured = null;
   codec.on('power', (w) => { captured = w; });
-  codec.onData(Buffer.from('PC1005;'));
-  assert.strictEqual(captured, 5);
+  codec.onData(Buffer.from('PC1004;'));
+  assert.strictEqual(captured, 4);
 });
 
 test('FTX-1 Optima: PC2100 reply parses as 100 W (prefix stripped)', () => {
@@ -774,12 +774,14 @@ test('FTX-1 Optima: PC1100 (wrong prefix) parses as 1100 (no strip)', () => {
   assert.strictEqual(captured, 1100);
 });
 
-test('FTX-1 Field: setTxPower emits only confirmed mapped payloads', () => {
+test('FTX-1 Field: setTxPower emits whole-watt model-prefixed payloads', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
-  codec.setTxPower(5);
+  codec.setTxPower(1);
+  codec.setTxPower(7);
   codec.setTxPower(100);
-  assert.strictEqual(writes[0], 'PC1005;');
-  assert.strictEqual(writes[1], 'PC1010;');
+  assert.strictEqual(writes[0], 'PC1001;');
+  assert.strictEqual(writes[1], 'PC1007;');
+  assert.strictEqual(writes[2], 'PC1010;');
 });
 
 test('FTX-1 Optima: setTxPower emits model-prefixed PC payload', () => {
