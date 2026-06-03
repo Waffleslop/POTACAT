@@ -174,7 +174,7 @@ const { RemoteServer } = require('./lib/remote-server');
 // and every other call is a stable no-op — safe to require unconditionally.
 const alsa = require('./lib/alsa');
 const { fetchSpots: fetchWwffSpots } = require('./lib/wwff');
-const { fetchSpots: fetchTilesSpots, parseFreqKhz: parseTilesFreqKhz } = require('./lib/tiles');
+const { fetchSpots: fetchTilesSpots, parseFreqKhz: parseTilesFreqKhz, TilesRateLimitError } = require('./lib/tiles');
 const { fetchSpots: fetchLlotaSpots } = require('./lib/llota');
 const { fetchSpots: fetchWwbotaSpots, postSpot: postWwbotaSpot } = require('./lib/wwbota');
 const { postWwffRespot } = require('./lib/wwff-respot');
@@ -9014,13 +9014,34 @@ function processWwffSpots(raw) {
   return [...seen.values()];
 }
 
-// Tiles is polled on its own ~20 s cadence (see refreshSpots), decoupled from
-// the user's spot-refresh interval — the tilesontheair.com operator foots the
-// Supabase bill, so POTACAT must stay polite however fast the user refreshes.
-// Between polls the last snapshot is reused. (KK4ODA 2026-05-21.)
-const TILES_POLL_MS = 20000;
+// Tiles polling has its own cadence, decoupled from the user's spot-
+// refresh interval — the tilesontheair.com operator foots the Supabase
+// Edge Function bill, and aggregate POTACAT polling drove a quota
+// incident on 2026-06-02. The new polite-poll discipline:
+//
+//   - **30 s base cadence** (was 20 s). Per the operator: anything 10-30 s
+//     catches new spots well within their 30-min lifetime.
+//   - **Incremental polls via `since`** — track the newest spot's created_at
+//     and ask only for spots newer than that. Each response is ~empty most
+//     of the time, which is what keeps total quota down.
+//   - **Periodic full resync** every 10 polls (~5 min) replaces the cache
+//     wholesale. Catches anything we missed during a brief network hiccup
+//     and forgets stale entries beyond the 30-min window without needing
+//     local TTL bookkeeping.
+//   - **429 Retry-After** is honored — when the server tells us to back
+//     off, we DON'T poll until the deadline, regardless of cadence. The
+//     UI keeps serving the cached list during the pause.
+//
+// Per-instance budget at 30 s = 2 req/min worst case (full snapshot poll)
+// or whatever Tiles' server-side throttle allows (currently 4 req/min/key).
+// (KK4ODA 2026-06-02 follow-up.)
+const TILES_POLL_MS = 30000;
+const TILES_FULL_RESYNC_EVERY_POLLS = 10; // ~5 min at 30 s
 let _tilesLastFetch = 0;
 let _tilesCache = [];
+let _tilesSinceTs = null;            // ISO of newest spot in cache
+let _tilesPollsSinceFullSync = 0;
+let _tilesBackoffUntil = 0;          // epoch ms; while now < this, skip fetch
 
 // Tiles API spot envelope:
 //   { id, call_sign, frequency, mode, maidenhead_grid, latitude, longitude,
@@ -9484,15 +9505,61 @@ async function refreshSpots() {
     if (enableLlota) fetches.push(fetchLlotaSpots().then(processLlotaSpots));
     if (enableWwbota) fetches.push(fetchWwbotaSpots().then(processWwbotaSpots));
     if (enableTiles) {
-      // Rate-limit Tiles to TILES_POLL_MS regardless of how often refreshSpots
-      // runs; reuse the cached snapshot in between so the UI still shows them.
-      if (Date.now() - _tilesLastFetch >= TILES_POLL_MS) {
-        _tilesLastFetch = Date.now();
+      // Tiles fetch with operator-friendly cadence + since-incremental
+      // polling + 429 backoff. See TILES_POLL_MS comment block above
+      // for the rationale.
+      const now = Date.now();
+      const dueByCadence = now - _tilesLastFetch >= TILES_POLL_MS;
+      const inBackoff = now < _tilesBackoffUntil;
+      if (dueByCadence && !inBackoff) {
+        _tilesLastFetch = now;
+        const isFullSync = !_tilesSinceTs
+          || _tilesPollsSinceFullSync >= TILES_FULL_RESYNC_EVERY_POLLS;
+        const tilesOpts = isFullSync ? {} : { since: _tilesSinceTs };
         fetches.push(
-          fetchTilesSpots()
+          fetchTilesSpots(tilesOpts)
             .then(processTilesSpots)
-            .then((spots) => { _tilesCache = spots; return spots; })
-            .catch(() => _tilesCache)
+            .then((spots) => {
+              if (isFullSync) {
+                _tilesCache = spots;
+                _tilesPollsSinceFullSync = 0;
+              } else if (spots.length > 0) {
+                // Merge new spots into cache, dedupe by call+freq+spotTime.
+                // (processTilesSpots doesn't surface the API's row id, and
+                // these three together are unique enough — same activator
+                // re-spotting on the same freq at the same instant doesn't
+                // happen.) Server only returns rows newer than _tilesSinceTs,
+                // so collisions here are rare retries of in-flight spots.
+                const keyOf = (s) => s.callsign + '|' + s.frequency + '|' + s.spotTime;
+                const seen = new Set(_tilesCache.map(keyOf));
+                const fresh = spots.filter((s) => !seen.has(keyOf(s)));
+                _tilesCache = _tilesCache.concat(fresh);
+              }
+              // Drop spots older than 30 min — matches the server's own
+              // active window so the cache doesn't grow unboundedly
+              // between full resyncs.
+              const ageCutoff = Date.now() - 30 * 60 * 1000;
+              _tilesCache = _tilesCache.filter((s) => {
+                const t = Date.parse(s.spotTime || '');
+                return !isFinite(t) || t >= ageCutoff;
+              });
+              // Track newest seen for next `since`.
+              for (const s of _tilesCache) {
+                const t = s.spotTime;
+                if (t && (!_tilesSinceTs || t > _tilesSinceTs)) _tilesSinceTs = t;
+              }
+              _tilesPollsSinceFullSync++;
+              return _tilesCache;
+            })
+            .catch((err) => {
+              if (err && err.name === 'TilesRateLimitError') {
+                _tilesBackoffUntil = Date.now() + err.retryAfter * 1000;
+                console.warn(`[Tiles] rate-limited; pausing polls for ${err.retryAfter}s (server Retry-After honored)`);
+              } else if (err && err.message) {
+                console.warn('[Tiles] fetch failed:', err.message);
+              }
+              return _tilesCache;
+            })
         );
       } else {
         fetches.push(Promise.resolve(_tilesCache));
