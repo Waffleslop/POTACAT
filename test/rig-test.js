@@ -721,8 +721,8 @@ const FTX1_FIELD_MODEL = {
   },
   cw: { text: 'ky1', textChunk: 50, speed: 'ks', paddleKey: 'txrx', kyMode: 'km' },
   atuCmd: 'ac103', minPower: 5, maxPower: 10, powerStep: 1,
-  powerChoices: [5, 6, 7, 8, 9, 10],
-  powerMap: { 5: 25, 6: 20, 7: 15, 8: 10, 9: 5, 10: 0 },
+  powerChoices: [5, 10],
+  powerMap: { 5: 5, 10: 10 },
   maxNbLevel: 10, maxDnrLevel: 10,
   agcMap: { off: 0, fast: 1, med: 2, mid: 2, slow: 3, auto: 4 },
   commands: {
@@ -746,14 +746,14 @@ const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
   }),
 });
 
-// Power: model-prefixed PC set/read (PC1xxx Field, PC2xxx Optima). The Field
-// payload behaves as a raw power-code map in hardware testing, not linear watts.
-test('FTX-1 Field: PC1005 reply maps back to observed 9 W', () => {
+// Power: model-prefixed PC set/read (PC1xxx Field, PC2xxx Optima). Field
+// hardware has confirmed two reliable CAT setpoints so far: 5W and 10W.
+test('FTX-1 Field: PC1005 reply maps back to observed 5 W', () => {
   const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
   let captured = null;
   codec.on('power', (w) => { captured = w; });
   codec.onData(Buffer.from('PC1005;'));
-  assert.strictEqual(captured, 9);
+  assert.strictEqual(captured, 5);
 });
 
 test('FTX-1 Optima: PC2100 reply parses as 100 W (prefix stripped)', () => {
@@ -774,14 +774,12 @@ test('FTX-1 Optima: PC1100 (wrong prefix) parses as 1100 (no strip)', () => {
   assert.strictEqual(captured, 1100);
 });
 
-test('FTX-1 Field: setTxPower emits model-prefixed raw mapped payload', () => {
+test('FTX-1 Field: setTxPower emits only confirmed mapped payloads', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
-  codec.setTxPower(7);
-  codec.setTxPower(9);
+  codec.setTxPower(5);
   codec.setTxPower(100);
-  assert.strictEqual(writes[0], 'PC1015;');
-  assert.strictEqual(writes[1], 'PC1005;');
-  assert.strictEqual(writes[2], 'PC1000;');
+  assert.strictEqual(writes[0], 'PC1005;');
+  assert.strictEqual(writes[1], 'PC1010;');
 });
 
 test('FTX-1 Optima: setTxPower emits model-prefixed PC payload', () => {
