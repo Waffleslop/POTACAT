@@ -16269,6 +16269,7 @@ const rigPowerOffBtn = document.getElementById('rig-power-off-btn');
 const rigRfGain = document.getElementById('rig-rfgain');
 const rigRfGainLabel = document.getElementById('rig-rfgain-label');
 const rigTxPower = document.getElementById('rig-txpower');
+const rigTxPowerSelect = document.getElementById('rig-txpower-select');
 const rigTxPowerLabel = document.getElementById('rig-txpower-label');
 const rigFilterPresets = document.getElementById('rig-filter-presets');
 // Phase-1 expanded rig modifiers (Flex 8600M underbuild fix, 2026-05-25).
@@ -16328,6 +16329,33 @@ function rigFormatPower(watts) {
   const numeric = Number(watts);
   if (!Number.isFinite(numeric)) return watts + 'W';
   return numeric.toFixed(decimals) + 'W';
+}
+
+function rigUsesPowerSelect() {
+  return Array.isArray(rigCurrentCaps.powerChoices) && rigCurrentCaps.powerChoices.length > 0;
+}
+
+function rigPopulatePowerChoices(caps) {
+  if (!rigTxPowerSelect) return;
+  const choices = Array.isArray(caps.powerChoices) ? caps.powerChoices : [];
+  const useSelect = choices.length > 0;
+  rigTxPower.classList.toggle('hidden', useSelect);
+  rigTxPowerSelect.classList.toggle('hidden', !useSelect);
+  if (!useSelect) return;
+
+  const previous = rigTxPowerSelect.value;
+  rigTxPowerSelect.innerHTML = '';
+  for (const choice of choices) {
+    const value = Number(choice);
+    if (!Number.isFinite(value)) continue;
+    const opt = document.createElement('option');
+    opt.value = String(value);
+    opt.textContent = rigFormatPower(value);
+    rigTxPowerSelect.appendChild(opt);
+  }
+  if (previous && Array.from(rigTxPowerSelect.options).some(o => o.value === previous)) {
+    rigTxPowerSelect.value = previous;
+  }
 }
 
 function rigGetFilterPresets(mode) {
@@ -16425,6 +16453,7 @@ function rigApplyCapabilities(caps) {
   const isFtx1 = !!(caps.dnrLevel || caps.clarRx || caps.clarTx || caps.preampTarget);
   rigPlaceMonitorNearCwControls(isFtx1);
   rigPopulateAgcOptions(caps);
+  rigPopulatePowerChoices(caps);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
   rigPowerOnBtn.style.display = caps.power ? '' : 'none';
@@ -16495,7 +16524,10 @@ function rigApplyCapabilities(caps) {
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
   rigTxPower.step = caps.powerStep != null ? caps.powerStep : 1;
-  if (rigTxPowerLabel) rigTxPowerLabel.textContent = rigFormatPower(rigTxPower.value);
+  if (rigTxPowerLabel) {
+    const powerValue = rigUsesPowerSelect() ? rigTxPowerSelect.value : rigTxPower.value;
+    rigTxPowerLabel.textContent = rigFormatPower(powerValue);
+  }
   rigRefreshPreampLevelOptions();
   if (rigNbLevel && caps.maxNbLevel != null) {
     rigNbLevel.min = 0;
@@ -16684,6 +16716,13 @@ rigTxPower.addEventListener('input', () => {
   rigTxPowerLabel.textContent = rigFormatPower(val);
   throttledRigControl('set-tx-power', val);
 });
+if (rigTxPowerSelect) {
+  rigTxPowerSelect.addEventListener('change', () => {
+    const val = parseFloat(rigTxPowerSelect.value);
+    rigTxPowerLabel.textContent = rigFormatPower(val);
+    window.api.rigControl({ action: 'set-tx-power', value: val });
+  });
+}
 
 // Listen for rig state updates from main process
 window.api.onRigState((state) => {
@@ -16766,7 +16805,17 @@ window.api.onRigState((state) => {
     rigRfGainLabel.textContent = state.rfGain;
   }
   if (document.activeElement !== rigTxPower && state.txPower != null) {
-    rigTxPower.value = state.txPower;
+    if (rigUsesPowerSelect() && rigTxPowerSelect && document.activeElement !== rigTxPowerSelect) {
+      const choices = Array.from(rigTxPowerSelect.options).map(o => parseFloat(o.value));
+      let best = choices[0], bestDist = Infinity;
+      for (const choice of choices) {
+        const dist = Math.abs(choice - Number(state.txPower));
+        if (dist < bestDist) { best = choice; bestDist = dist; }
+      }
+      if (best != null) rigTxPowerSelect.value = String(best);
+    } else {
+      rigTxPower.value = state.txPower;
+    }
     rigTxPowerLabel.textContent = rigFormatPower(state.txPower);
   }
   // Update filter presets

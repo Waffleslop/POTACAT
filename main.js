@@ -818,6 +818,7 @@ function getRigCapabilities(rigType) {
     if (model.maxPower != null) caps.maxPower = model.maxPower;
     if (model.powerStep != null) caps.powerStep = model.powerStep;
     if (model.powerDecimals != null) caps.powerDecimals = model.powerDecimals;
+    if (Array.isArray(model.powerChoices)) caps.powerChoices = model.powerChoices.slice();
     if (model.maxNbLevel != null) caps.maxNbLevel = model.maxNbLevel;
     if (model.maxDnrLevel != null) caps.maxDnrLevel = model.maxDnrLevel;
     if (Array.isArray(model.agcModes)) caps.agcModes = model.agcModes.slice();
