@@ -16473,10 +16473,44 @@ function rigPlaceMonitorNearCwControls(isFtx1) {
   anchor.insertAdjacentElement('afterend', monRow);
 }
 
+function rigPlaceFtx1PriorityControls(isFtx1) {
+  const modRow = document.getElementById('rig-modifiers-row');
+  const filterRow = rigFilterPresets ? rigFilterPresets.closest('.rig-popover-row') : null;
+  const rows = {
+    rfGain: document.getElementById('rig-rfgain-row'),
+    txPower: document.getElementById('rig-txpower-row'),
+    preamp: document.getElementById('rig-preamp-target-row'),
+    antenna: document.getElementById('rig-antenna-port-row'),
+  };
+
+  const insertAfter = (anchor, orderedRows) => {
+    if (!anchor) return;
+    for (const row of orderedRows.slice().reverse()) {
+      if (row) anchor.insertAdjacentElement('afterend', row);
+    }
+  };
+  const insertBefore = (anchor, orderedRows) => {
+    if (!anchor || !anchor.parentNode) return;
+    for (const row of orderedRows) {
+      if (row) anchor.parentNode.insertBefore(row, anchor);
+    }
+  };
+
+  if (isFtx1) {
+    // FTX-1 has frequently-used Field/Optima controls that benefit from a
+    // top grouping; keep that layout model-scoped instead of changing all rigs.
+    insertAfter(modRow, [rows.rfGain, rows.txPower, rows.preamp, rows.antenna]);
+  } else {
+    // Restore the upstream-style generic ordering for every non-FTX profile.
+    insertBefore(filterRow, [rows.preamp, rows.rfGain, rows.txPower, rows.antenna]);
+  }
+}
+
 function rigApplyCapabilities(caps) {
   caps = caps || {};
   rigCurrentCaps = caps;
   const isFtx1 = !!(caps.dnrLevel || caps.clarRx || caps.clarTx || caps.preampTarget);
+  rigPlaceFtx1PriorityControls(isFtx1);
   rigPlaceMonitorNearCwControls(isFtx1);
   rigPopulateAgcOptions(caps);
   rigPopulatePowerChoices(caps);
