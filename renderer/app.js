@@ -1071,6 +1071,7 @@ const setEnableRemote = null;
 const remoteConfig = null;
 const setRemotePort = document.getElementById('set-remote-port');
 const setRemoteRequireToken = document.getElementById('set-remote-require-token');
+const setAllowPairRequests = document.getElementById('set-allow-pair-requests');
 const remoteTokenRow = document.getElementById('remote-token-row');
 const setRemoteToken = document.getElementById('set-remote-token');
 const remoteRegenToken = document.getElementById('remote-regen-token');
@@ -9944,6 +9945,7 @@ logSaveBtn.addEventListener('click', async () => {
   let sotaRef  = parsedByType.sota  ? parsedByType.sota.primary  : '';
   let wwffRef  = parsedByType.wwff  ? parsedByType.wwff.primary  : '';
   let llotaRef = parsedByType.llota ? parsedByType.llota.primary : '';
+  let wwbotaRef = parsedByType.wwbota ? parsedByType.wwbota.primary : '';
   // The primary type's additional refs (for the n-fer loop below).
   const addlParks = primaryType && parsedByType[primaryType] ? parsedByType[primaryType].additional : [];
   // Secondary types' additional refs get joined into the _REF fields
@@ -9959,6 +9961,7 @@ logSaveBtn.addEventListener('click', async () => {
   if (primaryType !== 'sota'  && parsedByType.sota)  sotaRef  = joinRefs('sota');
   if (primaryType !== 'wwff'  && parsedByType.wwff)  wwffRef  = joinRefs('wwff');
   if (primaryType !== 'llota' && parsedByType.llota) llotaRef = joinRefs('llota');
+  if (primaryType !== 'wwbota' && parsedByType.wwbota) wwbotaRef = joinRefs('wwbota');
 
   // Re-spot state from stored targets
   const respotCheckbox = document.getElementById('log-respot');
@@ -9968,6 +9971,7 @@ logSaveBtn.addEventListener('click', async () => {
   const wantsRespot = respotCheckbox.checked && logTargets.includes('pota');
   const wantsWwffRespot = respotCheckbox.checked && logTargets.includes('wwff');
   const wantsLlotaRespot = respotCheckbox.checked && logTargets.includes('llota');
+  const wantsWwbotaRespot = respotCheckbox.checked && logTargets.includes('wwbota');
   const wantsDxcRespot = respotCheckbox.checked && logTargets.includes('dxc');
 
   // Persist the re-spot toggle preference. The comment text itself
@@ -10057,8 +10061,10 @@ logSaveBtn.addEventListener('click', async () => {
         wwffReference: ci === 0 && wantsWwffRespot ? respotWwffRef : '',
         llotaRespot: ci === 0 && wantsLlotaRespot,
         llotaReference: ci === 0 && wantsLlotaRespot && parsedByType.llota ? parsedByType.llota.primary : '',
+        wwbotaRespot: ci === 0 && wantsWwbotaRespot,
+        wwbotaReference: ci === 0 && wantsWwbotaRespot && parsedByType.wwbota ? parsedByType.wwbota.primary : '',
         dxcRespot: ci === 0 && wantsDxcRespot,
-        respotComment: ci === 0 && (wantsRespot || wantsWwffRespot || wantsLlotaRespot || wantsDxcRespot) ? commentText : '',
+        respotComment: ci === 0 && (wantsRespot || wantsWwffRespot || wantsLlotaRespot || wantsWwbotaRespot || wantsDxcRespot) ? commentText : '',
       };
 
       lastResult = await window.api.saveQso(qsoData);
@@ -10074,10 +10080,12 @@ logSaveBtn.addEventListener('click', async () => {
           sotaRef: sig === 'SOTA' ? addlRef : qsoData.sotaRef,
           wwffRef: sig === 'WWFF' ? addlRef : qsoData.wwffRef,
           llotaRef: sig === 'LLOTA' ? addlRef : qsoData.llotaRef,
+          wwbotaRef: sig === 'WWBOTA' ? addlRef : qsoData.wwbotaRef,
           comment: addlComment,
           respot: false,
           wwffRespot: false,
           llotaRespot: false,
+          wwbotaRespot: false,
           dxcRespot: false,
           respotComment: '',
           skipLogbookForward: true,
@@ -10137,13 +10145,28 @@ logSaveBtn.addEventListener('click', async () => {
           ? 'Could not reach logbook — is it running and configured correctly?'
           : lastResult.logbookError;
         showLogToast(`Logged ${displayCalls} to ADIF, but logbook forwarding failed: ${friendly}`, { warn: true, duration: 8000 });
-      } else if (lastResult.respotError) {
-        showLogToast(`Logged ${displayCalls} to ADIF, but POTA re-spot failed: ${lastResult.respotError}`, { warn: true, duration: 8000 });
-      } else if (lastResult.resposted) {
-        const sources = logTargets.filter(t => respotCheckbox.checked).map(t => RESPOT_NAMES[t]).join(' & ');
-        showLogToast(`Logged ${displayCalls} — re-spotted on ${sources || 'POTA'}`);
       } else {
-        showLogToast(`Logged ${displayCalls}`);
+        // Surface the first re-spot error that fired, with the correct
+        // program name so the user knows which network rejected the
+        // re-spot. Previously this branch only checked respotError and
+        // always blamed POTA — wwbotaRespotError was silently dropped
+        // and llota/wwff users got a misleading "POTA re-spot failed"
+        // toast. K3SBP/AB9AI 2026-06-03.
+        const respotErrSpec =
+          lastResult.respotError      ? { net: 'POTA',   msg: lastResult.respotError }      :
+          lastResult.wwffRespotError  ? { net: 'WWFF',   msg: lastResult.wwffRespotError }  :
+          lastResult.llotaRespotError ? { net: 'LLOTA',  msg: lastResult.llotaRespotError } :
+          lastResult.wwbotaRespotError ? { net: 'WWBOTA', msg: lastResult.wwbotaRespotError } :
+          lastResult.dxcRespotError   ? { net: 'DX cluster', msg: lastResult.dxcRespotError } :
+          null;
+        if (respotErrSpec) {
+          showLogToast(`Logged ${displayCalls} to ADIF, but ${respotErrSpec.net} re-spot failed: ${respotErrSpec.msg}`, { warn: true, duration: 8000 });
+        } else if (lastResult.resposted) {
+          const sources = logTargets.filter(t => respotCheckbox.checked).map(t => RESPOT_NAMES[t]).join(' & ');
+          showLogToast(`Logged ${displayCalls} — re-spotted on ${sources || 'POTA'}`);
+        } else {
+          showLogToast(`Logged ${displayCalls}`);
+        }
       }
     } else if (lastResult) {
       showLogToast(`Error: ${lastResult.error}`, { warn: true, duration: 5000 });
@@ -11559,6 +11582,7 @@ async function openSettingsDialog(tab) {
   const requireToken = s.remoteRequireToken !== false; // default true for existing users
   setRemoteRequireToken.checked = requireToken;
   remoteTokenRow.classList.toggle('hidden', !requireToken);
+  if (setAllowPairRequests) setAllowPairRequests.checked = s.allowPairRequests !== false;
   setRemoteToken.value = s.remoteToken || '';
   setRemotePttTimeout.value = s.remotePttTimeout || 180;
   if (setEchocatPairHost) setEchocatPairHost.value = s.echocatPairHost || '';
@@ -12016,6 +12040,7 @@ settingsSave.addEventListener('click', async () => {
   const remoteEnabled = true;
   const remotePortVal = parseInt(setRemotePort.value, 10) || 7300;
   const remoteRequireTokenVal = setRemoteRequireToken.checked;
+  const allowPairRequestsVal = setAllowPairRequests ? setAllowPairRequests.checked : true;
   const remoteTokenVal = setRemoteToken.value;
   const remotePttTimeoutVal = parseInt(setRemotePttTimeout.value, 10) || 180;
   const ssbOverDataVal = setSsbOverData.checked;
@@ -12233,6 +12258,7 @@ settingsSave.addEventListener('click', async () => {
     enableRemote: remoteEnabled,
     remotePort: remotePortVal,
     remoteRequireToken: remoteRequireTokenVal,
+    allowPairRequests: allowPairRequestsVal,
     remoteToken: remoteTokenVal,
     remotePttTimeout: remotePttTimeoutVal,
     echocatPairHost: setEchocatPairHost ? setEchocatPairHost.value.trim() : '',

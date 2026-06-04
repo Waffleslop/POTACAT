@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>POTACAT — Approve Pair Request</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <style>
+    :root {
+      --bg: #0f1a2e;
+      --bg-card: #1a2540;
+      --border: #2a3a5e;
+      --text: #e5edff;
+      --text-dim: #94a3c7;
+      --accent: #4fc3f7;
+      --ok: #4ecca3;
+      --bad: #e94560;
+      --warn: #f0a500;
+    }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+    body {
+      display: flex; flex-direction: column;
+      padding: 24px 28px;
+      box-sizing: border-box;
+    }
+    h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+    .lead { color: var(--text-dim); font-size: 13px; margin: 0 0 22px; line-height: 1.4; }
+    .device-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 18px 14px;
+      margin-bottom: 18px;
+    }
+    .device-row { display: flex; align-items: center; gap: 14px; }
+    .device-icon {
+      width: 44px; height: 44px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg);
+      border-radius: 8px;
+      font-size: 26px;
+    }
+    .device-name { font-size: 16px; font-weight: 600; line-height: 1.2; }
+    .device-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .countdown-bar {
+      margin-top: 14px;
+      height: 4px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .countdown-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 1s linear;
+    }
+    .countdown-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .fingerprint {
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 18px;
+      word-break: break-all;
+      line-height: 1.4;
+    }
+    .fp-toggle {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0;
+      margin-bottom: 8px;
+    }
+    .fp-toggle:hover { text-decoration: underline; }
+    .actions {
+      display: flex; gap: 10px;
+      margin-top: auto;
+    }
+    button.action {
+      flex: 1;
+      padding: 12px 0;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      font-family: inherit;
+    }
+    button.approve {
+      background: var(--ok);
+      border-color: var(--ok);
+      color: #002616;
+    }
+    button.approve:hover { background: #5ee0b6; }
+    button.deny {
+      background: transparent;
+      color: var(--bad);
+      border-color: var(--bad);
+    }
+    button.deny:hover { background: rgba(233,69,96,0.08); }
+    button.action:disabled { opacity: 0.5; cursor: default; }
+    .resolved {
+      margin: 24px 0;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      text-align: center;
+    }
+    .resolved.approved {
+      background: rgba(78,204,163,0.12);
+      color: var(--ok);
+    }
+    .resolved.denied {
+      background: rgba(233,69,96,0.12);
+      color: var(--bad);
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Pair request</h1>
+  <p class="lead">A device on your network is asking to pair with this POTACAT desktop. Approve only if it's one of yours.</p>
+
+  <div class="device-card" id="device-card">
+    <div class="device-row">
+      <div class="device-icon" id="device-icon">📱</div>
+      <div>
+        <div class="device-name" id="device-name">—</div>
+        <div class="device-meta" id="device-meta">—</div>
+      </div>
+    </div>
+    <div class="countdown-bar"><div class="countdown-fill" id="countdown-fill" style="width:100%;"></div></div>
+    <div class="countdown-label" id="countdown-label">Expires in 60 s</div>
+  </div>
+
+  <button class="fp-toggle" id="fp-toggle" type="button">Show this station's cert fingerprint</button>
+  <div class="fingerprint hidden" id="fingerprint">—</div>
+
+  <div class="actions" id="actions">
+    <button class="action deny" id="deny-btn" type="button">Deny</button>
+    <button class="action approve" id="approve-btn" type="button">Approve</button>
+  </div>
+
+  <div class="resolved approved hidden" id="resolved-ok">Approved. The device is now paired.</div>
+  <div class="resolved denied hidden" id="resolved-deny">Denied. The device was not paired.</div>
+
+  <script src="pair-request-popout.js"></script>
+</body>
+</html>

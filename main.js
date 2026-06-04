@@ -485,6 +485,7 @@ let spotsPopoutWin = null; // pop-out spots window (activator mode)
 let clusterPopoutWin = null; // pop-out DX cluster terminal window
 let propPopoutWin = null;    // pop-out propagation map window
 let pairPopoutWin = null;    // pop-out ECHOCAT pairing QR window
+let pairRequestPopoutWin = null; // tap-to-pair Approve/Deny popout
 let vfoPopoutWin = null;     // pop-out VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
@@ -5945,6 +5946,9 @@ function connectRemote() {
   // Hydrate paired-devices list from settings.json. The list survives
   // across desktop restarts; revoking from settings UI removes a device.
   try { remoteServer.setPairedDevices(settings.pairedDevices || []); } catch {}
+  // Tap-to-pair toggle. Default on; operator can flip off in
+  // Settings → ECHOCAT if they share their LAN with strangers.
+  try { remoteServer.setAllowPairRequests(settings.allowPairRequests !== false); } catch {}
   // When the server adds or revokes a device, persist the new list.
   remoteServer.on('paired-devices-changed', () => {
     try {
@@ -7395,7 +7399,7 @@ function connectRemote() {
         rstSent: contact.rstSent,
         rstRcvd: contact.rstRcvd,
         resposted: result.resposted || false,
-        respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.dxcRespotError || '',
+        respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
       });
     } catch (err) {
       console.error('[Echo CAT] Log QSO error:', err.message);
@@ -12642,6 +12646,10 @@ app.whenReady().then(() => {
       if (remoteServer && typeof remoteServer.setTunnelExposed === 'function') {
         try { remoteServer.setTunnelExposed(!!state.enabled); } catch {}
       }
+      // Push the new cloudHost (or empty when off) to any connected
+      // phones via the auth-ok + alt-hosts payload. tsHost stays
+      // unchanged here but we recompute together for simplicity.
+      try { _refreshAltHosts(); } catch {}
     });
     cloudTunnel.loadFromDisk();
     if (cloudTunnel.getState().enabled) {
@@ -12651,6 +12659,33 @@ app.whenReady().then(() => {
   } catch (err) {
     sendCatLog('[cloud-tunnel] init failed: ' + (err.message || err));
   }
+
+  // Alternate-host fan-out (Part B of tap-to-pair + tsHost handoff).
+  // RemoteServer rides the resulting tsHost/cloudHost on every
+  // auth-ok and POST /api/pair* response, plus pushes an 'alt-hosts'
+  // typed message whenever they change. main.js is the source of
+  // truth — Tailscale state is read via lib/remote-server's
+  // tailscaleStatus() shell-out + lib/cloud-tunnel's getCloudHost().
+  // Recomputed at startup, on cloudTunnel 'change', and every 10 min.
+  function _refreshAltHosts() {
+    if (!remoteServer) return;
+    let tsHost = '';
+    try {
+      const { tailscaleStatus } = require('./lib/remote-server');
+      const ts = tailscaleStatus();
+      if (ts && ts.loggedIn && ts.hostname) {
+        const port = settings.remotePort || 7300;
+        tsHost = ts.hostname.replace(/\.$/, '') + ':' + port;
+      }
+    } catch (err) {
+      // Tailscale CLI not present is the common case — log debug only.
+      if (err && err.message) console.log('[alt-hosts] tailscale lookup:', err.message);
+    }
+    const cloudHost = (cloudTunnel && typeof cloudTunnel.getCloudHost === 'function') ? (cloudTunnel.getCloudHost() || '') : '';
+    try { remoteServer.setAltHosts({ tsHost, cloudHost }); } catch {}
+  }
+  _refreshAltHosts();
+  setInterval(_refreshAltHosts, 10 * 60 * 1000);
 
   ipcMain.handle('cloud-tunnel-get-state', () => {
     return cloudTunnel ? cloudTunnel.getState() : { enabled: false, status: 'off' };
@@ -13209,6 +13244,127 @@ app.whenReady().then(() => {
     });
   });
   ipcMain.on('pair-popout-close', () => { if (pairPopoutWin && !pairPopoutWin.isDestroyed()) pairPopoutWin.close(); });
+
+  // Tap-to-pair Approve/Deny popout. RemoteServer emits 'pair-request'
+  // when a phone POSTs /api/pair-request; this opens a small
+  // alwaysOnTop window with the device name + countdown + buttons.
+  // Also pulls the main window forward and fires an Electron
+  // notification as a fallback when POTACAT is minimized so the
+  // operator actually sees the request.
+  function _openPairRequestPopout(req) {
+    if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) {
+      pairRequestPopoutWin.focus();
+      pairRequestPopoutWin.webContents.send('pair-request', req);
+      return;
+    }
+    const isMac = process.platform === 'darwin';
+    pairRequestPopoutWin = new BrowserWindow({
+      width: 420,
+      height: 440,
+      title: 'POTACAT — Pair request',
+      show: false,
+      resizable: false,
+      alwaysOnTop: true,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-pair-request-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    pairRequestPopoutWin.setMenuBarVisibility(false);
+    pairRequestPopoutWin.loadFile(path.join(__dirname, 'renderer', 'pair-request-popout.html'));
+    pairRequestPopoutWin.once('ready-to-show', () => {
+      if (!pairRequestPopoutWin || pairRequestPopoutWin.isDestroyed()) return;
+      pairRequestPopoutWin.show();
+      pairRequestPopoutWin.focus();
+      // Capture the fingerprint so the popout can show it.
+      let fingerprint = '';
+      try {
+        if (remoteServer && remoteServer._tlsCertPem) {
+          const x509 = new (require('crypto').X509Certificate)(remoteServer._tlsCertPem);
+          fingerprint = x509.fingerprint256 || '';
+        }
+      } catch {}
+      pairRequestPopoutWin.webContents.send('pair-request', { ...req, fingerprint });
+    });
+    pairRequestPopoutWin.on('closed', () => {
+      // If the popout was closed without Approve/Deny while a
+      // request is still pending, treat it as a Deny so the held
+      // HTTP response actually resolves.
+      if (remoteServer && req && req.requestId) {
+        try { remoteServer.denyPairRequest(req.requestId); } catch {}
+      }
+      pairRequestPopoutWin = null;
+    });
+    pairRequestPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        pairRequestPopoutWin.webContents.toggleDevTools();
+      }
+    });
+
+    // Bring the main window forward + system notification as a
+    // belt-and-suspenders for the minimized / tray case.
+    try {
+      if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+      }
+    } catch {}
+    try {
+      const { Notification } = require('electron');
+      if (Notification.isSupported()) {
+        const note = new Notification({
+          title: 'POTACAT — Pair request',
+          body: (req.deviceName || 'A device') + ' wants to pair with this station.',
+          urgency: 'critical',
+        });
+        note.on('click', () => {
+          if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) pairRequestPopoutWin.focus();
+        });
+        note.show();
+      }
+    } catch {}
+  }
+
+  if (remoteServer) {
+    remoteServer.on('pair-request', (req) => _openPairRequestPopout(req));
+    remoteServer.on('pair-request-cancelled', ({ requestId }) => {
+      if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) {
+        pairRequestPopoutWin.webContents.send('pair-request-expired', 'cancelled');
+        setTimeout(() => {
+          if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) pairRequestPopoutWin.close();
+        }, 1500);
+      }
+    });
+    remoteServer.on('pair-request-resolved', ({ requestId, approved, reason }) => {
+      if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) {
+        // 60-second timeout auto-resolved without the popout buttons
+        // being clicked — close the now-stale window.
+        if (reason === 'timeout') {
+          pairRequestPopoutWin.webContents.send('pair-request-expired', 'timeout');
+          setTimeout(() => {
+            if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) pairRequestPopoutWin.close();
+          }, 1500);
+        }
+      }
+    });
+  }
+
+  ipcMain.on('pair-request-approve', (_e, requestId) => {
+    if (remoteServer && typeof remoteServer.approvePairRequest === 'function') {
+      try { remoteServer.approvePairRequest(String(requestId || '')); } catch {}
+    }
+  });
+  ipcMain.on('pair-request-deny', (_e, requestId) => {
+    if (remoteServer && typeof remoteServer.denyPairRequest === 'function') {
+      try { remoteServer.denyPairRequest(String(requestId || '')); } catch {}
+    }
+  });
+  ipcMain.on('pair-request-close-window', () => {
+    if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) pairRequestPopoutWin.close();
+  });
   // Live theme relay — main window's light/dark toggle propagates
   // immediately to an open pair popout.
   ipcMain.on('pair-popout-theme', (_e, theme) => {
@@ -15953,14 +16109,23 @@ app.whenReady().then(() => {
     // Opt-in override: opts.mode = 'lan' forces the legacy LAN+cloud
     // combo even when the tunnel is up (useful for testing on home WiFi).
     const cloudHost = cloudTunnel ? cloudTunnel.getCloudHost() : '';
+    // Tailscale fallback host. If the desktop is on a tailnet, embed
+    // it in the QR so a phone pairing today can connect over the
+    // tailnet tomorrow — without having to re-pair from a new
+    // network. Same cert pin (fingerprint) covers it.
+    const altHosts = (remoteServer && typeof remoteServer.getAltHosts === 'function')
+      ? remoteServer.getAltHosts() : { tsHost: '', cloudHost: '' };
+    const tsHost = altHosts.tsHost || '';
     const effectiveMode = (opts.mode === 'lan') ? 'lan' : (cloudHost ? 'cloud' : 'lan');
     const qrParamsObj = { token: pairingToken, name: hostname };
     if (effectiveMode === 'cloud') {
       qrParamsObj.cloudHost = cloudHost;
+      if (tsHost) qrParamsObj.tsHost = tsHost;
     } else {
       qrParamsObj.host = wsUrl;
       qrParamsObj.fp = fingerprint;
       if (cloudHost) qrParamsObj.cloudHost = cloudHost;
+      if (tsHost) qrParamsObj.tsHost = tsHost;
     }
     const qrParams = new URLSearchParams(qrParamsObj);
     const qrText = `potacat://pair?${qrParams.toString()}`;
@@ -16567,6 +16732,12 @@ app.whenReady().then(() => {
       (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken) ||
       (has('remoteCwEnabled') && newSettings.remoteCwEnabled !== settings.remoteCwEnabled) ||
       (has('cwKeyPort') && newSettings.cwKeyPort !== settings.cwKeyPort);
+
+    // Tap-to-pair toggle is a live setting — no remoteServer
+    // restart needed, just push the new value through.
+    if (has('allowPairRequests') && newSettings.allowPairRequests !== settings.allowPairRequests) {
+      try { remoteServer.setAllowPairRequests(newSettings.allowPairRequests !== false); } catch {}
+    }
 
     const iconChanged = has('lightIcon') && newSettings.lightIcon !== settings.lightIcon;
 
@@ -18679,6 +18850,11 @@ function gracefulCleanup() {
   try { disconnectFreedvReporter(); } catch {}
   try { disconnectRemote(); } catch {}
   try { disconnectKeyer(); } catch {}
+  // Stop the DTR CW-key port too. disconnectKeyer() handles WinKeyer but
+  // not the raw DTR-keyed serial port — missing this leaves an open
+  // handle that the OS may write to after we've torn down our refs,
+  // surfacing as "WriteFileEx invalid handle" on quit.
+  try { disconnectCwKeyPort(); } catch {}
   try { stopJtcat(); } catch {}
   try { stopSstv(); } catch {}
   try { stopSstvMulti(); } catch {}
@@ -18694,6 +18870,26 @@ function gracefulCleanup() {
 app.on('before-quit', gracefulCleanup);
 process.on('SIGINT', () => { gracefulCleanup(); process.exit(0); });
 process.on('SIGTERM', () => { gracefulCleanup(); process.exit(0); });
+
+// Suppress known-benign shutdown errors. The Windows serialport binding
+// surfaces "WriteFileEx invalid handle" and similar when a write
+// reaches the kernel after Node has already closed the underlying COM
+// port — a race between our explicit close and any callback-less write
+// that was already in flight (WinKeyer PTT-off, idle ping, CW key drop).
+// Letting these propagate as uncaughtException pops Electron's
+// "uncaught exception" dialog AFTER the user already clicked quit.
+// During / after cleanup, swallow them with a log line instead.
+process.on('uncaughtException', (err) => {
+  const msg = err && err.message ? err.message : String(err);
+  const benignShutdownErr = /WriteFileEx.*invalid handle|writing to COM port.*invalid handle|Port is not open|Port is closed/i.test(msg);
+  if (cleanupDone || benignShutdownErr) {
+    console.warn('[shutdown] swallowed:', msg);
+    return;
+  }
+  // Pre-shutdown unexpected error — preserve historical behavior
+  // (Electron will show its dialog) by rethrowing.
+  throw err;
+});
 
 app.on('window-all-closed', () => {
   if (HEADLESS) return; // keep running in headless mode
