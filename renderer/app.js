@@ -16337,6 +16337,8 @@ const rigAntennaPortSel   = document.getElementById('rig-antenna-port-select');
 let rigPopoverOpen = false;
 let rigCurrentCaps = {};
 let rigCurrentMode = '';
+let rigPowerChoicesSignature = '';
+let rigLastFtx1Layout = null;
 
 const RIG_FILTER_PRESETS = {
   SSB: [1800, 2100, 2400, 2700, 3000, 3600],
@@ -16367,18 +16369,27 @@ function rigPopulatePowerChoices(caps) {
   const useSelect = choices.length > 0;
   rigTxPower.classList.toggle('hidden', useSelect);
   rigTxPowerSelect.classList.toggle('hidden', !useSelect);
-  if (!useSelect) return;
+  if (!useSelect) {
+    rigPowerChoicesSignature = '';
+    return;
+  }
+
+  const normalizedChoices = choices
+    .map(choice => Number(choice))
+    .filter(choice => Number.isFinite(choice));
+  const signature = normalizedChoices.join(',');
+  if (signature === rigPowerChoicesSignature) return;
+  if (document.activeElement === rigTxPowerSelect) return;
 
   const previous = rigTxPowerSelect.value;
   rigTxPowerSelect.innerHTML = '';
-  for (const choice of choices) {
-    const value = Number(choice);
-    if (!Number.isFinite(value)) continue;
+  for (const value of normalizedChoices) {
     const opt = document.createElement('option');
     opt.value = String(value);
     opt.textContent = rigFormatPower(value);
     rigTxPowerSelect.appendChild(opt);
   }
+  rigPowerChoicesSignature = signature;
   if (previous && Array.from(rigTxPowerSelect.options).some(o => o.value === previous)) {
     rigTxPowerSelect.value = previous;
   }
@@ -16510,7 +16521,10 @@ function rigApplyCapabilities(caps) {
   caps = caps || {};
   rigCurrentCaps = caps;
   const isFtx1 = !!(caps.dnrLevel || caps.clarRx || caps.clarTx || caps.preampTarget);
-  rigPlaceFtx1PriorityControls(isFtx1);
+  if (rigLastFtx1Layout !== isFtx1) {
+    rigPlaceFtx1PriorityControls(isFtx1);
+    rigLastFtx1Layout = isFtx1;
+  }
   rigPlaceMonitorNearCwControls(isFtx1);
   rigPopulateAgcOptions(caps);
   rigPopulatePowerChoices(caps);
@@ -16864,8 +16878,8 @@ window.api.onRigState((state) => {
     rigRfGain.value = state.rfGain;
     rigRfGainLabel.textContent = state.rfGain;
   }
-  if (document.activeElement !== rigTxPower && state.txPower != null) {
-    if (rigUsesPowerSelect() && rigTxPowerSelect && document.activeElement !== rigTxPowerSelect) {
+  if (state.txPower != null && document.activeElement !== rigTxPower && document.activeElement !== rigTxPowerSelect) {
+    if (rigUsesPowerSelect() && rigTxPowerSelect) {
       const choices = Array.from(rigTxPowerSelect.options).map(o => parseFloat(o.value));
       let best = choices[0], bestDist = Infinity;
       for (const choice of choices) {
