@@ -16332,6 +16332,7 @@ const rigPowerOffBtn = document.getElementById('rig-power-off-btn');
 const rigRfGain = document.getElementById('rig-rfgain');
 const rigRfGainLabel = document.getElementById('rig-rfgain-label');
 const rigTxPower = document.getElementById('rig-txpower');
+const rigTxPowerSelect = document.getElementById('rig-txpower-select');
 const rigTxPowerLabel = document.getElementById('rig-txpower-label');
 const rigFilterPresets = document.getElementById('rig-filter-presets');
 // Phase-1 expanded rig modifiers (Flex 8600M underbuild fix, 2026-05-25).
@@ -16369,18 +16370,66 @@ const rigBreakInBtn       = document.getElementById('rig-breakin-btn');
 const rigBreakInDelaySel  = document.getElementById('rig-breakin-delay-select');
 const rigPreampTargetSel  = document.getElementById('rig-preamp-target-select');
 const rigPreampLevelSel   = document.getElementById('rig-preamp-level-select');
+const rigAntennaPortSel   = document.getElementById('rig-antenna-port-select');
 let rigPopoverOpen = false;
 let rigCurrentCaps = {};
 let rigCurrentMode = '';
+let rigPowerChoicesSignature = '';
+let rigLastFtx1Layout = null;
 
 const RIG_FILTER_PRESETS = {
   SSB: [1800, 2100, 2400, 2700, 3000, 3600],
   CW:  [50, 100, 200, 500, 1000, 1500, 2400],
   DIG: [500, 1000, 2000, 3000, 4000],
 };
+const RIG_DEFAULT_AGC_MODES = ['off', 'fast', 'med', 'slow'];
+const RIG_AGC_LABELS = { off: 'Off', auto: 'Auto', fast: 'Fast', med: 'Mid', mid: 'Mid', slow: 'Slow' };
 
 function formatFilterWidth(hz) {
   return hz >= 1000 ? (hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 1) + 'k' : hz + '';
+}
+
+function rigFormatPower(watts) {
+  const decimals = Math.max(0, parseInt(rigCurrentCaps.powerDecimals || 0, 10));
+  const numeric = Number(watts);
+  if (!Number.isFinite(numeric)) return watts + 'W';
+  return numeric.toFixed(decimals) + 'W';
+}
+
+function rigUsesPowerSelect() {
+  return Array.isArray(rigCurrentCaps.powerChoices) && rigCurrentCaps.powerChoices.length > 0;
+}
+
+function rigPopulatePowerChoices(caps) {
+  if (!rigTxPowerSelect) return;
+  const choices = Array.isArray(caps.powerChoices) ? caps.powerChoices : [];
+  const useSelect = choices.length > 0;
+  rigTxPower.classList.toggle('hidden', useSelect);
+  rigTxPowerSelect.classList.toggle('hidden', !useSelect);
+  if (!useSelect) {
+    rigPowerChoicesSignature = '';
+    return;
+  }
+
+  const normalizedChoices = choices
+    .map(choice => Number(choice))
+    .filter(choice => Number.isFinite(choice));
+  const signature = normalizedChoices.join(',');
+  if (signature === rigPowerChoicesSignature) return;
+  if (document.activeElement === rigTxPowerSelect) return;
+
+  const previous = rigTxPowerSelect.value;
+  rigTxPowerSelect.innerHTML = '';
+  for (const value of normalizedChoices) {
+    const opt = document.createElement('option');
+    opt.value = String(value);
+    opt.textContent = rigFormatPower(value);
+    rigTxPowerSelect.appendChild(opt);
+  }
+  rigPowerChoicesSignature = signature;
+  if (previous && Array.from(rigTxPowerSelect.options).some(o => o.value === previous)) {
+    rigTxPowerSelect.value = previous;
+  }
 }
 
 function rigGetFilterPresets(mode) {
@@ -16405,8 +16454,117 @@ function rigBuildFilterPresets(mode, currentWidth) {
   }
 }
 
+function rigPopulateAgcOptions(caps) {
+  if (!rigAgcSelect) return;
+  const previous = rigAgcSelect.value === 'mid' ? 'med' : rigAgcSelect.value;
+  const rawModes = Array.isArray(caps.agcModes) && caps.agcModes.length
+    ? caps.agcModes
+    : RIG_DEFAULT_AGC_MODES;
+  const modes = [];
+  for (const mode of rawModes) {
+    const normalized = mode === 'mid' ? 'med' : mode;
+    if (!modes.includes(normalized)) modes.push(normalized);
+  }
+
+  rigAgcSelect.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '—';
+  rigAgcSelect.appendChild(empty);
+  for (const mode of modes) {
+    const opt = document.createElement('option');
+    opt.value = mode;
+    opt.textContent = RIG_AGC_LABELS[mode] || mode.toUpperCase();
+    rigAgcSelect.appendChild(opt);
+  }
+  rigAgcSelect.value = modes.includes(previous) ? previous : '';
+}
+
+function rigRefreshPreampLevelOptions() {
+  if (!rigPreampTargetSel || !rigPreampLevelSel) return;
+  const target = rigPreampTargetSel.value || 'hf50';
+  const previous = parseInt(rigPreampLevelSel.value || '0', 10);
+  const options = target === 'hf50'
+    ? [
+        { value: '0', label: 'IPO' },
+        { value: '1', label: 'AMP1' },
+        { value: '2', label: 'AMP2' },
+      ]
+    : [
+        { value: '0', label: 'Off' },
+        { value: '1', label: 'On' },
+      ];
+
+  rigPreampLevelSel.innerHTML = '';
+  for (const optDef of options) {
+    const opt = document.createElement('option');
+    opt.value = optDef.value;
+    opt.textContent = optDef.label;
+    rigPreampLevelSel.appendChild(opt);
+  }
+
+  const clamped = Math.min(previous, target === 'hf50' ? 2 : 1);
+  rigPreampLevelSel.value = String(clamped);
+  rigPreampLevelSel.title = target === 'hf50'
+    ? 'HF/50 preamp level: IPO, AMP1, or AMP2'
+    : 'VHF/UHF preamp: Off or On';
+}
+
+function rigPlaceMonitorNearCwControls(isFtx1) {
+  const delayRow = document.getElementById('rig-breakindelay-row');
+  const defaultAnchor = document.getElementById('rig-voxlevel-row');
+  const monRow = document.getElementById('rig-mon-row');
+  const monLevelRow = document.getElementById('rig-monlevel-row');
+  const anchor = isFtx1 ? delayRow : defaultAnchor;
+  if (!anchor || !monRow || !monLevelRow) return;
+  anchor.insertAdjacentElement('afterend', monLevelRow);
+  anchor.insertAdjacentElement('afterend', monRow);
+}
+
+function rigPlaceFtx1PriorityControls(isFtx1) {
+  const modRow = document.getElementById('rig-modifiers-row');
+  const filterRow = rigFilterPresets ? rigFilterPresets.closest('.rig-popover-row') : null;
+  const rows = {
+    rfGain: document.getElementById('rig-rfgain-row'),
+    txPower: document.getElementById('rig-txpower-row'),
+    preamp: document.getElementById('rig-preamp-target-row'),
+    antenna: document.getElementById('rig-antenna-port-row'),
+  };
+
+  const insertAfter = (anchor, orderedRows) => {
+    if (!anchor) return;
+    for (const row of orderedRows.slice().reverse()) {
+      if (row) anchor.insertAdjacentElement('afterend', row);
+    }
+  };
+  const insertBefore = (anchor, orderedRows) => {
+    if (!anchor || !anchor.parentNode) return;
+    for (const row of orderedRows) {
+      if (row) anchor.parentNode.insertBefore(row, anchor);
+    }
+  };
+
+  if (isFtx1) {
+    // FTX-1 has frequently-used Field/Optima controls that benefit from a
+    // top grouping; keep that layout model-scoped instead of changing all rigs.
+    insertAfter(modRow, [rows.rfGain, rows.txPower, rows.preamp, rows.antenna]);
+  } else {
+    // Restore the upstream-style generic ordering for every non-FTX profile.
+    insertBefore(filterRow, [rows.preamp, rows.rfGain, rows.txPower, rows.antenna]);
+  }
+}
+
 function rigApplyCapabilities(caps) {
-  rigCurrentCaps = caps || {};
+  caps = caps || {};
+  rigCurrentCaps = caps;
+  const isFtx1 = !!(caps.dnrLevel || caps.clarRx || caps.clarTx || caps.preampTarget);
+  if (rigLastFtx1Layout !== isFtx1) {
+    rigPlaceFtx1PriorityControls(isFtx1);
+    rigLastFtx1Layout = isFtx1;
+  }
+  rigPlaceMonitorNearCwControls(isFtx1);
+  rigPopulateAgcOptions(caps);
+  rigPopulatePowerChoices(caps);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
   rigPowerOnBtn.style.display = caps.power ? '' : 'none';
@@ -16424,6 +16582,18 @@ function rigApplyCapabilities(caps) {
   if (rigNrBtn)     rigNrBtn.style.display     = caps.nr     ? '' : 'none';
   if (rigAnfBtn)    rigAnfBtn.style.display    = caps.anf    ? '' : 'none';
   if (rigVoxBtn)    rigVoxBtn.style.display    = caps.vox    ? '' : 'none';
+  if (rigCompBtn) {
+    rigCompBtn.textContent = isFtx1 ? 'PROC' : 'Comp';
+    rigCompBtn.title = isFtx1 ? 'Speech Processor (PROC)' : 'Speech Compressor (TX)';
+  }
+  if (rigNrBtn) {
+    rigNrBtn.textContent = isFtx1 ? 'DNR' : 'NR';
+    rigNrBtn.title = isFtx1 ? 'Digital Noise Reduction' : 'Noise Reduction';
+  }
+  if (rigAnfBtn) {
+    rigAnfBtn.textContent = isFtx1 ? 'DNF' : 'ANF';
+    rigAnfBtn.title = isFtx1 ? 'Digital Notch Filter' : 'Auto Notch Filter';
+  }
   const anyModifier = caps.preamp || caps.att || caps.comp || caps.nr || caps.anf || caps.vox;
   const modRow = document.getElementById('rig-modifiers-row');
   if (modRow) modRow.style.display = anyModifier ? '' : 'none';
@@ -16436,7 +16606,7 @@ function rigApplyCapabilities(caps) {
     const el = document.getElementById(id);
     if (el) el.style.display = show ? '' : 'none';
   };
-  setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel);
+  setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel && !caps.dnrLevel);
   setRowDisplay('rig-nblevel-row',  !!caps.nbLevel);
   setRowDisplay('rig-voxlevel-row', !!caps.voxLevel);
   setRowDisplay('rig-monlevel-row', !!caps.monLevel);
@@ -16460,9 +16630,26 @@ function rigApplyCapabilities(caps) {
   setRowDisplay('rig-breakin-row',       !!caps.breakIn);
   setRowDisplay('rig-breakindelay-row',  !!caps.breakInDelay);
   setRowDisplay('rig-preamp-target-row', !!caps.preampTarget);
+  setRowDisplay('rig-antenna-port-row',  !!caps.antennaPort);
   // Clamp TX power slider to radio's min/max
   if (caps.minPower != null) rigTxPower.min = caps.minPower;
   if (caps.maxPower != null) rigTxPower.max = caps.maxPower;
+  rigTxPower.step = caps.powerStep != null ? caps.powerStep : 1;
+  if (rigTxPowerLabel) {
+    const powerValue = rigUsesPowerSelect() ? rigTxPowerSelect.value : rigTxPower.value;
+    rigTxPowerLabel.textContent = rigFormatPower(powerValue);
+  }
+  rigRefreshPreampLevelOptions();
+  if (rigNbLevel && caps.maxNbLevel != null) {
+    rigNbLevel.min = 0;
+    rigNbLevel.max = caps.maxNbLevel;
+    rigNbLevel.step = 1;
+  }
+  if (rigDnrLevel && caps.maxDnrLevel != null) {
+    rigDnrLevel.min = 0;
+    rigDnrLevel.max = caps.maxDnrLevel;
+    rigDnrLevel.step = 1;
+  }
 }
 
 function positionRigPopover() {
@@ -16601,6 +16788,7 @@ if (rigBreakInDelaySel) {
 // the radio always sees a coherent (target, level) pair.
 function _sendPreampTarget() {
   const target = (rigPreampTargetSel && rigPreampTargetSel.value) || 'hf50';
+  rigRefreshPreampLevelOptions();
   const level = parseInt((rigPreampLevelSel && rigPreampLevelSel.value) || '0', 10);
   // AMP2 is only valid on HF/50 — clamp away on VHF/UHF rather than
   // silently sending an out-of-range value.
@@ -16610,6 +16798,12 @@ function _sendPreampTarget() {
 }
 if (rigPreampTargetSel) rigPreampTargetSel.addEventListener('change', _sendPreampTarget);
 if (rigPreampLevelSel)  rigPreampLevelSel.addEventListener('change', _sendPreampTarget);
+if (rigAntennaPortSel) {
+  rigAntennaPortSel.addEventListener('change', () => {
+    const port = parseInt(rigAntennaPortSel.value, 10) || 1;
+    window.api.rigControl({ action: 'set-antenna-port', value: port });
+  });
+}
 
 // Slider handlers
 // Throttle rig control sliders to prevent flooding serial port
@@ -16629,14 +16823,24 @@ rigRfGain.addEventListener('input', () => {
 });
 
 rigTxPower.addEventListener('input', () => {
-  const val = parseInt(rigTxPower.value, 10);
-  rigTxPowerLabel.textContent = val + 'W';
+  const val = parseFloat(rigTxPower.value);
+  rigTxPowerLabel.textContent = rigFormatPower(val);
   throttledRigControl('set-tx-power', val);
 });
+if (rigTxPowerSelect) {
+  rigTxPowerSelect.addEventListener('change', () => {
+    const val = parseFloat(rigTxPowerSelect.value);
+    rigTxPowerLabel.textContent = rigFormatPower(val);
+    window.api.rigControl({ action: 'set-tx-power', value: val });
+  });
+}
 
 // Listen for rig state updates from main process
 window.api.onRigState((state) => {
   if (!state) return;
+  // Apply model capabilities before syncing values so Field-specific power
+  // decimals/limits and target-specific preamp labels are already in place.
+  if (state.capabilities) rigApplyCapabilities(state.capabilities);
   // Update NB button
   if (state.nb) {
     rigNbBtn.classList.add('active');
@@ -16697,24 +16901,37 @@ window.api.onRigState((state) => {
   }
   if (rigPreampTargetSel && state.preampTarget != null && document.activeElement !== rigPreampTargetSel) {
     rigPreampTargetSel.value = state.preampTarget;
+    rigRefreshPreampLevelOptions();
   }
   if (rigPreampLevelSel && state.preampLevel != null && document.activeElement !== rigPreampLevelSel) {
+    rigRefreshPreampLevelOptions();
     rigPreampLevelSel.value = String(state.preampLevel);
+  }
+  if (rigAntennaPortSel && state.antennaPort != null && document.activeElement !== rigAntennaPortSel) {
+    rigAntennaPortSel.value = String(state.antennaPort);
   }
   // Update sliders (only if user is not actively dragging)
   if (document.activeElement !== rigRfGain && state.rfGain != null) {
     rigRfGain.value = state.rfGain;
     rigRfGainLabel.textContent = state.rfGain;
   }
-  if (document.activeElement !== rigTxPower && state.txPower != null) {
-    rigTxPower.value = state.txPower;
-    rigTxPowerLabel.textContent = state.txPower + 'W';
+  if (state.txPower != null && document.activeElement !== rigTxPower && document.activeElement !== rigTxPowerSelect) {
+    if (rigUsesPowerSelect() && rigTxPowerSelect) {
+      const choices = Array.from(rigTxPowerSelect.options).map(o => parseFloat(o.value));
+      let best = choices[0], bestDist = Infinity;
+      for (const choice of choices) {
+        const dist = Math.abs(choice - Number(state.txPower));
+        if (dist < bestDist) { best = choice; bestDist = dist; }
+      }
+      if (best != null) rigTxPowerSelect.value = String(best);
+    } else {
+      rigTxPower.value = state.txPower;
+    }
+    rigTxPowerLabel.textContent = rigFormatPower(state.txPower);
   }
   // Update filter presets
   if (state.mode) rigCurrentMode = state.mode;
   rigBuildFilterPresets(state.mode || rigCurrentMode, state.filterWidth);
-  // Update capabilities (show/hide controls)
-  if (state.capabilities) rigApplyCapabilities(state.capabilities);
 });
 
 // Show/hide rig panel button based on CAT connection status

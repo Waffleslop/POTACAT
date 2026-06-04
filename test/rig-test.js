@@ -713,26 +713,47 @@ const FTX1_FIELD_MODEL = {
   brand: 'Yaesu', protocol: 'kenwood',
   caps: {
     nb: true, atu: true, filter: true, filterType: 'indexed', rfgain: true,
-    txpower: true, vfo: true, comp: true, nr: true, anf: true, vox: true,
-    agc: true, rit: true, mon: true, monLevel: true, micGain: true,
+    txpower: true, vfo: true, comp: false, compLevel: false, nr: true,
+    nrLevel: false, dnrLevel: true, anf: true, vox: true, voxLevel: true,
+    agc: true, rit: false, mon: true, monLevel: true, micGain: true,
     clarRx: true, clarTx: true, clarOffset: true, breakIn: true,
     breakInDelay: true, ftx1Clar: true,
   },
   cw: { text: 'ky1', textChunk: 50, speed: 'ks', paddleKey: 'txrx', kyMode: 'km' },
-  atuCmd: 'standard', minPower: 5, maxPower: 100, maxNbLevel: 10,
-  pcPrefix: 1, rmSwr: 6, rmAlc: 4,
+  atuCmd: 'ac103', minPower: 1, maxPower: 10, powerStep: 1,
+  powerChoices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  powerMap: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10 },
+  maxNbLevel: 10, maxDnrLevel: 10,
+  agcMap: { off: 0, fast: 1, med: 2, mid: 2, slow: 3, auto: 4 },
+  commands: {
+    setNbOn: 'NL0001;', setNbOff: 'NL0000;', getNb: 'NL0;', setNbLevel: 'NL0{val:pad3};',
+    setPower: 'PC1{val:pad3};',
+    getRfGain: 'RG0;', getAgc: 'GT0;',
+    setNoiseReductionOn: 'RL001;', setNoiseReductionOff: 'RL000;', getDnrLevel: 'RL0;', setDnrLevel: 'RL0{val:pad2};',
+    getMicGain: 'MG;', getVox: 'VX;', getVoxLevel: 'VG;', getAutoNotch: 'BC0;',
+    getMonitor: 'ML;', getClarState: 'CF000;', getClarOffset: 'CF001;',
+  },
+  pcPrefix: 1, rmSwr: 6, rmAlc: 4, pollTxMetersAlways: true, powerPollEvery: 2,
 };
 const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
-  atuCmd: 'ac103', pcPrefix: 2,
+  atuCmd: 'ac103', minPower: 5, maxPower: 100, powerScale: 1,
+  powerStep: 1, powerDecimals: 0, pcPrefix: 2,
+  caps: Object.assign({}, FTX1_FIELD_MODEL.caps, { antennaPort: true }),
+  commands: Object.assign({}, FTX1_FIELD_MODEL.commands, {
+    setPower: 'PC2{val:pad3};',
+    setAntennaPort: 'EX030704{val};',
+    getAntennaPort: 'EX030704;',
+  }),
 });
 
-// Power: model-prefixed PC parsing (PC1xxx Field, PC2xxx Optima).
-test('FTX-1 Field: PC1100 reply parses as 100 W (prefix stripped)', () => {
+// Power: model-prefixed PC set/read (PC1xxx Field, PC2xxx Optima). Field
+// hardware confirms whole-watt CAT values: PC1001 -> 1W ... PC1010 -> 10W.
+test('FTX-1 Field: PC1004 reply maps back to observed 4 W', () => {
   const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
   let captured = null;
   codec.on('power', (w) => { captured = w; });
-  codec.onData(Buffer.from('PC1100;'));
-  assert.strictEqual(captured, 100);
+  codec.onData(Buffer.from('PC1004;'));
+  assert.strictEqual(captured, 4);
 });
 
 test('FTX-1 Optima: PC2100 reply parses as 100 W (prefix stripped)', () => {
@@ -751,6 +772,28 @@ test('FTX-1 Optima: PC1100 (wrong prefix) parses as 1100 (no strip)', () => {
   codec.on('power', (w) => { captured = w; });
   codec.onData(Buffer.from('PC1100;'));
   assert.strictEqual(captured, 1100);
+});
+
+test('FTX-1 Field: setTxPower emits whole-watt model-prefixed payloads', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setTxPower(1);
+  codec.setTxPower(7);
+  codec.setTxPower(100);
+  assert.strictEqual(writes[0], 'PC1001;');
+  assert.strictEqual(writes[1], 'PC1007;');
+  assert.strictEqual(writes[2], 'PC1010;');
+});
+
+test('FTX-1 Optima: setTxPower emits model-prefixed PC payload', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  codec.setTxPower(100);
+  assert.strictEqual(writes[0], 'PC2100;');
+});
+
+test('FTX-1 Field native tuner uses external ATU start command AC103;', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.startTune();
+  assert.deepStrictEqual(writes, ['AC103;']);
 });
 
 // Meter channel routing (FTX-1 = RM6 SWR, RM4 ALC).
@@ -808,6 +851,115 @@ test('FTX-1 TX0 reply emits ptt=false', () => {
   codec.on('ptt', (v) => { ptt = v; });
   codec.onData(Buffer.from('TX0;'));
   assert.strictEqual(ptt, false);
+});
+
+test('FTX-1 NB toggle uses NL level off/on commands', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setNb(true);
+  codec.setNb(false);
+  assert.deepStrictEqual(writes, ['NL0001;', 'NL0000;']);
+});
+
+test('FTX-1 NB level clamps to 0..10', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setNbLevel(10);
+  codec.setNbLevel(99);
+  assert.deepStrictEqual(writes, ['NL0010;', 'NL0010;']);
+});
+
+test('FTX-1 NL reply drives NB state and level', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let state = null, level = null;
+  codec.on('nb', (v) => { state = v; });
+  codec.on('nbLevel', (v) => { level = v; });
+  codec.onData(Buffer.from('NL0008;'));
+  assert.strictEqual(state, true);
+  assert.strictEqual(level, 8);
+});
+
+test('FTX-1 DNR level 0..10 uses RL000..RL010', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setDnrLevel(0);
+  codec.setDnrLevel(10);
+  codec.setDnrLevel(99);
+  assert.deepStrictEqual(writes, ['RL000;', 'RL010;', 'RL010;']);
+});
+
+test('FTX-1 DNR toggle uses RL000/RL001', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setNoiseReduction(false);
+  codec.setNoiseReduction(true);
+  assert.deepStrictEqual(writes, ['RL000;', 'RL001;']);
+});
+
+test('FTX-1 RL reply drives DNR state and level', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let state = null, level = null;
+  codec.on('nr', (v) => { state = v; });
+  codec.on('dnrLevel', (v) => { level = v; });
+  codec.onData(Buffer.from('RL010;'));
+  assert.strictEqual(state, true);
+  assert.strictEqual(level, 10);
+});
+
+test('FTX-1 AGC mapping matches OFF/AUTO/FAST/MID/SLOW', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setAgc('off');
+  codec.setAgc('auto');
+  codec.setAgc('fast');
+  codec.setAgc('med');
+  codec.setAgc('slow');
+  assert.deepStrictEqual(writes, ['GT00;', 'GT04;', 'GT01;', 'GT02;', 'GT03;']);
+});
+
+test('FTX-1 GT reply parses Auto correctly', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let agc = null;
+  codec.on('agc', (v) => { agc = v; });
+  codec.onData(Buffer.from('GT04;'));
+  assert.strictEqual(agc, 'auto');
+});
+
+test('FTX-1 does not expose PROC controls in POTACAT', () => {
+  assert.strictEqual(FTX1_FIELD_MODEL.caps.comp, false);
+  assert.strictEqual(FTX1_FIELD_MODEL.caps.compLevel, false);
+  assert.strictEqual(FTX1_FIELD_MODEL.commands.setCompOn, undefined);
+  assert.strictEqual(FTX1_FIELD_MODEL.commands.getCompLevel, undefined);
+});
+
+test('FTX-1 RF gain reply maps raw 255 to 100%', () => {
+  const codec = new KenwoodCodec(FTX1_FIELD_MODEL, () => {});
+  let rf = null;
+  codec.on('rfgain', (v) => { rf = v; });
+  codec.onData(Buffer.from('RG0255;'));
+  assert.strictEqual(rf, 100);
+});
+
+test('FTX-1 preamp allows AMP2 only on HF/50', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  codec.setPreampTarget('hf50', 2);
+  codec.setPreampTarget('vhf', 2);
+  codec.setPreampTarget('uhf', 2);
+  assert.deepStrictEqual(writes, ['PA02;', 'PA11;', 'PA21;']);
+});
+
+test('FTX-1 Optima antenna select writes EX0307040/1; only on Optima', () => {
+  const optima = captureWrites(KenwoodCodec, FTX1_OPTIMA_MODEL);
+  optima.codec.setAntennaPort(1);
+  optima.codec.setAntennaPort(2);
+  assert.deepStrictEqual(optima.writes, ['EX0307040;', 'EX0307041;']);
+
+  const field = captureWrites(KenwoodCodec, FTX1_FIELD_MODEL);
+  field.codec.setAntennaPort(2);
+  assert.deepStrictEqual(field.writes, []);
+});
+
+test('FTX-1 Optima antenna readback parses EX0307040/1 to ANT 1/2', () => {
+  const codec = new KenwoodCodec(FTX1_OPTIMA_MODEL, () => {});
+  const ports = [];
+  codec.on('antennaPort', (v) => { ports.push(v); });
+  codec.onData(Buffer.from('EX0307040;EX0307041;'));
+  assert.deepStrictEqual(ports, [1, 2]);
 });
 
 // Monitor: channel 0 carries enable bit, channel 1 carries level.

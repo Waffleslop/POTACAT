@@ -739,6 +739,7 @@ let _currentBreakInState = false;
 let _currentBreakInDelay = 100; // ms
 let _currentPreampTarget = 'hf50';
 let _currentPreampLevel = 0;
+let _currentAntennaPort = 1;
 let _currentCwSidetoneState = true; // Flex default is sidetone ON; we mirror that.
 // WinKeyer-driven sidetone mute. Tracks whether the *WinKeyer activity*
 // path is currently holding the Flex sidetone off, plus the state we
@@ -816,6 +817,13 @@ function getRigCapabilities(rigType) {
     // Include power limits so UI can clamp sliders
     if (model.minPower != null) caps.minPower = model.minPower;
     if (model.maxPower != null) caps.maxPower = model.maxPower;
+    if (model.powerStep != null) caps.powerStep = model.powerStep;
+    if (model.powerDecimals != null) caps.powerDecimals = model.powerDecimals;
+    if (Array.isArray(model.powerChoices)) caps.powerChoices = model.powerChoices.slice();
+    if (model.maxNbLevel != null) caps.maxNbLevel = model.maxNbLevel;
+    if (model.maxDnrLevel != null) caps.maxDnrLevel = model.maxDnrLevel;
+    if (Array.isArray(model.agcModes)) caps.agcModes = model.agcModes.slice();
+    if (Array.isArray(model.preampTargets)) caps.preampTargets = model.preampTargets.slice();
     return caps;
   }
   // Fallback to generic per-type
@@ -1201,6 +1209,44 @@ function sendCatNb(on) {
   broadcastRigState();
 }
 
+function sendCatRfGain(val) { _currentRfGain = val; broadcastRigState(); }
+function sendCatNbLevel(val) { _currentNbLevel = val; _currentNbState = val > 0; broadcastRigState(); }
+function sendCatNr(on) { _currentNrState = on; broadcastRigState(); }
+function sendCatNrLevel(val) { _currentNrLevel = val; broadcastRigState(); }
+function sendCatDnrLevel(val) { _currentDnrLevel = val; _currentNrState = val > 0; broadcastRigState(); }
+function sendCatComp(on) { _currentCompState = on; broadcastRigState(); }
+function sendCatCompLevel(val) { _currentCompLevel = val; broadcastRigState(); }
+function sendCatAgc(mode) { _currentAgcMode = mode; broadcastRigState(); }
+function sendCatAnf(on) { _currentAnfState = on; broadcastRigState(); }
+function sendCatVox(on) { _currentVoxState = on; broadcastRigState(); }
+function sendCatVoxLevel(val) { _currentVoxLevel = val; broadcastRigState(); }
+function sendCatMon(on) { _currentMonState = on; broadcastRigState(); }
+function sendCatMonLevel(val) { _currentMonLevel = val; broadcastRigState(); }
+function sendCatMicGain(val) { _currentMicGain = val; broadcastRigState(); }
+function sendCatBreakIn(on) { _currentBreakInState = on; broadcastRigState(); }
+function sendCatAntennaPort(val) { _currentAntennaPort = val; broadcastRigState(); }
+
+function bindRigStateEvents(controller) {
+  if (!controller || controller._potacatRigStateEventsBound) return;
+  controller._potacatRigStateEventsBound = true;
+  controller.on('rfgain', sendCatRfGain);
+  controller.on('nbLevel', sendCatNbLevel);
+  controller.on('nr', sendCatNr);
+  controller.on('nrLevel', sendCatNrLevel);
+  controller.on('dnrLevel', sendCatDnrLevel);
+  controller.on('comp', sendCatComp);
+  controller.on('compLevel', sendCatCompLevel);
+  controller.on('agc', sendCatAgc);
+  controller.on('anf', sendCatAnf);
+  controller.on('vox', sendCatVox);
+  controller.on('voxLevel', sendCatVoxLevel);
+  controller.on('mon', sendCatMon);
+  controller.on('monLevel', sendCatMonLevel);
+  controller.on('micGain', sendCatMicGain);
+  controller.on('breakIn', sendCatBreakIn);
+  controller.on('antennaPort', sendCatAntennaPort);
+}
+
 function sendCatSmeter(val) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-smeter', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-smeter', val);
@@ -1260,6 +1306,7 @@ function broadcastRigState() {
     breakInDelay: _currentBreakInDelay,
     preampTarget: _currentPreampTarget,
     preampLevel: _currentPreampLevel,
+    antennaPort: _currentAntennaPort,
     capabilities: caps,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
@@ -1605,6 +1652,8 @@ async function connectCat() {
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
   }
+
+  bindRigStateEvents(cat);
 
   // Apply user command overrides from settings (Kenwood/Yaesu codec)
   if (cat && settings.rigCommandOverrides) {
@@ -15606,7 +15655,11 @@ app.whenReady().then(() => {
       case 'set-agc': {
         if (flexNeedsApi) { _flexWarnOnce('AGC requires SmartSDR API — not connected'); break; }
         const mode = String(data.value || '').toLowerCase();
-        if (!['off', 'fast', 'med', 'slow'].includes(mode)) break;
+        const caps = getRigCapabilities(rigType);
+        const allowedAgcModes = Array.isArray(caps.agcModes) && caps.agcModes.length
+          ? caps.agcModes
+          : ['off', 'fast', 'med', 'slow'];
+        if (!allowedAgcModes.includes(mode)) break;
         if (flexSdr()) smartSdr.setAgc(0, mode);
         else if (cat && cat.connected && typeof cat.setAgc === 'function') {
           // Older Icom (706/7100/7200/9100) supports fast/slow only; the
@@ -15628,10 +15681,13 @@ app.whenReady().then(() => {
       }
       case 'set-nb-level': {
         if (flexNeedsApi) { _flexWarnOnce('NB level requires SmartSDR API — not connected'); break; }
-        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
-        if (flexSdr()) smartSdr.setNbLevel(0, pct);
-        else if (cat && cat.connected && typeof cat.setNbLevel === 'function') cat.setNbLevel(pct);
-        _currentNbLevel = pct;
+        const caps = getRigCapabilities(rigType);
+        const max = caps.maxNbLevel != null ? caps.maxNbLevel : 100;
+        const level = Math.max(0, Math.min(max, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setNbLevel(0, level);
+        else if (cat && cat.connected && typeof cat.setNbLevel === 'function') cat.setNbLevel(level);
+        _currentNbLevel = level;
+        _currentNbState = level > 0;
         broadcastRigState();
         break;
       }
@@ -15697,6 +15753,8 @@ app.whenReady().then(() => {
       // --- FTX-1-class advanced rig controls ---
       // No Flex equivalents — these are Yaesu-specific raw CAT only.
       case 'set-mic-gain': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.micGain) break;
         const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
         if (cat && cat.connected && typeof cat.setMicGain === 'function') cat.setMicGain(pct);
         _currentMicGain = pct;
@@ -15704,6 +15762,8 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-comp-level': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.compLevel) break;
         const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
         if (cat && cat.connected && typeof cat.setCompLevel === 'function') cat.setCompLevel(pct);
         _currentCompLevel = pct;
@@ -15711,13 +15771,20 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-dnr-level': {
-        const level = Math.max(1, Math.min(15, Number(data.value) || 1));
+        const caps = getRigCapabilities(rigType);
+        if (!caps.dnrLevel) break;
+        const max = caps.maxDnrLevel != null ? caps.maxDnrLevel : 15;
+        const min = caps.maxDnrLevel != null ? 0 : 1;
+        const level = Math.max(min, Math.min(max, Number(data.value) || 0));
         if (cat && cat.connected && typeof cat.setDnrLevel === 'function') cat.setDnrLevel(level);
         _currentDnrLevel = level;
+        _currentNrState = level > 0;
         broadcastRigState();
         break;
       }
       case 'set-clar-rx': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.clarRx) break;
         const on = !!data.value;
         if (cat && cat.connected && typeof cat.setClarRx === 'function') cat.setClarRx(on);
         _currentClarRxState = on;
@@ -15725,6 +15792,8 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-clar-tx': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.clarTx) break;
         const on = !!data.value;
         if (cat && cat.connected && typeof cat.setClarTx === 'function') cat.setClarTx(on);
         _currentClarTxState = on;
@@ -15732,6 +15801,8 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-clar-offset': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.clarOffset) break;
         const hz = Math.max(-9999, Math.min(9999, Math.round(Number(data.value) || 0)));
         if (cat && cat.connected && typeof cat.setClarOffset === 'function') cat.setClarOffset(hz);
         _currentClarOffset = hz;
@@ -15739,6 +15810,8 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-break-in': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.breakIn) break;
         const on = !!data.value;
         if (cat && cat.connected && typeof cat.setBreakIn === 'function') cat.setBreakIn(on);
         _currentBreakInState = on;
@@ -15746,6 +15819,8 @@ app.whenReady().then(() => {
         break;
       }
       case 'set-break-in-delay': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.breakInDelay) break;
         const ms = Math.max(30, Math.min(3000, Number(data.value) || 100));
         if (cat && cat.connected && typeof cat.setBreakInDelay === 'function') cat.setBreakInDelay(ms);
         _currentBreakInDelay = ms;
@@ -15754,11 +15829,27 @@ app.whenReady().then(() => {
       }
       case 'set-preamp-target': {
         // value: { target: 'hf50'|'vhf'|'uhf', level: 0|1|2 }
+        const caps = getRigCapabilities(rigType);
+        if (!caps.preampTarget) break;
         const target = String((data.value && data.value.target) || data.target || 'hf50').toLowerCase();
-        const level = Math.max(0, Math.min(2, Number((data.value && data.value.level) ?? data.level ?? 0)));
+        const allowedTargets = Array.isArray(caps.preampTargets) && caps.preampTargets.length
+          ? caps.preampTargets
+          : ['hf50', 'vhf', 'uhf'];
+        if (!allowedTargets.includes(target)) break;
+        const maxPreampLevel = target === 'hf50' ? 2 : 1;
+        const level = Math.max(0, Math.min(maxPreampLevel, Number((data.value && data.value.level) ?? data.level ?? 0)));
         if (cat && cat.connected && typeof cat.setPreampTarget === 'function') cat.setPreampTarget(target, level);
         _currentPreampTarget = target;
         _currentPreampLevel = level;
+        broadcastRigState();
+        break;
+      }
+      case 'set-antenna-port': {
+        const caps = getRigCapabilities(rigType);
+        if (!caps.antennaPort) break;
+        const port = Math.max(1, Math.min(2, Math.round(Number(data.value) || 1)));
+        if (cat && cat.connected && typeof cat.setAntennaPort === 'function') cat.setAntennaPort(port);
+        _currentAntennaPort = port;
         broadcastRigState();
         break;
       }
