@@ -15925,7 +15925,15 @@ app.whenReady().then(() => {
       // Forward to ECHOCAT phone via WebSocket — kept for the browser ECHOCAT
       // path (Web Audio decoder); mobile ignores this and uses the WebRTC
       // track that the bridge above feeds.
+      //
+      // The WS path JSON.stringify's the message, which silently mangles
+      // a Float32Array into {"0":x,"1":y,…}. The Electron IPC paths above
+      // preserve TypedArrays via structured clone — only this branch needs
+      // an explicit Array.from. The HeapNumber pressure noted in the
+      // comment above only applies when ECHOCAT WS is connected AND a
+      // Kiwi/WebSDR is streaming, which is rare enough to accept the cost.
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        const pcmArr = Array.from(pcmFloat);
         if (_kiwiAudioCount === 10) sendCatLog(`[WebSDR] Streaming audio to ECHOCAT (${pcmArr.length} samples/packet)`);
         remoteServer.sendToClient({ type: 'kiwi-audio', pcm: pcmArr, sampleRate });
       }
