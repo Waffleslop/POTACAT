@@ -28,6 +28,63 @@ contextBridge.exposeInMainWorld('api', {
   echocatListPairedDevices: () => ipcRenderer.invoke('echocat-list-paired-devices'),
   echocatRevokeDevice: (deviceId) => ipcRenderer.invoke('echocat-revoke-device', deviceId),
   echocatRenameDevice: (deviceId, name) => ipcRenderer.invoke('echocat-rename-device', deviceId, name),
+  echocatSetDeviceTrusted: (deviceId, trusted) => ipcRenderer.invoke('echocat-set-device-trusted', deviceId, trusted),
+  // Persistent share-link API (Settings → Remote Access → Share Access).
+  // Distinct from echocatCreatePairingQr — these tokens survive a restart
+  // and support 1h / 24h / 7d / 30d TTLs for emailed pair links.
+  pairLinkCreate: (opts) => ipcRenderer.invoke('pair-link-create', opts || {}),
+  pairLinkList: () => ipcRenderer.invoke('pair-link-list'),
+  pairLinkRevoke: (token) => ipcRenderer.invoke('pair-link-revoke', token),
+  onPairLinksUpdated: (cb) => {
+    const handler = (_e, list) => cb(list);
+    ipcRenderer.on('pair-links-updated', handler);
+    return () => ipcRenderer.removeListener('pair-links-updated', handler);
+  },
+  // ─── Laptop side: paired shacks (connection targets) ──────────────
+  // These are populated when the user opens an emailed pair link or
+  // scans a QR; the redemption stores a deviceToken locally so this
+  // desktop can dial the shack later. Token is never returned to the
+  // renderer — only display fields.
+  connectionTargetsList: () => ipcRenderer.invoke('connection-targets-list'),
+  connectionTargetsRename: (id, name) => ipcRenderer.invoke('connection-targets-rename', id, name),
+  connectionTargetsRemove: (id) => ipcRenderer.invoke('connection-targets-remove', id),
+  // Pass null to switch back to the local rig.
+  connectionTargetsActivate: (id) => ipcRenderer.invoke('connection-targets-activate', id),
+  connectionTargetsGetStatus: () => ipcRenderer.invoke('connection-targets-get-status'),
+  // mDNS discovery of nearby POTACAT shacks for welcome-screen "we
+  // found a shack on your network" and Remote-Radios "+ Add new"
+  // same-LAN add. Returns [{name, host, port, fingerprint, rigModel, …}].
+  discoverShacks: () => ipcRenderer.invoke('discover-shacks'),
+  // Tap-to-pair against a discovered shack — operator clicks Approve
+  // on the shack's screen, response carries deviceToken which we
+  // persist into settings.connectionTargets[].
+  pairRequestDiscovered: (target) => ipcRenderer.invoke('pair-request-discovered', target),
+  // Cloud-attested auto-pair (Path 1, v1.9). cloudFindShacks lists
+  // shacks registered to the signed-in account; cloudPairShack does
+  // a one-click pair against a chosen one. No Approve modal, no QR.
+  cloudFindShacks: () => ipcRenderer.invoke('cloud-find-shacks'),
+  cloudPairShack: (shackDeviceId) => ipcRenderer.invoke('cloud-pair-shack', shackDeviceId),
+  // Live state from the RemoteClient.
+  onRemoteClientStatus: (cb) => {
+    const handler = (_e, s) => cb(s);
+    ipcRenderer.on('remote-client-status', handler);
+    return () => ipcRenderer.removeListener('remote-client-status', handler);
+  },
+  onRemoteClientDisplaced: (cb) => {
+    const handler = (_e, info) => cb(info);
+    ipcRenderer.on('remote-client-displaced', handler);
+    return () => ipcRenderer.removeListener('remote-client-displaced', handler);
+  },
+  onConnectionTargetsUpdated: (cb) => {
+    const handler = (_e, list) => cb(list);
+    ipcRenderer.on('connection-targets-updated', handler);
+    return () => ipcRenderer.removeListener('connection-targets-updated', handler);
+  },
+  onPairLinkRedeemed: (cb) => {
+    const handler = (_e, result) => cb(result);
+    ipcRenderer.on('pair-link-redeemed', handler);
+    return () => ipcRenderer.removeListener('pair-link-redeemed', handler);
+  },
   echocatTailscaleStatus: () => ipcRenderer.invoke('echocat-tailscale-status'),
   echocatIssueTailscaleCert: () => ipcRenderer.invoke('echocat-issue-tailscale-cert'),
   echocatPickFile: (opts) => ipcRenderer.invoke('echocat-pick-file', opts || {}),

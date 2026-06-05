@@ -2307,6 +2307,14 @@ dialog {
   color: var(--text-primary);
   margin-bottom: 12px;
 }
+.share-rig-notice.info {
+  border-left-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
+}
+.share-rig-notice.ok {
+  border-left-color: var(--accent-green);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
+}
 .share-rig-notice.warn {
   border-left-color: #f0a500;
   background: color-mix(in srgb, #f0a500 8%, transparent);
@@ -2370,6 +2378,99 @@ dialog {
   color: var(--text-secondary);
 }
 .share-rig-row label { margin: 0; display: inline-flex; align-items: baseline; gap: 6px; }
+/* Share Your Rig — anonymous-redeem checkbox row. Borrows the same
+   chip-card visual language as the "When?" radios so opt-in fields
+   look like one family. */
+.share-rig-anon-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--bg-primary);
+}
+.share-rig-anon-row:hover { background: var(--bg-hover); }
+.share-rig-anon-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 3px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent-blue);
+  cursor: pointer;
+}
+.share-rig-anon-row > span { flex: 1; min-width: 0; display: block; }
+.share-rig-anon-row:has(input:checked) {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-primary));
+}
+.share-rig-anon-row:has(input:checked) .share-rig-anon-title { color: var(--accent-blue); }
+.share-rig-anon-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.3; }
+.share-rig-anon-sub { display: block; font-size: 11px; color: var(--text-secondary); margin-top: 2px; line-height: 1.45; }
+
+/* Share Your Rig — "When?" section. Mirrors .pair-link-trust-option
+   visual styling so the two pairing dialogs feel like a family. */
+.share-rig-when-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.share-rig-when-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--bg-primary);
+}
+.share-rig-when-option:hover { background: var(--bg-hover); }
+.share-rig-when-option input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  margin: 3px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent-blue);
+  cursor: pointer;
+}
+.share-rig-when-option > span { flex: 1; min-width: 0; display: block; }
+.share-rig-when-option:has(input:checked) {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-primary));
+}
+.share-rig-when-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.3; }
+.share-rig-when-schedule-help-active .share-rig-when-title,
+.share-rig-when-option:has(input:checked) .share-rig-when-title { color: var(--accent-blue); }
+.share-rig-when-sub { display: block; font-size: 11px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4; }
+.share-rig-when-now,
+.share-rig-when-schedule { margin-top: 4px; }
+.share-rig-when-schedule.hidden,
+.share-rig-when-now.hidden { display: none; }
+.share-rig-when-pair { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.share-rig-when-pair label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 180px;
+}
+.share-rig-when-pair input[type="datetime-local"] {
+  padding: 5px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  color-scheme: dark;
+}
+:root[data-theme="light"] .share-rig-when-pair input[type="datetime-local"] { color-scheme: light; }
+
 .share-rig-num {
   width: 70px;
   padding: 3px 6px;
@@ -2532,9 +2633,30 @@ dialog {
   font-size: 11px;
 }
 .share-rig-list .lst-code { font-family: monospace; font-weight: 700; color: var(--text-primary); }
+/* Callsign label in place of the (now-hidden) 4-word code. Mono-ish
+   for ham-radio feel without screaming "secret-token-here." */
+.share-rig-list .lst-call {
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+}
+.share-rig-list .lst-copy {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--accent-blue);
+  border: 1px solid var(--accent-blue);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.share-rig-list .lst-copy:hover {
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+}
 .share-rig-list .lst-meta { color: var(--text-tertiary); flex: 1; margin-left: 6px; }
 .share-rig-list .lst-status { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 1px 6px; border-radius: 8px; }
 .share-rig-list .lst-status.active { background: color-mix(in srgb, var(--accent-green) 20%, transparent); color: var(--accent-green); }
+.share-rig-list .lst-status.scheduled { background: color-mix(in srgb, var(--accent-blue) 20%, transparent); color: var(--accent-blue); }
 .share-rig-list .lst-status.expired,
 .share-rig-list .lst-status.revoked { background: var(--bg-secondary); color: var(--text-tertiary); }
 .share-rig-list .lst-revoke {
@@ -2557,6 +2679,429 @@ dialog {
   padding: 0;
 }
 .share-rig-link-btn:hover { text-decoration: underline; }
+
+/* Pair my device — combined QR + share-link dialog (v1.9 consolidation).
+   #pair-device-dialog reuses the .pair-link-* styling below but adds
+   a wider container, a method radio at the top, and the QR card. */
+#pair-device-dialog { max-width: 560px; width: 92%; }
+.pair-device-warning {
+  background: color-mix(in srgb, var(--accent-red) 14%, var(--bg-primary));
+  border: 1px solid var(--accent-red);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+.pair-device-warning strong { color: var(--accent-red); }
+.pair-device-method-form { margin-top: 8px; }
+.pair-device-method-form.hidden { display: none; }
+.pair-device-qr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  min-height: 220px;
+  justify-content: center;
+}
+.pair-device-qr { display: block; width: 200px; height: 200px; }
+#pair-device-qr-svg svg { width: 100%; height: 100%; display: block; }
+.pair-device-qr-ttl {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-primary);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+.pair-device-qr-ttl.expired { color: var(--accent-red); font-weight: 600; }
+.pair-device-qr-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.pair-device-qr-actions button {
+  font-size: 12px;
+  padding: 5px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pair-device-qr-actions button.primary {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.pair-device-qr-actions button:hover { background: var(--bg-hover); }
+.pair-device-qr-actions button.primary:hover { background: color-mix(in srgb, var(--accent-blue) 80%, #fff); }
+.pair-device-qr-actions button[disabled] { opacity: 0.5; cursor: not-allowed; }
+.pair-device-manual { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.pair-device-manual-row { display: flex; flex-direction: column; gap: 3px; }
+.pair-device-manual-row label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.4px; }
+.pair-device-manual-value { display: flex; gap: 6px; }
+.pair-device-manual-row input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 4px 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  min-width: 0;
+}
+.pair-device-manual-value button {
+  font-size: 11px;
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.pair-device-manual-value button:hover { background: var(--bg-hover); }
+
+/* Pair Another Desktop dialog (persistent share-link flow, v1.9).
+   Mirrors the .share-rig-* visual language for consistency — TTL
+   preset chips, URL box with copy actions, pending-links list — so
+   operators don't have to learn two layouts for two pair surfaces. */
+#pair-link-dialog { max-width: 560px; width: 92%; }
+.pair-link-intro {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+.pair-link-section {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-secondary);
+}
+.pair-link-section:last-child { border-bottom: none; }
+.pair-link-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.pair-link-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.pair-link-preset {
+  font-size: 12px;
+  padding: 5px 12px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pair-link-preset:hover { background: var(--bg-hover); color: var(--text-primary); }
+.pair-link-preset.active {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.pair-link-trust {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pair-link-trust-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--bg-primary);
+}
+.pair-link-trust-option:hover { background: var(--bg-hover); }
+/* Explicit radio sizing — Chromium's native radio renders ~16px on
+   most platforms but can be larger under Windows display scaling,
+   which crowded the text. Pin to 14px and recolor with accent-color
+   to match the theme. */
+.pair-link-trust-option input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  margin: 3px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent-blue);
+  cursor: pointer;
+}
+/* The text container has to grow into the rest of the row — without
+   flex:1 it shrank to its content width and the radio dominated. */
+.pair-link-trust-option > span {
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+.pair-link-trust-option input[type="radio"]:checked + span .pair-link-trust-title { color: var(--accent-blue); }
+.pair-link-trust-option:has(input:checked) { border-color: var(--accent-blue); background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-primary)); }
+.pair-link-trust-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.3; }
+.pair-link-trust-sub { display: block; font-size: 11px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4; }
+
+#pair-link-label {
+  width: 100%;
+  font-size: 12px;
+  padding: 5px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.pair-link-result {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-secondary);
+}
+.pair-link-result.hidden { display: none; }
+.pair-link-reach {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.pair-link-reach .reach-yes { color: var(--accent-green); }
+.pair-link-reach .reach-no { color: var(--text-tertiary); }
+.pair-link-url-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-blue);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.pair-link-url-box textarea {
+  width: 100%;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  resize: none;
+  outline: none;
+  word-break: break-all;
+  box-sizing: border-box;
+}
+.pair-link-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.pair-link-actions button {
+  font-size: 12px;
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pair-link-actions button.primary {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.pair-link-actions button:hover { background: var(--bg-hover); }
+.pair-link-actions button.primary:hover { background: color-mix(in srgb, var(--accent-blue) 80%, #fff); }
+.pair-link-actions button.danger {
+  background: var(--bg-secondary);
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+.pair-link-actions button.danger:hover { background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
+.pair-link-qr-block summary { cursor: pointer; padding: 4px 0; font-size: 12px; color: var(--text-secondary); }
+.pair-link-qr-host { display: flex; justify-content: center; margin-top: 8px; }
+.pair-link-qr-host img,
+.pair-link-qr-host svg { display: block; width: 240px; height: 240px; background: #fff; padding: 8px; border-radius: 4px; }
+.pair-link-pending { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-secondary); }
+.pair-link-refresh {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--accent-blue);
+  cursor: pointer;
+  padding: 0;
+}
+.pair-link-refresh:hover { text-decoration: underline; }
+.pair-link-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.pair-link-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  font-size: 11px;
+}
+.pair-link-list .pll-meta { color: var(--text-secondary); flex: 1; }
+.pair-link-list .pll-label { font-weight: 600; color: var(--text-primary); }
+.pair-link-list .pll-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.pair-link-list .pll-status.active { background: color-mix(in srgb, var(--accent-green) 20%, transparent); color: var(--accent-green); }
+.pair-link-list .pll-status.used,
+.pair-link-list .pll-status.expired { background: var(--bg-secondary); color: var(--text-tertiary); }
+.pair-link-list .pll-revoke {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.pair-link-list .pll-revoke:hover { color: var(--accent-red); border-color: var(--accent-red); }
+.pair-link-empty { padding: 16px 0 !important; text-align: center; color: var(--text-tertiary); font-size: 12px; font-style: italic; justify-content: center !important; border: none !important; background: transparent !important; }
+
+/* Remote Radios dialog (desktop-to-desktop client manager, v1.9) */
+#remote-radios-dialog { max-width: 580px; width: 92%; }
+.remote-radios-intro { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 14px; }
+.remote-radios-local-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+}
+.remote-radios-local-row.active { border-color: var(--accent-green); }
+.remote-radios-local-name { font-weight: 600; color: var(--text-primary); font-size: 13px; }
+.remote-radios-local-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+.remote-radios-action {
+  font-size: 12px;
+  padding: 4px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.remote-radios-action:hover { background: var(--bg-hover); }
+.remote-radios-action.primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.remote-radios-action.primary:hover { background: color-mix(in srgb, var(--accent-blue) 80%, #fff); }
+.remote-radios-action.danger { color: var(--accent-red); border-color: var(--accent-red); }
+.remote-radios-action.danger:hover { background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
+.remote-radios-action[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.remote-radios-list-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin: 14px 0 6px;
+}
+.remote-radios-refresh {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--accent-blue);
+  cursor: pointer;
+  padding: 0;
+}
+.remote-radios-refresh:hover { text-decoration: underline; }
+
+.remote-radios-list { list-style: none; padding: 0; margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; max-height: 380px; overflow-y: auto; }
+.remote-radios-list li {
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+}
+.remote-radios-list li.active { border-color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 6%, var(--bg-primary)); }
+.remote-radios-list .rr-row { display: flex; align-items: center; gap: 8px; }
+.remote-radios-list .rr-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-tertiary); flex-shrink: 0; }
+.remote-radios-list .rr-dot.connected { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.remote-radios-list .rr-dot.unreachable { background: #d4a64a; }
+.remote-radios-list .rr-dot.expired { background: var(--accent-red); }
+.remote-radios-list .rr-name { font-weight: 600; color: var(--text-primary); font-size: 13px; flex: 1; cursor: pointer; }
+.remote-radios-list .rr-name input { width: 100%; font-size: 13px; padding: 2px 4px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--accent-blue); border-radius: 3px; font-family: inherit; }
+.remote-radios-list .rr-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; line-height: 1.5; }
+.remote-radios-list .rr-meta b { color: var(--text-secondary); font-weight: 600; }
+.remote-radios-list .rr-badges { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-secondary); margin-top: 4px; }
+.remote-radios-list .rr-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; margin-right: 5px; }
+.remote-radios-list .rr-badge.account { background: color-mix(in srgb, var(--accent-blue) 18%, transparent); color: var(--accent-blue); }
+.remote-radios-list .rr-badge.trusted { background: color-mix(in srgb, var(--accent-green) 18%, transparent); color: var(--accent-green); }
+.remote-radios-list .rr-badge.guest { background: var(--bg-secondary); color: var(--text-tertiary); }
+.remote-radios-list .rr-badge.leg { background: var(--bg-secondary); color: var(--text-secondary); }
+.remote-radios-list .rr-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.remote-radios-list .rr-actions button { font-size: 11px; padding: 3px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-secondary); border-radius: 3px; cursor: pointer; font-family: inherit; }
+.remote-radios-list .rr-actions button:hover { background: var(--bg-hover); }
+.remote-radios-list .rr-actions button.primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.remote-radios-list .rr-actions button.primary:hover { background: color-mix(in srgb, var(--accent-blue) 80%, #fff); }
+.remote-radios-list .rr-actions button.danger { color: var(--accent-red); border-color: var(--accent-red); }
+.remote-radios-list .rr-actions button.danger:hover { background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
+.remote-radios-empty { padding: 20px 12px !important; text-align: center; color: var(--text-tertiary); font-size: 12px; font-style: italic; }
+.remote-radios-empty b { color: var(--text-secondary); font-style: normal; }
+
+/* Displacement banner — shown at the top of the main window when our
+   connection got kicked by another client. Replaces the generic
+   disconnect with explicit "Casey's iPhone took over." */
+.displaced-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-red) 22%, var(--bg-primary)), var(--bg-primary));
+  border-bottom: 1px solid var(--accent-red);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.displaced-banner.hidden { display: none; }
+.displaced-banner-msg { flex: 1; line-height: 1.4; }
+.displaced-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.displaced-banner-actions button {
+  font-size: 12px;
+  padding: 4px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.displaced-banner-actions button.primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.displaced-banner-actions button:hover { background: var(--bg-hover); }
 
 /* Manage Operators dialog */
 #operators-dialog {
@@ -3943,6 +4488,173 @@ tr.wl-group-2 td:last-child {
 
 .welcome-radio-section a {
   color: var(--accent-blue);
+}
+
+/* Welcome → Connect to a Remote Shack. First-class entry point for
+   the desktop-to-desktop flow: mDNS-discovered shacks (LAN/Tailscale)
+   at the top, then Cloud sign-in CTA, then the paste-link fallback. */
+.welcome-remote-section {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-blue) 12%, var(--bg-tertiary)), var(--bg-tertiary));
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 35%, var(--border-primary));
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.welcome-remote-discovered {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 5px;
+  padding: 10px 12px;
+}
+.welcome-remote-discovered-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.welcome-remote-rescan {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.welcome-remote-rescan:hover { text-decoration: underline; }
+.welcome-remote-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.welcome-remote-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  font-size: 13px;
+}
+.welcome-remote-list .wrl-name { font-weight: 600; color: var(--text-primary); }
+.welcome-remote-list .wrl-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+.welcome-remote-list .wrl-info { flex: 1; }
+.welcome-remote-list button {
+  font-size: 12px;
+  padding: 4px 12px;
+  background: var(--accent-blue);
+  color: #fff;
+  border: 1px solid var(--accent-blue);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.welcome-remote-list button:hover { background: color-mix(in srgb, var(--accent-blue) 80%, #fff); }
+.welcome-remote-list button[disabled] { opacity: 0.5; cursor: not-allowed; }
+.welcome-remote-scanning,
+.welcome-remote-empty {
+  padding: 14px !important;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-style: italic;
+  background: transparent !important;
+  border: 1px dashed var(--border-secondary) !important;
+  display: block !important;
+}
+.welcome-remote-or {
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin: 10px 0;
+  position: relative;
+}
+.welcome-remote-or::before,
+.welcome-remote-or::after {
+  content: '';
+  display: inline-block;
+  vertical-align: middle;
+  width: 60px;
+  height: 1px;
+  background: var(--border-secondary);
+  margin: 0 8px;
+}
+.welcome-remote-alt-row { margin-bottom: 8px; }
+.welcome-remote-alt {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.welcome-remote-alt:hover { background: var(--bg-hover); border-color: var(--accent-blue); }
+.welcome-remote-alt-icon {
+  font-size: 22px;
+  width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.welcome-remote-alt-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.welcome-remote-alt-sub { display: block; font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.welcome-remote-paste-row {
+  display: flex;
+  gap: 6px;
+}
+.welcome-remote-paste-row input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+}
+.welcome-remote-paste-row button {
+  padding: 6px 14px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+.welcome-remote-paste-row button:hover { background: var(--bg-hover); }
+.welcome-remote-status {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--accent-blue) 14%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 40%, var(--border-secondary));
+  color: var(--text-primary);
+}
+.welcome-remote-status.hidden { display: none; }
+.welcome-remote-status.error {
+  background: color-mix(in srgb, var(--accent-red) 14%, var(--bg-primary));
+  border-color: var(--accent-red);
+}
+.welcome-remote-status.success {
+  background: color-mix(in srgb, var(--accent-green) 14%, var(--bg-primary));
+  border-color: var(--accent-green);
 }
 
 .welcome-import-section {
@@ -7442,6 +8154,8 @@ body.activator-rbn-on #rbn-view {
 .banner-logger {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: calc(3px * var(--bl-scale, 1));
   gap: calc(6px * var(--bl-scale, 1));
   padding: calc(4px * var(--bl-scale, 1)) 8px;
   background: var(--bg-panel);
@@ -7449,6 +8163,43 @@ body.activator-rbn-on #rbn-view {
   flex-shrink: 0;
   position: relative;
 }
+
+/* Station-info second line — DX info pulled from QRZ on callsign
+   input. flex-basis:100% forces it to wrap onto its own row inside
+   the banner-logger flex container. KM4CFT request 2026-05-26. */
+.bl-station-info {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--bl-scale, 1));
+  font-size: calc(11px * var(--bl-scale, 1));
+  color: var(--text-secondary);
+  padding: calc(2px * var(--bl-scale, 1)) calc(2px * var(--bl-scale, 1));
+  border-top: 1px dashed var(--border-secondary);
+  margin-top: calc(2px * var(--bl-scale, 1));
+}
+.bl-station-info.hidden { display: none; }
+.bl-info-label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: calc(10px * var(--bl-scale, 1));
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.bl-info-chip {
+  font-family: monospace;
+  white-space: nowrap;
+}
+.bl-info-chip:empty { display: none; }
+.bl-info-grid { color: var(--text-primary); }
+.bl-info-heading { color: var(--accent-green); font-weight: 700; }
+/* Empty-state hint when no callsign / QRZ has no grid. Same row, no
+   layout shift — the chips fill in next to it once data lands. */
+.bl-info-placeholder {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.bl-info-placeholder.hidden { display: none; }
 .banner-logger.hidden { display: none; }
 
 /* Drag-to-resize strip on the top edge — W9TEF wanted a way to make the

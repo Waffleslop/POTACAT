@@ -60,12 +60,12 @@ Format: each row is `name — direction — purpose`. Directions:
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `hello` | ↔ | Version + capability handshake (new in v1). |
+| `hello` | ↔ | Version + capability handshake (new in v1). Server-side `hello` also carries top-level `rigModel` (string, e.g. `"Flex 8600M"`, `"FTDX10"`) so POTACAT-desktop clients can label paired shacks in the Remote Radios panel — empty string when no rig is configured. |
 | `auth-mode` | S→C | Tell client which auth mode the server is configured for (`token`, `callsign`, `cloud`). |
 | `auth` | C→S | Submit credentials (token / callsign+password / cloud token). |
-| `auth-ok` | S→C | Auth succeeded. Bundles initial feature flags and settings. |
-| `auth-fail` | S→C | Auth rejected with reason. |
-| `kicked` | S→C | Server bumped this client because another connected. |
+| `auth-ok` | S→C | Auth succeeded. Bundles initial feature flags and settings. Per-device-token auths also include `expiresAt` (epoch ms or `null` for no-expiry — trusted / account-linked devices), `accountLinked` (bool — pair came in via Cloud-attested flow), and `trusted` (bool — operator marked the device "my own"). Absent for the legacy single-shared-token path and Guest Pass auth. |
+| `auth-fail` | S→C | Auth rejected with `reason`. New reason in v1.9: `"expired"` — paired device's sliding 180-day token elapsed without a reconnect; client should route to the re-pair UI. |
+| `kicked` | S→C | Server bumped this client because another connected. Carries `byPlatform`, `byVersion`, `byHost` so the displaced client can render a friendly "another device took over" banner instead of a mystery disconnect. |
 | `pong` | S→C | Reply to `ping` for connection health checks. |
 | `ping` | C→S | Latency / liveness probe. |
 
