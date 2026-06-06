@@ -179,6 +179,8 @@ contextBridge.exposeInMainWorld('api', {
   testHamlib: (config) => ipcRenderer.invoke('test-hamlib', config),
   testSerialCat: (config) => ipcRenderer.invoke('test-serial-cat', config),
   testIcomCiv: (config) => ipcRenderer.invoke('test-icom-civ', config),
+  testCivTcp: (config) => ipcRenderer.invoke('test-civ-tcp', config),
+  testIcomNetwork: (config) => ipcRenderer.invoke('test-icom-network', config),
   connectCat: (target) => ipcRenderer.send('connect-cat', target),
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
@@ -378,6 +380,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetAudioLatencyMs: (payload) => ipcRenderer.send('jtcat-set-audio-latency-ms', payload),
   onJtcatAudioLatency: (cb) => ipcRenderer.on('jtcat-audio-latency', (_e, data) => cb(data)),
   jtcatSetHoldTxFreq: (enabled) => ipcRenderer.send('jtcat-set-hold-tx-freq', !!enabled),
+  jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),
   jtcatEnableTx: (enabled) => ipcRenderer.send('jtcat-enable-tx', enabled),
   jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),
   jtcatTuneToggle: () => ipcRenderer.send('jtcat-tune-toggle'),
@@ -466,6 +469,7 @@ contextBridge.exposeInMainWorld('api', {
       }
     });
   },
+  setJtcatIpAudioReady: (ready) => ipcRenderer.send('jtcat-ip-audio-ready', { ready: !!ready }),
   // Cloud Sync
   qrzDownloadLogbook: () => ipcRenderer.invoke('qrz-download-logbook'),
   qrzDebugDump: () => ipcRenderer.invoke('qrz-debug-dump'),
