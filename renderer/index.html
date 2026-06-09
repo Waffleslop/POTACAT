@@ -1432,6 +1432,14 @@
           </select>
         </label>
         <span class="help-text" style="margin-bottom:8px;display:block;">Used in N1MM+ RadioInfo UDP broadcast. Set to 2 for a second radio in SO2R setups (FreqEZ, band decoders).</span>
+        <label style="display:block;margin:10px 0 4px;">Audio source for JTCAT / SSTV:
+          <select id="set-audio-source" style="min-width:240px;">
+            <option value="dax">Local audio device / DAX</option>
+            <option value="smartsdr">SmartSDR Direct (no DAX program)</option>
+            <option value="icom-network">Icom Network audio (RS-BA1)</option>
+          </select>
+        </label>
+        <span class="help-text" style="display:block;margin-bottom:8px;">Choose Icom Network audio when the active rig is Icom Network / RS-BA1. POTACAT uses the radio's UDP audio stream for JTCAT/SSTV receive audio and can send JTCAT FT8/FT4 plus SSTV transmit audio directly over RS-BA1.</span>
         <label class="radio-label"><input type="radio" name="radio-type" value="flex" checked> FlexRadio</label>
         <div id="flex-config" class="radio-sub hidden">
           <label>Radio IP:
@@ -1453,13 +1461,6 @@
             </label>
             <span class="help-text" style="display:block;">0 = no limit. Capping reduces audio dropouts on a Flex 6500.</span>
           </div>
-          <label style="display:block;margin-top:10px;">Audio source:
-            <select id="set-audio-source" style="min-width:200px;">
-              <option value="dax">DAX (SmartSDR virtual driver)</option>
-              <option value="smartsdr">SmartSDR Direct (no DAX program)</option>
-            </select>
-          </label>
-          <span class="help-text" style="display:block;">SmartSDR Direct subscribes to Flex audio over UDP and bypasses the DAX program &mdash; useful when DAX gets stuck silent under RDP.</span>
           <details id="flex-advanced" style="margin-top:10px;">
             <summary>Advanced</summary>
             <label style="margin-top:8px;">Legacy SmartSDR CAT slice:
@@ -1575,9 +1576,9 @@
           </div>
           <span class="help-text" style="margin-top:6px;display:block;">For CW paddle keying via ECHOCAT, set your radio menu: SET > Connectors > USB SEND/Keying > USB Keying (CW) = DTR</span>
         </div>
-        <label class="radio-label"><input type="radio" name="radio-type" value="civ-tcp"> Icom CI-V over TCP</label>
+        <label class="radio-label"><input type="radio" name="radio-type" value="civ-tcp"> Raw CI-V TCP bridge</label>
         <div id="civ-tcp-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">Raw CI-V frames over TCP. Works with (a) the IC-7300 MK II / IC-705 MK II / IC-7610 MK II native Network CI-V over LAN, or (b) a <code>ser2net</code> / <code>socat</code> bridge on a radio-adjacent box that exposes a USB CI-V port as a TCP listener.</span>
+          <span class="help-text" style="font-size:12px;">Raw CI-V frames over a plain TCP socket. Use this for a <code>ser2net</code> / <code>socat</code> bridge, or for hardware that explicitly exposes raw CI-V as TCP. Native Icom LAN remote control usually uses the Icom Network / RS-BA1 option below.</span>
           <label>Radio Model:
             <select id="set-civ-tcp-model">
               <option value="0x94">IC-7300</option>
@@ -1602,9 +1603,9 @@
             <button type="button" id="civ-tcp-test-btn">Test Connection</button>
             <span id="civ-tcp-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">IC-7300 MK II default port is <code>50001</code>. For <code>ser2net</code>, whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW paddle keying works the same as direct USB CI-V — the codec sends the same CW key command (0x1C 0x01) over the TCP transport.</span>
+          <span class="help-text" style="margin-top:6px;display:block;">For <code>ser2net</code>, use whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW paddle keying works the same as direct USB CI-V — the codec sends the same CW key command (0x1C 0x01) over the TCP transport.</span>
         </div>
-        <label class="radio-label"><input type="radio" name="radio-type" value="icom-network"> Icom (Network / RS-BA1) <span style="font-size:10px;color:var(--text-tertiary);">— experimental</span></label>
+        <label class="radio-label"><input type="radio" name="radio-type" value="icom-network"> Icom Network (UDP / RS-BA1) <span style="font-size:10px;color:var(--text-tertiary);">— CAT + RX/TX audio</span></label>
         <div id="icom-network-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">RS-BA1 protocol over UDP. Connect to (a) <code>wfserver</code> (wfview's headless server) running on a Linux/Mac/Pi adjacent to a USB-attached Icom — typical setup for IC-7300 / IC-7100 / FT-710 — or (b) directly to an IP-native Icom (IC-705, IC-9700, IC-7610, IC-7851, IC-R8600). Username/password come from whatever you set in wfserver's <code>--setup</code>, or in the radio's own <strong>Network User</strong> menu.</span>
           <label>Radio Model:
@@ -1634,7 +1635,17 @@
           <label>Password:
             <input type="password" id="set-icom-network-password" autocomplete="off">
           </label>
-          <span class="help-text" style="margin-top:6px;display:block;">Phase 1: CAT only (frequency, mode, CW text). No audio yet — bridge audio separately if needed (Mumble, virtual cable). For wfserver setup, see <code>WFSERVER.md</code> in the wfview repo.</span>
+          <label>Network TX gain:
+            <div style="display:flex;align-items:center;gap:10px;">
+              <input type="range" id="set-icom-network-tx-gain" min="0" max="150" value="72" style="flex:1;">
+              <span id="set-icom-network-tx-gain-val" style="min-width:44px;text-align:right;">72%</span>
+            </div>
+          </label>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="icom-network-test-btn">Test Connection</button>
+            <span id="icom-network-test-result" style="font-size:12px;"></span>
+          </div>
+          <span class="help-text" style="margin-top:6px;display:block;">CAT plus RS-BA1 receive/transmit audio. With Audio source set to Icom Network audio, POTACAT receives radio audio over UDP for JTCAT/SSTV decoding and can send JTCAT FT8/FT4 audio directly over the radio's RS-BA1 TX stream. Network TX gain scales the IP audio drive before it reaches the radio; use it with the JTCAT TX Pwr slider and the radio's LAN MOD gain to get clean output with little or no ALC.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">
