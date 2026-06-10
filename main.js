@@ -359,8 +359,10 @@ function _writeJsonAtomic(p, obj) {
 function loadSettings() {
   const global = _readJsonSafe(SETTINGS_PATH, null);
   if (!global) {
-    // Truly fresh install: return defaults, no profile yet.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, firstRun: true, watchlist: 'K3SBP' };
+    // Truly fresh install: return defaults, no profile yet. RBN + PSKReporter
+    // Propagation default ON so the "where am I heard" view has data out of the
+    // box (both activate once myCallsign is set). K3SBP 2026-06-10.
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP' };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
