@@ -17385,6 +17385,25 @@ app.whenReady().then(() => {
     }));
   });
 
+  // Redeem a pasted potacat://pair?… link DIRECTLY — no OS protocol handler.
+  // The paste box used to bounce the URL through shell.openExternal, which
+  // only works if Windows has potacat:// registered (the installer does, a
+  // dev `npm start` build does not), so pasting a link did nothing on dev /
+  // unregistered machines. Main can dial sockets, so just redeem it here.
+  // redeemPairLinkUrl still fires the 'pair-link-redeemed' event for the UI;
+  // we also return a result for immediate feedback. K3SBP 2026-06-10.
+  ipcMain.handle('pair-redeem-url', async (_e, url) => {
+    if (!url || !/^potacat:\/\/pair\?/i.test(String(url))) {
+      return { ok: false, error: 'Not a potacat://pair link' };
+    }
+    try {
+      await redeemPairLinkUrl(url);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+  });
+
   ipcMain.handle('connection-targets-rename', (_e, id, newName) => {
     if (!Array.isArray(settings.connectionTargets)) return { ok: false };
     const row = settings.connectionTargets.find(t => t.id === id);

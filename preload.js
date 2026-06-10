@@ -8,6 +8,7 @@ const { contextBridge, ipcRenderer, shell, webFrame } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
+  pairRedeemUrl: (url) => ipcRenderer.invoke('pair-redeem-url', url),
   copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
   onSpots: (cb) => ipcRenderer.on('spots', (_e, data) => cb(data)),
   onSpotsError: (cb) => ipcRenderer.on('spots-error', (_e, msg) => cb(msg)),

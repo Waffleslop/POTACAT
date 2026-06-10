@@ -3253,10 +3253,18 @@
     </h3>
 
     <p class="remote-radios-intro">
-      Switch this desktop between your local rig and a remote shack.
-      Pair a new shack with the <b>Pair another desktop</b> button on the
-      Summary card.
+      Switch this desktop between your local rig and a remote shack. On your
+      shack, use <b>Summary &rarr; Pair another desktop&hellip;</b> to generate a
+      pair link, then paste it below on this computer.
     </p>
+
+    <!-- Paste-a-link path: redeems directly in main (no potacat:// OS
+         protocol handler needed). K3SBP 2026-06-10. -->
+    <div class="remote-radios-paste-row" style="display:flex;gap:6px;margin-bottom:10px;">
+      <input type="text" id="remote-radios-paste-input" placeholder="potacat://pair?…  (paste the link from your shack)" autocomplete="off" spellcheck="false" style="flex:1;">
+      <button type="button" id="remote-radios-paste-btn" class="remote-radios-action">Pair</button>
+    </div>
+    <p id="remote-radios-paste-status" class="help-text hidden" style="margin:-4px 0 8px;"></p>
 
     <div class="remote-radios-local-row" id="remote-radios-local-row">
       <div>

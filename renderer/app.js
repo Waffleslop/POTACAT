@@ -5748,6 +5748,41 @@ async function _remoteRadiosRemove(id) {
   const localBtn = document.getElementById('remote-radios-local-btn');
   if (localBtn) localBtn.addEventListener('click', _remoteRadiosDisconnect);
 
+  // Paste-a-pair-link path. Redeems directly in main (window.api.pairRedeemUrl)
+  // — no dependency on the potacat:// OS protocol handler being registered.
+  const rrPasteBtn = document.getElementById('remote-radios-paste-btn');
+  const rrPasteInput = document.getElementById('remote-radios-paste-input');
+  const rrPasteStatus = document.getElementById('remote-radios-paste-status');
+  function _remoteRadiosPasteStatus(msg, isErr) {
+    if (!rrPasteStatus) return;
+    rrPasteStatus.textContent = msg || '';
+    rrPasteStatus.classList.toggle('hidden', !msg);
+    rrPasteStatus.style.color = isErr ? 'var(--accent-red)' : 'var(--text-secondary)';
+  }
+  async function _remoteRadiosPaste() {
+    const url = (rrPasteInput && rrPasteInput.value || '').trim();
+    if (!url) return;
+    if (!/^potacat:\/\/pair\?/i.test(url)) {
+      _remoteRadiosPasteStatus("That doesn't look like a pair link — it should start with potacat://pair?", true);
+      return;
+    }
+    _remoteRadiosPasteStatus('Redeeming pair link…', false);
+    try {
+      const r = window.api.pairRedeemUrl ? await window.api.pairRedeemUrl(url) : { ok: false, error: 'unsupported build' };
+      if (r && r.ok) {
+        _remoteRadiosPasteStatus('✓ Paired. Added to your shacks below.', false);
+        if (rrPasteInput) rrPasteInput.value = '';
+        _remoteRadiosRefreshList();
+      } else {
+        _remoteRadiosPasteStatus('Could not redeem: ' + ((r && r.error) || 'all paths failed'), true);
+      }
+    } catch (err) {
+      _remoteRadiosPasteStatus('Could not redeem: ' + (err.message || err), true);
+    }
+  }
+  if (rrPasteBtn) rrPasteBtn.addEventListener('click', _remoteRadiosPaste);
+  if (rrPasteInput) rrPasteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _remoteRadiosPaste(); } });
+
   // More-menu entry point.
   const openBtn = document.getElementById('view-remote-radios-btn');
   if (openBtn) openBtn.addEventListener('click', () => {
@@ -19289,22 +19324,24 @@ async function _welcomeRemotePasteLink() {
     return;
   }
   _welcomeRemoteStatus('Redeeming pair link…', null);
-  // The renderer can't dial the shack itself (no Node sockets). Hand
-  // off to main via the same protocol-URL path that handles email
-  // clicks — the URL flow goes through redeemPairLinkUrl, fires
-  // 'pair-link-redeemed' on success.
+  // Redeem DIRECTLY in main via IPC — the renderer can't dial sockets, but
+  // main can. Do NOT bounce through window.api.openExternal: that re-hands
+  // the URL to the OS protocol handler, which only works if potacat:// is
+  // registered with Windows (the installer registers it; a dev build does
+  // not), so the paste box silently did nothing on dev/unregistered machines.
+  // redeemPairLinkUrl still fires 'pair-link-redeemed' for the inline status;
+  // the returned result gives us an immediate error if the dial failed.
   try {
-    // Open via OS so the protocol handler runs. This works because
-    // main is registered for potacat:// and single-instance — the
-    // URL routes back into our running process.
-    if (window.api && window.api.openExternal) {
-      window.api.openExternal(url);
-    } else {
-      // Fallback: assign location (rare path; openExternal should always be there).
-      location.href = url;
+    if (window.api && window.api.pairRedeemUrl) {
+      const r = await window.api.pairRedeemUrl(url);
+      if (r && r.ok === false) {
+        _welcomeRemoteStatus('Could not redeem the link: ' + (r.error || 'all paths failed'), 'error');
+      }
+    } else if (window.api && window.api.openExternal) {
+      window.api.openExternal(url); // legacy fallback
     }
   } catch (err) {
-    _welcomeRemoteStatus('Could not open the link: ' + (err.message || err), 'error');
+    _welcomeRemoteStatus('Could not redeem the link: ' + (err.message || err), 'error');
   }
 }
 
