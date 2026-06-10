@@ -170,6 +170,7 @@ const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeLoggedAdif, encode
 const { PskrClient } = require('./lib/pskreporter');
 const { Ft8Engine } = require('./lib/ft8-engine');
 const { checkClockOffset, syncSystemClock } = require('./lib/ntp');
+const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const { RemoteServer } = require('./lib/remote-server');
 const { RemoteClient } = require('./lib/remote-client');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
@@ -3827,21 +3828,11 @@ function matchesAutoCqFilter(text, filterMode) {
   return false;
 }
 
+// Delegates to the shared parser (renderer/jtcat-parser.js) so the auto-CQ
+// responder, the popout, app.js, and the tests all agree on "CQ [MODIFIER]*
+// CALL [GRID]" — including grid-less directed/contest CQs and numeric serials.
 function parseCqMessage(text) {
-  const parts = (text || '').toUpperCase().split(/\s+/).filter(Boolean);
-  // CQ [MODIFIER]* CALLSIGN [GRID]. Modifiers (POTA, SOTA, DX, NA, EU, ...)
-  // are letter-only — they never match callsign shape. Match the first
-  // callsign-shaped token after CQ instead of the previous "if length>3
-  // and parts[1] looks like a modifier" heuristic, which broke for shorter
-  // messages like "CQ POTA W1AW" (no grid). The old code treated POTA as
-  // the callsign and replied with "POTA MYCALL MYGRID". (IU7RAL report.)
-  const isCallsign = (s) => /^[A-Z0-9]{1,3}[0-9][A-Z]{1,4}$/.test((s || '').split('/')[0]);
-  let callIdx = -1;
-  for (let i = 1; i < parts.length; i++) {
-    if (isCallsign(parts[i])) { callIdx = i; break; }
-  }
-  if (callIdx === -1) callIdx = 1; // nothing callsign-shaped — keep prior fallback
-  return { call: parts[callIdx] || '', grid: parts[callIdx + 1] || '' };
+  return JtcatParser.parseCq(text);
 }
 
 function broadcastAutoCqState() {
@@ -4229,6 +4220,9 @@ function startJtcat(mode) {
       }
     }
 
+    // Stamp the authoritative callsign so renderers classify against the
+    // current call, never a stale cached copy. K3SBP 2026-06-10.
+    data.myCall = (settings.myCallsign || '').toUpperCase();
     if (win && !win.isDestroyed()) {
       win.webContents.send('jtcat-decode', data);
     }
@@ -4554,6 +4548,7 @@ function broadcastJtcatClock(payload) {
 }
 
 async function runJtcatClockCheck() {
+  const prevLevel = jtcatLastClock && jtcatLastClock.level;
   try {
     const res = await checkClockOffset();
     const level = classifyClockOffset(res.offset);
@@ -4562,6 +4557,17 @@ async function runJtcatClockCheck() {
     // NTP unreachable (offline, firewall). Don't claim the clock is bad —
     // just report unknown so we don't nag a user whose clock is actually fine.
     jtcatLastClock = { offsetMs: null, server: null, level: 'unknown', ok: false, error: e.message, checkedAt: Date.now() };
+  }
+  // The clock just came back into spec (the user fixed it / w32tm resync took
+  // effect). The running engine carries stale slot-timing + latency-calibration
+  // state from the bad-clock period, so RX wouldn't recover until an app
+  // restart. Re-baseline it live instead — no restart needed. This covers all
+  // three entry points: the 5-min poll, the manual "Recheck", and the recheck
+  // fired right after "Sync now". K3SBP 2026-06-10.
+  if (jtcatLastClock.level === 'ok' && (prevLevel === 'bad' || prevLevel === 'warn') &&
+      ft8Engine && ft8Engine._running && typeof ft8Engine.reBaseline === 'function') {
+    ft8Engine.reBaseline();
+    jtcatLastClock.rebaselined = true;
   }
   broadcastJtcatClock(jtcatLastClock);
   return jtcatLastClock;
@@ -15956,6 +15962,21 @@ app.whenReady().then(() => {
     // replying with our grid to their CQ). Old `data.rr73` / `data.report`
     // are kept as fallbacks for any caller that hasn't been updated yet.
     // Chris N4RDX sequencing report 2026-04-29.
+    // Authoritative re-classification: derive the step + target call from the
+    // RAW decode text against OUR configured callsign. This is immune to a
+    // stale/empty/format-mismatched callsign cache in the popout or phone —
+    // the original "reply to my CQ → grid instead of report" bug. Only runs
+    // when the caller sent the raw text (newer popout); older callers fall
+    // through to their precomputed data.nextStep. K3SBP 2026-06-10.
+    if (data.text && myCall) {
+      const action = JtcatParser.inferReplyStep({ text: data.text }, myCall);
+      if (action) {
+        data.nextStep = action.step;
+        data.call = action.call;
+        if (action.theirGrid != null) data.theirGrid = action.theirGrid;
+        if (action.theirReport != null) data.theirReport = action.theirReport;
+      }
+    }
     let nextStep = data.nextStep;
     if (!nextStep) {
       if (data.rr73) nextStep = 'send-73';

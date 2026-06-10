@@ -5925,8 +5925,11 @@
         // Auto-reply runs regardless of filter
         if (isHunt && isCq && !ft8QsoState) {
           const parts = upper.split(/\s+/);
-          let callIdx = 1;
-          if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) callIdx = 2;
+          let callIdx = -1;
+          for (let i = 1; i < parts.length; i++) {
+            if (_rmtLooksLikeCall(parts[i])) { callIdx = i; break; }
+          }
+          if (callIdx === -1) callIdx = 1;
           const call = parts[callIdx] || '';
           const grid = parts[callIdx + 1] || '';
           if (call === ft8HuntCall) {
@@ -6006,19 +6009,47 @@
   // signal report vs plain signal report) and treating their step-2 grid
   // reply as a fresh CQ-reply caused double-click sequencing to roll back
   // the QSO. Chris N4RDX 2026-04-29.
+  // Mirror of renderer/jtcat-parser.js (the phone can't load the shared module
+  // — the ECHOCAT server serves a fixed asset whitelist). Keep in sync.
+  function _rmtLooksLikeCall(tok) {
+    if (!tok || tok.length < 3 || tok.length > 11) return false;
+    if (/^(CQ|DE|RR73|RRR|73|TU|TNX|QRZ)$/i.test(tok)) return false;
+    if (/^R?[+-]\d{2}$/.test(tok)) return false;
+    if (/^[A-R]{2}\d{2}([A-X]{2})?$/i.test(tok)) return false;
+    if (!/[A-Z]/i.test(tok) || !/\d/.test(tok)) return false;
+    return /^[A-Z0-9/]+$/i.test(tok);
+  }
+  function _rmtBaseCall(call) {
+    if (!call) return '';
+    var c = String(call).toUpperCase().replace(/[<>]/g, '');
+    if (c.indexOf('/') >= 0) {
+      var segs = c.split('/').filter(Boolean), best = '';
+      for (var i = 0; i < segs.length; i++) {
+        var s = segs[i];
+        if (/[0-9]/.test(s) && /[A-Z]/.test(s) && s.length > best.length) best = s;
+      }
+      c = best || segs[0] || '';
+    }
+    return c;
+  }
   function ft8InferReplyStep(decode, myCall) {
     const text = (decode.text || '').toUpperCase();
     const parts = text.split(/\s+/);
-    const me = (myCall || '').toUpperCase();
+    const me = _rmtBaseCall(myCall);
     if (text.indexOf('CQ ') === 0) {
-      let callIdx = 1;
-      if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) callIdx = 2;
+      // Scan for the first callsign-shaped token — handles directed/contest/
+      // event CQs ("CQ POTA W1AW") and numeric serials the old heuristic broke.
+      let callIdx = -1;
+      for (let i = 1; i < parts.length; i++) {
+        if (_rmtLooksLikeCall(parts[i])) { callIdx = i; break; }
+      }
+      if (callIdx === -1) callIdx = 1;
       const call = parts[callIdx] || '';
       const theirGrid = parts[callIdx + 1] || '';
       if (!call) return null;
       return { step: 'reply-cq', call, theirGrid };
     }
-    if (parts.length >= 2 && me && parts[0] === me && parts[1]) {
+    if (parts.length >= 2 && me && _rmtBaseCall(parts[0]) === me && parts[1]) {
       const fromCall = parts[1];
       const payload = parts[2] || '';
       if (payload === 'RR73' || payload === 'RRR' || payload === '73') {
@@ -6028,7 +6059,7 @@
       if (rRpt) return { step: 'send-rr73', call: fromCall, theirReport: rRpt[1] };
       const plainRpt = payload.match(/^([+-]\d{2})$/);
       if (plainRpt) return { step: 'send-r-report', call: fromCall, theirReport: plainRpt[1] };
-      if (/^[A-R]{2}[0-9]{2}$/i.test(payload)) {
+      if (/^[A-R]{2}[0-9]{2}([A-X]{2})?$/i.test(payload)) {
         return { step: 'send-report', call: fromCall, theirGrid: payload };
       }
       return { step: 'reply-cq', call: fromCall };

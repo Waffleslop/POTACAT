@@ -22690,12 +22690,7 @@ function renderJtcatDecodes() {
 // (FN20), reports (-12, +05, R-05), and acks (RR73/RRR/73/CQ/DE) when
 // picking the target call from a tail-end-style decode.
 function _looksLikeCallsign(tok) {
-  if (!tok || tok.length < 3 || tok.length > 11) return false;
-  if (/^(CQ|DE|RR73|RRR|73|TU|TNX|QRZ)$/i.test(tok)) return false;
-  if (/^R?[+-]\d{2}$/.test(tok)) return false;          // signal report
-  if (/^[A-R]{2}\d{2}([A-X]{2})?$/i.test(tok)) return false; // grid 4 or 6
-  if (!/[A-Z]/i.test(tok) || !/\d/.test(tok)) return false;
-  return /^[A-Z0-9/]+$/i.test(tok);
+  return JtcatParser.looksLikeCallsign(tok); // shared single source — renderer/jtcat-parser.js
 }
 
 function onJtcatDecodeClick(e) {
@@ -22711,22 +22706,26 @@ function onJtcatDecodeClick(e) {
   jtcatRxFreqLabel.textContent = df + ' Hz';
   if (jtcatRunning) window.api.jtcatSetRxFreq(df);
 
-  // If it's a CQ, start a QSO (reply to their CQ)
-  var cqMatch = upper.match(/^CQ\s+(?:(\w+)\s+)?([A-Z0-9/]+)\s+([A-R]{2}\d{2})/);
-  if (cqMatch) {
-    var theirCall = cqMatch[2];
-    var theirGrid = cqMatch[3];
-    jtcatStartQso(theirCall, theirGrid, df);
+  // If it's a CQ, start a QSO (reply to their CQ). Shared parser handles
+  // grid-less directed/contest/event CQs ("CQ POTA W1AW", "CQ NA K1ABC") and
+  // numeric serials — the old grid-required regex silently ignored them.
+  if (JtcatParser.isCqText(upper)) {
+    var pc = JtcatParser.parseCq(upper);
+    if (pc.call) jtcatStartQso(pc.call, pc.grid, df);
   }
   // If it's directed at me (MYCALL THEIRCALL PAYLOAD), pick up the QSO
   else if (myCall) {
     var parts = upper.split(/\s+/);
+    // Compare on base calls so a portable/hashed rendering of my own call
+    // still counts as "addressed to me".
+    var meN = JtcatParser.normalizeCall(myCall);
+    var p0 = JtcatParser.normalizeCall(parts[0] || '');
     // Tail-end / call-anyone: <TO> <FROM> <payload> where neither is us.
     // WSJT-X behavior: clicking such a decode targets the SENDER (FROM —
     // the right-hand callsign). Without this branch the desktop popout
     // only responded to CQ-prefixed decodes or messages addressed to us,
     // which is what NA7C/Ted reported as a deal-breaker. K3SBP 2026-05-29.
-    if (parts.length >= 2 && parts[0] !== myCall && parts[0] !== 'CQ' && _looksLikeCallsign(parts[1]) && parts[1] !== myCall) {
+    if (parts.length >= 2 && p0 !== meN && parts[0] !== 'CQ' && _looksLikeCallsign(parts[1]) && JtcatParser.normalizeCall(parts[1]) !== meN) {
       jtcatStartQso(parts[1], '', df);
       jtcatTxFreq = df;
       jtcatTxFreqInput.value = df;
@@ -22735,10 +22734,10 @@ function onJtcatDecodeClick(e) {
       renderJtcatDecodes();
       return;
     }
-    if (parts.length >= 2 && parts[0] === myCall) {
+    if (parts.length >= 2 && meN && p0 === meN) {
       var fromCall = parts[1];
       var payload = parts[2] || '';
-      var grid = /^[A-R]{2}[0-9]{2}$/.test(payload) ? payload : '';
+      var grid = /^[A-R]{2}[0-9]{2}([A-X]{2})?$/i.test(payload) ? payload : '';
       var rptMatch = payload.match(/^R?([+-]\d{2})$/);
       var hasRR73 = payload === 'RR73' || payload === 'RRR' || payload === '73';
       var snr = parseInt(row.dataset.db, 10) || 0;
@@ -23391,11 +23390,10 @@ function jtcatMapPlotDecode(d) {
   var parts = text.split(/\s+/);
 
   if (text.startsWith('CQ ')) {
-    // CQ [DX] CALL GRID — register the CQ caller
-    var idx = 1;
-    if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) idx = 2;
-    var call = parts[idx] || '';
-    var grid = parts[idx + 1] || '';
+    // CQ [MODIFIER]* CALL [GRID] — register the CQ caller (shared parser).
+    var pc = JtcatParser.parseCq(text);
+    var call = pc.call;
+    var grid = pc.grid;
     jtcatMapRegisterStation(call, grid);
     // Mark CQ callers green
     var stn = jtcatMapStations[call];
@@ -23665,6 +23663,7 @@ var jtcatClockMsg     = document.getElementById('jtcat-clock-msg');
 var jtcatClockSyncBtn = document.getElementById('jtcat-clock-sync');
 var jtcatClockSetBtn  = document.getElementById('jtcat-clock-settings');
 var jtcatClockReBtn   = document.getElementById('jtcat-clock-recheck');
+var jtcatClockBannerHideTimer = null;
 
 function fmtJtcatOffset(ms) {
   return (ms > 0 ? '+' : '') + (ms / 1000).toFixed(1) + 's';
@@ -23691,6 +23690,16 @@ function applyJtcatClock(d) {
   if (d.level === 'ok') {
     jtcatSyncStatus.textContent = 'Sync: OK';
     jtcatSyncStatus.classList.add('jtcat-synced');
+    // The clock was just corrected and the engine re-baselined live \u2014 confirm
+    // it so the user knows decoding resumed without a restart.
+    if (d.rebaselined && jtcatClockBanner && jtcatClockMsg) {
+      jtcatClockMsg.textContent = '\u2713 Clock corrected \u2014 FT8 timing re-baselined, decoding resumed.';
+      jtcatClockBanner.style.background = '#1a5a2a';
+      jtcatClockBanner.style.borderBottom = '2px solid #4ecca3';
+      jtcatClockBanner.classList.remove('hidden');
+      clearTimeout(jtcatClockBannerHideTimer);
+      jtcatClockBannerHideTimer = setTimeout(function () { jtcatClockBanner.classList.add('hidden'); }, 6000);
+    }
     return;
   }
 

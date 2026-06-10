@@ -414,46 +414,11 @@ section('Signal-report formatting');
 // the inline function in renderer/jtcat-popout.js. If you change either,
 // update the other. (TODO: extract to a shared CJS module that the
 // renderer also consumes via preload-bundled require.)
-function _jpLooksLikeCallsign(tok) {
-  if (!tok || tok.length < 3 || tok.length > 11) return false;
-  if (/^(CQ|DE|RR73|RRR|73|TU|TNX|QRZ)$/i.test(tok)) return false;
-  if (/^R?[+-]\d{2}$/.test(tok)) return false;
-  if (/^[A-R]{2}\d{2}([A-X]{2})?$/i.test(tok)) return false;
-  if (!/[A-Z]/i.test(tok) || !/\d/.test(tok)) return false;
-  return /^[A-Z0-9/]+$/i.test(tok);
-}
-function inferReplyStep(decode, myCall) {
-  var text = (decode.text || '').toUpperCase();
-  var parts = text.split(/\s+/);
-  var me = (myCall || '').toUpperCase();
-  if (text.indexOf('CQ ') === 0) {
-    var callIdx = 1;
-    if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) callIdx = 2;
-    var call = parts[callIdx] || '';
-    var theirGrid = parts[callIdx + 1] || '';
-    if (!call) return null;
-    return { step: 'reply-cq', call: call, theirGrid: theirGrid };
-  }
-  if (parts.length >= 2 && me && parts[0] === me && parts[1]) {
-    var fromCall = parts[1];
-    var payload = parts[2] || '';
-    if (payload === 'RR73' || payload === 'RRR' || payload === '73') {
-      return { step: 'send-73', call: fromCall };
-    }
-    var rRpt = payload.match(/^R([+-]\d{2})$/);
-    if (rRpt) return { step: 'send-rr73', call: fromCall, theirReport: rRpt[1] };
-    var plainRpt = payload.match(/^([+-]\d{2})$/);
-    if (plainRpt) return { step: 'send-r-report', call: fromCall, theirReport: plainRpt[1] };
-    if (/^[A-R]{2}[0-9]{2}$/i.test(payload)) {
-      return { step: 'send-report', call: fromCall, theirGrid: payload };
-    }
-    return { step: 'reply-cq', call: fromCall };
-  }
-  if (parts.length >= 2 && parts[0] !== 'CQ' && parts[0] !== me && parts[1] && parts[1] !== me && _jpLooksLikeCallsign(parts[1])) {
-    return { step: 'reply-cq', call: parts[1] };
-  }
-  return null;
-}
+// The classifier is now the SHARED module (renderer/jtcat-parser.js) — the
+// single source of truth the renderers and main.js also use. This test
+// therefore exercises the real production code instead of a hand-copy that
+// could (and did) drift. K3SBP 2026-06-10.
+const { inferReplyStep, looksLikeCallsign: _jpLooksLikeCallsign } = require('../renderer/jtcat-parser');
 
 section('Decode classifier (popout inferReplyStep)');
 {
