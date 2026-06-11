@@ -12912,6 +12912,32 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   _lastTuneFreq = freqHz;
   _lastTuneTime = now;
 
+  // QSY to a non-data mode while the FT8/FT4 engine is running stops
+  // the engine. Tuning a CW/SSB spot from the phone used to leave the
+  // engine decoding garbage on the new frequency and the mobile FT8
+  // tab stuck on "Stop" (Casey 2026-06-11). JTCAT's own QSYs
+  // (jtcat-set-band) tune with 'DIGU', which is in the data set, so
+  // they never trip this. Multi-remote slices don't set ft8Engine and
+  // are unaffected by a main-VFO QSY.
+  if (ft8Engine && mode) {
+    const mm = String(mode).toUpperCase();
+    const isDataish =
+      mm === 'FT8' || mm === 'FT4' || mm === 'FT2' ||
+      mm === 'DIGU' || mm === 'DIGL' ||
+      mm === 'PKTUSB' || mm === 'PKTLSB' ||
+      mm === 'DATA-USB' || mm === 'DATA-LSB' ||
+      mm === 'USB-D' || mm === 'LSB-D' ||
+      mm === 'RTTY' || mm === 'JS8' || mm.startsWith('PSK');
+    if (!isDataish) {
+      sendCatLog(`[JTCAT] QSY to ${mm} — stopping FT8/FT4 engine`);
+      stopJtcat();
+      if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+        remoteServer.broadcastJtcatStatus({ running: false });
+      }
+    }
+  }
+
   // Auto-tune KiwiSDR WebSDR to follow
   if (kiwiActive && kiwiClient && kiwiClient.connected && freqHz > 100000) {
     const fKhz = freqHz / 1000;
