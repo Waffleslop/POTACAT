@@ -77,6 +77,24 @@ section('RemoteClient — paired-target auth unchanged');
   eq(sent[0].passCode, undefined, 'no passCode on a paired target');
 }
 
+section('RemoteClient — sendTune wire contract (Hz in, freqKhz string out)');
+{
+  // Regression pin for the 1000x QSY bug: tuneRadio passes kHz around
+  // internally, but sendTune takes Hz and emits the wire's freqKhz itself.
+  // The call site must convert. (K3SBP 2026-06-11: laptop sent "7.026 kHz",
+  // shack PassEnforcement blocked everything as out-of-band.)
+  const sent = [];
+  const c = new RemoteClient({ id: 'ct_t', name: 'Shack', deviceToken: 'x', cloudHost: 'x' }, {});
+  c._ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)), close: () => {} };
+  c.sendTune({ frequency: 7026000, mode: 'CW' });          // 7026 kHz in Hz
+  eq(sent.length, 1, 'tune frame sent');
+  eq(sent[0].type, 'tune', 'frame type');
+  eq(sent[0].freqKhz, '7026.000', 'freqKhz is a kHz STRING — 7026.000, not 7.026');
+  eq(sent[0].mode, 'CW', 'mode rides along');
+  c.sendTune({ frequency: 14074000 });
+  eq(sent[1].freqKhz, '14074.000', '14074 kHz survives the round trip');
+}
+
 section('RemoteClient — pass-ended stops the session');
 {
   const events = [];

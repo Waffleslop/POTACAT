@@ -16696,7 +16696,12 @@ app.whenReady().then(() => {
     // applied here since KiwiSDR routing belongs to the shack, not
     // the laptop.
     if (isRemoteActive()) {
-      remoteClient.sendTune({ frequency, mode, bearing });
+      // tuneRadio's `frequency` param is kHz; sendTune expects Hz (it
+      // formats the wire's freqKhz itself — see remote-client.js). Passing
+      // kHz straight through shrank every QSY 1000× on the wire: the shack
+      // saw "7.026 kHz", and PassEnforcement rightly blocked it as
+      // out-of-band. K3SBP 2026-06-11.
+      remoteClient.sendTune({ frequency: Math.round(parseFloat(frequency) * 1000), mode, bearing });
       return;
     }
     if (slicePort && smartSdr && smartSdr.connected) {
