@@ -1,16 +1,46 @@
 // --- Startup timing instrumentation ---
-// `npm start --startup-timing` (or POTACAT_STARTUP_TIMING=1) prints a
-// `[startup] +Nms : <stage>` line at every checkpoint below. Helps
-// diagnose the "sometimes opens fast, sometimes 3-5s lag" symptom:
-// the slow run will have one stage that visibly jumps (typically AV
-// scan, native module load, or a network call at boot).
+// Every checkpoint below is ALWAYS appended to <userData>/startup.log
+// (truncated each launch) so a user whose app dies before the window
+// opens can just send us that file — no dev tools, no flags. Diagnosing
+// the macOS "launches and quits silently, no window, no dialog" reports
+// (v1.8.7, macOS 26) is exactly this scenario. `npm start --startup-timing`
+// (or POTACAT_STARTUP_TIMING=1) additionally prints the same lines to the
+// console for the original "variable boot lag" use case.
 const _startupTs = Date.now();
 const _startupTiming = process.argv.includes('--startup-timing') ||
   process.argv.includes('--startup-debug') ||
   process.env.POTACAT_STARTUP_TIMING === '1';
 let _lastStageTs = _startupTs;
+let _startupLogPath = null;   // resolved lazily — userData needs `app`
+let _startupLogFailed = false;
+function _appendStartupLog(line) {
+  if (_startupLogFailed) return;
+  try {
+    const fsx = require('fs');
+    if (!_startupLogPath) {
+      let dir;
+      try { dir = require('electron').app.getPath('userData'); }
+      catch { dir = require('os').tmpdir(); }
+      try { fsx.mkdirSync(dir, { recursive: true }); } catch {}
+      _startupLogPath = require('path').join(dir, 'startup.log');
+      // Fresh file per launch, with an identity header for bug reports.
+      const os = require('os');
+      let ver = '?';
+      try { ver = require('./package.json').version; } catch {}
+      fsx.writeFileSync(_startupLogPath,
+        `POTACAT v${ver} startup log -- ${new Date().toISOString()}\n` +
+        `platform=${process.platform} arch=${process.arch} os=${os.release()} ` +
+        `electron=${process.versions.electron} node=${process.versions.node} ` +
+        `packaged=${(() => { try { return require('electron').app.isPackaged; } catch { return '?'; } })()}\n` +
+        `argv=${JSON.stringify(process.argv.slice(1))}\n`);
+    }
+    // appendFileSync so the line survives an immediate crash/exit.
+    fsx.appendFileSync(_startupLogPath, line + '\n');
+  } catch {
+    _startupLogFailed = true; // disk/permissions trouble — never loop on it
+  }
+}
 function logStartupStage(name) {
-  if (!_startupTiming) return;
   const now = Date.now();
   const total = now - _startupTs;
   const delta = now - _lastStageTs;
@@ -18,7 +48,9 @@ function logStartupStage(name) {
   // Pad to align so the visual scan picks out the slow stage immediately.
   // ASCII-only: Windows cmd (CP437/850) mangles Greek delta and em-dash
   // into mojibake. Format reads as "total +Xms, delta +Yms".
-  console.error(`[startup] +${String(total).padStart(5, ' ')}ms (+${String(delta).padStart(5, ' ')}ms): ${name}`);
+  const line = `[startup] +${String(total).padStart(5, ' ')}ms (+${String(delta).padStart(5, ' ')}ms): ${name}`;
+  _appendStartupLog(line);
+  if (_startupTiming) console.error(line);
 }
 
 const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard } = require('electron');
@@ -31,6 +63,21 @@ const fs = require('fs');
 // K3SBP 2026-05-25.
 app.setName('POTACAT');
 logStartupStage('electron + path + fs required');
+
+// Early fatal-error capture — anything that kills the app before the window
+// opens lands in startup.log with a stack, instead of vanishing (from Finder
+// there's no console). Log-only while the late shutdown handler (registered
+// near the bottom of this file) is active so its dialog/benign-swallow
+// semantics stay intact; before that point, log + exit so a module-load
+// failure can't leave a windowless zombie process.
+let _lateExceptionHandlerActive = false;
+process.on('uncaughtException', (err) => {
+  _appendStartupLog('[FATAL] uncaughtException: ' + (err && err.stack || err));
+  if (!_lateExceptionHandlerActive) process.exit(70);
+});
+process.on('unhandledRejection', (reason) => {
+  _appendStartupLog('[FATAL] unhandledRejection: ' + (reason && reason.stack || reason));
+});
 
 // --- Headless mode: POTACAT --headless ---
 // Runs the full app with a hidden window — no GUI shown.
@@ -13558,6 +13605,10 @@ function _doPairRedeem(wssUrl, pinFingerprint, token) {
 // Single instance lock — second launch passes URL to running instance
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
+  // Silent-quit path — breadcrumb it so startup.log explains the "launches
+  // and immediately exits with no window" symptom when another instance
+  // (possibly a windowless/headless one) holds the lock.
+  _appendStartupLog('[quit] single-instance lock not acquired -- another POTACAT instance is running; quitting');
   app.quit();
 } else {
   app.on('second-instance', (_e, argv) => {
@@ -20609,6 +20660,11 @@ app.whenReady().then(() => {
   ipcMain.on('cw-cancel', () => {
     cancelAllCwSends();
   });
+}).catch((err) => {
+  // A rejection in the whenReady chain previously vanished (no dialog, no
+  // window — the renderer never opens). Capture it where users can find it.
+  _appendStartupLog('[FATAL] whenReady chain rejected: ' + (err && err.stack || err));
+  console.error('[startup] FATAL in whenReady chain:', err);
 });
 
 // --- Parks DB loader ---
@@ -20708,6 +20764,7 @@ process.on('SIGTERM', () => { gracefulCleanup(); process.exit(0); });
 // Letting these propagate as uncaughtException pops Electron's
 // "uncaught exception" dialog AFTER the user already clicked quit.
 // During / after cleanup, swallow them with a log line instead.
+_lateExceptionHandlerActive = true; // early startup.log handler goes log-only from here
 process.on('uncaughtException', (err) => {
   const msg = err && err.message ? err.message : String(err);
   const benignShutdownErr = /WriteFileEx.*invalid handle|writing to COM port.*invalid handle|Port is not open|Port is closed/i.test(msg);
@@ -20722,10 +20779,17 @@ process.on('uncaughtException', (err) => {
 
 app.on('window-all-closed', () => {
   if (HEADLESS) return; // keep running in headless mode
+  _appendStartupLog('[quit] window-all-closed -> app.quit()');
   // Fire-and-forget telemetry — don't await; delaying app.quit() causes SIGABRT on macOS
   const sessionSeconds = Math.round((Date.now() - sessionStartTime) / 1000);
   sendTelemetry(sessionSeconds);
 
   gracefulCleanup();
   app.quit();
+});
+
+// Final breadcrumb — if startup.log ends with this line the exit was an
+// orderly Electron quit; if it ends mid-stage, the process died there.
+app.on('quit', (_e, exitCode) => {
+  _appendStartupLog(`[quit] app quit event (exitCode=${exitCode})`);
 });
