@@ -205,9 +205,10 @@ jobs:
           # 25s kill (rc 124) = Chromium got past sandbox init.
           rm -rf ~/.config/POTACAT
           rc=0; timeout 25s xvfb-run -a "$BIN" --headless || rc=$?
-          # timeout kills xvfb-run but the Electron child survives and
-          # would hold port 7300 into the next scenario (EADDRINUSE).
-          pkill -f '/opt/POTACAT' || true; sleep 2
+          # timeout kills xvfb-run but the Electron child survives (and
+          # shrugs off SIGTERM headless) — SIGKILL it or the next
+          # scenario hits EADDRINUSE on port 7300.
+          pkill -9 -f 'POTACAT' || true; pkill -9 -f 'potacat' || true; sleep 1
           echo "exit code: $rc"
           echo "--- startup.log ---"; cat ~/.config/POTACAT/startup.log || echo "(no startup.log — JS never ran)"
           [ "$rc" = "124" ]
@@ -219,9 +220,10 @@ jobs:
           set -ex
           sudo sysctl -w kernel.unprivileged_userns_clone=0
           BIN=$(find /opt -maxdepth 2 -type f \( -name 'POTACAT' -o -name 'potacat' \) | head -1)
+          pkill -9 -f 'POTACAT' || true; pkill -9 -f 'potacat' || true; sleep 1
           rm -rf ~/.config/POTACAT
           rc=0; timeout 25s xvfb-run -a "$BIN" --headless || rc=$?
-          pkill -f '/opt/POTACAT' || true; sleep 2
+          pkill -9 -f 'POTACAT' || true; pkill -9 -f 'potacat' || true; sleep 1
           echo "exit code: $rc"
           echo "--- startup.log ---"; cat ~/.config/POTACAT/startup.log || echo "(no startup.log — JS never ran)"
           [ "$rc" = "124" ]
@@ -232,9 +234,10 @@ jobs:
         run: |
           set -ex
           chmod +x dist/POTACAT-*.AppImage
+          pkill -9 -f 'POTACAT' || true; pkill -9 -f 'potacat' || true; sleep 1
           rm -rf ~/.config/POTACAT
           rc=0; timeout 25s xvfb-run -a dist/POTACAT-*.AppImage --headless || rc=$?
-          pkill -f 'potacat.bin|POTACAT' || true; sleep 2
+          pkill -9 -f 'POTACAT' || true; pkill -9 -f 'potacat' || true; sleep 1
           echo "exit code: $rc"
           echo "--- startup.log ---"; cat ~/.config/POTACAT/startup.log || echo "(no startup.log — JS never ran)"
           [ "$rc" = "124" ]
