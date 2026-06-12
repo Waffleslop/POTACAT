@@ -23282,13 +23282,7 @@ function renderJtcatQsoTracker() {
   var phases = q.mode === 'cq' ? QSO_PHASES_CQ : QSO_PHASES_REPLY;
 
   // Header
-  if (q.phase === 'waiting') {
-    // Station we called started a QSO with someone else \u2014 POTACAT is
-    // holding our reply until they're free (their next CQ or sign-off).
-    jtcatQsoLabel.textContent = '\u23f8 ' + q.call + ' is working '
-      + (q.waitingPartner ? q.waitingPartner : 'another station')
-      + ' \u2014 waiting to reply';
-  } else if (q.mode === 'cq') {
+  if (q.mode === 'cq') {
     jtcatQsoLabel.textContent = q.call ? 'CQ \u2192 ' + q.call : 'Calling CQ...';
   } else {
     jtcatQsoLabel.textContent = 'Reply \u2192 ' + q.call;
@@ -23307,8 +23301,6 @@ function renderJtcatQsoTracker() {
   if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;
   if (q.mode === 'reply' && q.phase === '73') currentIdx = 4;
   if (q.mode === 'reply' && q.phase === 'done') currentIdx = 5;
-  // 'waiting' holds at the reply step \u2014 stuck before sending our reply.
-  if (q.phase === 'waiting') currentIdx = 0;
 
   var html = '';
   for (var i = 0; i < phases.length; i++) {

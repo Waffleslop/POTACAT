@@ -366,14 +366,7 @@ function _applyPopoutTheme(payload) {
     var phases = q.mode === 'cq' ? QSO_PHASES_CQ : QSO_PHASES_REPLY;
 
     // Header
-    if (q.phase === 'waiting') {
-      // The station we called started a QSO with someone else \u2014 POTACAT is
-      // holding our reply until they're free again (their next CQ or their
-      // sign-off to the other station). K3SBP 2026-05-14.
-      qsoLabel.textContent = '\u23f8 ' + q.call + ' is working '
-        + (q.waitingPartner ? q.waitingPartner : 'another station')
-        + ' \u2014 waiting to reply';
-    } else if (q.mode === 'cq') {
+    if (q.mode === 'cq') {
       qsoLabel.textContent = q.call ? 'CQ \u2192 ' + q.call : 'Calling CQ...';
     } else {
       qsoLabel.textContent = 'Reply \u2192 ' + q.call;
@@ -390,8 +383,6 @@ function _applyPopoutTheme(payload) {
     if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;
     if (q.mode === 'reply' && q.phase === '73') currentIdx = 4;
     if (q.mode === 'reply' && q.phase === 'done') currentIdx = 5;
-    // 'waiting' holds at the reply step \u2014 we're stuck before sending our reply.
-    if (q.phase === 'waiting') currentIdx = 0;
 
     var html = '';
     for (var i = 0; i < phases.length; i++) {

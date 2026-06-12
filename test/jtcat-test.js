@@ -207,8 +207,14 @@ section('REPLY mode — no-advance paths');
   }
 }
 
-section('REPLY mode — "they picked someone else" → waiting');
+section('REPLY mode — "they picked someone else" → keep calling (WSJT-X parity)');
 {
+  // WSJT-X parity (mainwindow.cpp auto_sequence): a busy station is NOT
+  // a reason to stop — keep calling them (tail-end). The one exception
+  // is WSJT-X's "auto stop to avoid accidental QRM": still in the
+  // calling phase AND their reply to the other op is within
+  // QRM_GUARD_HZ of OUR TX offset → halt. The v1.5.22 'waiting' hold
+  // phase was removed 2026-06-12 (Casey: WSJT-X behavior wanted).
   const baseQ = () => ({
     mode: 'reply',
     phase: 'reply',
@@ -222,49 +228,76 @@ section('REPLY mode — "they picked someone else" → waiting');
     txRetries: 0,
   });
 
-  // W1ABC replied to N4XYZ instead of us
+  // W1ABC replied to N4XYZ on a different frequency → keep calling
   {
     const eng = makeEngine();
-    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05')], eng);
-    assertEq(r.q.phase, 'waiting', 'they picked someone else → waiting');
-    assertEq(eng._txEnabled, false, 'TX disabled while waiting');
-    assertEq(r.lastTx, '', 'engine TX message cleared');
+    eng._txEnabled = true;
+    eng._txFreq = 1500;
+    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 800 })], eng);
+    assertEq(r.q.phase, 'reply', 'busy elsewhere on the band → still reply (keep calling)');
+    assertEq(eng._txEnabled, true, 'TX stays enabled');
+    assertEq(r.lastTx, null, 'TX message untouched (keeps repeating the reply)');
+    assert(!r.q._heardThisCycle, 'busy decode does NOT reset the retry counter (bounded tail-ending)');
   }
 
-  // From waiting: they CQ again → re-arm reply
+  // Busy decode does not reset retries → ceiling aborts eventually
   {
-    const q = baseQ();
-    q.phase = 'waiting';
-    q.waitCycles = 3;
-    const eng = makeEngine();
-    eng._txEnabled = false;
-    const r = drive(q, [decode('CQ W1ABC FN42')], eng);
-    assertEq(r.q.phase, 'reply', 'waiting → reply when they CQ again');
-    assertEq(r.q.waitCycles, 0, 'wait counter reset');
-    assertEq(eng._txEnabled, true, 'TX re-enabled');
-    assertEq(r.lastTx, 'W1ABC K3SBP FN20', 'TX msg restored from q.txMsg');
-    assertEq(eng._tryImmediateCalled, 1, 'tryImmediateTx called for next-boundary TX');
+    const out = sm.decideRetryOutcome({ phase: 'reply', txRetries: 11, heard: false, maxCq: 99, maxQso: 12, runMode: false });
+    assertEq(out.action, 'abort', 'unheard busy cycles hit the per-QSO ceiling → abort');
   }
 
-  // From waiting: they sign off with RR73 to other station → re-arm
+  // QRM guard: their reply to the other op lands ON our TX offset → halt
   {
-    const q = baseQ();
-    q.phase = 'waiting';
-    q.waitCycles = 5;
     const eng = makeEngine();
-    const r = drive(q, [decode('N4XYZ W1ABC RR73')], eng);
-    assertEq(r.q.phase, 'reply', 'waiting → reply when they sign off');
+    eng._txEnabled = true;
+    eng._txFreq = 1500;
+    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 1520 })], eng);
+    assertEq(r.q.phase, 'done', 'busy within QRM_GUARD_HZ of our TX offset → halted');
+    assert(typeof r.q.error === 'string' && r.q.error.indexOf('W1ABC') >= 0, 'error names the station');
+    assertEq(eng._txEnabled, false, 'TX disabled by the QRM guard');
   }
 
-  // Wait timeout
+  // Exactly at the guard edge counts as QRM (<=)
+  {
+    const eng = makeEngine();
+    eng._txEnabled = true;
+    eng._txFreq = 1500;
+    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 1500 + sm.QRM_GUARD_HZ })], eng);
+    assertEq(r.q.phase, 'done', 'busy at exactly QRM_GUARD_HZ → halted');
+  }
+
+  // Mid-QSO (past the calling phase) the QRM guard does NOT apply —
+  // WSJT-X only auto-stops during REPLYING. Keep repeating our message.
   {
     const q = baseQ();
-    q.phase = 'waiting';
-    q.waitCycles = sm.MAX_WAIT_CYCLES - 1; // next increment hits the cap
+    q.phase = 'r+report';
+    q.txMsg = 'W1ABC K3SBP R-07';
     const eng = makeEngine();
-    const r = drive(q, [], eng);
-    assertEq(r.q.phase, 'done', 'waiting → done at MAX_WAIT_CYCLES');
-    assert(typeof r.q.error === 'string' && r.q.error.indexOf('W1ABC') >= 0, 'error message references the station');
+    eng._txEnabled = true;
+    eng._txFreq = 1500;
+    const r = drive(q, [decode('N4XYZ W1ABC RR73', { df: 1500 })], eng);
+    assertEq(r.q.phase, 'r+report', 'mid-QSO busy decode on our freq → no QRM halt, keep repeating');
+    assertEq(eng._txEnabled, true, 'TX stays enabled mid-QSO');
+  }
+
+  // Same-cycle precedence: a direct reply to us wins over a busy decode
+  {
+    const eng = makeEngine();
+    eng._txEnabled = true;
+    eng._txFreq = 1500;
+    const r = drive(baseQ(), [
+      decode('N4XYZ W1ABC RR73', { df: 1500 }),  // stale busy decode
+      decode('K3SBP W1ABC -05', { df: 800 }),    // …but they also answered US
+    ], eng);
+    assertEq(r.q.phase, 'r+report', 'direct reply to us beats a same-cycle busy decode');
+  }
+
+  // No engine TX freq available → guard safely skipped, keep calling
+  {
+    const eng = makeEngine(); // no _txFreq
+    eng._txEnabled = true;
+    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 1500 })], eng);
+    assertEq(r.q.phase, 'reply', 'unknown TX offset → no QRM guard, keep calling');
   }
 }
 
