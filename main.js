@@ -179,6 +179,31 @@ process.stderr?.on('error', () => {});
 
 // Allow AudioContext to play without user gesture (required for JTCAT audio capture in Chromium 142+)
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+// Linux sandbox compatibility (issue #37): on systems that deny
+// unprivileged user namespaces to this binary (Ubuntu 23.10+ AppArmor
+// restriction without our deb's profile — AppImage/dev/extracted runs —
+// or hardened Debian's userns_clone=0) AND with no usable setuid
+// chrome-sandbox, Chromium aborts at launch telling the user to make
+// chrome-sandbox setuid root. Fall back to --no-sandbox in exactly that
+// launch-dead configuration, loudly, with the better fixes in the log.
+// Full rationale + decision matrix: lib/linux-sandbox.js.
+if (process.platform === 'linux') {
+  try {
+    const { decideSandboxFallback, gatherSandboxEnv } = require('./lib/linux-sandbox');
+    const verdict = decideSandboxFallback(gatherSandboxEnv(fs, path, process));
+    if (verdict.action === 'no-sandbox') {
+      app.commandLine.appendSwitch('no-sandbox');
+      _appendStartupLog(
+        '[sandbox] WARNING: running with --no-sandbox (' + verdict.reason + '). ' +
+        'POTACAT would otherwise abort at launch on this system. Better fixes: ' +
+        'install the .deb (ships an AppArmor profile - full Chromium sandbox, no setuid binary), ' +
+        'or opt in to the setuid helper for this install: ' +
+        'sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox (next to the POTACAT binary). ' +
+        'See https://github.com/Waffleslop/POTACAT/issues/37');
+    }
+  } catch { /* detection must never block startup */ }
+}
 const { execFile, spawn } = require('child_process');
 const { fetchSpots: fetchPotaSpots, parkStatesFromLocation } = require('./lib/pota');
 const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader } = require('./lib/sota');
