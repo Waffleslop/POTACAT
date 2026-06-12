@@ -39,6 +39,7 @@
     "appId": "com.waffleslop.potacat",
     "productName": "POTACAT",
     "icon": "assets/icon.png",
+    "afterPack": "scripts/linux-after-pack.js",
     "files": [
       "main.js",
       "preload.js",
@@ -134,6 +135,7 @@
         "rpm"
       ],
       "category": "Utility",
+      "appArmorProfile": "build/linux-apparmor-profile",
       "extraResources": [
         {
           "from": "resources/cloudflared/linux/cloudflared",

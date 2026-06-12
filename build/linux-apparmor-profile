@@ -1,0 +1,21 @@
+# AppArmor profile for POTACAT (GitHub issue #37).
+#
+# Grants unprivileged-user-namespace creation so Chromium's namespace
+# sandbox works on Ubuntu 23.10+ (apparmor_restrict_unprivileged_userns=1)
+# with NO setuid chrome-sandbox — same approach as the Chrome / VS Code /
+# Signal debs. Installed to /etc/apparmor.d/potacat by the deb/rpm
+# postinst (electron-builder linux.appArmorProfile).
+#
+# Attaches to the RENAMED real binary (potacat.bin): the visible
+# `potacat` entry point is the sandbox launcher shell script installed
+# by scripts/linux-after-pack.js, and a profile attached to a script
+# would confine the interpreter, not Electron.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile potacat /opt/POTACAT/potacat.bin flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/potacat>
+}

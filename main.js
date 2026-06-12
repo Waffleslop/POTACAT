@@ -180,29 +180,23 @@ process.stderr?.on('error', () => {});
 // Allow AudioContext to play without user gesture (required for JTCAT audio capture in Chromium 142+)
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-// Linux sandbox compatibility (issue #37): on systems that deny
-// unprivileged user namespaces to this binary (Ubuntu 23.10+ AppArmor
-// restriction without our deb's profile — AppImage/dev/extracted runs —
-// or hardened Debian's userns_clone=0) AND with no usable setuid
-// chrome-sandbox, Chromium aborts at launch telling the user to make
-// chrome-sandbox setuid root. Fall back to --no-sandbox in exactly that
-// launch-dead configuration, loudly, with the better fixes in the log.
-// Full rationale + decision matrix: lib/linux-sandbox.js.
-if (process.platform === 'linux') {
-  try {
-    const { decideSandboxFallback, gatherSandboxEnv } = require('./lib/linux-sandbox');
-    const verdict = decideSandboxFallback(gatherSandboxEnv(fs, path, process));
-    if (verdict.action === 'no-sandbox') {
-      app.commandLine.appendSwitch('no-sandbox');
-      _appendStartupLog(
-        '[sandbox] WARNING: running with --no-sandbox (' + verdict.reason + '). ' +
-        'POTACAT would otherwise abort at launch on this system. Better fixes: ' +
-        'install the .deb (ships an AppArmor profile - full Chromium sandbox, no setuid binary), ' +
-        'or opt in to the setuid helper for this install: ' +
-        'sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox (next to the POTACAT binary). ' +
-        'See https://github.com/Waffleslop/POTACAT/issues/37');
-    }
-  } catch { /* detection must never block startup */ }
+// Linux sandbox compatibility (issue #37). The DECISION lives in the
+// launcher shell script (scripts/linux-launcher.sh, installed as the
+// app's entry point by scripts/linux-after-pack.js): on systems that
+// deny unprivileged user namespaces to this binary AND have no usable
+// setuid chrome-sandbox, Chromium aborts BEFORE this file ever runs —
+// proven in CI (no startup.log was created; appendSwitch here was
+// useless). The unit-tested decision matrix is lib/linux-sandbox.js.
+// All this file can and should do is make the active fallback visible
+// in startup.log for bug reports.
+if (process.platform === 'linux' &&
+    (process.argv.includes('--no-sandbox') || app.commandLine.hasSwitch('no-sandbox'))) {
+  _appendStartupLog(
+    '[sandbox] WARNING: running with --no-sandbox (launcher fallback or explicit flag) - ' +
+    'this system denies the user-namespace sandbox and has no setuid chrome-sandbox. ' +
+    'Better fixes: install the .deb (full Chromium sandbox via AppArmor profile, no setuid binary), ' +
+    'or opt in: sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox (next to the binary). ' +
+    'See https://github.com/Waffleslop/POTACAT/issues/37');
 }
 const { execFile, spawn } = require('child_process');
 const { fetchSpots: fetchPotaSpots, parkStatesFromLocation } = require('./lib/pota');
