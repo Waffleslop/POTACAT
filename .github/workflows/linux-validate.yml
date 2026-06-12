@@ -93,7 +93,7 @@ jobs:
           node -e "
             const a = require('./lib/alsa');
             console.log('alsa available:', a.isAvailable(), 'version:', a._alsaVersion(), 'platform:', a._platform());
-            const devs = a.getDevices();
+            const devs = a.listDevices();
             console.log('enumerated', devs.length, 'devices');
             const native = require('./lib/alsa_native/build/Release/alsa_native.node');
             const cap = native.openCapture('null', { rate: 48000, channels: 1, periodFrames: 1024, bufferFrames: 4096 });
