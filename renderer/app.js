@@ -6633,14 +6633,69 @@ async function _renderSummaryEchocat() {
   let tunnel = null;
   let tail = null;
   let devices = [];
+  let web = null;
   try { tunnel = await window.api.cloudTunnelGetState(); } catch {}
   try { tail = await window.api.echocatTailscaleStatus(); } catch {}
   try { devices = await window.api.echocatListPairedDevices(); } catch {}
-  const html = _buildEchocatCardHTML(tunnel, tail, devices);
+  // Browser web-access info — the free, no-app, no-cloud path. The
+  // server is always-on; we just need the LAN address(es) + token.
+  try {
+    const s = await window.api.getSettings();
+    const ips = await window.api.getLocalIPs();
+    const port = s.remotePort || 7300;
+    // Prefer real-LAN addresses for the browser-on-same-WiFi case;
+    // Tailscale (100.x) is the remote path the card's pill already
+    // covers, so it shouldn't headline the "open in a browser" block.
+    const lan = (ips || []).filter((ip) => !ip.tailscale);
+    const list = (lan.length ? lan : (ips || [])).map((ip) => ip.address);
+    web = {
+      addresses: list,
+      port,
+      token: (s.remoteRequireToken !== false) ? (s.remoteToken || '') : '',
+    };
+  } catch {}
+  const html = _buildEchocatCardHTML(tunnel, tail, devices, web);
   for (const host of hosts) host.innerHTML = html;
 }
 
-function _buildEchocatCardHTML(tunnel, tail, devices) {
+// The free, no-app, no-cloud path: a browser on the same WiFi opens the
+// always-on ECHOCAT server directly. Promoted onto the card so it has
+// equal billing with Pair / Cloud instead of hiding in a collapsed
+// accordion (Casey 2026-06-13 — "make it available for users who don't
+// want to pay").
+function _buildEchocatWebHTML(web) {
+  if (!web || !Array.isArray(web.addresses) || web.addresses.length === 0) {
+    return '<div class="echo-web">'
+      + '<div class="echo-web-head"><span class="echo-web-title">Open in a browser</span>'
+      + '<span class="echo-web-tag">no app needed</span></div>'
+      + '<div class="echo-web-empty">No local network detected — connect this computer to your WiFi/LAN to get a browser link.</div>'
+      + '</div>';
+  }
+  const primary = 'https://' + web.addresses[0] + ':' + web.port;
+  const extras = web.addresses.slice(1).map((a) => 'https://' + a + ':' + web.port);
+  const tokenLine = web.token
+    ? '<div class="echo-web-token">Token <code>' + _esc(web.token) + '</code>'
+      + '<button type="button" class="echo-web-copy" data-act="echo-copy-weburl" data-copy="' + _esc(web.token) + '" title="Copy token">Copy</button></div>'
+    : '';
+  const extrasLine = extras.length
+    ? '<div class="echo-web-extra">Also at ' + extras.map((u) => '<code>' + _esc(u) + '</code>').join(', ') + '</div>'
+    : '';
+  return '<div class="echo-web">'
+    + '<div class="echo-web-head">'
+    + '<span class="echo-web-title">Open in a browser</span>'
+    + '<span class="echo-web-tag">no app needed</span>'
+    + '</div>'
+    + '<div class="echo-web-urlrow">'
+    + '<code class="echo-web-url">' + _esc(primary) + '</code>'
+    + '<button type="button" class="echo-web-copy primary" data-act="echo-copy-weburl" data-copy="' + _esc(primary) + '" title="Copy link">Copy</button>'
+    + '</div>'
+    + tokenLine
+    + extrasLine
+    + '<div class="echo-web-hint">Type it into any phone, tablet, or computer on your home WiFi. Must be <code>https://</code>; accept the security warning the first time.</div>'
+    + '</div>';
+}
+
+function _buildEchocatCardHTML(tunnel, tail, devices, web) {
   // Tunnel + Tailscale state. cloud-tunnel state lives on `.status`,
   // not `.state`. Possible values: off | provisioning | connecting |
   // live | reconnecting | error (see lib/cloud-tunnel.js).
@@ -6683,7 +6738,8 @@ function _buildEchocatCardHTML(tunnel, tail, devices) {
   const tunnelBtn = tunnelEffectivelyOn
     ? '<button type="button" data-act="tunnel-off">Turn off tunnel</button>'
     : '<button type="button" class="primary" data-act="tunnel-on">Turn on Cloud Tunnel</button>';
-  const body = '<div class="summary-line">' + _esc(detail) + '</div>'
+  const body = _buildEchocatWebHTML(web)
+    + '<div class="summary-line" style="margin-top:10px;">' + _esc(detail) + '</div>'
     + '<div class="summary-sub" style="margin-top:6px;font-weight:600;">My devices</div>'
     + '<div class="summary-device-list">' + _summaryDeviceListHTML(devices) + '</div>'
     + '<div class="summary-card-actions">'
@@ -6853,6 +6909,16 @@ function _wireSummaryCardActionsOnce() {
       else if (act === 'echo-pair-device') _pairDeviceOpen();
       else if (act === 'echo-share') _shareRigOpen();
       else if (act === 'echo-diagnostics') _summaryTunnelDiagOpen();
+      else if (act === 'echo-copy-weburl') {
+        const val = btn.dataset.copy || '';
+        if (val) {
+          try { await navigator.clipboard.writeText(val); }
+          catch { try { window.api.copyToClipboard(val); } catch {} }
+          const prev = btn.textContent;
+          btn.textContent = 'Copied';
+          setTimeout(() => { btn.textContent = prev; }, 1400);
+        }
+      }
       else if (act === 'pota-connect') await window.api.potaSyncConnect();
       else if (act === 'pota-refresh') await window.api.potaSyncNow();
       else if (act === 'device-revoke') {

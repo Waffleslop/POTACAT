@@ -3491,6 +3491,112 @@ dialog {
   background: color-mix(in srgb, var(--accent-blue) 80%, #fff);
 }
 
+/* ECHOCAT browser web-access block — the free, no-app/no-cloud path,
+   promoted to the top of the ECHOCAT card. Tinted panel with a green
+   accent so it reads as "this one's free and ready" next to the
+   pair/cloud actions. Casey 2026-06-13. */
+.echo-web {
+  background: color-mix(in srgb, var(--source-pota, #4ecca3) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--source-pota, #4ecca3) 35%, transparent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+}
+.echo-web-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.echo-web-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.echo-web-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--source-pota, #4ecca3);
+  border: 1px solid color-mix(in srgb, var(--source-pota, #4ecca3) 50%, transparent);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.echo-web-urlrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.echo-web-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  color: var(--accent-blue);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.echo-web-copy {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 4px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.echo-web-copy:hover { background: var(--bg-hover); }
+.echo-web-copy.primary {
+  background: var(--source-pota, #4ecca3);
+  color: #0a1a14;
+  border-color: var(--source-pota, #4ecca3);
+  font-weight: 600;
+}
+.echo-web-token {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.echo-web-token code,
+.echo-web-extra code {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.echo-web-extra {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+.echo-web-hint {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+.echo-web-hint code {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--text-secondary);
+}
+.echo-web-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 /* ECHOCAT device list */
 .summary-device-list {
   display: flex;
