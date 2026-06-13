@@ -1026,6 +1026,12 @@
         // Server tells us which login form to show
         authMode = msg.mode || 'token';
         if (authMode === 'club') {
+          // The injected __authMode may have pre-hidden the connect
+          // screen (it pre-hides only for 'none', but be defensive) —
+          // an auth-requiring mode must always re-show it, or the user
+          // is stranded on a dead main-UI shell with no way to log in.
+          connectScreen.classList.remove('hidden');
+          mainUI.classList.add('hidden');
           tokenLoginDiv.classList.add('hidden');
           clubLoginDiv.classList.remove('hidden');
           connectBtn.textContent = 'Log In';
@@ -1035,6 +1041,9 @@
           // Hide entire connect screen — server auto-authenticates
           connectScreen.classList.add('hidden');
         } else {
+          // Token mode — same defensive re-show as the club branch.
+          connectScreen.classList.remove('hidden');
+          mainUI.classList.add('hidden');
           tokenLoginDiv.classList.remove('hidden');
           clubLoginDiv.classList.add('hidden');
           connectBtn.textContent = 'Connect';
