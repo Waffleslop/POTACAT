@@ -42,14 +42,21 @@ contextBridge.exposeInMainWorld('api', {
   onKiwiAudio: (cb) => ipcRenderer.on('kiwi-audio', (_e, d) => cb(d)),
   onSmartSdrAudio: (cb) => {
     // Batch-ack so main can bound the IPC backlog. See main.js audioBus.
+    // Ack receipt, decoupled from cb, with a periodic flush so a slow/
+    // throwing handler can't freeze the credit and wedge main into
+    // dropping every frame (see preload-remote-audio.js, 2026-06-14).
     let _ackCount = 0;
-    ipcRenderer.on('smartsdr-audio-frame', (_e, d) => {
-      cb(d);
-      if (++_ackCount >= 20) {
+    const flush = () => {
+      if (_ackCount > 0) {
         ipcRenderer.send('audio-ack', { channel: 'smartsdr-audio-frame', count: _ackCount });
         _ackCount = 0;
       }
+    };
+    ipcRenderer.on('smartsdr-audio-frame', (_e, d) => {
+      if (++_ackCount >= 8) flush();
+      try { cb(d); } catch (e) { /* one bad frame must not stop acking */ }
     });
+    setInterval(flush, 250);
   },
   onTheme: (cb) => ipcRenderer.on('vfo-popout-theme', (_e, theme) => cb(theme)),
   // Live profile-list updates pushed by main when ECHOCAT phone (or another

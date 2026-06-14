@@ -25,14 +25,26 @@ contextBridge.exposeInMainWorld('api', {
     // backpressure — see main.js audioBus. Without these acks the
     // backlog counter never decrements and we'd be throttled after
     // AUDIO_MAX_BACKLOG frames.
+    //
+    // 2026-06-14: ack RECEIPT, decoupled from cb. The credit means "I
+    // pulled this frame off the IPC queue", which is true regardless of
+    // whether cb processed it. Previously the ack ran AFTER cb, so a
+    // throwing/slow cb skipped the ack, froze the credit, and wedged main
+    // into dropping every frame to this consumer forever (K3SBP no-iOS-
+    // audio / "1875 frames dropped"). A periodic flush returns partial
+    // credit so bursty flow can't pin the backlog either.
     let _ackCount = 0;
-    ipcRenderer.on('smartsdr-audio-frame', (_e, frame) => {
-      cb(frame);
-      if (++_ackCount >= 20) {
+    const flush = () => {
+      if (_ackCount > 0) {
         ipcRenderer.send('audio-ack', { channel: 'smartsdr-audio-frame', count: _ackCount });
         _ackCount = 0;
       }
+    };
+    ipcRenderer.on('smartsdr-audio-frame', (_e, frame) => {
+      if (++_ackCount >= 8) flush();
+      try { cb(frame); } catch (e) { /* one bad frame must not stop acking */ }
     });
+    setInterval(flush, 250);
   },
   onSmartSdrAudioFallback: (cb) => ipcRenderer.on('smartsdr-audio-fallback', () => cb()),
   // TX state — used to mute Kiwi audio while transmitting so the

@@ -600,9 +600,13 @@ let _sstvFeedPaused = false;
 // consumer is acceptable; OOM is not.
 // =====================================================================
 const _audioBus = new Map(); // wcId+':'+channel -> { sent, acked, dropped, lastDropLogMs }
-const AUDIO_MAX_BACKLOG = 40; // frames; ~210 ms at 190 fps — survives a
-                              // GC pause without garbling, well below
-                              // the multi-second backlog that leaks.
+const AUDIO_MAX_BACKLOG = 120; // frames; ~640 ms at 190 fps. Bumped from 40
+                              // (2026-06-14): under the added JTCAT-FT8 load
+                              // the old ~210 ms window pinned at the cap and
+                              // dropped ~every frame to the iOS bridge (K3SBP,
+                              // "1875 frames dropped"), starving rig audio.
+                              // 640 ms gives load spikes room while staying
+                              // well below the multi-second backlog that leaks.
 
 function audioSafeSend(wc, channel, payload) {
   if (!wc || wc.isDestroyed()) return;
@@ -618,8 +622,9 @@ function audioSafeSend(wc, channel, payload) {
     if (now - info.lastDropLogMs >= 10_000) {
       try {
         // Single CAT log line every 10 s when a consumer is sustaining
-        // a backlog — enough signal to diagnose, no flood.
-        sendCatLog(`[Audio] Backpressure on ${channel}: ${info.dropped} frames dropped (renderer not keeping up)`);
+        // a backlog — enough signal to diagnose, no flood. Name the
+        // renderer (wcId) so we can tell WHICH consumer is behind.
+        sendCatLog(`[Audio] Backpressure on ${channel} (wc#${wc.id}): ${info.dropped} frames dropped, backlog=${info.sent - info.acked} (renderer not keeping up)`);
       } catch {}
       info.dropped = 0;
       info.lastDropLogMs = now;
@@ -4281,6 +4286,15 @@ function startJtcat(mode) {
         ft8Engine.setAudioLatencyMs(settings.jtcatAudioLatencyMs);
       } else {
         ft8Engine.setAudioLatencyAuto(true);
+        // Seed the auto loop from the last persisted value so a restart
+        // (band/mode change, QSY — each builds a fresh engine) starts warm
+        // instead of re-converging from zero. This is what the persist
+        // handler below always intended ("apply it immediately") but the
+        // apply only ever ran for manual pins. K3SBP 2026-06-14.
+        if (typeof ft8Engine.seedAudioLatencyMs === 'function' &&
+            typeof settings.jtcatAudioLatencyMs === 'number') {
+          ft8Engine.seedAudioLatencyMs(settings.jtcatAudioLatencyMs);
+        }
       }
     }
     if (typeof ft8Engine.setHoldTxFreq === 'function') {
