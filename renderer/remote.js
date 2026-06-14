@@ -157,6 +157,8 @@
   let gainNode = null;   // GainNode for RX volume
   let txGainNode = null; // GainNode for TX mic level
   let rxAnalyser = null; // AnalyserNode for RX metering
+  let rxSource = null;   // MediaStreamAudioSourceNode tapping the remote track
+  let rxDestConnected = false; // is rxAnalyser → audioCtx.destination wired?
   let txAnalyser = null; // AnalyserNode for TX metering
   let meterAnimFrame = null; // requestAnimationFrame ID for meter rendering
   let volBoostLevel = 0; // 0=1x, 1=2x, 2=3x
@@ -3955,6 +3957,10 @@
     var pct = parseInt(rcRxGain.value, 10);
     rcRxGainVal.textContent = pct + '%';
     if (gainNode) gainNode.gain.value = pct / 100;
+    // Re-pick element vs Web-Audio output for the new gain (and keep
+    // volBoostLevel roughly in sync so the boost button stays meaningful).
+    volBoostLevel = pct > 100 ? 1 : 0;
+    applyRxOutput();
   });
   rcTxGain.addEventListener('input', function() {
     var pct = parseInt(rcTxGain.value, 10);
@@ -4094,6 +4100,33 @@
 
   function setAudioStatus(text) { audioBtn.textContent = text; }
 
+  // Decide which path actually drives the speakers, based on the current
+  // RX gain (gainNode, 0–3x). At <=100% the <video> element plays directly
+  // (element.volume caps at 1.0) — the robust path that survives a suspended
+  // AudioContext and Chromium's remote-MediaStream-through-Web-Audio silence.
+  // Above 100% we need real amplification, so we route the gain node to the
+  // Web Audio destination and mute the element to avoid double audio. Either
+  // way the analyser keeps tapping the gain node for the RX meter.
+  function applyRxOutput() {
+    if (!remoteAudio) return;
+    var g = gainNode ? gainNode.gain.value : 1;
+    var boosting = g > 1.0001;
+    if (audioCtx && rxAnalyser) {
+      if (boosting && !rxDestConnected) {
+        try { rxAnalyser.connect(audioCtx.destination); rxDestConnected = true; } catch (e) {}
+      } else if (!boosting && rxDestConnected) {
+        try { rxAnalyser.disconnect(audioCtx.destination); } catch (e) {}
+        rxDestConnected = false;
+      }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    remoteAudio.muted = boosting;
+    // When boosting, the element is muted and Web Audio carries the audio;
+    // otherwise the element plays at the requested attenuation (0–100%).
+    remoteAudio.volume = boosting ? 0 : Math.max(0, Math.min(1, g));
+    remoteAudio.play().catch(() => {});
+  }
+
   let micReady = false;
   var _useStun = false;
 
@@ -4112,13 +4145,25 @@
         // Create AudioContext during user gesture so iOS Safari doesn't block it
         try {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          // RX chain: source -> gainNode -> rxAnalyser -> destination
+          // Chrome can hand back a SUSPENDED context even when created inside
+          // a gesture if the gesture went stale across the await getUserMedia
+          // above — a suspended context means the Web Audio destination is
+          // silent, which is exactly "connected peer, frames flowing, no
+          // sound" (K3SBP 2026-06-14, LAN web client). Resume eagerly.
+          if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+          // RX chain: source -> gainNode -> rxAnalyser (-> destination only
+          // when boosting >100%; see applyRxOutput). At <=100% we let the
+          // media element play the audio directly, which is immune to a
+          // suspended AudioContext AND to the long-standing Chromium bug
+          // where a remote WebRTC MediaStream routed through Web Audio is
+          // silent. The analyser still taps the gain node for the RX meter
+          // regardless of whether its output is connected.
           gainNode = audioCtx.createGain();
           gainNode.gain.value = VOL_STEPS[volBoostLevel];
           rxAnalyser = audioCtx.createAnalyser();
           rxAnalyser.fftSize = 256;
           gainNode.connect(rxAnalyser);
-          rxAnalyser.connect(audioCtx.destination);
+          rxDestConnected = false;
           // TX chain: mic -> txGainNode -> txAnalyser (metering only, audio sent via WebRTC track)
           txGainNode = audioCtx.createGain();
           txGainNode.gain.value = 1.0;
@@ -4155,29 +4200,22 @@
       }
       pc.ontrack = (event) => {
         setAudioStatus('Live');
-        // Route through pre-created GainNode for volume boost
+        // The media element is the reliable audible output (immune to a
+        // suspended AudioContext / the Chromium remote-stream-through-Web-
+        // Audio silence bug). The Web Audio graph taps the same stream for
+        // the RX meter and supplies the >100% boost. applyRxOutput() picks
+        // which one actually reaches the speakers based on the gain.
+        remoteAudio.srcObject = event.streams[0];
         if (audioCtx && gainNode) {
           try {
-            var source = audioCtx.createMediaStreamSource(event.streams[0]);
-            source.connect(gainNode);
-            // Keep video element playing (muted) as iOS keep-alive
-            remoteAudio.srcObject = event.streams[0];
-            remoteAudio.volume = 0;
-            remoteAudio.play().catch(() => {});
+            if (rxSource) { try { rxSource.disconnect(); } catch (e) {} }
+            rxSource = audioCtx.createMediaStreamSource(event.streams[0]);
+            rxSource.connect(gainNode);
           } catch (e) {
-            console.warn('GainNode wiring failed, using direct playback:', e.message);
-            remoteAudio.srcObject = event.streams[0];
-            remoteAudio.volume = 1.0;
-            remoteAudio.muted = false;
-            remoteAudio.play().catch(() => {});
+            console.warn('RX Web Audio tap failed, element-only playback:', e.message);
           }
-        } else {
-          // Fallback: no Web Audio, play through element directly
-          remoteAudio.srcObject = event.streams[0];
-          remoteAudio.volume = 1.0;
-          remoteAudio.muted = false;
-          remoteAudio.play().catch(() => {});
         }
+        applyRxOutput();
         if (typeof smConnected !== 'undefined' && smConnected) smSetupRxBridge(event.streams[0]);
       };
       pc.onicecandidate = (event) => {
@@ -4217,6 +4255,8 @@
     if (localAudioStream) { localAudioStream.getTracks().forEach(t => t.stop()); localAudioStream = null; }
     if (remoteAudio) { remoteAudio.srcObject = null; }
     stopMeterRendering();
+    if (rxSource) { try { rxSource.disconnect(); } catch (e) {} rxSource = null; }
+    rxDestConnected = false;
     if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; gainNode = null; txGainNode = null; rxAnalyser = null; txAnalyser = null; }
     stopSessionKeepAlive();
     audioEnabled = false;
@@ -4270,6 +4310,8 @@
     // Sync RX gain slider
     rcRxGain.value = Math.round(gain * 100);
     rcRxGainVal.textContent = Math.round(gain * 100) + '%';
+    // Switch the audible path (element ↔ Web Audio) for the new gain.
+    applyRxOutput();
   });
 
   // --- Scan ---
