@@ -107,6 +107,57 @@ function waitFor(emitter, event, ms) {
   await sleep(300);
   check(tuneSeen.length === 1, 'shack rate-limits a second immediate tune (still 1)');
 
+  // ── Phase 2 audio leg: WebRTC signaling relay (answerer ↔ offerer) ──
+  // Proves the desktop client can run the answerer half: ask the shack to
+  // start audio, receive its TURN iceServers (stun-config) + SDP offer + ICE
+  // (signal), and relay its own SDP answer + ICE back — all through the real
+  // RemoteServer<->RemoteClient. The actual WebRTC media is browser-provided
+  // (proven by the phone/web client); this locks the OUR-CODE signaling relay.
+  console.log('\n=== Phase 2 audio signaling relay (answerer ↔ shack offerer) ===');
+  const sfc = [];
+  rs.on('signal-from-client', (d) => sfc.push(d));
+  const stunCfgP = waitFor(rc, 'stun-config', 4000);
+  const offerP = waitFor(rc, 'signal', 4000);
+
+  // 1. Client (answerer) asks the shack (offerer) to start audio.
+  rc.sendStartAudio();
+  await sleep(250);
+  check(sfc.some(d => d && d.type === 'start-audio'), 'shack received start-audio from the desktop client');
+
+  // 2. Shack hands over the minted TURN creds + its SDP offer + an ICE candidate.
+  rs.sendToClient({ type: 'stun-config', useStun: true, iceTtlMs: 3600000,
+    iceServers: [
+      { urls: ['stun:stun.cloudflare.com:3478'] },
+      { urls: ['turn:turn.cloudflare.com:3478?transport=udp'], username: 'u', credential: 'c' },
+    ] });
+  rs.sendToClient({ type: 'signal', data: { type: 'sdp', sdp: { type: 'offer', sdp: 'v=0\r\noffer' } } });
+  rs.sendToClient({ type: 'signal', data: { type: 'ice', candidate: { candidate: 'candidate:1 1 udp 2 1.2.3.4 5 typ relay', sdpMid: '0', sdpMLineIndex: 0 } } });
+
+  const stunCfg = await stunCfgP;
+  check(stunCfg && Array.isArray(stunCfg.iceServers) && stunCfg.iceServers.length === 2, 'client received stun-config with the shack TURN iceServers');
+  check(stunCfg && stunCfg.iceTtlMs === 3600000, 'stun-config iceTtlMs relayed to the client');
+  check(stunCfg && stunCfg.useStun === true, 'stun-config useStun relayed');
+  const offer = await offerP;
+  check(offer && offer.type === 'sdp' && offer.sdp && offer.sdp.type === 'offer', 'client received the shack SDP offer (unwrapped from signal)');
+
+  // 3. Client (answerer) relays its SDP answer + ICE candidate back.
+  rc.sendSignal({ type: 'sdp', sdp: { type: 'answer', sdp: 'v=0\r\nanswer' } });
+  rc.sendSignal({ type: 'ice', candidate: { candidate: 'candidate:2 1 udp 2 5.6.7.8 9 typ host', sdpMid: '0', sdpMLineIndex: 0 } });
+  rc.sendSignal({ bogus: true }); // no `type` → must be dropped, not sent
+  await sleep(300);
+  const answer = sfc.find(d => d && d.type === 'sdp');
+  const ice = sfc.find(d => d && d.type === 'ice');
+  check(answer && answer.sdp && answer.sdp.type === 'answer', 'shack received the client SDP answer');
+  check(ice && ice.candidate && typeof ice.candidate.candidate === 'string', 'shack received the client ICE candidate');
+  check(!sfc.some(d => d && d.bogus), 'sendSignal drops a payload with no type (never hits the wire)');
+
+  // 4. Mid-session re-mint: a fresh stun-config reaches the client too.
+  const remintP = waitFor(rc, 'stun-config', 3000);
+  rs.sendToClient({ type: 'stun-config', useStun: true, iceTtlMs: 1800000,
+    iceServers: [{ urls: ['turn:turn.cloudflare.com:3478?transport=udp'], username: 'u2', credential: 'c2' }] });
+  const remint = await remintP;
+  check(remint && remint.iceServers && remint.iceServers[0].username === 'u2', 'mid-session re-mint stun-config reaches the client');
+
   console.log('\n=== auth rejection (wrong token) ===');
   const badTarget = { id: 's2', name: 'Bad', lanHost: `wss://127.0.0.1:${PORT}`, fingerprint, deviceToken: 'WRONG' };
   const rc2 = new RemoteClient(badTarget, {});

@@ -101,6 +101,16 @@ check(P.validate({ type: 'watchlist:sync', callsigns: ['K3SBP'] }, P.Dir.C2S).ok
       P.validate({ type: 'watchlist:sync', callsigns: ['K3SBP'], groups: [] }, P.Dir.S2C).ok, 'watchlist:sync flows BOTH ways');
 check(!P.validate({ type: 'watchlist:sync' }).ok, 'watchlist:sync requires callsigns');
 
+// ── Phase-2 audio leg: stun-config + signal (registered contract) ───
+console.log('\n=== Phase-2 audio leg: stun-config + signal ===');
+check(P.validate({ type: 'stun-config', useStun: true }, P.Dir.S2C).ok, 'stun-config minimal (useStun) valid s2c');
+check(P.validate({ type: 'stun-config', useStun: true, iceTtlMs: 3600000,
+  iceServers: [{ urls: ['turn:turn.cloudflare.com:3478?transport=udp'], username: 'u', credential: 'c' }] }, P.Dir.S2C).ok, 'stun-config with iceServers+iceTtlMs valid');
+check(!P.validate({ type: 'stun-config', iceServers: 'nope' }).ok, 'stun-config rejects non-array iceServers');
+check(!P.validate({ type: 'stun-config', useStun: true }, P.Dir.C2S).ok, 'stun-config is s2c-only');
+check(P.validate({ type: 'signal', data: { type: 'start-audio' } }, P.Dir.C2S).ok &&
+      P.validate({ type: 'signal', data: { type: 'sdp', sdp: {} } }, P.Dir.S2C).ok, 'signal flows BOTH ways (offer/answer/ice/start-audio envelope)');
+
 // ── RemoteClient frames conform to the contract ─────────────────────
 // The desktop-as-client builds frames in lib/remote-client.js; assert each
 // is a registered c2s message that passes validate() with the right shape.
