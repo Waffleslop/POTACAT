@@ -13693,7 +13693,7 @@ settingsSave.addEventListener('click', async () => {
   await window.api.saveSettings({
     rigs: currentRigs,
     activeRigId: selectedRigId || null,
-    grid: setGrid.value.trim() || 'FN20jb',
+    grid: setGrid.value.trim() || '',
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
     maxDist: maxDistVal,
@@ -23951,6 +23951,10 @@ window.api.onJtcatDecode(function(data) {
       mode: data.mode,
       results: jtcatDecodes,
     });
+    // Cap at 10 cycles (~2.5 min of history). renderJtcatDecodes() rebuilds the
+    // entire DOM from this array on every decode event, so unbounded growth causes
+    // both heap and DOM to expand indefinitely — ~4.5 MB/min measured on a 6h run.
+    if (jtcatDecodeLog.length > 10) jtcatDecodeLog.shift();
   }
   // NOTE: sync status is NOT set here. Decodes arriving says nothing about the
   // PC clock — the real status comes from the NTP monitor (onJtcatClock below).
