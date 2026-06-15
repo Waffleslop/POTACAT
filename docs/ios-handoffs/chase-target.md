@@ -101,3 +101,48 @@ Named special events — **13 Colonies, LCTOTA, WWFF, IOTA, ILLW, Museum Ships, 
 - Tests to keep green: `node test/cq-target-test.js` (38), `node test/jtcat-test.js` (162), `node test/echocat-protocol.test.js` (27)
 
 73.
+
+---
+
+## iOS/Android implementation status (2026-06-15) — DONE (mobile side)
+
+Built in potacat-app commit `3011673` (pushed, master). Pure-TS,
+OTA-able, no new dep. Backward-compatible and **inert until this
+desktop feature merges to master + ships** (older desktops omit the
+fields → none/unhighlighted), so it's safe to land ahead of the merge.
+NOT yet OTA'd — recommend holding the OTA until the desktop half is
+live, then coordinate (or it rides the next native build).
+
+- **Protocol:** registered `jtcat-set-chase-target` (C2S) +
+  `jtcat-chase-target` (S2C) in `src/protocol/echocatProtocol.ts`.
+  Without them the S2C echo was dropped as an unknown type and the
+  C2S setter failed `encode()`. `chaseMatch` + `jtcatChaseTarget`
+  ride the existing field-less `jtcat-decode` / `optObject` auth-ok
+  passthroughs — no change needed there.
+- **`src/utils/cqTarget.ts`:** ported `renderer/cq-target.js` verbatim
+  — `QUICK_PICKS`, `US_STATES`, `normalizeTag`, `validateTag`,
+  `buildCqTxMsg`, `classifyTarget` (collision order
+  continent>program>contest>us-state>dxcc). Deliberately did NOT port
+  `matchesDecode`/`cqTagOf` per §1/§6 — desktop owns the match; mobile
+  styles `chaseMatch` only. 8 unit tests.
+- **`src/state/chaseTarget.ts`:** boot-registered store. Seeds from
+  `auth-ok.settings.jtcatChaseTarget`, applies live `jtcat-chase-target`,
+  and honors the §3 idempotency rule — the setter is sent ONLY on a
+  user action, a received value never echoes back.
+- **`src/screens/Ft8Screen.tsx` + `ChaseTargetSheet.tsx`:** CQ button
+  sends `modifier` from the tag (§5); gold ◎ badge + row tint on
+  `chaseMatch`; "◎ Chase" only-filter (persisted, directed/73 bypass,
+  §6); "Target:" pill opens the categorized picker + custom
+  US-state/DXCC field + live CQ preview. US-state highlight surfaced
+  as the documented v1 no-op (§6) — CQ tag works, decodes not
+  highlighted for states.
+
+Distinct from `jtcat-auto-cq-*` (already wired separately) — the §1
+naming trap was observed.
+
+Remaining for end-to-end: desktop `feature/chase-target` → master +
+ship; then OTA the mobile side (or ship in the next build) and
+device-verify the picker UI (sheet layout, the two new filter-row
+pills on narrow screens, the gold tint) — that's the only unverified
+part; wire + logic are tsc-clean and unit-tested (full mobile suite
+299/299).
