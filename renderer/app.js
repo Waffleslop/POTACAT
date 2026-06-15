@@ -24067,10 +24067,14 @@ window.api.onJtcatDecode(function(data) {
   jtcatDecodes = data.results || [];
   // Accumulate into the log
   if (jtcatDecodes.length > 0) {
-    var now = new Date();
-    var timeStr = String(now.getUTCHours()).padStart(2, '0') + ':' +
-                  String(now.getUTCMinutes()).padStart(2, '0') + ':' +
-                  String(now.getUTCSeconds()).padStart(2, '0');
+    // Stamp the FT8/FT4 PERIOD START (:00/:15/:30/:45 for FT8), not the
+    // wall-clock moment the decode rendered (~800 ms before the boundary, which
+    // showed :44/:14). Floor to the cycle for the current mode. K3SBP 2026-06-15.
+    var _cycleMs = (data.mode === 'FT2' ? 3800 : data.mode === 'FT4' ? 7500 : 15000);
+    var _b = new Date(Math.floor(Date.now() / _cycleMs) * _cycleMs);
+    var timeStr = String(_b.getUTCHours()).padStart(2, '0') + ':' +
+                  String(_b.getUTCMinutes()).padStart(2, '0') + ':' +
+                  String(_b.getUTCSeconds()).padStart(2, '0');
     jtcatDecodeLog.push({
       cycle: data.cycle,
       time: timeStr,

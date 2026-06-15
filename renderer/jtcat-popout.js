@@ -473,12 +473,26 @@ function _applyPopoutTheme(payload) {
   // --- Decode rendering ---
   function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+  // Each FT8/FT4 decode belongs to a fixed cycle that STARTS on a period
+  // boundary (:00/:15/:30/:45 for FT8's 15 s; :00/:07.5/… for FT4's 7.5 s).
+  // The decode is produced ~800 ms BEFORE the next boundary, so stamping
+  // `new Date()` at render time showed :44/:14 instead of the period start.
+  // Floor the clock to the current mode's cycle so the time column reads the
+  // WSJT-X-style period start. K3SBP 2026-06-15.
+  function cycleBoundaryUtc() {
+    var mode = modeSelect ? modeSelect.value : 'FT8';
+    var cycleMs = (mode === 'FT2' ? 3800 : mode === 'FT4' ? 7500 : 15000);
+    var d = new Date(Math.floor(Date.now() / cycleMs) * cycleMs);
+    return String(d.getUTCHours()).padStart(2, '0') + ':' +
+           String(d.getUTCMinutes()).padStart(2, '0') + ':' +
+           String(d.getUTCSeconds()).padStart(2, '0');
+  }
+
   // Add a single decode to My Activity pane (e.g. the CQ we clicked to start a QSO)
   function addToMyActivity(d) {
     var mEmpty = myActivity.querySelector('.jp-empty');
     if (mEmpty) mEmpty.remove();
-    var now = new Date();
-    var time = String(now.getUTCHours()).padStart(2, '0') + ':' + String(now.getUTCMinutes()).padStart(2, '0') + ':' + String(now.getUTCSeconds()).padStart(2, '0');
+    var time = cycleBoundaryUtc();
     var sep = document.createElement('div');
     sep.className = 'jp-cycle-sep';
     sep.textContent = time + ' UTC';
@@ -502,8 +516,7 @@ function _applyPopoutTheme(payload) {
     var decodeSlot = data.slot || null; // slot the decoded audio was from
     var time = '';
     if (results.length > 0) {
-      var now = new Date();
-      time = String(now.getUTCHours()).padStart(2, '0') + ':' + String(now.getUTCMinutes()).padStart(2, '0') + ':' + String(now.getUTCSeconds()).padStart(2, '0');
+      time = cycleBoundaryUtc();
       decodeLog.push({ time: time, results: results });
       if (decodeLog.length > 50) decodeLog.shift();
     }
@@ -816,8 +829,6 @@ function _applyPopoutTheme(payload) {
     if (transmitting && data.message) {
       txMsgEl.textContent = data.message;
       // Add TX row
-      var now = new Date();
-      var time = String(now.getUTCHours()).padStart(2, '0') + ':' + String(now.getUTCMinutes()).padStart(2, '0') + ':' + String(now.getUTCSeconds()).padStart(2, '0');
       var row = document.createElement('div');
       row.className = 'jp-row jp-tx';
       row.innerHTML = '<span class="jp-db">TX</span><span class="jp-df">--</span><span class="jp-msg">' + esc(data.message) + '</span>';

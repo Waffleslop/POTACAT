@@ -3993,6 +3993,19 @@ function parseCqMessage(text) {
   return JtcatParser.parseCq(text);
 }
 
+// HH:MM:SS UTC of the current FT8/FT4 PERIOD START (:00/:15/:30/:45 for FT8's
+// 15 s, :00/:07.5/… for FT4's 7.5 s). Decodes are produced ~800 ms before the
+// next boundary, so stamping wall-clock showed :44/:14 instead of the period
+// start; floor to the cycle so phone/desktop time columns read like WSJT-X.
+// K3SBP 2026-06-15.
+function jtcatPeriodUtc(mode) {
+  const cycleMs = mode === 'FT2' ? 3800 : mode === 'FT4' ? 7500 : 15000;
+  const d = new Date(Math.floor(Date.now() / cycleMs) * cycleMs);
+  return String(d.getUTCHours()).padStart(2, '0') + ':' +
+         String(d.getUTCMinutes()).padStart(2, '0') + ':' +
+         String(d.getUTCSeconds()).padStart(2, '0');
+}
+
 function broadcastAutoCqState() {
   const state = { mode: jtcatAutoCqMode, workedCount: jtcatAutoCqWorkedSession.size };
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
@@ -4459,10 +4472,7 @@ function startJtcat(mode) {
     }
     // Broadcast to phone + advance remote QSO state machine
     if (remoteServer && remoteServer.hasClient()) {
-      const now = new Date();
-      const timeStr = String(now.getUTCHours()).padStart(2, '0') + ':' +
-                      String(now.getUTCMinutes()).padStart(2, '0') + ':' +
-                      String(now.getUTCSeconds()).padStart(2, '0');
+      const timeStr = jtcatPeriodUtc(data.mode);
       const sliceBand = jtcatManager ? jtcatManager.getDialFreq('default').band : '';
       remoteServer.broadcastJtcatDecode({ ...data, time: timeStr, sliceId: 'default', band: sliceBand });
     }
@@ -20329,10 +20339,7 @@ app.whenReady().then(() => {
           jtcatPopoutWin.webContents.send('jtcat-decode', { ...data, sliceId: s.sliceId, band: s.band });
         }
         if (remoteServer && remoteServer.hasClient()) {
-          const now = new Date();
-          const timeStr = String(now.getUTCHours()).padStart(2, '0') + ':' +
-                          String(now.getUTCMinutes()).padStart(2, '0') + ':' +
-                          String(now.getUTCSeconds()).padStart(2, '0');
+          const timeStr = jtcatPeriodUtc(data.mode);
           remoteServer.broadcastJtcatDecode({ ...data, sliceId: s.sliceId, band: s.band, time: timeStr });
         }
         // Advance QSO state machine from this slice's decodes
