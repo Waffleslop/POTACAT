@@ -36,6 +36,8 @@ function _applyPopoutTheme(payload) {
   var decodeLog = [];
   var cqFilter = false;
   var wantedFilter = false;
+  var chaseFilter = false;
+  var chaseTarget = '';   // current chase tag ('' = none); shared with phone
   var sortBySignal = false;
   var searchFilter = '';
   var txEnabled = false;
@@ -66,6 +68,8 @@ function _applyPopoutTheme(payload) {
     myCallsign = (s.myCallsign || '').toUpperCase();
     myGrid = (s.grid || '').toUpperCase().substring(0, 4);
     applyUltracat(!!s.ultracat);
+    chaseTarget = s.jtcatChaseTarget || '';
+    reflectChaseTarget(chaseTarget);
     if (maxAttemptsInput && typeof s.jtcatMaxQsoAttempts === 'number') {
       maxAttemptsInput.value = s.jtcatMaxQsoAttempts;
     }
@@ -101,6 +105,9 @@ function _applyPopoutTheme(payload) {
   setInterval(updateUtcClock, 1000);
   var cqFilterBtn = document.getElementById('jp-cq-filter');
   var wantedFilterBtn = document.getElementById('jp-wanted-filter');
+  var chaseFilterBtn = document.getElementById('jp-chase-filter');
+  var chaseSelect = document.getElementById('jp-chase-target');
+  var chaseCustom = document.getElementById('jp-chase-custom');
   var cqBtn = document.getElementById('jp-cq');
   var fullAutoCqBtn = document.getElementById('jp-full-auto-cq');
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
@@ -529,10 +536,12 @@ function _applyPopoutTheme(payload) {
 
       if (cqFilter && !isCq && !is73 && !isDirected) return;
       if (wantedFilter && !isWanted && !isDirected && !is73) return;
+      if (chaseFilter && !d.chaseMatch && !isDirected && !is73) return;
       if (searchFilter && upper.indexOf(searchFilter) === -1) return;
 
       // Build needed badges + entity
       var badges = '';
+      if (d.chaseMatch) badges += '<span class="jp-badge jp-badge-chase" title="Chase target: ' + esc(chaseTarget) + '">◎</span>';
       if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
       if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
       if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
@@ -545,7 +554,7 @@ function _applyPopoutTheme(payload) {
       // can spot unworked parks at a glance during multi-slice operating.
       var spotMatch = d.call ? spottedCalls.get(String(d.call).toUpperCase()) : null;
       var spotClass = spotMatch ? (spotMatch.isNewPark ? ' jp-new-park' : ' jp-spotted') : '';
-      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '') + (d.watched ? ' jp-watched' : '') + spotClass;
+      row.className = 'jp-row' + (isCq ? ' jp-cq' : '') + (isDirected ? ' jp-directed' : '') + (isWanted ? ' jp-wanted' : '') + (d.chaseMatch ? ' jp-chase' : '') + (d.watched ? ' jp-watched' : '') + spotClass;
       if (spotMatch && spotMatch.reference) row.title = 'Spotted at ' + spotMatch.reference + (spotMatch.isNewPark ? ' (new park)' : '');
       var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
       // Band badge for multi-slice decodes
@@ -981,6 +990,82 @@ function _applyPopoutTheme(payload) {
     wantedFilterBtn.classList.toggle('active', wantedFilter);
   });
 
+  // --- Chase target picker (CqTarget shared module) ---
+  // Quick-pick tags that live in the dropdown directly; anything else (a US
+  // state or DXCC prefix) lives in the custom input under the "Custom…" option.
+  var CHASE_QUICK = (window.CqTarget && window.CqTarget.QUICK_PICKS) || [];
+  var chaseQuickSet = {};
+  CHASE_QUICK.forEach(function(p) { chaseQuickSet[p.tag] = true; });
+
+  (function buildChasePicker() {
+    if (!chaseSelect) return;
+    var html = '<option value="">Chase: --</option>';
+    var lastCat = '';
+    CHASE_QUICK.forEach(function(p) {
+      if (p.category !== lastCat) {
+        if (lastCat) html += '</optgroup>';
+        html += '<optgroup label="' + esc(p.category) + '">';
+        lastCat = p.category;
+      }
+      html += '<option value="' + esc(p.tag) + '">' + esc(p.tag) + '</option>';
+    });
+    if (lastCat) html += '</optgroup>';
+    html += '<option value="__custom">Custom (state/prefix)…</option>';
+    chaseSelect.innerHTML = html;
+  })();
+
+  // Reflect a tag into the picker UI without firing change handlers.
+  function reflectChaseTarget(tag) {
+    if (!chaseSelect) return;
+    tag = tag || '';
+    if (!tag) { chaseSelect.value = ''; if (chaseCustom) chaseCustom.style.display = 'none'; return; }
+    if (chaseQuickSet[tag]) {
+      chaseSelect.value = tag;
+      if (chaseCustom) chaseCustom.style.display = 'none';
+    } else {
+      chaseSelect.value = '__custom';
+      if (chaseCustom) { chaseCustom.style.display = ''; chaseCustom.value = tag; }
+    }
+  }
+
+  // Validate + apply locally, then tell main (which persists + syncs the phone).
+  function applyChaseTarget(rawTag) {
+    var v = window.CqTarget ? window.CqTarget.validateTag(rawTag) : { ok: true, tag: (rawTag || '').toUpperCase() };
+    if (!v.ok) { reflectChaseTarget(chaseTarget); return; } // revert on invalid (too long)
+    chaseTarget = v.tag;
+    reflectChaseTarget(chaseTarget);
+    if (window.api.jtcatSetChaseTarget) window.api.jtcatSetChaseTarget(chaseTarget);
+  }
+
+  if (chaseSelect) {
+    chaseSelect.addEventListener('change', function() {
+      if (chaseSelect.value === '__custom') {
+        if (chaseCustom) { chaseCustom.style.display = ''; chaseCustom.focus(); }
+        return; // wait for the custom field to commit
+      }
+      applyChaseTarget(chaseSelect.value);
+    });
+  }
+  if (chaseCustom) {
+    var commitCustom = function() { applyChaseTarget(chaseCustom.value); };
+    chaseCustom.addEventListener('change', commitCustom);
+    chaseCustom.addEventListener('blur', commitCustom);
+    chaseCustom.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); commitCustom(); chaseCustom.blur(); } });
+  }
+  if (chaseFilterBtn) {
+    chaseFilterBtn.addEventListener('click', function() {
+      chaseFilter = !chaseFilter;
+      chaseFilterBtn.classList.toggle('active', chaseFilter);
+    });
+  }
+  // Live sync from main (phone changed it, or echo of our own change).
+  if (window.api.onJtcatChaseTarget) {
+    window.api.onJtcatChaseTarget(function(state) {
+      chaseTarget = (state && state.tag) || '';
+      reflectChaseTarget(chaseTarget);
+    });
+  }
+
   var sortSignalBtn = document.getElementById('jp-sort-signal');
   sortSignalBtn.addEventListener('click', function() {
     sortBySignal = !sortBySignal;
@@ -1386,10 +1471,9 @@ function _applyPopoutTheme(payload) {
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
   });
 
-  var cqModifierSelect = document.getElementById('jp-cq-modifier');
   cqBtn.addEventListener('click', function() {
-    var mod = cqModifierSelect ? cqModifierSelect.value : '';
-    window.api.jtcatCallCq(mod);
+    // Call CQ directed at the current chase target (CQ <tag> <call> <grid>).
+    window.api.jtcatCallCq(chaseTarget);
   });
 
   enableTxBtn.addEventListener('click', function() {
@@ -1454,8 +1538,7 @@ function _applyPopoutTheme(payload) {
   if (fullAutoCqBtn) {
     fullAutoCqBtn.addEventListener('click', function() {
       var turningOn = !fullAutoCqActive;
-      var mod = cqModifierSelect ? cqModifierSelect.value : '';
-      window.api.jtcatSetFullAutoCq({ on: turningOn, modifier: mod });
+      window.api.jtcatSetFullAutoCq({ on: turningOn, modifier: chaseTarget });
       if (turningOn) { // run mode drives TX
         txEnabled = true;
         enableTxBtn.classList.add('active');

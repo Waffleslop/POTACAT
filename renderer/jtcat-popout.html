@@ -40,6 +40,10 @@
     .jp-row.jp-tx { opacity: 0.7; }
     .jp-row.jp-tx .jp-db { color: #e94560; }
     .jp-row.jp-wanted { background: rgba(255, 215, 64, 0.08); }
+    /* Chase target match — the entity you're chasing, distinct gold accent. */
+    .jp-row.jp-chase { border-left: 3px solid #ffcc33; padding-left: 5px; background: rgba(255, 204, 51, 0.12); }
+    .jp-row.jp-chase .jp-msg { color: #ffd966; }
+    .jp-badge.jp-badge-chase { background: #ffcc33; color: #1a1a2e; }
     /* Spot-list match: POTA/WWFF activator visible in the main spot table. */
     .jp-row.jp-spotted { border-left: 3px solid var(--accent-green, #4ecca3); padding-left: 5px; }
     /* New park: stronger highlight so unworked parks pop in busy Band Activity. */
@@ -255,13 +259,12 @@
   <!-- Controls -->
   <div class="jp-controls">
     <button id="jp-cq" class="jp-btn">CQ</button>
-    <select id="jp-cq-modifier" style="font-size:11px;padding:3px 2px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;" title="CQ modifier">
-      <option value="">--</option>
-      <option value="POTA">POTA</option>
-      <option value="SOTA">SOTA</option>
-      <option value="QRP">QRP</option>
-      <option value="DX">DX</option>
-    </select>
+    <!-- Chase target: what you call CQ to (CQ <tag> …) AND the entity whose
+         decodes get highlighted. Populated from CqTarget.QUICK_PICKS; "Custom…"
+         reveals the input for a US state (FL) or DXCC prefix (JA). -->
+    <select id="jp-chase-target" style="font-size:11px;padding:3px 2px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;" title="Chase target — directs your CQ and highlights matching decodes"></select>
+    <input id="jp-chase-custom" type="text" maxlength="4" placeholder="JA / FL" title="US state code (FL) or DXCC prefix (JA) — ≤4 letters, UPPERCASE" style="display:none;width:46px;font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
+    <button id="jp-chase-filter" class="jtcat-filter-btn" title="Show only decodes that match your chase target">Chase</button>
     <select id="jp-auto-cq" style="font-size:11px;padding:3px 2px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;" title="Auto-respond to CQ calls">
       <option value="off">Auto: Off</option>
       <option value="pota">Auto: POTA</option>
@@ -285,6 +288,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="jtcat-parser.js"></script>
+  <script src="cq-target.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>
 </html>

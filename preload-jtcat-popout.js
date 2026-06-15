@@ -64,6 +64,9 @@ contextBridge.exposeInMainWorld('api', {
   openQsoLog: () => ipcRenderer.send('qso-popout-open'),
   jtcatSetAutoCqMode: (mode) => ipcRenderer.send('jtcat-popout-auto-cq-mode', mode),
   onJtcatAutoCqState: (cb) => ipcRenderer.on('jtcat-auto-cq-state', (_e, data) => cb(data)),
+  // Chase target — the CQ tag / entity being chased (shared with the phone)
+  jtcatSetChaseTarget: (tag) => ipcRenderer.send('jtcat-popout-set-chase-target', tag || ''),
+  onJtcatChaseTarget: (cb) => ipcRenderer.on('jtcat-chase-target', (_e, data) => cb(data)),
   // ULTRACAT (tier-2 easter egg) — Full Auto CQ run mode
   onJtcatUltracat: (cb) => ipcRenderer.on('jtcat-ultracat', (_e, on) => cb(on)),
   jtcatSetFullAutoCq: (on) => ipcRenderer.send('jtcat-popout-full-auto-cq', on),

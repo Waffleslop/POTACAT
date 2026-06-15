@@ -10,6 +10,7 @@
   <title>ECHOCAT</title>
   <!-- leaflet-css -->
   <link rel="stylesheet" href="remote.css">
+  <!-- cq-target-js -->
   <script>if(localStorage.getItem('echocat-theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').content='#e8eaed'}</script>
 </head>
 <body>
@@ -1136,6 +1137,7 @@
         <input type="text" id="ft8-search" placeholder="Filter..." style="width:60px;font-size:10px;padding:1px 4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:3px;" spellcheck="false">
         <button type="button" id="ft8-cq-filter" class="ft8-filter-btn" title="Show only CQ and 73">CQ/73</button>
         <button type="button" id="ft8-wanted-filter" class="ft8-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button>
+        <button type="button" id="ft8-chase-filter" class="ft8-filter-btn" title="Show only decodes matching your chase target">Chase</button>
         <button type="button" id="ft8-sort-signal" class="ft8-filter-btn" title="Sort by signal strength">dB</button>
         <button type="button" id="ft8-multi-btn" class="ft8-filter-btn" title="Multi-slice decode">Multi</button>
         <button type="button" id="ft8-erase-btn" class="ft8-erase-btn">Erase</button>
@@ -1166,6 +1168,8 @@
         <button type="button" id="ft8-tx-btn" class="ft8-ctrl-btn ft8-tx-btn">TX</button>
         <button type="button" id="ft8-slot-btn" class="ft8-ctrl-btn ft8-slot-btn">Auto</button>
         <button type="button" id="ft8-cq-btn" class="ft8-ctrl-btn ft8-cq-btn">CQ</button>
+        <select id="ft8-chase" class="ft8-ctrl-btn" style="font-size:11px;padding:2px;width:auto;" title="Chase target — directs your CQ and highlights matching decodes"></select>
+        <input id="ft8-chase-custom" type="text" maxlength="4" placeholder="JA/FL" title="US state code or DXCC prefix — ≤4 letters" style="display:none;width:42px;font-size:11px;padding:2px 3px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:3px;text-transform:uppercase;">
         <select id="ft8-auto-cq" class="ft8-ctrl-btn" style="font-size:11px;padding:2px;width:auto;">
           <option value="off">Auto</option>
           <option value="pota">POTA</option>

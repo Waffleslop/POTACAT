@@ -237,6 +237,7 @@ const { PskrClient } = require('./lib/pskreporter');
 const { Ft8Engine } = require('./lib/ft8-engine');
 const { checkClockOffset, syncSystemClock } = require('./lib/ntp');
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
+const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
 const { RemoteClient } = require('./lib/remote-client');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
@@ -3982,6 +3983,57 @@ function broadcastAutoCqState() {
   }
 }
 
+// ─── Chase Target ───────────────────────────────────────────────────────────
+// One shared preference (settings.jtcatChaseTarget, '' = none) that drives both
+// the outgoing CQ tag and the incoming decode highlight, in BOTH the JTCAT
+// popout and the ECHOCAT phone. Last-writer-wins; the central setter persists
+// and rebroadcasts so the surfaces stay in sync. See renderer/cq-target.js.
+
+// Push the current chase target to popout + phone (mirrors broadcastAutoCqState).
+function broadcastChaseTarget() {
+  const state = { tag: settings.jtcatChaseTarget || '' };
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-chase-target', state);
+  }
+  if (remoteServer && remoteServer.hasClient()) {
+    remoteServer.broadcastJtcatChaseTarget(state);
+  }
+}
+
+// Central setter — validates, persists, syncs the other surfaces. Called from
+// the popout IPC and the phone WS handler.
+function applyChaseTarget(rawTag) {
+  const v = CqTarget.validateTag(rawTag);
+  if (!v.ok) { sendCatLog('[JTCAT] Chase target rejected: ' + (v.reason || rawTag)); return false; }
+  if ((settings.jtcatChaseTarget || '') === v.tag) { broadcastChaseTarget(); return true; }
+  settings.jtcatChaseTarget = v.tag;
+  saveSettings(settings);
+  updateRemoteSettings();
+  broadcastChaseTarget();
+  sendCatLog('[JTCAT] Chase target set: ' + (v.tag || '(none)'));
+  return true;
+}
+
+// Build the per-cycle chase context: the current target plus the cty-backed
+// helpers matchesDecode needs. Resolve the target prefix → entity ONCE here, not
+// per decode. Returns null when there's no target (caller skips flagging).
+function buildChaseContext() {
+  const target = settings.jtcatChaseTarget || '';
+  if (!target) return null;
+  let homeContinent = '';
+  let targetEntityName = null;
+  if (ctyDb) {
+    const me = settings.myCallsign ? resolveCallsign(settings.myCallsign, ctyDb) : null;
+    if (me) homeContinent = me.continent || '';
+    const cls = CqTarget.classifyTarget(target);
+    if (cls.kind === 'dxcc') {
+      const e = resolveCallsign(cls.tag, ctyDb);
+      targetEntityName = e ? e.name : null;
+    }
+  }
+  return { target, helpers: { homeContinent, targetEntityName } };
+}
+
 // ─── Full Auto CQ (ULTRACAT) ────────────────────────────────────────────────
 // Run mode: call CQ, work whoever answers, then re-arm CQ — forever, until the
 // operator stops it or the attended-watchdog trips. Gated behind the π unlock.
@@ -4009,6 +4061,11 @@ function broadcastFullAutoCqState() {
   }
 }
 
+// CQ TX message builder — delegates to the shared module (renderer/cq-target.js)
+// so the popout CQ button, the phone CQ button, and Full Auto CQ re-arm all
+// produce the same protocol-legal string.
+const buildCqTxMsg = CqTarget.buildCqTxMsg;
+
 // Build a fresh CQ QSO object and start transmitting. Returns the QSO or null
 // if callsign/grid/engine aren't ready. Shared by re-arm; mirrors the manual
 // CQ button's message build.
@@ -4016,8 +4073,7 @@ function jtcatBuildCqQso(modifier) {
   const myCall = (settings.myCallsign || '').toUpperCase();
   const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
   if (!myCall || !myGrid || !ft8Engine) return null;
-  const mod = (modifier || '').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4);
-  const txMsg = mod ? 'CQ ' + mod + ' ' + myCall + ' ' + myGrid : 'CQ ' + myCall + ' ' + myGrid;
+  const txMsg = buildCqTxMsg(myCall, myGrid, modifier);
   const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
   ft8Engine.setTxSlot(nextSlot);
   const qso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg,
@@ -4342,6 +4398,7 @@ function startJtcat(mode) {
       // Parse watchlist for matching
       const wlStr = (settings.watchlist || '').toUpperCase();
       const wlCalls = wlStr ? wlStr.split(',').map(s => s.trim().split(':')[0]).filter(Boolean) : [];
+      const chaseCtx = buildChaseContext();
       for (const r of data.results) {
         const { dxCall } = extractCallsigns(r.text || '');
         if (!dxCall) continue;
@@ -4363,6 +4420,8 @@ function startJtcat(mode) {
           r.grid = gm[1].toUpperCase();
           r.newGrid = !rosterWorkedGrids.has(r.grid);
         }
+        // Chase target highlight (renderer/cq-target.js). One rule for popout + phone.
+        if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
       }
     }
 
@@ -5687,6 +5746,10 @@ function updateRemoteSettings() {
     // retry ceiling so the phone's matching control shows the same value.
     ultracat: !!settings.ultracat,
     jtcatMaxQsoAttempts: jtcatMaxQsoRetries(),
+    // Chase target — the entity/tag the operator is chasing. Rides the auth-ok
+    // blob so a (re)connecting phone seeds its picker; live changes come via the
+    // jtcat-chase-target S2C message.
+    jtcatChaseTarget: settings.jtcatChaseTarget || '',
     enableAtu: !!settings.enableAtu,
     tuneClick: !!settings.tuneClick,
     enableRotor: !!settings.enableRotor,
@@ -8369,7 +8432,7 @@ function connectRemote() {
     else stopInProcessSpectrum();
   });
 
-  remoteServer.on('jtcat-call-cq', async () => {
+  remoteServer.on('jtcat-call-cq', async ({ modifier } = {}) => {
     if (!ft8Engine) return;
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
@@ -8383,7 +8446,10 @@ function connectRemote() {
     }
     // Auto-place TX on quiet frequency from FFT analysis
     ft8Engine.setTxFreq(jtcatQuietFreq);
-    const txMsg = 'CQ ' + myCall + ' ' + myGrid;
+    // Honor the phone's chase tag (the bare-CQ gap fix). Falls back to the
+    // shared chase target if the phone didn't send one. Same builder as the
+    // popout + Full Auto CQ so all three agree and clamp identically.
+    const txMsg = buildCqTxMsg(myCall, myGrid, modifier != null ? modifier : (settings.jtcatChaseTarget || ''));
     // TX on next available slot
     const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : (ft8Engine._lastRxSlot === 'odd' ? 'even' : 'even');
     ft8Engine.setTxSlot(nextSlot);
@@ -8511,6 +8577,11 @@ function connectRemote() {
     if (mode === 'off') jtcatAutoCqWorkedSession.clear();
     broadcastAutoCqState();
     console.log('[JTCAT Remote] Auto-CQ mode:', mode);
+  });
+
+  // Chase target from the phone — shared, last-writer-wins (see applyChaseTarget).
+  remoteServer.on('jtcat-set-chase-target', ({ tag } = {}) => {
+    applyChaseTarget(tag);
   });
 
   remoteServer.on('jtcat-halt-tx', () => {
@@ -16553,8 +16624,7 @@ app.whenReady().then(() => {
       sendCatLog(`[JTCAT] CQ aborted — ${!myCall ? 'callsign not set' : 'grid not set'} in Settings`);
       return;
     }
-    const mod = (modifier || '').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4);
-    const txMsg = mod ? 'CQ ' + mod + ' ' + myCall + ' ' + myGrid : 'CQ ' + myCall + ' ' + myGrid;
+    const txMsg = buildCqTxMsg(myCall, myGrid, modifier != null ? modifier : (settings.jtcatChaseTarget || ''));
     // TX on opposite slot from last decode; default to 'even' if no decodes yet
     const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
     ft8Engine.setTxSlot(nextSlot);
@@ -16578,6 +16648,11 @@ app.whenReady().then(() => {
     if (mode === 'off') jtcatAutoCqWorkedSession.clear();
     broadcastAutoCqState();
     console.log('[JTCAT Popout] Auto-CQ mode:', mode);
+  });
+
+  // Chase target from the popout — shared, last-writer-wins (see applyChaseTarget).
+  ipcMain.on('jtcat-popout-set-chase-target', (_e, tag) => {
+    applyChaseTarget(tag);
   });
 
   // ULTRACAT unlock state from the main window — forward to the popout so its
@@ -20041,6 +20116,7 @@ app.whenReady().then(() => {
           const currentBand = s.freqKhz ? freqToBand(s.freqKhz / 1000) : null;
           const wlStr = (settings.watchlist || '').toUpperCase();
           const wlCalls = wlStr ? wlStr.split(',').map(w => w.trim().split(':')[0]).filter(Boolean) : [];
+          const chaseCtx = buildChaseContext();
           for (const r of data.results) {
             r.sliceId = s.sliceId;
             r.band = currentBand || s.band || '';
@@ -20061,6 +20137,7 @@ app.whenReady().then(() => {
               r.grid = gm[1].toUpperCase();
               r.newGrid = !rosterWorkedGrids.has(r.grid);
             }
+            if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
           }
         }
         // Forward to popout

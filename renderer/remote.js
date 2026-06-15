@@ -581,6 +581,8 @@
   let ft8UserScrolled = false; // true when user has scrolled up in decode log
   let ft8CqFilter = false;     // CQ-only filter
   let ft8WantedFilter = false; // Wanted-only filter (new DXCC/grid/call)
+  let ft8ChaseFilter = false;  // Chase-only filter (matches the chase target)
+  let ft8ChaseTarget = '';     // chase tag ('' = none); shared with the desktop
   let ft8SortSignal = false;   // Sort decodes by signal strength
   let ft8SearchFilter = '';    // Text search filter
   let ft8TxFreqHz = 1500;      // TX frequency in Hz (for waterfall marker)
@@ -1125,6 +1127,8 @@
           echoSettings = msg.settings;
           myCallsign = msg.settings.myCallsign || '';
           phoneGrid = msg.settings.grid || phoneGrid;
+          // Seed the chase-target picker from the desktop's current value.
+          if (typeof window.__ft8ReflectChase === 'function') window.__ft8ReflectChase(msg.settings.jtcatChaseTarget || '');
           clusterConnected = !!msg.settings.clusterConnected;
           respotDefault = msg.settings.respotDefault !== false;
           if (msg.settings.respotTemplate) respotTemplate = msg.settings.respotTemplate;
@@ -1689,6 +1693,11 @@
           ft8AutoCqSelect.value = msg.mode || 'off';
           ft8AutoCqSelect.style.borderColor = msg.mode !== 'off' ? 'var(--pota)' : '';
         }
+        break;
+
+      case 'jtcat-chase-target':
+        // Desktop (or another client) changed the shared chase target.
+        if (typeof window.__ft8ReflectChase === 'function') window.__ft8ReflectChase(msg.tag || '');
         break;
 
       // Cloud Sync messages
@@ -6012,10 +6021,12 @@
         // Apply CQ filter — always show CQ, 73, directed-at-me, hunted, and QSO partner
         if (ft8CqFilter && !isCq && !is73 && !isDirected && !isHunt && !isQsoPartner) return;
         if (ft8WantedFilter && !isWanted && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
+        if (ft8ChaseFilter && !d.chaseMatch && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
         if (ft8SearchFilter && upper.indexOf(ft8SearchFilter) === -1) return;
 
         // Build needed badges + entity
         let badges = '';
+        if (d.chaseMatch) badges += '<span class="ft8-badge ft8-badge-chase" title="Chase target: ' + esc(ft8ChaseTarget) + '">◎</span>';
         if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
         if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
         if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
@@ -6025,7 +6036,7 @@
         const entityStr = d.entity ? '<span class="ft8-entity">' + esc(d.entity) + '</span>' : '';
 
         const row = document.createElement('div');
-        row.className = 'ft8-row' + (isCq ? ' ft8-cq' : '') + (isDirected ? ' ft8-directed' : '') + (isHunt ? ' ft8-hunt' : '') + (isWanted ? ' ft8-wanted' : '') + (d.watched ? ' ft8-watched' : '');
+        row.className = 'ft8-row' + (isCq ? ' ft8-cq' : '') + (isDirected ? ' ft8-directed' : '') + (isHunt ? ' ft8-hunt' : '') + (isWanted ? ' ft8-wanted' : '') + (d.chaseMatch ? ' ft8-chase' : '') + (d.watched ? ' ft8-watched' : '');
         row.innerHTML =
           '<span class="ft8-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
           '<span class="ft8-dt">' + (d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '') + '</span>' +
@@ -6315,10 +6326,10 @@
       // Cancel current QSO
       ft8Send({ type: 'jtcat-cancel-qso' });
     } else {
-      // Call CQ
+      // Call CQ directed at the current chase target (CQ <tag> <call> <grid>).
       ft8TxEnabled = true;
       ft8TxBtn.classList.add('active');
-      ft8Send({ type: 'jtcat-call-cq' });
+      ft8Send({ type: 'jtcat-call-cq', modifier: ft8ChaseTarget });
     }
   });
 
@@ -6369,6 +6380,76 @@
       ft8SortSignalBtn.classList.toggle('active', ft8SortSignal);
     });
   }
+
+  // --- Chase target (shared CqTarget module, synced with the desktop) ---
+  var ft8ChaseFilterBtn = document.getElementById('ft8-chase-filter');
+  var ft8ChaseSelect = document.getElementById('ft8-chase');
+  var ft8ChaseCustom = document.getElementById('ft8-chase-custom');
+  var ft8ChaseQuick = (window.CqTarget && window.CqTarget.QUICK_PICKS) || [];
+  var ft8ChaseQuickSet = {};
+  ft8ChaseQuick.forEach(function(p) { ft8ChaseQuickSet[p.tag] = true; });
+
+  (function buildFt8ChasePicker() {
+    if (!ft8ChaseSelect) return;
+    var html = '<option value="">Chase: --</option>';
+    var lastCat = '';
+    ft8ChaseQuick.forEach(function(p) {
+      if (p.category !== lastCat) {
+        if (lastCat) html += '</optgroup>';
+        html += '<optgroup label="' + esc(p.category) + '">';
+        lastCat = p.category;
+      }
+      html += '<option value="' + esc(p.tag) + '">' + esc(p.tag) + '</option>';
+    });
+    if (lastCat) html += '</optgroup>';
+    html += '<option value="__custom">Custom…</option>';
+    ft8ChaseSelect.innerHTML = html;
+  })();
+
+  function reflectFt8ChaseTarget(tag) {
+    if (!ft8ChaseSelect) return;
+    tag = tag || '';
+    if (!tag) { ft8ChaseSelect.value = ''; if (ft8ChaseCustom) ft8ChaseCustom.style.display = 'none'; return; }
+    if (ft8ChaseQuickSet[tag]) {
+      ft8ChaseSelect.value = tag;
+      if (ft8ChaseCustom) ft8ChaseCustom.style.display = 'none';
+    } else {
+      ft8ChaseSelect.value = '__custom';
+      if (ft8ChaseCustom) { ft8ChaseCustom.style.display = ''; ft8ChaseCustom.value = tag; }
+    }
+  }
+
+  function applyFt8ChaseTarget(rawTag) {
+    var v = window.CqTarget ? window.CqTarget.validateTag(rawTag) : { ok: true, tag: (rawTag || '').toUpperCase() };
+    if (!v.ok) { reflectFt8ChaseTarget(ft8ChaseTarget); return; } // revert on invalid
+    ft8ChaseTarget = v.tag;
+    reflectFt8ChaseTarget(ft8ChaseTarget);
+    ft8Send({ type: 'jtcat-set-chase-target', tag: ft8ChaseTarget });
+  }
+
+  if (ft8ChaseSelect) {
+    ft8ChaseSelect.addEventListener('change', function() {
+      if (ft8ChaseSelect.value === '__custom') {
+        if (ft8ChaseCustom) { ft8ChaseCustom.style.display = ''; ft8ChaseCustom.focus(); }
+        return;
+      }
+      applyFt8ChaseTarget(ft8ChaseSelect.value);
+    });
+  }
+  if (ft8ChaseCustom) {
+    var commitFt8Custom = function() { applyFt8ChaseTarget(ft8ChaseCustom.value); };
+    ft8ChaseCustom.addEventListener('change', commitFt8Custom);
+    ft8ChaseCustom.addEventListener('blur', commitFt8Custom);
+    ft8ChaseCustom.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); commitFt8Custom(); ft8ChaseCustom.blur(); } });
+  }
+  if (ft8ChaseFilterBtn) {
+    ft8ChaseFilterBtn.addEventListener('click', function() {
+      ft8ChaseFilter = !ft8ChaseFilter;
+      ft8ChaseFilterBtn.classList.toggle('active', ft8ChaseFilter);
+    });
+  }
+  // Expose for the settings-blob seed + the jtcat-chase-target dispatcher.
+  window.__ft8ReflectChase = function(tag) { ft8ChaseTarget = tag || ''; reflectFt8ChaseTarget(ft8ChaseTarget); };
 
   // Search filter
   var ft8SearchInput = document.getElementById('ft8-search');
