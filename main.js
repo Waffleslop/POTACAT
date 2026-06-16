@@ -3325,7 +3325,12 @@ function connectCluster() {
     client.connect({
       host: node.host,
       port: node.port,
-      callsign: settings.myCallsign,
+      // Per-node login callsign override. Cluster nodes allow only ONE
+      // connection per callsign, so an op who already feeds a node from their
+      // primary logger under their base call needs POTACAT to log in under a
+      // distinct SSID (e.g. WG9I-2) to run both at once. Blank = base call.
+      // (WG9I 2026-06-13.)
+      callsign: (node.loginCall && node.loginCall.trim()) || settings.myCallsign,
     });
 
     clusterClients.set(node.id, { client, nodeConfig: node });

@@ -3625,6 +3625,31 @@ function renderClusterNodeList(nodes) {
     info.appendChild(nameEl);
     info.appendChild(hostEl);
 
+    // Per-node login callsign override. Cluster nodes accept one connection
+    // per callsign, so an op feeding a node from another logger under their
+    // base call logs POTACAT in under an SSID (e.g. WG9I-2) here to run both.
+    // Blank = use My Callsign. (WG9I 2026-06-13.)
+    const myCall = ((document.getElementById('set-my-callsign') || {}).value || '').trim().toUpperCase();
+    const loginRow = document.createElement('div');
+    loginRow.className = 'node-item-login';
+    loginRow.style.cssText = 'font-size:11px;margin-top:3px;display:flex;align-items:center;gap:4px;';
+    const loginLabel = document.createElement('span');
+    loginLabel.textContent = 'Login as:';
+    const loginInput = document.createElement('input');
+    loginInput.type = 'text';
+    loginInput.maxLength = 12;
+    loginInput.value = node.loginCall || '';
+    loginInput.placeholder = myCall || 'My Callsign';
+    loginInput.style.cssText = 'width:110px;font-size:11px;padding:1px 4px;';
+    loginInput.title = 'Log in to this node under a different callsign (e.g. ' +
+      (myCall ? myCall + '-2' : 'WG9I-2') + ') so POTACAT does not collide with another app feeding the same node under your base call. Blank = My Callsign.';
+    loginInput.addEventListener('input', () => {
+      node.loginCall = loginInput.value.trim().toUpperCase();
+    });
+    loginRow.appendChild(loginLabel);
+    loginRow.appendChild(loginInput);
+    info.appendChild(loginRow);
+
     const dot = document.createElement('span');
     dot.className = 'node-status-dot';
     // Update from live status
