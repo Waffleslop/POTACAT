@@ -332,6 +332,33 @@ function _applyPopoutTheme(payload) {
     }
   }
 
+  // Cap how many FT8 decode cycles stay in each panel's DOM. renderDecodes()
+  // appends a separator + rows every cycle (~4/min) and they were never
+  // removed — the live document can't GC attached nodes, so the popout
+  // renderer leaked ~4.5 MB/min and Chromium eventually CHECK()-aborted after
+  // a few hours of continuous decoding. (78hawkeye, PR #54.)
+  var MAX_BA_CYCLES = 10;  // Band Activity — ~2.5 min of visible history
+  var MAX_MY_CYCLES = 30;  // My Activity grows much slower (directed only)
+
+  // Remove the oldest cycles (a .jp-cycle-sep and everything up to the next
+  // separator) until at most maxCycles remain.
+  function pruneCyclePanel(container, maxCycles) {
+    var seps = container.querySelectorAll('.jp-cycle-sep');
+    if (seps.length <= maxCycles) return;
+    var toRemove = seps.length - maxCycles;
+    for (var i = 0; i < toRemove; i++) {
+      var sep = container.querySelector('.jp-cycle-sep');
+      if (!sep) break;
+      var next = sep.nextSibling;
+      sep.remove();
+      while (next && !(next.classList && next.classList.contains('jp-cycle-sep'))) {
+        var tmp = next.nextSibling;
+        if (next.remove) next.remove();
+        next = tmp;
+      }
+    }
+  }
+
   function clearOld() {
     var now = Date.now();
     Object.keys(qsoArcs).forEach(function(key) {
@@ -341,6 +368,8 @@ function _applyPopoutTheme(payload) {
       if (call === myCallsign) return; // never expire our own station
       if (stations[call].lastSeen < now - 180000) { markerLayer.removeLayer(stations[call].marker); delete stations[call]; }
     });
+    pruneCyclePanel(bandActivity, MAX_BA_CYCLES);
+    pruneCyclePanel(myActivity, MAX_MY_CYCLES);
   }
 
   // --- QSO phase definitions ---
@@ -828,18 +857,32 @@ function _applyPopoutTheme(payload) {
     }
     if (transmitting && data.message) {
       txMsgEl.textContent = data.message;
-      // Add TX row
+      // Add TX row — prefixed with a .jp-cycle-sep so pruneCyclePanel() can
+      // evict it like any decode cycle. Without the separator the row is
+      // orphaned and accumulates forever (one per TX slot). (78hawkeye, PR #54.)
+      var txTime = cycleBoundaryUtc();
+      var txRowHtml = '<span class="jp-db">TX</span><span class="jp-df">--</span><span class="jp-msg">' + esc(data.message) + '</span>';
+      var baEmpty = bandActivity.querySelector('.jp-empty');
+      if (baEmpty) baEmpty.remove();
+      var baSep = document.createElement('div');
+      baSep.className = 'jp-cycle-sep';
+      baSep.textContent = txTime + ' UTC';
+      bandActivity.appendChild(baSep);
       var row = document.createElement('div');
       row.className = 'jp-row jp-tx';
-      row.innerHTML = '<span class="jp-db">TX</span><span class="jp-df">--</span><span class="jp-msg">' + esc(data.message) + '</span>';
+      row.innerHTML = txRowHtml;
       bandActivity.appendChild(row);
       bandActivity.scrollTop = bandActivity.scrollHeight;
-      // Also add TX row to My Activity
+      // Also add TX row to My Activity (same separator pattern).
       var mEmpty = myActivity.querySelector('.jp-empty');
       if (mEmpty) mEmpty.remove();
+      var mySep = document.createElement('div');
+      mySep.className = 'jp-cycle-sep';
+      mySep.textContent = txTime + ' UTC';
+      myActivity.appendChild(mySep);
       var myTxRow = document.createElement('div');
       myTxRow.className = 'jp-row jp-tx';
-      myTxRow.innerHTML = '<span class="jp-db">TX</span><span class="jp-df">--</span><span class="jp-msg">' + esc(data.message) + '</span>';
+      myTxRow.innerHTML = txRowHtml;
       myActivity.appendChild(myTxRow);
       myActivity.scrollTop = myActivity.scrollHeight;
     }

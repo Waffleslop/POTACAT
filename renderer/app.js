@@ -24081,6 +24081,11 @@ window.api.onJtcatDecode(function(data) {
       mode: data.mode,
       results: jtcatDecodes,
     });
+    // Cap at 10 cycles. renderJtcatDecodes() rebuilds the whole DOM from this
+    // array every decode, so unbounded growth leaked heap + DOM indefinitely —
+    // even though this in-window panel is never shown, the handler still runs.
+    // (78hawkeye, PR #54.)
+    if (jtcatDecodeLog.length > 10) jtcatDecodeLog.shift();
   }
   // NOTE: sync status is NOT set here. Decodes arriving says nothing about the
   // PC clock — the real status comes from the NTP monitor (onJtcatClock below).
