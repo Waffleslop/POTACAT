@@ -106,7 +106,7 @@
               <label class="spots-toggle" id="spots-hide-callref-label" title="Hide a spot only if you've already worked the same call AT THE SAME park today on the same band/mode. A roving activator at a new park stays visible."><input type="checkbox" id="spots-hide-callref"> Hide worked CALL+park combos</label>
               <label class="spots-toggle" id="spots-prioritize-new-label"><input type="checkbox" id="spots-prioritize-new"> Show NEW parks at top</label>
               <label class="spots-toggle" id="spots-strict-atno-label" title="Mark parks NEW unless they're in your imported POTA hunter CSV. Local-only QSOs that haven't reached pota.app won't suppress the NEW flag (K0OTC)."><input type="checkbox" id="spots-strict-atno"> Strict ATNO (POTA-credited only)</label>
-              <label class="spots-toggle"><input type="checkbox" id="spots-hide-oob"> Hide out-of-band</label>
+              <label class="spots-toggle" title="Hide spots your license class can't operate (and any truly out-of-band frequencies). Needs your License Class set in Settings → Operator — if it's None, nothing is hidden."><input type="checkbox" id="spots-hide-oob"> Hide out-of-privilege</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
             </div>
@@ -1910,7 +1910,8 @@
         <input type="number" id="set-max-dist" min="0" max="25000" step="50" value="0">
         <span class="help-text" id="set-max-dist-unit">miles</span>
       </label>
-      <label class="checkbox-label"><input type="checkbox" id="set-hide-out-of-band"> Hide out-of-band spots</label>
+      <label class="checkbox-label" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies."><input type="checkbox" id="set-hide-out-of-band"> Hide spots outside my license privileges</label>
+      <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings → Operator). If that's set to None, nothing is hidden.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-hide-worked"> Hide already-worked stations</label>
       <label>Watchlist (comma-separated, optional band:mode filter):
         <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL:CW, K0BUF:20m, W1AW:40m:SSB">
@@ -3721,8 +3722,8 @@
         </select>
       </label>
     </div>
-    <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;">
-      <input type="checkbox" id="welcome-hide-oob"> Hide out-of-privilege spots
+    <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies. Uses the License Class above.">
+      <input type="checkbox" id="welcome-hide-oob"> Hide spots outside my license privileges
     </label>
 
     <div class="welcome-section-label">FT8 Battle Royale</div>
