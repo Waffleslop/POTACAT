@@ -3137,7 +3137,16 @@ async function saveBannerQso() {
   try {
     for (let ci = 0; ci < callsigns.length; ci++) {
       const cs = callsigns[ci];
-      const qrzInfo = qrzData.get(cs.split('/')[0]);
+      // Resolve the operator name reliably before building the record. A bare
+      // cache read raced the on-screen lookup (and missed on case-mismatch:
+      // the cache is keyed uppercase) so the ADIF <NAME> was written empty
+      // even when the name showed on screen. Cache-first, awaited fallback.
+      const blBareCall = cs.split('/')[0].toUpperCase();
+      let qrzInfo = qrzData.get(blBareCall);
+      if (!qrzInfo) {
+        try { qrzInfo = await window.api.qrzLookup(cs); } catch {}
+        if (qrzInfo) qrzData.set(blBareCall, qrzInfo);
+      }
       const qsoData = {
         callsign: cs,
         frequency: String(freqKhz),
@@ -20636,19 +20645,26 @@ function renderActivatorLog() {
   activatorLogBody.innerHTML = '';
   // Pre-compute the filter for the PREV badge: a call counts as "worked
   // before" only if it has at least one QSO entry that ISN'T from this
-  // activation (today, this park ref). Without this filter, every call
-  // logged in the current session shows PREV the moment it's saved
+  // activation (today, at one of this activation's park refs). Without this,
+  // every call logged in the current session shows PREV the moment it's saved
   // — the freshly-written QSO is already in workedQsos before we render
-  // (Casey: "every call has PREV by it. I know I've not worked every
-  // call previously.").
+  // (Casey: "every call has PREV by it. I know I've not worked every call
+  // previously.").
+  //
+  // CANONICAL logic lives in lib/adif.js → isPriorActivationWork() and is unit
+  // tested in test/activation-log-test.js. It is mirrored inline here because
+  // the renderer cannot require() Node modules — keep the two in sync. Match on
+  // myRef (MY_SIG_INFO — the park I was activating), NOT ref (SIG_INFO, the
+  // other station's park, which is empty for ordinary activation QSOs); the old
+  // code compared ref, so sameRef was never true and every contact showed PREV.
   const todayUtc = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const currentRefs = activatorParkRefs.map(p => (p.ref || '').toUpperCase());
   function isPriorWork(call) {
     const entries = workedQsos.get(call) || [];
+    if (!entries.length) return false;
     return entries.some((e) => {
-      // Skip entries from today at any of this activation's park refs.
       const sameDay = e.date === todayUtc;
-      const sameRef = currentRefs.includes((e.ref || '').toUpperCase());
+      const sameRef = currentRefs.includes((e.myRef || '').toUpperCase());
       return !(sameDay && sameRef);
     });
   }
@@ -21583,11 +21599,20 @@ async function activatorLogContact() {
 
   // Log each callsign as a separate QSO with identical fields
   for (const callsign of callsigns) {
-    // Pull the operator name from the QRZ cache so it lands in the ADIF
-    // <NAME> field and shows in the in-memory activator log row. The top-bar
-    // display is a span (no value to read), but qrzData has the source
-    // record from when the lookup ran.
-    const qrzInfo = qrzData.get(callsign.split('/')[0].toUpperCase());
+    // Pull the operator name so it lands in the ADIF <NAME> field and the
+    // in-memory log row. The name shown during entry comes from a QRZ lookup
+    // (Tab handler / debounce) that does NOT always populate qrzData, so a
+    // bare cache read here races the on-screen display and frequently misses
+    // — writing an empty NAME to the ADIF even though the operator saw the
+    // name (Casey 2026-06-16: "ADIF NAME column blank"). Read the cache
+    // first, then fall back to an awaited lookup so the name is reliably
+    // resolved before we build the QSO record, and seed the cache for reuse.
+    const bareCall = callsign.split('/')[0].toUpperCase();
+    let qrzInfo = qrzData.get(bareCall);
+    if (!qrzInfo) {
+      try { qrzInfo = await window.api.qrzLookup(callsign); } catch {}
+      if (qrzInfo) qrzData.set(bareCall, qrzInfo);
+    }
     const opName = qrzInfo ? qrzDisplayName(qrzInfo) : '';
     const baseFields = {
       callsign,
@@ -21673,7 +21698,7 @@ async function activatorLogContact() {
       rstSent,
       rstRcvd,
       state: stateVal,
-      name: '',
+      name: opName,
       myParks: [...myParks.map(p => p.ref), ...activatorCrossRefs.map(xr => xr.ref)],
       theirParks: hunterParkRefs.map(p => p.ref),
       qsoData: allQsoData[0], // backward compat

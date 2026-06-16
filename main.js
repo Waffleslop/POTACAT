@@ -4138,7 +4138,7 @@ async function saveQsoRecord(qsoData, opts) {
   // Update worked QSOs map and notify renderer
   if (qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
-    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: (qsoData.mode || '').toUpperCase() };
+    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: (qsoData.mode || '').toUpperCase() };
     if (!workedQsos.has(call)) workedQsos.set(call, []);
     workedQsos.get(call).push(entry);
     // Mirror into the richer ragchew-logger index so a freshly-saved QSO
@@ -4605,7 +4605,7 @@ function connectWsjtx() {
         String(now.getUTCMonth() + 1).padStart(2, '0') +
         String(now.getUTCDate()).padStart(2, '0');
       // Update workedQsos (callsign tracking)
-      const entry = { date: qsoDate, ref: spot ? (spot.reference || '').toUpperCase() : '', band, mode };
+      const entry = { date: qsoDate, ref: spot ? (spot.reference || '').toUpperCase() : '', myRef: '', band, mode };
       if (!workedQsos.has(call)) workedQsos.set(call, []);
       workedQsos.get(call).push(entry);
       if (win && !win.isDestroyed()) win.webContents.send('worked-qsos', [...workedQsos.entries()]);
