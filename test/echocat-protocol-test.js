@@ -57,6 +57,20 @@ check(!P.validate({ type: 'spots', data: [] }, P.Dir.C2S).ok, 's2c spots REJECTE
 check(P.validate({ type: 'hello', protocolVersion: 1 }, P.Dir.C2S).ok &&
       P.validate({ type: 'hello', protocolVersion: 1 }, P.Dir.S2C).ok, 'BOTH-dir hello accepted either way');
 
+// ── WSPR relay — PINNED contract (ECHOCAT mobile ships against these) ──
+console.log('\n=== WSPR ===');
+check(P.validate({ type: 'jtcat-wspr-spots', spots: [] }, P.Dir.S2C).ok, 'wspr-spots valid (s2c)');
+check(P.validate({ type: 'jtcat-wspr-spots', spots: [{ call: 'G4ABC' }], error: 'x' }, P.Dir.S2C).ok, 'wspr-spots with error valid');
+check(!P.validate({ type: 'jtcat-wspr-spots', spots: 'x' }, P.Dir.S2C).ok, 'wspr-spots non-array spots invalid');
+check(!P.validate({ type: 'jtcat-wspr-spots', spots: [] }, P.Dir.C2S).ok, 'wspr-spots REJECTED as c2s (server can\'t receive it)');
+check(P.validate({ type: 'jtcat-wspr-beacon', enabled: true, txPct: 20, dBm: 30 }, P.Dir.C2S).ok, 'wspr-beacon full valid (c2s)');
+check(P.validate({ type: 'jtcat-wspr-beacon', dBm: 23 }, P.Dir.C2S).ok, 'wspr-beacon partial (dBm only) valid');
+check(P.validate({ type: 'jtcat-wspr-beacon' }, P.Dir.C2S).ok, 'wspr-beacon all-optional (empty) valid');
+check(!P.validate({ type: 'jtcat-wspr-beacon', enabled: 'yes' }, P.Dir.C2S).ok, 'wspr-beacon non-bool enabled invalid');
+check(!P.validate({ type: 'jtcat-wspr-beacon', enabled: true }, P.Dir.S2C).ok, 'wspr-beacon REJECTED as s2c (client can\'t receive it)');
+check(P.validate({ type: 'jtcat-wspr-beacon-state', enabled: false }, P.Dir.S2C).ok, 'wspr-beacon-state valid (s2c)');
+check(!P.validate({ type: 'jtcat-wspr-beacon-state' }, P.Dir.S2C).ok, 'wspr-beacon-state missing required enabled invalid');
+
 // ── parse() / encode() ──────────────────────────────────────────────
 console.log('\n=== parse() / encode() ===');
 check(!P.parse('{not json').ok, 'parse rejects invalid JSON');

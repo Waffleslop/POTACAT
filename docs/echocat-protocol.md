@@ -227,7 +227,7 @@ for the history.
 | `jtcat-start` | C→S | Start the FT8 engine. |
 | `jtcat-stop` | C→S | Stop the FT8 engine. |
 | `jtcat-status` | S→C | Engine state (running, mode, slot timing, etc.). |
-| `jtcat-set-mode` | C→S | FT8 / FT4 / FT2. |
+| `jtcat-set-mode` | C→S | FT8 / FT4 / FT2 / WSPR. |
 | `jtcat-set-band` | C→S | Switch band (informs JTCAT of TX freq). |
 | `jtcat-set-tx-freq` | C→S | TX audio frequency offset (Hz). |
 | `jtcat-set-tx-slot` | C→S | Even / odd / auto slot. |
@@ -244,6 +244,9 @@ for the history.
 | `jtcat-auto-cq-state` | S→C | Current auto-CQ mode broadcast. |
 | `jtcat-decode` | S→C | Single decode result (live feed). |
 | `jtcat-decode-batch` | S→C | Batch of decodes (initial backlog). |
+| `jtcat-wspr-spots` | S→C | Latest 2-min WSPR spot batch `{ spots[], error? }` — host-enriched (dBm, distance, bearing, DXCC). Replaces the list each cycle; replayed on reconnect. |
+| `jtcat-wspr-beacon` | C→S | Drive the WSPR beacon `{ enabled?, txPct?, dBm? }` (partial = leave unchanged). Host clamps power ≤30 dBm (1 W), owns the attended watchdog + TX path. |
+| `jtcat-wspr-beacon-state` | S→C | Authoritative beacon on/off `{ enabled }` — client sets its toggle from this (confirm/revert), never optimistically. |
 | `jtcat-cycle` | S→C | Cycle boundary tick (for slot indicators). |
 | `jtcat-tx-status` | S→C | Currently transmitting? what message? what slot? |
 | `jtcat-qso-state` | S→C | Active QSO phase tracker. |

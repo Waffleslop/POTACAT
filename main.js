@@ -5180,6 +5180,12 @@ function wsprWattsFromDbm(dbm) {
   return Math.min(JTCAT_WSPR_MAX_WATTS, Math.pow(10, (Number(dbm) - 30) / 10));
 }
 
+// Clamp reported power to <=30 dBm (1 W). Shared by the local (ipcMain) and
+// remote (phone) entry points so a client can never store/report >1 W.
+function clampWsprDbm(d) {
+  return Math.max(0, Math.min(JTCAT_WSPR_MAX_DBM, Number(d) || 0));
+}
+
 // Command the rig to the 1 W ceiling. Returns true if SOME power-control path
 // took the command. CRITICAL on Flex Direct: CAT (PC command) is bypassed there
 // — power MUST go through the SmartSDR API, where rfpower is a PERCENT (1% ≈
@@ -5255,10 +5261,14 @@ function wsprBeaconTick() {
 // WSPR beacon arm/disarm. Validates identity, forces the 1 W rig cap, and runs
 // the scheduler-driven transmit loop. Attended-only.
 function setWsprBeacon(on) {
+  // Authoritative confirm/revert to EVERY surface that can show the toggle —
+  // the local popout and any connected phone. The client never sets its toggle
+  // optimistically; it waits for this.
   const tellPopout = (enabled) => {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-wspr-beacon-state', { enabled });
     }
+    if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprBeaconState({ enabled });
   };
   if (!on) {
     if (jtcatWsprScheduler) jtcatWsprScheduler.setEnabled(false);
@@ -5306,6 +5316,21 @@ function setWsprBeacon(on) {
     ? '[JTCAT] WSPR: radio commanded to ~1 W (rfpower 1% on Flex / PC001 on CAT). Still verify actual output on a meter.'
     : '[JTCAT] ⚠ WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ≤1 W BY HAND before it transmits.');
   tellPopout(true);
+}
+
+// Shared WSPR beacon control — the local popout (ipcMain) and a remote phone
+// (remote-server) both route here, so power clamping and the host TX policy are
+// identical no matter who asks. Partial: undefined fields are left unchanged.
+function applyWsprBeaconControl(opts) {
+  opts = opts || {};
+  if (opts.txPct != null) settings.wsprTxPct = Math.max(0, Math.min(100, opts.txPct));
+  if (opts.dBm != null) settings.wsprDbm = clampWsprDbm(opts.dBm); // <=1 W, server-side
+  saveSettings(settings);
+  if (jtcatWsprScheduler) {
+    if (opts.txPct != null) jtcatWsprScheduler.setTxPct(settings.wsprTxPct);
+    if (opts.dBm != null) jtcatWsprScheduler.setDbm(settings.wsprDbm);
+  }
+  if (opts.enabled != null) setWsprBeacon(!!opts.enabled);
 }
 
 function remoteJtcatMyCall() { return (settings.myCallsign || '').toUpperCase(); }
@@ -5823,6 +5848,9 @@ function startJtcat(mode) {
     const payload = { spots, cycle: data.cycle, dialMHz: ft8Engine._wsprDialMHz, error: data.error || null };
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-wspr-spots', payload);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-wspr-spots', payload);
+    // Relay to a connected phone/web client (spots carry dBm + distance/bearing
+    // + DXCC, already enriched, so mobile renders without recomputing).
+    if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprSpots(payload);
 
     // Upload to wsprnet.org if enabled (keyed by our call + grid).
     if (settings.wsprUpload && settings.myCallsign && settings.grid && spots.length) {
@@ -10783,8 +10811,13 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
-    if (ft8Engine) ft8Engine.setMode(mode);
+    if (ft8Engine) ft8Engine.setMode(mode); // accepts 'WSPR'
   });
+
+  // Phone-driven WSPR beacon. Routes through the same shared control as the
+  // local popout (power clamp + host TX policy). setWsprBeacon broadcasts the
+  // authoritative jtcat-wspr-beacon-state back, so the phone confirms/reverts.
+  remoteServer.on('jtcat-wspr-beacon', (opts) => applyWsprBeaconControl(opts));
 
   remoteServer.on('jtcat-set-tx-freq', ({ hz }) => {
     if (ft8Engine) {
@@ -11088,6 +11121,12 @@ function connectRemote() {
 
   remoteServer.on('jtcat-set-band', ({ band, freqKhz }) => {
     if (freqKhz) tuneRadio(freqKhz, 'DIGU');
+    // WSPR: derive the decoder dial from the band host-side, so mobile doesn't
+    // need a separate jtcat-set-wspr-dial message (the popout uses one locally).
+    if (ft8Engine && ft8Engine._mode === 'WSPR' && band) {
+      const mhz = wsprBands.dialForBand(band);
+      if (mhz) ft8Engine.setWsprDial(mhz);
+    }
   });
 
   remoteServer.on('jtcat-log-qso', async () => {
@@ -22605,18 +22644,7 @@ app.whenReady().then(() => {
   // WSPR beacon controls. txPct/dBm persist; `enabled` starts/stops the
   // scheduler-driven transmit loop. Attended-only (Part 97) — bounded by the
   // same 30-min watchdog as Full Auto CQ.
-  ipcMain.on('jtcat-wspr-beacon', (_e, opts) => {
-    opts = opts || {};
-    if (opts.txPct != null) settings.wsprTxPct = Math.max(0, Math.min(100, opts.txPct));
-    // Hard cap reported power at 30 dBm (1 W) — WSPR is QRPp.
-    if (opts.dBm != null) settings.wsprDbm = Math.max(0, Math.min(JTCAT_WSPR_MAX_DBM, opts.dBm));
-    saveSettings(settings);
-    if (jtcatWsprScheduler) {
-      if (opts.txPct != null) jtcatWsprScheduler.setTxPct(settings.wsprTxPct);
-      if (opts.dBm != null) jtcatWsprScheduler.setDbm(settings.wsprDbm);
-    }
-    if (opts.enabled != null) setWsprBeacon(!!opts.enabled);
-  });
+  ipcMain.on('jtcat-wspr-beacon', (_e, opts) => applyWsprBeaconControl(opts));
   ipcMain.on('jtcat-set-rx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setRxFreq(hz); });
 
   ipcMain.on('jtcat-set-audio-latency-ms', (_e, payload) => {
