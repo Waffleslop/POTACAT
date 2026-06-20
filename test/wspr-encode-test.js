@@ -173,9 +173,32 @@ check('encodeWspr end-to-end returns Float32 audio', () => {
   assert.strictEqual(audio.length, W.TOTAL_TX_SAMPLES);
 });
 
-// ---- the golden gate (pending the wsprd binary) -----------------------
-todo('wsprd loopback: encode K1ABC/FN42/37 -> wsprd -> recovers call/grid/power',
-  'gated on third_party/wsprd build; this is the bit-exact on-air validation for the conv/interleave/sync constants');
+// ---- the golden gate: real loopback through wsprd ----------------------
+// Bit-exact on-air validation for the sync vector + conv constants. Runs for
+// real when a wsprd binary is present (dev/local); gracefully skipped in CI
+// where it isn't (the full sweep lives in scripts/wspr-loopback.js).
+(() => {
+  const { decodeWspr, resolveWsprdPath } = require('../lib/wspr-decoder');
+  if (!resolveWsprdPath()) {
+    todo('wsprd loopback', 'no wsprd binary present — run scripts/wspr-loopback.js where one is built');
+    return;
+  }
+  check('LOOPBACK: encode -> wsprd recovers call/grid/power (bit-exact)', () => {
+    assert.strictEqual(W.SYNC_VECTOR_VERIFIED, true, 'SYNC_VECTOR_VERIFIED should be true once the loopback passes');
+    for (const [call, grid, dBm] of [['K1ABC', 'FN42', 37], ['VK7JJ', 'QE37', 23]]) {
+      const total = 120 * W.SAMPLE_RATE;
+      const buf = new Float32Array(total);
+      const sig = W.synthesize(W.encodeSymbols(call, grid, dBm), { baseFreqHz: 1500, rampMs: 20 });
+      let s = 1; for (let i = 0; i < total; i++) { s = (1103515245 * s + 12345) & 0x7fffffff; buf[i] = (s / 0x7fffffff - 0.5) * 0.04; }
+      for (let i = 0; i < sig.length; i++) buf[W.SAMPLE_RATE + i] += sig[i] * 0.5;
+      const res = decodeWspr(buf, { dialFreqMHz: 14.0956 });
+      const hit = (res.spots || []).find((x) => x.call === call);
+      assert.ok(hit, `wsprd did not decode ${call} (${res.error || 'no match'})`);
+      assert.strictEqual(hit.grid, grid);
+      assert.strictEqual(hit.dBm, dBm);
+    }
+  });
+})();
 
 console.log(`\nWSPR encoder: ${pass} passed, ${fail} failed, ${pending} pending`);
 process.exit(fail ? 1 : 0);
