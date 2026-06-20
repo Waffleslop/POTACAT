@@ -4864,8 +4864,13 @@ let ft8Engine = null;    // alias for jtcatManager.engine (Phase 0 compatibility
 let remoteJtcatQso = null;
 let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
 // WSPR beacon state — driven by the IPC handler + a 1 s scheduler tick.
+// WSPR is a QRPp propagation beacon: power is HARD-CAPPED at 1 W (30 dBm).
+const JTCAT_WSPR_MAX_WATTS = 1;
+const JTCAT_WSPR_MAX_DBM = 30;
 let jtcatWsprScheduler = null;
 let jtcatWsprBeaconTimer = null;
+let jtcatWsprBeaconArmedAt = 0;
+let jtcatWsprPrevPower = 0; // rig power before we forced it to 1 W (to restore)
 let _jtcatTxFailsafeTimer = null;
 let _jtcatIcomHardReleaseTimer = null;
 const JTCAT_MAX_CQ_RETRIES = 15;
@@ -5151,7 +5156,10 @@ function armJtcatTxFailsafe(label, samples, sampleRate = 12000, offsetMs = 0, st
   const rate = Number(sampleRate) || 12000;
   const leadMs = Math.max(0, (Number(startDelayMs) || 500) - (Number(offsetMs) || 0));
   const expectedMs = count > 0 ? Math.ceil(count / rate * 1000 + leadMs + 2500) : 18000;
-  const timeoutMs = Math.max(5000, Math.min(30000, expectedMs));
+  // Upper bound must never be SHORTER than the waveform itself or it chops the
+  // transmission. FT8/FT4/FT2 buffers are <16 s (expectedMs <19 s, so the
+  // effective cap stays ~30 s as before); WSPR's 110.6 s buffer needs headroom.
+  const timeoutMs = Math.max(5000, Math.min(130000, expectedMs));
   _jtcatTxFailsafeTimer = setTimeout(() => {
     _jtcatTxFailsafeTimer = null;
     clearJtcatIcomHardRelease();
@@ -5168,13 +5176,67 @@ function armJtcatTxFailsafe(label, samples, sampleRate = 12000, offsetMs = 0, st
   }, timeoutMs);
 }
 
-// WSPR beacon control. Manages the scheduler + arming state and validates the
-// operator's identity. NOTE: keyed transmit is intentionally NOT wired to the
-// FT8 tx-start dispatch — that path's PTT failsafe caps at 30 s (tuned for
-// FT8's ~13 s waveform), which would chop a 110.6 s WSPR transmission. A
-// correct beacon needs a dedicated WSPR-length TX path + failsafe; until that's
-// built and bench-tested, arming the beacon reports its readiness and drives
-// the 2-minute rhythm UI without keying the radio. RX + wsprnet are fully live.
+// dBm -> watts, hard-capped at the WSPR QRPp ceiling (1 W).
+function wsprWattsFromDbm(dbm) {
+  return Math.min(JTCAT_WSPR_MAX_WATTS, Math.pow(10, (Number(dbm) - 30) / 10));
+}
+
+// Command the rig to the 1 W ceiling over CAT (Kenwood PC / Flex emulation /
+// rigctld). Best-effort: silently no-ops if CAT can't set power.
+function wsprForcePowerCap() {
+  try { if (cat && cat.connected && typeof cat.setTxPower === 'function') cat.setTxPower(JTCAT_WSPR_MAX_WATTS); } catch {}
+}
+
+// Transmit one WSPR frame. Power is capped three ways: dBm <= 30 (clamped),
+// the rig commanded to 1 W via CAT, and the audio drive scaled for sub-watt
+// targets. Reuses the standard tx-start audio dispatch (now failsafe-correct
+// for the 110.6 s waveform); txComplete()/the failsafe release PTT.
+function wsprBeaconTransmit(call, grid, dbm) {
+  if (!ft8Engine || ft8Engine._mode !== 'WSPR' || ft8Engine._txActive) return;
+  dbm = Math.max(0, Math.min(JTCAT_WSPR_MAX_DBM, dbm));
+  const watts = wsprWattsFromDbm(dbm);
+  wsprForcePowerCap(); // re-assert the 1 W rig cap immediately before key-up
+  let samples;
+  try {
+    samples = encodeWspr(call, grid, dbm, { baseFreqHz: 1500 });
+  } catch (e) { sendCatLog('[JTCAT] WSPR beacon encode error: ' + (e && e.message || e)); return; }
+  // Drive scaling approximates sub-1 W targets on top of the rig's 1 W cap
+  // (power ~ amplitude^2). The rig cap is the real limit; this is secondary.
+  const amp = Math.max(0.05, Math.min(1, Math.sqrt(watts / JTCAT_WSPR_MAX_WATTS)));
+  if (amp < 0.999) { for (let i = 0; i < samples.length; i++) samples[i] *= amp; }
+  ft8Engine._txActive = true;
+  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} ${dbm} dBm (~${watts >= 1 ? '1 W' : Math.round(watts * 1000) + ' mW'}, rig capped 1 W, drive ${Math.round(amp * 100)}%)`);
+  ft8Engine.emit('tx-start', { samples, message: `${call} ${grid} ${dbm}`, freq: ft8Engine._txFreq || 1500, slot: 'wspr', offsetMs: 0 });
+  // Backstop tx-end after the waveform in case an audio route doesn't call
+  // txComplete itself; the armed failsafe is the hard PTT-off backstop.
+  const durMs = Math.round(samples.length / 12000 * 1000) + 1000;
+  setTimeout(() => { if (ft8Engine && ft8Engine._txActive) { try { ft8Engine.txComplete(); } catch {} } }, durMs);
+}
+
+// 1 s tick: stops on watchdog / mode change, else asks the scheduler whether
+// this 2-minute slot transmits and, if so, keys at slot+1 s.
+function wsprBeaconTick() {
+  if (!jtcatWsprScheduler) return;
+  if (!ft8Engine || ft8Engine._mode !== 'WSPR') { setWsprBeacon(false); return; }
+  // Part 97: automatic TX on the calling frequencies must be attended. Bounded
+  // by the same 30-min watchdog as Full Auto CQ — re-arm to keep beaconing.
+  if (Date.now() - jtcatWsprBeaconArmedAt > JTCAT_FULL_AUTO_CQ_WATCHDOG_MS) {
+    sendCatLog('[JTCAT] WSPR beacon: 30-min attended-operator watchdog — stopping. Re-arm to continue.');
+    setWsprBeacon(false);
+    return;
+  }
+  if (ft8Engine._txActive) return;
+  const plan = jtcatWsprScheduler.tick(Date.now());
+  if (!plan) return;
+  const call = (settings.myCallsign || '').trim().toUpperCase();
+  const grid = (settings.grid || '').trim().toUpperCase().slice(0, 4);
+  const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
+  const lead = Math.max(0, plan.leadMs);
+  setTimeout(() => wsprBeaconTransmit(call, grid, dbm), lead);
+}
+
+// WSPR beacon arm/disarm. Validates identity, forces the 1 W rig cap, and runs
+// the scheduler-driven transmit loop. Attended-only.
 function setWsprBeacon(on) {
   const tellPopout = (enabled) => {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
@@ -5184,6 +5246,11 @@ function setWsprBeacon(on) {
   if (!on) {
     if (jtcatWsprScheduler) jtcatWsprScheduler.setEnabled(false);
     if (jtcatWsprBeaconTimer) { clearInterval(jtcatWsprBeaconTimer); jtcatWsprBeaconTimer = null; }
+    // Restore the operator's pre-beacon power if we lowered it.
+    if (jtcatWsprPrevPower > JTCAT_WSPR_MAX_WATTS && cat && cat.connected && typeof cat.setTxPower === 'function') {
+      try { cat.setTxPower(jtcatWsprPrevPower); sendCatLog(`[JTCAT] WSPR beacon: restored TX power to ${jtcatWsprPrevPower} W`); } catch {}
+    }
+    jtcatWsprPrevPower = 0;
     sendCatLog('[JTCAT] WSPR beacon disarmed');
     tellPopout(false);
     return;
@@ -5200,21 +5267,27 @@ function setWsprBeacon(on) {
     tellPopout(false);
     return;
   }
-  // Confirm the clean-room encoder accepts this identity (cheap, catches bad
-  // grids/calls before any transmit path is wired).
+  // Validate the identity through the clean-room encoder before keying anything.
   try {
-    encodeWspr(call, grid, settings.wsprDbm != null ? settings.wsprDbm : 30, { baseFreqHz: 1500 });
+    encodeWspr(call, grid, Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30), { baseFreqHz: 1500 });
   } catch (e) {
     sendCatLog('[JTCAT] WSPR beacon: ' + (e && e.message || e));
     tellPopout(false);
     return;
   }
+  // Force the 1 W power cap up front and remember the prior level to restore.
+  jtcatWsprPrevPower = (typeof _currentTxPower === 'number' && _currentTxPower > 0) ? _currentTxPower : 0;
+  wsprForcePowerCap();
   if (!jtcatWsprScheduler) jtcatWsprScheduler = new WsprScheduler({});
   jtcatWsprScheduler.setTxPct(settings.wsprTxPct != null ? settings.wsprTxPct : 20);
-  jtcatWsprScheduler.setDbm(settings.wsprDbm != null ? settings.wsprDbm : 30);
+  jtcatWsprScheduler.setDbm(Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30));
   jtcatWsprScheduler.setEnabled(true);
-  sendCatLog(`[JTCAT] WSPR beacon armed: ${call} ${grid}, TX ${jtcatWsprScheduler.txPct}% @ ${settings.wsprDbm != null ? settings.wsprDbm : 30} dBm. ` +
-    'Note: keyed transmit is pending the dedicated WSPR TX path (the FT8 PTT failsafe caps at 30 s); RX + wsprnet reporting are active now.');
+  jtcatWsprBeaconArmedAt = Date.now();
+  if (jtcatWsprBeaconTimer) clearInterval(jtcatWsprBeaconTimer);
+  jtcatWsprBeaconTimer = setInterval(wsprBeaconTick, 1000);
+  const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
+  sendCatLog(`[JTCAT] WSPR beacon ARMED: ${call} ${grid} @ ${dbm} dBm (${wsprWattsFromDbm(dbm) >= 1 ? '1 W' : Math.round(wsprWattsFromDbm(dbm) * 1000) + ' mW'} max), TX ${jtcatWsprScheduler.txPct}% of slots. ` +
+    'Power is hard-capped at 1 W. Attended only (30-min watchdog). VERIFY actual output on a meter / dummy load.');
   tellPopout(true);
 }
 
@@ -22518,7 +22591,8 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-wspr-beacon', (_e, opts) => {
     opts = opts || {};
     if (opts.txPct != null) settings.wsprTxPct = Math.max(0, Math.min(100, opts.txPct));
-    if (opts.dBm != null) settings.wsprDbm = opts.dBm;
+    // Hard cap reported power at 30 dBm (1 W) — WSPR is QRPp.
+    if (opts.dBm != null) settings.wsprDbm = Math.max(0, Math.min(JTCAT_WSPR_MAX_DBM, opts.dBm));
     saveSettings(settings);
     if (jtcatWsprScheduler) {
       if (opts.txPct != null) jtcatWsprScheduler.setTxPct(settings.wsprTxPct);

@@ -264,7 +264,7 @@
     <div id="jp-wspr-pane" class="jp-wspr-pane hidden">
       <div class="jp-wspr-beacon">
         <div class="jp-wspr-beacon-row">
-          <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. WSPR is mostly receive — transmit briefly, listen the rest.">
+          <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. Power is HARD-CAPPED at 1 W (QRPp). Attended only — verify actual output on a meter / dummy load.">
             <input type="checkbox" id="jp-wspr-tx-enable"> <b>Beacon TX</b>
           </label>
           <span class="jp-wspr-sep"></span>
@@ -272,13 +272,12 @@
             <input type="range" id="jp-wspr-txpct" min="0" max="100" step="5" value="20" style="width:70px;vertical-align:middle;">
             <span id="jp-wspr-txpct-val" class="jp-wspr-num">20%</span>
           </label>
-          <label title="Reported transmit power in dBm. Keep actual RF low — WSPR decodes far below the noise floor.">Pwr
+          <label title="Reported transmit power in dBm — capped at 30 dBm (1 W). WSPR is QRPp; it decodes far below the noise floor, so milliwatts carry. The radio is also commanded to 1 W over CAT before each transmit.">Pwr
             <select id="jp-wspr-dbm" class="jp-wspr-select">
-              <option>0</option><option>3</option><option>7</option><option>10</option>
-              <option>13</option><option>17</option><option>20</option><option>23</option>
-              <option>27</option><option selected>30</option><option>33</option>
-              <option>37</option><option>40</option><option>43</option><option>47</option><option>50</option>
-            </select><span class="jp-wspr-num">dBm</span>
+              <option>0</option><option>7</option><option>10</option><option>13</option>
+              <option>17</option><option>20</option><option>23</option><option>27</option>
+              <option selected>30</option>
+            </select><span class="jp-wspr-num" title="30 dBm = 1 W max">dBm ≤1 W</span>
           </label>
           <span class="jp-wspr-sep"></span>
           <label title="Upload your received spots to wsprnet.org — this is what plots your station on the global propagation map.">

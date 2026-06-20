@@ -1843,7 +1843,11 @@ function _applyPopoutTheme(payload) {
     wsprDistUnit = s.distUnit === 'km' ? 'km' : 'mi';
     if (s.wsprTxPct != null) wsprTxPctEl.value = s.wsprTxPct;
     wsprTxPctVal.textContent = wsprTxPctEl.value + '%';
-    if (s.wsprDbm != null) wsprDbmEl.value = String(s.wsprDbm);
+    // Power is capped at 30 dBm (1 W). Clamp a restored value and fall back to
+    // 30 if it doesn't match an offered (<=1 W) option.
+    var savedDbm = Math.min(30, s.wsprDbm != null ? s.wsprDbm : 30);
+    wsprDbmEl.value = String(savedDbm);
+    if (wsprDbmEl.selectedIndex < 0) wsprDbmEl.value = '30';
     wsprUploadEl.checked = !!s.wsprUpload;
 
     wsprTxPctEl.addEventListener('input', function() { wsprTxPctVal.textContent = wsprTxPctEl.value + '%'; });
@@ -1853,7 +1857,7 @@ function _applyPopoutTheme(payload) {
       if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({ txPct: v });
     });
     wsprDbmEl.addEventListener('change', function() {
-      var v = parseInt(wsprDbmEl.value, 10);
+      var v = Math.min(30, parseInt(wsprDbmEl.value, 10) || 0); // 30 dBm = 1 W cap
       window.api.saveSettings({ wsprDbm: v });
       if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({ dBm: v });
     });
