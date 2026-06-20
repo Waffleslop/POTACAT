@@ -4870,7 +4870,6 @@ const JTCAT_WSPR_MAX_DBM = 30;
 let jtcatWsprScheduler = null;
 let jtcatWsprBeaconTimer = null;
 let jtcatWsprBeaconArmedAt = 0;
-let jtcatWsprPrevPower = 0; // rig power before we forced it to 1 W (to restore)
 let _jtcatTxFailsafeTimer = null;
 let _jtcatIcomHardReleaseTimer = null;
 const JTCAT_MAX_CQ_RETRIES = 15;
@@ -5181,10 +5180,28 @@ function wsprWattsFromDbm(dbm) {
   return Math.min(JTCAT_WSPR_MAX_WATTS, Math.pow(10, (Number(dbm) - 30) / 10));
 }
 
-// Command the rig to the 1 W ceiling over CAT (Kenwood PC / Flex emulation /
-// rigctld). Best-effort: silently no-ops if CAT can't set power.
+// Command the rig to the 1 W ceiling. Returns true if SOME power-control path
+// took the command. CRITICAL on Flex Direct: CAT (PC command) is bypassed there
+// — power MUST go through the SmartSDR API, where rfpower is a PERCENT (1% ≈
+// 1 W on a 100 W Flex). We hit every path that's live so the cap can't be
+// silently skipped the way it was on the first on-air test (cat connected=false).
 function wsprForcePowerCap() {
-  try { if (cat && cat.connected && typeof cat.setTxPower === 'function') cat.setTxPower(JTCAT_WSPR_MAX_WATTS); } catch {}
+  let capped = false;
+  // Flex Direct / SmartSDR API — rfpower percent. 1% ≈ 1 W (≤1 W on lower-power
+  // models). This is the real cap for Flex; the Flex stage limits output
+  // regardless of DAX drive level.
+  try {
+    if (smartSdr && smartSdr.connected && typeof smartSdr.setTxPower === 'function') {
+      smartSdr.setTxPower(1); capped = true;
+    }
+  } catch {}
+  // Kenwood-protocol CAT (PC command, in watts) — for non-Flex-Direct rigs.
+  try {
+    if (cat && cat.connected && typeof cat.setTxPower === 'function') {
+      cat.setTxPower(JTCAT_WSPR_MAX_WATTS); capped = true;
+    }
+  } catch {}
+  return capped;
 }
 
 // Transmit one WSPR frame. Power is capped three ways: dBm <= 30 (clamped),
@@ -5246,12 +5263,10 @@ function setWsprBeacon(on) {
   if (!on) {
     if (jtcatWsprScheduler) jtcatWsprScheduler.setEnabled(false);
     if (jtcatWsprBeaconTimer) { clearInterval(jtcatWsprBeaconTimer); jtcatWsprBeaconTimer = null; }
-    // Restore the operator's pre-beacon power if we lowered it.
-    if (jtcatWsprPrevPower > JTCAT_WSPR_MAX_WATTS && cat && cat.connected && typeof cat.setTxPower === 'function') {
-      try { cat.setTxPower(jtcatWsprPrevPower); sendCatLog(`[JTCAT] WSPR beacon: restored TX power to ${jtcatWsprPrevPower} W`); } catch {}
-    }
-    jtcatWsprPrevPower = 0;
-    sendCatLog('[JTCAT] WSPR beacon disarmed');
+    // Fail-safe: leave the radio at the 1 W cap rather than silently restoring a
+    // high level. WSPR is QRPp and the operator asked for power to stay hard to
+    // raise — so they bump it back up deliberately for other modes.
+    sendCatLog('[JTCAT] WSPR beacon disarmed. TX power left at the ~1 W cap — raise it in your radio for other modes.');
     tellPopout(false);
     return;
   }
@@ -5275,9 +5290,9 @@ function setWsprBeacon(on) {
     tellPopout(false);
     return;
   }
-  // Force the 1 W power cap up front and remember the prior level to restore.
-  jtcatWsprPrevPower = (typeof _currentTxPower === 'number' && _currentTxPower > 0) ? _currentTxPower : 0;
-  wsprForcePowerCap();
+  // Force the 1 W power cap up front. If no power-control path is live, the
+  // operator MUST set <=1 W by hand — say so unmistakably.
+  const capped = wsprForcePowerCap();
   if (!jtcatWsprScheduler) jtcatWsprScheduler = new WsprScheduler({});
   jtcatWsprScheduler.setTxPct(settings.wsprTxPct != null ? settings.wsprTxPct : 20);
   jtcatWsprScheduler.setDbm(Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30));
@@ -5286,8 +5301,10 @@ function setWsprBeacon(on) {
   if (jtcatWsprBeaconTimer) clearInterval(jtcatWsprBeaconTimer);
   jtcatWsprBeaconTimer = setInterval(wsprBeaconTick, 1000);
   const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
-  sendCatLog(`[JTCAT] WSPR beacon ARMED: ${call} ${grid} @ ${dbm} dBm (${wsprWattsFromDbm(dbm) >= 1 ? '1 W' : Math.round(wsprWattsFromDbm(dbm) * 1000) + ' mW'} max), TX ${jtcatWsprScheduler.txPct}% of slots. ` +
-    'Power is hard-capped at 1 W. Attended only (30-min watchdog). VERIFY actual output on a meter / dummy load.');
+  sendCatLog(`[JTCAT] WSPR beacon ARMED: ${call} ${grid} @ ${dbm} dBm (${wsprWattsFromDbm(dbm) >= 1 ? '1 W' : Math.round(wsprWattsFromDbm(dbm) * 1000) + ' mW'} max), TX ${jtcatWsprScheduler.txPct}% of slots. Attended only (30-min watchdog).`);
+  sendCatLog(capped
+    ? '[JTCAT] WSPR: radio commanded to ~1 W (rfpower 1% on Flex / PC001 on CAT). Still verify actual output on a meter.'
+    : '[JTCAT] ⚠ WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ≤1 W BY HAND before it transmits.');
   tellPopout(true);
 }
 
