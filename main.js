@@ -4867,6 +4867,8 @@ let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
 // WSPR is a QRPp propagation beacon: power is HARD-CAPPED at 1 W (30 dBm).
 const JTCAT_WSPR_MAX_WATTS = 1;
 const JTCAT_WSPR_MAX_DBM = 30;
+// The TX audio routes prepend a ~500 ms PTT-settle lead before the waveform.
+const JTCAT_TX_AUDIO_LEAD_MS = 500;
 let jtcatWsprScheduler = null;
 let jtcatWsprBeaconTimer = null;
 let jtcatWsprBeaconArmedAt = 0;
@@ -5268,7 +5270,11 @@ function wsprBeaconTick() {
   const call = (settings.myCallsign || '').trim().toUpperCase();
   const grid = (settings.grid || '').trim().toUpperCase().slice(0, 4);
   const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
-  const lead = Math.max(0, plan.leadMs);
+  // The audio dispatch prepends a ~500 ms PTT-settle lead before the waveform
+  // (FT8 keys at slot+0 to land audio at slot+500 ms). WSPR's signal should
+  // start at slot+1.0 s, so key 500 ms early to absorb that lead and center DT
+  // (first on-air test landed ~slot+1.5 s = DT +0.5 s without this).
+  const lead = Math.max(0, plan.leadMs - JTCAT_TX_AUDIO_LEAD_MS);
   setTimeout(() => wsprBeaconTransmit(call, grid, dbm), lead);
 }
 
