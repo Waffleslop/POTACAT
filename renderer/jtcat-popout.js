@@ -1807,6 +1807,9 @@ function _applyPopoutTheme(payload) {
   var wsprClearBtn = document.getElementById('jp-wspr-clear');
   var wsprStatsEl = document.getElementById('jp-wspr-stats');
   var wsprShowHeard = document.getElementById('jp-wspr-show-heard');
+  var wsprHopCb = document.getElementById('jp-wspr-hop');
+  var wsprHopBandsEl = document.getElementById('jp-wspr-hop-bands');
+  var wsprHopSel = [];
   var wsprSpots = [];
   var wsprHeard = [];           // "where am I heard" reception reports (wspr.live)
   var wsprSortByDx = false;
@@ -1901,6 +1904,35 @@ function _applyPopoutTheme(payload) {
       } else if (map.hasLayer(wsprHeardLayer)) {
         wsprHeardLayer.remove();
       }
+    });
+    // Band-hop chips + toggle
+    wsprHopSel = Array.isArray(s.wsprHopBands) ? s.wsprHopBands.slice() : [];
+    wsprBuildHopChips();
+    wsprHopCb.checked = !!s.wsprHopEnabled && wsprHopSel.length >= 2;
+    wsprHopCb.addEventListener('change', function() {
+      window.api.jtcatWsprHop({ enabled: wsprHopCb.checked, bands: wsprHopSel });
+    });
+  }
+
+  // One toggle chip per WSPR band; click to include/exclude from the hop set.
+  function wsprBuildHopChips() {
+    if (!wsprHopBandsEl) return;
+    var order = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+    wsprHopBandsEl.innerHTML = '';
+    order.forEach(function(b) {
+      if (!WSPR_BAND_FREQS[b]) return;
+      var chip = document.createElement('span');
+      chip.className = 'jp-wspr-chip' + (wsprHopSel.indexOf(b) >= 0 ? ' on' : '');
+      chip.textContent = b.replace('m', '');
+      chip.title = b + ' — ' + WSPR_BAND_FREQS[b] + ' kHz';
+      chip.dataset.band = b;
+      chip.addEventListener('click', function() {
+        var i = wsprHopSel.indexOf(b);
+        if (i >= 0) wsprHopSel.splice(i, 1); else wsprHopSel.push(b);
+        chip.classList.toggle('on', wsprHopSel.indexOf(b) >= 0);
+        window.api.jtcatWsprHop({ bands: wsprHopSel, enabled: wsprHopCb.checked });
+      });
+      wsprHopBandsEl.appendChild(chip);
     });
   }
 
@@ -2050,6 +2082,19 @@ function _applyPopoutTheme(payload) {
   }
   if (window.api.onJtcatWsprHeard) {
     window.api.onJtcatWsprHeard(function(payload) { wsprRenderHeard(payload); });
+  }
+  // Band hop QSY'd the radio — reflect the new active band in the toolbar + chip.
+  if (window.api.onJtcatWsprHopBand) {
+    window.api.onJtcatWsprHopBand(function(d) {
+      if (!d || !d.band) return;
+      document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.band === d.band);
+      });
+      if (wsprHopBandsEl) {
+        var chips = wsprHopBandsEl.querySelectorAll('.jp-wspr-chip');
+        for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('hopping', chips[i].dataset.band === d.band);
+      }
+    });
   }
   // Main process confirms/reverts the beacon toggle (e.g. if arming failed
   // because the operator's call/grid isn't set, or we're not in WSPR mode).

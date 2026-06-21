@@ -229,6 +229,7 @@ const { freqToBand } = require('./lib/bands');
 const wsprnet = require('./lib/wspr/wsprnet');
 const wsprBands = require('./lib/wspr/bands');
 const wsprlive = require('./lib/wspr/wsprlive');
+const wsprBandhop = require('./lib/wspr/bandhop');
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
@@ -4873,6 +4874,10 @@ const JTCAT_TX_AUDIO_LEAD_MS = 500;
 let jtcatWsprScheduler = null;
 let jtcatWsprBeaconTimer = null;
 let jtcatWsprBeaconArmedAt = 0;
+// Band hopping — sweep the beacon/RX across several bands, one per 2-min cycle.
+let jtcatWsprHopEnabled = false;
+let jtcatWsprHopBands = [];
+let jtcatWsprHopDwell = 1;
 let _jtcatTxFailsafeTimer = null;
 let _jtcatIcomHardReleaseTimer = null;
 const JTCAT_MAX_CQ_RETRIES = 15;
@@ -5199,6 +5204,26 @@ async function maybeFetchWsprHeard(force) {
       sendCatLog(`[JTCAT] WSPR footprint: heard by ${rxers} station${rxers !== 1 ? 's' : ''} (farthest ${far} mi) in the last 3 h`);
     }
   } catch (e) { sendCatLog('[JTCAT] WSPR footprint error: ' + (e && e.message || e)); }
+}
+
+// Band hopping — QSY the radio to the next band in the hop set at cycle end.
+// Pure schedule (lib/wspr/bandhop) decides; here we tune + retune the decoder
+// dial. No-op unless hopping is on, in WSPR mode, with >=2 bands.
+function maybeHopBand() {
+  if (!jtcatWsprHopEnabled || !ft8Engine || ft8Engine._mode !== 'WSPR') return;
+  const bands = jtcatWsprHopBands;
+  if (!Array.isArray(bands) || bands.length < 2) return;
+  const curSlot = wsprBandhop.slotNumber(Date.now());
+  if (!wsprBandhop.bandChangesNext(curSlot, bands, jtcatWsprHopDwell)) return; // dwell — stay put
+  const nb = wsprBandhop.nextBand(curSlot, bands, jtcatWsprHopDwell);
+  const mhz = wsprBands.dialForBand(nb);
+  if (!mhz) return;
+  ft8Engine.setWsprDial(mhz);
+  tuneRadio(mhz * 1000, 'DIGU'); // kHz dial; WSPR rides USB/DIGU
+  settings.wsprDial = mhz;
+  sendCatLog(`[JTCAT] WSPR band hop → ${nb} (${mhz.toFixed(4)} MHz) for the next cycle`);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-wspr-hop-band', { band: nb });
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-wspr-hop-band', { band: nb });
 }
 
 // dBm -> watts, hard-capped at the WSPR QRPp ceiling (1 W).
@@ -5610,6 +5635,10 @@ function startJtcat(mode) {
     if (typeof ft8Engine.setWsprDial === 'function' && settings.wsprDial) {
       ft8Engine.setWsprDial(settings.wsprDial);
     }
+    // Restore band-hop config.
+    jtcatWsprHopBands = Array.isArray(settings.wsprHopBands) ? settings.wsprHopBands.filter((b) => wsprBands.dialForBand(b)) : [];
+    jtcatWsprHopDwell = settings.wsprHopDwell || 1;
+    jtcatWsprHopEnabled = !!settings.wsprHopEnabled && jtcatWsprHopBands.length >= 2;
   }
 
   // Persist the auto-derived latency so a fresh start can apply it
@@ -5897,6 +5926,10 @@ function startJtcat(mode) {
     if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprSpots(payload);
     // "Where am I heard" — refresh the beacon footprint from wspr.live (throttled).
     maybeFetchWsprHeard();
+    // Band hopping — QSY to the next band for the upcoming cycle. Fires near
+    // cycle end (after the decode snapshot), so the next 2-min window is clean
+    // on the new band.
+    maybeHopBand();
 
     // Upload to wsprnet.org if enabled (keyed by our call + grid).
     if (settings.wsprUpload && settings.myCallsign && settings.grid && spots.length) {
@@ -22691,6 +22724,22 @@ app.whenReady().then(() => {
   // scheduler-driven transmit loop. Attended-only (Part 97) — bounded by the
   // same 30-min watchdog as Full Auto CQ.
   ipcMain.on('jtcat-wspr-beacon', (_e, opts) => applyWsprBeaconControl(opts));
+  ipcMain.on('jtcat-wspr-hop', (_e, opts) => {
+    opts = opts || {};
+    if (Array.isArray(opts.bands)) {
+      jtcatWsprHopBands = opts.bands.filter((b) => wsprBands.dialForBand(b));
+      settings.wsprHopBands = jtcatWsprHopBands;
+    }
+    if (opts.dwell != null) { jtcatWsprHopDwell = Math.max(1, Math.min(10, opts.dwell)); settings.wsprHopDwell = jtcatWsprHopDwell; }
+    if (opts.enabled != null) {
+      jtcatWsprHopEnabled = !!opts.enabled && jtcatWsprHopBands.length >= 2;
+      settings.wsprHopEnabled = jtcatWsprHopEnabled;
+      sendCatLog(jtcatWsprHopEnabled
+        ? `[JTCAT] WSPR band hop ON: ${jtcatWsprHopBands.join(' → ')} (${jtcatWsprHopDwell} cycle${jtcatWsprHopDwell > 1 ? 's' : ''}/band)`
+        : (opts.enabled ? '[JTCAT] WSPR band hop needs at least 2 bands selected' : '[JTCAT] WSPR band hop OFF'));
+    }
+    saveSettings(settings);
+  });
   ipcMain.on('jtcat-set-rx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setRxFreq(hz); });
 
   ipcMain.on('jtcat-set-audio-latency-ms', (_e, payload) => {

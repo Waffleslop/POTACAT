@@ -97,6 +97,12 @@
     .jp-wspr-stats .s-mpw { color: #ff8c42; font-weight: 700; }
     .jp-wspr-stats .s-heard { color: var(--accent-blue, #4fc3f7); font-weight: 700; }
     .jp-wspr-stats .jp-wspr-stat-dim { color: var(--text-dim); }
+    /* Band-hop chips */
+    .jp-wspr-hop-bands { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+    .jp-wspr-chip { font-size: 10px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-dim); cursor: pointer; user-select: none; }
+    .jp-wspr-chip:hover { color: var(--text-secondary); }
+    .jp-wspr-chip.on { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); font-weight: 700; }
+    .jp-wspr-chip.hopping { box-shadow: 0 0 0 2px #4fc3f7; }
     .jp-wspr-next.tx { background: #e94560; color: #fff; animation: jp-tune-pulse 1s ease-in-out infinite; }
     /* Spot table */
     .jp-wspr-thead, .jp-wspr-row { display: grid; grid-template-columns: 50px 30px 34px 78px 30px 1fr 52px 60px 36px; gap: 4px; padding: 1px 8px; font-family: monospace; font-size: 11px; align-items: baseline; }
@@ -295,6 +301,13 @@
             <input type="checkbox" id="jp-wspr-show-heard" checked> Footprint
           </label>
           <span id="jp-wspr-next" class="jp-wspr-next" title="Next transmit / receive window">RX</span>
+        </div>
+        <div class="jp-wspr-beacon-row" style="margin-top:5px;">
+          <label title="Band hopping — sweep the beacon + RX across the selected bands, one band per 2-minute cycle. Pick 2 or more.">
+            <input type="checkbox" id="jp-wspr-hop"> <b>Band hop</b>
+          </label>
+          <span class="jp-wspr-sep"></span>
+          <span id="jp-wspr-hop-bands" class="jp-wspr-hop-bands"></span>
         </div>
       </div>
       <div id="jp-wspr-stats" class="jp-wspr-stats"><span class="jp-wspr-stat-dim">Listening…</span></div>
