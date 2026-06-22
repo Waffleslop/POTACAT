@@ -1910,6 +1910,13 @@
         <span class="help-text" style="margin-left:12px;display:block;">Shows where your FT8/FT4/CW transmissions are being received worldwide. Appears in the Propagation view alongside RBN.</span>
         <span class="help-text" style="display:block;margin-top:4px;">Polls every 5 minutes (PSKReporter rate limit). Spots appear after the first poll completes. Requires your callsign above.</span>
       </div>
+      <label class="checkbox-label"><input type="checkbox" id="set-pskr-upload"> Report my JTCAT decodes to PSKReporter</label>
+      <div id="pskr-upload-config" class="radio-sub hidden">
+        <span class="help-text" style="margin-left:12px;display:block;">Contribute the FT8/FT4 stations JTCAT decodes to <b>pskreporter.info</b> — the way WSJT-X does, so you appear on the global reception map. Sent every 5 minutes. Requires your callsign + grid above.</span>
+        <label style="margin-left:12px;display:block;margin-top:6px;">Antenna <span style="color:var(--text-dim,#888);">(optional)</span>:
+          <input type="text" id="set-pskr-antenna" placeholder="e.g. EFHW @ 30 ft" style="width:160px;" maxlength="60">
+        </label>
+      </div>
     </fieldset>
     <!-- 4. Spot Filters (merged Spots + Watchlist) -->
     <fieldset class="source-toggles" data-settings-tab="spots">

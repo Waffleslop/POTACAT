@@ -748,6 +748,9 @@ const pskrConfig = document.getElementById('pskr-config');
 const setEnablePskrMap = document.getElementById('set-enable-pskr-map');
 const pskrMapConfig = document.getElementById('pskr-map-config');
 const connPskrMap = document.getElementById('conn-pskr-map');
+const setPskrUpload = document.getElementById('set-pskr-upload');
+const pskrUploadConfig = document.getElementById('pskr-upload-config');
+const setPskrAntenna = document.getElementById('set-pskr-antenna');
 const setMyCallsign = document.getElementById('set-my-callsign');
 const setEnableClusterTerminal = document.getElementById('set-enable-cluster-terminal');
 const clusterTerminalBtn = document.getElementById('cluster-terminal-btn');
@@ -3925,6 +3928,11 @@ setEnablePskr.addEventListener('change', () => {
 setEnablePskrMap.addEventListener('change', () => {
   pskrMapConfig.classList.toggle('hidden', !setEnablePskrMap.checked);
 });
+if (setPskrUpload) {
+  setPskrUpload.addEventListener('change', () => {
+    pskrUploadConfig.classList.toggle('hidden', !setPskrUpload.checked);
+  });
+}
 
 // Rotor checkbox toggles rotor config visibility
 setEnableRotor.addEventListener('change', () => {
@@ -13327,6 +13335,11 @@ async function openSettingsDialog(tab) {
   pskrConfig.classList.toggle('hidden', !s.enablePskr);
   setEnablePskrMap.checked = s.enablePskrMap === true;
   pskrMapConfig.classList.toggle('hidden', !s.enablePskrMap);
+  if (setPskrUpload) {
+    setPskrUpload.checked = s.pskrUpload === true;
+    pskrUploadConfig.classList.toggle('hidden', !s.pskrUpload);
+    if (setPskrAntenna) setPskrAntenna.value = s.pskrAntenna || '';
+  }
   setEnableLogging.checked = s.enableLogging === true;
   setEnableBannerLogger.checked = s.enableBannerLogger === true;
   setN1mmRst.checked = s.n1mmRst === true;
@@ -14041,6 +14054,8 @@ settingsSave.addEventListener('click', async () => {
     enableWsjtx: wsjtxEnabled,
     enablePskr: pskrEnabled,
     enablePskrMap: pskrMapEnabledVal,
+    pskrUpload: setPskrUpload ? setPskrUpload.checked : false,
+    pskrAntenna: setPskrAntenna ? setPskrAntenna.value.trim() : '',
     wsjtxPort: wsjtxPortVal,
     wsjtxHighlight: wsjtxHighlightEnabled,
     wsjtxAutoLog: wsjtxAutoLogEnabled,
