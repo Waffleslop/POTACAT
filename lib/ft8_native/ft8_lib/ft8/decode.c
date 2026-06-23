@@ -3,6 +3,7 @@
 #include "crc.h"
 #include "ldpc.h"
 
+#include <stddef.h>
 #include <stdbool.h>
 #include <math.h>
 
