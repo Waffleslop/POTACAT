@@ -1413,11 +1413,33 @@
         </select>
       </label>
       <span class="help-text" style="margin-left:24px;display:block;">Auto matches the band's voice convention. Override if your rig needs a specific sideband for FreeDV regardless of band &mdash; e.g. FTDX3000 operators who prefer wide USB on 40m.</span>
-      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> Auto-SSTV on idle</label>
+      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> WSPR or SSTV While Idle</label>
       <span class="help-text" style="margin-left:12px;display:block;">
-        When idle, automatically opens SSTV and decodes on 20m (day) or 40m (night) based on your grid square.
+        When this station is idle for the defined time, have POTACAT open either WSPR or SSTV to passively receive.
         <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="480" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
       </span>
+      <div id="idle-rx-opts" style="margin-left:24px;margin-top:4px;display:none;">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;">Receive:
+          <select id="set-idle-rx-mode" style="font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;">
+            <option value="sstv">SSTV</option>
+            <option value="wspr">WSPR</option>
+          </select>
+        </label>
+        <div id="idle-wspr-opts" style="margin-top:6px;display:none;">
+          <label class="checkbox-label" style="font-size:12px;"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-hop"> Band hopping &mdash; sweep across the WSPR bands</label>
+          <label class="checkbox-label" style="font-size:12px;margin-top:2px;"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-single" checked> Single band:
+            <select id="set-idle-wspr-band" style="font-size:12px;padding:2px 4px;margin-left:4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;">
+              <option value="40m">40m (7.0386)</option>
+              <option value="30m">30m (10.1387)</option>
+              <option value="20m" selected>20m (14.0956)</option>
+              <option value="17m">17m (18.1046)</option>
+              <option value="15m">15m (21.0946)</option>
+              <option value="10m">10m (28.1246)</option>
+            </select>
+          </label>
+        </div>
+        <span id="idle-sstv-note" class="help-text" style="display:block;margin-top:4px;">SSTV: POTACAT flips to 20m (14.230 MHz) in the daytime and 40m (7.171 MHz) at night, based on your grid square.</span>
+      </div>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-sstv-post-process" checked> Polish decoded SSTV images (MMSSTV-style)</label>
       <span class="help-text" style="margin-left:12px;display:block;">
         Applies unsharp mask + saturation boost to decoded images before they're saved. Matches MMSSTV's default-on behavior. Disable for pixel-faithful captures.
@@ -3762,16 +3784,34 @@
     </label>
     <span class="help-text" style="display:block;margin-left:22px;margin-bottom:8px;">FT8 Battle Royale is a worldwide FT8/FT4 contest scored from the QSOs you log — POTACAT forwards each digital QSO to it in parallel with your normal logbook, so nothing else changes.</span>
 
-    <div class="welcome-section-label">Receive SSTV</div>
+    <div class="welcome-section-label">WSPR or SSTV While Idle</div>
     <label class="checkbox-label" style="margin-bottom:4px;">
       <input type="checkbox" id="welcome-enable-auto-sstv" checked>
-      Automatically switch to the 40m &amp; 20m SSTV calling frequencies and receive and decode images when the radio is idle
+      When this station is idle, have POTACAT open either WSPR or SSTV to passively receive
     </label>
     <div style="margin-left:22px;margin-bottom:8px;display:flex;align-items:center;gap:6px;font-size:13px;">
-      <span>Switch after</span>
+      <span>After</span>
       <input type="number" id="welcome-auto-sstv-min" min="5" max="600" value="90" style="width:60px;">
-      <span>minutes of no CAT activity</span>
+      <span>minutes of no activity, receive</span>
+      <select id="welcome-idle-rx-mode" style="font-size:13px;">
+        <option value="sstv">SSTV</option>
+        <option value="wspr">WSPR</option>
+      </select>
     </div>
+    <div id="welcome-idle-wspr-opts" style="margin-left:22px;margin-bottom:8px;display:none;font-size:13px;">
+      <label class="checkbox-label" style="font-size:13px;"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-hop"> Band hopping (sweep the WSPR bands)</label>
+      <label class="checkbox-label" style="font-size:13px;margin-top:2px;"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-single" checked> Single band:
+        <select id="welcome-idle-wspr-band" style="font-size:13px;margin-left:4px;">
+          <option value="40m">40m</option>
+          <option value="30m">30m</option>
+          <option value="20m" selected>20m</option>
+          <option value="17m">17m</option>
+          <option value="15m">15m</option>
+          <option value="10m">10m</option>
+        </select>
+      </label>
+    </div>
+    <span id="welcome-idle-sstv-note" class="help-text" style="display:block;margin-left:22px;margin-bottom:8px;">SSTV flips to 20m in the daytime and 40m at night, based on your grid square.</span>
 
     <div class="welcome-section-label">QRZ Lookup (optional)</div>
     <span class="help-text" style="display:block;margin-bottom:6px;">Shows operator name, location, and callsign details on spots. Requires a QRZ account.</span>

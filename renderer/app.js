@@ -13397,6 +13397,28 @@ async function openSettingsDialog(tab) {
   document.getElementById('set-freedv-force-sideband').value = s.freedvForceSideband || '';
   document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
   document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
+  // Idle-RX mode picker (WSPR or SSTV) + WSPR band options
+  (function () {
+    const enableEl = document.getElementById('set-enable-auto-sstv');
+    const modeEl = document.getElementById('set-idle-rx-mode');
+    if (!enableEl || !modeEl) return;
+    modeEl.value = s.idleRxMode === 'wspr' ? 'wspr' : 'sstv';
+    document.getElementById('idle-wspr-band-hop').checked = s.idleWsprBandHop === true;
+    document.getElementById('idle-wspr-band-single').checked = s.idleWsprBandHop !== true;
+    document.getElementById('set-idle-wspr-band').value = s.idleWsprBand || '20m';
+    const upd = function () {
+      document.getElementById('idle-rx-opts').style.display = enableEl.checked ? '' : 'none';
+      const wspr = modeEl.value === 'wspr';
+      document.getElementById('idle-wspr-opts').style.display = wspr ? '' : 'none';
+      document.getElementById('idle-sstv-note').style.display = wspr ? 'none' : '';
+    };
+    if (!enableEl.dataset.idleWired) {
+      enableEl.addEventListener('change', upd);
+      modeEl.addEventListener('change', upd);
+      enableEl.dataset.idleWired = '1';
+    }
+    upd();
+  })();
   document.getElementById('set-sstv-post-process').checked = s.sstvPostProcess !== false; // default on
   document.getElementById('set-enable-idle-pause').checked = s.enableIdlePause !== false;
   document.getElementById('set-idle-pause-min').value = s.idlePauseMin || 20;
@@ -14084,6 +14106,9 @@ settingsSave.addEventListener('click', async () => {
     freedvForceSideband: freedvForceSidebandVal,
     enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
     autoSstvInactivityMin: parseInt(document.getElementById('set-auto-sstv-min').value) || 90,
+    idleRxMode: document.getElementById('set-idle-rx-mode').value === 'wspr' ? 'wspr' : 'sstv',
+    idleWsprBandHop: document.getElementById('idle-wspr-band-hop').checked,
+    idleWsprBand: document.getElementById('set-idle-wspr-band').value || '20m',
     sstvPostProcess: document.getElementById('set-sstv-post-process').checked,
     enableIdlePause: document.getElementById('set-enable-idle-pause').checked,
     idlePauseMin: parseInt(document.getElementById('set-idle-pause-min').value) || 20,
@@ -19774,6 +19799,9 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   const hideOobChecked = document.getElementById('welcome-hide-oob').checked;
   const autoSstvChecked = document.getElementById('welcome-enable-auto-sstv').checked;
   const autoSstvMinVal = Math.max(5, Math.min(600, parseInt(document.getElementById('welcome-auto-sstv-min').value, 10) || 90));
+  const idleRxModeVal = document.getElementById('welcome-idle-rx-mode').value === 'wspr' ? 'wspr' : 'sstv';
+  const idleWsprBandHopVal = document.getElementById('welcome-idle-wspr-band-hop').checked;
+  const idleWsprBandVal = document.getElementById('welcome-idle-wspr-band').value || '20m';
   const ft8brEl = document.getElementById('welcome-enable-ft8br');
   const ft8brChecked = ft8brEl ? ft8brEl.checked : false;
   const lightModeEnabled = welcomeLightMode.checked;
@@ -19791,6 +19819,9 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     hideOutOfBand: hideOobChecked,
     enableAutoSstv: autoSstvChecked,
     autoSstvInactivityMin: autoSstvMinVal,
+    idleRxMode: idleRxModeVal,
+    idleWsprBandHop: idleWsprBandHopVal,
+    idleWsprBand: idleWsprBandVal,
     enableFt8br: ft8brChecked,
     firstRun: false,
     lastVersion: currentSettings.appVersion,
@@ -20144,6 +20175,22 @@ async function checkFirstRun(force = false) {
       // has saved — `!== false` so undefined stays ON.
       document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv !== false;
       document.getElementById('welcome-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
+      // Idle-RX mode (WSPR or SSTV) + WSPR band options on the welcome screen
+      (function () {
+        const modeEl = document.getElementById('welcome-idle-rx-mode');
+        if (!modeEl) return;
+        modeEl.value = s.idleRxMode === 'wspr' ? 'wspr' : 'sstv';
+        document.getElementById('welcome-idle-wspr-band-hop').checked = s.idleWsprBandHop === true;
+        document.getElementById('welcome-idle-wspr-band-single').checked = s.idleWsprBandHop !== true;
+        document.getElementById('welcome-idle-wspr-band').value = s.idleWsprBand || '20m';
+        const upd = function () {
+          const wspr = modeEl.value === 'wspr';
+          document.getElementById('welcome-idle-wspr-opts').style.display = wspr ? '' : 'none';
+          document.getElementById('welcome-idle-sstv-note').style.display = wspr ? 'none' : '';
+        };
+        if (!modeEl.dataset.idleWired) { modeEl.addEventListener('change', upd); modeEl.dataset.idleWired = '1'; }
+        upd();
+      })();
       const welcomeQrzUser = document.getElementById('welcome-qrz-user');
       const welcomeQrzPass = document.getElementById('welcome-qrz-pass');
       if (welcomeQrzUser) welcomeQrzUser.value = s.qrzUsername || '';

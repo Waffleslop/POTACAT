@@ -839,6 +839,7 @@ let _sstvHeartbeatTimer = null;
 let sstvManager = null;      // SSTV multi-slice manager
 let openSstvPopout = null;   // function — assigned in second whenReady block
 let startSstv = null;        // function — assigned in second whenReady block (same reason)
+let openJtcatPopout = null;  // function — assigned in second whenReady block (used by WSPR-on-idle)
 function defaultSstvGalleryDir() {
   return path.join(app.getPath('pictures'), 'POTACAT', 'SSTV-RX');
 }
@@ -15299,6 +15300,12 @@ let autoSstvActive = false;
 let autoSstvPrevFreq = null;
 let autoSstvPrevMode = null;
 let autoSstvCurrentFreq = 0;
+// WSPR-on-idle: the idle-RX feature can open WSPR instead of SSTV
+// (settings.idleRxMode). These track the WSPR variant so cancel restores the
+// user's prior JTCAT mode and only closes the popout if WE opened it.
+let autoIdleWsprActive = false;
+let autoIdlePrevJtcatMode = null;
+let autoIdleWsprOpenedPopout = false;
 
 function getSunTimes(lat, lon, date) {
   const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
@@ -15332,8 +15339,9 @@ function startAutoSstvTimer() {
     if (!autoSstvActive && idle >= thresholdMs) {
       triggerAutoSstv();
     }
-    // If already active, check for band change at sunrise/sunset
-    if (autoSstvActive) {
+    // If SSTV is already active, check for band change at sunrise/sunset.
+    // (WSPR-on-idle manages its own bands via the hop scheduler — skip.)
+    if (autoSstvActive && !autoIdleWsprActive) {
       const newBand = getSstvAutoFreq();
       if (newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
@@ -15360,7 +15368,30 @@ function autoSstvBlockedByJtcat() {
 
 function triggerAutoSstv() {
   if (autoSstvBlockedByJtcat()) {
-    sendCatLog('[Auto-SSTV] Deferred — JTCAT is decoding');
+    sendCatLog('[Auto-RX] Deferred — JTCAT is already decoding');
+    return;
+  }
+  // WSPR-on-idle variant: open the JTCAT popout in WSPR mode (it owns audio
+  // capture + the spot list/map) instead of SSTV. The popout auto-starts from
+  // settings.jtcatLastMode, so configure WSPR (dial / band-hop) first.
+  if ((settings.idleRxMode || 'sstv') === 'wspr') {
+    autoSstvActive = true;
+    autoIdleWsprActive = true;
+    autoIdlePrevJtcatMode = settings.jtcatLastMode || 'FT8';
+    autoIdleWsprOpenedPopout = !(jtcatPopoutWin && !jtcatPopoutWin.isDestroyed());
+    const band = settings.idleWsprBand || '20m';
+    const dialMhz = wsprBands.dialForBand(band) || 14.0956;
+    settings.jtcatLastMode = 'WSPR';
+    settings.wsprHopEnabled = settings.idleWsprBandHop === true;
+    settings.wsprDial = dialMhz;
+    settings.jtcatLastBandFreq = Math.round(dialMhz * 1000); // kHz — popout matches the WSPR band button
+    saveSettings(settings);
+    if (openJtcatPopout) openJtcatPopout();
+    sendCatLog('[Auto-RX] WSPR receive started — ' +
+      (settings.wsprHopEnabled ? 'band hopping' : band + ' (' + dialMhz.toFixed(4) + ' MHz)'));
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastSstvTxStatus({ state: 'auto-rx' });
+    }
     return;
   }
   autoSstvActive = true;
@@ -15379,6 +15410,21 @@ function triggerAutoSstv() {
 function cancelAutoSstv() {
   if (!autoSstvActive) return;
   autoSstvActive = false;
+  if (autoIdleWsprActive) {
+    // WSPR-on-idle teardown: restore the user's prior JTCAT mode and close the
+    // popout only if WE opened it (don't close one the user had open already).
+    autoIdleWsprActive = false;
+    if (autoIdlePrevJtcatMode) { settings.jtcatLastMode = autoIdlePrevJtcatMode; saveSettings(settings); }
+    autoIdlePrevJtcatMode = null;
+    if (autoIdleWsprOpenedPopout && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      try { jtcatPopoutWin.close(); } catch {}
+    }
+    autoIdleWsprOpenedPopout = false;
+    sendCatLog('[Auto-RX] WSPR receive stopped');
+    autoSstvPrevFreq = null;
+    autoSstvPrevMode = null;
+    return;
+  }
   if (autoSstvPrevFreq && cat && cat.connected) {
     cat.tune(autoSstvPrevFreq, autoSstvPrevMode || 'USB');
   }
@@ -18312,7 +18358,7 @@ app.whenReady().then(() => {
   });
 
   // --- JTCAT Pop-out Window ---
-  ipcMain.on('jtcat-popout-open', () => {
+  openJtcatPopout = function() {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.focus();
       return;
@@ -18390,7 +18436,8 @@ app.whenReady().then(() => {
         jtcatPopoutWin.webContents.toggleDevTools();
       }
     });
-  });
+  };
+  ipcMain.on('jtcat-popout-open', () => openJtcatPopout());
 
   ipcMain.on('jtcat-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
   ipcMain.on('jtcat-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
