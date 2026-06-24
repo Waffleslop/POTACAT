@@ -2545,6 +2545,10 @@
             <option value="winkeyer">K1EL WinKeyer</option>
           </select>
         </label>
+        <!-- Paddle swap — applies to the software keyer (MIDI) AND the K1EL
+             WinKeyer (baked into its mode register). Common to both backends. -->
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-swap-paddles"> Swap paddles</label>
+        <span class="help-text" style="margin-left:24px;display:block;">Sends DITs on the thumb-side paddle for left-handed ops (or fixes a miswired keying cable). Applies to MIDI and K1EL WinKeyer.</span>
         <!-- MIDI-specific settings -->
         <div id="cw-midi-config" style="margin-top:6px;">
           <label>Keyer Mode:
@@ -2554,7 +2558,6 @@
               <option value="straight">Straight Key</option>
             </select>
           </label>
-          <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-cw-swap-paddles"> Swap paddles</label>
           <label style="margin-top:8px;">MIDI Device:
             <div style="display:flex;gap:6px;margin-top:4px;">
               <select id="set-cw-midi-device" style="flex:1;"><option value="">— No MIDI devices —</option></select>

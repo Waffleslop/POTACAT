@@ -8311,7 +8311,14 @@ function connectWinKeyer() {
     console.log(`[WinKeyer] Connected, version ${version}`);
     // Echo paddle-decoded characters to the host so POTACAT can relay paddle
     // CW to the radio — the WinKeyer is on USB, not wired to a network Flex.
-    winKeyer.enablePaddleEcho();
+    // Also bake in paddle swap (mode register bit 3) from settings: the
+    // WinKeyer decodes paddles in HARDWARE, so a left-handed op's swap must
+    // live in its mode register. POTACAT used to write echo-only (0x40),
+    // clobbering any swap the op set in standalone — so a left-handed op got
+    // dit/dah reversed (R came out as K). setPaddleSwap writes echo|swap in one
+    // 0x0E. (KI0ER) Toggling the Swap-paddles checkbox reconnects the keyer
+    // (cwSwapPaddles is in cwKeyerChanged), so this re-applies live.
+    winKeyer.setPaddleSwap(settings.cwSwapPaddles === true);
     if (settings.cwWpm) winKeyer.setSpeed(settings.cwWpm);
     // Match the Flex's cwx keyer speed to the WinKeyer so paddle CW relayed to
     // the radio (see the 'echo' handler below) goes out at the speed you paddle.
