@@ -13417,7 +13417,7 @@ async function openSettingsDialog(tab) {
     const upd = function () {
       document.getElementById('idle-rx-opts').style.display = enableEl.checked ? '' : 'none';
       const wspr = modeEl.value === 'wspr';
-      document.getElementById('idle-wspr-opts').style.display = wspr ? '' : 'none';
+      document.getElementById('idle-wspr-opts').style.display = wspr ? 'flex' : 'none';
       document.getElementById('idle-sstv-note').style.display = wspr ? 'none' : '';
     };
     if (!enableEl.dataset.idleWired) {
@@ -20193,7 +20193,7 @@ async function checkFirstRun(force = false) {
         document.getElementById('welcome-idle-wspr-band').value = s.idleWsprBand || '20m';
         const upd = function () {
           const wspr = modeEl.value === 'wspr';
-          document.getElementById('welcome-idle-wspr-opts').style.display = wspr ? '' : 'none';
+          document.getElementById('welcome-idle-wspr-opts').style.display = wspr ? 'flex' : 'none';
           document.getElementById('welcome-idle-sstv-note').style.display = wspr ? 'none' : '';
         };
         if (!modeEl.dataset.idleWired) { modeEl.addEventListener('change', upd); modeEl.dataset.idleWired = '1'; }

@@ -1425,10 +1425,10 @@
             <option value="wspr">WSPR</option>
           </select>
         </label>
-        <div id="idle-wspr-opts" style="margin-top:6px;display:none;">
-          <label class="checkbox-label" style="font-size:12px;"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-hop"> Band hopping &mdash; sweep across the WSPR bands</label>
-          <label class="checkbox-label" style="font-size:12px;margin-top:2px;"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-single" checked> Single band:
-            <select id="set-idle-wspr-band" style="font-size:12px;padding:2px 4px;margin-left:4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;">
+        <div id="idle-wspr-opts" style="margin-top:6px;display:none;align-items:center;gap:18px;flex-wrap:wrap;">
+          <label class="checkbox-label" style="font-size:12px;display:inline-flex;align-items:center;gap:5px;margin:0;" title="Sweep across the WSPR bands, one per 2-minute cycle"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-hop"> Band hopping</label>
+          <label class="checkbox-label" style="font-size:12px;display:inline-flex;align-items:center;gap:5px;margin:0;"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-single" checked> Single band:
+            <select id="set-idle-wspr-band" style="font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;">
               <option value="40m">40m (7.0386)</option>
               <option value="30m">30m (10.1387)</option>
               <option value="20m" selected>20m (14.0956)</option>
@@ -3798,10 +3798,10 @@
         <option value="wspr">WSPR</option>
       </select>
     </div>
-    <div id="welcome-idle-wspr-opts" style="margin-left:22px;margin-bottom:8px;display:none;font-size:13px;">
-      <label class="checkbox-label" style="font-size:13px;"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-hop"> Band hopping (sweep the WSPR bands)</label>
-      <label class="checkbox-label" style="font-size:13px;margin-top:2px;"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-single" checked> Single band:
-        <select id="welcome-idle-wspr-band" style="font-size:13px;margin-left:4px;">
+    <div id="welcome-idle-wspr-opts" style="margin-left:22px;margin-bottom:8px;display:none;align-items:center;gap:18px;flex-wrap:wrap;font-size:13px;">
+      <label class="checkbox-label" style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0;" title="Sweep across the WSPR bands, one per 2-minute cycle"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-hop"> Band hopping</label>
+      <label class="checkbox-label" style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0;"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-single" checked> Single band:
+        <select id="welcome-idle-wspr-band" style="font-size:13px;">
           <option value="40m">40m</option>
           <option value="30m">30m</option>
           <option value="20m" selected>20m</option>
