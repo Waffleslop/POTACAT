@@ -10923,25 +10923,32 @@ function connectRemote() {
       txMsg = call + ' ' + myCall + ' 73';
       phase = '73';
     } else if (nextStep === 'send-rr73') {
+      // CQ SIDE: they answered our CQ with R+signal → we send RR73. CQ-mode
+      // phase so the state machine advances + the QSO logs (reply mode has no
+      // 'rr73' handler — WZ1H/W7RTA 2026-06-22). Log on setup (past the log pt).
       txMsg = call + ' ' + myCall + ' RR73';
-      phase = 'rr73';
+      phase = 'cq-rr73';
       const sameCall = remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.call.toUpperCase() === call.toUpperCase();
       remoteJtcatQso = {
-        mode: 'reply', call,
+        mode: 'cq', call,
         grid: theirGrid || (sameCall ? remoteJtcatQso.grid : ''),
         phase, txMsg,
         report: theirReport || (sameCall ? remoteJtcatQso.report : null),
         sentReport: (sameCall ? remoteJtcatQso.sentReport : null) || ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: sliceKey,
       };
+      if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
     } else if (nextStep === 'send-r-report') {
       txMsg = call + ' ' + myCall + ' R' + ourRpt;
       phase = 'r+report';
       remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase, txMsg, report: theirReport, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
     } else if (nextStep === 'send-report') {
+      // CQ SIDE: they answered our CQ with their grid → we send a signal report.
+      // CQ-mode phase 'cq-report' so the SM advances (their R-report → cq-rr73 +
+      // auto-log). Reply mode had no 'report' handler — the QSO froze, no log.
       txMsg = call + ' ' + myCall + ' ' + ourRpt;
-      phase = 'report';
-      remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase, txMsg, report: null, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
+      phase = 'cq-report';
+      remoteJtcatQso = { mode: 'cq', call, grid: theirGrid, phase, txMsg, report: null, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
     } else {
       txMsg = call + ' ' + myCall + ' ' + myGrid;
       phase = 'reply';
@@ -19352,19 +19359,24 @@ app.whenReady().then(() => {
       txMsg = data.call + ' ' + myCall + ' 73';
       phase = '73';
     } else if (nextStep === 'send-rr73') {
-      // Their step 4 (R+signal) → we send step 5 (RR73). Carry any prior
-      // QSO state if it's the same caller, otherwise create a new entry.
+      // They answered OUR CQ with R+signal (their step 4) → we're the CQ SIDE
+      // sending RR73 (step 5). Use CQ-mode phase 'cq-rr73' so the state machine
+      // actually advances it — reply mode has NO 'rr73' handler, so the QSO
+      // froze and never logged (WZ1H/W7RTA 2026-06-22: double-clicking a station
+      // answering you didn't log + pathway steps stuck). The log point (their
+      // R-report received) has passed, so log on setup like the send-73 case.
       txMsg = data.call + ' ' + myCall + ' RR73';
-      phase = 'rr73';
+      phase = 'cq-rr73';
       const sameCall = popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.call.toUpperCase() === data.call.toUpperCase();
       popoutJtcatQso = {
-        mode: 'reply', call: data.call,
+        mode: 'cq', call: data.call,
         grid: (data.theirGrid || data.grid || (sameCall ? popoutJtcatQso.grid : '')),
         phase, txMsg,
         report: data.theirReport || data.report || (sameCall ? popoutJtcatQso.report : null),
         sentReport: (sameCall ? popoutJtcatQso.sentReport : null) || ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
       };
+      if (!sameCall) await jtcatAutoLog(popoutJtcatQso);
     } else if (nextStep === 'send-r-report') {
       // Their step 3 (plain signal report) → we send step 4 (R+ourReport).
       txMsg = data.call + ' ' + myCall + ' R' + ourRpt;
@@ -19378,14 +19390,16 @@ app.whenReady().then(() => {
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
       };
     } else if (nextStep === 'send-report') {
-      // Their step 2 (grid reply) → we send step 3 (plain signal report).
-      // Old code treated this as a fresh CQ-reply (sending OUR grid back),
-      // which rolled back the QSO whenever a stale step-2 message was
-      // double-clicked after we'd already advanced.
+      // They answered OUR CQ with their grid (their step 2) → we're the CQ SIDE
+      // sending a signal report (step 3). Use CQ-mode phase 'cq-report' so the
+      // state machine advances it (their R-report → cq-rr73 + auto-log). Reply
+      // mode had NO 'report' handler, so the QSO froze and never logged
+      // (WZ1H/W7RTA 2026-06-22). Old code also briefly treated this as a fresh
+      // CQ-reply (sending OUR grid back), rolling the QSO back on a stale click.
       txMsg = data.call + ' ' + myCall + ' ' + ourRpt;
-      phase = 'report';
+      phase = 'cq-report';
       popoutJtcatQso = {
-        mode: 'reply', call: data.call,
+        mode: 'cq', call: data.call,
         grid: data.theirGrid || data.grid || '',
         phase, txMsg,
         report: null,
