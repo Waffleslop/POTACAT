@@ -413,7 +413,7 @@
         <div id="activator-crossref-popover" class="activator-crossref-popover hidden">
           <div class="crossref-row"><label class="crossref-label">SOTA</label><input type="text" id="activator-crossref-sota" class="crossref-input" placeholder="W6/CT-001" maxlength="20" spellcheck="false" autocomplete="off"></div>
           <div class="crossref-row"><label class="crossref-label">WWFF</label><input type="text" id="activator-crossref-wwff" class="crossref-input" placeholder="KFF-1234" maxlength="20" spellcheck="false" autocomplete="off"></div>
-          <div class="crossref-row"><label class="crossref-label">LLOTA</label><input type="text" id="activator-crossref-llota" class="crossref-input" placeholder="US-0001" maxlength="20" spellcheck="false" autocomplete="off"></div>
+          <div class="crossref-row"><label class="crossref-label">LLOTA</label><input type="text" id="activator-crossref-llota" class="crossref-input" placeholder="LLCL-0001" maxlength="20" spellcheck="false" autocomplete="off"></div>
           <div class="crossref-row"><label class="crossref-label">WWBOTA</label><input type="text" id="activator-crossref-wwbota" class="crossref-input" placeholder="B/G-2392" maxlength="20" spellcheck="false" autocomplete="off"></div>
         </div>
       </div>
@@ -2036,6 +2036,13 @@
       <label>Re-spot template (DX cluster):
         <input type="text" id="set-dx-respot-template" placeholder="Heard in {QTH} 73s {mycallsign} via POTACAT">
       </label>
+      <div id="respot-presets-block" style="margin-top:8px;">
+        <label style="display:block;">Saved re-spot messages
+          <span class="help-text" style="display:block;">Optional canned messages you can flick between in the log dialog (a <b>⟳</b> button appears next to the re-spot comment). The dialog still starts with the program template above, then cycles through these. Same placeholders: <code>{rst}</code>, <code>{QTH}</code>, <code>{mycallsign}</code>, <code>{op_firstname}</code>.</span>
+        </label>
+        <div id="respot-presets-list" style="display:flex;flex-direction:column;gap:4px;margin-top:4px;"></div>
+        <button type="button" id="respot-presets-add" style="margin-top:4px;padding:4px 12px;font-size:12px;">+ Add message</button>
+      </div>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
       <label>Notification duration (seconds):
@@ -3550,7 +3557,7 @@
       </div>
       <div class="log-ref-row" data-type="llota" style="display:none;">
         <label style="display:block;">LLOTA Refs:
-          <input type="text" id="log-ref-llota" placeholder="e.g. US-0001" style="text-transform:uppercase;" spellcheck="false" autocomplete="off">
+          <input type="text" id="log-ref-llota" placeholder="e.g. LLCL-0001" style="text-transform:uppercase;" spellcheck="false" autocomplete="off">
         </label>
         <div id="log-ref-name-llota" style="font-size:12px;color:var(--accent-green);margin-top:2px;min-height:16px;white-space:pre-line;"></div>
       </div>
@@ -3627,7 +3634,10 @@
       </label>
       <label id="log-respot-comment-label" style="display:block;margin-top:6px;">
         Re-spot comment:
-        <input type="text" id="log-respot-comment" placeholder="Thks {op_firstname} fer {rst}. 73s {mycallsign} via POTACAT">
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="log-respot-comment" placeholder="Thks {op_firstname} fer {rst}. 73s {mycallsign} via POTACAT" style="flex:1;">
+          <button type="button" id="log-respot-flick" class="hidden" title="Cycle saved re-spot messages" style="padding:4px 8px;white-space:nowrap;">⟳ <span id="log-respot-flick-pos">1/1</span></button>
+        </div>
         <span class="help-text">{rst} signal report, {QTH} grid, {mycallsign} your call, {op_firstname} their name (OM if unknown)</span>
       </label>
     </div>

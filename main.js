@@ -4513,7 +4513,9 @@ async function saveQsoRecord(qsoData, opts) {
     }
   }
 
-  // Re-spot on LLOTA if requested — validate ref matches LLOTA format (XX-NNNN where sig=LLOTA)
+  // Re-spot on LLOTA if requested — gated on sig=LLOTA only; the reference is
+  // passed through opaquely (no prefix-length assumption), so LLOTA's 2026-06-30
+  // switch from 2-letter to 4-letter prefixes (CL- -> LLCL-) needs no changes here.
   if (qsoData.llotaRespot && qsoData.llotaReference) {
     if (qsoData.sig !== 'LLOTA') {
       console.warn('LLOTA re-spot skipped: QSO sig is', qsoData.sig, 'not LLOTA, ref:', qsoData.llotaReference);
@@ -23533,6 +23535,20 @@ app.whenReady().then(() => {
     } catch {
       return null;
     }
+  });
+
+  // Approximate location for a callsign from cty.dat — the bottom-bar logger's
+  // grid/distance/heading fallback when QRZ has no grid and the call isn't
+  // currently spotted. Mirrors the spot table's resolution exactly: prefer the
+  // US-style call-area centroid, else the DXCC entity centroid. No QRZ needed.
+  ipcMain.handle('resolve-callsign-geo', (_e, callsign) => {
+    if (!ctyDb || !callsign) return null;
+    const entity = resolveCallsign(String(callsign).trim(), ctyDb);
+    if (!entity) return null;
+    const areaCoords = getCallAreaCoords(callsign, entity.name);
+    if (areaCoords) return { lat: areaCoords.lat, lon: areaCoords.lon, name: entity.name, source: 'callarea' };
+    if (entity.lat != null && entity.lon != null) return { lat: entity.lat, lon: entity.lon, name: entity.name, source: 'cty' };
+    return null;
   });
 
   // --- QRZ Logbook API ---

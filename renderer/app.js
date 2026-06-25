@@ -409,6 +409,9 @@ let enableWsjtx = false;
 let wsjtxDecodes = []; // recent decodes from WSJT-X (FIFO, max 50)
 let wsjtxState = null; // last WSJT-X status (freq, mode, etc.)
 const qrzData = new Map(); // callsign -> { fname, name, addr2, state, country }
+// Bottom-bar logger cty.dat geo fallback cache: base callsign -> { lat, lon }
+// or null (looked up once). Used when QRZ has no grid and the call isn't spotted.
+const ctyGeoCache = new Map();
 let qrzFullName = false; // show first+last or just first
 
 // --- Activator Mode State ---
@@ -622,6 +625,57 @@ const setWwffRespotTemplate = document.getElementById('set-wwff-respot-template'
 const setLlotaRespotTemplate = document.getElementById('set-llota-respot-template');
 const setWwbotaRespotTemplate = document.getElementById('set-wwbota-respot-template');
 const setDxRespotTemplate = document.getElementById('set-dx-respot-template');
+
+// --- Saved re-spot messages (Settings → Spots) ---
+// A dynamic list of canned messages. Rendered into #respot-presets-list as a
+// row (text input + remove button) each; collected back into an array on save.
+const respotPresetsList = document.getElementById('respot-presets-list');
+const respotPresetsAdd = document.getElementById('respot-presets-add');
+
+function addRespotPresetRow(value) {
+  if (!respotPresetsList) return;
+  const row = document.createElement('div');
+  row.className = 'respot-preset-row';
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'respot-preset-input';
+  input.value = value || '';
+  input.placeholder = 'e.g. Thanks from KS, or 59 KS';
+  input.style.flex = '1';
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.textContent = '✕';
+  del.title = 'Remove this message';
+  del.style.cssText = 'padding:2px 8px;line-height:1;';
+  del.addEventListener('click', () => row.remove());
+  row.appendChild(input);
+  row.appendChild(del);
+  respotPresetsList.appendChild(row);
+  return input;
+}
+
+function renderRespotPresetRows(presets) {
+  if (!respotPresetsList) return;
+  respotPresetsList.innerHTML = '';
+  const list = Array.isArray(presets) ? presets.filter(p => typeof p === 'string' && p.trim()) : [];
+  for (const p of list) addRespotPresetRow(p);
+}
+
+function collectRespotPresets() {
+  if (!respotPresetsList) return [];
+  return Array.from(respotPresetsList.querySelectorAll('.respot-preset-input'))
+    .map(i => i.value.trim())
+    .filter(Boolean);
+}
+
+if (respotPresetsAdd) {
+  respotPresetsAdd.addEventListener('click', () => {
+    const input = addRespotPresetRow('');
+    if (input) input.focus();
+  });
+}
+
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setEnableGma = document.getElementById('set-enable-gma');
@@ -1570,6 +1624,9 @@ async function loadPrefs() {
   if (settings.wwbotaRespotTemplate != null) wwbotaRespotTemplate = settings.wwbotaRespotTemplate;
   if (settings.dxRespotTemplate != null) dxRespotTemplate = settings.dxRespotTemplate;
   if (settings.quickRespotTemplate != null) quickRespotTemplate = settings.quickRespotTemplate;
+  respotPresets = Array.isArray(settings.respotPresets)
+    ? settings.respotPresets.filter(p => typeof p === 'string' && p.trim()).map(p => p.trim())
+    : [];
   myCallsign = settings.myCallsign || '';
   tuneClick = settings.tuneClick === true;
   enableSplit = settings.enableSplit === true;
@@ -2943,7 +3000,7 @@ function _blCardinal(brg) {
   return dirs[Math.round(brg / 45) % 8];
 }
 
-function _blRenderStationInfo(info, callsign) {
+function _blRenderStationInfo(info, callsign, ctyGeo) {
   // Single-line composite: "Name | Grid | Distance | Heading" rendered
   // into the bl-name input (Casey 2026-06-06 — collapsed the old
   // two-line layout). Empty fields are dropped from the join so a
@@ -2982,6 +3039,18 @@ function _blRenderStationInfo(info, callsign) {
     }
   }
 
+  // 3. cty.dat callsign → DXCC entity / call-area centroid (lowest precision).
+  //    Covers manually-typed calls that QRZ has no grid for and that aren't in
+  //    the live spot list — the gap that made the banner show name-only.
+  if (!them && ctyGeo && typeof ctyGeo.lat === 'number' && typeof ctyGeo.lon === 'number') {
+    them = { lat: ctyGeo.lat, lon: ctyGeo.lon };
+    try {
+      const g = latLonToGridLocal(ctyGeo.lat, ctyGeo.lon);
+      if (g) theirGrid = g.toUpperCase();
+    } catch {}
+    gridSource = 'cty';
+  }
+
   // Casey's spec example was 4-char grid ("FM20"). The 6-char form is
   // still computed for accuracy but trimmed for display — the extra
   // sub-square is noise in the banner.
@@ -3008,7 +3077,9 @@ function _blRenderStationInfo(info, callsign) {
   // affordance from the old chips without burning visible real estate.
   blName.title = gridSource === 'spot'
     ? 'Grid derived from spot location (park / cty.dat centroid)'
-    : (gridSource === 'qrz' ? 'Grid from QRZ profile' : '');
+    : gridSource === 'qrz' ? 'Grid from QRZ profile'
+    : gridSource === 'cty' ? 'Grid estimated from callsign (DXCC entity / call-area centroid)'
+    : '';
 }
 
 blCallsign.addEventListener('input', () => {
@@ -3025,22 +3096,32 @@ blCallsign.addEventListener('input', () => {
   // free, so we can populate grid/distance/heading instantly from the
   // current allSpots even before QRZ comes back. The QRZ result will
   // upgrade the row if it has a more precise grid.
-  _blRenderStationInfo(null, cs);
+  const base = cs.split('/')[0];
+  _blRenderStationInfo(null, cs, ctyGeoCache.get(base) || null);
   blLookupTimer = setTimeout(async () => {
-    const cached = qrzData.get(cs.split('/')[0]);
+    // cty.dat geo fallback — cheap local lookup (no network), cached per base
+    // call. Resolved up front so every render below carries the entity centroid
+    // as a last-resort grid/distance/heading source.
+    let ctyGeo = ctyGeoCache.get(base);
+    if (ctyGeo === undefined) {
+      try { ctyGeo = await window.api.resolveCallsignGeo(cs); } catch { ctyGeo = null; }
+      ctyGeoCache.set(base, ctyGeo || null);
+      if (blCallsign.value.trim().toUpperCase() !== cs) return; // stale
+    }
+    const cached = qrzData.get(base);
     if (cached) {
-      _blRenderStationInfo(cached, cs);
+      _blRenderStationInfo(cached, cs, ctyGeo);
       return;
     }
     try {
       const result = await window.api.qrzLookup(cs);
       if (blCallsign.value.trim().toUpperCase() !== cs) return; // stale
-      if (result) qrzData.set(cs.split('/')[0], result);
-      // Pass result (possibly null) AND callsign so the spot-table
-      // fallback runs even when QRZ has no record at all.
-      _blRenderStationInfo(result, cs);
+      if (result) qrzData.set(base, result);
+      // Pass result (possibly null) AND callsign so the spot-table + cty.dat
+      // fallbacks run even when QRZ has no record at all.
+      _blRenderStationInfo(result, cs, ctyGeo);
     } catch {
-      _blRenderStationInfo(null, cs);
+      _blRenderStationInfo(null, cs, ctyGeo);
     }
   }, 400);
 });
@@ -9979,6 +10060,9 @@ function updateLogRespot() {
       : targets.includes('llota') ? 'llota'
       : 'pota';
     respotComment.value = respotTemplateFor(tmplNetwork);
+    // Flick rotation: option 1 is the per-program template (above), then each
+    // saved message. The ⟳ button only appears when the user has saved any.
+    setupRespotFlick(respotTemplateFor(tmplNetwork));
     respotCommentLabel.style.display = respotCheckbox.checked ? '' : 'none';
     respotCheckbox.onchange = () => { respotCommentLabel.style.display = respotCheckbox.checked ? '' : 'none'; };
   } else {
@@ -9987,6 +10071,43 @@ function updateLogRespot() {
     respotCheckbox.checked = false;
   }
 }
+
+// --- Re-spot comment "flick" (cycle saved messages) ---
+// _respotFlickOptions[0] is the per-program template; the rest are the user's
+// saved messages. The ⟳ button advances through them and rewrites the comment.
+let _respotFlickOptions = [];
+let _respotFlickIdx = 0;
+
+function setupRespotFlick(programDefault) {
+  const btn = document.getElementById('log-respot-flick');
+  if (!btn) return;
+  _respotFlickOptions = [programDefault, ...respotPresets];
+  _respotFlickIdx = 0;
+  // Only useful when there's at least one saved message to flick to.
+  if (respotPresets.length > 0) {
+    btn.classList.remove('hidden');
+    updateRespotFlickPos();
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+function updateRespotFlickPos() {
+  const pos = document.getElementById('log-respot-flick-pos');
+  if (pos) pos.textContent = `${_respotFlickIdx + 1}/${_respotFlickOptions.length}`;
+}
+
+(function wireRespotFlick() {
+  const btn = document.getElementById('log-respot-flick');
+  const respotComment = document.getElementById('log-respot-comment');
+  if (!btn || !respotComment) return;
+  btn.addEventListener('click', () => {
+    if (_respotFlickOptions.length < 2) return;
+    _respotFlickIdx = (_respotFlickIdx + 1) % _respotFlickOptions.length;
+    respotComment.value = _respotFlickOptions[_respotFlickIdx];
+    updateRespotFlickPos();
+  });
+})();
 
 // Type chip click handlers — multi-toggle for OTA types, exclusive for DX.
 logTypePicker.addEventListener('click', (e) => {
@@ -13277,6 +13398,7 @@ async function openSettingsDialog(tab) {
   if (setLlotaRespotTemplate) setLlotaRespotTemplate.value = s.llotaRespotTemplate || '';
   if (setWwbotaRespotTemplate) setWwbotaRespotTemplate.value = s.wwbotaRespotTemplate || '';
   if (setDxRespotTemplate) setDxRespotTemplate.value = s.dxRespotTemplate || '';
+  renderRespotPresetRows(Array.isArray(s.respotPresets) ? s.respotPresets : []);
   setNotifyPopup.checked = s.notifyPopup !== false;
   setNotifySound.checked = s.notifySound !== false;
   setNotifyTimeout.value = s.notifyTimeout || 10;
@@ -13934,6 +14056,7 @@ settingsSave.addEventListener('click', async () => {
   const llotaRespotTemplateVal = setLlotaRespotTemplate ? setLlotaRespotTemplate.value.trim() : '';
   const wwbotaRespotTemplateVal = setWwbotaRespotTemplate ? setWwbotaRespotTemplate.value.trim() : '';
   const dxRespotTemplateVal = setDxRespotTemplate ? setDxRespotTemplate.value.trim() : '';
+  const respotPresetsVal = collectRespotPresets();
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
   const sotaMaxAgeVal = parseInt(setSotaMaxAge.value, 10) || 30;
@@ -13966,6 +14089,14 @@ settingsSave.addEventListener('click', async () => {
   // updateSettingsConnBar() picks up the new value when it runs further
   // down. The chip bar's RBN/PSKR visibility now keys off myCallsign.
   myCallsign = setMyCallsign.value.trim().toUpperCase();
+  // Hot-update the in-memory re-spot template + preset vars so the log dialog's
+  // auto-fill and ⟳ flick reflect the change immediately, without a reload.
+  respotTemplate = respotTemplateVal || respotTemplate;
+  wwffRespotTemplate = wwffRespotTemplateVal;
+  llotaRespotTemplate = llotaRespotTemplateVal;
+  wwbotaRespotTemplate = wwbotaRespotTemplateVal;
+  dxRespotTemplate = dxRespotTemplateVal || dxRespotTemplate;
+  respotPresets = respotPresetsVal.slice();
   let clusterEnabled = setEnableCluster.checked;
   let cwSpotsEnabled = setEnableCwSpots.checked;
   let rbnEnabled = setEnableRbn.checked;
@@ -14153,6 +14284,7 @@ settingsSave.addEventListener('click', async () => {
     llotaRespotTemplate: llotaRespotTemplateVal,
     wwbotaRespotTemplate: wwbotaRespotTemplateVal,
     dxRespotTemplate: dxRespotTemplateVal,
+    respotPresets: respotPresetsVal,
     notifyPopup: notifyPopupEnabled,
     notifySound: notifySoundEnabled,
     notifyTimeout: notifyTimeoutVal,
