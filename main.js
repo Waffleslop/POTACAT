@@ -193,6 +193,27 @@ process.stderr?.on('error', () => {});
 // Allow AudioContext to play without user gesture (required for JTCAT audio capture in Chromium 142+)
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+// Remote-desktop / ECHOCAT audio over Tailscale (and other VPN overlays).
+// By default Chromium hides local IPs behind generated `.local` mDNS ICE
+// candidates (privacy anonymization). That is fatal for the WebRTC audio leg
+// over Tailscale: the only viable direct path is the tailnet host candidate
+// (100.x.y.z), but an mDNS `.local` candidate can NEVER be resolved across the
+// tailnet — Tailscale carries no multicast, so the peer can't turn `.local`
+// back into 100.x. Result: control (CAT) works over the WS, but the audio
+// PeerConnection finds no usable pair and stays silent in BOTH directions —
+// exactly the "QSY works, no RX/TX audio over Tailscale" reports (W7RTA,
+// N0SNO, v1.8.14). A real browser tab dodges this because it exposes real host
+// IPs once mic permission is granted; our offerer/answerer run in hidden
+// Electron windows where that mitigation is unreliable (esp. RX-only / SmartSDR
+// -direct push paths that never call getUserMedia). Disabling the feature makes
+// WebRTC gather real host candidates on every interface, including tailscale0,
+// so the direct tailnet pair forms. Safe on LAN (host candidates already win)
+// and off Cloud+TURN (relay still works); this only un-hides local IPs to the
+// peer you're already authenticated/paired with. Process-wide, so it covers
+// both the shack offerer (renderer/remote-audio.html) and the client answerer
+// (renderer/remote-audio-client.html).
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+
 // Linux sandbox compatibility (issue #37). The DECISION lives in the
 // launcher shell script (scripts/linux-launcher.sh, installed as the
 // app's entry point by scripts/linux-after-pack.js): on systems that
@@ -9216,6 +9237,11 @@ function connectRemote() {
 
   remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
+    // Hold off echoing freq back to the phone until the rig poll catches up, so
+    // the stale pre-poll freq can't snap the phone's optimistic VFO back (N3VD
+    // "3 clicks to change"). Re-armed each tune; covers the ~1.5–2s serial poll
+    // lag with margin. Window cleared naturally once it elapses.
+    _freqSuppressUntil = Date.now() + 3000;
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
     tuneRadio(freqKhz, mode, bearing, { clearXit: !mode });
     // Auto-tune KiwiSDR
@@ -11733,8 +11759,12 @@ function broadcastRemoteRadioStatus() {
   if (modeVal && freedvEngine && (modeVal === 'USB' || modeVal === 'LSB')) {
     modeVal = 'FREEDV-' + (freedvEngine.mode || 'RADEV1').toUpperCase();
   }
+  // Suppress stale freq during a phone tune transition — same rationale as mode
+  // above. Omitting it (undefined → dropped from JSON) tells the phone "no change"
+  // so its optimistic VFO holds instead of snapping back to the pre-poll freq.
+  const freqVal = (now < _freqSuppressUntil) ? undefined : (_currentFreqHz || 0);
   const status = {
-    freq: _currentFreqHz || 0,
+    freq: freqVal,
     mode: modeVal,
     catConnected: (cat && cat.connected) || (smartSdr && smartSdr.connected),
     // Effective state — covers user PTT, FT8, voice macros, AND the CW
@@ -15760,6 +15790,16 @@ let _lastTuneFreq = 0;
 let _lastTuneTime = 0;
 let _lastTuneBand = null; // for ATU auto-tune on band change
 let _modeSuppressUntil = 0; // suppress stale mode broadcasts to ECHOCAT during tune transition
+// Suppress stale FREQUENCY echo to ECHOCAT right after a phone-initiated tune.
+// On serial rigs (e.g. IC-7300) _currentFreqHz doesn't update until the next rig
+// poll (~1s, paused during the tune), so a status broadcast in that window echoes
+// the OLD freq and overwrites the phone's optimistic VFO — the knob snaps back and
+// the user has to "out-turn" the echo ("turn 3 clicks for it to change", N3VD).
+// Mode already does this; frequency didn't. Scoped to remote tunes so a DESKTOP
+// tune still updates the phone promptly (it's a passive observer then). Each phone
+// tune re-arms the window, so it holds while the user keeps turning and reconciles
+// to the polled freq shortly after they stop.
+let _freqSuppressUntil = 0;
 
 // --- Guest Pass enforcement gates (#43) ---
 // Single chokepoints for TX-enable + TX-power that route through the
