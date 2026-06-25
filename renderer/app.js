@@ -13619,6 +13619,7 @@ async function openSettingsDialog(tab) {
   setEnableDxcc.checked = s.enableDxcc === true;
   setEnableFreedv.checked = s.enableFreedv === true;
   document.getElementById('set-freedv-use-data-mode').checked = s.freedvUseDataMode !== false; // default true
+  document.getElementById('set-jtcat-use-data-mode').checked = s.jtcatUseDataMode !== false; // default true
   document.getElementById('set-freedv-force-sideband').value = s.freedvForceSideband || '';
   document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
   document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
@@ -14161,6 +14162,7 @@ settingsSave.addEventListener('click', async () => {
   const dxccEnabled = setEnableDxcc.checked;
   const freedvEnabled = setEnableFreedv.checked;
   const freedvUseDataModeVal = document.getElementById('set-freedv-use-data-mode').checked;
+  const jtcatUseDataModeVal = document.getElementById('set-jtcat-use-data-mode').checked;
   const freedvForceSidebandVal = document.getElementById('set-freedv-force-sideband').value || '';
   const sotaUploadEnabled = setSotaUpload.checked;
   const sotaUsernameVal = setSotaUsername.value.trim();
@@ -14338,6 +14340,7 @@ settingsSave.addEventListener('click', async () => {
     enableDxcc: dxccEnabled,
     enableFreedv: freedvEnabled,
     freedvUseDataMode: freedvUseDataModeVal,
+    jtcatUseDataMode: jtcatUseDataModeVal,
     freedvForceSideband: freedvForceSidebandVal,
     enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
     autoSstvInactivityMin: parseInt(document.getElementById('set-auto-sstv-min').value) || 90,

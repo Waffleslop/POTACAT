@@ -16147,6 +16147,27 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     return;
   }
 
+  // Older Yaesu radios (FTDX3000/1200, FT-950, ...) cap DATA-mode (PKTUSB/PKTLSB)
+  // IF bandwidth too narrow for FT8/FT4, clipping the digital passband. When the
+  // operator opts into plain SSB for digital (jtcatUseDataMode === false — the
+  // JTCAT analog of freedvUseDataMode), tune the radio to USB/LSB instead of the
+  // data sub-mode and route the USB-CODEC audio at the rig, where the IF is wide.
+  // Digital is upper-sideband on every band, so FT8/FT4/FT2/DIGU map to USB.
+  // Flex tunes via the SmartSDR API path above (arbitrary filter widths — no
+  // narrow-DATA issue), so this only affects CAT/rigctld rigs. (AB9AI, FTDX3000
+  // via rigctld, v1.8.16.)
+  // Guard with !isFreedvMode so a FreeDV tune (which the block above already
+  // resolved to DIGU/USB per the independent freedvUseDataMode setting) isn't
+  // re-rewritten here.
+  if (settings.jtcatUseDataMode === false && mode && !isFreedvMode) {
+    const dm = String(mode).toUpperCase();
+    if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2' || dm === 'DIGU' || dm === 'PKTUSB' || dm === 'JS8' || dm === 'WSPR') {
+      mode = 'USB';
+    } else if (dm === 'DIGL' || dm === 'PKTLSB') {
+      mode = 'LSB';
+    }
+  }
+
   // CW XIT dispatch:
   //   - useNativeXit: ask the rig (Yaesu XT/RU/RD or SmartSDR slice XIT) for a TX-only offset.
   //   - useVfoShift: legacy — add the offset to the VFO itself and disable any native XIT.

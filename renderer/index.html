@@ -1413,6 +1413,8 @@
         </select>
       </label>
       <span class="help-text" style="margin-left:24px;display:block;">Auto matches the band's voice convention. Override if your rig needs a specific sideband for FreeDV regardless of band &mdash; e.g. FTDX3000 operators who prefer wide USB on 40m.</span>
+      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-jtcat-use-data-mode" checked> Switch radio to DATA mode (PKTUSB) for FT8 / FT4 (JTCAT)</label>
+      <span class="help-text" style="margin-left:24px;display:block;">Uncheck for older Yaesu rigs (FTDX3000, FT-950, etc.) where DATA / Packet-USB caps IF bandwidth too narrow for FT8/FT4. Off keeps the radio in plain USB; route the USB CODEC audio at the rig. Same fix as the FreeDV option above. (AB9AI)</span>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> WSPR or SSTV While Idle</label>
       <span class="help-text" style="margin-left:12px;display:block;">
         When this station is idle for the defined time, have POTACAT open either WSPR or SSTV to passively receive.
