@@ -1176,6 +1176,15 @@ button:hover {
   background: #ff8533;
 }
 
+/* Watchlist toggle "on" state — distinct from the orange Track It action. */
+.event-action-btn.event-action-btn-active {
+  background: #1776cf;
+}
+
+.event-action-btn.event-action-btn-active:hover {
+  background: #2a8ae0;
+}
+
 .event-action-btn.hidden {
   display: none;
 }
@@ -3904,6 +3913,75 @@ tr.wl-group-2 td:last-child {
 .wl-group:last-child {
   margin-bottom: 0;
 }
+
+/* Special event watchlist card (e.g. 13 Colonies) — sits above the three user
+   color groups, stroked distinctly in the event color. */
+.wl-event-card {
+  border: 2px dashed var(--wl-event-color, #1776cf);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: color-mix(in srgb, var(--wl-event-color, #1776cf) 8%, transparent);
+}
+.wl-event-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.wl-event-badge {
+  color: #fff;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.wl-event-title {
+  font-weight: bold;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.wl-event-toggle {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--wl-event-color, #1776cf);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wl-event-toggle.on {
+  background: var(--wl-event-color, #1776cf);
+  color: #fff;
+}
+.wl-event-when {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 7px;
+}
+.wl-event-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wl-event-chip {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+  color: var(--text-primary);
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+}
+.wl-event-chip-name {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
 .wl-group-head {
   display: flex;
   align-items: center;
@@ -4052,6 +4130,13 @@ tr.wl-group-2 td:last-child {
 .spot-gma {
   border-left: 3px solid var(--source-gma);
   background: color-mix(in srgb, var(--source-gma) 6%, transparent);
+}
+
+/* Event watchlist overlay (e.g. 13 Colonies) — subtle accent on rows whose
+   call is on an enabled event watchlist but not in a user color group. */
+.spot-event-watch {
+  border-left: 3px solid #1776cf;
+  background: color-mix(in srgb, #1776cf 7%, transparent);
 }
 
 .spot-pskr {

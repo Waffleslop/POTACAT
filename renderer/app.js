@@ -85,6 +85,44 @@ function lookupWatchlistGroup(callsign) {
   if (!callsign) return null;
   return watchlistGroupLookup.get(callsign.toUpperCase()) || null;
 }
+
+// --- Event watchlist overlay ---
+// A non-destructive watchlist fed by the Events system: when a user flips
+// "Watchlist" on for an event (e.g. 13 Colonies), that event's
+// callsignPatterns are surfaced like watchlist entries (star, show-only
+// filter, scan inclusion, age-gate bypass) WITHOUT touching the three user
+// color groups or the legacy `settings.watchlist` string. Rebuilt from
+// activeEvents whenever events change; auto-clears once an event's schedule
+// has fully ended. Exact calls go in a Set; wildcard patterns (e.g. "W1AW/*")
+// are kept as prefixes.
+let eventWatchlistExact = new Set();
+let eventWatchlistPrefixes = [];
+function rebuildEventWatchlist() {
+  eventWatchlistExact = new Set();
+  eventWatchlistPrefixes = [];
+  const now = Date.now();
+  for (const ev of activeEvents) {
+    if (!ev || !ev.watchlistOn) continue;
+    // Auto-clear: skip events whose every schedule window is in the past.
+    const sched = ev.schedule || [];
+    const ended = sched.length > 0 && sched.every(s => new Date(s.end).getTime() < now);
+    if (ended) continue;
+    for (const p of (ev.callsignPatterns || [])) {
+      if (typeof p !== 'string' || !p) continue;
+      if (p.endsWith('/*')) eventWatchlistPrefixes.push(p.slice(0, -1).toUpperCase());
+      else eventWatchlistExact.add(p.toUpperCase());
+    }
+  }
+}
+function isEventWatched(callsign) {
+  if (!callsign) return false;
+  const cs = callsign.toUpperCase();
+  if (eventWatchlistExact.has(cs)) return true;
+  for (const pre of eventWatchlistPrefixes) {
+    if (cs.startsWith(pre)) return true;
+  }
+  return false;
+}
 let maxAgeMin = 5;       // max spot age in minutes (POTA, LLOTA, WWFF, WWBOTA)
 let sotaMaxAgeMin = 30;  // SOTA max spot age in minutes
 let dxcMaxAgeMin = 15;   // DX cluster max spot age in minutes — DX spots aren't re-posted like POTA
@@ -1167,6 +1205,7 @@ const setRemoteCwEnabled = document.getElementById('set-remote-cw-enabled');
 const setRemoteStun = document.getElementById('set-remote-stun');
 const setAudioSource = document.getElementById('set-audio-source');
 const setFlexOnboardSpeaker = document.getElementById('set-flex-onboard-speaker');
+const setFlexMultiflex = document.getElementById('set-flex-multiflex');
 const setTxEqEnabled = document.getElementById('set-tx-eq-enabled');
 const setTxEqPreset = document.getElementById('set-tx-eq-preset');
 const setTxEqPresetRow = document.getElementById('set-tx-eq-preset-row');
@@ -1491,6 +1530,8 @@ function watchlistMatch(rules, callsign, band, mode) {
     if (r.mode && r.mode !== m) continue;
     return true;
   }
+  // Event watchlist overlay (e.g. 13 Colonies) — additive, ignores band/mode.
+  if (isEventWatched(cs)) return true;
   return false;
 }
 
@@ -2350,6 +2391,8 @@ async function openRigEditor(mode, rigId) {
       if (setRadioNr) setRadioNr.value = String(rig.radioNr || 1);
       const flexApiHostEl = document.getElementById('set-flex-api-host');
       if (flexApiHostEl) flexApiHostEl.value = rig.flexApiHost || '';
+      const flexSliceEl = document.getElementById('set-flex-slice');
+      if (flexSliceEl) flexSliceEl.value = String(rig.flexSlice != null ? rig.flexSlice : 0);
       // External ATU (LDG / MFJ) — RF-sensing auto-tuner config
       const extAtuEl = document.getElementById('set-external-atu');
       const extAtuWattsEl = document.getElementById('set-external-atu-watts');
@@ -2461,6 +2504,8 @@ rigSaveBtn.addEventListener('click', async () => {
   const rigRadioNr = setRadioNr ? parseInt(setRadioNr.value, 10) || 1 : 1;
   const flexApiHostEl = document.getElementById('set-flex-api-host');
   const rigFlexApiHost = flexApiHostEl ? flexApiHostEl.value.trim() : '';
+  const flexSliceEl = document.getElementById('set-flex-slice');
+  const rigFlexSlice = flexSliceEl ? (parseInt(flexSliceEl.value, 10) || 0) : 0;
   const extAtuEl = document.getElementById('set-external-atu');
   const extAtuWattsEl = document.getElementById('set-external-atu-watts');
   const extAtuSecsEl = document.getElementById('set-external-atu-seconds');
@@ -2482,6 +2527,7 @@ rigSaveBtn.addEventListener('click', async () => {
       rig.cwKeyPort = rigCwKeyPortVal;
       rig.radioNr = rigRadioNr;
       rig.flexApiHost = rigFlexApiHost;
+      rig.flexSlice = rigFlexSlice;
       rig.externalAtu = rigExternalAtu;
       rig.externalAtuWatts = rigExternalAtuWatts;
       rig.externalAtuSeconds = rigExternalAtuSeconds;
@@ -2498,6 +2544,7 @@ rigSaveBtn.addEventListener('click', async () => {
       cwKeyPort: rigCwKeyPortVal,
       radioNr: rigRadioNr,
       flexApiHost: rigFlexApiHost,
+      flexSlice: rigFlexSlice,
       externalAtu: rigExternalAtu,
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,
@@ -9363,10 +9410,18 @@ function bindPopupClickHandlers(mapInstance) {
 }
 
 // --- Scan ---
+// A spot is "skipped" if the user hit Skip on it, or it was worked today and
+// hasn't been force-unskipped. This is the same set the table greys out with
+// the "Unskip" button, what scan excludes, and what arrow-key nav steps over.
+// Single source of truth so the three callers can't drift apart.
+function isSpotSkipped(s) {
+  const key = s.callsign + '\t' + s.frequency;
+  return scanSkipped.has(key) || (isWorkedSpot(s) && !scanForceUnskipped.has(key));
+}
+
 function getScanList() {
   const filtered = sortSpots(getFiltered());
-  const skipKey = (s) => s.callsign + '\t' + s.frequency;
-  return filtered.filter((s) => s.source !== 'net' && !scanSkipped.has(skipKey(s)) && (!isWorkedSpot(s) || scanForceUnskipped.has(skipKey(s))));
+  return filtered.filter((s) => s.source !== 'net' && !isSpotSkipped(s));
 }
 
 // Notify main (→ ECHOCAT mobile) of a real scan on↔off transition. Fired only
@@ -9565,13 +9620,19 @@ document.addEventListener('keydown', (e) => {
     if (lastTunedSpot) {
       idx = filtered.findIndex(s => s.callsign === lastTunedSpot.callsign && s.frequency === lastTunedSpot.frequency);
     }
-    // Move
-    if (e.key === 'ArrowDown') {
-      idx = idx < filtered.length - 1 ? idx + 1 : 0;
-    } else {
-      idx = idx > 0 ? idx - 1 : filtered.length - 1;
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    // No current selection: anchor just outside the list so the first step
+    // lands on the end nearest the press direction (Down→first, Up→last).
+    if (idx === -1) idx = step === 1 ? -1 : filtered.length;
+    // Advance to the next non-skipped spot, wrapping around. Bail if every
+    // spot is SKIP-marked so we never loop forever. (K8IKO: arrow nav should
+    // step over skipped rows, matching scan behavior.)
+    let spot = null;
+    for (let i = 0; i < filtered.length; i++) {
+      idx = (idx + step + filtered.length) % filtered.length;
+      if (!isSpotSkipped(filtered[idx])) { spot = filtered[idx]; break; }
     }
-    const spot = filtered[idx];
+    if (!spot) return;
     lastTunedSpot = spot;
     notifyVfoTunedSpot(spot);
     prefillDxCommand(spot);
@@ -11195,7 +11256,7 @@ function render() {
       const isWorked = workedQsos.has(s.callsign.toUpperCase());
       const isWorkedToday = isWorked && isWorkedSpot(s);
       const spotSkipKey = s.callsign + '\t' + s.frequency;
-      const isSkipped = scanSkipped.has(spotSkipKey) || (isWorkedToday && !scanForceUnskipped.has(spotSkipKey));
+      const isSkipped = isSpotSkipped(s);
 
       // Source color-coding
       if (s.source === 'pota') tr.classList.add('spot-pota');
@@ -11217,6 +11278,10 @@ function render() {
         tr.classList.add(`wl-group-${wlMatch.idx}`);
         const wlName = (watchlistGroups[wlMatch.idx] && watchlistGroups[wlMatch.idx].name) || '';
         if (wlName) tr.title = `Watchlist: ${wlName}`;
+      } else if (isEventWatched(s.callsign)) {
+        // Event watchlist (e.g. 13 Colonies) — subtle accent so an enabled
+        // event watchlist is felt even though the event badge already marks it.
+        tr.classList.add('spot-event-watch');
       }
       if (isExpeditionVisible(s.callsign)) tr.classList.add('spot-expedition');
       if (s.comments && /POTA.?CAT/i.test(s.comments)) tr.classList.add('potacat-respot');
@@ -13756,6 +13821,7 @@ async function openSettingsDialog(tab) {
   if (setAudioSource) {
     setAudioSource.value = ['smartsdr', 'icom-network'].includes(s.audioSource) ? s.audioSource : 'dax';
   }
+  if (setFlexMultiflex) setFlexMultiflex.checked = s.flexMultiflex !== false; // default on
   if (setFlexOnboardSpeaker) {
     setFlexOnboardSpeaker.checked = !!s.flexOnboardSpeaker;
   }
@@ -13819,6 +13885,7 @@ async function openSettingsDialog(tab) {
   updateSettingsConnBar();
   // Populate events list
   populateSettingsEvents();
+  renderEventWatchlistCards();
   // App mode radio
   const modeRadio = document.querySelector(`input[name="set-app-mode"][value="${appMode}"]`);
   if (modeRadio) modeRadio.checked = true;
@@ -14238,6 +14305,7 @@ settingsSave.addEventListener('click', async () => {
   const remoteStunVal = setRemoteStun.checked;
   const audioSourceVal = setAudioSource ? setAudioSource.value : 'dax';
   const flexOnboardSpeakerVal = setFlexOnboardSpeaker ? setFlexOnboardSpeaker.checked : false;
+  const flexMultiflexVal = setFlexMultiflex ? setFlexMultiflex.checked : true;
   const cwKeyPortVal = setCwKeyPort.value || '';
   const launcherEnabled = setEnableLauncher ? setEnableLauncher.checked : false;
   // Audio comes from the active rig (resolved after selectedRig below)
@@ -14471,6 +14539,7 @@ settingsSave.addEventListener('click', async () => {
     remoteStun: remoteStunVal,
     audioSource: audioSourceVal,
     flexOnboardSpeaker: flexOnboardSpeakerVal,
+    flexMultiflex: flexMultiflexVal,
     cwKeyPort: cwKeyPortVal,
     enableLauncher: launcherEnabled,
     remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',
@@ -14863,6 +14932,7 @@ function updateEventBanner() {
   const message = document.getElementById('event-message');
   const progressCount = document.getElementById('event-progress-count');
   const optinBtn = document.getElementById('event-optin-btn');
+  const watchlistBtn = document.getElementById('event-watchlist-btn');
   const progressBtn = document.getElementById('event-progress-btn');
   const badge = document.getElementById('event-badge');
 
@@ -14877,6 +14947,10 @@ function updateEventBanner() {
   let isUpcoming = false;
   const now = new Date();
   for (const ev of activeEvents) {
+    // Snoozed (e.g. dismissed during the countdown) — skip until the snooze
+    // expires. Dismissing an upcoming event snoozes it until its start, so the
+    // banner stays hidden through the lead-in and returns when it goes LIVE.
+    if (ev.snoozeUntil && now.getTime() < ev.snoozeUntil) continue;
     // Check for currently active entry first
     const current = getActiveScheduleEntry(ev);
     if (current) {
@@ -14985,6 +15059,21 @@ function updateEventBanner() {
     progressCount.textContent = '';
     optinBtn.classList.remove('hidden');
     progressBtn.classList.add('hidden');
+  }
+
+  // Watchlist toggle — independent of Track It. Shown only for events that
+  // name stations (callsignPatterns), e.g. 13 Colonies / W1AW.
+  if (watchlistBtn) {
+    if ((activeEvent.callsignPatterns || []).length) {
+      watchlistBtn.classList.remove('hidden');
+      watchlistBtn.classList.toggle('event-action-btn-active', !!activeEvent.watchlistOn);
+      watchlistBtn.textContent = activeEvent.watchlistOn ? 'Remove from Watchlist' : 'Add to Watchlist';
+      watchlistBtn.title = activeEvent.watchlistOn
+        ? 'Stations are on your watchlist — click to remove'
+        : "Add this event's stations to your watchlist";
+    } else {
+      watchlistBtn.classList.add('hidden');
+    }
   }
 
   banner.classList.remove('hidden');
@@ -15204,23 +15293,46 @@ function updateSpotsEventsSection() {
     span.textContent = ev.name;
     lbl.append(cb, span);
 
+    const right = document.createElement('div');
+    right.style.cssText = 'display:flex;align-items:center;gap:4px;';
+
+    // Watchlist toggle — only for events that name stations.
+    if ((ev.callsignPatterns || []).length) {
+      const watchBtn = document.createElement('button');
+      watchBtn.type = 'button';
+      watchBtn.className = 'event-overlay-btn';
+      watchBtn.style.cssText = 'font-size:10px;padding:1px 6px;';
+      watchBtn.textContent = ev.watchlistOn ? 'Remove from Watchlist' : 'Add to Watchlist';
+      watchBtn.title = ev.watchlistOn
+        ? 'Stations are on your watchlist — click to remove'
+        : "Add this event's stations to your watchlist";
+      if (ev.watchlistOn) watchBtn.style.color = ev.badgeColor || '#1776cf';
+      watchBtn.addEventListener('click', async () => {
+        await window.api.setEventWatchlist({ eventId: ev.id, on: !ev.watchlistOn });
+      });
+      right.appendChild(watchBtn);
+    }
+
     const boardBtn = document.createElement('button');
     boardBtn.type = 'button';
     boardBtn.className = 'event-overlay-btn';
     boardBtn.style.cssText = 'font-size:10px;padding:1px 6px;';
     boardBtn.textContent = 'Board';
     boardBtn.addEventListener('click', () => openEventBoard(ev.id));
+    right.appendChild(boardBtn);
 
-    row.append(lbl, boardBtn);
+    row.append(lbl, right);
     container.appendChild(row);
   }
 }
 
 // Event banner button handlers
 function findBannerEvent() {
-  // Same logic as updateEventBanner — find active or upcoming event
+  // Same logic as updateEventBanner — find active or upcoming event,
+  // skipping snoozed ones so the click handlers act on the displayed event.
   const now = new Date();
   for (const ev of activeEvents) {
+    if (ev.snoozeUntil && now.getTime() < ev.snoozeUntil) continue;
     if (getActiveScheduleEntry(ev)) return ev;
     const upcoming = (ev.schedule || []).find(s => {
       const start = new Date(s.start);
@@ -15238,15 +15350,30 @@ document.getElementById('event-optin-btn').addEventListener('click', async () =>
   }
 });
 
-document.getElementById('event-dismiss').addEventListener('click', async () => {
+document.getElementById('event-watchlist-btn').addEventListener('click', async () => {
   const ev = findBannerEvent();
   if (ev) {
-    eventBannerSessionDismissed = true;
-    if (ev.optedIn) {
-      document.getElementById('event-banner').classList.add('hidden');
-    } else {
-      await window.api.setEventOptIn({ eventId: ev.id, dismissed: true });
-    }
+    await window.api.setEventWatchlist({ eventId: ev.id, on: !ev.watchlistOn });
+  }
+});
+
+document.getElementById('event-dismiss').addEventListener('click', async () => {
+  const ev = findBannerEvent();
+  if (!ev) return;
+  eventBannerSessionDismissed = true;
+  document.getElementById('event-banner').classList.add('hidden');
+  // Snooze until the event's next start, so an upcoming event stays hidden for
+  // the whole countdown and the banner returns as LIVE when it begins. If the
+  // event is already live (no future start), fall back to the dismiss flag.
+  const now = Date.now();
+  const nextStart = (ev.schedule || [])
+    .map(s => new Date(s.start).getTime())
+    .filter(t => t > now)
+    .sort((a, b) => a - b)[0];
+  if (nextStart) {
+    await window.api.setEventSnooze({ eventId: ev.id, snoozeUntil: nextStart });
+  } else if (!ev.optedIn) {
+    await window.api.setEventOptIn({ eventId: ev.id, dismissed: true });
   }
 });
 
@@ -15289,6 +15416,29 @@ function populateSettingsEvents() {
     left.appendChild(label);
     const right = document.createElement('div');
     right.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    // Watchlist toggle — only for events that name stations (e.g. 13 Colonies).
+    if ((ev.callsignPatterns || []).length) {
+      const watchBtn = document.createElement('button');
+      watchBtn.type = 'button';
+      watchBtn.textContent = ev.watchlistOn ? 'Remove from Watchlist' : 'Add to Watchlist';
+      watchBtn.title = ev.watchlistOn
+        ? 'Stations are on your watchlist — click to remove'
+        : "Add this event's stations to your watchlist";
+      watchBtn.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:3px;border:1px solid var(--border-secondary);cursor:pointer;'
+        + (ev.watchlistOn
+            ? `background:${ev.badgeColor || '#1776cf'};color:#fff;border-color:${ev.badgeColor || '#1776cf'};`
+            : 'background:var(--bg-tertiary);color:var(--text-secondary);');
+      watchBtn.addEventListener('click', async () => {
+        await window.api.setEventWatchlist({ eventId: ev.id, on: !ev.watchlistOn });
+        const events = await window.api.getActiveEvents();
+        activeEvents = events;
+        rebuildEventWatchlist();
+        populateSettingsEvents();
+        updateEventBanner();
+        render();
+      });
+      right.appendChild(watchBtn);
+    }
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:3px;border:1px solid var(--border-secondary);cursor:pointer;';
@@ -15334,11 +15484,78 @@ function populateSettingsEvents() {
   }
 }
 
+// Format an ISO timestamp as "Jul 1 at 1300 UTC" for event watchlist cards.
+function _fmtEventUtc(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()} at ${pad(d.getUTCHours())}${pad(d.getUTCMinutes())} UTC`;
+}
+
+// Special event watchlist cards at the top of Settings → Spots → Watchlist
+// Groups. One distinct, stroked card per active/upcoming event that names
+// stations (e.g. 13 Colonies), with its schedule window, an Add/Remove
+// toggle, and every station (including bonus point stations).
+function renderEventWatchlistCards() {
+  const host = document.getElementById('wl-event-cards');
+  if (!host) return;
+  const now = Date.now();
+  const cards = activeEvents.filter((ev) => {
+    if (!ev || !(ev.callsignPatterns || []).length) return false;
+    const sched = ev.schedule || [];
+    // Show while any schedule window hasn't ended yet.
+    return sched.some((s) => new Date(s.end).getTime() >= now);
+  });
+  if (!cards.length) { host.innerHTML = ''; return; }
+
+  host.innerHTML = cards.map((ev) => {
+    const sched = (ev.schedule || []).slice().sort((a, b) => new Date(a.start) - new Date(b.start));
+    const first = sched[0];
+    const last = sched[sched.length - 1];
+    const whenLine = first
+      ? `Watchlist begins ${_fmtEventUtc(first.start)} and ends ${_fmtEventUtc(last.end)}`
+      : 'Schedule TBD';
+    // Prefer the tracking checklist (id + named region/bonus); fall back to
+    // the raw callsign patterns.
+    const items = (ev.tracking && Array.isArray(ev.tracking.items) && ev.tracking.items.length)
+      ? ev.tracking.items
+      : (ev.callsignPatterns || []).map((p) => ({ id: p, name: '' }));
+    const chips = items.map((it) => {
+      const name = it.name ? `<span class="wl-event-chip-name">${_contestsEscape(it.name)}</span>` : '';
+      return `<span class="wl-event-chip"><b>${_contestsEscape(it.id)}</b>${name}</span>`;
+    }).join('');
+    const color = ev.badgeColor || '#1776cf';
+    const on = !!ev.watchlistOn;
+    return `
+      <div class="wl-event-card" style="--wl-event-color:${_contestsEscape(color)};">
+        <div class="wl-event-head">
+          <span class="wl-event-badge" style="background:${_contestsEscape(color)};">${_contestsEscape(ev.badge || 'EVT')}</span>
+          <span class="wl-event-title">${_contestsEscape(ev.name)} — Watchlist</span>
+          <button type="button" class="wl-event-toggle${on ? ' on' : ''}" data-event-id="${_contestsEscape(ev.id)}">${on ? 'Remove from Watchlist' : 'Add to Watchlist'}</button>
+        </div>
+        <div class="wl-event-when">${_contestsEscape(whenLine)}</div>
+        <div class="wl-event-chips">${chips}</div>
+      </div>`;
+  }).join('');
+
+  host.querySelectorAll('.wl-event-toggle').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-event-id');
+      const ev = activeEvents.find((e) => e.id === id);
+      if (!ev) return;
+      await window.api.setEventWatchlist({ eventId: id, on: !ev.watchlistOn });
+    });
+  });
+}
+
 // Listen for events from main process
 window.api.onActiveEvents((events) => {
   activeEvents = events;
+  rebuildEventWatchlist();
   updateEventBanner();
   updateSpotsEventsSection();
+  renderEventWatchlistCards();
   // Refresh overlay if open
   if (eventOverlayOpen && currentBoardEventId) {
     const ev = activeEvents.find(e => e.id === currentBoardEventId);
@@ -18661,6 +18878,7 @@ const rigAttBtn    = document.getElementById('rig-att-btn');
 const rigCompBtn   = document.getElementById('rig-comp-btn');
 const rigNrBtn     = document.getElementById('rig-nr-btn');
 const rigAnfBtn    = document.getElementById('rig-anf-btn');
+const rigApfBtn    = document.getElementById('rig-apf-btn');
 const rigVoxBtn    = document.getElementById('rig-vox-btn');
 const rigAgcSelect = document.getElementById('rig-agc-select');
 // Phase-2: continuous levels + monitor.
@@ -18901,6 +19119,7 @@ function rigApplyCapabilities(caps) {
   if (rigCompBtn)   rigCompBtn.style.display   = caps.comp   ? '' : 'none';
   if (rigNrBtn)     rigNrBtn.style.display     = caps.nr     ? '' : 'none';
   if (rigAnfBtn)    rigAnfBtn.style.display    = caps.anf    ? '' : 'none';
+  if (rigApfBtn)    rigApfBtn.style.display    = caps.apf    ? '' : 'none';
   if (rigVoxBtn)    rigVoxBtn.style.display    = caps.vox    ? '' : 'none';
   if (rigCompBtn) {
     rigCompBtn.textContent = isFtx1 ? 'PROC' : 'Comp';
@@ -19045,6 +19264,7 @@ _bindModifierBtn(rigAttBtn,    'set-att');
 _bindModifierBtn(rigCompBtn,   'set-comp');
 _bindModifierBtn(rigNrBtn,     'set-nr');
 _bindModifierBtn(rigAnfBtn,    'set-anf');
+_bindModifierBtn(rigApfBtn,    'set-apf');
 _bindModifierBtn(rigVoxBtn,    'set-vox');
 
 if (rigAgcSelect) {
@@ -19179,6 +19399,7 @@ window.api.onRigState((state) => {
   _syncModBtn(rigCompBtn,   state.comp);
   _syncModBtn(rigNrBtn,     state.nr);
   _syncModBtn(rigAnfBtn,    state.anf);
+  _syncModBtn(rigApfBtn,    state.apf);
   _syncModBtn(rigVoxBtn,    state.vox);
   _syncModBtn(rigMonBtn,    state.mon);
   _syncModBtn(rigRitBtn,    state.rit);
@@ -23041,8 +23262,10 @@ loadPrefs().then(() => {
 window.api.getActiveEvents().then((events) => {
   console.log('[Events] loaded', events.length, 'events:', events.map(e => e.id));
   activeEvents = events;
+  rebuildEventWatchlist();
   updateEventBanner();
   updateSpotsEventsSection();
+  renderEventWatchlistCards();
   render();
 }).catch(err => console.error('[Events] failed to load:', err));
 applyColOrder();

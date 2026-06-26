@@ -239,6 +239,7 @@ const sotaUploader = new SotaUploader();
 const { CatClient, RigctldClient, CivClient, listSerialPorts } = require('./lib/cat');
 // New rig abstraction layer
 const { RigController } = require('./lib/rig-controller');
+const { RIG_CONTROLS } = require('./lib/rig-controls');
 const { TcpTransport, SerialTransport } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
@@ -1024,6 +1025,20 @@ let _audioBridgeSilentSince = 0;
 let _currentFreqHz = 0;    // tracked for remote radio status
 let _currentMode = '';
 let _remoteTxState = false;
+// External RF-sensing ATU (LDG/MFJ) state + tune routine. Declared at module
+// scope so the single applyRigControl() dispatcher can reach the impl no matter
+// which transport (desktop IPC or ECHOCAT) triggered it. The real function body
+// is assigned inside connectRemote() (it closes over the remote-server context).
+let _externalAtuActive = false;
+let _externalAtuCancel = false;
+let runExternalAtuTune = async () => false;
+// THE single rig-control dispatcher. Both transports — desktop IPC
+// (ipcMain.handle 'rig-control') and the ECHOCAT phone (remoteServer.on
+// 'rig-control') — route through this one function so a control added once
+// works everywhere. Assigned in app.whenReady(); see applyRigControl below.
+// Do NOT reintroduce a second switch in either transport (that drift is what
+// silently broke NR/Comp/ANF/VOX on the phone).
+let applyRigControl = () => {};
 // Desktop-initiated CW TX lockout. The audio-health detector in
 // remote-audio.html watches localStream peak energy and false-fires
 // "peak-zero-while-rx" after 5s of silence — and rig audio goes silent
@@ -1061,6 +1076,36 @@ let _currentAttState = false;
 let _currentCompState = false;
 let _currentNrState = false;
 let _currentAnfState = false;
+let _currentApfState = false;
+let _currentSliceDax = null;   // DAX channel the Flex slice is routed to (0 = off, null = unknown)
+let _daxRouteOk = true;        // false when the slice's DAX channel != the one we listen on (silent RX)
+let _daxFixAttempted = false;  // debounce: one auto-fix per mismatch episode
+let _flexDaxChannel = 1;       // the DAX RX channel POTACAT actually uses (auto-picked free in multiFlex)
+let _daxFixTimes = [];         // recent auto-fix timestamps, for flap detection
+let _daxConflictWarned = false;// true once we've warned about a DAX-channel tug-of-war
+
+// Pick the DAX RX channel POTACAT should use. When self-hosting alongside
+// SmartSDR (multiFlex) we CANNOT share a DAX channel with its slice, so if the
+// preferred channel is taken by another slice, pick the lowest free one. In
+// bound mode (shared slice) we use the configured channel as before.
+function chooseFlexDaxChannel(ourSlice) {
+  const preferred = parseInt(settings.audioDaxChannel, 10) || 1;
+  if (!smartSdr || smartSdr.mode !== 'self' || typeof smartSdr.usedDaxChannels !== 'function') {
+    return preferred;
+  }
+  const used = smartSdr.usedDaxChannels(ourSlice);
+  if (!used.has(preferred)) return preferred;
+  for (let ch = 1; ch <= 8; ch++) { if (!used.has(ch)) return ch; }
+  return preferred; // all 8 taken (shouldn't happen) — fall back
+}
+
+// Which Flex slice POTACAT operates on (DAX RX/TX + auto-fix target). Per-rig
+// `flexSlice` (0=A..3=D), set in Settings → Rig; defaults to A.
+function getFlexSliceIndex() {
+  const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+  const s = rig && rig.flexSlice;
+  return (typeof s === 'number' && s >= 0 && s <= 3) ? s : 0;
+}
 let _currentVoxState = false;
 let _currentAgcMode = '';
 // Phase-2 levels + monitor (rig-popover continuous controls).
@@ -1212,7 +1257,10 @@ function getRigCapabilities(rigType) {
   }
   // Fallback to generic per-type
   switch (rigType) {
-    case 'flex':    return { nb: true, atu: true, vfo: false, filter: true, filterType: 'arbitrary', rfgain: true, txpower: true, power: false };
+    case 'flex':    return { nb: true, atu: true, vfo: false, filter: true, filterType: 'arbitrary', rfgain: true, txpower: true, power: false,
+                             // DSP/TX controls the SmartSDR API exposes — advertised so clients
+                             // only show what the Flex can actually do (and the dispatcher gates).
+                             nr: true, anf: true, apf: true, comp: true, vox: true, agc: true, mon: true, rit: true, cwSidetone: true };
     case 'yaesu':   return { nb: true, atu: true, vfo: true, filter: true, filterType: 'indexed', rfgain: true, txpower: true, power: true };
     case 'kenwood': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'direct', rfgain: true, txpower: true, power: true };
     case 'icom':    return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: true };
@@ -1523,6 +1571,19 @@ function sendCatStatus(s) {
   broadcastRigState();
 }
 
+// CAT-sourced freq/mode handlers. In multiFlex self-host the port-5002 CAT shim
+// reads SmartSDR's slice (not POTACAT's), so its freq/mode would show the wrong
+// slice — ignore it there; OUR slice's freq/mode arrives via the smartSdr
+// 'frequency'/'mode' events instead. Every other mode/rig uses cat normally.
+function catFrequencyHandler(hz) {
+  if (smartSdr && smartSdr.mode === 'self') return;
+  sendCatFrequency(hz);
+}
+function catModeHandler(md) {
+  if (smartSdr && smartSdr.mode === 'self') return;
+  sendCatMode(md);
+}
+
 function sendCatFrequency(hz) {
   if (hz > 0 && hz < 100000) {
     console.warn(`[CAT] Ignoring suspicious frequency: ${hz} Hz (below 100 kHz)`);
@@ -1675,8 +1736,11 @@ function broadcastRigState() {
     comp: _currentCompState,
     nr: _currentNrState,
     anf: _currentAnfState,
+    apf: _currentApfState,
     vox: _currentVoxState,
     agc: _currentAgcMode,
+    sliceDax: _currentSliceDax,
+    daxRouteOk: _daxRouteOk,
     nrLevel: _currentNrLevel,
     nbLevel: _currentNbLevel,
     voxLevel: _currentVoxLevel,
@@ -1696,6 +1760,10 @@ function broadcastRigState() {
     preampLevel: _currentPreampLevel,
     antennaPort: _currentAntennaPort,
     capabilities: caps,
+    // Control registry — lets clients render the rig panel (labels, grouping,
+    // TX-only tags, which caps gate each) from one source of truth instead of
+    // hardcoding buttons. See lib/rig-controls.js.
+    controls: RIG_CONTROLS,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
   sendVfoState();
@@ -1707,7 +1775,10 @@ function broadcastRigState() {
 // renderer over IPC), so the diagnostic-snapshot gatherer had nothing to read
 // — this gives it the last ~200 lines for the bug report's logLines section.
 const _catLogRing = [];
-const CAT_LOG_RING_CAP = 200;
+// Cap is generous because the per-second FA;/MD; CAT poll lines flood the ring
+// (~4 lines/sec); a small ring would scroll rig-control events out within
+// seconds, leaving the mobile diagnostic with only poll spam.
+const CAT_LOG_RING_CAP = 600;
 function getRecentSendCatLog(n) {
   const count = Math.max(1, Math.min(n || 50, _catLogRing.length));
   return _catLogRing.slice(-count);
@@ -1822,7 +1893,7 @@ function gatherDesktopRawDiagnostic() {
       cloudHost: (tunnel && tunnel.cloudHost) || null,
       lastHealthCheckAt: (tunnel && tunnel.lastCheckAt) || null,
     },
-    logLines: getRecentSendCatLog(50),
+    logLines: getRecentSendCatLog(400),
   };
 }
 
@@ -2768,7 +2839,7 @@ async function connectCat() {
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('status', (s) => checkFlexHandoff(!!s.connected));
-    cat.on('frequency', sendCatFrequency);
+    cat.on('frequency', catFrequencyHandler);
     // Serial CAT port opened but the radio never echoes our tune — classically a
     // Yaesu (FTDX1200/3000/5000) with menu "CAT RTS" enabled while we de-assert
     // RTS, or a DTR/RTS-blocked USB interface. The port connects (so QRZ/logging
@@ -2781,7 +2852,7 @@ async function connectCat() {
         win.webContents.send('cat-tune-unconfirmed', info || {});
       }
     });
-    cat.on('mode', sendCatMode);
+    cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
@@ -2830,8 +2901,8 @@ async function connectCat() {
       sendCatLog(`rigctld status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
     });
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -2852,8 +2923,8 @@ async function connectCat() {
       sendCatLog(`rigctld-net status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
     });
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -2872,8 +2943,8 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
@@ -2908,8 +2979,8 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
@@ -2937,8 +3008,8 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
@@ -3040,8 +3111,8 @@ async function connectCat() {
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
-    cat.on('frequency', sendCatFrequency);
-    cat.on('mode', sendCatMode);
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
@@ -6607,6 +6678,13 @@ function connectSmartSdr() {
   });
   smartSdr.on('connected', () => {
     _sdrErrorLogged = false;
+    // Fresh connection — re-arm DAX-route detection (clear stale state so the
+    // first mismatch this session can auto-fix).
+    _daxFixAttempted = false;
+    _daxRouteOk = true;
+    _currentSliceDax = null;
+    _daxFixTimes = [];
+    _daxConflictWarned = false;
     sendCatLog('SmartSDR API connected (port 4992) — rig controls active');
     // Cleanup for stale slice audio_mute=1 that an earlier experimental
     // build (since reverted) wrote to the radio. The Flex's band
@@ -6626,6 +6704,11 @@ function connectSmartSdr() {
     }
   });
   smartSdr.on('log', (msg) => sendCatLog('[SmartSDR] ' + msg));
+  // Route rejected commands (e.g. a bad slice field) into the CAT log ring so
+  // they're captured in the mobile diagnostic snapshot, not just console.log.
+  smartSdr.on('cmd-error', ({ seq, status, line }) => {
+    sendCatLog(`[SmartSDR] cmd error: R${seq}|${(status >>> 0).toString(16)}|${line}`);
+  });
   smartSdr.on('disconnected', () => {
     sendCatLog('SmartSDR API disconnected — rig controls (ATU/filter/gain) unavailable');
     // Flex Direct: with no port-5002 CAT either, the radio is now uncontrollable.
@@ -6648,6 +6731,9 @@ function connectSmartSdr() {
     saveSettings(settings);
   }
   smartSdr.setPersistentId(settings.smartSdrClientId);
+  // multiFlex: register POTACAT as its own GUI client even when SmartSDR is
+  // open, so it owns transmit. Default on; flexMultiflex=false rides along.
+  smartSdr.setMultiflex(settings.flexMultiflex !== false);
   // Tell SmartSDR whether CW keyer needs GUI auth
   smartSdr.setNeedsCw(!!(settings.enableCwKeyer || (settings.enableRemote && settings.remoteCwEnabled)));
   // Bind to GUI client for ECHOCAT rig controls (ATU, etc.)
@@ -6681,20 +6767,33 @@ function connectSmartSdr() {
     // (before `client gui` completes), so kick the audio client here.
     if (settings.audioSource === 'smartsdr') startSmartSdrAudio();
   });
+  // Start the audio client the moment the GUI mode resolves to 'bound' (or the
+  // multiFlex fallback). 'self' starts via gui-ready above once our clientId is
+  // ready; startSmartSdrAudio is idempotent so a double-fire is harmless.
+  smartSdr.on('gui-mode', () => {
+    if (settings.audioSource === 'smartsdr') startSmartSdrAudio();
+  });
   smartSdr.on('slice-ready', ({ index }) => {
     if (smartSdr.mode === 'self') {
       sendCatLog(`Flex Direct: tuning radio slice ${index}`);
       // POTACAT owns this slice — bind it to a DAX channel so RX/TX audio
-      // routes to the dedicated audio connection (no SmartSDR to do it).
-      const ch = parseInt(settings.audioDaxChannel, 10) || 1;
+      // routes to the dedicated audio connection (no SmartSDR to do it). In
+      // multiFlex, pick a channel SmartSDR's slice isn't already using.
+      _flexDaxChannel = chooseFlexDaxChannel(index);
+      const ch = _flexDaxChannel;
       smartSdr.setSliceDax(index, ch);
-      // As the GUI head, an 8000-series Flex plays this slice on its
-      // built-in speaker. Hunters don't want that — mute the onboard
-      // monitor audio unless the operator opted in (flexOnboardSpeaker).
-      // DAX is upstream-independent, so RX audio for JTCAT/SSTV is unaffected.
-      const onboard = !!settings.flexOnboardSpeaker;
+      // Onboard-speaker mute. SmartSDR-less self mode: audio_mute is independent
+      // of the DAX tap, so we mute the radio's speaker while DAX RX keeps
+      // flowing (default; flexOnboardSpeaker overrides). BUT in multiFlex (a 2nd
+      // client alongside SmartSDR on 4.2.x), the DAX feed is taken FROM the
+      // slice monitor mix — so audio_mute=1 ALSO silences DAX → no RX. Confirmed
+      // empirically (K3SBP 2026-06-26): muted = 0 decodes, unmuted = decodes. So
+      // in multiFlex we must leave the slice UNMUTED; the cost is the radio's
+      // speaker plays the slice audio (turn down the radio's volume to quiet it).
+      const _multiflexActive = !!(smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients.length > 0);
+      const onboard = !!settings.flexOnboardSpeaker || _multiflexActive;
       smartSdr.setOnboardAudioMute(index, !onboard);
-      sendCatLog(`Flex Direct: radio speaker ${onboard ? 'ON' : 'muted'} (slice ${index} audio_mute=${onboard ? 0 : 1})`);
+      sendCatLog(`Flex Direct: radio speaker ${onboard ? 'ON' : 'muted'} (slice ${index} audio_mute=${onboard ? 0 : 1})${_multiflexActive ? ' [multiFlex: must stay unmuted for DAX RX]' : ''}`);
     } else {
       // Bound mode: the host GUI client (SmartSDR-Win / AetherSDR) already
       // configured DAX; we're just following its active slice. The UI's CAT
@@ -6704,13 +6803,55 @@ function connectSmartSdr() {
       sendCatStatus({ connected: true });
     }
   });
+  // DAX-route health: the Flex tells us which DAX channel the slice is on. If
+  // it isn't the channel our dax_rx listens on, audio arrives silent (the
+  // "Slice A not on DAX 1 → all zeros" trap, which has no error to catch).
+  // Surface it loudly instead of decoding zeros forever.
+  smartSdr.on('slice-dax', ({ index, channel }) => {
+    // Only the slice POTACAT actually uses: its own slice when self-hosting
+    // (multiFlex may not put us on slice 0), else the configured fallback.
+    const target = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+    if (index !== target) return;
+    _currentSliceDax = channel;
+    const want = _flexDaxChannel;
+    const ok = channel === want;
+    if (ok) {
+      if (!_daxRouteOk) sendCatLog(`DAX route OK — slice ${index} is on DAX channel ${channel}.`);
+      _daxRouteOk = true;
+      _daxFixAttempted = false; // re-arm for any future drift
+    } else {
+      _daxRouteOk = false;
+      // Flap guard: if we've auto-fixed this slice several times in a few
+      // seconds, another client (SmartSDR) is fighting us for the channel —
+      // STOP re-setting it (that was the 12×/sec loop) and warn ONCE.
+      const now = Date.now();
+      _daxFixTimes = _daxFixTimes.filter((t) => now - t < 4000);
+      const flapping = _daxFixTimes.length >= 3;
+      if (flapping) {
+        if (!_daxConflictWarned) {
+          _daxConflictWarned = true;
+          sendCatLog(`⚠ DAX channel ${want} CONFLICT — another SmartSDR client keeps taking it back; POTACAT can't share a DAX channel. `
+            + `Set a different DAX channel for POTACAT, or close the other client. (No longer fighting for it.)`);
+        }
+      } else if (settings.flexDaxAutoFix !== false && !_daxFixAttempted && typeof smartSdr.setSliceDax === 'function') {
+        _daxFixAttempted = true;
+        _daxFixTimes.push(now);
+        sendCatLog(`⚠ DAX mismatch — slice ${index} on DAX ${channel === 0 ? 'OFF' : channel}; auto-setting to DAX ${want} so RX isn't silent.`);
+        smartSdr.setSliceDax(index, want);
+      }
+    }
+    broadcastRigState();
+  });
   // Mirror the self-hosted slice's frequency/mode to the UI when there is no
   // SmartSDR-Win CAT shim (port 5002) feeding `cat`.
+  // In multiFlex (self-host alongside SmartSDR) the port-5002 CAT shim reads
+  // SmartSDR's slice, not ours — so OUR slice's freq/mode (from the API) is
+  // authoritative for the display even though cat is connected.
   smartSdr.on('frequency', (hz) => {
-    if (!cat || !cat.connected) sendCatFrequency(hz);
+    if (smartSdr.mode === 'self' || !cat || !cat.connected) sendCatFrequency(hz);
   });
   smartSdr.on('mode', (md) => {
-    if (!cat || !cat.connected) sendCatMode(md);
+    if (smartSdr.mode === 'self' || !cat || !cat.connected) sendCatMode(md);
   });
   // Use per-rig flexApiHost if set, else smartSdrHost global, else catTarget host, else localhost
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
@@ -6742,16 +6883,20 @@ function checkFlexHandoff(catUp) {
   _lastCatUpForHandoff = catUp;
   if (!smartSdr || !smartSdr.connected) return;
   if (!settings.catTarget || settings.catTarget.type !== 'tcp') return; // Flex only
-  if (catUp && smartSdr.guiReady) {
-    // SmartSDR-Win came up while POTACAT was self-hosting — hand off so
-    // POTACAT follows SmartSDR's slice instead of running its own.
+  const multiflex = settings.flexMultiflex !== false;
+  if (catUp && smartSdr.guiReady && !multiflex) {
+    // Legacy (multiFlex off): SmartSDR-Win came up while self-hosting — hand
+    // off so POTACAT follows SmartSDR's slice (bound) instead of its own.
     sendCatLog('Flex Direct: SmartSDR detected — handing off (POTACAT will follow SmartSDR).');
     connectSmartSdr();
   } else if (!catUp && smartSdr.mode === 'bound') {
-    // SmartSDR-Win closed — reclaim the radio by self-hosting again.
+    // SmartSDR-Win closed while bound (multiFlex off, or the radio refused a
+    // 2nd client) — reclaim the radio by self-hosting again.
     sendCatLog('Flex Direct: SmartSDR closed — POTACAT resuming as the GUI client.');
     connectSmartSdr();
   }
+  // multiFlex + SmartSDR opened while self-hosting: nothing to do — POTACAT
+  // stays its own gui client alongside SmartSDR (no reconnect, no audio glitch).
 }
 
 // --- DAX-free audio path -----------------------------------------------
@@ -6762,6 +6907,11 @@ function checkFlexHandoff(catUp) {
 // forwarded to the renderer for WebCodecs decode + WebRTC track swap.
 function startSmartSdrAudio() {
   if (smartSdrAudio) return; // already running
+  // Wait until the GUI mode is resolved (self vs bound). The connect-time timer
+  // can fire while mode is still 'none'; starting then would bind audio to the
+  // wrong client. The 'gui-mode' event (bound) and 'gui-ready' (self, once our
+  // clientId exists) re-invoke this at the right moment.
+  if (!smartSdr || smartSdr.mode === 'none') return;
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const sdrHost = (activeRig && activeRig.flexApiHost) || settings.smartSdrHost || (settings.catTarget && settings.catTarget.host) || '127.0.0.1';
   smartSdrAudio = new SmartSdrAudio();
@@ -6877,17 +7027,28 @@ function startSmartSdrAudio() {
   smartSdrAudio.on('recovered', () => {
     sendCatLog('[SmartSDR-Audio] dax_rx stream recovered');
   });
-  const daxChannel = parseInt(settings.audioDaxChannel, 10) || 1;
+  // DAX RX channel POTACAT listens on. In multiFlex this must NOT collide with
+  // SmartSDR's slice channel, so auto-pick a free one. The dax_rx subscription
+  // below + the slice's dax + the auto-fix all use this same channel.
+  const _ourSlice = (smartSdr && smartSdr.ourSliceIndex != null) ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+  _flexDaxChannel = chooseFlexDaxChannel(_ourSlice);
+  const daxChannel = _flexDaxChannel;
   // Reach into the primary client for the GUI client UUID it
   // already discovered. The dedicated audio TCP needs to bind to the
   // SAME existing GUI client (not register a new one) — that's what
   // licenses it to receive audio. Without this bind, `stream create
   // type=dax_rx` succeeds but no audio packets ever route to us.
-  let guiClientId = (smartSdr && smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients[0]) || null;
-  // Flex Direct: no external SmartSDR/AetherSDR GUI client to bind to — bind
-  // the audio connection to POTACAT's OWN self-hosted GUI client instead.
-  if (!guiClientId && smartSdr && smartSdr.clientId) {
+  let guiClientId;
+  if (smartSdr && smartSdr.mode === 'self') {
+    // multiFlex / Flex Direct: bind the audio (and dax_tx) to OUR OWN gui
+    // client so POTACAT owns the transmit chain — this is what makes TX
+    // modulate with SmartSDR also open. null here means our `client gui` hasn't
+    // completed yet; the !guiClientId path below defers until gui-ready.
     guiClientId = smartSdr.clientId;
+  } else {
+    // Bound: ride along with the external GUI client we're bound to.
+    guiClientId = (smartSdr && smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients[0]) || null;
+    if (!guiClientId && smartSdr && smartSdr.clientId) guiClientId = smartSdr.clientId;
   }
   if (!guiClientId) {
     sendCatLog('[SmartSDR-Audio] No GUI client yet (primary not registered) — audio will start once Flex Direct is ready.');
@@ -6910,7 +7071,7 @@ function startSmartSdrAudio() {
   // ourselves. Use the followed slice if known, else slice 0 (single-slice
   // default). This also makes the dax_rx stall→re-subscribe path self-heal.
   if (smartSdr && smartSdr.mode === 'bound' && typeof smartSdr.setSliceDax === 'function') {
-    const sliceIdx = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : 0;
+    const sliceIdx = getFlexSliceIndex();
     smartSdr.setSliceDax(sliceIdx, daxChannel);
     sendCatLog(`[SmartSDR-Audio] Bound slice ${sliceIdx} → DAX channel ${daxChannel} for RX audio (no longer assuming the host set it)`);
   }
@@ -9982,7 +10143,7 @@ function connectRemote() {
     }
     _currentNbState = on;
     broadcastRigState();
-    console.log('[Echo CAT] NB:', on ? 'ON' : 'OFF');
+    sendCatLog(`rig-control[echocat] set-nb=${on} -> nb=${on ? 1 : 0} (flexApi=${smartSdr && smartSdr.connected ? 1 : 0})`);
   });
 
   remoteServer.on('set-atu', ({ on }) => {
@@ -10124,9 +10285,9 @@ function connectRemote() {
   // These tuners have no CAT — they sense carrier on the feedline and match
   // autonomously. We emit a low-power CW carrier so the tuner has something
   // to detect, then restore the rig's previous mode and power.
-  let _externalAtuActive = false;
-  let _externalAtuCancel = false;
-  async function runExternalAtuTune() {
+  _externalAtuActive = false;
+  _externalAtuCancel = false;
+  runExternalAtuTune = async function () {
     if (_externalAtuActive) return true; // already running
     const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
     if (!activeRig || activeRig.externalAtu !== 'rf-sense') return false;
@@ -10196,100 +10357,11 @@ function connectRemote() {
     ipcMain.emit('tx-eq-set', null, eqConfig);
   });
 
-  // Unified rig-control from ECHOCAT phone (same dispatch as desktop IPC)
-  remoteServer.on('rig-control', (data) => {
-    if (!data || !data.action) return;
-    const rigType = detectRigType();
-    const flexNeedsApi = rigType === 'flex' && !flexSdr();
-    switch (data.action) {
-      case 'set-nb': {
-        const on = !!data.value;
-        if (flexSdr()) smartSdr.setSliceNb(0, on);
-        else if (cat && cat.connected) cat.setNb(on);
-        _currentNbState = on;
-        broadcastRigState();
-        break;
-      }
-      case 'atu-tune': {
-        // RF-sensing external tuner (LDG Z-100plus, MFJ, etc.) — fire carrier
-        // burst instead of CAT's internal AC011.
-        const rig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-        if (rig && rig.externalAtu === 'rf-sense') {
-          runExternalAtuTune(); // async, fire-and-forget
-        } else if (flexNeedsApi) {
-          sendCatLog('ATU requires SmartSDR API — not connected');
-        } else if (flexSdr()) {
-          smartSdr.setAtu(true);
-          _currentAtuState = true;
-          broadcastRigState();
-        } else if (cat && cat.connected) {
-          cat.startTune();
-          _currentAtuState = true;
-          broadcastRigState();
-        }
-        break;
-      }
-      case 'power-on':
-        // Power-on: radio may be off, so don't require cat.connected — just need transport open
-        if (cat && rigType !== 'flex') cat.setPowerState(true);
-        break;
-      case 'power-off':
-        if (cat && cat.connected && rigType !== 'flex') cat.setPowerState(false);
-        break;
-      case 'set-rf-gain': {
-        if (flexNeedsApi) { sendCatLog('RF Gain requires SmartSDR API — not connected'); break; }
-        const value = Number(data.value) || 0;
-        if (flexSdr()) smartSdr.setRfGain(0, (value * 0.3) - 10);
-        else if (cat && cat.connected) {
-          if (rigType === 'rigctld') cat.setRfGain(value / 100);
-          else cat.setRfGain(value);
-        }
-        _currentRfGain = value;
-        broadcastRigState();
-        break;
-      }
-      case 'set-tx-power': {
-        if (flexNeedsApi) { sendCatLog('TX Power requires SmartSDR API — not connected'); break; }
-        const value = Number(data.value) || 0;
-        if (flexSdr()) gatedSmartSdrTxPower(value);
-        else if (cat && cat.connected) {
-          gatedSetTxPower(value, { rigType });
-        }
-        _currentTxPower = value;
-        broadcastRigState();
-        break;
-      }
-      case 'set-filter-width': {
-        if (flexNeedsApi) { sendCatLog('Filter requires SmartSDR API — not connected'); break; }
-        const width = Number(data.value) || 0;
-        if (width <= 0) break;
-        if (flexSdr()) {
-          const m = (_currentMode || '').toUpperCase();
-          let lo, hi;
-          if (m === 'CW') { lo = Math.max(0, 600 - Math.round(width / 2)); hi = 600 + Math.round(width / 2); }
-          else { lo = 100; hi = 100 + width; }
-          smartSdr.setSliceFilter(0, lo, hi);
-        } else if (cat && cat.connected) cat.setFilterWidth(width);
-        _currentFilterWidth = width;
-        // Update per-mode setting so rig panel changes persist across tunes
-        const cm = (_currentMode || '').toUpperCase();
-        if (cm === 'CW') settings.cwFilterWidth = width;
-        else if (cm === 'USB' || cm === 'LSB' || cm === 'SSB') settings.ssbFilterWidth = width;
-        else if (cm === 'DIGU' || cm === 'DIGL' || cm === 'PKTUSB' || cm === 'PKTLSB' || cm === 'FT8' || cm === 'FT4') settings.digitalFilterWidth = width;
-        broadcastRigState();
-        break;
-      }
-      case 'send-custom-cat': {
-        const cmd = data.command;
-        if (!cmd || typeof cmd !== 'string') break;
-        console.log('[Echo CAT] Custom CAT command:', cmd);
-        if (flexSdr()) smartSdr._send(cmd);
-        else if (cat && cat.connected) cat.sendRaw(cmd);
-        break;
-      }
-    }
-    console.log('[Echo CAT] rig-control:', data.action, data.value != null ? data.value : '');
-  });
+  // Rig-control from the ECHOCAT phone goes through the SAME dispatcher as the
+  // desktop IPC (applyRigControl). There is intentionally NO second switch here
+  // — that duplication is what let the phone path silently drift out of date
+  // (NR/Comp/ANF/VOX were missing). One dispatcher, two transports.
+  remoteServer.on('rig-control', (data) => applyRigControl(data, 'echocat'));
 
   remoteServer.on('set-activator-park', async ({ parkRef, activationType, activationName: actName, sig }) => {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType);
@@ -11794,6 +11866,24 @@ function broadcastRemoteRadioStatus() {
     filterWidth: _currentFilterWidth,
     rfgain: rfg,
     txpower: txp,
+    // DSP/TX state — without these the phone never learns NR/ANF/AGC/etc.
+    // turned on, so its toggle stays stuck sending `true` (can't turn off) and
+    // shows the wrong state. NB/ATU were the only ones echoed before; these are
+    // the rest, mirroring broadcastRigState() to the desktop renderer.
+    nr: _currentNrState,
+    anf: _currentAnfState,
+    apf: _currentApfState,
+    comp: _currentCompState,
+    vox: _currentVoxState,
+    agc: _currentAgcMode,
+    sliceDax: _currentSliceDax,
+    daxRouteOk: _daxRouteOk,
+    mon: _currentMonState,
+    rit: _currentRitState,
+    nrLevel: _currentNrLevel,
+    nbLevel: _currentNbLevel,
+    voxLevel: _currentVoxLevel,
+    monLevel: _currentMonLevel,
     // Live meter readings — mobile VFO screen reads these from the
     // status snapshot. (Gap 10.) These are also sent as discrete
     // {type:'smeter'|'swr'|'alc'|'power'} frames for real-time updates;
@@ -14995,6 +15085,8 @@ function pushEventsToRenderer() {
     ...ev,
     optedIn: !!(eventStates[ev.id] && eventStates[ev.id].optedIn),
     dismissed: !!(eventStates[ev.id] && eventStates[ev.id].dismissed),
+    watchlistOn: !!(eventStates[ev.id] && eventStates[ev.id].watchlistOn),
+    snoozeUntil: (eventStates[ev.id] && eventStates[ev.id].snoozeUntil) || 0,
     progress: (eventStates[ev.id] && eventStates[ev.id].progress) || {},
   }));
   win.webContents.send('active-events', payload);
@@ -15078,6 +15170,29 @@ function setEventOptIn(eventId, optedIn, dismissed) {
   if (!settings.events[eventId]) settings.events[eventId] = { optedIn: false, dismissed: false, progress: {} };
   if (optedIn !== undefined) settings.events[eventId].optedIn = optedIn;
   if (dismissed !== undefined) settings.events[eventId].dismissed = dismissed;
+  saveSettings(settings);
+  pushEventsToRenderer();
+}
+
+// Non-destructive "event watchlist" overlay — loads the event's
+// callsignPatterns into the watchlist surfacing (star/filter/scan) without
+// touching the user's three color groups or the legacy watchlist string.
+// The renderer auto-clears it once the event's schedule has fully ended.
+function setEventWatchlist(eventId, on) {
+  if (!settings.events) settings.events = {};
+  if (!settings.events[eventId]) settings.events[eventId] = { optedIn: false, dismissed: false, progress: {} };
+  settings.events[eventId].watchlistOn = !!on;
+  saveSettings(settings);
+  pushEventsToRenderer();
+}
+
+// Snooze the banner for an event until a timestamp (ms epoch). Dismissing an
+// upcoming event snoozes it until its start, so the countdown stays hidden and
+// the banner returns as LIVE when the event begins.
+function setEventSnooze(eventId, snoozeUntil) {
+  if (!settings.events) settings.events = {};
+  if (!settings.events[eventId]) settings.events[eventId] = { optedIn: false, dismissed: false, progress: {} };
+  settings.events[eventId].snoozeUntil = snoozeUntil || 0;
   saveSettings(settings);
   pushEventsToRenderer();
 }
@@ -16149,12 +16264,14 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     return;
   }
 
-  // No SmartSDR-Win CAT shim on port 5002, but the SmartSDR API connection is
-  // alive — either as the GUI client itself (Flex Direct: no SmartSDR /
-  // AetherSDR running) OR bound to an external GUI client (AetherSDR is
-  // running and owns the GUI session). In both cases `slice tune` reaches
-  // the radio; canTune covers both modes.
-  if ((!cat || !cat.connected) && smartSdr && smartSdr.canTune) {
+  // Tune via the SmartSDR API (our OWN slice) when:
+  //   - there's no SmartSDR-Win CAT shim on 5002 (Flex Direct, SmartSDR-less), OR
+  //   - we're self-hosting in multiFlex (mode === 'self') EVEN WHILE the 5002
+  //     shim is connected. The shim controls SmartSDR's slice, not ours — so in
+  //     multiFlex we must tune our own slice here instead of falling through to
+  //     cat.tune() below (which would QSY SmartSDR's slice and leave POTACAT
+  //     listening to its own untuned slice → silent RX, wrong-slice TX).
+  if (smartSdr && smartSdr.canTune && (smartSdr.mode === 'self' || !cat || !cat.connected)) {
     const sliceIndex = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : 0;
     const tuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
     const freqMhz = tuneHz / 1e6;
@@ -20019,7 +20136,10 @@ app.whenReady().then(() => {
   });
 
   // --- Rig Control Panel IPC ---
-  ipcMain.handle('rig-control', (_e, data) => {
+  // Single dispatcher (see the module-level `let applyRigControl` above for
+  // why). `source` is 'desktop' (IPC) or 'echocat' (phone) — used only for
+  // logging; the actual command path is identical for both.
+  applyRigControl = function (data, source = 'desktop') {
     if (!data || !data.action) return;
     const flexSdr = () => smartSdr && smartSdr.connected;
     const rigType = detectRigType();
@@ -20036,6 +20156,14 @@ app.whenReady().then(() => {
         const on = !!data.value;
         if (flexSdr()) {
           smartSdr.setSliceNb(0, on);
+          // A bare enable with level 0 is inaudible. On enable, bring the level
+          // up to the op's last-used value (or a sensible default) so toggling
+          // NB on actually does something.
+          if (on) {
+            const lvl = _currentNbLevel > 0 ? _currentNbLevel : (Number(settings.nbLevelDefault) || 50);
+            smartSdr.setNbLevel(0, lvl);
+            _currentNbLevel = lvl;
+          }
         } else if (cat && cat.connected) {
           cat.setNb(on);
         }
@@ -20053,14 +20181,15 @@ app.whenReady().then(() => {
           break;
         }
         if (flexNeedsApi) { sendCatLog('ATU requires SmartSDR API — not connected'); break; }
-        const atuOn = !_currentAtuState; // toggle
+        // Momentary "Tune" — every press initiates an antenna-tune cycle. It is
+        // NOT a toggle: a tune button that bypasses the ATU on the second tap is
+        // surprising, and the desktop + phone now share this one behavior.
         if (flexSdr()) {
-          smartSdr.setAtu(atuOn);
+          smartSdr.setAtu(true);
         } else if (cat && cat.connected) {
-          if (atuOn) cat.startTune();
-          else cat.stopTune();
+          cat.startTune();
         }
-        _currentAtuState = atuOn;
+        _currentAtuState = true;
         broadcastRigState();
         break;
       }
@@ -20167,8 +20296,16 @@ app.whenReady().then(() => {
       case 'set-nr': {
         if (flexNeedsApi) { _flexWarnOnce('NR requires SmartSDR API — not connected'); break; }
         const on = !!data.value;
-        if (flexSdr()) smartSdr.setNoiseReduction(0, on);
-        else if (cat && cat.connected && typeof cat.setNoiseReduction === 'function') cat.setNoiseReduction(on);
+        if (flexSdr()) {
+          smartSdr.setNoiseReduction(0, on);
+          // Same as NB: NR at level 0 does nothing audible. Restore the op's
+          // last-used level (or default) on enable so the toggle is meaningful.
+          if (on) {
+            const lvl = _currentNrLevel > 0 ? _currentNrLevel : (Number(settings.nrLevelDefault) || 50);
+            smartSdr.setNrLevel(0, lvl);
+            _currentNrLevel = lvl;
+          }
+        } else if (cat && cat.connected && typeof cat.setNoiseReduction === 'function') cat.setNoiseReduction(on);
         _currentNrState = on;
         broadcastRigState();
         break;
@@ -20179,6 +20316,15 @@ app.whenReady().then(() => {
         if (flexSdr()) smartSdr.setAutoNotch(0, on);
         else if (cat && cat.connected && typeof cat.setAutoNotch === 'function') cat.setAutoNotch(on);
         _currentAnfState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-apf': {
+        if (flexNeedsApi) { _flexWarnOnce('APF requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) smartSdr.setApf(0, on);
+        else if (cat && cat.connected && typeof cat.setApf === 'function') cat.setApf(on);
+        _currentApfState = on;
         broadcastRigState();
         break;
       }
@@ -20215,6 +20361,7 @@ app.whenReady().then(() => {
         if (flexSdr()) smartSdr.setNrLevel(0, pct);
         else if (cat && cat.connected && typeof cat.setNrLevel === 'function') cat.setNrLevel(pct);
         _currentNrLevel = pct;
+        if (pct > 0) { settings.nrLevelDefault = pct; saveSettings(settings); } // remember for next enable
         broadcastRigState();
         break;
       }
@@ -20227,6 +20374,7 @@ app.whenReady().then(() => {
         else if (cat && cat.connected && typeof cat.setNbLevel === 'function') cat.setNbLevel(level);
         _currentNbLevel = level;
         _currentNbState = level > 0;
+        if (level > 0) { settings.nbLevelDefault = level; saveSettings(settings); } // remember for next enable
         broadcastRigState();
         break;
       }
@@ -20392,8 +20540,27 @@ app.whenReady().then(() => {
         broadcastRigState();
         break;
       }
+      default:
+        // Unknown action — surface it so a client sending something the
+        // dispatcher doesn't implement is visible instead of silently ignored.
+        console.warn('[Rig] applyRigControl: unhandled action', data.action);
+        break;
     }
-  });
+    // Trace every rig-control through sendCatLog (NOT console.log) so it lands
+    // in the in-memory log ring and therefore in the mobile diagnostic snapshot
+    // (logLines). One line records what the client asked AND the DSP state we
+    // now echo back — the data needed to debug phone-side control sync. Skip
+    // internal/plumbing actions (get-state polls, custom-cat) to avoid spam.
+    const _ctlMeta = RIG_CONTROLS[data.action];
+    if (!_ctlMeta || !_ctlMeta.internal) {
+      const v = data.value != null ? '=' + data.value : '';
+      sendCatLog(`rig-control[${source}] ${data.action}${v} -> `
+        + `nb=${_currentNbState ? 1 : 0} nr=${_currentNrState ? 1 : 0} anf=${_currentAnfState ? 1 : 0} `
+        + `comp=${_currentCompState ? 1 : 0} vox=${_currentVoxState ? 1 : 0} agc=${_currentAgcMode || '-'} `
+        + `filt=${_currentFilterWidth} (flexApi=${smartSdr && smartSdr.connected ? 1 : 0})`);
+    }
+  };
+  ipcMain.handle('rig-control', (_e, data) => applyRigControl(data, 'desktop'));
 
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
@@ -21663,6 +21830,8 @@ app.whenReady().then(() => {
       ...ev,
       optedIn: !!(eventStates[ev.id] && eventStates[ev.id].optedIn),
       dismissed: !!(eventStates[ev.id] && eventStates[ev.id].dismissed),
+      watchlistOn: !!(eventStates[ev.id] && eventStates[ev.id].watchlistOn),
+      snoozeUntil: (eventStates[ev.id] && eventStates[ev.id].snoozeUntil) || 0,
       progress: (eventStates[ev.id] && eventStates[ev.id].progress) || {},
     }));
   });
@@ -21671,6 +21840,16 @@ app.whenReady().then(() => {
     setEventOptIn(eventId, optedIn, dismissed);
     // Scan existing log for matching QSOs when user opts in
     if (optedIn) scanLogForEvents();
+    return true;
+  });
+
+  ipcMain.handle('set-event-watchlist', (_e, { eventId, on }) => {
+    setEventWatchlist(eventId, on);
+    return true;
+  });
+
+  ipcMain.handle('set-event-snooze', (_e, { eventId, snoozeUntil }) => {
+    setEventSnooze(eventId, snoozeUntil);
     return true;
   });
 
