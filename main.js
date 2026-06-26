@@ -11894,6 +11894,12 @@ function broadcastRemoteRadioStatus() {
     alc: _currentAlc,
     power: _currentPower,
     capabilities: getRigCapabilities(rigType),
+    // Rig-control registry — lets the ECHOCAT phone render its rig panel
+    // data-driven (labels/group/txOnly/caps per action) from one source of
+    // truth instead of a hardcoded subset, so new controls appear on mobile
+    // automatically and the two sides can't drift. Static object; the phone
+    // caches it. (Desktop-handoff: rig-controls-registry-on-phone-status.)
+    controls: RIG_CONTROLS,
     // Audio bridge health. audioOk = "is audio actually flowing right
     // now"; audioExpected = "should audio be flowing" (CAT connected,
     // not TX, not FreeDV-muted, ECHOCAT enabled). iOS uses both: it
