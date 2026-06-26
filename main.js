@@ -6708,11 +6708,32 @@ function connectSmartSdr() {
   // they're captured in the mobile diagnostic snapshot, not just console.log.
   smartSdr.on('cmd-error', ({ seq, status, line }) => {
     sendCatLog(`[SmartSDR] cmd error: R${seq}|${(status >>> 0).toString(16)}|${line}`);
+    // Backup to the client-left detector: when bound to an external GUI client
+    // whose slice has vanished (it closed — AetherSDR gives no 5002 shim drop),
+    // our tunes error "Invalid slice receiver". That's definitive — reclaim the
+    // radio. Debounced (shared timer) + guarded to bound mode so a startup
+    // transient in self/none mode never triggers it.
+    if (smartSdr && smartSdr.mode === 'bound' && /Invalid slice receiver/i.test(line || '')) {
+      reclaimFlexRadio('bound GUI client gone (slice invalid)');
+    }
   });
   smartSdr.on('disconnected', () => {
     sendCatLog('SmartSDR API disconnected — rig controls (ATU/filter/gain) unavailable');
     // Flex Direct: with no port-5002 CAT either, the radio is now uncontrollable.
     if (!cat || !cat.connected) sendCatStatus({ connected: false });
+    // Recycle the audio client. This fires only on an UNEXPECTED drop (a kick —
+    // intentional disconnect() flips `connected` false before the socket closes,
+    // so it never emits 'disconnected'). After a kick the client auto-reconnects
+    // and re-binds (e.g. to AetherSDR); the old audio client is still bound to
+    // our dead client_id and startSmartSdrAudio() is idempotent, so tear it down
+    // here and let the reconnect's gui-mode/gui-ready start it on the new client.
+    stopSmartSdrAudio();
+  });
+  // The external GUI client we were bound to left the radio. For SmartSDR-Win
+  // the 5002 shim drop handles this; AetherSDR has no shim, so smartsdr.js
+  // detects its client-disconnect status and emits this. Reclaim → self-host.
+  smartSdr.on('gui-client-left', () => {
+    if (smartSdr && smartSdr.mode === 'bound') reclaimFlexRadio('bound GUI client (AetherSDR) closed');
   });
   smartSdr.on('give-up', ({ host, attempts }) => {
     const isLocal = host === '127.0.0.1' || host === 'localhost';
@@ -6894,6 +6915,17 @@ let _lastCatUpForHandoff = false;
 // AetherSDR (multiFlex off). connectSmartSdr() reads it; the handoff sets it.
 let _flexYieldToExternal = false;
 let _flexReclaimTimer = null; // settle timer before reclaiming the radio on close
+// Reclaim the radio (self-host) after the bound GUI client goes away. DELAY the
+// reconnect so the radio drops the host's stale GUI registration first — an
+// instant reconnect catches the corpse and re-binds to it instead of self-
+// hosting. Shared by the SmartSDR 5002-shim-drop path and the AetherSDR
+// client-left path (which can both fire) so they coalesce into one reconnect.
+function reclaimFlexRadio(reason) {
+  _flexYieldToExternal = false;
+  if (_flexReclaimTimer) clearTimeout(_flexReclaimTimer);
+  sendCatLog(`Flex Direct: ${reason} — reclaiming the radio as GUI client…`);
+  _flexReclaimTimer = setTimeout(() => { _flexReclaimTimer = null; connectSmartSdr(); }, 2000);
+}
 function checkFlexHandoff(catUp) {
   if (catUp === _lastCatUpForHandoff) return; // edge-triggered only
   _lastCatUpForHandoff = catUp;
@@ -6913,13 +6945,7 @@ function checkFlexHandoff(catUp) {
   } else if (!catUp && (smartSdr.mode === 'bound' || _flexYieldToExternal)) {
     // SmartSDR-Win closed (while bound, or while we were still yielding because
     // it never finished registering) — stop yielding and reclaim the radio.
-    // DELAY the reconnect: the radio drops SmartSDR's GUI registration a beat
-    // after its 5002 shim dies, and reconnecting instantly catches that stale
-    // client and re-binds to a corpse instead of self-hosting. Let it clear.
-    sendCatLog('Flex Direct: SmartSDR closed — reclaiming the radio as GUI client…');
-    _flexYieldToExternal = false;
-    if (_flexReclaimTimer) clearTimeout(_flexReclaimTimer);
-    _flexReclaimTimer = setTimeout(() => { _flexReclaimTimer = null; connectSmartSdr(); }, 2000);
+    reclaimFlexRadio('SmartSDR closed');
   }
   // multiFlex + SmartSDR opened while self-hosting: nothing to do — POTACAT
   // stays its own gui client alongside SmartSDR (no reconnect, no audio glitch).
