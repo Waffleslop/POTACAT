@@ -1523,7 +1523,7 @@
           <label class="checkbox-label" style="margin-top:10px;">
             <input type="checkbox" id="set-flex-onboard-speaker"> Play RX audio on the radio's built-in speaker
           </label>
-          <span class="help-text" style="display:block;margin-bottom:6px;">Off by default. When POTACAT runs the radio with no SmartSDR open (Flex Direct), an 8400/8600 plays the tuned slice on its onboard speaker. Leave this off to keep the radio silent while hunting &mdash; JTCAT/SSTV receive audio (DAX) is unaffected either way.</span>
+          <span class="help-text" style="display:block;margin-bottom:6px;">Off by default. When POTACAT runs the radio with no SmartSDR open (Flex Direct), the tuned slice is kept silent on the radio's own speaker (audio_gain=0) so you can listen on the computer (VFO popout speaker button) without the radio blaring. Check this to play the band on the 8400/8600's built-in speaker instead. Either way DAX RX (PC monitor + JTCAT/SSTV) keeps full audio &mdash; POTACAT no longer mutes the slice, which on 4.2.x firmware also killed DAX.</span>
           <label class="checkbox-label" style="margin-top:6px;">
             <input type="checkbox" id="set-smartsdr-spots"> Show spots on the panadapter
           </label>

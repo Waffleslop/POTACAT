@@ -13823,7 +13823,7 @@ async function openSettingsDialog(tab) {
   }
   if (setFlexMultiflex) setFlexMultiflex.checked = s.flexMultiflex !== false; // default on
   if (setFlexOnboardSpeaker) {
-    setFlexOnboardSpeaker.checked = !!s.flexOnboardSpeaker;
+    setFlexOnboardSpeaker.checked = s.flexOnboardSpeaker === true; // default off: quiet radio, listen on the PC (DAX still flows)
   }
   // TX EQ — load saved state into the Settings dialog. Live updates go
   // through window.api.setTxEq() so toggling the checkbox / dropdown
