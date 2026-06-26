@@ -7698,16 +7698,87 @@ const DEFAULT_CW_MACROS = [
   { label: 'AGN', text: 'AGN AGN PSE' },
   { label: 'TU', text: 'TU DE {MYCALL} K' },
 ];
+// User-addable CW macros — mirrors the voice-macro slot model (+/- buttons,
+// capped at 25). The visible row count is stored in localStorage; the macro
+// content is saved to settings.cwMacros on Settings Save.
+const CW_MACRO_MAX = 25;
+const CW_MACRO_DEFAULT_SLOTS = 5; // matches the historical fixed set
+const CW_MACRO_SLOTS_KEY = 'pota-cat-cw-macro-slots';
+function loadCwMacroSlots() {
+  let n = parseInt(localStorage.getItem(CW_MACRO_SLOTS_KEY), 10);
+  if (!Number.isFinite(n)) n = CW_MACRO_DEFAULT_SLOTS;
+  return Math.min(CW_MACRO_MAX, Math.max(1, n));
+}
+function saveCwMacroSlots(n) {
+  n = Math.min(CW_MACRO_MAX, Math.max(1, n));
+  try { localStorage.setItem(CW_MACRO_SLOTS_KEY, String(n)); } catch {}
+  return n;
+}
+// Raw read of the current editor rows (untrimmed) — used to preserve unsaved
+// edits when the +/- buttons re-render.
+function readCwMacroRows() {
+  const labels = cwMacroEditorEl.querySelectorAll('.cw-macro-label');
+  const texts = cwMacroEditorEl.querySelectorAll('.cw-macro-text');
+  const rows = [];
+  labels.forEach((el, i) => rows.push({ label: el.value, text: texts[i] ? texts[i].value : '' }));
+  return rows;
+}
 function renderCwMacroEditor(macros) {
   const list = macros && macros.length ? macros : DEFAULT_CW_MACROS;
+  // Show the saved slot count, but never fewer rows than there are populated
+  // macros (so an imported/larger set isn't hidden).
+  let slots = loadCwMacroSlots();
+  for (let h = CW_MACRO_MAX - 1; h >= 0; h--) {
+    const m = list[h];
+    if (m && (((m.label || '').length) || ((m.text || '').length))) {
+      if (h + 1 > slots) slots = h + 1;
+      break;
+    }
+  }
+  slots = Math.min(CW_MACRO_MAX, Math.max(1, slots));
   cwMacroEditorEl.innerHTML = '';
-  list.forEach((m, i) => {
+  for (let i = 0; i < slots; i++) {
+    const m = list[i] || {};
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:4px;align-items:center;';
     row.innerHTML = `<input type="text" class="cw-macro-label" data-idx="${i}" value="${(m.label || '').replace(/"/g, '&quot;')}" style="width:50px;font-size:11px;padding:2px 4px;" maxlength="6" placeholder="F${i + 1}">` +
       `<input type="text" class="cw-macro-text" data-idx="${i}" value="${(m.text || '').replace(/"/g, '&quot;')}" style="flex:1;font-size:11px;padding:2px 4px;font-family:monospace;" placeholder="CW text...">`;
     cwMacroEditorEl.appendChild(row);
-  });
+  }
+  // Footer: + Add / − Remove last + counter (mirrors the voice-macro editor).
+  const footer = document.createElement('div');
+  footer.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:4px;';
+  if (slots < CW_MACRO_MAX) {
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.textContent = '+ Add macro';
+    addBtn.title = 'Add another CW macro (up to ' + CW_MACRO_MAX + ')';
+    addBtn.style.cssText = 'font-size:11px;padding:3px 10px;cursor:pointer;';
+    addBtn.addEventListener('click', () => {
+      saveCwMacroSlots(slots + 1);
+      renderCwMacroEditor(readCwMacroRows());
+    });
+    footer.appendChild(addBtn);
+  }
+  const last = list[slots - 1];
+  const lastEmpty = !last || (!(last.label || '').trim() && !(last.text || '').trim());
+  if (slots > 1 && lastEmpty) {
+    const remBtn = document.createElement('button');
+    remBtn.type = 'button';
+    remBtn.textContent = '− Remove last';
+    remBtn.title = 'Hide the last (empty) CW macro';
+    remBtn.style.cssText = 'font-size:11px;padding:3px 10px;cursor:pointer;';
+    remBtn.addEventListener('click', () => {
+      saveCwMacroSlots(slots - 1);
+      renderCwMacroEditor(readCwMacroRows());
+    });
+    footer.appendChild(remBtn);
+  }
+  const counter = document.createElement('span');
+  counter.style.cssText = 'font-size:11px;color:var(--text-dim);margin-left:auto;';
+  counter.textContent = slots + ' / ' + CW_MACRO_MAX;
+  footer.appendChild(counter);
+  cwMacroEditorEl.appendChild(footer);
 }
 function readCwMacroEditor() {
   const labels = cwMacroEditorEl.querySelectorAll('.cw-macro-label');
