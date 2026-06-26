@@ -9258,6 +9258,21 @@ function connectRemote() {
   });
 
   remoteServer.on('ptt', ({ state }) => {
+    // FT8 PTT is engine-owned. A remote voice-PTT *release* must not cut an
+    // in-progress engine transmission out from under the rig — the engine keys
+    // via handleRemotePtt(true) from tx-start and releases on its own schedule
+    // (txComplete/failsafe). The bug this guards against: when the controlling
+    // phone's WebSocket blips and reconnects inside the 60s grace window, the
+    // phone fires a bare {type:'ptt',state:false} defensive reset; that landed
+    // here as handleRemotePtt(false) and dropped the rig to RX mid-slot,
+    // truncating the FT8 transmission (losing the tail Costas + CRC). This also
+    // covers _onClientDisconnected's force-RX, which funnels through the same
+    // listener. Desktop-initiated releases (profile-switch, grace teardown,
+    // stopJtcat) bypass this listener and are unaffected. (K8IKO/Wi-Fi blip.)
+    if (state === false && ft8Engine && ft8Engine._txActive) {
+      sendCatLog('[PTT] Ignored remote PTT-release during engine-owned FT8 TX');
+      return;
+    }
     // RS-BA1 streaming voice TX: start/stop the ring-buffer pump when the phone
     // keys/unkeys. Only when the active audio source is the Icom network rig.
     if (settings.audioSource === 'icom-network') {
