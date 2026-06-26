@@ -1875,7 +1875,10 @@ async function populateRadioSection(currentTarget) {
       [5002, 5003, 5004, 5005].includes(currentTarget.port);
     if (isFlexSlice) {
       setRadioType('flex');
-      setFlexSlice.value = String(currentTarget.port);
+      // The slice select holds 0-3 (A-D), not the port — derive it from the
+      // shim port (5002→A …). The authoritative restore from rig.flexSlice runs
+      // right after this; this just keeps the control right for standalone calls.
+      setFlexSlice.value = String(Math.max(0, Math.min(3, (currentTarget.port || 5002) - 5002)));
     } else {
       setRadioType('tcpcat');
       setTcpcatHost.value = currentTarget.host || '127.0.0.1';
@@ -2273,7 +2276,14 @@ function renderRigList(rigs, activeRigId) {
 function buildCatTargetFromForm() {
   const radioType = getSelectedRadioType();
   if (radioType === 'flex') {
-    return { type: 'tcp', host: '127.0.0.1', port: parseInt(setFlexSlice.value, 10) };
+    // POTACAT talks to the radio directly on 4992; this CAT target is the
+    // SmartSDR-Win Kenwood shim (port 5002+slice), used only to DETECT when
+    // SmartSDR-Win is running (the handoff trigger) and as a bound-mode tune
+    // path. Derive it from the chosen slice — A=5002, B=5003, C=5004, D=5005.
+    // (Was read from a now-removed legacy dropdown that collided on the same id
+    // as the slice select, producing a garbage port 0-3.)
+    const slice = parseInt(setFlexSlice.value, 10) || 0; // 0-3
+    return { type: 'tcp', host: '127.0.0.1', port: 5002 + slice };
   } else if (radioType === 'tcpcat') {
     return { type: 'tcp', host: setTcpcatHost.value.trim() || '127.0.0.1', port: parseInt(setTcpcatPort.value, 10) || 5002 };
   } else if (radioType === 'k4network') {
@@ -20233,6 +20243,12 @@ document.getElementById('welcome-rig-save-btn').addEventListener('click', () => 
   const name = document.getElementById('welcome-rig-name').value.trim() || 'My Radio';
   const catTarget = buildWelcomeCatTarget();
   welcomeRig = { id: 'rig_' + Date.now(), name, catTarget };
+  // Keep POTACAT's audio/tune slice in sync with the chosen Flex CAT shim port
+  // (5002→A …) so a non-A pick doesn't leave audio on slice A while CAT targets
+  // another slice.
+  if (catTarget && catTarget.type === 'tcp' && catTarget.port >= 5002 && catTarget.port <= 5005) {
+    welcomeRig.flexSlice = catTarget.port - 5002;
+  }
   showWelcomeRigItem(welcomeRig);
   document.getElementById('welcome-rig-editor').classList.add('hidden');
   document.getElementById('welcome-rig-add-btn').classList.add('hidden');
