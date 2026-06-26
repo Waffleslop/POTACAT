@@ -218,6 +218,7 @@
             <button id="rig-comp-btn" class="rig-btn" title="Speech Compressor (TX)">Comp</button>
             <button id="rig-nr-btn" class="rig-btn" title="Noise Reduction">NR</button>
             <button id="rig-anf-btn" class="rig-btn" title="Auto Notch Filter">ANF</button>
+            <button id="rig-apf-btn" class="rig-btn" title="Audio Peak Filter (CW)">APF</button>
             <button id="rig-vox-btn" class="rig-btn" title="Voice-Operated Transmit">VOX</button>
           </div>
           <div class="rig-popover-row" id="rig-rfgain-row">
@@ -392,6 +393,7 @@
     <span id="event-message"></span>
     <span id="event-progress-count"></span>
     <button id="event-optin-btn" class="event-action-btn hidden">Track It</button>
+    <button id="event-watchlist-btn" class="event-action-btn hidden" title="Add this event's stations to your watchlist">Watchlist</button>
     <button id="event-progress-btn" class="event-action-btn hidden" title="View progress">Progress</button>
     <button id="event-dismiss" title="Dismiss">&times;</button>
   </div>
@@ -1505,6 +1507,19 @@
           <span id="flex-discover-result" class="help-text" style="display:block;"></span>
           <span class="help-text" style="display:block;">Your FlexRadio's IP address. POTACAT connects straight to the radio (port 4992) and works whether or not SmartSDR / AetherSDR is running. Find it in SmartSDR's status bar or under Settings &rarr; Network.</span>
           <div id="flex-status" class="flex-status">&#9675; Not connected</div>
+          <label style="margin-top:10px;display:block;">POTACAT slice:
+            <select id="set-flex-slice" style="margin-left:4px;">
+              <option value="0">A</option>
+              <option value="1">B</option>
+              <option value="2">C</option>
+              <option value="3">D</option>
+            </select>
+          </label>
+          <span class="help-text" style="display:block;margin-bottom:6px;">Which Flex slice POTACAT uses for receive/transmit audio (DAX). POTACAT keeps this slice on the right DAX channel automatically &mdash; if SmartSDR has it on a different channel (or DAX off), RX goes silent, so POTACAT re-assigns it. Default <b>A</b>.</span>
+          <label class="checkbox-label" style="margin-top:10px;">
+            <input type="checkbox" id="set-flex-multiflex" checked> Run as an independent SmartSDR client (multiFlex)
+          </label>
+          <span class="help-text" style="display:block;margin-bottom:6px;">On by default. POTACAT registers as its own SmartSDR client so receive <i>and</i> transmit work the same whether SmartSDR is open or not. Requires multiFlex enabled on the radio (8000-series / 6400M / 6600M); if the radio refuses a second client, POTACAT rides along with the open SmartSDR instead (receive works, transmit needs SmartSDR closed). While SmartSDR is open, POTACAT's slice plays on the radio's speaker (DAX needs it unmuted) &mdash; mute the speaker in SmartSDR if you don't want it. SmartSDR-less operation is unaffected.</span>
           <label class="checkbox-label" style="margin-top:10px;">
             <input type="checkbox" id="set-flex-onboard-speaker"> Play RX audio on the radio's built-in speaker
           </label>
@@ -1972,6 +1987,10 @@
       </label>
       <div class="wl-groups-block">
         <div class="wl-groups-header">Watchlist Groups — colored outline around the callsign</div>
+        <!-- Special event watchlists (e.g. 13 Colonies) — rendered from the
+             Events system. One distinct, stroked card per active/upcoming
+             event, above the three user color groups. -->
+        <div id="wl-event-cards"></div>
         <div class="wl-group" data-wl-group="0">
           <div class="wl-group-head">
             <span class="wl-swatch" id="wl-swatch-0"></span>

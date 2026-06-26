@@ -286,6 +286,8 @@ contextBridge.exposeInMainWorld('api', {
   onActiveEvents: (cb) => ipcRenderer.on('active-events', (_e, data) => cb(data)),
   getActiveEvents: () => ipcRenderer.invoke('get-active-events'),
   setEventOptIn: (data) => ipcRenderer.invoke('set-event-optin', data),
+  setEventWatchlist: (data) => ipcRenderer.invoke('set-event-watchlist', data),
+  setEventSnooze: (data) => ipcRenderer.invoke('set-event-snooze', data),
   getEventProgress: (eventId) => ipcRenderer.invoke('get-event-progress', eventId),
   markEventRegion: (data) => ipcRenderer.invoke('mark-event-region', data),
   resetEventProgress: (eventId) => ipcRenderer.invoke('reset-event-progress', eventId),

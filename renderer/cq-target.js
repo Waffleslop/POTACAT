@@ -40,6 +40,8 @@
     { category: 'Continent / DX', tag: 'AN', label: 'AN — Antarctica' },
     { category: 'Program', tag: 'POTA', label: 'POTA — Parks on the Air' },
     { category: 'Program', tag: 'SOTA', label: 'SOTA — Summits on the Air' },
+    { category: 'Program', tag: 'BOTA', label: 'BOTA — Bunkers on the Air (WWBOTA)' },
+    { category: 'Program', tag: 'TILE', label: 'TILE — Tiles on the Air' },
     { category: 'Program', tag: 'FD', label: 'FD — Field Day' },
     { category: 'Program', tag: 'QRP', label: 'QRP — low power' },
     { category: 'Contest', tag: 'TEST', label: 'TEST — contest CQ' },
@@ -48,7 +50,7 @@
   // The 7 continent codes (DX is handled specially as "any non-home continent").
   var CONTINENTS = { NA: 1, SA: 1, EU: 1, AS: 1, AF: 1, OC: 1, AN: 1 };
   // Program / contest tags are matched by the literal CQ tag token in the decode.
-  var PROGRAMS = { POTA: 1, SOTA: 1, FD: 1, QRP: 1 };
+  var PROGRAMS = { POTA: 1, SOTA: 1, BOTA: 1, TILE: 1, FD: 1, QRP: 1 };
   var CONTESTS = { TEST: 1 };
   // USPS 2-letter codes (+ DC). A typed 2-letter code in this set is treated as
   // a US state, not a DXCC prefix (the collision rule).
