@@ -1481,7 +1481,7 @@
         <label style="display:block;margin:10px 0 4px;">Audio source for JTCAT / SSTV:
           <select id="set-audio-source" style="min-width:240px;">
             <option value="dax">Local audio device / DAX</option>
-            <option value="smartsdr">SmartSDR Direct (no DAX program)</option>
+            <option value="smartsdr">Flex Direct &mdash; VITA-49, no DAX program</option>
             <option value="icom-network">Icom Network audio (RS-BA1)</option>
           </select>
         </label>
@@ -1517,13 +1517,13 @@
           </label>
           <span class="help-text" style="display:block;margin-bottom:6px;">Which Flex slice POTACAT uses for receive/transmit audio (DAX). POTACAT keeps this slice on the right DAX channel automatically &mdash; if SmartSDR has it on a different channel (or DAX off), RX goes silent, so POTACAT re-assigns it. Default <b>A</b>.</span>
           <label class="checkbox-label" style="margin-top:10px;">
-            <input type="checkbox" id="set-flex-multiflex" checked> Run as an independent SmartSDR client (multiFlex)
+            <input type="checkbox" id="set-flex-multiflex" checked> Run an independent slice when SmartSDR / AetherSDR is open (multiFlex)
           </label>
-          <span class="help-text" style="display:block;margin-bottom:6px;">On by default. POTACAT registers as its own SmartSDR client so receive <i>and</i> transmit work the same whether SmartSDR is open or not. Requires multiFlex enabled on the radio (8000-series / 6400M / 6600M); if the radio refuses a second client, POTACAT rides along with the open SmartSDR instead (receive works, transmit needs SmartSDR closed). While SmartSDR is open, POTACAT's slice plays on the radio's speaker (DAX needs it unmuted) &mdash; mute the speaker in SmartSDR if you don't want it. SmartSDR-less operation is unaffected.</span>
+          <span class="help-text" style="display:block;margin-bottom:6px;"><b>Checked:</b> POTACAT registers as its own GUI client and keeps a <i>separate</i> slice, so it can transmit while SmartSDR / AetherSDR is open &mdash; but the other app shows its own slice, not the one POTACAT is working. Needs multiFlex enabled on the radio (8000-series / 6400M / 6600M). <b>Unchecked:</b> POTACAT follows the open client's slice (so SmartSDR / AetherSDR shows exactly what you're hunting) and hands off automatically &mdash; self-hosting when no client is open, binding when one opens, reclaiming when it closes; transmit (FT8 / SSTV) still works over DAX. Either way, SmartSDR-less (Flex Direct) operation is unaffected.</span>
           <label class="checkbox-label" style="margin-top:10px;">
             <input type="checkbox" id="set-flex-onboard-speaker"> Play RX audio on the radio's built-in speaker
           </label>
-          <span class="help-text" style="display:block;margin-bottom:6px;">Off by default. When POTACAT runs the radio with no SmartSDR open (Flex Direct), an 8400/8600 plays the tuned slice on its onboard speaker. Leave this off to keep the radio silent while hunting &mdash; JTCAT/SSTV receive audio (DAX) is unaffected either way.</span>
+          <span class="help-text" style="display:block;margin-bottom:6px;">Off by default. When POTACAT runs the radio with no SmartSDR open (Flex Direct), the tuned slice is kept silent on the radio's own speaker (slice audio level 0) so you can listen on the computer (VFO popout speaker button) without the radio blaring. Check this to play the band on the 8400/8600's built-in speaker instead. Either way DAX RX (PC monitor + JTCAT/SSTV) keeps full audio &mdash; POTACAT no longer mutes the slice, which on 4.2.x firmware also killed DAX.</span>
           <label class="checkbox-label" style="margin-top:6px;">
             <input type="checkbox" id="set-smartsdr-spots"> Show spots on the panadapter
           </label>
@@ -1536,18 +1536,6 @@
             </label>
             <span class="help-text" style="display:block;">0 = no limit. Capping reduces audio dropouts on a Flex 6500.</span>
           </div>
-          <details id="flex-advanced" style="margin-top:10px;">
-            <summary>Advanced</summary>
-            <label style="margin-top:8px;">Legacy SmartSDR CAT slice:
-              <select id="set-flex-slice">
-                <option value="5002">Slice A (TCP :5002)</option>
-                <option value="5003">Slice B (TCP :5003)</option>
-                <option value="5004">Slice C (TCP :5004)</option>
-                <option value="5005">Slice D (TCP :5005)</option>
-              </select>
-            </label>
-            <span class="help-text" style="display:block;">POTACAT tunes the radio directly over the API. This routes tuning through SmartSDR-Win's Kenwood CAT shim (TCP 5002&ndash;5005) instead &mdash; a fallback only, and SmartSDR must be running.</span>
-          </details>
           <!-- Per-band antenna selection. Sent to the radio via SmartSDR
                `slice set <N> rxant=ANTx txant=ANTy` immediately before
                every tune. Skipped for bands left blank. Casey 2026-06-09. -->

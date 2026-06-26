@@ -6708,11 +6708,32 @@ function connectSmartSdr() {
   // they're captured in the mobile diagnostic snapshot, not just console.log.
   smartSdr.on('cmd-error', ({ seq, status, line }) => {
     sendCatLog(`[SmartSDR] cmd error: R${seq}|${(status >>> 0).toString(16)}|${line}`);
+    // Backup to the client-left detector: when bound to an external GUI client
+    // whose slice has vanished (it closed — AetherSDR gives no 5002 shim drop),
+    // our tunes error "Invalid slice receiver". That's definitive — reclaim the
+    // radio. Debounced (shared timer) + guarded to bound mode so a startup
+    // transient in self/none mode never triggers it.
+    if (smartSdr && smartSdr.mode === 'bound' && /Invalid slice receiver/i.test(line || '')) {
+      reclaimFlexRadio('bound GUI client gone (slice invalid)');
+    }
   });
   smartSdr.on('disconnected', () => {
     sendCatLog('SmartSDR API disconnected — rig controls (ATU/filter/gain) unavailable');
     // Flex Direct: with no port-5002 CAT either, the radio is now uncontrollable.
     if (!cat || !cat.connected) sendCatStatus({ connected: false });
+    // Recycle the audio client. This fires only on an UNEXPECTED drop (a kick —
+    // intentional disconnect() flips `connected` false before the socket closes,
+    // so it never emits 'disconnected'). After a kick the client auto-reconnects
+    // and re-binds (e.g. to AetherSDR); the old audio client is still bound to
+    // our dead client_id and startSmartSdrAudio() is idempotent, so tear it down
+    // here and let the reconnect's gui-mode/gui-ready start it on the new client.
+    stopSmartSdrAudio();
+  });
+  // The external GUI client we were bound to left the radio. For SmartSDR-Win
+  // the 5002 shim drop handles this; AetherSDR has no shim, so smartsdr.js
+  // detects its client-disconnect status and emits this. Reclaim → self-host.
+  smartSdr.on('gui-client-left', () => {
+    if (smartSdr && smartSdr.mode === 'bound') reclaimFlexRadio('bound GUI client (AetherSDR) closed');
   });
   smartSdr.on('give-up', ({ host, attempts }) => {
     const isLocal = host === '127.0.0.1' || host === 'localhost';
@@ -6734,6 +6755,10 @@ function connectSmartSdr() {
   // multiFlex: register POTACAT as its own GUI client even when SmartSDR is
   // open, so it owns transmit. Default on; flexMultiflex=false rides along.
   smartSdr.setMultiflex(settings.flexMultiflex !== false);
+  // Single-GUI-slot handoff: when SmartSDR/AetherSDR is launching, yield the
+  // slot and bind instead of re-grabbing it (which locks the GUI client out
+  // with "In use: POTACAT"). Set by checkFlexHandoff; survives the reconnect.
+  smartSdr.setYieldToExternal(_flexYieldToExternal);
   // Tell SmartSDR whether CW keyer needs GUI auth
   smartSdr.setNeedsCw(!!(settings.enableCwKeyer || (settings.enableRemote && settings.remoteCwEnabled)));
   // Bind to GUI client for ECHOCAT rig controls (ATU, etc.)
@@ -6782,18 +6807,26 @@ function connectSmartSdr() {
       _flexDaxChannel = chooseFlexDaxChannel(index);
       const ch = _flexDaxChannel;
       smartSdr.setSliceDax(index, ch);
-      // Onboard-speaker mute. SmartSDR-less self mode: audio_mute is independent
-      // of the DAX tap, so we mute the radio's speaker while DAX RX keeps
-      // flowing (default; flexOnboardSpeaker overrides). BUT in multiFlex (a 2nd
-      // client alongside SmartSDR on 4.2.x), the DAX feed is taken FROM the
-      // slice monitor mix — so audio_mute=1 ALSO silences DAX → no RX. Confirmed
-      // empirically (K3SBP 2026-06-26): muted = 0 decodes, unmuted = decodes. So
-      // in multiFlex we must leave the slice UNMUTED; the cost is the radio's
-      // speaker plays the slice audio (turn down the radio's volume to quiet it).
+      // Speaker vs DAX. On this radio (4.2.x) audio_mute=1 ALSO kills the DAX RX
+      // tap — it's taken from the slice monitor mix — so muting silences the PC
+      // monitor + JTCAT/SSTV decoders too, not just the radio's speaker (K3SBP
+      // 2026-06-26). So NEVER mute in Flex Direct: keep audio_mute=0 so DAX
+      // always flows, and control the PHYSICAL speaker with audio_gain instead
+      // (DAX is full-scale, independent of the slice AF gain). Default = speaker
+      // silenced (gain=0) so the operator listens on the PC without the radio's
+      // own speaker blaring (the 8600 has no front-panel volume to turn down);
+      // flexOnboardSpeaker=true plays the band on the radio's speaker. multiFlex
+      // leaves the host GUI client's gain alone — we only ensure it's unmuted.
       const _multiflexActive = !!(smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients.length > 0);
-      const onboard = !!settings.flexOnboardSpeaker || _multiflexActive;
-      smartSdr.setOnboardAudioMute(index, !onboard);
-      sendCatLog(`Flex Direct: radio speaker ${onboard ? 'ON' : 'muted'} (slice ${index} audio_mute=${onboard ? 0 : 1})${_multiflexActive ? ' [multiFlex: must stay unmuted for DAX RX]' : ''}`);
+      smartSdr.setOnboardAudioMute(index, false);
+      if (_multiflexActive) {
+        sendCatLog(`Flex Direct: slice ${index} unmuted [multiFlex: host GUI owns speaker/gain]`);
+      } else {
+        const wantSpeaker = settings.flexOnboardSpeaker === true;
+        const level = wantSpeaker ? (parseInt(settings.flexSpeakerGain, 10) || 50) : 0;
+        smartSdr.setSliceAudioLevel(index, level);
+        sendCatLog(`Flex Direct: radio speaker ${wantSpeaker ? `ON (audio_level=${level})` : 'silenced (audio_level=0) — DAX/PC audio still live'} (slice ${index})`);
+      }
     } else {
       // Bound mode: the host GUI client (SmartSDR-Win / AetherSDR) already
       // configured DAX; we're just following its active slice. The UI's CAT
@@ -6878,22 +6911,41 @@ function disconnectSmartSdr() {
 // When that contradicts smartSdr's current role, reconnect it so the
 // grace-window discovery (_promoteOrBind) re-decides self-host vs. bound.
 let _lastCatUpForHandoff = false;
+// True while POTACAT must yield the single GUI slot to a running SmartSDR/
+// AetherSDR (multiFlex off). connectSmartSdr() reads it; the handoff sets it.
+let _flexYieldToExternal = false;
+let _flexReclaimTimer = null; // settle timer before reclaiming the radio on close
+// Reclaim the radio (self-host) after the bound GUI client goes away. DELAY the
+// reconnect so the radio drops the host's stale GUI registration first — an
+// instant reconnect catches the corpse and re-binds to it instead of self-
+// hosting. Shared by the SmartSDR 5002-shim-drop path and the AetherSDR
+// client-left path (which can both fire) so they coalesce into one reconnect.
+function reclaimFlexRadio(reason) {
+  _flexYieldToExternal = false;
+  if (_flexReclaimTimer) clearTimeout(_flexReclaimTimer);
+  sendCatLog(`Flex Direct: ${reason} — reclaiming the radio as GUI client…`);
+  _flexReclaimTimer = setTimeout(() => { _flexReclaimTimer = null; connectSmartSdr(); }, 2000);
+}
 function checkFlexHandoff(catUp) {
   if (catUp === _lastCatUpForHandoff) return; // edge-triggered only
   _lastCatUpForHandoff = catUp;
+  // SmartSDR came (back) up while a reclaim was pending — cancel it; stay bound.
+  if (catUp && _flexReclaimTimer) { clearTimeout(_flexReclaimTimer); _flexReclaimTimer = null; }
   if (!smartSdr || !smartSdr.connected) return;
   if (!settings.catTarget || settings.catTarget.type !== 'tcp') return; // Flex only
   const multiflex = settings.flexMultiflex !== false;
   if (catUp && smartSdr.guiReady && !multiflex) {
-    // Legacy (multiFlex off): SmartSDR-Win came up while self-hosting — hand
-    // off so POTACAT follows SmartSDR's slice (bound) instead of its own.
-    sendCatLog('Flex Direct: SmartSDR detected — handing off (POTACAT will follow SmartSDR).');
+    // multiFlex off: SmartSDR-Win is launching while POTACAT holds the single
+    // GUI slot. Reconnect in YIELD mode so POTACAT releases the slot and waits
+    // to bind — instead of re-grabbing it after the discovery timeout, which is
+    // what was locking SmartSDR out ("In use: POTACAT").
+    sendCatLog('Flex Direct: SmartSDR detected — releasing the GUI slot so it can open; POTACAT will bind and follow it.');
+    _flexYieldToExternal = true;
     connectSmartSdr();
-  } else if (!catUp && smartSdr.mode === 'bound') {
-    // SmartSDR-Win closed while bound (multiFlex off, or the radio refused a
-    // 2nd client) — reclaim the radio by self-hosting again.
-    sendCatLog('Flex Direct: SmartSDR closed — POTACAT resuming as the GUI client.');
-    connectSmartSdr();
+  } else if (!catUp && (smartSdr.mode === 'bound' || _flexYieldToExternal)) {
+    // SmartSDR-Win closed (while bound, or while we were still yielding because
+    // it never finished registering) — stop yielding and reclaim the radio.
+    reclaimFlexRadio('SmartSDR closed');
   }
   // multiFlex + SmartSDR opened while self-hosting: nothing to do — POTACAT
   // stays its own gui client alongside SmartSDR (no reconnect, no audio glitch).
@@ -15875,6 +15927,28 @@ function migrateRigSettings(s) {
     }
     if (changed) saveSettings(s);
   }
+  // Self-heal Flex rigs whose SmartSDR-Win CAT shim port got corrupted by an
+  // earlier duplicate-id bug: the Rig form built catTarget with port 0-3 (the
+  // 0-3 slice index) instead of 5002-5005, which also made the rig render as a
+  // generic IP-CAT radio and killed the SmartSDR handoff. A Flex rig is the one
+  // with flexApiHost set; if its localhost CAT target isn't a valid shim port,
+  // rebuild it from flexSlice (A=5002 … D=5005). Custom/remote CAT is left alone.
+  if (Array.isArray(s.rigs) && s.rigs.length) {
+    let healed = false;
+    for (const r of s.rigs) {
+      if (!r || !r.flexApiHost) continue; // only Flex rigs
+      const t = r.catTarget;
+      const localhostCat = !t || (t.type === 'tcp' && (t.host === '127.0.0.1' || !t.host));
+      const validShim = t && t.type === 'tcp' && [5002, 5003, 5004, 5005].includes(t.port);
+      if (localhostCat && !validShim) {
+        const slice = (typeof r.flexSlice === 'number' && r.flexSlice >= 0 && r.flexSlice <= 3) ? r.flexSlice : 0;
+        r.catTarget = { type: 'tcp', host: '127.0.0.1', port: 5002 + slice };
+        healed = true;
+        console.log(`[flex-migrate] repaired rig "${r.name || r.id}" CAT target → 127.0.0.1:${5002 + slice}`);
+      }
+    }
+    if (healed) saveSettings(s);
+  }
 }
 
 // --- FlexRadio UDP discovery ----------------------------------------------
@@ -22167,8 +22241,17 @@ app.whenReady().then(() => {
     // the slice POTACAT owns without a reconnect; bound mode leaves the
     // host GUI client's audio routing alone.
     if (flexOnboardSpeakerChanged && smartSdr && smartSdr.mode === 'self' && smartSdr.ourSliceIndex != null) {
-      smartSdr.setOnboardAudioMute(smartSdr.ourSliceIndex, !settings.flexOnboardSpeaker);
-      sendCatLog(`Flex Direct: radio speaker ${settings.flexOnboardSpeaker ? 'ON' : 'muted'} (live)`);
+      // Mirror the slice-ready policy: never mute (that kills DAX too); control
+      // the physical speaker with audio_gain. Only in solo — multiFlex leaves the
+      // host GUI client's gain alone.
+      const _multiflexActive = !!(smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients.length > 0);
+      smartSdr.setOnboardAudioMute(smartSdr.ourSliceIndex, false);
+      if (!_multiflexActive) {
+        const wantSpeaker = settings.flexOnboardSpeaker === true;
+        const level = wantSpeaker ? (parseInt(settings.flexSpeakerGain, 10) || 50) : 0;
+        smartSdr.setSliceAudioLevel(smartSdr.ourSliceIndex, level);
+        sendCatLog(`Flex Direct: radio speaker ${wantSpeaker ? `ON (audio_level=${level})` : 'silenced (audio_level=0) — DAX/PC audio still live'} (live)`);
+      }
     }
 
     // DAX-free audio path: start / stop the dedicated non-GUI audio
