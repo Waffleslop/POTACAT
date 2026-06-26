@@ -15927,6 +15927,28 @@ function migrateRigSettings(s) {
     }
     if (changed) saveSettings(s);
   }
+  // Self-heal Flex rigs whose SmartSDR-Win CAT shim port got corrupted by an
+  // earlier duplicate-id bug: the Rig form built catTarget with port 0-3 (the
+  // 0-3 slice index) instead of 5002-5005, which also made the rig render as a
+  // generic IP-CAT radio and killed the SmartSDR handoff. A Flex rig is the one
+  // with flexApiHost set; if its localhost CAT target isn't a valid shim port,
+  // rebuild it from flexSlice (A=5002 … D=5005). Custom/remote CAT is left alone.
+  if (Array.isArray(s.rigs) && s.rigs.length) {
+    let healed = false;
+    for (const r of s.rigs) {
+      if (!r || !r.flexApiHost) continue; // only Flex rigs
+      const t = r.catTarget;
+      const localhostCat = !t || (t.type === 'tcp' && (t.host === '127.0.0.1' || !t.host));
+      const validShim = t && t.type === 'tcp' && [5002, 5003, 5004, 5005].includes(t.port);
+      if (localhostCat && !validShim) {
+        const slice = (typeof r.flexSlice === 'number' && r.flexSlice >= 0 && r.flexSlice <= 3) ? r.flexSlice : 0;
+        r.catTarget = { type: 'tcp', host: '127.0.0.1', port: 5002 + slice };
+        healed = true;
+        console.log(`[flex-migrate] repaired rig "${r.name || r.id}" CAT target → 127.0.0.1:${5002 + slice}`);
+      }
+    }
+    if (healed) saveSettings(s);
+  }
 }
 
 // --- FlexRadio UDP discovery ----------------------------------------------
