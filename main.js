@@ -8266,12 +8266,12 @@ function updateRemoteSettings() {
     enableRotor: !!settings.enableRotor,
     rotorActive: settings.rotorActive !== false,
     remoteCwEnabled: !!settings.remoteCwEnabled,
-    // Fall back to the desktop POTACAT CW macros when the phone hasn't
-    // customized its own (settings.remoteCwMacros only gets written when
-    // the phone pushes 'save-cw-macros'). Walt KK4DF v1.5.18: desktop
-    // showed his custom macros but ECHOCAT showed defaults because the
-    // phone copy was never seeded. Phone-edited macros still win when set.
-    remoteCwMacros: settings.remoteCwMacros || settings.cwMacros || null,
+    // CW macros are ONE shared set: settings.cwMacros is canonical (the desktop
+    // editor + bar read it, and a phone 'save-cw-macros' now writes it too), so
+    // the phone always gets the live set and edits sync both ways. The legacy
+    // settings.remoteCwMacros is only a fallback for old phone-only configs.
+    // (The wire field name stays `remoteCwMacros` for app compatibility.)
+    remoteCwMacros: settings.cwMacros || settings.remoteCwMacros || null,
     // Phone-stored prefs that we persist server-side so they survive
     // localStorage wipes on the phone (Safari ITP, cache clears).
     // Currently: echocatWelcomeDismissed.
@@ -11387,17 +11387,21 @@ function connectRemote() {
     }
   });
 
-  // CW macros pushed from ECHOCAT phone — phone localStorage gets
-  // wiped periodically by Safari ITP and similar; the desktop is the
-  // durable home for the user's macros. We persist to
-  // settings.remoteCwMacros (which is already pushed to the phone via
-  // the auth-ok handshake) and trigger a re-push so other connected
-  // clients see the update too.
+  // CW macros pushed from ECHOCAT phone — phone localStorage gets wiped
+  // periodically by Safari ITP and similar; the desktop is the durable home.
+  // Write the CANONICAL set the desktop editor + macro bar read
+  // (settings.cwMacros) so phone edits actually SHOW on the desktop — they used
+  // to land in a separate settings.remoteCwMacros that the desktop never
+  // displayed. Drop that legacy override so cwMacros is the single source of
+  // truth and macros stay in sync both ways. Re-push to all clients and refresh
+  // the desktop macro bar (same pattern as voice-macros-updated).
   remoteServer.on('save-cw-macros', ({ macros }) => {
-    settings.remoteCwMacros = macros;
+    settings.cwMacros = macros;
+    delete settings.remoteCwMacros;
     saveSettings(settings);
     updateRemoteSettings();
-    sendCatLog(`[Echo CAT] Saved ${macros.length} CW macros from phone`);
+    if (win && !win.isDestroyed()) win.webContents.send('cw-macros-updated');
+    sendCatLog(`[Echo CAT] Synced ${macros.length} CW macros from phone`);
   });
 
   // ECHOCAT prefs from phone (welcome-banner dismissed, etc.) — same

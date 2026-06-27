@@ -18613,6 +18613,15 @@ if (window.api.onVoiceMacrosUpdated) {
   });
 }
 
+// CW macros edited on the phone (save-cw-macros) — refresh the desktop macro
+// bar so phone edits show up live, not just on next launch.
+if (window.api.onCwMacrosUpdated) {
+  window.api.onCwMacrosUpdated(function() {
+    invalidateCwMacroCache();
+    updateCwMacroBar();
+  });
+}
+
 // REC button on macro bar — cycles through slots
 if (voiceMacroRecBtn) {
   voiceMacroRecBtn.addEventListener('click', function() {
