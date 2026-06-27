@@ -17790,6 +17790,16 @@ app.whenReady().then(() => {
       if (!pairRequestPopoutWin || pairRequestPopoutWin.isDestroyed()) return;
       pairRequestPopoutWin.show();
       pairRequestPopoutWin.focus();
+    });
+    // Push the request data only AFTER the renderer has loaded and registered
+    // its onPairRequest listener. `ready-to-show` can fire BEFORE the popout's
+    // script runs — especially in packaged/asar builds, which load slower than
+    // `npm start` — so sending there dropped the message and the box rendered
+    // its blank placeholders (name "--", fingerprint "—", a frozen "Expires in
+    // 60s"). `did-finish-load` fires after the synchronous popout script, so the
+    // listener is always ready (same pattern as the QR pair popout above).
+    pairRequestPopoutWin.webContents.once('did-finish-load', () => {
+      if (!pairRequestPopoutWin || pairRequestPopoutWin.isDestroyed()) return;
       // Capture the fingerprint so the popout can show it.
       let fingerprint = '';
       try {
