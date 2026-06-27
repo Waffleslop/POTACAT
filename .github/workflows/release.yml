@@ -433,9 +433,14 @@ jobs:
           # If a release notes file is checked in at release-notes/vX.Y.Z.md, use it.
           # Otherwise let gh auto-generate from commits since the previous tag.
           NOTES_FILE="release-notes/${TAG}.md"
+          # Optional human-friendly release name in release-notes/vX.Y.Z.title
+          # (one line). Falls back to the tag, so a release can be titled
+          # "POTACAT with …" instead of just "v1.9.0".
+          TITLE_FILE="release-notes/${TAG}.title"
+          if [ -f "$TITLE_FILE" ]; then TITLE=$(head -1 "$TITLE_FILE"); else TITLE="$TAG"; fi
           if [ -f "$NOTES_FILE" ]; then
             gh release create "$TAG" \
-              --title "$TAG" \
+              --title "$TITLE" \
               --notes-file "$NOTES_FILE" \
               dist/POTACAT-Setup-*.exe dist/POTACAT-Portable-*.exe \
               dist/POTACAT-*.dmg \
@@ -448,7 +453,7 @@ jobs:
               dist/latest*.yml --clobber
           else
             gh release create "$TAG" \
-              --title "$TAG" \
+              --title "$TITLE" \
               --generate-notes \
               dist/POTACAT-Setup-*.exe dist/POTACAT-Portable-*.exe \
               dist/POTACAT-*.dmg \
