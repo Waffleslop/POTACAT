@@ -825,9 +825,19 @@ function _applyPopoutTheme(payload) {
     }
   });
 
+  var lastClockState = null; // last offset the monitor reported (set in applyClock)
   window.api.onJtcatStatus(function(data) {
-    // Engine stopped — clear the sync readout (no meaningful offset to show).
-    if (data && data.state === 'stopped') applyClock(null);
+    // Engine stopped. Clear the sync readout for an OK/unknown clock, BUT keep a
+    // bad/warn banner up — the clock is still wrong and must be fixed before the
+    // next run, so engine restarts (e.g. a SmartSDR/AetherSDR handoff cycling
+    // the engine) must not flicker the warning away.
+    if (data && data.state === 'stopped') {
+      if (lastClockState && (lastClockState.level === 'bad' || lastClockState.level === 'warn')) {
+        applyClock(lastClockState);
+      } else {
+        applyClock(null);
+      }
+    }
   });
 
   // --- Real clock-sync indicator + notice banner ---
@@ -847,6 +857,7 @@ function _applyPopoutTheme(payload) {
 
   function applyClock(d) {
     if (!syncEl) return;
+    lastClockState = d; // remembered so engine-stop can keep a bad banner up
     syncEl.classList.remove('jtcat-synced');
     syncEl.style.color = '';
     if (clockBanner) clockBanner.classList.add('hidden');
