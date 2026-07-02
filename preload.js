@@ -15,7 +15,9 @@ contextBridge.exposeInMainWorld('api', {
   onSpots: (cb) => ipcRenderer.on('spots', (_e, data) => cb(data)),
   onSpotsError: (cb) => ipcRenderer.on('spots-error', (_e, msg) => cb(msg)),
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
-  tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
+  // `origin` captures the renderer-side call stack so a stray QSY (e.g. the
+  // 33 MHz jump) can be traced to its exact caller in the main-process log.
+  tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort, origin: (new Error()).stack }),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),
   onExternalAtuStart: (cb) => ipcRenderer.on('external-atu-start', (_e, d) => cb(d)),
@@ -290,6 +292,7 @@ contextBridge.exposeInMainWorld('api', {
   setEventSnooze: (data) => ipcRenderer.invoke('set-event-snooze', data),
   getEventProgress: (eventId) => ipcRenderer.invoke('get-event-progress', eventId),
   markEventRegion: (data) => ipcRenderer.invoke('mark-event-region', data),
+  setEventItem: (data) => ipcRenderer.invoke('set-event-item', data),
   resetEventProgress: (eventId) => ipcRenderer.invoke('reset-event-progress', eventId),
   exportEventAdif: (data) => ipcRenderer.invoke('export-event-adif', data),
   minimize: () => ipcRenderer.send('win-minimize'),

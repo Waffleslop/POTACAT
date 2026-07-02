@@ -256,6 +256,7 @@ const { WsprScheduler } = require('./lib/wspr/scheduler');
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
+const { qsoDayInScheduleEntry } = require('./lib/event-progress');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -5158,6 +5159,17 @@ function broadcastFullAutoCqState() {
 // produce the same protocol-legal string.
 const buildCqTxMsg = CqTarget.buildCqTxMsg;
 
+// ARRL Field Day exchange context for JTCAT QSOs. Returns {fd, myExch} when FD
+// mode is enabled and the operator's exchange (class + ARRL/RAC section, e.g.
+// "2A EMA") is well-formed; otherwise null. q.fd flips the state machine to the
+// class+section sequence (no dB report); q.myExch is our own exchange.
+function jtcatFdContext() {
+  if (!settings.jtcatFdMode) return null;
+  const exch = String(settings.jtcatFdExch || '').toUpperCase().trim().replace(/\s+/g, ' ');
+  if (!/^\d{1,2}[A-F]\s+[A-Z]{2,3}$/.test(exch)) return null;
+  return { fd: true, myExch: exch };
+}
+
 // Build a fresh CQ QSO object and start transmitting. Returns the QSO or null
 // if callsign/grid/engine aren't ready. Shared by re-arm; mirrors the manual
 // CQ button's message build.
@@ -5165,11 +5177,14 @@ function jtcatBuildCqQso(modifier) {
   const myCall = (settings.myCallsign || '').toUpperCase();
   const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
   if (!myCall || !myGrid || !ft8Engine) return null;
+  const fd = jtcatFdContext();
+  if (fd) modifier = 'FD'; // Field Day CQ is always "CQ FD <call> <grid>"
   const txMsg = buildCqTxMsg(myCall, myGrid, modifier);
   const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
   ft8Engine.setTxSlot(nextSlot);
   const qso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg,
     report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+  if (fd) { qso.fd = true; qso.myExch = fd.myExch; }
   ft8Engine._txEnabled = true;
   ft8Engine.setTxMessage(txMsg);
   ft8Engine.tryImmediateTx();
@@ -5631,8 +5646,14 @@ async function jtcatAutoLog(qso) {
     sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
     return;
   }
-  // Prevent logging incomplete QSOs (no signal reports exchanged)
-  if (!q.report && !q.sentReport) {
+  // Prevent logging incomplete QSOs. Field Day exchanges a class+section
+  // instead of a signal report, so for FD QSOs require the received exchange.
+  if (q.fd) {
+    if (!q.theirExch) {
+      sendCatLog(`[JTCAT] Auto-log skipped — no Field Day exchange received for ${q.call}`);
+      return;
+    }
+  } else if (!q.report && !q.sentReport) {
     sendCatLog(`[JTCAT] Auto-log skipped — no signal reports exchanged for ${q.call}`);
     return;
   }
@@ -5668,6 +5689,16 @@ async function jtcatAutoLog(qso) {
     gridsquare: q.grid || '',
     comment: 'JTCAT ' + mode,
   };
+
+  // ARRL Field Day: log the class + ARRL/RAC section exchange (ADIF contest fields)
+  if (q.fd && q.theirExch) {
+    qsoData.contestId = 'ARRL-FIELD-DAY';
+    qsoData.class = q.theirClass || '';
+    qsoData.arrlSect = q.theirSection || '';
+    qsoData.srxString = q.theirExch || '';
+    qsoData.stxString = q.myExch || '';
+    qsoData.comment = `JTCAT FD ${mode} ${q.myExch || ''}<-${q.theirExch}`.trim();
+  }
 
   try {
     // Activation mode: add park refs so JTCAT QSOs log to the activation logbook
@@ -8227,6 +8258,7 @@ function pushActivatorStateToPhone() {
 function updateRemoteSettings() {
   if (!remoteServer) return;
   const anyCluster = [...clusterClients.values()].some(e => e.client.connected);
+  const _events = buildEventCatalogPayload();
   remoteServer.setRemoteSettings({
     myCallsign: settings.myCallsign || '',
     grid: settings.grid || '',
@@ -8282,6 +8314,13 @@ function updateRemoteSettings() {
     // each group's remoteEntries cache rides this push so mobile decorates
     // matching spots without having to fetch URLs itself.
     watchlistGroups: settings.watchlistGroups || null,
+    // Special-event subscriptions (13 Colonies et al.) — kept SEPARATE from
+    // watchlistGroups because events carry a schedule, callsign-pattern matching,
+    // and per-device mute. `eventSubscriptions` = tracked events the phone should
+    // match + self-notify on (honoring mutedPhone); `availableEvents` = the catalog
+    // for the phone's subscribe UI. Phone notifies from its own feed (no relay-push).
+    eventSubscriptions: _events.subscriptions,
+    availableEvents: _events.available,
     kiwiSdrHost1: settings.kiwiSdrHost1 || settings.kiwiSdrHost || '',
     kiwiSdrHost2: settings.kiwiSdrHost2 || '',
     kiwiSdrHost3: settings.kiwiSdrHost3 || '',
@@ -8541,6 +8580,12 @@ function _maybeMuteFlexCwSidetoneForWinKeyer(wkActive) {
  */
 function _muteFlexCwSidetoneForCwx(durationMs) {
   if (!settings.muteFlexCwSidetoneOnWinKeyer) return;
+  // This mute exists ONLY to stop the Flex sidetone (carried over DAX RX) from
+  // echoing against an ECHOCAT phone's own locally-generated sidetone. With no
+  // remote client connected, the Flex sidetone via DAX is the desktop op's only
+  // CW monitor, so muting it just leaves silence (K3SBP 2026-06-29). Gate it on
+  // an actually-connected client.
+  if (!(remoteServer && remoteServer.hasClient && remoteServer.hasClient())) return;
   const flexUp = detectRigType() === 'flex' && smartSdr && smartSdr.connected;
   if (!flexUp) return;
   if (!_flexCwSidetoneMutedByCwx) {
@@ -10414,6 +10459,28 @@ function connectRemote() {
   // — that duplication is what let the phone path silently drift out of date
   // (NR/Comp/ANF/VOX were missing). One dispatcher, two transports.
   remoteServer.on('rig-control', (data) => applyRigControl(data, 'echocat'));
+
+  // Phone subscribes / unsubscribes / mutes a special event. The phone half of
+  // the desktop's per-event toggle, extended with per-device mute. Only the
+  // fields present are applied; setEventSubscription re-broadcasts the updated
+  // eventSubscriptions so both devices converge. (ECHOCAT 13C contract 2026-06-29)
+  remoteServer.on('set-event-subscription', ({ eventId, tracking, mutedPhone, mutedDesktop } = {}) => {
+    if (!eventId) return;
+    setEventSubscription(eventId, { tracking, mutedPhone, mutedDesktop });
+    const changed = [['tracking', tracking], ['mutedPhone', mutedPhone], ['mutedDesktop', mutedDesktop]]
+      .filter(([, v]) => typeof v === 'boolean').map(([k, v]) => `${k}=${v}`).join(' ');
+    sendCatLog(`[events] set-event-subscription ${eventId}: ${changed || '(no-op)'}`);
+  });
+
+  // Phone manually checks/unchecks a station on the event checklist (13 Colonies
+  // et al.) — the mobile half of the desktop board's manual toggle, for QSOs
+  // logged outside POTACAT. setEventItemManual re-broadcasts eventSubscriptions
+  // (with merged progress) so both devices converge.
+  remoteServer.on('set-event-progress', ({ eventId, itemId, worked } = {}) => {
+    if (!eventId || !itemId) return;
+    setEventItemManual(eventId, itemId, !!worked);
+    sendCatLog(`[events] set-event-progress ${eventId}: ${itemId}=${!!worked}`);
+  });
 
   remoteServer.on('set-activator-park', async ({ parkRef, activationType, activationName: actName, sig }) => {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType);
@@ -14620,6 +14687,7 @@ function createWindow() {
     setInterval(fetchActiveEvents, 4 * 3600000); // refresh every 4 hours
     // Push cached events to renderer immediately + scan log for matches
     pushEventsToRenderer();
+    updateRemoteSettings(); // seed ECHOCAT catalog/subscriptions (no-op if remote server not up yet)
     scanLogForEvents();
     // Load directory cache and fetch fresh data (only if enabled)
     if (settings.enableDirectory) {
@@ -15080,7 +15148,7 @@ const BUILTIN_EVENTS = {
       badgeColor: '#1776cf',
       callsignPatterns: ['K2A', 'K2B', 'K2C', 'K2D', 'K2E', 'K2F', 'K2G', 'K2H', 'K2I', 'K2J', 'K2K', 'K2L', 'K2M', 'WM3PEN', 'GB13COL', 'TM13COL'],
       schedule: [
-        { region: 'ALL', regionName: '13 Colonies', start: '2026-07-01T13:00:00Z', end: '2026-07-07T04:00:00Z' },
+        { region: 'ALL', regionName: '13 Colonies', start: '2026-07-01T13:00:00Z', end: '2026-07-08T04:00:00Z' },
       ],
       tracking: {
         type: 'checklist', total: 16, label: 'Stations',
@@ -15131,6 +15199,7 @@ function fetchActiveEvents() {
           activeEvents = data.events;
           saveEventsCache(data);
           pushEventsToRenderer();
+          updateRemoteSettings(); // refresh ECHOCAT catalog/subscriptions on the live 4h event refresh
           scanLogForEvents();
         }
       } catch { /* silently ignore parse errors */ }
@@ -15149,7 +15218,7 @@ function pushEventsToRenderer() {
     dismissed: !!(eventStates[ev.id] && eventStates[ev.id].dismissed),
     watchlistOn: !!(eventStates[ev.id] && eventStates[ev.id].watchlistOn),
     snoozeUntil: (eventStates[ev.id] && eventStates[ev.id].snoozeUntil) || 0,
-    progress: (eventStates[ev.id] && eventStates[ev.id].progress) || {},
+    progress: mergedEventProgress(eventStates[ev.id]),
   }));
   win.webContents.send('active-events', payload);
 }
@@ -15248,6 +15317,70 @@ function setEventWatchlist(eventId, on) {
   pushEventsToRenderer();
 }
 
+// --- ECHOCAT cross-device event subscriptions (13 Colonies et al.) -----------
+// Build the two payloads the phone needs (rides the auth-ok + settings-update
+// blob next to watchlistGroups). `availableEvents` is the catalog for the phone's
+// "subscribe under Contests" UI; `eventSubscriptions` is every tracked (optedIn)
+// event with the per-device mute flags. callsignPatterns + schedule are sent
+// VERBATIM — the phone replicates the desktop match rule (a `/*`-suffixed pattern
+// is a prefix match, everything else exact) and the per-window schedule, so a spot
+// lights up identically on both. Keep this the single source of truth. (2026-06-29)
+function buildEventCatalogPayload() {
+  const states = settings.events || {};
+  const evs = activeEvents || [];
+  const available = evs.map((ev) => ({
+    id: ev.id,
+    name: ev.name,
+    callsignPatterns: ev.callsignPatterns || [],
+    schedule: ev.schedule || null,   // array of { region, regionName, start, end }
+    url: ev.url || '',
+    badge: ev.badge || '',
+  }));
+  const subscriptions = evs
+    .filter((ev) => states[ev.id] && states[ev.id].optedIn)
+    .map((ev) => {
+      const st = states[ev.id] || {};
+      return {
+        id: ev.id,
+        name: ev.name,
+        callsignPatterns: ev.callsignPatterns || [],
+        schedule: ev.schedule || null,
+        trackedAt: st.trackedAt || null,
+        mutedDesktop: !!st.mutedDesktop,
+        mutedPhone: !!st.mutedPhone,
+        // Board type + checklist item list so the phone can render the full set
+        // of stations (checked + unchecked), and the merged worked-state so its
+        // checkmarks match the desktop. Manual entries carry `manual: true`. The
+        // phone toggles via the `set-event-progress` C→S message. (13C progress)
+        board: ev.board || (ev.tracking && ev.tracking.type) || 'regions',
+        tracking: ev.tracking || null,
+        progress: mergedEventProgress(st),
+      };
+    });
+  return { available, subscriptions };
+}
+
+// Apply a subscribe/unsubscribe/mute from either device. `tracking` maps to the
+// existing optedIn flag; mutedPhone/mutedDesktop are NEW per-device notification
+// mutes, intentionally distinct from watchlistOn (which drives desktop star/filter/
+// scan surfacing — muting a device's notifications must not hide the highlight).
+// Only the fields actually present are applied. Re-pushes so both devices converge.
+function setEventSubscription(eventId, opts = {}) {
+  if (!eventId) return;
+  if (!settings.events) settings.events = {};
+  if (!settings.events[eventId]) settings.events[eventId] = { optedIn: false, dismissed: false, progress: {} };
+  const st = settings.events[eventId];
+  if (typeof opts.tracking === 'boolean') {
+    st.optedIn = opts.tracking;
+    if (opts.tracking && !st.trackedAt) st.trackedAt = Date.now();
+  }
+  if (typeof opts.mutedPhone === 'boolean') st.mutedPhone = opts.mutedPhone;
+  if (typeof opts.mutedDesktop === 'boolean') st.mutedDesktop = opts.mutedDesktop;
+  saveSettings(settings);
+  pushEventsToRenderer();
+  updateRemoteSettings(); // re-broadcast eventSubscriptions to all clients
+}
+
 // Snooze the banner for an event until a timestamp (ms epoch). Dismissing an
 // upcoming event snoozes it until its start, so the countdown stays hidden and
 // the banner returns as LIVE when the event begins.
@@ -15271,6 +15404,37 @@ function markEventRegion(eventId, region, qsoData) {
   };
   saveSettings(settings);
   pushEventsToRenderer();
+}
+
+// Union of log-derived progress (state.progress, rebuilt from the ADIF log by
+// scanLogForEvents) and manual check-offs (state.manualProgress). They are kept
+// in separate maps so neither path clobbers the other — scanLogForEvents resets
+// state.progress from scratch and would otherwise wipe a manual tick, the same
+// class of bug that lost restart progress. Log entries win on conflict (a real
+// QSO carries band/mode/date a manual tick can't); manual entries keep
+// `manual: true` so the UI can show them as user-marked and offer to un-mark.
+function mergedEventProgress(state) {
+  if (!state) return {};
+  return { ...(state.manualProgress || {}), ...(state.progress || {}) };
+}
+
+// Manual per-station check-off for the checklist board (13 Colonies etc.), for
+// operators who log outside POTACAT so scanLogForEvents can't auto-detect the
+// QSO. Also the phone's inbound path. Persisted apart from log-derived progress.
+function setEventItemManual(eventId, itemId, on) {
+  if (!eventId || !itemId) return;
+  if (!settings.events) settings.events = {};
+  if (!settings.events[eventId]) settings.events[eventId] = { optedIn: true, dismissed: false, progress: {} };
+  const state = settings.events[eventId];
+  if (!state.manualProgress) state.manualProgress = {};
+  if (on) {
+    state.manualProgress[itemId] = { call: itemId, manual: true, date: new Date().toISOString().slice(0, 10) };
+  } else {
+    delete state.manualProgress[itemId];
+  }
+  saveSettings(settings);
+  pushEventsToRenderer();
+  updateRemoteSettings(); // converge the phone's checklist
 }
 
 /** Scan existing QSO log for contacts that match opted-in events.
@@ -15301,18 +15465,13 @@ function scanLogForEvents() {
       const call = (rec.CALL || '').toUpperCase();
       if (!call) continue;
 
-      // Parse QSO date (YYYYMMDD) to match against schedule
+      // Find the schedule entry whose window covers this QSO's UTC day.
+      // Day-granular + inclusive so start/end-day QSOs aren't dropped for
+      // windows that begin/end at a non-midnight time (13 Colonies = 1300z–
+      // 0400z). See lib/event-progress.js — this is the fix for progress
+      // vanishing on restart.
       const qsoDateStr = rec.QSO_DATE || '';
-      const qsoDate = qsoDateStr.length === 8
-        ? new Date(`${qsoDateStr.slice(0, 4)}-${qsoDateStr.slice(4, 6)}-${qsoDateStr.slice(6, 8)}T12:00:00Z`)
-        : null;
-
-      // Find schedule entry that covers this QSO's date
-      const matchEntry = (ev.schedule || []).find(s => {
-        const start = new Date(s.start);
-        const end = new Date(s.end);
-        return qsoDate && qsoDate >= start && qsoDate < end;
-      });
+      const matchEntry = (ev.schedule || []).find(s => qsoDayInScheduleEntry(qsoDateStr, s));
       if (!matchEntry) continue;
 
       const qsoData = {
@@ -16100,8 +16259,32 @@ function gatedSmartSdrTxPower(value) {
   return true;
 }
 
-function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
+function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz -> Hz
+
+  // --- Sanity / out-of-band guard (added 2026-06-29 after a stray tune drove
+  //     the rig to 33 MHz). Hard-reject impossible values; for a plausible but
+  //     off-amateur-band frequency, log a warning + the caller origin so a
+  //     stray QSY is traceable, but DON'T block it (SWL / general-coverage RX
+  //     and WWV all live off the ham bands). `origin` is the renderer stack,
+  //     threaded from the 'tune' IPC; internal callers omit it. ---
+  const _freqMhzGuard = freqHz / 1e6;
+  if (!Number.isFinite(freqHz) || freqHz <= 0 || _freqMhzGuard > 2000) {
+    sendCatLog(`[tune] ⚠ REJECTED implausible frequency ${Number.isFinite(freqHz) ? _freqMhzGuard.toFixed(6) : freqKhz} MHz`
+      + (origin ? ` — caller origin:\n${origin}` : ''));
+    return;
+  }
+  if (!freqToBand(_freqMhzGuard)) {
+    // Throttle so scrolling across an off-band stretch (SWL) can't flood the
+    // log; a one-off stray QSY still logs its caller.
+    const _nowWarn = Date.now();
+    if (_nowWarn - (tuneRadio._lastOffBandWarn || 0) > 3000) {
+      tuneRadio._lastOffBandWarn = _nowWarn;
+      sendCatLog(`[tune] ⚠ off amateur band: ${_freqMhzGuard.toFixed(6)} MHz — allowed (RX/SWL), logging caller`
+        + (origin ? `:\n${origin}` : ' (internal caller)'));
+    }
+  }
+
   const now = Date.now();
   if (freqHz === _lastTuneFreq && now - _lastTuneTime < 300) return;
   // --- Guest Pass enforcement (#43): out-of-band block before any CAT write ---
@@ -19673,8 +19856,10 @@ app.whenReady().then(() => {
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
       };
     } else {
-      // 'reply-cq' — fresh reply with our grid (step 1 → step 2).
-      txMsg = data.call + ' ' + myCall + ' ' + myGrid;
+      // 'reply-cq' — fresh reply with our grid (step 1 → step 2). In Field Day
+      // mode we send our class+section exchange instead of the grid.
+      const fdCtx = jtcatFdContext();
+      txMsg = data.call + ' ' + myCall + ' ' + (fdCtx ? fdCtx.myExch : myGrid);
       phase = 'reply';
     }
 
@@ -19698,6 +19883,8 @@ app.whenReady().then(() => {
       // click 7Z1CE; advanceJtcatQso then kept scanning for KG4OJT and
       // never noticed 7Z1CE's reply). K3SBP 2026-05-30.
       popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: replySliceId };
+      const fdCtx = jtcatFdContext();
+      if (fdCtx) { popoutJtcatQso.fd = true; popoutJtcatQso.myExch = fdCtx.myExch; }
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
@@ -19731,7 +19918,9 @@ app.whenReady().then(() => {
       sendCatLog(`[JTCAT] CQ aborted — ${!myCall ? 'callsign not set' : 'grid not set'} in Settings`);
       return;
     }
-    const txMsg = buildCqTxMsg(myCall, myGrid, modifier != null ? modifier : (settings.jtcatChaseTarget || ''));
+    const fdCtx = jtcatFdContext();
+    const cqModifier = fdCtx ? 'FD' : (modifier != null ? modifier : (settings.jtcatChaseTarget || ''));
+    const txMsg = buildCqTxMsg(myCall, myGrid, cqModifier);
     // Auto-place TX on the quiet frequency the waterfall analysis found —
     // calling CQ on the default 1500 Hz lands right where everyone else calls
     // CQ. This mirrors the phone CQ path (jtcat-call-cq). setTxFreq is a no-op
@@ -19742,6 +19931,7 @@ app.whenReady().then(() => {
     const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
     ft8Engine.setTxSlot(nextSlot);
     popoutJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+    if (fdCtx) { popoutJtcatQso.fd = true; popoutJtcatQso.myExch = fdCtx.myExch; }
     ft8Engine._txEnabled = true;
     sendCatLog(`[JTCAT] CQ encoding: ${txMsg} slot=${nextSlot} @ ${jtcatQuietFreq}Hz (quiet)`);
     await ft8Engine.setTxMessage(txMsg);
@@ -20181,7 +20371,7 @@ app.whenReady().then(() => {
   // longer auto-follow the kiwi — acceptable; that path needs a real
   // race-protection design before re-introducing.)
 
-  ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort }) => {
+  ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin }) => {
     markUserActive();
     if (_vfoLocked) {
       _e.sender.send('tune-blocked', 'VFO Locked — Unlock VFO to change frequency');
@@ -20216,7 +20406,7 @@ app.whenReady().then(() => {
       smartSdr.setTxSlice(sliceIndex);
       smartSdr.setActiveSlice(sliceIndex);
     } else {
-      tuneRadio(frequency, mode, bearing);
+      tuneRadio(frequency, mode, bearing, { origin });
     }
     // Auto-tune KiwiSDR to match
     if (kiwiActive && kiwiClient && kiwiClient.connected) {
@@ -21926,7 +22116,7 @@ app.whenReady().then(() => {
       dismissed: !!(eventStates[ev.id] && eventStates[ev.id].dismissed),
       watchlistOn: !!(eventStates[ev.id] && eventStates[ev.id].watchlistOn),
       snoozeUntil: (eventStates[ev.id] && eventStates[ev.id].snoozeUntil) || 0,
-      progress: (eventStates[ev.id] && eventStates[ev.id].progress) || {},
+      progress: mergedEventProgress(eventStates[ev.id]),
     }));
   });
 
@@ -21953,6 +22143,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('mark-event-region', (_e, { eventId, region, qsoData }) => {
     markEventRegion(eventId, region, qsoData);
+    return true;
+  });
+
+  // Manual checklist toggle from the desktop board (station worked outside POTACAT).
+  ipcMain.handle('set-event-item', (_e, { eventId, itemId, worked }) => {
+    setEventItemManual(eventId, itemId, !!worked);
     return true;
   });
 

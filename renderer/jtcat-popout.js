@@ -73,6 +73,9 @@ function _applyPopoutTheme(payload) {
     if (maxAttemptsInput && typeof s.jtcatMaxQsoAttempts === 'number') {
       maxAttemptsInput.value = s.jtcatMaxQsoAttempts;
     }
+    fdMode = !!s.jtcatFdMode;
+    if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
+    reflectFd();
     updateMapHome();
     // Center map on home QTH if grid is available
     if (myGrid && map) {
@@ -111,6 +114,14 @@ function _applyPopoutTheme(payload) {
   var cqBtn = document.getElementById('jp-cq');
   var fullAutoCqBtn = document.getElementById('jp-full-auto-cq');
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
+  var fdToggle = document.getElementById('jp-fd-toggle');
+  var fdExchInput = document.getElementById('jp-fd-exch');
+  var fdMode = false;
+  var FD_EXCH_RE = /^\d{1,2}[A-F]\s+[A-Z]{2,3}$/;
+  function reflectFd() {
+    if (fdToggle) fdToggle.classList.toggle('active', fdMode);
+    if (fdExchInput) fdExchInput.style.display = fdMode ? '' : 'none';
+  }
   var enableTxBtn = document.getElementById('jp-enable-tx');
   var haltTxBtn = document.getElementById('jp-halt-tx');
   var tuneBtn = document.getElementById('jp-tune');
@@ -1764,6 +1775,30 @@ function _applyPopoutTheme(payload) {
       if (n > 60) n = 60;
       maxAttemptsInput.value = n;
       window.api.saveSettings({ jtcatMaxQsoAttempts: n });
+    });
+  }
+
+  // ARRL Field Day mode toggle + exchange entry
+  if (fdToggle) {
+    fdToggle.addEventListener('click', function() {
+      fdMode = !fdMode;
+      reflectFd();
+      window.api.saveSettings({ jtcatFdMode: fdMode });
+      if (fdMode && fdExchInput) {
+        fdExchInput.focus();
+        if (!FD_EXCH_RE.test((fdExchInput.value || '').toUpperCase().trim())) {
+          fdExchInput.style.borderColor = 'var(--accent-red, #e94560)';
+        }
+      }
+    });
+  }
+  if (fdExchInput) {
+    fdExchInput.addEventListener('change', function() {
+      var v = (fdExchInput.value || '').toUpperCase().trim().replace(/\s+/g, ' ');
+      fdExchInput.value = v;
+      var ok = FD_EXCH_RE.test(v);
+      fdExchInput.style.borderColor = ok || !v ? '' : 'var(--accent-red, #e94560)';
+      if (ok) window.api.saveSettings({ jtcatFdExch: v });
     });
   }
 

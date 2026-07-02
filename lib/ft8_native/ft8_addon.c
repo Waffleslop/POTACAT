@@ -10,6 +10,7 @@
 
 #include <node_api.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -18,6 +19,10 @@
 #include <ft8/message.h>
 #include <ft8/constants.h>
 #include <common/monitor.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #define MAX_CANDIDATES 140
 #define MAX_DECODED 50
@@ -152,6 +157,137 @@ static void ap_refresh(const char* mycall, const char* dxcall) {
         if (ap_cached_dxcall[0])
             ap2_valid = ap_build(ap_cached_mycall, ap_cached_dxcall, true, ap2_mask, ap2_bits);
     }
+}
+
+/* ---- TX waveform synthesis -------------------------------------------------
+ * GFSK phase shaping, ported from ft8_lib's gen_ft8 demo but with a heap
+ * `dphi` buffer (the demo uses a C99 VLA, which MSVC — the Windows addon
+ * compiler — rejects). Produces the modulated envelope starting at sample 0,
+ * matching ft8js's encode() so the engine's TX timing/late-start slicing is
+ * unchanged when it swaps in native encode. */
+#define GFSK_CONST_K 5.336446f /* == pi * sqrt(2 / log(2)) */
+
+static void gfsk_pulse(int n_spsym, float symbol_bt, float* pulse) {
+    for (int i = 0; i < 3 * n_spsym; ++i) {
+        float t = i / (float)n_spsym - 1.5f;
+        float arg1 = GFSK_CONST_K * symbol_bt * (t + 0.5f);
+        float arg2 = GFSK_CONST_K * symbol_bt * (t - 0.5f);
+        pulse[i] = (erff(arg1) - erff(arg2)) / 2;
+    }
+}
+
+/* Returns 0 on success, -1 on allocation failure. signal must hold n_sym*n_spsym floats. */
+static int synth_gfsk(const uint8_t* symbols, int n_sym, float f0, float symbol_bt,
+                      float symbol_period, int signal_rate, float* signal) {
+    int n_spsym = (int)(0.5f + signal_rate * symbol_period);
+    int n_wave = n_sym * n_spsym;
+    float hmod = 1.0f;
+    float dphi_peak = 2 * (float)M_PI * hmod / n_spsym;
+
+    float* dphi = (float*)malloc((size_t)(n_wave + 2 * n_spsym) * sizeof(float));
+    float* pulse = (float*)malloc((size_t)(3 * n_spsym) * sizeof(float));
+    if (!dphi || !pulse) { free(dphi); free(pulse); return -1; }
+
+    for (int i = 0; i < n_wave + 2 * n_spsym; ++i)
+        dphi[i] = 2 * (float)M_PI * f0 / signal_rate;
+
+    gfsk_pulse(n_spsym, symbol_bt, pulse);
+
+    for (int i = 0; i < n_sym; ++i) {
+        int ib = i * n_spsym;
+        for (int j = 0; j < 3 * n_spsym; ++j)
+            dphi[j + ib] += dphi_peak * symbols[i] * pulse[j];
+    }
+    for (int j = 0; j < 2 * n_spsym; ++j) {
+        dphi[j] += dphi_peak * pulse[j + n_spsym] * symbols[0];
+        dphi[j + n_sym * n_spsym] += dphi_peak * pulse[j] * symbols[n_sym - 1];
+    }
+
+    float phi = 0;
+    for (int k = 0; k < n_wave; ++k) {
+        signal[k] = sinf(phi);
+        phi = fmodf(phi + dphi[k + n_spsym], 2 * (float)M_PI);
+    }
+
+    int n_ramp = n_spsym / 8;
+    for (int i = 0; i < n_ramp; ++i) {
+        float env = (1 - cosf(2 * (float)M_PI * i / (2 * n_ramp))) / 2;
+        signal[i] *= env;
+        signal[n_wave - 1 - i] *= env;
+    }
+
+    free(dphi);
+    free(pulse);
+    return 0;
+}
+
+/* N-API encode function: (text, frequency?, protocol?) -> Float32Array | null
+ * Packs text (FD-aware via ftx_message_encode), generates tones, and synthesizes
+ * the GFSK envelope. The returned buffer starts at sample 0 with no leading
+ * silence — same contract as ft8js.encode(); the caller owns slot timing. */
+static napi_value Encode(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    if (argc < 1) {
+        napi_throw_error(env, NULL, "Expected (text, frequency?, protocol?)");
+        return NULL;
+    }
+
+    char text[64] = {0};
+    size_t text_len = 0;
+    napi_get_value_string_utf8(env, args[0], text, sizeof(text), &text_len);
+
+    double frequency = 1000.0;
+    if (argc >= 2) {
+        napi_valuetype vt;
+        napi_typeof(env, args[1], &vt);
+        if (vt == napi_number) napi_get_value_double(env, args[1], &frequency);
+    }
+
+    bool is_ft4 = false;
+    if (argc >= 3) {
+        char proto_str[8] = {0};
+        size_t n;
+        napi_get_value_string_utf8(env, args[2], proto_str, sizeof(proto_str), &n);
+        if (strcmp(proto_str, "FT4") == 0) is_ft4 = true;
+    }
+
+    /* Pack the text into a 77-bit message (NULL hash_if, matching ft8js). */
+    ftx_message_t msg;
+    ftx_message_init(&msg);
+    if (ftx_message_encode(&msg, NULL, text) != FTX_MESSAGE_RC_OK) {
+        napi_value null_val;
+        napi_get_null(env, &null_val);
+        return null_val;
+    }
+
+    int num_tones = is_ft4 ? FT4_NN : FT8_NN;
+    float symbol_period = is_ft4 ? FT4_SYMBOL_PERIOD : FT8_SYMBOL_PERIOD;
+    float symbol_bt = is_ft4 ? 1.0f : 2.0f;
+
+    uint8_t tones[FT4_NN > FT8_NN ? FT4_NN : FT8_NN];
+    if (is_ft4) ft4_encode(msg.payload, tones);
+    else        ft8_encode(msg.payload, tones);
+
+    int sample_rate = 12000;
+    int n_spsym = (int)(0.5f + sample_rate * symbol_period);
+    int n_wave = num_tones * n_spsym;
+
+    napi_value arraybuffer;
+    void* ab_data;
+    napi_create_arraybuffer(env, (size_t)n_wave * sizeof(float), &ab_data, &arraybuffer);
+
+    if (synth_gfsk(tones, num_tones, (float)frequency, symbol_bt, symbol_period, sample_rate, (float*)ab_data) != 0) {
+        napi_value null_val;
+        napi_get_null(env, &null_val);
+        return null_val;
+    }
+
+    napi_value typedarray;
+    napi_create_typedarray(env, napi_float32_array, (size_t)n_wave, arraybuffer, 0, &typedarray);
+    return typedarray;
 }
 
 /* N-API decode function */
@@ -306,11 +442,19 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
         napi_value v_ap;
         napi_get_boolean(env, is_ap, &v_ap);
 
+        /* Message type (i3/n3) lets the QSO state machine recognize contest
+         * exchanges (ARRL Field Day = i3:0 n3:3/4) without re-parsing the text. */
+        napi_value v_i3, v_n3;
+        napi_create_int32(env, (int32_t)ftx_message_get_i3(&message), &v_i3);
+        napi_create_int32(env, (int32_t)ftx_message_get_n3(&message), &v_n3);
+
         napi_set_named_property(env, obj, "db", v_db);
         napi_set_named_property(env, obj, "dt", v_dt);
         napi_set_named_property(env, obj, "df", v_df);
         napi_set_named_property(env, obj, "text", v_text);
         napi_set_named_property(env, obj, "ap", v_ap);
+        napi_set_named_property(env, obj, "i3", v_i3);
+        napi_set_named_property(env, obj, "n3", v_n3);
 
         napi_set_element(env, result_array, result_count, obj);
         result_count++;
@@ -328,6 +472,10 @@ static napi_value Init(napi_env env, napi_value exports) {
     napi_value fn;
     napi_create_function(env, "decode", NAPI_AUTO_LENGTH, Decode, NULL, &fn);
     napi_set_named_property(env, exports, "decode", fn);
+
+    napi_value fn_encode;
+    napi_create_function(env, "encode", NAPI_AUTO_LENGTH, Encode, NULL, &fn_encode);
+    napi_set_named_property(env, exports, "encode", fn_encode);
 
     return exports;
 }

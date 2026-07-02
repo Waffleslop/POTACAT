@@ -209,12 +209,11 @@ section('REPLY mode — no-advance paths');
 
 section('REPLY mode — "they picked someone else" → keep calling (WSJT-X parity)');
 {
-  // WSJT-X parity (mainwindow.cpp auto_sequence): a busy station is NOT
-  // a reason to stop — keep calling them (tail-end). The one exception
-  // is WSJT-X's "auto stop to avoid accidental QRM": still in the
-  // calling phase AND their reply to the other op is within
-  // QRM_GUARD_HZ of OUR TX offset → halt. The v1.5.22 'waiting' hold
-  // phase was removed 2026-06-12 (Casey: WSJT-X behavior wanted).
+  // WSJT-X parity: a busy station is NOT a reason to stop — keep calling
+  // them (tail-end) regardless of where their reply to the other op lands.
+  // WSJT-X has no frequency-proximity auto-halt. The v1.5.22 'waiting' hold
+  // was removed 2026-06-12, and the 50 Hz "QRM guard" auto-halt (e4259ce,
+  // mis-attributed to WSJT-X) was removed 2026-06-29 (Casey: WSJT-X wanted).
   const baseQ = () => ({
     mode: 'reply',
     phase: 'reply',
@@ -246,28 +245,20 @@ section('REPLY mode — "they picked someone else" → keep calling (WSJT-X pari
     assertEq(out.action, 'abort', 'unheard busy cycles hit the per-QSO ceiling → abort');
   }
 
-  // QRM guard: their reply to the other op lands ON our TX offset → halt
+  // Their reply to the other op lands ON our exact TX offset → STILL keep
+  // calling (this is the HI4WWA/KK4RXE case from K3SBP's 2026-06-29 report;
+  // the old QRM guard wrongly aborted here).
   {
     const eng = makeEngine();
     eng._txEnabled = true;
     eng._txFreq = 1500;
-    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 1520 })], eng);
-    assertEq(r.q.phase, 'done', 'busy within QRM_GUARD_HZ of our TX offset → halted');
-    assert(typeof r.q.error === 'string' && r.q.error.indexOf('W1ABC') >= 0, 'error names the station');
-    assertEq(eng._txEnabled, false, 'TX disabled by the QRM guard');
+    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 1500 })], eng);
+    assertEq(r.q.phase, 'reply', 'busy on our exact TX offset → keep calling (no halt)');
+    assertEq(eng._txEnabled, true, 'TX stays enabled — no QRM auto-halt');
+    assertEq(r.q.error, undefined, 'no abort error set');
   }
 
-  // Exactly at the guard edge counts as QRM (<=)
-  {
-    const eng = makeEngine();
-    eng._txEnabled = true;
-    eng._txFreq = 1500;
-    const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 1500 + sm.QRM_GUARD_HZ })], eng);
-    assertEq(r.q.phase, 'done', 'busy at exactly QRM_GUARD_HZ → halted');
-  }
-
-  // Mid-QSO (past the calling phase) the QRM guard does NOT apply —
-  // WSJT-X only auto-stops during REPLYING. Keep repeating our message.
+  // Mid-QSO, a busy decode on our freq is likewise never a reason to stop.
   {
     const q = baseQ();
     q.phase = 'r+report';
@@ -276,7 +267,7 @@ section('REPLY mode — "they picked someone else" → keep calling (WSJT-X pari
     eng._txEnabled = true;
     eng._txFreq = 1500;
     const r = drive(q, [decode('N4XYZ W1ABC RR73', { df: 1500 })], eng);
-    assertEq(r.q.phase, 'r+report', 'mid-QSO busy decode on our freq → no QRM halt, keep repeating');
+    assertEq(r.q.phase, 'r+report', 'mid-QSO busy decode on our freq → keep repeating');
     assertEq(eng._txEnabled, true, 'TX stays enabled mid-QSO');
   }
 
@@ -749,6 +740,114 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
   function setTxMessage(msg) {
     _txMessage = msg;
     return _preEncode();
+  }
+
+  // ============================================================
+  // Group: ARRL FIELD DAY exchange (class + section, no dB report)
+  // Sequence (CQ side K3SBP, S&P side W1ABC):
+  //   CQ FD K3SBP FN20 / K3SBP W1ABC 6A WI / W1ABC K3SBP R 2A EMA / K3SBP W1ABC RR73
+  // ============================================================
+  section('FIELD DAY — CQ side');
+  {
+    const baseQ = () => ({
+      mode: 'cq', phase: 'cq', call: null, myCall: 'K3SBP', myGrid: 'FN20',
+      fd: true, myExch: '2A EMA', txMsg: 'CQ FD K3SBP FN20', txRetries: 0,
+    });
+
+    // Answerer's exchange → we send R+exchange, capture their class/section, log
+    {
+      const eng = makeEngine();
+      const r = drive(baseQ(), [decode('K3SBP W1ABC 6A WI', { df: 1490 })], eng);
+      assertEq(r.q.phase, 'cq-rr73', 'FD CQ: exchange received → cq-rr73');
+      assertEq(r.q.call, 'W1ABC', 'FD CQ: captured answerer call');
+      assertEq(r.q.theirClass, '6A', 'FD CQ: captured their class');
+      assertEq(r.q.theirSection, 'WI', 'FD CQ: captured their section');
+      assertEq(r.q.theirExch, '6A WI', 'FD CQ: captured their exchange');
+      assertEq(r.lastTx, 'W1ABC K3SBP R 2A EMA', 'FD CQ: TX our R+exchange');
+      assertEq(r.doneCount, 1, 'FD CQ: logs when both exchanges known');
+      assertEq(eng._lastRxFreq, 1490, 'FD CQ: RX freq locked to answerer');
+    }
+
+    // 2-digit transmitter count + multi-char section
+    {
+      const r = drive(baseQ(), [decode('K3SBP N0ABC 16C NNJ')], makeEngine());
+      assertEq(r.q.theirExch, '16C NNJ', 'FD CQ: 2-digit count + 3-char section');
+      assertEq(r.lastTx, 'N0ABC K3SBP R 2A EMA', 'FD CQ: TX R+exchange (2-digit case)');
+    }
+
+    // cq-rr73 courtesy: wait one cycle, then done
+    {
+      const eng = makeEngine();
+      const q = baseQ();
+      q.phase = 'cq-rr73';
+      const r1 = drive(q, [], eng);
+      assertEq(r1.q.phase, 'cq-rr73', 'FD CQ: cq-rr73 first cycle waits');
+      const r2 = drive(q, [], eng);
+      assertEq(r2.q.phase, 'done', 'FD CQ: cq-rr73 second cycle → done');
+      assertEq(eng._txEnabled, false, 'FD CQ: TX disabled on done');
+      assertEq(eng._lastTxMsg, '', 'FD CQ: TX message cleared on done');
+    }
+
+    // Negatives: a standard grid reply and someone else's CQ must not advance
+    {
+      const r = drive(baseQ(), [decode('K3SBP W1ABC EN37')], makeEngine());
+      assertEq(r.q.phase, 'cq', 'FD CQ: standard grid reply does not advance FD QSO');
+      const r2 = drive(baseQ(), [decode('CQ FD W1ABC FN42')], makeEngine());
+      assertEq(r2.q.phase, 'cq', "FD CQ: another station's CQ FD does not advance");
+    }
+  }
+
+  section('FIELD DAY — S&P side');
+  {
+    const baseQ = () => ({
+      mode: 'reply', phase: 'reply', call: 'W1ABC', myCall: 'K3SBP', myGrid: 'FN20',
+      fd: true, myExch: '2A EMA', txMsg: 'W1ABC K3SBP 2A EMA', txRetries: 0,
+    });
+
+    // Their R+exchange → we send RR73, capture their class/section, log
+    {
+      const r = drive(baseQ(), [decode('K3SBP W1ABC R 6A WI')], makeEngine());
+      assertEq(r.q.phase, '73', 'FD S&P: R+exchange received → 73');
+      assertEq(r.q.theirClass, '6A', 'FD S&P: captured their class');
+      assertEq(r.q.theirSection, 'WI', 'FD S&P: captured their section');
+      assertEq(r.lastTx, 'W1ABC K3SBP RR73', 'FD S&P: TX RR73');
+      assertEq(r.doneCount, 1, 'FD S&P: logs on RR73');
+    }
+
+    // Late RR73 (we missed their R+exchange) still closes the QSO with a 73
+    {
+      const r = drive(baseQ(), [decode('K3SBP W1ABC RR73')], makeEngine());
+      assertEq(r.q.phase, '73', 'FD S&P: late RR73 → 73');
+      assertEq(r.lastTx, 'W1ABC K3SBP 73', 'FD S&P: TX courtesy 73 on late RR73');
+    }
+
+    // 73 courtesy: wait one cycle, then done
+    {
+      const eng = makeEngine();
+      const q = baseQ();
+      q.phase = '73';
+      drive(q, [], eng);
+      assertEq(q.phase, '73', 'FD S&P: 73 first cycle waits');
+      drive(q, [], eng);
+      assertEq(q.phase, 'done', 'FD S&P: 73 second cycle → done');
+      assertEq(eng._lastTxMsg, '', 'FD S&P: TX message cleared on done');
+    }
+
+    // They work another op — on our TX offset or anywhere → keep calling
+    // (WSJT-X parity; no QRM auto-halt, matching the standard reply path).
+    {
+      const eng = makeEngine();
+      eng._txFreq = 1500;
+      const r = drive(baseQ(), [decode('N9OTH W1ABC 3A IL', { df: 1500 })], eng);
+      assertEq(r.q.phase, 'reply', 'FD S&P: busy on our offset → keep calling (no halt)');
+      assertEq(r.q.error, undefined, 'FD S&P: no abort error');
+    }
+    {
+      const eng = makeEngine();
+      eng._txFreq = 1500;
+      const r = drive(baseQ(), [decode('N9OTH W1ABC 3A IL', { df: 2200 })], eng);
+      assertEq(r.q.phase, 'reply', 'FD S&P: busy far from TX keeps calling');
+    }
   }
 
   // Async because the engine's _preEncode returns a promise that we

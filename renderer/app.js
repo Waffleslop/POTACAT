@@ -2741,9 +2741,10 @@ bandButtonsEl.addEventListener('click', (e) => {
   if (freq) {
     const curMode = (radioMode || 'USB').toUpperCase();
     let mode = curMode;
-    // Flip sideband for SSB: LSB below 10 MHz, USB at/above 10 MHz
+    // Flip sideband for SSB: LSB below 10 MHz, USB at/above 10 MHz. 60m is the
+    // exception — USB by convention/regulation despite being below 10 MHz.
     if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB') {
-      const lsbBands = new Set(['160m', '80m', '60m', '40m']);
+      const lsbBands = new Set(['160m', '80m', '40m']);
       mode = lsbBands.has(band) ? 'LSB' : 'USB';
     }
     window.api.tune(String(freq), mode);
@@ -15163,10 +15164,33 @@ function updateEventBanner() {
 let currentBoardEventId = null;
 
 function renderEventBoard(event) {
+  renderEventOverlayTabs(event);
   const board = event.board || (event.tracking && event.tracking.type) || 'regions';
   if (board === 'regions') renderRegionsBoard(event);
   else if (board === 'checklist') renderChecklistBoard(event);
   else if (board === 'counter') renderCounterBoard(event);
+}
+
+// When more than one event is being tracked (e.g. ARRL 250 and 13 Colonies both
+// running in July), the single progress overlay would otherwise only ever show
+// whichever event the banner picked. Render a small tab per opted-in event so
+// every board is reachable from one place.
+function renderEventOverlayTabs(current) {
+  const tabs = document.getElementById('event-overlay-tabs');
+  if (!tabs) return;
+  const tracked = activeEvents.filter(e => e.optedIn);
+  if (tracked.length < 2) { tabs.classList.add('hidden'); tabs.innerHTML = ''; return; }
+  tabs.classList.remove('hidden');
+  tabs.innerHTML = '';
+  for (const ev of tracked) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'event-overlay-tab' + (ev.id === current.id ? ' active' : '');
+    btn.textContent = ev.badge ? `${ev.badge} ${ev.name}` : ev.name;
+    if (ev.id === current.id && ev.badgeColor) btn.style.borderColor = ev.badgeColor;
+    btn.addEventListener('click', () => openEventBoard(ev.id));
+    tabs.appendChild(btn);
+  }
 }
 
 function renderRegionsBoard(event) {
@@ -15248,11 +15272,25 @@ function renderChecklistBoard(event) {
   countEl.textContent = `${worked} / ${total}`;
 
   content.innerHTML = '';
+
+  // Hint: rows are clickable to mark stations worked when you logged them
+  // elsewhere (paper, another logger). Auto-detected QSOs from your POTACAT log
+  // show a lock and can't be un-ticked here.
+  const hint = document.createElement('div');
+  hint.style.cssText = 'font-size:10px;color:var(--text-tertiary);padding:2px 4px 6px;';
+  hint.textContent = 'Click a station to mark it worked (for QSOs logged outside POTACAT).';
+  content.appendChild(hint);
+
   for (const item of items) {
+    const p = progress[item.id];
+    const isWorked = !!p;
+    const isManual = isWorked && p.manual === true;
+    const isLogged = isWorked && !isManual;
+
     const row = document.createElement('div');
-    row.className = 'event-checklist-item' + (progress[item.id] ? ' worked' : '');
+    row.className = 'event-checklist-item' + (isWorked ? ' worked' : '');
     const marker = document.createElement('span');
-    marker.textContent = progress[item.id] ? '\u2713' : '\u25CB';
+    marker.textContent = isWorked ? '\u2713' : '\u25CB';
     marker.style.cssText = 'font-size:14px;width:16px;text-align:center;flex-shrink:0;';
     const callEl = document.createElement('span');
     callEl.style.cssText = 'font-weight:600;min-width:60px;';
@@ -15262,12 +15300,29 @@ function renderChecklistBoard(event) {
     nameEl.textContent = item.name;
     row.append(marker, callEl, nameEl);
 
-    if (progress[item.id]) {
-      const p = progress[item.id];
-      const info = document.createElement('span');
-      info.style.cssText = 'margin-left:auto;font-size:10px;color:var(--text-tertiary);';
-      info.textContent = [p.band, p.mode, p.date].filter(Boolean).join(' ');
-      row.appendChild(info);
+    const info = document.createElement('span');
+    info.style.cssText = 'margin-left:auto;font-size:10px;color:var(--text-tertiary);';
+    if (isLogged) {
+      info.textContent = [p.band, p.mode, p.date].filter(Boolean).join(' ') + ' \uD83D\uDD12';
+      info.title = 'Worked \u2014 auto-detected from your POTACAT log';
+    } else if (isManual) {
+      info.textContent = 'marked \u2715';
+      info.title = 'Manually marked \u2014 click to un-mark';
+    }
+    row.appendChild(info);
+
+    // Logged (real-QSO) rows are authoritative and not togglable \u2014 un-ticking
+    // here would just reappear on the next log re-scan. Only unworked / manual
+    // rows toggle the manual check-off.
+    if (isLogged) {
+      row.style.cursor = 'default';
+      row.title = 'Worked \u2014 auto-detected from your POTACAT log';
+    } else {
+      row.style.cursor = 'pointer';
+      row.title = isManual ? 'Click to un-mark' : 'Click to mark worked';
+      row.addEventListener('click', async () => {
+        await window.api.setEventItem({ eventId: event.id, itemId: item.id, worked: !isManual });
+      });
     }
 
     content.appendChild(row);
@@ -15458,7 +15513,14 @@ document.getElementById('event-dismiss').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('event-progress-btn').addEventListener('click', toggleEventOverlay);
+document.getElementById('event-progress-btn').addEventListener('click', () => {
+  // Focus the board on the event the banner is actually showing — not the
+  // stale currentBoardEventId / first-opted-in event toggleEventOverlay() would
+  // default to (which opened ARRL 250 while the banner showed 13 Colonies).
+  const ev = findBannerEvent();
+  if (ev) openEventBoard(ev.id);
+  else toggleEventOverlay();
+});
 
 document.getElementById('event-overlay-close').addEventListener('click', () => {
   toggleEventOverlay(false);

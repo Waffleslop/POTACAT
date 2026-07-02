@@ -1219,6 +1219,28 @@ button:hover {
   min-width: 280px;
   max-width: 340px;
   box-shadow: 0 4px 16px var(--shadow-heavy);
+  /* Never grow past the content area (<main>, the offset parent) — on a short
+     window the board would otherwise run off the top and get clipped. Cap to the
+     content height (less the 12px bottom anchor + a 12px top gap) and let the
+     board list scroll. <main> shrinks when the event-banner shows, so the cap
+     tracks the actual visible table area. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 24px);
+}
+
+/* Header, tabs and summary stay pinned; only the board list scrolls. */
+#event-progress-overlay .event-overlay-header,
+#event-progress-overlay #event-overlay-tabs,
+#event-progress-overlay #event-overlay-summary,
+#event-progress-overlay .parks-stats-divider {
+  flex: 0 0 auto;
+}
+
+#event-board-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .event-overlay-header {
@@ -1310,6 +1332,31 @@ button:hover {
 
 .event-checklist-item.worked {
   color: var(--accent-green);
+}
+
+/* Switcher tabs — one per tracked event, so both boards are reachable when
+   more than one event runs at once (ARRL 250 + 13 Colonies in July). */
+.event-overlay-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 12px 2px;
+}
+
+.event-overlay-tab {
+  font-size: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.event-overlay-tab.active {
+  border-color: var(--accent-red);
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 /* Event counter board (contests) */
@@ -8924,6 +8971,8 @@ body.activator-rbn-on #rbn-view {
 main.banner-logger-active #parks-stats-overlay,
 main.banner-logger-active #event-progress-overlay {
   bottom: 48px;
+  /* Taller bottom anchor → leave more headroom so the top isn't clipped. */
+  max-height: calc(100% - 60px);
 }
 .bl-field {
   font-size: calc(12px * var(--bl-scale, 1));

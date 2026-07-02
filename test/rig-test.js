@@ -68,6 +68,12 @@ test('ssbSideband at 10MHz+ = USB', () => {
   assert.strictEqual(ssbSideband(14074000), 'USB');
 });
 
+test('ssbSideband 60m = USB (below-10MHz exception)', () => {
+  assert.strictEqual(ssbSideband(5357000), 'USB');  // 60m US FT8 channel
+  assert.strictEqual(ssbSideband(5403500), 'USB');  // top US 60m channel
+  assert.strictEqual(ssbSideband(3573000), 'LSB');  // 80m stays LSB (no over-reach)
+});
+
 // =========================================================================
 console.log('\n=== KenwoodCodec (Yaesu FT-891) ===');
 

@@ -138,11 +138,19 @@ ftx_message_rc_t ftx_message_encode_std(ftx_message_t* msg, ftx_callsign_hash_in
 /// Pack Type 4 (One nonstandard call and one hashed call) message
 ftx_message_rc_t ftx_message_encode_nonstd(ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, const char* call_to, const char* call_de, const char* extra);
 
+/// Pack Type 0.3/0.4 (ARRL Field Day exchange) message.
+/// @param[in] call_to First callsign (the station being answered)
+/// @param[in] call_de Second callsign (the sending station)
+/// @param[in] exch    Exchange text following the two calls, e.g. "6A WI" or "R 2B EMA"
+ftx_message_rc_t ftx_message_encode_arrl_fd(ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, const char* call_to, const char* call_de, const char* exch);
+
 /// Pack plain text, up to 13 characters
 ftx_message_rc_t ftx_message_encode_free(ftx_message_t* msg, const char* text);
 ftx_message_rc_t ftx_message_encode_telemetry(ftx_message_t* msg, const uint8_t* telemetry);
 
 ftx_message_rc_t ftx_message_decode(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message, ftx_message_offsets_t* offsets);
+/// Unpack a Type 0.3/0.4 ARRL Field Day message into a single text string (call1 call2 [R ]<ntx><class> section).
+ftx_message_rc_t ftx_message_decode_arrl_fd(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message);
 ftx_message_rc_t ftx_message_decode_std(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* call_to, char* call_de, char* extra, ftx_field_t field_types[FTX_MAX_MESSAGE_FIELDS]);
 ftx_message_rc_t ftx_message_decode_nonstd(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* call_to, char* call_de, char* extra, ftx_field_t field_types[FTX_MAX_MESSAGE_FIELDS]);
 void ftx_message_decode_free(const ftx_message_t* msg, char* text);

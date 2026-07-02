@@ -380,6 +380,10 @@
       <option value="sota">Auto: SOTA</option>
       <option value="all">Auto: All CQ</option>
     </select>
+    <!-- ARRL Field Day — class+section exchange in place of grid/report.
+         When on, CQ becomes "CQ FD …" and QSOs run the FD sequence. -->
+    <button id="jp-fd-toggle" class="jtcat-filter-btn" title="ARRL Field Day mode: send CQ FD and exchange class + ARRL/RAC section (e.g. 2A EMA) instead of grid/report">FD</button>
+    <input id="jp-fd-exch" type="text" maxlength="7" placeholder="2A EMA" title="Your Field Day exchange: transmitters+class then ARRL/RAC section (e.g. 2A EMA)" style="display:none;width:58px;font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
     <!-- ULTRACAT — Full Auto CQ (hidden until the π unlock) -->
     <button id="jp-full-auto-cq" class="jp-btn jp-ultracat ultracat-gated hidden" title="ULTRACAT: call CQ continuously, work answerers, then resume CQ. Attended operation only.">Auto CQ</button>
     <label class="ultracat-gated hidden" style="font-size:10px;color:var(--text-tertiary);display:flex;align-items:center;gap:3px;" title="Stop retrying a QSO after this many cycles with no reply, then go back to calling CQ">

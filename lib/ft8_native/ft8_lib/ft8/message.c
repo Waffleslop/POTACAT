@@ -18,6 +18,21 @@ static char* stpcpy(char* dest, const char* src) {
 #define NTOKENS  ((uint32_t)2063592ul)
 #define MAXGRID4 ((uint16_t)32400ul)
 
+// ARRL/RAC sections for Field Day (types 0.3/0.4), 1-indexed via isec.
+// Order is load-bearing — it must match WSJT-X packjt77.f90 csec() exactly.
+#define FTX_ARRL_FD_NSEC 84
+static const char* const arrl_fd_sections[FTX_ARRL_FD_NSEC] = {
+    "AB",  "AK",  "AL",  "AR",  "AZ",  "BC",  "CO",  "CT",  "DE",  "EB",
+    "EMA", "ENY", "EPA", "EWA", "GA",  "GTA", "IA",  "ID",  "IL",  "IN",
+    "KS",  "KY",  "LA",  "LAX", "MAR", "MB",  "MDC", "ME",  "MI",  "MN",
+    "MO",  "MS",  "MT",  "NC",  "ND",  "NE",  "NFL", "NH",  "NL",  "NLI",
+    "NM",  "NNJ", "NNY", "NT",  "NTX", "NV",  "OH",  "OK",  "ONE", "ONN",
+    "ONS", "OR",  "ORG", "PAC", "PR",  "QC",  "RI",  "SB",  "SC",  "SCV",
+    "SD",  "SDG", "SF",  "SFL", "SJV", "SK",  "SNJ", "STX", "SV",  "TN",
+    "UT",  "VA",  "VI",  "VT",  "WCF", "WI",  "WMA", "WNY", "WPA", "WTX",
+    "WV",  "WWA", "WY",  "DX"
+};
+
 ////////////////////////////////////////////////////// Static function prototypes //////////////////////////////////////////////////////////////
 
 static void add_brackets(char* result, const char* original, int length);
@@ -155,6 +170,8 @@ ftx_message_rc_t ftx_message_encode(ftx_message_t* msg, ftx_callsign_hash_interf
     }
     // now we are fairly sure the next word should be the "de" callsign
     parse_position = copy_token(call_de, sizeof(call_de), parse_position);
+    // everything after the two calls — used for the ARRL Field Day exchange path
+    const char* fd_exch = parse_position;
     // and the word after that may be a grid or signal report
     parse_position = copy_token(extra, sizeof(extra), parse_position);
 
@@ -187,6 +204,14 @@ ftx_message_rc_t ftx_message_encode(ftx_message_t* msg, ftx_callsign_hash_interf
         if (rc == FTX_MESSAGE_RC_OK)
             return rc;
         LOG(LOG_DEBUG, "   ftx_message_encode_nonstd failed: %d\n", rc);
+    }
+    else if (!is_cq) {
+        // 4+ tokens with two leading callsigns — try the ARRL Field Day exchange
+        // (e.g. "K1ABC W9XYZ 6A WI", "W9XYZ K1ABC R 2B EMA") before free text.
+        rc = ftx_message_encode_arrl_fd(msg, hash_if, call_to, call_de, fd_exch);
+        if (rc == FTX_MESSAGE_RC_OK)
+            return rc;
+        LOG(LOG_DEBUG, "   ftx_message_encode_arrl_fd failed: %d\n", rc);
     }
     rc = ftx_message_encode_free(msg, message_text);
     if (rc == FTX_MESSAGE_RC_OK)
@@ -394,6 +419,98 @@ ftx_message_rc_t ftx_message_encode_telemetry(ftx_message_t* msg, const uint8_t*
     return FTX_MESSAGE_RC_OK;
 }
 
+ftx_message_rc_t ftx_message_encode_arrl_fd(ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, const char* call_to, const char* call_de, const char* exch)
+{
+    // exch is the text after the two callsigns: "[R ]<ntx><class> <section>"
+    // e.g. "6A WI" (ir=0) or "R 2B EMA" (ir=1). Layout (packjt77.f90 pack77_03):
+    //   c28 c28 ir(1) intx(4) nclass(3) isec(7) n3(3) i3(3)
+    char tok[16];
+    const char* p = trim_front(exch, ' ');
+
+    uint8_t ir = 0;
+    p = copy_token(tok, sizeof(tok), p);
+    if (equals(tok, "R"))
+    {
+        ir = 1;
+        p = copy_token(tok, sizeof(tok), p); // now the <ntx><class> token
+    }
+
+    // Parse "<ntx><class>" — 1..2 leading digits then a class letter A..F
+    int len = (int)strlen(tok);
+    if (len < 2 || len > 3)
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+    char cls = tok[len - 1];
+    if (cls < 'A' || cls > 'F')
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+    int ntx = 0;
+    for (int i = 0; i < len - 1; ++i)
+    {
+        if (!is_digit(tok[i]))
+            return FTX_MESSAGE_RC_ERROR_TYPE;
+        ntx = ntx * 10 + (tok[i] - '0');
+    }
+    if (ntx < 1 || ntx > 32)
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+    uint8_t nclass = (uint8_t)(cls - 'A');
+
+    // Section abbreviation (1-indexed isec)
+    char sectok[8];
+    p = copy_token(sectok, sizeof(sectok), p);
+    if (sectok[0] == '\0')
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+    int isec = -1;
+    for (int i = 0; i < FTX_ARRL_FD_NSEC; ++i)
+    {
+        if (equals(sectok, arrl_fd_sections[i]))
+        {
+            isec = i + 1;
+            break;
+        }
+    }
+    if (isec < 0)
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+
+    // Reject trailing junk (more tokens than a valid FD exchange)
+    char extra_tok[8];
+    copy_token(extra_tok, sizeof(extra_tok), p);
+    if (extra_tok[0] != '\0')
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+
+    uint8_t ipa, ipb;
+    int32_t n28a = pack28(call_to, hash_if, &ipa);
+    int32_t n28b = pack28(call_de, hash_if, &ipb);
+    if (n28a < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+    if (n28b < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+
+    uint8_t n3 = 3;          // type 0.3 covers 1..16 transmitters
+    uint8_t intx = (uint8_t)(ntx - 1);
+    if (ntx >= 17)
+    {
+        n3 = 4;             // type 0.4 covers 17..32 transmitters
+        intx = (uint8_t)(ntx - 17);
+    }
+    uint8_t i3 = 0;
+
+    uint32_t a = (uint32_t)n28a & 0x0FFFFFFFu;
+    uint32_t b = (uint32_t)n28b & 0x0FFFFFFFu;
+
+    // Pack 28 + 28 + 1 + 4 + 3 + 7 + 3 + 3 == 77 bits, MSB-first
+    msg->payload[0] = (uint8_t)(a >> 20);
+    msg->payload[1] = (uint8_t)(a >> 12);
+    msg->payload[2] = (uint8_t)(a >> 4);
+    msg->payload[3] = (uint8_t)((a << 4) | (b >> 24));
+    msg->payload[4] = (uint8_t)(b >> 16);
+    msg->payload[5] = (uint8_t)(b >> 8);
+    msg->payload[6] = (uint8_t)(b);
+    msg->payload[7] = (uint8_t)((ir << 7) | ((intx & 0x0Fu) << 3) | (nclass & 0x07u));
+    msg->payload[8] = (uint8_t)((((uint8_t)isec & 0x7Fu) << 1) | ((n3 >> 2) & 0x01u));
+    msg->payload[9] = (uint8_t)(((n3 & 0x03u) << 6) | (i3 << 3));
+
+    return FTX_MESSAGE_RC_OK;
+}
+
 ftx_message_rc_t ftx_message_decode(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message, ftx_message_offsets_t* offsets)
 {
     ftx_message_rc_t rc;
@@ -430,6 +547,12 @@ ftx_message_rc_t ftx_message_decode(const ftx_message_t* msg, ftx_callsign_hash_
         field2 = NULL;
         field3 = NULL;
         rc = FTX_MESSAGE_RC_OK;
+        break;
+    case FTX_MESSAGE_TYPE_ARRL_FD:
+        // Build the whole "call1 call2 [R ]<ntx><class> section" string into field1.
+        rc = ftx_message_decode_arrl_fd(msg, hash_if, field1);
+        field2 = NULL;
+        field3 = NULL;
         break;
     default:
         // not handled yet
@@ -581,6 +704,56 @@ ftx_message_rc_t ftx_message_decode_nonstd(const ftx_message_t* msg, ftx_callsig
     strcpy(call_de, call_2);
     field_types[1] = FTX_FIELD_CALL;
     LOG(LOG_INFO, "Decoded non-standard (type %d) message [%s] [%s] [%s]\n", i3, call_to, call_de, extra);
+    return FTX_MESSAGE_RC_OK;
+}
+
+ftx_message_rc_t ftx_message_decode_arrl_fd(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message)
+{
+    const uint8_t* p = msg->payload;
+
+    uint32_t n28a = ((uint32_t)p[0] << 20) | ((uint32_t)p[1] << 12) | ((uint32_t)p[2] << 4) | ((uint32_t)p[3] >> 4);
+    uint32_t n28b = (((uint32_t)p[3] & 0x0Fu) << 24) | ((uint32_t)p[4] << 16) | ((uint32_t)p[5] << 8) | (uint32_t)p[6];
+    uint8_t ir = (p[7] >> 7) & 0x01u;
+    uint8_t intx = (p[7] >> 3) & 0x0Fu;
+    uint8_t nclass = p[7] & 0x07u;
+    uint8_t isec = (p[8] >> 1) & 0x7Fu;
+    uint8_t n3 = ftx_message_get_n3(msg);
+
+    if (isec < 1 || isec > FTX_ARRL_FD_NSEC)
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+
+    char call_to[14], call_de[14];
+    ftx_field_t field_type;
+    // FD callsigns are plain 28-bit fields (no /R /P suffix bit), so ip=0, i3=0.
+    if (unpack28(n28a, 0, 0, hash_if, call_to, &field_type) < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+    if (unpack28(n28b, 0, 0, hash_if, call_de, &field_type) < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+
+    int ntx = intx + 1;
+    if (n3 == 4)
+        ntx += 16;
+    char cls = (char)('A' + nclass);
+
+    // "call1 call2 [R ]<ntx><class> section"
+    char* d = message;
+    d = append_string(d, call_to);
+    d = append_string(d, " ");
+    d = append_string(d, call_de);
+    d = append_string(d, " ");
+    if (ir)
+        d = append_string(d, "R ");
+    char ntxbuf[4];
+    int k = 0;
+    if (ntx >= 10)
+        ntxbuf[k++] = (char)('0' + ntx / 10);
+    ntxbuf[k++] = (char)('0' + ntx % 10);
+    ntxbuf[k++] = cls;
+    ntxbuf[k] = '\0';
+    d = append_string(d, ntxbuf);
+    d = append_string(d, " ");
+    d = append_string(d, arrl_fd_sections[isec - 1]);
+
     return FTX_MESSAGE_RC_OK;
 }
 
