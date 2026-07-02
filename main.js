@@ -258,6 +258,7 @@ const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
 const { qsoDayInScheduleEntry } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
+const { stripSigTag, appendTag } = require('./lib/log-comment');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -4373,32 +4374,37 @@ async function saveQsoRecord(qsoData, opts) {
     else if (settings.defaultPower) qsoData.txPower = String(settings.defaultPower);
   }
 
-  // Enrich COMMENT with park name + location for POTA/WWFF/LLOTA QSOs
+  // COMMENT tag handling. saveQsoRecord is the single authority: strip the
+  // short/full [SIG REF …] tag that the desktop renderer or phone-log path added
+  // (precise to this QSO's sig+sigInfo, so a user's own bracketed note stays),
+  // then re-append the canonical tag ONLY when auto-tagging is enabled. With
+  // `logCommentTags` off, COMMENT is exactly what the operator typed — SIG /
+  // SIG_INFO / POTA_REF are still populated separately (KE4EST). Centralizing
+  // here also fixes the phone-path double-tag the old trailing-only strip left.
+  const logCommentTags = settings.logCommentTags !== false; // default ON
   const parkRef = qsoData.potaRef || qsoData.wwffRef || (qsoData.sig && qsoData.sigInfo ? qsoData.sigInfo : '');
   if (parkRef) {
-    const park = getParkDb(parksMap, parkRef);
-    if (park && park.name) {
-      const parts = [
-        qsoData.sig || 'POTA',
-        parkRef,
-        park.locationDesc || '',
-        park.name || '',
-      ].filter(Boolean);
-      const parkTag = `[${parts.join(' ')}]`;
-      // Strip the auto-appended [SIG REF] tag from the base comment to avoid duplication
-      const userComment = (qsoData.comment || '').replace(/\s*\[.+?\]\s*$/, '').trim();
-      qsoData.comment = userComment ? `${userComment} ${parkTag}` : parkTag;
+    const stripped = stripSigTag(qsoData.comment, qsoData.sig || 'POTA', qsoData.sigInfo || parkRef);
+    let parkTag = '';
+    if (logCommentTags) {
+      const park = getParkDb(parksMap, parkRef);
+      if (park && park.name) {
+        parkTag = `[${[qsoData.sig || 'POTA', parkRef, park.locationDesc || '', park.name || ''].filter(Boolean).join(' ')}]`;
+      } else {
+        // Not in the park DB — keep the short ref tag so the park number survives.
+        parkTag = `[${qsoData.sig || 'POTA'} ${parkRef}]`;
+      }
     }
+    qsoData.comment = appendTag(stripped, parkTag);
   }
 
-  // Enrich COMMENT with CW club membership if the station was spotted via CW Spots
-  if (cwSpots.length > 0 && qsoData.callsign) {
+  // Enrich COMMENT with CW club membership if the station was spotted via CW
+  // Spots — unless auto-tagging is off.
+  if (logCommentTags && cwSpots.length > 0 && qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
     const clubs = [...new Set(cwSpots.filter(s => s.callsign === call && s.cwClub && s.cwClub !== 'CW').map(s => s.cwClub))];
     if (clubs.length > 0) {
-      const clubTag = `[${clubs.join(' ')}]`;
-      const base = (qsoData.comment || '').trim();
-      qsoData.comment = base ? `${base} ${clubTag}` : clubTag;
+      qsoData.comment = appendTag(qsoData.comment, `[${clubs.join(' ')}]`);
     }
   }
 
@@ -8276,6 +8282,7 @@ function updateRemoteSettings() {
     grid: settings.grid || '',
     clusterConnected: anyCluster,
     respotDefault: settings.respotDefault !== false,
+    logCommentTags: settings.logCommentTags !== false,
     respotTemplate: settings.respotTemplate || '{rst} in {QTH} 73s {mycallsign} via POTACAT',
     dxRespotTemplate: settings.dxRespotTemplate || 'Heard in {QTH} 73s {mycallsign} via POTACAT',
     scanDwell: parseInt(settings.scanDwell, 10) || 7,

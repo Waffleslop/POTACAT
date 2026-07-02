@@ -1061,6 +1061,7 @@ const adifImportBtn = document.getElementById('adif-import-btn');
 const adifImportResult = document.getElementById('adif-import-result');
 const setDefaultPower = document.getElementById('set-default-power');
 const setSendToLogbook = document.getElementById('set-send-to-logbook');
+const setLogCommentTags = document.getElementById('set-log-comment-tags');
 const logbookConfig = document.getElementById('logbook-config');
 const setLogbookType = document.getElementById('set-logbook-type');
 const logbookInstructions = document.getElementById('logbook-instructions');
@@ -13559,6 +13560,7 @@ async function openSettingsDialog(tab) {
   if (setWwbotaRespotTemplate) setWwbotaRespotTemplate.value = s.wwbotaRespotTemplate || '';
   if (setDxRespotTemplate) setDxRespotTemplate.value = s.dxRespotTemplate || '';
   renderRespotPresetRows(Array.isArray(s.respotPresets) ? s.respotPresets : []);
+  if (setLogCommentTags) setLogCommentTags.checked = s.logCommentTags !== false; // default ON
   setNotifyPopup.checked = s.notifyPopup !== false;
   setNotifySound.checked = s.notifySound !== false;
   setNotifyTimeout.value = s.notifyTimeout || 10;
@@ -14414,6 +14416,7 @@ settingsSave.addEventListener('click', async () => {
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
   const sendToLogbook = setSendToLogbook.checked;
+  const logCommentTagsEnabled = setLogCommentTags ? setLogCommentTags.checked : true;
   const logbookTypeVal = setLogbookType.value;
   const logbookHostVal = setLogbookHost.value.trim() || '127.0.0.1';
   const logbookPortVal = parseInt(setLogbookPort.value, 10) || 0;
@@ -14545,6 +14548,7 @@ settingsSave.addEventListener('click', async () => {
     enableLogging: loggingEnabled,
     enableBannerLogger: setEnableBannerLogger.checked,
     n1mmRst: n1mmRstEnabled,
+    logCommentTags: logCommentTagsEnabled,
     adifLogPath: adifLogPath,
     defaultPower: defaultPowerVal,
     sendToLogbook: sendToLogbook,
