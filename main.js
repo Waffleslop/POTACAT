@@ -257,6 +257,7 @@ const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
 const { qsoDayInScheduleEntry } = require('./lib/event-progress');
+const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -2782,10 +2783,21 @@ async function connectCat() {
     // (prevents "Resource busy" on macOS when switching rigs)
     await new Promise(r => setTimeout(r, 300));
   }
-  // Optimistic reset of the paddle-availability flag for the new rig —
-  // if the transport later emits 'pin-unsupported' (Linux cdc_acm),
-  // the flag drops to false and the phone stops generating sidetone.
-  _setCwPaddleAvailability(true, 'rig-changed');
+  // Determine paddle-availability proactively for the new rig so auth-ok carries
+  // the right value BEFORE the phone's first key press. A Yaesu/Kenwood-serial
+  // 'txrx' route (or rigctld) dead-keys CW — PTT only, no RF, no sidetone —
+  // unless a dedicated CW Key Port is configured. DTR routes stay optimistic
+  // here; a Linux cdc_acm 'pin-unsupported' still drops the flag lazily.
+  {
+    const _newRigModel = getActiveRigModel();
+    const _pa = cwPaddleAvailability({
+      transportType: settings.catTarget && settings.catTarget.type,
+      paddleKey: _newRigModel && _newRigModel.cw && _newRigModel.cw.paddleKey,
+      protocol: _newRigModel && _newRigModel.protocol,
+      hasKeyPort: !!settings.cwKeyPort,
+    });
+    _setCwPaddleAvailability(_pa.available, _pa.reason || 'rig-changed');
+  }
   killRigctld();
   const target = settings.catTarget;
   if (!target) return;
@@ -9772,6 +9784,7 @@ function connectRemote() {
   // CW keyer output: route IambicKeyer key events to radio
   let _cwPollResumeTimer = null;
   let _cwKeyLoggedRoute = false;
+  let _cwTxrxPttOnlyLogged = false;
   remoteServer.setCwKeyerOutput(({ down }) => {
     // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
@@ -9877,6 +9890,21 @@ function connectRemote() {
         if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwCaps.dtrPins || { dtr: true });
       } else if (paddleMethod === 'ta' && cwCaps.taKey) {
         cat.setCwKeyTa(down);
+      } else if (rigModel?.protocol === 'kenwood' && !(cwKeyPort && cwKeyPort.isOpen)) {
+        // txrx route on a Yaesu/Kenwood serial rig is bare PTT (TX1;/TX0; or
+        // TX;/RX;) — it keys the transmitter with ZERO CW output and no rig
+        // sidetone (G5HOW FTDx10, 2026-06-29). Skip it (mirroring the rigctld
+        // branch) and tell the phone the paddle won't make RF. Icom 'txrx' is a
+        // real CI-V key line, so it's not caught here. A dedicated CW Key Port
+        // (handled below) keys for real, so only skip when none is open.
+        if (!_cwTxrxPttOnlyLogged) {
+          _cwTxrxPttOnlyLogged = true;
+          sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +
+            'Workarounds: (1) type text in the CW widget\'s text box — that uses the rig\'s internal keyer and makes real RF; ' +
+            '(2) connect the rig\'s second (Enhanced) USB COM port, set the rig menu PC KEYING = DTR, and select it as the CW Key Port in Settings → Rig.');
+          _setCwPaddleAvailability(false, 'txrx-ptt-only');
+        }
+        // Skip cat-side keying; fall through to the dedicated CW Key Port block.
       } else {
         cat.setCwKeyTxRx(down);
       }
