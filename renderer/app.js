@@ -14861,11 +14861,19 @@ window.api.onUpdateAvailable((data) => {
 
   const version = data.version;
   const rawHeadline = data.releaseName || data.headline || '';
-  // GitHub release titles are often just "v1.5.7" (no prose headline) —
-  // showing "v1.5.7: v1.5.7" reads as a typo (bjh report). Strip the
-  // headline if it's effectively the version string itself.
-  const versionRe = new RegExp('^v?' + version.replace(/\./g, '\\.') + '\\s*$');
-  const headline = versionRe.test(rawHeadline.trim()) ? '' : rawHeadline;
+  // The banner prepends "v<version>:" itself, but GitHub release titles often
+  // carry the version too — bare "v1.5.7" (bjh report), or a prefix like
+  // "POTACAT 1.9.2 — hotfix…" / "v1.9.4 — Your Comments, Your Way" — which
+  // rendered the version twice ("v1.9.4: v1.9.4 — …", K3SBP on 1.9.4). Strip
+  // any leading [POTACAT ]v?<version> plus its separator, and drop the
+  // headline entirely if nothing but the version remains.
+  const vEsc = version.replace(/\./g, '\\.');
+  // — em dash, – en dash — escaped, not literal, so the pattern
+  // can't be corrupted by file-encoding mishaps.
+  const headline = rawHeadline
+    .trim()
+    .replace(new RegExp('^(?:POTACAT\\s+)?v?' + vEsc + '(?=$|\\s|[\\u2014\\u2013:-])\\s*(?:[\\u2014\\u2013:-]\\s*)?', 'i'), '')
+    .trim();
   message.textContent = headline
     ? `v${version}: ${headline}`
     : `POTACAT v${version} is available!`;
