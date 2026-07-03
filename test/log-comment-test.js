@@ -4,7 +4,7 @@
 'use strict';
 
 const assert = require('assert');
-const { stripSigTag, appendTag } = require('../lib/log-comment');
+const { stripSigTag, appendTag, ensureSigTag } = require('../lib/log-comment');
 
 let passed = 0, failed = 0;
 function check(cond, label) {
@@ -45,6 +45,14 @@ console.log('end-to-end: strip-then-append models saveQsoRecord (ON), strip-only
   const off = appendTag(stripSigTag('[POTA US-1234] note', 'POTA', 'US-1234'), '');
   eq(off, 'note', 'OFF: comment is exactly what the operator typed');
 }
+
+console.log('ensureSigTag keeps the park in comment-only transports (WRL — N3VD):');
+eq(ensureSigTag('TEST TEST TEST', 'POTA', 'US-7413'), 'TEST TEST TEST [POTA US-7413]', 'tags OFF: short tag appended for the WRL packet');
+eq(ensureSigTag('', 'POTA', 'US-7413'), '[POTA US-7413]', 'empty comment → tag only');
+eq(ensureSigTag('note [POTA US-7413 US-TX Name]', 'POTA', 'US-7413'), 'note [POTA US-7413 US-TX Name]', 'tags ON: full tag already there → untouched');
+eq(ensureSigTag('worked him at us-7413', 'POTA', 'US-7413'), 'worked him at us-7413', 'operator already typed the ref (any case) → untouched');
+eq(ensureSigTag('plain ragchew', '', ''), 'plain ragchew', 'no sig/sigInfo → passthrough');
+eq(ensureSigTag(null, 'POTA', 'US-7413'), '[POTA US-7413]', 'null comment → tag only');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'log-comment tests failed');

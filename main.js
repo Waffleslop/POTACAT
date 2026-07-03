@@ -258,7 +258,7 @@ const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
 const { qsoDayInScheduleEntry } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
-const { stripSigTag, appendTag } = require('./lib/log-comment');
+const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -14332,7 +14332,15 @@ function sendWrlUdp(qsoData, host, port) {
     // (N3VD 2026-06-29). Reuse the QSO's stored UUID so a deliberate resend
     // of the same contact is still recognized as the same contact.
     const contactId = String(qsoData.uuid || require('crypto').randomUUID()).replace(/-/g, '');
-    const comment = qsoData.comment || '';
+    // WRL Cat Control drops the ADIF-style sig/sig_info/pota_ref tags below
+    // (confirmed by N3VD's WRL export 2026-07-03 — same drop W7DB saw with the
+    // contest-pair tags), so the comment text is the ONLY channel that reliably
+    // lands a park number in the WRL cloud log. Keep a short [SIG REF] tag in
+    // this packet's comment even when `logCommentTags` is off — the operator's
+    // own log keeps the clean comment; this is transport-local.
+    const comment = ensureSigTag(qsoData.comment,
+      qsoData.sig || (qsoData.potaRef ? 'POTA' : ''),
+      qsoData.sigInfo || qsoData.potaRef || '');
     const grid = qsoData.gridsquare || '';
     const contestName = qsoData.sig || '';
     const contestNr = qsoData.sigInfo || '';
