@@ -23500,6 +23500,13 @@ window.api.onJtcatVita49Audio(function (frame) {
   return true;
 });
 
+// Labels that look like rig audio, for the default-input hint below. Covers
+// the TI/Burr-Brown "USB Audio CODEC" every Icom/Yaesu/Kenwood USB rig and
+// SignaLink present, Flex DAX, virtual-cable loopbacks, and common interface
+// names. Deliberately loose — a miss just asks a harmless question.
+const JTCAT_RIG_AUDIO_LABEL_RE = /codec|dax|icom|ic-7|yaesu|ftdx|kenwood|xiegu|qmx|qdx|digirig|signalink|cable|vb-audio|loopback|virtual|flex|sbitx|trusdx|radio/i;
+const _jtcatDefaultInputHinted = new Set(); // one hint per device label per session
+
 async function startJtcatAudio() {
   // Always stop existing audio first to ensure clean device state
   // (prevents stale stream after ECHOCAT releases the shared device)
@@ -23577,6 +23584,24 @@ async function startJtcatAudio() {
         if (window.api.jtcatLog) window.api.jtcatLog(warn);
         delete audioConstraints.deviceId;
         jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      }
+      // Default-input trap (WC5B 2026-07-03: his webcam mic was on the JTCAT
+      // waterfall — "System Default" resolved to the EMEET cam while the
+      // 7300's USB CODEC sat unused). When we're capturing the system default
+      // (nothing configured, or the configured device failed and we fell
+      // back) and the resolved label doesn't look like rig audio, ask — once
+      // per device per session. A wrong guess is a harmless question; a
+      // right one saves a support thread.
+      const usingDefaultInput = !audioConstraints.deviceId;
+      const inputLabel = (jtcatAudioStream.getAudioTracks()[0] || {}).label || '';
+      if (usingDefaultInput && inputLabel
+          && !JTCAT_RIG_AUDIO_LABEL_RE.test(inputLabel)
+          && !_jtcatDefaultInputHinted.has(inputLabel)) {
+        _jtcatDefaultInputHinted.add(inputLabel);
+        const hint = `[JTCAT] Listening to the system default input: "${inputLabel}" — is that your radio? ` +
+          `If the waterfall shows your own voice instead of band noise, set Audio Input to your rig's USB Audio CODEC / DAX device in Settings.`;
+        console.warn(hint);
+        if (window.api.jtcatLog) window.api.jtcatLog(hint);
       }
     }
 
