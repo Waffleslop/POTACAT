@@ -11789,6 +11789,7 @@ function disconnectRemote() {
 }
 
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
+let _ssbFreqBeforePtt = 0;    // dial freq saved at swap time — restore re-anchors here, never to a mid-TX polled freq
 let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
 
 function handleRemotePtt(state, opts = {}) {
@@ -11830,6 +11831,14 @@ function handleRemotePtt(state, opts = {}) {
     if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
       const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
       _ssbModeBeforePtt = curMode;
+      // Capture the dial BEFORE the swap. During TX in DATA mode a Yaesu with
+      // DATA MODE = PSK reports the subcarrier-shifted TX carrier (~1.5 kHz
+      // below the dial); the poll ingests it into _currentFreqHz mid-TX, and
+      // the restore below used to re-anchor the VFO to THAT — turning a
+      // display artifact into a real, permanent QSY on every PTT cycle
+      // (K4GDJ FTDX101MP: dial walked to 7208.46 and never came back).
+      // Both re-anchors must use this pre-PTT value.
+      _ssbFreqBeforePtt = _currentFreqHz;
       sendCatLog(`[PTT] ${curMode} -> ${dataMode} (SSB-over-DATA: mic disabled)`);
       // Yaesu rigs have a "DATA MODE" menu that controls whether DIGL/DIGU
       // behave as mic-disabled SSB (DATA MODE = Others/STD — carrier freq
@@ -11850,8 +11859,8 @@ function handleRemotePtt(state, opts = {}) {
       // Pass current freq so setModeOnly can re-anchor the VFO after the mode
       // change (Yaesu drifts by the filter-width diff on every mode swap).
       if (cat && cat.connected) {
-        if (cat.setModeOnly) cat.setModeOnly(dataMode, _currentFreqHz);
-        else if (_currentFreqHz) cat.tune(_currentFreqHz, dataMode);
+        if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt);
+        else if (_ssbFreqBeforePtt) cat.tune(_ssbFreqBeforePtt, dataMode);
       }
       // Stagger the upcoming PTT key-down on Icom so its CI-V PTT frame
       // doesn't collide with the mode frame just written above.
@@ -11899,15 +11908,20 @@ function handleRemotePtt(state, opts = {}) {
   }
 
   if (!state && _ssbModeBeforePtt) {
-    // Restore original voice mode after PTT release (mode-only, no retune)
+    // Restore original voice mode after PTT release (mode-only, no retune).
+    // Re-anchor to the freq captured BEFORE the swap — NOT _currentFreqHz,
+    // which the mid-TX poll may have contaminated with the PSK-shifted TX
+    // carrier (see the capture comment above; K4GDJ's permanent-QSY report).
     const restoreMode = _ssbModeBeforePtt;
+    const restoreFreq = _ssbFreqBeforePtt || _currentFreqHz;
     _ssbModeBeforePtt = null;
+    _ssbFreqBeforePtt = 0;
     sendCatLog(`[PTT] Restoring ${restoreMode} mode`);
     // Suppress mode broadcasts during restore so ECHOCAT doesn't flicker
     _modeSuppressUntil = Date.now() + 2000;
     if (cat && cat.connected) {
-      if (cat.setModeOnly) cat.setModeOnly(restoreMode, _currentFreqHz);
-      else if (_currentFreqHz) cat.tune(_currentFreqHz, restoreMode);
+      if (cat.setModeOnly) cat.setModeOnly(restoreMode, restoreFreq);
+      else if (restoreFreq) cat.tune(restoreFreq, restoreMode);
     }
   }
 
