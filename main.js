@@ -14187,6 +14187,10 @@ function rawQsoToQsoData(raw) {
     mySotaRef: raw.MY_SOTA_REF || '',
     myGridsquare: raw.MY_GRIDSQUARE || '',
     stationCallsign: raw.STATION_CALLSIGN || '',
+    // Stable per-QSO identity — the WRL (N1MM UDP) sender emits it as <ID> so
+    // the listener can dedup by contact, not by timestamp fingerprint. A
+    // resend of the SAME QSO keeps the same ID; distinct QSOs never collide.
+    uuid: raw.APP_POTACAT_UUID || '',
   };
 }
 
@@ -14298,9 +14302,22 @@ function sendWrlUdp(qsoData, host, port) {
     const rcv = qsoData.rstRcvd || '59';
     const dateStr = qsoData.qsoDate || '';
     const timeStr = qsoData.timeOn || '';
+    // Keep real seconds when the QSO has them (ADIF TIME_ON is often HHMMSS).
+    // Hardcoding :00 gave every same-minute QSO an identical timestamp, which
+    // fed the WRL-side dedup below (N3VD: multi-op logging / resend only
+    // landed the first QSO).
+    const secStr = timeStr.length >= 6 ? timeStr.slice(4, 6) : '00';
     const ts = dateStr.length === 8 && timeStr.length >= 4
-      ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)} ${timeStr.slice(0,2)}:${timeStr.slice(2,4)}:00`
+      ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)} ${timeStr.slice(0,2)}:${timeStr.slice(2,4)}:${secStr}`
       : new Date().toISOString().replace('T', ' ').slice(0, 19);
+    // Unique contact ID, N1MM-shaped (32-hex GUID, no dashes). Real N1MM
+    // packets always carry <ID>; listeners key dedup/replace on it. Without
+    // one, WRL Cat Control falls back to fingerprinting — and two multi-op
+    // QSOs logged in the same minute (same time/freq/band/mode/mycall, only
+    // <call> differs) collapse to one, dropping every op after the first
+    // (N3VD 2026-06-29). Reuse the QSO's stored UUID so a deliberate resend
+    // of the same contact is still recognized as the same contact.
+    const contactId = String(qsoData.uuid || require('crypto').randomUUID()).replace(/-/g, '');
     const comment = qsoData.comment || '';
     const grid = qsoData.gridsquare || '';
     const contestName = qsoData.sig || '';
@@ -14331,6 +14348,7 @@ function sendWrlUdp(qsoData, host, port) {
 
     const xml = `<?xml version="1.0" encoding="utf-8"?>\n<contactinfo>\n`
       + `  <app>POTACAT</app>\n`
+      + `  <ID>${escXml(contactId)}</ID>\n`
       + `  <contestname>${escXml(contestName)}</contestname>\n`
       + `  <contestnr>${escXml(contestNr)}</contestnr>\n`
       + `  <timestamp>${escXml(ts)}</timestamp>\n`
