@@ -199,11 +199,22 @@ int ftx_find_candidates(const ftx_waterfall_t* wf, int num_candidates, ftx_candi
     // Here we allow time offsets that exceed signal boundaries, as long as we still have all data bits.
     // I.e. we can afford to skip the first 7 or the last 7 Costas symbols, as long as we track how many
     // sync symbols we included in the score, so the score is averaged.
+    //
+    // The upper bound must span the whole waterfall, not a fixed +20 blocks: JTCAT's
+    // capture window is a rolling buffer that ends at (slot end - DECODE_LEAD_MS -
+    // pipeline lag), so the slot boundary sits ~1.3 s + lag INTO the buffer and a
+    // signal starts ~1.5 s in. At FT8's 160 ms blocks that is ~block 10 (inside the
+    // old +20 cap by luck); at FT4's 48 ms blocks it is ~block 32 — past the cap, so
+    // FT4 candidates were never scanned and FT4 decoded nothing, ever (K3SBP
+    // 2026-07-03). Allow any start where all but the last 10 symbols still fit;
+    // extract_likelihood/sync_score already zero-fill blocks past num_blocks.
+    int num_symbols = (wf->protocol == FTX_PROTOCOL_FT4) ? FT4_NN : FT8_NN;
+    int max_time_offset = wf->num_blocks - (num_symbols - 10);
     for (candidate.time_sub = 0; candidate.time_sub < wf->time_osr; ++candidate.time_sub)
     {
         for (candidate.freq_sub = 0; candidate.freq_sub < wf->freq_osr; ++candidate.freq_sub)
         {
-            for (candidate.time_offset = -10; candidate.time_offset < 20; ++candidate.time_offset)
+            for (candidate.time_offset = -10; candidate.time_offset < max_time_offset; ++candidate.time_offset)
             {
                 for (candidate.freq_offset = 0; (candidate.freq_offset + num_tones - 1) < wf->num_bins; ++candidate.freq_offset)
                 {
