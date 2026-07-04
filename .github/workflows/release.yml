@@ -36,8 +36,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # npm ci (not install): caret ranges + npm install meant every release
+      # was built with whatever electron-builder/NSIS template was newest that
+      # day — two releases from identical repos could ship different
+      # installers, and an upstream regression could appear with no repo
+      # change (suspected in the v1.9.4 Windows assisted-installer UAC-loop
+      # report). ci installs exactly what package-lock.json pins, so
+      # installers are reproducible; toolchain bumps are now deliberate
+      # lockfile commits.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true # native build failures don't block the release
@@ -66,7 +74,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install dependencies
-        run: npm install
+        run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true
@@ -121,7 +129,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install dependencies
-        run: npm install
+        run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true
@@ -210,7 +218,7 @@ jobs:
           # which is the whole point of building from source.
           /usr/local/bin/rigctl --list | grep -i 'FTX-1' || (echo "FTX-1 missing from rigctl --list" && exit 1)
       - name: Install dependencies
-        run: npm install
+        run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true
@@ -320,7 +328,7 @@ jobs:
           /usr/local/bin/rigctld --version
           /usr/local/bin/rigctl --list | grep -i 'FTX-1' || (echo "FTX-1 missing from rigctl --list" && exit 1)
       - name: Install dependencies
-        run: npm install
+        run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
         continue-on-error: true
