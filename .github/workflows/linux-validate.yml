@@ -66,7 +66,9 @@ jobs:
           /usr/local/bin/rigctld --version
 
       - name: Install dependencies
-        run: npm install
+        # npm ci to match the release workflow exactly — a validation run
+        # must exercise the same lockfile-pinned toolchain a release would.
+        run: npm ci
 
       - name: Build native addons
         # The whole point of this workflow — verify that alsa_native

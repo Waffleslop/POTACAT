@@ -34,3 +34,17 @@ jobs:
         run: node test/sstv-test.js
       - name: Run SSTV PSNR-quality matrix
         run: node test/sstv-quality-test.js
+
+  # The release workflow installs with npm ci (lockfile-pinned), which fails
+  # hard if package.json and package-lock.json drift apart. Catch that on the
+  # push that introduces the drift instead of at release-tag time.
+  lockfile-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22' # same as release.yml
+      - name: npm ci (verifies package-lock.json is in sync)
+        run: npm ci --no-audit --no-fund

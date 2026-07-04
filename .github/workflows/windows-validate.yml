@@ -1,0 +1,53 @@
+name: Windows build (validation)
+
+# Manual-trigger Windows-only build that does not create a GitHub release —
+# uploads the Setup/Portable exes as a workflow artifact instead. Mirrors the
+# release workflow's build-windows job step-for-step (same runner pin, same
+# npm ci toolchain), so a green run here means the release build will behave
+# identically. Used to hand a test installer to a Windows user (e.g. the
+# v1.9.4 assisted-installer UAC-loop report) before tagging a real release.
+#
+# Run via the Actions tab → "Windows build (validation)" → Run workflow,
+# or programmatically with `gh workflow run windows-validate.yml`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Short note about what's being validated (shows in run history)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-validate:
+    # windows-2022 pin — same reason as the release workflow: the
+    # windows-latest (Server 2025) image breaks node-gyp's Visual Studio
+    # detection for @serialport/bindings-cpp. Keep in lockstep with
+    # release.yml's build-windows job.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci # lockfile-pinned — must match release.yml exactly
+      - name: Build native addons
+        run: npm run build-natives
+        continue-on-error: true # same policy as the release build
+      - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
+        run: node scripts/fetch-cloudflared.js --platform=win
+      - name: Build Windows installers
+        run: npx electron-builder --win --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: potacat-windows-validation
+          path: |
+            dist/POTACAT-Setup-*.exe
+            dist/POTACAT-Portable-*.exe
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 30
