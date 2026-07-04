@@ -18062,6 +18062,10 @@ app.whenReady().then(() => {
   // operator actually sees the request.
   function _openPairRequestPopout(req) {
     if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) {
+      // Same zombie-window self-heal as the Logbook pop-out: if
+      // ready-to-show never fired, the window exists but is invisible.
+      if (pairRequestPopoutWin.isMinimized()) pairRequestPopoutWin.restore();
+      if (!pairRequestPopoutWin.isVisible()) pairRequestPopoutWin.show();
       pairRequestPopoutWin.focus();
       pairRequestPopoutWin.webContents.send('pair-request', req);
       return;
@@ -18090,6 +18094,15 @@ app.whenReady().then(() => {
       pairRequestPopoutWin.show();
       pairRequestPopoutWin.focus();
     });
+    // ready-to-show is not guaranteed (see Logbook pop-out) — and a pair
+    // request the operator never sees is a hard failure, so fall back.
+    const pairShowFallback = setTimeout(() => {
+      if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed() && !pairRequestPopoutWin.isVisible()) {
+        pairRequestPopoutWin.show();
+        pairRequestPopoutWin.focus();
+      }
+    }, 1500);
+    pairRequestPopoutWin.on('closed', () => clearTimeout(pairShowFallback));
     // Push the request data only AFTER the renderer has loaded and registered
     // its onPairRequest listener. `ready-to-show` can fire BEFORE the popout's
     // script runs — especially in packaged/asar builds, which load slower than
@@ -18236,6 +18249,15 @@ app.whenReady().then(() => {
   // --- QSO Pop-out window ---
   ipcMain.on('qso-popout-open', () => {
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+      // Self-heal a zombie window: if ready-to-show never fired (K4PEZ
+      // v1.9.4 — Logbook button dead after a JTCAT session until app
+      // relaunch), the window exists but was never shown, and focus()
+      // alone won't surface it.
+      if (qsoPopoutWin.isMinimized()) qsoPopoutWin.restore();
+      if (!qsoPopoutWin.isVisible()) {
+        sendCatLog('[Logbook] pop-out existed but was not visible — forcing show (ready-to-show was missed)');
+        qsoPopoutWin.show();
+      }
       qsoPopoutWin.focus();
       return;
     }
@@ -18267,9 +18289,23 @@ app.whenReady().then(() => {
     // Show only once the page has painted, so the user never sees the empty
     // (white) window surface flash before the dark theme loads. Pair with the
     // backgroundColor above as a belt-and-suspenders guard. (N3VD)
-    qsoPopoutWin.once('ready-to-show', () => {
-      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.show();
-    });
+    //
+    // ready-to-show is NOT guaranteed on Windows — after a GPU-heavy
+    // session (JTCAT waterfall/audio) the hidden window's first paint can
+    // be skipped and the event never fires, leaving an invisible zombie
+    // that eats every later Logbook click (K4PEZ v1.9.4). Fall back to a
+    // timer; backgroundColor already prevents the white flash in that path.
+    const showQsoPopout = () => {
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && !qsoPopoutWin.isVisible()) qsoPopoutWin.show();
+    };
+    qsoPopoutWin.once('ready-to-show', showQsoPopout);
+    const qsoShowFallback = setTimeout(() => {
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && !qsoPopoutWin.isVisible()) {
+        sendCatLog('[Logbook] ready-to-show never fired — showing pop-out via fallback timer');
+        showQsoPopout();
+      }
+    }, 1500);
+    qsoPopoutWin.on('closed', () => clearTimeout(qsoShowFallback));
 
     qsoPopoutWin.on('close', () => {
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
