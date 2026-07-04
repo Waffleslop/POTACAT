@@ -76,6 +76,18 @@ function _applyPopoutTheme(payload) {
     fdMode = !!s.jtcatFdMode;
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
     reflectFd();
+    // Rig-scoped UI: multi-slice is a FlexRadio concept (slices A-D + DAX RX
+    // channels) — hide the Multi button when the active rig isn't a Flex.
+    // Evaluated at popout open; a rig switch mid-session re-opens JTCAT anyway.
+    if (window.RigFamily) {
+      var activeRigForMulti = (s.rigs || []).find(function(r) { return r && r.id === s.activeRigId; });
+      if (!window.RigFamily.isFlex(activeRigForMulti)) {
+        var multiBtnEl = document.getElementById('jp-multi-btn');
+        if (multiBtnEl) multiBtnEl.classList.add('hidden');
+        var multiPanelEl = document.getElementById('jp-multi-panel');
+        if (multiPanelEl) multiPanelEl.classList.add('hidden');
+      }
+    }
     updateMapHome();
     // Center map on home QTH if grid is available
     if (myGrid && map) {

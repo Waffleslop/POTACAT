@@ -1420,6 +1420,9 @@ async function openCatPopover(anchor) {
         remoteAudioInput: rig.remoteAudioInput || '',
         remoteAudioOutput: rig.remoteAudioOutput || '',
         cwKeyPort: rig.cwKeyPort || '',
+        // Per-rig audio source rides the switch — before this, a Flex→Icom
+        // switch kept audioSource='smartsdr' and JTCAT/SSTV went silent.
+        audioSource: rigAudioSourceOf(rig),
       });
       activeRigName = rig.name || '';
       closeCatPopover();
@@ -1690,8 +1693,7 @@ async function loadPrefs() {
   // JTCAT Flex slice setting
   if (settings.jtcatFlexSlice) jtcatSliceSelect.value = settings.jtcatFlexSlice;
   // Show slice selector if active rig is Flex
-  var isFlex = activeRig && activeRig.catTarget && activeRig.catTarget.type === 'tcp' &&
-    [5002, 5003, 5004, 5005].includes(activeRig.catTarget.port);
+  var isFlex = window.RigFamily.isFlex(activeRig);
   jtcatSliceContainer.classList.toggle('hidden', !isFlex);
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
@@ -1823,8 +1825,50 @@ function getEffectiveSerialcatPort() {
   return manual || setSerialcatPort.value;
 }
 
+// Rig-scoped audio sources (lib/rig-family.js): rebuild #set-audio-source so
+// only the selected radio type's valid options exist — an IC-7300 user must
+// never see "Flex Direct" or the word DAX (2026-07-03 report). When the
+// family has exactly one valid source there is nothing to choose, so the
+// whole row hides and the Audio Devices pickers tell the whole story. If the
+// current value is invalid for the new type, snap to the family default —
+// the same trap that broke K3SBP's Flex TX (see syncRigAudioDeviceBypass).
+const AUDIO_SOURCE_HELP = {
+  flex: 'Flex Direct streams receive and transmit audio straight to the radio (VITA-49) — no DAX program and no audio device setup. Pick Local audio device only if you deliberately run the DAX program.',
+  'icom-network': "Icom Network audio uses the radio's RS-BA1 UDP stream for JTCAT/SSTV receive audio and sends JTCAT FT8/FT4 plus SSTV transmit audio directly over the network — no soundcard needed.",
+};
+function rebuildAudioSourceOptions() {
+  if (!setAudioSource || !window.RigFamily) return;
+  const family = window.RigFamily.familyFromRadioType(getSelectedRadioType());
+  const options = window.RigFamily.audioSourcesFor(family);
+  const prev = setAudioSource.value;
+  setAudioSource.innerHTML = options
+    .map(o => `<option value="${o.value}">${o.label}</option>`)
+    .join('');
+  setAudioSource.value = options.some(o => o.value === prev) ? prev : options[0].value;
+  const single = options.length < 2;
+  const row = document.getElementById('audio-source-row');
+  if (row) row.style.display = single ? 'none' : 'block';
+  const help = document.getElementById('audio-source-help');
+  if (help) {
+    help.textContent = AUDIO_SOURCE_HELP[family] || '';
+    help.style.display = single || !AUDIO_SOURCE_HELP[family] ? 'none' : 'block';
+  }
+  syncRigAudioDeviceBypass();
+}
+
+// Resolve a rig's effective audio source: its stored per-rig value when it is
+// legal for the rig's family, else the family default. Used everywhere the
+// global settings.audioSource is mirrored from a rig on activation.
+function rigAudioSourceOf(rig) {
+  const fam = window.RigFamily.rigFamily(rig);
+  const v = rig && rig.audioSource;
+  return window.RigFamily.audioSourceValidFor(fam, v)
+    ? v : window.RigFamily.defaultAudioSourceFor(fam);
+}
+
 function updateRadioSubPanels() {
   const type = getSelectedRadioType();
+  rebuildAudioSourceOptions();
   flexConfig.classList.toggle('hidden', type !== 'flex');
   tcpcatConfig.classList.toggle('hidden', type !== 'tcpcat');
   if (k4networkConfig) k4networkConfig.classList.toggle('hidden', type !== 'k4network');
@@ -1872,8 +1916,7 @@ async function populateRadioSection(currentTarget) {
     setRadioType('flex');
   } else if (currentTarget.type === 'tcp') {
     // Check if it matches a standard Flex slice (localhost + 5002-5005)
-    const isFlexSlice = (currentTarget.host === '127.0.0.1' || !currentTarget.host) &&
-      [5002, 5003, 5004, 5005].includes(currentTarget.port);
+    const isFlexSlice = window.RigFamily.familyFromCatTarget(currentTarget) === 'flex';
     if (isFlexSlice) {
       setRadioType('flex');
       // The slice select holds 0-3 (A-D), not the port — derive it from the
@@ -2396,6 +2439,12 @@ async function openRigEditor(mode, rigId) {
       setRigName.value = rig.name || '';
       if (rigModelSelect) rigModelSelect.value = rig.model || '';
       await populateRadioSection(rig.catTarget);
+      // Per-rig audio source — populateRadioSection just rebuilt the options
+      // for this rig's radio type, so the stored value (validated) sticks.
+      if (setAudioSource) {
+        setAudioSource.value = rigAudioSourceOf(rig);
+        syncRigAudioDeviceBypass();
+      }
       await populateRigAudioDevices(rig.remoteAudioInput, rig.remoteAudioOutput);
       // Restore per-rig CW key port
       if (setCwKeyPort && rig.cwKeyPort) setCwKeyPort.value = rig.cwKeyPort;
@@ -2511,6 +2560,9 @@ rigSaveBtn.addEventListener('click', async () => {
 
   const rigAudioIn = rigRemoteAudioInput.value || '';
   const rigAudioOut = rigRemoteAudioOutput.value || '';
+  // Per-rig audio source. The select only ever holds options valid for the
+  // selected radio type (rebuildAudioSourceOptions), so this is always legal.
+  const rigAudioSource = setAudioSource ? setAudioSource.value : 'dax';
   const rigCwKeyPortVal = setCwKeyPort ? setCwKeyPort.value || '' : '';
   const rigRadioNr = setRadioNr ? parseInt(setRadioNr.value, 10) || 1 : 1;
   const flexApiHostEl = document.getElementById('set-flex-api-host');
@@ -2535,6 +2587,7 @@ rigSaveBtn.addEventListener('click', async () => {
       rig.catTarget = catTarget;
       rig.remoteAudioInput = rigAudioIn;
       rig.remoteAudioOutput = rigAudioOut;
+      rig.audioSource = rigAudioSource;
       rig.cwKeyPort = rigCwKeyPortVal;
       rig.radioNr = rigRadioNr;
       rig.flexApiHost = rigFlexApiHost;
@@ -2552,6 +2605,7 @@ rigSaveBtn.addEventListener('click', async () => {
       catTarget,
       remoteAudioInput: rigAudioIn,
       remoteAudioOutput: rigAudioOut,
+      audioSource: rigAudioSource,
       cwKeyPort: rigCwKeyPortVal,
       radioNr: rigRadioNr,
       flexApiHost: rigFlexApiHost,
@@ -4290,10 +4344,11 @@ setSmartSdrMaxSpots.addEventListener('change', () => {
   window.api.saveSettings({ smartSdrMaxSpots: parseInt(setSmartSdrMaxSpots.value, 10) || 0 });
 });
 if (setAudioSource) {
-  setAudioSource.addEventListener('change', () => {
-    window.api.saveSettings({ audioSource: setAudioSource.value });
-    syncRigAudioDeviceBypass();
-  });
+  // Per-rig value — persisted on rig save (rigSaveBtn) and mirrored to the
+  // global settings.audioSource on rig activation, NOT saved globally here.
+  // (The old immediate global save let a rig-editor visit silently flip the
+  // running audio path before the user ever hit Save.)
+  setAudioSource.addEventListener('change', () => syncRigAudioDeviceBypass());
 }
 
 // TCI checkbox toggles config visibility
@@ -13590,6 +13645,21 @@ async function openSettingsDialog(tab) {
   setTgxlLabel3.value = (s.tgxlLabels && s.tgxlLabels[3]) || '';
   tgxlUpdateButtons(0);
   tgxlConfig.classList.toggle('hidden', !s.enableTgxl);
+  // Rig-scoped UI: Flex-ecosystem accessory opt-ins (TunerGenius, Antenna
+  // Genius) and the WinKeyer Flex-sidetone interaction only show when a Flex
+  // rig is defined — OR when the feature is already on (never hide the off
+  // switch of an enabled feature). Gated on "any rig", not the active one:
+  // accessories stay configurable while a different rig is selected.
+  {
+    const hasFlexRig = (s.rigs || []).some(r => window.RigFamily.isFlex(r));
+    const gateFlexRow = (id, enabled) => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = (hasFlexRig || enabled) ? '' : 'none';
+    };
+    gateFlexRow('tgxl-row', s.enableTgxl === true);
+    gateFlexRow('ag-row', s.enableAntennaGenius === true);
+    gateFlexRow('mute-flex-cw-sidetone-row', s.muteFlexCwSidetoneOnWinKeyer === true);
+  }
   setEnableN1mmUdp.checked = s.enableN1mmUdp === true;
   setN1mmHost.value = s.n1mmHost || '127.0.0.1';
   setN1mmPort.value = s.n1mmPort || 12060;
@@ -13896,15 +13966,11 @@ async function openSettingsDialog(tab) {
     setSsbOverData.checked = !!s.ssbOverData;
   } else {
     const activeRigForSsb = (s.rigs || []).find(r => r.id === s.activeRigId);
-    const isFlexForSsb = activeRigForSsb && activeRigForSsb.catTarget && activeRigForSsb.catTarget.type === 'tcp' &&
-      [5002, 5003, 5004, 5005].includes(activeRigForSsb.catTarget.port);
-    setSsbOverData.checked = !isFlexForSsb;
+    setSsbOverData.checked = !window.RigFamily.isFlex(activeRigForSsb);
   }
   setRemoteCwEnabled.checked = !!s.remoteCwEnabled;
   setRemoteStun.checked = s.remoteStun !== false; // default ON (needed for cloud/WebRTC audio)
-  if (setAudioSource) {
-    setAudioSource.value = ['smartsdr', 'icom-network'].includes(s.audioSource) ? s.audioSource : 'dax';
-  }
+  // (audio source is per-rig — openRigEditor loads it; nothing to do here)
   if (setFlexMultiflex) setFlexMultiflex.checked = s.flexMultiflex !== false; // default on
   if (setFlexOnboardSpeaker) {
     setFlexOnboardSpeaker.checked = s.flexOnboardSpeaker === true; // default off: quiet radio, listen on the PC (DAX still flows)
@@ -14387,7 +14453,9 @@ settingsSave.addEventListener('click', async () => {
   const ssbOverDataVal = setSsbOverData.checked;
   const remoteCwEnabledVal = setRemoteCwEnabled.checked;
   const remoteStunVal = setRemoteStun.checked;
-  const audioSourceVal = setAudioSource ? setAudioSource.value : 'dax';
+  // audioSourceVal is derived from the selected rig below (per-rig field) —
+  // the select can't be trusted here: it reflects the last rig opened in the
+  // editor (or the static default), not necessarily the active rig.
   const flexOnboardSpeakerVal = setFlexOnboardSpeaker ? setFlexOnboardSpeaker.checked : false;
   const flexMultiflexVal = setFlexMultiflex ? setFlexMultiflex.checked : true;
   const cwKeyPortVal = setCwKeyPort.value || '';
@@ -14426,6 +14494,9 @@ settingsSave.addEventListener('click', async () => {
   const selectedRigId = selectedRigRadio ? selectedRigRadio.value : '';
   const selectedRig = selectedRigId ? currentRigs.find(r => r.id === selectedRigId) : null;
   const rigTarget = selectedRig ? selectedRig.catTarget : null;
+  // Mirror the selected rig's audio source into the global runtime value.
+  // No rig selected → omit the key so the stored value is left untouched.
+  const audioSourceVal = selectedRig ? rigAudioSourceOf(selectedRig) : undefined;
   window.api.connectCat(rigTarget);
 
   await window.api.saveSettings({
@@ -14623,7 +14694,7 @@ settingsSave.addEventListener('click', async () => {
     ssbOverData: ssbOverDataVal,
     remoteCwEnabled: remoteCwEnabledVal,
     remoteStun: remoteStunVal,
-    audioSource: audioSourceVal,
+    ...(audioSourceVal !== undefined ? { audioSource: audioSourceVal } : {}),
     flexOnboardSpeaker: flexOnboardSpeakerVal,
     flexMultiflex: flexMultiflexVal,
     cwKeyPort: cwKeyPortVal,
@@ -20484,16 +20555,18 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
       saveData.rigs = [...existingRigs, welcomeRig];
     }
     saveData.activeRigId = welcomeRig.id;
-    // New Flex setup → default to SmartSDR Direct so FT8/SSTV audio streams
-    // straight to the radio with no DAX program and no device config — the
-    // "Local/DAX" default was the #1 "PTT keys but no audio" setup trap
-    // (Casey 2026-06-17 hit it himself). Welcome-only + guarded on unset, so
-    // no existing user's audio source is ever changed.
-    const ct = welcomeRig.catTarget;
-    const isFlex = ct && ct.type === 'tcp' && [5002, 5003, 5004, 5005].includes(ct.port);
-    if (isFlex && currentSettings.audioSource == null) {
-      saveData.audioSource = 'smartsdr';
-    }
+    // Per-rig audio source. New Flex setup defaults to SmartSDR Direct so
+    // FT8/SSTV audio streams straight to the radio with no DAX program and
+    // no device config — the "Local/DAX" default was the #1 "PTT keys but
+    // no audio" setup trap (Casey 2026-06-17 hit it himself). An existing
+    // global value that's valid for this rig's family is kept, so no
+    // existing user's audio source is ever changed (DAX-program Flex users
+    // stay on 'dax'). This rig becomes active, so mirror to the global too.
+    const welcomeFam = window.RigFamily.rigFamily(welcomeRig);
+    welcomeRig.audioSource = window.RigFamily.audioSourceValidFor(welcomeFam, currentSettings.audioSource)
+      ? currentSettings.audioSource
+      : window.RigFamily.defaultAudioSourceFor(welcomeFam);
+    saveData.audioSource = welcomeRig.audioSource;
   }
 
   await window.api.saveSettings(saveData);

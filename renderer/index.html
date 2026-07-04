@@ -1479,14 +1479,15 @@
           </select>
         </label>
         <span class="help-text" style="margin-bottom:8px;display:block;">Used in N1MM+ RadioInfo UDP broadcast. Set to 2 for a second radio in SO2R setups (FreqEZ, band decoders).</span>
-        <label style="display:block;margin:10px 0 4px;">Audio source for JTCAT / SSTV:
+        <!-- Options are rebuilt per radio-type by rebuildAudioSourceOptions()
+             (lib/rig-family.js) — a 7300 user must never see Flex DAX options.
+             The whole row hides when the family has only one valid source. -->
+        <label id="audio-source-row" style="display:block;margin:10px 0 4px;">Audio source for JTCAT / SSTV:
           <select id="set-audio-source" style="min-width:240px;">
-            <option value="dax">Local audio device / DAX</option>
-            <option value="smartsdr">Flex Direct &mdash; VITA-49, no DAX program</option>
-            <option value="icom-network">Icom Network audio (RS-BA1)</option>
+            <option value="dax">Local audio device</option>
           </select>
         </label>
-        <span class="help-text" style="display:block;margin-bottom:8px;">Choose Icom Network audio when the active rig is Icom Network / RS-BA1. POTACAT uses the radio's UDP audio stream for JTCAT/SSTV receive audio and can send JTCAT FT8/FT4 plus SSTV transmit audio directly over RS-BA1.</span>
+        <span class="help-text" id="audio-source-help" style="display:block;margin-bottom:8px;"></span>
         <div id="rig-audio-devices" style="margin:4px 0 10px;">
           <div style="font-size:13px;color:#4fc3f7;margin-bottom:4px;">Audio Devices</div>
           <label>RX audio in (from radio):
@@ -2128,7 +2129,9 @@
           </label>
         </div>
       </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-ag"> 4O3A Antenna Genius</label>
+      <!-- Flex-ecosystem accessories: rows hidden unless a Flex rig is defined
+           or the feature is already enabled (openSettingsDialog gates them). -->
+      <label class="checkbox-label" id="ag-row"><input type="checkbox" id="set-enable-ag"> 4O3A Antenna Genius</label>
       <div id="ag-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Automatically switches antennas when you tune to a spot.</span>
         <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
@@ -2150,7 +2153,7 @@
           <span class="help-text" style="display:block;margin-top:4px;">Set antenna position (1-8) for each band. Leave blank to skip switching on that band.</span>
         </div>
       </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-tgxl"> FlexRadio TunerGenius 1x3</label>
+      <label class="checkbox-label" id="tgxl-row"><input type="checkbox" id="set-enable-tgxl"> FlexRadio TunerGenius 1x3</label>
       <div id="tgxl-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Controls antenna switching on the TunerGenius 1x3 via direct TCP (port 9010).</span>
         <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
@@ -2609,7 +2612,7 @@
             </label>
           </div>
           <span class="help-text" style="display:block;">Connect WinKeyer KEY output to your radio's straight key jack. Paddles plug into the WinKeyer, not the PC.</span>
-          <label class="checkbox-label" style="margin-top:6px;" title="Flex only: temporarily mutes the radio's own CW sidetone only WHILE the WinKeyer is keying (busy / paddle breakin). Restores when the WK goes idle. Use this when the WinKeyer has its own sidetone and the radio sits in the same room — stops the doubled-tone effect without affecting POTACAT CW macros, SmartSDR CWX, HaliKey MIDI, or vBand keying (those all bypass the WK device and keep the Flex sidetone on).">
+          <label class="checkbox-label" id="mute-flex-cw-sidetone-row" style="margin-top:6px;" title="Flex only: temporarily mutes the radio's own CW sidetone only WHILE the WinKeyer is keying (busy / paddle breakin). Restores when the WK goes idle. Use this when the WinKeyer has its own sidetone and the radio sits in the same room — stops the doubled-tone effect without affecting POTACAT CW macros, SmartSDR CWX, HaliKey MIDI, or vBand keying (those all bypass the WK device and keep the Flex sidetone on).">
             <input type="checkbox" id="set-mute-flex-cw-sidetone-wk"> Mute Flex CW sidetone while WinKeyer is keying
           </label>
         </div>
@@ -2695,7 +2698,7 @@
           Audio: <span id="remote-audio-summary">not configured</span>
           <a href="#" id="remote-audio-edit-link" style="margin-left:8px;font-size:11px;color:#4fc3f7;cursor:pointer;">Edit in Radio tab</a>
         </div>
-        <span class="help-text" style="display:block;margin-top:2px;">Audio source (DAX vs. SmartSDR Direct) is set per-rig under Settings &rarr; Radio &rarr; your Flex rig.</span>
+        <span class="help-text" style="display:block;margin-top:2px;">Audio devices &mdash; and, for rigs that stream audio over the network, the audio source &mdash; are set per-rig under Settings &rarr; Radio.</span>
         <div style="margin-top:8px;">
           <label>PTT Safety Timeout (seconds):
             <input type="number" id="set-remote-ptt-timeout" min="30" max="600" value="180" style="width:70px;">
@@ -4035,6 +4038,7 @@
   </dialog>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="../lib/rig-family.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>
   <script src="app.js"></script>

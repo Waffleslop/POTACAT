@@ -5769,6 +5769,14 @@
 
   // --- Rig Selector ---
   function updateRigSelect(rigs, activeRigId) {
+    // Rig-scoped UI: FT8 multi-slice is Flex-only (slices A-D / DAX). The
+    // desktop stamps each rig with `family`; hide the Multi button when the
+    // active rig isn't a Flex. Fail open when family is absent (older
+    // desktop build) — the desktop side also guards the start message.
+    const activeRigEntry = (rigs || []).find(r => r && r.id === activeRigId);
+    const famKnown = activeRigEntry && activeRigEntry.family;
+    const multiBtnEl = document.getElementById('ft8-multi-btn');
+    if (multiBtnEl) multiBtnEl.style.display = (famKnown && famKnown !== 'flex') ? 'none' : '';
     if (!rigs || rigs.length < 2) {
       soRigRow.classList.add('hidden');
       return;

@@ -259,6 +259,7 @@ const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdif
 const { qsoDayInScheduleEntry } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
+const RigFamily = require('./lib/rig-family');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -7861,13 +7862,18 @@ function handleK4AudioFrame(frame) {
     audioSafeSend(remoteAudioWin.webContents, 'smartsdr-audio-frame', { pcm: monoF32, sampleRate: 12000 });
   }
   // 2) JTCAT (FT8) — engine wants 12 kHz mono, which is exactly what we have.
-  if (settings.audioSource === 'k4-network' && jtcatManager && jtcatManager.running) {
+  //    Keyed off catTarget.type like every other K4 audio path — the old
+  //    `audioSource === 'k4-network'` gate was dead code (no UI ever set
+  //    that value; audioSource is 'dax' for K4 rigs), so these feeds only
+  //    ran for users who hand-edited settings.json.
+  const k4Active = settings.catTarget && settings.catTarget.type === 'k4-network';
+  if (k4Active && jtcatManager && jtcatManager.running) {
     jtcatManager.feedAudio('default', monoF32);
   }
   // 3) SSTV — engine + waterfall both expect 48 kHz, so 4x linear-interp
   //    upsample. Same pattern as the SmartSDR Direct path; minor since
   //    SSTV is an occasional workflow. Same circuit-breaker guard.
-  if (settings.audioSource === 'k4-network' && sstvEngine && !_sstvFeedPaused) {
+  if (k4Active && sstvEngine && !_sstvFeedPaused) {
     const out = new Float32Array(monoF32.length * 4);
     for (let i = 0; i < monoF32.length; i++) {
       const s0 = monoF32[i];
@@ -9610,8 +9616,9 @@ function connectRemote() {
       tiles: settings.enableTiles !== false,
       cluster: settings.enableCluster === true,
     });
-    // Send rig list so phone can switch rigs
-    const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name }));
+    // Send rig list so phone can switch rigs. `family` lets the phone hide
+    // rig-scoped UI (multi-slice is Flex-only) without knowing catTarget shapes.
+    const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name, family: RigFamily.rigFamily(r) }));
     remoteServer.sendRigsToClient(rigs, settings.activeRigId || null);
     // Push activator state
     pushActivatorStateToPhone();
@@ -10205,6 +10212,9 @@ function connectRemote() {
     settings.catTarget = rig.catTarget;
     settings.remoteAudioInput = rig.remoteAudioInput || '';
     settings.remoteAudioOutput = rig.remoteAudioOutput || '';
+    // Per-rig audio source rides the switch (Flex→Icom kept 'smartsdr'
+    // before this and JTCAT/SSTV went silent).
+    settings.audioSource = rig.audioSource || RigFamily.defaultAudioSourceFor(RigFamily.rigFamily(rig));
     try { remoteServer.setRigModel(rig.model || ''); } catch {}
     _applyRigEqDefault(rig);
     // Per-rig CW key port
@@ -10223,8 +10233,8 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('reload-prefs');
     }
-    // Confirm back to phone
-    const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name }));
+    // Confirm back to phone (family drives the phone's rig-scoped UI)
+    const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name, family: RigFamily.rigFamily(r) }));
     remoteServer.sendRigsToClient(rigs, rig.id);
     console.log('[Echo CAT] Switched rig to:', rig.name);
   });
@@ -11083,6 +11093,13 @@ function connectRemote() {
   // ECHOCAT multi-slice — phone sends config, desktop runs engines + audio
   remoteServer.on('jtcat-start-multi-remote', ({ slices }) => {
     if (!Array.isArray(slices) || slices.length === 0) return;
+    // Multi-slice is Flex-only (slices A-D / DAX). The phone hides the button
+    // for other rigs; this guards stale/older clients.
+    const activeRigForMulti = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    if (!RigFamily.isFlex(activeRigForMulti)) {
+      sendCatLog('[JTCAT] Ignoring ECHOCAT multi-slice start — active rig is not a FlexRadio');
+      return;
+    }
     // Emit the same IPC event that the desktop popout uses
     ipcMain.emit('jtcat-start-multi', {}, slices);
     // Start audio capture in desktop renderer for each slice
@@ -16158,9 +16175,7 @@ function migrateRigSettings(s) {
   if (s.smartSdrHost && Array.isArray(s.rigs) && s.rigs.length) {
     let changed = false;
     for (const r of s.rigs) {
-      const t = r.catTarget;
-      const isFlex = t && t.type === 'tcp' && (t.host === '127.0.0.1' || !t.host) &&
-        [5002, 5003, 5004, 5005].includes(t.port);
+      const isFlex = RigFamily.familyFromCatTarget(r.catTarget) === 'flex';
       if (isFlex && !r.flexApiHost) { r.flexApiHost = s.smartSdrHost; changed = true; }
     }
     if (changed) saveSettings(s);
@@ -16186,6 +16201,32 @@ function migrateRigSettings(s) {
       }
     }
     if (healed) saveSettings(s);
+  }
+  // Per-rig audio source (rig-scoped UI, 2026-07-03). Rigs created before
+  // this have no audioSource — inherit the global when it's valid for the
+  // rig's family, so nobody's working audio path changes (a DAX-program Flex
+  // stays 'dax', a SmartSDR-less 8600 stays 'smartsdr'). Otherwise: 'dax'
+  // when the global was unset (that IS the old runtime default — a Flex rig
+  // must NOT be silently upgraded to Flex Direct here), else the family
+  // default. Then re-mirror the global from the ACTIVE rig — before this,
+  // switching rigs kept the previous rig's audio path (global stuck on
+  // 'smartsdr' with an Icom active → silent JTCAT/SSTV).
+  if (Array.isArray(s.rigs) && s.rigs.length) {
+    let audioChanged = false;
+    for (const r of s.rigs) {
+      if (!r || r.audioSource) continue;
+      const fam = RigFamily.rigFamily(r);
+      if (RigFamily.audioSourceValidFor(fam, s.audioSource)) r.audioSource = s.audioSource;
+      else r.audioSource = s.audioSource == null ? 'dax' : RigFamily.defaultAudioSourceFor(fam);
+      audioChanged = true;
+    }
+    const activeForAudio = s.rigs.find(r => r && r.id === s.activeRigId);
+    if (activeForAudio && activeForAudio.audioSource && s.audioSource !== activeForAudio.audioSource) {
+      console.log(`[rig-migrate] audioSource ${s.audioSource || '(unset)'} → ${activeForAudio.audioSource} (mirrored from active rig "${activeForAudio.name || activeForAudio.id}")`);
+      s.audioSource = activeForAudio.audioSource;
+      audioChanged = true;
+    }
+    if (audioChanged) saveSettings(s);
   }
 }
 
@@ -20986,8 +21027,12 @@ app.whenReady().then(() => {
   async function ensureTailscaleCertReady(progressCb) {
     const { tailscaleStatus, loadCachedTailscaleCert, issueTailscaleCert } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
-    if (loadCachedTailscaleCert(certDir)) return null; // already set up
     const ts = tailscaleStatus();
+    // Only "already set up" if the cached cert matches the machine's
+    // CURRENT tailnet hostname — a tailnet/device rename leaves a
+    // long-valid cert for a dead name that iOS rejects on every leg.
+    const expectedHost = ts && ts.loggedIn && ts.hostname ? ts.hostname : null;
+    if (loadCachedTailscaleCert(certDir, expectedHost)) return null; // already set up
     if (!ts) {
       return { warn: 'Tailscale not detected. iOS pair will likely fail. Install Tailscale to fix.' };
     }
@@ -21027,7 +21072,9 @@ app.whenReady().then(() => {
     const { tailscaleStatus, loadCachedTailscaleCert } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
     const ts = tailscaleStatus();
-    const cached = loadCachedTailscaleCert(certDir);
+    // Pass the current hostname so a cert left over from a renamed
+    // tailnet/device reads as "not set up" in the Settings UI.
+    const cached = loadCachedTailscaleCert(certDir, ts && ts.loggedIn && ts.hostname ? ts.hostname : null);
     return {
       installed: !!ts,
       loggedIn: ts ? !!ts.loggedIn : false,
@@ -22405,6 +22452,13 @@ app.whenReady().then(() => {
     const isPartialSave = !has('enablePota'); // hotkey saves only send 1-2 keys
 
     settings = { ...settings, ...newSettings };
+    // Active rig changed → its per-rig audio source is authoritative over
+    // whatever audioSource the save blob carried (the renderer mirrors it
+    // too, but partial saves and future callers shouldn't have to know).
+    if (activeRigChanged) {
+      const rigNow = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+      if (rigNow && rigNow.audioSource) settings.audioSource = rigNow.audioSource;
+    }
     saveSettings(settings);
 
     // Refetch any watchlist group whose URL changed. Clearing a URL
