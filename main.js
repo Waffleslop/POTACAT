@@ -300,7 +300,7 @@ const { fetchSpots: fetchGmaSpots, postGmaRespot, setLogger: gmaSetLogger } = re
 gmaSetLogger(sendCatLog); // surface GMA fetch errors in the CAT log (sendCatLog is hoisted)
 const { fetchNets: fetchDirectoryNets, fetchSwl: fetchDirectorySwl } = require('./lib/directory');
 const { QrzClient } = require('./lib/qrz');
-const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
+const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, nearbyParks: nearbyParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
 // NOTE: lib/dxcal.js (danplanet iCal) was retired 2026-05-29 in favor of
 // the community feed served by worker/dxpeditions — aggregated DX-World +
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
@@ -4737,15 +4737,19 @@ async function saveQsoRecord(qsoData, opts) {
   // Mallory KD5ZZU 2026-05-06: she logged a QSO from the desktop UI
   // and her iOS app's logbook stayed stale until she restarted the
   // app, because the desktop never told the app the log changed.
-  // The iOS app currently only subscribes to 'all-qsos' (not the
-  // more granular 'qso-updated'), so push the full list — small for
-  // most users, and the iOS app reapplies the snapshot in O(n).
+  // Clients advertising 'qso-delta' get just the appended record;
+  // everyone else still gets the full snapshot (chunked or the
+  // byte-capped legacy frame) — re-pushing the whole log on every
+  // save is what produced the 9.6MB frames of BUG-N3VD-20260701.
   try {
     if (remoteServer && remoteServer.running) {
       const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       const qsos = parseAllRawQsos(logPath);
       const mapped = qsos.map((q, i) => ({ idx: i, ...q }));
-      remoteServer.sendAllQsos(mapped);
+      const last = mapped.length ? mapped[mapped.length - 1] : null;
+      if (!last || !remoteServer.sendQsoAdded(last, mapped.length)) {
+        remoteServer.sendAllQsos(mapped);
+      }
     }
   } catch (err) {
     console.warn('[QSO] Broadcast to mobile clients failed:', err.message);
@@ -10563,6 +10567,18 @@ function connectRemote() {
     } catch (err) {
       console.error('[Echo CAT] Park search error:', err.message);
       remoteServer.sendParkResults([]);
+    }
+  });
+
+  // "Parks near me" for the mobile activation-start screen — distance-sorted
+  // from the phone's GPS fix (docs/mobile-handoff-activation-start.md)
+  remoteServer.on('nearby-parks', ({ lat, lon, limit }) => {
+    try {
+      const results = nearbyParksDb(parksArray, lat, lon, limit || 15);
+      remoteServer.sendNearbyParkResults(results || []);
+    } catch (err) {
+      console.error('[Echo CAT] Nearby parks error:', err.message);
+      remoteServer.sendNearbyParkResults([]);
     }
   });
 

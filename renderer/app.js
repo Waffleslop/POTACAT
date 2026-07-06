@@ -457,7 +457,7 @@ let appMode = 'hunter'; // 'hunter' or 'activator'
 let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP'}, ...]  max MAX_N_FER
 let activatorCrossRefs = [];  // [{program:'WWFF', ref:'KFF-1234'}, {program:'LLOTA', ref:'LLCL-0001'}]
 let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
-let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF'}]  max MAX_N_FER, resets per QSO
+let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF', program:'POTA'}]  max MAX_N_FER, resets per QSO; program drives ADIF SIG (default POTA)
 let activatorContacts = []; // in-memory QSO list for current activation session
 
 // Look up whether `call` would be a POTA dupe in the current activation —
@@ -547,6 +547,20 @@ function autoPotaPrefix(ref, callsign) {
   // Canadian callsigns: VE, VA, VY, VO, CY, CF, CG, CI, CJ, CK
   if (/^V[AEOY]\d/.test(call) || /^C[FGIJK]\d/.test(call)) return 'VE-' + ref;
   return ref;
+}
+
+/** Infer a hunter park ref's program from its shape, for refs typed directly
+ *  into the P2P field (autocomplete/spot-click paths carry an explicit
+ *  program). Without this, a summit-to-park or WWFF P2P typed by hand logs
+ *  SIG=POTA with a non-POTA ref — wrong credit on the other op's side.
+ *  Shapes: SOTA W4C/CM-001 (slash), WWFF KFF-1234 (FF- designator),
+ *  WWBOTA B/US-1234 (B/ prefix, checked before the generic slash). */
+function inferParkProgram(ref) {
+  const r = (ref || '').toUpperCase();
+  if (/^B\//.test(r)) return 'WWBOTA';
+  if (r.includes('/')) return 'SOTA';
+  if (/FF-\d/.test(r)) return 'WWFF';
+  return 'POTA';
 }
 
 /** Build display name from QRZ info, respecting full-name setting.
@@ -21397,7 +21411,9 @@ function resumeActivation(activation) {
         timeOn: c.timeOn || '',
         rstSent: c.rstSent || '',
         rstRcvd: c.rstRcvd || '',
-        mySig: 'POTA',
+        // Preserve the activation's real program — resuming a SOTA/WWFF
+        // activation used to re-tag every restored contact MY_SIG=POTA
+        mySig: activation.sig || 'POTA',
         mySigInfo: activation.parkRef,
         stationCallsign: myCallsign || '',
         operator: myCallsign || '',
@@ -21411,7 +21427,7 @@ function resumeActivation(activation) {
         timeOn: c.timeOn || '',
         rstSent: c.rstSent || '',
         rstRcvd: c.rstRcvd || '',
-        mySig: 'POTA',
+        mySig: activation.sig || 'POTA',
         mySigInfo: activation.parkRef,
         stationCallsign: myCallsign || '',
         operator: myCallsign || '',
@@ -22319,37 +22335,53 @@ function parseCommaSeparatedParks(segments) {
   }
 }
 
-/** Finalize comma-separated refs on blur/Enter — look up names, set grid from first park */
+/** Finalize comma-separated refs on blur/Enter — auto-prefix bare numbers,
+ *  look up names, set grid from first park, and warn on refs the parks DB
+ *  doesn't know (a typo'd ref used to silently produce an unmatchable ADIF) */
 function finalizeCommaSeparatedParks() {
   const fullVal = activatorParkRefInput.value.trim().toUpperCase();
   if (!fullVal) return;
-  const segments = fullVal.split(',').map(s => s.trim()).filter(Boolean);
+  const segments = fullVal.split(',').map(s => s.trim()).filter(Boolean)
+    .map(ref => autoPotaPrefix(ref, myCallsign));
   if (segments.length === 0) return;
 
   activatorParkRefs = segments.map(ref => {
     const existing = activatorParkRefs.find(p => p.ref === ref);
     return existing || { ref, name: '' };
   });
+  updateParkDisplay(); // reflect auto-prefixed refs back into the input
 
-  // Look up names for refs we don't have
-  for (let i = 0; i < activatorParkRefs.length; i++) {
-    if (!activatorParkRefs[i].name) {
-      const idx = i;
-      window.api.getPark(activatorParkRefs[idx].ref).then(p => {
-        if (p) {
-          activatorParkRefs[idx].name = p.name || '';
-          if (idx === 0) activatorParkNameEl.textContent = p.name || '';
-          // Set grid from first park if not already set
-          if (idx === 0 && p.latitude && p.longitude) {
-            activatorParkGrid = latLonToGridLocal(parseFloat(p.latitude), parseFloat(p.longitude));
-            const gridInput = document.getElementById('activator-grid');
-            if (gridInput) gridInput.value = activatorParkGrid;
-          }
-          updateParkExtraBadge();
+  // Look up names for refs we don't have; a miss flags the ref unknown.
+  // Warn only — the local parks DB can lag newly added parks, so an
+  // unknown ref must never block starting the activation.
+  const lookups = activatorParkRefs.map((park, idx) => {
+    if (park.name) { park.unknown = false; return Promise.resolve(); }
+    return window.api.getPark(park.ref).then(p => {
+      if (p) {
+        park.name = p.name || '';
+        park.unknown = false;
+        if (idx === 0) activatorParkNameEl.textContent = p.name || '';
+        // Set grid from first park if not already set
+        if (idx === 0 && p.latitude && p.longitude) {
+          activatorParkGrid = latLonToGridLocal(parseFloat(p.latitude), parseFloat(p.longitude));
+          const gridInput = document.getElementById('activator-grid');
+          if (gridInput) gridInput.value = activatorParkGrid;
         }
-      }).catch(() => {});
+        updateParkExtraBadge();
+      } else {
+        park.unknown = true;
+      }
+    }).catch(() => {});
+  });
+  Promise.all(lookups).then(() => {
+    const unknown = activatorParkRefs.filter(p => p.unknown).map(p => p.ref);
+    if (unknown.length > 0) {
+      activatorParkNameEl.textContent = `⚠ Not in parks DB: ${unknown.join(', ')} — check for typos`;
+      activatorParkNameEl.classList.add('park-unknown');
+    } else {
+      activatorParkNameEl.classList.remove('park-unknown');
     }
-  }
+  });
 
   if (activatorParkRefs.length === 1) {
     activatorParkNameEl.textContent = activatorParkRefs[0].name || '';
@@ -22467,9 +22499,11 @@ async function activatorLogContact() {
   const hunterInput = document.getElementById('activator-hunter-park');
   if (hunterInput && hunterInput.value.trim() && hunterParkRefs.length === 0) {
     const typed = hunterInput.value.trim().toUpperCase();
-    // Accept anything that looks like a park ref (e.g. K-1234, VE-0456, US-1234)
-    if (/^[A-Z]{1,3}-\d{3,5}$/.test(typed)) {
-      hunterParkRefs = [{ ref: typed, name: '' }];
+    // Accept POTA/WWFF-shaped refs (K-1234, US-1234, KFF-1234), SOTA summits
+    // (W4C/CM-001), and WWBOTA bunkers (B/US-1234); tag the real program so
+    // the ADIF SIG is right (summit-to-park typed by hand used to log SIG=POTA)
+    if (/^[A-Z]{1,4}-\d{3,5}$/.test(typed) || /^[A-Z0-9]{1,4}\/[A-Z]{2}-\d{3}$/.test(typed) || /^B\/[A-Z]{1,3}-\d{3,5}$/.test(typed)) {
+      hunterParkRefs = [{ ref: typed, name: '', program: inferParkProgram(typed) }];
     }
   }
   if (!primaryParkRef()) {
@@ -22544,7 +22578,7 @@ async function activatorLogContact() {
     for (const myPark of myParks) {
       for (const theirPark of theirParks) {
         const qsoData = { ...baseFields, mySig: 'POTA', mySigInfo: myPark.ref };
-        if (theirPark) { qsoData.sig = 'POTA'; qsoData.sigInfo = theirPark.ref; }
+        if (theirPark) { qsoData.sig = theirPark.program || 'POTA'; qsoData.sigInfo = theirPark.ref; }
         allQsoData.push(qsoData);
       }
     }
@@ -22555,7 +22589,7 @@ async function activatorLogContact() {
         if (xr.program === 'SOTA') qsoData.mySotaRef = xr.ref;
         else if (xr.program === 'WWFF') qsoData.myWwffRef = xr.ref;
         else if (xr.program === 'LLOTA') qsoData.myLlotaRef = xr.ref;
-        if (theirPark) { qsoData.sig = 'POTA'; qsoData.sigInfo = theirPark.ref; }
+        if (theirPark) { qsoData.sig = theirPark.program || 'POTA'; qsoData.sigInfo = theirPark.ref; }
         allQsoData.push(qsoData);
       }
     }
@@ -23169,9 +23203,12 @@ function fillActivatorFromSpot(s) {
   if (activatorModeSelect.querySelector(`option[value="${mappedMode}"]`)) {
     activatorModeSelect.value = mappedMode;
   }
-  // Fill hunter park ref if it's a POTA/WWFF spot
-  if (s.reference && (s.source === 'pota' || s.source === 'wwff')) {
-    hunterParkRefs = [{ ref: s.reference, name: s.parkName || '' }];
+  // Fill hunter park ref for any program with a P2P-creditable reference,
+  // carrying the real program so the ADIF SIG isn't hardcoded POTA
+  // (summit-to-park / WWFF P2P used to log SIG=POTA — wrong credit)
+  const spotProgram = { pota: 'POTA', wwff: 'WWFF', sota: 'SOTA', llota: 'LLOTA', wwbota: 'WWBOTA' }[s.source];
+  if (s.reference && spotProgram) {
+    hunterParkRefs = [{ ref: s.reference, name: s.parkName || '', program: spotProgram }];
     updateHunterParkDisplay();
   } else {
     hunterParkRefs = [];

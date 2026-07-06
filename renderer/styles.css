@@ -7718,6 +7718,10 @@ a.settings-echocat-badge-link:hover {
   text-overflow: ellipsis;
   max-width: 300px;
 }
+/* Park ref not found in the local parks DB — warn, never block */
+.activator-park-name.park-unknown {
+  color: var(--accent-red, #e94560);
+}
 .activator-grid {
   width: 8ch;
   font-family: monospace;

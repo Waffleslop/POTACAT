@@ -198,7 +198,8 @@ for the history.
 | `log-qso` | C→S | Submit a QSO for logging on the desktop. |
 | `log-ok` | S→C | Logging succeeded; includes idx in ADIF. |
 | `get-all-qsos` | C→S | Request the full QSO log. |
-| `all-qsos` | S→C | Full QSO log payload. |
+| `all-qsos` | S→C | Full QSO log payload. Chunked when the client hello advertises `chunked-all-qsos`; otherwise one frame capped to the most-recent 2000 records AND 256KB (`truncated: true` when cut). |
+| `qso-added` | S→C | Incremental append after a QSO save, sent only to clients advertising `qso-delta` — replaces the full `all-qsos` re-push on every save. `data` = one record in `all-qsos` shape, `total` = new log length; if `total` ≠ local count + 1 the client should resync via `get-all-qsos`. |
 | `update-qso` | C→S | Edit a QSO by index. |
 | `qso-updated` | S→C | Edit confirmation broadcast. |
 | `delete-qso` | C→S | Delete a QSO by index. |
@@ -207,6 +208,8 @@ for the history.
 | `qrz-lookup` | C→S | Alternate alias used in some paths. |
 | `call-lookup` | S→C | Lookup result. |
 | `search-parks` | C→S | Park name/ref search. |
+| `nearby-parks` | C→S | Distance-sorted parks around `{lat, lon, limit?}` — powers "Parks near me" on the mobile activation-start screen. |
+| `nearby-park-results` | S→C | Reply: parks nearest-first, each with `distanceMi` and `bearingDeg`. |
 | `park-results` | S→C | Park search results. |
 | `get-past-activations` | C→S | History of past activations for a park. |
 | `past-activations` | S→C | Past-activation results. |
