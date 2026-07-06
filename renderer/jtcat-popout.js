@@ -76,6 +76,18 @@ function _applyPopoutTheme(payload) {
     fdMode = !!s.jtcatFdMode;
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
     reflectFd();
+    // Watchlist-group stroke (ft8-watchlist-stroke-parity): build the same
+    // lookup the Spots list uses and expose the group colors to CSS.
+    // Evaluated at popout open — group edits mid-session apply on reopen.
+    if (window.WatchlistGroups) {
+      wlGroupLookup = window.WatchlistGroups.buildGroupLookup(s.watchlistGroups);
+      var wlGroupsArr = Array.isArray(s.watchlistGroups) ? s.watchlistGroups : [];
+      for (var wi = 0; wi < 3; wi++) {
+        if (wlGroupsArr[wi] && wlGroupsArr[wi].color) {
+          document.documentElement.style.setProperty('--jp-wl-color-' + wi, wlGroupsArr[wi].color);
+        }
+      }
+    }
     // Rig-scoped UI: multi-slice is a FlexRadio concept (slices A-D + DAX RX
     // channels) — hide the Multi button when the active rig isn't a Flex.
     // Evaluated at popout open; a rig switch mid-session re-opens JTCAT anyway.
@@ -99,6 +111,7 @@ function _applyPopoutTheme(payload) {
   });
 
   var qsoState = null; // current QSO state from main renderer
+  var wlGroupLookup = null; // watchlist-group Map (lib/watchlist-groups.js), built at settings load
 
   // --- DOM refs ---
   var bandActivity = document.getElementById('jp-band-activity');
@@ -286,6 +299,14 @@ function _applyPopoutTheme(payload) {
 
   function registerStation(call, grid) {
     if (!map || !call || !grid || !/^[A-R]{2}[0-9]{2}$/i.test(grid)) return;
+    // RR73 (and RR-anything) is a QSO-ending token, not a grid — but it IS
+    // shaped like one, so every decoded "... RR73" relocated the sender's
+    // marker to grid square RR73 in the middle of nowhere (K3SBP 2026-07-06:
+    // K2B teleported off the map right at QSO end; 13C stations send RR73
+    // nonstop). Same exclusion main.js's decode-grid enrichment has always
+    // applied. Guarded HERE so every register path (CQ parse, directed-msg
+    // payload, QSO state) is covered.
+    if (/^RR[0-9]{2}$/i.test(grid)) return;
     grid = grid.toUpperCase();
     var bounds = gridToBounds(grid);
     var pos = gridToLatLon(grid);
@@ -659,6 +680,16 @@ function _applyPopoutTheme(payload) {
     if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
     if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
     if (d.watched) badges += '<span class="jp-badge jp-badge-watch" title="Watchlist">W</span>';
+    // Tracked-event station (Casey 2026-07-06): render as a NORMAL-looking
+    // row with a [13C]-style badge alongside the letter badges — no tint
+    // (an event tint stacked on cq/wanted tints was unreadable). Badge +
+    // stroke only when the station is still useful (needed / new band-mode);
+    // worked stations are noise mid-sweep and get nothing.
+    var evM = d.eventMatch && d.eventMatch.status !== 'worked' ? d.eventMatch : null;
+    if (evM && evM.badge) {
+      var evTitle = evM.status === 'new-slot' ? 'Tracked event — worked, NEW band/mode' : 'Tracked event — NEEDED';
+      badges += '<span class="jp-badge jp-badge-event" style="background:' + esc(evM.badgeColor || '#1776cf') + ';color:#fff;" title="' + evTitle + '">' + esc(evM.badge) + '</span>';
+    }
     var entityStr = d.entity ? '<span class="jp-entity">' + esc(d.entity) + '</span>' : '';
 
     var row = document.createElement('div');
@@ -667,7 +698,27 @@ function _applyPopoutTheme(payload) {
     // can spot unworked parks at a glance during multi-slice operating.
     var spotMatch = d.call ? spottedCalls.get(String(d.call).toUpperCase()) : null;
     var spotClass = spotMatch ? (spotMatch.isNewPark ? ' jp-new-park' : ' jp-spotted') : '';
-    row.className = 'jp-row' + (c.isCq ? ' jp-cq' : '') + (c.isDirected ? ' jp-directed' : '') + (c.isWanted ? ' jp-wanted' : '') + (d.chaseMatch ? ' jp-chase' : '') + (d.watched ? ' jp-watched' : '') + spotClass;
+    // Watchlist-group stroke parity with the phone (spec of record:
+    // potacat-app docs/desktop-asks/ft8-watchlist-stroke-parity.md).
+    // Match order: transmitting call, then any message token (catches a
+    // watched friend BEING CALLED). Stroke always; the 12% tint only when
+    // the row is otherwise un-tinted (directed/chase/wanted/spot tints keep
+    // priority); emoji appended after the message; W badge untouched.
+    var wl = wlGroupLookup ? window.WatchlistGroups.matchDecode(wlGroupLookup, d.call, c.text) : null;
+    var wlClass = '';
+    if (wl) {
+      wlClass = ' jp-wl-g' + wl.idx;
+      // jp-cq counts as tinted too (desktop-only green CQ background the
+      // mobile precedence list has no equivalent of) — the stroke alone
+      // carries the watchlist signal there, keeping CQ rows scannable.
+      var otherwiseTinted = c.isCq || c.isDirected || d.chaseMatch || c.isWanted || !!spotMatch || !!d.watched;
+      if (!otherwiseTinted) wlClass += ' jp-wl-tint-g' + wl.idx;
+    } else if (evM) {
+      // Event stroke (mobile-parity priority: watchlist group wins, then
+      // event needed/new-slot). Stroke only — the row stays normal-looking.
+      wlClass = ' jp-event-needed';
+    }
+    row.className = 'jp-row' + (c.isCq ? ' jp-cq' : '') + (c.isDirected ? ' jp-directed' : '') + (c.isWanted ? ' jp-wanted' : '') + (d.chaseMatch ? ' jp-chase' : '') + (d.watched ? ' jp-watched' : '') + spotClass + wlClass;
     if (spotMatch && spotMatch.reference) row.title = 'Spotted at ' + spotMatch.reference + (spotMatch.isNewPark ? ' (new park)' : '');
     var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
     // Band badge for multi-slice decodes
@@ -681,7 +732,9 @@ function _applyPopoutTheme(payload) {
       '<span class="jp-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
       '<span class="jp-dt">' + dtStr + '</span>' +
       '<span class="jp-df">' + Math.round(d.df) + '</span>' +
-      '<span class="jp-msg">' + esc(c.text) + '</span>' +
+      '<span class="jp-msg">' + esc(c.text) +
+        (wl && wl.emoji ? '<span class="jp-wl-emoji">' + esc(wl.emoji) + '</span>' : '') +
+      '</span>' +
       (badges ? '<span class="jp-badges">' + badges + '</span>' : '') +
       entityStr;
     row.addEventListener('dblclick', (function(decode) { return function() { onDecodeRowClick(decode); }; })(d));

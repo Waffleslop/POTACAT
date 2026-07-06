@@ -34,45 +34,15 @@ let watchlistGroups = [
   { name: '', color: '#b388ff', emoji: '', url: '', callsigns: '', remoteEntries: [], lastFetchedAt: 0, lastFetchError: '' },
 ];
 
+// Parsing + lookup building live in lib/watchlist-groups.js — SHARED with
+// the JTCAT pop-out's decode stroke (ft8-watchlist-stroke-parity spec) so
+// the two resolutions can't drift.
 function _parseCallsignList(str) {
-  // Accepts comma OR whitespace OR newline separators. Strips qualifiers
-  // (anything after first ':' — the legacy watchlist syntax uses ':band' /
-  // ':mode' qualifiers; groups are simple match-or-not so we drop those).
-  if (!str) return [];
-  return str
-    .split(/[\s,;]+/)
-    .map(s => s.split(':')[0].trim().toUpperCase())
-    .filter(s => s.length > 0);
+  return window.WatchlistGroups.parseCallsignList(str);
 }
 
 function rebuildWatchlistGroupLookup() {
-  watchlistGroupLookup = new Map();
-  for (let i = 0; i < watchlistGroups.length; i++) {
-    const g = watchlistGroups[i];
-    if (!g) continue;
-    const groupEmoji = g.emoji || '';
-    // Manual callsigns first — they all get the group's fallback emoji.
-    for (const call of _parseCallsignList(g.callsigns)) {
-      if (!watchlistGroupLookup.has(call)) {
-        watchlistGroupLookup.set(call, { idx: i, emoji: groupEmoji });
-      }
-    }
-    // Then the remote entries fetched from the Ham2K PoLo URL. Per-call
-    // emoji from the file wins over the group's fallback; if neither is
-    // set, no emoji is shown.
-    if (Array.isArray(g.remoteEntries)) {
-      for (const entry of g.remoteEntries) {
-        if (!entry || !entry.call) continue;
-        const call = String(entry.call).toUpperCase();
-        if (!watchlistGroupLookup.has(call)) {
-          watchlistGroupLookup.set(call, {
-            idx: i,
-            emoji: entry.emoji || groupEmoji,
-          });
-        }
-      }
-    }
-  }
+  watchlistGroupLookup = window.WatchlistGroups.buildGroupLookup(watchlistGroups);
   // Push the colors onto :root so the CSS classes pick them up. Done here
   // so any color-picker change shows up immediately without a reload.
   const root = document.documentElement;
@@ -3868,10 +3838,33 @@ function renderClusterNodeList(nodes) {
     loginInput.title = 'Log in to this node under a different callsign (e.g. ' +
       (myCall ? myCall + '-2' : 'WG9I-2') + ') so POTACAT does not collide with another app feeding the same node under your base call. Blank = My Callsign.';
     loginInput.addEventListener('input', () => {
-      node.loginCall = loginInput.value.trim().toUpperCase();
+      // Stored as typed — no longer uppercased: for password-auth feeds
+      // (HamAlert) this is an account username that may be case-sensitive.
+      // Cluster nodes treat callsigns case-insensitively, so nothing is
+      // lost for the plain-callsign case.
+      node.loginCall = loginInput.value.trim();
     });
     loginRow.appendChild(loginLabel);
     loginRow.appendChild(loginInput);
+
+    // Optional per-node password — only for feeds that authenticate for
+    // real, e.g. HamAlert (hamalert.org:7300, HamAlert username above +
+    // account password here). Blank for normal DX cluster nodes. (G5HOW.)
+    const pwLabel = document.createElement('span');
+    pwLabel.textContent = 'Password:';
+    pwLabel.style.marginLeft = '6px';
+    const pwInput = document.createElement('input');
+    pwInput.type = 'password';
+    pwInput.autocomplete = 'off';
+    pwInput.value = node.password || '';
+    pwInput.placeholder = '(none)';
+    pwInput.style.cssText = 'width:90px;font-size:11px;padding:1px 4px;';
+    pwInput.title = 'Only for nodes that require a real password login — e.g. HamAlert (hamalert.org, port 7300): put your HamAlert username in "Login as" and your HamAlert account password here. Leave blank for normal DX cluster nodes.';
+    pwInput.addEventListener('input', () => {
+      node.password = pwInput.value;
+    });
+    loginRow.appendChild(pwLabel);
+    loginRow.appendChild(pwInput);
     info.appendChild(loginRow);
 
     const dot = document.createElement('span');
@@ -12568,6 +12561,16 @@ window.api.onSmartSdrUnreachable(({ host, hint }) => {
     openSettingsDialog('radio');
   };
 });
+
+// Auto-dismiss the banner when the API comes back — the background probe
+// (or the phone's rig-reconnect) can revive it minutes after give-up, and a
+// stale red banner over a working radio reads as broken.
+if (window.api.onSmartSdrReachable) {
+  window.api.onSmartSdrReachable(() => {
+    const b = document.getElementById('smartsdr-banner');
+    if (b) b.remove();
+  });
+}
 
 // --- VFO Lock: tune-blocked toast ---
 window.api.onTuneBlocked((msg) => {

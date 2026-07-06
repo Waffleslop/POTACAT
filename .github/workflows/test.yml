@@ -34,6 +34,22 @@ jobs:
         run: node test/sstv-test.js
       - name: Run SSTV PSNR-quality matrix
         run: node test/sstv-quality-test.js
+      - name: Run log-comment suite
+        run: node test/log-comment-test.js
+      - name: Run rig-family suite
+        run: node test/rig-family-test.js
+      - name: Run DX cluster login suite
+        run: node test/dxcluster-login-test.js
+      - name: Run settings-secrets suite
+        run: node test/settings-secrets-test.js
+      - name: Run contest-history suite
+        run: node test/contest-history-test.js
+      - name: Run SmartSDR reconnect suite
+        run: node test/smartsdr-reconnect-test.js
+      - name: Run watchlist-groups suite
+        run: node test/watchlist-groups-test.js
+      - name: Run event-decode-match suite
+        run: node test/event-decode-match-test.js
 
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the

@@ -27,7 +27,10 @@
 
     /* Decode row styles */
     .jp-cycle-sep { padding: 2px 8px; font-size: 10px; color: var(--text-dim, #666); border-top: 1px solid var(--border-primary); margin-top: 2px; }
-    .jp-row { display: flex; gap: 6px; padding: 1px 8px; cursor: pointer; align-items: baseline; }
+    /* Constant border geometry (ft8-watchlist-stroke-parity spec): every row
+       reserves the 1.5px stroke in transparent so a watchlist match
+       appearing/disappearing never shifts layout. */
+    .jp-row { display: flex; gap: 6px; padding: 1px 8px; cursor: pointer; align-items: baseline; border: 1.5px solid transparent; border-radius: 6px; }
     .jp-row:hover { background: var(--bg-hover); }
     /* My Activity inlines the cycle time per row (no separator line) — see jp-my-activity. */
     .jp-row .jp-time { min-width: 52px; text-align: right; color: var(--text-dim, #666); font-size: 11px; font-variant-numeric: tabular-nums; padding-right: 4px; border-right: 1px solid var(--border-primary); margin-right: 2px; }
@@ -76,6 +79,32 @@
     .jp-wf-pane.wf-tx-active { outline: 2px solid #e94560; outline-offset: -2px; animation: wf-tx-pulse 1s ease-in-out infinite; }
     @keyframes wf-tx-pulse { 0%,100% { outline-color: #e94560; } 50% { outline-color: #ff8888; } }
     .jp-row.jp-watched { background: rgba(255, 64, 129, 0.12); }
+    /* Watchlist-group stroke + tint (mirrors ECHOCAT mobile — spec of record:
+       potacat-app docs/desktop-asks/ft8-watchlist-stroke-parity.md). Stroke
+       applies regardless of which tint won (placed after the tint rules so
+       it also wins the border-left of jp-chase/jp-spotted); the 12% tint
+       class is only ADDED by buildBandRow when the row is otherwise
+       un-tinted. Colors ride CSS vars set from settings.watchlistGroups. */
+    .jp-row.jp-wl-g0 { border-color: var(--jp-wl-color-0, #ff7066); }
+    .jp-row.jp-wl-g1 { border-color: var(--jp-wl-color-1, #82b1ff); }
+    .jp-row.jp-wl-g2 { border-color: var(--jp-wl-color-2, #b388ff); }
+    .jp-row.jp-wl-tint-g0 { background: color-mix(in srgb, var(--jp-wl-color-0, #ff7066) 12%, transparent); }
+    .jp-row.jp-wl-tint-g1 { background: color-mix(in srgb, var(--jp-wl-color-1, #82b1ff) 12%, transparent); }
+    .jp-row.jp-wl-tint-g2 { background: color-mix(in srgb, var(--jp-wl-color-2, #b388ff) 12%, transparent); }
+    .jp-wl-emoji { margin-left: 4px; }
+    /* Tracked-event station (needed / new band-mode): accent stroke, NO tint
+       — the row stays normal-looking; the [13C] badge carries the identity.
+       Watchlist-group stroke outranks this (class applied only when no
+       group matched — mobile-parity priority order). */
+    .jp-row.jp-event-needed { border-color: var(--accent-red, #e94560); }
+    /* Light-theme readability for the tinted rows (Casey 2026-07-06: a CQ
+       from a wanted station rendered light-green bold on a pale tint —
+       unreadable). The dark-theme msg colors were designed for dark
+       backgrounds; give light mode darker equivalents. */
+    [data-theme="light"] .jp-row.jp-cq .jp-msg { color: #0b7a4b; }
+    [data-theme="light"] .jp-row.jp-directed .jp-msg { color: #b3202e; }
+    [data-theme="light"] .jp-row.jp-chase .jp-msg { color: #8a6a00; }
+    [data-theme="light"] .jp-row.jp-new-park .jp-msg { color: #0b7a4b; }
     .jp-entity { font-size: 10px; color: var(--text-dim, #666); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 
     /* WSPR pane */
@@ -401,6 +430,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/watchlist-groups.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="cq-target.js"></script>
   <script src="../lib/wspr/stats.js"></script>

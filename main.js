@@ -260,6 +260,10 @@ const { qsoDayInScheduleEntry } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const RigFamily = require('./lib/rig-family');
+const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
+const { buildContestHistory } = require('./lib/contest-history');
+const { getAllContests } = require('./lib/contests-db');
+const { eventDecodeMatch } = require('./lib/event-decode-match');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -3491,6 +3495,11 @@ function connectCluster() {
       // distinct SSID (e.g. WG9I-2) to run both at once. Blank = base call.
       // (WG9I 2026-06-13.)
       callsign: (node.loginCall && node.loginCall.trim()) || settings.myCallsign,
+      // Optional per-node password — for feeds that authenticate for real,
+      // e.g. HamAlert's telnet cluster (hamalert.org:7300, HamAlert
+      // username in loginCall + account password). Blank for normal nodes.
+      // (G5HOW 2026-07-05.)
+      password: node.password || '',
     });
 
     clusterClients.set(node.id, { client, nodeConfig: node });
@@ -4427,6 +4436,10 @@ async function saveQsoRecord(qsoData, opts) {
 
   // Check if QSO matches any active event and auto-mark progress
   checkEventQso(qsoData);
+
+  // Contest history: lazy full rebuild (debounced 2 min) so a QSO logged
+  // mid-contest shows up in the phone's per-year tally without a restart.
+  scheduleContestHistoryRebuild();
 
   // Update worked QSOs map and notify renderer
   if (qsoData.callsign) {
@@ -5971,6 +5984,11 @@ function startJtcat(mode) {
         }
         // Chase target highlight (renderer/cq-target.js). One rule for popout + phone.
         if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
+        // Tracked-event station (13 Colonies etc.) — needed/new-slot/worked
+        // classification the popout renders as a [13C] badge and the phone
+        // treats as authoritative (ft8-watchlist-stroke-parity GO decision).
+        const em = eventDecodeMatch(activeEvents, settings.events, uc, currentBand, data.mode || 'FT8');
+        if (em) r.eventMatch = em;
       }
     }
 
@@ -6740,6 +6758,10 @@ function connectSmartSdr() {
     _daxFixTimes = [];
     _daxConflictWarned = false;
     sendCatLog('SmartSDR API connected (port 4992) — rig controls active');
+    // Clear the "SmartSDR API unreachable" banner — with the background
+    // probe (lib/smartsdr.js) and the phone's rig-reconnect command, a
+    // recovery can happen long after the banner went up.
+    if (win && !win.isDestroyed()) win.webContents.send('smartsdr-reachable');
     // Cleanup for stale slice audio_mute=1 that an earlier experimental
     // build (since reverted) wrote to the radio. The Flex's band
     // persistence retains the flag across POTACAT crashes and reboots,
@@ -8350,6 +8372,10 @@ function updateRemoteSettings() {
     // for the phone's subscribe UI. Phone notifies from its own feed (no relay-push).
     eventSubscriptions: _events.subscriptions,
     availableEvents: _events.available,
+    // Contest participation history — per-contest, per-year QSO summaries
+    // derived from the log (rebuildContestHistory). Read-only on the phone;
+    // null until the first scan completes or when the log has no matches.
+    contestHistory: _contestHistory || null,
     kiwiSdrHost1: settings.kiwiSdrHost1 || settings.kiwiSdrHost || '',
     kiwiSdrHost2: settings.kiwiSdrHost2 || '',
     kiwiSdrHost3: settings.kiwiSdrHost3 || '',
@@ -10207,6 +10233,25 @@ function connectRemote() {
     if (!filters) return;
     settings.echoFilters = filters;
     saveSettings(settings);
+  });
+
+  remoteServer.on('rig-reconnect', () => {
+    // Phone-initiated "my radio is back on, retry now" — same blessed pair
+    // the desktop settings-save and switch-rig paths use. connect() resets
+    // the SmartSDR client's give-up state, so this also revives a stranded
+    // post-storm session immediately instead of waiting for the next
+    // background probe. Safe for every rig type: connectCat() re-dials the
+    // active catTarget, connectSmartSdr() no-ops for non-Flex rigs.
+    sendCatLog('[Echo CAT] Rig reconnect requested from phone');
+    try { if (!settings.enableWsjtx) connectCat(); } catch (err) {
+      sendCatLog('[Echo CAT] rig-reconnect connectCat failed: ' + err.message);
+    }
+    try { connectSmartSdr(); } catch (err) {
+      sendCatLog('[Echo CAT] rig-reconnect connectSmartSdr failed: ' + err.message);
+    }
+    // Ack so the phone can toast "reconnecting…" — the actual outcome
+    // arrives via the existing cat-status / radio-status broadcasts.
+    remoteServer.sendToClient({ type: 'rig-reconnect-ack' });
   });
 
   remoteServer.on('switch-rig', ({ rigId }) => {
@@ -14797,6 +14842,7 @@ function createWindow() {
     pushEventsToRenderer();
     updateRemoteSettings(); // seed ECHOCAT catalog/subscriptions (no-op if remote server not up yet)
     scanLogForEvents();
+    rebuildContestHistory();
     // Load directory cache and fetch fresh data (only if enabled)
     if (settings.enableDirectory) {
       const dirCache = loadDirectoryCache();
@@ -15547,6 +15593,34 @@ function setEventItemManual(eventId, itemId, on) {
 
 /** Scan existing QSO log for contacts that match opted-in events.
  *  Rebuilds progress from scratch so only log-verified QSOs count. */
+// Contest participation history — per-contest, per-year QSO summaries for
+// the ECHOCAT CNTST view ("did I play CQ WW last year?"). Derived entirely
+// from the log + data/contests.json year windows; ships in the remote-
+// settings blob as `contestHistory`. Spec + token interpretations:
+// potacat-app docs/desktop-asks/contest-participation-history(-RESPONSE).md.
+let _contestHistory = null;
+let _contestHistoryTimer = null;
+function rebuildContestHistory() {
+  try {
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    const qsos = fs.existsSync(logPath) ? parseAllRawQsos(logPath) : [];
+    _contestHistory = buildContestHistory(getAllContests(), qsos);
+  } catch (err) {
+    console.error('[contest-history] rebuild failed:', err.message);
+    _contestHistory = null;
+  }
+  updateRemoteSettings(); // no-op when ECHOCAT isn't up
+}
+// Debounced rebuild for live logging — history is retrospective, so a lazy
+// bump of the current year is plenty (the ask marks live updates optional).
+function scheduleContestHistoryRebuild() {
+  if (_contestHistoryTimer) clearTimeout(_contestHistoryTimer);
+  _contestHistoryTimer = setTimeout(() => {
+    _contestHistoryTimer = null;
+    rebuildContestHistory();
+  }, 120 * 1000);
+}
+
 function scanLogForEvents() {
   if (!activeEvents.length || !settings.events) return;
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
@@ -22046,12 +22120,11 @@ app.whenReady().then(() => {
       filters: [{ name: 'JSON', extensions: ['json'] }],
     });
     if (result.canceled || !result.filePath) return false;
-    // Exclude sensitive data from export
-    const exportData = { ...settings };
-    delete exportData.qrzPassword;
-    delete exportData.remoteToken;
-    delete exportData.smartSdrClientId;
-    fs.writeFileSync(result.filePath, JSON.stringify(exportData, null, 2));
+    // Exclude sensitive data from export. ONE registry, not an ad-hoc
+    // blocklist — the old 3-key delete list rotted and shipped exports
+    // carrying sota/K4/RS-BA1/cluster passwords + ECHOCAT device tokens.
+    // New secrets get added in lib/settings-secrets.js, nowhere else.
+    fs.writeFileSync(result.filePath, JSON.stringify(stripSecrets(settings), null, 2));
     return true;
   });
 
@@ -22065,10 +22138,12 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths.length) return false;
     try {
       const imported = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf-8'));
-      // Preserve local-only fields
+      // Re-graft this machine's secrets wherever the (stripped) export
+      // lacks them — including INSIDE rigs[]/clusterNodes[], which the
+      // spread below replaces wholesale (an import used to silently wipe
+      // every stored rig password). Machine identity always stays local.
+      restoreSecrets(imported, settings);
       imported.smartSdrClientId = settings.smartSdrClientId;
-      if (!imported.remoteToken) imported.remoteToken = settings.remoteToken;
-      if (!imported.qrzPassword) imported.qrzPassword = settings.qrzPassword;
       settings = { ...settings, ...imported };
       saveSettings(settings);
       return true;
@@ -22922,8 +22997,9 @@ app.whenReady().then(() => {
     loadWorkedParks();
     const parksAfter = workedParks ? workedParks.size : 0;
     const parksAdded = Math.max(0, parksAfter - parksBefore);
-    // Scan imported QSOs for event matches
+    // Scan imported QSOs for event matches + contest history
     scanLogForEvents();
+    rebuildContestHistory();
 
     // Notify pop-out logbook to refresh (if open and not the caller)
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() &&
@@ -24042,6 +24118,10 @@ app.whenReady().then(() => {
               r.newGrid = !rosterWorkedGrids.has(r.grid);
             }
             if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
+            // Tracked-event classification — same call as the single-engine
+            // path, with this slice's band.
+            const em = eventDecodeMatch(activeEvents, settings.events, uc, r.band, data.mode || 'FT8');
+            if (em) r.eventMatch = em;
           }
         }
         // Forward to popout
