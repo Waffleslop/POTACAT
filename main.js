@@ -11019,6 +11019,17 @@ function connectRemote() {
         country: qrzInfo ? (qrzInfo.country || '') : '',
       };
 
+      // Shared QSO identity (dupe fix, K3SBP 2026-07-08): if the phone sends
+      // the UUID of ITS local copy, stamp our record with it so the phone's
+      // own cloud journal entry and ours are the SAME cloud record instead
+      // of two. Without this the desktop mints a fresh UUID here, the phone
+      // journals its copy under another, and every device ends up with the
+      // QSO twice (cloud merge only matches by UUID). The log-ok reply also
+      // echoes the final UUID so the phone can adopt ours instead.
+      if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) {
+        qsoData.uuid = data.uuid;
+      }
+
       // Pass through respot flags from phone
       if (data.respot) qsoData.respot = true;
       if (data.wwffRespot) { qsoData.wwffRespot = true; qsoData.wwffReference = data.wwffReference || ''; }
@@ -11047,7 +11058,9 @@ function connectRemote() {
           // Cross-product: one ADIF record per park
           for (let i = 0; i < parkRefs.length; i++) {
             const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
-            if (i > 0) parkQso.skipLogbookForward = true;
+            // Only the FIRST record keeps the shared uuid — the cross-product
+            // copies are distinct cloud records and must mint their own.
+            if (i > 0) { parkQso.skipLogbookForward = true; parkQso.uuid = undefined; }
             const r = await saveQsoRecord(parkQso, { origin: 'ws-log-qso' });
             if (r) Object.assign(result, r);
           }
@@ -11058,10 +11071,13 @@ function connectRemote() {
           const r = await saveQsoRecord(qsoData, { origin: 'ws-log-qso' });
           if (r) Object.assign(result, r);
         }
-        // Cross-program references (WWFF, LLOTA for same park)
+        // Cross-program references (WWFF, LLOTA for same park).
+        // uuid: undefined — saveQsoRecord mutates qsoData.uuid on the primary
+        // save above, so a plain spread would journal the SAME uuid twice and
+        // the cloud would collapse the cross-ref into the primary record.
         const crossRefs1 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
         for (const xr of crossRefs1) {
-          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
+          const xrQso = { ...qsoData, uuid: undefined, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
           if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
           else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
           else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
@@ -11073,14 +11089,15 @@ function connectRemote() {
         if (parkRefs.length > 0) {
           for (let i = 0; i < parkRefs.length; i++) {
             const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
-            if (i > 0) parkQso.skipLogbookForward = true;
+            if (i > 0) { parkQso.skipLogbookForward = true; parkQso.uuid = undefined; }
             const r = await saveQsoRecord(parkQso, { origin: 'ws-log-qso' });
             if (r) Object.assign(result, r);
           }
-          // Cross-program references (WWFF, LLOTA for same park)
+          // Cross-program references (WWFF, LLOTA for same park) — uuid
+          // stripped for the same reason as the mySig branch above.
           const crossRefs2 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
           for (const xr of crossRefs2) {
-            const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
+            const xrQso = { ...qsoData, uuid: undefined, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
             if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
             else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
             else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
@@ -11099,7 +11116,7 @@ function connectRemote() {
       const additionalParks = data.additionalParks || [];
       for (const addlRef of additionalParks) {
         if (!addlRef) continue;
-        const addlQso = { ...qsoData, sigInfo: addlRef, respot: false, wwffRespot: false,
+        const addlQso = { ...qsoData, uuid: undefined, sigInfo: addlRef, respot: false, wwffRespot: false,
           llotaRespot: false, dxcRespot: false, respotComment: '', skipLogbookForward: true };
         await saveQsoRecord(addlQso, { origin: 'ws-log-qso' });
       }
@@ -11130,6 +11147,9 @@ function connectRemote() {
         band: contact.band,
         rstSent: contact.rstSent,
         rstRcvd: contact.rstRcvd,
+        // Final identity of the logged record — lets the phone stamp its
+        // local copy with the SAME uuid so cloud sync sees one QSO, not two.
+        uuid: qsoData.uuid || '',
         resposted: result.resposted || false,
         respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
       });
