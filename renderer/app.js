@@ -19132,6 +19132,22 @@ const rigNrBtn     = document.getElementById('rig-nr-btn');
 const rigAnfBtn    = document.getElementById('rig-anf-btn');
 const rigApfBtn    = document.getElementById('rig-apf-btn');
 const rigVoxBtn    = document.getElementById('rig-vox-btn');
+// Flex pan-level WNB + radio-native dB RF gain steps.
+const rigWnbBtn        = document.getElementById('rig-wnb-btn');
+const rigWnbLevel      = document.getElementById('rig-wnblevel');
+const rigWnbLevelLabel = document.getElementById('rig-wnblevel-label');
+const rigRfGainSelect  = document.getElementById('rig-rfgain-select');
+// Extended firmware DSP (Flex 8000/Aurora): NRL/NRS/RNN/NRF toggles + levels.
+const rigNrlBtn    = document.getElementById('rig-nrl-btn');
+const rigNrsBtn    = document.getElementById('rig-nrs-btn');
+const rigRnnBtn    = document.getElementById('rig-rnn-btn');
+const rigNrfBtn    = document.getElementById('rig-nrf-btn');
+const rigNrlLevel       = document.getElementById('rig-nrllevel');
+const rigNrlLevelLabel  = document.getElementById('rig-nrllevel-label');
+const rigNrsLevel       = document.getElementById('rig-nrslevel');
+const rigNrsLevelLabel  = document.getElementById('rig-nrslevel-label');
+const rigNrfLevel       = document.getElementById('rig-nrflevel');
+const rigNrfLevelLabel  = document.getElementById('rig-nrflevel-label');
 const rigAgcSelect = document.getElementById('rig-agc-select');
 // Phase-2: continuous levels + monitor.
 const rigNrLevel       = document.getElementById('rig-nrlevel');
@@ -19357,9 +19373,31 @@ function rigApplyCapabilities(caps) {
   rigPopulatePowerChoices(caps);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
+  if (rigWnbBtn) rigWnbBtn.style.display = caps.wnb ? '' : 'none';
   rigPowerOnBtn.style.display = caps.power ? '' : 'none';
   rigPowerOffBtn.style.display = caps.power ? '' : 'none';
   rigRfGain.closest('.rig-popover-row').style.display = caps.rfgain ? '' : 'none';
+  // Radio-native RF gain steps (Flex): swap the 0-100 slider for a dB select
+  // populated from the model's step list. The slider's -10..+20 dB mapping
+  // can't reach +32 and lands between the radio's detents.
+  const hasGainSteps = Array.isArray(caps.rfgainSteps) && caps.rfgainSteps.length > 0;
+  if (rigRfGainSelect) {
+    if (hasGainSteps) {
+      const want = caps.rfgainSteps.map(String).join(',');
+      if (rigRfGainSelect.dataset.steps !== want) {
+        rigRfGainSelect.dataset.steps = want;
+        rigRfGainSelect.innerHTML = '';
+        for (const db of caps.rfgainSteps) {
+          const opt = document.createElement('option');
+          opt.value = String(db);
+          opt.textContent = (db > 0 ? '+' : '') + db + ' dB';
+          rigRfGainSelect.appendChild(opt);
+        }
+      }
+    }
+    rigRfGainSelect.classList.toggle('hidden', !hasGainSteps);
+    rigRfGain.classList.toggle('hidden', hasGainSteps);
+  }
   rigTxPower.closest('.rig-popover-row').style.display = caps.txpower ? '' : 'none';
   rigFilterPresets.closest('.rig-popover-row').style.display = caps.filter ? '' : 'none';
   // Phase-1 expanded modifiers — each button individually gated. Hide the
@@ -19388,6 +19426,15 @@ function rigApplyCapabilities(caps) {
   const anyModifier = caps.preamp || caps.att || caps.comp || caps.nr || caps.anf || caps.vox;
   const modRow = document.getElementById('rig-modifiers-row');
   if (modRow) modRow.style.display = anyModifier ? '' : 'none';
+  // Extended firmware DSP row (Flex 8000/Aurora) — hidden entirely for rigs
+  // without any of the four, individual buttons gated per-cap like the
+  // modifiers above.
+  if (rigNrlBtn) rigNrlBtn.style.display = caps.nrl ? '' : 'none';
+  if (rigNrsBtn) rigNrsBtn.style.display = caps.nrs ? '' : 'none';
+  if (rigRnnBtn) rigRnnBtn.style.display = caps.rnn ? '' : 'none';
+  if (rigNrfBtn) rigNrfBtn.style.display = caps.nrf ? '' : 'none';
+  const extDspRow = document.getElementById('rig-extdsp-row');
+  if (extDspRow) extDspRow.style.display = (caps.nrl || caps.nrs || caps.rnn || caps.nrf) ? '' : 'none';
   const agcRow = document.getElementById('rig-agc-row');
   if (agcRow) agcRow.style.display = caps.agc ? '' : 'none';
   // Phase-2 level + monitor rows — each gated by its own cap so a rig
@@ -19399,6 +19446,10 @@ function rigApplyCapabilities(caps) {
   };
   setRowDisplay('rig-nrlevel-row',  !!caps.nrLevel && !caps.dnrLevel);
   setRowDisplay('rig-nblevel-row',  !!caps.nbLevel);
+  setRowDisplay('rig-wnblevel-row', !!caps.wnbLevel);
+  setRowDisplay('rig-nrllevel-row', !!caps.nrlLevel);
+  setRowDisplay('rig-nrslevel-row', !!caps.nrsLevel);
+  setRowDisplay('rig-nrflevel-row', !!caps.nrfLevel);
   setRowDisplay('rig-voxlevel-row', !!caps.voxLevel);
   setRowDisplay('rig-monlevel-row', !!caps.monLevel);
   // Mon / RIT / CW ST share a row — show it if any is supported, and
@@ -19448,6 +19499,10 @@ function positionRigPopover() {
   const bar = rigPanelBtn.closest('.status-bar');
   const barRect = bar.getBoundingClientRect();
   rigPopover.style.top = (rect.bottom - barRect.top + 4) + 'px';
+  // Cap the popover to the space below the anchor so a short window gets a
+  // scrollbar (overflow-y in CSS) instead of controls clipped off-screen.
+  const maxH = Math.max(120, window.innerHeight - rect.bottom - 16);
+  rigPopover.style.maxHeight = maxH + 'px';
   // Align right edge to anchor right, clamped to parent
   const popW = rigPopover.offsetWidth || 280;
   let left = rect.right - barRect.left - popW;
@@ -19455,6 +19510,10 @@ function positionRigPopover() {
   if (left + popW > barRect.width) left = barRect.width - popW;
   rigPopover.style.left = left + 'px';
 }
+
+// Keep the height cap honest if the window is resized while the popover is
+// open (it repositions on every open anyway).
+window.addEventListener('resize', () => { if (rigPopoverOpen) positionRigPopover(); });
 
 function openRigPopover() {
   positionRigPopover();
@@ -19518,6 +19577,19 @@ _bindModifierBtn(rigNrBtn,     'set-nr');
 _bindModifierBtn(rigAnfBtn,    'set-anf');
 _bindModifierBtn(rigApfBtn,    'set-apf');
 _bindModifierBtn(rigVoxBtn,    'set-vox');
+_bindModifierBtn(rigNrlBtn,    'set-nrl');
+_bindModifierBtn(rigNrsBtn,    'set-nrs');
+_bindModifierBtn(rigRnnBtn,    'set-rnn');
+_bindModifierBtn(rigNrfBtn,    'set-nrf');
+_bindModifierBtn(rigWnbBtn,    'set-wnb');
+if (rigRfGainSelect) {
+  rigRfGainSelect.addEventListener('change', () => {
+    const db = parseInt(rigRfGainSelect.value, 10);
+    if (Number.isNaN(db)) return;
+    if (rigRfGainLabel) rigRfGainLabel.textContent = (db > 0 ? '+' : '') + db + ' dB';
+    window.api.rigControl({ action: 'set-rf-gain-db', value: db });
+  });
+}
 
 if (rigAgcSelect) {
   rigAgcSelect.addEventListener('change', () => {
@@ -19540,6 +19612,10 @@ function _bindLevelSlider(slider, label, action, unit) {
 }
 _bindLevelSlider(rigNrLevel,  rigNrLevelLabel,  'set-nr-level',  '');
 _bindLevelSlider(rigNbLevel,  rigNbLevelLabel,  'set-nb-level',  '');
+_bindLevelSlider(rigNrlLevel, rigNrlLevelLabel, 'set-nrl-level', '');
+_bindLevelSlider(rigNrsLevel, rigNrsLevelLabel, 'set-nrs-level', '');
+_bindLevelSlider(rigNrfLevel, rigNrfLevelLabel, 'set-nrf-level', '');
+_bindLevelSlider(rigWnbLevel, rigWnbLevelLabel, 'set-wnb-level', '');
 _bindLevelSlider(rigVoxLevel, rigVoxLevelLabel, 'set-vox-level', '');
 _bindLevelSlider(rigMonLevel, rigMonLevelLabel, 'set-mon-level', '');
 _bindModifierBtn(rigMonBtn, 'set-mon');
@@ -19652,6 +19728,21 @@ window.api.onRigState((state) => {
   _syncModBtn(rigNrBtn,     state.nr);
   _syncModBtn(rigAnfBtn,    state.anf);
   _syncModBtn(rigApfBtn,    state.apf);
+  _syncModBtn(rigNrlBtn,    state.nrl);
+  _syncModBtn(rigNrsBtn,    state.nrs);
+  _syncModBtn(rigRnnBtn,    state.rnn);
+  _syncModBtn(rigNrfBtn,    state.nrf);
+  _syncModBtn(rigWnbBtn,    state.wnb);
+  // dB-step RF gain select — don't clobber while the user has it focused.
+  if (rigRfGainSelect && state.rfgainDb != null && document.activeElement !== rigRfGainSelect) {
+    const v = String(state.rfgainDb);
+    if (rigRfGainSelect.value !== v) {
+      rigRfGainSelect.value = v;
+      if (rigRfGainLabel && !rigRfGainSelect.classList.contains('hidden')) {
+        rigRfGainLabel.textContent = (state.rfgainDb > 0 ? '+' : '') + state.rfgainDb + ' dB';
+      }
+    }
+  }
   _syncModBtn(rigVoxBtn,    state.vox);
   _syncModBtn(rigMonBtn,    state.mon);
   _syncModBtn(rigRitBtn,    state.rit);
@@ -19669,6 +19760,10 @@ window.api.onRigState((state) => {
   }
   _syncLevel(rigNrLevel,  rigNrLevelLabel,  state.nrLevel,  '');
   _syncLevel(rigNbLevel,  rigNbLevelLabel,  state.nbLevel,  '');
+  _syncLevel(rigNrlLevel, rigNrlLevelLabel, state.nrlLevel, '');
+  _syncLevel(rigNrsLevel, rigNrsLevelLabel, state.nrsLevel, '');
+  _syncLevel(rigNrfLevel, rigNrfLevelLabel, state.nrfLevel, '');
+  _syncLevel(rigWnbLevel, rigWnbLevelLabel, state.wnbLevel, '');
   _syncLevel(rigVoxLevel, rigVoxLevelLabel, state.voxLevel, '');
   _syncLevel(rigMonLevel, rigMonLevelLabel, state.monLevel, '');
   // FTX-1-class advanced controls — same "don't clobber while dragging" guard.

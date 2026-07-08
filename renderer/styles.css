@@ -6652,6 +6652,10 @@ a.settings-echocat-badge-link:hover {
   margin-top: 4px;
   min-width: 280px;
   box-shadow: 0 4px 16px var(--shadow-heavy);
+  /* Short windows: positionRigPopover() caps max-height to the space below
+     the anchor; this makes the overflow scroll instead of clipping. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .rig-popover.hidden {

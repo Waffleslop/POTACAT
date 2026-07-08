@@ -209,6 +209,7 @@
           <div class="rig-popover-row rig-popover-buttons">
             <button id="rig-atu-btn" class="rig-btn" title="Start ATU tune cycle">ATU Tune</button>
             <button id="rig-nb-btn" class="rig-btn" title="Toggle Noise Blanker">NB</button>
+            <button id="rig-wnb-btn" class="rig-btn" title="Wideband Noise Blanker (whole panadapter)">WNB</button>
             <button id="rig-power-on-btn" class="rig-btn" title="Power On">Power On</button>
             <button id="rig-power-off-btn" class="rig-btn rig-btn-danger" title="Power Off">Power Off</button>
           </div>
@@ -221,9 +222,16 @@
             <button id="rig-apf-btn" class="rig-btn" title="Audio Peak Filter (CW)">APF</button>
             <button id="rig-vox-btn" class="rig-btn" title="Voice-Operated Transmit">VOX</button>
           </div>
+          <div class="rig-popover-row rig-popover-buttons" id="rig-extdsp-row">
+            <button id="rig-nrl-btn" class="rig-btn" title="LMS Adaptive Noise Reduction">NRL</button>
+            <button id="rig-nrs-btn" class="rig-btn" title="Spectral Noise Reduction — kills noise between words">NRS</button>
+            <button id="rig-rnn-btn" class="rig-btn" title="Neural-Net Noise Reduction (voice-trained)">RNN</button>
+            <button id="rig-nrf-btn" class="rig-btn" title="NRF Noise Reduction">NRF</button>
+          </div>
           <div class="rig-popover-row" id="rig-rfgain-row">
             <label>RF Gain</label>
             <input type="range" id="rig-rfgain" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <select id="rig-rfgain-select" class="hidden" title="Preamp / attenuation in radio-native dB steps" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;"></select>
             <span id="rig-rfgain-label">0</span>
           </div>
           <div class="rig-popover-row" id="rig-txpower-row">
@@ -271,6 +279,26 @@
             <label>NB Lvl</label>
             <input type="range" id="rig-nblevel" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
             <span id="rig-nblevel-label">0</span>
+          </div>
+          <div class="rig-popover-row" id="rig-wnblevel-row">
+            <label>WNB Lvl</label>
+            <input type="range" id="rig-wnblevel" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-wnblevel-label">0</span>
+          </div>
+          <div class="rig-popover-row" id="rig-nrllevel-row">
+            <label>NRL Lvl</label>
+            <input type="range" id="rig-nrllevel" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-nrllevel-label">0</span>
+          </div>
+          <div class="rig-popover-row" id="rig-nrslevel-row">
+            <label>NRS Lvl</label>
+            <input type="range" id="rig-nrslevel" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-nrslevel-label">0</span>
+          </div>
+          <div class="rig-popover-row" id="rig-nrflevel-row">
+            <label>NRF Lvl</label>
+            <input type="range" id="rig-nrflevel" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-nrflevel-label">0</span>
           </div>
           <div class="rig-popover-row" id="rig-voxlevel-row">
             <label>VOX Lvl</label>

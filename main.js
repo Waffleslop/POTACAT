@@ -1085,6 +1085,24 @@ let _currentCompState = false;
 let _currentNrState = false;
 let _currentAnfState = false;
 let _currentApfState = false;
+// Extended firmware DSP (Flex 8000/Aurora slice filters: lms_nr / speex_nr /
+// rnnoise / nrf). Write-tracked like the classic modifiers above — POTACAT
+// mirrors what it last sent; toggles made in AetherSDR/SmartSDR+ directly are
+// not read back (same limitation as nr/anf today).
+let _currentNrlState = false;
+let _currentNrsState = false;
+let _currentRnnState = false;
+let _currentNrfState = false;
+let _currentNrlLevel = 0;
+let _currentNrsLevel = 0;
+let _currentNrfLevel = 0;
+// WNB (pan-level wideband noise blanker, all Flex models) — unlike the slice
+// DSP toggles this one has real readback: pan status echoes wnb/wnb_level.
+let _currentWnbState = false;
+let _currentWnbLevel = 0;
+// Flex RF gain in radio-native dB steps (set-rf-gain-db). null = never set;
+// the legacy 0-100 set-rf-gain path continues to track _currentRfGain.
+let _currentRfGainDb = null;
 let _currentSliceDax = null;   // DAX channel the Flex slice is routed to (0 = off, null = unknown)
 let _daxRouteOk = true;        // false when the slice's DAX channel != the one we listen on (silent RX)
 let _daxFixAttempted = false;  // debounce: one auto-fix per mismatch episode
@@ -1745,6 +1763,16 @@ function broadcastRigState() {
     nr: _currentNrState,
     anf: _currentAnfState,
     apf: _currentApfState,
+    nrl: _currentNrlState,
+    nrs: _currentNrsState,
+    rnn: _currentRnnState,
+    nrf: _currentNrfState,
+    nrlLevel: _currentNrlLevel,
+    nrsLevel: _currentNrsLevel,
+    nrfLevel: _currentNrfLevel,
+    wnb: _currentWnbState,
+    wnbLevel: _currentWnbLevel,
+    rfgainDb: _currentRfGainDb,
     vox: _currentVoxState,
     agc: _currentAgcMode,
     sliceDax: _currentSliceDax,
@@ -6951,6 +6979,18 @@ function connectSmartSdr() {
     }
     broadcastRigState();
   });
+  // WNB readback — pan status echoes wnb/wnb_level, so the toggle stays in
+  // sync even when the op flips it in SmartSDR/AetherSDR. Only the pan our
+  // followed slice rides on counts (a second panadapter's WNB is not ours),
+  // and we only rebroadcast on actual change — pan status lines are chatty
+  // (every center-freq drag) and must not become a broadcast storm.
+  smartSdr.on('pan-status', ({ panId, wnb, wnbLevel }) => {
+    if (smartSdr.ourPanId && panId !== smartSdr.ourPanId) return;
+    let changed = false;
+    if (wnb !== undefined && wnb !== _currentWnbState) { _currentWnbState = wnb; changed = true; }
+    if (wnbLevel !== undefined && wnbLevel !== _currentWnbLevel) { _currentWnbLevel = wnbLevel; changed = true; }
+    if (changed) broadcastRigState();
+  });
   // Mirror the self-hosted slice's frequency/mode to the UI when there is no
   // SmartSDR-Win CAT shim (port 5002) feeding `cat`.
   // In multiFlex (self-host alongside SmartSDR) the port-5002 CAT shim reads
@@ -12123,6 +12163,18 @@ function broadcastRemoteRadioStatus() {
     nr: _currentNrState,
     anf: _currentAnfState,
     apf: _currentApfState,
+    // Extended firmware DSP (Flex 8000/Aurora) — cap-gated on the phone via
+    // capabilities.nrl/nrs/rnn/nrf; state keys match the caps names.
+    nrl: _currentNrlState,
+    nrs: _currentNrsState,
+    rnn: _currentRnnState,
+    nrf: _currentNrfState,
+    nrlLevel: _currentNrlLevel,
+    nrsLevel: _currentNrsLevel,
+    nrfLevel: _currentNrfLevel,
+    wnb: _currentWnbState,
+    wnbLevel: _currentWnbLevel,
+    rfgainDb: _currentRfGainDb,
     comp: _currentCompState,
     vox: _currentVoxState,
     agc: _currentAgcMode,
@@ -12146,9 +12198,11 @@ function broadcastRemoteRadioStatus() {
     capabilities: getRigCapabilities(rigType),
     // Rig-control registry — lets the ECHOCAT phone render its rig panel
     // data-driven (labels/group/txOnly/caps per action) from one source of
-    // truth instead of a hardcoded subset, so new controls appear on mobile
-    // automatically and the two sides can't drift. Static object; the phone
-    // caches it. (Desktop-handoff: rig-controls-registry-on-phone-status.)
+    // truth instead of a hardcoded subset. Static object; the phone caches
+    // it. NOTE: the iOS panel does NOT yet actually render from this — new
+    // controls (extended DSP, Casey on-device 2026-07-07) stayed invisible
+    // on the phone. Mobile work item:
+    // potacat-meta/work/open/extended-dsp-controls-ios.md.
     controls: RIG_CONTROLS,
     // Audio bridge health. audioOk = "is audio actually flowing right
     // now"; audioExpected = "should audio be flowing" (CAT connected,
@@ -20854,6 +20908,114 @@ app.whenReady().then(() => {
         broadcastRigState();
         break;
       }
+      // --- Extended firmware DSP (Flex 8000/Aurora: lms_nr/speex_nr/rnnoise/nrf) ---
+      // Flex-only, caps-gated: the params exist only in BigBend/DragonFire
+      // firmware, so a stale client sending them at a 6000 is dropped here
+      // rather than bounced off the radio.
+      case 'set-nrl': {
+        if (!getRigCapabilities(rigType).nrl) break;
+        if (flexNeedsApi) { _flexWarnOnce('NRL requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) smartSdr.setNrl(0, on);
+        _currentNrlState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-nrl-level': {
+        if (!getRigCapabilities(rigType).nrlLevel) break;
+        if (flexNeedsApi) { _flexWarnOnce('NRL level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setNrlLevel(0, pct);
+        _currentNrlLevel = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-nrs': {
+        if (!getRigCapabilities(rigType).nrs) break;
+        if (flexNeedsApi) { _flexWarnOnce('NRS requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) smartSdr.setNrs(0, on);
+        _currentNrsState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-nrs-level': {
+        if (!getRigCapabilities(rigType).nrsLevel) break;
+        if (flexNeedsApi) { _flexWarnOnce('NRS level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setNrsLevel(0, pct);
+        _currentNrsLevel = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-rnn': {
+        if (!getRigCapabilities(rigType).rnn) break;
+        if (flexNeedsApi) { _flexWarnOnce('RNN requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) smartSdr.setRnn(0, on);
+        _currentRnnState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-nrf': {
+        if (!getRigCapabilities(rigType).nrf) break;
+        if (flexNeedsApi) { _flexWarnOnce('NRF requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) smartSdr.setNrf(0, on);
+        _currentNrfState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-nrf-level': {
+        if (!getRigCapabilities(rigType).nrfLevel) break;
+        if (flexNeedsApi) { _flexWarnOnce('NRF level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setNrfLevel(0, pct);
+        _currentNrfLevel = pct;
+        broadcastRigState();
+        break;
+      }
+      case 'set-wnb': {
+        if (!getRigCapabilities(rigType).wnb) break;
+        if (flexNeedsApi) { _flexWarnOnce('WNB requires SmartSDR API — not connected'); break; }
+        const on = !!data.value;
+        if (flexSdr()) {
+          smartSdr.setWnb(on);
+          // Same as NB/NR: an enable at level 0 does nothing audible.
+          if (on && _currentWnbLevel <= 0) {
+            const lvl = Number(settings.wnbLevelDefault) || 50;
+            smartSdr.setWnbLevel(lvl);
+            _currentWnbLevel = lvl;
+          }
+        }
+        _currentWnbState = on;
+        broadcastRigState();
+        break;
+      }
+      case 'set-wnb-level': {
+        if (!getRigCapabilities(rigType).wnbLevel) break;
+        if (flexNeedsApi) { _flexWarnOnce('WNB level requires SmartSDR API — not connected'); break; }
+        const pct = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) smartSdr.setWnbLevel(pct);
+        _currentWnbLevel = pct;
+        if (pct > 0) { settings.wnbLevelDefault = pct; saveSettings(settings); } // remember for next enable
+        broadcastRigState();
+        break;
+      }
+      case 'set-rf-gain-db': {
+        // Radio-native preamp/attenuator step (caps.rfgainSteps). Validated
+        // against the model's step list so a bad client can't send the Flex
+        // an out-of-range gain.
+        const caps = getRigCapabilities(rigType);
+        if (!Array.isArray(caps.rfgainSteps) || !caps.rfgainSteps.length) break;
+        if (flexNeedsApi) { _flexWarnOnce('RF Gain requires SmartSDR API — not connected'); break; }
+        const db = Number(data.value);
+        if (!caps.rfgainSteps.includes(db)) break;
+        if (flexSdr()) smartSdr.setRfGain(0, db);
+        _currentRfGainDb = db;
+        broadcastRigState();
+        break;
+      }
       case 'set-vox': {
         if (flexNeedsApi) { _flexWarnOnce('VOX requires SmartSDR API — not connected'); break; }
         const on = !!data.value;
@@ -21082,6 +21244,7 @@ app.whenReady().then(() => {
       const v = data.value != null ? '=' + data.value : '';
       sendCatLog(`rig-control[${source}] ${data.action}${v} -> `
         + `nb=${_currentNbState ? 1 : 0} nr=${_currentNrState ? 1 : 0} anf=${_currentAnfState ? 1 : 0} `
+        + `nrl=${_currentNrlState ? 1 : 0} nrs=${_currentNrsState ? 1 : 0} rnn=${_currentRnnState ? 1 : 0} nrf=${_currentNrfState ? 1 : 0} `
         + `comp=${_currentCompState ? 1 : 0} vox=${_currentVoxState ? 1 : 0} agc=${_currentAgcMode || '-'} `
         + `filt=${_currentFilterWidth} (flexApi=${smartSdr && smartSdr.connected ? 1 : 0})`);
     }
