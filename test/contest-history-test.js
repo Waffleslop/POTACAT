@@ -119,5 +119,40 @@ console.log('scan cost sanity (not asserted):');
   console.log(`  20k QSOs × ${catalog.length} contests × 11 years: ${Date.now() - t0} ms`);
 }
 
+console.log('provenance-first attribution (APP_POTACAT_EVENT, events-roadmap #5):');
+{
+  // A record stamped at log time with a KNOWN catalog contest id attributes
+  // directly — mode/band heuristics are bypassed (the stamp is
+  // identity-proven). This CW QSO during CQ WW SSB would normally be
+  // mode-filtered out.
+  const stamped = { ...qso('20251025', '20m', 'CW'), APP_POTACAT_EVENT: 'cq-ww-ssb' };
+  const h = buildContestHistory(catalog, [stamped], { generatedAt: 1 });
+  check(!!(h && h.contests['cq-ww-ssb'] && h.contests['cq-ww-ssb']['2025']
+    && h.contests['cq-ww-ssb']['2025'].qsos === 1),
+    'stamped record attributes despite failing the mode filter');
+}
+{
+  // A stamped record only counts ONCE (provenance path skips heuristics) —
+  // no double attribution when the record would also match heuristically.
+  const stamped = { ...qso('20251025', '20m', 'SSB'), APP_POTACAT_EVENT: 'cq-ww-ssb' };
+  const h = buildContestHistory(catalog, [stamped], { generatedAt: 1 });
+  check(h.contests['cq-ww-ssb']['2025'].qsos === 1, 'stamp + heuristic match still counts once');
+}
+{
+  // Unknown stamp id (today's special events — 13col-2026 etc.): falls
+  // through to heuristics unchanged. Activates fully under roadmap #1.
+  const stamped = { ...qso('20251025', '20m', 'SSB'), APP_POTACAT_EVENT: '13col-2026' };
+  const h = buildContestHistory(catalog, [stamped], { generatedAt: 1 });
+  check(!!(h && h.contests['cq-ww-ssb'] && h.contests['cq-ww-ssb']['2025']
+    && h.contests['cq-ww-ssb']['2025'].qsos === 1),
+    'unknown stamp id falls back to heuristic attribution');
+}
+{
+  // Stamp naming a contest whose window does NOT cover the day → heuristics.
+  const stamped = { ...qso('20250615', '20m', 'SSB'), APP_POTACAT_EVENT: 'cq-ww-ssb' };
+  const h = buildContestHistory(catalog, [stamped], { generatedAt: 1 });
+  check(!(h && h.contests && h.contests['cq-ww-ssb']), 'out-of-window stamp does not force attribution');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'contest-history tests failed');

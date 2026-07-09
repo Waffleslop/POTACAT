@@ -15502,9 +15502,30 @@ function toggleEventOverlay(forceOpen) {
   }
 }
 
+// Events-catalog freshness (events-roadmap #5) — set via active-events-meta;
+// a stale note renders in the events section when refetches have failed >24h.
+let eventsFetchedAt = 0;
+if (window.api.onActiveEventsMeta) {
+  window.api.onActiveEventsMeta((meta) => {
+    eventsFetchedAt = (meta && meta.fetchedAt) || 0;
+    updateSpotsEventsSection();
+  });
+}
+
 function updateSpotsEventsSection() {
   const container = document.getElementById('spots-events-container');
   container.innerHTML = '';
+
+  // Stale-catalog note: only when the last successful fetch is >24h old —
+  // silence is the normal, fresh case.
+  if (eventsFetchedAt && (Date.now() - eventsFetchedAt) > 24 * 3600000) {
+    const staleNote = document.createElement('div');
+    staleNote.style.cssText = 'font-size:10px;color:var(--warn,#f0a500);padding:2px 0 4px;';
+    const hours = Math.round((Date.now() - eventsFetchedAt) / 3600000);
+    staleNote.textContent = `⚠ event data is ${hours >= 48 ? Math.round(hours / 24) + ' days' : hours + 'h'} old (last refresh failed — check connection)`;
+    staleNote.title = 'POTACAT could not refresh the event catalog from potacat.com. Schedules and station lists may be outdated.';
+    container.appendChild(staleNote);
+  }
 
   // Filter to events that are active or upcoming within 7 days
   const now = new Date();

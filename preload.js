@@ -287,6 +287,7 @@ contextBridge.exposeInMainWorld('api', {
   getDirectory: () => ipcRenderer.invoke('get-directory'),
   // Events system
   onActiveEvents: (cb) => ipcRenderer.on('active-events', (_e, data) => cb(data)),
+  onActiveEventsMeta: (cb) => ipcRenderer.on('active-events-meta', (_e, data) => cb(data)),
   getActiveEvents: () => ipcRenderer.invoke('get-active-events'),
   setEventOptIn: (data) => ipcRenderer.invoke('set-event-optin', data),
   setEventWatchlist: (data) => ipcRenderer.invoke('set-event-watchlist', data),

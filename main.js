@@ -15116,6 +15116,9 @@ function createWindow() {
     const cachedEvents = loadEventsCache();
     if (cachedEvents.events && cachedEvents.events.length) {
       activeEvents = cachedEvents.events;
+      // Seed fetch-freshness from the cache so the staleness warning/note
+      // survive a restart while offline.
+      if (cachedEvents.fetchedAt) _eventsFetchedAt = cachedEvents.fetchedAt;
     }
     fetchActiveEvents();
     setInterval(fetchActiveEvents, 4 * 3600000); // refresh every 4 hours
@@ -15645,6 +15648,30 @@ function saveEventsCache(data) {
   try { fs.writeFileSync(EVENTS_CACHE_PATH, JSON.stringify(data, null, 2)); } catch { /* ignore */ }
 }
 
+// Events-fetch health (events-roadmap #5): the refetch used to fail in total
+// silence forever — an offline shack ran on cached definitions with no hint.
+// Track the last SUCCESSFUL fetch (persisted in the cache file) and warn once
+// in the cat log when refetches have been failing for >24 h; the renderer
+// shows an "events data as of …" note when stale (active-events-meta).
+let _eventsFetchedAt = 0;
+let _eventsStaleWarned = false;
+const EVENTS_STALE_MS = 24 * 3600000;
+
+function _eventsFetchFailed(reason) {
+  if (_eventsFetchedAt && Date.now() - _eventsFetchedAt > EVENTS_STALE_MS && !_eventsStaleWarned) {
+    _eventsStaleWarned = true;
+    const hours = Math.round((Date.now() - _eventsFetchedAt) / 3600000);
+    sendCatLog(`[events] ⚠ Event catalog refresh has been failing for ${hours}h (${reason}) — running on cached definitions from ${new Date(_eventsFetchedAt).toISOString().slice(0, 16)}Z`);
+  }
+  pushEventsMeta();
+}
+
+function pushEventsMeta() {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('active-events-meta', { fetchedAt: _eventsFetchedAt });
+  }
+}
+
 function fetchActiveEvents() {
   const https = require('https');
   const req = https.get('https://potacat.com/events/active.json', (res) => {
@@ -15655,15 +15682,20 @@ function fetchActiveEvents() {
         const data = JSON.parse(body);
         if (data && Array.isArray(data.events)) {
           activeEvents = data.events;
-          saveEventsCache(data);
+          _eventsFetchedAt = Date.now();
+          _eventsStaleWarned = false;
+          saveEventsCache({ ...data, fetchedAt: _eventsFetchedAt });
           pushEventsToRenderer();
+          pushEventsMeta();
           updateRemoteSettings(); // refresh ECHOCAT catalog/subscriptions on the live 4h event refresh
           scanLogForEvents();
+        } else {
+          _eventsFetchFailed('unexpected payload');
         }
-      } catch { /* silently ignore parse errors */ }
+      } catch { _eventsFetchFailed('parse error'); }
     });
   });
-  req.on('error', () => { /* silently ignore — use cache */ });
+  req.on('error', () => { _eventsFetchFailed('network error'); });
 }
 
 function pushEventsToRenderer() {
