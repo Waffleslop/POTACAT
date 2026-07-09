@@ -142,6 +142,12 @@ ftx_message_rc_t ftx_message_encode(ftx_message_t* msg, ftx_callsign_hash_interf
     char call_de[12];
     char extra[20];
 
+    // A semicolon only ever appears in the Fox/Hound dual message
+    // ("K1ABC RR73; W9XYZ <KH1/KH7Z> -08") — route it before the standard
+    // tokenizer, which would mangle "RR73;".
+    if (strchr(message_text, ';') != NULL)
+        return ftx_message_encode_dxpedition(msg, hash_if, message_text);
+
     const char* parse_position = message_text;
     const bool is_cq = starts_with(message_text, "CQ ");
     if (is_cq) {
@@ -236,6 +242,19 @@ ftx_message_rc_t ftx_message_encode_std(ftx_message_t* msg, ftx_callsign_hash_in
     if (n28b < 0)
         return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
 
+    // At most one hashed callsign per message (WSJT-X rule). Two hashes would
+    // "encode" but decode as <...> <...> rubbish; failing here lets the
+    // dispatcher fall through to a type-4 message, which carries the
+    // nonstandard call in full. Same for a CQ from a nonstandard call
+    // ("CQ GB13COL"): a hashed CQ is unresolvable by fresh listeners, so it
+    // must go out as type 4 (icq path, full call, grid dropped).
+    bool hash_a = ((uint32_t)n28a >= NTOKENS) && ((uint32_t)n28a < NTOKENS + MAX22);
+    bool hash_b = ((uint32_t)n28b >= NTOKENS) && ((uint32_t)n28b < NTOKENS + MAX22);
+    if (hash_a && hash_b)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+    if (hash_b && ((uint32_t)n28a < NTOKENS))
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2; // token (CQ/QRZ/DE) + hashed call
+
     uint8_t i3 = 1; // No suffix or /R
     if (ends_with(call_to, "/P") || ends_with(call_de, "/P"))
     {
@@ -310,7 +329,7 @@ ftx_message_rc_t ftx_message_encode_nonstd(ftx_message_t* msg, ftx_callsign_hash
     {
         // choose which of the callsigns to encode as plain-text (58 bits) or hash (12 bits)
         iflip = 0; // call_de will be sent plain-text
-        if (call_de[0] == '<' && call_de[len_call_to - 1] == '>')
+        if (call_de[0] == '<' && call_de[len_call_de - 1] == '>') // (was len_call_to — upstream bug)
         {
             iflip = 1;
         }
@@ -318,6 +337,17 @@ ftx_message_rc_t ftx_message_encode_nonstd(ftx_message_t* msg, ftx_callsign_hash
         const char* call12;
         call12 = (iflip == 0) ? call_to : call_de;
         call58 = (iflip == 0) ? call_de : call_to;
+
+        // The hashed call may arrive bracket-wrapped ("<K3SBP>") from the
+        // message generator — strip before hashing (base-38 has no '<').
+        char call12_bare[12];
+        int len12 = strlen(call12);
+        if (call12[0] == '<' && len12 >= 3 && call12[len12 - 1] == '>' && (len12 - 2) <= 11)
+        {
+            memcpy(call12_bare, call12 + 1, len12 - 2);
+            call12_bare[len12 - 2] = '\0';
+            call12 = call12_bare;
+        }
         if (!save_callsign(hash_if, call12, NULL, &n12, NULL))
         {
             return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
@@ -511,11 +541,131 @@ ftx_message_rc_t ftx_message_encode_arrl_fd(ftx_message_t* msg, ftx_callsign_has
     return FTX_MESSAGE_RC_OK;
 }
 
+ftx_message_rc_t ftx_message_encode_dxpedition(ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, const char* message_text)
+{
+    // FT8 DXpedition (Fox/Hound) dual message, type i3=0 n3=1
+    // (packjt77.f90 pack77_01): c28 c28 h10 r5 n3(3) i3(3) == 77 bits.
+    //   "K1ABC RR73; W9XYZ <KH1/KH7Z> -08"
+    // call_1 gets RR73, call_2 gets a report from the h10-hashed Fox call.
+    char tok[16];
+    const char* p = trim_front(message_text, ' ');
+
+    char call1[12];
+    p = copy_token(call1, sizeof(call1), p);
+    if (call1[0] == '\0' || call1[sizeof(call1) - 1] != '\0')
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+
+    p = copy_token(tok, sizeof(tok), p);
+    if (!equals(tok, "RR73;"))
+        return FTX_MESSAGE_RC_ERROR_TYPE;
+
+    char call2[12];
+    p = copy_token(call2, sizeof(call2), p);
+    if (call2[0] == '\0' || call2[sizeof(call2) - 1] != '\0')
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+
+    // Fox callsign, bracket-wrapped ("<KH1/KH7Z>") — carried as a 10-bit hash
+    p = copy_token(tok, sizeof(tok), p);
+    int foxlen = (int)strlen(tok);
+    if (foxlen < 3 || tok[0] != '<' || tok[foxlen - 1] != '>' || (foxlen - 2) > 11)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+    char foxcall[12];
+    memcpy(foxcall, tok + 1, foxlen - 2);
+    foxcall[foxlen - 2] = '\0';
+    uint16_t n10;
+    if (!save_callsign(hash_if, foxcall, NULL, NULL, &n10))
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+
+    // Signed report, −30..+32 dB in 2 dB steps
+    p = copy_token(tok, sizeof(tok), p);
+    if (tok[0] != '+' && tok[0] != '-')
+        return FTX_MESSAGE_RC_ERROR_GRID;
+    int rpt = 0;
+    for (int i = 1; tok[i] != '\0'; ++i)
+    {
+        if (!is_digit(tok[i]))
+            return FTX_MESSAGE_RC_ERROR_GRID;
+        rpt = rpt * 10 + (tok[i] - '0');
+    }
+    if (tok[0] == '-')
+        rpt = -rpt;
+    int r5 = (rpt + 30) / 2;
+    if (r5 < 0) r5 = 0;
+    if (r5 > 31) r5 = 31;
+
+    uint8_t ipa, ipb;
+    int32_t n28a = pack28(call1, hash_if, &ipa);
+    int32_t n28b = pack28(call2, hash_if, &ipb);
+    if (n28a < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+    if (n28b < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+
+    uint32_t a = (uint32_t)n28a & 0x0FFFFFFFu;
+    uint32_t b = (uint32_t)n28b & 0x0FFFFFFFu;
+    uint8_t n3 = 1;
+    uint8_t i3 = 0;
+
+    // Pack 28 + 28 + 10 + 5 + 3 + 3 == 77 bits, MSB-first
+    msg->payload[0] = (uint8_t)(a >> 20);
+    msg->payload[1] = (uint8_t)(a >> 12);
+    msg->payload[2] = (uint8_t)(a >> 4);
+    msg->payload[3] = (uint8_t)((a << 4) | (b >> 24));
+    msg->payload[4] = (uint8_t)(b >> 16);
+    msg->payload[5] = (uint8_t)(b >> 8);
+    msg->payload[6] = (uint8_t)(b);
+    msg->payload[7] = (uint8_t)(n10 >> 2);
+    msg->payload[8] = (uint8_t)(((n10 & 0x03u) << 6) | (((uint8_t)r5 & 0x1Fu) << 1) | ((n3 >> 2) & 0x01u));
+    msg->payload[9] = (uint8_t)(((n3 & 0x03u) << 6) | (i3 << 3));
+
+    return FTX_MESSAGE_RC_OK;
+}
+
+ftx_message_rc_t ftx_message_decode_dxpedition(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message)
+{
+    // Inverse of ftx_message_encode_dxpedition — builds the whole
+    // "CALL1 RR73; CALL2 <FOXCALL> ±NN" string into `message`.
+    uint32_t n28a = ((uint32_t)msg->payload[0] << 20) | ((uint32_t)msg->payload[1] << 12)
+        | ((uint32_t)msg->payload[2] << 4) | ((uint32_t)msg->payload[3] >> 4);
+    uint32_t n28b = (((uint32_t)msg->payload[3] & 0x0Fu) << 24) | ((uint32_t)msg->payload[4] << 16)
+        | ((uint32_t)msg->payload[5] << 8) | (uint32_t)msg->payload[6];
+    uint16_t n10 = (uint16_t)(((uint16_t)msg->payload[7] << 2) | (msg->payload[8] >> 6));
+    int r5 = (msg->payload[8] >> 1) & 0x1F;
+    int rpt = 2 * r5 - 30;
+
+    char call1[14];
+    char call2[14];
+    char foxcall[14];
+    ftx_field_t ft;
+    if (unpack28(n28a, 0, 1, hash_if, call1, &ft) < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+    if (unpack28(n28b, 0, 1, hash_if, call2, &ft) < 0)
+        return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
+    lookup_callsign(hash_if, FTX_CALLSIGN_HASH_10_BITS, n10, foxcall); // "<CALL>" or "<...>"
+
+    char* pos = message;
+    pos = append_string(pos, call1);
+    pos = append_string(pos, " RR73; ");
+    pos = append_string(pos, call2);
+    pos = append_string(pos, " ");
+    pos = append_string(pos, foxcall);
+    pos = append_string(pos, " ");
+    char rptbuf[8];
+    rptbuf[0] = (rpt < 0) ? '-' : '+';
+    int mag = (rpt < 0) ? -rpt : rpt;
+    rptbuf[1] = (char)('0' + (mag / 10));
+    rptbuf[2] = (char)('0' + (mag % 10));
+    rptbuf[3] = '\0';
+    append_string(pos, rptbuf);
+
+    return FTX_MESSAGE_RC_OK;
+}
+
 ftx_message_rc_t ftx_message_decode(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message, ftx_message_offsets_t* offsets)
 {
     ftx_message_rc_t rc;
 
-    char buf[35]; // 13 + 13 + 6 (std/nonstd) / 14 (free text) / 19 (telemetry)
+    char buf[64]; // std/nonstd fields; FD + DXpedition write the full line into field1
     char* field1 = buf;
     char* field2 = buf + 14;
     char* field3 = buf + 14 + 14;
@@ -551,6 +701,12 @@ ftx_message_rc_t ftx_message_decode(const ftx_message_t* msg, ftx_callsign_hash_
     case FTX_MESSAGE_TYPE_ARRL_FD:
         // Build the whole "call1 call2 [R ]<ntx><class> section" string into field1.
         rc = ftx_message_decode_arrl_fd(msg, hash_if, field1);
+        field2 = NULL;
+        field3 = NULL;
+        break;
+    case FTX_MESSAGE_TYPE_DXPEDITION:
+        // Fox dual message — whole "CALL1 RR73; CALL2 <FOX> ±NN" into field1.
+        rc = ftx_message_decode_dxpedition(msg, hash_if, field1);
         field2 = NULL;
         field3 = NULL;
         break;
@@ -1012,6 +1168,24 @@ static int32_t pack28(const char* callsign, const ftx_callsign_hash_interface_t*
             return -1;
         }
         return 3 + v;
+    }
+
+    if (callsign[0] == '<')
+    {
+        // Bracketed call "<K3SBP>": an explicit "transmit as 22-bit hash"
+        // request from the message generator (WSJT-X <CALL> semantics), used
+        // in QSOs involving one nonstandard callsign. Strip the brackets and
+        // skip the basecall attempt. An unresolved "<...>" placeholder fails
+        // the base-38 charset check in save_callsign and is rejected here.
+        if (length < 3 || callsign[length - 1] != '>' || (length - 2) > 11)
+            return -1;
+        char inner[12];
+        memcpy(inner, callsign + 1, length - 2);
+        inner[length - 2] = '\0';
+        uint32_t n22;
+        if (!save_callsign(hash_if, inner, &n22, NULL, NULL))
+            return -1;
+        return NTOKENS + n22;
     }
 
     // Detect /R and /P suffix for basecall check

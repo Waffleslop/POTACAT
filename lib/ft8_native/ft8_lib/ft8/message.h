@@ -151,6 +151,12 @@ ftx_message_rc_t ftx_message_encode_telemetry(ftx_message_t* msg, const uint8_t*
 ftx_message_rc_t ftx_message_decode(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message, ftx_message_offsets_t* offsets);
 /// Unpack a Type 0.3/0.4 ARRL Field Day message into a single text string (call1 call2 [R ]<ntx><class> section).
 ftx_message_rc_t ftx_message_decode_arrl_fd(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message);
+
+/// Pack/unpack the Type 0.1 FT8 DXpedition (Fox/Hound) dual message:
+/// "K1ABC RR73; W9XYZ <KH1/KH7Z> -08" — call_1 gets RR73, call_2 gets a
+/// report from the h10-hashed Fox call. (2026-07-07, Hound-mode support.)
+ftx_message_rc_t ftx_message_encode_dxpedition(ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, const char* message_text);
+ftx_message_rc_t ftx_message_decode_dxpedition(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message);
 ftx_message_rc_t ftx_message_decode_std(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* call_to, char* call_de, char* extra, ftx_field_t field_types[FTX_MAX_MESSAGE_FIELDS]);
 ftx_message_rc_t ftx_message_decode_nonstd(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* call_to, char* call_de, char* extra, ftx_field_t field_types[FTX_MAX_MESSAGE_FIELDS]);
 void ftx_message_decode_free(const ftx_message_t* msg, char* text);

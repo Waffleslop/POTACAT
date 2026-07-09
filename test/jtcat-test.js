@@ -404,9 +404,19 @@ section('CQ mode — no advance paths');
     const r = drive(baseQ(), [decode('CQ K3SBP FN20')], makeEngine());
     assertEq(r.q.phase, 'cq', 'ignore our own CQ in decodes');
   }
-  // Decode contains us but malformed (no grid)
+  // Bare two-call reply ("K3SBP A1BCD", no grid, no report) — a nonstandard
+  // or grid-less station answering our CQ (their Tx1 has no room for a
+  // locator). Advances like a grid reply with grid unknown. 2026-07-07.
   {
-    const r = drive(baseQ(), [decode('K3SBP A1BCD')], makeEngine());
+    const r = drive(baseQ(), [decode('K3SBP A1BCD', { db: -7 })], makeEngine());
+    assertEq(r.q.phase, 'cq-report', 'bare two-call reply advances to cq-report');
+    assertEq(r.q.call, 'A1BCD', 'bare reply captures the caller');
+    assertEq(r.q.grid, '', 'bare reply has no grid');
+    assertEq(r.lastTx, 'A1BCD K3SBP -07', 'bare reply -> signal report');
+  }
+  // Decode contains us but genuinely unparseable (payload-shaped garbage)
+  {
+    const r = drive(baseQ(), [decode('K3SBP RR73')], makeEngine());
     assertEq(r.q.phase, 'cq', 'no advance if no parseable <call> <grid>');
   }
   // Decode unrelated
@@ -515,7 +525,9 @@ section('Edge cases — slash-portable + digit-leading callsigns');
   };
   const r = drive(q, [decode('K3SBP VP9/AA1AC -05', { db: -8 })], makeEngine());
   assertEq(r.q.phase, 'r+report', 'slash-portable advances normally');
-  assertEq(r.lastTx, 'VP9/AA1AC K3SBP R-08', 'slash-portable TX message');
+  // Slash calls are nonstandard c28: report legs carry them as a 22-bit hash,
+  // shown bracketed — WSJT-X bracket rules via formatDirectedMsg. 2026-07-07.
+  assertEq(r.lastTx, '<VP9/AA1AC> K3SBP R-08', 'slash-portable TX message (hashed/bracketed)');
 
   // Digit-leading CQer
   const cqQ = {
@@ -622,6 +634,170 @@ section('WSJT-X parity spot checks');
   drive(q2, [decode('K3SBP 3B9/M0CFW MH45', { db: -12 })], makeEngine());
   assertEq(q2.call, '3B9/M0CFW', 'parses slash-portable reply');
   assertEq(q2.grid, 'MH45', 'parses grid after slash-portable call');
+}
+
+// ============================================================
+// Group 4e: Nonstandard callsigns — hashed <> partner (2026-07-07)
+// Special-event/compound calls (GB13COL, PJ4/K1ABC) can't ride c28: mid-QSO
+// decodes render them <bracketed> (or <...> unresolved), ack legs must go
+// out as type 4 with the nonstandard call in FULL, and their Tx1 carries no
+// grid. See docs/jtcat-wsjtx-gap-plan.md "Protocol reference".
+// ============================================================
+section('Nonstandard callsigns — reply-side ladder (we answered CQ GB13COL)');
+{
+  const baseQ = () => ({
+    mode: 'reply', phase: 'reply', call: 'GB13COL', grid: '',
+    txMsg: '<GB13COL> K3SBP', report: null, sentReport: null,
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+  });
+
+  // Their report arrives with THEIR call hash-bracketed → r+report,
+  // and our R-report leg keeps the hash form (type 1).
+  {
+    const q = baseQ();
+    const r = drive(q, [decode('K3SBP <GB13COL> -08', { db: -4 })], makeEngine());
+    assertEq(q.phase, 'r+report', 'bracketed partner report advances to r+report');
+    assertEq(r.lastTx, '<GB13COL> K3SBP R-04', 'R-report leg hashes the nonstandard call');
+  }
+  // Their RR73 → our 73 goes out as TYPE 4: their call in full, ours hashed.
+  {
+    const q = baseQ();
+    q.phase = 'r+report'; q.report = '-08'; q.sentReport = '-04';
+    const r = drive(q, [decode('K3SBP <GB13COL> RR73')], makeEngine());
+    assertEq(q.phase, '73', 'bracketed RR73 closes the QSO');
+    assertEq(r.lastTx, 'GB13COL <K3SBP> 73', '73 leg is type 4 (their call in full)');
+    assertEq(r.doneCount, 1, 'logs at RR73 receipt');
+  }
+  // Unresolved hash: "<...>" must NOT match our partner — no advance.
+  {
+    const q = baseQ();
+    const r = drive(q, [decode('K3SBP <...> -08')], makeEngine());
+    assertEq(q.phase, 'reply', 'unresolved <...> does not advance the QSO');
+    assertEq(r.lastTx, null, 'no TX change on unresolved hash');
+  }
+}
+
+section('Nonstandard callsigns — CQ-side ladder (GB13COL answers our CQ)');
+{
+  const q = {
+    mode: 'cq', phase: 'cq', call: null, grid: null,
+    txMsg: 'CQ K3SBP FN20', report: null, sentReport: null,
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+  };
+  // Their Tx1 is a bare type-4 two-call (no room for a grid), our own call
+  // rendered as a hash: "<K3SBP> GB13COL".
+  const eng = makeEngine();
+  let r = drive(q, [decode('<K3SBP> GB13COL', { db: -7, df: 1740 })], eng);
+  assertEq(q.phase, 'cq-report', 'bare bracketed reply advances to cq-report');
+  assertEq(q.call, 'GB13COL', 'captures the nonstandard caller');
+  assertEq(q.grid, '', 'no grid from a nonstandard caller');
+  assertEq(r.lastTx, '<GB13COL> K3SBP -07', 'report leg hashes the nonstandard call');
+  assertEq(eng._lastRxFreq, 1740, 'RX freq follows the caller');
+  // Their R-report → our RR73 goes out as type 4 (their call in full) + log.
+  r = drive(q, [decode('K3SBP <GB13COL> R-03')], makeEngine());
+  assertEq(q.phase, 'cq-rr73', 'bracketed R-report advances to cq-rr73');
+  assertEq(r.lastTx, 'GB13COL <K3SBP> RR73', 'RR73 leg is type 4 (their call in full)');
+  assertEq(r.doneCount, 1, 'logs when both reports are in hand');
+}
+
+// ============================================================
+// Group 4f: Skip Grid — report-first reply (WSJT-X "disable Tx1", 2026-07-07)
+// main.js builds the opening reply as "THEIRCALL MYCALL -NN" (report, no
+// grid) with sentReport pre-set; the ladder then closes one cycle early.
+// ============================================================
+section('Skip Grid — report-first reply');
+{
+  const q = {
+    mode: 'reply', phase: 'reply', call: 'W1ABC', grid: 'FN42',
+    txMsg: 'W1ABC K3SBP -07', report: null, sentReport: '-07',
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+  };
+  const r = drive(q, [decode('K3SBP W1ABC R-12', { db: -3 })], makeEngine());
+  assertEq(q.phase, '73', 'skip-grid: their R-report goes straight to 73');
+  assertEq(r.lastTx, 'W1ABC K3SBP RR73', 'skip-grid: we close with RR73');
+  assertEq(q.sentReport, '-07', 'sentReport preserves the report we actually transmitted');
+  assertEq(q.report, '-12', 'their report captured');
+  assertEq(r.doneCount, 1, 'logs at R-report receipt');
+}
+{
+  // Partner ignores our report-opener and sends a plain report (treated it
+  // like a Tx1) — we advance to R+report and our sent report is the NEW one.
+  const q = {
+    mode: 'reply', phase: 'reply', call: 'W1ABC', grid: '',
+    txMsg: 'W1ABC K3SBP -07', report: null, sentReport: '-07',
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+  };
+  const r = drive(q, [decode('K3SBP W1ABC -02', { db: -5 })], makeEngine());
+  assertEq(q.phase, 'r+report', 'plain report still advances to r+report');
+  assertEq(r.lastTx, 'W1ABC K3SBP R-05', 'R+report carries the fresh estimate');
+  assertEq(q.sentReport, '-05', 'sentReport updated to what we now transmit');
+}
+
+// ============================================================
+// Group 4g: Hound mode — FT8 DXpedition, old-style Fox/Hound (2026-07-07)
+// q.hound is set by main.js when jtcatHoundMode is on. Rules: fox dual
+// messages ("K1ABC RR73; W9XYZ <KH1/KH7Z> -08") are parsed segment-wise so
+// the other hound's payload can't advance our QSO; when the fox answers, our
+// TX QSYs to the fox's frequency for the R+rpt leg; RR73 logs and stops TX
+// with NO 73 courtesy.
+// ============================================================
+section('Hound mode — fox dual messages + QSY + no-73 close');
+{
+  const baseQ = () => ({
+    mode: 'reply', phase: 'reply', call: 'KH7Z', grid: '',
+    txMsg: 'KH7Z K3SBP FN20', report: null, sentReport: null,
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0, hound: true,
+  });
+
+  // Fox report in a dual message: our segment carries the report, the other
+  // hound's RR73 must NOT close our QSO. TX QSYs to the fox's frequency.
+  {
+    const q = baseQ();
+    const eng = makeEngine();
+    eng._lastTxFreq = null;
+    eng.setTxFreq = function(f) { this._lastTxFreq = f; };
+    const r = drive(q, [decode('W9XYZ RR73; K3SBP <KH7Z> -13', { db: -9, df: 460 })], eng);
+    assertEq(q.phase, 'r+report', 'dual-message report advances to r+report');
+    assertEq(r.lastTx, 'KH7Z K3SBP R-09', 'R+rpt leg carries OUR measurement of the fox');
+    assertEq(eng._lastTxFreq, 460, 'TX QSYs to the fox frequency for the R+rpt leg');
+    assertEq(r.doneCount, 0, 'other hound\'s RR73 does not log our QSO');
+  }
+  // Fox RR73 in a dual message closes our QSO: log, no 73 courtesy, TX off.
+  {
+    const q = baseQ();
+    q.phase = 'r+report'; q.report = '-13'; q.sentReport = '-09';
+    const eng = makeEngine();
+    const r = drive(q, [decode('K3SBP RR73; W2ABC <KH7Z> -04', { db: -9 })], eng);
+    assertEq(q.phase, 'done', 'fox RR73 closes the hound QSO immediately');
+    assertEq(r.doneCount, 1, 'logs on RR73');
+    assertEq(eng._txEnabled, false, 'TX disabled — no 73 courtesy in a fox pileup');
+    assertEq(eng._lastTxMsg, '', 'TX message cleared');
+  }
+  // Fox jumps straight to RR73 while we are still in the reply phase
+  // (missed report cycle) — still close out and log.
+  {
+    const q = baseQ();
+    const eng = makeEngine();
+    const r = drive(q, [decode('K3SBP KH7Z RR73', { db: -9 })], eng);
+    assertEq(q.phase, 'done', 'RR73 in reply phase closes the hound QSO');
+    assertEq(r.doneCount, 1, 'logs on direct RR73');
+  }
+  // Dual message addressed to two OTHER hounds — no advance at all.
+  {
+    const q = baseQ();
+    const r = drive(q, [decode('W9XYZ RR73; W2ABC <KH7Z> -04', { db: -9 })], makeEngine());
+    assertEq(q.phase, 'reply', 'dual message for other hounds does not advance');
+    assertEq(r.doneCount, 0, 'and does not log');
+  }
+  // Standard (non-hound) QSOs are unaffected: RR73 still gets a 73 courtesy.
+  {
+    const q = baseQ();
+    delete q.hound;
+    q.phase = 'r+report'; q.report = '-13'; q.sentReport = '-09';
+    const r = drive(q, [decode('K3SBP KH7Z RR73', { db: -9 })], makeEngine());
+    assertEq(q.phase, '73', 'non-hound QSO still sends the 73 courtesy');
+    assertEq(r.lastTx, 'KH7Z K3SBP 73', 'courtesy 73 message unchanged');
+  }
 }
 
 // ============================================================

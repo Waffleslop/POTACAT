@@ -254,10 +254,14 @@ static napi_value Encode(napi_env env, napi_callback_info info) {
         if (strcmp(proto_str, "FT4") == 0) is_ft4 = true;
     }
 
-    /* Pack the text into a 77-bit message (NULL hash_if, matching ft8js). */
+    /* Pack the text into a 77-bit message. Uses the live hash interface so
+     * (a) nonstandard/bracketed calls can encode (type 4 + <hash> forms) and
+     * (b) our own TX seeds the hash table, mirroring WSJT-X seeding from the
+     * DX-call box. (Was NULL "matching ft8js" — which made every message
+     * containing a bracketed call fail encode and silently skip TX.) */
     ftx_message_t msg;
     ftx_message_init(&msg);
-    if (ftx_message_encode(&msg, NULL, text) != FTX_MESSAGE_RC_OK) {
+    if (ftx_message_encode(&msg, &hash_if, text) != FTX_MESSAGE_RC_OK) {
         napi_value null_val;
         napi_get_null(env, &null_val);
         return null_val;

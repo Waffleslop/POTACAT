@@ -76,6 +76,10 @@ function _applyPopoutTheme(payload) {
     fdMode = !!s.jtcatFdMode;
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
     reflectFd();
+    skipTx1 = !!s.jtcatSkipTx1;
+    reflectSkipTx1();
+    houndMode = !!s.jtcatHoundMode;
+    reflectHound();
     // Watchlist-group stroke (ft8-watchlist-stroke-parity): build the same
     // lookup the Spots list uses and expose the group colors to CSS.
     // Evaluated at popout open — group edits mid-session apply on reopen.
@@ -147,10 +151,27 @@ function _applyPopoutTheme(payload) {
     if (fdToggle) fdToggle.classList.toggle('active', fdMode);
     if (fdExchInput) fdExchInput.style.display = fdMode ? '' : 'none';
   }
+  // Skip grid (WSJT-X "disable Tx1"): reply to CQs with a report, not a grid
+  var skipTx1Toggle = document.getElementById('jp-skip-tx1');
+  var skipTx1 = false;
+  function reflectSkipTx1() {
+    if (skipTx1Toggle) skipTx1Toggle.classList.toggle('active', skipTx1);
+  }
+  // Hound mode (FT8 DXpedition, old-style Fox/Hound)
+  var houndToggle = document.getElementById('jp-hound-toggle');
+  var houndMode = false;
+  function reflectHound() {
+    if (houndToggle) houndToggle.classList.toggle('active', houndMode);
+  }
   var enableTxBtn = document.getElementById('jp-enable-tx');
   var haltTxBtn = document.getElementById('jp-halt-tx');
   var tuneBtn = document.getElementById('jp-tune');
   var txMsgEl = document.getElementById('jp-tx-msg');
+  // Manual TX message editing — while the inline input is open, QSO-state and
+  // TX-status broadcasts must not clobber it; all display writes go through
+  // this guard.
+  var txMsgEditing = false;
+  function setTxMsgDisplay(t) { if (!txMsgEditing) txMsgEl.textContent = t; }
   var rxTxEl = document.getElementById('jp-rx-tx');
   var txFreqLabel = document.getElementById('jp-tx-freq-label');
   var qsoTracker = document.getElementById('jp-qso-tracker');
@@ -1065,7 +1086,7 @@ function _applyPopoutTheme(payload) {
       if (active) active.classList.add('step-pulsing');
     }
     if (transmitting && data.message) {
-      txMsgEl.textContent = data.message;
+      setTxMsgDisplay(data.message);
       // Add TX row — prefixed with a .jp-cycle-sep so pruneCyclePanel() can
       // evict it like any decode cycle. Without the separator the row is
       // orphaned and accumulates forever (one per TX slot). (78hawkeye, PR #54.)
@@ -1104,7 +1125,7 @@ function _applyPopoutTheme(payload) {
       cqBtn.classList.remove('active');
       enableTxBtn.classList.remove('active');
       enableTxBtn.textContent = 'Enable TX';
-      txMsgEl.textContent = data.error || 'Error';
+      setTxMsgDisplay(data.error || 'Error');
       // Raise the same toast slot used for QSO-Logged success so the
       // "TX stopped" event is visible without DevTools. Red variant
       // distinguishes it from the green success toast. (K3SBP 2026-05-05:
@@ -1133,8 +1154,8 @@ function _applyPopoutTheme(payload) {
     var cqActive = qsoState && qsoState.mode === 'cq' && qsoState.phase !== 'done';
     cqBtn.classList.toggle('active', !!cqActive);
     // Keep TX msg in sync
-    if (qsoState && qsoState.txMsg) txMsgEl.textContent = qsoState.txMsg;
-    else if (!qsoState) txMsgEl.textContent = '\u2014';
+    if (qsoState && qsoState.txMsg) setTxMsgDisplay(qsoState.txMsg);
+    else if (!qsoState) setTxMsgDisplay('\u2014');
     // Sync TX button state
     if (qsoState && qsoState.phase !== 'done') {
       txEnabled = true;
@@ -1189,6 +1210,27 @@ function _applyPopoutTheme(payload) {
       qsoToast.classList.remove('error');
       delete qsoToast.dataset.errorToast;
     }, 8000);
+  }
+
+  // Non-blocking dupe warning (orange) — "already worked, calling anyway".
+  // Informational only: the reply proceeds; the operator can Halt TX.
+  function showJtcatWarnToast(message, sub) {
+    if (qsoToastTimer) clearTimeout(qsoToastTimer);
+    qsoToast.innerHTML = esc(message) +
+      (sub ? '<div class="jp-toast-sub">' + esc(sub) + '</div>' : '');
+    qsoToast.classList.add('visible');
+    qsoToast.classList.add('warn');
+    qsoToast.dataset.errorToast = '1'; // suppress the click-focuses-main behavior
+    qsoToastTimer = setTimeout(function() {
+      qsoToast.classList.remove('visible');
+      qsoToast.classList.remove('warn');
+      delete qsoToast.dataset.errorToast;
+    }, 6000);
+  }
+  if (window.api.onJtcatDupeWarning) {
+    window.api.onJtcatDupeWarning(function(data) {
+      showJtcatWarnToast((data && data.message) || 'Already worked', data && data.sub);
+    });
   }
 
   // --- Countdown timer ---
@@ -1762,7 +1804,7 @@ function _applyPopoutTheme(payload) {
     enableTxBtn.classList.remove('active');
     enableTxBtn.textContent = 'Enable TX';
     window.api.jtcatCancelQso();
-    txMsgEl.textContent = '--';
+    setTxMsgDisplay('--');
   });
 
   if (tuneBtn) {
@@ -1864,6 +1906,34 @@ function _applyPopoutTheme(payload) {
       var ok = FD_EXCH_RE.test(v);
       fdExchInput.style.borderColor = ok || !v ? '' : 'var(--accent-red, #e94560)';
       if (ok) window.api.saveSettings({ jtcatFdExch: v });
+    });
+  }
+
+  // Skip grid toggle — reply to CQs with a signal report instead of our grid
+  if (skipTx1Toggle) {
+    skipTx1Toggle.addEventListener('click', function() {
+      skipTx1 = !skipTx1;
+      reflectSkipTx1();
+      window.api.saveSettings({ jtcatSkipTx1: skipTx1 });
+    });
+  }
+
+  // Hound toggle — FT8 DXpedition (old-style Fox/Hound) hunting mode
+  if (houndToggle) {
+    houndToggle.addEventListener('click', function() {
+      houndMode = !houndMode;
+      reflectHound();
+      window.api.saveSettings({ jtcatHoundMode: houndMode });
+    });
+  }
+
+  // Live sync from main when a phone flips a shared JTCAT toggle
+  // (jtcat-set-skip-tx1 / jtcat-set-hound-mode via ECHOCAT).
+  if (window.api.onJtcatFlagState) {
+    window.api.onJtcatFlagState(function(data) {
+      if (!data) return;
+      if (data.key === 'jtcatSkipTx1') { skipTx1 = !!data.enabled; reflectSkipTx1(); }
+      else if (data.key === 'jtcatHoundMode') { houndMode = !!data.enabled; reflectHound(); }
     });
   }
 
@@ -2654,6 +2724,53 @@ function _applyPopoutTheme(payload) {
   // TX marker is now drawn on the canvas by popoutWaterfallLoop — hide CSS overlay
   var txMarkerEl = document.getElementById('jp-wf-tx-marker');
   if (txMarkerEl) txMarkerEl.style.display = 'none';
+
+  // Click the TX message to type a custom message (WSJT-X free-text / Tx-field
+  // editing). Enter validates against the REAL codec in main — anything
+  // accepted is guaranteed to encode (no silent no-TX at the cycle boundary);
+  // rejects show a red border + reason tooltip. Esc or blur cancels. Setting
+  // the message does NOT arm TX (mirrors WSJT-X: Enable TX stays a separate,
+  // deliberate action). The next state-machine advance overwrites it, same as
+  // WSJT-X regenerating standard messages.
+  txMsgEl.style.cursor = 'pointer';
+  txMsgEl.title = 'Click to type a custom TX message — standard exchange or free text ≤13 chars (A-Z 0-9 +-./?)';
+  txMsgEl.addEventListener('click', function() {
+    if (txMsgEditing) return;
+    txMsgEditing = true;
+    var prev = txMsgEl.textContent;
+    var input = document.createElement('input');
+    input.type = 'text'; input.maxLength = 40; input.spellcheck = false;
+    input.value = (prev === '—' || prev === '--' || prev === 'Error') ? '' : prev;
+    input.style.cssText = 'width:210px;font-size:12px;font-weight:bold;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;padding:1px 4px;font-family:monospace;text-transform:uppercase;';
+    txMsgEl.textContent = '';
+    txMsgEl.appendChild(input);
+    input.focus(); input.select();
+    var done = false;
+    function cancel() {
+      if (done) return;
+      done = true; txMsgEditing = false;
+      txMsgEl.textContent = prev;
+    }
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var v = (input.value || '').toUpperCase().trim().replace(/\s+/g, ' ');
+      if (!v) { cancel(); return; }
+      window.api.jtcatValidateTxMsg(v).then(function(res) {
+        if (done) return;
+        if (res && res.ok) {
+          done = true; txMsgEditing = false;
+          window.api.jtcatSetTxMsg(res.text);
+          txMsgEl.textContent = res.text;
+        } else {
+          input.style.borderColor = 'var(--accent-red, #e94560)';
+          input.title = (res && res.reason) || 'Not encodable as an FT8 message';
+        }
+      });
+    });
+    input.addEventListener('blur', function() { setTimeout(cancel, 100); });
+  });
 
   // Click TX freq label to manually enter frequency
   txFreqLabel.addEventListener('click', function() {

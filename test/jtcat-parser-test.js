@@ -102,6 +102,42 @@ eq(step('K3ABC NA7C -12', ME), { step: 'reply-cq', call: 'NA7C' }, 'third-party 
 eq(step('', ME), null, 'empty -> null');
 eq(step('XYZZY ABC', ME), null, 'garbage -> null');
 
+section('isStandardCall — c28 basecall shape (mirrors pack_basecall in message.c)');
+// 1x1/2x1 special-event calls ARE standard; slash/displaced-digit calls are not.
+[
+  ['K3SBP', true], ['W1A', true], ['K2A', true], ['N4C', true], ['W1AW', true],
+  ['3G0Z', true], ['VE3ABC', true], ['K3SBP/P', true], ['K1ABC/R', true],
+  ['3DA0XYZ', true], ['3XA0YZ', true], ['<W1ABC>', true],
+  ['GB13COL', false], ['TM13COL', false], ['YW18FIFA', false], ['LC0LEWIS', false],
+  ['PJ4/K1ABC', false], ['K3SBP/7', false], ['DL/K3SBP', false], ['W1AW/4', false],
+  ['<GB13COL>', false], ['<...>', false], ['', false], [null, false],
+].forEach(function (c) {
+  eq(P.isStandardCall(c[0]), c[1], 'isStandardCall(' + JSON.stringify(c[0]) + ') = ' + c[1]);
+});
+
+section('formatDirectedMsg — WSJT-X bracket rules for nonstandard calls');
+eq(P.formatDirectedMsg('W1ABC', 'K3SBP', '-08'), 'W1ABC K3SBP -08', 'both standard: plain');
+eq(P.formatDirectedMsg('W1ABC', 'K3SBP', 'RR73'), 'W1ABC K3SBP RR73', 'both standard ack: plain');
+eq(P.formatDirectedMsg('W1ABC', 'K3SBP', 'FN20'), 'W1ABC K3SBP FN20', 'both standard grid kept');
+eq(P.formatDirectedMsg('GB13COL', 'K3SBP', '-08'), '<GB13COL> K3SBP -08', 'report leg hashes nonstd call');
+eq(P.formatDirectedMsg('GB13COL', 'K3SBP', 'R-08'), '<GB13COL> K3SBP R-08', 'R-report leg hashes nonstd call');
+eq(P.formatDirectedMsg('GB13COL', 'K3SBP', 'RR73'), 'GB13COL <K3SBP> RR73', 'ack leg = type 4, nonstd call in full');
+eq(P.formatDirectedMsg('GB13COL', 'K3SBP', '73'), 'GB13COL <K3SBP> 73', '73 leg = type 4');
+eq(P.formatDirectedMsg('GB13COL', 'K3SBP', 'FN20'), '<GB13COL> K3SBP', 'grid DROPPED in nonstandard QSO');
+eq(P.formatDirectedMsg('GB13COL', 'K3SBP', ''), '<GB13COL> K3SBP', 'bare Tx1 to nonstd call');
+eq(P.formatDirectedMsg('W1ABC', 'PJ4/K1ABC', '-08'), 'W1ABC <PJ4/K1ABC> -08', 'MY nonstd call hashed on report leg');
+eq(P.formatDirectedMsg('W1ABC', 'PJ4/K1ABC', '73'), '<W1ABC> PJ4/K1ABC 73', 'MY nonstd call in full on ack leg');
+eq(P.formatDirectedMsg('W1ABC', 'PJ4/K1ABC', 'FN20'), 'W1ABC <PJ4/K1ABC>', 'grid dropped when MY call nonstd');
+eq(P.formatDirectedMsg('GB13COL', 'PJ4/K1ABC', '73'), null, 'both nonstandard: refused (WSJT-X rule)');
+eq(P.formatDirectedMsg('<GB13COL>', 'K3SBP', 'RR73'), 'GB13COL <K3SBP> RR73', 'pre-bracketed input normalized');
+
+section('inferReplyStep — hash-bracketed partner calls');
+eq(step('K3SBP <GB13COL> -05', ME), { step: 'send-r-report', call: 'GB13COL' }, 'bracketed report -> R+report, call unbracketed');
+eq(step('K3SBP <GB13COL> RR73', ME), { step: 'send-73', call: 'GB13COL' }, 'bracketed RR73 -> 73');
+eq(step('K3SBP <...> -05', ME), null, 'unresolved <...> -> not actionable');
+eq(step('W4XYZ <PJ4/K1ABC> 73', ME), { step: 'reply-cq', call: 'PJ4/K1ABC' }, 'bracketed tail-end FROM unwrapped');
+eq(step('CQ GB13COL', ME), { step: 'reply-cq', call: 'GB13COL' }, 'nonstandard type-4 CQ (no grid) -> reply-cq');
+
 section('inferReplyStep — empty/unknown my-call (main re-derives authoritatively)');
 // Without a callsign the classifier cannot know K3SBP is "me", so it falls to
 // tail-end. In production main.js always passes the configured callsign, so

@@ -52,6 +52,70 @@
     return c;
   }
 
+  // Remove a hashed-call <...> wrapper but keep portable affixes intact
+  // ("<PJ4/K1ABC>" -> "PJ4/K1ABC"). Unlike normalizeCall this preserves the
+  // full transmittable call — use it when building TX messages, use
+  // normalizeCall only for identity comparison.
+  function stripHashBrackets(tok) {
+    return String(tok || '').replace(/^</, '').replace(/>$/, '');
+  }
+
+  // Can this call be packed as a standard 28-bit callsign (c28 basecall)?
+  // Mirrors pack_basecall() in lib/ft8_native/ft8_lib/ft8/message.c: the call
+  // is right-aligned into a 6-char cell with its (last) prefix digit forced to
+  // position 3 — so 1x1/2x1 special-event calls (W1A, K2A) ARE standard, while
+  // slash calls (PJ4/K1ABC, K3SBP/7) and displaced-digit/long calls (GB13COL,
+  // YW18FIFA) are nonstandard and need <hash>/type-4 handling. A bare /P or /R
+  // suffix rides a flag bit in standard messages, so it stays standard.
+  function isStandardCall(call) {
+    if (!call) return false;
+    var c = stripHashBrackets(String(call).toUpperCase().trim());
+    if (/\/[PR]$/.test(c)) c = c.slice(0, -2);
+    if (!c || c.indexOf('/') >= 0) return false;
+    if (/^3DA0[A-Z]{1,3}$/.test(c)) c = '3D0' + c.slice(4); // Eswatini rewrite
+    else if (/^3X[A-Z][0-9A-Z]{0,4}$/.test(c)) c = 'Q' + c.slice(2); // Guinea rewrite
+    // Two right-alignments: AB0XYZ (digit at index 2) or A0XYZ (digit at index 1)
+    return /^[A-Z0-9]{2}[0-9][A-Z]{0,3}$/.test(c) ||
+      (c.length >= 3 && /^[A-Z0-9][0-9][A-Z]{0,3}$/.test(c));
+  }
+
+  // Build a directed TX message applying WSJT-X's bracket rules when one call
+  // is nonstandard (the 77-bit protocol can transmit only ONE call in full per
+  // message — the other travels as a hash, displayed in <brackets>):
+  //   - grid/report legs: type 1 with the NONSTANDARD call hashed
+  //       "<GB13COL> K3SBP R-08"; a grid payload is dropped entirely (WSJT-X
+  //       omits the locator in nonstandard QSOs — there's no room in type 4
+  //       and hash-first type 1 is reserved for reports).
+  //   - RRR/RR73/73 legs: type 4 with the nonstandard call in FULL (that's how
+  //       cold listeners learn the hash), so the STANDARD call gets brackets:
+  //       "GB13COL <K3SBP> RR73".
+  //   - both standard: plain text (byte-identical to the legacy builders).
+  //   - both nonstandard: null — unsupported pairing (WSJT-X refuses it too).
+  function formatDirectedMsg(theirCall, myCall, payload) {
+    var them = stripHashBrackets(String(theirCall || '').toUpperCase().trim());
+    var mine = stripHashBrackets(String(myCall || '').toUpperCase().trim());
+    var pay = String(payload == null ? '' : payload).toUpperCase().trim();
+    if (!them || !mine) return null;
+    var themStd = isStandardCall(them);
+    var mineStd = isStandardCall(mine);
+    if (themStd && mineStd) return (them + ' ' + mine + (pay ? ' ' + pay : ''));
+    if (!themStd && !mineStd) return null;
+    var isAck = /^(RRR|RR73|73)$/.test(pay);
+    // No locator in nonstandard QSOs (checked only on non-ack legs: RR73
+    // itself is grid-shaped — that's how the protocol encodes it).
+    if (!isAck && GRID_RE.test(pay)) pay = '';
+    if (isAck) {
+      // Type 4: nonstandard call in full, standard call hashed
+      return themStd
+        ? '<' + them + '> ' + mine + ' ' + pay
+        : them + ' <' + mine + '> ' + pay;
+    }
+    // Type 1: nonstandard call hashed, report (or nothing) in the payload slot
+    return themStd
+      ? them + ' <' + mine + '>' + (pay ? ' ' + pay : '')
+      : '<' + them + '> ' + mine + (pay ? ' ' + pay : '');
+  }
+
   function isCqText(text) {
     return (text || '').toUpperCase().indexOf('CQ ') === 0;
   }
@@ -95,8 +159,12 @@
 
     // Addressed to us: <MYCALL> <THEIRCALL> <payload>. Compare on the base
     // call so a portable/hashed rendering of our own call still matches.
+    // Their call may render hash-bracketed ("<GB13COL>") — strip for the
+    // returned call (it feeds TX builders), and refuse an unresolved "<...>"
+    // (we can't address a station whose full call we haven't copied yet).
     if (parts.length >= 2 && me && normalizeCall(parts[0]) === me && parts[1]) {
-      var fromCall = parts[1];
+      var fromCall = stripHashBrackets(parts[1]);
+      if (!looksLikeCallsign(fromCall)) return null;
       var payload = parts[2] || '';
       if (payload === 'RR73' || payload === 'RRR' || payload === '73') {
         return { step: 'send-73', call: fromCall };
@@ -112,10 +180,12 @@
     }
 
     // Tail-end / call-anyone: <TO> <FROM> <payload> where neither is us —
-    // target the SENDER (FROM, right-hand call). WSJT-X behavior.
+    // target the SENDER (FROM, right-hand call). WSJT-X behavior. Strip a
+    // hash wrapper so a bracket-rendered sender is still tail-endable.
+    var tailFrom = stripHashBrackets(parts[1] || '');
     if (parts.length >= 2 && parts[0] !== 'CQ' && normalizeCall(parts[0]) !== me &&
-        parts[1] && normalizeCall(parts[1]) !== me && looksLikeCallsign(parts[1])) {
-      return { step: 'reply-cq', call: parts[1] };
+        tailFrom && normalizeCall(tailFrom) !== me && looksLikeCallsign(tailFrom)) {
+      return { step: 'reply-cq', call: tailFrom };
     }
 
     return null;
@@ -124,6 +194,9 @@
   return {
     looksLikeCallsign: looksLikeCallsign,
     normalizeCall: normalizeCall,
+    stripHashBrackets: stripHashBrackets,
+    isStandardCall: isStandardCall,
+    formatDirectedMsg: formatDirectedMsg,
     isCqText: isCqText,
     parseCq: parseCq,
     inferReplyStep: inferReplyStep,
