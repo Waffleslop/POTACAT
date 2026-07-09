@@ -5308,6 +5308,11 @@ async function _renderSummaryOperator() {
       sel.disabled = true;
       return;
     }
+    // The active operator must always be an option. If it's missing from the
+    // list (the pre-encoding LZ3AW/P nesting bug put us here), a <select>
+    // silently falls back to the FIRST option — the dropdown then LIES about
+    // who is active and picking that operator never fires a change event.
+    if (activeCall && !list.includes(activeCall)) list.unshift(activeCall);
     sel.disabled = false;
     sel.innerHTML = list.map(c => {
       const sel = c === activeCall ? ' selected' : '';

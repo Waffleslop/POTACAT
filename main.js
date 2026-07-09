@@ -464,8 +464,13 @@ const GLOBAL_KEYS = new Set([
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
 
+// Slash callsigns (LZ3AW/P) are legal operators but '/' is a path separator —
+// the dir name encodes it as '_' (see lib/profile-dirs.js for the whole
+// story + the startup migration of pre-encoding nested dirs).
+const { profileDirName, profileCallFromDirName, migrateNestedSlashProfiles } = require('./lib/profile-dirs');
+
 function profileDir(callsign) {
-  return path.join(PROFILES_DIR, String(callsign || '').toUpperCase());
+  return path.join(PROFILES_DIR, profileDirName(callsign));
 }
 function profileSettingsPath(callsign) {
   return path.join(profileDir(callsign), 'settings.json');
@@ -598,6 +603,8 @@ function listProfiles() {
         try { return fs.statSync(path.join(PROFILES_DIR, n)).isDirectory(); }
         catch { return false; }
       })
+      // Dir names are encoded (LZ3AW_P); callers deal in callsigns (LZ3AW/P).
+      .map(profileCallFromDirName)
       .sort();
   } catch { return []; }
 }
@@ -702,7 +709,8 @@ function archiveProfile(callsign) {
   try {
     fs.mkdirSync(PROFILES_ARCHIVE_DIR, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const dest = path.join(PROFILES_ARCHIVE_DIR, call + '-' + stamp);
+    // Encoded name — a raw slash callsign would nest the archive copy too.
+    const dest = path.join(PROFILES_ARCHIVE_DIR, profileDirName(call) + '-' + stamp);
     fs.renameSync(src, dest);
     return { ok: true, archivedAs: dest };
   } catch (err) {
@@ -17367,6 +17375,17 @@ app.whenReady().then(() => {
   );
 
   Menu.setApplicationMenu(null);
+  // Repair mis-nested slash-callsign profiles (profiles/LZ3AW/P/ →
+  // profiles/LZ3AW_P/) BEFORE loadSettings — the activeProfile pointer may
+  // name the nested operator, and loadSettings resolves it via the encoded
+  // path that only exists after the move.
+  try {
+    const mig = migrateNestedSlashProfiles(PROFILES_DIR);
+    for (const m of mig.moved) console.log('[multi-op] migrated mis-nested profile ' + m.call + ' -> ' + m.to);
+    for (const s of mig.skipped) console.error('[multi-op] nested-profile migration skipped ' + s.call + ': ' + s.reason);
+  } catch (err) {
+    console.error('[multi-op] nested-profile migration failed:', err.message);
+  }
   settings = loadSettings();
   migrateRigSettings(settings);
   // Multi-op profile migration. If we loaded a legacy settings.json (one
