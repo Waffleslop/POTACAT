@@ -6244,13 +6244,19 @@ function startJtcat(mode) {
             return true;
           });
 
-        // Pick strongest SNR
-        candidates.sort((a, b) => b.db - a.db);
+        // Event-needed stations outrank raw signal strength (events-roadmap
+        // #4): a tracked-event station you still need (13 Colonies etc. —
+        // eventMatch computed in the decode enrichment above) gets answered
+        // over a stronger generic caller. SNR remains the tiebreak within
+        // each tier, preserving the original behavior when no event is live.
+        const evRank = (d) => (d.eventMatch && d.eventMatch.status !== 'worked') ? 1 : 0;
+        candidates.sort((a, b) => (evRank(b) - evRank(a)) || (b.db - a.db));
         const best = candidates[0];
 
         if (best) {
           jtcatAutoCqWorkedSession.add(best.call);
-          console.log(`[JTCAT Auto-CQ] Responding to ${best.call} (${best.grid}) SNR ${best.db}dB`);
+          const evNote = evRank(best) ? ' [event-needed]' : '';
+          console.log(`[JTCAT Auto-CQ] Responding to ${best.call} (${best.grid}) SNR ${best.db}dB${evNote}`);
 
           // Create QSO — assign to the owner's state variable
           const qso = {

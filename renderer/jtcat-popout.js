@@ -137,6 +137,8 @@ function _applyPopoutTheme(payload) {
   setInterval(updateUtcClock, 1000);
   var cqFilterBtn = document.getElementById('jp-cq-filter');
   var wantedFilterBtn = document.getElementById('jp-wanted-filter');
+  var eventFilterBtn = document.getElementById('jp-event-filter');
+  var eventFilter = false;
   var chaseFilterBtn = document.getElementById('jp-chase-filter');
   var chaseSelect = document.getElementById('jp-chase-target');
   var chaseCustom = document.getElementById('jp-chase-custom');
@@ -682,6 +684,10 @@ function _applyPopoutTheme(payload) {
     if (cqFilter && !c.isCq && !c.is73 && !c.isDirected) return false;
     if (wantedFilter && !c.isWanted && !c.isDirected && !c.is73) return false;
     if (chaseFilter && !c.d.chaseMatch && !c.isDirected && !c.is73) return false;
+    // Event filter (events-roadmap #4): only tracked-event stations still
+    // useful (needed / new band-mode slot); worked ones are mid-sweep noise.
+    if (eventFilter && !(c.d.eventMatch && c.d.eventMatch.status !== 'worked')
+        && !c.isDirected && !c.is73) return false;
     if (searchFilter && c.upper.indexOf(searchFilter) === -1) return false;
     return true;
   }
@@ -1302,6 +1308,14 @@ function _applyPopoutTheme(payload) {
     wantedFilterBtn.classList.toggle('active', wantedFilter);
     rebuildBandActivity();
   });
+
+  if (eventFilterBtn) {
+    eventFilterBtn.addEventListener('click', function() {
+      eventFilter = !eventFilter;
+      eventFilterBtn.classList.toggle('active', eventFilter);
+      rebuildBandActivity();
+    });
+  }
 
   // --- Chase target picker (CqTarget shared module) ---
   // Quick-pick tags that live in the dropdown directly; anything else (a US
