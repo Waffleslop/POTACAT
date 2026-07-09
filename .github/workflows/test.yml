@@ -58,6 +58,8 @@ jobs:
         run: node test/event-decode-match-test.js
       - name: Run event-progress suite
         run: node test/event-progress-test.js
+      - name: Run event-registry suite
+        run: node test/event-registry-test.js
 
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the

@@ -63,18 +63,29 @@ standalone project gating any NEW contest modes.
   the phone log view, catalog boundary-refresh already shipped (ab53d14).
 
 ### 1. Unified Events/Contests registry (multi-day project — the structural fix)
-- One registry entry: `{ id, kind: 'special-event'|'contest'|'award-window',
-  name, shortCode, schedule[], board?, tracking?, callsignPatterns?,
-  contestId?, exchangeSpec?, links{} }`.
-- Consumers converge: Contests view buckets, banner/boards, stamping
-  (special events → APP fields; contests → real `CONTEST_ID`), contest-
-  history, ECHOCAT catalog. Kills the dual-13C drift class permanently.
-- **Gate**: do this BEFORE building new WSJT-X contest modes (FT Roundup /
-  WW Digi from docs/jtcat-wsjtx-gap-plan.md) so their definitions land in
-  the unified registry.
-- Migration: contests.json entries become `kind: 'contest'` records; events
-  server schema versioned (`schemaVersion`), old clients keep reading the
-  current shape (additive fields only until a major bump).
+
+**Phase A — SHIPPED 2026-07-09**: `lib/event-registry.js` — alias resolution
+(event `contestId` field → builtin map, year-suffix tolerant),
+`buildEventAliasMap`, `unifiedCatalog()` merge with `supersededBy` marking,
+`kind` mapping (checklist→special-event, regions→award-window,
+counter→contest-window; contests category passes through). First consumer
+live: contest-history resolves event-id stamps through the alias map, using
+UNCAPPED provenance windows (umbrella contests like 13 Colonies' 159 h are
+heuristic-excluded by MAX_WINDOW_HOURS but a stamp is proof) — a QSO stamped
+`13col-2026` now attributes exactly to the `13-colonies` history. 21 tests,
+CI-wired.
+
+**Phase B — remaining**:
+- Contests view consumes `unifiedCatalog()` and collapses `supersededBy`
+  duplicates (one 13 Colonies row, events-side data wins).
+- Banner/boards + ECHOCAT catalog read the unified list; stamping picks
+  APP fields vs real `CONTEST_ID` by `kind`.
+- Server: events carry `contestId` natively (retire BUILTIN_ALIASES),
+  `schemaVersion` field; contests.json entries migrate to kind-tagged
+  records (additive until a major bump).
+- **Gate**: Phase B lands BEFORE building new WSJT-X contest modes
+  (FT Roundup / WW Digi from docs/jtcat-wsjtx-gap-plan.md) so their
+  definitions are unified from day one.
 
 ## Design invariants (carry forward)
 - Stamping is identity-proven only; counter/date-window presence never

@@ -276,6 +276,7 @@ const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine } = require('./lib/sstv-engine');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
+const EventRegistry = require('./lib/event-registry'); // unified Events/Contests registry (roadmap #1 Phase A)
 const { SstvManager } = require('./lib/sstv-manager');
 const sstvPost = require('./lib/sstv-post');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
@@ -15946,7 +15947,13 @@ function rebuildContestHistory() {
   try {
     const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     const qsos = fs.existsSync(logPath) ? parseAllRawQsos(logPath) : [];
-    _contestHistory = buildContestHistory(getAllContests(), qsos);
+    // Unified-registry Phase A: event-id stamps resolve to catalog contest
+    // ids via the alias map, so a "13col-2026"-stamped QSO attributes to the
+    // "13-colonies" contest exactly (no mode/band heuristics).
+    const contestsCatalog = getAllContests();
+    _contestHistory = buildContestHistory(contestsCatalog, qsos, {
+      eventAliases: EventRegistry.buildEventAliasMap(activeEvents, contestsCatalog),
+    });
   } catch (err) {
     console.error('[contest-history] rebuild failed:', err.message);
     _contestHistory = null;
