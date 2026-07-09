@@ -89,9 +89,14 @@ CI-wired.
   the FD value matching what JTCAT FD mode already writes). Contest modes
   that set CONTEST_ID themselves always win.
 
-**Phase C — remaining (server + data)**:
+**Phase C — remaining (server + data)** — website handoff filed:
+`potacat-meta/work/open/events-server-phase-c.md` (2026-07-09):
 - potacat.com events carry `contestId` natively (retire BUILTIN_ALIASES)
-  + `schemaVersion`; ETag + ~14-day ended-event retention on active.json.
+  + `schemaVersion`; ETag + ~14-day ended-event retention on active.json;
+  `links.results` for the finished-state board. Client half of ETag already
+  shipped (934c605: If-None-Match sent, 304 = freshness). Desktop follow-up
+  once `links.results` exists: surface "Submit for certificate" in the
+  lifecycle strip.
 - Curate `adifContestId` across the contests catalog where the ADIF
   Contest_ID vocabulary genuinely covers the entry (verify each against the
   spec — never guess).
