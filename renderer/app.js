@@ -15812,6 +15812,41 @@ window.api.onActiveEvents((events) => {
   render(); // re-render table for badges
 });
 
+// Event schedules re-evaluate on a 1-minute tick (Casey 2026-07-09: "if I
+// never reload during 13 Colonies, does the banner retire?"). Banner and
+// watchlist previously refreshed only when an events PUSH arrived — the
+// 4-hour server refetch, and only on success — so an offline shack kept
+// showing a LIVE banner indefinitely after the event ended, countdown
+// banners didn't flip to LIVE at the start moment, and snoozes never
+// expired on their own. The tick recomputes a live/upcoming/snoozed
+// signature each minute and runs the refresh chain only when an event
+// crosses a boundary. Works fully offline. activeEvents itself is
+// deliberately NOT pruned — the 13C board and its progress stay viewable
+// after the event; only presentation retires.
+let _eventScheduleSig = null;
+setInterval(() => {
+  const now = new Date();
+  const nowMs = now.getTime();
+  const sig = (activeEvents || []).map((ev) => {
+    const sched = ev.schedule || [];
+    const live = sched.some(s => now >= new Date(s.start) && now < new Date(s.end));
+    const upcoming = !live && sched.some(s => {
+      const start = new Date(s.start);
+      return start > now && (start - now) < 7 * 24 * 3600000;
+    });
+    const snoozed = !!(ev.snoozeUntil && nowMs < ev.snoozeUntil);
+    return `${ev.id}:${live ? 'L' : upcoming ? 'U' : '-'}${snoozed ? 's' : ''}`;
+  }).join(',');
+  if (_eventScheduleSig === sig) return;
+  const first = _eventScheduleSig === null;
+  _eventScheduleSig = sig;
+  if (first) return; // seed only — load-time renders already ran
+  rebuildEventWatchlist();
+  updateEventBanner();
+  updateSpotsEventsSection();
+  render(); // re-render table for badges
+}, 60 * 1000);
+
 // --- Directory (HF Nets & SWL Broadcasts) ---
 
 function isNetActiveNow(net) {

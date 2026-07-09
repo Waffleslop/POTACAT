@@ -15119,6 +15119,29 @@ function createWindow() {
     }
     fetchActiveEvents();
     setInterval(fetchActiveEvents, 4 * 3600000); // refresh every 4 hours
+    // Boundary tick for ECHOCAT (Casey 2026-07-09): the phone's event
+    // catalog rides the settings blob, which otherwise refreshes only on a
+    // SUCCESSFUL 4-hour refetch — an offline shack left phones showing a
+    // LIVE event indefinitely after it ended. Recompute a live-state
+    // signature every 5 minutes and re-push the blob when an event crosses
+    // a schedule boundary. The desktop renderer has its own 1-minute
+    // presentation tick (renderer/app.js) — this one exists for the phone,
+    // and both work fully offline. activeEvents is never pruned; boards and
+    // progress stay viewable after an event ends.
+    let _evBoundarySig = null;
+    setInterval(() => {
+      const now = new Date();
+      const sig = (activeEvents || []).map((ev) => {
+        const live = !!activeScheduleEntry(ev, now);
+        return ev.id + (live ? ':L' : ':-');
+      }).join(',');
+      if (_evBoundarySig === sig) return;
+      const first = _evBoundarySig === null;
+      _evBoundarySig = sig;
+      if (first) return; // seed only
+      sendCatLog('[events] schedule boundary crossed — refreshing ECHOCAT event catalog');
+      updateRemoteSettings();
+    }, 5 * 60 * 1000);
     // Push cached events to renderer immediately + scan log for matches
     pushEventsToRenderer();
     updateRemoteSettings(); // seed ECHOCAT catalog/subscriptions (no-op if remote server not up yet)
