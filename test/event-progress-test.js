@@ -11,7 +11,7 @@
 'use strict';
 
 const assert = require('assert');
-const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, matchEventQsoForStamp, retroStampMatches } = require('../lib/event-progress');
+const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, matchEventQsoForStamp, retroStampMatches, matchingRegionEntry } = require('../lib/event-progress');
 
 let passed = 0, failed = 0;
 function check(cond, label) {
@@ -139,6 +139,48 @@ console.log('\nretroStampMatches:');
 }
 check(retroStampMatches(null, [{ CALL: 'K2A', QSO_DATE: '20260701' }]).length === 0, 'null event -> none');
 check(retroStampMatches(EVENTS[0], []).length === 0, 'empty log -> none');
+
+// ---------------------------------------------------------------------------
+// Per-entry `patterns` disambiguation (website-agent audit 2026-07-09):
+// America250 runs 2–4 states per week, all matching event-level "W1AW/*".
+// Entry-level patterns pick the RIGHT state; absent patterns fall back.
+// ---------------------------------------------------------------------------
+console.log('\nmatchingRegionEntry (concurrent same-week regions):');
+{
+  const ev = { callsignPatterns: ['W1AW/*'] };
+  const week = [
+    { region: 'GA', regionName: 'Georgia', patterns: ['W1AW/4'] },
+    { region: 'IN', regionName: 'Indiana', patterns: ['W1AW/9'] },
+    { region: 'UT', regionName: 'Utah' }, // no patterns → event-level fallback
+  ];
+  check(matchingRegionEntry(ev, 'W1AW/9', week).region === 'IN',
+    'per-entry patterns pick the right concurrent state');
+  check(matchingRegionEntry(ev, 'W1AW/4', week).region === 'GA',
+    'first entry only wins when its own patterns match');
+  check(matchingRegionEntry(ev, 'W1AW/0', week).region === 'UT',
+    'pattern-less entry falls back to event-level patterns');
+  check(matchingRegionEntry(ev, 'K1ABC', week) === null, 'non-matching call -> null');
+  const bare = [{ region: 'PA' }, { region: 'OH' }];
+  check(matchingRegionEntry(ev, 'W1AW/3', bare).region === 'PA',
+    'no per-entry patterns anywhere -> legacy first-covering-entry behavior');
+}
+{
+  // End-to-end through the stamp matcher: two concurrent regions entries.
+  const ev = {
+    id: 'america250', name: 'America 250 WAS', board: 'regions',
+    callsignPatterns: ['W1AW/*'],
+    schedule: [
+      { region: 'GA', regionName: 'Georgia', patterns: ['W1AW/4'],
+        start: '2026-07-01T00:00:00Z', end: '2026-07-08T00:00:00Z' },
+      { region: 'IN', regionName: 'Indiana', patterns: ['W1AW/9'],
+        start: '2026-07-01T00:00:00Z', end: '2026-07-08T00:00:00Z' },
+    ],
+  };
+  const st = { america250: { optedIn: true, progress: {} } };
+  const m = matchEventQsoForStamp([ev], st, 'W1AW/9', new Date('2026-07-04T12:00:00Z'));
+  check(m && m.item === 'IN' && m.itemName === 'Indiana',
+    'stamp matcher attributes the concurrent-week QSO to the correct state');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'event-progress matcher tests failed');

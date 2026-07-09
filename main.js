@@ -256,7 +256,7 @@ const { WsprScheduler } = require('./lib/wspr/scheduler');
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
-const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, matchEventQsoForStamp, retroStampMatches } = require('./lib/event-progress');
+const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const RigFamily = require('./lib/rig-family');
@@ -15674,13 +15674,23 @@ function saveEventsCache(data) {
 let _eventsFetchedAt = 0;
 let _eventsStaleWarned = false;
 let _eventsEtag = null; // last ETag from active.json (conditional GET)
+let _eventsFailStreak = 0; // consecutive failed fetches (never-succeeded detection)
 const EVENTS_STALE_MS = 24 * 3600000;
 
 function _eventsFetchFailed(reason) {
+  _eventsFailStreak++;
   if (_eventsFetchedAt && Date.now() - _eventsFetchedAt > EVENTS_STALE_MS && !_eventsStaleWarned) {
     _eventsStaleWarned = true;
     const hours = Math.round((Date.now() - _eventsFetchedAt) / 3600000);
     sendCatLog(`[events] ⚠ Event catalog refresh has been failing for ${hours}h (${reason}) — running on cached definitions from ${new Date(_eventsFetchedAt).toISOString().slice(0, 16)}Z`);
+  } else if (!_eventsFetchedAt && _eventsFailStreak === 2 && !_eventsStaleWarned) {
+    // Never-succeeded case (website-agent audit 2026-07-09): the endpoint
+    // was missing since day one, _eventsFetchedAt stayed 0, and the stale
+    // warning above never armed — the exact silent failure events-roadmap
+    // #5 set out to eliminate. Two consecutive failures with no success on
+    // record (launch retry + one 4h cycle) warns once per run.
+    _eventsStaleWarned = true;
+    sendCatLog(`[events] ⚠ Event catalog has never been fetched successfully (${reason}) — running on built-in definitions. Check connectivity to potacat.com.`);
   }
   pushEventsMeta();
 }
@@ -15704,6 +15714,7 @@ function fetchActiveEvents() {
       res.resume(); // drain
       _eventsFetchedAt = Date.now();
       _eventsStaleWarned = false;
+      _eventsFailStreak = 0;
       saveEventsCache({ events: activeEvents, etag: _eventsEtag, fetchedAt: _eventsFetchedAt });
       pushEventsMeta();
       return;
@@ -15717,6 +15728,7 @@ function fetchActiveEvents() {
           activeEvents = data.events;
           _eventsFetchedAt = Date.now();
           _eventsStaleWarned = false;
+          _eventsFailStreak = 0;
           _eventsEtag = res.headers.etag || null;
           saveEventsCache({ ...data, etag: _eventsEtag, fetchedAt: _eventsFetchedAt });
           pushEventsToRenderer();
@@ -16036,8 +16048,8 @@ function scanLogForEvents() {
       // 0400z). See lib/event-progress.js — this is the fix for progress
       // vanishing on restart.
       const qsoDateStr = rec.QSO_DATE || '';
-      const matchEntry = (ev.schedule || []).find(s => qsoDayInScheduleEntry(qsoDateStr, s));
-      if (!matchEntry) continue;
+      const coveringEntries = (ev.schedule || []).filter(s => qsoDayInScheduleEntry(qsoDateStr, s));
+      if (!coveringEntries.length) continue;
 
       const qsoData = {
         callsign: call,
@@ -16048,8 +16060,7 @@ function scanLogForEvents() {
       };
 
       if (board === 'checklist') {
-        const items = (ev.tracking && ev.tracking.items) || [];
-        const matchedItem = items.find(it => call === it.id.toUpperCase() || call.startsWith(it.id.toUpperCase() + '/'));
+        const matchedItem = matchChecklistItem(ev.tracking && ev.tracking.items, call);
         if (!matchedItem || state.progress[matchedItem.id]) continue;
         state.progress[matchedItem.id] = {
           call: qsoData.callsign,
@@ -16059,12 +16070,11 @@ function scanLogForEvents() {
           freq: qsoData.frequency,
         };
       } else if (board === 'regions') {
-        const matches = (ev.callsignPatterns || []).some(pattern => {
-          if (pattern.endsWith('/*')) return call.startsWith(pattern.slice(0, -1));
-          return call === pattern.toUpperCase();
-        });
-        if (!matches || state.progress[matchEntry.region]) continue;
-        state.progress[matchEntry.region] = {
+        // Per-entry `patterns` disambiguate concurrent same-week states
+        // (America250) — shared helper with live marking/stamping.
+        const entry = matchingRegionEntry(ev, call, coveringEntries);
+        if (!entry || state.progress[entry.region]) continue;
+        state.progress[entry.region] = {
           call: qsoData.callsign,
           band: qsoData.band,
           mode: qsoData.mode,
@@ -16108,10 +16118,13 @@ function checkEventQso(qsoData) {
       const key = `qso-${Date.now()}`;
       markEventRegion(ev.id, key, qsoData);
     } else {
-      // Regions (WAS): match callsign pattern, mark active region
-      if (!matchRegionPatterns(ev.callsignPatterns, call)) continue;
-      if (state.progress[activeEntry.region]) continue;
-      markEventRegion(ev.id, activeEntry.region, qsoData);
+      // Regions (WAS): per-entry `patterns` disambiguate concurrent
+      // same-week states (America250); entries without patterns fall back
+      // to the event-level list. Shared helper with stamping/retro-stamp.
+      const entry = matchingRegionEntry(ev, call, coveringScheduleEntries(ev, now));
+      if (!entry) continue;
+      if (state.progress[entry.region]) continue;
+      markEventRegion(ev.id, entry.region, qsoData);
     }
   }
 }

@@ -22,7 +22,10 @@ on:
 jobs:
   jtcat-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bumped 5 → 12 (2026-07-09): the SSTV e2e + quality suites pushed the
+    # battery past 5 minutes and runs were being CANCELLED at the timeout —
+    # master showed "cancelled", not red, which is how it went unnoticed.
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
