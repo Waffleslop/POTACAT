@@ -15132,9 +15132,11 @@ function createWindow() {
     const cachedEvents = loadEventsCache();
     if (cachedEvents.events && cachedEvents.events.length) {
       activeEvents = cachedEvents.events;
-      // Seed fetch-freshness from the cache so the staleness warning/note
-      // survive a restart while offline.
+      // Seed fetch-freshness + ETag from the cache so the staleness
+      // warning/note survive a restart while offline and the first refetch
+      // can already be conditional.
       if (cachedEvents.fetchedAt) _eventsFetchedAt = cachedEvents.fetchedAt;
+      if (cachedEvents.etag) _eventsEtag = cachedEvents.etag;
     }
     fetchActiveEvents();
     setInterval(fetchActiveEvents, 4 * 3600000); // refresh every 4 hours
@@ -15671,6 +15673,7 @@ function saveEventsCache(data) {
 // shows an "events data as of …" note when stale (active-events-meta).
 let _eventsFetchedAt = 0;
 let _eventsStaleWarned = false;
+let _eventsEtag = null; // last ETag from active.json (conditional GET)
 const EVENTS_STALE_MS = 24 * 3600000;
 
 function _eventsFetchFailed(reason) {
@@ -15690,7 +15693,21 @@ function pushEventsMeta() {
 
 function fetchActiveEvents() {
   const https = require('https');
-  const req = https.get('https://potacat.com/events/active.json', (res) => {
+  // Conditional GET (unified-registry Phase C, client half): send the cached
+  // ETag; a 304 costs the server nothing and still counts as freshness on
+  // our side (the catalog is confirmed current). Works today (no ETag → no
+  // header → plain 200 path) and activates when potacat.com ships ETags.
+  const headers = {};
+  if (_eventsEtag) headers['If-None-Match'] = _eventsEtag;
+  const req = https.get('https://potacat.com/events/active.json', { headers }, (res) => {
+    if (res.statusCode === 304) {
+      res.resume(); // drain
+      _eventsFetchedAt = Date.now();
+      _eventsStaleWarned = false;
+      saveEventsCache({ events: activeEvents, etag: _eventsEtag, fetchedAt: _eventsFetchedAt });
+      pushEventsMeta();
+      return;
+    }
     let body = '';
     res.on('data', (chunk) => { body += chunk; });
     res.on('end', () => {
@@ -15700,7 +15717,8 @@ function fetchActiveEvents() {
           activeEvents = data.events;
           _eventsFetchedAt = Date.now();
           _eventsStaleWarned = false;
-          saveEventsCache({ ...data, fetchedAt: _eventsFetchedAt });
+          _eventsEtag = res.headers.etag || null;
+          saveEventsCache({ ...data, etag: _eventsEtag, fetchedAt: _eventsFetchedAt });
           pushEventsToRenderer();
           pushEventsMeta();
           updateRemoteSettings(); // refresh ECHOCAT catalog/subscriptions on the live 4h event refresh
