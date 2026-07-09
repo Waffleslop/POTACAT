@@ -107,6 +107,21 @@ function renderSlantedImage(rxImage, slantPx) {
       if (lastRxImage) renderSlantedImage(lastRxImage, 0);
     });
   }
+  // Redecode: replay the last transmission from the worker's raw-audio
+  // buffer, converting the display-shear slider into a real timing
+  // correction (a shear of N px across the full image ≈ N/(width·height)
+  // of a line per line = that many ppm·1e6 of sample-clock error).
+  const redecodeBtn = document.getElementById('rx-redecode');
+  if (redecodeBtn) {
+    redecodeBtn.addEventListener('click', () => {
+      let ppm = 0;
+      if (rxSlantPx && lastRxImage && lastRxImage.width && lastRxImage.height) {
+        ppm = Math.round((rxSlantPx / (lastRxImage.width * lastRxImage.height)) * 1e6);
+      }
+      statusBar.textContent = 'Redecoding from buffer' + (ppm ? ' (slant ' + ppm + ' ppm)…' : '…');
+      window.api.sstvRedecode({ slantPpm: ppm });
+    });
+  }
 })();
 let replyInset = { x: -1, y: -1, scale: 0.28, rotation: 0 }; // -1 = auto position (bottom-right)
 let galleryImages = [];   // [{filename, timestamp, mode, dataUrl}]
@@ -1570,11 +1585,18 @@ async function startRxAudio() {
 
     sstvWorkletNode.port.onmessage = (e) => {
       // SmartSDR Direct: the VITA-49 path in main feeds both the decoder
-      // and the waterfall (see onSstvVita49Audio handler below). Skip the
-      // local Windows-DAX capture entirely on this path so silent samples
-      // don't pile into the waterfall accumulator and dilute the FFT
-      // output. K3SBP 2026-05-15.
-      if (settings && settings.audioSource === 'smartsdr') return;
+      // and the waterfall (see onSstvVita49Audio handler below), so skip the
+      // local Windows-DAX capture — BUT only while VITA audio is actually
+      // FLOWING. The old unconditional skip (K3SBP 2026-05-15) meant any
+      // smartsdr-flagged state without a live stream (DAX conflict, yielded
+      // slot, radio disconnect, the v1.8.15-17 mute outage) starved the
+      // decoder completely with no fallback and no error. Recency-gated
+      // fallback (2026-07-07): if no VITA frame in 3 s, the local capture
+      // resumes feeding decoder + waterfall; the paths stay mutually
+      // exclusive by construction. Main mirrors this gate (sstv-feed-gate).
+      if (settings && settings.audioSource === 'smartsdr'
+          && (Date.now() - _lastVitaAudioTs) < 3000) return;
+      _markDecoderAudio(e.data, 'mic');
       // Send audio samples to main process for SSTV decoder (skip during TX to avoid self-decode)
       if (!isTx) window.api.sstvAudio(e.data);
       // Feed waterfall
@@ -1608,9 +1630,35 @@ if (window.api && window.api.onSstvVita49Audio) {
     if (!frame || !frame.pcm || !frame.pcm.length) return;
     if (isTx) return; // don't paint the waterfall during own TX
     const samples = (frame.pcm instanceof Float32Array) ? frame.pcm : new Float32Array(frame.pcm);
+    _markDecoderAudio(samples, 'vita');
     feedWaterfall(samples);
   });
 }
+
+// ===== RX AUDIO HEALTH =====================================================
+// Tracks whether NON-SILENT audio is actually reaching the decoder from any
+// ingress (mic/DAX-device capture or main's VITA-49 forward). The 2026-06
+// outage taught us dead feeds are invisible: the decoder just never locks
+// and the user assumes "SSTV is broken". Surface it in seconds instead.
+let _lastDecoderAudioTs = Date.now() + 8000; // grace period after open
+let _lastVitaAudioTs = 0; // for the smartsdr mic-fallback gate below
+function _markDecoderAudio(samples, source) {
+  if (source === 'vita') _lastVitaAudioTs = Date.now();
+  // Silence check: a live-but-muted feed is just as dead as no feed.
+  let peak = 0;
+  const step = Math.max(1, samples.length >> 6); // sample ~64 points
+  for (let i = 0; i < samples.length; i += step) {
+    const a = Math.abs(samples[i]);
+    if (a > peak) peak = a;
+  }
+  if (peak > 1e-4) _lastDecoderAudioTs = Date.now();
+}
+setInterval(() => {
+  const badge = document.getElementById('rx-no-audio');
+  if (!badge) return;
+  const dead = !isTx && (Date.now() - _lastDecoderAudioTs) > 5000;
+  badge.style.display = dead ? '' : 'none';
+}, 1000);
 
 // ===== MULTI-SLICE =========================================================
 
@@ -2017,10 +2065,18 @@ window.api.onSstvRxImage((data) => {
       pane.statusEl.textContent = data.mode + ' — ' + new Date().toLocaleTimeString();
     }
   } else {
-    rxInfo.textContent = data.mode + ' — ' + new Date().toLocaleTimeString();
+    const weakTag = data.weak ? ' (weak — not saved)' : (data.redecode ? ' (redecoded)' : '');
+    rxInfo.textContent = data.mode + weakTag + ' — ' + new Date().toLocaleTimeString();
     progressBar.style.width = '100%';
     setTimeout(() => { progressBar.style.width = '0%'; }, 2000);
-    statusBar.textContent = 'Image decoded: ' + data.mode;
+    statusBar.textContent = data.redecode
+      ? 'Redecoded from buffer: ' + data.mode + (data.weak ? ' (weak)' : '')
+      : data.weak
+        ? 'Weak decode shown (sync=' + ((data.stats && data.stats.sync) || '?') + '%) — not auto-saved'
+        : 'Image decoded: ' + data.mode;
+    // Weak-signal badge over the RX canvas
+    const weakBadge = document.getElementById('rx-weak-badge');
+    if (weakBadge) weakBadge.style.display = data.weak ? '' : 'none';
     // Stash the latest decode so the on-canvas Reply button can grab it
     lastRxImage = {
       imageData: new Uint8ClampedArray(data.imageData),
@@ -2028,6 +2084,10 @@ window.api.onSstvRxImage((data) => {
       height: data.height,
       mode: data.mode,
     };
+    // Paint the FINAL image (post-processed in main). The progressive
+    // rx-line paints are raw; and a redecode arrives with no line events
+    // at all, so without this repaint it would be invisible.
+    renderSlantedImage(lastRxImage, 0);
     const rxReplyBtn = document.getElementById('rx-reply-btn');
     if (rxReplyBtn) rxReplyBtn.style.display = '';
     // Reveal the slant slider; reset slant for the new decode.
@@ -2040,7 +2100,9 @@ window.api.onSstvRxImage((data) => {
     rxSlantPx = 0;
   }
 
-  // Add to gallery regardless of mode
+  // Add to gallery regardless of mode (redecodes replace the display only —
+  // a gallery entry would duplicate the original decode)
+  if (data.redecode) return;
   const w = data.width, h = data.height;
   const tmpC = document.createElement('canvas');
   tmpC.width = w; tmpC.height = h;
@@ -2052,6 +2114,7 @@ window.api.onSstvRxImage((data) => {
     dataUrl, mode: data.mode, timestamp: Date.now(),
     width: w, height: h, imageData: Array.from(data.imageData),
     sliceId: data.sliceId || null,
+    weak: !!data.weak, // session-only (weak decodes aren't written to disk)
   };
   galleryImages.unshift(entry);
   renderGallery();
