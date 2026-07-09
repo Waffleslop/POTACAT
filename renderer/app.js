@@ -15270,10 +15270,79 @@ let currentBoardEventId = null;
 
 function renderEventBoard(event) {
   renderEventOverlayTabs(event);
+  renderEventLifecycleStrip(event); // async fire-and-forget (finished summary + retro-stamp)
   const board = event.board || (event.tracking && event.tracking.type) || 'regions';
   if (board === 'regions') renderRegionsBoard(event);
   else if (board === 'checklist') renderChecklistBoard(event);
   else if (board === 'counter') renderCounterBoard(event);
+}
+
+// Post-event lifecycle strip (events-roadmap #2/#3). Shows above the board
+// when there is something to say: the event FINISHED (summary + nudge toward
+// the ADIF export) and/or unstamped past QSOs exist (explicit retro-stamp
+// button — never automatic). Hidden the rest of the time.
+async function renderEventLifecycleStrip(event) {
+  const content = document.getElementById('event-board-content');
+  if (!content || !content.parentElement) return;
+  let strip = document.getElementById('event-lifecycle-strip');
+  if (!strip) {
+    strip = document.createElement('div');
+    strip.id = 'event-lifecycle-strip';
+    strip.style.cssText = 'display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;margin:4px 0;border:1px solid var(--border-primary);border-radius:6px;background:var(--bg-secondary);font-size:12px;color:var(--text-primary);';
+    content.parentElement.insertBefore(strip, content);
+  }
+  const renderToken = (strip.dataset.token = String(Date.now()));
+
+  const now = new Date();
+  const sched = event.schedule || [];
+  const ended = sched.length > 0 && sched.every(s => new Date(s.end).getTime() < now.getTime());
+
+  let matched = 0;
+  try {
+    const res = await window.api.eventRetroStamp({ eventId: event.id, dryRun: true });
+    if (res && res.ok) matched = res.matched || 0;
+  } catch { /* strip simply omits the button */ }
+  if (strip.dataset.token !== renderToken) return; // superseded by a newer render
+
+  if (!ended && !matched) { strip.style.display = 'none'; return; }
+  strip.style.display = 'flex';
+  strip.innerHTML = '';
+
+  if (ended) {
+    const progress = event.progress || {};
+    const worked = Object.keys(progress).length;
+    const total = (event.tracking && (event.tracking.total || (event.tracking.items || []).length)) || 0;
+    const modes = {};
+    for (const k of Object.keys(progress)) {
+      const m = (progress[k].mode || '').toUpperCase();
+      if (m) modes[m] = (modes[m] || 0) + 1;
+    }
+    const modeStr = Object.entries(modes).map(([m, c]) => `${c} ${m}`).join(', ');
+    const span = document.createElement('span');
+    span.innerHTML = `<b>Finished</b> — worked ${worked}${total ? ' of ' + total : ''}${modeStr ? ' (' + esc(modeStr) + ')' : ''}. Use Export for your award/QSL submission.`;
+    strip.appendChild(span);
+  }
+
+  if (matched) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = `Stamp ${matched} past QSO${matched === 1 ? '' : 's'}`;
+    btn.title = `Write "${event.name || event.id}" into ${matched} matching log record${matched === 1 ? '' : 's'} (comment tag + ADIF event fields). Only QSOs with this event's stations inside its dates; already-stamped records are skipped.`;
+    btn.style.cssText = 'background:none;border:1px solid var(--accent-blue,#4fc3f7);color:var(--accent-blue,#4fc3f7);font-size:11px;font-weight:600;padding:3px 10px;border-radius:4px;cursor:pointer;';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Stamping…';
+      const res = await window.api.eventRetroStamp({ eventId: event.id });
+      if (res && res.ok) {
+        btn.textContent = `Stamped ${res.stamped} QSO${res.stamped === 1 ? '' : 's'} ✓`;
+      } else {
+        btn.textContent = 'Stamp failed';
+        btn.title = (res && res.error) || 'unknown error';
+        btn.disabled = false;
+      }
+    });
+    strip.appendChild(btn);
+  }
 }
 
 // When more than one event is being tracked (e.g. ARRL 250 and 13 Colonies both

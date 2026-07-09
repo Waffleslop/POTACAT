@@ -297,6 +297,7 @@ contextBridge.exposeInMainWorld('api', {
   setEventItem: (data) => ipcRenderer.invoke('set-event-item', data),
   resetEventProgress: (eventId) => ipcRenderer.invoke('reset-event-progress', eventId),
   exportEventAdif: (data) => ipcRenderer.invoke('export-event-adif', data),
+  eventRetroStamp: (data) => ipcRenderer.invoke('event-retro-stamp', data),
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),
   close: () => ipcRenderer.send('win-close'),

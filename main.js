@@ -256,7 +256,7 @@ const { WsprScheduler } = require('./lib/wspr/scheduler');
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
-const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, matchEventQsoForStamp } = require('./lib/event-progress');
+const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, matchEventQsoForStamp, retroStampMatches } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const RigFamily = require('./lib/rig-family');
@@ -22932,6 +22932,41 @@ app.whenReady().then(() => {
       pushEventsToRenderer();
     }
     return true;
+  });
+
+  // Retro-stamp (events-roadmap #3): write an event into matching PAST log
+  // records — explicit button, never automatic (silent bulk edits to a
+  // logbook are how trust dies). dryRun returns the match count for the
+  // button label; the real run rewrites the log atomically, then refreshes
+  // everything derived from it. Identity-proven matches only (shared
+  // predicates in lib/event-progress.js); records already stamped skip.
+  ipcMain.handle('event-retro-stamp', (_e, { eventId, dryRun } = {}) => {
+    try {
+      const ev = activeEvents.find((e) => e && e.id === eventId);
+      if (!ev) return { ok: false, error: 'unknown event' };
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      const qsos = parseAllRawQsos(logPath);
+      const matches = retroStampMatches(ev, qsos);
+      if (dryRun || !matches.length) return { ok: true, matched: matches.length, stamped: 0 };
+      for (const m of matches) {
+        const r = qsos[m.index];
+        r.APP_POTACAT_EVENT = ev.id;
+        if (m.item) r.APP_POTACAT_EVENT_ITEM = m.item;
+        if (settings.logCommentTags !== false) {
+          const tag = `[${[ev.name || ev.id, m.itemName].filter(Boolean).join(' - ')}]`;
+          const c = String(r.COMMENT || '');
+          if (!c.includes(tag)) r.COMMENT = c ? `${c} ${tag}` : tag;
+        }
+      }
+      rewriteAdifFile(logPath, qsos);
+      loadWorkedQsos();
+      scanLogForEvents();
+      rebuildContestHistory();
+      sendCatLog(`[events] Retro-stamped ${matches.length} past QSO(s) with ${ev.name || ev.id}`);
+      return { ok: true, matched: matches.length, stamped: matches.length };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   ipcMain.handle('export-event-adif', async (_e, { eventId }) => {

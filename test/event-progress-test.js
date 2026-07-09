@@ -11,7 +11,7 @@
 'use strict';
 
 const assert = require('assert');
-const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, matchEventQsoForStamp } = require('../lib/event-progress');
+const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, matchEventQsoForStamp, retroStampMatches } = require('../lib/event-progress');
 
 let passed = 0, failed = 0;
 function check(cond, label) {
@@ -99,6 +99,46 @@ check(matchEventQsoForStamp(EVENTS, { ...STATE, '13col-2026': { optedIn: false, 
 check(matchEventQsoForStamp(EVENTS, STATE, 'K2A', new Date('2026-08-01T00:00:00Z')) === null,
   'outside the schedule window -> no stamp');
 check(matchEventQsoForStamp(EVENTS, undefined, 'K2A', NOW) === null, 'missing state -> no stamp');
+
+// ---------------------------------------------------------------------------
+// Retro-stamping (events-roadmap #3): find PAST log records that belong to an
+// event but carry no stamp. Explicit-button feature; these tables pin the
+// candidate rules (identity + day window, skip stamped, counter never).
+// ---------------------------------------------------------------------------
+console.log('\nretroStampMatches:');
+{
+  const ev13 = EVENTS[0]; // checklist, Jul 1 1300z - Jul 8 0400z
+  const raw = (call, date, extra) => ({ CALL: call, QSO_DATE: date, ...extra });
+  const log = [
+    raw('K2A', '20260701'),                       // start day — matches
+    raw('K2A/4', '20260703'),                     // portable event station — matches
+    raw('W1AW', '20260703'),                      // not an event station
+    raw('GB13COL', '20260709'),                   // outside the day window
+    raw('GB13COL', '20260707', { APP_POTACAT_EVENT: '13col-2026' }), // already stamped — skip
+    raw('GB13COL', '20260706'),                   // matches (bonus station)
+  ];
+  const m = retroStampMatches(ev13, log);
+  check(m.length === 3, `checklist retro-stamp finds 3 candidates (got ${m.length})`);
+  check(m.map(x => x.index).join(',') === '0,1,5', 'candidate indexes are 0,1,5');
+  check(m[0].item === 'K2A' && m[0].itemName === 'New York', 'candidate carries item id + name');
+}
+{
+  const evReg = EVENTS[1]; // regions, W2S/* pattern, July
+  const log = [
+    { CALL: 'W2S/7', QSO_DATE: '20260710' },
+    { CALL: 'K1ABC', QSO_DATE: '20260710' },
+  ];
+  const m = retroStampMatches(evReg, log);
+  check(m.length === 1 && m[0].item === 'PA' && m[0].itemName === 'Pennsylvania',
+    'regions retro-stamp matches pattern calls with the covering region');
+}
+{
+  const evCounter = EVENTS[2]; // counter — never stamps
+  const m = retroStampMatches(evCounter, [{ CALL: 'K2A', QSO_DATE: '20260710' }]);
+  check(m.length === 0, 'counter boards produce no retro-stamp candidates');
+}
+check(retroStampMatches(null, [{ CALL: 'K2A', QSO_DATE: '20260701' }]).length === 0, 'null event -> none');
+check(retroStampMatches(EVENTS[0], []).length === 0, 'empty log -> none');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'event-progress matcher tests failed');
