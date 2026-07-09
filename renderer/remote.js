@@ -6017,7 +6017,8 @@
           const call = parts[callIdx] || '';
           const grid = parts[callIdx + 1] || '';
           if (call === ft8HuntCall) {
-            ft8Send({ type: 'jtcat-reply', call, grid, df: d.df || 1500, sliceId: d.sliceId });
+            ft8Send({ type: 'jtcat-reply', call, grid, df: d.df || 1500, sliceId: d.sliceId,
+              snr: d.db, slot: d.slot, text: text || '', nextStep: 'reply-cq' });
             ft8HuntCall = ''; // clear hunt — we've engaged
           }
         }
@@ -6166,6 +6167,10 @@
       df: decode.df || 1500,
       sliceId: decode.sliceId,
       snr: decode.db,
+      slot: decode.slot,
+      // Raw decode text — the host re-derives the step from this
+      // authoritatively (immune to a stale classifier on our side).
+      text: decode.text || '',
       nextStep: action.step,
       theirGrid: action.theirGrid,
       theirReport: action.theirReport,

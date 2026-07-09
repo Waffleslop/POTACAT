@@ -274,6 +274,7 @@ const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine } = require('./lib/sstv-engine');
+const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const { SstvManager } = require('./lib/sstv-manager');
 const sstvPost = require('./lib/sstv-post');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
@@ -774,6 +775,12 @@ let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
 // stops accumulating doomed frames. Recovery: stop+start the SSTV view,
 // or restart POTACAT.
 let _sstvFeedPaused = false;
+// Freshness timestamps for the SSTV ingress gates (lib/sstv-feed-gate.js):
+// last time each direct radio stream actually fed the decoder. The renderer
+// (mic/DAX-device) fallback engages when the selected stream goes stale.
+let _lastSstvVitaFeedMs = 0;
+let _lastSstvK4FeedMs = 0;
+let _lastSstvIcomFeedMs = 0;
 
 // =====================================================================
 // Bounded audio IPC fan-out — see audioSafeSend below.
@@ -5242,6 +5249,18 @@ function jtcatFdContext() {
   return { fd: true, myExch: exch };
 }
 
+// Directed TX message with WSJT-X bracket rules when one call is nonstandard
+// (special-event/compound: GB13COL, PJ4/K1ABC). Report legs hash the
+// nonstandard call ("<GB13COL> K3SBP -08"), ack legs send it in full via a
+// type-4 message ("GB13COL <K3SBP> RR73"), and grids are dropped (no room in
+// the nonstandard message types). Standard↔standard is byte-identical to the
+// old inline concatenation. Falls back to plain text if the formatter refuses
+// (both calls nonstandard — the codec can't TX that pairing anyway).
+function jtcatDirectedMsg(theirCall, myCall, payload) {
+  return JtcatParser.formatDirectedMsg(theirCall, myCall, payload)
+    || (theirCall + ' ' + myCall + (payload ? ' ' + payload : ''));
+}
+
 // Build a fresh CQ QSO object and start transmitting. Returns the QSO or null
 // if callsign/grid/engine aren't ready. Shared by re-arm; mirrors the manual
 // CQ button's message build.
@@ -6176,7 +6195,7 @@ function startJtcat(mode) {
             grid: best.grid,
             myCall,
             myGrid,
-            txMsg: best.call + ' ' + myCall + ' ' + myGrid,
+            txMsg: jtcatDirectedMsg(best.call, myCall, myGrid),
             report: null,
             sentReport: null,
             txRetries: 0,
@@ -7139,6 +7158,7 @@ function startSmartSdrAudio() {
       if (sstvPopoutWin) {
         audioSafeSend(sstvPopoutWin.webContents, 'sstv-vita49-audio', { pcm: upsampled, sampleRate: 48000 });
       }
+      _lastSstvVitaFeedMs = Date.now(); // freshness for the renderer-fallback gate
       sstvEngine.feedAudio(upsampled);
     }
     if (settings.audioSource === 'smartsdr' && jtcatManager && jtcatManager.running) {
@@ -7714,6 +7734,7 @@ function handleIcomNetworkPacedRxFrame(pcm, sampleRate, meta = {}) {
     if (sstvPopoutWin) {
       audioSafeSend(sstvPopoutWin.webContents, 'sstv-vita49-audio', { pcm: new Float32Array(sstvPcm), sampleRate: 48000 });
     }
+    _lastSstvIcomFeedMs = Date.now(); // freshness for the renderer-fallback gate
     sstvEngine.feedAudio(sstvPcm);
   }
 
@@ -7969,6 +7990,7 @@ function handleK4AudioFrame(frame) {
     if (sstvPopoutWin) {
       audioSafeSend(sstvPopoutWin.webContents, 'sstv-vita49-audio', { pcm: out, sampleRate: 48000 });
     }
+    _lastSstvK4FeedMs = Date.now(); // freshness for the renderer-fallback gate
     sstvEngine.feedAudio(out);
   }
   // Diagnostic: log first frame + periodic heartbeat (~every 5 s at 720
@@ -8392,6 +8414,13 @@ function updateRemoteSettings() {
     // blob so a (re)connecting phone seeds its picker; live changes come via the
     // jtcat-chase-target S2C message.
     jtcatChaseTarget: settings.jtcatChaseTarget || '',
+    // Skip Grid + Hound (2026-07-07) — shared last-writer-wins JTCAT toggles.
+    // The host applies them to BOTH owners' replies (main.js builds every TX
+    // message), so a phone only needs the toggle UI. Live changes ride the
+    // regular settings-update broadcast; C2S setters are
+    // jtcat-set-skip-tx1 / jtcat-set-hound-mode.
+    jtcatSkipTx1: !!settings.jtcatSkipTx1,
+    jtcatHoundMode: !!settings.jtcatHoundMode,
     enableAtu: !!settings.enableAtu,
     tuneClick: !!settings.tuneClick,
     enableRotor: !!settings.enableRotor,
@@ -11290,7 +11319,7 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-reply', async (data) => {
-    const { call, df, slot, sliceId, snr } = data;
+    let { call, df, slot, sliceId, snr } = data; // `call` is rebased below (re-derivation / hound)
     // Route TX to correct slice in multi-slice mode
     const targetEngine = (jtcatManager && sliceId) ? jtcatManager.getEngine(sliceId) : ft8Engine;
     if (!targetEngine) return;
@@ -11298,6 +11327,22 @@ function connectRemote() {
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
     if (!myCall) return;
+    // Authoritative re-classification from the RAW decode text — the same
+    // defense jtcat-popout-reply has had since 2026-06-10, absent here until
+    // K3SBP 2026-07-09 (tapping "K3SBP A1BC FN19" on the phone transmitted
+    // the grid, not the report: the WS demux stripped the phone's nextStep
+    // and the fallback below manufactured reply-cq). Immune to a stale or
+    // drifted phone-side classifier; only runs when the client sent text —
+    // older apps fall through to their precomputed nextStep/legacy flags.
+    if (data.text) {
+      const action = JtcatParser.inferReplyStep({ text: data.text }, myCall);
+      if (action) {
+        data.nextStep = action.step;
+        call = action.call;
+        if (action.theirGrid != null) data.theirGrid = action.theirGrid;
+        if (action.theirReport != null) data.theirReport = action.theirReport;
+      }
+    }
     // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
     if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.report &&
         remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done' &&
@@ -11307,7 +11352,13 @@ function connectRemote() {
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (targetEngine._txActive) targetEngine.txComplete();
-    targetEngine.setTxFreq(df);
+    // Hound mode: fox at 300–900 Hz, hounds must call 1000–4000 Hz (see the
+    // popout handler for the full rule). Hounds also call the fox's BASE call.
+    const houndReply = !!settings.jtcatHoundMode && !jtcatFdContext();
+    if (houndReply && call) call = JtcatParser.normalizeCall(call) || call;
+    let replyTxFreq = df;
+    if (houndReply && replyTxFreq < 1000) replyTxFreq = 1000 + Math.floor(Math.random() * 2000);
+    targetEngine.setTxFreq(replyTxFreq);
     targetEngine.setRxFreq(df);
     // TX on opposite slot from the station we're replying to (use slot from decode data)
     const targetSlot = slot || targetEngine._lastRxSlot;
@@ -11332,14 +11383,15 @@ function connectRemote() {
     const sliceKey = sliceId || 'default';
 
     let txMsg, phase;
+    let remoteReplySentRpt = null; // set when Skip Grid replaces the grid with a report
     if (nextStep === 'send-73') {
-      txMsg = call + ' ' + myCall + ' 73';
+      txMsg = jtcatDirectedMsg(call, myCall, '73');
       phase = '73';
     } else if (nextStep === 'send-rr73') {
       // CQ SIDE: they answered our CQ with R+signal → we send RR73. CQ-mode
       // phase so the state machine advances + the QSO logs (reply mode has no
       // 'rr73' handler — WZ1H/W7RTA 2026-06-22). Log on setup (past the log pt).
-      txMsg = call + ' ' + myCall + ' RR73';
+      txMsg = jtcatDirectedMsg(call, myCall, 'RR73');
       phase = 'cq-rr73';
       const sameCall = remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.call.toUpperCase() === call.toUpperCase();
       remoteJtcatQso = {
@@ -11352,18 +11404,23 @@ function connectRemote() {
       };
       if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
     } else if (nextStep === 'send-r-report') {
-      txMsg = call + ' ' + myCall + ' R' + ourRpt;
+      txMsg = jtcatDirectedMsg(call, myCall, 'R' + ourRpt);
       phase = 'r+report';
       remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase, txMsg, report: theirReport, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
+      if (houndReply) remoteJtcatQso.hound = true;
     } else if (nextStep === 'send-report') {
       // CQ SIDE: they answered our CQ with their grid → we send a signal report.
       // CQ-mode phase 'cq-report' so the SM advances (their R-report → cq-rr73 +
       // auto-log). Reply mode had no 'report' handler — the QSO froze, no log.
-      txMsg = call + ' ' + myCall + ' ' + ourRpt;
+      txMsg = jtcatDirectedMsg(call, myCall, ourRpt);
       phase = 'cq-report';
       remoteJtcatQso = { mode: 'cq', call, grid: theirGrid, phase, txMsg, report: null, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
     } else {
-      txMsg = call + ' ' + myCall + ' ' + myGrid;
+      // Fresh reply. Skip Grid (WSJT-X "disable Tx1") sends a signal report
+      // instead of our grid — same behavior as the popout handler. Hound Tx1
+      // always carries the grid (Skip Grid doesn't apply in a fox pileup).
+      if (settings.jtcatSkipTx1 && !houndReply) { txMsg = jtcatDirectedMsg(call, myCall, ourRpt); remoteReplySentRpt = ourRpt; }
+      else txMsg = jtcatDirectedMsg(call, myCall, myGrid);
       phase = 'reply';
     }
 
@@ -11379,8 +11436,9 @@ function connectRemote() {
       targetEngine.tryImmediateTx();
       if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
     } else if (phase === 'reply') {
-      // Fresh reply with our grid — set up new QSO entry.
-      remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase: 'reply', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
+      // Fresh reply with our grid (or report, in Skip Grid) — new QSO entry.
+      remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase: 'reply', txMsg, report: null, sentReport: remoteReplySentRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
+      if (houndReply) remoteJtcatQso.hound = true;
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       targetEngine.tryImmediateTx();
@@ -11410,6 +11468,24 @@ function connectRemote() {
   remoteServer.on('jtcat-set-chase-target', ({ tag } = {}) => {
     applyChaseTarget(tag);
   });
+
+  // Skip Grid + Hound toggles from the phone — shared last-writer-wins
+  // settings. Persisting triggers updateRemoteSettings() → settings-update,
+  // which is the echo every phone syncs from; the popout gets a direct nudge
+  // so its toggle flips live without a reopen.
+  const applyJtcatFlag = (key, enabled, label) => {
+    const v = !!enabled;
+    if (!!settings[key] === v) return;
+    settings[key] = v;
+    saveSettings(settings);
+    updateRemoteSettings();
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-flag-state', { key, enabled: v });
+    }
+    sendCatLog(`[JTCAT] ${label}: ${v ? 'ON' : 'OFF'} (remote)`);
+  };
+  remoteServer.on('jtcat-set-skip-tx1', ({ enabled } = {}) => applyJtcatFlag('jtcatSkipTx1', enabled, 'Skip Grid'));
+  remoteServer.on('jtcat-set-hound-mode', ({ enabled } = {}) => applyJtcatFlag('jtcatHoundMode', enabled, 'Hound mode'));
 
   remoteServer.on('jtcat-halt-tx', () => {
     clearJtcatTxFailsafe();
@@ -11715,7 +11791,7 @@ function connectRemote() {
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq') {
       if (q.phase === 'cq' || q.phase === 'cq-report') {
-        q.txMsg = validCall ? (q.call + ' ' + myCall + ' RR73') : '';
+        q.txMsg = validCall ? jtcatDirectedMsg(q.call, myCall, 'RR73') : '';
         q.phase = validCall ? 'cq-rr73' : 'done';
       } else {
         q.phase = 'done';
@@ -11723,10 +11799,10 @@ function connectRemote() {
     } else {
       if (q.phase === 'reply') {
         const rpt = q.sentReport || '-10';
-        q.txMsg = q.call + ' ' + myCall + ' R' + rpt;
+        q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
-        q.txMsg = q.call + ' ' + myCall + ' RR73';
+        q.txMsg = jtcatDirectedMsg(q.call, myCall, 'RR73');
         q.phase = '73';
       } else {
         q.phase = 'done';
@@ -13967,11 +14043,69 @@ function loadWorkedQsos() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('worked-qsos', [...workedQsos.entries()]);
     }
+    checkRemoteQsoMilestone();
   } catch (err) {
     console.error('Failed to parse worked QSOs:', err.message);
   }
   buildQsoDetailsIndex();
   buildRosterSets();
+}
+
+// --- Daily QSO milestone broadcast (ECHOCAT parity of the renderer's cat
+// celebration; mobile handoff: qso-milestone-celebrations). Semantics mirror
+// renderer/app.js checkQsoMilestone exactly: UTC-day count over the active
+// operator's logbook, one milestone per pass, pre-marked on first load (no
+// celebration burst for QSOs made before launch), set cleared when the count
+// drops (UTC day rollover / smaller log after a profile switch). The desktop
+// window celebrates via its own renderer-side logic; this covers the phone —
+// including headless mode where no renderer exists.
+const REMOTE_QSO_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 500];
+const _remoteCelebrated = new Set();
+let _remoteLastDailyCount = 0;
+let _remoteMilestonesSeeded = false;
+
+function _todayUtcQsoCount() {
+  const now = new Date();
+  const todayUtc = now.getUTCFullYear().toString() +
+    String(now.getUTCMonth() + 1).padStart(2, '0') +
+    String(now.getUTCDate()).padStart(2, '0');
+  let count = 0;
+  for (const entries of workedQsos.values()) {
+    for (const e of entries) {
+      if (e.date === todayUtc) count++;
+    }
+  }
+  return count;
+}
+
+function checkRemoteQsoMilestone() {
+  const count = _todayUtcQsoCount();
+  if (!_remoteMilestonesSeeded) {
+    _remoteMilestonesSeeded = true;
+    _remoteLastDailyCount = count;
+    for (const m of REMOTE_QSO_MILESTONES) {
+      if (count >= m) _remoteCelebrated.add(m);
+    }
+    return;
+  }
+  if (count < _remoteLastDailyCount) _remoteCelebrated.clear();
+  _remoteLastDailyCount = count;
+  for (const m of REMOTE_QSO_MILESTONES) {
+    if (count >= m && !_remoteCelebrated.has(m)) {
+      _remoteCelebrated.add(m);
+      const mega = m === 500;
+      if (remoteServer && remoteServer.running) {
+        remoteServer.sendToClient({
+          type: 'qso-milestone',
+          milestone: m,
+          count,
+          mega,
+          message: mega ? '500 QSOs today! You are UNSTOPPABLE!' : `${m} QSOs today! Keep going!`,
+        });
+      }
+      break; // one celebration at a time
+    }
+  }
 }
 
 // --- qsoDetails index — for the ragchew log pop-out ---
@@ -19555,11 +19689,22 @@ app.whenReady().then(() => {
     });
 
     sstvEngine.on('rx-image', (data) => {
-      sendCatLog(`[SSTV] Image decoded: ${data.width}x${data.height} ${data.mode} — saving to gallery`);
+      const stats = data.stats || {};
+      // Weak-tier decodes (2026-07-07): show the operator the noisy image —
+      // MMSSTV always paints something — but keep the gallery/auto-save
+      // clean for unattended operation.
+      if (data.redecode) {
+        sendCatLog(`[SSTV] Redecode result: ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}${data.weak ? ' (weak)' : ''}`);
+      } else if (data.weak) {
+        sendCatLog(`[SSTV] WEAK decode shown (not auto-saved): ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}`);
+      } else {
+        sendCatLog(`[SSTV] Image decoded: ${data.width}x${data.height} ${data.mode} — saving to gallery`);
+      }
       _sstvLastActivityMs = Date.now();
       applySstvPostProcess(data);
-      // Save to gallery
-      const saved = saveSstvImage(data);
+      // Save to gallery (good-tier live decodes only — weak decodes and
+      // manual redecodes display without touching the on-disk gallery)
+      const saved = (data.weak || data.redecode) ? null : saveSstvImage(data);
       // Send to popout
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-image', {
@@ -19568,6 +19713,9 @@ app.whenReady().then(() => {
           height: data.height,
           mode: data.mode,
           saved,
+          weak: !!data.weak,
+          redecode: !!data.redecode,
+          stats,
         });
       }
       // Send to ECHOCAT phone
@@ -19587,6 +19735,7 @@ app.whenReady().then(() => {
             mode: data.mode,
             width: data.width,
             height: data.height,
+            weak: !!data.weak, // additive — older apps ignore it
           });
         } catch (err) {
           console.error('[SSTV] ECHOCAT broadcast error:', err.message);
@@ -19788,31 +19937,39 @@ app.whenReady().then(() => {
   }
 
   // SSTV IPC handlers
+  //
+  // Ingress gating lives in lib/sstv-feed-gate.js (pure, table-tested).
+  // Key change 2026-07-07: the direct radio streams (SmartSDR VITA-49, K4,
+  // Icom) only outrank the renderer capture while they are FRESH — actually
+  // delivering frames — not merely "connected". The old object-existence
+  // gates left the decoder starved with no fallback whenever a stream
+  // existed but delivered nothing (DAX conflict, yielded slot, the
+  // v1.8.15–17 muted-slice outage). The popout mirrors this with its own
+  // 3 s VITA-recency check before capturing locally.
+  const _sstvRendererGateState = () => ({
+    engineRunning: !!sstvEngine,
+    feedPaused: _sstvFeedPaused,
+    audioSource: settings.audioSource,
+    smartSdrAudioUp: !!smartSdrAudio,
+    lastVitaFeedMs: _lastSstvVitaFeedMs,
+    k4Connected: !!(settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected),
+    lastK4FeedMs: _lastSstvK4FeedMs,
+    icomConnected: !!(settings.catTarget && settings.catTarget.type === 'icom-network' && cat && cat.connected),
+    lastIcomFeedMs: _lastSstvIcomFeedMs,
+    now: Date.now(),
+  });
+
   ipcMain.on('sstv-set-sample-rate', (_e, rate) => {
-    // SmartSDR Direct + K4 feed SSTV from main's own audio path at a fixed
-    // 48 kHz (the audio-frame / handleK4AudioFrame handlers — same paths the
-    // sstv-audio guard below drops the renderer capture for). The renderer's
-    // AudioContext rate is irrelevant there and must NOT override the
-    // decoder's rate — a mismatch skews every measured frequency and turns
-    // every decode into noise. Mirror the sstv-audio guards exactly.
-    if (settings.audioSource === 'smartsdr' && smartSdrAudio) return;
-    if (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected) return;
-    if (settings.audioSource === 'icom-network' && settings.catTarget && settings.catTarget.type === 'icom-network' && cat && cat.connected) return;
+    // The renderer's AudioContext rate must only apply while the renderer is
+    // the live ingress — the direct streams feed a fixed 48 kHz and a stale
+    // renderer rate would skew every measured frequency into noise.
+    if (!SstvFeedGate.rendererAudioDecision(_sstvRendererGateState()).accept) return;
     if (sstvEngine) sstvEngine.setSampleRate(rate);
     console.log('[SSTV] Audio sample rate set to ' + rate + ' Hz');
   });
 
   ipcMain.on('sstv-audio', (_e, buf) => {
-    if (!sstvEngine) return;
-    // SmartSDR Direct: VITA-49 audio is fed straight from main's audio-frame
-    // handler. Drop the renderer's (silent on this path) Windows-DAX-RX
-    // capture so the same audio isn't double-fed at the decoder.
-    if (settings.audioSource === 'smartsdr' && smartSdrAudio) return;
-    // K4 network: SSTV is fed by handleK4AudioFrame's 4x upsample.
-    if (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected) return;
-    // Icom Network: SSTV is fed from RS-BA1 RX audio frames in main.
-    if (settings.audioSource === 'icom-network' && settings.catTarget && settings.catTarget.type === 'icom-network' && cat && cat.connected) return;
-    if (_sstvFeedPaused) return; // circuit breaker — see flag definition
+    if (!SstvFeedGate.rendererAudioDecision(_sstvRendererGateState()).accept) return;
     let samples;
     if (buf instanceof Float32Array) samples = buf;
     else if (Array.isArray(buf)) samples = new Float32Array(buf);
@@ -19824,6 +19981,15 @@ app.whenReady().then(() => {
     if (!sstvEngine) startSstv();
     const imageData = new Uint8ClampedArray(data.imageData);
     sstvEngine.encode(imageData, data.width, data.height, data.mode);
+  });
+
+  // Manual redecode of the last received transmission (MMSSTV "replay from
+  // RX buffer") — optionally with a user-supplied slant correction in ppm.
+  ipcMain.on('sstv-redecode', (_e, opts) => {
+    if (!sstvEngine) return;
+    const ppm = Math.max(-5000, Math.min(5000, (opts && Number(opts.slantPpm)) || 0));
+    sendCatLog(`[SSTV] Redecode requested${ppm ? ` (slant ${ppm} ppm)` : ''}`);
+    sstvEngine.redecode({ slantPpm: ppm });
   });
 
   ipcMain.on('sstv-tx-complete', () => {
@@ -20096,7 +20262,15 @@ app.whenReady().then(() => {
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (replyEngine._txActive) replyEngine.txComplete();
-    replyEngine.setTxFreq(data.df || 1500);
+    // Hound mode (FT8 DXpedition): the Fox transmits at 300–900 Hz but
+    // ignores initial calls below 1000 Hz — hounds call 1000–4000 Hz. Keep
+    // RX on the fox; move our TX up if the click landed in the fox zone.
+    // (The state machine QSYs TX down to the fox's frequency for the R+rpt
+    // leg once the fox answers.)
+    const houndReply = !!settings.jtcatHoundMode && !jtcatFdContext();
+    let replyTxFreq = data.df || 1500;
+    if (houndReply && replyTxFreq < 1000) replyTxFreq = 1000 + Math.floor(Math.random() * 2000);
+    replyEngine.setTxFreq(replyTxFreq);
     replyEngine.setRxFreq(data.df || 1500);
     // TX on opposite slot from the station we're replying to
     const targetSlot = data.slot || replyEngine._lastRxSlot;
@@ -20137,10 +20311,16 @@ app.whenReady().then(() => {
       else nextStep = 'reply-cq';
     }
 
+    // Hounds call the fox's BASE call (KH7Z, not KH1/KH7Z) — WSJT-X rule. The
+    // base call is standard c28, so our Tx1 keeps its grid; fox dual messages
+    // still match because <KH1/KH7Z> contains the base as a substring.
+    if (houndReply && data.call) data.call = JtcatParser.normalizeCall(data.call) || data.call;
+
     let txMsg, phase;
+    let skipSentRpt = null; // set when Skip Grid replaces the grid with a report
     const ourRpt = fmtSnr(data.snr);
     if (nextStep === 'send-73') {
-      txMsg = data.call + ' ' + myCall + ' 73';
+      txMsg = jtcatDirectedMsg(data.call, myCall, '73');
       phase = '73';
     } else if (nextStep === 'send-rr73') {
       // They answered OUR CQ with R+signal (their step 4) → we're the CQ SIDE
@@ -20149,7 +20329,7 @@ app.whenReady().then(() => {
       // froze and never logged (WZ1H/W7RTA 2026-06-22: double-clicking a station
       // answering you didn't log + pathway steps stuck). The log point (their
       // R-report received) has passed, so log on setup like the send-73 case.
-      txMsg = data.call + ' ' + myCall + ' RR73';
+      txMsg = jtcatDirectedMsg(data.call, myCall, 'RR73');
       phase = 'cq-rr73';
       const sameCall = popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.call.toUpperCase() === data.call.toUpperCase();
       popoutJtcatQso = {
@@ -20163,7 +20343,7 @@ app.whenReady().then(() => {
       if (!sameCall) await jtcatAutoLog(popoutJtcatQso);
     } else if (nextStep === 'send-r-report') {
       // Their step 3 (plain signal report) → we send step 4 (R+ourReport).
-      txMsg = data.call + ' ' + myCall + ' R' + ourRpt;
+      txMsg = jtcatDirectedMsg(data.call, myCall, 'R' + ourRpt);
       phase = 'r+report';
       popoutJtcatQso = {
         mode: 'reply', call: data.call,
@@ -20173,6 +20353,7 @@ app.whenReady().then(() => {
         sentReport: ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
       };
+      if (houndReply) popoutJtcatQso.hound = true;
     } else if (nextStep === 'send-report') {
       // They answered OUR CQ with their grid (their step 2) → we're the CQ SIDE
       // sending a signal report (step 3). Use CQ-mode phase 'cq-report' so the
@@ -20180,7 +20361,7 @@ app.whenReady().then(() => {
       // mode had NO 'report' handler, so the QSO froze and never logged
       // (WZ1H/W7RTA 2026-06-22). Old code also briefly treated this as a fresh
       // CQ-reply (sending OUR grid back), rolling the QSO back on a stale click.
-      txMsg = data.call + ' ' + myCall + ' ' + ourRpt;
+      txMsg = jtcatDirectedMsg(data.call, myCall, ourRpt);
       phase = 'cq-report';
       popoutJtcatQso = {
         mode: 'cq', call: data.call,
@@ -20191,11 +20372,35 @@ app.whenReady().then(() => {
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
       };
     } else {
-      // 'reply-cq' — fresh reply with our grid (step 1 → step 2). In Field Day
-      // mode we send our class+section exchange instead of the grid.
+      // 'reply-cq' — fresh reply (step 1 → step 2). Field Day sends our
+      // class+section exchange; Skip Grid (WSJT-X "disable Tx1") sends a
+      // signal report instead of our grid, cutting one full cycle each way.
+      // The state machine's 'reply' phase already handles the shortened
+      // ladder — their R+report advances straight to RR73 + log.
       const fdCtx = jtcatFdContext();
-      txMsg = data.call + ' ' + myCall + ' ' + (fdCtx ? fdCtx.myExch : myGrid);
+      if (fdCtx) txMsg = data.call + ' ' + myCall + ' ' + fdCtx.myExch;
+      // Hound Tx1 always carries the grid (the fox's caller list wants it);
+      // Skip Grid doesn't apply inside a fox pileup.
+      else if (settings.jtcatSkipTx1 && !houndReply) { txMsg = jtcatDirectedMsg(data.call, myCall, ourRpt); skipSentRpt = ourRpt; }
+      else txMsg = jtcatDirectedMsg(data.call, myCall, myGrid);
       phase = 'reply';
+      // Dupe check — manual double-click only (the auto-CQ/run-mode paths
+      // SKIP worked calls; a human click proceeds with a warning, mirroring
+      // WSJT-X's worked-before coloring rather than refusing the QSO).
+      const dupeEntries = workedQsos.get((data.call || '').toUpperCase());
+      if (dupeEntries && dupeEntries.length && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        const curBand = (freqToBand((_currentFreqHz || 0) / 1e6) || '').toUpperCase();
+        const curMode = ((replyEngine && replyEngine._mode) || 'FT8').toUpperCase();
+        const sameBandMode = dupeEntries.some((w) =>
+          (w.band || '').toUpperCase() === curBand && (w.mode || '').toUpperCase() === curMode);
+        const last = dupeEntries[dupeEntries.length - 1];
+        const lastDate = (last.date || '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+        jtcatPopoutWin.webContents.send('jtcat-dupe-warning', {
+          message: data.call + ' already worked' + (sameBandMode ? ' on ' + curBand + ' ' + curMode : ''),
+          sub: 'Last: ' + (lastDate || 'unknown date') + (last.band ? ' ' + last.band : '') + (last.mode ? ' ' + last.mode : '') + ' — calling anyway',
+        });
+        sendCatLog(`[JTCAT] Dupe warning: ${data.call} already worked (${dupeEntries.length}x) — manual reply proceeding`);
+      }
     }
 
     if (phase === '73') {
@@ -20217,9 +20422,10 @@ app.whenReady().then(() => {
       // reply-phase QSO into another (e.g. abandon KG4OJT mid-cycle,
       // click 7Z1CE; advanceJtcatQso then kept scanning for KG4OJT and
       // never noticed 7Z1CE's reply). K3SBP 2026-05-30.
-      popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0, sliceId: replySliceId };
+      popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: skipSentRpt, myCall, myGrid, txRetries: 0, sliceId: replySliceId };
       const fdCtx = jtcatFdContext();
       if (fdCtx) { popoutJtcatQso.fd = true; popoutJtcatQso.myExch = fdCtx.myExch; }
+      if (houndReply) popoutJtcatQso.hound = true;
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
@@ -20325,7 +20531,7 @@ app.whenReady().then(() => {
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq') {
       if (q.phase === 'cq' || q.phase === 'cq-report') {
-        q.txMsg = validCall ? (q.call + ' ' + myCall + ' RR73') : '';
+        q.txMsg = validCall ? jtcatDirectedMsg(q.call, myCall, 'RR73') : '';
         q.phase = validCall ? 'cq-rr73' : 'done';
       } else {
         q.phase = 'done';
@@ -20333,10 +20539,10 @@ app.whenReady().then(() => {
     } else {
       if (q.phase === 'reply') {
         const rpt = q.sentReport || '-10';
-        q.txMsg = q.call + ' ' + myCall + ' R' + rpt;
+        q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
-        q.txMsg = q.call + ' ' + myCall + ' RR73';
+        q.txMsg = jtcatDirectedMsg(q.call, myCall, 'RR73');
         q.phase = '73';
       } else {
         q.phase = 'done';
@@ -24079,6 +24285,31 @@ app.whenReady().then(() => {
     else startJtcatTune();
   });
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
+  // Manual TX message validation — ground truth is the native codec (the same
+  // pack the TX path runs), so anything accepted here is guaranteed to encode
+  // instead of silently skipping TX at the cycle boundary. Falls back to a
+  // charset/shape check when the addon isn't available (WASM-only platforms)
+  // or the mode has its own encoder (FT2).
+  ipcMain.handle('jtcat-validate-tx-msg', (_e, text) => {
+    const t = String(text || '').toUpperCase().trim().replace(/\s+/g, ' ');
+    if (!t) return { ok: false, reason: 'Empty message' };
+    const mode = (ft8Engine && ft8Engine._mode) || settings.jtcatLastMode || 'FT8';
+    if (mode === 'FT8' || mode === 'FT4') {
+      try {
+        const native = require(path.join(__dirname, 'lib', 'ft8_native', 'build', 'Release', 'ft8_native.node'));
+        if (typeof native.encode === 'function') {
+          const samples = native.encode(t, 1500, mode === 'FT4' ? 'FT4' : 'FT8');
+          return samples
+            ? { ok: true, text: t }
+            : { ok: false, reason: 'Not encodable — use a standard exchange or free text ≤13 chars (A-Z 0-9 +-./?)' };
+        }
+      } catch { /* addon unavailable — fall through to the shape check */ }
+    }
+    // Fallback: free text (13-char WSJT-X alphabet) or a plausible directed message
+    if (/^[A-Z0-9 +\-./?]{1,13}$/.test(t)) return { ok: true, text: t };
+    if (/^(CQ( [A-Z0-9]{1,4})? )?[A-Z0-9/<>]{3,12}( [A-Z0-9/<>]{3,12})?( [A-Z0-9 +\-]{1,6})?$/.test(t)) return { ok: true, text: t };
+    return { ok: false, reason: 'Not a standard exchange and longer than 13-char free text' };
+  });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
   ipcMain.on('jtcat-set-tx-gain', (_e, level) => {
     setJtcatDirectTxGainLevel(level);

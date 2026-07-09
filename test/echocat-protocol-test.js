@@ -153,6 +153,40 @@ check(allConform, 'every RemoteClient frame validates as a c2s message');
 check(sent.find(m => m.type === 'ptt').state === true, 'sendPtt(true) → boolean state');
 check(sent.find(m => m.type === 'set-vfo').vfo === 'B', 'sendSetVfo carries vfo string');
 
+// ── jtcat-reply demux forwarding — PINNED (K3SBP 2026-07-09) ─────────
+// The WS demux's jtcat-reply allowlist predated the phone's nextStep
+// classifier and silently stripped it (plus snr/text/legacy flags), so the
+// host's fallback answered EVERY directed decode with a grid instead of a
+// report ("K3SBP A1BC FN19" tap → "A1BC K3SBP FN20"). These are source
+// contracts (same style as the rig-controls drift trap): the demux must
+// forward the full tap intent, and the host must re-derive from raw text.
+console.log('\n=== jtcat-reply demux forwarding (grid-instead-of-report regression) ===');
+{
+  const fs = require('fs');
+  const path = require('path');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const caseStart = serverSrc.indexOf("case 'jtcat-reply':");
+  const caseEnd = serverSrc.indexOf('break;', caseStart);
+  const caseBlock = caseStart >= 0 ? serverSrc.slice(caseStart, caseEnd) : '';
+  check(caseBlock.length > 0, "remote-server has a jtcat-reply demux case");
+  for (const field of ['text', 'nextStep', 'snr', 'slot', 'theirGrid', 'theirReport', 'rr73', 'report']) {
+    check(new RegExp('msg\\.' + field + '\\b').test(caseBlock),
+      `demux forwards msg.${field} (stripping it re-opens the grid-instead-of-report bug)`);
+  }
+
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const handlerStart = mainSrc.indexOf("remoteServer.on('jtcat-reply'");
+  const handlerSlice = handlerStart >= 0 ? mainSrc.slice(handlerStart, handlerStart + 4000) : '';
+  check(/inferReplyStep/.test(handlerSlice),
+    'remote jtcat-reply handler re-derives the step from raw decode text (popout parity)');
+
+  // The exact reported decode classifies as send-report, not reply-cq.
+  const JtcatParser = require('../renderer/jtcat-parser');
+  const action = JtcatParser.inferReplyStep({ text: 'K3SBP A1BC FN19' }, 'K3SBP');
+  check(action && action.step === 'send-report' && action.call === 'A1BC' && action.theirGrid === 'FN19',
+    '"K3SBP A1BC FN19" classifies as send-report to A1BC (the 2026-07-09 report)');
+}
+
 console.log('\n' + '='.repeat(52));
 console.log(`Results: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
