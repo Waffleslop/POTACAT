@@ -14,6 +14,7 @@
   "contests": [
     {
       "id": "cq-ww-ssb",
+      "adifContestId": "CQ-WW-SSB",
       "name": "CQ WW DX Contest, SSB",
       "sponsor": "CQ Magazine",
       "website": "https://www.cqww.com/",
@@ -28,6 +29,7 @@
     },
     {
       "id": "cq-ww-cw",
+      "adifContestId": "CQ-WW-CW",
       "name": "CQ WW DX Contest, CW",
       "sponsor": "CQ Magazine",
       "website": "https://www.cqww.com/",
@@ -260,6 +262,7 @@
     },
     {
       "id": "arrl-field-day",
+      "adifContestId": "ARRL-FIELD-DAY",
       "name": "ARRL Field Day",
       "sponsor": "ARRL",
       "website": "https://www.arrl.org/field-day",

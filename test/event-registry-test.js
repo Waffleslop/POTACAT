@@ -81,5 +81,17 @@ console.log('contest-history: event-stamped QSOs attribute via alias (uncapped w
     'unstamped mid-window QSOs still never attribute to umbrella contests');
 }
 
+console.log('adifContestIdForEvent (curated ADIF vocabulary only):');
+{
+  check(R.adifContestIdForEvent(EV_CUSTOM, catalog) === 'CQ-WW-SSB',
+    'event aliased to cq-ww-ssb yields the real ADIF CONTEST_ID');
+  check(R.adifContestIdForEvent(EV13, catalog) === null,
+    '13 Colonies yields NO CONTEST_ID (not in the ADIF vocabulary — never invented)');
+  check(R.adifContestIdForEvent(EV_UNKNOWN, catalog) === null, 'unaliased event -> null');
+  const fd = catalog.find(c => c.id === 'arrl-field-day');
+  check(fd && fd.adifContestId === 'ARRL-FIELD-DAY',
+    'curated field-day entry matches the value JTCAT FD mode already writes');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'event-registry tests failed');

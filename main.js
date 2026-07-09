@@ -4479,6 +4479,15 @@ async function saveQsoRecord(qsoData, opts) {
       qsoData.eventId = evMatch.eventId;
       qsoData.eventName = evMatch.eventName;
       if (evMatch.item) qsoData.eventItem = evMatch.item;
+      // Unified-registry Phase B: an event that aliases to a contests-catalog
+      // entry with a CURATED ADIF Contest_ID also gets the real CONTEST_ID
+      // (never invented — see adifContestIdForEvent). Contest modes that set
+      // it themselves (Field Day) win: this never overwrites.
+      if (!qsoData.contestId) {
+        const ev = activeEvents.find((e) => e && e.id === evMatch.eventId);
+        const adifId = ev && EventRegistry.adifContestIdForEvent(ev, getAllContests());
+        if (adifId) qsoData.contestId = adifId;
+      }
       if (logCommentTags) {
         const evTag = `[${[evMatch.eventName, evMatch.itemName].filter(Boolean).join(' - ')}]`;
         if (!(qsoData.comment || '').includes(evTag)) {
@@ -15711,6 +15720,8 @@ function pushEventsToRenderer() {
   const eventStates = settings.events || {};
   const payload = activeEvents.map(ev => ({
     ...ev,
+    kind: EventRegistry.kindForEvent(ev),                       // unified registry (Phase B, additive)
+    contestId: EventRegistry.contestIdForEvent(ev) || undefined, // contests-catalog alias
     optedIn: !!(eventStates[ev.id] && eventStates[ev.id].optedIn),
     dismissed: !!(eventStates[ev.id] && eventStates[ev.id].dismissed),
     watchlistOn: !!(eventStates[ev.id] && eventStates[ev.id].watchlistOn),
@@ -15832,6 +15843,11 @@ function buildEventCatalogPayload() {
     schedule: ev.schedule || null,   // array of { region, regionName, start, end }
     url: ev.url || '',
     badge: ev.badge || '',
+    // Unified-registry Phase B (additive): the event's unified kind and its
+    // contests-catalog alias — lets the phone link an event board to its
+    // contestHistory tally (both keyed by contestId once stamped QSOs flow).
+    kind: EventRegistry.kindForEvent(ev),
+    contestId: EventRegistry.contestIdForEvent(ev) || undefined,
   }));
   const subscriptions = evs
     .filter((ev) => states[ev.id] && states[ev.id].optedIn)
@@ -21656,13 +21672,37 @@ app.whenReady().then(() => {
     const db = require('./lib/contests-db');
     const now = new Date();
     const resolved = db.getResolved(now);
+    // Unified-registry Phase B: contests superseded by a live tracked event
+    // (alias-resolved — 13 Colonies exists in both catalogs) carry the event
+    // linkage so the Contests view renders ONE connected row: tracked state,
+    // live progress, and a jump to the event board instead of a static
+    // disconnected entry.
+    const aliasByContest = new Map();
+    for (const ev of activeEvents) {
+      const cid = EventRegistry.contestIdForEvent(ev);
+      if (cid) aliasByContest.set(cid, ev.id);
+    }
+    const eventStates = settings.events || {};
     return {
       now: now.toISOString(),
-      contests: resolved.map((c) => ({
-        ...c,
-        start: c.start ? c.start.toISOString() : null,
-        end: c.end ? c.end.toISOString() : null,
-      })),
+      contests: resolved.map((c) => {
+        const out = {
+          ...c,
+          kind: EventRegistry.kindForContest(c),
+          start: c.start ? c.start.toISOString() : null,
+          end: c.end ? c.end.toISOString() : null,
+        };
+        const evId = aliasByContest.get(c.id);
+        if (evId) {
+          const ev = activeEvents.find((e) => e.id === evId);
+          const st = eventStates[evId];
+          out.supersededBy = evId;
+          out.eventTracked = !!(st && st.optedIn);
+          out.eventProgress = st ? Object.keys(mergedEventProgress(st)).length : 0;
+          out.eventTotal = (ev && ev.tracking && (ev.tracking.total || (ev.tracking.items || []).length)) || 0;
+        }
+        return out;
+      }),
     };
   });
 

@@ -75,17 +75,30 @@ heuristic-excluded by MAX_WINDOW_HOURS but a stamp is proof) — a QSO stamped
 `13col-2026` now attributes exactly to the `13-colonies` history. 21 tests,
 CI-wired.
 
-**Phase B — remaining**:
-- Contests view consumes `unifiedCatalog()` and collapses `supersededBy`
-  duplicates (one 13 Colonies row, events-side data wins).
-- Banner/boards + ECHOCAT catalog read the unified list; stamping picks
-  APP fields vs real `CONTEST_ID` by `kind`.
-- Server: events carry `contestId` natively (retire BUILTIN_ALIASES),
-  `schemaVersion` field; contests.json entries migrate to kind-tagged
-  records (additive until a major bump).
-- **Gate**: Phase B lands BEFORE building new WSJT-X contest modes
-  (FT Roundup / WW Digi from docs/jtcat-wsjtx-gap-plan.md) so their
-  definitions are unified from day one.
+**Phase B (client side) — SHIPPED 2026-07-09**:
+- Contests view: superseded rows (13 Colonies) render as ONE connected
+  entry — a "◉ Tracked — 8/13 worked" chip (or "◎ Event available") that
+  jumps to the live event board instead of the static drawer. `get-contests`
+  carries `kind` + `supersededBy`/`eventTracked`/`eventProgress`/`eventTotal`.
+- `kind` + `contestId` ride the renderer events payload AND the ECHOCAT
+  catalog (additive) — the phone can link an event board to its
+  contestHistory tally.
+- Stamping writes a REAL ADIF `CONTEST_ID` when the stamped event aliases
+  to a catalog entry with a curated `adifContestId` (never invented —
+  13 Colonies gets none; ARRL-FIELD-DAY / CQ-WW-SSB / CQ-WW-CW curated,
+  the FD value matching what JTCAT FD mode already writes). Contest modes
+  that set CONTEST_ID themselves always win.
+
+**Phase C — remaining (server + data)**:
+- potacat.com events carry `contestId` natively (retire BUILTIN_ALIASES)
+  + `schemaVersion`; ETag + ~14-day ended-event retention on active.json.
+- Curate `adifContestId` across the contests catalog where the ADIF
+  Contest_ID vocabulary genuinely covers the entry (verify each against the
+  spec — never guess).
+- Optional: contests.json entries gain explicit `kind` tags (today computed
+  from `category` via kindForContest — adequate).
+- **Gate**: unified definitions BEFORE building new WSJT-X contest modes
+  (FT Roundup / WW Digi from docs/jtcat-wsjtx-gap-plan.md).
 
 ## Design invariants (carry forward)
 - Stamping is identity-proven only; counter/date-window presence never

@@ -11013,6 +11013,14 @@ function _contestsRender() {
       if (c) _contestsOpenDrawer(c);
     });
   });
+  // Event chip → the live event board (not the static drawer).
+  host.querySelectorAll('.contest-event-chip').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const evId = el.getAttribute('data-event-id');
+      if (evId && typeof openEventBoard === 'function') openEventBoard(evId);
+    });
+  });
 }
 
 function _contestsRowHtml(c, now) {
@@ -11025,6 +11033,18 @@ function _contestsRowHtml(c, now) {
   // Start time UTC alongside the relative label, so the user can plan
   // their evening without doing the math.
   const startStr = s.start ? _contestsFmtUtc(s.start) : '';
+  // Unified-registry Phase B: a contest superseded by a live tracked event
+  // (13 Colonies exists in both catalogs) renders as ONE connected row —
+  // progress chip that jumps to the event board instead of a static entry.
+  let eventChip = '';
+  if (c.supersededBy) {
+    const label = c.eventTracked
+      ? `◉ Tracked — ${c.eventProgress}${c.eventTotal ? '/' + c.eventTotal : ''} worked`
+      : '◎ Event available';
+    eventChip = `<button type="button" class="contest-event-chip" data-event-id="${_contestsEscape(c.supersededBy)}"
+      title="${c.eventTracked ? 'Open the live event board' : 'This runs as a tracked event — open its board to opt in'}"
+      style="margin-left:auto;background:none;border:1px solid var(--accent-blue,#4fc3f7);color:var(--accent-blue,#4fc3f7);font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;cursor:pointer;white-space:nowrap;">${_contestsEscape(label)}</button>`;
+  }
   return `
     <div class="contest-row" data-id="${c.id}">
       <span class="${pillClass}">${_contestsEscape(pillText)}</span>
@@ -11032,6 +11052,7 @@ function _contestsRowHtml(c, now) {
         <div class="contest-row-name">${_contestsEscape(c.name)}</div>
         <div class="contest-row-meta">${_contestsEscape(c._catLabel)} · ${_contestsEscape(modes)}${sponsor ? ' · ' + _contestsEscape(sponsor) : ''}${startStr ? ' · ' + startStr : ''}</div>
       </div>
+      ${eventChip}
     </div>
   `;
 }
