@@ -256,7 +256,7 @@ const { WsprScheduler } = require('./lib/wspr/scheduler');
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
-const { qsoDayInScheduleEntry } = require('./lib/event-progress');
+const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, matchEventQsoForStamp } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const RigFamily = require('./lib/rig-family');
@@ -4459,6 +4459,32 @@ async function saveQsoRecord(qsoData, opts) {
     const clubs = [...new Set(cwSpots.filter(s => s.callsign === call && s.cwClub && s.cwClub !== 'CW').map(s => s.cwClub))];
     if (clubs.length > 0) {
       qsoData.comment = appendTag(qsoData.comment, `[${clubs.join(' ')}]`);
+    }
+  }
+
+  // Event stamping (Casey 2026-07-09): identity-proven special-event QSOs —
+  // the worked call IS an event station (13 Colonies checklist) or matches
+  // the event's pattern list (America250/WAS-style regions) — carry the
+  // event in the log: JSON eventId/eventName(+item), ADIF
+  // APP_POTACAT_EVENT(+_ITEM), and a comment tag when auto-tagging is on.
+  // Counter-board events (any QSO in a date window) never stamp — being on
+  // the air during a contest weekend isn't proof of entering it. Central
+  // here so SSB, JTCAT, and phone-logged QSOs all get it. Real contests with
+  // ADIF CONTEST_ID vocabulary keep riding actual contest modes (Field Day
+  // today) — this is award/QSL provenance, not a contest exchange.
+  if (!qsoData.eventId && qsoData.callsign) {
+    const evMatch = matchEventQsoForStamp(activeEvents, settings.events, qsoData.callsign, new Date());
+    if (evMatch) {
+      qsoData.eventId = evMatch.eventId;
+      qsoData.eventName = evMatch.eventName;
+      if (evMatch.item) qsoData.eventItem = evMatch.item;
+      if (logCommentTags) {
+        const evTag = `[${[evMatch.eventName, evMatch.itemName].filter(Boolean).join(' - ')}]`;
+        if (!(qsoData.comment || '').includes(evTag)) {
+          qsoData.comment = appendTag(qsoData.comment, evTag);
+        }
+      }
+      sendCatLog(`[events] QSO stamped: ${qsoData.callsign} -> ${evMatch.eventName}${evMatch.itemName ? ' (' + evMatch.itemName + ')' : ''}`);
     }
   }
 
@@ -15964,18 +15990,14 @@ function checkEventQso(qsoData) {
 
     const board = ev.board || ev.tracking?.type || 'regions';
 
-    // Find the active schedule entry
-    const activeEntry = (ev.schedule || []).find(s => {
-      const start = new Date(s.start);
-      const end = new Date(s.end);
-      return now >= start && now < end;
-    });
+    // Matching predicates shared with saveQsoRecord's event stamping
+    // (lib/event-progress.js) so marking and stamping can't drift.
+    const activeEntry = activeScheduleEntry(ev, now);
     if (!activeEntry) continue;
 
     if (board === 'checklist') {
       // Checklist: match callsign exactly against tracking.items[].id
-      const items = (ev.tracking && ev.tracking.items) || [];
-      const matchedItem = items.find(it => call === it.id.toUpperCase() || call.startsWith(it.id.toUpperCase() + '/'));
+      const matchedItem = matchChecklistItem(ev.tracking && ev.tracking.items, call);
       if (!matchedItem) continue;
       if (state.progress[matchedItem.id]) continue;
       markEventRegion(ev.id, matchedItem.id, qsoData);
@@ -15985,13 +16007,7 @@ function checkEventQso(qsoData) {
       markEventRegion(ev.id, key, qsoData);
     } else {
       // Regions (WAS): match callsign pattern, mark active region
-      const matches = (ev.callsignPatterns || []).some(pattern => {
-        if (pattern.endsWith('/*')) {
-          return call.startsWith(pattern.slice(0, -1));
-        }
-        return call === pattern.toUpperCase();
-      });
-      if (!matches) continue;
+      if (!matchRegionPatterns(ev.callsignPatterns, call)) continue;
       if (state.progress[activeEntry.region]) continue;
       markEventRegion(ev.id, activeEntry.region, qsoData);
     }
