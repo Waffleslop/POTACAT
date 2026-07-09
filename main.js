@@ -275,6 +275,7 @@ const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine } = require('./lib/sstv-engine');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
+const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const { SstvManager } = require('./lib/sstv-manager');
 const sstvPost = require('./lib/sstv-post');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
@@ -5781,6 +5782,24 @@ async function jtcatAutoLog(qso) {
     comment: 'JTCAT ' + mode,
   };
 
+  // Hunted park (KB2UXB 2026-07-09): SSB spot-click logging carries the
+  // activator's park through the log form, but JTCAT taps a decode — the
+  // park never made it into FT8 logs. Resolve the worked call against the
+  // live program spot table (same-band spots rank first; 90-min freshness).
+  // saveQsoRecord is the comment-tag authority, so setting sig/sigInfo here
+  // also yields the canonical [POTA US-1234 …] COMMENT tag (when enabled)
+  // and the WRL/N1MM park fields downstream. Coexists with activation-mode
+  // mySig below — that's P2P.
+  const hunted = HuntedPark.findHuntedRefs(lastMergedSpots, q.call, {
+    freqKhz, myCall: settings.myCallsign,
+  });
+  if (hunted) {
+    qsoData.sig = hunted.sig;
+    qsoData.sigInfo = hunted.primaryRef;
+    qsoData[hunted.refField] = hunted.primaryRef;
+    sendCatLog(`[JTCAT] Hunted park matched: ${q.call} @ ${hunted.refs.map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
+  }
+
   // ARRL Field Day: log the class + ARRL/RAC section exchange (ADIF contest fields)
   if (q.fd && q.theirExch) {
     qsoData.contestId = 'ARRL-FIELD-DAY';
@@ -5811,6 +5830,26 @@ async function jtcatAutoLog(qso) {
       }
     } else {
       await saveQsoRecord(qsoData, { origin: 'jtcat-engine' });
+    }
+
+    // Additional hunted refs (n-fer activator spotted at several parks, or
+    // cross-program for the same site): one record per extra ref, mirroring
+    // the SSB log-form behavior. In activation mode they pair with the
+    // primary my-park ref (already on qsoData via the loop above) — POTA
+    // upload needs one my-park file per contact, not a full cross-product.
+    if (hunted && hunted.refs.length > 1) {
+      const inActivation = settings.appMode === 'activator' && parkRefs.length > 0;
+      for (const extra of hunted.refs.slice(1)) {
+        const extraQso = { ...qsoData, uuid: undefined, sig: extra.sig, sigInfo: extra.ref };
+        delete extraQso[hunted.refField];
+        extraQso[extra.refField] = extra.ref;
+        if (inActivation) {
+          extraQso.mySig = 'POTA';
+          extraQso.mySigInfo = parkRefs[0].ref;
+          extraQso.myGridsquare = settings.grid || '';
+        }
+        await saveQsoRecord(extraQso, { origin: 'jtcat-engine' });
+      }
     }
 
     console.log('[JTCAT] Auto-logged QSO:', q.call, 'OK');

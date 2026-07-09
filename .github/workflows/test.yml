@@ -38,6 +38,8 @@ jobs:
         run: node test/sstv-e2e-test.js
       - name: Run SSTV ingress feed-gate table tests
         run: node test/sstv-feed-gate-test.js
+      - name: Run hunted-park resolver tests
+        run: node test/hunted-park-test.js
       - name: Run log-comment suite
         run: node test/log-comment-test.js
       - name: Run rig-family suite
