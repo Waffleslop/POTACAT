@@ -292,7 +292,8 @@ const { checkClockOffset, syncSystemClock } = require('./lib/ntp');
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
-const { buildDiagnosticSnapshot } = require('./lib/diagnostic-snapshot');
+const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
+const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir } = require('./lib/bug-report-log');
 const { RemoteClient, tsWssUrl } = require('./lib/remote-client');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
 // and every other call is a stable no-op — safe to require unconditionally.
@@ -1837,11 +1838,72 @@ function getRecentSendCatLog(n) {
   return _catLogRing.slice(-count);
 }
 
+// Persistent per-launch session log: every sendCatLog line is appended to
+// <userData>/session.log from process start, so a bug report can include the
+// startup portion that the 600-line ring (and the renderer, which only hears
+// lines after did-finish-load) always lost. Fresh file per launch — the prior
+// run survives as session.log.old. appendFileSync so lines survive a crash;
+// same lazy-path + fail-once pattern as startup.log at the top of this file.
+let _sessionLogPath = null;
+let _sessionLogFailed = false;
+let _sessionLogBytes = 0;
+let _sessionLogRotatedMidRun = false;
+// ~4 poll lines/sec ≈ 0.9 MB/hour — 5 MB (+5 MB in .old after a mid-run
+// rotation) keeps a full day-long activation on disk.
+const SESSION_LOG_MAX_BYTES = 5 * 1024 * 1024;
+function appendSessionLog(line) {
+  if (_sessionLogFailed) return;
+  try {
+    if (!_sessionLogPath) {
+      let dir;
+      try { dir = app.getPath('userData'); } catch { dir = require('os').tmpdir(); }
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+      _sessionLogPath = path.join(dir, 'session.log');
+      try {
+        if (fs.existsSync(_sessionLogPath)) {
+          const old = _sessionLogPath + '.old';
+          try { fs.unlinkSync(old); } catch {}
+          fs.renameSync(_sessionLogPath, old);
+        }
+      } catch {}
+      const header = `POTACAT v${PACKAGE_VERSION} session log -- ${new Date().toISOString()} platform=${process.platform}\n`;
+      fs.writeFileSync(_sessionLogPath, header);
+      _sessionLogBytes = header.length;
+    }
+    const out = line + '\n';
+    fs.appendFileSync(_sessionLogPath, out);
+    _sessionLogBytes += out.length;
+    if (_sessionLogBytes > SESSION_LOG_MAX_BYTES) {
+      const old = _sessionLogPath + '.old';
+      try { fs.unlinkSync(old); } catch {}
+      fs.renameSync(_sessionLogPath, old);
+      _sessionLogRotatedMidRun = true;
+      fs.writeFileSync(_sessionLogPath, '(rotated — earlier lines of this run are in session.log.old)\n');
+      _sessionLogBytes = 0;
+    }
+  } catch {
+    _sessionLogFailed = true; // disk/permissions trouble — never loop on it
+  }
+}
+// Read back this run's full session log, oldest first. Spans the mid-run
+// rotation boundary (.old + current) but never reaches into a previous run.
+function readSessionLogLines() {
+  let text = '';
+  if (_sessionLogRotatedMidRun) {
+    try { text += fs.readFileSync(_sessionLogPath + '.old', 'utf8'); } catch {}
+  }
+  if (_sessionLogPath) {
+    try { text += fs.readFileSync(_sessionLogPath, 'utf8'); } catch {}
+  }
+  return text.split(/\r?\n/).filter(Boolean);
+}
+
 function sendCatLog(msg) {
   const ts = new Date().toISOString().slice(11, 23);
   const line = `[CAT ${ts}] ${msg}`;
   _catLogRing.push(line);
   if (_catLogRing.length > CAT_LOG_RING_CAP) _catLogRing.shift();
+  appendSessionLog(line);
   try { console.log(line); } catch { /* EPIPE if stdout closed */ }
   if (win && !win.isDestroyed()) win.webContents.send('cat-log', line);
 }
@@ -15072,6 +15134,12 @@ function createWindow() {
   // Once the renderer is actually ready to listen, send current state
   win.webContents.on('did-finish-load', () => {
     logStartupStage('main window did-finish-load (renderer ready)');
+    // Replay the pre-load log history: everything sendCatLog'd before this
+    // point never reached the renderer (no window to send to), so without
+    // this the log panel — and any bug report built from it — starts blind
+    // at did-finish-load. One array send, not per-line, so the renderer can
+    // rebuild its textarea once.
+    if (_catLogRing.length) win.webContents.send('cat-log-history', _catLogRing.slice());
     if (cat) {
       sendCatStatus({ connected: cat.connected, target: cat._target });
     }
@@ -20843,6 +20911,49 @@ app.whenReady().then(() => {
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
+    }
+  });
+
+  // Report a Bug: drop the repro-start marker. Routed through sendCatLog so
+  // it lands in the ring, the renderer's log panel, AND session.log — the
+  // get-bug-report-log selection below splits the file on it.
+  ipcMain.handle('bug-report-mark', () => {
+    sendCatLog(BUG_REPORT_MARKER);
+    return { ok: true };
+  });
+
+  // Report a Bug: the complete-from-launch log package. startup.log has boot
+  // checkpoints + fatal errors; session.log has every sendCatLog line since
+  // process start (including pre-window ones the renderer never received).
+  // Head/tail selection keeps the clipboard paste Discord-sized; redaction
+  // runs here so log lines from disk never reach the paste unmasked.
+  ipcMain.handle('get-bug-report-log', () => {
+    try {
+      let startupLines = [];
+      try {
+        if (_startupLogPath) {
+          startupLines = fs.readFileSync(_startupLogPath, 'utf8').split(/\r?\n/).filter(Boolean);
+        }
+      } catch {}
+      let sessionLines = readSessionLogLines();
+      // session.log write failed (disk trouble) — degrade to the in-memory
+      // ring so the report still carries the most recent lines.
+      if (!sessionLines.length) sessionLines = getRecentSendCatLog(400);
+      const sel = selectReportLines(sessionLines, { marker: BUG_REPORT_MARKER });
+      const home = (() => { try { return require('os').homedir(); } catch { return ''; } })();
+      const clean = (lines) => maskHomeDir(redactLogLines(lines), home);
+      return {
+        ok: true,
+        sessionLogPath: _sessionLogPath,
+        startup: clean(startupLines),
+        head: clean(sel.head),
+        tail: clean(sel.tail),
+        skipped: sel.skipped,
+        markerFound: sel.markerFound,
+        tailTruncated: sel.tailTruncated,
+      };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
     }
   });
 

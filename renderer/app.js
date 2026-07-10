@@ -17297,6 +17297,18 @@ window.api.onCatLog((msg) => {
   catLogOutput.scrollTop = catLogOutput.scrollHeight;
 });
 
+// Pre-load history replay: main buffers log lines from process start and
+// sends the backlog once on did-finish-load — everything before that point
+// predates this renderer, so without the replay the log panel starts blind
+// at load. History goes in FRONT of any live lines that raced it.
+window.api.onCatLogHistory((lines) => {
+  if (!Array.isArray(lines) || !lines.length) return;
+  catLogLines.unshift(...lines);
+  while (catLogLines.length > CAT_LOG_MAX) catLogLines.shift();
+  catLogOutput.value = catLogLines.join('\n');
+  catLogOutput.scrollTop = catLogOutput.scrollHeight;
+});
+
 catLogToggleBtn.addEventListener('click', () => {
   const isHidden = catLogPanel.classList.toggle('hidden');
   catLogToggleBtn.classList.toggle('active', !isHidden);
@@ -17346,7 +17358,37 @@ catLogClearBtn.addEventListener('click', () => {
       callsign: (s.myCallsign || '(not set)').toUpperCase(),
       features: enabled,
     };
-    const log = catLogLines.join('\n') || '(log is empty — verbose logging may not have captured anything during the repro)';
+    // Complete-from-launch log: main reads startup.log + session.log (both
+    // capture everything since process start, including the pre-window lines
+    // this renderer never received), redacts them, and returns head (startup)
+    // + tail (the repro, from the recording-started marker) so the paste
+    // stays Discord-sized. Falls back to the in-renderer buffer if the IPC
+    // fails for any reason — a shorter report still beats no report.
+    let logSections;
+    try {
+      const pkg = await window.api.getBugReportLog();
+      if (pkg && pkg.ok && (pkg.head?.length || pkg.tail?.length)) {
+        const body = [...(pkg.head || [])];
+        // Deliberately no full path here — it would leak C:\Users\<name>
+        // into a public Discord paste.
+        if (pkg.skipped > 0) {
+          body.push(`... (${pkg.skipped} lines omitted — full log: session.log in the POTACAT data folder) ...`);
+        }
+        if (pkg.tailTruncated > 0) {
+          body.push(`... (repro longer than the paste limit — first ${pkg.tailTruncated} repro lines omitted, see full log) ...`);
+        }
+        body.push(...(pkg.tail || []));
+        logSections = [];
+        if (pkg.startup && pkg.startup.length) {
+          logSections.push('### Startup log', '```', pkg.startup.join('\n'), '```', '');
+        }
+        logSections.push('### Log (from launch — repro follows the "recording started" marker)', '```', body.join('\n'), '```');
+      }
+    } catch {}
+    if (!logSections) {
+      const log = catLogLines.join('\n') || '(log is empty — nothing was captured during the repro)';
+      logSections = ['### Log', '```', log, '```'];
+    }
     return [
       '## POTACAT Bug Report',
       '',
@@ -17362,10 +17404,7 @@ catLogClearBtn.addEventListener('click', () => {
       '### What happened',
       '<!-- fill in: what went wrong, what you expected -->',
       '',
-      '### Verbose log',
-      '```',
-      log,
-      '```',
+      ...logSections,
     ].join('\n');
   }
 
@@ -17389,15 +17428,19 @@ catLogClearBtn.addEventListener('click', () => {
       if (setVerboseLog) setVerboseLog.checked = true;
       if (catLogToggleBtn) catLogToggleBtn.classList.remove('hidden');
     }
-    // 2. Show the log panel + clear existing lines
-    catLogLines.length = 0;
-    catLogOutput.value = '';
+    // 2. Drop the repro-start marker instead of wiping the log. The wipe
+    // used to discard everything since load, so bug reports never carried
+    // startup data; now history is kept (the report pulls the complete
+    // session log from main) and the marker delineates where the repro
+    // begins. Main echoes the marker back so it shows in the panel too.
+    try { await window.api.markBugReportStart(); } catch {}
+    // 3. Show the log panel
     if (priorLogPanelHidden) {
       catLogPanel.classList.remove('hidden');
       catLogToggleBtn.classList.add('active');
       document.body.classList.add('cat-log-open');
     }
-    // 3. Float a recording banner with Copy + Cancel
+    // 4. Float a recording banner with Copy + Cancel
     let banner = document.getElementById('bug-report-banner');
     if (!banner) {
       banner = document.createElement('div');
