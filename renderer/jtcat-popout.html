@@ -423,7 +423,10 @@
     <button id="jp-hound-toggle" class="jtcat-filter-btn" title="FT8 DXpedition Hound mode (old-style Fox/Hound): call the fox above 1000 Hz, auto-QSY to its frequency for the R+report, log on RR73 with no 73. Use on the DXpedition's published frequency, not the FT8 subband. SuperFox is not supported yet.">Hound</button>
     <!-- ULTRACAT — Full Auto CQ (hidden until the π unlock) -->
     <button id="jp-full-auto-cq" class="jp-btn jp-ultracat ultracat-gated hidden" title="ULTRACAT: call CQ continuously, work answerers, then resume CQ. Attended operation only.">Auto CQ</button>
-    <label class="ultracat-gated hidden" style="font-size:10px;color:var(--text-tertiary);display:flex;align-items:center;gap:3px;" title="Stop retrying a QSO after this many cycles with no reply, then go back to calling CQ">
+    <!-- Per-phase TX cap (was ULTRACAT-gated; public since the KQ4MHD
+         stuck-QSO request — a partner repeating a non-advancing message
+         used to hang the QSO forever) -->
+    <label style="font-size:10px;color:var(--text-tertiary);display:flex;align-items:center;gap:3px;" title="Give up on a QSO after this many transmissions of the same message with no progress. If signal reports were exchanged both ways, the QSO is logged and a final 73 is sent before stopping.">
       tries<input id="jp-max-attempts" type="number" min="1" max="60" value="12" style="width:38px;font-size:11px;padding:2px 3px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);">
     </label>
     <button id="jp-enable-tx" class="jp-btn">Enable TX</button>

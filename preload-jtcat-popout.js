@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetTxMsg: (text) => ipcRenderer.send('jtcat-set-tx-msg', text),
   jtcatValidateTxMsg: (text) => ipcRenderer.invoke('jtcat-validate-tx-msg', text),
   onJtcatDupeWarning: (cb) => ipcRenderer.on('jtcat-dupe-warning', (_e, data) => cb(data)),
+  // Stalled-QSO closeout notice ("logged, sending final 73") — informational,
+  // NOT the error channel: phase:'error' force-clears qsoState/txEnabled,
+  // which would fight the still-running courtesy-73 leg.
+  onJtcatQsoNotice: (cb) => ipcRenderer.on('jtcat-qso-notice', (_e, data) => cb(data)),
   onJtcatFlagState: (cb) => ipcRenderer.on('jtcat-flag-state', (_e, data) => cb(data)),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
   jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),

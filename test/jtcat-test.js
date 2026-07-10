@@ -239,10 +239,10 @@ section('REPLY mode — "they picked someone else" → keep calling (WSJT-X pari
     assert(!r.q._heardThisCycle, 'busy decode does NOT reset the retry counter (bounded tail-ending)');
   }
 
-  // Busy decode does not reset retries → ceiling aborts eventually
+  // Busy cycles count toward the cap → ceiling aborts eventually
   {
-    const out = sm.decideRetryOutcome({ phase: 'reply', txRetries: 11, heard: false, maxCq: 99, maxQso: 12, runMode: false });
-    assertEq(out.action, 'abort', 'unheard busy cycles hit the per-QSO ceiling → abort');
+    const out = sm.decideRetryOutcome({ phase: 'reply', txRetries: 11, maxCq: 99, maxQso: 12, runMode: false, closeoutEligible: false });
+    assertEq(out.action, 'abort', 'busy cycles hit the per-phase cap → abort');
   }
 
   // Their reply to the other op lands ON our exact TX offset → STILL keep
@@ -290,6 +290,135 @@ section('REPLY mode — "they picked someone else" → keep calling (WSJT-X pari
     const r = drive(baseQ(), [decode('N4XYZ W1ABC -05', { df: 1500 })], eng);
     assertEq(r.q.phase, 'reply', 'unknown TX offset → no QRM guard, keep calling');
   }
+}
+
+// ============================================================
+// Group 1d: Stalled-QSO give-up — closeout + messages (KQ4MHD)
+// ============================================================
+section('Stalled QSO — canCloseoutQso eligibility matrix');
+{
+  const eligible = () => ({
+    mode: 'reply', phase: 'r+report', call: 'W1ABC', myCall: 'K3SBP',
+    report: '-05', sentReport: '-08', txMsg: 'W1ABC K3SBP R-08', txRetries: 0,
+  });
+  assert(sm.canCloseoutQso(eligible()) === true, 'reply/r+report with both reports → eligible');
+  assert(sm.canCloseoutQso(Object.assign(eligible(), { hound: true })) === false, 'hound excluded — fox never acked, fox will not log');
+  assert(sm.canCloseoutQso(Object.assign(eligible(), { fd: true })) === false, 'FD excluded');
+  assert(sm.canCloseoutQso(Object.assign(eligible(), { report: null })) === false, 'no received report → not eligible');
+  assert(sm.canCloseoutQso(Object.assign(eligible(), { sentReport: null })) === false, 'no sent report → not eligible');
+  assert(sm.canCloseoutQso(Object.assign(eligible(), { phase: 'reply' })) === false, 'reply phase (no exchange yet) → not eligible');
+  assert(sm.canCloseoutQso({ mode: 'cq', phase: 'cq-report', call: 'A1BCD', myCall: 'K3SBP', report: null, sentReport: '-06' }) === false,
+    'CQ-side cq-report → not eligible (their report never received; RR73 would falsely ack)');
+  assert(sm.canCloseoutQso(null) === false, 'null QSO → not eligible');
+}
+
+section('Stalled QSO — closeoutStalledQso (log + final 73)');
+{
+  const mkQ = () => ({
+    mode: 'reply', phase: 'r+report', call: 'W1ABC', myCall: 'K3SBP',
+    report: '-05', sentReport: '-08', txMsg: 'W1ABC K3SBP R-08', txRetries: 0,
+  });
+  {
+    const q = mkQ();
+    let lastTx = null, doneCount = 0;
+    const ok = sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => { doneCount++; }, { log: () => {} });
+    assertEq(ok, true, 'closeout accepted');
+    assertEq(q.phase, '73', 'phase forced to courtesy 73');
+    assertEq(lastTx, 'W1ABC K3SBP 73', 'final TX is the courtesy 73');
+    assertEq(doneCount, 1, 'logged exactly once (onDone)');
+  }
+  {
+    const q = Object.assign(mkQ(), { hound: true });
+    let lastTx = null, doneCount = 0;
+    const ok = sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => { doneCount++; }, {});
+    assertEq(ok, false, 'hound closeout refused');
+    assertEq(q.phase, 'r+report', 'phase unchanged on refusal');
+    assertEq(lastTx, null, 'no TX queued on refusal');
+    assertEq(doneCount, 0, 'not logged on refusal');
+  }
+  // Closeout hands off to the EXISTING courtesy-73 leg, which tears down.
+  {
+    const q = mkQ();
+    sm.closeoutStalledQso(q, () => {}, () => {}, {});
+    const eng = makeEngine();
+    eng._txEnabled = true;
+    let r = drive(q, [], eng);
+    assertEq(r.q.phase, '73', 'first courtesy cycle waits');
+    assertEq(r.q._courtesySent, true, '_courtesySent set');
+    r = drive(q, [], eng);
+    assertEq(r.q.phase, 'done', 'second courtesy cycle → done');
+    assertEq(eng._txEnabled, false, 'engine TX disabled by courtesy teardown');
+    assertEq(eng._lastTxMsg, '', 'TX message cleared');
+    assertEq(eng._lastSlot, 'auto', 'TX slot back to auto');
+  }
+  // Nonstandard call → same bracket rules as a normal 73 leg.
+  {
+    const JtcatParser = require('../renderer/jtcat-parser');
+    const q = Object.assign(mkQ(), { call: 'PJ4/K1ABC' });
+    let lastTx = null;
+    sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => {}, {});
+    assertEq(lastTx, JtcatParser.formatDirectedMsg('PJ4/K1ABC', 'K3SBP', '73'),
+      'nonstandard call routes through formatDirectedMsg bracket rules');
+  }
+}
+
+section('Stalled QSO — end-to-end KQ4MHD scenario (partner heard, never sends RR73)');
+{
+  // We answered W1ABC's CQ; they sent a report; we advanced to r+report.
+  const q = {
+    mode: 'reply', phase: 'reply', call: 'W1ABC', grid: 'FN42',
+    txMsg: 'W1ABC K3SBP FN20', report: null, sentReport: null,
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+  };
+  const eng = makeEngine();
+  eng._txEnabled = true;
+  drive(q, [decode('K3SBP W1ABC -05', { db: -8 })], eng);
+  assertEq(q.phase, 'r+report', 'setup: reached r+report');
+  // The partner now repeats their report every cycle (HEARD each time) but
+  // never sends RR73 — the old heard-reset pinned retries at 0 and hung
+  // here forever. Apply the policy per cycle exactly as main.js's
+  // jtcatHandleRetryStall does.
+  let action = null;
+  let cycles = 0;
+  for (let i = 0; i < 40 && q.phase === 'r+report'; i++) {
+    q._heardThisCycle = false;
+    const before = q.phase;
+    drive(q, [decode('K3SBP W1ABC -05')], eng);
+    if (q.phase !== before) break;
+    cycles++;
+    const out = sm.decideRetryOutcome({
+      phase: q.phase, txRetries: q.txRetries,
+      maxCq: 15, maxQso: 12, runMode: false,
+      closeoutEligible: sm.canCloseoutQso(q),
+    });
+    q.txRetries = out.retries;
+    action = out.action;
+    if (action !== 'continue') break;
+  }
+  assertEq(cycles, 12, 'cap trips on the 12th stuck cycle (default jtcatMaxQsoAttempts)');
+  assertEq(action, 'closeout', 'reports were exchanged → closeout, not abort');
+  let lastTx = null, doneCount = 0;
+  sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => { doneCount++; }, {});
+  assertEq(doneCount, 1, 'QSO logged exactly once');
+  assertEq(lastTx, 'W1ABC K3SBP 73', 'final 73 queued');
+  drive(q, [], eng);
+  drive(q, [], eng);
+  assertEq(q.phase, 'done', 'courtesy leg completes');
+  assertEq(eng._txEnabled, false, 'TX disabled at done');
+}
+
+section('Stalled QSO — giveUpMessage flavors');
+{
+  assertEq(sm.giveUpMessage({ kind: 'closeout', call: 'W1ABC', max: 12 }),
+    'W1ABC stopped responding after 12 tries — QSO logged, sending final 73.', 'closeout notice');
+  assertEq(sm.giveUpMessage({ kind: 'abort', phase: 'cq', call: null, max: 15 }),
+    'CQ: no answer after 15 calls — TX stopped.', 'cq abort');
+  assertEq(sm.giveUpMessage({ kind: 'abort', phase: 'r+report', call: 'KH1/KH7Z', hound: true, max: 12 }),
+    'Fox KH1/KH7Z never confirmed after 12 tries — TX stopped, not logged.', 'hound abort');
+  assertEq(sm.giveUpMessage({ kind: 'abort', phase: 'cq-report', call: 'A1BCD', heard: true, max: 12 }),
+    'QSO with A1BCD: gave up after 12 tries — exchange never completed. TX stopped, not logged.', 'heard-but-stuck abort');
+  assertEq(sm.giveUpMessage({ kind: 'abort', phase: 'reply', call: 'W1ABC', heard: false, max: 12 }),
+    'QSO with W1ABC: gave up after 12 tries — no reply heard. TX stopped, not logged.', 'silent abort');
 }
 
 // ============================================================
@@ -343,7 +472,7 @@ section('CQ mode — happy path');
     q.call = 'A1BCD';
     const r = drive(q, [decode('K3SBP A1BCD AB20')], makeEngine());
     assertEq(r.q.phase, 'cq-report', 'no advance — repeated their grid, no report yet');
-    assert(r.q._heardThisCycle === true, '_heardThisCycle set so retries don\'t expire');
+    assert(r.q._heardThisCycle === true, '_heardThisCycle set — flavors the give-up message (no longer resets the cap)');
   }
 
   // Courtesy RR73 cycle
@@ -1089,24 +1218,34 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       await Promise.all([pA, pB, pC]);
       assertEq(_txEncodedMsg, 'C K3SBP FN20', 'multi-drift: final state is C');
 
-      // -- ULTRACAT: Full Auto CQ retry-outcome policy (decideRetryOutcome) --
-      section('ULTRACAT decideRetryOutcome — Full Auto CQ retry policy');
+      // -- Per-phase TX cap policy (decideRetryOutcome) --
+      // Hard cap since 2026-07 (KQ4MHD report): EVERY non-advancing cycle
+      // counts, heard or not. The old heard-reset let a partner repeating a
+      // non-advancing message (their grid, their report) pin retries at 0
+      // and hang the QSO forever.
+      section('decideRetryOutcome — per-phase TX cap policy');
       const D = sm.decideRetryOutcome;
-      assertEq(D({ phase: 'reply', txRetries: 5, heard: true, maxCq: 15, maxQso: 12, runMode: false }),
-        { retries: 0, action: 'continue' }, 'heard partner resets retries and continues');
-      assertEq(D({ phase: 'reply', txRetries: 3, heard: false, maxCq: 15, maxQso: 12, runMode: false }),
-        { retries: 4, action: 'continue' }, 'miss under limit increments and continues');
-      assertEq(D({ phase: 'r+report', txRetries: 11, heard: false, maxCq: 15, maxQso: 12, runMode: false }),
-        { retries: 12, action: 'abort' }, 'QSO retry limit aborts when not in run mode');
-      assertEq(D({ phase: 'r+report', txRetries: 11, heard: false, maxCq: 15, maxQso: 12, runMode: true }),
-        { retries: 12, action: 'rearm' }, 'QSO retry limit re-arms CQ in run mode');
-      assertEq(D({ phase: 'cq', txRetries: 99, heard: false, maxCq: 15, maxQso: 12, runMode: true }),
+      assertEq(D({ phase: 'reply', txRetries: 5, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: false }),
+        { retries: 6, action: 'continue' }, 'heard-but-stuck cycles count toward the hard per-phase cap (KQ4MHD)');
+      assertEq(D({ phase: 'reply', txRetries: 3, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: false }),
+        { retries: 4, action: 'continue' }, 'under the cap increments and continues');
+      assertEq(D({ phase: 'r+report', txRetries: 11, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: false }),
+        { retries: 12, action: 'abort' }, 'cap without exchanged reports aborts when not in run mode');
+      assertEq(D({ phase: 'r+report', txRetries: 11, maxCq: 15, maxQso: 12, runMode: true, closeoutEligible: false }),
+        { retries: 12, action: 'rearm' }, 'cap re-arms CQ in run mode');
+      assertEq(D({ phase: 'r+report', txRetries: 11, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: true }),
+        { retries: 12, action: 'closeout' }, 'cap with reports exchanged both ways → graceful closeout');
+      assertEq(D({ phase: 'r+report', txRetries: 11, maxCq: 15, maxQso: 12, runMode: true, closeoutEligible: true }),
+        { retries: 12, action: 'closeout' }, 'closeout beats rearm — run mode logs before moving on');
+      assertEq(D({ phase: 'r+report', txRetries: 3, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: true }),
+        { retries: 4, action: 'continue' }, 'closeout eligibility alone never trips the cap early');
+      assertEq(D({ phase: 'cq', txRetries: 99, maxCq: 15, maxQso: 12, runMode: true, closeoutEligible: false }),
         { retries: 0, action: 'continue' }, 'cq phase never aborts in run mode (CQ forever)');
-      assertEq(D({ phase: 'cq', txRetries: 14, heard: false, maxCq: 15, maxQso: 12, runMode: false }),
+      assertEq(D({ phase: 'cq', txRetries: 14, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: false }),
         { retries: 15, action: 'abort' }, 'manual CQ aborts at maxCq');
-      assertEq(D({ phase: 'reply', txRetries: 2, heard: false, maxCq: 15, maxQso: 3, runMode: false }),
+      assertEq(D({ phase: 'reply', txRetries: 2, maxCq: 15, maxQso: 3, runMode: false, closeoutEligible: false }),
         { retries: 3, action: 'abort' }, 'configurable max attempts (X=3) aborts at 3');
-      assertEq(D({ phase: 'reply', txRetries: 2, heard: false, maxCq: 15, maxQso: 3, runMode: true }),
+      assertEq(D({ phase: 'reply', txRetries: 2, maxCq: 15, maxQso: 3, runMode: true, closeoutEligible: false }),
         { retries: 3, action: 'rearm' }, 'configurable X re-arms CQ in run mode');
 
       // -- Test 4: drive the REAL lib/ft8-engine.js _preEncode + setTxMessage

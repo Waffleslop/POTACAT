@@ -1238,6 +1238,16 @@ function _applyPopoutTheme(payload) {
       showJtcatWarnToast((data && data.message) || 'Already worked', data && data.sub);
     });
   }
+  // Stalled-QSO closeout notice — the QSO hit the tries cap with reports
+  // exchanged both ways, so main logged it and is sending a final 73.
+  // Orange info toast, NOT the error path (which would clear the QSO state
+  // out from under the courtesy leg). Arrives after the green Logged toast
+  // and takes over the shared slot.
+  if (window.api.onJtcatQsoNotice) {
+    window.api.onJtcatQsoNotice(function(data) {
+      showJtcatWarnToast((data && data.message) || 'QSO closed out');
+    });
+  }
 
   // --- Countdown timer ---
   setInterval(function() {
