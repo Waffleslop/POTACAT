@@ -6284,8 +6284,12 @@ function startJtcat(mode) {
         const batch = jtcatPskRxPending;
         jtcatPskRxPending = null;
         jtcatPskRxTimer = null;
-        if (batch && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        if (!batch) return;
+        if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
           jtcatPopoutWin.webContents.send('jtcat-psk-rx', batch);
+        }
+        if (remoteServer && remoteServer.hasClient()) {
+          remoteServer.broadcastJtcatPskRx(batch);
         }
       }, 250);
     }
@@ -6667,7 +6671,7 @@ function startJtcat(mode) {
       if (popoutJtcatQso) jtcatMapPopoutWin.webContents.send('jtcat-qso-state', popoutJtcatQso);
     }
     if (remoteServer && remoteServer.hasClient()) {
-      remoteServer.broadcastJtcatTxStatus({ state: 'tx', message: data.message, slot: data.slot, txFreq: ft8Engine._txFreq });
+      remoteServer.broadcastJtcatTxStatus({ state: 'tx', message: data.message, slot: data.slot, txFreq: ft8Engine._txFreq, durMs: data.samples ? Math.round(data.samples.length / 12) : 0 });
     }
 
     // Audio dispatch. Three routes:
@@ -11542,10 +11546,6 @@ function connectRemote() {
   // --- JTCAT remote control (event handlers — helpers are at file level) ---
 
   remoteServer.on('jtcat-start', ({ mode }) => {
-    // PSK31 is popout-only for now — the phone has no character-stream UI,
-    // and a PSK engine here would leave the FT8 tab looking dead. Fall back
-    // to FT8 rather than silently running a mode the client can't render.
-    if (mode === 'PSK31') mode = 'FT8';
     // Close JTCAT popout if open — only one platform at a time
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       sendCatLog('[JTCAT] Closing popout — ECHOCAT taking over FT8');
@@ -11861,15 +11861,33 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
-    if (mode === 'PSK31') return; // popout-only mode — no phone UI for it yet
     if (!ft8Engine) return;
-    if (ft8Engine._mode === 'PSK31') {
-      // Phone is pulling the engine back to the FT8 family from a PSK
-      // session the popout left behind — needs a slice rebuild, not setMode.
+    // Same family-switch rule as the popout's jtcat-set-mode: PSK31 is a
+    // different engine class and Ft8Engine.setMode coerces unknown strings
+    // to FT8, so crossing FT-family <-> PSK rebuilds the slice.
+    const isPsk = mode === 'PSK31';
+    const wasPsk = ft8Engine._mode === 'PSK31';
+    if (isPsk !== wasPsk) {
       startJtcat(mode);
       return;
     }
     ft8Engine.setMode(mode); // accepts 'WSPR'
+  });
+
+  // PSK31 one-shot Send from the phone — same contract as the popout's
+  // jtcat-psk-send IPC: exact typed text (varicode is case-sensitive),
+  // Send IS the arm action, whole buffer = one transmission.
+  remoteServer.on('jtcat-psk-send', ({ text }) => {
+    if (!ft8Engine || ft8Engine._mode !== 'PSK31') return;
+    const t = String(text || '');
+    if (!t.trim()) return;
+    ft8Engine._txEnabled = true;
+    Promise.resolve(ft8Engine.setTxMessage(t)).then(() => {
+      if (!ft8Engine || ft8Engine._mode !== 'PSK31') return;
+      if (!ft8Engine.requestTx()) {
+        sendCatLog('[JTCAT] PSK Send (remote) ignored — TX already active or engine not running');
+      }
+    });
   });
 
   // Phone-driven WSPR beacon. Routes through the same shared control as the
