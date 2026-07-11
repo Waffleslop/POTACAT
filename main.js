@@ -5053,6 +5053,25 @@ function connectWsjtx() {
             qsoDataList: allQsoData,
           });
         }
+        // Phone session list — same gap as jtcatAutoLog (found in the
+        // 2026-07-11 activation-log audit): the desktop Act screen heard
+        // about bridge QSOs but the phone's session view never did.
+        if (remoteServer && remoteServer.running) {
+          const bandStr = qsoData.band || '';
+          const dupe = remoteServer.getSessionContacts().some(c =>
+            c.callsign && c.callsign.toUpperCase() === qsoData.callsign.toUpperCase() && c.band === bandStr);
+          remoteServer.addSessionContact({
+            callsign: qsoData.callsign,
+            timeUtc: qsoData.timeOn || '',
+            freqKhz: String(Math.round(freqMHz * 1000)),
+            mode: qsoData.mode,
+            band: bandStr,
+            rstSent: qsoData.rstSent,
+            rstRcvd: qsoData.rstRcvd,
+            dupe,
+          });
+          remoteServer.sendSessionContacts();
+        }
       } else {
         await saveQsoRecord(qsoData, { origin: 'wsjtx-bridge' });
       }
@@ -5930,6 +5949,47 @@ async function jtcatAutoLog(qso) {
         else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
         else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
         await saveQsoRecord(xrQso, { origin: 'jtcat-engine' });
+      }
+      // Feed the ACTIVATION LOG (user report 2026-07-11: "JTCAT contacts do
+      // not populate in the activation log"). The ADIF side above was always
+      // right, but the Act screen's contact list lives in the RENDERER
+      // (activatorContacts) and the phone's session list in remote-server —
+      // and neither ever heard about auto-logged FT8 QSOs. Reuse the
+      // wsjtx-activator-qso channel: the renderer handler already does the
+      // list push + activation-map popout + QRZ enrichment for the WSJT-X
+      // bridge; same event, same handler, no new plumbing.
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('wsjtx-activator-qso', {
+          callsign: qsoData.callsign,
+          timeUtc: qsoTime.length >= 4 ? `${qsoTime.slice(0, 2)}:${qsoTime.slice(2, 4)}` : '',
+          freqDisplay: freqMhz.toFixed(3),
+          mode: qsoData.mode,
+          band,
+          rstSent: qsoData.rstSent,
+          rstRcvd: qsoData.rstRcvd,
+          name: '',
+          myParks: parkRefs.map(p => p.ref),
+          theirParks: hunted ? hunted.refs.map(r => r.ref) : [],
+          qsoData,
+          qsoDataList: [qsoData],
+        });
+      }
+      // Phone session list — the same contact shape the phone log-qso path
+      // adds, with the same same-call-same-band dupe flag.
+      if (remoteServer && remoteServer.running) {
+        const dupe = remoteServer.getSessionContacts().some(c =>
+          c.callsign && c.callsign.toUpperCase() === qsoData.callsign && c.band === band);
+        remoteServer.addSessionContact({
+          callsign: qsoData.callsign,
+          timeUtc: qsoTime,
+          freqKhz: String(freqKhz),
+          mode: qsoData.mode,
+          band,
+          rstSent: qsoData.rstSent,
+          rstRcvd: qsoData.rstRcvd,
+          dupe,
+        });
+        remoteServer.sendSessionContacts();
       }
     } else {
       await saveQsoRecord(qsoData, { origin: 'jtcat-engine' });

@@ -15,6 +15,12 @@
     /* Reuse JTCAT styles from styles.css via class names */
     .jp-main { display: flex; flex: 1; min-height: 0; overflow: hidden; }
     .jp-decode-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border-primary); }
+    /* Draggable divider between Band Activity and the map pane (user report
+       2026-07-11: "need ability to resize windows within JTCAT"). Ratio is
+       persisted (localStorage jtcat-popout-split-pct); double-click resets
+       50/50. Same pattern as the main window's #split-splitter. */
+    .jp-splitter { width: 6px; cursor: col-resize; background: var(--bg-secondary); border-left: 1px solid var(--border-primary); border-right: 1px solid var(--border-primary); flex-shrink: 0; }
+    .jp-splitter:hover, .jp-splitter.dragging { background: var(--accent-green, #4ecca3); }
     .jp-decode-section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
     .jp-decode-section:first-child { border-bottom: 1px solid var(--border-primary); }
     .jp-decode-header { padding: 4px 8px; font-size: 11px; font-weight: bold; color: var(--text-secondary); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
@@ -40,8 +46,11 @@
     .jp-row .jp-msg { flex: 1; }
     .jp-row.jp-cq { background: rgba(0, 120, 0, 0.25); }
     .jp-row.jp-cq .jp-msg { color: var(--accent-green, #4ecca3); font-weight: bold; }
-    .jp-row.jp-directed { background: rgba(180, 30, 30, 0.35); }
-    .jp-row.jp-directed .jp-msg { color: #ff6b7a; font-weight: bold; }
+    /* Directed at us (someone answered our CQ): red is the ACCENT, not the
+       ink — red text on the red tint was unreadable (user report 2026-07-11).
+       Left-border + tint matches the jp-chase/jp-spotted accent pattern. */
+    .jp-row.jp-directed { background: rgba(180, 30, 30, 0.22); border-left: 3px solid #e94560; padding-left: 5px; }
+    .jp-row.jp-directed .jp-msg { color: #ffe2e6; font-weight: bold; }
     .jp-row.jp-tx { opacity: 0.7; }
     .jp-row.jp-tx .jp-db { color: #e94560; }
     .jp-row.jp-wanted { background: rgba(255, 215, 64, 0.08); }
@@ -155,6 +164,15 @@
 
     /* Controls bar */
     .jp-controls { padding: 6px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 12px; }
+    /* Bottom status strip (user report 2026-07-11: countdown hard to read).
+       Big tabular-num countdown + WSJT-X-style cycle progress bar, color-
+       keyed RX (green) vs TX (red) so period phase reads from across the
+       shack. The Sync indicator is status, not a control — it lives here. */
+    .jp-status-strip { display: flex; align-items: center; gap: 10px; padding: 3px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
+    .jp-cycle-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-primary); overflow: hidden; border: 1px solid var(--border-primary); }
+    .jp-cycle-fill { height: 100%; width: 0%; background: var(--accent-green, #4ecca3); }
+    .jp-cycle-fill.tx { background: #e94560; }
+    .jp-countdown-big { font-family: monospace; font-size: 16px; font-weight: 700; color: var(--text-primary); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
     .jp-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; font-weight: 600; cursor: pointer; }
     .jp-btn:hover { background: var(--bg-hover); }
     .jp-btn.active { background: var(--accent-green, #4ecca3); color: #fff; border-color: var(--accent-green, #4ecca3); }
@@ -259,8 +277,6 @@
     <div class="jtcat-status">
       <span id="jp-utc-clock" style="font-size:11px;font-family:monospace;color:#4fc3f7;white-space:nowrap;" title="UTC date & time"></span>
       <span id="jp-cycle" class="jtcat-cycle">&mdash;</span>
-      <span id="jp-countdown" class="jtcat-countdown">&mdash;</span>
-      <span id="jp-sync" class="jtcat-sync">Sync: &mdash;</span>
     </div>
     <button id="jp-multi-btn" class="jtcat-filter-btn" title="Multi-slice: decode multiple bands simultaneously" style="margin-left:4px;">Multi</button>
     <div style="display:flex;gap:4px;margin-left:auto;">
@@ -359,6 +375,7 @@
         <div class="jp-empty">No WSPR spots yet — listening on a 2-minute cycle…</div>
       </div>
     </div>
+    <div id="jp-splitter" class="jp-splitter" title="Drag to resize — double-click to reset 50/50"></div>
     <div class="jp-map-pane">
       <div id="jp-map" class="jp-map"></div>
     </div>
@@ -439,6 +456,15 @@
     <button id="jp-tune" class="jp-btn jp-tune" title="WSJT-X-style 90s steady-tone tune (click again to stop early)">Tune</button>
     <button id="jp-open-log" class="jp-btn" title="Open QSO log" style="margin-left:auto;">Log</button>
     <span id="jp-tx-msg" class="jp-tx-msg">&mdash;</span>
+  </div>
+
+  <!-- Bottom status strip — cycle progress + countdown + clock sync. -->
+  <div class="jp-status-strip">
+    <div id="jp-cycle-bar" class="jp-cycle-bar" title="FT8/FT4 period progress — green receiving, red transmitting">
+      <div id="jp-cycle-fill" class="jp-cycle-fill"></div>
+    </div>
+    <span id="jp-countdown" class="jp-countdown-big" title="Seconds until the next period">&mdash;</span>
+    <span id="jp-sync" class="jtcat-sync" title="Your COMPUTER's clock drives FT8 timing. POTACAT measures it against internet time (NTP) and warns past ~1s drift — it never changes the clock itself. Using ECHOCAT changes nothing: decoding runs on this computer, so the phone's clock doesn't matter.">Sync: &mdash;</span>
     <span id="jp-rx-tx" class="jp-status">RX</span>
   </div>
 

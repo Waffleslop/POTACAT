@@ -1256,7 +1256,8 @@ function _applyPopoutTheme(payload) {
     });
   }
 
-  // --- Countdown timer ---
+  // --- Countdown timer + cycle progress bar (bottom status strip) ---
+  var cycleFillEl = document.getElementById('jp-cycle-fill');
   setInterval(function() {
     var mode = modeSelect.value;
     var cycleSec = mode === 'WSPR' ? 120 : mode === 'FT2' ? 3.8 : mode === 'FT4' ? 7.5 : 15;
@@ -1264,6 +1265,12 @@ function _applyPopoutTheme(payload) {
     var msInto = Date.now() % cycleMs;
     var remaining = (cycleMs - msInto) / 1000;
     countdownEl.textContent = (remaining < 10 ? remaining.toFixed(1) : Math.ceil(remaining)) + 's';
+    // WSJT-X-style period progress — green while receiving, red while our
+    // transmitter is keyed. Readable from across the shack without digits.
+    if (cycleFillEl) {
+      cycleFillEl.style.width = ((msInto / cycleMs) * 100).toFixed(1) + '%';
+      cycleFillEl.classList.toggle('tx', !!transmitting);
+    }
     if (mode === 'WSPR') updateWsprNext(msInto, remaining);
   }, 200);
 
@@ -2637,8 +2644,53 @@ function _applyPopoutTheme(payload) {
     mapVisible = !mapVisible;
     mapPane.classList.toggle('hidden', !mapVisible);
     mapToggleBtn.classList.toggle('active', mapVisible);
+    if (splitterEl) splitterEl.style.display = mapVisible ? '' : 'none';
     if (mapVisible && map) setTimeout(function() { map.invalidateSize(); }, 100);
   });
+
+  // --- Pane splitter (user report 2026-07-11: resize windows within JTCAT).
+  // Drag the divider between Band Activity and the map; ratio persists per
+  // machine; double-click resets 50/50. flex-grow ratios keep both panes
+  // proportional on window resize (no fixed pixel widths to go stale).
+  var splitterEl = document.getElementById('jp-splitter');
+  var decodePaneEl = document.querySelector('.jp-decode-pane');
+  var SPLIT_LS_KEY = 'jtcat-popout-split-pct';
+  function applySplitPct(pct) {
+    if (!decodePaneEl || !mapPane) return;
+    var p = Math.max(20, Math.min(80, pct));
+    decodePaneEl.style.flex = String(p) + ' 1 0';
+    mapPane.style.flex = String(100 - p) + ' 1 0';
+    if (map) setTimeout(function() { map.invalidateSize(); }, 50);
+  }
+  if (splitterEl && decodePaneEl && mapPane) {
+    var savedPct = parseFloat(localStorage.getItem(SPLIT_LS_KEY));
+    if (!isNaN(savedPct)) applySplitPct(savedPct);
+    var dragging = false;
+    splitterEl.addEventListener('mousedown', function(e) {
+      dragging = true;
+      splitterEl.classList.add('dragging');
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!dragging) return;
+      var mainRect = document.querySelector('.jp-main').getBoundingClientRect();
+      if (mainRect.width <= 0) return;
+      var pct = ((e.clientX - mainRect.left) / mainRect.width) * 100;
+      applySplitPct(pct);
+    });
+    document.addEventListener('mouseup', function() {
+      if (!dragging) return;
+      dragging = false;
+      splitterEl.classList.remove('dragging');
+      // Persist what's actually applied (post-clamp).
+      var applied = parseFloat(decodePaneEl.style.flex) || 50;
+      try { localStorage.setItem(SPLIT_LS_KEY, String(applied)); } catch (e) {}
+    });
+    splitterEl.addEventListener('dblclick', function() {
+      applySplitPct(50);
+      try { localStorage.setItem(SPLIT_LS_KEY, '50'); } catch (e) {}
+    });
+  }
 
   mapPopoutBtn.addEventListener('click', function() {
     window.api.jtcatMapPopout();
