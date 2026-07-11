@@ -19,10 +19,15 @@ Casey chose to build PSK31 before RTTY. What shipped and where it differs:
   to a single PCM buffer (32-symbol idle preamble + varicode + 32-symbol
   carrier postamble) and rides the existing `tx-start` dispatch unchanged
   on every audio route. Live type-ahead streaming is a possible follow-up.
-- **Popout-only**: no ECHOCAT `digital-*` WS messages yet; remote handlers
-  guard 'PSK31' (phone jtcat-start falls back to FT8). The RX pane is
-  `#jp-psk-pane` (applyWsprMode-style swap), new IPC `jtcat-psk-rx` (250 ms
-  char batches) + `jtcat-psk-send`.
+- **Desktop popout + ECHOCAT wire** (phone UI pending): the RX pane is
+  `#jp-psk-pane` (applyWsprMode-style swap), IPC `jtcat-psk-rx` (250 ms char
+  batches) + `jtcat-psk-send`. The same pair exists as WS messages for
+  mobile (2f0c9be, 2026-07-11): `jtcat-psk-rx` with a ~2000-char replay
+  tail on reconnect, `jtcat-psk-send`, remote jtcat-start/set-mode accept
+  PSK31 (family switch rebuilds the slice), tx-status carries `durMs`.
+  Phone UI handed off: `potacat-meta/work/open/psk31-mobile.md`. This plan's
+  generic `digital-*` message family was NOT used — the messages are
+  jtcat-namespaced to match the existing FT8/WSPR protocol.
 - **Logging**: `lib/adif-writer.js` gained SUBMODE — PSK31 logs as
   MODE=PSK / SUBMODE=PSK31 (manual logging via the QSO popout; no QSO state
   machine for continuous modes).
