@@ -344,20 +344,34 @@ test('rigctld setFrequency', () => {
   assert.strictEqual(writes[0], 'F 14074000\n');
 });
 
-test('rigctld setMode FT8 -> M PKTUSB 3000 (wide for digital)', () => {
+// Passband is caps-gated: rigs with fixed filters (FT-857 et al.) make
+// hamlib reject "M USB 2400" outright (RPRT -1 — the MODE never changes),
+// so a model without caps.filter sends passband 0 (backend default). These
+// three were stale for weeks expecting the pre-gate behavior and trained
+// everyone to ignore "SOME TESTS FAILED" — updated 2026-07-11 to pin BOTH
+// sides of the gate.
+const RIGCTLD_FILTER_MODEL = { ...RIGCTLD_MODEL, caps: { ...RIGCTLD_MODEL.caps, filter: true } };
+
+test('rigctld setMode FT8, no filter caps -> M PKTUSB 0 (fixed-filter rigs reject passbands)', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.setMode('FT8', 14074000);
+  assert.strictEqual(writes[0], 'M PKTUSB 0\n');
+});
+
+test('rigctld setMode FT8, filter-capable -> M PKTUSB 3000 (wide for digital)', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_FILTER_MODEL);
   codec.setMode('FT8', 14074000);
   assert.strictEqual(writes[0], 'M PKTUSB 3000\n');
 });
 
-test('rigctld setMode CW -> M CW 500', () => {
-  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+test('rigctld setMode CW, filter-capable -> M CW 500', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_FILTER_MODEL);
   codec.setMode('CW', 14050000);
   assert.strictEqual(writes[0], 'M CW 500\n');
 });
 
-test('rigctld setMode SSB below 10 MHz -> M LSB 2400', () => {
-  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+test('rigctld setMode SSB below 10 MHz, filter-capable -> M LSB 2400', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_FILTER_MODEL);
   codec.setMode('SSB', 7200000);
   assert.strictEqual(writes[0], 'M LSB 2400\n');
 });
@@ -606,13 +620,17 @@ test('CIV setFilterWidth is no-op (FIL presets not Hz-addressable)', () => {
   assert.strictEqual(writes.length, 0, 'Should not send any filter command for CI-V');
 });
 
-test('CIV setMode does not include filter byte', () => {
+test('CIV setMode sends the 2-byte [mode, filter] form, echoing the last-seen filter', () => {
+  // Stale until 2026-07-11: expected the 1-byte mode-only form, but older
+  // Icoms (IC-7100/7200/9100/706MKIIG) silently DROP that form — the codec
+  // deliberately always sends [mode, filter], echoing the filter the rig
+  // last reported so per-mode filter memory is preserved (K6RBJ IC-7100
+  // 2026-05-25). First-poll default is FIL1 (0x01).
   const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
   codec.setMode('CW', 14000000);
   const hex = writes[0];
-  // cmd 0x06 with just mode byte 0x03 (CW), no filter byte
-  // Frame: FE FE 94 E0 06 03 FD — mode only, no 0x01/0x02/0x03 filter
-  assert.ok(hex.includes('0603fd'), `Expected mode-only (no filter byte), got: ${hex}`);
+  // Frame: FE FE 94 E0 06 03 01 FD — mode 0x03 (CW) + filter byte FIL1
+  assert.ok(hex.includes('060301fd'), `Expected [mode, FIL1] form, got: ${hex}`);
 });
 
 // =========================================================================

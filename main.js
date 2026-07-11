@@ -6807,6 +6807,11 @@ async function runJtcatClockCheck() {
     jtcatLastClock.rebaselined = true;
   }
   broadcastJtcatClock(jtcatLastClock);
+  // Phone rides the settings blob (jtcatClockSync) — push on level CHANGE so
+  // a drifting shack clock reaches the phone FT8 screen promptly instead of
+  // waiting for the next unrelated blob refresh. (Mobile work item:
+  // jtcat-clock-sync-on-phone.)
+  if (jtcatLastClock.level !== prevLevel) updateRemoteSettings();
   return jtcatLastClock;
 }
 
@@ -8736,6 +8741,12 @@ function updateRemoteSettings() {
     contestCatalogExtras: activeEvents
       .map((ev) => EventRegistry.synthesizeContestEntry(ev, getAllContests()))
       .filter(Boolean),
+    // Desktop clock-vs-NTP state for the phone FT8 screen: FT8 decodes on
+    // the DESKTOP clock, so a drifted shack PC = "good audio, zero decodes"
+    // with no phone-visible cause until this. {offsetMs, level: ok|warn|bad|
+    // unknown, checkedAt}; null before the first JTCAT session's check.
+    // Read-only on the phone — fixing the clock happens at the desktop.
+    jtcatClockSync: jtcatLastClock || null,
     kiwiSdrHost1: settings.kiwiSdrHost1 || settings.kiwiSdrHost || '',
     kiwiSdrHost2: settings.kiwiSdrHost2 || '',
     kiwiSdrHost3: settings.kiwiSdrHost3 || '',
