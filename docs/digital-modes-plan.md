@@ -224,6 +224,25 @@ The iOS app's existing FT8 screen subscribes to the new `digital-decode` channel
 ### RTTY (Baudot 45.45)
 AFSK at mark=2125 / space=1955 (170 Hz shift). Mark/space tone detection via Goertzel filters at the two frequencies, edge detect on start bit, sample 5 data bits at symbol-period midpoints, track LTRS/FIGS shift state. ~200 LOC. TX is two-tone FSK; trivial generation. Reference: fldigi RTTY source.
 
+**Primary DSP reference: MMTTY / MMVARI (user recommendation, 2026-07-11).**
+JE3HHT's MMTTY is the gold-standard RTTY demodulator (IIR mark/space
+discriminator, ATC automatic threshold control, selective-fade handling)
+and MMVARI is his multi-mode engine (bpsk/qpsk/rtty/mfsk/gmsk) that N1MM
+embeds; both were open-sourced Aug 2013 under **LGPL** (GitHub mirrors:
+github.com/n5ac/mmtty, /mmvari, /mmsstv — C++ Builder/VCL, Windows-only).
+Rules of engagement, same as the MMSSTV-informed SSTV rewrite:
+- **Techniques, not code.** A JS port of LGPL source is a derivative work
+  and would make the module LGPL inside our Apache-2.0 tree — study the
+  algorithms, implement clean-room, cite the technique in comments.
+- **Cannot embed**: MMVARI's engine is a VB6-era ActiveX OCX, Windows-only,
+  last released 2010 — a dead end for macOS/Linux/headless Pi and for the
+  main-process/ECHOCAT thin-client architecture.
+- **MFSK landmine**: the OCX docs require permission from ZL1BPU/IZ8BLY to
+  ship its mfsk mode in a commercial program — avoid MMVARI's MFSK path
+  entirely if MFSK ever comes up.
+- **Interop targets**: validate our PSK31/RTTY on-air against MMVARI and
+  fldigi (the recommending user runs MMVARI — natural beta tester).
+
 ### PSK31 (and PSK63 / PSK125)
 BPSK at 31.25/62.5/125 baud, 1500 Hz audio center, ±15 Hz wide. Costas/PLL phase tracking per symbol period, threshold the cumulative phase shift, decode through varicode (variable-length self-synchronizing prefix code). ~300–400 LOC. TX synth is cosine-windowed BPSK; ~150 LOC. References: fldigi, jspsk.
 
