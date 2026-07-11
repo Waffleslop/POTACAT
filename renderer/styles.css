@@ -8997,7 +8997,42 @@ main.banner-logger-active #event-progress-overlay {
 .bl-ref { width: calc(80px * var(--bl-scale, 1)); text-transform: uppercase; }
 .bl-ref.hidden { display: none; }
 .bl-callsign { width: calc(78px * var(--bl-scale, 1)); text-transform: uppercase; }
-.bl-name { width: calc(320px * var(--bl-scale, 1)); color: var(--text-secondary); background: transparent; border-color: transparent; cursor: default; }
+/* Station readout — a div, not an input: the name half ellipsizes while the
+   grid/distance/heading half stays right-justified against the freq field,
+   so a marathon QRZ club name can never push the geo data out of view. */
+.bl-name {
+  width: calc(320px * var(--bl-scale, 1));
+  color: var(--text-secondary);
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(8px * var(--bl-scale, 1));
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.bl-name-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bl-name-geo {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+  text-align: right;
+}
+/* Placeholder parity with the old <input> — shown until any content lands. */
+.bl-name.bl-name-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .bl-freq { width: calc(80px * var(--bl-scale, 1)); }
 .bl-notes { flex: 1; min-width: 60px; }
 .bl-respot-label { font-size: calc(11px * var(--bl-scale, 1)); color: var(--text-secondary); display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }

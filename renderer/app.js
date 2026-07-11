@@ -2905,7 +2905,19 @@ const blType = document.getElementById('bl-type');
 const blRef = document.getElementById('bl-ref');
 const blCallsign = document.getElementById('bl-callsign');
 const blName = document.getElementById('bl-name');
+const blNameText = document.getElementById('bl-name-text');
+const blNameGeo = document.getElementById('bl-name-geo');
 const blFreq = document.getElementById('bl-freq');
+
+// bl-name is a two-span div (not an input): name ellipsizes, geo stays
+// right-justified beside the freq field. Route ALL writes through here so
+// the placeholder class stays honest.
+function _blSetNameDisplay(name, geo) {
+  if (!blNameText || !blNameGeo) return;
+  blNameText.textContent = name || '';
+  blNameGeo.textContent = geo || '';
+  if (blName) blName.classList.toggle('bl-name-empty', !name && !geo);
+}
 const blMode = document.getElementById('bl-mode');
 const blRstSent = document.getElementById('bl-rst-sent');
 const blRstRcvd = document.getElementById('bl-rst-rcvd');
@@ -3167,8 +3179,9 @@ function _blRenderStationInfo(info, callsign, ctyGeo) {
     }
   }
 
-  const parts = [name, gridShort, distTxt, hdgTxt].filter(Boolean);
-  blName.value = parts.join(' | ');
+  // Name on the left (ellipsized when long); grid/distance/heading joined
+  // on the right, pinned against the freq field.
+  _blSetNameDisplay(name, [gridShort, distTxt, hdgTxt].filter(Boolean).join(' | '));
 
   // Source hint on hover — keeps the "where did this grid come from?"
   // affordance from the old chips without burning visible real estate.
@@ -3185,8 +3198,7 @@ blCallsign.addEventListener('input', () => {
   clearTimeout(blLookupTimer);
   const cs = blCallsign.value.trim();
   if (cs.length < 3) {
-    blName.value = '';
-    _blRenderStationInfo(null, null);
+    _blRenderStationInfo(null, null); // clears both name and geo spans
     return;
   }
   // Render once with what we know NOW — spot-table data is local and
@@ -3414,9 +3426,8 @@ async function saveBannerQso() {
     if (result && result.success) {
       // Keep type and ref sticky across QSOs (user is likely logging same park)
       blCallsign.value = '';
-      blName.value = '';
       blNotes.value = '';
-      _blRenderStationInfo(null);
+      _blRenderStationInfo(null); // clears both name and geo spans
       blFreqEdited = false;
       blModeEdited = false;
       blTimeEdited = false;
@@ -15124,8 +15135,25 @@ function getActiveScheduleEntry(event) {
   });
 }
 
+// Badge grace: decorate spots a day either side of the schedule so early
+// warm-up spots and just-past-midnight stragglers still read, but a REUSED
+// callsign doesn't. 1x1 calls (K2A…) rotate to unrelated operations within
+// days, and ended events stay in active.json ~14 days for history — without
+// this gate a stale 13C badge would decorate whoever holds K2C next week.
+const EVENT_BADGE_GRACE_MS = 24 * 3600000;
+
+function _eventScheduleNearActive(ev) {
+  const now = Date.now();
+  return (ev.schedule || []).some((s) => {
+    const start = new Date(s.start).getTime();
+    const end = new Date(s.end).getTime();
+    return now >= start - EVENT_BADGE_GRACE_MS && now <= end + EVENT_BADGE_GRACE_MS;
+  });
+}
+
 function getEventForCallsign(callsign) {
   for (const ev of activeEvents) {
+    if (!_eventScheduleNearActive(ev)) continue;
     if (matchesEventPattern(callsign, ev.callsignPatterns)) {
       return ev;
     }

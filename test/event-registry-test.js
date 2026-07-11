@@ -93,5 +93,66 @@ console.log('adifContestIdForEvent (curated ADIF vocabulary only):');
     'curated field-day entry matches the value JTCAT FD mode already writes');
 }
 
+console.log('synthesizeContestEntry (Phase B — server-pushed contest rows):');
+{
+  const WRTC = {
+    id: 'wrtc-2026', name: 'WRTC 2026', board: 'checklist',
+    url: 'https://www.wrtc2026.org', badge: 'WRTC',
+    schedule: [{ region: 'ALL', start: '2026-07-11T12:00:00Z', end: '2026-07-12T12:00:00Z' }],
+    tracking: { type: 'checklist', total: 50, items: [] },
+  };
+  const s = R.synthesizeContestEntry(WRTC, catalog);
+  check(!!s, 'un-aliased scheduled event synthesizes a contest row');
+  check(s.id === 'wrtc-2026' && s.source === 'events', 'id + source carried');
+  check(s.category === 'special-event', 'checklist board defaults to special-event category');
+  check(s.start === '2026-07-11T12:00:00.000Z' && s.end === '2026-07-12T12:00:00.000Z',
+    'explicit start/end from schedule');
+  check(s.durationHours === 24, 'duration derived from the schedule span');
+  check(Array.isArray(s.explicitWindows) && s.explicitWindows.length === 1,
+    'explicit windows carried for contest-history');
+  check(s.website === 'https://www.wrtc2026.org', 'event url becomes website');
+
+  // Server-provided optional fields pass through.
+  const rich = R.synthesizeContestEntry({ ...WRTC, id: 'x-2026', category: 'worldwide-dx',
+    sponsor: 'Someone', modes: ['CW', 'SSB'], bands: ['20m'] }, catalog);
+  check(rich.category === 'worldwide-dx' && rich.sponsor === 'Someone'
+    && rich.modes.length === 2 && rich.bands[0] === '20m', 'server category/sponsor/modes/bands pass through');
+
+  // Counter boards default to operating-event.
+  const counter = R.synthesizeContestEntry({ ...WRTC, id: 'y-2026', board: 'counter', tracking: { type: 'counter' } }, catalog);
+  check(counter.category === 'operating-event', 'counter board defaults to operating-event category');
+
+  check(R.synthesizeContestEntry(EV13, catalog) === null,
+    'catalog-aliased event does NOT synthesize (superseded catalog row renders it)');
+  check(R.synthesizeContestEntry({ id: 'no-sched-2026', name: 'X' }, catalog) === null,
+    'unscheduled event does not synthesize');
+  check(R.synthesizeContestEntry({ ...WRTC, id: 'cq-ww-ssb' }, catalog) === null,
+    'id collision with a catalog contest does not synthesize');
+}
+
+console.log('explicitWindows -> contest-history (Phase B end-to-end):');
+{
+  const WRTC = {
+    id: 'wrtc-2026', name: 'WRTC 2026', board: 'checklist',
+    schedule: [{ region: 'ALL', start: '2026-07-11T12:00:00Z', end: '2026-07-12T12:00:00Z' }],
+  };
+  const entry = R.synthesizeContestEntry(WRTC, catalog);
+  const qso = (d, band, mode, extra) => ({ QSO_DATE: d, BAND: band, MODE: mode, ...extra });
+  // Stamped QSO inside the window attributes to the event's own id.
+  const h = buildContestHistory(catalog.concat([entry]), [
+    qso('20260711', '20m', 'CW', { APP_POTACAT_EVENT: 'wrtc-2026' }),
+    qso('20260712', '40m', 'SSB', { APP_POTACAT_EVENT: 'wrtc-2026' }),
+  ], { generatedAt: 1 });
+  check(!!(h && h.contests['wrtc-2026'] && h.contests['wrtc-2026']['2026']
+    && h.contests['wrtc-2026']['2026'].qsos === 2),
+    'stamped QSOs attribute to the event-sourced entry via explicit windows');
+  // Out-of-window QSO does not.
+  const h2 = buildContestHistory(catalog.concat([entry]), [
+    qso('20260720', '20m', 'CW', { APP_POTACAT_EVENT: 'wrtc-2026' }),
+  ], { generatedAt: 1 });
+  check(!(h2 && h2.contests && h2.contests['wrtc-2026']),
+    'stamp outside the explicit window does not attribute');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'event-registry tests failed');

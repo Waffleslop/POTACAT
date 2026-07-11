@@ -8648,6 +8648,17 @@ function updateRemoteSettings() {
     // derived from the log (rebuildContestHistory). Read-only on the phone;
     // null until the first scan completes or when the log has no matches.
     contestHistory: _contestHistory || null,
+    // Server-pushed contest rows (unified registry Phase B) — events with no
+    // contests-catalog counterpart, synthesized to the catalog-entry shape
+    // with EXPLICIT start/end (no cadence rule to resolve). The phone appends
+    // these to its bundled catalog so a definition pushed to
+    // events/active.json reaches the mobile Contests view + labels the
+    // matching contestHistory ids — one synthesis rule, desktop-owned, so
+    // the two platforms can't drift. (Mobile handoff:
+    // server-pushed-contests-mobile.)
+    contestCatalogExtras: activeEvents
+      .map((ev) => EventRegistry.synthesizeContestEntry(ev, getAllContests()))
+      .filter(Boolean),
     kiwiSdrHost1: settings.kiwiSdrHost1 || settings.kiwiSdrHost || '',
     kiwiSdrHost2: settings.kiwiSdrHost2 || '',
     kiwiSdrHost3: settings.kiwiSdrHost3 || '',
@@ -15736,6 +15747,43 @@ const BUILTIN_EVENTS = {
       ],
       tracking: { type: 'counter', total: 0, label: 'QSOs' },
     },
+    // --- WRTC 2026 (during IARU HF Championship, 11-12 July 2026) ---
+    // 50 competitor stations in SE England, callsigns MB<digit><letter>
+    // (official list v2, wrtc2026.org 2026-07-09 — the MB block is otherwise
+    // unallocated; team↔callsign mapping is sealed until after the contest,
+    // hence no item names). CW + SSB on 80/40/20/15/10m; chaser award tiers
+    // by QSO count. Exact-match patterns — no wildcard, so the MB7Ixx
+    // gateway callsigns can't false-match. NOTE: the copy that reaches
+    // existing installs is potacat.com/events/active.json (4-hour refetch);
+    // this builtin is the no-cache fallback for fresh installs.
+    {
+      id: 'wrtc-2026',
+      name: 'WRTC 2026',
+      type: 'special-event',
+      board: 'checklist',
+      url: 'https://www.wrtc2026.org',
+      badge: 'WRTC',
+      badgeColor: '#c8102e',
+      callsignPatterns: ['MB1A', 'MB1I', 'MB1N', 'MB1S', 'MB1T', 'MB2A', 'MB2D', 'MB2H', 'MB2M', 'MB2N', 'MB2R', 'MB2S', 'MB2U', 'MB3B', 'MB3D', 'MB3F', 'MB3G', 'MB3H', 'MB3K', 'MB3L', 'MB3M', 'MB3R', 'MB3V', 'MB3W', 'MB4C', 'MB4F', 'MB4G', 'MB4L', 'MB4O', 'MB4P', 'MB4V', 'MB4W', 'MB4X', 'MB4Z', 'MB5C', 'MB5J', 'MB5O', 'MB5P', 'MB5Q', 'MB5X', 'MB5Y', 'MB5Z', 'MB7D', 'MB7F', 'MB7G', 'MB7K', 'MB7L', 'MB7M', 'MB7V', 'MB7W'],
+      schedule: [
+        { region: 'ALL', regionName: 'WRTC 2026 (IARU HF Championship)', start: '2026-07-11T12:00:00Z', end: '2026-07-12T12:00:00Z' },
+      ],
+      tracking: {
+        type: 'checklist', total: 50, label: 'Stations',
+        items: [
+          { id: 'MB1A', name: '' }, { id: 'MB1I', name: '' }, { id: 'MB1N', name: '' }, { id: 'MB1S', name: '' }, { id: 'MB1T', name: '' },
+          { id: 'MB2A', name: '' }, { id: 'MB2D', name: '' }, { id: 'MB2H', name: '' }, { id: 'MB2M', name: '' }, { id: 'MB2N', name: '' },
+          { id: 'MB2R', name: '' }, { id: 'MB2S', name: '' }, { id: 'MB2U', name: '' }, { id: 'MB3B', name: '' }, { id: 'MB3D', name: '' },
+          { id: 'MB3F', name: '' }, { id: 'MB3G', name: '' }, { id: 'MB3H', name: '' }, { id: 'MB3K', name: '' }, { id: 'MB3L', name: '' },
+          { id: 'MB3M', name: '' }, { id: 'MB3R', name: '' }, { id: 'MB3V', name: '' }, { id: 'MB3W', name: '' }, { id: 'MB4C', name: '' },
+          { id: 'MB4F', name: '' }, { id: 'MB4G', name: '' }, { id: 'MB4L', name: '' }, { id: 'MB4O', name: '' }, { id: 'MB4P', name: '' },
+          { id: 'MB4V', name: '' }, { id: 'MB4W', name: '' }, { id: 'MB4X', name: '' }, { id: 'MB4Z', name: '' }, { id: 'MB5C', name: '' },
+          { id: 'MB5J', name: '' }, { id: 'MB5O', name: '' }, { id: 'MB5P', name: '' }, { id: 'MB5Q', name: '' }, { id: 'MB5X', name: '' },
+          { id: 'MB5Y', name: '' }, { id: 'MB5Z', name: '' }, { id: 'MB7D', name: '' }, { id: 'MB7F', name: '' }, { id: 'MB7G', name: '' },
+          { id: 'MB7K', name: '' }, { id: 'MB7L', name: '' }, { id: 'MB7M', name: '' }, { id: 'MB7V', name: '' }, { id: 'MB7W', name: '' },
+        ],
+      },
+    },
     // --- 13 Colonies Special Event (July) ---
     {
       id: '13colonies-2026',
@@ -16117,7 +16165,13 @@ function rebuildContestHistory() {
     // ids via the alias map, so a "13col-2026"-stamped QSO attributes to the
     // "13-colonies" contest exactly (no mode/band heuristics).
     const contestsCatalog = getAllContests();
-    _contestHistory = buildContestHistory(contestsCatalog, qsos, {
+    // Phase B: event-sourced one-shots (explicit windows) join the catalog so
+    // stamped QSOs with un-aliased events (APP_POTACAT_EVENT=wrtc-2026) show
+    // in the phone's CNTST history under the event's own id.
+    const eventEntries = activeEvents
+      .map((ev) => EventRegistry.synthesizeContestEntry(ev, contestsCatalog))
+      .filter(Boolean);
+    _contestHistory = buildContestHistory(contestsCatalog.concat(eventEntries), qsos, {
       eventAliases: EventRegistry.buildEventAliasMap(activeEvents, contestsCatalog),
     });
   } catch (err) {
@@ -21046,7 +21100,10 @@ app.whenReady().then(() => {
     try {
       const db = require('./lib/contests-db');
       const all = db.getAllContests();
-      const ok = all.some((c) => c.website === url || c.rulesUrl === url);
+      // Event-sourced contest rows (Phase B) carry the event's url — those
+      // must pass the same allowlist gate or their link-outs silently die.
+      const ok = all.some((c) => c.website === url || c.rulesUrl === url)
+        || activeEvents.some((ev) => ev && (ev.url === url || ev.rulesUrl === url));
       if (!ok) return;
       require('electron').shell.openExternal(url);
     } catch { /* silent — invalid URL or load failure */ }
@@ -21877,27 +21934,40 @@ app.whenReady().then(() => {
       if (cid) aliasByContest.set(cid, ev.id);
     }
     const eventStates = settings.events || {};
-    return {
-      now: now.toISOString(),
-      contests: resolved.map((c) => {
-        const out = {
-          ...c,
-          kind: EventRegistry.kindForContest(c),
-          start: c.start ? c.start.toISOString() : null,
-          end: c.end ? c.end.toISOString() : null,
-        };
-        const evId = aliasByContest.get(c.id);
-        if (evId) {
-          const ev = activeEvents.find((e) => e.id === evId);
-          const st = eventStates[evId];
-          out.supersededBy = evId;
-          out.eventTracked = !!(st && st.optedIn);
-          out.eventProgress = st ? Object.keys(mergedEventProgress(st)).length : 0;
-          out.eventTotal = (ev && ev.tracking && (ev.tracking.total || (ev.tracking.items || []).length)) || 0;
-        }
-        return out;
-      }),
-    };
+    const rows = resolved.map((c) => {
+      const out = {
+        ...c,
+        kind: EventRegistry.kindForContest(c),
+        start: c.start ? c.start.toISOString() : null,
+        end: c.end ? c.end.toISOString() : null,
+      };
+      const evId = aliasByContest.get(c.id);
+      if (evId) {
+        const ev = activeEvents.find((e) => e.id === evId);
+        const st = eventStates[evId];
+        out.supersededBy = evId;
+        out.eventTracked = !!(st && st.optedIn);
+        out.eventProgress = st ? Object.keys(mergedEventProgress(st)).length : 0;
+        out.eventTotal = (ev && ev.tracking && (ev.tracking.total || (ev.tracking.items || []).length)) || 0;
+      }
+      return out;
+    });
+    // Phase B, the server-drivable half: scheduled events with NO catalog
+    // counterpart (WRTC 2026) render as contest rows too — push a definition
+    // to events/active.json and it appears in this view within the 4-hour
+    // refetch, no release. `supersededBy` here points at the event itself so
+    // the existing tracked-chip renderer links the row to the event board.
+    for (const ev of activeEvents) {
+      const synth = EventRegistry.synthesizeContestEntry(ev, resolved);
+      if (!synth) continue;
+      const st = eventStates[ev.id];
+      synth.supersededBy = ev.id;
+      synth.eventTracked = !!(st && st.optedIn);
+      synth.eventProgress = st ? Object.keys(mergedEventProgress(st)).length : 0;
+      synth.eventTotal = (ev.tracking && (ev.tracking.total || (ev.tracking.items || []).length)) || 0;
+      rows.push(synth);
+    }
+    return { now: now.toISOString(), contests: rows };
   });
 
   // Ensure ECHOCAT is serving a Tailscale-issued LE cert before we
@@ -23212,28 +23282,49 @@ app.whenReady().then(() => {
 
   ipcMain.handle('export-event-adif', async (_e, { eventId }) => {
     const state = settings.events && settings.events[eventId];
-    if (!state || !state.progress) return { success: false, error: 'No progress data' };
     const event = activeEvents.find(ev => ev.id === eventId);
     if (!event) return { success: false, error: 'Event not found' };
 
-    // Build ADIF records from progress entries
-    const records = [];
-    for (const [region, qso] of Object.entries(state.progress)) {
-      const entry = (event.schedule || []).find(s => s.region === region);
-      records.push({
-        CALL: qso.call,
-        QSO_DATE: (qso.date || '').replace(/-/g, ''),
-        TIME_ON: qso.time || '0000',
-        BAND: qso.band,
-        MODE: qso.mode,
-        FREQ: qso.freq ? (parseFloat(qso.freq) / 1000).toFixed(6) : '',
-        RST_SENT: qso.rstSent || '59',
-        RST_RCVD: qso.rstRcvd || '59',
-        STATE: region,
-        COMMENT: `${event.name} - ${entry ? entry.regionName : region}`,
-        STATION_CALLSIGN: settings.myCallsign || '',
-        OPERATOR: settings.myCallsign || '',
-      });
+    // Preferred source: log records stamped with this event at save time
+    // (APP_POTACAT_EVENT) — the COMPLETE set with full fidelity, including
+    // repeat contacts with the same station on other bands/modes (a WRTC
+    // chaser can work each of the 50 stations up to 10 times; the progress
+    // board keeps one per checklist item). Falls back to progress-derived
+    // records for events/QSOs that predate stamping.
+    let records = [];
+    try {
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      if (fs.existsSync(logPath)) {
+        records = parseAllRawQsos(logPath)
+          .filter((r) => String(r.APP_POTACAT_EVENT || '').trim() === eventId)
+          .map((r) => {
+            // Strip app-internal bookkeeping from the share copy.
+            const { APP_POTACAT_UUID, APP_POTACAT_VERSION, APP_POTACAT_MERGED_UUIDS, ...out } = r;
+            return out;
+          });
+      }
+    } catch { /* fall through to progress-derived records */ }
+
+    if (!records.length) {
+      if (!state || !state.progress) return { success: false, error: 'No progress data' };
+      // Build ADIF records from progress entries (legacy pre-stamping path)
+      for (const [region, qso] of Object.entries(state.progress)) {
+        const entry = (event.schedule || []).find(s => s.region === region);
+        records.push({
+          CALL: qso.call,
+          QSO_DATE: (qso.date || '').replace(/-/g, ''),
+          TIME_ON: qso.time || '0000',
+          BAND: qso.band,
+          MODE: qso.mode,
+          FREQ: qso.freq ? (parseFloat(qso.freq) / 1000).toFixed(6) : '',
+          RST_SENT: qso.rstSent || '59',
+          RST_RCVD: qso.rstRcvd || '59',
+          STATE: region,
+          COMMENT: `${event.name} - ${entry ? entry.regionName : region}`,
+          STATION_CALLSIGN: settings.myCallsign || '',
+          OPERATOR: settings.myCallsign || '',
+        });
+      }
     }
 
     const parentWin = win;

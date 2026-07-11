@@ -648,7 +648,14 @@
           <input type="text" id="bl-ref" class="bl-field bl-ref hidden" placeholder="Ref" maxlength="60" spellcheck="false" autocomplete="off" style="text-transform:uppercase;">
           <input type="text" id="bl-callsign" class="bl-field bl-callsign" placeholder="Callsign" maxlength="20" spellcheck="false" autocomplete="off" autocapitalize="characters">
           <span id="bl-dupe" class="bl-dupe hidden" title="">DUPE</span>
-          <input type="text" id="bl-name" class="bl-field bl-name" readonly tabindex="-1" placeholder="Name | Grid | Distance | Heading">
+          <!-- Two-part readout: QRZ name (ellipsized when long) + right-justified
+               grid/distance/heading pinned beside the frequency field. A single
+               input couldn't do this — an over-long QRZ name pushed the geo data
+               out of view (Casey 2026-07-10). -->
+          <div id="bl-name" class="bl-field bl-name bl-name-empty" data-placeholder="Name | Grid | Distance | Heading">
+            <span id="bl-name-text" class="bl-name-text"></span>
+            <span id="bl-name-geo" class="bl-name-geo"></span>
+          </div>
           <input type="text" id="bl-freq" class="bl-field bl-freq" placeholder="MHz or kHz" maxlength="10" inputmode="numeric" title="Accepts both: 14.275 (MHz) or 14275 (kHz)">
           <select id="bl-mode" class="bl-field bl-mode">
             <option value="SSB">SSB</option>
