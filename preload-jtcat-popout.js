@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('api', {
   jtcatTuneToggle: () => ipcRenderer.send('jtcat-tune-toggle'),
   jtcatSetTxMsg: (text) => ipcRenderer.send('jtcat-set-tx-msg', text),
   jtcatValidateTxMsg: (text) => ipcRenderer.invoke('jtcat-validate-tx-msg', text),
+  // PSK31 — one-shot Send (renders + fires immediately; Send IS the arm
+  // action) and the continuous decoded-character stream from the engine.
+  jtcatPskSend: (text) => ipcRenderer.send('jtcat-psk-send', text),
+  onJtcatPskRx: (cb) => ipcRenderer.on('jtcat-psk-rx', (_e, data) => cb(data)),
   onJtcatDupeWarning: (cb) => ipcRenderer.on('jtcat-dupe-warning', (_e, data) => cb(data)),
   // Stalled-QSO closeout notice ("logged, sending final 73") — informational,
   // NOT the error channel: phase:'error' force-clears qsoState/txEnabled,

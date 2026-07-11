@@ -1260,6 +1260,15 @@ function _applyPopoutTheme(payload) {
   var cycleFillEl = document.getElementById('jp-cycle-fill');
   setInterval(function() {
     var mode = modeSelect.value;
+    if (mode === 'PSK31') {
+      // Continuous mode — no periods. The bar still color-keys RX/TX.
+      countdownEl.textContent = '—';
+      if (cycleFillEl) {
+        cycleFillEl.style.width = transmitting ? '100%' : '0%';
+        cycleFillEl.classList.toggle('tx', !!transmitting);
+      }
+      return;
+    }
     var cycleSec = mode === 'WSPR' ? 120 : mode === 'FT2' ? 3.8 : mode === 'FT4' ? 7.5 : 15;
     var cycleMs = cycleSec * 1000;
     var msInto = Date.now() % cycleMs;
@@ -1297,9 +1306,18 @@ function _applyPopoutTheme(payload) {
     '20m': 14095.6, '17m': 18104.6, '15m': 21094.6, '12m': 24924.6, '10m': 28124.6,
     '6m': 50293.0,
   };
+  // PSK31 USB dial frequencies (kHz) — the conventional PSK watering holes.
+  // Activity sits 0.5–2.5 kHz above the dial; the default 1500 Hz audio
+  // center lands mid-sub-band. (40m: 7070 is the Americas convention;
+  // 7040 remains common in EU — click the waterfall or type a freq to move.)
+  var PSK_BAND_FREQS = {
+    '160m': 1838, '80m': 3580, '60m': 5357, '40m': 7070, '30m': 10142,
+    '20m': 14070, '17m': 18100, '15m': 21070, '12m': 24920, '10m': 28120,
+    '6m': 50291,
+  };
   function updateBandFreqs() {
     var m = modeSelect.value;
-    var table = m === 'WSPR' ? WSPR_BAND_FREQS : m === 'FT2' ? FT2_BAND_FREQS : m === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
+    var table = m === 'WSPR' ? WSPR_BAND_FREQS : m === 'PSK31' ? PSK_BAND_FREQS : m === 'FT2' ? FT2_BAND_FREQS : m === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
     document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
       var band = btn.dataset.band;
       if (table[band]) btn.dataset.freq = table[band];
@@ -1310,7 +1328,10 @@ function _applyPopoutTheme(payload) {
   modeSelect.addEventListener('change', function() {
     updateBandFreqs();
     applyWsprMode(modeSelect.value === 'WSPR');
+    applyPskMode(modeSelect.value === 'PSK31');
     window.api.jtcatSetMode(modeSelect.value);
+    // IPC is ordered: this lands after the family-switch rebuild above.
+    if (modeSelect.value === 'PSK31') pskSyncFreq();
     // Persist the mode so reopening JTCAT comes back in FT4/FT2 instead of
     // silently reverting to FT8 (which left the radio parked on the FT8 sub-
     // band and looked like "FT4 never decodes"). K3SBP 2026-06-10.
@@ -2360,16 +2381,220 @@ function _applyPopoutTheme(payload) {
   }
   // ================== end WSPR ==================
 
+  // ===================== PSK31 =====================
+  // Continuous keyboard mode — no slots, no QSO state machine. The pane swaps
+  // in for the decode/QSO UI (same applyWsprMode pattern): scrolling decoded
+  // text on top, a TX composer with macros below. RX text arrives from the
+  // main-process PskEngine in ~250ms batches on jtcat-psk-rx; Send fires a
+  // one-shot transmission via jtcat-psk-send (Send IS the arm action — there
+  // is no Enable TX in PSK mode).
+  var pskPane = document.getElementById('jp-psk-pane');
+  var pskRxEl = document.getElementById('jp-psk-rx');
+  var pskTxEl = document.getElementById('jp-psk-tx');
+  var pskFreqEl = document.getElementById('jp-psk-freq');
+  var pskQualityEl = document.getElementById('jp-psk-quality');
+  var pskTheirEl = document.getElementById('jp-psk-their');
+  var pskMacrosEl = document.getElementById('jp-psk-macros');
+  var pskSendBtn = document.getElementById('jp-psk-send');
+  var pskStopBtn = document.getElementById('jp-psk-stop');
+  var pskLogBtn = document.getElementById('jp-psk-log');
+  var pskClearBtn = document.getElementById('jp-psk-clear');
+  var multiBtnEl = document.getElementById('jp-multi-btn');
+  var PSK_RX_CAP = 20000;          // chars kept in the RX scrollback
+  var pskEchoTimer = null;         // TX progress reveal
+  var pskMacroDefs = null;         // from settings.pskMacros or defaults
+
+  // $CALL = the "their call" box; lowercase body text is deliberate — short
+  // varicode. Trailing \n keeps successive macro taps readable on air.
+  var PSK_DEFAULT_MACROS = [
+    { label: 'CQ',   text: 'CQ CQ CQ de $MYCALL $MYCALL $MYCALL pse K\n' },
+    { label: 'Exch', text: '$CALL de $MYCALL  UR RSQ 599 599  QTH grid $GRID $GRID  BTU $CALL de $MYCALL K\n' },
+    { label: 'BTU',  text: 'BTU $CALL de $MYCALL K\n' },
+    { label: '73',   text: '$CALL de $MYCALL  TNX FER QSO 73 73  sk\n' },
+  ];
+
+  function applyPskMode(on) {
+    if (pskPane) pskPane.classList.toggle('hidden', !on);
+    // applyWsprMode owns these toggles for WSPR; don't fight it when the
+    // current mode is WSPR (mode-change runs applyWsprMode first, then this).
+    if (decodePane) decodePane.classList.toggle('hidden', on || modeSelect.value === 'WSPR');
+    if (controlsBar) controlsBar.classList.toggle('hidden', on || modeSelect.value === 'WSPR');
+    if (on && qsoTracker) qsoTracker.classList.add('hidden');
+    // Multi-slice is FT8-family only.
+    if (multiBtnEl) multiBtnEl.style.display = on ? 'none' : '';
+    if (on) updatePskStatus(jpTxFreqHz, null, null);
+  }
+
+  // Push the displayed audio center to the engine. Must run AFTER the
+  // family switch rebuilds the slice (jtcatSetMode/jtcatStart) — a fresh
+  // PskEngine starts at 1500 Hz regardless of what the markers show.
+  function pskSyncFreq() {
+    jpRxFreqHz = jpTxFreqHz;
+    window.api.jtcatSetTxFreq(jpTxFreqHz);
+    window.api.jtcatSetRxFreq(jpTxFreqHz);
+  }
+
+  function updatePskStatus(freqHz, metric, snrDb) {
+    if (pskFreqEl && freqHz != null) pskFreqEl.textContent = freqHz + ' Hz';
+    if (pskQualityEl) {
+      pskQualityEl.textContent = metric == null ? 'Q —'
+        : 'Q ' + metric + (snrDb != null ? ' · ' + (snrDb > 0 ? '+' : '') + snrDb + ' dB' : '');
+    }
+  }
+
+  function pskAppendRx(text, cssClass) {
+    if (!pskRxEl || !text) return null;
+    var span = document.createElement('span');
+    if (cssClass) span.className = cssClass;
+    span.textContent = text;
+    pskRxEl.appendChild(span);
+    // Cap the scrollback — drop whole leading spans until under budget.
+    var total = pskRxEl.textContent.length;
+    while (total > PSK_RX_CAP && pskRxEl.firstChild && pskRxEl.firstChild !== span) {
+      total -= pskRxEl.firstChild.textContent.length;
+      pskRxEl.removeChild(pskRxEl.firstChild);
+    }
+    pskRxEl.scrollTop = pskRxEl.scrollHeight;
+    return span;
+  }
+
+  function pskSubstituteMacro(text) {
+    var their = (pskTheirEl && pskTheirEl.value || '').trim().toUpperCase();
+    return String(text)
+      .replace(/\$MYCALL/g, (myCallsign || 'NOCALL').toUpperCase())
+      .replace(/\$GRID/g, (myGrid || '').toUpperCase())
+      .replace(/\$CALL/g, their || '?');
+  }
+
+  function pskBuildMacros(s) {
+    if (!pskMacrosEl) return;
+    pskMacroDefs = (Array.isArray(s.pskMacros) && s.pskMacros.length)
+      ? s.pskMacros.filter(function(m) { return m && m.label && m.text; })
+      : PSK_DEFAULT_MACROS;
+    pskMacrosEl.innerHTML = '';
+    pskMacroDefs.forEach(function(m) {
+      var btn = document.createElement('button');
+      btn.className = 'jtcat-filter-btn';
+      btn.textContent = m.label;
+      btn.title = pskSubstituteMacro(m.text).trim();
+      btn.addEventListener('click', function() {
+        var t = pskSubstituteMacro(m.text);
+        // Insert at the cursor so macros compose naturally mid-buffer.
+        var start = pskTxEl.selectionStart != null ? pskTxEl.selectionStart : pskTxEl.value.length;
+        var end = pskTxEl.selectionEnd != null ? pskTxEl.selectionEnd : start;
+        pskTxEl.value = pskTxEl.value.slice(0, start) + t + pskTxEl.value.slice(end);
+        pskTxEl.selectionStart = pskTxEl.selectionEnd = start + t.length;
+        pskTxEl.focus();
+      });
+      pskMacrosEl.appendChild(btn);
+    });
+  }
+
+  function pskInit(s) {
+    if (!pskPane) return;
+    pskBuildMacros(s || {});
+    if (s && s.pskAudioCenter && modeSelect.value === 'PSK31') {
+      jpTxFreqHz = Math.max(100, Math.min(3000, parseInt(s.pskAudioCenter, 10) || 1500));
+      jpRxFreqHz = jpTxFreqHz;
+      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+    }
+
+    pskSendBtn.addEventListener('click', function() {
+      var text = pskTxEl.value;
+      if (!text.trim()) return;
+      window.api.jtcatPskSend(text);
+      // Persist the audio center the operator actually transmits on.
+      window.api.saveSettings({ pskAudioCenter: jpTxFreqHz });
+    });
+    pskStopBtn.addEventListener('click', function() {
+      window.api.jtcatHaltTx();
+    });
+    pskLogBtn.addEventListener('click', function() {
+      window.api.openQsoLog();
+    });
+    pskClearBtn.addEventListener('click', function() {
+      if (pskRxEl) pskRxEl.innerHTML = '';
+    });
+    // Ctrl+Enter in the composer = Send (Enter alone stays a newline — PSK
+    // text is multi-line by nature).
+    pskTxEl.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        pskSendBtn.click();
+      }
+    });
+    // Double-click a callsign in the RX stream to capture it for $CALL.
+    pskRxEl.addEventListener('dblclick', function() {
+      var word = String(window.getSelection() || '').trim().toUpperCase();
+      // Callsign-ish: 3-10 chars, letters+digits (optional /suffix), has a digit.
+      if (/^[A-Z0-9/]{3,10}$/.test(word) && /\d/.test(word) && /[A-Z]/.test(word)) {
+        if (pskTheirEl) pskTheirEl.value = word;
+      }
+    });
+  }
+
+  if (window.api.onJtcatPskRx) {
+    window.api.onJtcatPskRx(function(batch) {
+      if (!batch || !batch.chars) return;
+      pskAppendRx(batch.chars);
+      updatePskStatus(batch.freqHz, batch.metric, batch.snrDb);
+    });
+  }
+
+  // TX echo with a paced reveal — your transmitted text appears in red in
+  // the RX stream (fldigi/DigiPan convention), revealed at roughly the pace
+  // it goes out on air (uniform over the buffer duration main reports).
+  var pskEchoSpan = null;
+  var pskEchoMsg = '';
+  window.api.onJtcatTxStatus(function(data) {
+    if (modeSelect.value !== 'PSK31') return;
+    if (data.state === 'tx' && data.message) {
+      if (pskEchoTimer) { clearInterval(pskEchoTimer); pskEchoTimer = null; }
+      var msg = data.message;
+      var span = pskAppendRx('\n', 'p-tx-echo');
+      if (!span) return;
+      pskEchoSpan = span;
+      pskEchoMsg = msg;
+      var durMs = data.durMs && data.durMs > 2000 ? data.durMs : msg.length * 320 + 2000;
+      // ~1s idle preamble before the first character, ~1s carrier postamble
+      // after the last (32 symbols each at 31.25 baud).
+      var textMs = Math.max(1000, durMs - 2000);
+      var t0 = Date.now() + 1000;
+      pskEchoTimer = setInterval(function() {
+        var frac = (Date.now() - t0) / textMs;
+        var n = Math.max(0, Math.min(msg.length, Math.round(frac * msg.length)));
+        span.textContent = '\n' + msg.slice(0, n);
+        pskRxEl.scrollTop = pskRxEl.scrollHeight;
+        if (n >= msg.length) { clearInterval(pskEchoTimer); pskEchoTimer = null; }
+      }, 150);
+      pskSendBtn.disabled = true;
+    } else if (data.state !== 'tx') {
+      // Back to RX — snap any partial echo to the full text (a Halt mid-
+      // message leaves the reveal wherever it was, which reads as "the rest
+      // never went out" — but the buffer DID stop; show what was sent is
+      // unknowable, so show the whole message dimmed as the record of intent)
+      // and re-arm Send.
+      if (pskEchoTimer) { clearInterval(pskEchoTimer); pskEchoTimer = null; }
+      if (pskEchoSpan && pskEchoMsg) pskEchoSpan.textContent = '\n' + pskEchoMsg;
+      pskEchoSpan = null;
+      pskEchoMsg = '';
+      pskSendBtn.disabled = false;
+    }
+  });
+  // ================== end PSK31 ==================
+
   // Auto-restore last band, tune, and start decoding
   window.api.getSettings().then(function(s) {
     // Restore the last mode FIRST so the band buttons carry the correct
     // (FT4/FT2) sub-band frequencies before we match/select a band below.
-    if (s.jtcatLastMode === 'FT4' || s.jtcatLastMode === 'FT2' || s.jtcatLastMode === 'WSPR') {
+    if (s.jtcatLastMode === 'FT4' || s.jtcatLastMode === 'FT2' || s.jtcatLastMode === 'WSPR' || s.jtcatLastMode === 'PSK31') {
       modeSelect.value = s.jtcatLastMode;
       updateBandFreqs();
     }
     wsprInit(s);
+    pskInit(s);
     applyWsprMode(modeSelect.value === 'WSPR');
+    applyPskMode(modeSelect.value === 'PSK31');
     var lastFreq = s.jtcatLastBandFreq || 14074;
     var bandBtn = document.querySelector('.jtcat-band-btn[data-freq="' + lastFreq + '"]');
     // If no exact match, find the band button closest to the requested frequency
@@ -2384,6 +2609,9 @@ function _applyPopoutTheme(payload) {
     if (!bandBtn) bandBtn = document.querySelector('.jtcat-band-btn[data-band="20m"]');
     if (bandBtn) selectBand(bandBtn, false);
     window.api.jtcatStart(modeSelect.value);
+    // IPC is ordered: lands after jtcat-start built the PSK slice, so the
+    // restored audio center survives the fresh engine's 1500 Hz default.
+    if (modeSelect.value === 'PSK31') pskSyncFreq();
     // Start audio capture directly in the popout window
     startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
   });
@@ -2894,8 +3122,9 @@ function _applyPopoutTheme(payload) {
     var rect = jpWaterfall.getBoundingClientRect();
     var x = e.clientX - rect.left;
     var hz = Math.round(x / rect.width * 3000 / 10) * 10;
-    if (e.shiftKey) {
-      // Shift+click: set TX only (split TX/RX)
+    if (e.shiftKey && modeSelect.value !== 'PSK31') {
+      // Shift+click: set TX only (split TX/RX). PSK31 is transceive — the
+      // audio center IS both directions, so split makes no sense there.
       jpTxFreqHz = hz;
       txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
       window.api.jtcatSetTxFreq(hz);

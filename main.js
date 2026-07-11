@@ -1208,7 +1208,7 @@ const FILTER_PRESETS = {
 function getFilterPresets(mode) {
   const m = (mode || '').toUpperCase();
   if (m === 'CW') return FILTER_PRESETS.CW;
-  if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'RTTY' || m === 'PKTUSB' || m === 'PKTLSB') return FILTER_PRESETS.DIG;
+  if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'RTTY' || m === 'PKTUSB' || m === 'PKTLSB' || m.startsWith('PSK')) return FILTER_PRESETS.DIG;
   return FILTER_PRESETS.SSB; // default for SSB/USB/LSB/FM/AM
 }
 
@@ -5239,6 +5239,11 @@ let jtcatFullAutoCqModifier = '';      // CQ modifier carried across re-arms (PO
 let jtcatFullAutoCqLastActivity = 0;   // ms epoch of last QSO/decode progress (watchdog)
 const JTCAT_FULL_AUTO_CQ_WATCHDOG_MS = 30 * 60 * 1000; // 30 min unattended cap
 
+// PSK31 continuous RX text — engine emits per-feedAudio character batches;
+// these coalesce them to a ~250ms cadence before hitting the popout's IPC.
+let jtcatPskRxPending = null;
+let jtcatPskRxTimer = null;
+
 function matchesAutoCqFilter(text, filterMode) {
   const upper = (text || '').toUpperCase();
   if (!upper.startsWith('CQ ')) return false;
@@ -6227,7 +6232,7 @@ function startJtcat(mode) {
     // AP (a priori) decode — RX mirror of late-start TX. Default ON. myCall is
     // authoritative here; the engine auto-derives the QSO partner (dxCall) from
     // its TX message. Recovers marginal/late replies addressed to us.
-    if (typeof ft8Engine.setApContext === 'function') {
+    if (typeof ft8Engine.setApContext === 'function' && ft8Engine._mode !== 'PSK31') {
       const apOn = settings.jtcatApDecode !== false;
       const apCall = (settings.myCallsign || '').toUpperCase();
       ft8Engine.setApContext({ enabled: apOn, myCall: apCall });
@@ -6266,6 +6271,29 @@ function startJtcat(mode) {
   ft8Engine.removeAllListeners('wspr-spots');
   ft8Engine.removeAllListeners('tx-start');
   ft8Engine.removeAllListeners('tx-end');
+  ft8Engine.removeAllListeners('psk-text');
+
+  // PSK31 continuous RX text. Deliberately NOT routed through the 'decode'
+  // handler below — none of the FT8 classification / QSO state machine /
+  // remote broadcast applies to a character stream, and PSK31 is popout-only
+  // for now. Batched to ~250ms so a busy signal doesn't spam IPC per char.
+  ft8Engine.on('psk-text', (d) => {
+    if (!jtcatPskRxPending) {
+      jtcatPskRxPending = { chars: '', freqHz: d.freqHz, snrDb: d.snrDb, metric: d.metric };
+      jtcatPskRxTimer = setTimeout(() => {
+        const batch = jtcatPskRxPending;
+        jtcatPskRxPending = null;
+        jtcatPskRxTimer = null;
+        if (batch && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+          jtcatPopoutWin.webContents.send('jtcat-psk-rx', batch);
+        }
+      }, 250);
+    }
+    jtcatPskRxPending.chars += d.chars;
+    jtcatPskRxPending.freqHz = d.freqHz;
+    jtcatPskRxPending.snrDb = d.snrDb;
+    jtcatPskRxPending.metric = d.metric;
+  });
 
   // Catch engine errors (e.g. missing FT4/FT2 decoder on some platforms)
   ft8Engine.on('error', (data) => {
@@ -6631,7 +6659,8 @@ function startJtcat(mode) {
       win.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot });
     }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-      jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: ft8Engine._txFreq });
+      // durMs = buffer duration; the PSK pane paces its TX-echo reveal on it.
+      jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: ft8Engine._txFreq, durMs: data.samples ? Math.round(data.samples.length / 12) : 0 });
     }
     if (jtcatMapPopoutWin && !jtcatMapPopoutWin.isDestroyed()) {
       jtcatMapPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: ft8Engine._txFreq });
@@ -7034,6 +7063,11 @@ function stopJtcat() {
     jtcatManager.stopAll();
   }
   if (jtcatTuneState.active) stopJtcatTune();
+  if (jtcatPskRxTimer) {
+    clearTimeout(jtcatPskRxTimer);
+    jtcatPskRxTimer = null;
+    jtcatPskRxPending = null;
+  }
   ft8Engine = null;
   console.log('[JTCAT] Engine stopped');
 }
@@ -11508,6 +11542,10 @@ function connectRemote() {
   // --- JTCAT remote control (event handlers — helpers are at file level) ---
 
   remoteServer.on('jtcat-start', ({ mode }) => {
+    // PSK31 is popout-only for now — the phone has no character-stream UI,
+    // and a PSK engine here would leave the FT8 tab looking dead. Fall back
+    // to FT8 rather than silently running a mode the client can't render.
+    if (mode === 'PSK31') mode = 'FT8';
     // Close JTCAT popout if open — only one platform at a time
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       sendCatLog('[JTCAT] Closing popout — ECHOCAT taking over FT8');
@@ -11823,7 +11861,15 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
-    if (ft8Engine) ft8Engine.setMode(mode); // accepts 'WSPR'
+    if (mode === 'PSK31') return; // popout-only mode — no phone UI for it yet
+    if (!ft8Engine) return;
+    if (ft8Engine._mode === 'PSK31') {
+      // Phone is pulling the engine back to the FT8 family from a PSK
+      // session the popout left behind — needs a slice rebuild, not setMode.
+      startJtcat(mode);
+      return;
+    }
+    ft8Engine.setMode(mode); // accepts 'WSPR'
   });
 
   // Phone-driven WSPR beacon. Routes through the same shared control as the
@@ -17260,7 +17306,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     filterWidth = settings.cwFilterWidth || 0;
   } else if (m === 'SSB' || m === 'USB' || m === 'LSB') {
     filterWidth = settings.ssbFilterWidth || 0;
-  } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'PKTUSB' || m === 'PKTLSB') {
+  } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'PKTUSB' || m === 'PKTLSB' || m.startsWith('PSK')) {
     filterWidth = settings.digitalFilterWidth || 0;
   } else if (m === 'FM') {
     filterWidth = 0; // FM has fixed bandwidth
@@ -17367,7 +17413,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
       const wsjtxTuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
       const freqMhz = wsjtxTuneHz / 1e6;
       const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
-      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB')
+      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK'))
         ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
         : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
       sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}->${flexMode} filter=${filterWidth}${useVfoShift ? ` (VFO shifted +${settings.cwXit}Hz for XIT)` : ''}`);
@@ -17422,7 +17468,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     const tuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
     const freqMhz = tuneHz / 1e6;
     const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
-    const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB')
+    const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK'))
       ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
       : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
     if (mode) _modeSuppressUntil = Date.now() + 2000;
@@ -17486,7 +17532,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   // re-rewritten here.
   if (settings.jtcatUseDataMode === false && mode && !isFreedvMode) {
     const dm = String(mode).toUpperCase();
-    if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2' || dm === 'DIGU' || dm === 'PKTUSB' || dm === 'JS8' || dm === 'WSPR') {
+    if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2' || dm === 'DIGU' || dm === 'PKTUSB' || dm === 'JS8' || dm === 'WSPR' || dm.startsWith('PSK')) {
       mode = 'USB';
     } else if (dm === 'DIGL' || dm === 'PKTLSB') {
       mode = 'LSB';
@@ -21440,7 +21486,7 @@ app.whenReady().then(() => {
       const sliceIndex = slicePort - 5002;
       const freqHz = Math.round(parseFloat(frequency) * 1000);
       const jtSsbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
-      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'DIGU')
+      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'DIGU' || String(mode).startsWith('PSK'))
         ? 'DIGU' : (mode === 'CW' ? 'CW' : (mode === 'SSB' ? jtSsbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))));
       const filterWidth = settings.digitalFilterWidth || 0;
       sendCatLog(`JTCAT tune via SmartSDR: slice=${String.fromCharCode(65 + sliceIndex)} freq=${(freqHz / 1e6).toFixed(6)}MHz mode=${flexMode}`);
@@ -24752,7 +24798,19 @@ app.whenReady().then(() => {
   // --- JTCAT IPC ---
   ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
   ipcMain.on('jtcat-stop', () => stopJtcat());
-  ipcMain.on('jtcat-set-mode', (_e, mode) => { if (ft8Engine) ft8Engine.setMode(mode); });
+  ipcMain.on('jtcat-set-mode', (_e, mode) => {
+    if (!ft8Engine) return;
+    // PSK31 lives in a different engine class (continuous keyboard mode) —
+    // Ft8Engine.setMode() silently coerces unknown strings to 'FT8', so a
+    // family switch in either direction must rebuild the slice.
+    const isPsk = mode === 'PSK31';
+    const wasPsk = ft8Engine._mode === 'PSK31';
+    if (isPsk !== wasPsk) {
+      startJtcat(mode);
+      return;
+    }
+    ft8Engine.setMode(mode);
+  });
   ipcMain.on('jtcat-set-tx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setTxFreq(hz); });
   // WSPR USB dial — accepts a band name ('20m') or an MHz number; wsprd needs
   // it to report absolute spot frequencies and pick the band.
@@ -24890,15 +24948,39 @@ app.whenReady().then(() => {
     else startJtcatTune();
   });
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
+  // PSK31 one-shot Send: store + render the EXACT typed text (varicode is
+  // case-sensitive; lowercase is the on-air convention) and fire immediately —
+  // no slots to wait for. Clicking Send IS the deliberate arm action, so
+  // _txEnabled is set here rather than by a separate Enable TX toggle.
+  ipcMain.on('jtcat-psk-send', (_e, text) => {
+    if (!ft8Engine || ft8Engine._mode !== 'PSK31') return;
+    const t = String(text || '');
+    if (!t.trim()) return;
+    ft8Engine._txEnabled = true;
+    Promise.resolve(ft8Engine.setTxMessage(t)).then(() => {
+      if (!ft8Engine || ft8Engine._mode !== 'PSK31') return;
+      if (!ft8Engine.requestTx()) {
+        sendCatLog('[JTCAT] PSK Send ignored — TX already active or engine not running');
+      }
+    });
+  });
   // Manual TX message validation — ground truth is the native codec (the same
   // pack the TX path runs), so anything accepted here is guaranteed to encode
   // instead of silently skipping TX at the cycle boundary. Falls back to a
   // charset/shape check when the addon isn't available (WASM-only platforms)
   // or the mode has its own encoder (FT2).
   ipcMain.handle('jtcat-validate-tx-msg', (_e, text) => {
+    const mode = (ft8Engine && ft8Engine._mode) || settings.jtcatLastMode || 'FT8';
+    if (mode === 'PSK31') {
+      // Varicode carries any ASCII, case-sensitive (lowercase is the PSK31
+      // convention) — no uppercase/13-char shaping, no codec round-trip.
+      const raw = String(text || '');
+      if (!raw.trim()) return { ok: false, reason: 'Empty message' };
+      if (/^[\x00-\x7F]*$/.test(raw)) return { ok: true, text: raw };
+      return { ok: false, reason: 'PSK31 varicode covers ASCII characters only' };
+    }
     const t = String(text || '').toUpperCase().trim().replace(/\s+/g, ' ');
     if (!t) return { ok: false, reason: 'Empty message' };
-    const mode = (ft8Engine && ft8Engine._mode) || settings.jtcatLastMode || 'FT8';
     if (mode === 'FT8' || mode === 'FT4') {
       try {
         const native = require(path.join(__dirname, 'lib', 'ft8_native', 'build', 'Release', 'ft8_native.node'));

@@ -162,6 +162,19 @@
     .jp-wspr-row .w-country { color: var(--text-secondary); }
     .jp-wspr-row .w-reg { color: var(--text-dim); text-align: center; }
 
+    /* PSK31 pane (continuous keyboard mode — scrolling RX text + TX composer) */
+    .jp-psk-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border-primary); }
+    .jp-psk-pane.hidden { display: none; }
+    .jp-psk-status { display: flex; gap: 12px; align-items: baseline; padding: 4px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 11px; color: var(--text-dim); }
+    .jp-psk-status .p-freq { font-family: monospace; font-weight: 700; color: var(--accent-blue, #4fc3f7); font-variant-numeric: tabular-nums; }
+    .jp-psk-status .p-q { font-family: monospace; color: var(--accent-green, #4ecca3); font-variant-numeric: tabular-nums; }
+    .jp-psk-rx { flex: 1; overflow-y: auto; font-family: monospace; font-size: 13px; line-height: 1.5; padding: 6px 10px; white-space: pre-wrap; word-break: break-word; user-select: text; cursor: text; background: var(--bg-primary); color: var(--text-primary); min-height: 60px; }
+    .jp-psk-rx .p-tx-echo { color: #e94560; font-weight: 600; }
+    .jp-psk-txwrap { border-top: 1px solid var(--border-primary); background: var(--bg-secondary); padding: 6px 10px; display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+    .jp-psk-tx { width: 100%; box-sizing: border-box; height: 54px; resize: vertical; font-family: monospace; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    .jp-psk-macro-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+    .jp-psk-their { width: 90px; font-size: 11px; font-family: monospace; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--accent-green, #4ecca3); text-transform: uppercase; font-weight: 700; }
+
     /* Controls bar */
     .jp-controls { padding: 6px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 12px; }
     /* Bottom status strip (user report 2026-07-11: countdown hard to read).
@@ -269,6 +282,7 @@
         <option value="FT4">FT4</option>
         <option value="FT2">FT2</option>
         <option value="WSPR">WSPR</option>
+        <option value="PSK31">PSK</option>
       </select>
     </div>
     <span id="jp-radio-freq" style="font-size:12px;font-weight:bold;color:#4fc3f7;white-space:nowrap;font-family:monospace;" title="Radio frequency">—</span>
@@ -373,6 +387,32 @@
       </div>
       <div id="jp-wspr-list" class="jp-wspr-list">
         <div class="jp-empty">No WSPR spots yet — listening on a 2-minute cycle…</div>
+      </div>
+    </div>
+    <!-- PSK31 pane (swaps in for the decode pane in PSK mode).
+         Continuous keyboard mode: scrolling decoded text on top, TX composer
+         below. Double-click a callsign in the RX text to capture it for the
+         $CALL macro slot. One-shot Send — the whole buffer renders and keys
+         as a single transmission; Stop is the same full halt as Halt TX. -->
+    <div id="jp-psk-pane" class="jp-psk-pane hidden">
+      <div class="jp-psk-status">
+        <span>PSK31</span>
+        <span class="p-freq" id="jp-psk-freq" title="Tracked audio center (AFC-corrected). Click the waterfall to move it.">— Hz</span>
+        <span class="p-q" id="jp-psk-quality" title="Link quality 0–100 (phase coherence) and indicative SNR">Q —</span>
+        <span style="margin-left:auto;"></span>
+        <button id="jp-psk-clear" class="jtcat-filter-btn" title="Clear received text">Clear</button>
+      </div>
+      <div id="jp-psk-rx" class="jp-psk-rx" title="Received text — select to copy, double-click a callsign to capture it for macros"></div>
+      <div class="jp-psk-txwrap">
+        <textarea id="jp-psk-tx" class="jp-psk-tx" placeholder="Type your transmission here, then Send. Lowercase is faster on air (shorter varicode)." spellcheck="false"></textarea>
+        <div class="jp-psk-macro-row">
+          <input id="jp-psk-their" class="jp-psk-their" type="text" maxlength="12" placeholder="THEIR CALL" title="The station you're working — fills $CALL in macros. Double-click a callsign in the RX text to capture it.">
+          <span id="jp-psk-macros" style="display:contents;"></span>
+          <span style="margin-left:auto;"></span>
+          <button id="jp-psk-send" class="jp-btn" title="Transmit the buffer as one PSK31 transmission (preamble + text + postamble)" style="border-color:#e94560;color:#e94560;">Send</button>
+          <button id="jp-psk-stop" class="jp-btn jp-halt" title="Stop transmitting immediately (drops PTT)">Stop</button>
+          <button id="jp-psk-log" class="jp-btn" title="Open QSO log">Log</button>
+        </div>
       </div>
     </div>
     <div id="jp-splitter" class="jp-splitter" title="Drag to resize — double-click to reset 50/50"></div>

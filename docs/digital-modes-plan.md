@@ -1,8 +1,35 @@
 # Digital Modes — Unified View Plan
 
-Status: planning (not started)
+Status: PSK31 (Phase 2) shipped FIRST, 2026-07-11 — popout-only, one-shot Send
+        (see "PSK31 as-built" below). RTTY (Phase 1) and JS8 (Phases 3-4)
+        remain planned.
 Filed: 2026-05-08
 Scope: desktop, ECHOCAT Web, ECHOCAT iOS
+
+## PSK31 as-built (2026-07-11) — deltas from this plan
+
+Casey chose to build PSK31 before RTTY. What shipped and where it differs:
+
+- **Engines live in main.js**, not the popout: `lib/psk-engine.js` (pure-JS
+  DBPSK, inline, no worker) plugs into `JtcatManager.startSlice()` — this
+  plan's "popout capture chain feeds the engine" wording was already stale
+  for FT8 too. All audio routes (SmartSDR Direct, Icom UDP, renderer
+  capture) feed it for free at the 12 kHz `feedAudio` choke points.
+- **One-shot Send TX**, not a streaming TX queue: the typed buffer renders
+  to a single PCM buffer (32-symbol idle preamble + varicode + 32-symbol
+  carrier postamble) and rides the existing `tx-start` dispatch unchanged
+  on every audio route. Live type-ahead streaming is a possible follow-up.
+- **Popout-only**: no ECHOCAT `digital-*` WS messages yet; remote handlers
+  guard 'PSK31' (phone jtcat-start falls back to FT8). The RX pane is
+  `#jp-psk-pane` (applyWsprMode-style swap), new IPC `jtcat-psk-rx` (250 ms
+  char batches) + `jtcat-psk-send`.
+- **Logging**: `lib/adif-writer.js` gained SUBMODE — PSK31 logs as
+  MODE=PSK / SUBMODE=PSK31 (manual logging via the QSO popout; no QSO state
+  machine for continuous modes).
+- **Variants deferred**: engine is baud-parameterized but only PSK31 ships;
+  PSK63/125 = variant picker + constants + tests later.
+- Tests: `lib/psk-engine-test.js` (varicode round-trip, loopback, ±8 Hz AFC,
+  noise, squelch, TX contract).
 
 The JTCAT/FT8 popout (desktop) + FT8 screen (iOS) + FT8 view (ECHOCAT Web) become **the** digital-modes UI. Mode is a setting inside the view, not a separate window. One audio capture, one waterfall, one PTT route, one set of macros, one mobile screen. Switching from FT8 to PSK31 is a tab click, not an app navigation.
 
