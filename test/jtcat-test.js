@@ -930,6 +930,127 @@ section('Hound mode — fox dual messages + QSY + no-73 close');
 }
 
 // ============================================================
+// Own-TX echo guard (N3VD 2026-07-10): a radio looping transmit audio back
+// to the decoder (IC-7300 + MONI) produced decodes of OUR OWN messages. The
+// order-blind contains-both-calls matchers accepted them: cq-report read our
+// own report back via the optional-R regex and auto-logged sent==rcvd with
+// no QSO completed — 8 times in a row.
+// ============================================================
+section('Own-TX echo guard — addressed-to-us matching (N3VD)');
+{
+  // N3VD's exact scenario: CQ answered by AD9AR, we sent "AD9AR N3VD -11",
+  // the next decode batch contains only our own echo.
+  const cqQ = () => ({
+    mode: 'cq', phase: 'cq-report', call: 'AD9AR', grid: 'EM69',
+    txMsg: 'AD9AR N3VD -11', report: null, sentReport: '-11',
+    myCall: 'N3VD', myGrid: 'EM17', txRetries: 0,
+  });
+  {
+    const q = cqQ();
+    const r = drive(q, [decode('AD9AR N3VD -11', { db: -2 })], makeEngine());
+    assertEq(q.phase, 'cq-report', 'own echo does NOT advance cq-report');
+    assertEq(r.doneCount, 0, 'own echo does NOT log');
+    assertEq(q.report, null, 'own report is NOT recorded as theirs');
+  }
+  // Echo and the partner's REAL R-report in the same batch → their report wins.
+  {
+    const q = cqQ();
+    const r = drive(q, [
+      decode('AD9AR N3VD -11', { db: -2 }),
+      decode('N3VD AD9AR R-05', { db: -12 }),
+    ], makeEngine());
+    assertEq(q.phase, 'cq-rr73', 'real R-report still advances');
+    assertEq(q.report, '-05', 'THEIR report recorded, not our echo');
+    assertEq(r.doneCount, 1, 'logs on the real R-report');
+  }
+  // Leniency preserved: plain (R-less) report addressed to us still advances.
+  {
+    const q = cqQ();
+    const r = drive(q, [decode('N3VD AD9AR -05', { db: -12 })], makeEngine());
+    assertEq(q.phase, 'cq-rr73', 'plain report addressed to us still advances');
+    assertEq(q.report, '-05', 'plain report captured');
+    assertEq(r.doneCount, 1, 'and logs');
+  }
+  // Reply mode + Skip Grid: our echoed opener carries a report — must not
+  // advance with our own report recorded as theirs.
+  {
+    const q = {
+      mode: 'reply', phase: 'reply', call: 'W1ABC', grid: '',
+      txMsg: 'W1ABC K3SBP -15', report: null, sentReport: '-15',
+      myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+    };
+    const r = drive(q, [decode('W1ABC K3SBP -15', { db: -1 })], makeEngine());
+    assertEq(q.phase, 'reply', 'Skip-Grid own echo does not advance reply phase');
+    assertEq(r.doneCount, 0, 'and does not log');
+  }
+  // Straggler RR73 addressed to us while we are back in CQ phase: RR73
+  // satisfies [A-R]{2}\d{2} but is NOT a grid — must not start a phantom QSO.
+  {
+    const q = {
+      mode: 'cq', phase: 'cq', call: null, grid: null,
+      txMsg: 'CQ N3VD EM17', report: null, sentReport: null,
+      myCall: 'N3VD', myGrid: 'EM17', txRetries: 0,
+    };
+    const r = drive(q, [decode('N3VD W9XYZ RR73', { db: -9 })], makeEngine());
+    assertEq(q.phase, 'cq', 'straggler RR73 does not start a QSO');
+    assertEq(q.grid, null, 'RR73 is not captured as a grid');
+    assertEq(r.doneCount, 0, 'no log');
+  }
+}
+
+section('Own-TX echo guard — engine drops echo decodes (REAL lib/ft8-engine.js)');
+{
+  const Module = require('module');
+  const origLoad = Module.prototype.require;
+  Module.prototype.require = function (id) {
+    if (id === 'worker_threads') {
+      return {
+        Worker: class FakeWorker {
+          constructor() { this._listeners = {}; }
+          on(ev, fn) { this._listeners[ev] = fn; }
+          postMessage() {}
+          terminate() {}
+        },
+      };
+    }
+    return origLoad.apply(this, arguments);
+  };
+  let Ft8Engine;
+  try { Ft8Engine = require('../lib/ft8-engine'); } catch { /* skipped below */ }
+  Module.prototype.require = origLoad;
+
+  if (Ft8Engine && Ft8Engine.Ft8Engine) {
+    const engine = new Ft8Engine.Ft8Engine();
+    engine._txMessage = 'AD9AR N3VD -11';
+    let got = null;
+    engine.on('decode', (d) => { got = d; });
+    const logs = [];
+    engine.on('log', (m) => logs.push(m));
+    engine._onWorkerMessage({
+      type: 'decode-result',
+      results: [
+        { text: 'AD9AR N3VD -11', db: -2, dt: 0.1, df: 350 },   // our echo
+        { text: 'N3VD AD9AR R-05', db: -12, dt: 0.2, df: 1420 }, // the partner
+      ],
+    });
+    assert(!!got, 'decode event emitted');
+    assertEq(got.results.length, 1, 'own-TX echo filtered from results');
+    assertEq(got.results[0].text, 'N3VD AD9AR R-05', 'partner decode survives');
+    assert(logs.some((m) => /own-TX echo/.test(m)), 'diagnostic log line emitted');
+    // No TX message set → nothing filtered.
+    engine._txMessage = '';
+    got = null;
+    engine._onWorkerMessage({
+      type: 'decode-result',
+      results: [{ text: 'AD9AR N3VD -11', db: -2, dt: 0.1, df: 350 }],
+    });
+    assertEq(got.results.length, 1, 'no filtering when not transmitting');
+  } else {
+    console.log('  (engine echo-filter tests skipped — could not load engine)');
+  }
+}
+
+// ============================================================
 // Group 5: FT8 engine mode handling
 // ============================================================
 section('FT8 engine — mode handling (FT8/FT4/FT2)');

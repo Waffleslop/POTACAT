@@ -77,7 +77,16 @@ jobs:
         run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
-        continue-on-error: true
+        continue-on-error: true # freedv/rade are known-broken on mac; ft8 is gated below
+      - name: Verify ft8_native exists and is arm64
+        # Mirror of the x64 job's gate — a missing/wrong-arch FT8 decoder
+        # must stop the release rather than ship silent WASM fallback.
+        run: |
+          set -e
+          NODE_FILE=lib/ft8_native/build/Release/ft8_native.node
+          test -f "$NODE_FILE"
+          lipo -archs "$NODE_FILE"
+          lipo -archs "$NODE_FILE" | grep -q arm64
       - name: Bundle hamlib into assets/hamlib/
         run: |
           set -e
@@ -116,13 +125,18 @@ jobs:
             dist/latest-mac.yml
           if-no-files-found: error
 
-  # macOS Intel (x86_64). The bare `macos-N` labels (no `-arm64` suffix) are
-  # Intel; `macos-N-arm64` and `macos-latest` are Apple Silicon. macos-13 was
-  # retired in early 2026; macos-14 is the current Intel image and is itself
-  # scheduled for full deprecation by Nov 2026, after which the path forward
-  # is a universal DMG cross-compiled from arm64.
+  # macOS Intel (x86_64) build — CROSS-COMPILED from an Apple Silicon host.
+  # GitHub retired the Intel runners (macos-13 was the last bare-label Intel
+  # image); despite this job's old comment, `macos-14` is ARM64. A plain
+  # `node-gyp rebuild` here therefore produced arm64 .node files inside the
+  # x64 DMG — an Intel Mac can't load them, so ft8_native silently fell back
+  # to the slow WASM decoder (N3VD 2026-07-10, late-start TX every cycle).
+  # `--arch=x64` makes gyp emit ARCHS=x86_64; the verify step below fails the
+  # release if the shipped decoder is ever the wrong arch again.
+  # KNOWN GAP: `brew install hamlib` on this ARM host bundles arm64 rigctld
+  # into the x64 DMG — tracked in potacat-meta work/open/macos-x64-hamlib-arch.md.
   build-macos-x64:
-    runs-on: macos-14 # Intel x86_64
+    runs-on: macos-14 # ARM64 host — x64 artifacts are cross-compiled
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -130,9 +144,19 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         run: npm ci # lockfile-pinned — see build-windows for why
-      - name: Build native addons
-        run: npm run build-natives
-        continue-on-error: true
+      - name: Build native addons (cross-compiled for x64)
+        run: npm run build-natives -- --arch=x64
+        continue-on-error: true # freedv/rade are known-broken on mac; ft8 is gated below
+      - name: Verify ft8_native exists and is x86_64
+        # ft8_native is load-bearing (FT8 decode speed → TX timing). A wrong-
+        # arch or missing .node must STOP the release, not ship a WASM-only
+        # build that degrades silently in the field.
+        run: |
+          set -e
+          NODE_FILE=lib/ft8_native/build/Release/ft8_native.node
+          test -f "$NODE_FILE"
+          lipo -archs "$NODE_FILE"
+          lipo -archs "$NODE_FILE" | grep -q x86_64
       - name: Bundle hamlib into assets/hamlib/
         # Same logic as the arm64 job — brew on macos-13 resolves the
         # Intel-arch hamlib formula automatically.
