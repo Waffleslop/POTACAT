@@ -6641,6 +6641,53 @@ a.settings-echocat-badge-link:hover {
 }
 
 /* Rig Control Popover — rig panel dropdown from status bar */
+/* === Event Focus — contest-only spot lens (mobile parity) === */
+/* While focused the banner replaces the filter row: hide every sibling but
+   keep their state intact (display, not detach). */
+.filters.event-focused > *:not(.event-focus-banner) { display: none !important; }
+.event-focus-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--efc-color, #1776cf);
+  color: var(--efc-color, #1776cf);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.event-focus-chip:hover { background: rgba(255, 255, 255, 0.06); }
+.event-focus-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  padding: 4px 10px;
+  border: 1px solid var(--efb-color, #1776cf);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+.event-focus-banner.hidden { display: none; }
+.event-focus-banner .efb-text { display: flex; flex-direction: column; line-height: 1.25; }
+.event-focus-banner .efb-text b { color: var(--efb-color, #1776cf); font-size: 13px; }
+.event-focus-banner .efb-sub { font-size: 11px; color: var(--text-secondary); }
+.efb-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-primary);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.efb-btn.active { border-color: var(--efb-color, #1776cf); color: var(--efb-color, #1776cf); }
+.efb-btn.efb-close { margin-left: auto; font-size: 15px; line-height: 1; padding: 2px 9px; }
+.efb-btn.hidden { display: none; }
+
 .rig-popover {
   position: absolute;
   top: 100%;

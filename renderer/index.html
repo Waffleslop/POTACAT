@@ -33,6 +33,19 @@
   </div>
   <header>
     <div class="filters">
+      <!-- Event Focus (mobile parity, desktop-handoff event-focus-spot-view):
+           chips appear only while a TRACKED event is inside its window ±24h;
+           while focused the banner REPLACES the filter row (CSS hides the
+           siblings — dropdown state is untouched underneath). -->
+      <div id="event-focus-chips" style="display:contents;"></div>
+      <div id="event-focus-banner" class="event-focus-banner hidden">
+        <div class="efb-text">
+          <b>Showing <span id="efb-name"></span> only</b>
+          <span class="efb-sub">Other spots and filters are paused</span>
+        </div>
+        <button id="efb-needed" class="efb-btn hidden" type="button" title="Hide stations already worked for this event — new band/mode slots stay visible">Needed only</button>
+        <button id="efb-clear" class="efb-btn efb-close" type="button" title="Exit event focus — restore your filters">&times;</button>
+      </div>
       <div class="multi-dropdown" id="band-filter">
         <button class="multi-dropdown-btn" type="button">Band: <span class="multi-dropdown-text">All</span></button>
         <div class="multi-dropdown-menu">

@@ -8318,12 +8318,81 @@ function isWorkedSpotStrict(spot) {
   );
 }
 
+// --- Event Focus — the contest-only spot lens (mobile parity 2026-07-11,
+// desktop-handoff event-focus-spot-view.md). Session-only BY DESIGN: never
+// persisted, never synced across devices (it's view state, like scroll
+// position). While focused, spots pass iff they match the event's callsign
+// patterns — the SAME predicate that drives the event badges (so the list
+// and the decorations can never disagree) — bypassing source/band/mode/
+// region filters and the hide-worked toggles, but still honoring the
+// user-curated hidden-calls list and the current sort.
+let eventFocusId = null;
+let eventFocusNeededOnly = false;
+
+function _eventFocusEvent() {
+  return eventFocusId ? (activeEvents || []).find((e) => e.id === eventFocusId) : null;
+}
+
+/** Day-inclusive YYYYMMDD set covering the event's schedule windows — same
+ *  philosophy as lib/event-progress.js (a 12:00Z→12:00Z contest spans both
+ *  UTC days). Used by the Needed-only slot check. */
+function _eventWindowDays(ev) {
+  const days = new Set();
+  for (const sch of (ev.schedule || [])) {
+    const start = new Date(sch.start);
+    const end = new Date(sch.end);
+    if (isNaN(start) || isNaN(end)) continue;
+    let d = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+    for (; d <= end.getTime(); d += 86400000) {
+      days.add(new Date(d).toISOString().slice(0, 10).replace(/-/g, ''));
+    }
+  }
+  return days;
+}
+
+/** Needed-only: hide a checklist station already worked for this event —
+ *  but KEEP (a) a worked station spotted on a band/mode slot not yet in the
+ *  log (the award counts per-slot QSOs) and (b) matching callsigns that
+ *  aren't checklist items at all (permissive on unknowns). Mirrors mobile's
+ *  spotPassesFocus. Returns true when the spot should be HIDDEN. */
+function _eventFocusAlreadyWorked(ev, s) {
+  const board = ev.board || (ev.tracking && ev.tracking.type) || 'regions';
+  if (board !== 'checklist') return false;
+  const call = (s.callsign || '').toUpperCase();
+  const items = (ev.tracking && ev.tracking.items) || [];
+  if (!items.some((it) => it && it.id === call)) return false; // unknown → keep
+  const progress = ev.progress || {};
+  if (!progress[call]) return false; // not worked yet → keep
+  // Worked — keep only a NEW band/mode slot for this call inside the window.
+  const band = (s.band || '').toUpperCase();
+  const mode = (s.mode || '').toUpperCase();
+  if (!band && !mode) return true; // no slot info → nothing new to offer
+  const entries = workedQsos.get(call) || [];
+  const days = _eventWindowDays(ev);
+  return entries.some((e) =>
+    days.has(e.date) &&
+    (!band || (e.band || '').toUpperCase() === band) &&
+    (!mode || (e.mode || '').toUpperCase() === mode));
+}
+
 function getFiltered() {
   const bands = getDropdownValues(bandFilterEl);
   const modes = getDropdownValues(modeFilterEl);
   const continents = getDropdownValues(continentFilterEl);
   const maxAgeSecs = maxAgeMin * 60;
+  const focusEv = _eventFocusEvent(); // resolved once per render
   return allSpots.filter((s) => {
+    // Event Focus is an exclusive lens: ONLY event stations, from EVERY
+    // source (a chaser wants every path to a contest station — including
+    // sources the user has toggled off, and including net spots' slots).
+    // Hidden-calls stays respected (user-curated); Needed-only optionally
+    // drops already-worked checklist stations.
+    if (focusEv) {
+      if (!matchesEventPattern(s.callsign, focusEv.callsignPatterns)) return false;
+      if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency, s.band)) return false;
+      if (eventFocusNeededOnly && _eventFocusAlreadyWorked(focusEv, s)) return false;
+      return true;
+    }
     // Net spots always pass through all filters
     if (s.source === 'net') return true;
     // Pinned spot — the spot the user last tuned to (clicked a row, OR the
@@ -15320,10 +15389,38 @@ let currentBoardEventId = null;
 function renderEventBoard(event) {
   renderEventOverlayTabs(event);
   renderEventLifecycleStrip(event); // async fire-and-forget (finished summary + retro-stamp)
+  renderEventFocusBoardBtn(event);
   const board = event.board || (event.tracking && event.tracking.type) || 'regions';
   if (board === 'regions') renderRegionsBoard(event);
   else if (board === 'checklist') renderChecklistBoard(event);
   else if (board === 'counter') renderCounterBoard(event);
+}
+
+// "Focus Spots" on the board (Event Focus entry point #2): sets focus and
+// closes the overlay — the Spots list is right underneath, so the chain
+// alert → board → focused list is two clicks. Shown only while the event is
+// tracked and inside its window ±24h (same condition as the toolbar chips).
+function renderEventFocusBoardBtn(event) {
+  const content = document.getElementById('event-board-content');
+  if (!content || !content.parentElement) return;
+  let btn = document.getElementById('event-focus-board-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'event-focus-board-btn';
+    btn.type = 'button';
+    btn.className = 'event-focus-chip';
+    btn.style.cssText = 'margin:4px 0;align-self:flex-start;';
+    content.parentElement.insertBefore(btn, content);
+  }
+  const show = !!event.optedIn && _eventScheduleNearActive(event);
+  btn.style.display = show ? '' : 'none';
+  if (!show) return;
+  btn.style.setProperty('--efc-color', event.badgeColor || '#1776cf');
+  btn.textContent = `Focus Spots — ${event.name || event.id} only`;
+  btn.onclick = () => {
+    setEventFocus(event.id);
+    toggleEventOverlay(false);
+  };
 }
 
 // Post-event lifecycle strip (events-roadmap #2/#3). Shows above the board
@@ -15937,12 +16034,101 @@ function renderEventWatchlistCards() {
 }
 
 // Listen for events from main process
+// --- Event Focus UI (chips + banner + lifecycle; see getFiltered for the
+// filter semantics and the handoff doc for the shared cross-platform rules).
+function setEventFocus(id) {
+  const ev = (activeEvents || []).find((e) => e.id === id);
+  if (!ev) return;
+  eventFocusId = id;
+  eventFocusNeededOnly = false;
+  updateEventFocusUi();
+  render();
+}
+
+function clearEventFocus(toastMsg) {
+  if (!eventFocusId) return;
+  eventFocusId = null;
+  eventFocusNeededOnly = false;
+  updateEventFocusUi();
+  render(); // prior filter selections were never mutated — instant restore
+  if (toastMsg) showLogToast(toastMsg);
+}
+
+function updateEventFocusUi() {
+  const filtersRow = document.querySelector('header .filters');
+  const banner = document.getElementById('event-focus-banner');
+  const chipsHost = document.getElementById('event-focus-chips');
+  if (!filtersRow || !banner || !chipsHost) return;
+  const ev = _eventFocusEvent();
+  filtersRow.classList.toggle('event-focused', !!ev);
+  banner.classList.toggle('hidden', !ev);
+  if (ev) {
+    const nameEl = document.getElementById('efb-name');
+    if (nameEl) nameEl.textContent = ev.name || ev.id;
+    banner.style.setProperty('--efb-color', ev.badgeColor || '#1776cf');
+    const neededBtn = document.getElementById('efb-needed');
+    if (neededBtn) {
+      const board = ev.board || (ev.tracking && ev.tracking.type) || 'regions';
+      neededBtn.classList.toggle('hidden', board !== 'checklist');
+      neededBtn.classList.toggle('active', eventFocusNeededOnly);
+    }
+  }
+  // Chips: one per TRACKED event inside its window ±24h — the same grace the
+  // badge matcher uses. Hidden entirely outside windows (the filter row
+  // costs nothing 50 weeks a year) and while focused (banner owns the row).
+  chipsHost.innerHTML = '';
+  if (!ev) {
+    for (const cand of (activeEvents || [])) {
+      if (!cand.optedIn || !_eventScheduleNearActive(cand)) continue;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'event-focus-chip';
+      chip.style.setProperty('--efc-color', cand.badgeColor || '#1776cf');
+      chip.textContent = cand.name || cand.id;
+      chip.title = `Show only ${cand.name || cand.id} stations — every source, your filters paused until you exit`;
+      chip.addEventListener('click', () => setEventFocus(cand.id));
+      chipsHost.appendChild(chip);
+    }
+  }
+}
+
+// Banner buttons (static elements — bind once).
+{
+  const neededBtn = document.getElementById('efb-needed');
+  if (neededBtn) neededBtn.addEventListener('click', () => {
+    eventFocusNeededOnly = !eventFocusNeededOnly;
+    updateEventFocusUi();
+    render();
+  });
+  const clearBtn = document.getElementById('efb-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => clearEventFocus());
+}
+
+/** Expiry watchdog (runs every minute from the schedule tick): focus must
+ *  never outlive its event — clears at window end + 24h grace with a toast.
+ *  Also enforces untrack-clears when the event left the catalog entirely. */
+function checkEventFocusExpiry() {
+  if (!eventFocusId) return;
+  const ev = _eventFocusEvent();
+  if (!ev) { clearEventFocus(); return; } // event left the catalog
+  if (!_eventScheduleNearActive(ev)) {
+    clearEventFocus(`Event focus ended — ${ev.name || ev.id} is over — showing all spots again`);
+  }
+}
+
 window.api.onActiveEvents((events) => {
   activeEvents = events;
+  // Untrack clears focus (either device may untrack): a focus on an
+  // untracked event would render an empty list that can't explain itself.
+  if (eventFocusId) {
+    const focused = events.find(e => e.id === eventFocusId);
+    if (!focused || !focused.optedIn) clearEventFocus();
+  }
   rebuildEventWatchlist();
   updateEventBanner();
   updateSpotsEventsSection();
   renderEventWatchlistCards();
+  updateEventFocusUi();
   // Refresh overlay if open
   if (eventOverlayOpen && currentBoardEventId) {
     const ev = activeEvents.find(e => e.id === currentBoardEventId);
@@ -15974,8 +16160,14 @@ setInterval(() => {
       return start > now && (start - now) < 7 * 24 * 3600000;
     });
     const snoozed = !!(ev.snoozeUntil && nowMs < ev.snoozeUntil);
-    return `${ev.id}:${live ? 'L' : upcoming ? 'U' : '-'}${snoozed ? 's' : ''}`;
+    // 'n' = inside window ±24h grace — drives the Event Focus chips, whose
+    // show/hide boundaries (start−24h, end+24h) aren't covered by L/U.
+    const near = _eventScheduleNearActive(ev);
+    return `${ev.id}:${live ? 'L' : upcoming ? 'U' : '-'}${snoozed ? 's' : ''}${near ? 'n' : ''}`;
   }).join(',');
+  // Focus expiry runs EVERY tick (not just on boundary): it must fire at
+  // end + 24h grace, and clearing focus re-renders on its own.
+  checkEventFocusExpiry();
   if (_eventScheduleSig === sig) return;
   const first = _eventScheduleSig === null;
   _eventScheduleSig = sig;
@@ -15983,6 +16175,7 @@ setInterval(() => {
   rebuildEventWatchlist();
   updateEventBanner();
   updateSpotsEventsSection();
+  updateEventFocusUi();
   render(); // re-render table for badges
 }, 60 * 1000);
 
