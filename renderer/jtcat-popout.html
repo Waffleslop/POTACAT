@@ -417,6 +417,11 @@
     <!-- Skip grid (WSJT-X "disable Tx1"): answer a CQ with a signal report
          ("A1BC K3SBP -11") instead of grid — one full cycle shorter each way. -->
     <button id="jp-skip-tx1" class="jtcat-filter-btn" title="Skip the grid message when answering a CQ — reply with a signal report instead (WSJT-X 'skip Tx1'). Shortens each QSO by one cycle each way.">Skip Grid</button>
+    <!-- Hold TX Freq (WSJT-X "Hold Tx Freq"): keep our TX audio frequency
+         fixed instead of following the answered station — hold a clear spot
+         in the passband. Mobile has had this since K0OTC's ask; this is the
+         popout's parity control (the backend flag already existed). -->
+    <button id="jp-hold-tx" class="jtcat-filter-btn" title="Keep your TX audio frequency fixed instead of moving to each station you work (WSJT-X 'Hold Tx Freq') — hold a clear spot in the passband.">Hold TX</button>
     <!-- FT8 DXpedition Hound (old-style Fox/Hound; SuperFox not supported yet):
          initial calls forced ≥1000 Hz, TX QSYs to the fox when it answers,
          fox dual messages parsed, no 73 courtesy. -->

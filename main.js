@@ -1084,6 +1084,11 @@ let _currentSmeter = 0;
 // from the snapshot. Discrete {type:'smeter'|'swr'|'alc'} messages still fire
 // for live meter updates. (Gap 10, mobile dev report 2026-05-03.)
 let _currentSwr = 0;
+// Flex TRUE SWR ratio (smartSdr 'swr-ratio' — distinct from the raw CAT
+// `swr` scale). Snapshot field for mid-session phone connects; decays to 0
+// shortly after TX stops (frames only flow while transmitting).
+let _currentSwrRatio = 0;
+let _swrRatioClearTimer = null;
 let _currentAlc = 0;
 let _currentPower = 0; // live wattmeter reading from the rig (during TX)
 let _currentAtuState = false;
@@ -7095,6 +7100,18 @@ function connectSmartSdr() {
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: swr });
+    // Track for the status snapshot (mobile desktop-ask meter-scale-and-
+    // flex-swr-snapshot.md): a phone connecting mid-session should see SWR
+    // without waiting for the next meter frame. Flex SWR is only meaningful
+    // during TX — decay to 0 ten seconds after frames stop so clients don't
+    // render a stale ratio forever (the frames only flow while transmitting).
+    _currentSwrRatio = swr;
+    if (_swrRatioClearTimer) clearTimeout(_swrRatioClearTimer);
+    _swrRatioClearTimer = setTimeout(() => {
+      _swrRatioClearTimer = null;
+      _currentSwrRatio = 0;
+      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: 0 });
+    }, 10000);
   });
 
   smartSdr.on('cw-auth', ({ method, ok }) => {
@@ -10537,6 +10554,21 @@ function connectRemote() {
     remoteServer.sendToClient({ type: 'rig-reconnect-ack' });
   });
 
+  remoteServer.on('refresh-events', () => {
+    // Phone-initiated event-catalog refetch — force the 4-hour active.json
+    // poll NOW (a just-published event, e.g. WRTC landing minutes before its
+    // contest, shouldn't wait out the cycle). fetchActiveEvents' success path
+    // already pushes everywhere: renderer boards, events-meta, the phone's
+    // settings blob (availableEvents/contestCatalogExtras), and the log scan.
+    // The ack means "refetch started"; the catalog itself arrives via the
+    // normal settings-update broadcast. remote-server rate-limits to 1/10s.
+    sendCatLog('[Echo CAT] Event catalog refresh requested from phone');
+    try { fetchActiveEvents(); } catch (err) {
+      sendCatLog('[Echo CAT] refresh-events fetch failed: ' + err.message);
+    }
+    remoteServer.sendToClient({ type: 'refresh-events-ack' });
+  });
+
   remoteServer.on('switch-rig', ({ rigId }) => {
     const rig = (settings.rigs || []).find(r => r.id === rigId);
     if (!rig) return;
@@ -11451,6 +11483,11 @@ function connectRemote() {
     saveSettings(settings);
     if (remoteServer.hasClient()) {
       remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!enabled });
+    }
+    // Phone flipped it — nudge the popout's Hold TX button live (same
+    // pattern as applyJtcatFlag for Skip Grid / Hound).
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-flag-state', { key: 'jtcatHoldTxFreq', enabled: !!enabled });
     }
   });
 
@@ -12503,6 +12540,11 @@ function broadcastRemoteRadioStatus() {
     // session see the current values without waiting for the next poll.
     smeter: _currentSmeter,
     swr: _currentSwr,
+    // Flex TRUE SWR ratio (e.g. 1.4) — the SmartSDR path never feeds the raw
+    // `swr` scale, so this is the only snapshot SWR a Flex rig has. Decays
+    // to 0 shortly after TX stops. (Mobile ask: meter-scale-and-flex-swr-
+    // snapshot.md — phone prefers this over `swr` when non-zero.)
+    swrRatio: _currentSwrRatio,
     alc: _currentAlc,
     power: _currentPower,
     capabilities: getRigCapabilities(rigType),
@@ -24704,11 +24746,20 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-set-hold-tx-freq', (_e, enabled) => {
     settings.jtcatHoldTxFreq = !!enabled;
     saveSettings(settings);
-    if (ft8Engine && typeof ft8Engine.setHoldTxFreq === 'function') {
-      ft8Engine.setHoldTxFreq(settings.jtcatHoldTxFreq);
+    // Multi-slice aware — apply to whichever engine owns TX (same resolution
+    // as the phone-side handler; the old ft8Engine-only form missed the
+    // multi-slice txEngine).
+    const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
+    if (eng && typeof eng.setHoldTxFreq === 'function') {
+      eng.setHoldTxFreq(settings.jtcatHoldTxFreq);
     }
     if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
       remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: settings.jtcatHoldTxFreq });
+    }
+    // Keep the popout's Hold TX button live (harmless echo when the popout
+    // itself was the sender — it just re-applies the same UI state).
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-flag-state', { key: 'jtcatHoldTxFreq', enabled: settings.jtcatHoldTxFreq });
     }
   });
   ipcMain.on('jtcat-set-late-start-tx', (_e, enabled) => {

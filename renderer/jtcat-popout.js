@@ -78,6 +78,8 @@ function _applyPopoutTheme(payload) {
     reflectFd();
     skipTx1 = !!s.jtcatSkipTx1;
     reflectSkipTx1();
+    holdTxFreq = !!s.jtcatHoldTxFreq;
+    reflectHoldTx();
     houndMode = !!s.jtcatHoundMode;
     reflectHound();
     // Watchlist-group stroke (ft8-watchlist-stroke-parity): build the same
@@ -156,6 +158,11 @@ function _applyPopoutTheme(payload) {
   // Skip grid (WSJT-X "disable Tx1"): reply to CQs with a report, not a grid
   var skipTx1Toggle = document.getElementById('jp-skip-tx1');
   var skipTx1 = false;
+  var holdTxToggle = document.getElementById('jp-hold-tx');
+  var holdTxFreq = false;
+  function reflectHoldTx() {
+    if (holdTxToggle) holdTxToggle.classList.toggle('active', holdTxFreq);
+  }
   function reflectSkipTx1() {
     if (skipTx1Toggle) skipTx1Toggle.classList.toggle('active', skipTx1);
   }
@@ -1942,6 +1949,18 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // Hold TX Freq toggle — WSJT-X "Hold Tx Freq": keep our TX audio frequency
+  // fixed instead of following each answered station. Uses the DEDICATED IPC
+  // (not saveSettings) so main live-applies the engine setter and echoes the
+  // state to the phone — same channel the mobile Hold TX button rides.
+  if (holdTxToggle) {
+    holdTxToggle.addEventListener('click', function() {
+      holdTxFreq = !holdTxFreq;
+      reflectHoldTx();
+      window.api.jtcatSetHoldTxFreq(holdTxFreq);
+    });
+  }
+
   // Hound toggle — FT8 DXpedition (old-style Fox/Hound) hunting mode
   if (houndToggle) {
     houndToggle.addEventListener('click', function() {
@@ -1958,6 +1977,7 @@ function _applyPopoutTheme(payload) {
       if (!data) return;
       if (data.key === 'jtcatSkipTx1') { skipTx1 = !!data.enabled; reflectSkipTx1(); }
       else if (data.key === 'jtcatHoundMode') { houndMode = !!data.enabled; reflectHound(); }
+      else if (data.key === 'jtcatHoldTxFreq') { holdTxFreq = !!data.enabled; reflectHoldTx(); }
     });
   }
 

@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('api', {
   // which would fight the still-running courtesy-73 leg.
   onJtcatQsoNotice: (cb) => ipcRenderer.on('jtcat-qso-notice', (_e, data) => cb(data)),
   onJtcatFlagState: (cb) => ipcRenderer.on('jtcat-flag-state', (_e, data) => cb(data)),
+  // Hold TX Freq — dedicated IPC (not saveSettings): main live-applies the
+  // engine setter and echoes state to the phone (jtcat-hold-tx-state).
+  jtcatSetHoldTxFreq: (enabled) => ipcRenderer.send('jtcat-set-hold-tx-freq', !!enabled),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
   jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),

@@ -1121,6 +1121,75 @@ test('Non-FTX-1 Yaesu setAutoNotch writes BC01;/BC00;', () => {
 });
 
 // =========================================================================
+// Kenwood meter scaling + RM payload width (TS-480 desktop-ask,
+// meter-scale-and-flex-swr-snapshot.md). Three stacked bugs made the
+// TS-480 read S9 as ~S1 and SWR as blank:
+//   1. SM forwarded raw (0-30, S9=15) while consumers assume S9=120.
+//   2. RM forwarded raw (0-30) while consumers assume ratio = 1 + raw/60.
+//   3. PR #39's 3-digit RM clamp (correct for Yaesu) truncated Kenwood's
+//      4-digit replies to a tenth (RM10015 -> "001" -> 1).
+// =========================================================================
+console.log('\n=== Kenwood meter scaling (TS-480 desktop-ask) ===');
+
+const TS480_MODEL = { brand: 'Kenwood', protocol: 'kenwood', caps: {}, cw: {} };
+
+test('TS-480 SM0015 (S9 native) scales to 120 (renders S9)', () => {
+  const codec = new KenwoodCodec(TS480_MODEL, () => {});
+  let v = null; codec.on('smeter', (x) => { v = x; });
+  codec.onData(Buffer.from('SM0015;'));
+  assert.strictEqual(v, 120);
+});
+
+test('TS-480 SM0030 (full scale) scales to 240 (renders S9+)', () => {
+  const codec = new KenwoodCodec(TS480_MODEL, () => {});
+  let v = null; codec.on('smeter', (x) => { v = x; });
+  codec.onData(Buffer.from('SM0030;'));
+  assert.strictEqual(v, 240);
+});
+
+test('TS-480 RM10015 (4-digit, mid meter) parses 15 and scales to 60 (2.0:1, not blank)', () => {
+  const codec = new KenwoodCodec(TS480_MODEL, () => {});
+  let v = null; codec.on('swr', (x) => { v = x; });
+  codec.onData(Buffer.from('RM10015;'));
+  assert.strictEqual(v, 60);
+});
+
+test('TS-480 RM30015 (ALC mid) scales to 128 of 255', () => {
+  const codec = new KenwoodCodec(TS480_MODEL, () => {});
+  let v = null; codec.on('alc', (x) => { v = x; });
+  codec.onData(Buffer.from('RM30015;'));
+  assert.strictEqual(v, 128);
+});
+
+test('TS-890S per-model 0-70 meter: SM0035 (S9) scales to 120', () => {
+  const codec = new KenwoodCodec({ ...TS480_MODEL, smS9: 35, rmFull: 70 }, () => {});
+  let v = null; codec.on('smeter', (x) => { v = x; });
+  codec.onData(Buffer.from('SM0035;'));
+  assert.strictEqual(v, 120);
+});
+
+test('Yaesu SM passes through unscaled (already 0-255)', () => {
+  const codec = new KenwoodCodec(FT891_MODEL, () => {});
+  let v = null; codec.on('smeter', (x) => { v = x; });
+  codec.onData(Buffer.from('SM0128;'));
+  assert.strictEqual(v, 128);
+});
+
+test('Yaesu RM keeps the 3-digit clamp (FTX-1 extra-field guard intact)', () => {
+  const codec = new KenwoodCodec(FT891_MODEL, () => {});
+  let v = null; codec.on('swr', (x) => { v = x; });
+  codec.onData(Buffer.from('RM4120999;')); // value 120, appended fields ignored
+  assert.strictEqual(v, 120);
+});
+
+test('Non-Kenwood non-Yaesu brand passes through (no unmeasured scaling)', () => {
+  const codec = new KenwoodCodec({ brand: 'Elecraft', protocol: 'kenwood', caps: {}, cw: {} }, () => {});
+  let v = null; codec.on('smeter', (x) => { v = x; });
+  codec.onData(Buffer.from('SM0012;'));
+  assert.strictEqual(v, 12);
+});
+
+// =========================================================================
 // Summary
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
