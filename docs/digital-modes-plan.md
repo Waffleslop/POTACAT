@@ -18,7 +18,15 @@ Casey chose to build PSK31 before RTTY. What shipped and where it differs:
 - **One-shot Send TX**, not a streaming TX queue: the typed buffer renders
   to a single PCM buffer (32-symbol idle preamble + varicode + 32-symbol
   carrier postamble) and rides the existing `tx-start` dispatch unchanged
-  on every audio route. Live type-ahead streaming is a possible follow-up.
+  on every audio route. Live type-ahead streaming is the voted-for follow-up
+  — see "Type-ahead TX (W4MPT)" below.
+- **Macros (updated 2026-07-12, W4MPT feedback)**: six user-editable slots —
+  CQ / Call (answer a CQ) / Exch (report) / Brag (station details) / 73 /
+  blank free-text. Right-click a button (or left-click a blank slot) opens
+  an inline editor in the popout; Save persists all six to
+  `settings.pskMacros`, "Reset all" restores defaults (saves null). A saved
+  array shorter than six pads with blank `M#` slots, not defaults, so a
+  legacy 4-macro custom set doesn't grow a duplicate 73 button.
 - **Desktop popout + ECHOCAT wire** (phone UI pending): the RX pane is
   `#jp-psk-pane` (applyWsprMode-style swap), IPC `jtcat-psk-rx` (250 ms char
   batches) + `jtcat-psk-send`. The same pair exists as WS messages for
@@ -35,6 +43,42 @@ Casey chose to build PSK31 before RTTY. What shipped and where it differs:
   PSK63/125 = variant picker + constants + tests later.
 - Tests: `lib/psk-engine-test.js` (varicode round-trip, loopback, ±8 Hz AFC,
   noise, squelch, TX contract).
+
+## Type-ahead TX (W4MPT 2026-07-12) — scoped, not yet built
+
+W4MPT: "Type ahead text would be my vote, it's consistent with established
+practices." The fldigi/DigiPan model: a TX/RX toggle instead of one-shot
+Send — characters go out as you type, the carrier idles (continuous
+reversals) while the buffer is empty, RX drops PTT after the drain. This is
+a TX-plumbing project, not a UI tweak: every route today consumes ONE
+complete pre-rendered buffer whose length arms the failsafe and whose
+completion promise releases PTT.
+
+1. **Engine (small, pure, unit-testable)**: make PskEngine a pull source —
+   `startStream()` keys TX; `pullAudio(n)` synthesizes n samples from a bit
+   FIFO (typed chars append varicode via `queueText()`, empty FIFO
+   synthesizes idle reversals — authentic PSK31 between-keystroke behavior);
+   `endStream()` drains + postamble, then tx-end. Phase/envelope continuity
+   falls out of the per-symbol modulator as-is.
+2. **Routes (the actual work)** — convert "play buffer, resolve, drop PTT"
+   to a paced pump that pulls from the engine:
+   - Renderer DAX: chunk IPC into an AudioWorklet ring — the popout already
+     has this exact pattern in the RX direction (VITA-49 player); reuse it.
+   - SmartSDR Direct: `sendTxAudio(buffer)` → per-tick pull in the paced
+     UDP pump.
+   - Icom network: same, and `conditionDirectTxAudio`/envelope analysis must
+     run per-chunk (or move gain into the engine).
+3. **Safety**: `armJtcatTxFailsafe` arms off buffer length; streaming has
+   none. Policy: rolling failsafe re-armed by keystrokes, hard cap (~5 min
+   with no input) → auto-RX. Halt TX aborts the pump on every route.
+4. **UI**: TX/RX toggle; composer becomes the live buffer with a "sent"
+   cursor (chars turn red as consumed — the original spec's "live cursor").
+   One-shot Send stays as the phone contract until the WS wire grows a
+   char-stream message.
+
+Build order: engine pull-source + renderer route first (covers every
+soundcard rig), SmartSDR/Icom direct pumps second. Needs on-air validation
+on at least Flex Direct + one soundcard rig before release.
 
 The JTCAT/FT8 popout (desktop) + FT8 screen (iOS) + FT8 view (ECHOCAT Web) become **the** digital-modes UI. Mode is a setting inside the view, not a separate window. One audio capture, one waterfall, one PTT route, one set of macros, one mobile screen. Switching from FT8 to PSK31 is a tab click, not an app navigation.
 
