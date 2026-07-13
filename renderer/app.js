@@ -14003,6 +14003,7 @@ async function openSettingsDialog(tab) {
   document.getElementById('set-sstv-post-process').checked = s.sstvPostProcess !== false; // default on
   document.getElementById('set-enable-idle-pause').checked = s.enableIdlePause !== false;
   document.getElementById('set-idle-pause-min').value = s.idlePauseMin || 20;
+  document.getElementById('set-launch-at-startup').checked = s.launchAtStartup === true; // default off
   setSotaUpload.checked = s.sotaUpload === true;
   setSotaUsername.value = s.sotaUsername || '';
   setSotaPassword.value = s.sotaPassword || '';
@@ -14710,6 +14711,7 @@ settingsSave.addEventListener('click', async () => {
     sstvPostProcess: document.getElementById('set-sstv-post-process').checked,
     enableIdlePause: document.getElementById('set-enable-idle-pause').checked,
     idlePauseMin: parseInt(document.getElementById('set-idle-pause-min').value) || 20,
+    launchAtStartup: document.getElementById('set-launch-at-startup').checked,
     sotaUpload: sotaUploadEnabled,
     sotaUsername: sotaUsernameVal,
     sotaPassword: sotaPasswordVal,

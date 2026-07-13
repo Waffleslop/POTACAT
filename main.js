@@ -464,9 +464,42 @@ const GLOBAL_KEYS = new Set([
   'enableEchoCat',     // ECHOCAT server enable (machine-level)
   'cloudDeviceId',     // stable machine UUID for cloud device registration
                        // (must be global so both operators' phones find the same shack)
+  'launchAtStartup',   // OS login item — machine-scoped by nature
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
+
+// Launch POTACAT at OS login (Settings > Station). Default OFF.
+// Windows/macOS: Electron's login-item API (HKCU Run key / LaunchAgent).
+// Linux: Electron's API is a no-op there, so write/remove an XDG autostart
+// .desktop entry instead; APPIMAGE (when set) is the user-visible path — the
+// mounted process.execPath dies with the mount.
+function applyLaunchAtStartup(enabled) {
+  try {
+    if (process.platform === 'linux') {
+      const os = require('os');
+      const dir = path.join(os.homedir(), '.config', 'autostart');
+      const file = path.join(dir, 'potacat.desktop');
+      if (enabled) {
+        const execPath = process.env.APPIMAGE || process.execPath;
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(file, `[Desktop Entry]\nType=Application\nName=POTACAT\nComment=POTA hunting with CAT control\nExec="${execPath}"\nX-GNOME-Autostart-enabled=true\n`);
+      } else if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+      }
+      return;
+    }
+    if (!app.isPackaged) {
+      // Dev run: execPath is electron.exe — registering that would autostart
+      // a bare Electron shell at login. Only the packaged app registers.
+      sendCatLog('[Startup] Launch-at-startup not applied in dev (unpackaged) — will apply in a packaged build');
+      return;
+    }
+    app.setLoginItemSettings({ openAtLogin: !!enabled });
+  } catch (err) {
+    sendCatLog(`[Startup] Launch-at-startup ${enabled ? 'enable' : 'disable'} failed: ${err.message}`);
+  }
+}
 
 // Slash callsigns (LZ3AW/P) are legal operators but '/' is a path separator —
 // the dir name encodes it as '_' (see lib/profile-dirs.js for the whole
@@ -18018,6 +18051,11 @@ let kiwiActive = false;
 
 app.whenReady().then(() => {
   logStartupStage('app.whenReady fired');
+  // Re-assert the login item when enabled so the registered exe path
+  // self-heals after an update/reinstall moved the install dir. Never
+  // touch the OS state when the setting is off — respect anything the
+  // user configured outside POTACAT.
+  if (settings.launchAtStartup === true) applyLaunchAtStartup(true);
   startPskrReporter(); // 5-min PSKReporter flush loop (no-ops unless enabled)
   // Add Referer header for OpenStreetMap tile requests (required by OSM usage policy)
   const { session } = require('electron');
@@ -23603,6 +23641,12 @@ app.whenReady().then(() => {
       try { remoteServer.setAllowPairRequests(newSettings.allowPairRequests !== false); } catch {}
     }
 
+    // Launch-at-startup is applied live at the OS on change (login item /
+    // XDG autostart) — nothing else in the app depends on it.
+    if (has('launchAtStartup') && !!newSettings.launchAtStartup !== !!settings.launchAtStartup) {
+      applyLaunchAtStartup(!!newSettings.launchAtStartup);
+    }
+
     const iconChanged = has('lightIcon') && newSettings.lightIcon !== settings.lightIcon;
 
     const cwKeyerChanged = (has('enableCwKeyer') && newSettings.enableCwKeyer !== settings.enableCwKeyer) ||
@@ -23631,6 +23675,21 @@ app.whenReady().then(() => {
     // same helper from its own handler; this path covers the case
     // where the user picks a different rig from the desktop rig list.
     const activeRigChanged = has('activeRigId') && newSettings.activeRigId !== settings.activeRigId;
+
+    // CAT-relevant change? A full settings-save (e.g. toggling a spot source
+    // in the Spots panel) used to ALWAYS call connectCat() below, which for a
+    // rigctld user kills and re-spawns the rigctld child process on the same
+    // port. The respawn races the old process's port release and leaks
+    // duplicate CAT listeners (doubled `rx:` lines) — enough repeats crash
+    // the app. N4RDX v1.9.8: clicking Spots > Sources > POTA/SOTA crashed
+    // Windows every time. Toggling POTA has NOTHING to do with the radio, so
+    // only reconnect CAT when a CAT-relevant field actually changed.
+    const catTargetChanged = has('catTarget') &&
+      JSON.stringify(newSettings.catTarget) !== JSON.stringify(settings.catTarget);
+    const rigsChanged = has('rigs') &&
+      JSON.stringify(newSettings.rigs) !== JSON.stringify(settings.rigs);
+    const wsjtxToggled = has('enableWsjtx') && newSettings.enableWsjtx !== settings.enableWsjtx;
+    const catRelevantChanged = catTargetChanged || rigsChanged || activeRigChanged || wsjtxToggled;
 
     // Watchlist group URL changes — snapshot the OLD URL for each group
     // before the merge so we can detect "URL changed" per slot and
@@ -23682,9 +23741,13 @@ app.whenReady().then(() => {
     // Reconnect CW key port if it changed (works for both partial and full saves)
     if (has('cwKeyPort')) connectCwKeyPort();
 
-    // Only reconnect CAT / refresh spots for full settings saves
+    // Only reconnect CAT / refresh spots for full settings saves.
+    // CAT reconnect is now gated on an ACTUAL CAT change (see
+    // catRelevantChanged) — a spot-source toggle must never respawn rigctld
+    // (N4RDX crash). refreshSpots still runs on every full save so source
+    // toggles take effect immediately.
     if (!isPartialSave) {
-      if (!settings.enableWsjtx) connectCat();
+      if (catRelevantChanged && !settings.enableWsjtx) connectCat();
       refreshSpots();
       // Restart spot timer with new interval
       if (spotTimer) clearInterval(spotTimer);
