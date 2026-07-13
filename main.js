@@ -2514,15 +2514,10 @@ function sendN1mmRadioInfo() {
 
 let _cloudDeviceHeartbeatTimer = null;
 let _cloudDeviceLastType = null;
+let _cloudDeviceLastPayloadJson = null; // what the cloud directory currently holds for us
+let _cloudDeviceReRegTimer = null;
 
-async function ensureCloudDeviceRegistered() {
-  if (!cloudIpc) return;
-  const sync = cloudIpc.getCloudSync();
-  if (!sync || !settings.cloudAccessToken) return;
-  if (!settings.cloudDeviceId) {
-    settings.cloudDeviceId = require('crypto').randomUUID();
-    saveSettings(settings);
-  }
+function _buildCloudDevicePayload() {
   const type = (remoteServer && remoteServer.running) ? 'shack' : 'client';
 
   let fingerprint = '';
@@ -2544,7 +2539,7 @@ async function ensureCloudDeviceRegistered() {
   }
 
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-  const payload = {
+  return {
     deviceId: settings.cloudDeviceId,
     type,
     name: (require('os').hostname()) || 'POTACAT',
@@ -2555,27 +2550,67 @@ async function ensureCloudDeviceRegistered() {
     tsHost: altHosts.tsHost || '',
     cloudHost: altHosts.cloudHost || '',
   };
+}
+
+// Debounced re-register for event hooks (tunnel state change, ECHOCAT
+// start). Transitions arrive in bursts (provisioning → connecting → live
+// inside a second), so coalesce; the payload diff in
+// ensureCloudDeviceRegistered makes a no-change call a cheap no-op.
+function scheduleCloudDeviceReRegister(reason, delayMs = 2500) {
+  if (!settings.cloudAccessToken) return;
+  if (_cloudDeviceReRegTimer) clearTimeout(_cloudDeviceReRegTimer);
+  _cloudDeviceReRegTimer = setTimeout(() => {
+    _cloudDeviceReRegTimer = null;
+    ensureCloudDeviceRegistered(reason).catch(() => {});
+  }, delayMs);
+}
+
+async function ensureCloudDeviceRegistered(reason) {
+  if (!cloudIpc) return;
+  const sync = cloudIpc.getCloudSync();
+  if (!sync || !settings.cloudAccessToken) return;
+  if (!settings.cloudDeviceId) {
+    settings.cloudDeviceId = require('crypto').randomUUID();
+    saveSettings(settings);
+  }
+
+  const payload = _buildCloudDevicePayload();
+  const payloadJson = JSON.stringify(payload);
+  // Idempotent: identical payload + live heartbeat = nothing to do. (The
+  // heartbeat check matters — after sign-out/sign-in the directory row may
+  // be gone even though our snapshot matches.)
+  if (payloadJson === _cloudDeviceLastPayloadJson && _cloudDeviceHeartbeatTimer) return;
 
   try {
     await sync.registerDevice(payload);
-    sendCatLog(`[cloud-devices] registered as ${type} (${settings.cloudDeviceId})`);
-    _cloudDeviceLastType = type;
+    sendCatLog(`[cloud-devices] registered as ${payload.type} (${settings.cloudDeviceId})`
+      + (payload.type === 'shack' ? ` hosts: lan=${payload.lanHost ? 'yes' : 'no'} ts=${payload.tsHost ? 'yes' : 'no'} cloud=${payload.cloudHost ? 'yes' : 'no'}` : '')
+      + (reason ? ` [${reason}]` : ''));
+    _cloudDeviceLastType = payload.type;
+    _cloudDeviceLastPayloadJson = payloadJson;
   } catch (err) {
     sendCatLog(`[cloud-devices] register failed: ${err.message || err}`);
     return;
   }
 
   // Heartbeat — fires every 60s while signed in. Cheaper than a full
-  // re-register since it skips the upsert body. The full register is
-  // re-run only when the type flips (ECHOCAT toggled).
+  // re-register since it skips the upsert body. The full register re-runs
+  // whenever the payload MATERIALLY changed — not just on a type flip.
+  // W7RTA 2026-07-13: the boot-time registration ran before the ECHOCAT
+  // listen callback (type computed as 'client') and before the Cloud
+  // Tunnel came up (~11s later), and nothing ever refreshed the hosts —
+  // the phone's cloud pairing dialed a directory row with no cloudHost
+  // and died with "network error" while QR (which embeds hosts directly)
+  // worked fine. Restarting reproduced the same ordering every time.
   if (_cloudDeviceHeartbeatTimer) clearInterval(_cloudDeviceHeartbeatTimer);
   _cloudDeviceHeartbeatTimer = setInterval(async () => {
     try {
       if (!settings.cloudAccessToken || !settings.cloudDeviceId) return;
-      const nowType = (remoteServer && remoteServer.running) ? 'shack' : 'client';
-      if (nowType !== _cloudDeviceLastType) {
-        // Type changed — re-register with the new shape.
-        ensureCloudDeviceRegistered();
+      const nowJson = JSON.stringify(_buildCloudDevicePayload());
+      if (nowJson !== _cloudDeviceLastPayloadJson) {
+        // Type or hosts drifted (ECHOCAT toggled, tunnel came up/down,
+        // Tailscale cert appeared, LAN IP changed) — re-register.
+        ensureCloudDeviceRegistered('drift').catch(() => {});
         return;
       }
       await sync.heartbeatDevice(settings.cloudDeviceId);
@@ -2592,7 +2627,12 @@ function teardownCloudDeviceHeartbeat() {
     clearInterval(_cloudDeviceHeartbeatTimer);
     _cloudDeviceHeartbeatTimer = null;
   }
+  if (_cloudDeviceReRegTimer) {
+    clearTimeout(_cloudDeviceReRegTimer);
+    _cloudDeviceReRegTimer = null;
+  }
   _cloudDeviceLastType = null;
+  _cloudDeviceLastPayloadJson = null; // next sign-in must re-register fresh
 }
 
 // ─── RemoteClient lifecycle (desktop-as-client to another shack) ──
@@ -12380,6 +12420,15 @@ function connectRemote() {
     tunnelExposed: !!(cloudTunnel && cloudTunnel.getState().enabled),
   });
 
+  // The listen callback (which flips remoteServer.running) is async, with
+  // up to 5 × 800ms port retries — so the sign-in/boot registration can
+  // race it and file this desktop in the cloud directory as a 'client'
+  // (W7RTA's log: registered 180ms after "Server listening", type
+  // computed even earlier → client). Schedule a re-register after the
+  // retries settle; the payload diff makes it a no-op when boot ordering
+  // happened to win.
+  scheduleCloudDeviceReRegister('echocat-start', 6000);
+
   // KiwiSDR bridge — must be inside connectRemote() so listeners survive reconnect
   remoteServer.on('kiwi-connect', (msg) => {
     const raw = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || '';
@@ -18289,6 +18338,10 @@ app.whenReady().then(() => {
       // phones via the auth-ok + alt-hosts payload. tsHost stays
       // unchanged here but we recompute together for simplicity.
       try { _refreshAltHosts(); } catch {}
+      // Refresh the cloud_devices directory row — the tunnel URL is part
+      // of what the phone's account-pair flow dials, and boot-time
+      // registration always runs before the tunnel is live (W7RTA).
+      try { scheduleCloudDeviceReRegister('tunnel-state'); } catch {}
     });
     cloudTunnel.loadFromDisk();
     if (cloudTunnel.getState().enabled) {
