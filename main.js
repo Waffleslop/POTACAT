@@ -18100,11 +18100,6 @@ let kiwiActive = false;
 
 app.whenReady().then(() => {
   logStartupStage('app.whenReady fired');
-  // Re-assert the login item when enabled so the registered exe path
-  // self-heals after an update/reinstall moved the install dir. Never
-  // touch the OS state when the setting is off — respect anything the
-  // user configured outside POTACAT.
-  if (settings.launchAtStartup === true) applyLaunchAtStartup(true);
   startPskrReporter(); // 5-min PSKReporter flush loop (no-ops unless enabled)
   // Add Referer header for OpenStreetMap tile requests (required by OSM usage policy)
   const { session } = require('electron');
@@ -18148,6 +18143,13 @@ app.whenReady().then(() => {
   }
   migrateLegacyCloudTunnelConfig(settings);
   logStartupStage('settings loaded');
+  // Re-assert the login item when enabled so the registered exe path
+  // self-heals after an update/reinstall moved the install dir. Never
+  // touch the OS state when the setting is off — respect anything the
+  // user configured outside POTACAT. Must run AFTER loadSettings —
+  // `settings` is null until then, and reading it at the top of whenReady
+  // killed the whole startup chain (no window at all; caught 2026-07-13).
+  if (settings.launchAtStartup === true) applyLaunchAtStartup(true);
   if (settings.colorblindMode) {
     setSmartSdrColorblind(true);
     setTciColorblindMode(true);
