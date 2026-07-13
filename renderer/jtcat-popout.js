@@ -2406,12 +2406,37 @@ function _applyPopoutTheme(payload) {
 
   // $CALL = the "their call" box; lowercase body text is deliberate — short
   // varicode. Trailing \n keeps successive macro taps readable on air.
+  // Six user-editable slots (W4MPT 2026-07-12): CQ, Call (answer a CQ),
+  // Exch (report), Brag (station details — edit the [BRACKETED] bits),
+  // 73, and a blank free-text slot. Left-click inserts at the cursor;
+  // right-click (or left-click on a blank slot) opens the editor.
+  var PSK_MACRO_SLOTS = 6;
   var PSK_DEFAULT_MACROS = [
     { label: 'CQ',   text: 'CQ CQ CQ de $MYCALL $MYCALL $MYCALL pse K\n' },
+    { label: 'Call', text: '$CALL $CALL de $MYCALL $MYCALL $MYCALL K\n' },
     { label: 'Exch', text: '$CALL de $MYCALL  UR RSQ 599 599  QTH grid $GRID $GRID  BTU $CALL de $MYCALL K\n' },
-    { label: 'BTU',  text: 'BTU $CALL de $MYCALL K\n' },
+    { label: 'Brag', text: '$CALL de $MYCALL  rig [RIG] es [WATTS]w to [ANTENNA]  op [NAME] QTH [TOWN]  hw cpy? $CALL de $MYCALL K\n' },
     { label: '73',   text: '$CALL de $MYCALL  TNX FER QSO 73 73  sk\n' },
+    { label: 'Txt',  text: '' },
   ];
+
+  // Canonicalize settings.pskMacros to exactly six slots. A saved array wins
+  // slot-by-slot; short/invalid entries in a saved array become blank slots
+  // (NOT defaults — a legacy 4-macro custom set must not sprout a duplicate
+  // default 73 button). No saved array at all = the six defaults.
+  function pskNormalizeMacros(saved) {
+    var src = Array.isArray(saved) && saved.length ? saved : null;
+    var out = [];
+    for (var i = 0; i < PSK_MACRO_SLOTS; i++) {
+      var m = src ? src[i] : PSK_DEFAULT_MACROS[i];
+      if (m && typeof m.label === 'string' && m.label.trim()) {
+        out.push({ label: m.label.trim().slice(0, 8), text: String(m.text == null ? '' : m.text) });
+      } else {
+        out.push(src ? { label: 'M' + (i + 1), text: '' } : PSK_DEFAULT_MACROS[i]);
+      }
+    }
+    return out;
+  }
 
   function applyPskMode(on) {
     if (pskPane) pskPane.classList.toggle('hidden', !on);
@@ -2467,17 +2492,21 @@ function _applyPopoutTheme(payload) {
   }
 
   function pskBuildMacros(s) {
+    pskMacroDefs = pskNormalizeMacros(s.pskMacros);
+    pskRenderMacros();
+  }
+
+  function pskRenderMacros() {
     if (!pskMacrosEl) return;
-    pskMacroDefs = (Array.isArray(s.pskMacros) && s.pskMacros.length)
-      ? s.pskMacros.filter(function(m) { return m && m.label && m.text; })
-      : PSK_DEFAULT_MACROS;
     pskMacrosEl.innerHTML = '';
-    pskMacroDefs.forEach(function(m) {
+    pskMacroDefs.forEach(function(m, slot) {
       var btn = document.createElement('button');
       btn.className = 'jtcat-filter-btn';
       btn.textContent = m.label;
-      btn.title = pskSubstituteMacro(m.text).trim();
+      btn.title = (m.text.trim() ? pskSubstituteMacro(m.text).trim() + '\n\n' : 'Blank slot — ')
+        + 'right-click to edit';
       btn.addEventListener('click', function() {
+        if (!m.text.trim()) { pskOpenMacroEditor(slot); return; }
         var t = pskSubstituteMacro(m.text);
         // Insert at the cursor so macros compose naturally mid-buffer.
         var start = pskTxEl.selectionStart != null ? pskTxEl.selectionStart : pskTxEl.value.length;
@@ -2486,8 +2515,41 @@ function _applyPopoutTheme(payload) {
         pskTxEl.selectionStart = pskTxEl.selectionEnd = start + t.length;
         pskTxEl.focus();
       });
+      btn.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        pskOpenMacroEditor(slot);
+      });
       pskMacrosEl.appendChild(btn);
     });
+  }
+
+  // ---- macro slot editor (W4MPT) ----
+  var pskMeEl = document.getElementById('jp-psk-macro-editor');
+  var pskMeLabelEl = document.getElementById('jp-psk-me-label');
+  var pskMeTextEl = document.getElementById('jp-psk-me-text');
+  var pskMeSlot = -1;
+
+  function pskOpenMacroEditor(slot) {
+    if (!pskMeEl) return;
+    pskMeSlot = slot;
+    pskMeLabelEl.value = pskMacroDefs[slot].label;
+    pskMeTextEl.value = pskMacroDefs[slot].text;
+    pskMeEl.classList.remove('hidden');
+    pskMeTextEl.focus();
+  }
+
+  function pskCloseMacroEditor() {
+    pskMeSlot = -1;
+    if (pskMeEl) pskMeEl.classList.add('hidden');
+  }
+
+  function pskSaveMacros(defs) {
+    // null = revert to defaults (settings-save is a spread merge, so null
+    // overwrites the stored array and pskNormalizeMacros falls back).
+    window.api.saveSettings({ pskMacros: defs });
+    pskMacroDefs = pskNormalizeMacros(defs);
+    pskRenderMacros();
+    pskCloseMacroEditor();
   }
 
   function pskInit(s) {
@@ -2514,6 +2576,23 @@ function _applyPopoutTheme(payload) {
     });
     pskClearBtn.addEventListener('click', function() {
       if (pskRxEl) pskRxEl.innerHTML = '';
+    });
+    var meSave = document.getElementById('jp-psk-me-save');
+    var meCancel = document.getElementById('jp-psk-me-cancel');
+    var meReset = document.getElementById('jp-psk-me-reset');
+    if (meSave) meSave.addEventListener('click', function() {
+      if (pskMeSlot < 0) return;
+      pskMacroDefs[pskMeSlot] = {
+        label: (pskMeLabelEl.value.trim() || 'M' + (pskMeSlot + 1)).slice(0, 8),
+        text: pskMeTextEl.value,
+      };
+      pskSaveMacros(pskMacroDefs);
+    });
+    if (meCancel) meCancel.addEventListener('click', pskCloseMacroEditor);
+    if (meReset) meReset.addEventListener('click', function() { pskSaveMacros(null); });
+    if (pskMeEl) pskMeEl.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { pskCloseMacroEditor(); }
+      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (meSave) meSave.click(); }
     });
     // Ctrl+Enter in the composer = Send (Enter alone stays a newline — PSK
     // text is multi-line by nature).

@@ -174,6 +174,14 @@
     .jp-psk-tx { width: 100%; box-sizing: border-box; height: 54px; resize: vertical; font-family: monospace; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
     .jp-psk-macro-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
     .jp-psk-their { width: 90px; font-size: 11px; font-family: monospace; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--accent-green, #4ecca3); text-transform: uppercase; font-weight: 700; }
+    /* Macro slot editor (W4MPT): right-click a macro button (or click a blank
+       slot) to edit it in place; edits persist to settings.pskMacros. */
+    .jp-psk-macro-editor { display: flex; flex-direction: column; gap: 5px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-primary); padding: 6px; }
+    .jp-psk-macro-editor.hidden { display: none; }
+    .jp-psk-me-row { display: flex; gap: 6px; align-items: center; }
+    .jp-psk-me-label { width: 70px; font-size: 11px; font-family: monospace; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); }
+    .jp-psk-me-hint { font-size: 10px; color: var(--text-dim); }
+    .jp-psk-me-text { width: 100%; box-sizing: border-box; resize: vertical; font-family: monospace; font-size: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
 
     /* Controls bar */
     .jp-controls { padding: 6px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 12px; }
@@ -412,6 +420,19 @@
           <button id="jp-psk-send" class="jp-btn" title="Transmit the buffer as one PSK31 transmission (preamble + text + postamble)" style="border-color:#e94560;color:#e94560;">Send</button>
           <button id="jp-psk-stop" class="jp-btn jp-halt" title="Stop transmitting immediately (drops PTT)">Stop</button>
           <button id="jp-psk-log" class="jp-btn" title="Open QSO log">Log</button>
+        </div>
+        <div id="jp-psk-macro-editor" class="jp-psk-macro-editor hidden">
+          <div class="jp-psk-me-row">
+            <input id="jp-psk-me-label" class="jp-psk-me-label" type="text" maxlength="8" placeholder="Label">
+            <span class="jp-psk-me-hint">$MYCALL / $GRID / $CALL substitute on tap · end with a newline so taps chain cleanly · blank text = free-text slot</span>
+          </div>
+          <textarea id="jp-psk-me-text" class="jp-psk-me-text" rows="3" spellcheck="false" placeholder="Macro text"></textarea>
+          <div class="jp-psk-me-row">
+            <button id="jp-psk-me-save" class="jp-btn">Save</button>
+            <button id="jp-psk-me-cancel" class="jp-btn">Cancel</button>
+            <span style="margin-left:auto;"></span>
+            <button id="jp-psk-me-reset" class="jp-btn" title="Restore all six default macros">Reset all</button>
+          </div>
         </div>
       </div>
     </div>
