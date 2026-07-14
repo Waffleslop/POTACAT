@@ -13103,16 +13103,34 @@ function _applyRigEqDefault(rig) {
 // device contention with JTCAT/SSTV while warm.
 let _remoteAudioWinLoaded = false;
 let _remoteAudioPendingStart = false;
+let _remoteAudioWinShown = false;   // show-for-capture trick done once per window
 let _audioStartRequestedAt = 0; // start-audio frame → SDP-offer latency stamp
+
+// Chromium 134+ may mute getUserMedia tracks in never-shown windows.
+// Briefly show off-screen so the renderer is "visible" during capture; the
+// remote-audio-status 'started' handler hides it again once capture is up.
+// Runs at SESSION start, never at pre-warm — an idle pre-warmed bridge must
+// stay completely invisible (K3SBP 2026-07-14: pre-warm left an "ECHOCAT
+// audio bridge" window in the taskbar because the hide is tied to capture
+// starting, which a pure pre-warm never does).
+function _showRemoteAudioWinForCapture() {
+  if (!remoteAudioWin || remoteAudioWin.isDestroyed()) return;
+  if (_remoteAudioWinShown) return; // shown once already — restarts capture fine
+  _remoteAudioWinShown = true;
+  remoteAudioWin.setPosition(-9999, -9999);
+  remoteAudioWin.showInactive();
+}
 
 function prewarmRemoteAudioWindow() {
   if (remoteAudioWin && !remoteAudioWin.isDestroyed()) return;
   _remoteAudioWinLoaded = false;
+  _remoteAudioWinShown = false;
 
   remoteAudioWin = new BrowserWindow({
     width: 400,
     height: 300,
     show: false,
+    skipTaskbar: true, // even the brief capture-show shouldn't hit the taskbar
     webPreferences: {
       preload: path.join(__dirname, 'preload-remote-audio.js'),
       contextIsolation: true,
@@ -13124,10 +13142,6 @@ function prewarmRemoteAudioWindow() {
 
   // Grant media permissions to the audio window's session
   remoteAudioWin.webContents.session.setPermissionRequestHandler((_wc, perm, cb) => cb(true));
-  // Chromium 134+ may mute getUserMedia tracks in never-shown windows.
-  // Briefly show off-screen so the renderer is "visible" during capture, then hide.
-  remoteAudioWin.setPosition(-9999, -9999);
-  remoteAudioWin.showInactive();
 
   remoteAudioWin.loadFile(path.join(__dirname, 'renderer', 'remote-audio.html'));
 
@@ -13136,6 +13150,7 @@ function prewarmRemoteAudioWindow() {
     if (!remoteAudioWin || remoteAudioWin.isDestroyed()) return;
     if (!_remoteAudioPendingStart) return; // pure pre-warm — idle until start-audio
     _remoteAudioPendingStart = false;
+    _showRemoteAudioWinForCapture();
     remoteAudioWin.webContents.send('remote-audio-start', _buildAudioBridgeConfig());
     // Apply FreeDV mute if engine is active (audio window created after FreeDV started)
     if (_freedvAudioMuted) applyFreedvAudioMute();
@@ -13150,6 +13165,7 @@ function prewarmRemoteAudioWindow() {
     remoteAudioWin = null;
     _remoteAudioWinLoaded = false;
     _remoteAudioPendingStart = false;
+    _remoteAudioWinShown = false;
   });
 }
 
@@ -13176,6 +13192,7 @@ async function startRemoteAudio() {
       _remoteAudioPendingStart = true;
       return;
     }
+    _showRemoteAudioWinForCapture(); // no-op if this window has captured before
     remoteAudioWin.webContents.send('remote-audio-start', _buildAudioBridgeConfig());
     // Re-apply FreeDV mute after audio restart
     if (_freedvAudioMuted) setTimeout(() => applyFreedvAudioMute(), 500);
