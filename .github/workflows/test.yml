@@ -53,6 +53,8 @@ jobs:
         run: node test/settings-secrets-test.js
       - name: Run contest-history suite
         run: node test/contest-history-test.js
+      - name: Run contests-db suite
+        run: node test/contests-db-test.js
       - name: Run SmartSDR reconnect suite
         run: node test/smartsdr-reconnect-test.js
       - name: Run watchlist-groups suite
