@@ -10074,6 +10074,7 @@ function connectRemote() {
   });
 
   remoteServer.on('ptt', ({ state }) => {
+    const _pttT0 = Date.now(); // → ptt-applied latency reply below
     // FT8 PTT is engine-owned. A remote voice-PTT *release* must not cut an
     // in-progress engine transmission out from under the rig — the engine keys
     // via handleRemotePtt(true) from tx-start and releases on its own schedule
@@ -10112,6 +10113,11 @@ function connectRemote() {
       }
     }
     handleRemotePtt(state);
+    // True key-up latency for the phone's Diagnostics (frame receive →
+    // key command issued; excludes WS RTT and the rig's own T/R switch).
+    // The whole handler is deliberately synchronous — nothing awaits ahead
+    // of the key command — so this measures real work, not queueing.
+    try { remoteServer.sendToClient({ type: 'ptt-applied', state: !!state, ms: Date.now() - _pttT0 }); } catch { /* ignore */ }
   });
 
   // Scan on/off sync (scan-state-sync-desktop). The scan engine lives in the
@@ -10134,6 +10140,15 @@ function connectRemote() {
       clearTimeout(_clientDisconnectGraceTimer);
       _clientDisconnectGraceTimer = null;
       sendCatLog('[Echo CAT] Phone reconnected during grace window — engine survived.');
+    }
+    // Pre-warm the audio bridge so a later start-audio skips window
+    // creation + page load (~3s → capture+offer only). The warm page holds
+    // NO capture, so JTCAT/SSTV device grabs are unaffected. Cloud sessions
+    // also pre-mint TURN relay creds here so start-audio never awaits the
+    // mint round-trip (skipped when the cached grant is still >10 min out).
+    try { prewarmRemoteAudioWindow(); } catch (e) { sendCatLog('[audio] bridge pre-warm failed: ' + (e.message || e)); }
+    if (_turnCloudActive() && !(_turnIceServers && _turnExpiresAt > Date.now() + 10 * 60 * 1000)) {
+      _mintTurnCredentials().then((ice) => { if (ice) _sendStunConfig(); }).catch(() => {});
     }
     broadcastRemoteRadioStatus();
     // Seed the (re)connecting phone with the desktop's current scan state so a
@@ -12370,11 +12385,22 @@ function connectRemote() {
       // Tailscale sessions keep starting audio with zero added latency.
       // K3SBP 2026-06-14 (cloud-audio-turn-relay, Model A).
       _sendStunConfig(); // immediate: useStun (+ iceServers if already fresh)
-      (async () => {
-        const ice = await _mintTurnCredentials();
-        if (ice) _sendStunConfig(); // follow-up: now carries the relay creds
-        startRemoteAudio();         // bridge OFFERER builds its PC with them
-      })();
+      _audioStartRequestedAt = Date.now(); // → "[audio] offer sent Nms" log
+      // Fast path (audio-prewarm ask): when relay creds were pre-minted at
+      // client connect (or this isn't a Cloud session), start the bridge
+      // NOW — the pre-warmed window turns start-audio into capture+offer
+      // only. The mint-then-start path remains for a Cloud session whose
+      // creds are missing/stale (e.g. pre-warm mint failed or lapsed).
+      const haveFreshRelay = _turnIceServers && _turnExpiresAt > Date.now() + 60 * 1000;
+      if (!_turnCloudActive() || haveFreshRelay) {
+        startRemoteAudio();
+      } else {
+        (async () => {
+          const ice = await _mintTurnCredentials();
+          if (ice) _sendStunConfig(); // follow-up: now carries the relay creds
+          startRemoteAudio();         // bridge OFFERER builds its PC with them
+        })();
+      }
       return;
     }
     if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
@@ -13041,6 +13067,13 @@ function _buildAudioBridgeConfig() {
       preset:  settings.txEqPreset || 'ragchew',
       customParams: settings.txEqCustomParams || null,
     },
+    // First-syllable PTT guard: fixed delay (ms) on the phone-mic → rig
+    // path so speech spoken the instant PTT is pressed survives the keying
+    // delay instead of being clipped on air. DAX-direct path only (the
+    // setSinkId path has no WebAudio graph to hang a delay on). Default
+    // 120ms; settings.echoTxGuardMs = 0 disables, clamped ≤300.
+    txGuardMs: Math.max(0, Math.min(300,
+      settings.echoTxGuardMs != null ? (parseInt(settings.echoTxGuardMs, 10) || 0) : 120)),
   };
 }
 
@@ -13062,28 +13095,19 @@ function _applyRigEqDefault(rig) {
   sendCatLog(`[TX EQ] Restored rig default for "${rig.name || rig.id}": ${rig.txEqPreset || 'ragchew'}${rig.txEqEnabled ? '' : ' (off)'}`);
 }
 
-async function startRemoteAudio() {
-  // On macOS, request microphone permission before creating the audio window.
-  // Without this, getUserMedia() silently returns an empty/silent stream.
-  if (process.platform === 'darwin') {
-    const { systemPreferences } = require('electron');
-    const micStatus = systemPreferences.getMediaAccessStatus('microphone');
-    if (micStatus !== 'granted') {
-      const granted = await systemPreferences.askForMediaAccess('microphone');
-      if (!granted) {
-        console.error('[Echo CAT] Microphone permission denied by macOS');
-        return;
-      }
-    }
-  }
+// Pre-warm bookkeeping (audio-prewarm-and-ptt-latency ask): the bridge
+// window is created at client connect so the phone's later start-audio
+// skips Electron window creation + page load (~the bulk of the old ~3s).
+// The pre-warmed page idles with NO capture and NO AudioContext — the
+// renderer only acts on 'remote-audio-start' — so there is zero audio-
+// device contention with JTCAT/SSTV while warm.
+let _remoteAudioWinLoaded = false;
+let _remoteAudioPendingStart = false;
+let _audioStartRequestedAt = 0; // start-audio frame → SDP-offer latency stamp
 
-  // If window already exists, tell it to restart a fresh WebRTC session
-  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-    remoteAudioWin.webContents.send('remote-audio-start', _buildAudioBridgeConfig());
-    // Re-apply FreeDV mute after audio restart
-    if (_freedvAudioMuted) setTimeout(() => applyFreedvAudioMute(), 500);
-    return;
-  }
+function prewarmRemoteAudioWindow() {
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) return;
+  _remoteAudioWinLoaded = false;
 
   remoteAudioWin = new BrowserWindow({
     width: 400,
@@ -13108,21 +13132,58 @@ async function startRemoteAudio() {
   remoteAudioWin.loadFile(path.join(__dirname, 'renderer', 'remote-audio.html'));
 
   remoteAudioWin.webContents.on('did-finish-load', () => {
-    if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-      remoteAudioWin.webContents.send('remote-audio-start', _buildAudioBridgeConfig());
-      // Apply FreeDV mute if engine is active (audio window created after FreeDV started)
-      if (_freedvAudioMuted) applyFreedvAudioMute();
-      // If Kiwi is already streaming when the bridge starts, tell the window
-      // to swap immediately so the phone hears SDR audio without delay.
-      if (kiwiActive) {
-        remoteAudioWin.webContents.send('kiwi-active', true);
-      }
+    _remoteAudioWinLoaded = true;
+    if (!remoteAudioWin || remoteAudioWin.isDestroyed()) return;
+    if (!_remoteAudioPendingStart) return; // pure pre-warm — idle until start-audio
+    _remoteAudioPendingStart = false;
+    remoteAudioWin.webContents.send('remote-audio-start', _buildAudioBridgeConfig());
+    // Apply FreeDV mute if engine is active (audio window created after FreeDV started)
+    if (_freedvAudioMuted) applyFreedvAudioMute();
+    // If Kiwi is already streaming when the bridge starts, tell the window
+    // to swap immediately so the phone hears SDR audio without delay.
+    if (kiwiActive) {
+      remoteAudioWin.webContents.send('kiwi-active', true);
     }
   });
 
   remoteAudioWin.on('closed', () => {
     remoteAudioWin = null;
+    _remoteAudioWinLoaded = false;
+    _remoteAudioPendingStart = false;
   });
+}
+
+async function startRemoteAudio() {
+  // On macOS, request microphone permission before creating the audio window.
+  // Without this, getUserMedia() silently returns an empty/silent stream.
+  // (Pre-warm never captures, so the permission ask stays on the start path.)
+  if (process.platform === 'darwin') {
+    const { systemPreferences } = require('electron');
+    const micStatus = systemPreferences.getMediaAccessStatus('microphone');
+    if (micStatus !== 'granted') {
+      const granted = await systemPreferences.askForMediaAccess('microphone');
+      if (!granted) {
+        console.error('[Echo CAT] Microphone permission denied by macOS');
+        return;
+      }
+    }
+  }
+
+  // Window already exists (pre-warmed or live session).
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+    if (!_remoteAudioWinLoaded) {
+      // Pre-warm still loading — did-finish-load fires the start.
+      _remoteAudioPendingStart = true;
+      return;
+    }
+    remoteAudioWin.webContents.send('remote-audio-start', _buildAudioBridgeConfig());
+    // Re-apply FreeDV mute after audio restart
+    if (_freedvAudioMuted) setTimeout(() => applyFreedvAudioMute(), 500);
+    return;
+  }
+
+  _remoteAudioPendingStart = true;
+  prewarmRemoteAudioWindow();
 }
 
 function destroyRemoteAudioWindow() {
@@ -23434,6 +23495,12 @@ app.whenReady().then(() => {
   ipcMain.handle('get-local-ips', () => RemoteServer.getLocalIPs());
 
   ipcMain.on('remote-audio-send-signal', (_e, data) => {
+    // Measured start-audio → offer gap so latency reports are conclusive
+    // (audio-prewarm ask target: <200ms on LAN with a warm bridge).
+    if (data && data.type === 'sdp' && _audioStartRequestedAt) {
+      sendCatLog(`[audio] offer sent ${Date.now() - _audioStartRequestedAt}ms after start-audio`);
+      _audioStartRequestedAt = 0;
+    }
     if (remoteServer) {
       remoteServer.relaySignalToClient(data);
     }

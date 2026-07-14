@@ -124,7 +124,7 @@ window.api.onStartAudio(async (config) => {
       // slice and produce echo / distortion). K3SBP 2026-05-15.
       if (config.daxTxDirect) {
         audioEl.muted = true;
-        try { await startDaxTxTap(event.streams[0], config.txEq); }
+        try { await startDaxTxTap(event.streams[0], config.txEq, config.txGuardMs); }
         catch (e) { window.api.sendAudioStatus({ error: 'DAX TX tap init failed: ' + e.message }); }
       } else {
         audioEl.muted = false;
@@ -248,13 +248,14 @@ window.api.onFreedvMute((muted) => {
 let _daxTxCtx = null;
 let _daxTxNode = null;
 let _daxTxSource = null;
+let _daxTxDelay = null;   // first-syllable PTT guard (DelayNode), null when off
 // --- TX EQ + Compressor ---
 // DSP chain lives in renderer/tx-eq-chain.js (shared with vfo-popout).
 // This file just owns the bridge-side wiring + live-update plumbing.
 const _txEqChain = TxEqChain.create();
 let _txEqState = { enabled: false, preset: 'ragchew' };
 
-async function startDaxTxTap(stream, eqConfig) {
+async function startDaxTxTap(stream, eqConfig, guardMs) {
   stopDaxTxTap();
   if (!stream || !window.api.daxTxChunk) {
     window.api.sendAudioStatus({ error: 'DAX TX tap: missing api.daxTxChunk in preload' });
@@ -263,6 +264,19 @@ async function startDaxTxTap(stream, eqConfig) {
   _daxTxCtx = new AudioContext({ sampleRate: 24000 });
   await _daxTxCtx.audioWorklet.addModule('dax-tx-worklet.js');
   _daxTxSource = _daxTxCtx.createMediaStreamSource(stream);
+  // First-syllable PTT guard (audio-prewarm-and-ptt-latency ask): a fixed
+  // delay on the phone-mic path so speech that starts the instant PTT is
+  // pressed is still in flight when the rig finishes keying, instead of
+  // being clipped on the air. Bounded ≤300ms; 0 disables. Known tradeoff:
+  // the same delay applies at the tail, so an operator who unkeys the
+  // instant the last word ends loses up to guardMs of it — heads clip far
+  // more often than tails in practice (people key and talk immediately).
+  const _guardSec = Math.max(0, Math.min(300, Number(guardMs) || 0)) / 1000;
+  if (_guardSec > 0) {
+    _daxTxDelay = _daxTxCtx.createDelay(0.5);
+    _daxTxDelay.delayTime.value = _guardSec;
+    _daxTxSource.connect(_daxTxDelay);
+  }
   _daxTxNode = new AudioWorkletNode(_daxTxCtx, 'dax-tx-processor');
   _daxTxNode.port.onmessage = (ev) => {
     // Only forward the phone mic to the radio's dax_tx WHILE transmitting.
@@ -279,7 +293,10 @@ async function startDaxTxTap(stream, eqConfig) {
     enabled: !!(eqConfig && eqConfig.enabled),
     preset:  (eqConfig && eqConfig.preset) || 'ragchew',
   };
-  TxEqChain.wire(_txEqChain, _daxTxCtx, _daxTxSource, _daxTxNode, _txEqState);
+  // The EQ chain hangs off the guard delay when present. wire() disconnects
+  // whatever it's handed as `source`, which is the delay's OUTPUT — the
+  // _daxTxSource → _daxTxDelay hop above survives every live re-wire.
+  TxEqChain.wire(_txEqChain, _daxTxCtx, _daxTxDelay || _daxTxSource, _daxTxNode, _txEqState);
 
   // Connect to destination so the worklet stays scheduled. The dest is
   // muted (default 0 gain on a hidden window output) so this doesn't
@@ -291,8 +308,9 @@ function stopDaxTxTap() {
   // Drop the EQ nodes by wiring through "disabled" once (which disconnects
   // and nulls them out) so we don't leak references on stop.
   if (_daxTxSource && _daxTxNode) {
-    try { TxEqChain.wire(_txEqChain, _daxTxCtx, _daxTxSource, _daxTxNode, { enabled: false }); } catch {}
+    try { TxEqChain.wire(_txEqChain, _daxTxCtx, _daxTxDelay || _daxTxSource, _daxTxNode, { enabled: false }); } catch {}
   }
+  if (_daxTxDelay) { try { _daxTxDelay.disconnect(); } catch {} _daxTxDelay = null; }
   if (_daxTxNode) { try { _daxTxNode.disconnect(); } catch {} _daxTxNode = null; }
   if (_daxTxSource) { try { _daxTxSource.disconnect(); } catch {} _daxTxSource = null; }
   if (_daxTxCtx) { _daxTxCtx.close().catch(() => {}); _daxTxCtx = null; }
@@ -307,7 +325,7 @@ window.api.onTxEqUpdate((eqConfig) => {
     preset:  (eqConfig && eqConfig.preset) || 'ragchew',
   };
   if (_daxTxCtx && _daxTxSource && _daxTxNode) {
-    TxEqChain.wire(_txEqChain, _daxTxCtx, _daxTxSource, _daxTxNode, _txEqState);
+    TxEqChain.wire(_txEqChain, _daxTxCtx, _daxTxDelay || _daxTxSource, _daxTxNode, _txEqState);
   }
 });
 
