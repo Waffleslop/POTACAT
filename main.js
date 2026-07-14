@@ -549,7 +549,23 @@ function migrateLegacyCloudTunnelConfig(settingsObj) {
   const destPath = profileCloudTunnelPath(ownerCall);
   try {
     fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    if (!fs.existsSync(destPath)) {
+    // When BOTH configs exist, the NEWER one wins. A session that resolved
+    // an empty callsign (missing activeProfile pointer) writes its enable —
+    // with a freshly provisioned, possibly ROTATED token — to the root
+    // path; blindly keeping the profile copy resurrects the old token and
+    // the tunnel comes up dead after restart ("Cloud shuts off when
+    // POTACAT restarts", K3SBP 2026-07-13 — both files present on disk,
+    // root one newer). createdAt is stamped by enable(); fall back to
+    // mtime for configs predating it.
+    let adopt = !fs.existsSync(destPath);
+    if (!adopt) {
+      const destCfg = _readJsonSafe(destPath, {});
+      const legacyTime = Date.parse(cfg.createdAt || '') || (() => { try { return fs.statSync(legacyPath).mtimeMs; } catch { return 0; } })();
+      const destTime = Date.parse(destCfg.createdAt || '') || (() => { try { return fs.statSync(destPath).mtimeMs; } catch { return 0; } })();
+      adopt = legacyTime > destTime;
+      if (adopt) console.log('[cloud-tunnel] root tunnel config is newer than profiles/' + ownerCall + ' — adopting it (fresh token wins)');
+    }
+    if (adopt) {
       fs.copyFileSync(legacyPath, destPath);
       try { fs.chmodSync(destPath, 0o600); } catch {}
       console.log('[cloud-tunnel] migrated shared tunnel config to profiles/' + ownerCall + '/' + CLOUD_TUNNEL_CONFIG_FILENAME);
@@ -18139,6 +18155,27 @@ app.whenReady().then(() => {
       console.log('[multi-op] migration complete; activeProfile=' + settings.activeProfile);
     } catch (err) {
       console.error('[multi-op] migration failed:', err.message);
+    }
+  }
+  // Self-heal a LOST activeProfile pointer. When settings.json lacks the
+  // pointer, loadSettings() returns the global-only blob — no profile
+  // merge, so myCallsign is empty too — and every profile-scoped path
+  // (cloud-tunnel config, per-op logbook, …) silently falls back to its
+  // legacy location. That's how a shack ends up with TWO cloud-tunnel
+  // configs and a tunnel that "shuts off" on restart (K3SBP 2026-07-13).
+  // Only unambiguous repairs: exactly one profile directory on disk.
+  if (!settings.activeProfile && !settings.myCallsign) {
+    try {
+      const profs = listProfiles();
+      if (profs.length === 1) {
+        setActiveProfilePointer(profs[0]);
+        settings = loadSettings();
+        console.log('[multi-op] healed missing activeProfile pointer -> ' + profs[0]);
+      } else if (profs.length > 1) {
+        console.log('[multi-op] activeProfile pointer missing and ' + profs.length + ' profiles exist — leaving for the operator picker');
+      }
+    } catch (err) {
+      console.error('[multi-op] activeProfile self-heal failed:', err.message);
     }
   }
   migrateLegacyCloudTunnelConfig(settings);
