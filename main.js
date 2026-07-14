@@ -7288,6 +7288,11 @@ function connectSmartSdr() {
   smartSdr.setNeedsBind(!!settings.enableRemote);
   // Log CW auth results
   smartSdr.on('smeter', sendCatSmeter);
+  // Authoritative TX power readback (sub tx all). Flex was write-only for
+  // rfpower — phone VFO showed 0W until the user moved the slider, and even
+  // then only the optimistic echo. Everything downstream (renderer, VFO
+  // popout, phone status broadcast) already flows from sendCatPower.
+  smartSdr.on('power', sendCatPower);
   smartSdr.on('swr-ratio', (swr) => {
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
