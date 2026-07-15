@@ -1261,11 +1261,25 @@ function _applyPopoutTheme(payload) {
   setInterval(function() {
     var mode = modeSelect.value;
     if (mode === 'PSK31') {
-      // Continuous mode — no periods. The bar still color-keys RX/TX.
-      countdownEl.textContent = '—';
-      if (cycleFillEl) {
-        cycleFillEl.style.width = transmitting ? '100%' : '0%';
-        cycleFillEl.classList.toggle('tx', !!transmitting);
+      // Continuous mode — no periods. During a one-shot Send the bar sweeps
+      // across the transmission (main reports the exact buffer duration in
+      // tx-status durMs) and the big countdown shows seconds remaining;
+      // idle RX shows a green empty bar and an em dash. (Casey 2026-07-14:
+      // the first cut just went solid red with no time estimate.)
+      if (transmitting && pskTxDurMs > 0) {
+        var pskEl = Date.now() - pskTxT0;
+        var pskFrac = Math.max(0, Math.min(1, pskEl / pskTxDurMs));
+        countdownEl.textContent = Math.max(0, Math.ceil((pskTxDurMs - pskEl) / 1000)) + 's';
+        if (cycleFillEl) {
+          cycleFillEl.style.width = (pskFrac * 100).toFixed(1) + '%';
+          cycleFillEl.classList.add('tx');
+        }
+      } else {
+        countdownEl.textContent = '—';
+        if (cycleFillEl) {
+          cycleFillEl.style.width = transmitting ? '100%' : '0%';
+          cycleFillEl.classList.toggle('tx', !!transmitting);
+        }
       }
       return;
     }
@@ -2642,8 +2656,11 @@ function _applyPopoutTheme(payload) {
   // it goes out on air (uniform over the buffer duration main reports).
   var pskEchoSpan = null;
   var pskEchoMsg = '';
+  var pskTxT0 = 0;      // wall-clock start of the current one-shot TX
+  var pskTxDurMs = 0;   // its buffer duration — drives the status-strip sweep
   window.api.onJtcatTxStatus(function(data) {
     if (modeSelect.value !== 'PSK31') return;
+    if (data.state !== 'tx') { pskTxDurMs = 0; }
     if (data.state === 'tx' && data.message) {
       if (pskEchoTimer) { clearInterval(pskEchoTimer); pskEchoTimer = null; }
       var msg = data.message;
@@ -2652,6 +2669,8 @@ function _applyPopoutTheme(payload) {
       pskEchoSpan = span;
       pskEchoMsg = msg;
       var durMs = data.durMs && data.durMs > 2000 ? data.durMs : msg.length * 320 + 2000;
+      pskTxT0 = Date.now();
+      pskTxDurMs = durMs;
       // ~1s idle preamble before the first character, ~1s carrier postamble
       // after the last (32 symbols each at 31.25 baud).
       var textMs = Math.max(1000, durMs - 2000);
