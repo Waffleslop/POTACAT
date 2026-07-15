@@ -21959,6 +21959,8 @@ app.whenReady().then(() => {
     const allowed = [
       'https://www.qrz.com/', 'https://caseystanton.com/', 'https://github.com/Waffleslop/POTACAT/',
       'https://hamlib.github.io/', 'https://github.com/Hamlib/', 'https://discord.gg/',
+      // Mercury HF data modem (Rhizomatica) — download + docs links in Settings.
+      'https://github.com/Rhizomatica/', 'https://rhizomatica.github.io/',
       'https://potacat.com/', 'https://docs.potacat.com/', 'https://buymeacoffee.com/potacat', 'https://docs.google.com/spreadsheets/',
       'https://pota.app/', 'https://www.sotadata.org.uk/', 'https://wwff.co/', 'https://llota.app/',
       'https://tailscale.com', 'https://worldradioleague.com',

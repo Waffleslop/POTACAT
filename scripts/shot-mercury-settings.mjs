@@ -73,6 +73,21 @@ await main.evaluate(() => {
 const revealed = await main.evaluate(() => !document.getElementById('mercury-config').classList.contains('hidden'));
 check('sub-panel reveals when Enable is checked', revealed === true);
 
+// The download link must survive main's open-external ALLOWLIST (the real gate).
+// Patch shell.openExternal in main, click the link, confirm the URL got through
+// — without actually launching a browser.
+await app.evaluate(({ shell }) => {
+  globalThis.__openedUrls = [];
+  shell.openExternal = (u) => { globalThis.__openedUrls.push(u); return Promise.resolve(); };
+});
+await main.evaluate(() => {
+  const a = document.querySelector('#mercury-config a[data-external][href*="Rhizomatica/mercury/releases"]');
+  if (a) a.click();
+});
+await new Promise((r) => setTimeout(r, 300));
+const opened = await app.evaluate(() => globalThis.__openedUrls || []);
+check('clicking the download link actually opens it (passes the allowlist)', opened.some((u) => /Rhizomatica\/mercury\/releases/.test(u)), JSON.stringify(opened));
+
 await main.evaluate(() => document.getElementById('settings-save')?.click());
 await new Promise((r) => setTimeout(r, 1500));
 
