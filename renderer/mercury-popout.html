@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="popout-theme-boot.js"></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>POTACAT — Mercury HF Data</title>
+  <script src="popout-theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { display: flex; flex-direction: column; }
+
+    .mq-titlebar { -webkit-app-region: drag; display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 12px; flex-shrink: 0; }
+    .mq-titlebar .mq-title { font-weight: 700; color: var(--accent-blue, #4fc3f7); }
+    .mq-titlebar .mq-spacer { flex: 1; }
+    .mq-winbtn { -webkit-app-region: no-drag; width: 26px; height: 20px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: 3px; font-size: 13px; }
+    .mq-winbtn:hover { background: var(--bg-hover); }
+    .mq-winbtn.close:hover { background: #e94560; color: #fff; }
+
+    /* Connection bar */
+    .mq-connbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 12px; }
+    .mq-connbar label { color: var(--text-dim); }
+    .mq-mycall { font-family: monospace; font-weight: 700; color: var(--accent-green, #4ecca3); }
+    .mq-their { width: 110px; font-family: monospace; font-size: 12px; text-transform: uppercase; font-weight: 700; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--accent-green, #4ecca3); }
+    .mq-btn { padding: 3px 10px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); cursor: pointer; }
+    .mq-btn:hover:not(:disabled) { background: var(--bg-hover); }
+    .mq-btn:disabled { opacity: 0.45; cursor: default; }
+    .mq-btn.primary { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
+    .mq-btn.danger { border-color: #e94560; color: #e94560; }
+    .mq-connbar select { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 2px 4px; }
+    .mq-listen { display: inline-flex; align-items: center; gap: 4px; }
+
+    /* Status strip */
+    .mq-status { display: flex; gap: 14px; align-items: center; padding: 4px 10px; background: var(--bg-primary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .mq-state { font-weight: 700; }
+    .mq-state.idle { color: var(--text-dim); }
+    .mq-state.listening { color: var(--accent-blue, #4fc3f7); }
+    .mq-state.connecting { color: #f0a500; }
+    .mq-state.connected { color: var(--accent-green, #4ecca3); }
+    .mq-state.offline { color: #e94560; }
+    .mq-ptt { padding: 0 6px; border-radius: 3px; font-weight: 700; }
+    .mq-ptt.on { background: #e94560; color: #fff; }
+    .mq-busy.on { color: #f0a500; font-weight: 700; }
+
+    /* Transcript */
+    .mq-transcript { flex: 1; overflow-y: auto; font-family: monospace; font-size: 13px; line-height: 1.5; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; user-select: text; background: var(--bg-primary); min-height: 60px; }
+    .mq-line { margin: 1px 0; }
+    .mq-line .mq-who { font-weight: 700; }
+    .mq-line.rx .mq-who { color: var(--accent-green, #4ecca3); }
+    .mq-line.tx .mq-who { color: #e94560; }
+    .mq-line.sys { color: var(--text-dim); font-style: italic; }
+    .mq-line.file { color: var(--accent-blue, #4fc3f7); }
+
+    /* Composer */
+    .mq-composer { border-top: 1px solid var(--border-primary); background: var(--bg-secondary); padding: 6px 10px; display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+    .mq-tx { width: 100%; box-sizing: border-box; height: 46px; resize: vertical; font-family: monospace; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    .mq-tx:disabled { opacity: 0.5; }
+    .mq-composer-row { display: flex; gap: 6px; align-items: center; }
+    .mq-progress { font-size: 11px; color: var(--text-dim); font-family: monospace; }
+    .mq-hint { color: var(--text-dim); font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div class="mq-titlebar">
+    <span class="mq-title">Mercury — HF Data</span>
+    <span class="mq-hint" id="mq-conn-note">connecting to modem…</span>
+    <span class="mq-spacer"></span>
+    <button class="mq-winbtn" id="mq-min" title="Minimize">&#8211;</button>
+    <button class="mq-winbtn" id="mq-max" title="Maximize">&#9633;</button>
+    <button class="mq-winbtn close" id="mq-close" title="Close">&#10005;</button>
+  </div>
+
+  <div class="mq-connbar">
+    <label>de</label><span class="mq-mycall" id="mq-mycall">—</span>
+    <label>to</label>
+    <input id="mq-their" class="mq-their" type="text" maxlength="15" placeholder="THEIR CALL" title="Station to call">
+    <button id="mq-connect" class="mq-btn primary">Connect</button>
+    <button id="mq-disconnect" class="mq-btn" disabled>Disconnect</button>
+    <button id="mq-abort" class="mq-btn danger" disabled title="Dirty disconnect — drops the link immediately">Abort</button>
+    <span class="mq-spacer" style="flex:1"></span>
+    <label class="mq-listen"><input type="checkbox" id="mq-listen"> Listen</label>
+    <label>BW</label>
+    <select id="mq-bw">
+      <option value="500">500</option>
+      <option value="2300" selected>2300</option>
+      <option value="2750">2750</option>
+    </select>
+    <button id="mq-sendfile" class="mq-btn" disabled title="Send a file over the ARQ link">Send File…</button>
+  </div>
+
+  <div class="mq-status">
+    <span>State <span class="mq-state idle" id="mq-state">idle</span></span>
+    <span class="mq-ptt" id="mq-ptt">RX</span>
+    <span class="mq-busy" id="mq-busy">CH clear</span>
+    <span>SN <span id="mq-sn">—</span></span>
+    <span>BR <span id="mq-bitrate">—</span></span>
+  </div>
+
+  <div id="mq-transcript" class="mq-transcript" title="Conversation — select to copy"></div>
+
+  <div class="mq-composer">
+    <textarea id="mq-tx" class="mq-tx" placeholder="Connect to a station, then type and press Enter to send." spellcheck="false" disabled></textarea>
+    <div class="mq-composer-row">
+      <span class="mq-progress" id="mq-progress"></span>
+      <span class="mq-spacer" style="flex:1"></span>
+      <span class="mq-hint">Enter = send · Shift+Enter = newline</span>
+      <button id="mq-send" class="mq-btn primary" disabled>Send</button>
+    </div>
+  </div>
+
+  <script src="mercury-popout.js"></script>
+</body>
+</html>

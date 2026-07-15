@@ -1681,6 +1681,8 @@ async function loadPrefs() {
   jtcatSliceContainer.classList.toggle('hidden', !isFlex);
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
+  var mercuryBtn = document.getElementById('view-mercury-btn');
+  if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
   updateDxccButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
@@ -11242,6 +11244,7 @@ function bindClick(el, handler) {
   if (el && typeof el.addEventListener === 'function') el.addEventListener('click', handler);
 }
 bindClick(viewJtcatBtn, () => window.api.jtcatPopoutOpen());
+bindClick(document.getElementById('view-mercury-btn'), () => { if (window.api.mercuryPopoutOpen) window.api.mercuryPopoutOpen(); });
 bindClick(document.getElementById('view-sstv-btn'), () => window.api.sstvPopoutOpen());
 bindClick(document.getElementById('view-bandspread-btn'), () => {
   if (window.api.bandspreadPopoutOpen) window.api.bandspreadPopoutOpen();

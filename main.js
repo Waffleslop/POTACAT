@@ -271,6 +271,7 @@ const { MercuryClient } = require('./lib/mercury-client');
 const radioOwnerLib = require('./lib/radio-owner');
 const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
+const MercuryAppProto = require('./lib/mercury-app-protocol');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -1033,6 +1034,10 @@ let mercuryClient = null;       // MercuryClient — persistent TNC connection
 let mercuryLastStatus = null;   // last status pushed to the renderer (dedupe)
 let mercuryTxActive = false;    // Mercury currently keying (between PTT ON/OFF)
 let _mercuryTxFailsafeTimer = null; // rolling watchdog if Mercury never PTT-OFFs
+let mercuryPopoutWin = null;    // the chat/file UI window (Phase 5)
+let mercuryReassembler = null;  // app-protocol frame reassembler on the data socket
+let mercuryChatTail = [];       // recent chat/system lines for replay on popout open (cap 200)
+let mercuryRxFile = null;       // in-progress inbound file { name, size, received, path, ws }
 // The exclusive radio TX/audio path can be held by at most one mode engine at a
 // time (lib/radio-owner.js). JTCAT and Mercury must never both key the rig.
 let radioOwner = 'none';        // 'none' | 'jtcat' | 'mercury'
@@ -4168,6 +4173,75 @@ function sendMercuryStatus(s) {
     }
   }
   if (win && !win.isDestroyed()) win.webContents.send('mercury-status', s);
+  mercuryPopoutSend('mercury-status', s);
+}
+
+// ---- Mercury chat/file popout plumbing (Phase 5) ----
+function mercuryPopoutSend(channel, payload) {
+  if (mercuryPopoutWin && !mercuryPopoutWin.isDestroyed()) mercuryPopoutWin.webContents.send(channel, payload);
+}
+function pushMercuryChat(dir, text, who) {
+  const line = { dir, text, who };
+  mercuryChatTail.push(line);
+  if (mercuryChatTail.length > 200) mercuryChatTail = mercuryChatTail.slice(-200);
+  mercuryPopoutSend('mercury-chat', line);
+}
+
+// Inbound data-socket frames → chat lines / files. Files land in
+// <userData>/mercury-downloads/ (name sanitized).
+function handleMercuryData(buf) {
+  if (!mercuryReassembler) mercuryReassembler = new MercuryAppProto.FrameReassembler();
+  for (const f of mercuryReassembler.push(buf)) {
+    const m = MercuryAppProto.interpretFrame(f);
+    if (m.kind === 'chat') pushMercuryChat('rx', m.text);
+    else if (m.kind === 'file-meta') startMercuryRxFile(m);
+    else if (m.kind === 'file-data') appendMercuryRxFile(m.bytes);
+    else if (m.kind === 'file-end') finishMercuryRxFile();
+  }
+}
+function startMercuryRxFile(meta) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'mercury-downloads');
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = (String(meta.name || 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100)) || 'file';
+    const dest = path.join(dir, safe);
+    mercuryRxFile = { name: safe, size: meta.size || 0, received: 0, path: dest, ws: fs.createWriteStream(dest) };
+    mercuryPopoutSend('mercury-file', { dir: 'rx', name: safe, size: meta.size || 0, progress: 0 });
+  } catch (e) { sendCatLog('[Mercury] file receive error: ' + e.message); mercuryRxFile = null; }
+}
+function appendMercuryRxFile(bytes) {
+  if (!mercuryRxFile) return;
+  try {
+    mercuryRxFile.ws.write(bytes);
+    mercuryRxFile.received += bytes.length;
+    const pct = mercuryRxFile.size ? Math.min(100, Math.round(mercuryRxFile.received / mercuryRxFile.size * 100)) : null;
+    mercuryPopoutSend('mercury-file', { dir: 'rx', name: mercuryRxFile.name, size: mercuryRxFile.size, progress: pct });
+  } catch { /* ignore */ }
+}
+function finishMercuryRxFile() {
+  if (!mercuryRxFile) return;
+  const f = mercuryRxFile; mercuryRxFile = null;
+  try { f.ws.end(); } catch {}
+  sendCatLog(`[Mercury] received file ${f.name} (${f.received} bytes)`);
+  mercuryPopoutSend('mercury-file', { dir: 'rx', name: f.name, size: f.received, progress: 100, done: true, path: f.path });
+}
+function sendMercuryFile(filePath) {
+  try {
+    if (!mercuryClient || !mercuryClient.arqConnected) return { started: false, error: 'no ARQ session' };
+    const stat = fs.statSync(filePath);
+    if (stat.size > 5 * 1024 * 1024) { sendCatLog('[Mercury] file too large (>5 MB) for HF — not sent'); return { started: false, error: 'file too large for HF (>5 MB)' }; }
+    const name = path.basename(filePath);
+    const data = fs.readFileSync(filePath);
+    mercuryClient.sendData(MercuryAppProto.encodeFileMeta({ name, size: data.length }));
+    const CHUNK = 1024;
+    for (let off = 0; off < data.length; off += CHUNK) {
+      mercuryClient.sendData(MercuryAppProto.encodeFileData(data.subarray(off, Math.min(off + CHUNK, data.length))));
+    }
+    mercuryClient.sendData(MercuryAppProto.encodeFileEnd());
+    sendCatLog(`[Mercury] queued file ${name} (${data.length} bytes) to the ARQ link`);
+    mercuryPopoutSend('mercury-file', { dir: 'tx', name, size: data.length, progress: 100, done: true });
+    return { started: true, name, size: data.length };
+  } catch (e) { sendCatLog('[Mercury] file send error: ' + e.message); return { started: false, error: e.message }; }
 }
 
 function findMercury() {
@@ -4317,6 +4391,19 @@ function openMercuryClient() {
   });
   mercuryClient.on('cqframe', (e) => sendCatLog(`[Mercury] CQ heard: ${e.source} @ BW${e.bandwidth || '?'}`));
 
+  // Data socket → app-protocol frames → chat/file UI.
+  mercuryReassembler = new MercuryAppProto.FrameReassembler();
+  mercuryClient.on('data', (buf) => handleMercuryData(buf));
+
+  // Forward link/session state to the chat popout (the bridge above owns the
+  // arbiter/PTT side; these are display-only mirrors).
+  mercuryClient.on('connected', (e) => mercuryPopoutSend('mercury-session', { state: 'connected', source: e.source, dest: e.dest, bandwidth: e.bandwidth }));
+  mercuryClient.on('disconnected', () => { if (mercuryRxFile) { try { mercuryRxFile.ws.end(); } catch {} mercuryRxFile = null; } mercuryPopoutSend('mercury-session', { state: 'disconnected' }); });
+  mercuryClient.on('ptt', (e) => mercuryPopoutSend('mercury-link', { ptt: !!e.on }));
+  mercuryClient.on('busy', (e) => mercuryPopoutSend('mercury-link', { busy: !!e.on }));
+  mercuryClient.on('sn', (e) => mercuryPopoutSend('mercury-link', { sn: e.value }));
+  mercuryClient.on('bitrate', (e) => mercuryPopoutSend('mercury-link', { bitrate: e.bps }));
+
   // Raw control lines are only logged when the user opts into verbose (Mercury
   // sends IAMALIVE/BUFFER/SN continuously — noise otherwise).
   if (settings.mercuryVerbose) mercuryClient.on('line', (l) => sendCatLog(`[Mercury] < ${l}`));
@@ -4370,6 +4457,8 @@ function disconnectMercury() {
   if (mercuryTxActive) { mercuryTxActive = false; try { handleRemotePtt(false); } catch {} }
   releaseRadio('mercury');
   killMercury();
+  mercuryReassembler = null;
+  if (mercuryRxFile) { try { mercuryRxFile.ws.end(); } catch {} mercuryRxFile = null; }
   mercuryLastStatus = null;
   sendMercuryStatus({ connected: false });
 }
@@ -20522,6 +20611,94 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('jtcat-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
   ipcMain.on('jtcat-popout-focus-main', () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } });
+
+  // --- Mercury HF-data chat/file pop-out (Phase 5) ---
+  function openMercuryPopout() {
+    if (mercuryPopoutWin && !mercuryPopoutWin.isDestroyed()) { mercuryPopoutWin.focus(); return; }
+    const isMac = process.platform === 'darwin';
+    mercuryPopoutWin = new BrowserWindow({
+      width: 720, height: 560, title: 'POTACAT — Mercury HF Data',
+      backgroundColor: getThemeWindowBg(), show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-mercury-popout.js'),
+        contextIsolation: true, nodeIntegration: false,
+      },
+    });
+    const saved = settings.mercuryPopoutBounds;
+    if (saved && saved.width > 400 && saved.height > 300 && isOnScreen(saved)) mercuryPopoutWin.setBounds(clampToWorkArea(saved));
+    mercuryPopoutWin.show();
+    mercuryPopoutWin.setMenuBarVisibility(false);
+    mercuryPopoutWin.loadFile(path.join(__dirname, 'renderer', 'mercury-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
+    mercuryPopoutWin.on('close', () => {
+      if (mercuryPopoutWin && !mercuryPopoutWin.isDestroyed() && !mercuryPopoutWin.isMaximized() && !mercuryPopoutWin.isMinimized()) {
+        settings.mercuryPopoutBounds = mercuryPopoutWin.getBounds(); saveSettings(settings);
+      }
+    });
+    mercuryPopoutWin.on('closed', () => { mercuryPopoutWin = null; });
+    mercuryPopoutWin.webContents.on('did-finish-load', () => {
+      // Reflect current connection + replay the recent transcript so a reopened
+      // window isn't blank mid-session.
+      const connected = !!(mercuryClient && mercuryClient.connected);
+      const { control } = mercuryProcess.mercuryPorts(settings);
+      mercuryPopoutSend('mercury-status', settings.enableMercury ? { connected, host: '127.0.0.1', port: control } : { connected: false, error: 'Mercury is off — enable it in Settings' });
+      if (mercuryClient && mercuryClient.arqConnected) mercuryPopoutSend('mercury-session', { state: 'connected' });
+      for (const line of mercuryChatTail) mercuryPopoutSend('mercury-chat', { ...line, replay: true });
+      mercuryPopoutSend('mercury-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
+    });
+    mercuryPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') mercuryPopoutWin.webContents.toggleDevTools();
+    });
+  }
+  ipcMain.on('mercury-popout-open', () => openMercuryPopout());
+  ipcMain.on('mercury-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
+  ipcMain.on('mercury-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
+  ipcMain.on('mercury-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
+
+  const mercuryNotReady = () => mercuryPopoutSend('mercury-status', { connected: false, error: 'Mercury not running — enable it in Settings' });
+  ipcMain.on('mercury-cmd-connect', (_e, their) => {
+    if (!mercuryClient || !mercuryClient.connected) return mercuryNotReady();
+    const mine = (settings.myCallsign || '').trim();
+    const t = String(their || '').trim();
+    if (!mine || !t) { sendCatLog('[Mercury] connect needs both my callsign and a target'); return; }
+    mercuryClient.myCall(mine);
+    mercuryClient.arqConnect(mine, t);
+    sendCatLog(`[Mercury] calling ${t} as ${mine}`);
+  });
+  ipcMain.on('mercury-cmd-disconnect', () => { if (mercuryClient) mercuryClient.arqDisconnect(); });
+  ipcMain.on('mercury-cmd-abort', () => { if (mercuryClient) mercuryClient.abort(); });
+  ipcMain.on('mercury-cmd-listen', (_e, on) => {
+    settings.mercuryListen = !!on; saveSettings(settings);
+    if (!mercuryClient) return mercuryNotReady();
+    if (on) {
+      const got = acquireRadio('mercury');
+      if (got) { mercuryClient.myCall((settings.myCallsign || '').trim()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON'); }
+      mercuryPopoutSend('mercury-link', { listening: got });
+    } else {
+      mercuryClient.listen('OFF'); releaseRadio('mercury'); sendCatLog('[Mercury] LISTEN OFF');
+      mercuryPopoutSend('mercury-link', { listening: false });
+    }
+  });
+  ipcMain.on('mercury-cmd-bw', (_e, bw) => {
+    const n = parseInt(bw, 10);
+    if (n === 500 || n === 2300 || n === 2750) { settings.mercuryBw = n; saveSettings(settings); if (mercuryClient) mercuryClient.setBandwidth(n); }
+  });
+  ipcMain.on('mercury-cmd-send-text', (_e, text) => {
+    const t = String(text || '');
+    if (!t.trim() || !mercuryClient || !mercuryClient.arqConnected) return;
+    mercuryClient.sendData(MercuryAppProto.encodeChat(t));
+    pushMercuryChat('tx', t, (settings.myCallsign || 'ME').toUpperCase());
+  });
+  ipcMain.handle('mercury-cmd-send-file', async () => {
+    if (!mercuryClient || !mercuryClient.arqConnected) return { started: false, error: 'no ARQ session' };
+    const r = await dialog.showOpenDialog(mercuryPopoutWin || win, { properties: ['openFile'], title: 'Send a file over Mercury' });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
+    return sendMercuryFile(r.filePaths[0]);
+  });
+  ipcMain.on('mercury-open-downloads', () => {
+    try { require('electron').shell.openPath(path.join(app.getPath('userData'), 'mercury-downloads')); } catch {}
+  });
 
   // --- JTCAT Map Pop-out ---
   ipcMain.on('jtcat-map-popout', () => {

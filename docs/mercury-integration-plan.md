@@ -1,8 +1,9 @@
 # POTACAT × Mercury — HF Data Modem Integration
 
-Status: **Phases 1–3 + 4a shipped 2026-07-14** (launch/supervise; TNC client;
-radio-owner arbiter + PTT bridge; audio-bridge core + strategy). Phase 4b (FIFO
-transport + audio pumping) and 5–7 designed, not started. Filed: 2026-07-14.
+Status: **Phases 1–3, 4a, 5 shipped 2026-07-14** (launch/supervise; TNC client;
+radio-owner arbiter + PTT bridge; audio-bridge core + strategy; chat/file popout
+UI). Phase 4b (FIFO transport + audio pumping) and 6–7 designed, not started.
+Filed: 2026-07-14.
 
 ### Spike (2026-07-14): Mercury `fifo` backend is POSIX-only
 `audioio/audioio.c` opens the FIFO with `open(path, O_RDONLY/O_WRONLY | O_NONBLOCK)`
@@ -129,10 +130,25 @@ Linux/mac: create the two POSIX FIFOs (mkfifo) before spawn; pump `txFifo`
 "one owner, others early-return" discipline. Until built, a resolved `fifo`
 strategy is logged and coerced to `device`.
 
-### Phase 5 — Native chat/file UI (`mercury-popout`)
-Own popout window cloned from the JTCAT popout lifecycle; connection bar, chat
-transcript (PSK scrollback idiom), composer, file drop + BUFFER progress, status
-strip. A tiny length-prefixed app framing over the data socket (POTACAT↔POTACAT v1).
+### Phase 5 — Native chat/file UI (`mercury-popout`) ✅ (2026-07-14)
+- `lib/mercury-app-protocol.js` (pure): length-prefixed framing over the raw data
+  socket — `[type u8][len u32][payload]`, types CHAT/FILE_META/FILE_DATA/FILE_END,
+  `encode*` + `FrameReassembler` (reassembles across TCP chunk boundaries, resets
+  on a bogus oversize length) + `interpretFrame`. Tests: `test/mercury-app-protocol-test.js` (8).
+- Own popout window (`mercury-popout.{html,js}` + `preload-mercury-popout.js`,
+  cloned from the JTCAT popout lifecycle): connection bar (MYCALL, their-call,
+  Connect/Disconnect/Abort, BW, Listen), status strip (state/PTT/BUSY/SN/BITRATE),
+  chat transcript (RX/TX/system), composer (Enter=send), Send File…, dbl-click a
+  callsign to capture it. Launch via a `view-mercury-btn` (shown when
+  `enableMercury`) → `mercury-popout-open`.
+- main.js: data socket → `handleMercuryData` (chat → transcript; files →
+  `<userData>/mercury-downloads/`, 5 MB cap); `mercury-cmd-*` handlers drive the
+  client (connect/disconnect/abort/listen/bw/send-text/send-file via a picker);
+  session/link events mirror to the popout; a 200-line transcript tail replays on
+  reopen. Tests: `scripts/shot-mercury-popout.mjs` (13 e2e, injects main→renderer
+  events — no rig needed).
+- **Follow-ups:** file backpressure (pace off `BUFFER` instead of one synchronous
+  queue); drag-and-drop; interop framing with VarAC/Pat.
 
 ### Phase 6 — ECHOCAT phone mirror
 `broadcastMercuryRx` + replay tail + `mercury-send` in `lib/remote-server.js`;
