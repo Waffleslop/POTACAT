@@ -268,6 +268,8 @@ const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const mercuryProcess = require('./lib/mercury-process');
 const { MercuryClient } = require('./lib/mercury-client');
+const radioOwnerLib = require('./lib/radio-owner');
+const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -1028,6 +1030,11 @@ let mercuryProc = null;         // the spawned child process handle
 let mercuryStderr = '';         // accumulated stderr (capped at 4KB)
 let mercuryClient = null;       // MercuryClient — persistent TNC connection
 let mercuryLastStatus = null;   // last status pushed to the renderer (dedupe)
+let mercuryTxActive = false;    // Mercury currently keying (between PTT ON/OFF)
+let _mercuryTxFailsafeTimer = null; // rolling watchdog if Mercury never PTT-OFFs
+// The exclusive radio TX/audio path can be held by at most one mode engine at a
+// time (lib/radio-owner.js). JTCAT and Mercury must never both key the rig.
+let radioOwner = 'none';        // 'none' | 'jtcat' | 'mercury'
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
 let smartSdrAudio = null;     // separate non-GUI TCP for slice audio (DAX-free path)
@@ -4111,6 +4118,44 @@ function disconnectRbn() {
 // on the control socket for a later phase to drive handleRemotePtt(). Phase 1
 // only launches, supervises, and probes that the TNC is listening.
 
+// ---- radio-owner arbiter ----
+// Grant/return the exclusive radio path. Refusals are logged (and, for a user
+// gesture, surface a toast at the call site). Pure policy lives in
+// lib/radio-owner.js; this holds the single mutable `radioOwner`.
+function acquireRadio(who) {
+  const d = radioOwnerLib.decideAcquire(radioOwner, who);
+  if (d.ok) { radioOwner = d.owner; return true; }
+  sendCatLog(`[radio] ${who} could not take the radio — ${d.reason}`);
+  return false;
+}
+function releaseRadio(who) {
+  const d = radioOwnerLib.decideRelease(radioOwner, who);
+  radioOwner = d.owner;
+  return d.ok;
+}
+function forceReleaseRadio() {
+  radioOwner = radioOwnerLib.decideRelease(radioOwner, 'force').owner;
+}
+
+// Mercury keys the rig autonomously (it's a modem). We bridge its PTT ON/OFF
+// to POTACAT's gated PTT path and guard against a dead modem leaving the rig
+// keyed: a rolling failsafe, re-armed on each PTT ON / non-empty BUFFER, forces
+// PTT off if Mercury goes silent mid-over.
+const MERCURY_PTT_FAILSAFE_MS = 30000;
+function clearMercuryTxFailsafe() {
+  if (_mercuryTxFailsafeTimer) { clearTimeout(_mercuryTxFailsafeTimer); _mercuryTxFailsafeTimer = null; }
+}
+function armMercuryTxFailsafe() {
+  clearMercuryTxFailsafe();
+  _mercuryTxFailsafeTimer = setTimeout(() => {
+    if (mercuryTxActive) {
+      sendCatLog(`[Mercury] TX failsafe — no PTT OFF within ${MERCURY_PTT_FAILSAFE_MS / 1000}s; forcing PTT off`);
+      mercuryTxActive = false;
+      try { handleRemotePtt(false); } catch {}
+    }
+  }, MERCURY_PTT_FAILSAFE_MS);
+}
+
 function sendMercuryStatus(s) {
   // Dedupe identical consecutive statuses so a reconnect storm doesn't spam
   // the log; always forward the first and any change.
@@ -4227,14 +4272,55 @@ function openMercuryClient() {
   const { control, data } = mercuryProcess.mercuryPorts(settings);
   const host = '127.0.0.1';
   mercuryClient = new MercuryClient();
-  mercuryClient.on('status', (s) => sendMercuryStatus({ ...s, host, port: control }));
-  mercuryClient.on('connected', (e) => sendCatLog(`[Mercury] ARQ connected: ${e.source} → ${e.dest} @ BW${e.bandwidth || '?'}`));
-  mercuryClient.on('disconnected', () => sendCatLog('[Mercury] ARQ session ended'));
+
+  mercuryClient.on('status', (s) => {
+    sendMercuryStatus({ ...s, host, port: control });
+    if (s.connected) onMercuryReady();
+  });
+
+  // PTT / arbiter / failsafe policy lives in the unit-tested bridge; main.js
+  // supplies the real actions. `mercuryTxActive` mirrors the bridge's keyed
+  // state so disconnectMercury / the failsafe timer can see it.
+  attachMercuryRadioBridge(mercuryClient, {
+    keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true } : {}); },
+    acquire: () => acquireRadio('mercury'),
+    release: () => releaseRadio('mercury'),
+    abort: () => { try { mercuryClient.abort(); } catch {} },
+    armFailsafe: armMercuryTxFailsafe,
+    clearFailsafe: clearMercuryTxFailsafe,
+    log: (m) => sendCatLog(`[Mercury] ${m}`),
+    // After a session ends Mercury returns to idle; re-register LISTEN if opted in.
+    onIdle: () => { if (settings.mercuryListen) onMercuryReady(); },
+  });
   mercuryClient.on('cqframe', (e) => sendCatLog(`[Mercury] CQ heard: ${e.source} @ BW${e.bandwidth || '?'}`));
+
   // Raw control lines are only logged when the user opts into verbose (Mercury
   // sends IAMALIVE/BUFFER/SN continuously — noise otherwise).
   if (settings.mercuryVerbose) mercuryClient.on('line', (l) => sendCatLog(`[Mercury] < ${l}`));
+
   mercuryClient.connect({ host, controlPort: control, dataPort: data });
+}
+
+// Register the callsign + bandwidth, and (opt-in) put Mercury in LISTEN so it
+// answers inbound calls. LISTEN claims the radio up-front because an inbound
+// CALL will key PTT — Part 97 wants that attended, so it's default-OFF and the
+// operator opts in. Runs on every control (re)connect and after a session ends.
+function onMercuryReady() {
+  if (!mercuryClient || !mercuryClient.connected) return;
+  const call = (settings.myCallsign || '').trim();
+  if (call) mercuryClient.myCall(call);
+  const bw = parseInt(settings.mercuryBw, 10);
+  if (bw === 500 || bw === 2300 || bw === 2750) mercuryClient.setBandwidth(bw);
+  if (settings.mercuryListen && call) {
+    if (acquireRadio('mercury')) {
+      mercuryClient.listen('ON');
+      sendCatLog(`[Mercury] LISTEN ON as ${call}`);
+    } else {
+      // Radio busy (JTCAT) — don't listen; we'd only collide on an inbound call.
+      mercuryClient.listen('OFF');
+      sendCatLog(`[Mercury] LISTEN deferred — radio in use by ${radioOwner}`);
+    }
+  }
 }
 
 async function connectMercury() {
@@ -4257,6 +4343,9 @@ async function connectMercury() {
 }
 
 function disconnectMercury() {
+  clearMercuryTxFailsafe();
+  if (mercuryTxActive) { mercuryTxActive = false; try { handleRemotePtt(false); } catch {} }
+  releaseRadio('mercury');
   killMercury();
   mercuryLastStatus = null;
   sendMercuryStatus({ connected: false });
@@ -6875,6 +6964,15 @@ function startJtcat(mode) {
   });
 
   ft8Engine.on('tx-start', (data) => {
+    // Radio-owner arbiter: Mercury (HF data) and JTCAT must never both key. If
+    // Mercury holds the radio, refuse this transmission and unwind the engine
+    // cleanly. tx-end is guarded to NOT drop Mercury's PTT in this case.
+    if (radioOwner === 'mercury') {
+      sendCatLog('[JTCAT] TX blocked — Mercury (HF data) owns the radio. Stop Mercury to transmit FT8.');
+      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      return;
+    }
+    acquireRadio('jtcat'); // held for the duration of this transmission
     const catState = cat ? `connected=${cat.connected}` : 'cat=null';
     console.log(`[JTCAT] TX start requested — message: ${data.message}, ${catState}`);
     logIcomNetworkAudio(`FT8 TX: ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
@@ -7026,10 +7124,17 @@ function startJtcat(mode) {
 	    console.log('[JTCAT] TX end — PTT off');
 	    clearJtcatTxFailsafe();
 	    clearJtcatIcomHardRelease();
-	    if (settings.audioSource === 'icom-network') {
+	    // If Mercury owns the radio, this tx-end is unwinding a JTCAT TX the
+	    // arbiter blocked at tx-start — do NOT drop Mercury's PTT. Otherwise
+	    // release PTT normally and hand the radio back.
+	    if (radioOwner === 'mercury') {
+	      // JTCAT never keyed; leave Mercury's PTT alone.
+	    } else if (settings.audioSource === 'icom-network') {
 	      forceReleaseIcomNetworkTx('JTCAT tx-end');
+	      releaseRadio('jtcat');
 	    } else {
 	      handleRemotePtt(false);
+	      releaseRadio('jtcat');
 	    }
     // Stop the paced UDP pump if SmartSDR Direct TX was driving this cycle —
     // otherwise packets keep flowing after PTT release (harmless once the

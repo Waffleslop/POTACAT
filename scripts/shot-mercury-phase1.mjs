@@ -25,6 +25,8 @@ fs.writeFileSync(path.join(UD, 'settings.json'), JSON.stringify({
   enableMercury: true,
   mercuryPath: path.join(UD, 'does-not-exist-mercury'),
   mercuryBasePort: 8300, mercuryTxGainDb: -3,
+  // Phase 3: mercuryListen exercises the arbiter/onMercuryReady wiring at boot.
+  mercuryListen: true, mercuryBw: 2300,
 }, null, 2));
 
 let failures = 0;

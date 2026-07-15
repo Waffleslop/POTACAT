@@ -1,7 +1,7 @@
 # POTACAT × Mercury — HF Data Modem Integration
 
-Status: **Phases 1–2 shipped 2026-07-14** (launch + supervise; TNC client).
-Phases 3–7 designed, not started. Filed: 2026-07-14.
+Status: **Phases 1–3 shipped 2026-07-14** (launch/supervise; TNC client;
+radio-owner arbiter + PTT bridge). Phases 4–7 designed, not started. Filed: 2026-07-14.
 
 [Mercury](https://github.com/Rhizomatica/mercury) (Rhizomatica / HERMES,
 **GPL-3.0-or-later**) is an external HF **data** modem: FreeDV/codec2 OFDM (the
@@ -82,11 +82,24 @@ data = base+1 (8301), broadcast = 8100.
   async status parsed, PTT true→false, `arqConnected` state).
 - Not yet wired: the `ptt` event → `handleRemotePtt` (Phase 3), and any UI.
 
-### Phase 3 — Radio-owner arbiter + Mercury PTT
-`mercury-ptt` → `handleRemotePtt(state,{audio:true})` (gates/pass-enforcement/
-mode-switch). New `armMercuryTxFailsafe` (rolling, re-armed on PTT ON/BUFFER>0).
-New pure `lib/radio-owner.js` (`none|jtcat|mercury|voice` mutex) so FT8 and Mercury
-can never both key. **Highest-risk piece — build/test before the UI.**
+### Phase 3 — Radio-owner arbiter + Mercury PTT ✅ (2026-07-14)
+- Pure `lib/radio-owner.js` (`none|jtcat|mercury` mutex): `decideAcquire`/
+  `decideRelease`/`canAcquire`. main.js holds `radioOwner` + `acquireRadio`/
+  `releaseRadio`/`forceReleaseRadio`. Tests: `test/radio-owner-test.js` (11).
+- PTT / failsafe / session policy factored into the injectable, unit-tested
+  `lib/mercury-radio-bridge.js` (`attachMercuryRadioBridge(client, hooks)`):
+  PTT ON→key+arm failsafe; PTT OFF→clear+unkey; BUFFER>0→rolling re-arm;
+  CONNECTED→acquire or ABORT-to-yield; DISCONNECTED→clear+unkey+release+onIdle.
+  Tests: `test/mercury-radio-bridge-test.js` (7). main.js wires the real hooks
+  (`keyPtt`→`handleRemotePtt(state,{audio:true})`, acquire/release→arbiter) and a
+  30 s rolling `armMercuryTxFailsafe`.
+- JTCAT side: `ft8Engine 'tx-start'` acquires `'jtcat'` and is BLOCKED (unwound via
+  `txComplete()`) when Mercury owns; `tx-end` releases `'jtcat'` and, when Mercury
+  owns, does NOT drop Mercury's PTT.
+- `onMercuryReady`: on control (re)connect sends `MYCALL` + `BW`, and — opt-in
+  `mercuryListen` (default OFF, Part 97 attended) — acquires the radio + `LISTEN ON`.
+- **Follow-ups:** SSTV/WSPR/tune `tx-start` guards; multi-slice JTCAT holds `'jtcat'`
+  per-slice-TX only (session-level Mercury hold already blocks all JTCAT keying).
 
 ### Phase 4 — Audio bridge (per-rig)
 Generic rigs → real device (`-x wasapi|coreaudio|alsa`). Flex/Icom → `-x fifo`
