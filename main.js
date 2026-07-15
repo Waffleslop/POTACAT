@@ -267,6 +267,7 @@ const { eventDecodeMatch } = require('./lib/event-decode-match');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const mercuryProcess = require('./lib/mercury-process');
+const { MercuryClient } = require('./lib/mercury-client');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -1025,7 +1026,7 @@ let rbnWatchSpots = []; // RBN spots for watchlist callsigns, merged into main t
 // (lib/mercury-client.js) and PTT/audio arbiter land in later phases.
 let mercuryProc = null;         // the spawned child process handle
 let mercuryStderr = '';         // accumulated stderr (capped at 4KB)
-let mercuryReadyProbe = null;   // net.Socket used to confirm the TNC is listening
+let mercuryClient = null;       // MercuryClient — persistent TNC connection
 let mercuryLastStatus = null;   // last status pushed to the renderer (dedupe)
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
@@ -4151,9 +4152,10 @@ function writeMercuryIni() {
 }
 
 function killMercury() {
-  if (mercuryReadyProbe) {
-    try { mercuryReadyProbe.destroy(); } catch { /* ignore */ }
-    mercuryReadyProbe = null;
+  if (mercuryClient) {
+    try { mercuryClient.disconnect(); } catch { /* ignore */ }
+    try { mercuryClient.removeAllListeners(); } catch { /* ignore */ }
+    mercuryClient = null;
   }
   if (mercuryProc) {
     try { mercuryProc.kill(); } catch { /* ignore */ }
@@ -4215,33 +4217,24 @@ function spawnMercury() {
 }
 
 /**
- * Probe that Mercury's control port is accepting connections. Phase 1 stand-in
- * for the persistent MercuryClient (Phase 2) — opens a throwaway socket, and on
- * connect reports ready, then closes it so it doesn't hold Mercury's single
- * client slot. Retries a few times to cover the modem's own startup latency.
+ * Open the persistent TNC connection to a running Mercury. The MercuryClient
+ * owns its own reconnect backoff, so it tolerates Mercury not yet listening in
+ * the moment after spawn — it retries until the control socket answers, then
+ * emits status:true. Phase 2 stops here (transport only); a later phase wires
+ * the 'ptt'/'connected' events into handleRemotePtt and the chat UI.
  */
-function probeMercuryReady(attempt = 0) {
-  const net = require('net');
-  const { control } = mercuryProcess.mercuryPorts(settings);
+function openMercuryClient() {
+  const { control, data } = mercuryProcess.mercuryPorts(settings);
   const host = '127.0.0.1';
-  if (mercuryReadyProbe) { try { mercuryReadyProbe.destroy(); } catch {} mercuryReadyProbe = null; }
-  const sock = net.connect({ host, port: control });
-  mercuryReadyProbe = sock;
-  sock.setTimeout(2000);
-  sock.on('connect', () => {
-    sendMercuryStatus({ connected: true, host, port: control });
-    try { sock.end(); } catch {}
-    mercuryReadyProbe = null;
-  });
-  const retry = (err) => {
-    try { sock.destroy(); } catch {}
-    if (mercuryReadyProbe === sock) mercuryReadyProbe = null;
-    if (!mercuryProc) return; // gave up / stopped
-    if (attempt < 5) setTimeout(() => probeMercuryReady(attempt + 1), 1000);
-    else sendMercuryStatus({ connected: false, host, port: control, error: (err && err.message) || 'TNC not answering' });
-  };
-  sock.on('timeout', () => retry(new Error('probe timeout')));
-  sock.on('error', retry);
+  mercuryClient = new MercuryClient();
+  mercuryClient.on('status', (s) => sendMercuryStatus({ ...s, host, port: control }));
+  mercuryClient.on('connected', (e) => sendCatLog(`[Mercury] ARQ connected: ${e.source} → ${e.dest} @ BW${e.bandwidth || '?'}`));
+  mercuryClient.on('disconnected', () => sendCatLog('[Mercury] ARQ session ended'));
+  mercuryClient.on('cqframe', (e) => sendCatLog(`[Mercury] CQ heard: ${e.source} @ BW${e.bandwidth || '?'}`));
+  // Raw control lines are only logged when the user opts into verbose (Mercury
+  // sends IAMALIVE/BUFFER/SN continuously — noise otherwise).
+  if (settings.mercuryVerbose) mercuryClient.on('line', (l) => sendCatLog(`[Mercury] < ${l}`));
+  mercuryClient.connect({ host, controlPort: control, dataPort: data });
 }
 
 async function connectMercury() {
@@ -4260,7 +4253,7 @@ async function connectMercury() {
     sendMercuryStatus({ connected: false, error: msg });
     return;
   }
-  probeMercuryReady();
+  openMercuryClient();
 }
 
 function disconnectMercury() {

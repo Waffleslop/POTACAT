@@ -1,7 +1,7 @@
 # POTACAT × Mercury — HF Data Modem Integration
 
-Status: **Phase 1 shipped 2026-07-14** (launch + supervise + readiness probe).
-Phases 2–7 designed, not started. Filed: 2026-07-14.
+Status: **Phases 1–2 shipped 2026-07-14** (launch + supervise; TNC client).
+Phases 3–7 designed, not started. Filed: 2026-07-14.
 
 [Mercury](https://github.com/Rhizomatica/mercury) (Rhizomatica / HERMES,
 **GPL-3.0-or-later**) is an external HF **data** modem: FreeDV/codec2 OFDM (the
@@ -63,11 +63,24 @@ data = base+1 (8301), broadcast = 8100.
 - **Deferred within Phase 1:** the actual binary + `NOTICE` entry + `build.files`
   packaging wait on a per-platform Mercury build (macOS needs its own).
 
-### Phase 2 — `lib/mercury-client.js` (TNC client)
-Two `net.Socket`s (line-oriented control + raw data), modeled on `DxClusterClient`
-(intent flag + backoff). Emits `mercury-ptt/connected/disconnected/busy/buffer/…`;
-`sendData()` on the data socket. `connectMercury` swaps the readiness probe for a
-persistent client. Tests: `test/mercury-client-test.js`.
+### Phase 2 — `lib/mercury-client.js` (TNC client) ✅ (2026-07-14)
+- `MercuryClient` — two `net.Socket`s (line-oriented control + raw data), modeled
+  on `DxClusterClient` (stale-socket guard, `_wantDisconnect` intent flag,
+  exponential backoff, control watchdog on the IAMALIVE cadence). Emits
+  `status`/`connected`/`disconnected`/`ptt`/`busy`/`pending`/`cqframe`/`buffer`/
+  `sn`/`bitrate`/`iamalive`/`ack`/`line`/`data`. Commands: `myCall`, `listen`,
+  `setPublic`, `setBandwidth`, `arqConnect`/`arqDisconnect`, `abort`, `cqFrame`,
+  `queryBuffer/Sn/Bitrate`, `sendCommand`, and `sendData(buf)` on the data socket.
+- Pure exported `parseControlLine()` (case-insensitive keyword, callsign case
+  preserved) — the unit-test surface.
+- main.js `openMercuryClient()` replaced the Phase 1 probe: creates the client,
+  wires `status`→`sendMercuryStatus`, logs `connected`/`disconnected`/`cqframe`
+  (and raw lines under `mercuryVerbose`), and connects. `killMercury` tears the
+  client down.
+- Tests: `test/mercury-client-test.js` (7 parser cases + a real two-socket
+  loopback against a fake Mercury: commands sent, data delivered, CR-batched
+  async status parsed, PTT true→false, `arqConnected` state).
+- Not yet wired: the `ptt` event → `handleRemotePtt` (Phase 3), and any UI.
 
 ### Phase 3 — Radio-owner arbiter + Mercury PTT
 `mercury-ptt` → `handleRemotePtt(state,{audio:true})` (gates/pass-enforcement/
