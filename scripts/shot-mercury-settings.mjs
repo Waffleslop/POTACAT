@@ -44,6 +44,16 @@ await new Promise((r) => setTimeout(r, 800));
 const controls = await main.evaluate(() => ['set-mercury-enable', 'set-mercury-path', 'mercury-path-browse', 'set-mercury-sound', 'set-mercury-in', 'set-mercury-out', 'set-mercury-bw', 'set-mercury-txgain', 'set-mercury-listen'].map((id) => !!document.getElementById(id)));
 check('all Mercury settings controls present', controls.every(Boolean), controls.join(','));
 
+// Install instructions + clickable (data-external) download link are present.
+const install = await main.evaluate(() => {
+  const cfg = document.getElementById('mercury-config');
+  const txt = cfg ? cfg.textContent : '';
+  const link = cfg ? cfg.querySelector('a[data-external][href*="Rhizomatica/mercury"]') : null;
+  return { hasWin: /Windows:/.test(txt), hasLinux: /Linux:/.test(txt), hasCliNote: /mercury\.exe/.test(txt), link: link ? link.href : null };
+});
+check('install instructions cover Windows + Linux + the CLI binary', install.hasWin && install.hasLinux && install.hasCliNote);
+check('download link is a clickable external link to the Mercury releases', !!install.link && /Rhizomatica\/mercury\/releases/.test(install.link), install.link);
+
 // Sub-panel hidden until Enable is checked; reveals on check.
 let hiddenBefore = await main.evaluate(() => document.getElementById('mercury-config').classList.contains('hidden'));
 check('config sub-panel hidden while disabled', hiddenBefore === true);

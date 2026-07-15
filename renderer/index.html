@@ -2598,6 +2598,13 @@
           <button type="button" id="mercury-path-browse">Browse&hellip;</button>
         </label>
         <span class="help-text" style="display:block;">Leave blank to auto-detect (bundled or on PATH). Point at the Mercury executable if installed elsewhere.</span>
+        <div class="help-text" style="display:block;margin-top:6px;padding:7px 9px;border:1px solid var(--border-primary);border-radius:4px;line-height:1.55;">
+          <strong>Don't have Mercury yet?</strong> POTACAT needs Mercury's command-line modem (<code>mercury</code>/<code>mercury.exe</code>) &mdash; it launches it in the background and keeps PTT. You do <em>not</em> run Mercury's own window.
+          <br><strong>Windows:</strong> download the latest Windows release from <a href="https://github.com/Rhizomatica/mercury/releases" data-external style="color:var(--accent-blue,#4fc3f7);">github.com/Rhizomatica/mercury/releases</a>, unzip it, and point the Binary box above at <code>mercury.exe</code> (the CLI &mdash; <em>not</em> <code>mercury-ui.exe</code>).
+          <br><strong>Linux:</strong> build from source &mdash; <code>git clone https://github.com/Rhizomatica/mercury &amp;&amp; cd mercury &amp;&amp; make &amp;&amp; sudo make install</code> (deps: <code>build-essential pkg-config libasound2-dev libpulse-dev libhamlib-dev</code>), or use the Debian packages; then leave the Binary box blank (it lands on your PATH).
+          <br><strong>macOS:</strong> build from source (<code>make</code>).
+          <br>After installing, relaunch POTACAT &mdash; this window should show <em>modem ready</em>. Full guide: <a href="https://rhizomatica.github.io/mercury/" data-external style="color:var(--accent-blue,#4fc3f7);">rhizomatica.github.io/mercury</a>. Mercury is a separate open-source (GPL-3.0) program by Rhizomatica.
+        </div>
         <label style="margin-top:8px;">Audio:
           <select id="set-mercury-sound" style="width:130px;">
             <option value="auto">auto</option>
