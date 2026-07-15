@@ -410,6 +410,10 @@
         <span class="p-freq" id="jp-psk-freq" title="Tracked audio center (AFC-corrected). Click the waterfall to move it.">— Hz</span>
         <span class="p-q" id="jp-psk-quality" title="Link quality 0–100 (phase coherence) and indicative SNR">Q —</span>
         <span style="margin-left:auto;"></span>
+        <label style="display:inline-flex;align-items:center;gap:4px;" title="Squelch — how much phase coherence a signal needs before decoded text is shown. Raise it if band noise or carriers produce garbage characters; lower it to dig out weak signals.">SQL
+          <input type="range" id="jp-psk-sql" min="10" max="90" value="50" style="width:70px;">
+          <span id="jp-psk-sql-val" style="font-family:monospace;min-width:18px;">50</span>
+        </label>
         <button id="jp-psk-clear" class="jtcat-filter-btn" title="Clear received text">Clear</button>
       </div>
       <div id="jp-psk-rx" class="jp-psk-rx" title="Received text — select to copy, double-click a callsign to capture it for macros"></div>

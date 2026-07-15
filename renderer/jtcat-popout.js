@@ -2555,6 +2555,23 @@ function _applyPopoutTheme(payload) {
   function pskInit(s) {
     if (!pskPane) return;
     pskBuildMacros(s || {});
+    // Squelch slider — live-applies to the engine and persists (main owns
+    // the setting). First on-air run: a carrier near the center + one fixed
+    // threshold flooded the pane with noise garbage; band conditions vary,
+    // so the operator gets the knob (same reason fldigi has one).
+    var pskSqlEl = document.getElementById('jp-psk-sql');
+    var pskSqlValEl = document.getElementById('jp-psk-sql-val');
+    if (pskSqlEl) {
+      var sql0 = parseInt(s && s.pskSquelch, 10) || 50;
+      pskSqlEl.value = sql0;
+      if (pskSqlValEl) pskSqlValEl.textContent = String(sql0);
+      pskSqlEl.addEventListener('input', function() {
+        if (pskSqlValEl) pskSqlValEl.textContent = String(pskSqlEl.value);
+      });
+      pskSqlEl.addEventListener('change', function() {
+        if (window.api.jtcatPskSetSql) window.api.jtcatPskSetSql(parseInt(pskSqlEl.value, 10));
+      });
+    }
     if (s && s.pskAudioCenter && modeSelect.value === 'PSK31') {
       jpTxFreqHz = Math.max(100, Math.min(3000, parseInt(s.pskAudioCenter, 10) || 1500));
       jpRxFreqHz = jpTxFreqHz;

@@ -6596,6 +6596,12 @@ function startJtcat(mode) {
     if (typeof ft8Engine.setHoldTxFreq === 'function') {
       ft8Engine.setHoldTxFreq(!!settings.jtcatHoldTxFreq);
     }
+    // PSK31: apply the operator's squelch level (popout SQL slider). Real
+    // band noise varies too much for one hardcoded threshold — first on-air
+    // run flooded the pane with garbage (K3SBP 2026-07-14).
+    if (typeof ft8Engine.setSquelch === 'function') {
+      ft8Engine.setSquelch(parseInt(settings.pskSquelch, 10) || 50);
+    }
     // Late-start TX (WSJT-X waveform-truncation parity). Default ON — it's
     // standards-compliant and only helps (a reply that would otherwise miss
     // the cycle still goes out, decodable via the receiver's middle/end
@@ -7888,7 +7894,16 @@ function startSmartSdrAudio() {
       // the other no-ops. The main window suppresses its own capture while
       // the pop-out is open, so exactly one is ever live.
       const vita49Frame = { pcm: src, sampleRate };
-      if (win) audioSafeSend(win.webContents, 'jtcat-vita49-audio', vita49Frame);
+      // Skip the main window while it's minimized: Chromium throttles it,
+      // the worklet stops consuming, and every frame just rides the
+      // backpressure cap — K3SBP's overnight phone-JTCAT run logged
+      // "1875 frames dropped" every 10s for an hour to a window nobody
+      // could see. Decode is unaffected (the engine eats this same feed
+      // directly above); the renderer copy only drives the waterfall.
+      // Flow resumes automatically on restore (acks catch up).
+      if (win && !win.isDestroyed() && !win.isMinimized()) {
+        audioSafeSend(win.webContents, 'jtcat-vita49-audio', vita49Frame);
+      }
       if (jtcatPopoutWin) {
         audioSafeSend(jtcatPopoutWin.webContents, 'jtcat-vita49-audio', vita49Frame);
       }
@@ -25539,6 +25554,13 @@ app.whenReady().then(() => {
   // case-sensitive; lowercase is the on-air convention) and fire immediately —
   // no slots to wait for. Clicking Send IS the deliberate arm action, so
   // _txEnabled is set here rather than by a separate Enable TX toggle.
+  // PSK31 squelch (popout SQL slider) — live-apply to the engine + persist.
+  ipcMain.on('jtcat-psk-set-sql', (_e, level) => {
+    const v = Math.max(10, Math.min(90, parseInt(level, 10) || 50));
+    settings.pskSquelch = v;
+    saveSettings(settings);
+    if (ft8Engine && typeof ft8Engine.setSquelch === 'function') ft8Engine.setSquelch(v);
+  });
   ipcMain.on('jtcat-psk-send', (_e, text) => {
     if (!ft8Engine || ft8Engine._mode !== 'PSK31') return;
     const t = String(text || '');
