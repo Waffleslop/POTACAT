@@ -121,5 +121,17 @@ test('ini reflects configured ports and gain', () => {
   assert.ok(/tx_gain_db = -6\.0/.test(ini));
 });
 
+test('args/ini honor a resolved FIFO audio config (-x fifo + fifo paths)', () => {
+  const audio = { soundSystem: 'fifo', inputDevice: '/ud/mercury-rx.fifo', outputDevice: '/ud/mercury-tx.fifo' };
+  const args = buildMercuryArgs({}, '/tmp/m.ini', audio).join(' ');
+  assert.ok(args.includes('-x fifo'));
+  assert.ok(args.includes('-i /ud/mercury-rx.fifo'));
+  assert.ok(args.includes('-o /ud/mercury-tx.fifo'));
+  const ini = buildMercuryIni({}, audio);
+  assert.ok(/sound_system = fifo/.test(ini));
+  assert.ok(/input_device = \/ud\/mercury-rx\.fifo/.test(ini));
+  assert.ok(/output_device = \/ud\/mercury-tx\.fifo/.test(ini));
+});
+
 console.log(`\nMercury process helpers: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

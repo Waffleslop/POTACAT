@@ -270,6 +270,7 @@ const mercuryProcess = require('./lib/mercury-process');
 const { MercuryClient } = require('./lib/mercury-client');
 const radioOwnerLib = require('./lib/radio-owner');
 const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
+const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -4190,10 +4191,31 @@ function findMercury() {
 }
 
 /** Write the generated mercury.ini into userData and return its path. */
-function writeMercuryIni() {
+function writeMercuryIni(audio) {
   const iniPath = path.join(app.getPath('userData'), 'mercury.ini');
-  fs.writeFileSync(iniPath, mercuryProcess.buildMercuryIni(settings));
+  fs.writeFileSync(iniPath, mercuryProcess.buildMercuryIni(settings, audio));
   return iniPath;
+}
+
+// Decide how Mercury reaches the radio (real device vs FIFO direct-bridge) for
+// the active rig + this OS. The FIFO direct-bridge transport + audio pumping is
+// Phase 4b (needs a Linux box + real Mercury + rig to validate), so for now a
+// resolved `fifo` strategy is logged and coerced to a device this run.
+function resolveMercuryAudioStrategy() {
+  let rigFamily = '';
+  try {
+    const activeRig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+    rigFamily = activeRig ? (RigFamily.rigFamily(activeRig) || '') : '';
+  } catch { /* best-effort */ }
+  const fifoDir = app.getPath('userData');
+  let audio = mercuryAudioBridge.resolveMercuryAudio({ settings, rigFamily, platform: process.platform, fifoDir });
+  if (audio.useFifo) {
+    sendCatLog(`[Mercury] audio: ${audio.reason} — FIFO direct-bridge transport is not wired yet (Phase 4b); using a real audio device this run`);
+    audio = mercuryAudioBridge.resolveMercuryAudio({ settings: { ...settings, mercuryAudioBridge: 'device' }, rigFamily, platform: process.platform, fifoDir });
+  } else {
+    sendCatLog(`[Mercury] audio: ${audio.reason}`);
+  }
+  return audio;
 }
 
 function killMercury() {
@@ -4217,13 +4239,14 @@ function killMercury() {
 function spawnMercury() {
   return new Promise((resolve, reject) => {
     const mercuryPath = findMercury();
+    const audio = resolveMercuryAudioStrategy();
     let iniPath;
     try {
-      iniPath = writeMercuryIni();
+      iniPath = writeMercuryIni(audio);
     } catch (err) {
       return reject(new Error('could not write mercury.ini: ' + (err.message || err)));
     }
-    const args = mercuryProcess.buildMercuryArgs(settings, iniPath);
+    const args = mercuryProcess.buildMercuryArgs(settings, iniPath, audio);
     killMercury();
     mercuryStderr = '';
     sendCatLog('[Mercury] spawn: ' + [mercuryPath, ...args].map((a) => /\s/.test(a) ? '"' + a + '"' : a).join(' '));
@@ -24079,6 +24102,7 @@ app.whenReady().then(() => {
       (has('mercuryOutputDevice') && newSettings.mercuryOutputDevice !== settings.mercuryOutputDevice) ||
       (has('mercuryCaptureChannel') && newSettings.mercuryCaptureChannel !== settings.mercuryCaptureChannel) ||
       (has('mercuryTxGainDb') && newSettings.mercuryTxGainDb !== settings.mercuryTxGainDb) ||
+      (has('mercuryAudioBridge') && newSettings.mercuryAudioBridge !== settings.mercuryAudioBridge) ||
       (has('mercuryVerbose') && newSettings.mercuryVerbose !== settings.mercuryVerbose);
 
     const smartSdrChanged = (has('smartSdrSpots') && newSettings.smartSdrSpots !== settings.smartSdrSpots) ||

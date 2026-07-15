@@ -1,7 +1,15 @@
 # POTACAT × Mercury — HF Data Modem Integration
 
-Status: **Phases 1–3 shipped 2026-07-14** (launch/supervise; TNC client;
-radio-owner arbiter + PTT bridge). Phases 4–7 designed, not started. Filed: 2026-07-14.
+Status: **Phases 1–3 + 4a shipped 2026-07-14** (launch/supervise; TNC client;
+radio-owner arbiter + PTT bridge; audio-bridge core + strategy). Phase 4b (FIFO
+transport + audio pumping) and 5–7 designed, not started. Filed: 2026-07-14.
+
+### Spike (2026-07-14): Mercury `fifo` backend is POSIX-only
+`audioio/audioio.c` opens the FIFO with `open(path, O_RDONLY/O_WRONLY | O_NONBLOCK)`
+under `#ifndef FF_WIN`, carrying raw **s32le mono @ 8 kHz**. Windows named pipes
+cannot drive it. **Conclusion: the FIFO direct-bridge is Linux/mac only; Windows
+uses a real audio device.** (Casey's primary machine is Windows, so the no-VAC
+differentiator lands on the Pi/Linux/mac headless path, not his desktop.)
 
 [Mercury](https://github.com/Rhizomatica/mercury) (Rhizomatica / HERMES,
 **GPL-3.0-or-later**) is an external HF **data** modem: FreeDV/codec2 OFDM (the
@@ -101,11 +109,25 @@ data = base+1 (8301), broadcast = 8100.
 - **Follow-ups:** SSTV/WSPR/tune `tx-start` guards; multi-slice JTCAT holds `'jtcat'`
   per-slice-TX only (session-level Mercury hold already blocks all JTCAT keying).
 
-### Phase 4 — Audio bridge (per-rig)
-Generic rigs → real device (`-x wasapi|coreaudio|alsa`). Flex/Icom → `-x fifo`
-bridged into the existing 3-route TX dispatch + `feedAudio` RX sinks (8k↔12k
-resample via `resampleMonoFloat32`), obeying the "one owner, others early-return"
-discipline. Windows-FIFO caveat: spike named-pipe vs loopback before committing.
+### Phase 4a — Audio bridge core + strategy ✅ (2026-07-14)
+- `lib/mercury-audio-bridge.js` (pure): `s32leToF32`/`f32ToS32LE` (Mercury FIFO
+  format), `StreamingResampler` (continuity-preserving linear 8k↔12k, carries
+  fractional phase + boundary sample across chunks — no per-buffer edge clicks),
+  and `resolveMercuryAudio({settings,rigFamily,platform,fifoDir})` (device vs FIFO;
+  Windows always device; `auto`→fifo for Flex/Icom-network on POSIX). FIFO paths
+  are `path.posix`. Tests: `test/mercury-audio-bridge-test.js` (14).
+- `buildMercuryArgs`/`buildMercuryIni` take an optional resolved `audio` (emits
+  `-x fifo` + the FIFO paths, else device). main.js `resolveMercuryAudioStrategy`
+  computes it from the active rig family + OS and logs the choice.
+
+### Phase 4b — FIFO transport + audio pumping (deferred; needs Linux+Mercury+rig)
+Generic rigs already work via the device path (Phase 1 + 4a). For Flex/Icom on
+Linux/mac: create the two POSIX FIFOs (mkfifo) before spawn; pump `txFifo`
+(Mercury modem TX, s32le@8k) → `s32leToF32` → resample 8k→12k → the existing
+3-route TX dispatch (`smartSdrAudio`/`_icomNetworkTransport` chunk-push); tap the
+`feedAudio` RX sinks → resample 12k→8k → `f32ToS32LE` → `rxFifo`, obeying the
+"one owner, others early-return" discipline. Until built, a resolved `fifo`
+strategy is logged and coerced to `device`.
 
 ### Phase 5 — Native chat/file UI (`mercury-popout`)
 Own popout window cloned from the JTCAT popout lifecycle; connection bar, chat
