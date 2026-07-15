@@ -2585,6 +2585,53 @@
         <span class="help-text" style="display:block;">0 = no limit (show all spots)</span>
       </div>
     </fieldset>
+    <!-- 8a2. Mercury HF data modem -->
+    <fieldset class="source-toggles collapsible" data-settings-tab="station">
+      <legend>Mercury (HF data)</legend>
+      <label class="checkbox-label">
+        <input type="checkbox" id="set-mercury-enable"> Enable Mercury HF data modem
+      </label>
+      <div id="mercury-config" class="radio-sub hidden">
+        <span class="help-text" style="display:block;margin-bottom:6px;">Keyboard-to-keyboard chat + file transfer over HF via the external Mercury modem (a separate GPL program POTACAT launches and keeps PTT for). Open it from More &rarr; Mercury HF Data. Needs the Mercury binary installed.</span>
+        <label>Mercury binary:
+          <input type="text" id="set-mercury-path" placeholder="auto-detect / leave blank" style="width:230px;">
+          <button type="button" id="mercury-path-browse">Browse&hellip;</button>
+        </label>
+        <span class="help-text" style="display:block;">Leave blank to auto-detect (bundled or on PATH). Point at the Mercury executable if installed elsewhere.</span>
+        <label style="margin-top:8px;">Audio:
+          <select id="set-mercury-sound" style="width:130px;">
+            <option value="auto">auto</option>
+            <option value="wasapi">wasapi (Windows)</option>
+            <option value="dsound">dsound (Windows)</option>
+            <option value="alsa">alsa (Linux)</option>
+            <option value="pulse">pulse (Linux)</option>
+            <option value="coreaudio">coreaudio (mac)</option>
+            <option value="fifo">fifo (Linux/mac direct bridge)</option>
+          </select>
+        </label>
+        <label style="margin-left:8px;">In:
+          <input type="text" id="set-mercury-in" placeholder="capture device" style="width:150px;">
+        </label>
+        <label style="margin-left:8px;">Out:
+          <input type="text" id="set-mercury-out" placeholder="playback device" style="width:150px;">
+        </label>
+        <span class="help-text" style="display:block;">Device names as Mercury lists them (run <code>mercury -z</code>). On a Flex use your DAX RX/TX devices, or a virtual audio cable. Leave &lsquo;auto&rsquo; + blank to let Mercury choose. (fifo is a Linux/mac-only direct-to-radio bridge.)</span>
+        <label style="margin-top:8px;">Bandwidth:
+          <select id="set-mercury-bw" style="width:80px;">
+            <option value="500">500</option>
+            <option value="2300" selected>2300</option>
+            <option value="2750">2750</option>
+          </select>
+        </label>
+        <label style="margin-left:8px;">TX gain (dB):
+          <input type="number" id="set-mercury-txgain" min="-20" max="20" step="0.5" value="0" style="width:60px;">
+        </label>
+        <label class="checkbox-label" style="margin-top:8px;">
+          <input type="checkbox" id="set-mercury-listen"> Listen for incoming calls
+        </label>
+        <span class="help-text" style="display:block;">An inbound call keys PTT automatically — keep the station attended (Part 97). Off by default.</span>
+      </div>
+    </fieldset>
     <!-- 8b. WebSDR (KiwiSDR) -->
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
       <legend>WebSDR</legend>

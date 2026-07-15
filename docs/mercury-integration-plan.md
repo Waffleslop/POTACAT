@@ -130,6 +130,13 @@ Linux/mac: create the two POSIX FIFOs (mkfifo) before spawn; pump `txFifo`
 "one owner, others early-return" discipline. Until built, a resolved `fifo`
 strategy is logged and coerced to `device`.
 
+### Settings UI ✅ (2026-07-14)
+Settings ▸ Station ▸ "Mercury (HF data)" — enable checkbox + reveal sub-panel
+(modeled on the TCI block): binary path + Browse (`echocatPickFile`), sound system,
+in/out device (text; `mercury -z` names), bandwidth, TX gain, Listen. Four app.js
+touch-points (refs/toggle/load/persist); the More▾ "Mercury HF Data" item reveals
+live on save. No more hand-editing settings.json. Test: `scripts/shot-mercury-settings.mjs` (13 e2e).
+
 ### Phase 5 — Native chat/file UI (`mercury-popout`) ✅ (2026-07-14)
 - `lib/mercury-app-protocol.js` (pure): length-prefixed framing over the raw data
   socket — `[type u8][len u32][payload]`, types CHAT/FILE_META/FILE_DATA/FILE_END,

@@ -1141,6 +1141,16 @@ const setKiwiLabel3 = document.getElementById('set-kiwi-label-3');
 const setTciSpots = document.getElementById('set-tci-spots');
 const tciConfig = document.getElementById('tci-config');
 const setTciHost = document.getElementById('set-tci-host');
+// Mercury (HF data) settings
+const setMercuryEnable = document.getElementById('set-mercury-enable');
+const mercuryConfig = document.getElementById('mercury-config');
+const setMercuryPath = document.getElementById('set-mercury-path');
+const setMercurySound = document.getElementById('set-mercury-sound');
+const setMercuryIn = document.getElementById('set-mercury-in');
+const setMercuryOut = document.getElementById('set-mercury-out');
+const setMercuryBw = document.getElementById('set-mercury-bw');
+const setMercuryTxGain = document.getElementById('set-mercury-txgain');
+const setMercuryListen = document.getElementById('set-mercury-listen');
 const setTciPort = document.getElementById('set-tci-port');
 const setTciMaxAge = document.getElementById('set-tci-max-age');
 // CW Keyer
@@ -4375,6 +4385,19 @@ if (setAudioSource) {
 setTciSpots.addEventListener('change', () => {
   tciConfig.classList.toggle('hidden', !setTciSpots.checked);
 });
+if (setMercuryEnable) {
+  setMercuryEnable.addEventListener('change', () => {
+    mercuryConfig.classList.toggle('hidden', !setMercuryEnable.checked);
+  });
+  const mercuryPathBrowse = document.getElementById('mercury-path-browse');
+  if (mercuryPathBrowse) mercuryPathBrowse.addEventListener('click', async () => {
+    const p = await window.api.echocatPickFile({
+      title: 'Select the Mercury modem binary',
+      filters: [{ name: 'Executables', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }],
+    });
+    if (p) setMercuryPath.value = p;
+  });
+}
 // SOTA upload checkbox toggles config visibility
 setSotaUpload.addEventListener('change', () => {
   sotaUploadConfig.classList.toggle('hidden', !setSotaUpload.checked);
@@ -14043,6 +14066,17 @@ async function openSettingsDialog(tab) {
   setTciPort.value = s.tciPort || 50001;
   setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
   tciConfig.classList.toggle('hidden', !s.tciSpots);
+  if (setMercuryEnable) {
+    setMercuryEnable.checked = s.enableMercury === true;
+    setMercuryPath.value = s.mercuryPath || '';
+    setMercurySound.value = s.mercurySoundSystem || 'auto';
+    setMercuryIn.value = s.mercuryInputDevice || '';
+    setMercuryOut.value = s.mercuryOutputDevice || '';
+    setMercuryBw.value = String(s.mercuryBw || 2300);
+    setMercuryTxGain.value = (s.mercuryTxGainDb != null ? s.mercuryTxGainDb : 0);
+    setMercuryListen.checked = s.mercuryListen === true;
+    mercuryConfig.classList.toggle('hidden', !s.enableMercury);
+  }
   // CW Keyer
   setEnableCwKeyer.checked = s.enableCwKeyer === true;
   setCwKeyerType.value = s.cwKeyerType || 'midi';
@@ -14794,6 +14828,16 @@ settingsSave.addEventListener('click', async () => {
     tciHost: tciHostVal,
     tciPort: tciPortVal,
     tciMaxAge: tciMaxAgeVal,
+    ...(setMercuryEnable ? {
+      enableMercury: setMercuryEnable.checked,
+      mercuryPath: setMercuryPath.value.trim(),
+      mercurySoundSystem: setMercurySound.value,
+      mercuryInputDevice: setMercuryIn.value.trim(),
+      mercuryOutputDevice: setMercuryOut.value.trim(),
+      mercuryBw: parseInt(setMercuryBw.value, 10) || 2300,
+      mercuryTxGainDb: parseFloat(setMercuryTxGain.value) || 0,
+      mercuryListen: setMercuryListen.checked,
+    } : {}),
     enableCwKeyer: cwKeyerEnabled,
     cwKeyerType: cwKeyerTypeVal,
     cwKeyerMode: cwKeyerModeVal,
@@ -14831,6 +14875,9 @@ settingsSave.addEventListener('click', async () => {
     remoteAudioOutput: selectedRig ? (selectedRig.remoteAudioOutput || '') : '',
     appMode: document.querySelector('input[name="set-app-mode"]:checked')?.value || 'hunter',
   });
+  // Reflect the Mercury enable state in the More ▾ menu without a reload.
+  var mercuryViewBtn = document.getElementById('view-mercury-btn');
+  if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !setMercuryEnable.checked);
   grid = setGrid.value.trim();
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
