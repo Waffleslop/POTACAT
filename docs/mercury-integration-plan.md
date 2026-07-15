@@ -133,9 +133,23 @@ strategy is logged and coerced to `device`.
 ### Settings UI ✅ (2026-07-14)
 Settings ▸ Station ▸ "Mercury (HF data)" — enable checkbox + reveal sub-panel
 (modeled on the TCI block): binary path + Browse (`echocatPickFile`), sound system,
-in/out device (text; `mercury -z` names), bandwidth, TX gain, Listen. Four app.js
-touch-points (refs/toggle/load/persist); the More▾ "Mercury HF Data" item reveals
-live on save. No more hand-editing settings.json. Test: `scripts/shot-mercury-settings.mjs` (13 e2e).
+in/out device, bandwidth, TX gain, Listen. Four app.js touch-points
+(refs/toggle/load/persist); the More▾ "Mercury HF Data" item reveals live on save.
+Plus platform-specific **install instructions** with a clickable download link
+(required allowlisting the Rhizomatica domains in main.js's open-external handler —
+the allowlist is the real gate, a link element alone isn't enough). No more
+hand-editing settings.json.
+
+**Device-discovery wizard:** a "Discover devices" button runs `mercury -x <ss> -z`
+via the `mercury-list-devices` IPC → `parseSoundcardList` (pure, unit-tested against
+the real `device: name: '…' id: '…' default: …` format) → clickable capture/playback
+pickers that fill In/Out with the device **id** (shows the name). Auto-matches the
+active rig's audio: resolve `rig.remoteAudioInput/Output` ids → mediaDevice labels →
+token-match against Mercury's device names. Renders the list BEFORE the (sometimes
+slow) `enumerateDevices()` smart-match so the picker never blocks on it.
+Test: `scripts/shot-mercury-settings.mjs` (parser unit-tested; e2e covers the DOM +
+graceful no-binary path — the success/render path isn't harness-testable: frozen
+contextBridge can't be stubbed and execFile can't run a fake binary on Windows).
 
 ### Phase 5 — Native chat/file UI (`mercury-popout`) ✅ (2026-07-14)
 - `lib/mercury-app-protocol.js` (pure): length-prefixed framing over the raw data

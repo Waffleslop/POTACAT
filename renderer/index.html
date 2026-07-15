@@ -2622,7 +2622,21 @@
         <label style="margin-left:8px;">Out:
           <input type="text" id="set-mercury-out" placeholder="playback device" style="width:150px;">
         </label>
-        <span class="help-text" style="display:block;">Device names as Mercury lists them (run <code>mercury -z</code>). On a Flex use your DAX RX/TX devices, or a virtual audio cable. Leave &lsquo;auto&rsquo; + blank to let Mercury choose. (fifo is a Linux/mac-only direct-to-radio bridge.)</span>
+        <span class="help-text" style="display:block;">On a Flex use your DAX RX/TX devices, or a virtual audio cable. Leave &lsquo;auto&rsquo; + blank to let Mercury choose. (fifo is a Linux/mac-only direct-to-radio bridge.)</span>
+        <div style="margin-top:5px;">
+          <button type="button" id="mercury-discover-btn">&#128269; Discover devices</button>
+          <span class="help-text" id="mercury-discover-status" style="margin-left:8px;"></span>
+        </div>
+        <div id="mercury-devices" class="radio-sub hidden" style="margin-top:5px;display:flex;gap:18px;flex-wrap:wrap;">
+          <div style="min-width:230px;">
+            <div class="help-text" style="font-weight:700;margin-bottom:3px;">Capture &mdash; radio RX (fills In):</div>
+            <div id="mercury-cap-list"></div>
+          </div>
+          <div style="min-width:230px;">
+            <div class="help-text" style="font-weight:700;margin-bottom:3px;">Playback &mdash; radio TX (fills Out):</div>
+            <div id="mercury-play-list"></div>
+          </div>
+        </div>
         <label style="margin-top:8px;">Bandwidth:
           <select id="set-mercury-bw" style="width:80px;">
             <option value="500">500</option>

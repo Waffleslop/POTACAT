@@ -104,6 +104,17 @@ check('listen persisted', saved.mercuryListen === true);
 const btnVisible = await main.evaluate(() => { const b = document.getElementById('view-mercury-btn'); return b ? !b.classList.contains('hidden') : false; });
 check('Mercury menu item shown after enabling', btnVisible === true);
 
+// --- Device discovery wizard: no binary present → graceful error (real IPC).
+// (The success/render path needs a runnable mercury binary — contextBridge's
+// window.api is frozen so it can't be stubbed in-page, and execFile can't run a
+// fake on Windows without shell. The parser is covered by unit tests, and the
+// render/click layer is exercised on a real machine.)
+await main.evaluate(() => document.getElementById('mercury-discover-btn').click());
+await new Promise((r) => setTimeout(r, 1500));
+const discErr = await main.evaluate(() => document.getElementById('mercury-discover-status').textContent);
+check('Discover without a binary shows a graceful error', /⚠|not found|could not|timed out/i.test(discErr), discErr);
+check('discovery button + results container exist in the DOM', await main.evaluate(() => !!document.getElementById('mercury-cap-list') && !!document.getElementById('mercury-play-list')));
+
 await app.close();
 console.log(failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

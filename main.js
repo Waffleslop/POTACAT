@@ -20699,6 +20699,28 @@ app.whenReady().then(() => {
   ipcMain.on('mercury-open-downloads', () => {
     try { require('electron').shell.openPath(path.join(app.getPath('userData'), 'mercury-downloads')); } catch {}
   });
+  // Device discovery wizard: run `mercury -x <ss> -z` and parse the sound-card
+  // list so Settings can offer a one-click picker instead of hand-typed names.
+  ipcMain.handle('mercury-list-devices', async () => {
+    const bin = findMercury();
+    const soundSystem = mercuryProcess.mercuryDiscoverySoundSystem(settings, process.platform);
+    return await new Promise((resolve) => {
+      let done = false;
+      execFile(bin, ['-x', soundSystem, '-z'], { timeout: 8000, windowsHide: true }, (err, stdout) => {
+        if (done) return; done = true;
+        const parsed = mercuryProcess.parseSoundcardList(stdout || '');
+        const found = parsed.capture.length + parsed.playback.length;
+        if (found === 0 && err) {
+          const msg = err.code === 'ENOENT'
+            ? 'Mercury not found — set its path above, then try again.'
+            : (err.killed ? 'mercury -z timed out.' : (err.message || 'could not run mercury -z'));
+          resolve({ ok: false, error: msg, soundSystem });
+          return;
+        }
+        resolve({ ok: true, soundSystem, capture: parsed.capture, playback: parsed.playback });
+      });
+    });
+  });
 
   // --- JTCAT Map Pop-out ---
   ipcMain.on('jtcat-map-popout', () => {

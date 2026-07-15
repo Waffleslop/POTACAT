@@ -350,6 +350,7 @@ contextBridge.exposeInMainWorld('api', {
   // JTCAT pop-out
   jtcatPopoutOpen: () => ipcRenderer.send('jtcat-popout-open'),
   mercuryPopoutOpen: () => ipcRenderer.send('mercury-popout-open'),
+  mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
   jtcatSetUltracat: (on) => ipcRenderer.send('jtcat-set-ultracat', on),
   jtcatPopoutTheme: (theme) => ipcRenderer.send('jtcat-popout-theme', theme),
   onJtcatPopoutStatus: (cb) => ipcRenderer.on('jtcat-popout-status', (_e, open) => cb(open)),

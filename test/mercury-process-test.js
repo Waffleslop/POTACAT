@@ -11,6 +11,8 @@ const {
   mercuryPorts,
   buildMercuryArgs,
   buildMercuryIni,
+  parseSoundcardList,
+  mercuryDiscoverySoundSystem,
 } = require('../lib/mercury-process');
 
 let pass = 0, fail = 0;
@@ -131,6 +133,41 @@ test('args/ini honor a resolved FIFO audio config (-x fifo + fifo paths)', () =>
   assert.ok(/sound_system = fifo/.test(ini));
   assert.ok(/input_device = \/ud\/mercury-rx\.fifo/.test(ini));
   assert.ok(/output_device = \/ud\/mercury-tx\.fifo/.test(ini));
+});
+
+// ---- mercury -z parsing ----
+const SAMPLE_Z = [
+  "playback devices:",
+  "device: name: 'Speakers (Realtek(R) Audio)'  id: '{0.0.0.00000000}.{aaaa}'  default: 1",
+  "device: name: 'DAX Audio TX'  id: '{0.0.0.00000000}.{bbbb}'  default: 0",
+  "capture devices:",
+  "device: name: 'Microphone (USB Audio)'  id: '{0.0.1.00000000}.{cccc}'  default: 1",
+  "device: name: 'DAX Audio RX 1'  id: '{0.0.1.00000000}.{dddd}'  default: 0",
+  "",
+].join("\n");
+
+test('parseSoundcardList splits capture vs playback with name/id/default', () => {
+  const r = parseSoundcardList(SAMPLE_Z);
+  assert.strictEqual(r.playback.length, 2);
+  assert.strictEqual(r.capture.length, 2);
+  assert.deepStrictEqual(r.playback[1], { name: 'DAX Audio TX', id: '{0.0.0.00000000}.{bbbb}', isDefault: false });
+  assert.deepStrictEqual(r.capture[0], { name: 'Microphone (USB Audio)', id: '{0.0.1.00000000}.{cccc}', isDefault: true });
+  const dax = r.capture.find((d) => /DAX Audio RX/.test(d.name));
+  assert.strictEqual(dax.id, '{0.0.1.00000000}.{dddd}');
+});
+
+test('parseSoundcardList tolerates CRLF and empty/garbage input', () => {
+  assert.deepStrictEqual(parseSoundcardList(''), { capture: [], playback: [] });
+  assert.deepStrictEqual(parseSoundcardList('no devices here'), { capture: [], playback: [] });
+  const crlf = parseSoundcardList("capture devices:\r\ndevice: name: 'X'  id: 'y'  default: 0\r\n");
+  assert.strictEqual(crlf.capture[0].name, 'X');
+});
+
+test('discovery sound system resolves auto/no-device backends to the platform default', () => {
+  assert.strictEqual(mercuryDiscoverySoundSystem({}, 'win32'), 'wasapi');
+  assert.strictEqual(mercuryDiscoverySoundSystem({ mercurySoundSystem: 'auto' }, 'linux'), 'alsa');
+  assert.strictEqual(mercuryDiscoverySoundSystem({ mercurySoundSystem: 'fifo' }, 'darwin'), 'coreaudio');
+  assert.strictEqual(mercuryDiscoverySoundSystem({ mercurySoundSystem: 'dsound' }, 'win32'), 'dsound');
 });
 
 console.log(`\nMercury process helpers: ${pass} passed, ${fail} failed`);

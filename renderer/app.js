@@ -4397,6 +4397,77 @@ if (setMercuryEnable) {
     });
     if (p) setMercuryPath.value = p;
   });
+
+  // --- Device discovery wizard (runs `mercury -z`) ---
+  const mercuryDiscoverBtn = document.getElementById('mercury-discover-btn');
+  const mercuryDiscoverStatus = document.getElementById('mercury-discover-status');
+  const mercuryDevices = document.getElementById('mercury-devices');
+  const mercuryCapList = document.getElementById('mercury-cap-list');
+  const mercuryPlayList = document.getElementById('mercury-play-list');
+
+  function renderMercuryDeviceList(container, devices, targetInput, label) {
+    container.innerHTML = '';
+    if (!devices.length) { container.innerHTML = '<span class="help-text">(none found)</span>'; return; }
+    devices.forEach((d) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = d.name + (d.isDefault ? '  (default)' : '');
+      b.title = 'id: ' + d.id;
+      b.style.cssText = 'display:block;width:100%;text-align:left;margin:2px 0;padding:3px 6px;font-size:12px;border-radius:4px;cursor:pointer;border:1px solid var(--border-primary);background:var(--bg-primary);color:var(--text-primary);';
+      if (d.id === targetInput.value) b.style.borderColor = 'var(--accent-green, #4ecca3)';
+      b.addEventListener('click', () => {
+        targetInput.value = d.id;
+        Array.from(container.children).forEach((c) => { c.style.borderColor = 'var(--border-primary)'; });
+        b.style.borderColor = 'var(--accent-green, #4ecca3)';
+        mercuryDiscoverStatus.textContent = label + ' = ' + d.name;
+      });
+      container.appendChild(b);
+    });
+  }
+
+  // Suggest the Mercury device that matches the ACTIVE rig's configured audio.
+  // POTACAT's device ids are Chromium mediaDevice ids; Mercury reports its own
+  // names — so we bridge by LABEL: resolve the rig's device id to its label via
+  // enumerateDevices(), then token-match that label against Mercury's names.
+  async function mercurySuggestFromRig(res) {
+    try {
+      const rig = (settings.rigs || []).find((r) => r.id === settings.activeRigId);
+      if (!rig) return null;
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const labelFor = (id) => { const d = all.find((x) => x.deviceId === id); return d ? d.label : ''; };
+      const bestMatch = (lbl, list) => {
+        if (!lbl) return null;
+        const toks = lbl.toLowerCase().replace(/[()]/g, ' ').split(/\s+/).filter((t) => t.length > 1);
+        let best = null, score = 0;
+        list.forEach((d) => { const n = d.name.toLowerCase(); let s = 0; toks.forEach((t) => { if (n.indexOf(t) >= 0) s++; }); if (s > score) { score = s; best = d; } });
+        return score >= 2 ? best : null; // need a couple of matching tokens
+      };
+      return { cap: bestMatch(labelFor(rig.remoteAudioInput), res.capture), play: bestMatch(labelFor(rig.remoteAudioOutput), res.playback) };
+    } catch { return null; }
+  }
+
+  if (mercuryDiscoverBtn) mercuryDiscoverBtn.addEventListener('click', async () => {
+    mercuryDiscoverStatus.textContent = 'Running mercury -z…';
+    mercuryDevices.classList.add('hidden');
+    let res;
+    try { res = await window.api.mercuryListDevices(); } catch (e) { res = { ok: false, error: e && e.message }; }
+    if (!res || !res.ok) { mercuryDiscoverStatus.textContent = '⚠ ' + ((res && res.error) || 'discovery failed'); return; }
+    if (res.soundSystem) setMercurySound.value = res.soundSystem;
+    // Render the lists FIRST so the picker never depends on the (occasionally
+    // slow) enumerateDevices() call the smart-match uses below.
+    renderMercuryDeviceList(mercuryCapList, res.capture, setMercuryIn, 'In');
+    renderMercuryDeviceList(mercuryPlayList, res.playback, setMercuryOut, 'Out');
+    mercuryDevices.classList.remove('hidden');
+    mercuryDiscoverStatus.textContent = 'Found ' + (res.capture.length + res.playback.length) + ' devices (' + res.soundSystem + '). Pick one Capture + one Playback, then Save.';
+    // Best-effort smart match to the active rig's audio — refines the selection.
+    const suggest = await mercurySuggestFromRig(res);
+    if (suggest && (suggest.cap || suggest.play)) {
+      if (suggest.cap) { setMercuryIn.value = suggest.cap.id; renderMercuryDeviceList(mercuryCapList, res.capture, setMercuryIn, 'In'); }
+      if (suggest.play) { setMercuryOut.value = suggest.play.id; renderMercuryDeviceList(mercuryPlayList, res.playback, setMercuryOut, 'Out'); }
+      mercuryDiscoverStatus.textContent = '✓ Matched your rig' +
+        (suggest.cap ? ' — In: ' + suggest.cap.name : '') + (suggest.play ? ', Out: ' + suggest.play.name : '') + '. Review and Save.';
+    }
+  });
 }
 // SOTA upload checkbox toggles config visibility
 setSotaUpload.addEventListener('change', () => {
