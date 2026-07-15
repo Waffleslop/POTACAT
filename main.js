@@ -266,6 +266,7 @@ const { getAllContests } = require('./lib/contests-db');
 const { eventDecodeMatch } = require('./lib/event-decode-match');
 const { DxClusterClient } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
+const mercuryProcess = require('./lib/mercury-process');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -1019,6 +1020,13 @@ let rbn = null;
 let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
 let rbnFlushTimer = null; // throttle timer for RBN -> renderer updates
 let rbnWatchSpots = []; // RBN spots for watchlist callsigns, merged into main table
+// Mercury HF data modem (external GPL-3.0 process; see lib/mercury-process.js).
+// Phase 1: launch + supervise + readiness probe. The persistent TNC client
+// (lib/mercury-client.js) and PTT/audio arbiter land in later phases.
+let mercuryProc = null;         // the spawned child process handle
+let mercuryStderr = '';         // accumulated stderr (capped at 4KB)
+let mercuryReadyProbe = null;   // net.Socket used to confirm the TNC is listening
+let mercuryLastStatus = null;   // last status pushed to the renderer (dedupe)
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
 let smartSdrAudio = null;     // separate non-GUI TCP for slice audio (DAX-free path)
@@ -4087,6 +4095,178 @@ function disconnectRbn() {
   rbnSpots = [];
   rbnWatchSpots = [];
   sendRbnStatus({ connected: false });
+}
+
+// --- Mercury HF data modem ---
+// External standalone modem (Rhizomatica/HERMES, GPL-3.0-or-later). POTACAT
+// launches it as a SEPARATE PROCESS and talks to it only over its TCP TNC
+// interface — never linked — so the GPL stays off POTACAT's Apache binary
+// (mere aggregation, same posture as the bundled wsprd). The launch/supervise
+// flow is cloned from spawnRigctld(); the pure launch decisions (path
+// candidates, CLI args, ini) live in lib/mercury-process.js.
+//
+// Radio ownership stays with POTACAT: Mercury is spawned with NO radio-control
+// flags and radio_model = -1, so it never keys the rig — it emits PTT ON/OFF
+// on the control socket for a later phase to drive handleRemotePtt(). Phase 1
+// only launches, supervises, and probes that the TNC is listening.
+
+function sendMercuryStatus(s) {
+  // Dedupe identical consecutive statuses so a reconnect storm doesn't spam
+  // the log; always forward the first and any change.
+  const sig = JSON.stringify(s || {});
+  if (sig !== mercuryLastStatus) {
+    mercuryLastStatus = sig;
+    if (s && typeof s.connected === 'boolean') {
+      sendCatLog(`[Mercury] ${s.connected ? 'ready on TCP' : 'not running'}${s.host ? ` ${s.host}:${s.port}` : ''}${s.error ? ` — ${s.error}` : ''}`);
+    }
+  }
+  if (win && !win.isDestroyed()) win.webContents.send('mercury-status', s);
+}
+
+function findMercury() {
+  const candidates = mercuryProcess.mercuryPathCandidates({
+    settings,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir: __dirname,
+    platform: process.platform,
+  });
+  for (const p of candidates) {
+    try {
+      fs.accessSync(p, fs.constants.X_OK);
+      return p;
+    } catch { /* continue */ }
+  }
+  // Fall back to the bare name — spawn() will search PATH; ENOENT surfaces a
+  // clear "not found" status if it isn't installed.
+  console.log('[Mercury] binary not found at bundled or system paths — falling back to PATH');
+  return mercuryProcess.mercuryBinaryName(process.platform);
+}
+
+/** Write the generated mercury.ini into userData and return its path. */
+function writeMercuryIni() {
+  const iniPath = path.join(app.getPath('userData'), 'mercury.ini');
+  fs.writeFileSync(iniPath, mercuryProcess.buildMercuryIni(settings));
+  return iniPath;
+}
+
+function killMercury() {
+  if (mercuryReadyProbe) {
+    try { mercuryReadyProbe.destroy(); } catch { /* ignore */ }
+    mercuryReadyProbe = null;
+  }
+  if (mercuryProc) {
+    try { mercuryProc.kill(); } catch { /* ignore */ }
+    mercuryProc = null;
+  }
+}
+
+/**
+ * Spawn Mercury and resolve once the process has stayed up past a short init
+ * window. Modeled on spawnRigctld(): stderr piped to the CAT log, exit/error
+ * handlers null the handle and surface a status, promise gated on a 500ms
+ * readiness timer (no OTA — just "did it stay up").
+ */
+function spawnMercury() {
+  return new Promise((resolve, reject) => {
+    const mercuryPath = findMercury();
+    let iniPath;
+    try {
+      iniPath = writeMercuryIni();
+    } catch (err) {
+      return reject(new Error('could not write mercury.ini: ' + (err.message || err)));
+    }
+    const args = mercuryProcess.buildMercuryArgs(settings, iniPath);
+    killMercury();
+    mercuryStderr = '';
+    sendCatLog('[Mercury] spawn: ' + [mercuryPath, ...args].map((a) => /\s/.test(a) ? '"' + a + '"' : a).join(' '));
+
+    let proc;
+    try {
+      proc = spawn(mercuryPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (err) {
+      return reject(err);
+    }
+    mercuryProc = proc;
+
+    proc.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      mercuryStderr += text;
+      if (mercuryStderr.length > 4096) mercuryStderr = mercuryStderr.slice(-4096);
+      text.split('\n').filter(Boolean).forEach((line) => sendCatLog(`[Mercury] ${line}`));
+    });
+
+    let settled = false;
+    proc.on('error', (err) => {
+      if (mercuryProc === proc) mercuryProc = null;
+      if (!settled) { settled = true; reject(err); }
+    });
+    proc.on('exit', (code) => {
+      if (mercuryProc === proc) mercuryProc = null;
+      const lastLine = mercuryStderr.trim().split('\n').pop() || `mercury exited with code ${code}`;
+      if (!settled) { settled = true; reject(new Error(lastLine)); }
+      else sendMercuryStatus({ connected: false, error: lastLine });
+    });
+
+    setTimeout(() => {
+      if (!settled) { settled = true; resolve(proc); }
+    }, 500);
+  });
+}
+
+/**
+ * Probe that Mercury's control port is accepting connections. Phase 1 stand-in
+ * for the persistent MercuryClient (Phase 2) — opens a throwaway socket, and on
+ * connect reports ready, then closes it so it doesn't hold Mercury's single
+ * client slot. Retries a few times to cover the modem's own startup latency.
+ */
+function probeMercuryReady(attempt = 0) {
+  const net = require('net');
+  const { control } = mercuryProcess.mercuryPorts(settings);
+  const host = '127.0.0.1';
+  if (mercuryReadyProbe) { try { mercuryReadyProbe.destroy(); } catch {} mercuryReadyProbe = null; }
+  const sock = net.connect({ host, port: control });
+  mercuryReadyProbe = sock;
+  sock.setTimeout(2000);
+  sock.on('connect', () => {
+    sendMercuryStatus({ connected: true, host, port: control });
+    try { sock.end(); } catch {}
+    mercuryReadyProbe = null;
+  });
+  const retry = (err) => {
+    try { sock.destroy(); } catch {}
+    if (mercuryReadyProbe === sock) mercuryReadyProbe = null;
+    if (!mercuryProc) return; // gave up / stopped
+    if (attempt < 5) setTimeout(() => probeMercuryReady(attempt + 1), 1000);
+    else sendMercuryStatus({ connected: false, host, port: control, error: (err && err.message) || 'TNC not answering' });
+  };
+  sock.on('timeout', () => retry(new Error('probe timeout')));
+  sock.on('error', retry);
+}
+
+async function connectMercury() {
+  // Idempotent teardown of any prior instance.
+  disconnectMercury();
+  if (!settings.enableMercury) {
+    sendMercuryStatus({ connected: false });
+    return;
+  }
+  try {
+    await spawnMercury();
+  } catch (err) {
+    const msg = (err && err.code === 'ENOENT')
+      ? 'Mercury binary not found — set its path in Settings or install it'
+      : (err && err.message) || String(err);
+    sendMercuryStatus({ connected: false, error: msg });
+    return;
+  }
+  probeMercuryReady();
+}
+
+function disconnectMercury() {
+  killMercury();
+  mercuryLastStatus = null;
+  sendMercuryStatus({ connected: false });
 }
 
 // --- PSKReporter FreeDV integration ---
@@ -18315,6 +18495,7 @@ app.whenReady().then(() => {
   // Propagation popout always has data, regardless of whether enableRbn was
   // ever flipped on by the user.
   if (settings.myCallsign) connectRbn();
+  if (settings.enableMercury) connectMercury();
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
   connectAntennaGenius();
@@ -23787,6 +23968,21 @@ app.whenReady().then(() => {
       (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign) ||
       (has('watchlist') && newSettings.watchlist !== settings.watchlist);
 
+    // Mercury: relaunch only when a launch-relevant key actually changed, so
+    // an unrelated settings save never kills+respawns the modem (the rigctld
+    // respawn-race lesson, N4RDX v1.9.8). Audio-device/gain changes also
+    // require a relaunch since they're baked into the ini + CLI args at spawn.
+    const mercuryChanged = (has('enableMercury') && newSettings.enableMercury !== settings.enableMercury) ||
+      (has('mercuryPath') && newSettings.mercuryPath !== settings.mercuryPath) ||
+      (has('mercuryBasePort') && newSettings.mercuryBasePort !== settings.mercuryBasePort) ||
+      (has('mercuryBroadcastPort') && newSettings.mercuryBroadcastPort !== settings.mercuryBroadcastPort) ||
+      (has('mercurySoundSystem') && newSettings.mercurySoundSystem !== settings.mercurySoundSystem) ||
+      (has('mercuryInputDevice') && newSettings.mercuryInputDevice !== settings.mercuryInputDevice) ||
+      (has('mercuryOutputDevice') && newSettings.mercuryOutputDevice !== settings.mercuryOutputDevice) ||
+      (has('mercuryCaptureChannel') && newSettings.mercuryCaptureChannel !== settings.mercuryCaptureChannel) ||
+      (has('mercuryTxGainDb') && newSettings.mercuryTxGainDb !== settings.mercuryTxGainDb) ||
+      (has('mercuryVerbose') && newSettings.mercuryVerbose !== settings.mercuryVerbose);
+
     const smartSdrChanged = (has('smartSdrSpots') && newSettings.smartSdrSpots !== settings.smartSdrSpots) ||
       (has('smartSdrHost') && newSettings.smartSdrHost !== settings.smartSdrHost);
 
@@ -24003,6 +24199,13 @@ app.whenReady().then(() => {
       } else {
         disconnectRbn();
       }
+    }
+
+    // Relaunch Mercury if a launch-relevant key changed. connectMercury()
+    // tears down first and returns early when enableMercury is off.
+    if (mercuryChanged) {
+      if (settings.enableMercury) connectMercury();
+      else disconnectMercury();
     }
 
     // Reconnect SmartSDR if settings changed (also needed for WSJT-X+Flex and CW keyer).
@@ -26462,6 +26665,7 @@ function gracefulCleanup() {
     }
   } catch {}
   killRigctld();
+  try { killMercury(); } catch {}
 }
 
 app.on('before-quit', gracefulCleanup);
