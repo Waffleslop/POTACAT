@@ -55,6 +55,12 @@ function _applyPopoutTheme(payload) {
   // on each render(); drives the .jp-spotted / .jp-new-park row classes.
   var spottedCalls = new Map();
 
+  // True when the active rig is a FlexRadio. Gates the "RX audio silent —
+  // check DAX routing" waterfall overlay: an all-zero passband is a
+  // Flex-specific fault (the slice isn't routed to POTACAT's DAX RX channel),
+  // not a meaningful signal on any other rig, so the hint is Flex-only.
+  var popoutIsFlex = false;
+
   // ULTRACAT (tier-2 easter egg) — reveal/hide the Full Auto CQ controls.
   function applyUltracat(on) {
     document.body.classList.toggle('ultracat', !!on);
@@ -78,6 +84,8 @@ function _applyPopoutTheme(payload) {
     reflectFd();
     skipTx1 = !!s.jtcatSkipTx1;
     reflectSkipTx1();
+    answerCallers = s.jtcatAnswerCallers !== false; // default on
+    reflectAnswerCallers();
     holdTxFreq = !!s.jtcatHoldTxFreq;
     reflectHoldTx();
     houndMode = !!s.jtcatHoundMode;
@@ -99,7 +107,8 @@ function _applyPopoutTheme(payload) {
     // Evaluated at popout open; a rig switch mid-session re-opens JTCAT anyway.
     if (window.RigFamily) {
       var activeRigForMulti = (s.rigs || []).find(function(r) { return r && r.id === s.activeRigId; });
-      if (!window.RigFamily.isFlex(activeRigForMulti)) {
+      popoutIsFlex = window.RigFamily.isFlex(activeRigForMulti);
+      if (!popoutIsFlex) {
         var multiBtnEl = document.getElementById('jp-multi-btn');
         if (multiBtnEl) multiBtnEl.classList.add('hidden');
         var multiPanelEl = document.getElementById('jp-multi-panel');
@@ -171,6 +180,14 @@ function _applyPopoutTheme(payload) {
   var houndMode = false;
   function reflectHound() {
     if (houndToggle) houndToggle.classList.toggle('active', houndMode);
+  }
+  // Answer callers: while Auto-CQ is on and idle, auto-answer a station calling
+  // us directly (abandoned callbacks / late answers), not just CQ callers.
+  // Default on (settings.jtcatAnswerCallers !== false).
+  var answerCallersToggle = document.getElementById('jp-answer-callers');
+  var answerCallers = true;
+  function reflectAnswerCallers() {
+    if (answerCallersToggle) answerCallersToggle.classList.toggle('active', answerCallers);
   }
   var enableTxBtn = document.getElementById('jp-enable-tx');
   var haltTxBtn = document.getElementById('jp-halt-tx');
@@ -1991,6 +2008,17 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // Answer callers toggle — auto-answer a station calling us directly while
+  // Auto-CQ is on and idle (main.js jtcatTryAnswerDirectCaller reads the
+  // setting; honored for both popout and phone owners).
+  if (answerCallersToggle) {
+    answerCallersToggle.addEventListener('click', function() {
+      answerCallers = !answerCallers;
+      reflectAnswerCallers();
+      window.api.saveSettings({ jtcatAnswerCallers: answerCallers });
+    });
+  }
+
   // Hold TX Freq toggle — WSJT-X "Hold Tx Freq": keep our TX audio frequency
   // fixed instead of following each answered station. Uses the DEDICATED IPC
   // (not saveSettings) so main live-applies the engine setter and echoes the
@@ -2821,6 +2849,9 @@ function _applyPopoutTheme(payload) {
   function stopPopoutAudio() {
     if (popoutAudioProcessor) { popoutAudioProcessor.disconnect(); popoutAudioProcessor = null; }
     popoutAnalyser = null;
+    // No analyser means no RX-silent verdict — drop any overlay.
+    wfSilentShown = false;
+    setWfSilentOverlay(false);
     popoutRxGainNode = null;
     if (popoutAudioCtx) { popoutAudioCtx.close().catch(function() {}); popoutAudioCtx = null; }
     if (popoutAudioStream) { popoutAudioStream.getTracks().forEach(function(t) { t.stop(); }); popoutAudioStream = null; }
@@ -2970,6 +3001,11 @@ function _applyPopoutTheme(payload) {
         popoutAudioProcessor.connect(popoutAudioCtx.destination);
       }
       console.log('[JTCAT popout] Audio capture started, sample rate:', nativeRate);
+      // Prime the RX-silent watchdog so it measures a fresh WF_SILENCE_MS window
+      // from now — not from epoch 0, which would trip the overlay immediately.
+      wfLastSignalTs = Date.now();
+      wfSilentShown = false;
+      setWfSilentOverlay(false);
       // Start local waterfall rendering loop
       popoutWaterfallLoop();
     } catch (err) {
@@ -3062,6 +3098,24 @@ function _applyPopoutTheme(payload) {
   resizeWaterfall();
   window.addEventListener('resize', resizeWaterfall);
 
+  // --- RX-silent watchdog (Flex only) ---
+  // A dead DAX stream — the slice isn't routed to POTACAT's DAX RX channel, the
+  // exact "DAX channel CONFLICT / no longer fighting for it" state main.js
+  // warns about — reads as an all-zero passband here. On a Flex that's a
+  // routing fault worth surfacing, and it's distinguishable from a quiet band:
+  // a LIVE DAX carries band noise, so its passband is never zero. We warn only
+  // after the passband stays flatline for WF_SILENCE_MS, and clear the instant
+  // signal returns. Skipped while transmitting (RX is muted) or when RX gain is
+  // zeroed (that silence is the operator's choice, not a fault).
+  var jpWfSilentEl = document.getElementById('jp-wf-silent');
+  var WF_SILENCE_MS = 8000;    // flatline this long before the overlay shows
+  var WF_SILENCE_FLOOR = 2;    // max byte magnitude still treated as silence
+  var wfLastSignalTs = 0;      // last frame with passband energy above floor
+  var wfSilentShown = false;   // overlay currently visible
+  function setWfSilentOverlay(on) {
+    if (jpWfSilentEl) jpWfSilentEl.classList.toggle('show', !!on);
+  }
+
   // Waterfall rendering loop — driven by local AnalyserNode (no IPC)
   function popoutWaterfallLoop() {
     if (!popoutAnalyser) return;
@@ -3072,6 +3126,25 @@ function _applyPopoutTheme(payload) {
       // AnalyserNode covers 0 to sampleRate/2. FT8 passband is 0–3000 Hz.
       var nyquist = (popoutAudioCtx ? popoutAudioCtx.sampleRate : 12000) / 2;
       var passbandBins = Math.floor(3000 / nyquist * freqData.length);
+
+      // RX-silent watchdog (Flex only) — see notes above popoutWaterfallLoop.
+      if (popoutIsFlex && !transmitting && popoutRxGainLevel > 0.001) {
+        var wfMax = 0;
+        for (var pb = 0; pb < passbandBins; pb++) { if (freqData[pb] > wfMax) wfMax = freqData[pb]; }
+        var wfNow = Date.now();
+        if (wfMax > WF_SILENCE_FLOOR) {
+          wfLastSignalTs = wfNow;
+          if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
+        } else if (!wfSilentShown && (wfNow - wfLastSignalTs) > WF_SILENCE_MS) {
+          setWfSilentOverlay(true); wfSilentShown = true;
+        }
+      } else {
+        // Not applicable (non-Flex, transmitting, or muted): no verdict. Clear
+        // any warning and reset the clock so a fresh window is measured when we
+        // requalify (e.g. the moment TX ends).
+        wfLastSignalTs = Date.now();
+        if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
+      }
 
       var w = jpWaterfall.width;
       var h = jpWaterfall.height;

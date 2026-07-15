@@ -6568,6 +6568,82 @@ function processPopoutJtcatQso(results) {
   advanceJtcatQso(qso, results, popoutJtcatSetTxMsg, popoutJtcatOnDone(qso));
 }
 
+// Answer a station calling US directly while idle in auto-CQ mode (settings.
+// jtcatAnswerCallers, default on). A direct call — "MYCALL THEIRCALL <grid |
+// ±NN | (bare)>" — is NOT a "CQ", so the CQ-hunt selection below never engages
+// it. But a station you abandoned (busy working someone else during your retry
+// cap) who then finishes and calls you back arrives exactly this way, as does
+// any late answerer to a CQ you just stopped calling. Charlie/W7RTA's "you have
+// to double-click it" is precisely this gap. We synthesize the CQ SIDE of the
+// QSO and hand it to the SAME state machine that works a normal answer-to-our-
+// CQ, so report/phase/RR73/logging/return-to-idle are byte-identical and
+// already unit-tested — then on completion the non-run-mode teardown clears the
+// QSO and auto-CQ hunting resumes on the next decode. Returns true if a caller
+// was engaged (so the caller skips CQ-hunting this cycle). (KQ4MHD 2026-07-15.)
+async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
+  if (settings.jtcatAnswerCallers === false) return false;
+  if (!_autoSeqEnabled()) return false;         // auto-seq off = manual control
+  if (!ft8Engine || !myCall || !myGrid) return false;
+
+  // Decodes calling us: call1 === our call. That excludes CQs and our OWN
+  // echoes (whose call1 is the other station, never us — the N3VD echo guard),
+  // with no order-blind "contains both calls" ambiguity. Sender (call2) must be
+  // a real callsign we haven't already logged (skip completed dupes; a station
+  // still in jtcatAutoCqWorkedSession from an *abandon* is intentionally NOT
+  // skipped — that's the callback we want to catch).
+  const callers = results
+    .map((d) => ({ d, parts: (d.text || '').toUpperCase().replace(/[<>]/g, '').trim().split(/\s+/) }))
+    .filter(({ parts }) =>
+      parts.length >= 2 &&
+      parts[0] === myCall &&
+      parts[1] !== myCall &&
+      JtcatParser.looksLikeCallsign(parts[1]) &&
+      !(workedQsos && workedQsos.has(parts[1])));
+  if (!callers.length) return false;
+  callers.sort((a, b) => ((b.d.db == null ? -999 : b.d.db) - (a.d.db == null ? -999 : a.d.db)));
+  const caller = callers[0].d;
+  const senderCall = callers[0].parts[1];
+
+  // CQ-side QSO shell — identical shape to a CQ we called and they answered.
+  const qso = { mode: 'cq', phase: 'cq', call: null, grid: null, txMsg: '',
+    report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+  const fd = jtcatFdContext();
+  if (fd) { qso.fd = true; qso.myExch = fd.myExch; }
+
+  ft8Engine.setRxFreq(caller.df);
+  if (!settings.jtcatHoldTxFreq) ft8Engine.setTxFreq(caller.df);
+  ft8Engine._txEnabled = true;
+  const theirSlot = caller.slot || 'even';      // reply on the opposite slot
+  ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
+
+  const owner = (jtcatAutoCqOwner === 'remote') ? 'remote' : 'popout';
+  if (owner === 'remote') { remoteJtcatQso = qso; processRemoteJtcatQso(results); }
+  else { popoutJtcatQso = qso; processPopoutJtcatQso(results); }
+
+  // Did it engage? The CQ handler only advances on a parseable <grid>/<±NN>/
+  // bare reply; an RR73/73 straggler or unparseable line leaves phase 'cq'.
+  // If it didn't engage, roll back to idle so the CQ-hunt fallback can run and
+  // we never sit transmitting a phantom CQ we didn't intend.
+  const q = (owner === 'remote') ? remoteJtcatQso : popoutJtcatQso;
+  if (!q || q.phase === 'cq') {
+    if (owner === 'remote') remoteJtcatQso = null; else popoutJtcatQso = null;
+    ft8Engine._txEnabled = false;
+    try { ft8Engine.setTxMessage(''); } catch {}
+    try { ft8Engine.setTxSlot('auto'); } catch {}
+    return false;
+  }
+  // Engaged — set the reply message + late-start this cycle, exactly like the
+  // CQ-hunt answer path so the report goes out on the next opposite slot.
+  if (q.txMsg) {
+    await ft8Engine.setTxMessage(q.txMsg);
+    if (typeof ft8Engine.tryImmediateTx === 'function') ft8Engine.tryImmediateTx();
+  }
+  jtcatAutoCqWorkedSession.add(senderCall);
+  sendCatLog(`[JTCAT Auto-CQ] Answering direct call from ${senderCall} (SNR ${caller.db}dB) — "${caller.text}"`);
+  broadcastAutoCqState();
+  return true;
+}
+
 // One give-up executor for all four decode-handler retry blocks (popout +
 // remote, single-engine + multi-slice). The old duplicated inline copies
 // drifted — the multi-slice remote one read the constant instead of
@@ -6924,7 +7000,11 @@ function startJtcat(mode) {
       const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
       if (myCall && myGrid && ft8Engine) {
         const results = data.results || [];
-        const candidates = results
+        // Answer a station calling us DIRECTLY first (abandoned callbacks, late
+        // answers) — see jtcatTryAnswerDirectCaller. Only hunt a fresh CQ if we
+        // didn't engage one, so a callback always beats starting a new QSO.
+        const answeredCaller = await jtcatTryAnswerDirectCaller(results, myCall, myGrid);
+        const candidates = answeredCaller ? [] : results
           .filter(d => matchesAutoCqFilter(d.text, jtcatAutoCqMode))
           .map(d => ({ ...d, ...parseCqMessage(d.text) }))
           .filter(d => {
@@ -10917,12 +10997,42 @@ function connectRemote() {
     sendCwTextToRadio(text);
   });
 
+  // Sanitize a VFO-profile list arriving from a remote client before it
+  // becomes the persisted source of truth. Nothing on the wire is trusted
+  // here: a buggy or hostile client could otherwise land malformed entries in
+  // settings.vfoProfiles and corrupt the popout render / disk state. Rules
+  // mirror the data model (docs/mobile-handoff-vfo-profiles-sync.md): drop
+  // non-objects and any entry without a usable frequency; coerce name (≤64) +
+  // mode to strings; keep filterWidth only when finite and > 0 (never 0).
+  // Unknown fields are PRESERVED (forward-compat: a future id/updatedAt must
+  // survive the round trip). Capped so a runaway push can't bloat settings.json.
+  function sanitizeVfoProfiles(list) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const p of list) {
+      if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+      const freqKhz = Number(p.freqKhz);
+      if (!Number.isFinite(freqKhz) || freqKhz <= 0) continue;
+      const clean = { ...p };                 // keep unknown fields (forward-compat)
+      clean.freqKhz = freqKhz;
+      clean.name = String(p.name == null ? '' : p.name).slice(0, 64);
+      clean.mode = p.mode == null ? '' : String(p.mode);
+      const fw = Number(p.filterWidth);
+      if (Number.isFinite(fw) && fw > 0) clean.filterWidth = fw;
+      else delete clean.filterWidth;
+      out.push(clean);
+      if (out.length >= 500) break;
+    }
+    return out;
+  }
+
   // Phone updated the VFO profile list — single source of truth is
-  // `settings.vfoProfiles`. Save, then echo back to BOTH the phone (so its
-  // local list is the canonical persisted version) and the desktop VFO
-  // popout (live refresh of its inline list + Profiles tab).
+  // `settings.vfoProfiles`. Sanitize the untrusted list, save, then echo back
+  // to BOTH the phone (so its local list is the canonical persisted version,
+  // reconciled to the cleaned form) and the desktop VFO popout (live refresh of
+  // its inline list + Profiles tab).
   remoteServer.on('vfo-profiles-update', ({ profiles }) => {
-    settings.vfoProfiles = Array.isArray(profiles) ? profiles : [];
+    settings.vfoProfiles = sanitizeVfoProfiles(profiles);
     saveSettings(settings);
     remoteServer.sendVfoProfiles(settings.vfoProfiles);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
@@ -20667,7 +20777,16 @@ app.whenReady().then(() => {
     sendCatLog(`[Mercury] calling ${t} as ${mine}`);
   });
   ipcMain.on('mercury-cmd-disconnect', () => { if (mercuryClient) mercuryClient.arqDisconnect(); });
-  ipcMain.on('mercury-cmd-abort', () => { if (mercuryClient) mercuryClient.abort(); });
+  ipcMain.on('mercury-cmd-abort', () => {
+    if (mercuryClient) mercuryClient.abort();
+    // Defensive stop: a call in progress (or a wedged over) may not send a
+    // prompt PTT OFF, so drop our own PTT and cancel the failsafe now rather
+    // than waiting on Mercury. If Mercury re-keys for a real session, the
+    // bridge's PTT-ON handler re-arms everything.
+    clearMercuryTxFailsafe();
+    if (mercuryTxActive) { mercuryTxActive = false; try { handleRemotePtt(false); } catch {} }
+    sendCatLog('[Mercury] ABORT (user) — TX stopped');
+  });
   ipcMain.on('mercury-cmd-listen', (_e, on) => {
     settings.mercuryListen = !!on; saveSettings(settings);
     if (!mercuryClient) return mercuryNotReady();
@@ -23019,6 +23138,18 @@ app.whenReady().then(() => {
       // Continue with whatever cert we have — don't block pair-QR generation.
     }
 
+    // Refresh alt-hosts NOW so the tsHost/cloudHost baked into this QR reflect
+    // the CURRENT network, not the last periodic tick. getAltHosts() below
+    // reads a cache that's otherwise only refreshed at startup / cloud-tunnel
+    // change / every 10 min, which fails two common cases:
+    //   1. The operator signed into Tailscale AFTER launch (or since the last
+    //      tick) — the cached tsHost is still empty, so a Tailscale-only phone
+    //      scanning this QR would have nothing to dial.
+    //   2. ensureTailscaleCertReady() just restarted ECHOCAT for a first-time
+    //      cert — a fresh RemoteServer starts with empty _altHosts.
+    // (K3SBP 2026-07-15 — "turn on Tailscale, then scan" must embed tsHost.)
+    try { _refreshAltHosts(); } catch {}
+
     let qrcode;
     try { qrcode = require('qrcode'); }
     catch (err) {
@@ -23182,6 +23313,10 @@ app.whenReady().then(() => {
     } catch (err) {
       sendCatLog('[Pair-Link] Cert setup threw: ' + (err.message || err));
     }
+    // Refresh alt-hosts so a link minted right after enabling Tailscale (or
+    // after a first-time cert restart) actually carries the tailnet/cloud host.
+    // Same staleness reasoning as echocat-create-pairing-qr above.
+    try { _refreshAltHosts(); } catch {}
     let row;
     try {
       row = remoteServer.createPairLink({

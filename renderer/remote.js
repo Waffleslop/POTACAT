@@ -10847,10 +10847,15 @@
           if (vfProfileNameInput) vfProfileNameInput.focus();
           return;
         }
-        // Snapshot current VFO state. currentFilterWidth may be 0 if the rig
-        // hasn't reported one yet — store undefined in that case so apply
-        // doesn't attempt to set a 0-Hz filter.
-        const freqKhz = currentFreqHz ? Math.round(currentFreqHz / 1000) : 0;
+        // Snapshot current VFO state at full precision. Round to whole Hz (the
+        // radio's real resolution), THEN convert to kHz — do NOT Math.round to
+        // integer kHz, which silently drops CW/FT8 sub-kHz dial offsets (e.g. a
+        // 10118.5 kHz CW spot would collapse to 10119, and applying it later
+        // would tune 500 Hz off). Matches the desktop popout, which stores
+        // currentFreqHz/1000. currentFilterWidth may be 0 if the rig hasn't
+        // reported one yet — store undefined in that case so apply doesn't set
+        // a 0-Hz filter. (K3SBP 2026-07-15.)
+        const freqKhz = currentFreqHz ? Math.round(currentFreqHz) / 1000 : 0;
         if (!freqKhz) return;
         vfoProfiles.push({
           name, freqKhz,

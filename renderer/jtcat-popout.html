@@ -245,6 +245,11 @@
 
     /* Waterfall */
     .jp-waterfall { width: 100%; height: 80px; image-rendering: pixelated; cursor: crosshair; flex-shrink: 0; border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); display: block; }
+    /* RX-silent overlay (Flex-only; toggled by .show from jtcat-popout.js) */
+    #jp-wf-silent { display: none; position: absolute; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center; background: rgba(24, 12, 0, 0.74); pointer-events: none; z-index: 3; }
+    #jp-wf-silent.show { display: flex; }
+    #jp-wf-silent strong { color: #f0a500; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; text-shadow: 0 1px 2px #000; }
+    #jp-wf-silent span { color: #f0c060; font-size: 9px; opacity: 0.85; }
 
     /* Station popup */
     .jp-station-popup .leaflet-popup-content-wrapper { background: var(--bg-secondary, #1a1a2e); color: var(--text-primary, #eee); border: 1px solid var(--border-primary, #333); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
@@ -465,6 +470,8 @@
   <div id="jp-wf-single" style="position:relative;flex-shrink:0;">
     <canvas id="jp-waterfall" class="jp-waterfall" width="600" height="80"></canvas>
     <div id="jp-wf-tx-marker" style="position:absolute;top:0;bottom:0;width:1px;background:#ff2222;box-shadow:-1px 0 0 #000, 1px 0 0 #000;pointer-events:none;left:50%;"></div>
+    <!-- Flex-only: shown by jtcat-popout.js when the DAX RX stream reads silent -->
+    <div id="jp-wf-silent"><strong>RX audio silent — check DAX routing</strong><span>slice may not be on POTACAT's DAX RX channel</span></div>
   </div>
   <!-- Side-by-side waterfalls (multi-slice mode) -->
   <div id="jp-wf-multi" class="hidden" style="display:flex;flex-shrink:0;border-top:1px solid var(--border-primary);"></div>
@@ -494,6 +501,11 @@
       <option value="sota">Auto: SOTA</option>
       <option value="all">Auto: All CQ</option>
     </select>
+    <!-- Answer callers: while Auto-CQ is on and idle, also auto-answer a
+         station calling YOU directly (not just CQ callers) — e.g. one you
+         abandoned who finishes and calls back — then return to Auto-CQ.
+         Default on; reflects settings.jtcatAnswerCallers. -->
+    <button id="jp-answer-callers" class="jtcat-filter-btn active" title="While Auto-CQ is on and idle, automatically answer a station calling you directly (e.g. one you abandoned who calls back), then return to Auto-CQ. Answers anyone directing a call at your callsign; skips stations already in your log.">Answer Callers</button>
     <!-- ARRL Field Day — class+section exchange in place of grid/report.
          When on, CQ becomes "CQ FD …" and QSOs run the FD sequence. -->
     <button id="jp-fd-toggle" class="jtcat-filter-btn" title="ARRL Field Day mode: send CQ FD and exchange class + ARRL/RAC section (e.g. 2A EMA) instead of grid/report">FD</button>
