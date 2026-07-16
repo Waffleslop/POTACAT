@@ -10947,34 +10947,45 @@ function connectRemote() {
         if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwKeyPins);
       } else if (paddleMethod === 'ta' && cwCaps.taKey) {
         cat.setCwKeyTa(down);
-      } else if (rigModel?.protocol === 'kenwood' && !(cwKeyPort && cwKeyPort.isOpen)) {
-        // txrx route on a Yaesu/Kenwood serial rig is bare PTT (TX1;/TX0; or
-        // TX;/RX;) — it keys the transmitter with ZERO CW output and no rig
-        // sidetone (G5HOW FTDx10, 2026-06-29). Skip it (mirroring the rigctld
-        // branch) and tell the phone the paddle won't make RF. Icom 'txrx' is a
-        // real CI-V key line, so it's not caught here. A dedicated CW Key Port
-        // (handled below) keys for real, so only skip when none is open.
-        if (!_cwTxrxPttOnlyLogged) {
+      } else if (rigModel?.protocol === 'kenwood') {
+        // Yaesu/Kenwood CAT has NO per-element CW key command — the txrx route is
+        // bare PTT (TX1;/TX0; or TX;/RX;), which keys the transmitter with ZERO CW
+        // output and no rig sidetone (G5HOW FTDx10, 2026-06-29). So NEVER dead-key
+        // PTT for a paddle here. If a dedicated CW Key Port is open (e.g. the
+        // FTDX10's second/Standard USB COM port with PC KEYING = DTR/RTS), the block
+        // below does the real per-element keying — so we skip cat-side entirely,
+        // mirroring the Icom-'dtr'-with-keyport and rigctld branches. Previously we
+        // fell through to setCwKeyTxRx and dead-keyed PTT on the CAT port on top of
+        // the key port's real keying (held the rig in SEND). With no key port there's
+        // no way to make CW from a paddle at all, so tell the phone it won't make RF.
+        if (!(cwKeyPort && cwKeyPort.isOpen) && !_cwTxrxPttOnlyLogged) {
           _cwTxrxPttOnlyLogged = true;
           sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +
-            'Workarounds: (1) type text in the CW widget\'s text box — that uses the rig\'s internal keyer and makes real RF; ' +
-            '(2) connect the rig\'s second (Enhanced) USB COM port, set the rig menu PC KEYING = DTR, and select it as the CW Key Port in Settings → Rig.');
+            'For a real paddle: connect the rig\'s OTHER USB COM port (the one not used for CAT — "Standard" on the FTDX10, "Enhanced/CAT-2" on FT-710/991), ' +
+            'set the rig menu PC KEYING (or USB Keying (CW)) = DTR or RTS, and select that port as the CW Key Port in Settings → Rig — then set Settings → Rig → CW keying line to match, and enable BK-IN. ' +
+            'Or type in the CW text box — that uses the rig\'s internal keyer and makes real RF. See docs/linux-cw-keying.md.');
           _setCwPaddleAvailability(false, 'txrx-ptt-only');
         }
-        // Skip cat-side keying; fall through to the dedicated CW Key Port block.
+        // Skip cat-side keying; the dedicated CW Key Port block below (if open) keys.
       } else {
         cat.setCwKeyTxRx(down);
       }
       } // end non-rigctld branch
     }
-    // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter or QMX second port
+    // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter,
+    // a QMX second port, or a Yaesu's second (Standard/Enhanced) USB COM port.
     if (cwKeyPort && cwKeyPort.isOpen) {
-      // A dedicated key port is a separate USB-serial adapter with its own fixed
-      // wiring to the CW jack, so it uses the rig-model default pins (QMX = both,
-      // most = DTR) — NOT the cwKeyLine override, which describes the RADIO's own
-      // USB Keying (CW) menu on the main CAT port. Drive BOTH lines explicitly (keyed
-      // line follows `down`, other forced low) so node-serialport can't latch here either.
-      const pins = cwCaps.dtrPins || { dtr: true };
+      // Which line(s) the key port drives. Default: the model's key pins when it
+      // names one that includes DTR (QMX = DTR+RTS); otherwise DTR — the near-
+      // universal default for an external transistor adapter AND the Yaesu
+      // "PC KEYING = DTR" case. The per-rig cwKeyLine override lets a Yaesu user
+      // who set PC KEYING = RTS (or an RTS-wired adapter) select RTS instead.
+      // (We deliberately don't use the RADIO's main-port dtrPins here — that's the
+      // rig's own USB-keying line, e.g. IC-7300 RTS, which is a different port than
+      // an external key adapter that's almost always DTR.) Drive BOTH lines
+      // explicitly so node-serialport can't latch the un-keyed one.
+      const kpDefault = (cwCaps.dtrPins && cwCaps.dtrPins.dtr) ? cwCaps.dtrPins : { dtr: true, rts: false };
+      const pins = resolveCwKeyPins({ modelPins: kpDefault, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
       const pinState = { dtr: pins.dtr ? !!down : false, rts: pins.rts ? !!down : false };
       cwKeyPort.set(pinState, (err) => {
         if (err && !cwKeyPort._dtrLoggedError) {

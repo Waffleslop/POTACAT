@@ -117,6 +117,41 @@ lsusb | grep -i "CP210\|Silicon Labs"      # 10c4:ea60 = the IC-7300
 dmesg | grep -i "cp210x\|ttyUSB"           # shows which /dev/ttyUSB* it claimed
 ```
 
+## Yaesu FTDX10 / FT-710 / FT-991 — fist keying via the second COM port
+
+Yaesu's CAT protocol has **no per-element CW key command** — the only thing CAT
+can do is assert PTT (`TX1;`/`TX0;`), which keys the transmitter with *no* CW
+envelope. So a real paddle / straight key ("fist") cannot be sent over the CAT
+port alone. POTACAT will tell you this if you try (the ECHOCAT paddle shows a
+"won't make RF" banner and drops sidetone).
+
+The FTDX10's single USB cable presents **two** virtual COM ports:
+
+- **Enhanced COM port** — CAT (frequency/mode). Use this as your POTACAT CAT port.
+- **Standard COM port** — TX controls, including **CW keying** via a DTR/RTS line.
+
+To get fist keying working:
+
+1. **Radio:** RADIO SETTING → MODE CW → **PC KEYING = DTR** (or **RTS**).
+   Enable **BK-IN** (break-in) so the key line transmits.
+2. **POTACAT:** Settings → Rig → **CW Key Port** = the **Standard** COM port
+   (the one you are *not* using for CAT — e.g. `/dev/ttyUSB1`).
+3. **POTACAT:** Settings → Rig → **CW keying line** = **DTR** or **RTS**, matching
+   the PC KEYING value you set in step 1.
+
+POTACAT then pulses that line per dit/dah on the Standard port — real CW, real
+sidetone from the radio — while CAT (freq/mode/spots) keeps running on the
+Enhanced port. It no longer dead-keys PTT on the CAT port while you send.
+
+> On Linux the two ports enumerate as `/dev/ttyUSB0` and `/dev/ttyUSB1` (both
+> "Silicon Labs CP210x"). `dmesg | grep ttyUSB` shows which is which; if you're
+> unsure, the Enhanced port is the one that answers CAT (POTACAT connects to it).
+> The udev rule above already covers both (same `10c4:ea60`).
+
+Alternatives that also give a real fist: an external USB-UART (FTDI/CH340) with a
+keying transistor on the rig's **KEY** jack (set it as the CW Key Port, keying
+line = DTR), or a **WinKeyer**.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
