@@ -26,6 +26,7 @@
   var TRANSCRIPT_CAP = 5000;
   var tncConnected = false;   // control socket up (modem reachable)
   var arqConnected = false;   // in an ARQ session
+  var calling = false;        // Connect sent, ARQ not yet established (or the callee never answered)
   var listening = false;
 
   // ---- window controls ----
@@ -54,14 +55,18 @@
 
   // ---- enable/disable by state ----
   function refreshControls() {
-    connectBtn.disabled = !tncConnected || arqConnected;
-    disconnectBtn.disabled = !arqConnected;
-    abortBtn.disabled = !arqConnected;
+    // "busy" = calling OR connected. Abort/Disconnect must be reachable during
+    // the calling phase too — otherwise an unanswered call keys the rig with no
+    // way to stop it (the callee never answers, so arqConnected never flips).
+    var busy = arqConnected || calling;
+    connectBtn.disabled = !tncConnected || busy;
+    disconnectBtn.disabled = !busy;
+    abortBtn.disabled = !busy;
     sendFileBtn.disabled = !arqConnected;
     txEl.disabled = !arqConnected;
     sendBtn.disabled = !arqConnected;
-    theirEl.disabled = arqConnected;
-    listenCb.disabled = !tncConnected || arqConnected;
+    theirEl.disabled = busy;
+    listenCb.disabled = !tncConnected || busy;
     bwSel.disabled = !tncConnected;
   }
 
@@ -72,6 +77,7 @@
   function deriveState() {
     if (!tncConnected) return setState('offline');
     if (arqConnected) return setState('connected');
+    if (calling) return setState('connecting');
     if (listening) return setState('listening');
     setState('idle');
   }
@@ -80,12 +86,14 @@
   connectBtn.addEventListener('click', function () {
     var their = (theirEl.value || '').trim().toUpperCase();
     if (!their) { theirEl.focus(); return; }
-    setState('connecting');
+    calling = true;
     sys('Calling ' + their + '…');
     window.api.mercuryConnect(their);
+    deriveState();
+    refreshControls();
   });
-  disconnectBtn.addEventListener('click', function () { window.api.mercuryDisconnect(); sys('Disconnecting…'); });
-  abortBtn.addEventListener('click', function () { window.api.mercuryAbort(); sys('Aborting link.'); });
+  disconnectBtn.addEventListener('click', function () { calling = false; window.api.mercuryDisconnect(); sys('Disconnecting…'); deriveState(); refreshControls(); });
+  abortBtn.addEventListener('click', function () { calling = false; window.api.mercuryAbort(); sys('Aborting link.'); deriveState(); refreshControls(); });
   listenCb.addEventListener('change', function () { window.api.mercuryListen(listenCb.checked); });
   bwSel.addEventListener('change', function () { window.api.mercurySetBw(parseInt(bwSel.value, 10)); });
 
@@ -110,12 +118,13 @@
   window.api.onMercuryStatus(function (s) {
     tncConnected = !!(s && s.connected);
     connNote.textContent = tncConnected ? ('modem ready · ' + (s.host || '') + ':' + (s.port || '')) : (s && s.error ? s.error : 'modem not running');
-    if (!tncConnected) { arqConnected = false; listening = false; listenCb.checked = false; }
+    if (!tncConnected) { arqConnected = false; calling = false; listening = false; listenCb.checked = false; }
     deriveState();
     refreshControls();
   });
 
   window.api.onMercurySession(function (d) {
+    calling = false; // the call resolved one way or the other
     if (d.state === 'connected') {
       arqConnected = true;
       addLine('sys', '', '● Connected: ' + (d.source || '?') + ' ⇄ ' + (d.dest || '?') + ' @ BW' + (d.bandwidth || '?'));
