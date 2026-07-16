@@ -38,9 +38,10 @@ expect({ transportType: 'rigctld', paddleKey: 'dtr', protocol: 'civ', hasKeyPort
   false, 'rigctld-no-per-element-cw', 'rigctld, no key port (any model)');
 
 console.log('Real key-line routes stay available:');
-// Icom 'txrx' is a real CI-V key line (0x1C 0x01), NOT the Yaesu dead PTT.
+// Icom's real key route is 'dtr' (or CW text 0x17); 'txrx' isn't flagged dead
+// because Icom never routes paddles through it. (0x1C 0x01 is the ATU, not a key.)
 expect({ transportType: 'serial', paddleKey: 'txrx', protocol: 'civ', hasKeyPort: false },
-  true, null, 'Icom txrx (CI-V key line)');
+  true, null, 'Icom txrx (not the Kenwood dead-PTT route)');
 expect({ transportType: 'serial', paddleKey: 'dtr', protocol: 'civ', hasKeyPort: false },
   true, null, 'Icom DTR keying');
 expect({ transportType: 'serial', paddleKey: 'dtr', protocol: 'kenwood', hasKeyPort: false },

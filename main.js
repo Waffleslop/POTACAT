@@ -258,6 +258,7 @@ const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
+const { resolveCwKeyPins } = require('./lib/cw-key-line');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
@@ -3195,13 +3196,14 @@ async function connectCat() {
     sendCatLog(`Connecting to Icom on ${target.path}`);
     // Default DTR/RTS to LOW on the main CAT port. USB-CDC serial defaults
     // DTR high at open, but many Icom rigs (IC-7300, MK II, etc.) can be
-    // configured to use DTR as a CW key source (Menu → SET → Connectors →
-    // USB Keying (CW) = USB(A) DTR). In that mode, idle-high DTR means the
+    // configured to use DTR or RTS as a CW key source (Menu → SET → Connectors →
+    // USB Keying (CW) = USB(A) DTR/RTS). In that mode, an idle-high line means the
     // rig sees CW keyed-down any time it's in CW mode, and the moment the
-    // user switches to CW the tone goes out. Forcing DTR low on connect
-    // avoids that. POTACAT's CW keying uses CI-V 0x1C 0x01 for paddle
-    // elements (or a dedicated cwKeyPort for DTR-keying workflows) so this
-    // safety is always correct. Reported by KM4CFT 2026-04-24.
+    // user switches to CW the tone goes out. Forcing both lines low on connect
+    // avoids that. POTACAT keys CW via the DTR/RTS control line (setCwKeyDtr,
+    // line selected by the rig model / per-rig cwKeyLine), a dedicated cwKeyPort,
+    // or CW text over CI-V 0x17 — NOT 0x1C 0x01 (that's the antenna tuner). So
+    // forcing the lines low here is always safe. Reported by KM4CFT 2026-04-24.
     const dtrOff = target.dtrOff !== false; // default true
     transport.connect({ path: target.path, baudRate: target.baudRate || 19200, dtrOff });
 
@@ -10844,6 +10846,12 @@ function connectRemote() {
     const rigType = detectRigType();
     const rigModel = getActiveRigModel();
     const cwCaps = rigModel?.cw || {};
+    // Which modem-control line(s) key CW on the main CAT port: rig-model default
+    // (cw.dtrPins) unless the operator overrode it per-rig (rig.cwKeyLine) to match
+    // their radio's USB Keying (CW) = DTR/RTS menu. resolveCwKeyPins forces the
+    // un-keyed line low so node-serialport can't latch it (see setCwKeyDtr).
+    const _cwActiveRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    const cwKeyPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
     if (cat && cat.connected && rigType !== 'flex') {
       // Pause polling so commands don't interleave with CW keying
       if (down) {
@@ -10907,20 +10915,22 @@ function connectRemote() {
       if (!_cwKeyLoggedRoute) {
         _cwKeyLoggedRoute = true;
         sendCatLog(`[CW] Keying route: ${paddleMethod}${cwKeyPort && cwKeyPort.isOpen ? ' + dedicated key port' : ''} (model: ${rigModel?.brand || '?'})`);
-        // Actionable hint when we're toggling DTR on the main CAT port — a
-        // very common "radio doesn't key" gotcha is the rig menu not being
-        // set to read DTR. (KQ3Q on IC-7300.)
+        // Actionable hint when we're toggling a control line on the main CAT
+        // port — a very common "radio doesn't key" gotcha is the rig menu keying
+        // line (DTR vs RTS) not matching what POTACAT drives. (KQ3Q on IC-7300.)
         if (paddleMethod === 'main-dtr') {
           const brand = (rigModel?.brand || '').toLowerCase();
+          const line = (cwKeyPins.dtr && cwKeyPins.rts) ? 'DTR+RTS' : (cwKeyPins.rts ? 'RTS' : 'DTR');
           let hint;
           if (brand === 'icom') {
-            hint = 'IC-7300/705/7610: SET > Connectors > USB SEND = DTR (or USB Keying (CW) = USB(A) DTR).';
+            hint = `IC-7300/705/7610: SET > Connectors > USB SEND/Keying > USB Keying (CW) = ${line}. ` +
+              `POTACAT is driving ${line}; if your radio menu uses the other line, change one to match (Settings > Rig > CW keying line).`;
           } else if (brand === 'yaesu') {
-            hint = 'Yaesu: OPERATION SETTING > TUNING > CAT PORT setup + CW KEYING source = DTR.';
+            hint = `Yaesu: OPERATION SETTING > TUNING > CAT PORT setup + CW KEYING source = ${line}.`;
           } else if (brand === 'kenwood') {
-            hint = 'Kenwood: Menu > PC Port / USB > CW Keying = DTR.';
+            hint = `Kenwood: Menu > PC Port / USB > CW Keying = ${line}.`;
           } else {
-            hint = 'Check your rig menu — "USB Keying (CW) = DTR" (or equivalent) must be set or the DTR pulses POTACAT sends will not key the radio.';
+            hint = `Check your rig menu — "USB Keying (CW) = ${line}" (or equivalent) must match, or the ${line} pulses POTACAT sends won't key the radio.`;
           }
           sendCatLog(`[CW] If the radio isn't keying, verify the rig menu: ${hint}`);
         }
@@ -10934,7 +10944,7 @@ function connectRemote() {
         // 'pin-unsupported' on first try and we drop phone-side sidetone via
         // _setCwPaddleAvailability(false). Subsequent calls here are no-ops
         // since rig-controller latches `_dtrUnsupported` after the first error.
-        if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwCaps.dtrPins || { dtr: true });
+        if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwKeyPins);
       } else if (paddleMethod === 'ta' && cwCaps.taKey) {
         cat.setCwKeyTa(down);
       } else if (rigModel?.protocol === 'kenwood' && !(cwKeyPort && cwKeyPort.isOpen)) {
@@ -10959,11 +10969,13 @@ function connectRemote() {
     }
     // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter or QMX second port
     if (cwKeyPort && cwKeyPort.isOpen) {
-      // Use dtrPins from rig model: { dtr: true, rts: true } for QMX, { dtr: true } for most others
+      // A dedicated key port is a separate USB-serial adapter with its own fixed
+      // wiring to the CW jack, so it uses the rig-model default pins (QMX = both,
+      // most = DTR) — NOT the cwKeyLine override, which describes the RADIO's own
+      // USB Keying (CW) menu on the main CAT port. Drive BOTH lines explicitly (keyed
+      // line follows `down`, other forced low) so node-serialport can't latch here either.
       const pins = cwCaps.dtrPins || { dtr: true };
-      const pinState = {};
-      if (pins.dtr) pinState.dtr = !!down;
-      if (pins.rts) pinState.rts = !!down;
+      const pinState = { dtr: pins.dtr ? !!down : false, rts: pins.rts ? !!down : false };
       cwKeyPort.set(pinState, (err) => {
         if (err && !cwKeyPort._dtrLoggedError) {
           console.log(`[CW Key Port] Pin set error: ${err.message} (pins: ${JSON.stringify(pinState)})`);

@@ -1205,6 +1205,7 @@ const setTxEqEnabled = document.getElementById('set-tx-eq-enabled');
 const setTxEqPreset = document.getElementById('set-tx-eq-preset');
 const setTxEqPresetRow = document.getElementById('set-tx-eq-preset-row');
 const setCwKeyPort = document.getElementById('set-cw-key-port');
+const setCwKeyLine = document.getElementById('set-cw-key-line');
 const remoteUrlDisplay = document.getElementById('remote-url-display');
 // Mobile-app pairing UI (Phase 0 of native app)
 const echocatPairBtn = document.getElementById('echocat-pair-btn');
@@ -2444,6 +2445,8 @@ async function openRigEditor(mode, rigId) {
       await populateRigAudioDevices(rig.remoteAudioInput, rig.remoteAudioOutput);
       // Restore per-rig CW key port
       if (setCwKeyPort && rig.cwKeyPort) setCwKeyPort.value = rig.cwKeyPort;
+      // Restore per-rig CW keying line (DTR/RTS override; default 'auto')
+      if (setCwKeyLine) setCwKeyLine.value = rig.cwKeyLine || 'auto';
       if (setRadioNr) setRadioNr.value = String(rig.radioNr || 1);
       const flexApiHostEl = document.getElementById('set-flex-api-host');
       if (flexApiHostEl) flexApiHostEl.value = rig.flexApiHost || '';
@@ -2464,6 +2467,7 @@ async function openRigEditor(mode, rigId) {
     rigEditorTitle.textContent = 'Add Rig';
     setRigName.value = '';
     if (rigModelSelect) rigModelSelect.value = '';
+    if (setCwKeyLine) setCwKeyLine.value = 'auto';
     if (setRadioNr) setRadioNr.value = '1';
     const fh = document.getElementById('set-flex-api-host');
     if (fh) fh.value = '';
@@ -2560,6 +2564,7 @@ rigSaveBtn.addEventListener('click', async () => {
   // selected radio type (rebuildAudioSourceOptions), so this is always legal.
   const rigAudioSource = setAudioSource ? setAudioSource.value : 'dax';
   const rigCwKeyPortVal = setCwKeyPort ? setCwKeyPort.value || '' : '';
+  const rigCwKeyLineVal = setCwKeyLine ? (setCwKeyLine.value || 'auto') : 'auto';
   const rigRadioNr = setRadioNr ? parseInt(setRadioNr.value, 10) || 1 : 1;
   const flexApiHostEl = document.getElementById('set-flex-api-host');
   const rigFlexApiHost = flexApiHostEl ? flexApiHostEl.value.trim() : '';
@@ -2585,6 +2590,7 @@ rigSaveBtn.addEventListener('click', async () => {
       rig.remoteAudioOutput = rigAudioOut;
       rig.audioSource = rigAudioSource;
       rig.cwKeyPort = rigCwKeyPortVal;
+      rig.cwKeyLine = rigCwKeyLineVal;
       rig.radioNr = rigRadioNr;
       rig.flexApiHost = rigFlexApiHost;
       rig.flexSlice = rigFlexSlice;
@@ -2603,6 +2609,7 @@ rigSaveBtn.addEventListener('click', async () => {
       remoteAudioOutput: rigAudioOut,
       audioSource: rigAudioSource,
       cwKeyPort: rigCwKeyPortVal,
+      cwKeyLine: rigCwKeyLineVal,
       radioNr: rigRadioNr,
       flexApiHost: rigFlexApiHost,
       flexSlice: rigFlexSlice,
