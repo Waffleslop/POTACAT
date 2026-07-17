@@ -38,14 +38,20 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
   check(!!c._probeTimer && !c._reconnectTimer, 'background probe armed after give-up');
 
   // Probe fires → dials again; dial fails → probe re-armed, NO second give-up.
+  // Dial counts are LOWER bounds, not exact: with the probe interval shrunk to
+  // 40 ms, a sleep(60) that resolves late on a loaded CI runner fits an extra
+  // probe cycle inside the stretched window (seen twice on GitHub runners,
+  // 2026-07-17 — dials=3 at the second check). The regression being guarded is
+  // "probing continues and give-up fires exactly once", not the dial count.
   await sleep(60);
-  check(dials === 1, 'probe dialed the radio');
+  check(dials >= 1, 'probe dialed the radio');
   check(giveUps === 1, 'failed probe does not re-emit give-up (no banner spam)');
   check(!!c._probeTimer, 'probe re-armed after failure');
 
   // Second probe cycle keeps going (radio still off).
+  const dialsAfterFirstWindow = dials;
   await sleep(60);
-  check(dials === 2 && giveUps === 1, 'probing continues indefinitely, quietly');
+  check(dials > dialsAfterFirstWindow && giveUps === 1, 'probing continues indefinitely, quietly');
 
   // Radio comes back: successful connect resets state (mirrors the
   // sock.on(connect) handler). Then a later failure starts a FRESH cycle.
