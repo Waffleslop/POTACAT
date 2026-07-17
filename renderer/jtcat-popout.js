@@ -716,7 +716,7 @@ function _applyPopoutTheme(payload) {
       '<span class="jp-dt">' + dtStr + '</span>' +
       '<span class="jp-df">' + d.df + '</span>' +
       '<span class="jp-msg">' + esc(text) + '</span>' +
-      (d.ap ? '<span class="jp-badges"><span class="jp-badge jp-badge-ap" title="A priori decode — recovered a weak or late reply by hypothesizing your call">AP</span></span>' : '');
+      (d.ap ? '<span class="jp-badges"><span class="jp-badge jp-badge-ap" title="AP: A-priori decode — recovered a weak or late reply by hypothesizing your callsign in the decoder">AP</span></span>' : '');
     row.addEventListener('dblclick', (function(decode) { return function() { onDecodeRowClick(decode); }; })(d));
     myActivity.appendChild(row);
     myActivity.scrollTop = myActivity.scrollHeight;
@@ -762,12 +762,15 @@ function _applyPopoutTheme(payload) {
   function buildBandRow(c) {
     var d = c.d;
     var badges = '';
-    if (d.ap) badges += '<span class="jp-badge jp-badge-ap" title="A priori decode — recovered a weak or late reply by hypothesizing your call">AP</span>';
-    if (d.chaseMatch) badges += '<span class="jp-badge jp-badge-chase" title="Chase target: ' + esc(chaseTarget) + '">◎</span>';
-    if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
-    if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
-    if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
-    if (d.watched) badges += '<span class="jp-badge jp-badge-watch" title="Watchlist">W</span>';
+    // Every decoration explains itself on hover in plain language (Casey
+    // 2026-07-17: "G, C, O" read as mystery letters — the ◎ chase bullseye
+    // was being read as the letter O). State WHAT it means, then the value.
+    if (d.ap) badges += '<span class="jp-badge jp-badge-ap" title="AP: A-priori decode — recovered a weak or late reply by hypothesizing your callsign in the decoder">AP</span>';
+    if (d.chaseMatch) badges += '<span class="jp-badge jp-badge-chase" title="Chase match — this station matches your chase target (' + esc(chaseTarget) + ')">◎</span>';
+    if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="D: New DXCC on this band — you have not worked ' + esc(d.entity || 'this entity') + ' on this band yet">D</span>';
+    if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="G: New grid — you have not worked grid ' + esc(d.grid || '?') + ' before">G</span>';
+    if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="C: New call — ' + esc(d.call || 'this station') + ' is not in your log yet">C</span>';
+    if (d.watched) badges += '<span class="jp-badge jp-badge-watch" title="W: Watchlist — ' + esc(d.call || 'this station') + ' matches your watchlist">W</span>';
     // Tracked-event station (Casey 2026-07-06): render as a NORMAL-looking
     // row with a [13C]-style badge alongside the letter badges — no tint
     // (an event tint stacked on cq/wanted tints was unreadable). Badge +
@@ -813,7 +816,7 @@ function _applyPopoutTheme(payload) {
     var bandBadge = '';
     if (d.band && multiActive) {
       var bColor = BAND_COLORS[d.band] || '#888';
-      bandBadge = '<span class="jp-badge jp-badge-band" style="background:' + bColor + ';color:#000;">' + d.band + '</span>';
+      bandBadge = '<span class="jp-badge jp-badge-band" style="background:' + bColor + ';color:#000;" title="Band — this decode was received on the ' + esc(d.band) + ' slice">' + d.band + '</span>';
     }
     row.innerHTML =
       (bandBadge ? bandBadge : '') +
@@ -1297,6 +1300,90 @@ function _applyPopoutTheme(payload) {
   if (window.api.onJtcatQsoNotice) {
     window.api.onJtcatQsoNotice(function(data) {
       showJtcatWarnToast((data && data.message) || 'QSO closed out');
+    });
+  }
+
+  // --- Spot Target banner (Table-view FT8/FT4 spot click → auto-call) ---
+  // States from main's jtcat-spot-target broadcast: armed (waiting + Call now
+  // gated on having heard them at least once — parity is unknowable before
+  // that), engaged (calling), cleared (per-reason toast). The banner's
+  // Cancel/Call now buttons round-trip through main so state stays single-
+  // sourced.
+  var spotTargetBanner = document.getElementById('jp-spot-target-banner');
+  var spotTargetMsg = document.getElementById('jp-spot-target-msg');
+  var spotTargetCallNowBtn = document.getElementById('jp-spot-target-callnow');
+  var spotTargetCancelBtn = document.getElementById('jp-spot-target-cancel');
+  // Sync the popout's mode select + band button to the target's spot. The
+  // mode-change dispatch reuses the existing handler (updateBandFreqs →
+  // jtcatSetMode → persist → selectBand on the active button), which fixes
+  // the long-standing "FT4 spot with popout already open in FT8" gap. All
+  // checks are mismatch-gated so the heard-refresh broadcasts every cycle
+  // are no-ops here.
+  function spotTargetResync(data) {
+    if (!data.mode || !data.freqKhz) return;
+    var btns = document.querySelectorAll('.jtcat-band-btn');
+    var bestBtn = null, bestDist = Infinity;
+    btns.forEach(function(btn) {
+      var d = Math.abs(parseInt(btn.dataset.freq, 10) - data.freqKhz);
+      if (d < bestDist) { bestDist = d; bestBtn = btn; }
+    });
+    if (!bestBtn) return;
+    var activeBtn = document.querySelector('.jtcat-band-btn.active');
+    if (modeSelect.value !== data.mode) {
+      btns.forEach(function(b) { b.classList.remove('active'); });
+      bestBtn.classList.add('active');
+      modeSelect.value = data.mode;
+      modeSelect.dispatchEvent(new Event('change'));
+    } else if (activeBtn !== bestBtn) {
+      selectBand(bestBtn, true);
+    }
+  }
+  if (window.api.onJtcatSpotTarget) {
+    window.api.onJtcatSpotTarget(function(data) {
+      if (!data) return;
+      if (data.notice) showJtcatWarnToast(data.notice);
+      if (data.status === 'cleared') {
+        if (spotTargetBanner) spotTargetBanner.classList.add('hidden');
+        if (data.reason === 'worked') showJtcatWarnToast('Worked ' + data.call + ' — spot target cleared');
+        else if (data.reason === 'expired') showJtcatWarnToast('Spot target ' + data.call + ' expired — not heard for 10 minutes');
+        else if (data.reason === 'qsy') showJtcatWarnToast('Spot target ' + data.call + ' cleared — band or mode changed');
+        return;
+      }
+      if (!spotTargetBanner) return;
+      spotTargetBanner.classList.remove('hidden');
+      if (data.status === 'engaged') {
+        spotTargetMsg.textContent = 'Spot target ' + data.call + ' — calling';
+        if (spotTargetCallNowBtn) spotTargetCallNowBtn.disabled = true;
+        if (data.trigger) {
+          showJtcatWarnToast(
+            data.trigger === 'manual' ? 'Calling ' + data.call + ' now' : 'Heard ' + data.call + ' — calling',
+            data.holdTx ? 'Hold TX on — calling on your held offset, not their frequency' : undefined);
+        }
+        return;
+      }
+      // armed
+      var heardTxt = data.heard
+        ? ' — last heard ' + data.heard.agoSec + 's ago (' + (data.heard.slot || '?') + ' slot)'
+        : '';
+      spotTargetMsg.textContent = 'Spot target ' + data.call + ' — waiting for their CQ or QSO end' + heardTxt;
+      if (spotTargetCallNowBtn) {
+        spotTargetCallNowBtn.disabled = !data.heard;
+        spotTargetCallNowBtn.title = data.heard
+          ? 'Call the target immediately using the slot and frequency from the last time they were heard'
+          : 'Not heard yet — odd/even slot unknown';
+      }
+      spotTargetResync(data);
+    });
+  }
+  if (spotTargetCancelBtn) {
+    spotTargetCancelBtn.addEventListener('click', function() {
+      if (window.api.jtcatSpotTargetClear) window.api.jtcatSpotTargetClear();
+      if (spotTargetBanner) spotTargetBanner.classList.add('hidden');
+    });
+  }
+  if (spotTargetCallNowBtn) {
+    spotTargetCallNowBtn.addEventListener('click', function() {
+      if (!spotTargetCallNowBtn.disabled && window.api.jtcatSpotTargetCallNow) window.api.jtcatSpotTargetCallNow();
     });
   }
 
