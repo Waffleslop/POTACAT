@@ -46,6 +46,38 @@ against both codebases — desktop agent, build against these:
    name, two types; keep both registries explicit about it (mobile's entry
    already carries the warning comment).
 
+Second review pass — 2026-07-17, desktop-side verification (all four
+amendments above re-checked against the committed tree; two corrections and
+two NEW items for whoever builds the desktop work):
+
+5. **Amendment 2, corrected + expanded.** Verified: popout-close does drop
+   the target with a direct null (now `main.js:21076`) — real, must route
+   through `clearSpotTarget()`. But engine-stop is NOT stranded today: the
+   popout's `ipcMain.on('jtcat-stop')` nulls the target explicitly after
+   `stopJtcat()`. The REAL gap is the **remote `jtcat-stop` handler**
+   (`remoteServer.on('jtcat-stop')`) — it calls `stopJtcat()` and clears the
+   QSO but NOT the spot target, so a phone stopping the engine leaves an
+   armed target with no engine behind it, today. Fix all three the same way:
+   move the clear INTO `stopJtcat()` itself as `clearSpotTarget('user'|
+   'stopped')` and delete the two direct nulls — one choke point, every
+   stop path broadcasts.
+6. **Wrong-band TX guard interaction (NEW — the guard landed the same day
+   as this feature, `6025927`).** `main.js` now refuses any FT8 TX when the
+   rig's reported dial differs >2.5 kHz from `_jtcatExpectedDialHz` — the
+   dial JTCAT last tuned ITSELF (popout tune / phone `jtcat-set-band`;
+   spots-table tunes deliberately do not move it). A Spot Target QSY is an
+   INTENTIONAL dial move that arrives via the spots-table tune path, so the
+   anchor goes stale at arm time. Today this self-heals: the popout's
+   `spotTargetResync` re-selects the band → popout tune → anchor updates,
+   seconds before any fire is possible. But the remote-owned flow (desktop
+   work items 3–4) has NO popout resync — **the guard will block every
+   remote-owned spot-target fire on a band change** unless the arm/QSY also
+   moves the anchor. Whoever builds the remote work: set
+   `_jtcatExpectedDialHz = Math.round(target.freqKhz * 1000)` inside the
+   sanitized `jtcat-spot-target-set` handler (and anywhere the target flow
+   itself re-tunes). Also add this to the acceptance tests: arm from the
+   phone on a different band → target fires (not blocked by the dial guard).
+
 ---
 
 ## The feature in one paragraph
