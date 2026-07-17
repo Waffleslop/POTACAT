@@ -26259,6 +26259,13 @@ window.api.onJtcatStopForRemote(function() {
   // Only stop audio if the desktop JTCAT view isn't active
   if (!jtcatRunning) stopJtcatAudio();
 });
+// ECHOCAT FT8 takeover closed the JTCAT popout — tell the desktop operator
+// (the close is otherwise silent from this side; K3SBP 2026-07-17).
+if (window.api.onJtcatTakeoverNotice) {
+  window.api.onJtcatTakeoverNotice(function(data) {
+    showLogToast((data && data.message) || 'Mobile device took over FT8 — JTCAT popout closed.', { duration: 6000 });
+  });
+}
 
 // Sticky table header via JS transform on each th
 // (CSS position:sticky and transform on <thead> are unreliable in Chromium table rendering)
