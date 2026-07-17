@@ -67,6 +67,12 @@ jobs:
         run: node test/event-registry-test.js
       - name: Run bug-report-log suite
         run: node test/bug-report-log-test.js
+      - name: Run CW key-line resolver suite
+        run: node test/cw-key-line-test.js
+      - name: Run CW paddle-availability suite
+        run: node test/cw-paddle-availability-test.js
+      - name: Run SDR list sync suite
+        run: node test/sdr-list-sync-test.js
 
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the

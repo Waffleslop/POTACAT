@@ -259,6 +259,7 @@ const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdif
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { resolveCwKeyPins } = require('./lib/cw-key-line');
+const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sync');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
@@ -9384,6 +9385,11 @@ function updateRemoteSettings() {
     kiwiSdrLabel1: settings.kiwiSdrLabel1 || '',
     kiwiSdrLabel2: settings.kiwiSdrLabel2 || '',
     kiwiSdrLabel3: settings.kiwiSdrLabel3 || '',
+    // Full SDR receiver list (desktop-ask sdr-list-full-sync) — the slot keys
+    // above are a legacy view onto entries 0-2; the phone's unlimited list
+    // syncs through this key. Sanitized on the way out too, since the merge
+    // handler persisted phone blobs verbatim before this shipped.
+    kiwiSdrList: sanitizeKiwiSdrList(settings.kiwiSdrList),
     sstvTemplates: settings.sstvTemplates || [],
     sstvTextElements: settings.sstvTextElements || [],
     enableAutoSstv: !!settings.enableAutoSstv,
@@ -10812,33 +10818,51 @@ function connectRemote() {
     if (_clientDisconnectGraceTimer) clearTimeout(_clientDisconnectGraceTimer);
     _clientDisconnectGraceTimer = setTimeout(() => {
       _clientDisconnectGraceTimer = null;
-      if (ft8Engine) {
+      // Ownership guard (K3SBP 2026-07-17): a phone that merely CONNECTED —
+      // browsing VFO / Settings — was a viewer, never the JTCAT owner. When
+      // the desktop popout is open, IT owns the engine ("popout open ⇒ popout
+      // owns" is an invariant: a phone FT8 takeover would have CLOSED the
+      // popout via the 'jtcat-start' handler). So a viewer phone dropping off
+      // WiFi must not stop decoding — and must not fire the forced TX-offs
+      // below, which would cut a popout FT8 transmission mid-cycle.
+      const desktopOwnsJtcat = !!(jtcatPopoutWin && !jtcatPopoutWin.isDestroyed());
+      // Safety exception: if the phone vanished while actually holding PTT,
+      // the stuck-PTT failsafe outranks the guard — unkey regardless of who
+      // owns the engine (a keyed carrier with no operator is the worst case).
+      const remotePttStuck = !!(remoteServer && remoteServer._pttActive);
+      if (!desktopOwnsJtcat && ft8Engine) {
         stopJtcat();
         if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
-        console.log('[JTCAT] Phone disconnected (60s grace expired) — engine stopped, audio released');
+        console.log('[JTCAT] Mobile device disconnected (60s grace expired) — engine stopped, audio released');
+      } else if (desktopOwnsJtcat && ft8Engine) {
+        console.log('[JTCAT] Mobile device disconnected (60s grace expired) — popout owns the engine; decoding continues');
       }
+      // Phone-session cleanup — always safe: the phone's QSO context and its
+      // WebRTC audio bridge belong to the dead connection regardless of owner.
       remoteJtcatQso = null;
       destroyRemoteAudioWindow();
-      _ssbModeBeforePtt = null;
-      handleRemotePtt(false);
-      const rigType = detectRigType();
-      if (rigType === 'flex' && smartSdr && smartSdr.connected) {
-        smartSdr.cwPttRelease();
+      if (!desktopOwnsJtcat || remotePttStuck) {
+        _ssbModeBeforePtt = null;
+        handleRemotePtt(false);
+        const rigType = detectRigType();
+        if (rigType === 'flex' && smartSdr && smartSdr.connected) {
+          smartSdr.cwPttRelease();
+        }
+        // Force CW key port DTR low (key up) on full teardown
+        if (cwKeyPort && cwKeyPort.isOpen) {
+          cwKeyPort.set({ dtr: false }, () => {});
+        }
+        // Delayed safety TX-off: catches VOX re-trigger from audio artifacts
+        // during teardown and any race conditions from FT8 engine shutdown
+        setTimeout(() => {
+          if (cat && cat.connected) gatedSetTransmit(false);
+          if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
+        }, 500);
+        setTimeout(() => {
+          if (cat && cat.connected) gatedSetTransmit(false);
+          if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
+        }, 2000);
       }
-      // Force CW key port DTR low (key up) on full teardown
-      if (cwKeyPort && cwKeyPort.isOpen) {
-        cwKeyPort.set({ dtr: false }, () => {});
-      }
-      // Delayed safety TX-off: catches VOX re-trigger from audio artifacts
-      // during teardown and any race conditions from FT8 engine shutdown
-      setTimeout(() => {
-        if (cat && cat.connected) gatedSetTransmit(false);
-        if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
-      }, 500);
-      setTimeout(() => {
-        if (cat && cat.connected) gatedSetTransmit(false);
-        if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
-      }, 2000);
     }, 60_000);
   });
 
@@ -12209,6 +12233,13 @@ function connectRemote() {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       sendCatLog('[JTCAT] Closing popout — ECHOCAT taking over FT8');
       jtcatPopoutWin.close();
+      // Surface the takeover in the main window — from the desktop's chair the
+      // popout otherwise just vanishes (device-neutral: could be a tablet).
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('jtcat-takeover-notice', {
+          message: 'Mobile device took over FT8 — JTCAT popout closed. Reopen the popout to take back over.',
+        });
+      }
     }
     startJtcat(mode);
     // Start audio capture in desktop renderer
@@ -13028,7 +13059,12 @@ function connectRemote() {
 
   // KiwiSDR bridge — must be inside connectRemote() so listeners survive reconnect
   remoteServer.on('kiwi-connect', (msg) => {
-    const raw = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || '';
+    // Fallback chain ends at the full list's first entry — belt-and-braces
+    // for any pre-reconcile settings.json where the phone-synced kiwiSdrList
+    // exists but the legacy slot keys were never mirrored.
+    const listFirst = (Array.isArray(settings.kiwiSdrList) && settings.kiwiSdrList[0]
+      && settings.kiwiSdrList[0].host) || '';
+    const raw = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || listFirst;
     const clean = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
     sendCatLog(`[WebSDR] ECHOCAT connect: "${clean}"`);
     const parts = clean.split(':');
@@ -13052,8 +13088,23 @@ function connectRemote() {
     sendCatLog(`[WebSDR] ECHOCAT QSY: ${fKhz} kHz ${m.toUpperCase()}`);
   });
   remoteServer.on('save-settings', (partial) => {
+    // SDR list sync (desktop-ask sdr-list-full-sync): sanitize + reconcile
+    // the two layers (full kiwiSdrList vs the legacy 3-slot keys) BEFORE the
+    // merge persists them — never store a client blob verbatim (the
+    // sanitizeVfoProfiles lesson). Covers both the phone (sends both layers)
+    // and the web client (slots only — mirrored into the list so entries 4+
+    // survive). Partials with no SDR keys are untouched.
+    const sdrSync = reconcileSdrSettings(partial, settings.kiwiSdrList);
+    if (sdrSync) {
+      partial.kiwiSdrList = sdrSync.list;
+      Object.assign(partial, sdrSync.slotKeys);
+    }
     Object.assign(settings, partial);
     saveSettings(settings);
+    // Echo the CLEANED list back so the sender reconciles to it (the phone
+    // adopts settings-update pushes wholesale — same pattern as the
+    // sanitized VFO-profiles echo).
+    if (sdrSync) updateRemoteSettings();
   });
 }
 
@@ -24617,6 +24668,17 @@ app.whenReady().then(() => {
 
     const isPartialSave = !has('enablePota'); // hotkey saves only send 1-2 keys
 
+    // SDR list sync (desktop-ask sdr-list-full-sync): the Settings form sends
+    // only the 3 legacy slot keys — mirror the edit into kiwiSdrList (slots
+    // are a view onto entries 0-2) so the phone's entries 4+ survive a
+    // desktop-side slot edit. Replaces the partial's SDR keys with the
+    // reconciled canonical pair; saves without SDR keys are untouched.
+    const sdrSync = reconcileSdrSettings(newSettings, settings.kiwiSdrList);
+    if (sdrSync) {
+      newSettings.kiwiSdrList = sdrSync.list;
+      Object.assign(newSettings, sdrSync.slotKeys);
+    }
+
     settings = { ...settings, ...newSettings };
     // Active rig changed → its per-rig audio source is authoritative over
     // whatever audioSource the save blob carried (the renderer mirrors it
@@ -24885,7 +24947,9 @@ app.whenReady().then(() => {
     // Push updated settings to ECHOCAT phone
     // cwMacros: desktop edits should propagate to the phone so the
     // ECHOCAT keyer pane shows the user's custom macros (Walt KK4DF).
-    if (has('rotorActive') || has('enableRotor') || has('customCatButtons') || has('cwMacros')) {
+    // sdrSync: a desktop-side SDR slot edit must reach the phone's list
+    // (acceptance: "edit slot 2 on the desktop → phone row 2 updates").
+    if (has('rotorActive') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync) {
       updateRemoteSettings();
     }
 
