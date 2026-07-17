@@ -19517,7 +19517,11 @@ app.whenReady().then(() => {
     setTimeout(() => handleProtocolUrl(protocolUrl), 2000);
   }
 
-  // Configure QRZ client from saved credentials
+  // Configure QRZ client from saved credentials. Login outcomes (success +
+  // subscription status, or failure + why) go to the CAT log — without this
+  // a bad username/password or a non-subscriber account failed silently
+  // (console.error only) and users had nothing to check (KJ5BYZ 2026-07-17).
+  qrz.setLogger(sendCatLog);
   if (settings.enableQrz && settings.qrzUsername && settings.qrzPassword) {
     qrz.configure(settings.qrzUsername, settings.qrzPassword);
   }
@@ -25044,9 +25048,13 @@ app.whenReady().then(() => {
     // Swap app icon on all windows if setting changed
     if (iconChanged) applyIconToAllWindows();
 
-    // Reconfigure QRZ client if credentials changed
+    // Reconfigure QRZ client if credentials changed. Also clear any login
+    // backoff — configure() early-returns on unchanged creds and would keep
+    // the 5-min suppression, but an explicit Settings save is user intent to
+    // retry now (the backoff guards against automated lookup hammering).
     if (newSettings.enableQrz) {
       qrz.configure(newSettings.qrzUsername || '', newSettings.qrzPassword || '');
+      qrz.retryNow();
     }
 
     // Reconfigure SOTA uploader if credentials changed
