@@ -117,7 +117,7 @@ lsusb | grep -i "CP210\|Silicon Labs"      # 10c4:ea60 = the IC-7300
 dmesg | grep -i "cp210x\|ttyUSB"           # shows which /dev/ttyUSB* it claimed
 ```
 
-## Yaesu FTDX10 / FT-710 / FT-991 — fist keying via the second COM port
+## Yaesu FTDX10 / FT-891 / FT-710 / FT-991 — fist keying via the second COM port
 
 Yaesu's CAT protocol has **no per-element CW key command** — the only thing CAT
 can do is assert PTT (`TX1;`/`TX0;`), which keys the transmitter with *no* CW
@@ -133,6 +133,7 @@ The FTDX10's single USB cable presents **two** virtual COM ports:
 To get fist keying working:
 
 1. **Radio:** RADIO SETTING → MODE CW → **PC KEYING = DTR** (or **RTS**).
+   On the FT-891 this is **menu 07-12 PC KEYING** (pick DTR or RTS — not DAKY).
    Enable **BK-IN** (break-in) so the key line transmits.
 2. **POTACAT:** Settings → Rig → **CW Key Port** = the **Standard** COM port
    (the one you are *not* using for CAT — e.g. `/dev/ttyUSB1`).
