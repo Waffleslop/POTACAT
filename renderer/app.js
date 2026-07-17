@@ -26130,20 +26130,54 @@ async function playJtcatTxAudio(data) {
     // offsetMs to a small PTT-settle lead, so by the time the samples reach
     // here they're already truncated and this pad path just adds the settle.
     var SLOT_AUDIO_START_MS = 500; // WSJT-X convention
-    var leadingDelaySec = Math.max(0, (SLOT_AUDIO_START_MS - offsetMs) / 1000);
+    // But the upstream plan assumed the samples reach here promptly. On a
+    // slow machine the busy main window can sit on the IPC + this function's
+    // awaits for SECONDS — W7RTA's Evolve III (2026-07-15): PTT keyed on
+    // time, then 6.2s of dead carrier before source.start, and the envelope
+    // then ran past PTT-off (tail chopped = undecodable). Measure the REAL
+    // lateness from main's dispatch stamp (same machine, same clock) and
+    // fold it into the offset. When it exceeds the pad budget, start INTO
+    // the buffer (symbol-aligned) so the tail stays slot-locked — the same
+    // deliberate leading-Costas sacrifice main's late-start slicer makes
+    // (receivers re-sync on the mid/end Costas arrays). This is NOT the old
+    // naive skip K8LDX hit: small lateness (≤ the 500ms pad) still pads and
+    // keeps the full envelope, exactly as before.
+    var ipcLateMs = data.sentAt ? Math.max(0, Date.now() - data.sentAt) : 0;
+    var effOffsetMs = offsetMs + ipcLateMs;
+    var leadingDelaySec = Math.max(0, (SLOT_AUDIO_START_MS - effOffsetMs) / 1000);
+    var skipSec = 0;
+    if (effOffsetMs > SLOT_AUDIO_START_MS) {
+      var symbolSec = data.symbolSec || 0.160;
+      skipSec = Math.ceil(((effOffsetMs - SLOT_AUDIO_START_MS) / 1000) / symbolSec) * symbolSec;
+      skipSec = Math.min(skipSec, buffer.duration);
+    }
+    var remainSec = buffer.duration - skipSec;
+    if (skipSec > 0 && remainSec < 4) {
+      // Too little envelope left to be decodable — keying dead air helps
+      // nobody. Drop PTT (finishTx → txComplete) and say why, plainly.
+      window.api.jtcatLog('[JTCAT TX] ABORTED: audio reached playback ' + (ipcLateMs / 1000).toFixed(1) +
+        's after dispatch (slow machine / busy main window) — only ' + remainSec.toFixed(1) +
+        's of the FT8 envelope remained. Skipping this cycle instead of transmitting garbage. ' +
+        'Closing heavy views (map, PSKReporter) while running FT8 reduces this.');
+      finishTx();
+      return;
+    }
     var startTime = jtcatTxAudioCtx.currentTime + leadingDelaySec;
     // Pinpoint diagnostic — log just before source.start so a hang/throw
-    // here vs. earlier in the function is unambiguous in the log.
+    // here vs. earlier in the function is unambiguous in the log. ipcLate is
+    // the dispatch→here latency: the number to look at when a slow machine
+    // reports delayed/garbled FT8 TX audio.
     window.api.jtcatLog('[JTCAT TX] starting buffer source: bufDur=' + buffer.duration.toFixed(2) +
-      's leadingDelay=' + leadingDelaySec.toFixed(3) + 's ctxState=' + jtcatTxAudioCtx.state);
+      's leadingDelay=' + leadingDelaySec.toFixed(3) + 's skip=' + skipSec.toFixed(2) +
+      's ipcLate=' + ipcLateMs + 'ms ctxState=' + jtcatTxAudioCtx.state);
     try {
-      source.start(startTime, 0, buffer.duration);
+      source.start(startTime, skipSec, buffer.duration - skipSec);
     } catch (e) {
       window.api.jtcatLog('[JTCAT TX] source.start() THREW: ' + (e.message || String(e)) +
         ' — radio will not transmit. Often means the AudioContext sink (DAX device) is in a bad state.');
       throw e;
     }
-    var totalPlaySec = leadingDelaySec + buffer.duration;
+    var totalPlaySec = leadingDelaySec + (buffer.duration - skipSec);
 
     // Surface where the FT8 audio is actually going — AFTER source.start
     // so the device-label enumeration (slow on Chromium first call) never

@@ -5999,6 +5999,29 @@ function jtcatFullAutoCqWatchdog() {
   }
 }
 
+// Payload for the renderer DAX/system-default TX playback route (the shared
+// shape for all three jtcat-tx-audio send sites). Two things beyond the raw
+// samples:
+//   - sentAt: lets the renderer measure the REAL dispatch→playback latency.
+//     On a slow machine the busy main window can sit on the IPC for SECONDS —
+//     W7RTA's Evolve III (2026-07-15) keyed PTT on time, then played 6.2s of
+//     dead carrier before source.start, and the envelope ran past PTT-off.
+//     The renderer uses sentAt to pad/skip so the tail stays slot-aligned.
+//   - samples ride as a Float32Array (structured clone handles TypedArrays
+//     natively) — the old Array.from() serialized ~151k floats as a plain JS
+//     array, pure overhead that hurt exactly the machines already struggling.
+//   - symbolSec: the mode's symbol duration so the renderer's late-skip can
+//     align to symbol boundaries (FT4 = 48ms; FT8/default = 160ms).
+function jtcatRendererTxPayload(data, engine) {
+  const mode = (engine && engine._mode) || 'FT8';
+  return {
+    samples: (data.samples instanceof Float32Array) ? data.samples : Float32Array.from(data.samples || []),
+    offsetMs: data.offsetMs || 0,
+    sentAt: Date.now(),
+    symbolSec: mode === 'FT4' ? 0.048 : 0.160,
+  };
+}
+
 function clearJtcatTxFailsafe() {
   if (_jtcatTxFailsafeTimer) {
     clearTimeout(_jtcatTxFailsafeTimer);
@@ -7343,7 +7366,7 @@ function startJtcat(mode) {
         .catch((e) => {
           sendCatLog(`[SmartSDR-Audio] Direct TX failed: ${e.message} — falling back to Windows DAX TX route this cycle`);
           if (win && !win.isDestroyed() && ft8Engine && ft8Engine._txActive) {
-            win.webContents.send('jtcat-tx-audio', { samples: Array.from(data.samples), offsetMs: data.offsetMs || 0 });
+            win.webContents.send('jtcat-tx-audio', jtcatRendererTxPayload(data, ft8Engine));
           }
         });
     } else if (icomNetworkDirectTxOk) {
@@ -7391,7 +7414,7 @@ function startJtcat(mode) {
     } else {
       setTimeout(() => {
         if (win && !win.isDestroyed() && ft8Engine && ft8Engine._txActive) {
-          win.webContents.send('jtcat-tx-audio', { samples: Array.from(data.samples), offsetMs: data.offsetMs || 0 });
+          win.webContents.send('jtcat-tx-audio', jtcatRendererTxPayload(data, ft8Engine));
         }
       }, 200);
     }
@@ -26535,7 +26558,7 @@ app.whenReady().then(() => {
         // Send TX audio to renderer for playback through DAX TX
         setTimeout(() => {
           if (win && !win.isDestroyed() && engine._txActive) {
-            win.webContents.send('jtcat-tx-audio', { samples: Array.from(data.samples), offsetMs: data.offsetMs || 0 });
+            win.webContents.send('jtcat-tx-audio', jtcatRendererTxPayload(data, engine));
           }
         }, 200);
       });
