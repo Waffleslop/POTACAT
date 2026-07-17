@@ -5815,18 +5815,25 @@ function jtcatMaxQsoRetries() {
   return (Number.isFinite(n) && n >= 1 && n <= 60) ? n : JTCAT_MAX_QSO_RETRIES;
 }
 
-function broadcastFullAutoCqState() {
+function broadcastFullAutoCqState(reason) {
   const state = { active: jtcatFullAutoCq, owner: jtcatFullAutoCqOwner, workedCount: jtcatAutoCqWorkedSession.size };
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-full-auto-cq-state', state);
   }
   // Mirror to ECHOCAT clients (phone) so they can show the run indicator.
+  // `reason` (display-ready string) rides along on stop/refusal pushes so
+  // the phone can say WHY a run ended — the Part 97 watchdog stop must
+  // read as "attended limit reached", not a silent off (potacat-meta
+  // ultracat-run-mode-on-phone, option a). NOTE the phone toasts only on
+  // observed true→false TRANSITIONS, never on the connect-replay of this
+  // state, so a cached reason replayed later is harmless.
   if (remoteServer) {
     remoteServer.broadcastJtcatUltracatState({
       ultracat: !!settings.ultracat,
       fullAutoCq: jtcatFullAutoCq,
       owner: jtcatFullAutoCqOwner,
       maxQsoAttempts: jtcatMaxQsoRetries(),
+      reason: reason || null,
     });
   }
 }
@@ -5929,7 +5936,7 @@ function stopFullAutoCq(reason) {
     try { ft8Engine.setTxSlot('auto'); } catch {}
     if (ft8Engine._txActive && typeof ft8Engine.txComplete === 'function') ft8Engine.txComplete();
   }
-  broadcastFullAutoCqState();
+  broadcastFullAutoCqState(wasActive ? reason : undefined);
   if (wasActive && reason && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: 'Full Auto CQ stopped — ' + reason });
   }
@@ -12528,7 +12535,7 @@ function connectRemote() {
   remoteServer.on('jtcat-full-auto-cq', ({ on, modifier } = {}) => {
     if (on) {
       const ok = startFullAutoCq('remote', modifier || '');
-      if (!ok) broadcastFullAutoCqState();
+      if (!ok) broadcastFullAutoCqState('start refused — ULTRACAT locked, FT8 engine not running, or callsign/grid not set');
     } else {
       stopFullAutoCq('stopped from phone');
     }
