@@ -2,8 +2,17 @@
 
 **Audience:** ECHOCAT mobile (iOS / Android) team
 **Scope:** Strategy + wire contract for bringing Spot Target to the mobile app.
-The desktop feature is built (2026-07-17); the remote-owner desktop work listed
-in "Desktop work required" is NOT yet built — coordinate before shipping.
+**ALL desktop work is BUILT (2026-07-17 evening)** — work items 1–4 plus review
+amendments 1–6: protocol entries, `'spot-target'` hello capability, remote
+handlers (synthetic emits of the popout IPC channels — one sanitizer per
+action), dual-surface broadcast + connect hydration (cleared state drops the
+cache), owner-aware fire (popout open → popout path; else remote path via the
+`jtcat-reply` handler), remote-owned worked/engaged-recovery in both decode
+paths, popout-close keeps the target when a client is connected, ALL stop
+paths clear through `stopJtcat()` → `clearSpotTarget('stopped')`, and the
+spot-target-set applier moves the wrong-band-guard dial anchor. One contract
+addition: **`reason: 'stopped'`** (engine stopped) joins the cleared reasons —
+treat unknown reasons as silent-hide, which mobile already does.
 **Origin:** K3SBP — clicking an FT8/FT4 POTA spot in the desktop Table view now
 arms JTCAT to auto-call that activator. Mobile should get the same one-tap flow.
 

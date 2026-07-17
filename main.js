@@ -5768,9 +5768,8 @@ let jtcatSpotTarget = null; // { call, mode, freqKhz, band, reference, parkName,
 const JTCAT_SPOT_TARGET_TTL_MS = 10 * 60 * 1000; // unheard this long → expire
 
 function broadcastSpotTarget(extra) {
-  if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) return;
   const t = jtcatSpotTarget;
-  jtcatPopoutWin.webContents.send('jtcat-spot-target', {
+  const payload = {
     call: t ? t.call : '',
     mode: t ? t.mode : '',
     freqKhz: t ? t.freqKhz : 0,
@@ -5779,7 +5778,14 @@ function broadcastSpotTarget(extra) {
       ? { agoSec: Math.round((Date.now() - t.lastHeardAt) / 1000), slot: t.lastHeard.slot }
       : null,
     ...extra,
-  });
+  };
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-spot-target', payload);
+  }
+  // Mirror to the ECHOCAT client (docs/mobile-handoff-spot-target.md) — the
+  // method caches non-cleared state for connect hydration, so a phone that
+  // reconnects mid-arm sees the banner immediately.
+  if (remoteServer) remoteServer.broadcastJtcatSpotTarget(payload);
 }
 
 function clearSpotTarget(reason) {
@@ -5788,6 +5794,26 @@ function clearSpotTarget(reason) {
   jtcatSpotTarget = null;
   sendCatLog(`[JTCAT] Spot target ${call} cleared (${reason})`);
   broadcastSpotTarget({ status: 'cleared', reason, call });
+}
+
+// Owner-aware fire (handoff work item 3): the takeover model means the popout,
+// when open, owns the session — fire through the popout reply path (builds
+// popoutJtcatQso). Popout closed + a connected ECHOCAT client = remote-owned —
+// fire through the remote reply handler (builds remoteJtcatQso, so the app's
+// QSO tracker shows the ladder exactly as if the user had tapped the decode).
+// Both paths inherit Skip Grid / FD / Hound / Hold-TX / dupe handling. Returns
+// false when NO surface owns the session (e.g. client dropped after arming) —
+// callers leave the target armed instead of firing into the void.
+function fireSpotTarget(payload) {
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    ipcMain.emit('jtcat-popout-reply', {}, payload);
+    return true;
+  }
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    remoteServer.emit('jtcat-reply', payload);
+    return true;
+  }
+  return false;
 }
 let jtcatAutoCqOwner = null;           // 'popout' | 'remote' | null
 
@@ -7068,6 +7094,12 @@ function startJtcat(mode) {
     // re-arms a fresh CQ instead of going idle (work-then-CQ-again loop) —
     // both owners now, since the phone can drive run mode (jtcat-full-auto-cq).
     if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
+      // Remote-owned Spot Target completed — same worked-clear the popout
+      // done-block does (docs/mobile-handoff-spot-target.md work item 3).
+      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && remoteJtcatQso.call &&
+          JtcatParser.normalizeCall(remoteJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+        clearSpotTarget('worked');
+      }
       if (remoteJtcatQso.call) jtcatAutoCqWorkedSession.add(remoteJtcatQso.call);
       if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'remote') {
         rearmCq('remote');
@@ -7170,10 +7202,12 @@ function startJtcat(mode) {
         }
         if (Date.now() - tgt.lastHeardAt > JTCAT_SPOT_TARGET_TTL_MS) {
           clearSpotTarget('expired');
-        } else if (tgt.status === 'engaged' && !popoutJtcatQso) {
+        } else if (tgt.status === 'engaged' && !popoutJtcatQso && !remoteJtcatQso) {
           // The fired QSO died without completing (retry-stall abort or
           // replacement). Worked-case was handled in the done-block above.
-          // Re-arm and keep listening until expiry.
+          // Re-arm and keep listening until expiry. (Both QSO slots checked:
+          // a remote-owned fire lives in remoteJtcatQso — without that check
+          // a phone-fired target would re-arm the instant it engaged.)
           tgt.status = 'armed';
           broadcastSpotTarget();
         } else if (tgt.status === 'armed' && !popoutJtcatQso && !remoteJtcatQso && !jtcatFullAutoCq) {
@@ -7184,15 +7218,18 @@ function startJtcat(mode) {
           if (hits.length) {
             hits.sort((a, b) => ((b.d.db == null ? -999 : b.d.db) - (a.d.db == null ? -999 : a.d.db)));
             const hit = hits[0];
-            tgt.status = 'engaged';
-            broadcastSpotTarget({ holdTx: !!settings.jtcatHoldTxFreq, trigger: hit.trig.trigger });
-            sendCatLog(`[JTCAT] Spot target ${hit.trig.call} heard (${hit.trig.trigger}, SNR ${hit.d.db} dB) — calling`);
-            // Synthetic invocation of the double-click reply handler — same
-            // precedent as jtcat-start-multi. Inherits Skip Grid / FD / hound
-            // / Hold-TX no-op / opposite slot / dupe warning / TX arm.
-            ipcMain.emit('jtcat-popout-reply', {}, {
+            // Owner-aware synthetic reply — popout path when the popout is
+            // open, remote path when the phone owns the session (same
+            // precedent as jtcat-start-multi). Inherits Skip Grid / FD /
+            // hound / Hold-TX no-op / opposite slot / dupe warning / TX arm.
+            const fired = fireSpotTarget({
               call: hit.trig.call, text: hit.d.text, df: hit.d.df, slot: hit.d.slot, snr: hit.d.db,
             });
+            if (fired) {
+              tgt.status = 'engaged';
+              broadcastSpotTarget({ holdTx: !!settings.jtcatHoldTxFreq, trigger: hit.trig.trigger });
+              sendCatLog(`[JTCAT] Spot target ${hit.trig.call} heard (${hit.trig.trigger}, SNR ${hit.d.db} dB) — calling`);
+            }
           }
         }
       }
@@ -7837,6 +7874,12 @@ function stopJtcat() {
   clearJtcatTxFailsafe();
   clearJtcatIcomHardRelease();
   _jtcatExpectedDialHz = 0; // dial anchor dies with the session (pre-TX guard)
+  // No engine = no decodes = an armed target is meaningless. ONE choke point
+  // for every stop path (popout stop, phone jtcat-stop, engine teardown) so
+  // remotes always get the cleared broadcast — a direct null here stranded
+  // the phone banner (handoff amendment 5; the popout ipc's own null and the
+  // remote handler's missing clear were the two halves of that bug).
+  clearSpotTarget('stopped');
   if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
   if (settings.audioSource === 'icom-network') {
     forceReleaseIcomNetworkTx('JTCAT stop');
@@ -12538,6 +12581,19 @@ function connectRemote() {
     stopJtcat();
     remoteJtcatQso = null;
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+  });
+
+  // Spot Target from the phone (docs/mobile-handoff-spot-target.md).
+  // Synthetic emits of the SAME ipc channels the popout uses (the
+  // jtcat-popout-reply precedent) — one sanitizer/applier per action, no
+  // drift between surfaces. The phone's tap also sends the regular tune
+  // message separately, mirroring the desktop table click.
+  remoteServer.on('jtcat-spot-target-set', ({ target } = {}) => {
+    ipcMain.emit('jtcat-spot-target-set', {}, target);
+  });
+  remoteServer.on('jtcat-spot-target-clear', () => clearSpotTarget('user'));
+  remoteServer.on('jtcat-spot-target-call-now', () => {
+    ipcMain.emit('jtcat-spot-target-call-now', {}, null);
   });
 
   // Mobile spectrum subscribe — see lib/spectrum-fft.js for the
@@ -21048,8 +21104,14 @@ app.whenReady().then(() => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('jtcat-popout-status', false);
       }
-      // Popout gone = nobody to fire for or notify — drop the target silently.
-      jtcatSpotTarget = null;
+      // Popout gone: if an ECHOCAT client is connected, the target SURVIVES —
+      // it belongs to the session, not the surface (handoff work item 4; the
+      // remote fire path takes over). With no remote client there is nobody
+      // left to fire for: clear THROUGH clearSpotTarget so any future surface
+      // (and the hydration cache) sees the cleared state, never a stale one.
+      if (!(remoteServer && remoteServer.hasClient && remoteServer.hasClient())) {
+        clearSpotTarget('user');
+      }
     });
     jtcatPopoutWin.webContents.on('did-finish-load', () => {
       if (win && !win.isDestroyed()) {
@@ -21071,46 +21133,58 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-popout-open', () => openJtcatPopout());
 
   // ─── Spot Target IPC (see the watcher in the decode handler) ──────────────
-  // Set from the main window's spot click. Validates and replaces any prior
-  // target; the popout banner mirrors state via the jtcat-spot-target channel.
-  ipcMain.on('jtcat-spot-target-set', (_e, t) => {
-    if (!t || !t.call || !t.mode) return;
+  // Shared by the main window's spot click AND the ECHOCAT phone's spot tap
+  // (docs/mobile-handoff-spot-target.md) — sanitizes the untrusted blob,
+  // validates, and replaces any prior target: one target at a time, last set
+  // wins, regardless of which surface set it.
+  function applySpotTargetSet(t, source) {
+    if (!t || typeof t !== 'object' || !t.call || !t.mode) return;
     const mode = String(t.mode).toUpperCase();
     if (mode !== 'FT8' && mode !== 'FT4' && mode !== 'FT2') return;
-    const norm = JtcatParser.normalizeCall(t.call);
+    const norm = JtcatParser.normalizeCall(String(t.call));
     if (!JtcatParser.looksLikeCallsign(norm)) return;
     const myCall = (settings.myCallsign || '').toUpperCase();
     if (myCall && norm === JtcatParser.normalizeCall(myCall)) return; // can't target yourself
+    const freqKhz = Number(t.freqKhz) || 0;
     jtcatSpotTarget = {
-      call: String(t.call).toUpperCase(), mode,
-      freqKhz: Number(t.freqKhz) || 0, band: String(t.band || ''),
-      reference: String(t.reference || ''), parkName: String(t.parkName || ''),
+      call: String(t.call).toUpperCase().slice(0, 16), mode,
+      freqKhz, band: String(t.band || '').slice(0, 8),
+      reference: String(t.reference || '').slice(0, 24), parkName: String(t.parkName || '').slice(0, 80),
       status: 'armed', setAt: Date.now(), lastHeardAt: Date.now(), lastHeard: null,
     };
-    sendCatLog(`[JTCAT] Spot target armed: ${jtcatSpotTarget.call} (${mode}${jtcatSpotTarget.reference ? ', ' + jtcatSpotTarget.reference : ''}) — will call on their CQ or QSO end`);
+    // The target's QSY is an INTENTIONAL, session-owned dial move — move the
+    // wrong-band TX guard's anchor with it, or the guard would block the
+    // fire on any band change (handoff amendment 6; the popout's band resync
+    // also does this when open, but a remote-owned session has no popout).
+    if (freqKhz > 0) _jtcatExpectedDialHz = Math.round(freqKhz * 1000);
+    sendCatLog(`[JTCAT] Spot target armed${source ? ' [' + source + ']' : ''}: ${jtcatSpotTarget.call} (${mode}${jtcatSpotTarget.reference ? ', ' + jtcatSpotTarget.reference : ''}) — will call on their CQ or QSO end`);
     broadcastSpotTarget();
-  });
+  }
+  ipcMain.on('jtcat-spot-target-set', (_e, t) => applySpotTargetSet(t, ''));
   // Popout banner Cancel button.
   ipcMain.on('jtcat-spot-target-clear', () => clearSpotTarget('user'));
-  // Popout "Call now" — manual fire using the freshest heard decode's
-  // slot/df (mid-QSO decodes reveal parity even though they never
-  // auto-trigger). No `text` in the payload: an explicit reply-cq step keeps
-  // the reply handler from re-deriving a step off a mid-QSO exchange.
-  ipcMain.on('jtcat-spot-target-call-now', () => {
+  // "Call now" — manual fire using the freshest heard decode's slot/df
+  // (mid-QSO decodes reveal parity even though they never auto-trigger).
+  // No `text` in the payload: an explicit reply-cq step keeps the reply
+  // handler from re-deriving a step off a mid-QSO exchange. Shared by the
+  // popout banner and the phone banner; the fire is owner-aware.
+  function spotTargetCallNow(source) {
     const tgt = jtcatSpotTarget;
     if (!tgt || !tgt.lastHeard) return; // button is disabled until heard, but guard anyway
     if (popoutJtcatQso || remoteJtcatQso || jtcatFullAutoCq) {
       broadcastSpotTarget({ notice: 'QSO in progress — target will fire when idle' });
       return;
     }
-    tgt.status = 'engaged';
-    broadcastSpotTarget({ holdTx: !!settings.jtcatHoldTxFreq, trigger: 'manual' });
-    sendCatLog(`[JTCAT] Spot target ${tgt.call} — manual Call Now (last heard slot ${tgt.lastHeard.slot})`);
-    ipcMain.emit('jtcat-popout-reply', {}, {
+    const fired = fireSpotTarget({
       call: tgt.call, df: tgt.lastHeard.df, slot: tgt.lastHeard.slot,
       snr: tgt.lastHeard.snr, nextStep: 'reply-cq',
     });
-  });
+    if (!fired) return; // no surface owns the session — stay armed
+    tgt.status = 'engaged';
+    broadcastSpotTarget({ holdTx: !!settings.jtcatHoldTxFreq, trigger: 'manual' });
+    sendCatLog(`[JTCAT] Spot target ${tgt.call} — manual Call Now${source ? ' [' + source + ']' : ''} (last heard slot ${tgt.lastHeard.slot})`);
+  }
+  ipcMain.on('jtcat-spot-target-call-now', () => spotTargetCallNow(''));
 
   ipcMain.on('jtcat-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
   ipcMain.on('jtcat-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
@@ -26209,9 +26283,7 @@ app.whenReady().then(() => {
   // --- JTCAT IPC ---
   ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
   ipcMain.on('jtcat-stop', () => {
-    stopJtcat();
-    // No engine = no decodes = a stale armed target is meaningless.
-    jtcatSpotTarget = null;
+    stopJtcat(); // clears the spot target too (single choke point in stopJtcat)
   });
   ipcMain.on('jtcat-set-mode', (_e, mode) => {
     if (!ft8Engine) return;
@@ -26689,6 +26761,10 @@ app.whenReady().then(() => {
         if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
           // Mirror the popout branch above: a remote-owned Full Auto CQ run
           // re-arms instead of going idle (phone control path).
+          if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && remoteJtcatQso.call &&
+              JtcatParser.normalizeCall(remoteJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+            clearSpotTarget('worked');
+          }
           if (remoteJtcatQso.call) jtcatAutoCqWorkedSession.add(remoteJtcatQso.call);
           if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'remote') {
             rearmCq('remote');
