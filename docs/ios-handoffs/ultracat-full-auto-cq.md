@@ -1,7 +1,7 @@
 # Handoff → Mobile: ULTRACAT mode + JTCAT Full Auto CQ
 
 **Audience:** iOS/Android (ECHOCAT) agent.
-**Status as of desktop:** detection contract **shipped** (wire fields below are live on `master`). The *control* path (phone driving Full Auto CQ) is **specced but not yet wired** on desktop — see §5.
+**Status as of desktop:** detection contract **shipped**, and as of 2026-07-17 the *control* path is **live too** — `jtcat-full-auto-cq` C2S works, `owner: 'remote'` re-arms/stalls/watchdogs correctly (see §5, now historical). Desktop naming note: the popout controls were renamed 2026-07-16 — the auto-answer dropdown is now **"Hunt"**, Full Auto CQ's button is **"Run"**. Wire fields are unchanged.
 **Why this exists:** the desktop grew a hidden "ULTRACAT" tier that unlocks new JTCAT auto-sequencing. Mobile should be able to (a) detect when the paired desktop is ULTRACAT-unlocked and mirror the controls, and (b) eventually drive them.
 
 ---
@@ -70,16 +70,16 @@ Sent whenever ULTRACAT is toggled (unlock/revoke) or Full Auto CQ starts/stops, 
 | S2C | `jtcat-auto-cq-state` `{mode,…}` | existing — this is **auto-answer**, not Full Auto CQ |
 | C2S | `jtcat-call-cq` `{modifier}` | existing — single manual CQ |
 | C2S | `jtcat-auto-cq-mode` `{mode}` | existing — auto-**answer** on/off |
-| C2S | `jtcat-full-auto-cq` `{on, modifier}` | **PROPOSED — not yet on desktop** (see §5) |
+| C2S | `jtcat-full-auto-cq` `{on, modifier}` | **live** (2026-07-17) |
 
-## 5. Controlling Full Auto CQ from the phone (next step — desktop work needed)
+## 5. Controlling Full Auto CQ from the phone — LIVE (2026-07-17)
 
-Full Auto CQ currently runs only when **owner === 'popout'** (desktop window). For the phone to *drive* it, the desktop needs a **`remote` owner path**:
+The `remote` owner path is wired on desktop:
 
-- **C2S message to add:** `jtcat-full-auto-cq` `{ on: bool, modifier?: string }` → desktop calls `startFullAutoCq('remote', modifier)` / `stopFullAutoCq('stopped by phone')`. The existing `rearmCq`/`stopFullAutoCq`/watchdog already branch on `owner`, so this is mostly a new IPC + protocol entry + an ULTRACAT-unlock + capability guard (refuse if `!settings.ultracat`).
-- The phone should **gate the control on `ultracat === true`** and replicate the attended-watchdog client-side (§6).
-
-Until that lands, the phone can **observe** Full Auto CQ (via §3) but should present its own controls as read-only / desktop-driven, or omit the start/stop button.
+- **C2S:** `jtcat-full-auto-cq` `{ on: bool, modifier?: string }` → `startFullAutoCq('remote', modifier)` / `stopFullAutoCq('stopped from phone')`. The ULTRACAT unlock is guarded desktop-side; a locked desktop refuses and re-broadcasts `jtcat-ultracat-state` so an optimistic phone toggle reconciles to "not running". Watch that broadcast for your source of truth rather than assuming the send succeeded.
+- **Stop is unconditional** — `on:false` stops even a popout-owned run (any client silencing TX is always allowed). Feel free to offer a stop button whenever `fullAutoCq === true`, regardless of `owner`.
+- Remote-owned runs re-arm after each completed/stalled QSO and are covered by the same 30-min attended watchdog; QSO progress rides the existing remote JTCAT session messages.
+- The phone should **gate the start control on `ultracat === true`** and treat Hunt (`jtcat-auto-cq-mode`) and Run as mutually exclusive in its UI: the desktop enforces run→hunt-off (starting Run zeroes Hunt), but not the reverse — when the user picks a Hunt mode while a run is active, send `jtcat-full-auto-cq {on:false}` first (this mirrors the desktop popout UX).
 
 ## 6. Compliance — read before building a "leave it running" UI
 

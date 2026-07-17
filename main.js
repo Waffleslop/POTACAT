@@ -5892,8 +5892,9 @@ function rearmCq(owner) {
   return true;
 }
 
-// Start run mode for an owner (popout-only for v1). Guarded by the ULTRACAT
-// unlock so a locked client can't drive it.
+// Start run mode for an owner: 'popout' (desktop window) or 'remote' (the
+// ECHOCAT phone via jtcat-full-auto-cq). Guarded by the ULTRACAT unlock so a
+// locked client can't drive it.
 function startFullAutoCq(owner, modifier) {
   if (!settings.ultracat) { sendCatLog('[JTCAT] Full Auto CQ blocked — ULTRACAT locked'); return false; }
   if (!ft8Engine) { sendCatLog('[JTCAT] Full Auto CQ blocked — engine not running'); return false; }
@@ -6697,7 +6698,11 @@ function jtcatHandleRetryStall(o) {
   } else if (outcome.action === 'rearm') {
     sendCatLog('[JTCAT] Full Auto CQ — ' + (qso.call || 'partner') + ' stalled, resuming CQ');
     if (qso.call) jtcatAutoCqWorkedSession.add(qso.call);
-    rearmCq('popout'); // rearm only fires in run mode, which is popout-owner-only
+    // Re-arm under whichever owner is running — was hardcoded 'popout' when
+    // run mode was popout-only; the phone control path (jtcat-full-auto-cq)
+    // made 'remote' a live owner too, and a hardcoded owner mismatch turns
+    // rearmCq into a silent no-op (run stalls after the first stalled QSO).
+    rearmCq(jtcatFullAutoCqOwner);
   } else if (outcome.action === 'abort') {
     const msg = _jtcatStateMachine.giveUpMessage({
       kind: 'abort', phase: qso.phase, call: qso.call,
@@ -6933,11 +6938,17 @@ function startJtcat(mode) {
     }
     // Attended-operator watchdog for Full Auto CQ run mode (Part 97).
     jtcatFullAutoCqWatchdog();
-    // Clean up completed QSOs. In Full Auto CQ run mode the popout owner
-    // re-arms a fresh CQ instead of going idle (work-then-CQ-again loop).
+    // Clean up completed QSOs. In Full Auto CQ run mode the owning session
+    // re-arms a fresh CQ instead of going idle (work-then-CQ-again loop) —
+    // both owners now, since the phone can drive run mode (jtcat-full-auto-cq).
     if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
-      remoteJtcatQso = null;
-      remoteJtcatBroadcastQso();
+      if (remoteJtcatQso.call) jtcatAutoCqWorkedSession.add(remoteJtcatQso.call);
+      if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'remote') {
+        rearmCq('remote');
+      } else {
+        remoteJtcatQso = null;
+        remoteJtcatBroadcastQso();
+      }
     }
     if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
       if (popoutJtcatQso.call) jtcatAutoCqWorkedSession.add(popoutJtcatQso.call);
@@ -12504,6 +12515,24 @@ function connectRemote() {
     if (mode === 'off') jtcatAutoCqWorkedSession.clear();
     broadcastAutoCqState();
     console.log('[JTCAT Remote] Auto-CQ mode:', mode);
+  });
+
+  // ULTRACAT Full Auto CQ (run mode) from the phone — the §5 control path of
+  // docs/ios-handoffs/ultracat-full-auto-cq.md. Same startFullAutoCq the
+  // popout uses, with owner 'remote' so re-arm and QSO advancement ride the
+  // remote JTCAT session (rearmCq/jtcatHandleRetryStall already branch on
+  // owner). startFullAutoCq itself guards the ULTRACAT unlock + engine; on
+  // refusal we re-broadcast the (unchanged) state so an optimistic phone
+  // toggle reconciles back to "not running". Stop is unconditional — any
+  // client silencing TX is always allowed, even for a popout-owned run.
+  remoteServer.on('jtcat-full-auto-cq', ({ on, modifier } = {}) => {
+    if (on) {
+      const ok = startFullAutoCq('remote', modifier || '');
+      if (!ok) broadcastFullAutoCqState();
+    } else {
+      stopFullAutoCq('stopped from phone');
+    }
+    console.log('[JTCAT Remote] Full Auto CQ:', on ? 'start' : 'stop');
   });
 
   // Chase target from the phone — shared, last-writer-wins (see applyChaseTarget).
@@ -26336,8 +26365,15 @@ app.whenReady().then(() => {
           }
         }
         if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
-          remoteJtcatQso = null;
-          remoteJtcatBroadcastQso();
+          // Mirror the popout branch above: a remote-owned Full Auto CQ run
+          // re-arms instead of going idle (phone control path).
+          if (remoteJtcatQso.call) jtcatAutoCqWorkedSession.add(remoteJtcatQso.call);
+          if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'remote') {
+            rearmCq('remote');
+          } else {
+            remoteJtcatQso = null;
+            remoteJtcatBroadcastQso();
+          }
         }
         if (popoutJtcatQso && popoutJtcatQso.phase !== 'done') {
           const phaseBefore = popoutJtcatQso.phase;
