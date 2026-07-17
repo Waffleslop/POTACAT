@@ -1,6 +1,6 @@
 {
   "name": "potacat",
-  "version": "1.9.9",
+  "version": "1.9.10",
   "description": "Amateur radio spot aggregator with CAT control, QSO logging, and panadapter integration",
   "license": "Apache-2.0",
   "author": {
