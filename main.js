@@ -2804,6 +2804,20 @@ function ensureRemoteClient() {
   });
   remoteClient.on('status', (snap) => {
     _remoteClientLastStatus = snap;
+    // Mirror the shack's freq/mode into main-process state FIRST — surfaces
+    // that render from it (the VFO popout's vfo-radio-state above all) showed
+    // dashes and dead controls in remote-client mode because only the main
+    // window ever heard about the remote rig (NA7C, G90/rigctld 2026-07-17).
+    if (typeof snap.freq === 'number' && snap.freq > 0) _currentFreqHz = snap.freq;
+    if (snap.mode) _currentMode = snap.mode;
+    sendVfoState();
+    // Meters go through the sendCat* helpers (main window + VFO popout + our
+    // own ECHOCAT clients) instead of the old win-only sends, so a phone or
+    // popout attached to THIS laptop mirrors the remote rig too.
+    if (typeof snap.smeter === 'number') sendCatSmeter(snap.smeter);
+    if (typeof snap.swr === 'number') sendCatSwr(snap.swr);
+    if (typeof snap.alc === 'number') sendCatAlc(snap.alc);
+    if (typeof snap.power === 'number') sendCatPower(snap.power);
     if (!win || win.isDestroyed()) return;
     // Forward shack status fields into the local cat-* channels so
     // the renderer's existing handlers update transparently.
@@ -2817,10 +2831,6 @@ function ensureRemoteClient() {
       win.webContents.send('cat-frequency', snap.freq);
     }
     if (snap.mode) win.webContents.send('cat-mode', snap.mode);
-    if (typeof snap.smeter === 'number') win.webContents.send('cat-smeter', snap.smeter);
-    if (typeof snap.swr === 'number') win.webContents.send('cat-swr', snap.swr);
-    if (typeof snap.alc === 'number') win.webContents.send('cat-alc', snap.alc);
-    if (typeof snap.power === 'number') win.webContents.send('cat-power', snap.power);
   });
   remoteClient.on('spots', (data) => {
     if (win && !win.isDestroyed()) win.webContents.send('spots', data);
@@ -20815,12 +20825,22 @@ app.whenReady().then(() => {
     }
   });
 
+  // Remote-client mode: the rig lives on another POTACAT desktop — forward
+  // the same C2S messages the phone uses (set-mode / set-filter); the shack's
+  // existing handlers apply them. Without this the VFO popout's buttons were
+  // silent no-ops in remote mode (NA7C 2026-07-17); only 'tune' was routed.
   ipcMain.on('vfo-set-mode', (_e, mode) => {
+    if (isRemoteActive() && remoteClient) { remoteClient.sendSetMode(mode); return; }
     if (!_currentFreqHz) return;
     _lastTuneFreq = 0; // reset rate limiter
     tuneRadio(_currentFreqHz / 1000, mode);
   });
   ipcMain.on('vfo-set-filter-width', (_e, hz) => {
+    if (isRemoteActive() && remoteClient) {
+      remoteClient.sendRaw({ type: 'set-filter', width: Number(hz) || 0 });
+      _currentFilterWidth = hz;
+      return;
+    }
     if (cat && cat.connected) cat.setFilterWidth(hz);
     _currentFilterWidth = hz;
   });
@@ -23150,7 +23170,16 @@ app.whenReady().then(() => {
         + `filt=${_currentFilterWidth} (flexApi=${smartSdr && smartSdr.connected ? 1 : 0})`);
     }
   };
-  ipcMain.handle('rig-control', (_e, data) => applyRigControl(data, 'desktop'));
+  ipcMain.handle('rig-control', (_e, data) => {
+    // Remote-client mode: forward to the shack as the same 'rig-control' C2S
+    // the phone uses — its applyRigControl runs there. Covers every DSP /
+    // custom-CAT button in one place (NA7C: dead VFO-popout buttons).
+    if (isRemoteActive() && remoteClient) {
+      remoteClient.sendRaw({ type: 'rig-control', ...data });
+      return { ok: true, remote: true };
+    }
+    return applyRigControl(data, 'desktop');
+  });
 
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
