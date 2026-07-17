@@ -1122,6 +1122,12 @@ let _clientDisconnectGraceTimer = null;
 let _audioBridgeSilent = false;
 let _audioBridgeSilentSince = 0;
 let _currentFreqHz = 0;    // tracked for remote radio status
+// Dial JTCAT last tuned ITSELF (popout band button / phone set-band). Spot
+// clicks, scan, and VFO tunes deliberately don't move this anchor — the
+// pre-TX dial guard compares it against _currentFreqHz to refuse wrong-band
+// FT8 TX (KF0U 2026-07-17: a spots-table click QSY'd the rig to 17m while
+// JTCAT showed 20m, and the next transmissions went out on the wrong band).
+let _jtcatExpectedDialHz = 0;
 // Radio-link transition tracking (K6RBJ 2026-07-17): a dying USB/serial link
 // used to be a buried log line while the freq readout silently went stale —
 // the operator tuned a dead rig for weeks. Watch the effective connected
@@ -7377,6 +7383,26 @@ function startJtcat(mode) {
       try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
       return;
     }
+    // Wrong-band TX guard (KF0U 2026-07-17): if the rig's reported dial no
+    // longer matches the dial JTCAT tuned — a spots-table click QSY'd it, a
+    // scan moved it, or the operator turned the knob — keying now would
+    // transmit FT8 on a band the popout isn't even showing. Refuse the
+    // cycle and say exactly what happened and how to re-sync. Tolerance
+    // 2.5 kHz: the FT8 audio passband is ~3 kHz wide, so nudging the dial a
+    // couple kHz is deliberate operating; cross-band drift is MHz.
+    if (_jtcatExpectedDialHz > 0 && _currentFreqHz > 0 &&
+        Math.abs(_currentFreqHz - _jtcatExpectedDialHz) > 2500) {
+      const dialMsg = 'TX blocked — the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) +
+        ' MHz but JTCAT is set to ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) +
+        ' MHz. Something retuned the rig mid-session (a spot click, scan, or the radio itself). ' +
+        'Click a band button in the JTCAT window to re-sync and TX will resume.';
+      sendCatLog('[JTCAT] ' + dialMsg);
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: dialMsg });
+      }
+      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      return;
+    }
     acquireRadio('jtcat'); // held for the duration of this transmission
     const catState = cat ? `connected=${cat.connected}` : 'cat=null';
     console.log(`[JTCAT] TX start requested — message: ${data.message}, ${catState}`);
@@ -7810,6 +7836,7 @@ function stopInProcessSpectrum() {
 function stopJtcat() {
   clearJtcatTxFailsafe();
   clearJtcatIcomHardRelease();
+  _jtcatExpectedDialHz = 0; // dial anchor dies with the session (pre-TX guard)
   if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
   if (settings.audioSource === 'icom-network') {
     forceReleaseIcomNetworkTx('JTCAT stop');
@@ -13108,7 +13135,10 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-set-band', ({ band, freqKhz }) => {
-    if (freqKhz) tuneRadio(freqKhz, 'DIGU');
+    if (freqKhz) {
+      tuneRadio(freqKhz, 'DIGU');
+      _jtcatExpectedDialHz = Math.round(freqKhz * 1000); // phone-owned session anchor (see pre-TX dial guard)
+    }
     // WSPR: derive the decoder dial from the band host-side, so mobile doesn't
     // need a separate jtcat-set-wspr-dial message (the popout uses one locally).
     if (ft8Engine && ft8Engine._mode === 'WSPR' && band) {
@@ -22746,6 +22776,16 @@ app.whenReady().then(() => {
       // out-of-band. K3SBP 2026-06-11.
       remoteClient.sendTune({ frequency: Math.round(parseFloat(frequency) * 1000), mode, bearing });
       return;
+    }
+    // JTCAT dial anchor: a tune issued BY the JTCAT popout is the dial the
+    // engine session believes it's on. Tunes from every other window (spots
+    // table, scan, VFO popout) deliberately do NOT move the anchor — the
+    // pre-TX guard in the tx-start handler uses the difference to refuse
+    // wrong-band FT8 TX with an explanation instead of silently QRMing the
+    // wrong band (KF0U 2026-07-17).
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _e.sender === jtcatPopoutWin.webContents) {
+      const _anchorKhz = parseFloat(frequency);
+      if (isFinite(_anchorKhz) && _anchorKhz > 0) _jtcatExpectedDialHz = Math.round(_anchorKhz * 1000);
     }
     // Dead rig link → tell the window that asked, on the same channel the
     // VFO lock uses (main window + VFO popout both render it). Before this,
