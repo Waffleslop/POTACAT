@@ -9662,8 +9662,11 @@ function updateMapMarkers(filtered) {
     const mapEvent = getEventForCallsign(s.callsign);
     const eventBadgeHtml = mapEvent ? ` <span style="background:${mapEvent.badgeColor || '#ff6b00'};color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">${mapEvent.badge || 'EVT'}</span>` : '';
     const wwffBadge = s.wwffReference ? ` <span style="background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">WWFF</span>` : '';
-    const donorBadge = donorCallsigns.has(s.callsign.toUpperCase()) ? ' <span style="font-size:12px;" title="POTACAT Supporter">\uD83D\uDC3E</span>' : '';
-    const creatorBadge = s.callsign.toUpperCase() === 'K3SBP' ? ' <span style="font-size:12px;" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>' : '';
+    // Supporter/creator badges are for OTHER operators viewing you \u2014 never
+    // shown on your own call (same rule as the spots table, 2026-07-17).
+    const popupIsOwnCall = !!(myCallsign && s.callsign.toUpperCase() === myCallsign.toUpperCase());
+    const donorBadge = (!popupIsOwnCall && donorCallsigns.has(s.callsign.toUpperCase())) ? ' <span style="font-size:12px;" title="POTACAT Supporter">\uD83D\uDC3E</span>' : '';
+    const creatorBadge = (!popupIsOwnCall && s.callsign.toUpperCase() === 'K3SBP') ? ' <span style="font-size:12px;" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>' : '';
     const wwffRefLine = s.wwffReference ? `<br><b>${s.wwffReference}</b> ${s.wwffParkName || ''} <span style="color:${SOURCE_COLORS_ACTIVE.wwff};font-size:11px;">[WWFF]</span>` : '';
     const qrzOp = qrzData.get(s.callsign.toUpperCase().split('/')[0]);
     const opName = qrzDisplayName(qrzOp);
@@ -9974,7 +9977,7 @@ document.addEventListener('keydown', (e) => {
     render();
     // Scroll the tuned row to the center of the table viewport so the user
     // doesn't have to hunt for it as new spots reflow above/below. (N5SKT.)
-    const onFreqRow = tbody.querySelector('.on-freq');
+    const onFreqRow = tbody.querySelector('.tuned-spot') || tbody.querySelector('.on-freq');
     if (onFreqRow) onFreqRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
@@ -10676,7 +10679,7 @@ if (window.api.onBandspreadTunedSpot) {
     notifyVfoTunedSpot(match);
     if (typeof prefillDxCommand === 'function') prefillDxCommand(match);
     render();
-    const onFreqRow = tbody && tbody.querySelector('.on-freq');
+    const onFreqRow = tbody && (tbody.querySelector('.tuned-spot') || tbody.querySelector('.on-freq'));
     if (onFreqRow) onFreqRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
   });
 }
@@ -11662,10 +11665,17 @@ function render() {
       if (scanSpot && s.frequency === scanSpot.frequency) {
         tr.classList.add('scan-highlight');
       }
-      // Highlight row matching radio's current frequency or last tuned spot
-      if (radioFreqKhz !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhz) < 0.5) {
-        tr.classList.add('on-freq');
-      } else if (lastTunedSpot && s.callsign === lastTunedSpot.callsign && s.frequency === lastTunedSpot.frequency) {
+      // Two distinct highlights (split 2026-07-17 — one blue outline per dial-
+      // match drowned the table when 16 FT8 spots shared 14074):
+      //   .tuned-spot — the spot the operator clicked/tuned: strong outline,
+      //                 always exactly one row.
+      //   .on-freq    — everything else within 0.5 kHz of the dial: quiet
+      //                 blue left-edge + faint tint (group signal, not alarm).
+      const isClickedSpot = lastTunedSpot && s.callsign === lastTunedSpot.callsign &&
+        s.frequency === lastTunedSpot.frequency;
+      if (isClickedSpot) {
+        tr.classList.add('tuned-spot');
+      } else if (radioFreqKhz !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhz) < 0.5) {
         tr.classList.add('on-freq');
       }
       if (isSkipped) {
@@ -11720,12 +11730,23 @@ function render() {
         prefillDxCommand(s);
         window.api.tune(s.frequency, s.mode, s.bearing);
         if (s.lat != null && s.lon != null) showTuneArc(s.lat, s.lon, s.frequency, s.source);
-        // Auto-open JTCAT popout for digital mode spots
+        // Auto-open JTCAT popout for digital mode spots — and arm a Spot
+        // Target: the popout watches for this activator's CQ / QSO-end and
+        // auto-calls them with the decode's real slot/df (parity is
+        // unknowable from the spot itself). 2026-07-17.
         const dm = (s.mode || '').toUpperCase();
         if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2') {
-          // Save the spot freq as JTCAT band so the popout opens on the right band
+          // Save the spot freq AND mode so a fresh popout opens on the right
+          // band in the right mode (init restores jtcatLastMode before
+          // matching band buttons — an FT4 spot used to open in FT8).
           const spotFreqKhz = Math.round(parseFloat(s.frequency));
-          window.api.saveSettings({ jtcatLastBandFreq: spotFreqKhz });
+          window.api.saveSettings({ jtcatLastBandFreq: spotFreqKhz, jtcatLastMode: dm });
+          if (window.api.jtcatSpotTargetSet) {
+            window.api.jtcatSpotTargetSet({
+              call: s.callsign, mode: dm, freqKhz: spotFreqKhz,
+              band: s.band || '', reference: s.reference || '', parkName: s.parkName || '',
+            });
+          }
           window.api.jtcatPopoutOpen();
         }
         // Activator mode: fill QSO form from spot (hunter while activating)
@@ -11763,7 +11784,12 @@ function render() {
       const callTd = document.createElement('td');
       callTd.className = 'callsign-cell';
       callTd.setAttribute('data-col', 'callsign');
-      if (myCallsign && s.callsign.toUpperCase() === myCallsign.toUpperCase()) {
+      // Own-call row: ONE leading cat and nothing else \u2014 the donor paw and
+      // creator badges below are suppressed for your own call (K3SBP saw
+      // "cat K3SBP paw cat" when spotted; the trailing badges are for OTHER
+      // operators viewing you, not for you viewing yourself). 2026-07-17.
+      const isOwnCallRow = !!(myCallsign && s.callsign.toUpperCase() === myCallsign.toUpperCase());
+      if (isOwnCallRow) {
         const cat = document.createElement('span');
         cat.textContent = '\uD83D\uDC08\u200D\u2B1B ';
         cat.className = 'watchlist-star';
@@ -11797,7 +11823,7 @@ function render() {
         });
         callTd.appendChild(callLink);
       }
-      if (donorCallsigns.has(s.callsign.toUpperCase())) {
+      if (!isOwnCallRow && donorCallsigns.has(s.callsign.toUpperCase())) {
         const paw = document.createElement('span');
         paw.className = 'donor-paw';
         paw.title = 'POTACAT Supporter';
@@ -11816,7 +11842,7 @@ function render() {
         wlEmojiEl.textContent = wlMatch.emoji;
         callTd.appendChild(wlEmojiEl);
       }
-      if (s.callsign.toUpperCase() === 'K3SBP') {
+      if (!isOwnCallRow && s.callsign.toUpperCase() === 'K3SBP') {
         const cat = document.createElement('span');
         cat.className = 'donor-paw';
         cat.title = 'POTACAT Creator';
@@ -12114,7 +12140,7 @@ function render() {
     // off-screen so we don't fight a user who's scrolling around to look
     // at other spots. (N5SKT request — second half of "keep it centered".)
     if (!scanning && lastTunedSpot) {
-      const tunedRow = tbody.querySelector('tr.on-freq');
+      const tunedRow = tbody.querySelector('tr.tuned-spot') || tbody.querySelector('tr.on-freq');
       if (tunedRow) {
         const scroller = tbody.parentElement;
         if (scroller) {

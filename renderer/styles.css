@@ -1569,7 +1569,26 @@ a.park-link:hover {
   outline-offset: -2px;
 }
 
+/* Dial-match (quiet): every row within 0.5 kHz of the radio's frequency.
+   On FT8/FT4 ALL activators share one dial, so this must read as a GROUP —
+   a thin blue left edge + faint tint (same visual language as the DX-cluster
+   purple left border), not a per-row alarm. 16 solid outlines was a wall of
+   blue boxes (K3SBP 2026-07-17). The edge rides td:first-child via inset
+   box-shadow because <tr> can't carry border/outline reliably. */
 .on-freq {
+  background: rgba(79, 195, 247, 0.07);
+}
+/* Bar rides the RIGHT edge of the Log cell (not the row's left edge, where
+   it hugged the window border and was easy to miss — K3SBP 2026-07-17).
+   Anchored to .log-col rather than td:first-child because column order is
+   user-configurable; with the default order this puts the bar between the
+   Log button and the callsign. */
+.on-freq td.log-col {
+  box-shadow: inset -3px 0 0 var(--accent-blue, #4fc3f7);
+}
+/* The spot the operator actually clicked/tuned — always exactly one row.
+   Keeps the original strong treatment. */
+.tuned-spot {
   background: var(--bg-hover);
   outline: 2px solid var(--accent-blue);
   outline-offset: -2px;
@@ -1578,7 +1597,7 @@ a.park-link:hover {
 /* Ctrl/Cmd-click multi-op selection — operators picked to log together.
    Use `outline` (not box-shadow): box-shadow on a <tr> renders per-cell and
    clips to a partial stroke. A DASHED outline is a full rectangle around the
-   row and reads as "selected", distinct from the on-freq row's SOLID outline. */
+   row and reads as "selected", distinct from the tuned-spot row's SOLID outline. */
 .spot-selected {
   background: rgba(79, 195, 247, 0.16);
   outline: 2px dashed var(--accent-blue, #4fc3f7);

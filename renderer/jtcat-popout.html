@@ -354,6 +354,15 @@
     <button type="button" id="jp-clock-recheck" class="jtcat-filter-btn" title="Re-measure clock offset">Recheck</button>
   </div>
 
+  <!-- Spot Target banner — armed by clicking an FT8/FT4 spot in the desktop
+       Table view; JTCAT watches for the activator and auto-calls at their CQ
+       or QSO end (slot parity comes from the decode, never guessed). -->
+  <div id="jp-spot-target-banner" class="hidden" style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:var(--bg-tertiary);border-bottom:2px solid var(--accent-green, #4ecca3);color:var(--text-primary);font-size:12px;font-weight:600;">
+    <span id="jp-spot-target-msg" style="flex:1;"></span>
+    <button type="button" id="jp-spot-target-callnow" class="jtcat-filter-btn" title="Call the target immediately using the slot and frequency from the last time they were heard">Call now</button>
+    <button type="button" id="jp-spot-target-cancel" class="jtcat-filter-btn" title="Stop watching for this station">Cancel</button>
+  </div>
+
   <!-- Multi-slice config panel -->
   <div id="jp-multi-panel" class="jp-multi-panel hidden">
     <div id="jp-multi-slices"></div>

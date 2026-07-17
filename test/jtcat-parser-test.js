@@ -145,6 +145,41 @@ section('inferReplyStep — empty/unknown my-call (main re-derives authoritative
 eq(step('K3SBP W1ABC FN42', ''), { step: 'reply-cq', call: 'W1ABC' }, 'no my-call -> tail-end (main supplies the real call)');
 
 // ---------------------------------------------------------------------
+section('classifySpotTargetTrigger — Spot Target fire policy (CQ or QSO-end only)');
+function trig(text, target) {
+  const r = P.classifySpotTargetTrigger(text, target, ME);
+  return r ? { trigger: r.trigger, call: r.call } : null;
+}
+// CQ triggers
+eq(trig('CQ W1ABC FN42', 'W1ABC'), { trigger: 'cq', call: 'W1ABC' }, 'plain CQ fires');
+eq(trig('CQ POTA W1ABC FN42', 'W1ABC'), { trigger: 'cq', call: 'W1ABC' }, 'program-modifier CQ fires');
+eq(trig('CQ NA W1ABC', 'W1ABC'), { trigger: 'cq', call: 'W1ABC' }, 'directed CQ, no grid, fires');
+eq(trig('CQ K2XYZ FN31', 'W1ABC'), null, 'someone else\'s CQ does not fire');
+// Tail-end triggers (target SENDS RR73/RRR/73 to a third station)
+eq(trig('K2XYZ W1ABC RR73', 'W1ABC'), { trigger: 'tail', call: 'W1ABC' }, 'their RR73 to another fires');
+eq(trig('K2XYZ W1ABC RRR', 'W1ABC'), { trigger: 'tail', call: 'W1ABC' }, 'their RRR to another fires');
+eq(trig('K2XYZ W1ABC 73', 'W1ABC'), { trigger: 'tail', call: 'W1ABC' }, 'their 73 to another fires');
+// Mid-QSO exchanges must NOT auto-trigger (they only reveal parity)
+eq(trig('K2XYZ W1ABC -10', 'W1ABC'), null, 'their report leg does not fire');
+eq(trig('K2XYZ W1ABC R-08', 'W1ABC'), null, 'their R-report leg does not fire');
+eq(trig('K2XYZ W1ABC FN42', 'W1ABC'), null, 'their grid leg does not fire');
+eq(trig('K2XYZ W1ABC', 'W1ABC'), null, 'bare two-call does not fire');
+// Direction matters: target as ADDRESSEE means someone ELSE sent it
+eq(trig('W1ABC K2XYZ RR73', 'W1ABC'), null, 'RR73 sent TO the target does not fire');
+// Addressed to us = direct-caller machinery\'s case, not the spot target
+eq(trig('K3SBP W1ABC RR73', 'W1ABC'), null, 'their RR73 addressed to US does not fire here');
+// Identity robustness: portable/hashed on-air renderings of the spot call
+eq(trig('CQ W1ABC/P FN42', 'W1ABC'), { trigger: 'cq', call: 'W1ABC/P' }, 'portable CQ matches, returns as-transmitted call');
+eq(trig('K2XYZ <W1ABC> RR73', 'W1ABC'), { trigger: 'tail', call: 'W1ABC' }, 'hash-bracketed tail matches, brackets stripped');
+eq(trig('K2XYZ W9ZZZ RR73', 'W1ABC'), null, 'unrelated tail does not fire');
+eq(trig('', 'W1ABC'), null, 'empty text');
+eq(trig('CQ W1ABC FN42', ''), null, 'empty target');
+// Handoff contract: a firing decode must drive the reply handler to reply-cq
+// (the watcher passes the raw text; main re-derives the step from it).
+eq(step('CQ W1ABC FN42', ME), { step: 'reply-cq', call: 'W1ABC' }, 'CQ fire text -> inferReplyStep reply-cq');
+eq(step('K2XYZ W1ABC RR73', ME), { step: 'reply-cq', call: 'W1ABC' }, 'tail fire text -> inferReplyStep reply-cq targeting sender');
+
+// ---------------------------------------------------------------------
 console.log('\n============================================================');
 console.log(`Results: ${pass} passed, ${fail} failed`);
 if (fail > 0) { console.log('FAILURES PRESENT'); process.exit(1); }

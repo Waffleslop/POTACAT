@@ -191,6 +191,44 @@
     return null;
   }
 
+  /**
+   * Spot Target trigger classifier (2026-07-17): clicking an FT8/FT4 spot in
+   * the desktop table arms a target callsign; the decode watcher fires the
+   * auto-call ONLY at a polite opening — the target's own CQ, or the target
+   * ending a QSO with someone else (their RR73/RRR/73 = classic tail-end;
+   * they're listening next cycle). Mid-QSO payloads (grid, report, R-report,
+   * bare two-call) deliberately do NOT trigger; they still reveal slot parity,
+   * which the watcher records separately for the manual "Call now" button.
+   *
+   * Returns { trigger: 'cq' | 'tail', call } or null. `call` is the
+   * AS-TRANSMITTED call from the decode (portable/full form) because the TX
+   * builders must address what's actually on the air — the spot string may
+   * differ (spot "W1ABC", on-air "W1ABC/P"). Identity comparison uses
+   * normalizeCall so those still match.
+   */
+  function classifySpotTargetTrigger(text, targetCall, myCall) {
+    var t = String(text || '').toUpperCase().trim();
+    var target = normalizeCall(targetCall);
+    if (!t || !target) return null;
+    if (isCqText(t)) {
+      var pc = parseCq(t);
+      if (pc.call && normalizeCall(pc.call) === target) {
+        return { trigger: 'cq', call: stripHashBrackets(pc.call) };
+      }
+      return null;
+    }
+    // Tail-end: "ADDRESSEE SENDER RR73|RRR|73" — the SENDER is token 2.
+    var parts = t.split(/\s+/);
+    if (parts.length < 3) return null;
+    var from = stripHashBrackets(parts[1]);
+    if (!looksLikeCallsign(from) || normalizeCall(from) !== target) return null;
+    // Addressed to US = an exchange with us already in flight (or a straggler)
+    // — the direct-caller machinery owns that case, not the spot target.
+    if (myCall && normalizeCall(parts[0]) === normalizeCall(myCall)) return null;
+    if (/^(RR73|RRR|73)$/.test(parts[2] || '')) return { trigger: 'tail', call: from };
+    return null;
+  }
+
   return {
     looksLikeCallsign: looksLikeCallsign,
     normalizeCall: normalizeCall,
@@ -200,5 +238,6 @@
     isCqText: isCqText,
     parseCq: parseCq,
     inferReplyStep: inferReplyStep,
+    classifySpotTargetTrigger: classifySpotTargetTrigger,
   };
 });

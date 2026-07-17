@@ -352,6 +352,9 @@ contextBridge.exposeInMainWorld('api', {
   onVfoPopoutStatus: (cb) => ipcRenderer.on('vfo-popout-status', (_e, open) => cb(open)),
   // JTCAT pop-out
   jtcatPopoutOpen: () => ipcRenderer.send('jtcat-popout-open'),
+  // Spot Target: arm JTCAT to auto-call a clicked FT8/FT4 spot's activator
+  // once they're heard (slot parity comes from the decode, never guessed).
+  jtcatSpotTargetSet: (t) => ipcRenderer.send('jtcat-spot-target-set', t),
   mercuryPopoutOpen: () => ipcRenderer.send('mercury-popout-open'),
   mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
   jtcatSetUltracat: (on) => ipcRenderer.send('jtcat-set-ultracat', on),

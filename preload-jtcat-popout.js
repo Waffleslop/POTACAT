@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('api', {
   // NOT the error channel: phase:'error' force-clears qsoState/txEnabled,
   // which would fight the still-running courtesy-73 leg.
   onJtcatQsoNotice: (cb) => ipcRenderer.on('jtcat-qso-notice', (_e, data) => cb(data)),
+  // Spot Target (Table-view FT8/FT4 spot click → auto-call the activator)
+  onJtcatSpotTarget: (cb) => ipcRenderer.on('jtcat-spot-target', (_e, data) => cb(data)),
+  jtcatSpotTargetClear: () => ipcRenderer.send('jtcat-spot-target-clear'),
+  jtcatSpotTargetCallNow: () => ipcRenderer.send('jtcat-spot-target-call-now'),
   onJtcatFlagState: (cb) => ipcRenderer.on('jtcat-flag-state', (_e, data) => cb(data)),
   // Hold TX Freq — dedicated IPC (not saveSettings): main live-applies the
   // engine setter and echoes state to the phone (jtcat-hold-tx-state).

@@ -5749,6 +5749,40 @@ const JTCAT_MAX_QSO_RETRIES = 12; // ~3 minutes of retries at 15s/cycle
 // Auto-CQ response state
 let jtcatAutoCqMode = 'off';          // 'off' | 'pota' | 'sota' | 'all'
 let jtcatAutoCqWorkedSession = new Set(); // callsigns attempted/worked this session
+
+// ─── Spot Target (2026-07-17) ────────────────────────────────────────────────
+// Clicking an FT8/FT4/FT2 spot in the desktop table arms this; the watcher in
+// the decode handler auto-calls the activator at a polite opening — their CQ,
+// or their RR73/RRR/73 to someone else (tail-end). Slot parity and df are
+// unknowable from the spot, so we NEVER call blind: the fire always rides a
+// real decode. Session-only; one target at a time; popout banner mirrors it.
+let jtcatSpotTarget = null; // { call, mode, freqKhz, band, reference, parkName,
+                            //   status:'armed'|'engaged', setAt, lastHeardAt,
+                            //   lastHeard:{slot,df,snr}|null }
+const JTCAT_SPOT_TARGET_TTL_MS = 10 * 60 * 1000; // unheard this long → expire
+
+function broadcastSpotTarget(extra) {
+  if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) return;
+  const t = jtcatSpotTarget;
+  jtcatPopoutWin.webContents.send('jtcat-spot-target', {
+    call: t ? t.call : '',
+    mode: t ? t.mode : '',
+    freqKhz: t ? t.freqKhz : 0,
+    status: t ? t.status : 'cleared',
+    heard: (t && t.lastHeard)
+      ? { agoSec: Math.round((Date.now() - t.lastHeardAt) / 1000), slot: t.lastHeard.slot }
+      : null,
+    ...extra,
+  });
+}
+
+function clearSpotTarget(reason) {
+  if (!jtcatSpotTarget) return;
+  const call = jtcatSpotTarget.call;
+  jtcatSpotTarget = null;
+  sendCatLog(`[JTCAT] Spot target ${call} cleared (${reason})`);
+  broadcastSpotTarget({ status: 'cleared', reason, call });
+}
 let jtcatAutoCqOwner = null;           // 'popout' | 'remote' | null
 
 // ULTRACAT (tier-2 easter egg) — Full Auto CQ "run" mode: we call CQ, work
@@ -7037,6 +7071,12 @@ function startJtcat(mode) {
       }
     }
     if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
+      // Spot Target completed — clear it with a "worked" notice before the
+      // QSO object is dropped.
+      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && popoutJtcatQso.call &&
+          JtcatParser.normalizeCall(popoutJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+        clearSpotTarget('worked');
+      }
       if (popoutJtcatQso.call) jtcatAutoCqWorkedSession.add(popoutJtcatQso.call);
       if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'popout') {
         rearmCq('popout');
@@ -7094,6 +7134,61 @@ function startJtcat(mode) {
       } else if (popoutJtcatQso && popoutJtcatQso.phase !== phaseBefore) {
         popoutJtcatQso.txRetries = 0;
         jtcatFullAutoCqLastActivity = Date.now(); // QSO progressed — pet the watchdog
+      }
+    }
+
+    // --- Spot Target watcher ---
+    // Runs BEFORE the Auto-CQ hunt so an armed target outranks generic
+    // candidates in the same cycle; after a fire, hunt's !popoutJtcatQso gate
+    // skips naturally. Decode events fire every period even with zero
+    // decodes, so the TTL check needs no separate timer.
+    if (jtcatSpotTarget) {
+      const tgt = jtcatSpotTarget;
+      const tgtNorm = JtcatParser.normalizeCall(tgt.call);
+      const tgtResults = data.results || [];
+      const curBand = _currentFreqHz ? freqToBand(_currentFreqHz / 1e6) : null;
+      const curEngineMode = (ft8Engine && ft8Engine._mode) || '';
+      if (curEngineMode && curEngineMode !== tgt.mode) {
+        clearSpotTarget('qsy'); // engine mode changed away from the spot's
+      } else if (tgt.band && curBand && curBand.toUpperCase() !== String(tgt.band).toUpperCase()) {
+        clearSpotTarget('qsy'); // dial left the spot's band
+      } else {
+        // Heard tracking: ANY decode transmitted by the target refreshes the
+        // TTL and records slot/df/snr — mid-QSO exchanges don't auto-trigger
+        // (policy) but they reveal parity, which powers the manual Call Now.
+        const heardNow = tgtResults.find((r) => r.call && JtcatParser.normalizeCall(r.call) === tgtNorm);
+        if (heardNow) {
+          tgt.lastHeardAt = Date.now();
+          tgt.lastHeard = { slot: heardNow.slot, df: heardNow.df, snr: heardNow.db };
+          if (tgt.status === 'armed') broadcastSpotTarget(); // refresh "last heard" in the banner
+        }
+        if (Date.now() - tgt.lastHeardAt > JTCAT_SPOT_TARGET_TTL_MS) {
+          clearSpotTarget('expired');
+        } else if (tgt.status === 'engaged' && !popoutJtcatQso) {
+          // The fired QSO died without completing (retry-stall abort or
+          // replacement). Worked-case was handled in the done-block above.
+          // Re-arm and keep listening until expiry.
+          tgt.status = 'armed';
+          broadcastSpotTarget();
+        } else if (tgt.status === 'armed' && !popoutJtcatQso && !remoteJtcatQso && !jtcatFullAutoCq) {
+          // Idle — look for a polite opening: their CQ or QSO-end (tail-end).
+          const hits = tgtResults
+            .map((d) => ({ d, trig: JtcatParser.classifySpotTargetTrigger(d.text, tgt.call, settings.myCallsign) }))
+            .filter((h) => h.trig);
+          if (hits.length) {
+            hits.sort((a, b) => ((b.d.db == null ? -999 : b.d.db) - (a.d.db == null ? -999 : a.d.db)));
+            const hit = hits[0];
+            tgt.status = 'engaged';
+            broadcastSpotTarget({ holdTx: !!settings.jtcatHoldTxFreq, trigger: hit.trig.trigger });
+            sendCatLog(`[JTCAT] Spot target ${hit.trig.call} heard (${hit.trig.trigger}, SNR ${hit.d.db} dB) — calling`);
+            // Synthetic invocation of the double-click reply handler — same
+            // precedent as jtcat-start-multi. Inherits Skip Grid / FD / hound
+            // / Hold-TX no-op / opposite slot / dupe warning / TX arm.
+            ipcMain.emit('jtcat-popout-reply', {}, {
+              call: hit.trig.call, text: hit.d.text, df: hit.d.df, slot: hit.d.slot, snr: hit.d.db,
+            });
+          }
+        }
       }
     }
 
@@ -20923,6 +21018,8 @@ app.whenReady().then(() => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('jtcat-popout-status', false);
       }
+      // Popout gone = nobody to fire for or notify — drop the target silently.
+      jtcatSpotTarget = null;
     });
     jtcatPopoutWin.webContents.on('did-finish-load', () => {
       if (win && !win.isDestroyed()) {
@@ -20931,6 +21028,9 @@ app.whenReady().then(() => {
       // Send current theme
       const themePayload = { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' };
       jtcatPopoutWin.webContents.send('jtcat-popout-theme', themePayload);
+      // Fresh popout: show the armed Spot Target banner immediately (the
+      // target is usually set an instant before jtcat-popout-open).
+      if (jtcatSpotTarget) broadcastSpotTarget();
     });
     jtcatPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') {
@@ -20939,6 +21039,48 @@ app.whenReady().then(() => {
     });
   };
   ipcMain.on('jtcat-popout-open', () => openJtcatPopout());
+
+  // ─── Spot Target IPC (see the watcher in the decode handler) ──────────────
+  // Set from the main window's spot click. Validates and replaces any prior
+  // target; the popout banner mirrors state via the jtcat-spot-target channel.
+  ipcMain.on('jtcat-spot-target-set', (_e, t) => {
+    if (!t || !t.call || !t.mode) return;
+    const mode = String(t.mode).toUpperCase();
+    if (mode !== 'FT8' && mode !== 'FT4' && mode !== 'FT2') return;
+    const norm = JtcatParser.normalizeCall(t.call);
+    if (!JtcatParser.looksLikeCallsign(norm)) return;
+    const myCall = (settings.myCallsign || '').toUpperCase();
+    if (myCall && norm === JtcatParser.normalizeCall(myCall)) return; // can't target yourself
+    jtcatSpotTarget = {
+      call: String(t.call).toUpperCase(), mode,
+      freqKhz: Number(t.freqKhz) || 0, band: String(t.band || ''),
+      reference: String(t.reference || ''), parkName: String(t.parkName || ''),
+      status: 'armed', setAt: Date.now(), lastHeardAt: Date.now(), lastHeard: null,
+    };
+    sendCatLog(`[JTCAT] Spot target armed: ${jtcatSpotTarget.call} (${mode}${jtcatSpotTarget.reference ? ', ' + jtcatSpotTarget.reference : ''}) — will call on their CQ or QSO end`);
+    broadcastSpotTarget();
+  });
+  // Popout banner Cancel button.
+  ipcMain.on('jtcat-spot-target-clear', () => clearSpotTarget('user'));
+  // Popout "Call now" — manual fire using the freshest heard decode's
+  // slot/df (mid-QSO decodes reveal parity even though they never
+  // auto-trigger). No `text` in the payload: an explicit reply-cq step keeps
+  // the reply handler from re-deriving a step off a mid-QSO exchange.
+  ipcMain.on('jtcat-spot-target-call-now', () => {
+    const tgt = jtcatSpotTarget;
+    if (!tgt || !tgt.lastHeard) return; // button is disabled until heard, but guard anyway
+    if (popoutJtcatQso || remoteJtcatQso || jtcatFullAutoCq) {
+      broadcastSpotTarget({ notice: 'QSO in progress — target will fire when idle' });
+      return;
+    }
+    tgt.status = 'engaged';
+    broadcastSpotTarget({ holdTx: !!settings.jtcatHoldTxFreq, trigger: 'manual' });
+    sendCatLog(`[JTCAT] Spot target ${tgt.call} — manual Call Now (last heard slot ${tgt.lastHeard.slot})`);
+    ipcMain.emit('jtcat-popout-reply', {}, {
+      call: tgt.call, df: tgt.lastHeard.df, slot: tgt.lastHeard.slot,
+      snr: tgt.lastHeard.snr, nextStep: 'reply-cq',
+    });
+  });
 
   ipcMain.on('jtcat-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
   ipcMain.on('jtcat-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
@@ -22183,6 +22325,12 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-popout-cancel-qso', () => {
     if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'popout') stopFullAutoCq('cancelled by operator');
     const q = popoutJtcatQso;
+    // Operator abandoned a Spot Target QSO — clear the target too, or the
+    // watcher would re-arm and immediately call them again.
+    if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && q && q.call &&
+        JtcatParser.normalizeCall(q.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+      clearSpotTarget('user');
+    }
     popoutJtcatQso = null;
     const eng = (q && q.sliceId && jtcatManager) ? jtcatManager.getEngine(q.sliceId) : ft8Engine;
     if (eng) {
@@ -26020,7 +26168,11 @@ app.whenReady().then(() => {
 
   // --- JTCAT IPC ---
   ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
-  ipcMain.on('jtcat-stop', () => stopJtcat());
+  ipcMain.on('jtcat-stop', () => {
+    stopJtcat();
+    // No engine = no decodes = a stale armed target is meaningless.
+    jtcatSpotTarget = null;
+  });
   ipcMain.on('jtcat-set-mode', (_e, mode) => {
     if (!ft8Engine) return;
     // PSK31 lives in a different engine class (continuous keyboard mode) —
