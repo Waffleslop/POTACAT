@@ -316,6 +316,18 @@
     }
     .sdr-btn-vfo:hover { background: var(--bg-btn-hover); }
     .sdr-btn-vfo.active { background: var(--accent-gold); color: #1a1a2e; }
+    /* SDR selector — one dropdown + status chip instead of N station buttons.
+       The full-list sync (sdr-list-full-sync) means users may have 25+ SDRs;
+       a button per station stopped scaling. "SDR: [Twente ▾][OFF]" */
+    .sdr-sel-label { align-self: center; font-size: 11px; font-weight: bold; color: var(--text-muted); padding: 0 2px 0 4px; user-select: none; }
+    .sdr-sel-btn { flex: 3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sdr-chip { flex: 0 0 52px; }
+    .sdr-chip.on { background: var(--accent-gold); color: #1a1a2e; }
+    .sdr-dd { position: fixed; z-index: 500; max-height: 45vh; overflow-y: auto; background: var(--bg-input); border: 1px solid var(--accent-gold); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.55); }
+    .sdr-dd-item { padding: 8px 12px; font-size: 13px; color: var(--text-primary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sdr-dd-item:hover { background: var(--bg-btn-hover); }
+    .sdr-dd-item.sel { color: var(--accent-gold); font-weight: bold; }
+    .sdr-dd-item.conn::after { content: ' ●'; color: var(--accent-green); }
     .macro-row { display: flex; align-items: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
     .macro-label {
       font-size: 10px; font-weight: bold; color: var(--text-dimmer); text-transform: uppercase;
@@ -2544,15 +2556,20 @@ function kiwiCleanHost(h) { return (h || '').replace(/^https?:\/\//, '').replace
 
 function buildKiwiStationList(s) {
   kiwiStations = [];
-  const hosts = [s.kiwiSdrHost1 || s.kiwiSdrHost || '', s.kiwiSdrHost2 || '', s.kiwiSdrHost3 || ''];
-  const labels = [s.kiwiSdrLabel1 || '', s.kiwiSdrLabel2 || '', s.kiwiSdrLabel3 || ''];
-  hosts.forEach((h, i) => {
-    const clean = kiwiCleanHost(h);
+  // Full synced list first (sdr-list-full-sync — users may have 25+ SDRs);
+  // the legacy 3 slot keys are the fallback for pre-sync settings.json.
+  const entries = (Array.isArray(s.kiwiSdrList) && s.kiwiSdrList.length)
+    ? s.kiwiSdrList.map(e => ({ label: (e && e.label) || '', host: (e && e.host) || '' }))
+    : [
+        { label: s.kiwiSdrLabel1 || '', host: s.kiwiSdrHost1 || s.kiwiSdrHost || '' },
+        { label: s.kiwiSdrLabel2 || '', host: s.kiwiSdrHost2 || '' },
+        { label: s.kiwiSdrLabel3 || '', host: s.kiwiSdrHost3 || '' },
+      ];
+  entries.forEach(({ label, host }) => {
+    const clean = kiwiCleanHost(host);
     if (!clean) return;
     const parts = clean.split(':');
-    const host = parts[0];
-    const port = parseInt(parts[1], 10) || 8073;
-    kiwiStations.push({ label: labels[i] || host, host, port, fullHost: clean });
+    kiwiStations.push({ label: label || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: clean });
   });
   // Build select (for settings reference)
   kiwiStationSelect.innerHTML = '<option value="">-- select station --</option>';
@@ -2566,35 +2583,115 @@ function buildKiwiStationList(s) {
   buildKiwiButtons();
 }
 
+// --- SDR selector: "SDR: [Twente ▾][OFF]" ---
+// One name button (click → dropdown of ALL stations) + an ON/OFF chip
+// (click → connect/disconnect the selected station). Selection persists in
+// localStorage; picking from the dropdown connects immediately (one-click
+// parity with the old per-station buttons — picking while on another SDR
+// switches). The chip goes gold-ON only when the SELECTED station is the
+// connected one.
+let kiwiSelectedHost = localStorage.getItem('kiwiSelectedHost') || '';
+let kiwiDdEl = null;
+
+function kiwiSelectedStation() {
+  return kiwiStations.find(st => st.fullHost === kiwiSelectedHost) || kiwiStations[0] || null;
+}
+
 function buildKiwiButtons() {
+  closeKiwiDropdown();
   kiwiBtnRow.innerHTML = '';
-  kiwiStations.forEach((st, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'sdr-btn-vfo';
-    btn.style.display = '';
-    btn.textContent = st.label;
-    btn.title = st.fullHost;
-    btn.dataset.idx = i;
-    btn.addEventListener('click', () => {
-      if (kiwiConnected && kiwiConnectedHost === st.fullHost) {
-        window.api.kiwiDisconnect();
-      } else {
-        window.api.kiwiConnect({ host: st.host, port: st.port });
-        kiwiConnectedHost = st.fullHost;
-      }
-    });
-    kiwiBtnRow.appendChild(btn);
+  if (!kiwiStations.length) return;
+  const label = document.createElement('span');
+  label.className = 'sdr-sel-label';
+  label.textContent = 'SDR:';
+  const selBtn = document.createElement('button');
+  selBtn.className = 'sdr-btn-vfo sdr-sel-btn';
+  selBtn.id = 'kiwi-sel-btn';
+  selBtn.addEventListener('click', toggleKiwiDropdown);
+  const chip = document.createElement('button');
+  chip.className = 'sdr-btn-vfo sdr-chip';
+  chip.id = 'kiwi-status-chip';
+  chip.addEventListener('click', () => {
+    const st = kiwiSelectedStation();
+    if (kiwiConnected) {
+      window.api.kiwiDisconnect();
+    } else if (st) {
+      window.api.kiwiConnect({ host: st.host, port: st.port });
+      kiwiConnectedHost = st.fullHost;
+      updateKiwiButtonStates();
+    }
   });
+  kiwiBtnRow.appendChild(label);
+  kiwiBtnRow.appendChild(selBtn);
+  kiwiBtnRow.appendChild(chip);
   updateKiwiButtonStates();
 }
 
 function updateKiwiButtonStates() {
-  kiwiBtnRow.querySelectorAll('.sdr-btn-vfo').forEach(btn => {
-    const idx = parseInt(btn.dataset.idx, 10);
-    const st = kiwiStations[idx];
-    btn.classList.toggle('active', kiwiConnected && st && kiwiConnectedHost === st.fullHost);
-  });
+  const selBtn = document.getElementById('kiwi-sel-btn');
+  const chip = document.getElementById('kiwi-status-chip');
+  if (!selBtn || !chip) return;
+  const st = kiwiSelectedStation();
+  selBtn.textContent = (st ? st.label : 'No SDR') + ' ▾';
+  selBtn.title = st ? st.fullHost + ' — click to choose an SDR' : 'No SDR receivers configured';
+  const on = !!(kiwiConnected && st && kiwiConnectedHost === st.fullHost);
+  chip.textContent = on ? 'ON' : 'OFF';
+  chip.classList.toggle('on', on);
+  chip.title = on ? ('Disconnect ' + st.label) : (st ? ('Connect ' + st.label) : '');
 }
+
+async function toggleKiwiDropdown() {
+  if (kiwiDdEl) { closeKiwiDropdown(); return; }
+  // Refetch settings on every open — the phone (or Settings) may have edited
+  // the list while this popout was up; no dedicated change event needed.
+  try { buildKiwiStationList(await window.api.getSettings()); } catch {}
+  if (!kiwiStations.length) return;
+  const anchor = document.getElementById('kiwi-sel-btn');
+  if (!anchor) return;
+  const dd = document.createElement('div');
+  dd.className = 'sdr-dd';
+  const selHost = (kiwiSelectedStation() || {}).fullHost;
+  kiwiStations.forEach((st) => {
+    const item = document.createElement('div');
+    item.className = 'sdr-dd-item'
+      + (st.fullHost === selHost ? ' sel' : '')
+      + (kiwiConnected && st.fullHost === kiwiConnectedHost ? ' conn' : '');
+    item.textContent = st.label;
+    item.title = st.fullHost;
+    item.addEventListener('click', () => {
+      kiwiSelectedHost = st.fullHost;
+      localStorage.setItem('kiwiSelectedHost', st.fullHost);
+      closeKiwiDropdown();
+      window.api.kiwiConnect({ host: st.host, port: st.port });
+      kiwiConnectedHost = st.fullHost;
+      updateKiwiButtonStates();
+    });
+    dd.appendChild(item);
+  });
+  const r = anchor.getBoundingClientRect();
+  dd.style.left = r.left + 'px';
+  dd.style.top = (r.bottom + 4) + 'px';
+  dd.style.minWidth = r.width + 'px';
+  document.body.appendChild(dd);
+  kiwiDdEl = dd;
+  setTimeout(() => document.addEventListener('click', kiwiDdOutsideClick, true), 0);
+}
+
+function kiwiDdOutsideClick(e) {
+  const anchor = document.getElementById('kiwi-sel-btn');
+  if (kiwiDdEl && !kiwiDdEl.contains(e.target) && e.target !== anchor) closeKiwiDropdown();
+}
+
+function closeKiwiDropdown() {
+  if (!kiwiDdEl) return;
+  kiwiDdEl.remove();
+  kiwiDdEl = null;
+  document.removeEventListener('click', kiwiDdOutsideClick, true);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeKiwiDropdown();
+});
 
 wKiwiCb.addEventListener('change', async () => {
   kiwiEnabled = wKiwiCb.checked;
@@ -2613,6 +2710,16 @@ window.api.onKiwiStatus((s) => {
   kiwiConnected = s.connected;
   if (s.host) kiwiConnectedHost = s.host;
   if (!s.connected) { kiwiConnectedHost = ''; kiwiNextPlayTime = 0; }
+  // Selection follows the live connection — a connect initiated elsewhere
+  // (ECHOCAT phone, web client) lands on whatever station is actually
+  // playing, so the "SDR: [name][ON]" control never shows a stale name.
+  if (s.connected && kiwiConnectedHost) {
+    const st = kiwiStations.find(x => x.fullHost === kiwiConnectedHost);
+    if (st && st.fullHost !== kiwiSelectedHost) {
+      kiwiSelectedHost = st.fullHost;
+      localStorage.setItem('kiwiSelectedHost', st.fullHost);
+    }
+  }
   updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
   document.getElementById('kiwi-volume-row').style.display = s.connected ? 'flex' : 'none';
