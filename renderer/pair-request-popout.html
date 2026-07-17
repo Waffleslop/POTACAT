@@ -17,6 +17,21 @@
       --bad: #e94560;
       --warn: #f0a500;
     }
+    /* Dark — Charcoal variant. Self-styled popout (no styles.css), so mirror
+       styles.css [data-dark-variant="charcoal"] onto this popout's var names —
+       without this the popout stayed navy while the app ran charcoal. Before
+       the light block so light wins if both attrs are ever set. */
+    [data-dark-variant="charcoal"] {
+      --bg: #0b0d10;
+      --bg-card: #15181d;
+      --border: #262b33;
+      --text: #e6e9ee;
+      --text-dim: #8b919b;
+      --accent: #38bdf8;
+      --ok: #52c992;
+      --bad: #ef4444;
+      --warn: #fbbf24;
+    }
     /* Light theme: popout-theme-boot.js sets data-theme on <html> from the
        loadFile ?theme= query before first paint. This popout is self-styled
        (no styles.css), so override its vars for light mode. */
