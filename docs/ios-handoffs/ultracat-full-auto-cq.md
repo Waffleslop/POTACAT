@@ -54,7 +54,15 @@ Sent whenever ULTRACAT is toggled (unlock/revoke) or Full Auto CQ starts/stops, 
   "ultracat":      true,        // unlocked?  → show/hide ULTRACAT UI
   "fullAutoCq":    true,        // run mode currently active? → show the run indicator
   "owner":         "popout",    // who started it: "popout" | "remote" | null
-  "maxQsoAttempts": 12 }
+  "maxQsoAttempts": 12,
+  "reason":        null }       // display-ready string on stop/refusal pushes
+                                // (watchdog: "30-minute attended limit reached…";
+                                // refused start; operator stop). ADDED 2026-07-17
+                                // so the phone can surface WHY a run ended.
+                                // CAUTION: the state (reason included) is cached
+                                // and replayed on connect — toast reasons only on
+                                // live transitions, never the first state of a
+                                // session.
 ```
 
 **Recommended mobile logic:** reveal the ULTRACAT controls iff `ultracat === true` (from either signal); show the Full Auto CQ "running" indicator iff `fullAutoCq === true`. The phone does **not** need its own π unlock gesture — it simply mirrors the desktop's unlock state. (If you want an independent phone-side unlock later, that's a separate decision; for now, follow the desktop.)
