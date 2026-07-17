@@ -158,11 +158,37 @@ function _applyPopoutTheme(payload) {
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
   var fdToggle = document.getElementById('jp-fd-toggle');
   var fdExchInput = document.getElementById('jp-fd-exch');
+  // Active-mode chips (bottom-bar rework 2026-07-16): the FD/Hound switches
+  // live in the ⚙ popover; while a mode is ON a lit chip appears in the bar
+  // as the always-reachable off-switch (house rule: never hide the off
+  // switch of an enabled feature).
+  var fdChip = document.getElementById('jp-fd-chip');
+  var houndChip = document.getElementById('jp-hound-chip');
   var fdMode = false;
+  var fdSeason = false; // ARRL FD window (from jtcat-fd-window IPC) — gates the Hunt: Field Day option
   var FD_EXCH_RE = /^\d{1,2}[A-F]\s+[A-Z]{2,3}$/;
+  // Add/remove the seasonal "Hunt: Field Day" option. Present during the FD
+  // window, whenever FD mode is already on, or when main reports hunt mode
+  // 'fd' (state must always be representable in the select).
+  function ensureFdHuntOption() {
+    var sel = document.getElementById('jp-auto-cq');
+    if (!sel) return;
+    var want = fdSeason || fdMode || sel.value === 'fd';
+    var opt = sel.querySelector('option[value="fd"]');
+    if (want && !opt) {
+      opt = document.createElement('option');
+      opt.value = 'fd';
+      opt.textContent = 'Hunt: Field Day';
+      sel.appendChild(opt);
+    } else if (!want && opt && sel.value !== 'fd') {
+      opt.remove();
+    }
+  }
   function reflectFd() {
     if (fdToggle) fdToggle.classList.toggle('active', fdMode);
+    if (fdChip) fdChip.classList.toggle('hidden', !fdMode);
     if (fdExchInput) fdExchInput.style.display = fdMode ? '' : 'none';
+    ensureFdHuntOption();
   }
   // Skip grid (WSJT-X "disable Tx1"): reply to CQs with a report, not a grid
   var skipTx1Toggle = document.getElementById('jp-skip-tx1');
@@ -180,6 +206,7 @@ function _applyPopoutTheme(payload) {
   var houndMode = false;
   function reflectHound() {
     if (houndToggle) houndToggle.classList.toggle('active', houndMode);
+    if (houndChip) houndChip.classList.toggle('hidden', !houndMode);
   }
   // Answer callers: while Auto-CQ is on and idle, auto-answer a station calling
   // us directly (abandoned callbacks / late answers), not just CQ callers.
@@ -190,6 +217,16 @@ function _applyPopoutTheme(payload) {
     if (answerCallersToggle) answerCallersToggle.classList.toggle('active', answerCallers);
   }
   var enableTxBtn = document.getElementById('jp-enable-tx');
+  // The TX button is a STATE indicator (Casey 2026-07-16): green "TX On" while
+  // armed, grey "TX Off" while not — label and color always agree. Every place
+  // that arms/disarms TX goes through this one setter.
+  function setTxOnState(on) {
+    txEnabled = !!on;
+    if (enableTxBtn) {
+      enableTxBtn.classList.toggle('active', txEnabled);
+      enableTxBtn.textContent = txEnabled ? 'TX On' : 'TX Off';
+    }
+  }
   var haltTxBtn = document.getElementById('jp-halt-tx');
   var tuneBtn = document.getElementById('jp-tune');
   var txMsgEl = document.getElementById('jp-tx-msg');
@@ -1151,10 +1188,8 @@ function _applyPopoutTheme(payload) {
       qsoState = null;
     } else if (data.phase === 'error') {
       qsoState = null;
-      txEnabled = false;
+      setTxOnState(false);
       cqBtn.classList.remove('active');
-      enableTxBtn.classList.remove('active');
-      enableTxBtn.textContent = 'Enable TX';
       setTxMsgDisplay(data.error || 'Error');
       // Raise the same toast slot used for QSO-Logged success so the
       // "TX stopped" event is visible without DevTools. Red variant
@@ -1187,16 +1222,8 @@ function _applyPopoutTheme(payload) {
     if (qsoState && qsoState.txMsg) setTxMsgDisplay(qsoState.txMsg);
     else if (!qsoState) setTxMsgDisplay('\u2014');
     // Sync TX button state
-    if (qsoState && qsoState.phase !== 'done') {
-      txEnabled = true;
-      enableTxBtn.classList.add('active');
-      enableTxBtn.textContent = 'TX On';
-    }
-    if (qsoState && qsoState.phase === 'done') {
-      txEnabled = false;
-      enableTxBtn.classList.remove('active');
-      enableTxBtn.textContent = 'Enable TX';
-    }
+    if (qsoState && qsoState.phase !== 'done') setTxOnState(true);
+    if (qsoState && qsoState.phase === 'done') setTxOnState(false);
   });
 
   // --- QSO Logged notification ---
@@ -1883,16 +1910,12 @@ function _applyPopoutTheme(payload) {
   });
 
   enableTxBtn.addEventListener('click', function() {
-    txEnabled = !txEnabled;
-    enableTxBtn.classList.toggle('active', txEnabled);
-    enableTxBtn.textContent = txEnabled ? 'TX On' : 'Enable TX';
+    setTxOnState(!txEnabled);
     window.api.jtcatEnableTx(txEnabled);
   });
 
   haltTxBtn.addEventListener('click', function() {
-    txEnabled = false;
-    enableTxBtn.classList.remove('active');
-    enableTxBtn.textContent = 'Enable TX';
+    setTxOnState(false);
     window.api.jtcatCancelQso();
     setTxMsgDisplay('--');
   });
@@ -1923,21 +1946,49 @@ function _applyPopoutTheme(payload) {
     window.api.openQsoLog();
   });
 
-  // Auto-CQ response
+  // Hunt (auto-answer other stations' CQs; renamed from "Auto:" 2026-07-16)
   var autoCqSelect = document.getElementById('jp-auto-cq');
   autoCqSelect.addEventListener('change', function() {
+    // Hunt: Field Day (seasonal option) — one pick turns on the FD exchange
+    // mode AND filters the hunt to CQ FD callers. Without a valid exchange
+    // the state machine would silently fall back to the standard ladder
+    // (jtcatFdContext returns null), so surface the exchange box immediately.
+    if (autoCqSelect.value === 'fd' && !fdMode) {
+      fdMode = true;
+      reflectFd();
+      window.api.saveSettings({ jtcatFdMode: true });
+      if (fdExchInput && !FD_EXCH_RE.test((fdExchInput.value || '').toUpperCase().trim())) {
+        fdExchInput.focus();
+        fdExchInput.style.borderColor = 'var(--accent-red, #e94560)';
+      }
+    }
     window.api.jtcatSetAutoCqMode(autoCqSelect.value);
     if (autoCqSelect.value !== 'off') {
-      txEnabled = true;
-      enableTxBtn.classList.add('active');
-      enableTxBtn.textContent = 'TX On';
+      setTxOnState(true);
       window.api.jtcatEnableTx(true);
     }
   });
   window.api.onJtcatAutoCqState(function(state) {
+    // Mode 'fd' can arrive while the seasonal option isn't rendered (e.g.
+    // set before the season check resolved) — make it representable first.
+    if (state.mode === 'fd' && !autoCqSelect.querySelector('option[value="fd"]')) {
+      var fdOpt = document.createElement('option');
+      fdOpt.value = 'fd';
+      fdOpt.textContent = 'Hunt: Field Day';
+      autoCqSelect.appendChild(fdOpt);
+    }
     autoCqSelect.value = state.mode || 'off';
     autoCqSelect.style.borderColor = state.mode !== 'off' ? 'var(--pota)' : '';
   });
+  // Seasonal gate for the Hunt: Field Day option — active from ~7 days before
+  // ARRL FD weekend through its end (computed main-side from the contest
+  // calendar). Failure just means no seasonal option; FD stays reachable in ⚙.
+  if (window.api.jtcatFdWindow) {
+    window.api.jtcatFdWindow().then(function(w) {
+      fdSeason = !!(w && w.active);
+      ensureFdHuntOption();
+    }).catch(function() {});
+  }
 
   // ULTRACAT — Full Auto CQ run mode (button hidden unless π-unlocked)
   var fullAutoCqActive = false;
@@ -1946,9 +1997,7 @@ function _applyPopoutTheme(payload) {
       var turningOn = !fullAutoCqActive;
       window.api.jtcatSetFullAutoCq({ on: turningOn, modifier: chaseTarget });
       if (turningOn) { // run mode drives TX
-        txEnabled = true;
-        enableTxBtn.classList.add('active');
-        enableTxBtn.textContent = 'TX On';
+        setTxOnState(true);
         window.api.jtcatEnableTx(true);
       }
     });
@@ -1957,13 +2006,11 @@ function _applyPopoutTheme(payload) {
     fullAutoCqActive = !!(state && state.active);
     if (fullAutoCqBtn) {
       fullAutoCqBtn.classList.toggle('active', fullAutoCqActive);
-      fullAutoCqBtn.textContent = fullAutoCqActive ? 'Auto CQ ●' : 'Auto CQ';
+      // "Run" (contest slang: call CQ and work the pileup) — renamed from
+      // "Auto CQ" to end the CQ / Hunt / Auto CQ name collision.
+      fullAutoCqBtn.textContent = fullAutoCqActive ? 'Run ●' : 'Run';
     }
-    if (!fullAutoCqActive) {
-      enableTxBtn.classList.remove('active');
-      enableTxBtn.textContent = 'Enable TX';
-      txEnabled = false;
-    }
+    if (!fullAutoCqActive) setTxOnState(false);
   });
   if (maxAttemptsInput) {
     maxAttemptsInput.addEventListener('change', function() {
@@ -1975,20 +2022,31 @@ function _applyPopoutTheme(payload) {
     });
   }
 
-  // ARRL Field Day mode toggle + exchange entry
-  if (fdToggle) {
-    fdToggle.addEventListener('click', function() {
-      fdMode = !fdMode;
-      reflectFd();
-      window.api.saveSettings({ jtcatFdMode: fdMode });
-      if (fdMode && fdExchInput) {
-        fdExchInput.focus();
-        if (!FD_EXCH_RE.test((fdExchInput.value || '').toUpperCase().trim())) {
-          fdExchInput.style.borderColor = 'var(--accent-red, #e94560)';
-        }
+  // ARRL Field Day mode toggle + exchange entry. Shared by the ⚙ row and the
+  // bar chip (the chip delegates here). Turning FD OFF while Hunt: Field Day
+  // is selected also drops the hunt to Off — otherwise we'd keep answering
+  // CQ FD callers with a standard grid/report exchange.
+  function toggleFdMode() {
+    fdMode = !fdMode;
+    reflectFd();
+    window.api.saveSettings({ jtcatFdMode: fdMode });
+    if (fdMode && fdExchInput) {
+      fdExchInput.focus();
+      if (!FD_EXCH_RE.test((fdExchInput.value || '').toUpperCase().trim())) {
+        fdExchInput.style.borderColor = 'var(--accent-red, #e94560)';
       }
-    });
+    }
+    if (!fdMode) {
+      var sel = document.getElementById('jp-auto-cq');
+      if (sel && sel.value === 'fd') {
+        sel.value = 'off';
+        window.api.jtcatSetAutoCqMode('off');
+        ensureFdHuntOption(); // may retire the seasonal option off-season
+      }
+    }
   }
+  if (fdToggle) fdToggle.addEventListener('click', toggleFdMode);
+  if (fdChip) fdChip.addEventListener('click', toggleFdMode);
   if (fdExchInput) {
     fdExchInput.addEventListener('change', function() {
       var v = (fdExchInput.value || '').toUpperCase().trim().replace(/\s+/g, ' ');
@@ -2031,12 +2089,38 @@ function _applyPopoutTheme(payload) {
     });
   }
 
-  // Hound toggle — FT8 DXpedition (old-style Fox/Hound) hunting mode
-  if (houndToggle) {
-    houndToggle.addEventListener('click', function() {
-      houndMode = !houndMode;
-      reflectHound();
-      window.api.saveSettings({ jtcatHoundMode: houndMode });
+  // Hound toggle — FT8 DXpedition (old-style Fox/Hound) hunting mode.
+  // Shared by the ⚙ row and the bar chip.
+  function toggleHoundMode() {
+    houndMode = !houndMode;
+    reflectHound();
+    window.api.saveSettings({ jtcatHoundMode: houndMode });
+  }
+  if (houndToggle) houndToggle.addEventListener('click', toggleHoundMode);
+  if (houndChip) houndChip.addEventListener('click', toggleHoundMode);
+
+  // ⚙ Options popover — hosts the per-session preferences + special modes
+  // (bottom-bar rework 2026-07-16). Toggles on the ⚙ button; closes on
+  // outside click or Esc. Rows inside keep their own click handlers.
+  var optionsBtn = document.getElementById('jp-options-btn');
+  var optionsPop = document.getElementById('jp-options-pop');
+  function setOptionsPopOpen(open) {
+    if (!optionsPop) return;
+    optionsPop.classList.toggle('hidden', !open);
+    if (optionsBtn) optionsBtn.classList.toggle('active', open);
+  }
+  if (optionsBtn && optionsPop) {
+    optionsBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      setOptionsPopOpen(optionsPop.classList.contains('hidden'));
+    });
+    document.addEventListener('click', function(e) {
+      if (optionsPop.classList.contains('hidden')) return;
+      if (optionsPop.contains(e.target) || e.target === optionsBtn) return;
+      setOptionsPopOpen(false);
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && !optionsPop.classList.contains('hidden')) setOptionsPopOpen(false);
     });
   }
 
@@ -2136,6 +2220,7 @@ function _applyPopoutTheme(payload) {
     if (wsprPane) wsprPane.classList.toggle('hidden', !on);
     if (decodePane) decodePane.classList.toggle('hidden', on);
     if (controlsBar) controlsBar.classList.toggle('hidden', on);
+    if (on) setOptionsPopOpen(false); // bar is hiding — don't strand the ⚙ popover
     if (on && qsoTracker) qsoTracker.classList.add('hidden');
     // The toolbar "TX: 1500 Hz" is the FT8/FT4/FT2 audio offset — meaningless in
     // WSPR, where each transmission picks a random spot in the 200 Hz sub-band.
@@ -2486,6 +2571,7 @@ function _applyPopoutTheme(payload) {
     // current mode is WSPR (mode-change runs applyWsprMode first, then this).
     if (decodePane) decodePane.classList.toggle('hidden', on || modeSelect.value === 'WSPR');
     if (controlsBar) controlsBar.classList.toggle('hidden', on || modeSelect.value === 'WSPR');
+    if (on) setOptionsPopOpen(false); // bar is hiding — don't strand the ⚙ popover
     if (on && qsoTracker) qsoTracker.classList.add('hidden');
     // Multi-slice is FT8-family only.
     if (multiBtnEl) multiBtnEl.style.display = on ? 'none' : '';

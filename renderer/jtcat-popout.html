@@ -214,6 +214,36 @@
     .jp-ptt-mode.is-cat { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border-primary); }
     .jp-ptt-mode.is-vox { background: var(--warn, #f0a500); color: #000; border-color: var(--warn, #f0a500); }
 
+    /* Bottom-bar rework (2026-07-16, Casey): group separators, active-mode
+       chips, and the ⚙ Options popover that now hosts the per-session
+       preferences (full-sentence labels + helper text — no tooltip hunting). */
+    .jp-ctl-sep { width: 1px; align-self: stretch; background: var(--border-primary); flex-shrink: 0; }
+    /* Selects share the .jp-btn scale so the bar reads as one family
+       (Casey 2026-07-16: Chase vs Hunt looked like different UIs). */
+    .jp-select { font-size: 12px; font-weight: 600; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; }
+    /* AUTO group — visually binds Hunt + Run (the two mutually-exclusive
+       automatic-operation modes) so their association is legible. */
+    .jp-auto-group { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px dashed var(--border-primary); border-radius: 6px; flex-shrink: 0; }
+    .jp-auto-group-label { font-size: 9px; font-weight: 700; letter-spacing: 0.8px; color: var(--text-dim, #888); cursor: default; }
+    .jp-mode-chip { padding: 3px 8px; border-radius: 10px; border: 1px solid var(--warn, #f0a500); background: var(--warn, #f0a500); color: #000; font-size: 10px; font-weight: 700; cursor: pointer; letter-spacing: 0.4px; flex-shrink: 0; }
+    .jp-mode-chip:hover { opacity: 0.85; }
+    .jp-mode-chip.hidden { display: none; }
+    /* z-index 2000: Leaflet's map panes/controls (the attribution box) go up
+       to 1000 and were floating over the popover at 900; the QSO toast (9999)
+       stays above everything. */
+    .jp-options-pop { position: fixed; right: 8px; bottom: 72px; z-index: 2000; width: 380px; max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 6px; }
+    .jp-options-pop.hidden { display: none; }
+    .jp-opt-section { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim, #888); padding: 6px 8px 2px; }
+    .jp-opt-row { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 6px; padding: 6px 8px 6px 30px; cursor: pointer; position: relative; color: var(--text-primary); font-family: inherit; }
+    .jp-opt-row:hover { background: var(--bg-hover); }
+    .jp-opt-row::before { content: '\2610'; position: absolute; left: 9px; top: 5px; font-size: 14px; color: var(--text-dim, #888); }
+    .jp-opt-row.active::before { content: '\2611'; color: var(--accent-green, #4ecca3); }
+    .jp-opt-row.jp-opt-num-row { cursor: default; }
+    .jp-opt-row.jp-opt-num-row::before { content: ''; }
+    .jp-opt-label { display: block; font-size: 12px; font-weight: 600; }
+    .jp-opt-label input[type="number"] { width: 44px; font-size: 11px; padding: 1px 3px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); margin: 0 2px; }
+    .jp-opt-help { display: block; font-size: 10px; color: var(--text-dim, #888); margin-top: 2px; line-height: 1.35; }
+
     /* QSO Tracker */
     .jp-qso-tracker { padding: 6px 10px; background: var(--bg-tertiary, #1a1a2e); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
     .jp-qso-tracker.hidden { display: none; }
@@ -486,55 +516,87 @@
     <div id="jp-qso-steps" class="jp-qso-steps"></div>
   </div>
 
-  <!-- Controls -->
+  <!-- Controls — reworked 2026-07-16 (Casey): TX actions first, then call/
+       chase, then Hunt (the renamed auto-answer select). Per-session
+       preferences moved to the ⚙ Options popover below; special modes
+       (FD/Hound) surface as lit chips only while active, and Field Day also
+       appears inside the Hunt menu during the FD window. -->
   <div class="jp-controls">
+    <!-- TX button is a STATE indicator: green "TX On" armed / grey "TX Off"
+         not — label and color always agree (setTxOnState in jtcat-popout.js). -->
+    <button id="jp-enable-tx" class="jp-btn">TX Off</button>
+    <button id="jp-tune" class="jp-btn jp-tune" title="WSJT-X-style 90s steady-tone tune (click again to stop early)">Tune</button>
+    <button id="jp-halt-tx" class="jp-btn jp-halt">Halt TX</button>
+    <span class="jp-ctl-sep"></span>
     <button id="jp-cq" class="jp-btn">CQ</button>
     <!-- Chase target: what you call CQ to (CQ <tag> …) AND the entity whose
          decodes get highlighted. Populated from CqTarget.QUICK_PICKS; "Custom…"
          reveals the input for a US state (FL) or DXCC prefix (JA). -->
-    <select id="jp-chase-target" style="font-size:11px;padding:3px 2px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;" title="Chase target — directs your CQ and highlights matching decodes"></select>
-    <input id="jp-chase-custom" type="text" maxlength="4" placeholder="JA / FL" title="US state code (FL) or DXCC prefix (JA) — ≤4 letters, UPPERCASE" style="display:none;width:46px;font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
-    <button id="jp-chase-filter" class="jtcat-filter-btn" title="Show only decodes that match your chase target">Chase</button>
-    <select id="jp-auto-cq" style="font-size:11px;padding:3px 2px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);cursor:pointer;" title="Auto-respond to CQ calls">
-      <option value="off">Auto: Off</option>
-      <option value="pota">Auto: POTA</option>
-      <option value="sota">Auto: SOTA</option>
-      <option value="all">Auto: All CQ</option>
-    </select>
-    <!-- Answer callers: while Auto-CQ is on and idle, also auto-answer a
-         station calling YOU directly (not just CQ callers) — e.g. one you
-         abandoned who finishes and calls back — then return to Auto-CQ.
-         Default on; reflects settings.jtcatAnswerCallers. -->
-    <button id="jp-answer-callers" class="jtcat-filter-btn active" title="While Auto-CQ is on and idle, automatically answer a station calling you directly (e.g. one you abandoned who calls back), then return to Auto-CQ. Answers anyone directing a call at your callsign; skips stations already in your log.">Answer Callers</button>
-    <!-- ARRL Field Day — class+section exchange in place of grid/report.
-         When on, CQ becomes "CQ FD …" and QSOs run the FD sequence. -->
-    <button id="jp-fd-toggle" class="jtcat-filter-btn" title="ARRL Field Day mode: send CQ FD and exchange class + ARRL/RAC section (e.g. 2A EMA) instead of grid/report">FD</button>
+    <select id="jp-chase-target" class="jp-select" title="Chase target — directs your CQ and highlights matching decodes"></select>
+    <input id="jp-chase-custom" type="text" maxlength="4" placeholder="JA / FL" title="US state code (FL) or DXCC prefix (JA) — ≤4 letters, UPPERCASE" style="display:none;width:52px;font-size:12px;padding:4px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
+    <button id="jp-chase-filter" class="jp-btn" title="Show only decodes that match your chase target">Chase</button>
+    <span class="jp-ctl-sep"></span>
+    <!-- AUTO group — the two automatic-operation modes, visually bound so
+         their association is obvious. They're mutually exclusive: starting
+         Run turns Hunt off (main.js startFullAutoCq). Hunt = answer OTHERS'
+         CQs; Run (ULTRACAT) = call CQ yourself and work answerers. The
+         Field Day hunt option is appended by JS only during the FD window. -->
+    <span class="jp-auto-group">
+      <span class="jp-auto-group-label" title="Automatic operation — Hunt answers others' CQs; Run calls CQ itself. One at a time.">AUTO</span>
+      <select id="jp-auto-cq" class="jp-select" title="Hunt — automatically answer other stations' CQ calls and work them. Mutually exclusive with Run.">
+        <option value="off">Hunt: Off</option>
+        <option value="pota">Hunt: POTA</option>
+        <option value="sota">Hunt: SOTA</option>
+        <option value="all">Hunt: All CQs</option>
+      </select>
+      <!-- ULTRACAT — run mode, renamed from "Auto CQ" to end the CQ / Hunt /
+           Auto CQ name collision (hidden until the π unlock) -->
+      <button id="jp-full-auto-cq" class="jp-btn jp-ultracat ultracat-gated hidden" title="ULTRACAT run mode: call CQ continuously, work each answerer, then resume CQ — forever. Turns Hunt off while running. Attended operation only.">Run</button>
+    </span>
+    <!-- Active-mode chips: visible ONLY while the mode is on, so the
+         off-switch stays reachable (house rule) without a permanent toggle
+         eating bar space. The switches themselves live in the ⚙ popover. -->
+    <button id="jp-fd-chip" class="jp-mode-chip hidden" title="Field Day mode is ON — exchanging class + section instead of grid/report. Click to turn off.">FD</button>
     <input id="jp-fd-exch" type="text" maxlength="7" placeholder="2A EMA" title="Your Field Day exchange: transmitters+class then ARRL/RAC section (e.g. 2A EMA)" style="display:none;width:58px;font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
-    <!-- Skip grid (WSJT-X "disable Tx1"): answer a CQ with a signal report
-         ("A1BC K3SBP -11") instead of grid — one full cycle shorter each way. -->
-    <button id="jp-skip-tx1" class="jtcat-filter-btn" title="Skip the grid message when answering a CQ — reply with a signal report instead (WSJT-X 'skip Tx1'). Shortens each QSO by one cycle each way.">Skip Grid</button>
-    <!-- Hold TX Freq (WSJT-X "Hold Tx Freq"): keep our TX audio frequency
-         fixed instead of following the answered station — hold a clear spot
-         in the passband. Mobile has had this since K0OTC's ask; this is the
-         popout's parity control (the backend flag already existed). -->
-    <button id="jp-hold-tx" class="jtcat-filter-btn" title="Keep your TX audio frequency fixed instead of moving to each station you work (WSJT-X 'Hold Tx Freq') — hold a clear spot in the passband.">Hold TX</button>
-    <!-- FT8 DXpedition Hound (old-style Fox/Hound; SuperFox not supported yet):
-         initial calls forced ≥1000 Hz, TX QSYs to the fox when it answers,
-         fox dual messages parsed, no 73 courtesy. -->
-    <button id="jp-hound-toggle" class="jtcat-filter-btn" title="FT8 DXpedition Hound mode (old-style Fox/Hound): call the fox above 1000 Hz, auto-QSY to its frequency for the R+report, log on RR73 with no 73. Use on the DXpedition's published frequency, not the FT8 subband. SuperFox is not supported yet.">Hound</button>
-    <!-- ULTRACAT — Full Auto CQ (hidden until the π unlock) -->
-    <button id="jp-full-auto-cq" class="jp-btn jp-ultracat ultracat-gated hidden" title="ULTRACAT: call CQ continuously, work answerers, then resume CQ. Attended operation only.">Auto CQ</button>
-    <!-- Per-phase TX cap (was ULTRACAT-gated; public since the KQ4MHD
-         stuck-QSO request — a partner repeating a non-advancing message
-         used to hang the QSO forever) -->
-    <label style="font-size:10px;color:var(--text-tertiary);display:flex;align-items:center;gap:3px;" title="Give up on a QSO after this many transmissions of the same message with no progress. If signal reports were exchanged both ways, the QSO is logged and a final 73 is sent before stopping.">
-      tries<input id="jp-max-attempts" type="number" min="1" max="60" value="12" style="width:38px;font-size:11px;padding:2px 3px;border-radius:4px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);">
-    </label>
-    <button id="jp-enable-tx" class="jp-btn">Enable TX</button>
-    <button id="jp-halt-tx" class="jp-btn jp-halt">Halt TX</button>
-    <button id="jp-tune" class="jp-btn jp-tune" title="WSJT-X-style 90s steady-tone tune (click again to stop early)">Tune</button>
+    <button id="jp-hound-chip" class="jp-mode-chip hidden" title="Hound (DXpedition) mode is ON — calling a Fox station above 1000 Hz. Click to turn off.">HOUND</button>
+    <!-- ⚙ Options — per-session preferences + special modes, with plain-
+         English helper text (popover markup after the bar) -->
+    <button id="jp-options-btn" class="jp-btn" title="QSO options — answer callers, skip grid, hold TX frequency, retry limit, Field Day, Hound">&#9881;</button>
     <button id="jp-open-log" class="jp-btn" title="Open QSO log" style="margin-left:auto;">Log</button>
     <span id="jp-tx-msg" class="jp-tx-msg">&mdash;</span>
+  </div>
+
+  <!-- ⚙ Options popover — closed by outside click / Esc / the ⚙ button.
+       Rows keep their historical element IDs (jp-skip-tx1 etc.) so the JS
+       wiring and settings round-trip are unchanged; only the presentation
+       moved from cryptic bar toggles to labeled rows with helper text. -->
+  <div id="jp-options-pop" class="jp-options-pop hidden">
+    <div class="jp-opt-section">QSO behavior</div>
+    <button id="jp-answer-callers" class="jp-opt-row active">
+      <span class="jp-opt-label">Answer stations calling me</span>
+      <span class="jp-opt-help">While Hunt is on and idle, reply to anyone calling your callsign directly — e.g. a station you gave up on that finishes its QSO and calls you back. Calls already in your log are skipped.</span>
+    </button>
+    <button id="jp-skip-tx1" class="jp-opt-row">
+      <span class="jp-opt-label">Skip grid — faster QSOs</span>
+      <span class="jp-opt-help">Answer CQs with a signal report instead of your grid (WSJT-X "skip Tx1"). One full cycle shorter each way.</span>
+    </button>
+    <button id="jp-hold-tx" class="jp-opt-row">
+      <span class="jp-opt-label">Hold TX frequency</span>
+      <span class="jp-opt-help">Keep your TX audio offset fixed instead of moving to each station you work — hold a clear spot in the passband.</span>
+    </button>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Give up after <input id="jp-max-attempts" type="number" min="1" max="60" value="12"> tries</span>
+      <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. If signal reports were exchanged both ways, the QSO is logged and a final 73 is sent first.</span>
+    </label>
+    <div class="jp-opt-section">Special modes</div>
+    <button id="jp-fd-toggle" class="jp-opt-row">
+      <span class="jp-opt-label">Field Day</span>
+      <span class="jp-opt-help">ARRL Field Day weekend: send CQ FD and exchange class + section (e.g. 2A EMA) instead of grid and report. During FD week this also appears in the Hunt menu; while on, an FD chip and the exchange box show in the bar.</span>
+    </button>
+    <button id="jp-hound-toggle" class="jp-opt-row">
+      <span class="jp-opt-label">Hound (DXpedition)</span>
+      <span class="jp-opt-help">For working rare DXpeditions only — calls a "Fox" station running WSJT-X Fox/Hound split: you call above 1000 Hz, auto-QSY for the report, and no 73 is sent. Leave off for normal FT8 and POTA.</span>
+    </button>
   </div>
 
   <!-- Bottom status strip — cycle progress + countdown + clock sync. -->

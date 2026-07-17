@@ -5715,6 +5715,10 @@ function matchesAutoCqFilter(text, filterMode) {
   if (filterMode === 'all') return true;
   if (filterMode === 'pota') return upper.startsWith('CQ POTA ');
   if (filterMode === 'sota') return upper.startsWith('CQ SOTA ');
+  // Field Day hunt (popout "Hunt: Field Day", seasonal): answer only CQ FD
+  // callers — the popout turns jtcatFdMode on alongside, so the reply runs
+  // the class+section exchange, not grid/report.
+  if (filterMode === 'fd') return upper.startsWith('CQ FD ');
   return false;
 }
 
@@ -7030,6 +7034,12 @@ function startJtcat(mode) {
           const evNote = evRank(best) ? ' [event-needed]' : '';
           console.log(`[JTCAT Auto-CQ] Responding to ${best.call} (${best.grid}) SNR ${best.db}dB${evNote}`);
 
+          // Field Day: the opener is our class+section exchange, not the grid,
+          // and the QSO must carry q.fd so the state machine runs the FD ladder
+          // (advanceFdReplyQso) instead of grid/report. Mirrors the double-click
+          // answer path — without this, hunting during FD weekend mis-sequenced
+          // replies as standard QSOs. (2026-07-16, bottom-bar rework.)
+          const fdCtx = jtcatFdContext();
           // Create QSO — assign to the owner's state variable
           const qso = {
             mode: 'reply',
@@ -7038,11 +7048,13 @@ function startJtcat(mode) {
             grid: best.grid,
             myCall,
             myGrid,
-            txMsg: jtcatDirectedMsg(best.call, myCall, myGrid),
+            txMsg: fdCtx ? (best.call + ' ' + myCall + ' ' + fdCtx.myExch)
+                         : jtcatDirectedMsg(best.call, myCall, myGrid),
             report: null,
             sentReport: null,
             txRetries: 0,
           };
+          if (fdCtx) { qso.fd = true; qso.myExch = fdCtx.myExch; }
 
           ft8Engine.setRxFreq(best.df);
           ft8Engine.setTxFreq(best.df);
@@ -21884,6 +21896,33 @@ app.whenReady().then(() => {
     if (mode === 'off') jtcatAutoCqWorkedSession.clear();
     broadcastAutoCqState();
     console.log('[JTCAT Popout] Auto-CQ mode:', mode);
+  });
+
+  // Is it (nearly) ARRL Field Day? The popout shows its "Hunt: Field Day"
+  // option and FD bar controls only inside this window — from 7 days before
+  // the event (the setup/practice week) through its end. Resolved from the
+  // shipped contest calendar (data/contests.json, whenComputed
+  // nth-weekend-of:6:4) so there's no duplicate date math here; falls back to
+  // the literal rule if the calendar entry is ever renamed. The off-switch
+  // rule is handled renderer-side: FD controls stay visible whenever
+  // jtcatFdMode is already ON, in season or not.
+  ipcMain.handle('jtcat-fd-window', () => {
+    try {
+      const db = require('./lib/contests-db');
+      const fd = (db.getAllContests() || []).find((c) => c && c.id === 'arrl-field-day')
+        || { whenComputed: 'nth-weekend-of:6:4', durationHours: 24 };
+      const { start, end } = db.resolveOccurrence(fd, new Date());
+      if (!start || !end) return { active: false };
+      const LEAD_MS = 7 * 24 * 3600 * 1000;
+      const now = Date.now();
+      // resolveOccurrence returns NEXT year's event once this year's has
+      // ended, so the lead-time check correctly reads false off-season.
+      return { active: now >= start.getTime() - LEAD_MS && now <= end.getTime(),
+               startsAt: start.getTime(), endsAt: end.getTime() };
+    } catch (err) {
+      console.error('[JTCAT] fd-window failed:', err.message);
+      return { active: false };
+    }
   });
 
   // Chase target from the popout — shared, last-writer-wins (see applyChaseTarget).

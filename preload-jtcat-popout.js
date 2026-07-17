@@ -87,6 +87,9 @@ contextBridge.exposeInMainWorld('api', {
   openQsoLog: () => ipcRenderer.send('qso-popout-open'),
   jtcatSetAutoCqMode: (mode) => ipcRenderer.send('jtcat-popout-auto-cq-mode', mode),
   onJtcatAutoCqState: (cb) => ipcRenderer.on('jtcat-auto-cq-state', (_e, data) => cb(data)),
+  // ARRL Field Day window — gates the seasonal "Hunt: Field Day" option +
+  // FD bar controls. { active, startsAt, endsAt }.
+  jtcatFdWindow: () => ipcRenderer.invoke('jtcat-fd-window'),
   // Chase target — the CQ tag / entity being chased (shared with the phone)
   jtcatSetChaseTarget: (tag) => ipcRenderer.send('jtcat-popout-set-chase-target', tag || ''),
   onJtcatChaseTarget: (cb) => ipcRenderer.on('jtcat-chase-target', (_e, data) => cb(data)),
