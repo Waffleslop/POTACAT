@@ -26266,6 +26266,14 @@ if (window.api.onJtcatTakeoverNotice) {
     showLogToast((data && data.message) || 'Mobile device took over FT8 — JTCAT popout closed.', { duration: 6000 });
   });
 }
+// Generic main-process notices (radio link lost/restored, etc.) — same
+// toast used for logging feedback.
+if (window.api.onAppNotice) {
+  window.api.onAppNotice(function(data) {
+    if (!data || !data.message) return;
+    showLogToast(data.message, { warn: !!data.warn, duration: data.duration || 5000 });
+  });
+}
 
 // Sticky table header via JS transform on each th
 // (CSS position:sticky and transform on <thead> are unreliable in Chromium table rendering)

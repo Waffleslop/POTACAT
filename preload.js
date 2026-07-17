@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('api', {
   // 33 MHz jump) can be traced to its exact caller in the main-process log.
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort, origin: (new Error()).stack }),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
+  // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
+  // transitions etc. Rendered via showLogToast in app.js.
+  onAppNotice: (cb) => ipcRenderer.on('app-notice', (_e, data) => cb(data)),
   onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),
   onSmartSdrReachable: (cb) => ipcRenderer.on('smartsdr-reachable', () => cb()),
   onExternalAtuStart: (cb) => ipcRenderer.on('external-atu-start', (_e, d) => cb(d)),

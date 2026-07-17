@@ -1122,6 +1122,12 @@ let _clientDisconnectGraceTimer = null;
 let _audioBridgeSilent = false;
 let _audioBridgeSilentSince = 0;
 let _currentFreqHz = 0;    // tracked for remote radio status
+// Radio-link transition tracking (K6RBJ 2026-07-17): a dying USB/serial link
+// used to be a buried log line while the freq readout silently went stale —
+// the operator tuned a dead rig for weeks. Watch the effective connected
+// state and make every transition LOUD (CAT log + main-window toast).
+let _catLinkUpLast = false;
+let _catLinkUpKnown = false; // false until the first status of the session
 let _currentMode = '';
 let _remoteTxState = false;
 // External RF-sensing ATU (LDG/MFJ) state + tune routine. Declared at module
@@ -1666,6 +1672,30 @@ function sendCatStatus(s) {
   // let a stale `cat` disconnected-status blank the pill in either case.
   if (s && !s.connected && smartSdr && smartSdr.canTune) {
     s = { ...s, connected: true };
+  }
+  // Loud radio-link transitions (see _catLinkUpLast decl). Runs on the
+  // EFFECTIVE state (post canTune adjustment) and only on change — status
+  // pushes are frequent. The very first status of the session is silent
+  // (initial connect isn't news; a rig that starts absent isn't either).
+  {
+    const linkUp = !!(s && s.connected);
+    if (!_catLinkUpKnown) {
+      _catLinkUpKnown = true;
+      _catLinkUpLast = linkUp;
+    } else if (linkUp !== _catLinkUpLast) {
+      _catLinkUpLast = linkUp;
+      if (!linkUp) {
+        sendCatLog('[CAT] RADIO LINK LOST — the rig is no longer reachable (USB/serial dropped?). Tunes will be refused until it returns.');
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('app-notice', { message: 'Radio link lost — check the USB/serial connection', warn: true, duration: 8000 });
+        }
+      } else {
+        sendCatLog('[CAT] Radio link restored.');
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('app-notice', { message: 'Radio link restored', duration: 4000 });
+        }
+      }
+    }
   }
   if (win && !win.isDestroyed()) win.webContents.send('cat-status', s);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-status', s);
@@ -2983,10 +3013,15 @@ function connectCatWithStartupDelay() {
     sendCatLog(msg);
     appendIcomNetworkDiagnostic(msg);
     setTimeout(() => {
-      if (!settings.enableWsjtx) connectCat();
+      // .catch: a failed connect must land in the CAT log as a readable line,
+      // not as a raw [FATAL] unhandledRejection in startup.log (K6RBJ RS-BA1
+      // crash triage 2026-07-17 — parity with the retry path's .catch above).
+      if (!settings.enableWsjtx) {
+        connectCat().catch((err) => sendCatLog(`[Icom Network] Startup connect failed: ${err.message || err}`));
+      }
     }, ICOM_NETWORK_STARTUP_CONNECT_DELAY_MS);
   } else {
-    connectCat();
+    connectCat().catch((err) => sendCatLog(`[CAT] Startup connect failed: ${err.message || err}`));
   }
 }
 
@@ -3083,6 +3118,17 @@ async function connectCat() {
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('status', (s) => checkFlexHandoff(!!s.connected));
+    // Serial adapter re-enumerated under a new COM number (RF-induced USB
+    // reset renumbers ports — K6RBJ IC-7100). cat.js spotted the same USB
+    // device on another port; make the fix obvious with a toast.
+    cat.on('port-moved', ({ from, to }) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('app-notice', {
+          message: `Radio's serial port moved: ${from} is gone, same USB device found on ${to} — update Settings > My Rigs`,
+          warn: true, duration: 12000,
+        });
+      }
+    });
     cat.on('frequency', catFrequencyHandler);
     // Serial CAT port opened but the radio never echoes our tune — classically a
     // Yaesu (FTDX1200/3000/5000) with menu "CAT RTS" enabled while we de-assert
@@ -10576,6 +10622,14 @@ function connectRemote() {
 
   remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
+    // Dead rig link must be VISIBLE on the mobile device (K6RBJ tuned a dead
+    // COM port for weeks with no error). Reuse the tune-blocked channel the
+    // VFO lock already uses — shipped apps render it with zero mobile changes.
+    if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+      sendCatLog('[Echo CAT] tune refused — radio not connected (mobile device notified)');
+      remoteServer.sendToClient({ type: 'tune-blocked', reason: 'Radio not connected — check the rig link on the desktop (USB/serial)' });
+      return;
+    }
     // Hold off echoing freq back to the phone until the rig poll catches up, so
     // the stale pre-poll freq can't snap the phone's optimistic VFO back (N3VD
     // "3 clicks to change"). Re-armed each tune; covers the ~1.5–2s serial poll
@@ -22500,6 +22554,15 @@ app.whenReady().then(() => {
       // saw "7.026 kHz", and PassEnforcement rightly blocked it as
       // out-of-band. K3SBP 2026-06-11.
       remoteClient.sendTune({ frequency: Math.round(parseFloat(frequency) * 1000), mode, bearing });
+      return;
+    }
+    // Dead rig link → tell the window that asked, on the same channel the
+    // VFO lock uses (main window + VFO popout both render it). Before this,
+    // a spot click with a dead USB link logged one buried line and the UI
+    // moved on as if it worked. (K6RBJ 2026-07-17.)
+    if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+      sendCatLog('tune refused — no radio connected. Check Settings -> My Rigs.');
+      _e.sender.send('tune-blocked', 'Radio not connected — check the USB/serial link (Settings > My Rigs)');
       return;
     }
     if (slicePort && smartSdr && smartSdr.connected) {
