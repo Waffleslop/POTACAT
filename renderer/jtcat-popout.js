@@ -3107,6 +3107,15 @@ function _applyPopoutTheme(payload) {
           popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
         } catch (e) {
           console.warn('[JTCAT popout] Configured input failed, using default:', e.message);
+          // CAT-visible: a dead saved device id falling back to the DEFAULT
+          // input (often the mic) looks like "no waterfall / no decodes" with
+          // zero explanation. DAXv2 (SmartSDR 4.2.18+) REPLACED every DAX
+          // Windows endpoint, so saved device ids from before the upgrade all
+          // die exactly this way — re-pick the device in Settings > Radio.
+          if (window.api.jtcatLog) {
+            window.api.jtcatLog('[JTCAT popout] Saved audio input device not found (' + (e.message || e) +
+              ') — falling back to the DEFAULT input. If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > Radio.');
+          }
           delete constraints.deviceId;
           popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
         }
@@ -3206,8 +3215,26 @@ function _applyPopoutTheme(payload) {
       setWfSilentOverlay(false);
       // Start local waterfall rendering loop
       popoutWaterfallLoop();
+      // Surface the chosen source in the CAT log — K3SBP 2026-07-18: a
+      // failed/wrong-branch audio start was invisible (console-only), which
+      // turned "waterfall is blank" into a two-hour forensic hunt. One line
+      // per start makes the next report a one-glance diagnosis.
+      if (window.api.jtcatLog) {
+        window.api.jtcatLog('[JTCAT popout] Audio started: ' +
+          (audioSource === 'smartsdr' ? 'SmartSDR Direct (VITA-49)' :
+           audioSource === 'icom-network' ? 'Icom network' : 'device capture') +
+          ' @ ' + nativeRate + ' Hz — waterfall live');
+      }
     } catch (err) {
       console.error('[JTCAT popout] Audio capture failed:', err.message);
+      // LOUD failure — the waterfall silently staying blank (while decode
+      // keeps working off main's direct feed) is indistinguishable from a
+      // DAX/radio fault to the operator. Say what failed and how to retry.
+      if (window.api.jtcatLog) {
+        window.api.jtcatLog('[JTCAT popout] AUDIO START FAILED (' + (audioSource || 'device') + '): ' +
+          (err.message || err) + ' — the waterfall will be blank (decode is unaffected on SmartSDR Direct). ' +
+          'Close and reopen the JTCAT window to retry.');
+      }
     }
   }
 
