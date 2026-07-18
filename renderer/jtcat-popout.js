@@ -3063,12 +3063,40 @@ function _applyPopoutTheme(payload) {
     popoutVita49Dest = null;
   }
 
+  // Stall watchdog + retry state (K3SBP 2026-07-18 blank-waterfall hunt):
+  // an await inside startPopoutAudio can HANG without throwing (a wedged
+  // AudioContext resume / worklet load during DAXv2 device churn) — which
+  // produced neither the success nor the failure log. Breadcrumb the stage,
+  // log a STALLED line if start doesn't finish in 8s, and turn the
+  // RX-silent overlay into a click-to-retry.
+  var _audioStartStage = null;
+  var _audioStartWatchdog = null;
+  var _lastAudioArgs = null;
+
   async function startPopoutAudio(deviceId, audioSource) {
+    _lastAudioArgs = { deviceId: deviceId, audioSource: audioSource };
+    _audioStartStage = 'stop-old';
+    if (_audioStartWatchdog) clearTimeout(_audioStartWatchdog);
+    _audioStartWatchdog = setTimeout(function () {
+      if (window.api.jtcatLog) {
+        window.api.jtcatLog('[JTCAT popout] Audio start STALLED at stage "' + _audioStartStage +
+          '" after 8s (source=' + (audioSource || 'device') + ') — a hung await, usually the Windows ' +
+          'audio subsystem mid-DAXv2-device-churn. Click the waterfall overlay to retry.');
+      }
+      if (jpWfSilentEl) {
+        jpWfSilentEl.classList.add('show');
+        jpWfSilentEl.style.pointerEvents = 'auto';
+        jpWfSilentEl.style.cursor = 'pointer';
+        jpWfSilentEl.innerHTML = '<strong>Audio not started — click to retry</strong>';
+      }
+    }, 8000);
     // Clean up any stale audio state (e.g. after ECHOCAT used the same device)
     stopPopoutAudio();
+    _audioStartStage = 'settle';
     await new Promise(function(r) { setTimeout(r, 300); });
     try {
       if (audioSource === 'smartsdr') {
+        _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
         // owns the ring buffer + linear-interp resampler and feeds a
@@ -3076,15 +3104,18 @@ function _applyPopoutTheme(payload) {
         // getUserMedia path. K3SBP 2026-06-02 — eliminates per-frame
         // BufferSource churn.
         popoutVita49Ctx = new AudioContext();
+        _audioStartStage = 'ctx-resume (state=' + popoutVita49Ctx.state + ')';
         if (popoutVita49Ctx.state === 'suspended') {
           try { await popoutVita49Ctx.resume(); } catch (e) { /* logged below if it bites */ }
         }
+        _audioStartStage = 'worklet-load';
         try {
           await popoutVita49Ctx.audioWorklet.addModule('jtcat-vita49-source-worklet.js');
         } catch (e) {
           console.error('[JTCAT popout] failed to load VITA-49 source worklet:', e);
           throw e;
         }
+        _audioStartStage = 'source-node';
         popoutVita49Node = new AudioWorkletNode(popoutVita49Ctx, 'jtcat-vita49-source', {
           numberOfInputs: 0,
           numberOfOutputs: 1,
@@ -3103,6 +3134,7 @@ function _applyPopoutTheme(payload) {
           autoGainControl: false,
         };
         if (deviceId) constraints.deviceId = { exact: deviceId };
+        _audioStartStage = 'getUserMedia';
         try {
           popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
         } catch (e) {
@@ -3120,8 +3152,11 @@ function _applyPopoutTheme(payload) {
           popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
         }
       }
+      _audioStartStage = 'capture-ctx (state pending)';
       popoutAudioCtx = new AudioContext();
+      _audioStartStage = 'capture-ctx-resume (state=' + popoutAudioCtx.state + ')';
       if (popoutAudioCtx.state === 'suspended') await popoutAudioCtx.resume();
+      _audioStartStage = 'capture-pipeline';
       var nativeRate = popoutAudioCtx.sampleRate;
       var dsRatio = nativeRate / 12000;
       var source = popoutAudioCtx.createMediaStreamSource(popoutAudioStream);
@@ -3215,6 +3250,11 @@ function _applyPopoutTheme(payload) {
       setWfSilentOverlay(false);
       // Start local waterfall rendering loop
       popoutWaterfallLoop();
+      // Start finished — disarm the stall watchdog and restore the overlay
+      // to its normal RX-silent role.
+      _audioStartStage = null;
+      if (_audioStartWatchdog) { clearTimeout(_audioStartWatchdog); _audioStartWatchdog = null; }
+      if (jpWfSilentEl) { jpWfSilentEl.style.pointerEvents = ''; jpWfSilentEl.style.cursor = ''; }
       // Surface the chosen source in the CAT log — K3SBP 2026-07-18: a
       // failed/wrong-branch audio start was invisible (console-only), which
       // turned "waterfall is blank" into a two-hour forensic hunt. One line
@@ -3226,6 +3266,7 @@ function _applyPopoutTheme(payload) {
           ' @ ' + nativeRate + ' Hz — waterfall live');
       }
     } catch (err) {
+      if (_audioStartWatchdog) { clearTimeout(_audioStartWatchdog); _audioStartWatchdog = null; }
       console.error('[JTCAT popout] Audio capture failed:', err.message);
       // LOUD failure — the waterfall silently staying blank (while decode
       // keeps working off main's direct feed) is indistinguishable from a
@@ -3333,6 +3374,18 @@ function _applyPopoutTheme(payload) {
   // signal returns. Skipped while transmitting (RX is muted) or when RX gain is
   // zeroed (that silence is the operator's choice, not a fault).
   var jpWfSilentEl = document.getElementById('jp-wf-silent');
+  // Click-to-retry when the stall watchdog armed the overlay (pointerEvents
+  // is only enabled in that state, so normal RX-silent overlays stay inert).
+  if (jpWfSilentEl) {
+    jpWfSilentEl.addEventListener('click', function () {
+      if (jpWfSilentEl.style.pointerEvents !== 'auto') return;
+      jpWfSilentEl.classList.remove('show');
+      jpWfSilentEl.style.pointerEvents = '';
+      jpWfSilentEl.style.cursor = '';
+      if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT popout] Audio start retry (operator click)');
+      if (_lastAudioArgs) startPopoutAudio(_lastAudioArgs.deviceId, _lastAudioArgs.audioSource);
+    });
+  }
   var WF_SILENCE_MS = 8000;    // flatline this long before the overlay shows
   var WF_SILENCE_FLOOR = 2;    // max byte magnitude still treated as silence
   var wfLastSignalTs = 0;      // last frame with passband energy above floor
