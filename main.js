@@ -4770,6 +4770,14 @@ function sendPskrMapSpots() {
   sendPropStatus();
 }
 
+// FT8/FT4 TX started — pull the PSKReporter map early (once, ~90s later)
+// instead of leaving the operator staring at an empty map until the next
+// 5-minute poll. The client self-guards cadence, so calling this on every
+// tx-start is safe. K3SBP 2026-07-18.
+function nudgePskrMapAfterTx() {
+  if (pskrMap) { try { pskrMap.pollSoon(); } catch {} }
+}
+
 function connectPskrMap() {
   if (pskrMap) {
     pskrMap.disconnect();
@@ -7462,6 +7470,7 @@ function startJtcat(mode) {
       return;
     }
     acquireRadio('jtcat'); // held for the duration of this transmission
+    nudgePskrMapAfterTx(); // early PSKR-map pull so propagation shows this session
     const catState = cat ? `connected=${cat.connected}` : 'cat=null';
     console.log(`[JTCAT] TX start requested — message: ${data.message}, ${catState}`);
     logIcomNetworkAudio(`FT8 TX: ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
@@ -26887,6 +26896,7 @@ app.whenReady().then(() => {
           return;
         }
         const catState = cat ? `connected=${cat.connected}` : 'cat=null';
+        nudgePskrMapAfterTx(); // early PSKR-map pull (same as single-slice)
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
         handleRemotePtt(true);
