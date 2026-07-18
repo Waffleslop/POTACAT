@@ -88,6 +88,13 @@ function _applyPopoutTheme(payload) {
     reflectAnswerCallers();
     holdTxFreq = !!s.jtcatHoldTxFreq;
     reflectHoldTx();
+    // Seed the TX display with the pinned offset so a popout reopen shows
+    // the held frequency instead of the 1500 default (the engine restores
+    // the same value on rebuild via settings.jtcatTxFreqHz).
+    if (holdTxFreq && typeof s.jtcatTxFreqHz === 'number' && s.jtcatTxFreqHz >= 100 && s.jtcatTxFreqHz <= 3000) {
+      jpTxFreqHz = s.jtcatTxFreqHz;
+      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+    }
     houndMode = !!s.jtcatHoundMode;
     reflectHound();
     // Watchlist-group stroke (ft8-watchlist-stroke-parity): build the same
@@ -650,16 +657,24 @@ function _applyPopoutTheme(payload) {
   function onDecodeRowClick(d) {
     var action = inferReplyStep(d, myCallsign);
     if (!action) {
-      // Not a CQ, not addressed to us — just retune.
-      jpTxFreqHz = d.df || 1500;
-      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
-      window.api.jtcatSetTxFreq(jpTxFreqHz);
+      // Not a CQ, not addressed to us — just retune. Station-follow is an
+      // AUTO move: with Hold TX Freq on the engine will reject it, so don't
+      // paint the jump either — the label must always show what will
+      // actually transmit (KF0U 2026-07-17: display said the clicked freq,
+      // the rig transmitted at the held one all session).
+      if (!holdTxFreq) {
+        jpTxFreqHz = d.df || 1500;
+        txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+      }
+      window.api.jtcatSetTxFreq(d.df || 1500);
       return;
     }
 
-    jpTxFreqHz = d.df || 1500;
-    jpRxFreqHz = d.df || 1500;
-    txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+    if (!holdTxFreq) {
+      jpTxFreqHz = d.df || 1500;
+      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+    }
+    jpRxFreqHz = d.df || 1500; // RX always tracks the station, hold or not
 
     console.log('[JTCAT popout]', action.step, '→', action.call, 'df:', d.df, 'slot:', d.slot, 'theirReport:', action.theirReport, 'theirGrid:', action.theirGrid);
     if (action.step === 'reply-cq') addToMyActivity(d);
@@ -1130,6 +1145,15 @@ function _applyPopoutTheme(payload) {
   }
 
   window.api.onJtcatTxStatus(function(data) {
+    // Re-anchor the TX display to ENGINE truth. The label/marker were pure
+    // renderer-optimism before, so with Hold TX Freq on they could show a
+    // frequency the engine never accepted (KF0U 2026-07-17). txFreq rides
+    // every tx/rx status; skip per-slice statuses (multi panes have their
+    // own markers) and PSK31 (pskSyncFreq owns that ordering).
+    if (data.txFreq && !data.sliceId && modeSelect.value !== 'PSK31' && jpTxFreqHz !== data.txFreq) {
+      jpTxFreqHz = data.txFreq;
+      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+    }
     transmitting = data.state === 'tx';
     rxTxEl.textContent = transmitting ? 'TX' : 'RX';
     rxTxEl.style.color = transmitting ? '#e94560' : '';
@@ -3470,7 +3494,7 @@ function _applyPopoutTheme(payload) {
       var hz = Math.round(parseInt(input.value, 10) / 10) * 10;
       if (hz >= 100 && hz <= 3000) {
         jpTxFreqHz = hz;
-        window.api.jtcatSetTxFreq(hz);
+        window.api.jtcatSetTxFreq(hz, true); // operator move — honored under Hold TX Freq, re-pins
         window.api.jtcatSetRxFreq(hz);
       }
       txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
@@ -3488,13 +3512,13 @@ function _applyPopoutTheme(payload) {
       // audio center IS both directions, so split makes no sense there.
       jpTxFreqHz = hz;
       txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
-      window.api.jtcatSetTxFreq(hz);
+      window.api.jtcatSetTxFreq(hz, true); // operator move — honored under Hold TX Freq, re-pins
     } else {
       // Normal click: set both RX and TX
       jpTxFreqHz = hz;
       jpRxFreqHz = hz;
       txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
-      window.api.jtcatSetTxFreq(hz);
+      window.api.jtcatSetTxFreq(hz, true); // operator move — honored under Hold TX Freq, re-pins
       window.api.jtcatSetRxFreq(hz);
     }
   });

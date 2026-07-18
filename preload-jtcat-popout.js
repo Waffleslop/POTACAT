@@ -10,7 +10,10 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (url) => ipcRenderer.send('open-external', url),
   jtcatWsprBeacon: (opts) => ipcRenderer.send('jtcat-wspr-beacon', opts),
   jtcatWsprHop: (opts) => ipcRenderer.send('jtcat-wspr-hop', opts),
-  jtcatSetTxFreq: (hz) => ipcRenderer.send('jtcat-set-tx-freq', hz),
+  // `operator` true = a deliberate move (TX box / waterfall) — honored even
+  // while Hold TX Freq is on and becomes the new pinned offset. Omitted /
+  // false = auto-follow (decode click), blocked by the hold as before.
+  jtcatSetTxFreq: (hz, operator) => ipcRenderer.send('jtcat-set-tx-freq', hz, !!operator),
   jtcatSetRxFreq: (hz) => ipcRenderer.send('jtcat-set-rx-freq', hz),
   jtcatEnableTx: (enabled) => ipcRenderer.send('jtcat-enable-tx', enabled),
   jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),

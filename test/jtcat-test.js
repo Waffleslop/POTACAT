@@ -1373,12 +1373,76 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       // pipeline with a stubbed encodeMessage, so the algorithm-level
       // simulation above is corroborated by the actual code on disk.
       await testRealEnginePreEncode();
+
+      // -- Test 5: Hold TX Freq — auto calls blocked, operator moves honored
+      // and re-pinned (WSJT-X "Hold Tx Freq" parity; KF0U 2026-07-17).
+      await testHoldTxFreq();
     } catch (err) {
       console.error('  pre-encode race test threw:', err);
       fail++;
     }
     finish();
   })();
+}
+
+async function testHoldTxFreq() {
+  section('Hold TX Freq — engine gate & operator override (REAL lib/ft8-engine.js)');
+  // ft8-engine is already require-cached by testRealEnginePreEncode with the
+  // worker_threads stub in place, so a plain require is safe here.
+  const Ft8Engine = require('../lib/ft8-engine');
+  const eng = new Ft8Engine.Ft8Engine();
+  eng._workerReady = true;
+  const logs = [];
+  eng.on('log', (m) => logs.push(m));
+
+  // 1. Hold ON blocks a plain (auto) setTxFreq.
+  eng.setHoldTxFreq(true);
+  eng.setTxFreq(2200);
+  assertEq(eng._txFreq, 1500, 'hold on: auto setTxFreq blocked, stays at default 1500');
+  assert(logs.some((m) => m.includes('ignored') && m.includes('Hold TX Freq')),
+    'hold on: blocked call logs the ignore reason');
+
+  // 2. Operator move bypasses the hold AND re-pins.
+  logs.length = 0;
+  eng.setTxFreq(2200, { operator: true });
+  assertEq(eng._txFreq, 2200, 'hold on: operator move honored');
+  // 3. …and emits the pin-confirm log naming the new offset.
+  assert(logs.some((m) => m.includes('2200') && m.includes('operator')),
+    'hold on: operator move logs the new pinned offset');
+  // Subsequent auto call parks at the operator value, not the old default.
+  eng.setTxFreq(700);
+  assertEq(eng._txFreq, 2200, 'hold on: later auto call still blocked — 2200 is the new pin');
+
+  // 5. Clamps still apply on the operator path.
+  eng.setTxFreq(50, { operator: true });
+  assertEq(eng._txFreq, 100, 'operator move clamps low (50 → 100)');
+  eng.setTxFreq(5000, { operator: true });
+  assertEq(eng._txFreq, 3000, 'operator move clamps high (5000 → 3000)');
+
+  // 4. Hold OFF: both variants move (operator option inert).
+  eng.setHoldTxFreq(false);
+  eng.setTxFreq(900);
+  assertEq(eng._txFreq, 900, 'hold off: plain setTxFreq moves');
+  eng.setTxFreq(1100, { operator: true });
+  assertEq(eng._txFreq, 1100, 'hold off: operator variant also moves');
+
+  // 6. Pre-encode invalidation fires on an operator move under hold.
+  const inflight = [];
+  eng.encodeMessage = function (text, freq) {
+    return new Promise((resolve) => inflight.push({ text, freq, resolve }));
+  };
+  eng._txMessage = 'CQ K3SBP FN20';
+  eng._txEncodedMsg = 'CQ K3SBP FN20';
+  eng._txEncodedFreq = eng._txFreq;
+  eng.setHoldTxFreq(true);
+  eng.setTxFreq(1800, { operator: true });
+  await new Promise((r) => setImmediate(r));
+  assert(inflight.length >= 1, 'operator move under hold dispatches a re-encode');
+  if (inflight.length) {
+    assertEq(inflight[0].freq, 1800, 're-encode targets the operator frequency');
+    inflight[0].resolve(new Float32Array(180000));
+  }
+  await new Promise((r) => setImmediate(r));
 }
 
 async function testRealEnginePreEncode() {

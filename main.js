@@ -6873,6 +6873,19 @@ function jtcatHandleRetryStall(o) {
   }
 }
 
+// Persist the operator's chosen FT8/FT4 TX audio offset so Hold TX Freq can
+// re-pin it across band-change engine rebuilds and app restarts (WSJT-X
+// remembers its Tx offset too). Called from the two operator set-tx-freq
+// handlers and on hold-enable — the held value is the value at pin time or
+// the last deliberate move. PSK31 keeps its own pskAudioCenter persistence.
+function rememberJtcatTxFreq(eng) {
+  if (!eng || eng._mode === 'PSK31') return;
+  if (Number.isFinite(eng._txFreq)) {
+    settings.jtcatTxFreqHz = eng._txFreq;
+    saveSettings(settings);
+  }
+}
+
 function startJtcat(mode) {
   stopJtcat();
   // SSTV and JTCAT can't share the audio input device — getUserMedia
@@ -6924,6 +6937,14 @@ function startJtcat(mode) {
     }
     if (typeof ft8Engine.setHoldTxFreq === 'function') {
       ft8Engine.setHoldTxFreq(!!settings.jtcatHoldTxFreq);
+      // Restore the operator's pinned offset across the rebuild — a band
+      // change constructs a fresh engine at the 1500 default, and the old
+      // code re-enabled hold WITHOUT restoring the choice, silently
+      // re-pinning at 1500 (KF0U 2026-07-17: "the 2850 I selected").
+      if (settings.jtcatHoldTxFreq && typeof settings.jtcatTxFreqHz === 'number' &&
+          ft8Engine._mode !== 'PSK31') {
+        ft8Engine.setTxFreq(settings.jtcatTxFreqHz, { operator: true });
+      }
     }
     // PSK31: apply the operator's squelch level (popout SQL slider). Real
     // band noise varies too much for one hardcoded threshold — first on-air
@@ -12540,16 +12561,20 @@ function connectRemote() {
     }
   });
 
-  // Phone toggle for "Hold TX Freq" — when on, the engine's setTxFreq()
-  // becomes a no-op so QSO state machine / replies don't drag the user's
-  // pinned TX freq around. RX freq still tracks responders. (K0OTC
-  // 2026-05-04 — fixed-freq park operation.) Persisted so a reconnect
-  // restores the same state.
+  // Phone toggle for "Hold TX Freq" — when on, AUTO setTxFreq() calls (QSO
+  // state machine / replies) are ignored so they don't drag the user's
+  // pinned TX freq around; deliberate operator moves (jtcat-set-tx-freq,
+  // the popout TX box/waterfall) still pass and re-pin. RX freq always
+  // tracks responders. (K0OTC 2026-05-04 — fixed-freq park operation.)
+  // Persisted so a reconnect restores the same state.
   remoteServer.on('jtcat-set-hold-tx-freq', ({ enabled }) => {
     const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
     if (eng) eng.setHoldTxFreq(!!enabled);
     settings.jtcatHoldTxFreq = !!enabled;
     saveSettings(settings);
+    // Pin-time snapshot: the held value = the freq at the moment hold went
+    // on (or the last deliberate move) — survives band-change rebuilds.
+    if (enabled && eng) rememberJtcatTxFreq(eng);
     if (remoteServer.hasClient()) {
       remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!enabled });
     }
@@ -12634,7 +12659,10 @@ function connectRemote() {
     // matching slot) the countdown hits 0 and restarts at 15 instead
     // of showing the real 25s wait. K3SBP 2026-05-29.
     if (remoteServer.hasClient()) {
-      remoteServer.broadcastJtcatTxStatus({ state: 'rx', txFreq: jtcatQuietFreq, slot: nextSlot });
+      // Broadcast the engine's ACTUAL TX freq, not the quiet-freq pick — with
+      // Hold TX Freq on the pick was rejected and jtcatQuietFreq was a lie
+      // (same defect class as the popout's optimistic label; KF0U 2026-07-17).
+      remoteServer.broadcastJtcatTxStatus({ state: 'rx', txFreq: ft8Engine._txFreq, slot: nextSlot });
     }
     remoteJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
     await remoteJtcatSetTxMsg(txMsg); // encode first, then enable TX
@@ -12887,10 +12915,15 @@ function connectRemote() {
   remoteServer.on('jtcat-wspr-beacon', (opts) => applyWsprBeaconControl(opts));
 
   remoteServer.on('jtcat-set-tx-freq', ({ hz }) => {
-    if (ft8Engine) {
-      ft8Engine.setTxFreq(hz);
+    // Operator by definition — only the mobile device's TX control sends
+    // this (phone auto paths ride jtcat-reply). Honored even while Hold TX
+    // Freq is on; the value becomes the new pinned offset (WSJT-X parity).
+    const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
+    if (eng) {
+      eng.setTxFreq(hz, { operator: true });
+      rememberJtcatTxFreq(eng);
       if (remoteServer.hasClient()) {
-        remoteServer.broadcastJtcatTxStatus({ state: ft8Engine._txActive ? 'tx' : 'rx', txFreq: ft8Engine._txFreq });
+        remoteServer.broadcastJtcatTxStatus({ state: eng._txActive ? 'tx' : 'rx', txFreq: eng._txFreq });
       }
     }
   });
@@ -26298,7 +26331,16 @@ app.whenReady().then(() => {
     }
     ft8Engine.setMode(mode);
   });
-  ipcMain.on('jtcat-set-tx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setTxFreq(hz); });
+  // `operator` = a DELIBERATE move from the popout TX box / waterfall —
+  // honored even while Hold TX Freq is on, and the value becomes the new
+  // pinned offset (WSJT-X "Hold Tx Freq" parity; KF0U 2026-07-17: the old
+  // single-gate hold swallowed the operator's own 2850 and pinned 1500).
+  ipcMain.on('jtcat-set-tx-freq', (_e, hz, operator) => {
+    const eng = (jtcatManager && jtcatManager.txEngine) || ft8Engine;
+    if (!eng) return;
+    eng.setTxFreq(hz, operator ? { operator: true } : undefined);
+    if (operator) rememberJtcatTxFreq(eng);
+  });
   // WSPR USB dial — accepts a band name ('20m') or an MHz number; wsprd needs
   // it to report absolute spot frequencies and pick the band.
   ipcMain.on('jtcat-set-wspr-dial', (_e, bandOrMHz) => {
@@ -26369,6 +26411,8 @@ app.whenReady().then(() => {
     if (eng && typeof eng.setHoldTxFreq === 'function') {
       eng.setHoldTxFreq(settings.jtcatHoldTxFreq);
     }
+    // Pin-time snapshot — the held value survives band-change rebuilds.
+    if (settings.jtcatHoldTxFreq && eng) rememberJtcatTxFreq(eng);
     if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
       remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: settings.jtcatHoldTxFreq });
     }
