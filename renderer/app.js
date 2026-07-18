@@ -16240,10 +16240,20 @@ function updateEventFocusUi() {
   // Chips: one per TRACKED event inside its window ±24h — the same grace the
   // badge matcher uses. Hidden entirely outside windows (the filter row
   // costs nothing 50 weeks a year) and while focused (banner owns the row).
+  //
+  // Long-event rule (Casey 2026-07-18: the year-long ARRL America250 WAS
+  // pill parked in the filter row and pushed Band/Mode over): a chip only
+  // renders when the event's current window is a SHORT event — ≤120h, the
+  // same 5-day threshold contest-history uses to exclude umbrella contests.
+  // Longer events (Indiana Week, America250) are carried by the banner, the
+  // Events board, and the board's "Focus Spots" button instead. Each chip
+  // also gets an ✕ — per-event dismissal, persisted, hiding ONLY the pill
+  // (never the banner/badges/board).
   chipsHost.innerHTML = '';
   if (!ev) {
     for (const cand of (activeEvents || [])) {
       if (!cand.optedIn || !_eventScheduleNearActive(cand)) continue;
+      if (!_eventChipEligible(cand)) continue;
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'event-focus-chip';
@@ -16251,9 +16261,56 @@ function updateEventFocusUi() {
       chip.textContent = cand.name || cand.id;
       chip.title = `Show only ${cand.name || cand.id} stations — every source, your filters paused until you exit`;
       chip.addEventListener('click', () => setEventFocus(cand.id));
+      const x = document.createElement('span');
+      x.textContent = '✕';
+      x.title = 'Hide this pill (the event stays in the banner and Events board)';
+      x.style.cssText = 'margin-left:6px;opacity:0.6;cursor:pointer;';
+      x.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _dismissEventChip(cand.id);
+        updateEventFocusUi();
+        showLogToast(`${cand.name || cand.id} pill hidden — find it under Events`, { duration: 4000 });
+      });
+      chip.appendChild(x);
       chipsHost.appendChild(chip);
     }
   }
+}
+
+// ── Event chip visibility policy ────────────────────────────────────────────
+// Short events only (≤120h current window) minus per-event dismissals.
+// Dismissals persist in localStorage (renderer-pref pattern — Event Focus
+// itself stays session-only per the mobile contract; hiding a pill is a
+// desktop UI preference) and are pruned to live event ids so the list can't
+// grow forever.
+const EVENT_CHIP_MAX_WINDOW_MS = 120 * 3600 * 1000; // 5 days — umbrella-contest threshold
+const EVENT_CHIP_DISMISS_KEY = 'pota-cat-event-chip-dismissed';
+
+function _eventChipDismissedIds() {
+  try {
+    const v = JSON.parse(localStorage.getItem(EVENT_CHIP_DISMISS_KEY) || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+
+function _dismissEventChip(id) {
+  const live = new Set((activeEvents || []).map((e) => e.id));
+  const ids = _eventChipDismissedIds().filter((d) => live.has(d));
+  if (!ids.includes(id)) ids.push(id);
+  try { localStorage.setItem(EVENT_CHIP_DISMISS_KEY, JSON.stringify(ids)); } catch {}
+}
+
+function _eventChipEligible(ev) {
+  if (_eventChipDismissedIds().includes(ev.id)) return false;
+  // The window that makes it near-active decides the duration — a weekend
+  // entry inside a longer campaign still earns a pill for that weekend.
+  const now = Date.now();
+  return (ev.schedule || []).some((s) => {
+    const start = new Date(s.start).getTime();
+    const end = new Date(s.end).getTime();
+    if (!(now >= start - EVENT_BADGE_GRACE_MS && now <= end + EVENT_BADGE_GRACE_MS)) return false;
+    return (end - start) <= EVENT_CHIP_MAX_WINDOW_MS;
+  });
 }
 
 // Banner buttons (static elements — bind once).
