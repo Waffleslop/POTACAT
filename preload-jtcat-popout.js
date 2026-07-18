@@ -87,6 +87,12 @@ contextBridge.exposeInMainWorld('api', {
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   // QSO commands (relayed to main renderer)
+  // CAT-log sink — the popout had NO jtcatLog until 2026-07-18, so every
+  // `if (window.api.jtcatLog)` guard in jtcat-popout.js silently no-opped:
+  // audio-start success/failure/stall lines never reached the CAT log and
+  // the blank-waterfall hunt ran blind for a whole evening. Same channel
+  // the main window uses.
+  jtcatLog: (msg) => ipcRenderer.send('jtcat-log', msg),
   jtcatReply: (data) => ipcRenderer.send('jtcat-popout-reply', data),
   jtcatCallCq: (modifier) => ipcRenderer.send('jtcat-popout-call-cq', modifier || ''),
   jtcatCancelQso: () => ipcRenderer.send('jtcat-popout-cancel-qso'),
