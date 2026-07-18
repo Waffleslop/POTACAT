@@ -1371,6 +1371,7 @@ function _applyPopoutTheme(payload) {
         if (data.reason === 'worked') showJtcatWarnToast('Worked ' + data.call + ' — spot target cleared');
         else if (data.reason === 'expired') showJtcatWarnToast('Spot target ' + data.call + ' expired — not heard for 10 minutes');
         else if (data.reason === 'qsy') showJtcatWarnToast('Spot target ' + data.call + ' cleared — band or mode changed');
+        else if (data.reason === 'run') showJtcatWarnToast('Spot target ' + data.call + ' cleared — Run mode started');
         return;
       }
       if (!spotTargetBanner) return;

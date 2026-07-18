@@ -5999,28 +5999,46 @@ function jtcatDirectedMsg(theirCall, myCall, payload) {
 // Build a fresh CQ QSO object and start transmitting. Returns the QSO or null
 // if callsign/grid/engine aren't ready. Shared by re-arm; mirrors the manual
 // CQ button's message build.
-function jtcatBuildCqQso(modifier) {
+async function jtcatBuildCqQso(modifier) {
   const myCall = (settings.myCallsign || '').toUpperCase();
   const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
   if (!myCall || !myGrid || !ft8Engine) return null;
   const fd = jtcatFdContext();
   if (fd) modifier = 'FD'; // Field Day CQ is always "CQ FD <call> <grid>"
   const txMsg = buildCqTxMsg(myCall, myGrid, modifier);
-  const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
-  ft8Engine.setTxSlot(nextSlot);
+  // Time-aware TX slot (K3SBP 2026-07-17: Run took a full cycle to key up).
+  // Fire in the CURRENT slot when we're early enough for late-start
+  // truncation (up to 7 s, WSJT-X waveform-truncation parity), else target
+  // the literal NEXT boundary's parity. The old opposite-of-_lastRxSlot pick
+  // pinned a parity for no reason — a fresh CQ has no partner to be opposite
+  // OF — and could skip a perfectly reachable boundary, stretching the first
+  // transmission out to ~27 s after the Run click.
+  const cycleMs = 1000 * (typeof ft8Engine._cycleSec === 'function' ? ft8Engine._cycleSec() : 15);
+  const nowMs = Date.now();          // wall clock — TX scheduling never uses the RX-latency-adjusted clock
+  const msIntoCycle = nowMs % cycleMs;
+  const slotIdx = Math.floor(nowMs / cycleMs);
+  const curSlot = slotIdx % 2 === 0 ? 'even' : 'odd';
+  const lateCap = (ft8Engine._lateStartTxMs > 0 && ft8Engine._mode === 'FT8')
+    ? Math.min(ft8Engine._lateStartTxMs, 7000)
+    : 500; // FT4/late-start-off: only the 500 ms pad window reaches the current slot
+  ft8Engine.setTxSlot(msIntoCycle <= lateCap ? curSlot : (curSlot === 'even' ? 'odd' : 'even'));
   const qso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg,
     report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
   if (fd) { qso.fd = true; qso.myExch = fd.myExch; }
   ft8Engine._txEnabled = true;
-  ft8Engine.setTxMessage(txMsg);
-  ft8Engine.tryImmediateTx();
+  // Await the encode BEFORE the immediate attempt — the old un-awaited call
+  // meant tryImmediateTx always failed its samples-ready check, silently
+  // deferring the first CQ to the boundary poller.
+  await ft8Engine.setTxMessage(txMsg);
+  const fired = ft8Engine.tryImmediateTx();
+  sendCatLog(`[JTCAT] Run CQ ${fired ? `immediate TX (${msIntoCycle}ms into slot)` : `queued for next ${ft8Engine._txSlot} slot`}: ${txMsg}`);
   return qso;
 }
 
 // Re-arm CQ after a QSO completes or a stalled QSO is abandoned, in run mode.
-function rearmCq(owner) {
+async function rearmCq(owner) {
   if (!jtcatFullAutoCq || jtcatFullAutoCqOwner !== owner) return false;
-  const qso = jtcatBuildCqQso(jtcatFullAutoCqModifier);
+  const qso = await jtcatBuildCqQso(jtcatFullAutoCqModifier);
   if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
   jtcatFullAutoCqLastActivity = Date.now();
   if (owner === 'remote') { remoteJtcatQso = qso; remoteJtcatBroadcastQso(); }
@@ -6032,7 +6050,7 @@ function rearmCq(owner) {
 // Start run mode for an owner: 'popout' (desktop window) or 'remote' (the
 // ECHOCAT phone via jtcat-full-auto-cq). Guarded by the ULTRACAT unlock so a
 // locked client can't drive it.
-function startFullAutoCq(owner, modifier) {
+async function startFullAutoCq(owner, modifier) {
   if (!settings.ultracat) { sendCatLog('[JTCAT] Full Auto CQ blocked — ULTRACAT locked'); return false; }
   if (!ft8Engine) { sendCatLog('[JTCAT] Full Auto CQ blocked — engine not running'); return false; }
   jtcatFullAutoCq = true;
@@ -6042,12 +6060,18 @@ function startFullAutoCq(owner, modifier) {
   jtcatAutoCqMode = 'off';        // run and hunt are mutually exclusive
   jtcatAutoCqWorkedSession.clear();
   broadcastAutoCqState();
-  const qso = jtcatBuildCqQso(jtcatFullAutoCqModifier);
-  if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
-  // Pick a clear TX frequency once, at the start of the run — rearmCq
-  // deliberately leaves it alone so we hold the same frequency cycle to cycle
-  // (answerers find us there). Respects Hold TX Freq.
+  // Run supersedes any armed Spot Target (K3SBP 2026-07-17): calling CQ and
+  // waiting on a specific activator are mutually exclusive intents — without
+  // this the banner kept claiming "waiting for W6OBB" while Run owned TX.
+  clearSpotTarget('run');
+  // Pick a clear TX frequency BEFORE building the CQ — setting it after
+  // invalidated the just-finished pre-encode ("stale — re-encoding") and
+  // guaranteed the immediate-TX attempt below could never fire. rearmCq
+  // deliberately leaves the freq alone so we hold the same frequency cycle to
+  // cycle (answerers find us there). Respects Hold TX Freq.
   ft8Engine.setTxFreq(jtcatQuietFreq);
+  const qso = await jtcatBuildCqQso(jtcatFullAutoCqModifier);
+  if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
   if (owner === 'remote') { remoteJtcatQso = qso; remoteJtcatBroadcastQso(); }
   else { popoutJtcatQso = qso; popoutBroadcastQso(); }
   broadcastFullAutoCqState();
@@ -12834,9 +12858,9 @@ function connectRemote() {
   // refusal we re-broadcast the (unchanged) state so an optimistic phone
   // toggle reconciles back to "not running". Stop is unconditional — any
   // client silencing TX is always allowed, even for a popout-owned run.
-  remoteServer.on('jtcat-full-auto-cq', ({ on, modifier } = {}) => {
+  remoteServer.on('jtcat-full-auto-cq', async ({ on, modifier } = {}) => {
     if (on) {
-      const ok = startFullAutoCq('remote', modifier || '');
+      const ok = await startFullAutoCq('remote', modifier || '');
       if (!ok) broadcastFullAutoCqState('start refused — ULTRACAT locked, FT8 engine not running, or callsign/grid not set');
     } else {
       stopFullAutoCq('stopped from phone');
