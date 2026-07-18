@@ -63,8 +63,16 @@
         <span id="latency">--ms</span>
         <button type="button" id="vfo-fullview-btn" class="vfo-fullview-toggle" title="Full VFO View">VFO</button>
         <button type="button" id="rig-ctrl-toggle" class="rig-ctrl-toggle" title="Rig Controls">&#x2699;</button>
+        <!-- Hamburger nav (mobile parity) — hidden unless the Navigation
+             setting is "Menu"; opens #tab-menu-panel, a second entry point
+             into switchTab. -->
+        <button type="button" id="menu-btn" class="rig-ctrl-toggle hidden" title="Menu">&#9776;</button>
       </div>
     </div>
+
+    <!-- Hamburger nav menu — rows built by JS from the user's tab order
+         (one order drives BOTH the bar and this menu). -->
+    <div id="tab-menu-panel" class="hidden" style="position:fixed;top:44px;right:6px;z-index:1200;min-width:200px;max-height:70vh;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.45);padding:4px;"></div>
 
     <!-- Mode picker popup -->
     <div id="mode-picker" class="hidden">
@@ -551,6 +559,13 @@
           <div class="so-controls">
             <button type="button" class="rc-btn rc-toggle active" id="so-theme-dark">Dark</button>
             <button type="button" class="rc-btn rc-toggle" id="so-theme-light">Light</button>
+          </div>
+        </div>
+        <div class="so-row" title="Hide the tab bar and navigate from a menu button in the header instead — reclaims a full row for content (parity with the mobile app's hamburger nav).">
+          <label class="so-label">Navigation</label>
+          <div class="so-controls">
+            <button type="button" class="rc-btn rc-toggle active" id="so-nav-tabs">Tab bar</button>
+            <button type="button" class="rc-btn rc-toggle" id="so-nav-menu">Menu</button>
           </div>
         </div>
         <div class="so-row" title="Dock the VFO panel on one side at iPad size (&ge; 1000px). PTT moves from the bottom bar into the VFO panel.">
@@ -1127,6 +1142,8 @@
           <option value="FT8">FT8</option>
           <option value="FT4">FT4</option>
           <option value="FT2">FT2</option>
+          <option value="WSPR">WSPR</option>
+          <option value="PSK31">PSK</option>
         </select>
         <span style="flex:1;"></span>
         <span id="ft8-sync-status">Sync: --</span>
@@ -1156,6 +1173,49 @@
       <!-- Band Activity + My Activity split -->
       <div id="ft8-decode-log" class="ft8-decode-log" style="flex:1;min-height:0;">
         <div class="ft8-empty">Tap a band to start</div>
+      </div>
+      <!-- WSPR pane (web parity with the popout's jp-wspr-pane; docs/desktop-handoffs/
+           echocat-web-parity-wspr-psk-menu.md). Replaces the decode log when
+           mode = WSPR. Spots are host-enriched — rendered verbatim. -->
+      <div id="wspr-pane" class="hidden" style="flex:1;min-height:0;flex-direction:column;">
+        <div style="display:flex;align-items:center;gap:10px;padding:5px 10px;flex-wrap:wrap;background:var(--bg-header);border-bottom:1px solid var(--border);font-size:12px;">
+          <label style="display:flex;align-items:center;gap:4px;" title="Transmit a WSPR beacon in a share of 120s cycles. The toggle reflects the host's confirmation — it may revert if arming fails."><input type="checkbox" id="wspr-tx-enable"> Beacon</label>
+          <label title="Share of cycles used for beacon TX">TX% <input type="range" id="wspr-txpct" min="0" max="100" step="5" value="20" style="width:66px;vertical-align:middle;"> <span id="wspr-txpct-val">20%</span></label>
+          <label title="Reported power (dBm) — capped at 30 dBm (1 W)">Pwr <select id="wspr-dbm" class="ft8-mode-select" style="font-size:11px;">
+            <option value="0">0 dBm</option><option value="7">7 dBm</option><option value="10">10 dBm</option>
+            <option value="13">13 dBm</option><option value="17">17 dBm</option><option value="20">20 dBm</option>
+            <option value="23">23 dBm</option><option value="27">27 dBm</option><option value="30" selected>30 dBm</option>
+          </select></label>
+          <span id="wspr-next" style="margin-left:auto;color:var(--text-dim);"></span>
+        </div>
+        <div style="display:flex;gap:6px;padding:3px 10px;font-size:10px;font-weight:600;color:var(--text-dim);background:var(--bg-header);border-bottom:1px solid var(--border);font-family:monospace;">
+          <span style="width:44px;">UTC</span><span style="width:28px;text-align:right;">dB</span><span style="width:30px;text-align:right;">DT</span><span style="width:70px;">Freq</span><span style="width:24px;text-align:right;">Dft</span><span style="width:70px;">Call</span><span style="width:44px;">Grid</span><span style="flex:1;">Country</span><span style="width:26px;">Reg</span><span style="width:40px;text-align:right;">Dist</span><span style="width:30px;text-align:right;">Az</span>
+        </div>
+        <div id="wspr-list" style="flex:1;min-height:0;overflow-y:auto;font-family:monospace;font-size:11px;"></div>
+      </div>
+      <!-- PSK31 pane (web parity with the popout's jp-psk-pane). Continuous
+           keyboard mode: no cycles, no QSO machine; one deliberate Send. -->
+      <div id="psk-pane" class="hidden" style="flex:1;min-height:0;flex-direction:column;">
+        <div style="display:flex;align-items:center;gap:12px;padding:4px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim);">
+          <span id="psk-freq">AFC: -- Hz</span><span id="psk-quality">Q -- &middot; SNR --</span>
+        </div>
+        <div id="psk-rx" style="flex:1;min-height:0;overflow-y:auto;font-family:monospace;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word;padding:6px 10px;"></div>
+        <div id="psk-chips" style="display:none;gap:4px;flex-wrap:wrap;padding:2px 10px;border-top:1px solid var(--border);"></div>
+        <div style="display:flex;gap:4px;padding:4px 10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);">
+          <input id="psk-their" type="text" maxlength="10" placeholder="their call" autocapitalize="characters" autocomplete="off" spellcheck="false" style="width:82px;font-size:12px;padding:3px 5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;text-transform:uppercase;">
+          <div id="psk-macros" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+        </div>
+        <div style="display:flex;gap:4px;padding:4px 10px 8px;align-items:stretch;">
+          <!-- Verbatim contract: varicode is case-sensitive and lowercase is the
+               on-air convention — the browser keyboard must not "help".
+               autocapitalize/autocorrect/spellcheck off, no CSS uppercasing. -->
+          <textarea id="psk-tx" rows="2" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" placeholder="type text to transmit&hellip;" style="flex:1;font-family:monospace;font-size:13px;padding:5px 7px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;resize:none;"></textarea>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <button type="button" id="psk-send" class="ft8-ctrl-btn" style="flex:1;">Send</button>
+            <button type="button" id="psk-stop" class="ft8-ctrl-btn">Stop</button>
+            <button type="button" id="psk-log" class="ft8-ctrl-btn">Log</button>
+          </div>
+        </div>
       </div>
       <div id="ft8-my-activity-header" class="hidden" style="padding:3px 10px;font-size:10px;font-weight:600;color:var(--text-dim);background:var(--bg-header);border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
         <span>My Activity</span>

@@ -9706,6 +9706,14 @@ function updateRemoteSettings() {
     // syncs through this key. Sanitized on the way out too, since the merge
     // handler persisted phone blobs verbatim before this shipped.
     kiwiSdrList: sanitizeKiwiSdrList(settings.kiwiSdrList),
+    // PSK31/WSPR seeds for remote clients (web parity handoff): the popout
+    // reads these locally, but the web client can only see the blob — macro
+    // buttons and the beacon TX%/dBm controls seed from here. The beacon
+    // ENABLED state rides jtcat-wspr-beacon-state, not settings.
+    pskMacros: Array.isArray(settings.pskMacros) ? settings.pskMacros : null,
+    pskAudioCenter: settings.pskAudioCenter || 1500,
+    wsprTxPct: typeof settings.wsprTxPct === 'number' ? settings.wsprTxPct : 20,
+    wsprDbm: typeof settings.wsprDbm === 'number' ? settings.wsprDbm : 30,
     sstvTemplates: settings.sstvTemplates || [],
     sstvTextElements: settings.sstvTextElements || [],
     enableAutoSstv: !!settings.enableAutoSstv,

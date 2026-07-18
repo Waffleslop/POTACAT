@@ -605,9 +605,29 @@
     '6m': 50313, '2m': 144174,
   };
 
+  // WSPR USB dial frequencies (kHz) — kept ONLY for the frequency display;
+  // the actual WSPR dial is derived HOST-side from the band name
+  // (jtcat-set-band → wsprBands.dialForBand), so the client never tunes
+  // from this table. Matches lib/wspr/bands.js.
+  const WSPR_BAND_FREQS = {
+    '160m': 1836.6, '80m': 3568.6, '60m': 5287.2, '40m': 7038.6, '30m': 10138.7,
+    '20m': 14095.6, '17m': 18104.6, '15m': 21094.6, '12m': 24924.6, '10m': 28124.6,
+    '6m': 50293.0,
+  };
+  // PSK31 USB dial frequencies (kHz) — the conventional watering holes
+  // (40m: 7070 Americas convention). Mirrors the popout's table.
+  const PSK_BAND_FREQS = {
+    '160m': 1838, '80m': 3580, '60m': 5357, '40m': 7070, '30m': 10142,
+    '20m': 14070, '17m': 18100, '15m': 21070, '12m': 24920, '10m': 28120,
+    '6m': 50291,
+  };
+
   /** Update band button data-freq attributes for current mode */
   function updateBandFreqs() {
-    const table = ft8Mode === 'FT2' ? FT2_BAND_FREQS : ft8Mode === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
+    const table = ft8Mode === 'WSPR' ? WSPR_BAND_FREQS
+      : ft8Mode === 'PSK31' ? PSK_BAND_FREQS
+      : ft8Mode === 'FT2' ? FT2_BAND_FREQS
+      : ft8Mode === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
     Array.from(ft8BandSelect.options).forEach(opt => {
       const band = opt.value;
       if (table[band]) opt.dataset.freq = table[band];
@@ -1058,6 +1078,7 @@
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
+        applyNavMode(); // hamburger setting wins over the unconditional reveal above
         // Open BroadcastChannel so any popout windows opened from this session mirror our state
         setupMainBroadcastChannel();
         if (bc) { try { bc.postMessage({ kind: 'connection', online: true }); sendStateSnapshot(); } catch {} }
@@ -1626,6 +1647,20 @@
         ft8Mode = msg.mode || ft8Mode;
         ft8ModeSelect.value = ft8Mode;
         ft8SyncStatus.textContent = 'Sync: ' + (msg.sync || '--');
+        applyDigitalPanes(); // host-driven mode change (popout/phone) swaps panes too
+        break;
+
+      // --- PSK31 / WSPR (web parity: docs/desktop-handoffs/echocat-web-parity-wspr-psk-menu.md) ---
+      case 'jtcat-psk-rx':
+        pskHandleRx(msg);
+        break;
+
+      case 'jtcat-wspr-spots':
+        wsprHandleSpots(msg);
+        break;
+
+      case 'jtcat-wspr-beacon-state':
+        wsprBeaconEcho(msg);
         break;
 
       case 'jtcat-decode':
@@ -6602,13 +6637,23 @@
     updateBandFreqs();
     ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
     ft8StartCountdown(); // restart with new cycle duration
+    applyDigitalPanes(); // WSPR/PSK panes replace the decode log for those modes
     // Retune to the active band's new frequency for the selected mode
     const opt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
     if (opt) {
-      const freqKhz = parseFloat(opt.dataset.freq);
-      ft8Send({ type: 'jtcat-set-band', band: opt.value, freqKhz });
-      const hz = freqKhz * 1000;
-      if (hz > 100000) { freqDisplay.textContent = formatFreq(hz); currentFreqKhz = freqKhz; }
+      if (ft8Mode === 'WSPR') {
+        // WSPR dials are derived HOST-side from the band name (the handler
+        // calls wsprBands.dialForBand) — send the band WITHOUT freqKhz so the
+        // host sets the correct dial; never tune from a client table.
+        ft8Send({ type: 'jtcat-set-band', band: opt.value });
+        const wKhz = WSPR_BAND_FREQS[opt.value];
+        if (wKhz) { freqDisplay.textContent = formatFreq(wKhz * 1000); currentFreqKhz = wKhz; }
+      } else {
+        const freqKhz = parseFloat(opt.dataset.freq);
+        ft8Send({ type: 'jtcat-set-band', band: opt.value, freqKhz });
+        const hz = freqKhz * 1000;
+        if (hz > 100000) { freqDisplay.textContent = formatFreq(hz); currentFreqKhz = freqKhz; }
+      }
     }
   });
 
@@ -6616,11 +6661,18 @@
   ft8BandSelect.addEventListener('change', () => {
     const opt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
     const band = opt.value;
-    const freqKhz = parseFloat(opt.dataset.freq);
-    ft8Send({ type: 'jtcat-set-band', band, freqKhz });
-    // Immediately update frequency display (don't wait for CAT poll)
-    const hz = freqKhz * 1000;
-    if (hz > 100000) { freqDisplay.textContent = formatFreq(hz); currentFreqKhz = freqKhz; }
+    if (ft8Mode === 'WSPR') {
+      // Host derives the WSPR dial from the band name — no client freq.
+      ft8Send({ type: 'jtcat-set-band', band });
+      const wKhz = WSPR_BAND_FREQS[band];
+      if (wKhz) { freqDisplay.textContent = formatFreq(wKhz * 1000); currentFreqKhz = wKhz; }
+    } else {
+      const freqKhz = parseFloat(opt.dataset.freq);
+      ft8Send({ type: 'jtcat-set-band', band, freqKhz });
+      // Immediately update frequency display (don't wait for CAT poll)
+      const hz = freqKhz * 1000;
+      if (hz > 100000) { freqDisplay.textContent = formatFreq(hz); currentFreqKhz = freqKhz; }
+    }
     // Clear decode log on band change
     ft8DecodeLog = [];
     ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">Switching to ' + band + '...</div>';
@@ -6641,6 +6693,417 @@
     ft8TxFreqDisplay.textContent = 'TX: ' + hz + ' Hz';
     ft8Send({ type: 'jtcat-set-tx-freq', hz });
   });
+
+  // ======================================================================
+  // WSPR + PSK31 panes + hamburger nav — web parity with the mobile app
+  // (docs/desktop-handoffs/echocat-web-parity-wspr-psk-menu.md). WSPR is a
+  // propagation-beacon mode (no QSO, no cycles UI); PSK31 is a continuous
+  // keyboard mode (no cycles, one deliberate Send). Both panes replace the
+  // decode table when their mode is selected.
+  // ======================================================================
+  const wsprPane = document.getElementById('wspr-pane');
+  const pskPane = document.getElementById('psk-pane');
+  const ft8ControlBar = document.getElementById('ft8-control-bar');
+
+  /** Show/hide the WSPR/PSK panes vs the FT8 decode table for the current mode. */
+  function applyDigitalPanes() {
+    const wspr = ft8Mode === 'WSPR';
+    const psk = ft8Mode === 'PSK31';
+    if (wsprPane) { wsprPane.classList.toggle('hidden', !wspr); wsprPane.style.display = wspr ? 'flex' : ''; }
+    if (pskPane) { pskPane.classList.toggle('hidden', !psk); pskPane.style.display = psk ? 'flex' : ''; }
+    ft8DecodeLogEl.classList.toggle('hidden', wspr || psk);
+    // The FT8 TX/CQ/auto controls have no meaning in beacon/keyboard modes.
+    if (ft8ControlBar) ft8ControlBar.classList.toggle('hidden', wspr || psk);
+    if (wspr) { wsprSeedControls(); wsprStartClock(); } else { wsprStopClock(); }
+    if (psk) pskRenderMacros();
+  }
+
+  // ---------------- WSPR ----------------
+  let wsprSpots = [];      // host-enriched, rendered verbatim, cap 300
+  let wsprBeaconOn = false; // AUTHORITATIVE state — set only from the host echo
+  let wsprClockTimer = null;
+  const wsprTxEnable = document.getElementById('wspr-tx-enable');
+  const wsprTxPct = document.getElementById('wspr-txpct');
+  const wsprTxPctVal = document.getElementById('wspr-txpct-val');
+  const wsprDbm = document.getElementById('wspr-dbm');
+  const wsprNext = document.getElementById('wspr-next');
+  const wsprList = document.getElementById('wspr-list');
+
+  function wsprSeedControls() {
+    // Seed TX%/dBm from the host's persisted settings when available.
+    if (echoSettings) {
+      if (typeof echoSettings.wsprTxPct === 'number') {
+        wsprTxPct.value = echoSettings.wsprTxPct;
+        wsprTxPctVal.textContent = echoSettings.wsprTxPct + '%';
+      }
+      if (typeof echoSettings.wsprDbm === 'number') wsprDbm.value = String(Math.min(30, echoSettings.wsprDbm));
+    }
+  }
+
+  function wsprHandleSpots(msg) {
+    if (msg.error) {
+      wsprList.innerHTML = '<div class="ft8-empty">' + String(msg.error).replace(/</g, '&lt;') + '</div>';
+      return;
+    }
+    const incoming = Array.isArray(msg.spots) ? msg.spots : [];
+    for (const s of incoming) {
+      const key = (s.call || '') + '|' + (typeof s.freqMHz === 'number' ? s.freqMHz.toFixed(6) : '');
+      const idx = wsprSpots.findIndex((x) => x._key === key);
+      if (idx !== -1) wsprSpots.splice(idx, 1);
+      wsprSpots.unshift({ ...s, _key: key });
+    }
+    if (wsprSpots.length > 300) wsprSpots.length = 300; // desktop convention
+    wsprRender();
+  }
+
+  function wsprRender() {
+    if (!wsprList) return;
+    if (!wsprSpots.length) {
+      wsprList.innerHTML = '<div class="ft8-empty">Listening for WSPR&hellip; spots appear as the host decodes (120s cycles)</div>';
+      return;
+    }
+    const esc = (v) => String(v == null ? '' : v).replace(/</g, '&lt;');
+    wsprList.innerHTML = wsprSpots.map((s) =>
+      '<div style="display:flex;gap:6px;padding:2px 10px;border-bottom:1px solid var(--border);">' +
+      '<span style="width:44px;">' + esc(s.timeUtc) + '</span>' +
+      '<span style="width:28px;text-align:right;">' + esc(s.snr) + '</span>' +
+      '<span style="width:30px;text-align:right;">' + esc(s.dt) + '</span>' +
+      '<span style="width:70px;">' + (typeof s.freqMHz === 'number' ? s.freqMHz.toFixed(4) : '') + '</span>' +
+      '<span style="width:24px;text-align:right;">' + esc(s.drift) + '</span>' +
+      '<span style="width:70px;font-weight:600;">' + esc(s.call) + '</span>' +
+      '<span style="width:44px;">' + esc(s.grid) + '</span>' +
+      '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(s.entity) + '</span>' +
+      '<span style="width:26px;">' + esc(s.continent) + '</span>' +
+      '<span style="width:40px;text-align:right;">' + esc(s.distanceMi) + '</span>' +
+      '<span style="width:30px;text-align:right;">' + esc(s.bearing) + '</span>' +
+      '</div>').join('');
+  }
+
+  function wsprBeaconEcho(msg) {
+    // The echo is the truth (arming can fail host-side) — the checkbox
+    // renders ONLY from here, never from the local tap.
+    wsprBeaconOn = !!msg.enabled;
+    if (wsprTxEnable) wsprTxEnable.checked = wsprBeaconOn;
+  }
+
+  if (wsprTxEnable) wsprTxEnable.addEventListener('change', () => {
+    const wanted = wsprTxEnable.checked;
+    wsprTxEnable.checked = wsprBeaconOn; // optimistic-free: revert; the state echo flips it
+    ft8Send({ type: 'jtcat-wspr-beacon', enabled: wanted, txPct: parseInt(wsprTxPct.value, 10), dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+  });
+  if (wsprTxPct) wsprTxPct.addEventListener('input', () => {
+    wsprTxPctVal.textContent = wsprTxPct.value + '%';
+  });
+  if (wsprTxPct) wsprTxPct.addEventListener('change', () => {
+    ft8Send({ type: 'jtcat-wspr-beacon', txPct: parseInt(wsprTxPct.value, 10) });
+  });
+  if (wsprDbm) wsprDbm.addEventListener('change', () => {
+    ft8Send({ type: 'jtcat-wspr-beacon', dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+  });
+
+  // 120s cycle phase/countdown — same window math as the popout: the TX
+  // window is ~1s..111.6s into the slot, the tail is decode/RX turnaround.
+  function wsprTickClock() {
+    const cycleMs = 120000;
+    const msInto = Date.now() % cycleMs;
+    const remaining = Math.ceil((cycleMs - msInto) / 1000);
+    const inTxWindow = msInto >= 1000 && msInto < 111600;
+    let phase;
+    if (wsprBeaconOn && inTxWindow) phase = 'Beacon window';
+    else if (inTxWindow) phase = 'RX';
+    else phase = 'Decode';
+    if (wsprNext) wsprNext.textContent = phase + ' · next cycle in ' + remaining + 's';
+  }
+  function wsprStartClock() {
+    if (wsprClockTimer) return;
+    wsprTickClock();
+    wsprClockTimer = setInterval(wsprTickClock, 1000);
+  }
+  function wsprStopClock() {
+    if (wsprClockTimer) { clearInterval(wsprClockTimer); wsprClockTimer = null; }
+  }
+
+  // ---------------- PSK31 ----------------
+  const PSK_RX_CAP = 20000; // chars kept in the RX scrollback (popout parity)
+  const PSK_MACRO_SLOTS = 6;
+  // Mirrors the popout's defaults — lowercase body text is deliberate (short
+  // varicode); used when settings.pskMacros is absent from the blob.
+  const PSK_DEFAULT_MACROS = [
+    { label: 'CQ',   text: 'CQ CQ CQ de $MYCALL $MYCALL $MYCALL pse K\n' },
+    { label: 'Call', text: '$CALL $CALL de $MYCALL $MYCALL $MYCALL K\n' },
+    { label: 'Exch', text: '$CALL de $MYCALL  UR RSQ 599 599  QTH grid $GRID $GRID  BTU $CALL de $MYCALL K\n' },
+    { label: 'Brag', text: '$CALL de $MYCALL  rig [RIG] es [WATTS]w to [ANTENNA]  op [NAME] QTH [TOWN]  hw cpy? $CALL de $MYCALL K\n' },
+    { label: '73',   text: '$CALL de $MYCALL  TNX FER QSO 73 73  sk\n' },
+    { label: 'Txt',  text: '' },
+  ];
+  const pskRxEl = document.getElementById('psk-rx');
+  const pskTxEl = document.getElementById('psk-tx');
+  const pskTheirEl = document.getElementById('psk-their');
+  const pskMacrosEl = document.getElementById('psk-macros');
+  const pskChipsEl = document.getElementById('psk-chips');
+  const pskFreqEl = document.getElementById('psk-freq');
+  const pskQualityEl = document.getElementById('psk-quality');
+  let pskChipScanTimer = null;
+
+  function pskNormalizeMacros(saved) {
+    const src = Array.isArray(saved) && saved.length ? saved : null;
+    const out = [];
+    for (let i = 0; i < PSK_MACRO_SLOTS; i++) {
+      const m = src ? src[i] : PSK_DEFAULT_MACROS[i];
+      if (m && typeof m.label === 'string' && m.label.trim()) {
+        out.push({ label: m.label.trim().slice(0, 8), text: String(m.text == null ? '' : m.text) });
+      } else {
+        out.push(src ? { label: 'M' + (i + 1), text: '' } : PSK_DEFAULT_MACROS[i]);
+      }
+    }
+    return out;
+  }
+
+  function pskSubstituteMacro(text) {
+    const their = (pskTheirEl && pskTheirEl.value ? pskTheirEl.value : '').toUpperCase().trim();
+    return String(text || '')
+      .replace(/\$MYCALL/g, myCallsign || '')
+      .replace(/\$GRID/g, (phoneGrid || '').substring(0, 4))
+      .replace(/\$CALL/g, their);
+  }
+
+  function pskRenderMacros() {
+    if (!pskMacrosEl) return;
+    const defs = pskNormalizeMacros(echoSettings && echoSettings.pskMacros);
+    pskMacrosEl.innerHTML = '';
+    defs.forEach((m) => {
+      if (!m.text) return; // blank free-text slots aren't useful without the editor
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ft8-ctrl-btn';
+      btn.style.fontSize = '11px';
+      btn.textContent = m.label;
+      btn.title = m.text.trim().slice(0, 120);
+      btn.addEventListener('click', () => {
+        // Insert the substituted text at the cursor (popout parity).
+        const sub = pskSubstituteMacro(m.text);
+        const start = pskTxEl.selectionStart == null ? pskTxEl.value.length : pskTxEl.selectionStart;
+        const end = pskTxEl.selectionEnd == null ? start : pskTxEl.selectionEnd;
+        pskTxEl.value = pskTxEl.value.slice(0, start) + sub + pskTxEl.value.slice(end);
+        pskTxEl.focus();
+      });
+      pskMacrosEl.appendChild(btn);
+    });
+  }
+
+  function pskHandleRx(msg) {
+    if (!pskRxEl || !msg.chars) return;
+    const nearBottom = pskRxEl.scrollHeight - pskRxEl.scrollTop - pskRxEl.clientHeight < 40;
+    pskRxEl.textContent = (pskRxEl.textContent + msg.chars).slice(-PSK_RX_CAP);
+    if (nearBottom || msg.replay) pskRxEl.scrollTop = pskRxEl.scrollHeight;
+    if (msg.freqHz != null && pskFreqEl) pskFreqEl.textContent = 'AFC: ' + Math.round(msg.freqHz) + ' Hz';
+    if (pskQualityEl && (msg.metric != null || msg.snrDb != null)) {
+      pskQualityEl.textContent = 'Q ' + (msg.metric != null ? Math.round(msg.metric) : '--') +
+        ' · SNR ' + (msg.snrDb != null ? Math.round(msg.snrDb) + ' dB' : '--');
+    }
+    // Callsign capture — debounced scan of the RX tail (replay included:
+    // chips are passive affordances, not notifications).
+    if (pskChipScanTimer) clearTimeout(pskChipScanTimer);
+    pskChipScanTimer = setTimeout(pskScanCallsigns, 500);
+  }
+
+  function pskScanCallsigns() {
+    if (!pskChipsEl || !pskRxEl) return;
+    // Mobile's rule: 3-10 chars of [A-Z0-9/], must contain a letter AND a
+    // digit, scanned over the last ~800 chars of the RX stream.
+    const tail = pskRxEl.textContent.slice(-800).toUpperCase();
+    const seen = [];
+    const re = /[A-Z0-9/]{3,10}/g;
+    let m;
+    while ((m = re.exec(tail)) !== null) {
+      const tok = m[0];
+      if (!/[A-Z]/.test(tok) || !/[0-9]/.test(tok)) continue;
+      if (myCallsign && tok === myCallsign.toUpperCase()) continue;
+      if (!seen.includes(tok)) seen.push(tok);
+    }
+    const chips = seen.slice(-6);
+    pskChipsEl.style.display = chips.length ? 'flex' : 'none';
+    pskChipsEl.innerHTML = '';
+    chips.forEach((call) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'ft8-ctrl-btn';
+      chip.style.cssText = 'font-size:11px;padding:1px 8px;border-radius:10px;';
+      chip.textContent = call;
+      chip.title = 'Set as their call and open logging pre-filled';
+      chip.addEventListener('click', () => {
+        if (pskTheirEl) pskTheirEl.value = call;
+        openLogSheet({ callsign: call, mode: 'PSK31', freqKhz: currentFreqKhz });
+      });
+      pskChipsEl.appendChild(chip);
+    });
+  }
+
+  const pskSendBtn = document.getElementById('psk-send');
+  if (pskSendBtn) pskSendBtn.addEventListener('click', () => {
+    const text = pskTxEl.value; // VERBATIM — varicode is case-sensitive,
+    if (!text) return;          // lowercase is the on-air convention.
+    ft8Send({ type: 'jtcat-psk-send', text });
+    pskTxEl.value = '';
+  });
+  const pskStopBtn = document.getElementById('psk-stop');
+  if (pskStopBtn) pskStopBtn.addEventListener('click', () => {
+    ft8Send({ type: 'jtcat-halt-tx' });
+  });
+  const pskLogBtn = document.getElementById('psk-log');
+  if (pskLogBtn) pskLogBtn.addEventListener('click', () => {
+    openLogSheet({
+      callsign: (pskTheirEl && pskTheirEl.value ? pskTheirEl.value : '').toUpperCase().trim(),
+      mode: 'PSK31',
+      freqKhz: currentFreqKhz,
+    });
+  });
+
+  // ---------------- Hamburger nav (mobile TabMenu parity) ----------------
+  // One nav, one order: the user's tab order drives BOTH the bar and the
+  // menu. Order persists client-side; the repair rule on load (drop unknown
+  // ids/dupes, append missing in default order) means a future release that
+  // adds a tab SURFACES it instead of a stale saved order hiding it.
+  const TAB_DEFS = [
+    { id: 'spots',    menuLabel: 'Spots' },
+    { id: 'map',      menuLabel: 'Map' },
+    { id: 'log',      menuLabel: 'Log' },
+    { id: 'logbook',  menuLabel: 'Logbook' },
+    { id: 'activate', menuLabel: 'Activate' },
+    { id: 'ft8',      menuLabel: 'FT8 / Digital' },
+    { id: 'dir',      menuLabel: 'Directory' },
+    { id: 'sstv',     menuLabel: 'SSTV' },
+  ];
+  const TAB_ORDER_KEY = 'echocat-tab-order';
+  const NAV_MODE_KEY = 'echocat-hamburger';
+  const menuBtn = document.getElementById('menu-btn');
+  const tabMenuPanel = document.getElementById('tab-menu-panel');
+
+  function normalizeTabOrder(saved) {
+    const known = TAB_DEFS.map((t) => t.id);
+    const out = [];
+    if (Array.isArray(saved)) {
+      for (const id of saved) {
+        if (known.includes(id) && !out.includes(id)) out.push(id);
+      }
+    }
+    for (const id of known) if (!out.includes(id)) out.push(id);
+    return out;
+  }
+
+  function loadTabOrder() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(TAB_ORDER_KEY) || 'null'); } catch {}
+    return normalizeTabOrder(saved);
+  }
+
+  function saveTabOrder(order) {
+    try { localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order)); } catch {}
+  }
+
+  /** Reorder the tab BAR buttons to match — one order drives both surfaces. */
+  function applyTabOrder(order) {
+    for (const id of order) {
+      const btn = tabBar.querySelector('.tab[data-tab="' + id + '"]');
+      if (btn) tabBar.appendChild(btn);
+    }
+  }
+
+  function navMenuEnabled() {
+    try { return localStorage.getItem(NAV_MODE_KEY) === '1'; } catch { return false; }
+  }
+
+  function applyNavMode() {
+    const menuMode = navMenuEnabled();
+    if (menuBtn) menuBtn.classList.toggle('hidden', !menuMode);
+    // Only hide the bar when authenticated UI is visible; auth reveal calls
+    // this again so the setting wins after connect too.
+    if (menuMode) tabBar.classList.add('hidden');
+    else if (!mainUI.classList.contains('hidden')) tabBar.classList.remove('hidden');
+    const tabsBtn = document.getElementById('so-nav-tabs');
+    const menuModeBtn = document.getElementById('so-nav-menu');
+    if (tabsBtn) tabsBtn.classList.toggle('active', !menuMode);
+    if (menuModeBtn) menuModeBtn.classList.toggle('active', menuMode);
+    if (!menuMode && tabMenuPanel) tabMenuPanel.classList.add('hidden');
+  }
+
+  function renderTabMenu() {
+    if (!tabMenuPanel) return;
+    const order = loadTabOrder();
+    applyTabOrder(order);
+    tabMenuPanel.innerHTML = '';
+    const dirHidden = (() => { const b = document.getElementById('dir-tab-btn'); return b ? b.classList.contains('hidden') : true; })();
+    order.forEach((id, i) => {
+      const def = TAB_DEFS.find((t) => t.id === id);
+      if (!def) return;
+      if (id === 'dir' && dirHidden) return; // same gating as the bar
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:2px;';
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.style.cssText = 'flex:1;text-align:left;background:none;border:none;color:var(--text);font-size:14px;padding:9px 10px;cursor:pointer;border-radius:6px;';
+      item.textContent = def.menuLabel;
+      if (typeof activeTab !== 'undefined' && activeTab === id) item.style.fontWeight = '700';
+      item.addEventListener('click', () => {
+        tabMenuPanel.classList.add('hidden');
+        switchTab(id);
+      });
+      row.appendChild(item);
+      // Reorder handles — the persisted order drives bar AND menu.
+      const mk = (glyph, delta, title) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.title = title;
+        b.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:12px;padding:6px;cursor:pointer;';
+        b.textContent = glyph;
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const ord = loadTabOrder();
+          const from = ord.indexOf(id);
+          const to = from + delta;
+          if (from < 0 || to < 0 || to >= ord.length) return;
+          ord.splice(from, 1);
+          ord.splice(to, 0, id);
+          saveTabOrder(ord);
+          renderTabMenu();
+        });
+        return b;
+      };
+      row.appendChild(mk('▲', -1, 'Move up'));
+      row.appendChild(mk('▼', 1, 'Move down'));
+      tabMenuPanel.appendChild(row);
+    });
+  }
+
+  if (menuBtn) menuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (tabMenuPanel.classList.contains('hidden')) {
+      renderTabMenu();
+      tabMenuPanel.classList.remove('hidden');
+    } else {
+      tabMenuPanel.classList.add('hidden');
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (tabMenuPanel && !tabMenuPanel.classList.contains('hidden') &&
+        !tabMenuPanel.contains(e.target) && e.target !== menuBtn) {
+      tabMenuPanel.classList.add('hidden');
+    }
+  });
+
+  const soNavTabs = document.getElementById('so-nav-tabs');
+  const soNavMenu = document.getElementById('so-nav-menu');
+  if (soNavTabs) soNavTabs.addEventListener('click', () => {
+    try { localStorage.setItem(NAV_MODE_KEY, '0'); } catch {}
+    applyNavMode();
+  });
+  if (soNavMenu) soNavMenu.addEventListener('click', () => {
+    try { localStorage.setItem(NAV_MODE_KEY, '1'); } catch {}
+    applyNavMode();
+  });
+  // Apply the persisted order to the bar at load + reflect the nav setting.
+  applyTabOrder(loadTabOrder());
+  applyNavMode();
 
   // --- CW Keyer ---
   function updateCwPanelVisibility() {
