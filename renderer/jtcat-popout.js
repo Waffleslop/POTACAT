@@ -3412,6 +3412,7 @@ function _applyPopoutTheme(payload) {
   var WF_SILENCE_FLOOR = 2;    // max byte magnitude still treated as silence
   var wfLastSignalTs = 0;      // last frame with passband energy above floor
   var wfSilentShown = false;   // overlay currently visible
+  var wfSilentCause = '';      // 'gain' | 'silent' — which text the overlay carries
   function setWfSilentOverlay(on) {
     if (jpWfSilentEl) jpWfSilentEl.classList.toggle('show', !!on);
   }
@@ -3427,20 +3428,39 @@ function _applyPopoutTheme(payload) {
       var nyquist = (popoutAudioCtx ? popoutAudioCtx.sampleRate : 12000) / 2;
       var passbandBins = Math.floor(3000 / nyquist * freqData.length);
 
-      // RX-silent watchdog (Flex only) — see notes above popoutWaterfallLoop.
-      if (popoutIsFlex && !transmitting && popoutRxGainLevel > 0.001) {
+      // RX gain at 0 — the analyser (and, on device-audio paths, the capture
+      // worklet feeding the decoder) sits DOWNSTREAM of popoutRxGainNode, so
+      // a zeroed slider makes the waterfall deterministically black no matter
+      // what the radio sends. This exact case used to be EXCUSED by the
+      // watchdog below ("user muted on purpose") and cost a full night of
+      // DAX-routing archaeology while the fault was the slider (K3SBP
+      // 2026-07-18). Name the slider instead of staying quiet. Any source,
+      // any TX state — the message is statically true.
+      if (popoutRxGainLevel <= 0.001) {
+        if (!wfSilentShown || wfSilentCause !== 'gain') {
+          if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>Waterfall muted — RX gain is at 0</strong><span>drag the RX slider up to bring it back</span>';
+          wfSilentCause = 'gain';
+          setWfSilentOverlay(true); wfSilentShown = true;
+        }
+        wfLastSignalTs = Date.now(); // fresh window once the slider comes back up
+      } else if (popoutIsFlex && !transmitting) {
+        // RX-silent watchdog (Flex only) — see notes above popoutWaterfallLoop.
         var wfMax = 0;
         for (var pb = 0; pb < passbandBins; pb++) { if (freqData[pb] > wfMax) wfMax = freqData[pb]; }
         var wfNow = Date.now();
         if (wfMax > WF_SILENCE_FLOOR) {
           wfLastSignalTs = wfNow;
           if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
-        } else if (!wfSilentShown && (wfNow - wfLastSignalTs) > WF_SILENCE_MS) {
+        } else if ((!wfSilentShown || wfSilentCause !== 'silent') && (wfNow - wfLastSignalTs) > WF_SILENCE_MS) {
+          // Restore the default DAX text — the overlay may carry gain/stall
+          // wording from an earlier cause.
+          if (jpWfSilentEl) jpWfSilentEl.innerHTML = '<strong>RX audio silent — check DAX routing</strong><span>slice may not be on POTACAT\'s DAX RX channel</span>';
+          wfSilentCause = 'silent';
           setWfSilentOverlay(true); wfSilentShown = true;
         }
       } else {
-        // Not applicable (non-Flex, transmitting, or muted): no verdict. Clear
-        // any warning and reset the clock so a fresh window is measured when we
+        // Not applicable (non-Flex or transmitting): no verdict. Clear any
+        // warning and reset the clock so a fresh window is measured when we
         // requalify (e.g. the moment TX ends).
         wfLastSignalTs = Date.now();
         if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }

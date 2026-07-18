@@ -275,7 +275,8 @@
 
     /* Waterfall */
     .jp-waterfall { width: 100%; height: 80px; image-rendering: pixelated; cursor: crosshair; flex-shrink: 0; border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); display: block; }
-    /* RX-silent overlay (Flex-only; toggled by .show from jtcat-popout.js) */
+    /* RX-silent overlay (toggled by .show from jtcat-popout.js; text set per
+       cause — DAX-silent is Flex-only, RX-gain-at-0 fires on any source) */
     #jp-wf-silent { display: none; position: absolute; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center; background: rgba(24, 12, 0, 0.74); pointer-events: none; z-index: 3; }
     #jp-wf-silent.show { display: flex; }
     #jp-wf-silent strong { color: #f0a500; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; text-shadow: 0 1px 2px #000; }
@@ -509,7 +510,8 @@
   <div id="jp-wf-single" style="position:relative;flex-shrink:0;">
     <canvas id="jp-waterfall" class="jp-waterfall" width="600" height="80"></canvas>
     <div id="jp-wf-tx-marker" style="position:absolute;top:0;bottom:0;width:1px;background:#ff2222;box-shadow:-1px 0 0 #000, 1px 0 0 #000;pointer-events:none;left:50%;"></div>
-    <!-- Flex-only: shown by jtcat-popout.js when the DAX RX stream reads silent -->
+    <!-- Shown by jtcat-popout.js when the DAX RX stream reads silent (Flex) or
+         the RX gain slider is at 0 (any source); text rewritten per cause -->
     <div id="jp-wf-silent"><strong>RX audio silent — check DAX routing</strong><span>slice may not be on POTACAT's DAX RX channel</span></div>
   </div>
   <!-- Side-by-side waterfalls (multi-slice mode) -->
