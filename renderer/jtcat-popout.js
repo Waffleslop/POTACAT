@@ -2992,11 +2992,33 @@ function _applyPopoutTheme(payload) {
   var popoutVita49Dest = null;
   var popoutVita49Node = null;
 
+  // Frame-path diagnostics (K3SBP 2026-07-18 blank-waterfall hunt): the
+  // frame crosses the contextBridge here — the ONE difference from the
+  // isolation harness that painted fine. Log the first consumed frame, and
+  // if frames are being REJECTED for ~2s straight (400 frames), log WHY —
+  // node missing vs a bridge-mangled pcm payload.
+  var _vitaConsumedLogged = false;
+  var _vitaRejectCount = 0;
   if (window.api.onJtcatVita49Audio) {
     window.api.onJtcatVita49Audio(function (frame) {
       // Return false so the preload acks immediately when this window
       // isn't the live consumer — see preload-jtcat-popout.js.
-      if (!popoutVita49Node || !frame || !frame.pcm || !frame.pcm.length) return false;
+      if (!popoutVita49Node || !frame || !frame.pcm || !frame.pcm.length) {
+        _vitaRejectCount++;
+        if (_vitaRejectCount === 400 && window.api.jtcatLog) {
+          var t = frame && frame.pcm ? Object.prototype.toString.call(frame.pcm) : '(missing)';
+          window.api.jtcatLog('[JTCAT popout] VITA frames REJECTED for ~2s: node=' + !!popoutVita49Node +
+            ' pcmType=' + t + ' len=' + (frame && frame.pcm ? frame.pcm.length : 'n/a') +
+            ' — the waterfall is starving at the frame handler.');
+        }
+        return false;
+      }
+      _vitaRejectCount = 0;
+      if (!_vitaConsumedLogged && window.api.jtcatLog) {
+        _vitaConsumedLogged = true;
+        window.api.jtcatLog('[JTCAT popout] First VITA frame consumed: ' +
+          Object.prototype.toString.call(frame.pcm) + ' len=' + frame.pcm.length + ' — feeding the waterfall');
+      }
       if (popoutVita49Ctx && popoutVita49Ctx.state === 'suspended') popoutVita49Ctx.resume().catch(function () {});
       var pcm = (frame.pcm instanceof Float32Array) ? frame.pcm : new Float32Array(frame.pcm);
       popoutVita49Node.port.postMessage(pcm);
