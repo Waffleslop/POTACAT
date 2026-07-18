@@ -4469,11 +4469,51 @@ function spawnMercury() {
     }
     mercuryProc = proc;
 
+    // Flood guard + dead-device breaker (K3SBP 2026-07-18): with SmartSDR
+    // 4.2.18+ (DAXv2) the DAX Windows endpoints are DELETED the moment the
+    // DAX app closes — taking Mercury's capture device with them. Mercury's
+    // ffaudio loop then spins AUDCLNT_E_DEVICE_INVALIDATED at hundreds of
+    // lines/sec, which this relay used to pump straight into the CAT log
+    // (log flood + CPU burn, forever). Now: identical consecutive lines
+    // collapse into a periodic "repeated xN" summary, and a device-
+    // invalidated error stops Mercury once with ONE actionable line.
+    let _mLastLine = '';
+    let _mRepeat = 0;
+    let _mLastFlushMs = 0;
+    let _mDeviceDead = false;
     proc.stderr.on('data', (chunk) => {
       const text = chunk.toString();
       mercuryStderr += text;
       if (mercuryStderr.length > 4096) mercuryStderr = mercuryStderr.slice(-4096);
-      text.split('\n').filter(Boolean).forEach((line) => sendCatLog(`[Mercury] ${line}`));
+      for (const line of text.split('\n').filter(Boolean)) {
+        if (_mDeviceDead) return; // draining a dying process — stay quiet
+        if (/AUDCLNT_E_DEVICE_INVALIDATED/.test(line)) {
+          _mDeviceDead = true;
+          sendCatLog('[Mercury] Audio device disappeared (AUDCLNT_E_DEVICE_INVALIDATED) — ' +
+            'SmartSDR 4.2.18+ (DAXv2) deletes the DAX Windows devices when the DAX app closes, ' +
+            'taking Mercury\'s capture device with it. Stopping Mercury. To use it again: keep DAX ' +
+            'running, or re-pick Mercury\'s audio devices in Settings > Station > Mercury, then re-enable.');
+          try { proc.kill(); } catch {}
+          return;
+        }
+        if (line === _mLastLine) {
+          _mRepeat++;
+          const now = Date.now();
+          if (now - _mLastFlushMs >= 5000) {
+            sendCatLog(`[Mercury] (last line repeated ${_mRepeat} more times)`);
+            _mLastFlushMs = now;
+            _mRepeat = 0;
+          }
+          continue;
+        }
+        if (_mRepeat > 0) {
+          sendCatLog(`[Mercury] (last line repeated ${_mRepeat} more times)`);
+          _mRepeat = 0;
+        }
+        _mLastLine = line;
+        _mLastFlushMs = Date.now();
+        sendCatLog(`[Mercury] ${line}`);
+      }
     });
 
     let settled = false;
