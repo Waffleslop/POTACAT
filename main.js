@@ -1174,6 +1174,70 @@ let _currentSwr = 0;
 // shortly after TX stops (frames only flow while transmitting).
 let _currentSwrRatio = 0;
 let _swrRatioClearTimer = null;
+// ─── SWR guard (K3SBP 2026-07-17) ───────────────────────────────────────────
+// The Flex protects ITSELF from a bad match by folding back power — it never
+// refuses to key (K3SBP measured a real 46:1 pre-ATU while the 8600 happily
+// transmitted). This guard is the operator-side complement: abort a
+// transmission whose live SWR sustains above the limit, then LATCH — refuse
+// new TX until something plausibly changed the match (ATU run, band change,
+// or explicit override). SWR is only measurable DURING TX, so there is
+// deliberately no pre-TX prediction from stale readings.
+let _swrTripped = false;
+let _swrTrippedBand = '';       // band at trip time — leaving it clears the latch
+let _swrGuardHits = 0;          // consecutive over-limit frames (debounce = 3)
+let _swrGuardSuppressUntil = 0; // no tripping during/just after an ATU tune
+
+function swrGuardMax() {
+  const v = parseFloat(settings.swrGuardMax);
+  return (Number.isFinite(v) && v >= 1.5 && v <= 10) ? v : 3.0;
+}
+
+function clearSwrTrip(reason) {
+  if (!_swrTripped) return;
+  _swrTripped = false;
+  _swrTrippedBand = '';
+  _swrGuardHits = 0;
+  sendCatLog(`[SWR GUARD] TX re-enabled (${reason}).`);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: `TX re-enabled — SWR guard reset (${reason})`, duration: 5000 });
+  }
+}
+
+// An ATU tune transmits its own carrier through the WORST of the match while
+// fixing it — never trip on those frames, and treat the tune itself as the
+// "match plausibly changed" event that clears an existing latch.
+function noteAtuTuneStarted() {
+  _swrGuardSuppressUntil = Date.now() + 30000;
+  clearSwrTrip('ATU tune');
+}
+
+function tripSwrGuard(swr) {
+  if (_swrTripped) return;
+  _swrTripped = true;
+  _swrGuardHits = 0;
+  _swrTrippedBand = _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
+  const msg = `TX aborted — SWR ${swr.toFixed(1)}:1 exceeded the ${swrGuardMax().toFixed(1)}:1 limit. Run the ATU or change bands to re-enable TX (or turn off the SWR guard in Settings > My Rigs).`;
+  sendCatLog('[SWR GUARD] ' + msg);
+  // Kill whatever is transmitting, through the normal teardown paths.
+  if (jtcatTuneState.active) stopJtcatTune();
+  if (jtcatFullAutoCq) stopFullAutoCq('SWR guard tripped');
+  if (ft8Engine) {
+    ft8Engine._txEnabled = false;
+    try { if (ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+  }
+  handleRemotePtt(false);
+  if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
+  }
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+  }
+  // Mobile devices render tune-blocked as a visible error — reuse it.
+  if (remoteServer && remoteServer.running) {
+    remoteServer.sendToClient({ type: 'tune-blocked', reason: msg });
+  }
+}
 let _currentAlc = 0;
 let _currentPower = 0; // live wattmeter reading from the rig (during TX)
 let _currentAtuState = false;
@@ -1746,6 +1810,13 @@ function sendCatFrequency(hz) {
   if (hz > 0 && hz < 100000) {
     console.warn(`[CAT] Ignoring suspicious frequency: ${hz} Hz (below 100 kHz)`);
     return;
+  }
+  // SWR-guard latch: leaving the band it tripped on plausibly changes the
+  // match (different antenna/resonance) — re-enable TX. Single sink for every
+  // frequency source (tune, knob, scan, remote), so no per-path hooks needed.
+  if (_swrTripped && _swrTrippedBand && hz > 0) {
+    const b = freqToBand(hz / 1e6);
+    if (b && b !== _swrTrippedBand) clearSwrTrip('band change');
   }
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
@@ -7473,6 +7544,13 @@ function startJtcat(mode) {
       try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
       return;
     }
+    // SWR-guard latch: a prior transmission tripped the over-SWR abort and
+    // nothing has plausibly fixed the match yet (no ATU run / band change).
+    if (_swrTripped) {
+      sendCatLog('[JTCAT] TX blocked — SWR guard tripped. Run the ATU or change bands to re-enable TX.');
+      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      return;
+    }
     // Wrong-band TX guard (KF0U 2026-07-17): if the rig's reported dial no
     // longer matches the dial JTCAT tuned — a spots-table click QSY'd it, a
     // scan moved it, or the operator turned the knob — keying now would
@@ -7815,6 +7893,11 @@ function _stopDirectTuneTone() {
 
 function startJtcatTune() {
   if (jtcatTuneState.active) return;
+  if (_swrTripped) {
+    sendCatLog('[SWR GUARD] Tune blocked — SWR guard tripped. Run the ATU or change bands first.');
+    broadcastJtcatTuneState();
+    return;
+  }
   const directIcomReady = settings.audioSource === 'icom-network' &&
                           ICOM_NETWORK_TX_AUDIO_ENABLED &&
                           _icomNetworkTransport &&
@@ -7991,6 +8074,16 @@ function connectSmartSdr() {
   disconnectSmartSdr();
   if (!needsSmartSdr()) return;
   smartSdr = new SmartSdrClient();
+  // SWR-guard hook: every ATU tune start (any call site, incl. future ones)
+  // must suppress the guard while the ATU's own carrier sweeps the bad match,
+  // and counts as the "match plausibly changed" event that clears a latch.
+  {
+    const _origSetAtu = smartSdr.setAtu.bind(smartSdr);
+    smartSdr.setAtu = (on) => {
+      if (on) noteAtuTuneStarted();
+      return _origSetAtu(on);
+    };
+  }
   let _sdrErrorLogged = false;
   smartSdr.on('error', (err) => {
     console.error('SmartSDR:', err.message);
@@ -8104,6 +8197,19 @@ function connectSmartSdr() {
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: swr });
+    // SWR guard: these frames only flow during TX (src=TX- bridge meter), so
+    // a sustained over-limit value here means we are RIGHT NOW transmitting
+    // into a bad match. 3-frame debounce rides out ATU-settling spikes;
+    // suppressed entirely during/just after an ATU tune (see
+    // noteAtuTuneStarted). Values are the radio's own bridge, raw/128 — a
+    // true ratio, not a scaled meter.
+    if (settings.swrGuard !== false && !_swrTripped && Date.now() > _swrGuardSuppressUntil) {
+      if (swr > swrGuardMax()) {
+        if (++_swrGuardHits >= 3) tripSwrGuard(swr);
+      } else {
+        _swrGuardHits = 0;
+      }
+    }
     // Track for the status snapshot (mobile desktop-ask meter-scale-and-
     // flex-swr-snapshot.md): a phone connecting mid-session should see SWR
     // without waiting for the next meter frame. Flex SWR is only meaningful
@@ -13501,6 +13607,15 @@ let _ssbFreqBeforePtt = 0;    // dial freq saved at swap time — restore re-anc
 let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
 
 function handleRemotePtt(state, opts = {}) {
+  // SWR-guard latch backstop — covers every PTT source (voice macros, mobile
+  // device PTT, naked PTT) in one place. Releases (state=false) always pass.
+  if (state && _swrTripped) {
+    sendCatLog('[SWR GUARD] PTT blocked — SWR guard tripped. Run the ATU or change bands to re-enable TX.');
+    if (remoteServer && remoteServer.running) {
+      remoteServer.sendToClient({ type: 'tune-blocked', reason: 'PTT blocked — SWR guard tripped. Run the ATU or change bands on the desktop.' });
+    }
+    return;
+  }
   const target = settings.catTarget;
   const isFlexRig = target && target.type === 'tcp';
 
@@ -23506,6 +23621,10 @@ app.whenReady().then(() => {
         + `filt=${_currentFilterWidth} (flexApi=${smartSdr && smartSdr.connected ? 1 : 0})`);
     }
   };
+  // Operator override for the SWR-guard latch ("TX anyway" — their station,
+  // their call). Clears the latch without an ATU run or band change.
+  ipcMain.on('swr-guard-override', () => clearSwrTrip('operator override'));
+
   ipcMain.handle('rig-control', (_e, data) => {
     // Remote-client mode: forward to the shack as the same 'rig-control' C2S
     // the phone uses — its applyRigControl runs there. Covers every DSP /

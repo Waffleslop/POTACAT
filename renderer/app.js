@@ -1200,6 +1200,8 @@ const setRemoteCwEnabled = document.getElementById('set-remote-cw-enabled');
 const setRemoteStun = document.getElementById('set-remote-stun');
 const setAudioSource = document.getElementById('set-audio-source');
 const setFlexOnboardSpeaker = document.getElementById('set-flex-onboard-speaker');
+const setSwrGuard = document.getElementById('set-swr-guard');
+const setSwrGuardMax = document.getElementById('set-swr-guard-max');
 const setFlexMultiflex = document.getElementById('set-flex-multiflex');
 const setTxEqEnabled = document.getElementById('set-tx-eq-enabled');
 const setTxEqPreset = document.getElementById('set-tx-eq-preset');
@@ -14240,6 +14242,8 @@ async function openSettingsDialog(tab) {
   if (setFlexOnboardSpeaker) {
     setFlexOnboardSpeaker.checked = s.flexOnboardSpeaker === true; // default off: quiet radio, listen on the PC (DAX still flows)
   }
+  if (setSwrGuard) setSwrGuard.checked = s.swrGuard !== false; // default on
+  if (setSwrGuardMax) setSwrGuardMax.value = (typeof s.swrGuardMax === 'number' && s.swrGuardMax >= 1.5) ? s.swrGuardMax : 3;
   // TX EQ — load saved state into the Settings dialog. Live updates go
   // through window.api.setTxEq() so toggling the checkbox / dropdown
   // doesn't require reopening Settings or clicking Save.
@@ -14722,6 +14726,8 @@ settingsSave.addEventListener('click', async () => {
   // the select can't be trusted here: it reflects the last rig opened in the
   // editor (or the static default), not necessarily the active rig.
   const flexOnboardSpeakerVal = setFlexOnboardSpeaker ? setFlexOnboardSpeaker.checked : false;
+  const swrGuardVal = setSwrGuard ? setSwrGuard.checked : true;
+  const swrGuardMaxVal = setSwrGuardMax ? Math.min(10, Math.max(1.5, parseFloat(setSwrGuardMax.value) || 3)) : 3;
   const flexMultiflexVal = setFlexMultiflex ? setFlexMultiflex.checked : true;
   const cwKeyPortVal = setCwKeyPort.value || '';
   const launcherEnabled = setEnableLauncher ? setEnableLauncher.checked : false;
@@ -14973,6 +14979,8 @@ settingsSave.addEventListener('click', async () => {
     ...(audioSourceVal !== undefined ? { audioSource: audioSourceVal } : {}),
     flexOnboardSpeaker: flexOnboardSpeakerVal,
     flexMultiflex: flexMultiflexVal,
+    swrGuard: swrGuardVal,
+    swrGuardMax: swrGuardMaxVal,
     cwKeyPort: cwKeyPortVal,
     enableLauncher: launcherEnabled,
     remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',

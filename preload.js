@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('api', {
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.
   onAppNotice: (cb) => ipcRenderer.on('app-notice', (_e, data) => cb(data)),
+  // SWR-guard latch override ("TX anyway") — clears the tripped state.
+  swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),
   onSmartSdrReachable: (cb) => ipcRenderer.on('smartsdr-reachable', () => cb()),
   onExternalAtuStart: (cb) => ipcRenderer.on('external-atu-start', (_e, d) => cb(d)),

@@ -1585,6 +1585,11 @@
             <input type="checkbox" id="set-flex-onboard-speaker"> Play RX audio on the radio's built-in speaker
           </label>
           <span class="help-text" style="display:block;margin-bottom:6px;">Off by default. When POTACAT runs the radio with no SmartSDR open (Flex Direct), the tuned slice is kept silent on the radio's own speaker (slice audio level 0) so you can listen on the computer (VFO popout speaker button) without the radio blaring. Check this to play the band on the 8400/8600's built-in speaker instead. Either way DAX RX (PC monitor + JTCAT/SSTV) keeps full audio &mdash; POTACAT no longer mutes the slice, which on 4.2.x firmware also killed DAX.</span>
+          <label class="checkbox-label" style="margin-top:10px;">
+            <input type="checkbox" id="set-swr-guard" checked> SWR guard &mdash; abort TX into a bad match
+            <span style="margin-left:8px;">Max SWR: <input type="number" id="set-swr-guard-max" min="1.5" max="10" step="0.5" value="3" style="width:56px;"></span>
+          </label>
+          <span class="help-text" style="display:block;margin-bottom:6px;">The Flex protects itself from high SWR by folding back power &mdash; it never refuses to key, so a bad match just burns a transmission into heat. With the guard on, POTACAT watches the radio's own TX bridge and aborts any transmission whose SWR stays above the limit (3 consecutive readings), then blocks new TX until you run the ATU or change bands. Never trips during an ATU tune.</span>
           <label class="checkbox-label" style="margin-top:6px;">
             <input type="checkbox" id="set-smartsdr-spots"> Show spots on the panadapter
           </label>
