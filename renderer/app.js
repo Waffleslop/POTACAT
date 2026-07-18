@@ -17488,7 +17488,12 @@ window.api.onWsjtxQsoLogged((qso) => {
 
 // WSJT-X QSO logged while in activator mode — add to activator contact list
 window.api.onWsjtxActivatorQso((contact) => {
-  if (appMode !== 'activator' || !activationActive) return;
+  // Gate on the ACTIVATION being active — never on appMode (the view). W7RTA
+  // 2026-07-18: pressing "← Hunter" to work JTCAT flipped the view while the
+  // activation kept running, and this gate silently dropped every FT8 QSO
+  // from the activation list. The list renders fine into the hidden view;
+  // it's current when the operator returns.
+  if (!activationActive) return;
   activatorContacts.push(contact);
   renderActivatorLog();
   updateActivatorCounter();
@@ -22176,6 +22181,12 @@ function resumeActivation(activation) {
 /** Common activation start logic (used by start, continue, and resume) */
 function beginActivation() {
   activationActive = true;
+  // Tell MAIN the activation is running (W7RTA 2026-07-18): the JTCAT/WSJT-X
+  // auto-log paths gate park-stamping + activation-list pushes in main, which
+  // previously keyed off settings.appMode — the VIEW — so pressing "← Hunter"
+  // to go work FT8 silently dropped every QSO from the activation. The
+  // activation state must survive leaving the screen.
+  window.api.saveSettings({ activationActive: true });
   activationStartTime = Date.now();
   updateActivationUi();
   updateActivatorCounter();
@@ -22190,6 +22201,7 @@ function beginActivation() {
 /** Stop the current activation */
 function stopActivation() {
   activationActive = false;
+  window.api.saveSettings({ activationActive: false });
   if (activationTimerInterval) {
     clearInterval(activationTimerInterval);
     activationTimerInterval = null;

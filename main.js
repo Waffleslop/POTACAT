@@ -801,6 +801,22 @@ function loadAllProfilePairedDevices() {
       }
     } catch { /* corrupt profile dir — skip */ }
   }
+  // ALSO merge the ROOT settings.json rows (W7RTA "pairing revoked after
+  // updates", 2026-07-18): when the activeProfile pointer is momentarily
+  // lost (the ad65f71 drift class — restarts/updates are the window), a
+  // fresh pairing gets grouped under '' and saved to ROOT settings, which
+  // this loader never read — so the next boot silently forgot the device
+  // and the phone's auth came back "revoked". Reading root here resurrects
+  // any stranded pairings without re-pairing.
+  try {
+    const rootSettings = _readJsonSafe(SETTINGS_PATH, {});
+    const rootDevices = Array.isArray(rootSettings.pairedDevices) ? rootSettings.pairedDevices : [];
+    for (const dev of rootDevices) {
+      if (!dev || !dev.id || seen.has(dev.id)) continue;
+      seen.add(dev.id);
+      merged.push(dev);
+    }
+  } catch { /* unreadable root settings — profile rows still loaded */ }
   return merged;
 }
 
@@ -2730,8 +2746,17 @@ async function ensureCloudDeviceRegistered(reason) {
 
   try {
     await sync.registerDevice(payload);
+    // Include the ACCOUNT identity (masked) — the directory is account-scoped,
+    // so "my mobile device can't see my shack" triage always starts with
+    // "are both devices on the same account?" (W7RTA 2026-07-18: signed into
+    // different/no account on the tablet looked identical to a desktop bug).
+    const _acctEmail = String(settings.cloudEmail || '');
+    const _acctMasked = _acctEmail
+      ? _acctEmail.replace(/^(.{2})[^@]*(@.*)$/, '$1***$2')
+      : '(no email on file)';
     sendCatLog(`[cloud-devices] registered as ${payload.type} (${settings.cloudDeviceId})`
       + (payload.type === 'shack' ? ` hosts: lan=${payload.lanHost ? 'yes' : 'no'} ts=${payload.tsHost ? 'yes' : 'no'} cloud=${payload.cloudHost ? 'yes' : 'no'}` : '')
+      + ` account=${_acctMasked}`
       + (reason ? ` [${reason}]` : ''));
     _cloudDeviceLastType = payload.type;
     _cloudDeviceLastPayloadJson = payloadJson;
@@ -5661,9 +5686,11 @@ function connectWsjtx() {
         operator: f.OPERATOR || settings.myCallsign || '',
       };
 
-      // In activator mode, inject MY_SIG fields for each park ref (cross-product)
+      // In activator mode, inject MY_SIG fields for each park ref (cross-
+      // product). Same gate as jtcatAutoLog: activation RUNNING or the legacy
+      // appMode view check — never view-only (W7RTA 2026-07-18).
       const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
-      if (settings.appMode === 'activator' && parkRefs.length > 0) {
+      if ((settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0) {
         const allQsoData = [];
         for (let i = 0; i < parkRefs.length; i++) {
           const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
@@ -6704,9 +6731,15 @@ async function jtcatAutoLog(qso) {
   }
 
   try {
-    // Activation mode: add park refs so JTCAT QSOs log to the activation logbook
+    // Activation mode: add park refs so JTCAT QSOs log to the activation
+    // logbook. Gate on the activation RUNNING (settings.activationActive, set
+    // by the desktop's Start/Stop buttons) OR the legacy appMode check — the
+    // appMode-only gate dropped every QSO once the operator pressed
+    // "← Hunter" to open JTCAT, even though the activation was still active
+    // (W7RTA 2026-07-18). appMode stays as the OR-fallback because the
+    // mobile-device flow sets it without ever touching activationActive.
     const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
-    if (settings.appMode === 'activator' && parkRefs.length > 0) {
+    if ((settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0) {
       sendCatLog(`[JTCAT] Activation mode — logging to ${parkRefs.map(p => p.ref).join(', ')}`);
       for (let i = 0; i < parkRefs.length; i++) {
         const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
@@ -10937,7 +10970,11 @@ function connectRemote() {
   remoteServer.on('paired-devices-changed', () => {
     try {
       const allDevices = remoteServer.exportPairedDevices();
-      const activeCall = String((settings && settings.activeProfile) || '').toUpperCase();
+      // Fall back to myCallsign when the activeProfile pointer is empty/lost
+      // (ad65f71 drift class) so new pairings land in a profile file the
+      // loader reads, instead of being stranded under '' in root settings
+      // (the W7RTA "revoked after updates" mechanism).
+      const activeCall = String((settings && settings.activeProfile) || (settings && settings.myCallsign) || '').toUpperCase();
 
       // Group by profileCallsign; unstamped legacy devices fall back to active profile
       const byProfile = {};
@@ -10950,6 +10987,19 @@ function connectRemote() {
       // Save current profile's devices through the normal settings path
       settings.pairedDevices = byProfile[activeCall] || [];
       saveSettings(settings);
+      // Pointer-lost hardening: with activeProfile empty, `settings` IS the
+      // root file — also mirror the fallback profile's rows into its own
+      // profile file so the next healthy boot loads them from the normal path.
+      if (!(settings && settings.activeProfile) && activeCall && fs.existsSync(profileDir(activeCall))) {
+        try {
+          const pPath = profileSettingsPath(activeCall);
+          const pSettings = _readJsonSafe(pPath, {});
+          pSettings.pairedDevices = byProfile[activeCall] || [];
+          _writeJsonAtomic(pPath, pSettings);
+        } catch (err) {
+          console.error('[multi-op] pointer-lost paired-devices mirror failed:', err.message);
+        }
+      }
 
       // Save other profiles' devices directly to their profile settings files
       for (const [call, devices] of Object.entries(byProfile)) {
