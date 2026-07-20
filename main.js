@@ -12176,10 +12176,26 @@ function connectRemote() {
   });
 
   remoteServer.on('set-audio-device', ({ kind, deviceId }) => {
+    // remoteAudioInput/Output are SHARED with JTCAT's FT8 TX sink (the phone
+    // op's audio and FT8 tones both go to the rig CODEC). Windows virtual
+    // role devices ("default"/"communications") drift with the OS, so storing
+    // one here silently repointed JTCAT's TX audio off the radio and keyed
+    // 0-W carriers (KQ4MHD 2026-07-19). Refuse them — keep the last-good real
+    // endpoint — and tell the operator to pick the rig's named CODEC.
+    if (deviceId === 'default' || deviceId === 'communications') {
+      sendCatLog(`[Audio] Ignored ${kind} device "${deviceId}" — that is a Windows default-role endpoint, not a fixed device, and it can move off the radio (this keys the rig with no audio = 0 W out). Pick your rig's named USB CODEC instead.`);
+      return;
+    }
+    // Persist to the active rig too, so the choice survives a rig switch /
+    // restart (which re-mirror rig.remoteAudio* → the global settings) instead
+    // of the global and the rig's own copy silently diverging.
+    const activeRig = (settings.rigs || []).find((r) => r.id === settings.activeRigId);
     if (kind === 'input') {
       settings.remoteAudioInput = deviceId;
+      if (activeRig) activeRig.remoteAudioInput = deviceId;
     } else if (kind === 'output') {
       settings.remoteAudioOutput = deviceId;
+      if (activeRig) activeRig.remoteAudioOutput = deviceId;
     }
     saveSettings(settings);
     // Restart remote audio to apply new device (destroy, phone will re-initiate)

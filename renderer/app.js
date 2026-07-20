@@ -26307,6 +26307,20 @@ async function playJtcatTxAudio(data) {
         window.api.jtcatLog('[JTCAT TX] WARNING: setSinkId failed (' + sinkError + ') — FT8 audio is on system default, radio will NOT transmit. The saved device is stale or missing. Flex users: make sure the DAX program is running with TX1 mapped to your slice, then re-select the device in Settings.');
         return;
       }
+      // Windows virtual role devices ("default"/"communications", checked by
+      // raw id — the label prefix is localized) are a footgun as the FT8 TX
+      // sink: the OS can move the endpoint off the radio at any time, so the
+      // rig keys via CAT but gets no modulation and makes 0 W. This is how
+      // KQ4MHD's rig went silent after opening ECHOCAT (2026-07-19) — the
+      // shared remoteAudioOutput setting had been repointed to a role device.
+      // The set-audio-device handler now refuses to store these, but warn
+      // loudly here too so any other path (or a pre-fix saved value) is caught.
+      if (outputDeviceId === 'default' || outputDeviceId === 'communications') {
+        window.api.jtcatLog('[JTCAT TX] WARNING: FT8 TX audio output is the Windows "' + outputDeviceId +
+          '" role device, not a fixed radio CODEC — Windows can move this endpoint off the radio at any time ' +
+          '(opening ECHOCAT remote audio is one trigger), keying the rig with no modulation (0 W out). ' +
+          'Set Audio Output to your rig\'s named USB CODEC instead of Default/Communications.');
+      }
       _resolveTxDeviceLabel(outputDeviceId).then(function(r) {
         if (r.found) {
           window.api.jtcatLog('[JTCAT TX] Output device: ' + r.label);
