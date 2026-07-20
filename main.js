@@ -9944,6 +9944,11 @@ function updateRemoteSettings() {
 function ensureCwKeyPortLazyOpen() {
   if (!settings.cwKeyPort) return;
   if (cwKeyPort) return; // already open or in-flight; connectCwKeyPort sets this synchronously
+  // This port already ENOTTY'd this session: reopening can't ever succeed and
+  // the open itself blips DTR high (= a dit of RF per paddle element — the
+  // KM4CFT chirp loop). Text-send goes through pyserial; paddle stays
+  // disabled until a deliberate reconnect (settings change) re-tests.
+  if (_cwKeyPortIoctlLatched && _cwKeyPortPathForPython === settings.cwKeyPort) return;
   connectCwKeyPort();
 }
 
@@ -9964,6 +9969,10 @@ function connectCwKeyPort() {
   if (_cwKeyPortPathForPython && _cwKeyPortPathForPython !== portPath) {
     _cwKeyPortPathForPython = null;
   }
+  // Deliberate (non-lazy) reconnect: re-test the driver once. The lazy paddle
+  // path checks the latch BEFORE calling here, so it can't re-trip the chirp
+  // loop; a settings change or explicit reconnect legitimately retries.
+  _cwKeyPortIoctlLatched = false;
   if (!portPath) {
     _cwKeyPortPathForPython = null;
     return;
@@ -10026,10 +10035,22 @@ function connectCwKeyPort() {
             if (ioctlErr && !_ioctlUnsupported) {
               _ioctlUnsupported = true;
               _cwKeyPortPathForPython = portPath;
+              // Latch against LAZY reopens: each open glitches DTR high for
+              // 10-150ms before the drop runs — with per-paddle-element lazy
+              // reopens that WAS the RF the user heard ("radio is chirping",
+              // KM4CFT 2026-07-20: 13 open/fail/close cycles in 1.5s). A
+              // deliberate reconnect (settings change) still re-tests once.
+              _cwKeyPortIoctlLatched = true;
+              // Phone-side paddle must stop generating sidetone for keys that
+              // make no RF (and a TinyMIDI keyer must see the red banner) —
+              // same notification the main-CAT pin-unsupported path sends.
+              _setCwPaddleAvailability(false, 'key-port-tiocmset-unsupported');
               sendCatLog(`[CW Key Port] This driver doesn't honor TIOCMSET ("${err.message}") ` +
                 `— dropping DTR/RTS via Python helper, then closing the node-serialport handle. ` +
-                `CW text-send will use the Python pyserial path (requires python3 + pyserial — ` +
-                `install via pip or your distro's python3-pyserial package).`);
+                `Paddle keying on this port is DISABLED (each retry would blip the key line). ` +
+                `CW text-send still works via the Python pyserial path (requires python3 + pyserial — ` +
+                `Debian/Ubuntu: sudo apt install python3-serial; Fedora: sudo dnf install python3-pyserial; or: pip3 install pyserial). ` +
+                `For a real paddle, use an FTDI or CH340 USB-serial interface as the CW Key Port — those drivers honor the pin controls.`);
               // Drop DTR/RTS via pyserial (TIOCMBIS/BIC) BEFORE closing our
               // node-serialport handle. The kernel hupcl on close was racing
               // with the moment we needed DTR low — DA2PK reported the radio
@@ -10046,8 +10067,17 @@ function connectCwKeyPort() {
                 dropProc.stderr.on('data', (d) => { dropErr += d.toString(); });
                 dropProc.on('error', (e) => sendCatLog(`[CW Key Port] Python pin-drop spawn failed: ${e.code || e.message}`));
                 dropProc.on('exit', (code) => {
-                  if (code === 0) sendCatLog('[CW Key Port] DTR/RTS dropped via pyserial');
-                  else sendCatLog(`[CW Key Port] Python pin-drop exited code ${code}${dropErr ? ': ' + dropErr.split('\n')[0] : ''}`);
+                  if (code === 0) { sendCatLog('[CW Key Port] DTR/RTS dropped via pyserial'); return; }
+                  // Log the LAST line of the traceback — that's the actual
+                  // error (ModuleNotFoundError etc.). The first line is always
+                  // just "Traceback (most recent call last):", which is what
+                  // KM4CFT's log showed 13 times while telling us nothing.
+                  const _tbLines = dropErr.trim().split('\n').filter(Boolean);
+                  const _tbErr = _tbLines.length ? _tbLines[_tbLines.length - 1] : '';
+                  sendCatLog(`[CW Key Port] Python pin-drop exited code ${code}${_tbErr ? ': ' + _tbErr : ''}`);
+                  if (/ModuleNotFoundError|No module named/i.test(_tbErr)) {
+                    sendCatLog('[CW Key Port] pyserial is not installed. Debian/Ubuntu: sudo apt install python3-serial — Fedora: sudo dnf install python3-pyserial — Arch: sudo pacman -S python-pyserial — or: pip3 install pyserial. Then restart POTACAT.');
+                  }
                 });
               } catch (e) {
                 sendCatLog(`[CW Key Port] Python pin-drop threw: ${e.message}`);
@@ -10312,6 +10342,10 @@ let _cwDtrEndTimer = null;
 // pyserial uses TIOCMBIS/TIOCMBIC which the same driver accepts, so spawning
 // python3 -c "..." per message is a working escape hatch.
 let _cwKeyPortPathForPython = null;
+// True once the configured CW Key Port rejected TIOCMSET this session —
+// blocks the LAZY per-paddle-element reopen loop (each open blips DTR = RF
+// chirps). Reset by connectCwKeyPort (deliberate reconnects re-test once).
+let _cwKeyPortIoctlLatched = false;
 let _cwPythonProc = null;
 function sendCwTextViaPython(text, wpm) {
   if (!_cwKeyPortPathForPython) return false;
@@ -10366,7 +10400,7 @@ function sendCwTextViaPython(text, wpm) {
   _cwPythonProc.on('exit', (code) => {
     if (code !== 0) {
       const tip = /no module named serial|ModuleNotFoundError/i.test(stderr)
-        ? ' (pyserial not installed — try "pip install pyserial" or your distro\'s python3-pyserial package)'
+        ? ' (pyserial not installed — Debian/Ubuntu: sudo apt install python3-serial; Fedora: python3-pyserial; or: pip3 install pyserial)'
         : '';
       sendCatLog(`[CW] Python helper exited with code ${code}${tip}${stderr ? ': ' + stderr.split('\n')[0] : ''}`);
     }
