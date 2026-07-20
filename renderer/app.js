@@ -24692,6 +24692,8 @@ if (jtcatRxGainSlider) {
     var pct = parseInt(jtcatRxGainSlider.value, 10);
     jtcatRxGainVal.textContent = pct + '%';
     if (jtcatRxGainNode) jtcatRxGainNode.gain.value = pct / 100;
+    // Synced value — main persists it and mirrors to popout + ECHOCAT clients.
+    if (window.api.jtcatSetRxGain) window.api.jtcatSetRxGain(pct / 100);
   });
 }
 
@@ -24961,6 +24963,15 @@ if (jtcatFt8brCommentEl) {
 }
 // Hydrate from settings on load
 window.api.getSettings().then(function(s) {
+  // Seed the RX gain slider from the synced setting — the audio graph reads
+  // the slider's value when it builds (jtcatRxGainNode creation), so seeding
+  // the DOM early is sufficient.
+  if (typeof s.jtcatRxGain === 'number' && jtcatRxGainSlider) {
+    var rxPct = Math.round(s.jtcatRxGain * 100);
+    jtcatRxGainSlider.value = rxPct;
+    jtcatRxGainVal.textContent = rxPct + '%';
+    if (jtcatRxGainNode) jtcatRxGainNode.gain.value = s.jtcatRxGain;
+  }
   if (jtcatHoldTxFreqEl) jtcatHoldTxFreqEl.checked = !!s.jtcatHoldTxFreq;
   if (jtcatLateStartTxEl) jtcatLateStartTxEl.checked = s.jtcatLateStartTx !== false;
   if (jtcatApDecodeEl) jtcatApDecodeEl.checked = s.jtcatApDecode !== false;

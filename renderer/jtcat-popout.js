@@ -3026,22 +3026,45 @@ function _applyPopoutTheme(payload) {
     });
   }
 
-  // RX Gain slider — persisted in localStorage
+  // RX Gain slider — synced through main (settings.jtcatRxGain) so the main
+  // window and ECHOCAT clients see and control the SAME value. This slider at
+  // 0 is what blanked the waterfall on 2026-07-18 while nothing else could
+  // see it. localStorage stays as an early-boot seed + migration source from
+  // pre-sync builds; the settings value wins when present.
   var jpRxGain = document.getElementById('jp-rx-gain');
   var jpRxGainVal = document.getElementById('jp-rx-gain-val');
-  var savedRxPct = parseInt(localStorage.getItem('jtcat-rx-gain'), 10);
-  if (!isNaN(savedRxPct) && jpRxGain) {
-    jpRxGain.value = savedRxPct;
-    jpRxGainVal.textContent = savedRxPct + '%';
-    popoutRxGainLevel = savedRxPct / 100;
+  function jpApplyRxGainPct(pct, persistLocal) {
+    pct = Math.round(Number(pct));
+    if (!isFinite(pct)) return;
+    pct = Math.max(0, Math.min(100, pct));
+    if (jpRxGain) {
+      jpRxGain.value = pct;
+      jpRxGainVal.textContent = pct + '%';
+    }
+    popoutRxGainLevel = pct / 100;
+    if (popoutRxGainNode) popoutRxGainNode.gain.value = popoutRxGainLevel;
+    if (persistLocal) { try { localStorage.setItem('jtcat-rx-gain', pct); } catch (e) {} }
   }
+  var savedRxPct = parseInt(localStorage.getItem('jtcat-rx-gain'), 10);
+  if (!isNaN(savedRxPct)) jpApplyRxGainPct(savedRxPct, false);
+  window.api.getSettings().then(function (s) {
+    if (s && typeof s.jtcatRxGain === 'number') {
+      jpApplyRxGainPct(Math.round(s.jtcatRxGain * 100), true);
+    } else if (!isNaN(savedRxPct) && window.api.jtcatSetRxGain) {
+      // Pre-sync localStorage value — promote it to the synced setting once.
+      window.api.jtcatSetRxGain(savedRxPct / 100);
+    }
+  }).catch(function () {});
   if (jpRxGain) {
     jpRxGain.addEventListener('input', function() {
       var pct = parseInt(jpRxGain.value, 10);
-      jpRxGainVal.textContent = pct + '%';
-      popoutRxGainLevel = pct / 100;
-      if (popoutRxGainNode) popoutRxGainNode.gain.value = popoutRxGainLevel;
-      localStorage.setItem('jtcat-rx-gain', pct);
+      jpApplyRxGainPct(pct, true);
+      if (window.api.jtcatSetRxGain) window.api.jtcatSetRxGain(pct / 100);
+    });
+  }
+  if (window.api.onJtcatSetRxGain) {
+    window.api.onJtcatSetRxGain(function (level) {
+      jpApplyRxGainPct(Number(level) * 100, true);
     });
   }
 

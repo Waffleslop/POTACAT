@@ -466,6 +466,7 @@ const GLOBAL_KEYS = new Set([
   'windowState',       // window geometry
   'n1mmUdpPort',       // N1MM broadcast port
   'audioInputDeviceId', 'audioOutputDeviceId',  // OS audio device picks
+  'jtcatRxGain',       // JTCAT RX gain 0–1 — synced slider, machine audio property
   'mainMicDeviceId', 'mainPlaybackDeviceId',
   'echocatPort',       // ECHOCAT server port
   'echocatToken',      // ECHOCAT legacy single shared token (machine)
@@ -822,6 +823,28 @@ function loadAllProfilePairedDevices() {
 
 let settings = null;
 let win = null;
+
+// ── JTCAT RX gain — single source of truth (K3SBP 2026-07-20) ──────────────
+// The RX gain slider exists on THREE surfaces (main-window JTCAT view, the
+// popout, ECHOCAT clients) and used to be three unsynced localStorage values.
+// The popout's copy at 0 caused the 2026-07-18 blank-waterfall night, and the
+// phone could neither see it nor fix it. Every surface's change now lands
+// here: clamp → persist (debounced — sliders stream input events) → relay to
+// the other windows → echo jtcat-rx-gain-state to remote clients. The origin
+// surface is skipped so a dragging slider isn't fought by its own echo
+// (remote-server is single-client, so 'remote' origin = the dragger).
+let _jtcatRxGainSaveTimer = null;
+function applyJtcatRxGain(value, origin) {
+  let v = Number(value);
+  if (!Number.isFinite(v)) return;
+  v = Math.max(0, Math.min(1, v));
+  settings.jtcatRxGain = v;
+  clearTimeout(_jtcatRxGainSaveTimer);
+  _jtcatRxGainSaveTimer = setTimeout(() => { try { saveSettings(settings); } catch {} }, 1200);
+  if (origin !== 'main' && win && !win.isDestroyed()) win.webContents.send('jtcat-set-rx-gain', v);
+  if (origin !== 'popout' && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-set-rx-gain', v);
+  if (origin !== 'remote' && remoteServer) remoteServer.broadcastJtcatRxGainState({ value: v });
+}
 let popoutWin = null; // pop-out map window
 let qsoPopoutWin = null; // pop-out QSO log window
 let actmapPopoutWin = null; // pop-out activation map window
@@ -11249,6 +11272,10 @@ function connectRemote() {
     // Hold TX Freq state (K0OTC 2026-05-04). Persisted in settings so
     // reconnects show the same state.
     remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!settings.jtcatHoldTxFreq });
+    // RX gain — desktop-authoritative synced slider: hydrate so the client
+    // shows the shack's real value (a zeroed slider = blank waterfall) and
+    // never pushes its own stale copy.
+    remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1 });
     // VFO Profiles — send current list so phone's profiles widget can render
     // immediately. Phone edits push back via 'vfo-profiles-update'.
     remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
@@ -13220,7 +13247,7 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-rx-gain', ({ value }) => {
-    if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-rx-gain', value);
+    applyJtcatRxGain(value, 'remote');
   });
   remoteServer.on('jtcat-tx-gain', ({ value }) => {
     setJtcatDirectTxGainLevel(value);
@@ -26795,6 +26822,11 @@ app.whenReady().then(() => {
     setJtcatDirectTxGainLevel(level);
     // Relay TX gain from popout to main renderer
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', level);
+  });
+  // RX gain reports from either window's slider — synced everywhere else.
+  ipcMain.on('jtcat-set-rx-gain', (e, level) => {
+    const fromPopout = jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e.sender === jtcatPopoutWin.webContents;
+    applyJtcatRxGain(level, fromPopout ? 'popout' : 'main');
   });
   ipcMain.on('jtcat-auto-cq-mode', (_e, mode) => {
     jtcatAutoCqMode = mode || 'off';

@@ -428,6 +428,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetLateStartTx: (enabled) => ipcRenderer.send('jtcat-set-late-start-tx', !!enabled),
   jtcatSetApDecode: (enabled) => ipcRenderer.send('jtcat-set-ap-decode', !!enabled),
   jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),
+  jtcatSetRxGain: (level) => ipcRenderer.send('jtcat-set-rx-gain', level),
   jtcatEnableTx: (enabled) => ipcRenderer.send('jtcat-enable-tx', enabled),
   jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),
   jtcatTuneToggle: () => ipcRenderer.send('jtcat-tune-toggle'),

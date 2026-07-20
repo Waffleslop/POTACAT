@@ -1197,10 +1197,11 @@
         updateCwEnableBtn();
         // Load WebSDR stations from settings
         if (msg.settings && typeof kiwiLoadStationsE === 'function') kiwiLoadStationsE(msg.settings);
-        // Restore saved JTCAT gain levels to server
-        var restoredRx = parseInt(localStorage.getItem('echocat-ft8-rx-gain'), 10);
+        // Restore saved JTCAT TX gain to server (TX is not desktop-persisted).
+        // RX gain is DESKTOP-authoritative now — jtcat-rx-gain-state hydrates
+        // our slider at connect; pushing a stale local copy could re-blank the
+        // shack's waterfall (the 2026-07-18 incident, from the other side).
         var restoredTx = parseInt(localStorage.getItem('echocat-ft8-tx-gain'), 10);
-        if (!isNaN(restoredRx)) ft8Send({ type: 'jtcat-rx-gain', value: restoredRx / 100 });
         if (!isNaN(restoredTx)) ft8Send({ type: 'jtcat-tx-gain', value: (restoredTx / 100) * (restoredTx / 100) });
         break;
 
@@ -1642,6 +1643,23 @@
         break;
 
       // --- JTCAT (FT8/FT4) ---
+      case 'jtcat-rx-gain-state': {
+        // Desktop-authoritative synced RX gain — sent at connect and whenever
+        // any surface moves it. Our own drags aren't echoed back (the desktop
+        // skips the origin), so this can't fight the slider mid-drag.
+        var rgPct = Math.round(Number(msg.value) * 100);
+        if (isFinite(rgPct)) {
+          var rgEl = document.getElementById('ft8-rx-gain');
+          var rgVal = document.getElementById('ft8-rx-gain-val');
+          if (rgEl) {
+            rgEl.value = rgPct;
+            if (rgVal) rgVal.textContent = rgPct + '%';
+          }
+          try { localStorage.setItem('echocat-ft8-rx-gain', rgPct); } catch (e) {}
+        }
+        break;
+      }
+
       case 'jtcat-status':
         ft8Running = msg.running !== false;
         ft8Mode = msg.mode || ft8Mode;

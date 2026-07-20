@@ -40,6 +40,10 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetHoldTxFreq: (enabled) => ipcRenderer.send('jtcat-set-hold-tx-freq', !!enabled),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
   jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),
+  // RX gain — synced through main (settings.jtcatRxGain): report our slider,
+  // receive everyone else's moves (main window, ECHOCAT clients).
+  jtcatSetRxGain: (level) => ipcRenderer.send('jtcat-set-rx-gain', level),
+  onJtcatSetRxGain: (cb) => ipcRenderer.on('jtcat-set-rx-gain', (_e, level) => cb(level)),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),
   jtcatAudio: (buf) => ipcRenderer.send('jtcat-audio', buf),
   jtcatSliceAudio: (sliceId, buf) => ipcRenderer.send('jtcat-slice-audio', sliceId, buf),
