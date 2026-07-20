@@ -2814,11 +2814,11 @@
           <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). FlexRadio users need no extra setup &mdash; CW keys via SmartSDR automatically.</span>
         </div>
         <div style="margin-top:6px;margin-left:12px;">
-          <label>CW Key Port &mdash; optional (DTR keying):
+          <label>CW Key Port &mdash; optional (DTR/RTS keying):
             <input list="cw-key-port-list" id="set-cw-key-port" style="width:220px;background:var(--bg-input);border:1px solid var(--border-primary);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:13px;" placeholder="None, or type COM port">
             <datalist id="cw-key-port-list"></datalist>
           </label>
-          <span class="help-text" style="display:block;">Only needed for non-Flex rigs (QMX, etc). Uses a separate USB-serial adapter to key CW via the DTR pin. Leave as "none" for FlexRadio.</span>
+          <span class="help-text" style="display:block;">Only needed for non-Flex rigs (QMX, Yaesu second COM port, etc). Keys CW via the DTR or RTS pin &mdash; set Settings &rarr; Radio &rarr; CW keying line to match your rig's PC KEYING menu. Leave as "none" for FlexRadio.</span>
         </div>
       </div>
 

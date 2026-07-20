@@ -10506,8 +10506,13 @@ function sendCwTextToRadio(text) {
     // startup-dit it avoids. (WD4DAN.)
     if (!cwKeyPort) ensureCwKeyPortLazyOpen();
     if (cwKeyPort && cwKeyPort.isOpen) {
-      if (sendCwTextViaDtrKey(expanded, wpm, cwCaps.dtrPins)) {
-        sendCatLog(`[CW] Text via DTR keyer @ ${wpm} wpm: ${expanded}`);
+      // Honor the per-rig CW-keying-line override (Settings > Radio >
+      // CW keying line), exactly like the paddle paths do — raw
+      // cwCaps.dtrPins here meant a PC KEYING=RTS rig (N7BBQ's FT-891)
+      // got its TEXT keyed on DTR while paddles correctly used RTS.
+      const txtPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
+      if (sendCwTextViaDtrKey(expanded, wpm, txtPins)) {
+        sendCatLog(`[CW] Text via ${txtPins && txtPins.rts ? 'RTS' : 'DTR'} keyer @ ${wpm} wpm: ${expanded}`);
         return;
       }
     } else if (_cwKeyPortPathForPython) {
