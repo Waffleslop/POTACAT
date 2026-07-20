@@ -10346,8 +10346,11 @@ let _cwKeyPortPathForPython = null;
 // blocks the LAZY per-paddle-element reopen loop (each open blips DTR = RF
 // chirps). Reset by connectCwKeyPort (deliberate reconnects re-test once).
 let _cwKeyPortIoctlLatched = false;
+// One-shot per session: text fell through to CAT KY while a CW Key Port is
+// configured — the generic-Yaesu-model trap (KM4CFT 2026-07-20).
+let _cwTextKyHintLogged = false;
 let _cwPythonProc = null;
-function sendCwTextViaPython(text, wpm) {
+function sendCwTextViaPython(text, wpm, pins) {
   if (!_cwKeyPortPathForPython) return false;
   const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
   if (!cleaned) return false;
@@ -10356,32 +10359,49 @@ function sendCwTextViaPython(text, wpm) {
     try { _cwPythonProc.kill('SIGTERM'); } catch {}
     _cwPythonProc = null;
   }
+  // Which modem-control line(s) to pulse — resolved by the caller via
+  // resolveCwKeyPins so the radio's PC KEYING menu (RTS vs DTR) is honored.
+  // This path hardcoded DTR until 2026-07-20, which silently no-op'd on
+  // PC KEYING=RTS wiring (FT-891/FT-710 Standard-port keying, the same
+  // setup N1MM proves out) — and pyserial's default open asserted RTS
+  // high, holding an RTS-keyed radio in TX for the whole message.
+  const p = pins && (pins.dtr || pins.rts) ? pins : { dtr: true, rts: false };
   const morseJson = JSON.stringify(_MORSE_TABLE);
   const portPath = _cwKeyPortPathForPython.replace(/'/g, "\\'");
   // Inline Python — opens the tty (4800 matches the user's working script;
-  // baud is irrelevant for cdc_acm but pyserial requires one), keys via
-  // setDTR which uses TIOCMBIS/TIOCMBIC. Always drops DTR in finally so a
+  // baud is irrelevant for cdc_acm but pyserial requires one), keys via the
+  // dtr/rts properties which use TIOCMBIS/TIOCMBIC. Both lines are set LOW
+  // before open (pyserial applies pre-set states at open) so the open itself
+  // doesn't key the radio. Always drops the keyed line(s) in finally so a
   // SIGTERM mid-message can't leave the radio stuck.
   const script =
     'import sys, json, time, serial\n' +
-    `port = serial.Serial('${portPath}', 4800)\n` +
+    'port = serial.Serial()\n' +
+    `port.port = '${portPath}'\n` +
+    'port.baudrate = 4800\n' +
+    'port.dtr = False\n' +
+    'port.rts = False\n' +
+    'port.open()\n' +
     `MORSE = json.loads('${morseJson.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')\n` +
     `WPM = ${Math.max(5, Math.min(60, wpm | 0)) || 20}\n` +
     'DIT = 1.2 / WPM\n' +
     'DAH = 3 * DIT\n' +
+    'def key(on):\n' +
+    (p.dtr ? '    port.dtr = on\n' : '') +
+    (p.rts ? '    port.rts = on\n' : '') +
     'try:\n' +
     '    for ch in sys.stdin.read():\n' +
     '        if ch == " ":\n' +
     '            time.sleep(7 * DIT); continue\n' +
     '        if ch not in MORSE: continue\n' +
     '        for sym in MORSE[ch]:\n' +
-    '            port.setDTR(True)\n' +
+    '            key(True)\n' +
     '            time.sleep(DIT if sym == "." else DAH)\n' +
-    '            port.setDTR(False)\n' +
+    '            key(False)\n' +
     '            time.sleep(DIT)\n' +
     '        time.sleep(2 * DIT)\n' +
     'finally:\n' +
-    '    try: port.setDTR(False)\n' +
+    '    try: key(False)\n' +
     '    except Exception: pass\n' +
     '    port.close()\n';
   const { spawn } = require('child_process');
@@ -10547,13 +10567,21 @@ function sendCwTextToRadio(text) {
   const cwCaps = rigModel?.cw || {};
   if (cwCaps.textMethod === 'dtr-key-port') {
     const wpm = (cat && cat._cwWpm) || 20;
+    // Honor the per-rig CW-keying-line override (Settings > Radio >
+    // CW keying line), exactly like the paddle paths do — raw
+    // cwCaps.dtrPins here meant a PC KEYING=RTS rig (N7BBQ's FT-891)
+    // got its TEXT keyed on DTR while paddles correctly used RTS. The
+    // pyserial fallback takes the same pins (it hardcoded DTR until
+    // 2026-07-20 — KM4CFT's cp210x port routes ALL text through it).
+    const txtPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
+    const pinLabel = txtPins.dtr && txtPins.rts ? 'DTR+RTS' : (txtPins.rts ? 'RTS' : 'DTR');
     // If a previous open already proved this driver rejects TIOCMSET, skip
     // straight to the pyserial fallback — re-opening node-serialport just to
     // hit ENOTTY again would race the close-handler against the in-flight
     // text-send and spam the log on every key press. DA2PK 2026-05-05.
     if (_cwKeyPortPathForPython) {
-      if (sendCwTextViaPython(expanded, wpm)) {
-        sendCatLog(`[CW] Text via Python pyserial fallback @ ${wpm} wpm: ${expanded}`);
+      if (sendCwTextViaPython(expanded, wpm, txtPins)) {
+        sendCatLog(`[CW] Text via Python pyserial (${pinLabel}) @ ${wpm} wpm: ${expanded}`);
         return;
       }
     }
@@ -10563,26 +10591,30 @@ function sendCwTextToRadio(text) {
     // startup-dit it avoids. (WD4DAN.)
     if (!cwKeyPort) ensureCwKeyPortLazyOpen();
     if (cwKeyPort && cwKeyPort.isOpen) {
-      // Honor the per-rig CW-keying-line override (Settings > Radio >
-      // CW keying line), exactly like the paddle paths do — raw
-      // cwCaps.dtrPins here meant a PC KEYING=RTS rig (N7BBQ's FT-891)
-      // got its TEXT keyed on DTR while paddles correctly used RTS.
-      const txtPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
       if (sendCwTextViaDtrKey(expanded, wpm, txtPins)) {
-        sendCatLog(`[CW] Text via ${txtPins && txtPins.rts ? 'RTS' : 'DTR'} keyer @ ${wpm} wpm: ${expanded}`);
+        sendCatLog(`[CW] Text via ${pinLabel} keyer @ ${wpm} wpm: ${expanded}`);
         return;
       }
     } else if (_cwKeyPortPathForPython) {
       // node-serialport's TIOCMSET was rejected on this driver; pyserial uses
       // TIOCMBIS/TIOCMBIC which works on the same device. See dropPins above.
-      if (sendCwTextViaPython(expanded, wpm)) {
-        sendCatLog(`[CW] Text via Python pyserial fallback @ ${wpm} wpm: ${expanded}`);
+      if (sendCwTextViaPython(expanded, wpm, txtPins)) {
+        sendCatLog(`[CW] Text via Python pyserial (${pinLabel}) @ ${wpm} wpm: ${expanded}`);
         return;
       }
     }
   }
   // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
   if (cat && cat.connected) {
+    // Support trap (KM4CFT 2026-07-20): a CW Key Port is wired and working,
+    // but the selected rig model never routes TEXT through it — generic
+    // "Yaesu" fell through to CAT KY, whose digit-0 P1 form this firmware
+    // generation silently rejects (rig keys TX, no morse out). One-shot
+    // hint so the log names the misconfiguration instead of looking healthy.
+    if (!_cwTextKyHintLogged && settings.cwKeyPort && cwCaps.textMethod !== 'dtr-key-port' && rigModel?.brand === 'Yaesu') {
+      _cwTextKyHintLogged = true;
+      sendCatLog('[CW] Text is going out via the CAT KY command, not your CW Key Port. If this radio is an FT-891 or FT-710, select that exact model in Settings > Rig — on those rigs KY is unreliable (radio keys TX with no morse) and the correct model routes text through the key port instead.');
+    }
     cat.sendCwText(expanded);
   }
 }
