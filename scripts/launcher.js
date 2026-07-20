@@ -50,6 +50,32 @@ const RATE_LIMIT_MAX = 20;
 let config = { port: DEFAULT_PORT, potacatPath: 'auto', https: false };
 let startedAt = null;
 
+// --- Installer handshake (launcher.pid) ---
+// When this launcher runs as the packaged Electron binary (POTACAT.exe with
+// ELECTRON_RUN_AS_NODE) it holds an image lock on <INSTDIR>\POTACAT.exe,
+// which used to wedge upgrades/uninstalls. The NSIS installer used to sweep
+// for us with a PowerShell CIM query — which Sophos/EDR lockdown policies
+// kill outright when the installer was launched from a browser
+// ("BrowserAncestorPowershell", Sophos report 2026-07-19). So instead we
+// advertise our PID here and the installer terminates exactly this process
+// with in-process WinAPI calls (build/installer.nsh _KillLauncher) — no
+// shell, nothing for an EDR to flag. node.exe launchers never lock INSTDIR,
+// so they don't write the file. Removed on clean exit; the installer
+// validates the PID still maps to a POTACAT.exe image before killing, so a
+// stale file after a crash is harmless.
+const PID_PATH = path.join(CONFIG_DIR, 'launcher.pid');
+function writePidFile() {
+  if (!process.versions.electron) return;
+  try { fs.writeFileSync(PID_PATH, String(process.pid)); } catch { /* non-fatal */ }
+}
+function removePidFile() {
+  // Only remove our own advertisement — an EADDRINUSE loser exiting must not
+  // delete the winning launcher's file.
+  try {
+    if (fs.readFileSync(PID_PATH, 'utf8').trim() === String(process.pid)) fs.unlinkSync(PID_PATH);
+  } catch { /* non-fatal */ }
+}
+
 // --- Load config ---
 function loadConfig() {
   try {
@@ -666,6 +692,7 @@ server.on('error', (err) => {
 });
 
 server.listen(config.port, '0.0.0.0', () => {
+  writePidFile(); // only the instance that won the port advertises itself
   const proto = _usingHttps ? 'https' : 'http';
   const ips = getLocalIPs();
   console.log(`[Launcher] POTACAT Remote Launcher running on port ${config.port}`);
@@ -680,5 +707,7 @@ server.listen(config.port, '0.0.0.0', () => {
   console.log(`[Launcher] Running:   ${isRunning() ? 'YES' : 'NO'}`);
 });
 
+process.on('exit', removePidFile);
 process.on('SIGINT', () => { console.log('\n[Launcher] Shutting down'); server.close(); process.exit(0); });
+process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
