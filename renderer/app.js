@@ -15368,6 +15368,41 @@ function getActiveScheduleEntry(event) {
   });
 }
 
+// Plural sibling of getActiveScheduleEntry — ALL entries whose window contains
+// now. America250 WAS runs 2–4 states in the same week (Indiana + Utah this
+// week), so the banner must show every concurrent region, not just the first
+// one .find() happens to hit. The state-grid board already does this via its
+// own activeRegions Set; this brings the banner in line.
+function getActiveScheduleEntries(event) {
+  const now = new Date();
+  return (event.schedule || []).filter(s => now >= new Date(s.start) && now < new Date(s.end));
+}
+
+// US state/territory -> W1AW call district, for resolving W1AW/* to the exact
+// callsign per region. Module-level so the banner can pair each concurrent
+// state with its own call (Indiana -> W1AW/9, Utah -> W1AW/7).
+const W1AW_STATE_DISTRICT = {
+  CT: 1, ME: 1, MA: 1, NH: 1, RI: 1, VT: 1,
+  NJ: 2, NY: 2,
+  DE: 3, DC: 3, MD: 3, PA: 3,
+  AL: 4, FL: 4, GA: 4, KY: 4, NC: 4, SC: 4, TN: 4, VA: 4,
+  AR: 5, LA: 5, MS: 5, NM: 5, OK: 5, TX: 5,
+  CA: 6, HI: 6,
+  AZ: 7, ID: 7, MT: 7, NV: 7, OR: 7, UT: 7, WA: 7, WY: 7,
+  CO: 8, IA: 8, KS: 8, MN: 8, MO: 8, NE: 8, ND: 8, SD: 8,
+  IL: 9, IN: 9, WI: 9,
+  MI: 0, OH: 0, WV: 0,
+  AK: 'KL7', GU: 'KH2', PR: 'KP4', VI: 'KP2',
+};
+
+// "A", "A & B", "A, B & C" — Oxford-free serial join for banner subjects.
+function joinWithAmpersand(parts) {
+  const arr = parts.filter(Boolean);
+  if (arr.length <= 1) return arr[0] || '';
+  if (arr.length === 2) return `${arr[0]} & ${arr[1]}`;
+  return `${arr.slice(0, -1).join(', ')} & ${arr[arr.length - 1]}`;
+}
+
 // Badge grace: decorate spots a day either side of the schedule so early
 // warm-up spots and just-past-midnight stragglers still read, but a REUSED
 // callsign doesn't. 1x1 calls (K2A…) rotate to unrelated operations within
@@ -15410,9 +15445,11 @@ function updateEventBanner() {
     return;
   }
 
-  // Find first event with an active or upcoming schedule entry
+  // Find first event with an active or upcoming schedule entry. Entries are
+  // resolved as an ARRAY — America250 WAS runs multiple concurrent states per
+  // week, and the banner shows all of them (see getActiveScheduleEntries).
   let activeEvent = null;
-  let activeEntry = null;
+  let activeEntries = null;
   let isUpcoming = false;
   const now = new Date();
   for (const ev of activeEvents) {
@@ -15420,28 +15457,32 @@ function updateEventBanner() {
     // expires. Dismissing an upcoming event snoozes it until its start, so the
     // banner stays hidden through the lead-in and returns when it goes LIVE.
     if (ev.snoozeUntil && now.getTime() < ev.snoozeUntil) continue;
-    // Check for currently active entry first
-    const current = getActiveScheduleEntry(ev);
-    if (current) {
+    // Check for currently active entries first
+    const current = getActiveScheduleEntries(ev);
+    if (current.length) {
       activeEvent = ev;
-      activeEntry = current;
+      activeEntries = current;
       break;
     }
-    // Fall back to next upcoming entry (within 7 days)
+    // Fall back to the next upcoming cohort (within 7 days) — every entry that
+    // shares the earliest upcoming start, so a two-state week previews together.
     if (!activeEvent) {
-      const upcoming = (ev.schedule || []).find(s => {
-        const start = new Date(s.start);
-        return start > now && (start - now) < 7 * 24 * 3600000;
-      });
-      if (upcoming) {
+      const upcoming = (ev.schedule || [])
+        .filter(s => {
+          const start = new Date(s.start);
+          return start > now && (start - now) < 7 * 24 * 3600000;
+        })
+        .sort((a, b) => new Date(a.start) - new Date(b.start));
+      if (upcoming.length) {
+        const firstStart = +new Date(upcoming[0].start);
         activeEvent = ev;
-        activeEntry = upcoming;
+        activeEntries = upcoming.filter(s => +new Date(s.start) === firstStart);
         isUpcoming = true;
       }
     }
   }
 
-  if (!activeEvent || !activeEntry) {
+  if (!activeEvent || !activeEntries || !activeEntries.length) {
     banner.classList.add('hidden');
     return;
   }
@@ -15455,34 +15496,26 @@ function updateEventBanner() {
   badge.textContent = activeEvent.badge || '250';
   badge.style.background = activeEvent.badgeColor || '#ff6b00';
 
-  const endDate = new Date(activeEntry.end);
-  const endStr = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const startDate = new Date(activeEntry.start);
-  const startStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  // Concurrent entries can span a shared week; show the widest window.
+  const endStr = new Date(Math.max(...activeEntries.map(e => +new Date(e.end))))
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const startStr = new Date(Math.min(...activeEntries.map(e => +new Date(e.start))))
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
+  // Subject = every concurrent region. For W1AW/* each state is paired with
+  // its own resolved callsign (Indiana (W1AW/9) & Utah (W1AW/7)); for other
+  // patterns the shared call is appended once after the joined names.
   const callPattern = (activeEvent.callsignPatterns || [])[0] || '';
-  let callText = '';
-  if (callPattern) {
-    // For W1AW/* pattern, resolve to W1AW/<district> using the active region's call district
-    if (callPattern === 'W1AW/*' && activeEntry.region) {
-      const stateToDistrict = {
-        CT: 1, ME: 1, MA: 1, NH: 1, RI: 1, VT: 1,
-        NJ: 2, NY: 2,
-        DE: 3, DC: 3, MD: 3, PA: 3,
-        AL: 4, FL: 4, GA: 4, KY: 4, NC: 4, SC: 4, TN: 4, VA: 4,
-        AR: 5, LA: 5, MS: 5, NM: 5, OK: 5, TX: 5,
-        CA: 6, HI: 6,
-        AZ: 7, ID: 7, MT: 7, NV: 7, OR: 7, UT: 7, WA: 7, WY: 7,
-        CO: 8, IA: 8, KS: 8, MN: 8, MO: 8, NE: 8, ND: 8, SD: 8,
-        IL: 9, IN: 9, WI: 9,
-        MI: 0, OH: 0, WV: 0,
-        AK: 'KL7', GU: 'KH2', PR: 'KP4', VI: 'KP2',
-      };
-      const d = stateToDistrict[activeEntry.region];
-      callText = d !== undefined ? ` \u2014 W1AW/${d}` : ` \u2014 W1AW/*`;
-    } else {
-      callText = ` \u2014 ${callPattern.replace('/*', '/')}*`;
-    }
+  let subject = '';
+  let subjectCallText = '';
+  if (callPattern === 'W1AW/*') {
+    subject = joinWithAmpersand(activeEntries.map(e => {
+      const d = W1AW_STATE_DISTRICT[e.region];
+      return d !== undefined ? `${e.regionName} (W1AW/${d})` : e.regionName;
+    }));
+  } else {
+    subject = joinWithAmpersand(activeEntries.map(e => e.regionName));
+    if (callPattern) subjectCallText = ` \u2014 ${callPattern.replace('/*', '/')}*`;
   }
   const trackingLabel = (activeEvent.tracking && activeEvent.tracking.label) || 'items';
   const board = activeEvent.board || (activeEvent.tracking && activeEvent.tracking.type) || 'regions';
@@ -15493,13 +15526,13 @@ function updateEventBanner() {
     const total = activeEvent.tracking ? activeEvent.tracking.total : 0;
     if (isUpcoming) {
       if (isRegions) {
-        message.textContent = `${activeEntry.regionName} week starts ${startStr}${callText}`;
+        message.textContent = `${subject}${subjectCallText} starts ${startStr}`;
       } else {
         message.textContent = `${activeEvent.name} starts ${startStr}`;
       }
     } else {
       if (isRegions) {
-        message.textContent = `${activeEntry.regionName} week${callText} through ${endStr}`;
+        message.textContent = `${subject}${subjectCallText} through ${endStr}`;
       } else {
         message.textContent = `${activeEvent.name} active through ${endStr}`;
       }
@@ -15514,13 +15547,13 @@ function updateEventBanner() {
   } else {
     if (isUpcoming) {
       if (isRegions) {
-        message.textContent = `${activeEvent.name} \u2014 ${activeEntry.regionName}${callText} starts ${startStr}`;
+        message.textContent = `${activeEvent.name} \u2014 ${subject}${subjectCallText} starts ${startStr}`;
       } else {
         message.textContent = `${activeEvent.name} starts ${startStr}`;
       }
     } else {
       if (isRegions) {
-        message.textContent = `${activeEvent.name} \u2014 ${activeEntry.regionName}${callText} active through ${endStr}`;
+        message.textContent = `${activeEvent.name} \u2014 ${subject}${subjectCallText} active through ${endStr}`;
       } else {
         message.textContent = `${activeEvent.name} active through ${endStr}`;
       }
