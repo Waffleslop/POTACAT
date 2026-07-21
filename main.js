@@ -10368,6 +10368,16 @@ function sendCwTextViaPython(text, wpm, pins) {
   const p = pins && (pins.dtr || pins.rts) ? pins : { dtr: true, rts: false };
   const morseJson = JSON.stringify(_MORSE_TABLE);
   const portPath = _cwKeyPortPathForPython.replace(/'/g, "\\'");
+  // The text is embedded directly in the script rather than piped over stdin.
+  // `cleaned` is already stripped to [A-Z0-9 /?.=,+-] — no quotes or
+  // backslashes — so it's safe inside a single-quoted Python literal, and the
+  // extra guard below drops any stray ' or \ defensively. Piping over stdin
+  // was a crash vector: if python exited early (busy port, import failure) the
+  // node write hit EPIPE on an un-listened stdin stream, and the late
+  // uncaughtException handler rethrows during normal run = app crash. This is
+  // exactly the FT-891 dtr-key-port text path KM4CFT/jzkmath hit (2026-07-21).
+  const embedText = cleaned.replace(/[\\']/g, '');
+  const keyBody = (p.dtr ? '    port.dtr = on\n' : '') + (p.rts ? '    port.rts = on\n' : '');
   // Inline Python — opens the tty (4800 matches the user's working script;
   // baud is irrelevant for cdc_acm but pyserial requires one), keys via the
   // dtr/rts properties which use TIOCMBIS/TIOCMBIC. Both lines are set LOW
@@ -10375,7 +10385,8 @@ function sendCwTextViaPython(text, wpm, pins) {
   // doesn't key the radio. Always drops the keyed line(s) in finally so a
   // SIGTERM mid-message can't leave the radio stuck.
   const script =
-    'import sys, json, time, serial\n' +
+    'import json, time, serial\n' +
+    `TEXT = '${embedText}'\n` +
     'port = serial.Serial()\n' +
     `port.port = '${portPath}'\n` +
     'port.baudrate = 4800\n' +
@@ -10387,10 +10398,9 @@ function sendCwTextViaPython(text, wpm, pins) {
     'DIT = 1.2 / WPM\n' +
     'DAH = 3 * DIT\n' +
     'def key(on):\n' +
-    (p.dtr ? '    port.dtr = on\n' : '') +
-    (p.rts ? '    port.rts = on\n' : '') +
+    (keyBody || '    pass\n') +
     'try:\n' +
-    '    for ch in sys.stdin.read():\n' +
+    '    for ch in TEXT:\n' +
     '        if ch == " ":\n' +
     '            time.sleep(7 * DIT); continue\n' +
     '        if ch not in MORSE: continue\n' +
@@ -10406,7 +10416,9 @@ function sendCwTextViaPython(text, wpm, pins) {
     '    port.close()\n';
   const { spawn } = require('child_process');
   try {
-    _cwPythonProc = spawn('python3', ['-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    // stdin ignored — nothing is piped in, so there is no stdin stream to
+    // error out (see the embed rationale above).
+    _cwPythonProc = spawn('python3', ['-c', script], { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (err) {
     sendCatLog(`[CW] Python fallback spawn failed: ${err.message}. Install python3 + pyserial.`);
     return false;
@@ -10416,18 +10428,23 @@ function sendCwTextViaPython(text, wpm, pins) {
     _cwPythonProc = null;
   });
   let stderr = '';
-  _cwPythonProc.stderr.on('data', (d) => { stderr += d.toString(); });
+  if (_cwPythonProc.stderr) {
+    _cwPythonProc.stderr.on('data', (d) => { stderr += d.toString(); });
+    _cwPythonProc.stderr.on('error', () => {});
+  }
   _cwPythonProc.on('exit', (code) => {
     if (code !== 0) {
+      const tbLines = stderr.trim().split('\n').filter(Boolean);
+      const tbErr = tbLines.length ? tbLines[tbLines.length - 1] : '';
       const tip = /no module named serial|ModuleNotFoundError/i.test(stderr)
         ? ' (pyserial not installed — Debian/Ubuntu: sudo apt install python3-serial; Fedora: python3-pyserial; or: pip3 install pyserial)'
-        : '';
-      sendCatLog(`[CW] Python helper exited with code ${code}${tip}${stderr ? ': ' + stderr.split('\n')[0] : ''}`);
+        : (/busy|errno 16/i.test(stderr)
+          ? ' (the CW Key Port is busy — another program or POTACAT still holds it)'
+          : '');
+      sendCatLog(`[CW] Python helper exited with code ${code}${tip}${tbErr ? ': ' + tbErr : ''}`);
     }
     _cwPythonProc = null;
   });
-  _cwPythonProc.stdin.write(cleaned);
-  _cwPythonProc.stdin.end();
   return true;
 }
 
@@ -10460,7 +10477,9 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
     const state = {};
     if (pins.dtr) state.dtr = !!down;
     if (pins.rts) state.rts = !!down;
-    cwKeyPort.set(state, () => {});
+    // Runs inside setTimeout callbacks — a synchronous throw here (port closed
+    // mid-sequence) would escape to uncaughtException and crash the app.
+    try { cwKeyPort.set(state, () => {}); } catch { /* port went away mid-send */ }
   };
 
   let t = 0;
@@ -10485,6 +10504,18 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
 }
 
 function sendCwTextToRadio(text) {
+  // A CW keystroke must never crash the app. Every backend below touches
+  // serial/spawn/native code that can throw synchronously; without this a
+  // single bad send (KM4CFT's FT-891 key-port path, 2026-07-21) took the whole
+  // process down via the rethrowing uncaughtException handler.
+  try {
+    _sendCwTextToRadioImpl(text);
+  } catch (err) {
+    sendCatLog(`[CW] text-send failed: ${err && err.message ? err.message : err}`);
+  }
+}
+
+function _sendCwTextToRadioImpl(text) {
   if (!text) return;
   const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '')
     .replace(/\{mycallsign\}/gi, settings.myCallsign || '');
