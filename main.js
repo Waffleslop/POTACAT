@@ -10604,7 +10604,12 @@ function _sendCwTextToRadioImpl(text) {
     // got its TEXT keyed on DTR while paddles correctly used RTS. The
     // pyserial fallback takes the same pins (it hardcoded DTR until
     // 2026-07-20 — KM4CFT's cp210x port routes ALL text through it).
-    const txtPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
+    // NOTE: this branch referenced _cwActiveRig without declaring it in
+    // scope (it's a local const in the paddle path) — a ReferenceError that
+    // threw on EVERY FT-891/FT-710 CW text-send and crashed the app until
+    // the sendCwTextToRadio wrapper caught it (KM4CFT 2026-07-21).
+    const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    const txtPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: activeRig && activeRig.cwKeyLine });
     const pinLabel = txtPins.dtr && txtPins.rts ? 'DTR+RTS' : (txtPins.rts ? 'RTS' : 'DTR');
     // If a previous open already proved this driver rejects TIOCMSET, skip
     // straight to the pyserial fallback — re-opening node-serialport just to
