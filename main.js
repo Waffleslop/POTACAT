@@ -10349,6 +10349,11 @@ let _cwKeyPortIoctlLatched = false;
 // One-shot per session: text fell through to CAT KY while a CW Key Port is
 // configured — the generic-Yaesu-model trap (KM4CFT 2026-07-20).
 let _cwTextKyHintLogged = false;
+// De-dupe guard for rapid identical CW text sends (KM4CFT 2026-07-21): the
+// mobile CW screen dispatched the same macro twice ~3.5 s apart and the second
+// SIGTERM-killed the first mid-transmission ("briefly sends CW then stops").
+let _lastCwSendText = '';
+let _lastCwSendAt = 0;
 let _cwPythonProc = null;
 function sendCwTextViaPython(text, wpm, pins) {
   if (!_cwKeyPortPathForPython) return false;
@@ -10522,6 +10527,23 @@ function _sendCwTextToRadioImpl(text) {
   // Note: {call}, {op_firstname}, {state} are expanded client-side before reaching here
   console.log(`[CW] Text: ${expanded}`);
 
+  // De-dupe rapid identical sends. The mobile CW screen (a double-tap, or a
+  // client resend) can dispatch the SAME macro twice a few seconds apart; each
+  // new send cancels the in-flight one, so the operator hears the CW start and
+  // then stop partway through (KM4CFT: full CQ chopped ~3.5 s in). Ignore an
+  // identical text that lands while the previous one is still estimated to be
+  // playing (same envelope the TX lockout uses). A DIFFERENT text still
+  // cancels + resends (intentional change), and the phone's Stop button
+  // (cw-cancel-text -> cancelAllCwSends) still aborts and clears this guard.
+  const _cwNow = Date.now();
+  const _cwEstMs = Math.ceil((expanded.length * 12000) / Math.max(5, settings.cwWpm || 20));
+  if (expanded && expanded === _lastCwSendText && (_cwNow - _lastCwSendAt) < _cwEstMs) {
+    sendCatLog(`[CW] Ignoring duplicate send — already sending: ${expanded}`);
+    return;
+  }
+  _lastCwSendText = expanded;
+  _lastCwSendAt = _cwNow;
+
   // Backend-agnostic side effects FIRST — these only need the expanded
   // text + WPM, not knowledge of which keyer handled the send. They MUST
   // run before the dispatch branches below because several of those
@@ -10662,6 +10684,10 @@ function _sendCwTextToRadioImpl(text) {
 // pyserial / DTR-timer / CAT, so users on those rigs had no way to stop
 // a mis-clicked macro. Idempotent: safe to call when nothing is keying.
 function cancelAllCwSends() {
+  // Clear the duplicate-send guard so a deliberate resend of the same text
+  // right after Stop isn't swallowed as a "duplicate while sending".
+  _lastCwSendText = '';
+  _lastCwSendAt = 0;
   // 1. Hardware WinKeyer — flushes the WK1/WK3 buffer.
   if (winKeyer && winKeyer.connected) {
     try { winKeyer.cancelText(); } catch {}
