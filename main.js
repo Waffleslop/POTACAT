@@ -53,7 +53,7 @@ function logStartupStage(name) {
   if (_startupTiming) console.error(line);
 }
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const PACKAGE_VERSION = require('./package.json').version;
@@ -8082,8 +8082,33 @@ const { computeSpectrumBins } = require('./lib/spectrum-fft');
 const SPECTRUM_INTERVAL_MS = 100;
 const SPECTRUM_BIN_COUNT = 160;
 let _spectrumTimer = null;
+// Sticky intent: the mobile FT8 waterfall panel is open and wants the feed.
+// It is the source of truth for resuming the loop on reconnect — recovery no
+// longer depends on the phone re-sending jtcat-spectrum-subscribe (a fragile
+// round-trip that dropped the feed on every WS churn). (ft8-waterfall-mobile-
+// feed ask, 2026-07-22)
+let _mobileWantsSpectrum = false;
+// powerSaveBlocker held while a connected phone is watching the waterfall, so
+// display-sleep / window-hide can't suspend the renderer's FT8 audio capture
+// (backgroundThrottling:false covers timers/rAF, NOT AudioContext suspend).
+let _spectrumPowerSaveId = null;
+function _acquireSpectrumPowerSave() {
+  if (_spectrumPowerSaveId !== null) return;
+  try {
+    _spectrumPowerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+    console.log('[JTCAT] Spectrum feed: app-suspension blocker on — keeping FT8 capture alive for the mobile waterfall');
+  } catch { _spectrumPowerSaveId = null; }
+}
+function _releaseSpectrumPowerSave() {
+  if (_spectrumPowerSaveId === null) return;
+  try { if (powerSaveBlocker.isStarted(_spectrumPowerSaveId)) powerSaveBlocker.stop(_spectrumPowerSaveId); } catch {}
+  _spectrumPowerSaveId = null;
+}
 
 function startInProcessSpectrum() {
+  // Blocker only while a phone is actually connected — an armed-but-idle loop
+  // during a disconnect must not keep the desktop awake.
+  if (remoteServer && remoteServer.hasClient()) _acquireSpectrumPowerSave();
   if (_spectrumTimer) return;
   _spectrumTimer = setInterval(() => {
     if (!ft8Engine || !ft8Engine._audioBuffer) return;
@@ -8104,6 +8129,7 @@ function startInProcessSpectrum() {
 }
 
 function stopInProcessSpectrum() {
+  _releaseSpectrumPowerSave();
   if (!_spectrumTimer) return;
   clearInterval(_spectrumTimer);
   _spectrumTimer = null;
@@ -11339,6 +11365,11 @@ function connectRemote() {
       _clientDisconnectGraceTimer = null;
       sendCatLog('[Echo CAT] Phone reconnected during grace window — engine survived.');
     }
+    // Resume the mobile waterfall feed from the sticky intent flag, so it comes
+    // back on reconnect WITHOUT waiting for the phone to re-send
+    // jtcat-spectrum-subscribe. startInProcessSpectrum is idempotent and the
+    // loop self-guards, so this is safe to call unconditionally when wanted.
+    if (_mobileWantsSpectrum) startInProcessSpectrum();
     // Pre-warm the audio bridge so a later start-audio skips window
     // creation + page load (~3s → capture+offer only). The warm page holds
     // NO capture, so JTCAT/SSTV device grabs are unaffected. Cloud sessions
@@ -11499,10 +11530,19 @@ function connectRemote() {
       // desktop Scan button doesn't stay stuck showing the peer's scan.
       win.webContents.send('remote-peer-scan-state', { scanning: false });
     }
-    // Stop the in-process spectrum loop — only mobile would have
-    // subscribed it, and mobile re-subscribes on reconnect via the
-    // SpectrumPanel useEffect. K3SBP 2026-05-31.
-    stopInProcessSpectrum();
+    // Do NOT stop the in-process spectrum loop here. It self-guards on
+    // hasClient() (a no-op tick while disconnected) and resumes feeding the
+    // instant the phone reconnects — driven by the sticky _mobileWantsSpectrum
+    // flag in the client-connected handler, NOT by the phone re-sending
+    // jtcat-spectrum-subscribe. That re-subscribe round-trip dropped the mobile
+    // waterfall on every WS churn (e.g. the Android LAN-permission self-kick):
+    // any missed/raced/ backgrounded re-subscribe left the loop dead until the
+    // user toggled the panel. The loop is still torn down properly on an
+    // explicit panel close ({on:false}) and with the engine via stopJtcat when
+    // the 60s grace below expires. Only release the app-suspension blocker now,
+    // so the desktop can sleep while no phone is watching. (ft8-waterfall-
+    // mobile-feed ask, 2026-07-22)
+    _releaseSpectrumPowerSave();
     // Defer the heavy teardown by a 60-second grace period so an iOS
     // background-suspend (commonly 30-45s) doesn't kill the JTCAT
     // engine and force a full restart when the phone wakes back up.
@@ -11515,6 +11555,13 @@ function connectRemote() {
     if (_clientDisconnectGraceTimer) clearTimeout(_clientDisconnectGraceTimer);
     _clientDisconnectGraceTimer = setTimeout(() => {
       _clientDisconnectGraceTimer = null;
+      // Grace expired ⇒ the subscribing phone is gone for good. Clear the
+      // sticky waterfall intent and stop the now-idle loop, so a future
+      // unrelated phone starts fresh (and doesn't inherit an armed loop /
+      // suspension blocker it never asked for). A phone that reconnected
+      // inside the grace cancelled this timer, so its intent is preserved.
+      _mobileWantsSpectrum = false;
+      stopInProcessSpectrum();
       // Ownership guard (K3SBP 2026-07-17): a phone that merely CONNECTED —
       // browsing VFO / Settings — was a viewer, never the JTCAT owner. When
       // the desktop popout is open, IT owns the engine ("popout open ⇒ popout
@@ -13049,6 +13096,7 @@ function connectRemote() {
   // depend on which renderer window happens to be open. K3SBP
   // 2026-05-31.
   remoteServer.on('jtcat-spectrum-subscribe', ({ on }) => {
+    _mobileWantsSpectrum = !!on; // sticky — survives reconnects (see client-connected)
     if (on) startInProcessSpectrum();
     else stopInProcessSpectrum();
   });
