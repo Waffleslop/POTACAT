@@ -10633,34 +10633,36 @@ function _sendCwTextToRadioImpl(text) {
     const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
     const txtPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: activeRig && activeRig.cwKeyLine });
     const pinLabel = txtPins.dtr && txtPins.rts ? 'DTR+RTS' : (txtPins.rts ? 'RTS' : 'DTR');
-    // If a previous open already proved this driver rejects TIOCMSET, skip
-    // straight to the pyserial fallback — re-opening node-serialport just to
-    // hit ENOTTY again would race the close-handler against the in-flight
-    // text-send and spam the log on every key press. DA2PK 2026-05-05.
-    if (_cwKeyPortPathForPython) {
-      if (sendCwTextViaPython(expanded, wpm, txtPins)) {
-        sendCatLog(`[CW] Text via Python pyserial (${pinLabel}) @ ${wpm} wpm: ${expanded}`);
-        return;
-      }
+    // Key via the dedicated port with whichever backend is ready: pyserial
+    // (this driver rejected TIOCMSET, keys via TIOCMBIS/BIC) or node-serialport
+    // DTR. Returns a label if it keyed, else false.
+    const keyViaKeyPort = () => {
+      if (_cwKeyPortPathForPython && sendCwTextViaPython(expanded, wpm, txtPins)) return `Python pyserial (${pinLabel})`;
+      if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins)) return `${pinLabel} keyer`;
+      return false;
+    };
+    // A configured key port is authoritative for these rigs — their CAT KY is
+    // unreliable (keys TX with NO morse), so NEVER fall through to it. The port
+    // opens ASYNCHRONOUSLY, so the first send of a session arrives before the
+    // open has resolved which backend to use: key now if ready, else retry as
+    // the open lands (a few ms) instead of dropping to CAT KY. KM4CFT
+    // 2026-07-21: the first send went out on CAT KY = phone sidetone but no RF.
+    // Subsequent sends find _cwKeyPortPathForPython set and key with no delay.
+    if (settings.cwKeyPort) {
+      if (!cwKeyPort && !_cwKeyPortPathForPython) ensureCwKeyPortLazyOpen();
+      const via = keyViaKeyPort();
+      if (via) { sendCatLog(`[CW] Text via ${via} @ ${wpm} wpm: ${expanded}`); return; }
+      let tries = 0;
+      const retryKey = () => {
+        const v = keyViaKeyPort();
+        if (v) { sendCatLog(`[CW] Text via ${v} @ ${wpm} wpm: ${expanded}`); return; }
+        if (++tries < 8) { setTimeout(retryKey, 150); return; }
+        sendCatLog('[CW] CW Key Port did not become ready — text not sent. Check the CW Key Port in Settings > Rig (and, on Linux, that python3 + pyserial are installed).');
+      };
+      setTimeout(retryKey, 150);
+      return;
     }
-    // Trigger the lazy open so subsequent text sends in this session use
-    // the dedicated key port. This first send falls through to the
-    // alternate path (cat.sendCwText) below — acceptable cost vs. the
-    // startup-dit it avoids. (WD4DAN.)
-    if (!cwKeyPort) ensureCwKeyPortLazyOpen();
-    if (cwKeyPort && cwKeyPort.isOpen) {
-      if (sendCwTextViaDtrKey(expanded, wpm, txtPins)) {
-        sendCatLog(`[CW] Text via ${pinLabel} keyer @ ${wpm} wpm: ${expanded}`);
-        return;
-      }
-    } else if (_cwKeyPortPathForPython) {
-      // node-serialport's TIOCMSET was rejected on this driver; pyserial uses
-      // TIOCMBIS/TIOCMBIC which works on the same device. See dropPins above.
-      if (sendCwTextViaPython(expanded, wpm, txtPins)) {
-        sendCatLog(`[CW] Text via Python pyserial (${pinLabel}) @ ${wpm} wpm: ${expanded}`);
-        return;
-      }
-    }
+    // No key port configured — fall through to CAT KY below (best effort).
   }
   // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
   if (cat && cat.connected) {
