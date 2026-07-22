@@ -259,6 +259,7 @@ const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdif
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { resolveCwKeyPins } = require('./lib/cw-key-line');
+const { buildPersistentKeyerScript } = require('./lib/cw-keyer-script');
 const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sync');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const RigFamily = require('./lib/rig-family');
@@ -10074,16 +10075,25 @@ function connectCwKeyPort() {
               // KM4CFT 2026-07-20: 13 open/fail/close cycles in 1.5s). A
               // deliberate reconnect (settings change) still re-tests once.
               _cwKeyPortIoctlLatched = true;
-              // Phone-side paddle must stop generating sidetone for keys that
-              // make no RF (and a TinyMIDI keyer must see the red banner) —
-              // same notification the main-CAT pin-unsupported path sends.
-              _setCwPaddleAvailability(false, 'key-port-tiocmset-unsupported');
-              sendCatLog(`[CW Key Port] This driver doesn't honor TIOCMSET ("${err.message}") ` +
-                `— dropping DTR/RTS via Python helper, then closing the node-serialport handle. ` +
-                `Paddle keying on this port is DISABLED (each retry would blip the key line). ` +
-                `CW text-send still works via the Python pyserial path (requires python3 + pyserial — ` +
-                `Debian/Ubuntu: sudo apt install python3-serial; Fedora: sudo dnf install python3-pyserial; or: pip3 install pyserial). ` +
-                `For a real paddle, use an FTDI or CH340 USB-serial interface as the CW Key Port — those drivers honor the pin controls.`);
+              // node-serialport's per-element paddle keying can't run on this
+              // driver, but the PERSISTENT pyserial keyer can (it owns the port
+              // and toggles the line via TIOCMBIS/BIC) — so on Linux/mac paddle
+              // IS available; only the node-serialport path is disabled. On
+              // win32 the persistent keyer can't run (select-on-stdin), so
+              // paddle stays unavailable there. (KM4CFT 2026-07-22.)
+              if (process.platform !== 'win32') {
+                _setCwPaddleAvailability(true);
+                sendCatLog(`[CW Key Port] This driver doesn't honor TIOCMSET ("${err.message}") ` +
+                  `— using the persistent pyserial keyer for both paddle and text (requires python3 + pyserial — ` +
+                  `Debian/Ubuntu: sudo apt install python3-serial; Fedora: sudo dnf install python3-pyserial; or: pip3 install pyserial).`);
+              } else {
+                _setCwPaddleAvailability(false, 'key-port-tiocmset-unsupported');
+                sendCatLog(`[CW Key Port] This driver doesn't honor TIOCMSET ("${err.message}") ` +
+                  `— dropping DTR/RTS via Python helper, then closing the node-serialport handle. ` +
+                  `Paddle keying on this port is DISABLED (each retry would blip the key line). ` +
+                  `CW text-send still works via the Python pyserial path. ` +
+                  `For a real paddle, use an FTDI or CH340 USB-serial interface as the CW Key Port — those drivers honor the pin controls.`);
+              }
               // Drop DTR/RTS via pyserial (TIOCMBIS/BIC) BEFORE closing our
               // node-serialport handle. The kernel hupcl on close was racing
               // with the moment we needed DTR low — DA2PK reported the radio
@@ -10154,6 +10164,9 @@ function connectCwKeyPort() {
 }
 
 function disconnectCwKeyPort() {
+  // The persistent pyserial keyer holds the same physical port — release it too
+  // (it respawns on the next CW activity once the port path is re-established).
+  killCwPersistentKeyer();
   if (!cwKeyPort) return;
   const port = cwKeyPort;
   cwKeyPort = null;
@@ -10486,6 +10499,109 @@ function sendCwTextViaPython(text, wpm, pins) {
   return true;
 }
 
+// --- Persistent pyserial CW keyer (real-time paddle on TIOCMSET-reject ports) ---
+// On Linux cp210x/cdc_acm the driver rejects node-serialport's TIOCMSET, so
+// real-time paddle keying (touchscreen straight key / TinyMIDI on the phone)
+// couldn't work — the per-message spawn only handled pre-rendered text. This
+// long-running python process OWNS the key port and toggles the line per key
+// edge from stdin commands (lib/cw-keyer-script.js). Once running it handles
+// BOTH paddle (1/0) AND text (T <wpm> <msg>), so there's no per-message
+// open/close race. Gated to non-win32 (select-on-stdin is POSIX-only, and
+// win32 cp210x honors TIOCMSET so node-serialport is used there instead).
+// KM4CFT/jzkmath 2026-07-22: zero extra hardware, keeps his local paddle.
+let _cwPersistentKeyerProc = null;
+let _cwPersistentKeyerKey = null; // `${portPath}|${line}` the process is running for
+
+function _persistentKeyerLine(pins) {
+  if (pins && pins.dtr && pins.rts) return 'both';
+  if (pins && pins.rts) return 'rts';
+  return 'dtr';
+}
+
+// Ensure the persistent keyer is running for the current port + keying line.
+// Returns the process, or null if it can't run here (win32, no python path,
+// spawn failure). Respawns if the port or keying line changed.
+function ensureCwPersistentKeyer(pins) {
+  if (process.platform === 'win32') return null;
+  if (!_cwKeyPortPathForPython) return null;
+  const line = _persistentKeyerLine(pins);
+  const key = `${_cwKeyPortPathForPython}|${line}`;
+  if (_cwPersistentKeyerProc && _cwPersistentKeyerKey === key) return _cwPersistentKeyerProc;
+  if (_cwPersistentKeyerProc) killCwPersistentKeyer();
+  const script = buildPersistentKeyerScript({ portPath: _cwKeyPortPathForPython, line, morse: _MORSE_TABLE });
+  const { spawn } = require('child_process');
+  let proc;
+  try {
+    proc = spawn('python3', ['-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (err) {
+    sendCatLog(`[CW] Persistent keyer spawn failed: ${err.message}. Install python3 + pyserial.`);
+    return null;
+  }
+  _cwPersistentKeyerProc = proc;
+  _cwPersistentKeyerKey = key;
+  let stderr = '';
+  if (proc.stderr) {
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stderr.on('error', () => {});
+  }
+  if (proc.stdin) proc.stdin.on('error', () => {}); // EPIPE if it died — swallow
+  proc.on('error', (err) => {
+    sendCatLog(`[CW] python3 not available (${err.code || err.message}). Install python3 + pyserial for real-time CW keying on this port.`);
+    if (_cwPersistentKeyerProc === proc) { _cwPersistentKeyerProc = null; _cwPersistentKeyerKey = null; }
+  });
+  proc.on('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      const tbLines = stderr.trim().split('\n').filter(Boolean);
+      const tbErr = tbLines.length ? tbLines[tbLines.length - 1] : '';
+      const tip = /no module named serial|ModuleNotFoundError/i.test(stderr)
+        ? ' (pyserial not installed — Debian/Ubuntu: sudo apt install python3-serial)'
+        : (/busy|errno 16/i.test(stderr) ? ' (CW Key Port busy — another program holds it)' : '');
+      sendCatLog(`[CW] Persistent keyer exited code ${code}${tip}${tbErr ? ': ' + tbErr : ''}`);
+    }
+    if (_cwPersistentKeyerProc === proc) { _cwPersistentKeyerProc = null; _cwPersistentKeyerKey = null; }
+  });
+  sendCatLog(`[CW] Persistent keyer started on ${_cwKeyPortPathForPython} (${line.toUpperCase()})`);
+  return proc;
+}
+
+function _writePersistentKeyer(cmd) {
+  const proc = _cwPersistentKeyerProc;
+  if (!proc || !proc.stdin || proc.stdin.destroyed) return false;
+  try { proc.stdin.write(cmd + '\n'); return true; } catch { return false; }
+}
+
+// Real-time key edge (paddle). Returns true if handled by the persistent keyer.
+function cwPersistentKey(down, pins) {
+  if (!ensureCwPersistentKeyer(pins)) return false;
+  return _writePersistentKeyer(down ? '1' : '0');
+}
+
+// Text/macro via the persistent keyer's python-side Morse renderer. Only used
+// when the keyer is ALREADY running (spawned for paddle) — we don't spawn it
+// just for text, so a text-only user keeps the proven per-message python path
+// unchanged, and once the keyer owns the port (paddle in use) text routes
+// through it to avoid a two-opener conflict. Returns true if it took the text.
+function cwPersistentText(wpm, text, pins) {
+  if (!_cwPersistentKeyerProc) return false;       // not running → caller uses per-message python
+  if (!ensureCwPersistentKeyer(pins)) return false; // keeps the line in sync (respawn if changed)
+  const clean = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
+  if (!clean) return true; // keyer is up; nothing to send
+  return _writePersistentKeyer(`T ${Math.max(5, Math.min(60, wpm | 0)) || 20} ${clean}`);
+}
+
+function abortCwPersistentText() {
+  _writePersistentKeyer('A');
+}
+
+function killCwPersistentKeyer() {
+  const proc = _cwPersistentKeyerProc;
+  _cwPersistentKeyerProc = null;
+  _cwPersistentKeyerKey = null;
+  if (!proc) return;
+  try { if (proc.stdin && !proc.stdin.destroyed) proc.stdin.write('Q\n'); } catch {}
+  try { proc.kill('SIGTERM'); } catch {}
+}
+
 // Notify phone whether paddle keying actually reaches the radio. Macros
 // and text-send go through different code paths (CI-V 0x17, hamlib
 // send_morse) and stay enabled regardless — only the iambic-keyer paddle
@@ -10670,7 +10786,13 @@ function _sendCwTextToRadioImpl(text) {
     // (this driver rejected TIOCMSET, keys via TIOCMBIS/BIC) or node-serialport
     // DTR. Returns a label if it keyed, else false.
     const keyViaKeyPort = () => {
-      if (_cwKeyPortPathForPython && sendCwTextViaPython(expanded, wpm, txtPins)) return `Python pyserial (${pinLabel})`;
+      if (_cwKeyPortPathForPython) {
+        // Prefer the persistent keyer (also carries real-time paddle); it owns
+        // the port, so the per-message python is only the fallback when the
+        // keyer can't run (win32 / no python).
+        if (cwPersistentText(wpm, expanded, txtPins)) return `persistent keyer (${pinLabel})`;
+        if (sendCwTextViaPython(expanded, wpm, txtPins)) return `Python pyserial (${pinLabel})`;
+      }
       if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins)) return `${pinLabel} keyer`;
       return false;
     };
@@ -10723,6 +10845,9 @@ function cancelAllCwSends() {
   // right after Stop isn't swallowed as a "duplicate while sending".
   _lastCwSendText = '';
   _lastCwSendAt = 0;
+  // 0. Persistent pyserial keyer — abort any in-flight text and key up, but
+  //    keep the process alive so the paddle stays ready.
+  abortCwPersistentText();
   // 1. Hardware WinKeyer — flushes the WK1/WK3 buffer.
   if (winKeyer && winKeyer.connected) {
     try { winKeyer.cancelText(); } catch {}
@@ -11738,7 +11863,13 @@ function connectRemote() {
         // fell through to setCwKeyTxRx and dead-keyed PTT on the CAT port on top of
         // the key port's real keying (held the rig in SEND). With no key port there's
         // no way to make CW from a paddle at all, so tell the phone it won't make RF.
-        if (!(cwKeyPort && cwKeyPort.isOpen) && !_cwTxrxPttOnlyLogged) {
+        // Suppress the "would only key PTT / unavailable" notice when a CW Key
+        // Port is configured on a platform where the persistent pyserial keyer
+        // can drive it (non-win32) — the key-port block below keys for real, so
+        // the paddle IS available (KM4CFT FT-891 cp210x). Only warn when there's
+        // genuinely no working key-port route.
+        const _keyPortPaddlePossible = !!settings.cwKeyPort && process.platform !== 'win32';
+        if (!(cwKeyPort && cwKeyPort.isOpen) && !_keyPortPaddlePossible && !_cwTxrxPttOnlyLogged) {
           _cwTxrxPttOnlyLogged = true;
           sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +
             'For a real paddle: connect the rig\'s OTHER USB COM port (the one not used for CAT — "Standard" on the FTDX10, "Enhanced/CAT-2" on FT-710/991), ' +
@@ -11754,19 +11885,31 @@ function connectRemote() {
     }
     // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter,
     // a QMX second port, or a Yaesu's second (Standard/Enhanced) USB COM port.
+    // Which line(s) the key port drives. Default: the model's key pins when it
+    // names one that includes DTR (QMX = DTR+RTS); otherwise DTR — the near-
+    // universal default for an external transistor adapter AND the Yaesu
+    // "PC KEYING = DTR" case. The per-rig cwKeyLine override lets a Yaesu user
+    // who set PC KEYING = RTS (or an RTS-wired adapter) select RTS instead.
+    // (We deliberately don't use the RADIO's main-port dtrPins here — that's the
+    // rig's own USB-keying line, e.g. IC-7300 RTS, which is a different port than
+    // an external key adapter that's almost always DTR.) Drive BOTH lines
+    // explicitly so node-serialport can't latch the un-keyed one.
+    const kpDefault = (cwCaps.dtrPins && cwCaps.dtrPins.dtr) ? cwCaps.dtrPins : { dtr: true, rts: false };
+    const kpPins = resolveCwKeyPins({ modelPins: kpDefault, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
+    // TIOCMSET-rejecting port (Linux cp210x): real-time paddle via the
+    // persistent pyserial keyer, which the per-element node-serialport set()
+    // below can't do. First key-edge of a session bootstraps the port open
+    // (async ENOTTY sets _cwKeyPortPathForPython) — that one edge is dropped,
+    // subsequent edges key. (KM4CFT FT-891 built-in CP2105.)
+    if (process.platform !== 'win32' && settings.cwKeyPort && !(cwKeyPort && cwKeyPort.isOpen)) {
+      if (_cwKeyPortPathForPython) {
+        if (cwPersistentKey(!!down, kpPins)) return;
+      } else if (!cwKeyPort) {
+        ensureCwKeyPortLazyOpen(); // open once so ENOTTY marks the pyserial path
+      }
+    }
     if (cwKeyPort && cwKeyPort.isOpen) {
-      // Which line(s) the key port drives. Default: the model's key pins when it
-      // names one that includes DTR (QMX = DTR+RTS); otherwise DTR — the near-
-      // universal default for an external transistor adapter AND the Yaesu
-      // "PC KEYING = DTR" case. The per-rig cwKeyLine override lets a Yaesu user
-      // who set PC KEYING = RTS (or an RTS-wired adapter) select RTS instead.
-      // (We deliberately don't use the RADIO's main-port dtrPins here — that's the
-      // rig's own USB-keying line, e.g. IC-7300 RTS, which is a different port than
-      // an external key adapter that's almost always DTR.) Drive BOTH lines
-      // explicitly so node-serialport can't latch the un-keyed one.
-      const kpDefault = (cwCaps.dtrPins && cwCaps.dtrPins.dtr) ? cwCaps.dtrPins : { dtr: true, rts: false };
-      const pins = resolveCwKeyPins({ modelPins: kpDefault, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
-      const pinState = { dtr: pins.dtr ? !!down : false, rts: pins.rts ? !!down : false };
+      const pinState = { dtr: kpPins.dtr ? !!down : false, rts: kpPins.rts ? !!down : false };
       cwKeyPort.set(pinState, (err) => {
         if (err && !cwKeyPort._dtrLoggedError) {
           console.log(`[CW Key Port] Pin set error: ${err.message} (pins: ${JSON.stringify(pinState)})`);
