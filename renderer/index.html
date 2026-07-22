@@ -1467,9 +1467,9 @@
       <span class="help-text" style="margin-left:24px;display:block;">Auto matches the band's voice convention. Override if your rig needs a specific sideband for FreeDV regardless of band &mdash; e.g. FTDX3000 operators who prefer wide USB on 40m.</span>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-jtcat-use-data-mode" checked> Switch radio to DATA mode (PKTUSB) for FT8 / FT4 (JTCAT)</label>
       <span class="help-text" style="margin-left:24px;display:block;">Uncheck for older Yaesu rigs (FTDX3000, FT-950, etc.) where DATA / Packet-USB caps IF bandwidth too narrow for FT8/FT4. Off keeps the radio in plain USB; route the USB CODEC audio at the rig. Same fix as the FreeDV option above. (AB9AI)</span>
-      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> WSPR or SSTV While Idle</label>
+      <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> WSPR, PSK31, or SSTV While Idle</label>
       <span class="help-text" style="margin-left:12px;display:block;">
-        When this station is idle for the defined time, have POTACAT open either WSPR or SSTV to passively receive.
+        When this station is idle for the defined time, have POTACAT open WSPR, PSK31, or SSTV to passively receive.
         <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="480" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
       </span>
       <div id="idle-rx-opts" style="margin-left:24px;margin-top:4px;display:none;">
@@ -1477,8 +1477,23 @@
           <select id="set-idle-rx-mode" style="font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;">
             <option value="sstv">SSTV</option>
             <option value="wspr">WSPR</option>
+            <option value="psk31">PSK31</option>
           </select>
         </label>
+        <div id="idle-psk-opts" style="margin-top:6px;display:none;align-items:center;gap:8px;flex-wrap:wrap;">
+          <label style="font-size:12px;display:inline-flex;align-items:center;gap:5px;">Band:
+            <select id="set-idle-psk-band" style="font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;">
+              <option value="80m">80m (3.580)</option>
+              <option value="40m">40m (7.070)</option>
+              <option value="30m">30m (10.142)</option>
+              <option value="20m" selected>20m (14.070)</option>
+              <option value="17m">17m (18.100)</option>
+              <option value="15m">15m (21.070)</option>
+              <option value="10m">10m (28.120)</option>
+            </select>
+          </label>
+          <span class="help-text" style="display:block;">PSK31 parks on one band's watering hole (no hopping).</span>
+        </div>
         <div id="idle-wspr-opts" style="margin-top:6px;display:none;align-items:center;gap:18px;flex-wrap:wrap;">
           <label class="checkbox-label" style="font-size:12px;display:inline-flex;align-items:center;gap:5px;margin:0;" title="Sweep across the WSPR bands, one per 2-minute cycle"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-hop"> Band hopping</label>
           <label class="checkbox-label" style="font-size:12px;display:inline-flex;align-items:center;gap:5px;margin:0;"><input type="radio" name="idle-wspr-band-mode" id="idle-wspr-band-single" checked> Single band:
@@ -3944,10 +3959,10 @@
     </label>
     <span class="help-text" style="display:block;margin-left:22px;margin-bottom:8px;">FT8 Battle Royale is a worldwide FT8/FT4 contest scored from the QSOs you log — POTACAT forwards each digital QSO to it in parallel with your normal logbook, so nothing else changes.</span>
 
-    <div class="welcome-section-label">WSPR or SSTV While Idle</div>
+    <div class="welcome-section-label">WSPR, PSK31, or SSTV While Idle</div>
     <label class="checkbox-label" style="margin-bottom:4px;">
       <input type="checkbox" id="welcome-enable-auto-sstv" checked>
-      When this station is idle, have POTACAT open either WSPR or SSTV to passively receive
+      When this station is idle, have POTACAT open WSPR, PSK31, or SSTV to passively receive
     </label>
     <div style="margin-left:22px;margin-bottom:8px;display:flex;align-items:center;gap:6px;font-size:13px;">
       <span>After</span>
@@ -3956,7 +3971,21 @@
       <select id="welcome-idle-rx-mode" style="font-size:13px;">
         <option value="sstv">SSTV</option>
         <option value="wspr">WSPR</option>
+        <option value="psk31">PSK31</option>
       </select>
+    </div>
+    <div id="welcome-idle-psk-opts" style="margin-left:22px;margin-bottom:8px;display:none;align-items:center;gap:6px;font-size:13px;">
+      <span>Band:</span>
+      <select id="welcome-idle-psk-band" style="font-size:13px;">
+        <option value="80m">80m</option>
+        <option value="40m">40m</option>
+        <option value="30m">30m</option>
+        <option value="20m" selected>20m</option>
+        <option value="17m">17m</option>
+        <option value="15m">15m</option>
+        <option value="10m">10m</option>
+      </select>
+      <span class="help-text">parks on one band (no hopping)</span>
     </div>
     <div id="welcome-idle-wspr-opts" style="margin-left:22px;margin-bottom:8px;display:none;align-items:center;gap:18px;flex-wrap:wrap;font-size:13px;">
       <label class="checkbox-label" style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0;" title="Sweep across the WSPR bands, one per 2-minute cycle"><input type="radio" name="welcome-idle-wspr-band-mode" id="welcome-idle-wspr-band-hop"> Band hopping</label>

@@ -7095,7 +7095,14 @@ function startJtcat(mode) {
   // Casey on 2026-05-03: came back from Auto-SSTV, opened JTCAT on 20m,
   // got zero decodes; restart fixed it because SSTV was no longer
   // running.
-  cancelAutoSstv();
+  //
+  // But do NOT cancel a WSPR/PSK31-on-idle session here: it runs on THIS
+  // engine (no audio contention) and this startJtcat call is usually the very
+  // thing it triggered by opening the popout. Cancelling wiped auto-RX's own
+  // bookkeeping, so the engine kept decoding while the idle timer — blind to
+  // its own session — logged "already decoding" every 30s forever and never
+  // tore down when the operator returned. (Casey 2026-07-22)
+  if (autoSstvActive && !autoIdleJtcatActive) cancelAutoSstv();
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
     sendCatLog('[JTCAT] Closing SSTV popout — JTCAT and SSTV can\'t share the audio input');
     try { sstvPopoutWin.close(); } catch {}
@@ -18212,12 +18219,21 @@ let autoSstvActive = false;
 let autoSstvPrevFreq = null;
 let autoSstvPrevMode = null;
 let autoSstvCurrentFreq = 0;
-// WSPR-on-idle: the idle-RX feature can open WSPR instead of SSTV
-// (settings.idleRxMode). These track the WSPR variant so cancel restores the
-// user's prior JTCAT mode and only closes the popout if WE opened it.
-let autoIdleWsprActive = false;
+// JTCAT-on-idle: the idle-RX feature can open the JTCAT popout in WSPR or
+// PSK31 instead of SSTV (settings.idleRxMode). These track that variant so
+// cancel restores the user's prior JTCAT mode and only closes the popout if
+// WE opened it. WSPR and PSK31 both run on the JTCAT engine (no audio-device
+// contention like SSTV), so startJtcat must NOT cancel this session.
+let autoIdleJtcatActive = false;
 let autoIdlePrevJtcatMode = null;
-let autoIdleWsprOpenedPopout = false;
+let autoIdleJtcatOpenedPopout = false;
+let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' — names the stop log line
+// PSK31 watering-hole USB dials (kHz), mirrored from the popout's
+// PSK_BAND_FREQS. PSK31-on-idle parks on one band (no hopping).
+const PSK_IDLE_DIALS = {
+  '80m': 3580, '40m': 7070, '30m': 10142, '20m': 14070,
+  '17m': 18100, '15m': 21070, '10m': 28120,
+};
 
 function getSunTimes(lat, lon, date) {
   const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
@@ -18253,7 +18269,7 @@ function startAutoSstvTimer() {
     }
     // If SSTV is already active, check for band change at sunrise/sunset.
     // (WSPR-on-idle manages its own bands via the hop scheduler — skip.)
-    if (autoSstvActive && !autoIdleWsprActive) {
+    if (autoSstvActive && !autoIdleJtcatActive) {
       const newBand = getSstvAutoFreq();
       if (newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
@@ -18283,24 +18299,38 @@ function triggerAutoSstv() {
     sendCatLog('[Auto-RX] Deferred — JTCAT is already decoding');
     return;
   }
-  // WSPR-on-idle variant: open the JTCAT popout in WSPR mode (it owns audio
-  // capture + the spot list/map) instead of SSTV. The popout auto-starts from
-  // settings.jtcatLastMode, so configure WSPR (dial / band-hop) first.
-  if ((settings.idleRxMode || 'sstv') === 'wspr') {
+  // WSPR/PSK31-on-idle variant: open the JTCAT popout in that mode (it owns
+  // audio capture + the spot list/map) instead of SSTV. The popout auto-starts
+  // from settings.jtcatLastMode and tunes to settings.jtcatLastBandFreq, so
+  // configure both first.
+  const idleMode = settings.idleRxMode || 'sstv';
+  if (idleMode === 'wspr' || idleMode === 'psk31') {
     autoSstvActive = true;
-    autoIdleWsprActive = true;
+    autoIdleJtcatActive = true;
     autoIdlePrevJtcatMode = settings.jtcatLastMode || 'FT8';
-    autoIdleWsprOpenedPopout = !(jtcatPopoutWin && !jtcatPopoutWin.isDestroyed());
-    const band = settings.idleWsprBand || '20m';
-    const dialMhz = wsprBands.dialForBand(band) || 14.0956;
-    settings.jtcatLastMode = 'WSPR';
-    settings.wsprHopEnabled = settings.idleWsprBandHop === true;
-    settings.wsprDial = dialMhz;
-    settings.jtcatLastBandFreq = Math.round(dialMhz * 1000); // kHz — popout matches the WSPR band button
-    saveSettings(settings);
-    if (openJtcatPopout) openJtcatPopout();
-    sendCatLog('[Auto-RX] WSPR receive started — ' +
-      (settings.wsprHopEnabled ? 'band hopping' : band + ' (' + dialMhz.toFixed(4) + ' MHz)'));
+    autoIdleJtcatOpenedPopout = !(jtcatPopoutWin && !jtcatPopoutWin.isDestroyed());
+    if (idleMode === 'wspr') {
+      const band = settings.idleWsprBand || '20m';
+      const dialMhz = wsprBands.dialForBand(band) || 14.0956;
+      settings.jtcatLastMode = 'WSPR';
+      settings.wsprHopEnabled = settings.idleWsprBandHop === true;
+      settings.wsprDial = dialMhz;
+      settings.jtcatLastBandFreq = Math.round(dialMhz * 1000); // kHz — popout matches the WSPR band button
+      autoIdleRxLabel = 'WSPR';
+      saveSettings(settings);
+      if (openJtcatPopout) openJtcatPopout();
+      sendCatLog('[Auto-RX] WSPR receive started — ' +
+        (settings.wsprHopEnabled ? 'band hopping' : band + ' (' + dialMhz.toFixed(4) + ' MHz)'));
+    } else {
+      const band = settings.idlePskBand || '20m';
+      const dialKhz = PSK_IDLE_DIALS[band] || 14070;
+      settings.jtcatLastMode = 'PSK31';
+      settings.jtcatLastBandFreq = dialKhz; // popout matches the PSK31 band button + tunes here
+      autoIdleRxLabel = 'PSK31';
+      saveSettings(settings);
+      if (openJtcatPopout) openJtcatPopout();
+      sendCatLog('[Auto-RX] PSK31 receive started — ' + band + ' (' + (dialKhz / 1000).toFixed(3) + ' MHz)');
+    }
     if (remoteServer && remoteServer.hasClient()) {
       remoteServer.broadcastSstvTxStatus({ state: 'auto-rx' });
     }
@@ -18322,17 +18352,19 @@ function triggerAutoSstv() {
 function cancelAutoSstv() {
   if (!autoSstvActive) return;
   autoSstvActive = false;
-  if (autoIdleWsprActive) {
-    // WSPR-on-idle teardown: restore the user's prior JTCAT mode and close the
-    // popout only if WE opened it (don't close one the user had open already).
-    autoIdleWsprActive = false;
+  if (autoIdleJtcatActive) {
+    // WSPR/PSK31-on-idle teardown: restore the user's prior JTCAT mode and
+    // close the popout only if WE opened it (don't close one the user had open
+    // already).
+    autoIdleJtcatActive = false;
     if (autoIdlePrevJtcatMode) { settings.jtcatLastMode = autoIdlePrevJtcatMode; saveSettings(settings); }
     autoIdlePrevJtcatMode = null;
-    if (autoIdleWsprOpenedPopout && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    if (autoIdleJtcatOpenedPopout && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       try { jtcatPopoutWin.close(); } catch {}
     }
-    autoIdleWsprOpenedPopout = false;
-    sendCatLog('[Auto-RX] WSPR receive stopped');
+    autoIdleJtcatOpenedPopout = false;
+    sendCatLog('[Auto-RX] ' + (autoIdleRxLabel || 'WSPR') + ' receive stopped');
+    autoIdleRxLabel = null;
     autoSstvPrevFreq = null;
     autoSstvPrevMode = null;
     return;
