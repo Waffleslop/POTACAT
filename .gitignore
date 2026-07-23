@@ -21,3 +21,8 @@ assets/wsprd/*.dylib
 assets/wsprd/*.so*
 # WSPR loopback scratch wav
 dbg.wav
+
+# Native addon build artifacts (built locally / by CI, never tracked)
+lib/ft8_native/build/
+lib/ft8_native/bin/
+lib/rade_native/build/
