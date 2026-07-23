@@ -1838,13 +1838,38 @@ function sendCatStatus(s) {
         // the line high and only a physical unplug cleared it (N7BBQ, FT-891).
         // De-key first, ask questions later.
         dropCwKeyLine('CAT link lost');
+        // Link loss within ~3 s of driving the key line = the transmit almost
+        // certainly reset the USB itself (RF into the shared FT-891 CAT+key
+        // device). Point the operator at the real cause, not just "check USB".
+        const rfSuspect = _lastCwKeyMs && (Date.now() - _lastCwKeyMs < 3000);
+        if (rfSuspect) {
+          sendCatLog('[CAT] The link dropped during a CW transmission — RF is likely resetting the USB device. Add a ferrite choke on the USB cable, improve station grounding, or lower power. POTACAT will force the key line low again once the rig returns.');
+        }
         if (win && !win.isDestroyed()) {
-          win.webContents.send('app-notice', { message: 'Radio link lost — check the USB/serial connection', warn: true, duration: 8000 });
+          win.webContents.send('app-notice', {
+            message: rfSuspect
+              ? 'Radio link lost during CW TX — RF may be resetting the USB. Add a ferrite/ground; the key line will be released when it returns.'
+              : 'Radio link lost — check the USB/serial connection',
+            warn: true, duration: 8000,
+          });
         }
       } else {
         sendCatLog('[CAT] Radio link restored.');
         if (win && !win.isDestroyed()) {
           win.webContents.send('app-notice', { message: 'Radio link restored', duration: 4000 });
+        }
+        // If a CW key-line drop couldn't reach the port during the loss (the
+        // device vanished mid-key), the rig can be stranded in TX. Now that the
+        // device is back, reopen the key port so its open-time DTR/RTS-low
+        // un-keys it — the recovery the link-loss de-key couldn't do. Small
+        // delay so the re-enumerated port is ready. (N7BBQ 2026-07-23.)
+        if (_cwKeyDropPending && settings.cwKeyPort) {
+          _cwKeyDropPending = false;
+          setTimeout(() => {
+            disconnectCwKeyPort();
+            connectCwKeyPort();
+            sendCatLog('[CW] Reopened the CW key port after link restore to force the key line low (it was unreachable during the drop).');
+          }, 500);
         }
       }
     }
@@ -10428,6 +10453,11 @@ let _cwDtrSendTimers = []; // outstanding setTimeout ids so a new send can cance
 let _cwDtrEndTimer = null;
 let _cwStuckKeyWatchdog = null; // fires past a message's envelope to force the key line low if it latched
 const CW_STUCK_KEY_MARGIN_MS = 500; // watchdog fires this long after the envelope's own key-up
+// A de-key couldn't reach the key port (the device vanished mid-key — an
+// RF-induced USB reset drops the shared FT-891 CAT+key device, N7BBQ 2026-07-23).
+// The line can be stranded high; recover by reopening the port on link restore.
+let _cwKeyDropPending = false;
+let _lastCwKeyMs = 0; // last time we drove the CW key line — for the link-loss RF hint
 
 // Single choke point for forcing the dedicated CW key line (cwKeyPort DTR/RTS)
 // back to key-UP. The key port is a SEPARATE USB-serial adapter from the CAT
@@ -10442,8 +10472,22 @@ function dropCwKeyLine(reason) {
   if (_cwStuckKeyWatchdog) { clearTimeout(_cwStuckKeyWatchdog); _cwStuckKeyWatchdog = null; }
   if (_cwDtrSendTimers.length) { for (const t of _cwDtrSendTimers) clearTimeout(t); _cwDtrSendTimers = []; }
   if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
-  if (!(cwKeyPort && cwKeyPort.isOpen)) return;
-  const drop = () => { try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch { /* port went away */ } };
+  if (!(cwKeyPort && cwKeyPort.isOpen)) {
+    // No live handle to drop through. If a key port is configured the line may
+    // be stranded high on a device that vanished mid-key — flag it so link
+    // restore reopens the port and forces it low.
+    if (settings.cwKeyPort) _cwKeyDropPending = true;
+    return;
+  }
+  const drop = () => {
+    try {
+      cwKeyPort.set({ dtr: false, rts: false }, (err) => {
+        // "Access denied" here = the device dropped mid-key (COM handle stale).
+        // We can't reach it now; recover on link restore by reopening the port.
+        if (err) _cwKeyDropPending = true;
+      });
+    } catch { _cwKeyDropPending = true; }
+  };
   drop();
   setTimeout(() => { if (cwKeyPort && cwKeyPort.isOpen) drop(); }, 50);
   if (reason) sendCatLog(`[CW] Key line forced low — ${reason}`);
@@ -10741,6 +10785,9 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
 }
 
 function sendCwTextToRadio(text) {
+  // Timestamp the transmit so a CAT link loss in the next few seconds is
+  // recognized as RF-into-USB rather than a generic cable fault.
+  if (text) _lastCwKeyMs = Date.now();
   // A CW keystroke must never crash the app. Every backend below touches
   // serial/spawn/native code that can throw synchronously; without this a
   // single bad send (KM4CFT's FT-891 key-port path, 2026-07-21) took the whole
