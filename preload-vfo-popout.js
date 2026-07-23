@@ -8,8 +8,12 @@ contextBridge.exposeInMainWorld('api', {
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   setMode: (mode) => ipcRenderer.send('vfo-set-mode', mode),
   setFilterWidth: (hz) => ipcRenderer.send('vfo-set-filter-width', hz),
-  rigControl: (data) => ipcRenderer.send('rig-control', data),
-  sendCustomCat: (cmd) => ipcRenderer.send('rig-control', { action: 'send-custom-cat', command: cmd }),
+  // rig-control is registered with ipcMain.handle (main.js), so it must be
+  // invoked, not sent — a bare .send has no listener and is silently dropped,
+  // which is why the popout's ATU / NB / custom-CAT buttons did nothing. Match
+  // the main-window preload (preload.js). Fire-and-forget: callers don't await.
+  rigControl: (data) => ipcRenderer.invoke('rig-control', data),
+  sendCustomCat: (cmd) => ipcRenderer.invoke('rig-control', { action: 'send-custom-cat', command: cmd }),
   sendCwText: (text) => ipcRenderer.send('send-cw-text', text),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),

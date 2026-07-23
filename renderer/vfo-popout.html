@@ -1025,7 +1025,9 @@ function buildRigToggles() {
     nbBtn.title = 'Noise Blanker';
     nbBtn.addEventListener('click', () => {
       nbOn = !nbOn;
-      window.api.rigControl({ action: 'set-nb', on: nbOn });
+      // set-nb reads data.value (main.js) — the field name must match, or the
+      // handler sees value=undefined and NB never turns on.
+      window.api.rigControl({ action: 'set-nb', value: nbOn });
       document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
     });
     row.appendChild(nbBtn);
@@ -1033,11 +1035,12 @@ function buildRigToggles() {
     const atuBtn = document.createElement('button');
     atuBtn.className = 'toggle-btn atu-toggle' + (atuOn ? ' on' : '');
     atuBtn.textContent = 'ATU';
-    atuBtn.title = 'Antenna Tuner';
+    atuBtn.title = 'Start ATU tune cycle';
+    // Momentary: atu-tune runs a tune cycle on every press (NOT a toggle — see
+    // the rig-controls registry + applyRigControl). The .on indicator is driven
+    // by the radio's reported ATU state (onRadioState → atuOn), not the click.
     atuBtn.addEventListener('click', () => {
-      atuOn = !atuOn;
-      window.api.rigControl({ action: 'atu-tune', on: atuOn });
-      document.querySelectorAll('.atu-toggle').forEach(b => b.classList.toggle('on', atuOn));
+      window.api.rigControl({ action: 'atu-tune' });
     });
     row.appendChild(atuBtn);
   });
