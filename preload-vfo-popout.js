@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('api', {
   sendCwText: (text) => ipcRenderer.send('send-cw-text', text),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),
+  // Synced CW speed pushed by main.js applyCwWpm when WPM changes elsewhere
+  // (phone or the main window). Display-only: do NOT re-send from here.
+  onCwWpmChanged: (cb) => ipcRenderer.on('cw-wpm-changed', (_e, wpm) => cb(wpm)),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
   // Naked PTT (manual PTT button, no audio bridge). Distinct from
   // voiceMacroPtt so SSB-over-DATA doesn't disable the rig's hand mic

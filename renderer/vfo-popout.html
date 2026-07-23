@@ -2277,9 +2277,18 @@ let cwTunedOpName = '';   // current tuned op name for CW macro {op_firstname}
 function setCwWpm(wpm) {
   cwWpm = Math.max(5, Math.min(60, wpm));
   vfoCwWpm.textContent = cwWpm;
-  window.api.cwSetWpm(cwWpm);
-  window.api.saveSettings({ cwWpm });
+  window.api.cwSetWpm(cwWpm); // main's applyCwWpm persists settings.cwWpm
   updateCwSyncBtn();
+}
+
+// WPM changed on another surface (phone or the main window) — reflect it here.
+// Display-only (no cwSetWpm) so we don't echo it back into a loop.
+if (window.api.onCwWpmChanged) {
+  window.api.onCwWpmChanged((wpm) => {
+    cwWpm = Math.max(5, Math.min(60, wpm));
+    if (vfoCwWpm) vfoCwWpm.textContent = cwWpm;
+    updateCwSyncBtn();
+  });
 }
 
 function updateCwSyncBtn() {

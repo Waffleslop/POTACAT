@@ -18863,8 +18863,19 @@ function setCwMacroWpm(wpm) {
   cwMacroWpm = Math.max(5, Math.min(60, wpm));
   if (cwWpmDisplay) cwWpmDisplay.textContent = cwMacroWpm;
   window.api.cwSetWpm(cwMacroWpm);
-  window.api.saveSettings({ cwWpm: cwMacroWpm });
   updateCwSpotWpm(); // refresh sync button state
+}
+
+// WPM changed on another surface (phone or VFO popout) — reflect it here.
+// Display-only (no cwSetWpm) so we don't echo it back into a loop; main's
+// applyCwWpm already persisted settings.cwWpm.
+if (window.api.onCwWpmChanged) {
+  window.api.onCwWpmChanged((wpm) => {
+    cwMacroWpm = Math.max(5, Math.min(60, wpm));
+    if (cwWpmDisplay) cwWpmDisplay.textContent = cwMacroWpm;
+    if (setCwWpm) setCwWpm.value = cwMacroWpm; // Settings input
+    updateCwSpotWpm();
+  });
 }
 
 // Spotted station WPM display + sync

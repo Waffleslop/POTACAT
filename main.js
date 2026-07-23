@@ -846,6 +846,35 @@ function applyJtcatRxGain(value, origin) {
   if (origin !== 'popout' && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-set-rx-gain', v);
   if (origin !== 'remote' && remoteServer) remoteServer.broadcastJtcatRxGainState({ value: v });
 }
+
+// The one authoritative writer for CW speed — same shape as applyJtcatRxGain.
+// Before this, the phone's cw-config poked the live keyers but never touched
+// settings.cwWpm, so CW text/sidetone/envelopes (all of which read
+// settings.cwWpm) kept the desktop's old speed and the keyer reconfig clobbered
+// the phone's value — the "phone WPM is ignored" report (N7BBQ). Now every
+// surface's change lands here: clamp → persist (debounced) → apply to all live
+// keyers → relay to the other windows → echo cw-config-ack to the phone. The
+// origin surface is skipped so it isn't fought by its own echo.
+let _cwWpmSaveTimer = null;
+function applyCwWpm(wpm, origin) {
+  let v = Number(wpm);
+  if (!Number.isFinite(v)) return;
+  v = Math.max(5, Math.min(50, Math.round(v)));
+  settings.cwWpm = v;
+  clearTimeout(_cwWpmSaveTimer);
+  _cwWpmSaveTimer = setTimeout(() => { try { saveSettings(settings); } catch {} }, 1200);
+  // Apply to every live keyer so it's the working speed immediately (the same
+  // set the old cw-config / cw-set-wpm handlers did, now in one place).
+  if (keyer) keyer.setWpm(v);
+  if (winKeyer && winKeyer.connected) winKeyer.setSpeed(v);
+  if (smartSdr && smartSdr.connected) smartSdr.setCwSpeed(v);
+  if (cat && cat.connected) cat.setCwSpeed(v); // also updates cat._cwWpm (text keyer timing)
+  if (origin !== 'main' && win && !win.isDestroyed()) win.webContents.send('cw-wpm-changed', v);
+  if (origin !== 'vfo' && vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cw-wpm-changed', v);
+  // Skip echoing to the phone that just set it (its cw-config already got a
+  // unicast ack in remote-server) so we don't hand it back a "desktop change".
+  if (origin !== 'remote' && remoteServer) remoteServer.broadcastCwConfig({ wpm: v });
+}
 let popoutWin = null; // pop-out map window
 let qsoPopoutWin = null; // pop-out QSO log window
 let actmapPopoutWin = null; // pop-out activation map window
@@ -11961,16 +11990,11 @@ function connectRemote() {
     }
   });
 
-  // CW config changes from phone (WPM)
+  // CW WPM from the phone — make it authoritative (persist settings.cwWpm +
+  // sync every surface) instead of a transient keyer poke. Keyer MODE stays
+  // owned by remote-server's iambic keyer (this handler only carries WPM).
   remoteServer.on('cw-config', ({ wpm }) => {
-    if (winKeyer && winKeyer.connected) winKeyer.setSpeed(wpm);
-    if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
-      smartSdr.setCwSpeed(wpm);
-    }
-    // Also set KS on serial CAT (QMX etc.)
-    if (cat && cat.connected) {
-      cat.setCwSpeed(wpm);
-    }
+    if (typeof wpm === 'number') applyCwWpm(wpm, 'remote');
   });
 
   // CW text macros/freeform from phone — route to radio
@@ -11980,8 +12004,12 @@ function connectRemote() {
     cancelAllCwSends();
   });
 
-  remoteServer.on('cw-text', ({ text }) => {
+  remoteServer.on('cw-text', ({ text, wpm }) => {
     if (!text) return;
+    // Honor the WPM the phone sends inline with the macro so a bare cw-text
+    // (no preceding cw-config) still keys at the right speed — and it flows
+    // through the one authoritative writer, keeping settings.cwWpm current.
+    if (typeof wpm === 'number') applyCwWpm(wpm, 'remote');
     sendCwTextToRadio(text);
   });
 
@@ -28281,11 +28309,11 @@ app.whenReady().then(() => {
   ipcMain.on('cw-paddle-dah', (_e, pressed) => {
     if (keyer) keyer.paddleDah(pressed);
   });
-  ipcMain.on('cw-set-wpm', (_e, wpm) => {
-    if (keyer) keyer.setWpm(wpm);
-    if (winKeyer && winKeyer.connected) winKeyer.setSpeed(wpm);
-    if (smartSdr && smartSdr.connected) smartSdr.setCwSpeed(wpm);
-    if (cat && cat.connected) cat.setCwSpeed(wpm);
+  ipcMain.on('cw-set-wpm', (e, wpm) => {
+    // Origin from the sending window so applyCwWpm doesn't echo back to it
+    // (the main-window CW bar and the VFO popout both use this channel).
+    const fromVfo = vfoPopoutWin && !vfoPopoutWin.isDestroyed() && e.sender === vfoPopoutWin.webContents;
+    applyCwWpm(wpm, fromVfo ? 'vfo' : 'main');
   });
   ipcMain.on('cw-stop', () => {
     if (keyer) keyer.stop();

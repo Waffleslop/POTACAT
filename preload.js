@@ -482,6 +482,9 @@ contextBridge.exposeInMainWorld('api', {
   onCwKey: (cb) => ipcRenderer.on('cw-key', (_e, data) => cb(data)),
   onCwKeyerStatus: (cb) => ipcRenderer.on('cw-keyer-status', (_e, s) => cb(s)),
   onCwText: (cb) => ipcRenderer.on('cw-text', (_e, data) => cb(data)),
+  // Synced CW speed — fired by main.js applyCwWpm when WPM changes on another
+  // surface (phone or the VFO popout). Display-only: do NOT re-send from here.
+  onCwWpmChanged: (cb) => ipcRenderer.on('cw-wpm-changed', (_e, wpm) => cb(wpm)),
   // Remote Access
   getLocalIPs: () => ipcRenderer.invoke('get-local-ips'),
   // Remote Launcher
