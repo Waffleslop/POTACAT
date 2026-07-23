@@ -19798,6 +19798,9 @@ const rigPowerOnBtn = document.getElementById('rig-power-on-btn');
 const rigPowerOffBtn = document.getElementById('rig-power-off-btn');
 const rigRfGain = document.getElementById('rig-rfgain');
 const rigRfGainLabel = document.getElementById('rig-rfgain-label');
+const rigSquelch = document.getElementById('rig-squelch');
+const rigSquelchLabel = document.getElementById('rig-squelch-label');
+const rigSquelchRow = document.getElementById('rig-squelch-row');
 const rigTxPower = document.getElementById('rig-txpower');
 const rigTxPowerSelect = document.getElementById('rig-txpower-select');
 const rigTxPowerLabel = document.getElementById('rig-txpower-label');
@@ -20368,6 +20371,8 @@ rigRfGain.addEventListener('input', () => {
   throttledRigControl('set-rf-gain', val);
 });
 
+_bindLevelSlider(rigSquelch, rigSquelchLabel, 'set-squelch', '');
+
 rigTxPower.addEventListener('input', () => {
   const val = parseFloat(rigTxPower.value);
   rigTxPowerLabel.textContent = rigFormatPower(val);
@@ -20387,6 +20392,16 @@ window.api.onRigState((state) => {
   // Apply model capabilities before syncing values so Field-specific power
   // decimals/limits and target-specific preamp labels are already in place.
   if (state.capabilities) rigApplyCapabilities(state.capabilities);
+  // FM squelch row — the ONE mode-gated rig control. Show it only when the rig
+  // advertises squelch AND we're in FM (any band: 10m/6m/2m/70cm all do FM), or
+  // when it's already engaged so the operator can always turn it back down
+  // (CLAUDE.md: never hide a control whose feature is currently on). Gated here
+  // rather than in rigApplyCapabilities because that only sees caps, not mode.
+  if (rigSquelchRow) {
+    const sqCap = !!(state.capabilities && state.capabilities.squelch);
+    const showSql = sqCap && (state.mode === 'FM' || (state.squelch || 0) > 0);
+    rigSquelchRow.style.display = showSql ? '' : 'none';
+  }
   // Update NB button
   if (state.nb) {
     rigNbBtn.classList.add('active');
@@ -20438,6 +20453,7 @@ window.api.onRigState((state) => {
   }
   _syncLevel(rigNrLevel,  rigNrLevelLabel,  state.nrLevel,  '');
   _syncLevel(rigNbLevel,  rigNbLevelLabel,  state.nbLevel,  '');
+  _syncLevel(rigSquelch,  rigSquelchLabel,  state.squelch,  '');
   _syncLevel(rigNrlLevel, rigNrlLevelLabel, state.nrlLevel, '');
   _syncLevel(rigNrsLevel, rigNrsLevelLabel, state.nrsLevel, '');
   _syncLevel(rigNrfLevel, rigNrfLevelLabel, state.nrfLevel, '');

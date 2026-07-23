@@ -248,6 +248,11 @@
             <select id="rig-rfgain-select" class="hidden" title="Preamp / attenuation in radio-native dB steps" style="flex:1;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-secondary);padding:2px 4px;font-size:12px;"></select>
             <span id="rig-rfgain-label">0</span>
           </div>
+          <div class="rig-popover-row" id="rig-squelch-row" style="display:none;" title="FM squelch — mutes RX until a signal exceeds the threshold (shown in FM)">
+            <label>SQL</label>
+            <input type="range" id="rig-squelch" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">
+            <span id="rig-squelch-label">0</span>
+          </div>
           <div class="rig-popover-row" id="rig-txpower-row">
             <label>TX Power</label>
             <input type="range" id="rig-txpower" min="0" max="100" value="0" style="flex:1;accent-color:#4ecca3;">

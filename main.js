@@ -1284,6 +1284,7 @@ let _currentAtuState = false;
 let _currentVfo = 'A';
 let _currentFilterWidth = 0;
 let _currentRfGain = 0;
+let _currentSquelch = 0; // FM squelch threshold 0-100 (see applyRigControl 'set-squelch')
 let _currentTxPower = 0; // 0 = unknown until radio reports actual power
 let _vfoLocked = false;  // VFO lock — blocks tune requests from spots/table/map
 let _rfGainSuppressBroadcast = 0;  // timestamp: suppress ECHOCAT echo-back until this time
@@ -1491,18 +1492,24 @@ function getRigCapabilities(rigType) {
     if (model.maxDnrLevel != null) caps.maxDnrLevel = model.maxDnrLevel;
     if (Array.isArray(model.agcModes)) caps.agcModes = model.agcModes.slice();
     if (Array.isArray(model.preampTargets)) caps.preampTargets = model.preampTargets.slice();
+    // FM squelch — offered on every CAT rig (standard Yaesu/Kenwood SQ, Icom
+    // CI-V 0x14 03, Hamlib L SQL, Flex slice squelch). Clients gate it to FM
+    // mode. See lib/rig-controls.js 'set-squelch'. An unsupported SQ just
+    // returns a harmless rejection.
+    caps.squelch = true;
     return caps;
   }
-  // Fallback to generic per-type
+  // Fallback to generic per-type. squelch:true on every real CAT backend (not
+  // the 'none'/default case) — same rationale as the model path above.
   switch (rigType) {
-    case 'flex':    return { nb: true, atu: true, vfo: false, filter: true, filterType: 'arbitrary', rfgain: true, txpower: true, power: false,
+    case 'flex':    return { nb: true, atu: true, vfo: false, filter: true, filterType: 'arbitrary', rfgain: true, txpower: true, power: false, squelch: true,
                              // DSP/TX controls the SmartSDR API exposes — advertised so clients
                              // only show what the Flex can actually do (and the dispatcher gates).
                              nr: true, anf: true, apf: true, comp: true, vox: true, agc: true, mon: true, rit: true, cwSidetone: true };
-    case 'yaesu':   return { nb: true, atu: true, vfo: true, filter: true, filterType: 'indexed', rfgain: true, txpower: true, power: true };
-    case 'kenwood': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'direct', rfgain: true, txpower: true, power: true };
-    case 'icom':    return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: true };
-    case 'rigctld': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'passband', rfgain: true, txpower: true, power: true };
+    case 'yaesu':   return { nb: true, atu: true, vfo: true, filter: true, filterType: 'indexed', rfgain: true, txpower: true, power: true, squelch: true };
+    case 'kenwood': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'direct', rfgain: true, txpower: true, power: true, squelch: true };
+    case 'icom':    return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: true, squelch: true };
+    case 'rigctld': return { nb: true, atu: true, vfo: true, filter: true, filterType: 'passband', rfgain: true, txpower: true, power: true, squelch: true };
     default:        return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: false };
   }
 }
@@ -1993,6 +2000,7 @@ function broadcastRigState() {
   const state = {
     nb: _currentNbState,
     rfGain: _currentRfGain,
+    squelch: _currentSquelch,
     txPower: _currentTxPower,
     filterWidth: _currentFilterWidth,
     atuActive: _currentAtuState,
@@ -14326,6 +14334,7 @@ function broadcastRemoteRadioStatus() {
     vfo: _currentVfo,
     filterWidth: _currentFilterWidth,
     rfgain: rfg,
+    squelch: _currentSquelch,
     txpower: txp,
     // DSP/TX state — without these the phone never learns NR/ANF/AGC/etc.
     // turned on, so its toggle stays stuck sending `true` (can't turn off) and
@@ -23663,6 +23672,22 @@ app.whenReady().then(() => {
           }
         }
         _currentRfGain = value;
+        broadcastRigState();
+        break;
+      }
+      case 'set-squelch': {
+        if (!getRigCapabilities(rigType).squelch) break;
+        if (flexNeedsApi) { _flexWarnOnce('Squelch requires SmartSDR API — not connected'); break; }
+        const value = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) {
+          smartSdr.setSquelch(0, value);
+        } else if (cat && cat.connected && typeof cat.setSquelch === 'function') {
+          // rigctld's L SQL takes a 0.0-1.0 fraction, like RF gain; all others
+          // take the 0-100 percent directly.
+          cat.setSquelch(rigType === 'rigctld' ? value / 100 : value);
+        }
+        _currentSquelch = value;
+        settings.squelchDefault = value; saveSettings(settings); // remember across sessions
         broadcastRigState();
         break;
       }

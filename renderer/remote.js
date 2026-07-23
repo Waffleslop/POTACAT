@@ -698,6 +698,9 @@
   const rcAtuBtn = document.getElementById('rc-atu-btn');
   const rcRfGainSlider = document.getElementById('rc-rfgain-slider');
   const rcRfGainVal = document.getElementById('rc-rfgain-val');
+  const soSquelchRow = document.getElementById('so-squelch-row');
+  const rcSquelchSlider = document.getElementById('rc-squelch-slider');
+  const rcSquelchVal = document.getElementById('rc-squelch-val');
   const rcTxPowerSlider = document.getElementById('rc-txpower-slider');
   const rcTxPowerVal = document.getElementById('rc-txpower-val');
   const rcVfoA = document.getElementById('rc-vfo-a');
@@ -1904,6 +1907,10 @@
       rcRfGainSlider.value = s.rfgain;
       rcRfGainVal.textContent = s.rfgain;
     }
+    if (s.squelch !== undefined && rcSquelchSlider && document.activeElement !== rcSquelchSlider) {
+      rcSquelchSlider.value = s.squelch;
+      rcSquelchVal.textContent = s.squelch;
+    }
     if (s.txpower !== undefined) {
       rcTxPowerSlider.value = s.txpower;
       rcTxPowerVal.textContent = s.txpower;
@@ -1914,6 +1921,14 @@
       rcNbGroup.classList.toggle('hidden', !s.capabilities.nb);
       rcAtuGroup.classList.toggle('hidden', !s.capabilities.atu);
       soRfGainRow.classList.toggle('hidden', !s.capabilities.rfgain);
+      // FM squelch — mode-gated like the desktop: shown in FM (any band) or
+      // while engaged. When mode is momentarily unknown (suppressed during a
+      // tune) and squelch isn't engaged, leave the row as-is to avoid flicker.
+      if (soSquelchRow) {
+        const sqCap = !!s.capabilities.squelch;
+        if (sqCap && (s.squelch || 0) > 0) soSquelchRow.classList.remove('hidden');
+        else if (s.mode !== undefined) soSquelchRow.classList.toggle('hidden', !(sqCap && s.mode === 'FM'));
+      }
       soTxPowerRow.classList.toggle('hidden', !s.capabilities.txpower);
       rcVfoGroup.classList.toggle('hidden', !s.capabilities.vfo);
       // Rig On/Off — show wherever the radio's CAT set supports PS0/PS1, 0x18, or equivalent.
@@ -3745,6 +3760,19 @@
       ws.send(JSON.stringify({ type: 'set-rfgain', value: parseInt(rcRfGainSlider.value) }));
     }
   });
+
+  // FM squelch slider — rides the generic rig-control path (no dedicated
+  // message), so the desktop's one applyRigControl dispatcher handles it.
+  if (rcSquelchSlider) {
+    rcSquelchSlider.addEventListener('input', () => {
+      rcSquelchVal.textContent = rcSquelchSlider.value;
+    });
+    rcSquelchSlider.addEventListener('change', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'rig-control', data: { action: 'set-squelch', value: parseInt(rcSquelchSlider.value, 10) } }));
+      }
+    });
+  }
 
   // TX Power slider
   rcTxPowerSlider.addEventListener('input', () => {
