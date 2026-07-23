@@ -1803,6 +1803,12 @@ function sendCatStatus(s) {
       _catLinkUpLast = linkUp;
       if (!linkUp) {
         sendCatLog('[CAT] RADIO LINK LOST — the rig is no longer reachable (USB/serial dropped?). Tunes will be refused until it returns.');
+        // De-key the dedicated CW key line too. It's a SEPARATE USB-serial
+        // adapter from the CAT port, so the rig/PTT reconnect safety never
+        // touched it — a CW send caught mid-key by a serial glitch could latch
+        // the line high and only a physical unplug cleared it (N7BBQ, FT-891).
+        // De-key first, ask questions later.
+        dropCwKeyLine('CAT link lost');
         if (win && !win.isDestroyed()) {
           win.webContents.send('app-notice', { message: 'Radio link lost — check the USB/serial connection', warn: true, duration: 8000 });
         }
@@ -10391,6 +10397,28 @@ const _MORSE_TABLE = {
 };
 let _cwDtrSendTimers = []; // outstanding setTimeout ids so a new send can cancel an in-flight one
 let _cwDtrEndTimer = null;
+let _cwStuckKeyWatchdog = null; // fires past a message's envelope to force the key line low if it latched
+const CW_STUCK_KEY_MARGIN_MS = 500; // watchdog fires this long after the envelope's own key-up
+
+// Single choke point for forcing the dedicated CW key line (cwKeyPort DTR/RTS)
+// back to key-UP. The key port is a SEPARATE USB-serial adapter from the CAT
+// port, so the rig/PTT reconnect safety never covered it — a serial glitch
+// could latch it high and only a physical unplug cleared it (N7BBQ 2026-07-23,
+// FT-891). Every de-key path routes through here: send cancel, a stuck final
+// key-up, a CAT link loss, and the watchdog. Clears the in-flight keying timers
+// so a half-sent character can't re-key, and re-pulses low 50 ms later in case
+// the immediate write blipped. If the adapter itself was yanked the set() just
+// throws harmlessly (nothing software can do — the caveat).
+function dropCwKeyLine(reason) {
+  if (_cwStuckKeyWatchdog) { clearTimeout(_cwStuckKeyWatchdog); _cwStuckKeyWatchdog = null; }
+  if (_cwDtrSendTimers.length) { for (const t of _cwDtrSendTimers) clearTimeout(t); _cwDtrSendTimers = []; }
+  if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  if (!(cwKeyPort && cwKeyPort.isOpen)) return;
+  const drop = () => { try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch { /* port went away */ } };
+  drop();
+  setTimeout(() => { if (cwKeyPort && cwKeyPort.isOpen) drop(); }, 50);
+  if (reason) sendCatLog(`[CW] Key line forced low — ${reason}`);
+}
 // When node-serialport hits ENOTTY on TIOCMSET (Linux cdc_acm), we close our
 // handle and remember the port path here so sendCwTextViaPython can take over.
 // pyserial uses TIOCMBIS/TIOCMBIC which the same driver accepts, so spawning
@@ -10635,13 +10663,15 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
   const unitMs = 1200 / Math.max(5, Math.min(60, wpm || 20));
   const pins = dtrPins || { dtr: true };
   const setKey = (down) => {
-    if (!cwKeyPort || !cwKeyPort.isOpen) return;
+    if (!cwKeyPort || !cwKeyPort.isOpen) return false;
     const state = {};
     if (pins.dtr) state.dtr = !!down;
     if (pins.rts) state.rts = !!down;
     // Runs inside setTimeout callbacks — a synchronous throw here (port closed
     // mid-sequence) would escape to uncaughtException and crash the app.
-    try { cwKeyPort.set(state, () => {}); } catch { /* port went away mid-send */ }
+    // Returns whether the write was issued so the end-pulse can tell a clean
+    // key-up from a failed one (the stuck-key case).
+    try { cwKeyPort.set(state, () => {}); return true; } catch { return false; /* port went away mid-send */ }
   };
 
   let t = 0;
@@ -10661,7 +10691,23 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
   }
   // Final safety pulse: force key-up after total duration. Belt-and-suspenders
   // in case the last setKey(false) somehow didn't land (port blip, etc.).
-  _cwDtrEndTimer = setTimeout(() => { setKey(false); _cwDtrEndTimer = null; }, t + 100);
+  if (_cwStuckKeyWatchdog) { clearTimeout(_cwStuckKeyWatchdog); _cwStuckKeyWatchdog = null; }
+  _cwDtrEndTimer = setTimeout(() => {
+    const ok = setKey(false);
+    _cwDtrEndTimer = null;
+    // Clean key-up landed → stand the watchdog down. If the write FAILED (port
+    // glitch on the final key-up — the "every once in a while" latch), leave it
+    // armed to force the line low a moment later.
+    if (ok && _cwStuckKeyWatchdog) { clearTimeout(_cwStuckKeyWatchdog); _cwStuckKeyWatchdog = null; }
+  }, t + 100);
+  // Stuck-key watchdog — the catch-all: if the line is still held past the whole
+  // message envelope (failed final key-up, or a race the other de-key paths
+  // can't see), force it low and log it. Cleared by a clean end-pulse above, and
+  // by cancel / link-loss (both route through dropCwKeyLine).
+  _cwStuckKeyWatchdog = setTimeout(() => {
+    _cwStuckKeyWatchdog = null;
+    dropCwKeyLine('stuck-key watchdog — key line held past the message envelope');
+  }, t + 100 + CW_STUCK_KEY_MARGIN_MS);
   return true;
 }
 
@@ -10874,23 +10920,11 @@ function cancelAllCwSends() {
     try { _cwPythonProc.kill('SIGTERM'); } catch {}
     _cwPythonProc = null;
   }
-  // 5. Node-serialport DTR-key-port timer queue — clear pending dits/dahs
-  //    AND force key-up so a half-sent character doesn't strand the rig in
-  //    TX. Final safety pulse fires 50 ms later in case the immediate
-  //    set() didn't land.
-  if (_cwDtrSendTimers.length) {
-    for (const t of _cwDtrSendTimers) clearTimeout(t);
-    _cwDtrSendTimers = [];
-  }
-  if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
-  if (cwKeyPort && cwKeyPort.isOpen) {
-    try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch {}
-    setTimeout(() => {
-      if (cwKeyPort && cwKeyPort.isOpen) {
-        try { cwKeyPort.set({ dtr: false, rts: false }, () => {}); } catch {}
-      }
-    }, 50);
-  }
+  // 5. Node-serialport DTR-key-port timer queue — clear pending dits/dahs,
+  //    disarm the stuck-key watchdog, and force key-up (+ a 50 ms re-pulse) so
+  //    a half-sent character doesn't strand the rig in TX. One choke point for
+  //    every de-key path. Quiet (no reason) — cancel is a normal action.
+  dropCwKeyLine();
   // 6. Serial CAT — CatClient (CI-V) has stopCwText (0x17 0xFF); the
   //    newer RigController has a unified stopCwText (clears its KY drop
   //    timer + drops PTT, which aborts Kenwood KY buffer and Yaesu auto-

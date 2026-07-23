@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\ft8">
+      <UniqueIdentifier>{F7906B28-27A4-9187-7A29-C4FE230687C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\ft8">
+      <UniqueIdentifier>{F7906B28-27A4-9187-7A29-C4FE230687C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\ft8">
+      <UniqueIdentifier>{F7906B28-27A4-9187-7A29-C4FE230687C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\ft8">
+      <UniqueIdentifier>{F7906B28-27A4-9187-7A29-C4FE230687C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\ft8">
+      <UniqueIdentifier>{F7906B28-27A4-9187-7A29-C4FE230687C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\ft8">
+      <UniqueIdentifier>{F7906B28-27A4-9187-7A29-C4FE230687C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\ft8">
+      <UniqueIdentifier>{F7906B28-27A4-9187-7A29-C4FE230687C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\common">
+      <UniqueIdentifier>{2F5FD094-EF52-77F7-7AA8-4327A01BF747}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\fft">
+      <UniqueIdentifier>{3E853953-0B90-A0DF-CA26-351555EFA3D7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib">
+      <UniqueIdentifier>{DDA50F0F-A13D-9D7E-B1D7-559A3A0E3AD8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..\ft8_lib\fft">
+      <UniqueIdentifier>{3E853953-0B90-A0DF-CA26-351555EFA3D7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="D:">
+      <UniqueIdentifier>{E5D29F2B-0177-9942-CA95-0FF700094F89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="D:\Projects">
+      <UniqueIdentifier>{7CAFA559-49D5-0913-BD41-C91CD6F35482}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="D:\Projects\potacat-dev">
+      <UniqueIdentifier>{F496414A-76D6-B12D-5800-089447ABAB30}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="D:\Projects\potacat-dev\node_modules">
+      <UniqueIdentifier>{56DF7A98-063D-FB9D-485C-089023B4C16A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="D:\Projects\potacat-dev\node_modules\node-gyp">
+      <UniqueIdentifier>{77348C0E-2034-7791-74D5-63C077DF5A3B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="D:\Projects\potacat-dev\node_modules\node-gyp\src">
+      <UniqueIdentifier>{8CDEE807-BC53-E450-C8B8-4DEBB66742D4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="..">
+      <UniqueIdentifier>{739DB09A-CC57-A953-A6CF-F64FA08E4FA7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\ft8_addon.c">
+      <Filter>..</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\ft8\constants.c">
+      <Filter>..\ft8_lib\ft8</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\ft8\crc.c">
+      <Filter>..\ft8_lib\ft8</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\ft8\decode.c">
+      <Filter>..\ft8_lib\ft8</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\ft8\encode.c">
+      <Filter>..\ft8_lib\ft8</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\ft8\ldpc.c">
+      <Filter>..\ft8_lib\ft8</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\ft8\message.c">
+      <Filter>..\ft8_lib\ft8</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\ft8\text.c">
+      <Filter>..\ft8_lib\ft8</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\common\monitor.c">
+      <Filter>..\ft8_lib\common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\fft\kiss_fft.c">
+      <Filter>..\ft8_lib\fft</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ft8_lib\fft\kiss_fftr.c">
+      <Filter>..\ft8_lib\fft</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Projects\potacat-dev\node_modules\node-gyp\src\win_delay_load_hook.cc">
+      <Filter>D:\Projects\potacat-dev\node_modules\node-gyp\src</Filter>
+    </ClCompile>
+    <None Include="..\binding.gyp">
+      <Filter>..</Filter>
+    </None>
+  </ItemGroup>
+</Project>
