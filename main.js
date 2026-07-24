@@ -9950,6 +9950,13 @@ function updateRemoteSettings() {
     // jtcat-set-skip-tx1 / jtcat-set-hound-mode.
     jtcatSkipTx1: !!settings.jtcatSkipTx1,
     jtcatHoundMode: !!settings.jtcatHoundMode,
+    // Plain-USB escape hatch for older Yaesu (FTdx3000 etc.) that clip the
+    // digital passband in PKTUSB. Desktop is the source of truth; echo it so
+    // the phone doesn't fall back to the default-true on every launch and
+    // show "DATA mode (PKTUSB)" when the shack is actually on Plain USB
+    // (AB9AI 2026-07-24). tuneRadio already honors it; this only closes the
+    // display gap. Default-true idiom, like logCommentTags above.
+    jtcatUseDataMode: settings.jtcatUseDataMode !== false,
     enableAtu: !!settings.enableAtu,
     tuneClick: !!settings.tuneClick,
     enableRotor: !!settings.enableRotor,
