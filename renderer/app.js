@@ -260,6 +260,19 @@ function updateSplitIndicator() {
 }
 
 let activeRigName = ''; // name of the currently active rig profile
+// Per-rig short label shown in place of "CAT" on the status pills, so a
+// multi-rig operator sees WHICH radio is connected at a glance ("991",
+// "7300") — N7FQT 2026-08-16. Empty = the classic "CAT".
+let activeRigCatLabel = '';
+function catPillLabel() {
+  const s = String(activeRigCatLabel || '').trim().toUpperCase().slice(0, 4);
+  return s || 'CAT';
+}
+function refreshCatPillLabel() {
+  if (catStatusEl) catStatusEl.textContent = catPillLabel();
+  const el = document.getElementById('activator-cat-status');
+  if (el) el.textContent = catPillLabel();
+}
 let workedQsos = new Map(); // callsign -> [{date, ref}] from QSO log
 let donorCallsigns = new Set(); // supporter callsigns from potacat.com
 let expeditionCallsigns = new Set(); // active DX expeditions from Club Log + danplanet
@@ -1414,6 +1427,8 @@ async function openCatPopover(anchor) {
     window.api.connectCat(null);
     await window.api.saveSettings({ activeRigId: null });
     activeRigName = '';
+    activeRigCatLabel = '';
+    refreshCatPillLabel();
     closeCatPopover();
   });
   catPopoverRigs.appendChild(noneEl);
@@ -1449,6 +1464,8 @@ async function openCatPopover(anchor) {
         audioSource: rigAudioSourceOf(rig),
       });
       activeRigName = rig.name || '';
+      activeRigCatLabel = rig.catLabel || '';
+      refreshCatPillLabel();
       closeCatPopover();
     });
     catPopoverRigs.appendChild(rigEl);
@@ -1714,6 +1731,8 @@ async function loadPrefs() {
   const rigs = settings.rigs || [];
   const activeRig = rigs.find(r => r.id === settings.activeRigId);
   activeRigName = activeRig ? activeRig.name : '';
+  activeRigCatLabel = activeRig ? (activeRig.catLabel || '') : '';
+  refreshCatPillLabel();
   enableWsjtx = settings.enableWsjtx === true;
   updateWsjtxStatusVisibility();
   // CW Keyer: init MIDI + connect saved device on load (requires pi access)
@@ -2472,6 +2491,8 @@ async function openRigEditor(mode, rigId) {
     const rig = currentRigs.find(r => r.id === rigId);
     if (rig) {
       setRigName.value = rig.name || '';
+      const catLabelEl = document.getElementById('set-rig-cat-label');
+      if (catLabelEl) catLabelEl.value = rig.catLabel || '';
       if (rigModelSelect) rigModelSelect.value = rig.model || '';
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
@@ -2504,6 +2525,7 @@ async function openRigEditor(mode, rigId) {
   } else {
     rigEditorTitle.textContent = 'Add Rig';
     setRigName.value = '';
+    { const catLabelEl = document.getElementById('set-rig-cat-label'); if (catLabelEl) catLabelEl.value = ''; }
     if (rigModelSelect) rigModelSelect.value = '';
     if (setCwKeyLine) setCwKeyLine.value = 'auto';
     if (setRadioNr) setRadioNr.value = '1';
@@ -2576,6 +2598,7 @@ if (flexDiscoverBtn) {
 
 rigSaveBtn.addEventListener('click', async () => {
   const name = setRigName.value.trim() || 'Unnamed Rig';
+  const rigCatLabelVal = (document.getElementById('set-rig-cat-label')?.value || '').trim().toUpperCase().slice(0, 4);
   const catTarget = buildCatTargetFromForm();
   const model = rigModelSelect ? rigModelSelect.value || null : null;
 
@@ -2629,6 +2652,7 @@ rigSaveBtn.addEventListener('click', async () => {
       rig.audioSource = rigAudioSource;
       rig.cwKeyPort = rigCwKeyPortVal;
       rig.cwKeyLine = rigCwKeyLineVal;
+      rig.catLabel = rigCatLabelVal;
       rig.radioNr = rigRadioNr;
       rig.flexApiHost = rigFlexApiHost;
       rig.flexSlice = rigFlexSlice;
@@ -2648,6 +2672,7 @@ rigSaveBtn.addEventListener('click', async () => {
       audioSource: rigAudioSource,
       cwKeyPort: rigCwKeyPortVal,
       cwKeyLine: rigCwKeyLineVal,
+      catLabel: rigCatLabelVal,
       radioNr: rigRadioNr,
       flexApiHost: rigFlexApiHost,
       flexSlice: rigFlexSlice,
@@ -15559,6 +15584,8 @@ settingsSave.addEventListener('click', async () => {
     document.body.classList.remove('cat-log-open');
   }
   activeRigName = selectedRig ? selectedRig.name : '';
+  activeRigCatLabel = selectedRig ? (selectedRig.catLabel || '') : '';
+  refreshCatPillLabel();
   updateDxccButton();
   updateHeaders();
   saveFilters();
@@ -15610,7 +15637,7 @@ function syncActivatorCatPill(className, title) {
     el.style.cursor = 'pointer';
     el.style.fontSize = '11px';
     el.style.marginLeft = '4px';
-    el.textContent = 'CAT';
+    el.textContent = catPillLabel();
     el.title = title;
   }
 }
@@ -15633,7 +15660,7 @@ window.api.onCatStatus(({ connected, error, wsjtxMode }) => {
   }
   if (wsjtxMode) {
     if (catDisconnectTimer) { clearTimeout(catDisconnectTimer); catDisconnectTimer = null; }
-    catStatusEl.textContent = 'CAT';
+    catStatusEl.textContent = catPillLabel();
     catStatusEl.className = 'status connected';
     catStatusEl.title = 'Radio controlled by WSJT-X';
     syncActivatorCatPill('status connected', 'Radio controlled by WSJT-X');
@@ -15642,7 +15669,7 @@ window.api.onCatStatus(({ connected, error, wsjtxMode }) => {
   if (connected) {
     // Reconnected — cancel any pending disconnect display
     if (catDisconnectTimer) { clearTimeout(catDisconnectTimer); catDisconnectTimer = null; }
-    catStatusEl.textContent = 'CAT';
+    catStatusEl.textContent = catPillLabel();
     catStatusEl.className = 'status connected';
     const connTitle = activeRigName ? `Connected to ${activeRigName}` : 'Connected';
     catStatusEl.title = connTitle;
@@ -15652,7 +15679,7 @@ window.api.onCatStatus(({ connected, error, wsjtxMode }) => {
     if (!catDisconnectTimer) {
       catDisconnectTimer = setTimeout(() => {
         catDisconnectTimer = null;
-        catStatusEl.textContent = 'CAT';
+        catStatusEl.textContent = catPillLabel();
         catStatusEl.className = 'status disconnected';
         const discTitle = error || 'Disconnected';
         catStatusEl.title = discTitle;
