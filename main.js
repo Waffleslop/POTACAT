@@ -2199,6 +2199,21 @@ function sendCatMonLevel(val) { _currentMonLevel = val; broadcastRigState(); }
 function sendCatMicGain(val) { _currentMicGain = val; broadcastRigState(); }
 function sendCatBreakIn(on) { _currentBreakInState = on; broadcastRigState(); }
 function sendCatAntennaPort(val) { _currentAntennaPort = val; broadcastRigState(); }
+// Preamp/ATT READBACK (#82, rigctld) — change-gated: these arrive on the
+// 5-cycle poll, and re-broadcasting an unchanged ladder step every few
+// seconds would be pure noise.
+function sendCatPreampStep(db) {
+  if (db === _currentPreampStep) return;
+  _currentPreampStep = db;
+  _currentPreampState = db > 0;
+  broadcastRigState();
+}
+function sendCatAttStep(db) {
+  if (db === _currentAttStep) return;
+  _currentAttStep = db;
+  _currentAttState = db > 0;
+  broadcastRigState();
+}
 
 function bindRigStateEvents(controller) {
   if (!controller || controller._potacatRigStateEventsBound) return;
@@ -2219,6 +2234,8 @@ function bindRigStateEvents(controller) {
   controller.on('micGain', sendCatMicGain);
   controller.on('breakIn', sendCatBreakIn);
   controller.on('antennaPort', sendCatAntennaPort);
+  controller.on('preampStep', sendCatPreampStep);
+  controller.on('attStep', sendCatAttStep);
   controller.on('vfo', sendCatVfo);
   controller.on('split', sendCatSplit);
   controller.on('frequencyOther', sendCatFreqOther);

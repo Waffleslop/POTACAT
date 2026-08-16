@@ -1859,6 +1859,108 @@ test('mode-silence watchdog: a tune sequence pause does not restart the clock', 
 });
 
 // =========================================================================
+console.log('\n=== rigctld queue-order attribution (#81) + extended readback (#82) ===');
+
+// Harness: a codec whose writes are captured and whose replies we feed by
+// hand — the sequences below are VERBATIM from GoNoGoTest's wfview/IC-7300
+// reproduction, not fixtures invented from the parser (the vfo-split lesson).
+function rigctldHarness() {
+  const { codec, writes } = captureWrites(RigctldCodec, {
+    brand: 'Hamlib', protocol: 'rigctld',
+    caps: { nb: true, rfgain: true, txpower: true, preamp: true, att: true },
+    maxPower: 100,
+  });
+  const events = [];
+  for (const ev of ['ptt', 'nb', 'split', 'vfo', 'nr', 'comp', 'vox', 'anf', 'rfgain', 'power', 'preamp', 'preampStep', 'att', 'attStep', 'smeter', 'frequency']) {
+    codec.on(ev, (val) => events.push([ev, val]));
+  }
+  const feed = (lines) => { for (const l of lines) codec.onData(l + '\n'); };
+  return { codec, writes, events, feed };
+}
+
+test('#81 Test 1: SPLIT ON + NB OFF — NB must not steal SPLIT\'s 1', () => {
+  const h = rigctldHarness();
+  h.codec.getPtt();       // t
+  h.codec.getVfoSplit();  // v + s
+  h.codec.getNb();        // u NB
+  h.feed(['0', 'VFOA', '1', 'VFOA', '0']); // ptt, vfo, split=ON, txvfo, nb=OFF
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'split'), [['split', true]]);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'nb'), [['nb', false]]);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'ptt'), [['ptt', false]]);
+});
+
+test('#81 Test 2: SPLIT OFF + NB ON — the mirror image', () => {
+  const h = rigctldHarness();
+  h.codec.getPtt();
+  h.codec.getVfoSplit();
+  h.codec.getNb();
+  h.feed(['0', 'VFOA', '0', 'VFOA', '1']);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'split'), [['split', false]]);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'nb'), [['nb', true]]);
+});
+
+test('smeter sent first keeps its 0 — NB no longer outranks the queue', () => {
+  const h = rigctldHarness();
+  h.codec.getSmeter();    // l STRENGTH — "0" here means S9, a legal reading
+  h.codec.getNb();
+  h.feed(['0', '1']);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'smeter').length, 1);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'nb'), [['nb', true]]);
+});
+
+test('#82 rfgain/power readback: wfview\'s exact float replies', () => {
+  const h = rigctldHarness();
+  h.codec.getRfGain();    // l RF
+  h.codec.getPower();     // l RFPOWER
+  h.feed(['0.129412', '0.498039']);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'rfgain'), [['rfgain', 13]]);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'power'), [['power', 50]]);
+  assert.ok(h.writes.includes('l RF\n') && h.writes.includes('l RFPOWER\n'));
+});
+
+test('#82 preamp/att readback: integer dB maps to step + boolean', () => {
+  const h = rigctldHarness();
+  h.codec.getPreamp();
+  h.codec.getAtt();
+  h.feed(['10', '0']);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'preampStep'), [['preampStep', 10]]);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'preamp'), [['preamp', true]]);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'attStep'), [['attStep', 0]]);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'att'), [['att', false]]);
+});
+
+test('#82 toggles: NR/COMP/VOX/ANF track queue order among five bare digits', () => {
+  const h = rigctldHarness();
+  h.codec.getDnrLevel();     // u NR
+  h.codec.getCompressor();   // u COMP
+  h.codec.getVox();          // u VOX
+  h.codec.getAutoNotch();    // u ANF
+  h.codec.getNb();           // u NB
+  h.feed(['1', '0', '1', '0', '1']);
+  assert.deepStrictEqual(h.events, [
+    ['nr', true], ['comp', false], ['vox', true], ['anf', false], ['nb', true],
+  ]);
+});
+
+test('#82 RPRT rejection latches an extended readback off', () => {
+  const h = rigctldHarness();
+  h.codec.getRfGain();
+  h.feed(['RPRT -11']);
+  const before = h.writes.length;
+  h.codec.getRfGain(); // latched — must write nothing
+  assert.strictEqual(h.writes.length, before);
+});
+
+test('freq reply still resolves through the queue with meters in flight', () => {
+  const h = rigctldHarness();
+  h.codec.getFrequency();
+  h.codec.getSmeter();
+  h.feed(['14250000', '-20']);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'frequency'), [['frequency', 14250000]]);
+  assert.strictEqual(h.events.filter(e => e[0] === 'smeter').length, 1);
+});
+
+// =========================================================================
 // Summary
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
