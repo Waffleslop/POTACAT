@@ -22715,19 +22715,38 @@ app.whenReady().then(() => {
   function _refreshAltHosts() {
     if (!remoteServer) return;
     let tsHost = '';
+    let tsIp = '';
     try {
       const { tailscaleStatus } = require('./lib/remote-server');
       const ts = tailscaleStatus();
       if (ts && ts.loggedIn && ts.hostname) {
         const port = settings.remotePort || 7300;
         tsHost = ts.hostname.replace(/\.$/, '') + ':' + port;
+        // Ship the raw tailnet address alongside the MagicDNS name.
+        // tsHost alone made the whole Tailscale leg contingent on the
+        // PHONE resolving tailnet DNS, which it does not do when the
+        // Tailscale app isn't set to accept DNS — and the failure was
+        // indistinguishable from an offline desktop, because the phone
+        // just saw a name that went nowhere (LZ3AW, six weeks). This
+        // needs no DNS, and pinned dials skip hostname verification.
+        if (ts.ip4) tsIp = ts.ip4 + ':' + port;
+        // MagicDNS off is worth saying out loud: tsHost is then a name
+        // nothing on the tailnet can resolve. We still publish it (a
+        // phone with a hosts entry or its own resolver may cope) but
+        // tsIp is what will actually carry the connection.
+        if (!ts.magicDNS) {
+          sendCatLog('[alt-hosts] Tailscale MagicDNS is disabled in this tailnet — '
+            + (tsIp
+              ? `phones will reach this machine at ${tsIp} instead of ${tsHost}.`
+              : `${tsHost} will not resolve on your phone. Enable MagicDNS at https://login.tailscale.com/admin/dns (DNS -> MagicDNS).`));
+        }
       }
     } catch (err) {
       // Tailscale CLI not present is the common case — log debug only.
       if (err && err.message) console.log('[alt-hosts] tailscale lookup:', err.message);
     }
     const cloudHost = (cloudTunnel && typeof cloudTunnel.getCloudHost === 'function') ? (cloudTunnel.getCloudHost() || '') : '';
-    try { remoteServer.setAltHosts({ tsHost, cloudHost }); } catch {}
+    try { remoteServer.setAltHosts({ tsHost, tsIp, cloudHost }); } catch {}
   }
   _refreshAltHosts();
   setInterval(_refreshAltHosts, 10 * 60 * 1000);
@@ -27660,13 +27679,17 @@ app.whenReady().then(() => {
     // tailnet tomorrow — without having to re-pair from a new
     // network. Same cert pin (fingerprint) covers it.
     const altHosts = (remoteServer && typeof remoteServer.getAltHosts === 'function')
-      ? remoteServer.getAltHosts() : { tsHost: '', cloudHost: '' };
+      ? remoteServer.getAltHosts() : { tsHost: '', tsIp: '', cloudHost: '' };
     const tsHost = altHosts.tsHost || '';
+    // Raw tailnet address, carried beside the MagicDNS name so the
+    // Tailscale leg survives a phone that isn't resolving tailnet DNS.
+    const tsIp = altHosts.tsIp || '';
     const effectiveMode = (opts.mode === 'lan') ? 'lan' : (cloudHost ? 'cloud' : 'lan');
     const qrParamsObj = { token: pairingToken, name: hostname };
     if (effectiveMode === 'cloud') {
       qrParamsObj.cloudHost = cloudHost;
       if (tsHost) qrParamsObj.tsHost = tsHost;
+      if (tsIp) qrParamsObj.tsIp = tsIp;
       // Cloud-mode QRs used to omit the fingerprint entirely, which
       // permanently stripped the pinned-Tailscale option from that pairing
       // (LZ3AW 2026-08-03 — no fp means the ts leg can never validate a
@@ -27678,6 +27701,7 @@ app.whenReady().then(() => {
       qrParamsObj.fp = fingerprint;
       if (cloudHost) qrParamsObj.cloudHost = cloudHost;
       if (tsHost) qrParamsObj.tsHost = tsHost;
+      if (tsIp) qrParamsObj.tsIp = tsIp;
     }
     // Cert trust mode for the ts leg: '1' = the served cert is a
     // Tailscale-issued LE cert that validates publicly (dial tsHost with
@@ -29054,8 +29078,16 @@ app.whenReady().then(() => {
     // only reconnect CAT when a CAT-relevant field actually changed.
     const catTargetChanged = has('catTarget') &&
       JSON.stringify(newSettings.catTarget) !== JSON.stringify(settings.catTarget);
+    // Compare rigs MINUS cosmetic fields: renaming a rig or editing its
+    // status label is not a CAT change and must not respawn the connection
+    // (the label feature's whole point is glanceability, not churn).
+    const _rigsCatView = (arr) => JSON.stringify((arr || []).map((r) => {
+      if (!r || typeof r !== 'object') return r;
+      const { catLabel, name, ...rest } = r;
+      return rest;
+    }));
     const rigsChanged = has('rigs') &&
-      JSON.stringify(newSettings.rigs) !== JSON.stringify(settings.rigs);
+      _rigsCatView(newSettings.rigs) !== _rigsCatView(settings.rigs);
     const wsjtxToggled = has('enableWsjtx') && newSettings.enableWsjtx !== settings.enableWsjtx;
     const catRelevantChanged = catTargetChanged || rigsChanged || activeRigChanged || wsjtxToggled;
 

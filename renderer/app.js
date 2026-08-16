@@ -2686,6 +2686,18 @@ rigSaveBtn.addEventListener('click', async () => {
 
   renderRigList(currentRigs, currentActiveRigId);
   closeRigEditor();
+  // Persist the rig edit IMMEDIATELY as a partial save. It used to sit in
+  // currentRigs until the outer Settings Save — closing Settings without it
+  // silently discarded the edit (K3SBP's status labels, 2026-08-16), and
+  // nothing in the editor said so. A {rigs}-only save is partial, so main's
+  // save handler persists WITHOUT touching the CAT connection.
+  window.api.saveSettings({ rigs: currentRigs });
+  // If the edited rig is the active one, its label change shows right away.
+  const editedActive = currentRigs.find(r => r.id === currentActiveRigId);
+  if (editedActive) {
+    activeRigCatLabel = editedActive.catLabel || '';
+    refreshCatPillLabel();
+  }
 });
 
 // --- Multi-select dropdowns ---
@@ -15244,7 +15256,14 @@ settingsSave.addEventListener('click', async () => {
   // Mirror the selected rig's audio source into the global runtime value.
   // No rig selected → omit the key so the stored value is left untouched.
   const audioSourceVal = selectedRig ? rigAudioSourceOf(selectedRig) : undefined;
-  window.api.connectCat(rigTarget);
+  // NO direct connectCat here (K3SBP storm, 2026-08-16): this full save also
+  // triggers main's catRelevantChanged → connectCatSafe, and the two connect
+  // paths RACED — duplicate SmartSDR clients fighting over the GUI-client
+  // registration, plus an orphaned controller whose serial retry loop kept
+  // hammering a dead COM port. Main's gate is the single reconnect
+  // authority: it reconnects when the rig/target/rigs actually changed and
+  // stays quiet otherwise (the same discipline that fixed the N4RDX
+  // spot-toggle respawn crash on the main side — this was the renderer half).
 
   await window.api.saveSettings({
     rigs: currentRigs,
