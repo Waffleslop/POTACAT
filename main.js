@@ -15863,17 +15863,19 @@ function connectRemote() {
     }
   });
 
-  remoteServer.on('sstv-get-gallery', ({ limit, offset, requestId }) => {
+  remoteServer.on('sstv-get-gallery', async ({ limit, offset, requestId }) => {
     try {
       const galleryDir = ensureSstvGalleryDir();
-      const files = fs.readdirSync(galleryDir)
+      const files = (await fs.promises.readdir(galleryDir))
         .filter(f => f.endsWith('.png'))
         .sort((a, b) => b.localeCompare(a));
       const total = files.length;
       const slice = files.slice(offset || 0, (offset || 0) + (limit || 10));
-      const images = slice.map(f => {
-        return sstvGalleryRecordFromFile(path.join(galleryDir, f));
-      }).filter(Boolean);
+      const images = [];
+      for (const f of slice) {
+        const rec = await sstvGalleryRecordFromFile(path.join(galleryDir, f));
+        if (rec) images.push(rec);
+      }
       remoteServer.sendSstvGallery(images, requestId, total);
     } catch (err) {
       console.error('[SSTV] Gallery fetch for ECHOCAT error:', err.message);
@@ -25130,7 +25132,7 @@ app.whenReady().then(() => {
       }
     });
 
-    sstvEngine.on('rx-image', (data) => {
+    sstvEngine.on('rx-image', async (data) => {
       const stats = data.stats || {};
       _sstvDecode = null;
       pushActivityState();
@@ -25148,7 +25150,7 @@ app.whenReady().then(() => {
       applySstvPostProcess(data);
       // Save to gallery (good-tier live decodes only — weak decodes and
       // manual redecodes display without touching the on-disk gallery)
-      const saved = (data.weak || data.redecode) ? null : saveSstvImage(data);
+      const saved = (data.weak || data.redecode) ? null : await saveSstvImage(data);
       // Send to popout
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-image', {
@@ -25307,18 +25309,21 @@ app.whenReady().then(() => {
     return s || fallback || 'sstv';
   }
 
-  function sstvGalleryRecordFromFile(filePath) {
+  // ASYNC on purpose (#75, officiallor): the gallery lives under Pictures,
+  // which Windows commonly redirects to OneDrive — synchronous reads there
+  // can block on cloud-file hydration (or a wedged sync client) and froze
+  // the ENTIRE app the moment the SSTV window opened, no radio required.
+  // Every gallery filesystem touch must stay off the main thread's back.
+  async function sstvGalleryRecordFromFile(filePath) {
     try {
-      const stat = fs.statSync(filePath);
+      const stat = await fs.promises.stat(filePath);
       const filename = path.basename(filePath);
-      const png = fs.readFileSync(filePath);
+      const png = await fs.promises.readFile(filePath);
       const img = nativeImage.createFromBuffer(png);
       const size = img.getSize();
       let meta = {};
       const metaPath = filePath.replace(/\.png$/i, '.json');
-      if (fs.existsSync(metaPath)) {
-        try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch { meta = {}; }
-      }
+      try { meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8')); } catch { meta = {}; }
       const parts = filename.replace(/\.png$/i, '').split('_');
       return {
         filename,
@@ -25338,7 +25343,7 @@ app.whenReady().then(() => {
     }
   }
 
-  function saveSstvImage(data) {
+  async function saveSstvImage(data) {
     try {
       const galleryDir = ensureSstvGalleryDir();
       const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
@@ -25359,7 +25364,7 @@ app.whenReady().then(() => {
       }
       const img = nativeImage.createFromBitmap(bgra, { width: data.width, height: data.height });
       const filePath = path.join(galleryDir, filename);
-      fs.writeFileSync(filePath, img.toPNG());
+      await fs.promises.writeFile(filePath, img.toPNG());
       const meta = {
         filename,
         filePath,
@@ -25373,9 +25378,9 @@ app.whenReady().then(() => {
         callsign: settings.myCallsign || '',
         postProcessed: settings.sstvPostProcess !== false,
       };
-      fs.writeFileSync(filePath.replace(/\.png$/i, '.json'), JSON.stringify(meta, null, 2), 'utf-8');
+      await fs.promises.writeFile(filePath.replace(/\.png$/i, '.json'), JSON.stringify(meta, null, 2), 'utf-8');
       console.log('[SSTV] Saved decoded image:', filePath);
-      return sstvGalleryRecordFromFile(filePath);
+      return await sstvGalleryRecordFromFile(filePath);
     } catch (err) {
       console.error('[SSTV] Save image error:', err.message);
       return null;
@@ -25468,12 +25473,12 @@ app.whenReady().then(() => {
   ipcMain.handle('sstv-get-gallery', async () => {
     try {
       const galleryDir = ensureSstvGalleryDir();
-      const files = fs.readdirSync(galleryDir)
+      const files = (await fs.promises.readdir(galleryDir))
         .filter(f => f.endsWith('.png'))
         .sort((a, b) => b.localeCompare(a)); // newest first
       const results = [];
       for (const f of files.slice(0, 50)) { // limit to 50 most recent
-        const rec = sstvGalleryRecordFromFile(path.join(galleryDir, f));
+        const rec = await sstvGalleryRecordFromFile(path.join(galleryDir, f));
         if (rec) results.push(rec);
       }
       return results;
@@ -25487,9 +25492,8 @@ app.whenReady().then(() => {
     try {
       const galleryDir = ensureSstvGalleryDir();
       const filePath = path.join(galleryDir, path.basename(filename));
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      const metaPath = filePath.replace(/\.png$/i, '.json');
-      if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
+      await fs.promises.unlink(filePath).catch(() => {});
+      await fs.promises.unlink(filePath.replace(/\.png$/i, '.json')).catch(() => {});
       return true;
     } catch { return false; }
   });
@@ -25503,7 +25507,7 @@ app.whenReady().then(() => {
     });
     if (result.canceled || !result.filePaths.length) return null;
     const filePath = result.filePaths[0];
-    const data = fs.readFileSync(filePath);
+    const data = await fs.promises.readFile(filePath);
     const ext = path.extname(filePath).toLowerCase().replace('.', '');
     const mime = ext === 'jpg' ? 'jpeg' : ext;
     const dataUrl = `data:image/${mime};base64,${data.toString('base64')}`;
@@ -25615,9 +25619,9 @@ app.whenReady().then(() => {
       }
     });
 
-    sstvManager.on('rx-image', (data) => {
+    sstvManager.on('rx-image', async (data) => {
       applySstvPostProcess(data);
-      const saved = saveSstvImage(data);
+      const saved = await saveSstvImage(data);
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-image', {
           imageData: Array.from(data.imageData),
