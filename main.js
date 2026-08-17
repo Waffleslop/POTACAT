@@ -6683,9 +6683,12 @@ async function saveQsoRecord(qsoData, opts) {
 
   if (settings.sendToLogbook && settings.logbookType && !qsoData.skipLogbookForward) {
     try {
-      sendCatLog(`[Logbook] Forwarding QSO to ${settings.logbookType}: ${qsoData.callsign} ${qsoData.frequency}kHz ${qsoData.mode}`);
+      // Name the TARGET: a UDP send "succeeds" whether or not anything is
+      // listening, so when a logbook never receives, the host:port in this
+      // line is the whole diagnosis (KI4GT's WRL report had no way to tell).
+      sendCatLog(`[Logbook] Forwarding QSO to ${settings.logbookType} at ${settings.logbookHost || '127.0.0.1'}:${settings.logbookPort || '(default port)'}: ${qsoData.callsign} ${qsoData.frequency}kHz ${qsoData.mode}`);
       await forwardToLogbook(qsoData);
-      sendCatLog(`[Logbook] QSO forwarded successfully`);
+      sendCatLog(`[Logbook] QSO sent (UDP delivery is fire-and-forget — if the logbook never receives, check the host/port above and that it is actually listening)`);
     } catch (fwdErr) {
       sendCatLog(`[Logbook] Forwarding failed: ${fwdErr.message}`);
       console.error('Logbook forwarding failed:', fwdErr.message);
