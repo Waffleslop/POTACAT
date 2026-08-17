@@ -1960,6 +1960,68 @@ test('freq reply still resolves through the queue with meters in flight', () => 
   assert.strictEqual(h.events.filter(e => e[0] === 'smeter').length, 1);
 });
 
+// --- Round 3 (#82 retest): the full GoNoGoTest matrix ---
+function rigctldHarness3() {
+  const { codec, writes } = captureWrites(RigctldCodec, {
+    brand: 'Hamlib', protocol: 'rigctld', caps: {}, maxPower: 100,
+  });
+  const events = [];
+  for (const ev of ['agc', 'nrLevel', 'voxLevel', 'monLevel', 'micGain', 'compLevel', 'mon', 'rit', 'atu', 'passband', 'mode']) {
+    codec.on(ev, (val) => events.push([ev, val]));
+  }
+  const feed = (lines) => { for (const l of lines) codec.onData(l + '\n'); };
+  return { codec, writes, events, feed };
+}
+
+test('round-3 setters write the wfview-verified commands', () => {
+  const h = rigctldHarness3();
+  h.codec.setAutoNotch(true);
+  h.codec.setAgc('slow');
+  h.codec.setNrLevel(72);
+  h.codec.setVoxLevel(50);
+  h.codec.setMonitor(true);
+  h.codec.setMonLevel(25);
+  h.codec.setMicGain(40);
+  h.codec.setCompLevel(30);
+  h.codec.setRit(true);
+  assert.deepStrictEqual(h.writes, [
+    'U ANF 1\n', 'L AGC 3\n', 'L NR 0.720\n', 'L VOXGAIN 0.500\n',
+    'U MON 1\n', 'L MONITOR_GAIN 0.250\n', 'L MICGAIN 0.400\n',
+    'L COMP 0.300\n', 'U RIT 1\n',
+  ]);
+});
+
+test('round-3 readbacks: levels scale to percent, AGC maps to mode strings', () => {
+  const h = rigctldHarness3();
+  h.codec.getAgc();
+  h.codec.getDnrLevel();     // u NR + l NR
+  h.codec.getVoxLevel();
+  h.codec.getMonLevel();
+  h.codec.getMicGain();
+  h.codec.getCompLevel();
+  h.codec.getMonitor();
+  h.codec.getRit();
+  h.codec.getAtuEnabled();
+  h.feed(['2', '1', '0.721569', '0.500000', '0.250000', '0.400000', '0.300000', '1', '0', '1']);
+  assert.deepStrictEqual(h.events, [
+    ['agc', 'mid'], ['nrLevel', 72], ['voxLevel', 50], ['monLevel', 25],
+    ['micGain', 40], ['compLevel', 30], ['mon', true], ['rit', false], ['atu', true],
+  ]);
+});
+
+test('round-3: passband after mode is surfaced, not swallowed', () => {
+  const h = rigctldHarness3();
+  h.codec.getMode();
+  h.feed(['USB', '2400']);
+  assert.deepStrictEqual(h.events.filter(e => e[0] === 'passband'), [['passband', 2400]]);
+});
+
+test('round-3: ATU one-shot sends the vfo_op TUNE cycle', () => {
+  const h = rigctldHarness3();
+  h.codec.startTune();
+  assert.ok(h.writes.includes('G TUNE\n'), 'G TUNE missing: ' + JSON.stringify(h.writes));
+});
+
 // =========================================================================
 // Summary
 console.log(`\n${'='.repeat(50)}`);

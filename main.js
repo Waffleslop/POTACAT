@@ -2236,6 +2236,23 @@ function bindRigStateEvents(controller) {
   controller.on('antennaPort', sendCatAntennaPort);
   controller.on('preampStep', sendCatPreampStep);
   controller.on('attStep', sendCatAttStep);
+  // Round 3 readbacks (#82 retest) — change-gated: these ride the 5-cycle
+  // poll and an unchanged value must not re-broadcast every few seconds.
+  controller.on('atu', (on) => {
+    if (on === _currentAtuState) return;
+    _currentAtuState = on;
+    broadcastRigState();
+  });
+  controller.on('rit', (on) => {
+    if (on === _currentRitState) return;
+    _currentRitState = on;
+    broadcastRigState();
+  });
+  controller.on('passband', (hz) => {
+    if (hz === _currentFilterWidth) return;
+    _currentFilterWidth = hz;
+    broadcastRigState();
+  });
   controller.on('vfo', sendCatVfo);
   controller.on('split', sendCatSplit);
   controller.on('frequencyOther', sendCatFreqOther);
