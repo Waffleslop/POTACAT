@@ -79,6 +79,9 @@ function _applyPopoutTheme(payload) {
     if (maxAttemptsInput && typeof s.jtcatMaxQsoAttempts === 'number') {
       maxAttemptsInput.value = s.jtcatMaxQsoAttempts;
     }
+    if (reworkDaysInput && typeof s.jtcatReworkDays === 'number') {
+      reworkDaysInput.value = s.jtcatReworkDays;
+    }
     if (runPauseInput && typeof s.jtcatRunPauseAfter === 'number') {
       runPauseInput.value = s.jtcatRunPauseAfter;
     }
@@ -170,6 +173,7 @@ function _applyPopoutTheme(payload) {
   var cqBtn = document.getElementById('jp-cq');
   var fullAutoCqBtn = document.getElementById('jp-full-auto-cq');
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
+  var reworkDaysInput = document.getElementById('jp-rework-days');
   var runPauseInput = document.getElementById('jp-run-pause-after');
   var wfSpeedInput = document.getElementById('jp-wf-speed');
   var wfSpeedHelp = document.getElementById('jp-wf-speed-help');
@@ -2233,6 +2237,15 @@ function _applyPopoutTheme(payload) {
       if (n > 60) n = 60;
       maxAttemptsInput.value = n;
       window.api.saveSettings({ jtcatMaxQsoAttempts: n });
+    });
+  }
+  if (reworkDaysInput) {
+    reworkDaysInput.addEventListener('change', function() {
+      var n = parseInt(reworkDaysInput.value, 10);
+      if (!isFinite(n) || n < 0) n = 0;  // 0 = worked-before never expires
+      if (n > 3650) n = 3650;
+      reworkDaysInput.value = n;
+      window.api.saveSettings({ jtcatReworkDays: n });
     });
   }
   if (runPauseInput) {

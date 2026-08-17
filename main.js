@@ -292,6 +292,7 @@ const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine } = require('./lib/sstv-engine');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
+const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
 const EventRegistry = require('./lib/event-registry'); // unified Events/Contests registry (roadmap #1 Phase A)
 const { SstvManager } = require('./lib/sstv-manager');
 const sstvPost = require('./lib/sstv-post');
@@ -7306,33 +7307,47 @@ const JTCAT_MAX_QSO_RETRIES = 12; // ~3 minutes of retries at 15s/cycle
 let jtcatAutoCqMode = 'off';          // 'off' | 'pota' | 'sota' | 'all'
 let jtcatAutoCqWorkedSession = new Set(); // callsigns attempted/worked this session
 
+/** settings.jtcatReworkDays, clamped. 0 = worked-before never expires. */
+function jtcatReworkDaysSetting() {
+  const n = parseInt(settings.jtcatReworkDays, 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, 3650);
+}
+
 /**
  * Worked-before lookup against the ADIF log. The ONE definition of "already
- * worked" for JTCAT — the manual double-click dupe warning and Run mode's
- * answerer filter both read it, so a call the warning would flag is exactly a
- * call Run skips. Band/mode aware on purpose: the same station on a different
- * band or mode is a legitimate new QSO, and a plain Set of callsigns would
- * refuse it.
- * @returns {{worked:boolean, sameBandMode:boolean, entries:Array, last:object|null}}
+ * worked" for JTCAT — the manual double-click dupe warning, Hunt's candidate
+ * filter, and Run mode's answerer selection all read it, so a call the
+ * warning would flag is exactly a call the automatic paths skip. Policy is
+ * the pure decideWorkedBefore() in lib/worked-before.js: band/mode aware,
+ * relaxed by the rework window (settings.jtcatReworkDays) and by the
+ * program-activator exception — a station currently spotted at a park only
+ * blocks if we worked them at that park today (KQ4MHD 2026-08-17).
+ * @returns {{worked:boolean, sameBandMode:boolean, blocking:boolean,
+ *            reason:string, entries:Array, last:object|null}}
  */
 function jtcatWorkedInfo(call, band, mode) {
-  const entries = (workedQsos && workedQsos.get((call || '').toUpperCase())) || null;
-  if (!entries || !entries.length) return { worked: false, sameBandMode: false, entries: [], last: null };
-  const b = (band || '').toUpperCase();
-  const m = (mode || '').toUpperCase();
-  const sameBandMode = entries.some((w) =>
-    (w.band || '').toUpperCase() === b && (w.mode || '').toUpperCase() === m);
-  return { worked: true, sameBandMode, entries, last: entries[entries.length - 1] };
+  const c = (call || '').toUpperCase();
+  const entries = (workedQsos && workedQsos.get(c)) || [];
+  const hunted = HuntedPark.findHuntedRefs(lastMergedSpots, c, {
+    freqKhz: (_currentFreqHz || 0) / 1000, myCall: settings.myCallsign,
+  });
+  return WorkedBefore.decideWorkedBefore(entries, {
+    band, mode,
+    reworkDays: jtcatReworkDaysSetting(),
+    todayUtc: WorkedBefore.utcDateStamp(new Date()),
+    activatorRefs: hunted ? hunted.refs.map((r) => r.ref) : null,
+  });
 }
 
 /** Should an automatic path refuse to work this call right now? Session
  *  attempts always count (they may not have reached the ADIF log yet); logged
- *  QSOs only count on the same band+mode. */
+ *  QSOs count per the worked-before policy (see jtcatWorkedInfo). */
 function jtcatIsWorkedCall(call, band, mode) {
   const c = (call || '').toUpperCase();
   if (!c) return false;
   if (jtcatAutoCqWorkedSession.has(c)) return true;
-  return jtcatWorkedInfo(c, band, mode).sameBandMode;
+  return jtcatWorkedInfo(c, band, mode).blocking;
 }
 
 /** The band+mode a JTCAT engine is currently operating, for the dupe test. */
@@ -7482,7 +7497,14 @@ function parseCqMessage(text) {
  */
 function jtcatWorkableCallers(results, myCall, opts) {
   const filterMode = (opts && opts.filterMode) || 'all';
-  const isWorked = (opts && opts.isWorked) || ((call) => !!(workedQsos && workedQsos.has(call)));
+  // Default to the ONE worked-before definition. The old fallback was a bare
+  // workedQsos.has(call) — any prior contact ever, ANY band or mode — and
+  // Hunt's answer path used it, which is how a months-old 20m QSO blocked a
+  // 40m activator (KQ4MHD 2026-08-17). Callers that pass isWorked (tests,
+  // Run's pause counter) keep their injected predicate.
+  const dupeBandMode = jtcatCurrentBandMode(ft8Engine);
+  const isWorked = (opts && opts.isWorked)
+    || ((call) => jtcatIsWorkedCall(call, dupeBandMode.band, dupeBandMode.mode));
   return (results || [])
     .filter((d) => matchesAutoCqFilter(d.text, filterMode))
     .map((d) => ({ ...d, ...parseCqMessage(d.text) }))
@@ -25944,11 +25966,16 @@ app.whenReady().then(() => {
       if (dupe.worked && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
         const { sameBandMode, entries: dupeEntries, last } = dupe;
         const lastDate = (last.date || '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+        // The tail names WHY a same-band dupe isn't blocking (worked-before
+        // policy: new park activation, or aged out of the rework window).
+        const tail = dupe.blocking || !sameBandMode ? ' — calling anyway'
+          : dupe.reason === 'new-park' ? ' — new park activation, counts fresh'
+          : ' — outside the rework window';
         jtcatPopoutWin.webContents.send('jtcat-dupe-warning', {
           message: data.call + ' already worked' + (sameBandMode ? ' on ' + curBand + ' ' + curMode : ''),
-          sub: 'Last: ' + (lastDate || 'unknown date') + (last.band ? ' ' + last.band : '') + (last.mode ? ' ' + last.mode : '') + ' — calling anyway',
+          sub: 'Last: ' + (lastDate || 'unknown date') + (last.band ? ' ' + last.band : '') + (last.mode ? ' ' + last.mode : '') + tail,
         });
-        sendCatLog(`[JTCAT] Dupe warning: ${data.call} already worked (${dupeEntries.length}x) — manual reply proceeding`);
+        sendCatLog(`[JTCAT] Dupe warning: ${data.call} already worked (${dupeEntries.length}x, ${dupe.reason}) — manual reply proceeding`);
       }
     }
 

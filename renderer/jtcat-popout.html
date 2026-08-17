@@ -653,6 +653,10 @@
       <span class="jp-opt-label">Give up after <input id="jp-max-attempts" type="number" min="1" max="60" value="12"> tries</span>
       <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. If signal reports were exchanged both ways, the QSO is logged and a final 73 is sent first.</span>
     </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Worked-before expires after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
+      <span class="jp-opt-help">How long a logged contact keeps Hunt and Auto CQ from calling that station again on the same band and mode. 0 = forever. A station spotted as an activator is always fair game unless you already worked them at that park today — a new park or a new UTC day counts fresh, matching program rules.</span>
+    </label>
     <button id="jp-hunt-cq-fallback" class="jp-opt-row ultracat-gated hidden">
       <span class="jp-opt-label">Call CQ when there's nothing to hunt</span>
       <span class="jp-opt-help">While hunting, if nobody workable has called CQ for about a minute, start calling CQ yourself — and hand straight back to hunting the moment someone worth working shows up. Turns itself off if you change the Hunt setting.</span>
