@@ -1481,17 +1481,18 @@ function _applyPopoutTheme(payload) {
   var FT2_BAND_FREQS = {
     '160m': 1843, '80m': 3578, '60m': 5360, '40m': 7052, '30m': 10144,
     '20m': 14084, '17m': 18108, '15m': 21144, '12m': 24923, '10m': 28184,
+    '2m': 144184,
   };
   // FT4 dial frequencies (kHz) per band
   var FT4_BAND_FREQS = {
     '160m': 1840, '80m': 3568, '60m': 5357, '40m': 7047.5, '30m': 10140,
     '20m': 14080, '17m': 18104, '15m': 21140, '12m': 24919, '10m': 28180,
-    '6m': 50318,
+    '6m': 50318, '2m': 144170,
   };
   var FT8_BAND_FREQS = {
     '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136,
     '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074,
-    '6m': 50313,
+    '6m': 50313, '2m': 144174,
   };
   // WSPR USB dial frequencies (kHz) — the radio tunes here; signals sit
   // 1400–1600 Hz above. Matches lib/wspr/bands.js.
@@ -1713,7 +1714,7 @@ function _applyPopoutTheme(payload) {
     '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
     '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '2m': '#88ff88',
   };
-  var BAND_FREQS = { '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313 };
+  var BAND_FREQS = { '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '2m': 144174 };
   var SLICE_NAMES = { 5002: 'A', 5003: 'B', 5004: 'C', 5005: 'D' };
 
   if (multiBtn) multiBtn.addEventListener('click', function() {
