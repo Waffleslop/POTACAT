@@ -322,6 +322,8 @@ wwbotaSetLogger(sendCatLog); // surface WWBOTA SSE reconnects/errors in the CAT 
 const { postWwffRespot } = require('./lib/wwff-respot');
 const { fetchSpots: fetchGmaSpots, postGmaRespot, setLogger: gmaSetLogger } = require('./lib/gma');
 gmaSetLogger(sendCatLog); // surface GMA fetch errors in the CAT log (sendCatLog is hoisted)
+const { fetchSpots: fetchParcSpots, setLogger: parcSetLogger } = require('./lib/parc');
+parcSetLogger(sendCatLog); // PARC (Protected Area Radio Community) — N3FMC request 2026-08-17
 const { fetchNets: fetchDirectoryNets, fetchSwl: fetchDirectorySwl } = require('./lib/directory');
 const { QrzClient } = require('./lib/qrz');
 const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, nearbyParks: nearbyParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
@@ -1764,7 +1766,7 @@ function notifyWatchlistSpot({ callsign, frequency, mode, source, reference, loc
   const freqMHz = (parseFloat(frequency) / 1000).toFixed(3);
   let body = `${freqMHz} MHz`;
   if (mode) body += ` ${mode}`;
-  const sourceLabels = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', gma: 'GMA', dxc: 'DX Cluster', rbn: 'RBN', pskr: 'FreeDV' };
+  const sourceLabels = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', gma: 'GMA', parc: 'PARC', dxc: 'DX Cluster', rbn: 'RBN', pskr: 'FreeDV' };
   const label = sourceLabels[source] || source;
   if (reference) {
     body += ` \u2014 ${label} ${reference}`;
@@ -11501,6 +11503,8 @@ function panadapterAllowsSource(source) {
       case 'cwspots': return settings.enableCwSpots === true;
       case 'pskr':    return settings.enablePskr === true;
       case 'freedv':  return settings.enableFreedv === true;
+      case 'gma':     return settings.enableGma === true;   // was missing — GMA leaked into sync mode
+      case 'parc':    return settings.enableParc === true;
       case 'wsjtx':   return true; // local overlays — operator owns the WSJT-X UI
       default:        return true;
     }
@@ -11517,6 +11521,8 @@ function panadapterAllowsSource(source) {
     case 'cwspots': return settings.panadapterCwSpots === true;
     case 'pskr':    return settings.panadapterPskr === true;
     case 'freedv':  return settings.panadapterPskr === true;
+    case 'gma':     return settings.panadapterGma === true;   // was missing — GMA ignored its own toggle here
+    case 'parc':    return settings.panadapterParc === true;
     case 'wsjtx':   return settings.panadapterWsjtx === true;
     default:        return true;
   }
@@ -11542,6 +11548,7 @@ function panadapterWantsSource(source) {
     case 'cwspots': return settings.panadapterCwSpots === true;
     case 'pskr':    return settings.panadapterPskr === true;
     case 'gma':     return settings.panadapterGma === true;
+    case 'parc':    return settings.panadapterParc === true;
     default:        return false;
   }
 }
@@ -17766,6 +17773,59 @@ function processGmaSpots(raw) {
   return [...seen.values()];
 }
 
+// PARC (Protected Area Radio Community) — same WWFF-shaped intermediate as
+// GMA, one function apart so per-program tweaks never tangle.
+function processParcSpots(raw) {
+  const myPos = gridToLatLon(settings.grid);
+  const all = raw.map((s) => {
+    const freqKhz = s.frequency_khz;
+    const freqMHz = freqKhz / 1000;
+    const callsign = s.activator || '';
+    const lat = s.latitude != null ? parseFloat(s.latitude) : null;
+    const lon = s.longitude != null ? parseFloat(s.longitude) : null;
+    const haveLatLon = lat != null && lon != null && !isNaN(lat) && !isNaN(lon);
+
+    let distance = null, spotBearing = null;
+    if (myPos && haveLatLon) {
+      distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, lat, lon));
+      spotBearing = Math.round(bearing(myPos.lat, myPos.lon, lat, lon));
+    }
+
+    let continent = '', parcLocationDesc = '';
+    if (ctyDb && callsign) {
+      const entity = resolveCallsign(callsign, ctyDb);
+      if (entity) {
+        continent = entity.continent || '';
+        parcLocationDesc = entity.name || '';
+      }
+    }
+
+    const spotTime = s.spot_time ? new Date(s.spot_time * 1000).toISOString() : '';
+
+    return {
+      source: 'parc',
+      callsign,
+      frequency: String(freqKhz),
+      freqMHz,
+      mode: (s.mode || '').toUpperCase(),
+      reference: s.reference || '',
+      parkName: s.reference_name || '',
+      locationDesc: parcLocationDesc,
+      distance,
+      bearing: spotBearing,
+      lat: haveLatLon ? lat : null,
+      lon: haveLatLon ? lon : null,
+      band: freqToBand(freqMHz),
+      spotTime,
+      continent,
+    };
+  });
+  // Dedupe: keep latest spot per callsign+band (allows multi-band activations)
+  const seen = new Map();
+  for (const s of all) { seen.set(s.callsign + '_' + s.band, s); }
+  return [...seen.values()];
+}
+
 // Tiles polling has its own cadence, decoupled from the user's spot-
 // refresh interval — the tilesontheair.com operator foots the Supabase
 // Edge Function bill, and aggregate POTACAT polling drove a quota
@@ -18113,7 +18173,7 @@ function getActiveNetSpots() {
 // gma sits just below wwff: it re-publishes WWFF/other spots, so when the same
 // call+freq comes from both the dedicated WWFF/SOTA source and GMA, the native
 // source stays primary and GMA is folded in as an additional `sources` entry.
-const _DEDUPE_PRIORITY = { pota: 0, sota: 1, llota: 2, wwff: 3, gma: 4, cwspots: 5, dxc: 6 };
+const _DEDUPE_PRIORITY = { pota: 0, sota: 1, llota: 2, wwff: 3, parc: 4, gma: 5, cwspots: 6, dxc: 7 };
 
 function dedupeCrossSource(spots) {
   const groups = new Map();
@@ -18254,6 +18314,7 @@ async function refreshSpots() {
     const enableTiles = settings.enableTiles !== false || panadapterWantsSource('tiles');
     // GMA defaults OFF — opt-in, niche (mountain/summit) program. (Luk 2026-06-13.)
     const enableGma = settings.enableGma === true || panadapterWantsSource('gma');
+    const enableParc = settings.enableParc === true || panadapterWantsSource('parc'); // default OFF, opt-in (N3FMC)
 
     const fetches = [];
     if (enablePota) fetches.push(fetchPotaSpots().then(processPotaSpots));
@@ -18263,6 +18324,7 @@ async function refreshSpots() {
     if (enableWwbota) fetches.push(fetchWwbotaSpots().then(processWwbotaSpots));
     else wwbotaDisconnect(); // close the SSE stream when WWBOTA is off (idempotent)
     if (enableGma) fetches.push(fetchGmaSpots().then(processGmaSpots));
+    if (enableParc) fetches.push(fetchParcSpots().then(processParcSpots));
     if (enableTiles) {
       // Tiles fetch with operator-friendly cadence + since-incremental
       // polling + 429 backoff. See TILES_POLL_MS comment block above
@@ -18345,7 +18407,7 @@ async function refreshSpots() {
     // ref also reported by POTA/SOTA/WWFF, so a native program wins the primary
     // slot and GMA decorates as gmaReference. A GMA-only ref is still primary
     // (it's the only member of its group). (Luk 2026-06-13.)
-    const PROGRAM_PRIORITY = ['pota', 'sota', 'wwff', 'llota', 'wwbota', 'tiles', 'gma'];
+    const PROGRAM_PRIORITY = ['pota', 'sota', 'wwff', 'llota', 'wwbota', 'tiles', 'parc', 'gma'];
     const SECONDARY_FIELDS = {
       pota: { ref: 'potaReference', name: 'potaParkName' },
       sota: { ref: 'sotaReference', name: 'sotaParkName' },
@@ -18353,6 +18415,7 @@ async function refreshSpots() {
       llota: { ref: 'llotaReference', name: 'llotaParkName' },
       wwbota: { ref: 'wwbotaReference', name: 'wwbotaParkName' },
       tiles: { ref: 'tilesReference', name: 'tilesParkName' },
+      parc: { ref: 'parcReference', name: 'parcParkName' },
       gma: { ref: 'gmaReference', name: 'gmaParkName' },
     };
     const programSpots = allSpots.filter(s => PROGRAM_PRIORITY.includes(s.source));
@@ -29199,7 +29262,8 @@ app.whenReady().then(() => {
     const panadapterChanged = has('panadapterSyncTable') || has('panadapterPota') ||
       has('panadapterSota') || has('panadapterWwff') || has('panadapterLlota') ||
       has('panadapterCluster') || has('panadapterRbn') || has('panadapterCwSpots') ||
-      has('panadapterPskr') || has('panadapterWsjtx');
+      has('panadapterPskr') || has('panadapterWsjtx') ||
+      has('panadapterGma') || has('panadapterParc'); // gma was missing (its toggle never re-gated fetches)
     if (panadapterChanged) {
       // connectX() and disconnectX() are idempotent — they tear down before
       // (re)gating, so calling them when the gate is now false is the safe

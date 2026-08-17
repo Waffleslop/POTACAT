@@ -78,27 +78,33 @@ function greatCircleArc(lat1, lon1, lat2, lon2, numPoints) {
 // --- Colorblind-safe dual palettes ---
 const SOURCE_COLORS_NORMAL = {
   pota: '#4ecca3', sota: '#f0a500', wwff: '#26a69a',
-  llota: '#42a5f5', dxc: '#e040fb', rbn: '#00bcd4', pskr: '#ff6b6b'
+  llota: '#42a5f5', dxc: '#e040fb', rbn: '#00bcd4', pskr: '#ff6b6b',
+  gma: '#a98467', parc: '#7cb342'
 };
 const SOURCE_COLORS_CB = {
   pota: '#4fc3f7', sota: '#ffb300', wwff: '#29b6f6',
-  llota: '#42a5f5', dxc: '#e040fb', rbn: '#81d4fa', pskr: '#ffa726'
+  llota: '#42a5f5', dxc: '#e040fb', rbn: '#81d4fa', pskr: '#ffa726',
+  gma: '#bcaaa4', parc: '#aed581'
 };
 const SOURCE_STROKES_NORMAL = {
   pota: '#3ba882', sota: '#c47f00', wwff: '#1b7a71',
-  llota: '#1e88e5', dxc: '#ab00d9', rbn: '#0097a7', pskr: '#d84343'
+  llota: '#1e88e5', dxc: '#ab00d9', rbn: '#0097a7', pskr: '#d84343',
+  gma: '#7a5e4a', parc: '#558b2f'
 };
 const SOURCE_STROKES_CB = {
   pota: '#2196f3', sota: '#e6a200', wwff: '#0288d1',
-  llota: '#1e88e5', dxc: '#ab00d9', rbn: '#4fc3f7', pskr: '#e68a00'
+  llota: '#1e88e5', dxc: '#ab00d9', rbn: '#4fc3f7', pskr: '#e68a00',
+  gma: '#8d7b6f', parc: '#689f38'
 };
 const SOURCE_COLORS_WCAG = {
   pota: '#5ed8ad', sota: '#f0a500', wwff: '#3cc4b8',
-  llota: '#42a5f5', dxc: '#e87fff', rbn: '#00bcd4', pskr: '#ff9090'
+  llota: '#42a5f5', dxc: '#e87fff', rbn: '#00bcd4', pskr: '#ff9090',
+  gma: '#c8a98f', parc: '#9ccc65'
 };
 const SOURCE_STROKES_WCAG = {
   pota: '#42b88a', sota: '#c47f00', wwff: '#2a9e92',
-  llota: '#1e88e5', dxc: '#c040e0', rbn: '#0097a7', pskr: '#d06060'
+  llota: '#1e88e5', dxc: '#c040e0', rbn: '#0097a7', pskr: '#d06060',
+  gma: '#8a6f5a', parc: '#33691e'
 };
 let SOURCE_COLORS_ACTIVE = { ...SOURCE_COLORS_NORMAL };
 let SOURCE_STROKES_ACTIVE = { ...SOURCE_STROKES_NORMAL };

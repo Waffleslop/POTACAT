@@ -86,6 +86,7 @@
   --source-wwbota: #78909c;
   --source-tiles: #ab47bc;
   --source-gma: #a98467;
+  --source-parc: #7cb342;
   --source-dxc: #e040fb;
   --source-rbn: #00bcd4;
   --source-pskr: #ff6b6b;
@@ -4203,6 +4204,10 @@ tr.wl-group-2 td:last-child {
   border-left: 3px solid var(--source-gma);
   background: color-mix(in srgb, var(--source-gma) 6%, transparent);
 }
+.spot-parc {
+  border-left: 3px solid var(--source-parc);
+  background: color-mix(in srgb, var(--source-parc) 6%, transparent);
+}
 
 /* Event watchlist overlay (e.g. 13 Colonies) — subtle accent on rows whose
    call is on an enabled event watchlist but not in a user color group. */
@@ -4240,6 +4245,7 @@ tr.wl-group-2 td:last-child {
 .source-badge-wwbota { background: var(--source-wwbota); color: #fff; }
 .source-badge-tiles { background: var(--source-tiles); color: #fff; }
 .source-badge-gma { background: var(--source-gma); color: #000; }
+.source-badge-parc { background: var(--source-parc); color: #000; }
 .source-badge-pskr { background: var(--source-pskr); color: #000; }
 .source-badge-net  { background: var(--source-net); color: #000; }
 .source-badge-cwspots { background: var(--source-net); color: #000; }
@@ -4258,6 +4264,11 @@ tr.wl-group-2 td:last-child {
 .no-source-tint .spot-llota,
 .no-source-tint .spot-wwbota,
 .no-source-tint .spot-gma,
+.no-source-tint .spot-pskr,
+.no-source-tint .spot-net {
+  background: transparent;
+}
+.no-source-tint .spot-parc,
 .no-source-tint .spot-pskr,
 .no-source-tint .spot-net {
   background: transparent;

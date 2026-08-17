@@ -52,7 +52,8 @@ window.api.onTheme(theme => {
 
 const CB_SOURCE_COLORS = {
   pota: '#4fc3f7', sota: '#ffb300', wwff: '#29b6f6',
-  llota: '#42a5f5', dxc: '#e040fb', rbn: '#81d4fa', pskr: '#ffa726'
+  llota: '#42a5f5', dxc: '#e040fb', rbn: '#81d4fa', pskr: '#ffa726',
+  gma: '#bcaaa4', parc: '#aed581'
 };
 function applyColorblindVars(enabled) {
   const root = document.documentElement;

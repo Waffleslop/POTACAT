@@ -111,6 +111,7 @@ let enableLlota = false;
 let enableWwbota = true;
 let enableTiles = false;
 let enableGma = false; // GMA (Global Mountain Activity) — opt-in, default off
+let enableParc = false; // PARC (Protected Area Radio Community) — opt-in, default off
 let enableDxcc = false;
 let enableCluster = false;
 let enableCwSpots = false;
@@ -618,6 +619,7 @@ const spotsBtn = document.getElementById('spots-btn');
 const spotsPota = document.getElementById('spots-pota');
 const spotsSota = document.getElementById('spots-sota');
 const spotsGma = document.getElementById('spots-gma');
+const spotsParc = document.getElementById('spots-parc');
 const spotsWwff = document.getElementById('spots-wwff');
 const spotsLlota = document.getElementById('spots-llota');
 const spotsWwbota = document.getElementById('spots-wwbota');
@@ -722,6 +724,7 @@ if (respotPresetsAdd) {
 const setEnablePota = document.getElementById('set-enable-pota');
 const setEnableSota = document.getElementById('set-enable-sota');
 const setEnableGma = document.getElementById('set-enable-gma');
+const setEnableParc = document.getElementById('set-enable-parc');
 const setEnableWwff = document.getElementById('set-enable-wwff');
 const setEnableLlota = document.getElementById('set-enable-llota');
 const setEnableWwbota = document.getElementById('set-enable-wwbota');
@@ -1657,6 +1660,7 @@ async function loadPrefs() {
   enableWwbota = settings.enableWwbota !== false; // default true (Casey 2026-06-01)
   enableTiles = settings.enableTiles !== false; // default true (Tiles is fresh — show new users)
   enableGma = settings.enableGma === true; // default false (opt-in)
+  enableParc = settings.enableParc === true; // default false (opt-in)
   enableDxcc = settings.enableDxcc === true;  // default false
   enableCluster = settings.enableCluster === true; // default false
   enableCwSpots = settings.enableCwSpots === true; // default false
@@ -8747,6 +8751,7 @@ function getFiltered() {
       (s.source === 'wwbota' && !enableWwbota) ||
       (s.source === 'tiles' && !enableTiles) ||
       (s.source === 'gma' && !enableGma) ||
+      (s.source === 'parc' && !enableParc) ||
       (s.source === 'dxc' && !enableCluster) ||
       (s.source === 'cwspots' && !enableCwSpots) ||
       (s.source === 'rbn' && !enableRbn) ||
@@ -9233,19 +9238,19 @@ L.Icon.Default.mergeOptions({
 // --- Colorblind-safe dual palettes ---
 const SOURCE_COLORS_NORMAL = {
   pota: '#4ecca3', sota: '#f0a500', wwff: '#26a69a',
-  llota: '#42a5f5', tiles: '#ab47bc', gma: '#a98467', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#00bcd4', pskr: '#ff6b6b', freedv: '#00e5ff'
+  llota: '#42a5f5', tiles: '#ab47bc', gma: '#a98467', parc: '#7cb342', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#00bcd4', pskr: '#ff6b6b', freedv: '#00e5ff'
 };
 const SOURCE_COLORS_CB = {
   pota: '#4fc3f7', sota: '#ffb300', wwff: '#29b6f6',
-  llota: '#42a5f5', tiles: '#ce93d8', gma: '#bcaaa4', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#81d4fa', pskr: '#ffa726', freedv: '#00e5ff'
+  llota: '#42a5f5', tiles: '#ce93d8', gma: '#bcaaa4', parc: '#aed581', dxc: '#e040fb', cwspots: '#ffd740', rbn: '#81d4fa', pskr: '#ffa726', freedv: '#00e5ff'
 };
 const SOURCE_STROKES_NORMAL = {
   pota: '#3ba882', sota: '#c47f00', wwff: '#1b7a71',
-  llota: '#1e88e5', tiles: '#7b1fa2', gma: '#7a5e4a', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d84343', freedv: '#00acc1'
+  llota: '#1e88e5', tiles: '#7b1fa2', gma: '#7a5e4a', parc: '#558b2f', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d84343', freedv: '#00acc1'
 };
 const SOURCE_STROKES_CB = {
   pota: '#2196f3', sota: '#e6a200', wwff: '#0288d1',
-  llota: '#1e88e5', tiles: '#9c27b0', gma: '#8d7b6f', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#4fc3f7', pskr: '#e68a00', freedv: '#00acc1'
+  llota: '#1e88e5', tiles: '#9c27b0', gma: '#8d7b6f', parc: '#689f38', dxc: '#ab00d9', cwspots: '#c6a700', rbn: '#4fc3f7', pskr: '#e68a00', freedv: '#00acc1'
 };
 const RBN_BAND_COLORS_NORMAL = {
   '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3',
@@ -9306,7 +9311,8 @@ function applyColorblindMode(enabled) {
   }
   // Update inline source label colors in Spots dropdown
   const srcLabels = { pota: '#spots-pota', sota: '#spots-sota', wwff: '#spots-wwff',
-    llota: '#spots-llota', tiles: '#spots-tiles', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr' };
+    llota: '#spots-llota', tiles: '#spots-tiles', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr',
+    gma: '#spots-gma', parc: '#spots-parc' };
   for (const [src, sel] of Object.entries(srcLabels)) {
     const span = document.querySelector(sel + ' + span') || document.querySelector(sel)?.parentElement?.querySelector('span');
     if (span) span.style.color = SOURCE_COLORS_ACTIVE[src];
@@ -9319,11 +9325,11 @@ function applyColorblindMode(enabled) {
 // WCAG AA high-contrast source palettes
 const SOURCE_COLORS_WCAG = {
   pota: '#5ed8ad', sota: '#f0a500', wwff: '#3cc4b8',
-  llota: '#42a5f5', tiles: '#ce93d8', gma: '#c8a98f', dxc: '#e87fff', cwspots: '#ffe066', rbn: '#00bcd4', pskr: '#ff9090', freedv: '#00e5ff'
+  llota: '#42a5f5', tiles: '#ce93d8', gma: '#c8a98f', parc: '#9ccc65', dxc: '#e87fff', cwspots: '#ffe066', rbn: '#00bcd4', pskr: '#ff9090', freedv: '#00e5ff'
 };
 const SOURCE_STROKES_WCAG = {
   pota: '#42b88a', sota: '#c47f00', wwff: '#2a9e92',
-  llota: '#1e88e5', tiles: '#9c27b0', gma: '#8a6f5a', dxc: '#c040e0', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d06060', freedv: '#00acc1'
+  llota: '#1e88e5', tiles: '#9c27b0', gma: '#8a6f5a', parc: '#33691e', dxc: '#c040e0', cwspots: '#c6a700', rbn: '#0097a7', pskr: '#d06060', freedv: '#00acc1'
 };
 
 function applyWcagMode(enabled) {
@@ -9352,7 +9358,8 @@ function applyWcagMode(enabled) {
     root.style.setProperty('--source-' + src, color);
   }
   const srcLabels = { pota: '#spots-pota', sota: '#spots-sota', wwff: '#spots-wwff',
-    llota: '#spots-llota', tiles: '#spots-tiles', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr' };
+    llota: '#spots-llota', tiles: '#spots-tiles', dxc: '#spots-cluster', rbn: '#spots-rbn', pskr: '#spots-pskr',
+    gma: '#spots-gma', parc: '#spots-parc' };
   for (const [src, sel] of Object.entries(srcLabels)) {
     const span = document.querySelector(sel + ' + span') || document.querySelector(sel)?.parentElement?.querySelector('span');
     if (span) span.style.color = SOURCE_COLORS_ACTIVE[src];
@@ -9809,7 +9816,7 @@ const PRIVILEGE_RANGES = {
 
 const SOURCE_LABELS = {
   pota: 'POTA', sota: 'SOTA', dxc: 'DX', cwspots: 'CW',
-  rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', tiles: 'Tiles', gma: 'GMA', pskr: 'FreeDV', net: 'NET',
+  rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', tiles: 'Tiles', gma: 'GMA', parc: 'PARC', pskr: 'FreeDV', net: 'NET',
 };
 const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
@@ -11883,6 +11890,7 @@ function render() {
       if (s.source === 'llota') tr.classList.add('spot-llota');
       if (s.source === 'wwbota') tr.classList.add('spot-wwbota');
       if (s.source === 'gma') tr.classList.add('spot-gma');
+      if (s.source === 'parc') tr.classList.add('spot-parc');
       if (s.source === 'pskr') tr.classList.add('spot-pskr');
       if (s.source === 'net') tr.classList.add('spot-net');
       // Watchlist group — color the whole row when the activator's call
@@ -12245,6 +12253,8 @@ function render() {
           else if (s.source === 'wwff') url = `https://wwff.co/directory/?showRef=${s.reference}`;
           else if (s.source === 'llota') url = `https://llota.app/lighthouse/${s.reference}`;
           else if (s.source === 'wwbota') url = `https://wwbota.net/cluster-2/`;
+          else if (s.source === 'parc') url = `https://parc-community.com/parks/${s.reference}`;
+          else if (s.source === 'gma') url = `https://www.cqgma.org/`; // was falling through to a bogus POTA link
           else url = `https://pota.app/#/park/${s.reference}`;
           const a = document.createElement('a');
           a.textContent = cell.val;
@@ -13380,6 +13390,7 @@ function syncSpotsPanel() {
   if (spotsWwbota) spotsWwbota.checked = enableWwbota;
   if (spotsTiles) spotsTiles.checked = enableTiles;
   if (spotsGma) spotsGma.checked = enableGma;
+  if (spotsParc) spotsParc.checked = enableParc;
   spotsCluster.checked = enableCluster;
   spotsCwSpots.checked = enableCwSpots;
   spotsRbn.checked = enableRbn;
@@ -13426,6 +13437,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   enableWwbota = spotsWwbota ? spotsWwbota.checked : enableWwbota;
   enableTiles = spotsTiles ? spotsTiles.checked : enableTiles;
   enableGma = spotsGma ? spotsGma.checked : enableGma;
+  enableParc = spotsParc ? spotsParc.checked : enableParc;
   enableCluster = spotsCluster.checked;
   enableCwSpots = spotsCwSpots.checked;
   enableRbn = spotsRbn.checked;
@@ -13478,6 +13490,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   if (setEnableWwbota) setEnableWwbota.checked = enableWwbota;
   if (setEnableTiles) setEnableTiles.checked = enableTiles;
   if (setEnableGma) setEnableGma.checked = enableGma;
+  if (setEnableParc) setEnableParc.checked = enableParc;
   setEnableCluster.checked = enableCluster;
   setEnableCwSpots.checked = enableCwSpots;
   setEnableRbn.checked = enableRbn;
@@ -13494,7 +13507,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
 
   // Save and let main process handle connect/disconnect
   await window.api.saveSettings({
-    enablePota, enableSota, enableWwff, enableLlota, enableWwbota, enableTiles, enableGma,
+    enablePota, enableSota, enableWwff, enableLlota, enableWwbota, enableTiles, enableGma, enableParc,
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
     enableDxeSources: { ...enableDxeSources },
     hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, strictAtno, hideOutOfBand,
@@ -14397,6 +14410,7 @@ async function openSettingsDialog(tab) {
   if (setEnableWwbota) setEnableWwbota.checked = s.enableWwbota !== false;
   if (setEnableTiles) setEnableTiles.checked = s.enableTiles !== false;
   if (setEnableGma) setEnableGma.checked = s.enableGma === true;
+  if (setEnableParc) setEnableParc.checked = s.enableParc === true;
   setEnableQrz.checked = s.enableQrz === true;
   setQrzUsername.value = s.qrzUsername || '';
   setQrzPassword.value = s.qrzPassword || '';
@@ -15067,6 +15081,7 @@ settingsSave.addEventListener('click', async () => {
   const wwbotaEnabled = setEnableWwbota ? setEnableWwbota.checked : enableWwbota;
   const tilesEnabled = setEnableTiles ? setEnableTiles.checked : enableTiles;
   const gmaEnabled = setEnableGma ? setEnableGma.checked : enableGma;
+  const parcEnabled = setEnableParc ? setEnableParc.checked : enableParc;
   const qrzEnabled = setEnableQrz.checked;
   const qrzUsername = setQrzUsername.value.trim().toUpperCase();
   const qrzPassword = setQrzPassword.value;
@@ -15300,6 +15315,7 @@ settingsSave.addEventListener('click', async () => {
     enableWwbota: wwbotaEnabled,
     enableTiles: tilesEnabled,
     enableGma: gmaEnabled,
+    enableParc: parcEnabled,
     enableQrz: qrzEnabled,
     qrzUsername: qrzUsername,
     qrzPassword: qrzPassword,
@@ -15524,6 +15540,7 @@ settingsSave.addEventListener('click', async () => {
   enableLlota = llotaEnabled;
   enableTiles = tilesEnabled;
   enableGma = gmaEnabled;
+  enableParc = parcEnabled;
   enableCluster = clusterEnabled;
   enableRbn = rbnEnabled;
   enablePskr = pskrEnabled;
