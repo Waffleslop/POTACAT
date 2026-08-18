@@ -468,6 +468,8 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatTuneAudioStop: (cb) => ipcRenderer.on('jtcat-tune-audio-stop', () => cb()),
   onJtcatStartForRemote: (cb) => ipcRenderer.on('jtcat-start-for-remote', () => cb()),
   onJtcatStopForRemote: (cb) => ipcRenderer.on('jtcat-stop-for-remote', () => cb()),
+  onJtcatStartForJs8: (cb) => ipcRenderer.on('jtcat-start-for-js8', () => cb()),
+  onJtcatStopForJs8: (cb) => ipcRenderer.on('jtcat-stop-for-js8', () => cb()),
   // ECHOCAT FT8 takeover closed the JTCAT popout — surface a toast in the
   // main window so the desktop operator isn't left with a silent vanish.
   onJtcatTakeoverNotice: (cb) => ipcRenderer.on('jtcat-takeover-notice', (_e, data) => cb(data)),

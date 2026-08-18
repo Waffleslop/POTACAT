@@ -10044,6 +10044,15 @@ function stopJs8Spectrum() {
   console.log('[JS8] waterfall spectrum loop stopped');
 }
 
+function startJs8AudioFeed() {
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) return;
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-start-for-js8');
+}
+
+function stopJs8AudioFeed() {
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-js8');
+}
+
 function stopJtcat() {
   clearJtcatTxFailsafe();
   clearJtcatIcomHardRelease();
@@ -15621,14 +15630,14 @@ function connectRemote() {
   // back on js8-send-result so the phone shows "why not" instead of nothing.
   remoteServer.on('js8-start', ({ reqId } = {}) => {
     markUserActive();
-    if (js8Engine()) { js8PushStatus(); return; }
+    if (js8Engine()) { startJs8AudioFeed(); js8PushStatus(); return; }
     if (!settings.myCallsign) {
       // reqId attributes the failure to the tap — a bare ok:false reads as
       // a session-level error on the phone and cancels a pending send.
       remoteServer.sendJs8SendResult({ ok: false, error: 'Set your callsign in Settings on the desktop first.', reqId });
       return;
     }
-    try { startJtcat('JS8'); } catch (err) {
+    try { startJtcat('JS8'); startJs8AudioFeed(); } catch (err) {
       remoteServer.sendJs8SendResult({ ok: false, error: String((err && err.message) || err), reqId });
     }
   });
@@ -15637,6 +15646,7 @@ function connectRemote() {
     if (!js8Engine()) return;
     js8SetHeartbeat(false);
     stopJtcat();
+    stopJs8AudioFeed();
     js8PushStatus();
   });
   remoteServer.on('js8-heartbeat', ({ enabled, intervalMin }) => {
@@ -24591,6 +24601,7 @@ app.whenReady().then(() => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('jtcat-popout-status', false);
       }
+      if (js8Engine()) startJs8AudioFeed();
       // Popout gone: if an ECHOCAT client is connected, the target SURVIVES —
       // it belongs to the session, not the surface (handoff work item 4; the
       // remote fire path takes over). With no remote client there is nobody
@@ -24750,7 +24761,7 @@ app.whenReady().then(() => {
       // from their device.
       const remoteMaybeUsingJs8 = remoteServer && remoteServer.hasClient && remoteServer.hasClient();
       if (js8Engine() && !remoteMaybeUsingJs8) {
-        try { js8SetHeartbeat(false); stopJtcat(); } catch (err) { sendCatLog('[JS8] stop on close failed: ' + (err.message || err)); }
+        try { js8SetHeartbeat(false); stopJtcat(); stopJs8AudioFeed(); } catch (err) { sendCatLog('[JS8] stop on close failed: ' + (err.message || err)); }
       }
     });
     js8PopoutWin.webContents.on('did-finish-load', () => {
@@ -24775,6 +24786,7 @@ app.whenReady().then(() => {
       // it). No callsign → stay stopped; the bar's Start gives the clear error.
       if (!js8Engine() && settings.myCallsign) {
         try { startJtcat('JS8'); } catch (err) { sendCatLog('[JS8] auto-start on open failed: ' + (err.message || err)); }
+        if (js8Engine()) startJs8AudioFeed();
         js8PushStatus();
       }
     });
@@ -24815,12 +24827,13 @@ app.whenReady().then(() => {
   // in JS8 mode and every audio route, guard, and popout behavior follows.
   ipcMain.handle('js8-start', () => {
     markUserActive();
-    if (js8Engine()) return { ok: true, already: true };
+    if (js8Engine()) { startJs8AudioFeed(); return { ok: true, already: true }; }
     if (!settings.myCallsign) {
       return { ok: false, error: 'Set your callsign in Settings first — JS8 transmissions carry it.' };
     }
     try {
       startJtcat('JS8');
+      startJs8AudioFeed();
       return { ok: !!js8Engine() };
     } catch (err) {
       return { ok: false, error: String((err && err.message) || err) };
@@ -24831,6 +24844,7 @@ app.whenReady().then(() => {
     if (!js8Engine()) return { ok: true, already: true };
     js8SetHeartbeat(false);
     stopJtcat();
+    stopJs8AudioFeed();
     js8PushStatus();
     return { ok: true };
   });

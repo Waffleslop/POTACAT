@@ -25003,6 +25003,7 @@ var jtcatRemoteActive = false; // true when phone is driving JTCAT
 var jtcatQuietFreq = 1500;     // auto-detected quiet TX frequency (Hz)
 var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq updates
 var jtcatSpectrumFrame = 0;    // frame counter for throttling spectrum IPC to ~10fps
+var jtcatJs8AudioActive = false; // true when native JS8 owns the shared JTCAT audio feeder
 
 // --- SmartSDR Direct: synthetic JTCAT audio stream ---
 // On "SmartSDR Direct" the JTCAT audio doesn't come from a Windows DAX
@@ -25279,7 +25280,7 @@ async function startJtcatAudio() {
         console.warn('[JTCAT] Audio track ended (device disconnected?) — restarting capture in 2s');
         if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio track ended (device disconnected?) — restarting capture in 2s');
         setTimeout(function() {
-          if (jtcatRunning || jtcatRemoteActive) {
+          if (jtcatRunning || jtcatRemoteActive || jtcatJs8AudioActive) {
             stopJtcatAudio();
             startJtcatAudio();
           }
@@ -25481,7 +25482,7 @@ function stopJtcatAudio() {
 
 // Restart JTCAT audio after ECHOCAT releases the shared audio device
 window.api.onRestartJtcatAudio(() => {
-  if (jtcatRunning && !jtcatRemoteActive && !jtcatPopoutOpen) {
+  if ((jtcatRunning || jtcatJs8AudioActive) && !jtcatRemoteActive && !jtcatPopoutOpen) {
     console.log('[JTCAT] Restarting audio after ECHOCAT teardown');
     stopJtcatAudio();
     startJtcatAudio();
@@ -25509,7 +25510,7 @@ function stopJtcatView() {
   // If the phone is driving JTCAT, keep audio capture and engine running
   if (!jtcatRemoteActive) {
     window.api.jtcatStop();
-    stopJtcatAudio();
+    if (!jtcatJs8AudioActive) stopJtcatAudio();
   }
   if (jtcatCountdownTimer) {
     clearInterval(jtcatCountdownTimer);
@@ -27127,8 +27128,22 @@ window.api.onJtcatStopForRemote(function() {
   console.log('[JTCAT] Remote requested audio stop');
   jtcatRemoteActive = false;
   // Only stop audio if the desktop JTCAT view isn't active
-  if (!jtcatRunning) stopJtcatAudio();
+  if (!jtcatRunning && !jtcatJs8AudioActive) stopJtcatAudio();
 });
+if (window.api.onJtcatStartForJs8) {
+  window.api.onJtcatStartForJs8(function() {
+    console.log('[JTCAT] JS8 requested audio start');
+    jtcatJs8AudioActive = true;
+    if (!jtcatPopoutOpen) startJtcatAudio();
+  });
+}
+if (window.api.onJtcatStopForJs8) {
+  window.api.onJtcatStopForJs8(function() {
+    console.log('[JTCAT] JS8 requested audio stop');
+    jtcatJs8AudioActive = false;
+    if (!jtcatRunning && !jtcatRemoteActive) stopJtcatAudio();
+  });
+}
 // ECHOCAT FT8 takeover closed the JTCAT popout — tell the desktop operator
 // (the close is otherwise silent from this side; K3SBP 2026-07-17).
 if (window.api.onJtcatTakeoverNotice) {
