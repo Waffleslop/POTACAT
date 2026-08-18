@@ -21123,13 +21123,23 @@ function startAutoSstvTimer() {
   if (!settings.enableAutoSstv) return;
   const thresholdMs = (settings.autoSstvInactivityMin || 90) * 60 * 1000;
   autoSstvTimer = setInterval(() => {
+    // An active JTCAT session IS the operator using the radio. The defer
+    // guard below only BLOCKS the idle program — without this stamp the
+    // countdown expires mid-session and the pent-up program fires 30 s
+    // after the operator halts FT8, grabbing the rig from someone who was
+    // just at the controls (K3SBP 2026-08-17: JS8 opened 17 s after he
+    // shut down a CQ run). Petting the shared clock also keeps the idle
+    // CAT-polling pause from starving the VFO poll during a session.
+    if (autoSstvBlockedByJtcat()) lastActivityTime = Date.now();
     const idle = Date.now() - lastActivityTime;
     if (!autoSstvActive && idle >= thresholdMs) {
       triggerAutoSstv();
     }
     // If SSTV is already active, check for band change at sunrise/sunset.
-    // (WSPR-on-idle manages its own bands via the hop scheduler — skip.)
-    if (autoSstvActive && !autoIdleJtcatActive) {
+    // (WSPR-on-idle manages its own bands via the hop scheduler — skip.
+    // JS8-on-idle owns its own day/night QSY too — without the exclusion
+    // this branch retuned a JS8 idle session to the SSTV frequency.)
+    if (autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) {
       const newBand = getSstvAutoFreq();
       if (newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
