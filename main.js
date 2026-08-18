@@ -9087,7 +9087,7 @@ function startJtcat(mode) {
     if (/addon not built|js8_native/i.test(msg) && js8PopoutWin && !js8PopoutWin.isDestroyed()) {
       js8PopoutWin.webContents.send('js8call-send-result', {
         ok: false,
-        error: 'JS8 decoder is not available in this build — reinstall the latest POTACAT.',
+        error: 'JS8 decoder is missing from this build — reinstall the latest POTACAT. Built from source? Run "npm run build-natives" before packaging.',
       });
     }
   });

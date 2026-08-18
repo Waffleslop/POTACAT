@@ -204,8 +204,14 @@ Requires [Node.js](https://nodejs.org/) **22+**.
 git clone https://github.com/Waffleslop/POTACAT.git
 cd POTACAT
 npm install
+npm run build-natives   # compile the FT8 / JS8 / FreeDV native decoders
 npm start
 ```
+
+`build-natives` needs a C/C++ toolchain: Xcode Command Line Tools on macOS,
+Visual Studio Build Tools on Windows, `build-essential` on Linux. Skipping it
+still runs, but FT8 falls back to a slower WASM decoder with fewer features
+and JS8/FreeDV are unavailable.
 
 ## Build binaries
 
@@ -216,7 +222,10 @@ npm run dist:linux    # Linux: AppImage + .deb + .rpm
 ```
 
 Outputs land in `dist/`. electron-builder produces x86-64 and arm64 artifacts
-per the targets in `package.json`.
+per the targets in `package.json`. The dist commands refuse to package until
+`npm run build-natives` has been run (a build without the native decoders
+ships a broken JS8 and a degraded FT8); set `POTACAT_SKIP_NATIVE_CHECK=1` to
+override.
 
 ## Headless / Raspberry Pi
 

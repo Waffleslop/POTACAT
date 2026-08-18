@@ -32,9 +32,10 @@
     "launcher:install": "node scripts/launcher-install.js",
     "launcher:uninstall": "node scripts/launcher-install.js --uninstall",
     "fetch:cloudflared": "node scripts/fetch-cloudflared.js",
-    "predist:win": "node scripts/fetch-cloudflared.js --platform=win",
-    "predist:mac": "node scripts/fetch-cloudflared.js --platform=mac --arch=arm64",
-    "predist:linux": "node scripts/fetch-cloudflared.js --platform=linux --arch=x64",
+    "predist": "node scripts/verify-natives.js",
+    "predist:win": "node scripts/fetch-cloudflared.js --platform=win && node scripts/verify-natives.js",
+    "predist:mac": "node scripts/fetch-cloudflared.js --platform=mac --arch=arm64 && node scripts/verify-natives.js",
+    "predist:linux": "node scripts/fetch-cloudflared.js --platform=linux --arch=x64 && node scripts/verify-natives.js",
     "build-js8": "cd lib/js8_native && node-gyp rebuild"
   },
   "build": {
