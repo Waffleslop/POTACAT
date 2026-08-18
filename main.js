@@ -21029,6 +21029,7 @@ function markUserActive(opts) {
   if (idlePolePaused && cat && cat.resumePolling) {
     cat.resumePolling();
     idlePolePaused = false;
+    sendCatLog('[IdlePause] CAT polling resumed (user activity)');
   }
 }
 function isUserActive() { return (Date.now() - lastActivityTime) < 1800000; } // active within 30 min
@@ -21047,8 +21048,9 @@ function isIdleRxSelfAction(sender) {
 // Polling keeps some radios from entering their screensaver / sleep mode
 // (W3AVP report on FT-710). After N minutes of POTACAT inactivity we pause
 // the poll timer; any user action in POTACAT resumes it via markUserActive().
-// The user loses frequency/mode updates while paused — acceptable tradeoff
-// for long idle periods where they explicitly want the radio to sleep.
+// The user loses frequency/mode updates while paused — acceptable ONLY when
+// nobody is watching: the tick skips the pause while the VFO pop-out is open
+// or an ECHOCAT client is connected (see the guard in the tick).
 let idlePauseTimer = null;
 let idlePolePaused = false;
 function startIdlePauseTimer() {
@@ -21058,11 +21060,25 @@ function startIdlePauseTimer() {
   idlePauseTimer = setInterval(() => {
     if (idlePolePaused) return;
     if (!cat || !cat.pausePolling || !cat.connected) return;
+    // Never pause while someone is WATCHING the VFO. The poll is the only
+    // thing that notices radio-side dial changes, and a dial spin cannot pet
+    // the idle clock — the pause kills the very poll that would see it. So
+    // pausing under an open VFO pop-out (or a connected ECHOCAT client)
+    // freezes a display someone is looking at: writes still work, reads are
+    // dead, and only an app-side click silently revives it (N2FSM IC-7300
+    // 2026-08-18, VFO pop-out open the whole session). Pause only when
+    // nobody is looking; the countdown resumes when they stop.
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) return;
+    let remoteWatching = false;
+    try { remoteWatching = !!(remoteServer && remoteServer.running && remoteServer.activeClientContext()); } catch {}
+    if (remoteWatching) return;
     const idle = Date.now() - lastActivityTime;
     if (idle >= thresholdMs) {
       cat.pausePolling();
       idlePolePaused = true;
-      console.log('[IdlePause] CAT polling paused after ' + Math.round(idle / 60000) + ' min idle');
+      // sendCatLog, not console.log — the pause must be visible in session.log
+      // and bug reports (it was invisible in N2FSM's, which cost a diagnosis).
+      sendCatLog('[IdlePause] CAT polling paused after ' + Math.round(idle / 60000) + ' min idle — radio-side dial changes will not show until app activity resumes polling');
     }
   }, 30000); // check every 30s
 }
