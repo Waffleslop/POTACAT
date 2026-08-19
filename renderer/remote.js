@@ -3623,6 +3623,25 @@
     soTuneClickBtn.classList.toggle('active', tuneClick);
   }
 
+  // Text size S/M/L (localStorage) - drives the --ui-scale CSS variable.
+  (function initTextSize() {
+    const saved = parseFloat(localStorage.getItem('echocat-ui-scale')) || 1;
+    const apply = (v) => {
+      document.documentElement.style.setProperty('--ui-scale', v);
+      document.querySelectorAll('.text-size-btn').forEach((b) => {
+        b.classList.toggle('active', parseFloat(b.dataset.scale) === v);
+      });
+    };
+    apply(saved);
+    document.querySelectorAll('.text-size-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const v = parseFloat(b.dataset.scale) || 1;
+        localStorage.setItem('echocat-ui-scale', String(v));
+        apply(v);
+      });
+    });
+  })();
+
   function sendSetting(type, value) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: type, value: value }));

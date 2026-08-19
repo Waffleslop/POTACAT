@@ -1,3 +1,16 @@
+/* Text size (S/M/L, LZ3AW item 10). Pinch-zoom stays disabled (fixed
+   layouts); instead a scale factor multiplies the font size of the main
+   reading surfaces. Deliberately NOT a full px-to-rem sweep - the factor
+   touches the rows people squint at, not the chrome. */
+:root { --ui-scale: 1; }
+.spot-card, .spot-call, .lb-card, .ft8-decode-row, #psk-rx, #ft8-decode-log,
+.contact-row, .dir-row, #cw-panel, .em-val, .em-label {
+  font-size: calc(13px * var(--ui-scale));
+}
+.spot-call { font-size: calc(15px * var(--ui-scale)); }
+#freq-display { font-size: calc(22px * var(--ui-scale)); }
+.text-size-btn.active { background: var(--pota); color: #000; }
+
 /* ECHOCAT — Mobile Web UI */
 * { box-sizing: border-box; margin: 0; padding: 0; touch-action: manipulation; }
 
