@@ -5142,6 +5142,16 @@
   });
 
   function switchTab(tab, opts) {
+    // Spectrum feed follows visibility: pause the desktop's FFT loop when
+    // the FT8 tab (and its waterfall) leaves the screen, resume on return.
+    // try: switchTab can run during initial view restore, before the FT8
+    // section's declarations have evaluated (let = TDZ, typeof included).
+    try {
+      if (ft8WfVisible && activeTab !== tab) {
+        if (activeTab === 'ft8' && tab !== 'ft8') ft8WfSubscribe(false);
+        else if (tab === 'ft8' && activeTab !== 'ft8') ft8WfSubscribe(true);
+      }
+    } catch { /* pre-init switch — nothing subscribed yet */ }
     activeTab = tab;
     tabBar.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     // Hide all content areas
@@ -6786,11 +6796,28 @@
   // Waterfall toggle
   const ft8WfToggle = document.getElementById('ft8-wf-toggle');
   // Waterfall starts hidden — button not active until toggled
+  function ft8WfSubscribe(on) {
+    // Ask the desktop to run its own FFT loop for us. Without this the
+    // waterfall rides the desktop renderer's requestAnimationFrame forward
+    // and freezes whenever the desktop window is minimized/occluded.
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'jtcat-spectrum-subscribe', on: !!on })); } catch {}
+  }
+  function ft8WfSizeCanvas() {
+    // Match the backing store to the on-screen width so a phone rotation or
+    // tablet layout doesn't smear a fixed 320px bitmap. History clears on
+    // resize — acceptable for a 100px strip.
+    const cssW = ft8Waterfall.clientWidth || 320;
+    const w = Math.max(160, Math.min(640, Math.round(cssW)));
+    if (ft8Waterfall.width !== w) ft8Waterfall.width = w;
+  }
   ft8WfToggle.addEventListener('click', () => {
     ft8WfVisible = !ft8WfVisible;
     ft8Waterfall.classList.toggle('hidden', !ft8WfVisible);
     ft8WfToggle.classList.toggle('active', ft8WfVisible);
+    if (ft8WfVisible) ft8WfSizeCanvas();
+    ft8WfSubscribe(ft8WfVisible);
   });
+  window.addEventListener('resize', () => { if (ft8WfVisible) ft8WfSizeCanvas(); });
 
   // Erase button
   ft8EraseBtn.addEventListener('click', () => {

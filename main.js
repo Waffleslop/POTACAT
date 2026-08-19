@@ -31186,7 +31186,11 @@ app.whenReady().then(() => {
     jtcatQuietFreq = hz;
   });
   ipcMain.on('jtcat-spectrum', (_e, bins) => {
-    if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatSpectrum(bins);
+    // While a remote client holds a spectrum subscription, the in-process FFT
+    // loop is the sole WS feed — forwarding the renderer's rAF-paced bins too
+    // would interleave two streams at different cadences (the review's
+    // double-feed trap). The renderer copy still serves the popout mirror.
+    if (!_spectrumTimer && remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatSpectrum(bins);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-spectrum', { bins });
   });
 
