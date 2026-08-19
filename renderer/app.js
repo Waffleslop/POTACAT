@@ -8867,6 +8867,7 @@ const HIDEABLE_COLUMNS = [
   { key: 'operator', label: 'Operator' },
   { key: 'frequency', label: 'Freq (kHz)' },
   { key: 'mode', label: 'Mode' },
+  { key: 'wpm', label: 'WPM (CW speed)' },
   { key: 'source', label: 'Source' },
   { key: 'reference', label: 'Ref' },
   { key: 'parkName', label: 'Name' },
@@ -8884,10 +8885,22 @@ let hiddenColumns = new Set();
 function loadHiddenColumns() {
   try {
     const saved = JSON.parse(localStorage.getItem(HIDDEN_COLS_KEY));
-    if (Array.isArray(saved)) return new Set(saved);
+    if (Array.isArray(saved)) {
+      const set = new Set(saved);
+      // One-time seed: the WPM column (added 2026-08-19) must arrive HIDDEN
+      // for existing users — a saved hidden-set predating the column can't
+      // contain the key, and absence otherwise means visible. Right-click a
+      // column header to reveal it.
+      if (!localStorage.getItem('pota-cat-wpm-col-seeded')) {
+        set.add('wpm');
+        localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify([...set]));
+        localStorage.setItem('pota-cat-wpm-col-seeded', '1');
+      }
+      return set;
+    }
   } catch { /* ignore */ }
-  // Default: hide comments and grid columns on fresh install
-  return new Set(['comments', 'grid']);
+  // Default: hide comments, grid, and WPM (CW-only) columns on fresh install
+  return new Set(['comments', 'grid', 'wpm']);
 }
 
 function saveHiddenColumns() {
@@ -9029,7 +9042,7 @@ mapResizeObserver.observe(mapPaneEl);
 // --- Column Order (drag-and-drop reordering) ---
 const COL_ORDER_KEY = 'pota-cat-col-order-v1';
 const DEFAULT_COL_ORDER = [
-  'log','callsign','operator','frequency','mode','source','reference',
+  'log','callsign','operator','frequency','mode','wpm','source','reference',
   'parkName','locationDesc','grid','distance','bearing','spotTime','comments','skip','hide'
 ];
 
@@ -9078,7 +9091,7 @@ let colOrder = loadColOrder();
 const COL_WIDTHS_KEY = 'pota-cat-col-pct-v10';
 const COL_WIDTHS_KEY_V9 = 'pota-cat-col-pct-v9';
 const DEFAULT_COL_PCT_OBJ = {
-  log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, source: 5, reference: 6,
+  log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, wpm: 4, source: 5, reference: 6,
   parkName: 14, locationDesc: 7, grid: 5, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4, hide: 4
 };
 
@@ -12231,6 +12244,7 @@ function render() {
 
       const cells = [
         { val: s.mode, col: 'mode' },
+        { val: s.wpm != null ? String(s.wpm) : '', col: 'wpm' },
         { val: refDisplay, wwff: !!s.wwffReference, newPark: isNewPark, col: 'reference' },
         { val: parkDisplay, col: 'parkName' },
         { val: s.locationDesc, col: 'locationDesc' },

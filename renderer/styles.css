@@ -1702,6 +1702,7 @@ th.col-drop-right { border-right: 2px solid var(--accent-blue) !important; }
 .hide-col-operator [data-col="operator"],
 .hide-col-frequency [data-col="frequency"],
 .hide-col-mode [data-col="mode"],
+.hide-col-wpm [data-col="wpm"],
 .hide-col-source [data-col="source"],
 .hide-col-reference [data-col="reference"],
 .hide-col-parkName [data-col="parkName"],
