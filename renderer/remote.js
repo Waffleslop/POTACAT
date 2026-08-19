@@ -1448,6 +1448,21 @@
         // the visual indicator. Text-macro sidetone still yields to paddle.
         stopCwTextSidetone();
         cwIndicator.classList.toggle('active', !!msg.keying);
+        // Paddle-link diagnostics (LZ3AW TinyMidi report): rolling round-trip
+        // from paddle press to the server's keying echo. Local sidetone is
+        // zero-latency by design; this number is the LAG between what you
+        // hear and what the radio keys — the doubled-audio suspect when the
+        // rig monitor also returns via the audio bridge.
+        if (msg.keying && _paddleRttSentAt) {
+          const rtt = performance.now() - _paddleRttSentAt;
+          _paddleRttSentAt = 0;
+          _paddleRttAvg = _paddleRttAvg ? (_paddleRttAvg * 0.8 + rtt * 0.2) : rtt;
+          const el = document.getElementById('cw-paddle-rtt');
+          if (el) {
+            el.textContent = 'paddle link ~' + Math.round(_paddleRttAvg) + ' ms';
+            el.classList.remove('hidden');
+          }
+        }
         break;
 
       case 'cw-config-ack':
@@ -8178,7 +8193,9 @@
   // fire an unconditional release after 8 s. Server has a 1.5 s watchdog too;
   // this is an extra belt in case spurious keydowns keep resetting it while
   // the true release is missing.
-  var _paddleReleaseTimer = { dit: null, dah: null };
+    let _paddleRttSentAt = 0;  // press-to-echo round-trip stamp (diagnostics)
+  let _paddleRttAvg = 0;
+var _paddleReleaseTimer = { dit: null, dah: null };
   function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
     // to the server over WS (which does the real radio keying). Skip both
@@ -8190,6 +8207,7 @@
     if (contact === 'dit') localCwKeyer.paddleDit(!!state);
     else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
     if (ws && ws.readyState === WebSocket.OPEN) {
+      if (state && !_paddleRttSentAt) _paddleRttSentAt = performance.now();
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
     }
     if (_paddleReleaseTimer[contact]) {
