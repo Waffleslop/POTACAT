@@ -24587,6 +24587,13 @@ app.whenReady().then(() => {
         contextIsolation: true,
         nodeIntegration: false,
         autoplayPolicy: 'no-user-gesture-required',
+        // The waterfall loop AND the spectrum forward feeding ECHOCAT
+        // web/mobile both ride this window's requestAnimationFrame. Chromium
+        // throttles rAF for occluded/minimized windows, which froze the
+        // popout waterfall and the remote one together while decodes kept
+        // working (LZ3AW item 3). The hidden audio-helper windows already
+        // disable throttling for the same class of reason.
+        backgroundThrottling: false,
       },
     });
     const saved = settings.jtcatPopoutBounds;

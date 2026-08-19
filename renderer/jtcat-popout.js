@@ -3722,7 +3722,14 @@ function _applyPopoutTheme(payload) {
 
   // Waterfall rendering loop — driven by local AnalyserNode (no IPC)
   function popoutWaterfallLoop() {
-    if (!popoutAnalyser) return;
+    if (!popoutAnalyser) {
+      // A transiently-null analyser (mid device-change stop/start) used to
+      // RETURN here, skipping the re-arm at the bottom — the loop died
+      // permanently and the waterfall froze while decodes kept working
+      // (LZ3AW item 3). Stay armed and paint again when audio returns.
+      popoutWaterfallAnim = requestAnimationFrame(popoutWaterfallLoop);
+      return;
+    }
     try {
       var freqData = new Uint8Array(popoutAnalyser.frequencyBinCount);
       popoutAnalyser.getByteFrequencyData(freqData);
