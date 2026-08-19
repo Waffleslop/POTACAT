@@ -345,7 +345,7 @@ and non-private respectively. The predicate is the thread store's own
 | `cw-config` | C→S | Set WPM, mode, key port. |
 | `cw-config-ack` | S→C | Config accepted. |
 | `cw-state` | S→C | Keying down/up live. |
-| `cw-text` | C→S | Send a CW string. |
+| `cw-text` | C→S | Send a CW string. | `live:true` = key-as-I-type append chunk (bypasses the duplicate-send guard).
 | `cw-stop` | C→S | Cancel CW transmission. Halts the iambic paddle keyer and aborts any in-flight macro / freeform text on the rig (KY buffer flush, SmartSDR cwx clear, pyserial SIGTERM, DTR-timer clear, CAT 0x17 0xFF). |
 | `cw-enable` | C→S | Enable/disable the CW key port. |
 | `paddle` | C→S | Phone paddle event (dot/dash/space). |
@@ -418,6 +418,12 @@ the broader `status` message; no dedicated S→C envelope today.)
 | `voice-macro-delete` | C→S | Remove a stored recording. |
 | `voice-macro-labels` | S→C | Five-slot label array for voice-macro buttons (sent on connect + on changes). |
 | `save-echo-pref` | C→S | Persist an ECHOCAT-only preference (no settings.json round-trip). |
+| `jtcat-psk-rx` | S→C | PSK31 RX character batch {chars, freqHz, snrDb, metric}; hydration replays carry `replay:true`. Registered 2026-08-20 from observed frames. |
+| `jtcat-psk-send` | C→S | PSK31 one-shot transmit; `text` goes verbatim (varicode is case-sensitive). |
+| `jtcat-psk-set-sql` | C→S | PSK31 squelch 10-90; routed through the popout's clamp+persist handler. |
+| `freq-other` | S→C | Other-VFO (TX) frequency while split is on; 0 = hide. Cached + hydrated. |
+| `fwd-power` | S→C | Measured forward watts during TX (Flex TX bridge); decays to 0 after TX. Distinct from `power` (setting) and `tx-meter` (TX audio peak). |
+| `solar-data` | S→C | Solar blob (sfi/kIndex/aIndex + bands/kpHistory/alerts) — same payload as the desktop Conditions panel. Cached + hydrated. |
 | `save-custom-cat-buttons` | C→S | Save user-defined raw-CAT buttons for the Rig table. | Entries are `{name, command}` plus additive per-type fields (2026-08-19): `type` (`button` default / `toggle` / `slider`), `commandOff` (toggle), `min`/`max`/`value` (slider; the client substitutes `{v}`/`{v2}`/`{v3}`/`{v4}` placeholders and sends the FINAL string via `send-custom-cat` — the server never interprets templates). Clients that predate a field must PRESERVE unknown entry fields on save, not strip them; an older client rendering a toggle as a plain button sends only the On command, which is acceptable degradation. |
 | `colorblind-mode` | S→C | Server says colorblind mode is on (affects accent colors). |
 | `cluster-state` | S→C | DX-cluster connection state for the cluster badge. |
