@@ -4122,3 +4122,8 @@ body.popout-mode .popout-only { display: flex; }
    (fldigi/DigiPan convention, matches the desktop popout). */
 #psk-rx .p-tx-echo { color: #ff6b6b; }
 
+
+/* Split: TX-side (other VFO) frequency next to the main dial */
+#freq-other-display { font-size: 12px; color: var(--sota, #f0a500); margin-left: 6px; }
+#freq-other-display.hidden { display: none; }
+

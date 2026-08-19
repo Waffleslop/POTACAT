@@ -1567,6 +1567,22 @@
         break;
       }
 
+      case 'freq-other': {
+        // Other-VFO (TX side) frequency while split is on; 0 = hide. The
+        // desktop pushed this all along — the web client just never listened.
+        const el = document.getElementById('freq-other-display');
+        if (el) {
+          const v = Number(msg.value) || 0;
+          if (v > 100000) {
+            el.textContent = 'TX ' + formatFreq(v);
+            el.classList.remove('hidden');
+          } else {
+            el.classList.add('hidden');
+          }
+        }
+        break;
+      }
+
       case 'cluster-state':
         clusterConnected = !!msg.connected;
         break;

@@ -2311,7 +2311,7 @@ function sendCatFreqOther(hz) {
   _currentFreqOther = v;
   if (win && !win.isDestroyed()) win.webContents.send('cat-freq-other', v);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-freq-other', v);
-  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'freq-other', value: v });
+  if (remoteServer && remoteServer.running) remoteServer.sendFreqOther(v);
 }
 
 function sendCatSmeter(val) {
