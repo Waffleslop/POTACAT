@@ -556,6 +556,9 @@
   const lbCount = document.getElementById('lb-count');
   const lbList = document.getElementById('lb-list');
   let logbookQsos = [];
+  let lbChunkAccum = [];   // in-flight chunked all-qsos accumulation
+  let lbTotal = 0;         // full-log size reported by the server
+  let lbTruncated = false; // legacy path only: showing newest slice
   let expandedQsoIdx = -1;
   let ltSelectedType = 'dx';
 
@@ -1000,6 +1003,12 @@
           protocolVersion: 1,
           clientVersion: 'web',
           clientPlatform: 'web',
+          // Without these the server falls back to the legacy single-frame
+          // all-qsos path: newest 2000 records halved until the JSON fits in
+          // 256 KB - which is the "logbook only shows 125 QSOs" report
+          // (LZ3AW item 2). Chunked delivery has no cap; qso-delta appends
+          // one record per log write instead of re-pushing the whole log.
+          capabilities: ['chunked-all-qsos', 'qso-delta'],
         }));
       } catch {}
       onOpen();
@@ -1645,9 +1654,37 @@
         }
         break;
 
-      case 'all-qsos':
+      case 'all-qsos': {
+        // Chunked delivery (we advertise chunked-all-qsos): accumulate until
+        // the last chunk, then render once. Chunks arrive in order on one
+        // socket; a fresh chunk 0 (or an unchunked frame) starts over.
+        if (typeof msg.chunk === 'number' && typeof msg.totalChunks === 'number') {
+          if (msg.chunk === 0) lbChunkAccum = [];
+          lbChunkAccum = lbChunkAccum.concat(msg.data || []);
+          if (msg.chunk === msg.totalChunks - 1) {
+            logbookQsos = lbChunkAccum;
+            lbChunkAccum = [];
+            lbTotal = msg.total || logbookQsos.length;
+            lbTruncated = false;
+            renderLogbook();
+          }
+          break;
+        }
         logbookQsos = msg.data || [];
+        lbTotal = msg.total || logbookQsos.length;
+        lbTruncated = !!msg.truncated;
         renderLogbook();
+        break;
+      }
+
+      case 'qso-added':
+        // qso-delta capability: one record per log write instead of a full
+        // re-push. Records carry their full-log idx already.
+        if (msg.data) {
+          logbookQsos.push(msg.data);
+          lbTotal = msg.total || logbookQsos.length;
+          renderLogbook();
+        }
         break;
 
       case 'qso-updated':
@@ -6020,7 +6057,9 @@
 
   function renderLogbook() {
     const filtered = getFilteredLogbook();
-    lbCount.textContent = filtered.length + ' QSO' + (filtered.length !== 1 ? 's' : '');
+    lbCount.textContent = lbTruncated && lbTotal > logbookQsos.length
+      ? 'newest ' + filtered.length + ' of ' + lbTotal + ' QSOs'
+      : filtered.length + ' QSO' + (filtered.length !== 1 ? 's' : '');
 
     if (!filtered.length) {
       lbList.innerHTML = '<div class="lb-empty">No QSOs found</div>';
