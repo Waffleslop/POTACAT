@@ -12732,7 +12732,7 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
   return true;
 }
 
-function sendCwTextToRadio(text) {
+function sendCwTextToRadio(text, opts) {
   // Timestamp the transmit so a CAT link loss in the next few seconds is
   // recognized as RF-into-USB rather than a generic cable fault.
   if (text) _lastCwKeyMs = Date.now();
@@ -12741,14 +12741,19 @@ function sendCwTextToRadio(text) {
   // single bad send (KM4CFT's FT-891 key-port path, 2026-07-21) took the whole
   // process down via the rethrowing uncaughtException handler.
   try {
-    _sendCwTextToRadioImpl(text);
+    _sendCwTextToRadioImpl(text, opts || {});
   } catch (err) {
     sendCatLog(`[CW] text-send failed: ${err && err.message ? err.message : err}`);
   }
 }
 
-function _sendCwTextToRadioImpl(text) {
+function _sendCwTextToRadioImpl(text, opts) {
   if (!text) return;
+  // Key-as-I-type: each frame is a fresh append (a single char or a short
+  // chunk). Repeated letters are the NORM in live typing, so the duplicate
+  // guard below must not eat them; the streamable backends (Flex cwx,
+  // WinKeyer buffer, CAT KY) all append rather than restart.
+  const live = !!(opts && opts.live);
   const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '')
     .replace(/\{mycallsign\}/gi, settings.myCallsign || '');
   // Note: {call}, {op_firstname}, {state} are expanded client-side before reaching here
@@ -12764,7 +12769,7 @@ function _sendCwTextToRadioImpl(text) {
   // (cw-cancel-text -> cancelAllCwSends) still aborts and clears this guard.
   const _cwNow = Date.now();
   const _cwEstMs = Math.ceil((expanded.length * 12000) / Math.max(5, settings.cwWpm || 20));
-  if (expanded && expanded === _lastCwSendText && (_cwNow - _lastCwSendAt) < _cwEstMs) {
+  if (!live && expanded && expanded === _lastCwSendText && (_cwNow - _lastCwSendAt) < _cwEstMs) {
     sendCatLog(`[CW] Ignoring duplicate send — already sending: ${expanded}`);
     return;
   }
@@ -14032,13 +14037,13 @@ function connectRemote() {
     cancelAllCwSends();
   });
 
-  remoteServer.on('cw-text', ({ text, wpm }) => {
+  remoteServer.on('cw-text', ({ text, wpm, live }) => {
     if (!text) return;
     // Honor the WPM the phone sends inline with the macro so a bare cw-text
     // (no preceding cw-config) still keys at the right speed — and it flows
     // through the one authoritative writer, keeping settings.cwWpm current.
     if (typeof wpm === 'number') applyCwWpm(wpm, 'remote');
-    sendCwTextToRadio(text);
+    sendCwTextToRadio(text, { live: !!live });
   });
 
   // Sanitize a VFO-profile list arriving from a remote client before it
@@ -31951,8 +31956,8 @@ app.whenReady().then(() => {
     return true;
   });
   // Desktop CW text sending (macros)
-  ipcMain.on('send-cw-text', (_e, text) => {
-    sendCwTextToRadio(text);
+  ipcMain.on('send-cw-text', (_e, text, opts) => {
+    sendCwTextToRadio(text, opts);
   });
   // Desktop CW cancel / abort — fires from the ESC button in the main
   // window's CW macro bar and from the VFO popout's cancel button.

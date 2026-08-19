@@ -393,7 +393,7 @@ contextBridge.exposeInMainWorld('api', {
   cwPaddleDah: (pressed) => ipcRenderer.send('cw-paddle-dah', pressed),
   cwSetWpm: (wpm) => ipcRenderer.send('cw-set-wpm', wpm),
   cwStop: () => ipcRenderer.send('cw-stop'),
-  sendCwText: (text) => ipcRenderer.send('send-cw-text', text),
+  sendCwText: (text, opts) => ipcRenderer.send('send-cw-text', text, opts),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
   exportSettings: () => ipcRenderer.invoke('export-settings'),
   importSettings: () => ipcRenderer.invoke('import-settings'),

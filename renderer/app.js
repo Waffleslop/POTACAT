@@ -19483,7 +19483,44 @@ if (cwMacroCancelBtn) {
     cwMacroInput.value = '';
   });
 }
+// Key-as-I-type (LZ3AW item 8): stream characters to the rig as they are
+// typed instead of composing then sending. Default off; state survives in
+// localStorage. Sent characters cannot be unsent — deleting typed text only
+// resets the local cursor, it never edits what already went to air.
+let cwLiveMode = localStorage.getItem('pota-cat-cw-live') === '1';
+let cwLiveSent = 0;
+const cwLiveBtn = document.getElementById('cw-live-btn');
+function reflectCwLive() {
+  if (!cwLiveBtn) return;
+  cwLiveBtn.classList.toggle('active', cwLiveMode);
+  cwLiveBtn.title = cwLiveMode
+    ? 'Key as I type is ON - each character keys the rig as you type it. Click to turn off.'
+    : 'Key as I type: send each character as you type it instead of composing then sending.';
+}
+if (cwLiveBtn) {
+  reflectCwLive();
+  cwLiveBtn.addEventListener('click', () => {
+    cwLiveMode = !cwLiveMode;
+    cwLiveSent = cwMacroInput ? cwMacroInput.value.length : 0;
+    localStorage.setItem('pota-cat-cw-live', cwLiveMode ? '1' : '0');
+    reflectCwLive();
+  });
+}
 if (cwMacroInput) {
+  cwMacroInput.addEventListener('input', () => {
+    if (!cwLiveMode) return;
+    const v = cwMacroInput.value.toUpperCase();
+    if (v.length <= cwLiveSent || !v.startsWith(cwMacroInput.dataset.cwSentPrefix || v.slice(0, cwLiveSent))) {
+      // Deleted or edited already-sent text - resync silently; air is air.
+      cwLiveSent = Math.min(cwLiveSent, v.length);
+      cwMacroInput.dataset.cwSentPrefix = v.slice(0, cwLiveSent);
+      return;
+    }
+    const delta = v.slice(cwLiveSent);
+    cwLiveSent = v.length;
+    cwMacroInput.dataset.cwSentPrefix = v;
+    if (delta.trim() || delta.includes(' ')) window.api.sendCwText(delta, { live: true });
+  });
   cwMacroInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();

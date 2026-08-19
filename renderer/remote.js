@@ -7750,6 +7750,35 @@
     cwIndicator.classList.remove('active');
   }
 
+  // Key-as-I-type (LZ3AW item 8): stream characters as typed. Default off,
+  // localStorage-persisted. Sent characters cannot be unsent - deleting
+  // typed text only resyncs the local cursor.
+  let cwLiveMode = localStorage.getItem('echocat-cw-live') === '1';
+  let cwLiveSent = 0;
+  const cwLiveBtn = document.getElementById('cw-live-btn');
+  function reflectCwLive() {
+    if (cwLiveBtn) cwLiveBtn.classList.toggle('active', cwLiveMode);
+  }
+  reflectCwLive();
+  if (cwLiveBtn) cwLiveBtn.addEventListener('click', () => {
+    cwLiveMode = !cwLiveMode;
+    cwLiveSent = cwTextInput ? cwTextInput.value.length : 0;
+    localStorage.setItem('echocat-cw-live', cwLiveMode ? '1' : '0');
+    reflectCwLive();
+  });
+  if (cwTextInput) cwTextInput.addEventListener('input', () => {
+    if (!cwLiveMode) return;
+    const v = cwTextInput.value.toUpperCase();
+    if (v.length <= cwLiveSent) { cwLiveSent = v.length; return; }
+    const delta = v.slice(cwLiveSent);
+    cwLiveSent = v.length;
+    if (!delta.trim() && !delta.includes(' ')) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cw-text', text: delta, live: true }));
+    }
+    playCwTextSidetone(delta);
+  });
+
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
     // Expand macros: {op_firstname} -> operator name or "OM", {call} -> tuned callsign
