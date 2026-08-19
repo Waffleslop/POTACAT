@@ -21187,57 +21187,192 @@ while (customCatButtons.length > 1 && !customCatButtons[customCatButtons.length 
   customCatButtons.pop();
 }
 
+// Session-only last-sent state for custom TOGGLE controls. Deliberately not
+// persisted: POTACAT cannot parse arbitrary rigs' replies for user-typed raw
+// commands (unlike the built-in NB/etc toggles, which read back through the
+// codec), so the lit state means "last thing this button sent" — nothing
+// more. Cleared when slots are edited/removed so indexes can't go stale.
+let customToggleState = {};
+
+// Substitute the slider value into a command template. Placeholders: {v} =
+// bare integer, {v2}/{v3}/{v4} = zero-padded to that many digits (Kenwood
+// SQ0{v3}; etc.). A template with no placeholder gets the bare value
+// appended, so a plain prefix like "SQ0" still works.
+function customSliderCommand(template, value) {
+  const v = String(Math.round(value));
+  let out = template;
+  let found = false;
+  for (const w of [4, 3, 2]) {
+    const ph = '{v' + w + '}';
+    while (out.includes(ph)) { out = out.replace(ph, v.padStart(w, '0')); found = true; }
+  }
+  while (out.includes('{v}')) { out = out.replace('{v}', v); found = true; }
+  return found ? out : out + v;
+}
+const _customSliderTimers = {};
+
 function createCustomSlot(i) {
+  const b = customCatButtons[i] || {};
+  const type = (b.type === 'toggle' || b.type === 'slider') ? b.type : 'button';
   const slot = document.createElement('div');
   slot.className = 'rig-custom-slot';
   slot.dataset.slot = i;
+  if (type !== 'button') slot.style.flexWrap = 'wrap';
+
   const nameInput = document.createElement('input');
   nameInput.className = 'rig-custom-name';
   nameInput.placeholder = 'Label';
   nameInput.maxLength = 12;
-  nameInput.value = customCatButtons[i] ? customCatButtons[i].name || '' : '';
+  nameInput.value = b.name || '';
+  nameInput.addEventListener('change', () => {
+    if (customCatButtons[i]) customCatButtons[i].name = nameInput.value.trim();
+    saveCustomButtons();
+  });
+
+  const typeSel = document.createElement('select');
+  typeSel.className = 'rig-custom-type';
+  for (const [v, lbl] of [['button', 'Button'], ['toggle', 'Toggle'], ['slider', 'Slider']]) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = lbl;
+    typeSel.appendChild(o);
+  }
+  typeSel.value = type;
+  typeSel.title = 'Button sends one command. Toggle alternates an On and an Off command. Slider sends a command with a value in it.';
+  typeSel.addEventListener('change', () => {
+    if (!customCatButtons[i]) return;
+    customCatButtons[i].type = typeSel.value;
+    customToggleState = {};
+    saveCustomButtons();
+    renderCustomSlots();
+  });
+
   const cmdInput = document.createElement('input');
   cmdInput.className = 'rig-custom-cmd';
-  cmdInput.placeholder = 'CAT command';
   cmdInput.maxLength = 64;
-  cmdInput.value = customCatButtons[i] ? customCatButtons[i].command || '' : '';
-  const sendBtn = document.createElement('button');
-  sendBtn.className = 'rig-btn rig-custom-send';
-  sendBtn.title = 'Send command';
-  sendBtn.textContent = 'Send';
+  cmdInput.value = b.command || '';
+  cmdInput.placeholder = type === 'toggle' ? 'On command'
+    : type === 'slider' ? 'Command with {v}' : 'CAT command';
+  if (type === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ). No placeholder = value appended.';
+  cmdInput.addEventListener('change', () => {
+    if (customCatButtons[i]) customCatButtons[i].command = cmdInput.value.trim();
+    saveCustomButtons();
+  });
+
   const removeBtn = document.createElement('button');
   removeBtn.className = 'rig-btn rig-custom-remove';
   removeBtn.title = 'Remove';
   removeBtn.textContent = '\u00d7';
   removeBtn.style.cssText = 'padding:2px 5px;font-size:13px;color:#e94560;min-width:auto;';
-
-  nameInput.addEventListener('change', () => {
-    if (customCatButtons[i]) customCatButtons[i].name = nameInput.value.trim();
-    saveCustomButtons();
-  });
-  cmdInput.addEventListener('change', () => {
-    if (customCatButtons[i]) customCatButtons[i].command = cmdInput.value.trim();
-    saveCustomButtons();
-  });
-  sendBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const cmd = cmdInput.value.trim();
-    if (!cmd) return;
-    window.api.rigControl({ action: 'send-custom-cat', command: cmd });
-    sendBtn.style.background = '#2a6e4e';
-    setTimeout(() => { sendBtn.style.background = ''; }, 300);
-  });
   removeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     customCatButtons.splice(i, 1);
     if (customCatButtons.length === 0) customCatButtons.push({ name: '', command: '' });
+    customToggleState = {};
     saveCustomButtons();
     renderCustomSlots();
   });
 
   slot.appendChild(nameInput);
+  slot.appendChild(typeSel);
   slot.appendChild(cmdInput);
-  slot.appendChild(sendBtn);
+
+  if (type === 'toggle') {
+    const offInput = document.createElement('input');
+    offInput.className = 'rig-custom-cmd';
+    offInput.maxLength = 64;
+    offInput.placeholder = 'Off command';
+    offInput.value = b.commandOff || '';
+    offInput.addEventListener('change', () => {
+      if (customCatButtons[i]) customCatButtons[i].commandOff = offInput.value.trim();
+      saveCustomButtons();
+    });
+    slot.appendChild(offInput);
+
+    const tglBtn = document.createElement('button');
+    tglBtn.className = 'rig-btn rig-custom-send';
+    const reflect = () => {
+      const on = !!customToggleState[i];
+      tglBtn.textContent = on ? 'On' : 'Off';
+      tglBtn.classList.toggle('rig-custom-toggle-on', on);
+      tglBtn.title = on
+        ? 'Last sent: the On command. Click to send the Off command. (Shows the last command sent, not the radio state.)'
+        : 'Click to send the On command. (Shows the last command sent, not the radio state.)';
+    };
+    reflect();
+    tglBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const goingOn = !customToggleState[i];
+      const cmd = (goingOn ? cmdInput.value : offInput.value).trim();
+      if (!cmd) return;
+      window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+      customToggleState[i] = goingOn;
+      reflect();
+    });
+    slot.appendChild(tglBtn);
+  } else if (type === 'slider') {
+    const minInput = document.createElement('input');
+    minInput.type = 'number';
+    minInput.className = 'rig-custom-minmax';
+    minInput.title = 'Minimum value';
+    minInput.value = Number.isFinite(b.min) ? b.min : 0;
+    const maxInput = document.createElement('input');
+    maxInput.type = 'number';
+    maxInput.className = 'rig-custom-minmax';
+    maxInput.title = 'Maximum value';
+    maxInput.value = Number.isFinite(b.max) ? b.max : 255;
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.className = 'rig-custom-range';
+    const valOut = document.createElement('span');
+    valOut.className = 'rig-custom-val';
+    const syncRange = () => {
+      range.min = parseInt(minInput.value, 10) || 0;
+      range.max = parseInt(maxInput.value, 10) || 255;
+      valOut.textContent = range.value;
+    };
+    range.value = Number.isFinite(b.value) ? b.value : (Number.isFinite(b.min) ? b.min : 0);
+    syncRange();
+    const persistMinMax = () => {
+      if (!customCatButtons[i]) return;
+      customCatButtons[i].min = parseInt(minInput.value, 10) || 0;
+      customCatButtons[i].max = parseInt(maxInput.value, 10) || 255;
+      saveCustomButtons();
+      syncRange();
+    };
+    minInput.addEventListener('change', persistMinMax);
+    maxInput.addEventListener('change', persistMinMax);
+    range.addEventListener('input', () => {
+      valOut.textContent = range.value;
+      // Debounce: a drag fires dozens of input events; the serial port gets
+      // one command per 150ms of quiet, plus the final position.
+      clearTimeout(_customSliderTimers[i]);
+      _customSliderTimers[i] = setTimeout(() => {
+        const tpl = cmdInput.value.trim();
+        if (!tpl) return;
+        window.api.rigControl({ action: 'send-custom-cat', command: customSliderCommand(tpl, +range.value) });
+        if (customCatButtons[i]) { customCatButtons[i].value = +range.value; saveCustomButtons(); }
+      }, 150);
+    });
+    slot.appendChild(minInput);
+    slot.appendChild(range);
+    slot.appendChild(valOut);
+    slot.appendChild(maxInput);
+  } else {
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'rig-btn rig-custom-send';
+    sendBtn.title = 'Send command';
+    sendBtn.textContent = 'Send';
+    sendBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cmd = cmdInput.value.trim();
+      if (!cmd) return;
+      window.api.rigControl({ action: 'send-custom-cat', command: cmd });
+      sendBtn.style.background = '#2a6e4e';
+      setTimeout(() => { sendBtn.style.background = ''; }, 300);
+    });
+    slot.appendChild(sendBtn);
+  }
+
   slot.appendChild(removeBtn);
   return slot;
 }

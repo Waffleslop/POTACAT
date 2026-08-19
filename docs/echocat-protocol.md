@@ -418,7 +418,7 @@ the broader `status` message; no dedicated S→C envelope today.)
 | `voice-macro-delete` | C→S | Remove a stored recording. |
 | `voice-macro-labels` | S→C | Five-slot label array for voice-macro buttons (sent on connect + on changes). |
 | `save-echo-pref` | C→S | Persist an ECHOCAT-only preference (no settings.json round-trip). |
-| `save-custom-cat-buttons` | C→S | Save user-defined raw-CAT buttons for the Rig table. |
+| `save-custom-cat-buttons` | C→S | Save user-defined raw-CAT buttons for the Rig table. | Entries are `{name, command}` plus additive per-type fields (2026-08-19): `type` (`button` default / `toggle` / `slider`), `commandOff` (toggle), `min`/`max`/`value` (slider; the client substitutes `{v}`/`{v2}`/`{v3}`/`{v4}` placeholders and sends the FINAL string via `send-custom-cat` — the server never interprets templates). Clients that predate a field must PRESERVE unknown entry fields on save, not strip them; an older client rendering a toggle as a plain button sends only the On command, which is acceptable degradation. |
 | `colorblind-mode` | S→C | Server says colorblind mode is on (affects accent colors). |
 | `cluster-state` | S→C | DX-cluster connection state for the cluster badge. |
 | `qrz-names` | S→C | `{CALLSIGN: 'First Last'}` map after a batch QRZ lookup — drives the spot-row Name column. |

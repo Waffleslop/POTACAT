@@ -6876,6 +6876,33 @@ a.settings-echocat-badge-link:hover {
   padding: 3px 0;
 }
 
+/* Custom CAT control extras: type select, slider row, toggle lit state */
+.rig-custom-type {
+  background: var(--bg-tertiary, #16213e);
+  color: var(--text-secondary, #ccc);
+  border: 1px solid var(--border-secondary, #333);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 2px;
+}
+.rig-custom-minmax {
+  width: 44px;
+  background: var(--bg-tertiary, #16213e);
+  color: var(--text-secondary, #ccc);
+  border: 1px solid var(--border-secondary, #333);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 2px 3px;
+}
+.rig-custom-range { flex: 1; min-width: 70px; }
+.rig-custom-val {
+  min-width: 26px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-secondary, #ccc);
+}
+.rig-custom-send.rig-custom-toggle-on { background: #2a6e4e; }
+
 .rig-custom-name {
   width: 70px;
   background: var(--bg-primary);
