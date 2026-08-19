@@ -2254,9 +2254,14 @@ html, body {
 }
 
 /* --- Worked Spots --- */
+/* Desktop parity: a GREEN check for any previously worked call (any day),
+   dimming reserved for worked-today. The old dim-grey check on a dimmed
+   callsign was invisible on a phone in daylight (LZ3AW item 1). */
 .spot-card.worked .spot-call { color: var(--text-dim); }
 .spot-card.worked-today { opacity: 0.45; }
-.worked-check { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
+.worked-check { color: var(--pota, #4ecca3); font-size: 13px; font-weight: bold; margin-right: 3px; }
+#spot-worked-note { font-size: 10px; color: var(--text-dim); padding: 2px 8px; }
+#spot-worked-note.hidden { display: none; }
 .worked-chip { --src-color: var(--text-dim); }
 .worked-chip.active { background: var(--text-dim) !important; color: #000 !important; }
 

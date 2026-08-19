@@ -1544,6 +1544,20 @@
         break;
       }
 
+      case 'worked-qsos-skipped': {
+        // The full per-call history was too large to push (>256 KB serialized)
+        // — the desktop still sends the bounded worked-today summary, so
+        // today's dimming works but the "worked before" check covers today
+        // only. Say so instead of silently showing fewer checks (LZ3AW item
+        // 1: big logs lost the marks with no explanation).
+        const note = document.getElementById('spot-worked-note');
+        if (note) {
+          note.textContent = 'Worked history too large to sync in full - check marks cover today only';
+          note.classList.remove('hidden');
+        }
+        break;
+      }
+
       case 'cluster-state':
         clusterConnected = !!msg.connected;
         break;
