@@ -84,10 +84,18 @@ test('all three auth paths hydrate via the shared helpers', () => {
   // helpers exist so a new feed reaches every path by construction. Count
   // the call sites: legacy token, hello, and pass auth.
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  // 2026-08-20: the no-token and token paths consolidated onto ONE
+  // _hydrateClient(ws) helper (which carries the activity + JS8 calls
+  // once), so the counts are: helper internals (1 each) + the Guest Pass
+  // path's DELIBERATE subset (activity + JS8 inbox only — guests must not
+  // receive the owner's worked history / logbook feeds). Both full-trust
+  // paths must call the shared helper.
   const js8Calls = (src.match(/this\._sendJs8Hydration\(ws\)/g) || []).length;
   const actCalls = (src.match(/this\._sendActivityHydration\(ws\)/g) || []).length;
-  assert.strictEqual(js8Calls, 3, 'JS8 hydration from all three auth paths');
-  assert.strictEqual(actCalls, 3, 'activity hydration from all three auth paths');
+  const fullHydrations = (src.match(/this\._hydrateClient\(ws\)/g) || []).length;
+  assert.strictEqual(js8Calls, 2, 'JS8 hydration: shared helper + Guest Pass subset');
+  assert.strictEqual(actCalls, 2, 'activity hydration: shared helper + Guest Pass subset');
+  assert.strictEqual(fullHydrations, 2, 'both full-trust auth paths use _hydrateClient');
 });
 
 test('hydration sends activity-state before the content feeds', () => {
