@@ -23,6 +23,11 @@ function _appendStartupLog(line) {
       catch { dir = require('os').tmpdir(); }
       try { fsx.mkdirSync(dir, { recursive: true }); } catch {}
       _startupLogPath = require('path').join(dir, 'startup.log');
+      // Keep the previous launch's copy: a [FATAL] stack from a crash is
+      // useless if the relaunch that reports the bug truncates it first
+      // (the ARRL 250 crash report arrived with a healthy startup.log for
+      // exactly this reason).
+      try { if (fsx.existsSync(_startupLogPath)) fsx.copyFileSync(_startupLogPath, _startupLogPath + '.old'); } catch {}
       // Fresh file per launch, with an identity header for bug reports.
       const os = require('os');
       let ver = '?';
@@ -84,9 +89,26 @@ logStartupStage('electron + path + fs required');
 // semantics stay intact; before that point, log + exit so a module-load
 // failure can't leave a windowless zombie process.
 let _lateExceptionHandlerActive = false;
+// A fatal crash used to close the window with no explanation — the stack was
+// in startup.log all along, but nothing told the user the file existed and
+// the next launch truncated it. Name the file, then die deterministically.
+// Headless boxes skip the dialog (no display to show it on).
+function _fatalCrashDialog(err) {
+  try {
+    if (process.argv.includes('--headless')) return;
+    const firstLines = String((err && err.stack) || err).split('\n').slice(0, 2).join('\n');
+    let dir = '';
+    try { dir = require('electron').app.getPath('userData'); } catch {}
+    require('electron').dialog.showErrorBox(
+      'POTACAT hit an unexpected error and must close',
+      firstLines + '\n\nFull details were saved to startup.log' + (dir ? ' in:\n' + dir : '') +
+      '\n(the previous launch\'s copy is kept as startup.log.old)' +
+      '\n\nPlease attach that file to a bug report.');
+  } catch { /* dialog machinery unavailable that early -- the log still has it */ }
+}
 process.on('uncaughtException', (err) => {
   _appendStartupLog('[FATAL] uncaughtException: ' + (err && err.stack || err));
-  if (!_lateExceptionHandlerActive) process.exit(70);
+  if (!_lateExceptionHandlerActive) { _fatalCrashDialog(err); process.exit(70); }
 });
 process.on('unhandledRejection', (reason) => {
   _appendStartupLog('[FATAL] unhandledRejection: ' + (reason && reason.stack || reason));
@@ -32053,9 +32075,13 @@ process.on('uncaughtException', (err) => {
     catch { console.warn('[net] swallowed unhandled network error:', msg); }
     return;
   }
-  // Pre-shutdown unexpected error — preserve historical behavior
-  // (Electron will show its dialog) by rethrowing.
-  throw err;
+  // Pre-shutdown unexpected error. The old bare rethrow died with NO dialog
+  // at all — a throw inside an uncaughtException listener skips Electron's
+  // default dialog, which is how the ARRL 250 crash presented as "the window
+  // just closes". The early startup.log handler already recorded the stack
+  // (it is registered first); tell the user where it is, then exit.
+  _fatalCrashDialog(err);
+  process.exit(70);
 });
 
 app.on('window-all-closed', () => {
