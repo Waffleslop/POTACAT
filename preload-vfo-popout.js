@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
   onSmeter: (cb) => ipcRenderer.on('cat-smeter', (_e, val) => cb(val)),
   onSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),
+  onFwdPower: (cb) => ipcRenderer.on('cat-fwd-power', (_e, val) => cb(val)),
   // Other-VFO frequency while split is on (0 = hide the TX line).
   onCatFreqOther: (cb) => ipcRenderer.on('cat-freq-other', (_e, v) => cb(v)),
   onAlc: (cb) => ipcRenderer.on('cat-alc', (_e, val) => cb(val)),

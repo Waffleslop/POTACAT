@@ -1372,6 +1372,7 @@ let _currentSwr = 0;
 // shortly after TX stops (frames only flow while transmitting).
 let _currentSwrRatio = 0;
 let _swrRatioClearTimer = null;
+let _fwdPowerClearTimer = null;
 // ─── SWR guard (K3SBP 2026-07-17) ───────────────────────────────────────────
 // The Flex protects ITSELF from a bad match by folding back power — it never
 // refuses to key (K3SBP measured a real 46:1 pre-ATU while the 8600 happily
@@ -10267,6 +10268,23 @@ function connectSmartSdr() {
   // then only the optimistic echo. Everything downstream (renderer, VFO
   // popout, phone status broadcast) already flows from sendCatPower.
   smartSdr.on('power', sendCatPower);
+  // Forward power (watts) from the Flex TX bridge. The emit existed since
+  // the FWDPWR meter discovery shipped — with ZERO consumers; the wattmeter
+  // was measured and thrown away (LZ3AW item 6). Same fan-out shape as
+  // swr-ratio below; frames only flow during TX, so decay to 0 shortly
+  // after they stop rather than displaying stale watts forever.
+  smartSdr.on('fwd-power', (watts) => {
+    const w = Math.round((Number(watts) || 0) * 10) / 10;
+    if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', w);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', w);
+    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: w });
+    if (_fwdPowerClearTimer) clearTimeout(_fwdPowerClearTimer);
+    _fwdPowerClearTimer = setTimeout(() => {
+      _fwdPowerClearTimer = null;
+      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', 0);
+      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: 0 });
+    }, 3000);
+  });
   smartSdr.on('swr-ratio', (swr) => {
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);

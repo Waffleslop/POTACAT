@@ -1262,6 +1262,15 @@
         break;
 
       case 'power':
+        // Power SETTING readback — yields to live measured watts for 3s
+        // after any fwd-power frame so the two can share one bar honestly.
+        if (Date.now() - echoFwdLiveAt > 3000) updateEchoPower(msg.value);
+        break;
+
+      case 'fwd-power':
+        // Measured watts during TX (Flex TX bridge). Takes over the PWR bar
+        // while frames flow; 0 = decayed after TX.
+        echoFwdLiveAt = Date.now();
         updateEchoPower(msg.value);
         break;
 
@@ -4043,6 +4052,7 @@
   // Track the highest watt value seen this session so the bar auto-scales for
   // QRP (5W), 100W, and amp (1500W) users without needing per-rig config.
   var echoPwrMaxSeen = 100;
+  let echoFwdLiveAt = 0; // last measured fwd-power frame (wins over the setting)
   var echoShowMeter = document.getElementById('echo-show-meter');
   var echoMeterEnabled = localStorage.getItem('echoMeterEnabled') === 'true';
 

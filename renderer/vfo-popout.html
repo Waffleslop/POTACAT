@@ -460,6 +460,11 @@
         <div class="meter-bar-wrap"><div class="meter-bar" id="alc-bar"></div></div>
         <span class="meter-text" id="alc-text">&mdash;</span>
       </div>
+      <div class="meter-row" title="Measured forward power during TX (Flex)">
+        <span class="meter-label">PWR</span>
+        <div class="meter-bar-wrap"><div class="meter-bar" id="fwdpwr-bar"></div></div>
+        <span class="meter-text" id="fwdpwr-text">&mdash;</span>
+      </div>
       <div class="meter-row" title="PC-side peak audio level being sent to the radio's USB CODEC. If this rises during voice macros / PTT-Mic but ALC stays flat, the radio's USB MOD LEVEL needs to be raised. If both stay flat, check Windows audio output device + the radio's AF Output Level menu.">
         <span class="meter-label">TX</span>
         <div class="meter-bar-wrap"><div class="meter-bar" id="tx-peak-bar"></div></div>
@@ -1819,6 +1824,26 @@ window.api.onSwr((val) => {
   swrBar.style.background = color;
   swrText.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrText.style.color = color;
+});
+
+const fwdPwrBar = document.getElementById('fwdpwr-bar');
+const fwdPwrText = document.getElementById('fwdpwr-text');
+let fwdPwrMaxSeen = 10; // auto-scale: QRP to amp without a config knob
+if (window.api.onFwdPower) window.api.onFwdPower((w) => {
+  if (!fwdPwrBar) return;
+  if (!w) {
+    fwdPwrBar.style.width = '0%';
+    fwdPwrText.textContent = '\u2014';
+    fwdPwrText.style.color = '#666';
+    return;
+  }
+  if (w > fwdPwrMaxSeen) fwdPwrMaxSeen = w;
+  const level = Math.min(1, w / fwdPwrMaxSeen);
+  const color = level < 0.9 ? '#4ecca3' : '#ffd740';
+  fwdPwrBar.style.width = (level * 100) + '%';
+  fwdPwrBar.style.background = color;
+  fwdPwrText.textContent = w >= 100 ? Math.round(w) + 'W' : w.toFixed(1) + 'W';
+  fwdPwrText.style.color = color;
 });
 
 window.api.onSwrRatio((swr) => {
