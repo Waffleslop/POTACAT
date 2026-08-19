@@ -11944,6 +11944,7 @@ function updateRemoteSettings() {
     // buttons and the beacon TX%/dBm controls seed from here. The beacon
     // ENABLED state rides jtcat-wspr-beacon-state, not settings.
     pskMacros: Array.isArray(settings.pskMacros) ? settings.pskMacros : null,
+    pskSquelch: parseInt(settings.pskSquelch, 10) || 50,
     pskAudioCenter: settings.pskAudioCenter || 1500,
     wsprTxPct: typeof settings.wsprTxPct === 'number' ? settings.wsprTxPct : 20,
     wsprDbm: typeof settings.wsprDbm === 'number' ? settings.wsprDbm : 30,
@@ -15619,6 +15620,10 @@ function connectRemote() {
   // PSK31 one-shot Send from the phone — same contract as the popout's
   // jtcat-psk-send IPC: exact typed text (varicode is case-sensitive),
   // Send IS the arm action, whole buffer = one transmission.
+  remoteServer.on('jtcat-psk-set-sql', ({ value } = {}) => {
+    // One implementation: the popout's IPC handler owns clamp+persist+apply.
+    ipcMain.emit('jtcat-psk-set-sql', null, value);
+  });
   remoteServer.on('jtcat-psk-send', ({ text }) => {
     if (!ft8Engine || ft8Engine._mode !== 'PSK31') return;
     const t = String(text || '');

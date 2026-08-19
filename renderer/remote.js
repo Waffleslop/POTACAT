@@ -1572,6 +1572,14 @@
         break;
 
       case 'settings-update':
+        if (msg.settings && msg.settings.pskSquelch != null) {
+          const sqEl = document.getElementById('psk-sql');
+          const sqVal = document.getElementById('psk-sql-val');
+          if (sqEl && document.activeElement !== sqEl) {
+            sqEl.value = msg.settings.pskSquelch;
+            if (sqVal) sqVal.textContent = msg.settings.pskSquelch;
+          }
+        }
         if (msg.settings) {
           if (msg.settings.scanDwell != null) { scanDwell = msg.settings.scanDwell; soDwellVal.textContent = scanDwell + 's'; }
           if (msg.settings.refreshInterval != null) { refreshInterval = msg.settings.refreshInterval; refreshRateBtn.textContent = refreshInterval + 's'; soRefreshVal.textContent = refreshInterval + 's'; }
@@ -7134,13 +7142,34 @@
     });
   }
 
+  function pskAppendTxEcho(text) {
+    // fldigi/DigiPan convention (and the popout's): your own transmitted
+    // text appears in the RX stream in red so the QSO reads as one thread.
+    if (!pskRxEl) return;
+    const span = document.createElement('span');
+    span.className = 'p-tx-echo';
+    span.textContent = text.endsWith(String.fromCharCode(10)) ? text : text + String.fromCharCode(10);
+    pskRxEl.appendChild(span);
+    pskRxEl.scrollTop = pskRxEl.scrollHeight;
+  }
   const pskSendBtn = document.getElementById('psk-send');
   if (pskSendBtn) pskSendBtn.addEventListener('click', () => {
     const text = pskTxEl.value; // VERBATIM — varicode is case-sensitive,
     if (!text) return;          // lowercase is the on-air convention.
     ft8Send({ type: 'jtcat-psk-send', text });
+    pskAppendTxEcho(text);
     pskTxEl.value = '';
   });
+  // Squelch — hydrates from the settings blob, live-applies via the same
+  // clamp+persist path as the popout slider.
+  const pskSqlEl = document.getElementById('psk-sql');
+  const pskSqlVal = document.getElementById('psk-sql-val');
+  if (pskSqlEl) {
+    pskSqlEl.addEventListener('input', () => {
+      if (pskSqlVal) pskSqlVal.textContent = pskSqlEl.value;
+      ft8Send({ type: 'jtcat-psk-set-sql', value: parseInt(pskSqlEl.value, 10) || 50 });
+    });
+  }
   const pskStopBtn = document.getElementById('psk-stop');
   if (pskStopBtn) pskStopBtn.addEventListener('click', () => {
     ft8Send({ type: 'jtcat-halt-tx' });

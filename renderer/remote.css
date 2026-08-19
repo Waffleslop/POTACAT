@@ -4117,3 +4117,8 @@ body.popout-mode .popout-only { display: flex; }
 #popout-banner .popout-msg { color: var(--text); font-size: 11px; }
 #popout-banner.disconnected .popout-msg { color: #fff; }
 
+
+/* PSK31 TX echo — own transmitted text in red inside the RX stream
+   (fldigi/DigiPan convention, matches the desktop popout). */
+#psk-rx .p-tx-echo { color: #ff6b6b; }
+

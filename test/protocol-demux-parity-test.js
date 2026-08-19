@@ -107,7 +107,8 @@ const KNOWN_UNDECLARED = new Set([
   'tx-eq-set',
   'jtcat-set-skip-tx1',
   'jtcat-set-hound-mode',
-  'jtcat-psk-send',
+  // jtcat-psk-send graduated to the registry 2026-08-20 (schema captured
+  // from the live wire shape) — no longer undeclared debt.
 ]);
 
 /** Pull the body of the `switch (msg.type) { … }` demux by brace matching. */
