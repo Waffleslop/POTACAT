@@ -4140,3 +4140,12 @@ body.popout-mode .popout-only { display: flex; }
 #freq-other-display { font-size: 12px; color: var(--sota, #f0a500); margin-left: 6px; }
 #freq-other-display.hidden { display: none; }
 
+
+/* Solar pills (SFI/K/A) - desktop status-bar thresholds */
+#solar-pills { font-size: 10px; display: inline-flex; gap: 4px; margin-left: 6px; cursor: pointer; }
+#solar-pills.hidden { display: none; }
+#solar-pills .sp-pill { padding: 1px 5px; border-radius: 8px; background: var(--bg-card); }
+#solar-pills .sp-good { color: var(--pota, #4ecca3); }
+#solar-pills .sp-warn { color: var(--sota, #f0a500); }
+#solar-pills .sp-bad  { color: #e94560; }
+

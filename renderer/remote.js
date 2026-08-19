@@ -556,6 +556,7 @@
   const lbCount = document.getElementById('lb-count');
   const lbList = document.getElementById('lb-list');
   let logbookQsos = [];
+  let lastSolarData = null; // latest solar-data blob (tap the pills for detail)
   let lbChunkAccum = [];   // in-flight chunked all-qsos accumulation
   let lbTotal = 0;         // full-log size reported by the server
   let lbTruncated = false; // legacy path only: showing newest slice
@@ -1572,6 +1573,32 @@
         if (note) {
           note.textContent = 'Worked history too large to sync in full - check marks cover today only';
           note.classList.remove('hidden');
+        }
+        break;
+      }
+
+      case 'solar-data': {
+        // Desktop status-bar parity: SFI/K/A pills with the same color
+        // thresholds (SFI >=100 good / >=70 warn; K <=2 / <=4; A <=7 / <=20).
+        const sp = document.getElementById('solar-pills');
+        if (sp && (msg.sfi != null || msg.kIndex != null || msg.aIndex != null)) {
+          const cls = (v, goodMax, warnMax, invert) => {
+            if (v == null) return 'sp-warn';
+            if (invert) return v >= goodMax ? 'sp-good' : v >= warnMax ? 'sp-warn' : 'sp-bad';
+            return v <= goodMax ? 'sp-good' : v <= warnMax ? 'sp-warn' : 'sp-bad';
+          };
+          sp.innerHTML = '';
+          const mk = (label, klass) => {
+            const el = document.createElement('span');
+            el.className = 'sp-pill ' + klass;
+            el.textContent = label;
+            sp.appendChild(el);
+          };
+          if (msg.sfi != null) mk('SFI ' + msg.sfi, cls(msg.sfi, 100, 70, true));
+          if (msg.kIndex != null) mk('K ' + msg.kIndex, cls(msg.kIndex, 2, 4, false));
+          if (msg.aIndex != null) mk('A ' + msg.aIndex, cls(msg.aIndex, 7, 20, false));
+          sp.classList.remove('hidden');
+          lastSolarData = msg;
         }
         break;
       }
@@ -3639,6 +3666,22 @@
         localStorage.setItem('echocat-ui-scale', String(v));
         apply(v);
       });
+    });
+  })();
+
+  // Tap the solar pills for the band-conditions detail.
+  (function initSolarTap() {
+    const sp = document.getElementById('solar-pills');
+    if (!sp) return;
+    sp.addEventListener('click', () => {
+      if (!lastSolarData) return;
+      const d = lastSolarData;
+      const lines = [];
+      if (d.sunspots != null) lines.push('Sunspots ' + d.sunspots);
+      if (d.xray) lines.push('X-ray ' + d.xray);
+      if (d.solarWind) lines.push('Wind ' + d.solarWind);
+      (d.bands || []).forEach((b) => lines.push(b.band + ' (' + b.time + '): ' + b.condition));
+      if (lines.length && typeof showLogToast === 'function') showLogToast(lines.join('  |  '));
     });
   })();
 

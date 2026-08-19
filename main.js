@@ -17358,6 +17358,9 @@ function _broadcastSolar() {
   if (win && !win.isDestroyed()) win.webContents.send('solar-data', payload);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('solar-data', payload);
   if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed()) conditionsPopoutWin.webContents.send('solar-data', payload);
+  // ECHOCAT clients get the same blob (cached server-side for hydration) -
+  // the web client had no solar surface at all (LZ3AW item 11).
+  if (remoteServer && remoteServer.running) remoteServer.sendSolarData(payload);
 }
 
 function fetchSolarData() {
