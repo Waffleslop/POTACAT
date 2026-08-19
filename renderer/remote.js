@@ -3697,6 +3697,24 @@
     sendSetting('set-tune-click', tuneClick);
   });
 
+  // Fine width steps (LZ3AW item 7): absolute set-filter in 50 Hz steps for
+  // CW/digital, 100 Hz for voice — the coarse arrows jump between presets,
+  // which is useless when the QRM calls for "just 50 Hz narrower". Uses the
+  // width the radio last reported, so steps track reality, not local state.
+  function bwFineStep(dirSign) {
+    if (!currentFilterWidth) return;
+    const m = (currentMode || '').toUpperCase();
+    const fine = (m === 'CW' || m === 'CW-R' || m.indexOf('FT') === 0 || m.indexOf('DIG') === 0 ||
+      m.indexOf('PSK') === 0 || m === 'RTTY' || m.indexOf('PKT') === 0) ? 50 : 100;
+    const width = Math.max(50, currentFilterWidth + dirSign * fine);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'set-filter', width }));
+    }
+  }
+  const rcBwFineDn = document.getElementById('rc-bw-fine-dn');
+  const rcBwFineUp = document.getElementById('rc-bw-fine-up');
+  if (rcBwFineDn) rcBwFineDn.addEventListener('click', () => bwFineStep(-1));
+  if (rcBwFineUp) rcBwFineUp.addEventListener('click', () => bwFineStep(1));
   rcBwDn.addEventListener('click', () => {
     if (txState) return;
     if (ws && ws.readyState === WebSocket.OPEN) {

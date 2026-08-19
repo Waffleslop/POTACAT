@@ -585,6 +585,40 @@ test('CIV setTransmit off -> 1C 00 00', () => {
   assert.ok(hex.includes('1c0000'), `Expected PTT off, got: ${hex}`);
 });
 
+test('CIV setFilterWidth 2400 SSB -> 1A 03 idx 28 (BCD 0x28)', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  codec._lastMode = 'USB';
+  codec.setFilterWidth(2400);
+  const hex = writes[0];
+  assert.ok(hex.includes('1a0328'), `Expected 1A 03 28, got: ${hex}`);
+});
+
+test('CIV setFilterWidth 500 CW -> idx 9; 50 CW -> idx 0', () => {
+  const a = captureWrites(CivCodec, IC7300_MODEL);
+  a.codec._lastMode = 'CW';
+  a.codec.setFilterWidth(500);
+  assert.ok(a.writes[0].includes('1a0309'), `Expected idx 9, got: ${a.writes[0]}`);
+  const b = captureWrites(CivCodec, IC7300_MODEL);
+  b.codec._lastMode = 'CW';
+  b.codec.setFilterWidth(50);
+  assert.ok(b.writes[0].includes('1a0300'), `Expected idx 0, got: ${b.writes[0]}`);
+});
+
+test('CIV setFilterWidth caps: 3600 SSB idx 40; RTTY capped at 31; FM no-op', () => {
+  const a = captureWrites(CivCodec, IC7300_MODEL);
+  a.codec._lastMode = 'USB';
+  a.codec.setFilterWidth(9999);
+  assert.ok(a.writes[0].includes('1a0340'), `Expected idx 40 cap, got: ${a.writes[0]}`);
+  const b = captureWrites(CivCodec, IC7300_MODEL);
+  b.codec._lastMode = 'RTTY';
+  b.codec.setFilterWidth(3600);
+  assert.ok(b.writes[0].includes('1a0331'), `Expected RTTY cap 31, got: ${b.writes[0]}`);
+  const c = captureWrites(CivCodec, IC7300_MODEL);
+  c.codec._lastMode = 'FM';
+  c.codec.setFilterWidth(2400);
+  assert.strictEqual(c.writes.length, 0, 'FM must not send a width frame');
+});
+
 test('CIV setNb on -> 16 22 01', () => {
   const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
   codec.setNb(true);
@@ -612,13 +646,11 @@ test('CIV parse mode response', () => {
   assert.strictEqual(mode, 'USB');
 });
 
-test('CIV setFilterWidth is no-op (FIL presets not Hz-addressable)', () => {
-  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
-  codec.setMode('CW', 14000000);
-  writes.length = 0; // clear mode writes
-  codec.setFilterWidth(500);
-  assert.strictEqual(writes.length, 0, 'Should not send any filter command for CI-V');
-});
+// The old "setFilterWidth is a no-op" pin guarded against cmd 0x06 abuse
+// (preset selection that re-sends the mode byte). The 2026-08-20
+// implementation uses 0x1A 0x03 — the real width command, no mode byte —
+// so the pin is obsolete; coverage lives in the three width-table tests
+// above (SSB/CW indices, RTTY cap, FM no-op).
 
 test('CIV setMode sends the 2-byte [mode, filter] form, echoing the last-seen filter', () => {
   // Stale until 2026-07-11: expected the 1-byte mode-only form, but older
