@@ -6345,39 +6345,16 @@
     }
     return c;
   }
+  // Reply-step classification delegates to the SHARED parser
+  // (jtcat-parser.js, inlined into this page by the server) — the same
+  // module the desktop popout and main.js use. This replaces a hand-copied
+  // fork that was missing the tail-end branch, which made taps on stations
+  // mid-QSO with someone else dead-end into a bare retune: web could only
+  // answer CQ lines (LZ3AW item 3). The host re-derives authoritatively
+  // from the raw text, so client and host can no longer drift apart.
   function ft8InferReplyStep(decode, myCall) {
-    const text = (decode.text || '').toUpperCase();
-    const parts = text.split(/\s+/);
-    const me = _rmtBaseCall(myCall);
-    if (text.indexOf('CQ ') === 0) {
-      // Scan for the first callsign-shaped token — handles directed/contest/
-      // event CQs ("CQ POTA W1AW") and numeric serials the old heuristic broke.
-      let callIdx = -1;
-      for (let i = 1; i < parts.length; i++) {
-        if (_rmtLooksLikeCall(parts[i])) { callIdx = i; break; }
-      }
-      if (callIdx === -1) callIdx = 1;
-      const call = parts[callIdx] || '';
-      const theirGrid = parts[callIdx + 1] || '';
-      if (!call) return null;
-      return { step: 'reply-cq', call, theirGrid };
-    }
-    if (parts.length >= 2 && me && _rmtBaseCall(parts[0]) === me && parts[1]) {
-      const fromCall = parts[1];
-      const payload = parts[2] || '';
-      if (payload === 'RR73' || payload === 'RRR' || payload === '73') {
-        return { step: 'send-73', call: fromCall };
-      }
-      const rRpt = payload.match(/^R([+-]\d{2})$/);
-      if (rRpt) return { step: 'send-rr73', call: fromCall, theirReport: rRpt[1] };
-      const plainRpt = payload.match(/^([+-]\d{2})$/);
-      if (plainRpt) return { step: 'send-r-report', call: fromCall, theirReport: plainRpt[1] };
-      if (/^[A-R]{2}[0-9]{2}([A-X]{2})?$/i.test(payload)) {
-        return { step: 'send-report', call: fromCall, theirGrid: payload };
-      }
-      return { step: 'reply-cq', call: fromCall };
-    }
-    return null;
+    if (typeof JtcatParser === 'undefined' || !JtcatParser.inferReplyStep) return null;
+    return JtcatParser.inferReplyStep({ text: (decode && decode.text) || '' }, myCall);
   }
 
   function ft8ClickDecode(decode) {
