@@ -593,6 +593,7 @@ let scanning = false;
 let remoteScanning = false; // ECHOCAT mobile's scan engine is running (scan-state-sync-desktop)
 let scanTimer = null;
 let scanIndex = 0;
+let scanJustWrapped = false; // wrap-to-top: next scanning render jumps the scroller to the top
 let scanSkipped = new Set(); // "callsign\tfrequency" keys to skip
 // Frequencies dwelled on in the current pass through the scan list. Lets us
 // skip a second 14304 spot lower in the list when we already dwelled on an
@@ -10081,6 +10082,7 @@ function scanStep() {
   if (scanIndex >= list.length) {
     scanIndex = 0;
     scanVisitedFreqs.clear(); // wrapping to top starts a fresh pass
+    scanJustWrapped = true;   // render() jumps the table back to the top
   }
 
   const spot = list[scanIndex];
@@ -12398,10 +12400,22 @@ function render() {
       tbody.appendChild(tr);
     }
 
-    // Auto-scroll to the row being scanned so it stays visible
+    // Auto-scroll to the row being scanned so it stays visible. On a wrap
+    // back to the first entry, jump the scroller straight to the top: a
+    // smooth scrollIntoView over the whole table height gets cancelled by
+    // the next tbody rebuild mid-animation, so the view stayed parked at
+    // the bottom until the scan crawled back down to it (user report
+    // 2026-08-19). The per-step nearest/smooth scroll stays for the normal
+    // one-row advance.
     if (scanning) {
       const highlighted = tbody.querySelector('.scan-highlight');
-      if (highlighted) highlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (scanJustWrapped) {
+        scanJustWrapped = false;
+        const scroller = tbody.parentElement;
+        if (scroller) scroller.scrollTop = 0;
+      } else if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
     }
     // Tuned-spot keep-in-view: if the user has a pinned spot and a render
     // would have pushed it off-screen (new spots arriving + sort reflow),
