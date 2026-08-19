@@ -20672,6 +20672,7 @@ function scheduleContestHistoryRebuild() {
 function scanLogForEvents() {
   if (!activeEvents.length || !settings.events) return;
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  const scanStart = Date.now();
   let qsos = [];
   try {
     if (fs.existsSync(logPath)) qsos = parseAllRawQsos(logPath);
@@ -20741,6 +20742,10 @@ function scanLogForEvents() {
     saveSettings(settings);
     pushEventsToRenderer();
   }
+  // Duration line: this is a SYNCHRONOUS full-log parse on the main process
+  // (an event opt-in click waits on it) — the next big-log report should
+  // show its real cost instead of unexplained silence.
+  sendCatLog(`[Events] log scan: ${qsos.length} QSOs against ${activeEvents.length} event(s) in ${Date.now() - scanStart}ms`);
 }
 
 /** Check if a logged QSO matches any active event and auto-mark progress */
@@ -29104,11 +29109,17 @@ app.whenReady().then(() => {
         });
       }
     }
-    const adifLogPathChanged = newSettings.adifLogPath !== settings.adifLogPath;
-    const potaParksPathChanged = newSettings.potaParksPath !== settings.potaParksPath;
-
     // Only detect changes for keys that are actually present in the incoming save
     const has = (k) => k in newSettings;
+    // has()-guarded like everything below. These two compared unconditionally,
+    // so every PARTIAL save (JTCAT popout, spots dropdown, rig editor) saw
+    // undefined !== "<path>" and re-parsed the ENTIRE ADIF log + parks harvest
+    // downstream — 1-2s of synchronous main-process work per save on a big
+    // log, and the allocation churn behind the ARRL 250 main-process OOM
+    // crash (every save also re-serialized the full worked-QSOs map to the
+    // renderer AND the phone). 2026-08-19.
+    const adifLogPathChanged = has('adifLogPath') && newSettings.adifLogPath !== settings.adifLogPath;
+    const potaParksPathChanged = has('potaParksPath') && newSettings.potaParksPath !== settings.potaParksPath;
 
     const clusterChanged = (has('enableCluster') && newSettings.enableCluster !== settings.enableCluster) ||
       (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign) ||
@@ -29252,6 +29263,15 @@ app.whenReady().then(() => {
       Object.assign(newSettings, sdrSync.slotKeys);
     }
 
+    // Pre-merge snapshot for the CW Spots change check below — it runs after
+    // this merge, so comparing newSettings against settings there would always
+    // read as unchanged. (Its old form keyed on key PRESENCE alone, which
+    // reconnected the telnet feed on every save that merely included the keys.)
+    const _cwPrev = {
+      enableCwSpots: settings.enableCwSpots, cwSpotsHost: settings.cwSpotsHost,
+      cwSpotsPort: settings.cwSpotsPort, cwSpotsClubs: JSON.stringify(settings.cwSpotsClubs || null),
+      cwSpotsMaxWpm: settings.cwSpotsMaxWpm, myCallsign: settings.myCallsign,
+    };
     settings = { ...settings, ...newSettings };
     // Active rig changed → its per-rig audio source is authoritative over
     // whatever audioSource the save blob carried (the renderer mirrors it
@@ -29359,8 +29379,12 @@ app.whenReady().then(() => {
     }
 
     // Reconnect CW Spots if settings changed
-    const cwSpotsChanged = has('enableCwSpots') || has('cwSpotsHost') || has('cwSpotsPort') || has('cwSpotsClubs') || has('cwSpotsMaxWpm') ||
-      (has('myCallsign') && settings.enableCwSpots);
+    const cwSpotsChanged = (has('enableCwSpots') && settings.enableCwSpots !== _cwPrev.enableCwSpots) ||
+      (has('cwSpotsHost') && settings.cwSpotsHost !== _cwPrev.cwSpotsHost) ||
+      (has('cwSpotsPort') && settings.cwSpotsPort !== _cwPrev.cwSpotsPort) ||
+      (has('cwSpotsClubs') && JSON.stringify(settings.cwSpotsClubs || null) !== _cwPrev.cwSpotsClubs) ||
+      (has('cwSpotsMaxWpm') && settings.cwSpotsMaxWpm !== _cwPrev.cwSpotsMaxWpm) ||
+      (has('myCallsign') && settings.myCallsign !== _cwPrev.myCallsign && settings.enableCwSpots);
     if (cwSpotsChanged) {
       if (settings.enableCwSpots) connectCwSpots(); else disconnectCwSpots();
     }
