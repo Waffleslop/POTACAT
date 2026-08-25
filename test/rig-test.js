@@ -554,6 +554,16 @@ test('rigctld Yaesu ATU ft891 -> raw passthrough', () => {
 });
 
 // =========================================================================
+test('Elecraft K3/KX3 filter width uses BW in 10 Hz units (never FW)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const key of ['K3/K3S', 'K4/K4D', 'KX2/KX3']) {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS[key]);
+    codec.setFilterWidth(2700);
+    assert.strictEqual(writes[0], 'BW0270;', key + ': expected BW0270; got: ' + writes[0]);
+    assert.ok(!writes.some(w => w.startsWith('FW')), key + ': FW selects roofing SLOTS - must never be sent');
+  }
+});
+
 console.log('\n=== CivCodec (IC-7300) ===');
 
 const IC7300_MODEL = {
