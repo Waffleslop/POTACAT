@@ -11876,6 +11876,32 @@ function render() {
   pushBandspreadView(filtered);
 
   if (showTable) {
+    // Scroll anchoring: a refresh must not shove the row the user is
+    // reading. Capture the visible rows' identities + offsets before the
+    // rebuild; restore below so the viewport stays glued to the same spots
+    // even as new ones stack in above. Skipped while scanning (scan owns
+    // the viewport) and at the very top (new spots appearing there is the
+    // expected behavior — anchoring would make the table look frozen).
+    let _spotAnchors = null;
+    {
+      const scroller = tbody.parentElement;
+      if (!scanning && scroller && scroller.scrollTop > 4) {
+        const sTop = scroller.getBoundingClientRect().top;
+        const sBot = sTop + scroller.clientHeight;
+        const cand = [];
+        const tuned = tbody.querySelector('tr.tuned-spot');
+        for (const tr of tbody.querySelectorAll('tr[data-spot-key]')) {
+          const r = tr.getBoundingClientRect();
+          if (r.bottom < sTop || r.top > sBot) continue;
+          cand.push({ key: tr.dataset.spotKey, offset: r.top - sTop, tuned: tr === tuned });
+          if (cand.length >= 6) break;
+        }
+        // The tuned row (when visible) is what the user actually cares
+        // about; otherwise the topmost visible rows, nearest first.
+        cand.sort((a, b) => (b.tuned - a.tuned));
+        if (cand.length) _spotAnchors = { sTop, rows: cand };
+      }
+    }
     tbody.innerHTML = '';
 
     if (filtered.length === 0) {
@@ -12411,9 +12437,24 @@ function render() {
         if (td) tr.appendChild(td);
       }
 
+      tr.dataset.spotKey = (s.callsign || '') + '|' + s.frequency;
       tbody.appendChild(tr);
     }
 
+    // Scroll-anchor restore: put the first surviving anchor row back at its
+    // old offset. Walking the candidate list means even a spot that aged
+    // out doesn't snap the view — a neighbor holds the place instead.
+    if (_spotAnchors) {
+      const scroller = tbody.parentElement;
+      for (const a of _spotAnchors.rows) {
+        const el = tbody.querySelector('tr[data-spot-key="' + (window.CSS && CSS.escape ? CSS.escape(a.key) : a.key.replace(/"/g, '')) + '"]');
+        if (el && scroller) {
+          const sTop = scroller.getBoundingClientRect().top;
+          scroller.scrollTop += (el.getBoundingClientRect().top - sTop) - a.offset;
+          break;
+        }
+      }
+    }
     // Auto-scroll to the row being scanned so it stays visible. On a wrap
     // back to the first entry, jump the scroller straight to the top: a
     // smooth scrollIntoView over the whole table height gets cancelled by
