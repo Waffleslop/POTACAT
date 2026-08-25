@@ -14464,7 +14464,11 @@ function connectRemote() {
     if (flexSdr()) {
       smartSdr.setAtu(on);
     } else if (cat && cat.connected) {
-      if (on) cat.startTune();
+      // A state TOGGLE, not a tune request: enable/disable the inline tuner.
+      // The old mapping fired a one-shot tune cycle for "on" and disabled
+      // the tuner for "off" — so on never re-enabled it (KI4NHS/N4RDX).
+      if (typeof cat.setAtuEnabled === 'function') cat.setAtuEnabled(on);
+      else if (on) cat.startTune();
       else cat.stopTune();
     }
     _currentAtuState = on;
