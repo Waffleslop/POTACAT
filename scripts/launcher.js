@@ -186,10 +186,17 @@ function isEchocatListening() {
 }
 
 // --- Find POTACAT exe ---
+// Gather EVERY plausible install and launch the newest (by exe mtime - the
+// updater rewrites the binary, so newest mtime = newest version). The old
+// first-match ladder launched a stale 1.10.0 from a leftover install dir
+// (or a path frozen into launcher-config at install time) even though the
+// auto-updated current version sat one candidate further down - the user
+// rebooted into the old app + an update prompt every time (2026-08-26).
 function findPotacatPath() {
+  const candidates = [];
   if (config.potacatPath && config.potacatPath !== 'auto') {
-    if (fs.existsSync(config.potacatPath)) return config.potacatPath;
-    console.warn(`[Launcher] Configured path not found: ${config.potacatPath}`);
+    if (fs.existsSync(config.potacatPath)) candidates.push(config.potacatPath);
+    else console.warn(`[Launcher] Configured path not found: ${config.potacatPath}`);
   }
 
   if (IS_WIN) {
@@ -198,12 +205,8 @@ function findPotacatPath() {
         encoding: 'utf8', timeout: 5000, windowsHide: true,
       });
       const match = out.match(/"([^"]+POTACAT\.exe)"/i);
-      if (match && fs.existsSync(match[1])) return match[1];
+      if (match && fs.existsSync(match[1])) candidates.push(match[1]);
     } catch {}
-  }
-
-  const candidates = [];
-  if (IS_WIN) {
     candidates.push(path.join(process.env.LOCALAPPDATA || '', 'Programs', 'POTACAT', 'POTACAT.exe'));
     candidates.push(path.join(process.env.PROGRAMFILES || '', 'POTACAT', 'POTACAT.exe'));
   } else if (IS_MAC) {
@@ -213,10 +216,20 @@ function findPotacatPath() {
     candidates.push(path.join(os.homedir(), 'POTACAT.AppImage'));
   }
 
+  let best = null, bestM = -1;
+  const seen = new Set();
   for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    try {
+      const m = fs.statSync(p).mtimeMs;
+      if (m > bestM) { best = p; bestM = m; }
+    } catch { /* candidate absent */ }
   }
-  return null;
+  if (best && candidates[0] && best !== candidates[0] && fs.existsSync(candidates[0])) {
+    console.warn(`[Launcher] ${candidates[0]} is older than ${best} - launching the newest install (uninstall the old copy or update launcher-config.json to silence this).`);
+  }
+  return best;
 }
 
 // --- Start / Stop / Restart ---
