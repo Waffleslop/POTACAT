@@ -26735,8 +26735,24 @@ app.whenReady().then(() => {
   // kiwiClient and kiwiActive declared near top of whenReady for global access
 
   ipcMain.on('kiwi-connect', (_e, { host: rawHost, port: rawPort, password }) => {
+    // Inline station password: "password@host:port" in the SDR field.
+    // KiwiSDR sysops hand out passwords for full-length sessions on
+    // preview-limited receivers (work item kiwi-preview-bump-too-busy);
+    // parsed HERE because every surface funnels through this one intake —
+    // desktop field, web client, and phone — so no UI needed a new field.
+    // NOTE: a station saved with the password inline lives in the plain
+    // station string; the discrete per-station field with settings-secrets
+    // registration is the follow-up before exports can carry SDR lists.
+    let hostIn = rawHost || '';
+    let stationPassword = password;
+    const atIdx = hostIn.lastIndexOf('@');
+    if (atIdx > 0) {
+      stationPassword = hostIn.slice(0, atIdx);
+      hostIn = hostIn.slice(atIdx + 1);
+      sendCatLog('[WebSDR] Using inline station password for ' + hostIn);
+    }
     // Sanitize host — strip http://, https://, trailing slashes
-    const host = (rawHost || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const host = hostIn.replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const port = rawPort || 8073;
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
@@ -26855,7 +26871,7 @@ app.whenReady().then(() => {
       // KiwiSDR connect: pass myCallsign through so the client can both
       // identify (SET ident_user) and authenticate as a real ham (SET auth p=)
       // for extended listener time on tlimit-restricted kiwis.
-      kiwiClient.connect(host, port, password, settings.myCallsign || '');
+      kiwiClient.connect(host, port, stationPassword, settings.myCallsign || '');
     }
   });
 
