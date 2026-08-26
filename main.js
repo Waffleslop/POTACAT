@@ -16101,6 +16101,20 @@ function connectRemote() {
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
+        // Skip on a reports-both-ways QSO = the operator declaring it done.
+        // Speed POTA activators often never send RR73 at all (they take the
+        // R-report and CQ the next hunter), so the natural advance-and-log
+        // never fires — and this branch used to move to the 73 phase WITHOUT
+        // calling the logger, so Skip sent 73s but the QSO stayed unlogged
+        // (W8ATE 2026-08-26). Route through the SAME closeout the retry cap
+        // uses: log + one courtesy 73 + normal teardown.
+        if (_jtcatStateMachine.canCloseoutQso(q)) {
+          _jtcatStateMachine.closeoutStalledQso(q,
+            (m) => { remoteJtcatSetTxMsg(m); },
+            async () => { await jtcatAutoLog(q); },
+            { log: sendCatLog });
+          return;
+        }
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'RR73');
         q.phase = '73';
       } else {
@@ -26261,6 +26275,21 @@ app.whenReady().then(() => {
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
+        // Skip on a reports-both-ways QSO = the operator declaring it done.
+        // Speed POTA activators often never send RR73 at all (they take the
+        // R-report and CQ the next hunter), so the natural advance-and-log
+        // never fires — and this branch used to move to the 73 phase WITHOUT
+        // calling the logger, so Skip sent 73s but the QSO stayed unlogged
+        // (W8ATE 2026-08-26). Route through the SAME closeout the retry cap
+        // uses: log + one courtesy 73 + normal teardown.
+        if (_jtcatStateMachine.canCloseoutQso(q)) {
+          _jtcatStateMachine.closeoutStalledQso(q,
+            (m) => { eng.setTxMessage(m); },
+            async () => { await jtcatAutoLog(q); },
+            { log: sendCatLog });
+          popoutBroadcastQso();
+          return;
+        }
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'RR73');
         q.phase = '73';
       } else {
