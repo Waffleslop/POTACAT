@@ -3623,8 +3623,32 @@ async function connectCat() {
     _setCwPaddleAvailability(_pa.available, _pa.reason || 'rig-changed');
   }
   killRigctld();
-  const target = settings.catTarget;
-  if (!target) return;
+  let target = settings.catTarget;
+  if (!target) {
+    // A rig configured in My Rigs but never ACTIVATED leaves the global
+    // catTarget unset — startup then SILENTLY skipped the connect (no
+    // "Connecting..." line at all) while the rig editor's Test Connection,
+    // which drives its own config directly, passed. A maddening combination
+    // (WZ4LZ 2026-08-25, FT-891/rigctld: "test says connected, tune says no
+    // radio"). With exactly one configured rig there is nothing to choose:
+    // activate it. Otherwise say out loud why we are not connecting.
+    const rigsWithTarget = (settings.rigs || []).filter((r) => r && r.catTarget);
+    if (rigsWithTarget.length === 1) {
+      const rig = rigsWithTarget[0];
+      settings.activeRigId = rig.id;
+      settings.catTarget = rig.catTarget;
+      if (rig.audioSource) settings.audioSource = rig.audioSource; // per-rig mirror rides activation
+      saveSettings(settings);
+      target = settings.catTarget;
+      sendCatLog('[CAT] No active rig was selected — auto-activating the only configured rig (' + (rig.name || rig.model || 'rig') + ').');
+    } else if (rigsWithTarget.length > 1) {
+      sendCatLog('[CAT] Not connecting: ' + rigsWithTarget.length + ' rigs are configured but none is set ACTIVE. Pick one in Settings > My Rigs.');
+      return;
+    } else {
+      sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > My Rigs.');
+      return;
+    }
+  }
   if (target.type === 'icom-network' && !_icomNetworkConnectRetryActive && !_icomNetworkConnectRetryTimer) {
     clearIcomNetworkConnectRetry(true);
   }
