@@ -154,6 +154,10 @@ function _applyPopoutTheme(payload) {
           var col = groups && groups[gi] && groups[gi].color;
           if (col) document.documentElement.style.setProperty('--jp-wl-color-' + gi, col);
         }
+        // Repaint history: replaying the decode log through the row builder
+        // re-evaluates every visible row against the new lists/colors, so
+        // past decodes decorate too (not just future ones).
+        if (typeof rebuildBandActivity === 'function') rebuildBandActivity();
       } catch (e) { /* keep the old lookup on any malformed push */ }
     });
   } // watchlist-group Map (lib/watchlist-groups.js), built at settings load
