@@ -14934,6 +14934,19 @@ function _agoString(ts) {
 // change, or manual Refresh). Replace the cached entries + re-render
 // the status line + rebuild the lookup so the visible table picks up
 // any new matches without a reload.
+if (window.api && window.api.onOpenSettingsWatchlist) {
+  // JTCAT popout gear > Watchlist colors... lands here: open Settings and
+  // scroll to the groups block.
+  window.api.onOpenSettingsWatchlist(() => {
+    try {
+      if (settingsDialog && settingsDialog.classList.contains('hidden') && settingsBtn) settingsBtn.click();
+      setTimeout(() => {
+        const block = document.querySelector('.wl-groups-block');
+        if (block) block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 150);
+    } catch { /* settings dialog structure changed - the click is best-effort */ }
+  });
+}
 if (window.api && window.api.onWatchlistGroupsUpdated) {
   window.api.onWatchlistGroupsUpdated((groups) => {
     if (!Array.isArray(groups)) return;

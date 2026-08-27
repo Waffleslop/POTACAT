@@ -9181,6 +9181,8 @@ function startJtcat(mode) {
           r.newGrid = !rosterWorkedGrids.has(r.grid);
         }
         // Chase target highlight (renderer/cq-target.js). One rule for popout + phone.
+        if (chaseCtx) // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
+        if (chaseCtx) r.cqTag = CqTarget.cqTagOf ? CqTarget.cqTagOf(r.text || '') : '';
         if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
         // Tracked-event station (13 Colonies etc.) — needed/new-slot/worked
         // classification the popout renders as a [13C] badge and the phone
@@ -19889,7 +19891,8 @@ function _broadcastWatchlistGroups() {
   // Mirror to ECHOCAT clients so phones pick up fresh remoteEntries
   // without waiting for the next unrelated settings change. Cheap —
   // setRemoteSettings is just a struct-replace on the server side.
-  try { updateRemoteSettings(); } catch { /* server not up yet */ }
+  try { updateRemoteSettings();   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('watchlist-groups-updated', settings.watchlistGroups || []);
+} catch { /* server not up yet */ }
 }
 
 function fetchWatchlistGroupUrl(idx) {
@@ -26255,6 +26258,16 @@ app.whenReady().then(() => {
     else stopFullAutoCq('stopped by operator');
   });
 
+  // Gear > "Watchlist colors..." — focus the main window and open Settings
+  // scrolled to the watchlist groups (the popout has no editor of its own).
+  ipcMain.on('jtcat-open-watchlist-settings', () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+      win.webContents.send('open-settings-watchlist');
+    }
+  });
+
   ipcMain.on('jtcat-popout-skip-phase', async () => {
     if (!popoutJtcatQso || popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;
     const q = popoutJtcatQso;
@@ -31105,6 +31118,8 @@ app.whenReady().then(() => {
               r.grid = gm[1].toUpperCase();
               r.newGrid = !rosterWorkedGrids.has(r.grid);
             }
+            if (chaseCtx) // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
+            if (chaseCtx) r.cqTag = CqTarget.cqTagOf ? CqTarget.cqTagOf(r.text || '') : '';
             if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
             // Tracked-event classification — same call as the single-engine
             // path, with this slice's band.

@@ -54,5 +54,25 @@ console.log('matchDecode (spec match rules):');
   check(matchDecode(lu, 'W1FRIEND', 'CQ W1FRIEND FN20').emoji === '⭐', 'match carries the emoji');
 }
 
+// --- Tags + wildcards (RaptorFlight 2026-08-27) --------------------------
+{
+  const lk = buildGroupLookup([
+    { callsigns: 'PW8BR, NA, W1AW/*', emoji: 'S' },
+    { callsigns: 'POTA' },
+  ]);
+  check('wildcard entry matches any suffix',
+    matchDecode(lk, 'W1AW/4', 'CQ W1AW/4 FN31') !== null && matchDecode(lk, 'W1AW/4', 'CQ W1AW/4 FN31').idx === 0);
+  check('letters-only <=4 token becomes a CQ tag, matched via cqTag arg',
+    matchDecode(lk, 'K2XYZ', 'CQ NA K2XYZ FN20', 'NA') !== null && matchDecode(lk, 'K2XYZ', 'CQ NA K2XYZ FN20', 'NA').idx === 0);
+  check('tag in a later group still matches',
+    matchDecode(lk, 'K2XYZ', 'CQ POTA K2XYZ FN20', 'POTA') !== null && matchDecode(lk, 'K2XYZ', 'CQ POTA K2XYZ FN20', 'POTA').idx === 1);
+  check('exact call outranks a broad tag',
+    matchDecode(lk, 'PW8BR', 'CQ NA PW8BR GG66', 'NA').idx === 0);
+  check('no cqTag arg means tags never fire from plain text tokens alone',
+    matchDecode(lk, 'K2XYZ', 'K2XYZ K3ABC -10') === null);
+  check('bare Map contract preserved for spot-table consumers',
+    lk.get('PW8BR') !== undefined && typeof lk.size === 'number');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'watchlist-groups tests failed');

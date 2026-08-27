@@ -143,7 +143,20 @@ function _applyPopoutTheme(payload) {
   });
 
   var qsoState = null; // current QSO state from main renderer
-  var wlGroupLookup = null; // watchlist-group Map (lib/watchlist-groups.js), built at settings load
+  var wlGroupLookup = null;
+  if (window.api.onWatchlistGroupsUpdated) {
+    // Live edits from main Settings apply immediately — the old contract
+    // ("evaluated at popout open") made color/list changes look broken.
+    window.api.onWatchlistGroupsUpdated(function (groups) {
+      try {
+        wlGroupLookup = window.WatchlistGroups.buildGroupLookup(groups || []);
+        for (var gi = 0; gi < 3; gi++) {
+          var col = groups && groups[gi] && groups[gi].color;
+          if (col) document.documentElement.style.setProperty('--jp-wl-color-' + gi, col);
+        }
+      } catch (e) { /* keep the old lookup on any malformed push */ }
+    });
+  } // watchlist-group Map (lib/watchlist-groups.js), built at settings load
 
   // --- DOM refs ---
   var bandActivity = document.getElementById('jp-band-activity');
@@ -173,6 +186,10 @@ function _applyPopoutTheme(payload) {
   var cqBtn = document.getElementById('jp-cq');
   var fullAutoCqBtn = document.getElementById('jp-full-auto-cq');
   var maxAttemptsInput = document.getElementById('jp-max-attempts');
+  var openWatchlistBtn = document.getElementById('jp-open-watchlist');
+  if (openWatchlistBtn) openWatchlistBtn.addEventListener('click', function () {
+    if (window.api.openWatchlistSettings) window.api.openWatchlistSettings();
+  });
   var reworkDaysInput = document.getElementById('jp-rework-days');
   var runPauseInput = document.getElementById('jp-run-pause-after');
   var wfSpeedInput = document.getElementById('jp-wf-speed');
@@ -833,21 +850,28 @@ function _applyPopoutTheme(payload) {
     // watched friend BEING CALLED). Stroke always; the 12% tint only when
     // the row is otherwise un-tinted (directed/chase/wanted/spot tints keep
     // priority); emoji appended after the message; W badge untouched.
-    var wl = wlGroupLookup ? window.WatchlistGroups.matchDecode(wlGroupLookup, d.call, c.text) : null;
+    // cqTag (main-enriched; local fallback) lets letters-only group entries
+    // like NA or POTA match the CQ modifier — RaptorFlight's WSJT-X-style
+    // tag highlighting, 2026-08-27.
+    var _cqTag = d.cqTag !== undefined ? d.cqTag
+      : (window.CqTarget && window.CqTarget.cqTagOf ? window.CqTarget.cqTagOf(c.text) : '');
+    var wl = wlGroupLookup ? window.WatchlistGroups.matchDecode(wlGroupLookup, d.call, c.text, _cqTag) : null;
     var wlClass = '';
     if (wl) {
       wlClass = ' jp-wl-g' + wl.idx;
       // jp-cq counts as tinted too (desktop-only green CQ background the
       // mobile precedence list has no equivalent of) — the stroke alone
       // carries the watchlist signal there, keeping CQ rows scannable.
-      var otherwiseTinted = c.isCq || c.isDirected || d.chaseMatch || c.isWanted || !!spotMatch || !!d.watched;
-      if (!otherwiseTinted) wlClass += ' jp-wl-tint-g' + wl.idx;
+      // Watchlist FILL now outranks every tint except directed-at-me: the
+      // whole point is the row POPS from across the room (WSJT-X parity).
+      // Directed keeps the top slot — nothing may mute "they're calling ME".
+      if (!c.isDirected) wlClass += ' jp-wl-fill-g' + wl.idx;
     } else if (evM) {
       // Event stroke (mobile-parity priority: watchlist group wins, then
       // event needed/new-slot). Stroke only — the row stays normal-looking.
       wlClass = ' jp-event-needed';
     }
-    row.className = 'jp-row' + (c.isCq ? ' jp-cq' : '') + (c.isDirected ? ' jp-directed' : '') + (c.isWanted ? ' jp-wanted' : '') + (d.chaseMatch ? ' jp-chase' : '') + (d.watched ? ' jp-watched' : '') + spotClass + wlClass;
+    row.className = 'jp-row' + (c.isCq ? ' jp-cq' : '') + (c.isDirected ? ' jp-directed' : '') + (c.isWanted ? ' jp-wanted' : '') + (d.newDxcc ? ' jp-new-dxcc' : '') + (d.chaseMatch ? ' jp-chase' : '') + (d.watched ? ' jp-watched' : '') + spotClass + wlClass;
     if (spotMatch && spotMatch.reference) row.title = 'Spotted at ' + spotMatch.reference + (spotMatch.isNewPark ? ' (new park)' : '');
     var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
     // Band badge for multi-slice decodes

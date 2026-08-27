@@ -99,6 +99,16 @@
     .jp-row.jp-wl-tint-g0 { background: color-mix(in srgb, var(--jp-wl-color-0, #ff7066) 12%, transparent); }
     .jp-row.jp-wl-tint-g1 { background: color-mix(in srgb, var(--jp-wl-color-1, #82b1ff) 12%, transparent); }
     .jp-row.jp-wl-tint-g2 { background: color-mix(in srgb, var(--jp-wl-color-2, #b388ff) 12%, transparent); }
+    .jp-wl-fill-g0 { background: color-mix(in srgb, var(--jp-wl-color-0, #ff7066) 38%, transparent); border-left: 3px solid var(--jp-wl-color-0, #ff7066); }
+    .jp-wl-fill-g1 { background: color-mix(in srgb, var(--jp-wl-color-1, #82b1ff) 38%, transparent); border-left: 3px solid var(--jp-wl-color-1, #82b1ff); }
+    .jp-wl-fill-g2 { background: color-mix(in srgb, var(--jp-wl-color-2, #b388ff) 38%, transparent); border-left: 3px solid var(--jp-wl-color-2, #b388ff); }
+    /* Directed-at-me is UNMISSABLE (WSJT-X "black bar" parity): solid accent
+       band + bold; outranks every other treatment including watchlist fills. */
+    .jp-row.jp-directed { background: #e94560 !important; color: #fff; font-weight: 700; border-left: 6px solid #7a0f26; }
+    .jp-row.jp-directed .jp-msg { color: #fff; }
+    /* New DXCC pops (bright magenta tint) — data was always enriched, the
+       styling just whispered. */
+    .jp-row.jp-wanted.jp-new-dxcc { background: color-mix(in srgb, #ff00c8 24%, transparent); }
     .jp-wl-emoji { margin-left: 4px; }
     /* Tracked-event station (needed / new band-mode): accent stroke, NO tint
        — the row stays normal-looking; the [13C] badge carries the identity.
@@ -665,6 +675,10 @@
       <span class="jp-opt-label">Run pauses after <input id="jp-run-pause-after" type="number" min="0" max="60" value="8"> unanswered CQs</span>
       <span class="jp-opt-help">When Run has worked everyone it can, it stops transmitting and just listens, then picks CQ back up as soon as an unworked station calls CQ. Only pauses if nobody new is calling — on a busy band where you're simply not being heard it keeps going. Set 0 to never pause.</span>
     </label>
+    <button id="jp-open-watchlist" class="jp-opt-row">
+      <span class="jp-opt-label">Watchlist colors...</span>
+      <span class="jp-opt-help">Decodes matching your watchlist groups fill in each group's color. Edit the lists, colors, and CQ tags (NA, POTA...) in the main window's Settings - this opens them.</span>
+    </button>
     <div class="jp-opt-section">Display</div>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Waterfall speed <input id="jp-wf-speed" type="number" min="1" max="60" step="1" value="60"> lines/sec</span>

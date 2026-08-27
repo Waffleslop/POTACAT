@@ -144,6 +144,8 @@ contextBridge.exposeInMainWorld('api', {
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   // Settings
+  openWatchlistSettings: () => ipcRenderer.send('jtcat-open-watchlist-settings'),
+  onWatchlistGroupsUpdated: (cb) => ipcRenderer.on('watchlist-groups-updated', (_e, groups) => cb(groups)),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   // QRZ lookup
