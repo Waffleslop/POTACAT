@@ -14937,14 +14937,19 @@ function _agoString(ts) {
 if (window.api && window.api.onOpenSettingsWatchlist) {
   // JTCAT popout gear > Watchlist colors... lands here: open Settings and
   // scroll to the groups block.
-  window.api.onOpenSettingsWatchlist(() => {
+  window.api.onOpenSettingsWatchlist(async () => {
     try {
-      if (settingsDialog && settingsDialog.classList.contains('hidden') && settingsBtn) settingsBtn.click();
+      // The dialog is TABBED — open it directly on the Spots tab (where the
+      // watchlist groups live), then scroll the block into view once the
+      // panel has rendered. The first cut gated the open on a 'hidden'
+      // class the dialog never uses, so the click never fired (K3SBP,
+      // first live test 2026-08-27).
+      await openSettingsDialog('spots');
       setTimeout(() => {
         const block = document.querySelector('.wl-groups-block');
         if (block) block.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 150);
-    } catch { /* settings dialog structure changed - the click is best-effort */ }
+      }, 200);
+    } catch { /* best-effort — the dialog still opened on its default tab */ }
   });
 }
 if (window.api && window.api.onWatchlistGroupsUpdated) {
