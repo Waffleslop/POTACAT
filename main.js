@@ -29412,6 +29412,17 @@ app.whenReady().then(() => {
     if (activeRigChanged) {
       const rigNow = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
       if (rigNow && rigNow.audioSource) settings.audioSource = rigNow.audioSource;
+      // The catTarget mirror was MISSING here: activating a rig by id alone
+      // (the blue dot in My Rigs sends just activeRigId) left the global
+      // settings.catTarget stale or unset, so startup silently skipped the
+      // connection while the rig editor's Test — which drives the editor's
+      // own fields — kept passing (WZ4LZ, FT-891/rigctld, 2026-08-27: blue
+      // dot on, 'no radio connected' forever). audioSource always had this
+      // mirror; the connection target itself didn't. A payload that carries
+      // its own catTarget (the editor's full save) still wins.
+      if (rigNow && rigNow.catTarget && !has('catTarget')) {
+        settings.catTarget = rigNow.catTarget;
+      }
     }
     saveSettings(settings);
 
