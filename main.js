@@ -29439,6 +29439,13 @@ app.whenReady().then(() => {
     }
     saveSettings(settings);
 
+    // Watchlist group edits (lists, colors, emoji) must reach every open
+    // window NOW — the broadcast only fired from the remote-URL fetch paths,
+    // so a plain manual save updated the main window (renderer hot-apply)
+    // while the JTCAT popout kept its stale lookup and nothing colored
+    // (K3SBP live test 2026-08-27: EA8UP/W9AV + color = no decoration).
+    if (has('watchlistGroups')) _broadcastWatchlistGroups();
+
     // Refetch any watchlist group whose URL changed. Clearing a URL
     // also clears the cached entries so decoration stops immediately.
     if (_wlOldUrls.length > 0) {
