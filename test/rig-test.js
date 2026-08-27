@@ -564,6 +564,18 @@ test('Elecraft K3/KX3 filter width uses BW in 10 Hz units (never FW)', () => {
   }
 });
 
+test('rigctld same-mode re-send preserves explicit filter width (K6RBJ)', () => {
+  const model = { protocol: 'rigctld', caps: { filter: true }, brand: 'Icom' };
+  const { codec, writes } = captureWrites(RigctldCodec, model);
+  codec.setMode('LSB', 7185000);
+  codec.setFilterWidth(3000);
+  codec.setMode('LSB', 7185000);   // band-recall / re-anchor style re-send
+  codec.setMode('CW', 7030000);    // genuine change -> mode default again
+  const out = writes.map((w) => String(w).trim());
+  assert.strictEqual(out[2], 'M LSB 3000', 'same-mode re-send stomped the width: ' + out[2]);
+  assert.ok(!out[3].includes('3000'), 'mode change must reset to the default: ' + out[3]);
+});
+
 console.log('\n=== CivCodec (IC-7300) ===');
 
 const IC7300_MODEL = {
