@@ -10642,13 +10642,23 @@ function startSmartSdrAudio() {
       _lastSstvVitaFeedMs = Date.now(); // freshness for the renderer-fallback gate
       sstvEngine.feedAudio(upsampled);
     }
-    if (settings.audioSource === 'smartsdr' && jtcatManager && jtcatManager.running) {
+    if (settings.audioSource === 'smartsdr' &&
+        ((jtcatManager && jtcatManager.running) || (ft8Engine && ft8Engine._running))) {
       const src = (pcm instanceof Float32Array) ? pcm : new Float32Array(pcm);
       const out = new Float32Array(src.length >> 1);
       for (let i = 0, j = 0; j < out.length; i += 2, j++) {
         out[j] = (src[i] + src[i + 1]) * 0.5;
       }
-      jtcatManager.feedAudio('default', out);
+      // Feed the manager when it runs, else the bare single engine — the
+      // SAME fallback the Icom-network path always had and this branch
+      // lacked. Without it, a JS8 (or any single-engine) session on Flex
+      // Direct received NO audio unless FT8's machinery happened to be
+      // running: RJDEV4782's issue #78 repro — JS8 alone was deaf, opening
+      // FT8 fixed it, closing FT8 killed it again. No double-feed risk:
+      // the renderer's jtcat-audio IPC hard-drops on smartsdr (the VITA
+      // stream here is the sole feed by design, K3SBP 2026-05-14).
+      if (jtcatManager && jtcatManager.running) jtcatManager.feedAudio('default', out);
+      else ft8Engine.feedAudio(out);
       // Also forward the raw 24 kHz frame to whichever JTCAT renderer is
       // live so the waterfall can render. Each renderer builds a synthetic
       // MediaStream from these frames and runs its normal gain → analyser

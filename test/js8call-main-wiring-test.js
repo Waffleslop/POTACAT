@@ -270,5 +270,19 @@ test('HB ACK auto-reply is guarded and session-only', () => {
     'HB ACK enable must be session-only, never written to settings');
 });
 
+// -- issue #78: Flex Direct audio must reach a bare single engine ----------
+
+test('smartsdr VITA branch feeds a bare single engine (issue #78)', () => {
+  // JS8 runs single-engine; without the fallback it was deaf on Flex Direct
+  // unless FT8 happened to be up (RJDEV4782). Pin the exact shapes anywhere
+  // in main - the gate, the fallback, and the sole-feed drop contract.
+  assert.ok(RAW.includes('(jtcatManager && jtcatManager.running) || (ft8Engine && ft8Engine._running)'),
+    'smartsdr VITA branch must gate on manager OR the bare engine');
+  assert.ok(RAW.includes('else ft8Engine.feedAudio(out)'),
+    'smartsdr VITA branch must have the single-engine feed fallback');
+  assert.ok(RAW.includes("audioSource === 'smartsdr' && smartSdrAudio) return;"),
+    'renderer jtcat-audio must still hard-drop on smartsdr (sole-feed contract)');
+})
+
 console.log(`\nJS8 main wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
