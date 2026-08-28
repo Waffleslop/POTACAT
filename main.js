@@ -3120,6 +3120,12 @@ function _buildCloudDevicePayload() {
     try {
       fingerprint = (new (require('crypto').X509Certificate)(remoteServer._tlsCertPem)).fingerprint256;
     } catch {}
+  // SPKI pin rides beside the cert fingerprint (cert-pin Phase 2a): stable
+  // across reissues, so a phone that has learned it survives cert rotation.
+  let spkiPin = '';
+  if (type === 'shack' && remoteServer && typeof remoteServer.certSpkiPin === 'function') {
+    spkiPin = remoteServer.certSpkiPin();
+  }
   }
   const altHosts = (remoteServer && typeof remoteServer.getAltHosts === 'function')
     ? remoteServer.getAltHosts() : { tsHost: '', cloudHost: '' };
@@ -3140,6 +3146,7 @@ function _buildCloudDevicePayload() {
     name: (require('os').hostname()) || 'POTACAT',
     platform: 'desktop-' + process.platform,
     fingerprint,
+    spkiPin,
     rigModel: activeRig?.model || '',
     lanHost,
     tsHost: altHosts.tsHost || '',
@@ -27997,6 +28004,12 @@ app.whenReady().then(() => {
       // self-signed cert). Embed it whenever a cert is being served; the
       // phone ignores it when tsCertPublic says no pin is needed.
       if (fingerprint) qrParamsObj.fp = fingerprint;
+      // SPKI pin beside the cert fingerprint (cert-pin Phase 2a). Old
+      // phones ignore unknown params; new ones store it on the pairing.
+      try {
+        const spki = remoteServer && typeof remoteServer.certSpkiPin === 'function' ? remoteServer.certSpkiPin() : '';
+        if (spki) qrParamsObj.spki = spki;
+      } catch {}
     } else {
       qrParamsObj.host = wsUrl;
       qrParamsObj.fp = fingerprint;
