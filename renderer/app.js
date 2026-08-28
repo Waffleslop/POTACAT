@@ -35,7 +35,7 @@ let watchlistRaw = '';
 // everywhere.
 let watchlistGroupLookup = new Map();
 let watchlistGroups = [
-  { name: '', color: '#ff7066', emoji: '', url: '', callsigns: '', remoteEntries: [], lastFetchedAt: 0, lastFetchError: '' },
+  { name: '', color: '#ffa726', emoji: '', url: '', callsigns: '', remoteEntries: [], lastFetchedAt: 0, lastFetchError: '' },
   { name: '', color: '#82b1ff', emoji: '', url: '', callsigns: '', remoteEntries: [], lastFetchedAt: 0, lastFetchError: '' },
   { name: '', color: '#b388ff', emoji: '', url: '', callsigns: '', remoteEntries: [], lastFetchedAt: 0, lastFetchError: '' },
 ];
@@ -14385,7 +14385,7 @@ async function openSettingsDialog(tab) {
   // Hydrate watchlist groups from settings — default colors + empty fields
   // when not yet configured. Updates the in-memory state, the form
   // controls, and the CSS color variables in one pass.
-  const defaultGroupColors = ['#ff7066', '#82b1ff', '#b388ff'];
+  const defaultGroupColors = ['#ffa726', '#82b1ff', '#b388ff'];
   const savedGroups = Array.isArray(s.watchlistGroups) ? s.watchlistGroups : [];
   for (let i = 0; i < 3; i++) {
     const g = savedGroups[i] || {};
@@ -15612,7 +15612,7 @@ settingsSave.addEventListener('click', async () => {
   // refetch completes if any URL changed.
   watchlistGroups = watchlistGroupsSave.map((g, i) => ({
     name: g.name,
-    color: /^#[0-9a-f]{6}$/i.test(g.color) ? g.color : ['#ff7066','#82b1ff','#b388ff'][i],
+    color: /^#[0-9a-f]{6}$/i.test(g.color) ? g.color : ['#ffa726','#82b1ff','#b388ff'][i],
     emoji: g.emoji,
     url: g.url,
     callsigns: g.callsigns,

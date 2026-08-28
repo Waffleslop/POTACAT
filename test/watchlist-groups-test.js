@@ -74,5 +74,29 @@ console.log('matchDecode (spec match rules):');
     lk.get('PW8BR') !== undefined && typeof lk.size === 'number');
 }
 
+// --- Mobile-review rulings (2026-08-28): the contested cases, pinned ------
+{
+  // Ruling 2: remote entries are ALWAYS exact - a short letters-only remote
+  // entry must not become a CQ-tag matcher.
+  const lk = buildGroupLookup([{ callsigns: '', remoteEntries: [{ call: 'ABC' }] }]);
+  check('short letters-only REMOTE entry stays exact, never a tag',
+    (!lk._tags || !lk._tags.has('ABC')) && lk.get('ABC') !== undefined);
+}
+{
+  // Ruling 3: phased order - exact beats wildcard regardless of token
+  // position or group index; group order breaks ties within a kind.
+  const lk = buildGroupLookup([
+    { callsigns: 'W1AW/*' },
+    { callsigns: 'K3ABC', emoji: String.fromCodePoint(0x2B50) },
+  ]);
+  const m = matchDecode(lk, 'W1AW/4', 'W1AW/4 K3ABC RR73');
+  check('exact entry (group 1) outranks wildcard (group 0) on earlier token',
+    m !== null && m.idx === 1);
+  check('the real emoji rides the exact match',
+    m !== null && m.emoji === String.fromCodePoint(0x2B50));
+  check('wildcard still matches when no exact candidate exists',
+    matchDecode(lk, 'W1AW/7', 'CQ W1AW/7 FN31') !== null && matchDecode(lk, 'W1AW/7', 'CQ W1AW/7 FN31').idx === 0);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'watchlist-groups tests failed');

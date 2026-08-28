@@ -9181,8 +9181,12 @@ function startJtcat(mode) {
           r.newGrid = !rosterWorkedGrids.has(r.grid);
         }
         // Chase target highlight (renderer/cq-target.js). One rule for popout + phone.
-        if (chaseCtx) // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
-        if (chaseCtx) r.cqTag = CqTarget.cqTagOf ? CqTarget.cqTagOf(r.text || '') : '';
+                // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
+        // A pure text parse - deliberately NOT gated on chase context. The
+        // original insertion inherited an if(chaseCtx) guard from the line it
+        // split (mobile review, 2026-08-28): without a chase target set, no
+        // cqTag ever rode the wire and tag highlighting was broken-by-default.
+        r.cqTag = CqTarget.cqTagOf ? CqTarget.cqTagOf(r.text || '') : '';
         if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
         // Tracked-event station (13 Colonies etc.) — needed/new-slot/worked
         // classification the popout renders as a [13C] badge and the phone
@@ -29418,6 +29422,7 @@ app.whenReady().then(() => {
       cwSpotsPort: settings.cwSpotsPort, cwSpotsClubs: JSON.stringify(settings.cwSpotsClubs || null),
       cwSpotsMaxWpm: settings.cwSpotsMaxWpm, myCallsign: settings.myCallsign,
     };
+    const _wlPrevGroups = Array.isArray(settings.watchlistGroups) ? settings.watchlistGroups : null;
     settings = { ...settings, ...newSettings };
     // Active rig changed → its per-rig audio source is authoritative over
     // whatever audioSource the save blob carried (the renderer mirrors it
@@ -29444,7 +29449,24 @@ app.whenReady().then(() => {
     // so a plain manual save updated the main window (renderer hot-apply)
     // while the JTCAT popout kept its stale lookup and nothing colored
     // (K3SBP live test 2026-08-27: EA8UP/W9AV + color = no decoration).
-    if (has('watchlistGroups')) _broadcastWatchlistGroups();
+    if (has('watchlistGroups')) {
+      // Field OWNERSHIP enforced, not just documented (mobile review): the
+      // remote-URL cache (remoteEntries/lastFetchedAt/lastFetchError) is
+      // main's. A client save carrying a stale copy - e.g. the phone saving
+      // between a PoLo refetch and its next settings-update - must not
+      // clobber a fetch it never saw. Re-graft main's own copy per slot.
+      if (_wlPrevGroups && Array.isArray(settings.watchlistGroups)) {
+        for (let wi = 0; wi < settings.watchlistGroups.length; wi++) {
+          const gNew = settings.watchlistGroups[wi], gPrev = _wlPrevGroups[wi];
+          if (gNew && gPrev) {
+            gNew.remoteEntries = gPrev.remoteEntries;
+            gNew.lastFetchedAt = gPrev.lastFetchedAt;
+            gNew.lastFetchError = gPrev.lastFetchError;
+          }
+        }
+      }
+      _broadcastWatchlistGroups();
+    }
 
     // Refetch any watchlist group whose URL changed. Clearing a URL
     // also clears the cached entries so decoration stops immediately.
@@ -31125,8 +31147,12 @@ app.whenReady().then(() => {
               r.grid = gm[1].toUpperCase();
               r.newGrid = !rosterWorkedGrids.has(r.grid);
             }
-            if (chaseCtx) // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
-            if (chaseCtx) r.cqTag = CqTarget.cqTagOf ? CqTarget.cqTagOf(r.text || '') : '';
+                        // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
+        // A pure text parse - deliberately NOT gated on chase context. The
+        // original insertion inherited an if(chaseCtx) guard from the line it
+        // split (mobile review, 2026-08-28): without a chase target set, no
+        // cqTag ever rode the wire and tag highlighting was broken-by-default.
+        r.cqTag = CqTarget.cqTagOf ? CqTarget.cqTagOf(r.text || '') : '';
             if (chaseCtx) r.chaseMatch = CqTarget.matchesDecode(chaseCtx.target, r, chaseCtx.helpers);
             // Tracked-event classification — same call as the single-engine
             // path, with this slice's band.
