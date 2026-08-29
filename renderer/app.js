@@ -18475,6 +18475,21 @@ catLogClearBtn.addEventListener('click', () => {
         }
         body.push(...(pkg.tail || []));
         logSections = [];
+        // The crashed run goes FIRST — it is the reason the report exists,
+        // and a reader who stops after one code block should still see it.
+        if (pkg.prevRunUnclean) {
+          logSections.push('### Previous session ended unexpectedly (crash)', '');
+          if (pkg.prevCrash && pkg.prevCrash.startup && pkg.prevCrash.startup.length) {
+            logSections.push('Startup log of the crashed run:', '```',
+              pkg.prevCrash.startup.join('\n'), '```', '');
+          }
+          if (pkg.prevCrash && pkg.prevCrash.session && pkg.prevCrash.session.length) {
+            logSections.push('Final lines before it died:', '```',
+              pkg.prevCrash.session.join('\n'), '```', '');
+          } else {
+            logSections.push('(no log survived from that run)', '');
+          }
+        }
         if (pkg.startup && pkg.startup.length) {
           logSections.push('### Startup log', '```', pkg.startup.join('\n'), '```', '');
         }

@@ -115,6 +115,51 @@ console.log('=== maskHomeDir: usernames never reach the paste ===');
   eq(maskHomeDir(null, '/home/casey'), [], 'null lines → empty array');
 }
 
+// ── Crash carry-over (KE8WFF 2026-08-29) ─────────────────────────────────
+// A crash makes the CURRENT session useless as evidence: the user relaunched
+// in order to file the report, so this session began AFTER the failure. The
+// dead run survives as session.log.old / startup.log.old, which the report
+// never read — so the first report after a crash arrived describing a
+// perfectly healthy launch. main.js now detects an unclean exit via a
+// clean-exit marker and carries the dead run's tail into the paste.
+{
+  const fs = require('fs');
+  const path = require('path');
+  const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+
+  // The marker must be REMOVED at startup: its absence is what a crash
+  // leaves behind. A marker that lived across the run would prove nothing.
+  check(/fsx\.unlinkSync\(_cleanExitMarkerPath\)/.test(MAIN),
+    'startup clears the clean-exit marker');
+  check(/_prevRunUnclean = true;/.test(MAIN),
+    'a missing marker at boot means the previous run died');
+
+  // ...and WRITTEN only on a graceful shutdown.
+  const gc = MAIN.indexOf('function gracefulCleanup()');
+  check(gc !== -1, 'gracefulCleanup still exists');
+  const gcBody = MAIN.slice(gc, gc + 3000);
+  check(/writeFileSync\(_cleanExitMarkerPath/.test(gcBody),
+    'graceful shutdown stamps the marker');
+
+  // The report must carry the dead run, and must REDACT it like everything
+  // else — a crash tail is still the user's log, pasted in public.
+  check(/prevRunUnclean: _prevRunUnclean/.test(MAIN),
+    'bug report reports whether the last run crashed');
+  check(/_sessionLogPath \+ '\.old'/.test(MAIN),
+    'bug report reads the crashed session log');
+  check(/session: clean\(prevCrash\.session\)/.test(MAIN),
+    'crashed-run lines are redacted before leaving main');
+
+  // And it must be FIRST in the paste — the reason the report exists.
+  const crashIdx = APP.indexOf('Previous session ended unexpectedly');
+  const startupIdx = APP.indexOf('### Startup log');
+  check(crashIdx !== -1, 'renderer prints a crashed-run section');
+  check(crashIdx !== -1 && startupIdx !== -1 && crashIdx < startupIdx,
+    'the crashed run is printed before the current launch');
+  check(/no log survived from that run/.test(APP),
+    'says so plainly when the dead run left nothing');
+}
 // ───────────────────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

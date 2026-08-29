@@ -12,6 +12,15 @@ const _startupTiming = process.argv.includes('--startup-timing') ||
   process.env.POTACAT_STARTUP_TIMING === '1';
 let _lastStageTs = _startupTs;
 let _startupLogPath = null;   // resolved lazily — userData needs `app`
+// Did the PREVIOUS launch exit cleanly? A marker file is written during
+// graceful shutdown and removed at startup, so its ABSENCE at boot means the
+// last run died (crash, OOM kill, power loss) rather than quit. Without this
+// a crash is invisible to us: the user relaunches, clicks Report a Bug, and
+// the report carries the healthy NEW session while the evidence sits unread
+// in session.log.old (KE8WFF 2026-08-29 — crashes with JTCAT open that he
+// cannot reproduce on demand, so a lost first report costs days).
+let _prevRunUnclean = false;
+let _cleanExitMarkerPath = null;
 let _startupLogFailed = false;
 function _appendStartupLog(line) {
   if (_startupLogFailed) return;
@@ -28,6 +37,16 @@ function _appendStartupLog(line) {
       // (the ARRL 250 crash report arrived with a healthy startup.log for
       // exactly this reason).
       try { if (fsx.existsSync(_startupLogPath)) fsx.copyFileSync(_startupLogPath, _startupLogPath + '.old'); } catch {}
+      // Clean-exit marker, evaluated ONCE per launch beside the log rotation
+      // (this block runs before anything else can fail).
+      try {
+        _cleanExitMarkerPath = require('path').join(dir, 'clean-exit');
+        if (fsx.existsSync(_cleanExitMarkerPath)) {
+          fsx.unlinkSync(_cleanExitMarkerPath); // absent for the whole run
+        } else {
+          _prevRunUnclean = true;
+        }
+      } catch { /* marker is diagnostic only — never block startup */ }
       // Fresh file per launch, with an identity header for bug reports.
       const os = require('os');
       let ver = '?';
@@ -38,6 +57,11 @@ function _appendStartupLog(line) {
         `electron=${process.versions.electron} node=${process.versions.node} ` +
         `packaged=${(() => { try { return require('electron').app.isPackaged; } catch { return '?'; } })()}\n` +
         `argv=${JSON.stringify(process.argv.slice(1))}\n`);
+      if (_prevRunUnclean) {
+        fsx.appendFileSync(_startupLogPath,
+          '[startup] PREVIOUS SESSION DID NOT EXIT CLEANLY (crash, kill, or power loss).'
+          + ' Its log is preserved as session.log.old and is included in the next bug report.\n');
+      }
     }
     // appendFileSync so the line survives an immediate crash/exit.
     fsx.appendFileSync(_startupLogPath, line + '\n');
@@ -26735,6 +26759,24 @@ app.whenReady().then(() => {
       // session.log write failed (disk trouble) — degrade to the in-memory
       // ring so the report still carries the most recent lines.
       if (!sessionLines.length) sessionLines = getRecentSendCatLog(400);
+      // A crash makes the CURRENT session useless as evidence: the user
+      // relaunched to file the report, so this session started AFTER the
+      // failure. Carry the tail of the dead run — that is the only place the
+      // crash actually appears.
+      let prevCrash = null;
+      if (_prevRunUnclean) {
+        const prevTail = (file, n) => {
+          try {
+            const all = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
+            return all.slice(-n);
+          } catch { return []; }
+        };
+        const prevSession = _sessionLogPath ? prevTail(_sessionLogPath + '.old', 200) : [];
+        const prevStartup = _startupLogPath ? prevTail(_startupLogPath + '.old', 60) : [];
+        if (prevSession.length || prevStartup.length) {
+          prevCrash = { session: prevSession, startup: prevStartup };
+        }
+      }
       const sel = selectReportLines(sessionLines, { marker: BUG_REPORT_MARKER });
       const home = (() => { try { return require('os').homedir(); } catch { return ''; } })();
       const clean = (lines) => maskHomeDir(redactLogLines(lines), home);
@@ -26742,6 +26784,10 @@ app.whenReady().then(() => {
         ok: true,
         sessionLogPath: _sessionLogPath,
         startup: clean(startupLines),
+        prevRunUnclean: _prevRunUnclean,
+        prevCrash: prevCrash
+          ? { session: clean(prevCrash.session), startup: clean(prevCrash.startup) }
+          : null,
         head: clean(sel.head),
         tail: clean(sel.tail),
         skipped: sel.skipped,
@@ -32294,6 +32340,12 @@ function gracefulCleanup() {
   } catch {}
   killRigctld();
   try { killMercury(); } catch {}
+  // Last thing: stamp the clean-exit marker. Reaching here means we shut down
+  // on purpose, so the next launch will not report a crash. Anything that
+  // kills us before this point deliberately leaves the marker absent.
+  try {
+    if (_cleanExitMarkerPath) fs.writeFileSync(_cleanExitMarkerPath, new Date().toISOString());
+  } catch {}
 }
 
 app.on('before-quit', () => {
