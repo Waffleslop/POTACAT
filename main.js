@@ -21064,21 +21064,38 @@ let _macSignedCache = null;
  * auto-updates (they'd download and then fail at the swap). Self-detecting so
  * the feature turns on the instant a signed build ships and stays off for
  * unsigned dev/ad-hoc builds — no manual flag to flip, no risk to existing
- * users. Cached; only ever runs on macOS. Non-mac returns true (irrelevant).
+ * users. VERDICTS are cached; a check that could not run (codesign spawn
+ * failure/timeout) is deliberately not — caching a boot-storm hiccup as
+ * "unsigned" parked the whole session on the manual download link with no
+ * way back but a relaunch (W3DFX on 1.10.11, 2026-08-28). Only ever runs
+ * on macOS. Non-mac returns true (irrelevant).
  */
 function macBuildIsSigned() {
   if (process.platform !== 'darwin') return true;
   if (_macSignedCache !== null) return _macSignedCache;
-  _macSignedCache = false;
   try {
     const { spawnSync } = require('child_process');
     // /Applications/POTACAT.app/Contents/MacOS/POTACAT → the .app bundle.
     const appPath = process.execPath.replace(/\/Contents\/MacOS\/[^/]+$/, '');
     const r = spawnSync('codesign', ['-dv', '--verbose=2', appPath],
       { encoding: 'utf8', timeout: 5000 });
+    if (r.error) {
+      // codesign COULD NOT RUN - that is not a verdict on the signature.
+      // Fail safe for THIS check (no fake auto-update offer) but leave the
+      // cache empty so the next check retries instead of pinning the
+      // session to the manual download link.
+      sendCatLog('[update] codesign check could not run (' + r.error.message + ') - treating as unsigned for this check only');
+      return false;
+    }
     const out = (r.stderr || '') + (r.stdout || ''); // codesign writes to stderr
     _macSignedCache = /Authority=Developer ID Application/.test(out);
-  } catch { _macSignedCache = false; }
+    if (!_macSignedCache) {
+      sendCatLog('[update] codesign verdict: NOT a Developer ID build (status=' + r.status + '): ' + out.trim().split('\n').slice(0, 3).join(' | '));
+    }
+  } catch (err) {
+    sendCatLog('[update] codesign check threw (' + (err && err.message) + ') - treating as unsigned for this check only');
+    return false;
+  }
   return _macSignedCache;
 }
 
@@ -21092,12 +21109,19 @@ function checkForUpdates() {
   const macOsAutoUpdateUnsupported = process.platform === 'darwin' && !macBuildIsSigned();
   if (autoUpdater.isUpdaterActive() && !macOsAutoUpdateUnsupported) {
     // Installed build — use electron-updater
+    sendCatLog('[update] checking via electron-updater (installed, Developer ID-signed build)');
     autoUpdater.checkForUpdates().catch(() => {});
     if (win && !win.isDestroyed()) {
       win.webContents.send('updater-active', true);
     }
   } else {
     // Portable build (or macOS) — manual GitHub release check
+    // Say WHY, in the log a bug report carries - the branch choice was
+    // invisible when W3DFX's Mac started offering the download link
+    // instead of auto-updating (2026-08-28).
+    sendCatLog('[update] checking via manual GitHub notify - reason: ' +
+      (!autoUpdater.isUpdaterActive() ? 'updater inactive (portable/dev build)'
+        : 'macOS build not verified as Developer ID signed'));
     if (win && !win.isDestroyed()) {
       win.webContents.send('updater-active', false);
     }

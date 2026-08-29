@@ -161,6 +161,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Rename channel file so it survives artifact staging
+        # Both mac jobs write "latest-mac.yml" (electron-builder's channel
+        # filename is fixed per-OS, NOT per-arch). Staged together, one copy
+        # clobbered the other — a per-release arch coin flip (x64 won 1.10.5,
+        # .6, .8, .9, .11, .12; arm64 won 1.10.10), which broke Intel
+        # auto-update outright when arm64 won and put Apple Silicon under
+        # Rosetta when x64 won. Rename here; create-release merges them back
+        # into the one latest-mac.yml electron-updater actually fetches.
+        run: mv dist/latest-mac.yml dist/latest-mac-arm64.yml
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos-arm64
@@ -169,7 +178,7 @@ jobs:
             dist/POTACAT-*-arm64.dmg.blockmap
             dist/POTACAT-*-arm64*.zip
             dist/POTACAT-*-arm64*.zip.blockmap
-            dist/latest-mac.yml
+            dist/latest-mac-arm64.yml
           if-no-files-found: error
 
   # macOS Intel (x86_64) build — CROSS-COMPILED from an Apple Silicon host.
@@ -258,8 +267,12 @@ jobs:
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=x64
       - name: Build macOS dmg (x64)
-        # electron-builder writes a separate latest-mac-x64.yml so the
-        # auto-updater can serve the right binary per host arch.
+        # electron-builder writes latest-mac.yml naming ONLY this arch's
+        # files (there is no per-arch channel filename — an earlier comment
+        # here claimed a latest-mac-x64.yml that never existed). This job's
+        # copy stays canonical; the arm64 job renames its copy and
+        # create-release merges the two so the published manifest lists both
+        # arches and electron-updater can pick natively per host.
         run: npx electron-builder --mac --x64 --publish never --config builder-config.js
         # Same signing gate as the arm64 job — inert without the secrets.
         env:
@@ -561,6 +574,14 @@ jobs:
           mkdir -p dist
           cp -v dist-download/* dist/ || true
           ls -la dist/
+      - name: Merge per-arch mac channel files into one latest-mac.yml
+        # See the rename step in build-macos-arm64. Both files MUST exist —
+        # a missing manifest fails the release loudly instead of shipping a
+        # single-arch coin-flip manifest again.
+        run: |
+          test -f dist/latest-mac.yml
+          test -f dist/latest-mac-arm64.yml
+          node scripts/merge-latest-mac.js dist/latest-mac.yml dist/latest-mac-arm64.yml
       - name: Create GitHub release with auto-generated notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
