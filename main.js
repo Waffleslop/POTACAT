@@ -3130,13 +3130,16 @@ function _buildCloudDevicePayload() {
   const altHosts = (remoteServer && typeof remoteServer.getAltHosts === 'function')
     ? remoteServer.getAltHosts() : { tsHost: '', cloudHost: '' };
 
-  // Pick LAN host. Same logic as the pair-link generator.
+  // Pick LAN host — the address a client on the SAME NETWORK should dial.
+  // Uses the shared RemoteServer.lanAddress() (see its comment): ips[0] is
+  // the TAILNET address on any Tailscale-equipped desktop, and shipping
+  // that as `lanHost` made the phone's LAN leg fail against an unreachable
+  // overlay and silently fall back to cloud. Empty when the machine has no
+  // real LAN interface — the tailnet leg travels in tsHost, never here.
   let lanHost = '';
   if (type === 'shack' && remoteServer && remoteServer.running) {
-    const ips = RemoteServer.getLocalIPs();
-    if (ips && ips.length > 0) {
-      lanHost = `wss://${ips[0].address}:${remoteServer._port || 7300}`;
-    }
+    const lanAddr = RemoteServer.lanAddress();
+    if (lanAddr) lanHost = `wss://${lanAddr}:${remoteServer._port || 7300}`;
   }
 
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
@@ -27989,8 +27992,12 @@ app.whenReady().then(() => {
     const ips = RemoteServer.getLocalIPs();
     let host = '127.0.0.1';
     if (ips.length > 0) {
-      const lan = ips.find((ip) => !ip.tailscale);
-      host = lan ? lan.address : (ips[0].tailscaleHostname || ips[0].address);
+      // Shared with the cloud heartbeat via RemoteServer.lanAddress(). The
+      // tailnet FALLBACK below is deliberate and QR-only: a pairing QR with
+      // no host at all is useless, so a tailnet-only desktop still gets a
+      // dialable name. The heartbeat has no such fallback (tsHost carries it).
+      const lanAddr = RemoteServer.lanAddress(ips);
+      host = lanAddr || (ips[0].tailscaleHostname || ips[0].address);
     }
     const port = remoteServer._port || 7300;
     const wsUrl = `wss://${host}:${port}`;
