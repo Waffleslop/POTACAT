@@ -4141,11 +4141,62 @@ body.popout-mode .popout-only { display: flex; }
 #freq-other-display.hidden { display: none; }
 
 
+/* Custom CAT toggle + slider slots (desktop parity). A toggle shows the LAST
+   COMMAND SENT, not a readback — POTACAT cannot parse arbitrary rigs' replies
+   to user-typed raw commands. */
+.rc-custom-cat-btn.rc-custom-cat-on {
+  background: var(--pota, #4ecca3);
+  color: #000;
+  border-color: var(--pota, #4ecca3);
+}
+.rc-custom-cat-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+}
+.rc-ccs-label { color: var(--text-dim); }
+.rc-ccs-range { width: 90px; }
+.rc-ccs-value {
+  min-width: 26px;
+  text-align: right;
+  font-family: 'Courier New', monospace;
+  color: var(--text);
+}
+
 /* Solar pills (SFI/K/A) - desktop status-bar thresholds */
 #solar-pills { font-size: 10px; display: inline-flex; gap: 4px; margin-left: 6px; cursor: pointer; }
 #solar-pills.hidden { display: none; }
-#solar-pills .sp-pill { padding: 1px 5px; border-radius: 8px; background: var(--bg-card); }
-#solar-pills .sp-good { color: var(--pota, #4ecca3); }
-#solar-pills .sp-warn { color: var(--sota, #f0a500); }
-#solar-pills .sp-bad  { color: #e94560; }
+#solar-pills .sp-pill,
+#vf-solar-pills .sp-pill { padding: 1px 5px; border-radius: 8px; background: var(--bg-card); }
+#solar-pills .sp-good,
+#vf-solar-pills .sp-good { color: var(--pota, #4ecca3); }
+#solar-pills .sp-warn,
+#vf-solar-pills .sp-warn { color: var(--sota, #f0a500); }
+#solar-pills .sp-bad,
+#vf-solar-pills .sp-bad  { color: #e94560; }
+
+/* Full VFO View mirrors of the status-bar split TX line + solar pills. The
+   fullscreen panel covers the status bar, so without these the operator loses
+   both the moment they open it (LZ3AW 2026-08-28). */
+.vf-freq-other {
+  text-align: center;
+  font-size: 13px;
+  font-family: 'Courier New', monospace;
+  color: var(--sota, #f0a500);
+  margin-top: -2px;
+}
+.vf-freq-other.hidden { display: none; }
+.vf-solar-pills {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  font-size: 10px;
+  margin-top: 2px;
+}
+.vf-solar-pills.hidden { display: none; }
 

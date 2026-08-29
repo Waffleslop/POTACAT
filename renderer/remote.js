@@ -557,6 +557,50 @@
   const lbList = document.getElementById('lb-list');
   let logbookQsos = [];
   let lastSolarData = null; // latest solar-data blob (tap the pills for detail)
+  let lastFreqOtherHz = 0;  // split TX-side frequency, 0 = split off/hidden
+
+  // Both of these live in the status bar AND in the Full VFO View, which
+  // COVERS the status bar — so each renders into both surfaces, and the
+  // fullview's renderAll() calls them on open (the data usually arrived long
+  // before the panel did). LZ3AW 2026-08-28.
+  function renderFreqOther() {
+    const on = lastFreqOtherHz > 100000;
+    for (const id of ['freq-other-display', 'vf-freq-other']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (on) {
+        el.textContent = 'TX ' + formatFreq(lastFreqOtherHz);
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    }
+  }
+
+  function renderSolarPills() {
+    const d = lastSolarData;
+    if (!d) return;
+    const cls = (v, goodMax, warnMax, invert) => {
+      if (v == null) return 'sp-warn';
+      if (invert) return v >= goodMax ? 'sp-good' : v >= warnMax ? 'sp-warn' : 'sp-bad';
+      return v <= goodMax ? 'sp-good' : v <= warnMax ? 'sp-warn' : 'sp-bad';
+    };
+    for (const id of ['solar-pills', 'vf-solar-pills']) {
+      const sp = document.getElementById(id);
+      if (!sp) continue;
+      sp.innerHTML = '';
+      const mk = (label, klass) => {
+        const el = document.createElement('span');
+        el.className = 'sp-pill ' + klass;
+        el.textContent = label;
+        sp.appendChild(el);
+      };
+      if (d.sfi != null) mk('SFI ' + d.sfi, cls(d.sfi, 100, 70, true));
+      if (d.kIndex != null) mk('K ' + d.kIndex, cls(d.kIndex, 2, 4, false));
+      if (d.aIndex != null) mk('A ' + d.aIndex, cls(d.aIndex, 7, 20, false));
+      sp.classList.remove('hidden');
+    }
+  }
   let lbChunkAccum = [];   // in-flight chunked all-qsos accumulation
   let lbTotal = 0;         // full-log size reported by the server
   let lbTruncated = false; // legacy path only: showing newest slice
@@ -1595,25 +1639,9 @@
       case 'solar-data': {
         // Desktop status-bar parity: SFI/K/A pills with the same color
         // thresholds (SFI >=100 good / >=70 warn; K <=2 / <=4; A <=7 / <=20).
-        const sp = document.getElementById('solar-pills');
-        if (sp && (msg.sfi != null || msg.kIndex != null || msg.aIndex != null)) {
-          const cls = (v, goodMax, warnMax, invert) => {
-            if (v == null) return 'sp-warn';
-            if (invert) return v >= goodMax ? 'sp-good' : v >= warnMax ? 'sp-warn' : 'sp-bad';
-            return v <= goodMax ? 'sp-good' : v <= warnMax ? 'sp-warn' : 'sp-bad';
-          };
-          sp.innerHTML = '';
-          const mk = (label, klass) => {
-            const el = document.createElement('span');
-            el.className = 'sp-pill ' + klass;
-            el.textContent = label;
-            sp.appendChild(el);
-          };
-          if (msg.sfi != null) mk('SFI ' + msg.sfi, cls(msg.sfi, 100, 70, true));
-          if (msg.kIndex != null) mk('K ' + msg.kIndex, cls(msg.kIndex, 2, 4, false));
-          if (msg.aIndex != null) mk('A ' + msg.aIndex, cls(msg.aIndex, 7, 20, false));
-          sp.classList.remove('hidden');
+        if (msg.sfi != null || msg.kIndex != null || msg.aIndex != null) {
           lastSolarData = msg;
+          renderSolarPills();
         }
         break;
       }
@@ -1621,16 +1649,8 @@
       case 'freq-other': {
         // Other-VFO (TX side) frequency while split is on; 0 = hide. The
         // desktop pushed this all along — the web client just never listened.
-        const el = document.getElementById('freq-other-display');
-        if (el) {
-          const v = Number(msg.value) || 0;
-          if (v > 100000) {
-            el.textContent = 'TX ' + formatFreq(v);
-            el.classList.remove('hidden');
-          } else {
-            el.classList.add('hidden');
-          }
-        }
+        lastFreqOtherHz = Number(msg.value) || 0;
+        renderFreqOther();
         break;
       }
 
@@ -3686,9 +3706,11 @@
 
   // Tap the solar pills for the band-conditions detail.
   (function initSolarTap() {
-    const sp = document.getElementById('solar-pills');
-    if (!sp) return;
-    sp.addEventListener('click', () => {
+    // Both surfaces: the status bar row and its Full VFO View mirror.
+    const targets = ['solar-pills', 'vf-solar-pills']
+      .map((id) => document.getElementById(id)).filter(Boolean);
+    if (!targets.length) return;
+    targets.forEach((sp) => sp.addEventListener('click', () => {
       if (!lastSolarData) return;
       const d = lastSolarData;
       const lines = [];
@@ -3697,7 +3719,7 @@
       if (d.solarWind) lines.push('Wind ' + d.solarWind);
       (d.bands || []).forEach((b) => lines.push(b.band + ' (' + b.time + '): ' + b.condition));
       if (lines.length && typeof showLogToast === 'function') showLogToast(lines.join('  |  '));
-    });
+    }));
   })();
 
   function sendSetting(type, value) {
@@ -3879,7 +3901,44 @@
     if (!buttons || !Array.isArray(buttons)) return;
     customCatData = buttons;
     while (customCatData.length < 5) customCatData.push({ name: '', command: '' });
+    // Slots may have been re-typed or re-ordered on the desktop; a lit toggle
+    // would then be describing a command that no longer lives in that slot.
+    customToggleState = {};
     renderCustomCatButtons();
+  }
+
+  // Session-only last-sent state for custom TOGGLE slots, mirroring the
+  // desktop's customToggleState: POTACAT cannot parse arbitrary rigs' replies
+  // to user-typed raw commands, so the lit state means "the last thing this
+  // button sent" and nothing more. Not persisted; reset when slots change.
+  var customToggleState = {};
+  var customSliderTimers = {};
+
+  // Substitute the slider value into a command template — SAME contract as the
+  // desktop's customSliderCommand(): {v} bare, {v2}/{v3}/{v4} zero-padded, and
+  // a template with no placeholder gets the value appended.
+  function customSliderCommand(template, value) {
+    var v = String(Math.round(value));
+    var out = template;
+    var found = false;
+    var widths = [4, 3, 2];
+    for (var w = 0; w < widths.length; w++) {
+      var ph = '{v' + widths[w] + '}';
+      while (out.indexOf(ph) !== -1) {
+        var padded = v;
+        while (padded.length < widths[w]) padded = '0' + padded;
+        out = out.replace(ph, padded);
+        found = true;
+      }
+    }
+    while (out.indexOf('{v}') !== -1) { out = out.replace('{v}', v); found = true; }
+    return found ? out : out + v;
+  }
+
+  function sendCustomCat(cmd) {
+    if (!cmd || !ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ type: 'rig-control', data: { action: 'send-custom-cat', command: cmd } }));
+    return true;
   }
 
   function renderCustomCatButtons() {
@@ -3889,19 +3948,82 @@
       var entry = customCatData[i];
       if (!entry.name && !entry.command) continue;
       hasAny = true;
+      // Slot TYPE, same vocabulary the desktop writes (renderer/app.js
+      // createCustomSlot). The web client used to render EVERY slot as a plain
+      // button that fired `command`, so a toggle only ever sent its On command
+      // ("not working as toggle, at all" — LZ3AW 2026-08-28) and a slider sent
+      // its raw template, placeholders and all, straight at the radio.
+      var type = (entry.type === 'toggle' || entry.type === 'slider') ? entry.type : 'button';
+
+      if (type === 'slider') {
+        var wrap = document.createElement('span');
+        wrap.className = 'rc-custom-cat-slider';
+        var lbl = document.createElement('span');
+        lbl.className = 'rc-ccs-label';
+        lbl.textContent = entry.name || ('CAT ' + (i + 1));
+        var lo = Number.isFinite(entry.min) ? entry.min : 0;
+        var hi = Number.isFinite(entry.max) ? entry.max : 255;
+        var range = document.createElement('input');
+        range.type = 'range';
+        range.className = 'rc-ccs-range';
+        range.min = lo;
+        range.max = hi;
+        range.value = Number.isFinite(entry.value) ? entry.value : lo;
+        var out = document.createElement('span');
+        out.className = 'rc-ccs-value';
+        out.textContent = range.value;
+        range.dataset.idx = i;
+        range.addEventListener('input', function() {
+          var idx = parseInt(this.dataset.idx, 10);
+          var self = this;
+          this.parentElement.querySelector('.rc-ccs-value').textContent = this.value;
+          // Same 150ms debounce as the desktop: a drag fires dozens of input
+          // events and the rig's serial port should see one command per pause.
+          clearTimeout(customSliderTimers[idx]);
+          customSliderTimers[idx] = setTimeout(function() {
+            var e = customCatData[idx];
+            if (!e || !e.command) return;
+            if (sendCustomCat(customSliderCommand(e.command, +self.value))) e.value = +self.value;
+          }, 150);
+        });
+        wrap.appendChild(lbl);
+        wrap.appendChild(range);
+        wrap.appendChild(out);
+        customCatBtnsEl.appendChild(wrap);
+        continue;
+      }
+
       var btn = document.createElement('button');
       btn.className = 'rc-custom-cat-btn';
-      btn.textContent = entry.name || ('CAT ' + (i + 1));
       btn.dataset.idx = i;
-      btn.addEventListener('click', function() {
-        var idx = parseInt(this.dataset.idx);
-        var cmd = customCatData[idx] && customCatData[idx].command;
-        if (!cmd || !ws || ws.readyState !== WebSocket.OPEN) return;
-        ws.send(JSON.stringify({ type: 'rig-control', data: { action: 'send-custom-cat', command: cmd } }));
-        this.classList.add('sent');
-        var b = this;
-        setTimeout(function() { b.classList.remove('sent'); }, 300);
-      });
+      var label = entry.name || ('CAT ' + (i + 1));
+      if (type === 'toggle') {
+        var on = !!customToggleState[i];
+        btn.textContent = label + ' ' + (on ? 'On' : 'Off');
+        btn.classList.toggle('rc-custom-cat-on', on);
+        btn.title = 'Shows the last command sent, not the radio state.';
+        btn.addEventListener('click', function() {
+          var idx = parseInt(this.dataset.idx, 10);
+          var e = customCatData[idx];
+          if (!e) return;
+          var goingOn = !customToggleState[idx];
+          var cmd = (goingOn ? e.command : e.commandOff) || '';
+          if (!sendCustomCat(cmd.trim())) return;
+          customToggleState[idx] = goingOn;
+          this.textContent = (e.name || ('CAT ' + (idx + 1))) + ' ' + (goingOn ? 'On' : 'Off');
+          this.classList.toggle('rc-custom-cat-on', goingOn);
+        });
+      } else {
+        btn.textContent = label;
+        btn.addEventListener('click', function() {
+          var idx = parseInt(this.dataset.idx, 10);
+          var cmd = customCatData[idx] && customCatData[idx].command;
+          if (!sendCustomCat(cmd)) return;
+          this.classList.add('sent');
+          var b = this;
+          setTimeout(function() { b.classList.remove('sent'); }, 300);
+        });
+      }
       customCatBtnsEl.appendChild(btn);
     }
     // Always show section — Edit button allows creating buttons from ECHOCAT
@@ -3940,10 +4062,18 @@
       for (var j = 0; j < 5; j++) {
         var r = editor.querySelectorAll('.rc-custom-cat-editor-row')[j];
         if (!r) continue;
-        customCatData[j] = {
-          name: r.querySelector('.cce-name').value.trim(),
-          command: r.querySelector('.cce-cmd').value.trim(),
-        };
+        // PRESERVE the slot fields this editor does not expose. Rebuilding
+        // the object from the two inputs silently downgraded a
+        // desktop-configured toggle/slider to a plain button — type,
+        // commandOff, min/max and value were dropped and then SAVED BACK to
+        // the desktop, destroying the operator's configuration just for
+        // opening Edit in the browser (LZ3AW 2026-08-28).
+        var prev = customCatData[j] || {};
+        var next = {};
+        for (var k in prev) if (Object.prototype.hasOwnProperty.call(prev, k)) next[k] = prev[k];
+        next.name = r.querySelector('.cce-name').value.trim();
+        next.command = r.querySelector('.cce-cmd').value.trim();
+        customCatData[j] = next;
       }
       renderCustomCatButtons();
       // Save back to POTACAT
@@ -11084,6 +11214,11 @@ var _paddleReleaseTimer = { dit: null, dah: null };
 
     // --- Render: pull from existing shared state, push to view ---
     function renderAll() {
+      // The status bar is covered while this panel is open, so re-render its
+      // mirrored readouts here — the solar/split data usually arrived before
+      // the operator opened the panel (LZ3AW 2026-08-28).
+      renderFreqOther();
+      renderSolarPills();
       vfFreq.textContent = currentFreqKhz ? formatFreq(Math.round(currentFreqKhz * 1000)) : '---.---.---';
       vfModePill.textContent = currentMode || '---';
       // Filter pill — read from existing CW/SSB filter state if available

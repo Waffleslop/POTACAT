@@ -2294,13 +2294,15 @@ function sendCatVfo(vfo) {
   broadcastRigState();
 }
 
+/** @returns {boolean} true when the state actually changed (and broadcast). */
 function sendCatSplit(on) {
   const v = !!on;
-  if (v === _currentSplit) return;
+  if (v === _currentSplit) return false;
   _currentSplit = v;
   sendCatLog(`[CAT] Split ${v ? 'ON' : 'OFF'}`);
   if (!v) sendCatFreqOther(0);   // split off -> hide the TX line everywhere
   broadcastRigState();
+  return true;
 }
 
 // The OTHER VFO's frequency while split is on (the TX side) — TS-480 ask:
@@ -27277,8 +27279,17 @@ app.whenReady().then(() => {
         if (cat && cat.connected && typeof cat.setSplit === 'function') {
           cat.setSplit(on);
         }
-        _currentSplit = on;
-        broadcastRigState();
+        // Route the state through sendCatSplit() — the ONE split sink — rather
+        // than assigning _currentSplit here. That assignment bypassed the
+        // sink's `if (!v) sendCatFreqOther(0)`, so turning split OFF from a
+        // client never cleared the split TX-frequency readout; and because the
+        // flag was already false by the time the poll echoed, the readback's
+        // own call early-returned and nothing EVER cleared it. The stale "TX
+        // <freq>" line then sat on the web client and the VFO popout for the
+        // rest of the session (LZ3AW 2026-08-28, mobile + desktop Chrome).
+        // Same private-second-implementation drift the set-vfo case above was
+        // folded into the dispatcher to kill.
+        if (!sendCatSplit(on)) broadcastRigState(); // echo even on a no-op
         break;
       }
       case 'set-comp': {
