@@ -433,6 +433,7 @@
   let workedParksSet = new Set();  // park refs from CSV for new-to-me filter
   let showNewOnly = false;
   let workedQsos = new Map();     // callsign -> [{date, ref, band, mode}]
+  let wqChunkAccum = [];          // in-flight chunked worked-qsos accumulator
   let hideWorked = false;
   let clusterConnected = false;
   let myCallsign = '';
@@ -1053,7 +1054,7 @@
           // 256 KB - which is the "logbook only shows 125 QSOs" report
           // (LZ3AW item 2). Chunked delivery has no cap; qso-delta appends
           // one record per log write instead of re-pushing the whole log.
-          capabilities: ['chunked-all-qsos', 'qso-delta'],
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos'],
         }));
       } catch {}
       onOpen();
@@ -1588,12 +1589,25 @@
         if (activeTab === 'map') renderMapSpots();
         break;
 
-      case 'worked-qsos':
-        workedQsos = new Map(msg.entries || []);
+      case 'worked-qsos': {
+        // Chunked delivery (we advertise chunked-worked-qsos): accumulate
+        // until the last chunk, then swap the map in once. Same contract as
+        // all-qsos — chunks arrive in order on one socket, and a fresh
+        // chunk 0 (or an unchunked frame) starts over.
+        let entries = msg.entries || [];
+        if (typeof msg.chunk === 'number' && typeof msg.totalChunks === 'number') {
+          if (msg.chunk === 0) wqChunkAccum = [];
+          wqChunkAccum = wqChunkAccum.concat(entries);
+          if (msg.chunk !== msg.totalChunks - 1) break; // wait for the rest
+          entries = wqChunkAccum;
+          wqChunkAccum = [];
+        }
+        workedQsos = new Map(entries);
         spotsDropdown.querySelector('.rc-hide-worked-row').style.display = workedQsos.size > 0 ? '' : 'none';
         renderSpots();
         if (activeTab === 'map') renderMapSpots();
         break;
+      }
 
       case 'worked-today': {
         // Fallback / supplement for the full worked-qsos push when it
