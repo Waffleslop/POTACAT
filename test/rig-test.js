@@ -2262,6 +2262,38 @@ test('unknown mode is passed through rather than snapped to a guess', () => {
   assert.strictEqual(writes[0], 'FW3000;');
 });
 
+// LZ3AW 2026-08-28: "Fix of TX power meter" — his meter showed a flat number
+// that never moved while transmitting, because POTACAT polled `l RFPOWER`
+// (the power SETTING) and called it a meter. hamlib exposes the real thing as
+// RFPOWER_METER (0..1 of rated output) and his TS-480 supports it
+// (`rigctld -m 2028 --dump-caps` lists RFPOWER_METER under Get level).
+test('rigctld: forward-power meter is a TX-only query, distinct from the setting', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.getPowerMeter();
+  assert.strictEqual(writes[0], 'l RFPOWER_METER' + String.fromCharCode(10));
+  codec.getPower();
+  assert.strictEqual(writes[1], 'l RFPOWER' + String.fromCharCode(10), 'setting query changed');
+});
+
+test('rigctld: the meter fraction becomes watts on powerMeter, not power', () => {
+  const { codec } = captureWrites(RigctldCodec, { ...RIGCTLD_MODEL, maxPower: 100 });
+  const seen = [];
+  codec.on('powerMeter', (w) => seen.push(['powerMeter', w]));
+  codec.on('power', (w) => seen.push(['power', w]));
+  codec.getPowerMeter();
+  codec.onData('0.4375' + String.fromCharCode(10));
+  assert.deepStrictEqual(seen, [['powerMeter', 44]], 'got ' + JSON.stringify(seen));
+});
+
+test('rigctld: a backend without a wattmeter is asked once, then latched off', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.getPowerMeter();
+  codec.onData('RPRT -11' + String.fromCharCode(10));
+  const before = writes.length;
+  codec.getPowerMeter();
+  assert.strictEqual(writes.length, before, 'kept polling an unsupported meter');
+});
+
 // =========================================================================
 // Summary
 console.log(`\n${'='.repeat(50)}`);

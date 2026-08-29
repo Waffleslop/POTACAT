@@ -3738,6 +3738,10 @@ async function connectCat() {
     });
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
+    // power SETTING so every surface that shows a wattmeter gets real
+    // watts while transmitting; rigs that can't report it never emit.
+    cat.on('powerMeter', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -3830,6 +3834,10 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
+    // power SETTING so every surface that shows a wattmeter gets real
+    // watts while transmitting; rigs that can't report it never emit.
+    cat.on('powerMeter', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -3867,6 +3875,10 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
+    // power SETTING so every surface that shows a wattmeter gets real
+    // watts while transmitting; rigs that can't report it never emit.
+    cat.on('powerMeter', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -3896,6 +3908,10 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
+    // power SETTING so every surface that shows a wattmeter gets real
+    // watts while transmitting; rigs that can't report it never emit.
+    cat.on('powerMeter', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
 	    cat.on('swr', sendCatSwr);
@@ -3999,6 +4015,10 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
+    // power SETTING so every surface that shows a wattmeter gets real
+    // watts while transmitting; rigs that can't report it never emit.
+    cat.on('powerMeter', sendCatPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
