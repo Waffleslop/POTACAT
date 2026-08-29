@@ -811,7 +811,12 @@ html, body {
 .echo-meter-strip {
   display: flex;
   align-items: center;
-  gap: 4px;
+  /* WRAP, never clip. See the markup comment: as a fixed row the last two
+     meters were unreachable on a phone. column-gap spaces the groups; the
+     old per-label margin-left did that job and is gone with the regrouping. */
+  flex-wrap: wrap;
+  column-gap: 10px;
+  row-gap: 3px;
   padding: 4px 10px;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
@@ -820,6 +825,9 @@ html, body {
   flex-shrink: 0;
 }
 .echo-meter-strip.hidden { display: none; }
+/* A meter is label + bar + value and must break as ONE unit — a wrap that
+   separates "SWR:" from its bar is worse than the overflow it replaced. */
+.em-group { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .em-label { color: #888; font-weight: 600; }
 .em-val { color: #ccc; font-weight: 700; min-width: 36px; }
 
@@ -3245,6 +3253,19 @@ html, body {
 }
 
 /* ========== PHONE LANDSCAPE ========== */
+/* Narrow phones. The frequency is the widest single element in the status
+   bar and `.status-left` clips its overflow, which is why the mode badge
+   rendered as a truncated "C" instead of "CW" (LZ3AW screenshot 2026-08-29).
+   Shrink the frequency rather than let a badge lose characters, and keep the
+   badges themselves unshrinkable so they stay whole. */
+@media (max-width: 480px) {
+  #freq-display { font-size: 18px; letter-spacing: 0; }
+  .echo-meter-strip { column-gap: 8px; }
+  .echo-meter-strip canvas { width: 56px; }
+  .em-val { min-width: 30px; }
+}
+#mode-badge, #solar-pills, #freq-other-display { flex-shrink: 0; }
+
 @media (orientation: landscape) and (max-height: 500px) {
   #status-bar { padding: 4px 12px; padding-left: calc(12px + env(safe-area-inset-left, 0px)); padding-right: calc(12px + env(safe-area-inset-right, 0px)); }
   #freq-display { font-size: 18px; }

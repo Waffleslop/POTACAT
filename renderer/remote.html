@@ -938,22 +938,28 @@
     </div><!-- end filter-toolbar -->
 
     <!-- S-Meter / SWR / Power strip -->
+    <!-- Five meters at ~150px each is ~750px of content. As a single
+         non-wrapping flex row that simply CLIPPED on a phone: ALC ran off the
+         right edge and PWR / TX audio were unreachable entirely, so a mobile
+         operator could never see the power meter at all (LZ3AW screenshot,
+         2026-08-29). Each meter is now an atomic group and the strip wraps,
+         so nothing is ever cut off at any width or zoom level. -->
     <div id="echo-meter-strip" class="echo-meter-strip hidden">
-      <span class="em-label">S:</span>
-      <canvas id="echo-smeter-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
-      <span id="echo-smeter-text" class="em-val">—</span>
-      <span class="em-label" style="margin-left:8px;">SWR:</span>
-      <canvas id="echo-swr-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
-      <span id="echo-swr-text" class="em-val">—</span>
-      <span class="em-label" style="margin-left:8px;">ALC:</span>
-      <canvas id="echo-alc-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
-      <span id="echo-alc-text" class="em-val">—</span>
-      <span class="em-label" style="margin-left:8px;" title="RF power - measured watts while transmitting (Flex), power setting otherwise">PWR:</span>
-      <canvas id="echo-pwr-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
-      <span id="echo-pwr-text" class="em-val">—</span>
-      <span class="em-label" style="margin-left:8px;" title="PC-side TX peak — what POTACAT is feeding to the radio's USB CODEC. If TX moves but ALC stays flat, raise USB MOD LEVEL on the radio.">TX audio:</span>
-      <canvas id="echo-tx-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
-      <span id="echo-tx-text" class="em-val">—</span>
+      <span class="em-group"><span class="em-label">S:</span>
+        <canvas id="echo-smeter-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
+        <span id="echo-smeter-text" class="em-val">—</span></span>
+      <span class="em-group"><span class="em-label">SWR:</span>
+        <canvas id="echo-swr-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
+        <span id="echo-swr-text" class="em-val">—</span></span>
+      <span class="em-group"><span class="em-label">ALC:</span>
+        <canvas id="echo-alc-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
+        <span id="echo-alc-text" class="em-val">—</span></span>
+      <span class="em-group"><span class="em-label" title="RF power - measured watts while transmitting, power setting otherwise">PWR:</span>
+        <canvas id="echo-pwr-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
+        <span id="echo-pwr-text" class="em-val">—</span></span>
+      <span class="em-group"><span class="em-label" title="PC-side TX peak — what POTACAT is feeding to the radio's USB CODEC. If TX moves but ALC stays flat, raise USB MOD LEVEL on the radio.">TX audio:</span>
+        <canvas id="echo-tx-bar" width="80" height="10" style="border-radius:2px;background:#111;"></canvas>
+        <span id="echo-tx-text" class="em-val">—</span></span>
     </div>
 
     <!-- Spot list -->

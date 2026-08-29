@@ -31,6 +31,7 @@ const P = (...f) => path.join(__dirname, '..', ...f);
 const REMOTE = fs.readFileSync(P('renderer', 'remote.js'), 'utf8');
 const REMOTE_HTML = fs.readFileSync(P('renderer', 'remote.html'), 'utf8');
 const APP = fs.readFileSync(P('renderer', 'app.js'), 'utf8');
+const REMOTE_CSS = fs.readFileSync(P('renderer', 'remote.css'), 'utf8');
 const PRELOAD = fs.readFileSync(P('preload.js'), 'utf8');
 const PRELOAD_POPOUT = fs.readFileSync(P('preload-log-popout.js'), 'utf8');
 const POPOUT_JS = fs.readFileSync(P('renderer', 'log-popout.js'), 'utf8');
@@ -115,5 +116,40 @@ test('desktop {call} prefers in-window, then pop-out, then the tuned spot', () =
   assert.ok(/lastTunedSpot \? lastTunedSpot\.callsign/.test(body), 'lost the tuned-spot fallback');
 });
 
+// --- 4. The meter strip must never clip a meter off-screen ----------------
+// LZ3AW's phone screenshot (2026-08-29): five meters at ~150px each in one
+// non-wrapping flex row. ALC ran off the right edge and PWR / TX audio were
+// unreachable, so a mobile operator could never see the power meter at all —
+// including the one just fixed to read real forward power.
+test('the meter strip wraps instead of clipping', () => {
+  const at = REMOTE_CSS.indexOf('.echo-meter-strip {');
+  assert.notStrictEqual(at, -1, 'meter strip CSS moved');
+  const rule = REMOTE_CSS.slice(at, REMOTE_CSS.indexOf('}', at));
+  assert.ok(/flex-wrap:\s*wrap/.test(rule), 'strip cannot wrap — meters will clip');
+});
+
+test('a meter breaks as ONE unit (label + bar + value)', () => {
+  // A wrap that separates "SWR:" from its bar is worse than the overflow.
+  assert.ok(/\.em-group\s*\{[^}]*white-space:\s*nowrap/.test(REMOTE_CSS), 'em-group can split');
+  const groups = (REMOTE_HTML.match(/class="em-group"/g) || []).length;
+  assert.strictEqual(groups, 5, 'expected 5 grouped meters, found ' + groups);
+});
+
+test('every meter canvas still lives inside a group', () => {
+  for (const id of ['echo-smeter-bar', 'echo-swr-bar', 'echo-alc-bar', 'echo-pwr-bar', 'echo-tx-bar']) {
+    const at = REMOTE_HTML.indexOf('id="' + id + '"');
+    assert.notStrictEqual(at, -1, 'missing canvas ' + id);
+    const open = REMOTE_HTML.lastIndexOf('em-group', at);
+    const shut = REMOTE_HTML.lastIndexOf('</span></span>', at);
+    assert.ok(open !== -1 && open > shut, id + ' is outside any em-group');
+  }
+});
+
+test('status-bar badges are not allowed to shrink into truncation', () => {
+  // His mode badge rendered as a bare "C" because .status-left clips.
+  assert.ok(/#mode-badge,\s*#solar-pills,\s*#freq-other-display\s*\{[^}]*flex-shrink:\s*0/.test(REMOTE_CSS),
+    'badges can still be squeezed and clipped');
+  assert.ok(/@media \(max-width: 480px\)/.test(REMOTE_CSS), 'no narrow-phone rules');
+});
 console.log(`\nWeb log form / {call}: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
