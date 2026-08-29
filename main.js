@@ -29129,7 +29129,18 @@ app.whenReady().then(() => {
     if (status.iceConnectionState === 'failed') {
       sendCatLog('[Echo CAT Audio] ICE FAILED — no working path (CGNAT clients need TURN relay creds)');
     }
+    // The capture device actually opened, and any refusal/warning about it.
+    // These went to console.error only, so they never reached session.log or a
+    // bug report — which is why N2FSM's log showed no trace of the app opening
+    // his microphone (2026-08-28).
+    if (status.captureLabel) {
+      sendCatLog(`[Echo CAT Audio] capturing radio audio from: ${status.captureLabel}`);
+    }
+    if (status.warning) {
+      sendCatLog(`[Echo CAT Audio] WARNING: ${status.warning}`);
+    }
     if (status.error) {
+      sendCatLog(`[Echo CAT Audio] ERROR: ${status.error}`);
       console.error('[Echo CAT Audio] Error:', status.error);
     }
   });

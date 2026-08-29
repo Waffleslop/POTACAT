@@ -33,19 +33,48 @@ window.api.onStartAudio(async (config) => {
       autoGainControl: false,
     };
 
-    // Try specific device first, fall back to default if it fails
+    // NEVER substitute a device the operator did not choose. This used to
+    // fall back to the DEFAULT input when the configured device was missing —
+    // and on a shack PC the default input is the built-in microphone. Windows
+    // device IDs rotate across driver/USB changes and app updates, so a rig
+    // that had worked for months would silently come back as an open room mic:
+    // the shack audio went to the phone, the phone's speaker fed the room, and
+    // the room fed the mic. N2FSM (2026-08-28, IC-7300) heard the feedback from
+    // another room and it persisted with the radio volume at zero — because the
+    // radio was never in the loop. It is also a privacy failure: a hot mic in
+    // the shack, streamed to a phone and potentially over a TURN relay, with
+    // nothing on screen saying so. No audio is strictly better than the wrong
+    // audio, so a missing device now FAILS and says why.
     if (config.inputDeviceId) {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
           audio: { ...baseAudio, deviceId: { exact: config.inputDeviceId } },
         });
       } catch (e) {
-        window.api.sendAudioStatus({ error: 'Configured audio input not found, using default: ' + e.message });
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
+        window.api.sendAudioStatus({
+          error: 'Radio audio input not found, so no audio was captured (the microphone was NOT used). '
+            + 'Pick the radio\'s input again in Settings > My Rigs > Audio. Reason: ' + e.message,
+        });
+        return; // no capture at all — see above
       }
     } else {
+      // Nothing configured: this still opens the system default, because some
+      // stations legitimately run with the rig's USB codec AS the default
+      // recording device and have never set anything. That case keeps working,
+      // but it no longer does so silently — the label is logged below so a
+      // "why is my microphone on" report answers itself.
       localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
+      window.api.sendAudioStatus({
+        warning: 'No radio audio input is configured, so the system DEFAULT recording device was opened. '
+          + 'If that is a microphone, set the radio\'s input in Settings > My Rigs > Audio.',
+      });
     }
+    // Always name what is actually being sent to the phone. One line here
+    // would have answered N2FSM's report in a single message.
+    try {
+      const t = localStream.getAudioTracks()[0];
+      if (t) window.api.sendAudioStatus({ captureLabel: t.label || '(unnamed device)' });
+    } catch {}
 
     // ICE servers: prefer the Cloudflare TURN relay creds the desktop minted
     // (config.iceServers) so a CGNAT phone gets a relayed path; else fall back
