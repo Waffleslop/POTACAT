@@ -161,7 +161,11 @@ test('a set command\'s RPRT 0 does not cancel a pending read', () => {
 test('the pending queue stays bounded when replies never come', () => {
   const { codec } = makeCodec();
   for (let i = 0; i < 200; i++) poll(codec);
-  assert.ok(codec._pending.length <= 12, `queue grew to ${codec._pending.length}`);
+  // The cap is a leak guard only. It was 12 until the K6RBJ fix
+  // (2026-08-28) proved that smaller than one ~24-command ext cycle,
+  // evicting live entries at write time and misattributing the whole
+  // cycle - it must exceed the in-flight window, not approximate it.
+  assert.ok(codec._pending.length <= 48, `queue grew to ${codec._pending.length}`);
 });
 
 // LZ3AW IC-7300 on v1.9.23: an RPRT disarmed the VFO/split expectations and the
