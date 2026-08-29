@@ -145,6 +145,26 @@ test('every meter canvas still lives inside a group', () => {
   }
 });
 
+test('narrow-viewport rules keep the S/M/L text-size multiplier', () => {
+  // Android's display-size slider shrinks the CSS viewport, so the narrow
+  // rules fire exactly when someone has made text bigger on purpose. A bare
+  // px font-size there would silently cancel the text-size control that was
+  // built for this same operator (LZ3AW item 10, round 1).
+  const at = REMOTE_CSS.indexOf('@media (max-width: 480px)');
+  assert.notStrictEqual(at, -1, 'narrow-phone media query missing');
+  const block = REMOTE_CSS.slice(at, REMOTE_CSS.indexOf('}', REMOTE_CSS.indexOf('.em-val', at)));
+  const freq = block.match(/#freq-display\s*\{[^}]*\}/);
+  assert.ok(freq, 'no #freq-display rule in the narrow block');
+  assert.ok(/var\(--ui-scale\)/.test(freq[0]),
+    'narrow #freq-display drops --ui-scale: ' + freq[0]);
+});
+
+test('tab labels shrink on narrow viewports instead of colliding', () => {
+  assert.ok(/@media \(max-width: 400px\)/.test(REMOTE_CSS), 'no 400px tab rule');
+  assert.ok(/#tab-bar \.tab \{[^}]*text-overflow:\s*ellipsis/.test(REMOTE_CSS),
+    'a too-long tab label can still overlap its neighbour');
+});
+
 test('status-bar badges are not allowed to shrink into truncation', () => {
   // His mode badge rendered as a bare "C" because .status-left clips.
   assert.ok(/#mode-badge,\s*#solar-pills,\s*#freq-other-display\s*\{[^}]*flex-shrink:\s*0/.test(REMOTE_CSS),
