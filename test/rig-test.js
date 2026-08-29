@@ -2176,6 +2176,92 @@ test('K6RBJ: NB/preamp OFF survives the next full readback cycle', () => {
   assert.deepStrictEqual(preampEvents, [0], 'preamp events: ' + JSON.stringify(preampEvents));
 });
 
+// LZ3AW TS-480 (2026-08-28): "filter step ... on SSB it doesn't work at all"
+// while CW worked. Kenwood FW selects a filter SLOT, not an arbitrary
+// passband, and a width the radio doesn't own is ignored SILENTLY. Of
+// POTACAT's generic SSB presets (1000..4000) exactly one — 2400 — is a real
+// TS-480 SSB slot, so every SSB step was a no-op; the CW presets all land on
+// real CW slots, hence the mode-specific symptom. Slot table is hamlib's own
+// (`rigctld -m 2028 --dump-caps`), never guessed.
+const TS480 = require('../lib/rig-models').RIG_MODELS['TS-480'];
+
+function ts480Codec(mode) {
+  const { codec, writes } = captureWrites(KenwoodCodec, TS480);
+  codec._lastParsedMode = mode; // what the poll would have parsed
+  return { codec, writes };
+}
+
+test('TS-480 SSB: an unavailable width snaps to the nearest real slot', () => {
+  const { codec, writes } = ts480Codec('USB');
+  codec.setFilterWidth(2700);          // POTACAT preset; NOT a TS-480 slot
+  assert.strictEqual(writes[0], 'FW2400;', 'got ' + writes[0]);
+});
+
+test('TS-480 SSB: mid-range request picks the closer slot, not the widest', () => {
+  const { codec, writes } = ts480Codec('LSB');
+  codec.setFilterWidth(1000);          // 500 is 500 away, 2400 is 1400 away
+  assert.strictEqual(writes[0], 'FW0500;', 'got ' + writes[0]);
+  const narrow = ts480Codec('USB');
+  narrow.codec.setFilterWidth(300);    // 270 is 30 away, 500 is 200 away
+  assert.strictEqual(narrow.writes[0], 'FW0270;', 'got ' + narrow.writes[0]);
+});
+
+test('TS-480 SSB: a REAL slot is sent unchanged and logs nothing', () => {
+  const { codec, writes } = ts480Codec('USB');
+  const logs = [];
+  codec.on('log', (m) => logs.push(m));
+  codec.setFilterWidth(2400);
+  assert.strictEqual(writes[0], 'FW2400;');
+  assert.strictEqual(logs.length, 0, 'logged a snap that did not happen: ' + logs.join(' | '));
+});
+
+test('TS-480 SSB: a snap SAYS SO (the silence was the bug)', () => {
+  const { codec } = ts480Codec('USB');
+  const logs = [];
+  codec.on('log', (m) => logs.push(m));
+  codec.setFilterWidth(3000);
+  assert.strictEqual(logs.length, 1, 'no log line for a snapped width');
+  assert.ok(/2400Hz/.test(logs[0]) && /3000Hz/.test(logs[0]), 'log omits the values: ' + logs[0]);
+});
+
+test('TS-480 CW: the presets that always worked are untouched', () => {
+  for (const [req, expected] of [[50, 'FW0050;'], [100, 'FW0100;'], [200, 'FW0200;'],
+    [500, 'FW0500;'], [1000, 'FW1000;'], [2000, 'FW2000;']]) {
+    const { codec, writes } = ts480Codec('CW');
+    codec.setFilterWidth(req);
+    assert.strictEqual(writes[0], expected, req + 'Hz CW -> ' + writes[0]);
+  }
+});
+
+test('TS-480 RTTY/AM/FM snap within their own slot lists', () => {
+  const rtty = ts480Codec('RTTY');
+  rtty.codec.setFilterWidth(600);      // RTTY slots 250/500/1000/1500
+  assert.strictEqual(rtty.writes[0], 'FW0500;');
+  const am = ts480Codec('AM');
+  am.codec.setFilterWidth(5000);       // AM slots 2400/6000 -> 6000 is nearer
+  assert.strictEqual(am.writes[0], 'FW6000;');
+  const amNarrow = ts480Codec('AM');
+  amNarrow.codec.setFilterWidth(4000); // genuinely closer to 2400 (1600 vs 2000)
+  assert.strictEqual(amNarrow.writes[0], 'FW2400;');
+});
+
+test('a model with NO verified slot table is never altered', () => {
+  // Every rig but the TS-480 today. Snapping an unverified rig would send it
+  // a passband nobody checked — the opposite of the bug being fixed.
+  const generic = require('../lib/rig-models').GENERIC_CAPS.kenwood;
+  assert.ok(!generic.filterSlots, 'generic Kenwood grew an unverified slot table');
+  const { codec, writes } = captureWrites(KenwoodCodec, generic);
+  codec._lastParsedMode = 'USB';
+  codec.setFilterWidth(2700);
+  assert.strictEqual(writes[0], 'FW2700;', 'unverified rig was snapped: ' + writes[0]);
+});
+
+test('unknown mode is passed through rather than snapped to a guess', () => {
+  const { codec, writes } = ts480Codec('PKTUSB'); // no TS-480 slot family
+  codec.setFilterWidth(3000);
+  assert.strictEqual(writes[0], 'FW3000;');
+});
+
 // =========================================================================
 // Summary
 console.log(`\n${'='.repeat(50)}`);
