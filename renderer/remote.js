@@ -6636,6 +6636,24 @@
     if (!ft8UserScrolled) log.scrollTop = log.scrollHeight;
   }
 
+  // My Activity is an append-only view of decodes directed at us; over a long
+  // session it becomes a wall. Clearing is a VIEW action only — the log, the
+  // QSO state machine and Band Activity are untouched (LZ3AW 2026-08-29).
+  (function initMyActivityClear() {
+    const btn = document.getElementById('ft8-my-activity-clear');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const myLog = document.getElementById('ft8-my-activity');
+      const myHeader = document.getElementById('ft8-my-activity-header');
+      if (myLog) myLog.innerHTML = '';
+      // Re-hide the empty pane so the layout returns to its pre-activity
+      // state; the next directed decode unhides both again.
+      if (myLog) myLog.classList.add('hidden');
+      if (myHeader) myHeader.classList.add('hidden');
+    });
+  })();
+
   function ft8AddTxRow(message) {
     const log = ft8DecodeLogEl;
     const row = document.createElement('div');

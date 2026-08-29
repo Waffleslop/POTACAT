@@ -4038,3 +4038,16 @@ function _applyPopoutTheme(payload) {
   // --- Init map ---
   initMap();
 })();
+
+// My Activity clear — a VIEW action only. The log, the QSO state machine and
+// Band Activity are untouched; the next directed decode repopulates the pane
+// (LZ3AW 2026-08-29).
+(function initMyActivityClear() {
+  var btn = document.getElementById('jp-my-activity-clear');
+  var list = document.getElementById('jp-my-activity');
+  if (!btn || !list) return;
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    list.innerHTML = '<div class="jp-empty">No activity yet</div>';
+  });
+})();

@@ -1258,7 +1258,12 @@
       </div>
       <div id="ft8-my-activity-header" class="hidden" style="padding:3px 10px;font-size:10px;font-weight:600;color:var(--text-dim);background:var(--bg-header);border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
         <span>My Activity</span>
-        <button type="button" id="ft8-map-toggle" class="ft8-filter-btn" style="font-size:9px;padding:1px 6px;">Map</button>
+        <span style="display:flex;gap:4px;">
+          <!-- Clears the VIEW only: the log, the QSO state machine and the
+               band-activity pane are untouched (LZ3AW 2026-08-29). -->
+          <button type="button" id="ft8-my-activity-clear" class="ft8-filter-btn" style="font-size:9px;padding:1px 6px;" title="Clear this list (does not affect your log)">Clear</button>
+          <button type="button" id="ft8-map-toggle" class="ft8-filter-btn" style="font-size:9px;padding:1px 6px;">Map</button>
+        </span>
       </div>
       <div id="ft8-my-activity" class="ft8-decode-log hidden" style="max-height:120px;overflow-y:auto;flex-shrink:0;border-bottom:1px solid var(--border);">
       </div>
