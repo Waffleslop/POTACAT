@@ -1990,7 +1990,13 @@ test('#82 toggles: NR/COMP/VOX/ANF track queue order among five bare digits', ()
   h.codec.getVox();          // u VOX
   h.codec.getAutoNotch();    // u ANF
   h.codec.getNb();           // u NB
-  h.feed(['1', '0', '1', '0', '1']);
+  // getDnrLevel sends TWO queries (u NR + l NR), so SIX replies come back.
+  // This test used to feed five and lean on the nrlevel acceptor rejecting
+  // a bare '0' — true for wfview's always-decimal floats, FALSE for hamlib
+  // proper, whose %g prints zero as '0' (K6RBJ 2026-08-28: that assumption
+  // let boundary float replies cascade into the toggle kinds and pinned
+  // NB/preamp ON). Model the real stream: every query answers, in order.
+  h.feed(['1', '0', '0', '1', '0', '1']);
   assert.deepStrictEqual(h.events, [
     ['nr', true], ['comp', false], ['vox', true], ['anf', false], ['nb', true],
   ]);
@@ -2074,6 +2080,100 @@ test('round-3: ATU one-shot sends the vfo_op TUNE cycle', () => {
   const h = rigctldHarness3();
   h.codec.startTune();
   assert.ok(h.writes.includes('G TUNE\n'), 'G TUNE missing: ' + JSON.stringify(h.writes));
+});
+
+// K6RBJ regression (2026-08-28): a FULL ext poll cycle attributed correctly.
+// Two bugs conspired to pin NB/preamp ON against every off-command on his
+// IC-7100: RIGCTLD_PENDING_MAX (12) was smaller than the ~24-command ext
+// cycle, so the write-side cap evicted the first half of the cycle's queue
+// entries before any reply arrived and the whole cycle misattributed (NB's
+// "1" became preamp=true; the real preamp reply fell unclaimed); and the
+// float acceptors required a '.', which hamlib's %g formatting omits at the
+// boundaries ("0" at zero, "1" at full scale — verified live on rigctld
+// 4.7.0; wfview always prints decimals, which is what round 3 validated
+// against). The reply stream below is the real dummy-rig stream, boundary
+// values included. With the old cap/acceptors this test fails loudly.
+function rigctldFullCycleHarness() {
+  const { codec, writes } = captureWrites(RigctldCodec, {
+    brand: 'Hamlib', protocol: 'rigctld', caps: {}, maxPower: 100,
+  });
+  const events = [];
+  for (const ev of ['frequency', 'mode', 'ptt', 'vfo', 'split', 'smeter', 'power',
+    'nb', 'rfgain', 'agc', 'anf', 'vox', 'voxLevel', 'nr', 'nrLevel', 'comp',
+    'compLevel', 'mon', 'micGain', 'preamp', 'preampStep', 'att', 'attStep',
+    'monLevel', 'rit', 'atu']) {
+    codec.on(ev, (val) => events.push([ev, val]));
+  }
+  const feed = (lines) => { for (const l of lines) codec.onData(l + '\n'); };
+  return { codec, writes, events, feed };
+}
+
+test('K6RBJ: full 24-command ext cycle, every reply lands on its own control', () => {
+  const h = rigctldFullCycleHarness();
+  // Exactly what RigController sends on an every-5th poll tick, same order.
+  h.codec.getFrequency(); h.codec.getMode(); h.codec.getPtt();
+  h.codec.getVfoSplit(); h.codec.getSmeter(); h.codec.getPower();
+  h.codec.getNb(); h.codec.getRfGain(); h.codec.getAgc();
+  h.codec.getAutoNotch(); h.codec.getVox(); h.codec.getVoxLevel();
+  h.codec.getDnrLevel(); h.codec.getCompressor(); h.codec.getCompLevel();
+  h.codec.getMonitor(); h.codec.getMicGain(); h.codec.getPreamp();
+  h.codec.getAtt(); h.codec.getMonLevel(); h.codec.getRit();
+  h.codec.getAtuEnabled();
+  assert.strictEqual(h.writes.length, 24, 'cycle writes: ' + h.writes.length);
+  // Real hamlib 4.7.0 reply stream, strict command order. Radio state:
+  // NB ON, PREAMP 20dB, RF gain 0.5, VOX gain FULL (prints bare "1").
+  h.feed([
+    '145000000',        // f
+    'FM', '15000',      // m (mode + passband)
+    '0',                // t  (ptt off)
+    'VFOA',             // v
+    '0', 'None',        // s  (split off + TX vfo name)
+    '-32',              // l STRENGTH
+    '0',                // l RFPOWER  (%g zero — no decimal)
+    '1',                // u NB       <- ON; the old cap fed this to preamp
+    '0.5',              // l RF
+    '0',                // l AGC
+    '0',                // u ANF
+    '0',                // u VOX
+    '1',                // l VOXGAIN  (%g full scale — bare "1")
+    '0',                // u NR
+    '0',                // l NR
+    '0',                // u COMP
+    '0',                // l COMP
+    '0',                // u MON
+    '0',                // l MICGAIN
+    '20',               // l PREAMP   <- the reply the old cap dropped
+    '0',                // l ATT
+    '0',                // l MONITOR_GAIN
+    '0',                // u RIT
+    '0',                // u TUNER
+  ]);
+  const last = (ev) => { const hits = h.events.filter(e => e[0] === ev); return hits.length ? hits[hits.length - 1][1] : undefined; };
+  assert.strictEqual(last('nb'), true, 'NB must read ON, got ' + last('nb'));
+  assert.strictEqual(last('preampStep'), 20, 'preamp must read its own 20dB, got ' + last('preampStep'));
+  assert.strictEqual(last('preamp'), true);
+  assert.strictEqual(last('attStep'), 0, 'ATT never set — must read 0, got ' + last('attStep'));
+  assert.strictEqual(last('att'), false);
+  assert.strictEqual(last('ptt'), false);
+  assert.strictEqual(last('split'), false);
+  assert.strictEqual(last('mode'), 'FM');
+  assert.strictEqual(last('rfgain'), 50, 'RF gain 0.5 -> 50%');
+});
+
+test('K6RBJ: NB/preamp OFF survives the next full readback cycle', () => {
+  const h = rigctldFullCycleHarness();
+  // Operator toggles both OFF mid-session; rigctld accepts (RPRT 0 each).
+  h.codec.setNb(false);
+  h.codec.setPreamp(0);
+  h.feed(['RPRT 0', 'RPRT 0']);
+  // Next ext cycle reads the radio's true (now off) state.
+  h.codec.getPtt(); h.codec.getSmeter(); h.codec.getNb();
+  h.codec.getVoxLevel(); h.codec.getPreamp(); h.codec.getAtt();
+  h.feed(['0', '-30', '0', '1', '0', '0']);   // ptt, smeter, NB=0, VOXGAIN=1, PREAMP=0, ATT=0
+  const nbEvents = h.events.filter(e => e[0] === 'nb').map(e => e[1]);
+  const preampEvents = h.events.filter(e => e[0] === 'preampStep').map(e => e[1]);
+  assert.deepStrictEqual(nbEvents, [false], 'NB events: ' + JSON.stringify(nbEvents));
+  assert.deepStrictEqual(preampEvents, [0], 'preamp events: ' + JSON.stringify(preampEvents));
 });
 
 // =========================================================================
