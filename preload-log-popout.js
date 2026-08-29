@@ -64,6 +64,14 @@ const apiSurface = {
 
   // --- Pop-out lifecycle ---
   onPrefill: (cb) => ipcRenderer.on('log-popout-prefill', (_e, p) => cb(p)),
+
+  // The callsign currently typed here, so the MAIN window's CW macros can
+  // expand {call} to it. The pop-out is a separate BrowserWindow, so
+  // expandDesktopCwMacros' document.getElementById('log-callsign') can never
+  // see it — and since a spot's Log button routes to this window whenever it
+  // is open, an operator using the pop-out got an EMPTY {call} (LZ3AW
+  // 2026-08-29).
+  reportCallsign: (call) => ipcRenderer.send('log-popout-callsign', call),
 };
 
 try {

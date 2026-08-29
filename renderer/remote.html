@@ -1485,6 +1485,21 @@
                  autocapitalize="characters" autocorrect="off" spellcheck="false">
           <div id="log-ref-name" class="log-ref-name"></div>
         </div>
+        <!-- UTC date/time of the QSO. Visible because an operator should be
+             able to SEE what is about to be written to their log, and
+             editable because a QSO written up later (or off paper) needs its
+             real time, not the time of the tap (LZ3AW 2026-08-29). Both track
+             the clock until touched. -->
+        <div class="log-row">
+          <div class="log-field log-field-half">
+            <label for="log-date">Date UTC</label>
+            <input type="date" id="log-date">
+          </div>
+          <div class="log-field log-field-half">
+            <label for="log-time">Time UTC</label>
+            <input type="time" id="log-time" step="60">
+          </div>
+        </div>
         <div class="log-row">
           <div class="log-field log-field-half">
             <label for="log-freq">Freq kHz</label>

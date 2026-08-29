@@ -19442,11 +19442,22 @@ async function updateCwMacroBar() {
 }
 // Invalidate cache when settings are saved so macro bar picks up edits
 function invalidateCwMacroCache() { _cwMacroCache = null; }
+// Callsign typed in the Log pop-out (a separate BrowserWindow, so its field
+// is invisible to this document). Kept current by main's relay.
+let _logPopoutCallsign = '';
+if (window.api && window.api.onLogPopoutCallsign) {
+  window.api.onLogPopoutCallsign((c) => { _logPopoutCallsign = String(c || '').trim().toUpperCase(); });
+}
+
 function expandDesktopCwMacros(text) {
-  // {call} — tuned spot callsign (from log dialog or last tuned spot)
+  // {call} — the callsign being worked: whatever is typed in the in-window
+  // log dialog, else the Log POP-OUT's field (a spot's Log button routes
+  // there whenever it's open, so relying on this document alone left {call}
+  // empty for anyone using it — LZ3AW 2026-08-29), else the last tuned spot.
   const logCall = document.getElementById('log-callsign');
-  const call = (logCall && logCall.value) ? logCall.value.trim().toUpperCase()
-    : (lastTunedSpot ? lastTunedSpot.callsign : '');
+  const typed = (logCall && logCall.value) ? logCall.value.trim().toUpperCase() : '';
+  const call = typed || _logPopoutCallsign
+    || (lastTunedSpot ? lastTunedSpot.callsign : '');
   // {op_firstname} — nickname (preferred) or first name from QRZ
   const bareCall = call.split('/')[0];
   const qrzOp = bareCall ? qrzData.get(bareCall) : null;

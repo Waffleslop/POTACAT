@@ -31,6 +31,12 @@ function _applyPopoutTheme(payload) {
 (function () {
   // ── DOM refs ────────────────────────────────────────────────────────────
   const callInput = document.getElementById('lp-callsign');
+  // Keep the main window's CW-macro {call} in step with what is typed here.
+  if (callInput) {
+    callInput.addEventListener('input', () => {
+      try { if (window.api && window.api.reportCallsign) window.api.reportCallsign(callInput.value || ''); } catch {}
+    });
+  }
   const nameInput = document.getElementById('lp-name');
   const qrzBtn = document.getElementById('lp-qrz-link');
   const identityEl = document.getElementById('lp-identity');

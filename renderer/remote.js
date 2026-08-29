@@ -246,6 +246,42 @@
   const logForm = document.getElementById('log-form');
   const logCall = document.getElementById('log-call');
   const logFreq = document.getElementById('log-freq');
+  const logDate = document.getElementById('log-date');
+  const logTime = document.getElementById('log-time');
+  // "Untouched" flags. The form tracks the radio and the clock until the
+  // operator types in a field — after that it is THEIRS and nothing
+  // overwrites it. Without this the log sheet froze whatever the frequency
+  // happened to be when it opened, so a QSO logged after any retune went
+  // into the log on the wrong frequency (LZ3AW 2026-08-29: "WEB Log doesn't
+  // follow the frequency").
+  let logFreqDirty = false;
+  let logTimeDirty = false;
+  if (logFreq) logFreq.addEventListener('input', () => { logFreqDirty = true; });
+  if (logDate) logDate.addEventListener('input', () => { logTimeDirty = true; });
+  if (logTime) logTime.addEventListener('input', () => { logTimeDirty = true; });
+
+  /** Stamp the date/time inputs with 'now' in UTC. */
+  function logStampNow() {
+    const d = new Date();
+    if (logDate) logDate.value = d.toISOString().slice(0, 10);
+    if (logTime) logTime.value = d.toISOString().slice(11, 16);
+  }
+
+  /** Epoch ms from the (possibly edited) UTC date/time inputs; null = now. */
+  function logQsoAt() {
+    if (!logDate || !logTime || !logDate.value || !logTime.value) return null;
+    const ms = Date.parse(logDate.value + 'T' + logTime.value + ':00Z');
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  /** Keep the open log sheet in step with the radio and the clock. */
+  function logSheetFollowRadio() {
+    if (!logSheet || logSheet.classList.contains('hidden')) return;
+    if (!logFreqDirty && currentFreqKhz) {
+      logFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+    }
+    if (!logTimeDirty) logStampNow();
+  }
   const logMode = document.getElementById('log-mode');
   const logRstSent = document.getElementById('log-rst-sent');
   const logRstRcvd = document.getElementById('log-rst-rcvd');
@@ -2003,6 +2039,7 @@
       freqDisplay.textContent = formatFreq(s.freq);
       const prevFreqKhz = currentFreqKhz;
       currentFreqKhz = s.freq / 1000;
+      logSheetFollowRadio();
       if (bc) { try { bc.postMessage({ kind: 'vfo', freqKhz: currentFreqKhz, mode: (modeBadge && modeBadge.textContent) || '' }); } catch {} }
       // Repaint the Dir list so the tuned net/broadcast ring tracks the radio
       // (e.g. someone spinning the VFO on desktop while ECHOCAT shows Dir).
@@ -5222,6 +5259,11 @@
     const p = prefill || {};
     logCall.value = p.callsign || '';
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
+    // A prefilled frequency is the SPOT's, not the radio's — treat it as the
+    // operator's choice so it isn't overwritten by the next status push.
+    logFreqDirty = !!p.freqKhz;
+    logTimeDirty = false;
+    logStampNow();
     const mode = aliasModeForLogSheet(p.mode || currentMode);
     logMode.value = mode;
     logRstSent.value = p.rstSent || defaultRst(mode);
@@ -5319,6 +5361,11 @@
         sig,
         sigInfo,
       };
+      // The EXCHANGE time, not the tap time — the desktop's log-qso handler
+      // has accepted qsoAt since the JS8 logging work; the web form simply
+      // never offered it, so a QSO written up later was stamped 'now'.
+      const qsoAt = logQsoAt();
+      if (qsoAt) baseData.qsoAt = qsoAt;
       if (logSheetComment) baseData.userComment = logSheetComment;
 
       // Multi-OTA: forward every program ref the spot was tagged with
@@ -7328,7 +7375,10 @@
   }
 
   function pskSubstituteMacro(text) {
-    const their = (pskTheirEl && pskTheirEl.value ? pskTheirEl.value : '').toUpperCase().trim();
+    // $CALL: the PSK "their call" box first (it is the mode's own entry
+    // field), then the log form — same rule as CW's {call}.
+    let their = (pskTheirEl && pskTheirEl.value ? pskTheirEl.value : '').toUpperCase().trim();
+    if (!their) their = (logCall && logCall.value ? logCall.value : '').trim().toUpperCase();
     return String(text || '')
       .replace(/\$MYCALL/g, myCallsign || '')
       .replace(/\$GRID/g, (phoneGrid || '').substring(0, 4))
@@ -8000,12 +8050,24 @@
     playCwTextSidetone(delta);
   });
 
+  /** The callsign a macro's {call} should send RIGHT NOW.
+   *  A callsign TYPED into the log form wins over the last tuned spot: while
+   *  running a frequency you answer callers you were never tuned to, and
+   *  N1MM has always sent what's in the entry field (LZ3AW 2026-08-29).
+   *  Falls back to the tuned spot so tap-a-spot-then-macro is unchanged. */
+  function macroCallsign() {
+    const typed = (logCall && logCall.value ? logCall.value : '').trim().toUpperCase();
+    if (typed) return typed;
+    return tunedCallsign || '';
+  }
+
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    // Expand macros: {op_firstname} -> operator name or "OM", {call} -> tuned callsign
+    // Expand macros: {op_firstname} -> operator name or "OM", {call} -> the
+    // callsign being worked (typed in the log form, else the tuned spot).
     var expanded = text
       .replace(/\{op_firstname\}/gi, tunedOpName || '')
-      .replace(/\{call\}/gi, tunedCallsign || '')
+      .replace(/\{call\}/gi, macroCallsign())
       .replace(/\{state\}/gi, tunedState || '');
     ws.send(JSON.stringify({ type: 'cw-text', text: expanded }));
     playCwTextSidetone(expanded);

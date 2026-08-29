@@ -24061,6 +24061,12 @@ app.whenReady().then(() => {
   });
 
   // Frameless window controls for the log pop-out.
+  // The pop-out's typed callsign, relayed to the main window so CW macros
+  // can expand {call} while the operator logs in the pop-out (see
+  // preload-log-popout.js reportCallsign).
+  ipcMain.on('log-popout-callsign', (_e, call) => {
+    if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', String(call || ''));
+  });
   ipcMain.on('log-popout-minimize', () => { if (logPopoutWin) logPopoutWin.minimize(); });
   ipcMain.on('log-popout-close', () => { if (logPopoutWin) logPopoutWin.close(); });
 
