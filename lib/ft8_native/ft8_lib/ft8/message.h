@@ -10,7 +10,32 @@ extern "C"
 #endif
 
 #define FTX_PAYLOAD_LENGTH_BYTES 10 ///< number of bytes to hold 77 bits of FTx payload data
-#define FTX_MAX_MESSAGE_LENGTH   35 ///< max message length = callsign[13] + space + callsign[13] + space + report[6] + terminator
+/*
+ * Longest DECODED message text, including the terminator. Callers size their
+ * output buffer with this and the decoders write into it UNBOUNDED, so it must
+ * cover the longest line any decoder can emit — not merely the standard one.
+ *
+ * It was 35 ("callsign[13] + space + callsign[13] + space + report[6] +
+ * terminator"), which is exactly right for a standard message and too small
+ * for two types POTACAT added to this codec:
+ *
+ *   ARRL Field Day (i3=0 n3=3/4)   "WA9XYZ KA1ABC R 16A EMA"
+ *     13 + 1 + 13 + 1 + 2 + 3 + 1 + 4 + 1                       =  39
+ *   DXpedition / fox dual (0.1)    "K1ABC RR73; W9XYZ <KH1/KH7Z> -08"
+ *     13 + 7 + 13 + 1 + 13 + 1 + 3 + 1                          =  52
+ *
+ * Both overflowed the caller's stack buffer by up to 17 bytes whenever such a
+ * message was received — a live segfault on a decode, not a theoretical one
+ * (SP9LOP, Ubuntu 26.04, 2026-08-29: two identical faults in ft8_native.node,
+ * each a WRITE to an unmapped address that was the low 32 bits of the stack
+ * pointer, i.e. an adjacent pointer whose top half the overflow had zeroed).
+ *
+ * 64 covers the 52-byte worst case with headroom, and matches the scratch
+ * buffer ftx_message_decode already uses internally for the same lines. If a
+ * new message type is added, recompute the worst case above BEFORE assuming
+ * this is still large enough.
+ */
+#define FTX_MAX_MESSAGE_LENGTH   64
 #define FTX_MAX_MESSAGE_FIELDS   3  // may need to get longer for multi-part messages (DXpedition, contest etc.)
 
 /// Structure that holds the decoded message
