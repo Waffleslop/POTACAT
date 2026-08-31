@@ -8010,7 +8010,20 @@ function setJtcatHuntMode(mode, owner) {
   // this the clock would still read 0 and the watchdog would kill the very
   // first fallback CQ as a 30-minute timeout.
   if (m !== 'off') jtcatFullAutoCqLastActivity = Date.now();
-  if (m === 'off') jtcatAutoCqWorkedSession.clear();
+  if (m === 'off') {
+    jtcatAutoCqWorkedSession.clear();
+    // Selecting Off does NOT abandon a QSO already in progress: the state
+    // machine keeps advancing it (processPopoutJtcatQso gates on Auto-Seq, not
+    // on hunt mode) while the caller selection refuses to start anything new.
+    // That IS the "finish this one, then stop" control, but the natural
+    // assumption is the opposite, so operators reach for TX OFF or Halt TX
+    // instead and cut the exchange mid-stream (N2FSM 2026-08-31). Say it at
+    // the moment of the decision, which is when the doubt exists.
+    if (popoutJtcatQso || remoteJtcatQso) {
+      sendCatLog('[JTCAT] Hunt off — finishing the QSO in progress, then stopping. '
+        + 'TX stays on for this exchange; Halt TX would cut it short.');
+    }
+  }
   broadcastAutoCqState();
 }
 
