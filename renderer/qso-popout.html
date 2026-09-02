@@ -45,7 +45,7 @@
     .qso-table th.sort-asc::after { content: ' \25B2'; font-size: 9px; }
     .qso-table th.sort-desc::after { content: ' \25BC'; font-size: 9px; }
     .qso-table td { padding: 3px 6px; white-space: nowrap; border-bottom: 1px solid var(--border-secondary); height: 20px; box-sizing: content-box; }
-    .qso-table td:nth-child(15) { white-space: normal; word-break: break-word; max-width: 150px; }
+    .qso-table td.col-COMMENT { white-space: normal; word-break: break-word; }
     .qso-table tr:last-child td { border-bottom: none; }
     .qso-table td.editable { cursor: text; }
     .qso-table tbody tr { cursor: pointer; }
@@ -57,22 +57,54 @@
        to td (not th) so headers stay neutral. Kept above the .selected
        rule's reach so colors persist when a row is selected — the blue
        background tint is enough to signal selection. */
-    .qso-table td:nth-child(1)  { color: var(--log-date); }                          /* Date */
-    .qso-table td:nth-child(2)  { color: var(--log-time); }                          /* Time */
-    .qso-table td:nth-child(3)  { color: var(--log-call); font-weight: 600; }        /* Callsign */
-    .qso-table td:nth-child(4)  { color: var(--log-freq); }                          /* Freq */
-    .qso-table td:nth-child(5)  { color: var(--log-mode); }                          /* Mode */
-    .qso-table td:nth-child(6)  { color: var(--log-band); }                          /* Band */
-    .qso-table td:nth-child(7)  { color: var(--log-rst); }                           /* Pwr */
-    .qso-table td:nth-child(8)  { color: var(--log-rst); }                           /* RST S */
-    .qso-table td:nth-child(9)  { color: var(--log-rst); }                           /* RST R */
-    .qso-table td:nth-child(10) { color: var(--log-park); font-weight: 600; }        /* Park — always green */
-    .qso-table td:nth-child(11) { color: var(--log-region); }                        /* Grid */
-    .qso-table td:nth-child(12) { color: var(--log-region); }                        /* State */
-    .qso-table td:nth-child(13) { color: var(--log-region); }                        /* Country */
-    .qso-table td:nth-child(14) { color: var(--log-park); font-weight: 600;          /* QSL marks */
-                                  white-space: nowrap; cursor: pointer; }
-    .qso-table td:nth-child(15) { color: var(--log-notes); }                         /* Notes */
+    .qso-table td.col-QSO_DATE { color: var(--log-date); }
+    .qso-table td.col-TIME_ON  { color: var(--log-time); }
+    .qso-table td.col-CALL     { color: var(--log-call); font-weight: 600; }
+    .qso-table td.col-FREQ     { color: var(--log-freq); }
+    .qso-table td.col-MODE     { color: var(--log-mode); }
+    .qso-table td.col-BAND     { color: var(--log-band); }
+    .qso-table td.col-TX_PWR,
+    .qso-table td.col-RST_SENT,
+    .qso-table td.col-RST_RCVD { color: var(--log-rst); }
+    .qso-table td.col-SIG_INFO,
+    .qso-table td.col-MY_SIG_INFO { color: var(--log-park); font-weight: 600; }
+    .qso-table td.col-GRIDSQUARE,
+    .qso-table td.col-STATE,
+    .qso-table td.col-COUNTRY  { color: var(--log-region); }
+    .qso-table td.col-QSL      { color: var(--log-park); font-weight: 600;
+                                 white-space: nowrap; cursor: pointer; }
+    .qso-table td.col-COMMENT  { color: var(--log-notes); }
+    /* Fixed layout is what makes a dragged column edge mean anything: with
+       auto layout the browser sizes to content and ignores the width. Cells
+       clip instead of pushing their neighbours around. */
+    .qso-table { table-layout: fixed; }
+    .qso-table td { overflow: hidden; text-overflow: ellipsis; }
+    .qso-table th { position: relative; overflow: hidden; }
+    .qso-table th.col-dragging { opacity: 0.5; }
+    .qso-table th.col-drop { box-shadow: inset 2px 0 0 var(--accent-blue); }
+    .col-resize {
+      position: absolute; top: 0; right: 0; width: 6px; height: 100%;
+      cursor: col-resize; user-select: none;
+    }
+    .col-resize:hover { background: var(--accent-blue); opacity: 0.6; }
+    /* Column picker (right-click the header) */
+    .qso-col-menu {
+      position: fixed; z-index: 60; min-width: 150px; padding: 4px;
+      background: var(--bg-panel); border: 1px solid var(--border-primary);
+      border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      font-size: 12px; max-height: 70vh; overflow-y: auto;
+    }
+    .qso-col-menu.hidden { display: none; }
+    .qso-col-menu-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 6px; cursor: pointer; white-space: nowrap;
+    }
+    .qso-col-menu-row:hover { background: var(--bg-hover); }
+    .qso-col-menu-reset {
+      width: 100%; margin-top: 4px; padding: 4px;
+      background: var(--bg-input); color: var(--text-primary);
+      border: 1px solid var(--border-primary); border-radius: 3px; cursor: pointer;
+    }
     .qso-table td input {
       width: 100%; background: var(--bg-input); border: 1px solid var(--accent-blue);
       color: var(--text-primary); padding: 1px 4px; font-size: inherit;
@@ -233,29 +265,15 @@
   <div class="qso-body" id="qso-body">
     <table class="qso-table" id="qso-table">
       <thead>
-        <tr>
-          <th data-sort="QSO_DATE">Date</th>
-          <th data-sort="TIME_ON">Time</th>
-          <th data-sort="CALL">Callsign</th>
-          <th data-sort="FREQ">Freq</th>
-          <th data-sort="MODE">Mode</th>
-          <th data-sort="BAND">Band</th>
-          <th data-sort="TX_PWR">Pwr</th>
-          <th>RST S</th>
-          <th>RST R</th>
-          <th data-sort="SIG_INFO">Park</th>
-          <th data-sort="GRIDSQUARE">Grid</th>
-          <th data-sort="STATE">State</th>
-          <th data-sort="COUNTRY">Country</th>
-          <th data-sort="LOTW_QSL_SENT" title="QSL status: L = uploaded to LoTW, L&#10003; = LoTW confirmed, P = paper QSL received. Double-click to toggle paper QSL.">QSL</th>
-          <th>Notes</th>
-          <th></th>
-        </tr>
+        <tr id="qso-head-row"></tr>
       </thead>
       <tbody id="qso-tbody"></tbody>
     </table>
     <p class="qso-empty hidden" id="qso-empty">No QSOs logged yet</p>
   </div>
+
+  <!-- Column picker: right-click the header (same gesture as the Spots table) -->
+  <div id="qso-col-menu" class="qso-col-menu hidden"></div>
 
   <div id="qso-map-splitter"></div>
   <div id="qso-map-container"><div id="qso-map"></div></div>

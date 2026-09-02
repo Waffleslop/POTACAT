@@ -114,30 +114,15 @@ jobs:
           HAMLIB_PREFIX=$(brew --prefix hamlib)
           rm -f assets/hamlib/*.dll assets/hamlib/*.exe
           cp "$HAMLIB_PREFIX/bin/rigctld" assets/hamlib/rigctld
-          # 755, NOT just +x: Homebrew installs binaries 555 and cp preserves
-          # that. A file without owner-write breaks Squirrel.Mac auto-update —
-          # ShipIt must strip the quarantine xattr from every file in the
-          # downloaded zip and removexattr needs u+w; one read-only file fails
-          # the whole install and silently relaunches the old version (W3DFX,
-          # 1.10.3 -> 1.10.5, ShipIt_stderr.log: "Permission denied ...
-          # hamlib/rigctld ... file is read-only").
-          chmod 755 assets/hamlib/rigctld
-          copy_deps() {
-            local bin="$1"
-            for dep in $(otool -L "$bin" | awk 'NR>1 && /\.dylib/ {print $1}' | grep -E "(hamlib|libusb)" | grep -v "$(basename $bin)" || true); do
-              local name=$(basename "$dep")
-              if [ ! -f "assets/hamlib/$name" ]; then
-                cp "$dep" "assets/hamlib/$name" 2>/dev/null || continue
-                chmod +w "assets/hamlib/$name"
-                copy_deps "assets/hamlib/$name"
-              fi
-              install_name_tool -change "$dep" "@loader_path/$name" "$bin" || true
-            done
-          }
-          copy_deps assets/hamlib/rigctld
-          for lib in assets/hamlib/*.dylib; do
-            install_name_tool -id "@loader_path/$(basename $lib)" "$lib" || true
-          done
+          # Homebrew bakes ABSOLUTE Cellar paths into rigctld, so the copy
+          # above still loads /opt/homebrew/Cellar/hamlib/<ver>/lib/... — a
+          # path that exists on this runner and on no user's Mac. The script
+          # ships libhamlib/libusb alongside it, repoints the load commands at
+          # @loader_path, and FAILS THE BUILD if any absolute path survives.
+          # Hand-rolling that in shell is exactly what shipped a rigctld no
+          # Mac could launch, from the first release pipeline commit until
+          # WB0MMC reported "No rigs found" on 2026-08-31.
+          node scripts/bundle-mac-deps.js --expect-arch=arm64 assets/hamlib/rigctld
           ls -la assets/hamlib/
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe)
         # NOTE: built for the RUNNER arch. On the cross-compiled x64 job this
@@ -147,6 +132,12 @@ jobs:
           brew install fftw gcc
           gfortran -O3 -o assets/wsprd/wsprd third_party/wsprd/src/*.c third_party/wsprd/src/*.f90 -I"$(brew --prefix fftw)/include" "$(brew --prefix fftw)/lib/libfftw3f.a" -lm -static-libgfortran -static-libgcc
           test -f assets/wsprd/wsprd
+          # -static-libgfortran/-static-libgcc do NOT cover libquadmath: wsprd
+          # shipped linked to /opt/homebrew/opt/gcc/.../libquadmath.0.dylib and
+          # died in dyld on every Mac, exactly the way rigctld did (found
+          # 2026-08-31 while fixing that one). assets/wsprd's extraResources
+          # filter already ships *.dylib, so the bundled copy rides along.
+          node scripts/bundle-mac-deps.js --expect-arch=arm64 assets/wsprd/wsprd
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
       - name: Build macOS dmg (arm64)
@@ -223,38 +214,25 @@ jobs:
           lipo -archs "$NODE_FILE"
           lipo -archs "$NODE_FILE" | grep -q x86_64
       - name: Bundle hamlib into assets/hamlib/
-        # Same logic as the arm64 job — brew on macos-13 resolves the
-        # Intel-arch hamlib formula automatically.
+        # Same script as the arm64 job. NOTE the runner is ARM (macos-14),
+        # so brew installs the arm64 formula — the bundled rigctld is arm64
+        # inside the Intel DMG and the gate warns about it every build
+        # (potacat-meta work/open/macos-x64-hamlib-arch.md).
         run: |
           set -e
           brew install hamlib
           HAMLIB_PREFIX=$(brew --prefix hamlib)
           rm -f assets/hamlib/*.dll assets/hamlib/*.exe
           cp "$HAMLIB_PREFIX/bin/rigctld" assets/hamlib/rigctld
-          # 755, NOT just +x: Homebrew installs binaries 555 and cp preserves
-          # that. A file without owner-write breaks Squirrel.Mac auto-update —
-          # ShipIt must strip the quarantine xattr from every file in the
-          # downloaded zip and removexattr needs u+w; one read-only file fails
-          # the whole install and silently relaunches the old version (W3DFX,
-          # 1.10.3 -> 1.10.5, ShipIt_stderr.log: "Permission denied ...
-          # hamlib/rigctld ... file is read-only").
-          chmod 755 assets/hamlib/rigctld
-          copy_deps() {
-            local bin="$1"
-            for dep in $(otool -L "$bin" | awk 'NR>1 && /\.dylib/ {print $1}' | grep -E "(hamlib|libusb)" | grep -v "$(basename $bin)" || true); do
-              local name=$(basename "$dep")
-              if [ ! -f "assets/hamlib/$name" ]; then
-                cp "$dep" "assets/hamlib/$name" 2>/dev/null || continue
-                chmod +w "assets/hamlib/$name"
-                copy_deps "assets/hamlib/$name"
-              fi
-              install_name_tool -change "$dep" "@loader_path/$name" "$bin" || true
-            done
-          }
-          copy_deps assets/hamlib/rigctld
-          for lib in assets/hamlib/*.dylib; do
-            install_name_tool -id "@loader_path/$(basename $lib)" "$lib" || true
-          done
+          # Homebrew bakes ABSOLUTE Cellar paths into rigctld, so the copy
+          # above still loads /opt/homebrew/Cellar/hamlib/<ver>/lib/... — a
+          # path that exists on this runner and on no user's Mac. The script
+          # ships libhamlib/libusb alongside it, repoints the load commands at
+          # @loader_path, and FAILS THE BUILD if any absolute path survives.
+          # Hand-rolling that in shell is exactly what shipped a rigctld no
+          # Mac could launch, from the first release pipeline commit until
+          # WB0MMC reported "No rigs found" on 2026-08-31.
+          node scripts/bundle-mac-deps.js --expect-arch=x86_64 assets/hamlib/rigctld
           ls -la assets/hamlib/
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe)
         # NOTE: built for the RUNNER arch. On the cross-compiled x64 job this
@@ -264,6 +242,12 @@ jobs:
           brew install fftw gcc
           gfortran -O3 -o assets/wsprd/wsprd third_party/wsprd/src/*.c third_party/wsprd/src/*.f90 -I"$(brew --prefix fftw)/include" "$(brew --prefix fftw)/lib/libfftw3f.a" -lm -static-libgfortran -static-libgcc
           test -f assets/wsprd/wsprd
+          # -static-libgfortran/-static-libgcc do NOT cover libquadmath: wsprd
+          # shipped linked to /opt/homebrew/opt/gcc/.../libquadmath.0.dylib and
+          # died in dyld on every Mac, exactly the way rigctld did (found
+          # 2026-08-31 while fixing that one). assets/wsprd's extraResources
+          # filter already ships *.dylib, so the bundled copy rides along.
+          node scripts/bundle-mac-deps.js --expect-arch=x86_64 assets/wsprd/wsprd
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=x64
       - name: Build macOS dmg (x64)

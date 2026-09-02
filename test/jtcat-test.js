@@ -1465,6 +1465,9 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       // simulation above is corroborated by the actual code on disk.
       await testRealEnginePreEncode();
 
+      // -- Test 6: Hunt answers a SPOTTED activator's plain CQ.
+      testHuntSpottedFilter();
+
       // -- Test 5: Hold TX Freq — auto calls blocked, operator moves honored
       // and re-pinned (WSJT-X "Hold Tx Freq" parity; KF0U 2026-07-17).
       await testHoldTxFreq();
@@ -1602,6 +1605,56 @@ async function testRealEnginePreEncode() {
   assertEq(engine._txEncodedFreq, 1234, 'real engine: final encoded freq is LATEST');
   assertEq(engine._txEncoding, false, 'real engine: _txEncoding cleared after settle');
   assertEq(engine._reEncodePending, false, 'real engine: _reEncodePending cleared after settle');
+}
+
+function testHuntSpottedFilter() {
+  section('Hunt filter — spotted activators calling a plain CQ');
+  const m = sm.matchesHuntFilter;
+
+  // The rule that already existed, unchanged.
+  assert(m('CQ POTA K1ABC FN42', 'pota') === true, 'CQ POTA still matches POTA hunt');
+  assert(m('CQ SOTA W6XYZ DM07', 'sota') === true, 'CQ SOTA still matches SOTA hunt');
+  assert(m('CQ K1ABC FN42', 'all') === true, 'any CQ matches All CQs');
+  assert(m('CQ FD W1AW 2A EMA', 'fd') === true, 'CQ FD matches Field Day hunt');
+  assert(m('CQ K1ABC FN42', 'pota') === false, 'plain CQ from an UNSPOTTED station is not POTA');
+
+  // The feature: a plain CQ from someone the spot list places at a park.
+  // Most activators never send the POTA modifier — it costs characters and
+  // buys them nothing — so this was an entire activation the hunt could hear
+  // and would not answer (2026-09-02).
+  assert(m('CQ K1ABC FN42', 'pota', { spottedSigs: ['POTA'] }) === true,
+    'plain CQ from a POTA-spotted station matches POTA hunt');
+  assert(m('CQ DX K1ABC FN42', 'pota', { spottedSigs: ['POTA'] }) === true,
+    'CQ DX from a POTA-spotted station matches too (any CQ wording)');
+  assert(m('CQ W6XYZ DM07', 'sota', { spottedSigs: ['SOTA'] }) === true,
+    'plain CQ from a SOTA-spotted station matches SOTA hunt');
+
+  // ...and it stays a PROGRAM filter: the right program, or no match.
+  assert(m('CQ K1ABC FN42', 'pota', { spottedSigs: ['SOTA'] }) === false,
+    'a SOTA-spotted station does not satisfy POTA hunt');
+  assert(m('CQ K1ABC FN42', 'sota', { spottedSigs: ['POTA'] }) === false,
+    'a POTA-spotted station does not satisfy SOTA hunt');
+  assert(m('CQ K1ABC FN42', 'pota', { spottedSigs: ['WWFF', 'POTA'] }) === true,
+    'an n-fer spotted in several programs matches on the one being hunted');
+
+  // Never answer something that is not a CQ. "Whether or not they called CQ
+  // POTA" is about the CQ's wording — calling a station who is mid-QSO with
+  // somebody else is how you QRM the activation you came to work.
+  assert(m('K1ABC W9XYZ -12', 'pota', { spottedSigs: ['POTA'] }) === false,
+    'a report addressed to another station is never a hunt candidate');
+  assert(m('K1ABC W9XYZ RR73', 'pota', { spottedSigs: ['POTA'] }) === false,
+    'a spotted activator\'s RR73 to someone else is not answered (no tail-ending)');
+  assert(m('CQCQ K1ABC', 'all') === false, 'malformed CQ without a space is not a CQ');
+
+  // The operator can switch it off and get the literal-modifier rule back.
+  assert(m('CQ K1ABC FN42', 'pota', { spottedSigs: ['POTA'], spottedEnabled: false }) === false,
+    'setting off: a spotted plain CQ is not matched');
+  assert(m('CQ POTA K1ABC FN42', 'pota', { spottedSigs: [], spottedEnabled: false }) === true,
+    'setting off: an explicit CQ POTA still matches');
+
+  // Field Day is not a spotting program — never spot-matched.
+  assert(m('CQ K1ABC FN42', 'fd', { spottedSigs: ['POTA'] }) === false,
+    'Field Day hunt is never satisfied by a spot');
 }
 
 function finish() {

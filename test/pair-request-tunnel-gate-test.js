@@ -54,6 +54,21 @@ const pairReq = (port, requestId) =>
   check(P('172.15.0.1') === false && P('172.32.0.1') === false, '172.15 / 172.32 are NOT LAN');
   check(P('127.0.0.1') === false, 'LOOPBACK is NOT LAN (cloudflared forwards tunnel traffic from here)');
   check(P('100.94.1.2') === false, 'Tailscale 100.64/10 is NOT treated as plain LAN here');
+
+  console.log('\n=== _isTrustedPeerAddress (LAN + tailnet) ===');
+  // LZ3AW item 11: pairing over Tailscale from away was refused with "only
+  // works from your home network" whenever the Cloud Tunnel was on, because
+  // the gate asked the LAN-only question. Tap-to-pair needs no mDNS — the
+  // phone already reached the host — and the desktop Approve is still the
+  // trust decision.
+  const T = RemoteServer._isTrustedPeerAddress;
+  check(T('192.168.1.50') === true, 'LAN peer is trusted');
+  check(T('100.94.1.2') === true, 'TAILNET peer is trusted (the fix)');
+  check(T('100.64.0.1') === true && T('100.127.255.254') === true, 'both ends of 100.64/10');
+  check(T('100.63.255.255') === false && T('100.128.0.1') === false, 'neighbours of 100.64/10 are NOT tailnet');
+  check(T('127.0.0.1') === false, 'LOOPBACK still untrusted — that is where tunnel traffic arrives');
+  check(T('8.8.8.8') === false, 'public IPv4 still untrusted');
+  check(T('::ffff:100.94.1.2') === true, 'IPv6-mapped tailnet address unwrapped');
   check(P('::ffff:192.168.1.9') === true, 'IPv6-mapped IPv4 LAN address unwrapped');
   check(P('8.8.8.8') === false && P('garbage') === false, 'public IP / junk are NOT LAN');
 
@@ -130,6 +145,29 @@ const pairReq = (port, requestId) =>
     check(legit.status === 200 && legit.json && legit.json.deviceToken === dev.token,
       'the stored result was still intact — the attacker was gated, not served');
     RemoteServer._isPrivateLanAddress = realIsLan;
+  }
+
+  // 5. A TAILNET phone pairs while the tunnel is exposed (item 11). Steered
+  //    through the LAN pivot's sibling: the real socket is loopback in-process.
+  {
+    const realTailnet = RemoteServer._isTailnetAddress;
+    RemoteServer._isTailnetAddress = (ip) => ip === '127.0.0.1' || ip === '::ffff:127.0.0.1' || realTailnet(ip);
+    const rid = 'tg-tailnet-' + 'd'.repeat(12);
+    const inflight = pairReq(port, rid);
+    await sleep(300);
+    check(popups.some((x) => x.requestId === rid),
+      'tailnet source raises the Approve popup while the tunnel is exposed');
+    const dev = rs.approvePairRequest(rid);
+    const res = await inflight;
+    check(res.status === 200 && res.json && res.json.deviceToken === dev.token,
+      'Approve delivers credentials to the tailnet phone');
+    RemoteServer._isTailnetAddress = realTailnet;
+
+    // ...and with it restored, loopback is refused again — the tunnel path
+    // did not become trusted along the way.
+    const after = await pairReq(port, 'tg-after-' + 'e'.repeat(14));
+    check(after.status === 403 && after.json && after.json.error === 'pair_request_tunnel_blocked',
+      'loopback is still blocked after the tailnet case');
   }
 
   rs.stop();

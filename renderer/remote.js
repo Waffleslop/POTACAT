@@ -2114,6 +2114,14 @@
     if (s.split != null) {
       const sp = document.getElementById('rc-split');
       if (sp) sp.classList.toggle('active', !!s.split);
+      // Split off means there is no TX side to show. rig-state arrives on
+      // every change AND at connect, so gating the TX line on it here clears
+      // the readout even if the freq-other push was missed or raced — the
+      // stale "TX <freq>" LZ3AW saw survive split going off (2026-08-28).
+      if (!s.split && lastFreqOtherHz) {
+        lastFreqOtherHz = 0;
+        renderFreqOther();
+      }
     }
     if (s.filterWidth !== undefined) {
       currentFilterWidth = s.filterWidth;
@@ -4084,6 +4092,12 @@
     if (window.__vfRenderCustomCat) window.__vfRenderCustomCat();
   }
 
+  function saveCustomCatButtons() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'save-custom-cat-buttons', buttons: customCatData }));
+    }
+  }
+
   function renderCustomCatEditor() {
     var existing = customCatSection.querySelector('.rc-custom-cat-editor');
     if (existing) existing.remove();
@@ -4098,13 +4112,66 @@
       nameInput.placeholder = 'Label';
       nameInput.maxLength = 12;
       nameInput.value = customCatData[i] ? customCatData[i].name || '' : '';
+      // Slot TYPE. Rendering a toggle correctly is only half of parity: with
+      // no type control here, a browser could only ever CREATE plain buttons,
+      // so "the toggle doesn't work as a toggle, at all" survived the render
+      // fix for anyone who configures from the web (LZ3AW, round 3).
+      var entry = customCatData[i] || {};
+      var slotType = (entry.type === 'toggle' || entry.type === 'slider') ? entry.type : 'button';
+      var typeSel = document.createElement('select');
+      typeSel.className = 'cce-type';
+      typeSel.dataset.idx = i;
+      var TYPES = [['button', 'Button'], ['toggle', 'Toggle'], ['slider', 'Slider']];
+      for (var t = 0; t < TYPES.length; t++) {
+        var o = document.createElement('option');
+        o.value = TYPES[t][0];
+        o.textContent = TYPES[t][1];
+        typeSel.appendChild(o);
+      }
+      typeSel.value = slotType;
+      typeSel.title = 'Button sends one command. Toggle alternates an On and an Off command. Slider sends a command with a value in it.';
+      typeSel.addEventListener('change', function() {
+        var idx = parseInt(this.dataset.idx, 10);
+        if (!customCatData[idx]) customCatData[idx] = { name: '', command: '' };
+        customCatData[idx].type = this.value;
+        customToggleState = {};
+        saveCustomCatButtons();
+        renderCustomCatEditor();   // the extra fields appear/disappear with the type
+        renderCustomCatButtons();
+      });
+
       var cmdInput = document.createElement('input');
       cmdInput.className = 'cce-cmd';
-      cmdInput.placeholder = 'CAT command';
+      cmdInput.placeholder = slotType === 'toggle' ? 'On command'
+        : slotType === 'slider' ? 'Command with {v}' : 'CAT command';
+      if (slotType === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ). No placeholder = value appended.';
       cmdInput.maxLength = 64;
-      cmdInput.value = customCatData[i] ? customCatData[i].command || '' : '';
+      cmdInput.value = entry.command || '';
       row.appendChild(nameInput);
+      row.appendChild(typeSel);
       row.appendChild(cmdInput);
+
+      if (slotType === 'toggle') {
+        var offInput = document.createElement('input');
+        offInput.className = 'cce-cmd cce-off';
+        offInput.placeholder = 'Off command';
+        offInput.maxLength = 64;
+        offInput.value = entry.commandOff || '';
+        row.appendChild(offInput);
+      } else if (slotType === 'slider') {
+        var minInput = document.createElement('input');
+        minInput.className = 'cce-num cce-min';
+        minInput.type = 'number';
+        minInput.placeholder = 'min';
+        minInput.value = Number.isFinite(entry.min) ? entry.min : 0;
+        var maxInput = document.createElement('input');
+        maxInput.className = 'cce-num cce-max';
+        maxInput.type = 'number';
+        maxInput.placeholder = 'max';
+        maxInput.value = Number.isFinite(entry.max) ? entry.max : 255;
+        row.appendChild(minInput);
+        row.appendChild(maxInput);
+      }
       editor.appendChild(row);
     }
     customCatSection.appendChild(editor);
@@ -4124,13 +4191,16 @@
         for (var k in prev) if (Object.prototype.hasOwnProperty.call(prev, k)) next[k] = prev[k];
         next.name = r.querySelector('.cce-name').value.trim();
         next.command = r.querySelector('.cce-cmd').value.trim();
+        var offEl = r.querySelector('.cce-off');
+        if (offEl) next.commandOff = offEl.value.trim();
+        var minEl = r.querySelector('.cce-min');
+        var maxEl = r.querySelector('.cce-max');
+        if (minEl) next.min = Number(minEl.value) || 0;
+        if (maxEl) next.max = Number(maxEl.value) || 0;
         customCatData[j] = next;
       }
       renderCustomCatButtons();
-      // Save back to POTACAT
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'save-custom-cat-buttons', buttons: customCatData }));
-      }
+      saveCustomCatButtons();
     });
   }
 
@@ -5259,8 +5329,14 @@
     const p = prefill || {};
     logCall.value = p.callsign || '';
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
-    // A prefilled frequency is the SPOT's, not the radio's — treat it as the
-    // operator's choice so it isn't overwritten by the next status push.
+    // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
+    // a spot's, a decode's — so it is treated as the operator's choice and
+    // frozen. A caller whose frequency IS just the current dial must pass
+    // nothing and let the fallback above fill it, or the sheet is born dirty
+    // and never follows the radio again. That is exactly what the VFO panel's
+    // Log button and the PSK Log buttons did: they handed back `currentFreqKhz`
+    // and re-broke "the web log doesn't follow the frequency" for everyone who
+    // logs from the VFO panel (LZ3AW, still reported after the 1.10.13 fix).
     logFreqDirty = !!p.freqKhz;
     logTimeDirty = false;
     logStampNow();
@@ -7469,7 +7545,7 @@
       chip.title = 'Set as their call and open logging pre-filled';
       chip.addEventListener('click', () => {
         if (pskTheirEl) pskTheirEl.value = call;
-        openLogSheet({ callsign: call, mode: 'PSK31', freqKhz: currentFreqKhz });
+        openLogSheet({ callsign: call, mode: 'PSK31' }); // dial freq: see openLogSheet
       });
       pskChipsEl.appendChild(chip);
     });
@@ -7512,7 +7588,7 @@
     openLogSheet({
       callsign: (pskTheirEl && pskTheirEl.value ? pskTheirEl.value : '').toUpperCase().trim(),
       mode: 'PSK31',
-      freqKhz: currentFreqKhz,
+      // No freqKhz — see the invariant in openLogSheet.
     });
   });
 
@@ -8074,6 +8150,12 @@
    *  N1MM has always sent what's in the entry field (LZ3AW 2026-08-29).
    *  Falls back to the tuned spot so tap-a-spot-then-macro is unchanged. */
   function macroCallsign() {
+    // The VFO panel's own call box first — when the macros being pressed are
+    // the ones IN that panel, the call the operator typed there is the one
+    // they mean. Then the log form, then the tuned spot.
+    const vfCall = document.getElementById('vf-cw-call');
+    const panel = (vfCall && vfCall.value ? vfCall.value : '').trim().toUpperCase();
+    if (panel) return panel;
     const typed = (logCall && logCall.value ? logCall.value : '').trim().toUpperCase();
     if (typed) return typed;
     return tunedCallsign || '';
@@ -8092,26 +8174,46 @@
   }
 
   // --- Macro buttons ---
+  // The macros render into the CW tab AND the Full VFO View's CW widget. The
+  // VFO panel is a fullscreen overlay, so an operator running the radio from
+  // it could reach the WPM control and the free-text box but not one macro —
+  // they had to leave the panel to send "TU 73" (LZ3AW item 10).
   function renderCwMacros() {
-    cwMacroRow.innerHTML = '';
-    cwMacros.forEach(function(m, i) {
-      if (!m.label && !m.text) return;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'cw-macro-btn';
-      btn.textContent = m.label || ('M' + (i + 1));
-      btn.title = m.text || '';
-      btn.addEventListener('click', function() {
-        if (m.text) {
-          sendCwText(m.text);
-          btn.classList.add('sending');
-          setTimeout(function() { btn.classList.remove('sending'); }, 500);
-        }
+    var rows = [cwMacroRow, document.getElementById('vf-cw-macro-row')];
+    rows.forEach(function(row) {
+      if (!row) return;
+      row.innerHTML = '';
+      cwMacros.forEach(function(m, i) {
+        if (!m.label && !m.text) return;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cw-macro-btn';
+        btn.textContent = m.label || ('M' + (i + 1));
+        btn.title = m.text || '';
+        btn.addEventListener('click', function() {
+          if (m.text) {
+            sendCwText(m.text);
+            btn.classList.add('sending');
+            setTimeout(function() { btn.classList.remove('sending'); }, 500);
+          }
+        });
+        row.appendChild(btn);
       });
-      cwMacroRow.appendChild(btn);
     });
   }
   renderCwMacros();
+
+  // Typing the call in the VFO panel carries it to the log form, so the QSO
+  // can be logged without retyping it — "entered manually in the callsign
+  // field" should mean one field, wherever the operator is standing.
+  const vfCwCall = document.getElementById('vf-cw-call');
+  if (vfCwCall) {
+    vfCwCall.addEventListener('input', function() {
+      const v = this.value.toUpperCase();
+      if (this.value !== v) this.value = v;
+      if (logCall && logSheet && logSheet.classList.contains('hidden')) logCall.value = v;
+    });
+  }
 
   // --- Free-text CW input ---
   cwTextSend.addEventListener('click', function() {
@@ -11561,7 +11663,7 @@ var _paddleReleaseTimer = { dit: null, dah: null };
         if (!tunedCallsign) return;
         openLogSheet({
           callsign: tunedCallsign,
-          freqKhz: currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '',
+          // No freqKhz: this IS the dial, so let the sheet keep following it.
           mode: currentMode || '',
           sig: tunedSig || '',
           sigInfo: tunedRef || '',

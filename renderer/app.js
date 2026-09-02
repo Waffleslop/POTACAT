@@ -2036,12 +2036,22 @@ async function populateRadioSection(currentTarget) {
   updateRadioSubPanels();
 }
 
+function hamlibInstallHintUi() {
+  const plat = window.api && window.api.platform;
+  if (plat === 'darwin') return 'install Hamlib with: brew install hamlib';
+  if (plat === 'win32') return 'install Hamlib from hamlib.github.io and set its rigctld path in Settings';
+  return 'install Hamlib: sudo apt install libhamlib-utils';
+}
+
 function renderRigOptions(filteredList, selectedId) {
   setRigModel.innerHTML = '';
   if (filteredList.length === 0) {
     const opt = document.createElement('option');
     opt.value = '';
-    opt.textContent = allRigOptions.length === 0 ? 'No rigs found — install Hamlib (Linux: sudo apt install libhamlib-utils)' : 'No matches';
+    // Platform-correct advice: telling a Mac operator to apt-get was the
+    // only thing this dialog said when the bundled rigctld could not launch
+    // (WB0MMC 2026-08-31). The reason itself lands in the CAT log.
+    opt.textContent = allRigOptions.length === 0 ? `No rigs found — ${hamlibInstallHintUi()}, then reopen this dialog` : 'No matches';
     setRigModel.appendChild(opt);
   } else {
     for (const rig of filteredList) {
@@ -12825,6 +12835,16 @@ logMode.addEventListener('change', () => {
 // Log dialog close/cancel
 logCancelBtn.addEventListener('click', () => logDialog.close());
 logDialogClose.addEventListener('click', () => logDialog.close());
+// Relay what's typed here to the other windows that expand {call} (the VFO
+// pop-out owns the desktop CW macros and cannot read this document). Cleared
+// when the dialog closes so a finished QSO's call can't ride along into the
+// next macro.
+{
+  const logCallEl = document.getElementById('log-callsign');
+  const report = (v) => { try { window.api.reportLogCallsign(v); } catch { /* older preload */ } };
+  if (logCallEl) logCallEl.addEventListener('input', () => report(logCallEl.value.trim().toUpperCase()));
+  logDialog.addEventListener('close', () => report(''));
+}
 
 // Enter key saves QSO from anywhere in the log dialog
 logDialog.addEventListener('keydown', (e) => {

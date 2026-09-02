@@ -2222,7 +2222,7 @@ async function loadCwMacros() {
     btn.addEventListener('click', () => {
       let text = m.text || '';
       text = text.replace(/\{MYCALL\}/gi, s.myCallsign || '')
-        .replace(/\{call\}/gi, cwTunedCall)
+        .replace(/\{call\}/gi, cwTypedCall || cwTunedCall)
         .replace(/\{op_firstname\}/gi, cwTunedOpName)
         .replace(/\{state\}/gi, '');
       window.api.sendCwText(text);
@@ -2346,6 +2346,14 @@ const vfoCwSync = document.getElementById('vfo-cw-sync');
 let cwWpm = 20;
 let cwSpotWpmVal = null;
 let cwTunedCall = '';     // current tuned callsign for CW macro {call}
+// A callsign TYPED by the operator (log pop-out, or the main window's log
+// dialog) always beats the tuned spot: while running a frequency you answer
+// callers you were never tuned to. This window is separate from both of those
+// documents, so the value is relayed through main (LZ3AW item 13).
+let cwTypedCall = '';
+if (window.api && window.api.onLogPopoutCallsign) {
+  window.api.onLogPopoutCallsign((c) => { cwTypedCall = String(c || '').trim().toUpperCase(); });
+}
 let cwTunedOpName = '';   // current tuned op name for CW macro {op_firstname}
 
 (async () => {

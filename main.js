@@ -278,7 +278,7 @@ if (process.platform === 'linux' &&
     'or opt in: sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox (next to the binary). ' +
     'See https://github.com/Waffleslop/POTACAT/issues/37');
 }
-const { execFile, spawn } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 const { fetchSpots: fetchPotaSpots, parkStatesFromLocation } = require('./lib/pota');
 const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader } = require('./lib/sota');
 const sotaUploader = new SotaUploader();
@@ -288,7 +288,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
-const { TcpTransport, SerialTransport } = require('./lib/transport');
+const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
@@ -1836,28 +1836,46 @@ function notifyWatchlistSpot({ callsign, frequency, mode, source, reference, loc
 // --- Rigctld management ---
 let rigctldStderr = ''; // accumulated stderr from rigctld process (capped at 4KB)
 
-function findRigctld() {
-  // Check user-configured path first
-  if (settings && settings.rigctldPath) {
-    try {
-      fs.accessSync(settings.rigctldPath, fs.constants.X_OK);
-      return settings.rigctldPath;
-    } catch { /* fall through */ }
-  }
+// "Executable" is not the same as "runnable". The mac builds shipped a
+// rigctld that dyld refused to load (it still asked for the CI runner's
+// /opt/homebrew/Cellar/hamlib/<ver>/lib/libhamlib.4.dylib), and because
+// findRigctld only checked the X_OK bit it handed that binary back every
+// time — the Add Rig dialog said "No rigs found" and the operator's own
+// working Homebrew hamlib, two candidates further down this list, was never
+// tried (WB0MMC 2026-08-31). So a candidate now has to PROVE it runs.
+// Cached: this sits on the connect path, and the answer cannot change
+// without the app restarting.
+const _rigctldProbes = new Map(); // path -> { ok, err, logged }
 
-  // Check bundled path (packaged app vs dev)
+function rigctldRuns(bin) {
+  if (_rigctldProbes.has(bin)) return _rigctldProbes.get(bin);
+  let result;
+  try {
+    // --version prints and exits: no serial port opened, no radio touched.
+    execFileSync(bin, ['--version'], { timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] });
+    result = { ok: true };
+  } catch (err) {
+    // A loader failure puts the real reason on stderr while err.message is
+    // just "Command failed" — and that reason IS the diagnosis.
+    const stderr = err.stderr ? String(err.stderr).trim().split('\n')[0] : '';
+    result = { ok: false, err: stderr || err.message };
+  }
+  _rigctldProbes.set(bin, result);
+  return result;
+}
+
+function rigctldCandidates() {
   const isWin = process.platform === 'win32';
   const rigBin = isWin ? 'rigctld.exe' : 'rigctld';
-  const bundledPath = app.isPackaged
+  const list = [];
+  // User-configured path first
+  if (settings && settings.rigctldPath) list.push(settings.rigctldPath);
+  // Bundled (packaged app vs dev)
+  list.push(app.isPackaged
     ? path.join(process.resourcesPath, 'hamlib', rigBin)
-    : path.join(__dirname, 'assets', 'hamlib', rigBin);
-  try {
-    fs.accessSync(bundledPath, fs.constants.X_OK);
-    return bundledPath;
-  } catch { /* fall through */ }
-
-  // Check common install directories
-  const candidates = isWin ? [
+    : path.join(__dirname, 'assets', 'hamlib', rigBin));
+  // Common install directories
+  list.push(...(isWin ? [
     'C:\\Program Files\\hamlib\\bin\\rigctld.exe',
     'C:\\Program Files (x86)\\hamlib\\bin\\rigctld.exe',
     'C:\\hamlib\\bin\\rigctld.exe',
@@ -1867,12 +1885,30 @@ function findRigctld() {
     '/opt/homebrew/bin/rigctld',    // macOS Apple Silicon (Homebrew)
     '/opt/local/bin/rigctld',       // macOS MacPorts
     '/snap/bin/rigctld',
-  ];
-  for (const p of candidates) {
+  ]));
+  return list;
+}
+
+/** Where to get hamlib, in the words of the platform the operator is on. */
+function hamlibInstallHint() {
+  if (process.platform === 'darwin') return 'install hamlib with: brew install hamlib';
+  if (process.platform === 'win32') return 'install hamlib from hamlib.github.io, then set the rigctld path in Settings';
+  return 'install hamlib: sudo apt install libhamlib-utils';
+}
+
+function findRigctld() {
+  for (const cand of rigctldCandidates()) {
     try {
-      fs.accessSync(p, fs.constants.X_OK);
-      return p;
-    } catch { /* continue */ }
+      fs.accessSync(cand, fs.constants.X_OK);
+    } catch { continue; }
+    const probe = rigctldRuns(cand);
+    if (probe.ok) return cand;
+    // Present but unusable. Say so ONCE per path: silence here is what turned
+    // a broken binary into a bare "No rigs found" with nothing to go on.
+    if (!probe.logged) {
+      probe.logged = true;
+      sendCatLog(`[hamlib] ${cand} exists but will not run: ${probe.err} — trying the next rigctld`);
+    }
   }
 
   // Fall back to PATH (just the bare name — execFile will search PATH)
@@ -1885,7 +1921,7 @@ function listRigs(rigctldPath) {
     execFile(rigctldPath, ['-l'], { timeout: 10000 }, (err, stdout) => {
       if (err) {
         console.error('[hamlib] rigctld -l failed:', err.message);
-        sendCatLog(`[hamlib] rigctld not found or failed: ${err.message}. On Linux, install hamlib: sudo apt install libhamlib-utils`);
+        sendCatLog(`[hamlib] rigctld could not list rigs (${rigctldPath}): ${err.message}. To use a different one, ${hamlibInstallHint()}`);
         return reject(err);
       }
       const lines = stdout.split('\n');
@@ -1923,9 +1959,18 @@ function spawnRigctld(target, portOverride) {
   return new Promise((resolve, reject) => {
     const rigctldPath = findRigctld();
     const port = portOverride || String(target.rigctldPort || 4532);
+    // rigctld opens the serial port itself, so SerialTransport's dial-in/
+    // callout fallback can't help it — and rigctld has none of its own: given
+    // a macOS /dev/tty.* node it exits with "Resource busy" and the operator
+    // sees a rig that simply won't connect. The callout node is the one a
+    // radio is talked to on (see calloutTwin), so hand it that when it exists.
+    const serialPort = calloutTwin(target.serialPort) || target.serialPort;
+    if (serialPort !== target.serialPort) {
+      sendCatLog(`[rigctld] macOS: using the callout device ${serialPort} in place of the configured ${target.serialPort} (a /dev/tty.* node is the dial-in side and reports "Resource busy")`);
+    }
     const args = [
       '-m', String(target.rigId),
-      '-r', target.serialPort,
+      '-r', serialPort,
       '-s', String(target.baudRate || 9600),
       '-t', port,
     ];
@@ -1959,7 +2004,7 @@ function spawnRigctld(target, portOverride) {
           `If you have a full-size DigiRig (two virtual COM ports), this will fail — pick the OTHER port instead.`);
       }
       args.push('--ptt-type=' + (pttType === 'RTS' ? 'RTS' : 'DTR'));
-      args.push('--ptt-file=' + target.pttPort);
+      args.push('--ptt-file=' + (calloutTwin(target.pttPort) || target.pttPort));
     }
     if (target.dtrOff) args.push('--set-conf=dtr_state=OFF,rts_state=OFF');
     if (target.verbose) args.push('-vvvv');
@@ -2333,7 +2378,15 @@ function sendCatSplit(on) {
 // show both, one under the other. 0 = hide. Broadcast on change only.
 let _currentFreqOther = 0;
 function sendCatFreqOther(hz) {
-  const v = Number(hz) || 0;
+  // SPLIT IS THE AUTHORITY. A TX line while the radio is not in split is a
+  // lie, and the ways to produce one are many: the poll writes FB; using the
+  // split flag it had at WRITE time, so the reply can land after the IF; that
+  // cleared it; a client can set split off while a cycle is in flight; a
+  // codec that emits the other VFO unprompted needs no split at all. Clamping
+  // HERE means no surface can show a stale "TX <freq>" — which is what sat on
+  // LZ3AW's web client and VFO popout for a whole session (2026-08-28, and
+  // still there after the first fix, which only closed the one path it knew).
+  const v = _currentSplit ? (Number(hz) || 0) : 0;
   if (v === _currentFreqOther) return;
   _currentFreqOther = v;
   if (win && !win.isDestroyed()) win.webContents.send('cat-freq-other', v);
@@ -7432,9 +7485,7 @@ function jtcatReworkDaysSetting() {
 function jtcatWorkedInfo(call, band, mode) {
   const c = (call || '').toUpperCase();
   const entries = (workedQsos && workedQsos.get(c)) || [];
-  const hunted = HuntedPark.findHuntedRefs(lastMergedSpots, c, {
-    freqKhz: (_currentFreqHz || 0) / 1000, myCall: settings.myCallsign,
-  });
+  const hunted = jtcatSpottedActivator(c);
   return WorkedBefore.decideWorkedBefore(entries, {
     band, mode,
     reworkDays: jtcatReworkDaysSetting(),
@@ -7563,17 +7614,12 @@ function jtcatRunPauseAfter() {
 let jtcatPskRxPending = null;
 let jtcatPskRxTimer = null;
 
+// The rule itself lives in lib/jtcat-state-machine.js beside the other hunt
+// and run policy, so it can be tested without the app. This wrapper is the
+// text-only form (no spot cross-reference) used for the "is it a CQ at all"
+// pre-filter.
 function matchesAutoCqFilter(text, filterMode) {
-  const upper = (text || '').toUpperCase();
-  if (!upper.startsWith('CQ ')) return false;
-  if (filterMode === 'all') return true;
-  if (filterMode === 'pota') return upper.startsWith('CQ POTA ');
-  if (filterMode === 'sota') return upper.startsWith('CQ SOTA ');
-  // Field Day hunt (popout "Hunt: Field Day", seasonal): answer only CQ FD
-  // callers — the popout turns jtcatFdMode on alongside, so the reply runs
-  // the class+section exchange, not grid/report.
-  if (filterMode === 'fd') return upper.startsWith('CQ FD ');
-  return false;
+  return _jtcatStateMachine.matchesHuntFilter(text, filterMode);
 }
 
 // Delegates to the shared parser (renderer/jtcat-parser.js) so the auto-CQ
@@ -7581,6 +7627,64 @@ function matchesAutoCqFilter(text, filterMode) {
 // CALL [GRID]" — including grid-less directed/contest CQs and numeric serials.
 function parseCqMessage(text) {
   return JtcatParser.parseCq(text);
+}
+
+/** The program refs a callsign is spotted at right now (null if none). ONE
+ *  lookup, shared by hunt selection, worked-before and QSO logging. */
+function jtcatSpottedActivator(call) {
+  return HuntedPark.findHuntedRefs(lastMergedSpots, call, {
+    freqKhz: (_currentFreqHz || 0) / 1000, myCall: settings.myCallsign,
+  });
+}
+
+/** Hunt also answers a plain CQ from a spotted activator (default on). */
+function jtcatHuntSpottedEnabled() {
+  return settings.jtcatHuntSpotted !== false;
+}
+
+// Explained once per callsign per session — the same activator calls CQ every
+// other cycle and the reason does not change.
+const _jtcatSpottedHuntLogged = new Set();
+
+/**
+ * Does this CQ satisfy the hunt filter?
+ *
+ * POTA/SOTA hunt used to require the decode to literally start "CQ POTA " /
+ * "CQ SOTA ". Most activators just call CQ — the program modifier costs
+ * characters in a 13-character message and buys the activator nothing, since
+ * their hunters found them on the spot page. So POTA hunt sat silent through
+ * an entire activation it could hear perfectly (feature request 2026-09-02).
+ *
+ * The spot list is the authority POTA hunters already use, and POTACAT is
+ * holding it: a station spotted at a park within the last 90 minutes who is
+ * calling CQ on our band is an activator, whatever their message says. This
+ * is the same lookup that stamps the park onto the logged QSO, so a station
+ * hunted this way is logged with its reference automatically.
+ *
+ * Deliberately still requires a CQ. "Whether or not they called CQ POTA" is
+ * about the CQ's WORDING, not about calling stations who never called at all:
+ * answering a decode addressed to somebody else is how you QRM a QSO in
+ * progress. Tail-ending an activator's RR73 is a real technique and a
+ * reasonable follow-up, but it is a change in operating behaviour and should
+ * be asked for, not assumed.
+ */
+function jtcatHuntProgramMatch(d, filterMode) {
+  const hunted = (filterMode === 'pota' || filterMode === 'sota')
+    ? jtcatSpottedActivator(d.call) : null;
+  const spottedSigs = hunted ? hunted.refs.map((r) => r.sig) : [];
+  const ok = _jtcatStateMachine.matchesHuntFilter(d.text, filterMode, {
+    spottedSigs,
+    spottedEnabled: jtcatHuntSpottedEnabled(),
+  });
+  // Say why a station with no program modifier in its CQ is being answered —
+  // once per callsign, since the same activator calls every other cycle.
+  if (ok && hunted && !matchesAutoCqFilter(d.text, filterMode) && !_jtcatSpottedHuntLogged.has(d.call)) {
+    _jtcatSpottedHuntLogged.add(d.call);
+    const want = filterMode === 'pota' ? 'POTA' : 'SOTA';
+    const ref = hunted.refs.find((r) => r.sig === want);
+    sendCatLog(`[JTCAT] Hunt: ${d.call} is spotted at ${ref ? ref.ref : want} — answering their plain CQ`);
+  }
+  return ok;
 }
 
 /**
@@ -7609,10 +7713,14 @@ function jtcatWorkableCallers(results, myCall, opts) {
   const isWorked = (opts && opts.isWorked)
     || ((call) => jtcatIsWorkedCall(call, dupeBandMode.band, dupeBandMode.mode));
   return (results || [])
-    .filter((d) => matchesAutoCqFilter(d.text, filterMode))
+    // Any CQ at all, then parse, THEN apply the program filter — the
+    // spotted-activator half of that filter needs the callsign, which only
+    // exists after the parse.
+    .filter((d) => matchesAutoCqFilter(d.text, 'all'))
     .map((d) => ({ ...d, ...parseCqMessage(d.text) }))
     .filter((d) => {
       if (!d.call || d.call === myCall) return false;
+      if (!jtcatHuntProgramMatch(d, filterMode)) return false;
       if (jtcatAutoCqWorkedSession.has(d.call)) return false;
       if (isWorked(d.call)) return false;
       return true;
@@ -7996,6 +8104,8 @@ async function jtcatHuntFallbackStart() {
  * be the UI telling the operator something untrue.
  */
 function setJtcatHuntMode(mode, owner) {
+  // A fresh hunt explains itself again.
+  _jtcatSpottedHuntLogged.clear();
   const m = mode || 'off';
   if (jtcatHuntFallbackMode) {
     jtcatHuntFallbackMode = '';
@@ -13018,7 +13128,7 @@ function _sendCwTextToRadioImpl(text, opts) {
         // worse than not sending.
         if (cwCaps.textMethod !== 'dtr-key-port' && cat && cat.connected) {
           sendCatLog('[CW] CW Key Port did not become ready — falling back to CAT CW text. Fix or clear the CW Key Port in Settings > Rig to remove this delay.');
-          cat.sendCwText(expanded);
+          cat.sendCwText(expanded, { live });
           return;
         }
         sendCatLog('[CW] CW Key Port did not become ready — text not sent. Check the CW Key Port in Settings > Rig (and, on Linux, that python3 + pyserial are installed).');
@@ -13039,7 +13149,9 @@ function _sendCwTextToRadioImpl(text, opts) {
       _cwTextKyHintLogged = true;
       sendCatLog('[CW] Text is going out via the CAT KY command, not your CW Key Port. If this radio is an FT-891 or FT-710, select that exact model in Settings > Rig — on those rigs KY is unreliable (radio keys TX with no morse) and the correct model routes text through the key port instead.');
     }
-    cat.sendCwText(expanded);
+    // `live` = key-as-I-type: append to the radio's buffer, never abort what
+    // is already being keyed (see RigController.sendCwText).
+    cat.sendCwText(expanded, { live });
   }
 }
 
@@ -24101,8 +24213,26 @@ app.whenReady().then(() => {
   // The pop-out's typed callsign, relayed to the main window so CW macros
   // can expand {call} while the operator logs in the pop-out (see
   // preload-log-popout.js reportCallsign).
+  // The hand-typed callsign, from whichever window it was typed in, fanned out
+  // to every surface that expands {call}. The VFO pop-out is the one that
+  // needed it: it owns the desktop CW macros but is its own BrowserWindow, so
+  // it could read neither the main window's log dialog nor the log pop-out's
+  // field and expanded {call} from the last TUNED SPOT alone — a callsign
+  // typed by hand never reached the macro meant to send it (LZ3AW item 13).
+  //
+  // Two windows write here, so the value is kept PER SOURCE: closing the log
+  // dialog clears only the dialog's entry, and a callsign still sitting in the
+  // log pop-out keeps standing. Otherwise one window's clear silently wiped
+  // the other's call and the macro went out addressed to the wrong station.
+  const _typedCallsigns = { main: '', popout: '' };
   ipcMain.on('log-popout-callsign', (_e, call) => {
-    if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', String(call || ''));
+    const from = (win && !win.isDestroyed() && _e.sender === win.webContents) ? 'main' : 'popout';
+    _typedCallsigns[from] = String(call || '').trim().toUpperCase();
+    // Pop-out wins when both hold one: opening that window is the deliberate
+    // act, and a spot's Log button routes there whenever it is open.
+    const c = _typedCallsigns.popout || _typedCallsigns.main;
+    if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', c);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('log-popout-callsign', c);
   });
   ipcMain.on('log-popout-minimize', () => { if (logPopoutWin) logPopoutWin.minimize(); });
   ipcMain.on('log-popout-close', () => { if (logPopoutWin) logPopoutWin.close(); });
@@ -29399,7 +29529,7 @@ app.whenReady().then(() => {
       return await listRigs(rigctldPath);
     } catch (err) {
       console.error(`[hamlib] Failed to list rigs: ${err.message}`);
-      sendCatLog(`[hamlib] rigctld not found or failed: ${err.message}. On Linux: sudo apt install libhamlib-utils`);
+      sendCatLog(`[hamlib] could not list rigs: ${err.message}. To use a different one, ${hamlibInstallHint()}`);
       return [];
     }
   });

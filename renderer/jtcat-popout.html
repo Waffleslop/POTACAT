@@ -669,6 +669,10 @@
       <span class="jp-opt-label">Worked-before expires after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
       <span class="jp-opt-help">How long a logged contact keeps Hunt and Auto CQ from calling that station again on the same band and mode. 0 = forever. A station spotted as an activator is always fair game unless you already worked them at that park today — a new park or a new UTC day counts fresh, matching program rules.</span>
     </label>
+    <button id="jp-hunt-spotted" class="jp-opt-row">
+      <span class="jp-opt-label">Hunt spotted activators calling plain CQ</span>
+      <span class="jp-opt-help">POTA and SOTA hunt normally look for "CQ POTA" or "CQ SOTA" in the message, but most activators just call CQ. With this on, a station the live spot list places at a park or summit is hunted whenever you hear them call, whatever their CQ says — and the QSO still logs with their reference. Off = only an explicit CQ POTA / CQ SOTA counts.</span>
+    </button>
     <button id="jp-hunt-cq-fallback" class="jp-opt-row ultracat-gated hidden">
       <span class="jp-opt-label">Call CQ when there's nothing to hunt</span>
       <span class="jp-opt-help">While hunting, if nobody workable has called CQ for about a minute, start calling CQ yourself — and hand straight back to hunting the moment someone worth working shows up. Turns itself off if you change the Hunt setting.</span>

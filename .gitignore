@@ -13,6 +13,10 @@ resources/cloudflared/
 # GPLv3 wsprd binaries/DLLs live here for dev/CI; never commit the binaries
 # (source is vendored under third_party/wsprd/src per third_party/wsprd/BUILD.md)
 third_party/wsprd/build/
+# hamlib dylibs copied in by scripts/bundle-mac-deps.js on a mac build
+# (the Windows rigctld.exe/DLLs in that folder ARE tracked)
+assets/hamlib/*.dylib
+assets/hamlib/rigctld
 # wsprd binary staged into the package at build time (mirrors assets/hamlib)
 assets/wsprd/wsprd
 assets/wsprd/wsprd.exe

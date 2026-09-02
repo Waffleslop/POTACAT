@@ -334,6 +334,10 @@ contextBridge.exposeInMainWorld('api', {
   openLogPopout: (prefill) => ipcRenderer.send('log-popout-open', prefill),
   onLogPopoutStatus: (cb) => ipcRenderer.on('log-popout-status', (_e, open) => cb(open)),
   onLogPopoutCallsign: (cb) => ipcRenderer.on('log-popout-callsign', (_e, call) => cb(call)),
+  // The in-window log dialog reports on the SAME channel, so every surface
+  // that expands {call} — including the VFO pop-out, which is its own window —
+  // sees a hand-typed callsign wherever it was typed.
+  reportLogCallsign: (call) => ipcRenderer.send('log-popout-callsign', call),
   logPopoutTheme: (theme) => ipcRenderer.send('log-popout-theme', theme),
   pairPopoutTheme: (theme) => ipcRenderer.send('pair-popout-theme', theme),
   qsoPopoutClose: () => ipcRenderer.send('qso-popout-close'),

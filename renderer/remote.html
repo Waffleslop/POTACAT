@@ -255,6 +255,14 @@
             <input type="text" id="vf-cw-input" placeholder="Type CW to send" autocomplete="off" autocapitalize="characters">
             <button type="button" id="vf-cw-send" class="vf-rig-btn">TX</button>
           </div>
+          <!-- The callsign {call} expands to. Typing it here is the whole
+               point: the macros live in this panel now, so the call has to
+               as well, instead of only in a log sheet on another screen. -->
+          <div class="vf-cw-row">
+            <input type="text" id="vf-cw-call" placeholder="Their call &rarr; {call}" autocomplete="off"
+                   autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase;">
+          </div>
+          <div class="cw-macro-row" id="vf-cw-macro-row"></div>
         </div>
         <!-- Voice macros (SSB) -->
         <div class="vf-widget hidden" data-vf-widget="voice">

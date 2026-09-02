@@ -60,16 +60,96 @@ function gridToLatLonLocal(grid) {
   return { lat, lon };
 }
 
-// --- Editable columns ---
-// Indices match the cells[] order in buildRow()
-const EDITABLE = {
-  0: 'QSO_DATE', 1: 'TIME_ON', 2: 'CALL', 3: 'FREQ', 4: 'MODE',
-  6: 'TX_PWR',
-  7: 'RST_SENT', 8: 'RST_RCVD', 9: 'SIG_INFO',
-  10: 'GRIDSQUARE', 11: 'STATE', 12: 'COUNTRY',
-  // 13 is the QSL column — not text-editable; dblclick toggles paper QSL.
-  14: 'COMMENT',
-};
+// --- Columns ---
+// The logbook was a fixed table: sixteen <th> in the HTML, a positional
+// cells[] array, an EDITABLE map keyed by INDEX, and colours applied by
+// nth-child. Every one of those broke the moment a column could be hidden or
+// moved, so the whole thing is defined here instead and the header, the rows
+// and the CSS classes all come from this one list (LZ3AW item 8: MY_SIG_INFO,
+// resize, arrange, and a right-click picker like the Spots table has).
+//
+//   key    — stable id, used for prefs, the CSS class (.col-<key>) and dedupe
+//   label  — header text
+//   sort   — ADIF field to sort on (omit for a column that can't be sorted)
+//   field  — ADIF field this cell EDITS in place (omit for read-only)
+//   get    — cell text from a QSO record
+//   w      — default width in px
+//   off    — true to start hidden (the operator opts in from the picker)
+const ALL_COLUMNS = [
+  { key: 'QSO_DATE', label: 'Date', sort: 'QSO_DATE', field: 'QSO_DATE', w: 82,
+    get: (q) => (q.QSO_DATE ? q.QSO_DATE.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '') },
+  { key: 'TIME_ON', label: 'Time', sort: 'TIME_ON', field: 'TIME_ON', w: 52,
+    get: (q) => (q.TIME_ON ? q.TIME_ON.slice(0, 2) + ':' + q.TIME_ON.slice(2, 4) : '') },
+  { key: 'CALL', label: 'Callsign', sort: 'CALL', field: 'CALL', w: 92, get: (q) => q.CALL || '' },
+  { key: 'FREQ', label: 'Freq', sort: 'FREQ', field: 'FREQ', w: 72, get: (q) => q.FREQ || '' },
+  { key: 'MODE', label: 'Mode', sort: 'MODE', field: 'MODE', w: 56, get: (q) => q.MODE || '' },
+  { key: 'BAND', label: 'Band', sort: 'BAND', w: 52, get: (q) => q.BAND || '' },
+  { key: 'TX_PWR', label: 'Pwr', sort: 'TX_PWR', field: 'TX_PWR', w: 46, get: (q) => q.TX_PWR || '' },
+  { key: 'RST_SENT', label: 'RST S', field: 'RST_SENT', w: 48, get: (q) => q.RST_SENT || '' },
+  { key: 'RST_RCVD', label: 'RST R', field: 'RST_RCVD', w: 48, get: (q) => q.RST_RCVD || '' },
+  { key: 'SIG_INFO', label: 'Park', sort: 'SIG_INFO', field: 'SIG_INFO', w: 86, get: (q) => q.SIG_INFO || '' },
+  // THEIR park is SIG_INFO; MY park — the reference being activated — is
+  // MY_SIG_INFO (MY_POTA_REF on older logs). An activator's own log has
+  // SIG_INFO empty on every ordinary QSO, so without this column their own
+  // activations are invisible in their logbook.
+  { key: 'MY_SIG_INFO', label: 'My Park', sort: 'MY_SIG_INFO', field: 'MY_SIG_INFO', w: 86, off: true,
+    get: (q) => q.MY_SIG_INFO || q.MY_POTA_REF || '' },
+  { key: 'GRIDSQUARE', label: 'Grid', sort: 'GRIDSQUARE', field: 'GRIDSQUARE', w: 62, get: (q) => q.GRIDSQUARE || '' },
+  { key: 'STATE', label: 'State', sort: 'STATE', field: 'STATE', w: 52, get: (q) => q.STATE || '' },
+  { key: 'COUNTRY', label: 'Country', sort: 'COUNTRY', field: 'COUNTRY', w: 110, get: (q) => q.COUNTRY || '' },
+  { key: 'QSL', label: 'QSL', sort: 'LOTW_QSL_SENT', w: 56, get: (q) => qslMarks(q),
+    title: 'QSL status: L = uploaded to LoTW, L✓ = LoTW confirmed, P = paper QSL received. Double-click to toggle paper QSL.' },
+  { key: 'COMMENT', label: 'Notes', field: 'COMMENT', w: 150, get: (q) => q.COMMENT || '' },
+];
+
+const COL_PREFS_KEY = 'potacat-log-cols-v1';
+let colPrefs = { order: [], hidden: [], shown: [], widths: {} };
+try {
+  const saved = JSON.parse(localStorage.getItem(COL_PREFS_KEY) || 'null');
+  if (saved && typeof saved === 'object') {
+    colPrefs = {
+      order: Array.isArray(saved.order) ? saved.order : [],
+      hidden: Array.isArray(saved.hidden) ? saved.hidden : [],
+      shown: Array.isArray(saved.shown) ? saved.shown : [],
+      widths: (saved.widths && typeof saved.widths === 'object') ? saved.widths : {},
+    };
+  }
+} catch { /* corrupt prefs are not worth a broken logbook */ }
+
+function saveColPrefs() {
+  try { localStorage.setItem(COL_PREFS_KEY, JSON.stringify(colPrefs)); } catch { /* private mode */ }
+}
+
+/** Columns in the operator's order. Unknown saved keys are dropped and columns
+ *  a later release ADDS are appended, so prefs never freeze the column set. */
+function orderedColumns() {
+  const byKey = new Map(ALL_COLUMNS.map((c) => [c.key, c]));
+  const out = [];
+  for (const key of colPrefs.order) {
+    const c = byKey.get(key);
+    if (c && !out.includes(c)) out.push(c);
+  }
+  for (const c of ALL_COLUMNS) if (!out.includes(c)) out.push(c);
+  return out;
+}
+
+/** Hidden = explicitly hidden, or off-by-default and never opted into. Two
+ *  lists rather than one so a column added by a later release keeps its own
+ *  default instead of inheriting a decision the operator never made. */
+function isColHidden(c) {
+  if (colPrefs.hidden.includes(c.key)) return true;
+  if (c.off) return !colPrefs.shown.includes(c.key);
+  return false;
+}
+
+function visibleColumns() {
+  return orderedColumns().filter((c) => !isColHidden(c));
+}
+
+function colWidth(c) {
+  const w = Number(colPrefs.widths[c.key]);
+  return Number.isFinite(w) && w >= 24 ? w : c.w;
+}
 
 // QSL column marks: L = uploaded to LoTW (Phase 1.5 stamps it after each
 // successful upload), L + check = LoTW confirmed (Phase 3 download), P =
@@ -325,30 +405,19 @@ const _virt = {
     tr.dataset.idx = q.idx;
     if (selectedIdxs.has(q.idx)) tr.classList.add('selected');
 
-    const date = q.QSO_DATE ? q.QSO_DATE.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '';
-    const time = q.TIME_ON ? q.TIME_ON.slice(0, 2) + ':' + q.TIME_ON.slice(2, 4) : '';
-
-    const cells = [
-      date, time, q.CALL || '', q.FREQ || '', q.MODE || '',
-      q.BAND || '',
-      q.TX_PWR || '',
-      q.RST_SENT || '', q.RST_RCVD || '',
-      q.SIG_INFO || '',
-      q.GRIDSQUARE || '', q.STATE || '', q.COUNTRY || '',
-      qslMarks(q),
-      q.COMMENT || '',
-    ];
-
-    for (let i = 0; i < cells.length; i++) {
+    for (const c of visibleColumns()) {
       const td = document.createElement('td');
-      td.textContent = cells[i];
-      if (EDITABLE[i]) {
-        td.dataset.field = EDITABLE[i];
+      const text = c.get(q);
+      td.textContent = text;
+      td.className = 'col-' + c.key;   // colour follows the column, not its position
+      td.style.width = colWidth(c) + 'px';
+      if (c.field) {
+        td.dataset.field = c.field;
         td.classList.add('editable');
       }
-      if (i === 13) {
+      if (c.key === 'QSL') {
         td.classList.add('qsl-cell');
-        td.title = (cells[i] ? cells[i] + ' — ' : '') + 'double-click to toggle paper QSL received';
+        td.title = (text ? text + ' — ' : '') + 'double-click to toggle paper QSL';
       }
       tr.appendChild(td);
     }
@@ -369,15 +438,140 @@ const _virt = {
 };
 _virt.init();
 
-// --- Column sorting ---
-table.querySelectorAll('th[data-sort]').forEach(th => {
-  th.addEventListener('click', () => {
-    const col = th.dataset.sort;
-    if (sortCol === col) sortAsc = !sortAsc;
-    else { sortCol = col; sortAsc = col !== 'QSO_DATE'; }
-    render();
+// --- Header: sort, resize, drag-to-arrange, right-click picker ---
+const headRow = document.getElementById('qso-head-row');
+
+function renderHead() {
+  headRow.innerHTML = '';
+  for (const c of visibleColumns()) {
+    const th = document.createElement('th');
+    th.textContent = c.label;
+    th.dataset.key = c.key;
+    th.className = 'col-' + c.key;
+    th.style.width = colWidth(c) + 'px';
+    if (c.title) th.title = c.title;
+    if (c.sort) {
+      th.dataset.sort = c.sort;
+      if (sortCol === c.sort) th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+      th.addEventListener('click', (e) => {
+        if (e.target.classList.contains('col-resize')) return; // dragging the edge
+        if (sortCol === c.sort) sortAsc = !sortAsc;
+        else { sortCol = c.sort; sortAsc = c.sort !== 'QSO_DATE'; }
+        render();
+      });
+    }
+
+    // Drag to arrange. Header only — rows are virtualised and keep their own
+    // click/dblclick editing behaviour.
+    th.draggable = true;
+    th.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', c.key);
+      e.dataTransfer.effectAllowed = 'move';
+      th.classList.add('col-dragging');
+    });
+    th.addEventListener('dragend', () => th.classList.remove('col-dragging'));
+    th.addEventListener('dragover', (e) => { e.preventDefault(); th.classList.add('col-drop'); });
+    th.addEventListener('dragleave', () => th.classList.remove('col-drop'));
+    th.addEventListener('drop', (e) => {
+      e.preventDefault();
+      th.classList.remove('col-drop');
+      const from = e.dataTransfer.getData('text/plain');
+      if (!from || from === c.key) return;
+      const order = orderedColumns().map((x) => x.key);
+      order.splice(order.indexOf(from), 1);
+      order.splice(order.indexOf(c.key), 0, from);
+      colPrefs.order = order;
+      saveColPrefs();
+      renderHead();
+      _virt.invalidate();
+    });
+
+    // Resize grip on the trailing edge.
+    const grip = document.createElement('span');
+    grip.className = 'col-resize';
+    grip.addEventListener('click', (e) => e.stopPropagation());
+    grip.addEventListener('dragstart', (e) => { e.preventDefault(); e.stopPropagation(); });
+    grip.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = colWidth(c);
+      const onMove = (ev) => {
+        const w = Math.max(28, Math.round(startW + (ev.clientX - startX)));
+        colPrefs.widths[c.key] = w;
+        th.style.width = w + 'px';
+        syncTableWidth();
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        saveColPrefs();
+        _virt.invalidate();   // cells carry their own width
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    th.appendChild(grip);
+    headRow.appendChild(th);
+  }
+  // Trailing delete-button column — not arrangeable, not hideable.
+  const thDel = document.createElement('th');
+  thDel.className = 'col-actions';
+  headRow.appendChild(thDel);
+  syncTableWidth();
+}
+
+/** table-layout is fixed, so the table needs a width of its own — otherwise
+ *  the last column absorbs the slack and a resize looks like it did nothing. */
+function syncTableWidth() {
+  const total = visibleColumns().reduce((n, c) => n + colWidth(c), 0) + 34;
+  table.style.width = total + 'px';
+}
+
+// Right-click the header for the column picker — the same gesture the Spots
+// table uses, so there is one thing to learn.
+const colMenu = document.getElementById('qso-col-menu');
+function closeColMenu() { colMenu.classList.add('hidden'); }
+document.addEventListener('click', (e) => { if (!colMenu.contains(e.target)) closeColMenu(); });
+headRow.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  colMenu.innerHTML = '';
+  for (const c of orderedColumns()) {
+    const row = document.createElement('label');
+    row.className = 'qso-col-menu-row';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !isColHidden(c);
+    cb.addEventListener('change', () => {
+      colPrefs.hidden = colPrefs.hidden.filter((k) => k !== c.key);
+      colPrefs.shown = colPrefs.shown.filter((k) => k !== c.key);
+      if (cb.checked) { if (c.off) colPrefs.shown.push(c.key); }
+      else if (!c.off) colPrefs.hidden.push(c.key);
+      saveColPrefs();
+      renderHead();
+      _virt.invalidate();
+    });
+    row.appendChild(cb);
+    row.appendChild(document.createTextNode(' ' + c.label));
+    colMenu.appendChild(row);
+  }
+  const reset = document.createElement('button');
+  reset.className = 'qso-col-menu-reset';
+  reset.textContent = 'Reset columns';
+  reset.addEventListener('click', () => {
+    colPrefs = { order: [], hidden: [], shown: [], widths: {} };
+    saveColPrefs();
+    closeColMenu();
+    renderHead();
+    _virt.invalidate();
   });
+  colMenu.appendChild(reset);
+  colMenu.style.left = Math.min(e.clientX, window.innerWidth - 190) + 'px';
+  colMenu.style.top = e.clientY + 'px';
+  colMenu.classList.remove('hidden');
 });
+
+renderHead();
 
 // --- Search ---
 searchInput.addEventListener('input', () => {

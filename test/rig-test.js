@@ -1469,6 +1469,43 @@ function stubRig(codecMethods = {}) {
   return { rig, transport, codec };
 }
 
+// LZ3AW item 4, round 3: key-as-I-type "works, but when typing is faster the
+// keying delays too much". Every keystroke took the MACRO path — RX; to abort
+// whatever was playing, then a 50ms settle, then KY — so each letter killed
+// the letter before it and the radio never caught up with the typist.
+test('live CW appends: no abort, no settle delay', () => {
+  const calls = [];
+  const { rig } = stubRig({
+    setTransmit: (on) => calls.push('tx:' + on),
+    sendCwText: (t, o) => calls.push('ky:' + t + (o && o.live ? ':live' : '')),
+  });
+  rig.sendCwText('A', { live: true });
+  assert.deepStrictEqual(calls, ['ky:A:live'], 'live keystroke should append only: ' + calls.join(','));
+});
+
+test('a normal CW macro still aborts first, exactly as before', () => {
+  const calls = [];
+  const { rig } = stubRig({
+    setTransmit: (on) => calls.push('tx:' + on),
+    sendCwText: (t) => calls.push('ky:' + t),
+  });
+  rig.sendCwText('CQ TEST');
+  assert.deepStrictEqual(calls, ['tx:false'], 'macro must still abort in-flight CW');
+  // ...and the send itself is deferred by the 50ms settle (unchanged).
+});
+
+test('Kenwood KY: a live frame is NOT padded to the 24-char buffer', () => {
+  // Padding one typed character out to 24 appends 23 spaces — word gaps —
+  // between every letter. A whole macro is still padded, as it always was.
+  const ts480 = require('../lib/rig-models').RIG_MODELS['TS-480'];
+  const live = captureWrites(KenwoodCodec, ts480);
+  live.codec.sendCwText('A', { live: true });
+  assert.strictEqual(live.writes[0], 'KY A;', 'got ' + JSON.stringify(live.writes[0]));
+  const macro = captureWrites(KenwoodCodec, ts480);
+  macro.codec.sendCwText('CQ');
+  assert.strictEqual(macro.writes[0], 'KY CQ                      ;', 'got ' + JSON.stringify(macro.writes[0]));
+});
+
 test('unsupported control returns false and logs once', () => {
   const { rig } = stubRig(); // codec has no setNoiseReduction
   const logs = [];
@@ -2191,28 +2228,44 @@ function ts480Codec(mode) {
   return { codec, writes };
 }
 
+// SSB/AM/FM carry a SLOT INDEX, not the width: FW0000 is the 2400 Hz filter.
+// Sending FW2400 in SSB (what the first fix did, after snapping 2700 -> 2400)
+// names no slot the radio has, so it was ignored exactly as silently as the
+// unavailable width had been — LZ3AW's "SSB filter still doesn't work".
+// Source: hamlib ts480_filter_width[] + struct kenwood_filter_width.
 test('TS-480 SSB: an unavailable width snaps to the nearest real slot', () => {
   const { codec, writes } = ts480Codec('USB');
   codec.setFilterWidth(2700);          // POTACAT preset; NOT a TS-480 slot
-  assert.strictEqual(writes[0], 'FW2400;', 'got ' + writes[0]);
+  assert.strictEqual(writes[0], 'FW0000;', 'got ' + writes[0]);
 });
 
 test('TS-480 SSB: mid-range request picks the closer slot, not the widest', () => {
   const { codec, writes } = ts480Codec('LSB');
   codec.setFilterWidth(1000);          // 500 is 500 away, 2400 is 1400 away
-  assert.strictEqual(writes[0], 'FW0500;', 'got ' + writes[0]);
+  assert.strictEqual(writes[0], 'FW0001;', 'got ' + writes[0]);   // NAR1 slot
   const narrow = ts480Codec('USB');
   narrow.codec.setFilterWidth(300);    // 270 is 30 away, 500 is 200 away
-  assert.strictEqual(narrow.writes[0], 'FW0270;', 'got ' + narrow.writes[0]);
+  assert.strictEqual(narrow.writes[0], 'FW0002;', 'got ' + narrow.writes[0]); // NAR2
 });
 
-test('TS-480 SSB: a REAL slot is sent unchanged and logs nothing', () => {
+test('TS-480 SSB: a REAL slot logs no snap, and goes out as its index', () => {
   const { codec, writes } = ts480Codec('USB');
   const logs = [];
   codec.on('log', (m) => logs.push(m));
   codec.setFilterWidth(2400);
-  assert.strictEqual(writes[0], 'FW2400;');
+  assert.strictEqual(writes[0], 'FW0000;');
   assert.strictEqual(logs.length, 0, 'logged a snap that did not happen: ' + logs.join(' | '));
+});
+
+test('TS-480 SSB: choosing an optional-filter slot SAYS it is optional', () => {
+  // 500/270 Hz in SSB are the NAR1/NAR2 crystal filters. Without them fitted
+  // the radio ignores the command — "nothing happened", with no way to tell
+  // that from a bug, which is the whole failure mode this path keeps hitting.
+  const { codec } = ts480Codec('USB');
+  const logs = [];
+  codec.on('log', (m) => logs.push(m));
+  codec.setFilterWidth(500);
+  assert.ok(logs.some((l) => /optional NAR1/.test(l)), 'no optional-filter note: ' + logs.join(' | '));
 });
 
 test('TS-480 SSB: a snap SAYS SO (the silence was the bug)', () => {
@@ -2222,6 +2275,8 @@ test('TS-480 SSB: a snap SAYS SO (the silence was the bug)', () => {
   codec.setFilterWidth(3000);
   assert.strictEqual(logs.length, 1, 'no log line for a snapped width');
   assert.ok(/2400Hz/.test(logs[0]) && /3000Hz/.test(logs[0]), 'log omits the values: ' + logs[0]);
+  // The operator is told the WIDTH, never the slot index — 0 means nothing.
+  assert.ok(!/FW/.test(logs[0]), 'log leaks the wire value: ' + logs[0]);
 });
 
 test('TS-480 CW: the presets that always worked are untouched', () => {
@@ -2239,10 +2294,68 @@ test('TS-480 RTTY/AM/FM snap within their own slot lists', () => {
   assert.strictEqual(rtty.writes[0], 'FW0500;');
   const am = ts480Codec('AM');
   am.codec.setFilterWidth(5000);       // AM slots 2400/6000 -> 6000 is nearer
-  assert.strictEqual(am.writes[0], 'FW6000;');
+  assert.strictEqual(am.writes[0], 'FW0000;');   // 6000 Hz is AM slot 0
   const amNarrow = ts480Codec('AM');
   amNarrow.codec.setFilterWidth(4000); // genuinely closer to 2400 (1600 vs 2000)
-  assert.strictEqual(amNarrow.writes[0], 'FW2400;');
+  assert.strictEqual(amNarrow.writes[0], 'FW0001;');
+  const fm = ts480Codec('FM');
+  fm.codec.setFilterWidth(9000);       // one FM slot: 12000 -> index 0
+  assert.strictEqual(fm.writes[0], 'FW0000;');
+});
+
+// LZ3AW item 2, round 3: 1.10.13 gave the wattmeter to the rigctld path only
+// (hamlib RFPOWER_METER). He is on DIRECT SERIAL, where the Kenwood codec had
+// no getPowerMeter at all, so the controller's TX-only meter poll called
+// nothing and the meter stayed dead. On a TS-480 the SM reply during TX IS
+// the forward-power bar, full scale 20 (hamlib rigs/kenwood/ts480.c reads
+// RFPOWER_METER as `SM0;` / 20.0).
+test('TS-480 direct serial: SM during TX reports WATTS, not an S reading', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, TS480);
+  const seen = { smeter: [], powerMeter: [] };
+  codec.on('smeter', (v) => seen.smeter.push(v));
+  codec.on('powerMeter', (v) => seen.powerMeter.push(v));
+
+  codec.getPowerMeter();
+  assert.strictEqual(writes[0], 'SM;', 'power poll should reuse the S-meter command: ' + writes[0]);
+  codec.onData(Buffer.from('SM0010;'));               // half of full scale 20
+  assert.deepStrictEqual(seen.powerMeter, [50], 'TS-480 at 10/20 is 50W of 100');
+  assert.deepStrictEqual(seen.smeter, [], 'a TX power reading leaked onto the S-meter');
+
+  // The very next SM is a normal RX reading again — the flag is one-shot.
+  codec.onData(Buffer.from('SM0010;'));
+  assert.strictEqual(seen.powerMeter.length, 1, 'kept reading S-meter replies as watts');
+  assert.strictEqual(seen.smeter.length, 1);
+});
+
+test('TS-480: key-up cancels a wattmeter read in flight', () => {
+  // Otherwise the S-meter reply that follows key-up is published as watts and
+  // every wattmeter in the app keeps a phantom reading after TX ends.
+  const { codec } = captureWrites(KenwoodCodec, TS480);
+  const watts = [];
+  codec.on('powerMeter', (v) => watts.push(v));
+  codec.getPowerMeter();
+  codec.setTransmit(false);
+  codec.onData(Buffer.from('SM0010;'));
+  assert.deepStrictEqual(watts, []);
+  // A physical key-up seen only in the TX; readback must cancel it too.
+  codec.getPowerMeter();
+  codec.onData(Buffer.from('TX0;'));
+  codec.onData(Buffer.from('SM0010;'));
+  assert.deepStrictEqual(watts, []);
+});
+
+test('a rig with no verified TX power scale reports no watts', () => {
+  // The scale is per-model and hamlib-sourced; guessing one would put
+  // confident nonsense on the meter.
+  const generic = require('../lib/rig-models').GENERIC_CAPS.kenwood;
+  assert.ok(!generic.smTxPowerFull, 'generic Kenwood grew an unverified TX power scale');
+  const { codec, writes } = captureWrites(KenwoodCodec, generic);
+  const watts = [];
+  codec.on('powerMeter', (v) => watts.push(v));
+  codec.getPowerMeter();
+  assert.deepStrictEqual(writes, [], 'polled a wattmeter this rig has no scale for');
+  codec.onData(Buffer.from('SM0010;'));
+  assert.deepStrictEqual(watts, []);
 });
 
 test('a model with NO verified slot table is never altered', () => {

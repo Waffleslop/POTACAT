@@ -216,6 +216,16 @@ html, body {
   gap: 8px;
   min-width: 0;
   overflow: hidden;
+  /* WRAP TO A SECOND LINE rather than clip. This row carries the dial, the
+     split TX frequency, the solar pills and the mode badge, and `overflow:
+     hidden` silently cut the tail off whenever they stopped fitting — which
+     is precisely when SPLIT adds the TX line, or when Android's display-size
+     slider narrows the viewport (LZ3AW: "some data is hiding, when zoomed, or
+     SPLIT is enabled... maybe if this top bar is arranged to be 2 lines").
+     Wrapping costs nothing where there is room: on a wide viewport the row
+     never reaches its own width, so nothing moves. */
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
 .status-right {
@@ -679,7 +689,16 @@ html, body {
   font-size: 12px;
 }
 .rc-custom-cat-editor-row .cce-name { width: 70px; }
-.rc-custom-cat-editor-row .cce-cmd { flex: 1; font-family: monospace; }
+.rc-custom-cat-editor-row .cce-cmd { flex: 1; min-width: 80px; font-family: monospace; }
+/* Toggle/slider rows carry two more fields than a plain button — wrap rather
+   than squeeze them off a phone screen. */
+.rc-custom-cat-editor-row { flex-wrap: wrap; }
+.rc-custom-cat-editor-row .cce-type {
+  background: var(--panel, #16213e); color: var(--text, #eee);
+  border: 1px solid var(--border, #2a3f5f); border-radius: 3px;
+  font-size: calc(11px * var(--ui-scale, 1)); padding: 2px;
+}
+.rc-custom-cat-editor-row .cce-num { width: 52px; font-family: monospace; }
 
 .rc-toggle.active {
   color: var(--pota);

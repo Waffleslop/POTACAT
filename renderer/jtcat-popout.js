@@ -94,6 +94,8 @@ function _applyPopoutTheme(payload) {
     reflectSkipTx1();
     huntCqFallback = !!s.jtcatHuntCqFallback;
     reflectHuntCqFallback();
+    huntSpotted = s.jtcatHuntSpotted !== false; // default on
+    reflectHuntSpotted();
     answerCallers = s.jtcatAnswerCallers !== false; // default on
     reflectAnswerCallers();
     holdTxFreq = !!s.jtcatHoldTxFreq;
@@ -236,6 +238,8 @@ function _applyPopoutTheme(payload) {
   var skipTx1Toggle = document.getElementById('jp-skip-tx1');
   var huntCqFallbackToggle = document.getElementById('jp-hunt-cq-fallback');
   var huntCqFallback = false;
+  var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
+  var huntSpotted = true;   // default on — see main.js jtcatHuntProgramMatch
   var skipTx1 = false;
   var holdTxToggle = document.getElementById('jp-hold-tx');
   var holdTxFreq = false;
@@ -244,6 +248,9 @@ function _applyPopoutTheme(payload) {
   }
   function reflectHuntCqFallback() {
     if (huntCqFallbackToggle) huntCqFallbackToggle.classList.toggle('active', huntCqFallback);
+  }
+  function reflectHuntSpotted() {
+    if (huntSpottedToggle) huntSpottedToggle.classList.toggle('active', huntSpotted);
   }
   function reflectSkipTx1() {
     if (skipTx1Toggle) skipTx1Toggle.classList.toggle('active', skipTx1);
@@ -2373,6 +2380,18 @@ function _applyPopoutTheme(payload) {
       huntCqFallback = !huntCqFallback;
       reflectHuntCqFallback();
       window.api.saveSettings({ jtcatHuntCqFallback: huntCqFallback });
+    });
+  }
+
+  // Hunt spotted activators who call a plain CQ. The spot list is the same
+  // authority a hunter uses by hand; without this, POTA hunt hears an entire
+  // activation and answers none of it because the message says "CQ" and not
+  // "CQ POTA" (feature request 2026-09-02).
+  if (huntSpottedToggle) {
+    huntSpottedToggle.addEventListener('click', function() {
+      huntSpotted = !huntSpotted;
+      reflectHuntSpotted();
+      window.api.saveSettings({ jtcatHuntSpotted: huntSpotted });
     });
   }
 
