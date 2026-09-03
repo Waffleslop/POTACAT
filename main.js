@@ -30390,7 +30390,9 @@ app.whenReady().then(() => {
         if (!settled) {
           settled = true;
           try { port.close(); } catch { /* ignore */ }
-          const hint = allData ? `Got data but no FA response: ${allData.slice(0, 120)}` : 'No response from radio. Check baud rate and cable.';
+          const hint = allData
+            ? `Received data but no valid FA frequency response: ${JSON.stringify(allData.slice(0, 120))}. Check the radio's CAT baud rate and serial settings.`
+            : 'No response from radio. Check baud rate and cable.';
           resolve({ success: false, error: hint });
         }
       }, 5000);
@@ -30409,21 +30411,16 @@ app.whenReady().then(() => {
         allData += text;
         buf += text;
         console.log('[serial-cat-test] rx:', JSON.stringify(text));
-        // Scan for any FA response in the stream (skip startup banners etc.)
-        let semi;
-        while ((semi = buf.indexOf(';')) !== -1) {
-          const msg = buf.slice(0, semi);
-          buf = buf.slice(semi + 1);
-          if (msg.startsWith('FA') && !settled) {
-            settled = true;
-            clearTimeout(timeout);
-            try { port.close(); } catch { /* ignore */ }
-            const hz = parseInt(msg.slice(2), 10);
-            const freqMHz = (hz / 1e6).toFixed(6);
-            resolve({ success: true, frequency: freqMHz });
-            return;
-          }
-        }
+        // A startup banner may not be semicolon-terminated, so scan the whole
+        // stream instead of assuming FA starts a delimited message.
+        const faMatch = /FA(\d{9,11});/.exec(buf);
+        if (!faMatch || settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        try { port.close(); } catch { /* ignore */ }
+        const hz = parseInt(faMatch[1], 10);
+        const freqMHz = (hz / 1e6).toFixed(6);
+        resolve({ success: true, frequency: freqMHz });
       });
 
       port.on('error', (err) => {

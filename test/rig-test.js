@@ -10,6 +10,7 @@ const assert = require('assert');
 const { KenwoodCodec, expand, ssbSideband } = require('../lib/codecs/kenwood-codec');
 const { RigctldCodec } = require('../lib/codecs/rigctld-codec');
 const { CivCodec } = require('../lib/codecs/civ-codec');
+const { CatClient } = require('../lib/cat');
 
 let passed = 0;
 let failed = 0;
@@ -172,6 +173,14 @@ test('Yaesu parse FA response (9 digits)', () => {
   let freq = 0;
   codec.on('frequency', (hz) => { freq = hz; });
   codec.onData('FA014074000;');
+  assert.strictEqual(freq, 14074000);
+});
+
+test('CatClient parses FA response after unterminated startup data', () => {
+  const client = new CatClient();
+  let freq = 0;
+  client.on('frequency', (hz) => { freq = hz; });
+  client._onData(']bFA014074000;');
   assert.strictEqual(freq, 14074000);
 });
 
