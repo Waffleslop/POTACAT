@@ -1291,12 +1291,13 @@
         updateCwEnableBtn();
         // Load WebSDR stations from settings
         if (msg.settings && typeof kiwiLoadStationsE === 'function') kiwiLoadStationsE(msg.settings);
-        // Restore saved JTCAT TX gain to server (TX is not desktop-persisted).
-        // RX gain is DESKTOP-authoritative now — jtcat-rx-gain-state hydrates
-        // our slider at connect; pushing a stale local copy could re-blank the
-        // shack's waterfall (the 2026-07-18 incident, from the other side).
-        var restoredTx = parseInt(localStorage.getItem('echocat-ft8-tx-gain'), 10);
-        if (!isNaN(restoredTx)) ft8Send({ type: 'jtcat-tx-gain', value: (restoredTx / 100) * (restoredTx / 100) });
+        // JTCAT RX *and* TX gain are DESKTOP-authoritative — jtcat-rx-gain-state
+        // / jtcat-tx-gain-state hydrate our sliders at connect. This client used
+        // to push its saved TX copy here ("TX is not desktop-persisted"), which
+        // is precisely how one phone's 5% became the shack's 5% for good: every
+        // later transmission from the desktop keyed the radio with no audio,
+        // and the desktop's own slider still read 100% (NA7C, 2026-09-09 —
+        // the 2026-07-18 blank-waterfall incident, from the transmit side).
         break;
 
       case 'tune-blocked':
@@ -1870,6 +1871,22 @@
             if (rgVal) rgVal.textContent = rgPct + '%';
           }
           try { localStorage.setItem('echocat-ft8-rx-gain', rgPct); } catch (e) {}
+        }
+        break;
+      }
+
+      case 'jtcat-tx-gain-state': {
+        // Same for TX power (2026-09-09). The wire value is the GAIN —
+        // (pct/100)^2, the square curve every TX slider uses — so invert it.
+        var tgPct = Math.round(Math.sqrt(Math.max(0, Number(msg.value))) * 100);
+        if (isFinite(tgPct)) {
+          var tgEl = document.getElementById('ft8-tx-gain');
+          var tgVal = document.getElementById('ft8-tx-gain-val');
+          if (tgEl) {
+            tgEl.value = tgPct;
+            if (tgVal) tgVal.textContent = tgPct + '%';
+          }
+          try { localStorage.setItem('echocat-ft8-tx-gain', tgPct); } catch (e) {}
         }
         break;
       }

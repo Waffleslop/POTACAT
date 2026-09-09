@@ -528,6 +528,8 @@ const GLOBAL_KEYS = new Set([
   'audioInputDeviceId', 'audioOutputDeviceId',  // OS audio device picks
   'jtcatRxGain',       // JTCAT RX gain 0–1 — synced slider, machine audio property
   'jtcatRxGainByBand', // per-band memory for the above (same machine property)
+  'jtcatTxGain',       // JTCAT TX drive 0–1 (gain, square-curve domain) — synced
+                       // slider, machine audio property like jtcatRxGain
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
                        // (same reasoning as lightMode/darkVariant above)
   'mainMicDeviceId', 'mainPlaybackDeviceId',
@@ -988,6 +990,52 @@ function jtcatRxGainFollowBand(hz) {
   if (Math.abs(stored - current) < 0.005) return;   // already there — stay quiet
   sendCatLog(`[JTCAT] RX gain ${Math.round(stored * 100)}% restored for ${band}`);
   applyJtcatRxGain(stored, 'band');
+}
+
+// ── JTCAT TX power — single source of truth (NA7C 2026-09-09) ──────────────
+// The RX slider was made desktop-authoritative on 2026-07-20 (above) because a
+// client pushing its own stale copy blanked the shack's waterfall. The TX
+// slider kept the old arrangement — three unsynced localStorage copies, the
+// ECHOCAT web client re-pushing ITS copy on every connect, the popout slider
+// never told about anyone else's moves, and no log line anywhere saying what
+// level a transmission went out at. Set it low once from a phone, and every
+// later transmission from the shack keys the radio with next to no audio: red
+// TX LED, 0 W, no SWR, nothing in the log — while the desktop slider reads
+// 100%. WSJT-X on the same radio works first try. (NA7C, IC-7300, three
+// weeks of "nobody answers me on FT8".)
+//
+// So: one writer, same shape as applyJtcatRxGain. The value is the GAIN
+// (0–1, the (pct/100)^2 square-curve domain every slider already exchanges),
+// persisted as settings.jtcatTxGain, driving _jtcatDirectTxGainLevel (the
+// Icom-network/tune routes) AND the renderer's playback gain (relayed as
+// jtcat-set-tx-gain, and stamped onto each tx-start payload so the level at
+// the moment of keying is the one recorded here). Every change is LOGGED
+// with its origin, once per adjustment — the line that would have found
+// Ted's problem from the bug report alone.
+// At or below this slider percent the square curve gives a gain under
+// 0.0025 (-52 dB): no radio's MOD level makes RF out of that. Not a refusal —
+// an operator may want a keyed carrier with no tone — but every TX at this
+// level is flagged in the log, on both sides of the IPC.
+const JTCAT_TX_SILENT_PCT = 5;
+let _jtcatTxGainSaveTimer = null;
+function jtcatTxGainPct(gain) { return Math.round(Math.sqrt(Math.max(0, gain)) * 100); }
+function applyJtcatTxGain(value, origin) {
+  let v = Number(value);
+  if (!Number.isFinite(v)) return;
+  v = Math.max(0, Math.min(1, v));
+  settings.jtcatTxGain = v;
+  _jtcatDirectTxGainLevel = v;
+  clearTimeout(_jtcatTxGainSaveTimer);
+  _jtcatTxGainSaveTimer = setTimeout(() => {
+    try { saveSettings(settings); } catch {}
+    // Sliders stream input events; log the settled value once.
+    const who = origin === 'remote' ? 'ECHOCAT client' : origin === 'popout' ? 'JTCAT window' : origin === 'main' ? 'main window' : String(origin || 'unknown');
+    const pct = jtcatTxGainPct(v);
+    sendCatLog(`[JTCAT] TX power set to ${pct}% by the ${who}` + (pct <= JTCAT_TX_SILENT_PCT ? ' — WARNING: effectively silent, the radio will key with no audio (0 W)' : ''));
+  }, 1200);
+  if (origin !== 'main' && win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', v);
+  if (origin !== 'popout' && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-set-tx-gain', v);
+  if (origin !== 'remote' && remoteServer) remoteServer.broadcastJtcatTxGainState({ value: v });
 }
 
 // The one authoritative writer for CW speed — same shape as applyJtcatRxGain.
@@ -2935,11 +2983,6 @@ function clampNumber(value, min, max, fallback) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, n));
-}
-
-function setJtcatDirectTxGainLevel(level) {
-  _jtcatDirectTxGainLevel = clampNumber(level, 0, 1, _jtcatDirectTxGainLevel);
-  return _jtcatDirectTxGainLevel;
 }
 
 function getIcomNetworkTxGain() {
@@ -8582,12 +8625,16 @@ function jtcatFullAutoCqWatchdog() {
 //   - symbolSec: the mode's symbol duration so the renderer's late-skip can
 //     align to symbol boundaries (FT4 = 48ms; FT8/default = 160ms).
 function jtcatRendererTxPayload(data, engine) {
+  // txGain: the authoritative level at the moment of keying (applyJtcatTxGain).
+  // The renderer keeps its own copy in sync over jtcat-set-tx-gain, but the
+  // value that actually goes out should be the one the log says it is.
   const mode = (engine && engine._mode) || 'FT8';
   return {
     samples: (data.samples instanceof Float32Array) ? data.samples : Float32Array.from(data.samples || []),
     offsetMs: data.offsetMs || 0,
     sentAt: Date.now(),
     symbolSec: mode === 'FT4' ? 0.048 : 0.160,
+    txGain: _jtcatDirectTxGainLevel,
   };
 }
 
@@ -14387,6 +14434,10 @@ function connectRemote() {
     // shows the shack's real value (a zeroed slider = blank waterfall) and
     // never pushes its own stale copy.
     remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1 });
+    // TX power — same arrangement since 2026-09-09. The web client used to
+    // push its own saved copy here instead, which is how a phone's 5% became
+    // the shack's 5% for good (NA7C).
+    remoteServer.sendToClient({ type: 'jtcat-tx-gain-state', value: _jtcatDirectTxGainLevel });
     // VFO Profiles — send current list so phone's profiles widget can render
     // immediately. Phone edits push back via 'vfo-profiles-update'.
     remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
@@ -16578,8 +16629,7 @@ function connectRemote() {
     applyJtcatRxGain(value, 'remote');
   });
   remoteServer.on('jtcat-tx-gain', ({ value }) => {
-    setJtcatDirectTxGainLevel(value);
-    if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', value);
+    applyJtcatTxGain(value, 'remote');
   });
 
   // SSTV from ECHOCAT phone — open desktop SSTV popout
@@ -23435,6 +23485,12 @@ app.whenReady().then(() => {
   }
   settings = loadSettings();
   migrateRigSettings(settings);
+  // TX power is persisted now (applyJtcatTxGain). Before this the level
+  // reset to 100% on every launch and whatever client connected first
+  // re-imposed its own copy — headless included.
+  if (typeof settings.jtcatTxGain === 'number' && Number.isFinite(settings.jtcatTxGain)) {
+    _jtcatDirectTxGainLevel = Math.max(0, Math.min(1, settings.jtcatTxGain));
+  }
   // JS8 went native (docs/js8-native-plan.md): the bridge-era settings are
   // retired. Clear them once, loudly, so nobody wonders whether an old cable
   // config is still doing something. js8HeartbeatMin / js8Submode are the
@@ -31778,10 +31834,12 @@ app.whenReady().then(() => {
     return { ok: false, reason: 'Not a standard exchange and longer than 13-char free text' };
   });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
-  ipcMain.on('jtcat-set-tx-gain', (_e, level) => {
-    setJtcatDirectTxGainLevel(level);
-    // Relay TX gain from popout to main renderer
-    if (win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', level);
+  // TX power from any window's slider — one writer, synced everywhere else
+  // (applyJtcatTxGain); the origin is skipped so a dragging slider isn't
+  // fought by its own echo.
+  ipcMain.on('jtcat-set-tx-gain', (e, level) => {
+    const fromPopout = jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e.sender === jtcatPopoutWin.webContents;
+    applyJtcatTxGain(level, fromPopout ? 'popout' : 'main');
   });
   // RX gain reports from any window's slider — synced everywhere else. The JS8
   // popout shares the same value and channel; tag its origin so the echo skips

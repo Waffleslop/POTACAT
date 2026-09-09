@@ -25895,10 +25895,16 @@ if (jtcatRxGainSlider) {
   });
 }
 
-// TX Power slider — attenuates FT8 tone amplitude before audio output
+// TX Power slider — attenuates FT8 tone amplitude before audio output.
+// SYNCED (NA7C 2026-09-09): main's applyJtcatTxGain is the one writer and
+// settings.jtcatTxGain the one stored value, exactly as RX gain has been
+// since 2026-07-20. This slider reports its moves up and adopts everyone
+// else's (popout, ECHOCAT clients) over jtcat-set-tx-gain. localStorage is
+// only a cache for the first paint and a one-time migration source.
 var jtcatTxGainSlider = document.getElementById('jtcat-tx-gain');
 var jtcatTxGainVal = document.getElementById('jtcat-tx-gain-val');
 var jtcatTxGainLevel = 1.0;
+var JTCAT_TX_SILENT_PCT = 5;   // mirrors main.js — square curve gives < 0.0025 gain here
 // TX Pwr uses a square curve: gain = (pct/100)^2
 // This gives fine control at the low end (FT8 sweet spot ~10-20%)
 // and full range at the top. Slider 14% ≈ 0.02 gain, 20% ≈ 0.04 gain.
@@ -25914,25 +25920,41 @@ function syncJtcatTxGainToMain() {
     window.api.jtcatSetTxGain(jtcatTxGainLevel);
   }
 }
-function setJtcatTxGainPct(pct, persist) {
+// Local apply — slider, label, cache. `sync` pushes it to main as an
+// operator change; adopting a relayed value must NOT sync (that echo is
+// exactly the loop the origin-skip in main exists to prevent).
+function setJtcatTxGainPct(pct, sync) {
   pct = clampTxPwrPct(pct);
   jtcatTxGainLevel = txPwrToGain(pct);
   if (jtcatTxGainSlider) jtcatTxGainSlider.value = pct;
   if (jtcatTxGainVal) jtcatTxGainVal.textContent = pct + '%';
-  if (persist) {
+  try {
     localStorage.setItem('jtcat-tx-gain', pct);
     localStorage.setItem('jtcat-tx-gain-user-set', '1');
-  }
-  syncJtcatTxGainToMain();
+  } catch (e) {}
+  if (sync) syncJtcatTxGainToMain();
 }
 
 if (jtcatTxGainSlider) {
   var savedJtcatTxPct = parseInt(localStorage.getItem('jtcat-tx-gain'), 10);
-  var hasUserSavedJtcatTxGain = localStorage.getItem('jtcat-tx-gain-user-set') === '1';
-  var initialJtcatTxPct = hasUserSavedJtcatTxGain && Number.isFinite(savedJtcatTxPct)
-    ? savedJtcatTxPct
-    : parseInt(jtcatTxGainSlider.value, 10);
-  setJtcatTxGainPct(initialJtcatTxPct, false);
+  var hasUserSavedJtcatTxGain = localStorage.getItem('jtcat-tx-gain-user-set') === '1' && Number.isFinite(savedJtcatTxPct);
+  // First paint from the cache, WITHOUT pushing: the persisted setting wins
+  // once it arrives. Pushing here would overwrite a level set from the phone
+  // with this window's stale cache on every launch.
+  jtcatTxGainLevel = txPwrToGain(hasUserSavedJtcatTxGain ? savedJtcatTxPct : clampTxPwrPct(jtcatTxGainSlider.value));
+  if (hasUserSavedJtcatTxGain) {
+    jtcatTxGainSlider.value = savedJtcatTxPct;
+    if (jtcatTxGainVal) jtcatTxGainVal.textContent = savedJtcatTxPct + '%';
+  }
+  window.api.getSettings().then(function (s) {
+    if (s && typeof s.jtcatTxGain === 'number' && isFinite(s.jtcatTxGain)) {
+      jtcatTxGainLevel = Math.max(0, Math.min(1, s.jtcatTxGain));
+      setJtcatTxGainPct(gainToTxPwr(jtcatTxGainLevel), false);
+    } else if (hasUserSavedJtcatTxGain) {
+      // Pre-sync localStorage value — promote it to the synced setting once.
+      setJtcatTxGainPct(savedJtcatTxPct, true);
+    }
+  }).catch(function () {});
   jtcatTxGainSlider.addEventListener('input', function() {
     setJtcatTxGainPct(jtcatTxGainSlider.value, true);
   });
@@ -25945,14 +25967,12 @@ window.api.onJtcatSetRxGain(function(level) {
     jtcatRxGainVal.textContent = Math.round(level * 100) + '%';
   }
 });
-// Accept TX gain from popout or ECHOCAT
+// Accept TX gain from popout or ECHOCAT (relayed by main; never echoed back)
 window.api.onJtcatSetTxGain(function(level) {
-  jtcatTxGainLevel = level;
-  if (jtcatTxGainSlider) {
-    var pct = clampTxPwrPct(gainToTxPwr(level));
-    jtcatTxGainSlider.value = pct;
-    if (jtcatTxGainVal) jtcatTxGainVal.textContent = pct + '%';
-  }
+  level = Number(level);
+  if (!isFinite(level)) return;
+  jtcatTxGainLevel = Math.max(0, Math.min(1, level));
+  setJtcatTxGainPct(gainToTxPwr(jtcatTxGainLevel), false);
 });
 
 function stopJtcatAudio() {
@@ -27417,7 +27437,22 @@ async function playJtcatTxAudio(data) {
 
     var source = jtcatTxAudioCtx.createBufferSource();
     source.buffer = buffer;
-    // TX Power gain node — attenuates FT8 tone to prevent ALC overdrive
+    // TX Power gain node — attenuates FT8 tone to prevent ALC overdrive.
+    // Main stamps the authoritative level onto the payload (applyJtcatTxGain
+    // is the one writer; our copy is its relay), so the level that goes out
+    // is the one the shack's log says it is.
+    if (typeof data.txGain === 'number' && isFinite(data.txGain)) {
+      jtcatTxGainLevel = Math.max(0, Math.min(1, data.txGain));
+    }
+    var txPwrPct = clampTxPwrPct(gainToTxPwr(jtcatTxGainLevel));
+    if (txPwrPct <= JTCAT_TX_SILENT_PCT) {
+      // Not a refusal — but this is the whole symptom of "red TX LED, 0 W,
+      // no SWR, nothing" (NA7C's IC-7300, 2026-09-09), and until now no
+      // line in the log said so.
+      window.api.jtcatLog('[JTCAT TX] WARNING: TX Power is ' + txPwrPct + '% — effectively silent. ' +
+        'The radio will key with no audio (0 W out). Raise the TX Pwr slider in the JTCAT window ' +
+        'or on the ECHOCAT client that set it.');
+    }
     var txGain = jtcatTxAudioCtx.createGain();
     txGain.gain.value = jtcatTxGainLevel;
     source.connect(txGain);
@@ -27486,7 +27521,8 @@ async function playJtcatTxAudio(data) {
     // reports delayed/garbled FT8 TX audio.
     window.api.jtcatLog('[JTCAT TX] starting buffer source: bufDur=' + buffer.duration.toFixed(2) +
       's leadingDelay=' + leadingDelaySec.toFixed(3) + 's skip=' + skipSec.toFixed(2) +
-      's ipcLate=' + ipcLateMs + 'ms ctxState=' + jtcatTxAudioCtx.state);
+      's ipcLate=' + ipcLateMs + 'ms ctxState=' + jtcatTxAudioCtx.state +
+      ' txPwr=' + txPwrPct + '% (gain ' + jtcatTxGainLevel.toFixed(4) + ')');
     try {
       source.start(startTime, skipSec, buffer.duration - skipSec);
     } catch (e) {

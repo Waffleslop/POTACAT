@@ -3457,24 +3457,48 @@ function _applyPopoutTheme(payload) {
     });
   }
 
-  // TX Power slider — persisted in localStorage
+  // TX Power slider — SYNCED through main (settings.jtcatTxGain), the same
+  // arrangement RX gain got on 2026-07-20. Until 2026-09-09 this slider
+  // pushed its moves up but never heard anyone else's, so it read 100%
+  // while a phone had the shack at 5% — a keyed radio putting out 0 W with
+  // nothing on screen to say why (NA7C, IC-7300). localStorage is only the
+  // first-paint cache; the persisted setting wins once it arrives.
   var jpTxGain = document.getElementById('jp-tx-gain');
   var jpTxGainVal = document.getElementById('jp-tx-gain-val');
   // TX Pwr: square curve for fine low-end control (same as main window)
   function txPwrToGain(pct) { return (pct / 100) * (pct / 100); }
-  var savedTxPct = parseInt(localStorage.getItem('jtcat-tx-gain'), 10);
-  if (!isNaN(savedTxPct) && jpTxGain) {
-    jpTxGain.value = savedTxPct;
-    jpTxGainVal.textContent = savedTxPct + '%';
-    popoutTxGainLevel = txPwrToGain(savedTxPct);
+  function gainToTxPwr(gain) { return Math.round(Math.sqrt(Math.max(0, gain)) * 100); }
+  function jpApplyTxGainPct(pct, persistLocal) {
+    pct = Math.round(Number(pct));
+    if (!isFinite(pct)) return;
+    pct = Math.max(0, Math.min(100, pct));
+    if (jpTxGain) {
+      jpTxGain.value = pct;
+      jpTxGainVal.textContent = pct + '%';
+    }
+    popoutTxGainLevel = txPwrToGain(pct);
+    if (persistLocal) { try { localStorage.setItem('jtcat-tx-gain', pct); } catch (e) {} }
   }
+  var savedTxPct = parseInt(localStorage.getItem('jtcat-tx-gain'), 10);
+  if (!isNaN(savedTxPct)) jpApplyTxGainPct(savedTxPct, false);
+  window.api.getSettings().then(function (s) {
+    if (s && typeof s.jtcatTxGain === 'number') {
+      jpApplyTxGainPct(gainToTxPwr(s.jtcatTxGain), true);
+    } else if (!isNaN(savedTxPct) && window.api.jtcatSetTxGain) {
+      // Pre-sync localStorage value — promote it to the synced setting once.
+      window.api.jtcatSetTxGain(txPwrToGain(savedTxPct));
+    }
+  }).catch(function () {});
   if (jpTxGain) {
     jpTxGain.addEventListener('input', function() {
       var pct = parseInt(jpTxGain.value, 10);
-      jpTxGainVal.textContent = pct + '%';
-      popoutTxGainLevel = txPwrToGain(pct);
+      jpApplyTxGainPct(pct, true);
       window.api.jtcatSetTxGain(popoutTxGainLevel);
-      localStorage.setItem('jtcat-tx-gain', pct);
+    });
+  }
+  if (window.api.onJtcatSetTxGain) {
+    window.api.onJtcatSetTxGain(function (level) {
+      jpApplyTxGainPct(gainToTxPwr(Number(level)), true);
     });
   }
 
