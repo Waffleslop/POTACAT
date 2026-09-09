@@ -452,6 +452,10 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSetTxMsg: (text) => ipcRenderer.send('jtcat-set-tx-msg', text),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),
+  // The renderer TX route refused to play because the configured output
+  // device could not be opened (stale id after a USB re-enumeration, device
+  // unplugged). Main logs it and puts the reason on every JTCAT surface.
+  jtcatTxAudioFault: (fault) => ipcRenderer.send('jtcat-tx-audio-fault', fault),
   jtcatAudio: (buf) => ipcRenderer.send('jtcat-audio', buf),
   jtcatLog: (msg) => ipcRenderer.send('jtcat-log', msg),
   jtcatQuietFreq: (hz) => ipcRenderer.send('jtcat-quiet-freq', hz),

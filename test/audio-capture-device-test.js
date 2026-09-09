@@ -99,5 +99,77 @@ test('label, warning and error all reach the CAT log (not just console)', () => 
   assert.ok(/sendCatLog/.test(errBlock), 'audio errors still bypass the session log');
 });
 
+
+// ---------------------------------------------------------------------------
+// JTCAT TX output — the same rule on the transmit side (NA7C 2026-09-09).
+//
+// The renderer TX route used to log a WARNING when the configured output
+// device failed setSinkId and then play the FT8 envelope to the system default
+// anyway — with PTT already asserted by main. A keyed radio, 0 W, no SWR, FT8
+// tones out of the PC speakers, and the only evidence a line in a log nobody
+// had opened. Three weeks, IC-7300, while WSJT-X worked first try.
+const { describeJtcatTxAudioFault } = require('../lib/jtcat-tx-audio-fault');
+const APP = fs.readFileSync(P('renderer', 'app.js'), 'utf8');
+const PRELOAD = fs.readFileSync(P('preload.js'), 'utf8');
+
+function txRouteBlock() {
+  const start = APP.indexOf('async function playJtcatTxAudio(');
+  assert.notStrictEqual(start, -1, 'playJtcatTxAudio not found');
+  const end = APP.indexOf('window.api.onJtcatTxAudio(', start);
+  assert.notStrictEqual(end, -1, 'end of playJtcatTxAudio not found');
+  return APP.slice(start, end);
+}
+
+test('JTCAT TX: a CONFIGURED output that fails setSinkId refuses BEFORE any audio is built', () => {
+  const block = txRouteBlock();
+  const sink = block.indexOf('setSinkId(outputDeviceId)');
+  assert.notStrictEqual(sink, -1, 'no setSinkId on the configured id');
+  const refusal = block.indexOf('jtcatTxAudioFault(', sink);
+  assert.notStrictEqual(refusal, -1, 'the setSinkId failure no longer reports a fault');
+  const buffer = block.indexOf('createBufferSource()', sink);
+  assert.ok(refusal < buffer, 'the fault is reported AFTER the buffer source exists — audio may already be playing');
+  const tail = block.slice(block.lastIndexOf('if (outputDeviceId && !sinkApplied', refusal), buffer);
+  assert.ok(tail.includes('jtcatTxComplete()'), 'the refusal does not drop PTT (jtcatTxComplete)');
+  assert.ok(tail.includes('return;'), 'the refusal does not abandon playback');
+  assert.ok(tail.includes('jtcatTxPlaying = false'), 'the refusal leaves jtcatTxPlaying stuck true');
+});
+
+test('JTCAT TX: raw ALSA ids and the UNCONFIGURED case keep their fallback', () => {
+  // KF1G's alsa:plughw id can never be a Chromium sink and his default WAS the
+  // rig; an unconfigured station may run the CODEC as the Windows default.
+  const block = txRouteBlock();
+  const refusalIf = block.slice(block.indexOf('if (outputDeviceId && !sinkApplied'), block.indexOf('jtcatTxAudioFault('));
+  assert.ok(refusalIf.includes("indexOf('alsa:') !== 0"), 'raw ALSA ids are refused instead of falling back');
+  assert.ok(refusalIf.includes('outputDeviceId &&'), 'an unconfigured output is refused');
+  const unconfigured = block.indexOf('if (!outputDeviceId) {');
+  assert.notStrictEqual(unconfigured, -1, 'the unconfigured branch is gone');
+  assert.ok(block.slice(unconfigured, unconfigured + 400).includes('WARNING: no output device configured'),
+    'the unconfigured case no longer warns');
+});
+
+test('JTCAT TX: the refusal reaches the CAT log, the popout, the main window AND remote clients', () => {
+  const at = MAIN.indexOf("ipcMain.on('jtcat-tx-audio-fault'");
+  assert.notStrictEqual(at, -1, 'main has no handler for the fault');
+  const handler = MAIN.slice(at, at + 1200);
+  assert.ok(handler.includes('sendCatLog('), 'fault bypasses the session log');
+  assert.ok(handler.includes("'jtcat-qso-state', { phase: 'error'"), 'popout never sees the reason');
+  assert.ok(handler.includes("'app-notice'"), 'main window never sees the reason');
+  assert.ok(handler.includes("broadcastJtcatQsoState({ phase: 'error'"), 'web/mobile clients never see the reason');
+  assert.ok(PRELOAD.includes("jtcatTxAudioFault: (fault) => ipcRenderer.send('jtcat-tx-audio-fault'"),
+    'preload does not expose the fault channel');
+});
+
+test('JTCAT TX: the message names the cause, the consequence and the fix', () => {
+  const stale = describeJtcatTxAudioFault({ name: 'NotFoundError', reason: 'Failed to execute setSinkId [NotFoundError]' });
+  assert.ok(stale.startsWith('TX refused'), 'does not lead with what happened');
+  assert.ok(stale.includes('not present') && stale.includes('re-enumerated'), 'stale-id cause not explained');
+  assert.ok(stale.includes('will not key the radio with no audio'), 'consequence not stated');
+  assert.ok(stale.includes('Settings > My Rigs > Audio'), 'does not say where to fix it');
+  const other = describeJtcatTxAudioFault({ name: 'NotAllowedError', reason: 'busy' });
+  assert.ok(other.includes('could not be opened (busy)'), 'non-stale failure loses its reason');
+  assert.ok(other.includes('Settings > My Rigs > Audio'), 'non-stale failure does not say where to fix it');
+  assert.ok(describeJtcatTxAudioFault().includes('could not be opened (unknown error)'), 'no-payload call throws or is blank');
+});
+
 console.log(`\nAudio capture device: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

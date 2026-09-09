@@ -342,6 +342,7 @@ const { SstvEngine } = require('./lib/sstv-engine');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
+const { describeJtcatTxAudioFault } = require('./lib/jtcat-tx-audio-fault'); // renderer TX route refused: configured output device unavailable
 const EventRegistry = require('./lib/event-registry'); // unified Events/Contests registry (roadmap #1 Phase A)
 const { SstvManager } = require('./lib/sstv-manager');
 const sstvPost = require('./lib/sstv-post');
@@ -31854,6 +31855,30 @@ app.whenReady().then(() => {
     console.log('[JTCAT] Auto-CQ mode:', mode);
   });
   ipcMain.on('jtcat-tx-complete', () => { if (ft8Engine) ft8Engine.txComplete(); });
+  // The renderer TX route refused this transmission: the CONFIGURED FT8
+  // output device could not be opened, so it dropped PTT (the tx-complete
+  // above, sent right after this) rather than key the radio with the
+  // envelope playing out of the PC speakers. Main already asserted PTT by
+  // the time the samples reach the renderer — the refusal is why that keyed
+  // radio makes 0 W for a fraction of a second instead of 13 s. Say why on
+  // every surface a JTCAT operator might be looking at: the CAT log (bug
+  // reports), the popout's red toast, the main window's notice, and the
+  // web/mobile clients (jtcat-qso-state phase:'error' is the one channel
+  // they all render). NA7C, 2026-09-09: three weeks of "red TX LED, 0 W"
+  // with the only evidence a WARNING line in a log nobody had opened.
+  ipcMain.on('jtcat-tx-audio-fault', (_e, fault) => {
+    const msg = describeJtcatTxAudioFault(fault);
+    sendCatLog('[JTCAT TX] ' + msg + (fault && fault.idPrefix ? ' (saved id ' + fault.idPrefix + '…)' : ''));
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+    }
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
+    }
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastJtcatQsoState({ phase: 'error', error: msg });
+    }
+  });
 
   // Clock sync (lib/ntp.js). check = measure NTP offset now and rebroadcast;
   // sync = attempt w32tm /resync (needs admin), then re-measure; open-time-

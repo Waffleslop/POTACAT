@@ -27421,14 +27421,48 @@ async function playJtcatTxAudio(data) {
     // Route to the configured output device (DAX TX, USB soundcard, digirig, etc.)
     var sinkApplied = false;
     var sinkError = '';
+    var sinkErrorName = '';
     if (outputDeviceId && jtcatTxAudioCtx.setSinkId) {
       try {
         await jtcatTxAudioCtx.setSinkId(outputDeviceId);
         sinkApplied = true;
       } catch (e) {
-        sinkError = e.message || String(e);
+        sinkErrorName = (e && e.name) || '';
+        sinkError = ((e && e.message) || String(e)) + (sinkErrorName ? ' [' + sinkErrorName + ']' : '');
         console.warn('[JTCAT] Could not set TX audio output device:', sinkError);
       }
+    }
+    // A CONFIGURED output device that cannot be opened is a refusal, not a
+    // fallback — the rule the ECHOCAT bridge adopted for its INPUT device on
+    // 2026-08-28 (N2FSM), applied to the transmit side. Until 2026-09-09 this
+    // path logged a WARNING and played the FT8 envelope to the system default
+    // anyway, with PTT already asserted by main: a keyed radio, 0 W, no SWR,
+    // and FT8 tones coming out of the PC speakers. NA7C's IC-7300 did that
+    // for three weeks after Windows re-enumerated the USB CODEC (his saved
+    // id no longer matched any device), while WSJT-X — which picks its
+    // device by NAME every launch — worked first try. Nothing on screen ever
+    // said why; only the CAT log did, and only if you knew to look.
+    //
+    // Refuse BEFORE any audio plays: drop PTT right away (jtcatTxComplete →
+    // tx-end) and tell main, which puts the reason on the popout, the web
+    // client and the phone, not just in the log. The raw-ALSA case keeps
+    // its fallback (KF1G: the default sink WAS the rig) and an
+    // UNCONFIGURED output keeps playing to the default with a warning —
+    // some stations run the rig's CODEC as the Windows default and have
+    // never picked anything. Only "you chose a device and it is gone"
+    // refuses, and only on the real setSinkId failure: an enumerateDevices
+    // pre-check would false-refuse ids that setSinkId accepts (the
+    // "label unresolved, sink applied" case below).
+    if (outputDeviceId && !sinkApplied && sinkError && outputDeviceId.indexOf('alsa:') !== 0) {
+      jtcatTxPlaying = false;
+      window.api.jtcatTxAudioFault({
+        kind: 'output-unavailable',
+        name: sinkErrorName,
+        reason: sinkError,
+        idPrefix: outputDeviceId.slice(0, 12),
+      });
+      window.api.jtcatTxComplete();
+      return;
     }
 
     var samples = new Float32Array(samplesArray);
@@ -27552,7 +27586,9 @@ async function playJtcatTxAudio(data) {
           window.api.jtcatLog('[JTCAT TX] WARNING: the saved output "' + outputDeviceId + '" is a raw ALSA device — POTACAT cannot play FT8 audio to raw ALSA yet (capture only). Audio is going to the system default output instead; if that default is not your radio, it will not transmit. Pick the PulseAudio/PipeWire device for the same card in Settings > Radio.');
           return;
         }
-        window.api.jtcatLog('[JTCAT TX] WARNING: setSinkId failed (' + sinkError + ') — FT8 audio is on system default, radio will NOT transmit. The saved device is stale or missing. Flex users: make sure the DAX program is running with TX1 mapped to your slice, then re-select the device in Settings.');
+        // Only reachable when this AudioContext has no setSinkId at all (the
+        // refusal above owns every setSinkId FAILURE for a configured id).
+        window.api.jtcatLog('[JTCAT TX] WARNING: this build cannot route audio to a chosen output device (no AudioContext.setSinkId) — FT8 audio is on the system default; if that is not the radio, it will not transmit.');
         return;
       }
       // Windows virtual role devices ("default"/"communications", checked by
