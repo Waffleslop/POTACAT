@@ -7929,32 +7929,27 @@ async function enumerateAudioDevicesAugmented() {
     if (!have) return browser;
     const alsaList = await window.api.alsaListDevices();
     if (!Array.isArray(alsaList) || alsaList.length === 0) return browser;
-    // Group-separator option (purely visual — the deviceId is empty so
-    // the picker can't accidentally select it). Inserted after the
-    // browser-supplied entries so the existing PulseAudio/PipeWire
-    // devices remain on top — same behavior as MSHV's two-section list.
-    const augmented = browser.slice();
-    // INPUTS ONLY. The addon enumerates playback PCMs too, but lib/alsa.js
-    // playback is Phase 2 (unbuilt) and setSinkId cannot open an alsa: id —
-    // offering them as outputs sold a device nothing could play to, and the
-    // audio silently went to system default with a false "will NOT
-    // transmit" warning on every TX (KF1G's IC-7300 CODEC, 2026-08-13).
-    // Re-add the audiooutput branch only when Phase 2 playback ships.
-    augmented.push({ deviceId: '__alsa_separator__', kind: 'audioinput',  label: '── ALSA hardware (raw) ──', isAlsaSeparator: true });
-    for (const d of alsaList) {
-      if (d.kind !== 'audioinput') continue;
-      augmented.push({
-        deviceId: 'alsa:' + d.id,
-        kind: d.kind,
-        label: d.label,
-        groupId: 'alsa',
-        // Pass-through metadata used by future consumer wiring (card +
-        // device numbers let JTCAT/SSTV pick sensible default chunk
-        // sizes per device class).
-        alsaCard: d.card, alsaDevice: d.device, alsaIsPlughw: d.isPlughw,
-      });
-    }
-    return augmented;
+    // NOTHING IS LISTED YET — deliberately, and this is the second time.
+    //
+    // The addon enumerates raw hw:/plughw: PCMs that Chromium hides, and the
+    // plan was to offer them as `alsa:`-prefixed ids for a consumer that reads
+    // them through lib/alsa.js instead of the browser. The enumerate half
+    // shipped; the consumer wiring never did. So every capture path handed an
+    // alsa: id straight to getUserMedia, which has never heard of it, and
+    // failed with OverconstrainedError — the ECHOCAT bridge captured nothing
+    // in a reset loop and JTCAT silently fell back to the default input
+    // (KF1G 2026-09-05, an IC-7300 on Linux).
+    //
+    // The OUTPUT branch was removed on 2026-08-13 for exactly this — same
+    // operator, same trap, one branch over: "offering them as outputs sold a
+    // device nothing could play to". A device the operator can select but
+    // nothing can open is worse than one they cannot see, because the failure
+    // arrives later, somewhere else, and survives reboots.
+    //
+    // Re-add BOTH branches when lib/alsa.js capture/playback is actually wired
+    // to a consumer — not before. The enumeration IPC is left in place so that
+    // day is a small change here rather than a rebuild.
+    return browser;
   } catch (err) {
     console.warn('ALSA enumerate failed:', err && err.message);
     return browser;

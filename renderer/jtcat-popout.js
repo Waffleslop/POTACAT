@@ -3591,8 +3591,14 @@ function _applyPopoutTheme(payload) {
           // Windows endpoint, so saved device ids from before the upgrade all
           // die exactly this way — re-pick the device in Settings > Radio.
           if (window.api.jtcatLog) {
-            window.api.jtcatLog('[JTCAT popout] Saved audio input device not found (' + (e.message || e) +
-              ') — falling back to the DEFAULT input. If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > Radio.');
+            // A raw ALSA id is a different failure from a stale one and needs a
+            // different fix: nothing in the browser capture path can open an
+            // alsa: id, so "re-select your device" is useless advice unless it
+            // also says which entry to pick (KF1G 2026-09-05).
+            const savedId = String(constraints.deviceId && constraints.deviceId.exact || '');
+            window.api.jtcatLog(savedId.indexOf('alsa:') === 0
+              ? '[JTCAT popout] The saved audio input "' + savedId + '" is a raw ALSA device — POTACAT cannot capture FT8 audio from raw ALSA through the browser path. Falling back to the DEFAULT input. Pick the PulseAudio/PipeWire device for the same card in Settings > Radio, not the one under "ALSA hardware (raw)".'
+              : '[JTCAT popout] Saved audio input device not found (' + [e && e.name, e && e.message].filter(Boolean).join(': ') + ') — falling back to the DEFAULT input. If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > Radio.');
           }
           delete constraints.deviceId;
           popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });

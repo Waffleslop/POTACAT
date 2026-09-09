@@ -51,9 +51,31 @@ window.api.onStartAudio(async (config) => {
           audio: { ...baseAudio, deviceId: { exact: config.inputDeviceId } },
         });
       } catch (e) {
+        // NAME the cause. `.message` is empty on the error this fires on most
+        // — OverconstrainedError, a saved deviceId Chromium no longer knows —
+        // so the old text ended at "Reason: " and said nothing at all. KF1G's
+        // 2026-09-05 report had to be diagnosed from a JTCAT line further down
+        // the same log that happened to print `.name` instead. The name is the
+        // actionable half: OverconstrainedError = stale/unknown id,
+        // NotReadableError = another app holds the device, NotAllowedError =
+        // OS/browser permission.
+        const why = [e && e.name, e && e.message].filter(Boolean).join(': ') || String(e);
+        // A raw ALSA id can NEVER be opened by the browser capture path. The
+        // device picker
+        // offers an "ALSA hardware (raw)" section from the addon's own
+        // enumeration (renderer/app.js enumerateAudioDevicesAugmented) and no
+        // browser capture path consumes those ids — so the operator picks a
+        // device that looks right and gets "not found" forever, across reboots.
+        // Exactly the trap the OUTPUT side hit, same operator, three weeks
+        // earlier (KF1G 2026-08-13). Name it and name the fix.
+        const isAlsaId = String(config.inputDeviceId || '').indexOf('alsa:') === 0;
         window.api.sendAudioStatus({
-          error: 'Radio audio input not found, so no audio was captured (the microphone was NOT used). '
-            + 'Pick the radio\'s input again in Settings > My Rigs > Audio. Reason: ' + e.message,
+          error: isAlsaId
+            ? 'The radio audio input is a raw ALSA device ("' + config.inputDeviceId + '"), which the audio bridge cannot open — '
+              + 'no audio was captured (the microphone was NOT used). Pick the PulseAudio/PipeWire entry for the same '
+              + 'card in Settings > My Rigs > Audio, not the one under "ALSA hardware (raw)".'
+            : 'Radio audio input not found, so no audio was captured (the microphone was NOT used). '
+              + 'Pick the radio\'s input again in Settings > My Rigs > Audio. Reason: ' + why,
         });
         return; // no capture at all — see above
       }
