@@ -77,7 +77,16 @@ jobs:
 
   # macOS Apple Silicon (arm64).
   build-macos-arm64:
-    runs-on: macos-latest # arm64 on the M-series runner image
+    # PINNED, and it must stay pinned. macos-latest rolled forward between
+    # v1.10.14 (2026-09-02, green) and v1.10.15 (2026-09-09), and on the newer
+    # image electron-builder's codesign step dies with
+    #   security: SecKeychainUnlock: The user name or passphrase you entered is not correct
+    # — with the SAME secrets that build-macos-x64 signs with successfully on
+    # macos-14. Two consecutive reruns failed identically, so it is the image,
+    # not the documented one-arch keychain flake. Same lesson as windows-2022
+    # above: a -latest runner is a dependency that changes without a commit.
+    # macos-14 is an M-series host, so this is still a native arm64 build.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
