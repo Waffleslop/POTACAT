@@ -504,7 +504,7 @@
       <div id="activator-counter" class="activator-counter" title="Contacts logged (10 = valid activation)">0</div>
       <div class="act-btn-group">
         <button id="activator-map-btn" class="act-btn-group-item" title="Open activation map">Map</button>
-        <button id="activator-spots-btn" class="act-btn-group-item" title="Show/hide hunter spots">Spots</button>
+        <button id="activator-spots-btn" class="act-btn-group-item" title="Show/hide the hunter spot list below, to work park-to-park while activating">Hunt</button>
         <button id="activator-spots-popout-btn" class="act-btn-group-item act-btn-group-narrow" title="Pop out spots window">&#x2197;</button>
         <button id="activator-rbn-btn" class="act-btn-group-item hidden" title="Show/hide Propagation (RBN + PSKReporter)">Prop</button>
       </div>
@@ -551,6 +551,12 @@
         <div id="activator-hunter-dropdown" class="activator-dropdown hidden"></div>
       </div>
       <button id="activator-log-btn" class="activator-log-btn" title="Log contact (Enter)">Log</button>
+      <button id="activator-clear-btn" class="activator-clear-btn" title="Clear this entry (the contact was not made). Does not move the radio.">Clear</button>
+      <button id="activator-atu-btn" class="activator-atu-btn" title="Run an antenna-tuner cycle on this frequency">ATU</button>
+      <span id="activator-home-chip" class="activator-home-chip hidden">
+        <button id="activator-home-btn" class="activator-home-btn" title="Return to your calling frequency and clear this entry">&#x21A9; --</button>
+        <button id="activator-home-dismiss" class="activator-home-dismiss" title="Stay on this frequency — stop offering to return">&times;</button>
+      </span>
     </div>
     <div id="activator-history-panel" class="activator-history-panel hidden">
       <div class="activator-history-header">
@@ -4301,6 +4307,7 @@
   <script src="../lib/rig-gain-steps.js"></script>
   <script src="../lib/spot-mute-rules.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
+  <script src="../lib/activation-program.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>
   <script src="app.js"></script>

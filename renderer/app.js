@@ -446,7 +446,7 @@ let qrzFullName = false; // show first+last or just first
 
 // --- Activator Mode State ---
 let appMode = 'hunter'; // 'hunter' or 'activator'
-let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP'}, ...]  max MAX_N_FER
+let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP', program:'POTA'}, ...]  max MAX_N_FER
 let activatorCrossRefs = [];  // [{program:'WWFF', ref:'KFF-1234'}, {program:'LLOTA', ref:'LLCL-0001'}]
 let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
 let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF', program:'POTA'}]  max MAX_N_FER, resets per QSO; program drives ADIF SIG (default POTA)
@@ -480,24 +480,35 @@ function isActivatorDupe(call, freqKhz, mode) {
     if (!c.callsign || c.callsign.toUpperCase() !== upper) continue;
     // Compare modes (normalized)
     if (targetMode && c.mode && normalizeMode(c.mode) !== targetMode) continue;
-    // Compare bands (derived from the stored kHz frequency)
-    if (band && c.frequency) {
-      const cb = freqToBandActivator(Math.round(parseFloat(c.frequency)));
-      if (cb !== band) continue;
-    }
-    // Compare UTC date
-    const ts = c.timestamp ? new Date(c.timestamp) : null;
-    if (ts) {
-      const ud = ts.getUTCFullYear().toString() +
-        String(ts.getUTCMonth() + 1).padStart(2, '0') +
-        String(ts.getUTCDate()).padStart(2, '0');
-      if (ud !== todayUtc) continue;
-    }
+    // Compare bands. This read c.frequency and c.timestamp — fields no
+    // contact has ever carried (they are freqDisplay/timeUtc/band), so BOTH
+    // guards silently no-opped and this degraded to "same call, same mode,
+    // any band, any day". Working a station on 40m and again on 20m — which
+    // is exactly what hunting P2P across bands produces — raised a false
+    // dupe warning on a legitimate contact.
+    // Case-insensitive: ADIF spells bands 20M while freqToBandActivator
+    // returns 20m, and a contact can reach this list from either direction.
+    if (band && c.band && String(c.band).toUpperCase() !== String(band).toUpperCase()) continue;
+    // Compare UTC date. Where a contact genuinely has no date, SKIP the
+    // guard rather than inventing one — an absent field degrades to today's
+    // behaviour instead of a confidently wrong answer.
+    const cDate = c.qsoData && c.qsoData.qsoDate;
+    if (cDate && cDate !== todayUtc) continue;
     return c;
   }
   return null;
 }
 let activatorFreqKhz = 0;  // from CAT
+// Raw Hz from CAT. activatorFreqKhz is rounded, so returning to an SSB
+// station on 14285.5 would land on 14286.0 — audibly wrong.
+let activatorFreqHz = 0;
+// The frequency the operator was CALLING on before they clicked a P2P spot.
+// 0 means they are at home / not on an excursion — the variable IS the state.
+// Home is never `set`; it is snapshotted at the moment of a known excursion,
+// which is why an intentional QRG change needs no detection: it is simply
+// the ABSENCE of an excursion. See the block above fillActivatorFromSpot.
+let activatorHomeFreqHz = 0;
+let activatorHomeMode = '';
 let activationActive = false; // true while activation is running
 let activationStartTime = 0;  // Date.now() when activation started
 let activationTimerInterval = null;
@@ -507,6 +518,13 @@ let activatorSpotsVisible = false; // show hunter spot table below activator vie
 function primaryParkRef() { return activatorParkRefs[0]?.ref || ''; }
 /** Get primary activator park name */
 function primaryParkName() { return activatorParkRefs[0]?.name || ''; }
+/** The award program the operator is ACTIVATING under — POTA unless the
+ *  primary ref says otherwise. Every mySig used to be the literal 'POTA',
+ *  so a SOTA/WWFF/LLOTA/WWBOTA activator got MY_SIG=POTA on every contact. */
+function primaryProgram() { return ActivationProgram.primaryProgram(activatorParkRefs); }
+/** Every {sig, ref} this activation counts for — primaries then cross-refs,
+ *  deduped. See lib/activation-program.js for why the dedupe is load-bearing. */
+function activationMyRefs() { return ActivationProgram.activationMyRefs(activatorParkRefs, activatorCrossRefs); }
 
 /** Clean up QRZ name: title-case fully-uppercase / fully-lowercase
  *  input, drop trailing single-letter middle initial, preserve names
@@ -541,19 +559,12 @@ function autoPotaPrefix(ref, callsign) {
   return ref;
 }
 
-/** Infer a hunter park ref's program from its shape, for refs typed directly
- *  into the P2P field (autocomplete/spot-click paths carry an explicit
- *  program). Without this, a summit-to-park or WWFF P2P typed by hand logs
- *  SIG=POTA with a non-POTA ref — wrong credit on the other op's side.
- *  Shapes: SOTA W4C/CM-001 (slash), WWFF KFF-1234 (FF- designator),
- *  WWBOTA B/US-1234 (B/ prefix, checked before the generic slash). */
-function inferParkProgram(ref) {
-  const r = (ref || '').toUpperCase();
-  if (/^B\//.test(r)) return 'WWBOTA';
-  if (r.includes('/')) return 'SOTA';
-  if (/FF-\d/.test(r)) return 'WWFF';
-  return 'POTA';
-}
+/** Infer a park ref's program from its shape. Moved to lib/activation-program.js
+ *  so main, the renderer and the tests share one definition — and so the
+ *  reason it is only ever a SEEDER lives with it: an LLOTA ref (LLCL-0001)
+ *  is indistinguishable from a POTA one (US-0512), so the program is STORED
+ *  on each ref and this is never called at log time. */
+const inferParkProgram = ActivationProgram.inferParkProgram;
 
 /** Build display name from QRZ info, respecting full-name setting.
  *  Prefers nickname over fname when available. */
@@ -1764,7 +1775,14 @@ async function loadPrefs() {
     appMode = 'activator';
     // Restore activator parks — migrate from legacy single string to array
     if (settings.activatorParkRefs && Array.isArray(settings.activatorParkRefs) && settings.activatorParkRefs.length) {
-      activatorParkRefs = settings.activatorParkRefs;
+      activatorParkRefs = ActivationProgram.normalizeParkRefs(settings.activatorParkRefs);
+      // Refs saved before `program` existed get it seeded here. Re-save only
+      // when something was actually missing: main reads this straight out of
+      // settings, so without the write-back a resumed activation would log
+      // the right program over SSB and POTA over FT8 — a split log.
+      if (settings.activatorParkRefs.some(r => r && r.ref && !r.program)) {
+        window.api.saveSettings({ activatorParkRefs });
+      }
       activatorParkRefInput.value = primaryParkRef();
       activatorParkNameEl.textContent = primaryParkName();
       updateParkExtraBadge();
@@ -1796,7 +1814,7 @@ async function loadPrefs() {
         });
       }
     } else if (settings.activatorParkRef) {
-      activatorParkRefs = [{ ref: settings.activatorParkRef, name: '' }];
+      activatorParkRefs = ActivationProgram.normalizeParkRefs([{ ref: settings.activatorParkRef, name: '' }]);
       activatorParkRefInput.value = settings.activatorParkRef;
       window.api.getPark(settings.activatorParkRef).then(park => {
         if (park) {
@@ -3496,7 +3514,7 @@ async function saveBannerQso() {
         // semantic. The activation ends with endActivation(), which clears
         // the flag and stops the auto-inject.
         ...(activationActive && activatorParkRefs.length > 0
-          ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
+          ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
           : {}),
         // Only respot on the first callsign
         respot: ci === 0 && wantsRespot && type === 'pota',
@@ -3541,10 +3559,11 @@ async function saveBannerQso() {
       // their own MY_SIG record. Best-effort so a failed extra never unwinds
       // the saved QSO.
       if (activationActive && activatorParkRefs.length > 0) {
-        const extraMyRefs = [
-          ...activatorParkRefs.slice(1).map(p => ({ sig: 'POTA', ref: p.ref })),
-          ...activatorCrossRefs.map(xr => ({ sig: (xr.program || 'WWFF').toUpperCase(), ref: xr.ref })),
-        ];
+        // activationMyRefs() is primaries-then-cross-refs, deduped and in
+        // order, so [0] is the ref the record above already carries and the
+        // tail is exactly the extras — with the primary/X-Ref duplicate a
+        // non-POTA activator used to have to create by hand now collapsed.
+        const extraMyRefs = activationMyRefs().slice(1);
         const parkOneRecords = savedForCall.slice();
         for (const mr of extraMyRefs) {
           for (const base of parkOneRecords) {
@@ -10834,7 +10853,7 @@ function openQuickLog() {
   // Pass current rig freq/mode + any active activation context so a ragchew
   // during an activation is still tagged with mySig/mySigInfo on save.
   const activationCtx = (activationActive && activatorParkRefs.length > 0)
-    ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
+    ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
     : null;
   // If a spot is currently tuned (user QSY'd via the table), pre-fill the
   // callsign from that spot — operator hits Ctrl+L right after tuning,
@@ -12654,7 +12673,7 @@ function routeLogForSpot(spot) {
   const p = detectSpotPrograms(spot);
   const type = p.types[0] || 'dx';
   const activationCtx = (activationActive && activatorParkRefs.length > 0)
-    ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
+    ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
     : null;
   window.api.openLogPopout({
     callsign: spot.callsign || '',
@@ -13016,7 +13035,7 @@ logSaveBtn.addEventListener('click', async () => {
         // see the banner-logger comment above (Dean/Bob report). Gate is
         // activationActive only, not appMode.
         ...(activationActive && activatorParkRefs.length > 0
-          ? { mySig: 'POTA', mySigInfo: activatorParkRefs[0].ref }
+          ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
           : {}),
         // Only respot on the first callsign
         respot: ci === 0 && wantsRespot,
@@ -13067,10 +13086,11 @@ logSaveBtn.addEventListener('click', async () => {
       // park 1 only). Best-effort: a failed extra record must not unwind the
       // already-saved QSO.
       if (activationActive && activatorParkRefs.length > 0) {
-        const extraMyRefs = [
-          ...activatorParkRefs.slice(1).map(p => ({ sig: 'POTA', ref: p.ref })),
-          ...activatorCrossRefs.map(xr => ({ sig: (xr.program || 'WWFF').toUpperCase(), ref: xr.ref })),
-        ];
+        // activationMyRefs() is primaries-then-cross-refs, deduped and in
+        // order, so [0] is the ref the record above already carries and the
+        // tail is exactly the extras — with the primary/X-Ref duplicate a
+        // non-POTA activator used to have to create by hand now collapsed.
+        const extraMyRefs = activationMyRefs().slice(1);
         const parkOneRecords = savedForCall.slice();
         for (const mr of extraMyRefs) {
           for (const base of parkOneRecords) {
@@ -18372,7 +18392,14 @@ window.api.onCatAlc((val) => {
   const pct = Math.min(1, val / 255);
   const color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
   drawMeterBar(alcBarCanvas, pct, pct <= 0 ? '#333' : color);
-  alcTextEl.textContent = pct <= 0 ? '—' : Math.round(pct * 100) + '%';
+  // A reading of ZERO is a reading. Rendering it as an em dash made it
+  // identical to "this rig reports no ALC at all", so a K3 running with
+  // drive set correctly — no ALC action, which is how Elecraft tell you to
+  // run it — looked like a broken meter (jbkerkhoff 2026-09-03, whose SWR
+  // worked on the same rig in the same session). The dash now means only
+  // "nothing has arrived yet": it is the markup's initial text, and the
+  // first callback replaces it, zero or not.
+  alcTextEl.textContent = Math.round(pct * 100) + '%';
   alcTextEl.style.color = color;
 });
 
@@ -18456,11 +18483,25 @@ catLogClearBtn.addEventListener('click', () => {
     const s = await window.api.getSettings();
     const rigs = s.rigs || [];
     const activeRig = rigs.find(r => r.id === s.activeRigId) || rigs[0];
+    // NOTE the `|| rigs[0]` above: when activeRigId matches nothing, this line
+    // still names a rig, which reads as "a rig is active" when none is. Say so.
+    const rigActive = !!(activeRig && activeRig.id === s.activeRigId);
     const rigDesc = activeRig
       ? [activeRig.name, activeRig.model, activeRig.catTarget && activeRig.catTarget.type,
          activeRig.catTarget && (activeRig.catTarget.host ? activeRig.catTarget.host + ':' + activeRig.catTarget.port : activeRig.catTarget.path)]
-        .filter(Boolean).join(' / ')
+        .filter(Boolean).join(' / ') + (rigActive ? '' : '  [NOT THE ACTIVE RIG — activeRigId matches nothing]')
       : '(none configured)';
+    // Two settings silently stop POTACAT touching the local radio, and neither
+    // was in this report — so a log with no CAT lines at all was unreadable
+    // (KK4UDJ 2026-09-03). Operating a remote shack skips the local connect by
+    // design; WSJT-X integration hands the radio over on purpose.
+    const remoteTarget = s.activeTargetId &&
+      (s.connectionTargets || []).find((t) => t && t.id === s.activeTargetId);
+    const radioOwner = remoteTarget
+      ? 'REMOTE SHACK — ' + (remoteTarget.name || remoteTarget.host || 'unnamed target') +
+        ' (the local rig is deliberately not connected)'
+      : s.enableWsjtx ? 'WSJT-X integration is ON (POTACAT releases the radio to WSJT-X)'
+      : 'this station';
     const enabled = [
       s.enablePota && 'POTA', s.enableSota && 'SOTA', s.enableWwff && 'WWFF', s.enableLlota && 'LLOTA', s.enableWwbota && 'WWBOTA',
       s.enableCluster && 'DX-Cluster', s.enableCwSpots && 'CW-Spots', s.enableRbn && 'RBN',
@@ -18472,6 +18513,7 @@ catLogClearBtn.addEventListener('click', () => {
       platform: window.api.platform,
       rig: rigDesc,
       callsign: (s.myCallsign || '(not set)').toUpperCase(),
+      radioOwner,
       features: enabled,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
@@ -18527,6 +18569,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Platform:** ' + md.platform,
       '**Rig:** ' + md.rig,
       '**Callsign:** ' + md.callsign,
+      '**Radio controlled by:** ' + md.radioOwner,
       '**Features enabled:** ' + md.features,
       '',
       '### What I tried to do',
@@ -20764,6 +20807,9 @@ function rigApplyCapabilities(caps) {
   rigPopulateAgcOptions(caps);
   rigPopulatePowerChoices(caps);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
+  // Same gate as the rig popover's button, from the same caps payload — a
+  // rig with no tuner (internal or external) gets no dead ATU button.
+  if (activatorAtuBtn) activatorAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
   if (rigWnbBtn) rigWnbBtn.style.display = caps.wnb ? '' : 'none';
   rigPowerOnBtn.style.display = caps.power ? '' : 'none';
@@ -22798,6 +22844,11 @@ const activatorCallsignInput = document.getElementById('activator-callsign');
 const activatorOpNameEl = document.getElementById('activator-op-name');
 const activatorStateInput = document.getElementById('activator-state');
 const activatorLogBtn = document.getElementById('activator-log-btn');
+const activatorClearBtn = document.getElementById('activator-clear-btn');
+const activatorAtuBtn = document.getElementById('activator-atu-btn');
+const activatorHomeChip = document.getElementById('activator-home-chip');
+const activatorHomeBtn = document.getElementById('activator-home-btn');
+const activatorHomeDismiss = document.getElementById('activator-home-dismiss');
 const activatorLogBody = document.getElementById('activator-log-body');
 const activatorExportBtn = document.getElementById('activator-export');
 const activatorSpotBtn = document.getElementById('activator-spot-btn');
@@ -22863,6 +22914,7 @@ function setAppMode(mode) {
     // Seed freq/mode from current CAT state
     if (radioFreqKhz) {
       activatorFreqKhz = radioFreqKhz;
+      activatorFreqHz = radioFreqKhz * 1000;
       activatorFreqInput.value = (radioFreqKhz / 1000).toFixed(3);
       updateActivatorBandLabel(radioFreqKhz);
     }
@@ -22873,6 +22925,10 @@ function setAppMode(mode) {
     updateActivatorUtc();
     // Update activation UI state
     updateActivationUi();
+    // The activator onCatFrequency listener early-returns while the hunter
+    // view is up, so the arrival check that clears home is dormant there.
+    // Re-sync the chip on the way back in.
+    updateActivatorHomeUi();
     // Trigger parks DB load
     window.api.fetchParksDb('auto');
   } else {
@@ -22914,7 +22970,11 @@ function applyActivatorSpotsLayout() {
     if (mainEl) mainEl.classList.remove('hidden');
     // Restore saved height or use default
     const savedHeight = localStorage.getItem(ACTIVATOR_SPLIT_KEY);
-    activatorView.style.height = savedHeight || '40%';
+    // Bob N7FQT, revising his own mockup: "put the hunter display in the
+    // bottom quarter of the display to leave room for the logged activator
+    // records". The splitter and its saved height are untouched, so anyone
+    // who has already dragged it keeps what they chose.
+    activatorView.style.height = savedHeight || '75%';
     render();
   } else {
     document.body.classList.remove('activator-spots-on');
@@ -23080,7 +23140,11 @@ function resumeActivation(activation) {
   const primarySig = (activation.sig || 'POTA').toUpperCase();
   const mainRefs = refs.filter(r => (r.sig || 'POTA').toUpperCase() === primarySig);
   const crossRefs = refs.filter(r => (r.sig || 'POTA').toUpperCase() !== primarySig);
-  activatorParkRefs = mainRefs.map(r => ({ ref: r.ref, name: '' }));
+  // Carry the program through: r.sig is MY_SIG read back out of the log, so
+  // the resumed activation keeps its real program instead of reverting to
+  // POTA. Line ~23151 below has always honoured r.sig for the RESTORED
+  // contacts; without this, only the NEW ones came out wrong.
+  activatorParkRefs = mainRefs.map(r => ({ ref: r.ref, name: '', program: (r.sig || 'POTA').toUpperCase() }));
   activatorCrossRefs = crossRefs.map(r => ({ program: (r.sig || '').toUpperCase(), ref: r.ref }));
   hunterParkRefs = [];
   activatorParkRefInput.value = mainRefs.map(r => r.ref).join(',');
@@ -23150,6 +23214,7 @@ function resumeActivation(activation) {
 /** Common activation start logic (used by start, continue, and resume) */
 function beginActivation() {
   activationActive = true;
+  clearActivatorHome();
   // Tell MAIN the activation is running (W7RTA 2026-07-18): the JTCAT/WSJT-X
   // auto-log paths gate park-stamping + activation-list pushes in main, which
   // previously keyed off settings.appMode — the VIEW — so pressing "← Hunter"
@@ -23170,6 +23235,7 @@ function beginActivation() {
 /** Stop the current activation */
 function stopActivation() {
   activationActive = false;
+  clearActivatorHome();
   window.api.saveSettings({ activationActive: false });
   if (activationTimerInterval) {
     clearInterval(activationTimerInterval);
@@ -23989,7 +24055,7 @@ if (activatorParkRefInput) {
 }
 
 function selectPark(park) {
-  activatorParkRefs = [{ ref: park.reference, name: park.name || '' }];
+  activatorParkRefs = ActivationProgram.normalizeParkRefs([{ ref: park.reference, name: park.name || '' }]);
   activatorParkRefInput.value = park.reference;
   activatorParkNameEl.textContent = park.name || '';
   activatorParkDropdown.classList.add('hidden');
@@ -24020,7 +24086,7 @@ function selectParkMulti(park) {
 
   // Rebuild activatorParkRefs from the full input
   const segments = activatorParkRefInput.value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-  activatorParkRefs = segments.map(ref => ({ ref, name: '' }));
+  activatorParkRefs = ActivationProgram.normalizeParkRefs(segments.map(ref => ({ ref, name: '' })));
   // Fill in the selected park's name for the last one
   activatorParkRefs[activatorParkRefs.length - 1].name = park.name || '';
 
@@ -24059,7 +24125,9 @@ function parseCommaSeparatedParks(segments) {
     const existing = activatorParkRefs.find(p => p.ref === ref);
     return existing || { ref, name: '' };
   });
-  activatorParkRefs = newRefs;
+  // normalize preserves an existing program, so a value the operator
+  // corrected survives every keystroke that rebuilds this list.
+  activatorParkRefs = ActivationProgram.normalizeParkRefs(newRefs);
 
   if (activatorParkRefs.length > 0) {
     activatorStartBtn.disabled = false;
@@ -24077,10 +24145,10 @@ function finalizeCommaSeparatedParks() {
     .map(ref => autoPotaPrefix(ref, myCallsign));
   if (segments.length === 0) return;
 
-  activatorParkRefs = segments.map(ref => {
+  activatorParkRefs = ActivationProgram.normalizeParkRefs(segments.map(ref => {
     const existing = activatorParkRefs.find(p => p.ref === ref);
     return existing || { ref, name: '' };
-  });
+  }));
   updateParkDisplay(); // reflect auto-prefixed refs back into the input
 
   // Look up names for refs we don't have; a miss flags the ref unknown.
@@ -24305,22 +24373,19 @@ async function activatorLogContact() {
       myGridsquare: activatorParkGrid || '',
     };
 
-    // Cross-product: one ADIF record per MY_SIG_INFO × SIG_INFO combination
+    // Cross-product: one ADIF record per MY_SIG_INFO × SIG_INFO combination.
+    // Primary refs and cross-program refs come from ONE deduped list. Before
+    // this, mySig here was the literal 'POTA', so a SOTA activator had to
+    // enter the summit twice — primary field (logged POTA, wrong) plus the
+    // X-Ref slot (logged SOTA, right) — and their upload worked only because
+    // of that second record. Now the primary reports its real program, those
+    // two ARE the same record, and activationMyRefs() collapses them.
+    // MY_SOTA_REF / MY_WWFF_REF / MY_LLOTA_REF need no explicit assignment:
+    // buildAdifRecord derives each from mySig (lib/adif-writer.js:89-92).
     const allQsoData = [];
-    for (const myPark of myParks) {
+    for (const myRef of activationMyRefs()) {
       for (const theirPark of theirParks) {
-        const qsoData = { ...baseFields, mySig: 'POTA', mySigInfo: myPark.ref };
-        if (theirPark) { qsoData.sig = theirPark.program || 'POTA'; qsoData.sigInfo = theirPark.ref; }
-        allQsoData.push(qsoData);
-      }
-    }
-    // Cross-program records: WWFF/LLOTA refs for the same physical park
-    for (const xr of activatorCrossRefs) {
-      for (const theirPark of theirParks) {
-        const qsoData = { ...baseFields, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref };
-        if (xr.program === 'SOTA') qsoData.mySotaRef = xr.ref;
-        else if (xr.program === 'WWFF') qsoData.myWwffRef = xr.ref;
-        else if (xr.program === 'LLOTA') qsoData.myLlotaRef = xr.ref;
+        const qsoData = { ...baseFields, mySig: myRef.sig, mySigInfo: myRef.ref };
         if (theirPark) { qsoData.sig = theirPark.program || 'POTA'; qsoData.sigInfo = theirPark.ref; }
         allQsoData.push(qsoData);
       }
@@ -24410,12 +24475,28 @@ async function activatorLogContact() {
   updateActivatorCounter();
   renderActivatorLog();
 
-  // Clear and refocus
+  clearActivatorEntry();
+}
+
+/**
+ * Empty the quick-log entry row. One definition, shared by the Clear button
+ * and the tail of a successful log so the two can never drift.
+ *
+ * This is not cosmetic. hunterParkRefs was reset ONLY on the success path,
+ * so clicking a P2P spot, failing to work them, and then logging the next
+ * caller to your own CQ exported that QSO with SIG/SIG_INFO naming a park
+ * you never worked — a false park-to-park credit, uploaded to POTA.
+ *
+ * Deliberately does NOT move the radio and does NOT forget where home is:
+ * every other control in this row is a text field, and an operator clearing
+ * a mistyped callsign mid-listen must not have the rig walk away from the
+ * QSO they are about to make. The return chip is the control that moves it.
+ */
+function clearActivatorEntry() {
   activatorCallsignInput.value = '';
   activatorOpNameEl.textContent = '';
   if (activatorStateInput) activatorStateInput.value = '';
   resetActivatorRst();
-  // Reset hunter parks for next QSO
   hunterParkRefs = [];
   updateHunterParkDisplay();
   activatorCallsignInput.focus();
@@ -24423,6 +24504,34 @@ async function activatorLogContact() {
 
 if (activatorLogBtn) {
   activatorLogBtn.addEventListener('click', activatorLogContact);
+}
+if (activatorClearBtn) {
+  activatorClearBtn.addEventListener('click', clearActivatorEntry);
+}
+if (activatorAtuBtn) {
+  // Momentary, exactly like every other ATU control in the app: each press
+  // starts a tune cycle. NOT a toggle — a tune button that bypasses the
+  // tuner on the second tap is surprising. main's atu-tune dispatcher owns
+  // the Flex API / CAT / external-RF-sense split and clears the SWR latch.
+  let activatorAtuTimer = null;
+  activatorAtuBtn.addEventListener('click', () => {
+    window.api.rigControl({ action: 'atu-tune' });
+    activatorAtuBtn.classList.add('tuning');
+    if (activatorAtuTimer) clearTimeout(activatorAtuTimer);
+    activatorAtuTimer = setTimeout(() => {
+      activatorAtuBtn.classList.remove('tuning');
+      activatorAtuTimer = null;
+    }, 5000);
+  });
+}
+if (activatorHomeBtn) {
+  activatorHomeBtn.addEventListener('click', returnActivatorHome);
+}
+if (activatorHomeDismiss) {
+  // "Stay here" — the escape valve for every case the arrival check cannot
+  // see: a knob QSY to a new calling QRG while away, or CAT dropping mid
+  // excursion. Without it the chip could get stuck offering a dead frequency.
+  activatorHomeDismiss.addEventListener('click', clearActivatorHome);
 }
 
 // Enter key in callsign or RST fields triggers log
@@ -24543,9 +24652,16 @@ if (activatorSpotBtn) {
     const ref = primaryParkRef();
     if (!ref) { showLogToast('Set a park reference first', { warn: true }); return; }
     if (!myCallsign) { showLogToast('Set your callsign in Settings first', { warn: true }); return; }
-    const freq = activatorFreqKhz;
+    // While away on a P2P excursion the radio — and therefore
+    // activatorFreqKhz and the mode select — is on the OTHER activator's
+    // frequency. Spotting that would send every POTA hunter piling onto
+    // somebody else's QSO. Always self-spot the calling frequency.
+    const away = !!activatorHomeFreqHz;
+    const freq = away ? Math.round(activatorHomeFreqHz / 1000) : activatorFreqKhz;
     if (!freq) { showLogToast('No frequency — tune your radio first', { warn: true }); return; }
-    const mode = document.getElementById('activator-mode').value || _currentMode || 'SSB';
+    const mode = (away && activatorHomeMode)
+      ? activatorHomeMode
+      : (document.getElementById('activator-mode').value || _currentMode || 'SSB');
     try {
       const result = await window.api.quickRespot({
         callsign: myCallsign,
@@ -24556,7 +24672,9 @@ if (activatorSpotBtn) {
         comment: `${myCallsign} activating ${ref} via POTACAT`,
       });
       if (result && result.success) {
-        showLogToast(`Spotted on POTA: ${ref} ${Math.round(freq)} kHz ${mode}`);
+        showLogToast(away
+          ? `Spotted on your calling frequency: ${ref} ${Math.round(freq)} kHz ${mode}`
+          : `Spotted on POTA: ${ref} ${Math.round(freq)} kHz ${mode}`);
       } else {
         showLogToast('Self-spot failed: ' + (result?.error || 'unknown error'), { warn: true });
       }
@@ -24910,11 +25028,20 @@ window.api.onCatFrequency((hz) => {
   if (appMode !== 'activator') return;
   const khz = Math.round(hz / 1000);
   activatorFreqKhz = khz;
+  activatorFreqHz = hz;
   // Only update the input if it's not focused (don't fight the user while typing)
   if (document.activeElement !== activatorFreqInput) {
     activatorFreqInput.value = (khz / 1000).toFixed(3);
   }
   updateActivatorBandLabel(khz);
+  // The ONLY writer that clears home on a return. The tune can be refused —
+  // VFO lock, no rig connected, Guest Pass — and if the chip cleared itself
+  // optimistically it would vanish while the radio never moved, taking the
+  // operator's only way back with it and saying nothing. Confirming arrival
+  // instead means every failure degrades to 'the chip stays up', which is
+  // the honest outcome. It also handles a return made by hand on the knob.
+  // 500 Hz matches the spot-match tolerance used elsewhere in this file.
+  if (activatorHomeFreqHz && Math.abs(hz - activatorHomeFreqHz) < 500) clearActivatorHome();
 });
 
 window.api.onCatMode((mode) => {
@@ -24930,6 +25057,11 @@ function updateActivatorBandLabel(khz) {
 
 /** Fill activator QSO form from a clicked spot (hunt while activating) */
 function fillActivatorFromSpot(s) {
+  // FIRST statement, deliberately: this inherits the activationActive gate
+  // from both call sites (spot-row click and the map popup's Tune button),
+  // and it must run before the mode select is overwritten below, since the
+  // select is what holds the mode we are leaving.
+  captureActivatorHome();
   activatorCallsignInput.value = s.callsign || '';
   // Set mode dropdown — map radio modes to activator modes
   const spotMode = (s.mode || '').toUpperCase();
@@ -24988,11 +25120,88 @@ if (activatorFreqInput) {
   });
 }
 
+/**
+ * Remember the frequency the operator is CALLING on, at the instant they
+ * leave it to work a park-to-park.
+ *
+ * window.api.tune() is a shared sink with no intent — the spot table, map
+ * popup, VFO popout, bandspread, scan and remote all arrive identically —
+ * so rather than tag intent at every caller, this hangs off the one gesture
+ * that IS unambiguously an excursion: clicking a spot while activating.
+ * Everything else (knob, band button, typed frequency, mode change, scan) is
+ * ordinary operating, and whatever it leaves you on simply becomes the next
+ * thing snapshotted. A band change at sunset therefore needs no detection.
+ */
+function captureActivatorHome() {
+  if (!activationActive) return;
+  if (activatorHomeFreqHz) return;        // already away — three P2Ps in a row
+                                          // keep home pinned to the ORIGINAL
+                                          // calling frequency, not the last one.
+  const hz = activatorFreqHz || (activatorFreqKhz * 1000) || (radioFreqKhz * 1000);
+  if (!hz) return;                        // nothing to go back to; a missing
+                                          // button beats one pointing at 0.
+  activatorHomeFreqHz = hz;
+  activatorHomeMode = activatorModeSelect ? activatorModeSelect.value : '';
+  updateActivatorHomeUi();
+}
+
+/** Forget the excursion. No rig action. */
+function clearActivatorHome() {
+  activatorHomeFreqHz = 0;
+  activatorHomeMode = '';
+  updateActivatorHomeUi();
+}
+
+/**
+ * Go back to the calling frequency and clear the entry — going home ends the
+ * excursion unambiguously, so this is the single button for 'abort all of
+ * this', while Clear stays safe for fixing a typo mid-listen.
+ *
+ * Deliberately does not clear home itself: see the arrival check in
+ * onCatFrequency. Mirrors tuneActivatorFreq rather than calling it, because
+ * that rounds to integer kHz and would lose the sub-kHz return accuracy.
+ */
+function returnActivatorHome() {
+  if (!activatorHomeFreqHz) return;
+  const khz = activatorHomeFreqHz / 1000;
+  if (activatorHomeMode && activatorModeSelect &&
+      activatorModeSelect.querySelector(`option[value="${activatorHomeMode}"]`)) {
+    activatorModeSelect.value = activatorHomeMode;
+  }
+  activatorFreqKhz = Math.round(khz);
+  activatorFreqInput.value = (khz / 1000).toFixed(3);
+  updateActivatorBandLabel(Math.round(khz));
+  window.api.tune(khz, activatorHomeMode || activatorModeSelect.value);
+  clearActivatorEntry();
+}
+
+/** Show/hide the return chip and mark the frequency field as off-home. */
+function updateActivatorHomeUi() {
+  const away = !!activatorHomeFreqHz;
+  if (activatorHomeChip) activatorHomeChip.classList.toggle('hidden', !away);
+  if (activatorFreqInput) activatorFreqInput.classList.toggle('off-home', away);
+  if (away && activatorHomeBtn) {
+    const mhz = (activatorHomeFreqHz / 1e6).toFixed(3);
+    const homeBand = freqToBandActivator(Math.round(activatorHomeFreqHz / 1000)) || '';
+    const nowBand = freqToBandActivator(activatorFreqKhz) || '';
+    // Name the band too when the excursion crossed one — that is exactly when
+    // the operator most needs to know where the button is about to send them.
+    activatorHomeBtn.textContent = '\u21A9 ' + mhz + (homeBand && homeBand !== nowBand ? ' ' + homeBand : '');
+    activatorHomeBtn.title = 'Return to your calling frequency (' + mhz + ' MHz' +
+      (activatorHomeMode ? ' ' + activatorHomeMode : '') + ') and clear this entry';
+  }
+}
+
 function tuneActivatorFreq() {
   const mhz = parseFloat(activatorFreqInput.value);
   if (!mhz || mhz <= 0) return;
   const khz = Math.round(mhz * 1000);
   if (khz === activatorFreqKhz) return; // already there
+  // The operator typed a frequency and committed it — that is them declaring
+  // a new calling QRG, so stop offering to drag them back to the old one.
+  // After the guard above, so an idle blur (this fires on EVERY blur of the
+  // frequency input) can never clear home by accident.
+  clearActivatorHome();
   activatorFreqKhz = khz;
   updateActivatorBandLabel(khz);
   window.api.tune(khz, activatorModeSelect.value);
@@ -25185,12 +25394,15 @@ if (multiparkOkBtn) {
     }
     if (multiparkContext === 'my') {
       if (refs.length === 0) { multiparkDialog.close(); return; }
-      activatorParkRefs = refs;
+      activatorParkRefs = ActivationProgram.normalizeParkRefs(refs);
       updateParkDisplay();
       activatorStartBtn.disabled = !primaryParkRef();
       window.api.saveSettings({ activatorParkRefs });
     } else {
-      hunterParkRefs = refs;
+      // Carry the program: without it a summit or WWFF reference entered
+      // through the +N badge fell through to 'POTA' at log time and credited
+      // the other operator's P2P to the wrong program.
+      hunterParkRefs = refs.map(r => ({ ...r, program: r.program || inferParkProgram(r.ref) }));
       updateHunterParkDisplay();
     }
     multiparkDialog.close();
@@ -25234,7 +25446,7 @@ if (hunterParkInput) {
         item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span><span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
-          hunterParkRefs = [{ ref: park.reference, name: park.name || '' }];
+          hunterParkRefs = [{ ref: park.reference, name: park.name || '', program: inferParkProgram(park.reference) }];
           hunterParkInput.value = park.reference;
           hunterParkDropdown.classList.add('hidden');
           updateHunterParkDisplay();
@@ -27097,8 +27309,13 @@ function applyJtcatClock(d) {
   jtcatSyncStatus.style.color = bad ? '#e94560' : '#f0a500';
   if (jtcatClockBanner && jtcatClockMsg) {
     jtcatClockMsg.textContent = bad
-      ? '\u26a0 PC clock is ' + off + ' off UTC \u2014 FT8 will NOT decode until you fix it.'
-      : '\u26a0 PC clock is ' + off + ' off UTC \u2014 decoding may be unreliable. Sync recommended.';
+      // Name the ASYMMETRY — see renderer/jtcat-popout.js. A clock under a
+      // second out decodes everything and works nobody, so a message about
+      // DECODING teaches the operator to check the one thing that looks fine.
+      ? '\u26a0 PC clock is ' + off + ' off UTC \u2014 stations you call will NOT decode you, so nobody answers.'
+        + (Math.abs(d.offsetMs || 0) >= 2000 ? ' Your own decoding will fail too.'
+                                            : ' You will still decode them normally, which is why this is easy to miss.')
+      : '\u26a0 PC clock is ' + off + ' off UTC \u2014 you will decode fine, but weaker stations may not decode YOU. Sync recommended.';
     jtcatClockBanner.style.background   = bad ? '#5a1a1a' : '#5a4a1a';
     jtcatClockBanner.style.borderBottom = '2px solid ' + (bad ? '#e94560' : '#f0a500');
     jtcatClockBanner.classList.remove('hidden');

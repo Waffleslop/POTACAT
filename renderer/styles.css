@@ -8091,6 +8091,88 @@ body.activator-rbn-on #rbn-view {
 .activator-log-btn:hover { filter: brightness(1.1); }
 .activator-log-btn:active { filter: brightness(0.9); }
 
+/* Clear — deliberately a ghost button, subordinate to Log. Log is the 99%
+   action and is already reachable by Enter from every field in this row, so
+   a second FILLED button beside it would be a misclick magnet. Clear empties
+   the entry and never moves the radio. */
+.activator-clear-btn {
+  background: none;
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.activator-clear-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+
+/* ATU — same ghost weight as Clear. Changing bands to chase a park-to-park
+   is exactly when you need the tuner, and reaching the rig popover for it
+   means leaving the entry row mid-QSO. */
+.activator-atu-btn {
+  background: none;
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.activator-atu-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+/* A tune cycle takes seconds and the radio is transmitting through it, so
+   the button has to look busy — otherwise the operator presses it again. */
+.activator-atu-btn.tuning {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--warn-subtle);
+}
+
+/* "Return to my calling frequency" — shown only while the operator is away
+   on a P2P excursion. Amber, not green: this is a STATE indicator, and Log
+   should stay the only green thing in the row. */
+.activator-home-chip {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.activator-home-btn {
+  background: var(--warn-subtle);
+  border: none;
+  color: var(--warn);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: monospace;
+  white-space: nowrap;
+}
+.activator-home-btn:hover { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+.activator-home-dismiss {
+  background: var(--warn-subtle);
+  border: none;
+  border-left: 1px solid var(--warn);
+  color: var(--warn);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.activator-home-dismiss:hover { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+
+/* While away, the frequency field is showing the OTHER station's frequency,
+   not the one you are calling on. Say so rather than letting it read as
+   your activation frequency. */
+#activator-freq.off-home {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
 /* Activation log table */
 .activator-log-table-wrap {
   flex: 1;

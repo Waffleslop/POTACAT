@@ -85,6 +85,15 @@ function _applyPopoutTheme(payload) {
     if (runPauseInput && typeof s.jtcatRunPauseAfter === 'number') {
       runPauseInput.value = s.jtcatRunPauseAfter;
     }
+    modeHopOn = !!s.jtcatModeHop;
+    reflectModeHop();
+    if (Array.isArray(s.jtcatModeHopModes) && s.jtcatModeHopModes.length) {
+      modeHopModes = MODE_HOP_ALL.filter(function(m) { return s.jtcatModeHopModes.indexOf(m) !== -1; });
+    }
+    renderModeHopChips();
+    if (modeHopIdleInput && typeof s.jtcatModeHopIdleMin === 'number') {
+      modeHopIdleInput.value = s.jtcatModeHopIdleMin;
+    }
     if (typeof s.jtcatWaterfallSpeed === 'number') setWfSpeed(s.jtcatWaterfallSpeed, false);
     else updateWfSpeedHelp();
     fdMode = !!s.jtcatFdMode;
@@ -238,6 +247,40 @@ function _applyPopoutTheme(payload) {
   var skipTx1Toggle = document.getElementById('jp-skip-tx1');
   var huntCqFallbackToggle = document.getElementById('jp-hunt-cq-fallback');
   var huntCqFallback = false;
+  // FTx mode hop (Barry 2026-09-07) — rotate FT8/FT4/FT2 on the band we are
+  // already on when nobody workable turns up. main.js owns the carousel and
+  // the QSY; these are the switches and the readout.
+  var modeHopToggle = document.getElementById('jp-mode-hop');
+  var modeHopIdleInput = document.getElementById('jp-mode-hop-idle');
+  var modeHopModesEl = document.getElementById('jp-mode-hop-modes');
+  var modeHopOn = false;
+  var MODE_HOP_ALL = ['FT8', 'FT4', 'FT2'];
+  var modeHopModes = MODE_HOP_ALL.slice();
+  function reflectModeHop() {
+    if (modeHopToggle) modeHopToggle.classList.toggle('active', modeHopOn);
+  }
+  function renderModeHopChips() {
+    if (!modeHopModesEl) return;
+    modeHopModesEl.innerHTML = '';
+    MODE_HOP_ALL.forEach(function(m) {
+      var chip = document.createElement('span');
+      chip.className = 'jp-mode-chip' + (modeHopModes.indexOf(m) !== -1 ? ' on' : '');
+      chip.textContent = m;
+      chip.dataset.mode = m;
+      chip.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var i = modeHopModes.indexOf(m);
+        if (i === -1) modeHopModes.push(m); else modeHopModes.splice(i, 1);
+        // Keep the canonical order so the rotation reads FT8 → FT4 → FT2
+        // however the chips were clicked. main normalizes too; this is so
+        // the chips and the log agree about the order.
+        modeHopModes = MODE_HOP_ALL.filter(function(x) { return modeHopModes.indexOf(x) !== -1; });
+        renderModeHopChips();
+        window.api.jtcatModeHop({ modes: modeHopModes });
+      });
+      modeHopModesEl.appendChild(chip);
+    });
+  }
   var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
   var huntSpotted = true;   // default on — see main.js jtcatHuntProgramMatch
   var skipTx1 = false;
@@ -1130,13 +1173,22 @@ function _applyPopoutTheme(payload) {
     }
 
     // warn / bad — light the indicator and raise the banner.
+    //
+    // The message names the ASYMMETRY, because that is the whole trap: a
+    // clock under a second out decodes everything perfectly, so the operator
+    // sees a busy band and concludes the station is fine while nobody comes
+    // back to a single call. Telling them "decoding may be unreliable" —
+    // which is what this said — actively teaches the wrong test, since their
+    // decoding looks great. K3SBP lost two weeks to exactly that.
     var bad = d.level === 'bad';
     syncEl.textContent = 'Sync: ' + off + (bad ? ' ✕' : ' ⚠');
     syncEl.style.color = bad ? '#e94560' : '#f0a500';
     if (clockBanner && clockMsg) {
+      var deaf = Math.abs(d.offsetMs || 0) >= 2000;
       clockMsg.textContent = bad
-        ? '⚠ PC clock is ' + off + ' off UTC — FT8 will NOT decode until you fix it.'
-        : '⚠ PC clock is ' + off + ' off UTC — decoding may be unreliable. Sync recommended.';
+        ? '⚠ PC clock is ' + off + ' off UTC — stations you call will NOT decode you, so nobody answers.'
+          + (deaf ? ' Your own decoding will fail too.' : ' You will still decode them normally, which is why this is easy to miss.')
+        : '⚠ PC clock is ' + off + ' off UTC — you will decode fine, but weaker stations may not decode YOU. Sync recommended.';
       clockBanner.style.background    = bad ? '#5a1a1a' : '#5a4a1a';
       clockBanner.style.borderBottom  = '2px solid ' + (bad ? '#e94560' : '#f0a500');
       clockBanner.classList.remove('hidden');
@@ -2292,6 +2344,24 @@ function _applyPopoutTheme(payload) {
       window.api.saveSettings({ jtcatRunPauseAfter: n });
     });
   }
+  if (modeHopToggle) {
+    modeHopToggle.addEventListener('click', function() {
+      modeHopOn = !modeHopOn;
+      reflectModeHop();
+      // Not saveSettings: the jtcat-mode-hop channel also resets the idle
+      // clock and logs which modes are actually reachable on this band.
+      window.api.jtcatModeHop({ enabled: modeHopOn, modes: modeHopModes });
+    });
+  }
+  if (modeHopIdleInput) {
+    modeHopIdleInput.addEventListener('change', function() {
+      var n = parseInt(modeHopIdleInput.value, 10);
+      if (!isFinite(n) || n < 1) n = 1;
+      if (n > 60) n = 60;
+      modeHopIdleInput.value = n;
+      window.api.jtcatModeHop({ idleMin: n });
+    });
+  }
 
   // --- Waterfall speed -----------------------------------------------------
   // Lines drawn per second. The canvas is only 80 px tall, so at the legacy
@@ -2495,6 +2565,35 @@ function _applyPopoutTheme(payload) {
   document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { selectBand(btn, true); });
   });
+
+  // main.js hopped the FTx mode on us (settings.jtcatModeHop). The radio and
+  // the engine have already moved — this is only the display catching up, so
+  // nothing here re-tunes or re-saves: doing either would fight the QSY that
+  // just happened. Assigning modeSelect.value does not fire change, which is
+  // exactly why the mode select can be updated safely from here.
+  if (window.api.onJtcatModeHopped) {
+    window.api.onJtcatModeHopped(function(d) {
+      if (!d || !d.mode) return;
+      modeSelect.value = d.mode;
+      updateBandFreqs();  // band buttons now carry the new mode's dials
+      document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.band === d.band);
+      });
+      // The mode we left decoded a different frequency on a different
+      // cadence. Leaving its decodes stacked above the new ones reads as one
+      // band that suddenly went strange, so clear down exactly as a band
+      // change does.
+      decodeLog = [];
+      bandActivity.innerHTML = '<div class="jp-empty">' + (d.from || 'That mode') +
+        ' was quiet — listening on ' + d.mode + '...</div>';
+      myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
+      markerLayer.clearLayers();
+      arcLayer.clearLayers();
+      stations = {};
+      qsoArcs = {};
+      if (myCallsign && myGrid && map) registerStation(myCallsign, myGrid);
+    });
+  }
 
   // ===================== WSPR =====================
   // WSPR is a beacon/propagation mode, not a QSO mode. This pane swaps in for

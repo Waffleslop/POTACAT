@@ -153,12 +153,13 @@
     .jp-wspr-stats .s-mpw { color: #ff8c42; font-weight: 700; }
     .jp-wspr-stats .s-heard { color: var(--accent-blue, #4fc3f7); font-weight: 700; }
     .jp-wspr-stats .jp-wspr-stat-dim { color: var(--text-dim); }
-    /* Band-hop chips */
-    .jp-wspr-hop-bands { display: inline-flex; gap: 3px; flex-wrap: wrap; }
-    .jp-wspr-chip { font-size: 10px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-dim); cursor: pointer; user-select: none; }
-    .jp-wspr-chip:hover { color: var(--text-secondary); }
-    .jp-wspr-chip.on { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); font-weight: 700; }
-    .jp-wspr-chip.hopping { box-shadow: 0 0 0 2px #4fc3f7; }
+    /* Band-hop chips (WSPR) — shared with the FTx mode-hop chips */
+    .jp-wspr-hop-bands, .jp-mode-hop-modes { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+    .jp-mode-hop-modes { margin-left: 4px; vertical-align: middle; }
+    .jp-wspr-chip, .jp-mode-chip { font-size: 10px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-dim); cursor: pointer; user-select: none; }
+    .jp-wspr-chip:hover, .jp-mode-chip:hover { color: var(--text-secondary); }
+    .jp-wspr-chip.on, .jp-mode-chip.on { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); font-weight: 700; }
+    .jp-wspr-chip.hopping, .jp-mode-chip.hopping { box-shadow: 0 0 0 2px #4fc3f7; }
     .jp-wspr-next.tx { background: #e94560; color: #fff; animation: jp-tune-pulse 1s ease-in-out infinite; }
     /* Spot table */
     .jp-wspr-thead, .jp-wspr-row { display: grid; grid-template-columns: 46px 26px 30px 68px 26px 60px 42px 1fr 30px 50px 30px; gap: 4px; padding: 1px 8px; font-family: monospace; font-size: 11px; align-items: baseline; }
@@ -386,8 +387,8 @@
        measured NTP offset is marginal/bad. -->
   <div id="jp-clock-banner" class="hidden" style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:#5a1a1a;border-bottom:2px solid #e94560;color:#ffd9d9;font-size:12px;font-weight:600;">
     <span id="jp-clock-msg" style="flex:1;">⚠ PC clock is off — FT8 will not decode.</span>
-    <button type="button" id="jp-clock-settings" class="jtcat-filter-btn" title="Open Windows Date &amp; Time settings — click &quot;Sync now&quot;">Time settings…</button>
-    <button type="button" id="jp-clock-sync" class="jtcat-filter-btn" title="Try w32tm /resync (needs Administrator)">Sync now</button>
+    <button type="button" id="jp-clock-sync" class="jtcat-filter-btn" style="background:#e94560;color:#fff;border-color:#e94560;font-weight:700;" title="Set the clock from an internet time server. If the Windows Time service is switched off or has never synced — the usual cause — this turns it on and configures it too, which needs one Administrator prompt.">Fix it now</button>
+    <button type="button" id="jp-clock-settings" class="jtcat-filter-btn" title="Open Windows Date &amp; Time settings and do it by hand instead">Time settings…</button>
     <button type="button" id="jp-clock-recheck" class="jtcat-filter-btn" title="Re-measure clock offset">Recheck</button>
   </div>
 
@@ -673,6 +674,18 @@
       <span class="jp-opt-label">Hunt spotted activators calling plain CQ</span>
       <span class="jp-opt-help">POTA and SOTA hunt normally look for "CQ POTA" or "CQ SOTA" in the message, but most activators just call CQ. With this on, a station the live spot list places at a park or summit is hunted whenever you hear them call, whatever their CQ says — and the QSO still logs with their reference. Off = only an explicit CQ POTA / CQ SOTA counts.</span>
     </button>
+    <button id="jp-mode-hop" class="jp-opt-row">
+      <span class="jp-opt-label">Switch FTx mode when this one goes quiet</span>
+      <span class="jp-opt-help">While Hunt or Auto CQ is running, if nobody you could work has called for a few minutes, move between FT8, FT4 and FT2 on the band you are already on — 20m FT8 becomes 20m FT4, and so on. The band never changes, so the antenna and tuner are never asked to follow. Stations already worked on this band count as fresh contacts in another mode.</span>
+    </button>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Switch mode after <input id="jp-mode-hop-idle" type="number" min="1" max="60" value="3"> min with nobody to work</span>
+      <span class="jp-opt-help">Real minutes, not periods, so it means the same thing in FT8, FT4 and FT2.</span>
+    </label>
+    <div class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Modes in the rotation <span id="jp-mode-hop-modes" class="jp-mode-hop-modes"></span></span>
+      <span class="jp-opt-help">Pick at least two. A mode with no watering hole on the band you are on is skipped — 6m has no FT2 frequency, 2m has neither FT4 nor FT2.</span>
+    </div>
     <button id="jp-hunt-cq-fallback" class="jp-opt-row ultracat-gated hidden">
       <span class="jp-opt-label">Call CQ when there's nothing to hunt</span>
       <span class="jp-opt-help">While hunting, if nobody workable has called CQ for about a minute, start calling CQ yourself — and hand straight back to hunting the moment someone worth working shows up. Turns itself off if you change the Hunt setting.</span>

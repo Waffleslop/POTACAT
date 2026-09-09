@@ -1468,6 +1468,9 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       // -- Test 6: Hunt answers a SPOTTED activator's plain CQ.
       testHuntSpottedFilter();
 
+      // -- Test 7: FTx mode hopping policy (Barry 2026-09-07).
+      testModeHop();
+
       // -- Test 5: Hold TX Freq — auto calls blocked, operator moves honored
       // and re-pinned (WSJT-X "Hold Tx Freq" parity; KF0U 2026-07-17).
       await testHoldTxFreq();
@@ -1668,4 +1671,78 @@ function finish() {
     console.log('All tests passed.');
     process.exit(0);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// FTx mode hopping (lib/jtcat-modehop.js) — Barry's "FT4/FT2 are deserted"
+// request, 2026-09-07. Policy only; main.js owns the QSY.
+function testModeHop() {
+  section('Mode hop — idle-driven FT8/FT4/FT2 carousel');
+  const mh = require('../lib/jtcat-modehop');
+
+  // -- The minutes→periods conversion is the whole reason the setting is in
+  // minutes. A single "12 periods" would be 3 minutes on FT8 and 45 seconds
+  // on FT2; "3 minutes" has to mean three minutes in every mode.
+  assertEq(mh.periodsForMinutes(3, 'FT8'), 12, '3 min of FT8 = 12 periods');
+  assertEq(mh.periodsForMinutes(3, 'FT4'), 24, '3 min of FT4 = 24 periods');
+  assertEq(mh.periodsForMinutes(3, 'FT2'), 48, '3 min of FT2 = 48 periods (3.8s cycle, rounded up)');
+  assertEq(mh.periodsForMinutes(0, 'FT8'), 1, 'a zero/garbage idle time still waits one period');
+  assertEq(mh.periodsForMinutes(-5, 'FT8'), 1, 'a negative idle time still waits one period');
+
+  // -- Chip order must not become hop order, or two operators with the same
+  // three modes enabled walk them differently.
+  assertEq(mh.normalizeModes(['FT2', 'FT8', 'FT4']), ['FT8', 'FT4', 'FT2'], 'modes come back in canonical order');
+  assertEq(mh.normalizeModes(['ft4', 'FT4']), ['FT4'], 'lowercase accepted, duplicates collapsed');
+  assertEq(mh.normalizeModes(['FT8', 'JS8', 'WSPR', 'PSK31']), ['FT8'], 'non-FT-family modes are dropped');
+  assertEq(mh.normalizeModes(null), [], 'a missing list is an empty list, not a throw');
+
+  // -- Carousel.
+  assertEq(mh.nextMode(['FT8', 'FT4', 'FT2'], 'FT8'), 'FT4', 'FT8 steps to FT4');
+  assertEq(mh.nextMode(['FT8', 'FT4', 'FT2'], 'FT2'), 'FT8', 'the last mode wraps to the first');
+  assertEq(mh.nextMode(['FT8', 'FT2'], 'FT8'), 'FT2', 'a two-mode set skips the mode between them');
+  assertEq(mh.nextMode(['FT8'], 'FT8'), null, 'a one-mode set has nowhere to go');
+  // Sitting on a mode you excluded: enter the set rather than refuse.
+  assertEq(mh.nextMode(['FT4', 'FT2'], 'FT8'), 'FT4', 'a mode outside the set enters at the first member');
+
+  const base = { enabled: true, modes: ['FT8', 'FT4', 'FT2'], current: 'FT8', quietPeriods: 12, quietThreshold: 12, hopsSinceContact: 0 };
+  const D = (over) => mh.decideModeHop({ ...base, ...over });
+
+  assertEq(D({ enabled: false }).action, 'stay', 'disabled never hops');
+  assertEq(D({ enabled: false }).reason, 'off', 'disabled reports off');
+  // "on but nowhere to go" is a different operator-visible state from "off".
+  assertEq(D({ modes: ['FT8'] }).reason, 'need-two-modes', 'one enabled mode reports need-two-modes');
+  assertEq(D({ current: 'JS8' }).reason, 'not-ft-family', 'JS8 is never hopped out of');
+  assertEq(D({ current: 'WSPR' }).reason, 'not-ft-family', 'WSPR is never hopped out of (it has its own band hop)');
+  assertEq(D({ current: 'PSK31' }).reason, 'not-ft-family', 'PSK31 is never hopped out of');
+  assertEq(D({ quietPeriods: 11 }).reason, 'not-idle-yet', 'one period short of the threshold does not hop');
+  assertEq(D({ quietPeriods: 11 }).action, 'stay', 'one period short of the threshold stays');
+
+  const hop = D({});
+  assertEq(hop.action, 'hop', 'idle at threshold hops');
+  assertEq(hop.mode, 'FT4', 'idle FT8 hops to FT4');
+  assertEq(hop.lap, false, 'the first hop of a lap is not a completed lap');
+
+  // -- Lap: three enabled modes, three hops with nobody workable anywhere.
+  // The hop still happens (bands open again; the carousel should keep
+  // turning) but it flags the lap so the ULTRACAT Hunt→CQ fallback — the
+  // operator's OTHER answer to a dead band — stops being starved by it.
+  const lapped = D({ hopsSinceContact: 3 });
+  assertEq(lapped.action, 'hop', 'a completed lap still hops');
+  assertEq(lapped.lap, true, 'a completed lap is flagged');
+  assertEq(lapped.reason, 'idle-lap-complete', 'a completed lap says so in the reason');
+  assertEq(D({ hopsSinceContact: 2 }).lap, false, 'two hops of a three-mode set is not yet a lap');
+  // A lap while RUNNING is different: we have called CQ into every mode and
+  // nobody came back, so the carousel stops and lets run mode pause. A lap
+  // while merely hunting keeps circling, because listening costs nothing.
+  assertEq(D({ hopsSinceContact: 3, runActive: true }).action, 'stay', 'a completed lap in run mode stops hopping');
+  assertEq(D({ hopsSinceContact: 3, runActive: true }).reason, 'lap-complete-run-should-pause', 'and says why, so run mode can pause');
+  assertEq(D({ hopsSinceContact: 2, runActive: true }).action, 'hop', 'a run mid-lap still hops');
+  assertEq(D({ hopsSinceContact: 3, runActive: false }).action, 'hop', 'a completed lap while only hunting keeps circling');
+  // Lap length follows the ENABLED set, not FT_MODES.
+  assertEq(D({ modes: ['FT8', 'FT4'], hopsSinceContact: 2 }).lap, true, 'a two-mode set laps after two hops');
+
+  // -- Availability is the caller's job: main passes only modes that have a
+  // dial on the current band, so 6m (no FT2 watering hole) simply never
+  // offers FT2 rather than hopping to a frequency that does not exist.
+  assertEq(D({ modes: ['FT8', 'FT4'], current: 'FT4' }).mode, 'FT8', '6m-style set (no FT2) wraps FT4 back to FT8');
 }

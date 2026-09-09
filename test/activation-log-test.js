@@ -170,6 +170,70 @@ console.log('\n=== End-to-end: log file -> parseWorkedQsos -> isPriorActivationW
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// MY_SIG is the program the operator is ACTIVATING under, and it used to be
+// the literal 'POTA' in eleven places — so a SOTA, WWFF, LLOTA or WWBOTA
+// activator got MY_SIG=POTA on every contact. Every fixture above hardcodes
+// POTA, so before these cases nothing asserted a non-POTA program survives.
+console.log('\nMY_SIG carries the activation program');
+{
+  // The regression guard that matters most: a POTA activation is unchanged.
+  const pota = buildAdifRecord({ callsign: 'W1AW', mySig: 'POTA', mySigInfo: 'US-1234' });
+  check(pota.includes('<MY_SIG:4>POTA'), 'POTA activation still writes MY_SIG=POTA');
+  check(pota.includes('<MY_POTA_REF:7>US-1234'), 'POTA activation still derives MY_POTA_REF');
+
+  const sota = buildAdifRecord({ callsign: 'W1AW', mySig: 'SOTA', mySigInfo: 'W4C/CM-001' });
+  check(sota.includes('<MY_SIG:4>SOTA'), 'SOTA activation writes MY_SIG=SOTA');
+  check(sota.includes('<MY_SIG_INFO:10>W4C/CM-001'), 'SOTA activation writes the summit as MY_SIG_INFO');
+  check(sota.includes('<MY_SOTA_REF:10>W4C/CM-001'), 'SOTA activation derives MY_SOTA_REF from mySig');
+  // The negative is the one that catches a regression to the hardcode: if
+  // MY_SIG went back to POTA, MY_POTA_REF would reappear carrying a summit.
+  check(!sota.includes('MY_POTA_REF:'), 'SOTA activation writes NO MY_POTA_REF');
+
+  const wwff = buildAdifRecord({ callsign: 'W1AW', mySig: 'WWFF', mySigInfo: 'KFF-1234' });
+  check(wwff.includes('<MY_WWFF_REF:8>KFF-1234'), 'WWFF activation derives MY_WWFF_REF');
+  check(!wwff.includes('MY_POTA_REF:'), 'WWFF activation writes NO MY_POTA_REF');
+
+  const llota = buildAdifRecord({ callsign: 'W1AW', mySig: 'LLOTA', mySigInfo: 'LLCL-0001' });
+  check(llota.includes('<MY_LLOTA_REF:9>LLCL-0001'), 'LLOTA activation derives MY_LLOTA_REF');
+  // LLOTA is the program no ref-shape inference can detect (LLCL-0001 looks
+  // exactly like a POTA ref), which is why the program is stored per ref.
+  check(!llota.includes('MY_POTA_REF:'), 'LLOTA activation writes NO MY_POTA_REF');
+
+  // Known gap, asserted so it is recorded rather than rediscovered: there is
+  // no MY_WWBOTA_REF field in buildAdifRecord. A WWBOTA primary survives as
+  // MY_SIG/MY_SIG_INFO only. This change makes WWBOTA primaries reachable.
+  const wwbota = buildAdifRecord({ callsign: 'W1AW', mySig: 'WWBOTA', mySigInfo: 'B/US-1234' });
+  check(wwbota.includes('<MY_SIG:6>WWBOTA'), 'WWBOTA activation writes MY_SIG=WWBOTA');
+  check(!wwbota.includes('MY_WWBOTA_REF'), 'WWBOTA has no dedicated MY_ ref field (known gap)');
+}
+
+console.log('\nMY_SIG round-trips through the log');
+{
+  // This is the exact path that closes the resume bug: getPastActivations
+  // reads MY_SIG back out of the ADIF to compute each ref's `sig`, and
+  // resumeActivation now carries that into activatorParkRefs[].program.
+  const file = tempAdif([
+    { callsign: 'W1AW', frequency: '14074', mode: 'FT8', qsoDate: TODAY, mySig: 'SOTA', mySigInfo: 'W4C/CM-001', band: '20M' },
+  ]);
+  const rows = parseAllRawQsos(file);
+  check(rows.length === 1, 'one record parsed back');
+  check((rows[0].MY_SIG || '') === 'SOTA', 'MY_SIG survives the write/read round-trip as SOTA');
+  check((rows[0].MY_SIG_INFO || '') === 'W4C/CM-001', 'MY_SIG_INFO survives as the summit ref');
+}
+
+console.log('\nNo POTA hardcode remains in the log-building paths');
+{
+  // The whole bug was a literal written in eleven places. A source-text guard
+  // is the only assertion that makes it impossible to land silently again —
+  // and it is what enforces landing the renderer and main halves together:
+  // half-landed, SSB logs the right program while FT8 and the phone log POTA.
+  for (const rel of ['../renderer/app.js', '../main.js']) {
+    const src = fs.readFileSync(path.join(__dirname, rel), 'utf-8');
+    check(!/mySig:\s*'POTA'/.test(src),
+      rel.replace('../', '') + " has no hardcoded mySig: 'POTA'");
+  }
+}
+// ───────────────────────────────────────────────────────────────────────────
 for (const f of _cleanup) { try { fs.unlinkSync(f); } catch {} }
 
 console.log('\n' + '='.repeat(50));

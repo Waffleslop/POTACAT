@@ -296,10 +296,13 @@ const { CivCodec } = require('./lib/codecs/civ-codec');
 const { getTuneQuirks } = require('./lib/rig-models');
 const { gridToLatLon, haversineDistanceMiles, bearing } = require('./lib/grid');
 const { freqToBand } = require('./lib/bands');
+const { splitHostPort } = require('./lib/host-port');
+const activationProgram = require('./lib/activation-program');
 const wsprnet = require('./lib/wspr/wsprnet');
 const wsprBands = require('./lib/wspr/bands');
 const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
+const jtcatModehop = require('./lib/jtcat-modehop');
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
@@ -350,8 +353,8 @@ const { PotaSync } = require('./lib/pota-sync');
 const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
-const { Ft8Engine } = require('./lib/ft8-engine');
-const { checkClockOffset, syncSystemClock } = require('./lib/ntp');
+const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
+const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
@@ -883,6 +886,43 @@ function loadAllProfilePairedDevices() {
 
 let settings = null;
 let win = null;
+
+// webContents.send() THROWS "Render frame was disposed before WebFrameMain
+// could be accessed" once the frame is gone — and BrowserWindow.isDestroyed()
+// does NOT cover that. A window object outlives its frame during close,
+// during a reload, and after a renderer crash, so the ~200 guards of the form
+// `if (w && !w.isDestroyed()) w.webContents.send(...)` are all insufficient;
+// and even when one passes there is an unavoidable race, because the frame can
+// go between the check and the call.
+//
+// So the guard belongs where the throw is: on send() itself, applied once to
+// every window Electron creates, instead of at 434 call sites that cannot
+// prevent it anyway. K3SBP's Flex filled the console with these at METER RATE
+// (the VITA-49 meter stream fires several times a second) — and every throw is
+// also a DROPPED message, so this was never merely noise.
+//
+// Only the frame-disposed class is swallowed. A non-cloneable argument throws
+// from the same call and is a real programming error, so it still propagates.
+app.on('browser-window-created', (_e, w) => {
+  const wc = w.webContents;
+  const rawSend = wc.send.bind(wc);
+  wc.send = (...args) => {
+    if (wc.isDestroyed()) return;
+    try {
+      rawSend(...args);
+    } catch (err) {
+      const msg = (err && err.message) || '';
+      if (!/Render frame was disposed|Object has been destroyed|WebFrameMain/i.test(msg)) throw err;
+    }
+  };
+  // Name the CAUSE next time. A dead renderer behind a live window is exactly
+  // the state that produced the flood, and nothing said so.
+  wc.on('render-process-gone', (_ev, details) => {
+    try {
+      sendCatLog(`[window] the "${w.getTitle() || 'untitled'}" window's renderer stopped (${details && details.reason}) — its updates are being dropped until it reloads`);
+    } catch { /* logging must never be the thing that throws here */ }
+  });
+});
 
 // ── JTCAT RX gain — single source of truth (K3SBP 2026-07-20) ──────────────
 // The RX gain slider exists on THREE surfaces (main-window JTCAT view, the
@@ -1556,6 +1596,52 @@ function chooseFlexDaxChannel(ourSlice) {
   return preferred; // all 8 taken (shouldn't happen) — fall back
 }
 
+/**
+ * Read a CAT target's Host field, tolerating an endpoint pasted into it.
+ *
+ * Every networking document ever written spells an endpoint host:port, and
+ * the box is labelled Host, so operators paste the pair. N5ZC did
+ * (2026-09-06) and the only symptom was `getaddrinfo ENOTFOUND
+ * 127.0.0.1:4532` every 16 seconds — which reads as an unreachable rigctld,
+ * not as a typo two fields up. Accept it, use it, and say so.
+ */
+function resolveCatHostPort(target, defaultPort, label) {
+  const raw = (target && target.host) || '127.0.0.1';
+  const hp = splitHostPort(raw, (target && target.port) || defaultPort);
+  if (hp.corrected) {
+    sendCatLog(`[CAT] ${label}: the Host field contains a port ("${raw}") — connecting to ${hp.host} port ${hp.port}. Only the address belongs in Host; the port has its own box.`);
+  }
+  return { host: hp.host || '127.0.0.1', port: hp.port || defaultPort };
+}
+
+/**
+ * The slice PTT should key.
+ *
+ * The old expression was (catTarget.port || 5002) - 5002, which only means
+ * anything when catTarget really IS the SmartSDR-Win CAT shim: 5002=A .. 5005=D.
+ * On a Flex Direct or bound station the port belongs to something else entirely
+ * and the subtraction yields nonsense — N5ZC (2026-09-06) had a rigctld entry on
+ * 4532, which works out to slice -470. That was the bug waiting behind the one
+ * that actually bit him, since his PTT never reached this branch at all.
+ *
+ * Order matters. The shim port IS the operator explicitly declaring which slice
+ * POTACAT drives, so when the CAT target is that shim it wins outright — a
+ * station on 5003 (slice B) must keep keying B even while the host GUI client
+ * has A active, which is exactly what ourSliceIndex would report.
+ */
+function flexPttSliceIndex() {
+  const t = settings.catTarget;
+  if (t && t.type === 'tcp') {
+    const idx = (t.port || 5002) - 5002;
+    if (idx >= 0 && idx <= 3) return idx;
+  }
+  // Flex Direct / bound-without-shim: the slice the radio bound to us — the
+  // same source the tune path uses, so PTT and QSY can never disagree about
+  // which slice is ours.
+  if (smartSdr && smartSdr.ourSliceIndex != null) return smartSdr.ourSliceIndex;
+  return getFlexSliceIndex();
+}
+
 // Which Flex slice POTACAT operates on (DAX RX/TX + auto-fix target). Per-rig
 // `flexSlice` (0=A..3=D), set in Settings → Rig; defaults to A.
 function getFlexSliceIndex() {
@@ -1695,7 +1781,25 @@ function getFlexBandAntenna(band) {
   return { rx, tx };
 }
 
+/**
+ * Rig capabilities as advertised to every client (rig popover, activator row,
+ * VFO popout, phone).
+ *
+ * An external RF-sensing tuner (LDG Z-100plus / MFJ) is a REAL ATU the
+ * dispatcher can drive — the atu-tune case keys a low-power carrier for it via
+ * runExternalAtuTune() — so a rig whose model says atu:false still has one the
+ * moment the operator configures it. Without this override the ATU button hid
+ * on exactly the radios that need it most: not having an internal tuner is why
+ * you buy an outboard one.
+ */
 function getRigCapabilities(rigType) {
+  const caps = _rigCapabilitiesForType(rigType);
+  const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+  if (activeRig && activeRig.externalAtu === 'rf-sense') caps.atu = true;
+  return caps;
+}
+
+function _rigCapabilitiesForType(rigType) {
   // Try model-specific capabilities first
   const model = getActiveRigModel();
   if (model && model.caps) {
@@ -1948,11 +2052,44 @@ function listRigs(rigctldPath) {
   });
 }
 
+// The Test Connection rigctld runs on its own port and was tracked NOWHERE:
+// killRigctld() only knew about the live one, so an app exit during a test —
+// or any path that missed the handler's finally — orphaned a rigctld still
+// holding the serial port. It survives the restart, keeps answering on its
+// TCP port, and the next attempt fails with "Resource busy" while POTACAT
+// appears to still have the radio (jbkerkhoff's K3, 2026-09-03).
+let rigctldTestProc = null;
+
 function killRigctld() {
   if (rigctldProc) {
     try { rigctldProc.kill(); } catch { /* ignore */ }
     rigctldProc = null;
   }
+  if (rigctldTestProc) {
+    try { rigctldTestProc.kill(); } catch { /* ignore */ }
+    rigctldTestProc = null;
+  }
+}
+
+/**
+ * Kill a rigctld and WAIT for it to actually go.
+ *
+ * kill() only asks. Until the process is reaped the serial port is still
+ * open, so respawning immediately races the dying one and the new instance
+ * gets EBUSY — on macOS "Resource busy, cannot open /dev/cu.usbserial-...".
+ * The test handler already waited 300ms before starting a test for exactly
+ * this reason; it did not wait before restoring the live connection
+ * afterwards, which is the half that bit.
+ */
+function killAndWait(proc, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    if (!proc || proc.exitCode !== null || proc.signalCode) return resolve();
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    proc.once('exit', () => setTimeout(finish, 150)); // let the OS close the fd
+    try { proc.kill(); } catch { return finish(); }
+    setTimeout(finish, timeoutMs); // never hang a settings dialog on this
+  });
 }
 
 function spawnRigctld(target, portOverride) {
@@ -3199,12 +3336,12 @@ function _buildCloudDevicePayload() {
     try {
       fingerprint = (new (require('crypto').X509Certificate)(remoteServer._tlsCertPem)).fingerprint256;
     } catch {}
+  }
   // SPKI pin rides beside the cert fingerprint (cert-pin Phase 2a): stable
   // across reissues, so a phone that has learned it survives cert rotation.
   let spkiPin = '';
   if (type === 'shack' && remoteServer && typeof remoteServer.certSpkiPin === 'function') {
     spkiPin = remoteServer.certSpkiPin();
-  }
   }
   const altHosts = (remoteServer && typeof remoteServer.getAltHosts === 'function')
     ? remoteServer.getAltHosts() : { tsHost: '', cloudHost: '' };
@@ -3672,16 +3809,39 @@ function connectCatSafe(context) {
   connectCat().catch((err) => sendCatLog(`[CAT] Connect failed (${context}): ${err.message || err}`));
 }
 
+// The two ways connectCat() declines to touch the radio used to say NOTHING.
+// A log with no "Connecting to <brand> on <port>" line, no transport error and
+// no retry loop reads exactly like a broken cable — while the only message the
+// operator DOES get, "tune refused — no radio connected. Check Settings > My
+// Rigs", sends them to the one place that is already correct. KK4UDJ's TS-480
+// sat unconnected across two sessions with 3600 log lines that never once
+// mentioned the radio (2026-09-03). Same lesson as the "Not connecting: N rigs
+// configured but none ACTIVE" lines below: a deliberate refusal has to be as
+// visible as a failure. Change-gated so the reconnect callers can't flood.
+let _connectCatSkipLogged = '';
+function logConnectCatSkip(reason) {
+  if (_connectCatSkipLogged === reason) return;
+  _connectCatSkipLogged = reason;
+  sendCatLog(reason);
+}
+
 async function connectCat() {
   if (_connectCatPending) {
     if (settings && settings.catTarget && settings.catTarget.type === 'icom-network') {
       appendIcomNetworkDiagnostic('[Icom Network] connectCat skipped because another connect is already pending');
     }
+    logConnectCatSkip('[CAT] Not connecting: another connection attempt is still in progress.');
     return; // prevent concurrent connectCat() calls
   }
   // If we're in remote-client mode, the "CAT" is a shack on the other
   // end of a WebSocket — skip the local connection chain entirely.
-  if (isRemoteActive()) return;
+  if (isRemoteActive()) {
+    logConnectCatSkip('[CAT] Not connecting to the local radio: POTACAT is operating a REMOTE shack ' +
+      '(Settings > Connections). The rig in Settings > My Rigs is deliberately left alone — ' +
+      'switch back to this station to use it.');
+    return;
+  }
+  _connectCatSkipLogged = ''; // a real attempt resets the explanation
   _connectCatPending = true;
   const dataModSession = ++_icomNetworkDataModSession;
   try {
@@ -3894,8 +4054,7 @@ async function connectCat() {
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
-    const host = target.host || '127.0.0.1';
-    const port = target.port || 4532;
+    const { host, port } = resolveCatHostPort(target, 4532, 'remote rigctld');
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
     transport.connect({ host, port });
 
@@ -3960,8 +4119,7 @@ async function connectCat() {
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
-    const host = target.host || '127.0.0.1';
-    const port = target.port || 50001;
+    const { host, port } = resolveCatHostPort(target, 50001, 'Icom CI-V over TCP');
     sendCatLog(`Connecting to Icom CI-V over TCP on ${host}:${port}`);
     transport.connect({ host, port });
 
@@ -3998,8 +4156,9 @@ async function connectCat() {
 	      if (shouldShowIcomNetworkTransportLogInCat(m)) sendCatLog(m);
 	      appendIcomNetworkDiagnostic(m);
 	    });
-    const host = target.host || '127.0.0.1';
-    const controlPort = target.controlPort || target.port || 50001;
+    const _icomHp = resolveCatHostPort(target, target.controlPort || target.port || 50001, 'Icom network');
+    const host = _icomHp.host;
+    const controlPort = _icomHp.port;
     const connectRetryKey = icomNetworkTargetKey(target);
     const civPort = target.civPort || null; // null = use whatever the radio reports in Status
     const enableRxAudio = settings.audioSource === 'icom-network';
@@ -7253,13 +7412,19 @@ function connectWsjtx() {
       if ((settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0) {
         const allQsoData = [];
         for (let i = 0; i < parkRefs.length; i++) {
-          const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
+          const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
           allQsoData.push(parkQso);
           await saveQsoRecord(parkQso, { origin: 'wsjtx-bridge' });
         }
-        // Cross-program references (WWFF, LLOTA for same park)
+        // Cross-program references (WWFF, LLOTA for same park). Skip any that
+        // duplicate a primary: now the primary reports its real program, a
+        // SOTA activator's summit is BOTH the primary ref and the X-Ref they
+        // had to add as a workaround, and nothing downstream would catch the
+        // duplicate (_qsoDedupKey includes mySigInfo so real n-fers survive).
         const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+        const primaryKeys = activationProgram.myRefKeys(parkRefs);
         for (const xr of crossRefs) {
+          if (primaryKeys.has(activationProgram.refKey(xr.program, xr.ref))) continue;
           const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '' };
           if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
           else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
@@ -7607,6 +7772,221 @@ function jtcatRunPauseAfter() {
   const n = Number(settings.jtcatRunPauseAfter);
   if (!isFinite(n) || n < 0) return JTCAT_RUN_PAUSE_AFTER_DEFAULT;
   return Math.min(60, Math.round(n));
+}
+
+// ─── FTx mode hopping (settings.jtcatModeHop) ─────────────────────────────
+// "Would it be of any value or even possible to have automatic band hopping
+// (while in the AUTO Hunt mode or even in CQ mode) in the FTx modes? I was
+// thinking specifically for FT4 & FT2 ... there seems to be so little use on
+// those modes" — Barry, 2026-09-07.
+//
+// This hops the MODE and NEVER the band. A band change means retuning the
+// antenna, and starting an ATU sweep from a background timer is not something
+// to do behind the operator's back. FT8, FT4 and FT2 each have a watering
+// hole inside the SAME band (20m: 14074 / 14080 / 14084), so the carousel is
+// a few kHz of VFO movement with the antenna, tuner and amp untouched.
+//
+// Policy is the pure lib/jtcat-modehop.js; everything below is execution.
+const JTCAT_MODE_HOP_IDLE_MIN_DEFAULT = 3;
+let jtcatModeHopQuietPeriods = 0;   // consecutive periods with nobody workable
+let _jtcatModeHopPeriod = '';       // period already counted (N slices, one count)
+let jtcatModeHopsSinceContact = 0;  // hops since a workable station last appeared
+let _jtcatModeHopBand = '';         // band the idle clock has been counting on
+
+function jtcatModeHopEnabled() { return settings.jtcatModeHop === true; }
+
+/** settings.jtcatModeHopIdleMin — minutes of nothing workable before a hop. */
+function jtcatModeHopIdleMin() {
+  const n = Number(settings.jtcatModeHopIdleMin);
+  if (!isFinite(n) || n <= 0) return JTCAT_MODE_HOP_IDLE_MIN_DEFAULT;
+  return Math.min(60, Math.max(1, Math.round(n)));
+}
+
+/**
+ * The enabled hop modes that actually have a dial on the band we are on.
+ *
+ * 6m has no FT2 watering hole and 2m has neither FT4 nor FT2, so without this
+ * filter the carousel would "hop" to a frequency that does not exist and hand
+ * tuneRadio an undefined. Availability is resolved HERE, which is why the pure
+ * decision never needs a frequency table.
+ */
+function jtcatModeHopAvailable() {
+  const band = freqToBand((_currentFreqHz || 0) / 1e6);
+  if (!band) return [];
+  const want = Array.isArray(settings.jtcatModeHopModes) && settings.jtcatModeHopModes.length
+    ? settings.jtcatModeHopModes
+    : jtcatModehop.FT_MODES;
+  return jtcatModehop.normalizeModes(want).filter((m) => {
+    const table = freqsForMode(m);
+    return table && typeof table[band] === 'number';
+  });
+}
+
+/**
+ * Does mode hop get first refusal on a quiet band?
+ *
+ * Both this and the ULTRACAT Hunt-to-Run fallback answer "nothing is happening
+ * here", and the fallback's threshold (4 periods, about a minute of FT8) is far
+ * shorter than a hop's, so with both switched on the fallback would fire first
+ * every single time and the hop would never happen at all. Hunting somewhere
+ * else is the cheaper move than manufacturing activity yourself, so the hop
+ * goes first — until a full lap of the enabled modes has produced nobody, at
+ * which point the band really is dead in every mode and calling CQ is the
+ * better idea. That is what decideModeHop's `lap` measures.
+ */
+function jtcatModeHopDefersCqFallback() {
+  if (!jtcatModeHopEnabled()) return false;
+  const modes = jtcatModeHopAvailable();
+  if (modes.length < 2) return false;
+  return jtcatModeHopsSinceContact < modes.length;
+}
+
+/**
+ * One evaluation per decode cycle, from every decode path. Mirrors
+ * jtcatHuntCqFallbackTick's shape deliberately — same period gating, same
+ * mid-QSO rule — because they are answering the same question about the same
+ * decodes and any drift between them is a bug waiting to happen.
+ */
+function jtcatModeHopTick(results, mode) {
+  if (!jtcatModeHopEnabled() || !ft8Engine) return;
+  // Only while the operator has asked POTACAT to work the band for them.
+  // Someone with the popout open watching the waterfall must never find the
+  // VFO moving on its own — Barry asked for this "while in the AUTO Hunt mode
+  // or even in CQ mode", and that is exactly the boundary.
+  if (jtcatAutoCqMode === 'off' && !jtcatFullAutoCq && !jtcatHuntFallbackMode) {
+    jtcatModeHopQuietPeriods = 0;
+    return;
+  }
+  // Multi-slice already listens to several bands at once, each slice with its
+  // own engine and its own dial. There is no single mode to hop.
+  if (jtcatManager && jtcatManager.sliceCount > 1) return;
+  // Never mid-QSO, never keyed, and never while a spot target is armed — the
+  // operator picked that callsign ON this mode and frequency, and moving is
+  // the one thing that guarantees we never hear them.
+  const busy = (popoutJtcatQso && popoutJtcatQso.phase !== 'done')
+            || (remoteJtcatQso && remoteJtcatQso.phase !== 'done');
+  if (busy || ft8Engine._txActive || jtcatSpotTarget) {
+    jtcatModeHopQuietPeriods = 0;
+    return;
+  }
+  const myCall = (settings.myCallsign || '').toUpperCase();
+  if (!myCall) return;
+  const nowBand = freqToBand((_currentFreqHz || 0) / 1e6) || '';
+  if (nowBand !== _jtcatModeHopBand) {
+    // The radio moved bands under us — a spot click, the scanner, the knob,
+    // the phone. Whatever was quiet was quiet somewhere else; start over.
+    _jtcatModeHopBand = nowBand;
+    jtcatModeHopQuietPeriods = 0;
+    jtcatModeHopsSinceContact = 0;
+    return;
+  }
+  const filterMode = jtcatAutoCqMode !== 'off' ? jtcatAutoCqMode : (jtcatHuntFallbackMode || 'all');
+  if (jtcatWorkableCallers(results, myCall, { filterMode }).length > 0) {
+    // Somebody to work here — this mode is alive and the lap starts over.
+    jtcatModeHopQuietPeriods = 0;
+    jtcatModeHopsSinceContact = 0;
+    return;
+  }
+  // Period-gated: N slices reporting the same period must advance the count
+  // once, or the threshold arrives N times too fast (the lesson the Hunt
+  // fallback's own quiet counter is built on).
+  const pk = jtcatPeriodUtc(mode);
+  if (pk === _jtcatModeHopPeriod) return;
+  _jtcatModeHopPeriod = pk;
+  jtcatModeHopQuietPeriods++;
+  const cur = ((ft8Engine && ft8Engine._mode) || 'FT8').toUpperCase();
+  const decision = jtcatModehop.decideModeHop({
+    enabled: true,
+    modes: jtcatModeHopAvailable(),
+    current: cur,
+    quietPeriods: jtcatModeHopQuietPeriods,
+    quietThreshold: jtcatModehop.periodsForMinutes(jtcatModeHopIdleMin(), cur),
+    hopsSinceContact: jtcatModeHopsSinceContact,
+    runActive: !!jtcatFullAutoCq,
+  });
+  if (decision.action === 'hop') jtcatHopMode(decision.mode, decision);
+}
+
+/**
+ * Execute a hop: switch the engine's mode and QSY to that mode's watering
+ * hole on the band we are already on.
+ */
+function jtcatHopMode(next, decision) {
+  if (!ft8Engine || !next) return false;
+  // Single choke point for the one thing a hop must never do: QSY the rig
+  // out from under a transmission in flight, splattering a half-envelope
+  // onto the new watering hole. The tick already refuses while keyed, but the
+  // drained-run path is reached from jtcatHandleRetryStall — whose own
+  // fallback, jtcatPauseRunCq, explicitly handles being called with TX
+  // active — so the guard belongs here where both callers pass through.
+  if (ft8Engine._txActive) return false;
+  const band = freqToBand((_currentFreqHz || 0) / 1e6);
+  const table = freqsForMode(next);
+  const dialKhz = (band && table) ? table[band] : null;
+  if (!dialKhz) return false; // jtcatModeHopAvailable filtered this out; belt and braces
+  const from = (ft8Engine._mode || 'FT8').toUpperCase();
+  ft8Engine.setMode(next); // same FT family — no slice rebuild, see jtcat-set-mode
+  // Pass the real mode name, not DIGU: lib/cat.js maps FT8/FT4/FT2/DIGU/PKTUSB
+  // to the same rig data mode, and tuneRadio's isDataish set covers all of
+  // them (so the QSY never stops the engine) — but the tune log line then
+  // reads mode=FT4 right under the mode-hop line instead of an unexplained
+  // DIGU, which is the difference between a legible bug report and a puzzle.
+  tuneRadio(dialKhz, next);
+  // The wrong-band TX guard refuses to key when the rig's dial disagrees with
+  // this anchor. A hop that moved the radio without moving the anchor would
+  // block the first transmission on the new mode and blame a "spot click".
+  _jtcatExpectedDialHz = Math.round(dialKhz * 1000);
+  // Persist the same two keys the popout's own mode change writes, so closing
+  // and reopening JTCAT comes back where the radio actually is.
+  settings.jtcatLastMode = next;
+  settings.jtcatLastBandFreq = dialKhz;
+  saveSettings(settings);
+  jtcatModeHopQuietPeriods = 0;
+  _jtcatModeHopPeriod = '';
+  jtcatModeHopsSinceContact++;
+  sendCatLog('[JTCAT] Mode hop: ' + from + ' → ' + next + ' on ' + band + ' (' + dialKhz + ' kHz) — '
+    + jtcatModeHopIdleMin() + ' min with nobody workable'
+    + (decision && decision.lap ? '. Every enabled mode has now been tried without a contact.' : ''));
+  const payload = { mode: next, band, freqKhz: dialKhz, from, lap: !!(decision && decision.lap) };
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-mode-hopped', payload);
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-mode-hopped', payload);
+  if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatModeHopped(payload);
+  pushActivityState();
+  return true;
+}
+
+/**
+ * Run mode brings its own idle signal — N unanswered CQs with nobody
+ * workable — so it does not wait on the quiet-period counter, it hops on the
+ * spot. Returns false when there is nowhere to go, and the caller falls
+ * through to the normal drained-band pause.
+ */
+function jtcatHopModeForDrainedRun() {
+  if (!jtcatModeHopEnabled() || !ft8Engine) return false;
+  if (jtcatManager && jtcatManager.sliceCount > 1) return false;
+  const modes = jtcatModeHopAvailable();
+  if (modes.length < 2) return false;
+  // A completed lap means every enabled mode is drained. Stop the carousel
+  // and let the run pause, or we would spin through the modes forever with
+  // the 30-minute attended watchdog as the only thing that ever ends it.
+  if (jtcatModeHopsSinceContact >= modes.length) return false;
+  const cur = (ft8Engine._mode || 'FT8').toUpperCase();
+  const next = jtcatModehop.nextMode(modes, cur);
+  if (!next || next === cur) return false;
+  if (!jtcatHopMode(next, { lap: false })) return false;
+  // The unanswered count belongs to the mode we just left. Carrying it over
+  // would trip the drained test again on the very next CQ and hop us straight
+  // through the whole carousel in three transmissions.
+  jtcatFullAutoCqUnanswered = 0;
+  return true;
+}
+
+/** An operator mode change resets the carousel — they just told us where they
+ *  want to be, and the idle clock starts from that decision. */
+function jtcatModeHopReset() {
+  jtcatModeHopQuietPeriods = 0;
+  _jtcatModeHopPeriod = '';
+  jtcatModeHopsSinceContact = 0;
 }
 
 // PSK31 continuous RX text — engine emits per-feedAudio character batches;
@@ -8075,6 +8455,9 @@ function jtcatHuntCqFallbackTick(results, mode) {
   // Not currently filling: only a plain Hunt session can fall back. An
   // operator-started Run is theirs and is left alone.
   if (jtcatAutoCqMode === 'off' || jtcatFullAutoCq) { jtcatHuntQuietPeriods = 0; return; }
+  // Hopping to a mode where somebody might already be calling is cheaper
+  // than manufacturing activity ourselves, so the carousel goes first.
+  if (jtcatModeHopDefersCqFallback()) { jtcatHuntQuietPeriods = 0; return; }
   const workable = jtcatWorkableCallers(results, myCall, { filterMode: jtcatAutoCqMode });
   if (workable.length > 0) { jtcatHuntQuietPeriods = 0; return; }
   // The quiet counter measures PERIODS, so it must advance once per period no
@@ -8717,13 +9100,16 @@ async function jtcatAutoLog(qso) {
       sendCatLog(`[JTCAT] Activation mode — logging to ${parkRefs.map(p => p.ref).join(', ')}`);
       const allQsoData = [];
       for (let i = 0; i < parkRefs.length; i++) {
-        const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
+        const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
         allQsoData.push(parkQso);
         await saveQsoRecord(parkQso, { origin: 'jtcat-engine' });
       }
-      // Cross-program refs (WWFF, LLOTA)
+      // Cross-program refs (WWFF, LLOTA) — duplicates of a primary skipped;
+      // see the wsjtx-bridge path above for why that can now happen.
       const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+      const primaryKeys = activationProgram.myRefKeys(parkRefs);
       for (const xr of crossRefs) {
+        if (primaryKeys.has(activationProgram.refKey(xr.program, xr.ref))) continue;
         const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '' };
         if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
         else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
@@ -9019,7 +9405,16 @@ function jtcatHandleRetryStall(o) {
       maxUnanswered: jtcatRunPauseAfter(),
       workableCallers: o.workableCount || 0,
     });
-    if (pause.action === 'pause') { jtcatPauseRunCq(o.engine); return; }
+    if (pause.action === 'pause') {
+      // A drained band in run mode is exactly what mode hop is for, and
+      // moving beats sitting: worked-before is band AND mode aware, so the
+      // very stations that just drained this mode are fresh contacts one
+      // watering hole over. Only once every enabled mode has been tried
+      // without a contact do we actually stop calling and listen.
+      if (jtcatHopModeForDrainedRun()) return;
+      jtcatPauseRunCq(o.engine);
+      return;
+    }
   }
 
   const maxQso = jtcatMaxQsoRetries();
@@ -9440,6 +9835,7 @@ function startJtcat(mode) {
     // who chose Hunt wants to hunt, not to keep calling CQ. Only if the
     // fallback declines (Run is theirs, or the new callers don't match their
     // Hunt filter) does a paused Run resume.
+    jtcatModeHopTick(data.results || [], data.mode);
     jtcatHuntCqFallbackTick(data.results || [], data.mode);
     if (jtcatFullAutoCqPaused && runWorkable > 0) jtcatResumeRunCq(runWorkable);
 
@@ -9976,19 +10372,12 @@ function startJtcat(mode) {
 // --- JTCAT clock-offset monitor -----------------------------------------
 // Measures the local clock vs NTP (lib/ntp.js) and pushes a real sync status
 // to the JTCAT views. Replaces the old fake "Sync: OK" that the renderers lit
-// up on every decode cycle regardless of the actual clock. Thresholds chosen
-// to match FT8's decode tolerance: <1 s is fine, 1–2 s is marginal, >2 s means
-// decodes will fail outright.
+// up on every decode cycle regardless of the actual clock. The thresholds
+// themselves live in lib/ntp.js (classifyClockOffset) — read the comment
+// there before touching them, it is the two weeks of QSOs they cost.
 let jtcatClockTimer = null;
 let jtcatLastClock = null;
 const JTCAT_CLOCK_POLL_MS = 5 * 60 * 1000;
-
-function classifyClockOffset(offsetMs) {
-  const abs = Math.abs(offsetMs);
-  if (abs < 1000) return 'ok';
-  if (abs < 2000) return 'warn';
-  return 'bad';
-}
 
 function broadcastJtcatClock(payload) {
   if (win && !win.isDestroyed()) win.webContents.send('jtcat-clock', payload);
@@ -10022,6 +10411,25 @@ async function runJtcatClockCheck() {
     ft8Engine.reBaseline();
     jtcatLastClock.rebaselined = true;
   }
+  // The clock has to reach the CAT LOG, not just the FT8 windows. Until now a
+  // drifting clock was visible only as a banner in a window the operator may
+  // not have open, and a bug report — the one artifact we get to read — said
+  // nothing about it at all. K3SBP ran two weeks of zero QSOs on a clock that
+  // POLLED CORRECTLY the whole time; the measurement existed, nobody could
+  // see it. Logged on change, so it lands in session.log without flooding.
+  if (jtcatLastClock.level !== prevLevel) {
+    const off = jtcatLastClock.offsetMs;
+    if (jtcatLastClock.level === 'unknown') {
+      sendCatLog(`[Clock] could not reach an NTP server — clock offset unknown (${jtcatLastClock.error || 'no reason given'})`);
+    } else if (jtcatLastClock.level === 'ok') {
+      sendCatLog(`[Clock] PC clock is ${(off / 1000).toFixed(2)}s off UTC (${jtcatLastClock.server}) — in spec`);
+    } else {
+      sendCatLog(`[Clock] PC clock is ${(off / 1000).toFixed(2)}s off UTC (${jtcatLastClock.server}) — ` +
+        'stations you call will not decode you, so nobody answers. Your own decoding still works, ' +
+        'which is why this looks like a dead band or a bad antenna.');
+      offerClockFix(jtcatLastClock);
+    }
+  }
   broadcastJtcatClock(jtcatLastClock);
   // Phone rides the settings blob (jtcatClockSync) — push on level CHANGE so
   // a drifting shack clock reaches the phone FT8 screen promptly instead of
@@ -10029,6 +10437,38 @@ async function runJtcatClockCheck() {
   // jtcat-clock-sync-on-phone.)
   if (jtcatLastClock.level !== prevLevel) updateRemoteSettings();
   return jtcatLastClock;
+}
+
+// A clock warning is only useful if it reaches the operator. The banner lives
+// in the FT8/JS8 windows, and the person losing every QSO is usually staring
+// at the spot table or the radio — so say it once, out here, where they are.
+// One notification per transition into a bad level (not per 5-minute poll),
+// and never for a clock that is merely unmeasurable.
+let _clockFixOfferedAt = 0;
+function offerClockFix(state) {
+  if (settings.notifyPopup === false) return;
+  const now = Date.now();
+  if (now - _clockFixOfferedAt < 30 * 60 * 1000) return; // at most twice an hour
+  _clockFixOfferedAt = now;
+  try {
+    const off = (state.offsetMs / 1000).toFixed(2);
+    const n = new Notification({
+      title: 'POTACAT — check your PC clock',
+      body: `The clock is ${off}s off UTC. You will still decode other stations, but they cannot decode you, so nobody answers. Open the FT8 window and press "Fix it now".`,
+      silent: settings.notifySound === false,
+    });
+    n.on('click', () => {
+      // Take them to the window that carries the fix button.
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        if (jtcatPopoutWin.isMinimized()) jtcatPopoutWin.restore();
+        jtcatPopoutWin.focus();
+      } else if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+      }
+    });
+    n.show();
+  } catch { /* notifications are best-effort */ }
 }
 
 function startJtcatClockMonitor() {
@@ -10538,10 +10978,31 @@ function connectSmartSdr() {
     }
   });
 
-  // Flex Direct: POTACAT self-registered as a GUI client (no SmartSDR / AetherSDR
-  // running). The radio's band persistence restored a slice we tune natively.
+  // Flex Direct: POTACAT self-registered as a GUI client. Two very different
+  // situations reach here and they need different words.
+  //
+  // Solo (no SmartSDR / AetherSDR running) is the headline feature: the
+  // radio's band persistence restored a slice we tune natively.
+  //
+  // multiFlex alongside an open GUI client is the one that generates support
+  // tickets. POTACAT takes a slice OF ITS OWN — deliberate, so it owns its
+  // transmit — but from the operator's chair it looks like a dead radio:
+  // they click a spot, POTACAT tunes, and the panadapter they are watching
+  // never moves, because that is somebody else's slice. K0BUF (Flex 6500 +
+  // AetherSDR on Linux, 2026-09-03) reported it as "CAT doesn't appear to
+  // work in either direction". The rig editor explains the trade-off in full,
+  // but nobody reads a settings panel they have no reason to suspect — so say
+  // it here, at the moment it becomes true, and name the setting.
   smartSdr.on('gui-ready', ({ clientId }) => {
-    sendCatLog(`Flex Direct active — POTACAT is the GUI client; radio control works with no SmartSDR open (client_id=${clientId})`);
+    const _externalGuis = (smartSdr && smartSdr._discoveredGuiClients ? smartSdr._discoveredGuiClients.length : 0);
+    if (_externalGuis > 0) {
+      sendCatLog(`Flex multiFlex: ${_externalGuis} other GUI client${_externalGuis === 1 ? '' : 's'} open (SmartSDR / AetherSDR), so POTACAT registered as an INDEPENDENT GUI client and works its OWN slice. `
+        + 'Tuning a spot here moves POTACAT\'s slice — the panadapter in your SDR window is a different slice and will not follow it, and the frequency POTACAT shows is its own slice, not the one on screen there. '
+        + 'To drive the slice you are actually watching, turn off "Give POTACAT its own slice when SmartSDR / AetherSDR is open" in Settings > My Rigs > (edit the rig) and reconnect. '
+        + `(client_id=${clientId})`);
+    } else {
+      sendCatLog(`Flex Direct active — POTACAT is the GUI client; radio control works with no SmartSDR open (client_id=${clientId})`);
+    }
     sendCatStatus({ connected: true });
     // Now that POTACAT is a registered GUI client, the dedicated audio
     // connection can bind to it. The connect-time 1s timer fires too early
@@ -14937,7 +15398,10 @@ function connectRemote() {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType);
     settings.appMode = 'activator';
     if (parkRef) {
-      settings.activatorParkRefs = [{ id: parkRef, ref: parkRef, name: '' }];
+      // The phone has always sent `sig` on this message (lib/echocat-protocol.js)
+      // and main destructured it without ever reading it, so a phone-started
+      // SOTA activation was wrong at the source.
+      settings.activatorParkRefs = activationProgram.normalizeParkRefs([{ id: parkRef, ref: parkRef, name: '', program: sig }]);
       // Look up park name
       let parkName = '';
       try {
@@ -15385,10 +15849,13 @@ function connectRemote() {
       if (mySig && mySigInfo) {
         // Phone sent explicit park ref — use multi-park cross-product from desktop
         const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
-        if (mySig === 'POTA' && parkRefs.length > 1) {
+        // Compare against the activation's own primary program, not the
+        // literal 'POTA' — that test skipped the cross-product outright for
+        // a SOTA or WWFF activation started from the phone.
+        if (mySig === activationProgram.primaryProgram(parkRefs) && parkRefs.length > 1) {
           // Cross-product: one ADIF record per park
           for (let i = 0; i < parkRefs.length; i++) {
-            const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
+            const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
             // Only the FIRST record keeps the shared uuid — the cross-product
             // copies are distinct cloud records and must mint their own.
             if (i > 0) { parkQso.skipLogbookForward = true; parkQso.uuid = undefined; }
@@ -15407,7 +15874,9 @@ function connectRemote() {
         // save above, so a plain spread would journal the SAME uuid twice and
         // the cloud would collapse the cross-ref into the primary record.
         const crossRefs1 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+        const primaryKeys1 = activationProgram.myRefKeys(parkRefs);
         for (const xr of crossRefs1) {
+          if (primaryKeys1.has(activationProgram.refKey(xr.program, xr.ref))) continue;
           const xrQso = { ...qsoData, uuid: undefined, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
           if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
           else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
@@ -15419,15 +15888,18 @@ function connectRemote() {
         const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
         if (parkRefs.length > 0) {
           for (let i = 0; i < parkRefs.length; i++) {
-            const parkQso = { ...qsoData, mySig: 'POTA', mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
+            const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
             if (i > 0) { parkQso.skipLogbookForward = true; parkQso.uuid = undefined; }
             const r = await saveQsoRecord(parkQso, { origin: 'ws-log-qso' });
             if (r) Object.assign(result, r);
           }
           // Cross-program references (WWFF, LLOTA for same park) — uuid
-          // stripped for the same reason as the mySig branch above.
+          // stripped for the same reason as the mySig branch above; duplicates
+          // of a primary skipped for the reason given in the wsjtx path.
           const crossRefs2 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+          const primaryKeys2 = activationProgram.myRefKeys(parkRefs);
           for (const xr of crossRefs2) {
+            if (primaryKeys2.has(activationProgram.refKey(xr.program, xr.ref))) continue;
             const xrQso = { ...qsoData, uuid: undefined, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
             if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
             else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
@@ -15861,6 +16333,7 @@ function connectRemote() {
       return;
     }
     ft8Engine.setMode(mode); // accepts 'WSPR'
+    jtcatModeHopReset(); // the operator just chose a mode — the idle clock starts here
     if (mode !== 'WSPR') wsprSessionEnd();
     pushActivityState();
   });
@@ -16624,7 +17097,11 @@ function assertFlexTxDaxForTx() {
   // TX-Pwr does nothing" (WW4GA, Flex 8600 + AetherSDR 26.7.4). Same lesson
   // as js8KeyForTx part 3: the tx flag is global and must point at the slice
   // whose audio we're about to send. Harmless when it's already set.
-  try { if (smartSdr && smartSdr.connected) smartSdr.setTxSlice(getFlexSliceIndex()); } catch { /* best effort */ }
+  // Same resolver the PTT branch uses two lines later: this used to say
+  // getFlexSliceIndex() while PTT said (port-5002), so on a multiFlex or Flex
+  // Direct station the two could name different slices and the second write
+  // silently undid the first.
+  try { if (smartSdr && smartSdr.connected) smartSdr.setTxSlice(flexPttSliceIndex()); } catch { /* best effort */ }
   if (prior === true) return;     // already the TX source — nothing to do or restore
   if (!_sendFlexTxDax(true)) return;
   _flexTxDaxPrior = (prior === false) ? false : null;
@@ -16651,7 +17128,26 @@ function handleRemotePtt(state, opts = {}) {
     return;
   }
   const target = settings.catTarget;
-  const isFlexRig = target && target.type === 'tcp';
+  // "Is this a Flex" for PTT means "can the SmartSDR API key it", NOT "is the
+  // CAT target the SmartSDR-Win shim on 5002". Flex Direct and multiFlex-bound
+  // stations drive the radio entirely over the API: the tune path has keyed off
+  // smartSdr.canTune since Flex Direct shipped, and JTCAT sends the FT8 envelope
+  // to the radio as dax_tx VITA-49 — but this dispatcher still asked
+  // catTarget.type, so it was the last Flex control path that never learned.
+  // N5ZC (Aurora AU-520, 2026-09-06): POTACAT tuned his radio over the API and
+  // streamed every FT8 transmission over VITA-49, then refused to key it —
+  // "PTT FAILED: CAT not connected" — because his catTarget was a dead rigctld
+  // entry. RX, decode and frequency tracking were all perfect, so nothing in
+  // the symptom pointed at PTT.
+  //
+  // The predicate is the tune path's, deliberately: canTune AND (self-hosting
+  // OR no working CAT link). It must NOT be a bare smartSdr.connected, because
+  // needsSmartSdr() also connects for panadapter spots alone — an operator
+  // running an IC-7300 while pushing spots to a Flex would have had PTT
+  // silently diverted to the Flex.
+  const flexApiOwnsRadio = !!(smartSdr && smartSdr.canTune &&
+    (smartSdr.mode === 'self' || !cat || !cat.connected));
+  const isFlexRig = (target && target.type === 'tcp') || flexApiOwnsRadio;
 
   // SSB-over-DATA only makes sense when audio is being sent to the rig
   // through the USB CODEC (voice macro, ECHOCAT audio bridge, FT8 modem,
@@ -16732,7 +17228,7 @@ function handleRemotePtt(state, opts = {}) {
     // command via the TCP CAT shim — slice selection is lost but the radio
     // will at least key (W0MET silent-PTT report 2026-04-18).
     if (smartSdr && smartSdr.connected) {
-      const sliceIndex = (settings.catTarget.port || 5002) - 5002;
+      const sliceIndex = flexPttSliceIndex();
       smartSdr.setActiveSlice(sliceIndex);
       smartSdr.setTxSlice(sliceIndex);
       // TX audio source before keying: dax=1 must be in effect when RF
@@ -19841,6 +20337,12 @@ function createWindow() {
   });
 
   // Close pop-out map when main window closes
+  // Drop the reference once the window is really gone. Without this, `win`
+  // outlives its frame and every `if (win && !win.isDestroyed())` guard in the
+  // file still passes — which is how a closed window kept receiving meter
+  // updates until the process exited.
+  win.on('closed', () => { win = null; });
+
   win.on('close', () => {
     // Save window bounds before destruction. getNormalBounds(), not
     // getBounds(): it returns the un-maximized rect even while maximized,
@@ -21603,10 +22105,19 @@ function cancelAutoSstv() {
     // close the popout only if WE opened it (don't close one the user had open
     // already).
     autoIdleJtcatActive = false;
-    if (autoIdlePrevJtcatMode) { settings.jtcatLastMode = autoIdlePrevJtcatMode; saveSettings(settings); }
+    const restoreMode = autoIdlePrevJtcatMode;
+    if (restoreMode) { settings.jtcatLastMode = restoreMode; saveSettings(settings); }
     autoIdlePrevJtcatMode = null;
     if (autoIdleJtcatOpenedPopout && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       try { jtcatPopoutWin.close(); } catch {}
+    } else if (restoreMode && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() &&
+               ft8Engine && ft8Engine._mode !== restoreMode) {
+      // The window LIVES — either the operator adopted it by opening FT8, or
+      // it was theirs before the idle session began. Restoring the mode in
+      // settings alone leaves the running engine in WSPR while the operator
+      // looks at the mode they asked for, so move the engine too.
+      sendCatLog(`[Auto-RX] handing the JTCAT window back to you — switching ${ft8Engine._mode} to ${restoreMode}`);
+      ipcMain.emit('jtcat-set-mode', null, restoreMode);
     }
     autoIdleJtcatOpenedPopout = false;
     sendCatLog('[Auto-RX] ' + (autoIdleRxLabel || 'WSPR') + ' receive stopped');
@@ -24970,7 +25481,18 @@ app.whenReady().then(() => {
       }
     });
   };
-  ipcMain.on('jtcat-popout-open', () => openJtcatPopout());
+  ipcMain.on('jtcat-popout-open', () => {
+    // The OPERATOR asked for this window — WSPR/PSK31-on-idle calls
+    // openJtcatPopout() directly, never through IPC, so arriving here means a
+    // deliberate click. Hand the popout over NOW: opening FT8 counts as
+    // activity, the idle teardown that follows closes any popout IT opened,
+    // and the window just asked for disappears. "I try to open FT8 without
+    // closing WSPR, it just closes WSPR and does not open FT8" (K3SBP
+    // 2026-09-03). Clearing the flag is all it takes — cancelAutoSstv then
+    // restores the mode into a window that survives.
+    if (autoIdleJtcatActive) autoIdleJtcatOpenedPopout = false;
+    openJtcatPopout();
+  });
 
   // ─── Spot Target IPC (see the watcher in the decode handler) ──────────────
   // Shared by the main window's spot click AND the ECHOCAT phone's spot tap
@@ -30736,12 +31258,15 @@ app.whenReady().then(() => {
     const net = require('net');
     // Kill live rigctld first — two rigctld instances can't share a serial port
     const hadLiveRigctld = !!rigctldProc;
+    const dying = rigctldProc;
     killRigctld();
-    // Brief delay for OS to release the serial port
-    if (hadLiveRigctld) await new Promise((r) => setTimeout(r, 300));
+    // Wait for the port, don't guess at it. 300ms was usually enough and
+    // sometimes wasn't; killAndWait returns as soon as the process is reaped.
+    if (hadLiveRigctld) await killAndWait(dying);
 
     try {
       testProc = await spawnRigctld({ rigId, serialPort, baudRate, dtrOff, verbose: true }, '4533');
+      rigctldTestProc = testProc; // reapable by killRigctld()/gracefulCleanup
 
       // Give rigctld time to initialize and open the serial port
       await new Promise((r) => setTimeout(r, 1000));
@@ -30794,8 +31319,13 @@ app.whenReady().then(() => {
     } catch (err) {
       return { success: false, error: err.message };
     } finally {
+      // WAIT for the test rigctld to release the serial port before anything
+      // else opens it. Killing and immediately reconnecting raced the dying
+      // process straight into "Resource busy" — and because a failed restore
+      // leaves no rig connected, it looked like Save Rig had not persisted.
       if (testProc) {
-        try { testProc.kill(); } catch { /* ignore */ }
+        await killAndWait(testProc);
+        if (rigctldTestProc === testProc) rigctldTestProc = null;
       }
       // Restart live rigctld if one was running before the test
       if (hadLiveRigctld && settings.catTarget && settings.catTarget.type === 'rigctld') {
@@ -30974,6 +31504,7 @@ app.whenReady().then(() => {
       return;
     }
     ft8Engine.setMode(mode);
+    jtcatModeHopReset(); // the operator just chose a mode — the idle clock starts here
     if (mode !== 'WSPR') wsprSessionEnd();
     pushActivityState();
   });
@@ -31022,6 +31553,29 @@ app.whenReady().then(() => {
         ? `[JTCAT] WSPR band hop ON: ${jtcatWsprHopBands.join(' → ')} (${jtcatWsprHopDwell} cycle${jtcatWsprHopDwell > 1 ? 's' : ''}/band)`
         : (opts.enabled ? '[JTCAT] WSPR band hop needs at least 2 bands selected' : '[JTCAT] WSPR band hop OFF'));
     }
+    saveSettings(settings);
+  });
+  // FTx mode hop config from the popout gear popover (Barry 2026-09-07).
+  ipcMain.on('jtcat-mode-hop', (_e, opts) => {
+    opts = opts || {};
+    if (Array.isArray(opts.modes)) settings.jtcatModeHopModes = jtcatModehop.normalizeModes(opts.modes);
+    if (opts.idleMin != null) {
+      const n = Math.round(Number(opts.idleMin));
+      settings.jtcatModeHopIdleMin = isFinite(n) ? Math.max(1, Math.min(60, n)) : JTCAT_MODE_HOP_IDLE_MIN_DEFAULT;
+    }
+    if (opts.enabled != null) {
+      settings.jtcatModeHop = !!opts.enabled;
+      const avail = jtcatModeHopAvailable();
+      // Report the modes actually in play, not the ones ticked: 6m has no FT2
+      // watering hole and 2m has neither FT4 nor FT2, so on the higher bands
+      // the enabled set and the reachable set are different things.
+      sendCatLog(settings.jtcatModeHop
+        ? (avail.length >= 2
+            ? '[JTCAT] Mode hop ON: ' + avail.join(' → ') + ' after ' + jtcatModeHopIdleMin() + ' min with nobody workable (the band never changes)'
+            : '[JTCAT] Mode hop ON, but this band has fewer than two of the enabled modes — nothing to hop to')
+        : '[JTCAT] Mode hop OFF');
+    }
+    jtcatModeHopReset();
     saveSettings(settings);
   });
   ipcMain.on('jtcat-set-rx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setRxFreq(hz); });
@@ -31494,6 +32048,7 @@ app.whenReady().then(() => {
     // who chose Hunt wants to hunt, not to keep calling CQ. Only if the
     // fallback declines (Run is theirs, or the new callers don't match their
     // Hunt filter) does a paused Run resume.
+    jtcatModeHopTick(data.results || [], data.mode);
     jtcatHuntCqFallbackTick(data.results || [], data.mode);
     if (jtcatFullAutoCqPaused && runWorkable > 0) jtcatResumeRunCq(runWorkable);
 
