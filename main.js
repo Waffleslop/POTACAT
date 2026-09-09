@@ -1720,7 +1720,26 @@ function detectRigType() {
   if (!target) return 'unknown';
   if (target.type === 'icom' || target.type === 'civ-tcp' || target.type === 'icom-network') return 'icom';
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
-  if (target.type === 'tcp') return 'flex'; // TCP CAT ports 5002-5005 are always FlexRadio
+  if (target.type === 'tcp') {
+    // NOT every TCP CAT target is a Flex. SmartSDR's CAT shim is localhost-only
+    // on 5002-5005; a Hermes Lite 2 behind Thetis or Zeus is a TS-2000 emulator
+    // somewhere on the LAN — KI4GT 2026-09-01 had 192.168.x.x:19090. Calling
+    // that a Flex sent POTACAT chasing a SmartSDR API on 127.0.0.1:4992 that
+    // will never answer, and handed the operator a "set your Flex's IP address"
+    // error for a radio that is not a Flex.
+    //
+    // lib/rig-family.js already draws exactly this line (localhost + a shim
+    // port, or an explicit flexApiHost for Flex Direct). Use it rather than
+    // keeping a second copy of the rule that can drift from it.
+    const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    const rigForFamily = (activeRig && activeRig.catTarget)
+      ? activeRig
+      : { catTarget: target, flexApiHost: activeRig ? activeRig.flexApiHost : '' };
+    // A generic TCP CAT rig speaks Kenwood: connectCat's tcp branch builds the
+    // same CatClient a serial Kenwood gets (see its K4 comment — that path had
+    // already learned 'the old code assumed every TCP target was Flex').
+    return RigFamily.rigFamily(rigForFamily) === 'flex' ? 'flex' : 'kenwood';
+  }
   if (target.type === 'serial') {
     // New rig layer: check model brand directly (no runtime FA digit detection needed)
     if (cat && cat.model && cat.model.brand === 'Yaesu') return 'yaesu';
@@ -10777,9 +10796,12 @@ function stopJtcat() {
 
 // --- SmartSDR panadapter spots ---
 function needsSmartSdr() {
-  // Connect SmartSDR API only when a Flex radio is configured or panadapter spots are enabled.
-  // All Flex-specific features (CW keyer, rig controls, XIT) require catTarget.type === 'tcp'.
-  const isFlex = settings.catTarget && settings.catTarget.type === 'tcp';
+  // Connect SmartSDR API only when a Flex radio is configured or panadapter
+  // spots are enabled. This used to ask catTarget.type === 'tcp' directly,
+  // which is true of every network CAT rig — so a Hermes Lite 2 behind Thetis
+  // or Zeus spent the session retrying a SmartSDR API it does not have
+  // (KI4GT 2026-09-01). detectRigType() is now the single place that decides.
+  const isFlex = detectRigType() === 'flex';
   if (settings.smartSdrSpots) return true;
   if (!isFlex) return false; // non-Flex rigs never need SmartSDR
   if (settings.enableCwKeyer) return true;
@@ -10883,6 +10905,16 @@ function connectSmartSdr() {
     if (smartSdr && smartSdr.mode === 'bound') reclaimFlexRadio('bound GUI client (AetherSDR) closed');
   });
   smartSdr.on('give-up', ({ host, attempts }) => {
+    // Reached with a non-Flex active rig only when the operator turned on
+    // panadapter spots, which is a deliberate choice (push spots to a Flex
+    // while operating something else) — but the Flex-IP advice below is then
+    // wrong and reads as POTACAT being confused about their radio.
+    if (detectRigType() !== 'flex') {
+      sendCatLog(`SmartSDR API unreachable at ${host}:4992 after ${attempts} attempts — giving up. ` +
+        `Your active rig is not a FlexRadio, so this is only needed for the panadapter-spots feature. ` +
+        `Turn off "Send spots to SmartSDR panadapter" in Settings, or point it at a Flex that is on the network.`);
+      return;
+    }
     const isLocal = host === '127.0.0.1' || host === 'localhost';
     const hint = isLocal
       ? `Set "SmartSDR API Host" in your Rig settings to your Flex's IP address (e.g. 192.168.1.100). SmartSDR only exposes CAT on localhost; the API (ATU, NB, SWR, S-meter, CW keyer, SSB/DIGU TX) lives on port 4992 of the radio itself.`
@@ -17147,7 +17179,7 @@ function handleRemotePtt(state, opts = {}) {
   // silently diverted to the Flex.
   const flexApiOwnsRadio = !!(smartSdr && smartSdr.canTune &&
     (smartSdr.mode === 'self' || !cat || !cat.connected));
-  const isFlexRig = (target && target.type === 'tcp') || flexApiOwnsRadio;
+  const isFlexRig = detectRigType() === 'flex' || flexApiOwnsRadio;
 
   // SSB-over-DATA only makes sense when audio is being sent to the rig
   // through the USB CODEC (voice macro, ECHOCAT audio bridge, FT8 modem,

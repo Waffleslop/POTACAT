@@ -23,6 +23,13 @@ eq(familyFromCatTarget({ type: 'tcp', port: 5005 }), 'flex', 'shim slice D, host
 eq(familyFromCatTarget({ type: 'tcp', host: 'localhost', port: 5003 }), 'flex', 'shim, localhost');
 eq(familyFromCatTarget({ type: 'tcp', host: '192.168.1.9', port: 5002 }), 'generic', 'remote host + shim port = generic IP CAT');
 eq(familyFromCatTarget({ type: 'tcp', host: '127.0.0.1', port: 5006 }), 'generic', 'local + non-shim port');
+// KI4GT 2026-09-01: a Hermes Lite 2 behind Thetis or Zeus is a TS-2000
+// emulator on the LAN. main.js used to read every tcp target as a Flex and
+// spent the session retrying a SmartSDR API on 127.0.0.1:4992 that does not
+// exist, then told him to set his Flex's IP address. detectRigType() now
+// asks this module instead, so these two cases guard that decision.
+eq(familyFromCatTarget({ type: 'tcp', host: '192.168.68.119', port: 19090 }), 'generic', 'Thetis/Zeus TS-2000 emulator on the LAN is NOT a Flex');
+eq(familyFromCatTarget({ type: 'tcp', host: '127.0.0.1', port: 19090 }), 'generic', 'a local non-Flex CAT server is still not a Flex');
 eq(familyFromCatTarget({ type: 'k4-network', host: 'k4' }), 'k4', 'K4 network');
 eq(familyFromCatTarget({ type: 'serial', path: 'COM5' }), 'serial', 'serial CAT');
 eq(familyFromCatTarget({ type: 'icom', path: 'COM7' }), 'icom', 'Icom CI-V USB');
