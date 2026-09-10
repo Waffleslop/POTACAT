@@ -57,6 +57,8 @@ jobs:
         run: node test/contests-db-test.js
       - name: Run SmartSDR reconnect suite
         run: node test/smartsdr-reconnect-test.js
+      - name: Run SmartSDR meter suite
+        run: node test/smartsdr-meter-test.js
       - name: Run watchlist-groups suite
         run: node test/watchlist-groups-test.js
       - name: Run event-decode-match suite

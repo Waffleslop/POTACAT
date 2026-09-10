@@ -1486,6 +1486,16 @@ let _currentSwr = 0;
 let _currentSwrRatio = 0;
 let _swrRatioClearTimer = null;
 let _fwdPowerClearTimer = null;
+// ─── Flex TX RF summary (K3SBP 2026-09-10) ───────────────────────────────────
+// Forward power and SWR from the Flex TX bridge went to the VFO popout, the
+// web client and the phone — and never to the CAT log. A Flex bug report
+// could therefore show ten clean FT8 cycles (audio queued, dax=1, PTT on,
+// PTT off) and still not say whether one watt left the radio: "keys but no
+// RF" and "RF out but nobody answers" produced identical logs. Peak watts
+// and max SWR are accumulated from the meter frames between key-down and
+// key-up and written as ONE line at release, so a 13 s FT8 frame costs one
+// log line rather than 260. Null whenever a Flex PTT is not down.
+let _flexTxRf = null;   // { startedAt, peakW, maxSwr, frames }
 // ─── SWR guard (K3SBP 2026-07-17) ───────────────────────────────────────────
 // The Flex protects ITSELF from a bad match by folding back power — it never
 // refuses to key (K3SBP measured a real 46:1 pre-ATU while the 8600 happily
@@ -10339,6 +10349,13 @@ function startJtcat(mode) {
           }, 150);
         })
         .catch((e) => {
+          // A deliberate cancel (operator Stop/Halt, SWR trip, shutdown)
+          // rejects here too. cancelTx already logged where it stopped, and
+          // the fallback below is gated on _txActive, which the cancel has
+          // cleared — so it never fired, but the line said it would. Read
+          // literally it claimed a Windows DAX TX had gone out (K3SBP
+          // 2026-09-10, chasing why a Flex Direct station got no replies).
+          if (e && e.message === 'TX cancelled') return;
           sendCatLog(`[SmartSDR-Audio] Direct TX failed: ${e.message} — falling back to Windows DAX TX route this cycle`);
           if (win && !win.isDestroyed() && ft8Engine && ft8Engine._txActive) {
             win.webContents.send('jtcat-tx-audio', jtcatRendererTxPayload(data, ft8Engine));
@@ -11028,6 +11045,7 @@ function connectSmartSdr() {
   // after they stop rather than displaying stale watts forever.
   smartSdr.on('fwd-power', (watts) => {
     const w = Math.round((Number(watts) || 0) * 10) / 10;
+    if (_flexTxRf) { _flexTxRf.frames++; if (w > _flexTxRf.peakW) _flexTxRf.peakW = w; }
     if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', w);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', w);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: w });
@@ -11039,6 +11057,7 @@ function connectSmartSdr() {
     }, 3000);
   });
   smartSdr.on('swr-ratio', (swr) => {
+    if (_flexTxRf && swr > _flexTxRf.maxSwr) _flexTxRf.maxSwr = swr;
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-swr-ratio', swr);
@@ -17223,6 +17242,30 @@ function restoreFlexTxDax() {
   }
 }
 
+// One CAT-log line per Flex key-down saying what the TX bridge measured. The
+// three shapes are deliberately distinct because they need different next
+// steps: watts → the radio radiated, look elsewhere; no frames with a bound
+// FWDPWR meter → the radio never reported keying OR its meter stream is not
+// reaching this PC (the radio's own TX indicator settles which); no FWDPWR
+// meter in the list → this firmware doesn't expose it, nothing to infer.
+function logFlexTxRfSummary() {
+  const rf = _flexTxRf;
+  _flexTxRf = null;
+  if (!rf) return;
+  const secs = ((Date.now() - rf.startedAt) / 1000).toFixed(1);
+  if (rf.frames === 0) {
+    if (smartSdr && smartSdr._fwdMeterId != null) {
+      sendCatLog(`[TX] RF out: NO forward-power frames from the Flex TX bridge during a ${secs} s key-down — either the radio never keyed or its meter stream is not reaching this PC (check the radio's own TX indicator)`);
+    } else {
+      sendCatLog(`[TX] RF out: not measured — the Flex meter list exposes no FWDPWR meter (${secs} s key-down)`);
+    }
+    return;
+  }
+  const peak = rf.peakW >= 10 ? String(Math.round(rf.peakW)) : rf.peakW.toFixed(1);
+  const swr = rf.maxSwr >= 1 ? `, SWR ${rf.maxSwr.toFixed(1)}` : '';
+  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s)`);
+}
+
 function handleRemotePtt(state, opts = {}) {
   pushActivityState();   // busy.tx edges reach the activity feed (debounced)
   // SWR-guard latch backstop — covers every PTT source (voice macros, mobile
@@ -17344,8 +17387,11 @@ function handleRemotePtt(state, opts = {}) {
       // every release — including the failsafe paths, which all come
       // through here as handleRemotePtt(false).
       if (state) assertFlexTxDaxForTx();
-      gatedSmartSdrTransmit(state);
-      if (!state) restoreFlexTxDax();
+      const keyed = gatedSmartSdrTransmit(state);
+      // Only a PTT that actually went to the radio opens an RF window; a
+      // pass-blocked key-down must not later read "no RF during key-down".
+      if (state && keyed) _flexTxRf = { startedAt: Date.now(), peakW: 0, maxSwr: 0, frames: 0 };
+      if (!state) { restoreFlexTxDax(); logFlexTxRfSummary(); }
     } else if (cat && cat.connected) {
       if (state) sendCatLog('[PTT] SmartSDR API unavailable — falling back to TS-2000 TX; command (slice selection skipped)');
       gatedSetTransmit(state);
