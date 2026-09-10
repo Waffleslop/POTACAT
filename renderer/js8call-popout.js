@@ -608,8 +608,12 @@
     var off = fmtOffset(d.offsetMs || 0);
     var bad = d.level === 'bad';
     clockMsgEl.textContent = bad
-      ? 'PC clock is ' + off + ' off UTC — JS8 will NOT decode until you fix it.'
-      : 'PC clock is ' + off + ' off UTC — decoding may be unreliable. Sync recommended.';
+      // See renderer/jtcat-popout.js: the failure is asymmetric and the old
+      // wording pointed the operator at their decoding, which looks healthy.
+      ? 'PC clock is ' + off + ' off UTC — stations you call will NOT decode you, so nobody answers.'
+        + (Math.abs(d.offsetMs || 0) >= 2000 ? ' Your own decoding will fail too.'
+                                            : ' You will still decode them normally, which is why this is easy to miss.')
+      : 'PC clock is ' + off + ' off UTC — you will decode fine, but weaker stations may not decode YOU. Sync recommended.';
     clockEl.style.background = bad ? '#5a1a1a' : '#5a4a1a';
     clockEl.style.borderBottomColor = bad ? '#e94560' : '#f0a500';
     clockEl.hidden = false;

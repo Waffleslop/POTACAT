@@ -73,6 +73,10 @@ jobs:
         run: node test/cw-paddle-availability-test.js
       - name: Run SDR list sync suite
         run: node test/sdr-list-sync-test.js
+      - name: Run clock offset suite
+        run: node test/clock-offset-test.js
+      - name: Run require/exports consistency suite
+        run: node test/require-exports-test.js
 
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the

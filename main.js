@@ -10432,7 +10432,17 @@ function startJtcat(mode) {
     console.error('[JTCAT] Engine error:', err.message);
   });
 
-  ft8Engine.start();
+  ft8Engine.start(); // no-op: startSlice() already started it (kept as a guard)
+  // The engine has been running since jtcatManager.startSlice() above, and
+  // Ft8Engine.start() emits its {state:'running'} status SYNCHRONOUSLY — before
+  // a single ft8Engine.on('status') above was attached. So the running status
+  // never reached the popout, the main window or a remote client (the phone
+  // handler re-broadcasts one by hand for exactly that reason), and the clock
+  // monitor hooked on it (39ec7ca, 2026-06-10) had never fired on its own:
+  // not one '[Clock]' line in any log, 'Sync: —' in the popout until someone
+  // pressed Recheck. Dead since the manager took over engine start (c60f962).
+  // Emit it again now that the listeners exist. K3SBP 2026-09-10.
+  ft8Engine.emit('status', { state: 'running', mode: mode || 'FT8' });
   console.log('[JTCAT] Engine started, mode:', mode || 'FT8');
 }
 
@@ -10481,9 +10491,10 @@ async function runJtcatClockCheck() {
   // The clock has to reach the CAT LOG, not just the FT8 windows. Until now a
   // drifting clock was visible only as a banner in a window the operator may
   // not have open, and a bug report — the one artifact we get to read — said
-  // nothing about it at all. K3SBP ran two weeks of zero QSOs on a clock that
-  // POLLED CORRECTLY the whole time; the measurement existed, nobody could
-  // see it. Logged on change, so it lands in session.log without flooding.
+  // nothing about it at all. K3SBP ran two weeks of zero QSOs (2026-09-03) on
+  // a clock nobody had measured: this monitor's 'running' hook had never
+  // fired (see the end of startJtcat), so only a manual Recheck ever ran it.
+  // Logged on change, so it lands in session.log without flooding.
   if (jtcatLastClock.level !== prevLevel) {
     const off = jtcatLastClock.offsetMs;
     if (jtcatLastClock.level === 'unknown') {
@@ -10538,9 +10549,19 @@ function offerClockFix(state) {
   } catch { /* notifications are best-effort */ }
 }
 
+const JTCAT_CLOCK_REUSE_MS = 60 * 1000;
 function startJtcatClockMonitor() {
   if (jtcatClockTimer) return;
-  runJtcatClockCheck();
+  // Every QSY to another mode and every slice change rebuilds the engine, so
+  // this runs far more often than the clock can change. A measurement under a
+  // minute old is re-broadcast (the popout was just rebuilt and needs it)
+  // instead of querying NTP again; the 5-minute interval is armed either way.
+  if (jtcatLastClock && jtcatLastClock.level !== 'unknown' &&
+      Date.now() - (jtcatLastClock.checkedAt || 0) < JTCAT_CLOCK_REUSE_MS) {
+    broadcastJtcatClock(jtcatLastClock);
+  } else {
+    runJtcatClockCheck();
+  }
   jtcatClockTimer = setInterval(runJtcatClockCheck, JTCAT_CLOCK_POLL_MS);
 }
 
@@ -10838,6 +10859,9 @@ function stopJtcat() {
     jtcatPskRxTimer = null;
     jtcatPskRxPending = null;
   }
+  // Single-slice stops it via the engine's 'stopped' status; multi-slice has
+  // no status listener, so stop it here for both.
+  stopJtcatClockMonitor();
   ft8Engine = null;
   console.log('[JTCAT] Engine stopped');
 }
@@ -32303,6 +32327,9 @@ app.whenReady().then(() => {
     });
 
     ft8Engine = jtcatManager.engine; // Phase 0 compat alias
+    // No per-engine 'status' listener on this path, so arm the clock monitor
+    // directly — N slices on one PC clock still need exactly one check.
+    startJtcatClockMonitor();
     console.log(`[JTCAT] Multi-slice started: ${slices.map(s => s.sliceId + '/' + s.band).join(', ')}`);
   });
 
