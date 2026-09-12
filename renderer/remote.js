@@ -4618,7 +4618,14 @@
     var pct = Math.min(1, val / 255);
     var color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
     drawEchoBar(echoAlcBar, pct, pct <= 0 ? '#333' : color);
-    echoAlcText.textContent = pct <= 0 ? '\u2014' : Math.round(pct * 100) + '%';
+    // A reading of ZERO is a reading. Rendering it as an em dash made it
+    // identical to "this rig reports no ALC at all", so a K3 running with
+    // drive set correctly — no ALC action, which is how Elecraft tell you to
+    // run it — looked like a broken meter (jbkerkhoff 2026-09-03, whose SWR
+    // worked on the same rig in the same session). The dash now means only
+    // "nothing has arrived yet": it is the markup's initial text, and the
+    // first callback replaces it, zero or not.
+    echoAlcText.textContent = Math.round(pct * 100) + '%';
     echoAlcText.style.color = color;
   }
 
