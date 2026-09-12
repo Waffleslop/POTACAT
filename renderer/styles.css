@@ -9893,7 +9893,10 @@ main.banner-logger-active #event-progress-overlay {
 .contests-drawer-dl {
   margin: 0 0 16px 0;
   display: grid;
-  grid-template-columns: 110px 1fr;
+  /* minmax(0, …): a grid column's default min-width is its content, so one
+     unbreakable token (a slash-joined frequency list) pushed every row past
+     the drawer edge with no scrollbar to reach it. */
+  grid-template-columns: 110px minmax(0, 1fr);
   gap: 6px 12px;
   font-size: 12px;
 }
@@ -9908,6 +9911,8 @@ main.banner-logger-active #event-progress-overlay {
   margin: 0;
   color: var(--text-primary);
   line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .contests-drawer-actions {
   display: flex;
@@ -9932,6 +9937,10 @@ main.banner-logger-active #event-progress-overlay {
 .contests-drawer-btn-secondary {
   color: var(--text-secondary);
   font-size: 11px;
+}
+.contests-drawer-btn-primary {
+  border-color: var(--accent-blue);
+  font-weight: 600;
 }
 
 /* ── Pair Mobile App (Settings → ECHOCAT → Pair Mobile App) ───────── */

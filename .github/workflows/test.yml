@@ -71,6 +71,8 @@ jobs:
         run: node test/events-catalog-test.js
       - name: Run event-geo suite (event stations plot at their city)
         run: node test/event-geo-test.js
+      - name: Run event-banner-pick suite (which event owns the banner; ended contests)
+        run: node test/event-banner-pick-test.js
       - name: Run bug-report-log suite
         run: node test/bug-report-log-test.js
       - name: Run CW key-line resolver suite

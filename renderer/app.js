@@ -11724,6 +11724,18 @@ function _contestsOpenDrawer(c) {
     : '';
   const startStr = start ? _contestsFmtUtc(start) : whenRule;
   const endStr = end ? _contestsFmtUtc(end) : '';
+  // A contest that runs as a tracked event (13 Colonies, Route 66) puts its
+  // tracking action FIRST in the drawer. The row chip already links to the
+  // board, but the drawer covers that chip on any window narrower than the
+  // list plus 400 px, so an operator who clicked the row read a wall of notes
+  // and had no way to start tracking (Casey 2026-09-12).
+  let eventAction = '';
+  if (c.supersededBy && (c.eventTracked || _contestsStatus(c, new Date()).kind !== 'ended')) {
+    const label = c.eventTracked
+      ? `Open event board — ${c.eventProgress}${c.eventTotal ? '/' + c.eventTotal : ''} worked`
+      : 'Track this event';
+    eventAction = `<a href="#" class="contests-drawer-btn contests-drawer-btn-primary" data-event-id="${_contestsEscape(c.supersededBy)}" data-event-tracked="${c.eventTracked ? '1' : '0'}">${_contestsEscape(label)}</a>`;
+  }
   body.innerHTML = `
     <h3>${name}</h3>
     <div class="contests-drawer-sponsor">${sponsor}</div>
@@ -11736,13 +11748,26 @@ function _contestsOpenDrawer(c) {
       ${notes ? `<dt>Notes</dt><dd>${notes}</dd>` : ''}
     </dl>
     <div class="contests-drawer-actions">
+      ${eventAction}
       <a href="#" class="contests-drawer-btn" data-url="${_contestsEscape(c.website || '')}">Open sponsor site &#x2197;</a>
       ${c.rulesUrl && c.rulesUrl !== c.website ? `<a href="#" class="contests-drawer-btn" data-url="${_contestsEscape(c.rulesUrl)}">Rules &#x2197;</a>` : ''}
     </div>
   `;
   body.querySelectorAll('.contests-drawer-btn').forEach((a) => {
-    a.addEventListener('click', (e) => {
+    a.addEventListener('click', async (e) => {
       e.preventDefault();
+      const evId = a.getAttribute('data-event-id');
+      if (evId) {
+        // Opt in right here — "Track this event" that only opened a board
+        // with no opt-in control on it would be the same dead end one click
+        // later. The events push that follows refreshes the contests cache.
+        if (a.getAttribute('data-event-tracked') !== '1') {
+          await window.api.setEventOptIn({ eventId: evId, optedIn: true });
+        }
+        drawer.classList.add('hidden');
+        if (typeof openEventBoard === 'function') openEventBoard(evId);
+        return;
+      }
       const u = a.getAttribute('data-url');
       if (u) window.api.openContestUrl(u);
     });
@@ -16259,6 +16284,74 @@ function getEventForCallsign(callsign) {
 
 let eventBannerSessionDismissed = false; // dismissal persists across mode switches within session
 
+// Total span of an event's schedule (first start to last end). America250's
+// 49 weekly cohorts span the year; 13 Colonies is 159 h, Route 66 216 h.
+function eventScheduleSpanMs(ev) {
+  const sched = ev.schedule || [];
+  if (!sched.length) return Infinity;
+  const starts = sched.map(s => new Date(s.start).getTime());
+  const ends = sched.map(s => new Date(s.end).getTime());
+  return Math.max(...ends) - Math.min(...starts);
+}
+
+// Which event the banner shows: { ev, entries, isUpcoming } or null. ONE
+// selector for updateEventBanner and the banner's button handlers — they had
+// drifted (the render preferred live over upcoming, the handlers took the
+// first event that was either), so a click could act on an event the banner
+// wasn't showing.
+//
+// Among LIVE candidates the SHORTEST schedule wins, not the first in the
+// feed. The feed lists America250 first and it runs all year, so with
+// feed-order selection it held the banner for every week of 2026 and the
+// banner's Track It — the only opt-in most operators ever see — never once
+// offered 13 Colonies or Route 66, both of which start and finish inside
+// one of America250's weeks (Casey 2026-09-12: "there is no way to track
+// Route 66"). A nine-day event is news; the year-long one is wallpaper the
+// operator can reach from its board any time. Ties keep feed order.
+//
+// A dismissed, never-tracked event is SKIPPED rather than hiding the
+// banner: it gave up its own claim, not the next event's. Upcoming (within
+// 7 days) is the fallback only when nothing is live, earliest start first.
+function pickBannerEvent() {
+  const now = new Date();
+  const nowMs = now.getTime();
+  let live = null;
+  let upcoming = null;
+  for (const ev of activeEvents) {
+    // Snoozed (e.g. dismissed during the countdown) — skip until the snooze
+    // expires. Dismissing an upcoming event snoozes it until its start, so the
+    // banner stays hidden through the lead-in and returns when it goes LIVE.
+    if (ev.snoozeUntil && nowMs < ev.snoozeUntil) continue;
+    if (ev.dismissed && !ev.optedIn) continue;
+    // Entries are resolved as an ARRAY — America250 WAS runs multiple
+    // concurrent states per week, and the banner shows all of them.
+    const current = getActiveScheduleEntries(ev);
+    if (current.length) {
+      const span = eventScheduleSpanMs(ev);
+      if (!live || span < live.span) live = { ev, entries: current, span };
+      continue;
+    }
+    if (live) continue;
+    // Next upcoming cohort — every entry that shares the earliest upcoming
+    // start, so a two-state week previews together.
+    const soon = (ev.schedule || [])
+      .filter(s => {
+        const start = new Date(s.start);
+        return start > now && (start - now) < 7 * 24 * 3600000;
+      })
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
+    if (soon.length) {
+      const firstStart = +new Date(soon[0].start);
+      if (!upcoming || firstStart < upcoming.start) {
+        upcoming = { ev, entries: soon.filter(s => +new Date(s.start) === firstStart), start: firstStart };
+      }
+    }
+  }
+  if (live) return { ev: live.ev, entries: live.entries, isUpcoming: false };
+  if (upcoming) return { ev: upcoming.ev, entries: upcoming.entries, isUpcoming: true };
+  return null;
+}
+
 function updateEventBanner() {
   const banner = document.getElementById('event-banner');
   const message = document.getElementById('event-message');
@@ -16273,53 +16366,14 @@ function updateEventBanner() {
     return;
   }
 
-  // Find first event with an active or upcoming schedule entry. Entries are
-  // resolved as an ARRAY — America250 WAS runs multiple concurrent states per
-  // week, and the banner shows all of them (see getActiveScheduleEntries).
-  let activeEvent = null;
-  let activeEntries = null;
-  let isUpcoming = false;
-  const now = new Date();
-  for (const ev of activeEvents) {
-    // Snoozed (e.g. dismissed during the countdown) — skip until the snooze
-    // expires. Dismissing an upcoming event snoozes it until its start, so the
-    // banner stays hidden through the lead-in and returns when it goes LIVE.
-    if (ev.snoozeUntil && now.getTime() < ev.snoozeUntil) continue;
-    // Check for currently active entries first
-    const current = getActiveScheduleEntries(ev);
-    if (current.length) {
-      activeEvent = ev;
-      activeEntries = current;
-      break;
-    }
-    // Fall back to the next upcoming cohort (within 7 days) — every entry that
-    // shares the earliest upcoming start, so a two-state week previews together.
-    if (!activeEvent) {
-      const upcoming = (ev.schedule || [])
-        .filter(s => {
-          const start = new Date(s.start);
-          return start > now && (start - now) < 7 * 24 * 3600000;
-        })
-        .sort((a, b) => new Date(a.start) - new Date(b.start));
-      if (upcoming.length) {
-        const firstStart = +new Date(upcoming[0].start);
-        activeEvent = ev;
-        activeEntries = upcoming.filter(s => +new Date(s.start) === firstStart);
-        isUpcoming = true;
-      }
-    }
-  }
-
-  if (!activeEvent || !activeEntries || !activeEntries.length) {
+  const pick = pickBannerEvent();
+  if (!pick || !pick.entries.length) {
     banner.classList.add('hidden');
     return;
   }
-
-  // If dismissed and not opted in, stay hidden
-  if (activeEvent.dismissed && !activeEvent.optedIn) {
-    banner.classList.add('hidden');
-    return;
-  }
+  const activeEvent = pick.ev;
+  const activeEntries = pick.entries;
+  const isUpcoming = pick.isUpcoming;
 
   badge.textContent = activeEvent.badge || '250';
   badge.style.background = activeEvent.badgeColor || '#ff6b00';
@@ -16415,12 +16469,42 @@ function renderEventBoard(event) {
   renderEventOverlayTabs(event);
   renderEventLinksRow(event);
   renderEventLifecycleStrip(event); // async fire-and-forget (finished summary + retro-stamp)
+  renderEventTrackBoardBtn(event);
   renderEventFocusBoardBtn(event);
   renderEventMapBoardBtn(event);
   const board = event.board || (event.tracking && event.tracking.type) || 'regions';
   if (board === 'regions') renderRegionsBoard(event);
   else if (board === 'checklist') renderChecklistBoard(event);
   else if (board === 'counter') renderCounterBoard(event);
+}
+
+// "Track this event" on the board, for an event the operator reached without
+// opting in — the Contests row chip and the Settings card's board link both
+// open the board for an untracked event, and until 2026-09-12 that board
+// showed the station list with no opt-in anywhere on it (Focus Spots and
+// Show on map hide until tracked, and the banner's Track It belongs to
+// whichever event holds the banner, which for most of 2026 is America250).
+// Opting in re-renders the board through the events push, so this button
+// replaces itself with the tracked-only controls.
+function renderEventTrackBoardBtn(event) {
+  const content = document.getElementById('event-board-content');
+  if (!content || !content.parentElement) return;
+  let btn = document.getElementById('event-track-board-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'event-track-board-btn';
+    btn.type = 'button';
+    btn.className = 'event-focus-chip';
+    btn.style.cssText = 'margin:4px 0;align-self:flex-start;';
+    content.parentElement.insertBefore(btn, content);
+  }
+  const show = !event.optedIn && _eventScheduleNearActive(event);
+  btn.style.display = show ? '' : 'none';
+  if (!show) return;
+  btn.style.setProperty('--efc-color', event.badgeColor || '#1776cf');
+  btn.textContent = 'Track this event';
+  btn.title = 'Tag its stations in the spot list and on FT8, and tick this board as you log them';
+  btn.onclick = () => { window.api.setEventOptIn({ eventId: event.id, optedIn: true }); };
 }
 
 // "Focus Spots" on the board (Event Focus entry point #2): sets focus and
@@ -16933,21 +17017,11 @@ function updateSpotsEventsSection() {
   }
 }
 
-// Event banner button handlers
+// Event banner button handlers act on the event the banner is showing —
+// the same pickBannerEvent() the render used.
 function findBannerEvent() {
-  // Same logic as updateEventBanner — find active or upcoming event,
-  // skipping snoozed ones so the click handlers act on the displayed event.
-  const now = new Date();
-  for (const ev of activeEvents) {
-    if (ev.snoozeUntil && now.getTime() < ev.snoozeUntil) continue;
-    if (getActiveScheduleEntry(ev)) return ev;
-    const upcoming = (ev.schedule || []).find(s => {
-      const start = new Date(s.start);
-      return start > now && (start - now) < 7 * 24 * 3600000;
-    });
-    if (upcoming) return ev;
-  }
-  return null;
+  const pick = pickBannerEvent();
+  return pick ? pick.ev : null;
 }
 
 document.getElementById('event-optin-btn').addEventListener('click', async () => {
@@ -17305,6 +17379,12 @@ function checkEventFocusExpiry() {
 
 window.api.onActiveEvents((events) => {
   activeEvents = events;
+  // Contest rows carry the linked event's tracked state and progress
+  // (get-contests joins them), and the cache was fetched once per session —
+  // so "Track this event" in the drawer left the row saying "Event
+  // available" and the count never moved. Re-fetch on the next render.
+  contestsCache = null;
+  if (currentView === 'contests') renderContestsView();
   // Untrack clears focus (either device may untrack): a focus on an
   // untracked event would render an empty list that can't explain itself.
   if (eventFocusId) {
