@@ -149,6 +149,15 @@
   // will pre-authenticate on the same cookie — no token box, like 'none'.
   const servedAuthMode = authMode;
   const webCookieMode = () => authMode === 'cookie';
+  // A sign-in fragment (#pair=<token> / #pass=<code>.<session>) is consumed
+  // by the connect page — but a browser that ALREADY holds a live cookie
+  // gets this SPA for that same URL, and then nothing stripped it: the pass
+  // code and session id (together, the cookie's value) sat in the address
+  // bar, history and any copied link (re-opening a share link, 2026-09-12).
+  // Drop it before anything else runs; the credential has done its job.
+  if (/^#(pair|pass)=/.test(location.hash || '')) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  }
   let clubMember = null;  // { callsign, firstname, role, licenseClass }
   let pingInterval = null;
   let lastPingSent = 0;

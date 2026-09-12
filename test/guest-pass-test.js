@@ -6,12 +6,17 @@
 //   1. extractGuestPassCode: all three intake forms + rejects
 //   2. RemoteClient pass-mode auth: sends {mode:'pass', passCode, sessionId}
 //      on auth-mode (never the deviceToken), and pass-ended stops reconnects
+//   3. PassEnforcement revoke: the owner's own revoke ends the live session
+//      at once (endPassIfCode), and a revoke made elsewhere (mobile device,
+//      second desktop) is caught by the cloud re-read — 404 = revoked,
+//      anything else is not evidence and the session stays up
 //
 // Run:  node test/guest-pass-test.js
 // =====================================================================
 
 const { extractGuestPassCode } = require('../lib/guest-pass');
 const { RemoteClient } = require('../lib/remote-client');
+const { PassEnforcement } = require('../lib/pass-enforcement');
 
 let pass = 0, fail = 0;
 function eq(actual, expected, msg) {
@@ -130,7 +135,93 @@ section('RemoteServer — tap-to-pair LAN source classifier');
 }
 
 // ---------------------------------------------------------------------
-console.log('\n============================================================');
-console.log(`Results: ${pass} passed, ${fail} failed`);
-if (fail > 0) { console.log('FAILURES PRESENT'); process.exit(1); }
-console.log('All guest-pass tests passed.');
+// PassEnforcement — revoke propagation. The cloud's DELETE /v1/passes/:code
+// is silent towards the shack, so two things end a live guest: the owner's
+// own revoke (immediate, endPassIfCode) and the periodic cloud re-read
+// (404 = revoked). fetch is stubbed; the poll runs at 20 ms.
+async function passEnforcementRevokeTests() {
+  section('PassEnforcement — revoke propagation');
+  const realFetch = global.fetch;
+  const passBody = (code, expiresInMs) => ({
+    code, owner_callsign: 'K3SBP', privilege_class: 'general', max_power_w: 100,
+    allowed_modes: [], expires_at: new Date(Date.now() + expiresInMs).toISOString(),
+  });
+  const resp = (status, body) => ({
+    status, ok: status >= 200 && status < 300, statusText: String(status),
+    json: async () => body,
+  });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    // (a) the owner's own revoke — no poll needed
+    {
+      global.fetch = async () => resp(200, passBody('otter-newt-mosaic-rooster', 600000));
+      const pe = new PassEnforcement({ revalidateMs: 0 });
+      const ended = [];
+      pe.on('ended', (i) => ended.push(i));
+      await pe.loadPass('otter-newt-mosaic-rooster');
+      eq(pe.getState(), 'active', 'loaded → active');
+      eq(pe.endPassIfCode('journal-kettle-fox-idaho'), false, 'a different code ends nothing');
+      eq(pe.getState(), 'active', 'still active after the wrong code');
+      eq(pe.endPassIfCode('OTTER-NEWT-MOSAIC-ROOSTER'), true, 'same code (any case) ends the session');
+      eq(ended.map((i) => [i.reason, i.code]), [['revoked', 'otter-newt-mosaic-rooster']], "'ended' carries reason=revoked + the code");
+      eq(pe.endPassIfCode('otter-newt-mosaic-rooster'), false, 'idempotent once ended');
+      await sleep(0);
+      eq(pe.getState(), 'idle', 'settles to idle');
+      eq(pe.endPassIfCode('otter-newt-mosaic-rooster'), false, 'idle: nothing to end');
+    }
+    // (b) revoke made elsewhere — the re-read sees 404
+    {
+      let calls = 0;
+      let cloud = () => resp(200, passBody('otter-newt-mosaic-rooster', 600000));
+      global.fetch = async () => { calls++; return cloud(); };
+      const pe = new PassEnforcement({ revalidateMs: 20 });
+      const ended = [];
+      pe.on('ended', (i) => ended.push(i));
+      await pe.loadPass('otter-newt-mosaic-rooster');
+      const loadCalls = calls;
+      await sleep(70);
+      eq(calls > loadCalls, true, 'the poll re-reads the pass while live');
+      eq(pe.getState(), 'active', '200 keeps the session up');
+      cloud = () => resp(503, { error: 'validate_failed' });
+      await sleep(50);
+      eq(pe.getState(), 'active', '5xx is not evidence — still active');
+      cloud = () => { throw new Error('ENETUNREACH'); };
+      await sleep(50);
+      eq(pe.getState(), 'active', 'network error is not evidence — still active');
+      cloud = () => resp(404, { error: 'not_found' });
+      await sleep(50);
+      eq(ended.map((i) => i.reason), ['revoked'], '404 → ended once, reason=revoked');
+      await sleep(0);
+      eq(pe.getState(), 'idle', 'settles to idle after the poll-driven end');
+      const after = calls;
+      await sleep(60);
+      eq(calls, after, 'the poll stops with the session (no repeated 404s at the cloud)');
+    }
+    // (c) a shortened expires_at from the cloud is adopted, a longer one is not
+    {
+      let cloud = () => resp(200, passBody('otter-newt-mosaic-rooster', 600000));
+      global.fetch = async () => cloud();
+      const pe = new PassEnforcement({ revalidateMs: 20 });
+      await pe.loadPass('otter-newt-mosaic-rooster');
+      const before = pe.getSessionStatus().remainingSeconds;
+      cloud = () => resp(200, passBody('otter-newt-mosaic-rooster', 6000000));
+      await sleep(50);
+      eq(pe.getSessionStatus().remainingSeconds <= before, true, 'a longer expires_at is ignored');
+      cloud = () => resp(200, passBody('otter-newt-mosaic-rooster', 5000));
+      await sleep(50);
+      eq(pe.getSessionStatus().remainingSeconds <= 5, true, 'a shorter expires_at is adopted');
+      pe.endPass('owner_override');
+      await sleep(0);
+    }
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
+// ---------------------------------------------------------------------
+passEnforcementRevokeTests().catch((err) => { fail++; console.log('  ✗ PassEnforcement tests threw: ' + (err && err.stack || err)); }).then(() => {
+  console.log('\n============================================================');
+  console.log(`Results: ${pass} passed, ${fail} failed`);
+  if (fail > 0) { console.log('FAILURES PRESENT'); process.exit(1); }
+  console.log('All guest-pass tests passed.');
+});

@@ -23938,6 +23938,14 @@ app.whenReady().then(() => {
       sendToRenderer: (channel, data) => {
         if (win && !win.isDestroyed()) win.webContents.send(channel, data);
       },
+      // Owner revoked a Guest Pass here: end the guest riding it NOW.
+      // PassEnforcement's 'ended' → broadcastPassEnded() kicks the WS
+      // clients and purges the browser sign-ins for that pass.
+      onPassRevoked: (code) => {
+        if (passEnforcement && passEnforcement.endPassIfCode(code, 'revoked')) {
+          sendCatLog(`[pass] revoked by the owner: live session for code=${code} ended`);
+        }
+      },
     });
     cloudIpc.startBackgroundSync();
 
