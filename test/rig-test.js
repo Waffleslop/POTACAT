@@ -2101,7 +2101,12 @@ test('round-3 readbacks: levels scale to percent, AGC maps to mode strings', () 
   h.codec.getAtuEnabled();
   h.feed(['2', '1', '0.721569', '0.500000', '0.250000', '0.400000', '0.300000', '1', '0', '1']);
   assert.deepStrictEqual(h.events, [
-    ['agc', 'mid'], ['nrLevel', 72], ['voxLevel', 50], ['monLevel', 25],
+    // 'med', not hamlib's 'mid': POTACAT's canonical AGC vocabulary is
+    // off/fast/med/slow (main's set-agc allow-list, and what clients render).
+    // Emitting 'mid' cleared the mobile AGC highlight instead of lighting MED
+    // while writes still worked, because the write map accepts both spellings
+    // (GoNoGoTest IC-7300/wfview, #82 retest on v1.10.14).
+    ['agc', 'med'], ['nrLevel', 72], ['voxLevel', 50], ['monLevel', 25],
     ['micGain', 40], ['compLevel', 30], ['mon', true], ['rit', false], ['atu', true],
   ]);
 });
