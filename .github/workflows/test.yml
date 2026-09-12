@@ -69,6 +69,8 @@ jobs:
         run: node test/event-registry-test.js
       - name: Run events-catalog suite (BUILTIN_EVENTS validates)
         run: node test/events-catalog-test.js
+      - name: Run event-geo suite (event stations plot at their city)
+        run: node test/event-geo-test.js
       - name: Run bug-report-log suite
         run: node test/bug-report-log-test.js
       - name: Run CW key-line resolver suite

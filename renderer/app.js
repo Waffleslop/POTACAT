@@ -9619,6 +9619,10 @@ function initMap() {
   // Add home marker
   updateHomeMarker();
 
+  // Event station pins + route line (Route 66 On The Air etc.). The map is
+  // created lazily on first view, so the events may already be loaded.
+  renderEventMapOverlay();
+
   // Add day/night overlay and refresh every 60s
   updateNightOverlay();
   setInterval(updateNightOverlay, 60000);
@@ -9724,6 +9728,140 @@ function showTuneArc(lat, lon, freq, source) {
       );
     }
   }
+}
+
+// ─── Event map overlay (Route 66 On The Air and any checklist event whose
+// items carry coordinates) ────────────────────────────────────────────────
+// A pin per station — filled in the event colour once worked, hollow while
+// still needed — and a dashed line through the items that carry a `route`
+// order, so the board's list becomes the road it describes. Rebuilt from
+// activeEvents on every `active-events` push (opt-in, progress, feed refresh
+// and the log re-scan all arrive there), so a logged QSO fills its pin with
+// no extra wiring. Rovers (no lat/lon) and `offRoute` stops (Tribune, KS is
+// a spur with no `route`) are never guessed at: unplaced or unlinked, not
+// invented. Live cluster spots for these stations stay in markerLayer —
+// main.js already puts them at the same city (coordSource 'event'), so a
+// spotted needed station shows its spot marker on top of its hollow pin.
+// Hiding an event's overlay is device-local (localStorage), like the pill
+// dismissal: "I can see the road, stop drawing it" is not shack state.
+const EVENT_MAP_HIDDEN_KEY = 'pota-cat-event-map-hidden';
+let eventMapLayer = null;
+
+function eventMapHiddenIds() {
+  try {
+    const v = JSON.parse(localStorage.getItem(EVENT_MAP_HIDDEN_KEY));
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+function isEventMapHidden(eventId) { return eventMapHiddenIds().includes(eventId); }
+function setEventMapHidden(eventId, hidden) {
+  const ids = eventMapHiddenIds().filter((id) => id !== eventId);
+  if (hidden) ids.push(eventId);
+  try { localStorage.setItem(EVENT_MAP_HIDDEN_KEY, JSON.stringify(ids)); } catch { /* ignore */ }
+  renderEventMapOverlay();
+}
+function _eventItemHasGeo(it) {
+  return !!it && Number.isFinite(it.lat) && Number.isFinite(it.lon);
+}
+// Anything to draw at all? Drives the board button: a checklist without
+// coordinates (13 Colonies) gets no "Show on map" it could not honour.
+function eventHasMapItems(ev) {
+  if (!ev) return false;
+  const board = ev.board || (ev.tracking && ev.tracking.type) || 'regions';
+  if (board !== 'checklist') return false;
+  return ((ev.tracking && ev.tracking.items) || []).some(_eventItemHasGeo);
+}
+// "912 mi · 258° WSW" from home for an item with coordinates, '' when either
+// end is unknown. Home is the map's position when the map exists, else the
+// settings grid — the board can open before the map has ever been shown.
+function eventItemDistanceText(item) {
+  if (!_eventItemHasGeo(item)) return '';
+  const home = mainHomePos || (grid ? gridToLatLonLocal(grid) : null);
+  if (!home) return '';
+  const mi = Math.round(_blHaversine(home.lat, home.lon, item.lat, item.lon, true));
+  const brg = Math.round(_blBearingDeg(home.lat, home.lon, item.lat, item.lon));
+  return `${formatDistance(mi)} ${distUnit === 'km' ? 'km' : 'mi'} \u00B7 ${formatBearing(brg)}`;
+}
+
+// The overlay as plain geometry — what both this window and the pop-out map
+// draw, and what sendPopoutSpots ships. One entry per event that should be
+// on the map right now; empty when nothing should.
+function buildEventMapOverlay() {
+  const out = [];
+  for (const ev of activeEvents) {
+    if (!ev.optedIn || !_eventScheduleNearActive(ev) || !eventHasMapItems(ev) || isEventMapHidden(ev.id)) continue;
+    const progress = ev.progress || {};
+    const items = ev.tracking.items.filter(_eventItemHasGeo);
+    // The road: items with a route order, in that order.
+    const route = items.filter((it) => Number.isFinite(it.route))
+      .sort((a, b) => a.route - b.route)
+      .map((it) => [it.lat, it.lon]);
+    const pins = items.map((it) => {
+      const p = progress[it.id];
+      let workedLine;
+      if (p && p.manual) workedLine = 'Marked worked';
+      else if (p) workedLine = 'Worked ' + [p.band, p.mode, p.date].filter(Boolean).join(' ');
+      else workedLine = 'Not yet worked';
+      return { id: it.id, name: it.name || '', lat: it.lat, lon: it.lon, worked: !!p, workedLine, dist: eventItemDistanceText(it) };
+    });
+    out.push({
+      id: ev.id,
+      name: ev.name || ev.id,
+      color: ev.badgeColor || '#1776cf',
+      url: typeof ev.url === 'string' && /^https?:\/\//i.test(ev.url) ? ev.url : '',
+      route: route.length >= 2 ? route : [],
+      pins,
+    });
+  }
+  return out;
+}
+
+// Draw one overlay geometry into a Leaflet layer group. Mirrored in
+// renderer/map-popout.js (separate window, no shared modules) — keep the two
+// in step.
+function drawEventMapOverlay(layer, overlay) {
+  layer.clearLayers();
+  for (const ev of overlay) {
+    const color = ev.color;
+    if (ev.route.length >= 2) {
+      // A highway never crosses the antimeridian, so no segment split; the
+      // three world copies are the ones the tune arc and home marker draw,
+      // and the halo is drawTuneArc's: black under the coloured dashes so
+      // the line survives busy dark tiles and bright marker clusters.
+      for (const offset of [-360, 0, 360]) {
+        const pts = ev.route.map(([a, b]) => [a, b + offset]);
+        layer.addLayer(L.polyline(pts, { color: '#000', weight: 4, opacity: 0.6, interactive: false }));
+        layer.addLayer(L.polyline(pts, { color, weight: 2, opacity: 0.95, dashArray: '6 4', interactive: false }));
+      }
+    }
+    for (const pin of ev.pins) {
+      const icon = L.divIcon({
+        className: 'event-map-pin',
+        html: `<div class="event-map-pin-dot${pin.worked ? ' worked' : ''}" style="--emp-color:${esc(color)}"></div>`
+          + `<div class="event-map-pin-label" style="--emp-color:${esc(color)}">${esc(pin.id)}</div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      });
+      const popup = `<b>${esc(pin.id)}</b> — ${esc(pin.name)}`
+        + (pin.dist ? `<br><span style="font-size:11px">${esc(pin.dist)}</span>` : '')
+        + `<br><span style="color:${pin.worked ? '#4ecca3' : '#f0a500'}">${esc(pin.workedLine)}</span>`
+        + `<br><span style="font-size:11px;color:#aaa">${esc(ev.name)}</span>`
+        + (ev.url ? ` · <a data-external href="${esc(ev.url)}">Event site</a>` : '');
+      for (const offset of [-360, 0, 360]) {
+        // Needed pins sit above worked ones: the ones you still want are
+        // the ones that must stay clickable in a cluster.
+        layer.addLayer(
+          L.marker([pin.lat, pin.lon + offset], { icon, zIndexOffset: pin.worked ? 200 : 300 }).bindPopup(popup)
+        );
+      }
+    }
+  }
+}
+
+function renderEventMapOverlay() {
+  if (!map) return;
+  if (!eventMapLayer) eventMapLayer = L.layerGroup().addTo(map);
+  drawEventMapOverlay(eventMapLayer, buildEventMapOverlay());
 }
 
 // POTA locationDesc → state codes. Parks spanning states list several
@@ -11764,6 +11902,7 @@ function sendPopoutSpots() {
     spots: enrichSpotsForPopout(filtered),
     distUnit,
     enableLogging,
+    eventOverlay: buildEventMapOverlay(), // event station pins + route (Route 66)
   });
 }
 
@@ -16266,8 +16405,10 @@ let currentBoardEventId = null;
 
 function renderEventBoard(event) {
   renderEventOverlayTabs(event);
+  renderEventLinksRow(event);
   renderEventLifecycleStrip(event); // async fire-and-forget (finished summary + retro-stamp)
   renderEventFocusBoardBtn(event);
+  renderEventMapBoardBtn(event);
   const board = event.board || (event.tracking && event.tracking.type) || 'regions';
   if (board === 'regions') renderRegionsBoard(event);
   else if (board === 'checklist') renderChecklistBoard(event);
@@ -16299,6 +16440,79 @@ function renderEventFocusBoardBtn(event) {
     setEventFocus(event.id);
     toggleEventOverlay(false);
   };
+}
+
+// "Show on map" / "Hide from map" on the board, only for a tracked, near-
+// active event whose stations have coordinates (Route 66). Toggles the
+// device-local hide; "Show" also brings the map into view when it is not,
+// because a button that says Show and changes nothing visible is the kind
+// that gets clicked three times.
+function renderEventMapBoardBtn(event) {
+  const content = document.getElementById('event-board-content');
+  if (!content || !content.parentElement) return;
+  let btn = document.getElementById('event-map-board-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'event-map-board-btn';
+    btn.type = 'button';
+    btn.className = 'event-focus-chip';
+    btn.style.cssText = 'margin:4px 0;align-self:flex-start;';
+    content.parentElement.insertBefore(btn, content);
+  }
+  const show = !!event.optedIn && _eventScheduleNearActive(event) && eventHasMapItems(event);
+  btn.style.display = show ? '' : 'none';
+  if (!show) return;
+  const hidden = isEventMapHidden(event.id);
+  btn.style.setProperty('--efc-color', event.badgeColor || '#1776cf');
+  btn.textContent = hidden ? 'Show on map' : 'Hide from map';
+  btn.title = hidden
+    ? 'Draw this event\'s stations and route on the map'
+    : 'Stop drawing this event\'s stations on the map (this device only)';
+  btn.onclick = () => {
+    setEventMapHidden(event.id, !hidden);
+    renderEventMapBoardBtn(event);
+    // Same path as the toolbar Map button (split / exclusive / pop-out aware).
+    if (hidden && !showMap) viewMapBtn.click();
+  };
+}
+
+// Rules / certificate / stations / frequencies links for any event whose
+// definition carries `links` (13 Colonies and Route 66 both do), under the
+// board tabs. Each anchor is data-external so the document-level delegation
+// routes it to the default browser; main.js's open-external gate accepts any
+// URL an active event names, so no sponsor hostname is ever enumerated.
+const EVENT_LINK_LABELS = [
+  ['rules', 'Rules'],
+  ['results', 'Certificate application'],
+  ['stations', 'Stations'],
+  ['frequencies', 'Frequencies'],
+];
+function renderEventLinksRow(event) {
+  const content = document.getElementById('event-board-content');
+  if (!content || !content.parentElement) return;
+  let row = document.getElementById('event-links-row');
+  if (!row) {
+    row = document.createElement('div');
+    row.id = 'event-links-row';
+    row.className = 'event-links-row';
+    content.parentElement.insertBefore(row, content);
+  }
+  row.innerHTML = '';
+  const links = (event && event.links && typeof event.links === 'object') ? event.links : {};
+  const entries = EVENT_LINK_LABELS.filter(([k]) => typeof links[k] === 'string' && /^https?:\/\//i.test(links[k]));
+  const site = event && typeof event.url === 'string' && /^https?:\/\//i.test(event.url) ? event.url : '';
+  if (!entries.length && !site) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  const add = (label, href) => {
+    const a = document.createElement('a');
+    a.href = href;
+    a.setAttribute('data-external', '');
+    a.textContent = label;
+    a.title = href;
+    row.appendChild(a);
+  };
+  if (site) add('Event site', site);
+  for (const [k, label] of entries) add(label, links[k]);
 }
 
 // Post-event lifecycle strip (events-roadmap #2/#3). Shows above the board
@@ -16343,7 +16557,11 @@ async function renderEventLifecycleStrip(event) {
     }
     const modeStr = Object.entries(modes).map(([m, c]) => `${c} ${m}`).join(', ');
     const span = document.createElement('span');
-    span.innerHTML = `<b>Finished</b> — worked ${worked}${total ? ' of ' + total : ''}${modeStr ? ' (' + esc(modeStr) + ')' : ''}. Use Export for your award/QSL submission.`;
+    // A certificate link in the definition turns the nudge into the next
+    // click: Route 66 is a mail-in application, 13 Colonies a web form.
+    const cert = event.links && typeof event.links.results === 'string' && /^https?:\/\//i.test(event.links.results)
+      ? ` or <a data-external href="${esc(event.links.results)}">apply for the certificate</a>` : '';
+    span.innerHTML = `<b>Finished</b> — worked ${worked}${total ? ' of ' + total : ''}${modeStr ? ' (' + esc(modeStr) + ')' : ''}. Use Export for your award/QSL submission${cert}.`;
     strip.appendChild(span);
   }
 
@@ -16479,7 +16697,30 @@ function renderChecklistBoard(event) {
   hint.textContent = 'Click a station to mark it worked (for QSOs logged outside POTACAT).';
   content.appendChild(hint);
 
+  // Items without a `group` first, in definition order (Route 66 lists the
+  // road Chicago → Santa Monica), then one sub-heading per group (Rovers)
+  // in first-seen order. Row markup is the same either way.
+  const groups = [];
+  const grouped = new Map();
   for (const item of items) {
+    const g = item && typeof item.group === 'string' && item.group.trim() ? item.group.trim() : '';
+    if (!grouped.has(g)) { grouped.set(g, []); if (g) groups.push(g); }
+    grouped.get(g).push(item);
+  }
+  const ordered = [...(grouped.get('') || [])];
+  for (const g of groups) {
+    ordered.push({ _heading: g });
+    ordered.push(...grouped.get(g));
+  }
+
+  for (const item of ordered) {
+    if (item._heading) {
+      const h = document.createElement('div');
+      h.className = 'event-checklist-group';
+      h.textContent = item._heading;
+      content.appendChild(h);
+      continue;
+    }
     const p = progress[item.id];
     const isWorked = !!p;
     const isManual = isWorked && p.manual === true;
@@ -16522,6 +16763,9 @@ function renderChecklistBoard(event) {
         await window.api.setEventItem({ eventId: event.id, itemId: item.id, worked: !isManual });
       });
     }
+    // Where it is from here, for stations that are somewhere (rovers aren't).
+    const dist = eventItemDistanceText(item);
+    if (dist) row.title = `${dist} from home \u2014 ${row.title}`;
 
     content.appendChild(row);
   }
@@ -17064,6 +17308,7 @@ window.api.onActiveEvents((events) => {
   updateSpotsEventsSection();
   renderEventWatchlistCards();
   updateEventFocusUi();
+  renderEventMapOverlay(); // pins fill as QSOs stamp; opt-in/out adds or drops the event
   // Refresh overlay if open
   if (eventOverlayOpen && currentBoardEventId) {
     const ev = activeEvents.find(e => e.id === currentBoardEventId);
@@ -25518,6 +25763,7 @@ window.api.getActiveEvents().then((events) => {
   updateEventBanner();
   updateSpotsEventsSection();
   renderEventWatchlistCards();
+  renderEventMapOverlay();
   render();
 }).catch(err => console.error('[Events] failed to load:', err));
 applyColOrder();

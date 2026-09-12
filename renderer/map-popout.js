@@ -169,6 +169,7 @@ const expeditionIcon = L.divIcon({
 
 let map = null;
 let markerLayer = null;
+let eventLayer = null; // special-event station pins + route (Route 66)
 let homeMarker = null;
 let nightLayer = null;
 let homePos = null;
@@ -258,6 +259,7 @@ function initMap() {
   }).addTo(map);
 
   markerLayer = L.featureGroup().addTo(map);
+  eventLayer = L.layerGroup().addTo(map);
   bindPopupClickHandlers(map);
   updateNightOverlay();
   setInterval(updateNightOverlay, 60000);
@@ -454,6 +456,13 @@ function bindPopupClickHandlers(mapInstance) {
         window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(link.dataset.call.split('/')[0])}`);
       });
     });
+    // Event-site links in the event pin popups (main.js gates the URL).
+    container.querySelectorAll('a[data-external]').forEach((link) => {
+      link.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        window.api.openExternal(link.getAttribute('href'));
+      });
+    });
     container.querySelectorAll('.log-popup-btn').forEach((btn) => {
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
@@ -473,20 +482,69 @@ function bindPopupClickHandlers(mapInstance) {
   });
 }
 
+// --- Special-event overlay ---
+// Geometry comes pre-built from the main renderer (buildEventMapOverlay in
+// app.js) with every spot push; this is a copy of app.js drawEventMapOverlay
+// — the two windows share no modules, so keep them in step.
+
+function escHtml(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function drawEventOverlay(overlay) {
+  if (!eventLayer) return;
+  eventLayer.clearLayers();
+  for (const ev of overlay || []) {
+    const color = ev.color || '#1776cf';
+    const route = Array.isArray(ev.route) ? ev.route : [];
+    if (route.length >= 2) {
+      for (const offset of [-360, 0, 360]) {
+        const pts = route.map(([a, b]) => [a, b + offset]);
+        eventLayer.addLayer(L.polyline(pts, { color: '#000', weight: 4, opacity: 0.6, interactive: false }));
+        eventLayer.addLayer(L.polyline(pts, { color, weight: 2, opacity: 0.95, dashArray: '6 4', interactive: false }));
+      }
+    }
+    for (const pin of ev.pins || []) {
+      const icon = L.divIcon({
+        className: 'event-map-pin',
+        html: `<div class="event-map-pin-dot${pin.worked ? ' worked' : ''}" style="--emp-color:${escHtml(color)}"></div>`
+          + `<div class="event-map-pin-label" style="--emp-color:${escHtml(color)}">${escHtml(pin.id)}</div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      });
+      const popup = `<b>${escHtml(pin.id)}</b> — ${escHtml(pin.name)}`
+        + (pin.dist ? `<br><span style="font-size:11px">${escHtml(pin.dist)}</span>` : '')
+        + `<br><span style="color:${pin.worked ? '#4ecca3' : '#f0a500'}">${escHtml(pin.workedLine)}</span>`
+        + `<br><span style="font-size:11px;color:#aaa">${escHtml(ev.name)}</span>`
+        + (ev.url ? ` · <a data-external href="${escHtml(ev.url)}">Event site</a>` : '');
+      for (const offset of [-360, 0, 360]) {
+        eventLayer.addLayer(
+          L.marker([pin.lat, pin.lon + offset], { icon, zIndexOffset: pin.worked ? 200 : 300 }).bindPopup(popup)
+        );
+      }
+    }
+  }
+}
+
 // --- IPC Listeners ---
 
 // Register IPC listeners immediately (before async init) so they're ready
 // when the main renderer sends initial data after did-finish-load
 let _pendingSpots = null;
 let _pendingArc = null;
+let _pendingEventOverlay = null;
 
 window.api.onPopoutSpots((data) => {
   if (data.distUnit) distUnit = data.distUnit;
   if (data.enableLogging != null) enableLogging = data.enableLogging;
   if (!map) {
     _pendingSpots = data.spots || [];
+    if (data.eventOverlay) _pendingEventOverlay = data.eventOverlay;
   } else {
     updateMapMarkers(data.spots || []);
+    if (data.eventOverlay) drawEventOverlay(data.eventOverlay);
   }
 });
 
@@ -588,6 +646,10 @@ async function init() {
   if (_pendingSpots) {
     updateMapMarkers(_pendingSpots);
     _pendingSpots = null;
+  }
+  if (_pendingEventOverlay) {
+    drawEventOverlay(_pendingEventOverlay);
+    _pendingEventOverlay = null;
   }
   if (_pendingArc) {
     if (_pendingArc.clear) clearTuneArc();

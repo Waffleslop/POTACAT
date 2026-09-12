@@ -319,6 +319,7 @@ const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
 const { getAllContests } = require('./lib/contests-db');
 const { eventDecodeMatch } = require('./lib/event-decode-match');
+const { eventStationGeo } = require('./lib/event-geo');
 const { DxClusterClient, looksLikeCallsign: clusterCallsignOk } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
 const mercuryProcess = require('./lib/mercury-process');
@@ -4478,7 +4479,9 @@ function formatClusterComment(comment) {
 }
 
 // Build a normalized spot from raw cluster data (shared by all cluster clients).
-// Position lookup ladder, best→worst: QRZ grid (async, see refineClusterSpotWithQrz)
+// Position lookup ladder, best→worst: event-station city (a tracked
+// checklist event's tracking.items[].lat/lon — TERMINAL, see lib/event-geo.js)
+// → QRZ grid (async, see refineClusterSpotWithQrz)
 // → call-area centroid (large multi-area countries) → DXCC centroid (cty.dat).
 // Without the call-area fallback all US DX spots stack at one Kansas pixel
 // because cty.dat returns the same lat/lon for every US-prefix callsign;
@@ -4506,7 +4509,7 @@ function buildClusterSpot(raw, myPos, myEntity) {
     band: raw.band,
     spotTime: raw.spotTime,
     wpm: wpmMatch ? parseInt(wpmMatch[1], 10) : null,
-    coordSource: null, // 'qrz' | 'callarea' | 'cty' | null
+    coordSource: null, // 'event' | 'qrz' | 'callarea' | 'cty' | null
   };
 
   if (ctyDb) {
@@ -4554,6 +4557,24 @@ function buildClusterSpot(raw, myPos, myEntity) {
     }
   }
 
+  // A special-event station is where its event says it is, for the event's
+  // window: W6K is Oklahoma City for nine days in September, not the W6
+  // call-area centroid and not the trustee's QRZ address. Applied last so
+  // it wins, and refineClusterSpotWithQrz leaves an 'event' placement alone.
+  // Not gated on opt-in — location is a fact about the station. Rovers
+  // carry no coordinates and fall through to the ladder above.
+  const geo = eventStationGeo(activeEvents, raw.callsign);
+  if (geo) {
+    spot.lat = geo.lat;
+    spot.lon = geo.lon;
+    spot.coordSource = 'event';
+    spot.locationDesc = geo.locationDesc;
+    if (myPos) {
+      spot.distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, geo.lat, geo.lon));
+      spot.bearing = Math.round(bearing(myPos.lat, myPos.lon, geo.lat, geo.lon));
+    }
+  }
+
   return spot;
 }
 
@@ -4567,7 +4588,9 @@ function buildClusterSpot(raw, myPos, myEntity) {
 // configured or the user has it disabled — call-area fallback already
 // provides reasonable map placement for the common large-country cases.
 function refineClusterSpotWithQrz(rawCallsign, spot, myPos) {
-  if (spot.coordSource === 'qrz' || !qrz.configured || !settings.enableQrz) return;
+  // 'event' is terminal: the club station's QRZ grid is somebody's house,
+  // the event definition's city is where the station actually is.
+  if (spot.coordSource === 'qrz' || spot.coordSource === 'event' || !qrz.configured || !settings.enableQrz) return;
   qrz.lookup(rawCallsign).then((qrzResult) => {
     if (!qrzResult || !qrzResult.grid) return;
     const ll = gridToLatLon(qrzResult.grid);
@@ -21631,6 +21654,23 @@ function fetchActiveEvents() {
   req.on('error', () => { _eventsFetchFailed('network error'); });
 }
 
+// Is `url` one of the link-outs an active event definition carries — its
+// site, rules page, or any of its `links` (rules / results = certificate
+// application / stations / frequencies)? Event sponsors are a different
+// hostname per event (13colonies.us, w6jbt.org, ...) and the definitions
+// come from our own feed, so the definition IS the allowlist: the renderer's
+// board links row, lifecycle strip and map-pin popups all go through
+// open-external with a URL taken verbatim from the event.
+function eventUrlAllowed(url) {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
+  return activeEvents.some((ev) => {
+    if (!ev) return false;
+    if (ev.url === url || ev.rulesUrl === url) return true;
+    const links = ev.links && typeof ev.links === 'object' ? ev.links : null;
+    return !!links && Object.values(links).some((v) => v === url);
+  });
+}
+
 function pushEventsToRenderer() {
   if (!win || win.isDestroyed()) return;
   // Merge event definitions with user opt-in/progress state from settings
@@ -27970,7 +28010,9 @@ app.whenReady().then(() => {
       // ECHOCAT mobile app store links (Settings footer promo).
       'https://apps.apple.com/', 'https://play.google.com/',
     ];
-    if (allowed.some(prefix => url.startsWith(prefix))) {
+    // Event sponsor sites (13 Colonies, Route 66, ...) come from the event
+    // definition itself — see eventUrlAllowed — rather than this list.
+    if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url)) {
       shell.openExternal(url);
     }
   });
@@ -27990,7 +28032,7 @@ app.whenReady().then(() => {
       // Event-sourced contest rows (Phase B) carry the event's url — those
       // must pass the same allowlist gate or their link-outs silently die.
       const ok = all.some((c) => c.website === url || c.rulesUrl === url)
-        || activeEvents.some((ev) => ev && (ev.url === url || ev.rulesUrl === url));
+        || eventUrlAllowed(url);
       if (!ok) return;
       require('electron').shell.openExternal(url);
     } catch { /* silent — invalid URL or load failure */ }

@@ -1335,6 +1335,58 @@ button:hover {
   color: var(--accent-green);
 }
 
+/* Group sub-heading inside the checklist (Route 66's Rovers): the items
+   that have no place on the map, listed after the road. */
+.event-checklist-group {
+  padding: 8px 12px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* Rules / certificate / stations links under the board tabs. */
+.event-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 12px 2px;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+.event-links-row a {
+  color: var(--accent-blue, #4fc3f7);
+  text-decoration: none;
+}
+.event-links-row a:hover { text-decoration: underline; }
+
+/* Event station pins on the main map: a dot in the event colour, filled
+   once worked and hollow while needed, with the call beside it. */
+.event-map-pin { background: none; border: none; }
+.event-map-pin-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 2px solid var(--emp-color, #1776cf);
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.event-map-pin-dot.worked { background: var(--emp-color, #1776cf); }
+.event-map-pin-label {
+  position: absolute;
+  left: 15px;
+  top: -2px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--emp-color, #1776cf);
+  text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* Switcher tabs — one per tracked event, so both boards are reachable when
    more than one event runs at once (ARRL 250 + 13 Colonies in July). */
 .event-overlay-tabs {
