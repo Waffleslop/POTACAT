@@ -243,6 +243,33 @@ function _applyPopoutTheme(payload) {
     if (fdExchInput) fdExchInput.style.display = fdMode ? '' : 'none';
     ensureFdHuntOption();
   }
+  // "Hunt: Event stations" — answer CQs from tracked-event stations still
+  // needed (Route 66 On The Air, 13 Colonies). Offered while an opted-in
+  // checklist event is within a day of its window; main decides that and
+  // ships it in jtcat-auto-cq-state as `eventHunt`, so this select, the
+  // ECHOCAT web client and the mobile app all show the option together.
+  // Like the FD option: never removed while it is the selected value.
+  var eventHunt = { available: false, events: [] };
+  function ensureEventHuntOption(selectedIsEvent) {
+    var sel = document.getElementById('jp-auto-cq');
+    if (!sel) return;
+    var want = eventHunt.available || selectedIsEvent || sel.value === 'event';
+    var opt = sel.querySelector('option[value="event"]');
+    if (want && !opt) {
+      opt = document.createElement('option');
+      opt.value = 'event';
+      opt.textContent = 'Hunt: Event stations';
+      sel.appendChild(opt);
+    } else if (!want && opt && sel.value !== 'event') {
+      opt.remove();
+      opt = null;
+    }
+    if (opt) {
+      var names = (eventHunt.events || []).map(function(e) { return e.name; }).filter(Boolean);
+      opt.title = 'Answer CQs from stations you still need for '
+        + (names.length ? names.join(', ') : 'a tracked event');
+    }
+  }
   // Skip grid (WSJT-X "disable Tx1"): reply to CQs with a report, not a grid
   var skipTx1Toggle = document.getElementById('jp-skip-tx1');
   var huntCqFallbackToggle = document.getElementById('jp-hunt-cq-fallback');
@@ -2272,6 +2299,10 @@ function _applyPopoutTheme(payload) {
       fdOpt.textContent = 'Hunt: Field Day';
       autoCqSelect.appendChild(fdOpt);
     }
+    // Same for 'event': the offer rides this message, and a mode set from a
+    // mobile device must be representable whether or not the offer is open.
+    if (state.eventHunt) eventHunt = state.eventHunt;
+    ensureEventHuntOption(state.mode === 'event');
     autoCqSelect.value = state.mode || 'off';
     autoCqSelect.style.borderColor = state.mode !== 'off' ? 'var(--pota)' : '';
   });

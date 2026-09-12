@@ -249,8 +249,8 @@ for the history.
 | `jtcat-cancel-qso` | C→S | Abandon current QSO. |
 | `jtcat-skip-phase` | C→S | Skip to next QSO phase. |
 | `jtcat-log-qso` | C→S | Log the current FT8 QSO. |
-| `jtcat-auto-cq-mode` | C→S | Auto-CQ filter (off/POTA/SOTA/all). |
-| `jtcat-auto-cq-state` | S→C | Current auto-CQ mode broadcast. |
+| `jtcat-auto-cq-mode` | C→S | Hunt filter `{ mode }`: `off` / `pota` / `sota` / `all` / `fd` (Field Day, seasonal) / `event` (Hunt: Event stations — answer CQs from tracked-event stations still needed; offer it only while `jtcat-auto-cq-state.eventHunt.available`). |
+| `jtcat-auto-cq-state` | S→C | Current hunt mode `{ mode, fallback, workedCount, eventHunt: { available, events: [{ id, name, badge }] } }`. Broadcast on change AND hydrated at connect (since 1.10.16). `eventHunt` is the shack's decision on whether the `event` mode is on offer (opted-in checklist event within 24 h of its window); a client renders the option from it and keeps the option while `mode === 'event'`. |
 | `jtcat-decode` | S→C | Single decode result (live feed). |
 | `jtcat-decode-batch` | S→C | Batch of decodes (initial backlog). |
 | `jtcat-wspr-spots` | S→C | Latest 2-min WSPR spot batch `{ spots[], error? }` — host-enriched (dBm, distance, bearing, DXCC). Replaces the list each cycle; replayed on reconnect. |

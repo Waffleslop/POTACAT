@@ -6,7 +6,7 @@
 'use strict';
 
 const assert = require('assert');
-const { eventDecodeMatch, spotIsNewSlot } = require('../lib/event-decode-match');
+const { eventDecodeMatch, spotIsNewSlot, eventHuntAvailability } = require('../lib/event-decode-match');
 
 let passed = 0, failed = 0;
 function check(cond, label) {
@@ -71,6 +71,38 @@ console.log('slot semantics (mirrors mobile eventSlots.ts):');
   const multi = { band: '20m', mode: 'SSB', slots: [{ band: '20m', mode: 'SSB' }, { band: '40m', mode: 'FT8' }] };
   check(spotIsNewSlot(multi, '40m', 'FT8') === false, 'slots[] read when present — 40m FT8 covered');
   check(spotIsNewSlot(multi, '40m', 'CW') === true, 'slots[] — 40m CW still a new slot');
+}
+
+console.log('eventHuntAvailability (is "Hunt: Event stations" on offer):');
+{
+  const H = 3600 * 1000;
+  const start = new Date(THIRTEEN_C.schedule[0].start).getTime();
+  const end = new Date(THIRTEEN_C.schedule[0].end).getTime();
+  const a = eventHuntAvailability(EVENTS, states(), IN_WINDOW);
+  check(a.available === true && a.events.length === 1 && a.events[0].id === '13c-test'
+    && a.events[0].name === '13 Colonies' && a.events[0].badge === '13C',
+    'in window + opted in → available, names the event {id,name,badge}');
+  check(eventHuntAvailability(EVENTS, states(), new Date(start - 12 * H)).available === true,
+    '12 h before the window opens → offered (24 h grace, arm it ahead)');
+  check(eventHuntAvailability(EVENTS, states(), new Date(start - 3 * 24 * H)).available === false,
+    '3 days before → not offered');
+  check(eventHuntAvailability(EVENTS, states(), new Date(end + 12 * H)).available === true,
+    '12 h after the window closes → still offered (select keeps its value)');
+  check(eventHuntAvailability(EVENTS, states(), AFTER).available === false,
+    'well after → not offered');
+  check(eventHuntAvailability(EVENTS, states(), IN_WINDOW, 0).available === true,
+    'grace 0: in window is still in window');
+  check(eventHuntAvailability(EVENTS, states(), new Date(start - 1), 0).available === false,
+    'grace 0: one ms before start is outside');
+  const notOpted = { '13c-test': { optedIn: false }, 'was-test': { optedIn: true } };
+  check(eventHuntAvailability(EVENTS, notOpted, IN_WINDOW).available === false,
+    'not opted in → not offered (a regions board never counts either)');
+  check(eventHuntAvailability(EVENTS, {}, IN_WINDOW).available === false, 'no state at all → not offered');
+  check(eventHuntAvailability(null, states(), IN_WINDOW).available === false, 'null events → not offered');
+  check(eventHuntAvailability(EVENTS, null, IN_WINDOW).available === false, 'null states → not offered');
+  // Matching stays strictly in-window even while the offer is open.
+  check(eventDecodeMatch(EVENTS, states(), 'K2A', '20m', 'FT8', new Date(start - 12 * H)) === null,
+    'offer open 12 h early, but a decode then is NOT classified (grace is for the control, not the QSO)');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

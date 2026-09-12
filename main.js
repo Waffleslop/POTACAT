@@ -318,7 +318,7 @@ const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
 const { getAllContests } = require('./lib/contests-db');
-const { eventDecodeMatch } = require('./lib/event-decode-match');
+const { eventDecodeMatch, eventHuntAvailability } = require('./lib/event-decode-match');
 const { eventStationGeo } = require('./lib/event-geo');
 const { DxClusterClient, looksLikeCallsign: clusterCallsignOk } = require('./lib/dxcluster');
 const { RbnClient } = require('./lib/rbn');
@@ -8196,9 +8196,21 @@ function jtcatHuntProgramMatch(d, filterMode) {
   const hunted = (filterMode === 'pota' || filterMode === 'sota')
     ? jtcatSpottedActivator(d.call) : null;
   const spottedSigs = hunted ? hunted.refs.map((r) => r.sig) : [];
+  // Hunt: Event stations — a tracked-event station (Route 66 On The Air, 13
+  // Colonies) the operator still needs. The decode enrichment has usually
+  // classified it already (d.eventMatch: the needed / new-slot / worked the
+  // popout badge shows); classify here only when that didn't run. Band and
+  // mode only separate "worked" from "new slot", and a same-band/mode dupe
+  // is refused by the worked-before test after this anyway.
+  let eventMatch = null;
+  if (filterMode === 'event') {
+    const { band, mode } = jtcatCurrentBandMode(ft8Engine);
+    eventMatch = d.eventMatch || eventDecodeMatch(activeEvents, settings.events, d.call, band, mode);
+  }
   const ok = _jtcatStateMachine.matchesHuntFilter(d.text, filterMode, {
     spottedSigs,
     spottedEnabled: jtcatHuntSpottedEnabled(),
+    eventNeeded: !!(eventMatch && eventMatch.status !== 'worked'),
   });
   // Say why a station with no program modifier in its CQ is being answered —
   // once per callsign, since the same activator calls every other cycle.
@@ -8207,6 +8219,12 @@ function jtcatHuntProgramMatch(d, filterMode) {
     const want = filterMode === 'pota' ? 'POTA' : 'SOTA';
     const ref = hunted.refs.find((r) => r.sig === want);
     sendCatLog(`[JTCAT] Hunt: ${d.call} is spotted at ${ref ? ref.ref : want} — answering their plain CQ`);
+  }
+  if (ok && eventMatch && !_jtcatSpottedHuntLogged.has(d.call)) {
+    _jtcatSpottedHuntLogged.add(d.call);
+    const ev = (activeEvents || []).find((e) => e && e.id === eventMatch.id);
+    const why = eventMatch.status === 'new-slot' ? 'worked, but not on this band/mode' : 'still needed';
+    sendCatLog(`[JTCAT] Hunt: ${d.call} is a ${ev ? ev.name : eventMatch.id} station (${why}) — answering their CQ`);
   }
   return ok;
 }
@@ -8220,7 +8238,7 @@ function jtcatHuntProgramMatch(d, filterMode) {
  * @param {Array}  results     decodes for this cycle
  * @param {string} myCall      our callsign (excluded)
  * @param {object} [opts]
- * @param {string} [opts.filterMode] CQ filter ('all'|'pota'|'sota'|'fd')
+ * @param {string} [opts.filterMode] CQ filter ('all'|'pota'|'sota'|'fd'|'event')
  * @param {function} [opts.isWorked] override the worked-before test. Hunt keeps
  *   its historical "worked anywhere, ever" rule; Run passes the band/mode-aware
  *   jtcatIsWorkedCall so it doesn't count a station it WOULD happily work on
@@ -8275,16 +8293,43 @@ function jtcatPeriodUtc(mode) {
          String(d.getUTCSeconds()).padStart(2, '0');
 }
 
-function broadcastAutoCqState() {
+/** Which opted-in checklist events "Hunt: Event stations" could hunt right
+ *  now (24 h grace either side of the window — lib/event-decode-match.js). */
+function jtcatEventHuntAvailability() {
+  return eventHuntAvailability(activeEvents, settings.events);
+}
+
+// Re-broadcast the hunt state when the event-hunt offer changes — an opt-in,
+// a feed refresh, or the clock reaching an event's window. Called from
+// pushEventsToRenderer (every event-state mutation) and the 5-minute
+// schedule-boundary tick, so the popout's and the clients' "Hunt: Event
+// stations" option appears and disappears without anyone touching Hunt.
+let _jtcatEventHuntKey = null;
+function jtcatEventHuntSync() {
+  const key = JSON.stringify(jtcatEventHuntAvailability());
+  if (key === _jtcatEventHuntKey) return;
+  const first = _jtcatEventHuntKey === null;
+  _jtcatEventHuntKey = key;
+  if (!first) broadcastAutoCqState();
+}
+
+function jtcatAutoCqStatePayload() {
   // While the fallback has Run filling dead air, jtcatAutoCqMode is 'off' —
   // but the operator still chose Hunt and the select must keep saying so, or
   // it snaps to "Hunt: Off" the moment the band goes quiet. Report their
   // choice; `fallback` tells clients Run is covering for it right now.
-  const state = {
+  // `eventHunt` says whether "Hunt: Event stations" is on offer and for which
+  // events, so every surface renders the option from the one answer.
+  return {
     mode: jtcatHuntFallbackMode || jtcatAutoCqMode,
     fallback: !!jtcatHuntFallbackMode,
     workedCount: jtcatAutoCqWorkedSession.size,
+    eventHunt: jtcatEventHuntAvailability(),
   };
+}
+
+function broadcastAutoCqState() {
+  const state = jtcatAutoCqStatePayload();
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-auto-cq-state', state);
   }
@@ -14688,6 +14733,10 @@ function connectRemote() {
       const enabled = !eng || eng._autoSeq !== false;
       remoteServer.sendToClient({ type: 'jtcat-auto-seq-state', enabled });
     }
+    // Hunt mode + the event-hunt offer. Until 2026-09-12 this was only ever
+    // broadcast on a CHANGE, so a client connecting mid-hunt showed "Off" and
+    // could not know whether "Hunt: Event stations" was on the menu.
+    remoteServer.broadcastJtcatAutoCqState(jtcatAutoCqStatePayload());
     // Hold TX Freq state (K0OTC 2026-05-04). Persisted in settings so
     // reconnects show the same state.
     remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!settings.jtcatHoldTxFreq });
@@ -20890,6 +20939,9 @@ function createWindow() {
     let _evBoundarySig = null;
     setInterval(() => {
       const now = new Date();
+      // The "Hunt: Event stations" offer opens 24 h before an event and
+      // closes 24 h after — a clock-driven change no state mutation announces.
+      jtcatEventHuntSync();
       const sig = (activeEvents || []).map((ev) => {
         const live = !!activeScheduleEntry(ev, now);
         return ev.id + (live ? ':L' : ':-');
@@ -21672,6 +21724,9 @@ function eventUrlAllowed(url) {
 }
 
 function pushEventsToRenderer() {
+  // Before the window guard: headless shacks have ECHOCAT clients and a
+  // JTCAT engine but no main window, and the hunt offer must reach them too.
+  jtcatEventHuntSync();
   if (!win || win.isDestroyed()) return;
   // Merge event definitions with user opt-in/progress state from settings
   const eventStates = settings.events || {};
@@ -25988,6 +26043,9 @@ app.whenReady().then(() => {
       // Fresh popout: show the armed Spot Target banner immediately (the
       // target is usually set an instant before jtcat-popout-open).
       if (jtcatSpotTarget) broadcastSpotTarget();
+      // ...the hunt mode a phone may have set, and whether "Hunt: Event
+      // stations" is on offer (the option is appended by JS from this).
+      jtcatPopoutWin.webContents.send('jtcat-auto-cq-state', jtcatAutoCqStatePayload());
       // ...and the radio's RF power, so the TX Pwr slider never opens blank.
       pushJtcatPopoutRigPower(true);
     });

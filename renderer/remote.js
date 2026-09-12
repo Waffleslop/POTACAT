@@ -2046,6 +2046,25 @@
 
       case 'jtcat-auto-cq-state':
         if (ft8AutoCqSelect) {
+          // "Event" (Hunt: Event stations) is offered only while the shack
+          // says a tracked event is near (msg.eventHunt) — and kept while it
+          // is the selected mode, so the select never loses its value.
+          const evOffer = !!(msg.eventHunt && msg.eventHunt.available);
+          let evOpt = ft8AutoCqSelect.querySelector('option[value="event"]');
+          if ((evOffer || msg.mode === 'event') && !evOpt) {
+            evOpt = document.createElement('option');
+            evOpt.value = 'event';
+            evOpt.textContent = 'Event';
+            ft8AutoCqSelect.appendChild(evOpt);
+          } else if (!evOffer && msg.mode !== 'event' && evOpt) {
+            evOpt.remove();
+            evOpt = null;
+          }
+          if (evOpt) {
+            const names = ((msg.eventHunt && msg.eventHunt.events) || []).map((e) => e.name).filter(Boolean);
+            evOpt.title = 'Hunt: answer CQs from stations you still need for '
+              + (names.length ? names.join(', ') : 'a tracked event');
+          }
           ft8AutoCqSelect.value = msg.mode || 'off';
           ft8AutoCqSelect.style.borderColor = msg.mode !== 'off' ? 'var(--pota)' : '';
         }

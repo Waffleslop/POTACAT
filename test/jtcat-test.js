@@ -1467,6 +1467,7 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
 
       // -- Test 6: Hunt answers a SPOTTED activator's plain CQ.
       testHuntSpottedFilter();
+      testHuntEventFilter();
 
       // -- Test 7: FTx mode hopping policy (Barry 2026-09-07).
       testModeHop();
@@ -1658,6 +1659,41 @@ function testHuntSpottedFilter() {
   // Field Day is not a spotting program — never spot-matched.
   assert(m('CQ K1ABC FN42', 'fd', { spottedSigs: ['POTA'] }) === false,
     'Field Day hunt is never satisfied by a spot');
+}
+
+function testHuntEventFilter() {
+  section('Hunt filter — event stations still needed (Route 66 / 13 Colonies)');
+  const m = sm.matchesHuntFilter;
+
+  // The station qualifies, not the message: main supplies eventNeeded from
+  // the same needed/new-slot/worked classification the decode badge shows.
+  assert(m('CQ W6K EM15', 'event', { eventNeeded: true }) === true,
+    'plain CQ from a needed event station matches Event hunt');
+  assert(m('CQ NA W6K EM15', 'event', { eventNeeded: true }) === true,
+    'CQ with any wording matches (CQ NA)');
+  assert(m('CQ POTA W6K EM15', 'event', { eventNeeded: true, spottedSigs: ['POTA'] }) === true,
+    'an event station that also calls CQ POTA matches');
+  assert(m('CQ W6K EM15', 'event', { eventNeeded: false }) === false,
+    'a worked (or non-event) station is not answered');
+  assert(m('CQ W6K EM15', 'event') === false,
+    'no opts at all → not needed → not answered (never a default yes)');
+  assert(m('CQ W6AB CM87', 'event', { eventNeeded: false }) === false,
+    'an ordinary W6 call is not an event station');
+
+  // Still a CQ-only hunt: a needed station mid-QSO with someone else is
+  // left alone — same no-tail-ending rule as the spotted-activator hunt.
+  assert(m('W6K K3SBP -10', 'event', { eventNeeded: true }) === false,
+    'a report from a needed station to someone else is never answered');
+  assert(m('W6K K3SBP RR73', 'event', { eventNeeded: true }) === false,
+    'a needed station\'s RR73 to someone else is not tail-ended');
+
+  // eventNeeded means nothing to the other modes.
+  assert(m('CQ W6K EM15', 'pota', { eventNeeded: true }) === false,
+    'event-needed does not satisfy POTA hunt');
+  assert(m('CQ W6K EM15', 'fd', { eventNeeded: true }) === false,
+    'event-needed does not satisfy Field Day hunt');
+  assert(m('CQ W6K EM15', 'all', { eventNeeded: false }) === true,
+    'All CQs is unaffected by eventNeeded');
 }
 
 function finish() {
