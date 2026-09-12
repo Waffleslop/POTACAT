@@ -138,7 +138,11 @@ console.log('=== maskHomeDir: usernames never reach the paste ===');
   // ...and WRITTEN only on a graceful shutdown.
   const gc = MAIN.indexOf('function gracefulCleanup()');
   check(gc !== -1, 'gracefulCleanup still exists');
-  const gcBody = MAIN.slice(gc, gc + 3000);
+  // The whole function body (to its closing brace at column 0), not a fixed
+  // byte window — a safety step added ABOVE the marker write must not fail
+  // this guard (the 2026-09-10 WSPR power restore did exactly that).
+  const gcEnd = MAIN.indexOf('\n}\n', gc);
+  const gcBody = MAIN.slice(gc, gcEnd === -1 ? gc + 3000 : gcEnd);
   check(/writeFileSync\(_cleanExitMarkerPath/.test(gcBody),
     'graceful shutdown stamps the marker');
 

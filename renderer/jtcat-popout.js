@@ -3457,12 +3457,171 @@ function _applyPopoutTheme(payload) {
     });
   }
 
-  // TX Power slider — SYNCED through main (settings.jtcatTxGain), the same
-  // arrangement RX gain got on 2026-07-20. Until 2026-09-09 this slider
+  // --- PWR meter (measured forward power, Flex TX bridge) --------------------
+  // Frames only flow during TX; main sends a 0 a few seconds after they stop.
+  // Auto-scales to the highest reading seen this session (a 1 W beacon and a
+  // 100 W CQ both need a visible bar), same as the VFO pop-out.
+  var jpPwrGroup = document.getElementById('jp-pwr-group');
+  var jpPwrBar = document.getElementById('jp-pwr-bar');
+  var jpPwrVal = document.getElementById('jp-pwr-val');
+  var jpPwrMaxSeen = 10;
+  if (window.api.onCatFwdPower && jpPwrBar) {
+    window.api.onCatFwdPower(function(val) {
+      var w = Number(val) || 0;
+      if (jpPwrGroup) jpPwrGroup.classList.remove('hidden'); // the rig has a wattmeter
+      if (w <= 0) {
+        jpPwrBar.style.width = '0%';
+        jpPwrVal.textContent = '\u2014';
+        jpPwrVal.style.color = '';
+        return;
+      }
+      if (w > jpPwrMaxSeen) jpPwrMaxSeen = w <= 10 ? 10 : w <= 100 ? 100 : Math.ceil(w / 100) * 100;
+      jpPwrBar.style.width = Math.min(100, (w / jpPwrMaxSeen) * 100) + '%';
+      jpPwrBar.style.background = '#4fc3f7';
+      jpPwrVal.textContent = (w >= 10 ? Math.round(w) : w.toFixed(1)) + ' W';
+      jpPwrVal.style.color = '#4fc3f7';
+    });
+  }
+
+  // --- TX Pwr: the RADIO's RF power, in watts --------------------------------
+  // Hydrated from main's jtcat-rig-power push (a slice of rig-state: value +
+  // the model's clamp/step/choices + whether a set would take) and written
+  // back through the one rig-control dispatcher, exactly like the Rig panel's
+  // TX Power slider in the main window. Before 2026-09-10 the only "TX Pwr"
+  // in this window was the audio-drive slider below — a no-op on Flex Direct,
+  // where the radio itself had been left at the WSPR beacon's 1 W for weeks.
+  var jpRfGroup = document.getElementById('jp-rf-power-group');
+  var jpRfRange = document.getElementById('jp-rf-power');
+  var jpRfSelect = document.getElementById('jp-rf-power-select');
+  var jpRfVal = document.getElementById('jp-rf-power-val');
+  var jpRfCaps = { minPower: 0, maxPower: 100, powerStep: 1, powerDecimals: 0, powerChoices: null };
+  var jpRfLastInputAt = 0;
+  var jpRfSendTimer = null;
+  var jpRfPendingWatts = null;
+  var jpRfKnown = false;
+  var JP_WSPR_CAP_WATTS = 1; // main.js JTCAT_WSPR_MAX_WATTS
+
+  function jpRfFormat(w) {
+    var d = jpRfCaps.powerDecimals || 0;
+    return (d > 0 ? Number(w).toFixed(d) : String(Math.round(Number(w)))) + ' W';
+  }
+  function jpRfPaintValue(w, known) {
+    if (!jpRfVal) return;
+    jpRfKnown = !!known;
+    if (!known) { jpRfVal.textContent = '\u2014'; jpRfVal.style.color = ''; jpRfVal.title = 'RF power not reported by the radio yet'; return; }
+    jpRfVal.textContent = jpRfFormat(w);
+    // At the beacon cap in a non-WSPR mode = the exact state that hid a month
+    // of unanswered CQs. Say so where the number is.
+    var lowForMode = w > 0 && w <= JP_WSPR_CAP_WATTS && modeSelect && modeSelect.value !== 'WSPR';
+    jpRfVal.style.color = lowForMode ? '#e94560' : '';
+    jpRfVal.title = lowForMode
+      ? 'The radio is at the WSPR beacon\u2019s ' + JP_WSPR_CAP_WATTS + ' W cap. Raise it here unless QRP is intended.'
+      : 'Radio RF power setting';
+  }
+  function jpRfSend(watts) {
+    jpRfPendingWatts = watts;
+    if (jpRfSendTimer) return;
+    // 80 ms coalesce, same as the main window's throttledRigControl — a drag
+    // must not flood a serial rig with one PC command per pixel.
+    jpRfSendTimer = setTimeout(function() {
+      jpRfSendTimer = null;
+      var w = jpRfPendingWatts; jpRfPendingWatts = null;
+      if (w == null || !window.api.rigControl) return;
+      window.api.rigControl({ action: 'set-tx-power', value: w });
+    }, 80);
+  }
+  function jpRfApply(p) {
+    if (!p || !jpRfGroup) return;
+    jpRfCaps = {
+      minPower: p.minPower != null ? p.minPower : 0,
+      maxPower: p.maxPower != null ? p.maxPower : 100,
+      powerStep: p.powerStep != null ? p.powerStep : 1,
+      powerDecimals: p.powerDecimals != null ? p.powerDecimals : 0,
+      powerChoices: Array.isArray(p.powerChoices) && p.powerChoices.length ? p.powerChoices : null,
+    };
+    var known = !!p.known && p.watts > 0;
+    // Nothing to show AND nothing to set: no rig, or one with no power control.
+    if (!known && !p.settable) { jpRfGroup.classList.add('hidden'); return; }
+    jpRfGroup.classList.remove('hidden');
+    var useSelect = !!jpRfCaps.powerChoices;
+    if (jpRfSelect) {
+      jpRfSelect.classList.toggle('hidden', !useSelect);
+      if (useSelect) {
+        var want = jpRfCaps.powerChoices.map(String).join('|');
+        if (jpRfSelect.dataset.choices !== want) {
+          jpRfSelect.innerHTML = '';
+          jpRfCaps.powerChoices.forEach(function(c) {
+            var o = document.createElement('option'); o.value = String(c); o.textContent = jpRfFormat(c); jpRfSelect.appendChild(o);
+          });
+          jpRfSelect.dataset.choices = want;
+        }
+        jpRfSelect.disabled = !p.settable;
+      }
+    }
+    if (jpRfRange) {
+      jpRfRange.classList.toggle('hidden', useSelect);
+      jpRfRange.min = jpRfCaps.minPower;
+      jpRfRange.max = jpRfCaps.maxPower;
+      jpRfRange.step = jpRfCaps.powerStep;
+      jpRfRange.disabled = !p.settable;
+      jpRfRange.title = p.settable
+        ? 'Radio RF power: ' + jpRfCaps.minPower + '\u2013' + jpRfCaps.maxPower + ' W'
+        : 'Radio RF power (read-only \u2014 no live CAT/SmartSDR power control)';
+    }
+    // Do not yank the knob out from under a drag: the echo of our own set is
+    // in flight, and a mid-drag readback would snap the thumb back a pixel.
+    var dragging = document.activeElement === jpRfRange || document.activeElement === jpRfSelect ||
+                   (Date.now() - jpRfLastInputAt) < 600;
+    if (known && !dragging) {
+      if (jpRfRange && !useSelect) jpRfRange.value = p.watts;
+      if (jpRfSelect && useSelect) jpRfSelect.value = String(p.watts);
+    }
+    if (!dragging) jpRfPaintValue(p.watts, known);
+  }
+  if (jpRfRange) {
+    jpRfRange.addEventListener('input', function() {
+      jpRfLastInputAt = Date.now();
+      var w = Number(jpRfRange.value);
+      jpRfPaintValue(w, true);
+      jpRfSend(w);
+    });
+    jpRfRange.addEventListener('change', function() { jpRfRange.blur(); });
+  }
+  if (jpRfSelect) {
+    jpRfSelect.addEventListener('change', function() {
+      jpRfLastInputAt = Date.now();
+      var w = Number(jpRfSelect.value);
+      jpRfPaintValue(w, true);
+      jpRfSend(w);
+      jpRfSelect.blur();
+    });
+  }
+  if (window.api.onJtcatRigPower) window.api.onJtcatRigPower(jpRfApply);
+  // The red-at-1 W tell depends on the mode; repaint when it changes.
+  if (modeSelect) modeSelect.addEventListener('change', function() {
+    if (!jpRfGroup || jpRfGroup.classList.contains('hidden') || !jpRfKnown) return;
+    var src = jpRfCaps.powerChoices ? jpRfSelect : jpRfRange;
+    if (src) jpRfPaintValue(Number(src.value), true);
+  });
+
+  // Drive slider (was labelled "TX Pwr" until 2026-09-10) — the AUDIO level
+  // POTACAT feeds the radio, SYNCED through main (settings.jtcatTxGain), the
+  // same arrangement RX gain got on 2026-07-20. Until 2026-09-09 this slider
   // pushed its moves up but never heard anyone else's, so it read 100%
   // while a phone had the shack at 5% — a keyed radio putting out 0 W with
   // nothing on screen to say why (NA7C, IC-7300). localStorage is only the
-  // first-paint cache; the persisted setting wins once it arrives.
+  // first-paint cache; the persisted setting wins once it arrives. It sets
+  // modulation, not RF power: on the SmartSDR Direct route it does nothing
+  // (the dax_tx feed goes out at full scale), so startPopoutAudio dims it.
+  var jpTxDriveGroup = document.getElementById('jp-tx-drive-group');
+  function jpSetDriveRelevance(audioSource) {
+    if (!jpTxDriveGroup) return;
+    var inert = audioSource === 'smartsdr';
+    jpTxDriveGroup.style.opacity = inert ? '0.45' : '';
+    jpTxDriveGroup.title = inert
+      ? 'Audio drive has no effect on the SmartSDR Direct route (the DAX TX feed is sent at full scale). Use TX Pwr \u2014 the radio\u2019s RF power \u2014 instead.'
+      : 'Audio drive % into the radio (logarithmic \u2014 fine control at the low end). Sets modulation level, not RF power; TX Pwr is the radio\u2019s power.';
+  }
   var jpTxGain = document.getElementById('jp-tx-gain');
   var jpTxGainVal = document.getElementById('jp-tx-gain-val');
   // TX Pwr: square curve for fine low-end control (same as main window)
@@ -3536,6 +3695,7 @@ function _applyPopoutTheme(payload) {
 
   async function startPopoutAudio(deviceId, audioSource) {
     _lastAudioArgs = { deviceId: deviceId, audioSource: audioSource };
+    jpSetDriveRelevance(audioSource);
     _audioStartStage = 'stop-old';
     if (_audioStartWatchdog) clearTimeout(_audioStartWatchdog);
     _audioStartWatchdog = setTimeout(function () {

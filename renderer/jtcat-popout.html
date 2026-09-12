@@ -532,21 +532,44 @@
   </div>
 
   <!-- Audio controls -->
-  <div style="display:flex;align-items:center;gap:8px;padding:2px 10px;font-size:11px;color:var(--text-dim,#888);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
+  <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;padding:2px 10px;font-size:11px;color:var(--text-dim,#888);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
     <span style="flex-shrink:0;">RX</span>
-    <input type="range" id="jp-rx-gain" min="0" max="300" value="100" style="width:80px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
+    <input type="range" id="jp-rx-gain" min="0" max="300" value="100" style="width:70px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
     <span id="jp-rx-gain-val" style="min-width:32px;text-align:right;">100%</span>
-    <span style="flex-shrink:0;margin-left:8px;border-left:1px solid var(--border-primary);padding-left:8px;">TX Pwr</span>
-    <input type="range" id="jp-tx-gain" min="0" max="100" value="100" style="width:80px;accent-color:#e94560;" title="TX Power % (logarithmic — fine control at low end for FT8)">
-    <span id="jp-tx-gain-val" style="min-width:32px;text-align:right;">100%</span>
-    <!-- Radio meters. S is live on RX; SWR is only measurable DURING TX, so it
-         reads em-dash until the radio reports a match and blanks again ~10 s
-         after the frames stop rather than freezing on a stale ratio. Same
-         wire scale and same colour thresholds as the VFO pop-out. -->
+    <!-- TX Pwr is the RADIO's RF power setting, in watts — the same control as
+         the Rig panel's TX Power slider, through the same set-tx-power path.
+         Hydrated from main (jtcat-rig-power); disabled when the rig can only be
+         read; hidden only while nothing is known. Red when it sits at the WSPR
+         beacon's 1 W cap in a non-WSPR mode (the level a beacon session used
+         to leave behind, invisible on Flex Direct). -->
+    <span id="jp-rf-power-group" class="jp-meter-group hidden" title="Radio RF power (watts) — the radio's own TX power setting">
+      <span style="flex-shrink:0;">TX Pwr</span>
+      <input type="range" id="jp-rf-power" min="0" max="100" step="1" value="0" style="width:80px;accent-color:#e94560;">
+      <select id="jp-rf-power-select" class="hidden" style="font-size:11px;background:var(--bg-tertiary,#0f1419);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;padding:0 2px;"></select>
+      <span id="jp-rf-power-val" style="min-width:36px;text-align:right;font-variant-numeric:tabular-nums;">&mdash;</span>
+    </span>
+    <!-- Drive is the AUDIO level POTACAT feeds the radio (the old "TX Pwr"
+         slider, jtcatTxGain). It sets modulation, not RF power, and on the
+         SmartSDR Direct route it does nothing at all — the dax_tx feed is
+         sent at full scale — so it is dimmed there. -->
+    <span id="jp-tx-drive-group" class="jp-meter-group" title="Audio drive % into the radio (logarithmic — fine control at the low end). Sets modulation level, not RF power; TX Pwr is the radio's power.">
+      <span style="flex-shrink:0;">Drive</span>
+      <input type="range" id="jp-tx-gain" min="0" max="100" value="100" style="width:56px;">
+      <span id="jp-tx-gain-val" style="min-width:32px;text-align:right;">100%</span>
+    </span>
+    <!-- Radio meters. S is live on RX; PWR and SWR are only measurable DURING
+         TX, so they read em-dash until the radio reports and blank again a few
+         seconds after the frames stop rather than freezing on a stale value.
+         Same wire scale and same colour thresholds as the VFO pop-out. -->
     <span class="jp-meter-group" title="Signal strength from the radio">
       <span style="flex-shrink:0;">S</span>
       <span class="jp-meter"><span id="jp-smeter-bar" class="jp-meter-bar"></span></span>
       <span id="jp-smeter-val" class="jp-meter-val">&mdash;</span>
+    </span>
+    <span id="jp-pwr-group" class="jp-meter-group hidden" title="Measured forward power (watts) — only while transmitting">
+      <span style="flex-shrink:0;">PWR</span>
+      <span class="jp-meter"><span id="jp-pwr-bar" class="jp-meter-bar"></span></span>
+      <span id="jp-pwr-val" class="jp-meter-val">&mdash;</span>
     </span>
     <span class="jp-meter-group" title="SWR — only measurable while transmitting">
       <span style="flex-shrink:0;">SWR</span>

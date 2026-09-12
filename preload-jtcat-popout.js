@@ -18,6 +18,14 @@ contextBridge.exposeInMainWorld('api', {
   onCatSmeter: (cb) => ipcRenderer.on('cat-smeter', (_e, val) => cb(val)),
   onCatSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onCatSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),
+  // Measured forward power (watts) from the Flex TX bridge — frames only flow
+  // during TX; main sends 0 shortly after they stop.
+  onCatFwdPower: (cb) => ipcRenderer.on('cat-fwd-power', (_e, val) => cb(val)),
+  // The radio's RF power SETTING for the TX Pwr slider: {watts, settable,
+  // known, minPower, maxPower, powerStep, powerDecimals, powerChoices}.
+  // Pushed on every rig-state change and once on load. Sets go back through
+  // rigControl({action:'set-tx-power', value}).
+  onJtcatRigPower: (cb) => ipcRenderer.on('jtcat-rig-power', (_e, p) => cb(p)),
   jtcatWsprBeacon: (opts) => ipcRenderer.send('jtcat-wspr-beacon', opts),
   jtcatWsprHop: (opts) => ipcRenderer.send('jtcat-wspr-hop', opts),
   // `operator` true = a deliberate move (TX box / waterfall) — honored even

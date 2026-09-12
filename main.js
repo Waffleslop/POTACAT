@@ -304,6 +304,7 @@ const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
 const { WsprScheduler } = require('./lib/wspr/scheduler');
+const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
@@ -533,6 +534,8 @@ const GLOBAL_KEYS = new Set([
                        // slider, machine audio property like jtcatRxGain
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
                        // (same reasoning as lightMode/darkVariant above)
+  'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
+                       // radio before capping it at 1 W — the radio is this machine's
   'mainMicDeviceId', 'mainPlaybackDeviceId',
   'echocatPort',       // ECHOCAT server port
   'echocatToken',      // ECHOCAT legacy single shared token (machine)
@@ -2483,6 +2486,9 @@ function sendCatPower(watts) {
   _currentTxPower = watts;
   _currentPower = watts;
   broadcastRigState();
+  // A stale WSPR pre-beacon marker with the radio still at the 1 W cap is a
+  // restore that never landed — this readback is where it gets put back.
+  if (!isRemoteActive()) wsprReconcilePreCapPower(watts);
 }
 
 function sendCatNb(on) {
@@ -2708,6 +2714,43 @@ function broadcastRigState() {
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
   sendVfoState();
   broadcastRemoteRadioStatus();
+  pushJtcatPopoutRigPower();
+}
+
+// The JTCAT popout's "TX Pwr" slider is the RADIO's RF power, in watts, and
+// drives set-tx-power through the one rig-control dispatcher — the popout used
+// to carry only an audio-drive slider labelled "TX Pwr", which on Flex Direct
+// does nothing at all (the dax_tx route applies no gain), so it read 85% while
+// the radio sat at 1 W. This is the slice of rig-state the popout needs: value
+// plus the model's clamp/step/choices, and whether a set would take (a Flex
+// without the API can only be read, so the control shows disabled rather than
+// lying). Deduped by content — broadcastRigState fires on every meter tick.
+let _jtcatPopoutRigPowerSig = '';
+function jtcatPopoutRigPowerPayload() {
+  const rigType = detectRigType();
+  const caps = getRigCapabilities(rigType) || {};
+  const flexApi = !!(smartSdr && smartSdr.connected);
+  const linkUp = rigType === 'flex' ? flexApi : (flexApi || !!(cat && cat.connected));
+  return {
+    watts: _currentTxPower,
+    // Roaming (host-while-roaming) forwards rig-control to the remote shack,
+    // so the set takes there even with no local link.
+    settable: !!caps.txpower && (linkUp || isRemoteActive()),
+    known: _currentTxPower > 0,
+    minPower: caps.minPower != null ? caps.minPower : 0,
+    maxPower: caps.maxPower != null ? caps.maxPower : 100,
+    powerStep: caps.powerStep != null ? caps.powerStep : 1,
+    powerDecimals: caps.powerDecimals != null ? caps.powerDecimals : 0,
+    powerChoices: Array.isArray(caps.powerChoices) ? caps.powerChoices : null,
+  };
+}
+function pushJtcatPopoutRigPower(force) {
+  if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) { _jtcatPopoutRigPowerSig = ''; return; }
+  const payload = jtcatPopoutRigPowerPayload();
+  const sig = JSON.stringify(payload);
+  if (!force && sig === _jtcatPopoutRigPowerSig) return;
+  _jtcatPopoutRigPowerSig = sig;
+  try { jtcatPopoutWin.webContents.send('jtcat-rig-power', payload); } catch {}
 }
 
 // In-process rolling buffer of the most recent CAT/ECHOCAT log lines. There
@@ -8912,6 +8955,123 @@ function wsprForcePowerCap() {
   return capped;
 }
 
+// ---- WSPR pre-beacon power memory ------------------------------------------
+// The cap above used to be one-way: the beacon set 1 W and the disarm path
+// deliberately left it there ("raise it in your radio for other modes"). On a
+// Flex that setting PERSISTS IN THE RADIO across POTACAT restarts, Flex Direct
+// shows no SmartSDR slider, and until d07752f the wattmeter read the 30 dBm
+// meter as "30 W" — so an 8600M sat at rfpower=1% for weeks of unanswered FT8
+// CQs with nothing on screen saying so (K3SBP 2026-09-10). The level the beacon
+// found is now remembered in settings (GLOBAL_KEY: it describes this machine's
+// radio) and put back when the beacon stands down: disarm, mode switch, engine
+// stop, app quit — and, because a crash or a write that never reached the radio
+// can strand it, the first power readback of a session with a stale marker and
+// the radio still at the cap also restores it. The marker is cleared by the
+// radio's own readback confirming a level above the cap, never by a command
+// having been *sent* (see wsprReconcilePreCapPower).
+function wsprBeaconArmed() {
+  return !!(jtcatWsprScheduler && jtcatWsprScheduler.enabled);
+}
+
+function wsprForgetPreCapPower() {
+  if (!settings.wsprPreCapPower) return;
+  delete settings.wsprPreCapPower;
+  _wsprRestoreAttempts = 0;
+  try { saveSettings(settings); } catch {}
+}
+
+// Called at arm, BEFORE wsprForcePowerCap(). Returns the watts that will be
+// restored, or 0 when no pre-beacon level is known.
+function wsprRememberPreCapPower() {
+  const r = WsprPowerMemory.rememberPreCapPower({
+    current: _currentTxPower, prior: settings.wsprPreCapPower,
+    rigId: settings.activeRigId || null, cap: JTCAT_WSPR_MAX_WATTS, now: Date.now(),
+  });
+  if (r.changed) {
+    settings.wsprPreCapPower = r.marker;
+    _wsprRestoreAttempts = 0;
+    try { saveSettings(settings); } catch {}
+  }
+  return r.restoreWatts;
+}
+
+function wsprCommandTxPower(watts) {
+  try {
+    if (smartSdr && smartSdr.connected) return gatedSmartSdrTxPower(watts);
+    if (cat && cat.connected) return gatedSetTxPower(watts, { rigType: detectRigType() });
+  } catch (e) {
+    sendCatLog('[JTCAT] WSPR: power restore command failed: ' + (e && e.message || e));
+  }
+  return false;
+}
+
+let _wsprRestoreRetryTimer = null;
+let _wsprRestoreAttempts = 0;
+const WSPR_RESTORE_MAX_ATTEMPTS = 3;
+
+// Put the remembered level back. Returns 'restored' | 'deferred' | 'failed' |
+// 'none'. Not immediate while a WSPR frame is still going out (the disarm tick
+// can land mid-transmission and the cap exists for exactly that frame) — the
+// restore is retried once a second until the frame ends. `immediate` is for
+// engine stop / app quit, where the audio has already been cancelled.
+function wsprRestorePreCapPower(why, opts = {}) {
+  const m = settings.wsprPreCapPower;
+  const d = WsprPowerMemory.decideRestore({
+    marker: m, rigId: settings.activeRigId || null, cap: JTCAT_WSPR_MAX_WATTS,
+    txActiveWspr: !!(ft8Engine && ft8Engine._txActive && ft8Engine._mode === 'WSPR'),
+    immediate: !!opts.immediate, attempts: _wsprRestoreAttempts, maxAttempts: WSPR_RESTORE_MAX_ATTEMPTS,
+  });
+  if (d.action === 'none') return 'none';
+  if (d.action === 'forget-rig-mismatch') {
+    sendCatLog(`[JTCAT] WSPR: remembered pre-beacon TX power (${m.watts} W) belongs to a different rig — forgetting it. Check this radio's TX power by hand.`);
+    wsprForgetPreCapPower();
+    return 'none';
+  }
+  if (d.action === 'defer') {
+    if (!_wsprRestoreRetryTimer) {
+      sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power will be restored to ${m.watts} W when this transmission ends.`);
+      _wsprRestoreRetryTimer = setInterval(() => {
+        if (wsprBeaconArmed()) { clearInterval(_wsprRestoreRetryTimer); _wsprRestoreRetryTimer = null; return; }
+        if (ft8Engine && ft8Engine._txActive && ft8Engine._mode === 'WSPR') return;
+        clearInterval(_wsprRestoreRetryTimer); _wsprRestoreRetryTimer = null;
+        wsprRestorePreCapPower(why, { immediate: true });
+      }, 1000);
+    }
+    return 'deferred';
+  }
+  if (d.action === 'give-up') {
+    sendCatLog(`[JTCAT] WSPR: the radio did not take the ${m.watts} W restore after ${WSPR_RESTORE_MAX_ATTEMPTS} attempts — giving up. Set TX power by hand (Rig panel, or the TX Pwr slider in the JTCAT window).`);
+    wsprForgetPreCapPower();
+    return 'failed';
+  }
+  _wsprRestoreAttempts++;
+  if (!wsprCommandTxPower(m.watts)) {
+    sendCatLog(`[JTCAT] WSPR beacon ${why}: could not restore TX power to ${m.watts} W (no live CAT/SmartSDR power control). The radio is still at the ~${JTCAT_WSPR_MAX_WATTS} W beacon cap — raise it by hand, or it will be restored on the next power readback.`);
+    return 'failed';
+  }
+  sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power restored to ${m.watts} W (the beacon had capped it at ${JTCAT_WSPR_MAX_WATTS} W).`);
+  // Optimistic local echo so every surface shows the restored level now; the
+  // radio's readback confirms it and clears the marker (or retries).
+  _currentTxPower = m.watts;
+  _currentPower = m.watts;
+  broadcastRigState();
+  return 'restored';
+}
+
+// Hooked into sendCatPower — every power readback from the radio, on any rig
+// backend. With a marker outstanding and no beacon running: a readback above
+// the cap is the confirmation that clears it; a readback still at/below the cap
+// is a restore that never landed (crash, kill, a quit before the socket
+// flushed, a previous build that never restored at all) and is retried here.
+function wsprReconcilePreCapPower(watts) {
+  const d = WsprPowerMemory.decideReconcile({
+    marker: settings.wsprPreCapPower, armed: wsprBeaconArmed(),
+    retryPending: !!_wsprRestoreRetryTimer, watts, cap: JTCAT_WSPR_MAX_WATTS,
+  });
+  if (d === 'forget') wsprForgetPreCapPower();
+  else if (d === 'restore') wsprRestorePreCapPower('left the radio at the beacon cap', { immediate: true });
+}
+
 // Transmit one WSPR frame. Power is capped three ways: dBm <= 30 (clamped),
 // the rig commanded to 1 W via CAT, and the audio drive scaled for sub-watt
 // targets. Reuses the standard tx-start audio dispatch (now failsafe-correct
@@ -8947,12 +9107,15 @@ function wsprBeaconTransmit(call, grid, dbm) {
 // this 2-minute slot transmits and, if so, keys at slot+1 s.
 function wsprBeaconTick() {
   if (!jtcatWsprScheduler) return;
-  if (!ft8Engine || ft8Engine._mode !== 'WSPR') { setWsprBeacon(false); return; }
+  if (!ft8Engine || ft8Engine._mode !== 'WSPR') {
+    setWsprBeacon(false, { why: ft8Engine ? 'stood down (JTCAT left WSPR mode)' : 'stood down (JTCAT stopped)' });
+    return;
+  }
   // Part 97: automatic TX on the calling frequencies must be attended. Bounded
   // by the same 30-min watchdog as Full Auto CQ — re-arm to keep beaconing.
   if (Date.now() - jtcatWsprBeaconArmedAt > JTCAT_FULL_AUTO_CQ_WATCHDOG_MS) {
     sendCatLog('[JTCAT] WSPR beacon: 30-min attended-operator watchdog — stopping. Re-arm to continue.');
-    setWsprBeacon(false);
+    setWsprBeacon(false, { why: 'stopped by the 30-min watchdog' });
     return;
   }
   if (ft8Engine._txActive) return;
@@ -8985,8 +9148,10 @@ function wsprBeaconTick() {
 }
 
 // WSPR beacon arm/disarm. Validates identity, forces the 1 W rig cap, and runs
-// the scheduler-driven transmit loop. Attended-only.
-function setWsprBeacon(on) {
+// the scheduler-driven transmit loop. Attended-only. Disarm opts: `why` names
+// the trigger in the log; `immediate` skips the wait-for-frame-end on the power
+// restore (engine stop / app quit, where TX audio is already cancelled).
+function setWsprBeacon(on, opts = {}) {
   // Authoritative confirm/revert to EVERY surface that can show the toggle —
   // the local popout and any connected phone. The client never sets its toggle
   // optimistically; it waits for this.
@@ -8997,12 +9162,20 @@ function setWsprBeacon(on) {
     if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprBeaconState({ enabled });
   };
   if (!on) {
+    const wasArmed = wsprBeaconArmed() || !!jtcatWsprBeaconTimer;
     if (jtcatWsprScheduler) jtcatWsprScheduler.setEnabled(false);
     if (jtcatWsprBeaconTimer) { clearInterval(jtcatWsprBeaconTimer); jtcatWsprBeaconTimer = null; }
-    // Fail-safe: leave the radio at the 1 W cap rather than silently restoring a
-    // high level. WSPR is QRPp and the operator asked for power to stay hard to
-    // raise — so they bump it back up deliberately for other modes.
-    sendCatLog('[JTCAT] WSPR beacon disarmed. TX power left at the ~1 W cap — raise it in your radio for other modes.');
+    if (!wasArmed) { tellPopout(false); return; }
+    // Put back the level the beacon found. This used to be deliberately
+    // one-way ("raise it in your radio for other modes") as a QRPp fail-safe —
+    // and left an 8600M at rfpower=1% for weeks of unanswered FT8, because the
+    // Flex remembers it across restarts and nothing on screen said 1 W. The
+    // restore only ever returns to a level the operator had set themselves.
+    const why = opts.why || 'disarmed';
+    const r = wsprRestorePreCapPower(why, { immediate: !!opts.immediate });
+    if (r === 'none') {
+      sendCatLog(`[JTCAT] WSPR beacon ${why}. TX power is still at the ~${JTCAT_WSPR_MAX_WATTS} W beacon cap (no pre-beacon level was known) — raise it in the Rig panel or with the TX Pwr slider in the JTCAT window before other modes.`);
+    }
     tellPopout(false);
     return;
   }
@@ -9026,8 +9199,11 @@ function setWsprBeacon(on) {
     tellPopout(false);
     return;
   }
-  // Force the 1 W power cap up front. If no power-control path is live, the
-  // operator MUST set <=1 W by hand — say so unmistakably.
+  // Remember the level we are about to override, THEN force the 1 W cap. If no
+  // power-control path is live, the operator MUST set <=1 W by hand — say so
+  // unmistakably.
+  if (_wsprRestoreRetryTimer) { clearInterval(_wsprRestoreRetryTimer); _wsprRestoreRetryTimer = null; }
+  const restoreWatts = wsprRememberPreCapPower();
   const capped = wsprForcePowerCap();
   if (!jtcatWsprScheduler) jtcatWsprScheduler = new WsprScheduler({});
   jtcatWsprScheduler.setTxPct(settings.wsprTxPct != null ? settings.wsprTxPct : 20);
@@ -9047,7 +9223,10 @@ function setWsprBeacon(on) {
       : ' TX 0% = listen only.') +
     `. Attended only (30-min watchdog).`);
   sendCatLog(capped
-    ? '[JTCAT] WSPR: radio commanded to ~1 W (rfpower 1% on Flex / PC001 on CAT). Still verify actual output on a meter.'
+    ? '[JTCAT] WSPR: radio commanded to ~1 W (rfpower 1% on Flex / PC001 on CAT). Still verify actual output on a meter.' +
+      (restoreWatts > 0
+        ? ` ${restoreWatts} W will be restored when the beacon stands down.`
+        : ' No pre-beacon power level was known, so it stays at 1 W until you raise it.')
     : '[JTCAT] ⚠ WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ≤1 W BY HAND before it transmits.');
   tellPopout(true);
 }
@@ -10295,6 +10474,7 @@ function startJtcat(mode) {
     }
 
     const modeForTx = ft8Engine ? ft8Engine._mode : 'FT8';
+    jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq);
     // Stamp the period this transmission goes out in — jtcatHandleRetryStall
     // counts one try per stamped TX (never per decode period). Placed after
     // every TX-block guard above so refused cycles don't count as tries.
@@ -10838,6 +11018,13 @@ function stopJtcat() {
     if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
     try { handleRemotePtt(false); } catch {}
   }
+  // A WSPR beacon dies with the engine — and takes its 1 W cap with it. The
+  // 1 s tick used to notice the engine was gone and disarm on its own, but
+  // now that disarm restores power it must run while the rig link is still up
+  // (TX audio is already cancelled above, so restore immediately).
+  if (wsprBeaconArmed() || jtcatWsprBeaconTimer) {
+    try { setWsprBeacon(false, { immediate: true, why: 'stopped with JTCAT' }); } catch {}
+  }
   // Spectrum loop has no reason to keep running once the engine is
   // gone — audioBuffer reads would all return zeros anyway. Mobile
   // re-subscribes on the next FT8-tab open.
@@ -11048,11 +11235,13 @@ function connectSmartSdr() {
     if (_flexTxRf) { _flexTxRf.frames++; if (w > _flexTxRf.peakW) _flexTxRf.peakW = w; }
     if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', w);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', w);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', w);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: w });
     if (_fwdPowerClearTimer) clearTimeout(_fwdPowerClearTimer);
     _fwdPowerClearTimer = setTimeout(() => {
       _fwdPowerClearTimer = null;
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', 0);
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', 0);
       if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: 0 });
     }, 3000);
   });
@@ -15321,6 +15510,8 @@ function connectRemote() {
   let _txPowerTimer = null;
   remoteServer.on('set-txpower', ({ value }) => {
     _currentTxPower = value;
+    // The operator has taken the level over — a WSPR restore must not undo it.
+    if (!wsprBeaconArmed()) wsprForgetPreCapPower();
     _txPowerSuppressBroadcast = Date.now() + 500;
     if (_txPowerTimer) clearTimeout(_txPowerTimer);
     _txPowerTimer = setTimeout(() => {
@@ -17263,7 +17454,38 @@ function logFlexTxRfSummary() {
   }
   const peak = rf.peakW >= 10 ? String(Math.round(rf.peakW)) : rf.peakW.toFixed(1);
   const swr = rf.maxSwr >= 1 ? `, SWR ${rf.maxSwr.toFixed(1)}` : '';
-  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s)`);
+  // The commanded level beside the measured one: "peak 1.0 W" alone reads as a
+  // drive/antenna/meter question; "peak 1.0 W ... RF power set to 1 W" says the
+  // radio did exactly what it was told (K3SBP's weeks at the WSPR cap).
+  const setTo = _currentTxPower > 0 ? `; RF power set to ${_currentTxPower} W` : '';
+  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s${setTo})`);
+}
+
+// Say what the radio's RF power is set to at every JTCAT key-down, and warn —
+// in the log every time, on screen once per level — when a non-WSPR mode is
+// about to go out at the WSPR beacon cap. The log line is what makes a "no
+// replies" report diagnosable from the paste alone; the on-screen notice is
+// for the operator who never reads logs. Deliberate QRP is respected: the
+// notice says what is happening and where the slider is, and does not block.
+let _jtcatLowPowerNoticedWatts = 0;
+function jtcatNoteTxPowerForMode(mode, message, freqHz) {
+  const w = _currentTxPower;
+  const setTo = w > 0 ? `RF power set to ${w} W` : 'RF power unknown (no readback from the radio)';
+  sendCatLog(`[JTCAT] TX start: ${mode} "${message || ''}" @ ${freqHz || '?'} Hz, ${setTo}`);
+  if (!(w > 0) || w > JTCAT_WSPR_MAX_WATTS || mode === 'WSPR') {
+    if (w > JTCAT_WSPR_MAX_WATTS) _jtcatLowPowerNoticedWatts = 0;
+    return;
+  }
+  sendCatLog(`[JTCAT] WARNING: transmitting ${mode} with the radio's RF power at ${w} W — the WSPR beacon cap. Raise TX Pwr in the JTCAT window (or the Rig panel) if that is not intended.`);
+  if (_jtcatLowPowerNoticedWatts === w) return; // one toast per level, not per transmission
+  _jtcatLowPowerNoticedWatts = w;
+  const msg = `Transmitting ${mode} at ${w} W — the radio's RF power is at the WSPR beacon cap. Raise TX Pwr in this window if that is not intended.`;
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message: msg });
+  }
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
+  }
 }
 
 function handleRemotePtt(state, opts = {}) {
@@ -25633,6 +25855,8 @@ app.whenReady().then(() => {
       // Fresh popout: show the armed Spot Target banner immediately (the
       // target is usually set an instant before jtcat-popout-open).
       if (jtcatSpotTarget) broadcastSpotTarget();
+      // ...and the radio's RF power, so the TX Pwr slider never opens blank.
+      pushJtcatPopoutRigPower(true);
     });
     jtcatPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') {
@@ -28076,6 +28300,8 @@ app.whenReady().then(() => {
           gatedSetTxPower(value, { rigType });
         }
         _currentTxPower = value;
+        // The operator has taken the level over — a WSPR restore must not undo it.
+        if (!wsprBeaconArmed()) wsprForgetPreCapPower();
         broadcastRigState();
         break;
       }
@@ -33186,6 +33412,15 @@ function gracefulCleanup() {
   // radio before the SmartSDR/CAT/keyer connections close — otherwise the
   // radio can stay keyed with no audio (a silent-carrier FCC issue).
   try { handleRemotePtt(false); } catch {}
+  // A WSPR beacon armed at quit must give the radio its power back NOW, while
+  // the CAT/SmartSDR links below are still open — stopJtcat() runs after they
+  // are torn down and could no longer reach the rig. (smartsdr.disconnect()
+  // end()s the socket, so the queued rfpower write still flushes; if it does
+  // not, the persisted marker restores it on the next session's readback.)
+  try {
+    if (smartSdrAudio) smartSdrAudio.cancelTx();
+    if (wsprBeaconArmed() || jtcatWsprBeaconTimer) setWsprBeacon(false, { immediate: true, why: 'stopped at app quit' });
+  } catch {}
   try { if (sstvEngine) sstvEngine.stop(); } catch {}
   // Save QRZ cache to disk
   try {
