@@ -11375,6 +11375,11 @@ function _contestsStatus(c, now) {
   const end = _contestsParseDate(c.end);
   if (!start) return { kind: 'unscheduled', label: c.whenRule || 'See sponsor' };
   if (start <= now && end >= now) return { kind: 'live', label: 'LIVE', start, end };
+  // Catalog contests roll to their next occurrence, but a one-shot pushed
+  // from events/active.json (WRTC 2026) keeps its explicit window — once
+  // that has passed the "in Nh" math goes negative and fell through to
+  // "starting soon" under "This week", two months after the event.
+  if (end && end < now) return { kind: 'ended', label: 'ended', start, end };
   const diffMs = start.getTime() - now.getTime();
   const diffH = Math.round(diffMs / 3600000);
   const diffD = Math.floor(diffH / 24);
@@ -11534,6 +11539,7 @@ async function renderContestsView() {
 function _contestsBucket(c, now) {
   const s = c._status;
   if (s.kind === 'live') return BUCKETS.live;
+  if (s.kind === 'ended') return BUCKETS.past;
   if (s.kind === 'unscheduled' || !s.start) return BUCKETS.unscheduled;
   const start = s.start;
 
@@ -11574,9 +11580,10 @@ const BUCKETS = {
   nextWeek:     { key: 'next-week',     label: 'Next week',               rank: 4 },
   later:        { key: 'later',         label: 'Later',                   rank: 5 },
   unscheduled:  { key: 'unscheduled',   label: 'Unscheduled / recurring', rank: 6 },
+  past:         { key: 'past',          label: 'Past',                    rank: 7 },
 };
 // Property names in BUCKETS, in display order. Each maps to .key for grouping.
-const BUCKET_NAMES = ['live', 'thisWeekend', 'thisWeek', 'nextWeekend', 'nextWeek', 'later', 'unscheduled'];
+const BUCKET_NAMES = ['live', 'thisWeekend', 'thisWeek', 'nextWeekend', 'nextWeek', 'later', 'unscheduled', 'past'];
 
 function _contestsRender() {
   const host = document.getElementById('contests-list');
@@ -11592,7 +11599,7 @@ function _contestsRender() {
     const cat = c.category || 'other';
     if (filter[cat] === false) continue;
     const status = _contestsStatus(c, now);
-    if (!showPast && status.kind === 'unscheduled') continue;
+    if (!showPast && (status.kind === 'unscheduled' || status.kind === 'ended')) continue;
     const entry = { ...c, _status: status, _catLabel: catLabel.get(cat) || cat };
     entry._bucket = _contestsBucket(entry, now);
     rows.push(entry);
@@ -11673,7 +11680,8 @@ function _contestsRowHtml(c, now) {
   // (13 Colonies exists in both catalogs) renders as ONE connected row —
   // progress chip that jumps to the event board instead of a static entry.
   let eventChip = '';
-  if (c.supersededBy) {
+  // An ended event still shows its progress; it no longer invites tracking.
+  if (c.supersededBy && (c.eventTracked || s.kind !== 'ended')) {
     const label = c.eventTracked
       ? `◉ Tracked — ${c.eventProgress}${c.eventTotal ? '/' + c.eventTotal : ''} worked`
       : '◎ Event available';

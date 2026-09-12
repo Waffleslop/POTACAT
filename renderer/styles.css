@@ -9844,6 +9844,12 @@ main.banner-logger-active #event-progress-overlay {
   font-weight: normal;
   font-style: italic;
 }
+.contest-pill-ended {
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-secondary);
+  font-weight: normal;
+}
 
 /* Drawer */
 .contests-drawer {
