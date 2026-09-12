@@ -5886,8 +5886,9 @@ async function _shareRigUpdateReachNotice() {
     box.classList.add('ok');
     box.innerHTML = '<strong>You can share with anyone, anywhere.</strong> '
       + 'Since you have POTACAT Cloud Tunnel turned on, your friend can '
-      + 'connect from any internet connection. They\'ll need a free '
-      + 'POTACAT Cloud account to redeem the code.';
+      + 'connect from any internet connection, in the ECHOCAT app or in '
+      + 'any browser. A free POTACAT Cloud account is needed unless you '
+      + 'allow redeeming without an account.';
   } else if (mode === 'tailscale') {
     box.classList.add('info');
     box.innerHTML = '<strong>You can share with people on your tailnet.</strong> '
@@ -6026,8 +6027,8 @@ async function _shareRigIssue() {
     const introEl = document.getElementById('share-rig-result-intro');
     if (introEl) {
       introEl.innerHTML = res.allow_anonymous
-        ? 'Pass generated. Send the link below to your friend. <b>They can redeem without signing in to POTACAT Cloud</b> — perfect for one-off guests.'
-        : 'Pass generated. Send the link below to your friend. They\'ll need a free POTACAT Cloud account (sign-up is one click).';
+        ? 'Pass generated. Send the link below to your friend. They can open it in the ECHOCAT app or in any browser, and <b>redeem without signing in to POTACAT Cloud</b> — perfect for one-off guests.'
+        : 'Pass generated. Send the link below to your friend. They can open it in the ECHOCAT app or in any browser; they\'ll need a free POTACAT Cloud account (sign-up is one click).';
     }
     const startsAt = res.starts_at ? new Date(res.starts_at) : null;
     const expiresAt = res.expires_at ? new Date(res.expires_at) : null;
@@ -7398,12 +7399,21 @@ async function _renderSummaryEchocat() {
       const tsIp = (ips || []).find((ip) => ip.tailscale);
       if (tsIp) tailscaleUrl = 'https://' + tsIp.address + ':' + port;
     }
+    // POTACAT Cloud: the tunnel host is a real HTTPS origin any browser
+    // can open from anywhere — the visitor signs in at
+    // login.potacat.com and comes back holding a device cookie
+    // (lib/echocat-web-gate.js). Only offered while the tunnel is
+    // actually live: a connecting/errored tunnel would hand out a
+    // link that 502s at Cloudflare.
+    const cloudUrl = (tunnel && tunnel.status === 'live' && tunnel.cloudHost)
+      ? 'https://' + String(tunnel.cloudHost) : '';
     web = {
       addresses: list,
       port,
       token: (s.remoteRequireToken !== false) ? (s.remoteToken || '') : '',
       tailscaleUrl,
       tailscaleCertValid,
+      cloudUrl,
     };
   } catch {}
   const html = _buildEchocatCardHTML(tunnel, tail, devices, web);
@@ -7416,28 +7426,39 @@ async function _renderSummaryEchocat() {
 // accordion (Casey 2026-06-13 — "make it available for users who don't
 // want to pay").
 function _buildEchocatWebHTML(web) {
+  const hasCloud = !!(web && web.cloudUrl);
+  // One URL row: optional label, the url, a copy button, and (for a
+  // link that works from THIS computer without a cert warning) Open.
+  const urlRow = (label, url, isPrimary, opts) =>
+    (label ? '<div class="echo-web-rowlabel">' + label + '</div>' : '')
+    + '<div class="echo-web-urlrow">'
+    + '<code class="echo-web-url">' + _esc(url) + '</code>'
+    + '<button type="button" class="echo-web-copy' + (isPrimary ? ' primary' : '') + '" data-act="echo-copy-weburl" data-copy="' + _esc(url) + '" title="Copy link">Copy</button>'
+    + ((opts && opts.open) ? '<a class="echo-web-copy echo-web-open" data-external="1" href="' + _esc(url) + '" title="Open in your default browser">Open</a>' : '')
+    + '</div>';
+  // Anywhere via POTACAT Cloud — a public HTTPS origin with a real
+  // certificate. The browser signs in at login.potacat.com (owner) or
+  // redeems a Guest Pass; no token to type, nothing to accept.
+  const cloudBlock = hasCloud
+    ? urlRow('Anywhere (POTACAT Cloud)', web.cloudUrl, true, { open: true })
+      + '<div class="echo-web-extra">Sign in with your POTACAT Cloud account in the browser. No certificate warning.</div>'
+    : '';
   if (!web || !Array.isArray(web.addresses) || web.addresses.length === 0) {
     return '<div class="echo-web">'
       + '<div class="echo-web-head"><span class="echo-web-title">Open in a browser</span>'
       + '<span class="echo-web-tag">no app needed</span></div>'
+      + cloudBlock
       + '<div class="echo-web-empty">No local network detected — connect this computer to your WiFi/LAN to get a browser link.</div>'
       + '</div>';
   }
   const primary = 'https://' + web.addresses[0] + ':' + web.port;
   const extras = web.addresses.slice(1).map((a) => 'https://' + a + ':' + web.port);
   const hasTs = !!web.tailscaleUrl;
-  // One URL row: optional label, the url, a copy button.
-  const urlRow = (label, url, isPrimary) =>
-    (label ? '<div class="echo-web-rowlabel">' + label + '</div>' : '')
-    + '<div class="echo-web-urlrow">'
-    + '<code class="echo-web-url">' + _esc(url) + '</code>'
-    + '<button type="button" class="echo-web-copy' + (isPrimary ? ' primary' : '') + '" data-act="echo-copy-weburl" data-copy="' + _esc(url) + '" title="Copy link">Copy</button>'
-    + '</div>';
   // When a Tailscale URL exists, label the two so users know which
   // works where; the LAN one only works on the home network.
-  const lanBlock = urlRow(hasTs ? 'On your WiFi (home)' : '', primary, !hasTs);
+  const lanBlock = urlRow((hasTs || hasCloud) ? 'On your WiFi (home)' : '', primary, !hasTs && !hasCloud);
   const tsBlock = hasTs
-    ? urlRow('Away from home (Tailscale)', web.tailscaleUrl, true)
+    ? urlRow('Away from home (Tailscale)', web.tailscaleUrl, !hasCloud)
       + (web.tailscaleCertValid
         ? ''
         : '<div class="echo-web-extra">MagicDNS is off — this uses your Tailscale IP, so you\'ll get a certificate warning. Turn on MagicDNS for a clean link.</div>')
@@ -7449,14 +7470,19 @@ function _buildEchocatWebHTML(web) {
   const extrasLine = extras.length
     ? '<div class="echo-web-extra">Other home addresses: ' + extras.map((u) => '<code>' + _esc(u) + '</code>').join(', ') + '</div>'
     : '';
+  // The cert-warning guidance belongs to the LAN/Tailscale rows only —
+  // the Cloud link has a real certificate.
   const hint = hasTs
     ? 'Use the WiFi link at home; the Tailscale link works anywhere both devices are signed into your tailnet. Must be <code>https://</code>; accept the warning the first time.'
-    : 'Type it into any phone, tablet, or computer on your home WiFi. Must be <code>https://</code>; accept the security warning the first time.';
+    : (hasCloud
+      ? 'The WiFi link only works on your home network. Must be <code>https://</code>; accept the security warning the first time.'
+      : 'Type it into any phone, tablet, or computer on your home WiFi. Must be <code>https://</code>; accept the security warning the first time.');
   return '<div class="echo-web">'
     + '<div class="echo-web-head">'
     + '<span class="echo-web-title">Open in a browser</span>'
     + '<span class="echo-web-tag">no app needed</span>'
     + '</div>'
+    + cloudBlock
     + lanBlock
     + tsBlock
     + tokenLine
@@ -7541,9 +7567,13 @@ function _summaryDeviceListHTML(devices) {
     const name = _esc(d.name || d.label || 'Unnamed device');
     const created = d.createdAt ? new Date(d.createdAt).toLocaleDateString() : '';
     const seen = fmtAge(d.lastSeen);
+    // A browser signed in over the Cloud tunnel is a paired device
+    // like any other (Rename/Revoke work; Revoke bounces it to the
+    // sign-in page) — the tag says which rows are browsers.
+    const kind = d.platform === 'web' ? ' <span class="summary-device-kind">browser</span>' : '';
     return '<div class="summary-device">'
       + '<div>'
-      + '<div class="summary-device-name">' + name + '</div>'
+      + '<div class="summary-device-name">' + name + kind + '</div>'
       + '<div class="summary-device-meta">paired ' + _esc(created) + ' · last seen ' + _esc(seen) + '</div>'
       + '</div>'
       + '<div class="summary-device-actions">'

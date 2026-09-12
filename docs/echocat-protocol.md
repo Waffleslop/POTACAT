@@ -61,13 +61,14 @@ Format: each row is `name — direction — purpose`. Directions:
 | Message | Dir | Purpose |
 |---|---|---|
 | `hello` | ↔ | Version + capability handshake (new in v1). Server-side `hello` also carries top-level `rigModel` (string, e.g. `"Flex 8600M"`, `"FTDX10"`) so POTACAT-desktop clients can label paired shacks in the Remote Radios panel — empty string when no rig is configured. |
-| `auth-mode` | S→C | Tell client which auth mode the server is configured for (`token`, `callsign`, `cloud`). |
+| `auth-mode` | S→C | Tell client which auth mode the server is configured for (`token`, `callsign`, `cloud`, `none`, `cookie`). `cookie` (2026-09-11, ECHOCAT Web over POTACAT Cloud): the WebSocket upgrade carried a valid `__Host-echocat_device` or `__Host-echocat_pass` cookie and the server has **already** authenticated the socket — `auth-ok` follows immediately with no `auth` message from the client. Sent only when the upgrade's `Origin` matches its `Host` (or the tunnel's `cloudHost`); a cross-site page that makes the browser attach the cookie gets `token` and no `auth-ok`. The page was served with `window.__authMode="cookie"` by the same decision (`lib/echocat-web-gate.js` `wsAuthModeFor` / `decideHttpGate`), so a page in cookie mode that receives `auth-mode: token` knows its cookie died (revoked, expired, pass ended) and must sign out and reload rather than show a token box. |
 | `auth` | C→S | Submit credentials (token / callsign+password / cloud token). |
 | `auth-ok` | S→C | Auth succeeded. Bundles initial feature flags and settings. Per-device-token auths also include `expiresAt` (epoch ms or `null` for no-expiry — trusted / account-linked devices), `accountLinked` (bool — pair came in via Cloud-attested flow), and `trusted` (bool — operator marked the device "my own"). Absent for the legacy single-shared-token path and Guest Pass auth. Also carries the shack's CURRENT alternate dials + trust info on every connect: `tsHost`, `cloudHost`, `tsCertPublic` (true = served cert is a Tailscale-issued LE cert, validate normally, no pin; absent/false = self-signed, pin `fingerprint`), `spki` (SHA-256 lower-hex of the cert's SubjectPublicKeyInfo DER — stable across cert reissues since the keypair persists, cert-pin Phase 2a; a client that stores it verifies future certs by SPKI and survives rotation), and `fingerprint` (SHA-256 colon-hex of the cert being presented NOW — also the no-re-pair recovery for a rotated cert). A client paired cloud-only should ADOPT `tsHost` from here rather than treating the pairing as frozen. |
 | `alt-hosts` | S→C | Mid-session update of the same alternate-dial fields `auth-ok` carries (`tsHost`, `cloudHost`, `tsCertPublic`, `fingerprint`, `spki`) — pushed when the values actually change (operator signs into Tailscale, Cloud Tunnel comes up/down). Sent since v1.8.5; registered 2026-08-03. |
-| `auth-fail` | S→C | Auth rejected with `reason`. New reason in v1.9: `"expired"` — paired device's sliding 180-day token elapsed without a reconnect; client should route to the re-pair UI. |
+| `auth-fail` | S→C | Auth rejected with `reason`. New reason in v1.9: `"expired"` — paired device's sliding 180-day token elapsed without a reconnect; client should route to the re-pair UI. In cookie mode the web client treats any `auth-fail` as a dead cookie (`POST /api/web-signout` then reload to the connect page). |
 | `kicked` | S→C | Server bumped this client because another connected. Carries `byPlatform`, `byVersion`, `byHost` so the displaced client can render a friendly "another device took over" banner instead of a mystery disconnect. |
 | `revoked` | S→C | The shack operator revoked this device's pairing **while it was connected** (Settings → paired devices → Revoke). Carries `reason` (display string). Sent immediately before the server closes the socket with code `4004`. Unlike `kicked`, the device token no longer exists — the client must drop to its unpaired state and must **not** auto-reconnect (a reconnect gets a terminal `auth-fail`; the server can't distinguish revoked from never-paired once the record is deleted). Only the matching per-device pairing is kicked; legacy shared-token and Guest Pass sessions are unaffected (pass revocation has its own `pass-ended` flow). New 2026-06-12. |
+| `pass-ended` | S→C | The Guest Pass this session was riding on ended (owner revoked it, it expired, or the owner's Cloud entitlement lapsed). Carries `reason` and `code`. The server also purges the pass's web-gate sessions, so a browser reload lands on the connect page (with `?notice=pass-ended`) rather than a dead SPA. Pre-existing message, registered 2026-09-11. |
 | `pong` | S→C | Reply to `ping` for connection health checks. |
 | `ping` | C→S | Latency / liveness probe. |
 
@@ -458,6 +459,35 @@ diagnostics.
 | Message | Dir | Purpose |
 |---|---|---|
 | *(none yet — pairing happens via HTTP `POST /api/pair`, not WebSocket)* | | |
+
+#### ECHOCAT Web over POTACAT Cloud (HTTP, 2026-09-11)
+
+A browser on the public tunnel (`https://<callsign>.potacat.com`) never
+sees a token box. Anonymous `GET /` is a **constant** static connect
+page (no version, callsign, or renderer source — the e696ad5 leak rule
+still holds; every other tunnel path stays the 503 stub). It links to
+`https://login.potacat.com/?station=<host>` (owner) or
+`?guest=1&station=<host>` (Guest Pass), and the sign-in page bounces the
+browser back with a URL **fragment** (never sent to Cloudflare or the
+desktop's log): `#pair=<pairToken>` or `#pass=<code>.<sessionId>`. The
+connect page strips the fragment (`history.replaceState`) and posts it:
+
+| Endpoint | Body | Result |
+|---|---|---|
+| `POST /api/pair-account` | `{pairToken, web:true}` | Same cloud attestation as the mobile app's pair (`verify-pair-token` in main.js, `account_mismatch` enforced by the cloud), but the paired device is `platform:'web'`, named from the User-Agent ("Browser on Chrome (Windows)"), never expires, and the device token goes into an HttpOnly cookie **`__Host-echocat_device`** (`Secure; SameSite=Strict; Path=/; Max-Age=1y`). The JSON reply carries `ok:true` and **omits `deviceToken`** — the page never holds it. Without `web:true` the reply is unchanged (mobile/desktop clients still get `deviceToken`). Requires `Origin` = our host. |
+| `POST /api/pass-gate` | `{passCode, sessionId}` | Runs the desktop's existing pass validator (cloud `validate-session`); on success sets **`__Host-echocat_pass`** = `<code>.<sessionId>` with `Max-Age = min(expires_at − now, 7 d)` and replies `{ok, ownerCallsign, expiresAt}`. 404 `pass_invalid`, 410 `pass_invalid` (already expired), 503 `owner_station_offline` / `pass_validate_failed`, 403 `origin`. Requires `Origin` = our host; JSON only (no form encoding, so no login-CSRF). |
+| `POST /api/web-signout` | *(none)* | Clears both cookies; for an owner session also **revokes the browser's paired-device row**. `{ok:true}`. Requires `Origin`. The web client calls this on any cookie/WS disagreement before reloading, so it can never reload-loop. |
+
+With a valid cookie, `GET /` serves the SPA with `window.__authMode="cookie"`
+and the WebSocket upgrade (cookie attached by the browser) is
+pre-authenticated exactly like the device-token branch — `auth-mode:
+cookie` then `auth-ok` (`accountLinked:true` for owners; `passSession`
+for guests). Revoking the browser in Settings › ECHOCAT › My devices
+closes its socket (`revoked`, 4004) and its next `GET /` is the connect
+page again with a clearing `Set-Cookie`. Tunnel-sourced POSTs to
+`/api/pair`, `/api/pair-account`, `/api/pass-gate` are rate-limited per
+`cf-connecting-ip` (`FailureRateLimiter`, same tiers as the cloud's
+`rateLimitPasses`).
 
 #### Pairing QR payload
 

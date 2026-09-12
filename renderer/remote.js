@@ -143,7 +143,12 @@
   let storedToken = '';
   let reconnectTimer = null;
   let wasKicked = false;
-  let authMode = window.__authMode || 'token'; // 'token' | 'club' | 'none' — injected by server
+  let authMode = window.__authMode || 'token'; // 'token' | 'club' | 'none' | 'cookie' — injected by server
+  // ECHOCAT Web over POTACAT Cloud: 'cookie' means the HTTP gate served
+  // this page on a __Host- cookie (owner device or Guest Pass) and the WS
+  // will pre-authenticate on the same cookie — no token box, like 'none'.
+  const servedAuthMode = authMode;
+  const webCookieMode = () => authMode === 'cookie';
   let clubMember = null;  // { callsign, firstname, role, licenseClass }
   let pingInterval = null;
   let lastPingSent = 0;
@@ -223,9 +228,15 @@
   const mainUI = document.getElementById('main-ui');
 
   // Pre-hide connect screen when no token required (server injects __authMode)
-  if (authMode === 'none') {
+  if (authMode === 'none' || authMode === 'cookie') {
     connectScreen.classList.add('hidden');
     mainUI.classList.remove('hidden');
+  }
+  // Served through the POTACAT Cloud tunnel: a real certificate, so the
+  // self-signed "Advanced > Proceed" help would only mislead.
+  if (/\.potacat\.com$/i.test(location.hostname)) {
+    var certHelpEl = document.getElementById('connect-help-cert');
+    if (certHelpEl) certHelpEl.classList.add('hidden');
   }
   const freqDisplay = document.getElementById('freq-display');
   const modeBadge = document.getElementById('mode-badge');
@@ -982,7 +993,9 @@
       connectClub(call, pass);
     } else {
       var token = tokenInput.value.trim().toUpperCase();
-      if (authMode !== 'none' && !token) return;
+      // 'cookie' re-dials with the browser's cookie (after a kick, "Tap
+      // Connect to take over") — there is no token to type.
+      if (authMode !== 'none' && authMode !== 'cookie' && !token) return;
       storedToken = token;
       connectError.classList.add('hidden');
       connectBtn.textContent = 'Connecting...';
@@ -1143,7 +1156,24 @@
       case 'auth-mode':
         // Server tells us which login form to show
         authMode = msg.mode || 'token';
-        if (authMode === 'club') {
+        if (servedAuthMode === 'cookie' && authMode !== 'cookie') {
+          // The page was served on a cookie the WebSocket just refused
+          // (revoked between page load and upgrade, pass expired, or the
+          // upgrade came without our Origin). Never leave the user on a
+          // token box they cannot fill: drop the cookie and land on the
+          // connect page with a notice.
+          webSignOutAndReload('link-expired');
+          break;
+        }
+        if (authMode === 'cookie') {
+          tokenLoginDiv.classList.add('hidden');
+          clubLoginDiv.classList.add('hidden');
+          // Same as 'none': the server authenticates on the cookie and
+          // auth-ok follows. Keep the connect screen hidden unless a kick
+          // put it up (then the Connect button re-dials on the cookie).
+          if (!wasKicked) connectScreen.classList.add('hidden');
+          connectBtn.textContent = 'Connect';
+        } else if (authMode === 'club') {
           // The injected __authMode may have pre-hidden the connect
           // screen (it pre-hides only for 'none', but be defensive) —
           // an auth-requiring mode must always re-show it, or the user
@@ -1183,6 +1213,10 @@
         // on reconnect / page reload.
         vfoLocked = !!msg.vfoLocked;
         updateVfoLockUi();
+        // ECHOCAT Web session (POTACAT Cloud): pass banner + Sign out row
+        renderPassBanner(msg.passSession);
+        renderWebSessionRow(msg.passSession);
+        try { sessionStorage.removeItem('echocat-web-reload'); } catch {}
         // Club member info
         if (msg.member) {
           clubMember = msg.member;
@@ -1318,10 +1352,39 @@
         break;
 
       case 'auth-fail':
+        if (webCookieMode()) {
+          // The cookie the server pre-authenticated on was refused after
+          // all (expired device row, Guest Pass no longer valid). Nothing
+          // the user can type here fixes that.
+          webSignOutAndReload('link-expired');
+          break;
+        }
         connectError.textContent = msg.reason || 'Authentication failed';
         connectError.classList.remove('hidden');
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
+        break;
+
+      case 'revoked':
+        // Settings > ECHOCAT > My devices > Revoke on the desktop. The
+        // server closes the socket right after this.
+        if (webCookieMode()) { webSignOutAndReload('revoked'); break; }
+        wasKicked = true;
+        releaseWakeLock();
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        mainUI.classList.add('hidden');
+        connectScreen.classList.remove('hidden');
+        connectError.textContent = msg.reason || 'Access revoked by the desktop operator';
+        connectError.classList.remove('hidden');
+        connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
+        connectBtn.disabled = false;
+        break;
+
+      case 'pass-ended':
+        // The owner ended or revoked the Guest Pass, or it expired.
+        if (webCookieMode()) { webSignOutAndReload('pass-ended'); break; }
+        renderPassBanner(null);
+        showToast('Guest Pass ended' + (msg.reason ? ': ' + msg.reason : ''), 6000, true);
         break;
 
       case 'audio-devices':
@@ -5039,6 +5102,93 @@
       }
     }, 3000);
   }
+
+  // --- ECHOCAT Web session (POTACAT Cloud) ---
+  // This page can be served because the browser carried a valid __Host-
+  // cookie (owner device minted by /api/pair-account {web:true}, or a Guest
+  // Pass from /api/pass-gate). When the server later refuses that
+  // credential — revoked in Settings > ECHOCAT > My devices, pass ended,
+  // or the cookie the WS saw disagrees with the one the page was served
+  // on — the only honest recovery is to drop the cookie SERVER-SIDE and
+  // land on the connect page with a notice. The sign-out POST is what
+  // breaks a reload loop (a page served on a cookie the WS keeps refusing
+  // would otherwise reload forever); sessionStorage is the backstop for
+  // the case where even that POST fails.
+  const WEB_RELOAD_KEY = 'echocat-web-reload';
+  function webSignOutAndReload(notice) {
+    var now = Date.now();
+    try {
+      var last = parseInt(sessionStorage.getItem(WEB_RELOAD_KEY) || '0', 10);
+      if (last && now - last < 10000) { showWebSessionEnded(notice); return; }
+      sessionStorage.setItem(WEB_RELOAD_KEY, String(now));
+    } catch {}
+    webSignOut(notice);
+  }
+  function webSignOut(notice) {
+    wasKicked = true; // stop the reconnect loop
+    releaseWakeLock();
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    try { if (ws) ws.close(); } catch {}
+    var go = function() { location.replace('/?notice=' + encodeURIComponent(notice || 'signed-out')); };
+    try {
+      // Same-origin POST: the browser attaches Origin, which the server
+      // requires on this endpoint. No body needed.
+      fetch('/api/web-signout', { method: 'POST', credentials: 'same-origin', cache: 'no-store' })
+        .catch(function() {})
+        .then(go, go);
+    } catch { go(); }
+  }
+  var WEB_SESSION_ENDED_COPY = {
+    'pass-ended': 'Your Guest Pass session has ended.',
+    'revoked': 'This browser\'s access was revoked by the station owner.',
+    'signed-out': 'You were signed out of this station.',
+    'link-expired': 'Your sign-in for this station ended.'
+  };
+  function showWebSessionEnded(notice) {
+    wasKicked = true;
+    releaseWakeLock();
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    mainUI.classList.add('hidden');
+    connectScreen.classList.remove('hidden');
+    tokenLoginDiv.classList.add('hidden');
+    clubLoginDiv.classList.add('hidden');
+    connectBtn.classList.add('hidden');
+    connectError.textContent = (WEB_SESSION_ENDED_COPY[notice] || WEB_SESSION_ENDED_COPY['link-expired']) + ' Reload this page to sign in again.';
+    connectError.classList.remove('hidden');
+  }
+  // Guest Pass banner under the status bar: who issued it and what it
+  // allows, so a guest is never surprised by a refused mode or power.
+  function renderPassBanner(ps) {
+    var el = document.getElementById('pass-banner');
+    if (!el) return;
+    if (!ps || !ps.code) { el.classList.add('hidden'); el.textContent = ''; return; }
+    var head = 'Guest Pass' + (ps.ownerCallsign ? ' from ' + ps.ownerCallsign : '');
+    var limits = [];
+    if (ps.privilegeClass) limits.push(String(ps.privilegeClass).toUpperCase() + ' privileges');
+    if (ps.maxPowerW) limits.push('max ' + ps.maxPowerW + ' W');
+    if (Array.isArray(ps.allowedModes) && ps.allowedModes.length) limits.push(ps.allowedModes.join('/'));
+    if (ps.expiresAt) {
+      var d = new Date(ps.expiresAt);
+      if (!isNaN(d.getTime())) limits.push('until ' + d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }));
+    }
+    el.textContent = head + (limits.length ? ' \u2014 ' + limits.join(', ') : '');
+    el.classList.remove('hidden');
+  }
+  // Settings > "This browser": what this browser is signed in as, and Sign out.
+  function renderWebSessionRow(ps) {
+    var row = document.getElementById('so-web-session');
+    var text = document.getElementById('so-web-session-text');
+    if (!row || !text) return;
+    if (!webCookieMode()) { row.classList.add('hidden'); return; }
+    text.textContent = ps && ps.code
+      ? 'Guest Pass' + (ps.ownerCallsign ? ' from ' + ps.ownerCallsign : '')
+      : 'Signed in with POTACAT Cloud';
+    row.classList.remove('hidden');
+  }
+  (function() {
+    var btn = document.getElementById('so-web-signout-btn');
+    if (btn) btn.addEventListener('click', function() { webSignOut('signed-out'); });
+  })();
 
   // --- Reconnect ---
   let noTokenMode = false;

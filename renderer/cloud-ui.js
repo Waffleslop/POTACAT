@@ -725,7 +725,22 @@
     }
     const hostText = state.enabled && state.cloudHost ? state.cloudHost : '';
     if (ctStatusPill) { ctStatusPill.textContent = label; ctStatusPill.className = pillClass; }
-    if (ctHost) ctHost.textContent = hostText;
+    if (ctHost) {
+      // A live tunnel host is an address a browser can open (ECHOCAT
+      // Web signs in at login.potacat.com). data-external routes it
+      // to the default browser via app.js's delegation.
+      ctHost.textContent = '';
+      if (hostText && state.status === 'live') {
+        const a = document.createElement('a');
+        a.href = 'https://' + hostText;
+        a.textContent = hostText;
+        a.setAttribute('data-external', '1');
+        a.title = 'Open in your browser';
+        ctHost.appendChild(a);
+      } else {
+        ctHost.textContent = hostText;
+      }
+    }
     if (ctBannerPill) { ctBannerPill.textContent = label; ctBannerPill.className = pillClass; }
     if (ctBannerHost) ctBannerHost.textContent = hostText ? 'https://' + hostText : '';
     if (ctEnableBtn) ctEnableBtn.classList.toggle('hidden', !!state.enabled);

@@ -36,7 +36,7 @@
       </div>
       <button id="connect-btn" type="button">Connect</button>
       <div id="connect-error" class="hidden"></div>
-      <p class="connect-help">
+      <p class="connect-help" id="connect-help-cert">
         Use <b>https://</b> to connect.<br>
         First visit: tap <b>Advanced</b> → <b>Proceed</b> to accept the certificate.
       </p>
@@ -72,6 +72,10 @@
         <button type="button" id="menu-btn" class="rig-ctrl-toggle hidden" title="Menu">&#9776;</button>
       </div>
     </div>
+
+    <!-- Guest Pass banner (ECHOCAT Web over POTACAT Cloud): filled from
+         auth-ok.passSession, hidden for owners. -->
+    <div id="pass-banner" class="hidden"></div>
 
     <!-- Hamburger nav menu — rows built by JS from the user's tab order
          (one order drives BOTH the bar and this menu). -->
@@ -773,6 +777,16 @@
             <button type="button" class="so-ssb-del-btn" title="Delete" disabled>Del</button>
           </div>
           <p class="so-ssb-hint">Record mic audio to play as voice macros during PTT. Max 30s each.</p>
+        </div>
+
+        <!-- This browser (ECHOCAT Web over POTACAT Cloud) — shown only when
+             the page was served on a __Host- cookie -->
+        <div id="so-web-session" class="hidden">
+          <div class="so-section-label">This Browser</div>
+          <div class="so-row">
+            <span class="so-label" id="so-web-session-text">Signed in with POTACAT Cloud</span>
+            <button type="button" id="so-web-signout-btn" class="so-step-btn" style="padding:6px 12px;">Sign out</button>
+          </div>
         </div>
 
         <!-- Cloud Sync -->

@@ -23985,9 +23985,15 @@ app.whenReady().then(() => {
       label = '🌐 Cloud · reconnecting…';
     }
     cloudTray.setToolTip(`POTACAT — ${label}`);
+    // ECHOCAT Web over the tunnel: a live cloudHost is a URL any browser
+    // can open (sign-in at login.potacat.com).
+    const openInBrowser = (state && state.enabled && state.status === 'live' && state.cloudHost)
+      ? [{ label: 'Open in browser', click: () => { try { require('electron').shell.openExternal('https://' + state.cloudHost); } catch {} } }]
+      : [];
     try {
       cloudTray.setContextMenu(Menu.buildFromTemplate([
         { label, click: () => focusMainWindowAndOpenCloudPanel() },
+        ...openInBrowser,
         { type: 'separator' },
         { label: 'Open POTACAT', click: () => focusMainWindowAndOpenCloudPanel(false) },
         { label: 'Quit', click: () => app.quit() },
@@ -24176,7 +24182,7 @@ app.whenReady().then(() => {
       sendCatLog(`[pass] session ended: ${info.reason}`);
       // #46a: also broadcast to pass-authed WS clients so mobile gets
       // real-time end (its client-side timer is UX-only).
-      try { if (remoteServer) remoteServer.broadcastPassEnded(info.reason); } catch {}
+      try { if (remoteServer) remoteServer.broadcastPassEnded(info.reason, info.code); } catch {}
     });
 
     // #46a: wire remoteServer's pass auth-mode handlers.

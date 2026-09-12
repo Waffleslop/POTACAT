@@ -3662,6 +3662,22 @@ dialog {
   border-color: var(--source-pota, #4ecca3);
   font-weight: 600;
 }
+.echo-web-open {
+  text-decoration: none;
+  line-height: normal;
+}
+.summary-device-kind {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 999px;
+  padding: 0 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 .echo-web-token {
   display: flex;
   align-items: center;

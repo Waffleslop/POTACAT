@@ -739,6 +739,21 @@ html, body {
   50% { opacity: 0.6; }
 }
 
+/* Guest Pass banner (ECHOCAT Web over POTACAT Cloud) */
+#pass-banner {
+  background: var(--bg-header);
+  color: var(--pota);
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
 /* --- Filter Toolbar --- */
 #filter-toolbar {
   flex-shrink: 0;
