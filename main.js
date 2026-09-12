@@ -21845,6 +21845,13 @@ function setEventWatchlist(eventId, on) {
 // VERBATIM — the phone replicates the desktop match rule (a `/*`-suffixed pattern
 // is a prefix match, everything else exact) and the per-window schedule, so a spot
 // lights up identically on both. Keep this the single source of truth. (2026-06-29)
+//
+// Route 66 (2026-09-12, additive): `badgeColor` and `links` on both lists,
+// and `badge`/`url` on subscriptions too, so a board the mobile device
+// renders from eventSubscriptions alone can colour its pins and offer the
+// rules / certificate-application / stations / frequencies links without a
+// second lookup. `tracking` already passes through verbatim, which is how the
+// checklist items' lat/lon/route/offRoute/group reach it.
 function buildEventCatalogPayload() {
   const states = settings.events || {};
   const evs = activeEvents || [];
@@ -21855,6 +21862,8 @@ function buildEventCatalogPayload() {
     schedule: ev.schedule || null,   // array of { region, regionName, start, end }
     url: ev.url || '',
     badge: ev.badge || '',
+    badgeColor: ev.badgeColor || '',
+    links: eventLinksForClients(ev),
     // Unified-registry Phase B (additive): the event's unified kind and its
     // contests-catalog alias — lets the phone link an event board to its
     // contestHistory tally (both keyed by contestId once stamped QSOs flow).
@@ -21870,6 +21879,10 @@ function buildEventCatalogPayload() {
         name: ev.name,
         callsignPatterns: ev.callsignPatterns || [],
         schedule: ev.schedule || null,
+        url: ev.url || '',
+        badge: ev.badge || '',
+        badgeColor: ev.badgeColor || '',
+        links: eventLinksForClients(ev),
         trackedAt: st.trackedAt || null,
         mutedDesktop: !!st.mutedDesktop,
         mutedPhone: !!st.mutedPhone,
@@ -21883,6 +21896,21 @@ function buildEventCatalogPayload() {
       };
     });
   return { available, subscriptions };
+}
+
+// The event's link-outs as sent to ECHOCAT clients: the same http(s)-only
+// rule the desktop's open-external gate applies (eventUrlAllowed), so a feed
+// entry can never hand a mobile device a javascript:/file: URL to open. Keys
+// are the definition's own (rules / results / stations / frequencies);
+// `results` is the certificate application for a special event.
+function eventLinksForClients(ev) {
+  const links = ev && ev.links && typeof ev.links === 'object' ? ev.links : null;
+  if (!links) return undefined;
+  const out = {};
+  for (const [k, v] of Object.entries(links)) {
+    if (typeof v === 'string' && /^https?:\/\//i.test(v)) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 // Apply a subscribe/unsubscribe/mute from either device. `tracking` maps to the
