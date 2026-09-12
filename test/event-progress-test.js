@@ -234,5 +234,55 @@ console.log('\nretroCorrectStamps:');
 }
 
 
+// ---------------------------------------------------------------------------
+// Route 66 On The Air 2026 (route66-2026) against the REAL fallback
+// definition in main.js, so a station-list edit that breaks matching fails
+// here rather than on the air. 22 stations, all exact patterns; mobiles
+// sign /m66 (the CALL/suffix rule that already carries K2A/4).
+// ---------------------------------------------------------------------------
+console.log('\nRoute 66 On The Air (BUILTIN route66-2026):');
+{
+  const { loadBuiltinEvents } = require('../scripts/validate-events');
+  const r66 = loadBuiltinEvents().events.find((e) => e.id === 'route66-2026');
+  check(!!r66, 'route66-2026 is in BUILTIN_EVENTS');
+  const items = r66.tracking.items;
+  check(items.length === 22 && r66.tracking.total === 22 && r66.callsignPatterns.length === 22,
+    '22 stations: items, total and patterns agree');
+  check(matchChecklistItem(items, 'W6K').name === 'Oklahoma City, OK', 'W6K = Oklahoma City');
+  check(matchChecklistItem(items, 'W6K/M66').name === 'Oklahoma City, OK', 'a mobile signing W6K/M66 still ticks W6K');
+  check(matchChecklistItem(items, 'W6KA') === null, 'W6KA (a real California call) is not W6K');
+  check(matchChecklistItem(items, 'W6U') === null, 'W6U is unused this year — no item, no tick');
+  check(matchChecklistItem(items, 'W6Z').group === 'Rovers', 'rover stations carry group: Rovers');
+  check(!('lat' in matchChecklistItem(items, 'W6Z')), 'rovers have NO coordinates (never invented)');
+  check(r66.callsignPatterns.every((p) => !p.includes('*')), 'every pattern is exact — a W6* wildcard would badge every California call');
+  const onRoute = items.filter((it) => it.route).sort((a, b) => a.route - b.route);
+  check(onRoute.length === 17 && onRoute[0].id === 'W6Q' && onRoute[16].id === 'W6A',
+    'route order runs Chicago (W6Q) -> Santa Monica (W6A), 17 stops');
+  check(matchChecklistItem(items, 'W6M').offRoute === true && !matchChecklistItem(items, 'W6M').route,
+    'Tribune KS (W6M) is off-route: pin only, not on the polyline');
+
+  const state = { 'route66-2026': { optedIn: true, progress: {} } };
+  const stamp = (call, iso) => matchEventQsoForStamp([r66], state, call, new Date(iso));
+  const opening = stamp('W6K', '2026-09-12T00:01:00Z');
+  check(opening && opening.item === 'W6K' && opening.itemName === 'Oklahoma City, OK' && opening.eventName === 'Route 66 On The Air',
+    'live path stamps W6K at the 0001z opening');
+  check(stamp('W6K', '2026-09-12T00:00:30Z') === null, 'live path: 30 s before 0001z is before the event');
+  check(stamp('W6A', '2026-09-20T23:59:00Z') !== null, 'live path stamps through the closing minute on the 20th');
+  check(stamp('W6A', '2026-09-21T00:00:00Z') === null, 'live path: the 21st is after the event');
+  // The log rebuild / retro-stamp is day-granular and must stay at least as
+  // lenient as live: the 30-s-early QSO IS a Route 66 contact on rebuild.
+  const entry = r66.schedule[0];
+  check(qsoDayInScheduleEntry('20260912', entry) && qsoDayInScheduleEntry('20260920', entry),
+    'rebuild covers the 12th and the 20th');
+  check(!qsoDayInScheduleEntry('20260911', entry) && !qsoDayInScheduleEntry('20260921', entry),
+    'rebuild excludes the 11th and the 21st');
+  const m = retroStampMatches(r66, [
+    { CALL: 'W6K', QSO_DATE: '20260912', TIME_ON: '000030' },
+    { CALL: 'W6KA', QSO_DATE: '20260913' },
+    { CALL: 'W6A', QSO_DATE: '20260921' },
+  ]);
+  check(m.length === 1 && m[0].index === 0 && m[0].item === 'W6K', 'retro-stamp finds only the W6K contact');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'event-progress matcher tests failed');

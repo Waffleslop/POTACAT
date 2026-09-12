@@ -60,5 +60,29 @@ console.log('resolveOccurrence from the report date (now = 2026-07-14):');
   check(iso(during.start) === '2026-07-18', 'mid-weekend query still resolves the LIVE occurrence');
 }
 
+console.log('nth-weekday-of with a day offset (Route 66 On The Air = Saturday after Labor Day):');
+{
+  // Labor Day is the 1st Monday of September; the event opens the Saturday
+  // AFTER it. `nth-weekend-of:9:2` reads a week LATE whenever September
+  // opens on a Sunday or Monday (2024: Sep 14 vs the real Sep 7; 2025:
+  // Sep 13 vs Sep 6) — the anchor has to be the holiday.
+  check(iso(resolveStartForYear('nth-weekday-of:9:1:Mon+5', 2024)) === '2024-09-07', '2024 = Sep 7 (2nd weekend rule says Sep 14)');
+  check(iso(resolveStartForYear('nth-weekday-of:9:1:Mon+5', 2025)) === '2025-09-06', '2025 = Sep 6 (2nd weekend rule says Sep 13)');
+  check(iso(resolveStartForYear('nth-weekday-of:9:1:Mon+5', 2026)) === '2026-09-12', '2026 = Sep 12');
+  check(iso(resolveStartForYear('nth-weekday-of:9:1:Mon+5', 2027)) === '2027-09-11', '2027 = Sep 11');
+  check(iso(resolveStartForYear('nth-weekday-of:9:1:Mon', 2026)) === '2026-09-07', 'no offset still = Labor Day itself');
+  check(iso(resolveStartForYear('nth-weekday-of:9:1:Mon-2', 2026)) === '2026-09-05', 'negative offset walks backwards');
+  check(iso(resolveStartForYear('nth-weekday-of:11:4:Thu+1', 2026)) === '2026-11-27', 'Black Friday 2026 = Nov 27');
+  check(resolveStartForYear('nth-weekday-of:9:1:Mon+', 2026) === null, 'a dangling sign is not a rule');
+
+  const card = catalog.find(c => c.id === 'route-66-ota');
+  check(card && card.whenComputed === 'nth-weekday-of:9:1:Mon+5', 'catalog card uses the offset verb (was custom:, which resolves to nothing)');
+  const live = resolveOccurrence(card, new Date('2026-09-12T15:00:00Z'));
+  check(live && iso(live.start) === '2026-09-12' && live.end.toISOString() === '2026-09-21T00:00:00.000Z',
+    `opening day resolves the LIVE 9-day occurrence (got ${live && iso(live.start)})`);
+  check(iso(resolveOccurrence(card, new Date('2026-09-25T00:00:00Z')).start) === '2027-09-11',
+    'after the event it rolls to 2027 = Sep 11');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

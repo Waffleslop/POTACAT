@@ -21452,6 +21452,11 @@ const BUILTIN_EVENTS = {
       url: 'https://www.13colonies.us',
       badge: '13C',
       badgeColor: '#1776cf',
+      contestId: '13-colonies',
+      links: {
+        results: 'https://www.13colonies.us/certificates',
+        rules: 'https://www.13colonies.us/faq',
+      },
       callsignPatterns: ['K2A', 'K2B', 'K2C', 'K2D', 'K2E', 'K2F', 'K2G', 'K2H', 'K2I', 'K2J', 'K2K', 'K2L', 'K2M', 'WM3PEN', 'GB13COL', 'TM13COL'],
       schedule: [
         { region: 'ALL', regionName: '13 Colonies', start: '2026-07-01T13:00:00Z', end: '2026-07-08T04:00:00Z' },
@@ -21475,6 +21480,61 @@ const BUILTIN_EVENTS = {
           { id: 'WM3PEN', name: 'Bonus: Philadelphia' },
           { id: 'GB13COL', name: 'Bonus: England' },
           { id: 'TM13COL', name: 'Bonus: France' },
+        ],
+      },
+    },
+    // --- Route 66 On The Air (Citrus Belt ARC, September) ---
+    // 22 stations this year (U/V/X/Y unused) — the list churns yearly, so a
+    // new year is a new id. Checklist items may carry generic metadata:
+    // lat/lon (map pin + cluster-spot placement, see eventStationGeo),
+    // route (polyline order along the highway), offRoute (pin only —
+    // Tribune KS is a spur), group (board sub-heading; rovers have no
+    // fixed place and no published coordinates). Must stay identical to
+    // events/active.json on the website: scripts/validate-events.js --compare.
+    {
+      id: 'route66-2026',
+      name: 'Route 66 On The Air',
+      type: 'special-event',
+      board: 'checklist',
+      url: 'https://w6jbt.org/',
+      badge: 'R66',
+      badgeColor: '#c0392b',
+      contestId: 'route-66-ota',
+      links: {
+        rules: 'https://w6jbt.org/?page_id=23',
+        results: 'https://w6jbt.org/wp-content/uploads/2026/09/FINAL-CERTIFICATE-APPLICATION-2026-rev.pdf',
+        stations: 'https://w6jbt.org/2013-route-66-on-the-air-participating-clubs/',
+        frequencies: 'https://w6jbt.org/operating-frequency-guidelines/',
+      },
+      callsignPatterns: ['W6A', 'W6B', 'W6C', 'W6D', 'W6E', 'W6F', 'W6G', 'W6H', 'W6I', 'W6J', 'W6K', 'W6L', 'W6M', 'W6N', 'W6O', 'W6P', 'W6Q', 'W6R', 'W6S', 'W6T', 'W6W', 'W6Z'],
+      schedule: [
+        { region: 'ALL', regionName: 'Route 66 On The Air', start: '2026-09-12T00:01:00Z', end: '2026-09-20T23:59:59Z' },
+      ],
+      tracking: {
+        type: 'checklist', total: 22, label: 'Stations',
+        items: [
+          { id: 'W6Q', name: 'Chicago, IL', lat: 41.88, lon: -87.63, route: 1 },
+          { id: 'W6P', name: 'St. Louis, MO', lat: 38.63, lon: -90.20, route: 2 },
+          { id: 'W6O', name: 'Lebanon, MO', lat: 37.68, lon: -92.66, route: 3 },
+          { id: 'W6R', name: 'Springfield, MO', lat: 37.21, lon: -93.29, route: 4 },
+          { id: 'W6N', name: 'Joplin, MO', lat: 37.08, lon: -94.51, route: 5 },
+          { id: 'W6M', name: 'Tribune, KS', lat: 38.47, lon: -101.75, offRoute: true },
+          { id: 'W6L', name: 'Tulsa, OK', lat: 36.15, lon: -95.99, route: 6 },
+          { id: 'W6K', name: 'Oklahoma City, OK', lat: 35.47, lon: -97.52, route: 7 },
+          { id: 'W6J', name: 'Elk City, OK', lat: 35.41, lon: -99.40, route: 8 },
+          { id: 'W6I', name: 'Amarillo, TX', lat: 35.22, lon: -101.83, route: 9 },
+          { id: 'W6H', name: 'Albuquerque, NM', lat: 35.08, lon: -106.65, route: 10 },
+          { id: 'W6G', name: 'Flagstaff, AZ', lat: 35.20, lon: -111.65, route: 11 },
+          { id: 'W6F', name: 'Kingman, AZ', lat: 35.19, lon: -114.05, route: 12 },
+          { id: 'W6E', name: 'Barstow, CA', lat: 34.90, lon: -117.02, route: 13 },
+          { id: 'W6D', name: 'Oak Hills, CA', lat: 34.38, lon: -117.43, route: 14 },
+          { id: 'W6C', name: 'San Bernardino, CA', lat: 34.11, lon: -117.29, route: 15 },
+          { id: 'W6B', name: 'Los Angeles, CA', lat: 34.05, lon: -118.24, route: 16 },
+          { id: 'W6A', name: 'Santa Monica, CA', lat: 34.02, lon: -118.49, route: 17 },
+          { id: 'W6S', name: 'Arizona Rover 1', group: 'Rovers' },
+          { id: 'W6T', name: 'Arizona Rover 2', group: 'Rovers' },
+          { id: 'W6W', name: 'Kingman Rover 1', group: 'Rovers' },
+          { id: 'W6Z', name: 'California Rover', group: 'Rovers' },
         ],
       },
     },

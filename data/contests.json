@@ -1090,15 +1090,15 @@
       "id": "route-66-ota",
       "name": "Route 66 On The Air",
       "sponsor": "Citrus Belt ARC (W6JBT)",
-      "website": "https://www.w6jbt.org/route-66/",
-      "rulesUrl": "https://www.w6jbt.org/route-66/",
-      "whenRule": "9 days starting the Saturday after Labor Day weekend (US), through the following Sunday",
-      "whenComputed": "custom:Saturday after Labor Day for 9 days",
+      "website": "https://w6jbt.org/",
+      "rulesUrl": "https://w6jbt.org/?page_id=23",
+      "whenRule": "9 days starting 0001z the Saturday after Labor Day (US), through 2359z the second Sunday",
+      "whenComputed": "nth-weekday-of:9:1:Mon+5",
       "durationHours": 216,
-      "bands": ["all HF", "VHF", "UHF"],
-      "modes": ["any"],
+      "bands": ["160m", "80m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"],
+      "modes": ["CW", "SSB", "DIGITAL"],
       "category": "special-event",
-      "notes": "21 special-event stations W6A through W6U activate along historic Route 66 (Chicago to LA). Each station has a city stop. Work all 21 for the Clean Sweep certificate."
+      "notes": "Special-event stations W6A through W6T plus W6W and W6Z (22 in 2026; letters U/V/X/Y unused) operate from cities along historic Route 66, Chicago to Santa Monica, plus four rovers; mobiles sign /m66. Any ONE station on any band or mode earns the certificate (mail-in application, no clean sweep, no log submission); QSL each station direct with an SASE. Frequency guideline: CW 3.533/7.033/10.110/14.033/18.080/21.033/24.900/28.033/50.033, SSB 3.866/7.266/14.266/18.164/21.366/24.966/28.466/50.166, FT8 on the standard dials. Stations self-spot on the DX cluster. POTACAT tracks the stations as an opt-in event (Settings > Events)."
     },
     {
       "id": "skywarn-recognition",

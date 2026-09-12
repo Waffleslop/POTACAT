@@ -154,5 +154,18 @@ console.log('explicitWindows -> contest-history (Phase B end-to-end):');
     'stamp outside the explicit window does not attribute');
 }
 
+console.log('Route 66 On The Air (feed contestId, no alias):');
+{
+  const { loadBuiltinEvents } = require('../scripts/validate-events');
+  const r66 = loadBuiltinEvents().events.find((e) => e.id === 'route66-2026');
+  check(r66 && r66.contestId === 'route-66-ota', 'route66-2026 carries contestId route-66-ota on the definition');
+  check(R.contestIdForEvent(r66) === 'route-66-ota', 'resolves through the definition, not BUILTIN_ALIASES');
+  check(!Object.keys(R.BUILTIN_ALIASES || {}).some((k) => k.startsWith('route66')),
+    'no route66 alias was added (feed contestId is the mechanism going forward)');
+  check(catalog.some((c) => c.id === 'route-66-ota'), 'the catalog card route-66-ota exists');
+  check(R.adifContestIdForEvent(r66, catalog) === null,
+    'Route 66 yields NO CONTEST_ID (special event, not in the ADIF vocabulary)');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'event-registry tests failed');
