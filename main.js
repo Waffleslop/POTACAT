@@ -3564,7 +3564,12 @@ async function ensureCloudDeviceRegistered(reason) {
         ensureCloudDeviceRegistered('drift').catch(() => {});
         return;
       }
-      await sync.heartbeatDevice(settings.cloudDeviceId);
+      // The live client, not the one captured at registration: a session
+      // change rebuilds it, and a heartbeat on the old one would carry
+      // the previous account's tokens.
+      const live = cloudIpc && cloudIpc.getCloudSync();
+      if (!live) return;
+      await live.heartbeatDevice(settings.cloudDeviceId);
     } catch (err) {
       // Network blip or rotated token — quiet, the next heartbeat
       // retries. Audible log only when it persists.
@@ -15178,7 +15183,10 @@ function connectRemote() {
     settings.cloudRefreshToken = result.refreshToken;
     settings.cloudUser = result.user;
     saveSettings(settings);
-    setImmediate(() => ensureCloudDeviceRegistered().catch(() => {}));
+    // Same funnel as the Settings-tab login: fresh client for the NEW
+    // tokens (the old one kept the previous session's until restart) and
+    // a device re-registration so the heartbeat isn't on the old client.
+    cloudIpc.cloudSessionChanged('signin');
     return { success: true, user: result.user };
   });
 
@@ -15191,10 +15199,9 @@ function connectRemote() {
     settings.cloudRefreshToken = result.refreshToken;
     settings.cloudUser = result.user;
     saveSettings(settings);
-    // Auto-register this desktop in the cloud_devices directory on
-    // successful registration so the welcome screen's "find your
-    // shacks" flow has this device available immediately.
-    setImmediate(() => ensureCloudDeviceRegistered().catch(() => {}));
+    // Fresh client + device registration (see cloud-login above) so the
+    // welcome screen's "find your shacks" flow has this desktop at once.
+    cloudIpc.cloudSessionChanged('register');
     return { success: true, user: result.user };
   });
 
@@ -15212,6 +15219,9 @@ function connectRemote() {
     settings.cloudLastSyncTimestamp = null;
     settings.cloudLastSyncAt = null;
     saveSettings(settings);
+    // Drop the cached client (and its sync timer) and the device heartbeat
+    // so nothing keeps talking to the cloud with the signed-out tokens.
+    if (cloudIpc) cloudIpc.cloudSessionChanged('signout');
     return { success: true };
   });
 
@@ -23946,6 +23956,13 @@ app.whenReady().then(() => {
           sendCatLog(`[pass] revoked by the owner: live session for code=${code} ended`);
         }
       },
+      // The signed-in account changed (any sign-in / sign-out path): the
+      // device heartbeat captured the previous client and its early
+      // return would keep the new account unregistered — start over.
+      onCloudSessionChanged: (reason) => {
+        teardownCloudDeviceHeartbeat();
+        setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
+      },
     });
     cloudIpc.startBackgroundSync();
 
@@ -24125,7 +24142,9 @@ app.whenReady().then(() => {
       if (msg === 'cloudflared-missing') return { error: 'cloudflared-missing' };
       if (msg === 'auth-required') return { error: 'auth-required' };
       sendCatLog('[cloud-tunnel] enable failed: ' + msg);
-      return { error: msg };
+      // code = the cloud's machine code (e.g. 'no_callsign') so the
+      // renderer can route to the fix instead of only printing msg.
+      return { error: msg, code: err.code || null };
     }
   });
 

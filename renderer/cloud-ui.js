@@ -44,12 +44,21 @@
   const lastSyncSpan = document.getElementById('cloud-last-sync');
   const downloadAdifBtn = document.getElementById('cloud-download-adif');
   const connCloudPill = document.getElementById('conn-cloud');
+  const callsignEditLink = document.getElementById('cloud-callsign-edit-link');
+  const callsignEditor = document.getElementById('cloud-callsign-editor');
+  const callsignEditorText = document.getElementById('cloud-callsign-editor-text');
+  const callsignEditInput = document.getElementById('cloud-callsign-input');
+  const callsignSaveBtn = document.getElementById('cloud-callsign-save');
+  const callsignCancelBtn = document.getElementById('cloud-callsign-cancel');
+  const callsignStatus = document.getElementById('cloud-callsign-status');
 
   // ── State ─────────────────────────────────────────────────────────
 
   let isLoggedIn = false;
   let currentSyncStatus = 'idle';
   let _refreshingStatus = false;
+  let accountCallsign = '';        // callsign on the Cloud account ('' = none set)
+  let callsignEditorMode = null;   // 'missing' | 'change' | null (closed)
 
   // ── UI Helpers ────────────────────────────────────────────────────
 
@@ -64,6 +73,8 @@
     accountSection.classList.add('hidden');
     if (signOutFieldset) signOutFieldset.classList.add('hidden');
     isLoggedIn = false;
+    accountCallsign = '';
+    closeCallsignEditor();
     updateCloudPill('disconnected');
     if (loginSignout) loginSignout.classList.toggle('hidden', !hasStaleTokens);
   }
@@ -74,8 +85,14 @@
     if (signOutFieldset) signOutFieldset.classList.remove('hidden');
     isLoggedIn = true;
 
-    userCallsignSpan.textContent = subscription?.callsign || user?.callsign || '';
+    accountCallsign = subscription?.callsign || user?.callsign || '';
+    userCallsignSpan.textContent = accountCallsign;
     userEmailSpan.textContent = user?.email || 'unknown';
+    if (callsignEditLink) callsignEditLink.classList.toggle('hidden', !accountCallsign);
+    // No callsign on the account → open the editor unprompted; it's the
+    // one fix for the tunnel's no_callsign refusal and the free trial.
+    if (!accountCallsign) openCallsignEditor('missing');
+    else if (callsignEditorMode === 'missing') closeCallsignEditor();
 
     if (subscription && subscription.status === 'active') {
       subStatusSpan.textContent = 'active';
@@ -262,6 +279,106 @@
   if (showRegisterLink) showRegisterLink.addEventListener('click', (e) => { e.preventDefault(); setCloudAuthMode('register'); });
   if (showSigninLink) showSigninLink.addEventListener('click', (e) => { e.preventDefault(); setCloudAuthMode('signin'); });
 
+  // ── Account callsign (add when missing, or change) ────────────────
+  // PUT /v1/auth/callsign via cloud-set-callsign. 'missing' opens by itself
+  // from showAccount(); 'change' comes from the "Change callsign" link.
+
+  function setCallsignStatus(msg, color) {
+    if (!callsignStatus) return;
+    callsignStatus.textContent = msg || '';
+    callsignStatus.style.color = color || 'var(--text-secondary)';
+    callsignStatus.classList.toggle('hidden', !msg);
+  }
+
+  async function openCallsignEditor(mode) {
+    if (!callsignEditor || !callsignEditInput) return;
+    // Already open in this mode — don't clobber what the user is typing
+    // when refreshStatus() re-renders the account.
+    if (callsignEditorMode === mode) return;
+    callsignEditorMode = mode;
+    if (callsignEditorText) {
+      callsignEditorText.textContent = mode === 'missing'
+        ? 'Your POTACAT Cloud account has no callsign. Add it to use the Cloud Tunnel, embeds, and your free trial.'
+        : `Change the callsign on this account (currently ${accountCallsign}). Your Cloud Tunnel address moves with it, and you can change it once every 30 days.`;
+    }
+    if (callsignCancelBtn) callsignCancelBtn.classList.toggle('hidden', mode === 'missing');
+    setCallsignStatus('');
+    callsignEditInput.value = mode === 'change' ? accountCallsign : '';
+    callsignEditor.classList.remove('hidden');
+    if (mode === 'missing') {
+      // Suggest the Station callsign — only a suggestion; saving is the
+      // user's click (a club station's call may not be the account's).
+      try {
+        const settings = await window.api.getSettings();
+        if (callsignEditorMode === 'missing' && !callsignEditInput.value && settings.myCallsign) {
+          callsignEditInput.value = String(settings.myCallsign).toUpperCase();
+        }
+      } catch {}
+    }
+  }
+
+  function closeCallsignEditor() {
+    callsignEditorMode = null;
+    if (callsignEditor) callsignEditor.classList.add('hidden');
+    setCallsignStatus('');
+  }
+
+  if (callsignEditLink) {
+    callsignEditLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (callsignEditorMode === 'change') closeCallsignEditor();
+      else openCallsignEditor('change');
+    });
+  }
+  if (callsignCancelBtn) callsignCancelBtn.addEventListener('click', closeCallsignEditor);
+  if (callsignEditInput) {
+    callsignEditInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && callsignSaveBtn) { e.preventDefault(); callsignSaveBtn.click(); }
+    });
+  }
+
+  if (callsignSaveBtn) {
+    callsignSaveBtn.addEventListener('click', async () => {
+      const cs = (callsignEditInput.value || '').trim().toUpperCase();
+      if (!cs) return setCallsignStatus('Enter your callsign.', 'var(--accent-red)');
+      const previous = accountCallsign;
+      if (previous && cs === previous) return closeCallsignEditor();
+      if (previous && !confirm(`Change your POTACAT Cloud callsign from ${previous} to ${cs}?\n\nYour Cloud Tunnel address moves to ${cs.toLowerCase()}.potacat.com, so paired phones reconnect through the new address. You can change it again after 30 days.`)) return;
+
+      callsignSaveBtn.disabled = true;
+      setCallsignStatus('Saving…');
+      try {
+        const res = await window.api.cloudSetCallsign(cs);
+        if (!res || res.error) {
+          let msg = (res && res.error) || 'Could not save the callsign.';
+          if (res && res.code === 'callsign_change_limited' && res.nextAllowedAt && !/\d{4}/.test(msg)) {
+            msg += ` You can change it again on ${new Date(res.nextAllowedAt).toLocaleDateString()}.`;
+          }
+          setCallsignStatus(msg, 'var(--accent-red)');
+          return;
+        }
+        closeCallsignEditor();
+        await refreshStatus();
+        if (res.trialGranted) alert(`Callsign ${cs} saved — your 30-day POTACAT Cloud free trial has started.`);
+        // A rename revokes the old tunnel server-side. If this shack had it
+        // on, re-provision now so it comes back under the new hostname
+        // instead of cloudflared sitting on a dead token.
+        if (previous && window.api.cloudTunnelGetState && window.api.cloudTunnelEnable) {
+          const st = await window.api.cloudTunnelGetState().catch(() => null);
+          if (st && st.enabled) {
+            const r = await window.api.cloudTunnelEnable().catch(() => null);
+            if (r && r.ok) renderTunnelState(r.state);
+            else refreshTunnelState();
+          }
+        }
+      } catch (err) {
+        setCallsignStatus('Failed: ' + (err.message || err), 'var(--accent-red)');
+      } finally {
+        callsignSaveBtn.disabled = false;
+      }
+    });
+  }
+
   if (signOutBtn) {
     signOutBtn.addEventListener('click', async () => {
       await window.api.cloudLogout();
@@ -423,16 +540,16 @@
       try {
         const res = await window.api.cloudForgotPassword(email);
         if (res && res.error) {
-          // Status-coded errors get tailored copy. Cloud added 404/409
-          // 2026-06-01 so older builds silently returned 200 — the
-          // sub-300 LOC reformat below means a typo no longer looks
-          // like a working flow that just doesn't send mail.
+          // Status-coded errors get tailored copy. Cloud added the 404
+          // 2026-06-01 so older builds silently returned 200 — a typo no
+          // longer looks like a working flow that just doesn't send mail.
+          // The old 409 ("sign in with Apple directly") is gone from the
+          // server since 2026-08-14: an Apple/Google-only account gets the
+          // link too, and completing it SETS a first password — the only
+          // way such an account can ever sign in on the desktop (KC3SRV).
           let msg;
           if (res.status === 404) {
             msg = "No POTACAT Cloud account uses that email. Double-check the spelling, or sign up.";
-          } else if (res.status === 409) {
-            const provider = res.provider === 'apple' ? 'Apple' : (res.provider === 'google' ? 'Google' : 'a sign-in provider');
-            msg = res.message || `That account uses Sign in with ${provider} — there's no password to reset. Sign in with ${provider} directly.`;
           } else if (res.error === 'network') {
             msg = 'No connection. Check your network and try again.';
           } else {
@@ -446,7 +563,9 @@
           return;
         }
         if (forgotStatus) {
-          forgotStatus.textContent = 'Check your inbox — link valid for 24h.';
+          // The server's text says whether the link RESETS a password or
+          // SETS a first one for an Apple/Google account; keep it.
+          forgotStatus.textContent = (res && res.message) || 'Check your inbox — link valid for 24h.';
           forgotStatus.style.color = 'var(--accent-green)';
         }
         // Re-enable after a beat so re-tries are possible if the email never arrives.
@@ -799,6 +918,17 @@
             ctError.textContent = 'POTACAT Cloud subscription required. Subscribe in the Sync section above.';
             ctError.classList.remove('hidden');
           }
+        } else if (res && res.code === 'no_callsign') {
+          // The tunnel hostname is <callsign>.potacat.com — no callsign on
+          // the account, no tunnel. Open the callsign editor (above) rather
+          // than leaving the user at a dead end.
+          if (ctError) {
+            ctError.textContent = res.error;
+            ctError.classList.remove('hidden');
+          }
+          await openCallsignEditor('missing');
+          if (callsignEditor) callsignEditor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (callsignEditInput) { try { callsignEditInput.focus(); } catch {} }
         } else if (res && res.error) {
           if (ctError) {
             ctError.textContent = res.error === 'cloudflared-missing'

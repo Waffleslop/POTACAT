@@ -565,6 +565,7 @@ contextBridge.exposeInMainWorld('api', {
   cloudGoogleSignIn: () => ipcRenderer.invoke('cloud-google-signin'),
   cloudLogin: (email, password) => ipcRenderer.invoke('cloud-login', email, password),
   cloudRegister: (email, password, callsign) => ipcRenderer.invoke('cloud-register', email, password, callsign),
+  cloudSetCallsign: (callsign) => ipcRenderer.invoke('cloud-set-callsign', callsign),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
   cloudGetStatus: () => ipcRenderer.invoke('cloud-get-status'),
   cloudSyncNow: () => ipcRenderer.invoke('cloud-sync-now'),

@@ -3160,6 +3160,22 @@
       <div id="cloud-account-section" class="hidden">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <span><strong id="cloud-user-callsign"></strong> &mdash; <span id="cloud-user-email" style="color:var(--text-secondary);"></span></span>
+          <a href="#" id="cloud-callsign-edit-link" class="hidden" style="font-size:11px;color:var(--accent-blue);">Change callsign</a>
+        </div>
+        <!-- Account callsign editor. Opens by itself when the Cloud account
+             has no callsign (created in ECHOCAT or via Google without one) —
+             the Cloud Tunnel hostname, embeds and the free trial all key off
+             it, and there was no way to add one short of a support ticket.
+             Pre-filled from the Station callsign but only saved on click: a
+             club station's callsign may not be the account owner's. -->
+        <div id="cloud-callsign-editor" class="hidden" style="margin-bottom:8px;padding:8px 10px;background:var(--bg-panel);border:1px solid var(--accent-blue);border-radius:6px;">
+          <p id="cloud-callsign-editor-text" style="font-size:12px;color:var(--text-primary);margin:0 0 6px;"></p>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="text" id="cloud-callsign-input" placeholder="e.g. K3SBP" maxlength="15" style="text-transform:uppercase;width:120px;">
+            <button type="button" id="cloud-callsign-save" class="btn btn-primary btn-sm">Save Callsign</button>
+            <button type="button" id="cloud-callsign-cancel" class="btn btn-sm hidden">Cancel</button>
+          </div>
+          <p id="cloud-callsign-status" class="help-text hidden" style="font-size:11px;margin:4px 0 0;"></p>
         </div>
         <div style="margin-bottom:6px;">
           <span id="cloud-sub-status" class="status disconnected">inactive</span>
