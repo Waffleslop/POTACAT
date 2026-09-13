@@ -305,6 +305,7 @@ const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
+const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
@@ -1513,6 +1514,33 @@ let _swrTripMessage = '';       // the operator-readable trip reason, for the JS
 let _swrTrippedBand = '';       // band at trip time — leaving it clears the latch
 let _swrGuardHits = 0;          // consecutive over-limit frames (debounce = 3)
 let _swrGuardSuppressUntil = 0; // no tripping during/just after an ATU tune
+let _swrLastAutoTune = 0;       // last auto-tune start (60 s gate)
+let _swrAutoTuneFailedBand = ''; // band whose auto-tune the radio reported as no match — no retry this session
+let _atuTuneEpisode = null;     // a Flex tune we are waiting on: { startedAt, auto, sawSweep, band, timer }
+
+function swrGuardBand() {
+  return _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
+}
+
+// Every surface that shows the guard's state, in one place: CAT log, main
+// window toast, JTCAT popout error line, JS8 banner, mobile devices.
+function swrGuardAnnounce(msg) {
+  sendCatLog('[SWR GUARD] ' + msg);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
+  }
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+  }
+  // JS8 window: the persistent SWR banner + ATU affordance. The window
+  // shows no CAT log, so before this a JS8 transmission just died at ~0.5s
+  // with nothing on screen (Casey 2026-08-09).
+  try { js8PushStatus(); } catch { /* pre-init */ }
+  // Mobile devices render tune-blocked as a visible error — reuse it.
+  if (remoteServer && remoteServer.running) {
+    remoteServer.sendToClient({ type: 'tune-blocked', reason: msg });
+  }
+}
 
 function swrGuardMax() {
   const v = parseFloat(settings.swrGuardMax);
@@ -1534,11 +1562,63 @@ function clearSwrTrip(reason) {
 }
 
 // An ATU tune transmits its own carrier through the WORST of the match while
-// fixing it — never trip on those frames, and treat the tune itself as the
-// "match plausibly changed" event that clears an existing latch.
-function noteAtuTuneStarted() {
-  _swrGuardSuppressUntil = Date.now() + 30000;
-  clearSwrTrip('ATU tune');
+// fixing it — never trip on those frames. Whether the tune CLEARS an existing
+// latch depends on who can answer "did it match?":
+//   - A Flex tune reports `atu status=` (lib/smartsdr.js _parseAtuStatus), so
+//     the latch WAITS for that answer in onAtuStatus(): TUNE_OK/TUNE_SUCCESSFUL
+//     re-enables TX, a failure or bypass keeps it off, and so does silence
+//     (ATU_RESULT_TIMEOUT_MS). Until 2026-09-13 the latch cleared on the
+//     START of the tune — before the radio had tried anything — so the
+//     auto-tune turned K3SBP's 19:1 fault on 20 m into tune -> re-key -> trip
+//     with the guard blind for 30 s in between, and the log never said the
+//     tune had failed.
+//   - A CAT rig's tune or an external RF-sense tuner reports nothing back,
+//     so the tune itself stays the "match plausibly changed" event and clears
+//     the latch as before (the guard can only trip on a Flex anyway).
+// Called by the smartSdr.setAtu wrapper in connectSmartSdr() for every Flex
+// tune start (opts.awaitResult) and directly by the non-Flex tune paths.
+function noteAtuTuneStarted(opts) {
+  const now = Date.now();
+  _swrGuardSuppressUntil = now + 30000;
+  const awaitResult = !!(opts && opts.awaitResult) && smartSdr && smartSdr.connected;
+  if (!awaitResult) { clearSwrTrip('ATU tune'); return; }
+  if (_atuTuneEpisode && _atuTuneEpisode.timer) clearTimeout(_atuTuneEpisode.timer);
+  const episode = { startedAt: now, auto: !!(opts && opts.auto), sawSweep: false, band: swrGuardBand(), timer: null };
+  _atuTuneEpisode = episode;
+  if (_swrTripped) sendCatLog('[SWR GUARD] ATU tune started — TX stays disabled until the radio reports a match.');
+  episode.timer = setTimeout(() => {
+    if (_atuTuneEpisode !== episode) return;
+    _atuTuneEpisode = null;
+    if (!_swrTripped) return;
+    swrGuardAnnounce(`the radio reported no ATU result within ${SwrGuard.ATU_RESULT_TIMEOUT_MS / 1000} s — TX stays disabled. Run the ATU again, change bands, or override the guard.`);
+  }, SwrGuard.ATU_RESULT_TIMEOUT_MS);
+}
+
+// The radio's answer to a tune POTACAT is waiting on (any starter: the SWR
+// guard's auto-tune, the ATU button, ECHOCAT, band-change auto-tune).
+function onAtuStatus(kv) {
+  const episode = _atuTuneEpisode;
+  if (!episode || kv.status == null) return;
+  const { outcome } = SwrGuard.decideAtuOutcome(episode, kv.status, Date.now());
+  if (!outcome) return;
+  clearTimeout(episode.timer);
+  _atuTuneEpisode = null;
+  // The sweep is over, so the guard need not stay blind for the rest of the
+  // 30 s tune window — 2 s covers the carrier dropping.
+  _swrGuardSuppressUntil = Math.min(_swrGuardSuppressUntil, Date.now() + 2000);
+  if (outcome === 'matched') {
+    // The operator fixed whatever failed earlier — let auto-tune try again here.
+    if (_swrAutoTuneFailedBand && _swrAutoTuneFailedBand === episode.band) _swrAutoTuneFailedBand = '';
+    if (_swrTripped) clearSwrTrip(`ATU matched: ${kv.status}`);
+    else sendCatLog(`[ATU] tune result: ${kv.status}`);
+    return;
+  }
+  if (episode.auto && episode.band) _swrAutoTuneFailedBand = episode.band;
+  if (!_swrTripped) { sendCatLog(`[ATU] tune result: ${kv.status} — no match`); return; }
+  const where = episode.band ? `on ${episode.band}` : 'here';
+  const msg = `ATU could not match (${kv.status}) — TX stays disabled. A tuner can't fix this; check the antenna, feedline and antenna switch ${where}. Run the ATU again once it's fixed, change bands, or override the guard.`;
+  _swrTripMessage = msg;
+  swrGuardAnnounce(msg);
 }
 
 function tripSwrGuard(swr) {
@@ -1548,7 +1628,6 @@ function tripSwrGuard(swr) {
   _swrTrippedBand = _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
   const msg = `TX aborted — SWR ${swr.toFixed(1)}:1 exceeded the ${swrGuardMax().toFixed(1)}:1 limit. Run the ATU or change bands to re-enable TX (or turn off the SWR guard in Settings > My Rigs).`;
   _swrTripMessage = msg;
-  sendCatLog('[SWR GUARD] ' + msg);
   // Kill whatever is transmitting, through the normal teardown paths.
   if (jtcatTuneState.active) stopJtcatTune();
   if (jtcatFullAutoCq) stopFullAutoCq('SWR guard tripped');
@@ -1558,38 +1637,35 @@ function tripSwrGuard(swr) {
   }
   handleRemotePtt(false);
   if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
-  }
-  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-    jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
-  }
-  // JS8 window: the persistent SWR banner + ATU affordance. The window
-  // shows no CAT log, so before this a JS8 transmission just died at ~0.5s
-  // with nothing on screen (Casey 2026-08-09).
-  try { js8PushStatus(); } catch { /* pre-init */ }
-  // Mobile devices render tune-blocked as a visible error — reuse it.
-  if (remoteServer && remoteServer.running) {
-    remoteServer.sendToClient({ type: 'tune-blocked', reason: msg });
-  }
-  // ⚙ Optional self-heal (settings.swrAutoTune): run the Flex ATU once to
-  // re-match instead of making the operator do it. Time-gated to one attempt
-  // per minute — the tune clears the latch, so without this gate a still-bad
-  // match would trip → tune → trip forever. If it trips again inside the
-  // minute, it latches and the operator intervenes. Flex-only (the guard is).
+  swrGuardAnnounce(msg);
+  // ⚙ Optional self-heal (settings.swrAutoTune): run the Flex ATU to re-match
+  // instead of making the operator do it. The tune does NOT clear the latch —
+  // only the radio's TUNE_OK does (see noteAtuTuneStarted/onAtuStatus) — and
+  // lib/swr-guard.js refuses it above 10:1 (no ATU matches that; the tune
+  // would be 10 W into the fault), on a band where the ATU already gave up
+  // this session, and more than once a minute. Flex-only (the guard is).
   // (smartSdr && connected inline — flexSdr() is closure-local to the remote
   // setup and NOT in scope here; calling it crashed the app the first time
   // the guard tripped with auto-tune on. K3SBP 2026-08-13.)
-  if (settings.swrAutoTune && smartSdr && smartSdr.connected && Date.now() - _swrLastAutoTune > 60000) {
+  const auto = SwrGuard.decideSwrAutoTune({
+    enabled: !!settings.swrAutoTune,
+    flexConnected: !!(smartSdr && smartSdr.connected),
+    swr, band: _swrTrippedBand, failedBand: _swrAutoTuneFailedBand,
+    lastAutoTuneAt: _swrLastAutoTune, now: Date.now(),
+  });
+  if (auto.tune) {
     _swrLastAutoTune = Date.now();
-    sendCatLog('[SWR GUARD] auto-tuning the ATU to re-match (one shot — latches if it trips again).');
+    sendCatLog('[SWR GUARD] auto-tuning the ATU to re-match — TX stays disabled until the radio reports a match.');
     setTimeout(() => {
-      try { noteAtuTuneStarted(); smartSdr.setAtu(true); }   // clears the latch + suppresses tripping during the sweep
+      try { smartSdr.setAtu(true, { auto: true }); }   // the setAtu wrapper opens the result-awaiting episode + suppresses tripping during the sweep
       catch (err) { sendCatLog('[SWR GUARD] auto-tune failed: ' + (err.message || err)); }
     }, 300);   // let the abort teardown settle before keying the tune carrier
+  } else if (auto.reason === 'beyond-atu') {
+    sendCatLog(`[SWR GUARD] SWR ${swr.toFixed(1)}:1 is beyond what an ATU can match (auto-tune limit ${SwrGuard.SWR_AUTOTUNE_MAX}:1) — not auto-tuning. Check the antenna, feedline and antenna switch.`);
+  } else if (auto.reason === 'failed-on-band') {
+    sendCatLog(`[SWR GUARD] the ATU already failed to match on ${_swrTrippedBand} this session — not auto-tuning again.`);
   }
 }
-let _swrLastAutoTune = 0;
 let _currentAlc = 0;
 let _currentPower = 0; // live wattmeter reading from the rig (during TX)
 let _currentAtuState = false;
@@ -2395,6 +2471,11 @@ function sendCatFrequency(hz) {
   if (_swrTripped && _swrTrippedBand && hz > 0) {
     const b = freqToBand(hz / 1e6);
     if (b && b !== _swrTrippedBand) clearSwrTrip('band change');
+  }
+  // A tune result still in flight was for the band we just left.
+  if (_atuTuneEpisode && _atuTuneEpisode.band && hz > 0) {
+    const b = freqToBand(hz / 1e6);
+    if (b && b !== _atuTuneEpisode.band) { clearTimeout(_atuTuneEpisode.timer); _atuTuneEpisode = null; }
   }
   // Same reasoning, same sink: JTCAT's RX level is remembered per band, so a
   // band change restores the level that band was last run at.
@@ -11167,14 +11248,17 @@ function connectSmartSdr() {
   smartSdr = new SmartSdrClient();
   // SWR-guard hook: every ATU tune start (any call site, incl. future ones)
   // must suppress the guard while the ATU's own carrier sweeps the bad match,
-  // and counts as the "match plausibly changed" event that clears a latch.
+  // and opens the episode whose `atu status=` result decides whether a latch
+  // clears (noteAtuTuneStarted/onAtuStatus). opts.auto marks the guard's own
+  // auto-tune so a failure is remembered per band.
   {
     const _origSetAtu = smartSdr.setAtu.bind(smartSdr);
-    smartSdr.setAtu = (on) => {
-      if (on) noteAtuTuneStarted();
+    smartSdr.setAtu = (on, opts) => {
+      if (on) noteAtuTuneStarted({ awaitResult: true, auto: !!(opts && opts.auto) });
       return _origSetAtu(on);
     };
   }
+  smartSdr.on('atu-status', onAtuStatus);
   let _sdrErrorLogged = false;
   smartSdr.on('error', (err) => {
     console.error('SmartSDR:', err.message);
@@ -28439,17 +28523,19 @@ app.whenReady().then(() => {
         break;
       }
       case 'atu-tune': {
-        // Running the tuner is the "match plausibly changed" event that clears
-        // an SWR-guard latch. The Flex setAtu wrap already calls this; the CAT
-        // path (cat.startTune below) did not, so a latched non-Flex rig could
-        // never clear via its own ATU button (Casey 2026-08-09, Flex works —
-        // this is the CAT-rig correctness half). Idempotent; safe to double-call.
-        noteAtuTuneStarted();
+        // Running the tuner is the "match plausibly changed" event for an
+        // SWR-guard latch. On a Flex the setAtu wrap opens an episode and the
+        // radio's `atu status=` decides (a failed tune keeps TX off); an
+        // external RF-sense tuner or a CAT rig's tune reports nothing back, so
+        // for those noteAtuTuneStarted() clears the latch outright — the CAT
+        // path did not even do that before Casey 2026-08-09, so a latched
+        // non-Flex rig could never clear via its own ATU button.
         // External RF-sensing tuner (LDG Z-100plus / MFJ) path — emits a low-
         // power CW carrier so the tuner can match. Internal CAT tune is used
         // only when no external tuner is configured on the active rig.
         const rig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
         if (rig && rig.externalAtu === 'rf-sense') {
+          noteAtuTuneStarted();
           runExternalAtuTune(); // async fire-and-forget
           break;
         }
@@ -28460,6 +28546,7 @@ app.whenReady().then(() => {
         if (flexSdr()) {
           smartSdr.setAtu(true);
         } else if (cat && cat.connected) {
+          noteAtuTuneStarted();
           cat.startTune();
         }
         _currentAtuState = true;
