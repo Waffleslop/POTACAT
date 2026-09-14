@@ -2413,6 +2413,131 @@ test('rigctld: a backend without a wattmeter is asked once, then latched off', (
 });
 
 // =========================================================================
+// Icom Network / IC-7760 (K3FZT, 2026-09-14). Three methods the RS-BA1 glue in
+// main.js had called since 2026-06-16 never existed: setRadioAddress (the
+// Test button's probe loop threw a TypeError inside a timer -> uncaught ->
+// the app died), getDataMod/setDataMod (DATA MOD auto-LAN logged "commands
+// are unavailable" on every connect). And the live CI-V address came only
+// from rigs[].model, so a non-0x94 Icom with a blank model was addressed as
+// an IC-7300 and — Icoms ignore frames not addressed to them — never answered.
+console.log('\n=== CivCodec: radio address + DATA MOD (Icom Network / IC-7760) ===');
+
+const IC7760_MODEL = require('../lib/rig-models').RIG_MODELS['IC-7760'];
+
+test('IC-7760 is a known model: CI-V 0xB2, 200 W, ATU', () => {
+  assert.ok(IC7760_MODEL, 'IC-7760 missing from RIG_MODELS');
+  assert.strictEqual(IC7760_MODEL.civAddr, 0xB2);
+  assert.strictEqual(IC7760_MODEL.maxPower, 200);
+  assert.strictEqual(IC7760_MODEL.caps.atu, true);
+});
+
+test('CIV frames are addressed to the model civAddr (0xB2 for an IC-7760)', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7760_MODEL);
+  codec.getFrequency();
+  assert.ok(writes[0].startsWith('fefeb2e003'), `expected FE FE B2 E0 03, got: ${writes[0]}`);
+});
+
+test('setRadioAddress re-addresses every later frame and reports the address in force', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  assert.strictEqual(codec.radioAddress, 0x94);
+  assert.strictEqual(codec.setRadioAddress(0xB2), 0xB2);
+  codec.getFrequency();
+  assert.ok(writes[0].startsWith('fefeb2e0'), `expected 0xB2 after setRadioAddress, got: ${writes[0]}`);
+  assert.strictEqual(codec.setRadioAddress('junk'), 0xB2, 'a bad address must be ignored, not adopted');
+  assert.strictEqual(codec.setRadioAddress(0x1FF), 0xB2);
+});
+
+test('getDataMod(0x0130) -> 1A 05 01 30 (IC-7760 DATA1 MOD read)', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7760_MODEL);
+  codec.getDataMod(0x0130);
+  assert.strictEqual(writes[0], 'fefeb2e01a050130fd', writes[0]);
+});
+
+test('setDataMod(0x0130, 0x09) -> 1A 05 01 30 09 (DATA1 MOD = LAN); rejects an out-of-range value', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7760_MODEL);
+  assert.strictEqual(codec.setDataMod(0x0130, 0x09), true);
+  assert.strictEqual(writes[0], 'fefeb2e01a05013009fd', writes[0]);
+  assert.strictEqual(codec.setDataMod(0x0130, 0x100), false);
+  assert.strictEqual(writes.length, 1, 'a refused write must not reach the radio');
+});
+
+test('IC-7610 DATA1 MOD (item 0092) encodes as 00 92 — item ids are two bytes, high first', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  codec.setRadioAddress(0x98);
+  codec.setDataMod(0x0092, 0x05);
+  assert.strictEqual(writes[0], 'fefe98e01a05009205fd', writes[0]);
+});
+
+test('a 1A 05 reply parses to a data-mod event {settingId, value}', () => {
+  const { codec } = captureWrites(CivCodec, IC7760_MODEL);
+  const got = [];
+  codec.on('data-mod', (d) => got.push(d));
+  codec.onData(Buffer.from('fefee0b21a05013009fd', 'hex'));
+  assert.deepStrictEqual(got, [{ settingId: 0x0130, value: 0x09 }]);
+});
+
+test('a frequency reply carries meta.fromAddr — the address the radio answered FROM', () => {
+  const { codec } = captureWrites(CivCodec, IC7300_MODEL);
+  const got = [];
+  codec.on('frequency', (hz, meta) => got.push([hz, meta]));
+  // FE FE E0 B2 03 <BCD 14.074000> FD — an IC-7760 answering a probe.
+  codec.onData(Buffer.from('fefee0b2030040071400fd', 'hex'));
+  assert.strictEqual(got.length, 1);
+  assert.strictEqual(got[0][0], 14074000);
+  assert.strictEqual(got[0][1].fromAddr, 0xB2);
+  assert.strictEqual(got[0][1].toAddr, 0xE0);
+});
+
+test('RigController exposes getDataMod/setDataMod and forwards data-mod (the auto-LAN path)', () => {
+  const sent = [];
+  const { rig, codec } = stubRig({
+    getDataMod: (id) => sent.push(['get', id]),
+    setDataMod: (id, v) => { sent.push(['set', id, v]); return true; },
+  });
+  const got = [];
+  rig.on('data-mod', (d) => got.push(d));
+  assert.strictEqual(rig.getDataMod(0x0130), true);
+  assert.strictEqual(rig.setDataMod(0x0130, 0x09), true);
+  codec.emit('data-mod', { settingId: 0x0130, value: 0x01 });
+  assert.deepStrictEqual(sent, [['get', 0x0130], ['set', 0x0130, 0x09]]);
+  assert.deepStrictEqual(got, [{ settingId: 0x0130, value: 0x01 }]);
+});
+
+test('RigController: a codec without DATA MOD support returns false (not a throw, not a silent no-op)', () => {
+  const { rig } = stubRig();
+  const logs = [];
+  rig.on('log', (m) => logs.push(m));
+  assert.strictEqual(rig.getDataMod(0x0130), false);
+  assert.strictEqual(rig.setDataMod(0x0130, 0x09), false);
+  assert.ok(logs.some((m) => /DATA MOD/.test(m)), 'the refusal must be logged');
+});
+
+test('RigController forwards frequency meta to its listeners', () => {
+  const { rig, codec } = stubRig();
+  const got = [];
+  rig.on('frequency', (hz, meta) => got.push([hz, meta]));
+  codec.emit('frequency', 14074000, { fromAddr: 0xB2 });
+  assert.deepStrictEqual(got, [[14074000, { fromAddr: 0xB2 }]]);
+});
+
+test('RS-BA1 transport surfaces the radio-reported CI-V address as radio-info', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rsba1-transport.js'), 'utf8');
+  assert.ok(src.includes("this.emit('radio-info', this.radioInfo)"), 'ControlStream must emit radio-info from Capabilities');
+  assert.ok(src.includes("this.control.on('radio-info'"), 'RsBa1Transport must forward it');
+  assert.ok(/get radioInfo\(\)/.test(src), 'RsBa1Transport must expose radioInfo');
+});
+
+test('main.js adopts the reported address and probes it first (source-text guard)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(src.includes("transport.on('radio-info', (info) => {"), 'live path listens for radio-info');
+  assert.ok(src.includes('networkCodec.setRadioAddress(reported)'), 'live path re-addresses the codec');
+  assert.ok(src.includes('probeAddrs = uniq([reported, ...probeAddrs])'), 'test probe puts the reported address first');
+  assert.ok(src.includes('0xB2, // IC-7760'), 'IC-7760 is in the probe list');
+  assert.ok(/models: \['IC-7760'\],\s*civAddrs: \[0xB2\],\s*settingId: 0x0130,/.test(src), 'IC-7760 DATA1 MOD spec');
+  assert.ok(src.includes('if (civAddr != null) merged.civAddr = civAddr;'), 'getActiveRigModel borrows the picked CI-V address');
+});
+
+// =========================================================================
 // Summary
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);

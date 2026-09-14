@@ -8577,7 +8577,8 @@ document.getElementById('icom-network-test-btn')?.addEventListener('click', asyn
       const probeAddr = Number.isFinite(result.probedAddress) && result.probedAddress !== result.civAddress
         ? ` (answered probe 0x${result.probedAddress.toString(16).toUpperCase().padStart(2, '0')})`
         : '';
-      resultEl.textContent = `Connected! Freq: ${result.frequency} MHz${responseAddr}${probeAddr}`;
+      const radioName = result.radioName ? ` ${result.radioName}` : '';
+      resultEl.textContent = `Connected!${radioName} Freq: ${result.frequency} MHz${responseAddr}${probeAddr}`;
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;

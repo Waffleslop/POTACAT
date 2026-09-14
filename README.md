@@ -170,7 +170,7 @@ start, run it with `--no-sandbox`.
 | FlexRadio 6000 / 8000 | **SmartSDR CAT** — auto-discovers on your LAN |
 | Icom IC-7300, Elecraft KX2/KX3, Yaesu FT-891, most others | **Hamlib** — 200+ models |
 | QRP Labs QMX / QDX, Win4Yaesu | **Serial CAT (Kenwood protocol)** — pick the port and baud |
-| IC-705, IC-9700, IC-7610, or wfview's `wfserver` | **Icom Network** — CI-V over IP |
+| IC-705, IC-9700, IC-7610, IC-7760, or wfview's `wfserver` | **Icom Network** — CI-V over IP |
 
 Per-radio walkthroughs with known-working settings are in the
 **[rig setup guides](https://potacat.com/radios.html)**.

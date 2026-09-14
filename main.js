@@ -1906,15 +1906,29 @@ function getActiveRigModel() {
   // (IC-706MKIIG) is left un-polled. All other panel caps stay generic so we
   // don't surface untested Icom controls. (NA7C Ted: blank power logged 100 W)
   if (rigType === 'icom' && generic) {
-    const civModel = activeRig?.catTarget?.civModel
-      || (settings.catTarget && settings.catTarget.civModel);
+    const catTarget = activeRig?.catTarget || settings.catTarget || null;
+    const civModel = catTarget?.civModel;
     const specific = civModel ? getModel(civModel, null) : null;
-    if (specific) {
+    // The CI-V ADDRESS also comes from that picker (catTarget.civAddress —
+    // the "Radio Model" select on every Icom connection form). The codec
+    // addresses every frame to model.civAddr and an Icom ignores frames not
+    // addressed to it, so leaving the generic 0x94 here gave any non-IC-7300
+    // with a blank rigs[].model a healthy link and a radio that never
+    // answered (K3FZT, IC-7760 = 0xB2 over LAN, 2026-09-14). NA7C's IC-7300
+    // matched 0x94 by coincidence. Only the codec reads civAddr, so borrowing
+    // it surfaces no untested controls.
+    const picked = Number(catTarget?.civAddress ?? catTarget?.civAddr);
+    const civAddr = (Number.isInteger(picked) && picked > 0 && picked <= 0xFF) ? picked
+      : (specific && Number.isInteger(specific.civAddr) ? specific.civAddr : null);
+    if (specific || civAddr != null) {
       const merged = { ...generic, caps: { ...generic.caps } };
-      if (specific.caps && specific.caps.txpower != null) merged.caps.txpower = specific.caps.txpower;
-      if (specific.maxPower != null) merged.maxPower = specific.maxPower;
-      if (specific.minPower != null) merged.minPower = specific.minPower;
-      if (specific.powerStep != null) merged.powerStep = specific.powerStep;
+      if (civAddr != null) merged.civAddr = civAddr;
+      if (specific) {
+        if (specific.caps && specific.caps.txpower != null) merged.caps.txpower = specific.caps.txpower;
+        if (specific.maxPower != null) merged.maxPower = specific.maxPower;
+        if (specific.minPower != null) merged.minPower = specific.minPower;
+        if (specific.powerStep != null) merged.powerStep = specific.powerStep;
+      }
       return merged;
     }
   }
@@ -3288,6 +3302,18 @@ const ICOM_NETWORK_DATA_MOD_SPECS = [
     networkValue: 0x03,
     values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'MIC+USB', 0x03: 'WLAN' },
   },
+  {
+    // IC-7760 CI-V Reference Guide: set-mode item 0130 "DATA1 MOD" (0131 =
+    // DATA2, 0132 = DATA3 — each data mode has its own source; POTACAT uses
+    // DATA1, which is what `1A 06 01` selects). Value 09 = LAN.
+    models: ['IC-7760'],
+    civAddrs: [0xB2],
+    settingId: 0x0130,
+    label: 'DATA1 MOD',
+    networkLabel: 'LAN',
+    networkValue: 0x09,
+    values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'LINE-IN', 0x03: 'ACC', 0x04: 'MIC+USB', 0x05: 'MIC+LINE-IN', 0x06: 'MIC+ACC', 0x07: 'MIC+USB+ACC', 0x08: 'MIC+LINE-IN+ACC', 0x09: 'LAN' },
+  },
 ];
 
 function getActiveRigModelName() {
@@ -3295,11 +3321,15 @@ function getActiveRigModelName() {
   return activeRig?.model || '';
 }
 
-function getIcomNetworkDataModSpec(target, rigModel) {
-  const modelName = String(getActiveRigModelName() || target?.model || target?.name || '').toUpperCase();
-  const civAddr = Number(target?.civAddr ?? rigModel?.civAddr);
+function getIcomNetworkDataModSpec(target, rigModel, liveCivAddr = null) {
+  const modelName = String(getActiveRigModelName() || target?.model || target?.name || target?.civModel || '').toUpperCase();
+  const civAddr = Number(target?.civAddr ?? target?.civAddress ?? rigModel?.civAddr);
+  // liveCivAddr = the address the codec is addressing right now, which on
+  // the Icom Network path is what the radio reported about itself.
+  const live = Number(liveCivAddr);
   return ICOM_NETWORK_DATA_MOD_SPECS.find((spec) => {
     if (modelName && spec.models.some((m) => modelName === m.toUpperCase())) return true;
+    if (Number.isFinite(live) && spec.civAddrs.includes(live)) return true;
     return Number.isFinite(civAddr) && spec.civAddrs.includes(civAddr);
   }) || null;
 }
@@ -3348,11 +3378,11 @@ function waitForIcomDataMod(controller, settingId, timeoutMs = 1500) {
   });
 }
 
-async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId) {
+async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId, liveCivAddr = null) {
   if (!controller || !controller.connected) return;
   if (!target || target.type !== 'icom-network') return;
   if (settings.audioSource !== 'icom-network') return;
-  const spec = getIcomNetworkDataModSpec(target, rigModel);
+  const spec = getIcomNetworkDataModSpec(target, rigModel, liveCivAddr);
   if (!spec) {
     logIcomNetworkAudio('[Icom-Network-Audio] DATA MOD auto-LAN is not configured for this Icom model; leaving radio MOD input unchanged.');
     return;
@@ -4331,15 +4361,33 @@ async function connectCat() {
     //   - wfserver (wfview's headless GPLv3 server) bridging a USB-attached
     //     Icom (IC-7300/MK II, IC-7100, etc.) onto the network
     //   - IP-native Icoms with built-in network: IC-705, IC-9700, IC-7610,
-    //     IC-7851, IC-R8600
+    //     IC-7760, IC-7851, IC-R8600
     // Wraps CI-V bytes in RS-BA1 data frames; CivCodec is unchanged from
     // the serial / civ-tcp paths.
     transport = new RsBa1Transport();
-    const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: target.civAddr || 0x94, caps: {}, cw: {} };
+    const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: target.civAddr || target.civAddress || 0x94, caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
     codec = new CivCodec(model, (data) => transport.write(data));
     cat = new RigController(model, transport, codec);
     const networkCat = cat;
+    const networkCodec = codec;
+    const civHex = (n) => `0x${Number(n).toString(16).toUpperCase().padStart(2, '0')}`;
+    // The radio names its own CI-V address in the RS-BA1 Capabilities
+    // packet. Trust it over the model: an Icom ignores any frame not
+    // addressed to it, so a wrong address here is a perfect session with a
+    // silent radio and nothing in the log (K3FZT, IC-7760 = 0xB2 with a
+    // blank rig model, 2026-09-14). 0x00 (broadcast) and 0xE0 (the
+    // controller's own address) are not a radio.
+    transport.on('radio-info', (info) => {
+      const reported = Number(info && info.civAddress);
+      if (!Number.isInteger(reported) || reported <= 0 || reported === 0xE0 || reported > 0xFF) return;
+      if (reported === networkCodec.radioAddress) return;
+      const was = networkCodec.radioAddress;
+      networkCodec.setRadioAddress(reported);
+      const msg = `[Icom Network] radio reports CI-V address ${civHex(reported)}${info.name ? ` (${info.name})` : ''}; configured ${civHex(was)} — using ${civHex(reported)}. Set the Radio Model picker to match so this is not a surprise next time.`;
+      sendCatLog(msg);
+      appendIcomNetworkDiagnostic(msg);
+    });
     cat._debug = true;
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
@@ -4374,7 +4422,7 @@ async function connectCat() {
     cat.on('status', (s) => {
       if (!s || !s.connected || !enableTxAudio) return;
       setTimeout(() => {
-        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession).catch((err) => {
+        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession, networkCodec.radioAddress).catch((err) => {
           sendCatLog(`[Icom-Network-Audio] DATA MOD auto-LAN failed: ${err.message || err}`);
         });
       }, 700);
@@ -4414,7 +4462,7 @@ async function connectCat() {
       sendCatLog(msg);
       appendIcomNetworkDiagnostic(msg);
     }
-    const connectMsg = `Connecting to Icom Network on ${host}:${controlPort} (RS-BA1 protocol${enableRxAudio ? ', RX audio enabled' : ''}${enableTxAudio ? ', TX audio enabled' : ', TX audio disabled'})`;
+    const connectMsg = `Connecting to Icom Network on ${host}:${controlPort} (RS-BA1 protocol, CI-V address ${civHex(model.civAddr)}${enableRxAudio ? ', RX audio enabled' : ''}${enableTxAudio ? ', TX audio enabled' : ', TX audio disabled'})`;
     sendCatLog(connectMsg);
     appendIcomNetworkDiagnostic(connectMsg);
     transport.connect({
@@ -31837,20 +31885,22 @@ app.whenReady().then(() => {
           return true;
         });
       };
-      const probeAddrs = uniq([
+      let probeAddrs = uniq([
         civAddress || 0x94,
         0x00, // CI-V broadcast/default probe.
         0x98, // IC-7610
         0x94, // IC-7300
         0xB6, // IC-7300 MK II
+        0xB2, // IC-7760
         0xA4, // IC-705
         0xA2, // IC-9700
         0x8E, // IC-7851
         0x96, // IC-7850
         0x88, // IC-7100
-        0x7A, // IC-7200
-        0x76, // IC-9100
+        0x7A, // IC-7600
+        0x76, // IC-7200
       ]);
+      let radioName = null;
 
       const recordLog = (msg) => {
         if (!msg) return;
@@ -31899,6 +31949,16 @@ app.whenReady().then(() => {
 
       transport.on('log', recordLog);
       transport.on('data', (chunk) => codec.onData(chunk));
+      // The Capabilities packet names the radio and its CI-V address; probe
+      // that first so the common case answers on the first frame.
+      transport.on('radio-info', (info) => {
+        const reported = Number(info && info.civAddress);
+        if (info && info.name) radioName = String(info.name);
+        if (Number.isInteger(reported) && reported > 0 && reported !== 0xE0 && reported <= 0xFF) {
+          probeAddrs = uniq([reported, ...probeAddrs]);
+          recordLog(`[rsba1/test] radio reports CI-V address 0x${reported.toString(16).toUpperCase().padStart(2, '0')}${radioName ? ` (${radioName})` : ''}`);
+        }
+      });
       transport.on('connect', () => {
         civStreamReady = true;
         const probeStartMs = 1200;
@@ -31927,6 +31987,7 @@ app.whenReady().then(() => {
           frequency: (hz / 1e6).toFixed(6),
           civAddress: responseAddr,
           probedAddress: activeProbeAddr,
+          radioName,
         });
       });
       codec.on('error', (err) => {
