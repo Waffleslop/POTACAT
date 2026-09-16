@@ -125,5 +125,26 @@ test('the header documents how to recompute the bound', () => {
     'the long message types are not documented at the macro');
 });
 
+// N2FSM 2026-09-16: "<WB8YJF/NA67>" is an 11-character call plus its hash
+// brackets = 13 characters. The encoder's token buffers were 12, copy_token()
+// truncated silently (it NUL-fills, so the "last byte != NUL" too-long check
+// was dead code), the closing '>' was lost, and every report leg to that
+// station failed to encode — JTCAT sat mid-QSO with the rig silent.
+test('encoder callsign tokens hold an 11-char call plus <brackets>', () => {
+  const m = MSG.match(/#define\s+FTX_CALL_TOKEN_SIZE\s+(\d+)/);
+  assert.ok(m, 'FTX_CALL_TOKEN_SIZE not found');
+  assert.ok(parseInt(m[1], 10) >= 11 + 2 + 1, 'token buffer smaller than "<" + 11 chars + ">" + NUL');
+  const at = MSG.indexOf('ftx_message_rc_t ftx_message_encode(');
+  const body = MSG.slice(at, at + 1500);
+  assert.ok(/char call_to\[FTX_CALL_TOKEN_SIZE\]/.test(body) && /char call_de\[FTX_CALL_TOKEN_SIZE\]/.test(body),
+    'ftx_message_encode no longer sizes its call tokens from FTX_CALL_TOKEN_SIZE');
+});
+
+test('no too-long check relies on copy_token leaving the last byte set', () => {
+  // copy_token NUL-fills the whole buffer, so this idiom can never fire.
+  assert.ok(!/\[sizeof\(\w+\) - 1\] != '\\0'/.test(MSG),
+    'a "buf[sizeof(buf) - 1] != NUL" overflow check is back — always false after copy_token');
+});
+
 console.log(`\nFT8 message buffer: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

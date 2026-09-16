@@ -68,6 +68,21 @@ console.log('=== Compound-call forms ===');
   check('<PJ4/K1ABC> W9XYZ +03', r.encoded && r.texts.includes('<PJ4/K1ABC> W9XYZ +03'), JSON.stringify(r.texts));
 }
 
+console.log('=== 11-character slash call (N2FSM / WB8YJF/NA67, 2026-09-16) ===');
+// "<WB8YJF/NA67>" is 13 characters with its brackets; the encoder's 12-byte
+// token buffers used to cut off the '>' and refuse every hashed leg.
+{
+  const JtcatParser = require(path.join(__dirname, '..', 'renderer', 'jtcat-parser.js'));
+  for (const pay of ['FN20', '-10', 'R-10', 'RR73', '73']) {
+    const t = JtcatParser.formatDirectedMsg('WB8YJF/NA67', 'N2FSM', pay);
+    const r = roundTrip(t);
+    check(t, r.encoded && r.texts.includes(t), r.encoded ? JSON.stringify(r.texts) : 'encode failed');
+  }
+  const r = roundTrip('N2FSM <WB8YJF/NA67> -10');
+  check('N2FSM <WB8YJF/NA67> -10 (not truncated)', r.encoded && r.texts.includes('N2FSM <WB8YJF/NA67> -10'), JSON.stringify(r.texts));
+  check('<12-char call> is refused, not truncated', addon.encode('<ABCDEFGHIJKL> N2FSM -10', 1500, 'FT8') === null);
+}
+
 console.log('=== Unresolvable/illegal forms ===');
 {
   check('<...> K3SBP rejects', addon.encode('<...> K3SBP', 1500, 'FT8') === null);

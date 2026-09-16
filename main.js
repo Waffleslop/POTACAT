@@ -104,6 +104,30 @@ function getAppDisplayVersion() {
 // this override the WSJT-X confirm shows "potacat" in lowercase.
 // K3SBP 2026-05-25.
 app.setName('POTACAT');
+
+// Single-instance lock, taken BEFORE the first log write. It used to sit
+// ~24k lines down and end in app.quit(), which does not stop a not-yet-ready
+// app: the second launch still ran whenReady — opened the rig's COM port,
+// published mDNS, died on EADDRINUSE :7300 — and on the way rotated BOTH of
+// the running instance's logs, so the bug report the operator then filed
+// carried none of the history before the relaunch (N2FSM 2026-09-16; it also
+// ate the clean-exit marker check and reported a false unclean exit). The
+// URL/focus hand-off is delivered by requestSingleInstanceLock itself, and
+// app.exit() before ready ends the process on the spot — no ready, no
+// before-quit/gracefulCleanup. The one-shot CLI modes below never took the
+// lock and must still run beside a live instance.
+const gotTheLock = (process.argv.includes('--print-cert-fingerprint') || process.argv.includes('--launcher'))
+  ? true
+  : app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  // One breadcrumb in the RUNNING instance's startup.log, appended — never
+  // through _appendStartupLog, which would rotate it.
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'startup.log'),
+      `[second-instance] ${new Date().toISOString()} another launch found POTACAT already running and handed off to it\n`);
+  } catch {}
+  app.exit(0);
+}
 logStartupStage('electron + path + fs required');
 
 // Early fatal-error capture — anything that kills the app before the window
@@ -9920,6 +9944,64 @@ function jtcatHandleRetryStall(o) {
   }
 }
 
+// A QSO whose next message cannot be encoded can never progress, and it never
+// reaches the per-phase cap either: that cap counts TRANSMISSIONS, and a
+// message that won't pack never transmits. So the QSO sat in its phase
+// forever — rig silent, "no advance" every cycle, Hunt and Run both blocked
+// behind the dead QSO object (N2FSM, "JTCAT falling asleep" twice on
+// WB8YJF/NA67, 2026-09-14/16). Treat the refusal as the give-up it is.
+function jtcatAbandonUnencodableQso(engine, data) {
+  const failed = String((data && data.message) || '').trim().toUpperCase();
+  if (!failed) return;
+  const owners = [
+    {
+      get: () => popoutJtcatQso,
+      clear: () => { popoutJtcatQso = null; popoutBroadcastQso(); },
+      notify: (msg) => {
+        if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+          jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+        }
+      },
+      owner: 'popout',
+    },
+    {
+      get: () => remoteJtcatQso,
+      clear: () => { remoteJtcatQso = null; remoteJtcatBroadcastQso(); },
+      notify: (msg) => {
+        if (remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: msg });
+      },
+      owner: 'remote',
+    },
+  ];
+  for (const o of owners) {
+    const qso = o.get();
+    if (!qso || qso.phase === 'done') continue;
+    if (String(qso.txMsg || '').trim().toUpperCase() !== failed) continue;
+    const who = qso.call || 'this station';
+    if (qso.call) jtcatAutoCqWorkedSession.add(qso.call);
+    // Run mode with a partner: drop the partner and go back to CQ. A CQ that
+    // itself won't encode has nothing to fall back to, so it stops.
+    if (jtcatFullAutoCq && jtcatFullAutoCqOwner === o.owner && qso.phase !== 'cq') {
+      sendCatLog(`[JTCAT] Full Auto CQ — cannot transmit to ${who}, resuming CQ`);
+      rearmCq(jtcatFullAutoCqOwner);
+      continue;
+    }
+    const msg = `Cannot transmit "${data.message}" to ${who} — QSO abandoned`;
+    sendCatLog('[JTCAT] ' + msg);
+    if (engine) {
+      engine._txEnabled = false;
+      engine.setTxMessage('');
+      if (typeof engine.setTxSlot === 'function') engine.setTxSlot('auto');
+      if (engine._txActive) engine.txComplete();
+      // The engine reports each failing message once; this QSO is gone, so a
+      // fresh attempt at the same station must be able to fail loudly again.
+      engine._encodeFailKey = '';
+    }
+    o.clear();
+    o.notify(msg);
+  }
+}
+
 // Persist the operator's chosen FT8/FT4 TX audio offset so Hold TX Freq can
 // re-pin it across band-change engine rebuilds and app restarts (WSJT-X
 // remembers its Tx offset too). Called from the two operator set-tx-freq
@@ -10593,6 +10675,7 @@ function startJtcat(mode) {
     // while the rig never keyed and the bug report showed nothing (KF0U's
     // FT4 reply to W1AW/4, 2026-07-22). One line, deduped in the engine.
     sendCatLog(`[JTCAT] TX ENCODE FAILED (${data.mode}): "${data.message}" — ${data.reason}. The rig will NOT key until the TX message changes.`);
+    jtcatAbandonUnencodableQso(ft8Engine, data);
   });
 
   ft8Engine.on('tx-start', (data) => {
@@ -24038,15 +24121,9 @@ function _doPairRedeem(wssUrl, pinFingerprint, token) {
   });
 }
 
-// Single instance lock — second launch passes URL to running instance
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  // Silent-quit path — breadcrumb it so startup.log explains the "launches
-  // and immediately exits with no window" symptom when another instance
-  // (possibly a windowless/headless one) holds the lock.
-  _appendStartupLog('[quit] single-instance lock not acquired -- another POTACAT instance is running; quitting');
-  app.quit();
-} else {
+// Single instance lock (acquired at the top of this file) — a second launch
+// passes its URL to the running instance.
+if (gotTheLock) {
   app.on('second-instance', (_e, argv) => {
     const url = argv.find(a => a.startsWith('potacat://'));
     if (url) handleProtocolUrl(url);
@@ -32898,6 +32975,7 @@ app.whenReady().then(() => {
 
       engine.on('encode-failed', (data) => {
         sendCatLog(`[JTCAT] TX ENCODE FAILED (${s.band} ${data.mode}): "${data.message}" — ${data.reason}. This slice will NOT key until the TX message changes.`);
+        jtcatAbandonUnencodableQso(engine, data);
       });
 
       // Wire TX events — critical for multi-slice PTT and audio playback

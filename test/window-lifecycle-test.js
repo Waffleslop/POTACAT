@@ -80,5 +80,21 @@ test('every hidden helper window is reachable by the enumeration', () => {
     'expected the usual crop of BrowserWindows; found ' + hidden + ' — has window creation moved?');
 });
 
+// N2FSM 2026-09-16: a second launch ran app.quit() ~24k lines in, which does
+// not stop a not-yet-ready app — it opened the rig's COM port, crashed on
+// :7300, and rotated the RUNNING instance's startup.log and session.log first,
+// so the operator's bug report lost everything before the relaunch.
+test('the single-instance lock is taken before any log file is touched', () => {
+  const lock = SRC.indexOf('app.requestSingleInstanceLock()');
+  const firstLog = SRC.search(/^logStartupStage\(/m);
+  assert.ok(lock > 0, 'requestSingleInstanceLock not found');
+  assert.ok(firstLog > 0, 'first logStartupStage call not found');
+  assert.ok(lock < firstLog, 'the lock must be acquired before the first logStartupStage (which rotates startup.log)');
+  const between = SRC.slice(lock, firstLog);
+  assert.ok(/if \(!gotTheLock\)[\s\S]*app\.exit\(0\)/.test(between),
+    'a second instance must app.exit() before ready — app.quit() lets whenReady run');
+  assert.ok(!/_appendStartupLog\(/.test(between), 'the second-instance path must not rotate startup.log');
+});
+
 console.log(`\nWindow lifecycle: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

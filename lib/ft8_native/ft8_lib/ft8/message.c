@@ -50,6 +50,22 @@ static bool lookup_callsign(const ftx_callsign_hash_interface_t* hash_if, ftx_ca
 /// returns the numeric value if it matches "CQ nnn" or "CQ a[bcd]", otherwise -1
 static int parse_cq_modifier(const char* string);
 
+// A callsign token is at most 11 characters, plus the two brackets of a
+// hash-request "<CALL>" -- 13 characters and a NUL. The buffers were 12, so an
+// 11-character call in brackets ("<WB8YJF/NA67>", N2FSM 2026-09-16) lost its
+// closing '>' and every report leg to that station failed to encode.
+#define FTX_CALL_TOKEN_SIZE 14
+
+// copy_token() truncates silently and NUL-fills, so "is the last byte NUL?"
+// can never detect an overlong token. Measure the source instead.
+static bool token_too_long(const char* string, int size)
+{
+    int n = 0;
+    while (string[n] != ' ' && string[n] != '\0')
+        n++;
+    return n > size - 1;
+}
+
 /// Pack a special token, a 22-bit hash code, or a valid base call into a 29-bit integer.
 static int32_t pack28(const char* callsign, const ftx_callsign_hash_interface_t* hash_if, uint8_t* ip);
 
@@ -138,9 +154,10 @@ ftx_message_type_t ftx_message_get_type(const ftx_message_t* msg)
 
 ftx_message_rc_t ftx_message_encode(ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, const char* message_text)
 {
-    char call_to[12];
-    char call_de[12];
+    char call_to[FTX_CALL_TOKEN_SIZE];
+    char call_de[FTX_CALL_TOKEN_SIZE];
     char extra[20];
+    bool call_to_long = false, call_de_long = false, extra_long = false;
 
     // A semicolon only ever appears in the Fox/Hound dual message
     // ("K1ABC RR73; W9XYZ <KH1/KH7Z> -08") — route it before the standard
@@ -155,7 +172,7 @@ ftx_message_rc_t ftx_message_encode(ftx_message_t* msg, ftx_callsign_hash_interf
         memset(call_to, 0, sizeof(call_to));
 
         // copy the next token temporarily (for the debug message)
-        copy_token(call_de, 12, parse_position);
+        copy_token(call_de, sizeof(call_de), parse_position);
         LOG(LOG_DEBUG, "next token after CQ: '%s' in '%s'\n", call_de, message_text);
 
         // see if the word after CQ matches the a[bcd] or nnn pattern, and append to call_to
@@ -164,6 +181,7 @@ ftx_message_rc_t ftx_message_encode(ftx_message_t* msg, ftx_callsign_hash_interf
             // treat "CQ nnn" or "CQ a[bcd]" as a single token:
             // copy the CQ and then the next token to call_to
             memcpy(call_to, "CQ \0", 4);
+            call_to_long = token_too_long(parse_position, sizeof(call_to) - 3);
             parse_position = copy_token(call_to + 3, sizeof(call_to) - 3, parse_position);
             LOG(LOG_DEBUG, "CQ modifier encoding %d; parse_pos after CQ: %s in %s\n", cq_modifier_v, parse_position, message_text);
         } else {
@@ -172,28 +190,31 @@ ftx_message_rc_t ftx_message_encode(ftx_message_t* msg, ftx_callsign_hash_interf
         }
     } else {
         // else it's not a CQ: expect first token to be the "to" callsign
+        call_to_long = token_too_long(parse_position, sizeof(call_to));
         parse_position = copy_token(call_to, sizeof(call_to), parse_position);
     }
     // now we are fairly sure the next word should be the "de" callsign
+    call_de_long = token_too_long(parse_position, sizeof(call_de));
     parse_position = copy_token(call_de, sizeof(call_de), parse_position);
     // everything after the two calls — used for the ARRL Field Day exchange path
     const char* fd_exch = parse_position;
     // and the word after that may be a grid or signal report
+    extra_long = token_too_long(parse_position, sizeof(extra));
     parse_position = copy_token(extra, sizeof(extra), parse_position);
 
     LOG(LOG_DEBUG, "ftx_message_encode: parsed '%s' '%s' '%s'; remaining chars '%s'\n", call_to, call_de, extra, parse_position);
 
-    if (call_to[sizeof(call_to) - 1] != '\0')
+    if (call_to_long)
     {
         // token too long
         return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
     }
-    if (call_de[sizeof(call_de) - 1] != '\0')
+    if (call_de_long)
     {
         // token too long
         return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
     }
-    if (extra[sizeof(extra) - 1] != '\0')
+    if (extra_long)
     {
         // token too long
         return FTX_MESSAGE_RC_ERROR_GRID;
@@ -551,8 +572,9 @@ ftx_message_rc_t ftx_message_encode_dxpedition(ftx_message_t* msg, ftx_callsign_
     const char* p = trim_front(message_text, ' ');
 
     char call1[12];
+    bool call1_long = token_too_long(p, sizeof(call1));
     p = copy_token(call1, sizeof(call1), p);
-    if (call1[0] == '\0' || call1[sizeof(call1) - 1] != '\0')
+    if (call1[0] == '\0' || call1_long)
         return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
 
     p = copy_token(tok, sizeof(tok), p);
@@ -560,8 +582,9 @@ ftx_message_rc_t ftx_message_encode_dxpedition(ftx_message_t* msg, ftx_callsign_
         return FTX_MESSAGE_RC_ERROR_TYPE;
 
     char call2[12];
+    bool call2_long = token_too_long(p, sizeof(call2));
     p = copy_token(call2, sizeof(call2), p);
-    if (call2[0] == '\0' || call2[sizeof(call2) - 1] != '\0')
+    if (call2[0] == '\0' || call2_long)
         return FTX_MESSAGE_RC_ERROR_CALLSIGN2;
 
     // Fox callsign, bracket-wrapped ("<KH1/KH7Z>") — carried as a 10-bit hash
