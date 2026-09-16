@@ -598,6 +598,11 @@ function qrzNameAndLocation(info) {
 // --- Scan state ---
 // --- Radio frequency tracking ---
 let radioFreqKhz = null;
+// Unrounded dial in kHz. radioFreqKhz is rounded to whole kHz, so a spot on
+// 14320.5 sits exactly 0.5 from it (Math.round → 14321) and fails every
+// "< 0.5 kHz" on-spot test — the pin was dropped the moment the radio
+// arrived, and the next arrow key restarted from the top/bottom (N7HHI).
+let radioFreqKhzExact = null;
 let radioMode = null;
 
 let scanning = false;
@@ -12370,7 +12375,7 @@ function render() {
         s.frequency === lastTunedSpot.frequency;
       if (isClickedSpot) {
         tr.classList.add('tuned-spot');
-      } else if (radioFreqKhz !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhz) < 0.5) {
+      } else if (radioFreqKhzExact !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhzExact) < 0.5) {
         tr.classList.add('on-freq');
       }
       if (isSkipped) {
@@ -18735,6 +18740,8 @@ window.api.onWsjtxActivatorQso((contact) => {
 // --- Radio frequency tracking ---
 window.api.onCatFrequency((hz) => {
   const newKhz = Math.round(hz / 1000);
+  const exactKhz = hz / 1000;
+  radioFreqKhzExact = exactKhz;
   if (newKhz === radioFreqKhz) return;
   const oldBand = radioFreqKhz ? freqToBandActivator(radioFreqKhz) : null;
   radioFreqKhz = newKhz;
@@ -18761,10 +18768,10 @@ window.api.onCatFrequency((hz) => {
   // the VFO popout's tuned-spot info; the actual pin still updates on
   // user-initiated click/tune (line 5478). And we still un-pin when the
   // rig moves AWAY from a previously-pinned freq.
-  const onSpot = allSpots.find(s => Math.abs(parseFloat(s.frequency) - newKhz) < 0.5);
+  const onSpot = allSpots.find(s => Math.abs(parseFloat(s.frequency) - exactKhz) < 0.5);
   if (onSpot) {
     notifyVfoTunedSpot(onSpot);
-  } else if (lastTunedSpot && Math.abs(parseFloat(lastTunedSpot.frequency) - newKhz) >= 0.5) {
+  } else if (lastTunedSpot && Math.abs(parseFloat(lastTunedSpot.frequency) - exactKhz) >= 0.5) {
     // Rig moved off the pinned spot's freq — drop the pin.
     lastTunedSpot = null;
     notifyVfoTunedSpot(null);
