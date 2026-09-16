@@ -143,6 +143,57 @@ function makeEngine() {
     ok(e._lastWorkerResponseMs === 0, 'a zero stamp (no worker alive) stays zero — the spawn seeds it');
   }
 
+  // AF0DB 2026-09-07: a capture delivering 25-50% of a slot had every decode
+  // skipped (1/2 threshold) but was never called starved (1/4 threshold) —
+  // no decodes, no restart, nothing in the log.
+  section('a half-starved capture is logged and restarted, not silently skipped');
+  {
+    spawned.length = 0;
+    const e = makeEngine();
+    e._workerReady = true;
+    e._lastWorkerResponseMs = Date.now();
+    const posted = [];
+    e._worker.postMessage = (m) => posted.push(m);
+    const logs = [];
+    let silent = 0;
+    e.on('log', (m) => logs.push(m));
+    e.on('silent', () => silent++);
+    const slot = e._audioBuffer.length;
+    const cycle = (fraction) => {
+      e._samplesSinceCycle = Math.round(slot * fraction);
+      e._audioBuffer.fill(0.1); // audible, so only the sample count can starve it
+      e._onCycleBoundary();
+    };
+
+    cycle(0.35); // could be startup — no log yet
+    ok(posted.length === 0, 'a 35% cycle is not decoded');
+    ok(!logs.some((l) => /decode skipped/.test(l)), 'one partial cycle is not reported (engine may have started mid-slot)');
+    cycle(0.35);
+    ok(logs.some((l) => /decode skipped for 2 cycles in a row — only 35%/.test(l)), 'a second partial cycle is reported with its share');
+    cycle(0.35);
+    ok(silent === 1, `three 35% cycles trigger the audio-capture restart (silent=${silent})`);
+    ok(logs.some((l) => /restarting audio capture/.test(l)), 'the restart is logged');
+
+    cycle(1);
+    ok(posted.length === 1, 'a full cycle is decoded');
+    cycle(0.35);
+    ok(logs.filter((l) => /decode skipped/.test(l)).length === 1, 'a full cycle resets the partial-skip count');
+
+    const e2 = makeEngine();
+    e2._workerReady = true;
+    e2._lastWorkerResponseMs = Date.now();
+    let silent2 = 0;
+    e2.on('silent', () => silent2++);
+    for (let i = 0; i < 3; i++) {
+      e2._samplesSinceCycle = Math.round(e2._audioBuffer.length * 0.9);
+      e2._audioBuffer.fill(0.1);
+      e2._onCycleBoundary();
+    }
+    ok(silent2 === 0, 'a 90% capture is healthy (no restart)');
+    e._running = false;
+    e2._running = false;
+  }
+
   quiet(false);
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
