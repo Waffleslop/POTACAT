@@ -2259,7 +2259,8 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
 const rigSetupBtn = document.getElementById('rig-setup-btn');
 const rigSetupSummary = document.getElementById('rig-setup-summary');
 const rigSetupPanel = document.getElementById('rig-setup-panel');
-const RIG_SETUP_ISSUE_URL = 'https://github.com/Waffleslop/POTACAT/issues/new';
+const RIG_SETUP_DISCORD_URL = 'https://discord.gg/cuNQpES38C';
+const RIG_SETUP_EMAIL = 'k3sbp@potacat.com';
 let rigSetupDone = new Set();     // note ids ticked for the rig being edited
 let rigSetupAutoOpened = false;   // auto-open at most once per editor visit
 let rigSetupSeq = 0;
@@ -2305,7 +2306,7 @@ function renderRigSetupNotes() {
   rigSetupBtn.classList.toggle('empty', notes.length === 0);
   rigSetupSummary.textContent = open > 0
     ? open + ' required radio setting' + (open === 1 ? '' : 's') + ' — CAT or CW will not work without ' + (open === 1 ? 'it' : 'them')
-    : (notes.length ? 'What other operators set on this radio' : 'No setup notes for this radio yet');
+    : (notes.length ? 'What other operators set on this radio' : 'No setup notes for this radio yet — worked it out? Tell us');
 
   rigSetupPanel.textContent = '';
   const groups = [['required', 'Required'], ['recommended', 'Recommended'], ['tip', 'Tips']];
@@ -2356,22 +2357,32 @@ function renderRigSetupNotes() {
       rigSetupPanel.appendChild(box);
     }
   }
+  // Shown for every setup, with or without notes: the table only grows when
+  // an operator who worked it out tells us.
   const foot = document.createElement('div');
   foot.className = 'rig-setup-foot';
-  foot.appendChild(document.createTextNode(notes.length ? 'Needed something else on your radio? ' : 'Got this radio working? '));
-  const a = document.createElement('a');
-  a.href = '#';
-  a.textContent = 'Tell us what you changed';
-  a.addEventListener('click', (e) => {
-    e.preventDefault();
+  const link = (text, onClick) => {
+    const a = document.createElement('a');
+    a.href = '#';
+    a.textContent = text;
+    a.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    return a;
+  };
+  foot.appendChild(document.createTextNode(notes.length
+    ? 'Needed a setting we don\'t list here? '
+    : 'We don\'t have setup instructions for this radio yet. If you get it working, '));
+  foot.appendChild(document.createTextNode(notes.length ? 'Share your setup on ' : 'share your setup on '));
+  foot.appendChild(link('Discord', () => window.api.openExternal(RIG_SETUP_DISCORD_URL)));
+  foot.appendChild(document.createTextNode(' or email '));
+  foot.appendChild(link(RIG_SETUP_EMAIL, () => {
     const model = rigSetupModelName() || '(model not set)';
     const body = 'Radio model: ' + model + '\nConnection type: ' + getSelectedRadioType() +
       '\nComputer: ' + (navigator.platform || '') +
       '\n\nWhat did you change on the radio (menu path and value)?\n\n\nWhat happened before you changed it?\n';
-    window.api.openExternal(RIG_SETUP_ISSUE_URL + '?title=' + encodeURIComponent('Setup note: ' + model) +
+    window.api.openExternal('mailto:' + RIG_SETUP_EMAIL + '?subject=' + encodeURIComponent('POTACAT setup: ' + model) +
       '&body=' + encodeURIComponent(body));
-  });
-  foot.appendChild(a);
+  }));
+  foot.appendChild(document.createTextNode(' and we\'ll add it so other operators can benefit.'));
   rigSetupPanel.appendChild(foot);
 
   // First visit to a new rig with a required step: show it without a click.

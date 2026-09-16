@@ -28368,6 +28368,8 @@ app.whenReady().then(() => {
       'http://rx.linkfanel.net', 'http://kiwisdr.com', 'http://websdr.org',
       // ECHOCAT mobile app store links (Settings footer promo).
       'https://apps.apple.com/', 'https://play.google.com/',
+      // Rig editor Setup instructions: "email us your setup".
+      'mailto:k3sbp@potacat.com',
     ];
     // Event sponsor sites (13 Colonies, Route 66, ...) come from the event
     // definition itself — see eventUrlAllowed — rather than this list.
