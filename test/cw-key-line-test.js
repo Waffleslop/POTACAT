@@ -6,7 +6,7 @@
 'use strict';
 
 const assert = require('assert');
-const { resolveCwKeyPins } = require('../lib/cw-key-line');
+const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('../lib/cw-key-line');
 
 let passed = 0, failed = 0;
 function check(cond, label) {
@@ -43,6 +43,16 @@ console.log('Result always names both lines (no undefined that could latch):');
 const keys = resolveCwKeyPins({ modelPins: { dtr: true }, cwKeyLine: 'auto' });
 check(typeof keys.dtr === 'boolean' && typeof keys.rts === 'boolean',
   `both lines boolean → dtr=${keys.dtr} rts=${keys.rts}`);
+
+console.log('Dedicated CW Key Port line (resolveKeyPortPins):');
+// The key port defaults to DTR unless the model's own pins include DTR —
+// an IC-7300's RTS USB-keying line says nothing about an adapter on another port.
+const kp = (o) => keyLineLabel(resolveKeyPortPins(o));
+check(kp({ modelPins: null }) === 'DTR', 'no model pins (FTDX10) → DTR');
+check(kp({ modelPins: { dtr: false, rts: true } }) === 'DTR', 'RTS-only model pins (IC-7300) → still DTR on the key port');
+check(kp({ modelPins: { dtr: true, rts: true } }) === 'DTR+RTS', 'DTR+RTS model pins (QMX) → both');
+check(kp({ modelPins: null, cwKeyLine: 'rts' }) === 'RTS', 'per-rig RTS override wins (FTDX10 PC KEYING = RTS)');
+check(kp({ modelPins: { dtr: true, rts: true }, cwKeyLine: 'dtr' }) === 'DTR', 'per-rig DTR override wins over QMX pins');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'cw-key-line tests failed');

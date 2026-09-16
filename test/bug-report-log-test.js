@@ -125,7 +125,9 @@ console.log('=== maskHomeDir: usernames never reach the paste ===');
 {
   const fs = require('fs');
   const path = require('path');
-  const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  // LF-normalised: a Windows checkout has CRLF, and the function-end search
+  // below looks for a bare newline.
+  const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
   const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
 
   // The marker must be REMOVED at startup: its absence is what a crash

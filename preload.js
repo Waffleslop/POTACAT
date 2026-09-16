@@ -200,6 +200,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
+  getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   discoverFlex: () => ipcRenderer.invoke('discover-flex'),
   listPorts: () => ipcRenderer.invoke('list-ports'),

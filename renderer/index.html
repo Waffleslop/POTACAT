@@ -1577,6 +1577,13 @@
           </select>
         </label>
         <span class="help-text" style="margin-bottom:8px;display:block;">Selecting your model enables model-specific features: CW keying, ATU commands, CI-V address, filter control, and power limits.</span>
+        <!-- Rig setup notes (lib/rig-setup-notes.js): radio menu settings other
+             operators needed before POTACAT could drive the radio. -->
+        <div class="rig-setup-row">
+          <button type="button" id="rig-setup-btn" class="rig-setup-btn" aria-expanded="false" aria-controls="rig-setup-panel">Setup instructions</button>
+          <span id="rig-setup-summary" class="help-text"></span>
+        </div>
+        <div id="rig-setup-panel" class="rig-setup-panel hidden"></div>
         <label>CW keying line (USB CW over CAT port):
           <select id="set-cw-key-line" style="width:150px;">
             <option value="auto">Auto (model default)</option>
@@ -1584,7 +1591,7 @@
             <option value="rts">RTS</option>
           </select>
         </label>
-        <span class="help-text" style="margin-bottom:8px;display:block;">For serial rigs (Icom/Yaesu/Kenwood) that key CW off a USB control line. Must match the radio's <b>USB Keying (CW)</b> menu. The IC-7300 default is <b>RTS</b>. Ignored for FlexRadio and dedicated CW-key-port setups. See docs/linux-cw-keying.md.</span>
+        <span class="help-text" style="margin-bottom:8px;display:block;">For serial rigs (Icom/Yaesu/Kenwood) that key CW off a USB control line. Must match the radio's <b>USB Keying (CW)</b> / <b>PC KEYING</b> menu — <b>Setup instructions</b> above names the exact setting for your radio. Ignored for FlexRadio and dedicated CW-key-port setups. See docs/linux-cw-keying.md.</span>
         <label>N1MM Radio #:
           <select id="set-radio-nr" style="width:80px;">
             <option value="1">1</option>

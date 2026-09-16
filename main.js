@@ -335,7 +335,7 @@ const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
-const { resolveCwKeyPins } = require('./lib/cw-key-line');
+const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('./lib/cw-key-line');
 const { buildPersistentKeyerScript } = require('./lib/cw-keyer-script');
 const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sync');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
@@ -409,7 +409,8 @@ const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache,
 // the community feed served by worker/dxpeditions — aggregated DX-World +
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
 // worker for the schema served at /feeds/dxpeditions.json.
-const { getModel, getModelList } = require('./lib/rig-models');
+const { getModel, getModelList, RIG_MODELS } = require('./lib/rig-models');
+const { resolveSetupNotes, radioTypeFromCatTarget } = require('./lib/rig-setup-notes');
 const { autoUpdater } = require('electron-updater');
 let registerCloudIpc;
 try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
@@ -3339,6 +3340,39 @@ const ICOM_NETWORK_DATA_MOD_SPECS = [
     values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'LINE-IN', 0x03: 'ACC', 0x04: 'MIC+USB', 0x05: 'MIC+LINE-IN', 0x06: 'MIC+ACC', 0x07: 'MIC+USB+ACC', 0x08: 'MIC+LINE-IN+ACC', 0x09: 'LAN' },
   },
 ];
+
+/**
+ * Setup notes for a rig as the editor (or a saved rig) describes it. Icoms are
+ * usually identified by the CI-V picker (catTarget.civModel) with rigs[].model
+ * left blank, so that name counts as the model too.
+ */
+function rigSetupNotesFor(q) {
+  const target = q.catTarget || {};
+  const model = String(q.model || target.civModel || '').trim();
+  return resolveSetupNotes({
+    model,
+    modelInfo: model ? (RIG_MODELS[model] || null) : null,
+    radioType: q.radioType || radioTypeFromCatTarget(q.catTarget),
+    cwKeyLine: q.cwKeyLine || 'auto',
+    platform: process.platform,
+    done: q.done,
+  });
+}
+
+/**
+ * " — see Settings > My Rigs > Setup instructions" when the active rig has a
+ * required setup note for this feature that the operator has not ticked, so a
+ * log line about a symptom points at the fix. Empty otherwise.
+ */
+function activeRigSetupPointer(feature) {
+  try {
+    const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    if (!rig) return '';
+    const open = rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, cwKeyLine: rig.cwKeyLine, done: rig.setupDone })
+      .filter(n => n.level === 'required' && !n.done && (!feature || n.feature === feature));
+    return open.length ? ' — see Settings > My Rigs > (this rig) > Setup instructions: "' + open[0].title + '"' : '';
+  } catch { return ''; }
+}
 
 function getActiveRigModelName() {
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
@@ -15154,6 +15188,7 @@ function connectRemote() {
   // CW keyer output: route IambicKeyer key events to radio
   let _cwPollResumeTimer = null;
   let _cwKeyLoggedRoute = false;
+  let _cwKeyPortLineLogged = '';   // the key-port line last announced
   let _cwTxrxPttOnlyLogged = false;
   remoteServer.setCwKeyerOutput(({ down }) => {
     // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
@@ -15253,7 +15288,7 @@ function connectRemote() {
           } else {
             hint = `Check your rig menu — "USB Keying (CW) = ${line}" (or equivalent) must match, or the ${line} pulses POTACAT sends won't key the radio.`;
           }
-          sendCatLog(`[CW] If the radio isn't keying, verify the rig menu: ${hint}`);
+          sendCatLog(`[CW] If the radio isn't keying, verify the rig menu: ${hint}${activeRigSetupPointer('CW')}`);
         }
       }
       if (paddleMethod === 'dtr') {
@@ -15310,8 +15345,7 @@ function connectRemote() {
     // rig's own USB-keying line, e.g. IC-7300 RTS, which is a different port than
     // an external key adapter that's almost always DTR.) Drive BOTH lines
     // explicitly so node-serialport can't latch the un-keyed one.
-    const kpDefault = (cwCaps.dtrPins && cwCaps.dtrPins.dtr) ? cwCaps.dtrPins : { dtr: true, rts: false };
-    const kpPins = resolveCwKeyPins({ modelPins: kpDefault, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
+    const kpPins = resolveKeyPortPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
     // TIOCMSET-rejecting port (Linux cp210x): real-time paddle via the
     // persistent pyserial keyer, which the per-element node-serialport set()
     // below can't do. First key-edge of a session bootstraps the port open
@@ -15325,6 +15359,14 @@ function connectRemote() {
       }
     }
     if (cwKeyPort && cwKeyPort.isOpen) {
+      // Say which line the key port drives, once per line: the radio's own
+      // keying menu (Yaesu PC KEYING) has to name the same one or nothing
+      // goes out, and nothing else in the log says which line that is.
+      const kpLabel = keyLineLabel(kpPins);
+      if (down && _cwKeyPortLineLogged !== kpLabel) {
+        _cwKeyPortLineLogged = kpLabel;
+        sendCatLog(`[CW] Keying on the CW Key Port with ${kpLabel}. The radio's PC KEYING (or CW keying) menu must be set to ${kpLabel}${activeRigSetupPointer('CW')}`);
+      }
       const pinState = { dtr: kpPins.dtr ? !!down : false, rts: kpPins.rts ? !!down : false };
       cwKeyPort.set(pinState, (err) => {
         if (err && !cwKeyPort._dtrLoggedError) {
@@ -29314,6 +29356,10 @@ app.whenReady().then(() => {
   }));
   ipcMain.on('refresh-solar', () => { fetchAllSolar(); });
   ipcMain.handle('get-rig-models', () => getModelList());
+  // Rig editor "Setup instructions" (lib/rig-setup-notes.js). Resolved here, not
+  // in the renderer, because the note text is filled from the model table and
+  // the same key-line resolver the CW keying code uses.
+  ipcMain.handle('get-rig-setup-notes', (_e, q) => rigSetupNotesFor(q || {}));
   ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
 
   // Resolve contest occurrences for the current moment + serialize as

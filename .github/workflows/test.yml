@@ -77,6 +77,8 @@ jobs:
         run: node test/bug-report-log-test.js
       - name: Run CW key-line resolver suite
         run: node test/cw-key-line-test.js
+      - name: Run rig setup notes suite
+        run: node test/rig-setup-notes-test.js
       - name: Run CW paddle-availability suite
         run: node test/cw-paddle-availability-test.js
       - name: Run SDR list sync suite

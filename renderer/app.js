@@ -2251,6 +2251,147 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
   if (!setRigName.value.trim()) setRigName.value = modelName;
 });
 
+// --- Rig setup instructions (lib/rig-setup-notes.js, resolved in main) ---
+// The radio menu settings other operators needed before POTACAT could drive
+// the radio (an FTDX10's PC KEYING, an Icom's CI-V address). The notes are
+// filled from POTACAT's own choices, so they re-resolve whenever the model,
+// radio type or CW keying line changes in this editor.
+const rigSetupBtn = document.getElementById('rig-setup-btn');
+const rigSetupSummary = document.getElementById('rig-setup-summary');
+const rigSetupPanel = document.getElementById('rig-setup-panel');
+const RIG_SETUP_ISSUE_URL = 'https://github.com/Waffleslop/POTACAT/issues/new';
+let rigSetupDone = new Set();     // note ids ticked for the rig being edited
+let rigSetupAutoOpened = false;   // auto-open at most once per editor visit
+let rigSetupSeq = 0;
+let rigSetupLast = [];
+
+function rigSetupModelName() {
+  const explicit = rigModelSelect ? rigModelSelect.value : '';
+  if (explicit) return explicit;
+  // Icoms are usually identified by the CI-V picker with Radio Model unset.
+  const pickerId = { icom: 'set-icom-model', 'civ-tcp': 'set-civ-tcp-model', 'icom-network': 'set-icom-network-model' }[getSelectedRadioType()];
+  const sel = pickerId && document.getElementById(pickerId);
+  return sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].text : '';
+}
+
+function setRigSetupPanelOpen(open) {
+  if (!rigSetupPanel || !rigSetupBtn) return;
+  rigSetupPanel.classList.toggle('hidden', !open);
+  rigSetupBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+async function refreshRigSetupNotes() {
+  if (!rigSetupBtn || !window.api.getRigSetupNotes) return;
+  const seq = ++rigSetupSeq;
+  let notes = [];
+  try {
+    notes = await window.api.getRigSetupNotes({
+      model: rigSetupModelName(),
+      radioType: getSelectedRadioType(),
+      cwKeyLine: setCwKeyLine ? (setCwKeyLine.value || 'auto') : 'auto',
+      done: [...rigSetupDone],
+    }) || [];
+  } catch { notes = []; }
+  if (seq !== rigSetupSeq) return; // a newer refresh is on its way
+  rigSetupLast = notes;
+  renderRigSetupNotes();
+}
+
+function renderRigSetupNotes() {
+  const notes = rigSetupLast;
+  const open = notes.filter((n) => n.level === 'required' && !rigSetupDone.has(n.id)).length;
+  rigSetupBtn.textContent = notes.length ? 'Setup instructions (' + notes.length + ')' : 'Setup instructions';
+  rigSetupBtn.classList.toggle('needs-action', open > 0);
+  rigSetupBtn.classList.toggle('empty', notes.length === 0);
+  rigSetupSummary.textContent = open > 0
+    ? open + ' required radio setting' + (open === 1 ? '' : 's') + ' — CAT or CW will not work without ' + (open === 1 ? 'it' : 'them')
+    : (notes.length ? 'What other operators set on this radio' : 'No setup notes for this radio yet');
+
+  rigSetupPanel.textContent = '';
+  const groups = [['required', 'Required'], ['recommended', 'Recommended'], ['tip', 'Tips']];
+  for (const [level, label] of groups) {
+    const inGroup = notes.filter((n) => n.level === level);
+    if (!inGroup.length) continue;
+    const head = document.createElement('div');
+    head.className = 'rig-setup-group';
+    head.textContent = label;
+    rigSetupPanel.appendChild(head);
+    for (const n of inGroup) {
+      const done = rigSetupDone.has(n.id);
+      const box = document.createElement('div');
+      box.className = 'rig-setup-note level-' + n.level + (done ? ' is-done' : '');
+      const h = document.createElement('h5');
+      h.textContent = n.title;
+      box.appendChild(h);
+      const ol = document.createElement('ol');
+      for (const step of n.steps) {
+        const li = document.createElement('li');
+        li.textContent = step;
+        ol.appendChild(li);
+      }
+      box.appendChild(ol);
+      const why = document.createElement('div');
+      why.className = 'rig-setup-why';
+      why.textContent = n.why;
+      box.appendChild(why);
+      const meta = document.createElement('div');
+      meta.className = 'rig-setup-meta';
+      if (n.level !== 'tip') {
+        const lab = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = done;
+        cb.addEventListener('change', () => {
+          if (cb.checked) rigSetupDone.add(n.id); else rigSetupDone.delete(n.id);
+          renderRigSetupNotes();
+        });
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode('Done on my radio'));
+        meta.appendChild(lab);
+      }
+      const src = document.createElement('span');
+      src.textContent = n.feature + ' · From: ' + n.source;
+      meta.appendChild(src);
+      box.appendChild(meta);
+      rigSetupPanel.appendChild(box);
+    }
+  }
+  const foot = document.createElement('div');
+  foot.className = 'rig-setup-foot';
+  foot.appendChild(document.createTextNode(notes.length ? 'Needed something else on your radio? ' : 'Got this radio working? '));
+  const a = document.createElement('a');
+  a.href = '#';
+  a.textContent = 'Tell us what you changed';
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const model = rigSetupModelName() || '(model not set)';
+    const body = 'Radio model: ' + model + '\nConnection type: ' + getSelectedRadioType() +
+      '\nComputer: ' + (navigator.platform || '') +
+      '\n\nWhat did you change on the radio (menu path and value)?\n\n\nWhat happened before you changed it?\n';
+    window.api.openExternal(RIG_SETUP_ISSUE_URL + '?title=' + encodeURIComponent('Setup note: ' + model) +
+      '&body=' + encodeURIComponent(body));
+  });
+  foot.appendChild(a);
+  rigSetupPanel.appendChild(foot);
+
+  // First visit to a new rig with a required step: show it without a click.
+  if (open > 0 && rigEditorMode === 'add' && !rigSetupAutoOpened) {
+    rigSetupAutoOpened = true;
+    setRigSetupPanelOpen(true);
+  }
+}
+
+if (rigSetupBtn) {
+  rigSetupBtn.addEventListener('click', () => setRigSetupPanelOpen(rigSetupPanel.classList.contains('hidden')));
+  if (rigModelSelect) rigModelSelect.addEventListener('change', refreshRigSetupNotes);
+  if (setCwKeyLine) setCwKeyLine.addEventListener('change', refreshRigSetupNotes);
+  document.querySelectorAll('input[name="radio-type"]').forEach((b) => b.addEventListener('change', refreshRigSetupNotes));
+  for (const id of ['set-icom-model', 'set-civ-tcp-model', 'set-icom-network-model']) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', refreshRigSetupNotes);
+  }
+}
+
 // Linux /dev/serial/by-id/ paths are 80+ chars and overwhelm the rig-list row.
 // Strip the long prefix and truncate the middle so the path stays recognizable
 // (keeps the vendor/model + interface suffix the user actually typed).
@@ -2570,6 +2711,14 @@ async function openRigEditor(mode, rigId) {
     await populateRigAudioDevices('', '');
   }
 
+  {
+    const editing = mode === 'edit' ? currentRigs.find(r => r.id === rigId) : null;
+    rigSetupDone = new Set((editing && Array.isArray(editing.setupDone)) ? editing.setupDone : []);
+  }
+  rigSetupAutoOpened = false;
+  setRigSetupPanelOpen(false);
+  refreshRigSetupNotes();
+
   rigEditor.classList.remove('hidden');
   rigAddBtn.classList.add('hidden');
   updateFlexStatus();
@@ -2693,6 +2842,7 @@ rigSaveBtn.addEventListener('click', async () => {
       rig.externalAtuWatts = rigExternalAtuWatts;
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.flexBandAntennaMap = flexBandAntennaMap;
+      rig.setupDone = [...rigSetupDone];
     }
   } else {
     const newRig = {
@@ -2713,6 +2863,7 @@ rigSaveBtn.addEventListener('click', async () => {
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,
       flexBandAntennaMap,
+      setupDone: [...rigSetupDone],
     };
     currentRigs.push(newRig);
   }
@@ -18867,6 +19018,20 @@ catLogClearBtn.addEventListener('click', () => {
       s.enablePskr && 'PSKR', s.enableDxcc && 'DXCC', s.enableFreedv && 'FreeDV',
       s.enableAutoSstv && 'Auto-SSTV',
     ].filter(Boolean).join(', ') || '(none)';
+    // Setup notes for the reported rig, and which the operator ticked — answers
+    // "did you set PC KEYING?" before anyone has to ask.
+    let setupNotes = '(none for this rig)';
+    if (activeRig && window.api.getRigSetupNotes) {
+      try {
+        const notes = await window.api.getRigSetupNotes({
+          model: activeRig.model, catTarget: activeRig.catTarget,
+          cwKeyLine: activeRig.cwKeyLine, done: activeRig.setupDone,
+        });
+        if (notes && notes.length) {
+          setupNotes = notes.map((n) => n.id + (n.level === 'tip' ? '' : (n.done ? ' (done)' : ' (NOT ticked)'))).join(', ');
+        }
+      } catch {}
+    }
     const md = {
       version: window._appVersion || s.appVersion || 'unknown',
       platform: window.api.platform,
@@ -18874,6 +19039,7 @@ catLogClearBtn.addEventListener('click', () => {
       callsign: (s.myCallsign || '(not set)').toUpperCase(),
       radioOwner,
       features: enabled,
+      setupNotes,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
     // capture everything since process start, including the pre-window lines
@@ -18930,6 +19096,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Callsign:** ' + md.callsign,
       '**Radio controlled by:** ' + md.radioOwner,
       '**Features enabled:** ' + md.features,
+      '**Setup notes:** ' + md.setupNotes,
       '',
       '### What I tried to do',
       '<!-- fill in: the steps you took -->',
