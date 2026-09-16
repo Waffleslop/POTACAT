@@ -71,5 +71,25 @@ test('setting a hunt mode still clears the worked-session set', () => {
   assert.ok(/jtcatAutoCqWorkedSession\.clear\(\)/.test(body), 'worked-session clear was lost');
 });
 
+// K3SBP 2026-09-16: ULTRACAT is the operator taking full responsibility, so
+// Hunt runs as long as they leave it on; without ULTRACAT it gets the same
+// 30-minute no-activity limit as Run.
+test('Hunt watchdog applies only when ULTRACAT is locked', () => {
+  const at = MAIN.indexOf('function jtcatFullAutoCqWatchdog()');
+  assert.ok(at !== -1, 'jtcatFullAutoCqWatchdog not found');
+  const body = MAIN.slice(at, MAIN.indexOf('\n}', at));
+  assert.ok(/jtcatAutoCqMode !== 'off' && !settings\.ultracat/.test(body),
+    'the Hunt stop must be gated on ULTRACAT being locked');
+  assert.ok(/setJtcatHuntMode\('off'/.test(body),
+    'the Hunt stop must go through setJtcatHuntMode so a QSO in progress still finishes');
+});
+
+test('a given-up QSO is written to the session log', () => {
+  const at = MAIN.indexOf('function jtcatHandleRetryStall(');
+  const body = MAIN.slice(at, MAIN.indexOf('\n}', at));
+  assert.ok(/outcome\.action === 'abort'[\s\S]*sendCatLog\('\[JTCAT\] ' \+ msg\)/.test(body),
+    'the abort notice went back to console-only — bug reports lose why a QSO ended');
+});
+
 console.log(`\nJTCAT hunt-off: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

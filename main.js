@@ -8885,9 +8885,27 @@ function jtcatHuntFallbackResume(count) {
 // still armed while paused: a band that never comes back ends the run rather
 // than leaving it sitting there indefinitely.
 function jtcatFullAutoCqWatchdog() {
-  if (!jtcatFullAutoCq) return;
-  if (Date.now() - jtcatFullAutoCqLastActivity > JTCAT_FULL_AUTO_CQ_WATCHDOG_MS) {
+  const idle = Date.now() - jtcatFullAutoCqLastActivity > JTCAT_FULL_AUTO_CQ_WATCHDOG_MS;
+  if (!idle) return;
+  if (jtcatFullAutoCq) {
     stopFullAutoCq('30-minute attended limit reached — confirm you are at the radio to resume');
+  }
+  // Hunt answers CQs on its own, which is automatic operation too. With
+  // ULTRACAT unlocked the operator has taken full responsibility and Hunt runs
+  // as long as they leave it on (K3SBP 2026-09-16); without it, Hunt gets the
+  // same 30 minutes with no operator action and no QSO progress as Run.
+  // setJtcatHuntMode('off') still lets a QSO already in progress finish.
+  if (jtcatAutoCqMode !== 'off' && !settings.ultracat) {
+    const notice = 'Hunt stopped — 30 minutes with no QSO progress and nothing from the operator. '
+      + 'Pick a Hunt mode again to resume.';
+    setJtcatHuntMode('off', jtcatAutoCqOwner);
+    sendCatLog('[JTCAT] ' + notice);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: notice });
+    }
+    if (remoteServer && remoteServer.hasClient()) {
+      remoteServer.broadcastJtcatQsoState({ phase: 'error', error: notice });
+    }
   }
 }
 
@@ -9931,7 +9949,10 @@ function jtcatHandleRetryStall(o) {
       kind: 'abort', phase: qso.phase, call: qso.call,
       heard: !!qso._heardThisCycle, hound: !!qso.hound, max,
     });
-    console.log('[JTCAT] ' + msg);
+    // sendCatLog, not console.log: a QSO given up on has to be visible in the
+    // bug report, or the log just jumps to the next station with no reason
+    // (N2FSM 2026-09-14, KI7SKT -> W0CTX).
+    sendCatLog('[JTCAT] ' + msg);
     const eng = o.engine;
     if (eng) {
       eng._txEnabled = false;
@@ -10405,6 +10426,7 @@ function startJtcat(mode) {
         });
       } else if (remoteJtcatQso && remoteJtcatQso.phase !== phaseBefore) {
         remoteJtcatQso.txRetries = 0;
+        jtcatFullAutoCqLastActivity = Date.now(); // QSO progressed — pet the watchdog
       }
     }
     // Advance popout QSO state machine
@@ -32962,6 +32984,7 @@ app.whenReady().then(() => {
             });
           } else if (remoteJtcatQso && remoteJtcatQso.phase !== phaseBefore) {
             remoteJtcatQso.txRetries = 0;
+            jtcatFullAutoCqLastActivity = Date.now();
           }
           remoteJtcatBroadcastQso();
         }
