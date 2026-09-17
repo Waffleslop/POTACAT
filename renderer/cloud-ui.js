@@ -607,12 +607,16 @@
       syncNowBtn.textContent = 'Syncing...';
       try {
         const result = await window.api.cloudSyncNow();
+        await refreshStatus();
         if (result.error) {
           alert('Sync failed: ' + result.error);
         } else {
-          lastSyncSpan.textContent = 'just now';
+          // Say what moved, so 'it says synced but my QSOs are not there' is
+          // answerable. (Pending changes have their own counter.)
+          const parts = [`sent ${result.pushed || 0}`, `received ${result.pulled || 0}`];
+          if (result.conflicts) parts.push(`${result.conflicts} replaced by the cloud copy`);
+          lastSyncSpan.textContent = `just now: ${parts.join(', ')}`;
         }
-        await refreshStatus();
       } finally {
         syncNowBtn.disabled = false;
         syncNowBtn.textContent = 'Sync Now';

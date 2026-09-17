@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   deleteQso: (idx) => ipcRenderer.invoke('delete-qso', idx),
   exportAdif: (qsos) => ipcRenderer.invoke('export-adif', qsos),
   importAdif: () => ipcRenderer.invoke('import-adif'),
+  findDuplicateQsos: () => ipcRenderer.invoke('find-duplicate-qsos'),
+  deleteDuplicateQsos: (remove) => ipcRenderer.invoke('delete-duplicate-qsos', { remove }),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getDefaultLogPath: () => ipcRenderer.invoke('get-default-log-path'),
   onQsoAdded: (cb) => ipcRenderer.on('qso-popout-added', (_e, qso) => cb(qso)),

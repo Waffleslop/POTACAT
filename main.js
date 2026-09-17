@@ -358,7 +358,9 @@ const radioOwnerLib = require('./lib/radio-owner');
 const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const MercuryAppProto = require('./lib/mercury-app-protocol');
-const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
+const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
+const QsoLog = require('./lib/qso-log');
+const { planImport, findDuplicateGroups } = require('./lib/qso-match');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
@@ -7278,10 +7280,9 @@ async function saveQsoRecord(qsoData, opts) {
 
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
   if (!qsoData.uuid) qsoData.uuid = require('crypto').randomUUID();
-  appendQso(logPath, qsoData);
-
-  // Record in cloud sync journal
-  if (cloudIpc) cloudIpc.journalCreate(qsoData);
+  // The cloud copy is exactly the record written to the file. (The journal
+  // used to upper-case qsoData's own keys: CALLSIGN, QSODATE, FREQUENCY.)
+  QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink: qsoLogSink });
 
   // Notify QSO pop-out window
   if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
@@ -15592,40 +15593,15 @@ function connectRemote() {
 
   cloudBridge('cloud-sync-now', async () => {
     if (!cloudIpc) return { error: 'Cloud not initialized' };
-    const sync = cloudIpc.getCloudSync();
-    const result = await sync.sync(cloudIpc.journal, {
-      onPulled: () => {},
-      onConflicts: () => {},
-    });
-    settings.cloudLastSyncAt = new Date().toISOString();
-    if (sync.lastSyncTimestamp) settings.cloudLastSyncTimestamp = sync.lastSyncTimestamp;
-    if (result.totalQsos != null) settings.cloudTotalQsos = result.totalQsos;
-    if (result.deviceCount != null) settings.cloudDeviceCount = result.deviceCount;
-    saveSettings(settings);
-    return { success: true, pushed: result.pushed, pulled: result.pulled };
+    // The same cycle as the desktop button. This used to pass no-op
+    // callbacks, so a sync started from a mobile device advanced the pull
+    // cursor past QSOs it then threw away.
+    return cloudIpc.syncNow();
   });
 
   cloudBridge('cloud-bulk-upload', async () => {
     if (!cloudIpc) return { error: 'Cloud not initialized' };
-    const { parseAllRawQsos } = require('./lib/adif');
-    const { rewriteAdifFile } = require('./lib/adif-writer');
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-    const allQsos = parseAllRawQsos(logPath);
-    let needsRewrite = false;
-    for (const qso of allQsos) {
-      if (!qso.APP_POTACAT_UUID) {
-        qso.APP_POTACAT_UUID = require('crypto').randomUUID();
-        qso.APP_POTACAT_VERSION = '1';
-        needsRewrite = true;
-      }
-    }
-    if (needsRewrite) rewriteAdifFile(logPath, allQsos);
-    const sync = cloudIpc.getCloudSync();
-    const result = await sync.bulkUpload(allQsos.map(f => ({ uuid: f.APP_POTACAT_UUID, adifFields: f })));
-    cloudIpc.journal.clear();
-    settings.cloudLastSyncAt = new Date().toISOString();
-    saveSettings(settings);
-    return { success: true, imported: result.imported, duplicates: result.duplicates, total: allQsos.length };
+    return cloudIpc.uploadFullLog();
   });
 
   cloudBridge('cloud-verify-subscription', async () => {
@@ -16348,14 +16324,16 @@ function connectRemote() {
 
   remoteServer.on('update-qso', ({ idx, fields }) => {
     try {
-      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-      const qsos = parseAllRawQsos(logPath);
-      if (idx < 0 || idx >= qsos.length) {
+      let found = false;
+      mutateQsoLog((qsos) => {
+        if (!qsos[idx]) return false;
+        found = true;
+        Object.assign(qsos[idx], fields);
+      });
+      if (!found) {
         remoteServer.sendQsoUpdated({ success: false, idx, error: 'Invalid index' });
         return;
       }
-      Object.assign(qsos[idx], fields);
-      rewriteAdifFile(logPath, qsos);
       loadWorkedQsos();
       // Notify desktop QSO pop-out
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
@@ -16369,14 +16347,16 @@ function connectRemote() {
 
   remoteServer.on('delete-qso', ({ idx }) => {
     try {
-      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-      const qsos = parseAllRawQsos(logPath);
-      if (idx < 0 || idx >= qsos.length) {
+      let found = false;
+      mutateQsoLog((qsos) => {
+        if (!qsos[idx]) return false;
+        found = true;
+        qsos.splice(idx, 1);
+      });
+      if (!found) {
         remoteServer.sendQsoDeleted({ success: false, idx, error: 'Invalid index' });
         return;
       }
-      qsos.splice(idx, 1);
-      rewriteAdifFile(logPath, qsos);
       loadWorkedQsos();
       // Notify desktop QSO pop-out
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
@@ -20118,8 +20098,60 @@ async function sendDxccData() {
   }
 }
 
+// --- QSO log writes ---
+// Every change to the log goes through lib/qso-log.js, which works out what
+// changed and hands it to the cloud journal, so no write path can forget to
+// sync (most of them used to). These bind it to the active log.
+function qsoLogPath() {
+  return settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+}
+
+function qsoLogSink(changes) {
+  if (cloudIpc) cloudIpc.recordLogChanges(changes);
+}
+
+function mutateQsoLog(mutate) {
+  return QsoLog.mutateLog(qsoLogPath(), mutate, { sink: qsoLogSink });
+}
+
+/**
+ * Add records from another logger (ADIF/SQLite import, QRZ download),
+ * skipping contacts the log already holds — the same rule the cloud merge
+ * uses (lib/qso-match.js). Re-importing an export from ACLog etc. used to add
+ * every earlier QSO again, and each copy then synced as a new cloud QSO.
+ */
+function importQsoRecords(records) {
+  const logPath = qsoLogPath();
+  const existing = QsoLog.readLog(logPath);
+  const { fresh, skipped } = planImport(existing, records);
+  QsoLog.appendRecords(logPath, fresh, { existing, sink: qsoLogSink });
+  const unique = new Set(fresh.map((r) => String(r.CALL).toUpperCase())).size;
+  return { imported: fresh.length, skipped, unique };
+}
+
+// Once per log path per session: rewrite records the pre-2026-09-17 cloud
+// journal named CALLSIGN/QSODATE/... (lib/adif-normalize.js). Until then
+// they are invisible to worked-before, and they were being dropped by every
+// log rewrite.
+const _qsoLogRepairChecked = new Set();
+function repairQsoLogFieldNames(logPath) {
+  if (_qsoLogRepairChecked.has(logPath)) return;
+  _qsoLogRepairChecked.add(logPath);
+  try {
+    const { repaired, collapsed } = QsoLog.repairFieldNames(logPath);
+    if (repaired) {
+      sendCatLog(`[Log] Repaired ${repaired} QSO record(s) that cloud sync had stored with non-ADIF field names` +
+        (collapsed ? `, removed ${collapsed} identical re-appended cop${collapsed === 1 ? 'y' : 'ies'}` : '') +
+        ' (original kept as .pre-field-repair-*.bak)');
+    }
+  } catch (err) {
+    sendCatLog(`[Log] Field-name repair skipped: ${err.message}`);
+  }
+}
+
 // --- Worked QSOs tracking ---
 function loadWorkedQsos() {
+  repairQsoLogFieldNames(qsoLogPath());
   if (!settings.adifLogPath) return;
   try {
     workedQsos = parseWorkedQsos(settings.adifLogPath);
@@ -28179,11 +28211,13 @@ app.whenReady().then(() => {
             const { parseTqslSkips, stampLotwSent } = require('./lib/lotw-flags');
             const snapshotQsos = parseAllRawQsos(snap);
             const skips = parseTqslSkips(String(stderr || ''));
-            const qsos = parseAllRawQsos(logPath);
             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-            const stats = stampLotwSent(qsos, snapshotQsos, skips, today);
+            let stats;
+            mutateQsoLog((qsos) => {
+              stats = stampLotwSent(qsos, snapshotQsos, skips, today);
+              if (!stats.stamped) return false;
+            });
             if (stats.stamped > 0) {
-              rewriteAdifFile(logPath, qsos);
               if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
                 qsoPopoutWin.webContents.send('qso-popout-refresh');
               }
@@ -28240,10 +28274,12 @@ app.whenReady().then(() => {
       return { ok: false, message: 'LoTW rejected the login — check your lotw.arrl.org website username and password (this is NOT the certificate password).' };
     }
     const records = parseLotwAdif(res.body);
-    const qsos = parseAllRawQsos(logPath);
-    const stats = stampLotwConfirmations(qsos, records, lotwKey);
+    let stats;
+    const { qsos } = mutateQsoLog((log) => {
+      stats = stampLotwConfirmations(log, records, lotwKey);
+      if (!stats.confirmed) return false;
+    });
     if (stats.confirmed > 0) {
-      rewriteAdifFile(logPath, qsos);
       loadWorkedQsos();
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
     }
@@ -30796,48 +30832,54 @@ app.whenReady().then(() => {
   // button label; the real run rewrites the log atomically, then refreshes
   // everything derived from it. Identity-proven matches only (shared
   // predicates in lib/event-progress.js); records already stamped skip.
+  function applyEventStamps(ev, qsos, matches, heal) {
+    for (const m of matches) {
+      const r = qsos[m.index];
+      r.APP_POTACAT_EVENT = ev.id;
+      if (m.item) r.APP_POTACAT_EVENT_ITEM = m.item;
+      if (settings.logCommentTags !== false) {
+        const tag = `[${[ev.name || ev.id, m.itemName].filter(Boolean).join(' - ')}]`;
+        const c = String(r.COMMENT || '');
+        if (!c.includes(tag)) r.COMMENT = c ? `${c} ${tag}` : tag;
+      }
+    }
+    for (const c of heal.corrections) {
+      const r = qsos[c.index];
+      const prevName = (() => {
+        const e = (ev.schedule || []).find((s) => s.region === c.prevItem);
+        return e ? e.regionName : c.prevItem;
+      })();
+      r.APP_POTACAT_EVENT_ITEM = c.item;
+      if (settings.logCommentTags !== false) {
+        const oldTag = `[${[ev.name || ev.id, prevName].filter(Boolean).join(' - ')}]`;
+        const newTag = `[${[ev.name || ev.id, c.itemName].filter(Boolean).join(' - ')}]`;
+        const cm = String(r.COMMENT || '');
+        if (cm.includes(oldTag)) r.COMMENT = cm.replace(oldTag, newTag);
+        else if (!cm.includes(newTag)) r.COMMENT = cm ? `${cm} ${newTag}` : newTag;
+      }
+      sendCatLog(`[events] Corrected ${r.CALL} ${r.QSO_DATE}: ${c.prevItem || '(none)'} -> ${c.item} (${ev.name || ev.id})`);
+    }
+  }
+
   ipcMain.handle('event-retro-stamp', (_e, { eventId, dryRun } = {}) => {
     try {
       const ev = activeEvents.find((e) => e && e.id === eventId);
       if (!ev) return { ok: false, error: 'unknown event' };
-      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-      const qsos = parseAllRawQsos(logPath);
-      const matches = retroStampMatches(ev, qsos);
-      // Healing half: stamps written under the first-entry-wins matcher (or
-      // the transposed district table) can name the WRONG state — WG9I's
-      // W1AW/7 Oregon QSO carried New Jersey. Recompute every existing stamp
-      // and fix the disagreements in the same explicit-button pass.
-      const heal = retroCorrectStamps(ev, qsos);
+      let matches = [];
+      let heal = { corrections: [] };
+      mutateQsoLog((qsos) => {
+        matches = retroStampMatches(ev, qsos);
+        // Healing half: stamps written under the first-entry-wins matcher (or
+        // the transposed district table) can name the WRONG state — WG9I's
+        // W1AW/7 Oregon QSO carried New Jersey. Recompute every existing stamp
+        // and fix the disagreements in the same explicit-button pass.
+        heal = retroCorrectStamps(ev, qsos);
+        if (dryRun || (!matches.length && !heal.corrections.length)) return false;
+        applyEventStamps(ev, qsos, matches, heal);
+      });
       if (dryRun || (!matches.length && !heal.corrections.length)) {
         return { ok: true, matched: matches.length, stamped: 0, corrected: heal.corrections.length };
       }
-      for (const m of matches) {
-        const r = qsos[m.index];
-        r.APP_POTACAT_EVENT = ev.id;
-        if (m.item) r.APP_POTACAT_EVENT_ITEM = m.item;
-        if (settings.logCommentTags !== false) {
-          const tag = `[${[ev.name || ev.id, m.itemName].filter(Boolean).join(' - ')}]`;
-          const c = String(r.COMMENT || '');
-          if (!c.includes(tag)) r.COMMENT = c ? `${c} ${tag}` : tag;
-        }
-      }
-      for (const c of heal.corrections) {
-        const r = qsos[c.index];
-        const prevName = (() => {
-          const e = (ev.schedule || []).find((s) => s.region === c.prevItem);
-          return e ? e.regionName : c.prevItem;
-        })();
-        r.APP_POTACAT_EVENT_ITEM = c.item;
-        if (settings.logCommentTags !== false) {
-          const oldTag = `[${[ev.name || ev.id, prevName].filter(Boolean).join(' - ')}]`;
-          const newTag = `[${[ev.name || ev.id, c.itemName].filter(Boolean).join(' - ')}]`;
-          const cm = String(r.COMMENT || '');
-          if (cm.includes(oldTag)) r.COMMENT = cm.replace(oldTag, newTag);
-          else if (!cm.includes(newTag)) r.COMMENT = cm ? `${cm} ${newTag}` : newTag;
-        }
-        sendCatLog(`[events] Corrected ${r.CALL} ${r.QSO_DATE}: ${c.prevItem || '(none)'} -> ${c.item} (${ev.name || ev.id})`);
-      }
-      rewriteAdifFile(logPath, qsos);
       loadWorkedQsos();
       scanLogForEvents();
       rebuildContestHistory();
@@ -31569,27 +31611,16 @@ app.whenReady().then(() => {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
 
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-    let totalImported = 0;
-    const uniqueCalls = new Set();
+    const incoming = [];
     const fileNames = [];
 
     for (const filePath of result.filePaths) {
       try {
         if (isSqliteFile(filePath)) {
           const qsos = await parseSqliteFile(filePath);
-          for (const qso of qsos) {
-            appendImportedQso(logPath, qso);
-            uniqueCalls.add(qso.call.toUpperCase());
-            totalImported++;
-          }
+          for (const qso of qsos) incoming.push(sqliteQsoToAdifFields(qso));
         } else {
-          const qsos = parseAllRawQsos(filePath);
-          for (const qso of qsos) {
-            appendRawQso(logPath, qso);
-            uniqueCalls.add((qso.CALL || '').toUpperCase());
-            totalImported++;
-          }
+          incoming.push(...parseAllRawQsos(filePath));
         }
         fileNames.push(path.basename(filePath));
       } catch (err) {
@@ -31602,6 +31633,10 @@ app.whenReady().then(() => {
         return { success: false, error: `Failed to parse ${path.basename(filePath)}: ${err.message}` };
       }
     }
+
+    // All files are read before anything is written: one duplicate check
+    // across the whole set, one append, one journal write.
+    const { imported: totalImported, skipped: totalSkipped, unique: uniqueCallCount } = importQsoRecords(incoming);
 
     // Reload worked callsigns from updated log and push to renderer
     loadWorkedQsos();
@@ -31629,8 +31664,11 @@ app.whenReady().then(() => {
 
     const fileList = fileNames.join(', ');
     const detailLines = [
-      `${totalImported.toLocaleString()} QSOs (${uniqueCalls.size.toLocaleString()} unique callsigns) added.`,
+      `${totalImported.toLocaleString()} QSOs (${uniqueCallCount.toLocaleString()} unique callsigns) added.`,
     ];
+    if (totalSkipped > 0) {
+      detailLines.push(`${totalSkipped.toLocaleString()} skipped: already in your log (same call, mode, frequency and time).`);
+    }
     if (parksAdded > 0) {
       detailLines.push('');
       detailLines.push(`Worked-parks list now has ${parksAfter.toLocaleString()} references (${parksAdded.toLocaleString()} new from this import).`);
@@ -31649,7 +31687,8 @@ app.whenReady().then(() => {
     return {
       success: true,
       imported: totalImported,
-      unique: uniqueCalls.size,
+      skipped: totalSkipped,
+      unique: uniqueCallCount,
       parksTotal: parksAfter,
       parksAdded,
     };
@@ -33263,28 +33302,7 @@ app.whenReady().then(() => {
       const records = parseAdifStream(adifText);
       sendCatLog(`[QRZ] Parsed ${records.length} records from ${adifText.length} bytes of ADIF`);
 
-      // Dedup against existing log
-      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-      const existingQsos = new Set();
-      try {
-        const existing = parseAllRawQsos(logPath);
-        for (const q of existing) {
-          const key = [q.CALL, q.QSO_DATE, (q.TIME_ON || '').slice(0, 4), q.BAND].join('|').toUpperCase();
-          existingQsos.add(key);
-        }
-      } catch { /* no existing log or parse error */ }
-
-      let imported = 0;
-      let skipped = 0;
-      for (const fields of records) {
-        const key = [fields.CALL, fields.QSO_DATE, (fields.TIME_ON || '').slice(0, 4), fields.BAND].join('|').toUpperCase();
-        if (existingQsos.has(key)) { skipped++; continue; }
-        // appendRawQso expects a fields object — pass the parsed map directly
-        // (the previous code passed a raw string here, which corrupted the log)
-        appendRawQso(logPath, fields);
-        existingQsos.add(key);
-        imported++;
-      }
+      const { imported, skipped } = importQsoRecords(records);
 
       sendCatLog(`[QRZ] Downloaded ${records.length} QSOs, imported ${imported} new, skipped ${skipped} duplicates`);
       if (imported > 0) loadWorkedQsos();
@@ -33526,17 +33544,14 @@ app.whenReady().then(() => {
     if (!refs.length) return { success: false, error: 'No park ref given' };
     try {
       if (!fs.existsSync(logPath)) return { success: false, error: 'Log file not found' };
-      const qsos = parseAllRawQsos(logPath);
-      const before = qsos.length;
-      const filtered = qsos.filter(q => {
+      const { changes } = mutateQsoLog((qsos) => qsos.filter(q => {
         if ((q.QSO_DATE || '') !== date) return true;
         const mySig = (q.MY_SIG || '').toUpperCase();
         const myRef = (q.MY_SIG_INFO || '').toUpperCase();
         return !refs.some(r => r.sig === mySig && r.ref === myRef); // keep unless a ref matches
-      });
-      const removed = before - filtered.length;
+      }));
+      const removed = changes.length;
       if (removed === 0) return { success: true, removed: 0 };
-      rewriteAdifFile(logPath, filtered);
       loadWorkedQsos();
       return { success: true, removed };
     } catch (err) {
@@ -33599,13 +33614,14 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('update-qso', async (event, { idx, fields }) => {
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     try {
-      const qsos = parseAllRawQsos(logPath);
-      if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
-      Object.assign(qsos[idx], fields);
-      rewriteAdifFile(logPath, qsos);
-      if (cloudIpc) cloudIpc.journalUpdate(qsos[idx]);
+      let found = false;
+      mutateQsoLog((qsos) => {
+        if (!qsos[idx]) return false;
+        found = true;
+        Object.assign(qsos[idx], fields);
+      });
+      if (!found) return { success: false, error: 'Invalid index' };
       loadWorkedQsos();
       // Notify other windows about the change
       const sender = event.sender;
@@ -33625,44 +33641,43 @@ app.whenReady().then(() => {
   // row with TIME_ON +N seconds so dupe-detection in downstream loggers
   // doesn't merge them.
   ipcMain.handle('expand-qso-multipark', async (event, { idx, refs }) => {
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    const cleanRefs = (refs || [])
+      .map(r => String(r || '').trim().toUpperCase())
+      .filter(Boolean);
+    if (cleanRefs.length < 2) return { success: false, error: 'Need at least two refs to split' };
     try {
-      const qsos = parseAllRawQsos(logPath);
-      if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
-      const cleanRefs = (refs || [])
-        .map(r => String(r || '').trim().toUpperCase())
-        .filter(Boolean);
-      if (cleanRefs.length < 2) return { success: false, error: 'Need at least two refs to split' };
+      let added = 0;
+      mutateQsoLog((qsos) => {
+        const base = qsos[idx];
+        if (!base) return false;
+        base.SIG = 'POTA';
+        base.SIG_INFO = cleanRefs[0];
+        base.POTA_REF = cleanRefs[0];
 
-      const base = qsos[idx];
-      base.SIG = 'POTA';
-      base.SIG_INFO = cleanRefs[0];
-      base.POTA_REF = cleanRefs[0];
-
-      // Build clones for refs[1..N-1]. TIME_ON is HHMMSS in ADIF; bump the
-      // seconds field by i so each row has a unique timestamp. If the bump
-      // crosses 60s we just keep going — major loggers tolerate non-rollover
-      // times in this range, and 4-park n-fers logged at the same minute
-      // are realistic.
-      const baseTime = (base.TIME_ON || '000000').padEnd(6, '0').slice(0, 6);
-      const baseHms = parseInt(baseTime, 10) || 0;
-      const clones = [];
-      for (let i = 1; i < cleanRefs.length; i++) {
-        const newHms = String(baseHms + i).padStart(6, '0');
-        const clone = { ...base };
-        clone.SIG = 'POTA';
-        clone.SIG_INFO = cleanRefs[i];
-        clone.POTA_REF = cleanRefs[i];
-        clone.TIME_ON = newHms;
-        if (clone.TIME_OFF) clone.TIME_OFF = newHms;
-        clones.push(clone);
-      }
-      qsos.splice(idx + 1, 0, ...clones);
-      rewriteAdifFile(logPath, qsos);
-      if (cloudIpc) {
-        cloudIpc.journalUpdate(base);
-        for (const c of clones) cloudIpc.journalUpdate(c);
-      }
+        // Build clones for refs[1..N-1]. TIME_ON is HHMMSS in ADIF; bump the
+        // seconds field by i so each row has a unique timestamp. If the bump
+        // crosses 60s we just keep going — major loggers tolerate non-rollover
+        // times in this range, and 4-park n-fers logged at the same minute
+        // are realistic. Each clone is its own QSO: mutateQsoLog gives it a
+        // fresh uuid (a {...base} copy carries the base's, which made every
+        // clone overwrite the same cloud record).
+        const baseTime = (base.TIME_ON || '000000').padEnd(6, '0').slice(0, 6);
+        const baseHms = parseInt(baseTime, 10) || 0;
+        const clones = [];
+        for (let i = 1; i < cleanRefs.length; i++) {
+          const newHms = String(baseHms + i).padStart(6, '0');
+          const clone = { ...base };
+          clone.SIG = 'POTA';
+          clone.SIG_INFO = cleanRefs[i];
+          clone.POTA_REF = cleanRefs[i];
+          clone.TIME_ON = newHms;
+          if (clone.TIME_OFF) clone.TIME_OFF = newHms;
+          clones.push(clone);
+        }
+        qsos.splice(idx + 1, 0, ...clones);
+        added = clones.length;
+      });
+      if (!added) return { success: false, error: 'Invalid index' };
       loadWorkedQsos();
       // Notify the QSO pop-out to reload from disk so its indices realign —
       // splice shifted everything after idx.
@@ -33670,21 +33685,19 @@ app.whenReady().then(() => {
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
         qsoPopoutWin.webContents.send('qso-popout-refresh');
       }
-      return { success: true, added: clones.length };
+      return { success: true, added };
     } catch (err) {
       return { success: false, error: err.message };
     }
   });
 
   ipcMain.handle('delete-qso', async (event, idx) => {
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     try {
-      const qsos = parseAllRawQsos(logPath);
-      if (idx < 0 || idx >= qsos.length) return { success: false, error: 'Invalid index' };
-      const deletedQso = { ...qsos[idx] };
-      qsos.splice(idx, 1);
-      rewriteAdifFile(logPath, qsos);
-      if (cloudIpc) cloudIpc.journalDelete(deletedQso);
+      const { changes } = mutateQsoLog((qsos) => {
+        if (idx < 0 || idx >= qsos.length) return false;
+        qsos.splice(idx, 1);
+      });
+      if (!changes.length) return { success: false, error: 'Invalid index' };
       loadWorkedQsos();
       // Notify QSO pop-out about the deletion
       const sender = event.sender;
@@ -33697,38 +33710,86 @@ app.whenReady().then(() => {
     }
   });
 
-  // Update QSO(s) by matching fields (used by activator mode to edit a contact with multiple ADIF records)
-  ipcMain.handle('update-qsos-by-match', async (_event, { match, updates }) => {
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  // Find Duplicates (logbook): groups of records that are the same contact,
+  // by the rule import and cloud merge use. Each member carries a content
+  // fingerprint; the delete call below refuses to act if the log changed in
+  // between, so the operator only ever removes what they were shown.
+  ipcMain.handle('find-duplicate-qsos', () => {
     try {
-      const qsos = parseAllRawQsos(logPath);
-      const callUpper = (match.callsign || '').toUpperCase();
-      const dateMatch = (match.qsoDate || '').replace(/-/g, '');
-      const timeMatch = (match.timeOn || '').replace(/:/g, '');
-      let updated = 0;
-      for (const q of qsos) {
-        const qCall = (q.CALL || '').toUpperCase();
-        const qDate = (q.QSO_DATE || '').replace(/-/g, '');
-        const qTime = (q.TIME_ON || '').replace(/:/g, '').substring(0, 4);
-        if (qCall !== callUpper) continue;
-        if (qDate !== dateMatch) continue;
-        if (qTime !== timeMatch.substring(0, 4)) continue;
-        if (match.frequency) {
-          const qFreq = parseFloat(q.FREQ || 0) * 1000;
-          const mFreq = parseFloat(match.frequency);
-          if (Math.abs(qFreq - mFreq) > 1) continue;
+      const qsos = QsoLog.readLog(qsoLogPath());
+      const groups = findDuplicateGroups(qsos).map(({ members, keep }) => ({
+        keep,
+        members: members.map((idx) => ({ idx, fp: QsoLog.fingerprint(qsos[idx]), fields: qsos[idx] })),
+      }));
+      return { success: true, scanned: qsos.length, groups };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('delete-duplicate-qsos', (event, { remove } = {}) => {
+    try {
+      const targets = Array.isArray(remove) ? remove : [];
+      if (!targets.length) return { success: true, removed: 0 };
+      let stale = false;
+      const { changes } = mutateQsoLog((qsos) => {
+        const drop = new Set();
+        for (const { idx, fp } of targets) {
+          if (!qsos[idx] || QsoLog.fingerprint(qsos[idx]) !== fp) { stale = true; return false; }
+          drop.add(idx);
         }
-        // Apply updates
-        Object.assign(q, updates);
-        updated++;
+        return qsos.filter((_q, i) => !drop.has(i));
+      });
+      if (stale) return { success: false, error: 'The log changed since the scan. Run Find Duplicates again.' };
+      loadWorkedQsos();
+      const sender = event.sender;
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
+        qsoPopoutWin.webContents.send('qso-popout-refresh');
       }
-      if (updated > 0) {
-        rewriteAdifFile(logPath, qsos);
-        loadWorkedQsos();
-        if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-          const refreshed = parseAllRawQsos(logPath);
-          qsoPopoutWin.webContents.send('qso-popout-refreshed', refreshed);
+      return { success: true, removed: changes.length };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Activator mode edits/deletes a contact that can span several ADIF
+  // records (one per park): callsign + date + HHMM (+ frequency) selects them.
+  function qsoMatcher(match) {
+    const callUpper = (match.callsign || '').toUpperCase();
+    const dateMatch = (match.qsoDate || '').replace(/-/g, '');
+    const timeMatch = (match.timeOn || '').replace(/:/g, '').substring(0, 4);
+    return (q) => {
+      if ((q.CALL || '').toUpperCase() !== callUpper) return false;
+      if ((q.QSO_DATE || '').replace(/-/g, '') !== dateMatch) return false;
+      if ((q.TIME_ON || '').replace(/:/g, '').substring(0, 4) !== timeMatch) return false;
+      if (match.frequency) {
+        const qFreq = parseFloat(q.FREQ || 0) * 1000; // FREQ in MHz -> kHz
+        if (Math.abs(qFreq - parseFloat(match.frequency)) > 1) return false;
+      }
+      return true;
+    };
+  }
+
+  function refreshQsoPopoutFromDisk() {
+    if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+      qsoPopoutWin.webContents.send('qso-popout-refreshed', QsoLog.readLog(qsoLogPath()));
+    }
+  }
+
+  ipcMain.handle('update-qsos-by-match', async (_event, { match, updates }) => {
+    try {
+      const matches = qsoMatcher(match);
+      let updated = 0;
+      mutateQsoLog((qsos) => {
+        for (const q of qsos) {
+          if (!matches(q)) continue;
+          Object.assign(q, updates);
+          updated++;
         }
+      });
+      if (updated > 0) {
+        loadWorkedQsos();
+        refreshQsoPopoutFromDisk();
       }
       return { success: true, updated };
     } catch (err) {
@@ -33736,39 +33797,14 @@ app.whenReady().then(() => {
     }
   });
 
-  // Delete QSO(s) by matching fields (used by activator mode to remove a contact with multiple ADIF records)
   ipcMain.handle('delete-qsos-by-match', async (_event, match) => {
-    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     try {
-      const qsos = parseAllRawQsos(logPath);
-      const before = qsos.length;
-      const callUpper = (match.callsign || '').toUpperCase();
-      const dateMatch = (match.qsoDate || '').replace(/-/g, '');
-      const timeMatch = (match.timeOn || '').replace(/:/g, '');
-      // Remove all QSOs that match callsign + date + time (+ freq if provided)
-      const filtered = qsos.filter(q => {
-        const qCall = (q.CALL || '').toUpperCase();
-        const qDate = (q.QSO_DATE || '').replace(/-/g, '');
-        const qTime = (q.TIME_ON || '').replace(/:/g, '').substring(0, 4);
-        if (qCall !== callUpper) return true;
-        if (qDate !== dateMatch) return true;
-        if (qTime !== timeMatch.substring(0, 4)) return true;
-        if (match.frequency) {
-          const qFreq = parseFloat(q.FREQ || 0) * 1000; // FREQ in MHz -> kHz
-          const mFreq = parseFloat(match.frequency);
-          if (Math.abs(qFreq - mFreq) > 1) return true;
-        }
-        return false; // matched — remove
-      });
-      const removed = before - filtered.length;
+      const matches = qsoMatcher(match);
+      const { changes } = mutateQsoLog((qsos) => qsos.filter((q) => !matches(q)));
+      const removed = changes.length;
       if (removed > 0) {
-        rewriteAdifFile(logPath, filtered);
         loadWorkedQsos();
-        // Notify QSO pop-out to refresh
-        if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-          const refreshed = parseAllRawQsos(logPath);
-          qsoPopoutWin.webContents.send('qso-popout-refreshed', refreshed);
-        }
+        refreshQsoPopoutFromDisk();
       }
       return { success: true, removed };
     } catch (err) {

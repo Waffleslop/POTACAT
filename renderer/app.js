@@ -8504,6 +8504,7 @@ async function runAdifImport(resultEl) {
       resultEl.textContent = '';
     } else if (result.success) {
       const parts = [`${result.imported.toLocaleString()} QSOs imported`];
+      if (result.skipped > 0) parts.push(`${result.skipped.toLocaleString()} already in the log`);
       if (result.parksAdded > 0) {
         parts.push(`${result.parksAdded.toLocaleString()} new park ref${result.parksAdded === 1 ? '' : 's'}`);
       }
