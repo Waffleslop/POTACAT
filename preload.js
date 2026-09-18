@@ -214,6 +214,9 @@ contextBridge.exposeInMainWorld('api', {
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
   onCatPower: (cb) => ipcRenderer.on('cat-power', (_e, watts) => cb(watts)),
+  // Measured forward power while transmitting (Flex TX bridge, rigctld
+  // RFPOWER_METER, Kenwood SM during TX) — distinct from the power SETTING.
+  onCatFwdPower: (cb) => ipcRenderer.on('cat-fwd-power', (_e, watts) => cb(watts)),
   onCatSmeter: (cb) => ipcRenderer.on('cat-smeter', (_e, val) => cb(val)),
   onCatSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onCatSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),

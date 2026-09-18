@@ -18903,6 +18903,29 @@ window.api.onCatSwr((val) => {
   swrTextEl.style.color = color;
 });
 
+// Measured forward power. Scaled against the radio's power SETTING when it
+// is known (95 W out of a 100 W setting fills the bar), else 100 W. 0 W after
+// key-up decays the bar rather than leaving the last reading up.
+const pwrBarCanvas = document.getElementById('pwr-bar');
+const pwrTextEl = document.getElementById('pwr-text');
+if (window.api.onCatFwdPower && pwrBarCanvas) {
+  window.api.onCatFwdPower((watts) => {
+    const w = Number(watts) || 0;
+    if (w <= 0) {
+      drawMeterBar(pwrBarCanvas, 0, '#333');
+      pwrTextEl.textContent = '—';
+      pwrTextEl.style.color = '#666';
+      return;
+    }
+    if (meterBoxVisible) meterBox.classList.remove('hidden');
+    const full = radioPower > 0 ? radioPower : 100;
+    const level = Math.min(1, w / full);
+    drawMeterBar(pwrBarCanvas, level, '#4ecca3');
+    pwrTextEl.textContent = (w < 10 ? w.toFixed(1) : Math.round(w)) + ' W';
+    pwrTextEl.style.color = '#4ecca3';
+  });
+}
+
 // Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
 window.api.onCatSwrRatio((swr) => {
   if (meterBoxVisible) meterBox.classList.remove('hidden');

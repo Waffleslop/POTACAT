@@ -2600,6 +2600,24 @@ function sendCatMode(mode) {
   sendN1mmRadioInfo();
 }
 
+// Measured forward power, from whichever radio reports one (Flex TX bridge
+// fwd-power, rigctld RFPOWER_METER, Kenwood SM while keyed). One fan-out for
+// every wattmeter: main window, VFO and JTCAT pop-outs, ECHOCAT clients.
+// Frames only flow during TX, so the displays decay to 0 shortly after they
+// stop rather than showing stale watts forever.
+function sendCatFwdPower(watts) {
+  const w = Math.round((Number(watts) || 0) * 10) / 10;
+  const push = (v) => {
+    if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', v);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', v);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', v);
+    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: v });
+  };
+  push(w);
+  if (_fwdPowerClearTimer) clearTimeout(_fwdPowerClearTimer);
+  _fwdPowerClearTimer = setTimeout(() => { _fwdPowerClearTimer = null; push(0); }, 3000);
+}
+
 function sendCatPower(watts) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-power', watts);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-power', watts);
@@ -4266,10 +4284,12 @@ async function connectCat() {
     });
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -4361,10 +4381,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -4402,10 +4424,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -4452,10 +4476,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
 	    cat.on('swr', sendCatSwr);
@@ -4560,10 +4586,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -11577,17 +11605,7 @@ function connectSmartSdr() {
   smartSdr.on('fwd-power', (watts) => {
     const w = Math.round((Number(watts) || 0) * 10) / 10;
     if (_flexTxRf) { _flexTxRf.frames++; if (w > _flexTxRf.peakW) _flexTxRf.peakW = w; }
-    if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', w);
-    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', w);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', w);
-    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: w });
-    if (_fwdPowerClearTimer) clearTimeout(_fwdPowerClearTimer);
-    _fwdPowerClearTimer = setTimeout(() => {
-      _fwdPowerClearTimer = null;
-      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', 0);
-      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', 0);
-      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: 0 });
-    }, 3000);
+    sendCatFwdPower(w);
   });
   smartSdr.on('swr-ratio', (swr) => {
     if (_flexTxRf && swr > _flexTxRf.maxSwr) _flexTxRf.maxSwr = swr;
