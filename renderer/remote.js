@@ -558,6 +558,33 @@
   const bandFilterEl = document.getElementById('rc-band-filter');
   const modeFilterEl = document.getElementById('rc-mode-filter');
   const regionFilterEl = document.getElementById('rc-region-filter');
+  // Callsign filter — VERBATIM copy of lib/call-filter.js (this page cannot
+  // load node modules; test/call-filter-test.js pins the copy). Device-local.
+  function parseCallFilter(spec) {
+    const tokens = String(spec || '').toUpperCase().split(/[\s,;]+/).filter(Boolean);
+    return tokens.map((t) => ({
+      token: t,
+      re: new RegExp('^' + t.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')),
+    }));
+  }
+  function callMatchesFilter(callsign, matchers) {
+    if (!matchers || !matchers.length) return true;
+    const c = String(callsign || '').toUpperCase();
+    for (let i = 0; i < matchers.length; i++) if (matchers[i].re.test(c)) return true;
+    return false;
+  }
+  const callFilterEl = document.getElementById('rc-call-filter');
+  let callFilter = [];
+  if (callFilterEl) {
+    try { callFilterEl.value = localStorage.getItem('echocat-call-filter') || ''; } catch {}
+    callFilter = parseCallFilter(callFilterEl.value);
+    callFilterEl.addEventListener('input', () => {
+      callFilter = parseCallFilter(callFilterEl.value);
+      try { localStorage.setItem('echocat-call-filter', callFilterEl.value); } catch {}
+      renderSpots();
+      if (activeTab === 'map') renderMapSpots();
+    });
+  }
   const spotsDropdown = document.getElementById('rc-spots-dropdown');
   const rcNewOnly = document.getElementById('rc-new-only');
   const rcHideWorked = document.getElementById('rc-hide-worked');
@@ -2392,6 +2419,7 @@
     const filtered = spots.filter(s => {
       if (bands && !bands.has(s.band)) return false;
       if (modes && !modes.has(spotModeCategory(s.mode))) return false;
+      if (callFilter.length && !callMatchesFilter(s.callsign, callFilter)) return false;
       if (regions && s.continent && !regions.has(s.continent)) return false;
       if (spotMatchesMuteRule(s)) return false;
       if (showNewOnly && !isNewPark(s)) return false;

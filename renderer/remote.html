@@ -927,6 +927,8 @@
           <label class="rc-dropdown-item"><input type="checkbox" value="SA"> S. America</label>
         </div>
       </div>
+      <!-- Callsign filter: prefixes or calls, comma-separated, * wildcard. Device-local (mirrors lib/call-filter.js). -->
+      <input type="search" id="rc-call-filter" placeholder="Calls: LZ, SP9ABC" title="Show only these callsigns or prefixes — comma-separated, * and ? wildcards. Empty = all." autocomplete="off" autocapitalize="characters" spellcheck="false" style="width:120px;font-size:12px;padding:3px 6px;background:var(--bg-input,#111);color:inherit;border:1px solid var(--border,#444);border-radius:4px;">
 
       <!-- Spots dropdown panel -->
       <div class="rc-dropdown" id="rc-spots-dropdown">

@@ -623,6 +623,21 @@ const MI_TO_KM = 1.60934;
 
 const bandFilterEl = document.getElementById('band-filter');
 const modeFilterEl = document.getElementById('mode-filter');
+// Callsign filter (lib/call-filter.js): a list of calls or prefixes; empty =
+// everything. Device-local, like column widths — a hunter's shortlist for
+// this screen, not a station setting.
+const callFilterEl = document.getElementById('call-filter');
+let callFilter = [];
+(function initCallFilter() {
+  if (!callFilterEl || typeof CallFilter === 'undefined') return;
+  try { callFilterEl.value = localStorage.getItem('pota-cat-call-filter') || ''; } catch {}
+  callFilter = CallFilter.parseCallFilter(callFilterEl.value);
+  callFilterEl.addEventListener('input', () => {
+    callFilter = CallFilter.parseCallFilter(callFilterEl.value);
+    try { localStorage.setItem('pota-cat-call-filter', callFilterEl.value); } catch {}
+    if (typeof render === 'function') render();
+  });
+})();
 const tbody = document.getElementById('spots-body');
 const noSpots = document.getElementById('no-spots');
 // Ctrl/Cmd-click multi-op selection: callsigns (uppercased) picked across spots
@@ -8988,6 +9003,7 @@ function getFiltered() {
     if (isPinned) {
       if (bands && !bands.has(s.band)) return false;
       if (!modeMatches(s.mode, modes)) return false;
+      if (callFilter.length && !CallFilter.callMatchesFilter(s.callsign, callFilter)) return false;
       if (continents && !continents.has(s.continent)) return false;
       if (typeof SpotMuteRules !== 'undefined' && SpotMuteRules.matchesMuteRule(s, spotMuteRules)) return false;
       return true;
@@ -9025,6 +9041,7 @@ function getFiltered() {
     }
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
+    if (callFilter.length && !CallFilter.callMatchesFilter(s.callsign, callFilter)) return false;
     if (continents && !continents.has(s.continent)) return false;
     // Per-band region mutes (N7BBQ: JA on 40m unworkable daily, but the same
     // stations on 15m are wanted — a global Asia filter is too blunt). Table,
