@@ -360,6 +360,7 @@ const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const MercuryAppProto = require('./lib/mercury-app-protocol');
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const QsoLog = require('./lib/qso-log');
+const OriginHealth = require('./lib/origin-health');
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -426,6 +427,10 @@ let qrz = new QrzClient();
 
 // --- Cloud Sync (initialized in app.whenReady) ---
 let cloudIpc = null;
+// Last 'server-state' from the ECHOCAT listener (lib/remote-server.js
+// serverState()). null until the first start. The tunnel origin check,
+// the Settings card and the bug report all read this.
+let _echocatServerState = null;
 let potaSync = null; // lib/pota-sync.js instance — created lazily on first access
 // --- POTACAT Cloud (CF tunnel) — initialized in app.whenReady, after cloudIpc ---
 let cloudTunnel = null;
@@ -3063,6 +3068,14 @@ function gatherDesktopRawDiagnostic() {
         catch { return 0; }
       })(),
       passSession: !!(conn && conn.passSession),
+      // The listener the phone and the tunnel both reach for. "not
+      // listening" here explains a 502 without anyone inferring it.
+      localServer: (() => {
+        try {
+          if (!settings.enableRemote) return { enabled: false, listening: false, https: null, port: settings.remotePort || 7300, bindFailed: false, tlsFailed: false, lastError: '' };
+          return Object.assign({ enabled: true }, remoteServer ? remoteServer.serverState() : { listening: false });
+        } catch { return null; }
+      })(),
     },
     pairedDevices: (paired || []).map(d => ({
       id: d.id, name: d.name, platform: d.platform, lastSeenAt: d.lastSeen || null,
@@ -3100,6 +3113,7 @@ function gatherDesktopRawDiagnostic() {
       status: (tunnel && tunnel.status) || 'off',
       cloudHost: (tunnel && tunnel.cloudHost) || null,
       lastHealthCheckAt: (tunnel && tunnel.lastCheckAt) || null,
+      origin: (tunnel && tunnel.origin) || null,
     },
     logLines: getRecentSendCatLog(400),
   };
@@ -14674,6 +14688,46 @@ async function restartEchoAudio(source) {
   }
 }
 
+function onEchocatServerState(state) {
+  const prev = _echocatServerState;
+  _echocatServerState = state;
+  if (win && !win.isDestroyed()) win.webContents.send('echocat-server-state', state);
+  const failedNow = !!(state && (state.bindFailed || (state.tlsFailed && !state.listening)));
+  const failedBefore = !!(prev && (prev.bindFailed || (prev.tlsFailed && !prev.listening)));
+  if (failedNow && !failedBefore && win && !win.isDestroyed()) {
+    // Sticky: this is the "phones cannot reach me" state, and it stays
+    // until the operator reads it or the port binds.
+    win.webContents.send('app-notice', { message: 'ECHOCAT is not reachable: ' + (state.lastError || 'the local server did not start'), warn: true, sticky: true, duration: 0 });
+  } else if (!failedNow && failedBefore && state && state.listening && win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: `ECHOCAT server is up on port ${state.port}`, duration: 5000 });
+  }
+  // Let the tunnel card flip now rather than at the next 5-minute tick.
+  if (cloudTunnel && typeof cloudTunnel.recheckOrigin === 'function') {
+    cloudTunnel.recheckOrigin().catch(() => {});
+  }
+}
+
+// The Cloud Tunnel's origin self-test (lib/origin-health.js). The ingress is
+// fixed server-side at https://localhost:7300, so this checks the port the
+// operator configured against that, the listener's own state, and — only
+// when the listener claims to be up — one real local HTTPS request.
+async function probeOriginForTunnel() {
+  const tunnel = cloudTunnel ? cloudTunnel.getState() : { enabled: false, status: 'off' };
+  const port = settings.remotePort || 7300;
+  let server;
+  if (!settings.enableRemote || !remoteServer) {
+    server = { listening: false, https: null, port, bindFailed: false, tlsFailed: false,
+      lastError: 'ECHOCAT is switched off, so the Cloud Tunnel has nothing to forward to. Turn ECHOCAT on in Settings > ECHOCAT.' };
+  } else {
+    server = remoteServer.serverState();
+  }
+  let probe = null;
+  if (tunnel.enabled && server.listening) {
+    try { probe = await OriginHealth.probeLocalOrigin(port); } catch (err) { probe = { ok: false, https: null, statusCode: null, error: err.message }; }
+  }
+  return OriginHealth.decideOriginState({ tunnelEnabled: tunnel.enabled, tunnelStatus: tunnel.status, port, server, probe });
+}
+
 function connectRemote() {
   disconnectRemote();
   if (!settings.enableRemote) return;
@@ -14823,6 +14877,12 @@ function connectRemote() {
   // and Jonathan KM4CFT reported "Page does not load. Nothing in Verbose
   // log." in v1.5.7 with no further information possible.
   remoteServer.on('log', (msg) => sendCatLog('[Echo CAT] ' + msg));
+  // The listen result used to go nowhere: 'started' had no listener, so a
+  // bind failure or a plain-HTTP fallback left the app looking normal and
+  // the Cloud Tunnel reporting healthy while every request 502'd (K5AWJ
+  // 2026-09-17). Now it drives a banner, the Settings card and the tunnel
+  // origin check.
+  remoteServer.on('server-state', onEchocatServerState);
 
   remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
@@ -24492,6 +24552,8 @@ app.whenReady().then(() => {
     let label;
     if (!state || !state.enabled) {
       label = '🌐 LAN only';
+    } else if (state.status === 'live' && state.origin && state.origin.state !== 'ok' && state.origin.state !== 'pending') {
+      label = '🌐 Cloud up · POTACAT not answering';
     } else if (state.status === 'live') {
       label = `🌐 Cloud · ${state.cloudHost || '(unknown host)'}`;
     } else {
@@ -24500,7 +24562,8 @@ app.whenReady().then(() => {
     cloudTray.setToolTip(`POTACAT — ${label}`);
     // ECHOCAT Web over the tunnel: a live cloudHost is a URL any browser
     // can open (sign-in at login.potacat.com).
-    const openInBrowser = (state && state.enabled && state.status === 'live' && state.cloudHost)
+    const originOk = !(state && state.origin) || state.origin.state === 'ok';
+    const openInBrowser = (state && state.enabled && state.status === 'live' && state.cloudHost && originOk)
       ? [{ label: 'Open in browser', click: () => { try { require('electron').shell.openExternal('https://' + state.cloudHost); } catch {} } }]
       : [];
     try {
@@ -24539,6 +24602,7 @@ app.whenReady().then(() => {
       getCloudflaredPath: resolveCloudflaredPath,
       log: (msg) => sendCatLog(msg),
       safeStorage,
+      probeOrigin: () => probeOriginForTunnel(),
     });
     cloudTunnel.on('change', (state) => {
       if (win && !win.isDestroyed()) win.webContents.send('cloud-tunnel-state', state);
@@ -24617,6 +24681,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle('cloud-tunnel-get-state', () => {
     return cloudTunnel ? cloudTunnel.getState() : { enabled: false, status: 'off' };
+  });
+
+  ipcMain.handle('echocat-server-state-get', () => {
+    if (!settings.enableRemote) return { enabled: false, listening: false, https: null, port: settings.remotePort || 7300, bindFailed: false, tlsFailed: false, lastError: '' };
+    return Object.assign({ enabled: true }, remoteServer ? remoteServer.serverState() : (_echocatServerState || { listening: false }));
   });
 
   ipcMain.handle('cloud-tunnel-enable', async () => {

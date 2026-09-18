@@ -821,6 +821,9 @@
   const ctError = document.getElementById('cloud-tunnel-error');
   const ctDegraded = document.getElementById('cloud-tunnel-degraded');
   const ctDegradedText = document.getElementById('cloud-tunnel-degraded-text');
+  const ctOrigin = document.getElementById('cloud-tunnel-origin');
+  const ctOriginTitle = document.getElementById('cloud-tunnel-origin-title');
+  const ctOriginText = document.getElementById('cloud-tunnel-origin-text');
 
   // ECHOCAT-tab banner mirrors the canonical Cloud-tab state. The
   // Manage button hands off to the existing 'open-settings-panel'
@@ -831,9 +834,16 @@
 
   function renderTunnelState(state) {
     if (!state) return;
+    // Origin self-test (lib/origin-health.js). The cloud vouching for
+    // cloudflared is not the same as POTACAT answering behind it: a dead
+    // origin used to show green "Live" with a link that 502'd (K5AWJ).
+    const originBad = !!(state.enabled && state.origin && state.origin.state !== 'ok' && state.origin.state !== 'pending' && state.origin.state !== 'off');
+    const linkable = state.status === 'live' && !originBad;
     let label, pillClass;
     if (!state.enabled) {
       label = 'LAN only'; pillClass = 'status disconnected';
+    } else if (originBad && state.status === 'live') {
+      label = state.origin.label || 'Cloud up · POTACAT not answering'; pillClass = 'status connecting';
     } else if (state.degraded) {
       // Nominally up but cloudflared can't refresh DNS — amber, not
       // green: the tunnel is failing and the user needs to act.
@@ -853,7 +863,7 @@
       // Web signs in at login.potacat.com). data-external routes it
       // to the default browser via app.js's delegation.
       ctHost.textContent = '';
-      if (hostText && state.status === 'live') {
+      if (hostText && linkable) {
         const a = document.createElement('a');
         a.href = 'https://' + hostText;
         a.textContent = hostText;
@@ -868,6 +878,15 @@
     if (ctBannerHost) ctBannerHost.textContent = hostText ? 'https://' + hostText : '';
     if (ctEnableBtn) ctEnableBtn.classList.toggle('hidden', !!state.enabled);
     if (ctDisableBtn) ctDisableBtn.classList.toggle('hidden', !state.enabled);
+    if (ctOrigin) {
+      if (originBad) {
+        if (ctOriginTitle) ctOriginTitle.textContent = '⚠ ' + (state.origin.label || 'Cloud up · POTACAT not answering');
+        if (ctOriginText) ctOriginText.textContent = ' — ' + (state.origin.reason || 'POTACAT is not answering behind the tunnel.');
+        ctOrigin.classList.remove('hidden');
+      } else {
+        ctOrigin.classList.add('hidden');
+      }
+    }
     if (ctDegraded) {
       if (state.degraded) {
         if (ctDegradedText) ctDegradedText.textContent = ' — ' + (state.degradedReason || 'The Cloud Tunnel is having DNS trouble.');

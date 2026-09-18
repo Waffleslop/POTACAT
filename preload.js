@@ -153,6 +153,13 @@ contextBridge.exposeInMainWorld('api', {
   cloudTunnelEnable: () => ipcRenderer.invoke('cloud-tunnel-enable'),
   cloudTunnelDisable: () => ipcRenderer.invoke('cloud-tunnel-disable'),
   cloudTunnelDiagnostics: () => ipcRenderer.invoke('cloud-tunnel-diagnostics'),
+  // ECHOCAT listener state (bind / TLS outcome) — the tunnel origin.
+  echocatServerStateGet: () => ipcRenderer.invoke('echocat-server-state-get'),
+  onEchocatServerState: (cb) => {
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on('echocat-server-state', handler);
+    return () => ipcRenderer.removeListener('echocat-server-state', handler);
+  },
   onCloudTunnelState: (cb) => {
     const handler = (_e, state) => cb(state);
     ipcRenderer.on('cloud-tunnel-state', handler);
