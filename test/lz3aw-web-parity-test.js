@@ -97,5 +97,70 @@ test('desktop VFO pop-out: a toggle alternates On and Off commands; sliders are 
   assert.ok(/btn\.textContent = b\.name \+ ' ' \+ \(on \? 'On' : 'Off'\);/.test(vfo));
 });
 
+console.log('\n=== #13 {call}: the most recently changed field, on any surface ===');
+const { TypedCallTracker } = require('../lib/typed-call');
+test('tracker: latest non-empty field wins; a cleared field drops out and the next most recent stands in', () => {
+  const t = new TypedCallTracker();
+  assert.strictEqual(t.current(), '');
+  t.set('web:vf', 'w1aw ');
+  assert.strictEqual(t.current(), 'W1AW');
+  t.set('main:log', 'K3SBP');
+  assert.strictEqual(t.current(), 'K3SBP', 'newer field wins over an older one');
+  t.set('main:log', '');
+  assert.strictEqual(t.current(), 'W1AW', 'cleared: the older still-filled field stands in');
+  t.set('popout', 'N2XYZ');
+  t.clear('popout');
+  assert.strictEqual(t.current(), 'W1AW');
+  t.set('web:vf', '');
+  assert.strictEqual(t.current(), '', 'nothing left');
+});
+test('main: one setter broadcasts the winner to the window, the VFO pop-out and ECHOCAT; pop-out close clears; web reports arrive', () => {
+  assert.ok(/const typedCalls = new TypedCallTracker\(\);/.test(main));
+  const fn = main.slice(main.indexOf('function setTypedCall'), main.indexOf('function setTypedCall') + 700);
+  assert.ok(/if \(now === prev\) return;/.test(fn), 'no broadcast when the winner is unchanged');
+  assert.ok(/win\.webContents\.send\('log-popout-callsign', now\)/.test(fn) && /vfoPopoutWin\.webContents\.send\('log-popout-callsign', now\)/.test(fn) && /remoteServer\.sendTypedCall\(now\)/.test(fn));
+  assert.ok(/ipcMain\.on\('log-popout-callsign', \(_e, call, source\) => \{/.test(main));
+  assert.ok(/logPopoutWin = null;\n\s+setTypedCall\('popout', ''\);/.test(main));
+  assert.ok(/vfoPopoutWin\.webContents\.send\('log-popout-callsign', typedCalls\.current\(\)\);/.test(main), 'VFO pop-out hydrated on open');
+  assert.ok(/remoteServer\.on\('typed-call', \(\{ call, source \}\) => setTypedCall\('web:' \+ \(source \|\| 'log'\), call\)\);/.test(main));
+});
+test('protocol + server: typed-call is registered both ways, demuxed, and hydrated at connect', () => {
+  const proto = require('../lib/echocat-protocol');
+  const reg = proto.MESSAGES || proto.REGISTRY || proto.messages || proto;
+  const entry = (reg && reg['typed-call']) || (proto.get && proto.get('typed-call'));
+  assert.ok(entry, 'registry entry');
+  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/case 'typed-call':\n[\s\S]{0,300}this\.emit\('typed-call', \{ call: String\(msg\.call \|\| ''\), source: String\(msg\.source \|\| ''\) \}\);/.test(srv));
+  assert.ok(/sendTypedCall\(call\) \{\n\s+this\._typedCall = String\(call \|\| ''\);/.test(srv));
+  assert.ok(/if \(this\._typedCall\) this\._sendTo\(ws, \{ type: 'typed-call', call: this\._typedCall \}\);/.test(srv), 'hydrated');
+});
+test('web: every call field reports (typed, filled, cleared) and {call} prefers the shared winner', () => {
+  for (const src of ['ql', 'lt', 'log']) assert.ok(new RegExp(`reportTypedCall\\('${src}', ${src}Call\\.value\\)`).test(web), src + ' typing');
+  assert.ok(/reportTypedCall\('vf', v\);/.test(web), 'VFO-panel box');
+  assert.ok(/logCall\.value = p\.callsign \|\| '';\n\s+reportTypedCall\('log', logCall\.value\);/.test(web), 'sheet open (code-set)');
+  assert.ok(/function closeLogSheet\(\) \{\n\s+reportTypedCall\('log', ''\);/.test(web), 'sheet close');
+  assert.ok(/qlCall\.value = '';\n\s+reportTypedCall\('ql', ''\);/.test(web), 'quick log cleared after logging');
+  assert.ok(/case 'typed-call':\n\s+sharedTypedCall = /.test(web));
+  const mc = web.slice(web.indexOf('function macroCallsign'), web.indexOf('function macroCallsign') + 900);
+  assert.ok(/if \(sharedTypedCall\) return sharedTypedCall;/.test(mc), 'shared winner first');
+});
+test('desktop: every call field reports with its source; the expander prefers the shared winner, then live fields', () => {
+  assert.ok(/reportLogCallsign\(v, 'main:log'\)/.test(app));
+  assert.ok(/reportLogCallsign\(blCallsign\.value\.trim\(\)\.toUpperCase\(\), 'main:banner'\)/.test(app));
+  assert.ok(/reportLogCallsign\(activatorCallsignInput\.value\.trim\(\)\.toUpperCase\(\), 'main:activator'\)/.test(app));
+  assert.ok((app.match(/reportLogCallsign\('', 'main:activator'\)/g) || []).length >= 1, 'activator clears report');
+  assert.ok(/logDialog\.addEventListener\('close', \(\) => \{ report\(''\); if \(logCallEl\) logCallEl\.value = ''; \}\);/.test(app), 'dialog close clears the field too');
+  const ex = app.slice(app.indexOf('function expandDesktopCwMacros'), app.indexOf('function expandDesktopCwMacros') + 900);
+  assert.ok(/const call = _logPopoutCallsign \|\| live/.test(ex));
+  assert.ok(/'log-callsign', 'activator-callsign', 'bl-callsign'/.test(ex), 'all three local fields are read live');
+});
+test('log pop-out: reports on code-set values as well as typing; preloads carry the source', () => {
+  const lp = R('log-popout.js');
+  assert.ok((lp.match(/reportCall\(\);/g) || []).length >= 3, 'clearForm + both prefills report');
+  assert.ok(/ipcRenderer\.send\('log-popout-callsign', call, 'popout'\)/.test(fs.readFileSync(path.join(__dirname, '..', 'preload-log-popout.js'), 'utf8')));
+  assert.ok(/reportLogCallsign: \(call, source\) => ipcRenderer\.send\('log-popout-callsign', call, source\)/.test(fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8')));
+  assert.ok(/text\.replace\(\/\\\{call\\\}\/gi, cwTypedCall \|\| cwTunedCall \|\| ''\)/.test(vfo), 'VFO pop-out free text expands {call}');
+});
+
 console.log(`\nLZ3AW web parity: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

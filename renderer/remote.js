@@ -275,6 +275,9 @@
   // into the log on the wrong frequency (LZ3AW 2026-08-29: "WEB Log doesn't
   // follow the frequency").
   let logFreqDirty = false;
+  // The callsign being worked as main sees it across EVERY surface (S2C
+  // typed-call) — the most recently changed non-empty field, desktop or web.
+  let sharedTypedCall = '';
   // A sheet opened from a spot is frozen at the spot's frequency — until the
   // radio actually arrives there, after which it follows the dial like any
   // other (the "only gets the frequency from a spot" half of LZ3AW #12).
@@ -1424,6 +1427,10 @@
 
       case 'swr':
         updateEchoSwr(msg.value);
+        break;
+
+      case 'typed-call':
+        sharedTypedCall = String(msg.call || '').trim().toUpperCase();
         break;
 
       case 'swr-ratio':
@@ -5574,6 +5581,7 @@
   function openLogSheet(prefill) {
     const p = prefill || {};
     logCall.value = p.callsign || '';
+    reportTypedCall('log', logCall.value); // a value set in code counts too
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
@@ -5635,6 +5643,7 @@
   }
 
   function closeLogSheet() {
+    reportTypedCall('log', ''); // a closed sheet is not holding a call
     logSheet.classList.add('slide-down');
     setTimeout(() => {
       logSheet.classList.add('hidden');
@@ -6150,6 +6159,10 @@
   qlCall.addEventListener('input', () => triggerCallLookup(qlCall, 'ql'));
   ltCall.addEventListener('input', () => triggerCallLookup(ltCall, 'lt'));
   logCall.addEventListener('input', () => triggerCallLookup(logCall, 'log'));
+  // Every field that can hold the call being worked reports it (CW {call}).
+  qlCall.addEventListener('input', () => reportTypedCall('ql', qlCall.value));
+  ltCall.addEventListener('input', () => reportTypedCall('lt', ltCall.value));
+  logCall.addEventListener('input', () => reportTypedCall('log', logCall.value));
 
   function showCallLookup(msg) {
     const infoEl = callLookupSource === 'lt' ? ltCallInfo : callLookupSource === 'log' ? logCallInfo : qlCallInfo;
@@ -6220,6 +6233,7 @@
     }
 
     qlCall.value = '';
+    reportTypedCall('ql', '');
     qlCallInfo.classList.add('hidden');
     qlCallInfo.textContent = '';
     qlNotes.value = '';
@@ -8400,10 +8414,18 @@
    *  running a frequency you answer callers you were never tuned to, and
    *  N1MM has always sent what's in the entry field (LZ3AW 2026-08-29).
    *  Falls back to the tuned spot so tap-a-spot-then-macro is unchanged. */
+  /** Tell main what a callsign field holds now (typed, filled or cleared). */
+  function reportTypedCall(source, value) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'typed-call', source, call: String(value || '').trim().toUpperCase() }));
+  }
+
   function macroCallsign() {
-    // The VFO panel's own call box first — when the macros being pressed are
-    // the ones IN that panel, the call the operator typed there is the one
-    // they mean. Then the log form, then the tuned spot.
+    // Main's merged view first: the most recently changed non-empty field on
+    // ANY surface, which is the call the operator means. Reading the panel
+    // box first let a call typed there an hour ago beat the one just typed
+    // into the log sheet (LZ3AW #13). Local fields are the offline fallback.
+    if (sharedTypedCall) return sharedTypedCall;
     const vfCall = document.getElementById('vf-cw-call');
     const panel = (vfCall && vfCall.value ? vfCall.value : '').trim().toUpperCase();
     if (panel) return panel;
@@ -8463,6 +8485,7 @@
       const v = this.value.toUpperCase();
       if (this.value !== v) this.value = v;
       if (logCall && logSheet && logSheet.classList.contains('hidden')) logCall.value = v;
+      reportTypedCall('vf', v);
     });
   }
 

@@ -3198,6 +3198,8 @@ const bannerLoggerEl = document.getElementById('banner-logger');
 const blType = document.getElementById('bl-type');
 const blRef = document.getElementById('bl-ref');
 const blCallsign = document.getElementById('bl-callsign');
+// Reports the call it holds for CW-macro {call} (lib/typed-call.js).
+if (blCallsign) blCallsign.addEventListener('input', () => { try { window.api.reportLogCallsign(blCallsign.value.trim().toUpperCase(), 'main:banner'); } catch {} });
 const blName = document.getElementById('bl-name');
 const blNameText = document.getElementById('bl-name-text');
 const blNameGeo = document.getElementById('bl-name-geo');
@@ -3754,7 +3756,7 @@ async function saveBannerQso() {
     const result = lastResult;
     if (result && result.success) {
       // Keep type and ref sticky across QSOs (user is likely logging same park)
-      blCallsign.value = '';
+      blCallsign.value = ''; try { window.api.reportLogCallsign('', 'main:banner'); } catch {}
       blNotes.value = '';
       _blRenderStationInfo(null); // clears both name and geo spans
       blFreqEdited = false;
@@ -13249,9 +13251,9 @@ logDialogClose.addEventListener('click', () => logDialog.close());
 // next macro.
 {
   const logCallEl = document.getElementById('log-callsign');
-  const report = (v) => { try { window.api.reportLogCallsign(v); } catch { /* older preload */ } };
+  const report = (v) => { try { window.api.reportLogCallsign(v, 'main:log'); } catch { /* older preload */ } };
   if (logCallEl) logCallEl.addEventListener('input', () => report(logCallEl.value.trim().toUpperCase()));
-  logDialog.addEventListener('close', () => report(''));
+  logDialog.addEventListener('close', () => { report(''); if (logCallEl) logCallEl.value = ''; });
 }
 
 // Enter key saves QSO from anywhere in the log dialog
@@ -20123,9 +20125,13 @@ function expandDesktopCwMacros(text) {
   // log dialog, else the Log POP-OUT's field (a spot's Log button routes
   // there whenever it's open, so relying on this document alone left {call}
   // empty for anyone using it — LZ3AW 2026-08-29), else the last tuned spot.
-  const logCall = document.getElementById('log-callsign');
-  const typed = (logCall && logCall.value) ? logCall.value.trim().toUpperCase() : '';
-  const call = typed || _logPopoutCallsign
+  // Main's merged view first (lib/typed-call.js: the most recently changed
+  // non-empty field on ANY surface — this window's fields report there too),
+  // then this window's own fields read live, then the tuned spot.
+  const live = ['log-callsign', 'activator-callsign', 'bl-callsign']
+    .map((id) => { const el = document.getElementById(id); return el && el.value ? el.value.trim().toUpperCase() : ''; })
+    .find(Boolean) || '';
+  const call = _logPopoutCallsign || live
     || (lastTunedSpot ? lastTunedSpot.callsign : '');
   // {op_firstname} — nickname (preferred) or first name from QRZ
   const bareCall = call.split('/')[0];
@@ -23445,6 +23451,8 @@ const activatorCounterEl = document.getElementById('activator-counter');
 const activatorUtcEl = document.getElementById('activator-utc');
 const activatorTimerEl = document.getElementById('activator-timer');
 const activatorCallsignInput = document.getElementById('activator-callsign');
+// Reports the call it holds for CW-macro {call} (lib/typed-call.js).
+if (activatorCallsignInput) activatorCallsignInput.addEventListener('input', () => { try { window.api.reportLogCallsign(activatorCallsignInput.value.trim().toUpperCase(), 'main:activator'); } catch {} });
 const activatorOpNameEl = document.getElementById('activator-op-name');
 const activatorStateInput = document.getElementById('activator-state');
 const activatorLogBtn = document.getElementById('activator-log-btn');
@@ -25097,7 +25105,7 @@ async function activatorLogContact() {
  * QSO they are about to make. The return chip is the control that moves it.
  */
 function clearActivatorEntry() {
-  activatorCallsignInput.value = '';
+  activatorCallsignInput.value = ''; try { window.api.reportLogCallsign('', 'main:activator'); } catch {}
   activatorOpNameEl.textContent = '';
   if (activatorStateInput) activatorStateInput.value = '';
   resetActivatorRst();

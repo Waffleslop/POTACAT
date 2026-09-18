@@ -2429,7 +2429,8 @@ vfoCwSync.addEventListener('click', () => { if (cwSpotWpmVal) setCwWpm(cwSpotWpm
 
 vfoCwSend.addEventListener('click', () => {
   const text = vfoCwInput.value.trim();
-  if (text) { window.api.sendCwText(text); vfoCwInput.value = ''; }
+  // Same {call} the macro buttons use — typed free text never expanded it.
+  if (text) { window.api.sendCwText(text.replace(/\{call\}/gi, cwTypedCall || cwTunedCall || '')); vfoCwInput.value = ''; }
 });
 vfoCwInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { vfoCwSend.click(); e.preventDefault(); }

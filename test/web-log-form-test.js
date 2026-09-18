@@ -108,11 +108,16 @@ test('the Log POP-OUT reports its callsign to the main window', () => {
   assert.ok(/onLogPopoutCallsign:/.test(PRELOAD), 'main preload exposes no listener');
 });
 
-test('desktop {call} prefers in-window, then pop-out, then the tuned spot', () => {
+// Since 2026-09-18 (LZ3AW #13) main merges EVERY call field on every surface
+// (lib/typed-call.js: the most recently changed non-empty one wins) and
+// relays the winner on 'log-popout-callsign'; the desktop's own fields report
+// there too, so the relayed value comes first and the live local read is the
+// offline fallback ahead of the tuned spot.
+test('desktop {call} prefers the merged winner, then its own live fields, then the tuned spot', () => {
   const i = APP.indexOf('function expandDesktopCwMacros');
   assert.notStrictEqual(i, -1);
-  const body = APP.slice(i, i + 900);
-  assert.ok(/const call = typed \|\| _logPopoutCallsign/.test(body), 'pop-out not in the fallback chain');
+  const body = APP.slice(i, i + 1200);
+  assert.ok(/const call = _logPopoutCallsign \|\| live/.test(body), 'merged winner not first in the chain');
   assert.ok(/lastTunedSpot \? lastTunedSpot\.callsign/.test(body), 'lost the tuned-spot fallback');
 });
 

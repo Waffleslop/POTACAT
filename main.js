@@ -1697,6 +1697,19 @@ let _currentAtuState = false;
 let _currentVfo = 'A';
 let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s)
 let _currentFilterWidth = 0;
+
+// The callsign being worked — CW-macro {call} on every surface. See
+// lib/typed-call.js for the rule (most recently changed non-empty field wins).
+const { TypedCallTracker } = require('./lib/typed-call');
+const typedCalls = new TypedCallTracker();
+function setTypedCall(source, call) {
+  const prev = typedCalls.current();
+  const now = typedCalls.set(source, call);
+  if (now === prev) return;
+  if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', now);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('log-popout-callsign', now);
+  if (remoteServer && remoteServer.running) remoteServer.sendTypedCall(now);
+}
 let _currentRfGain = 0;
 let _currentSquelch = 0; // FM squelch threshold 0-100 (see applyRigControl 'set-squelch')
 let _currentTxPower = 0; // 0 = unknown until radio reports actual power
@@ -15811,6 +15824,10 @@ function connectRemote() {
     broadcastRigState();
   }
 
+  // Web fields (log sheet, quick log, Log tab, VFO-panel box) report the
+  // call they hold; the shared value goes back out to every surface.
+  remoteServer.on('typed-call', ({ call, source }) => setTypedCall('web:' + (source || 'log'), call));
+
   remoteServer.on('set-filter', ({ width }) => {
     if (!width || width <= 0) return;
     applyFilter(width);
@@ -25578,6 +25595,7 @@ app.whenReady().then(() => {
     });
     logPopoutWin.on('closed', () => {
       logPopoutWin = null;
+      setTypedCall('popout', ''); // a closed window is not holding a call
       if (win && !win.isDestroyed()) win.webContents.send('log-popout-status', false);
     });
 
@@ -25623,15 +25641,11 @@ app.whenReady().then(() => {
   // dialog clears only the dialog's entry, and a callsign still sitting in the
   // log pop-out keeps standing. Otherwise one window's clear silently wiped
   // the other's call and the macro went out addressed to the wrong station.
-  const _typedCallsigns = { main: '', popout: '' };
-  ipcMain.on('log-popout-callsign', (_e, call) => {
-    const from = (win && !win.isDestroyed() && _e.sender === win.webContents) ? 'main' : 'popout';
-    _typedCallsigns[from] = String(call || '').trim().toUpperCase();
-    // Pop-out wins when both hold one: opening that window is the deliberate
-    // act, and a spot's Log button routes there whenever it is open.
-    const c = _typedCallsigns.popout || _typedCallsigns.main;
-    if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', c);
-    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('log-popout-callsign', c);
+  // Every callsign field reports here, naming itself; a sender that predates
+  // the source argument is the main log dialog or the Log pop-out.
+  ipcMain.on('log-popout-callsign', (_e, call, source) => {
+    const from = source || ((win && !win.isDestroyed() && _e.sender === win.webContents) ? 'main:log' : 'popout');
+    setTypedCall(from, call);
   });
   ipcMain.on('log-popout-minimize', () => { if (logPopoutWin) logPopoutWin.minimize(); });
   ipcMain.on('log-popout-close', () => { if (logPopoutWin) logPopoutWin.close(); });
@@ -26089,6 +26103,9 @@ app.whenReady().then(() => {
     vfoPopoutWin.loadFile(path.join(__dirname, 'renderer', 'vfo-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
     vfoPopoutWin.webContents.on('did-finish-load', () => {
       sendVfoState();
+      // {call} for its macros — a pop-out opened after the call was typed
+      // used to learn it only from the next keystroke.
+      vfoPopoutWin.webContents.send('log-popout-callsign', typedCalls.current());
       // Hydrate the lock: without this a popout opened AFTER the lock was
       // engaged shows the open padlock while main refuses tunes with "VFO
       // Locked" — the exact contradiction in #76.
