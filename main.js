@@ -24995,10 +24995,18 @@ app.whenReady().then(() => {
     return { ok: true, source: src, entries };
   });
 
-  // Ensure launcher background service is installed for boot startup.
-  // Only INSTALL (to Startup/LaunchAgents) — don't spawn duplicates on every app launch.
-  // The launcher starts on next boot, or user can enable it manually in Settings.
-  if (app.isPackaged && settings.enableLauncher !== false) {
+  // Re-assert the Remote Launcher's login item for operators who asked for
+  // it (Install in Settings > ECHOCAT, or the Cloud tab's start-at-login
+  // offer sets enableLauncher = true). Only INSTALL (Startup/LaunchAgents) —
+  // never spawn duplicates on every app launch; it starts at the next login.
+  //
+  // OPT-IN since 2026-09-18. This used to run on `!== false`: every packaged
+  // install got an OS login item on first run with nothing on screen saying
+  // so, and — because the Settings checkbox it was tied to no longer exists —
+  // the first Settings save then wrote enableLauncher:false without removing
+  // it. A login item is added only when the operator says yes (Casey, §5 of
+  // the launch-defaults handoff).
+  if (app.isPackaged && settings.enableLauncher === true) {
     try {
       const exePath = process.execPath;
       const configDir = app.getPath('userData');
@@ -30456,8 +30464,18 @@ app.whenReady().then(() => {
   // Node script on port 7301 — separate process so it outlives POTACAT.
   // Install logic ported inline from scripts/launcher-install.js so we
   // don't need a shell-out (and `node` doesn't need to be on PATH).
-  ipcMain.handle('launcher-install', async () => _installLauncher());
-  ipcMain.handle('launcher-uninstall', async () => _uninstallLauncher());
+  // Install/Uninstall ARE the opt-in: persist it so boot re-asserts the login
+  // item only for operators who chose it (and stops for those who removed it).
+  ipcMain.handle('launcher-install', async () => {
+    const r = await _installLauncher();
+    if (r && r.ok && settings.enableLauncher !== true) { settings.enableLauncher = true; saveSettings(settings); }
+    return r;
+  });
+  ipcMain.handle('launcher-uninstall', async () => {
+    const r = await _uninstallLauncher();
+    if (r && r.ok && settings.enableLauncher !== false) { settings.enableLauncher = false; saveSettings(settings); }
+    return r;
+  });
   ipcMain.handle('launcher-status', async () => _launcherStatus());
   ipcMain.handle('launcher-start', async () => _startLauncher());
 

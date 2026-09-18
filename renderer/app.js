@@ -15730,7 +15730,6 @@ settingsSave.addEventListener('click', async () => {
   const swrGuardMaxVal = setSwrGuardMax ? Math.min(10, Math.max(1.5, parseFloat(setSwrGuardMax.value) || 3)) : 3;
   const flexMultiflexVal = setFlexMultiflex ? setFlexMultiflex.checked : true;
   const cwKeyPortVal = setCwKeyPort.value || '';
-  const launcherEnabled = setEnableLauncher ? setEnableLauncher.checked : false;
   // Audio comes from the active rig (resolved after selectedRig below)
   // CW Keyer
   const cwKeyerEnabled = setEnableCwKeyer.checked;
@@ -16000,7 +15999,6 @@ settingsSave.addEventListener('click', async () => {
     swrGuard: swrGuardVal,
     swrGuardMax: swrGuardMaxVal,
     cwKeyPort: cwKeyPortVal,
-    enableLauncher: launcherEnabled,
     remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',
     remoteAudioOutput: selectedRig ? (selectedRig.remoteAudioOutput || '') : '',
     appMode: document.querySelector('input[name="set-app-mode"]:checked')?.value || 'hunter',

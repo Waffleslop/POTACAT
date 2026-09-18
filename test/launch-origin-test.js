@@ -284,6 +284,29 @@ check('renderer: the cloud link is withheld unless the origin is ok', () => {
   assert.ok(/cloud-tunnel-origin/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8')), 'origin notice markup');
 });
 
+// ── §5: login items are opt-in, offered where they matter ──────────────────
+check('launcher: the login item is installed only on an explicit opt-in, and Install/Uninstall are that opt-in', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/if \(app\.isPackaged && settings\.enableLauncher === true\) \{/.test(src), 'boot gate is === true');
+  assert.ok(!/app\.isPackaged && settings\.enableLauncher !== false/.test(src), 'the silent default is gone');
+  assert.ok(/ipcMain\.handle\('launcher-install', async \(\) => \{\n\s+const r = await _installLauncher\(\);\n\s+if \(r && r\.ok && settings\.enableLauncher !== true\) \{ settings\.enableLauncher = true;/.test(src));
+  assert.ok(/ipcMain\.handle\('launcher-uninstall', async \(\) => \{\n\s+const r = await _uninstallLauncher\(\);\n\s+if \(r && r\.ok && settings\.enableLauncher !== false\) \{ settings\.enableLauncher = false;/.test(src));
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(!/enableLauncher: launcherEnabled/.test(app), 'Settings save no longer writes enableLauncher from a checkbox that does not exist');
+});
+check('cloud tab: start-at-login is OFFERED after enabling the tunnel, never applied silently', () => {
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/async function refreshStartupOffer\(state\)/.test(ui));
+  assert.ok(/if \(!state \|\| !state\.enabled \|\| startupOfferDismissed\) \{ ctStartup\.classList\.add\('hidden'\); return; \}/.test(ui), 'only while the tunnel is on');
+  assert.ok(/if \(!s \|\| s\.launchAtStartup === true\) \{ ctStartup\.classList\.add\('hidden'\); return; \}/.test(ui), 'and only while POTACAT is not a login item');
+  assert.ok(/refreshStartupOffer\(state\)\.catch\(\(\) => \{\}\);\n\s+\}/.test(ui), 'evaluated on every tunnel state render');
+  assert.ok(/await window\.api\.saveSettings\(\{ launchAtStartup: true \}\);/.test(ui), 'Turn on sets the login item through the normal settings path');
+  assert.ok(/if \(wantLauncher && window\.api\.launcherInstall\)/.test(ui), 'the launcher rides the same yes, and only if ticked');
+  assert.ok(!/launchAtStartup: true/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/applyLaunchAtStartup\(true\)/g, '')), 'main never flips launchAtStartup on its own');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  for (const id of ['cloud-tunnel-startup', 'cloud-tunnel-startup-launcher', 'cloud-tunnel-startup-on', 'cloud-tunnel-startup-not-now']) assert.ok(html.includes(`id="${id}"`), id);
+});
+
 (async () => {
   for (const run of queue) await run();
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

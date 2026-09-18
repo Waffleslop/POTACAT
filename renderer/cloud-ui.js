@@ -834,6 +834,57 @@
   const ctDegraded = document.getElementById('cloud-tunnel-degraded');
   const ctDegradedText = document.getElementById('cloud-tunnel-degraded-text');
   const ctOrigin = document.getElementById('cloud-tunnel-origin');
+  // Start-at-login offer (§5 of the launch-defaults handoff). A tunnel only
+  // comes back after a reboot if POTACAT does; the launcher only helps if it
+  // is running. Both are OS login items, so neither is ever added silently —
+  // they are OFFERED here, at the one moment they matter, and stay offered
+  // (quietly) while the tunnel is on and POTACAT is not set to start at
+  // login. "Not now" hides it for this session only.
+  const ctStartup = document.getElementById('cloud-tunnel-startup');
+  const ctStartupLauncher = document.getElementById('cloud-tunnel-startup-launcher');
+  const ctStartupOn = document.getElementById('cloud-tunnel-startup-on');
+  const ctStartupNotNow = document.getElementById('cloud-tunnel-startup-not-now');
+  const ctStartupDone = document.getElementById('cloud-tunnel-startup-done');
+  let startupOfferDismissed = false;
+  try { startupOfferDismissed = sessionStorage.getItem('ct-startup-offer-dismissed') === '1'; } catch {}
+
+  /** Show the offer iff the tunnel is on, POTACAT is not a login item, and it was not dismissed this session. */
+  async function refreshStartupOffer(state) {
+    if (!ctStartup || !window.api || !window.api.getSettings) return;
+    if (!state || !state.enabled || startupOfferDismissed) { ctStartup.classList.add('hidden'); return; }
+    let s = null;
+    try { s = await window.api.getSettings(); } catch {}
+    if (!s || s.launchAtStartup === true) { ctStartup.classList.add('hidden'); return; }
+    if (ctStartupDone) ctStartupDone.classList.add('hidden');
+    ctStartup.classList.remove('hidden');
+  }
+
+  if (ctStartupOn) {
+    ctStartupOn.addEventListener('click', async () => {
+      ctStartupOn.disabled = true;
+      try {
+        const wantLauncher = !!(ctStartupLauncher && ctStartupLauncher.checked);
+        // launchAtStartup is applied live at the OS by main on save.
+        await window.api.saveSettings({ launchAtStartup: true });
+        let note = 'POTACAT will start when this computer starts.';
+        if (wantLauncher && window.api.launcherInstall) {
+          const r = await window.api.launcherInstall();
+          note += (r && r.ok) ? ' The Remote Launcher is installed too.' : ' (The Remote Launcher could not be installed: ' + ((r && r.error) || 'unknown error') + ')';
+        }
+        if (ctStartupDone) { ctStartupDone.textContent = note; ctStartupDone.classList.remove('hidden'); }
+        setTimeout(() => { if (ctStartup) ctStartup.classList.add('hidden'); }, 4000);
+      } finally {
+        ctStartupOn.disabled = false;
+      }
+    });
+  }
+  if (ctStartupNotNow) {
+    ctStartupNotNow.addEventListener('click', () => {
+      startupOfferDismissed = true;
+      try { sessionStorage.setItem('ct-startup-offer-dismissed', '1'); } catch {}
+      if (ctStartup) ctStartup.classList.add('hidden');
+    });
+  }
   const ctOriginTitle = document.getElementById('cloud-tunnel-origin-title');
   const ctOriginText = document.getElementById('cloud-tunnel-origin-text');
 
@@ -917,6 +968,7 @@
         ctError.classList.add('hidden');
       }
     }
+    refreshStartupOffer(state).catch(() => {});
   }
 
   if (ctBannerManage) {
