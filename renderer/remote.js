@@ -8420,6 +8420,16 @@
   // --- Free-text CW input ---
   cwTextSend.addEventListener('click', function() {
     var text = cwTextInput.value.trim();
+    if (cwLiveMode) {
+      // Key-as-I-type: the text has already gone to air character by
+      // character. Send/Enter only clears the box — re-sending aborted the
+      // letters still keying and played the whole line a second time, and
+      // leaving cwLiveSent at the old length swallowed the next characters
+      // until the new line was longer than the old one (LZ3AW).
+      cwTextInput.value = '';
+      cwLiveSent = 0;
+      return;
+    }
     if (text) {
       sendCwText(text);
       cwTextInput.value = '';

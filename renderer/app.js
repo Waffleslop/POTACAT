@@ -20216,12 +20216,25 @@ if (cwMacroInput) {
   cwMacroInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (cwLiveMode) {
+        // Key-as-I-type: every character in the box has already gone to
+        // air. Enter only clears it for the next line — handing it to Send
+        // aborted the letters still keying and played the whole line again
+        // (LZ3AW's "typing is delaying too much", the other half of it).
+        cwMacroInput.value = '';
+        cwLiveSent = 0;
+        cwMacroInput.dataset.cwSentPrefix = '';
+        return;
+      }
       cwMacroSendBtn.click();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       cwMacroCancelBtn.click();
     }
   });
+  // A cleared box restarts the live cursor; otherwise the next characters are
+  // swallowed until the text is longer than the line before it.
+  cwMacroCancelBtn.addEventListener('click', () => { cwLiveSent = 0; cwMacroInput.dataset.cwSentPrefix = ''; });
 }
 
 // --- Voice Macros (desktop) ---
