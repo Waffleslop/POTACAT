@@ -5480,6 +5480,14 @@
         sigInfo,
       };
       if (userComment) baseData.userComment = userComment;
+      // A past QSO: both UTC fields filled. Blank = now, stamped by the
+      // desktop exactly as before (same qsoAt contract as the hunter sheet).
+      const ltDate = document.getElementById('lt-date');
+      const ltTime = document.getElementById('lt-time');
+      if (ltDate && ltTime && ltDate.value && ltTime.value) {
+        const ms = Date.parse(ltDate.value + 'T' + ltTime.value + ':00Z');
+        if (Number.isFinite(ms)) baseData.qsoAt = ms;
+      }
 
       // Respot flags
       const respotCb = document.getElementById('lt-respot-cb');

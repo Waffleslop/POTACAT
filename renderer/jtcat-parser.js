@@ -130,10 +130,18 @@
     var parts = (text || '').toUpperCase().split(/\s+/).filter(Boolean);
     var callIdx = -1;
     for (var i = 1; i < parts.length; i++) {
-      if (looksLikeCallsign(parts[i])) { callIdx = i; break; }
+      // A hash-bracketed call ("CQ <SP9ABC/P> KO02") is a call the decoder
+      // resolved from its hash — answerable once the brackets come off. Left
+      // on, they reached the TX builders as part of the callsign and the
+      // reply never keyed (LZ3AW 2026-09-18: "TX can't be initiated by
+      // clicking on it"). An UNRESOLVED "<...>" is refused: we cannot
+      // address a station whose call we have not copied.
+      if (looksLikeCallsign(stripHashBrackets(parts[i]))) { callIdx = i; break; }
     }
     if (callIdx === -1) callIdx = 1;
-    return { call: parts[callIdx] || '', grid: parts[callIdx + 1] || '' };
+    var call = stripHashBrackets(parts[callIdx] || '');
+    if (/^\.+$/.test(call)) call = '';
+    return { call: call, grid: parts[callIdx + 1] || '' };
   }
 
   var GRID_RE = /^[A-R]{2}[0-9]{2}([A-X]{2})?$/i; // 4- or 6-char Maidenhead

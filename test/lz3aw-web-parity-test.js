@@ -162,5 +162,32 @@ test('log pop-out: reports on code-set values as well as typing; preloads carry 
   assert.ok(/text\.replace\(\/\\\{call\\\}\/gi, cwTypedCall \|\| cwTunedCall \|\| ''\)/.test(vfo), 'VFO pop-out free text expands {call}');
 });
 
+console.log('\n=== round 4b (his 2026-09-18 reply) ===');
+const P = require('../renderer/jtcat-parser');
+test('JTCAT: a hash-bracketed CQ call is answerable once the brackets come off; an unresolved <...> is refused', () => {
+  assert.deepStrictEqual(P.inferReplyStep({ text: 'CQ <SP9ABC/P> KO02' }, 'LZ3AW'), { step: 'reply-cq', call: 'SP9ABC/P', theirGrid: 'KO02' });
+  assert.deepStrictEqual(P.parseCq('CQ POTA <GB13COL> IO91'), { call: 'GB13COL', grid: 'IO91' });
+  assert.strictEqual(P.inferReplyStep({ text: 'CQ <...> KO02' }, 'LZ3AW'), null);
+  assert.deepStrictEqual(P.inferReplyStep({ text: '<LZ3AW> SP9ABC/P' }, 'LZ3AW'), { step: 'reply-cq', call: 'SP9ABC/P' }, 'our own hashed call still reads as addressed to us');
+});
+test('CW Key Port: key-as-I-type APPENDS to the DTR queue instead of cancelling it, and holds the TX flag', () => {
+  const fn = main.slice(main.indexOf('function sendCwTextViaDtrKey'), main.indexOf('function sendCwTextToRadio'));
+  assert.ok(/if \(live && queueActive\) \{\n\s+\/\/ Append/.test(fn), 'append branch');
+  assert.ok(/t = Math\.max\(0, _cwDtrQueueEndAt - Date\.now\(\)\);/.test(fn), 'starts where the queue ends');
+  assert.ok(/_cwDtrQueueEndAt = Date\.now\(\) \+ t;/.test(fn));
+  assert.ok(/cat\.noteTransmitting\(t \+ 200\)/.test(fn), 'the link watchdog is told');
+  assert.ok(/sendCwTextViaDtrKey\(expanded, wpm, txtPins, \{ live \}\)/.test(main), 'the live flag reaches the key port');
+  assert.ok(/remoteServer\.setCwKeyerOutput\(\(\{ down \}\) => \{\n[\s\S]{0,500}if \(down && cat && typeof cat\.noteTransmitting === 'function'\) cat\.noteTransmitting\(2000\);/.test(main), 'paddle edges hold TX too');
+});
+test('manual entry: desktop New QSO and the web Log tab take a UTC date and time', () => {
+  const html = R('qso-popout.html'), js = R('qso-popout.js');
+  assert.ok(/id="qso-new-date"/.test(html) && /id="qso-new-time"/.test(html));
+  assert.ok(/stampNewQsoNow\(\);/.test(js.slice(js.indexOf("newQsoBtn.addEventListener('click'"), js.indexOf("newQsoBtn.addEventListener('click'") + 400)), 'pre-filled with now on open');
+  assert.ok(/const qsoDate = \(\(newQsoDate && newQsoDate\.value\) \|\| nowIso\.slice\(0, 10\)\)\.replace\(\/-\/g, ''\);/.test(js));
+  const rh = R('remote.html');
+  assert.ok(/id="lt-date"/.test(rh) && /id="lt-time"/.test(rh));
+  assert.ok(/if \(ltDate && ltTime && ltDate\.value && ltTime\.value\) \{\n\s+const ms = Date\.parse\(ltDate\.value \+ 'T' \+ ltTime\.value \+ ':00Z'\);\n\s+if \(Number\.isFinite\(ms\)\) baseData\.qsoAt = ms;/.test(web), 'blank = now, filled = past');
+});
+
 console.log(`\nLZ3AW web parity: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -1001,7 +1001,15 @@ const newQsoFreq = document.getElementById('qso-new-freq');
 const newQsoMode = document.getElementById('qso-new-mode');
 const newQsoRstS = document.getElementById('qso-new-rst-s');
 const newQsoRstR = document.getElementById('qso-new-rst-r');
+const newQsoDate = document.getElementById('qso-new-date');
+const newQsoTime = document.getElementById('qso-new-time');
 const newQsoComment = document.getElementById('qso-new-comment');
+// Pre-fill UTC now; an operator entering a past QSO overwrites it.
+function stampNewQsoNow() {
+  const iso = new Date().toISOString();
+  if (newQsoDate) newQsoDate.value = iso.slice(0, 10);
+  if (newQsoTime) newQsoTime.value = iso.slice(11, 16);
+}
 const newQsoTypeChips = document.getElementById('qso-new-type-chips');
 const newQsoRef = document.getElementById('qso-new-ref');
 const newQsoRespotLabel = document.getElementById('qso-new-respot-label');
@@ -1083,6 +1091,7 @@ newQsoBtn.addEventListener('click', () => {
   newQsoForm.classList.toggle('hidden');
   if (!newQsoForm.classList.contains('hidden')) {
     updateNewQsoTypeUI();
+    stampNewQsoNow();
     // Auto-fill freq with the rig's current frequency unless the user
     // already typed something (manual edit wins). Only fires when we
     // actually have a frequency cached — opening the form before the
@@ -1101,9 +1110,11 @@ document.getElementById('qso-new-cancel').addEventListener('click', () => {
 document.getElementById('qso-new-save').addEventListener('click', async () => {
   const call = newQsoCall.value.trim().toUpperCase();
   if (!call) { newQsoCall.focus(); return; }
-  const now = new Date();
-  const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
-  const timeOn = now.toISOString().slice(11, 16).replace(/:/g, '');
+  // The form's UTC date/time — pre-filled with now on open, edited for a
+  // past QSO. Empty (an old form) still means now.
+  const nowIso = new Date().toISOString();
+  const qsoDate = ((newQsoDate && newQsoDate.value) || nowIso.slice(0, 10)).replace(/-/g, '');
+  const timeOn = ((newQsoTime && newQsoTime.value) || nowIso.slice(11, 16)).replace(/:/g, '');
   const freqKhz = newQsoFreq.value.trim();
   const mode = newQsoMode.value;
   const ref = newQsoRef.value.trim().toUpperCase();
@@ -1162,6 +1173,7 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
   newQsoRstR.value = '59';
   newQsoRef.value = '';
   newQsoComment.value = '';
+  stampNewQsoNow();
   newQsoSelectedType = 'dx';
   updateNewQsoTypeUI();
   newQsoForm.classList.add('hidden');

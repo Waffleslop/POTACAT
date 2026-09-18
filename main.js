@@ -14039,14 +14039,36 @@ function _setCwPaddleAvailability(available, reason) {
   }
 }
 
-function sendCwTextViaDtrKey(text, wpm, dtrPins) {
+// When the DTR queue drains (absolute ms). Key-as-I-type appends to it.
+let _cwDtrQueueEndAt = 0;
+
+/**
+ * @param {{live?: boolean}} [opts] live = key-as-I-type: APPEND this character
+ *   after whatever is still keying. Every call used to cancel the in-flight
+ *   timers and start over, so each letter typed killed the letter before it
+ *   mid-element — slow typing worked, fast typing was "useless" (LZ3AW
+ *   2026-09-18; his text goes out on the CW Key Port, not the rig's KY
+ *   buffer, so the KY-side fix never touched it). A whole message still
+ *   starts clean.
+ */
+function sendCwTextViaDtrKey(text, wpm, dtrPins, opts) {
   if (!cwKeyPort || !cwKeyPort.isOpen) return false;
   const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
   if (!cleaned) return false;
-  // Cancel any in-flight DTR keying so re-sending mid-message starts clean.
-  for (const t of _cwDtrSendTimers) clearTimeout(t);
-  _cwDtrSendTimers = [];
-  if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  const live = !!(opts && opts.live);
+  const queueActive = !!_cwDtrEndTimer;
+  let t = 0;
+  if (live && queueActive) {
+    // Append: start where the queue ends, with the inter-character gap the
+    // previous character already left. Nothing in flight is touched.
+    t = Math.max(0, _cwDtrQueueEndAt - Date.now());
+    if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  } else {
+    // Cancel any in-flight DTR keying so re-sending mid-message starts clean.
+    for (const tm of _cwDtrSendTimers) clearTimeout(tm);
+    _cwDtrSendTimers = [];
+    if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  }
 
   const unitMs = 1200 / Math.max(5, Math.min(60, wpm || 20));
   const pins = dtrPins || { dtr: true };
@@ -14062,7 +14084,6 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
     try { cwKeyPort.set(state, () => {}); return true; } catch { return false; /* port went away mid-send */ }
   };
 
-  let t = 0;
   for (const ch of cleaned) {
     if (ch === ' ') { t += 4 * unitMs; continue; } // word gap (3 already added after prev char)
     const morse = _MORSE_TABLE[ch];
@@ -14077,6 +14098,11 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
     }
     t += 2 * unitMs; // inter-character gap = 3 units total (1 already added)
   }
+  _cwDtrQueueEndAt = Date.now() + t;
+  // The rig is keyed for this long; a TS-480 mutes CAT meanwhile, and the
+  // link watchdog must not read that as a dead radio (lib/rig-controller.js
+  // noteTransmitting). RigController only — the legacy CatClient has no hold.
+  if (cat && typeof cat.noteTransmitting === 'function') cat.noteTransmitting(t + 200);
   // Final safety pulse: force key-up after total duration. Belt-and-suspenders
   // in case the last setKey(false) somehow didn't land (port blip, etc.).
   if (_cwStuckKeyWatchdog) { clearTimeout(_cwStuckKeyWatchdog); _cwStuckKeyWatchdog = null; }
@@ -14248,7 +14274,7 @@ function _sendCwTextToRadioImpl(text, opts) {
         if (cwPersistentText(wpm, expanded, txtPins)) return `persistent keyer (${pinLabel})`;
         if (sendCwTextViaPython(expanded, wpm, txtPins)) return `Python pyserial (${pinLabel})`;
       }
-      if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins)) return `${pinLabel} keyer`;
+      if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins, { live })) return `${pinLabel} keyer`;
       return false;
     };
     // A configured key port is authoritative for these rigs — their CAT KY is
@@ -15222,6 +15248,11 @@ function connectRemote() {
   let _cwKeyPortLineLogged = '';   // the key-port line last announced
   let _cwTxrxPttOnlyLogged = false;
   remoteServer.setCwKeyerOutput(({ down }) => {
+    // A paddle keys the rig outside the controller's own PTT path. Hold the
+    // TX flag past each edge so a CAT-muted TS-480 is not declared DOWN ten
+    // seconds into an over — which forced the key line low mid-word
+    // (LZ3AW's TinyMidi paddle: "stops transmitting after a few seconds").
+    if (down && cat && typeof cat.noteTransmitting === 'function') cat.noteTransmitting(2000);
     // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
       if (down) {
