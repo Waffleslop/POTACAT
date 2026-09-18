@@ -9905,7 +9905,10 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
   ft8Engine.setRxFreq(caller.df);
   if (!settings.jtcatHoldTxFreq) ft8Engine.setTxFreq(caller.df);
   ft8Engine._txEnabled = true;
-  const theirSlot = caller.slot || 'even';      // reply on the opposite slot
+  // Every decode now carries its slot (ft8-engine stamps it per job); the
+  // engine's last RX slot is the fallback, never a bare 'even' — that default
+  // put half of all replies in the activator's own slot (K4HXM 2026-09-18).
+  const theirSlot = caller.slot || ft8Engine._lastRxSlot || 'even';      // reply on the opposite slot
   ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
 
   const owner = (jtcatAutoCqOwner === 'remote') ? 'remote' : 'popout';
@@ -10655,7 +10658,7 @@ function startJtcat(mode) {
           ft8Engine.setTxFreq(best.df);
           ft8Engine._txEnabled = true;
           // Match their TX slot: they CQ on slot X, we reply on the opposite
-          const theirSlot = best.slot || 'even';
+          const theirSlot = best.slot || ft8Engine._lastRxSlot || 'even';
           ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
 
           if (jtcatAutoCqOwner === 'remote') {
