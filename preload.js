@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('api', {
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.
   onAppNotice: (cb) => ipcRenderer.on('app-notice', (_e, data) => cb(data)),
+  // A QSO reached the log, whatever path logged it (saveQsoRecord is the one
+  // choke point). Drives the QSO-logged chime.
+  onQsoLogged: (cb) => ipcRenderer.on('qso-logged', (_e, q) => cb(q)),
   // SWR-guard latch override ("TX anyway") — clears the tripped state.
   swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),
@@ -221,6 +224,9 @@ contextBridge.exposeInMainWorld('api', {
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
   onCatPower: (cb) => ipcRenderer.on('cat-power', (_e, watts) => cb(watts)),
+  // Measured forward power while transmitting (Flex TX bridge, rigctld
+  // RFPOWER_METER, Kenwood SM during TX) — distinct from the power SETTING.
+  onCatFwdPower: (cb) => ipcRenderer.on('cat-fwd-power', (_e, watts) => cb(watts)),
   onCatSmeter: (cb) => ipcRenderer.on('cat-smeter', (_e, val) => cb(val)),
   onCatSwr: (cb) => ipcRenderer.on('cat-swr', (_e, val) => cb(val)),
   onCatSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, val) => cb(val)),
@@ -345,7 +351,7 @@ contextBridge.exposeInMainWorld('api', {
   // The in-window log dialog reports on the SAME channel, so every surface
   // that expands {call} — including the VFO pop-out, which is its own window —
   // sees a hand-typed callsign wherever it was typed.
-  reportLogCallsign: (call) => ipcRenderer.send('log-popout-callsign', call),
+  reportLogCallsign: (call, source) => ipcRenderer.send('log-popout-callsign', call, source),
   logPopoutTheme: (theme) => ipcRenderer.send('log-popout-theme', theme),
   pairPopoutTheme: (theme) => ipcRenderer.send('pair-popout-theme', theme),
   qsoPopoutClose: () => ipcRenderer.send('qso-popout-close'),

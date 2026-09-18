@@ -71,7 +71,7 @@ const apiSurface = {
   // see it — and since a spot's Log button routes to this window whenever it
   // is open, an operator using the pop-out got an EMPTY {call} (LZ3AW
   // 2026-08-29).
-  reportCallsign: (call) => ipcRenderer.send('log-popout-callsign', call),
+  reportCallsign: (call) => ipcRenderer.send('log-popout-callsign', call, 'popout'),
 };
 
 try {

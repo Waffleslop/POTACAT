@@ -2233,55 +2233,81 @@ function ts480Codec(mode) {
   return { codec, writes };
 }
 
-// SSB/AM/FM carry a SLOT INDEX, not the width: FW0000 is the 2400 Hz filter.
-// Sending FW2400 in SSB (what the first fix did, after snapping 2700 -> 2400)
-// names no slot the radio has, so it was ignored exactly as silently as the
-// unavailable width had been — LZ3AW's "SSB filter still doesn't work".
-// Source: hamlib ts480_filter_width[] + struct kenwood_filter_width.
-test('TS-480 SSB: an unavailable width snaps to the nearest real slot', () => {
+// SSB on a TS-480 is not an FW slot at all. FW in SSB picks between fitted IF
+// filters — the only stock one is 2400 — so every width POTACAT asked for
+// landed on the same slot and the radio never changed, twice over (LZ3AW
+// 2026-08-28, 2026-09-14). The passband in SSB/FM is the DSP HIGH cut (SH)
+// over the LOW cut (SL), each a two-digit index into a fixed table. Source:
+// hamlib ts480_slope_filter_high[]/_low[] (rigs/kenwood/ts480.c). POTACAT
+// never moves the operator's low cut; a width becomes a high cut.
+test('TS-480 SSB: a width becomes a high cut — first table value at or above low + width', () => {
   const { codec, writes } = ts480Codec('USB');
-  codec.setFilterWidth(2700);          // POTACAT preset; NOT a TS-480 slot
-  assert.strictEqual(writes[0], 'FW0000;', 'got ' + writes[0]);
+  codec.setFilterWidth(2400);          // assumed low 300 → target 2700 → SH09 = 2800
+  assert.deepStrictEqual(writes, ['SL;', 'SH09;'], 'asks the radio for its low cut, sets the high cut: ' + writes.join(' '));
+  assert.ok(!writes.some((w) => w.startsWith('FW')), 'FW is never sent in SSB');
 });
 
-test('TS-480 SSB: mid-range request picks the closer slot, not the widest', () => {
+test('TS-480 SSB: the operator\'s own low cut is used once the radio has reported it, and never moved', () => {
   const { codec, writes } = ts480Codec('LSB');
-  codec.setFilterWidth(1000);          // 500 is 500 away, 2400 is 1400 away
-  assert.strictEqual(writes[0], 'FW0001;', 'got ' + writes[0]);   // NAR1 slot
-  const narrow = ts480Codec('USB');
-  narrow.codec.setFilterWidth(300);    // 270 is 30 away, 500 is 200 away
-  assert.strictEqual(narrow.writes[0], 'FW0002;', 'got ' + narrow.writes[0]); // NAR2
+  codec.onData('SL02;');               // radio says: low cut 100 Hz
+  codec.setFilterWidth(2400);          // 100 + 2400 = 2500 → SH08 = 2600
+  assert.deepStrictEqual(writes, ['SH08;'], writes.join(' '));
 });
 
-test('TS-480 SSB: a REAL slot logs no snap, and goes out as its index', () => {
+test('TS-480 SSB: the achieved passband is reported, and a difference is said out loud', () => {
+  const { codec } = ts480Codec('USB');
+  const logs = [], pb = [];
+  codec.on('log', (m) => logs.push(m));
+  codec.on('passband', (hz) => pb.push(hz));
+  codec.onData('SL04;');               // 300 Hz
+  codec.setFilterWidth(2700);          // 300 + 2700 = 3000 → SH10 = 3000 → width 2700 exactly
+  assert.deepStrictEqual(pb, [2700]);
+  assert.strictEqual(logs.length, 0, 'an exact hit is silent: ' + logs.join(' | '));
+  codec.setFilterWidth(2500);          // 2800 → SH09 = 2800 → 2500 exactly
+  assert.deepStrictEqual(pb, [2700, 2500]);
+  codec.setFilterWidth(1900);          // 2200 → SH06 = 2200 → 1900 exact
+  codec.setFilterWidth(3300);          // 3600 → SH12 = 4000 → 3700, not what was asked
+  assert.strictEqual(pb[pb.length - 1], 3700);
+  assert.ok(logs.some((l) => /3300Hz/.test(l) && /4000Hz/.test(l) && /3700Hz/.test(l)), 'log names ask, high cut and result: ' + logs.join(' | '));
+  assert.ok(!logs.some((l) => /SHd/.test(l)), 'log never leaks the wire index');
+});
+
+test('TS-480 SSB: a width past the table clamps to the widest high cut', () => {
   const { codec, writes } = ts480Codec('USB');
-  const logs = [];
-  codec.on('log', (m) => logs.push(m));
-  codec.setFilterWidth(2400);
-  assert.strictEqual(writes[0], 'FW0000;');
-  assert.strictEqual(logs.length, 0, 'logged a snap that did not happen: ' + logs.join(' | '));
+  codec.onData('SL00;');
+  codec.setFilterWidth(9000);
+  assert.deepStrictEqual(writes, ['SH13;']);
 });
 
-test('TS-480 SSB: choosing an optional-filter slot SAYS it is optional', () => {
-  // 500/270 Hz in SSB are the NAR1/NAR2 crystal filters. Without them fitted
-  // the radio ignores the command — "nothing happened", with no way to tell
-  // that from a bug, which is the whole failure mode this path keeps hitting.
+test('TS-480 SL;/SH; readback: both known = one passband event, the radio\'s own number', () => {
   const { codec } = ts480Codec('USB');
-  const logs = [];
-  codec.on('log', (m) => logs.push(m));
-  codec.setFilterWidth(500);
-  assert.ok(logs.some((l) => /optional NAR1/.test(l)), 'no optional-filter note: ' + logs.join(' | '));
+  const pb = [];
+  codec.on('passband', (hz) => pb.push(hz));
+  codec.onData('SH07;');               // 2400 high, low unknown → nothing yet
+  assert.deepStrictEqual(pb, []);
+  codec.onData('SL03;');               // 200 low → 2200
+  assert.deepStrictEqual(pb, [2200]);
+  codec.getFilter();
 });
 
-test('TS-480 SSB: a snap SAYS SO (the silence was the bug)', () => {
-  const { codec } = ts480Codec('USB');
-  const logs = [];
-  codec.on('log', (m) => logs.push(m));
-  codec.setFilterWidth(3000);
-  assert.strictEqual(logs.length, 1, 'no log line for a snapped width');
-  assert.ok(/2400Hz/.test(logs[0]) && /3000Hz/.test(logs[0]), 'log omits the values: ' + logs[0]);
-  // The operator is told the WIDTH, never the slot index — 0 means nothing.
-  assert.ok(!/FW/.test(logs[0]), 'log leaks the wire value: ' + logs[0]);
+test('TS-480 getFilter asks SL; and SH; in SSB, and nothing in CW (FW has no readback)', () => {
+  const ssb = ts480Codec('USB');
+  ssb.codec.getFilter();
+  assert.deepStrictEqual(ssb.writes, ['SL;', 'SH;']);
+  const cw = ts480Codec('CW');
+  cw.codec.getFilter();
+  assert.deepStrictEqual(cw.writes, []);
+});
+
+test('TS-480 meter query is SM0; (hamlib RFPOWER_METER), reply accepted with or without the digit', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, TS480);
+  codec.getSmeter();
+  assert.deepStrictEqual(writes, ['SM0;']);
+  const seen = [];
+  codec.on('smeter', (v) => seen.push(v));
+  codec.onData('SM00010;');
+  codec.onData('SM0010;');
+  assert.strictEqual(seen.length, 2);
 });
 
 test('TS-480 CW: the presets that always worked are untouched', () => {
@@ -2303,9 +2329,11 @@ test('TS-480 RTTY/AM/FM snap within their own slot lists', () => {
   const amNarrow = ts480Codec('AM');
   amNarrow.codec.setFilterWidth(4000); // genuinely closer to 2400 (1600 vs 2000)
   assert.strictEqual(amNarrow.writes[0], 'FW0001;');
+  // FM shares the SSB slope tables (hamlib: SSB|FM|RTTY rows) — a high cut,
+  // clamped to the widest, never the single 12 kHz FW slot.
   const fm = ts480Codec('FM');
-  fm.codec.setFilterWidth(9000);       // one FM slot: 12000 -> index 0
-  assert.strictEqual(fm.writes[0], 'FW0000;');
+  fm.codec.setFilterWidth(9000);
+  assert.deepStrictEqual(fm.writes, ['SL;', 'SH13;']);
 });
 
 // LZ3AW item 2, round 3: 1.10.13 gave the wattmeter to the rigctld path only
@@ -2321,7 +2349,7 @@ test('TS-480 direct serial: SM during TX reports WATTS, not an S reading', () =>
   codec.on('powerMeter', (v) => seen.powerMeter.push(v));
 
   codec.getPowerMeter();
-  assert.strictEqual(writes[0], 'SM;', 'power poll should reuse the S-meter command: ' + writes[0]);
+  assert.strictEqual(writes[0], 'SM0;', 'power poll should reuse the meter query (SM0; on a TS-480): ' + writes[0]);
   codec.onData(Buffer.from('SM0010;'));               // half of full scale 20
   assert.deepStrictEqual(seen.powerMeter, [50], 'TS-480 at 10/20 is 50W of 100');
   assert.deepStrictEqual(seen.smeter, [], 'a TX power reading leaked onto the S-meter');

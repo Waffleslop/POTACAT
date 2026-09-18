@@ -275,8 +275,19 @@
   // into the log on the wrong frequency (LZ3AW 2026-08-29: "WEB Log doesn't
   // follow the frequency").
   let logFreqDirty = false;
+  // The callsign being worked as main sees it across EVERY surface (S2C
+  // typed-call) — the most recently changed non-empty field, desktop or web.
+  let sharedTypedCall = '';
+  // A sheet opened from a spot is frozen at the spot's frequency — until the
+  // radio actually arrives there, after which it follows the dial like any
+  // other (the "only gets the frequency from a spot" half of LZ3AW #12).
+  let logFreqPinnedKhz = 0;
+  // Activator quick log: same contract, its own flags. It was filled once on
+  // tab open and never again — "only after page refresh" (LZ3AW #12).
+  let qlFreqDirty = false;
+  let qlModeDirty = false;
   let logTimeDirty = false;
-  if (logFreq) logFreq.addEventListener('input', () => { logFreqDirty = true; });
+  if (logFreq) logFreq.addEventListener('input', () => { logFreqDirty = true; logFreqPinnedKhz = 0; });
   if (logDate) logDate.addEventListener('input', () => { logTimeDirty = true; });
   if (logTime) logTime.addEventListener('input', () => { logTimeDirty = true; });
 
@@ -297,10 +308,20 @@
   /** Keep the open log sheet in step with the radio and the clock. */
   function logSheetFollowRadio() {
     if (!logSheet || logSheet.classList.contains('hidden')) return;
+    if (logFreqDirty && logFreqPinnedKhz && currentFreqKhz && Math.abs(currentFreqKhz - logFreqPinnedKhz) < 0.5) {
+      logFreqDirty = false; // the radio reached the spot: follow it from here
+      logFreqPinnedKhz = 0;
+    }
     if (!logFreqDirty && currentFreqKhz) {
       logFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
     }
     if (!logTimeDirty) logStampNow();
+  }
+  /** Keep the activator quick log in step with the radio unless the operator typed over it. */
+  function quickLogFollowRadio() {
+    if (!qlFreq) return;
+    if (!qlFreqDirty && currentFreqKhz) qlFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+    if (!qlModeDirty && qlMode && currentMode && qlMode.querySelector('option[value="' + currentMode + '"]')) qlMode.value = currentMode;
   }
   const logMode = document.getElementById('log-mode');
   const logRstSent = document.getElementById('log-rst-sent');
@@ -537,6 +558,33 @@
   const bandFilterEl = document.getElementById('rc-band-filter');
   const modeFilterEl = document.getElementById('rc-mode-filter');
   const regionFilterEl = document.getElementById('rc-region-filter');
+  // Callsign filter — VERBATIM copy of lib/call-filter.js (this page cannot
+  // load node modules; test/call-filter-test.js pins the copy). Device-local.
+  function parseCallFilter(spec) {
+    const tokens = String(spec || '').toUpperCase().split(/[\s,;]+/).filter(Boolean);
+    return tokens.map((t) => ({
+      token: t,
+      re: new RegExp('^' + t.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')),
+    }));
+  }
+  function callMatchesFilter(callsign, matchers) {
+    if (!matchers || !matchers.length) return true;
+    const c = String(callsign || '').toUpperCase();
+    for (let i = 0; i < matchers.length; i++) if (matchers[i].re.test(c)) return true;
+    return false;
+  }
+  const callFilterEl = document.getElementById('rc-call-filter');
+  let callFilter = [];
+  if (callFilterEl) {
+    try { callFilterEl.value = localStorage.getItem('echocat-call-filter') || ''; } catch {}
+    callFilter = parseCallFilter(callFilterEl.value);
+    callFilterEl.addEventListener('input', () => {
+      callFilter = parseCallFilter(callFilterEl.value);
+      try { localStorage.setItem('echocat-call-filter', callFilterEl.value); } catch {}
+      renderSpots();
+      if (activeTab === 'map') renderMapSpots();
+    });
+  }
   const spotsDropdown = document.getElementById('rc-spots-dropdown');
   const rcNewOnly = document.getElementById('rc-new-only');
   const rcHideWorked = document.getElementById('rc-hide-worked');
@@ -1408,6 +1456,10 @@
         updateEchoSwr(msg.value);
         break;
 
+      case 'typed-call':
+        sharedTypedCall = String(msg.call || '').trim().toUpperCase();
+        break;
+
       case 'swr-ratio':
         updateEchoSwrRatio(msg.value);
         break;
@@ -2148,6 +2200,7 @@
       const prevFreqKhz = currentFreqKhz;
       currentFreqKhz = s.freq / 1000;
       logSheetFollowRadio();
+      quickLogFollowRadio();
       if (bc) { try { bc.postMessage({ kind: 'vfo', freqKhz: currentFreqKhz, mode: (modeBadge && modeBadge.textContent) || '' }); } catch {} }
       // Repaint the Dir list so the tuned net/broadcast ring tracks the radio
       // (e.g. someone spinning the VFO on desktop while ECHOCAT shows Dir).
@@ -2167,6 +2220,7 @@
     }
     if (s.mode) {
       currentMode = s.mode;
+      quickLogFollowRadio();
       // Display friendly name for FreeDV modes
       const mUp = s.mode.toUpperCase();
       modeBadge.textContent = mUp.startsWith('FREEDV') ? (mUp.includes('RADE') ? 'RADE' : 'FreeDV') : s.mode;
@@ -2330,8 +2384,17 @@
     return true;
   }
 
-  function hasWorkedCallsign(s) {
-    return workedQsos.has((s.callsign || '').toUpperCase());
+  // The check mark means worked on THIS band and mode, any date — a call
+  // worked once on 40 m CW is still a fresh contact on 20 m SSB (LZ3AW #14).
+  // Modes compare as the worked map stores them (USB/LSB logged as SSB).
+  function hasWorkedOnBandMode(s) {
+    const entries = workedQsos.get((s.callsign || '').toUpperCase());
+    if (!entries || !entries.length) return false;
+    const band = String(s.band || '').toUpperCase();
+    let mode = String(s.mode || '').toUpperCase();
+    if (mode === 'USB' || mode === 'LSB') mode = 'SSB';
+    if (mode === 'DIGI' || mode === 'DATA' || mode === 'DIGITAL') mode = '';
+    return entries.some((e) => (!band || e.band === band) && (!mode || e.mode === mode));
   }
 
   // Map spot mode to filter category
@@ -2356,6 +2419,7 @@
     const filtered = spots.filter(s => {
       if (bands && !bands.has(s.band)) return false;
       if (modes && !modes.has(spotModeCategory(s.mode))) return false;
+      if (callFilter.length && !callMatchesFilter(s.callsign, callFilter)) return false;
       if (regions && s.continent && !regions.has(s.continent)) return false;
       if (spotMatchesMuteRule(s)) return false;
       if (showNewOnly && !isNewPark(s)) return false;
@@ -2426,7 +2490,7 @@
       const newPark = isNewPark(s);
       const newClass = newPark ? ' new-park' : '';
       const workedToday = isWorkedSpot(s);
-      const workedEver = !workedToday && hasWorkedCallsign(s);
+      const workedEver = !workedToday && hasWorkedOnBandMode(s);
       const workedClass = workedToday ? ' worked-today' : workedEver ? ' worked' : '';
       const isSkipped = scanSkipped.has(s.frequency) || (workedToday && !scanForceUnskipped.has(s.frequency));
       const skipClass = isSkipped ? ' scan-skipped' : '';
@@ -4066,11 +4130,19 @@
 
   function loadCustomCatButtons(buttons) {
     if (!buttons || !Array.isArray(buttons)) return;
+    const before = customCatData;
     customCatData = buttons;
     while (customCatData.length < 5) customCatData.push({ name: '', command: '' });
-    // Slots may have been re-typed or re-ordered on the desktop; a lit toggle
-    // would then be describing a command that no longer lives in that slot.
-    customToggleState = {};
+    // A lit toggle describes the last command sent from THAT slot. Forget it
+    // only where the slot's commands changed — settings-update arrives on
+    // every cluster connect and clock check, and resetting every toggle each
+    // time made the next press send On again (LZ3AW #7).
+    const sig = (e) => (e ? [e.type || 'button', e.command || '', e.commandOff || ''].join('\u0001') : '');
+    const kept = {};
+    for (const i of Object.keys(customToggleState)) {
+      if (customToggleState[i] && sig(before[i]) === sig(customCatData[i])) kept[i] = true;
+    }
+    customToggleState = kept;
     renderCustomCatButtons();
   }
 
@@ -4108,7 +4180,7 @@
     return true;
   }
 
-  function renderCustomCatButtons() {
+  function renderCustomCatButtons(opts) {
     customCatBtnsEl.innerHTML = '';
     var hasAny = false;
     for (var i = 0; i < customCatData.length; i++) {
@@ -4179,6 +4251,8 @@
           customToggleState[idx] = goingOn;
           this.textContent = (e.name || ('CAT ' + (idx + 1))) + ' ' + (goingOn ? 'On' : 'Off');
           this.classList.toggle('rc-custom-cat-on', goingOn);
+          // The VFO panel's copy of this row is a snapshot — refresh it.
+          if (window.__vfRenderCustomCat) window.__vfRenderCustomCat();
         });
       } else {
         btn.textContent = label;
@@ -4194,8 +4268,11 @@
       customCatBtnsEl.appendChild(btn);
     }
     // Always show section — Edit button allows creating buttons from ECHOCAT
-    // Re-render editor if open
-    if (customCatEditing) renderCustomCatEditor();
+    // Re-render editor if open — except from the editor's own blur handler:
+    // rebuilding the editor there destroyed the field the operator had just
+    // clicked into, so the Off command of a toggle could never be typed from
+    // a browser and every toggle saved with an empty Off (LZ3AW #7).
+    if (customCatEditing && !(opts && opts.keepEditor)) renderCustomCatEditor();
     // Mirror to the optional VFO Custom CAT widget if it's enabled.
     if (window.__vfRenderCustomCat) window.__vfRenderCustomCat();
   }
@@ -4283,8 +4360,10 @@
       editor.appendChild(row);
     }
     customCatSection.appendChild(editor);
-    // Auto-save on blur
-    editor.addEventListener('focusout', function() {
+    // Auto-save on blur — but a move between the editor's own fields is not
+    // a blur worth saving on, and never rebuilds the editor mid-edit.
+    editor.addEventListener('focusout', function(ev) {
+      if (ev && ev.relatedTarget && editor.contains(ev.relatedTarget)) return;
       for (var j = 0; j < 5; j++) {
         var r = editor.querySelectorAll('.rc-custom-cat-editor-row')[j];
         if (!r) continue;
@@ -4307,7 +4386,7 @@
         if (maxEl) next.max = Number(maxEl.value) || 0;
         customCatData[j] = next;
       }
-      renderCustomCatButtons();
+      renderCustomCatButtons({ keepEditor: true });
       saveCustomCatButtons();
     });
   }
@@ -5429,6 +5508,14 @@
         sigInfo,
       };
       if (userComment) baseData.userComment = userComment;
+      // A past QSO: both UTC fields filled. Blank = now, stamped by the
+      // desktop exactly as before (same qsoAt contract as the hunter sheet).
+      const ltDate = document.getElementById('lt-date');
+      const ltTime = document.getElementById('lt-time');
+      if (ltDate && ltTime && ltDate.value && ltTime.value) {
+        const ms = Date.parse(ltDate.value + 'T' + ltTime.value + ':00Z');
+        if (Number.isFinite(ms)) baseData.qsoAt = ms;
+      }
 
       // Respot flags
       const respotCb = document.getElementById('lt-respot-cb');
@@ -5530,6 +5617,7 @@
   function openLogSheet(prefill) {
     const p = prefill || {};
     logCall.value = p.callsign || '';
+    reportTypedCall('log', logCall.value); // a value set in code counts too
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
@@ -5540,6 +5628,7 @@
     // and re-broke "the web log doesn't follow the frequency" for everyone who
     // logs from the VFO panel (LZ3AW, still reported after the 1.10.13 fix).
     logFreqDirty = !!p.freqKhz;
+    logFreqPinnedKhz = Number(p.freqKhz) || 0;
     logTimeDirty = false;
     logStampNow();
     const mode = aliasModeForLogSheet(p.mode || currentMode);
@@ -5590,6 +5679,7 @@
   }
 
   function closeLogSheet() {
+    reportTypedCall('log', ''); // a closed sheet is not holding a call
     logSheet.classList.add('slide-down');
     setTimeout(() => {
       logSheet.classList.add('hidden');
@@ -5870,6 +5960,7 @@
       pastActivationsDiv.classList.add('hidden');
       quickLogForm.classList.remove('hidden');
       logFooter.classList.remove('hidden');
+      qlFreqDirty = false; qlModeDirty = false;
       if (currentFreqKhz) qlFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
       if (currentMode) qlMode.value = currentMode;
       qlCall.focus();
@@ -6075,7 +6166,9 @@
     if (e.key === 'Enter') { e.preventDefault(); submitQuickLog(); }
   });
 
+  if (qlFreq) qlFreq.addEventListener('input', () => { qlFreqDirty = true; });
   qlMode.addEventListener('change', () => {
+    qlModeDirty = true;
     const rst = defaultRst(qlMode.value);
     qlRstSent.value = rst;
     qlRstRcvd.value = rst;
@@ -6102,6 +6195,10 @@
   qlCall.addEventListener('input', () => triggerCallLookup(qlCall, 'ql'));
   ltCall.addEventListener('input', () => triggerCallLookup(ltCall, 'lt'));
   logCall.addEventListener('input', () => triggerCallLookup(logCall, 'log'));
+  // Every field that can hold the call being worked reports it (CW {call}).
+  qlCall.addEventListener('input', () => reportTypedCall('ql', qlCall.value));
+  ltCall.addEventListener('input', () => reportTypedCall('lt', ltCall.value));
+  logCall.addEventListener('input', () => reportTypedCall('log', logCall.value));
 
   function showCallLookup(msg) {
     const infoEl = callLookupSource === 'lt' ? ltCallInfo : callLookupSource === 'log' ? logCallInfo : qlCallInfo;
@@ -6172,10 +6269,12 @@
     }
 
     qlCall.value = '';
+    reportTypedCall('ql', '');
     qlCallInfo.classList.add('hidden');
     qlCallInfo.textContent = '';
     qlNotes.value = '';
     qlCall.focus();
+    qlFreqDirty = false; qlModeDirty = false;
     if (currentFreqKhz) qlFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
   }
 
@@ -8351,10 +8450,18 @@
    *  running a frequency you answer callers you were never tuned to, and
    *  N1MM has always sent what's in the entry field (LZ3AW 2026-08-29).
    *  Falls back to the tuned spot so tap-a-spot-then-macro is unchanged. */
+  /** Tell main what a callsign field holds now (typed, filled or cleared). */
+  function reportTypedCall(source, value) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'typed-call', source, call: String(value || '').trim().toUpperCase() }));
+  }
+
   function macroCallsign() {
-    // The VFO panel's own call box first — when the macros being pressed are
-    // the ones IN that panel, the call the operator typed there is the one
-    // they mean. Then the log form, then the tuned spot.
+    // Main's merged view first: the most recently changed non-empty field on
+    // ANY surface, which is the call the operator means. Reading the panel
+    // box first let a call typed there an hour ago beat the one just typed
+    // into the log sheet (LZ3AW #13). Local fields are the offline fallback.
+    if (sharedTypedCall) return sharedTypedCall;
     const vfCall = document.getElementById('vf-cw-call');
     const panel = (vfCall && vfCall.value ? vfCall.value : '').trim().toUpperCase();
     if (panel) return panel;
@@ -8414,12 +8521,23 @@
       const v = this.value.toUpperCase();
       if (this.value !== v) this.value = v;
       if (logCall && logSheet && logSheet.classList.contains('hidden')) logCall.value = v;
+      reportTypedCall('vf', v);
     });
   }
 
   // --- Free-text CW input ---
   cwTextSend.addEventListener('click', function() {
     var text = cwTextInput.value.trim();
+    if (cwLiveMode) {
+      // Key-as-I-type: the text has already gone to air character by
+      // character. Send/Enter only clears the box — re-sending aborted the
+      // letters still keying and played the whole line a second time, and
+      // leaving cwLiveSent at the old length swallowed the next characters
+      // until the new line was longer than the old one (LZ3AW).
+      cwTextInput.value = '';
+      cwLiveSent = 0;
+      return;
+    }
     if (text) {
       sendCwText(text);
       cwTextInput.value = '';
@@ -12071,6 +12189,7 @@ var _paddleReleaseTimer = { dit: null, dah: null };
         btn.type = 'button';
         btn.className = 'vf-macro-btn';
         btn.textContent = name;
+        if (srcBtn.classList.contains('rc-custom-cat-on')) btn.classList.add('active');
         btn.addEventListener('click', () => srcBtn.click());
         vfCustomCatRow.appendChild(btn);
       });

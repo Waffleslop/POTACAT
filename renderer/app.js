@@ -247,6 +247,7 @@ let enableBannerLogger = false;
 let n1mmRst = false; // N1MM-style single-field RST inputs
 let defaultPower = 100;
 let tuneClick = false;
+let qsoChime = 'off'; // 'off' | 'soft' | 'twotone' | 'bell' | 'morse-r' — see playQsoChime
 let enableSplit = false;
 
 // Status-bar SPLIT indicator. Visible whenever enableSplit is true so the
@@ -623,6 +624,21 @@ const MI_TO_KM = 1.60934;
 
 const bandFilterEl = document.getElementById('band-filter');
 const modeFilterEl = document.getElementById('mode-filter');
+// Callsign filter (lib/call-filter.js): a list of calls or prefixes; empty =
+// everything. Device-local, like column widths — a hunter's shortlist for
+// this screen, not a station setting.
+const callFilterEl = document.getElementById('call-filter');
+let callFilter = [];
+(function initCallFilter() {
+  if (!callFilterEl || typeof CallFilter === 'undefined') return;
+  try { callFilterEl.value = localStorage.getItem('pota-cat-call-filter') || ''; } catch {}
+  callFilter = CallFilter.parseCallFilter(callFilterEl.value);
+  callFilterEl.addEventListener('input', () => {
+    callFilter = CallFilter.parseCallFilter(callFilterEl.value);
+    try { localStorage.setItem('pota-cat-call-filter', callFilterEl.value); } catch {}
+    if (typeof render === 'function') render();
+  });
+})();
 const tbody = document.getElementById('spots-body');
 const noSpots = document.getElementById('no-spots');
 // Ctrl/Cmd-click multi-op selection: callsigns (uppercased) picked across spots
@@ -759,6 +775,9 @@ const setLicenseClass = document.getElementById('set-license-class');
 const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
 const setHideWorked = document.getElementById('set-hide-worked');
 const setTuneClick = document.getElementById('set-tune-click');
+const setQsoChime = document.getElementById('set-qso-chime');
+const setQsoChimeTest = document.getElementById('set-qso-chime-test');
+if (setQsoChimeTest) setQsoChimeTest.addEventListener('click', () => { try { playQsoChime(setQsoChime ? setQsoChime.value : 'soft'); } catch {} });
 const setEnableSplit = document.getElementById('set-enable-split');
 const setEnableAtu = document.getElementById('set-enable-atu');
 const setEnableRotor = document.getElementById('set-enable-rotor');
@@ -1745,6 +1764,7 @@ async function loadPrefs() {
     : [];
   myCallsign = settings.myCallsign || '';
   tuneClick = settings.tuneClick === true;
+  qsoChime = settings.qsoChime || 'off';
   enableSplit = settings.enableSplit === true;
   updateSplitIndicator();
   catLogToggleBtn.classList.toggle('hidden', settings.verboseLog !== true);
@@ -3198,6 +3218,8 @@ const bannerLoggerEl = document.getElementById('banner-logger');
 const blType = document.getElementById('bl-type');
 const blRef = document.getElementById('bl-ref');
 const blCallsign = document.getElementById('bl-callsign');
+// Reports the call it holds for CW-macro {call} (lib/typed-call.js).
+if (blCallsign) blCallsign.addEventListener('input', () => { try { window.api.reportLogCallsign(blCallsign.value.trim().toUpperCase(), 'main:banner'); } catch {} });
 const blName = document.getElementById('bl-name');
 const blNameText = document.getElementById('bl-name-text');
 const blNameGeo = document.getElementById('bl-name-geo');
@@ -3754,7 +3776,7 @@ async function saveBannerQso() {
     const result = lastResult;
     if (result && result.success) {
       // Keep type and ref sticky across QSOs (user is likely logging same park)
-      blCallsign.value = '';
+      blCallsign.value = ''; try { window.api.reportLogCallsign('', 'main:banner'); } catch {}
       blNotes.value = '';
       _blRenderStationInfo(null); // clears both name and geo spans
       blFreqEdited = false;
@@ -3848,6 +3870,37 @@ blFreq.addEventListener('keydown', (e) => {
 blMode.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); blRstSent.focus(); blRstSent.select(); }
 });
+
+// --- QSO logged chime (N2FSM 2026-09-12: "a subtle indicator to know I just
+// completed a contact" when POTACAT is in the background or the next room).
+// Synthesized, so there is nothing to ship or find; four flavours, off by
+// default. Fired by main's 'qso-logged', the one event every log path
+// (dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X) passes through.
+function playQsoChime(kind) {
+  if (!kind || kind === 'off') return;
+  if (!audioCtx) audioCtx = new AudioContext();
+  const t0 = audioCtx.currentTime;
+  const tone = (freq, at, dur, peak, type) => {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0 + at);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t0 + at);
+    o.stop(t0 + at + dur + 0.05);
+  };
+  switch (kind) {
+    case 'soft': tone(880, 0, 0.35, 0.18); break;
+    case 'twotone': tone(660, 0, 0.18, 0.18); tone(990, 0.16, 0.32, 0.18); break;
+    case 'bell': tone(1320, 0, 0.9, 0.16); tone(1980, 0, 0.45, 0.05); tone(2640, 0, 0.25, 0.03); break;
+    case 'morse-r': { const u = 0.06; for (const [at, d] of [[0, u], [2 * u, 3 * u], [6 * u, u]]) tone(700, at, d, 0.2); break; } // R = .-.
+    default: tone(880, 0, 0.35, 0.18);
+  }
+}
+if (window.api.onQsoLogged) window.api.onQsoLogged(() => { try { playQsoChime(qsoChime); } catch {} });
 
 // --- Tune confirmation click ---
 let audioCtx = null;
@@ -8819,6 +8872,30 @@ function spotAgeSecs(spotTime) {
   } catch { return Infinity; }
 }
 
+// The mode name a spot carries, as the worked map stores it (USB/LSB are
+// logged as SSB; DIGI/DATA spots name no single mode, so they match any).
+function spotModeKey(spot) {
+  const m = String(spot.mode || '').toUpperCase();
+  if (m === 'USB' || m === 'LSB') return 'SSB';
+  if (m === 'DIGI' || m === 'DATA' || m === 'DIGITAL') return '';
+  return m;
+}
+
+/**
+ * Worked this station on this spot's BAND and MODE, any date. This is what
+ * the check mark means: a call worked once on 40 m CW is still a fresh
+ * contact on 20 m SSB, and marking it worked hid exactly the QSOs the
+ * operator still wanted (LZ3AW #14). No band or no mode on the spot = the
+ * call alone.
+ */
+function hasWorkedOnBandMode(spot) {
+  const entries = workedQsos.get(String(spot.callsign || '').toUpperCase());
+  if (!entries || entries.length === 0) return false;
+  const band = String(spot.band || '').toUpperCase();
+  const mode = spotModeKey(spot);
+  return entries.some((e) => (!band || e.band === band) && (!mode || e.mode === mode));
+}
+
 function isWorkedSpot(spot) {
   const entries = workedQsos.get(spot.callsign.toUpperCase());
   if (!entries || entries.length === 0) return false;
@@ -8967,6 +9044,7 @@ function getFiltered() {
     if (isPinned) {
       if (bands && !bands.has(s.band)) return false;
       if (!modeMatches(s.mode, modes)) return false;
+      if (callFilter.length && !CallFilter.callMatchesFilter(s.callsign, callFilter)) return false;
       if (continents && !continents.has(s.continent)) return false;
       if (typeof SpotMuteRules !== 'undefined' && SpotMuteRules.matchesMuteRule(s, spotMuteRules)) return false;
       return true;
@@ -9004,6 +9082,7 @@ function getFiltered() {
     }
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
+    if (callFilter.length && !CallFilter.callMatchesFilter(s.callsign, callFilter)) return false;
     if (continents && !continents.has(s.continent)) return false;
     // Per-band region mutes (N7BBQ: JA on 40m unworkable daily, but the same
     // stations on 15m are wanted — a global Asia filter is too blunt). Table,
@@ -10295,7 +10374,7 @@ function updateMapMarkers(filtered) {
 
     // Pin color matches source: POTA green, SOTA orange, DXC purple, etc.
     const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
-    const worked = workedQsos.has(s.callsign.toUpperCase());
+    const worked = hasWorkedOnBandMode(s);
     const isExpedition = isExpeditionVisible(s.callsign);
     const sourceIcon = sourceIcons[s.source] || sourceIcons.pota;
     const markerOptions = isExpedition
@@ -12090,8 +12169,8 @@ window.api.onPopoutOpenLog((spot) => {
 function enrichSpotsForPopout(filtered) {
   return filtered.map(s => ({
     ...s,
-    isWorked: workedQsos.has(s.callsign.toUpperCase()),
-    isWorkedToday: workedQsos.has(s.callsign.toUpperCase()) && isWorkedSpot(s),
+    isWorked: hasWorkedOnBandMode(s),
+    isWorkedToday: isWorkedSpot(s),
     isExpedition: isExpeditionVisible(s.callsign),
     expeditionEntity: (expeditionMeta.get(s.callsign.toUpperCase()) || {}).entity || '',
     isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
@@ -12315,7 +12394,7 @@ function render() {
 
     for (const s of filtered) {
       const tr = document.createElement('tr');
-      const isWorked = workedQsos.has(s.callsign.toUpperCase());
+      const isWorked = hasWorkedOnBandMode(s);
       const isWorkedToday = isWorked && isWorkedSpot(s);
       const spotSkipKey = s.callsign + '\t' + s.frequency;
       const isSkipped = isSpotSkipped(s);
@@ -13230,9 +13309,9 @@ logDialogClose.addEventListener('click', () => logDialog.close());
 // next macro.
 {
   const logCallEl = document.getElementById('log-callsign');
-  const report = (v) => { try { window.api.reportLogCallsign(v); } catch { /* older preload */ } };
+  const report = (v) => { try { window.api.reportLogCallsign(v, 'main:log'); } catch { /* older preload */ } };
   if (logCallEl) logCallEl.addEventListener('input', () => report(logCallEl.value.trim().toUpperCase()));
-  logDialog.addEventListener('close', () => report(''));
+  logDialog.addEventListener('close', () => { report(''); if (logCallEl) logCallEl.value = ''; });
 }
 
 // Enter key saves QSO from anywhere in the log dialog
@@ -14837,6 +14916,7 @@ async function openSettingsDialog(tab) {
   setHideOutOfBand.checked = s.hideOutOfBand === true;
   setHideWorked.checked = s.hideWorked === true;
   setTuneClick.checked = s.tuneClick === true;
+  if (setQsoChime) setQsoChime.value = s.qsoChime || 'off';
   setEnableRotor.checked = s.enableRotor === true;
   if (s.enableRotor) rotorConfigured = true;
   if (setRotorType) setRotorType.value = s.rotorType || 'pstrotator';
@@ -15883,6 +15963,7 @@ settingsSave.addEventListener('click', async () => {
     hideOutOfBand: hideOob,
     hideWorked: hideWorkedEnabled,
     tuneClick: tuneClickEnabled,
+    qsoChime: setQsoChime ? setQsoChime.value : 'off',
     enableRotor: rotorEnabledVal,
     rotorType: rotorTypeVal,
     rotorMode: rotorModeVal,
@@ -18906,6 +18987,29 @@ window.api.onCatSwr((val) => {
   swrTextEl.style.color = color;
 });
 
+// Measured forward power. Scaled against the radio's power SETTING when it
+// is known (95 W out of a 100 W setting fills the bar), else 100 W. 0 W after
+// key-up decays the bar rather than leaving the last reading up.
+const pwrBarCanvas = document.getElementById('pwr-bar');
+const pwrTextEl = document.getElementById('pwr-text');
+if (window.api.onCatFwdPower && pwrBarCanvas) {
+  window.api.onCatFwdPower((watts) => {
+    const w = Number(watts) || 0;
+    if (w <= 0) {
+      drawMeterBar(pwrBarCanvas, 0, '#333');
+      pwrTextEl.textContent = '—';
+      pwrTextEl.style.color = '#666';
+      return;
+    }
+    if (meterBoxVisible) meterBox.classList.remove('hidden');
+    const full = radioPower > 0 ? radioPower : 100;
+    const level = Math.min(1, w / full);
+    drawMeterBar(pwrBarCanvas, level, '#4ecca3');
+    pwrTextEl.textContent = (w < 10 ? w.toFixed(1) : Math.round(w)) + ' W';
+    pwrTextEl.style.color = '#4ecca3';
+  });
+}
+
 // Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
 window.api.onCatSwrRatio((swr) => {
   if (meterBoxVisible) meterBox.classList.remove('hidden');
@@ -20092,9 +20196,13 @@ function expandDesktopCwMacros(text) {
   // log dialog, else the Log POP-OUT's field (a spot's Log button routes
   // there whenever it's open, so relying on this document alone left {call}
   // empty for anyone using it — LZ3AW 2026-08-29), else the last tuned spot.
-  const logCall = document.getElementById('log-callsign');
-  const typed = (logCall && logCall.value) ? logCall.value.trim().toUpperCase() : '';
-  const call = typed || _logPopoutCallsign
+  // Main's merged view first (lib/typed-call.js: the most recently changed
+  // non-empty field on ANY surface — this window's fields report there too),
+  // then this window's own fields read live, then the tuned spot.
+  const live = ['log-callsign', 'activator-callsign', 'bl-callsign']
+    .map((id) => { const el = document.getElementById(id); return el && el.value ? el.value.trim().toUpperCase() : ''; })
+    .find(Boolean) || '';
+  const call = _logPopoutCallsign || live
     || (lastTunedSpot ? lastTunedSpot.callsign : '');
   // {op_firstname} — nickname (preferred) or first name from QRZ
   const bareCall = call.split('/')[0];
@@ -20232,12 +20340,25 @@ if (cwMacroInput) {
   cwMacroInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (cwLiveMode) {
+        // Key-as-I-type: every character in the box has already gone to
+        // air. Enter only clears it for the next line — handing it to Send
+        // aborted the letters still keying and played the whole line again
+        // (LZ3AW's "typing is delaying too much", the other half of it).
+        cwMacroInput.value = '';
+        cwLiveSent = 0;
+        cwMacroInput.dataset.cwSentPrefix = '';
+        return;
+      }
       cwMacroSendBtn.click();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       cwMacroCancelBtn.click();
     }
   });
+  // A cleared box restarts the live cursor; otherwise the next characters are
+  // swallowed until the text is longer than the line before it.
+  cwMacroCancelBtn.addEventListener('click', () => { cwLiveSent = 0; cwMacroInput.dataset.cwSentPrefix = ''; });
 }
 
 // --- Voice Macros (desktop) ---
@@ -23401,6 +23522,8 @@ const activatorCounterEl = document.getElementById('activator-counter');
 const activatorUtcEl = document.getElementById('activator-utc');
 const activatorTimerEl = document.getElementById('activator-timer');
 const activatorCallsignInput = document.getElementById('activator-callsign');
+// Reports the call it holds for CW-macro {call} (lib/typed-call.js).
+if (activatorCallsignInput) activatorCallsignInput.addEventListener('input', () => { try { window.api.reportLogCallsign(activatorCallsignInput.value.trim().toUpperCase(), 'main:activator'); } catch {} });
 const activatorOpNameEl = document.getElementById('activator-op-name');
 const activatorStateInput = document.getElementById('activator-state');
 const activatorLogBtn = document.getElementById('activator-log-btn');
@@ -23523,6 +23646,11 @@ activatorSpotsVisible = localStorage.getItem(ACTIVATOR_SPOTS_KEY) === '1';
 /** Apply or remove the activator-spots split layout */
 function applyActivatorSpotsLayout() {
   if (activatorSpotsVisible && appMode === 'activator') {
+    // Hunt means the spots TABLE. The lower pane shows whatever `currentView`
+    // is, so an operator who had SWL/HF Nets (or RBN, DXCC, Contests) open
+    // before entering activator mode got that instead of spots (Casey
+    // 2026-09-18). Map stays map — that is still spots.
+    if (currentView !== 'table' && currentView !== 'map') setView('table');
     document.body.classList.add('activator-spots-on');
     activatorSpotsSplitter.classList.remove('hidden');
     activatorSpotsBtn.classList.add('active');
@@ -25053,7 +25181,7 @@ async function activatorLogContact() {
  * QSO they are about to make. The return chip is the control that moves it.
  */
 function clearActivatorEntry() {
-  activatorCallsignInput.value = '';
+  activatorCallsignInput.value = ''; try { window.api.reportLogCallsign('', 'main:activator'); } catch {}
   activatorOpNameEl.textContent = '';
   if (activatorStateInput) activatorStateInput.value = '';
   resetActivatorRst();

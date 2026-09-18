@@ -83,6 +83,8 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="PSK31"> PSK31</label>
         </div>
       </div>
+      <!-- Callsign filter (lib/call-filter.js): prefixes or calls, comma-separated, * wildcard. Device-local. -->
+      <input type="search" id="call-filter" placeholder="Calls: LZ, SP9ABC" title="Show only these callsigns or prefixes — comma-separated, * and ? wildcards. Empty = all." autocomplete="off" autocapitalize="characters" spellcheck="false" style="width:130px;font-size:12px;padding:3px 6px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:4px;">
       <div class="multi-dropdown" id="spots-dropdown">
         <button class="multi-dropdown-btn" type="button" id="spots-btn">Spots</button>
         <div class="spots-dropdown-panel">
@@ -618,6 +620,11 @@
             <span class="meter-label">ALC<span class="meter-tx-hint">·TX</span></span>
             <canvas id="alc-bar" width="120" height="14"></canvas>
             <span id="alc-text" class="meter-val">—</span>
+          </div>
+          <div class="meter-row" title="Measured forward power — reported by the radio only while transmitting.">
+            <span class="meter-label">PWR<span class="meter-tx-hint">·TX</span></span>
+            <canvas id="pwr-bar" width="120" height="14"></canvas>
+            <span id="pwr-text" class="meter-val">—</span>
           </div>
         </div>
         <!-- Floating CW Macro box — draggable -->
@@ -2186,6 +2193,16 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
+      <label title="A short sound each time a QSO is logged — from any window, the mobile device, JTCAT or WSJT-X — so you know a contact went in the log even when POTACAT is in the background.">QSO logged chime:
+        <select id="set-qso-chime" style="margin-left:4px;">
+          <option value="off">Off</option>
+          <option value="soft">Soft ding</option>
+          <option value="twotone">Two-tone</option>
+          <option value="bell">Bell</option>
+          <option value="morse-r">Morse R (received)</option>
+        </select>
+        <button type="button" id="set-qso-chime-test" style="margin-left:6px;padding:2px 8px;font-size:12px;">Test</button>
+      </label>
       <label>Notification duration (seconds):
         <input type="number" id="set-notify-timeout" min="3" max="60" step="1" value="10">
       </label>
@@ -4357,6 +4374,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-gain-steps.js"></script>
   <script src="../lib/spot-mute-rules.js"></script>
+  <script src="../lib/call-filter.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="../lib/activation-program.js"></script>
   <script src="jtcat-parser.js"></script>

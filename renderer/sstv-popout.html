@@ -180,6 +180,7 @@
         <!-- RX audio health: red when no decoder audio has arrived recently
              (dead DAX stream, wrong input device, muted slice…). -->
         <div id="rx-no-audio" style="display:none;position:absolute;bottom:8px;left:8px;background:rgba(233,69,96,0.92);color:#fff;border-radius:4px;font-size:11px;font-weight:700;padding:3px 8px;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.5);" title="No RX audio is reaching the SSTV decoder. Check the audio input device, DAX routing, or the radio connection.">✕ NO RX AUDIO</div>
+        <div id="rx-low-audio" style="display:none;position:absolute;bottom:8px;left:8px;background:rgba(240,165,0,0.92);color:#1a1a2e;border-radius:4px;font-size:11px;font-weight:700;padding:3px 8px;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.5);" title="RX audio is reaching the decoder at a very low level. Raise the recording level for this device (Windows Sound > Recording > Levels) or the radio's USB/ACC AF output level.">RX AUDIO LOW</div>
         <button type="button" id="rx-reply-btn" title="Use this as the PiP reply inset on your next TX"
                 style="display:none;position:absolute;bottom:8px;right:8px;background:rgba(233,69,96,0.95);color:#fff;border:none;border-radius:4px;font-size:12px;font-weight:700;padding:6px 12px;cursor:pointer;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.5);">↩ Reply with this</button>
       </div>
@@ -325,6 +326,7 @@
   <div class="sstv-settings">
     <span>Audio In:</span>
     <select id="audio-input"></select>
+    <span id="rx-level" style="font-size:11px;color:#8892b0;min-width:6em" title="Peak level of the RX audio reaching the SSTV decoder (dB below full scale). Healthy is about -30 to -6 dBFS.">--</span>
     <span>Audio Out:</span>
     <select id="audio-output"></select>
   </div>

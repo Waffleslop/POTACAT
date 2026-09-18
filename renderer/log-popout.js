@@ -31,12 +31,11 @@ function _applyPopoutTheme(payload) {
 (function () {
   // ── DOM refs ────────────────────────────────────────────────────────────
   const callInput = document.getElementById('lp-callsign');
-  // Keep the main window's CW-macro {call} in step with what is typed here.
-  if (callInput) {
-    callInput.addEventListener('input', () => {
-      try { if (window.api && window.api.reportCallsign) window.api.reportCallsign(callInput.value || ''); } catch {}
-    });
-  }
+  // Keep CW-macro {call} in step with what this field holds — typed, filled
+  // from a spot, or cleared. Only typing used to report, so a value set in
+  // code stayed invisible and a stale one kept winning (LZ3AW #13).
+  const reportCall = () => { try { if (window.api && window.api.reportCallsign) window.api.reportCallsign(callInput.value || ''); } catch {} };
+  if (callInput) callInput.addEventListener('input', reportCall);
   const nameInput = document.getElementById('lp-name');
   const qrzBtn = document.getElementById('lp-qrz-link');
   const identityEl = document.getElementById('lp-identity');
@@ -371,6 +370,7 @@ function _applyPopoutTheme(payload) {
 
   function clearForm(opts) {
     callInput.value = '';
+    reportCall();
     nameInput.value = '';
     refInput.value = '';
     if (refNameEl) refNameEl.textContent = '';
@@ -656,6 +656,7 @@ function _applyPopoutTheme(payload) {
   function applySpotPrefill(p) {
     clearForm({ skipFocus: true });
     callInput.value = String(p.callsign || '').toUpperCase();
+    reportCall();
     if (p.freqKhz) freqInput.value = String(Math.round(p.freqKhz));
     if (p.mode) {
       const m = modeFamily(p.mode);
@@ -708,6 +709,7 @@ function _applyPopoutTheme(payload) {
       // should be on RST Sent so I can quickly type in the RST".)
       if (p.callsign && !callInput.value) {
         callInput.value = String(p.callsign).toUpperCase();
+        reportCall();
         // Trigger the callsign lookup so QTH/past QSOs populate.
         scheduleLookup();
         rstSentInput.focus();

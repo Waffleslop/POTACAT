@@ -927,6 +927,8 @@
           <label class="rc-dropdown-item"><input type="checkbox" value="SA"> S. America</label>
         </div>
       </div>
+      <!-- Callsign filter: prefixes or calls, comma-separated, * wildcard. Device-local (mirrors lib/call-filter.js). -->
+      <input type="search" id="rc-call-filter" placeholder="Calls: LZ, SP9ABC" title="Show only these callsigns or prefixes — comma-separated, * and ? wildcards. Empty = all." autocomplete="off" autocapitalize="characters" spellcheck="false" style="width:120px;font-size:12px;padding:3px 6px;background:var(--bg-input,#111);color:inherit;border:1px solid var(--border,#444);border-radius:4px;">
 
       <!-- Spots dropdown panel -->
       <div class="rc-dropdown" id="rc-spots-dropdown">
@@ -1039,6 +1041,18 @@
               <option value="PSK31">PSK31</option>
               <option value="AM">AM</option>
             </select>
+          </div>
+        </div>
+        <!-- UTC date/time for a PAST QSO. Empty = now (the desktop stamps it),
+             which is the live-logging case; fill both to back-date (LZ3AW). -->
+        <div class="log-row">
+          <div class="log-field log-field-half">
+            <label for="lt-date">Date (UTC, blank = now)</label>
+            <input type="date" id="lt-date">
+          </div>
+          <div class="log-field log-field-half">
+            <label for="lt-time">Time (UTC)</label>
+            <input type="time" id="lt-time" step="60">
           </div>
         </div>
         <div class="log-row">

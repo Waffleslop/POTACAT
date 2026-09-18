@@ -332,7 +332,7 @@ const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF pow
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
-const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
+const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('./lib/cw-key-line');
@@ -1704,6 +1704,19 @@ let _currentAtuState = false;
 let _currentVfo = 'A';
 let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s)
 let _currentFilterWidth = 0;
+
+// The callsign being worked — CW-macro {call} on every surface. See
+// lib/typed-call.js for the rule (most recently changed non-empty field wins).
+const { TypedCallTracker } = require('./lib/typed-call');
+const typedCalls = new TypedCallTracker();
+function setTypedCall(source, call) {
+  const prev = typedCalls.current();
+  const now = typedCalls.set(source, call);
+  if (now === prev) return;
+  if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', now);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('log-popout-callsign', now);
+  if (remoteServer && remoteServer.running) remoteServer.sendTypedCall(now);
+}
 let _currentRfGain = 0;
 let _currentSquelch = 0; // FM squelch threshold 0-100 (see applyRigControl 'set-squelch')
 let _currentTxPower = 0; // 0 = unknown until radio reports actual power
@@ -2605,6 +2618,24 @@ function sendCatMode(mode) {
   sendVfoState();
   broadcastRigState();
   sendN1mmRadioInfo();
+}
+
+// Measured forward power, from whichever radio reports one (Flex TX bridge
+// fwd-power, rigctld RFPOWER_METER, Kenwood SM while keyed). One fan-out for
+// every wattmeter: main window, VFO and JTCAT pop-outs, ECHOCAT clients.
+// Frames only flow during TX, so the displays decay to 0 shortly after they
+// stop rather than showing stale watts forever.
+function sendCatFwdPower(watts) {
+  const w = Math.round((Number(watts) || 0) * 10) / 10;
+  const push = (v) => {
+    if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', v);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', v);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', v);
+    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: v });
+  };
+  push(w);
+  if (_fwdPowerClearTimer) clearTimeout(_fwdPowerClearTimer);
+  _fwdPowerClearTimer = setTimeout(() => { _fwdPowerClearTimer = null; push(0); }, 3000);
 }
 
 function sendCatPower(watts) {
@@ -4282,10 +4313,12 @@ async function connectCat() {
     });
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -4377,10 +4410,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -4418,10 +4453,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -4468,10 +4505,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
 	    cat.on('swr', sendCatSwr);
@@ -4576,10 +4615,12 @@ async function connectCat() {
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
-    // Measured forward power (hamlib RFPOWER_METER). Same sink as the
-    // power SETTING so every surface that shows a wattmeter gets real
-    // watts while transmitting; rigs that can't report it never emit.
-    cat.on('powerMeter', sendCatPower);
+    // Measured forward power (hamlib RFPOWER_METER; Kenwood SM during TX).
+    // Its own channel, like the Flex TX bridge. Routing it through the
+    // power SETTING sink put the reading on the setting's display, where
+    // the next PC; poll overwrote it and no wattmeter ever drew it
+    // (LZ3AW's "TX power meter not fixed", 2026-09-14).
+    cat.on('powerMeter', sendCatFwdPower);
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -7303,6 +7344,13 @@ async function saveQsoRecord(qsoData, opts) {
     qsoPopoutWin.webContents.send('qso-popout-added', qsoData);
   }
 
+  // Tell the main window a QSO went in, from whichever path logged it —
+  // dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X. The QSO-logged
+  // chime hangs off this (N2FSM 2026-09-12).
+  if (win && !win.isDestroyed()) {
+    win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode });
+  }
+
   // Track QSO in telemetry (fire-and-forget)
   const qsoSource = (qsoData.sig || '').toLowerCase();
   trackQso(['pota', 'sota', 'wwff', 'llota', 'wwbota'].includes(qsoSource) ? qsoSource : null);
@@ -7317,7 +7365,7 @@ async function saveQsoRecord(qsoData, opts) {
   // Update worked QSOs map and notify renderer
   if (qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
-    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: (qsoData.mode || '').toUpperCase() };
+    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
     if (!workedQsos.has(call)) workedQsos.set(call, []);
     workedQsos.get(call).push(entry);
     // Mirror into the richer ragchew-logger index so a freshly-saved QSO
@@ -7843,7 +7891,7 @@ function connectWsjtx() {
       const freqHz = qso.txFrequency || 0;
       const freqKhz = freqHz > 100000 ? freqHz / 1000 : freqHz; // WSJT-X sends Hz
       const band = freqKhz ? (freqToBand(freqKhz / 1000) || '') : '';
-      const mode = (qso.mode || '').toUpperCase();
+      const mode = normalizeLogMode(qso.mode, qso.submode);
       const now = new Date();
       const qsoDate = now.getUTCFullYear().toString() +
         String(now.getUTCMonth() + 1).padStart(2, '0') +
@@ -9872,7 +9920,10 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
   ft8Engine.setRxFreq(caller.df);
   if (!settings.jtcatHoldTxFreq) ft8Engine.setTxFreq(caller.df);
   ft8Engine._txEnabled = true;
-  const theirSlot = caller.slot || 'even';      // reply on the opposite slot
+  // Every decode now carries its slot (ft8-engine stamps it per job); the
+  // engine's last RX slot is the fallback, never a bare 'even' — that default
+  // put half of all replies in the activator's own slot (K4HXM 2026-09-18).
+  const theirSlot = caller.slot || ft8Engine._lastRxSlot || 'even';      // reply on the opposite slot
   ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
 
   const owner = (jtcatAutoCqOwner === 'remote') ? 'remote' : 'popout';
@@ -10622,7 +10673,7 @@ function startJtcat(mode) {
           ft8Engine.setTxFreq(best.df);
           ft8Engine._txEnabled = true;
           // Match their TX slot: they CQ on slot X, we reply on the opposite
-          const theirSlot = best.slot || 'even';
+          const theirSlot = best.slot || ft8Engine._lastRxSlot || 'even';
           ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
 
           if (jtcatAutoCqOwner === 'remote') {
@@ -11592,17 +11643,7 @@ function connectSmartSdr() {
   smartSdr.on('fwd-power', (watts) => {
     const w = Math.round((Number(watts) || 0) * 10) / 10;
     if (_flexTxRf) { _flexTxRf.frames++; if (w > _flexTxRf.peakW) _flexTxRf.peakW = w; }
-    if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', w);
-    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', w);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', w);
-    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: w });
-    if (_fwdPowerClearTimer) clearTimeout(_fwdPowerClearTimer);
-    _fwdPowerClearTimer = setTimeout(() => {
-      _fwdPowerClearTimer = null;
-      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', 0);
-      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', 0);
-      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: 0 });
-    }, 3000);
+    sendCatFwdPower(w);
   });
   smartSdr.on('swr-ratio', (swr) => {
     if (_flexTxRf && swr > _flexTxRf.maxSwr) _flexTxRf.maxSwr = swr;
@@ -14023,14 +14064,36 @@ function _setCwPaddleAvailability(available, reason) {
   }
 }
 
-function sendCwTextViaDtrKey(text, wpm, dtrPins) {
+// When the DTR queue drains (absolute ms). Key-as-I-type appends to it.
+let _cwDtrQueueEndAt = 0;
+
+/**
+ * @param {{live?: boolean}} [opts] live = key-as-I-type: APPEND this character
+ *   after whatever is still keying. Every call used to cancel the in-flight
+ *   timers and start over, so each letter typed killed the letter before it
+ *   mid-element — slow typing worked, fast typing was "useless" (LZ3AW
+ *   2026-09-18; his text goes out on the CW Key Port, not the rig's KY
+ *   buffer, so the KY-side fix never touched it). A whole message still
+ *   starts clean.
+ */
+function sendCwTextViaDtrKey(text, wpm, dtrPins, opts) {
   if (!cwKeyPort || !cwKeyPort.isOpen) return false;
   const cleaned = String(text).toUpperCase().replace(/[^A-Z0-9 /?.=,+\-]/g, '');
   if (!cleaned) return false;
-  // Cancel any in-flight DTR keying so re-sending mid-message starts clean.
-  for (const t of _cwDtrSendTimers) clearTimeout(t);
-  _cwDtrSendTimers = [];
-  if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  const live = !!(opts && opts.live);
+  const queueActive = !!_cwDtrEndTimer;
+  let t = 0;
+  if (live && queueActive) {
+    // Append: start where the queue ends, with the inter-character gap the
+    // previous character already left. Nothing in flight is touched.
+    t = Math.max(0, _cwDtrQueueEndAt - Date.now());
+    if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  } else {
+    // Cancel any in-flight DTR keying so re-sending mid-message starts clean.
+    for (const tm of _cwDtrSendTimers) clearTimeout(tm);
+    _cwDtrSendTimers = [];
+    if (_cwDtrEndTimer) { clearTimeout(_cwDtrEndTimer); _cwDtrEndTimer = null; }
+  }
 
   const unitMs = 1200 / Math.max(5, Math.min(60, wpm || 20));
   const pins = dtrPins || { dtr: true };
@@ -14046,7 +14109,6 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
     try { cwKeyPort.set(state, () => {}); return true; } catch { return false; /* port went away mid-send */ }
   };
 
-  let t = 0;
   for (const ch of cleaned) {
     if (ch === ' ') { t += 4 * unitMs; continue; } // word gap (3 already added after prev char)
     const morse = _MORSE_TABLE[ch];
@@ -14061,6 +14123,11 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins) {
     }
     t += 2 * unitMs; // inter-character gap = 3 units total (1 already added)
   }
+  _cwDtrQueueEndAt = Date.now() + t;
+  // The rig is keyed for this long; a TS-480 mutes CAT meanwhile, and the
+  // link watchdog must not read that as a dead radio (lib/rig-controller.js
+  // noteTransmitting). RigController only — the legacy CatClient has no hold.
+  if (cat && typeof cat.noteTransmitting === 'function') cat.noteTransmitting(t + 200);
   // Final safety pulse: force key-up after total duration. Belt-and-suspenders
   // in case the last setKey(false) somehow didn't land (port blip, etc.).
   if (_cwStuckKeyWatchdog) { clearTimeout(_cwStuckKeyWatchdog); _cwStuckKeyWatchdog = null; }
@@ -14232,7 +14299,7 @@ function _sendCwTextToRadioImpl(text, opts) {
         if (cwPersistentText(wpm, expanded, txtPins)) return `persistent keyer (${pinLabel})`;
         if (sendCwTextViaPython(expanded, wpm, txtPins)) return `Python pyserial (${pinLabel})`;
       }
-      if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins)) return `${pinLabel} keyer`;
+      if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins, { live })) return `${pinLabel} keyer`;
       return false;
     };
     // A configured key port is authoritative for these rigs — their CAT KY is
@@ -15252,6 +15319,11 @@ function connectRemote() {
   let _cwKeyPortLineLogged = '';   // the key-port line last announced
   let _cwTxrxPttOnlyLogged = false;
   remoteServer.setCwKeyerOutput(({ down }) => {
+    // A paddle keys the rig outside the controller's own PTT path. Hold the
+    // TX flag past each edge so a CAT-muted TS-480 is not declared DOWN ten
+    // seconds into an over — which forced the key line low mid-word
+    // (LZ3AW's TinyMidi paddle: "stops transmitting after a few seconds").
+    if (down && cat && typeof cat.noteTransmitting === 'function') cat.noteTransmitting(2000);
     // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
     if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
       if (down) {
@@ -15828,6 +15900,10 @@ function connectRemote() {
     _currentFilterWidth = width;
     broadcastRigState();
   }
+
+  // Web fields (log sheet, quick log, Log tab, VFO-panel box) report the
+  // call they hold; the shared value goes back out to every surface.
+  remoteServer.on('typed-call', ({ call, source }) => setTypedCall('web:' + (source || 'log'), call));
 
   remoteServer.on('set-filter', ({ width }) => {
     if (!width || width <= 0) return;
@@ -25673,6 +25749,7 @@ app.whenReady().then(() => {
     });
     logPopoutWin.on('closed', () => {
       logPopoutWin = null;
+      setTypedCall('popout', ''); // a closed window is not holding a call
       if (win && !win.isDestroyed()) win.webContents.send('log-popout-status', false);
     });
 
@@ -25718,15 +25795,11 @@ app.whenReady().then(() => {
   // dialog clears only the dialog's entry, and a callsign still sitting in the
   // log pop-out keeps standing. Otherwise one window's clear silently wiped
   // the other's call and the macro went out addressed to the wrong station.
-  const _typedCallsigns = { main: '', popout: '' };
-  ipcMain.on('log-popout-callsign', (_e, call) => {
-    const from = (win && !win.isDestroyed() && _e.sender === win.webContents) ? 'main' : 'popout';
-    _typedCallsigns[from] = String(call || '').trim().toUpperCase();
-    // Pop-out wins when both hold one: opening that window is the deliberate
-    // act, and a spot's Log button routes there whenever it is open.
-    const c = _typedCallsigns.popout || _typedCallsigns.main;
-    if (win && !win.isDestroyed()) win.webContents.send('log-popout-callsign', c);
-    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('log-popout-callsign', c);
+  // Every callsign field reports here, naming itself; a sender that predates
+  // the source argument is the main log dialog or the Log pop-out.
+  ipcMain.on('log-popout-callsign', (_e, call, source) => {
+    const from = source || ((win && !win.isDestroyed() && _e.sender === win.webContents) ? 'main:log' : 'popout');
+    setTypedCall(from, call);
   });
   ipcMain.on('log-popout-minimize', () => { if (logPopoutWin) logPopoutWin.minimize(); });
   ipcMain.on('log-popout-close', () => { if (logPopoutWin) logPopoutWin.close(); });
@@ -26184,6 +26257,9 @@ app.whenReady().then(() => {
     vfoPopoutWin.loadFile(path.join(__dirname, 'renderer', 'vfo-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
     vfoPopoutWin.webContents.on('did-finish-load', () => {
       sendVfoState();
+      // {call} for its macros — a pop-out opened after the call was typed
+      // used to learn it only from the next keystroke.
+      vfoPopoutWin.webContents.send('log-popout-callsign', typedCalls.current());
       // Hydrate the lock: without this a popout opened AFTER the lock was
       // engaged shows the open padlock while main refuses tunes with "VFO
       // Locked" — the exact contradiction in #76.
