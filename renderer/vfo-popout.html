@@ -1107,20 +1107,46 @@ let customCatButtons = [];
 function buildCustomCatBtns() {
   // Remove any previously injected custom buttons
   document.querySelectorAll('.custom-cat-injected').forEach(el => el.remove());
-  const btns = customCatButtons.filter(b => b.name && b.command);
+  // Sliders have no control here; buttons and toggles do. A toggle used to be
+  // drawn as a plain button that only ever sent its On command (LZ3AW #7).
+  const btns = customCatButtons.filter(b => b.name && b.command && b.type !== 'slider');
   if (btns.length === 0) return;
   // Append custom CAT buttons into each rig-toggles-shared row
   document.querySelectorAll('.rig-toggles-shared').forEach(row => {
     btns.forEach(b => {
       const btn = document.createElement('button');
       btn.className = 'cat-cmd-btn custom-cat-injected';
-      btn.textContent = b.name;
-      btn.title = b.command;
-      btn.addEventListener('click', () => window.api.sendCustomCat(b.command));
+      if (b.type === 'toggle') {
+        // Session-only "last sent" state, like the other windows: POTACAT
+        // cannot read back an arbitrary user-typed command.
+        const key = customToggleKey(b);
+        const paint = () => {
+          const on = !!customToggleState[key];
+          btn.textContent = b.name + ' ' + (on ? 'On' : 'Off');
+          btn.classList.toggle('active', on);
+        };
+        btn.title = 'Shows the last command sent, not the radio state.';
+        btn.addEventListener('click', () => {
+          const goingOn = !customToggleState[key];
+          const cmd = String((goingOn ? b.command : b.commandOff) || '').trim();
+          if (!cmd) return;
+          window.api.sendCustomCat(cmd);
+          customToggleState[key] = goingOn;
+          document.querySelectorAll('.custom-cat-injected').forEach((el) => { if (el._paint) el._paint(); });
+        });
+        btn._paint = paint;
+        paint();
+      } else {
+        btn.textContent = b.name;
+        btn.title = b.command;
+        btn.addEventListener('click', () => window.api.sendCustomCat(b.command));
+      }
       row.appendChild(btn);
     });
   });
 }
+const customToggleState = {};
+const customToggleKey = (b) => [b.name, b.command, b.commandOff || ''].join('');
 buildCustomCatBtns();
 
 // --- Step sizes for VFO dial ---

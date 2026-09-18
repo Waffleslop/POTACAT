@@ -8814,6 +8814,30 @@ function spotAgeSecs(spotTime) {
   } catch { return Infinity; }
 }
 
+// The mode name a spot carries, as the worked map stores it (USB/LSB are
+// logged as SSB; DIGI/DATA spots name no single mode, so they match any).
+function spotModeKey(spot) {
+  const m = String(spot.mode || '').toUpperCase();
+  if (m === 'USB' || m === 'LSB') return 'SSB';
+  if (m === 'DIGI' || m === 'DATA' || m === 'DIGITAL') return '';
+  return m;
+}
+
+/**
+ * Worked this station on this spot's BAND and MODE, any date. This is what
+ * the check mark means: a call worked once on 40 m CW is still a fresh
+ * contact on 20 m SSB, and marking it worked hid exactly the QSOs the
+ * operator still wanted (LZ3AW #14). No band or no mode on the spot = the
+ * call alone.
+ */
+function hasWorkedOnBandMode(spot) {
+  const entries = workedQsos.get(String(spot.callsign || '').toUpperCase());
+  if (!entries || entries.length === 0) return false;
+  const band = String(spot.band || '').toUpperCase();
+  const mode = spotModeKey(spot);
+  return entries.some((e) => (!band || e.band === band) && (!mode || e.mode === mode));
+}
+
 function isWorkedSpot(spot) {
   const entries = workedQsos.get(spot.callsign.toUpperCase());
   if (!entries || entries.length === 0) return false;
@@ -10290,7 +10314,7 @@ function updateMapMarkers(filtered) {
 
     // Pin color matches source: POTA green, SOTA orange, DXC purple, etc.
     const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
-    const worked = workedQsos.has(s.callsign.toUpperCase());
+    const worked = hasWorkedOnBandMode(s);
     const isExpedition = isExpeditionVisible(s.callsign);
     const sourceIcon = sourceIcons[s.source] || sourceIcons.pota;
     const markerOptions = isExpedition
@@ -12085,8 +12109,8 @@ window.api.onPopoutOpenLog((spot) => {
 function enrichSpotsForPopout(filtered) {
   return filtered.map(s => ({
     ...s,
-    isWorked: workedQsos.has(s.callsign.toUpperCase()),
-    isWorkedToday: workedQsos.has(s.callsign.toUpperCase()) && isWorkedSpot(s),
+    isWorked: hasWorkedOnBandMode(s),
+    isWorkedToday: isWorkedSpot(s),
     isExpedition: isExpeditionVisible(s.callsign),
     expeditionEntity: (expeditionMeta.get(s.callsign.toUpperCase()) || {}).entity || '',
     isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
@@ -12310,7 +12334,7 @@ function render() {
 
     for (const s of filtered) {
       const tr = document.createElement('tr');
-      const isWorked = workedQsos.has(s.callsign.toUpperCase());
+      const isWorked = hasWorkedOnBandMode(s);
       const isWorkedToday = isWorked && isWorkedSpot(s);
       const spotSkipKey = s.callsign + '\t' + s.frequency;
       const isSkipped = isSpotSkipped(s);

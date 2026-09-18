@@ -332,7 +332,7 @@ const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF pow
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
-const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord } = require('./lib/adif');
+const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('./lib/cw-key-line');
@@ -7330,7 +7330,7 @@ async function saveQsoRecord(qsoData, opts) {
   // Update worked QSOs map and notify renderer
   if (qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
-    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: (qsoData.mode || '').toUpperCase() };
+    const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
     if (!workedQsos.has(call)) workedQsos.set(call, []);
     workedQsos.get(call).push(entry);
     // Mirror into the richer ragchew-logger index so a freshly-saved QSO
@@ -7856,7 +7856,7 @@ function connectWsjtx() {
       const freqHz = qso.txFrequency || 0;
       const freqKhz = freqHz > 100000 ? freqHz / 1000 : freqHz; // WSJT-X sends Hz
       const band = freqKhz ? (freqToBand(freqKhz / 1000) || '') : '';
-      const mode = (qso.mode || '').toUpperCase();
+      const mode = normalizeLogMode(qso.mode, qso.submode);
       const now = new Date();
       const qsoDate = now.getUTCFullYear().toString() +
         String(now.getUTCMonth() + 1).padStart(2, '0') +
