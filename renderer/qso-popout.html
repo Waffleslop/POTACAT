@@ -111,6 +111,49 @@
       font-family: inherit; box-sizing: border-box;
     }
 
+    /* --- Find Duplicates --- */
+    .dupe-overlay {
+      position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55);
+    }
+    .dupe-overlay.hidden { display: none; }
+    .dupe-dialog {
+      width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
+      display: flex; flex-direction: column;
+      background: var(--bg-panel); border: 1px solid var(--border-primary); border-radius: 6px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+    }
+    .dupe-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px; border-bottom: 1px solid var(--border-primary); font-weight: 600;
+    }
+    .dupe-intro { margin: 8px 12px; color: var(--text-secondary); font-size: 12px; }
+    .dupe-list { overflow-y: auto; padding: 0 12px 8px; }
+    .dupe-group { border: 1px solid var(--border-primary); border-radius: 4px; margin-bottom: 8px; }
+    .dupe-group.skipped { opacity: 0.5; }
+    .dupe-group-head {
+      display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+      background: var(--bg-secondary); font-size: 12px;
+    }
+    .dupe-row {
+      display: grid; grid-template-columns: 22px 64px 124px 60px 56px 44px 1fr auto;
+      gap: 6px; align-items: center; padding: 3px 8px; font-size: 12px; cursor: pointer;
+    }
+    .dupe-row:hover { background: var(--bg-hover); }
+    .dupe-row .dupe-ref { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+    .dupe-row .dupe-tag { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+    .dupe-row.remove .dupe-tag { color: var(--accent-red, #e94560); }
+    .dupe-foot {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      border-top: 1px solid var(--border-primary);
+    }
+    .dupe-note { flex: 1; font-size: 11px; color: var(--text-tertiary); }
+    .dupe-delete-btn {
+      border: 1px solid var(--accent-red, #e94560); background: var(--accent-red, #e94560); color: #fff;
+      padding: 3px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    }
+    .dupe-delete-btn:disabled { opacity: 0.4; cursor: default; }
+
     .qso-empty { text-align: center; color: var(--text-tertiary); margin: 40px 0; }
 
     .qso-footer {
@@ -180,6 +223,7 @@
     <span class="qso-count" id="qso-count"></span>
     <button class="qso-export-btn" id="qso-new" style="background:var(--accent-green,#4ecca3);color:#000;font-weight:600;">+ New QSO</button>
     <button class="qso-export-btn" id="qso-import">Import ADIF</button>
+    <button class="qso-export-btn" id="qso-dupes" title="Find QSOs logged more than once">Find Duplicates</button>
     <button class="qso-export-btn" id="qso-export">Export ADIF</button>
     <button class="qso-export-btn" id="qso-resend" title="Resend visible QSOs to configured logbook">Resend to Logbook</button>
   </div>
@@ -294,6 +338,23 @@
   </div>
 
   <div class="qso-toast" id="qso-toast"></div>
+
+  <!-- Find Duplicates: nothing is deleted until the operator confirms this list -->
+  <div id="dupe-overlay" class="dupe-overlay hidden">
+    <div class="dupe-dialog" role="dialog" aria-labelledby="dupe-title">
+      <div class="dupe-head">
+        <span id="dupe-title">Duplicate QSOs</span>
+        <button type="button" class="titlebar-btn" id="dupe-close" title="Close">&#x2715;</button>
+      </div>
+      <p class="dupe-intro" id="dupe-intro"></p>
+      <div class="dupe-list" id="dupe-list"></div>
+      <div class="dupe-foot">
+        <span class="dupe-note">Removed copies are also removed from POTACAT Cloud.</span>
+        <button type="button" class="qso-clear-btn" id="dupe-cancel">Cancel</button>
+        <button type="button" class="dupe-delete-btn" id="dupe-delete"></button>
+      </div>
+    </div>
+  </div>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="qso-popout.js"></script>

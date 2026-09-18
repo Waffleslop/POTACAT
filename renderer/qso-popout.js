@@ -1195,13 +1195,130 @@ document.getElementById('qso-import').addEventListener('click', async () => {
       await resolveAllCallsigns();
       await resolveAllParkLocations();
       render();
-      toast(`Imported ${result.imported} QSOs (${result.unique} calls)`);
+      toast(`Imported ${result.imported} QSOs (${result.unique} calls)` +
+        (result.skipped ? `, skipped ${result.skipped} already in the log` : ''));
     } else {
       toast('Import failed: ' + (result.error || 'unknown error'));
     }
   } catch (err) {
     toast('Import failed: ' + err.message);
   }
+});
+
+// --- Find Duplicates ---
+// Groups come from main (the same-contact rule import and cloud sync use).
+// Each group keeps one record — the operator can pick which — or can be left
+// alone entirely. Nothing is deleted until the Delete button is pressed, and
+// main refuses if the log changed since the scan.
+const dupeOverlay = document.getElementById('dupe-overlay');
+const dupeList = document.getElementById('dupe-list');
+const dupeIntro = document.getElementById('dupe-intro');
+const dupeDeleteBtn = document.getElementById('dupe-delete');
+let dupeGroups = [];
+
+function dupeCell(text, cls) {
+  const el = document.createElement('span');
+  if (cls) el.className = cls;
+  el.textContent = text || '';
+  return el;
+}
+
+function dupeRemovals() {
+  const remove = [];
+  for (const g of dupeGroups) {
+    if (!g.include) continue;
+    for (const m of g.members) if (m.idx !== g.keep) remove.push({ idx: m.idx, fp: m.fp });
+  }
+  return remove;
+}
+
+function renderDupeGroups() {
+  dupeList.textContent = '';
+  dupeGroups.forEach((g, gi) => {
+    const box = document.createElement('div');
+    box.className = 'dupe-group' + (g.include ? '' : ' skipped');
+
+    const head = document.createElement('label');
+    head.className = 'dupe-group-head';
+    const include = document.createElement('input');
+    include.type = 'checkbox';
+    include.checked = g.include;
+    include.addEventListener('change', () => { g.include = include.checked; renderDupeGroups(); });
+    const f0 = g.members[0].fields;
+    head.append(include, dupeCell(`${f0.CALL} — ${g.members.length} copies`));
+    box.appendChild(head);
+
+    for (const m of g.members) {
+      const f = m.fields;
+      const keep = m.idx === g.keep;
+      const row = document.createElement('label');
+      row.className = 'dupe-row' + (g.include && !keep ? ' remove' : '');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = `dupe-keep-${gi}`;
+      radio.checked = keep;
+      radio.disabled = !g.include;
+      radio.addEventListener('change', () => { g.keep = m.idx; renderDupeGroups(); });
+      const date = f.QSO_DATE ? `${f.QSO_DATE.slice(0, 4)}-${f.QSO_DATE.slice(4, 6)}-${f.QSO_DATE.slice(6, 8)}` : '';
+      const time = f.TIME_ON ? `${f.TIME_ON.slice(0, 2)}:${f.TIME_ON.slice(2, 4)}:${(f.TIME_ON.slice(4, 6) || '00')}` : '';
+      const mode = f.SUBMODE && /^(MFSK|PSK)$/i.test(f.MODE || '') ? f.SUBMODE : f.MODE;
+      const refs = [f.SIG_INFO, f.MY_SIG_INFO && `my ${f.MY_SIG_INFO}`, f.COMMENT].filter(Boolean).join(' · ');
+      const filled = Object.values(f).filter((v) => v != null && v !== '').length;
+      row.append(
+        radio,
+        dupeCell(f.CALL),
+        dupeCell(`${date} ${time}`),
+        dupeCell(f.FREQ ? (parseFloat(f.FREQ) * 1000).toFixed(1) : f.BAND),
+        dupeCell(mode),
+        dupeCell(f.BAND),
+        dupeCell(refs, 'dupe-ref'),
+        dupeCell(g.include ? (keep ? `keep · ${filled} fields` : `remove · ${filled} fields`) : `${filled} fields`, 'dupe-tag'),
+      );
+      box.appendChild(row);
+    }
+    dupeList.appendChild(box);
+  });
+  const n = dupeRemovals().length;
+  dupeDeleteBtn.textContent = n ? `Delete ${n} duplicate${n === 1 ? '' : 's'}` : 'Delete';
+  dupeDeleteBtn.disabled = n === 0;
+}
+
+function closeDupes() {
+  dupeOverlay.classList.add('hidden');
+  dupeGroups = [];
+}
+
+document.getElementById('qso-dupes').addEventListener('click', async () => {
+  const result = await window.api.findDuplicateQsos();
+  if (!result || !result.success) { toast('Duplicate scan failed: ' + ((result && result.error) || 'unknown error')); return; }
+  if (!result.groups.length) { toast(`No duplicates in ${result.scanned} QSOs`); return; }
+  dupeGroups = result.groups.map((g) => ({ ...g, include: true }));
+  const copies = dupeGroups.reduce((n, g) => n + g.members.length - 1, 0);
+  dupeIntro.textContent = `${dupeGroups.length} contact${dupeGroups.length === 1 ? ' is' : 's are'} logged more than once ` +
+    `(same call and mode, within 5 kHz and 3 minutes). The copy with the most fields is kept by default; ` +
+    `pick a different one, or untick a contact to leave it alone. ${copies} cop${copies === 1 ? 'y' : 'ies'} selected for removal.`;
+  renderDupeGroups();
+  dupeOverlay.classList.remove('hidden');
+});
+
+document.getElementById('dupe-close').addEventListener('click', closeDupes);
+document.getElementById('dupe-cancel').addEventListener('click', closeDupes);
+dupeOverlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDupes(); });
+
+dupeDeleteBtn.addEventListener('click', async () => {
+  const remove = dupeRemovals();
+  if (!remove.length) return;
+  dupeDeleteBtn.disabled = true;
+  const result = await window.api.deleteDuplicateQsos(remove);
+  if (!result || !result.success) {
+    toast('Nothing deleted: ' + ((result && result.error) || 'unknown error'));
+    dupeDeleteBtn.disabled = false;
+    return;
+  }
+  closeDupes();
+  allQsos = await window.api.getAllQsos();
+  render();
+  toast(`Deleted ${result.removed} duplicate QSO${result.removed === 1 ? '' : 's'}`);
 });
 
 // --- Export ADIF ---

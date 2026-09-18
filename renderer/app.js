@@ -7572,7 +7572,11 @@ async function _renderSummaryEchocat() {
     // (lib/echocat-web-gate.js). Only offered while the tunnel is
     // actually live: a connecting/errored tunnel would hand out a
     // link that 502s at Cloudflare.
-    const cloudUrl = (tunnel && tunnel.status === 'live' && tunnel.cloudHost)
+    // ...and only while the origin self-test says POTACAT is answering
+    // behind it (lib/origin-health.js) — otherwise the link 502s at the
+    // origin instead of the edge, which is no better.
+    const originOk = !(tunnel && tunnel.origin) || tunnel.origin.state === 'ok';
+    const cloudUrl = (tunnel && tunnel.status === 'live' && tunnel.cloudHost && originOk)
       ? 'https://' + String(tunnel.cloudHost) : '';
     web = {
       addresses: list,
@@ -8504,6 +8508,7 @@ async function runAdifImport(resultEl) {
       resultEl.textContent = '';
     } else if (result.success) {
       const parts = [`${result.imported.toLocaleString()} QSOs imported`];
+      if (result.skipped > 0) parts.push(`${result.skipped.toLocaleString()} already in the log`);
       if (result.parksAdded > 0) {
         parts.push(`${result.parksAdded.toLocaleString()} new park ref${result.parksAdded === 1 ? '' : 's'}`);
       }
@@ -15725,7 +15730,6 @@ settingsSave.addEventListener('click', async () => {
   const swrGuardMaxVal = setSwrGuardMax ? Math.min(10, Math.max(1.5, parseFloat(setSwrGuardMax.value) || 3)) : 3;
   const flexMultiflexVal = setFlexMultiflex ? setFlexMultiflex.checked : true;
   const cwKeyPortVal = setCwKeyPort.value || '';
-  const launcherEnabled = setEnableLauncher ? setEnableLauncher.checked : false;
   // Audio comes from the active rig (resolved after selectedRig below)
   // CW Keyer
   const cwKeyerEnabled = setEnableCwKeyer.checked;
@@ -15995,7 +15999,6 @@ settingsSave.addEventListener('click', async () => {
     swrGuard: swrGuardVal,
     swrGuardMax: swrGuardMaxVal,
     cwKeyPort: cwKeyPortVal,
-    enableLauncher: launcherEnabled,
     remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',
     remoteAudioOutput: selectedRig ? (selectedRig.remoteAudioOutput || '') : '',
     appMode: document.querySelector('input[name="set-app-mode"]:checked')?.value || 'hunter',
@@ -19050,6 +19053,17 @@ catLogClearBtn.addEventListener('click', () => {
         }
       } catch {}
     }
+    // The ECHOCAT listener and the tunnel origin, stated: a report from a
+    // phone that cannot connect should say "not listening" up front.
+    let echocatServer = '(unknown)';
+    try {
+      const st = window.api.echocatServerStateGet ? await window.api.echocatServerStateGet() : null;
+      if (st && st.enabled === false) echocatServer = 'off';
+      else if (st && st.listening) echocatServer = `listening on ${st.https ? 'https' : 'HTTP (no TLS!)'} :${st.port}`;
+      else if (st) echocatServer = `NOT listening on :${st.port}` + (st.bindFailed ? ' (port busy)' : st.tlsFailed ? ' (TLS certificate failed)' : '') + (st.lastError ? ' — ' + st.lastError : '');
+      const t = await window.api.cloudTunnelGetState();
+      if (t && t.enabled) echocatServer += `; tunnel ${t.status}` + (t.origin ? `, origin ${t.origin.state}` : '');
+    } catch {}
     const md = {
       version: window._appVersion || s.appVersion || 'unknown',
       platform: window.api.platform,
@@ -19058,6 +19072,7 @@ catLogClearBtn.addEventListener('click', () => {
       radioOwner,
       features: enabled,
       setupNotes,
+      echocatServer,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
     // capture everything since process start, including the pre-window lines
@@ -19115,6 +19130,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Radio controlled by:** ' + md.radioOwner,
       '**Features enabled:** ' + md.features,
       '**Setup notes:** ' + md.setupNotes,
+      '**ECHOCAT server:** ' + md.echocatServer,
       '',
       '### What I tried to do',
       '<!-- fill in: the steps you took -->',

@@ -3261,6 +3261,29 @@
         <strong style="color:var(--source-sota);">⚠ Cloud Tunnel DNS trouble</strong>
         <span id="cloud-tunnel-degraded-text"></span>
       </div>
+      <!-- Origin self-test (lib/origin-health.js): the tunnel is up but
+           POTACAT itself is not answering behind it — wrong port, no TLS,
+           port not bound. Amber; the cloud link is withheld while shown. -->
+      <div id="cloud-tunnel-origin" class="hidden" style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(212,166,74,0.12);border-left:3px solid var(--source-sota);font-size:12px;line-height:1.5;color:var(--text-secondary);">
+        <strong style="color:var(--source-sota);" id="cloud-tunnel-origin-title">⚠ Cloud up · POTACAT not answering</strong>
+        <span id="cloud-tunnel-origin-text"></span>
+      </div>
+      <!-- Start-at-login offer: shown while the tunnel is on and POTACAT is not
+           a login item. A reboot otherwise leaves the tunnel down until someone
+           opens POTACAT by hand (Billy, 2026-09-17). Nothing is added to the
+           OS unless the operator presses Turn on. -->
+      <div id="cloud-tunnel-startup" class="hidden" style="margin-top:8px;padding:8px 10px;border-radius:6px;background:var(--bg-tertiary);border-left:3px solid var(--accent-blue);font-size:12px;line-height:1.5;color:var(--text-secondary);">
+        <div><strong style="color:var(--text-primary);">After a restart, nothing reconnects until POTACAT is opened.</strong> Start POTACAT when this computer starts, so the tunnel comes back on its own.</div>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;">
+          <input type="checkbox" id="cloud-tunnel-startup-launcher" checked>
+          <span>Also keep the Remote Launcher running, so your mobile device can restart POTACAT if it closes (adds a second login item, port 7301).</span>
+        </label>
+        <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
+          <button type="button" id="cloud-tunnel-startup-on" class="btn btn-primary" style="font-size:12px;padding:3px 10px;">Turn on</button>
+          <button type="button" id="cloud-tunnel-startup-not-now" class="btn" style="font-size:12px;padding:3px 10px;">Not now</button>
+          <span id="cloud-tunnel-startup-done" class="hidden" style="color:var(--accent-green,#4ecca3);"></span>
+        </div>
+      </div>
     </fieldset>
 
     <fieldset class="source-toggles" data-settings-tab="cloud">
@@ -3292,6 +3315,7 @@
           <span>Cloud QSOs: <strong id="cloud-qso-count">--</strong></span>
           <span style="margin-left:12px;">Devices: <strong id="cloud-device-count">--</strong></span>
           <span style="margin-left:12px;">Pending: <strong id="cloud-pending-count">0</strong></span>
+          <span id="cloud-pending-others" class="hidden" style="margin-left:12px;color:var(--source-sota);" title="Changes made while another account was signed in. They upload when that account signs in again; they are never sent to this one."></span>
           <span style="margin-left:12px;">Last sync: <strong id="cloud-last-sync">never</strong></span>
         </div>
       </div>

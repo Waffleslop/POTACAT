@@ -41,6 +41,7 @@
   const qsoCountSpan = document.getElementById('cloud-qso-count');
   const deviceCountSpan = document.getElementById('cloud-device-count');
   const pendingCountSpan = document.getElementById('cloud-pending-count');
+  const pendingOthersSpan = document.getElementById('cloud-pending-others');
   const lastSyncSpan = document.getElementById('cloud-last-sync');
   const downloadAdifBtn = document.getElementById('cloud-download-adif');
   const connCloudPill = document.getElementById('conn-cloud');
@@ -185,6 +186,17 @@
         deviceCountSpan.textContent = '--';
       }
       pendingCountSpan.textContent = status.pendingChanges ?? 0;
+      if (pendingOthersSpan) {
+        // Another operator's unsent changes on this PC: shown, never sent
+        // to this account (lib/sync-journal.js forOwner).
+        const o = status.pendingForOthers;
+        if (o && o.count > 0) {
+          pendingOthersSpan.textContent = '+ ' + o.count + ' waiting for ' + (o.owners.length === 1 ? 'another account' : o.owners.length + ' other accounts');
+          pendingOthersSpan.classList.remove('hidden');
+        } else {
+          pendingOthersSpan.classList.add('hidden');
+        }
+      }
       lastSyncSpan.textContent = formatTimestamp(status.lastSyncAt || status.lastSyncTimestamp || status.sync?.lastSyncAt);
     } catch (err) {
       console.error('Cloud status error:', err);
@@ -607,12 +619,16 @@
       syncNowBtn.textContent = 'Syncing...';
       try {
         const result = await window.api.cloudSyncNow();
+        await refreshStatus();
         if (result.error) {
           alert('Sync failed: ' + result.error);
         } else {
-          lastSyncSpan.textContent = 'just now';
+          // Say what moved, so 'it says synced but my QSOs are not there' is
+          // answerable. (Pending changes have their own counter.)
+          const parts = [`sent ${result.pushed || 0}`, `received ${result.pulled || 0}`];
+          if (result.conflicts) parts.push(`${result.conflicts} replaced by the cloud copy`);
+          lastSyncSpan.textContent = `just now: ${parts.join(', ')}`;
         }
-        await refreshStatus();
       } finally {
         syncNowBtn.disabled = false;
         syncNowBtn.textContent = 'Sync Now';
@@ -817,6 +833,60 @@
   const ctError = document.getElementById('cloud-tunnel-error');
   const ctDegraded = document.getElementById('cloud-tunnel-degraded');
   const ctDegradedText = document.getElementById('cloud-tunnel-degraded-text');
+  const ctOrigin = document.getElementById('cloud-tunnel-origin');
+  // Start-at-login offer (§5 of the launch-defaults handoff). A tunnel only
+  // comes back after a reboot if POTACAT does; the launcher only helps if it
+  // is running. Both are OS login items, so neither is ever added silently —
+  // they are OFFERED here, at the one moment they matter, and stay offered
+  // (quietly) while the tunnel is on and POTACAT is not set to start at
+  // login. "Not now" hides it for this session only.
+  const ctStartup = document.getElementById('cloud-tunnel-startup');
+  const ctStartupLauncher = document.getElementById('cloud-tunnel-startup-launcher');
+  const ctStartupOn = document.getElementById('cloud-tunnel-startup-on');
+  const ctStartupNotNow = document.getElementById('cloud-tunnel-startup-not-now');
+  const ctStartupDone = document.getElementById('cloud-tunnel-startup-done');
+  let startupOfferDismissed = false;
+  try { startupOfferDismissed = sessionStorage.getItem('ct-startup-offer-dismissed') === '1'; } catch {}
+
+  /** Show the offer iff the tunnel is on, POTACAT is not a login item, and it was not dismissed this session. */
+  async function refreshStartupOffer(state) {
+    if (!ctStartup || !window.api || !window.api.getSettings) return;
+    if (!state || !state.enabled || startupOfferDismissed) { ctStartup.classList.add('hidden'); return; }
+    let s = null;
+    try { s = await window.api.getSettings(); } catch {}
+    if (!s || s.launchAtStartup === true) { ctStartup.classList.add('hidden'); return; }
+    if (ctStartupDone) ctStartupDone.classList.add('hidden');
+    ctStartup.classList.remove('hidden');
+  }
+
+  if (ctStartupOn) {
+    ctStartupOn.addEventListener('click', async () => {
+      ctStartupOn.disabled = true;
+      try {
+        const wantLauncher = !!(ctStartupLauncher && ctStartupLauncher.checked);
+        // launchAtStartup is applied live at the OS by main on save.
+        await window.api.saveSettings({ launchAtStartup: true });
+        let note = 'POTACAT will start when this computer starts.';
+        if (wantLauncher && window.api.launcherInstall) {
+          const r = await window.api.launcherInstall();
+          note += (r && r.ok) ? ' The Remote Launcher is installed too.' : ' (The Remote Launcher could not be installed: ' + ((r && r.error) || 'unknown error') + ')';
+        }
+        if (ctStartupDone) { ctStartupDone.textContent = note; ctStartupDone.classList.remove('hidden'); }
+        setTimeout(() => { if (ctStartup) ctStartup.classList.add('hidden'); }, 4000);
+      } finally {
+        ctStartupOn.disabled = false;
+      }
+    });
+  }
+  if (ctStartupNotNow) {
+    ctStartupNotNow.addEventListener('click', () => {
+      startupOfferDismissed = true;
+      try { sessionStorage.setItem('ct-startup-offer-dismissed', '1'); } catch {}
+      if (ctStartup) ctStartup.classList.add('hidden');
+    });
+  }
+  const ctOriginTitle = document.getElementById('cloud-tunnel-origin-title');
+  const ctOriginText = document.getElementById('cloud-tunnel-origin-text');
 
   // ECHOCAT-tab banner mirrors the canonical Cloud-tab state. The
   // Manage button hands off to the existing 'open-settings-panel'
@@ -827,9 +897,16 @@
 
   function renderTunnelState(state) {
     if (!state) return;
+    // Origin self-test (lib/origin-health.js). The cloud vouching for
+    // cloudflared is not the same as POTACAT answering behind it: a dead
+    // origin used to show green "Live" with a link that 502'd (K5AWJ).
+    const originBad = !!(state.enabled && state.origin && state.origin.state !== 'ok' && state.origin.state !== 'pending' && state.origin.state !== 'off');
+    const linkable = state.status === 'live' && !originBad;
     let label, pillClass;
     if (!state.enabled) {
       label = 'LAN only'; pillClass = 'status disconnected';
+    } else if (originBad && state.status === 'live') {
+      label = state.origin.label || 'Cloud up · POTACAT not answering'; pillClass = 'status connecting';
     } else if (state.degraded) {
       // Nominally up but cloudflared can't refresh DNS — amber, not
       // green: the tunnel is failing and the user needs to act.
@@ -849,7 +926,7 @@
       // Web signs in at login.potacat.com). data-external routes it
       // to the default browser via app.js's delegation.
       ctHost.textContent = '';
-      if (hostText && state.status === 'live') {
+      if (hostText && linkable) {
         const a = document.createElement('a');
         a.href = 'https://' + hostText;
         a.textContent = hostText;
@@ -864,6 +941,15 @@
     if (ctBannerHost) ctBannerHost.textContent = hostText ? 'https://' + hostText : '';
     if (ctEnableBtn) ctEnableBtn.classList.toggle('hidden', !!state.enabled);
     if (ctDisableBtn) ctDisableBtn.classList.toggle('hidden', !state.enabled);
+    if (ctOrigin) {
+      if (originBad) {
+        if (ctOriginTitle) ctOriginTitle.textContent = '⚠ ' + (state.origin.label || 'Cloud up · POTACAT not answering');
+        if (ctOriginText) ctOriginText.textContent = ' — ' + (state.origin.reason || 'POTACAT is not answering behind the tunnel.');
+        ctOrigin.classList.remove('hidden');
+      } else {
+        ctOrigin.classList.add('hidden');
+      }
+    }
     if (ctDegraded) {
       if (state.degraded) {
         if (ctDegradedText) ctDegradedText.textContent = ' — ' + (state.degradedReason || 'The Cloud Tunnel is having DNS trouble.');
@@ -882,6 +968,7 @@
         ctError.classList.add('hidden');
       }
     }
+    refreshStartupOffer(state).catch(() => {});
   }
 
   if (ctBannerManage) {
