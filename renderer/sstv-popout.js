@@ -1642,6 +1642,14 @@ if (window.api && window.api.onSstvVita49Audio) {
 // and the user assumes "SSTV is broken". Surface it in seconds instead.
 let _lastDecoderAudioTs = Date.now() + 8000; // grace period after open
 let _lastVitaAudioTs = 0; // for the smartsdr mic-fallback gate below
+// RX level (WB8IMY 2026-09-18): a feed at -40 dBFS is "alive" to the dead
+// check and paints a bright auto-ranged waterfall, yet used to leave the
+// decoder in IDLE. The decoder now normalises its input, but below
+// RX_LOW_DBFS the boost runs out, so say so — the number is the same one
+// the decode log prints as 'in='.
+const RX_LOW_DBFS = -50;
+let _rxLevelPeak = 0;   // peak |sample| since the last level tick
+let _rxLevelHold = 0;   // slow-decaying hold for the badge (no flicker between lines)
 function _markDecoderAudio(samples, source) {
   if (source === 'vita') _lastVitaAudioTs = Date.now();
   // Silence check: a live-but-muted feed is just as dead as no feed.
@@ -1652,12 +1660,30 @@ function _markDecoderAudio(samples, source) {
     if (a > peak) peak = a;
   }
   if (peak > 1e-4) _lastDecoderAudioTs = Date.now();
+  if (peak > _rxLevelPeak) _rxLevelPeak = peak;
 }
 setInterval(() => {
   const badge = document.getElementById('rx-no-audio');
   if (!badge) return;
   const dead = !isTx && (Date.now() - _lastDecoderAudioTs) > 5000;
   badge.style.display = dead ? '' : 'none';
+  // Level readout + low badge
+  const peak = _rxLevelPeak;
+  _rxLevelPeak = 0;
+  _rxLevelHold = Math.max(peak, _rxLevelHold * 0.6); // ~4 dB/s release
+  const holdDb = _rxLevelHold > 0 ? 20 * Math.log10(_rxLevelHold) : -120;
+  const levelEl = document.getElementById('rx-level');
+  if (levelEl) {
+    const db = peak > 0 ? 20 * Math.log10(peak) : -120;
+    levelEl.textContent = isTx ? '--' : (db <= -100 ? 'no audio' : Math.round(db) + ' dBFS');
+    levelEl.style.color = (!isTx && db > -100 && db < RX_LOW_DBFS) ? '#f0a500' : '#8892b0';
+  }
+  const low = document.getElementById('rx-low-audio');
+  if (low) {
+    const isLow = !isTx && !dead && holdDb < RX_LOW_DBFS;
+    low.style.display = isLow ? '' : 'none';
+    if (isLow) low.textContent = 'RX AUDIO LOW (' + Math.round(holdDb) + ' dBFS)';
+  }
 }, 1000);
 
 // ===== MULTI-SLICE =========================================================
