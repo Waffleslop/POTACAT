@@ -247,6 +247,7 @@ let enableBannerLogger = false;
 let n1mmRst = false; // N1MM-style single-field RST inputs
 let defaultPower = 100;
 let tuneClick = false;
+let qsoChime = 'off'; // 'off' | 'soft' | 'twotone' | 'bell' | 'morse-r' — see playQsoChime
 let enableSplit = false;
 
 // Status-bar SPLIT indicator. Visible whenever enableSplit is true so the
@@ -774,6 +775,9 @@ const setLicenseClass = document.getElementById('set-license-class');
 const setHideOutOfBand = document.getElementById('set-hide-out-of-band');
 const setHideWorked = document.getElementById('set-hide-worked');
 const setTuneClick = document.getElementById('set-tune-click');
+const setQsoChime = document.getElementById('set-qso-chime');
+const setQsoChimeTest = document.getElementById('set-qso-chime-test');
+if (setQsoChimeTest) setQsoChimeTest.addEventListener('click', () => { try { playQsoChime(setQsoChime ? setQsoChime.value : 'soft'); } catch {} });
 const setEnableSplit = document.getElementById('set-enable-split');
 const setEnableAtu = document.getElementById('set-enable-atu');
 const setEnableRotor = document.getElementById('set-enable-rotor');
@@ -1760,6 +1764,7 @@ async function loadPrefs() {
     : [];
   myCallsign = settings.myCallsign || '';
   tuneClick = settings.tuneClick === true;
+  qsoChime = settings.qsoChime || 'off';
   enableSplit = settings.enableSplit === true;
   updateSplitIndicator();
   catLogToggleBtn.classList.toggle('hidden', settings.verboseLog !== true);
@@ -3865,6 +3870,37 @@ blFreq.addEventListener('keydown', (e) => {
 blMode.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); blRstSent.focus(); blRstSent.select(); }
 });
+
+// --- QSO logged chime (N2FSM 2026-09-12: "a subtle indicator to know I just
+// completed a contact" when POTACAT is in the background or the next room).
+// Synthesized, so there is nothing to ship or find; four flavours, off by
+// default. Fired by main's 'qso-logged', the one event every log path
+// (dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X) passes through.
+function playQsoChime(kind) {
+  if (!kind || kind === 'off') return;
+  if (!audioCtx) audioCtx = new AudioContext();
+  const t0 = audioCtx.currentTime;
+  const tone = (freq, at, dur, peak, type) => {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0 + at);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t0 + at);
+    o.stop(t0 + at + dur + 0.05);
+  };
+  switch (kind) {
+    case 'soft': tone(880, 0, 0.35, 0.18); break;
+    case 'twotone': tone(660, 0, 0.18, 0.18); tone(990, 0.16, 0.32, 0.18); break;
+    case 'bell': tone(1320, 0, 0.9, 0.16); tone(1980, 0, 0.45, 0.05); tone(2640, 0, 0.25, 0.03); break;
+    case 'morse-r': { const u = 0.06; for (const [at, d] of [[0, u], [2 * u, 3 * u], [6 * u, u]]) tone(700, at, d, 0.2); break; } // R = .-.
+    default: tone(880, 0, 0.35, 0.18);
+  }
+}
+if (window.api.onQsoLogged) window.api.onQsoLogged(() => { try { playQsoChime(qsoChime); } catch {} });
 
 // --- Tune confirmation click ---
 let audioCtx = null;
@@ -14875,6 +14911,7 @@ async function openSettingsDialog(tab) {
   setHideOutOfBand.checked = s.hideOutOfBand === true;
   setHideWorked.checked = s.hideWorked === true;
   setTuneClick.checked = s.tuneClick === true;
+  if (setQsoChime) setQsoChime.value = s.qsoChime || 'off';
   setEnableRotor.checked = s.enableRotor === true;
   if (s.enableRotor) rotorConfigured = true;
   if (setRotorType) setRotorType.value = s.rotorType || 'pstrotator';
@@ -15922,6 +15959,7 @@ settingsSave.addEventListener('click', async () => {
     hideOutOfBand: hideOob,
     hideWorked: hideWorkedEnabled,
     tuneClick: tuneClickEnabled,
+    qsoChime: setQsoChime ? setQsoChime.value : 'off',
     enableRotor: rotorEnabledVal,
     rotorType: rotorTypeVal,
     rotorMode: rotorModeVal,
@@ -23592,6 +23630,11 @@ activatorSpotsVisible = localStorage.getItem(ACTIVATOR_SPOTS_KEY) === '1';
 /** Apply or remove the activator-spots split layout */
 function applyActivatorSpotsLayout() {
   if (activatorSpotsVisible && appMode === 'activator') {
+    // Hunt means the spots TABLE. The lower pane shows whatever `currentView`
+    // is, so an operator who had SWL/HF Nets (or RBN, DXCC, Contests) open
+    // before entering activator mode got that instead of spots (Casey
+    // 2026-09-18). Map stays map — that is still spots.
+    if (currentView !== 'table' && currentView !== 'map') setView('table');
     document.body.classList.add('activator-spots-on');
     activatorSpotsSplitter.classList.remove('hidden');
     activatorSpotsBtn.classList.add('active');

@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('api', {
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.
   onAppNotice: (cb) => ipcRenderer.on('app-notice', (_e, data) => cb(data)),
+  // A QSO reached the log, whatever path logged it (saveQsoRecord is the one
+  // choke point). Drives the QSO-logged chime.
+  onQsoLogged: (cb) => ipcRenderer.on('qso-logged', (_e, q) => cb(q)),
   // SWR-guard latch override ("TX anyway") — clears the tripped state.
   swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),

@@ -2193,6 +2193,16 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-popup" checked> Pop-up notification</label>
       <label class="checkbox-label"><input type="checkbox" id="set-notify-sound" checked> Sound notification</label>
+      <label title="A short sound each time a QSO is logged — from any window, the mobile device, JTCAT or WSJT-X — so you know a contact went in the log even when POTACAT is in the background.">QSO logged chime:
+        <select id="set-qso-chime" style="margin-left:4px;">
+          <option value="off">Off</option>
+          <option value="soft">Soft ding</option>
+          <option value="twotone">Two-tone</option>
+          <option value="bell">Bell</option>
+          <option value="morse-r">Morse R (received)</option>
+        </select>
+        <button type="button" id="set-qso-chime-test" style="margin-left:6px;padding:2px 8px;font-size:12px;">Test</button>
+      </label>
       <label>Notification duration (seconds):
         <input type="number" id="set-notify-timeout" min="3" max="60" step="1" value="10">
       </label>

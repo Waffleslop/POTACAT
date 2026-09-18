@@ -7329,6 +7329,13 @@ async function saveQsoRecord(qsoData, opts) {
     qsoPopoutWin.webContents.send('qso-popout-added', qsoData);
   }
 
+  // Tell the main window a QSO went in, from whichever path logged it —
+  // dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X. The QSO-logged
+  // chime hangs off this (N2FSM 2026-09-12).
+  if (win && !win.isDestroyed()) {
+    win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode });
+  }
+
   // Track QSO in telemetry (fire-and-forget)
   const qsoSource = (qsoData.sig || '').toLowerCase();
   trackQso(['pota', 'sota', 'wwff', 'llota', 'wwbota'].includes(qsoSource) ? qsoSource : null);
