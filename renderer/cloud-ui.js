@@ -41,6 +41,7 @@
   const qsoCountSpan = document.getElementById('cloud-qso-count');
   const deviceCountSpan = document.getElementById('cloud-device-count');
   const pendingCountSpan = document.getElementById('cloud-pending-count');
+  const pendingOthersSpan = document.getElementById('cloud-pending-others');
   const lastSyncSpan = document.getElementById('cloud-last-sync');
   const downloadAdifBtn = document.getElementById('cloud-download-adif');
   const connCloudPill = document.getElementById('conn-cloud');
@@ -185,6 +186,17 @@
         deviceCountSpan.textContent = '--';
       }
       pendingCountSpan.textContent = status.pendingChanges ?? 0;
+      if (pendingOthersSpan) {
+        // Another operator's unsent changes on this PC: shown, never sent
+        // to this account (lib/sync-journal.js forOwner).
+        const o = status.pendingForOthers;
+        if (o && o.count > 0) {
+          pendingOthersSpan.textContent = '+ ' + o.count + ' waiting for ' + (o.owners.length === 1 ? 'another account' : o.owners.length + ' other accounts');
+          pendingOthersSpan.classList.remove('hidden');
+        } else {
+          pendingOthersSpan.classList.add('hidden');
+        }
+      }
       lastSyncSpan.textContent = formatTimestamp(status.lastSyncAt || status.lastSyncTimestamp || status.sync?.lastSyncAt);
     } catch (err) {
       console.error('Cloud status error:', err);

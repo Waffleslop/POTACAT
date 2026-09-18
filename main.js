@@ -15643,7 +15643,7 @@ function connectRemote() {
       loggedIn: true,
       user: settings.cloudUser,
       lastSyncAt: settings.cloudLastSyncAt,
-      pendingChanges: cloudIpc ? cloudIpc.journal.length : 0,
+      ...(cloudIpc ? cloudIpc.pendingStatus() : { pendingChanges: 0 }),
       sync: {
         totalQsos: settings.cloudTotalQsos ?? null,
         deviceCount: settings.cloudDeviceCount ?? null,
@@ -24493,6 +24493,7 @@ app.whenReady().then(() => {
       saveSettings: (s) => { Object.assign(settings, s); saveSettings(settings); },
       getLogPath: () => settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi'),
       loadWorkedQsos: () => loadWorkedQsos(),
+      log: (msg) => sendCatLog(msg),
       sendToRenderer: (channel, data) => {
         if (win && !win.isDestroyed()) win.webContents.send(channel, data);
       },
@@ -24513,6 +24514,9 @@ app.whenReady().then(() => {
       },
     });
     cloudIpc.startBackgroundSync();
+    // Once the app has settled: anything logged while signed out (or
+    // imported before imports synced) that the cloud does not hold yet.
+    setTimeout(() => { cloudIpc.reconcileWithCloud('boot').catch(() => {}); }, 15000);
 
     // Register this desktop in the cloud_devices directory so signed-in
     // laptops on the same account can find it (and auto-pair without
