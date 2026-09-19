@@ -192,6 +192,14 @@
     }
     .cat-cmd-btn:hover { background: var(--bg-btn-hover); }
     .cat-cmd-btn:active { background: #4a4a6a; }
+    /* Custom-CAT slider slot (see buildCustomCatBtns) */
+    .custom-cat-slider {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg-btn); border: 1px solid var(--border);
+      color: var(--text-secondary); padding: 4px 10px; border-radius: 4px; font-size: 12px;
+    }
+    .ccs-range { width: 110px; accent-color: var(--accent, #e94560); }
+    .ccs-val { min-width: 2.5em; text-align: right; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 
     /* --- Keypad tab --- */
     .keypad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 300px; margin: 0 auto; padding: 8px 0; }
@@ -1104,16 +1112,85 @@ buildRigToggles();
 // --- Custom CAT buttons ---
 let customCatButtons = [];
 
+// Substitute a slider value into a command template — SAME contract as the
+// main window's customSliderCommand() and the web client's copy, pinned
+// across all three by test/custom-cat-parity-test.js: {v} bare, {v2}/{v3}/{v4}
+// zero-padded, and a template with no placeholder gets the value appended.
+function customSliderCommand(template, value) {
+  var v = String(Math.round(value));
+  var out = template;
+  var found = false;
+  var widths = [4, 3, 2];
+  for (var w = 0; w < widths.length; w++) {
+    var ph = '{v' + widths[w] + '}';
+    while (out.indexOf(ph) !== -1) {
+      var padded = v;
+      while (padded.length < widths[w]) padded = '0' + padded;
+      out = out.replace(ph, padded);
+      found = true;
+    }
+  }
+  while (out.indexOf('{v}') !== -1) { out = out.replace('{v}', v); found = true; }
+  return found ? out : out + v;
+}
+
+const customSliderTimers = {};
+
 function buildCustomCatBtns() {
-  // Remove any previously injected custom buttons
+  // Remove any previously injected custom controls
   document.querySelectorAll('.custom-cat-injected').forEach(el => el.remove());
-  // Sliders have no control here; buttons and toggles do. A toggle used to be
-  // drawn as a plain button that only ever sent its On command (LZ3AW #7).
-  const btns = customCatButtons.filter(b => b.name && b.command && b.type !== 'slider');
+  // Buttons, toggles AND sliders. A toggle used to be drawn as a plain button
+  // that only ever sent its On command (LZ3AW #7), and a slider was left out
+  // of this window altogether — the operator had to go back to the main
+  // window to move it ("not visible in VFO pane", LZ3AW 2026-09-19).
+  const btns = customCatButtons.filter(b => b.name && b.command);
   if (btns.length === 0) return;
-  // Append custom CAT buttons into each rig-toggles-shared row
+  // Append custom CAT controls into each rig-toggles-shared row
   document.querySelectorAll('.rig-toggles-shared').forEach(row => {
     btns.forEach(b => {
+      if (b.type === 'slider') {
+        const lo = Number.isFinite(b.min) ? b.min : 0;
+        const hi = Number.isFinite(b.max) ? b.max : 255;
+        const wrap = document.createElement('span');
+        wrap.className = 'custom-cat-slider custom-cat-injected';
+        const lbl = document.createElement('span');
+        lbl.className = 'ccs-label';
+        lbl.textContent = b.name;
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.className = 'ccs-range';
+        range.min = lo;
+        range.max = hi;
+        range.value = Number.isFinite(b.value) ? b.value : lo;
+        range.title = b.command;
+        const val = document.createElement('span');
+        val.className = 'ccs-val';
+        val.textContent = range.value;
+        range.addEventListener('input', () => {
+          val.textContent = range.value;
+          // Debounced like the main window's: dragging a slider must not
+          // fire a CAT command per pixel.
+          const key = b.name + '|' + b.command;
+          if (customSliderTimers[key]) clearTimeout(customSliderTimers[key]);
+          customSliderTimers[key] = setTimeout(() => {
+            customSliderTimers[key] = null;
+            window.api.sendCustomCat(customSliderCommand(b.command, +range.value));
+          }, 150);
+          // Keep every mirror of this slot in this window in step.
+          document.querySelectorAll('.custom-cat-slider.custom-cat-injected').forEach((el) => {
+            if (el === wrap || el._key !== key) return;
+            const r = el.querySelector('input[type="range"]'), v = el.querySelector('.ccs-val');
+            if (r) r.value = range.value;
+            if (v) v.textContent = range.value;
+          });
+        });
+        wrap._key = b.name + '|' + b.command;
+        wrap.appendChild(lbl);
+        wrap.appendChild(range);
+        wrap.appendChild(val);
+        row.appendChild(wrap);
+        return;
+      }
       const btn = document.createElement('button');
       btn.className = 'cat-cmd-btn custom-cat-injected';
       if (b.type === 'toggle') {

@@ -803,8 +803,28 @@ html, body {
   overflow-y: auto;
 }
 
+/* An open panel is moved to <body> (see openDropdownPanel in remote.js), so
+   it is shown by its OWN class — a descendant selector no longer reaches it.
+   The container rule stays for panels that have not been opened yet. */
+/* Custom-CAT slider mirrored into the VFO pane (see renderVfCustomCat). */
+.vf-macro-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: var(--bg-card);
+  font-size: 12px;
+}
+.vf-macro-slider-label { color: var(--text-dim); white-space: nowrap; }
+.vf-macro-slider-val { color: var(--text); min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.vf-macro-range { width: 110px; accent-color: var(--accent, #e94560); }
+
 .rc-dropdown.open .rc-dropdown-menu,
-.rc-dropdown.open .rc-spots-panel { display: block; }
+.rc-dropdown.open .rc-spots-panel,
+.rc-dropdown-menu.rc-open,
+.rc-spots-panel.rc-open { display: block; }
 
 .rc-dropdown-item, .rc-spots-toggle {
   display: flex;

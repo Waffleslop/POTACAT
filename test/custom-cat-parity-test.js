@@ -29,6 +29,9 @@ function test(name, fn) {
 const R = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8');
 const APP = R('app.js');
 const REMOTE = R('remote.js');
+// Third copy (2026-09-19): the desktop VFO pop-out draws slider slots too, so
+// it carries its own substitution and must not drift from the other two.
+const VFO = R('vfo-popout.html');
 
 /** Pull one function's source out of a renderer file and make it callable. */
 function extractFn(src, name) {
@@ -47,6 +50,7 @@ function extractFn(src, name) {
 
 const appSlider = extractFn(APP, 'customSliderCommand');
 const webSlider = extractFn(REMOTE, 'customSliderCommand');
+const vfoSlider = extractFn(VFO, 'customSliderCommand');
 
 // [template, value, expected] — the placeholder contract both sides implement.
 const VECTORS = [
@@ -64,12 +68,14 @@ const VECTORS = [
   ['{v3}', 0, '000'],
 ];
 
-test('desktop and web slider substitution agree on every vector', () => {
+test('desktop, web and VFO pop-out slider substitution agree on every vector', () => {
   for (const [tpl, val, expected] of VECTORS) {
     assert.strictEqual(appSlider(tpl, val), expected,
       'desktop: ' + tpl + ' @ ' + val);
     assert.strictEqual(webSlider(tpl, val), expected,
       'web: ' + tpl + ' @ ' + val + ' (drifted from the desktop contract)');
+    assert.strictEqual(vfoSlider(tpl, val), expected,
+      'VFO pop-out: ' + tpl + ' @ ' + val + ' (drifted from the desktop contract)');
   }
 });
 

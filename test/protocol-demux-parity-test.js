@@ -94,8 +94,6 @@ const KNOWN_DRIFT = new Set([
   'sstv-get-gallery:limit',
   'sstv-get-gallery:offset',
   'sstv-get-gallery:requestId',
-  'paddle:contact',
-  'paddle:state',
 ]);
 
 /** Messages the demux handles that the registry never declares at all. Same

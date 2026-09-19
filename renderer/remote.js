@@ -2853,10 +2853,49 @@
   });
 
   // --- Multi-select dropdown helpers ---
+  //
+  // The toolbar scrolls sideways on a phone, and these panels are
+  // position:fixed, which mobile WebKit still clips to a scrolling ancestor.
+  // The old answer was to flip the bar to overflow-x:visible while a panel
+  // was open. That RESETS scrollLeft to 0 — the browser cannot keep a scroll
+  // offset on a box that no longer scrolls — so on any bar too wide for the
+  // screen the toolbar jumped back to the start under the operator's finger,
+  // the button they had just tapped slid away (often off-screen, taking the
+  // panel's computed position with it), and the bar stayed unscrollable until
+  // something closed the panel: "push it does nothing and the whole bar line
+  // stucks", phone only, desktop browser fine (LZ3AW 2026-09-19; the bar grew
+  // past a phone's width when the callsign filter joined it in 1.10.18).
+  // Now the open panel is MOVED to <body>, where no ancestor can clip it, and
+  // the bar is never touched. Panels keep their listeners across the move.
   var _filterScroll = document.getElementById('filter-toolbar-scroll');
   function closeAllDropdowns() {
     document.querySelectorAll('.rc-dropdown.open').forEach(d => d.classList.remove('open'));
-    if (_filterScroll) _filterScroll.style.overflowX = '';
+    document.querySelectorAll('.rc-open').forEach(p => p.classList.remove('rc-open'));
+  }
+
+  // Park the panel on <body> and place it under its button, kept inside the
+  // viewport (a button near the right edge would otherwise open a panel half
+  // off-screen on a phone).
+  function openDropdownPanel(btn, panel) {
+    if (panel.parentNode !== document.body) document.body.appendChild(panel);
+    panel.classList.add('rc-open');
+    const rect = btn.getBoundingClientRect();
+    const margin = 8;
+    const width = panel.offsetWidth || 180;
+    let left = rect.left;
+    if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
+    panel.style.left = Math.max(margin, left) + 'px';
+    panel.style.top = (rect.bottom + 4) + 'px';
+    // A fixed panel does not follow its button, so scrolling the bar (or the
+    // page) closes it rather than leaving it pointing at nothing.
+    const close = () => { closeAllDropdowns(); detach(); };
+    const detach = () => {
+      if (_filterScroll) _filterScroll.removeEventListener('scroll', close);
+      window.removeEventListener('scroll', close, true);
+    };
+    detach();
+    if (_filterScroll) _filterScroll.addEventListener('scroll', close, { once: true });
+    window.addEventListener('scroll', close, true);
   }
 
   function initMultiDropdown(container, onChange) {
@@ -2879,13 +2918,9 @@
       container.classList.toggle('open');
       if (container.classList.contains('open')) {
         _dropdownJustOpened = true;
-        // Remove overflow clipping so position:fixed menus escape on mobile WebKit
-        if (_filterScroll) _filterScroll.style.overflowX = 'visible';
-        const rect = btn.getBoundingClientRect();
-        menu.style.left = rect.left + 'px';
-        menu.style.top = (rect.bottom + 4) + 'px';
+        openDropdownPanel(btn, menu);
       } else {
-        if (_filterScroll) _filterScroll.style.overflowX = '';
+        menu.classList.remove('rc-open');
       }
     });
     menu.addEventListener('click', (e) => e.stopPropagation());
@@ -2922,15 +2957,12 @@
     e.stopPropagation();
     document.querySelectorAll('.rc-dropdown.open').forEach(d => { if (d !== spotsDropdown) d.classList.remove('open'); });
     spotsDropdown.classList.toggle('open');
+    const spotsPanel = spotsDropdown.querySelector('.rc-spots-panel');
     if (spotsDropdown.classList.contains('open')) {
       _dropdownJustOpened = true;
-      if (_filterScroll) _filterScroll.style.overflowX = 'visible';
-      const rect = spotsDropdown.querySelector('.rc-dropdown-btn').getBoundingClientRect();
-      const panel = spotsDropdown.querySelector('.rc-spots-panel');
-      panel.style.left = rect.left + 'px';
-      panel.style.top = (rect.bottom + 4) + 'px';
+      openDropdownPanel(spotsDropdown.querySelector('.rc-dropdown-btn'), spotsPanel);
     } else {
-      if (_filterScroll) _filterScroll.style.overflowX = '';
+      spotsPanel.classList.remove('rc-open');
     }
   });
 
@@ -6939,17 +6971,34 @@
         const isHunt = ft8HuntCall && upper.indexOf(ft8HuntCall) >= 0;
         const is73 = upper.indexOf('RR73') >= 0 || upper.indexOf(' 73') >= 0;
 
-        // Auto-reply runs regardless of filter
+        // Auto-reply runs regardless of filter.
+        // The CQ is parsed by the SHARED parser, which strips the <...> a
+        // decoder puts around a call it resolved from a hash. This hand-rolled
+        // copy did not: a hunt target that decoded as "CQ <SP9ABC/P> KO02"
+        // never matched, so the one station the operator had asked for was
+        // the one station the web client would not answer (LZ3AW 2026-09-19).
         if (isHunt && isCq && !ft8QsoState) {
-          const parts = upper.split(/\s+/);
-          let callIdx = -1;
-          for (let i = 1; i < parts.length; i++) {
-            if (_rmtLooksLikeCall(parts[i])) { callIdx = i; break; }
+          let call = '', grid = '';
+          if (typeof JtcatParser !== 'undefined' && JtcatParser.parseCq) {
+            const pc = JtcatParser.parseCq(upper);
+            call = pc.call || '';
+            grid = pc.grid || '';
+          } else {
+            const parts = upper.split(/\s+/);
+            let callIdx = -1;
+            for (let i = 1; i < parts.length; i++) {
+              if (_rmtLooksLikeCall(parts[i])) { callIdx = i; break; }
+            }
+            if (callIdx === -1) callIdx = 1;
+            call = parts[callIdx] || '';
+            grid = parts[callIdx + 1] || '';
           }
-          if (callIdx === -1) callIdx = 1;
-          const call = parts[callIdx] || '';
-          const grid = parts[callIdx + 1] || '';
-          if (call === ft8HuntCall) {
+          // Compare on the base call so a portable or hash-rendered form of
+          // the hunted station still counts as the station.
+          const sameCall = call && (call === ft8HuntCall ||
+            (typeof JtcatParser !== 'undefined' && JtcatParser.normalizeCall &&
+             JtcatParser.normalizeCall(call) === JtcatParser.normalizeCall(ft8HuntCall)));
+          if (sameCall) {
             ft8Send({ type: 'jtcat-reply', call, grid, df: d.df || 1500, sliceId: d.sliceId,
               snr: d.db, slot: d.slot, text: text || '', nextStep: 'reply-cq' });
             ft8HuntCall = ''; // clear hunt — we've engaged
@@ -8842,6 +8891,7 @@
     let _paddleRttSentAt = 0;  // press-to-echo round-trip stamp (diagnostics)
   let _paddleRttAvg = 0;
 var _paddleReleaseTimer = { dit: null, dah: null };
+var _paddleHoldTimer = { dit: null, dah: null };
   function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
     // to the server over WS (which does the real radio keying). Skip both
@@ -8856,6 +8906,21 @@ var _paddleReleaseTimer = { dit: null, dah: null };
       if (state && !_paddleRttSentAt) _paddleRttSentAt = performance.now();
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
     }
+    // Hold keepalive: a held contact sends one press and nothing more, and
+    // the server's paddle watchdog used to read that silence as a lost
+    // key-up and stop the keyer 1.5 s in, mid-character (LZ3AW's TinyMidi
+    // paddle). Repeating the press proves the contact is still down, so the
+    // watchdog keeps its short window and still catches a real lost key-up.
+    if (_paddleHoldTimer[contact]) {
+      clearInterval(_paddleHoldTimer[contact]);
+      _paddleHoldTimer[contact] = null;
+    }
+    if (state) {
+      _paddleHoldTimer[contact] = setInterval(function() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 1, hold: true }));
+      }, 400);
+    }
     if (_paddleReleaseTimer[contact]) {
       clearTimeout(_paddleReleaseTimer[contact]);
       _paddleReleaseTimer[contact] = null;
@@ -8863,6 +8928,7 @@ var _paddleReleaseTimer = { dit: null, dah: null };
     if (state) {
       _paddleReleaseTimer[contact] = setTimeout(function() {
         _paddleReleaseTimer[contact] = null;
+        if (_paddleHoldTimer[contact]) { clearInterval(_paddleHoldTimer[contact]); _paddleHoldTimer[contact] = null; }
         if (contact === 'dit') { ditDown = false; localCwKeyer.paddleDit(false); }
         else { dahDown = false; localCwKeyer.paddleDah(false); }
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -12177,21 +12243,60 @@ var _paddleReleaseTimer = { dit: null, dah: null };
 
     // ----- Custom CAT: mirror buttons from the Settings overlay's row -----
     const vfCustomCatRow = document.getElementById('vf-customcat-row');
+    // This row MIRRORS the Settings overlay's controls rather than rebuilding
+    // them, so debounce, template substitution and toggle state stay in one
+    // place. It walked `button` elements only, and a slider slot is a
+    // <span> holding an <input type="range"> — so sliders silently never
+    // appeared here ("Custom slider works, but not visible in VFO pane",
+    // LZ3AW 2026-09-19). Both shapes are mirrored now; a slider forwards its
+    // value to the source range, whose own listener does the sending.
     function renderVfCustomCat() {
       if (!vfCustomCatRow) return;
       vfCustomCatRow.innerHTML = '';
       const src = document.getElementById('rc-custom-cat-btns');
       if (!src) return;
-      Array.from(src.querySelectorAll('button')).forEach((srcBtn) => {
-        const name = (srcBtn.textContent || '').trim();
-        if (!name) return;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'vf-macro-btn';
-        btn.textContent = name;
-        if (srcBtn.classList.contains('rc-custom-cat-on')) btn.classList.add('active');
-        btn.addEventListener('click', () => srcBtn.click());
-        vfCustomCatRow.appendChild(btn);
+      Array.from(src.children).forEach((slot) => {
+        if (slot.tagName === 'BUTTON') {
+          const name = (slot.textContent || '').trim();
+          if (!name) return;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'vf-macro-btn';
+          btn.textContent = name;
+          if (slot.classList.contains('rc-custom-cat-on')) btn.classList.add('active');
+          btn.addEventListener('click', () => slot.click());
+          vfCustomCatRow.appendChild(btn);
+          return;
+        }
+        const srcRange = slot.querySelector && slot.querySelector('input[type="range"]');
+        if (!srcRange) return;
+        const srcLabel = slot.querySelector('.rc-ccs-label');
+        const wrap = document.createElement('span');
+        wrap.className = 'vf-macro-slider';
+        const lbl = document.createElement('span');
+        lbl.className = 'vf-macro-slider-label';
+        lbl.textContent = (srcLabel && srcLabel.textContent) || 'CAT';
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.className = 'vf-macro-range';
+        range.min = srcRange.min;
+        range.max = srcRange.max;
+        range.step = srcRange.step || 1;
+        range.value = srcRange.value;
+        const val = document.createElement('span');
+        val.className = 'vf-macro-slider-val';
+        val.textContent = srcRange.value;
+        range.addEventListener('input', () => {
+          val.textContent = range.value;
+          // Drive the source control: its own 'input' listener debounces and
+          // sends, and keeps the overlay's slider in step with this one.
+          srcRange.value = range.value;
+          srcRange.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        wrap.appendChild(lbl);
+        wrap.appendChild(range);
+        wrap.appendChild(val);
+        vfCustomCatRow.appendChild(wrap);
       });
     }
 

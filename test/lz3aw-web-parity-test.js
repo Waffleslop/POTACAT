@@ -89,10 +89,15 @@ test('web: toggle state survives a settings push for unchanged slots', () => {
 });
 test('web VFO widget copy: refreshed after a toggle press and shows the lit state', () => {
   assert.ok(/this\.classList\.toggle\('rc-custom-cat-on', goingOn\);\n\s+\/\/ The VFO panel's copy[\s\S]{0,200}window\.__vfRenderCustomCat\(\);/.test(web));
-  assert.ok(/if \(srcBtn\.classList\.contains\('rc-custom-cat-on'\)\) btn\.classList\.add\('active'\);/.test(web));
+  // The mirror walks every slot now (buttons AND slider spans), so the source
+  // element is `slot`; copying the lit state is the behaviour pinned here.
+  assert.ok(/if \(slot\.classList\.contains\('rc-custom-cat-on'\)\) btn\.classList\.add\('active'\);/.test(web));
 });
-test('desktop VFO pop-out: a toggle alternates On and Off commands; sliders are not drawn as buttons', () => {
-  assert.ok(/b\.type !== 'slider'\)/.test(vfo));
+test('desktop VFO pop-out: a toggle alternates On and Off commands; a slider is a real slider', () => {
+  // Sliders were filtered out of this window until LZ3AW asked for them in
+  // the VFO pane (2026-09-19) — see test/lz3aw-round5-test.js.
+  assert.ok(!/b\.type !== 'slider'/.test(vfo), 'no longer filtered out');
+  assert.ok(/window\.api\.sendCustomCat\(customSliderCommand\(b\.command, \+range\.value\)\)/.test(vfo));
   assert.ok(/const cmd = String\(\(goingOn \? b\.command : b\.commandOff\) \|\| ''\)\.trim\(\);/.test(vfo));
   assert.ok(/btn\.textContent = b\.name \+ ' ' \+ \(on \? 'On' : 'Off'\);/.test(vfo));
 });
