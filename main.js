@@ -339,6 +339,7 @@ const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('./lib/cw
 const { buildPersistentKeyerScript } = require('./lib/cw-keyer-script');
 const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sync');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
+const { buildWrlContactInfo } = require('./lib/wrl-packet');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
@@ -7259,9 +7260,14 @@ async function saveQsoRecord(qsoData, opts) {
   // Auto-fill TX power from the live CAT reading (matches the TX Power slider)
   // when the caller didn't supply one — typical for the Logbook pop-out's
   // "+ New QSO" form which has no power field.
+  // A supplied value is coerced to a String here rather than trusted: the Log
+  // QSO pop-out sends a Number while every other log path sends text, and the
+  // transports downstream do string work on this field (W9TEF 2026-09-19).
   if (!qsoData.txPower) {
     if (_currentTxPower > 0) qsoData.txPower = String(_currentTxPower);
     else if (settings.defaultPower) qsoData.txPower = String(settings.defaultPower);
+  } else {
+    qsoData.txPower = String(qsoData.txPower);
   }
 
   // COMMENT tag handling. saveQsoRecord is the single authority: strip the
@@ -20850,101 +20856,16 @@ function sendUdpAdif(qsoData, host, port) {
 function sendWrlUdp(qsoData, host, port) {
   return new Promise((resolve, reject) => {
     const dgram = require('dgram');
-    const call = qsoData.callsign || '';
-    const mycall = qsoData.operator || settings.myCallsign || '';
-    const freqKhz = parseFloat(qsoData.frequency) || 0;
-    const rxfreq = Math.round(freqKhz * 100).toString(); // N1MM uses 10 Hz units
-    const txfreq = rxfreq;
-    const mode = (qsoData.mode || 'SSB').toUpperCase();
-    const band = (qsoData.band || '').toUpperCase();
-    const snt = qsoData.rstSent || '59';
-    const rcv = qsoData.rstRcvd || '59';
-    const dateStr = qsoData.qsoDate || '';
-    const timeStr = qsoData.timeOn || '';
-    // Keep real seconds when the QSO has them (ADIF TIME_ON is often HHMMSS).
-    // Hardcoding :00 gave every same-minute QSO an identical timestamp, which
-    // fed the WRL-side dedup below (N3VD: multi-op logging / resend only
-    // landed the first QSO).
-    const secStr = timeStr.length >= 6 ? timeStr.slice(4, 6) : '00';
-    const ts = dateStr.length === 8 && timeStr.length >= 4
-      ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)} ${timeStr.slice(0,2)}:${timeStr.slice(2,4)}:${secStr}`
-      : new Date().toISOString().replace('T', ' ').slice(0, 19);
-    // Unique contact ID, N1MM-shaped (32-hex GUID, no dashes). Real N1MM
-    // packets always carry <ID>; listeners key dedup/replace on it. Without
-    // one, WRL Cat Control falls back to fingerprinting — and two multi-op
-    // QSOs logged in the same minute (same time/freq/band/mode/mycall, only
-    // <call> differs) collapse to one, dropping every op after the first
-    // (N3VD 2026-06-29). Reuse the QSO's stored UUID so a deliberate resend
-    // of the same contact is still recognized as the same contact.
-    const contactId = String(qsoData.uuid || require('crypto').randomUUID()).replace(/-/g, '');
-    // WRL Cat Control drops the ADIF-style sig/sig_info/pota_ref tags below
-    // (confirmed by N3VD's WRL export 2026-07-03 — same drop W7DB saw with the
-    // contest-pair tags), so the comment text is the ONLY channel that reliably
-    // lands a park number in the WRL cloud log. Keep a short [SIG REF] tag in
-    // this packet's comment even when `logCommentTags` is off — the operator's
-    // own log keeps the clean comment; this is transport-local.
-    const comment = ensureSigTag(qsoData.comment,
-      qsoData.sig || (qsoData.potaRef ? 'POTA' : ''),
-      qsoData.sigInfo || qsoData.potaRef || '');
-    const grid = qsoData.gridsquare || '';
-    const contestName = qsoData.sig || '';
-    const contestNr = qsoData.sigInfo || '';
-    // The base N1MM ContactInfo schema doesn't carry STATE / SIG / SIG_INFO
-    // and only ships the contest pair (contestname / contestnr). WRL Cat
-    // Control's listener doesn't translate those back to ADIF SIG / SIG_INFO
-    // on the way to the cloud logbook, so POTA hunts had no SIG fields and
-    // none of the QSOs carried STATE (W7DB report). Emit the ADIF-style
-    // tags alongside the legacy ones — N1MM ignores unknown tags, and WRL
-    // picks them up directly into the ADIF record. Only emit when we have
-    // a value so we don't pollute the packet with empty elements.
-    const adifField = (name, val) => val ? `  <${name}>${escXml(val)}</${name}>\n` : '';
-    const state = qsoData.state || '';
-    const county = qsoData.county || '';
-    const country = qsoData.country || '';
-    const name = qsoData.name || '';
-    const sig = qsoData.sig || '';
-    const sigInfo = qsoData.sigInfo || '';
-    const potaRef = qsoData.potaRef || '';
-    const sotaRef = qsoData.sotaRef || '';
-    const wwffRef = qsoData.wwffRef || '';
-    const txPower = qsoData.txPower || '';
-    const stationCallsign = qsoData.stationCallsign || mycall;
-    const myGridsquare = qsoData.myGridsquare || settings.grid || '';
-    const mySig = qsoData.mySig || '';
-    const mySigInfo = qsoData.mySigInfo || '';
-
-    const xml = `<?xml version="1.0" encoding="utf-8"?>\n<contactinfo>\n`
-      + `  <app>POTACAT</app>\n`
-      + `  <ID>${escXml(contactId)}</ID>\n`
-      + `  <contestname>${escXml(contestName)}</contestname>\n`
-      + `  <contestnr>${escXml(contestNr)}</contestnr>\n`
-      + `  <timestamp>${escXml(ts)}</timestamp>\n`
-      + `  <mycall>${escXml(mycall)}</mycall>\n`
-      + `  <operator>${escXml(mycall)}</operator>\n`
-      + `  <band>${escXml(band)}</band>\n`
-      + `  <rxfreq>${rxfreq}</rxfreq>\n`
-      + `  <txfreq>${txfreq}</txfreq>\n`
-      + `  <call>${escXml(call)}</call>\n`
-      + `  <mode>${escXml(mode)}</mode>\n`
-      + `  <snt>${escXml(snt)}</snt>\n`
-      + `  <rcv>${escXml(rcv)}</rcv>\n`
-      + `  <gridsquare>${escXml(grid)}</gridsquare>\n`
-      + adifField('state', state)
-      + adifField('cnty', county)
-      + adifField('country', country)
-      + adifField('name', name)
-      + adifField('sig', sig)
-      + adifField('sig_info', sigInfo)
-      + adifField('pota_ref', potaRef)
-      + adifField('sota_ref', sotaRef)
-      + adifField('wwff_ref', wwffRef)
-      + adifField('tx_pwr', txPower)
-      + adifField('station_callsign', stationCallsign)
-      + adifField('my_gridsquare', myGridsquare)
-      + adifField('my_sig', mySig)
-      + adifField('my_sig_info', mySigInfo)
-      + `  <comment>${escXml(comment)}</comment>\n`
-      + `</contactinfo>\n`;
+    // The packet build lives in lib/wrl-packet.js (pure + tested). Every
+    // value is String()-coerced there: the Log QSO pop-out hands txPower in
+    // as a Number while the ADIF resend path hands the same field in as a
+    // String, and the old inline escXml called .replace on whatever it got —
+    // so a pop-out QSO died with `str.replace is not a function` while
+    // "Resend to Logbook" on the same contact worked (W9TEF 2026-09-19).
+    const xml = buildWrlContactInfo(qsoData, {
+      myCallsign: settings.myCallsign,
+      myGrid: settings.grid,
+    });
 
     const message = Buffer.from(xml, 'utf-8');
     const client = dgram.createSocket('udp4');
@@ -20954,11 +20875,6 @@ function sendWrlUdp(qsoData, host, port) {
       else resolve();
     });
   });
-}
-
-function escXml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /**

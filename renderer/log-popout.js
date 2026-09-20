@@ -484,7 +484,13 @@ function _applyPopoutTheme(payload) {
       timeOn: time,
       rstSent: (rstSentInput.value || '59').slice(0, 3),
       rstRcvd: (rstRcvdInput.value || '59').slice(0, 3),
-      txPower: powerInput.value ? Number(powerInput.value) : undefined,
+      // String, like every other field here — main normalizes too, but a
+      // Number leaving this form is what broke WRL forwarding (W9TEF). A
+      // non-numeric entry stays undefined so main's auto-fill still runs,
+      // rather than shipping the string "NaN" as the QSO's power.
+      txPower: Number.isFinite(Number(powerInput.value)) && powerInput.value.trim()
+        ? String(Number(powerInput.value))
+        : undefined,
       sig,
       sigInfo,
       potaRef,

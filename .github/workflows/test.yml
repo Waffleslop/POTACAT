@@ -45,6 +45,8 @@ jobs:
         run: node test/hunted-park-test.js
       - name: Run log-comment suite
         run: node test/log-comment-test.js
+      - name: Run WRL packet suite (numeric fields must not break forwarding)
+        run: node test/wrl-packet-test.js
       - name: Run rig-family suite
         run: node test/rig-family-test.js
       - name: Run DX cluster login suite
