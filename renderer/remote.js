@@ -4362,6 +4362,7 @@
       cmdInput.placeholder = slotType === 'toggle' ? 'On command'
         : slotType === 'slider' ? 'Command with {v}' : 'CAT command';
       if (slotType === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ). No placeholder = value appended.';
+      else cmdInput.title = 'Text commands as your manual prints them (FA014074000; ). Icom CI-V as hex bytes (FE FE 80 E0 12 00 FD).';
       cmdInput.maxLength = 64;
       cmdInput.value = entry.command || '';
       row.appendChild(nameInput);
