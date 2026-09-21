@@ -65,6 +65,7 @@ typedef HMODULE lib_t;
 #  include <pthread.h>
 #  include <time.h>
 #  include <unistd.h>
+#  include <sys/stat.h>
 #  define FTAPI
 typedef void* lib_t;
 #  define lib_open(name) dlopen((name), RTLD_NOW)
@@ -153,7 +154,19 @@ static void sleep_ms(unsigned ms) {
 static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
 /* The parent closes our stdin to stop us: a clean FT4222_UnInitialize/FT_Close
- * beats a TerminateProcess. A thread blocks on stdin and flips g_stop at EOF. */
+ * beats a TerminateProcess. A thread blocks on stdin and flips g_stop at EOF.
+ * Only when stdin IS a pipe: run from a shell with no stdin (CI, `> capture`
+ * from a script) the EOF is immediate and the helper would stop before its
+ * first frame — the release smoke test lost exactly that race on Linux. */
+static int stdin_is_pipe(void) {
+#ifdef _WIN32
+  return GetFileType(GetStdHandle(STD_INPUT_HANDLE)) == FILE_TYPE_PIPE;
+#else
+  struct stat st;
+  if (fstat(0, &st) != 0) return 0;
+  return S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode);
+#endif
+}
 #ifdef _WIN32
 static unsigned __stdcall stdin_watch(void* arg) {
   (void)arg;
@@ -415,12 +428,12 @@ static int run_synth(int fps, int once) {
   uint32_t seq = 0;
   unsigned gap = fps > 0 ? (1000u / (unsigned)fps) : 33;
   fprintf(stderr, "yaesu-scope: --synth — generated frames, no radio (kind=1)\n");
-  while (!g_stop) {
+  do {   /* the first frame is written before the stop flag is consulted: --once always yields one */
     synth_frame(buf, ++seq);
     if (!write_frame(buf, 1, seq)) return EXIT_STOPPED;
     if (once) return EXIT_STOPPED;
     sleep_ms(gap);
-  }
+  } while (!g_stop);
   return EXIT_STOPPED;
 }
 
@@ -448,7 +461,7 @@ int main(int argc, char** argv) {
 #endif
   signal(SIGINT, on_signal);
   signal(SIGTERM, on_signal);
-  start_stdin_watch();
+  if (stdin_is_pipe()) start_stdin_watch();
 
   if (synth) return run_synth(fps, once);
   if (!load_ftdi()) return EXIT_NO_LIBRARY;
