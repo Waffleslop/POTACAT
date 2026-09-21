@@ -804,6 +804,7 @@
   let scopeServerOk = false;
   let scopeState = null;
   let scopeLatest = null;
+  let scopeFloor = (() => { try { return Number(localStorage.getItem('echocat-scope-floor')) || 0; } catch { return 0; } })();
 
   function scopeAvailable() {
     return !!(scopeServerOk && window.ScopeAxis && rigCapabilities && rigCapabilities.nativeScope);
@@ -864,8 +865,9 @@
     }
     scopeDrawAll();
   }
-  function scopeRenderFrame(bins) {
-    if (!bins || !bins.length) return;
+  function scopeRenderFrame(rawBins) {
+    if (!rawBins || !rawBins.length) return;
+    const bins = window.ScopeAxis ? window.ScopeAxis.applyFloor(rawBins, scopeFloor) : rawBins;
     scopeLatest = bins;
     if (activeTab !== 'scope' || !scopeWf) return;
     const ctx = scopeWf.getContext('2d');
@@ -937,6 +939,14 @@
   }
   if (scopeTrace) scopeTrace.addEventListener('click', (e) => scopeTuneAt(e.clientX, scopeTrace));
   if (scopeWf) scopeWf.addEventListener('click', (e) => scopeTuneAt(e.clientX, scopeWf));
+  const scopeFloorEl = document.getElementById('scope-phone-floor');
+  if (scopeFloorEl) {
+    scopeFloorEl.value = String(scopeFloor);
+    scopeFloorEl.addEventListener('input', (e) => {
+      scopeFloor = Number(e.target.value) || 0;
+      try { localStorage.setItem('echocat-scope-floor', String(scopeFloor)); } catch { /* private mode */ }
+    });
+  }
   const scopeEnableBtn = document.getElementById('scope-phone-enable');
   if (scopeEnableBtn) scopeEnableBtn.addEventListener('click', () => sendToServer({ type: 'scope-enable-radio' }));
   window.addEventListener('resize', () => { if (activeTab === 'scope') { scopeSizeCanvases(); scopeDrawAll(); } });

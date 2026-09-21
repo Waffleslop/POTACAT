@@ -78,6 +78,7 @@
     <span class="sc-meta"><span class="dim">SCU-LAN10</span> <span id="sc-sculan">—</span></span>
     <span class="sc-spacer"></span>
     <button class="sc-btn accent" id="sc-enable" style="display:none" title="Sends EX0301261; to the radio. POTACAT turns it back off when the scope closes.">Enable SCU-LAN10 on the radio</button>
+    <label class="sc-check" title="Noise floor: everything below this level is drawn black, so signals stand out. Display only — the radio's data is untouched."><span class="dim">Floor</span> <input type="range" id="sc-floor" min="0" max="200" value="0" style="width:110px;vertical-align:middle;"></label>
     <button class="sc-btn toggle on" id="sc-spots-toggle" title="Overlay POTA / SOTA / cluster spots that fall inside the scope">Spots</button>
     <button class="sc-btn" id="sc-retry" title="Stop and restart the scope helper">Retry</button>
     <div class="sc-gear">

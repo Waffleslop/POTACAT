@@ -206,9 +206,11 @@ for a reason worth keeping:
 Verified live (synthetic signal, `--synth`): pop-out Blocked→Live, correct
 10 kHz CENTER axis, click-to-tune reaches main's tune sink, ECHOCAT `hello`
 carries `scope`, 256-bin frames at ~10 fps, helper exits on pop-out close.
-**Still unverified: the frame offsets against a real radio** — step 1 below
-needs a tester with an FT-710; the first capture becomes
-`test/fixtures/ft710-scope-*.bin`.
+**Verified on air 2026-09-21:** the first FT-710 owner on 1.10.21 reported
+"It works!" with spots overlaid — the frame layout is right. He asked for a
+noise floor; `applyFloor` (scope-axis.js, slider on both surfaces) is it. A
+capture for `test/fixtures/` is still wanted so the parser is pinned by real
+bytes, not only by the builder's inverse.
 
 Requested three times in one Discord thread and as GitHub issue #91 the
 same day. This is the first **real RF panadapter for a conventional

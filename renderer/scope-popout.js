@@ -33,6 +33,7 @@ let peak = new Float32Array(BINS);
 let spots = [];
 let showSpots = true;
 let peakHold = false;
+let floor = (() => { try { return Number(localStorage.getItem('scope-floor')) || 0; } catch { return 0; } })();
 let drawPending = false;
 
 // ─── Waterfall ─────────────────────────────────────────────────────────────
@@ -206,8 +207,9 @@ function drawSpots() {
 
 // ─── Frames ────────────────────────────────────────────────────────────────
 window.api.onScopeFrame((f) => {
-  const bins = f && f.bins;
-  if (!bins || bins.length !== BINS) return;
+  const raw = f && f.bins;
+  if (!raw || raw.length !== BINS) return;
+  const bins = A.applyFloor(raw, floor);   // display floor, shared maths with the web client
   latest = bins;
   for (let i = 0; i < BINS; i++) {
     smooth[i] = smooth[i] * 0.45 + bins[i] * 0.55;
@@ -263,6 +265,12 @@ $('sc-colormap').addEventListener('change', (e) => {
   try { localStorage.setItem('scope-colormap', e.target.value); } catch { /* private mode */ }
 });
 $('sc-fps').addEventListener('change', (e) => window.api.setFps(Number(e.target.value)));
+const floorEl = $('sc-floor');
+floorEl.value = String(floor);
+floorEl.addEventListener('input', (e) => {
+  floor = Number(e.target.value) || 0;
+  try { localStorage.setItem('scope-floor', String(floor)); } catch { /* private mode */ }
+});
 $('sc-peak').addEventListener('change', (e) => { peakHold = e.target.checked; if (!peakHold) peak.fill(0); scheduleDraw(); });
 $('sc-synth').addEventListener('change', (e) => window.api.setSynth(e.target.checked));
 

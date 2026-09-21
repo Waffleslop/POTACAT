@@ -162,6 +162,30 @@ check('width larger than the source is clamped', () => {
   assert.strictEqual(out.length, 850);
 });
 
+section('Display noise floor (the first FT-710 owner\'s request)');
+
+const Axis = require('../lib/scope-axis');
+
+check('floor 0 returns the bins untouched', () => {
+  const b = new Uint8Array([0, 10, 100, 255]);
+  assert.strictEqual(Axis.applyFloor(b, 0), b);
+});
+
+check('levels at or below the floor go black, the rest stretches back to full scale', () => {
+  const out = Axis.applyFloor(new Uint8Array([0, 50, 51, 153, 255]), 51);
+  assert.strictEqual(out[0], 0);
+  assert.strictEqual(out[1], 0);
+  assert.strictEqual(out[2], 0);
+  assert.strictEqual(out[3], 128, '153 is half way from the floor to full scale');
+  assert.strictEqual(out[4], 255, 'full scale stays full scale');
+});
+
+check('the floor is clamped so a stray value cannot divide by zero', () => {
+  const out = Axis.applyFloor(new Uint8Array([255]), 9999);
+  assert.strictEqual(out[0], 255);
+  assert.strictEqual(Axis.applyFloor(new Uint8Array([200]), -5)[0], 200);
+});
+
 section('CAT replies');
 
 check('SS span reply → Hz', () => {
