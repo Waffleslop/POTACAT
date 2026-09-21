@@ -2020,6 +2020,11 @@ function getRigCapabilities(rigType) {
   const caps = _rigCapabilitiesForType(rigType);
   const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
   if (activeRig && activeRig.externalAtu === 'rf-sense') caps.atu = true;
+  // The band scope's synthetic signal needs no radio, but every client gates
+  // its scope controls on nativeScope — so with the switch on, any rig
+  // reports one. That is how all three clients get bench-tested without an
+  // FT-710 in the room (mobile handoff, follow-up 4).
+  if (yaesuScopeSynth && !caps.nativeScope) caps.nativeScope = 'synthetic';
   return caps;
 }
 
@@ -15241,6 +15246,15 @@ function connectRemote() {
   });
 
   remoteServer.on('client-disconnected', () => {
+    // Band scope: the subscription dies with the socket. The mobile client
+    // re-sends scope-subscribe on every auth-ok while a surface is up, so
+    // nothing here needs to be sticky — and a flag left true would let a
+    // helper (and the radio's SCU-LAN10) run for a client that has gone, or
+    // start for the next one that never asked (mobile handoff, follow-up 2).
+    if (yaesuScopeRemoteWants) {
+      yaesuScopeRemoteWants = false;
+      if (!yaesuScopeWanted()) { try { stopYaesuScope('ECHOCAT client disconnected'); } catch { /* not running */ } }
+    }
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
       // Phone gone — clear any mirrored "phone is scanning" state so the
@@ -16892,7 +16906,23 @@ function connectRemote() {
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
   });
-  remoteServer.on('scope-enable-radio', () => yaesuScopeEnableOnRadio());
+  remoteServer.on('scope-enable-radio', ({ guest } = {}) => {
+    if (guest) {
+      // A Guest Pass may look; the host's radio menu is not a guest's to
+      // change. The refusal is told in the guest's own diag card.
+      sendCatLog('[Scope] a Guest Pass client asked to turn SCU-LAN10 on — refused (the host\'s radio settings are not a guest\'s to change)');
+      if (remoteServer && remoteServer.running && typeof remoteServer.broadcastScopeState === 'function') {
+        remoteServer.broadcastScopeState(yaesuScopeRemotePayload({ diag: {
+          key: 'guest', severity: 'blocker',
+          headline: 'SCU-LAN10 is off, and a Guest Pass cannot change it',
+          detail: 'The scope streams only when SCU-LAN10 is on in the radio menu. Only the host can turn it on.',
+          action: 'Ask the host to enable SCU-LAN10 on the radio (OPERATION SETTING > GENERAL > 26).',
+        } }));
+      }
+      return;
+    }
+    yaesuScopeEnableOnRadio();
+  });
 
   remoteServer.on('jtcat-call-cq', async ({ modifier } = {}) => {
     if (!ft8Engine) return;
@@ -20794,12 +20824,31 @@ function yaesuScopeStatePayload() {
   };
 }
 
+/**
+ * The state as an ECHOCAT client sees it: an explicit field list, never the
+ * spread. The local object carries `helperPath` — an absolute path on the
+ * shack PC, with the operator's username on Windows — and that must not leave
+ * the machine, Guest Pass sessions least of all (mobile handoff, follow-up 1).
+ */
+function yaesuScopeRemotePayload(extra) {
+  const s = yaesuScopeState;
+  return {
+    status: s.status, kind: s.kind, spanHz: s.spanHz, anchor: s.anchor, speed: s.speed,
+    scuLan: s.scuLan, centerHz: s.centerHz, diag: s.diag,
+    axis: YaesuScope.scopeAxis({ centerHz: s.centerHz, spanHz: s.spanHz, anchor: s.anchor }),
+    available: yaesuScopeSynth || yaesuScopeRigHasScope(),
+    fps: settings.yaesuScopeFps || 20,
+    synth: yaesuScopeSynth,
+    ...(extra || {}),
+  };
+}
+
 function yaesuScopeBroadcastState() {
   const payload = yaesuScopeStatePayload();
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-state', payload);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-state', payload);
   if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && typeof remoteServer.broadcastScopeState === 'function') {
-    remoteServer.broadcastScopeState(payload);
+    remoteServer.broadcastScopeState(yaesuScopeRemotePayload());
   }
   yaesuScopeLastStateSend = Date.now();
 }
@@ -27960,6 +28009,9 @@ app.whenReady().then(() => {
     yaesuScopeSynth = !!on;
     sendCatLog('[Scope] synthetic signal ' + (on ? 'ON — no radio involved' : 'OFF'));
     yaesuScopeRestartLater('signal source changed');
+    // Capabilities changed (nativeScope appears/disappears on a non-FT-710):
+    // the More menu, the web client and the mobile app all gate on them.
+    try { broadcastRigState(); } catch { /* no rig yet */ }
   });
   ipcMain.on('scope-set-fps', (_e, fps) => {
     const v = Math.max(1, Math.min(60, Math.round(Number(fps) || 20)));

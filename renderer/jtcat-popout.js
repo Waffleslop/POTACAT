@@ -2503,7 +2503,7 @@ function _applyPopoutTheme(payload) {
   function bsTune(frac) {
     var ax = bsAxis();
     if (!ax.known) return;
-    var hz = window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849);
+    var hz = window.ScopeAxis.snapTapHz(window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849), bsState && bsState.spanHz);
     window.api.tune((hz / 1000).toFixed(3), null);
   }
   function bsDraw() {

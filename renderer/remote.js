@@ -973,7 +973,7 @@
     const r = el.getBoundingClientRect();
     if (r.width <= 0) return;
     const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    const hz = window.ScopeAxis.binToHz(axis, frac * (axis.bins - 1));
+    const hz = window.ScopeAxis.snapTapHz(window.ScopeAxis.binToHz(axis, frac * (axis.bins - 1)), scopeState && scopeState.spanHz);
     sendToServer({ type: 'tune', freqKhz: (hz / 1000).toFixed(3), mode: '' });
   }
   for (const sf of scopeSurfaces) {

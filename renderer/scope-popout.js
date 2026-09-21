@@ -227,7 +227,7 @@ window.api.onPopoutTheme(_applyPopoutTheme);
 // ─── Interaction ───────────────────────────────────────────────────────────
 function tuneToFraction(frac) {
   if (!axis.known) return;
-  const hz = A.binToHz(axis, Math.max(0, Math.min(1, frac)) * (BINS - 1));
+  const hz = A.snapTapHz(A.binToHz(axis, Math.max(0, Math.min(1, frac)) * (BINS - 1)), state.spanHz);
   window.api.tune((hz / 1000).toFixed(3), null);
 }
 wf.onClick(tuneToFraction);

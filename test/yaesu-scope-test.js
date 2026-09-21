@@ -186,6 +186,52 @@ check('the floor is clamped so a stray value cannot divide by zero', () => {
   assert.strictEqual(Axis.applyFloor(new Uint8Array([200]), -5)[0], 200);
 });
 
+section('Tap snapping — one rule for every client');
+
+check('the step follows the span: 10 / 50 / 100 / 500 Hz', () => {
+  assert.strictEqual(Axis.snapTapHz(14074123, 10000), 14074120);
+  assert.strictEqual(Axis.snapTapHz(14074123, 50000), 14074100);
+  assert.strictEqual(Axis.snapTapHz(14074123, 200000), 14074100);
+  assert.strictEqual(Axis.snapTapHz(14074249, 1000000), 14074000);
+  assert.strictEqual(Axis.snapTapHz(14074251, 1000000), 14074500);
+});
+
+section('Mobile handoff follow-ups (2026-09-21)');
+
+check('1. the remote scope-state is an explicit field list — never helperPath', () => {
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  const fn = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
+  assert.ok(fn.length > 0, 'yaesuScopeRemotePayload missing');
+  assert.ok(!/\.\.\.yaesuScopeState\b/.test(fn) && !/helperPath|frames|misaligned/.test(fn), 'remote payload must not spread the local state');
+  assert.ok(mainSrc.includes('remoteServer.broadcastScopeState(yaesuScopeRemotePayload())'), 'broadcast must use the remote payload');
+  assert.ok(!mainSrc.includes('remoteServer.broadcastScopeState(payload)'), 'the local payload must never go to the wire');
+});
+
+check('2. a client disconnect clears the remote subscription and stops an unwatched helper', () => {
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  const i = mainSrc.indexOf("remoteServer.on('client-disconnected'");
+  assert.ok(i > 0);
+  const body = mainSrc.slice(i, i + 900);
+  assert.ok(body.includes('yaesuScopeRemoteWants = false'), 'flag not cleared on disconnect');
+  assert.ok(body.includes("stopYaesuScope('ECHOCAT client disconnected')"), 'helper not stopped on disconnect');
+});
+
+check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf-8');
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  assert.ok(serverSrc.includes("this.emit('scope-enable-radio', { guest: !!ws._passSession })"));
+  const i = mainSrc.indexOf("remoteServer.on('scope-enable-radio'");
+  const body = mainSrc.slice(i, i + 1200);
+  assert.ok(/if \(guest\)[\s\S]*key: 'guest'[\s\S]*return;[\s\S]*yaesuScopeEnableOnRadio\(\);/.test(body), 'guest branch must refuse with a diag before the real enable');
+});
+
+check('4. the synthetic signal advertises nativeScope on any rig and re-broadcasts rig state', () => {
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  assert.ok(mainSrc.includes("if (yaesuScopeSynth && !caps.nativeScope) caps.nativeScope = 'synthetic';"));
+  const i = mainSrc.indexOf("ipcMain.on('scope-set-synth'");
+  assert.ok(mainSrc.slice(i, i + 700).includes('broadcastRigState()'), 'rig state not re-broadcast when the switch flips');
+});
+
 section('CAT replies');
 
 check('SS span reply → Hz', () => {
