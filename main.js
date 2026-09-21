@@ -571,6 +571,7 @@ const GLOBAL_KEYS = new Set([
   'jtcatTxGain',       // JTCAT TX drive 0–1 (gain, square-curve domain) — synced
                        // slider, machine audio property like jtcatRxGain
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
+  'jtcatWaterfallFloor', // waterfall display noise floor (0..200) — same nature
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's

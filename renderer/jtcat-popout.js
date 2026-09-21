@@ -95,6 +95,7 @@ function _applyPopoutTheme(payload) {
       modeHopIdleInput.value = s.jtcatModeHopIdleMin;
     }
     if (typeof s.jtcatWaterfallSpeed === 'number') setWfSpeed(s.jtcatWaterfallSpeed, false);
+    if (typeof s.jtcatWaterfallFloor === 'number') setWfFloor(s.jtcatWaterfallFloor, false);
     else updateWfSpeedHelp();
     fdMode = !!s.jtcatFdMode;
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
@@ -208,6 +209,9 @@ function _applyPopoutTheme(payload) {
   var reworkDaysInput = document.getElementById('jp-rework-days');
   var runPauseInput = document.getElementById('jp-run-pause-after');
   var wfSpeedInput = document.getElementById('jp-wf-speed');
+  var wfFloorInput = document.getElementById('jp-wf-floor');
+  var wfFloorVal = document.getElementById('jp-wf-floor-val');
+  var wfFloor = 0;   // display noise floor, 0..200 (ScopeAxis.applyFloor — shared with the Band Scope)
   var wfSpeedHelp = document.getElementById('jp-wf-speed-help');
   var fdToggle = document.getElementById('jp-fd-toggle');
   var fdExchInput = document.getElementById('jp-fd-exch');
@@ -2185,6 +2189,7 @@ function _applyPopoutTheme(payload) {
         // Draw new line at top
         var bins = new Uint8Array(p.analyser.frequencyBinCount);
         p.analyser.getByteFrequencyData(bins);
+        if (wfFloor > 0 && window.ScopeAxis) bins = window.ScopeAxis.applyFloor(bins, wfFloor);
         // Map 0-3kHz (FT8 passband) to canvas width
         // AudioContext sample rate is typically 48kHz, so 3kHz = bins * (3000 / (sampleRate/2))
         var nyquist = (p.sampleRate || 48000) / 2;
@@ -2428,6 +2433,22 @@ function _applyPopoutTheme(payload) {
   }
   if (wfSpeedInput) {
     wfSpeedInput.addEventListener('change', function() { setWfSpeed(wfSpeedInput.value, true); });
+  }
+  // Display floor — the FT-710 scope's Floor slider, on this waterfall too
+  // (Casey 2026-09-21). Applied AFTER the silence watchdog reads the raw
+  // bins, so a high floor can never fake an 'RX audio silent' verdict.
+  function setWfFloor(n, persist) {
+    n = parseInt(n, 10);
+    if (!isFinite(n) || n < 0) n = 0;
+    if (n > 200) n = 200;
+    wfFloor = n;
+    if (wfFloorInput) wfFloorInput.value = n;
+    if (wfFloorVal) wfFloorVal.textContent = n;
+    if (persist) window.api.saveSettings({ jtcatWaterfallFloor: n });
+  }
+  if (wfFloorInput) {
+    wfFloorInput.addEventListener('input', function() { setWfFloor(wfFloorInput.value, false); });
+    wfFloorInput.addEventListener('change', function() { setWfFloor(wfFloorInput.value, true); });
   }
 
   // ARRL Field Day mode toggle + exchange entry. Shared by the ⚙ row and the
@@ -4142,6 +4163,9 @@ function _applyPopoutTheme(payload) {
         wfLastSignalTs = Date.now();
         if (wfSilentShown) { setWfSilentOverlay(false); wfSilentShown = false; }
       }
+
+      // Display floor, after the watchdog has seen the raw levels.
+      if (wfFloor > 0 && window.ScopeAxis) freqData = window.ScopeAxis.applyFloor(freqData, wfFloor);
 
       var w = jpWaterfall.width;
       var h = jpWaterfall.height;

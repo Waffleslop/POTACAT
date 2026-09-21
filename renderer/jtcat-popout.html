@@ -728,6 +728,10 @@
       <span class="jp-opt-label">Waterfall speed <input id="jp-wf-speed" type="number" min="1" max="60" step="1" value="60"> lines/sec</span>
       <span class="jp-opt-help" id="jp-wf-speed-help">How fast the waterfall scrolls.</span>
     </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Waterfall floor <input id="jp-wf-floor" type="range" min="0" max="200" step="1" value="0" style="width:120px;vertical-align:middle;"> <span id="jp-wf-floor-val">0</span></span>
+      <span class="jp-opt-help">Noise floor for the picture: levels below it are drawn black so signals stand out. Display only — decoding is untouched. Same control as the Band Scope.</span>
+    </label>
     <div class="jp-opt-section">Special modes</div>
     <button id="jp-fd-toggle" class="jp-opt-row">
       <span class="jp-opt-label">Field Day</span>
@@ -757,6 +761,7 @@
   <script src="jtcat-parser.js"></script>
   <script src="cq-target.js"></script>
   <script src="../lib/wspr/stats.js"></script>
+  <script src="../lib/scope-axis.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>
 </html>
