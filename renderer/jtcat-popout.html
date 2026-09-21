@@ -578,6 +578,25 @@
     </span>
   </div>
 
+  <!-- Band scope: the radio's OWN spectrum (FT-710 over USB) as a strip above
+       the audio waterfall. Only for a rig that streams one, and only while the
+       gear > Display toggle is on. Drawn by renderer/waterfall.js. -->
+  <div id="jp-bandscope" class="hidden" style="position:relative;flex-shrink:0;background:#000;border-top:1px solid var(--border-primary);">
+    <div style="display:flex;align-items:center;gap:8px;padding:2px 10px;font-size:10px;color:var(--text-secondary);background:var(--bg-secondary);">
+      <span style="font-weight:700;color:var(--text-primary)">Band Scope</span>
+      <span id="jp-bs-status">—</span>
+      <span id="jp-bs-span"></span>
+      <span id="jp-bs-mode"></span>
+      <span style="flex:1"></span>
+      <button type="button" id="jp-bs-enable" class="hidden" title="Turns SCU-LAN10 on in the radio menu (EX0301261;). POTACAT turns it back off when the scope stops." style="font-size:10px;padding:1px 6px;border:1px solid #e94560;background:#e94560;color:#fff;border-radius:3px;cursor:pointer;">Enable SCU-LAN10</button>
+      <span id="jp-bs-lo" style="font-family:monospace"></span>
+      <span id="jp-bs-c" style="font-family:monospace;color:#e94560;font-weight:700"></span>
+      <span id="jp-bs-hi" style="font-family:monospace"></span>
+    </div>
+    <canvas id="jp-bs-trace" style="width:100%;height:56px;display:block;cursor:crosshair;"></canvas>
+    <canvas id="jp-bs-wf" style="width:100%;height:96px;display:block;cursor:crosshair;"></canvas>
+  </div>
+
   <!-- Waterfall slice selector (multi-slice mode) -->
   <div id="jp-wf-slice-bar" class="hidden" style="display:flex;gap:2px;padding:2px 10px;background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;font-size:10px;"></div>
 
@@ -732,6 +751,10 @@
       <span class="jp-opt-label">Waterfall floor <input id="jp-wf-floor" type="range" min="0" max="200" step="1" value="0" style="width:120px;vertical-align:middle;"> <span id="jp-wf-floor-val">0</span></span>
       <span class="jp-opt-help">Noise floor for the picture: levels below it are drawn black so signals stand out. Display only — decoding is untouched. Same control as the Band Scope.</span>
     </label>
+    <label class="jp-opt-row hidden" id="jp-bandscope-row">
+      <span class="jp-opt-label"><input type="checkbox" id="jp-bandscope-toggle"> Band scope strip</span>
+      <span class="jp-opt-help">The radio's own spectrum above the audio waterfall — the FT-710 streams it over USB. Click it to tune. The floor above applies to it too.</span>
+    </label>
     <div class="jp-opt-section">Special modes</div>
     <button id="jp-fd-toggle" class="jp-opt-row">
       <span class="jp-opt-label">Field Day</span>
@@ -762,6 +785,7 @@
   <script src="cq-target.js"></script>
   <script src="../lib/wspr/stats.js"></script>
   <script src="../lib/scope-axis.js"></script>
+  <script src="waterfall.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>
 </html>

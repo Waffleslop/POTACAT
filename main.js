@@ -572,6 +572,7 @@ const GLOBAL_KEYS = new Set([
                        // slider, machine audio property like jtcatRxGain
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
   'jtcatWaterfallFloor', // waterfall display noise floor (0..200) — same nature
+  'jtcatShowBandScope',  // band-scope strip in the JTCAT pop-out (FT-710) — display
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
@@ -20745,6 +20746,7 @@ let yaesuScopeCatBusy = false;
 let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns it back off
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
 let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
+let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
 let yaesuScopeLastRemoteFrame = 0;
 let yaesuScopeLastStateSend = 0;
 const yaesuScopeState = {
@@ -20766,6 +20768,7 @@ function yaesuScopeRigHasScope() {
 
 function yaesuScopeWanted() {
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) return true;
+  if (yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) return true;
   return !!(yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient());
 }
 
@@ -20785,12 +20788,16 @@ function yaesuScopeStatePayload() {
     axis: YaesuScope.scopeAxis({ centerHz: yaesuScopeState.centerHz, spanHz: yaesuScopeState.spanHz, anchor: yaesuScopeState.anchor }),
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
+    // Whether the active rig can do this at all — the JTCAT pop-out and the
+    // web client show their band-scope controls only when it is true.
+    available: yaesuScopeSynth || yaesuScopeRigHasScope(),
   };
 }
 
 function yaesuScopeBroadcastState() {
   const payload = yaesuScopeStatePayload();
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-state', payload);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-state', payload);
   if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && typeof remoteServer.broadcastScopeState === 'function') {
     remoteServer.broadcastScopeState(payload);
   }
@@ -20919,6 +20926,9 @@ function yaesuScopeOnFrame(f) {
   }
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
     scopePopoutWin.webContents.send('scope-frame', { seq: f.seq, kind: f.kind, bins: f.wf1 });
+  }
+  if (yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('scope-frame', { seq: f.seq, kind: f.kind, bins: f.wf1 });
   }
   if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient()) {
     const now = Date.now();
@@ -26708,6 +26718,8 @@ app.whenReady().then(() => {
     });
     jtcatPopoutWin.on('closed', () => {
       jtcatPopoutWin = null;
+      yaesuScopeJtcatWants = false;
+      if (!yaesuScopeWanted()) { try { stopYaesuScope('JTCAT window closed'); } catch { /* not running */ } }
       // Clear popout QSO state and halt TX so engine doesn't keep transmitting
       if (popoutJtcatQso) {
         popoutJtcatQso = null;
@@ -26736,6 +26748,8 @@ app.whenReady().then(() => {
       // Send current theme
       const themePayload = { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' };
       jtcatPopoutWin.webContents.send('jtcat-popout-theme', themePayload);
+      // Band scope availability (FT-710): the strip's toggle appears from this.
+      jtcatPopoutWin.webContents.send('scope-state', yaesuScopeStatePayload());
       // Fresh popout: show the armed Spot Target banner immediately (the
       // target is usually set an instant before jtcat-popout-open).
       if (jtcatSpotTarget) broadcastSpotTarget();
@@ -27929,6 +27943,13 @@ app.whenReady().then(() => {
   ipcMain.on('scope-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('scope-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
   ipcMain.on('scope-enable-on-radio', () => yaesuScopeEnableOnRadio());
+  // The JTCAT pop-out's band-scope strip: it watches while shown, like a
+  // subscribed ECHOCAT client, and the helper runs for whoever is watching.
+  ipcMain.on('jtcat-scope-watch', (_e, on) => {
+    yaesuScopeJtcatWants = !!on;
+    if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
+    else if (!yaesuScopeWanted()) stopYaesuScope('JTCAT band scope hidden');
+  });
   const yaesuScopeRestartLater = (why) => {
     stopYaesuScope(why);
     yaesuScopeRestarts = 0;

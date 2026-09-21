@@ -96,6 +96,7 @@ function _applyPopoutTheme(payload) {
     }
     if (typeof s.jtcatWaterfallSpeed === 'number') setWfSpeed(s.jtcatWaterfallSpeed, false);
     if (typeof s.jtcatWaterfallFloor === 'number') setWfFloor(s.jtcatWaterfallFloor, false);
+    if (typeof s.jtcatShowBandScope === 'boolean') bsSetOn(s.jtcatShowBandScope, false);
     else updateWfSpeedHelp();
     fdMode = !!s.jtcatFdMode;
     if (fdExchInput) fdExchInput.value = s.jtcatFdExch || '';
@@ -2450,6 +2451,126 @@ function _applyPopoutTheme(payload) {
     wfFloorInput.addEventListener('input', function() { setWfFloor(wfFloorInput.value, false); });
     wfFloorInput.addEventListener('change', function() { setWfFloor(wfFloorInput.value, true); });
   }
+
+  // ─── Band scope strip: the radio's OWN spectrum inside this window ─────────
+  // The FT-710 streams its band scope over USB (lib/yaesu-scope.js); main runs
+  // the helper while this strip is shown, sends scope-state (axis, status,
+  // availability) and scope-frame (850 bins). Drawn on renderer/waterfall.js,
+  // axis maths from lib/scope-axis.js — the same code the Band Scope window and
+  // the web client use. The audio waterfall below it is untouched.
+  var bsWrap = document.getElementById('jp-bandscope');
+  var bsRow = document.getElementById('jp-bandscope-row');
+  var bsToggle = document.getElementById('jp-bandscope-toggle');
+  var bsTrace = document.getElementById('jp-bs-trace');
+  var bsWfCanvas = document.getElementById('jp-bs-wf');
+  var bsEnableBtn = document.getElementById('jp-bs-enable');
+  var bsWf = null;
+  var bsState = null;
+  var bsLatest = null;
+  var bsSmooth = null;
+  var bsDialHz = 0;
+  var bsOn = false;
+  var bsAvailable = false;
+  var bsLastWatch = null;
+
+  function bsAxis() {
+    var A = window.ScopeAxis; var s = bsState || {};
+    return A.scopeAxis({ centerHz: bsDialHz || s.centerHz || 0, spanHz: s.spanHz || 0, anchor: s.anchor || 'center' });
+  }
+  function bsSyncWatch() {
+    var want = !!(bsOn && bsAvailable);
+    if (want === bsLastWatch) return;
+    bsLastWatch = want;
+    if (window.api.scopeWatch) window.api.scopeWatch(want);
+  }
+  function bsApplyVisibility() {
+    var show = bsOn && bsAvailable;
+    if (bsRow) bsRow.classList.toggle('hidden', !bsAvailable);
+    if (bsWrap) bsWrap.classList.toggle('hidden', !show);
+    if (show && !bsWf && bsWfCanvas && typeof Waterfall !== 'undefined') {
+      bsWf = new Waterfall(bsWfCanvas, { bins: 850, historyRows: 256, colormap: 'turbo', gamma: 0.6 });
+      if (bsWf.supported) bsWf.onClick(function(frac) { bsTune(frac); });
+    }
+    if (show && bsWf && bsWf.supported) bsWf.resize();
+    bsSyncWatch();
+  }
+  function bsSetOn(on, persist) {
+    bsOn = !!on;
+    if (bsToggle) bsToggle.checked = bsOn;
+    bsApplyVisibility();
+    if (persist) window.api.saveSettings({ jtcatShowBandScope: bsOn });
+  }
+  function bsTune(frac) {
+    var ax = bsAxis();
+    if (!ax.known) return;
+    var hz = window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849);
+    window.api.tune((hz / 1000).toFixed(3), null);
+  }
+  function bsDraw() {
+    if (!bsTrace || !(bsOn && bsAvailable)) return;
+    var A = window.ScopeAxis;
+    var ax = bsAxis();
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.max(1, Math.round(bsTrace.clientWidth * dpr)), h = Math.max(1, Math.round(bsTrace.clientHeight * dpr));
+    if (bsTrace.width !== w || bsTrace.height !== h) { bsTrace.width = w; bsTrace.height = h; }
+    var ctx = bsTrace.getContext('2d');
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+    for (var i = 1; i < 10; i++) { var gx = Math.round(i * w / 10) + 0.5; ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke(); }
+    if (bsSmooth) {
+      ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 1.2 * dpr; ctx.beginPath();
+      for (var b = 0; b < 850; b++) { var x = b * (w - 1) / 849; var y = h - 2 * dpr - (bsSmooth[b] / 255) * (h - 4 * dpr); if (b === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+      ctx.stroke();
+    }
+    var dial = bsDialHz || (bsState && bsState.centerHz) || 0;   // no dial yet (no radio): main's centre
+    var rxBin = dial ? A.hzToBin(ax, dial) : null;
+    if (rxBin != null) { var mx = Math.round(rxBin * (w - 1) / 849) + 0.5; ctx.strokeStyle = '#e94560'; ctx.lineWidth = 1.5 * dpr; ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, h); ctx.stroke(); }
+    if (bsWf && bsWf.supported) bsWf.setMarkers(rxBin == null ? [] : [{ pos: rxBin / 849, color: '#e94560', kind: 'rx' }]);
+    var lo = document.getElementById('jp-bs-lo'), c = document.getElementById('jp-bs-c'), hi = document.getElementById('jp-bs-hi');
+    if (lo) lo.textContent = ax.hzPerBin ? A.formatHz(ax.startHz) : '';
+    if (c) c.textContent = dial ? A.formatHz(dial) : '';
+    if (hi) hi.textContent = ax.hzPerBin ? A.formatHz(ax.endHz) : '';
+  }
+  if (window.api.onScopeState) {
+    window.api.onScopeState(function(s) {
+      bsState = s || null;
+      bsAvailable = !!(s && s.available);
+      var st = (s && s.status) || 'stopped';
+      var statusEl = document.getElementById('jp-bs-status');
+      if (statusEl) {
+        statusEl.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: s && s.kind === 1 ? 'Live (synthetic)' : 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[st] || st;
+        statusEl.style.color = st === 'live' ? '#4ecca3' : (st === 'blocked' || st === 'error') ? '#e94560' : '';
+        if (s && s.diag && st !== 'live') statusEl.title = (s.diag.headline || '') + (s.diag.action ? ' — ' + s.diag.action : '');
+        else statusEl.title = '';
+      }
+      var spanEl = document.getElementById('jp-bs-span');
+      if (spanEl) spanEl.textContent = s && s.spanHz ? 'Span ' + window.ScopeAxis.formatSpan(s.spanHz) : '';
+      var modeEl = document.getElementById('jp-bs-mode');
+      if (modeEl) modeEl.textContent = s && s.anchor ? s.anchor.toUpperCase() + (s.anchor !== 'center' ? ' (axis assumed)' : '') : '';
+      var needEnable = !!(s && s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent')));
+      if (bsEnableBtn) bsEnableBtn.classList.toggle('hidden', !needEnable);
+      bsApplyVisibility();
+      bsDraw();
+    });
+  }
+  if (window.api.onScopeFrame) {
+    window.api.onScopeFrame(function(f) {
+      if (!(bsOn && bsAvailable) || !f || !f.bins || f.bins.length !== 850) return;
+      var bins = (wfFloor > 0 && window.ScopeAxis) ? window.ScopeAxis.applyFloor(f.bins, wfFloor) : f.bins;
+      bsLatest = bins;
+      if (!bsSmooth) bsSmooth = new Float32Array(850);
+      for (var i = 0; i < 850; i++) bsSmooth[i] = bsSmooth[i] * 0.45 + bins[i] * 0.55;
+      if (bsWf && bsWf.supported) bsWf.pushFrame(bins);
+      bsDraw();
+    });
+  }
+  if (window.api.onCatFrequency) {
+    window.api.onCatFrequency(function(hz) { if (hz > 0) { bsDialHz = hz; if (bsOn && bsAvailable) bsDraw(); } });
+  }
+  if (bsToggle) bsToggle.addEventListener('change', function() { bsSetOn(bsToggle.checked, true); });
+  if (bsTrace) bsTrace.addEventListener('click', function(e) { var r = bsTrace.getBoundingClientRect(); if (r.width > 0) bsTune((e.clientX - r.left) / r.width); });
+  if (bsEnableBtn) bsEnableBtn.addEventListener('click', function() { if (window.api.scopeEnableOnRadio) window.api.scopeEnableOnRadio(); });
+  window.addEventListener('resize', function() { if (bsOn && bsAvailable) { if (bsWf && bsWf.supported) bsWf.resize(); bsDraw(); } });
 
   // ARRL Field Day mode toggle + exchange entry. Shared by the ⚙ row and the
   // bar chip (the chip delegates here). Turning FD OFF while Hunt: Field Day

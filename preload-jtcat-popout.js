@@ -163,6 +163,12 @@ contextBridge.exposeInMainWorld('api', {
   qrzLookup: (callsign) => ipcRenderer.invoke('qrz-lookup', callsign),
   // Theme
   onPopoutTheme: (cb) => ipcRenderer.on('jtcat-popout-theme', (_e, theme) => cb(theme)),
+  // Band scope (the radio's own spectrum — FT-710 over USB) shown as a strip
+  // above the audio waterfall. main runs the helper while this window watches.
+  onScopeFrame: (cb) => ipcRenderer.on('scope-frame', (_e, f) => cb(f)),
+  onScopeState: (cb) => ipcRenderer.on('scope-state', (_e, s) => cb(s)),
+  scopeWatch: (on) => ipcRenderer.send('jtcat-scope-watch', !!on),
+  scopeEnableOnRadio: () => ipcRenderer.send('scope-enable-on-radio'),
   // Spot-list highlight — receives the currently-visible POTA/WWFF callsigns
   // from the main renderer so JTCAT can color-match decode rows that match
   // what's in the filtered spot table.

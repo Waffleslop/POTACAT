@@ -1314,6 +1314,14 @@
       </div>
       <!-- FT8 Map (decoded stations) -->
       <div id="ft8-map-container" class="hidden" style="height:150px;flex-shrink:0;border-bottom:1px solid var(--border);"></div>
+      <!-- Band scope strip: the radio's own spectrum above the audio waterfall
+           (FT-710 over USB). The BS button toggles it; shown only when the
+           shack advertises scope and the rig declares nativeScope. -->
+      <div id="ft8-bandscope" class="hidden" style="background:#000;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div style="display:flex;gap:6px;align-items:center;padding:2px 8px;font-size:10px;color:var(--text-dim);background:var(--bg-header);"><span style="font-weight:700;color:var(--text)">Band Scope</span><span id="ft8-bs-status"></span><span id="ft8-bs-span"></span><span style="flex:1"></span><span id="ft8-bs-lo" style="font-family:monospace"></span><span id="ft8-bs-c" style="font-family:monospace;color:#e94560;font-weight:700"></span><span id="ft8-bs-hi" style="font-family:monospace"></span></div>
+        <canvas id="ft8-bs-trace" width="320" height="50" style="width:100%;height:50px;display:block;background:#000;"></canvas>
+        <canvas id="ft8-bs-wf" width="320" height="90" style="width:100%;height:90px;display:block;background:#000;image-rendering:pixelated;"></canvas>
+      </div>
       <canvas id="ft8-waterfall" class="ft8-waterfall hidden" width="320" height="100"></canvas>
       <div id="ft8-control-bar">
         <button type="button" id="ft8-tx-btn" class="ft8-ctrl-btn ft8-tx-btn">TX</button>
@@ -1330,6 +1338,7 @@
         <span id="ft8-tx-msg" class="ft8-tx-msg">--</span>
         <button type="button" id="ft8-log-btn" class="ft8-ctrl-btn ft8-log-btn">LOG</button>
         <button type="button" id="ft8-wf-toggle" class="ft8-ctrl-btn ft8-wf-btn" title="Toggle waterfall">WF</button>
+        <button type="button" id="ft8-bs-toggle" class="ft8-ctrl-btn ft8-wf-btn hidden" title="Band scope — the radio's own spectrum (FT-710)">BS</button>
       </div>
       <div id="ft8-qso-exchange" class="ft8-qso-exchange hidden"></div>
     </div>
