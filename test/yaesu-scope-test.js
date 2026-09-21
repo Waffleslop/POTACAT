@@ -221,8 +221,16 @@ check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
   const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
   assert.ok(serverSrc.includes("this.emit('scope-enable-radio', { guest: !!ws._passSession })"));
   const i = mainSrc.indexOf("remoteServer.on('scope-enable-radio'");
-  const body = mainSrc.slice(i, i + 1200);
-  assert.ok(/if \(guest\)[\s\S]*key: 'guest'[\s\S]*return;[\s\S]*yaesuScopeEnableOnRadio\(\);/.test(body), 'guest branch must refuse with a diag before the real enable');
+  const body = mainSrc.slice(i, i + 1400);
+  assert.ok(/if \(guest\)[\s\S]*YAESU_SCOPE_GUEST_DIAG[\s\S]*return;[\s\S]*yaesuScopeEnableOnRadio\(\);/.test(body), 'guest branch must refuse with the guest diag before the real enable');
+  // ...and the card is a property of the SESSION, not the press: the remote
+  // payload substitutes it whenever the honest card would ask for Enable,
+  // so a QSY re-broadcast cannot un-say it (mobile review, 2026-09-21).
+  const pay = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
+  assert.ok(/yaesuScopeRemoteIsGuest && asksForEnable\) \? YAESU_SCOPE_GUEST_DIAG : s\.diag/.test(pay), 'remote payload must substitute the guest diag for a guest session');
+  assert.ok(serverSrc.includes("this.emit('scope-subscribe', { on: !!msg.on, guest: !!ws._passSession })"), 'subscribe must carry the guest flag');
+  const d = mainSrc.indexOf("remoteServer.on('client-disconnected'");
+  assert.ok(mainSrc.slice(d, d + 1000).includes('yaesuScopeRemoteIsGuest = false'), 'guest flag must clear on disconnect');
 });
 
 check('4. the synthetic signal advertises nativeScope on any rig and re-broadcasts rig state', () => {

@@ -15255,6 +15255,7 @@ function connectRemote() {
       yaesuScopeRemoteWants = false;
       if (!yaesuScopeWanted()) { try { stopYaesuScope('ECHOCAT client disconnected'); } catch { /* not running */ } }
     }
+    yaesuScopeRemoteIsGuest = false;
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
       // Phone gone — clear any mirrored "phone is scanning" state so the
@@ -16901,8 +16902,9 @@ function connectRemote() {
   });
 
   // Band scope: the helper runs while the client's Scope view is on screen.
-  remoteServer.on('scope-subscribe', ({ on }) => {
+  remoteServer.on('scope-subscribe', ({ on, guest }) => {
     yaesuScopeRemoteWants = !!on;
+    yaesuScopeRemoteIsGuest = !!on && !!guest;
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
   });
@@ -16910,14 +16912,13 @@ function connectRemote() {
     if (guest) {
       // A Guest Pass may look; the host's radio menu is not a guest's to
       // change. The refusal is told in the guest's own diag card.
+      // Backstop only — the session-level flag already puts the guest card in
+      // every broadcast; an older client that still shows the button gets it
+      // re-said here.
       sendCatLog('[Scope] a Guest Pass client asked to turn SCU-LAN10 on — refused (the host\'s radio settings are not a guest\'s to change)');
+      yaesuScopeRemoteIsGuest = true;
       if (remoteServer && remoteServer.running && typeof remoteServer.broadcastScopeState === 'function') {
-        remoteServer.broadcastScopeState(yaesuScopeRemotePayload({ diag: {
-          key: 'guest', severity: 'blocker',
-          headline: 'SCU-LAN10 is off, and a Guest Pass cannot change it',
-          detail: 'The scope streams only when SCU-LAN10 is on in the radio menu. Only the host can turn it on.',
-          action: 'Ask the host to enable SCU-LAN10 on the radio (OPERATION SETTING > GENERAL > 26).',
-        } }));
+        remoteServer.broadcastScopeState(yaesuScopeRemotePayload({ diag: YAESU_SCOPE_GUEST_DIAG }));
       }
       return;
     }
@@ -20777,6 +20778,13 @@ let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
 let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
+let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
+const YAESU_SCOPE_GUEST_DIAG = {
+  key: 'guest', severity: 'blocker',
+  headline: 'SCU-LAN10 is off, and a Guest Pass cannot change it',
+  detail: 'The scope streams only when SCU-LAN10 is on in the radio menu. Only the host can turn it on.',
+  action: 'Ask the host to enable SCU-LAN10 on the radio (OPERATION SETTING > GENERAL > 26).',
+};
 let yaesuScopeLastRemoteFrame = 0;
 let yaesuScopeLastStateSend = 0;
 const yaesuScopeState = {
@@ -20832,9 +20840,14 @@ function yaesuScopeStatePayload() {
  */
 function yaesuScopeRemotePayload(extra) {
   const s = yaesuScopeState;
+  // A guest sees the guest card wherever the honest card would have asked for
+  // the Enable press — a property of the session, so it is there from the
+  // first frame and survives every re-broadcast (mobile review of item 3).
+  const asksForEnable = s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent'));
+  const diag = (yaesuScopeRemoteIsGuest && asksForEnable) ? YAESU_SCOPE_GUEST_DIAG : s.diag;
   return {
     status: s.status, kind: s.kind, spanHz: s.spanHz, anchor: s.anchor, speed: s.speed,
-    scuLan: s.scuLan, centerHz: s.centerHz, diag: s.diag,
+    scuLan: s.scuLan, centerHz: s.centerHz, diag,
     axis: YaesuScope.scopeAxis({ centerHz: s.centerHz, spanHz: s.spanHz, anchor: s.anchor }),
     available: yaesuScopeSynth || yaesuScopeRigHasScope(),
     fps: settings.yaesuScopeFps || 20,
