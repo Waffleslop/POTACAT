@@ -49,6 +49,21 @@ jobs:
         run: node test/wrl-packet-test.js
       - name: Run raw CAT command suite (rigctld binary escapes)
         run: node test/raw-cat-command-test.js
+      - name: Run FT-710 band-scope suite (frame parser, axis, helper exit codes)
+        run: node test/yaesu-scope-test.js
+      - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser
+        run: |
+          gcc -O2 -Wall -o /tmp/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -ldl -lpthread -lm
+          /tmp/yaesu-scope --synth --once > /tmp/scope-frame.bin
+          node -e "
+            const S = require('./lib/yaesu-scope');
+            const st = new S.YaesuScopeStream();
+            let n = 0;
+            st.on('frame', (f) => { n++; if (!f.aligned || f.kind !== 1) { console.error('bad frame', f.aligned, f.kind); process.exit(1); } });
+            st.feed(require('fs').readFileSync('/tmp/scope-frame.bin'));
+            if (n !== 1) { console.error('expected 1 frame, got', n); process.exit(1); }
+            console.log('helper → parser round trip OK');
+          "
       - name: Run rig-family suite
         run: node test/rig-family-test.js
       - name: Run DX cluster login suite

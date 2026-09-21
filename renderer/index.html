@@ -181,6 +181,9 @@
             <button class="view-menu-item" id="view-js8call-btn">JS8</button>
             <button class="view-menu-item hidden" id="view-mercury-btn">Mercury HF Data</button>
             <button class="view-menu-item" id="view-sstv-btn">SSTV</button>
+            <!-- Shown only for a rig whose capabilities declare nativeScope
+                 (the FT-710's scope over USB) — see rigApplyCapabilities. -->
+            <button class="view-menu-item hidden" id="view-scope-btn" title="The radio's own band scope, read over its USB cable">Band Scope &#x2197;</button>
             <button class="view-menu-item" id="view-bandspread-btn">Bandspread</button>
             <button class="view-menu-item" id="view-rbn-btn">Propagation</button>
             <button class="view-menu-item" id="view-contests-btn">Contests</button>

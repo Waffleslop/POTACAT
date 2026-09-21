@@ -790,6 +790,156 @@
   // SSTV DOM refs
   var echoSettings = null; // full settings object — used for SSTV templates
   const sstvView = document.getElementById('sstv-view');
+
+  // ─── Band scope (the radio's own spectrum — FT-710 over USB) ─────────────
+  // Mirrors the FT8 strip: subscribe while the view is on screen, the shack
+  // streams peak-held bins at ~10 fps, Canvas-2D scroll. Axis maths is the
+  // inlined lib/scope-axis.js — the same code the desktop uses, so a tap
+  // lands where the label says. Shown only when the shack advertises
+  // 'scope' AND the active rig declares nativeScope.
+  const scopeView = document.getElementById('scope-view');
+  const scopeTabBtn = document.getElementById('scope-tab-btn');
+  const scopeTrace = document.getElementById('scope-phone-trace');
+  const scopeWf = document.getElementById('scope-phone-wf');
+  let scopeServerOk = false;
+  let scopeState = null;
+  let scopeLatest = null;
+
+  function scopeAvailable() {
+    return !!(scopeServerOk && window.ScopeAxis && rigCapabilities && rigCapabilities.nativeScope);
+  }
+  function scopeUpdateTabVisibility() {
+    if (!scopeTabBtn) return;
+    const show = scopeAvailable();
+    scopeTabBtn.classList.toggle('hidden', !show);
+    if (!show && activeTab === 'scope') switchTab('spots');
+  }
+  function scopeSubscribe(on) {
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scope-subscribe', on: !!on })); } catch { /* not connected */ }
+  }
+  function scopeAxisNow() {
+    const A = window.ScopeAxis;
+    const st = scopeState || {};
+    const centerHz = Math.round((currentFreqKhz || 0) * 1000) || (st.centerHz || 0);
+    return A.scopeAxis({ centerHz, spanHz: st.spanHz || 0, anchor: st.anchor || 'center', bins: scopeLatest ? scopeLatest.length : 256 });
+  }
+  function scopeSizeCanvases() {
+    for (const c of [scopeTrace, scopeWf]) {
+      if (!c) continue;
+      const w = Math.max(160, Math.floor(c.clientWidth || 320));
+      const h = Math.max(40, Math.floor(c.clientHeight || c.height));
+      if (c.width !== w) c.width = w;
+      if (c.height !== h) c.height = h;
+    }
+  }
+  function scopeApplyState(st) {
+    scopeState = st || null;
+    const A = window.ScopeAxis;
+    const status = (st && st.status) || 'stopped';
+    const statusEl = document.getElementById('scope-phone-status');
+    if (statusEl) {
+      statusEl.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[status] || status;
+      statusEl.style.color = status === 'live' ? '#4ecca3' : (status === 'blocked' || status === 'error') ? '#e94560' : 'var(--text-dim)';
+    }
+    const synthEl = document.getElementById('scope-phone-synth');
+    if (synthEl) synthEl.classList.toggle('hidden', !(st && st.kind === 1));
+    const spanEl = document.getElementById('scope-phone-span');
+    if (spanEl) spanEl.textContent = st && st.spanHz && A ? A.formatSpan(st.spanHz) : '';
+    const modeEl = document.getElementById('scope-phone-mode');
+    if (modeEl) modeEl.textContent = st && st.anchor ? st.anchor.toUpperCase() + (st.anchor !== 'center' ? ' (axis assumed)' : '') : '';
+    const needEnable = !!(st && st.kind !== 1 && (st.scuLan === '0' || (st.diag && st.diag.key === 'silent')));
+    const enableEl = document.getElementById('scope-phone-enable');
+    if (enableEl) enableEl.classList.toggle('hidden', !needEnable);
+    const diag = document.getElementById('scope-phone-diag');
+    if (diag) {
+      if (st && st.diag && status !== 'live') {
+        diag.textContent = '';
+        const h = document.createElement('div'); h.style.fontWeight = '700'; h.textContent = st.diag.headline || '';
+        const d = document.createElement('div'); d.style.color = 'var(--text-dim)'; d.textContent = [st.diag.detail, st.diag.action].filter(Boolean).join(' ');
+        diag.appendChild(h); diag.appendChild(d);
+        diag.classList.remove('hidden');
+      } else {
+        diag.classList.add('hidden');
+      }
+    }
+    scopeDrawAll();
+  }
+  function scopeRenderFrame(bins) {
+    if (!bins || !bins.length) return;
+    scopeLatest = bins;
+    if (activeTab !== 'scope' || !scopeWf) return;
+    const ctx = scopeWf.getContext('2d');
+    const w = scopeWf.width, h = scopeWf.height;
+    if (w > 1 && h > 1) {
+      // Shift the picture down one row, paint the newest on top.
+      const img = ctx.getImageData(0, 0, w, h - 1);
+      ctx.putImageData(img, 0, 1);
+      const row = ctx.createImageData(w, 1);
+      const step = bins.length / w;
+      for (let x = 0; x < w; x++) {
+        const v = bins[Math.min(bins.length - 1, Math.floor(x * step))] || 0;
+        // Same colour ramp as the FT8 strip.
+        const r = v > 170 ? 255 : v > 85 ? (v - 85) * 3 : 0;
+        const g = v > 170 ? 255 - (v - 170) * 3 : v > 85 ? 255 : v * 3;
+        const b = v > 85 ? 0 : 255 - v * 3;
+        row.data[x * 4] = r; row.data[x * 4 + 1] = g; row.data[x * 4 + 2] = b; row.data[x * 4 + 3] = 255;
+      }
+      ctx.putImageData(row, 0, 0);
+    }
+    scopeDrawAll();
+  }
+  function scopeDrawAll() {
+    const A = window.ScopeAxis;
+    if (!A || !scopeTrace) return;
+    const axis = scopeAxisNow();
+    const centerHz = Math.round((currentFreqKhz || 0) * 1000);
+    const lo = document.getElementById('scope-phone-ax-lo');
+    const c = document.getElementById('scope-phone-ax-c');
+    const hi = document.getElementById('scope-phone-ax-hi');
+    if (lo) lo.textContent = axis.hzPerBin ? A.formatHz(axis.startHz) : '—';
+    if (c) c.textContent = centerHz ? A.formatHz(centerHz) : '—';
+    if (hi) hi.textContent = axis.hzPerBin ? A.formatHz(axis.endHz) : '—';
+    const ctx = scopeTrace.getContext('2d');
+    const w = scopeTrace.width, h = scopeTrace.height;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 10; i++) { const x = Math.round(i * w / 10) + 0.5; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    const bins = scopeLatest;
+    if (bins && bins.length > 1) {
+      ctx.strokeStyle = '#4fc3f7';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let i = 0; i < bins.length; i++) {
+        const x = i * (w - 1) / (bins.length - 1);
+        const y = h - 2 - (bins[i] / 255) * (h - 4);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    const rxBin = centerHz && axis.hzPerBin ? A.hzToBin(axis, centerHz) : null;
+    if (rxBin != null) {
+      const x = Math.round(rxBin * (w - 1) / (axis.bins - 1)) + 0.5;
+      ctx.strokeStyle = '#e94560';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+  }
+  function scopeTuneAt(clientX, el) {
+    const axis = scopeAxisNow();
+    if (!axis.known) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const hz = window.ScopeAxis.binToHz(axis, frac * (axis.bins - 1));
+    sendToServer({ type: 'tune', freqKhz: (hz / 1000).toFixed(3), mode: '' });
+  }
+  if (scopeTrace) scopeTrace.addEventListener('click', (e) => scopeTuneAt(e.clientX, scopeTrace));
+  if (scopeWf) scopeWf.addEventListener('click', (e) => scopeTuneAt(e.clientX, scopeWf));
+  const scopeEnableBtn = document.getElementById('scope-phone-enable');
+  if (scopeEnableBtn) scopeEnableBtn.addEventListener('click', () => sendToServer({ type: 'scope-enable-radio' }));
+  window.addEventListener('resize', () => { if (activeTab === 'scope') { scopeSizeCanvases(); scopeDrawAll(); } });
   const sstvCameraPreview = document.getElementById('sstv-camera-preview');
   const sstvPhoneCompose = document.getElementById('sstv-phone-compose');
   const sstvPhoneComposeCtx = sstvPhoneCompose ? sstvPhoneCompose.getContext('2d') : null;
@@ -1208,6 +1358,9 @@
           ws._serverProtocolVersion = msg.protocolVersion | 0;
           ws._serverVersion = String(msg.serverVersion || '');
           ws._serverCapabilities = Array.isArray(msg.capabilities) ? msg.capabilities : [];
+          scopeServerOk = ws._serverCapabilities.indexOf('scope') !== -1;
+          scopeUpdateTabVisibility();
+          if (activeTab === 'scope') scopeSubscribe(true);
         } catch {}
         break;
       case 'auth-mode':
@@ -2096,6 +2249,13 @@
         ft8RenderWaterfall(msg.bins);
         break;
 
+      case 'scope-frame':
+        scopeRenderFrame(msg.bins);
+        break;
+      case 'scope-state':
+        scopeApplyState(msg);
+        break;
+
       case 'jtcat-auto-cq-state':
         if (ft8AutoCqSelect) {
           // "Event" (Hunt: Event stations) is offered only while the shack
@@ -2306,6 +2466,7 @@
       soFilterRow.classList.toggle('hidden', !s.capabilities.filter);
       rcNbGroup.classList.toggle('hidden', !s.capabilities.nb);
       rcAtuGroup.classList.toggle('hidden', !s.capabilities.atu);
+      scopeUpdateTabVisibility();
       soRfGainRow.classList.toggle('hidden', !s.capabilities.rfgain);
       // FM squelch — mode-gated like the desktop: shown in FM (any band) or
       // while engaged. When mode is momentarily unknown (suppressed during a
@@ -5873,6 +6034,10 @@
         else if (tab === 'ft8' && activeTab !== 'ft8') ft8WfSubscribe(true);
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
+    try {
+      if (activeTab === 'scope' && tab !== 'scope') scopeSubscribe(false);
+      else if (tab === 'scope' && activeTab !== 'scope') scopeSubscribe(true);
+    } catch { /* pre-init */ }
     activeTab = tab;
     tabBar.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     // Hide all content areas
@@ -5885,15 +6050,16 @@
     ft8View.classList.add('hidden');
     if (dirView) dirView.classList.add('hidden');
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
+    if (scopeView) { scopeView.classList.add('hidden'); scopeView.style.display = 'none'; }
     // Popout trigger: visible only on the Map tab, and only in non-popout windows
     if (mapPopoutBtn) mapPopoutBtn.classList.toggle('hidden', isPopout || tab !== 'map');
     if (scanning) stopScan();
     // Show/hide PTT button — hide when FT8/SSTV tab is active
-    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv') ? 'none' : '';
+    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope') ? 'none' : '';
     // Hide entire bottom bar on FT8/SSTV tab
-    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv') ? 'none' : '';
+    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope') ? 'none' : '';
     // Hide Scan button and freq step arrows on FT8/SSTV tab
-    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv') ? 'none' : '';
+    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope') ? 'none' : '';
     var freqStepBtns = document.getElementById('freq-step-btns');
     if (freqStepBtns) freqStepBtns.style.display = tab === 'ft8' ? 'none' : '';
     // Hide CW/SSB panels on tabs where they're not relevant
@@ -5960,6 +6126,10 @@
     } else if (tab === 'dir') {
       if (dirView) dirView.classList.remove('hidden');
       renderDirectoryTab();
+    } else if (tab === 'scope') {
+      if (scopeView) { scopeView.classList.remove('hidden'); scopeView.style.display = 'flex'; }
+      scopeSizeCanvases();
+      scopeDrawAll();
     } else if (tab === 'sstv') {
       if (sstvView) { sstvView.classList.remove('hidden'); sstvView.style.display = 'flex'; }
       // Open SSTV on desktop + fetch recent decodes

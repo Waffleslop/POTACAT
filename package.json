@@ -175,6 +175,13 @@
         ]
       },
       {
+        "from": "assets/yaesu-scope",
+        "to": "bin",
+        "filter": [
+          "yaesu-scope*"
+        ]
+      },
+      {
         "from": "scripts/launcher.js",
         "to": "scripts/launcher.js"
       }

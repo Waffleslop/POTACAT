@@ -399,6 +399,9 @@ contextBridge.exposeInMainWorld('api', {
   // SSTV pop-out
   sstvPopoutOpen: () => ipcRenderer.send('sstv-popout-open'),
   sstvPopoutTheme: (theme) => ipcRenderer.send('sstv-popout-theme', theme),
+  // Band Scope pop-out (the radio's own spectrum — FT-710 over USB)
+  scopePopoutOpen: () => ipcRenderer.send('scope-popout-open'),
+  scopePopoutTheme: (theme) => ipcRenderer.send('scope-popout-theme', theme),
   // Bandspread pop-out
   bandspreadPopoutOpen: () => ipcRenderer.send('bandspread-popout-open'),
   bandspreadPopoutClose: () => ipcRenderer.send('bandspread-popout-close'),

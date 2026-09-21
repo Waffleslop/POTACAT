@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="popout-theme-boot.js"></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>POTACAT — Band Scope</title>
+  <script src="popout-theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; }
+    body { display: flex; flex-direction: column; }
+
+    .sc-titlebar { display: flex; align-items: center; padding: 0 8px; height: 32px; background: var(--bg-header); border-bottom: 1px solid var(--border-primary); -webkit-app-region: drag; flex-shrink: 0; user-select: none; }
+    .sc-titlebar-title { font-size: 12px; font-weight: 700; color: var(--text-primary); flex: 1; }
+    .sc-titlebar-btn { -webkit-app-region: no-drag; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 8px; line-height: 1; }
+    .sc-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
+    .sc-titlebar-btn.close:hover { background: #e94560; color: #fff; }
+    body.platform-darwin .sc-titlebar { padding-left: 76px; }
+    body.platform-darwin .sc-titlebar-btn { display: none; }
+
+    .sc-toolbar { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; flex-wrap: wrap; }
+    .sc-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 10px; font-weight: 700; font-size: 11px; letter-spacing: .3px; background: var(--bg-input); color: var(--text-secondary); border: 1px solid var(--border-primary); }
+    .sc-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #888; }
+    .sc-pill.live::before { background: #4ecca3; box-shadow: 0 0 6px #4ecca3; }
+    .sc-pill.starting::before { background: #f0a500; }
+    .sc-pill.blocked::before, .sc-pill.error::before { background: #e94560; }
+    .sc-badge { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; background: #f0a500; color: #1a1a2e; }
+    .sc-meta { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text-primary); }
+    .sc-meta .dim { color: var(--text-secondary); }
+    .sc-sep { width: 1px; height: 16px; background: var(--border-primary); }
+    .sc-spacer { flex: 1; }
+    .sc-btn { background: var(--bg-input); border: 1px solid var(--border-primary); color: var(--text-primary); border-radius: 4px; padding: 3px 9px; cursor: pointer; font-size: 11px; }
+    .sc-btn:hover { background: var(--bg-hover); }
+    .sc-btn.accent { background: #e94560; border-color: #e94560; color: #fff; font-weight: 700; }
+    .sc-btn.toggle.on { border-color: #4fc3f7; color: #4fc3f7; }
+    label.sc-check { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+
+    .sc-diag { display: none; padding: 8px 12px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); }
+    .sc-diag.show { display: block; }
+    .sc-diag.blocker, .sc-diag.error { border-left: 4px solid #e94560; }
+    .sc-diag.info { border-left: 4px solid #4fc3f7; }
+    .sc-diag h3 { margin: 0 0 3px; font-size: 13px; }
+    .sc-diag p { margin: 2px 0; color: var(--text-secondary); }
+    .sc-diag .sc-actions { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .sc-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #000; position: relative; }
+    #sc-trace { width: 100%; height: 140px; display: block; flex-shrink: 0; cursor: crosshair; }
+    #sc-spots { width: 100%; height: 22px; display: block; flex-shrink: 0; background: #06060e; cursor: pointer; }
+    #sc-wf { width: 100%; flex: 1; min-height: 80px; display: block; cursor: crosshair; }
+    .sc-axis { display: flex; justify-content: space-between; padding: 2px 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
+    .sc-axis .c { color: #e94560; font-weight: 700; }
+    .sc-unsupported { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--bg-primary); }
+
+    .sc-gear { position: relative; }
+    .sc-pop { display: none; position: absolute; right: 0; top: 26px; z-index: 5; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px; padding: 8px 10px; min-width: 220px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+    .sc-pop.show { display: block; }
+    .sc-pop .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+    .sc-pop select { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 2px 4px; font-size: 11px; }
+    .sc-pop .hint { color: var(--text-secondary); font-size: 10px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="sc-titlebar">
+    <span class="sc-titlebar-title">POTACAT — Band Scope</span>
+    <button class="sc-titlebar-btn" id="min-btn" title="Minimize">&#x2013;</button>
+    <button class="sc-titlebar-btn" id="max-btn" title="Maximize">&#x25A1;</button>
+    <button class="sc-titlebar-btn close" id="close-btn" title="Close">&#x2715;</button>
+  </div>
+
+  <div class="sc-toolbar">
+    <span class="sc-pill" id="sc-status">Stopped</span>
+    <span class="sc-badge" id="sc-synth-badge" style="display:none" title="Generated signal from the helper's --synth mode; no radio involved">SYNTHETIC</span>
+    <span class="sc-sep"></span>
+    <span class="sc-meta"><span class="dim">Span</span> <span id="sc-span">—</span></span>
+    <span class="sc-meta"><span class="dim">Mode</span> <span id="sc-mode">—</span></span>
+    <span class="sc-meta"><span class="dim">Sweep</span> <span id="sc-speed">—</span></span>
+    <span class="sc-meta"><span class="dim">SCU-LAN10</span> <span id="sc-sculan">—</span></span>
+    <span class="sc-spacer"></span>
+    <button class="sc-btn accent" id="sc-enable" style="display:none" title="Sends EX0301261; to the radio. POTACAT turns it back off when the scope closes.">Enable SCU-LAN10 on the radio</button>
+    <button class="sc-btn toggle on" id="sc-spots-toggle" title="Overlay POTA / SOTA / cluster spots that fall inside the scope">Spots</button>
+    <button class="sc-btn" id="sc-retry" title="Stop and restart the scope helper">Retry</button>
+    <div class="sc-gear">
+      <button class="sc-btn" id="sc-gear-btn" title="Display settings">&#x2699;</button>
+      <div class="sc-pop" id="sc-gear-pop">
+        <div class="row"><span>Colour map</span><select id="sc-colormap"><option value="turbo">Turbo</option><option value="classic">Classic</option></select></div>
+        <div class="row"><span>Frames per second</span><select id="sc-fps"><option value="10">10</option><option value="20">20</option><option value="30">30</option></select></div>
+        <div class="row"><label class="sc-check"><input type="checkbox" id="sc-peak"> Peak hold on the trace</label></div>
+        <div class="row"><label class="sc-check"><input type="checkbox" id="sc-synth"> Synthetic signal (no radio)</label></div>
+        <div class="hint">The synthetic signal exercises the whole path without an FT-710: a wandering carrier, a breathing SSB signal and a keying CW station.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sc-diag" id="sc-diag">
+    <h3 id="sc-diag-head"></h3>
+    <p id="sc-diag-detail"></p>
+    <p id="sc-diag-action"></p>
+    <div class="sc-actions">
+      <button class="sc-btn accent" id="sc-diag-enable" style="display:none">Enable SCU-LAN10 on the radio</button>
+      <button class="sc-btn" id="sc-diag-retry">Retry</button>
+    </div>
+  </div>
+
+  <div class="sc-stage">
+    <canvas id="sc-trace"></canvas>
+    <canvas id="sc-spots"></canvas>
+    <canvas id="sc-wf"></canvas>
+    <div class="sc-unsupported" id="sc-unsupported">WebGL2 is not available in this window — the waterfall cannot be drawn.</div>
+  </div>
+  <div class="sc-axis"><span id="sc-ax-lo">—</span><span class="c" id="sc-ax-c">—</span><span id="sc-ax-hi">—</span></div>
+
+  <script src="../lib/scope-axis.js"></script>
+  <script src="waterfall.js"></script>
+  <script src="scope-popout.js"></script>
+</body>
+</html>

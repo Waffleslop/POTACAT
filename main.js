@@ -340,6 +340,7 @@ const { buildPersistentKeyerScript } = require('./lib/cw-keyer-script');
 const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sync');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { buildWrlContactInfo } = require('./lib/wrl-packet');
+const YaesuScope = require('./lib/yaesu-scope');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
@@ -554,6 +555,8 @@ const GLOBAL_KEYS = new Set([
   'rigs',              // rig hardware definitions
   'activeRigId',       // last-selected rig (global default)
   'firstRun',          // first-time-launch flag
+  'yaesuScopeFps',     // band-scope helper frame rate — a display/machine property
+  'yaesuScopeHelperPath', // explicit yaesu-scope binary on THIS machine
   'piAccess',          // easter egg unlock (legacy — now-public features)
   'ultracat',          // ULTRACAT mode unlock (CTRL+SHIFT+click π — The Net)
   'lightMode',         // theme — light vs dark master switch
@@ -1117,6 +1120,7 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
+let scopePopoutWin = null;   // pop-out Band Scope window (the FT-710's own spectrum over USB)
 let bandspreadPopoutWin = null; // pop-out bandspread window
 let logPopoutWin = null;     // pop-out Log QSO window (W9TEF "ragchew logger" feature)
 let lastMergedSpots = [];        // most recent dedupe'd spot list, cached so the
@@ -2543,6 +2547,8 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('cat-frequency', hz);
+  yaesuScopeNoteFrequency(hz); // the scope's axis is centred on the dial
   if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-frequency', hz);
   // JS8 window: the dial readout + band picker follow the rig live. The
   // window shipped blind in v1.10.0 ("doesn't show the band I'm on" —
@@ -16878,6 +16884,14 @@ function connectRemote() {
     else stopInProcessSpectrum();
   });
 
+  // Band scope: the helper runs while the client's Scope view is on screen.
+  remoteServer.on('scope-subscribe', ({ on }) => {
+    yaesuScopeRemoteWants = !!on;
+    if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
+    else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
+  });
+  remoteServer.on('scope-enable-radio', () => yaesuScopeEnableOnRadio());
+
   remoteServer.on('jtcat-call-cq', async ({ modifier } = {}) => {
     if (!ft8Engine) return;
     const myCall = remoteJtcatMyCall();
@@ -19936,6 +19950,11 @@ function sendMergedSpots() {
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
     bandspreadPopoutWin.webContents.send('spots', spotsForPanadapter(merged));
   }
+  // Band Scope pop-out overlays spots on the radio's own spectrum — same
+  // panadapter-source filter as bandspread, for the same reason.
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
+    scopePopoutWin.webContents.send('spots', spotsForPanadapter(merged));
+  }
   // Trigger QRZ lookups for new callsigns (async, non-blocking)
   if (qrz.configured && settings.enableQrz) {
     const callsigns = [...new Set(merged.map(s => s.callsign))];
@@ -20705,6 +20724,276 @@ function createWsjtxUdpBridge(label) {
       });
     },
   };
+}
+
+// ═══ Yaesu FT-710 band scope over USB ══════════════════════════════════════════
+// The radio's own spectrum, read from its FT4222 USB→SPI bridge by a helper
+// process (helpers/yaesu-scope, supervised here the way rigctld and Mercury
+// are) and decoded by lib/yaesu-scope.js. It runs only while somebody is
+// looking — the Band Scope pop-out, or an ECHOCAT client with its Scope view
+// open — and it puts the radio back the way it found it. The one thing it
+// may change on the radio is the SCU-LAN10 menu item, and only when the
+// operator presses the button for it. Plan: docs/waterfall-plan.md, Phase 5.
+let yaesuScopeProc = null;
+let yaesuScopeStream = null;
+let yaesuScopeStderr = '';
+let yaesuScopeRestartTimer = null;
+let yaesuScopeRestarts = 0;
+let yaesuScopeCatTimer = null;
+let yaesuScopeCatBusy = false;
+let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns it back off
+let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
+let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
+let yaesuScopeLastRemoteFrame = 0;
+let yaesuScopeLastStateSend = 0;
+const yaesuScopeState = {
+  status: 'stopped',   // stopped | starting | live | blocked | error | unavailable
+  kind: 0,             // 0 = live bridge, 1 = synthetic
+  spanCode: null, spanHz: 0, anchor: 'center', modeCode: null, speed: null,
+  scuLan: null,        // '0' | '1' | null while unread
+  centerHz: 0, frames: 0, misaligned: 0,
+  diag: null,          // { key, severity, headline, detail, action } — what to tell the operator
+  helperPath: '',
+};
+
+function yaesuScopeRigHasScope() {
+  try {
+    const caps = getRigCapabilities(detectRigType());
+    return !!(caps && caps.nativeScope === 'yaesu-ft4222');
+  } catch { return false; }
+}
+
+function yaesuScopeWanted() {
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) return true;
+  return !!(yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient());
+}
+
+function findYaesuScopeHelper() {
+  const cands = YaesuScope.helperPathCandidates({
+    settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
+  });
+  for (const p of cands) {
+    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* next candidate */ }
+  }
+  return null;
+}
+
+function yaesuScopeStatePayload() {
+  return {
+    ...yaesuScopeState,
+    axis: YaesuScope.scopeAxis({ centerHz: yaesuScopeState.centerHz, spanHz: yaesuScopeState.spanHz, anchor: yaesuScopeState.anchor }),
+    fps: settings.yaesuScopeFps || 20,
+    synth: yaesuScopeSynth,
+  };
+}
+
+function yaesuScopeBroadcastState() {
+  const payload = yaesuScopeStatePayload();
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-state', payload);
+  if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && typeof remoteServer.broadcastScopeState === 'function') {
+    remoteServer.broadcastScopeState(payload);
+  }
+  yaesuScopeLastStateSend = Date.now();
+}
+
+function yaesuScopeSetStatus(status, diag) {
+  yaesuScopeState.status = status;
+  yaesuScopeState.diag = diag || null;
+  yaesuScopeBroadcastState();
+}
+
+/** Called from sendCatFrequency — the single frequency sink — so every QSY path centres the axis. */
+function yaesuScopeNoteFrequency(hz) {
+  if (!(hz > 0)) return;
+  yaesuScopeState.centerHz = hz;
+  if (yaesuScopeState.status === 'stopped') return;
+  // The pop-out already receives cat-frequency; ECHOCAT wants the axis re-sent, throttled.
+  if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
+}
+
+function startYaesuScope() {
+  if (yaesuScopeProc) return;
+  if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
+  const synth = yaesuScopeSynth;
+  if (!synth && isRemoteActive()) {
+    yaesuScopeSetStatus('unavailable', { key: 'remote', severity: 'blocker',
+      headline: 'The Band Scope reads the radio on this PC',
+      detail: 'This desktop is controlling a remote shack. Open the scope on the shack PC, or in ECHOCAT.' });
+    return;
+  }
+  if (!synth && !yaesuScopeRigHasScope()) {
+    yaesuScopeSetStatus('unavailable', { key: 'no-rig', severity: 'blocker',
+      headline: 'The active rig has no USB band scope',
+      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable. Pick the FT-710 in Settings > My Rigs, or try the synthetic signal from the gear menu.' });
+    return;
+  }
+  const helperPath = findYaesuScopeHelper();
+  if (!helperPath) {
+    sendCatLog('[Scope] helper binary not found — see helpers/yaesu-scope/BUILD.md');
+    yaesuScopeSetStatus('error', { key: 'no-helper', severity: 'error',
+      headline: 'The scope helper is not in this build',
+      detail: 'yaesu-scope is missing from resources/bin. In a dev checkout, build it: helpers/yaesu-scope/BUILD.md.' });
+    return;
+  }
+  const args = YaesuScope.helperArgs({ fps: settings.yaesuScopeFps || 20, synth });
+  sendCatLog('[Scope] spawn: ' + [helperPath, ...args].map((a) => (/\s/.test(a) ? '"' + a + '"' : a)).join(' '));
+  let proc;
+  try {
+    proc = spawn(helperPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (err) {
+    yaesuScopeSetStatus('error', { key: 'spawn', severity: 'error', headline: 'Could not start the scope helper', detail: err.message });
+    return;
+  }
+  yaesuScopeProc = proc;
+  yaesuScopeStderr = '';
+  yaesuScopeState.helperPath = helperPath;
+  yaesuScopeState.kind = synth ? 1 : 0;
+  yaesuScopeState.frames = 0;
+  yaesuScopeState.misaligned = 0;
+  const stream = new YaesuScope.YaesuScopeStream();
+  yaesuScopeStream = stream;
+  stream.on('frame', (f) => { if (yaesuScopeProc === proc) yaesuScopeOnFrame(f); });
+  proc.stdout.on('data', (chunk) => stream.feed(chunk));
+  proc.stderr.on('data', (chunk) => {
+    const text = chunk.toString();
+    yaesuScopeStderr = (yaesuScopeStderr + text).slice(-4096);
+    for (const line of text.split('\n').filter(Boolean)) sendCatLog('[Scope] ' + line);
+  });
+  proc.on('error', (err) => {
+    if (yaesuScopeProc === proc) { yaesuScopeProc = null; yaesuScopeStream = null; }
+    yaesuScopeSetStatus('error', { key: 'spawn', severity: 'error', headline: 'Could not start the scope helper', detail: err.message });
+  });
+  proc.on('exit', (code, signal) => {
+    if (yaesuScopeProc !== proc) return; // superseded — a later start owns the state now
+    yaesuScopeProc = null;
+    yaesuScopeStream = null;
+    yaesuScopeStopCatPolling();
+    const d = YaesuScope.describeHelperExit(code, { signal });
+    if (d.severity === 'info') { yaesuScopeSetStatus('stopped', null); return; }
+    sendCatLog('[Scope] helper exited: ' + d.headline + (d.detail ? ' — ' + d.detail : ''));
+    yaesuScopeSetStatus(d.severity === 'blocker' ? 'blocked' : 'error', d);
+    if (YaesuScope.helperExitIsTransient(code) && yaesuScopeWanted() && yaesuScopeRestarts < 5) {
+      yaesuScopeRestarts++;
+      sendCatLog('[Scope] retrying in 3 s (' + yaesuScopeRestarts + '/5)');
+      yaesuScopeRestartTimer = setTimeout(() => {
+        yaesuScopeRestartTimer = null;
+        if (yaesuScopeWanted()) startYaesuScope();
+      }, 3000);
+    }
+  });
+  yaesuScopeSetStatus('starting', null);
+  yaesuScopeStartCatPolling();
+}
+
+function stopYaesuScope(why) {
+  if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
+  yaesuScopeStopCatPolling();
+  if (yaesuScopeScuLanWeSet) {
+    yaesuScopeScuLanWeSet = false;
+    if (cat && cat.connected && typeof cat.sendRaw === 'function') {
+      cat.sendRaw('EX0301260;');
+      sendCatLog('[Scope] SCU-LAN10 turned back off on the radio (POTACAT had turned it on)' + (why ? ' — ' + why : ''));
+    }
+  }
+  const proc = yaesuScopeProc;
+  if (!proc) {
+    if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
+    return;
+  }
+  yaesuScopeProc = null;
+  yaesuScopeStream = null;
+  try { proc.stdin.end(); } catch { /* already gone */ }          // the helper's clean exit path
+  setTimeout(() => { try { proc.kill(); } catch { /* exited */ } }, 1500);
+  yaesuScopeSetStatus('stopped', null);
+}
+
+function yaesuScopeOnFrame(f) {
+  yaesuScopeState.frames++;
+  if (!f.aligned) { yaesuScopeState.misaligned++; return; }
+  if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
+  if (yaesuScopeState.status !== 'live') {
+    yaesuScopeRestarts = 0;
+    sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : 'live radio') + ')');
+    yaesuScopeSetStatus('live', null);
+  }
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
+    scopePopoutWin.webContents.send('scope-frame', { seq: f.seq, kind: f.kind, bins: f.wf1 });
+  }
+  if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient()) {
+    const now = Date.now();
+    if (now - yaesuScopeLastRemoteFrame >= 100) {   // ~10 fps, peak-held to 256 bins
+      yaesuScopeLastRemoteFrame = now;
+      remoteServer.broadcastScopeFrame({ seq: f.seq, kind: f.kind, bins: Array.from(YaesuScope.downsampleBins(f.wf1, 256)) });
+    }
+  }
+}
+
+function yaesuScopeStartCatPolling() {
+  yaesuScopeStopCatPolling();
+  yaesuScopeReadRadio();
+  yaesuScopeCatTimer = setInterval(yaesuScopeReadRadio, 2000);
+}
+
+function yaesuScopeStopCatPolling() {
+  if (yaesuScopeCatTimer) { clearInterval(yaesuScopeCatTimer); yaesuScopeCatTimer = null; }
+}
+
+/**
+ * What the radio says about its own scope: span (SS05), anchor mode (SS06),
+ * sweep speed (SS00) and the SCU-LAN10 menu item (EX030126). Polled every
+ * 2 s while the scope runs, because a span change on the front panel must
+ * re-scale the axis. All four are READS.
+ */
+async function yaesuScopeReadRadio() {
+  if (yaesuScopeState.kind === 1) {
+    // Synthetic: a believable axis, and nothing asked of the radio.
+    const changed = yaesuScopeState.spanHz !== 10000 || yaesuScopeState.scuLan !== '1';
+    Object.assign(yaesuScopeState, { spanCode: '3', spanHz: 10000, anchor: 'center', modeCode: '4', speed: 'FAST1', scuLan: '1' });
+    if (!yaesuScopeState.centerHz) yaesuScopeState.centerHz = 14074000;
+    if (changed) yaesuScopeBroadcastState();
+    return;
+  }
+  if (!cat || !cat.connected || typeof cat.queryRaw !== 'function' || yaesuScopeCatBusy) return;
+  yaesuScopeCatBusy = true;
+  try {
+    const snapshot = () => JSON.stringify([yaesuScopeState.spanHz, yaesuScopeState.anchor, yaesuScopeState.speed, yaesuScopeState.scuLan]);
+    const before = snapshot();
+    const ask = (cmd) => cat.queryRaw(cmd, { timeoutMs: 1200 }).catch(() => null);
+    const ss05 = YaesuScope.parseSsReply(await ask('SS05;'));
+    if (ss05 && ss05.p2 === 5) { yaesuScopeState.spanCode = ss05.p3; yaesuScopeState.spanHz = YaesuScope.spanHzFromCode(ss05.p3) || 0; }
+    const ss06 = YaesuScope.parseSsReply(await ask('SS06;'));
+    if (ss06 && ss06.p2 === 6) {
+      const m = YaesuScope.modeFromCode(ss06.p3);
+      if (m) { yaesuScopeState.modeCode = m.code; yaesuScopeState.anchor = m.anchor; }
+    }
+    const ss00 = YaesuScope.parseSsReply(await ask('SS00;'));
+    if (ss00 && ss00.p2 === 0) yaesuScopeState.speed = YaesuScope.speedFromCode(ss00.p3);
+    const ex = YaesuScope.parseExReply(await ask('EX030126;'));
+    if (ex && ex.menu === '030126') yaesuScopeState.scuLan = ex.value === '1' ? '1' : '0';
+    if (before !== snapshot()) {
+      sendCatLog('[Scope] radio: span ' + YaesuScope.formatSpan(yaesuScopeState.spanHz) + ', ' + String(yaesuScopeState.anchor).toUpperCase()
+        + ' mode, sweep ' + (yaesuScopeState.speed || '?') + ', SCU-LAN10 '
+        + (yaesuScopeState.scuLan === '1' ? 'ON' : yaesuScopeState.scuLan === '0' ? 'OFF' : 'unread'));
+      yaesuScopeBroadcastState();
+    }
+  } finally {
+    yaesuScopeCatBusy = false;
+  }
+}
+
+/** The operator pressed the button: turn SCU-LAN10 on. Remembered, logged, undone at stop. */
+function yaesuScopeEnableOnRadio() {
+  if (!cat || !cat.connected || typeof cat.sendRaw !== 'function') {
+    sendCatLog('[Scope] cannot enable SCU-LAN10 — no CAT link to the radio');
+    return;
+  }
+  sendCatLog('[Scope] turning SCU-LAN10 ON in the radio menu (EX0301261;) — POTACAT turns it back off when the scope closes');
+  yaesuScopeScuLanWeSet = true;
+  cat.sendRaw('EX0301261;');
+  setTimeout(() => {
+    yaesuScopeReadRadio();
+    if (!yaesuScopeProc && yaesuScopeWanted()) { yaesuScopeRestarts = 0; startYaesuScope(); }
+  }, 700);
 }
 
 const hamrsBridge = createWsjtxUdpBridge('HamRS');
@@ -27582,6 +27871,82 @@ app.whenReady().then(() => {
     });
   };
 
+  // --- Band Scope pop-out (the FT-710's own spectrum over USB) ---
+  let openScopePopout = () => {
+    if (scopePopoutWin && !scopePopoutWin.isDestroyed()) { scopePopoutWin.focus(); return; }
+    const isMac = process.platform === 'darwin';
+    scopePopoutWin = new BrowserWindow({
+      width: 1000,
+      height: 640,
+      title: 'POTACAT — Band Scope',
+      backgroundColor: getThemeWindowBg(),
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-scope-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    const saved = settings.scopePopoutBounds;
+    if (saved && saved.width > 400 && saved.height > 300 && isOnScreen(saved)) {
+      scopePopoutWin.setBounds(clampToWorkArea(saved));
+    }
+    scopePopoutWin.show();
+    scopePopoutWin.setMenuBarVisibility(false);
+    scopePopoutWin.loadFile(path.join(__dirname, 'renderer', 'scope-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
+    scopePopoutWin.on('close', () => {
+      if (scopePopoutWin && !scopePopoutWin.isDestroyed() && !scopePopoutWin.isMaximized() && !scopePopoutWin.isMinimized()) {
+        settings.scopePopoutBounds = scopePopoutWin.getBounds();
+        saveSettings(settings);
+      }
+    });
+    scopePopoutWin.on('closed', () => {
+      scopePopoutWin = null;
+      if (!yaesuScopeWanted()) stopYaesuScope('scope window closed');
+    });
+    scopePopoutWin.webContents.on('did-finish-load', () => {
+      if (!scopePopoutWin || scopePopoutWin.isDestroyed()) return;
+      scopePopoutWin.webContents.send('scope-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
+      try { scopePopoutWin.webContents.send('spots', spotsForPanadapter(lastMergedSpots || [])); } catch { /* no spots yet */ }
+      if (yaesuScopeState.centerHz) scopePopoutWin.webContents.send('cat-frequency', yaesuScopeState.centerHz);
+      yaesuScopeRestarts = 0;
+      startYaesuScope();
+      yaesuScopeBroadcastState();
+    });
+    scopePopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') scopePopoutWin.webContents.toggleDevTools();
+    });
+  };
+
+  ipcMain.on('scope-popout-open', () => openScopePopout());
+  ipcMain.on('scope-popout-theme', (_e, theme) => {
+    if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-popout-theme', theme);
+  });
+  ipcMain.on('scope-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
+  ipcMain.on('scope-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
+  ipcMain.on('scope-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
+  ipcMain.on('scope-enable-on-radio', () => yaesuScopeEnableOnRadio());
+  const yaesuScopeRestartLater = (why) => {
+    stopYaesuScope(why);
+    yaesuScopeRestarts = 0;
+    setTimeout(() => { if (yaesuScopeWanted()) startYaesuScope(); }, 400);
+  };
+  ipcMain.on('scope-restart', () => yaesuScopeRestartLater('restart requested'));
+  ipcMain.on('scope-set-synth', (_e, on) => {
+    yaesuScopeSynth = !!on;
+    sendCatLog('[Scope] synthetic signal ' + (on ? 'ON — no radio involved' : 'OFF'));
+    yaesuScopeRestartLater('signal source changed');
+  });
+  ipcMain.on('scope-set-fps', (_e, fps) => {
+    const v = Math.max(1, Math.min(60, Math.round(Number(fps) || 20)));
+    if (v === (settings.yaesuScopeFps || 20)) return;
+    settings.yaesuScopeFps = v;
+    saveSettings(settings);
+    yaesuScopeRestartLater('frame rate changed');
+  });
+
   ipcMain.on('sstv-popout-open', () => openSstvPopout());
 
   ipcMain.on('sstv-popout-theme', (_e, theme) => {
@@ -34059,6 +34424,9 @@ function gracefulCleanup() {
     if (wsprBeaconArmed() || jtcatWsprBeaconTimer) setWsprBeacon(false, { immediate: true, why: 'stopped at app quit' });
   } catch {}
   try { if (sstvEngine) sstvEngine.stop(); } catch {}
+  // The band-scope helper, and the radio's SCU-LAN10 menu item if POTACAT
+  // turned it on — this must run while the CAT link below is still open.
+  try { stopYaesuScope('app quit'); } catch {}
   // Save QRZ cache to disk
   try {
     const qrzCachePath = path.join(app.getPath('userData'), 'qrz-cache.json');

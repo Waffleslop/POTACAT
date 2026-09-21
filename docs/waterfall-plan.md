@@ -177,7 +177,38 @@ the triplicated Canvas-2D scroll code.
 - KiwiSDR / WebSDR remote waterfall data.
 - Yaesu FT-710 native scope over USB — **now planned, see Phase 5.**
 
-## Phase 5 — Yaesu FT-710 native band scope *(planned 2026-09-20)*
+## Phase 5 — Yaesu FT-710 native band scope *(BUILT 2026-09-20 — awaiting an FT-710 to verify the frame layout)*
+
+**Status.** Everything below is built and exercised end to end on a desk with
+no FT-710: `helpers/yaesu-scope` (compiled, MSVC and gcc), `lib/yaesu-scope.js`
++ `lib/scope-axis.js`, the pop-out, the ECHOCAT leg, packaging in all five
+release jobs, CI. Three refinements over the plan as first written, each
+for a reason worth keeping:
+
+1. **The helper is a dumb pipe with alignment, not a parser.** It opens the
+   bridge, keeps the SPI stream on frame boundaries (wfview's single-byte
+   resync — alignment is a transport concern, since the slave streams
+   continuously), and writes verbatim 4096-byte frames behind an 8-byte
+   header. De-inverting, bins, metadata and the axis all live in JavaScript
+   where they are unit-tested and correctable without a recompile. A capture
+   is `helper > file`; replay is the same bytes into `YaesuScopeStream`.
+2. **No FTDI SDK at build time; nothing of FTDI's in the installer.** The
+   helper declares the dozen prototypes itself and loads LibFT4222/ftd2xx at
+   run time, so a missing driver is exit code 2 with the FTDI URL in the
+   diagnostic, and step 0's redistribution question dissolves.
+3. **The CAT side comes from the manual, not the write-ups.** `EX040101` /
+   `EX040200` are NOT scope commands on the FT-710 — menu 04-01-01 is MY
+   CALL. The scope's span, anchor mode and sweep are the `SS` command
+   (`SS05;` `SS06;` `SS00;`), and the switch that makes the bridge stream is
+   menu 03-01-26, SCU-LAN10 (`EX030126;`). POTACAT reads all four; it sets
+   SCU-LAN10 only when the operator presses the button, and puts it back.
+
+Verified live (synthetic signal, `--synth`): pop-out Blocked→Live, correct
+10 kHz CENTER axis, click-to-tune reaches main's tune sink, ECHOCAT `hello`
+carries `scope`, 256-bin frames at ~10 fps, helper exits on pop-out close.
+**Still unverified: the frame offsets against a real radio** — step 1 below
+needs a tester with an FT-710; the first capture becomes
+`test/fixtures/ft710-scope-*.bin`.
 
 Requested three times in one Discord thread and as GitHub issue #91 the
 same day. This is the first **real RF panadapter for a conventional

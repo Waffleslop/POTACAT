@@ -12106,6 +12106,7 @@ bindClick(document.getElementById('view-psk31-btn'), () => {
 bindClick(document.getElementById('view-mercury-btn'), () => { if (window.api.mercuryPopoutOpen) window.api.mercuryPopoutOpen(); });
 bindClick(document.getElementById('view-js8call-btn'), () => { if (window.api.js8PopoutOpen) window.api.js8PopoutOpen(); });
 bindClick(document.getElementById('view-sstv-btn'), () => window.api.sstvPopoutOpen());
+bindClick(document.getElementById('view-scope-btn'), () => { if (window.api.scopePopoutOpen) window.api.scopePopoutOpen(); });
 bindClick(document.getElementById('view-bandspread-btn'), () => {
   if (window.api.bandspreadPopoutOpen) window.api.bandspreadPopoutOpen();
 });
@@ -14423,6 +14424,7 @@ quickLightMode.addEventListener('change', async () => {
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(p);
   window.api.logPopoutTheme(p);
   if (window.api.pairPopoutTheme) window.api.pairPopoutTheme(p);
+  if (window.api.scopePopoutTheme) window.api.scopePopoutTheme(p);
   if (actmapPopoutOpen) window.api.actmapPopoutTheme(p);
   if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(p);
   if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(p);
@@ -21488,6 +21490,10 @@ function rigApplyCapabilities(caps) {
   rigPopulateAgcOptions(caps);
   rigPopulatePowerChoices(caps);
   rigAtuBtn.style.display = caps.atu ? '' : 'none';
+  // Band Scope lives in the More menu and exists only for a rig that can
+  // stream its own spectrum (FT-710 over USB). Rig-scoped like DAX/Flex.
+  const scopeMenuBtn = document.getElementById('view-scope-btn');
+  if (scopeMenuBtn) scopeMenuBtn.classList.toggle('hidden', !caps.nativeScope);
   // Same gate as the rig popover's button, from the same caps payload — a
   // rig with no tuner (internal or external) gets no dead ATU button.
   if (activatorAtuBtn) activatorAtuBtn.style.display = caps.atu ? '' : 'none';

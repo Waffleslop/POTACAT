@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="remote.css">
   <!-- cq-target-js -->
   <!-- jtcat-parser-js -->
+  <!-- scope-axis-js -->
   <script>if(localStorage.getItem('echocat-theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').content='#e8eaed'}</script>
 </head>
 <body>
@@ -868,6 +869,8 @@
       <button class="tab" data-tab="ft8">FT8</button>
       <button class="tab hidden" data-tab="dir" id="dir-tab-btn">Dir</button>
       <button class="tab" data-tab="sstv">SSTV</button>
+      <!-- Band scope: shown when the shack's rig streams its own spectrum (FT-710 over USB) -->
+      <button class="tab hidden" data-tab="scope" id="scope-tab-btn">Scope</button>
     </div>
 
     <!-- Filter toolbar -->
@@ -1486,6 +1489,23 @@
       </div><!-- end scrollable -->
     </div>
 
+    <!-- Band scope (the radio's own spectrum, FT-710 over USB). Peak-held
+         bins arrive as scope-frame at ~10 fps while this view is on screen;
+         the axis rides scope-state. Drawn Canvas-2D like the FT8 strip. -->
+    <div id="scope-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;flex-wrap:wrap;">
+        <span id="scope-phone-status" style="font-weight:700;color:var(--text-dim)">Stopped</span>
+        <span id="scope-phone-synth" class="hidden" style="padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;background:#f0a500;color:#1a1a2e;">SYNTHETIC</span>
+        <span id="scope-phone-span" style="font-family:monospace;color:var(--text)"></span>
+        <span id="scope-phone-mode" style="color:var(--text-dim)"></span>
+        <span style="flex:1"></span>
+        <button type="button" id="scope-phone-enable" class="hidden" style="padding:3px 8px;font-size:11px;font-weight:700;border:1px solid #e94560;background:#e94560;color:#fff;border-radius:4px;">Enable SCU-LAN10</button>
+      </div>
+      <div id="scope-phone-diag" class="hidden" style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--border);border-left:4px solid #e94560;background:var(--bg-card);"></div>
+      <canvas id="scope-phone-trace" width="320" height="80" style="width:100%;height:80px;display:block;background:#000;"></canvas>
+      <canvas id="scope-phone-wf" width="320" height="240" style="width:100%;flex:1;min-height:120px;display:block;background:#000;image-rendering:pixelated;"></canvas>
+      <div id="scope-phone-axis" style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 8px;color:var(--text-dim);background:var(--bg-header);border-top:1px solid var(--border);flex-shrink:0;"><span id="scope-phone-ax-lo">—</span><span id="scope-phone-ax-c" style="color:#e94560;font-weight:700">—</span><span id="scope-phone-ax-hi">—</span></div>
+    </div>
     <div id="bottom-bar">
       <!-- Initial state: big connect button for new users -->
       <button id="audio-connect-btn" type="button" class="bb-connect-btn">&#x1F50A; Tap to Connect Audio</button>

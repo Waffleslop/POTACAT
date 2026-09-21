@@ -65,3 +65,8 @@ worker/donors/.wrangler/
 scripts/shot-*.mjs
 scripts/psk-macros-entry.js
 ui-test-entry.js
+# FT-710 band-scope helper: compiled per platform by the release workflow into
+# assets/yaesu-scope (mirrors assets/wsprd); local builds land in helpers/.../build
+assets/yaesu-scope/yaesu-scope
+assets/yaesu-scope/yaesu-scope.exe
+helpers/yaesu-scope/build/

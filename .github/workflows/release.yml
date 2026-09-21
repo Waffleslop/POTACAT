@@ -59,6 +59,12 @@ jobs:
         run: |
           gfortran -O3 -o assets/wsprd/wsprd.exe third_party/wsprd/src/*.c third_party/wsprd/src/*.f90 -lfftw3f -lm -static
           test -f assets/wsprd/wsprd.exe
+      - name: Build yaesu-scope (FT-710 band-scope helper; loads FTDI at run time, no SDK)
+        shell: msys2 {0}
+        run: |
+          gcc -O2 -Wall -o assets/yaesu-scope/yaesu-scope.exe helpers/yaesu-scope/yaesu-scope.c -static
+          test -f assets/yaesu-scope/yaesu-scope.exe
+          ./assets/yaesu-scope/yaesu-scope.exe --synth --once | head -c 2 | grep -q YS
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=win
       - name: Build Windows installers
@@ -147,6 +153,11 @@ jobs:
           # 2026-08-31 while fixing that one). assets/wsprd's extraResources
           # filter already ships *.dylib, so the bundled copy rides along.
           node scripts/bundle-mac-deps.js --expect-arch=arm64 assets/wsprd/wsprd
+      - name: Build yaesu-scope (FT-710 band-scope helper; loads FTDI at run time, no SDK)
+        run: |
+          clang -O2 -Wall -arch arm64 -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -lpthread -lm
+          test -f assets/yaesu-scope/yaesu-scope
+          ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
       - name: Build macOS dmg (arm64)
@@ -257,6 +268,11 @@ jobs:
           # 2026-08-31 while fixing that one). assets/wsprd's extraResources
           # filter already ships *.dylib, so the bundled copy rides along.
           node scripts/bundle-mac-deps.js --expect-arch=x86_64 assets/wsprd/wsprd
+      - name: Build yaesu-scope (FT-710 band-scope helper; loads FTDI at run time, no SDK)
+        run: |
+          clang -O2 -Wall -arch x86_64 -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -lpthread -lm
+          test -f assets/yaesu-scope/yaesu-scope
+          file assets/yaesu-scope/yaesu-scope | grep -q x86_64
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=x64
       - name: Build macOS dmg (x64)
@@ -396,6 +412,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libfftw3-dev gfortran
           gfortran -O3 -o assets/wsprd/wsprd third_party/wsprd/src/*.c third_party/wsprd/src/*.f90 -Wl,-Bstatic -lfftw3f -Wl,-Bdynamic -lm -static-libgfortran -static-libgcc
           test -f assets/wsprd/wsprd
+      - name: Build yaesu-scope (FT-710 band-scope helper; loads FTDI at run time, no SDK)
+        run: |
+          gcc -O2 -Wall -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -ldl -lpthread -lm
+          test -f assets/yaesu-scope/yaesu-scope
+          ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=x64
       - name: Build Linux packages
@@ -520,6 +541,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libfftw3-dev gfortran
           gfortran -O3 -o assets/wsprd/wsprd third_party/wsprd/src/*.c third_party/wsprd/src/*.f90 -Wl,-Bstatic -lfftw3f -Wl,-Bdynamic -lm -static-libgfortran -static-libgcc
           test -f assets/wsprd/wsprd
+      - name: Build yaesu-scope (FT-710 band-scope helper; loads FTDI at run time, no SDK)
+        run: |
+          gcc -O2 -Wall -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -ldl -lpthread -lm
+          test -f assets/yaesu-scope/yaesu-scope
+          ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=arm64
       - name: Build Linux packages (arm64)
