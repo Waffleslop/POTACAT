@@ -1,6 +1,8 @@
 # Unified Waterfall — Plan
 
-Status: in progress — Phase 1 started 2026-05-21
+Status: Phase 1 shipped (0054ec8, SSTV uses it). Phase 2 stashed 2026-05-24
+— when revisited it is a stand-alone pop-out, not embedded. Phase 5 (Yaesu
+FT-710 native scope) planned 2026-09-20 — see the end of this file.
 Owner: POTACAT desktop
 
 ## Goal
@@ -173,3 +175,130 @@ the triplicated Canvas-2D scroll code.
 
 - Icom CI-V scope-waveform → real panadapter for IC-7300 / IC-705 / etc.
 - KiwiSDR / WebSDR remote waterfall data.
+- Yaesu FT-710 native scope over USB — **now planned, see Phase 5.**
+
+## Phase 5 — Yaesu FT-710 native band scope *(planned 2026-09-20)*
+
+Requested three times in one Discord thread and as GitHub issue #91 the
+same day. This is the first **real RF panadapter for a conventional
+radio**, and it lands before Phase 3 because the protocol is documented
+to the byte and the operator already owns every part of the path.
+
+### Why it is cheap
+
+The FT-710 has no IF OUT (it is direct sampling), but it puts its own
+band scope on the **USB cable that already carries CAT and audio**,
+through an FTDI **FT4222 USB→SPI bridge** on the main board. The
+SCU-LAN10 LAN box is not required — only its **menu item** enabled.
+wfview (`ft4222handler.cpp`), 710 Console, VLSC's MRRC Modern and
+kd9taw/Nexus all read it. Everything below is from their published
+write-ups; **wfview and Nexus are GPL-3.0 — technique only, never
+paste** (the AetherSDR posture). MRRC Modern's licence is unspecified:
+do not read its source until that is settled.
+
+### Protocol (verify on a real radio before trusting any of it)
+
+| Item | Value |
+|---|---|
+| Device | FTDI descriptor `"FT4222 A"`, SPI master, single I/O |
+| Clock | SYS_CLK_24 ÷ 64 = 375 kHz; CPOL/CPHA idle-high, leading edge; slave select 0x01 |
+| Read | 4096 bytes per transaction, ~30 frames/s from the radio |
+| Frame | 850 bins per receiver — WF1 at 0–849, WF2 at 850–1699; 150 B metadata at 2900–3049; sync tail `FF 01 EE 01` |
+| Encoding | bins are **inverted**: `~b & 0xFF` |
+| Radio menu | SCU-LAN10 enabled (`EX 03-01-26`) |
+| After connect | send `EX040101;` (scope output on) and `EX040200;` (CENTER mode) — without both the bridge stays silent |
+| Driver | FTDI **LibFT4222** (SPI-master API; bundles D2XX). Closed source. Windows + Linux confirmed by wfview; FTDI ships macOS but the FT-710 path is unreported there |
+
+What the 150-byte metadata block carries (span, centre, mode?) is not
+in any write-up read so far. If it names the span, the axis comes from
+the frame; if not, it comes from CAT (`EX0402xx` scope span settings).
+**Find out in step 0 — the placement maths depends on it.**
+
+### Design
+
+**A native helper process, not an N-API addon.** No Node binding to
+LibFT4222 exists (npm `ftdi-d2xx` is D2XX only, no SPI master, three
+years stale), and an addon would put a closed-source FTDI library
+inside the Electron ABI on three platforms — the glibc and macOS-dyld
+lessons argue against it. Instead:
+
+- `helpers/yaesu-scope/` — a small C program linking LibFT4222. Opens
+  `"FT4222 A"`, configures SPI, reads 4096-byte transactions, finds the
+  sync tail, de-inverts, and writes one **850-byte row per frame** to
+  stdout with a 4-byte header (receiver id, sequence, span code, flags).
+  Exit codes name the failure: no FT4222 device, LibFT4222 missing,
+  bridge opened but silent for 3 s. Nothing else — no CAT, no UI.
+- `lib/yaesu-scope.js` — `findYaesuScopeHelper` / `spawnYaesuScope` /
+  frame parser, cloned from the rigctld / Mercury supervision pattern
+  in main.js (find → spawn → restart with backoff → kill in
+  `gracefulCleanup`). Pure parser + placement maths unit-tested.
+- main.js sends `EX040101;` / `EX040200;` through the live CAT link once
+  the helper reports frames flowing, and **restores the radio's
+  previous scope mode on disconnect** — the WSPR power-cap lesson:
+  never leave a setting changed behind the operator's back.
+- **Source adapter** → `Waterfall.pushFrame()` in a stand-alone
+  **pop-out** (the Phase 2 direction), with the spot overlay, RX marker
+  from the live dial, and click-to-tune mapping bin → Hz from the span.
+- **ECHOCAT** from day one: S2C `scope-frame` (850 B, downsampled to
+  ~10 fps ≈ 8 KB/s), hydrated on connect; `renderer/remote.js` draws it
+  with the same `waterfall.js` component; hello capability `scope`.
+  The mobile app consumes it in its own handoff.
+
+### Diagnostics — the part every silent failure in this project argues for
+
+Nexus got this right and it is copied as behaviour: the pop-out and the
+log say **which** piece is missing, in severity order, and never send
+the operator into the radio menu on a build that cannot open the
+bridge:
+
+1. no LibFT4222 → "Install FTDI's LibFT4222" with the download link
+2. no `"FT4222 A"` device → "the FT-710 USB driver is not installed / the radio is not on this USB port"
+3. device opens, no frames → "SCU-LAN10 is off in the radio menu (EX 03-01-26)"
+4. frames but no sync → protocol drift, log the first 64 bytes hex
+
+Each is a `session.log` line and a bug-report field.
+
+### Scope and gating
+
+- Rig-scoped: the pop-out entry and settings appear only for
+  `rigFamily() === 'yaesu'` models that declare `caps.nativeScope`
+  (FT-710 first; the FTDX10 may share the bridge — **unknown**, verify
+  before declaring it).
+- Windows and Linux at launch; macOS ships as unverified until someone
+  reports it.
+- The Icom CI-V `0x27` scope adapter is the same shape and is the
+  natural Phase 6; do not fold it in here.
+
+### Steps
+
+0. Read LibFT4222's redistribution terms; confirm the helper may ship
+   inside the installer (wfview redistributes FTDI drivers, which is
+   the precedent). Decide bundle vs. "install from FTDI" on that.
+1. Helper: build on Windows, open the bridge on a real FT-710, dump raw
+   frames to a file. **Needs a tester with the radio** — Casey has no
+   FT-710. Candidates: the #91 author, the two Discord askers, KB2UXB.
+2. Parser + placement from the dumped frames, unit-tested against the
+   captures (`test/yaesu-scope-test.js`, fixtures under `test/fixtures/`).
+3. Supervision + CAT enable/restore + diagnostics in main.js.
+4. Pop-out on `waterfall.js` with spots and click-to-tune.
+5. ECHOCAT wire + web client.
+6. Linux build of the helper in the release workflow; macOS attempted,
+   shipped as unverified.
+
+### Testing
+
+- Fixtures: at least one raw 4096-byte capture per span setting, with
+  the CAT-reported centre and span recorded alongside.
+- Parser: sync recovery from an arbitrary byte offset; inverted-byte
+  correction; a frame with a corrupt tail is dropped, not drawn.
+- Placement: a known carrier at a known frequency lands on the right
+  bin for every span.
+- Live: the pop-out tracks a VFO turn within one frame; the radio's
+  scope mode is back to what it was after POTACAT disconnects.
+
+### Explicitly not this phase
+
+An **external SDR on an IF OUT** (the Yaesu Web Control model — SDRplay
+/ RTL-SDR via SoapySDR on a 9 MHz IF tap). Different feature, different
+radios (FTDX10/FTDX101 class), heavy native dependencies, and the
+operator must own the SDR. Filed with `docs/rtlsdr-rx-only-plan.md`.
