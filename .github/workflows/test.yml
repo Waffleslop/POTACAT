@@ -49,6 +49,8 @@ jobs:
         run: node test/wrl-packet-test.js
       - name: Run raw CAT command suite (rigctld binary escapes)
         run: node test/raw-cat-command-test.js
+      - name: Run rigctld stderr explainer suite
+        run: node test/rigctld-stderr-test.js
       - name: Run FT-710 band-scope suite (frame parser, axis, helper exit codes)
         run: node test/yaesu-scope-test.js
       - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser

@@ -341,6 +341,7 @@ const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sy
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { buildWrlContactInfo } = require('./lib/wrl-packet');
 const YaesuScope = require('./lib/yaesu-scope');
+const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
@@ -2319,6 +2320,31 @@ function killAndWait(proc, timeoutMs = 2000) {
     try { proc.kill(); } catch { return finish(); }
     setTimeout(finish, timeoutMs); // never hang a settings dialog on this
   });
+}
+
+/**
+ * Wait until a serial path can actually be opened. A killed rigctld is reaped
+ * before Windows' USB-serial driver has let go of the port — Test Connection
+ * spawned its rigctld 150 ms after the live one died and got "already open /
+ * Access denied", reported to the operator as "COM3 No such file or directory"
+ * while his radio link was fine (K5AWJ, FT-710, 2026-09-22). Process exit is
+ * not port release; this waits for the port.
+ */
+async function waitForSerialPortFree(path, timeoutMs = 4000) {
+  if (!path || /^\d+\.\d+\.\d+\.\d+|:\d+$/.test(String(path))) return true; // not a local serial device
+  let SerialPort;
+  try { ({ SerialPort } = require('serialport')); } catch { return true; }
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const ok = await new Promise((resolve) => {
+      let port;
+      try { port = new SerialPort({ path, baudRate: 9600, autoOpen: false }); } catch { return resolve(true); }
+      port.open((err) => { if (err) return resolve(false); port.close(() => resolve(true)); });
+    });
+    if (ok) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 150));
+  }
 }
 
 function spawnRigctld(target, portOverride) {
@@ -20774,6 +20800,7 @@ let yaesuScopeRestartTimer = null;
 let yaesuScopeRestarts = 0;
 let yaesuScopeCatTimer = null;
 let yaesuScopeCatBusy = false;
+let yaesuScopeCatDeadCycles = 0;     // consecutive poll cycles with no reply to any scope read
 let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns it back off
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
 let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
@@ -21003,6 +21030,8 @@ function yaesuScopeOnFrame(f) {
 
 function yaesuScopeStartCatPolling() {
   yaesuScopeStopCatPolling();
+  yaesuScopeCatDeadCycles = 0;
+  yaesuScopeState.catReads = null;
   yaesuScopeReadRadio();
   yaesuScopeCatTimer = setInterval(yaesuScopeReadRadio, 2000);
 }
@@ -21029,9 +21058,10 @@ async function yaesuScopeReadRadio() {
   if (!cat || !cat.connected || typeof cat.queryRaw !== 'function' || yaesuScopeCatBusy) return;
   yaesuScopeCatBusy = true;
   try {
+    let answered = 0;
     const snapshot = () => JSON.stringify([yaesuScopeState.spanHz, yaesuScopeState.anchor, yaesuScopeState.speed, yaesuScopeState.scuLan]);
     const before = snapshot();
-    const ask = (cmd) => cat.queryRaw(cmd, { timeoutMs: 1200 }).catch(() => null);
+    const ask = (cmd) => cat.queryRaw(cmd, { timeoutMs: 1200 }).then((r) => { answered++; return r; }, () => null);
     const ss05 = YaesuScope.parseSsReply(await ask('SS05;'));
     if (ss05 && ss05.p2 === 5) { yaesuScopeState.spanCode = ss05.p3; yaesuScopeState.spanHz = YaesuScope.spanHzFromCode(ss05.p3) || 0; }
     const ss06 = YaesuScope.parseSsReply(await ask('SS06;'));
@@ -21047,6 +21077,17 @@ async function yaesuScopeReadRadio() {
       sendCatLog('[Scope] radio: span ' + YaesuScope.formatSpan(yaesuScopeState.spanHz) + ', ' + String(yaesuScopeState.anchor).toUpperCase()
         + ' mode, sweep ' + (yaesuScopeState.speed || '?') + ', SCU-LAN10 '
         + (yaesuScopeState.scuLan === '1' ? 'ON' : yaesuScopeState.scuLan === '0' ? 'OFF' : 'unread'));
+      yaesuScopeBroadcastState();
+    }
+    // A link that answers none of the four is not going to — K5AWJ's FT-710
+    // via rigctld rejected every `w SS05;` with RPRT -1 in 7 ms, four times a
+    // cycle, every 2 s. Say it once, stop asking; the picture still draws.
+    yaesuScopeCatDeadCycles = answered ? 0 : yaesuScopeCatDeadCycles + 1;
+    if (yaesuScopeCatDeadCycles >= 3) {
+      yaesuScopeStopCatPolling();
+      sendCatLog('[Scope] the CAT link answers none of the scope reads (SS05/SS06/SS00/EX030126) — span, mode and SCU-LAN10 state stay unknown; the picture still draws. '
+        + 'Set the span on the radio; click-to-tune needs a known span. (rigctld rejected each read with RPRT -1.)');
+      yaesuScopeState.catReads = 'unanswered';
       yaesuScopeBroadcastState();
     }
   } finally {
@@ -32738,6 +32779,9 @@ app.whenReady().then(() => {
     // Wait for the port, don't guess at it. 300ms was usually enough and
     // sometimes wasn't; killAndWait returns as soon as the process is reaped.
     if (hadLiveRigctld) await killAndWait(dying);
+    if (hadLiveRigctld && !(await waitForSerialPortFree(serialPort, 4000))) {
+      sendCatLog(`[rigctld] ${serialPort} is still busy 4 s after the live rigctld exited — another program may hold it`);
+    }
 
     try {
       testProc = await spawnRigctld({ rigId, serialPort, baudRate, dtrOff, verbose: true }, '4533');
@@ -32749,7 +32793,7 @@ app.whenReady().then(() => {
       // Check if rigctld already exited (bad config, serial port issue, etc.)
       if (testProc.exitCode !== null) {
         const lastLine = rigctldStderr.trim().split('\n').pop() || `rigctld exited with code ${testProc.exitCode}`;
-        return { success: false, error: lastLine };
+        return { success: false, error: explainRigctldFailure(rigctldStderr, lastLine) };
       }
 
       const freq = await new Promise((resolve, reject) => {
@@ -32757,7 +32801,7 @@ app.whenReady().then(() => {
           sock.destroy();
           const lines = rigctldStderr.trim().split('\n').filter(Boolean);
           const hint = lines.slice(-3).join(' | ');
-          reject(new Error(hint ? `Timed out — rigctld: ${hint}` : 'Timed out waiting for rigctld response'));
+          reject(new Error(explainRigctldFailure(rigctldStderr, hint ? `Timed out — rigctld: ${hint}` : 'Timed out waiting for rigctld response')));
         }, 5000);
 
         const sock = net.createConnection({ host: '127.0.0.1', port: 4533 }, () => {
@@ -32786,7 +32830,7 @@ app.whenReady().then(() => {
           clearTimeout(timeout);
           // Surface rigctld's stderr if available — it has the real error
           const lastLine = rigctldStderr.trim().split('\n').pop();
-          reject(new Error(lastLine || `Connection failed: ${err.message}`));
+          reject(new Error(explainRigctldFailure(rigctldStderr, lastLine || `Connection failed: ${err.message}`)));
         });
       });
 
