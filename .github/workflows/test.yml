@@ -55,6 +55,10 @@ jobs:
         run: node test/js8-audio-feed-test.js
       - name: Run JTCAT hunt-off / attended-clock / mode-hop diagnostics guards
         run: node test/jtcat-hunt-off-test.js
+      - name: Run desktop UX guards (activator split, chime, Propagation view keeps time)
+        run: node test/desktop-ux-test.js
+      - name: Run SWR guard suite (latch policy, ATU outcome, latched-QSO abandon)
+        run: node test/swr-guard-test.js
       - name: Run FT-710 band-scope suite (frame parser, axis, helper exit codes)
         run: node test/yaesu-scope-test.js
       - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser

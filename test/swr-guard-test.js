@@ -151,5 +151,37 @@ check('a Flex atu status line becomes an atu-status event with the raw fields', 
   assert.strictEqual(c.atuStatus, 'TUNE_FAIL_BYPASS');
 });
 
+
+// K3SBP 2026-09-23: a 19:1 trip at 19:50 UTC, and the QSO with TJ1GD sat at
+// r+report "no advance" for 1 h 47 min with Hunt blocked behind it — a try is
+// a TRANSMISSION and a refused tx-start is not one, so the retry cap never
+// came. The refusal now abandons the shell, Run stops instead of re-arming
+// a CQ the latch would refuse again, and Hunt says once why it is idle.
+check('a JTCAT tx-start refused by the latch abandons the QSO shell', () => {
+  const at = mainSrc.indexOf("sendCatLog('[JTCAT] TX blocked — SWR guard tripped.");
+  assert.ok(at !== -1, 'refusal line not found');
+  assert.ok(mainSrc.slice(at, at + 400).includes('jtcatAbandonQsoBehindSwrLatch(ft8Engine);'), 'the refusal must abandon the shell');
+});
+
+check('the abandon covers both owners, stops Run, and clears + notifies', () => {
+  const at = mainSrc.indexOf('function jtcatAbandonQsoBehindSwrLatch(');
+  const body = mainSrc.slice(at, mainSrc.indexOf('\n}', at));
+  assert.ok(/for \(const o of jtcatQsoOwners\(\)\)/.test(body), 'must iterate the shared owners table');
+  assert.ok(/stopFullAutoCq\('SWR guard latched/.test(body), 'Run must stop, not re-arm');
+  assert.ok(/o\.clear\(\);\s*o\.notify\(msg\);/.test(body), 'the shell is cleared and the surface told');
+  // The unencodable-message abandon shares the table — one place to add a third owner.
+  const un = mainSrc.slice(mainSrc.indexOf('function jtcatAbandonUnencodableQso('), mainSrc.indexOf('function jtcatAbandonUnencodableQso(') + 400);
+  assert.ok(/for \(const o of jtcatQsoOwners\(\)\)/.test(un), 'unencodable abandon must use the shared owners table');
+});
+
+check('Hunt does not engage a caller while the latch holds, and says so once per latch', () => {
+  assert.ok(/if \(myCall && myGrid && ft8Engine && !jtcatSwrLatchBlocksHunt\(\)\) \{/.test(mainSrc), 'Hunt engagement is not gated on the latch');
+  const at = mainSrc.indexOf('function jtcatSwrLatchBlocksHunt(');
+  const body = mainSrc.slice(at, mainSrc.indexOf('\n}', at));
+  assert.ok(/if \(!_swrHuntNoted\) \{/.test(body), 'must log once, not every period');
+  const clr = mainSrc.slice(mainSrc.indexOf('function clearSwrTrip('), mainSrc.indexOf('function clearSwrTrip(') + 400);
+  assert.ok(/_swrHuntNoted = false;/.test(clr), 'a new latch must be allowed to explain itself again');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

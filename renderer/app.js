@@ -19523,6 +19523,26 @@ function initRbnMap() {
   // Add day/night overlay
   updateRbnNightOverlay();
   setInterval(updateRbnNightOverlay, 60000);
+  // Ages are painted as text at render time, and the view only re-rendered
+  // when NEW spots arrived — so once PSKReporter had nothing new the page
+  // froze: "14m" under every receiver for hours, and spots long past the
+  // max-age filter still on the map (K3SBP 2026-09-23, three hours after the
+  // last transmission). Tick while the view is showing.
+  setInterval(tickRbnAges, 30000);
+}
+
+let _rbnRenderedKey = '';
+function rbnSpotsKey(list) {
+  return list.map((s) => s._source + ':' + s._station + ':' + s.band + ':' + s.spotTime).join('|');
+}
+function tickRbnAges() {
+  if (!(currentView === 'rbn' || activatorRbnVisible)) return;
+  renderRbnTable();
+  // Marker popups carry the age too, so rebuild them as well — unless one is
+  // open and nothing has entered or left the filter, in which case a rebuild
+  // would only tear the popup down under the operator.
+  const popupOpen = !!(rbnMap && rbnMap._popup && typeof rbnMap._popup.isOpen === 'function' && rbnMap._popup.isOpen());
+  if (!popupOpen || rbnSpotsKey(getFilteredRbnSpots()) !== _rbnRenderedKey) renderRbnMarkers();
 }
 
 async function updateRbnHomeMarker() {
@@ -19607,6 +19627,7 @@ function renderRbnMarkers() {
   rbnMarkerLayer.clearLayers();
 
   const filtered = getFilteredRbnSpots();
+  _rbnRenderedKey = rbnSpotsKey(filtered);
   const unit = distUnit === 'km' ? 'km' : 'mi';
   const activeBands = new Set();
 

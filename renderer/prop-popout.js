@@ -238,6 +238,20 @@ function _applyPopoutTheme(payload) {
     updateHomeMarker();
     updateNightOverlay();
     setInterval(updateNightOverlay, 60000);
+    // Same freeze as the main window's Propagation view: ages are text
+    // painted at render time, so with nothing new from PSKReporter the
+    // "seen" column and the max-age filter stood still for hours.
+    setInterval(tickAges, 30000);
+  }
+
+  var renderedKey = '';
+  function spotsKey(list) {
+    return list.map(function(s) { return s._source + ':' + s._station + ':' + s.band + ':' + s.spotTime; }).join('|');
+  }
+  function tickAges() {
+    renderTable();
+    var popupOpen = !!(map && map._popup && typeof map._popup.isOpen === 'function' && map._popup.isOpen());
+    if (!popupOpen || spotsKey(getFilteredSpots()) !== renderedKey) renderMarkers();
   }
 
   function updateHomeMarker() {
@@ -302,6 +316,7 @@ function _applyPopoutTheme(payload) {
     markerLayer.clearLayers();
 
     var filtered = getFilteredSpots();
+    renderedKey = spotsKey(filtered);
     var activeBands = new Set();
 
     // Arcs

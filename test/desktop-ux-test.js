@@ -44,5 +44,33 @@ test('chime: off by default, four synthesized flavours, persisted as settings.qs
   assert.ok(!/new Audio\(/.test(app.slice(app.indexOf('function playQsoChime'), app.indexOf('function playQsoChime') + 1500)), 'synthesized, no audio asset');
 });
 
+
+// K3SBP 2026-09-23: the Propagation view showed "14m" under every receiver
+// three hours after the last transmission. Ages are text painted at render
+// time and the view only re-rendered when NEW spots arrived, so once
+// PSKReporter had nothing new it froze — and spots long past the max-age
+// filter stayed on the map. Both surfaces tick while showing.
+test('Propagation: main-window view re-renders on a clock, not only on new spots', () => {
+  assert.ok(/setInterval\(tickRbnAges, 30000\)/.test(app), 'no age tick in the main window');
+  const fn = app.slice(app.indexOf('function tickRbnAges'), app.indexOf('function tickRbnAges') + 900);
+  assert.ok(/currentView === 'rbn' \|\| activatorRbnVisible/.test(fn), 'the tick must be gated on the view showing');
+  assert.ok(/renderRbnTable\(\)/.test(fn), 'the table (the "seen" column) must re-render');
+  assert.ok(/popupOpen/.test(fn) && /renderRbnMarkers\(\)/.test(fn), 'markers re-render unless an open popup would be torn down for nothing');
+});
+
+test('Propagation: the pop-out ticks the same way', () => {
+  const pp = R('renderer/prop-popout.js');
+  assert.ok(/setInterval\(tickAges, 30000\)/.test(pp), 'no age tick in the pop-out');
+  const fn = pp.slice(pp.indexOf('function tickAges'), pp.indexOf('function tickAges') + 600);
+  assert.ok(/renderTable\(\)/.test(fn) && /renderMarkers\(\)/.test(fn));
+});
+
+test('Propagation: main prunes a day-old PSKReporter report instead of keeping it for the session', () => {
+  const at = main.indexOf("pskrMap.on('pollDone'");
+  const body = main.slice(at, at + 900);
+  assert.ok(/24 \* 3600 \* 1000/.test(body) && /pskrMapSpots = pskrMapSpots\.filter/.test(body), 'no prune on pollDone');
+  assert.ok(/if \(pskrMapSpots\.length !== before\) sendPskrMapSpots\(\);/.test(body), 'a prune must re-push, or the clients keep the pruned rows');
+});
+
 console.log(`\nDesktop UX: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

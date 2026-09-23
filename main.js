@@ -1552,6 +1552,7 @@ let _flexTxRf = null;   // { startedAt, peakW, maxSwr, frames }
 let _swrTripped = false;
 let _swrTripMessage = '';       // the operator-readable trip reason, for the JS8 banner
 let _swrTrippedBand = '';       // band at trip time — leaving it clears the latch
+let _swrHuntNoted = false;      // Hunt has logged once that the latch is why it is not answering
 let _swrGuardHits = 0;          // consecutive over-limit frames (debounce = 3)
 let _swrGuardSuppressUntil = 0; // no tripping during/just after an ATU tune
 let _swrLastAutoTune = 0;       // last auto-tune start (60 s gate)
@@ -1592,6 +1593,7 @@ function clearSwrTrip(reason) {
   _swrTripped = false;
   _swrTripMessage = '';
   _swrTrippedBand = '';
+  _swrHuntNoted = false;
   _swrGuardHits = 0;
   sendCatLog(`[SWR GUARD] TX re-enabled (${reason}).`);
   if (win && !win.isDestroyed()) {
@@ -7130,6 +7132,14 @@ function connectPskrMap() {
   });
 
   pskrMap.on('pollDone', () => {
+    // A fetched report never left the array: the map carried every receiver
+    // since launch, capped only at 500. Drop what no max-age filter would
+    // show (24 h) and re-push if anything went, so the pop-out and the
+    // mobile Prop tab are not handed a day of history each poll.
+    const cutoff = Date.now() - 24 * 3600 * 1000;
+    const before = pskrMapSpots.length;
+    pskrMapSpots = pskrMapSpots.filter((s) => { const t = Date.parse(s.spotTime); return !(t > 0) || t >= cutoff; });
+    if (pskrMapSpots.length !== before) sendPskrMapSpots();
     sendPskrMapStatus({ connected: pskrMap.connected, nextPollAt: pskrMap.nextPollAt, spotCount: pskrMapSpots.length, pollUpdate: true });
   });
 
@@ -10198,10 +10208,10 @@ function jtcatHandleRetryStall(o) {
 // forever — rig silent, "no advance" every cycle, Hunt and Run both blocked
 // behind the dead QSO object (N2FSM, "JTCAT falling asleep" twice on
 // WB8YJF/NA67, 2026-09-14/16). Treat the refusal as the give-up it is.
-function jtcatAbandonUnencodableQso(engine, data) {
-  const failed = String((data && data.message) || '').trim().toUpperCase();
-  if (!failed) return;
-  const owners = [
+/** The two QSO shells and how to clear/notify each — one table for every
+ *  "this QSO cannot go on" path, so a new one cannot forget the phone. */
+function jtcatQsoOwners() {
+  return [
     {
       get: () => popoutJtcatQso,
       clear: () => { popoutJtcatQso = null; popoutBroadcastQso(); },
@@ -10221,7 +10231,60 @@ function jtcatAbandonUnencodableQso(engine, data) {
       owner: 'remote',
     },
   ];
-  for (const o of owners) {
+}
+
+/**
+ * A QSO that cannot transmit never reaches the retry cap — a try is a
+ * TRANSMISSION and a refused tx-start is not one — so a shell behind the SWR
+ * latch sat at "no advance" for as long as the latch held: K3SBP 2026-09-23,
+ * TJ1GD at r+report for 1 h 47 min after a 19:1 trip, Hunt blocked behind it
+ * the whole time, and nothing in the log after the trip line. Same shape as
+ * the unencodable-message abandon below; here nothing about the message is
+ * wrong, the radio just must not key. Run stops rather than re-arms — the
+ * re-armed CQ would be refused the same way next period.
+ */
+function jtcatAbandonQsoBehindSwrLatch(engine) {
+  for (const o of jtcatQsoOwners()) {
+    const qso = o.get();
+    if (!qso || qso.phase === 'done') continue;
+    const who = qso.call || 'this station';
+    if (jtcatFullAutoCq && jtcatFullAutoCqOwner === o.owner) {
+      stopFullAutoCq('SWR guard latched — run stopped until the antenna matches', { quiet: true });
+    }
+    const msg = qso.phase === 'cq'
+      ? 'SWR guard has TX latched — CQ stopped. Run the ATU or change bands, then call again.'
+      : 'SWR guard has TX latched — QSO with ' + who + ' abandoned, not logged. Run the ATU or change bands.';
+    sendCatLog('[JTCAT] ' + msg);
+    if (engine) {
+      engine._txEnabled = false;
+      engine.setTxMessage('');
+      if (typeof engine.setTxSlot === 'function') engine.setTxSlot('auto');
+      if (engine._txActive) engine.txComplete();
+    }
+    o.clear();
+    o.notify(msg);
+  }
+}
+
+/**
+ * Hunt must not engage a caller the latch will refuse: with the shell now
+ * abandoned on refusal, Hunt would otherwise pick the next CQ every period,
+ * be refused, abandon it, and write three lines a cycle for as long as the
+ * antenna is bad. One line per latch, then silence until it clears.
+ */
+function jtcatSwrLatchBlocksHunt() {
+  if (!_swrTripped) return false;
+  if (!_swrHuntNoted) {
+    _swrHuntNoted = true;
+    sendCatLog('[JTCAT] Hunt: not answering anyone while the SWR guard is latched — run the ATU or change bands and Hunt resumes on its own.');
+  }
+  return true;
+}
+
+function jtcatAbandonUnencodableQso(engine, data) {
+  const failed = String((data && data.message) || '').trim().toUpperCase();
+  if (!failed) return;
+  for (const o of jtcatQsoOwners()) {
     const qso = o.get();
     if (!qso || qso.phase === 'done') continue;
     if (String(qso.txMsg || '').trim().toUpperCase() !== failed) continue;
@@ -10752,7 +10815,7 @@ function startJtcat(mode) {
     if (jtcatAutoCqMode !== 'off' && !popoutJtcatQso && !remoteJtcatQso) {
       const myCall = (settings.myCallsign || '').toUpperCase();
       const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
-      if (myCall && myGrid && ft8Engine) {
+      if (myCall && myGrid && ft8Engine && !jtcatSwrLatchBlocksHunt()) {
         const results = data.results || [];
         // Answer a station calling us DIRECTLY first (abandoned callbacks, late
         // answers) — see jtcatTryAnswerDirectCaller. Only hunt a fresh CQ if we
@@ -10942,6 +11005,7 @@ function startJtcat(mode) {
     if (_swrTripped) {
       sendCatLog('[JTCAT] TX blocked — SWR guard tripped. Run the ATU or change bands to re-enable TX.');
       try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatAbandonQsoBehindSwrLatch(ft8Engine); // a shell that cannot key never reaches its retry cap
       return;
     }
     // Wrong-band TX guard (KF0U 2026-07-17): if the rig's reported dial no
