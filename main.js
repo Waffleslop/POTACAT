@@ -10353,6 +10353,7 @@ function startJtcat(mode) {
     ft8Engine.on('tx-start', () => js8PushStatus());
     ft8Engine.on('tx-end', () => js8PushStatus());
   }
+  if (ft8Engine._mode === 'JS8') js8AudioFeed(true);
   if (ft8Engine._mode === 'JS8') {
     // A fresh JS8 engine session: reset the reassembler (stale half-messages
     // from the previous band/session must not greet the new one) and let the
@@ -11433,6 +11434,24 @@ function stopInProcessSpectrum() {
 // couple of null checks when JS8 is off. RX-gain brightness is applied in the
 // popout, so the bins here stay the raw spectrum.
 let _js8SpectrumTimer = null;
+/**
+ * Who captures audio for a JS8 session. JS8 runs as the JTCAT engine, but its
+ * window captures nothing: the FT8 pop-out feeds the engine from its own
+ * getUserMedia worklet, and a phone-started session is fed by the MAIN window
+ * (jtcat-start-for-remote → app.js startJtcatAudio). JS8's start paths asked
+ * nobody — so on a USB-codec rig the JS8 engine ran deaf: waterfall black, no
+ * decodes, FT8 fine (KN4IIG, IC-7300, 2026-09-20). On a Flex / K4 / Icom
+ * Network the engine is fed in main and the renderer's PCM is dropped at the
+ * jtcat-audio handler, which is why this never showed here. Ask the main
+ * window exactly as a phone start does; the pop-out, when open, already feeds.
+ */
+function js8AudioFeed(on) {
+  if (!win || win.isDestroyed()) return;
+  if (on && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) return; // the pop-out's own worklet feeds the engine
+  win.webContents.send(on ? 'jtcat-start-for-remote' : 'jtcat-stop-for-remote');
+  if (on) sendCatLog(`[JS8] audio: main window capturing for the JS8 engine (route: ${settings.audioSource || 'device'})`);
+}
+
 function startJs8Spectrum() {
   if (_js8SpectrumTimer) return;
   _js8SpectrumTimer = setInterval(() => {
@@ -11454,6 +11473,7 @@ function stopJs8Spectrum() {
 }
 
 function stopJtcat() {
+  if (ft8Engine && ft8Engine._mode === 'JS8') js8AudioFeed(false);
   clearJtcatTxFailsafe();
   clearJtcatIcomHardRelease();
   _jtcatExpectedDialHz = 0; // dial anchor dies with the session (pre-TX guard)
@@ -26821,6 +26841,7 @@ app.whenReady().then(() => {
     });
     jtcatPopoutWin.on('closed', () => {
       jtcatPopoutWin = null;
+      if (js8Engine()) js8AudioFeed(true); // its worklet was the JS8 engine's audio; the main window takes over
       yaesuScopeJtcatWants = false;
       if (!yaesuScopeWanted()) { try { stopYaesuScope('JTCAT window closed'); } catch { /* not running */ } }
       // Clear popout QSO state and halt TX so engine doesn't keep transmitting

@@ -51,6 +51,8 @@ jobs:
         run: node test/raw-cat-command-test.js
       - name: Run rigctld stderr explainer suite
         run: node test/rigctld-stderr-test.js
+      - name: Run JS8 audio-feed guards (JS8 must have a capturer on USB-codec rigs)
+        run: node test/js8-audio-feed-test.js
       - name: Run FT-710 band-scope suite (frame parser, axis, helper exit codes)
         run: node test/yaesu-scope-test.js
       - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser
