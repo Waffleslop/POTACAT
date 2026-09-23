@@ -260,9 +260,13 @@
        automatic-operation modes) so their association is legible. */
     .jp-auto-group { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px dashed var(--border-primary); border-radius: 6px; flex-shrink: 0; }
     .jp-auto-group-label { font-size: 9px; font-weight: 700; letter-spacing: 0.8px; color: var(--text-dim, #888); cursor: default; }
-    .jp-mode-chip { padding: 3px 8px; border-radius: 10px; border: 1px solid var(--warn, #f0a500); background: var(--warn, #f0a500); color: #000; font-size: 10px; font-weight: 700; cursor: pointer; letter-spacing: 0.4px; flex-shrink: 0; }
-    .jp-mode-chip:hover { opacity: 0.85; }
-    .jp-mode-chip.hidden { display: none; }
+    /* The FD chip only. It used to be `.jp-mode-chip`, the class the mode-hop
+       rotation chips also carry, and being the later rule it painted THEIR
+       off state Field-Day orange — "the buttons were orange while FT8 was
+       green" (N2FSM 2026-09-23) read as a colour code nobody designed. */
+    #jp-fd-chip { padding: 3px 8px; border-radius: 10px; border: 1px solid var(--warn, #f0a500); background: var(--warn, #f0a500); color: #000; font-size: 10px; font-weight: 700; cursor: pointer; letter-spacing: 0.4px; flex-shrink: 0; }
+    #jp-fd-chip:hover { opacity: 0.85; }
+    #jp-fd-chip.hidden { display: none; }
     /* z-index 2000: Leaflet's map panes/controls (the attribution box) go up
        to 1000 and were floating over the popover at 900; the QSO toast (9999)
        stays above everything. */
@@ -728,7 +732,7 @@
     </label>
     <div class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Modes in the rotation <span id="jp-mode-hop-modes" class="jp-mode-hop-modes"></span></span>
-      <span class="jp-opt-help">Pick at least two. A mode with no watering hole on the band you are on is skipped — 6m has no FT2 frequency, 2m has neither FT4 nor FT2.</span>
+      <span class="jp-opt-help">Green = in the rotation, grey = left out. Pick at least two. A mode with no watering hole on the band you are on is skipped — 6m has no FT2 frequency, 2m has neither FT4 nor FT2.</span>
     </div>
     <button id="jp-hunt-cq-fallback" class="jp-opt-row ultracat-gated hidden">
       <span class="jp-opt-label">Call CQ when there's nothing to hunt</span>

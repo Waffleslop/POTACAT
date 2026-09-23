@@ -8230,6 +8230,7 @@ const JTCAT_MODE_HOP_IDLE_MIN_DEFAULT = 3;
 let jtcatModeHopQuietPeriods = 0;   // consecutive periods with nobody workable
 let _jtcatModeHopPeriod = '';       // period already counted (N slices, one count)
 let jtcatModeHopsSinceContact = 0;  // hops since a workable station last appeared
+let _jtcatModeHopNote = '';         // last refusal reason logged (one line per change, not per period)
 let _jtcatModeHopBand = '';         // band the idle clock has been counting on
 
 function jtcatModeHopEnabled() { return settings.jtcatModeHop === true; }
@@ -8286,6 +8287,40 @@ function jtcatModeHopDefersCqFallback() {
  * mid-QSO rule — because they are answering the same question about the same
  * decodes and any drift between them is a bug waiting to happen.
  */
+/**
+ * One line for the log per CHANGE of reason, never per period. Barry's first
+ * report (N2FSM 2026-09-23) was a carousel that never turned and a log with
+ * nothing in it to say why: every refusal in the tick was silent, so the
+ * bug report could not tell "the clock never started" from "it was mid-QSO"
+ * from "only one mode was in the rotation". At an FT2 cadence (3.8 s) a line
+ * per period would bury the rest of the log, so the reason is logged when it
+ * changes and cleared silently when the count starts moving again.
+ */
+function jtcatModeHopNote(reason) {
+  if (reason === _jtcatModeHopNote) return;
+  _jtcatModeHopNote = reason;
+  if (reason) sendCatLog('[JTCAT] Mode hop: waiting — ' + reason);
+}
+
+/** The one sentence that says whether the carousel can turn on this band. */
+function jtcatModeHopStatusLine() {
+  if (!jtcatModeHopEnabled()) return '[JTCAT] Mode hop OFF';
+  const avail = jtcatModeHopAvailable();
+  if (avail.length >= 2) {
+    return '[JTCAT] Mode hop ON: ' + avail.join(' → ') + ' after ' + jtcatModeHopIdleMin()
+      + ' min with nobody workable (the band never changes)';
+  }
+  // Report the modes actually in play, not the ones ticked: 6m has no FT2
+  // watering hole and 2m has neither FT4 nor FT2, so on the higher bands the
+  // enabled set and the reachable set are different things. And say which
+  // chip colour means what — "orange while FT8 was green" was Barry reading
+  // the rotation backwards.
+  return '[JTCAT] Mode hop ON, but '
+    + (avail.length === 1
+        ? 'only ' + avail[0] + ' is in the rotation on this band — nothing to hop to (green chips are in, grey chips are out; pick at least two)'
+        : 'none of the enabled modes has a watering hole on this band — nothing to hop to');
+}
+
 function jtcatModeHopTick(results, mode) {
   if (!jtcatModeHopEnabled() || !ft8Engine) return;
   // Only while the operator has asked POTACAT to work the band for them.
@@ -8294,11 +8329,12 @@ function jtcatModeHopTick(results, mode) {
   // or even in CQ mode", and that is exactly the boundary.
   if (jtcatAutoCqMode === 'off' && !jtcatFullAutoCq && !jtcatHuntFallbackMode) {
     jtcatModeHopQuietPeriods = 0;
+    jtcatModeHopNote('Hunt or Auto CQ is not running — the carousel only turns while POTACAT is working the band for you');
     return;
   }
   // Multi-slice already listens to several bands at once, each slice with its
   // own engine and its own dial. There is no single mode to hop.
-  if (jtcatManager && jtcatManager.sliceCount > 1) return;
+  if (jtcatManager && jtcatManager.sliceCount > 1) { jtcatModeHopNote('multi-slice — every slice already has its own band'); return; }
   // Never mid-QSO, never keyed, and never while a spot target is armed — the
   // operator picked that callsign ON this mode and frequency, and moving is
   // the one thing that guarantees we never hear them.
@@ -8306,10 +8342,15 @@ function jtcatModeHopTick(results, mode) {
             || (remoteJtcatQso && remoteJtcatQso.phase !== 'done');
   if (busy || ft8Engine._txActive || jtcatSpotTarget) {
     jtcatModeHopQuietPeriods = 0;
+    const q = (popoutJtcatQso && popoutJtcatQso.phase !== 'done') ? popoutJtcatQso : remoteJtcatQso;
+    jtcatModeHopNote(busy
+      ? ((q && q.call) ? 'in a QSO with ' + q.call : 'calling CQ') + ' — the clock restarts when it ends'
+      : ft8Engine._txActive ? 'transmitting'
+      : 'spot target ' + jtcatSpotTarget.call + ' is armed on this mode — it stays until worked, expired or cleared');
     return;
   }
   const myCall = (settings.myCallsign || '').toUpperCase();
-  if (!myCall) return;
+  if (!myCall) { jtcatModeHopNote('no callsign in Settings'); return; }
   const nowBand = freqToBand((_currentFreqHz || 0) / 1e6) || '';
   if (nowBand !== _jtcatModeHopBand) {
     // The radio moved bands under us — a spot click, the scanner, the knob,
@@ -8317,6 +8358,7 @@ function jtcatModeHopTick(results, mode) {
     _jtcatModeHopBand = nowBand;
     jtcatModeHopQuietPeriods = 0;
     jtcatModeHopsSinceContact = 0;
+    _jtcatModeHopNote = '';
     return;
   }
   const filterMode = jtcatAutoCqMode !== 'off' ? jtcatAutoCqMode : (jtcatHuntFallbackMode || 'all');
@@ -8324,6 +8366,7 @@ function jtcatModeHopTick(results, mode) {
     // Somebody to work here — this mode is alive and the lap starts over.
     jtcatModeHopQuietPeriods = 0;
     jtcatModeHopsSinceContact = 0;
+    _jtcatModeHopNote = '';
     return;
   }
   // Period-gated: N slices reporting the same period must advance the count
@@ -8334,16 +8377,39 @@ function jtcatModeHopTick(results, mode) {
   _jtcatModeHopPeriod = pk;
   jtcatModeHopQuietPeriods++;
   const cur = ((ft8Engine && ft8Engine._mode) || 'FT8').toUpperCase();
+  const avail = jtcatModeHopAvailable();
+  const threshold = jtcatModehop.periodsForMinutes(jtcatModeHopIdleMin(), cur);
+  if (jtcatModeHopQuietPeriods === 1) {
+    // The one line that proves the clock is running at all. Once per quiet
+    // stretch, with the destination and the real wait, so a bug report
+    // shows where the hop was due and the operator knows what to expect.
+    const next = jtcatModehop.nextMode(avail, cur);
+    sendCatLog('[JTCAT] Mode hop: nobody workable on ' + cur + ' on ' + nowBand + ' — idle clock started'
+      + (next && next !== cur
+          ? ', hopping to ' + next + ' after ' + jtcatModeHopIdleMin() + ' min (' + threshold + ' ' + cur + ' periods) if nobody shows'
+          : ', but ' + (avail.length < 2 ? 'only ' + (avail.join('/') || 'nothing') + ' is in the rotation here — nothing to hop to' : 'there is nowhere to go')));
+  }
   const decision = jtcatModehop.decideModeHop({
     enabled: true,
-    modes: jtcatModeHopAvailable(),
+    modes: avail,
     current: cur,
     quietPeriods: jtcatModeHopQuietPeriods,
-    quietThreshold: jtcatModehop.periodsForMinutes(jtcatModeHopIdleMin(), cur),
+    quietThreshold: threshold,
     hopsSinceContact: jtcatModeHopsSinceContact,
     runActive: !!jtcatFullAutoCq,
   });
-  if (decision.action === 'hop') jtcatHopMode(decision.mode, decision);
+  if (decision.action === 'hop') {
+    _jtcatModeHopNote = '';
+    jtcatHopMode(decision.mode, decision);
+  } else if (decision.reason === 'not-idle-yet') {
+    _jtcatModeHopNote = ''; // counting — whatever was in the way is gone
+  } else if (decision.reason === 'need-two-modes') {
+    jtcatModeHopNote('only ' + (avail.join('/') || 'nothing') + ' is in the rotation on ' + nowBand + ' — pick at least two modes (green = in the rotation)');
+  } else if (decision.reason === 'lap-complete-run-should-pause') {
+    jtcatModeHopNote('every enabled mode has been tried without a contact — Run pauses instead of circling');
+  } else {
+    jtcatModeHopNote(decision.reason === 'not-ft-family' ? cur + ' is not an FT mode — nothing to hop from' : 'nowhere to go from ' + cur);
+  }
 }
 
 /**
@@ -8828,6 +8894,7 @@ async function startFullAutoCq(owner, modifier, opts) {
   jtcatFullAutoCqOwner = owner;
   jtcatFullAutoCqModifier = modifier || '';
   if (!auto) jtcatFullAutoCqLastActivity = Date.now();
+  if (!auto && jtcatModeHopEnabled()) { _jtcatModeHopNote = ''; sendCatLog(jtcatModeHopStatusLine()); }
   jtcatFullAutoCqUnanswered = 0;
   jtcatFullAutoCqPaused = false;
   jtcatAutoCqMode = 'off';        // run and hunt are mutually exclusive
@@ -8987,6 +9054,10 @@ function setJtcatHuntMode(mode, owner) {
   // this the clock would still read 0 and the watchdog would kill the very
   // first fallback CQ as a 30-minute timeout.
   if (m !== 'off') jtcatFullAutoCqLastActivity = Date.now();
+  // The carousel only turns while Hunt or Run is on, and the toggle's own log
+  // line is usually long before the bug report's recording window: restate
+  // it here, where the automatic operation the hop rides on actually starts.
+  if (m !== 'off' && jtcatModeHopEnabled()) { _jtcatModeHopNote = ''; sendCatLog(jtcatModeHopStatusLine()); }
   if (m === 'off') {
     jtcatAutoCqWorkedSession.clear();
     // Selecting Off does NOT abandon a QSO already in progress: the state
@@ -9026,6 +9097,17 @@ function jtcatHuntFallbackResume(count) {
 // indefinitely. Called each decode cycle while run mode is active. Deliberately
 // still armed while paused: a band that never comes back ends the run rather
 // than leaving it sitting there indefinitely.
+/**
+ * The attended-operator clock, petted by the operator's own hands: a Hunt or
+ * Run selection, the CQ button, a double-click or tap reply. QSO progress
+ * pets it separately at the state-machine sites. Automatic paths (the
+ * Hunt→Run fallback, re-armed CQs) must NOT call this — that is the Part 97
+ * line the watchdog holds.
+ */
+function jtcatNoteOperatorAtRadio() {
+  jtcatFullAutoCqLastActivity = Date.now();
+}
+
 function jtcatFullAutoCqWatchdog() {
   const idle = Date.now() - jtcatFullAutoCqLastActivity > JTCAT_FULL_AUTO_CQ_WATCHDOG_MS;
   if (!idle) return;
@@ -16972,6 +17054,7 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-call-cq', async ({ modifier } = {}) => {
+    jtcatNoteOperatorAtRadio(); // the phone's CQ button is the operator too, see jtcat-popout-call-cq
     if (!ft8Engine) return;
     const myCall = remoteJtcatMyCall();
     const myGrid = remoteJtcatMyGrid();
@@ -17012,6 +17095,7 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-reply', async (data) => {
+    jtcatNoteOperatorAtRadio(); // a tap-to-reply on the phone is the operator, see jtcat-popout-call-cq
     let { call, df, slot, sliceId, snr } = data; // `call` is rebased below (re-derivation / hound)
     // Route TX to correct slice in multi-slice mode
     const targetEngine = (jtcatManager && sliceId) ? jtcatManager.getEngine(sliceId) : ft8Engine;
@@ -28214,6 +28298,7 @@ app.whenReady().then(() => {
 
   // --- Popout QSO state machine (drives engine directly, like ECHOCAT) ---
   ipcMain.on('jtcat-popout-reply', async (_e, data) => {
+    jtcatNoteOperatorAtRadio(); // a double-click reply is the operator, see jtcat-popout-call-cq
     // Route TX to correct slice in multi-slice mode
     const replySliceId = data.sliceId || 'default';
     const replyEngine = (jtcatManager && data.sliceId) ? jtcatManager.getEngine(data.sliceId) : ft8Engine;
@@ -28418,6 +28503,12 @@ app.whenReady().then(() => {
 
   ipcMain.on('jtcat-popout-call-cq', async (_e, modifier) => {
     sendCatLog(`[JTCAT] CQ button pressed (engine=${!!ft8Engine})`);
+    // An operator pressing CQ is an operator at the radio: the 30-minute
+    // attended clock restarts. It used to count only Hunt/Run selection and
+    // QSO progress, so Hunt died under someone actively calling CQ
+    // (N2FSM 2026-09-23: 15 CQs by hand, then "Hunt stopped — nothing from
+    // the operator").
+    jtcatNoteOperatorAtRadio();
     if (!ft8Engine) {
       console.log('[JTCAT Popout] CQ aborted — engine not running');
       sendCatLog('[JTCAT] CQ aborted — engine not running. Open JTCAT first.');
@@ -33105,15 +33196,12 @@ app.whenReady().then(() => {
     }
     if (opts.enabled != null) {
       settings.jtcatModeHop = !!opts.enabled;
-      const avail = jtcatModeHopAvailable();
-      // Report the modes actually in play, not the ones ticked: 6m has no FT2
-      // watering hole and 2m has neither FT4 nor FT2, so on the higher bands
-      // the enabled set and the reachable set are different things.
-      sendCatLog(settings.jtcatModeHop
-        ? (avail.length >= 2
-            ? '[JTCAT] Mode hop ON: ' + avail.join(' → ') + ' after ' + jtcatModeHopIdleMin() + ' min with nobody workable (the band never changes)'
-            : '[JTCAT] Mode hop ON, but this band has fewer than two of the enabled modes — nothing to hop to')
-        : '[JTCAT] Mode hop OFF');
+      sendCatLog(jtcatModeHopStatusLine());
+    } else if (Array.isArray(opts.modes) && jtcatModeHopEnabled()) {
+      // A chip click changes what the carousel can reach; say so, the same
+      // way the toggle does, so the log shows the rotation the operator
+      // actually ended up with (Barry's first run had FT8 alone in it).
+      sendCatLog(jtcatModeHopStatusLine());
     }
     jtcatModeHopReset();
     saveSettings(settings);
