@@ -12071,6 +12071,7 @@ function _startDirectTuneTone() {
   const n = Math.round(RATE * CHUNK_MS / 1000); // 480 mono samples / chunk
   const dPhase = 2 * Math.PI * JTCAT_TUNE_FREQ_HZ / RATE;
   _jtcatTunePhase = 0;
+  if (smartSdrAudio && typeof smartSdrAudio.takeStreamTxStats === 'function') smartSdrAudio.takeStreamTxStats(); // zero the counters
   _jtcatTuneTxTimer = setInterval(() => {
     if (!smartSdrAudio || !smartSdrAudio.txReady) return;
     const buf = new Float32Array(n);
@@ -12083,7 +12084,14 @@ function _startDirectTuneTone() {
   }, CHUNK_MS);
 }
 function _stopDirectTuneTone() {
+  const wasRunning = !!_jtcatTuneTxTimer;
   if (_jtcatTuneTxTimer) { clearInterval(_jtcatTuneTxTimer); _jtcatTuneTxTimer = null; }
+  // What actually reached the radio — turns "keyed, 0 W" into either "no
+  // audio left this PC" or "audio arrived and the radio did not use it".
+  if (wasRunning && smartSdrAudio && typeof smartSdrAudio.takeStreamTxStats === 'function') {
+    const st = smartSdrAudio.takeStreamTxStats();
+    sendCatLog(`[JTCAT] Tune tone: ${st.packets} audio packets sent to the radio (${st.chunks} chunks${st.refused ? `, ${st.refused} refused: ${st.reason}` : ''}; dax_tx ${st.streamId || 'none'} -> ${st.host || '?'})`);
+  }
   _jtcatTunePhase = 0;
   if (smartSdrAudio && smartSdrAudio.resetTxStream) { try { smartSdrAudio.resetTxStream(); } catch {} }
 }
