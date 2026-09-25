@@ -318,7 +318,8 @@ const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const { getTuneQuirks } = require('./lib/rig-models');
-const { gridToLatLon, haversineDistanceMiles, bearing } = require('./lib/grid');
+const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
+const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
@@ -7843,6 +7844,19 @@ function shouldForwardClientDriven() {
   return false;
 }
 
+// Fill the station side of an activation record from the park DB. Used by
+// saveQsoRecord and every activation export (the export writes the renderer's
+// copies, which never saw what saveQsoRecord stamped). Fills blanks only.
+function activationStationFillFor(rec) {
+  if (!rec || !rec.mySigInfo) return {};
+  let park = null;
+  try { park = getParkDb(parksMap, rec.mySigInfo) || null; } catch {}
+  return activationStationFill(rec, { myCallsign: settings.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation });
+}
+function fillActivationExport(qsos) {
+  return (qsos || []).map(q => ({ ...q, ...activationStationFillFor(q) }));
+}
+
 async function saveQsoRecord(qsoData, opts) {
   opts = opts || {};
   const origin = opts.origin || 'local-manual';
@@ -7917,6 +7931,9 @@ async function saveQsoRecord(qsoData, opts) {
   if (settings.myCallsign && !qsoData.stationCallsign) {
     qsoData.stationCallsign = settings.myCallsign.toUpperCase();
   }
+  // Activation record: MY_GRIDSQUARE / MY_STATE from the park when the
+  // logging path did not supply them (lib/activation-station.js).
+  Object.assign(qsoData, activationStationFillFor(qsoData));
 
   // Auto-fill TX power from the live CAT reading (matches the TX Power slider)
   // when the caller didn't supply one — typical for the Logbook pop-out's
@@ -8473,7 +8490,7 @@ function connectWsjtx() {
       if ((settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0) {
         const allQsoData = [];
         for (let i = 0; i < parkRefs.length; i++) {
-          const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
+          const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref };
           allQsoData.push(parkQso);
           await saveQsoRecord(parkQso, { origin: 'wsjtx-bridge' });
         }
@@ -8486,7 +8503,7 @@ function connectWsjtx() {
         const primaryKeys = activationProgram.myRefKeys(parkRefs);
         for (const xr of crossRefs) {
           if (primaryKeys.has(activationProgram.refKey(xr.program, xr.ref))) continue;
-          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '' };
+          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref };
           if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
           else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
           else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
@@ -10446,7 +10463,7 @@ async function jtcatAutoLog(qso) {
       sendCatLog(`[JTCAT] Activation mode — logging to ${parkRefs.map(p => p.ref).join(', ')}`);
       const allQsoData = [];
       for (let i = 0; i < parkRefs.length; i++) {
-        const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: settings.grid || '' };
+        const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref };
         allQsoData.push(parkQso);
         await saveQsoRecord(parkQso, { origin: 'jtcat-engine' });
       }
@@ -10456,7 +10473,7 @@ async function jtcatAutoLog(qso) {
       const primaryKeys = activationProgram.myRefKeys(parkRefs);
       for (const xr of crossRefs) {
         if (primaryKeys.has(activationProgram.refKey(xr.program, xr.ref))) continue;
-        const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '' };
+        const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref };
         if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
         else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
         else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
@@ -10517,15 +10534,16 @@ async function jtcatAutoLog(qso) {
     // primary my-park ref (already on qsoData via the loop above) — POTA
     // upload needs one my-park file per contact, not a full cross-product.
     if (hunted && hunted.refs.length > 1) {
-      const inActivation = settings.appMode === 'activator' && parkRefs.length > 0;
+      // Activation RUNNING, not the view (W7RTA 2026-07-18), and the park's
+      // real program — this was the last literal MY_SIG 'POTA'.
+      const inActivation = (settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0;
       for (const extra of hunted.refs.slice(1)) {
         const extraQso = { ...qsoData, uuid: undefined, sig: extra.sig, sigInfo: extra.ref };
         delete extraQso[hunted.refField];
         extraQso[extra.refField] = extra.ref;
         if (inActivation) {
-          extraQso.mySig = 'POTA';
+          extraQso.mySig = activationProgram.programOf(parkRefs[0]);
           extraQso.mySigInfo = parkRefs[0].ref;
-          extraQso.myGridsquare = settings.grid || '';
         }
         await saveQsoRecord(extraQso, { origin: 'jtcat-engine' });
       }
@@ -17476,7 +17494,9 @@ function connectRemote() {
       // Activator mode: inject mySig fields from phone or desktop settings
       const mySig = data.mySig || '';
       const mySigInfo = data.mySigInfo || '';
-      const myGrid = data.myGridsquare || settings.grid || '';
+      // The mobile device's own grid when it sent one; otherwise the park's,
+      // filled in saveQsoRecord — never the HOME grid (N7VBN 2026-09-22).
+      const myGrid = data.myGridsquare || '';
 
       let result = { success: true };
       if (mySig && mySigInfo) {
@@ -34899,7 +34919,7 @@ app.whenReady().then(() => {
         ],
       });
       if (result.canceled) return { success: false };
-      writeActivationAdifRaw(result.filePath, qsos);
+      writeActivationAdifRaw(result.filePath, fillActivationExport(qsos));
       rememberAdifExportDir(result.filePath);
       return { success: true, path: result.filePath };
     } catch (err) {
@@ -34928,7 +34948,7 @@ app.whenReady().then(() => {
       const safeRef = (parkRef || 'PARK').replace(/[^A-Za-z0-9_-]/g, '_');
       const fileName = `${safeCall}@${safeRef}-${dateStr}.adi`;
       const filePath = path.join(dir, fileName);
-      writeActivationAdifRaw(filePath, qsos);
+      writeActivationAdifRaw(filePath, fillActivationExport(qsos));
       // Reveal the file in Explorer/Finder so the user can drag-drop it
       // onto the upload page. Then open the upload page itself.
       const { shell } = require('electron');
@@ -34966,7 +34986,7 @@ app.whenReady().then(() => {
         const safeRef = ref.replace(/[^A-Za-z0-9_-]/g, '_');
         const fileName = `${activatorCall || 'POTACAT'}@${safeRef}-${dateStr}.adi`;
         const filePath = path.join(folder, fileName);
-        writeActivationAdifRaw(filePath, qsos);
+        writeActivationAdifRaw(filePath, fillActivationExport(qsos));
         fileCount++;
         totalQsos += qsos.length;
       }

@@ -12681,6 +12681,10 @@ function render() {
         const cat = document.createElement('span');
         cat.textContent = '\uD83D\uDC08\u200D\u2B1B ';
         cat.className = 'watchlist-star';
+        // Say what it is: N7VBN (2026-09-22) saw "a dog/cow and something
+        // else" \u2014 on Windows 10 the black cat (cat + joiner + black square)
+        // draws as two separate glyphs.
+        cat.title = 'This is your own spot';
         callTd.appendChild(cat);
       } else if (isWatched) {
         const star = document.createElement('span');
@@ -25229,6 +25233,15 @@ async function activatorLogContact() {
   const freqKhz = inputMhz > 0 ? Math.round(inputMhz * 1000) : (activatorFreqKhz || radioFreqKhz || 0);
   const freqMhz = freqKhz ? (freqKhz / 1000).toFixed(3) : '';
   const band = freqToBandActivator(freqKhz) || '';
+  // No radio reading and nothing typed: a contact with no frequency has no
+  // band, and POTA cannot credit it (N7VBN 2026-09-22 logged six this way,
+  // exported as FREQ NaN). Ask for it instead of logging a contact that
+  // will be rejected at upload.
+  if (!freqKhz) {
+    showLogToast('Type the frequency first (in MHz, for example 14.285). POTACAT has no reading from the radio.', { warn: true, duration: 6000 });
+    activatorFreqInput.focus();
+    return;
+  }
 
   const now = new Date();
   const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');

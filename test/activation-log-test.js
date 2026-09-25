@@ -231,7 +231,58 @@ console.log('\nNo POTA hardcode remains in the log-building paths');
     const src = fs.readFileSync(path.join(__dirname, rel), 'utf-8');
     check(!/mySig:\s*'POTA'/.test(src),
       rel.replace('../', '') + " has no hardcoded mySig: 'POTA'");
+    // The assignment spelling slipped past the pattern above for months (the
+    // JTCAT extra-park record, found 2026-09-25 with N7VBN's log).
+    check(!/\.mySig\s*=\s*'POTA'/.test(src),
+      rel.replace('../', '') + " has no hardcoded .mySig = 'POTA'");
+    // An activation record must never carry the operator's HOME grid: the
+    // park's grid is filled in saveQsoRecord (lib/activation-station.js).
+    check(!/mySigInfo:[^}\n]*myGridsquare:\s*settings\.grid/.test(src) && !/myGridsquare\s*=\s*settings\.grid/.test(src),
+      rel.replace('../', '') + ' never stamps settings.grid (home) onto an activation record');
   }
+}
+
+// ── N7VBN 2026-09-22: the station side of activation records ──────────────
+{
+  const { activationStationFill } = require('../lib/activation-station');
+  const { latLonToGrid } = require('../lib/grid');
+  const { parkStatesFromLocation } = require('../lib/pota');
+  const park = { reference: 'US-7637', latitude: '47.62', longitude: '-117.36', locationDesc: 'US-WA' };
+  const ctx = { myCallsign: 'n7vbn', park, latLonToGrid, parkStates: parkStatesFromLocation };
+  // A hunter contact made while activating (spot-log path): only MY_SIG/INFO.
+  const fill = activationStationFill({ callsign: 'VA3UZ', mySig: 'POTA', mySigInfo: 'US-7637' }, ctx);
+  check(fill.operator === 'N7VBN' && fill.stationCallsign === 'N7VBN', 'hunter-while-activating record gets OPERATOR + STATION_CALLSIGN');
+  check(/^DN17/.test(fill.myGridsquare || ''), 'MY_GRIDSQUARE from the park position (' + fill.myGridsquare + ')');
+  check(fill.myState === 'WA', 'MY_STATE from a single-state park');
+  // Never overwrite what the logging path supplied (a grid typed in the Act screen).
+  const kept = activationStationFill({ mySigInfo: 'US-7637', myGridsquare: 'DM45ee', operator: 'K3SBP' }, ctx);
+  check(!('myGridsquare' in kept) && !('operator' in kept), 'fills blanks only');
+  // A park in two states cannot say which side the activator was on.
+  const twoStates = activationStationFill({ mySigInfo: 'US-1234' }, { ...ctx, park: { ...park, locationDesc: 'US-WA,US-ID' } });
+  check(!('myState' in twoStates), 'no MY_STATE for a multi-state park');
+  // Not an activation record: untouched.
+  check(Object.keys(activationStationFill({ callsign: 'W1AW' }, ctx)).length === 0, 'hunter-only record is left alone');
+  // Unknown park (SOTA summit etc.): callsigns still, no invented grid/state.
+  const noPark = activationStationFill({ mySigInfo: 'W7W/SN-001' }, { ...ctx, park: null });
+  check(noPark.operator === 'N7VBN' && !('myGridsquare' in noPark) && !('myState' in noPark), 'unknown park: callsigns only');
+
+  // The writer: no FREQ "NaN", BAND from the frequency, MY_STATE written.
+  const noFreq = buildAdifRecord({ callsign: 'KK7YFH', frequency: '', mode: 'SSB', qsoDate: '20260921', timeOn: '181813', mySig: 'POTA', mySigInfo: 'US-7637' });
+  check(!/NaN/.test(noFreq) && !/<FREQ:/.test(noFreq), 'a missing frequency is left out, never written as NaN');
+  const withFreq = buildAdifRecord({ callsign: 'KK7YFH', frequency: '14225', mode: 'SSB', qsoDate: '20260921', timeOn: '1828', myState: 'WA' });
+  check(/<BAND:3>20m/.test(withFreq), 'BAND derived from FREQ when the caller gave none');
+  check(/<MY_STATE:2>WA/.test(withFreq), 'MY_STATE written');
+
+  // Wiring: every save and every activation export passes through the fill,
+  // and the Act screen refuses a contact with no frequency.
+  const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf-8');
+  const save = main.slice(main.indexOf('async function saveQsoRecord('), main.indexOf('async function saveQsoRecord(') + 6000);
+  check(/activationStationFillFor\(qsoData\)/.test(save), 'saveQsoRecord fills activation station fields');
+  const exportCalls = main.match(/writeActivationAdifRaw\([^)]*\)/g) || [];
+  check(exportCalls.length >= 3 && exportCalls.every(c => /fillActivationExport\(/.test(c)), 'every activation export is filled (' + exportCalls.length + ')');
+  const app = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf-8');
+  const act = app.slice(app.indexOf('async function activatorLogContact('), app.indexOf('async function activatorLogContact(') + 4000);
+  check(/if \(!freqKhz\) \{[\s\S]{0,400}activatorFreqInput\.focus\(\);\s*return;/.test(act), 'Act screen asks for the frequency instead of logging none');
 }
 // ───────────────────────────────────────────────────────────────────────────
 for (const f of _cleanup) { try { fs.unlinkSync(f); } catch {} }
