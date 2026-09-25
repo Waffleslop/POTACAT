@@ -45,7 +45,7 @@
   // saves the whole list. When the checklist changes a rig's setup fields
   // with Settings open underneath, bring that copy up to date, or the next
   // Settings save would put the old values back.
-  const RIG_SETUP_FIELDS = ['setupDone', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupPassed', 'setupShareId', 'setupShared'];
+  const RIG_SETUP_FIELDS = ['setupDone', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupPassed', 'setupShareId', 'setupShared', 'setupMeasured'];
   async function syncSettingsRigCopy() {
     try {
       if (typeof currentRigs === 'undefined' || !Array.isArray(currentRigs) || !currentRigs.length) return;

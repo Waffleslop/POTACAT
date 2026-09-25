@@ -256,7 +256,7 @@ t('peMachine tells the 64-bit LibFT4222 from the 32-bit one', () => {
 t('main.js: settings saves keep setup progress; test-transmit restore trusts only a readback; scope finds our FTDI copy', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\s+/g, ' ');
   const has = (snip) => assert.ok(main.includes(snip.replace(/\s+/g, ' ')), 'main.js missing: ' + snip);
-  has("const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared'];");
+  has("const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured'];");
   has('_lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() }; if (!isRemoteActive()) stationSetupReconcilePower(Number(watts) || 0);');
   has('const back = await waitForPowerReadback(sentAt, (w) => w > testW + 0.5, 6000);');
   has("if (process.platform === 'win32') pre('PATH', ';');");

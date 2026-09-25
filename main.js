@@ -3595,6 +3595,22 @@ function stationSetupPayload(rigId) {
     for (const st of firstPass) rig.setupPassed[st.id] = Date.now();
     try { saveSettings(settings); } catch {}
   }
+  // Keep the numbers behind a passing listen / test transmit on the rig, so a
+  // later "Share my working setup" still carries them when the step shows
+  // "Worked on <date>" from an earlier session (lib/setup-share.js).
+  {
+    const r = stationSetupResultsFor(rig.id);
+    const m = rig.setupMeasured || {};
+    let changed = false;
+    if (r.rxTest && (r.rxTest.result === 'ok' || r.rxTest.result === 'low') && Number.isFinite(r.rxTest.dbfs)
+        && (!m.rx || m.rx.at !== r.rxTest.at)) {
+      m.rx = { dbfs: r.rxTest.dbfs, at: r.rxTest.at }; changed = true;
+    }
+    if (r.txTest && r.txTest.result === 'ok' && (!m.tx || m.tx.at !== r.txTest.at)) {
+      m.tx = { watts: r.txTest.watts || 0, swr: r.txTest.swr || 0, byOperator: !!r.txTest.byOperator, at: r.txTest.at }; changed = true;
+    }
+    if (changed) { rig.setupMeasured = m; try { saveSettings(settings); } catch {} }
+  }
   const prefs = { hidden: !!rig.setupChecklistHidden, announced: rig.setupAnnounced || [] };
   return {
     rig: { id: rig.id, name: rig.name || rig.model || 'Radio', model: rig.model || '', active: rig.id === settings.activeRigId },
@@ -3750,7 +3766,8 @@ async function stationSetupShareSend(rigId, req = {}) {
 async function flushPendingSetupShares() {
   const pending = SetupShare.prunePending(settings.setupSharePending);
   if ((settings.setupSharePending || []).length !== pending.length) { settings.setupSharePending = pending; try { saveSettings(settings); } catch {} }
-  for (const e of pending) {
+  for (const [i, e] of pending.entries()) {
+    if (i) await sleepMs(SetupShare.FLUSH_SPACING_MS);
     const status = await postSetupShare(e.payload);
     const outcome = SetupShare.deliveryOutcome(status);
     if (outcome === 'sent') {
@@ -32464,7 +32481,7 @@ app.whenReady().then(() => {
     // keys keeps main's — otherwise the next rig edit would wipe them and the
     // checklist would nag about steps that already work.
     if (Array.isArray(newSettings.rigs) && Array.isArray(settings.rigs)) {
-      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared'];
+      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured'];
       newSettings.rigs = newSettings.rigs.map((r) => {
         const cur = r && settings.rigs.find(x => x && x.id === r.id);
         if (!cur) return r;

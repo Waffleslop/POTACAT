@@ -158,10 +158,56 @@ t('pending shares: newest per radio, none older than 30 days, capped', () => {
   assert.deepStrictEqual(S.prunePending(undefined, now), []);
 });
 
-t('delivery: 2xx sent; unreachable, 404, 429 and 5xx kept; other refusals dropped', () => {
+t('delivery: 2xx sent; only 400 and 413 dropped; everything else (Cloudflare included) kept', () => {
   assert.strictEqual(S.deliveryOutcome(201), 'sent');
-  for (const c of [0, 404, 408, 429, 500, 503]) assert.strictEqual(S.deliveryOutcome(c), 'retry', String(c));
-  for (const c of [400, 401, 413, 422]) assert.strictEqual(S.deliveryOutcome(c), 'drop', String(c));
+  assert.strictEqual(S.deliveryOutcome(200), 'sent');
+  for (const c of [400, 413]) assert.strictEqual(S.deliveryOutcome(c), 'drop', String(c));
+  for (const c of [0, 401, 403, 404, 405, 408, 415, 422, 429, 500, 503, 520, 522, 526]) {
+    assert.strictEqual(S.deliveryOutcome(c), 'retry', String(c));
+  }
+});
+
+t('an audio device named after its owner is withheld, and the preview says so', () => {
+  const p = build({ audioLabels: { input: "Casey's AirPods Pro", output: 'John’s iPhone Microphone' } });
+  const json = JSON.stringify(p);
+  assert.ok(!/Casey|John/.test(json), json);
+  assert.strictEqual(p.audio.inputLabel, null);
+  assert.strictEqual(p.audio.outputLabel, null);
+  assert.strictEqual(p.audio.labelsWithheld, true);
+  assert.ok(S.describeShare(p).some(l => l.label === 'Audio device name' && /person's name/.test(l.value)));
+  const q = build();
+  assert.strictEqual(q.audio.labelsWithheld, false);
+  assert.strictEqual(q.audio.inputLabel, 'Microphone (USB Audio CODEC)');
+  for (const plain of ['Microphone (USB Audio CODEC)', 'Line In (Realtek(R) Audio)', 'Speakers (2- FT-710)', 'Its mic']) {
+    assert.strictEqual(S.labelHasName(plain), false, plain);
+  }
+});
+
+t('the transmit tick says what it rests on: measured, operator, or an earlier pass', () => {
+  assert.strictEqual(build().measured.txTestEvidence, 'measured');
+  const op = build({ live: { ...live, txTest: { result: 'ok', watts: 0, swr: 0, byOperator: true, at: 1 } } });
+  assert.strictEqual(op.measured.txTestEvidence, 'operator');
+  assert.strictEqual(op.measured.txTestWatts, null);
+  // Passed in an earlier session: the numbers kept on the rig are sent.
+  const at = Date.UTC(2026, 8, 24);
+  const earlier = build({ live: { clock: live.clock }, rig: { ...rig, setupMeasured: { rx: { dbfs: -44.2, at }, tx: { watts: 4.8, swr: 1.4, byOperator: false, at } } } });
+  assert.strictEqual(earlier.measured.txTestEvidence, 'measured');
+  assert.strictEqual(earlier.measured.txTestWatts, 4.8);
+  assert.strictEqual(earlier.measured.rxDbfs, -44);
+  assert.strictEqual(earlier.measured.txTestOn, '2026-09-24');
+  // Passed before the numbers were kept: the tick stays, flagged as unrecorded.
+  const bare = build({ live: {} });
+  assert.strictEqual(bare.measured.txTestEvidence, 'unrecorded');
+  assert.strictEqual(bare.measured.txTestWatts, null);
+  assert.ok(S.describeShare(bare).some(l => /no reading kept/.test(l.value)));
+  // No transmit step passing: no evidence claimed at all.
+  const noTx = build({ result: { ...result, steps: result.steps.filter(x => x.id !== 'tx-test') } });
+  assert.strictEqual(noTx.measured.txTestEvidence, null);
+});
+
+t('app.channel follows the version', () => {
+  assert.strictEqual(build().app.channel, 'release');
+  assert.strictEqual(build({ appVersion: '1.10.23-beta.2' }).app.channel, 'beta');
 });
 
 // --- wiring guards ----------------------------------------------------------
@@ -184,7 +230,11 @@ t('main: undelivered shares are machine-global and retried at launch; share fiel
   assert.ok(/'setupSharePending',/.test(main.slice(main.indexOf('const GLOBAL_KEYS'), main.indexOf(']);', main.indexOf('const GLOBAL_KEYS')))));
   assert.ok(/SETUP_KEYS = \[[^\]]*'setupShareId'[^\]]*'setupShared'/.test(main));
   assert.ok(/flushPendingSetupShares\(\)/.test(main.slice(main.indexOf('_stationSetupLaunchLastVersion = settings.lastVersion'))));
-  assert.ok(/'setupShareId', 'setupShared'\]/.test(rend), 'renderer keeps Settings\' rig copy in step');
+  assert.ok(/'setupShareId', 'setupShared', 'setupMeasured'\]/.test(rend), 'renderer keeps Settings\' rig copy in step');
+  assert.ok(/SETUP_KEYS = \[[^\]]*'setupMeasured'/.test(main));
+  const flush = main.slice(main.indexOf('async function flushPendingSetupShares'));
+  assert.ok(/sleepMs\(SetupShare\.FLUSH_SPACING_MS\)/.test(flush.slice(0, 1500)), 'queued deliveries are spaced (shared-NAT rate limit)');
+  assert.ok(/rig\.setupMeasured = m/.test(main), 'passing measurements are kept on the rig');
 });
 
 t('renderer: never sends anything itself, and shows the preview before Send', () => {
