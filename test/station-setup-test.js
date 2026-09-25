@@ -278,5 +278,25 @@ t('renderer: window, entry points, launch card, bug-report line', () => {
   assert.ok(app.includes('window.openStationSetup(newId)'), 'Add Rig opens the checklist');
 });
 
+// K3SBP's 8600, 2026-09-25: the restore safety saw the 5 W readback 80 ms
+// after the drop and set the radio back to 100 W mid-test.
+t('the power-restore safety stays out of a test that is still running', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 300);
+  assert.ok(/if \(!m \|\| _stationSetupTxTest \|\| _stationSetupTxBusy\) return;/.test(rec));
+  const run = main.slice(main.indexOf('async function runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest('));
+  assert.ok(/_stationSetupTxBusy = true;\s*try \{ return await _runStationSetupTxTest\(rigId, opts\); \}\s*finally \{ _stationSetupTxBusy = false; \}/.test(run),
+    'held from before the power drop until the restore is confirmed');
+});
+
+// K3SBP 2026-09-25: typed a status label (FLEX) in the rig editor, pressed
+// the main Settings Save, and the edit was dropped without a word.
+t('Settings Save commits an open rig editor first', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const save = app.slice(app.indexOf("settingsSave.addEventListener('click'"), app.indexOf("settingsSave.addEventListener('click'") + 700);
+  assert.ok(/if \(rigEditorMode\) \{\s*const committed = await saveRigEditor\(\);\s*if \(!committed\) return;/.test(save));
+  assert.ok(/rigSaveBtn\.addEventListener\('click', \(\) => \{ saveRigEditor\(\); \}\);/.test(app));
+});
+
 console.log(`Station Setup: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

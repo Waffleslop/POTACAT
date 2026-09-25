@@ -2827,7 +2827,9 @@ if (flexDiscoverBtn) {
   });
 }
 
-rigSaveBtn.addEventListener('click', async () => {
+// Commit the rig editor. Returns false only when the operator backed out of
+// the confirm below, so a caller knows the edit is still pending.
+async function saveRigEditor() {
   const name = setRigName.value.trim() || 'Unnamed Rig';
   const rigCatLabelVal = (document.getElementById('set-rig-cat-label')?.value || '').trim().toUpperCase().slice(0, 4);
   const catTarget = buildCatTargetFromForm();
@@ -2847,7 +2849,7 @@ rigSaveBtn.addEventListener('click', async () => {
       'This is WRONG for full-size DigiRig and similar two-port adapters — those have a SECOND COM port for PTT, you should pick that one instead.\n\n' +
       'Save with same port?'
     );
-    if (!ok) return;
+    if (!ok) return false;
   }
 
   const rigAudioIn = rigRemoteAudioInput.value || '';
@@ -2939,7 +2941,9 @@ rigSaveBtn.addEventListener('click', async () => {
     activeRigCatLabel = editedActive.catLabel || '';
     refreshCatPillLabel();
   }
-});
+  return true;
+}
+rigSaveBtn.addEventListener('click', () => { saveRigEditor(); });
 
 // --- Multi-select dropdowns ---
 // K3SBP 2026-05-14: removed the "Digital (all)" group preset from the mode
@@ -15719,6 +15723,15 @@ document.getElementById('settings-import').addEventListener('click', async () =>
 });
 
 settingsSave.addEventListener('click', async () => {
+  // A rig being edited is part of what the operator is saving. Settings Save
+  // used to ignore the open rig editor, write the rig list WITHOUT the edit
+  // and close the dialog — typing a status label ("FLEX") and pressing Save
+  // silently lost it (K3SBP 2026-09-25). Commit it first; if the operator
+  // backs out of the editor's own confirm, stay open with the edit intact.
+  if (rigEditorMode) {
+    const committed = await saveRigEditor();
+    if (!committed) return;
+  }
   // Assigns the module global (no `const`) so the right-click watchlist
   // buttons see the newly saved list without a reload.
   watchlistRaw = setWatchlist.value.trim();

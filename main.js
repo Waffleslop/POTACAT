@@ -3492,6 +3492,7 @@ const stationSetupResults = new Map(); // rigId -> { rxTest, txDeviceTest, txTes
 // before the renderer's What's New check rewrites settings.lastVersion.
 let _stationSetupLaunchLastVersion;
 let _stationSetupNotifyTimer = null;
+let _stationSetupTxBusy = false;       // a test transmit is running (see runStationSetupTxTest)
 let _stationSetupTxTest = null;        // { peakW, fwdEvents, peakSwr } while a test transmit runs
 let _lastPowerReadback = null;         // { watts, at } — the radio's own report, never our optimism
 let _setupPowerRestoreAttempt = 0;
@@ -3661,7 +3662,7 @@ const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 // K3SBP's radio sat at 1 W for weeks after a restore that was sent, not seen).
 function stationSetupReconcilePower(watts) {
   const m = settings.setupTxPowerRestore;
-  if (!m || _stationSetupTxTest) return;
+  if (!m || _stationSetupTxTest || _stationSetupTxBusy) return;
   if (m.rigId && m.rigId !== settings.activeRigId) return;
   if (watts > m.testWatts + 0.5) {
     delete settings.setupTxPowerRestore;
@@ -3800,7 +3801,23 @@ async function waitForPowerReadback(sinceTs, predicate, timeoutMs) {
  * by the radio's own readback. Operator-initiated only (the renderer asks
  * first, with the antenna/dummy-load warning).
  */
-async function runStationSetupTxTest(rigId, { keepPower = false } = {}) {
+// Held for the WHOLE test — from before the power is lowered until the
+// restore is confirmed. stationSetupReconcilePower used to key off
+// _stationSetupTxTest, which is only set once the 1.5 s settle after
+// lowering is over: the 5 W readback arrived first, read as "a restore that
+// never landed", and set the radio back to 100 W mid-test (K3SBP's 8600,
+// 2026-09-25, 80 ms after the drop).
+async function runStationSetupTxTest(rigId, opts) {
+  if (_stationSetupTxBusy) {
+    const rig = stationSetupRigById(rigId);
+    return rig ? (stationSetupResultsFor(rig.id).txTest || null) : null;
+  }
+  _stationSetupTxBusy = true;
+  try { return await _runStationSetupTxTest(rigId, opts); }
+  finally { _stationSetupTxBusy = false; }
+}
+
+async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   const rig = stationSetupRigById(rigId);
   const r = stationSetupResultsFor(rig ? rig.id : '');
   const done = (t) => { r.txTest = { ...t, at: Date.now() }; stationSetupNotify(); return r.txTest; };
