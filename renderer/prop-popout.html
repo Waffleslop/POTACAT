@@ -41,6 +41,10 @@
     .pp-table th { position: sticky; top: 0; background: var(--bg-secondary); padding: 3px 8px; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-primary); }
     .pp-table td { padding: 3px 8px; border-bottom: 1px solid var(--border-primary); white-space: nowrap; }
     .pp-table tr:hover { background: var(--bg-hover); }
+    .pp-table tr.prop-empty-row td { padding: 14px 12px; white-space: normal; text-align: center; color: var(--text-dim); }
+    .pp-table tr.prop-empty-row:hover { background: transparent; }
+    .prop-empty-title { color: var(--text-secondary); font-size: 13px; margin-bottom: 4px; }
+    .prop-empty-detail { font-size: 12px; }
     .pp-source-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
     .pp-qrz-link { color: var(--accent-blue, #4fc3f7); text-decoration: none; }
     .pp-qrz-link:hover { text-decoration: underline; }
@@ -148,6 +152,7 @@
   </div>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="../lib/prop-empty-state.js"></script>
   <script src="prop-popout.js"></script>
 </body>
 </html>

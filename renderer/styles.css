@@ -5922,6 +5922,17 @@ a.settings-echocat-badge-link:hover {
   z-index: 2;
 }
 
+/* Empty Propagation table: says why it is empty and when the next check is */
+#rbn-table tbody tr.prop-empty-row td {
+  padding: 14px 12px;
+  white-space: normal;
+  text-align: center;
+  color: var(--text-dim);
+}
+#rbn-table tbody tr.prop-empty-row:hover { background: transparent; }
+.prop-empty-title { color: var(--text-secondary); font-size: 13px; margin-bottom: 4px; }
+.prop-empty-detail { font-size: 12px; }
+
 #rbn-table tbody tr {
   border-bottom: 1px solid var(--border-primary);
 }

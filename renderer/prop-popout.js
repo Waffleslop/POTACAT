@@ -234,7 +234,8 @@ function _applyPopoutTheme(payload) {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OSM', maxZoom: 18, className: 'dark-tiles',
     }).addTo(map);
-    markerLayer = L.layerGroup().addTo(map);
+    // featureGroup: updateNightOverlay() needs bringToFront (see app.js initRbnMap).
+    markerLayer = L.featureGroup().addTo(map);
     updateHomeMarker();
     updateNightOverlay();
     setInterval(updateNightOverlay, 60000);
@@ -278,7 +279,7 @@ function _applyPopoutTheme(payload) {
         fillColor: '#000', fillOpacity: 0.25, color: '#4fc3f7', weight: 1, opacity: 0.4, interactive: false,
       }).addTo(map);
     }
-    if (markerLayer) markerLayer.bringToFront();
+    if (markerLayer && markerLayer.bringToFront) markerLayer.bringToFront();
   }
 
   // --- Filtering ---
@@ -377,9 +378,50 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // Reports inside the max age that only the band/mode filter hides.
+  function countHiddenByFilter() {
+    var maxAge = parseInt(maxAgeInput.value, 10) || 30;
+    var maxAgeSecs = maxAge * (ageUnitSelect.value === 'h' ? 3600 : 60);
+    var n = 0;
+    if (showRbn) rbnSpots.forEach(function(s) { if (spotAgeSecs(s.spotTime) <= maxAgeSecs) n++; });
+    if (showPskr) pskrSpots.forEach(function(s) { if (spotAgeSecs(s.spotTime) <= maxAgeSecs) n++; });
+    return n;
+  }
+
+  // Same sentence as the main window's Propagation view (lib/prop-empty-state.js).
+  function renderEmptyRow() {
+    if (!window.PropEmptyState) return;
+    var st = lastPropStatus || {};
+    var msg = window.PropEmptyState.describeEmptyProp({
+      myCallsign: st.myCallsign,
+      showRbn: showRbn,
+      showPskr: showPskr,
+      hiddenCount: countHiddenByFilter(),
+      rbn: st.rbn || {},
+      pskr: st.pskr || {},
+    });
+    var tr = document.createElement('tr');
+    tr.className = 'prop-empty-row';
+    var td = document.createElement('td');
+    td.colSpan = 8;
+    var title = document.createElement('div');
+    title.className = 'prop-empty-title';
+    title.textContent = msg.title;
+    td.appendChild(title);
+    if (msg.detail) {
+      var detail = document.createElement('div');
+      detail.className = 'prop-empty-detail';
+      detail.textContent = msg.detail;
+      td.appendChild(detail);
+    }
+    tr.appendChild(td);
+    tableBody.appendChild(tr);
+  }
+
   function renderTable() {
     tableBody.innerHTML = '';
     var sorted = getFilteredSpots().reverse(); // newest first
+    if (sorted.length === 0) { renderEmptyRow(); return; }
 
     sorted.forEach(function(s) {
       var tr = document.createElement('tr');
@@ -517,13 +559,16 @@ function _applyPopoutTheme(payload) {
       pskrDetailEl.textContent = st.pskr.spotCount + ' spots' + nextStr;
     } else {
       pskrDotEl.className = 'pp-status-dot disconnected';
-      pskrDetailEl.textContent = 'polling…';
+      pskrDetailEl.textContent = st.pskr.lastError
+        ? st.pskr.lastError + (st.pskr.nextPollAt ? ' · retry ' + fmtCountdown(st.pskr.nextPollAt) : '')
+        : 'polling…';
     }
   }
 
   window.api.onPropStatus(function(data) {
     lastPropStatus = data;
     renderPropStatus();
+    if (tableBody.querySelector('.prop-empty-row')) renderTable();
   });
 
   // Re-render countdown every second so the "next poll in 4:32" ticks down

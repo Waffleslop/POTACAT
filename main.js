@@ -5281,6 +5281,7 @@ function sendPropStatus() {
       connected: !!(pskrMap && pskrMap.connected),
       spotCount: pskrMapSpots.length,
       nextPollAt: pskrMap ? pskrMap.nextPollAt : null,
+      ...pskrMapPollState(),
     },
   });
 }
@@ -7017,7 +7018,21 @@ function disconnectFreedvReporter() {
 }
 
 // --- PSKReporter Map view ---
+// Poll outcome carried on every status push, so an empty Propagation table
+// can say "checked at 00:32z, nobody heard you" vs "HTTP 526 since 00:32z"
+// (lib/prop-empty-state.js).
+function pskrMapPollState() {
+  if (!pskrMap) return {};
+  return {
+    lastOkAt: pskrMap.lastOkAt || null,
+    lastError: pskrMap.lastError || null,
+    lastErrorAt: pskrMap.lastErrorAt || null,
+    nextPollAt: pskrMap.nextPollAt || null,
+  };
+}
+
 function sendPskrMapStatus(s) {
+  s = { ...pskrMapPollState(), ...s };
   if (win && !win.isDestroyed()) win.webContents.send('pskr-map-status', s);
   // sendToClient() guards on readyState; mirror broadcastSpots() rather than
   // hasClient() to avoid the silent-drop on auto-auth connections.
@@ -7150,7 +7165,9 @@ function connectPskrMap() {
   pskrMap.on('error', (msg) => {
     console.error(msg);
     sendCatLog(`[PSKRMap] ${msg}`);
-    sendPskrMapStatus({ connected: false, error: msg });
+    // The client schedules its retry right after emitting 'error'; wait a
+    // tick so the push carries the retry time.
+    setImmediate(() => sendPskrMapStatus({ connected: false, error: msg }));
   });
 
   pskrMap.connect({ senderCallsign: myCall });

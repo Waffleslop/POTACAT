@@ -19512,7 +19512,10 @@ function initRbnMap() {
     className: 'dark-tiles',
   }).addTo(rbnMap);
 
-  rbnMarkerLayer = L.layerGroup().addTo(rbnMap);
+  // featureGroup, not layerGroup: updateRbnNightOverlay() calls bringToFront(),
+  // which a layerGroup does not have — the throw aborted this function on the
+  // first open of the view, before the table rendered or the age tick armed.
+  rbnMarkerLayer = L.featureGroup().addTo(rbnMap);
 
   // Bind QRZ handlers inside popups
   bindPopupClickHandlers(rbnMap);
@@ -19588,7 +19591,46 @@ function updateRbnNightOverlay() {
       interactive: false,
     }).addTo(rbnMap);
   }
-  if (rbnMarkerLayer) rbnMarkerLayer.bringToFront();
+  if (rbnMarkerLayer && rbnMarkerLayer.bringToFront) rbnMarkerLayer.bringToFront();
+}
+
+// Reports inside the max age that only the band/mode filter hides — what an
+// empty table's sentence counts (lib/prop-empty-state.js).
+function countRbnHiddenByFilter() {
+  const maxAge = parseInt(rbnMaxAgeInput.value, 10) || 30;
+  const maxAgeSecs = maxAge * (rbnAgeUnitSelect.value === 'h' ? 3600 : 60);
+  let n = 0;
+  if (propShowRbn) for (const s of rbnSpots) if (spotAgeSecs(s.spotTime) <= maxAgeSecs) n++;
+  if (propShowPskr) for (const s of pskrMapSpots) if (spotAgeSecs(s.spotTime) <= maxAgeSecs) n++;
+  return n;
+}
+
+function renderRbnEmptyRow() {
+  const msg = window.PropEmptyState && window.PropEmptyState.describeEmptyProp({
+    myCallsign,
+    showRbn: propShowRbn,
+    showPskr: propShowPskr,
+    hiddenCount: countRbnHiddenByFilter(),
+    rbn: { connected: rbnConnected },
+    pskr: pskrMapPollState,
+  });
+  if (!msg) return;
+  const tr = document.createElement('tr');
+  tr.className = 'prop-empty-row';
+  const td = document.createElement('td');
+  td.colSpan = 8;
+  const title = document.createElement('div');
+  title.className = 'prop-empty-title';
+  title.textContent = msg.title;
+  td.appendChild(title);
+  if (msg.detail) {
+    const detail = document.createElement('div');
+    detail.className = 'prop-empty-detail';
+    detail.textContent = msg.detail;
+    td.appendChild(detail);
+  }
+  tr.appendChild(td);
+  rbnTableBody.appendChild(tr);
 }
 
 function getFilteredRbnSpots() {
@@ -19707,6 +19749,7 @@ function renderRbnTable() {
 
   // Show newest spots first
   const sorted = [...getFilteredRbnSpots()].reverse();
+  if (sorted.length === 0) { renderRbnEmptyRow(); return; }
 
   for (const s of sorted) {
     const tr = document.createElement('tr');
@@ -19828,6 +19871,7 @@ window.api.onRbnSpots((spots) => {
 
 window.api.onRbnStatus(({ connected }) => {
   rbnConnected = connected;
+  if ((currentView === 'rbn' || activatorRbnVisible) && rbnTableBody.querySelector('.prop-empty-row')) renderRbnTable();
 });
 
 // --- PSKReporter status listener ---
@@ -19851,9 +19895,12 @@ window.api.onPskrMapSpots((spots) => {
 });
 
 let pskrMapNextPollAt = null;
-window.api.onPskrMapStatus(({ connected, error, spotCount, nextPollAt, pollUpdate }) => {
+let pskrMapPollState = {};
+window.api.onPskrMapStatus(({ connected, error, spotCount, nextPollAt, pollUpdate, lastOkAt, lastError, lastErrorAt }) => {
   pskrMapConnected = connected;
   if (nextPollAt) pskrMapNextPollAt = nextPollAt;
+  pskrMapPollState = { connected, lastOkAt, lastError, lastErrorAt, nextPollAt };
+  if ((currentView === 'rbn' || activatorRbnVisible) && rbnTableBody.querySelector('.prop-empty-row')) renderRbnTable();
   updateSettingsConnBar();
   if (!pollUpdate) {
     if (connected && spotCount != null) showLogToast(`PSKReporter: ${spotCount} spots (polling every 5 min)`, { duration: 4000 });
