@@ -12,7 +12,7 @@
   },
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/utf8-console.js && electron .",
     "build-ft8": "cd lib/ft8_native && node-gyp rebuild",
     "build-freedv": "cd lib/freedv_native && node-gyp rebuild",
     "build-rade": "node scripts/build-rade.js",
