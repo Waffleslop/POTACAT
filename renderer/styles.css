@@ -1014,6 +1014,7 @@ button:hover {
   border-radius: 4px;
   cursor: pointer;
 }
+#voice-macro-hear.active { background: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); color: #0b1a14; }
 .cw-macro-esc:hover { background: var(--accent-red); color: #fff; }
 
 .status.disconnected {

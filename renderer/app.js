@@ -20576,6 +20576,29 @@ if (cwMacroInput) {
 const voiceMacroBar = document.getElementById('voice-macro-bar');
 const voiceMacroBtns = document.getElementById('voice-macro-btns');
 const voiceMacroRecBtn = document.getElementById('voice-macro-rec');
+// "HEAR": play a voice macro on this computer's default output too, while it
+// transmits (KW4FM 2026-09-25: "I would still like to hear a playback of
+// your voice macros when you choose it for transmit"). Off by default — on a
+// radio that mixes its front mic with USB audio, speakers can feed back into
+// the mic; headphones or the radio's DATA mode avoid that.
+const voiceMacroHearBtn = document.getElementById('voice-macro-hear');
+let voiceMacroMonitor = false;
+let voiceMonitorCtx = null;
+let voiceMonitorSource = null;
+function renderVoiceMacroHear() {
+  if (voiceMacroHearBtn) voiceMacroHearBtn.classList.toggle('active', voiceMacroMonitor);
+}
+if (voiceMacroHearBtn) {
+  window.api.getSettings().then(s => { voiceMacroMonitor = !!(s && s.voiceMacroMonitor); renderVoiceMacroHear(); }).catch(() => {});
+  voiceMacroHearBtn.addEventListener('click', () => {
+    voiceMacroMonitor = !voiceMacroMonitor;
+    renderVoiceMacroHear();
+    window.api.saveSettings({ voiceMacroMonitor });
+    showLogToast(voiceMacroMonitor
+      ? 'Voice macros will play on this computer while they transmit. Use headphones if your radio also picks up its microphone.'
+      : 'Voice macros will no longer play on this computer.', { duration: 5000 });
+  });
+}
 const voiceMacroEditor = document.getElementById('voice-macro-editor');
 const quickShowVoiceMacros = document.getElementById('quick-show-voice-macros');
 let voiceMacroBoxVisible = localStorage.getItem('voiceMacroBoxVisible') === 'true';
@@ -20722,7 +20745,21 @@ async function playVoiceMacro(idx, btn) {
   voicePlaybackCtx = new AudioContext();
   if (voicePlaybackCtx.state === 'suspended') await voicePlaybackCtx.resume();
   if (outputDeviceId && voicePlaybackCtx.setSinkId) {
-    try { await voicePlaybackCtx.setSinkId(outputDeviceId); } catch (e) { console.warn('[Voice] Output device error:', e.message); }
+    try {
+      await voicePlaybackCtx.setSinkId(outputDeviceId);
+    } catch (e) {
+      // The same rule as FT8 and Tune: a CONFIGURED rig output that will not
+      // open is a refusal. Playing to the default device instead keyed the
+      // radio with no audio and put the macro on the PC speakers.
+      if (outputDeviceId.indexOf('alsa:') !== 0) {
+        console.warn('[Voice] Output device error:', e.message);
+        try { voicePlaybackCtx.close(); } catch (_) {}
+        voicePlaybackCtx = null;
+        window.api.jtcatTxAudioFault({ kind: 'output-unavailable', context: 'voice', name: (e && e.name) || '', reason: (e && e.message) || String(e), idPrefix: outputDeviceId.slice(0, 12) });
+        return;
+      }
+      console.warn('[Voice] Output device error (ALSA, using the default):', e.message);
+    }
   }
   voicePlaybackCtx.decodeAudioData(bytes.buffer, function(audioBuffer) {
     voicePlayingIdx = idx;
@@ -20730,8 +20767,21 @@ async function playVoiceMacro(idx, btn) {
     voicePlaybackSource = voicePlaybackCtx.createBufferSource();
     voicePlaybackSource.buffer = audioBuffer;
     voicePlaybackSource.connect(voicePlaybackCtx.destination);
+    // Monitor copy on the default output. Skipped when the rig IS the
+    // default output: the copy would go to the radio a second time.
+    var monitor = null;
+    if (voiceMacroMonitor && outputDeviceId && outputDeviceId !== 'default') {
+      try {
+        voiceMonitorCtx = new AudioContext();
+        monitor = voiceMonitorCtx.createBufferSource();
+        monitor.buffer = audioBuffer;
+        monitor.connect(voiceMonitorCtx.destination);
+        voiceMonitorSource = monitor;
+      } catch (e) { monitor = null; }
+    }
     window.api.voiceMacroPtt(true);
     voicePlaybackSource.start(0);
+    if (monitor) { try { monitor.start(0); } catch (e) {} }
     voicePlaybackSource.onended = function() { stopVoicePlayback(); };
   });
 }
@@ -20739,6 +20789,8 @@ async function playVoiceMacro(idx, btn) {
 function stopVoicePlayback() {
   if (voicePlaybackSource) { try { voicePlaybackSource.stop(); } catch(e) {} voicePlaybackSource = null; }
   if (voicePlaybackCtx) { voicePlaybackCtx.close().catch(function(){}); voicePlaybackCtx = null; }
+  if (voiceMonitorSource) { try { voiceMonitorSource.stop(); } catch (e) {} voiceMonitorSource = null; }
+  if (voiceMonitorCtx) { voiceMonitorCtx.close().catch(function(){}); voiceMonitorCtx = null; }
   window.api.voiceMacroPtt(false);
   voicePlayingIdx = -1;
   if (voiceMacroBtns) voiceMacroBtns.querySelectorAll('button.active').forEach(b => b.classList.remove('active'));

@@ -191,5 +191,33 @@ test('JTCAT Tune: a CONFIGURED output that fails setSinkId refuses and unkeys, n
   assert.ok(describeJtcatTxAudioFault({ name: 'NotFoundError' }).startsWith('TX refused:'));
 });
 
+// Voice macros keyed PTT and played to the DEFAULT device when the saved rig
+// output would not open — the same silent-carrier failure, with the operator's
+// voice out of the PC speakers. Refused before PTT now (found 2026-09-25 while
+// adding KW4FM's monitor).
+test('Voice macro: a CONFIGURED output that fails setSinkId refuses before PTT', () => {
+  const start = APP.indexOf('async function playVoiceMacro(');
+  const body = APP.slice(start, APP.indexOf('function stopVoicePlayback(', start));
+  const refuse = body.indexOf("context: 'voice'");
+  assert.ok(refuse !== -1 && refuse < body.indexOf('voiceMacroPtt(true)'), 'must refuse before keying');
+  assert.ok(/indexOf\('alsa:'\) !== 0/.test(body), 'raw ALSA keeps its fallback');
+  assert.ok(describeJtcatTxAudioFault({ context: 'voice', name: 'NotFoundError' }).startsWith('Voice macro refused:'));
+});
+
+// KW4FM 2026-09-25: hear a voice macro locally while it transmits.
+test('Voice macro monitor: default output only, never a second copy into the rig, stopped with the clip', () => {
+  const start = APP.indexOf('async function playVoiceMacro(');
+  const body = APP.slice(start, APP.indexOf('function stopVoicePlayback(', start));
+  assert.ok(/if \(voiceMacroMonitor && outputDeviceId && outputDeviceId !== 'default'\)/.test(body), 'skipped when the rig IS the default output');
+  assert.ok(/voiceMonitorCtx = new AudioContext\(\);/.test(body) && !/voiceMonitorCtx\.setSinkId/.test(body), 'plays on the default output');
+  const stop = APP.slice(APP.indexOf('function stopVoicePlayback('), APP.indexOf('function stopVoicePlayback(') + 800);
+  assert.ok(/voiceMonitorSource\.stop\(\)/.test(stop) && /voiceMonitorCtx\.close\(\)/.test(stop));
+  const WEB = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const play = WEB.slice(WEB.indexOf('function playSsbMacro('), WEB.indexOf('function stopSsbPlayback('));
+  assert.ok(/if \(ssbMonitorOn\) \{[\s\S]{0,200}ssbPlaybackSource\.connect\(ssbMonitorGain\);\s*ssbMonitorGain\.connect\(ctx\.destination\);/.test(play), 'web: same source, sample-locked');
+  const wstop = WEB.slice(WEB.indexOf('function stopSsbPlayback('), WEB.indexOf('function stopSsbPlayback(') + 400);
+  assert.ok(/ssbMonitorGain\.disconnect\(\)/.test(wstop));
+});
+
 console.log(`\nAudio capture device: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

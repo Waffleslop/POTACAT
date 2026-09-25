@@ -9717,6 +9717,21 @@ var _paddleHoldTimer = { dit: null, dah: null };
   }
 
   // Play an SSB macro: PTT on, swap audio track, play clip, PTT off
+  // Hear a voice macro on this device while it transmits (KW4FM 2026-09-25).
+  // The same decoded source feeds the radio's track and this device's
+  // speaker, so the two stay sample-locked. Safe from feedback on this side:
+  // the phone mic is swapped OFF the sender for the whole clip. Per device.
+  var ssbMonitorOn = (function() { try { return localStorage.getItem('echoSsbMonitor') === '1'; } catch (e) { return false; } })();
+  var ssbMonitorGain = null;
+  var ssbMonitorCb = document.getElementById('echo-ssb-monitor');
+  if (ssbMonitorCb) {
+    ssbMonitorCb.checked = ssbMonitorOn;
+    ssbMonitorCb.addEventListener('change', function() {
+      ssbMonitorOn = ssbMonitorCb.checked;
+      try { localStorage.setItem('echoSsbMonitor', ssbMonitorOn ? '1' : '0'); } catch (e) {}
+    });
+  }
+
   function playSsbMacro(idx, btn) {
     if (ssbPlayingIdx >= 0) stopSsbPlayback();
     if (!audioEnabled || !pc) return;
@@ -9737,6 +9752,12 @@ var _paddleHoldTimer = { dit: null, dah: null };
           ssbPlaybackSource = ctx.createBufferSource();
           ssbPlaybackSource.buffer = audioBuffer;
           ssbPlaybackSource.connect(ssbPlaybackDest);
+          if (ssbMonitorOn) {
+            ssbMonitorGain = ctx.createGain();
+            ssbMonitorGain.gain.value = 0.8;
+            ssbPlaybackSource.connect(ssbMonitorGain);
+            ssbMonitorGain.connect(ctx.destination);
+          }
 
           // Get the sender for our audio track
           var senders = pc.getSenders();
@@ -9805,6 +9826,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
   function stopSsbPlayback() {
     if (ssbPlaybackTimer) { clearInterval(ssbPlaybackTimer); ssbPlaybackTimer = null; }
+    if (ssbMonitorGain) { try { ssbMonitorGain.disconnect(); } catch (e) {} ssbMonitorGain = null; }
     if (ssbPlaybackSource) {
       try { ssbPlaybackSource.stop(); } catch(e) {}
       ssbPlaybackSource = null;
