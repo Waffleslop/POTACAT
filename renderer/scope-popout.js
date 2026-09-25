@@ -38,7 +38,11 @@ let drawPending = false;
 
 // ─── Waterfall ─────────────────────────────────────────────────────────────
 const savedColormap = (() => { try { return localStorage.getItem('scope-colormap') || 'turbo'; } catch { return 'turbo'; } })();
-const wf = new Waterfall(wfCanvas, { bins: BINS, historyRows: 512, colormap: savedColormap, gamma: 0.6 });
+// crop: resizing the window shows more or less history at the same scale,
+// never squeezes it (Scott 2026-09-25). History = the tallest screen, so a
+// full-height window is never short of rows.
+const WF_HISTORY_ROWS = Math.min(2160, Math.max(512, Math.ceil((window.screen && window.screen.height) || 1080)));
+const wf = new Waterfall(wfCanvas, { bins: BINS, historyRows: WF_HISTORY_ROWS, colormap: savedColormap, gamma: 0.6, crop: true });
 if (!wf.supported) $('sc-unsupported').style.display = 'flex';
 $('sc-colormap').value = savedColormap;
 

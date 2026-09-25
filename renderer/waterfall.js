@@ -36,6 +36,14 @@ out vec4 fragColor;
 uniform sampler2D u_tex;
 uniform float u_rowOffset;
 uniform int u_colormap;
+// Crop mode (opts.crop): one history row per CSS pixel row, newest at the
+// top, so a shorter window shows LESS history instead of squeezing all of it
+// (Scott 2026-09-25: "if I make the window smaller, I just lose the bottom
+// part ... currently it is scrunched up to fit").
+uniform int u_crop;
+uniform float u_viewRows;   // canvas height in CSS px
+uniform float u_histRows;   // texture rows
+uniform float u_writeRow;   // next row to be written (newest = writeRow - 1)
 
 vec3 cmClassic(float t) {
   t = clamp(t, 0.0, 1.0);
@@ -54,7 +62,14 @@ vec3 cmTurbo(float t) {
   return            mix(vec3(0.98,0.73,0.05),    vec3(0.96,0.16,0.10), (t-0.88)/0.12);
 }
 void main() {
-  float tv = fract(v_uv.y + u_rowOffset);
+  float tv;
+  if (u_crop == 1) {
+    float k = floor((1.0 - v_uv.y) * u_viewRows);   // rows down from the top
+    if (k >= u_histRows) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+    tv = fract((u_writeRow - 1.0 - k + 0.5) / u_histRows);   // row centre
+  } else {
+    tv = fract(v_uv.y + u_rowOffset);
+  }
   float m = texture(u_tex, vec2(v_uv.x, tv)).r;
   vec3 c = (u_colormap == 1) ? cmTurbo(m) : cmClassic(m);
   fragColor = vec4(c, 1.0);
@@ -101,12 +116,15 @@ void main() { fragColor = u_color; }`;
   class Waterfall {
     /**
      * @param {HTMLCanvasElement} canvas - a canvas with no prior 2D context.
-     * @param {object} opts - { bins, historyRows, colormap, gamma }
+     * @param {object} opts - { bins, historyRows, colormap, gamma, crop }
+     *   crop: true = one history row per CSS pixel (resizing crops old rows
+     *   off the bottom); false (default) = all history spread over the height.
      */
     constructor(canvas, opts = {}) {
       this.canvas = canvas;
       this.bins = Math.max(16, opts.bins || 1024);
       this.historyRows = Math.max(16, opts.historyRows || 512);
+      this.crop = !!opts.crop;
       this.gamma = opts.gamma || 0.5;
       this._cmIndex = opts.colormap === 'turbo' ? 1 : 0;
       this._markers = [];
@@ -175,6 +193,10 @@ void main() { fragColor = u_color; }`;
       this._uTex = gl.getUniformLocation(this._wfProg, 'u_tex');
       this._uRowOffset = gl.getUniformLocation(this._wfProg, 'u_rowOffset');
       this._uColormap = gl.getUniformLocation(this._wfProg, 'u_colormap');
+      this._uCrop = gl.getUniformLocation(this._wfProg, 'u_crop');
+      this._uViewRows = gl.getUniformLocation(this._wfProg, 'u_viewRows');
+      this._uHistRows = gl.getUniformLocation(this._wfProg, 'u_histRows');
+      this._uWriteRow = gl.getUniformLocation(this._wfProg, 'u_writeRow');
       this._wfPos = gl.getAttribLocation(this._wfProg, 'a_pos');
       this._uLineColor = gl.getUniformLocation(this._lineProg, 'u_color');
       this._linePos = gl.getAttribLocation(this._lineProg, 'a_pos');
@@ -236,6 +258,10 @@ void main() { fragColor = u_color; }`;
       gl.uniform1i(this._uTex, 0);
       gl.uniform1i(this._uColormap, this._cmIndex);
       gl.uniform1f(this._uRowOffset, this._writeRow / this.historyRows);
+      gl.uniform1i(this._uCrop, this.crop ? 1 : 0);
+      gl.uniform1f(this._uViewRows, Math.max(1, this.canvas.clientHeight || this.canvas.height));
+      gl.uniform1f(this._uHistRows, this.historyRows);
+      gl.uniform1f(this._uWriteRow, this._writeRow);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
 
       // RX/TX marker lines.
