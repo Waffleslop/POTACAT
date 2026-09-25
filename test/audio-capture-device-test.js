@@ -171,5 +171,25 @@ test('JTCAT TX: the message names the cause, the consequence and the fix', () =>
   assert.ok(describeJtcatTxAudioFault().includes('could not be opened (unknown error)'), 'no-payload call throws or is blank');
 });
 
+// Tune keys the radio for 90 s through the same output: it used to swallow
+// the setSinkId failure (`catch {}`) and play the tone to the PC speakers.
+test('JTCAT Tune: a CONFIGURED output that fails setSinkId refuses and unkeys, never plays to the default', () => {
+  const start = APP.indexOf('async function startJtcatTuneAudio(');
+  assert.notStrictEqual(start, -1, 'startJtcatTuneAudio not found');
+  const body = APP.slice(start, APP.indexOf('function stopJtcatTuneAudio(', start));
+  assert.ok(!/setSinkId\(outputDeviceId\);\s*\}\s*catch\s*\{\s*\}/.test(body), 'setSinkId failure swallowed again');
+  const refuse = body.indexOf('jtcatTuneAudioFailed');
+  assert.ok(refuse !== -1 && refuse < body.indexOf('createOscillator'), 'must refuse before any tone is built');
+  assert.ok(/context: 'tune'/.test(body) && /jtcatTxAudioFault\(/.test(body), 'reason must reach the same fault channel as FT8');
+  assert.ok(/indexOf\('alsa:'\) !== 0/.test(body), 'raw ALSA keeps its fallback (KF1G)');
+  const catchAll = body.slice(body.lastIndexOf('catch (err)'));
+  assert.ok(/jtcatTuneAudioFailed/.test(catchAll), 'any tune audio failure unkeys the radio');
+  const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const h = MAIN.slice(MAIN.indexOf("ipcMain.on('jtcat-tune-audio-failed'"), MAIN.indexOf("ipcMain.on('jtcat-tune-toggle'"));
+  assert.ok(/stopJtcatTune\(\)/.test(h), 'main must unkey on the renderer\'s report');
+  assert.ok(describeJtcatTxAudioFault({ context: 'tune', name: 'NotFoundError' }).startsWith('Tune refused:'));
+  assert.ok(describeJtcatTxAudioFault({ name: 'NotFoundError' }).startsWith('TX refused:'));
+});
+
 console.log(`\nAudio capture device: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

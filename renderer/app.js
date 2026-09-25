@@ -28562,8 +28562,28 @@ async function startJtcatTuneAudio() {
       jtcatTxAudioCtx = new AudioContext({ sampleRate: 12000 });
     }
     if (jtcatTxAudioCtx.state === 'suspended') await jtcatTxAudioCtx.resume();
+    // Same rule as playJtcatTxAudio: a CONFIGURED output that cannot be
+    // opened is a refusal, never a fallback to the default device. Main has
+    // already keyed the radio for the whole tune (90 s): playing the tone to
+    // the PC speakers is a keyed radio with no audio, 0 W, and nothing on
+    // screen — NA7C's three weeks, through the Tune button. Raw ALSA ids keep
+    // their fallback (KF1G), as on the FT8 path.
     if (outputDeviceId && jtcatTxAudioCtx.setSinkId) {
-      try { await jtcatTxAudioCtx.setSinkId(outputDeviceId); } catch {}
+      try {
+        await jtcatTxAudioCtx.setSinkId(outputDeviceId);
+      } catch (e) {
+        if (outputDeviceId.indexOf('alsa:') !== 0) {
+          var errName = (e && e.name) || '';
+          window.api.jtcatTxAudioFault({
+            kind: 'output-unavailable', context: 'tune', name: errName,
+            reason: ((e && e.message) || String(e)) + (errName ? ' [' + errName + ']' : ''),
+            idPrefix: outputDeviceId.slice(0, 12),
+          });
+          window.api.jtcatTuneAudioFailed({ reason: (e && e.message) || errName || 'output unavailable' });
+          return;
+        }
+        console.warn('[JTCAT] Tune: could not set the ALSA output, using the default:', e && e.message);
+      }
     }
     stopJtcatTuneAudio();
     jtcatTuneOsc = jtcatTxAudioCtx.createOscillator();
@@ -28578,6 +28598,8 @@ async function startJtcatTuneAudio() {
     jtcatTuneOsc.start();
   } catch (err) {
     console.error('[JTCAT] Tune audio start failed:', err.message || err);
+    // No tone is playing, so do not leave the radio keyed for 90 s.
+    window.api.jtcatTuneAudioFailed({ reason: (err && err.message) || String(err) });
   }
 }
 function stopJtcatTuneAudio() {

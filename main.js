@@ -3834,6 +3834,7 @@ async function runStationSetupTxTest(rigId, { keepPower = false } = {}) {
     if (_stationSetupTxTest && _currentSwrRatio > _stationSetupTxTest.peakSwr) _stationSetupTxTest.peakSwr = _currentSwrRatio;
   }, 150);
   sendCatLog(`[Setup] test transmit: 3 s tone at ${keepPower ? 'the radio\'s current power' : Math.min(prevW || testW, testW) + ' W'}`);
+  const tuneStartedAt = Date.now();
   startJtcatTune();
   const keyed = jtcatTuneState.active;
   if (keyed) {
@@ -3841,6 +3842,7 @@ async function runStationSetupTxTest(rigId, { keepPower = false } = {}) {
     stopJtcatTune();
     await sleepMs(900); // meters report a beat late
   }
+  const audioFault = _jtcatTuneAudioFault && _jtcatTuneAudioFault.at >= tuneStartedAt ? _jtcatTuneAudioFault : null;
   clearInterval(swrPoll);
   const meas = _stationSetupTxTest;
   _stationSetupTxTest = null;
@@ -3864,6 +3866,12 @@ async function runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   }
 
   if (!keyed) return done({ result: 'error', message: 'The radio could not be keyed. The log panel says why.', restored, restoreNote });
+  if (audioFault) {
+    // POTACAT refused to send the tone (the radio's audio output would not
+    // open) and unkeyed at once — not a "no power" radio problem.
+    sendCatLog(`[Setup] test transmit: stopped, the radio's audio output could not be opened (${audioFault.reason})`);
+    return done({ result: 'error', message: "POTACAT stopped the test because the radio's audio output could not be opened. Choose the output again under Audio in the radio settings (the step above checks it), then test again.", restored, restoreNote });
+  }
   const watts = Math.round(meas.peakW * 10) / 10;
   const swr = meas.peakSwr > 0 ? Math.round(meas.peakSwr * 10) / 10 : 0;
   let result;
@@ -12035,6 +12043,10 @@ function _stopDirectTuneTone() {
   _jtcatTunePhase = 0;
   if (smartSdrAudio && smartSdrAudio.resetTxStream) { try { smartSdrAudio.resetTxStream(); } catch {} }
 }
+
+// Set when the renderer could not play the tune tone (Station Setup's test
+// transmit reads it to name the real cause instead of "no power came out").
+let _jtcatTuneAudioFault = null;
 
 function startJtcatTune() {
   if (jtcatTuneState.active) return;
@@ -34129,6 +34141,15 @@ app.whenReady().then(() => {
   // through the rig USB CODEC for up to 90s, so the user can dial in TX
   // power and ALC without juggling Enable TX timing. Click again to stop
   // early. Halt TX also kills it.
+  // The renderer could not play the tune tone (its configured output is gone,
+  // or the audio context failed). Unkey now rather than at the 90 s timer; the
+  // operator-facing reason arrives on 'jtcat-tx-audio-fault' when there is one.
+  ipcMain.on('jtcat-tune-audio-failed', (_e, info = {}) => {
+    if (!jtcatTuneState.active || jtcatTuneState.directIcom || jtcatDirectTxActive()) return;
+    _jtcatTuneAudioFault = { reason: String(info.reason || 'audio output unavailable'), at: Date.now() };
+    sendCatLog(`[JTCAT] Tune stopped: no tone could be played (${_jtcatTuneAudioFault.reason}) — radio unkeyed`);
+    stopJtcatTune();
+  });
   ipcMain.on('jtcat-tune-toggle', () => {
     if (jtcatTuneState.active) stopJtcatTune();
     else startJtcatTune();

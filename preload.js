@@ -477,6 +477,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatEnableTx: (enabled) => ipcRenderer.send('jtcat-enable-tx', enabled),
   jtcatHaltTx: () => ipcRenderer.send('jtcat-halt-tx'),
   jtcatTuneToggle: () => ipcRenderer.send('jtcat-tune-toggle'),
+  jtcatTuneAudioFailed: (info) => ipcRenderer.send('jtcat-tune-audio-failed', info),
   jtcatSetTxMsg: (text) => ipcRenderer.send('jtcat-set-tx-msg', text),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),
