@@ -149,5 +149,39 @@ test('GUEST PASS still never receives the owner\'s worked history', () => {
   }
 });
 
+// LZ3AW round 6: a LAN no-token or cloud-cookie browser is authenticated and
+// hydrated BEFORE its hello is read, so the history went out capless, hit the
+// cap and was skipped — and the chunked copy never followed. "Check marks
+// cover today only", every session.
+test('hydrated before hello: the hello that advertises chunks gets the whole history', () => {
+  const srv = serverWith(HISTORY);
+  const ws = fakeWs([]);                 // capabilities not known yet
+  srv._sendWorkedQsosCapped(ws);         // what hydration does
+  assert.strictEqual(ws.sent.length, 1);
+  assert.strictEqual(ws.sent[0].type, 'worked-qsos-skipped');
+  srv._handleMessage(ws, { type: 'hello', protocolVersion: protocol.PROTOCOL_VERSION, clientPlatform: 'web', clientVersion: 'test', capabilities: ['chunked-worked-qsos'] });
+  const chunks = ws.sent.filter(m => m.type === 'worked-qsos');
+  assert.ok(chunks.length >= 1, 'no chunked history after hello');
+  const got = chunks.reduce((n, c) => n + c.entries.length, 0);
+  assert.strictEqual(got, HISTORY.length);
+  // And only once, however the rest of the connection goes.
+  srv._sendWorkedQsosCapped(ws);
+  assert.strictEqual(ws.sent.filter(m => m.type === 'worked-qsos').length, chunks.length);
+});
+
+test('a hello with no chunk capability after a skip changes nothing', () => {
+  const srv = serverWith(HISTORY);
+  const ws = fakeWs([]);
+  srv._sendWorkedQsosCapped(ws);
+  srv._handleMessage(ws, { type: 'hello', protocolVersion: protocol.PROTOCOL_VERSION, clientPlatform: 'ios', clientVersion: 'test', capabilities: [] });
+  assert.strictEqual(ws.sent.filter(m => m.type === 'worked-qsos').length, 0);
+});
+
+test('the web client hides the "today only" banner when the full history arrives', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const h = src.slice(src.indexOf("case 'worked-qsos': {"), src.indexOf("case 'worked-today': {"));
+  assert.ok(/spot-worked-note[\s\S]{0,80}classList\.add\('hidden'\)/.test(h), 'banner never hidden');
+});
+
 console.log(`\nWorked-QSOs chunking: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

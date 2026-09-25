@@ -139,9 +139,15 @@ queueAsync('a client that sends hold keepalives keeps the strict 1.5 s release',
 test('the web client repeats a held contact, and stops repeating on release', () => {
   const js = R('renderer/remote.js');
   assert.ok(/ws\.send\(JSON\.stringify\(\{ type: 'paddle', contact: contact, state: 1, hold: true \}\)\);/.test(js));
-  assert.ok(/_paddleHoldTimer\[contact\] = setInterval\(/.test(js));
+  // Round 6: the keepalive ticks from a worker (page timers are clamped to
+  // 1/s, then 1/min, when the window is hidden), with page timers as fallback.
+  assert.ok(/new Worker\(URL\.createObjectURL\(new Blob\(/.test(js), 'hold keepalive runs on a worker timer');
+  assert.ok(/_paddleHoldTimer\[contact\] = setInterval\(/.test(js), 'page-timer fallback kept');
   const release = js.slice(js.indexOf('_paddleReleaseTimer[contact] = setTimeout'), js.indexOf('_paddleReleaseTimer[contact] = setTimeout') + 600);
-  assert.ok(/clearInterval\(_paddleHoldTimer\[contact\]\)/.test(release), 'the 8 s release safety stops the keepalive too');
+  assert.ok(/_stopPaddleHold\(contact\)/.test(release), 'the 8 s release safety stops the keepalive too');
+  const stop = js.slice(js.indexOf('function _stopPaddleHold('), js.indexOf('function _stopPaddleHold(') + 400);
+  assert.ok(/_paddleHoldActive\[contact\] = false/.test(stop) && /start: false/.test(stop) && /clearInterval\(_paddleHoldTimer\[contact\]\)/.test(stop),
+    'stopping a hold stops the worker tick, the fallback timer, and any tick already in flight');
   assert.ok(MESSAGES.paddle.fields.contact && MESSAGES.paddle.fields.state && MESSAGES.paddle.fields.hold,
     'the registry documents what paddle actually carries');
 });

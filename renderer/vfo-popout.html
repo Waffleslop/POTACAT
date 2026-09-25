@@ -1932,6 +1932,10 @@ window.api.onSwr((val) => {
 const fwdPwrBar = document.getElementById('fwdpwr-bar');
 const fwdPwrText = document.getElementById('fwdpwr-text');
 let fwdPwrMaxSeen = 10; // auto-scale: QRP to amp without a config knob
+// Scale against the radio's power SETTING when it is known — auto-scaling
+// alone made the first reading full scale, so a steady carrier pinned the
+// bar at 100% and it never moved (LZ3AW round 6: "a bar graph, but not
+// moving"). The setting comes from the rig-state push (currentTxPower).
 if (window.api.onFwdPower) window.api.onFwdPower((w) => {
   if (!fwdPwrBar) return;
   if (!w) {
@@ -1941,7 +1945,8 @@ if (window.api.onFwdPower) window.api.onFwdPower((w) => {
     return;
   }
   if (w > fwdPwrMaxSeen) fwdPwrMaxSeen = w;
-  const level = Math.min(1, w / fwdPwrMaxSeen);
+  const fullScale = (Number(currentTxPower) > 0) ? Math.max(Number(currentTxPower), w) : fwdPwrMaxSeen;
+  const level = Math.min(1, w / fullScale);
   const color = level < 0.9 ? '#4ecca3' : '#ffd740';
   fwdPwrBar.style.width = (level * 100) + '%';
   fwdPwrBar.style.background = color;

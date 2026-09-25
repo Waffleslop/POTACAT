@@ -586,6 +586,18 @@
     });
   }
   const spotsDropdown = document.getElementById('rc-spots-dropdown');
+  // A toolbar dropdown's panel is MOVED to <body> while it is open
+  // (openDropdownPanel — the phone toolbar fix), so container.querySelector
+  // stops finding it: every filter then read as "nothing checked", the
+  // Spots menu's second tap threw, and the worked-row toggles threw inside
+  // the worked-qsos handler (LZ3AW round 6, 2026-09-21). Look panels up
+  // through here; the first call (at load, while the panel is still in its
+  // container) remembers it.
+  function ddPanel(container) {
+    if (!container) return null;
+    if (!container._rcPanel) container._rcPanel = container.querySelector('.rc-dropdown-menu, .rc-spots-panel');
+    return container._rcPanel || container;
+  }
   const rcNewOnly = document.getElementById('rc-new-only');
   const rcHideWorked = document.getElementById('rc-hide-worked');
   const logRefSection = document.getElementById('log-ref-section');
@@ -1908,7 +1920,7 @@
         if (msg.data) {
           const map = { pota: 'pota', sota: 'sota', wwff: 'wwff', llota: 'llota', cluster: 'dxc' };
           for (const [settingKey, srcAttr] of Object.entries(map)) {
-            const cb = spotsDropdown.querySelector(`input[data-src="${srcAttr}"]`);
+            const cb = ddPanel(spotsDropdown).querySelector(`input[data-src="${srcAttr}"]`);
             if (cb) cb.checked = !!msg.data[settingKey];
           }
         }
@@ -1958,7 +1970,7 @@
 
       case 'worked-parks':
         workedParksSet = new Set(msg.refs || []);
-        spotsDropdown.querySelector('.rc-new-only-row').style.display = workedParksSet.size > 0 ? '' : 'none';
+        ddPanel(spotsDropdown).querySelector('.rc-new-only-row').style.display = workedParksSet.size > 0 ? '' : 'none';
         renderSpots();
         if (activeTab === 'map') renderMapSpots();
         break;
@@ -1977,7 +1989,10 @@
           wqChunkAccum = [];
         }
         workedQsos = new Map(entries);
-        spotsDropdown.querySelector('.rc-hide-worked-row').style.display = workedQsos.size > 0 ? '' : 'none';
+        ddPanel(spotsDropdown).querySelector('.rc-hide-worked-row').style.display = workedQsos.size > 0 ? '' : 'none';
+        // The full history arrived, so "today only" no longer applies — the
+        // banner used to stay for the whole session once shown (LZ3AW).
+        { const wn = document.getElementById('spot-worked-note'); if (wn) wn.classList.add('hidden'); }
         renderSpots();
         if (activeTab === 'map') renderMapSpots();
         break;
@@ -2002,7 +2017,7 @@
             }
           }
           if (workedQsos.size > 0) {
-            spotsDropdown.querySelector('.rc-hide-worked-row').style.display = '';
+            ddPanel(spotsDropdown).querySelector('.rc-hide-worked-row').style.display = '';
           }
           renderSpots();
           if (activeTab === 'map') renderMapSpots();
@@ -3121,7 +3136,7 @@
 
   function initMultiDropdown(container, onChange) {
     const btn = container.querySelector('.rc-dropdown-btn');
-    const menu = container.querySelector('.rc-dropdown-menu');
+    const menu = ddPanel(container);
     const textEl = container.querySelector('.rc-dd-text');
     const allCb = menu.querySelector('input[value="all"]');
     const itemCbs = [...menu.querySelectorAll('input:not([value="all"])')];
@@ -3161,9 +3176,10 @@
   }
 
   function getDropdownValues(container) {
-    const allCb = container.querySelector('input[value="all"]');
+    const panel = ddPanel(container);
+    const allCb = panel.querySelector('input[value="all"]');
     if (allCb && allCb.checked) return null;
-    const checked = [...container.querySelectorAll('input:not([value="all"]):checked')];
+    const checked = [...panel.querySelectorAll('input:not([value="all"]):checked')];
     if (checked.length === 0) return null;
     return new Set(checked.map(cb => cb.value));
   }
@@ -3178,7 +3194,7 @@
     e.stopPropagation();
     document.querySelectorAll('.rc-dropdown.open').forEach(d => { if (d !== spotsDropdown) d.classList.remove('open'); });
     spotsDropdown.classList.toggle('open');
-    const spotsPanel = spotsDropdown.querySelector('.rc-spots-panel');
+    const spotsPanel = ddPanel(spotsDropdown);
     if (spotsDropdown.classList.contains('open')) {
       _dropdownJustOpened = true;
       openDropdownPanel(spotsDropdown.querySelector('.rc-dropdown-btn'), spotsPanel);
@@ -3187,8 +3203,8 @@
     }
   });
 
-  spotsDropdown.querySelector('.rc-spots-panel').addEventListener('click', (e) => e.stopPropagation());
-  spotsDropdown.querySelector('.rc-spots-panel').addEventListener('change', (e) => {
+  ddPanel(spotsDropdown).addEventListener('click', (e) => e.stopPropagation());
+  ddPanel(spotsDropdown).addEventListener('change', (e) => {
     const cb = e.target;
     if (cb.dataset.src) {
       // Desktop's set-sources handler keys on settings-flag names
@@ -3199,7 +3215,7 @@
       // toggle was a no-op. AA6C report. Mirror the existing receive map.
       const SRC_DOM_TO_WIRE = { dxc: 'cluster' };
       const sources = {};
-      spotsDropdown.querySelectorAll('[data-src]').forEach(c => {
+      ddPanel(spotsDropdown).querySelectorAll('[data-src]').forEach(c => {
         const wireKey = SRC_DOM_TO_WIRE[c.dataset.src] || c.dataset.src;
         sources[wireKey] = c.checked;
       });
@@ -3228,9 +3244,10 @@
 
   // --- Filter persistence (sync to desktop settings.json) ---
   function getFilterValues(container) {
-    const allCb = container.querySelector('input[value="all"]');
+    const panel = ddPanel(container);
+    const allCb = panel.querySelector('input[value="all"]');
     if (allCb && allCb.checked) return null;
-    const checked = [...container.querySelectorAll('input:not([value="all"]):checked')];
+    const checked = [...panel.querySelectorAll('input:not([value="all"]):checked')];
     if (checked.length === 0) return null;
     return checked.map(cb => cb.value);
   }
@@ -3252,8 +3269,8 @@
     if (!f) return;
     [bandFilterEl, modeFilterEl, regionFilterEl].forEach((el, i) => {
       const vals = [f.bands, f.modes, f.regions][i];
-      const allCb = el.querySelector('input[value="all"]');
-      const itemCbs = [...el.querySelectorAll('input:not([value="all"])')];
+      const allCb = ddPanel(el).querySelector('input[value="all"]');
+      const itemCbs = [...ddPanel(el).querySelectorAll('input:not([value="all"])')];
       if (!vals) {
         allCb.checked = true;
         itemCbs.forEach(cb => { cb.checked = false; });
@@ -4396,6 +4413,26 @@
       if (customToggleState[i] && sig(before[i]) === sig(customCatData[i])) kept[i] = true;
     }
     customToggleState = kept;
+    // Slider slots: the value THIS device last sent wins over the desktop's
+    // saved copy, which a browser never updates. Every settings-update used
+    // to put the old value back, so the thumb and readout snapped back while
+    // the radio had moved (LZ3AW round 6: "the value on the radio changes,
+    // but on the slider doesn't").
+    // Whichever moved LAST wins: a change on the desktop's own slider shows
+    // up as a new saved value, and then that one is shown instead.
+    for (let i = 0; i < customCatData.length; i++) {
+      const e = customCatData[i];
+      const incoming = e ? e.value : undefined;
+      const deskMoved = customSliderDesk[i] !== undefined && incoming !== customSliderDesk[i];
+      customSliderDesk[i] = incoming;
+      if (!(i in customSliderSent)) continue;
+      if (e && !deskMoved && sig(before[i]) === sig(e)) e.value = customSliderSent[i];
+      else delete customSliderSent[i];
+    }
+    // Nothing a slot shows changed: do not rebuild. A rebuild also replaced
+    // the slider under the operator's finger in the middle of a drag.
+    const view = (arr) => JSON.stringify((arr || []).map(e => e ? [e.type || 'button', e.name || '', e.command || '', e.commandOff || '', e.min, e.max, e.value] : null));
+    if (view(before) === view(customCatData) && document.getElementById('rc-custom-cat-btns') && document.getElementById('rc-custom-cat-btns').children.length) return;
     renderCustomCatButtons();
   }
 
@@ -4405,6 +4442,8 @@
   // button sent" and nothing more. Not persisted; reset when slots change.
   var customToggleState = {};
   var customSliderTimers = {};
+  var customSliderSent = {};   // slot -> value this device last sent (see loadCustomCatButtons)
+  var customSliderDesk = {};   // slot -> the desktop's saved value as last received
 
   // Substitute the slider value into a command template — SAME contract as the
   // desktop's customSliderCommand(): {v} bare, {v2}/{v3}/{v4} zero-padded, and
@@ -4475,7 +4514,7 @@
           customSliderTimers[idx] = setTimeout(function() {
             var e = customCatData[idx];
             if (!e || !e.command) return;
-            if (sendCustomCat(customSliderCommand(e.command, +self.value))) e.value = +self.value;
+            if (sendCustomCat(customSliderCommand(e.command, +self.value))) { e.value = +self.value; customSliderSent[idx] = +self.value; }
           }, 150);
         });
         wrap.appendChild(lbl);
@@ -9121,6 +9160,42 @@
   let _paddleRttAvg = 0;
 var _paddleReleaseTimer = { dit: null, dah: null };
 var _paddleHoldTimer = { dit: null, dah: null };
+  // The hold keepalive ticks from a WORKER when it can. A page whose window
+  // is hidden or covered (the browser behind POTACAT on the same PC) has its
+  // timers clamped to once a second, and after five minutes to once a
+  // MINUTE — the 400 ms keepalive then misses the server's 1.5 s paddle
+  // watchdog and keying stops mid-hold, a few seconds in (LZ3AW round 6:
+  // "TinyMidi paddle - no change"; MIDI keeps arriving in a hidden tab).
+  // Dedicated-worker timers are not clamped that way.
+  var _paddleHoldActive = { dit: false, dah: false };
+  var _holdTickWorker = null;
+  function _sendPaddleHold(contact) {
+    if (!_paddleHoldActive[contact] || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 1, hold: true }));
+  }
+  function _holdTicker() {
+    if (_holdTickWorker !== null) return _holdTickWorker;
+    try {
+      var src = 'var t={};onmessage=function(e){var d=e.data;clearInterval(t[d.id]);delete t[d.id];' +
+        'if(d.start){t[d.id]=setInterval(function(){postMessage(d.id);},d.ms);}};';
+      _holdTickWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      _holdTickWorker.onmessage = function(e) { _sendPaddleHold(e.data); };
+    } catch (err) {
+      _holdTickWorker = false; // fall back to page timers
+    }
+    return _holdTickWorker;
+  }
+  function _startPaddleHold(contact) {
+    _paddleHoldActive[contact] = true;
+    var w = _holdTicker();
+    if (w) w.postMessage({ id: contact, start: true, ms: 400 });
+    else _paddleHoldTimer[contact] = setInterval(function() { _sendPaddleHold(contact); }, 400);
+  }
+  function _stopPaddleHold(contact) {
+    _paddleHoldActive[contact] = false;
+    if (_holdTickWorker) _holdTickWorker.postMessage({ id: contact, start: false });
+    if (_paddleHoldTimer[contact]) { clearInterval(_paddleHoldTimer[contact]); _paddleHoldTimer[contact] = null; }
+  }
   function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
     // to the server over WS (which does the real radio keying). Skip both
@@ -9140,16 +9215,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // key-up and stop the keyer 1.5 s in, mid-character (LZ3AW's TinyMidi
     // paddle). Repeating the press proves the contact is still down, so the
     // watchdog keeps its short window and still catches a real lost key-up.
-    if (_paddleHoldTimer[contact]) {
-      clearInterval(_paddleHoldTimer[contact]);
-      _paddleHoldTimer[contact] = null;
-    }
-    if (state) {
-      _paddleHoldTimer[contact] = setInterval(function() {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 1, hold: true }));
-      }, 400);
-    }
+    _stopPaddleHold(contact);
+    if (state) _startPaddleHold(contact);
     if (_paddleReleaseTimer[contact]) {
       clearTimeout(_paddleReleaseTimer[contact]);
       _paddleReleaseTimer[contact] = null;
@@ -9157,7 +9224,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (state) {
       _paddleReleaseTimer[contact] = setTimeout(function() {
         _paddleReleaseTimer[contact] = null;
-        if (_paddleHoldTimer[contact]) { clearInterval(_paddleHoldTimer[contact]); _paddleHoldTimer[contact] = null; }
+        _stopPaddleHold(contact);
         if (contact === 'dit') { ditDown = false; localCwKeyer.paddleDit(false); }
         else { dahDown = false; localCwKeyer.paddleDah(false); }
         if (ws && ws.readyState === WebSocket.OPEN) {
