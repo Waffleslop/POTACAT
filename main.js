@@ -1544,6 +1544,7 @@ let _fwdPowerClearTimer = null;
 // and max SWR are accumulated from the meter frames between key-down and
 // key-up and written as ONE line at release, so a 13 s FT8 frame costs one
 // log line rather than 260. Null whenever a Flex PTT is not down.
+let _flexTransmitKv = null; // merged Flex 'transmit' status fields (lo/hi TX filter, rfpower, dax, ...)
 let _flexTxRf = null;   // { startedAt, peakW, maxSwr, frames }
 // ─── SWR guard (K3SBP 2026-07-17) ───────────────────────────────────────────
 // The Flex protects ITSELF from a bad match by folding back power — it never
@@ -12518,6 +12519,11 @@ function connectSmartSdr() {
   // then only the optimistic echo. Everything downstream (renderer, VFO
   // popout, phone status broadcast) already flows from sendCatPower.
   smartSdr.on('power', sendCatPower);
+  // Keep the radio's transmit block (deltas merged): the TX filter edges
+  // (lo/hi) decide whether an audio tone can modulate at all — K3SBP's 8600
+  // made 4 W from FT8 at 1290 Hz and nothing from a 1500 Hz Tune tone at the
+  // same 6 W setting (2026-09-25).
+  smartSdr.on('transmit-status', (kv) => { _flexTransmitKv = { ...(_flexTransmitKv || {}), ...(kv || {}) }; });
   // Forward power (watts) from the Flex TX bridge. The emit existed since
   // the FWDPWR meter discovery shipped — with ZERO consumers; the wattmeter
   // was measured and thrown away (LZ3AW item 6). Same fan-out shape as
@@ -18907,7 +18913,9 @@ function logFlexTxRfSummary() {
   const setTo = _currentTxPower > 0 ? `; RF power set to ${_currentTxPower} W` : '';
   const rawW = rf.peakRawW || 0;
   const raw = rf.peakW < 1 ? ` [meter peak ${rawW > 0 ? (10 * Math.log10(rawW) + 30).toFixed(1) + ' dBm = ' + rawW.toPrecision(2) + ' W' : 'nothing'}]` : '';
-  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s${setTo})${raw}`);
+  const kv = _flexTransmitKv || {};
+  const txFilt = (kv.lo != null || kv.hi != null) ? `; TX filter ${kv.lo || '?'}-${kv.hi || '?'} Hz` : '';
+  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s${setTo}${txFilt})${raw}`);
 }
 
 // Say what the radio's RF power is set to at every JTCAT key-down, and warn —
