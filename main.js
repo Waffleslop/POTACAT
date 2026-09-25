@@ -12517,7 +12517,14 @@ function connectSmartSdr() {
   // after they stop rather than displaying stale watts forever.
   smartSdr.on('fwd-power', (watts) => {
     const w = Math.round((Number(watts) || 0) * 10) / 10;
-    if (_flexTxRf) { _flexTxRf.frames++; if (w > _flexTxRf.peakW) _flexTxRf.peakW = w; }
+    if (_flexTxRf) {
+      _flexTxRf.frames++;
+      if (w > _flexTxRf.peakW) _flexTxRf.peakW = w;
+      // Unrounded too: "peak 0.0 W" hid whether the radio reported a small
+      // reading or nothing at all (K3SBP 8600 at 5-6 W, 2026-09-25).
+      const raw = Number(watts) || 0;
+      if (!(_flexTxRf.peakRawW >= raw)) _flexTxRf.peakRawW = raw;
+    }
     sendCatFwdPower(w);
   });
   smartSdr.on('swr-ratio', (swr) => {
@@ -18890,7 +18897,9 @@ function logFlexTxRfSummary() {
   // drive/antenna/meter question; "peak 1.0 W ... RF power set to 1 W" says the
   // radio did exactly what it was told (K3SBP's weeks at the WSPR cap).
   const setTo = _currentTxPower > 0 ? `; RF power set to ${_currentTxPower} W` : '';
-  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s${setTo})`);
+  const rawW = rf.peakRawW || 0;
+  const raw = rf.peakW < 1 ? ` [meter peak ${rawW > 0 ? (10 * Math.log10(rawW) + 30).toFixed(1) + ' dBm = ' + rawW.toPrecision(2) + ' W' : 'nothing'}]` : '';
+  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s${setTo})${raw}`);
 }
 
 // Say what the radio's RF power is set to at every JTCAT key-down, and warn —
