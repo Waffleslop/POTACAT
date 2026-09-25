@@ -289,6 +289,15 @@ t('the power-restore safety stays out of a test that is still running', () => {
     'held from before the power drop until the restore is confirmed');
 });
 
+// An audio tone cannot modulate a radio in CW: it keys and radiates nothing.
+t('the test transmit refuses in CW mode, before touching power or PTT, and logs the mode', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const run = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest(') + 4000);
+  const cw = run.indexOf("if (/^CW/.test(modeNow))");
+  assert.ok(cw > 0 && cw < run.indexOf("action: 'set-tx-power'") && cw < run.indexOf('startJtcatTune()'));
+  assert.ok(/\[Setup\] test transmit: radio mode/.test(run));
+});
+
 // K3SBP 2026-09-25: typed a status label (FLEX) in the rig editor, pressed
 // the main Settings Save, and the edit was dropped without a word.
 t('Settings Save commits an open rig editor first', () => {

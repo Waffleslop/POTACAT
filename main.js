@@ -3827,6 +3827,15 @@ async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   if (!live.catConnected) return done({ result: 'error', message: 'Radio control is not working yet.' });
   if (_swrTripped) return done({ result: 'error', message: 'Transmit is blocked by the SWR guard. Run the antenna tuner or change bands, then test again.' });
   if (jtcatTuneState.active || radioOwner !== 'none') return done({ result: 'error', message: 'Something else is transmitting right now (FT8, JS8 or a data mode). Stop it, then test again.' });
+  // The test sends an AUDIO tone. In CW the radio keys but ignores audio, so
+  // it transmits nothing — 0.0 W, SWR 1.0 — and the result blamed the audio
+  // (K3SBP's 8600, 2026-09-25). Say so instead of keying. Never switch the
+  // radio's mode behind the operator's back.
+  const modeNow = String(_currentMode || '').toUpperCase();
+  if (/^CW/.test(modeNow)) {
+    return done({ result: 'error', message: 'The radio is in CW mode. The test sends an audio tone, which needs USB, LSB or a DATA mode (DIGU on a Flex). Switch the radio to USB, then test again.' });
+  }
+  sendCatLog(`[Setup] test transmit: radio mode ${modeNow || 'unknown'}`);
 
   const info = RIG_MODELS[rig.model] || {};
   const testW = Math.min(5, Number(info.maxPower) || 100);
