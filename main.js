@@ -12063,7 +12063,7 @@ function jtcatDirectTxActive() {
 // Fix: stream the tone straight to dax_tx, mirroring the FT8 path.
 let _jtcatTuneTxActive = false; // a Tune tone is in flight on the direct dax_tx path
 const JTCAT_TUNE_FREQ_HZ = 1500;   // matches WSJT-X tune tone + the renderer path
-const JTCAT_TUNE_AMP = 0.5;        // moderate steady level; operator sets drive on the rig
+const JTCAT_TUNE_DIRECT_AMP = 1.0; // Flex direct dax_tx: the FT8 encoder's own full-scale level
 function _startDirectTuneTone() {
   // Same sender as FT8 (smartSdrAudio.sendTxAudio: one buffer, paced to real
   // time, with a short silent lead-in). Tune used to push 20 ms chunks from a
@@ -12075,8 +12075,16 @@ function _startDirectTuneTone() {
   const RATE = 12000;                                  // sendTxAudio's input rate
   const n = Math.round(RATE * JTCAT_TUNE_DURATION_S);
   const buf = new Float32Array(n);
-  const dPhase = 2 * Math.PI * JTCAT_TUNE_FREQ_HZ / RATE;
-  for (let i = 0; i < n; i++) buf[i] = JTCAT_TUNE_AMP * Math.sin(i * dPhase);
+  // Same drive and frequency as an FT8 transmission, like WSJT-X's Tune: the
+  // FT8 encoder's buffer is full scale (peak 1.0, sent unscaled on this path)
+  // at the operator's TX audio offset. The old fixed 0.5 at 1500 Hz made 26 W
+  // where FT8 made 53 W at a 69 W setting, and 0.014 W where FT8 made 4 W at
+  // 6 W (K3SBP's 8600, 2026-09-25) — so Tune and the Station Setup test read
+  // "no power" on a radio that was working.
+  const toneHz = (ft8Engine && ft8Engine._txFreq > 100 && ft8Engine._txFreq < 3000) ? ft8Engine._txFreq : JTCAT_TUNE_FREQ_HZ;
+  const dPhase = 2 * Math.PI * toneHz / RATE;
+  for (let i = 0; i < n; i++) buf[i] = JTCAT_TUNE_DIRECT_AMP * Math.sin(i * dPhase);
+  sendCatLog(`[JTCAT] Tune tone: ${Math.round(toneHz)} Hz at FT8 drive`);
   _jtcatTuneTxActive = true;
   // offsetMs 420 -> an 80 ms silent lead-in (TX_SLOT_AUDIO_START_MS - 420),
   // the same PTT-settle lead the late-start FT8 path uses.
