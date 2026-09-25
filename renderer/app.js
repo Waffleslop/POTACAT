@@ -2773,6 +2773,7 @@ async function openRigEditor(mode, rigId) {
   setRigName.focus();
 }
 
+let _stationSetupOpenAfterSave = null; // id of a rig just added (renderer/station-setup.js)
 function closeRigEditor() {
   rigEditorMode = null;
   editingRigId = null;
@@ -2914,6 +2915,7 @@ rigSaveBtn.addEventListener('click', async () => {
       setupDone: [...rigSetupDone],
     };
     currentRigs.push(newRig);
+    _stationSetupOpenAfterSave = newRig.id;
   }
 
   renderRigList(currentRigs, currentActiveRigId);
@@ -2923,7 +2925,14 @@ rigSaveBtn.addEventListener('click', async () => {
   // silently discarded the edit (K3SBP's status labels, 2026-08-16), and
   // nothing in the editor said so. A {rigs}-only save is partial, so main's
   // save handler persists WITHOUT touching the CAT connection.
-  window.api.saveSettings({ rigs: currentRigs });
+  const _ssSave = window.api.saveSettings({ rigs: currentRigs });
+  // A radio was just added: open its Station Setup checklist so the operator
+  // is walked through the rest instead of left to find it.
+  if (_stationSetupOpenAfterSave && typeof window.openStationSetup === 'function') {
+    const newId = _stationSetupOpenAfterSave;
+    _stationSetupOpenAfterSave = null;
+    Promise.resolve(_ssSave).then(() => window.openStationSetup(newId));
+  }
   // If the edited rig is the active one, its label change shows right away.
   const editedActive = currentRigs.find(r => r.id === currentActiveRigId);
   if (editedActive) {
@@ -19273,6 +19282,18 @@ catLogClearBtn.addEventListener('click', () => {
         }
       } catch {}
     }
+    // Station Setup state for the active rig: which checklist step is not
+    // working is the first line of triage for "it doesn't work".
+    let stationSetup = '(unavailable)';
+    try {
+      const ss = window.api.stationSetupGet ? await window.api.stationSetupGet() : null;
+      if (ss && ss.rig) {
+        const open = ss.steps.filter((st) => st.state !== 'ok' && st.state !== 'confirmed' && st.level !== 'optional');
+        stationSetup = `${ss.summary.requiredTotal - ss.summary.requiredLeft}/${ss.summary.requiredTotal} essential steps working`
+          + (open.length ? '; not yet: ' + open.map((st) => `${st.id} (${st.state})`).join(', ') : '')
+          + (ss.prefs && ss.prefs.hidden ? '; reminders hidden' : '');
+      }
+    } catch {}
     // The ECHOCAT listener and the tunnel origin, stated: a report from a
     // phone that cannot connect should say "not listening" up front.
     let echocatServer = '(unknown)';
@@ -19292,6 +19313,7 @@ catLogClearBtn.addEventListener('click', () => {
       radioOwner,
       features: enabled,
       setupNotes,
+      stationSetup,
       echocatServer,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
@@ -19350,6 +19372,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Radio controlled by:** ' + md.radioOwner,
       '**Features enabled:** ' + md.features,
       '**Setup notes:** ' + md.setupNotes,
+      '**Station Setup:** ' + md.stationSetup,
       '**ECHOCAT server:** ' + md.echocatServer,
       '',
       '### What I tried to do',

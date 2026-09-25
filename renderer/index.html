@@ -191,6 +191,7 @@
             <button class="view-menu-item" id="view-directory-btn">SWL/HF Net Directory</button>
             <button class="view-menu-item" id="view-conditions-btn" title="Open Solar &amp; Propagation Conditions in a new window">Conditions &#x2197;</button>
             <div class="view-menu-divider"></div>
+            <button class="view-menu-item" id="view-station-setup-btn" title="A checklist for your radio: what is working and what still needs doing">Station Setup</button>
             <button class="view-menu-item" id="quick-activator-mode" title="Switch to Activator mode (rapid logging for park activations). Return via the Back to Hunter button in the Activator UI.">Activator mode</button>
             <button class="view-menu-item" id="view-remote-radios-btn" title="Manage paired shacks — switch this desktop between local rig and remote shacks.">Remote Radios&hellip;</button>
           </div>
@@ -1225,6 +1226,7 @@
         <!-- Action button styled like a tab, sits at the bottom of
              the sidebar nav. Doesn't switch tabs — fires the
              existing report-bug-btn click handler (Discord template). -->
+        <button type="button" class="settings-tab settings-tab-action" id="settings-station-setup-btn" title="A checklist for your radio: what is working and what still needs doing">Station Setup</button>
         <button type="button" class="settings-tab settings-tab-action" id="report-bug-btn" title="Captures a verbose log and builds a bug report for Discord #bug-report">🐞 Report a Bug</button>
       </div>
       <input type="text" id="settings-search" class="settings-search" placeholder="Search settings...">
@@ -4100,6 +4102,33 @@
   </dialog>
 
   <!-- What's New dialog (shown after version update) -->
+  <!-- Station Setup: per-radio checklist with live status (renderer/station-setup.js,
+       lib/station-setup.js). Large type on purpose — it is written for the
+       operator least comfortable with computers. -->
+  <dialog id="station-setup-dialog" class="station-setup-dialog">
+    <div class="log-dialog-header">
+      <h3 id="ss-title">Station Setup</h3>
+      <select id="ss-rig" class="ss-rig hidden" title="Which radio"></select>
+      <button type="button" id="ss-close" class="log-dialog-x" title="Close">&times;</button>
+    </div>
+    <div id="ss-progress" class="ss-progress"></div>
+    <div id="ss-message" class="ss-message hidden"></div>
+    <div id="ss-steps" class="ss-steps"></div>
+    <div class="ss-footer">
+      <button type="button" id="ss-recheck" class="ss-btn">Check everything again</button>
+      <span class="ss-footer-spacer"></span>
+      <button type="button" id="ss-hide" class="ss-link">Don't show this again for this radio</button>
+      <button type="button" id="ss-done" class="ss-btn ss-btn-primary">Close</button>
+    </div>
+  </dialog>
+  <div id="station-setup-card" class="station-setup-card hidden" role="status">
+    <div id="ss-card-text" class="ss-card-text"></div>
+    <div class="ss-card-buttons">
+      <button type="button" id="ss-card-continue" class="ss-btn ss-btn-primary">Continue setup</button>
+      <button type="button" id="ss-card-later" class="ss-btn">Remind me later</button>
+      <button type="button" id="ss-card-never" class="ss-link">Don't ask again</button>
+    </div>
+  </div>
   <dialog id="whats-new-dialog">
     <div class="log-dialog-header">
       <h3 id="whats-new-title">What's New</h3>
@@ -4423,6 +4452,7 @@
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>
   <script src="app.js"></script>
+  <script src="station-setup.js"></script>
   <script src="cloud-ui.js"></script>
   <script src="pota-sync-ui.js"></script>
 </body>

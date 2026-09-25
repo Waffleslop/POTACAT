@@ -417,6 +417,7 @@ const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache,
 // worker for the schema served at /feeds/dxpeditions.json.
 const { getModel, getModelList, RIG_MODELS } = require('./lib/rig-models');
 const { resolveSetupNotes, radioTypeFromCatTarget } = require('./lib/rig-setup-notes');
+const StationSetup = require('./lib/station-setup');
 const { autoUpdater } = require('electron-updater');
 let registerCloudIpc;
 try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
@@ -2476,6 +2477,7 @@ function sendCatStatus(s) {
       _catLinkUpLast = linkUp;
     } else if (linkUp !== _catLinkUpLast) {
       _catLinkUpLast = linkUp;
+      stationSetupNotify();
       if (!linkUp) {
         sendCatLog('[CAT] RADIO LINK LOST — the rig is no longer reachable (USB/serial dropped?). Tunes will be refused until it returns.');
         // De-key the dedicated CW key line too. It's a SEPARATE USB-serial
@@ -2669,6 +2671,10 @@ function sendCatMode(mode) {
 // stop rather than showing stale watts forever.
 function sendCatFwdPower(watts) {
   const w = Math.round((Number(watts) || 0) * 10) / 10;
+  if (_stationSetupTxTest) {
+    _stationSetupTxTest.fwdEvents++;
+    if (w > _stationSetupTxTest.peakW) _stationSetupTxTest.peakW = w;
+  }
   const push = (v) => {
     if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', v);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', v);
@@ -2690,6 +2696,9 @@ function sendCatPower(watts) {
   // A stale WSPR pre-beacon marker with the radio still at the 1 W cap is a
   // restore that never landed — this readback is where it gets put back.
   if (!isRemoteActive()) wsprReconcilePreCapPower(watts);
+  // Same for a Station Setup test transmit (lowered to QRP for the test).
+  _lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() };
+  if (!isRemoteActive()) stationSetupReconcilePower(Number(watts) || 0);
 }
 
 function sendCatNb(on) {
@@ -3466,6 +3475,272 @@ function activeRigSetupPointer(feature) {
 function getActiveRigModelName() {
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   return activeRig?.model || '';
+}
+
+// ---------------------------------------------------------------------------
+// Station Setup — per-radio checklist with live status (lib/station-setup.js
+// holds the policy; this gathers what is true right now and runs the checks
+// that need the main process: the low-power transmit test, the FTDI library
+// lookup/copy, the clock). Results of operator-initiated tests live for the
+// session only — a green tick is always from THIS session's check.
+// ---------------------------------------------------------------------------
+const stationSetupResults = new Map(); // rigId -> { rxTest, txDeviceTest, txTest }
+// The version this launch upgraded FROM. Captured lazily on first use,
+// before the renderer's What's New check rewrites settings.lastVersion.
+let _stationSetupLaunchLastVersion;
+let _stationSetupNotifyTimer = null;
+let _stationSetupTxTest = null;        // { peakW, fwdEvents, peakSwr } while a test transmit runs
+let _lastPowerReadback = null;         // { watts, at } — the radio's own report, never our optimism
+let _setupPowerRestoreAttempt = 0;
+
+function stationSetupRigById(rigId) {
+  const rigs = settings.rigs || [];
+  return rigs.find(r => r && r.id === (rigId || settings.activeRigId)) || null;
+}
+
+function stationSetupResultsFor(rigId) {
+  if (!stationSetupResults.has(rigId)) stationSetupResults.set(rigId, {});
+  return stationSetupResults.get(rigId);
+}
+
+// Where "Find the file for me" puts FTDI's LibFT4222. The scope helper gets
+// this folder on its library search path (startYaesuScope), so no admin
+// rights, no System32, and it survives app updates.
+function ftdiUserDir() { return path.join(app.getPath('userData'), 'ftdi'); }
+
+function ft4222LibraryNames() {
+  if (process.platform === 'win32') return ['LibFT4222-64.dll', 'LibFT4222.dll'];
+  if (process.platform === 'darwin') return ['libft4222.dylib'];
+  return ['libft4222.so', 'libft4222.so.1.4.7', 'libft4222.so.1.4.6', 'libft4222.so.1.4.4.44'];
+}
+
+// Same places the helper's LoadLibrary/dlopen will look, plus ours.
+function ft4222SearchDirs() {
+  const dirs = [ftdiUserDir()];
+  if (process.platform === 'win32') {
+    const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+    dirs.push(path.join(sysRoot, 'System32'));
+    const helper = typeof findYaesuScopeHelper === 'function' ? findYaesuScopeHelper() : null;
+    if (helper) dirs.push(path.dirname(helper));
+    for (const d of String(process.env.PATH || '').split(';')) if (d) dirs.push(d);
+  } else {
+    dirs.push('/usr/local/lib', '/usr/lib', '/opt/homebrew/lib', '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu');
+  }
+  return dirs;
+}
+
+function findFt4222() {
+  const dirs = ft4222SearchDirs();
+  const has = (name) => dirs.some(d => { try { return fs.existsSync(path.join(d, name)); } catch { return false; } });
+  const libraryFound = ft4222LibraryNames().some(has);
+  // ftd2xx.dll is FTDI's D2XX driver (Windows only; libft4222 bundles it on Unix).
+  const d2xxFound = process.platform !== 'win32' || has('ftd2xx.dll');
+  return { libraryFound, d2xxFound };
+}
+
+function stationSetupLive(rig) {
+  const r = stationSetupResultsFor(rig.id);
+  const isActive = rig.id === settings.activeRigId;
+  const catConnected = isActive && (!!_catLinkUpLast || !!(smartSdr && smartSdr.canTune));
+  let scope = null;
+  const info = rig.model ? (RIG_MODELS[rig.model] || null) : null;
+  if (info && info.caps && info.caps.nativeScope === 'yaesu-ft4222') {
+    const f = findFt4222();
+    const st = (typeof yaesuScopeState !== 'undefined' && yaesuScopeState) || {};
+    const diag = st.diag || {};
+    scope = {
+      libraryFound: f.libraryFound, d2xxFound: f.d2xxFound,
+      status: isActive ? st.status : null,
+      diagKey: isActive ? diag.key : null,
+      diagHeadline: diag.headline, diagDetail: diag.detail, diagAction: diag.action,
+    };
+  }
+  return {
+    callsign: settings.myCallsign || '',
+    grid: settings.grid || '',
+    catConnected,
+    freqHz: catConnected ? _currentFreqHz : 0,
+    clock: jtcatLastClock,
+    rxTest: r.rxTest || null,
+    txDeviceTest: r.txDeviceTest || null,
+    txTest: r.txTest || null,
+    scope,
+  };
+}
+
+function stationSetupPayload(rigId) {
+  const rig = stationSetupRigById(rigId);
+  if (!rig) return { rig: null, steps: [], summary: { total: 0, ok: 0, requiredLeft: 0, complete: true, next: null } };
+  const radioType = radioTypeFromCatTarget(rig.catTarget);
+  const res = StationSetup.evaluateChecklist({
+    rig: {
+      id: rig.id, name: rig.name, model: rig.model, radioType, active: rig.id === settings.activeRigId,
+      audioSource: rig.audioSource || (rig.id === settings.activeRigId ? settings.audioSource : ''),
+      inputDeviceId: rig.remoteAudioInput || '', outputDeviceId: rig.remoteAudioOutput || '',
+    },
+    modelInfo: rig.model ? (RIG_MODELS[rig.model] || null) : null,
+    platform: process.platform,
+    notes: rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, cwKeyLine: rig.cwKeyLine, done: rig.setupDone }),
+    live: stationSetupLive(rig),
+    prefs: { skipped: rig.setupSkipped || [], confirmed: rig.setupDone || [], passed: rig.setupPassed || {} },
+  });
+  // Remember when each MEASURED step first worked (operator-confirmed menu
+  // settings are already stored in setupDone). Saved only when something is
+  // new, so polling the checklist never rewrites settings.json.
+  const firstPass = res.steps.filter(st => st.state === 'ok' && !(rig.setupPassed && rig.setupPassed[st.id]));
+  if (firstPass.length) {
+    rig.setupPassed = { ...(rig.setupPassed || {}) };
+    for (const st of firstPass) rig.setupPassed[st.id] = Date.now();
+    try { saveSettings(settings); } catch {}
+  }
+  const prefs = { hidden: !!rig.setupChecklistHidden, announced: rig.setupAnnounced || [] };
+  return {
+    rig: { id: rig.id, name: rig.name || rig.model || 'Radio', model: rig.model || '', active: rig.id === settings.activeRigId },
+    rigs: (settings.rigs || []).map(r => ({ id: r.id, name: r.name || r.model || 'Radio', active: r.id === settings.activeRigId })),
+    prefs,
+    // What the launch card needs: unfinished-and-never-done required steps,
+    // and steps new since the version this launch upgraded FROM.
+    launch: {
+      prompt: StationSetup.shouldPromptAtLaunch(res, prefs),
+      newSteps: StationSetup.newStepsSince(res, _stationSetupLaunchLastVersion, prefs).map(st => ({ id: st.id, title: st.title })),
+      firstRun: !!settings.firstRun,
+    },
+    appVersion: getAppDisplayVersion(),
+    platform: process.platform,
+    ...res,
+  };
+}
+
+// Something a step depends on changed — tell an open checklist to refresh.
+function stationSetupNotify() {
+  if (_stationSetupNotifyTimer) return;
+  _stationSetupNotifyTimer = setTimeout(() => {
+    _stationSetupNotifyTimer = null;
+    if (win && !win.isDestroyed()) win.webContents.send('station-setup-changed');
+  }, 400);
+}
+
+function stationSetupSaveRig(rigId, mutate) {
+  const rig = stationSetupRigById(rigId);
+  if (!rig) return;
+  mutate(rig);
+  try { saveSettings(settings); } catch {}
+}
+
+const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
+
+// A test transmit lowered the power; put it back and trust only a readback.
+// Called from sendCatPower on every power report, so a restore lost to a
+// crash or a slow radio is repaired on the next report (the WSPR cap lesson:
+// K3SBP's radio sat at 1 W for weeks after a restore that was sent, not seen).
+function stationSetupReconcilePower(watts) {
+  const m = settings.setupTxPowerRestore;
+  if (!m || _stationSetupTxTest) return;
+  if (m.rigId && m.rigId !== settings.activeRigId) return;
+  if (watts > m.testWatts + 0.5) {
+    delete settings.setupTxPowerRestore;
+    _setupPowerRestoreAttempt = 0;
+    try { saveSettings(settings); } catch {}
+    return;
+  }
+  const now = Date.now();
+  if (_setupPowerRestoreAttempt >= 3 || now - (m.lastAttemptAt || 0) < 10000) return;
+  _setupPowerRestoreAttempt++;
+  m.lastAttemptAt = now;
+  sendCatLog(`[Setup] radio still at ${watts} W after a test transmit — setting it back to ${m.watts} W (attempt ${_setupPowerRestoreAttempt} of 3)`);
+  try { applyRigControl({ action: 'set-tx-power', value: m.watts }, 'setup'); } catch {}
+}
+
+async function waitForPowerReadback(sinceTs, predicate, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (_lastPowerReadback && _lastPowerReadback.at > sinceTs && predicate(_lastPowerReadback.watts)) return _lastPowerReadback.watts;
+    await sleepMs(250);
+  }
+  return null;
+}
+
+/**
+ * Low-power test transmit: note the power, drop to QRP (5 W or the radio's
+ * maximum if lower), key a 3 s 1500 Hz tone down the SAME audio route FT8
+ * uses, measure forward power / SWR, then restore the power and confirm it
+ * by the radio's own readback. Operator-initiated only (the renderer asks
+ * first, with the antenna/dummy-load warning).
+ */
+async function runStationSetupTxTest(rigId, { keepPower = false } = {}) {
+  const rig = stationSetupRigById(rigId);
+  const r = stationSetupResultsFor(rig ? rig.id : '');
+  const done = (t) => { r.txTest = { ...t, at: Date.now() }; stationSetupNotify(); return r.txTest; };
+  if (!rig || rig.id !== settings.activeRigId) return done({ result: 'error', message: 'Switch to this radio first, then test.' });
+  if (_stationSetupTxTest) return r.txTest || null;
+  const live = stationSetupLive(rig);
+  if (!live.catConnected) return done({ result: 'error', message: 'Radio control is not working yet.' });
+  if (_swrTripped) return done({ result: 'error', message: 'Transmit is blocked by the SWR guard. Run the antenna tuner or change bands, then test again.' });
+  if (jtcatTuneState.active || radioOwner !== 'none') return done({ result: 'error', message: 'Something else is transmitting right now (FT8, JS8 or a data mode). Stop it, then test again.' });
+
+  const info = RIG_MODELS[rig.model] || {};
+  const testW = Math.min(5, Number(info.maxPower) || 100);
+  const prevW = Number(_currentTxPower) || 0;
+  let lowered = false;
+  if (!keepPower) {
+    if (!prevW) {
+      return done({ result: 'error', message: 'POTACAT cannot read the power setting from this radio, so it will not change it. Turn the power down on the radio yourself, then use "Test at the radio\'s current power".', needsManualPower: true });
+    }
+    if (prevW > testW) {
+      settings.setupTxPowerRestore = { watts: prevW, testWatts: testW, rigId: rig.id, at: Date.now() };
+      _setupPowerRestoreAttempt = 0;
+      try { saveSettings(settings); } catch {}
+      sendCatLog(`[Setup] test transmit: lowering power ${prevW} W -> ${testW} W for the test`);
+      applyRigControl({ action: 'set-tx-power', value: testW }, 'setup');
+      lowered = true;
+      await sleepMs(1500);
+    }
+  }
+
+  _stationSetupTxTest = { peakW: 0, fwdEvents: 0, peakSwr: 0 };
+  const swrPoll = setInterval(() => {
+    if (_stationSetupTxTest && _currentSwrRatio > _stationSetupTxTest.peakSwr) _stationSetupTxTest.peakSwr = _currentSwrRatio;
+  }, 150);
+  sendCatLog(`[Setup] test transmit: 3 s tone at ${keepPower ? 'the radio\'s current power' : Math.min(prevW || testW, testW) + ' W'}`);
+  startJtcatTune();
+  const keyed = jtcatTuneState.active;
+  if (keyed) {
+    await sleepMs(3000);
+    stopJtcatTune();
+    await sleepMs(900); // meters report a beat late
+  }
+  clearInterval(swrPoll);
+  const meas = _stationSetupTxTest;
+  _stationSetupTxTest = null;
+
+  // Restore, then believe only the radio.
+  let restored = true, restoreNote = '';
+  if (lowered) {
+    const sentAt = Date.now();
+    sendCatLog(`[Setup] test transmit: restoring power to ${prevW} W`);
+    applyRigControl({ action: 'set-tx-power', value: prevW }, 'setup');
+    const back = await waitForPowerReadback(sentAt, (w) => w > testW + 0.5, 6000);
+    if (back != null) {
+      delete settings.setupTxPowerRestore;
+      try { saveSettings(settings); } catch {}
+      sendCatLog(`[Setup] test transmit: radio confirms ${back} W`);
+    } else {
+      restored = false;
+      restoreNote = `POTACAT set your power back to ${prevW} W, but the radio has not confirmed it yet. Check the power on the radio.`;
+      sendCatLog(`[Setup] test transmit: no power readback after restoring ${prevW} W — will retry when the radio next reports its power`);
+    }
+  }
+
+  if (!keyed) return done({ result: 'error', message: 'The radio could not be keyed. The log panel says why.', restored, restoreNote });
+  const watts = Math.round(meas.peakW * 10) / 10;
+  const swr = meas.peakSwr > 0 ? Math.round(meas.peakSwr * 10) / 10 : 0;
+  let result;
+  if (meas.fwdEvents === 0) result = 'unmeasured';
+  else if (watts < 0.5) result = 'no-power';
+  else if (swr >= 3) result = 'swr-high';
+  else result = 'ok';
+  sendCatLog(`[Setup] test transmit result: ${result}${watts ? `, ${watts} W` : ''}${swr ? `, SWR ${swr}` : ''}`);
+  return done({ result, watts, swr, restored, restoreNote });
 }
 
 function getIcomNetworkDataModSpec(target, rigModel, liveCivAddr = null) {
@@ -11488,6 +11763,7 @@ async function runJtcatClockCheck() {
   // a clock nobody had measured: this monitor's 'running' hook had never
   // fired (see the end of startJtcat), so only a manual Recheck ever ran it.
   // Logged on change, so it lands in session.log without flooding.
+  stationSetupNotify();
   if (jtcatLastClock.level !== prevLevel) {
     const off = jtcatLastClock.offsetMs;
     if (jtcatLastClock.level === 'unknown') {
@@ -21256,6 +21532,7 @@ function yaesuScopeBroadcastState() {
     remoteServer.broadcastScopeState(yaesuScopeRemotePayload());
   }
   yaesuScopeLastStateSend = Date.now();
+  stationSetupNotify();
 }
 
 function yaesuScopeSetStatus(status, diag) {
@@ -21301,7 +21578,17 @@ function startYaesuScope() {
   sendCatLog('[Scope] spawn: ' + [helperPath, ...args].map((a) => (/\s/.test(a) ? '"' + a + '"' : a)).join(' '));
   let proc;
   try {
-    proc = spawn(helperPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    // userData/ftdi first on the library search path: that is where Station
+    // Setup's "Find the file for me" puts FTDI's LibFT4222 (no admin rights,
+    // survives updates). LoadLibraryA searches PATH; dlopen honours
+    // LD_LIBRARY_PATH / DYLD_LIBRARY_PATH for a bare library name.
+    const ftdiDir = ftdiUserDir();
+    const env = { ...process.env };
+    const pre = (k, sep) => { env[k] = env[k] ? ftdiDir + sep + env[k] : ftdiDir; };
+    if (process.platform === 'win32') pre('PATH', ';');
+    else if (process.platform === 'darwin') pre('DYLD_LIBRARY_PATH', ':');
+    else pre('LD_LIBRARY_PATH', ':');
+    proc = spawn(helperPath, args, { stdio: ['pipe', 'pipe', 'pipe'], env });
   } catch (err) {
     yaesuScopeSetStatus('error', { key: 'spawn', severity: 'error', headline: 'Could not start the scope helper', detail: err.message });
     return;
@@ -25097,6 +25384,9 @@ app.whenReady().then(() => {
     console.error('[multi-op] nested-profile migration failed:', err.message);
   }
   settings = loadSettings();
+  // Station Setup's "new for your radio" card compares against the version
+  // this launch upgraded FROM — read before What's New rewrites lastVersion.
+  _stationSetupLaunchLastVersion = settings.lastVersion || null;
   migrateRigSettings(settings);
   // TX power is persisted now (applyJtcatTxGain). Before this the level
   // reset to 100% on every launch and whatever client connected first
@@ -28407,6 +28697,94 @@ app.whenReady().then(() => {
   };
 
   ipcMain.on('scope-popout-open', () => openScopePopout());
+
+  // --- Station Setup checklist (lib/station-setup.js; state gathering above
+  // stationSetupPayload). Registered here so 'open-scope' can reach
+  // openScopePopout.
+  ipcMain.handle('station-setup-get', (_e, rigId) => stationSetupPayload(rigId));
+  // Results of the checks that run in the renderer (they need a real audio
+  // device open: the 3-second listen and the output-device open).
+  ipcMain.handle('station-setup-report', (_e, { rigId, kind, result } = {}) => {
+    const rig = stationSetupRigById(rigId);
+    if (rig && (kind === 'rxTest' || kind === 'txDeviceTest')) {
+      stationSetupResultsFor(rig.id)[kind] = { ...(result || {}), at: Date.now() };
+      if (kind === 'rxTest') sendCatLog(`[Setup] listen test: ${result && result.result}${result && Number.isFinite(result.dbfs) ? ` (${Math.round(result.dbfs)} dBFS)` : ''}${result && result.error ? ' — ' + result.error : ''}`);
+      if (kind === 'txDeviceTest' && result && !result.ok) sendCatLog(`[Setup] audio output check failed: ${result.error || 'could not open'}`);
+    }
+    return stationSetupPayload(rig ? rig.id : rigId);
+  });
+  ipcMain.handle('station-setup-action', async (_e, req = {}) => {
+    const { action } = req;
+    const rig = stationSetupRigById(req.rigId);
+    const rigId = rig ? rig.id : null;
+    let message = '';
+    const { shell } = require('electron');
+    const listAdd = (key, ids) => stationSetupSaveRig(rigId, (r) => { r[key] = [...new Set([...(r[key] || []), ...ids])]; });
+    const listDel = (key, ids) => stationSetupSaveRig(rigId, (r) => { r[key] = (r[key] || []).filter(x => !ids.includes(x)); });
+    switch (action) {
+      case 'recheck': break;
+      case 'tx-test': await runStationSetupTxTest(rigId); break;
+      case 'tx-test-current-power': await runStationSetupTxTest(rigId, { keepPower: true }); break;
+      case 'tx-test-confirm': {
+        // The operator watched the radio's own meter move: a real observation
+        // on a radio POTACAT cannot measure.
+        const r = stationSetupResultsFor(rigId);
+        r.txTest = { result: 'ok', watts: 0, swr: 0, byOperator: true, at: Date.now() };
+        sendCatLog('[Setup] test transmit: operator confirmed the radio\'s power meter moved');
+        break;
+      }
+      case 'check-clock': await runJtcatClockCheck(); break;
+      case 'sync-clock': {
+        const res = await syncSystemClock();
+        await sleepMs(1500);
+        await runJtcatClockCheck();
+        if (res && res.success === false && res.message) message = res.message;
+        break;
+      }
+      case 'open-scope': openScopePopout(); break;
+      case 'open-ftdi-download': shell.openExternal('https://ftdichip.com/software-examples/ft4222h-software-examples/'); break;
+      case 'open-ftdi-driver': shell.openExternal('https://ftdichip.com/drivers/d2xx-drivers/'); break;
+      case 'locate-ft4222': {
+        const names = ft4222LibraryNames();
+        const pick = await dialog.showOpenDialog(win, {
+          title: process.platform === 'win32' ? 'Choose LibFT4222-64.dll (in the amd64 folder)' : 'Choose the libft4222 file',
+          properties: ['openFile'],
+          filters: process.platform === 'win32' ? [{ name: 'LibFT4222', extensions: ['dll'] }] : [],
+        });
+        if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) break;
+        const src = pick.filePaths[0];
+        const base = path.basename(src);
+        if (!/^libft4222/i.test(base)) {
+          message = `That file is "${base}". Choose the one named ${names[0]}.`;
+          break;
+        }
+        try {
+          if (process.platform === 'win32') {
+            const arch = StationSetup.peMachine(fs.readFileSync(src));
+            if (arch === 'x86') { message = 'That is the 32-bit copy. Choose the one in the folder named "amd64".'; break; }
+            if (arch !== 'x64') { message = 'That file is not a 64-bit Windows library. Choose LibFT4222-64.dll from the folder named "amd64".'; break; }
+          }
+          fs.mkdirSync(ftdiUserDir(), { recursive: true });
+          // Always install under the name the helper asks for first.
+          const destName = process.platform === 'win32' ? 'LibFT4222-64.dll' : base;
+          fs.copyFileSync(src, path.join(ftdiUserDir(), destName));
+          sendCatLog(`[Setup] FTDI LibFT4222 installed for the band scope: ${destName} -> ${ftdiUserDir()}`);
+          message = 'Done. The file is installed.';
+        } catch (err) {
+          message = `Could not copy the file: ${err.message}`;
+        }
+        break;
+      }
+      case 'skip': if (req.step) listAdd('setupSkipped', [req.step]); break;
+      case 'unskip': if (req.step) listDel('setupSkipped', [req.step]); break;
+      case 'confirm-notes': if (Array.isArray(req.noteIds)) listAdd('setupDone', req.noteIds.map(String)); break;
+      case 'hide': stationSetupSaveRig(rigId, (r) => { r.setupChecklistHidden = true; }); break;
+      case 'unhide': stationSetupSaveRig(rigId, (r) => { r.setupChecklistHidden = false; }); break;
+      case 'announced': if (Array.isArray(req.steps)) listAdd('setupAnnounced', req.steps.map(String)); break;
+      default: message = 'Unknown action';
+    }
+    return { ...stationSetupPayload(rigId), message };
+  });
   ipcMain.on('scope-popout-theme', (_e, theme) => {
     if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-popout-theme', theme);
   });
@@ -31954,6 +32332,21 @@ app.whenReady().then(() => {
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
+    // The renderer saves the WHOLE rig list from the copy it loaded when
+    // Settings opened. Station Setup progress is written by main after that
+    // (a passed test, "don't ask again"), so an incoming rig that lacks those
+    // keys keeps main's — otherwise the next rig edit would wipe them and the
+    // checklist would nag about steps that already work.
+    if (Array.isArray(newSettings.rigs) && Array.isArray(settings.rigs)) {
+      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced'];
+      newSettings.rigs = newSettings.rigs.map((r) => {
+        const cur = r && settings.rigs.find(x => x && x.id === r.id);
+        if (!cur) return r;
+        const out = { ...r };
+        for (const k of SETUP_KEYS) if (!(k in out) && k in cur) out[k] = cur[k];
+        return out;
+      });
+    }
     // Per-band region mutes: sanitize on every write (never store a payload
     // verbatim) and ship the updated set to connected ECHOCAT clients so a
     // rule added on the desktop hides the spots on the mobile device too.

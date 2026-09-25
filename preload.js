@@ -211,9 +211,18 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
+  stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
+  stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
+  stationSetupAction: (q) => ipcRenderer.invoke('station-setup-action', q),
+  onStationSetupChanged: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('station-setup-changed', handler);
+    return () => ipcRenderer.removeListener('station-setup-changed', handler);
+  },
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   discoverFlex: () => ipcRenderer.invoke('discover-flex'),
   listPorts: () => ipcRenderer.invoke('list-ports'),
+  rotctldListModels: () => ipcRenderer.invoke('rotctld-list-models'),
   listRigs: () => ipcRenderer.invoke('list-rigs'),
   testHamlib: (config) => ipcRenderer.invoke('test-hamlib', config),
   testSerialCat: (config) => ipcRenderer.invoke('test-serial-cat', config),

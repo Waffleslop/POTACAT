@@ -10284,3 +10284,44 @@ main.banner-logger-active #event-progress-overlay {
 .rig-setup-note .rig-setup-meta input[type="checkbox"] { display: inline-block; width: auto; margin: 0; accent-color: var(--accent-red); }
 .rig-setup-foot { font-size: 12px; color: var(--text-tertiary); margin-top: 4px; }
 .rig-setup-foot a { color: var(--accent-blue); }
+
+/* Station Setup checklist (renderer/station-setup.js). Big type and plain
+   buttons on purpose: written for the operator least at home with computers. */
+.station-setup-dialog { width: min(760px, 94vw); max-height: 88vh; padding: 0; display: none; flex-direction: column; font-size: 15px; }
+.station-setup-dialog[open] { display: flex; position: fixed; inset: 0; margin: auto; height: fit-content; }
+.station-setup-dialog .log-dialog-header { padding: 14px 18px 8px; gap: 10px; }
+.station-setup-dialog .log-dialog-header h3 { font-size: 19px; margin: 0; }
+.ss-rig { margin-left: auto; font-size: 14px; }
+.ss-progress { padding: 0 18px 10px; color: var(--text-secondary); font-size: 15px; }
+.ss-progress strong { color: var(--text-primary); }
+.ss-message { margin: 0 18px 10px; padding: 10px 12px; border-radius: 6px; background: var(--bg-tertiary); border-left: 4px solid #4fc3f7; }
+.ss-steps { overflow-y: auto; padding: 0 18px 8px; flex: 1; }
+.ss-group { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+.ss-step { display: grid; grid-template-columns: 30px 1fr; gap: 4px 10px; padding: 10px 12px; margin-bottom: 6px; border-radius: 8px; background: var(--bg-primary); border: 1px solid var(--border-primary); }
+.ss-step.ss-next { border-color: #4fc3f7; box-shadow: 0 0 0 1px #4fc3f7 inset; }
+.ss-icon { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; color: #fff; background: #777; }
+.ss-state-ok .ss-icon, .ss-state-confirmed .ss-icon { background: #3a9a78; }
+.ss-state-needs .ss-icon { background: #d9822b; }
+.ss-state-unknown .ss-icon { background: #4a6fa5; }
+.ss-state-blocked .ss-icon, .ss-state-optional .ss-icon, .ss-state-skipped .ss-icon { background: #666; }
+.ss-step-title { font-size: 16px; font-weight: 600; color: var(--text-primary); align-self: center; }
+.ss-step-title .ss-tag { font-size: 12px; font-weight: 400; color: var(--text-dim); margin-left: 6px; }
+.ss-step-body { grid-column: 2; }
+.ss-detail { color: var(--text-secondary); line-height: 1.45; }
+.ss-instr { margin: 8px 0 0; padding-left: 22px; line-height: 1.5; }
+.ss-instr li { margin-bottom: 4px; }
+.ss-instr-title { margin: 10px 0 2px; font-weight: 600; }
+.ss-why { margin: 2px 0 0 22px; font-size: 13px; color: var(--text-dim); }
+.ss-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ss-btn { font-size: 15px; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; }
+.ss-btn:hover { filter: brightness(1.15); }
+.ss-btn:disabled { opacity: 0.55; cursor: default; }
+.ss-btn-primary { background: #1f6f9f; border-color: #1f6f9f; color: #fff; }
+.ss-btn-danger { background: #b5452f; border-color: #b5452f; color: #fff; }
+.ss-link { background: none; border: none; color: var(--text-dim); text-decoration: underline; cursor: pointer; font-size: 13px; padding: 4px; }
+.ss-confirm { margin-top: 10px; padding: 10px 12px; border-radius: 6px; background: var(--bg-tertiary); border-left: 4px solid #d9822b; line-height: 1.5; }
+.ss-footer { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border-primary); }
+.ss-footer-spacer { flex: 1; }
+.station-setup-card { position: fixed; right: 18px; bottom: 44px; z-index: 900; width: min(420px, calc(100vw - 36px)); padding: 14px 16px; border-radius: 10px; background: var(--bg-secondary); border: 1px solid #4fc3f7; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font-size: 15px; }
+.ss-card-text { color: var(--text-primary); line-height: 1.45; margin-bottom: 10px; }
+.ss-card-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
