@@ -12061,39 +12061,34 @@ function jtcatDirectTxActive() {
 // renderer tone goes nowhere and the carrier never reaches the Flex even though
 // PTT keys. K3SBP 2026-06-15: "Flex + POTACAT doesn't send any audio on PTT."
 // Fix: stream the tone straight to dax_tx, mirroring the FT8 path.
-let _jtcatTuneTxTimer = null;
-let _jtcatTunePhase = 0;
+let _jtcatTuneTxActive = false; // a Tune tone is in flight on the direct dax_tx path
 const JTCAT_TUNE_FREQ_HZ = 1500;   // matches WSJT-X tune tone + the renderer path
 const JTCAT_TUNE_AMP = 0.5;        // moderate steady level; operator sets drive on the rig
 function _startDirectTuneTone() {
-  if (_jtcatTuneTxTimer) return;
-  const RATE = 24000, CHUNK_MS = 20;
-  const n = Math.round(RATE * CHUNK_MS / 1000); // 480 mono samples / chunk
+  // Same sender as FT8 (smartSdrAudio.sendTxAudio: one buffer, paced to real
+  // time, with a short silent lead-in). Tune used to push 20 ms chunks from a
+  // timer through the live-mic streaming path, starting at the instant of
+  // key-down: on K3SBP's 8600 (2026-09-25) that keyed, sent 266 well-formed
+  // packets in real time, and radiated 0.0 W, while FT8 CQs on the same
+  // radio, band and minute made 53 W. One proven path for engine audio.
+  if (_jtcatTuneTxActive || !smartSdrAudio || !smartSdrAudio.txReady) return;
+  const RATE = 12000;                                  // sendTxAudio's input rate
+  const n = Math.round(RATE * JTCAT_TUNE_DURATION_S);
+  const buf = new Float32Array(n);
   const dPhase = 2 * Math.PI * JTCAT_TUNE_FREQ_HZ / RATE;
-  _jtcatTunePhase = 0;
-  if (smartSdrAudio && typeof smartSdrAudio.takeStreamTxStats === 'function') smartSdrAudio.takeStreamTxStats(); // zero the counters
-  _jtcatTuneTxTimer = setInterval(() => {
-    if (!smartSdrAudio || !smartSdrAudio.txReady) return;
-    const buf = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      buf[i] = JTCAT_TUNE_AMP * Math.sin(_jtcatTunePhase);
-      _jtcatTunePhase += dPhase;
-      if (_jtcatTunePhase > 2 * Math.PI) _jtcatTunePhase -= 2 * Math.PI;
-    }
-    try { smartSdrAudio.pushTxAudioChunk(buf); } catch {}
-  }, CHUNK_MS);
+  for (let i = 0; i < n; i++) buf[i] = JTCAT_TUNE_AMP * Math.sin(i * dPhase);
+  _jtcatTuneTxActive = true;
+  // offsetMs 420 -> an 80 ms silent lead-in (TX_SLOT_AUDIO_START_MS - 420),
+  // the same PTT-settle lead the late-start FT8 path uses.
+  smartSdrAudio.sendTxAudio(buf, 420)
+    .catch((e) => { if (!e || e.message !== 'TX cancelled') sendCatLog(`[JTCAT] Tune tone direct send failed: ${e && e.message}`); })
+    .finally(() => { _jtcatTuneTxActive = false; });
 }
 function _stopDirectTuneTone() {
-  const wasRunning = !!_jtcatTuneTxTimer;
-  if (_jtcatTuneTxTimer) { clearInterval(_jtcatTuneTxTimer); _jtcatTuneTxTimer = null; }
-  // What actually reached the radio — turns "keyed, 0 W" into either "no
-  // audio left this PC" or "audio arrived and the radio did not use it".
-  if (wasRunning && smartSdrAudio && typeof smartSdrAudio.takeStreamTxStats === 'function') {
-    const st = smartSdrAudio.takeStreamTxStats();
-    sendCatLog(`[JTCAT] Tune tone: ${st.packets} audio packets sent to the radio (${st.chunks} chunks${st.refused ? `, ${st.refused} refused: ${st.reason}` : ''}; dax_tx ${st.streamId || 'none'} -> ${st.host || '?'})`);
+  if (_jtcatTuneTxActive && smartSdrAudio && typeof smartSdrAudio.cancelTx === 'function') {
+    try { smartSdrAudio.cancelTx(); } catch {}   // logs "DAX TX cancelled at packet N/M"
   }
-  _jtcatTunePhase = 0;
-  if (smartSdrAudio && smartSdrAudio.resetTxStream) { try { smartSdrAudio.resetTxStream(); } catch {} }
+  _jtcatTuneTxActive = false;
 }
 
 // Set when the renderer could not play the tune tone (Station Setup's test
