@@ -3583,12 +3583,17 @@ async function restoreIcomNetworkDataMod(reason = 'disconnect') {
   }
 }
 
-// Rotor control — two backends behind one sendRotorBearing() entry point:
+// Rotor control — three backends behind one sendRotorBearing() entry point:
 //   'pstrotator' (default) — fire-and-forget UDP XML to PstRotator
 //   'rotorez'              — direct serial to a Rotor-EZ / RotorCard /
 //                            Hy-Gain DCU-1 controller (lib/rotorez.js)
+//   'rotctld'              — Hamlib rotctld over TCP (lib/rotctld-client.js):
+//                            every rotator Hamlib supports, no paid software
+//                            (KD9WI 2026-09-13). POTACAT starts the bundled
+//                            rotctld itself, or connects to one already running.
 const dgram = require('dgram');
 const { RotorEzClient } = require('./lib/rotorez');
+const { RotctldClient, buildRotctldArgs, parseRotorList } = require('./lib/rotctld-client');
 let rotorSocket = null;
 let rotorEz = null;
 
@@ -3616,7 +3621,182 @@ function syncRotorEz() {
   rotorEz.connect(settings.rotorSerialPath);
 }
 
+// --- Hamlib rotctld ---
+let rotctldClient = null;
+let rotctldProc = null;
+let rotctldProcKey = '';      // launch config the running rotctld was started with
+let rotctldClientKey = '';    // host:port the client points at
+let rotctldStderr = '';
+let rotctldRespawnTimer = null;
+let rotctldRespawnDelay = 10000;
+
+function rotctldCandidates() {
+  const isWin = process.platform === 'win32';
+  const bin = isWin ? 'rotctld.exe' : 'rotctld';
+  const list = [];
+  if (settings && settings.rotctldPath) list.push(settings.rotctldPath);
+  list.push(app.isPackaged
+    ? path.join(process.resourcesPath, 'hamlib', bin)
+    : path.join(__dirname, 'assets', 'hamlib', bin));
+  // An operator who pointed POTACAT at their own Hamlib for rigctld has
+  // rotctld in the same folder.
+  if (settings && settings.rigctldPath) list.push(path.join(path.dirname(settings.rigctldPath), bin));
+  list.push(...(isWin ? [
+    'C:\\Program Files\\hamlib\\bin\\rotctld.exe',
+    'C:\\Program Files (x86)\\hamlib\\bin\\rotctld.exe',
+    'C:\\hamlib\\bin\\rotctld.exe',
+  ] : [
+    '/usr/bin/rotctld',
+    '/usr/local/bin/rotctld',
+    '/opt/homebrew/bin/rotctld',
+    '/opt/local/bin/rotctld',
+    '/snap/bin/rotctld',
+  ]));
+  return list;
+}
+
+function findRotctld() {
+  for (const cand of rotctldCandidates()) {
+    try { fs.accessSync(cand, fs.constants.X_OK); return cand; } catch {}
+  }
+  return 'rotctld'; // PATH
+}
+
+function rotctldLaunchConfig() {
+  return {
+    model: parseInt(settings.rotctldModel, 10) || 0,
+    device: String(settings.rotctldDevice || '').trim(),
+    baud: parseInt(settings.rotctldBaud, 10) || 9600,
+    port: parseInt(settings.rotctldPort, 10) || 4533,
+    conf: String(settings.rotctldConf || '').trim(),
+  };
+}
+
+function stopRotctldProc() {
+  if (rotctldRespawnTimer) { clearTimeout(rotctldRespawnTimer); rotctldRespawnTimer = null; }
+  if (rotctldProc) {
+    const proc = rotctldProc;
+    rotctldProc = null; // cleared first: the exit handler must see this as OUR kill
+    try { proc.kill(); } catch {}
+  }
+  rotctldProcKey = '';
+}
+
+function stopRotctld() {
+  if (rotctldClient) { rotctldClient.disconnect(); rotctldClient = null; }
+  rotctldClientKey = '';
+  stopRotctldProc();
+}
+
+function rotctldInstallHint() {
+  if (process.platform === 'darwin') return 'install hamlib with: brew install hamlib';
+  if (process.platform === 'win32') return 'install hamlib from hamlib.github.io';
+  return 'install hamlib: sudo apt install libhamlib-utils';
+}
+
+function spawnRotctld(cfg) {
+  const bin = findRotctld();
+  // rotctld opens the serial port itself; on macOS hand it the callout node,
+  // exactly as spawnRigctld does ("Resource busy" on /dev/tty.*). A network
+  // backend's "device" is host:port and is passed through untouched.
+  const isNetDevice = /:\d+$/.test(cfg.device);
+  const device = cfg.device && !isNetDevice ? (calloutTwin(cfg.device) || cfg.device) : cfg.device;
+  const args = buildRotctldArgs({ ...cfg, device });
+  sendCatLog('rotctld spawn: ' + args.map((a) => /\s/.test(a) ? '"' + a + '"' : a).join(' ') + (bin === 'rotctld' ? ' (rotctld from PATH)' : ''));
+  rotctldStderr = '';
+  let proc;
+  try {
+    proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  } catch (err) {
+    sendCatLog(`[rotctld] could not start ${bin}: ${err.message} — ${rotctldInstallHint()}`);
+    return;
+  }
+  rotctldProc = proc;
+  rotctldProcKey = JSON.stringify(cfg);
+  const startedAt = Date.now();
+  proc.stderr.on('data', (chunk) => {
+    const text = chunk.toString();
+    rotctldStderr = (rotctldStderr + text).slice(-4096);
+    text.split('\n').filter(Boolean).forEach((line) => sendCatLog(`[rotctld] ${line}`));
+  });
+  proc.on('error', (err) => {
+    sendCatLog(`[rotctld] could not start ${bin}: ${err.message} — ${rotctldInstallHint()}`);
+  });
+  proc.on('exit', (code) => {
+    if (rotctldProc !== proc) return; // we stopped it
+    rotctldProc = null;
+    rotctldProcKey = '';
+    const last = rotctldStderr.trim().split('\n').pop() || `exit code ${code}`;
+    // A quick death is configuration (wrong port, wrong model, port in use):
+    // back off hard so the log is not a wall of restarts. A crash after a
+    // long healthy run is retried soon.
+    if (Date.now() - startedAt > 60000) rotctldRespawnDelay = 10000;
+    const delay = rotctldRespawnDelay;
+    rotctldRespawnDelay = Math.min(rotctldRespawnDelay * 2, 300000);
+    sendCatLog(`[rotctld] stopped: ${last} — restarting in ${Math.round(delay / 1000)} s`);
+    if (rotctldRespawnTimer) clearTimeout(rotctldRespawnTimer);
+    rotctldRespawnTimer = setTimeout(() => {
+      rotctldRespawnTimer = null;
+      if (settings.enableRotor && settings.rotorType === 'rotctld' && settings.rotctldLaunch !== false) spawnRotctld(rotctldLaunchConfig());
+    }, delay);
+  });
+}
+
+// Start/stop/re-point the rotctld backend to match settings. Called at
+// startup, on save-settings (rotor keys), and from sendRotorBearing.
+function syncRotctld() {
+  const want = !!settings.enableRotor && settings.rotorType === 'rotctld';
+  if (!want) { stopRotctld(); return; }
+  const launch = settings.rotctldLaunch !== false;
+  let host, port;
+  if (launch) {
+    const cfg = rotctldLaunchConfig();
+    if (!cfg.model) {
+      stopRotctld();
+      sendCatLog('[rotctld] pick your rotor model in Settings > Tuning > Antenna to start rotctld');
+      return;
+    }
+    // Only the Dummy rotor (model 1) runs without a device; a real one would
+    // start, fail to open a port nobody chose, and exit.
+    if (!cfg.device && cfg.model !== 1) {
+      stopRotctld();
+      sendCatLog('[rotctld] choose the rotor\'s serial port (or host:port for a network rotor) in Settings > Tuning > Antenna to start rotctld');
+      return;
+    }
+    if (rotctldProcKey !== JSON.stringify(cfg)) {
+      // New or changed config: (re)start now, even over a pending respawn.
+      stopRotctldProc();
+      rotctldRespawnDelay = 10000;
+      spawnRotctld(cfg);
+    }
+    host = '127.0.0.1';
+    port = cfg.port;
+  } else {
+    stopRotctldProc();
+    host = String(settings.rotctldHost || '127.0.0.1').trim();
+    port = parseInt(settings.rotctldPort, 10) || 4533;
+  }
+  const key = `${host}:${port}`;
+  if (rotctldClient && rotctldClientKey === key) return;
+  if (!rotctldClient) {
+    rotctldClient = new RotctldClient();
+    rotctldClient.on('log', (m) => sendCatLog(m));
+    rotctldClient.on('settled', ({ bearing, target, arrived, timedOut }) => {
+      sendCatLog(`[rotctld] rotor stopped at ${bearing}° (target ${target}°${arrived ? '' : timedOut ? ' — NOT reached, still turning after 3 min' : ' — NOT reached'})`);
+    });
+  }
+  rotctldClientKey = key;
+  // A freshly spawned rotctld needs a moment to listen; the client's
+  // reconnect loop covers that without a special case.
+  rotctldClient.connect({ host, port, graceMs: launch ? 3000 : 0 });
+}
+
 function sendRotorBearing(azimuth) {
+  if (settings.rotorType === 'rotctld') {
+    syncRotctld();
+    if (rotctldClient) rotctldClient.rotate(azimuth); // RotctldClient logs its own traffic
+    return;
+  }
   if ((settings.rotorType || 'pstrotator') === 'rotorez') {
     syncRotorEz();
     if (rotorEz) rotorEz.rotate(azimuth); // RotorEzClient logs its own traffic
@@ -21835,6 +22015,8 @@ function createWindow() {
     // Open the Rotor-EZ serial port now (if configured) so the first
     // auto-rotate doesn't race the async port open.
     syncRotorEz();
+    // Same for rotctld: start it (or connect to it) before the first QSY.
+    syncRotctld();
     // Auto-send DXCC data if enabled and ADIF path is set
     if (settings.enableDxcc) {
       sendDxccData();
@@ -31739,6 +31921,19 @@ app.whenReady().then(() => {
     return { success: true, filePath: result.filePath, count: records.length };
   });
 
+  // Hamlib rotor models for the Settings picker ("rotctld -l").
+  ipcMain.handle('rotctld-list-models', () => new Promise((resolve) => {
+    const bin = findRotctld();
+    execFile(bin, ['-l'], { timeout: 10000 }, (err, stdout) => {
+      if (err) {
+        sendCatLog(`[rotctld] could not list rotor models (${bin}): ${err.message} — ${rotctldInstallHint()}`);
+        resolve({ ok: false, error: err.message, models: [] });
+        return;
+      }
+      resolve({ ok: true, models: parseRotorList(stdout) });
+    });
+  }));
+
   ipcMain.handle('list-ports', async () => {
     return listSerialPorts();
   });
@@ -32255,6 +32450,11 @@ app.whenReady().then(() => {
     // Open/close/re-point the Rotor-EZ serial client when its config changes
     if (has('enableRotor') || has('rotorType') || has('rotorSerialPath')) {
       syncRotorEz();
+    }
+    // ...and the Hamlib rotctld backend (restarts rotctld on a launch-key change)
+    if (['enableRotor', 'rotorType', 'rotctldLaunch', 'rotctldModel', 'rotctldDevice', 'rotctldBaud',
+      'rotctldPort', 'rotctldHost', 'rotctldConf', 'rotctldPath'].some(has)) {
+      syncRotctld();
     }
 
     // Push updated settings to ECHOCAT phone
@@ -34797,6 +34997,7 @@ function gracefulCleanup() {
     }
   } catch {}
   killRigctld();
+  try { stopRotctld(); } catch {}
   try { killMercury(); } catch {}
   // Last thing: stamp the clean-exit marker. Reaching here means we shut down
   // on purpose, so the next launch will not report a crash. Anything that

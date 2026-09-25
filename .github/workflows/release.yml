@@ -129,6 +129,7 @@ jobs:
           HAMLIB_PREFIX=$(brew --prefix hamlib)
           rm -f assets/hamlib/*.dll assets/hamlib/*.exe
           cp "$HAMLIB_PREFIX/bin/rigctld" assets/hamlib/rigctld
+          cp "$HAMLIB_PREFIX/bin/rotctld" assets/hamlib/rotctld   # Hamlib rotor control (KD9WI)
           # Homebrew bakes ABSOLUTE Cellar paths into rigctld, so the copy
           # above still loads /opt/homebrew/Cellar/hamlib/<ver>/lib/... — a
           # path that exists on this runner and on no user's Mac. The script
@@ -137,7 +138,7 @@ jobs:
           # Hand-rolling that in shell is exactly what shipped a rigctld no
           # Mac could launch, from the first release pipeline commit until
           # WB0MMC reported "No rigs found" on 2026-08-31.
-          node scripts/bundle-mac-deps.js --expect-arch=arm64 assets/hamlib/rigctld
+          node scripts/bundle-mac-deps.js --expect-arch=arm64 assets/hamlib/rigctld assets/hamlib/rotctld
           ls -la assets/hamlib/
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe)
         # NOTE: built for the RUNNER arch. On the cross-compiled x64 job this
@@ -244,6 +245,7 @@ jobs:
           HAMLIB_PREFIX=$(brew --prefix hamlib)
           rm -f assets/hamlib/*.dll assets/hamlib/*.exe
           cp "$HAMLIB_PREFIX/bin/rigctld" assets/hamlib/rigctld
+          cp "$HAMLIB_PREFIX/bin/rotctld" assets/hamlib/rotctld   # Hamlib rotor control (KD9WI)
           # Homebrew bakes ABSOLUTE Cellar paths into rigctld, so the copy
           # above still loads /opt/homebrew/Cellar/hamlib/<ver>/lib/... — a
           # path that exists on this runner and on no user's Mac. The script
@@ -252,7 +254,7 @@ jobs:
           # Hand-rolling that in shell is exactly what shipped a rigctld no
           # Mac could launch, from the first release pipeline commit until
           # WB0MMC reported "No rigs found" on 2026-08-31.
-          node scripts/bundle-mac-deps.js --expect-arch=x86_64 assets/hamlib/rigctld
+          node scripts/bundle-mac-deps.js --expect-arch=x86_64 assets/hamlib/rigctld assets/hamlib/rotctld
           ls -la assets/hamlib/
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe)
         # NOTE: built for the RUNNER arch. On the cross-compiled x64 job this
@@ -389,6 +391,7 @@ jobs:
           set -e
           rm -f assets/hamlib/*.dll assets/hamlib/*.exe
           cp /usr/local/bin/rigctld assets/hamlib/rigctld
+          cp /usr/local/bin/rotctld assets/hamlib/rotctld   # Hamlib rotor control (KD9WI)
           # 755, NOT just +x: Homebrew installs binaries 555 and cp preserves
           # that. A file without owner-write breaks Squirrel.Mac auto-update —
           # ShipIt must strip the quarantine xattr from every file in the
@@ -396,17 +399,19 @@ jobs:
           # the whole install and silently relaunches the old version (W3DFX,
           # 1.10.3 -> 1.10.5, ShipIt_stderr.log: "Permission denied ...
           # hamlib/rigctld ... file is read-only").
-          chmod 755 assets/hamlib/rigctld
+          chmod 755 assets/hamlib/rigctld assets/hamlib/rotctld
           for dep in $(ldd /usr/local/bin/rigctld | awk '/(hamlib|libusb)/ {print $3}'); do
             if [ -f "$dep" ]; then
               cp -L "$dep" "assets/hamlib/$(basename $dep)"
             fi
           done
           patchelf --set-rpath '$ORIGIN' assets/hamlib/rigctld
+          patchelf --set-rpath '$ORIGIN' assets/hamlib/rotctld
           for lib in assets/hamlib/*.so*; do
             [ -f "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
           done
           ls -la assets/hamlib/
+          ./assets/hamlib/rotctld -l | grep -q 'GS-232' || (echo 'bundled rotctld cannot list rotors' && exit 1)
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe)
         run: |
           sudo apt-get update && sudo apt-get install -y libfftw3-dev gfortran
@@ -518,6 +523,7 @@ jobs:
           set -e
           rm -f assets/hamlib/*.dll assets/hamlib/*.exe
           cp /usr/local/bin/rigctld assets/hamlib/rigctld
+          cp /usr/local/bin/rotctld assets/hamlib/rotctld   # Hamlib rotor control (KD9WI)
           # 755, NOT just +x: Homebrew installs binaries 555 and cp preserves
           # that. A file without owner-write breaks Squirrel.Mac auto-update —
           # ShipIt must strip the quarantine xattr from every file in the
@@ -525,17 +531,19 @@ jobs:
           # the whole install and silently relaunches the old version (W3DFX,
           # 1.10.3 -> 1.10.5, ShipIt_stderr.log: "Permission denied ...
           # hamlib/rigctld ... file is read-only").
-          chmod 755 assets/hamlib/rigctld
+          chmod 755 assets/hamlib/rigctld assets/hamlib/rotctld
           for dep in $(ldd /usr/local/bin/rigctld | awk '/(hamlib|libusb)/ {print $3}'); do
             if [ -f "$dep" ]; then
               cp -L "$dep" "assets/hamlib/$(basename $dep)"
             fi
           done
           patchelf --set-rpath '$ORIGIN' assets/hamlib/rigctld
+          patchelf --set-rpath '$ORIGIN' assets/hamlib/rotctld
           for lib in assets/hamlib/*.so*; do
             [ -f "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
           done
           ls -la assets/hamlib/
+          ./assets/hamlib/rotctld -l | grep -q 'GS-232' || (echo 'bundled rotctld cannot list rotors' && exit 1)
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe)
         run: |
           sudo apt-get update && sudo apt-get install -y libfftw3-dev gfortran

@@ -790,6 +790,18 @@ const rotorPstConfig = document.getElementById('rotor-pst-config');
 const rotorEzConfig = document.getElementById('rotor-ez-config');
 const setRotorEzPort = document.getElementById('set-rotor-ez-port');
 const setRotorEzPortManual = document.getElementById('set-rotor-ez-port-manual');
+const rotorRotctldConfig = document.getElementById('rotor-rotctld-config');
+const setRotctldLaunch = document.getElementById('set-rotctld-launch');
+const rotctldLaunchConfigEl = document.getElementById('rotctld-launch-config');
+const setRotctldModel = document.getElementById('set-rotctld-model');
+const setRotctldDevice = document.getElementById('set-rotctld-device');
+const setRotctldDeviceManual = document.getElementById('set-rotctld-device-manual');
+const setRotctldBaud = document.getElementById('set-rotctld-baud');
+const setRotctldConf = document.getElementById('set-rotctld-conf');
+const setRotctldHost = document.getElementById('set-rotctld-host');
+const setRotctldPort = document.getElementById('set-rotctld-port');
+const rotctldHostRow = document.getElementById('rotctld-host-row');
+const rotctldPortHelp = document.getElementById('rotctld-port-help');
 const setEnableAg = document.getElementById('set-enable-ag');
 const agConfig = document.getElementById('ag-config');
 const setAgHost = document.getElementById('set-ag-host');
@@ -4561,10 +4573,90 @@ setEnableRotor.addEventListener('change', () => {
 // blocks and lazily populates the COM-port picker — same pattern as the
 // rig editor's port dropdown.
 function applyRotorTypeVisibility() {
-  const isEz = setRotorType && setRotorType.value === 'rotorez';
-  if (rotorPstConfig) rotorPstConfig.classList.toggle('hidden', isEz);
+  const type = setRotorType ? setRotorType.value : 'pstrotator';
+  const isEz = type === 'rotorez';
+  const isRotctld = type === 'rotctld';
+  if (rotorPstConfig) rotorPstConfig.classList.toggle('hidden', isEz || isRotctld);
   if (rotorEzConfig) rotorEzConfig.classList.toggle('hidden', !isEz);
+  if (rotorRotctldConfig) rotorRotctldConfig.classList.toggle('hidden', !isRotctld);
   if (isEz) populateRotorEzPorts();
+  if (isRotctld) { applyRotctldLaunchVisibility(); populateRotctldModels(); populateRotctldDevices(); }
+}
+
+// "Start rotctld for me" = model/port/speed; otherwise host/port of a
+// rotctld the operator runs (this machine or another).
+function applyRotctldLaunchVisibility() {
+  const launch = !setRotctldLaunch || setRotctldLaunch.checked;
+  if (rotctldLaunchConfigEl) rotctldLaunchConfigEl.classList.toggle('hidden', !launch);
+  if (rotctldHostRow) rotctldHostRow.classList.toggle('hidden', launch);
+  if (rotctldPortHelp) {
+    rotctldPortHelp.textContent = launch
+      ? 'The TCP port POTACAT starts rotctld on (only this computer can reach it). Default 4533.'
+      : 'Where your rotctld is listening. Default 4533.';
+  }
+}
+if (setRotctldLaunch) setRotctldLaunch.addEventListener('change', applyRotctldLaunchVisibility);
+
+let _rotctldModelsLoaded = false;
+async function populateRotctldModels() {
+  if (!setRotctldModel) return;
+  const saved = parseInt(setRotctldModel.dataset.saved || setRotctldModel.value, 10) || 0;
+  if (_rotctldModelsLoaded) { if (saved) setRotctldModel.value = String(saved); return; }
+  let res = { ok: false, models: [] };
+  try { res = await window.api.rotctldListModels(); } catch {}
+  setRotctldModel.innerHTML = '';
+  const pick = document.createElement('option');
+  pick.value = '';
+  pick.textContent = res.ok ? 'Choose your rotor...' : 'Hamlib rotctld not found';
+  setRotctldModel.appendChild(pick);
+  const models = (res.models || []).slice().sort((a, b) =>
+    (a.mfg + ' ' + a.model).localeCompare(b.mfg + ' ' + b.model));
+  for (const m of models) {
+    const opt = document.createElement('option');
+    opt.value = String(m.id);
+    opt.textContent = `${m.mfg} ${m.model}${m.status && m.status !== 'Stable' ? ' (' + m.status + ')' : ''}`;
+    setRotctldModel.appendChild(opt);
+  }
+  // A saved model this Hamlib does not list stays selectable rather than
+  // silently becoming "Choose your rotor".
+  if (saved && !models.some(m => m.id === saved)) {
+    const opt = document.createElement('option');
+    opt.value = String(saved);
+    opt.textContent = `Model ${saved} (not in this Hamlib)`;
+    setRotctldModel.appendChild(opt);
+  }
+  if (saved) setRotctldModel.value = String(saved);
+  _rotctldModelsLoaded = res.ok;
+}
+
+async function populateRotctldDevices() {
+  if (!setRotctldDevice) return;
+  const saved = setRotctldDevice.dataset.saved || '';
+  let ports = [];
+  try { ports = await window.api.listPorts(); } catch {}
+  setRotctldDevice.innerHTML = '';
+  // An explicit empty first entry: a list that defaulted to the first port
+  // enumerated would hand rotctld some other device's COM port unasked.
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = ports.length ? 'Choose a port... (none for network or Dummy rotors)' : 'No serial ports found';
+  setRotctldDevice.appendChild(none);
+  const detected = new Set();
+  for (const p of ports) {
+    detected.add(p.path);
+    const opt = document.createElement('option');
+    opt.value = p.path;
+    opt.textContent = `${p.path} — ${p.friendlyName}`;
+    if (saved === p.path) opt.selected = true;
+    setRotctldDevice.appendChild(opt);
+  }
+  if (saved && !detected.has(saved)) {
+    const opt = document.createElement('option');
+    opt.value = saved;
+    opt.textContent = `${saved} — (not detected)`;
+    opt.selected = true;
+    setRotctldDevice.appendChild(opt);
+  }
 }
 
 async function populateRotorEzPorts(savedPath) {
@@ -14927,6 +15019,14 @@ async function openSettingsDialog(tab) {
   setRotorPort.value = s.rotorPort || 12040;
   if (setRotorEzPort) setRotorEzPort.dataset.saved = s.rotorSerialPath || '';
   if (setRotorEzPortManual) setRotorEzPortManual.value = '';
+  if (setRotctldLaunch) setRotctldLaunch.checked = s.rotctldLaunch !== false;
+  if (setRotctldModel) setRotctldModel.dataset.saved = s.rotctldModel ? String(s.rotctldModel) : '';
+  if (setRotctldDevice) setRotctldDevice.dataset.saved = s.rotctldDevice || '';
+  if (setRotctldDeviceManual) setRotctldDeviceManual.value = '';
+  if (setRotctldBaud) setRotctldBaud.value = String(s.rotctldBaud || 9600);
+  if (setRotctldConf) setRotctldConf.value = s.rotctldConf || '';
+  if (setRotctldHost) setRotctldHost.value = s.rotctldHost || '127.0.0.1';
+  if (setRotctldPort) setRotctldPort.value = s.rotctldPort || 4533;
   rotorConfig.classList.toggle('hidden', !s.enableRotor);
   if (s.enableRotor) applyRotorTypeVisibility(); // populates the EZ port list from dataset.saved
   setEnableAg.checked = s.enableAntennaGenius === true;
@@ -15765,6 +15865,13 @@ settingsSave.addEventListener('click', async () => {
     || (setRotorEzPort && setRotorEzPort.value)
     || (setRotorEzPort && setRotorEzPort.dataset.saved)
     || '';
+  // rotctld: fall back to the loaded values so saving while another rotor
+  // type is showing (lists never populated) doesn't wipe the rotctld setup.
+  const rotctldModelVal = parseInt((setRotctldModel && setRotctldModel.value) || (setRotctldModel && setRotctldModel.dataset.saved), 10) || 0;
+  const rotctldDeviceVal = (setRotctldDeviceManual && setRotctldDeviceManual.value.trim())
+    || (setRotctldDevice && setRotctldDevice.value)
+    || (setRotctldDevice && setRotctldDevice.dataset.saved)
+    || '';
   const agEnabled = setEnableAg.checked;
   const agHostVal = setAgHost.value.trim();
   const agRadioPortVal = parseInt(setAgRadioPort.value, 10) || 1;
@@ -15972,6 +16079,13 @@ settingsSave.addEventListener('click', async () => {
     rotorHost: rotorHostVal,
     rotorPort: rotorPortVal,
     rotorSerialPath: rotorSerialPathVal,
+    rotctldLaunch: setRotctldLaunch ? setRotctldLaunch.checked : true,
+    rotctldModel: rotctldModelVal,
+    rotctldDevice: rotctldDeviceVal,
+    rotctldBaud: parseInt(setRotctldBaud && setRotctldBaud.value, 10) || 9600,
+    rotctldConf: setRotctldConf ? setRotctldConf.value.trim() : '',
+    rotctldHost: (setRotctldHost && setRotctldHost.value.trim()) || '127.0.0.1',
+    rotctldPort: parseInt(setRotctldPort && setRotctldPort.value, 10) || 4533,
     enableAntennaGenius: agEnabled,
     agHost: agHostVal,
     agRadioPort: agRadioPortVal,

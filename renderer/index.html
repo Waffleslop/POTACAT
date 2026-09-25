@@ -2239,17 +2239,18 @@
       <label class="checkbox-label"><input type="checkbox" id="set-tune-click"> Tune confirmation sound</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Play a click when the radio confirms it has changed frequency</span>
     </fieldset>
-    <!-- 6. Antenna (beam heading + PstRotator) -->
+    <!-- 6. Antenna (beam heading + rotor control) -->
     <fieldset class="source-toggles" data-settings-tab="tuning">
       <legend>Antenna</legend>
       <label class="checkbox-label"><input type="checkbox" id="set-show-bearing"> Show Beam Heading</label>
       <span class="help-text" style="margin-left:12px;display:block;">Compass bearing from your QTH to each spot</span>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-rotor"> Rotor control (PstRotator / Rotor-EZ)</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-rotor"> Rotor control (Hamlib / PstRotator / Rotor-EZ)</label>
       <div id="rotor-config" class="radio-sub hidden">
         <label style="margin-bottom:4px;">Rotor:
           <select id="set-rotor-type" style="width:220px;">
             <option value="pstrotator">PstRotator (UDP)</option>
             <option value="rotorez">Rotor-EZ / DCU-1 (serial)</option>
+            <option value="rotctld">Hamlib rotctld (free, most rotators)</option>
           </select>
         </label>
         <label style="margin-bottom:4px;">Rotate:
@@ -2268,6 +2269,44 @@
             <input type="number" id="set-rotor-port" value="12040" min="1" max="65535" style="width:80px;">
           </label>
           <span class="help-text" style="display:block;margin-top:4px;">Default port is 12040. Use 12042, 12044, 12046 for additional rotators.</span>
+        </div>
+        <div id="rotor-rotctld-config" class="hidden">
+          <span class="help-text" style="font-size:12px;">Hamlib's free rotator control: GS-232, SPID, Easycomm, Rotor-EZ, ARS, Prosistel and more. POTACAT can start rotctld for you from the Hamlib it ships with.</span>
+          <label class="checkbox-label"><input type="checkbox" id="set-rotctld-launch"> Start rotctld for me</label>
+          <div id="rotctld-launch-config">
+            <label>Rotor model:
+              <select id="set-rotctld-model" style="width:280px;"></select>
+            </label>
+            <label>Serial port:
+              <select id="set-rotctld-device" style="width:240px;"></select>
+            </label>
+            <label>Manual port or host:port (if not listed):
+              <input type="text" id="set-rotctld-device-manual" placeholder="COM9, /dev/ttyUSB0 or 192.168.1.20:12000" style="width:220px;">
+            </label>
+            <label>Speed:
+              <select id="set-rotctld-baud" style="width:100px;">
+                <option value="1200">1200</option>
+                <option value="2400">2400</option>
+                <option value="4800">4800</option>
+                <option value="9600">9600</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="57600">57600</option>
+                <option value="115200">115200</option>
+              </select>
+            </label>
+            <label>Extra settings (optional):
+              <input type="text" id="set-rotctld-conf" placeholder="min_az=-180,max_az=180" style="width:220px;">
+            </label>
+            <span class="help-text" style="display:block;font-size:12px;">Passed to rotctld as --set-conf. Use it for a rotor with non-standard stops.</span>
+          </div>
+          <label id="rotctld-host-row">Host:
+            <input type="text" id="set-rotctld-host" placeholder="127.0.0.1" style="width:140px;">
+          </label>
+          <label>Port:
+            <input type="number" id="set-rotctld-port" value="4533" min="1" max="65535" style="width:80px;">
+          </label>
+          <span class="help-text" id="rotctld-port-help" style="display:block;margin-top:4px;font-size:12px;"></span>
         </div>
         <div id="rotor-ez-config" class="hidden">
           <span class="help-text" style="font-size:12px;">Drives an Idiom Press / Ham Supply Rotor-EZ or RotorCard board — or a Hy-Gain DCU-1 — directly over its serial port (4800 8N1). The port can't be shared with the rig.</span>
