@@ -15297,7 +15297,9 @@ function _launcherPaths() {
   let launcherCfgDir;
   if (platform === 'win32') launcherCfgDir = path.join(process.env.APPDATA || '', 'potacat');
   else if (platform === 'darwin') launcherCfgDir = path.join(os.homedir(), 'Library', 'Application Support', 'potacat');
-  else launcherCfgDir = path.join(os.homedir(), '.config', 'potacat');
+  // Linux is case-sensitive: settings live in userData (~/.config/POTACAT),
+  // which is where scripts/launcher.js now looks too (getConfigDir).
+  else launcherCfgDir = userData;
   return { userData, launcherDest, autostartPath, launcherCfgDir, platform };
 }
 
@@ -15489,6 +15491,46 @@ async function _startLauncher() {
   } catch (err) {
     sendCatLog(`[Launcher] Start failed: ${err.message}`);
     return { ok: false, error: err.message };
+  }
+}
+
+// An installed launcher runs a COPY of scripts/launcher.js in userData, made
+// at Install and never again — so every launcher fix since (#70/#71/#80 in
+// 1.10.5/1.10.8, newest-install in 1.10.12, the #84 fixes) never reached
+// anyone who had already installed it; "restart the launcher after
+// updating" could not help. At launch: if the copy differs from this
+// build's, replace it, and restart a running launcher so it runs the new
+// code. A launcher run by system Node writes no PID file; that one picks the
+// new copy up at its next start (next login).
+async function _refreshInstalledLauncher() {
+  try {
+    const { launcherDest, launcherCfgDir } = _launcherPaths();
+    if (!fs.existsSync(launcherDest)) return; // never installed
+    const bundled = fs.readFileSync(path.join(__dirname, 'scripts', 'launcher.js'), 'utf8');
+    if (fs.readFileSync(launcherDest, 'utf8') === bundled) return;
+    fs.writeFileSync(launcherDest, bundled);
+    let pid = 0;
+    try { pid = parseInt(fs.readFileSync(path.join(launcherCfgDir, 'launcher.pid'), 'utf8').trim(), 10) || 0; } catch {}
+    let alive = false;
+    if (pid) { try { process.kill(pid, 0); alive = true; } catch {} }
+    if (!alive) {
+      sendCatLog('[Launcher] Updated the installed launcher to this version (it takes effect the next time it starts)');
+      return;
+    }
+    try { process.kill(pid); } catch {}
+    // Wait for its port to free, then start it again on the new code.
+    const net = require('net');
+    const portFree = () => new Promise((resolve) => {
+      const probe = net.createServer();
+      probe.once('error', () => resolve(false));
+      probe.once('listening', () => probe.close(() => resolve(true)));
+      probe.listen(7301, '0.0.0.0');
+    });
+    for (let i = 0; i < 20 && !(await portFree()); i++) await new Promise(r => setTimeout(r, 250));
+    const { pid: newPid } = _spawnLauncherProc(launcherDest);
+    sendCatLog(`[Launcher] Updated the installed launcher to this version and restarted it (PID ${pid} -> ${newPid})`);
+  } catch (err) {
+    sendCatLog(`[Launcher] Could not update the installed launcher: ${err.message}`);
   }
 }
 
@@ -25555,6 +25597,9 @@ app.whenReady().then(() => {
   // Station Setup's "new for your radio" card compares against the version
   // this launch upgraded FROM — read before What's New rewrites lastVersion.
   _stationSetupLaunchLastVersion = settings.lastVersion || null;
+  // Bring an installed Remote Launcher up to this build's code (see
+  // _refreshInstalledLauncher). Late, so it never competes with startup.
+  setTimeout(() => { _refreshInstalledLauncher().catch(() => {}); }, 20000);
   // Station Setup reports that could not be delivered last time.
   if ((settings.setupSharePending || []).length) setTimeout(() => { flushPendingSetupShares().catch(() => {}); }, 90000);
   migrateRigSettings(settings);

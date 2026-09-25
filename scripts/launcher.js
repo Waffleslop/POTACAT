@@ -26,7 +26,16 @@ const IS_MAC = process.platform === 'darwin';
 function getConfigDir() {
   if (IS_WIN) return path.join(process.env.APPDATA || '', 'potacat');
   if (IS_MAC) return path.join(os.homedir(), 'Library', 'Application Support', 'potacat');
-  return path.join(os.homedir(), '.config', 'potacat');
+  // Linux is case-sensitive, and app.setName('POTACAT') puts the real
+  // settings in ~/.config/POTACAT. Reading only 'potacat' found no callsign
+  // and exited (it worked only where a pre-1.7.4 lowercase folder was left
+  // behind — KB2UXB's laptop yes, desktop no). Prefer the folder that
+  // actually holds settings.json.
+  const upper = path.join(os.homedir(), '.config', 'POTACAT');
+  const lower = path.join(os.homedir(), '.config', 'potacat');
+  if (fs.existsSync(path.join(upper, 'settings.json'))) return upper;
+  if (fs.existsSync(path.join(lower, 'settings.json'))) return lower;
+  return upper;
 }
 
 const CONFIG_DIR = getConfigDir();
@@ -35,6 +44,9 @@ const SETTINGS_PATH = path.join(CONFIG_DIR, 'settings.json');
 const DEFAULT_PORT = 7301;
 const ECHOCAT_PORT = 7300;
 const PROCESS_NAME = IS_WIN ? 'POTACAT.exe' : 'POTACAT';
+// Linux: the packaged binary is lowercase 'potacat', renamed 'potacat.bin'
+// behind the sandbox wrapper since 1.8.9 — pgrep -x "POTACAT" never matched.
+const LINUX_PROCESS_NAMES = ['potacat.bin', 'potacat', 'POTACAT'];
 const RATE_LIMIT_WINDOW = 60000;
 const RATE_LIMIT_MAX = 20;
 // Authed status polls only (see checkRateLimit buckets): the page polls
@@ -135,8 +147,48 @@ function parseArgs() {
 // --- Process detection ---
 const MY_PID = process.pid;
 
+// A launcher that runs as full Electron (POTACAT.exe --launcher) has GPU and
+// utility children that are ALSO POTACAT.exe, and a launcher run as
+// Electron-as-Node is POTACAT.exe running launcher.js. Counting those as
+// "POTACAT is running" made Start a no-op ("already running") after a reboot
+// with no window anywhere, and Stop/Restart killed the launcher's own
+// children (officiallor #84). With the process table's parent PIDs and
+// command lines, keep only the real app: not us, not our children, not
+// another launcher, not a launcher's child.
+let _pidCache = null;
+function getWindowsAppPids() {
+  if (_pidCache && Date.now() - _pidCache.at < 4000) return _pidCache.pids; // one CIM query costs ~1 s
+  const script = "Get-CimInstance Win32_Process -Filter \"Name='" + PROCESS_NAME + "'\" | " +
+    'Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress';
+  const out = execSync('powershell -NoProfile -NonInteractive -Command -', {
+    input: script, encoding: 'utf8', timeout: 8000, windowsHide: true,
+  }).trim();
+  let rows = out ? JSON.parse(out) : [];
+  if (!Array.isArray(rows)) rows = [rows];
+  const pids = appPidsFromProcessTable(rows, MY_PID);
+  _pidCache = { at: Date.now(), pids };
+  return pids;
+}
+
+/** Pure: which rows are the POTACAT app (not a launcher, not a launcher's child). */
+function appPidsFromProcessTable(rows, myPid) {
+  const isLauncher = (r) => r.ProcessId === myPid || /--launcher\b|launcher\.js/i.test(r.CommandLine || '');
+  const launcherPids = new Set(rows.filter(isLauncher).map(r => r.ProcessId));
+  launcherPids.add(myPid);
+  // The app's main process first (no --type=), so /status names it rather
+  // than a GPU or renderer child.
+  const isChild = (r) => /--type=/.test(r.CommandLine || '') ? 1 : 0;
+  return rows
+    .filter(r => r && r.ProcessId && !launcherPids.has(r.ProcessId) && !launcherPids.has(r.ParentProcessId))
+    .sort((a, b) => isChild(a) - isChild(b))
+    .map(r => r.ProcessId);
+}
+
 /** Get all PIDs of POTACAT.exe except our own launcher process */
 function getOtherPids() {
+  if (IS_WIN) {
+    try { return getWindowsAppPids(); } catch (err) { /* no PowerShell/CIM: the tasklist fallback below */ }
+  }
   try {
     if (IS_WIN) {
       const out = execSync(`tasklist /FI "IMAGENAME eq ${PROCESS_NAME}" /FO CSV /NH`, {
@@ -156,8 +208,14 @@ function getOtherPids() {
       }
       return pids;
     } else {
-      const out = execSync(`pgrep -x "${PROCESS_NAME}"`, { encoding: 'utf8', timeout: 5000 });
-      return out.trim().split('\n').map(s => parseInt(s, 10)).filter(p => p && p !== MY_PID);
+      const found = new Set();
+      for (const name of (IS_MAC ? [PROCESS_NAME] : LINUX_PROCESS_NAMES)) {
+        try {
+          const out = execSync(`pgrep -x "${name}"`, { encoding: 'utf8', timeout: 5000 });
+          for (const line of out.trim().split('\n')) { const pid = parseInt(line, 10); if (pid && pid !== MY_PID) found.add(pid); }
+        } catch { /* pgrep exits 1 when nothing matches */ }
+      }
+      return [...found];
     }
   } catch {
     return [];
@@ -212,8 +270,12 @@ function findPotacatPath() {
   } else if (IS_MAC) {
     candidates.push('/Applications/POTACAT.app/Contents/MacOS/POTACAT');
   } else {
+    // deb/rpm install lowercase names; keep the old guesses too.
+    candidates.push('/usr/bin/potacat');
+    candidates.push('/opt/POTACAT/potacat');
     candidates.push('/usr/bin/POTACAT');
     candidates.push(path.join(os.homedir(), 'POTACAT.AppImage'));
+    if (process.env.APPIMAGE) candidates.push(process.env.APPIMAGE);
   }
 
   let best = null, bestM = -1;
@@ -233,28 +295,60 @@ function findPotacatPath() {
 }
 
 // --- Start / Stop / Restart ---
-function startPotacat() {
+// How long a started POTACAT must stay up before Start reports success.
+const START_CONFIRM_MS = 4000;
+
+/** The environment for the app: never ours as Electron-as-Node. */
+function appEnv(env) {
+  const out = { ...env };
+  // A launcher run as Electron-as-Node has ELECTRON_RUN_AS_NODE=1; inherited,
+  // it made POTACAT.exe start as bare Node and exit at once while Start said
+  // "started" — "cursor briefly shows loading ... it does not launch"
+  // (KB2UXB 2026-06-25, officiallor #84).
+  delete out.ELECTRON_RUN_AS_NODE;
+  delete out.ELECTRON_NO_ATTACH_CONSOLE;
+  return out;
+}
+
+async function startPotacat() {
   const exePath = findPotacatPath();
   if (!exePath) return { ok: false, error: 'POTACAT executable not found. Set potacatPath in launcher-config.json.' };
+  _pidCache = null;
   if (isRunning()) return { ok: true, already: true, pid: getPid() };
 
+  let child;
   try {
-    const child = spawn(exePath, [], {
+    child = spawn(exePath, [], {
       detached: true,
       stdio: 'ignore',
       windowsHide: false,
+      env: appEnv(process.env),
     });
-    child.unref();
-    startedAt = Date.now();
-    console.log(`[Launcher] Started POTACAT (PID ${child.pid}) from ${exePath}`);
-    return { ok: true, pid: child.pid };
   } catch (err) {
     console.error(`[Launcher] Failed to start: ${err.message}`);
     return { ok: false, error: err.message };
   }
+  // Report success only if it is still running a few seconds later — a
+  // process that exits at once is a failed start, not a started app.
+  const exited = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), START_CONFIRM_MS);
+    child.once('exit', (code, signal) => { clearTimeout(t); resolve({ code, signal }); });
+    child.once('error', (err) => { clearTimeout(t); resolve({ code: null, signal: null, error: err.message }); });
+  });
+  child.unref();
+  if (exited) {
+    const why = exited.error || `exit code ${exited.code}${exited.signal ? ', ' + exited.signal : ''}`;
+    console.error(`[Launcher] POTACAT exited right after starting (${why}) from ${exePath}`);
+    return { ok: false, error: `POTACAT started and exited immediately (${why}).` };
+  }
+  startedAt = Date.now();
+  _pidCache = null;
+  console.log(`[Launcher] Started POTACAT (PID ${child.pid}) from ${exePath}`);
+  return { ok: true, pid: child.pid };
 }
 
 async function stopPotacat() {
+  _pidCache = null;
   const pids = getOtherPids();
   if (pids.length === 0) return { ok: true, already: true };
   // Electron is multi-process: renderers/GPU are ALSO POTACAT.exe. Killing a
@@ -280,6 +374,7 @@ async function stopPotacat() {
   const deadline = Date.now() + 5000;
   while (survivors.length && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 300));
+    _pidCache = null;
     survivors = getOtherPids();
   }
   if (survivors.length === 0) {
@@ -683,7 +778,7 @@ async function handleRequest(req, res) {
   }
 
   if (pathname === '/start' && req.method === 'POST') {
-    const result = startPotacat();
+    const result = await startPotacat();
     res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
     return;
@@ -771,5 +866,4 @@ server.listen(config.port, '0.0.0.0', () => {
 
 process.on('exit', removePidFile);
 process.on('SIGINT', () => { console.log('\n[Launcher] Shutting down'); server.close(); process.exit(0); });
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
