@@ -1801,6 +1801,7 @@
 
       case 'spots':
         spots = msg.data || [];
+        if (typeof resolveEchoSpotWpm === 'function') resolveEchoSpotWpm();
         renderSpots();
         if (activeTab === 'map') renderMapSpots();
         if (bc) { try { bc.postMessage({ kind: 'spots', data: spots }); } catch {} }
@@ -1902,6 +1903,7 @@
           cwWpmLabel.textContent = cwWpm + ' WPM';
           localCwKeyer.setWpm(msg.wpm);
           if (window.__vfSyncCw) window.__vfSyncCw();
+          if (typeof updateEchoCwSpotWpm === 'function') updateEchoCwSpotWpm();
         }
         if (msg.mode) {
           cwMode = msg.mode;
@@ -2434,6 +2436,7 @@
       freqDisplay.textContent = formatFreq(s.freq);
       const prevFreqKhz = currentFreqKhz;
       currentFreqKhz = s.freq / 1000;
+      if (Math.abs(currentFreqKhz - prevFreqKhz) > 0.05 && typeof resolveEchoSpotWpm === 'function') resolveEchoSpotWpm();
       logSheetFollowRadio();
       quickLogFollowRadio();
       if (bc) { try { bc.postMessage({ kind: 'vfo', freqKhz: currentFreqKhz, mode: (modeBadge && modeBadge.textContent) || '' }); } catch {} }
@@ -8988,27 +8991,86 @@
   var echoSpotWpmEl = document.getElementById('cw-spot-wpm-echo');
   var echoWpmSyncBtn = document.getElementById('cw-wpm-sync-echo');
 
+  // Auto-sync (KE4WLE 2026-09-25: "automatically slows or increases the WPM
+  // to match the spotted station without having to click sync every time.
+  // Maybe single press for sync and double press for auto sync?"). One press
+  // matches once; a double press or press-and-hold turns auto-sync on/off.
+  // With it on, the speed follows the TUNED spot's WPM — re-resolved when the
+  // dial moves and when the spot list refreshes — in CW modes only. Per
+  // device, like the rest of this page's layout choices.
+  var cwAutoSync = (function() { try { return localStorage.getItem('echoCwAutoSync') === '1'; } catch (e) { return false; } })();
+  function cwWpmClamp(w) { return Math.max(5, Math.min(50, Math.round(w))); }
+  function isCwModeNow() { return /^CW/i.test(currentMode || '') || /^CW/i.test((modeBadge && modeBadge.textContent) || ''); }
+  function applySpotWpm() {
+    if (!echoSpotWpm) return;
+    var w = cwWpmClamp(echoSpotWpm);
+    if (w === cwWpm) return;
+    cwWpm = w;
+    cwWpmLabel.textContent = cwWpm + ' WPM';
+    sendCwConfig();
+    if (window.__vfSyncCw) window.__vfSyncCw();
+  }
   function updateEchoCwSpotWpm() {
     if (!echoSpotWpmEl || !echoWpmSyncBtn) return;
-    if (echoSpotWpm && echoSpotWpm !== cwWpm) {
-      echoSpotWpmEl.textContent = 'Theirs: ' + echoSpotWpm;
-      echoSpotWpmEl.classList.remove('hidden');
-      echoWpmSyncBtn.classList.remove('hidden');
-    } else {
-      echoSpotWpmEl.classList.add('hidden');
-      echoWpmSyncBtn.classList.add('hidden');
+    if (cwAutoSync && echoSpotWpm && isCwModeNow()) applySpotWpm();
+    var differs = !!(echoSpotWpm && cwWpmClamp(echoSpotWpm) !== cwWpm);
+    echoSpotWpmEl.textContent = echoSpotWpm ? ('Theirs: ' + echoSpotWpm) : '';
+    echoSpotWpmEl.classList.toggle('hidden', !differs);
+    // Auto-sync keeps the button on screen: once the speeds match it would
+    // otherwise vanish, and with it the only way to turn auto-sync off.
+    echoWpmSyncBtn.classList.toggle('hidden', !differs && !cwAutoSync);
+    echoWpmSyncBtn.classList.toggle('auto', cwAutoSync);
+    echoWpmSyncBtn.textContent = cwAutoSync ? 'Auto' : 'Sync';
+    echoWpmSyncBtn.title = cwAutoSync
+      ? 'Auto-sync is on: the speed follows the tuned spot. Double-press or hold to turn it off.'
+      : 'Press: match their speed once. Double-press or hold: match it automatically.';
+  }
+  function setCwAutoSync(on) {
+    cwAutoSync = !!on;
+    try { localStorage.setItem('echoCwAutoSync', cwAutoSync ? '1' : '0'); } catch (e) {}
+    updateEchoCwSpotWpm();
+  }
+  // The tuned spot's WPM, from the dial — so auto-sync follows the VFO, not
+  // only a tap on a spot card (a scan step, the knob, the map all land here).
+  function resolveEchoSpotWpm() {
+    if (!currentFreqKhz || !Array.isArray(spots)) return;
+    var best = null, bestD = 0.6;
+    for (var i = 0; i < spots.length; i++) {
+      var sp = spots[i];
+      if (!sp || !sp.wpm) continue;
+      var d = Math.abs(parseFloat(sp.frequency) - currentFreqKhz);
+      if (d < bestD) { best = sp; bestD = d; }
     }
+    var w = best ? best.wpm : null;
+    if (w !== echoSpotWpm) { echoSpotWpm = w; updateEchoCwSpotWpm(); }
   }
 
   if (echoWpmSyncBtn) {
-    echoWpmSyncBtn.addEventListener('click', function() {
-      if (echoSpotWpm) {
-        cwWpm = echoSpotWpm;
-        cwWpmLabel.textContent = cwWpm + ' WPM';
-        sendCwConfig();
-        updateEchoCwSpotWpm();
-      }
+    var _syncClickTimer = null, _syncHoldTimer = null, _syncHeld = false;
+    echoWpmSyncBtn.addEventListener('pointerdown', function() {
+      _syncHeld = false;
+      clearTimeout(_syncHoldTimer);
+      _syncHoldTimer = setTimeout(function() { _syncHeld = true; setCwAutoSync(!cwAutoSync); }, 550);
     });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) {
+      echoWpmSyncBtn.addEventListener(ev, function() { clearTimeout(_syncHoldTimer); });
+    });
+    echoWpmSyncBtn.addEventListener('contextmenu', function(e) { e.preventDefault(); }); // long-press on a phone
+    echoWpmSyncBtn.addEventListener('click', function() {
+      if (_syncHeld) { _syncHeld = false; return; }          // the hold already toggled
+      if (_syncClickTimer) {                                  // second press: toggle auto
+        clearTimeout(_syncClickTimer);
+        _syncClickTimer = null;
+        setCwAutoSync(!cwAutoSync);
+        return;
+      }
+      _syncClickTimer = setTimeout(function() {               // single press: match once
+        _syncClickTimer = null;
+        applySpotWpm();
+        updateEchoCwSpotWpm();
+      }, 260);
+    });
+    updateEchoCwSpotWpm();
   }
 
   // Mode buttons

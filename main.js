@@ -20767,6 +20767,10 @@ function dedupeCrossSource(spots) {
       // Park names too, for the info display in the log dialog.
       if (s.source === 'sota' && s.parkName && !survivor.sotaParkName) survivor.sotaParkName = s.parkName;
       if (s.source === 'llota' && s.parkName && !survivor.llotaParkName) survivor.llotaParkName = s.parkName;
+      // CW speed lives only on RBN / cluster spots; a POTA survivor used to
+      // drop it, so the WPM "Sync" (and auto-sync) had nothing to match on
+      // the spots CW hunters work most (KE4WLE 2026-09-25).
+      if (s.wpm && !survivor.wpm) survivor.wpm = s.wpm;
     }
     collapsed.push(survivor);
   }

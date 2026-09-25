@@ -1299,6 +1299,8 @@ html, body {
 .cw-spot-wpm { font-size: 10px; color: #f0a500; font-family: monospace; white-space: nowrap; margin-left: 4px; }
 .cw-wpm-sync { font-size: 9px; padding: 2px 8px; border-radius: 3px; border: 1px solid #f0a500; background: transparent; color: #f0a500; cursor: pointer; font-weight: 600; margin-left: 2px; }
 .cw-wpm-sync:active { background: #f0a500; color: #000; }
+.cw-wpm-sync { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.cw-wpm-sync.auto { background: #f0a500; color: #000; }
 
 .cw-mode-wrap {
   display: flex;
