@@ -214,6 +214,8 @@ contextBridge.exposeInMainWorld('api', {
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
   stationSetupAction: (q) => ipcRenderer.invoke('station-setup-action', q),
+  stationSetupSharePreview: (q) => ipcRenderer.invoke('station-setup-share-preview', q),
+  stationSetupShareSend: (q) => ipcRenderer.invoke('station-setup-share-send', q),
   onStationSetupChanged: (cb) => {
     const handler = () => cb();
     ipcRenderer.on('station-setup-changed', handler);

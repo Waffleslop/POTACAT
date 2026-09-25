@@ -418,6 +418,7 @@ const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache,
 const { getModel, getModelList, RIG_MODELS } = require('./lib/rig-models');
 const { resolveSetupNotes, radioTypeFromCatTarget } = require('./lib/rig-setup-notes');
 const StationSetup = require('./lib/station-setup');
+const SetupShare = require('./lib/setup-share');
 const { autoUpdater } = require('electron-updater');
 let registerCloudIpc;
 try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
@@ -585,6 +586,7 @@ const GLOBAL_KEYS = new Set([
   'cloudDeviceId',     // stable machine UUID for cloud device registration
                        // (must be global so both operators' phones find the same shack)
   'launchAtStartup',   // OS login item — machine-scoped by nature
+  'setupSharePending', // Station Setup shares not yet delivered (retried at launch) — about this machine's radios
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
@@ -3607,6 +3609,13 @@ function stationSetupPayload(rigId) {
     },
     appVersion: getAppDisplayVersion(),
     platform: process.platform,
+    // "Share my working setup" (lib/setup-share.js): offered only when every
+    // required step works on this radio.
+    share: {
+      eligible: SetupShare.eligibleToShare(res),
+      sharedAt: rig.setupShared ? rig.setupShared.at : null,
+      pending: SetupShare.prunePending(settings.setupSharePending).some(e => e.payload && e.payload.shareId === rig.setupShareId),
+    },
     ...res,
   };
 }
@@ -3649,6 +3658,112 @@ function stationSetupReconcilePower(watts) {
   m.lastAttemptAt = now;
   sendCatLog(`[Setup] radio still at ${watts} W after a test transmit — setting it back to ${m.watts} W (attempt ${_setupPowerRestoreAttempt} of 3)`);
   try { applyRigControl({ action: 'set-tx-power', value: m.watts }, 'setup'); } catch {}
+}
+
+// --- "Share my working setup" (lib/setup-share.js holds the policy) -------
+// The operator sees the exact report before it is sent (preview), and a
+// report that cannot be delivered — the cloud endpoint may ship after this
+// release — is kept in settings.setupSharePending and retried at launch.
+
+function stationSetupShareBuild(rigId, req = {}) {
+  const rig = stationSetupRigById(rigId);
+  if (!rig) return { error: 'No radio.' };
+  const res = stationSetupPayload(rig.id);
+  if (!SetupShare.eligibleToShare(res)) return { error: 'Sharing opens once every essential step works on this radio.' };
+  if (!rig.setupShareId) {
+    rig.setupShareId = require('crypto').randomUUID();
+    try { saveSettings(settings); } catch {}
+  }
+  const payload = SetupShare.buildSetupShare({
+    shareId: rig.setupShareId,
+    appVersion: getAppDisplayVersion(), platform: process.platform, arch: process.arch,
+    rig,
+    radioType: radioTypeFromCatTarget(rig.catTarget),
+    family: RigFamily.rigFamily(rig) || '',
+    modelInfo: rig.model ? (RIG_MODELS[rig.model] || null) : null,
+    result: res,
+    live: stationSetupLive(rig),
+    levels: { jtcatTxGain: settings.jtcatTxGain, jtcatRxGain: settings.jtcatRxGain, txDrive: settings.txDrive },
+    audioLabels: req.audioLabels || {},
+    answers: req.answers || {},
+    callsign: settings.myCallsign || '',
+  });
+  const fingerprint = SetupShare.shareFingerprint(payload);
+  return {
+    payload, fingerprint,
+    lines: SetupShare.describeShare(payload),
+    alreadyShared: !!(rig.setupShared && rig.setupShared.fingerprint === fingerprint),
+  };
+}
+
+async function postSetupShare(payload) {
+  try {
+    // POTACAT_SETUP_SHARE_URL: point a dev build at a local stand-in server.
+    const res = await fetch(process.env.POTACAT_SETUP_SHARE_URL || SetupShare.SHARE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'POTACAT/' + getAppDisplayVersion() },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    });
+    return res.status;
+  } catch {
+    return 0;
+  }
+}
+
+function stationSetupQueueShare(payload) {
+  settings.setupSharePending = SetupShare.prunePending([...(settings.setupSharePending || []), { payload, queuedAt: Date.now() }]);
+  try { saveSettings(settings); } catch {}
+}
+
+function stationSetupMarkShared(shareId, fingerprint) {
+  const rig = (settings.rigs || []).find(r => r && r.setupShareId === shareId);
+  if (rig) rig.setupShared = { at: Date.now(), fingerprint };
+  settings.setupSharePending = (settings.setupSharePending || []).filter(e => !(e && e.payload && e.payload.shareId === shareId));
+  try { saveSettings(settings); } catch {}
+}
+
+async function stationSetupShareSend(rigId, req = {}) {
+  const built = stationSetupShareBuild(rigId, req);
+  if (built.error) return { message: built.error };
+  const status = await postSetupShare(built.payload);
+  const outcome = SetupShare.deliveryOutcome(status);
+  const model = built.payload.radio.model || 'radio';
+  if (outcome === 'sent') {
+    stationSetupMarkShared(built.payload.shareId, built.fingerprint);
+    sendCatLog(`[Setup] shared the working ${model} setup (HTTP ${status})`);
+    return { message: 'Sent. Thank you — this helps every owner of this radio.' };
+  }
+  if (outcome === 'retry') {
+    stationSetupQueueShare(built.payload);
+    // Remember what was queued so the checklist says "will be sent".
+    const rig = stationSetupRigById(rigId);
+    if (rig) { rig.setupShared = { at: null, fingerprint: built.fingerprint, queuedAt: Date.now() }; try { saveSettings(settings); } catch {} }
+    sendCatLog(`[Setup] could not send the ${model} setup yet (${status ? 'HTTP ' + status : 'no connection'}) — kept, and POTACAT will try again next time it starts`);
+    return { message: 'POTACAT could not reach the server just now. Your setup is saved and will be sent automatically the next time POTACAT starts.' };
+  }
+  sendCatLog(`[Setup] the server refused the ${model} setup report (HTTP ${status})`);
+  return { message: `The server did not accept the report (error ${status}). Nothing else to do; thank you for trying.` };
+}
+
+// At launch: deliver anything that could not be sent before.
+async function flushPendingSetupShares() {
+  const pending = SetupShare.prunePending(settings.setupSharePending);
+  if ((settings.setupSharePending || []).length !== pending.length) { settings.setupSharePending = pending; try { saveSettings(settings); } catch {} }
+  for (const e of pending) {
+    const status = await postSetupShare(e.payload);
+    const outcome = SetupShare.deliveryOutcome(status);
+    if (outcome === 'sent') {
+      stationSetupMarkShared(e.payload.shareId, SetupShare.shareFingerprint(e.payload));
+      sendCatLog(`[Setup] delivered a saved ${e.payload.radio && e.payload.radio.model || 'radio'} setup report (HTTP ${status})`);
+    } else if (outcome === 'drop') {
+      settings.setupSharePending = (settings.setupSharePending || []).filter(x => x !== e);
+      try { saveSettings(settings); } catch {}
+      sendCatLog(`[Setup] the server refused a saved setup report (HTTP ${status}) — dropped`);
+    } else {
+      break; // still unreachable; try again next launch
+    }
+  }
 }
 
 async function waitForPowerReadback(sinceTs, predicate, timeoutMs) {
@@ -25387,6 +25502,8 @@ app.whenReady().then(() => {
   // Station Setup's "new for your radio" card compares against the version
   // this launch upgraded FROM — read before What's New rewrites lastVersion.
   _stationSetupLaunchLastVersion = settings.lastVersion || null;
+  // Station Setup reports that could not be delivered last time.
+  if ((settings.setupSharePending || []).length) setTimeout(() => { flushPendingSetupShares().catch(() => {}); }, 90000);
   migrateRigSettings(settings);
   // TX power is persisted now (applyJtcatTxGain). Before this the level
   // reset to 100% on every launch and whatever client connected first
@@ -28712,6 +28829,15 @@ app.whenReady().then(() => {
       if (kind === 'txDeviceTest' && result && !result.ok) sendCatLog(`[Setup] audio output check failed: ${result.error || 'could not open'}`);
     }
     return stationSetupPayload(rig ? rig.id : rigId);
+  });
+  // "Share my working setup": preview = exactly what Send would post.
+  ipcMain.handle('station-setup-share-preview', (_e, req = {}) => {
+    const b = stationSetupShareBuild(req.rigId, req);
+    return b.error ? { error: b.error } : { lines: b.lines, alreadyShared: b.alreadyShared };
+  });
+  ipcMain.handle('station-setup-share-send', async (_e, req = {}) => {
+    const r = await stationSetupShareSend(req.rigId, req);
+    return { ...stationSetupPayload(req.rigId), message: r.message };
   });
   ipcMain.handle('station-setup-action', async (_e, req = {}) => {
     const { action } = req;
@@ -32338,7 +32464,7 @@ app.whenReady().then(() => {
     // keys keeps main's — otherwise the next rig edit would wipe them and the
     // checklist would nag about steps that already work.
     if (Array.isArray(newSettings.rigs) && Array.isArray(settings.rigs)) {
-      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced'];
+      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared'];
       newSettings.rigs = newSettings.rigs.map((r) => {
         const cur = r && settings.rigs.find(x => x && x.id === r.id);
         if (!cur) return r;

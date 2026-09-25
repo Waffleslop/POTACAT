@@ -10319,6 +10319,13 @@ main.banner-logger-active #event-progress-overlay {
 .ss-btn-primary { background: #1f6f9f; border-color: #1f6f9f; color: #fff; }
 .ss-btn-danger { background: #b5452f; border-color: #b5452f; color: #fff; }
 .ss-link { background: none; border: none; color: var(--text-dim); text-decoration: underline; cursor: pointer; font-size: 13px; padding: 4px; }
+/* "Share my working setup" (lib/setup-share.js) */
+.ss-share { margin: 14px 0 4px; padding: 12px 14px; border-radius: 6px; background: var(--bg-tertiary); border-left: 4px solid #4ecca3; line-height: 1.5; font-size: 15px; }
+.ss-share textarea { width: 100%; min-height: 64px; margin: 6px 0; font: inherit; font-size: 14px; box-sizing: border-box; }
+.ss-share-list { margin: 8px 0; display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 14px; }
+.ss-share-list dt { color: var(--text-dim); }
+.ss-share-list dd { margin: 0; overflow-wrap: anywhere; }
+.ss-share label { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 .ss-confirm { margin-top: 10px; padding: 10px 12px; border-radius: 6px; background: var(--bg-tertiary); border-left: 4px solid #d9822b; line-height: 1.5; }
 .ss-footer { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border-primary); }
 .ss-footer-spacer { flex: 1; }

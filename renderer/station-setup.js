@@ -17,12 +17,18 @@
   const messageEl = $('ss-message');
   const rigSel = $('ss-rig');
   const card = $('station-setup-card');
+  const shareEl = $('ss-share');
 
   let rigId = null;
   let current = null;
   let busy = {};            // step id -> label while a check runs
   let confirmTx = null;     // action id awaiting the transmit confirmation
   let autoRan = new Set();  // rigId:check — automatic checks run once per open
+  // "Share my working setup": null | 'form' | 'preview' | 'sending'
+  let shareMode = null;
+  let shareNotes = '';
+  let shareCallsign = false;
+  let sharePreview = null;
 
   const ICON = { ok: '✓', confirmed: '✓', needs: '!', unknown: '?', blocked: '–', optional: '·', skipped: '–' };
   const TAG = { confirmed: 'you confirmed this', optional: 'optional', skipped: 'not using', blocked: 'waiting on a step above' };
@@ -39,7 +45,7 @@
   // saves the whole list. When the checklist changes a rig's setup fields
   // with Settings open underneath, bring that copy up to date, or the next
   // Settings save would put the old values back.
-  const RIG_SETUP_FIELDS = ['setupDone', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupPassed'];
+  const RIG_SETUP_FIELDS = ['setupDone', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupPassed', 'setupShareId', 'setupShared'];
   async function syncSettingsRigCopy() {
     try {
       if (typeof currentRigs === 'undefined' || !Array.isArray(currentRigs) || !currentRigs.length) return;
@@ -100,6 +106,117 @@
       }
       stepsEl.appendChild(renderStep(st, st.id === s.next));
     }
+    renderShare();
+  }
+
+  // --- "Share my working setup" (lib/setup-share.js) -------------------------
+  // Offered only when every essential step works. The preview is built by
+  // main from the SAME payload Send posts, so what the operator reads is
+  // exactly what leaves the computer.
+
+  function renderShare() {
+    if (!shareEl) return;
+    const sh = current && current.share;
+    // Lives at the end of the scrolling step list (render() empties that list,
+    // so it is re-attached every time).
+    stepsEl.appendChild(shareEl);
+    if (!sh || !sh.eligible) { shareEl.classList.add('hidden'); shareEl.innerHTML = ''; return; }
+    shareEl.classList.remove('hidden');
+    shareEl.innerHTML = '';
+    const name = current.rig.model || current.rig.name;
+    const p = (html) => { const d = document.createElement('div'); d.innerHTML = html; shareEl.appendChild(d); return d; };
+    const btn = (label, cls, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = cls; b.textContent = label;
+      b.disabled = shareMode === 'sending';
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const row = () => { const r = document.createElement('div'); r.className = 'ss-actions'; shareEl.appendChild(r); return r; };
+
+    if (!shareMode) {
+      p('<strong>Help other ' + esc(name) + ' owners.</strong> Your radio is working. You can send POTACAT your working settings so they become the defaults for everyone with this radio.');
+      if (sh.pending) p('Your settings are saved and will be sent the next time POTACAT starts.');
+      else if (sh.sharedAt) p("You shared this radio's settings on " + esc(new Date(sh.sharedAt).toISOString().slice(0, 10)) + '. Thank you.');
+      row().appendChild(btn(sh.sharedAt || sh.pending ? 'Share again' : 'Share my working setup', sh.sharedAt || sh.pending ? 'ss-btn' : 'ss-btn ss-btn-primary', () => { shareMode = 'form'; render(); }));
+      return;
+    }
+
+    if (shareMode === 'form') {
+      p('<strong>One question (you can leave it empty).</strong> Did you change anything in the radio&rsquo;s own menus to get it working with POTACAT? Tell us what, in your own words. For example: which menu you changed and what you set it to.');
+      const ta = document.createElement('textarea');
+      ta.maxLength = 1000;
+      ta.value = shareNotes;
+      ta.placeholder = 'Menu settings you changed, if you remember';
+      ta.addEventListener('input', () => { shareNotes = ta.value; });
+      shareEl.appendChild(ta);
+      const lab = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = shareCallsign;
+      cb.addEventListener('change', () => { shareCallsign = cb.checked; });
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode('Include my callsign, so POTACAT can ask me about it'));
+      shareEl.appendChild(lab);
+      const r = row();
+      r.appendChild(btn('See what will be sent', 'ss-btn ss-btn-primary', showSharePreview));
+      r.appendChild(btn('Cancel', 'ss-btn', () => { shareMode = null; render(); }));
+      return;
+    }
+
+    // preview / sending
+    p('<strong>This is everything that will be sent.</strong> No passwords, addresses or computer names are ever included.');
+    const dl = document.createElement('dl');
+    dl.className = 'ss-share-list';
+    for (const line of (sharePreview && sharePreview.lines) || []) {
+      const dt = document.createElement('dt'); dt.textContent = line.label;
+      const dd = document.createElement('dd'); dd.textContent = line.value;
+      dl.appendChild(dt); dl.appendChild(dd);
+    }
+    shareEl.appendChild(dl);
+    if (sharePreview && sharePreview.alreadyShared) p('You already sent exactly these settings. Sending again just updates them.');
+    const r = row();
+    r.appendChild(btn(shareMode === 'sending' ? 'Sending…' : 'Send', 'ss-btn ss-btn-primary', sendShare));
+    r.appendChild(btn('Change my answer', 'ss-btn', () => { shareMode = 'form'; render(); }));
+    r.appendChild(btn('Cancel', 'ss-btn', () => { shareMode = null; render(); }));
+  }
+
+  // Device names, not ids: main never sees labels, and an id is a
+  // per-machine hash that means nothing to anyone else.
+  async function shareAudioLabels() {
+    const out = { input: '', output: '' };
+    try {
+      const dev = await rigDevices();
+      const list = await navigator.mediaDevices.enumerateDevices();
+      const find = (id, kind) => { const d = list.find(x => x.deviceId === id && x.kind === kind); return d ? d.label : ''; };
+      out.input = find(dev.input, 'audioinput');
+      out.output = find(dev.output, 'audiooutput');
+    } catch {}
+    return out;
+  }
+
+  function shareRequest(labels) {
+    return { rigId, audioLabels: labels, answers: { menuNotes: shareNotes, includeCallsign: shareCallsign } };
+  }
+
+  async function showSharePreview() {
+    const labels = await shareAudioLabels();
+    let res = null;
+    try { res = await window.api.stationSetupSharePreview(shareRequest(labels)); } catch {}
+    if (!res || res.error) { showMessage((res && res.error) || 'Could not prepare the report.'); shareMode = null; render(); return; }
+    sharePreview = res;
+    shareMode = 'preview';
+    render();
+  }
+
+  async function sendShare() {
+    shareMode = 'sending';
+    render();
+    const labels = await shareAudioLabels();
+    try { current = await window.api.stationSetupShareSend(shareRequest(labels)); } catch {}
+    shareMode = null;
+    sharePreview = null;
+    showMessage(current && current.message);
+    render();
   }
 
   function renderStep(st, isNext) {
@@ -337,6 +454,8 @@
     rigId = id || null;
     busy = {};
     confirmTx = null;
+    shareMode = null;
+    sharePreview = null;
     showMessage('');
     hideCard();
     await refresh();
@@ -365,7 +484,7 @@
     render();
   });
   rigSel.addEventListener('change', () => open(rigSel.value));
-  window.api.onStationSetupChanged(() => { if (dlg.open && !confirmTx && !Object.keys(busy).length) refresh(); });
+  window.api.onStationSetupChanged(() => { if (dlg.open && !confirmTx && !shareMode && !Object.keys(busy).length) refresh(); });
 
   const moreBtn = $('view-station-setup-btn');
   if (moreBtn) moreBtn.addEventListener('click', () => open());
