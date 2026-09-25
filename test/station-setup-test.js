@@ -294,7 +294,7 @@ t('the test transmit refuses in CW mode, before touching power or PTT, and logs 
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
   const run = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest(') + 4000);
   const cw = run.indexOf("if (/^CW/.test(modeNow))");
-  assert.ok(cw > 0 && cw < run.indexOf("action: 'set-tx-power'") && cw < run.indexOf('startJtcatTune()'));
+  assert.ok(cw > 0 && cw < run.indexOf("action: 'set-tx-power'") && cw < run.indexOf('startJtcatTune('));
   assert.ok(/\[Setup\] test transmit: radio mode/.test(run));
 });
 

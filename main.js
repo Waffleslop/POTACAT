@@ -3493,6 +3493,7 @@ const stationSetupResults = new Map(); // rigId -> { rxTest, txDeviceTest, txTes
 // before the renderer's What's New check rewrites settings.lastVersion.
 let _stationSetupLaunchLastVersion;
 let _stationSetupNotifyTimer = null;
+const STATION_SETUP_TEST_TONE_HZ = 1000;
 let _stationSetupTxBusy = false;       // a test transmit is running (see runStationSetupTxTest)
 let _stationSetupTxTest = null;        // { peakW, fwdEvents, peakSwr } while a test transmit runs
 let _lastPowerReadback = null;         // { watts, at } — the radio's own report, never our optimism
@@ -3863,7 +3864,11 @@ async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   }, 150);
   sendCatLog(`[Setup] test transmit: 3 s tone at ${keepPower ? 'the radio\'s current power' : Math.min(prevW || testW, testW) + ' W'}`);
   const tuneStartedAt = Date.now();
-  startJtcatTune();
+  // 1000 Hz: inside every SSB/data TX filter, and away from 1500 Hz, which
+  // K3SBP's 8600 all but removed at 6 W (TX filter 0-3100; FT8 at 820 and
+  // 1290 Hz made 4 W at the same setting, 2026-09-25). The test asks "does
+  // this radio transmit", not "at the operator's FT8 offset".
+  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ });
   const keyed = jtcatTuneState.active;
   if (keyed) {
     await sleepMs(3000);
@@ -12082,7 +12087,8 @@ function _startDirectTuneTone() {
   // where FT8 made 53 W at a 69 W setting, and 0.014 W where FT8 made 4 W at
   // 6 W (K3SBP's 8600, 2026-09-25) — so Tune and the Station Setup test read
   // "no power" on a radio that was working.
-  const toneHz = (ft8Engine && ft8Engine._txFreq > 100 && ft8Engine._txFreq < 3000) ? ft8Engine._txFreq : JTCAT_TUNE_FREQ_HZ;
+  const toneHz = jtcatTuneState.toneHz
+    || ((ft8Engine && ft8Engine._txFreq > 100 && ft8Engine._txFreq < 3000) ? ft8Engine._txFreq : JTCAT_TUNE_FREQ_HZ);
   const dPhase = 2 * Math.PI * toneHz / RATE;
   for (let i = 0; i < n; i++) buf[i] = JTCAT_TUNE_DIRECT_AMP * Math.sin(i * dPhase);
   sendCatLog(`[JTCAT] Tune tone: ${Math.round(toneHz)} Hz at FT8 drive`);
@@ -12104,8 +12110,11 @@ function _stopDirectTuneTone() {
 // transmit reads it to name the real cause instead of "no power came out").
 let _jtcatTuneAudioFault = null;
 
-function startJtcatTune() {
+// opts.toneHz: a fixed tone for callers that are testing the radio rather
+// than tuning at the operator's FT8 offset (Station Setup's test transmit).
+function startJtcatTune(opts = {}) {
   if (jtcatTuneState.active) return;
+  jtcatTuneState.toneHz = Number(opts.toneHz) > 100 ? Number(opts.toneHz) : 0;
   if (_swrTripped) {
     sendCatLog('[SWR GUARD] Tune blocked — SWR guard tripped. Run the ATU or change bands first.');
     broadcastJtcatTuneState();
