@@ -1296,6 +1296,14 @@ function _applyPopoutTheme(payload) {
       jpTxFreqHz = data.txFreq;
       txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
     }
+    // A CQ has no partner to listen to, so RX comes to our own frequency —
+    // replies arrive there. Without this the RX marker (and the engine's RX
+    // focus) stayed on the last QSO partner's offset after every QSO.
+    if (data.state === 'tx' && data.txFreq && !data.sliceId && modeSelect.value !== 'PSK31'
+        && /^CQ\s/.test(data.message || '') && jpRxFreqHz !== data.txFreq) {
+      jpRxFreqHz = data.txFreq;
+      window.api.jtcatSetRxFreq(data.txFreq);
+    }
     transmitting = data.state === 'tx';
     rxTxEl.textContent = transmitting ? 'TX' : 'RX';
     rxTxEl.style.color = transmitting ? '#e94560' : '';
@@ -4332,32 +4340,42 @@ function _applyPopoutTheme(payload) {
         wfAccumCount = 0;
       }
 
-      // RX marker (green) — pulses when receiving
+      // Frequency marker. RX and TX are normally the same frequency, and then
+      // there is ONE bar: green while receiving, red while transmitting. Two
+      // bars only when they really differ — a Shift+click split, or Hold TX
+      // Freq while answering a station elsewhere — green = where we listen,
+      // red = where we transmit (K3SBP 2026-09-24: a CQ after a QSO left the
+      // green bar parked on the last partner's frequency beside the red one).
       var rxX = Math.round(jpRxFreqHz / 3000 * w);
       var txX = Math.round(jpTxFreqHz / 3000 * w);
       var pulse = (Math.sin(Date.now() / 200) + 1) / 2; // 0-1 oscillation
-      var rxGlow = !transmitting ? 2 + pulse * 4 : 0;
-      var txGlow = transmitting ? 2 + pulse * 4 : 0;
-      // RX line
-      if (rxGlow > 0) {
-        jpWfCtx.shadowColor = '#4ecca3';
-        jpWfCtx.shadowBlur = rxGlow;
+      var glow = 2 + pulse * 4;
+      var split = Math.abs(rxX - txX) > 3;
+      if (split) {
+        // RX line (green) — pulses when receiving
+        if (!transmitting) { jpWfCtx.shadowColor = '#4ecca3'; jpWfCtx.shadowBlur = glow; }
+        jpWfCtx.fillStyle = '#000';
+        jpWfCtx.fillRect(rxX - 3, 0, 7, h);
+        jpWfCtx.fillStyle = '#4ecca3';
+        jpWfCtx.fillRect(rxX - 2, 0, 5, h);
+        jpWfCtx.shadowBlur = 0;
+        // TX line (red) — pulses when transmitting
+        if (transmitting) { jpWfCtx.shadowColor = '#ff2222'; jpWfCtx.shadowBlur = glow; }
+        jpWfCtx.fillStyle = '#000';
+        jpWfCtx.fillRect(txX - 2, 0, 5, h);
+        jpWfCtx.fillStyle = '#ff2222';
+        jpWfCtx.fillRect(txX - 1, 0, 3, h);
+        jpWfCtx.shadowBlur = 0;
+      } else {
+        var markColor = transmitting ? '#ff2222' : '#4ecca3';
+        jpWfCtx.shadowColor = markColor;
+        jpWfCtx.shadowBlur = glow;
+        jpWfCtx.fillStyle = '#000';
+        jpWfCtx.fillRect(txX - 3, 0, 7, h);
+        jpWfCtx.fillStyle = markColor;
+        jpWfCtx.fillRect(txX - 2, 0, 5, h);
+        jpWfCtx.shadowBlur = 0;
       }
-      jpWfCtx.fillStyle = '#000';
-      jpWfCtx.fillRect(rxX - 3, 0, 7, h);
-      jpWfCtx.fillStyle = '#4ecca3';
-      jpWfCtx.fillRect(rxX - 2, 0, 5, h);
-      jpWfCtx.shadowBlur = 0;
-      // TX marker (red) — pulses when transmitting
-      if (txGlow > 0) {
-        jpWfCtx.shadowColor = '#ff2222';
-        jpWfCtx.shadowBlur = txGlow;
-      }
-      jpWfCtx.fillStyle = '#000';
-      jpWfCtx.fillRect(txX - 2, 0, 5, h);
-      jpWfCtx.fillStyle = '#ff2222';
-      jpWfCtx.fillRect(txX - 1, 0, 3, h);
-      jpWfCtx.shadowBlur = 0;
 
       // Auto-detect quietest TX frequency (~every 0.5s)
       popoutQuietFreqFrame++;
