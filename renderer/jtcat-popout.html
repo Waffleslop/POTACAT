@@ -66,7 +66,7 @@
     .jp-row.jp-new-park { background: rgba(78, 204, 163, 0.18); border-left: 3px solid #66ff99; padding-left: 5px; }
     .jp-row.jp-new-park .jp-msg { color: #8affc2; font-weight: 600; }
     .jp-badge { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 2px; margin-right: 2px; line-height: 1.4; display: inline-block; vertical-align: baseline; }
-    .jp-badge-dxcc { background: #e94560; color: #fff; }
+    .jp-badge-dxcc { background: var(--accent-red, #e94560); color: #fff; }
     .jp-badge-grid { background: #4fc3f7; color: #000; }
     .jp-badge-call { background: #f0a500; color: #000; }
     .jp-badge-watch { background: #ff4081; color: #fff; }
@@ -106,8 +106,11 @@
     .jp-row.jp-wl-fill-g2, .jp-row.jp-cq.jp-wl-fill-g2, .jp-row.jp-wanted.jp-wl-fill-g2 { background: color-mix(in srgb, var(--jp-wl-color-2, #b388ff) 38%, transparent); border-left: 3px solid var(--jp-wl-color-2, #b388ff); }
     /* Directed-at-me is UNMISSABLE (WSJT-X "black bar" parity): solid accent
        band + bold; outranks every other treatment including watchlist fills. */
-    .jp-row.jp-directed { background: #e94560 !important; color: #fff; font-weight: 700; border-left: 6px solid #7a0f26; }
-    .jp-row.jp-directed .jp-msg { color: #fff; }
+    .jp-row.jp-directed { background: var(--accent-red, #e94560) !important; color: #fff; font-weight: 700; border-left: 6px solid #7a0f26; }
+    .jp-row.jp-directed .jp-msg,
+    .jp-row.jp-directed .jp-time, .jp-row.jp-directed .jp-db,
+    .jp-row.jp-directed .jp-dt, .jp-row.jp-directed .jp-df,
+    .jp-row.jp-directed .jp-entity { color: #fff; }
     /* New DXCC pops (bright magenta tint) — data was always enriched, the
        styling just whispered. */
     .jp-row.jp-wanted.jp-new-dxcc { background: color-mix(in srgb, #ff00c8 24%, transparent); }
@@ -122,7 +125,13 @@
        unreadable). The dark-theme msg colors were designed for dark
        backgrounds; give light mode darker equivalents. */
     [data-theme="light"] .jp-row.jp-cq .jp-msg { color: #0b7a4b; }
-    [data-theme="light"] .jp-row.jp-directed .jp-msg { color: #b3202e; }
+    /* The directed row is a SOLID red band since the WSJT-X "black bar"
+       change, so its text is white in both themes — this rule used to paint
+       it dark red on red (1.7:1) and the time/dt/df columns stayed grey
+       (1.1:1). Light mode also gets the darker red (white 5.6:1), for
+       operators working in full sun (Dusty Notes 2026-09-25). */
+    [data-theme="light"] .jp-row.jp-directed { background: #c62828 !important; }
+    [data-theme="light"] .jp-row.jp-directed .jp-msg { color: #fff; }
     [data-theme="light"] .jp-row.jp-chase .jp-msg { color: #8a6a00; }
     [data-theme="light"] .jp-row.jp-new-park .jp-msg { color: #0b7a4b; }
     /* WSPR distance + best-DX use the same pale yellow as chase — same
@@ -160,7 +169,7 @@
     .jp-wspr-chip:hover, .jp-mode-chip:hover { color: var(--text-secondary); }
     .jp-wspr-chip.on, .jp-mode-chip.on { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); font-weight: 700; }
     .jp-wspr-chip.hopping, .jp-mode-chip.hopping { box-shadow: 0 0 0 2px #4fc3f7; }
-    .jp-wspr-next.tx { background: #e94560; color: #fff; animation: jp-tune-pulse 1s ease-in-out infinite; }
+    .jp-wspr-next.tx { background: var(--accent-red, #e94560); color: #fff; animation: jp-tune-pulse 1s ease-in-out infinite; }
     /* Spot table */
     .jp-wspr-thead, .jp-wspr-row { display: grid; grid-template-columns: 46px 26px 30px 68px 26px 60px 42px 1fr 30px 50px 30px; gap: 4px; padding: 1px 8px; font-family: monospace; font-size: 11px; align-items: baseline; }
     .jp-wspr-thead { color: var(--text-dim); font-weight: 700; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); padding-top: 3px; padding-bottom: 3px; flex-shrink: 0; }
@@ -211,18 +220,18 @@
     .jp-status-strip { display: flex; align-items: center; gap: 10px; padding: 3px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
     .jp-cycle-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-primary); overflow: hidden; border: 1px solid var(--border-primary); }
     .jp-cycle-fill { height: 100%; width: 0%; background: var(--accent-green, #4ecca3); }
-    .jp-cycle-fill.tx { background: #e94560; }
+    .jp-cycle-fill.tx { background: var(--accent-red, #e94560); }
     .jp-countdown-big { font-family: monospace; font-size: 16px; font-weight: 700; color: var(--text-primary); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
     .jp-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; font-weight: 600; cursor: pointer; }
     .jp-btn:hover { background: var(--bg-hover); }
     .jp-btn.active { background: var(--accent-green, #4ecca3); color: #fff; border-color: var(--accent-green, #4ecca3); }
-    .jp-btn.jp-halt { background: #e94560; color: #fff; border-color: #e94560; }
+    .jp-btn.jp-halt { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; }
     /* ATU — momentary. The pulse is a 5 s "I sent it" acknowledgement, not a
        readback: the radio doesn't report tune-in-progress over CAT. */
     .jp-btn.jp-atu.tuning { background: #f0a500; color: #000; border-color: #f0a500; animation: jp-tune-pulse 1s ease-in-out infinite; }
     .jp-btn.jp-tune { color: #f0a500; border-color: #f0a500; }
     .jp-btn.jp-tune:hover { background: #f0a500; color: #000; }
-    .jp-btn.jp-tune.active { background: #e94560; color: #fff; border-color: #e94560; animation: jp-tune-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
+    .jp-btn.jp-tune.active { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; animation: jp-tune-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
     /* ULTRACAT Full Auto CQ — Matrix-green identity, pulses while running. */
     .jp-btn.jp-ultracat { color: #00ff41; border-color: #00ff41; }
     .jp-btn.jp-ultracat:hover { background: #00ff41; color: #000; }
@@ -291,13 +300,13 @@
     .jp-qso-skip { background: none; border: 1px solid #4fc3f7; color: #4fc3f7; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; line-height: 1; font-weight: 600; }
     .jp-qso-skip:hover { background: #4fc3f7; color: #000; }
     .jp-qso-cancel { margin-left: auto; background: none; border: 1px solid #e94560; color: #e94560; border-radius: 4px; padding: 2px 8px; font-size: 14px; cursor: pointer; line-height: 1; }
-    .jp-qso-cancel:hover { background: #e94560; color: #fff; }
+    .jp-qso-cancel:hover { background: var(--accent-red, #e94560); color: #fff; }
     .jp-qso-steprow { display: flex; align-items: center; gap: 8px; }
     .jp-qso-steps { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; font-family: monospace; font-size: 11px; flex: 1 1 auto; min-width: 0; }
     .jp-qso-step { display: flex; align-items: center; gap: 2px; padding: 3px 6px; border-radius: 3px; white-space: nowrap; background: var(--bg-secondary); color: var(--text-dim); border: 1px solid transparent; }
     .jp-qso-step.step-done { color: var(--text-tertiary, #666); text-decoration: line-through; opacity: 0.6; }
     .jp-qso-step.step-current { font-weight: bold; }
-    .jp-qso-step.step-current.step-tx { background: #e94560; color: #fff; border-color: #e94560; }
+    .jp-qso-step.step-current.step-tx { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; }
     .jp-qso-step.step-current.step-tx.step-pulsing { animation: qso-step-pulse 1s ease-in-out infinite; }
     .jp-qso-step.step-current.step-rx { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); }
     @keyframes qso-step-pulse { 0%,100% { opacity: 1; box-shadow: 0 0 4px #e94560; } 50% { opacity: 0.6; box-shadow: 0 0 12px #e94560; } }
@@ -391,7 +400,7 @@
        measured NTP offset is marginal/bad. -->
   <div id="jp-clock-banner" class="hidden" style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:#5a1a1a;border-bottom:2px solid #e94560;color:#ffd9d9;font-size:12px;font-weight:600;">
     <span id="jp-clock-msg" style="flex:1;">⚠ PC clock is off — FT8 will not decode.</span>
-    <button type="button" id="jp-clock-sync" class="jtcat-filter-btn" style="background:#e94560;color:#fff;border-color:#e94560;font-weight:700;" title="Set the clock from an internet time server. If the Windows Time service is switched off or has never synced — the usual cause — this turns it on and configures it too, which needs one Administrator prompt.">Fix it now</button>
+    <button type="button" id="jp-clock-sync" class="jtcat-filter-btn" style="background:var(--accent-red, #e94560);color:#fff;border-color:#e94560;font-weight:700;" title="Set the clock from an internet time server. If the Windows Time service is switched off or has never synced — the usual cause — this turns it on and configures it too, which needs one Administrator prompt.">Fix it now</button>
     <button type="button" id="jp-clock-settings" class="jtcat-filter-btn" title="Open Windows Date &amp; Time settings and do it by hand instead">Time settings…</button>
     <button type="button" id="jp-clock-recheck" class="jtcat-filter-btn" title="Re-measure clock offset">Recheck</button>
   </div>
@@ -592,7 +601,7 @@
       <span id="jp-bs-span"></span>
       <span id="jp-bs-mode"></span>
       <span style="flex:1"></span>
-      <button type="button" id="jp-bs-enable" class="hidden" title="Turns SCU-LAN10 on in the radio menu (EX0301261;). POTACAT turns it back off when the scope stops." style="font-size:10px;padding:1px 6px;border:1px solid #e94560;background:#e94560;color:#fff;border-radius:3px;cursor:pointer;">Enable SCU-LAN10</button>
+      <button type="button" id="jp-bs-enable" class="hidden" title="Turns SCU-LAN10 on in the radio menu (EX0301261;). POTACAT turns it back off when the scope stops." style="font-size:10px;padding:1px 6px;border:1px solid #e94560;background:var(--accent-red, #e94560);color:#fff;border-radius:3px;cursor:pointer;">Enable SCU-LAN10</button>
       <span id="jp-bs-lo" style="font-family:monospace"></span>
       <span id="jp-bs-c" style="font-family:monospace;color:#e94560;font-weight:700"></span>
       <span id="jp-bs-hi" style="font-family:monospace"></span>

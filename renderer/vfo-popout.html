@@ -31,7 +31,7 @@
       --bg-hover: #d0d4da; --bg-btn: #e0e2e8; --bg-btn-hover: #d0d4da;
       --border: #c0c4cc; --border-accent: #1976d2;
       --text-primary: #1a1a2e; --text-secondary: #4a4a6a; --text-dim: #6a6a80; --text-dimmer: #8a8a9a;
-      --accent-blue: #1976d2; --accent-green: #2e7d5a; --accent-red: #d32f2f;
+      --accent-blue: #1976d2; --accent-green: #2e7d5a; --accent-red: #c62828;
       --accent-gold: #b8860b;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -54,7 +54,7 @@
       cursor: pointer; padding: 2px 6px; border-radius: 3px;
     }
     .titlebar-btns button:hover { background: var(--bg-btn); color: #fff; }
-    .titlebar-btns .close-btn:hover { background: #e94560; color: #fff; }
+    .titlebar-btns .close-btn:hover { background: var(--accent-red, #e94560); color: #fff; }
 
     /* --- Frequency display --- */
     .freq-row {
@@ -212,7 +212,7 @@
     .kp-btn:active { background: #4a4a6a; }
     .kp-btn.kp-action { font-size: 14px; font-weight: bold; }
     .kp-btn.kp-go { background: #4ecca3; color: #1a1a2e; border-color: var(--accent-green); }
-    .kp-btn.kp-clear { background: #e94560; color: #fff; border-color: #e94560; }
+    .kp-btn.kp-clear { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; }
     .kp-input {
       grid-column: 1 / -1; text-align: center; font-family: 'Consolas', monospace;
       font-size: 24px; background: var(--bg-input); border: 1px solid var(--border);
@@ -408,12 +408,12 @@
     .voice-macro-btn.active { background: #4fc3f7; color: #1a1a2e; }
     .voice-macro-btn.empty { opacity: 0.3; cursor: default; }
     .voice-stop-btn {
-      background: #e94560; border: 1px solid #e94560; color: #fff;
+      background: var(--accent-red, #e94560); border: 1px solid #e94560; color: #fff;
       padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
       font-weight: bold;
     }
     .cw-cancel-btn {
-      background: #e94560; border: 1px solid #e94560; color: #fff;
+      background: var(--accent-red, #e94560); border: 1px solid #e94560; color: #fff;
       padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
       font-weight: bold;
     }

@@ -1415,7 +1415,7 @@
           <span style="font-size:13px;font-weight:700;color:var(--accent);">TRANSMITTING</span>
           <span style="flex:1"></span>
           <span id="sstv-phone-tx-time" style="font-size:13px;font-family:monospace;color:var(--text);">0:00 / 0:00</span>
-          <button type="button" id="sstv-phone-halt-btn" style="padding:4px 10px;font-size:12px;font-weight:700;border:1px solid #e94560;background:#e94560;color:#fff;border-radius:4px;">HALT</button>
+          <button type="button" id="sstv-phone-halt-btn" style="padding:4px 10px;font-size:12px;font-weight:700;border:1px solid #e94560;background:var(--accent, #e94560);color:#fff;border-radius:4px;">HALT</button>
         </div>
         <div style="height:6px;background:var(--bg-card);border-radius:3px;overflow:hidden;">
           <div id="sstv-phone-tx-progress" style="height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width 0.5s;"></div>
@@ -1509,7 +1509,7 @@
         <span id="scope-phone-mode" style="color:var(--text-dim)"></span>
         <label style="display:inline-flex;align-items:center;gap:4px;color:var(--text-dim)" title="Noise floor: levels below this are drawn black">Floor <input type="range" id="scope-phone-floor" min="0" max="200" value="0" style="width:90px"></label>
         <span style="flex:1"></span>
-        <button type="button" id="scope-phone-enable" class="hidden" style="padding:3px 8px;font-size:11px;font-weight:700;border:1px solid #e94560;background:#e94560;color:#fff;border-radius:4px;">Enable SCU-LAN10</button>
+        <button type="button" id="scope-phone-enable" class="hidden" style="padding:3px 8px;font-size:11px;font-weight:700;border:1px solid #e94560;background:var(--accent, #e94560);color:#fff;border-radius:4px;">Enable SCU-LAN10</button>
       </div>
       <div id="scope-phone-diag" class="hidden" style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--border);border-left:4px solid #e94560;background:var(--bg-card);"></div>
       <canvas id="scope-phone-trace" width="320" height="80" style="width:100%;height:80px;display:block;background:#000;"></canvas>

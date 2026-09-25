@@ -259,9 +259,9 @@ html, body {
   display: inline-block;
 }
 
-.cat-dot { background: #e94560; }
+.cat-dot { background: var(--accent, #e94560); }
 .cat-dot.connected { background: var(--pota); }
-.audio-dot { background: #e94560; }
+.audio-dot { background: var(--accent, #e94560); }
 .audio-dot.connected { background: var(--pota); }
 
 #latency {
@@ -930,7 +930,7 @@ html, body {
   background: #3a1a1a; color: #e94560; border: 2px solid #e94560;
   cursor: pointer;
 }
-.bb-halt-btn:active { background: #e94560; color: #fff; }
+.bb-halt-btn:active { background: var(--accent, #e94560); color: #fff; }
 
 /* --- Refresh Rate Chip --- */
 .refresh-chip { background: none; border: 1px solid #444; color: var(--text-dim); border-radius: 12px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: auto; flex-shrink: 0; }
@@ -1565,7 +1565,7 @@ html, body {
 .so-ssb-rec-btn:active, .so-ssb-play-btn:active { opacity: 0.8; }
 
 .so-ssb-rec-btn.recording {
-  background: #e94560;
+  background: var(--accent, #e94560);
   color: white;
   border-color: #e94560;
   animation: rec-pulse 1s ease-in-out infinite;
@@ -2654,7 +2654,7 @@ html, body {
   color: #000;
 }
 .ft8-rx-badge.ft8-txing {
-  background: #e94560;
+  background: var(--accent, #e94560);
   color: #fff;
 }
 #ft8-countdown { font-family: monospace; }
@@ -2670,7 +2670,7 @@ html, body {
   top: 60px;
   left: 50%;
   transform: translateX(-50%);
-  background: #e94560;
+  background: var(--accent, #e94560);
   color: #fff;
   padding: 10px 20px;
   border-radius: 8px;
@@ -2765,7 +2765,7 @@ html, body {
 .ft8-row.ft8-chase .ft8-msg { color: #ffd966; }
 .ft8-badge { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 2px; margin-right: 1px; line-height: 1.4; display: inline-block; vertical-align: baseline; }
 .ft8-badge-chase { background: #ffcc33; color: #1a1a2e; }
-.ft8-badge-dxcc { background: #e94560; color: #fff; }
+.ft8-badge-dxcc { background: var(--accent, #e94560); color: #fff; }
 .ft8-badge-grid { background: #4fc3f7; color: #000; }
 .ft8-badge-call { background: #f0a500; color: #000; }
 .ft8-badge-watch { background: #ff4081; color: #fff; }
@@ -2804,8 +2804,8 @@ html, body {
   text-align: center;
 }
 .ft8-tx-btn { background: #333; color: #888; }
-.ft8-tx-btn.active { background: #e94560; color: #fff; }
-.ft8-tx-btn.ft8-txing { background: #e94560; color: #fff; animation: ft8-pulse 1s ease-in-out infinite; }
+.ft8-tx-btn.active { background: var(--accent, #e94560); color: #fff; }
+.ft8-tx-btn.ft8-txing { background: var(--accent, #e94560); color: #fff; animation: ft8-pulse 1s ease-in-out infinite; }
 @keyframes ft8-pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
 .ft8-slot-btn { background: #2a4a7a; color: #4fc3f7; }
 .ft8-cq-btn { background: #1a3a2a; color: var(--pota); border: 1px solid var(--pota); }
@@ -2891,7 +2891,7 @@ html, body {
   --bg: #f0f2f5;
   --bg-card: #ffffff;
   --bg-header: #e8eaed;
-  --accent: #d32f2f;
+  --accent: #c62828;
   --text: #1a1a2e;
   --text-dim: #6a6a80;
   --border: #ccc;

@@ -15,7 +15,7 @@
     .sc-titlebar-title { font-size: 12px; font-weight: 700; color: var(--text-primary); flex: 1; }
     .sc-titlebar-btn { -webkit-app-region: no-drag; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 8px; line-height: 1; }
     .sc-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
-    .sc-titlebar-btn.close:hover { background: #e94560; color: #fff; }
+    .sc-titlebar-btn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
     body.platform-darwin .sc-titlebar { padding-left: 76px; }
     body.platform-darwin .sc-titlebar-btn { display: none; }
 
@@ -24,7 +24,7 @@
     .sc-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #888; }
     .sc-pill.live::before { background: #4ecca3; box-shadow: 0 0 6px #4ecca3; }
     .sc-pill.starting::before { background: #f0a500; }
-    .sc-pill.blocked::before, .sc-pill.error::before { background: #e94560; }
+    .sc-pill.blocked::before, .sc-pill.error::before { background: var(--accent-red, #e94560); }
     .sc-badge { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; background: #f0a500; color: #1a1a2e; }
     .sc-meta { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text-primary); }
     .sc-meta .dim { color: var(--text-secondary); }
@@ -32,7 +32,7 @@
     .sc-spacer { flex: 1; }
     .sc-btn { background: var(--bg-input); border: 1px solid var(--border-primary); color: var(--text-primary); border-radius: 4px; padding: 3px 9px; cursor: pointer; font-size: 11px; }
     .sc-btn:hover { background: var(--bg-hover); }
-    .sc-btn.accent { background: #e94560; border-color: #e94560; color: #fff; font-weight: 700; }
+    .sc-btn.accent { background: var(--accent-red, #e94560); border-color: #e94560; color: #fff; font-weight: 700; }
     .sc-btn.toggle.on { border-color: #4fc3f7; color: #4fc3f7; }
     label.sc-check { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); cursor: pointer; user-select: none; }
 

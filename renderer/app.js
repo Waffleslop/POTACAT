@@ -10007,7 +10007,7 @@ async function updateHomeMarker() {
 
   const homeIcon = L.divIcon({
     className: 'home-marker-icon',
-    html: '<div style="background:#e94560;width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>',
+    html: '<div style="background:var(--accent-red, #e94560);width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>',
     iconSize: [14, 14],
     iconAnchor: [7, 7],
   });
@@ -13865,7 +13865,7 @@ window.api.onTuneBlocked((msg) => {
   if (!t) {
     t = document.createElement('div');
     t.id = 'tune-blocked-toast';
-    t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#e94560;color:#fff;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:bold;z-index:10001;pointer-events:none;box-shadow:0 4px 20px rgba(233,69,96,0.5);opacity:0;transition:opacity 0.2s';
+    t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--accent-red, #e94560);color:#fff;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:bold;z-index:10001;pointer-events:none;box-shadow:0 4px 20px rgba(233,69,96,0.5);opacity:0;transition:opacity 0.2s';
     document.body.appendChild(t);
   }
   t.textContent = msg || 'VFO Locked — Unlock VFO to change frequency';
@@ -19703,7 +19703,7 @@ async function updateRbnHomeMarker() {
 
   const homeIcon = L.divIcon({
     className: 'home-marker-icon',
-    html: '<div style="background:#e94560;width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>',
+    html: '<div style="background:var(--accent-red, #e94560);width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>',
     iconSize: [14, 14],
     iconAnchor: [7, 7],
   });
@@ -20284,7 +20284,7 @@ function showTuneBlockedToast(msg) {
   if (!t) {
     t = document.createElement('div');
     t.id = 'tune-blocked-toast';
-    t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#e94560;color:#fff;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:bold;z-index:10001;pointer-events:none;box-shadow:0 4px 20px rgba(233,69,96,0.5);opacity:0;transition:opacity 0.2s';
+    t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--accent-red, #e94560);color:#fff;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:bold;z-index:10001;pointer-events:none;box-shadow:0 4px 20px rgba(233,69,96,0.5);opacity:0;transition:opacity 0.2s';
     document.body.appendChild(t);
   }
   t.textContent = msg;

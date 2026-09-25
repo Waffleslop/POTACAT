@@ -211,12 +211,12 @@
            a remote rig (Phase 2 audio leg). Press-and-hold (mouse/touch) to
            transmit voice — explicit, never a keyboard hijack, so there's no
            accidental TX. Keys the remote rig + opens our mic for the session. -->
-      <button id="remote-ptt-btn" class="status hidden" style="background:#e94560;color:#fff;cursor:pointer;border:none;font-weight:600;" title="Hold to talk to the remote rig">🎙 HOLD TO TALK</button>
+      <button id="remote-ptt-btn" class="status hidden" style="background:var(--accent-red, #e94560);color:#fff;cursor:pointer;border:none;font-weight:600;" title="Hold to talk to the remote rig">🎙 HOLD TO TALK</button>
       <!-- Split-mode indicator. Hidden by default; shown when settings.enableSplit
            is true. Click to disable (asks for confirmation since some operators
            do use split legitimately). KQ4MHD report 2026-04-30. -->
       <span id="split-indicator" class="status hidden" style="background:#f0a500;color:#1a1a2e;font-weight:bold;cursor:pointer;" title="Split mode is ON — RX and TX are on different VFOs. Click to disable.">SPLIT</span>
-      <span id="jtcat-tx-indicator" class="status hidden" style="background:#e94560;color:#fff;font-weight:bold;animation:tx-blink 1s ease-in-out infinite;">JTCAT TX</span>
+      <span id="jtcat-tx-indicator" class="status hidden" style="background:var(--accent-red, #e94560);color:#fff;font-weight:bold;animation:tx-blink 1s ease-in-out infinite;">JTCAT TX</span>
       <span id="wsjtx-status" class="status disconnected hidden">WSJT-X</span>
       <span id="cw-keyer-status" class="status hidden" style="background:#b8860b;color:#fff;cursor:pointer;">CW</span>
       <div id="cw-popover" class="cw-popover hidden">

@@ -16,7 +16,7 @@
     .sstv-titlebar-title { font-size: 12px; font-weight: 700; color: var(--text-primary); flex: 1; }
     .sstv-titlebar-btn { -webkit-app-region: no-drag; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 8px; line-height: 1; }
     .sstv-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
-    .sstv-titlebar-btn.close:hover { background: #e94560; color: #fff; }
+    .sstv-titlebar-btn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
 
     /* Scrollable content area */
     .sstv-scroll { flex: 1; overflow-y: auto; min-height: 0; }
@@ -43,7 +43,7 @@
     .sstv-btn:hover { background: var(--bg-hover); }
     .sstv-btn-tx { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); min-width: 110px; font-size: 14px; }
     .sstv-btn-tx:hover { background: var(--accent-green, #4ecca3); color: #000; }
-    .sstv-btn-tx.transmitting { background: #e94560; border-color: #e94560; color: #fff; animation: tx-pulse 1s ease-in-out infinite; }
+    .sstv-btn-tx.transmitting { background: var(--accent-red, #e94560); border-color: #e94560; color: #fff; animation: tx-pulse 1s ease-in-out infinite; }
     @keyframes tx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     .sstv-btn-tx.reply-mode { border-color: #4fc3f7; color: #4fc3f7; }
     .sstv-btn-tx.reply-mode:hover { background: #4fc3f7; color: #000; }
@@ -61,7 +61,7 @@
     /* Progress bar */
     .sstv-progress { height: 3px; background: var(--bg-primary); flex-shrink: 0; }
     .sstv-progress-bar { height: 100%; background: var(--accent-green, #4ecca3); width: 0%; transition: width 0.3s; }
-    .sstv-progress-bar.tx { background: #e94560; }
+    .sstv-progress-bar.tx { background: var(--accent-red, #e94560); }
 
     /* Gallery */
     .sstv-gallery-wrap { flex: 1; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); min-height: 100px; display: flex; flex-direction: column; }
@@ -108,7 +108,7 @@
     .sstv-multi-start { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid var(--accent-green, #4ecca3); background: transparent; color: var(--accent-green, #4ecca3); cursor: pointer; }
     .sstv-multi-start:hover { background: var(--accent-green, #4ecca3); color: #000; }
     .sstv-multi-stop { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid #e94560; background: transparent; color: #e94560; cursor: pointer; }
-    .sstv-multi-stop:hover { background: #e94560; color: #fff; }
+    .sstv-multi-stop:hover { background: var(--accent-red, #e94560); color: #fff; }
 
     /* Multi-decode grid */
     .sstv-rx-grid { display: grid; gap: 8px; padding: 8px 12px; flex-shrink: 0; }

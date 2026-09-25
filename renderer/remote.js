@@ -13,7 +13,7 @@
   function buildBanner() {
     const el = document.createElement('div');
     el.id = 'echocat-fatal-banner';
-    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e94560;color:#fff;padding:8px 12px;font:12px/1.4 monospace;max-height:50vh;overflow:auto;border-bottom:2px solid #fff;';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:var(--accent, #e94560);color:#fff;padding:8px 12px;font:12px/1.4 monospace;max-height:50vh;overflow:auto;border-bottom:2px solid #fff;';
 
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
