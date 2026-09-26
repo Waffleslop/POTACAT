@@ -151,6 +151,9 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatFullAutoCqState: (cb) => ipcRenderer.on('jtcat-full-auto-cq-state', (_e, data) => cb(data)),
   // Map popout
   jtcatMapPopout: () => ipcRenderer.send('jtcat-map-popout'),
+  // Activation window (log + map) — shown while an activation runs
+  openActivationWindow: () => ipcRenderer.send('actmap-popout-open'),
+  onActivationState: (cb) => ipcRenderer.on('activation-state', (_e, active) => cb(!!active)),
   // Tuning
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),

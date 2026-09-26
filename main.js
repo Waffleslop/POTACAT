@@ -27587,6 +27587,90 @@ app.whenReady().then(() => {
   });
 
   // Capture activation map pop-out as PNG for social share image
+  // Save / Copy the activation as a social image (NO4D 2026-09-25: "is there
+  // a way to export the map of an activation?"; Casey: "an attractive image
+  // to be posted on IG/FB/TikTok ... mindful of safe zones"). Rendered
+  // off-screen at an exact size by renderer/actmap-share.html — post 4:5
+  // (1080x1350) or story 9:16 (1080x1920); the safe zones live in that page —
+  // so the result doesn't depend on how big the Activation window is.
+  const ACTMAP_SHARE_SIZES = { post: { width: 1080, height: 1350 }, story: { width: 1080, height: 1920 } };
+  async function renderActivationShareImage(share) {
+    const format = share && share.format === 'story' ? 'story' : 'post';
+    const size = ACTMAP_SHARE_SIZES[format];
+    // The window itself stays small: Windows clamps a window to the screen
+    // height even when hidden, so a 1920-tall window came out ~1000 tall and
+    // stretched. The page's viewport is set through the DevTools protocol
+    // instead, which is independent of the window, and captured from there.
+    const w = new BrowserWindow({
+      show: false, frame: false, width: 540, height: 540,
+      webPreferences: {
+        offscreen: true,
+        preload: path.join(__dirname, 'preload-actmap-share.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    const dbg = w.webContents.debugger;
+    try {
+      dbg.attach('1.3');
+      const metrics = { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false };
+      // Only AFTER a page has loaded: setDeviceMetricsOverride on the initial
+      // blank page crashes Electron 39 outright (the whole app). And the
+      // window must stay offscreen — a merely hidden one never paints, so the
+      // capture hangs.
+      await w.loadFile(path.join(__dirname, 'renderer', 'actmap-share.html'));
+      await dbg.sendCommand('Emulation.setDeviceMetricsOverride', metrics);
+      const ready = new Promise((resolve) => {
+        const onReady = (e) => { if (e.sender === w.webContents) { ipcMain.removeListener('actmap-share-ready', onReady); resolve(); } };
+        ipcMain.on('actmap-share-ready', onReady);
+        setTimeout(() => { ipcMain.removeListener('actmap-share-ready', onReady); resolve(); }, 15000);
+      });
+      w.webContents.send('actmap-share-data', { ...share, format });
+      await ready;
+      const shot = await dbg.sendCommand('Page.captureScreenshot', {
+        format: 'png', clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 },
+      });
+      return nativeImage.createFromBuffer(Buffer.from(shot.data, 'base64'));
+    } finally {
+      try { dbg.detach(); } catch {}
+      if (!w.isDestroyed()) w.destroy();
+    }
+  }
+
+  ipcMain.handle('actmap-save-image', async (_e, opts) => {
+    const owner = actmapPopoutWin && !actmapPopoutWin.isDestroyed() ? actmapPopoutWin : null;
+    const action = opts && opts.action === 'copy' ? 'copy' : 'save';
+    let image;
+    try {
+      image = await renderActivationShareImage((opts && opts.share) || {});
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    if (action === 'copy') {
+      clipboard.writeImage(image);
+      return { ok: true };
+    }
+    const name = String((opts && opts.filename) || 'activation.png').replace(/[^A-Za-z0-9_+.-]/g, '-').replace(/^\.+/, '') || 'activation.png';
+    // Test hook: render checks write straight to a folder, no dialog.
+    if (process.env.POTACAT_SHARE_TEST_DIR) {
+      const out = path.join(process.env.POTACAT_SHARE_TEST_DIR, name.endsWith('.png') ? name : name + '.png');
+      fs.writeFileSync(out, image.toPNG());
+      return { ok: true, path: out };
+    }
+    const { canceled, filePath } = await dialog.showSaveDialog(owner, {
+      title: 'Save activation image',
+      defaultPath: path.join(app.getPath('downloads'), name.endsWith('.png') ? name : name + '.png'),
+      filters: [{ name: 'PNG image', extensions: ['png'] }],
+    });
+    if (canceled || !filePath) return { ok: false, cancelled: true };
+    try {
+      fs.writeFileSync(filePath, image.toPNG());
+      return { ok: true, path: filePath };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('capture-actmap-popout', async () => {
     if (!actmapPopoutWin || actmapPopoutWin.isDestroyed()) {
       return { success: false, error: 'Activation map is not open' };
@@ -32873,6 +32957,13 @@ app.whenReady().then(() => {
       (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken) ||
       (has('remoteCwEnabled') && newSettings.remoteCwEnabled !== settings.remoteCwEnabled) ||
       (has('cwKeyPort') && newSettings.cwKeyPort !== settings.cwKeyPort);
+
+    // The JTCAT pop-out shows an "Activation" button while an activation runs
+    // (NO4D: "a way to see the activation log while in FT8").
+    if (has('activationActive') && !!newSettings.activationActive !== !!settings.activationActive &&
+        jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('activation-state', !!newSettings.activationActive);
+    }
 
     // Tap-to-pair toggle is a live setting — no remoteServer
     // restart needed, just push the new value through.

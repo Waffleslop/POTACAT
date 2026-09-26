@@ -11473,6 +11473,8 @@ window.api.onActmapPopoutStatus((open) => {
     // Push full state when pop-out becomes ready
     window.api.actmapPopoutData({
       parkRefs: activatorParkRefs.map(p => p.ref),
+      program: (activatorParkRefs[0] && activatorParkRefs[0].program) || 'POTA',
+      startedAt: activationStartTime || Date.now(),
       contacts: activatorContacts,
     });
   }
@@ -24388,6 +24390,11 @@ function updateActivatorCounter() {
 }
 
 function renderActivatorLog() {
+  // The Activation pop-out mirrors this log. Edits and deletes happen only
+  // here, so every redraw sends it the list (log-only: its map keeps its view).
+  if (actmapPopoutOpen) {
+    window.api.actmapPopoutData({ parkRefs: activatorParkRefs.map(p => p.ref), program: (activatorParkRefs[0] && activatorParkRefs[0].program) || 'POTA', startedAt: activationStartTime || Date.now(), contacts: activatorContacts, logOnly: true });
+  }
   activatorLogBody.innerHTML = '';
   // Pre-compute the filter for the PREV badge: a call counts as "worked
   // before" only if it has at least one QSO entry that ISN'T from this

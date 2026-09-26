@@ -4171,6 +4171,16 @@ function _applyPopoutTheme(payload) {
     window.api.jtcatMapPopout();
   });
 
+  // Activation window (log + map), offered while an activation is running
+  // (NO4D 2026-09-25: "a way to see the activation log while in FT8").
+  var activationBtn = document.getElementById('jp-activation-btn');
+  if (activationBtn && window.api.openActivationWindow) {
+    activationBtn.addEventListener('click', function() { window.api.openActivationWindow(); });
+    var showActivationBtn = function(active) { activationBtn.hidden = !active; };
+    window.api.getSettings().then(function(s) { showActivationBtn(!!(s && s.activationActive)); }).catch(function() {});
+    window.api.onActivationState(showActivationBtn);
+  }
+
   // --- Waterfall ---
   var jpWaterfall = document.getElementById('jp-waterfall');
   var jpWfCtx = jpWaterfall.getContext('2d');

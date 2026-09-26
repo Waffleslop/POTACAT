@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.tile.openstreetmap.org; connect-src 'self' https://*.tile.openstreetmap.org;">
+  <title>Activation share image</title>
+  <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
+  <!--
+    Rendered off-screen at an exact social size and captured by main
+    ('actmap-save-image'). Two formats:
+      post  1080x1350 (4:5) — Instagram/Facebook feed. Text stays inside the
+            centre 1080x1080 square with 80 px sides, so a square or 3:4 grid
+            crop never cuts it.
+      story 1080x1920 (9:16) — Stories, Reels, TikTok, Shorts. Text stays
+            below the top 270 px (status/profile bar), above the bottom 420 px
+            (caption, music, nav) and left of the right-hand 150 px (like,
+            comment, share buttons).
+    The --safe-* variables below are the only place those numbers live.
+  -->
+  <style>
+    :root {
+      --w: 1080px; --h: 1350px;
+      --safe-top: 135px; --safe-bottom: 135px; --safe-left: 80px; --safe-right: 80px;
+      --ink: #ffffff; --ink-soft: rgba(255,255,255,0.82); --ink-faint: rgba(255,255,255,0.55);
+      --accent: #4ecca3; --arc: #4fc3f7; --shade: 9, 13, 24;
+    }
+    body[data-format="story"] {
+      --h: 1920px;
+      --safe-top: 270px; --safe-bottom: 420px; --safe-left: 64px; --safe-right: 150px;
+    }
+    html, body { margin: 0; padding: 0; width: var(--w); height: var(--h); overflow: hidden; background: #111827; }
+    body { position: relative; font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); }
+    #map { position: absolute; inset: 0; background: rgb(var(--shade)); }
+    .dark-tiles { filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7); }
+    .leaflet-control-container { display: none; }
+
+    /* Shade behind the text so it reads on any map, fading into it. */
+    .shade { position: absolute; left: 0; right: 0; pointer-events: none; z-index: 500; }
+    .shade.top { top: 0; height: calc(var(--safe-top) + 360px); background: linear-gradient(rgb(var(--shade)) 0%, rgba(var(--shade),0.8) 45%, rgba(var(--shade),0) 100%); }
+    .fill { position: absolute; left: 0; right: 0; height: 0; z-index: 500; background: rgb(var(--shade)); pointer-events: none; }
+    #fill-top { top: 0; }
+    #fill-bottom { bottom: 0; }
+    .shade.bottom { bottom: 0; height: calc(var(--safe-bottom) + 380px); background: linear-gradient(rgba(var(--shade),0) 0%, rgba(var(--shade),0.82) 45%, rgb(var(--shade)) 100%); }
+
+    .block { position: absolute; left: var(--safe-left); right: var(--safe-right); z-index: 600; }
+    #head { top: calc(var(--safe-top) + 24px); }
+    #foot { bottom: calc(var(--safe-bottom) + 24px); }
+
+    .kicker { font-size: 26px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+    .call { font-size: 118px; font-weight: 800; line-height: 1; letter-spacing: 2px; }
+    .park { margin-top: 22px; font-size: 40px; font-weight: 650; line-height: 1.18; color: var(--ink);
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .park .ref { color: var(--accent); }
+    .where { margin-top: 10px; font-size: 32px; color: var(--ink-soft); }
+
+    .stats { display: flex; align-items: flex-end; gap: 44px; }
+    .stat .n { font-size: 112px; font-weight: 800; line-height: 0.95; font-variant-numeric: tabular-nums; }
+    .stat .l { font-size: 26px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; color: var(--ink-soft); margin-top: 8px; }
+    .stat.small .n { font-size: 64px; }
+    .meta { margin-top: 22px; font-size: 30px; color: var(--ink-soft); }
+    .meta .dot { color: var(--ink-faint); padding: 0 10px; }
+    .brand-row { margin-top: 26px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .osm { font-size: 17px; color: var(--ink-faint); }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 700; letter-spacing: 5px; color: var(--ink-faint); }
+    .brand img { width: 34px; height: 34px; border-radius: 8px; opacity: 0.7; }
+  </style>
+</head>
+<body data-format="post">
+  <div id="map"></div>
+  <div class="fill" id="fill-top"></div>
+  <div class="fill" id="fill-bottom"></div>
+  <div class="shade top"></div>
+  <div class="shade bottom"></div>
+  <div class="block" id="head">
+    <div class="kicker" id="kicker">Park activation</div>
+    <div class="call" id="call"></div>
+    <div class="park" id="park"></div>
+    <div class="where" id="where"></div>
+  </div>
+  <div class="block" id="foot">
+    <div class="stats" id="stats"></div>
+    <div class="meta" id="meta"></div>
+    <div class="brand-row">
+      <span class="osm">Map &copy; OpenStreetMap contributors</span>
+      <span class="brand"><img src="../assets/icon-256.png" alt="">POTACAT</span>
+    </div>
+  </div>
+  <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="actmap-share.js"></script>
+</body>
+</html>

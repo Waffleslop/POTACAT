@@ -14,7 +14,10 @@ function _applyPopoutTheme(payload) {
     document.documentElement.removeAttribute('data-dark-variant');
   }
 }
-/* actmap-popout.js — Pop-out activation map showing park + logged contacts */
+/* actmap-popout.js — Activation window: map of the park + logged contacts,
+   the activation log beside it, and Save / Copy image of the map.
+   NO4D 2026-09-25: "Is there a way to see the activation log while in FT8?
+   ... is there a way to export the map of an activation?" */
 
 let accentGreen = '#4ecca3'; // updated by colorblind mode
 
@@ -120,6 +123,10 @@ let contactMarkers = []; // { marker, arcs[] }
 let usedPositions = [];
 let contactCount = 0;
 const counterEl = document.getElementById('qso-counter');
+let contacts = [];                 // the activation's contacts, in log order
+let parkInfo = { refs: [], name: '', locationDesc: '', program: 'POTA', startedAt: 0 };
+let myCallsign = '';
+const POTA_VALID_QSOS = 10;
 
 let _pendingData = null;
 let _pendingContacts = [];
@@ -184,12 +191,134 @@ function addContactMarker(callsign, lat, lon, timeUtc, freqDisplay, mode, name) 
 // --- Update Counter ---
 
 function updateCounter() {
-  counterEl.textContent = contactCount + ' QSO' + (contactCount !== 1 ? 's' : '');
+  contactCount = contacts.length;
+  const valid = contactCount >= POTA_VALID_QSOS;
+  counterEl.textContent = valid
+    ? `${contactCount} QSOs`
+    : `${contactCount} / ${POTA_VALID_QSOS} QSOs`;
+  counterEl.classList.toggle('valid', valid);
 }
+
+// --- Log ---
+
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderLog() {
+  const body = document.getElementById('act-log-body');
+  const empty = document.getElementById('act-log-empty');
+  if (!body) return;
+  const rows = [];
+  for (let i = contacts.length - 1; i >= 0; i--) {   // newest on top, like the main log
+    const c = contacts[i] || {};
+    const p2p = Array.isArray(c.theirParks) && c.theirParks.length
+      ? `<span class="p2p" title="Park to park: ${esc(c.theirParks.join(', '))}">P2P</span>` : '';
+    rows.push(`<tr>
+      <td class="num">${i + 1}</td>
+      <td class="time">${esc(c.timeUtc)}</td>
+      <td class="call" title="${esc(c.name || '')}">${esc(c.callsign)}${p2p}</td>
+      <td>${esc(c.band || c.freqDisplay)}</td>
+      <td>${esc(c.mode)}</td>
+      <td>${esc(c.rstSent)}</td>
+      <td>${esc(c.rstRcvd)}</td>
+      <td>${esc(c.state)}</td>
+    </tr>`);
+  }
+  body.innerHTML = rows.join('');
+  if (empty) empty.style.display = contacts.length ? 'none' : '';
+  updateCounter();
+}
+
+function renderPark() {
+  const el = document.getElementById('act-park');
+  if (!el) return;
+  const refs = parkInfo.refs.join(', ');
+  el.textContent = refs ? (parkInfo.name ? `${refs} — ${parkInfo.name}` : refs) : 'No activation';
+  el.title = el.textContent;
+}
+
+// --- View: Map / Both / Log ---
+
+const VIEW_KEY = 'potacat-actmap-view';
+function setView(view) {
+  const v = ['map', 'both', 'log'].includes(view) ? view : 'both';
+  document.body.dataset.view = v;
+  document.querySelectorAll('.act-seg button').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
+  try { localStorage.setItem(VIEW_KEY, v); } catch {}
+  if (map) setTimeout(() => map.invalidateSize(), 0);
+}
+document.querySelectorAll('.act-seg button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+let _savedView = 'both';
+try { _savedView = localStorage.getItem(VIEW_KEY) || 'both'; } catch {}
+setView(_savedView);
+
+// --- Save / Copy the shareable image ---
+// Main renders it off-screen at an exact social size (renderer/actmap-share.html);
+// this window only supplies the facts and the plotted positions.
+
+const FORMAT_KEY = 'potacat-actmap-share-format';
+const formatSel = document.getElementById('act-format');
+try { const f = localStorage.getItem(FORMAT_KEY); if (f && formatSel) formatSel.value = f; } catch {}
+if (formatSel) formatSel.addEventListener('change', () => { try { localStorage.setItem(FORMAT_KEY, formatSel.value); } catch {} });
+
+function bandOrder(b) { const m = String(b).match(/^(\d+(?:\.\d+)?)(c?m)$/i); return m ? -(parseFloat(m[1]) * (m[2].toLowerCase() === 'cm' ? 0.01 : 1)) : 0; }
+
+function shareData() {
+  const utcDate = new Date(parkInfo.startedAt || Date.now()).toISOString().slice(0, 10);
+  const bands = [...new Set(contacts.map((c) => c.band).filter(Boolean))].sort((x, y) => bandOrder(x) - bandOrder(y));
+  const modes = [...new Set(contacts.map((c) => String(c.mode || '').toUpperCase()).filter(Boolean))];
+  const p2p = contacts.filter((c) => Array.isArray(c.theirParks) && c.theirParks.length).length;
+  const states = new Set(contacts.map((c) => String(c.state || '').toUpperCase()).filter(Boolean)).size;
+  return {
+    format: formatSel ? formatSel.value : 'post',
+    callsign: myCallsign,
+    program: parkInfo.program,
+    parkRefs: parkInfo.refs,
+    parkName: parkInfo.name,
+    locationDesc: parkInfo.locationDesc,
+    date: utcDate,
+    qsos: contacts.length,
+    p2p,
+    states: states >= 2 ? states : 0,
+    bands,
+    modes,
+    park: parkLat != null ? { lat: parkLat, lon: parkLon } : null,
+    points: contactMarkers.map((m) => { const ll = m.marker.getLatLng(); return { lat: ll.lat, lon: ll.lng }; }),
+  };
+}
+
+async function exportImage(action) {
+  const status = document.getElementById('act-status');
+  const share = shareData();
+  const file = [share.callsign, share.parkRefs.join('+'), share.date, share.format].filter(Boolean).join('_').replace(/[^A-Za-z0-9_+.-]/g, '-') + '.png';
+  if (status) status.textContent = 'Rendering image…';
+  try {
+    const r = await window.api.saveActivationImage({ action, filename: file, share });
+    if (status) {
+      status.textContent = r && r.ok ? (action === 'copy' ? 'Image copied to the clipboard' : `Saved ${r.path}`)
+        : (r && r.cancelled ? '' : 'Could not create the image' + (r && r.error ? ': ' + r.error : ''));
+      status.title = status.textContent;
+    }
+  } catch (err) {
+    if (status) status.textContent = 'Could not create the image';
+  }
+}
+document.getElementById('act-save').addEventListener('click', () => exportImage('save'));
+document.getElementById('act-copy').addEventListener('click', () => exportImage('copy'));
 
 // --- Full State Push ---
 
 async function handleActivationData(data) {
+  // A log-only refresh (an edit or delete in the main window) changes the
+  // table and counter and leaves the map's view alone.
+  contacts = Array.isArray(data.contacts) ? data.contacts.slice() : [];
+  parkInfo.refs = data.parkRefs || [];
+  if (data.program) parkInfo.program = data.program;
+  if (data.startedAt) parkInfo.startedAt = data.startedAt;
+  renderPark();
+  renderLog();
+  if (data.logOnly) return;
   // Clear existing markers
   for (const cm of contactMarkers) {
     map.removeLayer(cm.marker);
@@ -200,9 +329,6 @@ async function handleActivationData(data) {
   if (parkMarker) { map.removeLayer(parkMarker); parkMarker = null; }
 
   const parkRefs = data.parkRefs || [];
-  const contacts = data.contacts || [];
-  contactCount = contacts.length;
-  updateCounter();
 
   // Resolve park location
   const ref = parkRefs[0] || '';
@@ -210,6 +336,8 @@ async function handleActivationData(data) {
   if (ref) {
     try {
       const park = await window.api.getPark(ref);
+      if (park && park.name) { parkInfo.name = park.name; renderPark(); }
+      if (park && park.locationDesc) parkInfo.locationDesc = park.locationDesc;
       if (park && park.latitude && park.longitude) {
         pLat = parseFloat(park.latitude);
         pLon = parseFloat(park.longitude);
@@ -259,6 +387,8 @@ async function handleContactAdded(data) {
   // If this is a location update (QRZ grid arrived after initial add),
   // replace the existing marker with a precisely positioned one
   if (data.update) {
+    const li = contacts.findIndex((c) => c.callsign === contact.callsign && c.timeUtc === contact.timeUtc);
+    if (li >= 0) { contacts[li] = contact; renderLog(); }
     const idx = contactMarkers.findIndex(m => m.callsign === contact.callsign);
     if (idx >= 0 && contact.grid) {
       const pos = gridToLatLon(contact.grid);
@@ -273,8 +403,8 @@ async function handleContactAdded(data) {
     return;
   }
 
-  contactCount++;
-  updateCounter();
+  contacts.push(contact);
+  renderLog();
 
   // Update park marker popup count
   if (parkMarker && parkLat != null) {
@@ -298,6 +428,14 @@ async function handleContactAdded(data) {
 // --- IPC Listeners (registered before async init for buffering) ---
 
 window.api.onActivationData((data) => {
+  // A log-only refresh needs no map.
+  if (!map && data && data.logOnly) {
+    contacts = Array.isArray(data.contacts) ? data.contacts.slice() : [];
+    parkInfo.refs = data.parkRefs || parkInfo.refs;
+    renderPark();
+    renderLog();
+    return;
+  }
   if (!map) { _pendingData = data; return; }
   handleActivationData(data);
 });
@@ -325,6 +463,7 @@ async function init() {
       variant: settings.darkVariant || 'navy',
     });
     if (settings.colorblindMode) accentGreen = '#4fc3f7';
+    myCallsign = String(settings.myCallsign || '').toUpperCase();
     initMap();
   } catch {
     initMap();
