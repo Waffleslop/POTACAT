@@ -8818,7 +8818,26 @@ const JTCAT_MAX_QSO_RETRIES = 12; // ~3 minutes of retries at 15s/cycle
 
 // Auto-CQ response state
 let jtcatAutoCqMode = 'off';          // 'off' | 'pota' | 'sota' | 'all'
-let jtcatAutoCqWorkedSession = new Set(); // callsigns attempted/worked this session
+let jtcatAutoCqWorkedSession = new Set(); // "CALL|BAND|MODE" attempted/worked this session
+
+// The session memory is band- and mode-aware, like the log check it sits in
+// front of (N2FSM 2026-09-26: a station worked on FT8 earlier in the session
+// was skipped by Hunt on FT4 — "highlighted in green, being ignored" — while
+// the dupe toast correctly said the earlier QSO was on another mode). A bare
+// callsign here blocked every band and mode until the session reset.
+function jtcatSessionKey(call, band, mode) {
+  return `${String(call || '').toUpperCase()}|${String(band || '').toUpperCase()}|${String(mode || '').toUpperCase()}`;
+}
+/** Remember a call as attempted/worked on the band+mode it was worked on
+ *  (default: the single engine's current band and mode). */
+function jtcatSessionMark(call, bandMode) {
+  if (!call) return;
+  const bm = bandMode || jtcatCurrentBandMode(ft8Engine);
+  jtcatAutoCqWorkedSession.add(jtcatSessionKey(call, bm.band, bm.mode));
+}
+function jtcatSessionHas(call, band, mode) {
+  return jtcatAutoCqWorkedSession.has(jtcatSessionKey(call, band, mode));
+}
 
 /** settings.jtcatReworkDays, clamped. 0 = worked-before never expires. */
 function jtcatReworkDaysSetting() {
@@ -8857,7 +8876,7 @@ function jtcatWorkedInfo(call, band, mode) {
 function jtcatIsWorkedCall(call, band, mode) {
   const c = (call || '').toUpperCase();
   if (!c) return false;
-  if (jtcatAutoCqWorkedSession.has(c)) return true;
+  if (jtcatSessionHas(c, band, mode)) return true;
   return jtcatWorkedInfo(c, band, mode).blocking;
 }
 
@@ -9377,7 +9396,7 @@ function jtcatWorkableCallers(results, myCall, opts) {
     .filter((d) => {
       if (!d.call || d.call === myCall) return false;
       if (!jtcatHuntProgramMatch(d, filterMode)) return false;
-      if (jtcatAutoCqWorkedSession.has(d.call)) return false;
+      if (jtcatSessionHas(d.call, dupeBandMode.band, dupeBandMode.mode)) return false;
       if (isWorked(d.call)) return false;
       return true;
     });
@@ -10829,7 +10848,7 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
     await ft8Engine.setTxMessage(q.txMsg);
     if (typeof ft8Engine.tryImmediateTx === 'function') ft8Engine.tryImmediateTx();
   }
-  jtcatAutoCqWorkedSession.add(senderCall);
+  jtcatSessionMark(senderCall);
   sendCatLog(`[JTCAT Auto-CQ] Answering direct call from ${senderCall} (SNR ${caller.db}dB) — "${caller.text}"`);
   broadcastAutoCqState();
   return true;
@@ -10919,7 +10938,7 @@ function jtcatHandleRetryStall(o) {
     jtcatFullAutoCqLastActivity = Date.now(); // counts as progress for the watchdog
   } else if (outcome.action === 'rearm') {
     sendCatLog('[JTCAT] Full Auto CQ — ' + (qso.call || 'partner') + ' stalled, resuming CQ');
-    if (qso.call) jtcatAutoCqWorkedSession.add(qso.call);
+    if (qso.call) jtcatSessionMark(qso.call);
     // Re-arm under whichever owner is running — was hardcoded 'popout' when
     // run mode was popout-only; the phone control path (jtcat-full-auto-cq)
     // made 'remote' a live owner too, and a hardcoded owner mismatch turns
@@ -11033,7 +11052,7 @@ function jtcatAbandonUnencodableQso(engine, data) {
     if (!qso || qso.phase === 'done') continue;
     if (String(qso.txMsg || '').trim().toUpperCase() !== failed) continue;
     const who = qso.call || 'this station';
-    if (qso.call) jtcatAutoCqWorkedSession.add(qso.call);
+    if (qso.call) jtcatSessionMark(qso.call);
     // Run mode with a partner: drop the partner and go back to CQ. A CQ that
     // itself won't encode has nothing to fall back to, so it stops.
     if (jtcatFullAutoCq && jtcatFullAutoCqOwner === o.owner && qso.phase !== 'cq') {
@@ -11400,7 +11419,7 @@ function startJtcat(mode) {
           JtcatParser.normalizeCall(remoteJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
         clearSpotTarget('worked');
       }
-      if (remoteJtcatQso.call) jtcatAutoCqWorkedSession.add(remoteJtcatQso.call);
+      if (remoteJtcatQso.call) jtcatSessionMark(remoteJtcatQso.call);
       if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'remote') {
         rearmCq('remote');
       } else {
@@ -11415,7 +11434,7 @@ function startJtcat(mode) {
           JtcatParser.normalizeCall(popoutJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
         clearSpotTarget('worked');
       }
-      if (popoutJtcatQso.call) jtcatAutoCqWorkedSession.add(popoutJtcatQso.call);
+      if (popoutJtcatQso.call) jtcatSessionMark(popoutJtcatQso.call);
       if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'popout') {
         rearmCq('popout');
       } else {
@@ -11578,7 +11597,7 @@ function startJtcat(mode) {
         const best = candidates[0];
 
         if (best) {
-          jtcatAutoCqWorkedSession.add(best.call);
+          jtcatSessionMark(best.call);
           const evNote = evRank(best) ? ' [event-needed]' : '';
           console.log(`[JTCAT Auto-CQ] Responding to ${best.call} (${best.grid}) SNR ${best.db}dB${evNote}`);
 
@@ -34930,7 +34949,7 @@ app.whenReady().then(() => {
         // (same logic as single-engine path in startJtcat)
         jtcatFullAutoCqWatchdog();
         if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
-          if (popoutJtcatQso.call) jtcatAutoCqWorkedSession.add(popoutJtcatQso.call);
+          if (popoutJtcatQso.call) jtcatSessionMark(popoutJtcatQso.call, { band: (s.freqKhz ? freqToBand(s.freqKhz / 1000) : s.band) || '', mode: s.mode || 'FT8' });
           if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'popout') {
             rearmCq('popout');
           } else {
@@ -34945,7 +34964,7 @@ app.whenReady().then(() => {
               JtcatParser.normalizeCall(remoteJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
             clearSpotTarget('worked');
           }
-          if (remoteJtcatQso.call) jtcatAutoCqWorkedSession.add(remoteJtcatQso.call);
+          if (remoteJtcatQso.call) jtcatSessionMark(remoteJtcatQso.call, { band: (s.freqKhz ? freqToBand(s.freqKhz / 1000) : s.band) || '', mode: s.mode || 'FT8' });
           if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'remote') {
             rearmCq('remote');
           } else {
