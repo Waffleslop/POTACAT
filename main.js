@@ -19092,7 +19092,12 @@ function handleRemotePtt(state, opts = {}) {
   // beat when we just switched mode. Icom only — 0 (immediate) otherwise.
   // (K1MRE IC-7300 over CP2102 on RPi, 2026-06-18.)
   let _civPttDelayMs = 0;
-  if (state && settings.ssbOverData && audioActive && !ft8Engine) {
+  // opts.forceDataMode: the caller knows this transmission's audio only
+  // reaches the rig in DATA mode (SSTV on an Icom, whose factory DATA OFF MOD
+  // is MIC,ACC — plain USB keys with silence; WB8IMY IC-7300, 2026-09-26),
+  // so the switch happens whether or not the SSB-over-DATA setting is on.
+  const forceData = !!opts.forceDataMode;
+  if (state && (settings.ssbOverData || forceData) && audioActive && (!ft8Engine || forceData)) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
@@ -28385,8 +28390,13 @@ app.whenReady().then(() => {
         }
         return;
       }
-      // Key PTT
-      handleRemotePtt(true);
+      // Key PTT. The SSTV audio goes through the rig's USB audio, so say so:
+      // SSB-over-DATA applies (it never did — this call carried no `audio`),
+      // and an Icom always transmits it in USB-D/LSB-D, because in plain USB
+      // its factory DATA OFF MOD setting takes the mic, not USB, and the rig
+      // keys with no audio (WB8IMY IC-7300, 2026-09-26). Receive stays in USB.
+      const _sstvIcom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
+      handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom });
 
       // Optional CW ID — required by some regulators (UK/EU), good
       // practice everywhere. When settings.sstvCwId is true, append
