@@ -2039,6 +2039,15 @@ const _origOnRxVis = window.api.onSstvRxVis;
 const _origOnRxLine = window.api.onSstvRxLine;
 const _origOnRxImage = window.api.onSstvRxImage;
 
+// RX canvas size for a lock: the decoder's own mode dimensions (sent with
+// every rx-vis since 2026-09-26), else the TX table. MODE_RES lists only the
+// five TX-compose modes, so a PD-160 / Robot 24 / Martin 2 lock used to keep
+// the PREVIOUS image's canvas and every row was drawn at the wrong width.
+function rxResFor(data) {
+  if (data && data.width > 0 && data.height > 0) return { w: data.width, h: data.height };
+  return MODE_RES[data && data.mode] || null;
+}
+
 // Override RX event handlers to support multi-slice routing
 window.api.onSstvRxVis((data) => {
   if (data.sliceId && multiActive) {
@@ -2047,7 +2056,7 @@ window.api.onSstvRxVis((data) => {
       pane.statusEl.textContent = 'Decoding ' + (data.modeName || data.mode) + '...';
       pane.ctx.fillStyle = '#000';
       pane.ctx.fillRect(0, 0, pane.canvas.width, pane.canvas.height);
-      const res = MODE_RES[data.mode];
+      const res = rxResFor(data);
       if (res) { pane.canvas.width = res.w; pane.canvas.height = res.h; }
     }
   } else {
@@ -2055,7 +2064,7 @@ window.api.onSstvRxVis((data) => {
     rxInfo.textContent = 'Decoding ' + (data.modeName || data.mode) + '...';
     rxCtx.fillStyle = '#000';
     rxCtx.fillRect(0, 0, rxCanvas.width, rxCanvas.height);
-    const res = MODE_RES[data.mode];
+    const res = rxResFor(data);
     if (res) { rxCanvas.width = res.w; rxCanvas.height = res.h; }
     statusBar.textContent = 'Decoding ' + (data.modeName || data.mode);
     progressBar.style.width = '0%';
@@ -2063,21 +2072,43 @@ window.api.onSstvRxVis((data) => {
   }
 });
 
+// The decoder let go of a lock (wrong mode, signal gone, new VIS). The
+// picture so far stays on the canvas; the status stops claiming a decode.
+if (window.api.onSstvRxLockLost) {
+  window.api.onSstvRxLockLost((data) => {
+    const msg = 'Lost lock on ' + (data.modeName || data.mode) + ' — listening';
+    if (data.sliceId && multiActive) {
+      const pane = multiRxPanes.get(data.sliceId);
+      if (pane) pane.statusEl.textContent = msg;
+    } else {
+      rxInfo.textContent = msg;
+      statusBar.textContent = msg;
+      progressBar.style.width = '0%';
+    }
+  });
+}
+
+// One rx-line event is one image row, or TWO for PD modes (a PD audio line
+// carries a row pair). ImageData needs the exact row count; a buffer that is
+// not a whole number of canvas rows belongs to another lock's canvas and is
+// skipped rather than thrown on (it used to throw on every PD line).
+function rxRowImage(rgba, w) {
+  if (!(w > 0) || rgba.length === 0 || rgba.length % (4 * w) !== 0) return null;
+  return new ImageData(rgba, w, rgba.length / (4 * w));
+}
+
 window.api.onSstvRxLine((data) => {
   if (data.sliceId && multiActive) {
     const pane = multiRxPanes.get(data.sliceId);
     if (pane) {
-      const rgba = new Uint8ClampedArray(data.rgba);
-      const imgData = new ImageData(rgba, pane.canvas.width, 1);
-      pane.ctx.putImageData(imgData, 0, data.line);
+      const imgData = rxRowImage(new Uint8ClampedArray(data.rgba), pane.canvas.width);
+      if (imgData) pane.ctx.putImageData(imgData, 0, data.line);
       const pct = Math.round((data.line / data.totalLines) * 100);
       pane.statusEl.textContent = 'Line ' + (data.line + 1) + '/' + data.totalLines + ' (' + pct + '%)';
     }
   } else {
-    const rgba = new Uint8ClampedArray(data.rgba);
-    const w = rxCanvas.width;
-    const imgData = new ImageData(rgba, w, 1);
-    rxCtx.putImageData(imgData, 0, data.line);
+    const imgData = rxRowImage(new Uint8ClampedArray(data.rgba), rxCanvas.width);
+    if (imgData) rxCtx.putImageData(imgData, 0, data.line);
     const pct = Math.round((data.line / data.totalLines) * 100);
     rxInfo.textContent = 'Line ' + (data.line + 1) + '/' + data.totalLines + ' (' + pct + '%)';
     progressBar.style.width = pct + '%';

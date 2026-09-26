@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   onSstvRxImage: (cb) => ipcRenderer.on('sstv-rx-image', (_e, d) => cb(d)),
   onSstvRxLine: (cb) => ipcRenderer.on('sstv-rx-line', (_e, d) => cb(d)),
   onSstvRxVis: (cb) => ipcRenderer.on('sstv-rx-vis', (_e, d) => cb(d)),
+  onSstvRxLockLost: (cb) => ipcRenderer.on('sstv-rx-lock-lost', (_e, d) => cb(d)),
   onSstvStatus: (cb) => ipcRenderer.on('sstv-status', (_e, d) => cb(d)),
   onSstvRxDebug: (cb) => ipcRenderer.on('sstv-rx-debug', (_e, d) => cb(d)),
   // SmartSDR Direct: VITA-49 audio frames forwarded from main so the SSTV

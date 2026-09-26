@@ -373,7 +373,7 @@ const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
-const { SstvEngine } = require('./lib/sstv-engine');
+const { SstvEngine, sstvRxVisLogLine } = require('./lib/sstv-engine');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
@@ -28496,7 +28496,18 @@ app.whenReady().then(() => {
   // === SSTV Pop-out Window ================================================
 
   startSstv = function startSstv() {
-    if (sstvEngine) return;
+    if (sstvEngine) {
+      // The 'sstv-stop' handlers (desktop IPC, ECHOCAT "Close SSTV") stop the
+      // engine without dropping it, and this early return used to leave that
+      // stopped engine in place for good: no RX, and phone TX encodes
+      // silently dropped, until the pop-out was closed. A restart is a fresh
+      // worker, so no decoder state (mode, lock) survives it.
+      if (!sstvEngine.running) {
+        sstvEngine.start();
+        sendCatLog('[SSTV] Decoder restarted — listening for VIS headers');
+      }
+      return;
+    }
     sstvEngine = new SstvEngine();
 
     sstvEngine.on('encode-complete', (data) => {
@@ -28660,7 +28671,9 @@ app.whenReady().then(() => {
     });
 
     sstvEngine.on('rx-vis', (data) => {
-      sendCatLog(`[SSTV] VIS detected: ${data.modeName} (mode 0x${(data.mode || 0).toString(16)}) — locking onto signal`);
+      // data.mode is the mode KEY ('pd160'), never a number — formatting it as
+      // hex printed "0xpd160". The VIS code is its own field.
+      sendCatLog(sstvRxVisLogLine(data));
       _sstvLastActivityMs = Date.now();
       _sstvDecode = { mode: data.modeName || '', startedAt: Date.now(), updatedAt: Date.now(), line: 0, totalLines: 0 };
       pushActivityState();
@@ -28752,6 +28765,18 @@ app.whenReady().then(() => {
         } catch (err) {
           console.error('[SSTV] ECHOCAT broadcast error:', err.message);
         }
+      }
+    });
+
+    // The decoder let go of a lock: wrong mode (no line sync at its period),
+    // the signal went away, or a new VIS header took over mid-image.
+    sstvEngine.on('rx-lock-lost', (data) => {
+      sendCatLog(`[SSTV] ${data.detail} — listening again`);
+      _sstvLastActivityMs = Date.now();
+      _sstvDecode = null;
+      pushActivityState();
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-lock-lost', data);
       }
     });
 
@@ -29089,6 +29114,9 @@ app.whenReady().then(() => {
       // Popout already open — ask it to re-QSY to the selected SSTV freq so the
       // radio moves back from whatever POTA spot the user last tuned to.
       try { sstvPopoutWin.webContents.send('sstv-refocus-qsy'); } catch {}
+      // An open pop-out means the operator expects RX: restart a decoder a
+      // 'sstv-stop' left stopped (startSstv is a no-op on a running one).
+      if (startSstv) startSstv();
       sstvPopoutWin.focus();
       return;
     }
@@ -29416,6 +29444,13 @@ app.whenReady().then(() => {
     sstvManager.on('status', (data) => {
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-status', data);
+      }
+    });
+
+    sstvManager.on('rx-lock-lost', (data) => {
+      sendCatLog(`[SSTV] [${data.sliceId}] ${data.detail} — listening again`);
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-lock-lost', data);
       }
     });
 
