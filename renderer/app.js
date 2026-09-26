@@ -23721,97 +23721,9 @@ async function showWhatsNew(version) {
   }
 }
 
-// Render GitHub-flavored release notes to clean HTML for the
-// What's New dialog. The previous implementation just bolded
-// `**Headline:**`, leaving the literal word on-screen and skipping
-// inline code, italics, links, and paragraph breaks. This version
-// is a small focused markdown renderer plus pre-processing for the
-// project's release-notes conventions (`**Headline:** …`, signoff,
-// CI-asset footers).
+// Release notes -> HTML: lib/release-notes-format.js (tested).
 function formatReleaseNotes(md) {
-  // ── Pre-processing ──────────────────────────────────────────────
-  // Trim download / install / checksum / smartscreen tail.
-  md = md.replace(/\n---+[\s\S]*?(?:sudo |SmartScreen|`shasum|`sha256sum|Download |latest-(?:mac|linux|win))[\s\S]*/im, '\n---\n').trim();
-  md = md.replace(/\n#{1,4} *(Install|Download|Checksum|SHA-?256|SmartScreen|Assets)[\s\S]*/i, '').trim();
-  // Strip Claude / Anthropic attribution if it leaked through.
-  md = md.replace(/^.*(?:generated with|claude|anthropic).*$/gim, '').trim();
-  // Pull the H1 title — we render it as the lead heading at the top.
-  let h1 = '';
-  md = md.replace(/^# +(.+)$/m, (_m, h) => { h1 = h.trim(); return ''; }).trim();
-  // The `**Headline:** <prose>` convention introduces a lead paragraph.
-  // Extract it so we can render it visually distinct (lighter, larger),
-  // then strip the literal word "Headline:" so it doesn't appear inline.
-  let lead = '';
-  md = md.replace(/^\*\*Headline:\*\*\s*(.+)$/m, (_m, prose) => { lead = prose.trim(); return ''; }).trim();
-  // Strip the standalone `73.` signoff if it's the very last line —
-  // we render it ourselves in the chrome instead.
-  md = md.replace(/\n+73\.?\s*$/i, '').trim();
-  // Strip horizontal rules that now bracket empty regions.
-  md = md.replace(/(^|\n)---+\s*$/g, '$1').trim();
-
-  // ── Block-level rendering ───────────────────────────────────────
-  // Pull code fences out first so their contents aren't re-escaped.
-  const codeBlocks = [];
-  md = md.replace(/```([a-z]*)\n([\s\S]*?)```/gi, (_m, _lang, body) => {
-    const idx = codeBlocks.push(body.trim()) - 1;
-    return `CODEBLOCK${idx}`;
-  });
-  // HTML-escape everything else.
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  md = esc(md);
-
-  // Headings (in descending order so ## doesn't eat ###).
-  md = md.replace(/^#### +(.+)$/gm, '<h5 class="rn-h5">$1</h5>');
-  md = md.replace(/^### +(.+)$/gm, '<h4 class="rn-h4">$1</h4>');
-  md = md.replace(/^## +(.+)$/gm, '<h3 class="rn-h3">$1</h3>');
-  md = md.replace(/^---+\s*$/gm, '<hr class="rn-hr">');
-
-  // Inline transforms (run before list/paragraph wrapping so lists pick
-  // up the rendered text).
-  // Inline code (backticks). Single backticks only — code fences are
-  // already extracted above.
-  md = md.replace(/`([^`\n]+)`/g, '<code class="rn-code">$1</code>');
-  // Bold / italic. Bold first so the asterisk-counting works.
-  md = md.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  md = md.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
-  md = md.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
-  // Links: [text](url)
-  md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" data-external="1">$1</a>');
-
-  // Lists: turn consecutive `- ` lines into a <ul>. Indented nested
-  // lines (4 spaces, "  - " or "  * ") aren't handled — release notes
-  // don't use them.
-  md = md.replace(/(^|\n)((?:[ \t]*[-*+] +.+(?:\n|$))+)/g, (_m, pre, block) => {
-    const items = block.split(/\n/).filter(Boolean).map(line =>
-      '<li>' + line.replace(/^[ \t]*[-*+] +/, '') + '</li>'
-    ).join('');
-    return pre + '<ul class="rn-ul">' + items + '</ul>';
-  });
-
-  // Paragraphs: split on blank lines, wrap text-only chunks in <p>.
-  // Leave anything that's already HTML alone.
-  const blocks = md.split(/\n{2,}/);
-  const out = blocks.map(b => {
-    const trimmed = b.trim();
-    if (!trimmed) return '';
-    if (/^<(h\d|ul|pre|hr|blockquote)/.test(trimmed)) return trimmed;
-    // Soft line breaks inside a paragraph become <br>.
-    return '<p class="rn-p">' + trimmed.replace(/\n/g, '<br>') + '</p>';
-  }).join('\n');
-
-  // ── Reinsert code blocks ────────────────────────────────────────
-  let html = out.replace(/CODEBLOCK(\d+)/g, (_m, idx) => {
-    return '<pre class="rn-pre"><code>' + esc(codeBlocks[+idx]) + '</code></pre>';
-  });
-
-  // ── Compose final ──────────────────────────────────────────────
-  const head = (h1 || lead)
-    ? '<div class="rn-head">'
-      + (h1 ? '<div class="rn-h1">' + esc(h1) + '</div>' : '')
-      + (lead ? '<div class="rn-lead">' + esc(lead) + '</div>' : '')
-      + '</div>'
-    : '';
-  return head + html;
+  return window.ReleaseNotesFormat.formatReleaseNotes(md);
 }
 
 // =============================================================================
