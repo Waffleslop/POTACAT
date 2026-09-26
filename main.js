@@ -24973,9 +24973,14 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   const newCategory  = _modeCategory(m);
   const sameCategory = prevCategory && prevCategory === newCategory;
   let filterWidth = 0;
-  if (sameCategory && _currentFilterWidth > 0) {
-    // Stay on the operator's live width — don't snap back to the saved default.
-    filterWidth = _currentFilterWidth;
+  if (sameCategory) {
+    // Same mode family: send NO width, so the operator's live width simply
+    // stays. Re-sending the width we last read back asked the radio for a
+    // value it may not take — an FTDX-1200 via rigctld rejected "2450"
+    // (RPRT -1) and landed on 2500 on every spot click (GitHub #85,
+    // jkendri; gibbsjj saw a 500 Hz CW filter jump the same way). The
+    // codec's same-mode resend already keeps the rig's own width.
+    filterWidth = 0;
   } else if (m === 'CW') {
     filterWidth = settings.cwFilterWidth || 0;
   } else if (m === 'SSB' || m === 'USB' || m === 'LSB') {
