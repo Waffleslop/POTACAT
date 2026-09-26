@@ -7739,7 +7739,7 @@ async function _renderSummaryEchocat() {
     web = {
       addresses: list,
       port,
-      token: (s.remoteRequireToken !== false) ? (s.remoteToken || '') : '',
+      token: (s.remoteRequireToken === true) ? (s.remoteToken || '') : '',
       tailscaleUrl,
       tailscaleCertValid,
       cloudUrl,
@@ -14659,7 +14659,7 @@ async function refreshEchoCatInfo() {
     } else {
       echoCatUrl.textContent = 'No network found';
     }
-    const requireToken = s.remoteRequireToken !== false;
+    const requireToken = s.remoteRequireToken === true;
     const tokenRow = echoCatToken.closest('.echo-cat-token-row');
     if (requireToken && token) {
       echoCatToken.textContent = token;
@@ -14751,7 +14751,7 @@ echoCatCopy.addEventListener('click', async () => {
   const ips = await window.api.getLocalIPs();
   const best = ips.find(ip => ip.tailscale) || ips[0];
   const url = best ? `https://${best.address}:${port}` : '';
-  const requireToken = s.remoteRequireToken !== false;
+  const requireToken = s.remoteRequireToken === true;
   const text = (requireToken && token) ? `${url}\nToken: ${token}` : url;
   try {
     await navigator.clipboard.writeText(text);
@@ -15397,7 +15397,13 @@ async function openSettingsDialog(tab) {
   // local visibility flag (true) and populate the per-tab fields.
   enableRemote = true;
   setRemotePort.value = s.remotePort || 7300;
-  const requireToken = s.remoteRequireToken !== false; // default true for existing users
+  // Unset = NO token, the same default the server has always used. Settings
+  // used to read unset as "required", so the first Settings save on a fresh
+  // install ticked it on and ECHOCAT Web started asking for a token nobody had
+  // set up (Casey 2026-09-25: "too confusing for people"). An operator who
+  // turned it on has an explicit true and keeps it. The Cloud Tunnel needs a
+  // paired device or Guest Pass either way.
+  const requireToken = s.remoteRequireToken === true;
   setRemoteRequireToken.checked = requireToken;
   remoteTokenRow.classList.toggle('hidden', !requireToken);
   if (setAllowPairRequests) setAllowPairRequests.checked = s.allowPairRequests !== false;
