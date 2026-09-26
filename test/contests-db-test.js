@@ -233,8 +233,11 @@ console.log('the new DSL forms:');
   check(r('weekday-on-or-before:06-20:Sat', 2027) === '2027-06-19T00:00Z', 'weekday-on-or-before: Sunday Jun 20 2027 → Sat Jun 19');
   check(r('nth-weekday-of:2:1:Sat+22:1500z', 2027) === '2027-02-28T15:00Z', 'offset + time: NC QP 2027 = Feb 28 1500z');
   // Year bound.
-  const a250 = get('arrl-america250-was');
-  check(a250.whenComputed === 'range:01-01:12-31@2026', 'America250 WAS is bounded to 2026');
+  // America250 WAS is a tracked EVENT (events feed, BUILTIN_EVENTS
+  // 'america250-2026'), which renders its own Contests row; a catalog copy
+  // showed it twice. The year-bound form is exercised with an inline entry.
+  check(!catalog.some((c) => /america250/i.test(c.id)), 'America250 lives in the events feed, not the catalog (no duplicate row)');
+  const a250 = { id: 'x-a250', whenComputed: 'range:01-01:12-31@2026', durationHours: 8760 };
   check(iso(resolveOccurrence(a250, new Date('2026-09-26T00:00:00Z')).start) === '2026-01-01', 'America250 is live in 2026');
   check(resolveOccurrence(a250, new Date('2027-01-01T00:00:01Z')).start === null, 'America250 resolves to nothing after 2026');
   check(resolveStartForYear(a250.whenComputed, 2027) === null && iso(resolveStartForYear(a250.whenComputed, 2026)) === '2026-01-01',

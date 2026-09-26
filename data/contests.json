@@ -1158,20 +1158,6 @@
       "notes": "Three sessions per year (Jan, May, July) — primarily for operators ≤25 years old."
     },
     {
-      "id": "arrl-america250-was",
-      "name": "ARRL America250 Worked All States",
-      "sponsor": "ARRL",
-      "website": "https://www.arrl.org/america250-was",
-      "rulesUrl": "https://america250.arrl.org/",
-      "whenRule": "All of 2026 (one-off) — W1AW/p visits every state, each for a Wednesday-to-Tuesday week or two",
-      "whenComputed": "range:01-01:12-31@2026",
-      "durationHours": 8760,
-      "bands": ["all HF", "6m", "2m"],
-      "modes": ["any"],
-      "category": "special-event",
-      "notes": "America's 250th anniversary. Work W1AW/p from every state (and the state-by-state 250th-anniversary stations) for the WAS award; confirmations through LoTW. 2026 only."
-    },
-    {
       "id": "wwff-august",
       "name": "WWFF August Anniversary Awards",
       "sponsor": "WWFF",
