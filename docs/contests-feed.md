@@ -51,13 +51,15 @@ updates to users on desktop and mobile app."
 ### Occurrences
 
 - Sorted by `start`, all with `end` after `horizon.from` (generated − 7 days).
-- Year-bound rules (`fixed:`, `range:`, `nth-weekend-of:`, `nth-weekday-of:`,
-  and any year-bound form added later): every occurrence starting before
-  generated + 400 days (so always this one and next year's).
-- Recurring rules (`weekly:`, `monthly-*`, multi-session weekly): every
-  occurrence starting before generated + 60 days.
-- A rule the resolver cannot resolve (`custom:`) or a one-off whose year has
-  passed: `occurrences: []`. The client shows `whenRule`.
+- The horizon comes from `parseRule(whenComputed).kind` in lib/contests-db.js:
+  `annual` → every occurrence starting before generated + 400 days (always
+  this one and next year's); `weekly` / `monthly` → before generated + 60 days.
+  `resolveOccurrences(entry, from, to)` does the enumeration.
+- `custom:` rules return the entry's `explicitWindows` (sponsor-announced
+  dates no rule captures, e.g. the NA SSB Sprint), else `occurrences: []`
+  and the client shows `whenRule`. A one-off bounded by `@YYYY` returns
+  nothing once its year has passed.
+- The job runs `validateCatalog()` before publishing.
 
 ### Client rule
 
