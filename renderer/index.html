@@ -1922,12 +1922,12 @@
             </label>
             <div id="external-atu-config" style="margin-top:6px;">
               <label>Tune carrier power (W):
-                <input type="number" id="set-external-atu-watts" min="5" max="25" value="10" style="width:70px;">
+                <input type="number" id="set-external-atu-watts" min="1" max="25" value="10" style="width:70px;">
               </label>
               <label style="margin-left:8px;">Carrier duration (s):
                 <input type="number" id="set-external-atu-seconds" min="1" max="15" step="0.5" value="4" style="width:60px;">
               </label>
-              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power CW carrier so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards.</span>
+              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power CW carrier so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards. 1 to 25 W; your radio may not go below its own minimum (5 W on many rigs).</span>
             </div>
           </div>
         </details>

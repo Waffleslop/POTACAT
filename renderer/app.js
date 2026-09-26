@@ -2868,7 +2868,7 @@ async function saveRigEditor() {
   const extAtuWattsEl = document.getElementById('set-external-atu-watts');
   const extAtuSecsEl = document.getElementById('set-external-atu-seconds');
   const rigExternalAtu = extAtuEl ? extAtuEl.value : '';
-  const rigExternalAtuWatts = extAtuWattsEl ? Math.max(5, Math.min(25, parseInt(extAtuWattsEl.value, 10) || 10)) : 10;
+  const rigExternalAtuWatts = extAtuWattsEl ? Math.max(1, Math.min(25, parseInt(extAtuWattsEl.value, 10) || 10)) : 10;
   const rigExternalAtuSeconds = extAtuSecsEl ? Math.max(1, Math.min(15, parseFloat(extAtuSecsEl.value) || 4)) : 4;
 
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex

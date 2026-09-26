@@ -17099,7 +17099,9 @@ function connectRemote() {
       sendCatLog('[ExtATU] CAT not connected — cannot trigger external tuner');
       return true;
     }
-    const watts = Math.max(5, Math.min(25, parseInt(activeRig.externalAtuWatts, 10) || 10));
+    // Floor 1 W (was 5): low-power RF-sense tuners such as the AT-100M Pro
+    // want 2-5 W (GitHub #90). The radio still enforces its own minimum.
+    const watts = Math.max(1, Math.min(25, parseInt(activeRig.externalAtuWatts, 10) || 10));
     const seconds = Math.max(1, Math.min(15, parseFloat(activeRig.externalAtuSeconds) || 4));
     _externalAtuActive = true;
     _externalAtuCancel = false;
