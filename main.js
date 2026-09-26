@@ -346,7 +346,8 @@ const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
-const { getAllContests } = require('./lib/contests-db');
+const contestsDb = require('./lib/contests-db');
+const { ContestsFeed } = require('./lib/contests-feed');
 const { eventDecodeMatch, eventHuntAvailability } = require('./lib/event-decode-match');
 const { eventStationGeo } = require('./lib/event-geo');
 const { DxClusterClient, looksLikeCallsign: clusterCallsignOk } = require('./lib/dxcluster');
@@ -1446,6 +1447,28 @@ let expeditionCallsigns = new Set(); // active DX expeditions from Club Log + da
 let expeditionMeta = new Map(); // callsign -> { entity, startDate, endDate, description }
 let activeEvents = [];                // events fetched from remote endpoint
 const EVENTS_CACHE_PATH = path.join(app.getPath('userData'), 'events-cache.json');
+// Contests: the server-resolved feed (docs/contests-feed.md), with the
+// bundled catalog + resolver as the fallback. contestsCatalog() is the ONE
+// list every consumer reads — the Contests view, the link-out allowlist,
+// event aliasing, contest history — so a contest added to the feed opens
+// its links and attributes its QSOs like a bundled one.
+const contestsFeed = new ContestsFeed({
+  cachePath: path.join(app.getPath('userData'), 'contests-feed.json'),
+  bundled: () => contestsDb.getAllContests(),
+  resolveLocal: (c, now) => contestsDb.resolveOccurrence(c, now),
+  fetch: async (url, headers) => {
+    const r = await fetch(url, { headers: { 'User-Agent': 'POTACAT/' + require('./package.json').version, ...headers }, signal: AbortSignal.timeout(20000) });
+    return { status: r.status, etag: r.headers.get('etag'), body: r.status === 200 ? await r.text() : '' };
+  },
+  fs: {
+    read: (p) => fs.readFileSync(p, 'utf8'),
+    write: (p, data) => { const tmp = p + '.tmp'; fs.writeFileSync(tmp, data); fs.renameSync(tmp, p); },
+  },
+  log: (msg) => { try { sendCatLog(msg); } catch { console.log(msg); } },
+});
+contestsFeed.load();
+function contestsCatalog() { return contestsFeed.catalog(); }
+let _feedSchedulesStarted = false; // events + contests refresh timers, set up once
 let directoryNets = [];               // HF nets from community Google Sheet
 let directorySwl = [];                // SWL broadcasts from community Google Sheet
 const DIRECTORY_CACHE_PATH = path.join(app.getPath('userData'), 'directory-cache.json');
@@ -8094,7 +8117,7 @@ async function saveQsoRecord(qsoData, opts) {
       // it themselves (Field Day) win: this never overwrites.
       if (!qsoData.contestId) {
         const ev = activeEvents.find((e) => e && e.id === evMatch.eventId);
-        const adifId = ev && EventRegistry.adifContestIdForEvent(ev, getAllContests());
+        const adifId = ev && EventRegistry.adifContestIdForEvent(ev, contestsCatalog());
         if (adifId) qsoData.contestId = adifId;
       }
       if (logCommentTags) {
@@ -14294,7 +14317,7 @@ function updateRemoteSettings() {
     // the two platforms can't drift. (Mobile handoff:
     // server-pushed-contests-mobile.)
     contestCatalogExtras: activeEvents
-      .map((ev) => EventRegistry.synthesizeContestEntry(ev, getAllContests()))
+      .map((ev) => EventRegistry.synthesizeContestEntry(ev, contestsCatalog()))
       .filter(Boolean),
     // Desktop clock-vs-NTP state for the phone FT8 screen: FT8 decodes on
     // the DESKTOP clock, so a drifted shack PC = "good audio, zero decodes"
@@ -22701,7 +22724,22 @@ function createWindow() {
       if (cachedEvents.etag) _eventsEtag = cachedEvents.etag;
     }
     fetchActiveEvents();
-    setInterval(fetchActiveEvents, 4 * 3600000); // refresh every 4 hours
+    // did-finish-load fires again on every renderer reload; the timers and
+    // the listener below must exist once, not once per reload.
+    if (!_feedSchedulesStarted) {
+      _feedSchedulesStarted = true;
+      setInterval(fetchActiveEvents, 4 * 3600000); // refresh every 4 hours
+      // Contests feed: the server regenerates it daily; checking every 6 h
+      // (conditional, a 304 costs nothing) puts a catalog fix on every desktop
+      // the same day. A changed feed re-renders the Contests view if it's open
+      // and refreshes the phone's contest history.
+      contestsFeed.on('updated', () => {
+        if (win && !win.isDestroyed()) win.webContents.send('contests-updated');
+        try { updateRemoteSettings(); } catch {}
+      });
+      setTimeout(() => { contestsFeed.refresh().catch(() => {}); }, 20000);
+      setInterval(() => { contestsFeed.refresh().catch(() => {}); }, 6 * 3600000);
+    }
     // Boundary tick for ECHOCAT (Casey 2026-07-09): the phone's event
     // catalog rides the settings blob, which otherwise refreshes only on a
     // SUCCESSFUL 4-hour refetch — an offline shack left phones showing a
@@ -23781,15 +23819,15 @@ function rebuildContestHistory() {
     // Unified-registry Phase A: event-id stamps resolve to catalog contest
     // ids via the alias map, so a "13col-2026"-stamped QSO attributes to the
     // "13-colonies" contest exactly (no mode/band heuristics).
-    const contestsCatalog = getAllContests();
+    const catalogNow = contestsCatalog();
     // Phase B: event-sourced one-shots (explicit windows) join the catalog so
     // stamped QSOs with un-aliased events (APP_POTACAT_EVENT=wrtc-2026) show
     // in the phone's CNTST history under the event's own id.
     const eventEntries = activeEvents
-      .map((ev) => EventRegistry.synthesizeContestEntry(ev, contestsCatalog))
+      .map((ev) => EventRegistry.synthesizeContestEntry(ev, catalogNow))
       .filter(Boolean);
-    _contestHistory = buildContestHistory(contestsCatalog.concat(eventEntries), qsos, {
-      eventAliases: EventRegistry.buildEventAliasMap(activeEvents, contestsCatalog),
+    _contestHistory = buildContestHistory(catalogNow.concat(eventEntries), qsos, {
+      eventAliases: EventRegistry.buildEventAliasMap(activeEvents, catalogNow),
     });
   } catch (err) {
     console.error('[contest-history] rebuild failed:', err.message);
@@ -29602,8 +29640,8 @@ app.whenReady().then(() => {
   // jtcatFdMode is already ON, in season or not.
   ipcMain.handle('jtcat-fd-window', () => {
     try {
-      const db = require('./lib/contests-db');
-      const fd = (db.getAllContests() || []).find((c) => c && c.id === 'arrl-field-day')
+      const db = contestsDb;
+      const fd = (contestsCatalog() || []).find((c) => c && c.id === 'arrl-field-day')
         || { whenComputed: 'nth-weekend-of:6:4', durationHours: 24 };
       const { start, end } = db.resolveOccurrence(fd, new Date());
       if (!start || !end) return { active: false };
@@ -30153,8 +30191,7 @@ app.whenReady().then(() => {
   ipcMain.on('open-contest-url', (_e, url) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
     try {
-      const db = require('./lib/contests-db');
-      const all = db.getAllContests();
+      const all = contestsCatalog();
       // Event-sourced contest rows (Phase B) carry the event's url — those
       // must pass the same allowlist gate or their link-outs silently die.
       const ok = all.some((c) => c.website === url || c.rulesUrl === url)
@@ -31138,9 +31175,8 @@ app.whenReady().then(() => {
   // round-trips cleanly across all Electron versions). Renderer parses
   // back to Date when rendering.
   ipcMain.handle('get-contests', () => {
-    const db = require('./lib/contests-db');
     const now = new Date();
-    const resolved = db.getResolved(now);
+    const resolved = contestsFeed.resolvedAt(now);
     // Unified-registry Phase B: contests superseded by a live tracked event
     // (alias-resolved — 13 Colonies exists in both catalogs) carry the event
     // linkage so the Contests view renders ONE connected row: tracked state,

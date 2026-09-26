@@ -12123,7 +12123,7 @@ function _contestsRender() {
       e.preventDefault();
       e.stopPropagation();
       const url = el.getAttribute('data-url');
-      if (url) window.api.openExternal(url);
+      if (url) window.api.openContestUrl(url); // the contest-catalog allowlist, like the drawer
     });
   });
   // Event chip → the live event board (not the static drawer).
@@ -12282,6 +12282,14 @@ document.getElementById('contests-drawer-close')?.addEventListener('click', () =
 document.getElementById('contests-show-past')?.addEventListener('change', () => {
   if (contestsCache) _contestsRender();
 });
+// The server's contests feed changed (lib/contests-feed.js): drop the cached
+// copy so the next view reads it, and redraw now if the view is open.
+if (window.api.onContestsUpdated) {
+  window.api.onContestsUpdated(() => {
+    contestsCache = null;
+    if (currentView === 'contests') renderContestsView();
+  });
+}
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && currentView === 'contests') {
     const drawer = document.getElementById('contests-detail-drawer');
