@@ -30,35 +30,88 @@
 #define LDPC_ITERATIONS 25
 #define SAMPLE_RATE 12000
 
-/* Callsign hash table for message unpacking */
-#define HASH_SIZE 256
+/* Callsign hash table for message unpacking.
+ *
+ * ft8_lib saves EVERY callsign it unpacks (save_callsign), so the table only
+ * ever grows. It used to be a fixed 256-slot open-addressing table with no
+ * eviction: once 256 distinct calls had been heard (~15 min on a busy 20 m
+ * band) ht_add's probe loop never found an empty slot and spun forever. The
+ * decode never returned, the engine's watchdog "respawned" the worker — but
+ * worker.terminate() cannot interrupt native code, so the old thread kept
+ * spinning on a core while the new one shared (and re-initialised) the same
+ * static table. That is the "FT8 silently stops decoding" report and part of
+ * issue #87. Now: 1024 slots, every entry stamped with the decode cycle that
+ * last touched it, and the least-recently-used half is dropped whenever the
+ * load reaches 3/4 — so a probe always reaches an empty slot. */
+#define HASH_SIZE 1024
+#define HASH_PRUNE_AT (HASH_SIZE * 3 / 4)
 
-static struct {
+typedef struct {
     char callsign[12];
     uint32_t hash;
-} hash_table[HASH_SIZE];
+    uint32_t age;   /* ht_epoch when last saved or looked up */
+} ht_entry_t;
+
+static ht_entry_t hash_table[HASH_SIZE];
 static int hash_table_size = 0;
+static uint32_t ht_epoch = 0;   /* bumped once per Decode() call */
 
 static void ht_init(void) {
     hash_table_size = 0;
     memset(hash_table, 0, sizeof(hash_table));
 }
 
+static int ht_home(uint32_t hash22) {
+    uint16_t h10 = (hash22 >> 12) & 0x3FFu;
+    return (h10 * 23) % HASH_SIZE;
+}
+
+static void ht_insert_raw(const ht_entry_t* e) {
+    int idx = ht_home(e->hash);
+    while (hash_table[idx].callsign[0] != '\0')
+        idx = (idx + 1) % HASH_SIZE;
+    hash_table[idx] = *e;
+    hash_table_size++;
+}
+
+static int ht_cmp_age_desc(const void* a, const void* b) {
+    uint32_t x = ((const ht_entry_t*)a)->age, y = ((const ht_entry_t*)b)->age;
+    return (x < y) ? 1 : ((x > y) ? -1 : 0);
+}
+
+/* Keep the most recently used half; rebuild so probe chains stay valid. */
+static void ht_prune(void) {
+    static ht_entry_t keep[HASH_SIZE];
+    int n = 0;
+    for (int i = 0; i < HASH_SIZE; ++i)
+        if (hash_table[i].callsign[0] != '\0') keep[n++] = hash_table[i];
+    qsort(keep, (size_t)n, sizeof(keep[0]), ht_cmp_age_desc);
+    if (n > HASH_SIZE / 2) n = HASH_SIZE / 2;
+    ht_init();
+    for (int i = 0; i < n; ++i) ht_insert_raw(&keep[i]);
+}
+
 static void ht_add(const char* callsign, uint32_t hash) {
-    uint16_t h10 = (hash >> 12) & 0x3FFu;
-    int idx = (h10 * 23) % HASH_SIZE;
+    int idx = ht_home(hash);
     while (hash_table[idx].callsign[0] != '\0') {
         if (((hash_table[idx].hash & 0x3FFFFFu) == hash) &&
             strcmp(hash_table[idx].callsign, callsign) == 0) {
             hash_table[idx].hash &= 0x3FFFFFu;
+            hash_table[idx].age = ht_epoch;
             return;
         }
         idx = (idx + 1) % HASH_SIZE;
     }
-    hash_table_size++;
-    strncpy(hash_table[idx].callsign, callsign, 11);
-    hash_table[idx].callsign[11] = '\0';
-    hash_table[idx].hash = hash;
+    if (hash_table_size >= HASH_PRUNE_AT) {
+        ht_prune();
+    }
+    ht_entry_t e;
+    memset(&e, 0, sizeof(e));
+    strncpy(e.callsign, callsign, 11);
+    e.callsign[11] = '\0';
+    e.hash = hash;
+    e.age = ht_epoch;
+    ht_insert_raw(&e);
 }
 
 static bool ht_lookup(ftx_callsign_hash_type_t type, uint32_t hash, char* callsign) {
@@ -69,6 +122,7 @@ static bool ht_lookup(ftx_callsign_hash_type_t type, uint32_t hash, char* callsi
     while (hash_table[idx].callsign[0] != '\0') {
         if (((hash_table[idx].hash & 0x3FFFFFu) >> shift) == hash) {
             strcpy(callsign, hash_table[idx].callsign);
+            hash_table[idx].age = ht_epoch;
             return true;
         }
         idx = (idx + 1) % HASH_SIZE;
@@ -338,6 +392,7 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
     if (argc >= 3) { size_t n; napi_get_value_string_utf8(env, args[2], ap_mycall, sizeof(ap_mycall), &n); }
     if (argc >= 4) { size_t n; napi_get_value_string_utf8(env, args[3], ap_dxcall, sizeof(ap_dxcall), &n); }
     ap_refresh(ap_mycall, ap_dxcall);
+    ++ht_epoch;
 
     /* Set up monitor */
     monitor_config_t cfg = {
