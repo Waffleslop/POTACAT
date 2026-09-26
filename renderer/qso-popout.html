@@ -79,6 +79,10 @@
        clip instead of pushing their neighbours around. */
     .qso-table { table-layout: fixed; }
     .qso-table td { overflow: hidden; text-overflow: ellipsis; }
+    /* The delete column stays in view at the right edge of a wide log, and
+       its "Sure?" confirmation is never clipped (GitHub #94). */
+    .qso-table th.col-actions, .qso-table tbody td:last-child { position: sticky; right: 0; background: var(--bg-primary); overflow: visible; z-index: 1; }
+    .qso-table .log-delete-btn.confirming { white-space: nowrap; }
     .qso-table th { position: relative; overflow: hidden; }
     .qso-table th.col-dragging { opacity: 0.5; }
     .qso-table th.col-drop { box-shadow: inset 2px 0 0 var(--accent-blue); }

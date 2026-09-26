@@ -517,14 +517,18 @@ function renderHead() {
   // Trailing delete-button column — not arrangeable, not hideable.
   const thDel = document.createElement('th');
   thDel.className = 'col-actions';
+  // Wide enough for "Sure?" — at 34 px the confirmation was clipped to a
+  // sliver (GitHub #94).
+  thDel.style.width = ACTIONS_COL_PX + 'px';
   headRow.appendChild(thDel);
   syncTableWidth();
 }
 
 /** table-layout is fixed, so the table needs a width of its own — otherwise
  *  the last column absorbs the slack and a resize looks like it did nothing. */
+const ACTIONS_COL_PX = 64;
 function syncTableWidth() {
-  const total = visibleColumns().reduce((n, c) => n + colWidth(c), 0) + 34;
+  const total = visibleColumns().reduce((n, c) => n + colWidth(c), 0) + ACTIONS_COL_PX;
   table.style.width = total + 'px';
 }
 
