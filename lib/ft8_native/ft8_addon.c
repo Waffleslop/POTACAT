@@ -766,8 +766,67 @@ static bool decode_refined(bb_ctx_t* b, cpxf* c, float f_est, float t_est_sample
 }
 
 /* Remove one decoded FT8 signal from x[0..n). */
-static void subtract_signal(bb_ctx_t* b, cpxf* c, float* x, int n, const uint8_t* tones,
-                            float f_est, float t_est, bool precise) {
+/* k-th smallest of v[0..n) (quickselect; reorders v). */
+static float select_kth(float* v, int n, int k) {
+    int lo = 0, hi = n - 1;
+    while (lo < hi) {
+        float piv = v[(lo + hi) >> 1];
+        int i = lo, j = hi;
+        while (i <= j) {
+            while (v[i] < piv) ++i;
+            while (v[j] > piv) --j;
+            if (i <= j) { float t = v[i]; v[i] = v[j]; v[j] = t; ++i; --j; }
+        }
+        if (k <= j) hi = j; else if (k >= i) lo = i; else break;
+    }
+    return v[k];
+}
+
+/* One-sided noise power density near f0 (power per Hz, in the units of x^2),
+ * from the slot spectrum bb_prepare made of n real samples. The 10th
+ * percentile of the 0.0625 Hz bins within +/-400 Hz, scaled to the mean of
+ * an exponential (noise power in one bin is chi-square, 2 degrees of
+ * freedom): a busy band's FT8 signals cover most of the bins, so a median
+ * would read the neighbours as noise; the quietest tenth is still noise. */
+#define SNR_NOISE_HALF_HZ 400.0f
+#define SNR_NOISE_PCTL 0.10f
+#define SNR_BLOCKS 8            /* half-symbol blocks per signal-power measurement */
+static float noise_density(bb_ctx_t* b, float f0, int n) {
+    int k0 = (int)((f0 - SNR_NOISE_HALF_HZ) / BB_DF);
+    int k1 = (int)((f0 + 50.0f + SNR_NOISE_HALF_HZ) / BB_DF);
+    int kmin = (int)(100.0f / BB_DF), kmax = (int)(3200.0f / BB_DF);
+    if (k0 < kmin) k0 = kmin;
+    if (k1 > kmax) k1 = kmax;
+    int m = k1 - k0;
+    if (m < 64) return 0;
+    float* v = (float*)b->dphi;   /* scratch (only needed before the amplitudes) */
+    for (int i = 0; i < m; ++i) {
+        const cpxf z = b->spec[k0 + i];
+        v[i] = z.r * z.r + z.i * z.i;
+    }
+    float q = select_kth(v, m, (int)(SNR_NOISE_PCTL * m));
+    float mean = q / -logf(1.0f - SNR_NOISE_PCTL);
+    int nn = (n < BB_NFFT1) ? n : BB_NFFT1;
+    return 2.0f * mean / ((float)nn * SAMPLE_RATE);
+}
+
+/* Regenerate a decoded FT8 signal, measure its SNR the way WSJT-X defines it
+ * (signal power over the noise power in 2500 Hz), and, if apply, subtract it
+ * from x. Returns the SNR in dB, floored at -24 like WSJT-X.
+ *
+ * Signal power comes from the same per-block complex amplitudes the
+ * subtraction fits against the regenerated waveform, so it follows fading
+ * and needs no guess at where the tones fall. Each block's |a|^2 carries a
+ * noise term of 4 sigma^2 / sum|c|^2, removed with the local noise density.
+ * This replaced a 15 s Goertzel at the nominal tone frequencies in the
+ * worker, whose 0.07 Hz bins missed a tone that was 0.5 Hz off (issue #87).
+ * Measured: synthetic signals in white noise read within 0.3 dB of the true
+ * SNR from -20 to +10 dB; against WSJT-X on ft8_lib's reference recordings
+ * the quiet sets agree within 0.5 dB and the busy 20 m set reads ~3 dB
+ * higher (WSJT-X counts undecoded clutter as noise). The signal report
+ * JTCAT sends is this number. */
+static float subtract_signal(bb_ctx_t* b, cpxf* c, float* x, int n, const uint8_t* tones,
+                             float f_est, float t_est, bool precise, bool apply) {
     const int nn = FT8_NN;
     const int sps = FT8_SPS;
     float f0, mf;
@@ -828,6 +887,32 @@ static void subtract_signal(bb_ctx_t* b, cpxf* c, float* x, int n, const uint8_t
         }
         b->blk_num[bl].r = nr; b->blk_num[bl].i = ni; b->blk_den[bl] = d;
     }
+    float snr_db = -24.0f;
+    {
+        float n0 = noise_density(b, f0, n);
+        double pa = 0; int nb = 0;
+        const float sigma2 = n0 * SAMPLE_RATE * 0.5f;   /* white-equivalent sample variance */
+        /* 0.64 s measurement blocks: long enough that a station 10 Hz away
+         * averages out, short enough to follow HF fading. */
+        const int G = SNR_BLOCKS;
+        for (int bl0 = 0; bl0 + G <= nblk; bl0 += G) {
+            float nr = 0, ni = 0, d = 0;
+            for (int bl = bl0; bl < bl0 + G; ++bl) { nr += b->blk_num[bl].r; ni += b->blk_num[bl].i; d += b->blk_den[bl]; }
+            if (d < 0.5f * SUB_BLOCK * G) continue;       /* block off the end of the slot */
+            float ar = 2 * nr / d, ai = 2 * ni / d;
+            pa += (double)(ar * ar + ai * ai) - 4.0 * sigma2 / d;
+            ++nb;
+        }
+        if (n0 > 0 && nb > 0) {
+            double ps = 0.5 * pa / nb;                    /* Re(a c) has power |a|^2 / 2 */
+            double r = ps / (n0 * 2500.0);
+            if (r > 0) {
+                float db = (float)(10.0 * log10(r));
+                if (db > snr_db) snr_db = db;
+            }
+        }
+    }
+    if (!apply) return snr_db;
     const int hw = SUB_SMOOTH;
     for (int bl = 0; bl < nblk; ++bl) {
         float nr = 0, ni = 0, d = 0;
@@ -855,6 +940,7 @@ static void subtract_signal(bb_ctx_t* b, cpxf* c, float* x, int n, const uint8_t
         const cpxf cr = b->cref[k];
         x[i] -= ar * cr.r - ai * cr.i;   /* Re(a * c) */
     }
+    return snr_db;
 }
 
 /* Unpack + dedupe + record. Returns true if a new result was stored. */
@@ -1043,14 +1129,18 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
     for (int pass = 0; pass < passes && nres < max_res; ++pass) {
         int first_new = nres;
         nres = decode_pass(resid, n, protocol, have_bb ? &bb : NULL, cbuf, res, nres, max_res);
-        if (nres == first_new || pass == passes - 1) break;
+        if (!have_bb || !ft8) break;
+        /* Every decode is measured on the residual it was found in; all but
+         * the last pass's are also subtracted before the next pass. */
+        bool last = (nres == first_new || pass == passes - 1 || nres >= max_res);
         for (int k = first_new; k < nres; ++k) {
             uint8_t tones[FT8_NN];
             ft8_encode(res[k].msg.payload, tones);
             float f_est = res[k].have_ref ? res[k].f_ref : res[k].freq_hz;
             float t_est = res[k].have_ref ? res[k].t_ref : (res[k].time_sec - FT8_SYMBOL_PERIOD) * SAMPLE_RATE;
-            subtract_signal(&bb, cbuf, resid, n, tones, f_est, t_est, res[k].have_ref);
+            res[k].snr = subtract_signal(&bb, cbuf, resid, n, tones, f_est, t_est, res[k].have_ref, !last);
         }
+        if (last) break;
     }
     if (have_bb) { bb_free(&bb); free(cbuf); }
     free(resid);

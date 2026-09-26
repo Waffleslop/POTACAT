@@ -87,7 +87,43 @@ if (!fs.existsSync(ADDON)) {
     assert.strictEqual(tot.noiseDecodes, 0, `${tot.noiseDecodes} decodes from signal-free slots (false decodes)`);
     console.log(`       matched ${tot.matched}/${tot.ref}, extras ${tot.extra}, ${Math.round(tot.ms / tot.files)} ms/slot mean, ${Math.round(tot.maxMs)} ms max`);
   });
+
+  // 3. SNR is measured, in WSJT-X's definition (signal power over the noise
+  //    power in 2500 Hz — ft8sim's), and JTCAT sends it as the signal report.
+  //    Known signals in white Gaussian noise must read back within 1.5 dB.
+  //    The noise generator matters: an LCG feeding Box-Muller makes
+  //    structured "noise" whose quiet bins read 15 dB low.
+  test('measured SNR matches the true SNR in white noise', () => {
+    const n = require(ADDON);
+    let s = 0x9e3779b9;
+    const rnd = () => { // mulberry32
+      s = (s + 0x6d2b79f5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return (((t ^ (t >>> 14)) >>> 0) + 0.5) / 4294967296;
+    };
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd())) * Math.cos(2 * Math.PI * rnd());
+    const text = 'K1ABC W9XYZ EN37';
+    const w = n.encode(text, 1234.5, 'FT8');
+    let pw = 0; for (let i = 0; i < w.length; i++) pw += w[i] * w[i]; pw /= w.length;
+    for (const snr of [-16, -8, 0, 8]) {
+      const x = new Float32Array(180000);
+      for (let i = 0; i < x.length; i++) x[i] = gauss();
+      const g = Math.sqrt((2500 / 6000) * Math.pow(10, snr / 10) / pw);
+      for (let i = 0; i < w.length; i++) x[6000 + i] += g * w[i];
+      const d = n.decode(x, 'FT8', '', '').find((r) => r.text === text);
+      assert.ok(d, `no decode at ${snr} dB`);
+      assert.ok(Math.abs(d.db - snr) <= 1.5, `true ${snr} dB read ${d.db.toFixed(1)} dB`);
+    }
+  });
 }
+
+test('the worker keeps the native SNR (fixSNR is the WASM fallback only)', () => {
+  const worker = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-worker.js'), 'utf8');
+  const nativeFt8 = worker.slice(worker.indexOf("nativeDecode(samples, 'FT8'"), worker.indexOf('WASM decode:'));
+  assert.ok(!/fixSNR\(rawResults/.test(nativeFt8.split('} else if (decode)')[0]), 'native FT8 results must not be re-estimated');
+});
 
 console.log(`\n${pass} passed, ${fail} failed${skip ? `, ${skip} skipped` : ''}`);
 process.exit(fail ? 1 : 0);
