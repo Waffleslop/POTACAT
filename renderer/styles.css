@@ -10333,3 +10333,7 @@ main.banner-logger-active #event-progress-overlay {
 .station-setup-card { position: fixed; right: 18px; bottom: 44px; z-index: 900; width: min(420px, calc(100vw - 36px)); padding: 14px 16px; border-radius: 10px; background: var(--bg-secondary); border: 1px solid #4fc3f7; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font-size: 15px; }
 .ss-card-text { color: var(--text-primary); line-height: 1.45; margin-bottom: 10px; }
 .ss-card-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.echocat-review-card { padding-right: 34px; }
+.er-title { font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.er-close { position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--text-dim); font-size: 20px; line-height: 1; cursor: pointer; }
+.er-close:hover { color: var(--text-primary); }

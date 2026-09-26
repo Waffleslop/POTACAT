@@ -419,6 +419,7 @@ const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache,
 const { getModel, getModelList, RIG_MODELS } = require('./lib/rig-models');
 const { resolveSetupNotes, radioTypeFromCatTarget } = require('./lib/rig-setup-notes');
 const StationSetup = require('./lib/station-setup');
+const ReviewAsk = require('./lib/review-ask'); // one-time "Rate ECHOCAT" card
 const SetupShare = require('./lib/setup-share');
 const { autoUpdater } = require('electron-updater');
 let registerCloudIpc;
@@ -588,6 +589,7 @@ const GLOBAL_KEYS = new Set([
                        // (must be global so both operators' phones find the same shack)
   'launchAtStartup',   // OS login item — machine-scoped by nature
   'setupSharePending', // Station Setup shares not yet delivered (retried at launch) — about this machine's radios
+  'echocatReviewAsk',  // the one-time "Rate ECHOCAT" card: state, snooze, days a phone connected (per install)
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
@@ -7893,6 +7895,46 @@ function fillActivationExport(qsos) {
   return (qsos || []).map(q => ({ ...q, ...activationStationFillFor(q) }));
 }
 
+// --- "Rate ECHOCAT" (lib/review-ask.js holds the policy) -------------------
+let _lastQsoLoggedAt = 0;
+let _reviewAskOnScreen = false;   // the card is up this session; never send it twice
+const _appStartedAt = Date.now();
+
+// Is this a calm moment? Never while operating: a review ask that lands in a
+// pileup costs a review. Each "no" says why, for the log.
+function reviewAskCalm() {
+  if (Date.now() - _appStartedAt < 2 * 60 * 1000) return { ok: false, why: 'app open under 2 minutes' };
+  const transmitting = (cat && cat._transmitting) || !!_flexTxRf || jtcatTuneState.active
+    || radioOwner !== 'none' || !!(ft8Engine && ft8Engine._txActive);
+  if (transmitting) return { ok: false, why: 'transmitting' };
+  if (ft8Engine && ft8Engine._running) return { ok: false, why: 'FT8 running' };
+  if (jtcatFullAutoCq || jtcatAutoCqMode !== 'off') return { ok: false, why: 'Run/Hunt active' };
+  if (settings.activationActive) return { ok: false, why: 'activation running' };
+  if (Date.now() - _lastQsoLoggedAt < 60 * 1000) return { ok: false, why: 'QSO just logged' };
+  if (passEnforcement && passEnforcement.getState() !== 'idle') return { ok: false, why: 'hosting a Guest Pass' };
+  return { ok: true, why: '' };
+}
+
+let _reviewAskLastWhy = '';
+function reviewAskTick() {
+  if (_reviewAskOnScreen || !win || win.isDestroyed()) return;
+  if (!remoteServer) { if (_reviewAskLastWhy !== 'no ECHOCAT server') { _reviewAskLastWhy = 'no ECHOCAT server'; console.log('[ECHOCAT] review ask waiting: no ECHOCAT server'); } return; }
+  const d = ReviewAsk.decideReviewAsk({
+    devices: remoteServer.listPairedDevices ? remoteServer.listPairedDevices() : [],
+    ask: settings.echocatReviewAsk,
+    now: Date.now(),
+    calm: reviewAskCalm(),
+  });
+  // Say why it is waiting, once per reason — console only, it is not news.
+  if (!d.show) {
+    if (d.why !== _reviewAskLastWhy) { _reviewAskLastWhy = d.why; console.log('[ECHOCAT] review ask waiting: ' + d.why); }
+    return;
+  }
+  _reviewAskOnScreen = true;
+  console.log('[ECHOCAT] review ask: offering the card (' + d.stores.join('+') + ')');
+  win.webContents.send('echocat-review-ask', { stores: d.stores });
+}
+
 async function saveQsoRecord(qsoData, opts) {
   opts = opts || {};
   const origin = opts.origin || 'local-manual';
@@ -8067,6 +8109,7 @@ async function saveQsoRecord(qsoData, opts) {
   // Tell the main window a QSO went in, from whichever path logged it —
   // dialog, pop-out, quick log, JTCAT auto-log, phone, WSJT-X. The QSO-logged
   // chime hangs off this (N2FSM 2026-09-12).
+  _lastQsoLoggedAt = Date.now(); // the Rate-ECHOCAT card never lands on a fresh QSO
   if (win && !win.isDestroyed()) {
     win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode });
   }
@@ -15992,6 +16035,19 @@ function connectRemote() {
     if (win && !win.isDestroyed()) win.webContents.send('remote-peer-scan-state', { scanning });
   });
 
+  // A phone or tablet (not a browser) connected today: one of the three days
+  // the Rate-ECHOCAT card waits for (lib/review-ask.js).
+  remoteServer.on('client-hello', ({ platform } = {}) => {
+    if (!ReviewAsk.isPhonePlatform(platform)) return;
+    const before = ReviewAsk.normalizeAsk(settings.echocatReviewAsk);
+    const d = new Date();
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const after = ReviewAsk.recordDaySeen(before, day);
+    if (after.daysSeen.length !== before.daysSeen.length) {
+      settings.echocatReviewAsk = after;
+      try { saveSettings(settings); } catch {}
+    }
+  });
   remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {
     // Cancel any pending teardown — the phone came back inside the
     // grace window, so the engine kept running and we're whole.
@@ -28983,6 +29039,23 @@ app.whenReady().then(() => {
   // --- Station Setup checklist (lib/station-setup.js; state gathering above
   // stationSetupPayload). Registered here so 'open-scope' can reach
   // openScopePopout.
+  // "Rate ECHOCAT": checked every 5 minutes; the card itself waits for a calm
+  // moment, and the renderer says when it really went on screen.
+  setInterval(reviewAskTick, 5 * 60 * 1000);
+  setTimeout(reviewAskTick, 2 * 60 * 1000 + 5000);
+  ipcMain.on('echocat-review-shown', () => {
+    settings.echocatReviewAsk = ReviewAsk.markShown(settings.echocatReviewAsk);
+    try { saveSettings(settings); } catch {}
+  });
+  ipcMain.on('echocat-review-deferred', () => { _reviewAskOnScreen = false; console.log('[ECHOCAT] review ask: another notice is up — trying again later'); });
+  ipcMain.on('echocat-review-action', (_e, { action, store } = {}) => {
+    settings.echocatReviewAsk = ReviewAsk.applyAction(settings.echocatReviewAsk, action);
+    try { saveSettings(settings); } catch {}
+    if (action === 'rate' && ReviewAsk.STORE_LINKS[store]) {
+      try { require('electron').shell.openExternal(ReviewAsk.STORE_LINKS[store]); } catch {}
+    }
+    sendCatLog(`[ECHOCAT] review ask: ${action}${store ? ' (' + store + ')' : ''} -> ${settings.echocatReviewAsk.state}`);
+  });
   ipcMain.handle('station-setup-get', (_e, rigId) => stationSetupPayload(rigId));
   // Results of the checks that run in the renderer (they need a real audio
   // device open: the 3-second listen and the output-device open).

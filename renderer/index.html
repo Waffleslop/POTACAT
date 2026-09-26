@@ -4123,6 +4123,14 @@
       <button type="button" id="ss-done" class="ss-btn ss-btn-primary">Close</button>
     </div>
   </dialog>
+  <!-- One-time "Rate ECHOCAT" card (lib/review-ask.js, renderer/echocat-review.js).
+       Same house style as the Station Setup launch card; never a modal. -->
+  <div id="echocat-review-card" class="station-setup-card echocat-review-card hidden" role="status">
+    <button type="button" id="er-close" class="er-close" title="Not now" aria-label="Close">&times;</button>
+    <div class="er-title">Enjoying ECHOCAT?</div>
+    <div id="er-text" class="ss-card-text"></div>
+    <div id="er-buttons" class="ss-card-buttons"></div>
+  </div>
   <div id="station-setup-card" class="station-setup-card hidden" role="status">
     <div id="ss-card-text" class="ss-card-text"></div>
     <div class="ss-card-buttons">
@@ -4455,6 +4463,7 @@
   <script src="remote-ptt.js"></script>
   <script src="app.js"></script>
   <script src="station-setup.js"></script>
+  <script src="echocat-review.js"></script>
   <script src="cloud-ui.js"></script>
   <script src="pota-sync-ui.js"></script>
 </body>

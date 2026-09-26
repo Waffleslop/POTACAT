@@ -216,6 +216,10 @@ contextBridge.exposeInMainWorld('api', {
   stationSetupAction: (q) => ipcRenderer.invoke('station-setup-action', q),
   stationSetupSharePreview: (q) => ipcRenderer.invoke('station-setup-share-preview', q),
   stationSetupShareSend: (q) => ipcRenderer.invoke('station-setup-share-send', q),
+  onEchocatReviewAsk: (cb) => ipcRenderer.on('echocat-review-ask', (_e, d) => cb(d)),
+  echocatReviewShown: () => ipcRenderer.send('echocat-review-shown'),
+  echocatReviewDeferred: () => ipcRenderer.send('echocat-review-deferred'),
+  echocatReviewAction: (q) => ipcRenderer.send('echocat-review-action', q),
   onStationSetupChanged: (cb) => {
     const handler = () => cb();
     ipcRenderer.on('station-setup-changed', handler);
