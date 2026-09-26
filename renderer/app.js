@@ -5004,6 +5004,24 @@ lotwUploadBtn.addEventListener('click', async () => {
     lotwUploadResult.textContent = (r.message || (r.ok ? 'Uploaded.' : 'Upload failed.'))
       + (!r.ok && r.detail ? ' [' + r.detail + ']' : '');
     lotwUploadResult.style.color = r.ok ? '#4ecca3' : '#e94560';
+    // The skipped QSOs themselves, with TQSL's reason (GitHub #92).
+    if (r.skipped && r.skipped.length) {
+      const det = document.createElement('details');
+      det.style.marginTop = '4px';
+      det.style.color = 'var(--text-primary)';
+      const sum = document.createElement('summary');
+      sum.textContent = `Show the ${r.skipped.length} skipped QSO${r.skipped.length === 1 ? '' : 's'}`;
+      det.appendChild(sum);
+      const ul = document.createElement('ul');
+      ul.style.margin = '4px 0 0 16px';
+      for (const sk of r.skipped) {
+        const li = document.createElement('li');
+        li.textContent = `${sk.call} ${sk.date} ${sk.time}${sk.station ? ' as ' + sk.station : ''}: ${sk.reason}${sk.detail ? ' (' + sk.detail + ')' : ''}`;
+        ul.appendChild(li);
+      }
+      det.appendChild(ul);
+      lotwUploadResult.appendChild(det);
+    }
   } catch (e) {
     lotwUploadResult.textContent = 'Upload failed: ' + (e.message || e);
     lotwUploadResult.style.color = '#e94560';

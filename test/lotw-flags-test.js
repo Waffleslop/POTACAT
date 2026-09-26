@@ -80,5 +80,19 @@ test('stampLotwSent: stamps snapshot QSOs, spares skips / new / already-stamped'
   assert.strictEqual(qsos[4].LOTW_QSL_SENT, undefined);
 });
 
+// GitHub #92: "N skipped (see log)" and no log said why. Each skip carries
+// TQSL's headline and its specific line.
+test('each skip carries TQSL\'s reason and detail', () => {
+  const skips = parseTqslSkips(STDERR_SAMPLE);
+  const cr2t = skips.find(s => s.CALL === 'CR2T');
+  assert.strictEqual(cr2t.reason, 'Callsign Certificate does not match QSO details');
+  assert.ok(/has value 'K3SBP' while QSO has 'WB6ACU'/.test(cr2t.detail));
+  const n0ad = skips.find(s => s.CALL === 'N0AD');
+  assert.strictEqual(n0ad.reason, 'Station Location does not match QSO details');
+  assert.ok(/'Gridsquare' has value 'FN20JB'/.test(n0ad.detail));
+  // The TQSL banner above the first block is not mistaken for a reason.
+  assert.ok(!/TQSL Version|Signing using/.test(cr2t.reason + cr2t.detail));
+});
+
 console.log(`\nLoTW flags: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

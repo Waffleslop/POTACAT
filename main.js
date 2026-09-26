@@ -29910,8 +29910,20 @@ app.whenReady().then(() => {
             sendCatLog(`[LoTW] Marked ${stats.stamped} QSOs as uploaded` +
               (stats.alreadyStamped ? ` (${stats.alreadyStamped} already marked)` : '') +
               (skips.length ? `; ${skips.length} skipped by TQSL stay unmarked` : ''));
+            // Say WHICH QSOs TQSL skipped and why, in the log and in the
+            // result, grouped by reason (GitHub #92: "which log?").
+            for (const sk of skips) {
+              sendCatLog(`[LoTW] skipped ${sk.CALL} ${sk.QSO_DATE} ${sk.TIME_ON || ''}${sk.STATION_CALLSIGN ? ' as ' + sk.STATION_CALLSIGN : ''} — ${sk.reason || 'no reason given'}${sk.detail ? ' (' + sk.detail + ')' : ''}`);
+            }
+            const byReason = new Map();
+            for (const sk of skips) byReason.set(sk.reason || 'no reason given', (byReason.get(sk.reason || 'no reason given') || 0) + 1);
+            const reasons = [...byReason].map(([why, n]) => `${n} "${why}"`).join(', ');
+            r.skipped = skips.slice(0, 200).map(sk => ({
+              call: sk.CALL, date: sk.QSO_DATE, time: sk.TIME_ON || '', station: sk.STATION_CALLSIGN || '',
+              reason: sk.reason || '', detail: sk.detail || '',
+            }));
             if (stats.stamped > 0 || skips.length > 0) {
-              r.message += ` ${stats.stamped} QSOs marked as uploaded${skips.length ? `; ${skips.length} skipped (see log)` : ''}.`;
+              r.message += ` ${stats.stamped} QSOs marked as uploaded${skips.length ? `; ${skips.length} skipped by TQSL: ${reasons}. These stay unmarked until fixed.` : '.'}`;
             }
           } catch (stampErr) {
             sendCatLog('[LoTW] Sent-flag stamping failed (upload itself succeeded): ' + stampErr.message);
