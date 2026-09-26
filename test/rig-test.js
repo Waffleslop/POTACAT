@@ -1437,8 +1437,15 @@ test('RPRT rejection within 1.5s of a control names the command', () => {
   codec.setPreamp(true);
   codec.onData('RPRT -11\n');
   assert.ok(logs.some((l) => l.includes('likely rejecting "L PREAMP 10"')), `got: ${logs.join(' | ')}`);
+  // #82: an un-probed preamp guess that is rejected moves on to the next
+  // value, and THAT command is named if it is rejected too.
+  codec.onData('RPRT -11\n');
+  assert.ok(logs.some((l) => l.includes('likely rejecting "L PREAMP 1"')), `got: ${logs.join(' | ')}`);
   // Attribution is consumed — a repeat of the same code without a fresh
   // user command falls back to the on-change dedup (no second line).
+  codec.setCompressor(true);
+  codec.onData('RPRT -11\n');
+  assert.ok(logs.some((l) => l.includes('likely rejecting "U COMP 1"')), `got: ${logs.join(' | ')}`);
   const before = logs.length;
   codec.onData('RPRT -11\n');
   assert.strictEqual(logs.length, before);
