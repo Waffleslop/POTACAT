@@ -1458,6 +1458,18 @@ let pskrMapFlushTimer = null;  // throttle timer for PSKReporter Map -> renderer
 let keyer = null;          // IambicKeyer instance for CW MIDI keying
 let winKeyer = null;       // K1EL WinKeyer instance for hardware CW keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
+// Wiring that must survive connectRemote() replacing the server. That
+// function removes every listener from the old instance and builds a new
+// one, so a listener or setter attached once at startup was lost on every
+// rebuild — and never attached at all when ECHOCAT was enabled after launch.
+// A fresh install that turned ECHOCAT on, then tapped Pair, waited for an
+// approval window that could not open until POTACAT was restarted (2026-09-26).
+// onRemoteServer(fn) runs fn on the current server now and on every new one.
+const _remoteServerHooks = [];
+function onRemoteServer(fn) {
+  _remoteServerHooks.push(fn);
+  if (remoteServer) fn(remoteServer);
+}
 // Active ALSA capture sessions (Linux raw hw:/plughw: devices). Assigned in the
 // ipcMain handler block below; declared here at module scope so gracefulCleanup()
 // can stop every session on quit. If left running, each session's setInterval
@@ -15794,6 +15806,9 @@ function connectRemote() {
   if (!settings.enableRemote) return;
 
   remoteServer = new RemoteServer();
+  for (const hook of _remoteServerHooks) {
+    try { hook(remoteServer); } catch (err) { sendCatLog('[Echo CAT] wiring hook failed: ' + (err && err.message ? err.message : err)); }
+  }
   // Seed the activity cache at birth. Without this a phone connecting to a
   // freshly-launched idle desktop gets NO activity-state despite the hello
   // advertising the capability — "idle" must be a stated fact, not an
@@ -26079,6 +26094,8 @@ app.whenReady().then(() => {
   }
   _refreshAltHosts();
   setInterval(_refreshAltHosts, 10 * 60 * 1000);
+  // A rebuilt server starts with no alt hosts; don't leave it that way for 10 min.
+  onRemoteServer(() => _refreshAltHosts());
 
   ipcMain.handle('cloud-tunnel-get-state', () => {
     return cloudTunnel ? cloudTunnel.getState() : { enabled: false, status: 'off' };
@@ -26176,8 +26193,8 @@ app.whenReady().then(() => {
     // accepts same-pass re-attach, supersedes a stale session when no
     // guest is connected, and rejects mismatch only while another
     // guest is live (single-pass invariant).
-    if (remoteServer) {
-      remoteServer.setPassValidator(async (code, sessionToken) => {
+    onRemoteServer((rs) => {
+      rs.setPassValidator(async (code, sessionToken) => {
         // Phase 3 (cloud mig 009): every WS pass-auth attempt is
         // validated against the high-entropy session_token returned
         // by /redeem, not just the publicly-visible pass code. This
@@ -26224,7 +26241,7 @@ app.whenReady().then(() => {
           passClientDisconnectTimer = null;
         }
       };
-      remoteServer.on('pass-client-disconnected', ({ code }) => {
+      rs.on('pass-client-disconnected', ({ code }) => {
         clearPassDisconnectTimer();
         passClientDisconnectTimer = setTimeout(() => {
           passClientDisconnectTimer = null;
@@ -26235,7 +26252,7 @@ app.whenReady().then(() => {
           }
         }, 60_000);
       });
-      remoteServer.setPassAuthCallback(async (code, _sessionId) => {
+      rs.setPassAuthCallback(async (code, _sessionId) => {
         clearPassDisconnectTimer();
         const state = passEnforcement.getState();
         if (state === 'idle') {
@@ -26261,7 +26278,7 @@ app.whenReady().then(() => {
         await new Promise((resolve) => setImmediate(resolve));
         await passEnforcement.loadPass(code);
       });
-    }
+    });
   } catch (err) {
     sendCatLog('[pass-enforcement] init failed: ' + (err.message || err));
   }
@@ -26810,15 +26827,15 @@ app.whenReady().then(() => {
     } catch {}
   }
 
-  if (remoteServer) {
-    remoteServer.on('pair-request', (req) => _openPairRequestPopout(req));
+  onRemoteServer((rs) => {
+    rs.on('pair-request', (req) => _openPairRequestPopout(req));
     // Note: pair-request-cancelled listener was here. Removed
     // 2026-06-04 — the popout now stays open for the full 60-s
     // window regardless of the phone-socket state so iOS's
     // aggressive socket teardown doesn't close the operator's
     // approval window before they can click. See remote-server.js
     // `req.on('close')` comment for the full rationale.
-    remoteServer.on('pair-request-resolved', ({ requestId, approved, reason }) => {
+    rs.on('pair-request-resolved', ({ requestId, approved, reason }) => {
       if (pairRequestPopoutWin && !pairRequestPopoutWin.isDestroyed()) {
         // 60-second timeout auto-resolved without the popout buttons
         // being clicked — close the now-stale window.
@@ -26830,7 +26847,7 @@ app.whenReady().then(() => {
         }
       }
     });
-  }
+  });
 
   ipcMain.on('pair-request-approve', (_e, requestId) => {
     if (remoteServer && typeof remoteServer.approvePairRequest === 'function') {
@@ -30173,7 +30190,11 @@ app.whenReady().then(() => {
   }
   ipcMain.on('vfo-set-lock', (_e, locked) => applyVfoLock(locked));
   // ECHOCAT clients toggle via WS; remote-server emits this event.
-  if (remoteServer) remoteServer.on('vfo-set-lock', (locked) => applyVfoLock(locked));
+  onRemoteServer((rs) => {
+    rs.on('vfo-set-lock', (locked) => applyVfoLock(locked));
+    // A rebuilt server would otherwise tell clients the VFO is unlocked.
+    if (typeof rs.setVfoLocked === 'function') rs.setVfoLocked(_vfoLocked);
+  });
 
   // --- KiwiSDR / WebSDR.org integration ---
   const { KiwiSdrClient } = require('./lib/kiwisdr');
