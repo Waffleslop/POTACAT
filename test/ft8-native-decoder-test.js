@@ -10,8 +10,9 @@
 //    core. Here a child process pushes several thousand distinct calls through
 //    encode + decode under a timeout, so a regression FAILS instead of hanging.
 // 2. Decode sensitivity floor on ft8_lib's WSJT-X-referenced test set, so a
-//    future change cannot quietly give back the multi-pass gains
-//    (scripts/ft8-benchmark.js is the full report).
+//    future change cannot quietly give back the multi-pass gains, and zero
+//    decodes from signal-free slots (scripts/ft8-benchmark.js is the full
+//    report).
 //
 // Both need the built addon (npm run build-ft8); skipped when it is absent,
 // like CI jobs that do not compile natives.
@@ -74,13 +75,16 @@ if (!fs.existsSync(ADDON)) {
   });
 
   test('decode sensitivity floor on the WSJT-X reference set', () => {
-    const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'ft8-benchmark.js'), '--json'], { encoding: 'utf8', timeout: 120000 });
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'ft8-benchmark.js'), '--json', '--noise', '20'], { encoding: 'utf8', timeout: 120000 });
     assert.strictEqual(r.status, 0, 'benchmark failed: ' + (r.stderr || '').slice(0, 400));
     const tot = JSON.parse(r.stdout.trim().split(/\r?\n/).pop());
-    // Baseline (single pass, 140 candidates) matched 933 of 1289 with 0 implausible extras.
-    const FLOOR = +(process.env.FT8_MATCH_FLOOR || 933);
+    // Single pass / 140 candidates (before #87) matched 933 of 1289; multi-pass
+    // with refined demodulation + subtraction matches 1251. Deterministic, so
+    // the floor sits just under it.
+    const FLOOR = +(process.env.FT8_MATCH_FLOOR || 1245);
     assert.ok(tot.matched >= FLOOR, `matched ${tot.matched} < floor ${FLOOR}`);
     assert.strictEqual(tot.implausible, 0, `${tot.implausible} implausible (likely false) decodes`);
+    assert.strictEqual(tot.noiseDecodes, 0, `${tot.noiseDecodes} decodes from signal-free slots (false decodes)`);
     console.log(`       matched ${tot.matched}/${tot.ref}, extras ${tot.extra}, ${Math.round(tot.ms / tot.files)} ms/slot mean, ${Math.round(tot.maxMs)} ms max`);
   });
 }

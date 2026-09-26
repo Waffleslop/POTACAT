@@ -11,6 +11,8 @@
  *   node scripts/ft8-benchmark.js            # per-file + total table
  *   node scripts/ft8-benchmark.js --quiet    # totals only
  *   node scripts/ft8-benchmark.js --extras   # also list every extra decode
+ *   node scripts/ft8-benchmark.js --missed   # also list every missed reference decode (with SNR)
+ *   node scripts/ft8-benchmark.js --noise 40 # also decode 40 signal-free slots: every decode is false
  *   node scripts/ft8-benchmark.js --json     # machine-readable totals on the last line
  *   node scripts/ft8-benchmark.js --addon <path/to/ft8_native.node>
  *
@@ -21,7 +23,8 @@
  *
  * An EXTRA is a decode not in the reference. WSJT-X is not ground truth — it
  * misses real signals too — so extras are split:
- *   corroborated — a callsign in it appears in some reference decode (any file)
+ *   corroborated — the same message, or a callsign in it, appears in some
+ *                  reference decode (any file: stations repeat across slots)
  *   plausible    — every token parses as FT8 message vocabulary (calls, grids,
  *                  reports, CQ/RR73/73/...), but not corroborated
  *   implausible  — fails the structure check (most likely a false decode)
@@ -112,14 +115,16 @@ function normalize(text) {
     .trim();
 }
 
+const refSnr = new Map(); // file|text -> WSJT-X SNR
 function parseReference(file) {
   const msgs = [];
   for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
     // 110130  -6  0.7  683 ~  CQ TA6CQ KN70      AS Turkey
-    const m = raw.match(/^\s*\d+\s+-?\d+\s+-?[\d.]+\s+\d+\s+~\s+(.*)$/);
+    const m = raw.match(/^\s*\d+\s+(-?\d+)\s+-?[\d.]+\s+\d+\s+~\s+(.*)$/);
     if (!m) continue;
-    const text = m[1].split(/\s{2,}/)[0]; // drop country / AP annotations
-    msgs.push(normalize(text));
+    const text = normalize(m[2].split(/\s{2,}/)[0]); // drop country / AP annotations
+    msgs.push(text);
+    refSnr.set(file + '|' + text, +m[1]);
   }
   return msgs;
 }
@@ -167,12 +172,17 @@ if (!cases.length) { console.error('No WAV+TXT pairs under ' + WAV_DIR); process
 
 // Every callsign WSJT-X heard anywhere in the set (for corroborating extras).
 const refCalls = new Set();
+const refMsgs = new Set();
 const refs = cases.map((c) => parseReference(c.txt));
+for (const r of refs) for (const m of r) refMsgs.add(m);
 for (const r of refs) for (const m of r) for (const t of m.split(' ')) if (isCallish(t) && t !== '<...>') refCalls.add(t);
 
 const tot = { files: 0, ours: 0, ref: 0, matched: 0, missed: 0, extra: 0, corroborated: 0, plausible: 0, implausible: 0, ms: 0, maxMs: 0 };
 const rows = [];
 const extrasList = [];
+const missedList = [];
+const snrBuckets = {}; // WSJT-X SNR bucket -> {ref, matched}
+const bucketOf = (snr) => (snr <= -20 ? '<=-20' : snr <= -15 ? '-19..-15' : snr <= -10 ? '-14..-10' : snr <= 0 ? '-9..0' : '>0');
 
 // Warm-up (first call pays one-time allocation / page-fault cost).
 native.decode(new Float32Array(SLOT_SAMPLES), 'FT8', MY_CALL, DX_CALL);
@@ -190,10 +200,17 @@ cases.forEach((c, idx) => {
   const oursSet = new Set(ours);
   const matched = [...refSet].filter((m) => oursSet.has(m)).length;
   const missed = refSet.size - matched;
+  for (const m of refSet) {
+    const snr = refSnr.get(c.txt + '|' + m);
+    const b = snrBuckets[bucketOf(snr)] || (snrBuckets[bucketOf(snr)] = { ref: 0, matched: 0 });
+    b.ref++;
+    if (oursSet.has(m)) b.matched++;
+    else missedList.push({ file: path.relative(WAV_DIR, c.wav), text: m, snr });
+  }
   const extras = ours.filter((m) => !refSet.has(m));
   let corr = 0, plaus = 0, impl = 0;
   for (const e of extras) {
-    const k = e.split(' ').some((t) => refCalls.has(t)) ? 'corroborated' : (plausible(e) ? 'plausible' : 'implausible');
+    const k = (refMsgs.has(e) || e.split(' ').some((t) => refCalls.has(t))) ? 'corroborated' : (plausible(e) ? 'plausible' : 'implausible');
     if (k === 'corroborated') corr++; else if (k === 'plausible') plaus++; else impl++;
     extrasList.push({ file: path.relative(WAV_DIR, c.wav), text: e, kind: k });
   }
@@ -213,15 +230,48 @@ if (!flag('--quiet') && !flag('--json')) {
     console.log(`${r.file.padEnd(25)} ${pad(r.ours, 5)} ${pad(r.ref, 6)} ${pad(r.matched, 6)} ${pad(r.missed, 5)} ${pad(r.extra, 6)}  (${r.corr}/${r.plaus}/${r.impl})`.padEnd(76) + pad(r.ms.toFixed(0), 6) + (r.rate !== SR ? `  [resampled from ${r.rate} Hz]` : ''));
   }
 }
+if (flag('--missed')) {
+  console.log('\nMissed (in WSJT-X reference, not decoded):');
+  for (const e of missedList) console.log(`  ${String(e.snr).padStart(4)} dB  ${e.file.padEnd(24)} ${e.text}`);
+}
 if (flag('--extras')) {
   console.log('\nExtras (not in WSJT-X reference):');
   for (const e of extrasList) console.log(`  ${e.kind.padEnd(13)} ${e.file.padEnd(24)} ${e.text}`);
 }
+// False-alarm check: slots with no signal at all. Anything decoded here is a
+// false decode by construction (half white noise, half noise plus a few
+// steady carriers, which stress the sync search). Deterministic PRNG.
+const NOISE_SLOTS = args.includes('--noise') ? +(opt('--noise', '0')) || 40 : 0;
+tot.noiseSlots = NOISE_SLOTS;
+tot.noiseDecodes = 0;
+const noiseTexts = [];
+if (NOISE_SLOTS) {
+  let seed = 12345;
+  const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  for (let s = 0; s < NOISE_SLOTS; s++) {
+    const slot = new Float32Array(SLOT_SAMPLES);
+    for (let i = 0; i < slot.length; i++) slot[i] = 0.05 * gauss();
+    if (s % 2) {
+      for (let c = 0; c < 4; c++) {
+        const f = 300 + rnd() * 2500, a = 0.02 + rnd() * 0.2;
+        for (let i = 0; i < slot.length; i++) slot[i] += a * Math.sin(2 * Math.PI * f * i / SR);
+      }
+    }
+    for (const r of native.decode(slot, 'FT8', MY_CALL, DX_CALL)) { tot.noiseDecodes++; noiseTexts.push(r.text); }
+  }
+}
+
 const pct = (100 * tot.matched / tot.ref).toFixed(1);
 if (!flag('--json')) {
+  if (NOISE_SLOTS) {
+    console.log(`\nNoise-only slots: ${NOISE_SLOTS}, false decodes: ${tot.noiseDecodes}${noiseTexts.length ? '  [' + noiseTexts.join(' | ') + ']' : ''}`);
+  }
   console.log('-'.repeat(84));
   console.log(`TOTAL ${tot.files} files: ours ${tot.ours}, WSJT-X ${tot.ref}, matched ${tot.matched} (${pct}%), missed ${tot.missed}, ` +
     `extra ${tot.extra} (corroborated ${tot.corroborated}, plausible ${tot.plausible}, implausible ${tot.implausible})`);
+  console.log('matched by WSJT-X SNR: ' + ['<=-20', '-19..-15', '-14..-10', '-9..0', '>0']
+    .filter((k) => snrBuckets[k]).map((k) => `${k} dB ${snrBuckets[k].matched}/${snrBuckets[k].ref}`).join(', '));
   console.log(`decode time: total ${tot.ms.toFixed(0)} ms, mean ${(tot.ms / tot.files).toFixed(0)} ms/slot, max ${tot.maxMs.toFixed(0)} ms/slot`);
 } else {
   console.log(JSON.stringify({ ...tot, matchedPct: +pct }));
