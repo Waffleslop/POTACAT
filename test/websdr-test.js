@@ -282,8 +282,9 @@ test('tune URL has all required params with USB defaults', () => {
   assert.ok(sent.startsWith('GET /~~param?'));
   assert.ok(sent.includes('f=14074'));
   assert.ok(sent.includes('mode=USB'));
-  assert.ok(sent.includes('lo=300'));
-  assert.ok(sent.includes('hi=2700'));
+  // Edges in kHz, as WebSDR.org's own client sends them (0.3..2.7 for USB).
+  assert.ok(sent.includes('lo=0.3&'), sent);
+  assert.ok(sent.includes('hi=2.7&'), sent);
   assert.ok(sent.includes('band=0'));
   assert.ok(sent.includes('name=POTACAT_K3SBP'));
 });
@@ -296,8 +297,28 @@ test('LSB sets negative passband', () => {
   const ws = require('ws');
   c._ws = { readyState: ws.OPEN, send: (s) => { sent = s; } };
   c._sendTune();
-  assert.ok(sent.includes('lo=-2700'));
-  assert.ok(sent.includes('hi=-300'));
+  assert.ok(sent.includes('lo=-2.7&'), sent);
+  assert.ok(sent.includes('hi=-0.3&'), sent);
+});
+
+// GitHub #93 (DF1VB): CW showed the station 600 Hz low on the WebSDR page.
+// Official convention: narrow LSB-side window, BFO above the station; the
+// site shows BFO + (lo+hi)/2, which must be the station's own frequency, and
+// the carrier sits 0.6 kHz below the BFO -> a 600 Hz tone.
+test('CW: WebSDR shows the station on its frequency, carrier heard at 600 Hz', () => {
+  const c = newClient();
+  c._desiredFreqKhz = 14025;
+  c._desiredMode = 'cw';
+  let sent = null;
+  const ws = require('ws');
+  c._ws = { readyState: ws.OPEN, send: (s) => { sent = s; } };
+  c._sendTune();
+  const q = new URLSearchParams(sent.split('?')[1]);
+  const f = +q.get('f'), lo = +q.get('lo'), hi = +q.get('hi');
+  assert.ok(hi - lo < 1.0, 'narrow window, so WebSDR treats it as CW');
+  assert.strictEqual(+(f + (lo + hi) / 2).toFixed(3), 14025, 'displayed frequency = the station');
+  assert.ok(Math.abs(f - 14025.6) < 1e-6, 'BFO 0.6 kHz above the carrier (' + f + ')');
+  assert.ok(lo < -(f - 14025) && -(f - 14025) < hi, 'the carrier falls inside the passband');
 });
 
 test('tune() resets predictor', () => {
