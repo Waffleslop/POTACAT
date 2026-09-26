@@ -9610,21 +9610,35 @@ main.banner-logger-active #event-progress-overlay {
   padding:8px;text-align:center;background:var(--bg-panel);border-radius:4px;
 }
 
-/* ===== Contests view ===== */
+/* ===== Contests view =====
+   One compact line per contest in aligned columns (2026-09-26). The old
+   two-line cards were capped at 1000 px while the header spanned the
+   window, so a wide window showed long empty rows and a hint floating far
+   to their right. Header and list now share the full width, and every row
+   uses the same grid template as the column header. */
 #contests-view {
-  padding: 16px;
+  padding: 14px 16px;
   overflow-y: auto;
   height: 100%;
+  --contest-cols: 104px minmax(220px, 2fr) 150px 56px minmax(90px, 1fr) minmax(110px, 1.1fr) minmax(160px, 2.2fr) 64px;
 }
 .contests-header {
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border-secondary);
-  padding-bottom: 12px;
+  margin-bottom: 10px;
+}
+.contests-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 .contests-header h2 {
-  margin: 0 0 6px 0;
+  margin: 0;
   font-size: 18px;
   color: var(--text-primary);
+}
+.contests-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 .contests-attribution {
   font-size: 11px;
@@ -9644,6 +9658,7 @@ main.banner-logger-active #event-progress-overlay {
 .contests-filter-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -9654,11 +9669,6 @@ main.banner-logger-active #event-progress-overlay {
   gap: 6px;
   cursor: pointer;
 }
-.contests-hint {
-  margin-left: auto;
-  font-style: italic;
-  color: var(--text-tertiary);
-}
 .contests-loading,
 .contests-error {
   padding: 24px;
@@ -9667,86 +9677,127 @@ main.banner-logger-active #event-progress-overlay {
 }
 .contests-error { color: var(--accent-red); }
 
-/* Flat "What's Next" list — single chronological column. Replaces the
-   old card-grouped layout 2026-06-08 (Casey wanted a unified next-up
-   view with source toggles rather than per-category cards). The
-   .contest-card* + .contest-entry* rules below are no longer
-   referenced but kept as dead-code for now in case we revert. */
 #contests-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  max-width: 1000px;
 }
-/* Temporal bucket — "This weekend", "This week", etc. Header has a
-   sticky-feel separation; body holds the contest rows. */
+.contest-cols,
+.contest-row {
+  display: grid;
+  grid-template-columns: var(--contest-cols);
+  column-gap: 12px;
+  align-items: center;
+}
+.contest-cols {
+  position: sticky;
+  top: -14px;
+  z-index: 1;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
 .contest-bucket {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 .contest-bucket-header {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  padding: 0 4px 6px;
-  border-bottom: 1px solid var(--border-secondary);
+  gap: 8px;
+  padding: 14px 10px 4px;
 }
 .contest-bucket-label {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.3px;
   color: var(--text-primary);
 }
 .contest-bucket-count {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-tertiary);
   background: var(--bg-panel);
-  padding: 1px 7px;
+  padding: 1px 6px;
   border-radius: 8px;
 }
-.contest-bucket-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-/* LIVE bucket header gets the alert accent so it really pops. */
-.contest-bucket-live .contest-bucket-header {
-  border-bottom-color: var(--accent-red);
-}
+/* LIVE section gets the alert accent so it really pops. */
 .contest-bucket-live .contest-bucket-label {
   color: var(--accent-red);
 }
 .contest-row {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
-  padding: 10px 14px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-secondary);
   cursor: pointer;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 12px;
-  align-items: center;
-  transition: background 0.1s;
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-height: 30px;
 }
 .contest-row:hover { background: var(--bg-hover); }
-.contest-row-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
+.contest-bucket-live .contest-row { background: color-mix(in srgb, var(--accent-red) 6%, transparent); }
+.contest-bucket-live .contest-row:hover { background: var(--bg-hover); }
+.contest-row > span,
 .contest-row-name {
-  font-size: 13px;
-  color: var(--text-primary);
-  font-weight: 500;
-}
-.contest-row-meta {
-  font-size: 11px;
-  color: var(--text-tertiary);
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.contest-row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.contest-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* Basis 0: the sponsor only ever gets what the name leaves over. */
+.contest-row-sponsor {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.contest-row-notes {
+  color: var(--text-tertiary);
+}
+.contest-row-when {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.contest-row-len {
+  font-variant-numeric: tabular-nums;
+}
+.contest-row-rules {
+  justify-self: end;
+  font-size: 11px;
+  color: var(--accent-blue);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.contest-row-rules:hover { text-decoration: underline; }
+.contest-event-chip {
+  flex: none;
+  background: none;
+  border: 1px solid var(--accent-blue);
+  color: var(--accent-blue);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 .contests-empty {
   padding: 30px;
@@ -9754,81 +9805,33 @@ main.banner-logger-active #event-progress-overlay {
   color: var(--text-tertiary);
   font-size: 13px;
 }
+/* Narrow windows drop notes, then bands, then modes; the drawer has them all. */
+@media (max-width: 1500px) {
+  #contests-view { --contest-cols: 104px minmax(220px, 3fr) 150px 56px minmax(90px, 1.2fr) minmax(110px, 1.4fr) 64px; }
+  .contest-col-notes { display: none; }
+}
+@media (max-width: 1050px) {
+  #contests-view { --contest-cols: 104px minmax(200px, 3fr) 150px 56px minmax(90px, 1.2fr) 64px; }
+  .contest-col-bands { display: none; }
+}
+@media (max-width: 800px) {
+  #contests-view { --contest-cols: 96px minmax(160px, 1fr) 140px 48px 60px; }
+  .contest-col-modes { display: none; }
+}
 
-/* (kept for legacy — unused after 2026-06-08 redesign) */
-#contests-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 12px;
-}
-.contest-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.contest-card-header {
-  padding: 8px 12px;
-  background: var(--bg-secondary);
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--border-secondary);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.contest-card-count {
-  font-size: 10px;
-  font-weight: normal;
-  color: var(--text-tertiary);
-  background: var(--bg-primary);
-  padding: 1px 6px;
-  border-radius: 8px;
-}
-.contest-card-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.contest-entry {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-secondary);
-  cursor: pointer;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 10px;
-  row-gap: 2px;
-  align-items: center;
-}
-.contest-entry:last-child { border-bottom: none; }
-.contest-entry:hover { background: var(--bg-hover); }
-.contest-entry-name {
-  grid-column: 2;
-  grid-row: 1;
-  font-size: 13px;
-  color: var(--text-primary);
-  font-weight: 500;
-}
-.contest-entry-meta {
-  grid-column: 2;
-  grid-row: 2;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
 .contest-pill {
-  grid-column: 1;
-  grid-row: 1 / span 2;
   display: inline-block;
-  padding: 3px 8px;
+  justify-self: start;
+  padding: 2px 8px;
   border-radius: 10px;
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
   min-width: 64px;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-align: center;
 }
 .contest-pill-live {

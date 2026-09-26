@@ -11879,6 +11879,78 @@ function _contestsSaveAndRerender() {
   _contestsRender();
 }
 
+// Mode filter (Casey 2026-09-26: "non-CW ops won't want to see CW
+// contests"). A contest is shown when ANY of its modes belongs to a ticked
+// family — a CW+SSB QSO party is still a phone contest for a phone-only
+// operator — and a contest with no stated mode ("any", or none) always shows.
+const CONTESTS_MODE_FAMILIES = [
+  { key: 'cw',      label: 'CW' },
+  { key: 'phone',   label: 'Phone (SSB, FM, AM)' },
+  { key: 'digital', label: 'Digital (RTTY, FT8, FT4, PSK)' },
+];
+const CONTESTS_MODE_LS_KEY = 'pota-cat-contests-modes-v1';
+
+function _contestsModeFamily(mode) {
+  const m = String(mode || '').toUpperCase();
+  if (m === 'CW') return 'cw';
+  if (m === 'SSB' || m === 'FM' || m === 'AM' || m === 'PHONE' || m === 'USB' || m === 'LSB') return 'phone';
+  if (!m || m === 'ANY' || m === 'MIXED' || m === 'ALL') return null;
+  return 'digital';
+}
+
+function _contestsModeFilter() {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(CONTESTS_MODE_LS_KEY) || '{}') || {}; } catch {}
+  const out = {};
+  for (const { key } of CONTESTS_MODE_FAMILIES) out[key] = stored[key] !== false;
+  return out;
+}
+
+function _contestsModeVisible(c, modeFilter) {
+  const fams = (c.modes || []).map(_contestsModeFamily);
+  if (fams.length === 0 || fams.includes(null)) return true;
+  return fams.some((f) => modeFilter[f]);
+}
+
+function _contestsUpdateModeBtnLabel() {
+  const el = document.querySelector('#contests-mode-filter .multi-dropdown-text');
+  if (!el) return;
+  const f = _contestsModeFilter();
+  const on = CONTESTS_MODE_FAMILIES.filter((m) => f[m.key]);
+  el.textContent = on.length === CONTESTS_MODE_FAMILIES.length ? 'All'
+    : on.length === 0 ? 'None' : on.map((m) => m.label.split(' ')[0]).join(', ');
+}
+
+function _contestsPopulateModeMenu() {
+  const menu = document.getElementById('contests-mode-menu');
+  const container = document.getElementById('contests-mode-filter');
+  if (!menu || !container || menu.dataset.populated === '1') return;
+  const f = _contestsModeFilter();
+  menu.innerHTML = CONTESTS_MODE_FAMILIES.map(({ key, label }) =>
+    `<label class="multi-dropdown-item"><input type="checkbox" value="${key}"${f[key] ? ' checked' : ''}> ${_contestsEscape(label)}</label>`
+  ).join('');
+  menu.dataset.populated = '1';
+  const btn = container.querySelector('.multi-dropdown-btn');
+  if (btn) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.multi-dropdown.open').forEach((d) => { if (d !== container) d.classList.remove('open'); });
+      container.classList.toggle('open');
+    });
+  }
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  menu.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const map = {};
+      menu.querySelectorAll('input[type="checkbox"]').forEach((x) => { map[x.value] = x.checked; });
+      try { localStorage.setItem(CONTESTS_MODE_LS_KEY, JSON.stringify(map)); } catch {}
+      _contestsUpdateModeBtnLabel();
+      _contestsRender();
+    });
+  });
+  _contestsUpdateModeBtnLabel();
+}
+
 async function renderContestsView() {
   const host = document.getElementById('contests-list');
   if (!host) return;
@@ -11892,6 +11964,7 @@ async function renderContestsView() {
     }
   }
   _contestsPopulateSourceMenu();
+  _contestsPopulateModeMenu();
   _contestsRender();
   // Live tick: refresh status labels every 60s so countdowns stay current.
   if (contestsRefreshTimer) clearInterval(contestsRefreshTimer);
@@ -11966,6 +12039,7 @@ function _contestsRender() {
   const now = new Date();
   const showPast = document.getElementById('contests-show-past').checked;
   const filter = _contestsCurrentFilter();
+  const modeFilter = _contestsModeFilter();
   const catLabel = new Map(CONTESTS_CATEGORY_ORDER.map(({ key, label }) => [key, label]));
 
   // Flatten + tag with status & temporal bucket.
@@ -11973,6 +12047,7 @@ function _contestsRender() {
   for (const c of contestsCache.contests) {
     const cat = c.category || 'other';
     if (filter[cat] === false) continue;
+    if (!_contestsModeVisible(c, modeFilter)) continue;
     const status = _contestsStatus(c, now);
     if (!showPast && (status.kind === 'unscheduled' || status.kind === 'ended')) continue;
     const entry = { ...c, _status: status, _catLabel: catLabel.get(cat) || cat };
@@ -11998,30 +12073,42 @@ function _contestsRender() {
     return;
   }
 
-  // Group into bucket sections; render each header + its rows.
-  const byBucket = new Map();
+  // Group into sections. The near-term buckets stay as they are; "Later" is
+  // split by month, because one 80-row "Later" block is where Route 66 and
+  // 13 Colonies went to be missed (Casey 2026-09-26).
+  const sections = [];
+  const byKey = new Map();
   for (const r of rows) {
-    if (!byBucket.has(r._bucket.key)) byBucket.set(r._bucket.key, []);
-    byBucket.get(r._bucket.key).push(r);
+    let key = r._bucket.key, label = r._bucket.label, accent = !!r._bucket.accent;
+    if (key === 'later' && r._status.start) {
+      const d = r._status.start;
+      key = 'later-' + d.getFullYear() + '-' + d.getMonth();
+      label = d.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    }
+    if (!byKey.has(key)) { const sec = { key, label, accent, rows: [] }; byKey.set(key, sec); sections.push(sec); }
+    byKey.get(key).rows.push(r);
   }
-  const html = [];
-  for (const name of BUCKET_NAMES) {
-    const b = BUCKETS[name];
-    const arr = byBucket.get(b.key);
-    if (!arr || arr.length === 0) continue;
+  const html = [`
+    <div class="contest-cols" aria-hidden="true">
+      <span>Status</span><span>Contest</span><span>Starts (UTC)</span><span>Length</span><span class="contest-col-modes">Modes</span><span class="contest-col-bands">Bands</span><span class="contest-col-notes">Notes</span><span></span>
+    </div>`];
+  for (const sec of sections) {
     html.push(`
-      <div class="contest-bucket${b.accent ? ' contest-bucket-live' : ''}">
+      <div class="contest-bucket${sec.accent ? ' contest-bucket-live' : ''}">
         <div class="contest-bucket-header">
-          <span class="contest-bucket-label">${b.label}</span>
-          <span class="contest-bucket-count">${arr.length}</span>
+          <span class="contest-bucket-label">${_contestsEscape(sec.label)}</span>
+          <span class="contest-bucket-count">${sec.rows.length}</span>
         </div>
-        <div class="contest-bucket-body">
-          ${arr.map((c) => _contestsRowHtml(c, now)).join('')}
-        </div>
+        ${sec.rows.map((c) => _contestsRowHtml(c, now)).join('')}
       </div>
     `);
   }
   host.innerHTML = html.join('');
+  const sub = document.getElementById('contests-subtitle');
+  if (sub) {
+    const live = rows.filter((r) => r._bucket.key === 'live').length;
+    sub.textContent = `${rows.length} contests and special events${live ? ` · ${live} on the air now` : ''} · click a row for details`;
+  }
 
   // Wire row click → drawer.
   host.querySelectorAll('.contest-row').forEach((el) => {
@@ -12029,6 +12116,14 @@ function _contestsRender() {
       const id = el.getAttribute('data-id');
       const c = contestsCache.contests.find((x) => x.id === id);
       if (c) _contestsOpenDrawer(c);
+    });
+  });
+  host.querySelectorAll('.contest-row-rules').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = el.getAttribute('data-url');
+      if (url) window.api.openExternal(url);
     });
   });
   // Event chip → the live event board (not the static drawer).
@@ -12041,16 +12136,42 @@ function _contestsRender() {
   });
 }
 
+// One compact line per contest, columns aligned with .contest-cols above
+// (grid template shared in styles.css): status, name + sponsor, start in
+// UTC, length, modes, bands, rules link.
+function _contestsDurationLabel(h) {
+  if (!h) return '';
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h >= 168 && h % 168 === 0) return `${h / 168}w`;
+  if (h >= 48) return `${Math.round(h / 24)}d`;
+  return `${h}h`;
+}
+
+// "160–10m" for a contiguous HF run, the plain list otherwise.
+function _contestsBandsLabel(bands) {
+  const list = (bands || []).filter(Boolean);
+  if (list.length <= 3) return list.join(', ');
+  const m = list.map((b) => String(b).match(/^(\d+)m$/));
+  if (m.every(Boolean)) return `${m[0][1]}–${m[m.length - 1][1]}m (${list.length})`;
+  return list.join(', ');
+}
+
 function _contestsRowHtml(c, now) {
   const s = c._status;
   const pillClass = `contest-pill contest-pill-${s.kind}`;
   let pillText = s.label;
-  if (s.kind === 'live') pillText = `LIVE — ${_contestsRunningEndLabel(s.end, now)}`;
+  if (s.kind === 'live') pillText = _contestsRunningEndLabel(s.end, now);
+  if (s.kind === 'unscheduled') pillText = 'recurring';
   const modes = (c.modes || []).join(', ');
-  const sponsor = c.sponsor || '';
-  // Start time UTC alongside the relative label, so the user can plan
-  // their evening without doing the math.
-  const startStr = s.start ? _contestsFmtUtc(s.start) : '';
+  const bands = _contestsBandsLabel(c.bands);
+  let when = '';
+  if (s.start) {
+    const d = s.start;
+    const pad = (n) => String(n).padStart(2, '0');
+    when = `${d.toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })} ${d.getUTCDate()} ${d.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' })} ${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}z`;
+  } else {
+    when = c.whenRule || '';
+  }
   // Unified-registry Phase B: a contest superseded by a live tracked event
   // (13 Colonies exists in both catalogs) renders as ONE connected row —
   // progress chip that jumps to the event board instead of a static entry.
@@ -12058,20 +12179,25 @@ function _contestsRowHtml(c, now) {
   // An ended event still shows its progress; it no longer invites tracking.
   if (c.supersededBy && (c.eventTracked || s.kind !== 'ended')) {
     const label = c.eventTracked
-      ? `◉ Tracked — ${c.eventProgress}${c.eventTotal ? '/' + c.eventTotal : ''} worked`
-      : '◎ Event available';
+      ? `Tracked — ${c.eventProgress}${c.eventTotal ? '/' + c.eventTotal : ''} worked`
+      : 'Track event';
     eventChip = `<button type="button" class="contest-event-chip" data-event-id="${_contestsEscape(c.supersededBy)}"
-      title="${c.eventTracked ? 'Open the live event board' : 'This runs as a tracked event — open its board to opt in'}"
-      style="margin-left:auto;background:none;border:1px solid var(--accent-blue,#4fc3f7);color:var(--accent-blue,#4fc3f7);font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;cursor:pointer;white-space:nowrap;">${_contestsEscape(label)}</button>`;
+      title="${c.eventTracked ? 'Open the live event board' : 'This runs as a tracked event — open its board to opt in'}">${_contestsEscape(label)}</button>`;
   }
+  const rules = c.rulesUrl || c.website || '';
   return `
-    <div class="contest-row" data-id="${c.id}">
+    <div class="contest-row" data-id="${_contestsEscape(c.id)}" title="${_contestsEscape(c.whenRule || '')}">
       <span class="${pillClass}">${_contestsEscape(pillText)}</span>
-      <div class="contest-row-main">
-        <div class="contest-row-name">${_contestsEscape(c.name)}</div>
-        <div class="contest-row-meta">${_contestsEscape(c._catLabel)} · ${_contestsEscape(modes)}${sponsor ? ' · ' + _contestsEscape(sponsor) : ''}${startStr ? ' · ' + startStr : ''}</div>
+      <div class="contest-row-name">
+        <span class="contest-row-title">${_contestsEscape(c.name)}</span>${eventChip}
+        <span class="contest-row-sponsor">${_contestsEscape(c.sponsor || c._catLabel)}</span>
       </div>
-      ${eventChip}
+      <span class="contest-row-when">${_contestsEscape(when)}</span>
+      <span class="contest-row-len">${_contestsDurationLabel(c.durationHours)}</span>
+      <span class="contest-row-modes contest-col-modes" title="${_contestsEscape(modes)}">${_contestsEscape(modes)}</span>
+      <span class="contest-row-bands contest-col-bands" title="${_contestsEscape((c.bands || []).join(', '))}">${_contestsEscape(bands)}</span>
+      <span class="contest-row-notes contest-col-notes" title="${_contestsEscape(c.notes || '')}">${_contestsEscape(c.notes || '')}</span>
+      ${rules ? `<a href="#" class="contest-row-rules" data-url="${_contestsEscape(rules)}">Rules &#x2197;</a>` : '<span></span>'}
     </div>
   `;
 }

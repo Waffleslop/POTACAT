@@ -1062,7 +1062,10 @@
     </div>
     <div id="contests-view" class="hidden">
       <div class="contests-header">
-        <h2>What's Next</h2>
+        <div class="contests-title-row">
+          <h2>Contests</h2>
+          <span class="contests-subtitle" id="contests-subtitle"></span>
+        </div>
         <div class="contests-filter-row">
           <!-- Sources dropdown — checked categories appear in the flat list.
                Defaults all-on, choice persisted in localStorage so the
@@ -1073,8 +1076,13 @@
               <!-- Populated at render time from CONTESTS_CATEGORY_ORDER -->
             </div>
           </div>
-          <label class="contests-toggle"><input type="checkbox" id="contests-show-past" /> Show past (next-year occurrence)</label>
-          <span class="contests-hint">Tap any row for sponsor link &amp; rules</span>
+          <!-- Modes: a contest shows when ANY of its modes is ticked, so a
+               CW+SSB QSO party stays for a phone-only operator; "any" always shows. -->
+          <div class="multi-dropdown" id="contests-mode-filter">
+            <button class="multi-dropdown-btn" type="button">Modes: <span class="multi-dropdown-text">All</span></button>
+            <div class="multi-dropdown-menu" id="contests-mode-menu"></div>
+          </div>
+          <label class="contests-toggle"><input type="checkbox" id="contests-show-past" /> Show ended and unscheduled</label>
         </div>
       </div>
       <div id="contests-list"></div>
