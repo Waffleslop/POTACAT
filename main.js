@@ -720,10 +720,11 @@ function loadSettings() {
     // Truly fresh install: return defaults, no profile yet. RBN + PSKReporter
     // Propagation default ON so the "where am I heard" view has data out of the
     // box (both activate once myCallsign is set). K3SBP 2026-06-10.
-    // New installs get the charcoal dark theme and WSPR as the idle receive
-    // mode (Casey 2026-09-25). Written here, not as a fallback, so installs
-    // that never chose keep what they have been looking at: navy, SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', darkVariant: 'charcoal', idleRxMode: 'wspr' };
+    // New installs start in LIGHT mode; switching to dark lands on charcoal,
+    // and navy stays one click away. Idle receive mode is WSPR (Casey
+    // 2026-09-25). Written here, not as read-side fallbacks, so installs that
+    // never chose keep what they have been looking at: dark navy, SSTV.
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', lightMode: true, darkVariant: 'charcoal', idleRxMode: 'wspr' };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
