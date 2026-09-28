@@ -211,6 +211,22 @@ test('the codec uses the calibration on a real SM reply, and says so in the log'
   assert.ok(logs.some((l) => /SM=14 of 20 -> 100 W \(calibrated\)/.test(l)), logs.join(' | '));
 });
 
+// "Can we calibrate the other meters (S-meter, SWR and ALC) in this way?"
+test('SWR and ALC log their raw reading next to the displayed value, once per change', () => {
+  const { codec } = ts480();
+  const logs = [], swr = [], alc = [];
+  codec.on('log', (l) => logs.push(l));
+  codec.on('swr', (v) => swr.push(v));
+  codec.on('alc', (v) => alc.push(v));
+  codec.onData('RM10015;');
+  codec.onData('RM10015;');
+  codec.onData('RM30010;');
+  assert.deepStrictEqual(swr, [60, 60], 'SWR still reaches the meters (15 of 30 = 2.0:1)');
+  assert.deepStrictEqual(alc, [85]);
+  assert.strictEqual(logs.filter((l) => /SWR meter raw RM1=15 of 30 -> 2\.0:1/.test(l)).length, 1, logs.join(' | '));
+  assert.ok(logs.some((l) => /ALC meter raw RM3=10 of 30 -> 33% of the bar/.test(l)), logs.join(' | '));
+});
+
 (async () => {
   for (const [name, fn] of cases) {
     try { await fn(); passed++; console.log('  ✓ ' + name); }
