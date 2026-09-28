@@ -220,7 +220,24 @@ window.api.onRefocusQsy(() => {
     const opt = freqSelect.options[freqSelect.selectedIndex];
     tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
   } catch (e) { console.error('[SSTV] Refocus QSY error:', e); }
+  refreshRxDevice();
 });
+
+// The radio's audio device can change while this window is open (a rig
+// switch, or a new input picked in My Rigs). Re-read it on focus and reopen
+// the capture when the device SSTV should use is no longer the one it has.
+async function refreshRxDevice() {
+  try {
+    const fresh = await window.api.getSettings();
+    if ((fresh.remoteAudioInput || '') === (settings.remoteAudioInput || '')
+        && (fresh.sstvAudioInput || '') === (settings.sstvAudioInput || '')
+        && (fresh.audioSource || '') === (settings.audioSource || '')) return;
+    settings = fresh;
+    await populateAudioDevices();
+    await startRxAudio();
+  } catch (e) { console.error('[SSTV] Audio device refresh error:', e); }
+}
+window.addEventListener('focus', () => { refreshRxDevice(); });
 
 // --- Radio frequency sync ---
 window.api.onCatFrequency((hz) => {
@@ -1228,7 +1245,18 @@ window.api.onSstvTxAudio(async (data) => {
   const gainLevel = (txGainSlider.value / 100) || 0.5;
 
   try {
-    const outputDeviceId = (await window.api.getSettings()).sstvAudioOutput || '';
+    // The radio's output (My Rigs > Audio) unless this window chose one; a
+    // configured device that cannot be opened REFUSES the transmission (the
+    // catch below unkeys) instead of playing the picture out of the PC
+    // speakers with the radio keyed (lib/sstv-audio-device.js).
+    const txSettings = await window.api.getSettings();
+    const outputs = (_sstvAudioDevices.outputs || []);
+    const out = window.SstvAudioDevice.resolveSstvAudio({
+      sstvId: txSettings.sstvAudioOutput || '', rigId: txSettings.remoteAudioOutput || '',
+      devices: outputs, kind: 'output',
+    });
+    if (!out.ok) throw new Error(out.message);
+    const outputDeviceId = out.deviceId;
     if (!txAudioCtx || txAudioCtx.state === 'closed') {
       txAudioCtx = new AudioContext({ sampleRate: 48000 });
     }
@@ -1236,7 +1264,7 @@ window.api.onSstvTxAudio(async (data) => {
 
     if (outputDeviceId && txAudioCtx.setSinkId) {
       try { await txAudioCtx.setSinkId(outputDeviceId); } catch (e) {
-        console.warn('[SSTV] Could not set TX output device:', e.message);
+        throw new Error(`could not open the TX audio output (${out.label || 'configured device'}): ${e.message}`);
       }
     }
 
@@ -1526,35 +1554,62 @@ openFolderBtn.addEventListener('click', () => window.api.sstvOpenGalleryFolder()
 
 // ===== AUDIO CAPTURE (RX) ==================================================
 
+// The last enumeration, for resolving which device SSTV uses.
+let _sstvAudioDevices = { inputs: [], outputs: [] };
+
+function _rigDeviceOptionLabel(list, rigId) {
+  if (!rigId) return 'From My Rigs (not set)';
+  const d = list.find(x => x.deviceId === rigId);
+  return 'From My Rigs (' + (d ? (d.label || rigId.slice(0, 20)) : 'not connected') + ')';
+}
+
 async function populateAudioDevices() {
   try {
     const devices = await window.api.enumerateAudioDevices();
     const inputs = devices.filter(d => d.kind === 'audioinput');
     const outputs = devices.filter(d => d.kind === 'audiooutput');
+    _sstvAudioDevices = { inputs, outputs };
 
-    audioInputSelect.innerHTML = '<option value="">Default</option>';
+    // "" follows the radio's device (My Rigs > Audio), like FT8 and ECHOCAT.
+    audioInputSelect.innerHTML = '';
+    { const o = document.createElement('option'); o.value = ''; o.textContent = _rigDeviceOptionLabel(inputs, settings.remoteAudioInput); audioInputSelect.appendChild(o); }
     for (const d of inputs) {
       const opt = document.createElement('option');
       opt.value = d.deviceId;
       opt.textContent = d.label || d.deviceId.slice(0, 20);
       audioInputSelect.appendChild(opt);
     }
-    if (settings.sstvAudioInput) audioInputSelect.value = settings.sstvAudioInput;
+    if (settings.sstvAudioInput) {
+      // A saved device that is no longer present stays selected (as a
+      // placeholder) so startRxAudio can say so, instead of the select
+      // silently falling back to the first option.
+      if (!inputs.some(d => d.deviceId === settings.sstvAudioInput)) {
+        const o = document.createElement('option'); o.value = settings.sstvAudioInput; o.textContent = 'Saved device (not connected)'; audioInputSelect.appendChild(o);
+      }
+      audioInputSelect.value = settings.sstvAudioInput;
+    }
 
-    audioOutputSelect.innerHTML = '<option value="">Default</option>';
+    audioOutputSelect.innerHTML = '';
+    { const o = document.createElement('option'); o.value = ''; o.textContent = _rigDeviceOptionLabel(outputs, settings.remoteAudioOutput); audioOutputSelect.appendChild(o); }
     for (const d of outputs) {
       const opt = document.createElement('option');
       opt.value = d.deviceId;
       opt.textContent = d.label || d.deviceId.slice(0, 20);
       audioOutputSelect.appendChild(opt);
     }
-    if (settings.sstvAudioOutput) audioOutputSelect.value = settings.sstvAudioOutput;
+    if (settings.sstvAudioOutput) {
+      if (!outputs.some(d => d.deviceId === settings.sstvAudioOutput)) {
+        const o = document.createElement('option'); o.value = settings.sstvAudioOutput; o.textContent = 'Saved device (not connected)'; audioOutputSelect.appendChild(o);
+      }
+      audioOutputSelect.value = settings.sstvAudioOutput;
+    }
   } catch (e) {
     console.warn('[SSTV] Audio device enumeration failed:', e);
   }
 }
 
 audioInputSelect.addEventListener('change', async () => {
+  settings.sstvAudioInput = audioInputSelect.value;
   await window.api.saveSettings({ sstvAudioInput: audioInputSelect.value });
   await startRxAudio();
 });
@@ -1569,8 +1624,22 @@ async function startRxAudio() {
   if (sstvStream) { sstvStream.getTracks().forEach(t => t.stop()); sstvStream = null; }
   if (sstvAudioCtx) { try { sstvAudioCtx.close(); } catch {} sstvAudioCtx = null; }
 
+  // Direct radio streams (Flex SmartSDR, Icom network) feed the decoder from
+  // main; this capture is only their fallback, so the device notices below
+  // would be noise for those stations.
+  const directStream = settings && ['smartsdr', 'icom-network'].includes(settings.audioSource);
+  const pick = window.SstvAudioDevice.resolveSstvAudio({
+    sstvId: audioInputSelect.value || '', rigId: settings.remoteAudioInput || '',
+    devices: _sstvAudioDevices.inputs, kind: 'input',
+  });
+  if (!pick.ok) {
+    rxInfo.textContent = 'Radio audio not found';
+    statusBar.textContent = pick.message;
+    console.warn('[SSTV] RX audio refused: ' + pick.message);
+    return;
+  }
   try {
-    const deviceId = audioInputSelect.value || undefined;
+    const deviceId = pick.deviceId || undefined;
     const constraints = { audio: { sampleRate: 48000, channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
     if (deviceId) constraints.audio.deviceId = { exact: deviceId };
 
@@ -1611,7 +1680,12 @@ async function startRxAudio() {
     window.api.sstvSetSampleRate(actualRate);
 
     rxInfo.textContent = 'Listening...';
-    statusBar.textContent = 'RX audio started (' + actualRate + ' Hz)';
+    // Say WHICH device: "RX audio started" alone never showed that SSTV was
+    // on the laptop microphone.
+    const track = sstvStream.getAudioTracks()[0];
+    const heard = (track && track.label) || pick.label || 'default device';
+    statusBar.textContent = 'Listening on ' + heard + ' (' + actualRate + ' Hz)'
+      + (pick.notice && !directStream ? '. ' + pick.notice : '');
   } catch (err) {
     console.error('[SSTV] RX audio start error:', err);
     rxInfo.textContent = 'No audio input';
