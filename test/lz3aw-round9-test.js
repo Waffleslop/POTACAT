@@ -218,13 +218,57 @@ test('SWR and ALC log their raw reading next to the displayed value, once per ch
   codec.on('log', (l) => logs.push(l));
   codec.on('swr', (v) => swr.push(v));
   codec.on('alc', (v) => alc.push(v));
-  codec.onData('RM10015;');
-  codec.onData('RM10015;');
+  codec.onData('RM10005;');
+  codec.onData('RM10005;');
   codec.onData('RM30010;');
-  assert.deepStrictEqual(swr, [60, 60], 'SWR still reaches the meters (15 of 30 = 2.0:1)');
+  assert.deepStrictEqual(swr, [60, 60], 'SWR still reaches the meters (raw 5 = 2.0:1 on his radio)');
   assert.deepStrictEqual(alc, [85]);
-  assert.strictEqual(logs.filter((l) => /SWR meter raw RM1=15 of 30 -> 2\.0:1/.test(l)).length, 1, logs.join(' | '));
+  assert.strictEqual(logs.filter((l) => /SWR meter raw RM1=5 of 30 -> 2\.0:1 \(calibrated\)/.test(l)).length, 1, logs.join(' | '));
   assert.ok(logs.some((l) => /ALC meter raw RM3=10 of 30 -> 33% of the bar/.test(l)), logs.join(' | '));
+});
+
+// LZ3AW 2026-09-28, against the radio's own ARCP-480 readout.
+test("TS-480 S-meter reads his radio's S-units at every measured point (S9 is raw 11, not 15)", () => {
+  const { codec } = ts480();
+  const seen = [];
+  codec.on('smeter', (v) => seen.push(v));
+  const label = (v) => (v <= 120 ? `S${Math.round((v * 9) / 120)}` : `S9+${Math.round(((v - 120) * 60) / 135)}`);
+  const pairs = [[0, 'S0'], [3, 'S1'], [5, 'S3'], [7, 'S5'], [9, 'S7'], [11, 'S9'], [14, 'S9+20'], [17, 'S9+40'], [20, 'S9+60']];
+  for (const [raw, want] of pairs) {
+    codec.onData(`SM0${String(raw).padStart(4, '0')};`);
+    assert.strictEqual(label(seen[seen.length - 1]), want, `SM ${raw} should read ${want}`);
+  }
+  codec.onData('SM00030;');
+  assert.strictEqual(seen[seen.length - 1], 255, 'beyond S9+60 stays at full scale');
+});
+
+test('TS-480 SWR reads his measured ratios (the bar is not linear)', () => {
+  const { codec } = ts480();
+  const seen = [];
+  codec.on('swr', (v) => seen.push(v));
+  for (const [raw, ratio] of [[1, 1.0], [3, 1.5], [5, 2.0]]) {
+    codec.onData(`RM1${String(raw).padStart(4, '0')};`);
+    assert.strictEqual(1 + seen[seen.length - 1] / 60, ratio, `RM1 ${raw} should read ${ratio}:1`);
+  }
+  codec.onData('RM10006;');
+  const at6 = 1 + seen[seen.length - 1] / 60;
+  codec.onData('RM10007;');
+  const at7 = 1 + seen[seen.length - 1] / 60;
+  assert.ok(at6 > 2.5 && at6 < 3.0 && at7 > 3.0 && at7 < 3.5, `6 and 7 straddle his ~3:1 (${at6}, ${at7})`);
+  codec.onData('RM10030;');
+  assert.strictEqual(seen[seen.length - 1], 255, 'capped at the meter full scale');
+});
+
+test('the brand default is untouched for Kenwood models without a measured table', () => {
+  const { KenwoodCodec: KC } = require('../lib/codecs/kenwood-codec');
+  const c = new KC({ brand: 'Kenwood', protocol: 'kenwood', caps: {}, cw: {} }, () => {});
+  let sm = null, swr = null;
+  c.on('smeter', (v) => { sm = v; });
+  c.on('swr', (v) => { swr = v; });
+  c.onData('SM0015;');
+  c.onData('RM10015;');
+  assert.strictEqual(sm, 120, 'S9 = 15 default');
+  assert.strictEqual(swr, 60, 'linear default');
 });
 
 (async () => {
