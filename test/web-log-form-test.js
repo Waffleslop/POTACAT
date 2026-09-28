@@ -176,5 +176,19 @@ test('status-bar badges are not allowed to shrink into truncation', () => {
     'badges can still be squeezed and clipped');
   assert.ok(/@media \(max-width: 480px\)/.test(REMOTE_CSS), 'no narrow-phone rules');
 });
+// KW4FM: in the ECHOCAT app a signal report field has both digits selected on
+// focus, so typing replaces "59"; on the web they were not.
+test('every web signal-report field selects its whole value on focus', () => {
+  const at = REMOTE.indexOf('function isRstField(');
+  assert.ok(at > 0, 'no RST focus helper');
+  const block = REMOTE.slice(at, at + 900);
+  assert.ok(block.includes('rst-(sent|rcvd)$/'), 'id match covers lt-/ql-/log- rst fields');
+  assert.ok(block.includes("'RST_SENT'") && block.includes("'RST_RCVD'"), 'logbook editor data-field inputs covered');
+  assert.ok(block.includes("document.addEventListener('focusin'"), 'one delegated listener (fields rendered later are covered)');
+  assert.ok(block.includes('setSelectionRange(0, el.value.length)'), 'deferred selection for iOS Safari');
+  for (const id of ['lt-rst-sent', 'lt-rst-rcvd', 'ql-rst-sent', 'ql-rst-rcvd', 'log-rst-sent', 'log-rst-rcvd']) {
+    assert.ok(REMOTE_HTML.includes(`id="${id}"`), `${id} still exists`);
+  }
+});
 console.log(`\nWeb log form / {call}: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

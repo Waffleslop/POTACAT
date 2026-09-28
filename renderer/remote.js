@@ -634,6 +634,26 @@
   const ltRespotCommentWrap = document.getElementById('lt-respot-comment-wrap');
   const ltRespotComment = document.getElementById('lt-respot-comment');
 
+  // A signal report field selects its whole value on focus, as in the
+  // ECHOCAT app, so typing "57" replaces the "59" instead of appending to it
+  // (KW4FM). One delegated listener covers every form: the Log tab, the quick
+  // log, the log sheet and the logbook editor. The deferred setSelectionRange
+  // is what iOS Safari needs; select() alone is undone by its tap handling.
+  function isRstField(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
+    if (/(^|-)rst-(sent|rcvd)$/.test(el.id || '')) return true;
+    const f = el.getAttribute('data-field');
+    return f === 'RST_SENT' || f === 'RST_RCVD';
+  }
+  document.addEventListener('focusin', (e) => {
+    const el = e.target;
+    if (!isRstField(el)) return;
+    setTimeout(() => {
+      if (document.activeElement !== el) return;
+      try { el.setSelectionRange(0, el.value.length); } catch { el.select(); }
+    }, 0);
+  });
+
   // Persistent custom respot text — survives between contacts (KE4WLE bug).
   // Two slots: one for OTA respots (POTA/WWFF/LLOTA share the same template)
   // and one for DX-cluster spots. Saved as raw text WITH placeholders intact
