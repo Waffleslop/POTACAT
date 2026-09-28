@@ -59,7 +59,7 @@ contextBridge.exposeInMainWorld('api', {
   // Radio frequency updates
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   // Re-QSY when the SSTV popout is reopened/refocused (main re-requests the tune)
-  onRefocusQsy: (cb) => ipcRenderer.on('sstv-refocus-qsy', () => cb()),
+  onRefocusQsy: (cb) => ipcRenderer.on('sstv-refocus-qsy', (_e, target) => cb(target || null)),
   // Theme
   onPopoutTheme: (cb) => ipcRenderer.on('sstv-popout-theme', (_e, theme) => cb(theme)),
   // Window controls

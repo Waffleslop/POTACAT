@@ -204,10 +204,15 @@ const MODE_RES = {
   // Set theme
   try { applyTheme(settings.lightMode ? 'light' : 'dark'); } catch {}
 
-  // Auto-QSY to the selected SSTV frequency on open
+  // Auto-QSY to the selected SSTV frequency on open, or to the one main
+  // asked for (idle SSTV picks the day/night band).
   try {
-    const initOpt = freqSelect.options[freqSelect.selectedIndex];
-    tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
+    const q = new URLSearchParams(location.search);
+    if (q.get('freqKhz')) selectAndTune(q.get('freqKhz'), q.get('mode'));
+    else {
+      const initOpt = freqSelect.options[freqSelect.selectedIndex];
+      tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
+    }
   } catch (e) { console.error('[SSTV] Auto-QSY error:', e); }
 
 })();
@@ -215,10 +220,13 @@ const MODE_RES = {
 // --- Refocus from main (user re-opened SSTV from the view menu) ---
 // Re-tune to the currently selected SSTV frequency so the radio QSYs back
 // from whatever spot the user last clicked.
-window.api.onRefocusQsy(() => {
+window.api.onRefocusQsy((target) => {
   try {
-    const opt = freqSelect.options[freqSelect.selectedIndex];
-    tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
+    if (target && target.freqKhz) selectAndTune(target.freqKhz, target.mode);
+    else {
+      const opt = freqSelect.options[freqSelect.selectedIndex];
+      tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
+    }
   } catch (e) { console.error('[SSTV] Refocus QSY error:', e); }
   refreshRxDevice();
 });
@@ -286,6 +294,15 @@ const tuneBtn = document.getElementById('tune-btn');
 
 function getFreqMode(freqKhz) {
   return parseInt(freqKhz) < 10000 ? 'LSB' : 'USB';
+}
+
+// Show a frequency main chose in the dropdown (or the custom box) and tune it.
+function selectAndTune(freqKhz, mode) {
+  const v = String(Math.round(Number(freqKhz)));
+  const opt = Array.from(freqSelect.options).find(o => o.value === v);
+  if (opt) { freqSelect.value = v; freqInput.value = ''; }
+  else freqInput.value = v;
+  tuneToFreq(v, mode || (opt && opt.dataset.mode));
 }
 
 function tuneToFreq(freq, mode) {
@@ -1369,6 +1386,10 @@ window.api.onSstvTxImage((data) => {
 window.api.onSstvStatus((data) => {
   if (data.state === 'running' && !multiActive) {
     rxInfo.textContent = 'Listening...';
+  } else if (data.state === 'stopped' && !multiActive) {
+    // Say so: "Listening..." over a stopped decoder was the report.
+    rxInfo.textContent = 'Decoder stopped';
+    statusBar.textContent = 'The SSTV decoder is stopped. Close and reopen this window to restart it.';
   }
 });
 

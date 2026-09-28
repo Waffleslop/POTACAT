@@ -18527,7 +18527,9 @@ function connectRemote() {
 
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
   remoteServer.on('sstv-photo', ({ image, mode }) => {
-    if (!sstvEngine && startSstv) startSstv();
+    // startSstv also restarts a STOPPED engine (the old `!sstvEngine` test
+    // never did, so a photo after any stop encoded into nothing).
+    if (startSstv) startSstv();
     if (!sstvEngine) {
       console.error('[SSTV] ECHOCAT photo received but SSTV not initialized');
       return;
@@ -18580,7 +18582,18 @@ function connectRemote() {
     }
   });
   remoteServer.on('sstv-stop', () => {
-    if (sstvEngine) sstvEngine.stop();
+    // The mobile app sends this when its SSTV screen closes. With the desktop
+    // SSTV window open the operator is receiving here, and stopping left that
+    // window saying "Listening..." over a dead decoder (audio accepted, then
+    // dropped). Only stop when nothing on the desktop is watching.
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      sendCatLog('[SSTV] The ECHOCAT app closed SSTV; the decoder keeps running because the SSTV window is open here');
+      return;
+    }
+    if (sstvEngine && sstvEngine.running) {
+      sstvEngine.stop();
+      sendCatLog('[SSTV] Decoder stopped by the ECHOCAT app');
+    }
   });
 
   // Phone tapped the AUTO-SSTV banner to disable the idle-trigger feature.
@@ -24325,8 +24338,15 @@ function isUserActive() { return (Date.now() - lastActivityTime) < 1800000; } //
  * markUserActive() from cancelling the session that caused the event.
  */
 function isIdleRxSelfAction(sender) {
-  return !!(autoIdleJtcatActive && sender && jtcatPopoutWin &&
-    !jtcatPopoutWin.isDestroyed() && sender === jtcatPopoutWin.webContents);
+  if (!sender) return false;
+  if (autoIdleJtcatActive && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() &&
+      sender === jtcatPopoutWin.webContents) return true;
+  // Idle SSTV: the SSTV window tunes as it opens. Counted as the operator,
+  // that tune cancelled the session it belonged to within a second, retuned
+  // the pre-idle frequency, then landed on 14.230 whatever the time of day
+  // (the same self-cancel 4461c9da fixed for the JTCAT window only).
+  return !!(autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active &&
+    sstvPopoutWin && !sstvPopoutWin.isDestroyed() && sender === sstvPopoutWin.webContents);
 }
 
 // --- Idle CAT-polling pause ---
@@ -24547,7 +24567,9 @@ function triggerAutoSstv() {
   const autoSstvBand = getSstvAutoFreq();
   autoSstvCurrentFreq = autoSstvBand.freqKhz;
   if (cat && cat.connected) cat.tune(autoSstvBand.freqKhz * 1000, autoSstvBand.mode);
-  if (openSstvPopout) openSstvPopout();
+  // Hand the window the band chosen here: it tunes to its own selection on
+  // open (14.230 by default), which put a night session back on 20 m.
+  if (openSstvPopout) openSstvPopout({ freqKhz: autoSstvBand.freqKhz, mode: autoSstvBand.mode });
   sendCatLog('[Auto-SSTV] Activated — tuned to ' + autoSstvCurrentFreq + ' kHz');
   if (remoteServer) {
     remoteServer.broadcastSstvTxStatus({ state: 'auto-rx', freqKhz: autoSstvCurrentFreq });
@@ -28890,6 +28912,15 @@ app.whenReady().then(() => {
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-debug', data);
       }
+      // A quality-gate reject ends a decode with no image. It reached only the
+      // pop-out's decode log, so a bug report could not tell "never locked"
+      // from "locked, then thrown away", and the activity feed stayed on
+      // "decoding" (_sstvDecode was never cleared).
+      if (data && /discarded/i.test(data.detail || '')) {
+        sendCatLog(`[SSTV] ${data.detail}`);
+        _sstvDecode = null;
+        pushActivityState();
+      }
     });
 
     // Per-frame error rate is high enough to flood the CAT log with the same
@@ -29087,7 +29118,7 @@ app.whenReady().then(() => {
   // v1.8.15–17 muted-slice outage). The popout mirrors this with its own
   // 3 s VITA-recency check before capturing locally.
   const _sstvRendererGateState = () => ({
-    engineRunning: !!sstvEngine,
+    engineRunning: !!(sstvEngine && sstvEngine.running),
     feedPaused: _sstvFeedPaused,
     audioSource: settings.audioSource,
     smartSdrAudioUp: !!smartSdrAudio,
@@ -29118,7 +29149,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('sstv-encode', (_e, data) => {
-    if (!sstvEngine) startSstv();
+    startSstv(); // creates, or restarts a stopped engine; no-op when running
     const imageData = new Uint8ClampedArray(data.imageData);
     sstvEngine.encode(imageData, data.width, data.height, data.mode);
   });
@@ -29209,11 +29240,14 @@ app.whenReady().then(() => {
   });
 
   // SSTV pop-out window
-  openSstvPopout = function() {
+  // opts.freqKhz/mode: a frequency the window should select and tune instead
+  // of its own dropdown choice (idle SSTV picks the day/night band).
+  openSstvPopout = function(opts) {
+    const target = opts && opts.freqKhz ? { freqKhz: opts.freqKhz, mode: opts.mode || '' } : null;
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       // Popout already open — ask it to re-QSY to the selected SSTV freq so the
       // radio moves back from whatever POTA spot the user last tuned to.
-      try { sstvPopoutWin.webContents.send('sstv-refocus-qsy'); } catch {}
+      try { sstvPopoutWin.webContents.send('sstv-refocus-qsy', target); } catch {}
       // An open pop-out means the operator expects RX: restart a decoder a
       // 'sstv-stop' left stopped (startSstv is a no-op on a running one).
       if (startSstv) startSstv();
@@ -29242,7 +29276,9 @@ app.whenReady().then(() => {
     }
     sstvPopoutWin.show();
     sstvPopoutWin.setMenuBarVisibility(false);
-    sstvPopoutWin.loadFile(path.join(__dirname, 'renderer', 'sstv-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
+    const sstvQuery = { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' };
+    if (target) { sstvQuery.freqKhz = String(target.freqKhz); sstvQuery.mode = target.mode; }
+    sstvPopoutWin.loadFile(path.join(__dirname, 'renderer', 'sstv-popout.html'), { query: sstvQuery });
     sstvPopoutWin.on('close', () => {
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         if (!sstvPopoutWin.isMaximized() && !sstvPopoutWin.isMinimized()) {
