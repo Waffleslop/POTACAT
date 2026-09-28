@@ -38,6 +38,8 @@ jobs:
         run: node test/sstv-test.js
       - name: Run SSTV PSNR-quality matrix
         run: node test/sstv-quality-test.js
+      - name: Run SSTV realistic reception (SSB filter, in-band noise, mistuning)
+        run: node test/sstv-realistic-rx-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)
