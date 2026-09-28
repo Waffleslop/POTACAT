@@ -183,11 +183,20 @@ window.api.onStartAudio(async (config) => {
       // level instead of unity-then-correct.
       if (config.txDrive != null) _txDrivePct = Number(config.txDrive);
       if (config.daxTxDirect) {
+        _txSinkRoute = false;
         audioEl.muted = true;
         try { await startDaxTxTap(event.streams[0], config.txEq, config.txGuardMs); }
         catch (e) { window.api.sendAudioStatus({ error: 'DAX TX tap init failed: ' + e.message }); }
       } else {
-        audioEl.muted = false;
+        // The phone's mic reaches the radio's USB audio input ONLY while
+        // transmitting, as on the DAX path below. Played all the time, the
+        // jitter-buffered tail of the operator's speech kept a VOX-keyed
+        // interface (SignaLink) in transmit after release, delaying the
+        // return to receive (OH7DSQ, FT-950). remote-tx-state follows the
+        // operator's PTT press, not CAT success, so a VOX-only station still
+        // gets its audio.
+        _txSinkRoute = true;
+        audioEl.muted = !kiwiTxMuted;
         // Route to specific output device (radio's USB audio input via DAX program)
         if (config.outputDeviceId && typeof audioEl.setSinkId === 'function') {
           try {
@@ -333,6 +342,9 @@ let _daxTxCtx = null;
 let _daxTxNode = null;
 let _daxTxSource = null;
 let _daxTxDelay = null;   // first-syllable PTT guard (DelayNode), null when off
+// TX audio goes out through <audio>.setSinkId (a USB CODEC / SignaLink), so
+// that element is gated to the TX state in onTxState.
+let _txSinkRoute = false;
 // --- TX EQ + Compressor ---
 // DSP chain lives in renderer/tx-eq-chain.js (shared with vfo-popout).
 // This file just owns the bridge-side wiring + live-update plumbing.
@@ -729,6 +741,8 @@ window.api.onTxState((state) => {
   const wasMuted = kiwiTxMuted;
   kiwiTxMuted = !!state;
   if (kiwiGain) kiwiGain.gain.value = kiwiTxMuted ? 0 : 1;
+  // Sink route: the phone's mic plays into the radio only while keyed.
+  if (_txSinkRoute) audioEl.muted = !kiwiTxMuted;
   // SmartSDR-direct path needs the same TX-mute so the mobile listener
   // doesn't hear their own TX echoed back through the Flex receiver.
   if (smartGain) smartGain.gain.value = kiwiTxMuted ? 0 : 1;
