@@ -16563,7 +16563,14 @@ function connectRemote() {
         // can drive it (non-win32) — the key-port block below keys for real, so
         // the paddle IS available (KM4CFT FT-891 cp210x). Only warn when there's
         // genuinely no working key-port route.
-        const _keyPortPaddlePossible = !!settings.cwKeyPort && process.platform !== 'win32';
+        // A configured key port that is still OPENING is possible too: the
+        // first paddle press of a session is what starts the lazy open, so
+        // "not open yet" used to mark the paddle unavailable for the whole
+        // session on Windows — and mid-press, which left the radio keyed
+        // (LZ3AW TS-480 + COM4 key port, 1.10.25). Only a Windows driver that
+        // rejected the pin ioctl really cannot key (that path reports itself).
+        const _keyPortPaddlePossible = !!settings.cwKeyPort &&
+          !(process.platform === 'win32' && _cwKeyPortIoctlLatched && _cwKeyPortPathForPython === settings.cwKeyPort);
         if (!(cwKeyPort && cwKeyPort.isOpen) && !_keyPortPaddlePossible && !_cwTxrxPttOnlyLogged) {
           _cwTxrxPttOnlyLogged = true;
           sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +

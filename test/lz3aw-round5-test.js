@@ -72,8 +72,8 @@ test('the controller forwards the codec powerMeter event (it swallowed it)', () 
   rig.on('powerMeter', (w) => seen.push(w));
   rig._transmitting = true;
   codec.getPowerMeter();           // arms the "this SM reply is watts" flag
-  codec.onData('SM00010;');        // TS-480: full scale 20 → 10/20 of 100 W
-  assert.deepStrictEqual(seen, [50], 'watts reached the controller\'s listeners');
+  codec.onData('SM00010;');        // TS-480 SM 10 → 44 W on LZ3AW's measured table
+  assert.deepStrictEqual(seen, [44], 'watts reached the controller\'s listeners');
 });
 
 test('a power reply counts as a live read for the staleness watchdog', () => {

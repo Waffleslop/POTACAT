@@ -58,9 +58,9 @@ test('a prompt power reply is still watts, and its raw value is logged for calib
   codec.on('powerMeter', (w) => watts.push(w));
   codec.on('log', (m) => logs.push(m));
   codec.getPowerMeter();
-  codec.onData('SM00016;');
-  assert.deepStrictEqual(watts, [80]);
-  assert.ok(logs.some(l => /power meter raw SM=16 of 20 -> 80 W/.test(l)), logs.join('\n'));
+  codec.onData('SM00012;');   // between LZ3AW's measured 11 (50 W) and 14 (100 W)
+  assert.deepStrictEqual(watts, [67]);
+  assert.ok(logs.some(l => /power meter raw SM=12 of 20 -> 67 W \(calibrated\)/.test(l)), logs.join('\n'));
 });
 
 test('the VFO pop-out power bar scales to the power SETTING, not the first reading', () => {

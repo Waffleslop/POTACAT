@@ -1713,8 +1713,11 @@ test('kenwood tune targets the active VFO (FB write after IF says B)', () => {
 test('kenwood setVfo(B) retargets the next freq poll optimistically', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, KENWOOD_VFO_MODEL);
   codec.setVfo('B');
+  // The command, then its own readback right behind it (IF; + VFO B's
+  // frequency — LZ3AW round 9: the display waited two poll cycles).
+  assert.deepStrictEqual(writes, ['FR1;', 'IF;', 'FB;']);
   codec.getFrequency();
-  assert.deepStrictEqual(writes, ['FR1;', 'FB;']);
+  assert.strictEqual(writes[writes.length - 1], 'FB;', 'the poll reads VFO B too');
 });
 
 test('kenwood getVfoSplit polls IF;', () => {
@@ -2357,8 +2360,8 @@ test('TS-480 direct serial: SM during TX reports WATTS, not an S reading', () =>
 
   codec.getPowerMeter();
   assert.strictEqual(writes[0], 'SM0;', 'power poll should reuse the meter query (SM0; on a TS-480): ' + writes[0]);
-  codec.onData(Buffer.from('SM0010;'));               // half of full scale 20
-  assert.deepStrictEqual(seen.powerMeter, [50], 'TS-480 at 10/20 is 50W of 100');
+  codec.onData(Buffer.from('SM0010;'));               // between LZ3AW's measured 7 (25 W) and 11 (50 W)
+  assert.deepStrictEqual(seen.powerMeter, [44], 'TS-480 SM 10 reads 44 W on the measured calibration');
   assert.deepStrictEqual(seen.smeter, [], 'a TX power reading leaked onto the S-meter');
 
   // The very next SM is a normal RX reading again — the flag is one-shot.

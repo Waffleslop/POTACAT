@@ -1868,10 +1868,10 @@
         // tone with no RF (KM4CFT 2026-04-29).
         cwPaddleAvailable = msg.available !== false;
         if (!cwPaddleAvailable) {
-          // Stop any in-progress paddle sidetone immediately
-          if (typeof localCwKeyer !== 'undefined' && localCwKeyer) {
-            try { localCwKeyer.paddleDit(false); localCwKeyer.paddleDah(false); } catch (e) {}
-          }
+          // Stop any in-progress paddle immediately — sidetone, hold
+          // keepalives and the server's keyer (a held contact otherwise
+          // kept the radio keyed with no release ever sent).
+          if (window.__echocatReleasePaddles) window.__echocatReleasePaddles(true);
         }
         updatePaddleHelp();
         break;
@@ -8989,6 +8989,10 @@
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(JSON.stringify({ type: 'cw-stop' }));
       stopCwTextSidetone();
+      // STOP also clears this page's paddle state. A contact it still thought
+      // was down made every later press a no-op (`if (!ditDown)`), which read
+      // as "the paddle doesn't work until POTACAT is restarted" (LZ3AW).
+      if (window.__echocatReleasePaddles) window.__echocatReleasePaddles(false);
     });
   }
 
@@ -9366,13 +9370,37 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (_holdTickWorker) _holdTickWorker.postMessage({ id: contact, start: false });
     if (_paddleHoldTimer[contact]) { clearInterval(_paddleHoldTimer[contact]); _paddleHoldTimer[contact] = null; }
   }
+  // Release every contact: stop the hold keepalives, cancel the 8 s fallback,
+  // silence the local keyer, and (when asked) tell the server. A release is
+  // never gated — it cannot key the radio, and dropping one left the desktop
+  // keyer sending dits until STOP (LZ3AW, 1.10.25).
+  function releaseAllPaddles(tellServer) {
+    ['dit', 'dah'].forEach(function(contact) {
+      var wasDown = contact === 'dit' ? ditDown : dahDown;
+      _stopPaddleHold(contact);
+      if (_paddleReleaseTimer[contact]) { clearTimeout(_paddleReleaseTimer[contact]); _paddleReleaseTimer[contact] = null; }
+      if (contact === 'dit') ditDown = false; else dahDown = false;
+      try {
+        if (contact === 'dit') localCwKeyer.paddleDit(false); else localCwKeyer.paddleDah(false);
+      } catch (e) {}
+      if (tellServer && wasDown && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 0 }));
+      }
+    });
+  }
+
+  // Reachable from the message handler and the STOP button whatever scope
+  // they sit in (a silent `typeof` miss would bring the stuck key back).
+  window.__echocatReleasePaddles = releaseAllPaddles;
+
   function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
     // to the server over WS (which does the real radio keying). Skip both
     // sides when desktop has reported paddle keying can't reach the radio
     // (cwPaddleAvailable=false) — playing sidetone for keys that don't
     // produce RF was misleading users into thinking POTACAT was broken.
-    if (!cwPaddleAvailable) return;
+    // Presses only: a release always goes out (see releaseAllPaddles).
+    if (!cwPaddleAvailable && state) return;
     ensureCwAudioCtx();
     if (contact === 'dit') localCwKeyer.paddleDit(!!state);
     else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
