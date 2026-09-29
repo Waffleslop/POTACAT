@@ -46,7 +46,7 @@ test('an SM power query nobody answered does not turn the next S-meter reply int
   codec.on('powerMeter', (w) => watts.push(w));
   codec.on('smeter', (v) => smeter.push(v));
   codec.getPowerMeter();                       // asked during a CW over
-  codec._smWantPowerAt = Date.now() - 5000;    // ...and the radio never answered
+  codec._smAsked[0].at = Date.now() - 5000;   // ...and the radio never answered
   codec.onData('SM00005;');                    // the next reply is an S reading
   assert.deepStrictEqual(watts, [], 'an S5 reading was reported as watts');
   assert.strictEqual(smeter.length, 1);

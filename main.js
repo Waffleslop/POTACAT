@@ -2735,7 +2735,12 @@ function sendCatMode(mode) {
 // stop rather than showing stale watts forever.
 // Displays hold the peak: one CAT sample per poll mostly misses it, and the
 // radio's own bar is peak-reading (lib/meter-peak-hold.js).
-const _fwdPowerHold = require('./lib/meter-peak-hold').createPeakHold();
+// Short hold, fast fall: with a 300 ms TX wattmeter read (RigController
+// TX_METER_MS) a 1 s hold and a 50 %/s decay made the bar lag the radio's
+// by seconds on the way down (LZ3AW round 11: "not in real time", while
+// S/SWR/ALC, which have no hold, moved perfectly). One read period of hold
+// still bridges a CW gap.
+const _fwdPowerHold = require('./lib/meter-peak-hold').createPeakHold({ holdMs: 350, decayPerSec: 0.9 });
 
 /** Does paddle keying on this station touch ONLY the dedicated CW Key Port?
  *  Mirrors the routing in the keyer output below: Kenwood-protocol rigs key

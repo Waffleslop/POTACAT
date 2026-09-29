@@ -136,7 +136,8 @@ test('the meter strip wraps instead of clipping', () => {
 test('a meter breaks as ONE unit (label + bar + value)', () => {
   // A wrap that separates "SWR:" from its bar is worse than the overflow.
   assert.ok(/\.em-group\s*\{[^}]*white-space:\s*nowrap/.test(REMOTE_CSS), 'em-group can split');
-  const groups = (REMOTE_HTML.match(/class="em-group"/g) || []).length;
+  // "em-group hidden" counts: the TX audio group starts hidden (LZ3AW round 11).
+  const groups = (REMOTE_HTML.match(/class="em-group( hidden)?"/g) || []).length;
   assert.strictEqual(groups, 5, 'expected 5 grouped meters, found ' + groups);
 });
 

@@ -1470,6 +1470,22 @@
         try {
           ws._serverProtocolVersion = msg.protocolVersion | 0;
           ws._serverVersion = String(msg.serverVersion || '');
+          // This page came from the desktop that answered the FIRST hello.
+          // A reconnect to an updated desktop leaves an open tab running the
+          // old page against the new server: LZ3AW kept a tab open across
+          // 1.10.27 and his paddle still went the old way (round 11). Load
+          // the new page once; the guard stops a loop if a reload does not
+          // change the version.
+          if (ws._serverVersion) {
+            if (!window.__echocatPageServerVersion) {
+              window.__echocatPageServerVersion = ws._serverVersion;
+            } else if (window.__echocatPageServerVersion !== ws._serverVersion) {
+              var reloadKey = 'echocat-reloaded-for-' + ws._serverVersion;
+              var already = false;
+              try { already = sessionStorage.getItem(reloadKey) === '1'; sessionStorage.setItem(reloadKey, '1'); } catch (e) {}
+              if (!already) { location.reload(); return; }
+            }
+          }
           ws._serverCapabilities = Array.isArray(msg.capabilities) ? msg.capabilities : [];
           scopeServerOk = ws._serverCapabilities.indexOf('scope') !== -1;
           cwKeyStreamOk = ws._serverCapabilities.indexOf('cw-key-stream') !== -1;
@@ -4931,8 +4947,13 @@
       _txDecayRaf = null;
     }
   }
+  // The TX audio meter shows the mic audio POTACAT feeds the radio's USB
+  // CODEC, so on a CW or voice-over-mic station it never moves: it stays
+  // hidden until it actually carries audio (LZ3AW: "it shows nothing").
+  var echoTxGroup = document.getElementById('echo-tx-group');
   function updateEchoTxMeter(peak) {
     _txLastPeak = Math.max(0, Math.min(1, +peak || 0));
+    if (_txLastPeak > 0.01 && echoTxGroup && echoTxGroup.classList.contains('hidden')) echoTxGroup.classList.remove('hidden');
     _txLastPeakAt = Date.now();
     if (!_txDecayRaf) _txDecayRaf = requestAnimationFrame(_txDecayTick);
   }
