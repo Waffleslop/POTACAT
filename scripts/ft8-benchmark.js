@@ -44,6 +44,8 @@ const ADDON = path.resolve(opt('--addon', path.join(ROOT, 'lib', 'ft8_native', '
 const WAV_DIR = path.resolve(opt('--dir', path.join(ROOT, 'lib', 'ft8_native', 'ft8_lib', 'test', 'wav')));
 const MY_CALL = opt('--mycall', '');
 const DX_CALL = opt('--dxcall', '');
+// --budget <ms>: the engine's decode time budget (0 = none, the default).
+const BUDGET = Number(opt('--budget', '0')) || 0;
 const SR = 12000;
 const SLOT_SAMPLES = 15 * SR; // what the engine hands the worker
 
@@ -191,7 +193,7 @@ cases.forEach((c, idx) => {
   const { rate, samples } = readWav(c.wav);
   const slot = toSlot(resample(samples, rate, SR));
   const t0 = process.hrtime.bigint();
-  const res = native.decode(slot, 'FT8', MY_CALL, DX_CALL);
+  const res = native.decode(slot, 'FT8', MY_CALL, DX_CALL, BUDGET);
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
 
   const ref = refs[idx];
@@ -258,7 +260,7 @@ if (NOISE_SLOTS) {
         for (let i = 0; i < slot.length; i++) slot[i] += a * Math.sin(2 * Math.PI * f * i / SR);
       }
     }
-    for (const r of native.decode(slot, 'FT8', MY_CALL, DX_CALL)) { tot.noiseDecodes++; noiseTexts.push(r.text); }
+    for (const r of native.decode(slot, 'FT8', MY_CALL, DX_CALL, BUDGET)) { tot.noiseDecodes++; noiseTexts.push(r.text); }
   }
 }
 

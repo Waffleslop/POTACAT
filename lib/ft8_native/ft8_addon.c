@@ -13,6 +13,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 #include <ft8/decode.h>
 #include <ft8/encode.h>
@@ -971,9 +976,29 @@ static bool record_result(ft_result_t* res, int* nres, int max_res, const ftx_me
     return true;
 }
 
-/* One decode pass over x. Returns the new result count. */
+/* Monotonic milliseconds, for the decode time budget. */
+static double now_ms(void) {
+#ifdef _WIN32
+    static LARGE_INTEGER freq = {0};
+    LARGE_INTEGER t;
+    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t);
+    return (double)t.QuadPart * 1000.0 / (double)freq.QuadPart;
+#else
+    /* C11 timespec_get, not clock_gettime: the build is -std=c11, under
+     * which glibc hides the POSIX clocks. Wall time is fine for a budget. */
+    struct timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+#endif
+}
+
+/* One decode pass over x. Returns the new result count.
+ * deadline (now_ms() clock, 0 = none): once it passes, candidates skip the
+ * refined demodulator (the expensive part) and get the plain waterfall decode
+ * plus waterfall AP, which is the whole pre-#87 decoder. *out_of_time is set. */
 static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t* bb, cpxf* cbuf,
-                       ft_result_t* res, int nres, int max_res) {
+                       ft_result_t* res, int nres, int max_res, double deadline, bool* out_of_time) {
     monitor_config_t cfg = {
         .f_min = 200,
         .f_max = 3000,
@@ -1026,7 +1051,9 @@ static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t*
             record_result(res, &nres, max_res, &message, false, freq_hz, time_sec, snr, false, 0, 0);
             continue;
         }
-        if (refine) {
+        bool late = deadline > 0 && now_ms() >= deadline;
+        if (late) *out_of_time = true;
+        if (refine && !late) {
             bool skip = false;
             for (int k = 0; k < ntried; ++k)
                 if (fabsf(tried_f[k] - freq_hz) < 1.6f && fabsf(tried_t[k] - t_start) < 240.0f) { skip = true; break; }
@@ -1043,7 +1070,7 @@ static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t*
             }
             continue;
         }
-        /* FT4 (no refined path): waterfall AP as before. */
+        /* FT4 (no refined path), or FT8 out of time: waterfall AP as before. */
         if (ap2_valid && ftx_decode_candidate_ap(&mon.wf, cand, LDPC_ITERATIONS, ap2_mask, ap2_bits, &message, &status)) {
             record_result(res, &nres, max_res, &message, true, freq_hz, time_sec, snr, false, 0, 0);
         } else if (ap1_valid && ftx_decode_candidate_ap(&mon.wf, cand, LDPC_ITERATIONS, ap1_mask, ap1_bits, &message, &status)) {
@@ -1059,12 +1086,13 @@ static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t*
 
 /* N-API decode function */
 static napi_value Decode(napi_env env, napi_callback_info info) {
-    size_t argc = 4;
-    napi_value args[4];
+    size_t argc = 5;
+    napi_value args[5];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+    const double t_start_ms = now_ms();
 
     if (argc < 1) {
-        napi_throw_error(env, NULL, "Expected (samples, protocol?, myCall?, dxCall?)");
+        napi_throw_error(env, NULL, "Expected (samples, protocol?, myCall?, dxCall?, budgetMs?)");
         return NULL;
     }
 
@@ -1102,6 +1130,22 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
     ap_refresh(ap_mycall, ap_dxcall);
     ++ht_epoch;
 
+    /* Time budget (args[4], ms, 0/absent = none). The multi-pass decoder
+     * (#87) costs ~0.35-0.7 s a busy slot on a fast PC and several times that
+     * on a slow one, and a decode that finishes after the next slot has begun
+     * is too late for the QSO it belongs to: the transmission has already
+     * gone out with the previous message (AB1EX 2026-09-27, FT-710: every
+     * step of every QSO sent twice). When the budget runs out the decoder
+     * finishes what the old one-pass decoder would have found and stops. */
+    double budget_ms = 0;
+    if (argc >= 5) {
+        napi_valuetype vt;
+        if (napi_typeof(env, args[4], &vt) == napi_ok && vt == napi_number) napi_get_value_double(env, args[4], &budget_ms);
+    }
+    const double deadline = budget_ms > 0 ? t_start_ms + budget_ms : 0;
+    bool out_of_time = false;
+    int passes_run = 0;
+
     int n = (int)length;
     int max_res = MAX_DECODED;
     ft_result_t* res = (ft_result_t*)calloc((size_t)max_res, sizeof(ft_result_t));
@@ -1128,11 +1172,13 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
     int nres = 0;
     for (int pass = 0; pass < passes && nres < max_res; ++pass) {
         int first_new = nres;
-        nres = decode_pass(resid, n, protocol, have_bb ? &bb : NULL, cbuf, res, nres, max_res);
+        nres = decode_pass(resid, n, protocol, have_bb ? &bb : NULL, cbuf, res, nres, max_res, deadline, &out_of_time);
+        ++passes_run;
         if (!have_bb || !ft8) break;
         /* Every decode is measured on the residual it was found in; all but
          * the last pass's are also subtracted before the next pass. */
         bool last = (nres == first_new || pass == passes - 1 || nres >= max_res);
+        if (!last && deadline > 0 && now_ms() >= deadline) { last = true; out_of_time = true; }
         for (int k = first_new; k < nres; ++k) {
             uint8_t tones[FT8_NN];
             ft8_encode(res[k].msg.payload, tones);
@@ -1174,6 +1220,15 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
         napi_set_element(env, result_array, k, obj);
     }
     free(res);
+    /* How the decode went, for the engine's log: passes completed, whether
+     * the budget cut it short, and its wall time. */
+    napi_value v_passes, v_oot, v_ms;
+    napi_create_int32(env, passes_run, &v_passes);
+    napi_get_boolean(env, out_of_time, &v_oot);
+    napi_create_double(env, now_ms() - t_start_ms, &v_ms);
+    napi_set_named_property(env, result_array, "passes", v_passes);
+    napi_set_named_property(env, result_array, "outOfTime", v_oot);
+    napi_set_named_property(env, result_array, "ms", v_ms);
     return result_array;
 }
 

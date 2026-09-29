@@ -48,6 +48,8 @@ jobs:
         run: node test/trusdx-poll-test.js
       - name: Run rigctld sideband width (band change keeps the filter)
         run: node test/rigctld-sideband-width-test.js
+      - name: Run FT8 decode deadline (reply decoded before the next slot, tries counted by slot)
+        run: node test/ft8-decode-deadline-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)

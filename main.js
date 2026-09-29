@@ -9421,9 +9421,9 @@ function jtcatRunWorkableCount(results) {
 // next boundary, so stamping wall-clock showed :44/:14 instead of the period
 // start; floor to the cycle so phone/desktop time columns read like WSJT-X.
 // K3SBP 2026-06-15.
-function jtcatPeriodUtc(mode) {
+function jtcatPeriodUtc(mode, atMs) {
   const cycleMs = mode === 'FT2' ? 3800 : mode === 'FT4' ? 7500 : 15000;
-  const d = new Date(Math.floor(Date.now() / cycleMs) * cycleMs);
+  const d = new Date(Math.floor((Number.isFinite(atMs) ? atMs : Date.now()) / cycleMs) * cycleMs);
   return String(d.getUTCHours()).padStart(2, '0') + ':' +
          String(d.getUTCMinutes()).padStart(2, '0') + ':' +
          String(d.getUTCSeconds()).padStart(2, '0');
@@ -10878,7 +10878,12 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
 //   abort    → tear down TX, drop the QSO unlogged, notify
 function jtcatHandleRetryStall(o) {
   const qso = o.qso;
-  const pk = jtcatPeriodUtc(o.mode);
+  // The period whose audio was decoded (the engine stamps it on the decode),
+  // not the clock now: on a slow PC the decode lands after the next TX has
+  // started and been stamped, so "now" named our own TX period, every stall
+  // looked like "reply still pending", and tries were never counted
+  // (AB1EX 2026-09-27: 12+ R-08s with tries set lower).
+  const pk = jtcatPeriodUtc(o.mode, o.periodStartMs);
   // A try = a TRANSMISSION, not a decode period. Decode events fire every
   // period — including our own TX period and periods where TX was deferred —
   // and counting each burned the cap twice per QSO cycle ("tries 5" gave up
@@ -11464,7 +11469,7 @@ function startJtcat(mode) {
       if (remoteJtcatQso && remoteJtcatQso.phase === phaseBefore && remoteJtcatQso.phase !== 'done') {
         const qso = remoteJtcatQso;
         jtcatHandleRetryStall({
-          qso, mode: data.mode, engine: ft8Engine,
+          qso, mode: data.mode, periodStartMs: data.periodStartMs, engine: ft8Engine,
           // The phone can own a run since the jtcat-full-auto-cq control path
           // went live (2026-07-17). This was still hardcoded false from when
           // run mode was popout-only, so a remote-owned run aborted on its
@@ -11494,7 +11499,7 @@ function startJtcat(mode) {
       if (popoutJtcatQso && popoutJtcatQso.phase === phaseBefore && popoutJtcatQso.phase !== 'done') {
         const qso = popoutJtcatQso;
         jtcatHandleRetryStall({
-          qso, mode: data.mode, engine: ft8Engine,
+          qso, mode: data.mode, periodStartMs: data.periodStartMs, engine: ft8Engine,
           runMode: jtcatFullAutoCq && jtcatFullAutoCqOwner === 'popout',
           workableCount: runWorkable,
           setTxMsg: popoutJtcatSetTxMsg, onDone: popoutJtcatOnDone(qso),
@@ -35116,7 +35121,7 @@ app.whenReady().then(() => {
             // Period-key dedup inside jtcatHandleRetryStall keeps N slices
             // from burning N tries per cycle against the same global QSO.
             jtcatHandleRetryStall({
-              qso, mode: data.mode, engine,
+              qso, mode: data.mode, periodStartMs: data.periodStartMs, engine,
               runMode: jtcatFullAutoCq && jtcatFullAutoCqOwner === 'popout',
               workableCount: runWorkable,
               setTxMsg: popoutJtcatSetTxMsg, onDone: popoutJtcatOnDone(qso),
@@ -35145,7 +35150,7 @@ app.whenReady().then(() => {
           if (remoteJtcatQso && remoteJtcatQso.phase === phaseBefore && remoteJtcatQso.phase !== 'done') {
             const qso = remoteJtcatQso;
             jtcatHandleRetryStall({
-              qso, mode: data.mode, engine,
+              qso, mode: data.mode, periodStartMs: data.periodStartMs, engine,
               // Was hardcoded false from the popout-only era — see the
               // single-engine path. A phone-owned run must re-arm too.
               runMode: jtcatFullAutoCq && jtcatFullAutoCqOwner === 'remote',
