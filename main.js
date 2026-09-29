@@ -348,6 +348,7 @@ const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
 const contestsDb = require('./lib/contests-db');
 const { ContestsFeed } = require('./lib/contests-feed');
+const { SstvPackStore } = require('./lib/sstv-packs');
 const { eventDecodeMatch, eventHuntAvailability } = require('./lib/event-decode-match');
 const { eventStationGeo } = require('./lib/event-geo');
 const { DxClusterClient, looksLikeCallsign: clusterCallsignOk } = require('./lib/dxcluster');
@@ -1135,6 +1136,7 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
+let sstvPackStore = null;    // SSTV style packs (lib/sstv-packs.js)
 // Who opened the SSTV window: 'app' (ECHOCAT sstv-open) or 'desktop'. An
 // explicit Stop RX from the app closes only a window the app opened.
 let sstvPopoutOpenedBy = null;
@@ -30729,6 +30731,53 @@ app.whenReady().then(() => {
     rs.on('vfo-set-lock', (locked) => applyVfoLock(locked));
     // A rebuilt server would otherwise tell clients the VFO is unlocked.
     if (typeof rs.setVfoLocked === 'function') rs.setVfoLocked(_vfoLocked);
+  });
+
+  // --- SSTV style packs (lib/sstv-packs.js, data/sstv-packs/, worker/sstv-packs) ---
+  // Seasonal and event scenery for SSTV templates. Bundled packs ship in the
+  // app; more arrive from packs.potacat.com (a signed index, like the
+  // DXpedition list) and are downloaded when the operator claims one. Claims
+  // sync with a paired ECHOCAT app as a union. The SSTV window reads packs
+  // only through these handlers.
+  sstvPackStore = new SstvPackStore({
+    bundledDir: path.join(__dirname, 'data', 'sstv-packs'),
+    userDir: path.join(app.getPath('userData'), 'sstv-packs'),
+    getSettings: () => settings,
+    saveSettings: (s) => saveSettings(s),
+    appVersion: app.getVersion(),
+    log: (m) => { try { sendCatLog(m); } catch { console.log(m); } },
+  });
+  sstvPackStore.on('changed', () => {
+    try {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('sstv-packs-changed', sstvPackStore.list());
+    } catch { /* window closing */ }
+    try { if (remoteServer && remoteServer.running) remoteServer.sendSstvPackClaims(sstvPackStore.claimsPayload()); } catch { /* */ }
+  });
+  sstvPackStore.start();
+  ipcMain.handle('sstv-packs-list', () => sstvPackStore.list());
+  ipcMain.handle('sstv-pack-get', (_e, id) => sstvPackStore.get(String(id || '')));
+  ipcMain.handle('sstv-pack-claim', (_e, id) => sstvPackStore.claim(String(id || '')));
+  ipcMain.handle('sstv-pack-unclaim', (_e, id) => sstvPackStore.unclaim(String(id || '')));
+  ipcMain.handle('sstv-pack-set-active', (_e, id) => sstvPackStore.setActive(id ? String(id) : null));
+  onRemoteServer((rs) => {
+    // The app learns the desktop's claims at connect and sends its own.
+    rs.on('client-connected', () => {
+      try { rs.sendSstvPackClaims(sstvPackStore.claimsPayload()); } catch { /* */ }
+    });
+    rs.on('sstv-pack-claims', async ({ claimed, active, lookShuffle } = {}) => {
+      try {
+        await sstvPackStore.mergeClaims(claimed);
+        if (Number.isFinite(lookShuffle) && lookShuffle !== settings.sstvLookShuffle) {
+          settings.sstvLookShuffle = lookShuffle;
+          saveSettings(settings);
+        }
+        if (typeof active === 'string' && active !== (settings.sstvActivePack || '')) {
+          sstvPackStore.setActive(active || null);
+        }
+        // Answer with the merged state, so both sides end up identical.
+        rs.sendSstvPackClaims(sstvPackStore.claimsPayload());
+      } catch (e) { sendCatLog('[SSTV packs] claim sync failed: ' + (e.message || e)); }
+    });
   });
 
   // --- KiwiSDR / WebSDR.org integration ---

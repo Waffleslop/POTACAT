@@ -54,6 +54,10 @@ jobs:
         run: node test/echocat-usb-tx-graph-test.js
       - name: Run SSTV decoder state (explicit Stop RX, S2C sstv-decoder-state)
         run: node test/sstv-decoder-state-test.js
+      - name: Run SSTV style packs (pure-data format, signed feed, store, claims sync)
+        run: node test/sstv-packs-test.js
+      - name: Validate SSTV style packs in data/sstv-packs
+        run: node scripts/validate-sstv-packs.js
       - name: Run LZ3AW round 10 (SWR 1:1, fast TX wattmeter, paddle element stream, Kenwood FR/FT split)
         run: node test/lz3aw-round10-test.js
       - name: Run LZ3AW round 11 (SM query order, S-meter during TX, wattmeter hold, VFO/split trace)
