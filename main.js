@@ -1666,6 +1666,21 @@ function clearSwrTrip(reason) {
   }
   // Clear the JS8 window's persistent SWR banner (js8-state.swrTripped).
   try { js8PushStatus(); } catch { /* pre-init */ }
+  pushSstvRigState();
+}
+
+/** The SSTV window's view of the radio: whether it has a tuner, and the SWR
+ *  guard's state for the trip banner. */
+function pushSstvRigState() {
+  if (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) return;
+  let atu = false;
+  try { atu = !!getRigCapabilities(detectRigType()).atu; } catch {}
+  try {
+    sstvPopoutWin.webContents.send('sstv-rig-state', {
+      atu, atuActive: !!_currentAtuState,
+      swrTripped: !!_swrTripped, swrMessage: _swrTripMessage || '',
+    });
+  } catch {}
 }
 
 // An ATU tune transmits its own carrier through the WORST of the match while
@@ -1744,7 +1759,14 @@ function tripSwrGuard(swr) {
   }
   handleRemotePtt(false);
   if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
+  // The SSTV window plays the picture itself and was never told: the audio
+  // kept playing into an unkeyed radio and TRANSMIT stayed on HALT until
+  // pressed (Casey 2026-09-29). Stop it and show the trip there.
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+    try { sstvPopoutWin.webContents.send('sstv-abort-tx'); } catch {}
+  }
   swrGuardAnnounce(msg);
+  pushSstvRigState();
   // ⚙ Optional self-heal (settings.swrAutoTune): run the Flex ATU to re-match
   // instead of making the operator do it. The tune does NOT clear the latch —
   // only the radio's TUNE_OK does (see noteAtuTuneStarted/onAtuStatus) — and
@@ -2765,6 +2787,7 @@ function sendCatFwdPower(watts) {
     if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', v);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', v);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', v);
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-fwd-power', v);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: v });
   };
   push(_fwdPowerHold.sample(w));
@@ -2928,6 +2951,7 @@ function sendCatSwr(val) {
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr', val);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-swr', val);
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-swr', val);
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-swr', val);
   _currentSwr = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr', value: val });
 }
@@ -3008,6 +3032,7 @@ function broadcastRigState() {
     controls: RIG_CONTROLS,
   };
   if (win && !win.isDestroyed()) win.webContents.send('rig-state', state);
+  pushSstvRigState();
   sendVfoState();
   broadcastRemoteRadioStatus();
   pushJtcatPopoutRigPower();
@@ -12702,6 +12727,7 @@ function connectSmartSdr() {
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-swr-ratio', swr);
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-swr-ratio', swr);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: swr });
     // SWR guard: these frames only flow during TX (src=TX- bridge meter), so
@@ -18587,7 +18613,16 @@ function connectRemote() {
   });
 
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
-  remoteServer.on('sstv-photo', ({ image, mode }) => {
+  remoteServer.on('sstv-photo', ({ image, mode, guest }) => {
+    if (guest && passEnforcement) {
+      const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: _currentFreqHz });
+      if (!res.allowed) {
+        sendCatLog(`[pass] SSTV picture from guest ${guest.call || guest.code} refused: ${res.userVisible}`);
+        remoteServer.broadcastSstvTxStatus({ state: 'rx', error: res.userVisible });
+        return;
+      }
+      sendCatLog(`[SSTV] Transmitting a picture from guest ${guest.call || 'on pass ' + guest.code}`);
+    }
     // startSstv also restarts a STOPPED engine (the old `!sstvEngine` test
     // never did, so a photo after any stop encoded into nothing).
     if (startSstv) startSstv();
@@ -18629,6 +18664,7 @@ function connectRemote() {
             width: size.width,
             height: size.height,
             mode,
+            guestCall: guest ? (guest.call || 'guest') : null,
           });
         }
       };
@@ -29132,6 +29168,10 @@ app.whenReady().then(() => {
         freqHz: meta.freqHz || null,
         freqKhz: meta.freqKhz || null,
         callsign: meta.callsign || '',
+        // Their call: typed in the SSTV reply bar (theirCall) or decoded
+        // from the FSK ID after the picture (fskCall).
+        theirCall: meta.theirCall || meta.fskCall || '',
+        fskCall: meta.fskCall || '',
       };
     } catch (err) {
       console.error('[SSTV] Gallery record error:', err.message);
@@ -29267,6 +29307,110 @@ app.whenReady().then(() => {
     pushSstvDecoderState();
   });
 
+  // The SSTV window's tuner button and the trip banner's Tune ATU: the same
+  // rig-control action every other surface uses, so the SWR guard's
+  // match-awaiting episode (setAtu wrapper) applies here too.
+  ipcMain.handle('sstv-atu-tune', async () => {
+    try { await applyRigControl({ action: 'atu-tune' }, 'sstv'); return { ok: true }; }
+    catch (err) { return { ok: false, error: err.message || String(err) }; }
+  });
+  ipcMain.on('sstv-rig-state-get', () => pushSstvRigState());
+
+  // Values the templates fill in: {MYCALL} {GRID} {PARK} {NAME} {RIG}, and
+  // the call last typed anywhere in POTACAT (a reply's fallback for {CALL}).
+  ipcMain.handle('sstv-context', () => {
+    const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+    let rigLabel = '';
+    try { const m = getActiveRigModel(); rigLabel = (rig && rig.name) || (m && m.name) || ''; } catch {}
+    const watts = Number(_currentTxPower) || 0;
+    return {
+      myCall: settings.myCallsign || '',
+      grid: settings.grid || '',
+      park: primaryParkRef(),
+      parkName: primaryParkName(),
+      name: settings.sstvOperatorName || settings.operatorName || '',
+      rig: rigLabel ? (rigLabel + (watts ? ' · ' + Math.round(watts) + ' W' : '')) : '',
+      typedCall: typedCalls.current() || '',
+    };
+  });
+
+  // Remember whose picture a gallery image is, so a later reply to it is
+  // already filled in.
+  ipcMain.handle('sstv-gallery-set-call', async (_e, { filename, call } = {}) => {
+    try {
+      if (!filename) return false;
+      const metaPath = path.join(ensureSstvGalleryDir(), path.basename(String(filename))).replace(/\.png$/i, '.json');
+      let meta = {};
+      try { meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8')); } catch { meta = {}; }
+      meta.theirCall = String(call || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
+      await fs.promises.writeFile(metaPath, JSON.stringify(meta, null, 2));
+      return true;
+    } catch { return false; }
+  });
+
+  // Log a contact from the reply bar: the log pop-out opens with SSTV, their
+  // call and the RSV sent filled in.
+  ipcMain.on('sstv-log-contact', (_e, { call, rsvSent } = {}) => {
+    const freqKhz = _currentFreqHz ? _currentFreqHz / 1000 : undefined;
+    ipcMain.emit('log-popout-open', null, {
+      force: true, type: 'dx', callsign: String(call || '').toUpperCase(),
+      mode: 'SSTV', freqKhz, rstSent: String(rsvSent || '595'), rstRcvd: '',
+      power: _currentTxPower || undefined,
+    });
+  });
+
+  // Take templates to another machine: one JSON file with the operator's own
+  // templates, their look and their claimed packs.
+  ipcMain.handle('sstv-templates-export', async () => {
+    const { dialog } = require('electron');
+    const res = await dialog.showSaveDialog(sstvPopoutWin || win, {
+      title: 'Export SSTV templates', defaultPath: 'potacat-sstv-templates.json',
+      filters: [{ name: 'POTACAT SSTV templates', extensions: ['json'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    const data = {
+      potacatSstvTemplates: 1, exportedAt: new Date().toISOString(),
+      templates: settings.sstvTemplates || [],
+      lookShuffle: settings.sstvLookShuffle | 0,
+      claimedPacks: settings.sstvPacksClaimed || [],
+      activePack: settings.sstvActivePack || null,
+      defaultReply: settings.sstvDefaultReply || null,
+    };
+    await fs.promises.writeFile(res.filePath, JSON.stringify(data, null, 1));
+    sendCatLog(`[SSTV] Exported ${data.templates.length} template(s) to ${path.basename(res.filePath)}`);
+    return { ok: true, count: data.templates.length };
+  });
+  ipcMain.handle('sstv-templates-import', async () => {
+    const { dialog } = require('electron');
+    const res = await dialog.showOpenDialog(sstvPopoutWin || win, {
+      title: 'Import SSTV templates', properties: ['openFile'],
+      filters: [{ name: 'POTACAT SSTV templates', extensions: ['json'] }],
+    });
+    if (res.canceled || !res.filePaths || !res.filePaths.length) return { ok: false, canceled: true };
+    try {
+      const raw = await fs.promises.readFile(res.filePaths[0], 'utf-8');
+      if (raw.length > 8 * 1024 * 1024) return { ok: false, error: 'That file is too large to be a template export.' };
+      const data = JSON.parse(raw);
+      if (!data || data.potacatSstvTemplates !== 1 || !Array.isArray(data.templates)) {
+        return { ok: false, error: 'That file is not a POTACAT SSTV template export.' };
+      }
+      // Merge: imported templates after the ones already here, up to 24.
+      const existing = settings.sstvTemplates || [];
+      const incoming = data.templates.filter((t) => t && typeof t === 'object' && Array.isArray(t.texts));
+      const merged = existing.concat(incoming).slice(0, 24);
+      const added = merged.length - existing.length;
+      const patch = { sstvTemplates: merged };
+      if (Number.isFinite(data.lookShuffle) && !settings.sstvLookShuffle) patch.sstvLookShuffle = data.lookShuffle | 0;
+      if (Array.isArray(data.claimedPacks)) patch.sstvPacksClaimed = Array.from(new Set((settings.sstvPacksClaimed || []).concat(data.claimedPacks.filter((x) => typeof x === 'string'))));
+      Object.assign(settings, patch);
+      saveSettings(settings);
+      sendCatLog(`[SSTV] Imported ${added} template(s) from ${path.basename(res.filePaths[0])}`);
+      return { ok: true, added, skipped: incoming.length - added };
+    } catch (err) {
+      return { ok: false, error: 'Could not read that file: ' + (err.message || err) };
+    }
+  });
+
   ipcMain.handle('sstv-get-gallery', async () => {
     try {
       const galleryDir = ensureSstvGalleryDir();
@@ -29379,6 +29523,7 @@ app.whenReady().then(() => {
       sstvPopoutWin.webContents.send('sstv-popout-theme', themePayload);
       // Start SSTV engine when popout opens
       startSstv();
+      pushSstvRigState();
     });
     sstvPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') {

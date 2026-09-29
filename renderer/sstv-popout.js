@@ -30,8 +30,6 @@ const txCtx = txCanvas.getContext('2d');
 const rxInfo = document.getElementById('rx-info');
 const modeSelect = document.getElementById('mode-select');
 const loadBtn = document.getElementById('load-btn');
-const randomBtn = document.getElementById('random-btn');
-const clearReplyBtn = document.getElementById('clear-reply-btn');
 const txBtn = document.getElementById('tx-btn');
 const progressBar = document.getElementById('progress-bar');
 const txGainSlider = document.getElementById('tx-gain');
@@ -41,7 +39,7 @@ const openFolderBtn = document.getElementById('open-folder-btn');
 const audioInputSelect = document.getElementById('audio-input');
 const audioOutputSelect = document.getElementById('audio-output');
 const statusBar = document.getElementById('status-bar');
-const textLayersEl = document.getElementById('text-layers');
+const textLayersEl = document.getElementById('text-layers'); // gone in the redesign; text is edited on the picture
 const textPropsEl = document.getElementById('text-props');
 const addTextBtn = document.getElementById('add-text-btn');
 
@@ -177,6 +175,13 @@ const MODE_RES = {
     }
   } catch (e) { console.error('[SSTV] Text elements restore error:', e); }
 
+  // What the templates fill in, the station's look, and any style pack.
+  try { await refreshContext(); } catch (e) { console.error('[SSTV] Context error:', e); }
+  try { await loadActivePack(); } catch (e) { console.error('[SSTV] Pack load error:', e); }
+  rebuildLook();
+  try { const on = document.getElementById('op-name'); if (on) on.value = settings.sstvOperatorName || ''; } catch {}
+  try { await refreshPacks(); } catch (e) { console.error('[SSTV] Packs list error:', e); }
+
   // Load saved templates
   try {
     templates = settings.sstvTemplates || [];
@@ -189,8 +194,14 @@ const MODE_RES = {
   // Update canvas size for mode
   try { updateCanvasSize(); } catch {}
 
-  // Generate initial random pattern
-  try { generateRandomPattern(); } catch (e) { console.error('[SSTV] Pattern error:', e); }
+  // The last starter template (CQ SSTV on a first run); a station that built
+  // its own compose before the redesign keeps it, on a fresh pattern.
+  try {
+    const last = settings.sstvLastStarter || (settings.sstvTextElements && settings.sstvTextElements.length ? null : 'cq');
+    if (last && window.SstvTemplates.starter(last)) applyStarter(last, { keepTexts: !!(settings.sstvTextElements && settings.sstvTextElements.length && settings.sstvTextElements.some(t => t.tpl)) });
+    else generateRandomPattern();
+  } catch (e) { console.error('[SSTV] Starter error:', e); try { generateRandomPattern(); } catch {} }
+  renderTemplateStrip();
 
   // Populate audio devices
   try { await populateAudioDevices(); } catch (e) { console.error('[SSTV] Audio device error:', e); }
@@ -203,6 +214,20 @@ const MODE_RES = {
 
   // Set theme
   try { applyTheme(settings.lightMode ? 'light' : 'dark'); } catch {}
+
+  // Fonts load asynchronously; redraw once they are here so the first
+  // picture isn't in the fallback face.
+  try {
+    await Promise.race([
+      Promise.all(['400 30px "Bungee"', '400 30px "Archivo Black"', '400 30px "Russo One"', '800 30px "Rubik"', '400 30px "Rye"'].map(f => document.fonts.load(f).catch(() => null))),
+      new Promise(r => setTimeout(r, 2500)),
+    ]);
+    if (activeStarterId) rerenderStarterScene();
+    renderTxPreview(); renderTemplateStrip();
+  } catch {}
+  try { window.api.sstvRigStateGet && window.api.sstvRigStateGet(); } catch {}
+  showRigScopedControls();
+  fitCanvases();
 
   // Auto-QSY to the selected SSTV frequency on open, or to the one main
   // asked for (idle SSTV picks the day/night band).
@@ -274,8 +299,19 @@ document.getElementById('close-btn').addEventListener('click', () => window.api.
 
 // --- Mode change ---
 modeSelect.addEventListener('change', () => {
+  const oldH = txCanvas.height;
   updateCanvasSize();
+  // A starter is drawn for the mode's size: redraw its scene and move its
+  // text for the new height (Robot modes are 240 lines, the rest 256).
+  if (activeStarterId) {
+    const k = txCanvas.height / (oldH || 256);
+    if (k !== 1) textElements.forEach(t => { t.y = Math.round(t.y * k); });
+    activeSlot = window.SstvTemplates.replySlot(activeStarterId, txCanvas.height);
+    rerenderStarterScene();
+  }
   renderTxPreview();
+  fitCanvases();
+  updateTxState();
   window.api.saveSettings({ sstvMode: modeSelect.value });
 });
 
@@ -358,6 +394,7 @@ function isAutoLabel(t) {
 }
 
 function renderTextLayers() {
+  if (!textLayersEl) return;
   textLayersEl.innerHTML = '';
   for (let i = 0; i < textElements.length; i++) {
     const t = textElements[i];
@@ -418,7 +455,8 @@ function renderTextProps() {
   const textInput = document.createElement('input');
   textInput.type = 'text';
   textInput.value = isAutoLabel(t) ? '' : t.label;
-  textInput.placeholder = isAutoLabel(t) ? getTextDisplayName(t) + ' (auto)' : 'Text...';
+  textInput.placeholder = isAutoLabel(t) ? getTextDisplayName(t) + ' (auto)' : 'Text… ({MYCALL} {CALL} {RSV} {GRID} {PARK} {UTC})';
+  textInput.title = 'Use {MYCALL}, {CALL}, {RSV}, {GRID}, {PARK}, {NAME}, {RIG} or {UTC} and POTACAT fills them in';
   textInput.disabled = isAutoLabel(t);
   textInput.style.opacity = isAutoLabel(t) ? '0.5' : '1';
   textInput.addEventListener('input', () => { t.label = textInput.value; onTextChanged(); });
@@ -492,6 +530,33 @@ function renderTextProps() {
     resetBtn.addEventListener('click', () => { t.rotation = 0; onTextChanged(); renderTextProps(); });
     textPropsEl.appendChild(resetBtn);
   }
+
+  // Hide, delete (text you added, or a template line), done.
+  const hideBtn = document.createElement('button');
+  hideBtn.className = 'tp-toggle' + (t.visible ? '' : ' active');
+  hideBtn.textContent = t.visible ? '\u25C9' : '\u25CB';
+  hideBtn.title = t.visible ? 'Hide this text' : 'Show this text';
+  hideBtn.addEventListener('click', () => { t.visible = !t.visible; onTextChanged(); renderTextProps(); });
+  textPropsEl.appendChild(hideBtn);
+  if (t.key.startsWith('user-') || t.tpl) {
+    const del = document.createElement('button');
+    del.className = 'tp-toggle';
+    del.textContent = '\u2715';
+    del.title = 'Remove this text';
+    del.addEventListener('click', () => {
+      const i = textElements.indexOf(t);
+      if (i >= 0) textElements.splice(i, 1);
+      selectedText = null; textPropsEl.style.display = 'none';
+      onTextChanged();
+    });
+    textPropsEl.appendChild(del);
+  }
+  const done = document.createElement('button');
+  done.className = 'tp-toggle';
+  done.style.width = 'auto'; done.style.padding = '0 6px';
+  done.textContent = 'Done';
+  done.addEventListener('click', () => { selectedText = null; textPropsEl.style.display = 'none'; renderTxPreview(); });
+  textPropsEl.appendChild(done);
 }
 
 function onTextChanged() {
@@ -536,13 +601,16 @@ function pushComposeStateNow() {
       console.warn('[SSTV] bg serialize error:', e.message);
     }
   }
-  const texts = textElements.map(t => ({
-    key: t.key, label: t.label || '',
-    x: t.x, y: t.y, fontSize: t.fontSize,
-    bold: !!t.bold, italic: !!t.italic,
-    color: t.color, rotation: t.rotation || 0,
-    visible: t.visible !== false,
-  }));
+  const texts = textElements.map(t => {
+    const b = textBox(t);
+    return {
+      key: t.key, label: b.label || '',
+      x: Math.round(b.x0), y: t.y, fontSize: b.size,
+      bold: !!t.bold || !!t.tpl, italic: !!t.italic,
+      color: b.color, rotation: t.rotation || 0,
+      visible: t.visible !== false,
+    };
+  });
   window.api.sstvComposeState({ bgDataUrl, texts, mode: modeSelect.value });
 }
 // Main asks for current state (triggered by phone sstv-open / sstv-get-compose)
@@ -554,6 +622,7 @@ function saveTextElements() {
   window.api.saveSettings({ sstvTextElements: textElements.map(t => ({
     key: t.key, label: isAutoLabel(t) ? '' : t.label,
     x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible,
+    align: t.align, outline: !!t.outline, role: t.role, tpl: !!t.tpl,
   }))});
 }
 
@@ -590,6 +659,7 @@ loadBtn.addEventListener('click', async () => {
       bgImage = img;
       bgParams = null; // photo, not a pattern
       activeTemplateIdx = -1;
+      activeStarterId = null; // the photo replaces the starter's scene; its text stays
       renderTemplateStrip();
       renderTxPreview();
     };
@@ -597,12 +667,9 @@ loadBtn.addEventListener('click', async () => {
   }
 });
 
-// Random pattern generator — params are stored for template reproducibility
-randomBtn.addEventListener('click', () => {
-  generateRandomPattern();
-  activeTemplateIdx = -1;
-  renderTemplateStrip();
-});
+// Random pattern generator — kept for templates saved before the redesign
+// (they store bgParams). The Random button is gone; the Test pattern starter
+// replaces it.
 
 function generateRandomPattern(params) {
   const res = MODE_RES[modeSelect.value] || { w: 320, h: 256 };
@@ -772,14 +839,16 @@ function renderTxPreview() {
     }
   }
 
-  // Reply inset (PiP) — draggable, resizable, rotatable
+  // Reply inset (PiP) — in the template's picture slot when it has one,
+  // otherwise bottom-right; draggable, wheel-resizable, rotatable.
   if (replyImage) {
-    const insetW = Math.round(w * replyInset.scale);
-    const insetH = Math.round(h * replyInset.scale);
     const margin = 6;
-    // Auto-position if not set
-    const ix = replyInset.x >= 0 ? replyInset.x : w - insetW - margin;
-    const iy = replyInset.y >= 0 ? replyInset.y : h - insetH - margin;
+    let insetW, insetH;
+    if (replyInset.w) { insetW = replyInset.w; insetH = replyInset.h; }
+    else if (activeSlot) { insetW = activeSlot.w; insetH = activeSlot.h; }
+    else { insetW = Math.round(w * replyInset.scale); insetH = Math.round(h * replyInset.scale); }
+    const ix = replyInset.x >= 0 ? replyInset.x : (activeSlot ? activeSlot.x : w - insetW - margin);
+    const iy = replyInset.y >= 0 ? replyInset.y : (activeSlot ? activeSlot.y : h - insetH - margin);
     // Cache for hit testing
     replyInset._drawX = ix; replyInset._drawY = iy;
     replyInset._drawW = insetW; replyInset._drawH = insetH;
@@ -804,39 +873,25 @@ function renderTxPreview() {
       txCtx.drawImage(replyInset._canvas, 0, 0, replyImage.width, replyImage.height, ix, iy, insetW, insetH);
     }
     txCtx.restore();
+    drawReplyThumb();
   }
 
-  // Draw draggable text elements
+  // Draw the text layers
   for (const t of textElements) {
     if (!t.visible || !t.label) continue;
-    txCtx.save();
-    txCtx.shadowColor = '#000';
-    txCtx.shadowBlur = 3;
-    txCtx.shadowOffsetX = 1;
-    txCtx.shadowOffsetY = 1;
-    txCtx.fillStyle = t.color || '#ffffff';
-    txCtx.font = textFont(t);
-    const rot = t.rotation || 0;
-    if (rot) {
-      txCtx.translate(t.x, t.y);
-      txCtx.rotate(rot);
-      txCtx.fillText(t.label, 0, 0);
-    } else {
-      txCtx.fillText(t.label, t.x, t.y);
-    }
-    txCtx.restore();
+    drawTextLayer(txCtx, t);
   }
 
   // Draw rotation handle on selected text
   if (selectedText && selectedText.visible && selectedText.label && !isTx) {
     const t = selectedText;
     txCtx.save();
-    txCtx.font = textFont(t);
-    const metrics = txCtx.measureText(t.label);
+    const box = textBox(t);
     const rot = t.rotation || 0;
+    const metrics = { width: box.width };
     // Handle position: right edge of text, vertically centered
-    const hx = metrics.width + 8;
-    const hy = -t.fontSize / 2;
+    const hx = (box.x0 - t.x) + box.width + 8;
+    const hy = -box.size / 2;
     let handleX, handleY;
     if (rot) {
       const cos = Math.cos(rot), sin = Math.sin(rot);
@@ -882,10 +937,9 @@ function canvasToImageCoords(e) {
 
 // Get the rotation handle position for a text element
 function getRotateHandle(t) {
-  txCtx.font = textFont(t);
-  const metrics = txCtx.measureText(t.label);
-  const hx = metrics.width + 8;
-  const hy = -t.fontSize / 2;
+  const box = textBox(t);
+  const hx = (box.x0 - t.x) + box.width + 8;
+  const hy = -box.size / 2;
   const rot = t.rotation || 0;
   if (rot) {
     const cos = Math.cos(rot), sin = Math.sin(rot);
@@ -907,10 +961,10 @@ function hitTestText(mx, my) {
   for (let i = textElements.length - 1; i >= 0; i--) {
     const t = textElements[i];
     if (!t.visible || !t.label) continue;
-    txCtx.font = textFont(t);
-    const metrics = txCtx.measureText(t.label);
-    const textW = metrics.width;
-    const textH = t.fontSize;
+    const box = textBox(t);
+    const textW = box.width;
+    const textH = box.size;
+    const off = box.x0 - t.x; // centred text starts left of its anchor
     const rot = t.rotation || 0;
     // Transform mouse coords into the text element's local space
     let lx, ly;
@@ -923,8 +977,8 @@ function hitTestText(mx, my) {
       lx = mx - t.x;
       ly = my - t.y;
     }
-    // Local bounding box: 0..textW horizontally, -textH..+2 vertically
-    if (lx >= 0 && lx <= textW && ly >= -textH && ly <= 2) {
+    // Local bounding box: off..off+textW horizontally, -textH..+2 vertically
+    if (lx >= off && lx <= off + textW && ly >= -textH && ly <= 2) {
       return t;
     }
   }
@@ -946,6 +1000,8 @@ txCanvas.addEventListener('mousedown', (e) => {
   // Check reply inset drag
   if (hitTestReplyInset(pos.x, pos.y)) {
     replyDrag = true;
+    // Keep the size it has now while it moves out of its slot.
+    if (!replyInset.w) { replyInset.w = replyInset._drawW; replyInset.h = replyInset._drawH; }
     dragOffsetX = pos.x - replyInset._drawX;
     dragOffsetY = pos.y - replyInset._drawY;
     e.preventDefault();
@@ -967,6 +1023,7 @@ txCanvas.addEventListener('mousedown', (e) => {
     selectedText = hit;
     renderTextLayers();
     renderTextProps();
+    renderTxPreview();
     e.preventDefault();
   } else {
     if (selectedText) {
@@ -1035,7 +1092,11 @@ txCanvas.addEventListener('wheel', (e) => {
   const pos = canvasToImageCoords(e);
   if (hitTestReplyInset(pos.x, pos.y)) {
     e.preventDefault();
-    replyInset.scale = Math.max(0.1, Math.min(0.8, replyInset.scale + (e.deltaY < 0 ? 0.03 : -0.03)));
+    const f = e.deltaY < 0 ? 1.08 : 0.93;
+    const cw = replyInset._drawW || 90, ch = replyInset._drawH || 72;
+    const nw = Math.max(30, Math.min(txCanvas.width, Math.round(cw * f)));
+    replyInset.w = nw; replyInset.h = Math.round(nw * ch / cw);
+    if (replyInset.x < 0) { replyInset.x = replyInset._drawX; replyInset.y = replyInset._drawY; }
     renderTxPreview();
   }
 }, { passive: false });
@@ -1053,8 +1114,8 @@ const tplSaveBtn = document.getElementById('tpl-save-btn');
 const tplCount = document.getElementById('tpl-count');
 
 tplSaveBtn.addEventListener('click', () => {
-  if (templates.length >= 12) {
-    statusBar.textContent = 'Max 12 templates — delete one first';
+  if (templates.length >= 24) {
+    statusBar.textContent = 'You have 24 templates of your own. Delete one first.';
     return;
   }
   // Generate thumbnail from current TX canvas
@@ -1080,8 +1141,11 @@ tplSaveBtn.addEventListener('click', () => {
   const tpl = {
     bgParams: bgParams ? JSON.parse(JSON.stringify(bgParams)) : null,
     bgDataUrl,
-    texts: textElements.map(t => ({ key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label })),
+    texts: textElements.map(t => ({ key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, align: t.align, outline: !!t.outline, role: t.role, tpl: !!t.tpl })),
     thumbnail,
+    // Where a reply's picture goes, so a saved reply template keeps its slot.
+    slot: activeSlot ? Object.assign({}, activeSlot) : null,
+    name: activeStarterId ? (window.SstvTemplates.starter(activeStarterId) || {}).name + ' (mine)' : 'My template',
   };
   templates.push(tpl);
   activeTemplateIdx = templates.length - 1;
@@ -1106,7 +1170,11 @@ function loadTemplate(idx) {
     color: saved.color || '#ffffff',
     rotation: saved.rotation || 0,
     visible: saved.visible !== false,
+    align: saved.align, outline: !!saved.outline, role: saved.role, tpl: !!saved.tpl,
   }));
+  activeStarterId = null;
+  activeSlot = tpl.slot || null;
+  replyInset.x = -1; replyInset.y = -1; replyInset.w = 0; replyInset.h = 0;
 
   // Re-fill auto-labels with current callsign/grid
   syncAutoLabels();
@@ -1144,11 +1212,45 @@ function saveTemplates() {
 }
 
 function renderTemplateStrip() {
-  // Remove all template thumbnails (keep the + button)
+  // Starters first (drawn in the station's look), then the operator's own,
+  // then the + button that saves the current picture.
   while (tplStrip.firstChild !== tplSaveBtn) {
     tplStrip.removeChild(tplStrip.firstChild);
   }
-  tplCount.textContent = templates.length ? '(' + templates.length + ')' : '';
+  tplCount.textContent = String(window.SstvTemplates.STARTERS.length + templates.length);
+  const defReply = defaultReplyId();
+  for (const st of window.SstvTemplates.STARTERS) {
+    const div = document.createElement('div');
+    div.className = 'sstv-tpl' + (st.id === activeStarterId ? ' active' : '');
+    div.title = st.name + ' — ' + st.why + (st.reply ? ' Right-click to make it your default reply.' : '');
+    div.appendChild(starterThumb(st.id));
+    if (st.reply) {
+      const b = document.createElement('span');
+      b.className = 'tpl-badge';
+      b.textContent = st.id === defReply ? '\u21A9 default' : '\u21A9';
+      div.appendChild(b);
+    }
+    const nm = document.createElement('div');
+    nm.className = 'tpl-name';
+    nm.textContent = st.name;
+    div.appendChild(nm);
+    div.addEventListener('click', () => applyStarter(st.id));
+    if (st.reply) {
+      div.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openMenu(e.clientX, e.clientY, st.name, [
+          { label: 'Use for replies', action: () => { setDefaultReply(st.id); } },
+          { label: 'Compose with it', action: () => applyStarter(st.id) },
+        ]);
+      });
+    }
+    tplStrip.insertBefore(div, tplSaveBtn);
+  }
+  if (templates.length) {
+    const sep = document.createElement('div');
+    sep.className = 'tray-sep';
+    tplStrip.insertBefore(sep, tplSaveBtn);
+  }
   for (let i = 0; i < templates.length; i++) {
     const tpl = templates[i];
     const div = document.createElement('div');
@@ -1205,6 +1307,10 @@ txBtn.addEventListener('click', () => {
   }
   const mode = modeSelect.value;
   const res = MODE_RES[mode] || { w: 320, h: 256 };
+  // A selected text draws an editing handle on the picture; never send it.
+  // Redraw first so {UTC} is the time of this transmission.
+  if (selectedText) { selectedText = null; textPropsEl.style.display = 'none'; }
+  renderTxPreview();
   // Get final composited image data from TX canvas
   const imageData = txCtx.getImageData(0, 0, res.w, res.h);
   // Send to main process for encoding
@@ -1254,6 +1360,7 @@ window.api.onSstvTxAudio(async (data) => {
       progressBar.classList.remove('tx');
       setTimeout(() => { progressBar.style.width = '0%'; }, 1000);
       statusBar.textContent = 'TX complete';
+      noteReplySent();
     }, (durationSec + 1) * 1000);
     return;
   }
@@ -1322,13 +1429,8 @@ window.api.onSstvTxAudio(async (data) => {
       progressBar.classList.remove('tx');
       setTimeout(() => { progressBar.style.width = '0%'; }, 1000);
       statusBar.textContent = 'TX complete';
-      // Clear reply after successful TX
-      if (replyImage) {
-        replyImage = null;
-        clearReplyBtn.style.display = 'none';
-        txBtn.classList.remove('reply-mode');
-        renderTxPreview();
-      }
+      // A reply stays after it is sent, so the 73 is one pick away.
+      noteReplySent();
     }
 
     source.onended = finishTx;
@@ -1371,8 +1473,10 @@ window.api.onSstvTxImage((data) => {
     const rgba = new Uint8ClampedArray(data.imageData);
     const imgData = new ImageData(rgba, w, h);
     txCtx.putImageData(imgData, 0, 0);
-    statusBar.textContent = 'ECHOCAT TX: ' + data.mode + ' (' + w + 'x' + h + ')';
-    rxInfo.textContent = 'TX from phone — ' + data.mode;
+    statusBar.textContent = data.guestCall
+      ? 'Transmitting a picture from guest ' + data.guestCall + ' (' + data.mode + ')'
+      : 'ECHOCAT TX: ' + data.mode + ' (' + w + 'x' + h + ')';
+    rxInfo.textContent = data.guestCall ? 'TX from guest ' + data.guestCall : 'TX from the ECHOCAT app — ' + data.mode;
   } catch (err) {
     console.error('[SSTV] TX image display error:', err);
   }
@@ -1407,6 +1511,8 @@ async function loadGallery() {
           timestamp: img.timestamp,
           width: img.width || 320,
           height: img.height || 256,
+          theirCall: img.theirCall || '',
+          fskCall: img.fskCall || '',
         });
       }
       renderGallery();
@@ -1420,7 +1526,7 @@ function renderGallery() {
   gallery.innerHTML = '';
   // Sort by timestamp descending (newest first)
   galleryImages.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-  galleryCount.textContent = '(' + galleryImages.length + ')';
+  galleryCount.textContent = String(galleryImages.length);
   for (let i = 0; i < galleryImages.length; i++) {
     const entry = galleryImages[i];
     const thumb = document.createElement('div');
@@ -1436,29 +1542,25 @@ function renderGallery() {
     info.textContent = dateStr + ' ' + (entry.mode || '');
     thumb.appendChild(info);
 
-    // Click to view fullscreen
-    thumb.addEventListener('click', () => viewImageFullscreen(entry.dataUrl));
-    // Double-click to set as reply
-    thumb.addEventListener('dblclick', (e) => { e.stopPropagation(); setReplyImage(entry); });
-    // Right-click to delete
-    thumb.addEventListener('contextmenu', ((idx, fn) => (e) => {
-      e.preventDefault();
-      showImageContextMenu(e.clientX, e.clientY, idx, fn);
-    })(i, entry.filename));
-
-    // Reply button — overlaid on the thumbnail so the feature is discoverable
-    // without relying on the double-click shortcut
-    const replyBtn = document.createElement('button');
-    replyBtn.type = 'button';
-    replyBtn.textContent = '↩ Reply';
-    replyBtn.title = 'Use this as the PiP reply inset on your next TX';
-    replyBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:rgba(233,69,96,0.92);color:#fff;border:none;border-radius:3px;font-size:10px;font-weight:700;padding:3px 6px;cursor:pointer;z-index:2;';
-    replyBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setReplyImage(entry);
+    if (entry.theirCall) info.textContent = entry.theirCall + ' · ' + (entry.mode || '');
+    thumb.title = 'Click to view · double-click to reply · right-click for more';
+    // Click views it full size, unless a second click makes it a double-click
+    // (which replies): the old immediate viewer covered the thumbnail and
+    // swallowed the double-click.
+    let clickTimer = null;
+    thumb.addEventListener('click', () => {
+      if (clickTimer) return;
+      clickTimer = setTimeout(() => { clickTimer = null; viewImageFullscreen(entry.dataUrl); }, 260);
     });
-    thumb.style.position = thumb.style.position || 'relative';
-    thumb.appendChild(replyBtn);
+    thumb.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+      startReply(entry);
+    });
+    thumb.addEventListener('contextmenu', ((idx) => (e) => {
+      e.preventDefault();
+      openImageMenu(e.clientX, e.clientY, entry, idx);
+    })(i));
 
     gallery.appendChild(thumb);
   }
@@ -1514,6 +1616,7 @@ function viewImageFullscreen(src) {
 function setReplyImage(entry) {
   // Reset inset position/scale for new reply
   replyInset.x = -1; replyInset.y = -1; replyInset.scale = 0.28; replyInset.rotation = 0;
+  replyInset.w = 0; replyInset.h = 0;
   replyInset._canvasDirty = true;
   if (entry.imageData) {
     replyImage = {
@@ -1535,39 +1638,23 @@ function setReplyImage(entry) {
         width: img.width,
         height: img.height,
       };
-      clearReplyBtn.style.display = '';
-      txBtn.textContent = 'REPLY';
-      txBtn.classList.add('reply-mode');
+      replyInset._canvasDirty = true;
+      updateTxButton();
       renderTxPreview();
     };
     img.src = entry.dataUrl;
     return;
   }
-  clearReplyBtn.style.display = '';
-  txBtn.textContent = 'REPLY';
-  txBtn.classList.add('reply-mode');
+  updateTxButton();
   renderTxPreview();
 }
 
-clearReplyBtn.addEventListener('click', () => {
-  replyImage = null;
-  clearReplyBtn.style.display = 'none';
-  txBtn.textContent = 'TRANSMIT';
-  txBtn.classList.remove('reply-mode');
-  renderTxPreview();
-});
-
-// On-canvas "Reply with this" button — uses the latest decode directly
+// On-canvas Reply button — the latest decode
 const rxReplyBtnEl = document.getElementById('rx-reply-btn');
 if (rxReplyBtnEl) {
-  rxReplyBtnEl.addEventListener('click', () => {
-    if (!lastRxImage) return;
-    setReplyImage({
-      imageData: lastRxImage.imageData,
-      width: lastRxImage.width,
-      height: lastRxImage.height,
-      mode: lastRxImage.mode,
-    });
+  rxReplyBtnEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (lastRxImage) startReply(lastRxImage);
   });
 }
 
@@ -1705,8 +1792,8 @@ async function startRxAudio() {
     // on the laptop microphone.
     const track = sstvStream.getAudioTracks()[0];
     const heard = (track && track.label) || pick.label || 'default device';
-    statusBar.textContent = 'Listening on ' + heard + ' (' + actualRate + ' Hz)'
-      + (pick.notice && !directStream ? '. ' + pick.notice : '');
+    setStatusDevice(heard, !audioInputSelect.value);
+    statusBar.textContent = (pick.notice && !directStream) ? pick.notice : 'Listening (' + actualRate + ' Hz)';
   } catch (err) {
     console.error('[SSTV] RX audio start error:', err);
     rxInfo.textContent = 'No audio input';
@@ -1817,6 +1904,7 @@ function saveMultiSliceConfigs() {
 }
 
 multiBtn.addEventListener('click', () => {
+  closeGear();
   multiPanel.classList.toggle('hidden');
   multiBtn.classList.toggle('active', !multiPanel.classList.contains('hidden'));
   if (!multiPanel.classList.contains('hidden')) {
@@ -2235,6 +2323,10 @@ window.api.onSstvRxImage((data) => {
       width: data.width,
       height: data.height,
       mode: data.mode,
+      filename: (data.saved && data.saved.filename) || null,
+      theirCall: (data.saved && data.saved.theirCall) || '',
+      fskCall: (data.saved && data.saved.fskCall) || '',
+      at: Date.now(),
     };
     // Paint the FINAL image (post-processed in main). The progressive
     // rx-line paints are raw; and a redecode arrives with no line events
@@ -2242,11 +2334,10 @@ window.api.onSstvRxImage((data) => {
     renderSlantedImage(lastRxImage, 0);
     const rxReplyBtn = document.getElementById('rx-reply-btn');
     if (rxReplyBtn) rxReplyBtn.style.display = '';
-    // Reveal the slant slider; reset slant for the new decode.
-    const slantRow = document.getElementById('rx-slant-row');
+    ['rx-slant-btn', 'rx-redecode'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
+    // Reset slant for the new decode (the slider opens from Fix slant).
     const slantSlider = document.getElementById('rx-slant-slider');
     const slantValue = document.getElementById('rx-slant-value');
-    if (slantRow) slantRow.style.display = 'flex';
     if (slantSlider) slantSlider.value = 0;
     if (slantValue) slantValue.textContent = '0 px';
     rxSlantPx = 0;
@@ -2267,6 +2358,9 @@ window.api.onSstvRxImage((data) => {
     width: w, height: h, imageData: Array.from(data.imageData),
     sliceId: data.sliceId || null,
     weak: !!data.weak, // session-only (weak decodes aren't written to disk)
+    filename: (data.saved && data.saved.filename) || null,
+    theirCall: (data.saved && data.saved.theirCall) || '',
+    fskCall: (data.saved && data.saved.fskCall) || '',
   };
   galleryImages.unshift(entry);
   renderGallery();
@@ -2397,18 +2491,6 @@ function drawWaterfallLine(mags) {
 // ===== DECODE LOG ==========================================================
 
 const decodeLog = document.getElementById('decode-log');
-const logWrap = document.getElementById('log-wrap');
-const logToggle = document.getElementById('log-toggle');
-let logVisible = true;
-
-logToggle.addEventListener('click', () => {
-  logVisible = !logVisible;
-  // Only collapse the textarea — the header (with this toggle) stays visible
-  // so users can click it again to re-open. Previously the whole log-wrap
-  // was hidden, which also hid the toggle itself.
-  logWrap.classList.toggle('collapsed', !logVisible);
-  logToggle.querySelector('span').textContent = logVisible ? '(click to hide)' : '(click to show)';
-});
 
 document.getElementById('log-copy-btn').addEventListener('click', () => {
   navigator.clipboard.writeText(decodeLog.value).then(() => {
@@ -2456,4 +2538,693 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     window.api.setZoom(1);
   }
+});
+
+
+// ===========================================================================
+// REDESIGN (2026-09-29): starters and looks, replies, tray, top bar,
+// settings, tuner + SWR banner, packs. Templates draw through
+// lib/sstv-templates.js (window.SstvTemplates).
+// ===========================================================================
+
+const T = window.SstvTemplates;
+let ctxData = { myCall: '', grid: '', park: '', parkName: '', name: '', rig: '', typedCall: '' };
+let currentLook = T.lookFor({ call: 'N0CALL' });
+let activePack = null;          // the pack object in use, or null
+let packImages = {};            // pack image name -> HTMLImageElement
+let packsList = [];             // from main (lib/sstv-packs.js), if present
+let activeStarterId = null;     // the starter whose scene is the background
+let activeSlot = null;          // where a reply's picture goes, or null
+
+async function refreshContext() {
+  if (!window.api.sstvContext) return;
+  try { ctxData = Object.assign(ctxData, await window.api.sstvContext()); } catch {}
+}
+
+function rebuildLook() {
+  currentLook = T.lookFor({ call: callsign || ctxData.myCall || 'N0CALL', shuffle: settings.sstvLookShuffle | 0, pack: activePack });
+  const d = document.getElementById('look-desc');
+  if (d) d.textContent = T.describeLook(currentLook) + (activePack ? ' · ' + activePack.name + ' pack' : '');
+}
+
+function utcStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + 'Z';
+}
+
+function templateVars() {
+  return {
+    MYCALL: (callsign || ctxData.myCall || '').toUpperCase(),
+    GRID: (grid || ctxData.grid || '').toUpperCase(),
+    CALL: replySession ? (replySession.call || '') : '',
+    RSV: replySession ? (replySession.rsv || '595') : '595',
+    PARK: ctxData.park || '',
+    UTC: utcStamp(),
+    NAME: settings.sstvOperatorName || ctxData.name || '',
+    RIG: ctxData.rig || '',
+  };
+}
+
+// How a text layer draws right now: words (placeholders filled, a pack may
+// reword a headline), font, fitted size, colour, and where it starts.
+function textBox(t, ctx, canvasW) {
+  const c = ctx || txCtx;
+  const cw = canvasW || txCanvas.width;
+  let label = t.label || '';
+  let color = t.color || '#ffffff';
+  let family = '"Segoe UI", sans-serif';
+  let weight = t.bold ? 'bold' : 'normal';
+  if (t.tpl) {
+    const st = T.textStyle(t, currentLook);
+    label = st.label; color = st.color;
+    family = st.fontCss + ', "Segoe UI", sans-serif';
+    weight = String(st.weight);
+  }
+  label = T.fillVars(label, templateVars());
+  const italic = t.italic ? 'italic ' : '';
+  let size = t.fontSize || 14;
+  const font = (sz) => italic + weight + ' ' + sz + 'px ' + family;
+  c.font = font(size);
+  let width = c.measureText(label).width;
+  if (t.tpl) {
+    const maxW = t.align === 'center' ? cw - 20 : cw - 12 - t.x;
+    while (size > 10 && width > maxW) { size -= 1; c.font = font(size); width = c.measureText(label).width; }
+  }
+  const x0 = t.align === 'center' ? t.x - width / 2 : t.x;
+  return { label, font: font(size), size, width, x0, color, outline: !!t.outline };
+}
+
+function drawTextLayer(ctx, t, canvasW) {
+  const b = textBox(t, ctx, canvasW);
+  if (!b.label) return;
+  ctx.save();
+  ctx.font = b.font;
+  const rot = t.rotation || 0;
+  const dx = b.x0 - t.x;
+  ctx.translate(t.x, t.y);
+  if (rot) ctx.rotate(rot);
+  if (b.outline) {
+    // Brightness contrast survives SSTV; a light outline for dark lettering.
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(3, b.size / 5);
+    ctx.strokeStyle = T.isDark(b.color) ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)';
+    ctx.strokeText(b.label, dx, 0);
+  } else {
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 3; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 1;
+  }
+  ctx.fillStyle = b.color;
+  ctx.fillText(b.label, dx, 0);
+  ctx.restore();
+}
+
+function applyStarter(id, opts) {
+  const st = T.starter(id);
+  if (!st) return;
+  const o = opts || {};
+  activeStarterId = id;
+  const h = txCanvas.height || 256;
+  if (!o.keepTexts) {
+    textElements = T.textLayers(id, h);
+    userTextCounter = 0;
+    selectedText = null;
+    textPropsEl.style.display = 'none';
+  }
+  activeSlot = T.replySlot(id, h);
+  replyInset.x = -1; replyInset.y = -1; replyInset.w = 0; replyInset.h = 0;
+  activeTemplateIdx = -1;
+  rerenderStarterScene();
+  if (replySession && st.reply && rbTpl) rbTpl.value = id;
+  window.api.saveSettings({ sstvLastStarter: id });
+  saveTextElements();
+  renderTemplateStrip();
+  renderTxPreview();
+  updateTxState();
+}
+
+function rerenderStarterScene() {
+  if (!activeStarterId) return;
+  const c = document.createElement('canvas');
+  c.width = txCanvas.width || 320; c.height = txCanvas.height || 256;
+  T.renderScene(c, activeStarterId, currentLook, packImages);
+  bgImage = c; bgParams = null;
+}
+
+// Starter thumbnails, cached per look (a shuffle or pack redraws them).
+const _thumbCache = new Map();
+function starterThumb(id) {
+  const key = id + '|' + (callsign || '') + '|' + (settings.sstvLookShuffle | 0) + '|' + (activePack ? activePack.id + activePack.version : '') + '|' + (replySession ? replySession.call : '');
+  let url = _thumbCache.get(key);
+  if (!url) {
+    const c = document.createElement('canvas'); c.width = 320; c.height = 256;
+    const ctx = c.getContext('2d');
+    T.renderScene(c, id, currentLook, packImages);
+    const slot = T.replySlot(id, 256);
+    if (slot) {
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(slot.x - 3, slot.y - 3, slot.w + 6, slot.h + 6);
+      if (replyInset._canvas && replyImage) ctx.drawImage(replyInset._canvas, slot.x, slot.y, slot.w, slot.h);
+      else { ctx.fillStyle = '#39415f'; ctx.fillRect(slot.x, slot.y, slot.w, slot.h); }
+    }
+    for (const t of T.textLayers(id, 256)) drawTextLayer(ctx, t, 320);
+    url = c.toDataURL('image/png');
+    if (_thumbCache.size > 60) _thumbCache.clear();
+    _thumbCache.set(key, url);
+  }
+  const img = document.createElement('img');
+  img.src = url;
+  img.alt = id;
+  return img;
+}
+
+function onLookChanged() {
+  rebuildLook();
+  _thumbCache.clear();
+  if (activeStarterId) rerenderStarterScene();
+  renderTemplateStrip();
+  renderTxPreview();
+}
+
+// ---- Reply sessions ----------------------------------------------------------
+// Replying is a session with the station: it survives template changes and
+// transmissions, and ends on ✕, a reply to another picture, or 15 minutes
+// without a transmission.
+const REPLY_IDLE_MS = 15 * 60 * 1000;
+let replySession = null;
+const replybar = document.getElementById('replybar');
+const txHead = document.getElementById('tx-head');
+const rbCall = document.getElementById('rb-call');
+const rbRsv = document.getElementById('rb-rsv');
+const rbTpl = document.getElementById('rb-tpl');
+const rbSrc = document.getElementById('rb-src');
+const rbSent = document.getElementById('rb-sent');
+
+function defaultReplyId() {
+  const id = settings.sstvDefaultReply;
+  const st = id && T.starter(id);
+  return st && st.reply ? id : 'reply';
+}
+function setDefaultReply(id) {
+  settings.sstvDefaultReply = id;
+  window.api.saveSettings({ sstvDefaultReply: id });
+  renderTemplateStrip();
+  statusBar.textContent = 'Double-click now replies with ' + (T.starter(id) || {}).name + '.';
+}
+
+async function startReply(entry, starterId) {
+  if (!entry) return;
+  let call = String(entry.theirCall || entry.fskCall || '').toUpperCase();
+  let source = call ? (entry.fskCall && call === String(entry.fskCall).toUpperCase() ? 'from FSK ID' : '') : '';
+  if (!call) {
+    await refreshContext();
+    if (ctxData.typedCall) { call = String(ctxData.typedCall).toUpperCase(); source = 'last typed'; }
+  }
+  replySession = {
+    call, source, rsv: (rbRsv.value || '595').replace(/[^0-9]/g, '').slice(0, 3) || '595',
+    filename: entry.filename || null, mode: entry.mode || '',
+    startedAt: Date.now(), lastTxAt: 0,
+  };
+  setReplyImage(entry);
+  rbTpl.textContent = '';
+  for (const st of T.STARTERS.filter(x => x.reply)) {
+    const o = document.createElement('option');
+    o.value = st.id; o.textContent = st.name;
+    rbTpl.appendChild(o);
+  }
+  const id = starterId || defaultReplyId();
+  rbCall.value = call;
+  rbSrc.textContent = call ? source : 'type their call';
+  rbSent.textContent = '';
+  replybar.hidden = false;
+  txHead.hidden = true;
+  applyStarter(id);
+  rbTpl.value = id;
+  updateTxButton();
+  if (!call) setTimeout(() => rbCall.focus(), 0);
+  statusBar.textContent = 'Replying' + (call ? ' to ' + call : '') + '. Change the template any time; the reply stays.';
+}
+
+function endReply(why) {
+  replySession = null;
+  replyImage = null;
+  replybar.hidden = true;
+  txHead.hidden = false;
+  updateTxButton();
+  _thumbCache.clear();
+  renderTemplateStrip();
+  renderTxPreview();
+  if (why) statusBar.textContent = why;
+}
+
+function noteReplySent() {
+  if (!replySession) return;
+  replySession.lastTxAt = Date.now();
+  const d = new Date();
+  rbSent.textContent = 'sent ' + String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0') + 'Z';
+}
+
+function updateTxButton() {
+  if (isTx) return;
+  txBtn.textContent = replySession ? 'REPLY' : 'TRANSMIT';
+  txBtn.classList.toggle('reply-mode', !!replySession);
+}
+
+function drawReplyThumb() {
+  const c = document.getElementById('rb-thumb');
+  if (!c || !replySession || !replyInset._canvas) return;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.drawImage(replyInset._canvas, 0, 0, c.width, c.height);
+}
+
+let _saveCallTimer = null;
+rbCall.addEventListener('input', () => {
+  if (!replySession) return;
+  const v = rbCall.value.toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
+  if (v !== rbCall.value) rbCall.value = v;
+  replySession.call = v;
+  rbSrc.textContent = v ? '' : 'type their call';
+  renderTxPreview();
+  // Saved with the picture, so a later reply to it is already filled in.
+  const fn = replySession.filename;
+  if (fn && window.api.sstvGallerySetCall) {
+    clearTimeout(_saveCallTimer);
+    _saveCallTimer = setTimeout(() => {
+      window.api.sstvGallerySetCall(fn, v);
+      const g = galleryImages.find(x => x.filename === fn);
+      if (g) { g.theirCall = v; renderGallery(); }
+    }, 600);
+  }
+});
+rbRsv.addEventListener('input', () => {
+  const v = rbRsv.value.replace(/[^0-9]/g, '').slice(0, 3);
+  if (v !== rbRsv.value) rbRsv.value = v;
+  if (replySession) { replySession.rsv = v || '595'; renderTxPreview(); }
+});
+rbTpl.addEventListener('change', () => applyStarter(rbTpl.value));
+document.getElementById('rb-x').addEventListener('click', () => endReply('Reply ended.'));
+document.getElementById('rb-log').addEventListener('click', () => {
+  if (!replySession || !window.api.sstvLogContact) return;
+  window.api.sstvLogContact({ call: replySession.call, rsvSent: replySession.rsv });
+});
+setInterval(() => {
+  if (!replySession || isTx) return;
+  const since = replySession.lastTxAt || replySession.startedAt;
+  if (Date.now() - since > REPLY_IDLE_MS) endReply('Reply ended after 15 minutes without a transmission.');
+}, 30000);
+
+// FSK ID after a picture names the station (see lib/sstv-fskid.js).
+if (window.api.onSstvRxFskid) {
+  window.api.onSstvRxFskid((d) => {
+    const call = String((d && d.call) || '').toUpperCase();
+    if (!call) return;
+    addLogEntry(logTime() + ' FSK ID ' + call);
+    if (lastRxImage && Date.now() - (lastRxImage.at || 0) < 30000) {
+      lastRxImage.fskCall = call;
+      if (!lastRxImage.theirCall) lastRxImage.theirCall = call;
+      const g = galleryImages.find(x => x.filename && x.filename === lastRxImage.filename) || galleryImages[0];
+      if (g && !g.theirCall) { g.theirCall = call; g.fskCall = call; renderGallery(); }
+    }
+    rxInfo.textContent = (lastRxImage ? lastRxImage.mode + ' — ' : '') + 'from ' + call;
+  });
+}
+
+// The live picture: double-click replies, right-click for more.
+const rxBox = document.getElementById('rx-box');
+rxBox.addEventListener('dblclick', (e) => {
+  if (e.target.closest('.over-actions')) return;
+  if (lastRxImage) startReply(lastRxImage);
+});
+rxBox.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (lastRxImage) openImageMenu(e.clientX, e.clientY, lastRxImage, -1);
+});
+document.getElementById('rx-slant-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const row = document.getElementById('rx-slant-row');
+  row.style.display = row.style.display === 'flex' ? 'none' : 'flex';
+  fitCanvases();
+});
+
+// ---- Menus -------------------------------------------------------------------
+const ctxMenu = document.getElementById('ctx-menu');
+function closeMenu() { ctxMenu.hidden = true; }
+function openMenu(x, y, header, items) {
+  ctxMenu.textContent = '';
+  if (header) { const h = document.createElement('div'); h.className = 'h'; h.textContent = header; ctxMenu.appendChild(h); }
+  for (const it of items) {
+    if (it === '-') { ctxMenu.appendChild(document.createElement('hr')); continue; }
+    const b = document.createElement('button');
+    b.type = 'button'; b.setAttribute('role', 'menuitem');
+    if (it.danger) b.className = 'danger';
+    b.append(it.label);
+    if (it.note) { const sm = document.createElement('small'); sm.textContent = it.note; b.appendChild(sm); }
+    b.addEventListener('click', () => { closeMenu(); it.action(); });
+    ctxMenu.appendChild(b);
+  }
+  ctxMenu.hidden = false;
+  const r = ctxMenu.getBoundingClientRect();
+  ctxMenu.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + 'px';
+  ctxMenu.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + 'px';
+  const first = ctxMenu.querySelector('button');
+  if (first) first.focus();
+}
+document.addEventListener('mousedown', (e) => { if (!ctxMenu.hidden && !ctxMenu.contains(e.target)) closeMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMenu(); closeGear(); closeFreqPop(); } });
+
+function openImageMenu(x, y, entry, galleryIdx) {
+  const call = entry.theirCall || entry.fskCall || '';
+  const def = defaultReplyId();
+  const items = T.STARTERS.filter(st => st.reply).map(st => ({
+    label: 'Reply with ' + st.name.replace(/^Reply( with|:)?\s*/i, ''),
+    note: st.id === def ? 'double-click' : '',
+    action: () => startReply(entry, st.id),
+  }));
+  items.push('-');
+  if (entry.dataUrl) items.push({ label: 'View full size', action: () => viewImageFullscreen(entry.dataUrl) });
+  items.push({ label: 'Open the pictures folder', action: () => window.api.sstvOpenGalleryFolder() });
+  if (galleryIdx >= 0) {
+    items.push({ label: 'Delete', danger: true, action: async () => {
+      if (entry.filename) await window.api.sstvDeleteImage(entry.filename);
+      galleryImages.splice(galleryIdx, 1);
+      renderGallery();
+      statusBar.textContent = 'Picture deleted';
+    } });
+  }
+  openMenu(x, y, (call || 'Unknown call') + (entry.mode ? ' · ' + entry.mode : ''), items);
+}
+
+// ---- Tray tabs ------------------------------------------------------------------
+const trayTabs = Array.from(document.querySelectorAll('.tab'));
+function showTab(t) {
+  trayTabs.forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  document.querySelectorAll('.tray-body').forEach(b => { b.hidden = b.dataset.body !== t; });
+  document.getElementById('open-folder-btn').hidden = t !== 'rx';
+  document.getElementById('log-copy-btn').hidden = t !== 'log';
+  if (t === 'packs') {
+    const dot = document.getElementById('packs-dot');
+    if (dot) dot.textContent = '';
+    try { localStorage.setItem('sstv-packs-seen', packsSeenKey()); } catch {}
+    renderPacksStrip();
+  }
+  if (t === 'log') decodeLog.scrollTop = decodeLog.scrollHeight;
+}
+trayTabs.forEach(b => b.addEventListener('click', () => showTab(b.dataset.t)));
+showTab('rx');
+
+// ---- Top bar: bands and the frequency picker -----------------------------------
+const BAND_OF = (khz) => khz < 4000 ? '80' : khz < 8000 ? '40' : khz < 15000 ? '20' : khz < 19000 ? '17' : khz < 22000 ? '15' : khz < 25500 ? '12' : khz < 30000 ? '10' : '6';
+const bandsEl = document.getElementById('bands');
+(function buildBands() {
+  const groups = Array.from(freqSelect.querySelectorAll('optgroup'));
+  for (const g of groups) {
+    const band = g.label.replace('m', '');
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'band'; b.textContent = band; b.dataset.band = band;
+    b.title = g.label + ' SSTV';
+    b.addEventListener('click', () => {
+      // The calling frequency when the band has one, else its first.
+      const opts = Array.from(g.querySelectorAll('option'));
+      const opt = opts.find(o => /calling/i.test(o.textContent)) || opts[0];
+      freqSelect.value = opt.value;
+      freqInput.value = '';
+      tuneToFreq(opt.value, opt.dataset.mode);
+      showFreq(opt.value, opt.dataset.mode);
+    });
+    bandsEl.appendChild(b);
+  }
+})();
+function showFreq(khz, mode) {
+  const k = Number(khz);
+  if (!Number.isFinite(k) || k <= 0) return;
+  document.getElementById('freq-label').textContent = (k / 1000).toFixed(3);
+  document.getElementById('freq-mode').textContent = (mode || getFreqMode(k)) + ' \u25BE';
+  const band = BAND_OF(k);
+  bandsEl.querySelectorAll('.band').forEach(b => b.classList.toggle('on', b.dataset.band === band));
+}
+const freqPop = document.getElementById('freq-pop');
+function closeFreqPop() { freqPop.hidden = true; }
+document.getElementById('freq-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  freqPop.hidden = !freqPop.hidden;
+  if (!freqPop.hidden) freqSelect.focus();
+});
+document.addEventListener('mousedown', (e) => { if (!freqPop.hidden && !freqPop.contains(e.target) && !e.target.closest('#freq-btn')) closeFreqPop(); });
+freqSelect.addEventListener('change', () => {
+  const opt = freqSelect.options[freqSelect.selectedIndex];
+  showFreq(freqSelect.value, opt && opt.dataset.mode);
+  closeFreqPop();
+});
+freqInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { showFreq(freqInput.value.trim()); closeFreqPop(); } });
+tuneBtn.addEventListener('click', () => { showFreq(freqInput.value.trim()); closeFreqPop(); });
+window.api.onCatFrequency((hz) => { if (hz > 0) showFreq(Math.round(hz / 1000)); });
+{ const o = freqSelect.options[freqSelect.selectedIndex]; showFreq(freqSelect.value, o && o.dataset.mode); }
+
+// ---- Settings popover --------------------------------------------------------------
+const gearPop = document.getElementById('gear-pop');
+function closeGear() { gearPop.hidden = true; }
+document.getElementById('gear-btn').addEventListener('click', (e) => { e.stopPropagation(); gearPop.hidden = !gearPop.hidden; });
+document.addEventListener('mousedown', (e) => { if (!gearPop.hidden && !gearPop.contains(e.target) && !e.target.closest('#gear-btn')) closeGear(); });
+document.getElementById('look-shuffle').addEventListener('click', () => {
+  settings.sstvLookShuffle = (settings.sstvLookShuffle | 0) + 1;
+  window.api.saveSettings({ sstvLookShuffle: settings.sstvLookShuffle });
+  onLookChanged();
+  statusBar.textContent = 'New look: ' + T.describeLook(currentLook);
+});
+document.getElementById('op-name').addEventListener('change', (e) => {
+  settings.sstvOperatorName = e.target.value.trim();
+  window.api.saveSettings({ sstvOperatorName: settings.sstvOperatorName });
+  _thumbCache.clear(); renderTxPreview(); renderTemplateStrip();
+});
+document.getElementById('tpl-export').addEventListener('click', async () => {
+  if (!window.api.sstvTemplatesExport) return;
+  const r = await window.api.sstvTemplatesExport();
+  if (r && r.ok) statusBar.textContent = 'Exported ' + r.count + ' template(s), your look and your packs.';
+  else if (r && r.error) statusBar.textContent = r.error;
+});
+document.getElementById('tpl-import').addEventListener('click', async () => {
+  if (!window.api.sstvTemplatesImport) return;
+  const r = await window.api.sstvTemplatesImport();
+  if (r && r.ok) {
+    settings = await window.api.getSettings();
+    templates = settings.sstvTemplates || [];
+    rebuildLook(); _thumbCache.clear(); renderTemplateStrip();
+    statusBar.textContent = 'Imported ' + r.added + ' template(s)' + (r.skipped ? ' (' + r.skipped + ' over the limit of 24 were left out)' : '') + '.';
+    showTab('tpl');
+  } else if (r && r.error) statusBar.textContent = r.error;
+});
+document.getElementById('log-copy-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(decodeLog.value).then(() => { statusBar.textContent = 'Decode log copied'; }).catch(() => {});
+});
+
+// Flex-only controls stay hidden on other radios (lib/rig-family.js).
+function showRigScopedControls() {
+  let flex = false;
+  try {
+    const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    flex = rig ? window.RigFamily.isFlex(rig) : window.RigFamily.familyFromCatTarget(settings.catTarget || {}) === 'flex';
+  } catch {}
+  document.getElementById('multi-row').hidden = !flex && !multiActive;
+}
+
+function setStatusDevice(label, fromRigs) {
+  const el = document.getElementById('status-device');
+  el.textContent = '';
+  el.append('Listening on ');
+  const b = document.createElement('b'); b.textContent = label; el.appendChild(b);
+  el.append(fromRigs ? ' (from My Rigs)' : ' (chosen for SSTV)');
+}
+
+// ---- Radio: meters, tuner, SWR trip ----------------------------------------------
+const atuBtn = document.getElementById('atu-btn');
+const tripEl = document.getElementById('trip');
+let rigHasAtu = false;
+function setMeter(id, pct, text, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const i = el.querySelector('i');
+  i.style.setProperty('--v', Math.max(0, Math.min(100, pct)) + '%');
+  if (color) i.style.setProperty('--c', color);
+  el.querySelector('b').textContent = text;
+}
+function showSwr(ratio) {
+  if (!(ratio > 0)) return;
+  const color = ratio <= 1.5 ? '#4ecca3' : ratio <= 2 ? '#ffd740' : ratio <= 3 ? '#f0a500' : '#e94560';
+  setMeter('m-swr', (ratio - 1) / 3 * 100, ratio < 10 ? ratio.toFixed(1) : '>10', color);
+}
+if (window.api.onCatSwr) window.api.onCatSwr((v) => { if (v > 0) showSwr(1 + v / 60); });
+if (window.api.onCatSwrRatio) window.api.onCatSwrRatio((r) => showSwr(r));
+let _pwrMax = 100;
+if (window.api.onCatFwdPower) window.api.onCatFwdPower((w) => {
+  const v = Number(w) || 0;
+  if (v > _pwrMax) _pwrMax = v;
+  setMeter('m-pwr', v / _pwrMax * 100, v ? Math.round(v) + ' W' : '—');
+});
+async function runAtu(btn) {
+  if (!window.api.sstvAtuTune) return;
+  const label = btn.textContent;
+  btn.classList.add('busy'); btn.textContent = 'Tuning…'; btn.disabled = true;
+  const r = await window.api.sstvAtuTune();
+  setTimeout(() => { btn.classList.remove('busy'); btn.textContent = label; btn.disabled = false; }, 2500);
+  statusBar.textContent = r && r.ok ? 'Tuning the antenna. Transmit unlocks when the radio reports a match.' : 'Tune failed: ' + ((r && r.error) || 'no answer');
+}
+atuBtn.addEventListener('click', () => runAtu(atuBtn));
+document.getElementById('trip-atu').addEventListener('click', (e) => runAtu(e.currentTarget));
+document.getElementById('trip-override').addEventListener('click', () => { if (window.api.swrGuardOverride) window.api.swrGuardOverride(); });
+if (window.api.onSstvRigState) window.api.onSstvRigState((st) => {
+  rigHasAtu = !!(st && st.atu);
+  atuBtn.hidden = !rigHasAtu;
+  document.getElementById('trip-atu').hidden = !rigHasAtu;
+  const tripped = !!(st && st.swrTripped);
+  tripEl.hidden = !tripped;
+  if (tripped) {
+    document.getElementById('trip-msg').textContent = st.swrMessage || 'The SWR guard stopped the transmission.';
+    // The picture was stopped by main; make sure this window agrees.
+    if (isTx) abortTxLocal('Stopped: SWR over the limit');
+  }
+  updateTxState();
+  fitCanvases();
+});
+
+// ---- Status lines over the pictures ------------------------------------------------
+const MODE_SECONDS = { martin1: 114, martin2: 58, martin3: 57, martin4: 29, scottie1: 110, scottie2: 71, scottieDx: 269, robot24: 24, robot36: 36, robot72: 72, pd90: 90, pd120: 126, pd160: 161, pd180: 187, pd240: 248 };
+function updateTxState() {
+  const el = document.getElementById('tx-state');
+  if (!el) return;
+  const st = activeStarterId ? T.starter(activeStarterId) : null;
+  el.textContent = (st ? st.name + ' · ' : '') + (MODE_SECONDS[modeSelect.value] || '?') + ' s';
+}
+
+// ---- Fit the pictures to the window (no scrolling) --------------------------------
+function fitOne(canvas, area) {
+  if (!canvas || !area) return;
+  const aw = area.clientWidth, ah = area.clientHeight;
+  if (!aw || !ah) return;
+  const aspect = (canvas.width || 320) / (canvas.height || 256);
+  let w = Math.min(aw - 2, (ah - 2) * aspect);
+  w = Math.max(80, Math.floor(w));
+  canvas.style.width = w + 'px';
+  canvas.style.height = Math.round(w / aspect) + 'px';
+}
+function fitCanvases() {
+  fitOne(rxCanvas, document.getElementById('rx-area'));
+  fitOne(txCanvas, document.getElementById('tx-area'));
+}
+try {
+  const ro = new ResizeObserver(() => fitCanvases());
+  ro.observe(document.getElementById('rx-area'));
+  ro.observe(document.getElementById('tx-area'));
+} catch { window.addEventListener('resize', fitCanvases); }
+// Keep the fit right when a decode changes the RX picture's shape.
+window.api.onSstvRxVis(() => setTimeout(fitCanvases, 0));
+
+// ---- Style packs ----------------------------------------------------------------------
+function packsSeenKey() { return packsList.filter(p => p.inSeason).map(p => p.id + '@' + p.version).join(','); }
+async function refreshPacks() {
+  if (!window.api.sstvPacksList) return;
+  try { packsList = (await window.api.sstvPacksList()) || []; } catch { packsList = []; }
+  const sel = document.getElementById('pack-select');
+  if (sel) {
+    const cur = settings.sstvActivePack || '';
+    sel.textContent = '';
+    const none = document.createElement('option'); none.value = ''; none.textContent = 'None'; sel.appendChild(none);
+    for (const p of packsList.filter(x => x.claimed || x.bundled || x.installed)) {
+      const o = document.createElement('option'); o.value = p.id; o.textContent = p.name + (p.inSeason ? '' : ' (out of season)'); sel.appendChild(o);
+    }
+    sel.value = cur;
+  }
+  // A "new" dot, once, for in-season packs not yet looked at.
+  let seen = '';
+  try { seen = localStorage.getItem('sstv-packs-seen') || ''; } catch {}
+  const dot = document.getElementById('packs-dot');
+  if (dot) dot.textContent = packsList.some(p => p.inSeason && !p.claimed) && seen !== packsSeenKey() ? '\u25CF new' : '';
+  if (!document.querySelector('[data-body="packs"]').hidden) renderPacksStrip();
+}
+async function loadActivePack() {
+  activePack = null; packImages = {};
+  const id = settings.sstvActivePack;
+  if (!id || !window.api.sstvPackGet) return;
+  const got = await window.api.sstvPackGet(id);
+  if (!got || !got.pack) return;
+  // Pack fonts arrive as bytes and are registered here (no network).
+  for (const f of (got.fonts || [])) {
+    try { const face = new FontFace(f.family, f.bytes); await face.load(); document.fonts.add(face); } catch (e) { console.warn('[SSTV] pack font', f.family, e.message); }
+  }
+  const imgs = (got.pack.images && typeof got.pack.images === 'object') ? got.pack.images : {};
+  await Promise.all(Object.keys(imgs).map(name => new Promise((res) => {
+    const im = new Image(); im.onload = () => { packImages[name] = im; res(); }; im.onerror = () => res(); im.src = imgs[name];
+  })));
+  activePack = got.pack;
+}
+async function setActivePack(id) {
+  if (window.api.sstvPackSetActive) {
+    const r = await window.api.sstvPackSetActive(id || null);
+    if (r && r.ok === false) { statusBar.textContent = r.error || 'Could not use that pack.'; return; }
+  }
+  settings.sstvActivePack = id || null;
+  await loadActivePack();
+  onLookChanged();
+  await refreshPacks();
+  statusBar.textContent = id ? 'Style pack: ' + (activePack ? activePack.name : id) : 'Style pack off';
+}
+document.getElementById('pack-select').addEventListener('change', (e) => setActivePack(e.target.value));
+function renderPacksStrip() {
+  const strip = document.getElementById('packs-strip');
+  strip.textContent = '';
+  if (!window.api.sstvPacksList) {
+    const n = document.createElement('div'); n.style.cssText = 'font-size:12px;color:var(--text-dim);padding:8px;line-height:1.5;';
+    n.textContent = 'Style packs are not available in this build.';
+    strip.appendChild(n); return;
+  }
+  if (!packsList.length) {
+    const n = document.createElement('div'); n.style.cssText = 'font-size:12px;color:var(--text-dim);padding:8px;';
+    n.textContent = 'No packs yet. New ones appear here when potacat.com publishes them.';
+    strip.appendChild(n); return;
+  }
+  for (const p of packsList) {
+    const card = document.createElement('div');
+    card.className = 'pack-card' + (p.compatible === false ? ' soon' : '');
+    const c = document.createElement('canvas'); c.width = 320; c.height = 256;
+    drawPackPreview(c, p);
+    const nm = document.createElement('div'); nm.className = 'pack-name';
+    const state = p.id === settings.sstvActivePack ? 'in use' : (p.claimed || p.installed || p.bundled) ? 'use' : 'get';
+    nm.textContent = p.name + ' · ' + state;
+    card.title = p.name + (p.by ? ' by ' + p.by : '') + (p.inSeason ? ' — in season' : ' — out of season, still yours to use') + (p.compatible === false ? '. Needs a newer POTACAT.' : '');
+    card.append(c, nm);
+    card.addEventListener('click', async () => {
+      if (p.compatible === false) { statusBar.textContent = p.name + ' needs a newer version of POTACAT.'; return; }
+      if (p.id === settings.sstvActivePack) { await setActivePack(null); return; }
+      if (!(p.claimed || p.installed || p.bundled) && window.api.sstvPackClaim) {
+        statusBar.textContent = 'Getting ' + p.name + '…';
+        const r = await window.api.sstvPackClaim(p.id);
+        if (!r || !r.ok) { statusBar.textContent = (r && r.error) || 'Could not get that pack.'; return; }
+      }
+      await setActivePack(p.id);
+    });
+    strip.appendChild(card);
+  }
+}
+const _packPreviewCache = new Map();
+async function drawPackPreview(canvas, p) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1b1512'; ctx.fillRect(0, 0, 320, 256);
+  try {
+    let pack = _packPreviewCache.get(p.id + '@' + p.version);
+    if (!pack && (p.bundled || p.installed || p.claimed) && window.api.sstvPackGet) {
+      const got = await window.api.sstvPackGet(p.id);
+      pack = got && got.pack;
+      if (pack) _packPreviewCache.set(p.id + '@' + p.version, pack);
+    }
+    if (pack && pack.backgrounds && pack.backgrounds.length) {
+      T.drawRecipe(ctx, pack, pack.backgrounds[0], pack.palettes[0], T.rnd(77), {});
+    } else {
+      ctx.fillStyle = '#2c3a4f'; ctx.fillRect(0, 0, 320, 256);
+    }
+    ctx.font = '700 34px "Segoe UI", sans-serif'; ctx.textAlign = 'center';
+    ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineJoin = 'round';
+    ctx.strokeText(p.name, 160, 236); ctx.fillStyle = '#ffffff'; ctx.fillText(p.name, 160, 236);
+  } catch {}
+}
+if (window.api.onSstvPacksChanged) window.api.onSstvPacksChanged(async (list) => {
+  packsList = list || packsList;
+  await refreshPacks();
 });

@@ -75,7 +75,8 @@ test('the SSTV window uses the resolver for RX and TX, and never falls back sile
   const rx = js.slice(js.indexOf('async function startRxAudio('), js.indexOf('async function startRxAudio(') + 6000);
   assert.ok(/rigId: settings\.remoteAudioInput/.test(rx), 'RX resolves against the radio input');
   assert.ok(/if \(!pick\.ok\) \{[\s\S]{0,200}return;/.test(rx), 'a refused device does not open anything');
-  assert.ok(/Listening on ' \+ heard/.test(rx), 'the status line names the device');
+  // The redesign names the device at the start of the status bar.
+  assert.ok(/setStatusDevice\(heard,/.test(rx) && /el\.append\('Listening on '\)/.test(js), 'the status line names the device');
   assert.ok(!/<option value="">Default<\/option>/.test(js), 'no "Default" (system microphone) first option');
   assert.ok(/rigId: txSettings\.remoteAudioOutput/.test(js), 'TX resolves against the radio output');
   assert.ok(/if \(!out\.ok\) throw new Error\(out\.message\)/.test(js), 'a missing TX output refuses (and unkeys) instead of playing to the speakers');

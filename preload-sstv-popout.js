@@ -47,6 +47,20 @@ contextBridge.exposeInMainWorld('api', {
   sstvOpenGalleryFolder: () => ipcRenderer.send('sstv-open-gallery-folder'),
   sstvDeleteImage: (filename) => ipcRenderer.invoke('sstv-delete-image', filename),
   sstvLoadFile: () => ipcRenderer.invoke('sstv-load-file'),
+  // Redesign (2026-09-29): tuner, trip banner, meters, template context,
+  // reply calls, log, template export/import.
+  sstvAtuTune: () => ipcRenderer.invoke('sstv-atu-tune'),
+  sstvRigStateGet: () => ipcRenderer.send('sstv-rig-state-get'),
+  onSstvRigState: (cb) => ipcRenderer.on('sstv-rig-state', (_e, d) => cb(d)),
+  swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
+  onCatSwr: (cb) => ipcRenderer.on('cat-swr', (_e, v) => cb(v)),
+  onCatSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, v) => cb(v)),
+  onCatFwdPower: (cb) => ipcRenderer.on('cat-fwd-power', (_e, v) => cb(v)),
+  sstvContext: () => ipcRenderer.invoke('sstv-context'),
+  sstvGallerySetCall: (filename, call) => ipcRenderer.invoke('sstv-gallery-set-call', { filename, call }),
+  sstvLogContact: (d) => ipcRenderer.send('sstv-log-contact', d),
+  sstvTemplatesExport: () => ipcRenderer.invoke('sstv-templates-export'),
+  sstvTemplatesImport: () => ipcRenderer.invoke('sstv-templates-import'),
   // Audio devices
   enumerateAudioDevices: () => navigator.mediaDevices.enumerateDevices()
     .then(d => d.filter(x => x.kind === 'audioinput' || x.kind === 'audiooutput')

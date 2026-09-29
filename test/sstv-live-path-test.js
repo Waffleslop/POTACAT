@@ -50,7 +50,8 @@ test('the engine forwards weak / stats / redecode from the worker', () => {
 });
 
 test('a phone photo or desktop TX restarts a stopped decoder', () => {
-  const photo = MAIN.slice(MAIN.indexOf("remoteServer.on('sstv-photo'"), MAIN.indexOf("remoteServer.on('sstv-photo'") + 400);
+  // 1400: a guest's picture is checked against the pass first (2026-09-29).
+  const photo = MAIN.slice(MAIN.indexOf("remoteServer.on('sstv-photo'"), MAIN.indexOf("remoteServer.on('sstv-photo'") + 1400);
   assert.ok(/\n    if \(startSstv\) startSstv\(\);/.test(photo), 'unconditional startSstv (it restarts a stopped engine)');
   assert.ok(!/if \(!sstvEngine && startSstv\) startSstv\(\)/.test(MAIN), 'the old existence-only test is gone');
   const enc = MAIN.slice(MAIN.indexOf("ipcMain.on('sstv-encode'"), MAIN.indexOf("ipcMain.on('sstv-encode'") + 300);

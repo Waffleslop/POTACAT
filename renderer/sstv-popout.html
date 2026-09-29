@@ -8,8 +8,17 @@
   <script src="popout-theme-bootstrap.js"></script>
   <link rel="stylesheet" href="styles.css">
   <style>
+    /* Template fonts, shipped with POTACAT (SIL OFL 1.1, licences in renderer/fonts/). */
+    @font-face { font-family: 'Bungee'; src: url('fonts/Bungee-Regular.woff2') format('woff2'); font-weight: 400; }
+    @font-face { font-family: 'Archivo Black'; src: url('fonts/ArchivoBlack-Regular.woff2') format('woff2'); font-weight: 400; }
+    @font-face { font-family: 'Russo One'; src: url('fonts/RussoOne-Regular.woff2') format('woff2'); font-weight: 400; }
+    @font-face { font-family: 'Rubik'; src: url('fonts/Rubik-ExtraBold.woff2') format('woff2'); font-weight: 800; }
+    @font-face { font-family: 'Rye'; src: url('fonts/Rye-Regular.woff2') format('woff2'); font-weight: 400; }
+
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     body { display: flex; flex-direction: column; }
+    [hidden] { display: none !important; }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: 1px; }
 
     /* Titlebar */
     .sstv-titlebar { display: flex; align-items: center; padding: 0 8px; height: 32px; background: var(--bg-header); border-bottom: 1px solid var(--border-primary); -webkit-app-region: drag; flex-shrink: 0; user-select: none; }
@@ -18,145 +27,158 @@
     .sstv-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
     .sstv-titlebar-btn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
 
-    /* Scrollable content area */
-    .sstv-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+    .spacer { flex: 1; }
+    .btn { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-primary); cursor: pointer; white-space: nowrap; }
+    .btn:hover { background: var(--bg-hover); }
+    .btn.atu { border-color: var(--accent-blue, #4fc3f7); color: var(--accent-blue, #4fc3f7); }
+    .btn.atu.busy { background: var(--accent-blue, #4fc3f7); color: #06202c; }
+    .btn.go { background: var(--accent-blue, #4fc3f7); border-color: var(--accent-blue, #4fc3f7); color: #06202c; }
+    .btn.gear { font-size: 15px; padding: 2px 8px; }
 
-    /* Image panes */
-    .sstv-panes { display: flex; gap: 12px; padding: 12px; align-items: flex-start; flex-shrink: 0; }
-    .sstv-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-    .sstv-pane-label { font-size: 12px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .sstv-canvas-wrap { position: relative; background: #000; border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; }
-    .sstv-canvas-wrap canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
-    .sstv-decode-info { position: absolute; bottom: 4px; left: 6px; font-size: 11px; color: #ccc; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 3px; pointer-events: none; }
+    /* Top bar: where you are and what the radio is doing */
+    .top { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); position: relative; }
+    .bands { display: flex; gap: 2px; }
+    .band { font-size: 12px; font-weight: 600; padding: 4px 7px; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); cursor: pointer; }
+    .band:hover { color: var(--text-primary); background: var(--bg-hover); }
+    .band.on { background: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); color: #0d1a14; }
+    .freqwrap { position: relative; }
+    .freq { font-family: Consolas, 'Courier New', monospace; font-size: 14px; color: var(--text-primary); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); white-space: nowrap; cursor: pointer; }
+    .freq small { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
+    .top select { font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    .meter { display: flex; align-items: center; gap: 4px; font-family: Consolas, monospace; font-size: 12px; color: var(--text-secondary); }
+    .meter i { display: block; width: 36px; height: 6px; border-radius: 3px; background: #0c0f1f; position: relative; overflow: hidden; }
+    .meter i::after { content: ""; position: absolute; inset: 0; width: var(--v, 0%); background: var(--c, var(--accent-green, #4ecca3)); }
+    .meter b { font-weight: 600; color: var(--text-primary); min-width: 34px; }
 
-    /* RX waterfall */
-    .sstv-waterfall-wrap { margin-top: 4px; border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; background: #000; }
-    .sstv-waterfall-wrap canvas { display: block; width: 100%; height: 80px; }
-    .sstv-wf-labels { display: flex; justify-content: space-between; padding: 1px 4px; font-size: 9px; color: var(--text-dim); }
+    .pop { position: absolute; z-index: 30; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 6px; background: var(--bg-header); border: 1px solid var(--border-primary); box-shadow: 0 12px 30px rgba(0,0,0,0.5); font-size: 12px; color: var(--text-secondary); }
+    .pop h4 { margin: 4px 0 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+    .pop label { display: flex; flex-direction: column; gap: 3px; }
+    .pop select, .pop input[type=text] { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 6px; }
+    .pop .dim { color: var(--text-dim); font-size: 11px; line-height: 1.4; }
+    .pop .row { display: flex; gap: 6px; align-items: center; }
+    #freq-pop { top: 36px; left: 0; width: 230px; }
+    #freq-select { width: 100%; }
+    #freq-input { width: 90px; font-family: Consolas, monospace; }
+    #gear-pop { top: 44px; right: 10px; width: 300px; max-height: calc(100vh - 120px); overflow-y: auto; }
+    #look-desc { color: var(--text-primary); }
 
-    /* Controls bar */
-    .sstv-controls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; flex-wrap: wrap; }
-    .sstv-controls select, .sstv-controls input { font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 6px; }
-    .sstv-controls select { min-width: 110px; }
-    .sstv-controls label { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
-    .sstv-btn { padding: 5px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-primary); cursor: pointer; white-space: nowrap; }
-    .sstv-btn:hover { background: var(--bg-hover); }
-    .sstv-btn-tx { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); min-width: 110px; font-size: 14px; }
-    .sstv-btn-tx:hover { background: var(--accent-green, #4ecca3); color: #000; }
-    .sstv-btn-tx.transmitting { background: var(--accent-red, #e94560); border-color: #e94560; color: #fff; animation: tx-pulse 1s ease-in-out infinite; }
-    @keyframes tx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    /* SWR trip */
+    .trip { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: rgba(233,69,96,0.14); border-bottom: 1px solid var(--accent-red, #e94560); font-size: 13px; }
+    .trip b { color: var(--accent-red, #e94560); }
+
+    /* Stage: the two pictures, sized to fit so nothing scrolls */
+    .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .sstv-panes { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 8px 12px 6px; }
+    .sstv-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 5px; }
+    .pane-h { display: flex; align-items: center; gap: 8px; height: 22px; flex-shrink: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+    .pane-h .st { text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 12px; color: var(--text-dim); }
+    .img-area { flex: 1; min-height: 60px; display: flex; align-items: center; justify-content: center; }
+    .imgbox { position: relative; line-height: 0; background: #000; border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; }
+    .imgbox canvas { display: block; image-rendering: pixelated; }
+    #rx-box { cursor: pointer; }
+    .badge { position: absolute; font-size: 11px; line-height: 1.3; font-weight: 700; padding: 3px 7px; border-radius: 3px; z-index: 2; }
+    .sstv-decode-info { position: absolute; bottom: 6px; left: 6px; font-size: 11px; line-height: 1.3; color: #ccc; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 3px; pointer-events: none; }
+    .over-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; z-index: 3; }
+    .imgbox:hover .over-actions, .imgbox:focus-within .over-actions { opacity: 1; }
+    .ov { font-size: 11px; line-height: 1.3; font-weight: 700; padding: 4px 8px; border-radius: 3px; border: none; background: rgba(12,15,31,0.88); color: #e6e8f2; cursor: pointer; }
+    .ov.reply { background: var(--accent-red, #e94560); color: #fff; }
+    #rx-slant-row { display: none; align-items: center; gap: 8px; padding: 3px 6px; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 4px; font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+    .sstv-waterfall-wrap { flex-shrink: 0; height: 34px; border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; background: #000; }
+    .sstv-waterfall-wrap canvas { display: block; width: 100%; height: 100%; }
+    .actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .drive { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); }
+    .drive input { width: 64px; accent-color: var(--accent-green, #4ecca3); }
+    .sstv-btn-tx { margin-left: auto; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; padding: 6px 16px; border-radius: 5px; border: 1px solid var(--accent-green, #4ecca3); background: transparent; color: var(--accent-green, #4ecca3); cursor: pointer; min-width: 120px; }
+    .sstv-btn-tx:hover { background: var(--accent-green, #4ecca3); color: #0d1a14; }
+    .sstv-btn-tx.transmitting { background: var(--accent-red, #e94560); border-color: var(--accent-red, #e94560); color: #fff; animation: tx-pulse 1s ease-in-out infinite; }
     .sstv-btn-tx.reply-mode { border-color: #4fc3f7; color: #4fc3f7; }
-    .sstv-btn-tx.reply-mode:hover { background: #4fc3f7; color: #000; }
-    .sstv-spacer { flex: 1; }
-
-    /* Band buttons */
-    .sstv-bands { display: flex; gap: 3px; align-items: center; }
-    .sstv-band-btn { font-size: 13px; font-weight: 600; padding: 5px 10px; border: 1px solid var(--border-primary); border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
-    .sstv-band-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-    .sstv-band-btn.active { background: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); color: #000; }
-    .sstv-freq-select { font-size: 13px; min-width: 140px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
-    .sstv-freq-input { width: 70px; font-size: 12px; font-family: monospace; text-align: center; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
-    .sstv-freq-input:focus { border-color: var(--accent-blue, #4fc3f7); outline: none; }
-
-    /* Progress bar */
-    .sstv-progress { height: 3px; background: var(--bg-primary); flex-shrink: 0; }
+    .sstv-btn-tx.reply-mode:hover { background: #4fc3f7; color: #06202c; }
+    @keyframes tx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    .sstv-progress { height: 3px; border-radius: 2px; background: var(--bg-secondary); overflow: hidden; flex-shrink: 0; }
     .sstv-progress-bar { height: 100%; background: var(--accent-green, #4ecca3); width: 0%; transition: width 0.3s; }
     .sstv-progress-bar.tx { background: var(--accent-red, #e94560); }
 
-    /* Gallery */
-    .sstv-gallery-wrap { flex: 1; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); min-height: 100px; display: flex; flex-direction: column; }
-    .sstv-gallery-header { font-size: 13px; font-weight: 700; color: var(--text-secondary); padding: 5px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
-    .sstv-gallery-header span { font-weight: 400; color: var(--text-dim); }
-    .sstv-gallery { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; overflow-y: hidden; flex: 1; align-items: flex-start; }
-    .sstv-gallery::-webkit-scrollbar { height: 6px; }
-    .sstv-gallery::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 3px; }
-    .sstv-thumb { flex-shrink: 0; cursor: pointer; position: relative; border: 2px solid transparent; border-radius: 4px; overflow: hidden; transition: border-color 0.15s; }
-    .sstv-thumb:hover { border-color: var(--accent-blue, #4fc3f7); }
-    .sstv-thumb.selected { border-color: var(--accent-blue, #4fc3f7); }
-    .sstv-thumb img { display: block; height: 80px; width: auto; image-rendering: pixelated; }
-    .sstv-thumb-info { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); font-size: 10px; color: #ccc; padding: 1px 4px; text-align: center; }
+    /* Reply session bar (replaces the Transmit header while replying) */
+    .replybar { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; flex-shrink: 0; border-radius: 4px; background: rgba(79,195,247,0.12); border: 1px solid var(--accent-blue, #4fc3f7); font-size: 12px; color: var(--text-secondary); }
+    .replybar canvas { width: 30px; height: 24px; border-radius: 2px; flex-shrink: 0; }
+    .replybar b { color: var(--accent-blue, #4fc3f7); }
+    .replybar input { font-family: Consolas, monospace; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 1px 4px; text-transform: uppercase; }
+    #rb-call { width: 72px; }
+    #rb-rsv { width: 34px; text-align: center; }
+    .replybar select { font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 1px 2px; max-width: 128px; }
+    .replybar .x { margin-left: auto; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 4px; }
+    .replybar .x:hover { color: var(--accent-red, #e94560); }
+    .replybar .lg { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 3px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-primary); cursor: pointer; }
+    .replybar .sent { font-size: 11px; color: var(--accent-green, #4ecca3); }
+    .src-tag { font-size: 10px; color: var(--text-dim); }
 
-    /* Template strip */
-    .sstv-tpl-wrap { flex-shrink: 0; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); }
-    .sstv-tpl-header { font-size: 13px; font-weight: 700; color: var(--text-secondary); padding: 5px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
-    .sstv-tpl-strip { display: flex; gap: 6px; padding: 6px 12px; overflow-x: auto; align-items: flex-start; }
-    .sstv-tpl-strip::-webkit-scrollbar { height: 6px; }
-    .sstv-tpl-strip::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 3px; }
-    .sstv-tpl { flex-shrink: 0; cursor: pointer; position: relative; border: 2px solid transparent; border-radius: 4px; overflow: hidden; transition: border-color 0.15s; }
-    .sstv-tpl:hover { border-color: var(--accent-blue, #4fc3f7); }
-    .sstv-tpl.active { border-color: var(--accent-green, #4ecca3); }
-    .sstv-tpl img { display: block; height: 56px; width: auto; image-rendering: pixelated; }
-    .sstv-tpl-del { position: absolute; top: 1px; right: 1px; background: rgba(0,0,0,0.7); color: #e94560; font-size: 12px; border: none; cursor: pointer; padding: 0 3px; border-radius: 2px; line-height: 1.2; display: none; }
-    .sstv-tpl:hover .sstv-tpl-del { display: block; }
-    .sstv-tpl-add { flex-shrink: 0; width: 50px; height: 56px; border: 2px dashed var(--border-primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-dim); font-size: 22px; transition: all 0.15s; }
-    .sstv-tpl-add:hover { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
+    /* Text editor over the Transmit picture */
+    .sstv-canvas-wrap canvas.draggable, #tx-canvas { cursor: crosshair; }
+    .insp { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; padding: 5px 7px; border-radius: 5px; background: rgba(22,33,62,0.96); border: 1px solid var(--accent-blue, #4fc3f7); font-size: 12px; line-height: 1.3; z-index: 4; }
+    .insp input[type=text] { flex: 1; min-width: 80px; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; }
+    .insp input[type=number] { width: 44px; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 2px 4px; text-align: center; }
+    .insp input[type=color] { width: 22px; height: 22px; border: 1px solid var(--border-primary); border-radius: 3px; padding: 0; background: none; cursor: pointer; }
+    .insp .tp-toggle { width: 22px; height: 22px; border: 1px solid var(--border-primary); border-radius: 3px; background: transparent; color: var(--text-secondary); font-weight: 700; cursor: pointer; padding: 0; }
+    .insp .tp-toggle.active { background: var(--accent-blue, #4fc3f7); color: #06202c; border-color: var(--accent-blue, #4fc3f7); }
 
-    /* TX canvas interaction */
-    .sstv-canvas-wrap canvas.draggable { cursor: crosshair; }
-
-    /* Multi-slice panel */
+    /* Multi-slice (Flex only) */
     .sstv-multi-panel { padding: 6px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 13px; }
     .sstv-multi-panel.hidden { display: none; }
     .sstv-multi-row { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
-    .sstv-multi-row select, .sstv-multi-row input { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; }
-    .sstv-multi-row select { min-width: 60px; }
-    .sstv-multi-row .multi-freq { min-width: 120px; }
-    .sstv-multi-row .multi-audio { min-width: 130px; max-width: 200px; }
+    .sstv-multi-row select { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; }
     .sstv-multi-row .multi-del { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 0 4px; }
-    .sstv-multi-row .multi-del:hover { color: #e94560; }
     .sstv-multi-btns { display: flex; gap: 6px; margin-top: 4px; }
-    .sstv-multi-start { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid var(--accent-green, #4ecca3); background: transparent; color: var(--accent-green, #4ecca3); cursor: pointer; }
-    .sstv-multi-start:hover { background: var(--accent-green, #4ecca3); color: #000; }
-    .sstv-multi-stop { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; border: 1px solid #e94560; background: transparent; color: #e94560; cursor: pointer; }
-    .sstv-multi-stop:hover { background: var(--accent-red, #e94560); color: #fff; }
-
-    /* Multi-decode grid */
-    .sstv-rx-grid { display: grid; gap: 8px; padding: 8px 12px; flex-shrink: 0; }
-    .sstv-rx-grid.cols-1 { grid-template-columns: 1fr; }
+    .sstv-multi-start, .sstv-multi-stop { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 4px; background: transparent; cursor: pointer; }
+    .sstv-multi-start { border: 1px solid var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
+    .sstv-multi-stop { border: 1px solid #e94560; color: #e94560; }
+    .sstv-rx-grid { display: grid; gap: 8px; padding: 0 12px 6px; flex-shrink: 0; max-height: 45%; overflow-y: auto; }
+    .sstv-rx-grid.hidden { display: none; }
     .sstv-rx-grid.cols-2 { grid-template-columns: 1fr 1fr; }
     .sstv-rx-pane { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; }
     .sstv-rx-pane-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); padding: 3px 6px; background: var(--bg-primary); border-bottom: 1px solid var(--border-primary); }
-    .sstv-rx-pane canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
-    .sstv-rx-pane .sstv-wf-mini { height: 40px; }
     .sstv-rx-pane-status { font-size: 11px; color: var(--text-dim); padding: 2px 6px; }
 
-    /* Settings row */
-    .sstv-settings { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 12px; color: var(--text-secondary); background: var(--bg-primary); border-top: 1px solid var(--border-primary); flex-shrink: 0; flex-wrap: wrap; }
-    .sstv-settings select { font-size: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; max-width: 220px; }
+    /* Tray: everything you browse, one fixed strip */
+    .tray { flex-shrink: 0; height: 128px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); display: flex; flex-direction: column; }
+    .tabs { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border-primary); height: 28px; flex-shrink: 0; }
+    .tab { font-size: 12px; font-weight: 600; padding: 5px 10px; border: none; background: transparent; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab.on { color: var(--text-primary); border-bottom-color: var(--accent-blue, #4fc3f7); }
+    .tab small { font-weight: 400; color: var(--text-dim); margin-left: 3px; }
+    #packs-dot { color: var(--accent-orange, #f0a500); }
+    .tabs .btn { font-size: 11px; padding: 2px 8px; }
+    .tray-body { flex: 1; min-height: 0; }
+    .sstv-gallery, .sstv-tpl-strip, .packs-strip { height: 100%; box-sizing: border-box; display: flex; gap: 6px; padding: 7px 10px; overflow-x: auto; overflow-y: hidden; align-items: flex-start; }
+    .sstv-thumb, .sstv-tpl, .pack-card { flex-shrink: 0; cursor: pointer; position: relative; border: 2px solid transparent; border-radius: 4px; overflow: hidden; }
+    .sstv-thumb:hover, .sstv-tpl:hover, .pack-card:hover { border-color: var(--accent-blue, #4fc3f7); }
+    .sstv-tpl.active { border-color: var(--accent-green, #4ecca3); }
+    .sstv-thumb img, .sstv-tpl img, .sstv-tpl canvas, .pack-card canvas { display: block; height: 72px; width: 90px; object-fit: cover; image-rendering: pixelated; }
+    .sstv-thumb-info, .tpl-name, .pack-name { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.72); font-size: 10px; line-height: 1.3; color: #ccd; padding: 1px 4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tpl-badge { position: absolute; top: 2px; left: 2px; font-size: 10px; line-height: 1.2; font-weight: 700; padding: 1px 4px; border-radius: 3px; background: rgba(79,195,247,0.9); color: #06202c; }
+    .sstv-tpl-del { position: absolute; top: 1px; right: 1px; background: rgba(0,0,0,0.7); color: #e94560; font-size: 12px; border: none; cursor: pointer; padding: 0 3px; border-radius: 2px; line-height: 1.2; display: none; }
+    .sstv-tpl:hover .sstv-tpl-del { display: block; }
+    .sstv-tpl-add { flex-shrink: 0; width: 56px; height: 72px; border: 2px dashed var(--border-primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-dim); font-size: 22px; }
+    .sstv-tpl-add:hover { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
+    .tray-sep { flex-shrink: 0; width: 1px; align-self: stretch; background: var(--border-primary); margin: 0 4px; }
+    .sstv-log-wrap { height: 100%; }
+    .sstv-log-textarea { width: 100%; height: 100%; box-sizing: border-box; resize: none; border: none; outline: none; background: var(--bg-primary); color: var(--text-dim); font-family: Consolas, "Courier New", monospace; font-size: 11px; padding: 4px 12px; line-height: 1.5; }
+    .pack-card.soon canvas { filter: saturate(0.4) brightness(0.7); }
 
-    /* Text layer editor */
-    .sstv-text-editor { padding: 6px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
-    .sstv-text-layers { display: flex; flex-direction: column; gap: 2px; max-height: 130px; overflow-y: auto; }
-    .sstv-text-layer { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
-    .sstv-text-layer:hover { background: var(--bg-hover); }
-    .sstv-text-layer.selected { border-color: var(--accent-blue, #4fc3f7); background: rgba(79,195,247,0.1); }
-    .sstv-text-layer .tl-vis { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-green, #4ecca3); }
-    .sstv-text-layer .tl-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-    .sstv-text-layer .tl-del { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 0 3px; line-height: 1; }
-    .sstv-text-layer .tl-del:hover { color: #e94560; }
-    .sstv-text-props { display: flex; align-items: center; gap: 6px; padding: 5px 0; flex-wrap: wrap; }
-    .sstv-text-props input[type="text"] { flex: 1; min-width: 100px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 6px; }
-    .sstv-text-props input[type="number"] { width: 48px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 4px 5px; text-align: center; }
-    .sstv-text-props input[type="color"] { width: 26px; height: 26px; border: 1px solid var(--border-primary); border-radius: 3px; padding: 0; cursor: pointer; background: none; }
-    .sstv-text-props select { font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; }
-    .sstv-text-props .tp-toggle { font-size: 13px; font-weight: 700; width: 26px; height: 26px; border: 1px solid var(--border-primary); border-radius: 3px; background: transparent; color: var(--text-secondary); cursor: pointer; padding: 0; line-height: 24px; text-align: center; }
-    .sstv-text-props .tp-toggle.active { background: var(--accent-blue, #4fc3f7); color: #000; border-color: var(--accent-blue, #4fc3f7); }
-    .sstv-add-text-btn { font-size: 13px; padding: 4px 12px; border: 1px dashed var(--border-primary); border-radius: 4px; background: transparent; color: var(--text-dim); cursor: pointer; margin-top: 4px; }
-    .sstv-add-text-btn:hover { border-color: var(--accent-green, #4ecca3); color: var(--accent-green, #4ecca3); }
+    .status { flex-shrink: 0; height: 24px; display: flex; align-items: center; gap: 14px; padding: 0 12px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border-primary); background: var(--bg-header); white-space: nowrap; overflow: hidden; }
+    #status-device b { color: var(--text-secondary); font-weight: 600; }
+    #rx-level { font-family: Consolas, monospace; min-width: 6em; }
+    #status-bar { overflow: hidden; text-overflow: ellipsis; }
 
-    /* Decode log — fixed height panel like POTACAT verbose log */
-    .sstv-log-wrap { border-top: 1px solid var(--border-primary); height: 150px; flex-shrink: 0; display: flex; flex-direction: column; }
-    .sstv-log-wrap.collapsed { height: auto; }
-    .sstv-log-wrap.collapsed .sstv-log-textarea { display: none; }
-    .sstv-log-header { font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 3px 12px; display: flex; align-items: center; gap: 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
-    .sstv-log-textarea { flex: 1; width: 100%; resize: none; border: none; outline: none; background: var(--bg-primary); color: var(--text-dim); font-family: Consolas, "Courier New", monospace; font-size: 11px; padding: 4px 12px; line-height: 1.5; }
-
-    /* Status */
-    .sstv-status { font-size: 12px; color: var(--text-dim); padding: 4px 12px; flex-shrink: 0; border-top: 1px solid var(--border-primary); }
+    /* Right-click menu */
+    .ctx { position: fixed; z-index: 10000; min-width: 210px; padding: 4px 0; background: var(--bg-header); border: 1px solid var(--border-primary); border-radius: 6px; box-shadow: 0 10px 28px rgba(0,0,0,0.55); font-size: 12px; }
+    .ctx .h { padding: 5px 12px 6px; color: var(--text-dim); font-size: 11px; border-bottom: 1px solid var(--border-primary); margin-bottom: 3px; }
+    .ctx button { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; padding: 6px 12px; background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 12px; }
+    .ctx button:hover, .ctx button:focus-visible { background: var(--bg-hover); outline: none; }
+    .ctx button small { color: var(--text-dim); }
+    .ctx button.danger { color: #e94560; }
+    .ctx hr { border: none; border-top: 1px solid var(--border-primary); margin: 3px 0; }
   </style>
 </head>
 <body>
-  <!-- Titlebar -->
   <div class="sstv-titlebar">
     <span class="sstv-titlebar-title">POTACAT — SSTV</span>
     <button class="sstv-titlebar-btn" id="min-btn" title="Minimize">&#x2013;</button>
@@ -164,180 +186,198 @@
     <button class="sstv-titlebar-btn close" id="close-btn" title="Close">&#x2715;</button>
   </div>
 
-  <!-- Scrollable content -->
-  <div class="sstv-scroll">
-
-  <!-- Image panes -->
-  <div class="sstv-panes">
-    <div class="sstv-pane">
-      <div class="sstv-pane-label">RX Decode</div>
-      <div class="sstv-canvas-wrap" style="position:relative;">
-        <canvas id="rx-canvas" width="320" height="256"></canvas>
-        <div class="sstv-decode-info" id="rx-info">Idle</div>
-        <!-- Weak-signal badge: decode was shown (MMSSTV-style "always paint")
-             but failed the auto-save quality gate. -->
-        <div id="rx-weak-badge" style="display:none;position:absolute;top:8px;left:8px;background:rgba(255,159,10,0.92);color:#1a1a1a;border-radius:4px;font-size:11px;font-weight:700;padding:3px 8px;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.5);" title="Weak signal — the decode didn't meet the quality gate, so it was shown but not saved to the gallery.">⚠ WEAK — not saved</div>
-        <!-- RX audio health: red when no decoder audio has arrived recently
-             (dead DAX stream, wrong input device, muted slice…). -->
-        <div id="rx-no-audio" style="display:none;position:absolute;bottom:8px;left:8px;background:rgba(233,69,96,0.92);color:#fff;border-radius:4px;font-size:11px;font-weight:700;padding:3px 8px;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.5);" title="No RX audio is reaching the SSTV decoder. Check the audio input device, DAX routing, or the radio connection.">✕ NO RX AUDIO</div>
-        <div id="rx-low-audio" style="display:none;position:absolute;bottom:8px;left:8px;background:rgba(240,165,0,0.92);color:#1a1a2e;border-radius:4px;font-size:11px;font-weight:700;padding:3px 8px;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.5);" title="RX audio is reaching the decoder at a very low level. Raise the recording level for this device (Windows Sound > Recording > Levels) or the radio's USB/ACC AF output level.">RX AUDIO LOW</div>
-        <button type="button" id="rx-reply-btn" title="Use this as the PiP reply inset on your next TX"
-                style="display:none;position:absolute;bottom:8px;right:8px;background:rgba(233,69,96,0.95);color:#fff;border:none;border-radius:4px;font-size:12px;font-weight:700;padding:6px 12px;cursor:pointer;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.5);">↩ Reply with this</button>
-      </div>
-      <div id="rx-slant-row" style="display:none;align-items:center;gap:8px;padding:4px 8px;background:var(--bg-secondary);border-top:1px solid var(--border-primary);font-size:11px;color:var(--text-secondary);">
-        <span title="Manually shear the decoded image to fix residual slant. Drag right to correct images that slant top-right to bottom-left.">Slant fix:</span>
-        <input type="range" id="rx-slant-slider" min="-60" max="60" value="0" step="1" style="flex:1;" title="Pixels to shear the decoded image. 0 = no correction.">
-        <span id="rx-slant-value" style="font-family:monospace;min-width:40px;text-align:right;">0 px</span>
-        <button type="button" id="rx-slant-reset" title="Reset slant to 0" style="background:none;border:1px solid var(--border-primary);color:var(--text-dim);font-size:11px;padding:2px 6px;border-radius:3px;cursor:pointer;">Reset</button>
-        <button type="button" id="rx-redecode" title="Re-decode the last received transmission from the audio buffer, applying the slant correction for real (MMSSTV 'replay from RX buffer'). The result replaces the display but is not auto-saved." style="background:none;border:1px solid var(--accent-blue,#4fc3f7);color:var(--accent-blue,#4fc3f7);font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer;font-weight:600;">↻ Redecode</button>
-      </div>
-      <div class="sstv-waterfall-wrap">
-        <canvas id="wf-canvas" width="640" height="100"></canvas>
-        <div class="sstv-wf-labels"><span>1.1 kHz</span><span>1.7 kHz</span><span>2.3 kHz</span></div>
-      </div>
-    </div>
-    <div class="sstv-pane">
-      <div class="sstv-pane-label">TX Compose <span style="font-weight:400;color:var(--text-dim);font-size:10px">(drag text to reposition)</span></div>
-      <div class="sstv-canvas-wrap">
-        <canvas id="tx-canvas" width="320" height="256" class="draggable"></canvas>
+  <!-- Top bar: band, calling frequency, mode, the radio -->
+  <div class="top">
+    <div class="bands" id="bands" role="group" aria-label="Band"></div>
+    <div class="freqwrap">
+      <button type="button" class="freq" id="freq-btn" title="Pick a calling frequency or type one">
+        <span id="freq-label">14.230</span><small id="freq-mode">USB ▾</small>
+      </button>
+      <div class="pop" id="freq-pop" hidden>
+        <select id="freq-select" class="sstv-freq-select" title="SSTV calling frequency" size="12">
+          <optgroup label="80m">
+            <option value="3730" data-mode="LSB">3.730 (EU)</option>
+            <option value="3845" data-mode="LSB">3.845 (NA)</option>
+          </optgroup>
+          <optgroup label="40m">
+            <option value="7165" data-mode="USB">7.165</option>
+            <option value="7171" data-mode="USB">7.171 (calling)</option>
+          </optgroup>
+          <optgroup label="20m">
+            <option value="14227" data-mode="USB">14.227</option>
+            <option value="14230" data-mode="USB" selected>14.230 (calling)</option>
+            <option value="14233" data-mode="USB">14.233</option>
+          </optgroup>
+          <optgroup label="17m"><option value="18161" data-mode="USB">18.161</option></optgroup>
+          <optgroup label="15m"><option value="21340" data-mode="USB">21.340 (calling)</option></optgroup>
+          <optgroup label="12m"><option value="24975" data-mode="USB">24.975</option></optgroup>
+          <optgroup label="10m"><option value="28680" data-mode="USB">28.680 (calling)</option></optgroup>
+          <optgroup label="6m"><option value="50680" data-mode="USB">50.680</option></optgroup>
+        </select>
+        <div class="row">
+          <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz" title="Another frequency, in kHz — press Enter">
+          <button type="button" class="btn" id="tune-btn">Tune</button>
+        </div>
       </div>
     </div>
-  </div>
-
-  <!-- Controls -->
-  <div class="sstv-controls">
-    <select id="mode-select" title="SSTV Mode">
+    <select id="mode-select" title="SSTV mode">
       <optgroup label="Martin">
-        <option value="martin1">Martin M1 (114s)</option>
-        <option value="martin2">Martin M2 (58s)</option>
-        <option value="martin3">Martin M3 (57s)</option>
-        <option value="martin4">Martin M4 (29s)</option>
+        <option value="martin1">Martin M1 · 114 s</option>
+        <option value="martin2">Martin M2 · 58 s</option>
+        <option value="martin3">Martin M3 · 57 s</option>
+        <option value="martin4">Martin M4 · 29 s</option>
       </optgroup>
       <optgroup label="Scottie">
-        <option value="scottie1">Scottie S1 (110s)</option>
-        <option value="scottie2">Scottie S2 (71s)</option>
-        <option value="scottieDx">Scottie DX (269s)</option>
+        <option value="scottie1">Scottie S1 · 110 s</option>
+        <option value="scottie2">Scottie S2 · 71 s</option>
+        <option value="scottieDx">Scottie DX · 269 s</option>
       </optgroup>
       <optgroup label="Robot">
-        <option value="robot24">Robot 24 (24s)</option>
-        <option value="robot36">Robot 36 (36s)</option>
-        <option value="robot72">Robot 72 (72s)</option>
+        <option value="robot24">Robot 24 · 24 s</option>
+        <option value="robot36">Robot 36 · 36 s</option>
+        <option value="robot72">Robot 72 · 72 s</option>
       </optgroup>
       <optgroup label="PD">
-        <option value="pd90">PD-90 (90s)</option>
-        <option value="pd120">PD-120 (126s)</option>
-        <option value="pd160">PD-160 (161s)</option>
-        <option value="pd180">PD-180 (187s)</option>
-        <option value="pd240">PD-240 (248s)</option>
+        <option value="pd90">PD-90 · 90 s</option>
+        <option value="pd120">PD-120 · 126 s</option>
+        <option value="pd160">PD-160 · 161 s</option>
+        <option value="pd180">PD-180 · 187 s</option>
+        <option value="pd240">PD-240 · 248 s</option>
       </optgroup>
     </select>
-    <button class="sstv-btn" id="load-btn" title="Load image from file">Choose Photo</button>
-    <button class="sstv-btn" id="random-btn" title="Generate random pattern">Random</button>
-    <button class="sstv-btn" id="multi-btn" title="Multi-slice monitoring">Multi</button>
-    <button class="sstv-btn" id="clear-reply-btn" style="display:none" title="Clear reply image">Clear Reply</button>
-    <div class="sstv-spacer"></div>
-    <select id="freq-select" class="sstv-freq-select" title="SSTV Frequency">
-      <optgroup label="80m">
-        <option value="3730" data-mode="LSB">3.730 (EU)</option>
-        <option value="3845" data-mode="LSB">3.845 (NA)</option>
-      </optgroup>
-      <optgroup label="40m">
-        <option value="7165" data-mode="USB">7.165</option>
-        <option value="7171" data-mode="USB">7.171 (calling)</option>
-      </optgroup>
-      <optgroup label="20m">
-        <option value="14227" data-mode="USB">14.227</option>
-        <option value="14230" data-mode="USB" selected>14.230 (calling)</option>
-        <option value="14233" data-mode="USB">14.233</option>
-      </optgroup>
-      <optgroup label="17m"><option value="18161" data-mode="USB">18.161</option></optgroup>
-      <optgroup label="15m"><option value="21340" data-mode="USB">21.340 (calling)</option></optgroup>
-      <optgroup label="12m"><option value="24975" data-mode="USB">24.975</option></optgroup>
-      <optgroup label="10m"><option value="28680" data-mode="USB">28.680 (calling)</option></optgroup>
-      <optgroup label="6m"><option value="50680" data-mode="USB">50.680</option></optgroup>
-    </select>
-    <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz" title="Custom frequency — press Enter">
-    <button class="sstv-btn" id="tune-btn" title="Tune to selected frequency">Tune</button>
-    <div class="sstv-spacer"></div>
-    <button class="sstv-btn sstv-btn-tx" id="tx-btn">TRANSMIT</button>
+    <span class="spacer"></span>
+    <span class="meter" id="m-swr" title="SWR, live while transmitting">SWR <i></i> <b>—</b></span>
+    <span class="meter" id="m-pwr" title="Forward power, live while transmitting">PWR <i></i> <b>—</b></span>
+    <button type="button" class="btn atu" id="atu-btn" title="Run the radio's antenna tuner" hidden>ATU Tune</button>
+    <button type="button" class="btn gear" id="gear-btn" title="SSTV settings" aria-label="SSTV settings">&#9881;</button>
+
+    <div class="pop" id="gear-pop" hidden>
+      <h4>Your look</h4>
+      <div id="look-desc"></div>
+      <div class="dim">Worked out from your callsign, so your pictures are recognisable. Used by the starter templates.</div>
+      <div class="row"><button type="button" class="btn" id="look-shuffle">Shuffle my look</button></div>
+      <label>Style pack <select id="pack-select"><option value="">None</option></select></label>
+      <label>Your first name, for {NAME} <input type="text" id="op-name" maxlength="20" spellcheck="false"></label>
+      <h4>Audio</h4>
+      <label>Receive <select id="audio-input"></select></label>
+      <label>Transmit <select id="audio-output"></select></label>
+      <div class="dim">SSTV follows the radio's audio in My Rigs. Pick a device here only if SSTV should use a different one.</div>
+      <h4>Templates</h4>
+      <div class="row"><button type="button" class="btn" id="tpl-export">Export…</button><button type="button" class="btn" id="tpl-import">Import…</button></div>
+      <div class="dim">Take your own templates, your look and your packs to another computer.</div>
+      <div id="multi-row" hidden>
+        <h4>FlexRadio</h4>
+        <div class="row"><button type="button" class="btn" id="multi-btn">Watch several bands…</button></div>
+      </div>
+    </div>
   </div>
 
-  <!-- Multi-slice config panel (hidden by default) -->
+  <!-- SWR trip -->
+  <div class="trip" id="trip" hidden role="alert">
+    <b>TX stopped</b><span id="trip-msg"></span>
+    <span class="spacer"></span>
+    <button type="button" class="btn go" id="trip-atu" hidden>Tune ATU</button>
+    <button type="button" class="btn" id="trip-override" title="Allow transmitting again without a tuner match">Override</button>
+  </div>
+
+  <!-- Multi-slice config panel (Flex only; opened from settings) -->
   <div class="sstv-multi-panel hidden" id="multi-panel">
     <div id="multi-slices"></div>
     <div class="sstv-multi-btns">
-      <button class="sstv-btn" id="multi-add" style="font-size:12px;padding:3px 10px">+ Add Slice</button>
-      <div class="sstv-spacer"></div>
-      <button class="sstv-multi-start" id="multi-start">Start Monitoring</button>
+      <button class="btn" id="multi-add">+ Add slice</button>
+      <div class="spacer"></div>
+      <button class="sstv-multi-start" id="multi-start">Start monitoring</button>
       <button class="sstv-multi-stop" id="multi-stop" style="display:none">Stop</button>
     </div>
   </div>
 
-  <!-- Multi-decode grid (shown when multi is active, replaces single RX pane) -->
-  <div class="sstv-rx-grid hidden" id="rx-grid"></div>
+  <div class="stage">
+    <div class="sstv-panes">
+      <div class="sstv-pane" id="rx-pane">
+        <div class="pane-h">Receive <span class="st" id="rx-state"></span></div>
+        <div class="img-area" id="rx-area">
+          <div class="imgbox" id="rx-box" title="Double-click to reply · right-click for more">
+            <canvas id="rx-canvas" width="320" height="256"></canvas>
+            <div class="sstv-decode-info" id="rx-info">Idle</div>
+            <div class="badge" id="rx-weak-badge" style="display:none;top:8px;left:8px;background:rgba(255,159,10,0.92);color:#1a1a1a;" title="Weak signal: the picture is shown but was not saved to Received.">WEAK — not saved</div>
+            <div class="badge" id="rx-no-audio" style="display:none;bottom:28px;left:8px;background:rgba(233,69,96,0.92);color:#fff;" title="No receive audio is reaching the decoder. Check the audio device, DAX routing or the radio connection.">NO RX AUDIO</div>
+            <div class="badge" id="rx-low-audio" style="display:none;bottom:28px;left:8px;background:rgba(240,165,0,0.92);color:#1a1a2e;" title="Receive audio is very low. Raise the recording level for this device or the radio's USB/ACC output level.">RX AUDIO LOW</div>
+            <div class="over-actions">
+              <button type="button" class="ov reply" id="rx-reply-btn" style="display:none" title="Reply to this picture (or double-click it)">↩ Reply</button>
+              <button type="button" class="ov" id="rx-slant-btn" style="display:none" title="Straighten a slanted picture">Fix slant</button>
+              <button type="button" class="ov" id="rx-redecode" style="display:none" title="Decode the last transmission again from the audio buffer, with the slant correction applied">Redecode</button>
+            </div>
+          </div>
+        </div>
+        <div id="rx-slant-row">
+          <span>Slant</span>
+          <input type="range" id="rx-slant-slider" min="-60" max="60" value="0" step="1" style="flex:1;" title="Pixels to shear the picture. 0 = no correction.">
+          <span id="rx-slant-value" style="font-family:monospace;min-width:40px;text-align:right;">0 px</span>
+          <button type="button" class="btn" id="rx-slant-reset" style="font-size:11px;padding:1px 6px;">Reset</button>
+        </div>
+        <div class="sstv-waterfall-wrap"><canvas id="wf-canvas" width="640" height="100"></canvas></div>
+      </div>
 
-  <!-- Progress -->
-  <div class="sstv-progress"><div class="sstv-progress-bar" id="progress-bar"></div></div>
-
-  <!-- Text layer editor -->
-  <div class="sstv-text-editor">
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
-      <span style="font-size:11px;font-weight:700;color:var(--text-secondary)">Text Layers</span>
-      <div class="sstv-spacer"></div>
-      <label style="font-size:11px;color:var(--text-secondary)">TX Gain <input type="range" id="tx-gain" min="0" max="100" value="50" style="width:60px;vertical-align:middle"></label>
+      <div class="sstv-pane" id="tx-pane">
+        <div class="pane-h" id="tx-head">Transmit <span class="st" id="tx-state"></span></div>
+        <div class="replybar" id="replybar" hidden>
+          <canvas id="rb-thumb" width="320" height="256" aria-hidden="true"></canvas>
+          <b>↩</b><span>to</span>
+          <input type="text" id="rb-call" maxlength="12" aria-label="Their call" spellcheck="false" autocomplete="off">
+          <span class="src-tag" id="rb-src"></span>
+          <span>RSV</span><input type="text" id="rb-rsv" maxlength="3" value="595" aria-label="Your report for their picture" inputmode="numeric">
+          <select id="rb-tpl" aria-label="Reply template"></select>
+          <span class="sent" id="rb-sent"></span>
+          <button type="button" class="lg" id="rb-log" title="Open the log with this contact filled in">Log</button>
+          <button type="button" class="x" id="rb-x" aria-label="End this reply" title="End this reply">✕</button>
+        </div>
+        <div class="img-area" id="tx-area">
+          <div class="imgbox" id="tx-box">
+            <canvas id="tx-canvas" width="320" height="256" class="draggable" title="Click text to edit it, drag to move it"></canvas>
+            <div class="insp" id="text-props" style="display:none"></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" id="load-btn" title="Use a photo as the background">Photo…</button>
+          <button type="button" class="btn" id="add-text-btn">+ Text</button>
+          <label class="drive" title="Audio level sent to the radio">Drive <input type="range" id="tx-gain" min="0" max="100" value="50"></label>
+          <button type="button" class="sstv-btn-tx" id="tx-btn">TRANSMIT</button>
+        </div>
+        <div class="sstv-progress"><div class="sstv-progress-bar" id="progress-bar"></div></div>
+      </div>
     </div>
-    <div class="sstv-text-layers" id="text-layers"></div>
-    <div class="sstv-text-props" id="text-props" style="display:none"></div>
-    <button class="sstv-add-text-btn" id="add-text-btn">+ Add Text</button>
+    <!-- Multi-decode grid (Flex multi-slice) -->
+    <div class="sstv-rx-grid hidden" id="rx-grid"></div>
   </div>
 
-  <!-- Template strip -->
-  <div class="sstv-tpl-wrap">
-    <div class="sstv-tpl-header">
-      Templates
-      <span style="font-weight:400;color:var(--text-dim)" id="tpl-count"></span>
+  <div class="tray">
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab on" data-t="rx" role="tab">Received <small id="gallery-count"></small></button>
+      <button type="button" class="tab" data-t="tpl" role="tab">Templates <small id="tpl-count"></small></button>
+      <button type="button" class="tab" data-t="log" role="tab">Log</button>
+      <button type="button" class="tab" data-t="packs" role="tab">Packs <small id="packs-dot"></small></button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="open-folder-btn">Open folder</button>
+      <button type="button" class="btn" id="log-copy-btn" hidden>Copy log</button>
     </div>
-    <div class="sstv-tpl-strip" id="tpl-strip">
-      <div class="sstv-tpl-add" id="tpl-save-btn" title="Save current as template">+</div>
-    </div>
+    <div class="tray-body" data-body="rx"><div class="sstv-gallery" id="gallery"></div></div>
+    <div class="tray-body" data-body="tpl" hidden><div class="sstv-tpl-strip" id="tpl-strip"><div class="sstv-tpl-add" id="tpl-save-btn" title="Save the current picture as a template">+</div></div></div>
+    <div class="tray-body" data-body="log" hidden><div class="sstv-log-wrap" id="log-wrap"><textarea class="sstv-log-textarea" id="decode-log" readonly aria-label="Decode log"></textarea></div></div>
+    <div class="tray-body" data-body="packs" hidden><div class="packs-strip" id="packs-strip"></div></div>
   </div>
 
-  <!-- Gallery -->
-  <div class="sstv-gallery-wrap">
-    <div class="sstv-gallery-header">
-      Received Images <span id="gallery-count"></span>
-      <div class="sstv-spacer"></div>
-      <button class="sstv-btn" id="open-folder-btn" style="font-size:10px;padding:2px 8px">Open Folder</button>
-    </div>
-    <div class="sstv-gallery" id="gallery"></div>
+  <div class="status">
+    <span id="status-device"></span>
+    <span id="rx-level" title="Peak level of the receive audio reaching the decoder. Healthy is about -30 to -6 dBFS.">--</span>
+    <span id="status-bar">Ready</span>
   </div>
 
-  <!-- Decode log -->
-  <div class="sstv-log-wrap" id="log-wrap">
-    <div class="sstv-log-header">
-      <span id="log-toggle" style="cursor:pointer">Decode Log <span style="font-weight:400;color:var(--text-dim);font-size:11px">(click to hide)</span></span>
-      <div class="sstv-spacer"></div>
-      <button class="sstv-btn" id="log-copy-btn" style="font-size:11px;padding:2px 8px">Copy</button>
-    </div>
-    <textarea class="sstv-log-textarea" id="decode-log" readonly></textarea>
-  </div>
-
-  <!-- Audio settings -->
-  <div class="sstv-settings">
-    <span>Audio In:</span>
-    <select id="audio-input"></select>
-    <span id="rx-level" style="font-size:11px;color:#8892b0;min-width:6em" title="Peak level of the RX audio reaching the SSTV decoder (dB below full scale). Healthy is about -30 to -6 dBFS.">--</span>
-    <span>Audio Out:</span>
-    <select id="audio-output"></select>
-  </div>
-
-  </div><!-- end sstv-scroll -->
-
-  <!-- Status -->
-  <div class="sstv-status" id="status-bar">Ready</div>
+  <div class="ctx" id="ctx-menu" hidden role="menu"></div>
 
   <script src="waterfall.js"></script>
   <script src="../lib/sstv-audio-device.js"></script>
+  <script src="../lib/rig-family.js"></script>
+  <script src="../lib/sstv-templates.js"></script>
   <script src="sstv-popout.js"></script>
 </body>
 </html>
