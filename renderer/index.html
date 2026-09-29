@@ -3051,11 +3051,11 @@
           </div>
           <button type="button" id="echocat-restart-audio-btn" style="padding:4px 12px;">Restart audio</button>
         </div>
-        <!-- TX EQ + Compressor — direct audio paths only (SmartSDR
-             Direct, K4 network). DAX-device path bypasses Web Audio. -->
+        <!-- TX EQ + Compressor — every ECHOCAT mic route: dax_tx (SmartSDR
+             Direct, K4 network) and the USB CODEC / DAX-device graph. -->
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px;">
           <div style="flex:1;min-width:280px;">
-            <strong>TX EQ + Compression <span style="color:#888;font-weight:normal;font-size:11px;">(SmartSDR Direct &amp; K4 network)</span></strong>
+            <strong>TX EQ + Compression <span style="color:#888;font-weight:normal;font-size:11px;">(ECHOCAT mic audio)</span></strong>
             <span class="help-text" style="display:block;">Compensates for radios that disable internal EQ + compression in DATA mode (IC-7300 and similar). Applied to mic audio before it reaches the rig.</span>
           </div>
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">

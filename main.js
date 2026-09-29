@@ -19811,8 +19811,8 @@ function _buildAudioBridgeConfig() {
       : undefined,
     audioSource:    settings.audioSource || 'dax',
     daxTxDirect,
-    // TX EQ + compressor — applied in the bridge renderer to mic audio
-    // BEFORE the AudioWorklet that feeds dax_tx packets to the rig.
+    // TX EQ + compressor — applied in the bridge renderer to the client-mic
+    // audio on both routes (dax_tx worklet, or the USB CODEC's WebAudio graph).
     // Compensates for the IC-7300 / similar rigs disabling their internal
     // EQ + compression in DATA mode (which SSB-over-DATA forces). Off by
     // default so existing users don't get a silent audio change.
@@ -19823,8 +19823,8 @@ function _buildAudioBridgeConfig() {
     },
     // First-syllable PTT guard: fixed delay (ms) on the phone-mic → rig
     // path so speech spoken the instant PTT is pressed survives the keying
-    // delay instead of being clipped on air. DAX-direct path only (the
-    // setSinkId path has no WebAudio graph to hang a delay on). Default
+    // delay instead of being clipped on air. Both routes (the USB CODEC
+    // route has its own WebAudio graph since KM0JPR 2026-09-28). Default
     // 120ms; settings.echoTxGuardMs = 0 disables, clamped ≤300.
     txGuardMs: Math.max(0, Math.min(300,
       settings.echoTxGuardMs != null ? (parseInt(settings.echoTxGuardMs, 10) || 0) : 120)),

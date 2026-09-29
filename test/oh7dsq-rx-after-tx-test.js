@@ -26,16 +26,22 @@ const html = R('renderer/remote-audio.html');
 
 test('the sink route starts gated to the TX state, not open', () => {
   const at = html.indexOf('if (config.daxTxDirect) {');
-  const branch = html.slice(at, html.indexOf('_applyTxDrive(); // sink route', at));
-  assert.ok(/_txSinkRoute = true;\s*audioEl\.muted = !kiwiTxMuted;/.test(branch), 'sink route: muted unless transmitting');
+  const branch = html.slice(at, html.indexOf('// PC-side TX peak meter', at));
+  // KM0JPR 2026-09-28: the USB CODEC route is a WebAudio graph whose last
+  // node is a TX gate; the bare <audio> element is only the fallback.
+  const graph = html.slice(html.indexOf('async function startSinkTxGraph('), html.indexOf('function stopSinkTxGraph('));
+  assert.ok(/_sinkTxGate\.gain\.value = kiwiTxMuted \? 1 : 0;/.test(graph), 'graph gate: closed unless transmitting');
+  assert.ok(/audioEl\.muted = true;/.test(graph), 'the element never plays the mic alongside the graph');
+  assert.ok(/_txSinkLegacy = true;\s*audioEl\.muted = !kiwiTxMuted;/.test(branch), 'fallback: muted unless transmitting');
   assert.ok(!/audioEl\.muted = false;/.test(branch), 'no unconditional unmute left');
   assert.ok(/_txSinkRoute = false;\s*audioEl\.muted = true;/.test(branch), 'the DAX path keeps its own gate');
 });
 
 test('the TX-state edge opens and closes the sink route', () => {
   const at = html.indexOf('window.api.onTxState(');
-  const fn = html.slice(at, at + 900);
-  assert.ok(/if \(_txSinkRoute\) audioEl\.muted = !kiwiTxMuted;/.test(fn));
+  const fn = html.slice(at, at + 1400);
+  assert.ok(/_sinkTxGate\.gain\.setTargetAtTime\(kiwiTxMuted \? 1 : 0/.test(fn), 'graph gate follows TX');
+  assert.ok(/else if \(_txSinkRoute && _txSinkLegacy\) \{\s*audioEl\.muted = !kiwiTxMuted;/.test(fn), 'fallback element follows TX');
 });
 
 test('the gate follows the PTT press, not CAT success (a VOX-only station still transmits)', () => {

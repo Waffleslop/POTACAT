@@ -196,16 +196,33 @@ window.api.onStartAudio(async (config) => {
         // operator's PTT press, not CAT success, so a VOX-only station still
         // gets its audio.
         _txSinkRoute = true;
-        audioEl.muted = !kiwiTxMuted;
-        // Route to specific output device (radio's USB audio input via DAX program)
-        if (config.outputDeviceId && typeof audioEl.setSinkId === 'function') {
-          try {
-            await audioEl.setSinkId(config.outputDeviceId);
-          } catch (e) {
-            window.api.sendAudioStatus({ error: 'Failed to set output device: ' + e.message });
+        // A WebAudio graph into the radio's USB audio input, so this route
+        // gets what the DAX path has: TX drive above unity, the TX EQ +
+        // compressor and the first-syllable guard. Played through the bare
+        // <audio> element the phone's mic went out at unity with no
+        // compression at all, and a boost above 100% was clamped (KM0JPR
+        // IC-7300 2026-09-27: low ALC and power next to the stock mic).
+        let graphOk = false;
+        try {
+          await startSinkTxGraph(event.streams[0], config.outputDeviceId, config.txEq, config.txGuardMs);
+          graphOk = true;
+        } catch (e) {
+          stopSinkTxGraph();
+          window.api.sendAudioStatus({ note: 'TX audio graph unavailable (' + e.message + '); playing the mic through the output device directly' });
+        }
+        if (!graphOk) {
+          _txSinkLegacy = true;
+          audioEl.muted = !kiwiTxMuted;
+          // Route to specific output device (radio's USB audio input via DAX program)
+          if (config.outputDeviceId && typeof audioEl.setSinkId === 'function') {
+            try {
+              await audioEl.setSinkId(config.outputDeviceId);
+            } catch (e) {
+              window.api.sendAudioStatus({ error: 'Failed to set output device: ' + e.message });
+            }
           }
         }
-        _applyTxDrive(); // sink route: drive via <audio>.volume
+        _applyTxDrive();
       }
       // PC-side TX peak meter — tap the incoming stream with an AnalyserNode
       // and push peaks to the VFO popout via main. The audio still plays
@@ -342,9 +359,15 @@ let _daxTxCtx = null;
 let _daxTxNode = null;
 let _daxTxSource = null;
 let _daxTxDelay = null;   // first-syllable PTT guard (DelayNode), null when off
-// TX audio goes out through <audio>.setSinkId (a USB CODEC / SignaLink), so
-// that element is gated to the TX state in onTxState.
+// TX audio goes to a USB CODEC / SignaLink rather than dax_tx. It is gated to
+// the TX state in onTxState: a gain node on the WebAudio graph, or, when the
+// graph could not be built (_txSinkLegacy), the <audio> element's mute.
 let _txSinkRoute = false;
+let _txSinkLegacy = false;
+let _sinkTxCtx = null;
+let _sinkTxSource = null;
+let _sinkTxDelay = null;
+let _sinkTxGate = null;
 // --- TX EQ + Compressor ---
 // DSP chain lives in renderer/tx-eq-chain.js (shared with vfo-popout).
 // This file just owns the bridge-side wiring + live-update plumbing.
@@ -359,17 +382,17 @@ let _txEqState = { enabled: false, preset: 'ragchew' };
 // Two mic->rig routes, so two levers:
 //   * DAX-direct (Flex / K4 network): a real GainNode ahead of the EQ chain,
 //     full 0-200 range.
-//   * setSinkId (generic USB CODEC): that route has no WebAudio graph (same
-//     reason the PTT guard delay is DAX-only), so we drive the <audio>
-//     element's .volume — which HTML caps at 1.0. Above 100% we clamp and say
-//     so rather than pretend the boost applied.
+//   * USB CODEC: the same GainNode on its own WebAudio graph (AudioContext
+//     .setSinkId to the radio's input), full 0-200 range. Only if that graph
+//     cannot be built does it fall back to the <audio> element's .volume,
+//     which HTML caps at 1.0: above 100% we then clamp and say so.
 let _txDrivePct = 100;
 let _txDriveGain = null;   // GainNode on the DAX path (null on the sink route)
 function _applyTxDrive() {
   const g = Math.max(0, Math.min(200, Number(_txDrivePct))) / 100;
   if (_txDriveGain) _txDriveGain.gain.value = g;
-  // setSinkId route: <audio>.volume is 0..1 only.
-  if (audioEl) audioEl.volume = Math.min(1, g);
+  // Element fallback: <audio>.volume is 0..1 only.
+  if (audioEl) audioEl.volume = _txSinkLegacy ? Math.min(1, g) : 1;
   if (!_txDriveGain && g > 1) {
     window.api.sendAudioStatus({
       note: `TX drive ${Math.round(g * 100)}% clamped to 100% — boost above unity needs the DAX-direct path; ` +
@@ -436,6 +459,55 @@ async function startDaxTxTap(stream, eqConfig, guardMs) {
   _daxTxNode.connect(_daxTxCtx.destination);
   if (_daxTxCtx.state === 'suspended') { try { await _daxTxCtx.resume(); } catch {} }
 }
+// USB CODEC route: phone mic -> guard delay -> TX drive -> EQ/compressor ->
+// TX gate -> the radio's USB audio input. The <audio> element keeps the
+// stream attached (Chromium only feeds a remote WebRTC track into WebAudio
+// while an element holds it) but stays muted, or the mic would play twice.
+async function startSinkTxGraph(stream, outputDeviceId, eqConfig, guardMs) {
+  stopSinkTxGraph();
+  if (!stream) throw new Error('no mic stream');
+  const ctx = new AudioContext({ latencyHint: 'interactive' });
+  _sinkTxCtx = ctx;
+  if (outputDeviceId) {
+    if (typeof ctx.setSinkId !== 'function') throw new Error('AudioContext.setSinkId is not available');
+    await ctx.setSinkId(outputDeviceId);
+  }
+  _txSinkLegacy = false;
+  audioEl.muted = true;
+  _sinkTxSource = ctx.createMediaStreamSource(stream);
+  const guardSec = Math.max(0, Math.min(300, Number(guardMs) || 0)) / 1000;
+  if (guardSec > 0) {
+    _sinkTxDelay = ctx.createDelay(0.5);
+    _sinkTxDelay.delayTime.value = guardSec;
+    _sinkTxSource.connect(_sinkTxDelay);
+  }
+  _txDriveGain = ctx.createGain();
+  (_sinkTxDelay || _sinkTxSource).connect(_txDriveGain);
+  _sinkTxGate = ctx.createGain();
+  _sinkTxGate.gain.value = kiwiTxMuted ? 1 : 0;
+  _sinkTxGate.connect(ctx.destination);
+  _txEqState = {
+    enabled: !!(eqConfig && eqConfig.enabled),
+    preset:  (eqConfig && eqConfig.preset) || 'ragchew',
+  };
+  TxEqChain.wire(_txEqChain, ctx, _txDriveGain, _sinkTxGate, _txEqState);
+  _applyTxDrive();
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
+}
+function stopSinkTxGraph() {
+  if (_sinkTxCtx && _txDriveGain && _sinkTxGate) {
+    try { TxEqChain.wire(_txEqChain, _sinkTxCtx, _txDriveGain, _sinkTxGate, { enabled: false }); } catch {}
+  }
+  if (_sinkTxCtx) {
+    if (_txDriveGain) { try { _txDriveGain.disconnect(); } catch {} _txDriveGain = null; }
+    if (_sinkTxDelay) { try { _sinkTxDelay.disconnect(); } catch {} }
+    if (_sinkTxGate) { try { _sinkTxGate.disconnect(); } catch {} }
+    if (_sinkTxSource) { try { _sinkTxSource.disconnect(); } catch {} }
+    _sinkTxCtx.close().catch(() => {});
+  }
+  _sinkTxCtx = null; _sinkTxSource = null; _sinkTxDelay = null; _sinkTxGate = null;
+}
+
 function stopDaxTxTap() {
   // Drop the EQ nodes by wiring through "disabled" once (which disconnects
   // and nulls them out) so we don't leak references on stop.
@@ -459,6 +531,8 @@ window.api.onTxEqUpdate((eqConfig) => {
   };
   if (_daxTxCtx && _daxTxSource && _daxTxNode) {
     TxEqChain.wire(_txEqChain, _daxTxCtx, _txDriveGain || _daxTxDelay || _daxTxSource, _daxTxNode, _txEqState);
+  } else if (_sinkTxCtx && _txDriveGain && _sinkTxGate) {
+    TxEqChain.wire(_txEqChain, _sinkTxCtx, _txDriveGain, _sinkTxGate, _txEqState);
   }
 });
 
@@ -617,6 +691,9 @@ window.api.onStopAudio(() => {
   tearDownKiwiGraph();
   tearDownLocalMixGraph();
   stopDaxTxTap();
+  stopSinkTxGraph();
+  _txSinkRoute = false;
+  _txSinkLegacy = false;
   audioSender = null;
   audioEl.srcObject = null;
   stopTxMeter();
@@ -742,7 +819,14 @@ window.api.onTxState((state) => {
   kiwiTxMuted = !!state;
   if (kiwiGain) kiwiGain.gain.value = kiwiTxMuted ? 0 : 1;
   // Sink route: the phone's mic plays into the radio only while keyed.
-  if (_txSinkRoute) audioEl.muted = !kiwiTxMuted;
+  // 5 ms ramp on the graph's gate so opening it never clicks the audio.
+  if (_sinkTxGate && _sinkTxCtx) {
+    const t = _sinkTxCtx.currentTime;
+    _sinkTxGate.gain.cancelScheduledValues(t);
+    _sinkTxGate.gain.setTargetAtTime(kiwiTxMuted ? 1 : 0, t, 0.005);
+  } else if (_txSinkRoute && _txSinkLegacy) {
+    audioEl.muted = !kiwiTxMuted;
+  }
   // SmartSDR-direct path needs the same TX-mute so the mobile listener
   // doesn't hear their own TX echoed back through the Flex receiver.
   if (smartGain) smartGain.gain.value = kiwiTxMuted ? 0 : 1;
