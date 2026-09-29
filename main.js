@@ -1162,6 +1162,9 @@ let lastMergedSpots = [];        // most recent dedupe'd spot list, cached so th
                                  // panadapter's allowlist when "Sync with Table
                                  // View" is off (K0OTC 2026-04-30).
 let sstvEngine = null;       // SSTV encode/decode engine (single-slice)
+// The picture most recently saved to the gallery, so an FSK ID that follows
+// it (the callsign sent after the picture) can be written into its sidecar.
+let _sstvLastSaved = null;   // { jsonPath, at }
 // Circuit breaker for the SSTV worker. When the worker storms errors
 // (~190/sec under K3SBP 2026-05-25's repro), the audio-frame fan-out keeps
 // pushing buffers into a worker that's making zero forward progress —
@@ -28873,6 +28876,26 @@ app.whenReady().then(() => {
       }
     });
 
+    // FSK ID: the callsign MMSSTV/QSSTV send after a picture (lib/sstv-fskid.js).
+    // The window uses it to fill "their call" for a reply; the gallery keeps it
+    // with the picture it followed.
+    sstvEngine.on('fskid', (data) => {
+      if (!data || !data.call) return;
+      sendCatLog(`[SSTV] FSK ID: ${data.call}`);
+      _sstvLastActivityMs = Date.now();
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-rx-fskid', { call: data.call, at: data.at || Date.now() });
+      }
+      // The ID follows its picture within seconds; tag that picture's sidecar.
+      const last = _sstvLastSaved;
+      if (last && Date.now() - last.at < 30000) {
+        _sstvLastSaved = null;
+        fs.promises.readFile(last.jsonPath, 'utf-8')
+          .then((txt) => { const meta = JSON.parse(txt); meta.fskCall = data.call; return fs.promises.writeFile(last.jsonPath, JSON.stringify(meta, null, 2), 'utf-8'); })
+          .catch((err) => console.error('[SSTV] FSK ID sidecar update failed:', err.message));
+      }
+    });
+
     sstvEngine.on('rx-line', (data) => {
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-line', {
@@ -29127,6 +29150,8 @@ app.whenReady().then(() => {
         freqHz: meta.freqHz || null,
         freqKhz: meta.freqKhz || null,
         callsign: meta.callsign || '',
+        // The sending station's call, from the FSK ID that followed the picture.
+        fskCall: meta.fskCall || '',
       };
     } catch (err) {
       console.error('[SSTV] Gallery record error:', err.message);
@@ -29170,6 +29195,7 @@ app.whenReady().then(() => {
         postProcessed: settings.sstvPostProcess !== false,
       };
       await fs.promises.writeFile(filePath.replace(/\.png$/i, '.json'), JSON.stringify(meta, null, 2), 'utf-8');
+      _sstvLastSaved = { jsonPath: filePath.replace(/\.png$/i, '.json'), at: Date.now() };
       console.log('[SSTV] Saved decoded image:', filePath);
       return await sstvGalleryRecordFromFile(filePath);
     } catch (err) {
