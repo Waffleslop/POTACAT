@@ -58,9 +58,16 @@ test('a phone photo or desktop TX restarts a stopped decoder', () => {
 });
 
 test('the ECHOCAT app closing SSTV does not stop the decoder the desktop window is using', () => {
-  const stop = MAIN.slice(MAIN.indexOf("remoteServer.on('sstv-stop'"), MAIN.indexOf("remoteServer.on('sstv-stop'") + 900);
-  assert.ok(/if \(sstvPopoutWin && !sstvPopoutWin\.isDestroyed\(\)\) \{[\s\S]{0,300}return;/.test(stop), 'an open SSTV window keeps the decoder');
-  assert.ok(/sendCatLog\('\[SSTV\] Decoder stopped by the ECHOCAT app'\)/.test(stop), 'a stop is logged');
+  // Since the app's explicit Stop RX (sstv-decoder-state-desktop) the rule is
+  // the pure decideSstvStop; a BARE stop (older apps' tab switch) with the
+  // window open still keeps the decoder, and is logged.
+  const { decideSstvStop } = require('../lib/sstv-decoder-state');
+  for (const openedBy of ['app', 'desktop']) {
+    assert.strictEqual(decideSstvStop({ windowOpen: true, openedBy, running: true }).action, 'keep-window', 'an open SSTV window keeps the decoder');
+  }
+  assert.strictEqual(decideSstvStop({ windowOpen: false, running: true }).log, '[SSTV] Decoder stopped by the ECHOCAT app', 'a stop is logged');
+  const stop = MAIN.slice(MAIN.indexOf("remoteServer.on('sstv-stop'"), MAIN.indexOf("remoteServer.on('sstv-stop'") + 1500);
+  assert.ok(/decideSstvStop\(\{/.test(stop) && /sendCatLog\(d\.log\)/.test(stop), 'main runs the decision and logs it');
   assert.ok(/engineRunning: !!\(sstvEngine && sstvEngine\.running\)/.test(MAIN), 'the feed gate asks whether the engine RUNS, not whether it exists');
   const pop = R('renderer/sstv-popout.js');
   assert.ok(/data\.state === 'stopped'[\s\S]{0,120}Decoder stopped/.test(pop), 'the SSTV window shows a stopped decoder');

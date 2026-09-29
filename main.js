@@ -374,6 +374,7 @@ const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine, sstvRxVisLogLine } = require('./lib/sstv-engine');
+const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
@@ -1134,6 +1135,24 @@ let vfoPopoutWin = null;     // pop-out VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
+// Who opened the SSTV window: 'app' (ECHOCAT sstv-open) or 'desktop'. An
+// explicit Stop RX from the app closes only a window the app opened.
+let sstvPopoutOpenedBy = null;
+let _sstvDecoderStateSent = '';
+/** S2C sstv-decoder-state on every change (engine start/stop, window
+ *  open/close) and at client connect (force). Deduped by content. */
+function pushSstvDecoderState({ force = false } = {}) {
+  const windowOpen = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed());
+  const state = sstvDecoderState({
+    running: !!(sstvEngine && sstvEngine.running),
+    windowOpen,
+    openedBy: sstvPopoutOpenedBy,
+  });
+  const key = JSON.stringify(state);
+  if (!force && key === _sstvDecoderStateSent) return;
+  _sstvDecoderStateSent = key;
+  try { if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastSstvDecoderState(state); } catch {}
+}
 let scopePopoutWin = null;   // pop-out Band Scope window (the FT-710's own spectrum over USB)
 let bandspreadPopoutWin = null; // pop-out bandspread window
 let logPopoutWin = null;     // pop-out Log QSO window (W9TEF "ragchew logger" feature)
@@ -16164,6 +16183,9 @@ function connectRemote() {
       _mintTurnCredentials().then((ice) => { if (ice) _sendStunConfig(); }).catch(() => {});
     }
     broadcastRemoteRadioStatus();
+    // The SSTV decoder's real state, so a reconnecting app replaces its own
+    // RX belief at once (it survives a blip: nothing stops SSTV on disconnect).
+    pushSstvDecoderState({ force: true });
     // Seed the (re)connecting phone with the desktop's current scan state so a
     // mid-scan reconnect shows the in-progress scan (scan-state-sync-desktop).
     remoteServer.sendToClient({ type: 'scan-state', scanning: desktopScanning });
@@ -18514,7 +18536,7 @@ function connectRemote() {
   // SSTV from ECHOCAT phone — open desktop SSTV popout
   remoteServer.on('sstv-open', () => {
     console.log('[SSTV] ECHOCAT sstv-open received, openSstvPopout=' + (typeof openSstvPopout));
-    if (openSstvPopout) openSstvPopout();
+    if (openSstvPopout) openSstvPopout({ openedBy: 'app' });
     else console.warn('[SSTV] openSstvPopout not yet assigned — second whenReady block not run?');
     // Ask the popout to push its current compose to the phone. Popout may not
     // exist yet on first open; the ipc handler tolerates that.
@@ -18542,7 +18564,7 @@ function connectRemote() {
     // Open the desktop popout so the operator can see what's being sent. The
     // popout also owns TX audio playback for the Flex audio path.
     const popoutWasOpen = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed());
-    if (!popoutWasOpen && openSstvPopout) openSstvPopout();
+    if (!popoutWasOpen && openSstvPopout) openSstvPopout({ openedBy: 'app' });
     try {
       const { nativeImage } = require('electron');
       // Decode base64 JPEG/PNG from phone
@@ -18586,19 +18608,28 @@ function connectRemote() {
       console.error('[SSTV] ECHOCAT photo error:', err.message);
     }
   });
-  remoteServer.on('sstv-stop', () => {
-    // The mobile app sends this when its SSTV screen closes. With the desktop
-    // SSTV window open the operator is receiving here, and stopping left that
-    // window saying "Listening..." over a dead decoder (audio accepted, then
-    // dropped). Only stop when nothing on the desktop is watching.
-    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
-      sendCatLog('[SSTV] The ECHOCAT app closed SSTV; the decoder keeps running because the SSTV window is open here');
-      return;
-    }
-    if (sstvEngine && sstvEngine.running) {
+  remoteServer.on('sstv-stop', ({ reason } = {}) => {
+    // Two senders: the app's explicit Stop RX ({reason:'user'}) and older
+    // apps' bare stop on every SSTV tab switch. A bare stop never touches an
+    // open window (e6326b3a: it left "Listening..." over a dead decoder); an
+    // explicit one closes a window the app opened and leaves one opened at the
+    // desk alone. Policy: lib/sstv-decoder-state.js decideSstvStop.
+    const windowOpen = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed());
+    const d = decideSstvStop({
+      reason, windowOpen, openedBy: windowOpen ? sstvPopoutOpenedBy : null,
+      running: !!(sstvEngine && sstvEngine.running),
+    });
+    if (d.log) sendCatLog(d.log);
+    if (d.action === 'stop') {
       sstvEngine.stop();
-      sendCatLog('[SSTV] Decoder stopped by the ECHOCAT app');
+    } else if (d.action === 'stop-and-close') {
+      // Closing runs stopSstv() (PTT release included) from the 'closed' handler.
+      sstvEngine && sstvEngine.stop();
+      try { sstvPopoutWin.close(); } catch {}
     }
+    // Always answer with the truth, so an app whose Stop RX was declined
+    // shows the decoder still running rather than its own belief.
+    pushSstvDecoderState({ force: true });
   });
 
   // Phone tapped the AUTO-SSTV banner to disable the idle-trigger feature.
@@ -28631,11 +28662,15 @@ app.whenReady().then(() => {
       // worker, so no decoder state (mode, lock) survives it.
       if (!sstvEngine.running) {
         sstvEngine.start();
+        pushSstvDecoderState();
         sendCatLog('[SSTV] Decoder restarted — listening for VIS headers');
       }
       return;
     }
     sstvEngine = new SstvEngine();
+    // running <-> stopped reaches the app; decoding/encoding are the same
+    // "running" state and are deduped away.
+    sstvEngine.on('status', () => pushSstvDecoderState());
 
     sstvEngine.on('encode-complete', (data) => {
       // Ensure popout is open for audio playback — open it if needed
@@ -28970,6 +29005,7 @@ app.whenReady().then(() => {
     });
 
     sstvEngine.start();
+    pushSstvDecoderState();
     console.log('[SSTV] Engine started');
     sendCatLog('[SSTV] Decoder started — listening for VIS headers');
     _sstvLastActivityMs = Date.now();
@@ -28994,6 +29030,7 @@ app.whenReady().then(() => {
       console.log('[SSTV] Engine stopped');
       sendCatLog('[SSTV] Decoder stopped');
     }
+    pushSstvDecoderState();
     // Re-arm the audio-feed circuit breaker so the next start() gets a
     // fresh chance. The error condition that tripped it might be transient
     // (state corruption from a previous session) and stop+start usually
@@ -29193,6 +29230,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('sstv-stop', () => {
     if (sstvEngine) sstvEngine.stop();
+    pushSstvDecoderState();
   });
 
   ipcMain.handle('sstv-get-gallery', async () => {
@@ -29249,6 +29287,8 @@ app.whenReady().then(() => {
   // of its own dropdown choice (idle SSTV picks the day/night band).
   openSstvPopout = function(opts) {
     const target = opts && opts.freqKhz ? { freqKhz: opts.freqKhz, mode: opts.mode || '' } : null;
+    // An already-open window keeps its opener: the app re-sending sstv-open
+    // must not take ownership of a window the operator opened at the desk.
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       // Popout already open — ask it to re-QSY to the selected SSTV freq so the
       // radio moves back from whatever POTA spot the user last tuned to.
@@ -29260,6 +29300,7 @@ app.whenReady().then(() => {
       return;
     }
     const isMac = process.platform === 'darwin';
+    sstvPopoutOpenedBy = (opts && opts.openedBy === 'app') ? 'app' : 'desktop';
     sstvPopoutWin = new BrowserWindow({
       width: 900,
       height: 700,
@@ -29294,8 +29335,10 @@ app.whenReady().then(() => {
     });
     sstvPopoutWin.on('closed', () => {
       sstvPopoutWin = null;
-      stopSstv();
+      sstvPopoutOpenedBy = null;
+      stopSstv(); // pushes sstv-decoder-state {running:false, windowOpen:false}
     });
+    pushSstvDecoderState();
     sstvPopoutWin.webContents.on('did-finish-load', () => {
       // Send theme
       const themePayload = { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' };

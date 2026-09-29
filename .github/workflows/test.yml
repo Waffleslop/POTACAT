@@ -52,6 +52,8 @@ jobs:
         run: node test/ft8-decode-deadline-test.js
       - name: Run ECHOCAT USB CODEC TX graph (drive above unity, EQ, TX gate)
         run: node test/echocat-usb-tx-graph-test.js
+      - name: Run SSTV decoder state (explicit Stop RX, S2C sstv-decoder-state)
+        run: node test/sstv-decoder-state-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)
