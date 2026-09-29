@@ -28929,6 +28929,8 @@ app.whenReady().then(() => {
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-fskid', { call: data.call, at: data.at || Date.now() });
       }
+      // The ECHOCAT app fills "their call" for a reply the same way.
+      try { if (remoteServer && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'sstv-rx-fskid', call: data.call, at: data.at || Date.now() }); } catch {}
       // The ID follows its picture within seconds; tag that picture's sidecar.
       const last = _sstvLastSaved;
       if (last && Date.now() - last.at < 30000) {
