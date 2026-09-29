@@ -645,6 +645,23 @@
     const f = el.getAttribute('data-field');
     return f === 'RST_SENT' || f === 'RST_RCVD';
   }
+  // Typing a full report in RST Sent moves on to RST Rcvd, as the desktop's
+  // log does (setupRstAutoAdvance): 2 characters on phone modes ("57"), 3 on
+  // CW and digital ("579", "-10"). Only typing jumps; deleting never does.
+  // The focus handler below then selects Rcvd, so it can be typed over too.
+  document.addEventListener('input', (e) => {
+    const el = e.target;
+    const m = el && el.tagName === 'INPUT' && /^(lt|ql|log)-rst-sent$/.exec(el.id || '');
+    if (!m) return;
+    if (e.inputType && !e.inputType.startsWith('insert')) return;
+    const modeEl = document.getElementById(m[1] + '-mode');
+    const mode = ((modeEl && modeEl.value) || '').toUpperCase();
+    const want = /^(SSB|USB|LSB|AM|FM)/.test(mode) ? 2 : 3;
+    if (el.value.length >= want) {
+      const rcvd = document.getElementById(m[1] + '-rst-rcvd');
+      if (rcvd) rcvd.focus();
+    }
+  });
   document.addEventListener('focusin', (e) => {
     const el = e.target;
     if (!isRstField(el)) return;

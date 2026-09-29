@@ -181,13 +181,26 @@ test('status-bar badges are not allowed to shrink into truncation', () => {
 test('every web signal-report field selects its whole value on focus', () => {
   const at = REMOTE.indexOf('function isRstField(');
   assert.ok(at > 0, 'no RST focus helper');
-  const block = REMOTE.slice(at, at + 900);
+  const block = REMOTE.slice(at, at + 2500);
   assert.ok(block.includes('rst-(sent|rcvd)$/'), 'id match covers lt-/ql-/log- rst fields');
   assert.ok(block.includes("'RST_SENT'") && block.includes("'RST_RCVD'"), 'logbook editor data-field inputs covered');
   assert.ok(block.includes("document.addEventListener('focusin'"), 'one delegated listener (fields rendered later are covered)');
   assert.ok(block.includes('setSelectionRange(0, el.value.length)'), 'deferred selection for iOS Safari');
   for (const id of ['lt-rst-sent', 'lt-rst-rcvd', 'ql-rst-sent', 'ql-rst-rcvd', 'log-rst-sent', 'log-rst-rcvd']) {
     assert.ok(REMOTE_HTML.includes(`id="${id}"`), `${id} still exists`);
+  }
+});
+// KW4FM: "Could it move from report sent to report received automatically
+// like POTACAT" — the desktop's setupRstAutoAdvance.
+test('typing a full report in RST Sent moves to RST Rcvd, on every web log form', () => {
+  const at = REMOTE.indexOf("/^(lt|ql|log)-rst-sent$/");
+  assert.ok(at > 0, 'no auto-advance for the three forms');
+  const block = REMOTE.slice(at - 200, at + 800);
+  assert.ok(block.includes("inputType.startsWith('insert')"), 'deleting never jumps');
+  assert.ok(block.includes("/^(SSB|USB|LSB|AM|FM)/.test(mode) ? 2 : 3"), '2 on phone modes, 3 on CW/digital (desktop rule)');
+  assert.ok(block.includes("-rst-rcvd'"), 'focus moves to the matching Rcvd field');
+  for (const p of ['lt', 'ql', 'log']) {
+    assert.ok(REMOTE_HTML.includes(`id="${p}-mode"`), `${p}-mode exists`);
   }
 });
 console.log(`\nWeb log form / {call}: ${pass} passed, ${fail} failed`);
