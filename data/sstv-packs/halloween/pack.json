@@ -1,0 +1,287 @@
+{
+  "schema": 1,
+  "id": "halloween",
+  "version": 2,
+  "name": "Halloween",
+  "season": {
+    "from": "10-01",
+    "to": "11-02"
+  },
+  "by": "POTACAT",
+  "minApp": "1.10.27",
+  "style": "Two-ink screen print: flat ink, hand-cut edges, the second ink offset downwards. No glows, no gradients beyond the sky.",
+  "fonts": [
+    {
+      "family": "Rye",
+      "file": "Rye-Regular.woff2",
+      "license": "OFL-1.1",
+      "licenseFile": "OFL.txt",
+      "use": "headlines"
+    }
+  ],
+  "palettes": [
+    {
+      "name": "Soot and pumpkin",
+      "sky": ["#1b1512", "#211913", "#2a2017"],
+      "land": "#0e0a08",
+      "glow": "#e2661b",
+      "ink": "#efe3c8",
+      "ink2": "#e2661b"
+    },
+    {
+      "name": "Bone and ghoul",
+      "sky": ["#191a14", "#1f2019", "#272a1f"],
+      "land": "#0b0b08",
+      "glow": "#9cc34a",
+      "ink": "#efe8d4",
+      "ink2": "#6e4494"
+    },
+    {
+      "name": "Old postcard",
+      "sky": ["#2b1d12", "#342415", "#3f2c18"],
+      "land": "#130c07",
+      "glow": "#f08a24",
+      "ink": "#f3e6c4",
+      "ink2": "#c2371d"
+    }
+  ],
+  "accents": ["#f08a24", "#efe3c8", "#b9d86a"],
+  "text": {
+    "headlineFont": "Rye",
+    "headlines": ["CQ SSTV", "TNX QSO", "SSTV ACTIVITY", "WEEKEND", "PSE RPT", "TNX FB PIC!"],
+    "replace": {
+      "SSTV ACTIVITY": "HALLOWEEN",
+      "WEEKEND": "OCT 31"
+    }
+  },
+  "shapes": {
+    "tomb": {
+      "poly": [[0, 1], [0, 0.35], [0.1, 0.12], [0.3, 0.02], [0.5, 0], [0.7, 0.02], [0.9, 0.12], [1, 0.35], [1, 1]]
+    },
+    "eyes": {
+      "parts": [
+        {
+          "poly": [[0, 0.5], [0.0924, 0.374], [0.21, 0.35], [0.3276, 0.374], [0.42, 0.5], [0.3276, 0.626], [0.21, 0.65], [0.0924, 0.626]]
+        },
+        {
+          "poly": [[0.58, 0.5], [0.6724, 0.374], [0.79, 0.35], [0.9076, 0.374], [1, 0.5], [0.9076, 0.626], [0.79, 0.65], [0.6724, 0.626]]
+        },
+        {
+          "poly": [[0.175, 0.362], [0.245, 0.362], [0.26, 0.5], [0.245, 0.638], [0.175, 0.638], [0.16, 0.5]],
+          "color": "$land"
+        },
+        {
+          "poly": [[0.755, 0.362], [0.825, 0.362], [0.84, 0.5], [0.825, 0.638], [0.755, 0.638], [0.74, 0.5]],
+          "color": "$land"
+        }
+      ]
+    }
+  },
+  "backgrounds": [
+    {
+      "name": "Lantern",
+      "draw": [
+        {
+          "fill": "$sky0"
+        },
+        {
+          "blob": {
+            "x": 160,
+            "y": 158,
+            "rx": 186,
+            "ry": 128,
+            "color": "$glow",
+            "rough": 3
+          }
+        },
+        {
+          "blob": {
+            "x": 160,
+            "y": 158,
+            "rx": 62,
+            "ry": 124,
+            "color": "rgba(0,0,0,0.16)",
+            "rough": 2
+          }
+        },
+        {
+          "blob": {
+            "x": 40,
+            "y": 158,
+            "rx": 70,
+            "ry": 118,
+            "color": "rgba(0,0,0,0.12)",
+            "rough": 2
+          }
+        },
+        {
+          "blob": {
+            "x": 280,
+            "y": 158,
+            "rx": 70,
+            "ry": 118,
+            "color": "rgba(0,0,0,0.12)",
+            "rough": 2
+          }
+        },
+        {
+          "poly": {
+            "pts": [[150, 36], [168, 36], [176, 6], [156, 4]],
+            "color": "#3d4a23",
+            "rough": 2
+          }
+        },
+        {
+          "poly": {
+            "pts": [[70, 120], [128, 120], [98, 76]],
+            "color": "$land",
+            "rough": 3,
+            "print": {
+              "dy": 5,
+              "color": "$ink"
+            }
+          }
+        },
+        {
+          "poly": {
+            "pts": [[192, 120], [250, 120], [220, 76]],
+            "color": "$land",
+            "rough": 3,
+            "print": {
+              "dy": 5,
+              "color": "$ink"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Candy corn",
+      "draw": [
+        {
+          "stripes": {
+            "rough": 5,
+            "bands": [[0, "$ink"], [90, "$glow"], [176, "#f2c230"]]
+          }
+        },
+        {
+          "band": {
+            "y": 0,
+            "h": 256,
+            "color": "rgba(20,12,6,0.18)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Moon, cropped",
+      "draw": [
+        {
+          "fill": "$sky0"
+        },
+        {
+          "blob": {
+            "x": 262,
+            "y": 64,
+            "rx": 128,
+            "ry": 128,
+            "color": "$ink",
+            "rough": 2,
+            "print": {
+              "dy": 5,
+              "color": "$ink2"
+            }
+          }
+        },
+        {
+          "blob": {
+            "x": 226,
+            "y": 48,
+            "rx": 18,
+            "ry": 14,
+            "color": "rgba(0,0,0,0.08)",
+            "rough": 2
+          }
+        },
+        {
+          "blob": {
+            "x": 290,
+            "y": 108,
+            "rx": 26,
+            "ry": 20,
+            "color": "rgba(0,0,0,0.07)",
+            "rough": 2
+          }
+        },
+        {
+          "branch": {
+            "from": [-10, 212],
+            "to": [220, 150],
+            "width": 11,
+            "color": "$land",
+            "twigs": 5
+          }
+        }
+      ]
+    },
+    {
+      "name": "Eyes in the dark",
+      "draw": [
+        {
+          "fill": "$land"
+        },
+        {
+          "shape": "eyes",
+          "at": [[40, 90], [60, 90]],
+          "size": 150,
+          "color": "$glow"
+        },
+        {
+          "shape": "eyes",
+          "at": [[20, 60], [150, 170]],
+          "size": 56,
+          "color": "$glow"
+        },
+        {
+          "shape": "eyes",
+          "at": [[220, 260], [150, 180]],
+          "size": 44,
+          "color": "$glow"
+        }
+      ]
+    },
+    {
+      "name": "Fog and a stone",
+      "draw": [
+        {
+          "fill": "$sky1"
+        },
+        {
+          "shape": "tomb",
+          "at": [[30, 60], [104, 116]],
+          "size": 84,
+          "color": "$land",
+          "rough": 2,
+          "print": {
+            "dy": 5,
+            "color": "$ink2"
+          }
+        },
+        {
+          "band": {
+            "y": 188,
+            "h": 68,
+            "color": "$land"
+          }
+        },
+        {
+          "stripes": {
+            "rough": 4,
+            "alpha": 0.2,
+            "bands": [[150, "$ink"], [166, "transparent"], [196, "$ink"], [210, "transparent"], [232, "$ink"], [244, "transparent"]]
+          }
+        }
+      ]
+    }
+  ]
+}

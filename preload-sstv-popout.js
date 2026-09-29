@@ -47,6 +47,16 @@ contextBridge.exposeInMainWorld('api', {
   sstvOpenGalleryFolder: () => ipcRenderer.send('sstv-open-gallery-folder'),
   sstvDeleteImage: (filename) => ipcRenderer.invoke('sstv-delete-image', filename),
   sstvLoadFile: () => ipcRenderer.invoke('sstv-load-file'),
+  // SSTV style packs (lib/sstv-packs.js). list() entries: { id, name, version,
+  // season, by, minApp, inSeason, bundled, installed, available,
+  // updateAvailable, compatible, size, claimed, active }. get() returns
+  // { pack, fonts: [{ family, file, bytes: Uint8Array }] } or null.
+  sstvPacksList: () => ipcRenderer.invoke('sstv-packs-list'),
+  sstvPackGet: (id) => ipcRenderer.invoke('sstv-pack-get', id),
+  sstvPackClaim: (id) => ipcRenderer.invoke('sstv-pack-claim', id),
+  sstvPackUnclaim: (id) => ipcRenderer.invoke('sstv-pack-unclaim', id),
+  sstvPackSetActive: (id) => ipcRenderer.invoke('sstv-pack-set-active', id),
+  onSstvPacksChanged: (cb) => ipcRenderer.on('sstv-packs-changed', (_e, list) => cb(list)),
   // Audio devices
   enumerateAudioDevices: () => navigator.mediaDevices.enumerateDevices()
     .then(d => d.filter(x => x.kind === 'audioinput' || x.kind === 'audiooutput')
