@@ -2736,6 +2736,20 @@ function sendCatMode(mode) {
 // Displays hold the peak: one CAT sample per poll mostly misses it, and the
 // radio's own bar is peak-reading (lib/meter-peak-hold.js).
 const _fwdPowerHold = require('./lib/meter-peak-hold').createPeakHold();
+
+/** Does paddle keying on this station touch ONLY the dedicated CW Key Port?
+ *  Mirrors the routing in the keyer output below: Kenwood-protocol rigs key
+ *  the port and send nothing over CAT (TA keying exists in no codec), DTR
+ *  models skip the CAT port when the key port is open, and rigctld has no
+ *  per-element keying so it uses the port too. Everything else (Icom CI-V
+ *  PTT, DTR on the CAT port, TA) talks on the CAT port. */
+function paddleKeysOnKeyPortOnly({ keyPortOpen, rigctld, protocol, paddleKey, taKeying }) {
+  if (!keyPortOpen) return false;
+  if (rigctld) return true;
+  if (paddleKey === 'dtr') return true;
+  if (protocol === 'kenwood' && !(paddleKey === 'ta' && taKeying)) return true;
+  return false;
+}
 function sendCatFwdPower(watts) {
   const w = Math.round((Number(watts) || 0) * 10) / 10;
   if (_stationSetupTxTest) {
@@ -16474,8 +16488,23 @@ function connectRemote() {
     const _cwActiveRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
     const cwKeyPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
     if (cat && cat.connected && rigType !== 'flex') {
-      // Pause polling so commands don't interleave with CW keying
-      if (down) {
+      // Pause polling so commands don't interleave with CW keying — but only
+      // when the keying goes over the CAT port. A dedicated CW Key Port
+      // (Kenwood-CAT rigs, DTR models, rigctld) keys a different port, so the
+      // pause bought nothing and cost every meter reading for as long as the
+      // paddle was in use (LZ3AW TS-480 + COM4 key port, 2026-09-29: "the
+      // power meter ... sometimes takes longer to visualise").
+      const _keyPortOnly = paddleKeysOnKeyPortOnly({
+        keyPortOpen: !!(cwKeyPort && cwKeyPort.isOpen),
+        rigctld: !!(settings.catTarget && settings.catTarget.type === 'rigctld'),
+        protocol: rigModel && rigModel.protocol,
+        paddleKey: cwCaps.paddleKey,
+        taKeying: !!(cwCaps.taKey && typeof cat.supportsCwKeyTa === 'function' && cat.supportsCwKeyTa()),
+      });
+      if (_keyPortOnly) {
+        // Nothing to pause (a pause from before the port opened is still
+        // resumed by its own timer).
+      } else if (down) {
         if (_cwPollResumeTimer) { clearTimeout(_cwPollResumeTimer); _cwPollResumeTimer = null; }
         cat.pausePolling();
       } else {

@@ -248,7 +248,9 @@ test('TS-480 SWR reads his measured ratios (the bar is not linear)', () => {
   codec.on('swr', (v) => seen.push(v));
   for (const [raw, ratio] of [[1, 1.0], [3, 1.5], [5, 2.0]]) {
     codec.onData(`RM1${String(raw).padStart(4, '0')};`);
-    assert.strictEqual(1 + seen[seen.length - 1] / 60, ratio, `RM1 ${raw} should read ${ratio}:1`);
+    // A perfect match is sent as wire 1 (1.02:1, shown as 1.0) because every
+    // display blanks wire 0 as "no reading" (LZ3AW 9/29).
+    assert.strictEqual((1 + seen[seen.length - 1] / 60).toFixed(1), ratio.toFixed(1), `RM1 ${raw} should read ${ratio}:1`);
   }
   codec.onData('RM10006;');
   const at6 = 1 + seen[seen.length - 1] / 60;

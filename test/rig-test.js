@@ -1715,7 +1715,8 @@ test('kenwood setVfo(B) retargets the next freq poll optimistically', () => {
   codec.setVfo('B');
   // The command, then its own readback right behind it (IF; + VFO B's
   // frequency — LZ3AW round 9: the display waited two poll cycles).
-  assert.deepStrictEqual(writes, ['FR1;', 'IF;', 'FB;']);
+  // FR picks the receive VFO; FT follows it when not in split (LZ3AW 9/29).
+  assert.deepStrictEqual(writes, ['FR1;', 'FT1;', 'IF;', 'FB;']);
   codec.getFrequency();
   assert.strictEqual(writes[writes.length - 1], 'FB;', 'the poll reads VFO B too');
 });

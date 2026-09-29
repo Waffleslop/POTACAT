@@ -74,9 +74,9 @@ test('paddle elements keep their exact length and a one-dit space despite late t
 });
 
 test('iambic keyer hands each element its length; its end is not re-switched', () => {
-  assert.ok(/onKey\(true, isDit \? ditMs\(\) : dahMs\(\)\);/.test(src));
+  assert.ok(/onKey\(true, isDit \? ditMs\(\) : dahMs\(\)(, \{[^}]*\})?\);/.test(src));
   assert.ok(/onKey\(false, 0\); \/\/ the scheduled element already ends itself/.test(src));
-  assert.ok(/if \(durMs\) \{ schedulePaddleElement\(durMs\); return; \}/.test(src));
+  assert.ok(/if \(durMs\) \{ (sendCwKeyStream\(true, durMs, info\); )?schedulePaddleElement\(durMs\); return; \}/.test(src));
 });
 
 test('live typing appends to the sidetone instead of cutting off what is sounding', () => {

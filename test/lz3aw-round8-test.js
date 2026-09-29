@@ -121,7 +121,9 @@ test('every wattmeter surface gets the held value, and the TX poll samples it ev
   assert.ok(/_fwdPowerHold\.reset\(\); push\(0\)/.test(fn), 'the silence reset clears it');
   assert.ok(/peakW = w/.test(fn), 'Station Setup still measures the raw sample');
   const rc = R('lib/rig-controller.js');
-  assert.ok(/if \(txMeters\) \{\s*if \(this\._codec\.getPowerMeter\)/.test(rc), 'power meter is not behind the every-2nd-cycle gate');
+  // Round 10 (9/29): direct serial reads it on its own 300 ms timer; the
+  // main tick still asks every cycle when that timer is off (rigctld).
+  assert.ok(/if \(txMeters && !this\._fastTxMeter\) this\._askPowerMeter\(\);/.test(rc), 'power meter is not behind the every-2nd-cycle gate');
 });
 
 (async () => {

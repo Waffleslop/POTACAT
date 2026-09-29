@@ -54,6 +54,8 @@ jobs:
         run: node test/echocat-usb-tx-graph-test.js
       - name: Run SSTV decoder state (explicit Stop RX, S2C sstv-decoder-state)
         run: node test/sstv-decoder-state-test.js
+      - name: Run LZ3AW round 10 (SWR 1:1, fast TX wattmeter, paddle element stream, Kenwood FR/FT split)
+        run: node test/lz3aw-round10-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)

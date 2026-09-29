@@ -849,6 +849,9 @@
   const scopeView = document.getElementById('scope-view');
   const scopeTabBtn = document.getElementById('scope-tab-btn');
   let scopeServerOk = false;
+  // The desktop replays this page's own keyer (cw-key) instead of re-keying
+  // from forwarded paddle contacts. See sendCwKeyStream.
+  var cwKeyStreamOk = false;
   let scopeState = null;
   let scopeLatest = null;
   let scopeSubscribedSent = false;
@@ -1469,6 +1472,7 @@
           ws._serverVersion = String(msg.serverVersion || '');
           ws._serverCapabilities = Array.isArray(msg.capabilities) ? msg.capabilities : [];
           scopeServerOk = ws._serverCapabilities.indexOf('scope') !== -1;
+          cwKeyStreamOk = ws._serverCapabilities.indexOf('cw-key-stream') !== -1;
           scopeUpdateTabVisibility();
           scopeSubscribedSent = false; // a fresh connection knows nothing — re-send if a scope surface is up
           scopeSyncSubscription(activeTab);
@@ -8474,12 +8478,12 @@
       if (toneTimer) { clearTimeout(toneTimer); toneTimer = null; }
       if (iesTimer)  { clearTimeout(iesTimer);  iesTimer  = null; }
     }
-    function startElement(isDit) {
+    function startElement(isDit, continued) {
       state = TONE;
       currentIsDit = isDit;
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
-      onKey(true, isDit ? ditMs() : dahMs());
+      onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
       clearTimers();
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
     }
@@ -8495,11 +8499,11 @@
       var oppDown  = currentIsDit ? dahPressed : ditPressed;
       var sameLatch = currentIsDit ? ditLatch : dahLatch;
       var sameDown  = currentIsDit ? ditPressed : dahPressed;
-      if (oppLatch || oppDown) { startElement(!currentIsDit); return; }
-      if (sameLatch || sameDown) { startElement(currentIsDit); return; }
+      if (oppLatch || oppDown) { startElement(!currentIsDit, true); return; }
+      if (sameLatch || sameDown) { startElement(currentIsDit, true); return; }
       if (mode === 'iambicB' && bothAtStart && !ditPressed && !dahPressed) {
         bothAtStart = false;
-        startElement(!currentIsDit);
+        startElement(!currentIsDit, true);
         return;
       }
       state = IDLE;
@@ -8536,14 +8540,14 @@
       setMode: function(m) {
         if (m === 'iambicA' || m === 'iambicB' || m === 'straight') {
           mode = m;
-          if (state !== IDLE) { clearTimers(); state = IDLE; onKey(false); }
+          if (state !== IDLE) { clearTimers(); state = IDLE; onKey(false, undefined, { cancel: true }); }
         }
       },
       setSwap: function(b) { swap = !!b; },
       stop: function() {
         clearTimers();
         ditPressed = dahPressed = ditLatch = dahLatch = false;
-        if (state !== IDLE) { state = IDLE; onKey(false); }
+        if (state !== IDLE) { state = IDLE; onKey(false, undefined, { cancel: true }); }
       },
     };
   }
@@ -8597,10 +8601,39 @@
     }
     paddleNextAt = 0;
   }
-  var localCwKeyer = createLocalCwKeyer(function(down, durMs) {
-    if (durMs) { schedulePaddleElement(durMs); return; } // iambic element
+  // The keying the operator hears is the keying the radio sends: with a
+  // desktop that supports it, every element this keyer makes goes to the
+  // shack with its ideal start time and length, and the shack replays them at
+  // that spacing behind a jitter buffer. Forwarding the paddle CONTACTS for a
+  // second keyer at the shack meant network jitter decided the elements:
+  // a dit release that arrived late became two dits (LZ3AW, 400 km from his
+  // TS-480, 2026-09-29: "errors ... especially with the dots").
+  var cwStreamNextAt = 0;
+  function sendCwKeyStream(down, durMs, info) {
+    if (!cwKeyStreamOk || !ws || ws.readyState !== WebSocket.OPEN) return;
+    var now = performance.now();
+    var msg;
+    if (down && durMs) {
+      // A continued element starts exactly one space after the previous
+      // one, whatever this page's timers did; a new streak starts now.
+      var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : now;
+      cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
+      msg = { type: 'cw-key', at: at, down: true, ms: durMs };
+    } else if (down) {
+      cwStreamNextAt = 0;
+      msg = { type: 'cw-key', at: now, down: true };
+    } else {
+      cwStreamNextAt = 0;
+      msg = { type: 'cw-key', at: now, down: false };
+      if (info && info.cancel) msg.cancel = true;
+    }
+    ws.send(JSON.stringify(msg));
+  }
+  var localCwKeyer = createLocalCwKeyer(function(down, durMs, info) {
+    if (durMs) { sendCwKeyStream(true, durMs, info); schedulePaddleElement(durMs); return; } // iambic element
     if (durMs === 0) return;                              // its end is already scheduled
     // Straight key, or a keyer stop/mode change.
+    sendCwKeyStream(down, 0, info);
     if (!down) cancelPaddleTones();
     handleCwSidetone(down);
   });
@@ -9382,6 +9415,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
   var _holdTickWorker = null;
   function _sendPaddleHold(contact) {
     if (!_paddleHoldActive[contact] || !ws || ws.readyState !== WebSocket.OPEN) return;
+    // Stream mode: the keepalive only matters for a held straight key.
+    if (cwKeyStreamOk) { ws.send(JSON.stringify({ type: 'cw-key', hold: true })); return; }
     ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 1, hold: true }));
   }
   function _holdTicker() {
@@ -9420,10 +9455,13 @@ var _paddleHoldTimer = { dit: null, dah: null };
       try {
         if (contact === 'dit') localCwKeyer.paddleDit(false); else localCwKeyer.paddleDah(false);
       } catch (e) {}
-      if (tellServer && wasDown && ws && ws.readyState === WebSocket.OPEN) {
+      if (tellServer && wasDown && !cwKeyStreamOk && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 0 }));
       }
     });
+    // Stream mode: this page's keyer IS the radio's keyer, so stopping keying
+    // means stopping it (its stop sends the cancelling key-up).
+    if (cwKeyStreamOk) { try { localCwKeyer.stop(); } catch (e) {} }
   }
 
   // Reachable from the message handler and the STOP button whatever scope
@@ -9441,7 +9479,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     ensureCwAudioCtx();
     if (contact === 'dit') localCwKeyer.paddleDit(!!state);
     else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN && !cwKeyStreamOk) {
       if (state && !_paddleRttSentAt) _paddleRttSentAt = performance.now();
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
     }
@@ -9462,7 +9500,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
         _stopPaddleHold(contact);
         if (contact === 'dit') { ditDown = false; localCwKeyer.paddleDit(false); }
         else { dahDown = false; localCwKeyer.paddleDah(false); }
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN && !cwKeyStreamOk) {
           ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: 0 }));
         }
       }, 8000);
