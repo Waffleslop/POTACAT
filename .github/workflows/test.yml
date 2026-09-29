@@ -54,6 +54,8 @@ jobs:
         run: node test/echocat-usb-tx-graph-test.js
       - name: Run SSTV decoder state (explicit Stop RX, S2C sstv-decoder-state)
         run: node test/sstv-decoder-state-test.js
+      - name: Run SSTV redesign (starters, looks, packs drawn, replies, SWR trip, guest SSTV)
+        run: node test/sstv-redesign-test.js
       - name: Run SSTV style packs (pure-data format, signed feed, store, claims sync)
         run: node test/sstv-packs-test.js
       - name: Validate SSTV style packs in data/sstv-packs

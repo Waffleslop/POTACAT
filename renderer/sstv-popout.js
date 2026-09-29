@@ -2733,10 +2733,10 @@ function setDefaultReply(id) {
 async function startReply(entry, starterId) {
   if (!entry) return;
   let call = String(entry.theirCall || entry.fskCall || '').toUpperCase();
-  let source = call ? (entry.fskCall && call === String(entry.fskCall).toUpperCase() ? 'from FSK ID' : '') : '';
+  let source = call ? (entry.fskCall && call === String(entry.fskCall).toUpperCase() ? 'FSK' : '') : '';
   if (!call) {
     await refreshContext();
-    if (ctxData.typedCall) { call = String(ctxData.typedCall).toUpperCase(); source = 'last typed'; }
+    if (ctxData.typedCall) { call = String(ctxData.typedCall).toUpperCase(); source = 'typed'; }
   }
   replySession = {
     call, source, rsv: (rbRsv.value || '595').replace(/[^0-9]/g, '').slice(0, 3) || '595',
@@ -2752,7 +2752,8 @@ async function startReply(entry, starterId) {
   }
   const id = starterId || defaultReplyId();
   rbCall.value = call;
-  rbSrc.textContent = call ? source : 'type their call';
+  rbSrc.textContent = call ? source : 'call?';
+  rbSrc.title = source === 'FSK' ? 'Read from the FSK ID sent after the picture' : source === 'typed' ? 'The call you last typed in POTACAT' : 'Type their call';
   rbSent.textContent = '';
   replybar.hidden = false;
   txHead.hidden = true;
@@ -2802,7 +2803,7 @@ rbCall.addEventListener('input', () => {
   const v = rbCall.value.toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
   if (v !== rbCall.value) rbCall.value = v;
   replySession.call = v;
-  rbSrc.textContent = v ? '' : 'type their call';
+  rbSrc.textContent = v ? '' : 'call?';
   renderTxPreview();
   // Saved with the picture, so a later reply to it is already filled in.
   const fn = replySession.filename;
