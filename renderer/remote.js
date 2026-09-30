@@ -11439,7 +11439,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // Load templates + text elements from settings received on auth
   function sstvPhoneLoadSettings() {
     if (!echoSettings) return;
-    if (echoSettings.sstvTemplates && echoSettings.sstvTemplates.length) {
+    // An empty list is news too (the last template deleted, here or on
+    // another machine): keeping the stale copy would save it back.
+    if (Array.isArray(echoSettings.sstvTemplates)) {
       sstvPhoneTemplates = echoSettings.sstvTemplates;
     }
     sstvPhoneRenderTemplates();

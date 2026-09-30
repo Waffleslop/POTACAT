@@ -752,6 +752,40 @@ function _splitSettings(s) {
   return { global: globalOut, profile: profileOut };
 }
 
+// --- SSTV template identity + cloud sync --------------------------------------
+// Every template write (SSTV window, ECHOCAT web client, import) sends the
+// whole list; only a diff against what is stored tells an edit from a delete,
+// so identity is stamped HERE, once (lib/sstv-template-sync.js stampTemplates).
+const SstvTemplateSyncLib = require('./lib/sstv-template-sync');
+const SSTV_SYNC_KEYS = ['sstvTemplates', 'sstvLookShuffle', 'sstvLookLocked', 'sstvPacksClaimed', 'sstvActivePack', 'sstvDefaultReply'];
+let sstvTemplateSync = null;
+function stampSstvTemplatesPatch(patch) {
+  if (!patch || !('sstvTemplates' in patch)) return false;
+  const r = SstvTemplateSyncLib.stampTemplates(settings.sstvTemplates || [], patch.sstvTemplates || [], {
+    now: Date.now(), newId: () => require('crypto').randomUUID(), deleted: settings.sstvTemplatesDeleted,
+  });
+  patch.sstvTemplates = r.templates;
+  patch.sstvTemplatesDeleted = r.deleted;
+  return r.changed;
+}
+/** After a save: tell the surfaces that hold a copy, and queue the cloud push. */
+function afterSstvSettingsSaved(patch, opts) {
+  if (!patch || !SSTV_SYNC_KEYS.some((k) => k in patch)) return;
+  if ('sstvTemplates' in patch || (opts && opts.fromCloud)) {
+    try {
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+        sstvPopoutWin.webContents.send('sstv-templates-update', {
+          templates: settings.sstvTemplates || [],
+          lookShuffle: settings.sstvLookShuffle, lookLocked: !!settings.sstvLookLocked,
+          defaultReply: settings.sstvDefaultReply || null, fromCloud: !!(opts && opts.fromCloud),
+        });
+      }
+    } catch {}
+    try { updateRemoteSettings(); } catch {}
+  }
+  if (!(opts && opts.fromCloud) && sstvTemplateSync) sstvTemplateSync.schedulePush();
+}
+
 function saveSettings(s) {
   // Auto-migrate on first save if we're in legacy single-file mode and
   // a callsign exists. Picks up users upgrading from a pre-multi-op build.
@@ -19097,8 +19131,10 @@ function connectRemote() {
       partial.kiwiSdrList = sdrSync.list;
       Object.assign(partial, sdrSync.slotKeys);
     }
+    stampSstvTemplatesPatch(partial);
     Object.assign(settings, partial);
     saveSettings(settings);
+    afterSstvSettingsSaved(partial);
     // Echo the CLEANED list back so the sender reconciles to it (the phone
     // adopts settings-update pushes wholesale — same pattern as the
     // sanitized VFO-profiles echo).
@@ -26019,6 +26055,16 @@ app.whenReady().then(() => {
   // Station Setup reports that could not be delivered last time.
   if ((settings.setupSharePending || []).length) setTimeout(() => { flushPendingSetupShares().catch(() => {}); }, 90000);
   migrateRigSettings(settings);
+  // SSTV templates saved before they had identities get one now, once, so the
+  // cloud merge (and the ECHOCAT web client's whole-list saves) can tell them apart.
+  if ((settings.sstvTemplates || []).some((t) => t && !t.id)) {
+    const patch = { sstvTemplates: settings.sstvTemplates };
+    const prevDeleted = settings.sstvTemplatesDeleted;
+    const r = SstvTemplateSyncLib.stampTemplates([], patch.sstvTemplates, { now: Date.now(), newId: () => require('crypto').randomUUID(), deleted: prevDeleted });
+    settings.sstvTemplates = r.templates;
+    settings.sstvTemplatesDeleted = r.deleted;
+    saveSettings(settings);
+  }
   // TX power is persisted now (applyJtcatTxGain). Before this the level
   // reset to 100% on every launch and whatever client connected first
   // re-imposed its own copy — headless included.
@@ -26194,9 +26240,22 @@ app.whenReady().then(() => {
       onCloudSessionChanged: (reason) => {
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
+        // A new account brings its own templates (and takes this machine's).
+        if (reason !== 'signout' && sstvTemplateSync) setTimeout(() => sstvTemplateSync.sync('signin').catch(() => {}), 2000);
       },
     });
     cloudIpc.startBackgroundSync();
+    // SSTV templates follow the account (GET/PUT /v1/sstv/templates). Any
+    // signed-in account, no subscription; a 404 means the route is not
+    // deployed yet and templates simply stay local.
+    sstvTemplateSync = new SstvTemplateSyncLib.SstvTemplateSync({
+      request: () => (cloudIpc.currentOwnerId() ? (m, p, b) => cloudIpc.getCloudSync()._authedRequest(m, p, b) : null),
+      owner: () => cloudIpc.currentOwnerId(),
+      getSettings: () => settings,
+      saveSettings: (patch, opts) => { Object.assign(settings, patch); saveSettings(settings); afterSstvSettingsSaved(patch, opts); },
+      log: (msg) => sendCatLog(msg),
+    });
+    setTimeout(() => { sstvTemplateSync.sync('boot').catch(() => {}); }, 20000);
     // Once the app has settled: anything logged while signed out (or
     // imported before imports synced) that the cloud does not hold yet.
     setTimeout(() => { cloudIpc.reconcileWithCloud('boot').catch(() => {}); }, 15000);
@@ -29424,14 +29483,19 @@ app.whenReady().then(() => {
       }
       // Merge: imported templates after the ones already here, up to 24.
       const existing = settings.sstvTemplates || [];
-      const incoming = data.templates.filter((t) => t && typeof t === 'object' && Array.isArray(t.texts));
+      // An export from this account on another machine carries the same ids:
+      // those are already here (or deliberately deleted here), not new ones.
+      const have = new Set(existing.map((t) => t && t.id).filter(Boolean));
+      const incoming = data.templates.filter((t) => t && typeof t === 'object' && Array.isArray(t.texts) && !(t.id && have.has(t.id)));
       const merged = existing.concat(incoming).slice(0, 24);
       const added = merged.length - existing.length;
       const patch = { sstvTemplates: merged };
       if (Number.isFinite(data.lookShuffle) && !settings.sstvLookShuffle) patch.sstvLookShuffle = data.lookShuffle | 0;
       if (Array.isArray(data.claimedPacks)) patch.sstvPacksClaimed = Array.from(new Set((settings.sstvPacksClaimed || []).concat(data.claimedPacks.filter((x) => typeof x === 'string'))));
+      stampSstvTemplatesPatch(patch);
       Object.assign(settings, patch);
       saveSettings(settings);
+      afterSstvSettingsSaved(patch);
       sendCatLog(`[SSTV] Imported ${added} template(s) from ${path.basename(res.filePaths[0])}`);
       return { ok: true, added, skipped: incoming.length - added };
     } catch (err) {
@@ -29507,6 +29571,7 @@ app.whenReady().then(() => {
     }
     const isMac = process.platform === 'darwin';
     sstvPopoutOpenedBy = (opts && opts.openedBy === 'app') ? 'app' : 'desktop';
+    if (sstvTemplateSync) sstvTemplateSync.sync('sstv-window').catch(() => {});
     sstvPopoutWin = new BrowserWindow({
       width: 900,
       height: 700,
@@ -33345,6 +33410,8 @@ app.whenReady().then(() => {
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
+    stampSstvTemplatesPatch(newSettings);
+    setImmediate(() => afterSstvSettingsSaved(newSettings));
     // The renderer saves the WHOLE rig list from the copy it loaded when
     // Settings opened. Station Setup progress is written by main after that
     // (a passed test, "don't ask again"), so an incoming rig that lacks those

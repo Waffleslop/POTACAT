@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   onSstvRxVis: (cb) => ipcRenderer.on('sstv-rx-vis', (_e, d) => cb(d)),
   // The callsign a station sent as FSK ID after its picture: { call, at }.
   onSstvRxFskid: (cb) => ipcRenderer.on('sstv-rx-fskid', (_e, d) => cb(d)),
+  // The stored template list after main stamped identities, or after the
+  // cloud merged in another machine's templates.
+  onSstvTemplatesUpdate: (cb) => ipcRenderer.on('sstv-templates-update', (_e, d) => cb(d)),
   onSstvRxLockLost: (cb) => ipcRenderer.on('sstv-rx-lock-lost', (_e, d) => cb(d)),
   onSstvStatus: (cb) => ipcRenderer.on('sstv-status', (_e, d) => cb(d)),
   onSstvRxDebug: (cb) => ipcRenderer.on('sstv-rx-debug', (_e, d) => cb(d)),

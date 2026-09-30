@@ -1130,14 +1130,7 @@ tplSaveBtn.addEventListener('click', () => {
 
   // Save background as data URL if it's a photo (not a pattern)
   let bgDataUrl = null;
-  if (bgImage && !bgParams) {
-    // Photo background — save as data URL
-    const c = document.createElement('canvas');
-    c.width = bgImage.width || bgImage.naturalWidth;
-    c.height = bgImage.height || bgImage.naturalHeight;
-    c.getContext('2d').drawImage(bgImage, 0, 0);
-    bgDataUrl = c.toDataURL('image/jpeg', 0.85);
-  }
+  if (bgImage && !bgParams) bgDataUrl = templatePhotoDataUrl(bgImage);
 
   const tpl = {
     bgParams: bgParams ? JSON.parse(JSON.stringify(bgParams)) : null,
@@ -3307,3 +3300,64 @@ document.getElementById('tx-box').addEventListener('contextmenu', (e) => {
   openMenu(e.clientX, e.clientY, T.describeLook(currentLook), items);
 });
 showLookLock();
+
+// ---- Template photos small enough to travel ------------------------------------
+// A saved photo used to be the camera original at JPEG 0.85 — several MB,
+// which the cloud (150 KB per photo, 2 MB per set) and the ECHOCAT settings
+// push both refuse. Nothing SSTV sends is bigger than 640x496 (PD modes), so
+// scale to fit that and step the quality down until it is under the cap.
+const TEMPLATE_PHOTO_MAX_W = 640, TEMPLATE_PHOTO_MAX_H = 496, TEMPLATE_PHOTO_MAX_CHARS = 140 * 1024;
+function templatePhotoDataUrl(img) {
+  const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+  if (!w0 || !h0) return null;
+  let scale = Math.min(1, TEMPLATE_PHOTO_MAX_W / w0, TEMPLATE_PHOTO_MAX_H / h0);
+  for (let pass = 0; pass < 4; pass++) {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w0 * scale));
+    c.height = Math.max(1, Math.round(h0 * scale));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    for (const q of [0.85, 0.75, 0.65, 0.55, 0.45]) {
+      const url = c.toDataURL('image/jpeg', q);
+      if (url.length <= TEMPLATE_PHOTO_MAX_CHARS) return url;
+    }
+    scale *= 0.75;
+  }
+  return null;
+}
+
+// Photo templates saved before this shrink: re-encode them once, in place.
+async function shrinkLegacyTemplatePhotos() {
+  let changed = false;
+  for (const t of templates) {
+    if (!t || typeof t.bgDataUrl !== 'string' || t.bgDataUrl.length <= 150 * 1024) continue;
+    const img = new Image();
+    const ok = await new Promise((res) => { img.onload = () => res(true); img.onerror = () => res(false); img.src = t.bgDataUrl; });
+    if (!ok) continue;
+    const small = templatePhotoDataUrl(img);
+    if (small) { t.bgDataUrl = small; changed = true; }
+  }
+  if (changed) saveTemplates();
+}
+setTimeout(() => { shrinkLegacyTemplatePhotos().catch(() => {}); }, 3000);
+
+// Main stamps ids on every save and merges other machines' templates in.
+if (window.api.onSstvTemplatesUpdate) {
+  window.api.onSstvTemplatesUpdate((d) => {
+    if (!d || !Array.isArray(d.templates)) return;
+    const activeId = activeTemplateIdx >= 0 && templates[activeTemplateIdx] ? templates[activeTemplateIdx].id : null;
+    templates = d.templates;
+    settings.sstvTemplates = templates;
+    activeTemplateIdx = activeId ? templates.findIndex((t) => t && t.id === activeId) : activeTemplateIdx;
+    if (d.fromCloud) {
+      if (d.defaultReply !== undefined) settings.sstvDefaultReply = d.defaultReply;
+      if (!!d.lookLocked !== !!settings.sstvLookLocked) { settings.sstvLookLocked = !!d.lookLocked; showLookLock(); }
+      if (Number.isFinite(d.lookShuffle) && d.lookShuffle !== settings.sstvLookShuffle) {
+        settings.sstvLookShuffle = d.lookShuffle;
+        rebuildLook();
+        onLookChanged();
+      }
+      statusBar.textContent = 'Templates updated from your other machines.';
+    }
+    renderTemplateStrip();
+  });
+}
