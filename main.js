@@ -1384,6 +1384,24 @@ function ensureSstvGalleryDir() {
   migrateLegacySstvGalleryIfNeeded(dir);
   return dir;
 }
+// The gallery's order, pages and records live in lib/sstv-gallery.js, and
+// every caller reaches them from HERE, at module scope. The record builder
+// used to be declared inside app.whenReady(), where the ECHOCAT handler in
+// connectRemote() could not see it: every app gallery request threw a
+// ReferenceError that was swallowed into an empty list, from ed309212
+// (2026-08-16) until 2026-09-30.
+const SstvGallery = require('./lib/sstv-gallery');
+const sstvGalleryDeps = () => ({ fsp: fs.promises, nativeImage });
+// ASYNC on purpose (#75): the folder is usually under OneDrive, where a
+// synchronous read can block on hydration and freeze the whole app.
+async function sstvGalleryRecordFromFile(filePath, opts) {
+  try {
+    return await SstvGallery.galleryRecord(filePath, sstvGalleryDeps(), opts);
+  } catch (err) {
+    sendCatLog('[SSTV] Gallery picture ' + path.basename(filePath) + ' unreadable: ' + err.message);
+    return null;
+  }
+}
 let jtcatMapPopoutWin = null; // pop-out JTCAT map window
 let popoutJtcatQso = null;   // QSO state for popout (like remoteJtcatQso for ECHOCAT)
 let cat = null;
@@ -18774,23 +18792,33 @@ function connectRemote() {
     }
   });
 
-  remoteServer.on('sstv-get-gallery', async ({ limit, offset, requestId }) => {
+  // Newest first, one page at a time. A client that says thumbs:true gets
+  // 160 px JPEGs (thumb:true on each record) and fetches the full picture on
+  // tap; an older client gets full PNGs, at most 10 per page (30 were ~9 MB).
+  remoteServer.on('sstv-get-gallery', async ({ limit, offset, requestId, thumbs }) => {
+    let dir = '';
     try {
-      const galleryDir = ensureSstvGalleryDir();
-      const files = (await fs.promises.readdir(galleryDir))
-        .filter(f => f.endsWith('.png'))
-        .sort((a, b) => b.localeCompare(a));
-      const total = files.length;
-      const slice = files.slice(offset || 0, (offset || 0) + (limit || 10));
-      const images = [];
-      for (const f of slice) {
-        const rec = await sstvGalleryRecordFromFile(path.join(galleryDir, f));
-        if (rec) images.push(rec);
-      }
-      remoteServer.sendSstvGallery(images, requestId, total);
+      dir = ensureSstvGalleryDir();
+      const page = await SstvGallery.galleryPage(dir, { limit: thumbs ? limit : Math.min(limit || 10, 10), offset, thumbs }, sstvGalleryDeps());
+      for (const e of page.errors) sendCatLog('[SSTV] Gallery picture unreadable: ' + e);
+      remoteServer.sendSstvGallery(page.images, requestId, page.total);
     } catch (err) {
-      console.error('[SSTV] Gallery fetch for ECHOCAT error:', err.message);
-      remoteServer.sendSstvGallery([], requestId, 0);
+      // Say so, in the log a bug report carries and to the client, instead of
+      // pretending the folder is empty (the ReferenceError hid for six weeks).
+      sendCatLog('[SSTV] Gallery for ECHOCAT failed' + (dir ? ' (' + dir + ')' : '') + ': ' + err.message);
+      remoteServer.sendSstvGallery([], requestId, undefined, 'The pictures folder could not be read: ' + err.message);
+    }
+  });
+
+  remoteServer.on('sstv-get-gallery-image', async ({ filename, requestId }) => {
+    const name = SstvGallery.safeGalleryName(filename);
+    if (!name) { remoteServer.sendSstvGalleryImage({ filename, requestId, error: 'Not a gallery picture.' }); return; }
+    try {
+      const rec = await SstvGallery.galleryRecord(path.join(ensureSstvGalleryDir(), name), sstvGalleryDeps());
+      remoteServer.sendSstvGalleryImage({ filename: name, requestId, dataUrl: rec.dataUrl, width: rec.width, height: rec.height });
+    } catch (err) {
+      sendCatLog('[SSTV] Gallery picture ' + name + ' for ECHOCAT failed: ' + err.message);
+      remoteServer.sendSstvGalleryImage({ filename: name, requestId, error: 'That picture could not be read.' });
     }
   });
 
@@ -29229,44 +29257,6 @@ app.whenReady().then(() => {
     return s || fallback || 'sstv';
   }
 
-  // ASYNC on purpose (#75, officiallor): the gallery lives under Pictures,
-  // which Windows commonly redirects to OneDrive — synchronous reads there
-  // can block on cloud-file hydration (or a wedged sync client) and froze
-  // the ENTIRE app the moment the SSTV window opened, no radio required.
-  // Every gallery filesystem touch must stay off the main thread's back.
-  async function sstvGalleryRecordFromFile(filePath) {
-    try {
-      const stat = await fs.promises.stat(filePath);
-      const filename = path.basename(filePath);
-      const png = await fs.promises.readFile(filePath);
-      const img = nativeImage.createFromBuffer(png);
-      const size = img.getSize();
-      let meta = {};
-      const metaPath = filePath.replace(/\.png$/i, '.json');
-      try { meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8')); } catch { meta = {}; }
-      const parts = filename.replace(/\.png$/i, '').split('_');
-      return {
-        filename,
-        filePath,
-        dataUrl: 'data:image/png;base64,' + png.toString('base64'),
-        mode: meta.mode || parts[1] || '',
-        timestamp: meta.timestamp || stat.mtimeMs,
-        width: meta.width || size.width || 320,
-        height: meta.height || size.height || 256,
-        freqHz: meta.freqHz || null,
-        freqKhz: meta.freqKhz || null,
-        callsign: meta.callsign || '',
-        // Their call: typed in the SSTV reply bar (theirCall) or decoded
-        // from the FSK ID after the picture (fskCall).
-        theirCall: meta.theirCall || meta.fskCall || '',
-        fskCall: meta.fskCall || '',
-      };
-    } catch (err) {
-      console.error('[SSTV] Gallery record error:', err.message);
-      return null;
-    }
-  }
-
   async function saveSstvImage(data) {
     try {
       const galleryDir = ensureSstvGalleryDir();
@@ -29510,18 +29500,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('sstv-get-gallery', async () => {
     try {
-      const galleryDir = ensureSstvGalleryDir();
-      const files = (await fs.promises.readdir(galleryDir))
-        .filter(f => f.endsWith('.png'))
-        .sort((a, b) => b.localeCompare(a)); // newest first
-      const results = [];
-      for (const f of files.slice(0, 50)) { // limit to 50 most recent
-        const rec = await sstvGalleryRecordFromFile(path.join(galleryDir, f));
-        if (rec) results.push(rec);
-      }
-      return results;
+      // The 50 most recently RECEIVED (not the alphabetically last).
+      const page = await SstvGallery.galleryPage(ensureSstvGalleryDir(), { limit: 50, offset: 0 }, sstvGalleryDeps());
+      for (const e of page.errors) sendCatLog('[SSTV] Gallery picture unreadable: ' + e);
+      return page.images;
     } catch (err) {
-      console.error('[SSTV] Gallery read error:', err.message);
+      sendCatLog('[SSTV] Gallery read failed: ' + err.message);
       return [];
     }
   });

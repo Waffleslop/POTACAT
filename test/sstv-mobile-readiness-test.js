@@ -59,7 +59,7 @@ test('the hello advertises sstv-packs, sstv-fskid and sstv-guest-check', () => {
   // …and each names something that really exists behind it.
   assert.ok(/case 'sstv-pack-claims':/.test(src) && /type: 'sstv-pack-claims'/.test(src), 'pack claims both ways');
   const main = R('main.js');
-  assert.ok(/type: 'sstv-rx-fskid'/.test(main) && /fskCall: meta\.fskCall/.test(main), 'FSK ID reaches clients and gallery records');
+  assert.ok(/type: 'sstv-rx-fskid'/.test(main) && /fskCall: meta\.fskCall/.test(R('lib/sstv-gallery.js')), 'FSK ID reaches clients and gallery records');
   assert.ok(/interceptCatCommand\(\{ type: 'sstv_tx'/.test(main) && /broadcastSstvTxStatus\(\{ state: 'rx', error: res\.userVisible \}\)/.test(main), 'guest picture checked, refusal as sstv-tx-status');
 });
 

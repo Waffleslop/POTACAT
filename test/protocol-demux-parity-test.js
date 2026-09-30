@@ -91,9 +91,6 @@ const KNOWN_DRIFT = new Set([
   'save-echo-pref:value',
   'sstv-photo:image',
   'sstv-photo:mode',
-  'sstv-get-gallery:limit',
-  'sstv-get-gallery:offset',
-  'sstv-get-gallery:requestId',
 ]);
 
 /** Messages the demux handles that the registry never declares at all. Same
