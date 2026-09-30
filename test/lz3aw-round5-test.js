@@ -70,7 +70,7 @@ test('the controller forwards the codec powerMeter event (it swallowed it)', () 
   const { rig, codec } = rig480();
   const seen = [];
   rig.on('powerMeter', (w) => seen.push(w));
-  rig._transmitting = true;
+  rig.noteTransmitting(2000); codec._smSettleUntil = 0; // keyed, past the edge settle (round 12)
   codec.getPowerMeter();           // arms the "this SM reply is watts" flag
   codec.onData('SM00010;');        // TS-480 SM 10 → 44 W on LZ3AW's measured table
   assert.deepStrictEqual(seen, [44], 'watts reached the controller\'s listeners');

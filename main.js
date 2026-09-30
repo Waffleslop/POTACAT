@@ -26131,6 +26131,30 @@ app.whenReady().then(() => {
     settings.sstvTemplatesDeleted = r.deleted;
     saveSettings(settings);
   }
+  // Photo templates saved before 1.11.0 held the camera original. The SSTV
+  // window shrinks them when it opens, but an operator who never opens it
+  // sent the whole thing in every ECHOCAT settings push (LZ3AW: 880 KB per
+  // settings-update, and "photo too large to sync"). Shrink them here: fit
+  // 640x496 (the largest SSTV frame), JPEG, under 140 KB.
+  try {
+    let shrunk = 0;
+    for (const t of settings.sstvTemplates || []) {
+      if (!t || typeof t.bgDataUrl !== 'string' || t.bgDataUrl.length <= 150 * 1024) continue;
+      const img = nativeImage.createFromDataURL(t.bgDataUrl);
+      const sz = img.getSize();
+      if (!sz.width || !sz.height) continue;
+      let k = Math.min(1, 640 / sz.width, 496 / sz.height), url = null;
+      for (let pass = 0; pass < 4 && !url; pass++, k *= 0.75) {
+        const small = img.resize({ width: Math.max(1, Math.round(sz.width * k)), height: Math.max(1, Math.round(sz.height * k)), quality: 'good' });
+        for (const q of [85, 75, 65, 55, 45]) {
+          const u = 'data:image/jpeg;base64,' + small.toJPEG(q).toString('base64');
+          if (u.length <= 140 * 1024) { url = u; break; }
+        }
+      }
+      if (url) { t.bgDataUrl = url; t.updatedAt = Date.now(); shrunk++; }
+    }
+    if (shrunk) { saveSettings(settings); console.log(`[SSTV] Shrank ${shrunk} template photo(s) to SSTV size`); }
+  } catch (err) { console.error('[SSTV] template photo shrink failed:', err.message); }
   // TX power is persisted now (applyJtcatTxGain). Before this the level
   // reset to 100% on every launch and whatever client connected first
   // re-imposed its own copy — headless included.

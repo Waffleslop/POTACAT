@@ -53,10 +53,13 @@ test('an SM power query nobody answered does not turn the next S-meter reply int
 });
 
 test('a prompt power reply is still watts, and its raw value is logged for calibration', () => {
-  const { codec } = rig480();
+  const { rig, codec } = rig480();
   const watts = [], logs = [];
   codec.on('powerMeter', (w) => watts.push(w));
   codec.on('log', (m) => logs.push(m));
+  // Keyed the way the app keys it (round 12: SM replies are read by the TX
+  // state the controller reports, not by question order).
+  rig.noteTransmitting(2000); codec._smSettleUntil = 0;
   codec.getPowerMeter();
   codec.onData('SM00012;');   // between LZ3AW's measured 11 (50 W) and 14 (100 W)
   assert.deepStrictEqual(watts, [67]);
