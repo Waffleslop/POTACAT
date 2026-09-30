@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('api', {
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   // Radio frequency updates
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
+  onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
   // Re-QSY when the SSTV popout is reopened/refocused (main re-requests the tune)
   onRefocusQsy: (cb) => ipcRenderer.on('sstv-refocus-qsy', (_e, target) => cb(target || null)),
   // Theme

@@ -205,11 +205,25 @@ test('the reply bar shows where they were heard, and offers to go back when the 
   const js = fs.readFileSync(path.join(ROOT, 'renderer', 'sstv-popout.js'), 'utf8');
   assert.ok(/freqHz: entryQrgHz\(entry\), rigMode: entry\.rigMode/.test(js));
   assert.ok(/Math\.abs\(_dialHz - hz\) > 500/.test(js) && /'Go to ' \+ fmtQrg\(hz\)/.test(js));
+  assert.ok(/const offSide = !!have && have !== want;/.test(js), 'the wrong sideband is not "on"');
+  assert.ok(/window\.api\.onCatMode\(/.test(js) && /sstvPopoutWin\.webContents\.send\('cat-mode', mode\)/.test(MAIN), 'the window hears the radio\'s mode');
+  // The same rules the ECHOCAT app uses, run for real.
+  const src = js.replace(/\r\n/g, '\n');
+  const grab = (name) => {
+    const i = src.indexOf('function ' + name + '(');
+    const line = src.slice(i, src.indexOf('\n', i));
+    return /\}\s*$/.test(line) ? line + '\n' : src.slice(i, src.indexOf('\n}\n', i) + 2); // one-liner or block
+  };
+  const fns = new Function(grab('getFreqMode') + grab('sideOf') + grab('fmtQrg') + 'return { getFreqMode, sideOf, fmtQrg };')();
+  assert.strictEqual(fns.fmtQrg(7171500), '7.172', 'whole kHz first');
+  assert.strictEqual(fns.fmtQrg(14230000), '14.230');
+  assert.deepStrictEqual(['3845', '5357', '7171', '14230', '28680'].map(fns.getFreqMode), ['LSB', 'USB', 'LSB', 'USB', 'USB'], '60 m is USB');
+  assert.deepStrictEqual(['PKTUSB', 'USB-D', 'DIGU', 'LSB', 'DIGL', 'CW', ''].map(fns.sideOf), ['USB', 'USB', 'USB', 'LSB', 'LSB', 'OTHER', '']);
   assert.ok(/tuneToFreq\(String\(khz\), mode\)/.test(js));
   assert.ok(/sstvLogContact\(\{ call: replySession\.call, rsvSent: replySession\.rsv, freqHz: replySession\.freqHz/.test(js), 'Log uses the heard frequency');
   assert.ok(/const hz = Number\(freqHz\) > 0 \? Number\(freqHz\) : _currentFreqHz;/.test(MAIN));
   assert.ok(/id="rb-qrg"/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'sstv-popout.html'), 'utf8')));
-  assert.ok(/msg\.freqHz \? ' ' \+ \(msg\.freqHz \/ 1e6\)/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'remote.js'), 'utf8')), 'the web client shows it too');
+  assert.ok(/msg\.freqHz \? ' ' \+ \(Math\.round\(msg\.freqHz \/ 1000\)/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'remote.js'), 'utf8')), 'the web client shows it too');
 });
 
 (async () => {

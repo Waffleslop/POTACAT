@@ -12216,7 +12216,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var d = img.timestamp ? new Date(img.timestamp) : null;
     var dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     var imgHz = img.freqHz || (img.freqKhz ? img.freqKhz * 1000 : 0);
-    info.textContent = (img.mode || '') + (imgHz ? ' ' + (imgHz / 1e6).toFixed(3) : '') + ' ' + dateStr;
+    info.textContent = (img.mode || '') + (imgHz ? ' ' + (Math.round(imgHz / 1000) / 1000).toFixed(3) : '') + ' ' + dateStr;
     div.appendChild(info);
     // Reply button — overlays the thumb, taps set this image as PiP reply inset
     var replyBtn = document.createElement('button');
@@ -12310,7 +12310,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var info = document.createElement('div');
     info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
     var now = new Date();
-    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + (msg.freqHz / 1e6).toFixed(3) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + (Math.round(msg.freqHz / 1000) / 1000).toFixed(3) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     div.appendChild(info);
     // Reply button on live decode — most valuable placement since this is the
     // thumbnail users reach for first right after receiving

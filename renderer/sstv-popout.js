@@ -328,8 +328,12 @@ const freqSelect = document.getElementById('freq-select');
 const freqInput = document.getElementById('freq-input');
 const tuneBtn = document.getElementById('tune-btn');
 
+// The sideband SSTV uses on a frequency: LSB below 10 MHz except 60 m,
+// which is USB by regulation. The ECHOCAT app uses the same rule.
 function getFreqMode(freqKhz) {
-  return parseInt(freqKhz) < 10000 ? 'LSB' : 'USB';
+  const k = parseInt(freqKhz);
+  if (k >= 5250 && k <= 5450) return 'USB';
+  return k < 10000 ? 'LSB' : 'USB';
 }
 
 // Show a frequency main chose in the dropdown (or the custom box) and tune it.
@@ -3401,25 +3405,42 @@ if (window.api.sstvTemplatesSyncState) {
 // Received tiles show it, and the reply bar offers to go back there: a reply
 // sent while tuned elsewhere goes nowhere the other station is listening.
 let _dialHz = 0;
+let _dialMode = '';
 window.api.onCatFrequency((hz) => { if (hz > 0) { _dialHz = hz; showReplyQrg(); } });
+if (window.api.onCatMode) window.api.onCatMode((m) => { _dialMode = String(m || ''); showReplyQrg(); });
+// The side a mode names: data variants (PKTUSB, USB-D, DIGU) count as their
+// sideband; CW/FM/AM name none, and SSTV cannot go out in them.
+function sideOf(mode) {
+  const m = String(mode || '').toUpperCase();
+  if (/LSB|DIGL/.test(m)) return 'LSB';
+  if (/USB|DIGU/.test(m)) return 'USB';
+  return m ? 'OTHER' : '';
+}
 function entryQrgHz(e) {
   if (!e) return null;
   if (e.freqHz > 0) return e.freqHz;
   if (e.freqKhz > 0) return e.freqKhz * 1000;
   return null;
 }
-function fmtQrg(hz) { return (hz / 1e6).toFixed(3); }
+// Whole kHz first: 7171.5 kHz is 7.172, never a float-rounded 7.171.
+function fmtQrg(hz) { return (Math.round(hz / 1000) / 1000).toFixed(3); }
 const rbQrg = document.getElementById('rb-qrg');
 function showReplyQrg() {
   if (!rbQrg) return;
   const hz = replySession && replySession.freqHz;
   if (!hz) { rbQrg.hidden = true; return; }
-  const off = _dialHz > 0 && Math.abs(_dialHz - hz) > 500;
+  // The right frequency on the wrong sideband (or in CW/FM/AM) is not "on":
+  // their picture is heard, but a reply there is not.
+  const want = sideOf(replySession.rigMode) === 'LSB' || sideOf(replySession.rigMode) === 'USB' ? sideOf(replySession.rigMode) : getFreqMode(Math.round(hz / 1000));
+  const have = sideOf(_dialMode);
+  const offFreq = _dialHz > 0 && Math.abs(_dialHz - hz) > 500;
+  const offSide = !!have && have !== want;
+  const off = offFreq || offSide;
   rbQrg.hidden = false;
   rbQrg.classList.toggle('off', off);
-  rbQrg.textContent = off ? 'Go to ' + fmtQrg(hz) : 'on ' + fmtQrg(hz);
+  rbQrg.textContent = off ? 'Go to ' + fmtQrg(hz) + (offSide && !offFreq ? ' ' + want : '') : 'on ' + fmtQrg(hz);
   rbQrg.title = off
-    ? 'You heard this picture on ' + fmtQrg(hz) + ' MHz' + (replySession.rigMode ? ' ' + replySession.rigMode : '') + '; the radio is on ' + fmtQrg(_dialHz) + '. Click to go back before replying.'
+    ? 'You heard this picture on ' + fmtQrg(hz) + ' MHz ' + want + '; the radio is on ' + fmtQrg(_dialHz || hz) + (_dialMode ? ' ' + _dialMode : '') + '. Click to go back before replying.'
     : 'Heard on ' + fmtQrg(hz) + ' MHz' + (replySession.rigMode ? ' ' + replySession.rigMode : '');
 }
 if (rbQrg) rbQrg.addEventListener('click', () => {
@@ -3427,8 +3448,8 @@ if (rbQrg) rbQrg.addEventListener('click', () => {
   const khz = Math.round(replySession.freqHz / 1000);
   // Data variants (PKTUSB, USB-D, DIGU) come back as their sideband: SSTV
   // transmit picks the data mode itself where a radio needs it.
-  const rm = String(replySession.rigMode || '');
-  const mode = /LSB|DIGL/i.test(rm) ? 'LSB' : /USB|DIGU/i.test(rm) ? 'USB' : getFreqMode(khz);
+  const s = sideOf(replySession.rigMode);
+  const mode = s === 'LSB' || s === 'USB' ? s : getFreqMode(khz);
   showFreq(khz, mode);
   tuneToFreq(String(khz), mode);
 });

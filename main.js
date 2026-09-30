@@ -2799,6 +2799,8 @@ function sendCatMode(mode) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-mode', displayMode);
   }
   if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-mode', mode);
+  // The SSTV window compares it with where a picture was heard (reply bar).
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-mode', mode);
   _currentMode = mode; // keep real mode internally for CAT
   // Don't clear mode suppress — handleRemotePtt sets a long suppress during
   // SSB-over-DATA transitions to prevent ECHOCAT from seeing transient DATA modes
