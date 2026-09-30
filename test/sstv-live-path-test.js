@@ -78,7 +78,7 @@ test('idle SSTV: the SSTV window tunes as part of the session, to the band idle 
   const fn = MAIN.slice(MAIN.indexOf('function isIdleRxSelfAction('), MAIN.indexOf('function isIdleRxSelfAction(') + 900);
   assert.ok(/autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active/.test(fn), 'the SSTV window counts as the session itself');
   assert.ok(/sender === sstvPopoutWin\.webContents/.test(fn));
-  assert.ok(/openSstvPopout\(\{ freqKhz: autoSstvBand\.freqKhz, mode: autoSstvBand\.mode \}\)/.test(MAIN), 'the day/night band is handed to the window');
+  assert.ok(/openSstvPopout\(\{ freqKhz: autoSstvBand\.freqKhz, mode: autoSstvBand\.mode(, auto: true)? \}\)/.test(MAIN), 'the day/night band is handed to the window');
   assert.ok(/webContents\.send\('sstv-refocus-qsy', target\)/.test(MAIN), 'an already-open window gets it too');
   const pop = R('renderer/sstv-popout.js');
   assert.ok(/q\.get\('freqKhz'\)\) selectAndTune/.test(pop), 'a new window tunes to it instead of its dropdown default');

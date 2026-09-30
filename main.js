@@ -11227,6 +11227,32 @@ function rememberJtcatTxFreq(eng) {
   }
 }
 
+// The other half of the rule in startJtcat(): SSTV and JTCAT can't share the
+// radio's audio input, so OPENING SSTV hands the radio over too. Until
+// 2026-09-30 only FT8 closed SSTV; opening SSTV with FT8 up left both holding
+// the input (K3SBP: "JTCAT pop out should have tore down when SSTV opened").
+// Closing the FT8/JS8 windows stops them (the main window's close handler
+// releases capture); an engine the ECHOCAT app is driving has no window to
+// close, so it is stopped here the way the app's own jtcat-stop does.
+function releaseJtcatForSstv() {
+  const ft8Win = jtcatPopoutWin && !jtcatPopoutWin.isDestroyed();
+  const js8Win = js8PopoutWin && !js8PopoutWin.isDestroyed();
+  if (!ft8Win && !js8Win && !ft8Engine) return false;
+  sendCatLog('[SSTV] Closing ' + (js8Win && !ft8Win ? 'JS8' : 'JTCAT') + ' — SSTV and JTCAT cannot share the audio input');
+  if (ft8Win) { try { jtcatPopoutWin.close(); } catch {} }
+  if (js8Win) { try { js8PopoutWin.close(); } catch {} }
+  if (ft8Engine) {
+    try { js8SetHeartbeat(false); } catch {}
+    stopJtcat();
+    remoteJtcatQso = null;
+    if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+    if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+      try { remoteServer.broadcastJtcatStatus({ running: false }); } catch {}
+    }
+  }
+  return true;
+}
+
 function startJtcat(mode) {
   stopJtcat();
   // SSTV and JTCAT can't share the audio input device — getUserMedia
@@ -24633,7 +24659,9 @@ function getSstvAutoFreq() {
   const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
   const sun = getSunTimes(pos.lat, pos.lon, now);
   const daytime = utcH >= sun.sunrise && utcH < sun.sunset;
-  return daytime ? { freqKhz: 14230, mode: 'USB' } : { freqKhz: 7171, mode: 'USB' };
+  // 40 m SSTV is LSB in North America (7.171 LSB, like 80 m's 3.845); a USB
+  // night session heard nothing but inverted garbage.
+  return daytime ? { freqKhz: 14230, mode: 'USB' } : { freqKhz: 7171, mode: 'LSB' };
 }
 
 function startAutoSstvTimer() {
@@ -24754,7 +24782,7 @@ function triggerAutoSstv() {
   if (cat && cat.connected) cat.tune(autoSstvBand.freqKhz * 1000, autoSstvBand.mode);
   // Hand the window the band chosen here: it tunes to its own selection on
   // open (14.230 by default), which put a night session back on 20 m.
-  if (openSstvPopout) openSstvPopout({ freqKhz: autoSstvBand.freqKhz, mode: autoSstvBand.mode });
+  if (openSstvPopout) openSstvPopout({ freqKhz: autoSstvBand.freqKhz, mode: autoSstvBand.mode, auto: true });
   sendCatLog('[Auto-SSTV] Activated — tuned to ' + autoSstvCurrentFreq + ' kHz');
   if (remoteServer) {
     remoteServer.broadcastSstvTxStatus({ state: 'auto-rx', freqKhz: autoSstvCurrentFreq });
@@ -29594,6 +29622,9 @@ app.whenReady().then(() => {
       return;
     }
     const isMac = process.platform === 'darwin';
+    // Hand the radio over (releaseJtcatForSstv). Auto-SSTV never gets here
+    // with JTCAT up: it defers while JTCAT decodes (autoSstvBlockedByJtcat).
+    if (!(opts && opts.auto)) releaseJtcatForSstv();
     sstvPopoutOpenedBy = (opts && opts.openedBy === 'app') ? 'app' : 'desktop';
     if (sstvTemplateSync) sstvTemplateSync.sync('sstv-window').catch(() => {});
     sstvPopoutWin = new BrowserWindow({
