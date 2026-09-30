@@ -1549,10 +1549,11 @@ function renderGallery() {
     info.className = 'sstv-thumb-info';
     const d = entry.timestamp ? new Date(entry.timestamp) : null;
     const dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    info.textContent = dateStr + ' ' + (entry.mode || '');
+    const qrg = entryQrgHz(entry) ? ' · ' + fmtQrg(entryQrgHz(entry)) : '';
+    info.textContent = dateStr + ' ' + (entry.mode || '') + qrg;
     thumb.appendChild(info);
 
-    if (entry.theirCall) info.textContent = entry.theirCall + ' · ' + (entry.mode || '');
+    if (entry.theirCall) info.textContent = entry.theirCall + ' · ' + (entry.mode || '') + qrg;
     thumb.title = 'Click to view · double-click to reply · right-click for more';
     // Click views it full size, unless a second click makes it a double-click
     // (which replies): the old immediate viewer covered the thumbnail and
@@ -2316,7 +2317,7 @@ window.api.onSstvRxImage((data) => {
     }
   } else {
     const weakTag = data.weak ? ' (weak — not saved)' : (data.redecode ? ' (redecoded)' : '');
-    rxInfo.textContent = data.mode + weakTag + ' — ' + new Date().toLocaleTimeString();
+    rxInfo.textContent = data.mode + weakTag + (data.freqHz ? ' on ' + fmtQrg(data.freqHz) : '') + ' — ' + new Date().toLocaleTimeString();
     progressBar.style.width = '100%';
     setTimeout(() => { progressBar.style.width = '0%'; }, 2000);
     statusBar.textContent = data.redecode
@@ -2336,6 +2337,7 @@ window.api.onSstvRxImage((data) => {
       filename: (data.saved && data.saved.filename) || null,
       theirCall: (data.saved && data.saved.theirCall) || '',
       fskCall: (data.saved && data.saved.fskCall) || '',
+      freqHz: data.freqHz || null, rigMode: data.rigMode || '',
       at: Date.now(),
     };
     // Paint the FINAL image (post-processed in main). The progressive
@@ -2371,6 +2373,7 @@ window.api.onSstvRxImage((data) => {
     filename: (data.saved && data.saved.filename) || null,
     theirCall: (data.saved && data.saved.theirCall) || '',
     fskCall: (data.saved && data.saved.fskCall) || '',
+    freqHz: data.freqHz || null, rigMode: data.rigMode || '',
   };
   galleryImages.unshift(entry);
   renderGallery();
@@ -2755,6 +2758,7 @@ async function startReply(entry, starterId) {
   replySession = {
     call, source, rsv: (rbRsv.value || '595').replace(/[^0-9]/g, '').slice(0, 3) || '595',
     filename: entry.filename || null, mode: entry.mode || '',
+    freqHz: entryQrgHz(entry), rigMode: entry.rigMode || '',
     startedAt: Date.now(), lastTxAt: 0,
   };
   setReplyImage(entry);
@@ -2769,6 +2773,7 @@ async function startReply(entry, starterId) {
   rbSrc.textContent = call ? source : 'call?';
   rbSrc.title = source === 'FSK' ? 'Read from the FSK ID sent after the picture' : source === 'typed' ? 'The call you last typed in POTACAT' : 'Type their call';
   rbSent.textContent = '';
+  showReplyQrg();
   replybar.hidden = false;
   txHead.hidden = true;
   applyStarter(id);
@@ -2780,6 +2785,7 @@ async function startReply(entry, starterId) {
 
 function endReply(why) {
   replySession = null;
+  showReplyQrg();
   replyImage = null;
   replybar.hidden = true;
   txHead.hidden = false;
@@ -3389,3 +3395,40 @@ if (window.api.sstvTemplatesSyncState) {
     window.api.sstvTemplatesSyncNow().then(showTemplateSyncState).catch(() => {}).finally(() => { syncBtn.disabled = false; });
   });
 }
+
+// ---- Where a received picture was heard -------------------------------------------
+// Main stamps each picture with the dial when its VIS header arrived. The
+// Received tiles show it, and the reply bar offers to go back there: a reply
+// sent while tuned elsewhere goes nowhere the other station is listening.
+let _dialHz = 0;
+window.api.onCatFrequency((hz) => { if (hz > 0) { _dialHz = hz; showReplyQrg(); } });
+function entryQrgHz(e) {
+  if (!e) return null;
+  if (e.freqHz > 0) return e.freqHz;
+  if (e.freqKhz > 0) return e.freqKhz * 1000;
+  return null;
+}
+function fmtQrg(hz) { return (hz / 1e6).toFixed(3); }
+const rbQrg = document.getElementById('rb-qrg');
+function showReplyQrg() {
+  if (!rbQrg) return;
+  const hz = replySession && replySession.freqHz;
+  if (!hz) { rbQrg.hidden = true; return; }
+  const off = _dialHz > 0 && Math.abs(_dialHz - hz) > 500;
+  rbQrg.hidden = false;
+  rbQrg.classList.toggle('off', off);
+  rbQrg.textContent = off ? 'Go to ' + fmtQrg(hz) : 'on ' + fmtQrg(hz);
+  rbQrg.title = off
+    ? 'You heard this picture on ' + fmtQrg(hz) + ' MHz' + (replySession.rigMode ? ' ' + replySession.rigMode : '') + '; the radio is on ' + fmtQrg(_dialHz) + '. Click to go back before replying.'
+    : 'Heard on ' + fmtQrg(hz) + ' MHz' + (replySession.rigMode ? ' ' + replySession.rigMode : '');
+}
+if (rbQrg) rbQrg.addEventListener('click', () => {
+  if (!replySession || !replySession.freqHz || !rbQrg.classList.contains('off')) return;
+  const khz = Math.round(replySession.freqHz / 1000);
+  // Data variants (PKTUSB, USB-D, DIGU) come back as their sideband: SSTV
+  // transmit picks the data mode itself where a radio needs it.
+  const rm = String(replySession.rigMode || '');
+  const mode = /LSB|DIGL/i.test(rm) ? 'LSB' : /USB|DIGU/i.test(rm) ? 'USB' : getFreqMode(khz);
+  showFreq(khz, mode);
+  tuneToFreq(String(khz), mode);
+});

@@ -160,6 +160,56 @@ test('protocol: thumbs, the full-picture request, and the capability', () => {
   assert.ok(/case 'sstv-get-gallery-image':/.test(rs) && /thumbs: msg\.thumbs === true/.test(rs));
 });
 
+// ---- where it was heard ------------------------------------------------------------
+test('a record says where the picture was heard: sidecar first, else the kHz in the name', async () => {
+  const dir = galleryDir([
+    { name: 'sstv_martin1_14230kHz_K3SBP_2026-09-30_01-02-03.png', meta: { freqHz: 14230500, freqKhz: 14231, rigMode: 'USB' } },
+    { name: 'sstv_scottie1_7171kHz_2026-09-01_00-00-00.png' },
+    { name: 'sstv_robot36_2026-08-01_12-00-00.png' },
+  ]);
+  const rec = (n) => G.galleryRecord(path.join(dir, n), deps);
+  const a = await rec('sstv_martin1_14230kHz_K3SBP_2026-09-30_01-02-03.png');
+  assert.deepStrictEqual([a.freqHz, a.freqKhz, a.rigMode], [14230500, 14231, 'USB']);
+  const b = await rec('sstv_scottie1_7171kHz_2026-09-01_00-00-00.png');
+  assert.deepStrictEqual([b.freqHz, b.freqKhz, b.rigMode], [7171000, 7171, '']);
+  const c = await rec('sstv_robot36_2026-08-01_12-00-00.png');
+  assert.deepStrictEqual([c.freqHz, c.freqKhz], [null, null]);
+});
+
+test('main takes the frequency when the picture STARTS and sends it everywhere', () => {
+  const vis = MAIN.slice(MAIN.indexOf("sstvEngine.on('rx-vis'"), MAIN.indexOf("sstvEngine.on('fskid'"));
+  assert.ok(/_sstvRxQrg = sstvRxQrgNow\(\);/.test(vis), 'captured at the VIS header');
+  const img = MAIN.slice(MAIN.indexOf("sstvEngine.on('rx-image'"), MAIN.indexOf("sstvEngine.on('rx-lock-lost'"));
+  assert.ok(/data\.freqHz = qrg\.freqHz;/.test(img) && /\(data\.redecode && _sstvLastRxQrg\)/.test(img), 'a redecode keeps its original frequency');
+  assert.ok((img.match(/freqHz: data\.freqHz/g) || []).length >= 2, 'to the SSTV window and to ECHOCAT');
+  const save = MAIN.slice(MAIN.indexOf('async function saveSstvImage('), MAIN.indexOf('async function saveSstvImage(') + 3000);
+  assert.ok(/const heardHz = data\.freqHz !== undefined/.test(save) && /freqHz: heardHz \|\| null/.test(save) && /rigMode:/.test(save), 'saved as heard, with the mode');
+  const multi = fs.readFileSync(path.join(ROOT, 'lib', 'sstv-manager.js'), 'utf8');
+  assert.ok(/freqHz: freqKhz > 0 \? Math\.round\(freqKhz \* 1000\)/.test(multi), 'each Flex slice tags its own frequency');
+});
+
+test('ECHOCAT sstv-rx-image carries freqHz, rigMode and filename (and is cached for hydration)', () => {
+  const { RemoteServer } = require('../lib/remote-server');
+  const rs = Object.create(RemoteServer.prototype);
+  rs._client = null;
+  rs.broadcastSstvRxImage({ base64: 'data:image/png;base64,AA', mode: 'Martin M1', width: 320, height: 256, freqHz: 14230000, rigMode: 'USB', filename: 'x.png', weak: true });
+  const p = rs._sstvLastImage;
+  assert.deepStrictEqual([p.freqHz, p.rigMode, p.filename, p.weak], [14230000, 'USB', 'x.png', true]);
+  rs.broadcastSstvRxImage({ base64: 'x', mode: 'm', freqHz: NaN });
+  assert.strictEqual(rs._sstvLastImage.freqHz, null);
+  const { MESSAGES } = require('../lib/echocat-protocol');
+  assert.ok(MESSAGES['sstv-rx-image'].fields.freqHz && MESSAGES['sstv-rx-image'].fields.rigMode);
+});
+
+test('the reply bar shows where they were heard, and offers to go back when the dial is elsewhere', () => {
+  const js = fs.readFileSync(path.join(ROOT, 'renderer', 'sstv-popout.js'), 'utf8');
+  assert.ok(/freqHz: entryQrgHz\(entry\), rigMode: entry\.rigMode/.test(js));
+  assert.ok(/Math\.abs\(_dialHz - hz\) > 500/.test(js) && /'Go to ' \+ fmtQrg\(hz\)/.test(js));
+  assert.ok(/tuneToFreq\(String\(khz\), mode\)/.test(js));
+  assert.ok(/id="rb-qrg"/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'sstv-popout.html'), 'utf8')));
+  assert.ok(/msg\.freqHz \? ' ' \+ \(msg\.freqHz \/ 1e6\)/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'remote.js'), 'utf8')), 'the web client shows it too');
+});
+
 (async () => {
   let passed = 0, failed = 0;
   for (const [name, fn] of cases) {

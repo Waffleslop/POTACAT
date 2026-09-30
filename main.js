@@ -7255,6 +7255,14 @@ function js8SetHeartbeat(enabled) {
 
 /** In-progress SSTV decode, tracked from rx-vis → rx-line → rx-image. */
 let _sstvDecode = null; // { mode, startedAt, updatedAt, line, totalLines }
+/** Where the picture being received was heard: the dial when its VIS header
+ *  arrived, not when it finished (the operator may tune away mid-picture).
+ *  Saved with it, shown with it, and a reply offers to go back there. */
+let _sstvRxQrg = null; // { freqHz, rigMode }
+let _sstvLastRxQrg = null; // the last completed picture's, for its redecodes
+function sstvRxQrgNow() {
+  return { freqHz: _currentFreqHz > 0 ? _currentFreqHz : null, rigMode: _currentMode || '' };
+}
 /** WSPR session accumulation. active flips false when WSPR stops; the data
  *  stays serveable until the next session starts fresh. */
 let _wsprSession = null; // { startedAt, spots: [], count, active }
@@ -29002,6 +29010,7 @@ app.whenReady().then(() => {
       sendCatLog(sstvRxVisLogLine(data));
       _sstvLastActivityMs = Date.now();
       _sstvDecode = { mode: data.modeName || '', startedAt: Date.now(), updatedAt: Date.now(), line: 0, totalLines: 0 };
+      _sstvRxQrg = sstvRxQrgNow();
       pushActivityState();
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-vis', data);
@@ -29060,6 +29069,12 @@ app.whenReady().then(() => {
     sstvEngine.on('rx-image', async (data) => {
       const stats = data.stats || {};
       _sstvDecode = null;
+      // A redecode is the same picture again: it keeps the frequency it was heard on.
+      const qrg = (data.redecode && _sstvLastRxQrg) || _sstvRxQrg || sstvRxQrgNow();
+      _sstvRxQrg = null;
+      if (!data.redecode) _sstvLastRxQrg = qrg;
+      data.freqHz = qrg.freqHz;
+      data.rigMode = qrg.rigMode;
       pushActivityState();
       // Weak-tier decodes (2026-07-07): show the operator the noisy image —
       // MMSSTV always paints something — but keep the gallery/auto-save
@@ -29083,6 +29098,8 @@ app.whenReady().then(() => {
           width: data.width,
           height: data.height,
           mode: data.mode,
+          freqHz: data.freqHz,
+          rigMode: data.rigMode,
           saved,
           weak: !!data.weak,
           redecode: !!data.redecode,
@@ -29109,6 +29126,8 @@ app.whenReady().then(() => {
             width: data.width,
             height: data.height,
             weak: !!data.weak, // additive — older apps ignore it
+            freqHz: data.freqHz, rigMode: data.rigMode,
+            filename: (saved && saved.filename) || null,
           });
         } catch (err) {
           console.error('[SSTV] ECHOCAT broadcast error:', err.message);
@@ -29262,7 +29281,8 @@ app.whenReady().then(() => {
       const galleryDir = ensureSstvGalleryDir();
       const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
       const modePart = sanitizeSstvFilenamePart(data.mode, 'unknown');
-      const freqPart = _currentFreqHz ? `${Math.round(_currentFreqHz / 1000)}kHz` : '';
+      const heardHz = data.freqHz !== undefined ? data.freqHz : (_currentFreqHz || null);
+      const freqPart = heardHz ? `${Math.round(heardHz / 1000)}kHz` : '';
       const callPart = sanitizeSstvFilenamePart(settings.myCallsign || '', '');
       const pieces = ['sstv', modePart, freqPart, callPart, ts].filter(Boolean);
       const filename = `${pieces.join('_')}.png`;
@@ -29287,8 +29307,11 @@ app.whenReady().then(() => {
         height: data.height,
         timestamp: Date.now(),
         isoTime: new Date().toISOString(),
-        freqHz: _currentFreqHz || null,
-        freqKhz: _currentFreqHz ? Math.round(_currentFreqHz / 1000) : null,
+        // Where it was HEARD (the dial when the picture began); rigMode is
+        // the radio's mode then (USB/LSB/…), so a reply can go back there.
+        freqHz: heardHz || null,
+        freqKhz: heardHz ? Math.round(heardHz / 1000) : null,
+        rigMode: data.rigMode !== undefined ? (data.rigMode || '') : (_currentMode || ''),
         callsign: settings.myCallsign || '',
         postProcessed: settings.sstvPostProcess !== false,
       };
@@ -29864,6 +29887,7 @@ app.whenReady().then(() => {
           imageData: Array.from(data.imageData),
           width: data.width, height: data.height,
           mode: data.mode, sliceId: data.sliceId,
+          freqHz: data.freqHz || null, rigMode: data.rigMode || '',
           saved,
         });
       }
@@ -29881,6 +29905,8 @@ app.whenReady().then(() => {
           remoteServer.broadcastSstvRxImage({
             base64: 'data:image/png;base64,' + base64,
             mode: data.mode, width: data.width, height: data.height,
+            freqHz: data.freqHz || null, rigMode: data.rigMode || '',
+            filename: (saved && saved.filename) || null,
           });
         } catch (err) { console.error('[SSTV] Multi broadcast error:', err.message); }
       }

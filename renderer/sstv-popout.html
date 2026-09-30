@@ -115,6 +115,8 @@
     .replybar .x:hover { color: var(--accent-red, #e94560); }
     .replybar .lg { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 3px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-primary); cursor: pointer; }
     .replybar .sent { font-size: 11px; color: var(--accent-green, #4ecca3); }
+    .replybar .qrg { font-family: Consolas, monospace; font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid transparent; background: transparent; color: var(--text-dim); cursor: default; white-space: nowrap; }
+    .replybar .qrg.off { color: #1a1a2e; background: #f0a500; border-color: #f0a500; font-weight: 700; cursor: pointer; }
     .src-tag { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
 
     /* Text editor over the Transmit picture */
@@ -334,6 +336,7 @@
           <span class="src-tag" id="rb-src"></span>
           <span>RSV</span><input type="text" id="rb-rsv" maxlength="3" value="595" aria-label="Your report for their picture" inputmode="numeric">
           <select id="rb-tpl" aria-label="Reply template"></select>
+          <button type="button" class="qrg" id="rb-qrg" hidden></button>
           <span class="sent" id="rb-sent"></span>
           <button type="button" class="lg" id="rb-log" title="Open the log with this contact filled in">Log</button>
           <button type="button" class="x" id="rb-x" aria-label="End this reply" title="End this reply">✕</button>
