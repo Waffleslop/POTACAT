@@ -191,5 +191,27 @@ test('no page scroll: the window is a fixed layout', () => {
   assert.ok(/id="multi-row" hidden/.test(html), 'Flex multi-slice hidden until the rig is a Flex');
 });
 
+test('templates have categories; no PSE K on a picture (a picture is not an over)', () => {
+  const ids = new Set(T.CATEGORIES.map(c => c.id));
+  for (const need of ['all', 'cq', 'reply', 'pota', 'mine']) assert.ok(ids.has(need), need);
+  for (const st of T.STARTERS) assert.ok(ids.has(st.category) && st.category !== 'all' && st.category !== 'mine', st.id + ' ' + st.category);
+  assert.ok(!/PSE K/.test(R('lib/sstv-templates.js')));
+  const js = R('renderer/sstv-popout.js');
+  assert.ok(/st\.category !== cat/.test(js), 'the strip filters starters by chip');
+  assert.ok(/category: activeStarterId/.test(js), 'a saved template keeps its starter category');
+});
+
+test('Drive sits by the meters; bands match the FT8 window; a look can be kept', () => {
+  const html = R('renderer/sstv-popout.html');
+  const top = html.slice(html.indexOf('id="bands"'), html.indexOf('id="m-swr"'));
+  assert.ok(/id="tx-gain"/.test(top), 'Drive is in the top bar');
+  assert.strictEqual((html.match(/id="tx-gain"/g) || []).length, 1);
+  const js = R('renderer/sstv-popout.js');
+  assert.ok(/jtcat-band-btn/.test(js) && /classList\.toggle\('active'/.test(js));
+  assert.ok(/settings\.sstvLookLocked\) \{ statusBar/.test(js), 'Shuffle refuses while the look is kept');
+  assert.ok(/getElementById\('tx-box'\)\.addEventListener\('contextmenu'/.test(js), 'right-click the picture');
+  assert.ok(/fontCss: st\.fontCss/.test(js), 'a saved template freezes its lettering');
+});
+
 console.log(`\nSSTV redesign: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

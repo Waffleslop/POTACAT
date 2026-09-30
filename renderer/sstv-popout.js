@@ -623,6 +623,7 @@ function saveTextElements() {
     key: t.key, label: isAutoLabel(t) ? '' : t.label,
     x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible,
     align: t.align, outline: !!t.outline, role: t.role, tpl: !!t.tpl,
+    fit: !!t.fit, fontCss: t.fontCss, fontWeight: t.fontWeight,
   }))});
 }
 
@@ -1141,7 +1142,17 @@ tplSaveBtn.addEventListener('click', () => {
   const tpl = {
     bgParams: bgParams ? JSON.parse(JSON.stringify(bgParams)) : null,
     bgDataUrl,
-    texts: textElements.map(t => ({ key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, align: t.align, outline: !!t.outline, role: t.role, tpl: !!t.tpl })),
+    // Frozen: the words, lettering and colours as they look now, so a later
+    // Shuffle or pack never changes a template you saved. Placeholders stay.
+    texts: textElements.map(t => {
+      const base = { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, align: t.align, outline: !!t.outline, role: t.role, fit: !!(t.tpl || t.fit), fontCss: t.fontCss, fontWeight: t.fontWeight };
+      if (t.tpl) {
+        const st = T.textStyle(t, currentLook);
+        Object.assign(base, { label: st.label, color: st.color, fontCss: st.fontCss, fontWeight: st.weight, outline: true });
+      }
+      return base;
+    }),
+    category: activeStarterId ? ((T.starter(activeStarterId) || {}).category || 'mine') : 'mine',
     thumbnail,
     // Where a reply's picture goes, so a saved reply template keeps its slot.
     slot: activeSlot ? Object.assign({}, activeSlot) : null,
@@ -1171,6 +1182,7 @@ function loadTemplate(idx) {
     rotation: saved.rotation || 0,
     visible: saved.visible !== false,
     align: saved.align, outline: !!saved.outline, role: saved.role, tpl: !!saved.tpl,
+    fit: !!saved.fit, fontCss: saved.fontCss, fontWeight: saved.fontWeight,
   }));
   activeStarterId = null;
   activeSlot = tpl.slot || null;
@@ -1218,8 +1230,11 @@ function renderTemplateStrip() {
     tplStrip.removeChild(tplStrip.firstChild);
   }
   tplCount.textContent = String(window.SstvTemplates.STARTERS.length + templates.length);
+  renderTplCats();
   const defReply = defaultReplyId();
+  const cat = tplCategory;
   for (const st of window.SstvTemplates.STARTERS) {
+    if (cat === 'mine' || (cat !== 'all' && st.category !== cat)) continue;
     const div = document.createElement('div');
     div.className = 'sstv-tpl' + (st.id === activeStarterId ? ' active' : '');
     div.title = st.name + ' — ' + st.why + (st.reply ? ' Right-click to make it your default reply.' : '');
@@ -1246,12 +1261,14 @@ function renderTemplateStrip() {
     }
     tplStrip.insertBefore(div, tplSaveBtn);
   }
-  if (templates.length) {
+  const mineShown = templates.some(t => cat === 'all' || cat === 'mine' || (t.category || 'mine') === cat);
+  if (mineShown && cat !== 'mine') {
     const sep = document.createElement('div');
     sep.className = 'tray-sep';
     tplStrip.insertBefore(sep, tplSaveBtn);
   }
   for (let i = 0; i < templates.length; i++) {
+    if (!(cat === 'all' || cat === 'mine' || (templates[i].category || 'mine') === cat)) continue;
     const tpl = templates[i];
     const div = document.createElement('div');
     div.className = 'sstv-tpl' + (i === activeTemplateIdx ? ' active' : '');
@@ -2600,6 +2617,10 @@ function textBox(t, ctx, canvasW) {
     label = st.label; color = st.color;
     family = st.fontCss + ', "Segoe UI", sans-serif';
     weight = String(st.weight);
+  } else if (t.fontCss) {
+    // A saved template keeps the lettering it was saved with.
+    family = t.fontCss + ', "Segoe UI", sans-serif';
+    weight = String(t.fontWeight || 400);
   }
   label = T.fillVars(label, templateVars());
   const italic = t.italic ? 'italic ' : '';
@@ -2607,7 +2628,7 @@ function textBox(t, ctx, canvasW) {
   const font = (sz) => italic + weight + ' ' + sz + 'px ' + family;
   c.font = font(size);
   let width = c.measureText(label).width;
-  if (t.tpl) {
+  if (t.tpl || t.fit) {
     const maxW = t.align === 'center' ? cw - 20 : cw - 12 - t.x;
     while (size > 10 && width > maxW) { size -= 1; c.font = font(size); width = c.measureText(label).width; }
   }
@@ -2916,7 +2937,7 @@ function openImageMenu(x, y, entry, galleryIdx) {
 
 // ---- Tray tabs ------------------------------------------------------------------
 const trayTabs = Array.from(document.querySelectorAll('.tab'));
-function showTab(t) {
+let showTab = function (t) {
   trayTabs.forEach(b => b.classList.toggle('on', b.dataset.t === t));
   document.querySelectorAll('.tray-body').forEach(b => { b.hidden = b.dataset.body !== t; });
   document.getElementById('open-folder-btn').hidden = t !== 'rx';
@@ -2928,7 +2949,7 @@ function showTab(t) {
     renderPacksStrip();
   }
   if (t === 'log') decodeLog.scrollTop = decodeLog.scrollHeight;
-}
+};
 trayTabs.forEach(b => b.addEventListener('click', () => showTab(b.dataset.t)));
 showTab('rx');
 
@@ -2940,7 +2961,7 @@ const bandsEl = document.getElementById('bands');
   for (const g of groups) {
     const band = g.label.replace('m', '');
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'band'; b.textContent = band; b.dataset.band = band;
+    b.type = 'button'; b.className = 'band jtcat-band-btn'; b.textContent = band; b.dataset.band = band;
     b.title = g.label + ' SSTV';
     b.addEventListener('click', () => {
       // The calling frequency when the band has one, else its first.
@@ -2960,7 +2981,7 @@ function showFreq(khz, mode) {
   document.getElementById('freq-label').textContent = (k / 1000).toFixed(3);
   document.getElementById('freq-mode').textContent = (mode || getFreqMode(k)) + ' \u25BE';
   const band = BAND_OF(k);
-  bandsEl.querySelectorAll('.band').forEach(b => b.classList.toggle('on', b.dataset.band === band));
+  bandsEl.querySelectorAll('.band').forEach(b => b.classList.toggle('active', b.dataset.band === band));
 }
 const freqPop = document.getElementById('freq-pop');
 function closeFreqPop() { freqPop.hidden = true; }
@@ -2985,12 +3006,27 @@ const gearPop = document.getElementById('gear-pop');
 function closeGear() { gearPop.hidden = true; }
 document.getElementById('gear-btn').addEventListener('click', (e) => { e.stopPropagation(); gearPop.hidden = !gearPop.hidden; });
 document.addEventListener('mousedown', (e) => { if (!gearPop.hidden && !gearPop.contains(e.target) && !e.target.closest('#gear-btn')) closeGear(); });
-document.getElementById('look-shuffle').addEventListener('click', () => {
+document.getElementById('look-shuffle').addEventListener('click', () => shuffleLook());
+function shuffleLook() {
+  if (settings.sstvLookLocked) { statusBar.textContent = 'Your look is kept. Unlock it in ⚙ to shuffle.'; return; }
   settings.sstvLookShuffle = (settings.sstvLookShuffle | 0) + 1;
   window.api.saveSettings({ sstvLookShuffle: settings.sstvLookShuffle });
   onLookChanged();
   statusBar.textContent = 'New look: ' + T.describeLook(currentLook);
-});
+}
+function setLookLocked(on) {
+  settings.sstvLookLocked = !!on;
+  window.api.saveSettings({ sstvLookLocked: settings.sstvLookLocked });
+  showLookLock();
+  statusBar.textContent = on ? 'Look kept: ' + T.describeLook(currentLook) : 'Shuffle is back on.';
+}
+function showLookLock() {
+  const lockBtn = document.getElementById('look-lock');
+  const shuf = document.getElementById('look-shuffle');
+  if (lockBtn) lockBtn.textContent = settings.sstvLookLocked ? 'Unlock look' : 'Keep this look';
+  if (shuf) shuf.disabled = !!settings.sstvLookLocked;
+}
+document.getElementById('look-lock').addEventListener('click', () => setLookLocked(!settings.sstvLookLocked));
 document.getElementById('op-name').addEventListener('change', (e) => {
   settings.sstvOperatorName = e.target.value.trim();
   window.api.saveSettings({ sstvOperatorName: settings.sstvOperatorName });
@@ -3229,3 +3265,45 @@ if (window.api.onSstvPacksChanged) window.api.onSstvPacksChanged(async (list) =>
   packsList = list || packsList;
   await refreshPacks();
 });
+
+
+// ---- Template categories (tray chips) ------------------------------------------
+let tplCategory = 'all';
+try { tplCategory = localStorage.getItem('sstv-tpl-category') || 'all'; } catch {}
+function renderTplCats() {
+  const box = document.getElementById('tpl-cats');
+  if (!box) return;
+  box.textContent = '';
+  for (const c of T.CATEGORIES) {
+    if (c.id === 'mine' && !templates.length) continue;
+    if (c.id !== 'all' && c.id !== 'mine' && !T.STARTERS.some(s => s.category === c.id) && !templates.some(t => t.category === c.id)) continue;
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip' + (c.id === tplCategory ? ' on' : ''); b.textContent = c.name;
+    b.addEventListener('click', () => {
+      tplCategory = c.id;
+      try { localStorage.setItem('sstv-tpl-category', c.id); } catch {}
+      renderTemplateStrip();
+    });
+    box.appendChild(b);
+  }
+}
+{
+  const _showTab = showTab;
+  // The chips only show on the Templates tab.
+  showTab = function (t) { _showTab(t); const box = document.getElementById('tpl-cats'); if (box) box.hidden = t !== 'tpl'; };
+}
+
+// ---- Right-click the Transmit picture ---------------------------------------------
+document.getElementById('tx-box').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (isTx) return;
+  const items = [
+    { label: 'Save as my template', note: templates.length + '/24', action: () => tplSaveBtn.click() },
+    '-',
+    { label: settings.sstvLookLocked ? 'Unlock my look' : 'Keep this look', action: () => setLookLocked(!settings.sstvLookLocked) },
+  ];
+  if (!settings.sstvLookLocked) items.push({ label: 'Shuffle my look', action: () => shuffleLook() });
+  items.push('-', { label: 'Add text', action: () => addTextBtn.click() }, { label: 'Use a photo…', action: () => loadBtn.click() });
+  openMenu(e.clientX, e.clientY, T.describeLook(currentLook), items);
+});
+showLookLock();

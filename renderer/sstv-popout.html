@@ -38,9 +38,14 @@
     /* Top bar: where you are and what the radio is doing */
     .top { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); position: relative; }
     .bands { display: flex; gap: 2px; }
-    .band { font-size: 12px; font-weight: 600; padding: 4px 7px; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); cursor: pointer; }
-    .band:hover { color: var(--text-primary); background: var(--bg-hover); }
-    .band.on { background: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); color: #0d1a14; }
+    /* Band buttons share the FT8 window's style (.jtcat-band-btn in styles.css), a little tighter to fit. */
+    .bands .jtcat-band-btn { padding: 4px 8px; min-width: 30px; font-size: 12px; }
+    .top-drive { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); font-family: Consolas, monospace; }
+    .top-drive input { width: 60px; accent-color: var(--accent-green, #4ecca3); }
+    .chips { display: flex; gap: 3px; align-items: center; }
+    .chip { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); cursor: pointer; }
+    .chip:hover { color: var(--text-primary); }
+    .chip.on { background: var(--accent-blue, #4fc3f7); border-color: var(--accent-blue, #4fc3f7); color: #06202c; }
     .freqwrap { position: relative; }
     .freq { font-family: Consolas, 'Courier New', monospace; font-size: 14px; color: var(--text-primary); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); white-space: nowrap; cursor: pointer; }
     .freq small { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
@@ -246,6 +251,7 @@
       </optgroup>
     </select>
     <span class="spacer"></span>
+    <label class="top-drive" title="Audio level SSTV sends to the radio">Drive <input type="range" id="tx-gain" min="0" max="100" value="50"></label>
     <span class="meter" id="m-swr" title="SWR, live while transmitting">SWR <i></i> <b>—</b></span>
     <span class="meter" id="m-pwr" title="Forward power, live while transmitting">PWR <i></i> <b>—</b></span>
     <button type="button" class="btn atu" id="atu-btn" title="Run the radio's antenna tuner" hidden>ATU Tune</button>
@@ -255,7 +261,7 @@
       <h4>Your look</h4>
       <div id="look-desc"></div>
       <div class="dim">Worked out from your callsign, so your pictures are recognisable. Used by the starter templates.</div>
-      <div class="row"><button type="button" class="btn" id="look-shuffle">Shuffle my look</button></div>
+      <div class="row"><button type="button" class="btn" id="look-shuffle">Shuffle my look</button><button type="button" class="btn" id="look-lock" title="Keep this look: Shuffle is turned off until you unlock it">Keep this look</button></div>
       <label>Style pack <select id="pack-select"><option value="">None</option></select></label>
       <label>Your first name, for {NAME} <input type="text" id="op-name" maxlength="20" spellcheck="false"></label>
       <h4>Audio</h4>
@@ -332,7 +338,7 @@
           <button type="button" class="x" id="rb-x" aria-label="End this reply" title="End this reply">✕</button>
         </div>
         <div class="img-area" id="tx-area">
-          <div class="imgbox" id="tx-box">
+          <div class="imgbox" id="tx-box" title="Click text to edit it · right-click to save as a template">
             <canvas id="tx-canvas" width="320" height="256" class="draggable" title="Click text to edit it, drag to move it"></canvas>
             <div class="insp" id="text-props" style="display:none"></div>
           </div>
@@ -340,7 +346,6 @@
         <div class="actions">
           <button type="button" class="btn" id="load-btn" title="Use a photo as the background">Photo…</button>
           <button type="button" class="btn" id="add-text-btn">+ Text</button>
-          <label class="drive" title="Audio level sent to the radio">Drive <input type="range" id="tx-gain" min="0" max="100" value="50"></label>
           <button type="button" class="sstv-btn-tx" id="tx-btn">TRANSMIT</button>
         </div>
         <div class="sstv-progress"><div class="sstv-progress-bar" id="progress-bar"></div></div>
@@ -357,6 +362,7 @@
       <button type="button" class="tab" data-t="log" role="tab">Log</button>
       <button type="button" class="tab" data-t="packs" role="tab">Packs <small id="packs-dot"></small></button>
       <span class="spacer"></span>
+      <div class="chips" id="tpl-cats" hidden role="group" aria-label="Template category"></div>
       <button type="button" class="btn" id="open-folder-btn">Open folder</button>
       <button type="button" class="btn" id="log-copy-btn" hidden>Copy log</button>
     </div>
