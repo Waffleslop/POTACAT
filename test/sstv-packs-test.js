@@ -139,7 +139,7 @@ test('the index signature verifies, and a changed byte does not', () => {
   const { entry } = entryFor(halloween());
   const wire = signedFeed([entry]);
   assert.strictEqual(verifyIndex(wire, PUB).packs[0].id, 'halloween');
-  const tampered = { ...wire, index: wire.index.replace('"version":2', '"version":3') };
+  const tampered = { ...wire, index: wire.index.replace(`"version":${entry.version}`, `"version":${entry.version + 1}`) };
   assert.throws(() => verifyIndex(tampered, PUB), /signature/);
   assert.throws(() => verifyIndex({ index: wire.index }, PUB), /not a signed index/);
 });
@@ -169,7 +169,7 @@ test('feed merge: a pack only on the server is listed as available, and claiming
   const { raw, entry } = entryFor(pack);
   const net = fakeNet({
     'https://packs.test/feeds/sstv-packs.json': { body: JSON.stringify(signedFeed([entry])), etag: '"a"' },
-    'https://packs.test/packs/winter@2.json': { body: raw },
+    [`https://packs.test/packs/winter@${pack.version}.json`]: { body: raw },
   });
   const { s, settings } = store({ fetch: net });
   await s.refresh();
@@ -189,7 +189,7 @@ test('a pack that does not match the signed hash is refused and nothing is insta
   const userDir = tmpDir();
   const { s, settings } = store({ userDir, fetch: fakeNet({
     'https://packs.test/feeds/sstv-packs.json': { body: JSON.stringify(signedFeed([entry])) },
-    'https://packs.test/packs/spooky@2.json': { body: evil },
+    [`https://packs.test/packs/spooky@${pack.version}.json`]: { body: evil },
   }) });
   await s.refresh();
   const r = await s.claim('spooky');
@@ -204,8 +204,8 @@ test('a font file that does not match its hash is refused', async () => {
   const { raw, entry } = entryFor(pack, [['Rye-Regular.woff2', font]]);
   const { s } = store({ fetch: fakeNet({
     'https://packs.test/feeds/sstv-packs.json': { body: JSON.stringify(signedFeed([entry])) },
-    'https://packs.test/packs/fonty@2.json': { body: raw },
-    'https://packs.test/packs/fonty@2/Rye-Regular.woff2': { body: Buffer.concat([font, Buffer.from('x')]) },
+    [`https://packs.test/packs/fonty@${pack.version}.json`]: { body: raw },
+    [`https://packs.test/packs/fonty@${pack.version}/Rye-Regular.woff2`]: { body: Buffer.concat([font, Buffer.from('x')]) },
   }) });
   await s.refresh();
   const r = await s.claim('fonty');

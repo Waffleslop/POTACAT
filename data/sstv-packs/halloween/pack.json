@@ -1,7 +1,7 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "halloween",
-  "version": 2,
+  "version": 3,
   "name": "Halloween",
   "season": {
     "from": "10-01",
@@ -14,6 +14,7 @@
     {
       "family": "Rye",
       "file": "Rye-Regular.woff2",
+      "ttf": "Rye-Regular.ttf",
       "license": "OFL-1.1",
       "licenseFile": "OFL.txt",
       "use": "headlines"

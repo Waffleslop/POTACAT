@@ -6,9 +6,7 @@
 // Run: node scripts/validate-sstv-packs.js [dir]
 const fs = require('fs');
 const path = require('path');
-const { validatePack } = require('../lib/sstv-pack-validate');
-
-const MAX_FILE = { woff2: 200 * 1024, txt: 16 * 1024 };
+const { validatePack, FONT_FILE_LIMITS: MAX_FILE, packFileNames } = require('../lib/sstv-pack-validate');
 
 function checkPackDir(dir) {
   const errors = [];
@@ -19,8 +17,12 @@ function checkPackDir(dir) {
   const v = validatePack(pack, { bytes: raw.length });
   for (const e of v.errors) errors.push(`${id}: ${e}`);
   if (pack.id !== id) errors.push(`${id}: folder name and pack id "${pack.id}" differ`);
+  // Packs published from this repo must be drawable on the ECHOCAT app too:
+  // schema 2, a TTF beside every WOFF2. (The validator still reads schema 1
+  // so an older pack in someone's store keeps working.)
+  if (pack.schema !== 2) errors.push(`${id}: new packs are schema 2 (a .ttf beside every .woff2, for the ECHOCAT app)`);
   for (const f of pack.fonts || []) {
-    for (const name of [f.file, f.licenseFile].filter(Boolean)) {
+    for (const name of [f.file, f.ttf, f.licenseFile].filter(Boolean)) {
       const p = path.join(dir, name);
       if (!fs.existsSync(p)) { errors.push(`${id}: ${name} is named but missing`); continue; }
       const size = fs.statSync(p).size;
@@ -29,7 +31,7 @@ function checkPackDir(dir) {
     }
     if (!f.licenseFile) errors.push(`${id}: font ${f.family} ships without its licence file`);
   }
-  const allowed = new Set(['pack.json', ...(pack.fonts || []).flatMap((f) => [f.file, f.licenseFile]).filter(Boolean)]);
+  const allowed = new Set(['pack.json', ...packFileNames(pack)]);
   for (const name of fs.readdirSync(dir)) if (!allowed.has(name)) errors.push(`${id}: stray file ${name} (only pack.json and named fonts/licences ship)`);
   return errors;
 }

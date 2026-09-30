@@ -1,0 +1,3 @@
+# SSTV style packs are signed by sha256 of their exact bytes. Never let a
+# checkout rewrite line endings in them, or the hash depends on who signs.
+data/sstv-packs/** -text

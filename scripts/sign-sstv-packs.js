@@ -21,12 +21,13 @@ const path = require('path');
 const crypto = require('crypto');
 const { checkPackDir } = require('./validate-sstv-packs');
 const { verifyIndex, KEY_ID } = require('../lib/sstv-packs');
+const { packFileNames } = require('../lib/sstv-pack-validate');
 
 function keyPath() {
   return process.env.POTACAT_PACK_KEY || path.join(os.homedir(), '.potacat', 'sstv-pack-signing-key.pem');
 }
 
-function buildFeed({ srcDir, outDir, privateKeyPem, now }) {
+function buildFeed({ srcDir, outDir, privateKeyPem, now, verifyKey }) {
   const dirs = fs.readdirSync(srcDir).map((n) => path.join(srcDir, n)).filter((d) => fs.statSync(d).isDirectory());
   const problems = dirs.flatMap(checkPackDir);
   if (problems.length) throw new Error('packs failed validation:\n  ' + problems.join('\n  '));
@@ -37,12 +38,10 @@ function buildFeed({ srcDir, outDir, privateKeyPem, now }) {
     const raw = fs.readFileSync(path.join(d, 'pack.json'));
     const pack = JSON.parse(raw.toString('utf8'));
     const files = [];
-    for (const f of pack.fonts || []) {
-      for (const name of [f.file, f.licenseFile].filter(Boolean)) {
-        const body = fs.readFileSync(path.join(d, name));
-        files.push({ name, size: body.length, sha256: sha(body) });
-        writes.push([`packs/${pack.id}@${pack.version}/${name}`, body]);
-      }
+    for (const name of packFileNames(pack)) {
+      const body = fs.readFileSync(path.join(d, name));
+      files.push({ name, size: body.length, sha256: sha(body) });
+      writes.push([`packs/${pack.id}@${pack.version}/${name}`, body]);
     }
     entries.push({
       id: pack.id, name: pack.name, version: pack.version, season: pack.season, by: pack.by, minApp: pack.minApp,
@@ -54,7 +53,7 @@ function buildFeed({ srcDir, outDir, privateKeyPem, now }) {
   const index = JSON.stringify({ schema: 1, generated: new Date(now || Date.now()).toISOString(), packs: entries });
   const sig = crypto.sign(null, Buffer.from(index, 'utf8'), crypto.createPrivateKey(privateKeyPem)).toString('base64');
   const wire = { index, sig, keyId: KEY_ID };
-  verifyIndex(wire); // refuse to publish anything the app would reject
+  verifyIndex(wire, verifyKey); // refuse to publish anything the app would reject (tests pass their own key)
   writes.push(['feeds/sstv-packs.json', Buffer.from(JSON.stringify(wire))]);
   for (const [rel, body] of writes) {
     const p = path.join(outDir, rel);
