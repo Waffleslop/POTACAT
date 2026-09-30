@@ -64,6 +64,8 @@ jobs:
         run: node test/sstv-template-sync-test.js
       - name: Run SSTV gallery (newest first, thumbnails, module-scope guard)
         run: node test/sstv-gallery-test.js
+      - name: Run SSTV help (reports RSV/P scale, help content, calling-frequency sidebands)
+        run: node test/sstv-help-test.js
       - name: Run SSTV style packs (pure-data format, signed feed, store, claims sync)
         run: node test/sstv-packs-test.js
       - name: Validate SSTV style packs in data/sstv-packs

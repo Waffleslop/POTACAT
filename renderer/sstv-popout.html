@@ -104,7 +104,7 @@
     .sstv-progress-bar.tx { background: var(--accent-red, #e94560); }
 
     /* Reply session bar (replaces the Transmit header while replying) */
-    .replybar { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; flex-shrink: 0; border-radius: 4px; background: rgba(79,195,247,0.12); border: 1px solid var(--accent-blue, #4fc3f7); font-size: 12px; color: var(--text-secondary); }
+    .replybar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; min-height: 26px; padding: 2px 6px; flex-shrink: 0; border-radius: 4px; background: rgba(79,195,247,0.12); border: 1px solid var(--accent-blue, #4fc3f7); font-size: 12px; color: var(--text-secondary); }
     .replybar canvas { width: 30px; height: 24px; border-radius: 2px; flex-shrink: 0; }
     .replybar b { color: var(--accent-blue, #4fc3f7); }
     .replybar input { font-family: Consolas, monospace; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 1px 4px; text-transform: uppercase; }
@@ -118,6 +118,23 @@
     .replybar .qrg { font-family: Consolas, monospace; font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid transparent; background: transparent; color: var(--text-dim); cursor: default; white-space: nowrap; }
     .replybar .qrg.off { color: #1a1a2e; background: #f0a500; border-color: #f0a500; font-weight: 700; cursor: pointer; }
     .src-tag { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+    .replybar .hlp { width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 1px solid var(--border-primary); background: transparent; color: var(--text-dim); font-size: 10px; line-height: 14px; cursor: pointer; flex-shrink: 0; }
+    .replybar .hlp:hover { color: var(--accent-blue, #4fc3f7); border-color: var(--accent-blue, #4fc3f7); }
+    #rb-rsv.bad { border-color: #f0a500; }
+    /* SSTV help: a panel over the window that scrolls inside itself. */
+    .help-veil { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 9000; display: flex; align-items: center; justify-content: center; }
+    .help-veil[hidden] { display: none; }
+    .help-panel { width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: var(--bg-secondary, #16213e); border: 1px solid var(--border-primary); border-radius: 8px; padding: 14px 18px; color: var(--text-primary); font-size: 13px; line-height: 1.45; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+    .help-panel h3 { margin: 0 0 6px; font-size: 16px; display: flex; align-items: center; }
+    .help-panel h3 button { margin-left: auto; background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer; }
+    .help-panel h4 { margin: 14px 0 4px; font-size: 13px; color: var(--accent-blue, #4fc3f7); }
+    .help-panel p { margin: 0 0 6px; color: var(--text-secondary); }
+    .help-panel ul { margin: 0 0 6px 18px; padding: 0; color: var(--text-secondary); }
+    .help-panel li { margin: 2px 0; }
+    .help-panel table { border-collapse: collapse; margin: 4px 0 6px; width: auto; table-layout: auto; }
+    .help-panel td { padding: 2px 12px 2px 0; vertical-align: top; color: var(--text-secondary); }
+    .help-panel td:first-child { font-family: Consolas, monospace; color: var(--text-primary); white-space: nowrap; }
+    .help-panel .hot { outline: 1px solid var(--accent-blue, #4fc3f7); border-radius: 4px; padding: 2px 6px; margin: 0 -6px; }
 
     /* Text editor over the Transmit picture */
     .sstv-canvas-wrap canvas.draggable, #tx-canvas { cursor: crosshair; }
@@ -207,8 +224,8 @@
             <option value="3845" data-mode="LSB">3.845 (NA)</option>
           </optgroup>
           <optgroup label="40m">
-            <option value="7165" data-mode="USB">7.165</option>
-            <option value="7171" data-mode="USB">7.171 (calling)</option>
+            <option value="7165" data-mode="LSB">7.165</option>
+            <option value="7171" data-mode="LSB">7.171 (calling)</option>
           </optgroup>
           <optgroup label="20m">
             <option value="14227" data-mode="USB">14.227</option>
@@ -270,6 +287,9 @@
       <label>Receive <select id="audio-input"></select></label>
       <label>Transmit <select id="audio-output"></select></label>
       <div class="dim">SSTV follows the radio's audio in My Rigs. Pick a device here only if SSTV should use a different one.</div>
+      <h4>Help</h4>
+      <div class="row"><button type="button" class="btn" id="sstv-help-btn">How SSTV contacts work</button></div>
+      <div class="dim">Where to call, what "UR P5" and "UR 595" mean, and how a contact goes.</div>
       <h4>Templates</h4>
       <div class="row"><button type="button" class="btn" id="tpl-export">Export…</button><button type="button" class="btn" id="tpl-import">Import…</button></div>
       <div class="dim">Take your own templates, your look and your packs to another computer.</div>
@@ -334,7 +354,7 @@
           <b>↩</b><span>to</span>
           <input type="text" id="rb-call" maxlength="12" aria-label="Their call" spellcheck="false" autocomplete="off">
           <span class="src-tag" id="rb-src"></span>
-          <span>RSV</span><input type="text" id="rb-rsv" maxlength="3" value="595" aria-label="Your report for their picture" inputmode="numeric">
+          <span>Report</span><input type="text" id="rb-rsv" maxlength="3" value="595" aria-label="Your report on their picture: RSV like 595, or P1 to P5" spellcheck="false" autocomplete="off"><button type="button" class="hlp" id="rb-help" title="What do 595 and P5 mean?" aria-label="About reports">?</button>
           <select id="rb-tpl" aria-label="Reply template"></select>
           <button type="button" class="qrg" id="rb-qrg" hidden></button>
           <span class="sent" id="rb-sent"></span>
@@ -388,6 +408,7 @@
   <script src="../lib/sstv-audio-device.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/sstv-templates.js"></script>
+  <script src="../lib/sstv-help.js"></script>
   <script src="sstv-popout.js"></script>
 </body>
 </html>

@@ -2598,6 +2598,7 @@ function templateVars() {
     GRID: (grid || ctxData.grid || '').toUpperCase(),
     CALL: replySession ? (replySession.call || '') : '',
     RSV: replySession ? (replySession.rsv || '595') : '595',
+    RPT: (window.SstvHelp && window.SstvHelp.reportText(replySession ? replySession.rsv : '595')) || (replySession ? replySession.rsv : '') || 'RSV 595',
     PARK: ctxData.park || '',
     UTC: utcStamp(),
     NAME: settings.sstvOperatorName || ctxData.name || '',
@@ -2762,7 +2763,7 @@ async function startReply(entry, starterId) {
     if (ctxData.typedCall) { call = String(ctxData.typedCall).toUpperCase(); source = 'typed'; }
   }
   replySession = {
-    call, source, rsv: (rbRsv.value || '595').replace(/[^0-9]/g, '').slice(0, 3) || '595',
+    call, source, rsv: cleanReport(rbRsv.value) || '595',
     filename: entry.filename || null, mode: entry.mode || '',
     freqHz: entryQrgHz(entry), rigMode: entry.rigMode || '',
     startedAt: Date.now(), lastTxAt: 0,
@@ -2842,11 +2843,24 @@ rbCall.addEventListener('input', () => {
     }, 600);
   }
 });
+// A report is RSV (595) or the P scale (P5), answered in the style they used.
+function cleanReport(text) {
+  const v = String(text || '').toUpperCase().replace(/[^0-9P]/g, '');
+  return /^P/.test(v) ? v.slice(0, 2) : v.replace(/P/g, '').slice(0, 3);
+}
+function showReportHint() {
+  const H = window.SstvHelp;
+  const ok = !!(H && H.parseReport(rbRsv.value));
+  rbRsv.classList.toggle('bad', !ok && rbRsv.value !== '');
+  rbRsv.title = H ? H.explainReport(rbRsv.value) : '';
+}
 rbRsv.addEventListener('input', () => {
-  const v = rbRsv.value.replace(/[^0-9]/g, '').slice(0, 3);
+  const v = cleanReport(rbRsv.value);
   if (v !== rbRsv.value) rbRsv.value = v;
-  if (replySession) { replySession.rsv = v || '595'; renderTxPreview(); }
+  showReportHint();
+  if (replySession && window.SstvHelp && window.SstvHelp.parseReport(v)) { replySession.rsv = v; renderTxPreview(); }
 });
+showReportHint();
 rbTpl.addEventListener('change', () => applyStarter(rbTpl.value));
 document.getElementById('rb-x').addEventListener('click', () => endReply('Reply ended.'));
 document.getElementById('rb-log').addEventListener('click', () => {
@@ -3455,3 +3469,42 @@ if (rbQrg) rbQrg.addEventListener('click', () => {
   showFreq(khz, mode);
   tuneToFreq(String(khz), mode);
 });
+
+// ---- How SSTV contacts work (⚙ > Help, and the ? by the report) ------------------
+function openSstvHelp(focusId) {
+  const H = window.SstvHelp;
+  if (!H) return;
+  let veil = document.getElementById('help-veil');
+  if (!veil) {
+    veil = document.createElement('div');
+    veil.id = 'help-veil'; veil.className = 'help-veil';
+    veil.innerHTML = '<div class="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title"></div>';
+    document.body.appendChild(veil);
+    const panel = veil.firstChild;
+    const h3 = document.createElement('h3');
+    h3.id = 'help-title';
+    h3.appendChild(document.createTextNode('How SSTV contacts work'));
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '\u2715'; x.setAttribute('aria-label', 'Close');
+    x.addEventListener('click', () => { veil.hidden = true; });
+    h3.appendChild(x);
+    panel.appendChild(h3);
+    for (const s of H.SECTIONS) {
+      const sec = document.createElement('section');
+      sec.dataset.id = s.id;
+      const h = document.createElement('h4'); h.textContent = s.title; sec.appendChild(h);
+      if (s.text) { const p = document.createElement('p'); p.textContent = s.text; sec.appendChild(p); }
+      if (s.items) { const ul = document.createElement('ul'); for (const it of s.items) { const li = document.createElement('li'); li.textContent = it; ul.appendChild(li); } sec.appendChild(ul); }
+      if (s.table) { const tb = document.createElement('table'); for (const [a, b] of s.table) { const tr = document.createElement('tr'); const ta = document.createElement('td'); ta.textContent = a; const tbd = document.createElement('td'); tbd.textContent = b; tr.appendChild(ta); tr.appendChild(tbd); tb.appendChild(tr); } sec.appendChild(tb); }
+      panel.appendChild(sec);
+    }
+    veil.addEventListener('mousedown', (e) => { if (e.target === veil) veil.hidden = true; });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !veil.hidden) veil.hidden = true; });
+  }
+  veil.hidden = false;
+  const panel = veil.firstChild;
+  panel.querySelectorAll('section').forEach((s) => s.classList.toggle('hot', s.dataset.id === focusId));
+  const target = focusId && panel.querySelector('section[data-id="' + focusId + '"]');
+  panel.scrollTop = target ? target.offsetTop - panel.offsetTop - 8 : 0;
+}
+document.getElementById('sstv-help-btn').addEventListener('click', () => openSstvHelp());
+document.getElementById('rb-help').addEventListener('click', () => openSstvHelp('reports'));
