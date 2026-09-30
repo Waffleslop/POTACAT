@@ -50,6 +50,8 @@ jobs:
         run: node test/rigctld-sideband-width-test.js
       - name: Run FT8 decode deadline (reply decoded before the next slot, tries counted by slot)
         run: node test/ft8-decode-deadline-test.js
+      - name: Run FT8 engine (TX timing, slot locks, late start, wait-for-decode)
+        run: node lib/ft8-engine-test.js
       - name: Run ECHOCAT USB CODEC TX graph (drive above unity, EQ, TX gate)
         run: node test/echocat-usb-tx-graph-test.js
       - name: Run SSTV decoder state (explicit Stop RX, S2C sstv-decoder-state)
