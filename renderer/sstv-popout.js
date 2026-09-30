@@ -465,7 +465,11 @@ function renderTextProps() {
   textInput.title = 'Use {MYCALL}, {CALL}, {RSV}, {GRID}, {PARK}, {NAME}, {RIG} or {UTC} and POTACAT fills them in';
   textInput.disabled = isAutoLabel(t);
   textInput.style.opacity = isAutoLabel(t) ? '0.5' : '1';
+  const labelBefore = t.label || '';
   textInput.addEventListener('input', () => { t.label = textInput.value; onTextChanged(); });
+  // Typed their call over {CALL}? It belongs in the reply's call box, which
+  // fills every {CALL}, the log and the gallery; the placeholder stays.
+  textInput.addEventListener('change', () => { callTypedOverPlaceholder(t, labelBefore, textInput.value, textInput); });
   textPropsEl.appendChild(textInput);
 
   // Font size
@@ -1248,7 +1252,9 @@ function renderTemplateStrip() {
     nm.className = 'tpl-name';
     nm.textContent = st.name;
     div.appendChild(nm);
-    div.addEventListener('click', () => applyStarter(st.id));
+    // A reply template starts a reply (the picture can be picked next);
+    // anything else composes.
+    div.addEventListener('click', () => { if (st.reply && !replySession) startReply(null, st.id); else applyStarter(st.id); });
     if (st.reply) {
       div.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -1566,6 +1572,7 @@ function renderGallery() {
     // swallowed the double-click.
     let clickTimer = null;
     thumb.addEventListener('click', () => {
+      if (replySession && !replySession.hasPicture) { startReply(entry); return; } // the picture this reply answers
       if (clickTimer) return;
       clickTimer = setTimeout(() => { clickTimer = null; viewImageFullscreen(entry.dataUrl); }, 260);
     });
@@ -2352,7 +2359,7 @@ window.api.onSstvRxImage((data) => {
     renderSlantedImage(lastRxImage, 0);
     const rxReplyBtn = document.getElementById('rx-reply-btn');
     if (rxReplyBtn) rxReplyBtn.style.display = '';
-    ['rx-slant-btn', 'rx-redecode'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
+    ['rx-slant-btn', 'rx-redecode', 'rx-clear-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
     // Reset slant for the new decode (the slider opens from Fix slant).
     const slantSlider = document.getElementById('rx-slant-slider');
     const slantValue = document.getElementById('rx-slant-value');
@@ -2754,32 +2761,66 @@ function setDefaultReply(id) {
   statusBar.textContent = 'Double-click now replies with ' + (T.starter(id) || {}).name + '.';
 }
 
+// A reply is a template plus the picture being answered, picked in either
+// order (Casey 2026-09-30: "click my template and the message I'm replying
+// to. It should QSY to that freq and put focus on the callsign and RST
+// boxes"). With no picture yet, the reply bar is up and the next picture
+// clicked in Received (or the live one) becomes the one answered.
 async function startReply(entry, starterId) {
-  if (!entry) return;
-  let call = String(entry.theirCall || entry.fskCall || '').toUpperCase();
+  // Picking the picture for a reply that has none yet keeps what was typed.
+  const waiting = replySession && !replySession.hasPicture;
+  const keepCall = waiting ? replySession.call : '';
+  const keepTpl = waiting ? (activeStarterId && (T.starter(activeStarterId) || {}).reply ? activeStarterId : null) : null;
+  if (!starterId && keepTpl) starterId = keepTpl;
+  entry = entry || null;
+  let call = entry ? String(entry.theirCall || entry.fskCall || '').toUpperCase() : '';
   let source = call ? (entry.fskCall && call === String(entry.fskCall).toUpperCase() ? 'FSK' : '') : '';
-  if (!call) {
+  if (!call && keepCall) { call = keepCall; source = ''; }
+  if (!call && entry) {
     await refreshContext();
     if (ctxData.typedCall) { call = String(ctxData.typedCall).toUpperCase(); source = 'typed'; }
   }
+  if (!entry) {
+    replySession = {
+      call, source, rsv: cleanReport(rbRsv.value) || '595', hasPicture: false,
+      filename: null, mode: '', freqHz: null, rigMode: '', heardAt: null,
+      startedAt: Date.now(), lastTxAt: 0,
+    };
+    replyImage = null;
+    showReplyBar(call, source, starterId || defaultReplyId());
+    rbCall.focus(); rbCall.select();
+    statusBar.textContent = 'Replying: now click the picture you are answering (Received, or the live picture). POTACAT tunes to where it was heard.';
+    return;
+  }
   replySession = {
-    call, source, rsv: cleanReport(rbRsv.value) || '595',
+    call, source, rsv: cleanReport(rbRsv.value) || '595', hasPicture: true,
     filename: entry.filename || null, mode: entry.mode || '',
     freqHz: entryQrgHz(entry), rigMode: entry.rigMode || '',
     heardAt: entry.timestamp || entry.at || null,
     startedAt: Date.now(), lastTxAt: 0,
   };
   setReplyImage(entry);
+  showReplyBar(call, source, starterId || defaultReplyId());
+  // Go where they are, and put the cursor where the typing is: their call
+  // when it is not known, else the report.
+  const moved = replyGoToHeard();
+  setTimeout(() => {
+    const box = call ? rbRsv : rbCall;
+    box.focus(); box.select();
+  }, 0);
+  statusBar.textContent = 'Replying' + (call ? ' to ' + call : '') + (moved ? ' · tuned to ' + fmtQrg(replySession.freqHz) + ' where they were heard' : '') + '. Change the template any time; the reply stays.';
+}
+
+function showReplyBar(call, source, id) {
   rbTpl.textContent = '';
   for (const st of T.STARTERS.filter(x => x.reply)) {
     const o = document.createElement('option');
     o.value = st.id; o.textContent = st.name;
     rbTpl.appendChild(o);
   }
-  const id = starterId || defaultReplyId();
   rbCall.value = call;
-  rbSrc.textContent = call ? source : 'call?';
-  rbSrc.title = source === 'FSK' ? 'Read from the FSK ID sent after the picture' : source === 'typed' ? 'The call you last typed in POTACAT' : 'Type their call';
+  rbSrc.textContent = call ? source : (replySession && !replySession.hasPicture ? 'pick picture' : 'call?');
+  rbSrc.title = source === 'FSK' ? 'Read from the FSK ID sent after the picture' : source === 'typed' ? 'The call you last typed in POTACAT' : (replySession && !replySession.hasPicture ? 'Click the picture you are answering' : 'Type their call');
   rbSent.textContent = '';
   showReplyQrg();
   replybar.hidden = false;
@@ -2787,8 +2828,6 @@ async function startReply(entry, starterId) {
   applyStarter(id);
   rbTpl.value = id;
   updateTxButton();
-  if (!call) setTimeout(() => rbCall.focus(), 0);
-  statusBar.textContent = 'Replying' + (call ? ' to ' + call : '') + '. Change the template any time; the reply stays.';
 }
 
 function endReply(why) {
@@ -2896,6 +2935,10 @@ rxBox.addEventListener('dblclick', (e) => {
   if (e.target.closest('.over-actions')) return;
   if (lastRxImage) startReply(lastRxImage);
 });
+rxBox.addEventListener('click', (e) => {
+  if (e.target.closest('.over-actions')) return;
+  if (lastRxImage && replySession && !replySession.hasPicture) startReply(lastRxImage);
+});
 rxBox.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (lastRxImage) openImageMenu(e.clientX, e.clientY, lastRxImage, -1);
@@ -2949,6 +2992,7 @@ function openImageMenu(x, y, entry, galleryIdx) {
     window.api.sstvLogContact({ call, rsvSent: '', freqHz: entryQrgHz(entry), heardAt: entry.timestamp || entry.at || null, sstvMode: entry.mode || '' });
   } });
   if (entry.dataUrl) items.push({ label: 'View full size', action: () => viewImageFullscreen(entry.dataUrl) });
+  if (galleryIdx < 0 && entry === lastRxImage) items.push({ label: 'Clear the receive picture', action: () => clearRxPicture() });
   items.push({ label: 'Open the pictures folder', action: () => window.api.sstvOpenGalleryFolder() });
   if (galleryIdx >= 0) {
     items.push({ label: 'Delete', danger: true, action: async () => {
@@ -3466,8 +3510,13 @@ function showReplyQrg() {
     ? 'You heard this picture on ' + fmtQrg(hz) + ' MHz ' + want + '; the radio is on ' + fmtQrg(_dialHz || hz) + (_dialMode ? ' ' + _dialMode : '') + '. Click to go back before replying.'
     : 'Heard on ' + fmtQrg(hz) + ' MHz' + (replySession.rigMode ? ' ' + replySession.rigMode : '');
 }
-if (rbQrg) rbQrg.addEventListener('click', () => {
-  if (!replySession || !replySession.freqHz || !rbQrg.classList.contains('off')) return;
+if (rbQrg) rbQrg.addEventListener('click', () => replyGoToHeard());
+// Tune to where the reply's picture was heard, on its sideband, if the radio
+// is not there already. Returns true when it moved the radio.
+function replyGoToHeard() {
+  if (!replySession || !replySession.freqHz) return false;
+  showReplyQrg();
+  if (!rbQrg || !rbQrg.classList.contains('off')) return false;
   const khz = Math.round(replySession.freqHz / 1000);
   // Data variants (PKTUSB, USB-D, DIGU) come back as their sideband: SSTV
   // transmit picks the data mode itself where a radio needs it.
@@ -3475,7 +3524,8 @@ if (rbQrg) rbQrg.addEventListener('click', () => {
   const mode = s === 'LSB' || s === 'USB' ? s : getFreqMode(khz);
   showFreq(khz, mode);
   tuneToFreq(String(khz), mode);
-});
+  return true;
+}
 
 // ---- How SSTV contacts work (⚙ > Help, and the ? by the report) ------------------
 function openSstvHelp(focusId) {
@@ -3515,3 +3565,39 @@ function openSstvHelp(focusId) {
 }
 document.getElementById('sstv-help-btn').addEventListener('click', () => openSstvHelp());
 document.getElementById('rb-help').addEventListener('click', () => openSstvHelp('reports'));
+
+// ---- Their call typed over {CALL} ---------------------------------------------------
+const CALL_RE = /^(?=[A-Z0-9/]*\d)(?=[A-Z0-9/]*[A-Z])[A-Z0-9/]{3,12}$/;
+function callTypedOverPlaceholder(t, before, after, input) {
+  const i = String(before).indexOf('{CALL}');
+  if (i < 0) return false;
+  const head = before.slice(0, i), tail = before.slice(i + 6);
+  const now = String(after);
+  if (!now.startsWith(head) || !now.endsWith(tail) || now.length < head.length + tail.length) return false;
+  const call = now.slice(head.length, now.length - tail.length).trim().toUpperCase();
+  if (!CALL_RE.test(call)) return false;
+  if (!replySession) startReply(null, activeStarterId && (T.starter(activeStarterId) || {}).reply ? activeStarterId : undefined);
+  if (!replySession) return false;
+  t.label = before;             // the placeholder stays; the call box fills it
+  if (input) input.value = before;
+  rbCall.value = call;
+  rbCall.dispatchEvent(new Event('input'));
+  renderTxPreview();
+  statusBar.textContent = call + ' is now in the reply\'s call box, which fills {CALL} everywhere and goes to the log.';
+  return true;
+}
+
+// ---- Clear the receive picture ------------------------------------------------------
+// A weak (unsaved) or unwanted picture stays until the next one decodes over it.
+function clearRxPicture() {
+  lastRxImage = null;
+  rxCtx.fillStyle = '#000';
+  rxCtx.fillRect(0, 0, rxCanvas.width, rxCanvas.height);
+  ['rx-weak-badge', 'rx-reply-btn', 'rx-slant-btn', 'rx-redecode', 'rx-clear-btn'].forEach((id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  const row = document.getElementById('rx-slant-row'); if (row) row.style.display = 'none';
+  rxInfo.textContent = 'Listening…';
+}
+{
+  const b = document.getElementById('rx-clear-btn');
+  if (b) b.addEventListener('click', (e) => { e.stopPropagation(); clearRxPicture(); });
+}

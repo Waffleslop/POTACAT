@@ -202,6 +202,30 @@ test('templates travel: export and import in the settings popover', () => {
   assert.ok(/id="tpl-export"/.test(html) && /id="tpl-import"/.test(html));
 });
 
+test('a reply is a template plus a picture, in either order; it tunes there and puts the cursor where the typing is', () => {
+  const js = R('renderer/sstv-popout.js');
+  assert.ok(/if \(st\.reply && !replySession\) startReply\(null, st\.id\); else applyStarter\(st\.id\);/.test(js), 'a reply template starts a reply');
+  assert.ok(/if \(replySession && !replySession\.hasPicture\) \{ startReply\(entry\); return; \}/.test(js), 'the next Received picture clicked is the one answered');
+  assert.ok(/if \(lastRxImage && replySession && !replySession\.hasPicture\) startReply\(lastRxImage\);/.test(js), 'so is the live picture');
+  assert.ok(/const moved = replyGoToHeard\(\);/.test(js), 'it tunes to where they were heard');
+  assert.ok(/const box = call \? rbRsv : rbCall;/.test(js), 'cursor: their call if unknown, else the report');
+});
+
+test('their call typed over {CALL} lands in the call box; the placeholder stays', () => {
+  const js = R('renderer/sstv-popout.js');
+  const i = js.indexOf('function callTypedOverPlaceholder('), src = js.slice(i, js.indexOf('\n}\n', i) + 2);
+  assert.ok(/t\.label = before;/.test(src) && /rbCall\.value = call;/.test(src));
+  const re = /^(?=[A-Z0-9/]*\d)(?=[A-Z0-9/]*[A-Z])[A-Z0-9/]{3,12}$/;
+  assert.ok(['W1AW', 'N4ABC', 'LZ3AW', 'PJ4/K1ABC'].every((c) => re.test(c)));
+  assert.ok(!['TNX', 'FB', '599', 'HELLO'].some((c) => re.test(c)), 'ordinary words stay words');
+});
+
+test('a weak or unwanted receive picture can be cleared', () => {
+  const html = R('renderer/sstv-popout.html'), js = R('renderer/sstv-popout.js');
+  assert.ok(/id="rx-clear-btn"/.test(html));
+  assert.ok(/function clearRxPicture\(\)/.test(js) && /label: 'Clear the receive picture'/.test(js));
+});
+
 test('no page scroll: the window is a fixed layout', () => {
   const html = R('renderer/sstv-popout.html');
   assert.ok(!/class="sstv-scroll"/.test(html), 'the scrolling wrapper is gone');
