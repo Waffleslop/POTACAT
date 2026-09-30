@@ -79,5 +79,24 @@ test('every calling frequency in the list uses the sideband the reply bar and th
   for (const w of where) { const [mhz, side] = w.split(' '); assert.strictEqual(side, getFreqMode(String(Math.round(Number(mhz) * 1000))), w); }
 });
 
+test('logging SSTV: 595 by default, P5 kept, and the log keeps SSTV and the heard frequency', () => {
+  const lp = R('renderer/log-popout.js');
+  const i = lp.indexOf('function defaultRstFor('), src = lp.slice(i, lp.indexOf('\n  }\n', i) + 4);
+  const defaultRstFor = new Function('CW_DIGI_MODES', src + 'return defaultRstFor;')(new Set(['CW', 'FT8']));
+  assert.deepStrictEqual(['SSTV', 'CW', 'SSB'].map(defaultRstFor), ['595', '599', '59']);
+  // A prefill pins what it says the QSO was, or the rig's USB flips SSTV to SSB.
+  assert.ok(/if \(p\.freqKhz\) freqUserEdited = true;\n\s+if \(p\.mode\) modeUserEdited = true;/.test(lp));
+  assert.ok(/const next = p\.rstSent && !p\.rstRcvd \? rstRcvdInput : rstSentInput;/.test(lp), 'the cursor goes to the report still to type');
+  assert.ok(/if \(p\.notes\) notesInput\.value = String\(p\.notes\);/.test(lp));
+  assert.ok(/timeInput\.value = p\.timeOn\.slice\(0, 2\) \+ ':' \+ p\.timeOn\.slice\(2, 4\);[\s\S]{0,300}timeUserEdited = true;/.test(lp), 'a carried time is not overwritten by the live clock');
+  const main = R('main.js');
+  const at = main.indexOf("ipcMain.on('sstv-log-contact'");
+  const h = main.slice(at, at + 1800);
+  assert.ok(/mode: 'SSTV'/.test(h) && /Date\.now\(\) - Number\(heardAt\) < 60 \* 60 \* 1000/.test(h) && /notes: sstvMode \? 'SSTV '/.test(h));
+  const js = R('renderer/sstv-popout.js');
+  assert.ok(/heardAt: replySession\.heardAt, sstvMode: replySession\.mode/.test(js), 'the reply bar sends when and in what mode');
+  assert.ok(/label: 'Log a contact with '/.test(js), 'a received picture can be logged without replying');
+});
+
 console.log(`\nSSTV help: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

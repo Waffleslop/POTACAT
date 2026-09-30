@@ -29454,13 +29454,21 @@ app.whenReady().then(() => {
 
   // Log a contact from the reply bar: the log pop-out opens with SSTV, their
   // call and the RSV sent filled in.
-  ipcMain.on('sstv-log-contact', (_e, { call, rsvSent, freqHz } = {}) => {
+  ipcMain.on('sstv-log-contact', (_e, { call, rsvSent, freqHz, heardAt, sstvMode } = {}) => {
     // The frequency the picture was heard on (the QSO's), else the dial.
     const hz = Number(freqHz) > 0 ? Number(freqHz) : _currentFreqHz;
     const freqKhz = hz ? hz / 1000 : undefined;
+    // The contact began when their picture arrived, when that was recent; an
+    // old gallery picture logged now is logged now.
+    const at = Number(heardAt) > 0 && Date.now() - Number(heardAt) < 60 * 60 * 1000 ? new Date(Number(heardAt)) : null;
+    const pad = (n) => String(n).padStart(2, '0');
     ipcMain.emit('log-popout-open', null, {
       force: true, type: 'dx', callsign: String(call || '').toUpperCase(),
-      mode: 'SSTV', freqKhz, rstSent: String(rsvSent || '595'), rstRcvd: '',
+      mode: 'SSTV', freqKhz, rstSent: rsvSent ? String(rsvSent) : '', rstRcvd: '',
+      qsoDate: at ? `${at.getUTCFullYear()}${pad(at.getUTCMonth() + 1)}${pad(at.getUTCDate())}` : undefined,
+      timeOn: at ? `${pad(at.getUTCHours())}${pad(at.getUTCMinutes())}${pad(at.getUTCSeconds())}` : undefined,
+      // ADIF has no SSTV submode: the picture mode goes in the comment.
+      notes: sstvMode ? 'SSTV ' + String(sstvMode).slice(0, 30) : '',
       power: _currentTxPower || undefined,
     });
   });

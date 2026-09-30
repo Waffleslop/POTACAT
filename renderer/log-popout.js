@@ -653,6 +653,12 @@ function _applyPopoutTheme(payload) {
   // Modes whose RST is three digits. Mirrors CW_DIGI_MODES_SET in app.js so a
   // spot routed here gets the same 599 the in-window overlay would have given.
   const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
+  // SSTV reports RSV (595: readability, strength, picture) or the P scale
+  // (P5); lib/sstv-help.js. Voice keeps 59, keyed and digital modes 599.
+  function defaultRstFor(mode) {
+    if (mode === 'SSTV') return '595';
+    return CW_DIGI_MODES.has(mode) ? '599' : '59';
+  }
 
   /** Spot-driven prefill (`force`): the operator clicked Log on a specific
    *  spot, so this window becomes that QSO outright rather than merging into
@@ -668,7 +674,14 @@ function _applyPopoutTheme(payload) {
       const m = modeFamily(p.mode);
       if ([...modeSelect.options].some((o) => o.value === m)) modeSelect.value = m;
     }
+    // What this prefill says the QSO WAS stays put: clearForm() above resets
+    // the "edited" flags, so the next CAT update used to overwrite them with
+    // the rig's state. An SSTV log flipped to SSB (the radio is on USB) and
+    // the frequency the picture was heard on became wherever the dial was.
+    if (p.freqKhz) freqUserEdited = true;
+    if (p.mode) modeUserEdited = true;
     if (p.power) powerInput.value = String(p.power);
+    if (p.notes) notesInput.value = String(p.notes);
     // selectChip reveals the reference row and re-seeds the re-spot checkbox
     // and comment template for this program — do it before filling the ref.
     selectChip(p.type || 'dx');
@@ -677,7 +690,7 @@ function _applyPopoutTheme(payload) {
     // JS8 (and future digi prefills) carry real signal reports — an SNR each
     // way, extracted from the conversation itself. Honor them; the 599/59
     // default is only for prefills that carry none.
-    const rst = CW_DIGI_MODES.has(modeSelect.value) ? '599' : '59';
+    const rst = defaultRstFor(modeSelect.value);
     rstSentInput.value = p.rstSent || rst;
     rstRcvdInput.value = p.rstRcvd || rst;
     // The EXCHANGE time, when the prefill knows it (JS8: the trailing
@@ -689,10 +702,17 @@ function _applyPopoutTheme(payload) {
     }
     if (p.timeOn && /^\d{6}$/.test(p.timeOn)) {
       timeInput.value = p.timeOn.slice(0, 2) + ':' + p.timeOn.slice(2, 4);
+      // Pinned, or the live clock (startClock, every second) writes "now" over
+      // it: the JS8 exchange time and an SSTV picture's arrival were both lost
+      // a second after the window opened.
+      timeUserEdited = true;
     }
     if (callInput.value) scheduleLookup();
-    rstSentInput.focus();
-    rstSentInput.select();
+    // A prefill that already knows what we sent (an SSTV reply) leaves only
+    // their report on us to type.
+    const next = p.rstSent && !p.rstRcvd ? rstRcvdInput : rstSentInput;
+    next.focus();
+    next.select();
   }
 
   if (window.api.onPrefill) {

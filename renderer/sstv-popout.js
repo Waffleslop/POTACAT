@@ -2766,6 +2766,7 @@ async function startReply(entry, starterId) {
     call, source, rsv: cleanReport(rbRsv.value) || '595',
     filename: entry.filename || null, mode: entry.mode || '',
     freqHz: entryQrgHz(entry), rigMode: entry.rigMode || '',
+    heardAt: entry.timestamp || entry.at || null,
     startedAt: Date.now(), lastTxAt: 0,
   };
   setReplyImage(entry);
@@ -2865,7 +2866,7 @@ rbTpl.addEventListener('change', () => applyStarter(rbTpl.value));
 document.getElementById('rb-x').addEventListener('click', () => endReply('Reply ended.'));
 document.getElementById('rb-log').addEventListener('click', () => {
   if (!replySession || !window.api.sstvLogContact) return;
-  window.api.sstvLogContact({ call: replySession.call, rsvSent: replySession.rsv, freqHz: replySession.freqHz || null });
+  window.api.sstvLogContact({ call: replySession.call, rsvSent: replySession.rsv, freqHz: replySession.freqHz || null, heardAt: replySession.heardAt, sstvMode: replySession.mode });
 });
 setInterval(() => {
   if (!replySession || isTx) return;
@@ -2941,6 +2942,12 @@ function openImageMenu(x, y, entry, galleryIdx) {
     action: () => startReply(entry, st.id),
   }));
   items.push('-');
+  // Log without replying (the contact happened, or they answered someone else's
+  // reply you want to log): their call, where and when it was heard, the mode.
+  items.push({ label: 'Log a contact with ' + (call || 'this station') + '…', action: () => {
+    if (!window.api.sstvLogContact) return;
+    window.api.sstvLogContact({ call, rsvSent: '', freqHz: entryQrgHz(entry), heardAt: entry.timestamp || entry.at || null, sstvMode: entry.mode || '' });
+  } });
   if (entry.dataUrl) items.push({ label: 'View full size', action: () => viewImageFullscreen(entry.dataUrl) });
   items.push({ label: 'Open the pictures folder', action: () => window.api.sstvOpenGalleryFolder() });
   if (galleryIdx >= 0) {
