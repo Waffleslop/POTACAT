@@ -29452,8 +29452,10 @@ app.whenReady().then(() => {
 
   // Log a contact from the reply bar: the log pop-out opens with SSTV, their
   // call and the RSV sent filled in.
-  ipcMain.on('sstv-log-contact', (_e, { call, rsvSent } = {}) => {
-    const freqKhz = _currentFreqHz ? _currentFreqHz / 1000 : undefined;
+  ipcMain.on('sstv-log-contact', (_e, { call, rsvSent, freqHz } = {}) => {
+    // The frequency the picture was heard on (the QSO's), else the dial.
+    const hz = Number(freqHz) > 0 ? Number(freqHz) : _currentFreqHz;
+    const freqKhz = hz ? hz / 1000 : undefined;
     ipcMain.emit('log-popout-open', null, {
       force: true, type: 'dx', callsign: String(call || '').toUpperCase(),
       mode: 'SSTV', freqKhz, rstSent: String(rsvSent || '595'), rstRcvd: '',

@@ -2845,7 +2845,7 @@ rbTpl.addEventListener('change', () => applyStarter(rbTpl.value));
 document.getElementById('rb-x').addEventListener('click', () => endReply('Reply ended.'));
 document.getElementById('rb-log').addEventListener('click', () => {
   if (!replySession || !window.api.sstvLogContact) return;
-  window.api.sstvLogContact({ call: replySession.call, rsvSent: replySession.rsv });
+  window.api.sstvLogContact({ call: replySession.call, rsvSent: replySession.rsv, freqHz: replySession.freqHz || null });
 });
 setInterval(() => {
   if (!replySession || isTx) return;

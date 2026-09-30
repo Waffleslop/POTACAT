@@ -206,6 +206,8 @@ test('the reply bar shows where they were heard, and offers to go back when the 
   assert.ok(/freqHz: entryQrgHz\(entry\), rigMode: entry\.rigMode/.test(js));
   assert.ok(/Math\.abs\(_dialHz - hz\) > 500/.test(js) && /'Go to ' \+ fmtQrg\(hz\)/.test(js));
   assert.ok(/tuneToFreq\(String\(khz\), mode\)/.test(js));
+  assert.ok(/sstvLogContact\(\{ call: replySession\.call, rsvSent: replySession\.rsv, freqHz: replySession\.freqHz/.test(js), 'Log uses the heard frequency');
+  assert.ok(/const hz = Number\(freqHz\) > 0 \? Number\(freqHz\) : _currentFreqHz;/.test(MAIN));
   assert.ok(/id="rb-qrg"/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'sstv-popout.html'), 'utf8')));
   assert.ok(/msg\.freqHz \? ' ' \+ \(msg\.freqHz \/ 1e6\)/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'remote.js'), 'utf8')), 'the web client shows it too');
 });
