@@ -232,14 +232,17 @@
     .jp-btn.jp-tune { color: #f0a500; border-color: #f0a500; }
     .jp-btn.jp-tune:hover { background: #f0a500; color: #000; }
     .jp-btn.jp-tune.active { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; animation: jp-tune-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
-    /* ULTRACAT Full Auto CQ — Matrix-green identity, pulses while running. */
-    .jp-btn.jp-ultracat { color: #00ff41; border-color: #00ff41; }
+    /* ULTRACAT Full Auto CQ — Matrix-green identity, pulses while running.
+       Its own near-black face: the green on the theme's button grey was 1.1:1
+       on the light theme (Casey 2026-09-30: "hard for me to see"); on #0b1a0f
+       it is 13.2:1 on every theme, and black on the running fill is 15.4:1. */
+    .jp-btn.jp-ultracat { background: #0b1a0f; color: #00ff41; border-color: #00ff41; }
     .jp-btn.jp-ultracat:hover { background: #00ff41; color: #000; }
     .jp-btn.jp-ultracat.active { background: #00ff41; color: #000; border-color: #00ff41; text-shadow: none; box-shadow: 0 0 8px #00ff4188; animation: jp-tune-pulse 1.2s ease-in-out infinite; }
     /* Paused: still running, not transmitting because the band is worked out.
        Reads as "armed but idle" — holds the ULTRACAT green outline, drops the
        filled/pulsing treatment that means "transmitting". */
-    .jp-btn.jp-ultracat.active.paused { background: transparent; color: #00ff41; box-shadow: none; animation: none; opacity: 0.75; }
+    .jp-btn.jp-ultracat.active.paused { background: #0b1a0f; color: #00ff41; border-style: dashed; box-shadow: none; animation: none; }
     @keyframes jp-tune-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     /* S / SWR meters in the audio bar. Narrow on purpose — the bar already
        carries two sliders and has to survive a 600 px window. */
