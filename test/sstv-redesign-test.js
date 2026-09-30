@@ -79,6 +79,25 @@ test('every starter draws, carries the station call, and keeps text on the pictu
   assert.strictEqual(T.STARTERS.filter(s => s.reply).length, 3);
 });
 
+test('PD 640-wide modes scale text x, lettering and the reply slot with the width (not left-half small)', () => {
+  const a = T.textLayers('cq', 256), b = T.textLayers('cq', 496, 640);
+  a.forEach((t, i) => {
+    assert.strictEqual(b[i].x, t.x * 2, 'x doubles');
+    assert.strictEqual(b[i].fontSize, t.fontSize * 2, 'lettering doubles');
+    assert.ok(Math.abs(b[i].y - t.y * 496 / 256) <= 1, 'y follows the height');
+  });
+  const s = T.replySlot('reply-big', 256), s2 = T.replySlot('reply-big', 496, 640);
+  assert.deepStrictEqual([s2.x, s2.w], [s.x * 2, s.w * 2]);
+  // Centred lettering is centred on the 640 canvas, not on its left half.
+  const centred = b.filter((t) => t.align === 'center');
+  assert.ok(centred.length && centred.every((t) => t.x === 320), 'centred at 320 of 640: ' + centred.map((t) => t.x));
+  // Without a width nothing changes (320-wide modes, and callers that never passed one).
+  assert.deepStrictEqual(T.textLayers('cq', 256, 320), a);
+  const js = R('renderer/sstv-popout.js');
+  assert.ok(/T\.textLayers\(id, h, w\)/.test(js) && /T\.replySlot\(id, h, w\)/.test(js), 'the window passes its width');
+  assert.ok(/t\.x = Math\.round\(t\.x \* kx\)/.test(js), 'a mode change rescales x and lettering');
+});
+
 test('Robot modes (240 lines) scale text and the reply slot', () => {
   const t256 = T.textLayers('cq', 256), t240 = T.textLayers('cq', 240);
   assert.ok(t240[1].y < t256[1].y);

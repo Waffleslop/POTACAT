@@ -299,14 +299,16 @@ document.getElementById('close-btn').addEventListener('click', () => window.api.
 
 // --- Mode change ---
 modeSelect.addEventListener('change', () => {
-  const oldH = txCanvas.height;
+  const oldH = txCanvas.height, oldW = txCanvas.width;
   updateCanvasSize();
   // A starter is drawn for the mode's size: redraw its scene and move its
-  // text for the new height (Robot modes are 240 lines, the rest 256).
+  // text for the new height (Robot modes are 240 lines, the rest 256) and
+  // width (PD 240/290 are 640 wide: x and lettering double).
   if (activeStarterId) {
     const k = txCanvas.height / (oldH || 256);
-    if (k !== 1) textElements.forEach(t => { t.y = Math.round(t.y * k); });
-    activeSlot = window.SstvTemplates.replySlot(activeStarterId, txCanvas.height);
+    const kx = txCanvas.width / (oldW || 320);
+    if (k !== 1 || kx !== 1) textElements.forEach(t => { t.y = Math.round(t.y * k); t.x = Math.round(t.x * kx); t.fontSize = Math.max(6, Math.round((t.fontSize || 14) * kx)); });
+    activeSlot = window.SstvTemplates.replySlot(activeStarterId, txCanvas.height, txCanvas.width);
     rerenderStarterScene();
   }
   renderTxPreview();
@@ -2664,14 +2666,14 @@ function applyStarter(id, opts) {
   if (!st) return;
   const o = opts || {};
   activeStarterId = id;
-  const h = txCanvas.height || 256;
+  const h = txCanvas.height || 256, w = txCanvas.width || 320;
   if (!o.keepTexts) {
-    textElements = T.textLayers(id, h);
+    textElements = T.textLayers(id, h, w);
     userTextCounter = 0;
     selectedText = null;
     textPropsEl.style.display = 'none';
   }
-  activeSlot = T.replySlot(id, h);
+  activeSlot = T.replySlot(id, h, w);
   replyInset.x = -1; replyInset.y = -1; replyInset.w = 0; replyInset.h = 0;
   activeTemplateIdx = -1;
   rerenderStarterScene();
