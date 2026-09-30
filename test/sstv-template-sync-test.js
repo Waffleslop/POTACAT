@@ -242,6 +242,17 @@ test('the SSTV window saves small photos and adopts the stamped list', () => {
   assert.ok(/Array\.isArray\(echoSettings\.sstvTemplates\)/.test(R('renderer/remote.js')), 'the web client adopts an emptied list');
 });
 
+test('the operator sees the sync state in words (too large, not signed in), with Sync now', async () => {
+  const seen = [];
+  const m = new S.SstvTemplateSync({ request: () => null, owner: () => null, getSettings: () => ({}), saveSettings: () => {}, onState: (st) => seen.push(st.status) });
+  await m.sync('test');
+  assert.deepStrictEqual(seen, ['signed-out']);
+  const js = R('renderer/sstv-popout.js');
+  assert.ok(/'too-large': st\.error/.test(js) && /onSstvTemplatesSyncState\(showTemplateSyncState\)/.test(js));
+  assert.ok(/id="tpl-sync-now"/.test(R('renderer/sstv-popout.html')));
+  assert.ok(/ipcMain\.handle\('sstv-templates-sync-now'/.test(R('main.js')));
+});
+
 (async () => {
   let passed = 0, failed = 0;
   for (const [name, fn] of cases) {

@@ -3361,3 +3361,31 @@ if (window.api.onSstvTemplatesUpdate) {
     renderTemplateStrip();
   });
 }
+
+// ---- Cloud template sync status (⚙ > Templates) ----------------------------------
+function showTemplateSyncState(st) {
+  const line = document.getElementById('tpl-sync-line');
+  const btn = document.getElementById('tpl-sync-now');
+  if (!line || !st) return;
+  const at = st.at ? new Date(st.at).toISOString().slice(11, 16) + 'Z' : '';
+  const words = {
+    'ok': 'Templates synced with your POTACAT Cloud account' + (at ? ' at ' + at : '') + '.',
+    'signed-out': 'Sign in to POTACAT Cloud (Settings) and your templates follow you to every computer.',
+    'not-ready': 'Cloud template sync is not available yet. Your templates are kept on this computer.',
+    'too-large': st.error || 'Your templates are too large to sync.',
+    'error': 'Templates did not sync: ' + (st.error || 'unknown error') + '.',
+    'idle': 'Templates sync with your POTACAT Cloud account.',
+  };
+  line.textContent = words[st.status] || words.idle;
+  line.style.color = (st.status === 'too-large' || st.status === 'error') ? 'var(--accent-red, #e94560)' : '';
+  if (btn) btn.hidden = st.status === 'signed-out' || st.status === 'not-ready';
+}
+if (window.api.sstvTemplatesSyncState) {
+  window.api.sstvTemplatesSyncState().then(showTemplateSyncState).catch(() => {});
+  window.api.onSstvTemplatesSyncState(showTemplateSyncState);
+  const syncBtn = document.getElementById('tpl-sync-now');
+  if (syncBtn) syncBtn.addEventListener('click', () => {
+    syncBtn.disabled = true;
+    window.api.sstvTemplatesSyncNow().then(showTemplateSyncState).catch(() => {}).finally(() => { syncBtn.disabled = false; });
+  });
+}

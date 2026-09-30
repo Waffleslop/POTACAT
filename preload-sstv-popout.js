@@ -66,6 +66,9 @@ contextBridge.exposeInMainWorld('api', {
   sstvLogContact: (d) => ipcRenderer.send('sstv-log-contact', d),
   sstvTemplatesExport: () => ipcRenderer.invoke('sstv-templates-export'),
   sstvTemplatesImport: () => ipcRenderer.invoke('sstv-templates-import'),
+  sstvTemplatesSyncState: () => ipcRenderer.invoke('sstv-templates-sync-state'),
+  sstvTemplatesSyncNow: () => ipcRenderer.invoke('sstv-templates-sync-now'),
+  onSstvTemplatesSyncState: (cb) => ipcRenderer.on('sstv-templates-sync-state', (_e, d) => cb(d)),
   // SSTV style packs (lib/sstv-packs.js). list() entries: { id, name, version,
   // season, by, minApp, inSeason, bundled, installed, available,
   // updateAvailable, compatible, size, claimed, active }. get() returns

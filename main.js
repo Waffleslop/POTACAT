@@ -26254,6 +26254,8 @@ app.whenReady().then(() => {
       getSettings: () => settings,
       saveSettings: (patch, opts) => { Object.assign(settings, patch); saveSettings(settings); afterSstvSettingsSaved(patch, opts); },
       log: (msg) => sendCatLog(msg),
+      // The SSTV window's settings line: synced / not signed in / too large.
+      onState: (st) => { try { if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('sstv-templates-sync-state', st); } catch {} },
     });
     setTimeout(() => { sstvTemplateSync.sync('boot').catch(() => {}); }, 20000);
     // Once the app has settled: anything logged while signed out (or
@@ -29448,6 +29450,9 @@ app.whenReady().then(() => {
 
   // Take templates to another machine: one JSON file with the operator's own
   // templates, their look and their claimed packs.
+  ipcMain.handle('sstv-templates-sync-state', () => (sstvTemplateSync ? sstvTemplateSync.state : { status: 'signed-out' }));
+  ipcMain.handle('sstv-templates-sync-now', () => (sstvTemplateSync ? sstvTemplateSync.sync('button') : { status: 'signed-out' }));
+
   ipcMain.handle('sstv-templates-export', async () => {
     const { dialog } = require('electron');
     const res = await dialog.showSaveDialog(sstvPopoutWin || win, {
