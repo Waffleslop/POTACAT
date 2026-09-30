@@ -24,8 +24,8 @@ const CORS = {
 };
 
 const PACK_RE = /^packs\/[a-z0-9][a-z0-9-]*@\d+\.json$/;
-const FILE_RE = /^packs\/[a-z0-9][a-z0-9-]*@\d+\/[A-Za-z0-9._-]+\.(woff2|txt)$/;
-const TYPES = { json: 'application/json; charset=utf-8', woff2: 'font/woff2', txt: 'text/plain; charset=utf-8' };
+const FILE_RE = /^packs\/[a-z0-9][a-z0-9-]*@\d+\/[A-Za-z0-9._-]+\.(woff2|ttf|otf|txt)$/;
+const TYPES = { json: 'application/json; charset=utf-8', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', txt: 'text/plain; charset=utf-8' };
 
 async function etagOf(buf) {
   const d = await crypto.subtle.digest('SHA-256', buf);

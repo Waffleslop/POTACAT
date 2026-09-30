@@ -17,7 +17,7 @@ Packs are made in the POTACAT repo under `data/sstv-packs/<id>/` (a
 |---|---|---|
 | `GET /feeds/sstv-packs.json` | The signed index | 5 min at the edge, ETag |
 | `GET /packs/<id>@<version>.json` | One pack, exactly as in the repo | immutable |
-| `GET /packs/<id>@<version>/<file>` | A font (`.woff2`) or licence (`.txt`) the pack names | immutable |
+| `GET /packs/<id>@<version>/<file>` | A font (`.woff2`, and since schema 2 its `.ttf`/`.otf` for the ECHOCAT app) or licence (`.txt`) the pack names | immutable |
 | `GET /healthz` | `{ ok, packs, generated }` | none |
 
 ## Wire format

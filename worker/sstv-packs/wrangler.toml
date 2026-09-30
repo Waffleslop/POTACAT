@@ -11,5 +11,5 @@ routes = [
 # Create the KV namespace and paste its id here:
 #   npx wrangler kv namespace create SSTV_PACKS
 kv_namespaces = [
-  { binding = "SSTV_PACKS", id = "REPLACE_WITH_KV_NAMESPACE_ID" }
+  { binding = "SSTV_PACKS", id = "fdc68c5765094814ad275f062ed97b9f" }
 ]
