@@ -8493,6 +8493,14 @@
     var toneTimer = null, iesTimer = null;
     var ditPressStart = 0, dahPressStart = 0;
     var GHOST_MS = 12;
+    // A contact that bounces as it closes (down, up, down within a few ms)
+    // pressed again while its own element was sounding, which latched one
+    // more of the same element: a dot tap sent "..", a dash tap "--", in
+    // iambic A and B alike (LZ3AW 2026-10-01, heard in his own sidetone).
+    // A press this soon after the same contact's release is that bounce, not
+    // a new press; 15 ms is a whole dot at 80 WPM. Same rule in lib/keyer.js.
+    var BOUNCE_MS = 15;
+    var ditReleaseAt = -1e9, dahReleaseAt = -1e9;
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -8533,10 +8541,12 @@
       ditPressed = pressed;
       if (mode === 'straight') { onKey(pressed); return; }
       if (pressed) {
+        if (Date.now() - ditReleaseAt < BOUNCE_MS) return;
         ditPressStart = Date.now();
         if (state === IDLE) startElement(true);
         else ditLatch = true;
       } else {
+        ditReleaseAt = Date.now();
         // Ghost-press cleanup (Android BT MIDI etc. — matches server keyer)
         var held = Date.now() - ditPressStart;
         if (ditLatch && held < GHOST_MS && state !== IDLE) ditLatch = false;
@@ -8546,10 +8556,12 @@
       dahPressed = pressed;
       if (mode === 'straight') return;
       if (pressed) {
+        if (Date.now() - dahReleaseAt < BOUNCE_MS) return;
         dahPressStart = Date.now();
         if (state === IDLE) startElement(false);
         else dahLatch = true;
       } else {
+        dahReleaseAt = Date.now();
         var held = Date.now() - dahPressStart;
         if (dahLatch && held < GHOST_MS && state !== IDLE) dahLatch = false;
       }

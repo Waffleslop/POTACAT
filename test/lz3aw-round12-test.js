@@ -129,5 +129,26 @@ test('old full-size SSTV template photos are shrunk at start-up (880 KB settings
   assert.ok(/t\.updatedAt = Date\.now\(\)/.test(b), 'an edit the cloud merge adopts');
 });
 
+console.log('=== #4 (round 13) a receive report inside a CW hold is logged ===');
+
+test('the radio reporting RX mid CW hold is logged, at most every 10 s', () => {
+  const { rig, codec } = rig480();
+  rig._debug = true; // main.js sets this on every controller
+  const logs = [];
+  rig.on('log', (m) => logs.push(m));
+  rig.noteTransmitting(3000);
+  codec.emit('ptt', false);            // full break-in: RX between elements
+  rig.noteTransmitting(3000);          // the next element re-arms
+  codec.emit('ptt', false);
+  const said = logs.filter((m) => /radio reported receive \d+ ms before POTACAT's CW hold ended/.test(m));
+  assert.strictEqual(said.length, 1, 'not once per element: ' + JSON.stringify(logs));
+  rig._cancelCwHold();
+  rig._cwHoldRxLoggedAt -= 11000;      // 11 s later, a new over
+  rig.noteTransmitting(3000);
+  codec.emit('ptt', false);
+  assert.strictEqual(logs.filter((m) => /radio reported receive/.test(m)).length, 2);
+  rig._cancelCwHold();
+});
+
 console.log(`\nLZ3AW round 12: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

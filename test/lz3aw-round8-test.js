@@ -59,7 +59,10 @@ test('a real second press still latches (the fix is edge-only, not latch-off)', 
   k.paddleDit(true);
   await sleep(20);
   k.paddleDit(false);
-  await sleep(10);
+  // 30 ms, not 10: a re-press within 15 ms of the release is contact bounce
+  // (IambicKeyer.BOUNCE_MS, test/paddle-bounce-test.js); no finger is that
+  // fast. Still inside the first 60 ms dit, so it still has to latch.
+  await sleep(30);
   k.paddleDit(true); // a genuine new press inside the first dit
   await sleep(25);
   k.paddleDit(false);
