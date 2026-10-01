@@ -17,6 +17,9 @@
     .mq-winbtn { -webkit-app-region: no-drag; width: 26px; height: 20px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: 3px; font-size: 13px; }
     .mq-winbtn:hover { background: var(--bg-hover); }
     .mq-winbtn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
+    /* macOS: the system traffic lights replace these buttons (popout-theme-boot.js). */
+    .platform-darwin .mq-titlebar { padding-left: 80px; }
+    .platform-darwin .mq-winbtn { display: none; }
 
     /* Connection bar */
     .mq-connbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 12px; }

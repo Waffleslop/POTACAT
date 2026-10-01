@@ -47,4 +47,15 @@
   } catch (e) {
     // No query / parse failure → leave the stylesheet's default (dark).
   }
+
+  // macOS: every pop-out opens with titleBarStyle 'hiddenInset', so the
+  // system traffic lights sit over the left of our title bar. Mark <html>
+  // here, before first paint, so each pop-out's CSS can hide its own
+  // minimize/maximize/close buttons and clear the traffic lights. Seven
+  // pop-outs (Log, VFO, Spots, DX Cluster, JS8, SSTV, Mercury) never added
+  // the class and showed both sets of buttons, with the title under the
+  // traffic lights (N0KAH 2026-10-01).
+  try {
+    if (window.api && window.api.platform === 'darwin') document.documentElement.classList.add('platform-darwin');
+  } catch (e) { /* no preload bridge: leave the Windows/Linux layout */ }
 })();

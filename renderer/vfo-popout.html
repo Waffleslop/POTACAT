@@ -49,6 +49,9 @@
       font-size: 12px; color: var(--text-dim); min-height: 28px;
     }
     .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 4px; }
+    /* macOS: the system traffic lights replace these buttons (popout-theme-boot.js). */
+    .platform-darwin .titlebar { padding-left: 80px; }
+    .platform-darwin .titlebar-btns { display: none; }
     .titlebar-btns button {
       background: none; border: none; color: var(--text-dim); font-size: 14px;
       cursor: pointer; padding: 2px 6px; border-radius: 3px;

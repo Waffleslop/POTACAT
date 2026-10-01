@@ -26,6 +26,9 @@
     .sstv-titlebar-btn { -webkit-app-region: no-drag; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 8px; line-height: 1; }
     .sstv-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
     .sstv-titlebar-btn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
+    /* macOS: the system traffic lights replace these buttons (popout-theme-boot.js). */
+    .platform-darwin .sstv-titlebar { padding-left: 80px; }
+    .platform-darwin .sstv-titlebar-btn { display: none; }
 
     .spacer { flex: 1; }
     .btn { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-primary); cursor: pointer; white-space: nowrap; }
