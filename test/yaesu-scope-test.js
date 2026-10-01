@@ -449,6 +449,12 @@ check('the helper is staged into resources/bin by electron-builder and built by 
   assert.strictEqual(builds, 5, `expected the helper compiled in 5 release jobs (win, mac×2, linux×2), found ${builds}`);
 });
 
+check('the idle CAT pause never fires while the band scope is watched (N8VCL: scope stuck on 75 m)', () => {
+  const tick = mainSrc.slice(mainSrc.indexOf('function startIdlePauseTimer()'), mainSrc.indexOf('function stopIdlePauseTimer()'));
+  assert.ok(/if \(yaesuScopeWanted\(\)\) return;/.test(tick), 'startIdlePauseTimer lacks the yaesuScopeWanted() guard');
+  assert.ok(tick.indexOf('yaesuScopeWanted()') < tick.indexOf('cat.pausePolling()'), 'the guard must come before the pause');
+});
+
 console.log('\n' + '='.repeat(52));
 console.log(`Results: ${pass} passed, ${fail} failed`);
 if (fail > 0) {

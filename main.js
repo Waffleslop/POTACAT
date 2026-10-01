@@ -24585,6 +24585,12 @@ function startIdlePauseTimer() {
     // 2026-08-18, VFO pop-out open the whole session). Pause only when
     // nobody is looking; the countdown resumes when they stop.
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) return;
+    // The FT-710 band scope is watched the same way, and its axis is the
+    // polled dial: N8VCL ragchewed on 75 m with only the scope open, the
+    // pause fired, and the scope, VFO and log line stayed on 75 m after he
+    // moved to 40 m (2026-09-30). A streaming scope also keeps the radio
+    // awake on its own, so pausing buys nothing here.
+    if (yaesuScopeWanted()) return;
     let remoteWatching = false;
     try { remoteWatching = !!(remoteServer && remoteServer.running && remoteServer.activeClientContext()); } catch {}
     if (remoteWatching) return;
