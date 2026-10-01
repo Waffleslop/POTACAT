@@ -438,9 +438,17 @@ function pushJtcatSpotsHighlight(filtered) {
 /** Send tuned spot info to VFO popout */
 function notifyVfoTunedSpot(spot) {
   if (!spot) { window.api.vfoTunedSpot(null); return; }
-  // Find all activators on same frequency
-  const sameFreq = allSpots.filter(s => s.frequency === spot.frequency);
-  const spots = sameFreq.length > 0 ? sameFreq : [spot];
+  // Every activator on the same frequency that the TABLE is showing — its
+  // filters, source toggles, hidden calls and age limit — plus the tuned spot
+  // itself. allSpots also held spots the table had aged out or filtered, so
+  // the VFO named operators that were no longer on the list or on pota.app
+  // (N0KAH 2026-10-01). One line per callsign: a POTA spot and a cluster
+  // re-spot of the same station are the same operator.
+  const sameFreq = getFiltered().filter(s => s.frequency === spot.frequency);
+  const spots = [spot];
+  for (const s of sameFreq) {
+    if (!spots.some(o => (o.callsign || '').toUpperCase() === (s.callsign || '').toUpperCase())) spots.push(s);
+  }
   // Build array of operator data. For net spots we also forward band/mode/
   // comments so the popout can render an HF NET card instead of a QRZ card.
   const ops = spots.map(s => {
@@ -9107,7 +9115,10 @@ function isWorkedSpot(spot) {
   const todayQsos = entries.filter(e => e.date === todayUtc);
   if (todayQsos.length === 0) return false;
   const spotBand = (spot.band || '').toUpperCase();
-  const spotMode = (spot.mode || '').toUpperCase();
+  // Logged modes are normalized (USB/LSB -> SSB); compare the spot's the same
+  // way, as the check mark does, or a spot reported as USB never grays out
+  // after the QSO (KC1SSY 2026-10-01: "sometimes doesn't gray out").
+  const spotMode = spotModeKey(spot);
   const spotRef = (spot.reference || '').toUpperCase();
   // If the spot carries a park/summit reference, require that exact ref to
   // count as "worked today" — a roving activator at a new park must not be
@@ -9144,7 +9155,7 @@ function isWorkedSpotStrict(spot) {
     String(now.getUTCDate()).padStart(2, '0');
   const spotRef = spot.reference.toUpperCase();
   const spotBand = (spot.band || '').toUpperCase();
-  const spotMode = (spot.mode || '').toUpperCase();
+  const spotMode = spotModeKey(spot); // see isWorkedSpot
   return entries.some(e =>
     e.date === todayUtc &&
     (e.ref || '').toUpperCase() === spotRef &&
@@ -11523,6 +11534,23 @@ window.api.onQsoPopoutStatus((open) => {
 window.api.onLogPopoutStatus((open) => {
   logPopoutOpen = open;
 });
+
+// --- VFO Pop-out ---
+// Its activator/park card comes from notifyVfoTunedSpot(), which used to run
+// only on a tune: a VFO opened while sitting on a spot stayed blank until the
+// next row click (N0KAH 2026-10-01). Send the tuned spot, or the spot at the
+// radio's frequency, when it opens; main replays it once the window loads.
+if (window.api.onVfoPopoutStatus) {
+  window.api.onVfoPopoutStatus((open) => {
+    if (!open) return;
+    const onFreq = radioFreqKhzExact != null
+      ? allSpots.find(s => Math.abs(parseFloat(s.frequency) - radioFreqKhzExact) < 0.5)
+      : null;
+    const spot = (lastTunedSpot && (radioFreqKhzExact == null ||
+      Math.abs(parseFloat(lastTunedSpot.frequency) - radioFreqKhzExact) < 0.5)) ? lastTunedSpot : onFreq;
+    if (spot) notifyVfoTunedSpot(spot);
+  });
+}
 
 // --- Cluster Terminal Pop-out ---
 window.api.onClusterPopoutStatus((open) => {

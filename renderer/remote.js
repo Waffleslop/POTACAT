@@ -2687,7 +2687,7 @@
     const todayQsos = entries.filter(e => e.date === todayUtc);
     if (todayQsos.length === 0) return false;
     const spotBand = (s.band || '').toUpperCase();
-    const spotMode = (s.mode || '').toUpperCase();
+    const spotMode = spotModeKey(s); // normalized like the logged mode (KC1SSY)
     const spotRef = (s.reference || '').toUpperCase();
     // Same roving-activator fix as the desktop: match on the park/summit
     // reference too when the spot has one, otherwise a different park for a
@@ -2711,13 +2711,19 @@
   // The check mark means worked on THIS band and mode, any date — a call
   // worked once on 40 m CW is still a fresh contact on 20 m SSB (LZ3AW #14).
   // Modes compare as the worked map stores them (USB/LSB logged as SSB).
+  // A spot's mode the way logged modes are normalized (USB/LSB -> SSB; a
+  // generic data mode matches any). Same rule as spotModeKey() in app.js.
+  function spotModeKey(s) {
+    const m = String(s.mode || '').toUpperCase();
+    if (m === 'USB' || m === 'LSB') return 'SSB';
+    if (m === 'DIGI' || m === 'DATA' || m === 'DIGITAL') return '';
+    return m;
+  }
   function hasWorkedOnBandMode(s) {
     const entries = workedQsos.get((s.callsign || '').toUpperCase());
     if (!entries || !entries.length) return false;
     const band = String(s.band || '').toUpperCase();
-    let mode = String(s.mode || '').toUpperCase();
-    if (mode === 'USB' || mode === 'LSB') mode = 'SSB';
-    if (mode === 'DIGI' || mode === 'DATA' || mode === 'DIGITAL') mode = '';
+    const mode = spotModeKey(s);
     return entries.some((e) => (!band || e.band === band) && (!mode || e.mode === mode));
   }
 

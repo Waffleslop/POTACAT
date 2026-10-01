@@ -88,6 +88,8 @@ jobs:
         run: node test/spot-hides-test.js
       - name: Run macOS title bars (every pop-out hides its own window buttons)
         run: node test/mac-titlebar-test.js
+      - name: Run VFO card and worked grey-out (N0KAH, KC1SSY)
+        run: node test/vfo-and-greyout-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)

@@ -1168,6 +1168,7 @@ let propPopoutWin = null;    // pop-out propagation map window
 let pairPopoutWin = null;    // pop-out ECHOCAT pairing QR window
 let pairRequestPopoutWin = null; // tap-to-pair Approve/Deny popout
 let vfoPopoutWin = null;     // pop-out VFO window
+let _lastVfoTunedSpot = null; // the last activator card sent to the VFO window
 let conditionsPopoutWin = null; // pop-out Conditions (solar / propagation)
 let jtcatPopoutWin = null;   // pop-out JTCAT window
 let sstvPopoutWin = null;    // pop-out SSTV window
@@ -28172,6 +28173,11 @@ app.whenReady().then(() => {
       // engaged shows the open padlock while main refuses tunes with "VFO
       // Locked" — the exact contradiction in #76.
       vfoPopoutWin.webContents.send('vfo-lock-state', _vfoLocked);
+      // The activator/park card: the main window sends it when a spot is
+      // tuned, so a VFO opened afterwards sat blank until the next row click
+      // (N0KAH 2026-10-01). Replay the last one; the main window also re-sends
+      // the spot at the radio's frequency when it hears the VFO opened.
+      if (_lastVfoTunedSpot) vfoPopoutWin.webContents.send('vfo-tuned-spot', _lastVfoTunedSpot);
       if (_cachedSolarData) vfoPopoutWin.webContents.send('solar-data', _cachedSolarData);
       vfoPopoutWin.webContents.send('vfo-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
       // Initial TX EQ state so the popout's controls hydrate to the
@@ -28312,6 +28318,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('vfo-tuned-spot', (_e, spot) => {
+    _lastVfoTunedSpot = spot || null; // replayed when the VFO window loads
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
       vfoPopoutWin.webContents.send('vfo-tuned-spot', spot);
     }

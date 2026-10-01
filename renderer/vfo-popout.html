@@ -161,6 +161,8 @@
     .op-multi-line { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
     .op-multi-line .op-ml-call { color: var(--accent-blue); font-weight: bold; font-family: 'Consolas', monospace; }
     .op-multi-line .op-ml-name { color: var(--text-secondary); margin-left: 4px; }
+    .op-multi-line .op-ml-ref { color: var(--accent-green); font-weight: bold; margin-left: 6px; }
+    .op-multi-line .op-ml-src { color: var(--text-dim); font-size: 10px; margin-left: 6px; letter-spacing: 0.5px; }
     /* 4+ ops: inline comma-separated */
     .op-crowd { font-size: 13px; line-height: 1.6; }
     .op-crowd-call { color: var(--accent-blue); font-weight: bold; font-family: 'Consolas', monospace; }
@@ -2688,6 +2690,13 @@ window.api.onTheme((p) => {
 const opInfoEl = document.getElementById('op-info');
 
 let _lastOpsPayload = null;
+// Short tag for where a spot came from, as the main table's source column names it.
+function opSourceLabel(source) {
+  const s = String(source || '').toLowerCase();
+  const names = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', wwbota: 'WWBOTA', gma: 'GMA', parc: 'PARC',
+    dxc: 'DXC', cluster: 'DXC', rbn: 'RBN', pskr: 'PSKR', 'cw-spots': 'CW', tiles: 'TILES' };
+  return names[s] || (s ? s.toUpperCase() : '');
+}
 function renderOpInfo(spot) {
   // Support new { ops: [...] } format and legacy single-spot format
   const ops = spot && spot.ops ? spot.ops : (spot && spot.callsign ? [spot] : []);
@@ -2745,9 +2754,14 @@ function renderOpInfo(spot) {
       }
     }
   } else if (n <= 3) {
-    // 2-3 ops: one line per op — callsign + name
+    // 2-3 ops: one line per op — callsign, park, where the spot came from,
+    // then the name (N0KAH 2026-10-01: with several ops on one frequency,
+    // which park and which spot source is each one?).
     for (const op of ops) {
       html += '<span class="op-multi-line"><span class="op-ml-call">' + esc(op.callsign) + '</span>';
+      if (op.reference) html += '<span class="op-ml-ref">' + esc(op.reference) + '</span>';
+      const src = opSourceLabel(op.source);
+      if (src) html += '<span class="op-ml-src">' + esc(src) + '</span>';
       if (op.displayName) html += '<span class="op-ml-name">' + esc(op.displayName) + '</span>';
       html += '</span>';
     }
