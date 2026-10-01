@@ -312,6 +312,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
@@ -16038,6 +16039,48 @@ async function probeOriginForTunnel() {
   return OriginHealth.decideOriginState({ tunnelEnabled: tunnel.enabled, tunnelStatus: tunnel.status, port, server, probe });
 }
 
+// --- Hidden spots: ONE list, here (K8IKO 2026-10-01) ---
+// The desktop window, ECHOCAT Web and the mobile app all render this list and
+// change it only through changeSpotHides(). null = forever (lib/spot-hides.js).
+function spotHidesNow() {
+  const r = SpotHides.pruneHides(SpotHides.normalizeHides(settings.spotHides), Date.now());
+  if (r.changed) { settings.spotHides = r.hides; saveSettings(settings); }
+  return r.hides;
+}
+// Skips sync too, but only as a "not now": memory only, gone at 0000Z and on
+// restart (the app's contract; Casey agreed 2026-10-01).
+let spotSkips = [];
+let spotSkipsDay = '';
+function spotSkipsNow() {
+  const day = new Date().toISOString().slice(0, 10);
+  if (day !== spotSkipsDay) { spotSkipsDay = day; spotSkips = []; }
+  return spotSkips;
+}
+function publishSpotHides() {
+  const hides = spotHidesNow();
+  const skips = spotSkipsNow();
+  if (win && !win.isDestroyed()) win.webContents.send('spot-hides', { hides, skips });
+  if (remoteServer) remoteServer.sendSpotHides(hides, skips);
+}
+function changeSpotSkips(call, frequency, skipped) {
+  const r = SpotHides.applySkip(spotSkipsNow(), call, frequency, !!skipped);
+  if (r.changed) spotSkips = r.skips;
+  publishSpotHides();
+}
+// At 0000Z the skips go everywhere at once, not at the next click.
+setInterval(() => {
+  const had = spotSkips.length;
+  spotSkipsNow();
+  if (had && !spotSkips.length) publishSpotHides();
+}, 60000);
+// Every op answers with a push, changed or not: the surface that asked
+// settles on the echo (and a refused or no-op request snaps back).
+function changeSpotHides(op) {
+  const r = op(spotHidesNow());
+  if (r.changed) { settings.spotHides = r.hides; saveSettings(settings); }
+  publishSpotHides();
+}
+
 function connectRemote() {
   disconnectRemote();
   if (!settings.enableRemote) return;
@@ -17101,6 +17144,15 @@ function connectRemote() {
   // Per-band region mutes edited from a client (mobile parity for the
   // desktop right-click flow). Sanitized, persisted, and echoed back inside
   // echo-filters so every surface converges on the accepted set.
+  remoteServer.on('hide-spot', ({ call, key, expiresAt }) => {
+    changeSpotHides((h) => SpotHides.applyHide(h, call, key, expiresAt === undefined ? null : expiresAt));
+  });
+  remoteServer.on('unhide-spot', ({ call, key }) => {
+    changeSpotHides((h) => SpotHides.applyUnhide(h, call, key));
+  });
+  remoteServer.on('skip-spot', ({ call, frequency, skipped }) => changeSpotSkips(call, frequency, skipped));
+  remoteServer.sendSpotHides(spotHidesNow(), spotSkipsNow()); // this server's hydrate copy
+
   remoteServer.on('set-spot-mute-rules', (rules) => {
     settings.spotMuteRules = normalizeMuteRules(rules);
     saveSettings(settings);
@@ -31863,6 +31915,21 @@ app.whenReady().then(() => {
 
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion() }));
+  // Hidden spots (see changeSpotHides). The window's pre-sync list lived in its
+  // localStorage; it is folded in once and then cleared there.
+  ipcMain.handle('spot-hides-get', () => ({ hides: spotHidesNow(), skips: spotSkipsNow(), migrated: !!settings.spotHidesMigrated }));
+  ipcMain.on('spot-skip', (_e, { call, frequency, skipped } = {}) => changeSpotSkips(call, frequency, skipped));
+  ipcMain.on('spot-hides-migrate', (_e, legacy) => {
+    if (settings.spotHidesMigrated) return;
+    settings.spotHidesMigrated = true;
+    changeSpotHides((h) => ({ hides: SpotHides.mergeHides(h, legacy), changed: true }));
+  });
+  ipcMain.on('spot-hide', (_e, { call, key, expiresAt } = {}) => {
+    changeSpotHides((h) => SpotHides.applyHide(h, call, key, expiresAt === undefined ? null : expiresAt));
+  });
+  ipcMain.on('spot-unhide', (_e, { call, key } = {}) => {
+    changeSpotHides((h) => SpotHides.applyUnhide(h, call, key));
+  });
 
   // Manual refresh for one watchlist group's Ham2K PoLo URL. Renderer
   // calls this from the Settings dialog's "Refresh" button so the user

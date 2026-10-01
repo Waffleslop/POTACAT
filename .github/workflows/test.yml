@@ -84,6 +84,8 @@ jobs:
         run: node test/lz3aw-round12-test.js
       - name: Run paddle contact bounce (one tap is one element, web and desktop keyers)
         run: node test/paddle-bounce-test.js
+      - name: Run spot hides/skips sync (one desktop-owned list for every surface)
+        run: node test/spot-hides-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)

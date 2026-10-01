@@ -294,6 +294,13 @@ contextBridge.exposeInMainWorld('api', {
   onWorkedQsos: (cb) => ipcRenderer.on('worked-qsos', (_e, data) => cb(data)),
   onWorkedParks: (cb) => ipcRenderer.on('worked-parks', (_e, data) => cb(data)),
   onSpotMuteRules: (cb) => ipcRenderer.on('spot-mute-rules', (_e, rules) => cb(rules)),
+  // Hidden spots: main owns the list (lib/spot-hides.js), every surface renders it.
+  getSpotHides: () => ipcRenderer.invoke('spot-hides-get'),
+  migrateSpotHides: (legacy) => ipcRenderer.send('spot-hides-migrate', legacy),
+  hideSpot: (call, key, expiresAt) => ipcRenderer.send('spot-hide', { call, key, expiresAt }),
+  unhideSpot: (call, key) => ipcRenderer.send('spot-unhide', { call, key }),
+  skipSpot: (call, frequency, skipped) => ipcRenderer.send('spot-skip', { call, frequency, skipped }),
+  onSpotHides: (cb) => ipcRenderer.on('spot-hides', (_e, state) => cb(state)), // { hides, skips }
   onCreditedParks: (cb) => ipcRenderer.on('credited-parks', (_e, refs) => cb(refs)),
   choosePotaParksFile: () => ipcRenderer.invoke('choose-pota-parks-file'),
   onWsjtxStatus: (cb) => ipcRenderer.on('wsjtx-status', (_e, s) => cb(s)),

@@ -184,46 +184,64 @@
   let scanIndex = 0;
   let scanTimer = null;
   let scanDwell = 7;
+  // Skip keys are callsign + TAB + frequency, as on the desktop. The set is
+  // the desktop's (spot-hides push, memory only, cleared at 0000Z), so a skip
+  // here shows on the desktop and in the app. scanForceUnskipped (un-skipping
+  // a WORKED spot) stays this page's own.
   var scanSkipped = new Set();
   var scanForceUnskipped = new Set();
+  function spotSkipKey(s) { return s.callsign + '\t' + s.frequency; }
 
-  // Hidden-by-band (CALLSIGN -> Set of band labels). Clicking the row Hide
-  // button adds the spot's band; spots on that band for that callsign are
-  // filtered out of the list until they reappear on a different band.
-  // Persisted so refreshes don't surface the same repeat-callers again.
+  // Hidden spots: the desktop's ONE list (lib/spot-hides.js), pushed as
+  // spot-hides on connect and after every change from any surface, so a hide
+  // made here, on the desktop or in the app shows everywhere (K8IKO
+  // 2026-10-01). { CALL: { '*' | whole kHz | 'band:20m': expiresAt|null } },
+  // null = forever. The row's H button is the band scope: hidden on this band
+  // until they QSY to another. The band hides this browser kept before sync
+  // are sent up once (first spot-hides), then removed.
   const ECHO_HIDDEN_KEY = 'echocat-hidden-bands';
-  var hiddenByBand = {};
-  try {
-    const raw = JSON.parse(localStorage.getItem(ECHO_HIDDEN_KEY) || '{}');
-    for (const k of Object.keys(raw)) {
-      if (Array.isArray(raw[k])) hiddenByBand[k] = new Set(raw[k]);
+  var spotHides = {};
+  // Mirrors isSpotHidden() in renderer/app.js (pinned by test/spot-hides-test.js).
+  function isSpotHiddenByList(call, freq, band) {
+    const entry = call && spotHides[String(call).toUpperCase()];
+    if (!entry) return false;
+    const now = Date.now();
+    const live = (exp) => exp === null || (typeof exp === 'number' && exp > now);
+    if ('*' in entry && live(entry['*'])) return true;
+    if (freq) {
+      const k = String(Math.round(parseFloat(freq)));
+      if (k in entry && live(entry[k])) return true;
     }
-  } catch { hiddenByBand = {}; }
-  function saveHiddenByBand() {
-    const out = {};
-    for (const k of Object.keys(hiddenByBand)) {
-      if (hiddenByBand[k].size > 0) out[k] = Array.from(hiddenByBand[k]);
-    }
-    try { localStorage.setItem(ECHO_HIDDEN_KEY, JSON.stringify(out)); } catch {}
+    if (band && ('band:' + band) in entry && live(entry['band:' + band])) return true;
+    return false;
   }
-  function isCallBandHidden(call, band) {
-    if (!call || !band) return false;
-    const set = hiddenByBand[call.toUpperCase()];
-    return !!(set && set.has(band));
+  function sendSpotHideOp(obj) {
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); } catch { /* not connected */ }
+  }
+  function adoptSpotHides(hides) {
+    spotHides = (hides && typeof hides === 'object') ? hides : {};
+    let legacy = null;
+    try { legacy = JSON.parse(localStorage.getItem(ECHO_HIDDEN_KEY) || 'null'); } catch { legacy = null; }
+    if (legacy && typeof legacy === 'object') {
+      for (const call of Object.keys(legacy)) {
+        if (!Array.isArray(legacy[call])) continue;
+        for (const band of legacy[call]) sendSpotHideOp({ type: 'hide-spot', call: call, key: 'band:' + band });
+      }
+      try { localStorage.removeItem(ECHO_HIDDEN_KEY); } catch {}
+    }
   }
   function toggleCallBandHidden(call, band) {
     if (!call || !band) return false;
-    const key = call.toUpperCase();
-    if (!hiddenByBand[key]) hiddenByBand[key] = new Set();
-    if (hiddenByBand[key].has(band)) {
-      hiddenByBand[key].delete(band);
-      if (hiddenByBand[key].size === 0) delete hiddenByBand[key];
-      saveHiddenByBand();
-      return false;
-    }
-    hiddenByBand[key].add(band);
-    saveHiddenByBand();
-    return true;
+    const c = call.toUpperCase();
+    const key = 'band:' + band;
+    const entry = Object.assign({}, spotHides[c] || {});
+    const hidden = key in entry;
+    // Applied here at once, then sent; the desktop's echo confirms it.
+    if (hidden) delete entry[key]; else entry[key] = null;
+    spotHides = Object.assign({}, spotHides);
+    if (Object.keys(entry).length) spotHides[c] = entry; else delete spotHides[c];
+    sendSpotHideOp(hidden ? { type: 'unhide-spot', call: c, key: key } : { type: 'hide-spot', call: c, key: key });
+    return !hidden;
   }
 
   // Refresh rate
@@ -1995,6 +2013,12 @@
         applyFilters(msg.data);
         break;
 
+      case 'spot-hides':
+        adoptSpotHides(msg.hides);
+        if (Array.isArray(msg.skips)) scanSkipped = new Set(msg.skips);
+        renderSpots();
+        break;
+
       case 'log-ok':
         logSaveBtn.disabled = false;
         ltSave.disabled = false;
@@ -2724,9 +2748,9 @@
       if (spotMatchesMuteRule(s)) return false;
       if (showNewOnly && !isNewPark(s)) return false;
       if (hideWorked && isWorkedSpot(s)) return false;
-      // Band-scoped hide (Hide button on each row). Drops out as soon as the
-      // spot appears on a different band.
-      if (isCallBandHidden(s.callsign, s.band)) return false;
+      // Hidden on the desktop's list: every spot of the call, this kHz, or
+      // this band (the row's H button; lifts when they QSY to another band).
+      if (isSpotHiddenByList(s.callsign, s.frequency, s.band)) return false;
       return true;
     });
     filtered.sort((a, b) => {
@@ -2792,7 +2816,7 @@
       const workedToday = isWorkedSpot(s);
       const workedEver = !workedToday && hasWorkedOnBandMode(s);
       const workedClass = workedToday ? ' worked-today' : workedEver ? ' worked' : '';
-      const isSkipped = scanSkipped.has(s.frequency) || (workedToday && !scanForceUnskipped.has(s.frequency));
+      const isSkipped = scanSkipped.has(spotSkipKey(s)) || (workedToday && !scanForceUnskipped.has(spotSkipKey(s)));
       const skipClass = isSkipped ? ' scan-skipped' : '';
       const workedCheck = (workedToday || workedEver) ? '<span class="worked-check">\u2713</span>' : '';
       const refClass = s.source === 'sota' ? 'sota' : s.source === 'dxc' ? 'dxc' : '';
@@ -2806,7 +2830,7 @@
       const srcLabel = src.toUpperCase();
       const newBadge = newPark ? '<span class="new-badge">N</span>' : '';
       const logBtn = isNet ? '<span class="spot-btn-empty"></span>' : '<button type="button" class="spot-log-btn">L</button>';
-      const skipBtn = isNet ? '<span class="spot-btn-empty"></span>' : `<button type="button" class="spot-skip-btn" data-skipfreq="${s.frequency}">${isSkipped ? 'U' : 'S'}</button>`;
+      const skipBtn = isNet ? '<span class="spot-btn-empty"></span>' : `<button type="button" class="spot-skip-btn" data-skipfreq="${esc(String(s.frequency))}" data-skipcall="${esc(s.callsign)}">${isSkipped ? 'U' : 'S'}</button>`;
       const hideBtn = (isNet || !s.band)
         ? '<span class="spot-btn-empty"></span>'
         : `<button type="button" class="spot-hide-btn" data-hidecall="${esc(s.callsign)}" data-hideband="${esc(s.band)}" title="Hide ${esc(s.callsign)} on ${esc(s.band)} until QSY">H</button>`;
@@ -3048,14 +3072,18 @@
   spotList.addEventListener('click', (e) => {
     const skipTarget = e.target.closest('.spot-skip-btn');
     if (skipTarget) {
+      const call = skipTarget.dataset.skipcall;
       const freq = skipTarget.dataset.skipfreq;
-      if (scanSkipped.has(freq)) {
-        scanSkipped.delete(freq);
-        scanForceUnskipped.add(freq);
+      const key = call + '\t' + freq;
+      const skipped = !scanSkipped.has(key);
+      if (!skipped) {
+        scanSkipped.delete(key);
+        scanForceUnskipped.add(key);
       } else {
-        scanSkipped.add(freq);
-        scanForceUnskipped.delete(freq);
+        scanSkipped.add(key);
+        scanForceUnskipped.delete(key);
       }
+      sendSpotHideOp({ type: 'skip-spot', call: call, frequency: freq, skipped: skipped });
       renderSpots();
       return;
     }
@@ -5550,9 +5578,9 @@
   function scanStep() {
     if (!scanning) return;
     const list = getFilteredSpots().filter(function(s) {
-      if (scanSkipped.has(s.frequency)) return false;
+      if (scanSkipped.has(spotSkipKey(s))) return false;
       var workedToday = isWorkedSpot(s);
-      if (workedToday && !scanForceUnskipped.has(s.frequency)) return false;
+      if (workedToday && !scanForceUnskipped.has(spotSkipKey(s))) return false;
       return true;
     });
     if (!list.length) { stopScan(); return; }

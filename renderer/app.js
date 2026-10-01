@@ -208,18 +208,41 @@ let enableBandActivity = false;
 let licenseClass = 'none';
 let hideOutOfBand = false;
 let showHiddenSpots = false;
-// Hidden spots: { CALLSIGN: { "*": expiryMs, "14074": expiryMs, ... } }
-// Legacy compat: bare number values are treated as { "*": expiry }
+// Hidden spots: { CALLSIGN: { "*": expiryMs, "14074": expiryMs, "band:20m": ... } }
+// A VIEW of main's list (lib/spot-hides.js), which ECHOCAT Web and the mobile
+// app render too: changes go to main, main pushes the list back (K8IKO
+// 2026-10-01). Main sends null for forever; this window keeps Infinity.
+// The old localStorage copy is folded into main's once, then removed: it
+// stored Infinity as null, which the prune below read as expired, so a
+// "Hide forever" here never survived a restart.
 const HIDDEN_SPOTS_KEY = 'pota-cat-hidden-spots';
 let hiddenSpots = {};
-try { hiddenSpots = JSON.parse(localStorage.getItem(HIDDEN_SPOTS_KEY)) || {}; } catch { hiddenSpots = {}; }
-// Migrate legacy format (bare number/Infinity -> { "*": value })
-for (const call of Object.keys(hiddenSpots)) {
-  if (typeof hiddenSpots[call] === 'number' || hiddenSpots[call] === Infinity) {
-    hiddenSpots[call] = { '*': hiddenSpots[call] };
+function adoptSpotHides(hides) {
+  const out = {};
+  for (const [call, entry] of Object.entries(hides || {})) {
+    out[call] = {};
+    for (const [key, exp] of Object.entries(entry || {})) out[call][key] = exp === null ? Infinity : exp;
   }
+  hiddenSpots = out;
 }
-function saveHiddenSpots() { localStorage.setItem(HIDDEN_SPOTS_KEY, JSON.stringify(hiddenSpots)); }
+if (window.api.getSpotHides) {
+  window.api.getSpotHides().then(({ hides, skips, migrated }) => {
+    if (!migrated) {
+      let legacy = {};
+      try { legacy = JSON.parse(localStorage.getItem(HIDDEN_SPOTS_KEY)) || {}; } catch { legacy = {}; }
+      window.api.migrateSpotHides(legacy);
+      try { localStorage.removeItem(HIDDEN_SPOTS_KEY); } catch { /* ignore */ }
+    }
+    adoptSpotHides(hides);
+    adoptSpotSkips(skips);
+    if (typeof render === 'function') render();
+  }).catch(() => {});
+  window.api.onSpotHides((state) => {
+    adoptSpotHides(state && state.hides);
+    adoptSpotSkips(state && state.skips);
+    if (typeof render === 'function') render();
+  });
+}
 function pruneHiddenSpots() {
   const now = Date.now();
   let changed = false;
@@ -230,7 +253,7 @@ function pruneHiddenSpots() {
     }
     if (Object.keys(entry).length === 0) { delete hiddenSpots[call]; changed = true; }
   }
-  if (changed) saveHiddenSpots();
+  return changed; // main prunes its own copy; this only tidies the view
 }
 function isSpotHidden(callsign, freqStr, band) {
   const entry = hiddenSpots[callsign.toUpperCase()];
@@ -254,15 +277,23 @@ function isSpotHidden(callsign, freqStr, band) {
   }
   return false;
 }
+// Applied here at once (no flicker), then sent to main, whose push confirms it.
 function hideSpotEntry(callsign, freqKey, expiry) {
   const call = callsign.toUpperCase();
   if (!hiddenSpots[call]) hiddenSpots[call] = {};
   hiddenSpots[call][freqKey] = expiry;
-  saveHiddenSpots();
+  if (window.api.hideSpot) window.api.hideSpot(call, freqKey, expiry === Infinity ? null : expiry);
 }
-function unhideSpot(callsign) {
-  delete hiddenSpots[callsign.toUpperCase()];
-  saveHiddenSpots();
+// Without a key: every scope of the call ("Unhide (all)").
+function unhideSpot(callsign, key) {
+  const call = callsign.toUpperCase();
+  if (key && hiddenSpots[call]) {
+    delete hiddenSpots[call][key];
+    if (Object.keys(hiddenSpots[call]).length === 0) delete hiddenSpots[call];
+  } else {
+    delete hiddenSpots[call];
+  }
+  if (window.api.unhideSpot) window.api.unhideSpot(call, key || undefined);
 }
 function hiddenSpotCount() {
   pruneHiddenSpots();
@@ -639,7 +670,10 @@ let remoteScanning = false; // ECHOCAT mobile's scan engine is running (scan-sta
 let scanTimer = null;
 let scanIndex = 0;
 let scanJustWrapped = false; // wrap-to-top: next scanning render jumps the scroller to the top
-let scanSkipped = new Set(); // "callsign\tfrequency" keys to skip
+// "callsign\tfrequency" keys to skip. Main's list (shared with ECHOCAT, memory
+// only, cleared at 0000Z): the Skip button asks main, and main's push lands here.
+let scanSkipped = new Set();
+function adoptSpotSkips(skips) { if (Array.isArray(skips)) scanSkipped = new Set(skips); }
 // Frequencies dwelled on in the current pass through the scan list. Lets us
 // skip a second 14304 spot lower in the list when we already dwelled on an
 // earlier 14304 spot this cycle (atvfool issue #23). Cleared when the pass
@@ -13168,6 +13202,9 @@ function render() {
           scanSkipped.add(spotSkipKey);
           scanForceUnskipped.delete(spotSkipKey);
         }
+        // Shared with ECHOCAT (main's echo confirms it). scanForceUnskipped,
+        // un-skipping a WORKED spot, stays this window's own.
+        if (window.api.skipSpot) window.api.skipSpot(s.callsign, String(s.frequency), !isSkipped);
         if (scanning) {
           if (skippingActive) {
             // Skipping the row we're dwelling on: tune the next spot now and
@@ -13218,11 +13255,7 @@ function render() {
         const bandKey = 'band:' + s.band;
         if (isBandHidden) {
           // Drop just the band entry; leave any other scopes the user set
-          if (hiddenSpots[callKey]) {
-            delete hiddenSpots[callKey][bandKey];
-            if (Object.keys(hiddenSpots[callKey]).length === 0) delete hiddenSpots[callKey];
-            saveHiddenSpots();
-          }
+          unhideSpot(callKey, bandKey);
         } else {
           hideSpotEntry(callKey, bandKey, Infinity);
         }
