@@ -183,5 +183,36 @@ test('the web client hides the "today only" banner when the full history arrives
   assert.ok(/spot-worked-note[\s\S]{0,80}classList\.add\('hidden'\)/.test(h), 'banner never hidden');
 });
 
+// K8IKO 2026-10-01: a station logged at the desktop never dimmed in ECHOCAT.
+// main.js sends [...workedQsos.entries()] — [call, logs] tuples — and the
+// worked-today summary read .callsign/.date off the tuple, so it was empty
+// on every send.
+function utcDay(ms) {
+  const d = new Date(ms);
+  return d.getUTCFullYear() + String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
+}
+
+test('worked-today reads the [call, logs] tuples main.js actually sends', () => {
+  const srv = Object.create(RemoteServer.prototype);
+  const today = utcDay(Date.now());
+  const worked = new Map([
+    ['K1ABC', [{ date: today, ref: 'US-1234', band: '20M', mode: 'CW' }, { date: '20200101', ref: '', band: '40M', mode: 'SSB' }]],
+    ['W2XYZ', [{ date: '20200101', ref: '', band: '20M', mode: 'FT8' }]],
+  ]);
+  srv._workedQsos = [...worked.entries()];
+  srv._workedTodayCache = null;
+  const out = srv._buildWorkedTodaySummary();
+  assert.deepStrictEqual(out, [{ call: 'K1ABC', ref: 'US-1234', band: '20M', mode: 'CW', date: today }]);
+});
+
+test('worked-today is rebuilt after UTC midnight, not served from yesterday\'s cache', () => {
+  const srv = Object.create(RemoteServer.prototype);
+  const today = utcDay(Date.now());
+  srv._workedQsos = [['K1ABC', [{ date: today, ref: '', band: '20M', mode: 'CW' }]]];
+  srv._workedTodayCache = [{ call: 'OLD1', ref: '', band: '20M', mode: 'CW', date: '20200101' }];
+  srv._workedTodayCacheDay = '20200101';
+  assert.deepStrictEqual(srv._buildWorkedTodaySummary().map((e) => e.call), ['K1ABC']);
+});
+
 console.log(`\nWorked-QSOs chunking: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
