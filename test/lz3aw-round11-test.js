@@ -7,6 +7,7 @@
 //   / "Split and VFO switching still are showing with big delay." / "TX audio
 //    on the meters bar line on WEB ... shows nothing."
 // Run: node test/lz3aw-round11-test.js
+require('./ws-stub-if-missing');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');

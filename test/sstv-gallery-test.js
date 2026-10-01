@@ -9,6 +9,7 @@
 // empty gallery for six weeks. The scope guard below fails the build if any
 // function the gallery handlers call is not declared at module scope.
 // Run: node test/sstv-gallery-test.js
+require('./ws-stub-if-missing');
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');

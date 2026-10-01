@@ -15,6 +15,7 @@ const { KenwoodCodec } = require('../lib/codecs/kenwood-codec');
 const { RigController } = require('../lib/rig-controller');
 const { RIG_MODELS } = require('../lib/rig-models');
 const { CwKeyPlayout } = require('../lib/cw-key-playout');
+require('./ws-stub-if-missing');
 const { RemoteServer } = require('../lib/remote-server');
 const P = require('../lib/echocat-protocol');
 const { EventEmitter } = require('events');
