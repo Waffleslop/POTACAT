@@ -15,7 +15,7 @@
 // tolerance, because decode tolerance is exactly what made this invisible.
 'use strict';
 const assert = require('assert');
-const { classifyClockOffset, CLOCK_OK_MS, CLOCK_BAD_MS } = require('../lib/ntp');
+const { classifyClockOffset, CLOCK_OK_MS, CLOCK_BAD_MS, pickOffset } = require('../lib/ntp');
 
 let passed = 0;
 function t(name, fn) { fn(); passed++; console.log(`  ok - ${name}`); }
@@ -117,6 +117,56 @@ t('a fresh measurement is reused across engine rebuilds instead of re-querying N
   assert.ok(body.includes('broadcastJtcatClock(jtcatLastClock)'), 'a rebuilt popout never receives the last reading');
   assert.ok(body.includes("level !== 'unknown'"), 'a failed NTP query is reused instead of retried');
   assert.ok(body.includes('setInterval(runJtcatClockCheck'), 'the periodic poll is not armed');
+});
+
+console.log('\npickOffset() (KC1SSY: warnings on a clock Dimension 4 keeps synced)');
+
+t('a reply that waited is not believed over the fast ones', () => {
+  // Three fast servers say +40 ms; one reply sat 900 ms and reads -410 ms.
+  const r = pickOffset([
+    { server: 'a', offset: 40, roundtrip: 20 },
+    { server: 'b', offset: 38, roundtrip: 15 },
+    { server: 'c', offset: -410, roundtrip: 900 },
+    { server: 'd', offset: 42, roundtrip: 60 },
+  ]);
+  assert.strictEqual(r.used, 3);
+  assert.strictEqual(r.offset, 40);
+  assert.strictEqual(classifyClockOffset(r.offset), 'ok');
+});
+
+t('two slow replies cannot outvote the fast ones (the old median of all four could)', () => {
+  const r = pickOffset([
+    { server: 'a', offset: 30, roundtrip: 10 },
+    { server: 'b', offset: 35, roundtrip: 12 },
+    { server: 'c', offset: -600, roundtrip: 1300 },
+    { server: 'd', offset: -650, roundtrip: 1400 },
+  ]);
+  assert.ok(Math.abs(r.offset) < CLOCK_OK_MS, 'got ' + r.offset);
+});
+
+t('a clock that really is off still reads off, whatever the round trips', () => {
+  const r = pickOffset([
+    { server: 'a', offset: 1520, roundtrip: 20 },
+    { server: 'b', offset: 1490, roundtrip: 25 },
+    { server: 'c', offset: 1510, roundtrip: 30 },
+  ]);
+  assert.strictEqual(classifyClockOffset(r.offset), 'bad');
+});
+
+t('failed servers are skipped; none answering is null', () => {
+  assert.strictEqual(pickOffset([{ server: 'a', error: 'timeout' }]), null);
+  assert.strictEqual(pickOffset([{ server: 'a', error: 'x' }, { server: 'b', offset: 12, roundtrip: 9 }]).offset, 12);
+});
+
+t('the query stamps t1 at the send, after DNS (slow DNS read as a slow clock)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'ntp.js'), 'utf8');
+  assert.ok(/dns\.lookup\(server/.test(src), 'no DNS lookup before the query');
+  assert.ok(/t1 = Date\.now\(\);\s*socket\.send\(packet, 0, 48, NTP_PORT, address/.test(src), 't1 is not stamped at the send to the resolved address');
+});
+
+t('a warning line carries every server reading', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/Readings: \$\{jtcatLastClock\.readings\}/.test(src));
 });
 
 console.log(`\n${passed} passed`);

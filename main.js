@@ -12194,7 +12194,12 @@ async function runJtcatClockCheck() {
   try {
     const res = await checkClockOffset();
     const level = classifyClockOffset(res.offset);
-    jtcatLastClock = { offsetMs: res.offset, server: res.server, level, ok: level === 'ok', checkedAt: Date.now() };
+    // Every server's answer, for the log: a warning on a PC that something
+    // else keeps synced (KC1SSY, Dimension 4) is then readable from one line.
+    const readings = (res.results || []).map((r) => r.error
+      ? `${r.server} no reply`
+      : `${r.server} ${r.offset >= 0 ? '+' : ''}${(r.offset / 1000).toFixed(2)}s (rtt ${r.roundtrip} ms)`).join(', ');
+    jtcatLastClock = { offsetMs: res.offset, server: res.server, level, ok: level === 'ok', checkedAt: Date.now(), readings };
   } catch (e) {
     // NTP unreachable (offline, firewall). Don't claim the clock is bad —
     // just report unknown so we don't nag a user whose clock is actually fine.
@@ -12228,7 +12233,8 @@ async function runJtcatClockCheck() {
     } else {
       sendCatLog(`[Clock] PC clock is ${(off / 1000).toFixed(2)}s off UTC (${jtcatLastClock.server}) — ` +
         'stations you call will not decode you, so nobody answers. Your own decoding still works, ' +
-        'which is why this looks like a dead band or a bad antenna.');
+        'which is why this looks like a dead band or a bad antenna.' +
+        (jtcatLastClock.readings ? ` Readings: ${jtcatLastClock.readings}.` : ''));
       offerClockFix(jtcatLastClock);
     }
   }
