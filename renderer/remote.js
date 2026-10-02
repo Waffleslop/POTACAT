@@ -8548,16 +8548,26 @@
       ditLatch = false; dahLatch = false;
       onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
       clearTimers();
+      timerDue = performance.now() + (isDit ? ditMs() : dahMs());
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
+    }
+    // How late each timer fires (the page's main thread is busy): reported to
+    // the desktop log per over (cw-diag, LZ3AW 2026-10-02).
+    var timerDue = 0;
+    function noteTimerLate() {
+      if (typeof cwDiagNote === 'function') cwDiagNote('timer', performance.now() - timerDue);
     }
     function onToneEnd() {
       toneTimer = null;
+      noteTimerLate();
       onKey(false, 0); // the scheduled element already ends itself
       state = IES;
+      timerDue = performance.now() + ditMs();
       iesTimer = setTimeout(onIesEnd, ditMs());
     }
     function onIesEnd() {
       iesTimer = null;
+      noteTimerLate();
       var oppLatch = currentIsDit ? dahLatch : ditLatch;
       var oppDown  = currentIsDit ? dahPressed : ditPressed;
       var sameLatch = currentIsDit ? ditLatch : dahLatch;
@@ -8659,6 +8669,48 @@
     g.setValueAtTime(cwSidetoneVol, t + dur - ramp);
     g.linearRampToValueAtTime(0, t + dur);
     paddleNextAt = t + dur + ditSec;
+    return (t - now) * 1000; // how far ahead of the keyer's choice it sounds
+  }
+
+  // --- Paddle timing diagnostic (LZ3AW 2026-10-02) ---
+  // He hears extra dots and dashes in this page's own sidetone, in iambic A
+  // and B alike, while typed CW is perfect. The keyer chooses each element on
+  // its timers; the operator releases on what he HEARS. If the sound arrives
+  // well after the choice (scheduling lead + the device's output latency, a
+  // Bluetooth headset adds 150-250 ms) or the timers fire late (a busy page),
+  // he releases late and the keyer honestly sends one more. One line per
+  // over in the desktop log says which: cw-diag, sent after 1.5 s of quiet.
+  var cwDiag = null, cwDiagTimer = null;
+  function cwDiagNote(kind, ms) {
+    ms = Math.max(0, Number(ms) || 0);
+    if (!cwDiag) cwDiag = { elements: 0, timerMax: 0, timerSum: 0, timerN: 0, inputMax: 0, aheadMax: 0, aheadSum: 0 };
+    if (kind === 'timer') { cwDiag.timerMax = Math.max(cwDiag.timerMax, ms); cwDiag.timerSum += ms; cwDiag.timerN++; }
+    else if (kind === 'input') cwDiag.inputMax = Math.max(cwDiag.inputMax, ms);
+    else if (kind === 'ahead') { cwDiag.elements++; cwDiag.aheadMax = Math.max(cwDiag.aheadMax, ms); cwDiag.aheadSum += ms; }
+    if (cwDiagTimer) clearTimeout(cwDiagTimer);
+    cwDiagTimer = setTimeout(sendCwDiag, 1500);
+  }
+  function noteCwInputLag(e) {
+    // Event.timeStamp and performance.now() share the page's time origin.
+    if (e && e.timeStamp > 0) cwDiagNote('input', performance.now() - e.timeStamp);
+  }
+  function sendCwDiag() {
+    cwDiagTimer = null;
+    const d = cwDiag;
+    cwDiag = null;
+    if (!d || !d.elements) return;
+    const outMs = cwAudioCtx ? Math.round(((cwAudioCtx.baseLatency || 0) + (cwAudioCtx.outputLatency || 0)) * 1000) : 0;
+    try {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({
+        type: 'cw-diag', elements: d.elements, wpm: cwWpm,
+        soundAfterChoiceMaxMs: Math.round(d.aheadMax + outMs),
+        soundAfterChoiceAvgMs: Math.round(d.aheadSum / d.elements + outMs),
+        outputLatencyMs: outMs,
+        timerLateMaxMs: Math.round(d.timerMax),
+        timerLateAvgMs: d.timerN ? Math.round(d.timerSum / d.timerN) : 0,
+        inputLagMaxMs: Math.round(d.inputMax),
+      }));
+    } catch { /* not connected */ }
   }
   function cancelPaddleTones() {
     if (paddleGain && cwAudioCtx) {
@@ -8697,7 +8749,7 @@
     ws.send(JSON.stringify(msg));
   }
   var localCwKeyer = createLocalCwKeyer(function(down, durMs, info) {
-    if (durMs) { sendCwKeyStream(true, durMs, info); schedulePaddleElement(durMs); return; } // iambic element
+    if (durMs) { sendCwKeyStream(true, durMs, info); cwDiagNote('ahead', schedulePaddleElement(durMs)); return; } // iambic element
     if (durMs === 0) return;                              // its end is already scheduled
     // Straight key, or a keyer stop/mode change.
     sendCwKeyStream(down, 0, info);
@@ -9612,6 +9664,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       logPaddleDrop('cwPaddleAvailable is false (desktop has determined paddle keying can\'t reach the radio — see verbose log for cause)');
       return;
     }
+    noteCwInputLag(e);
     if (contact === 'dit') {
       e.preventDefault();
       if (!ditDown) { ditDown = true; sendPaddle('dit', 1); }
@@ -9625,6 +9678,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (!cwAvailable) return;
     if (isInputFocused()) return;
     var contact = matchPaddleKey(e);
+    if (contact) noteCwInputLag(e);
     if (contact === 'dit') {
       e.preventDefault();
       ditDown = false;
@@ -9678,6 +9732,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   }
 
   function ecHandleMidiMessage(msg) {
+    noteCwInputLag(msg);
     var data = msg.data;
     var status = data[0];
     var note = data[1];

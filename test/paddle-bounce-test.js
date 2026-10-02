@@ -68,6 +68,39 @@ for (const [kname, make] of [['web keyer', webKeyer], ['desktop keyer', deskKeye
   }
 }
 
+// LZ3AW 2026-10-02: still extra elements on 1.11.2. Before changing the keyer
+// again, measure it: cw-diag reports how long after the keyer chose each
+// element the operator heard it, and how late its timers and inputs ran.
+cases.push(['cw-diag: the web keyer reports each timer and element when the diagnostic is present', async () => {
+  const notes = [];
+  // eslint-disable-next-line no-new-func
+  const create = new Function('cwDiagNote', webSrc + '; return createLocalCwKeyer;')((kind, ms) => notes.push([kind, ms]));
+  const k = create(() => {});
+  k.setWpm(WPM);
+  k.paddleDit(true); await sleep(40); k.paddleDit(false); await sleep(300); k.stop();
+  assert.ok(notes.filter((n) => n[0] === 'timer').length >= 2, 'tone end and space end not measured: ' + JSON.stringify(notes));
+  assert.ok(notes.every((n) => n[1] >= -5), 'a timer reported as early');
+  const web2 = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  assert.ok(/cwDiagNote\('ahead', schedulePaddleElement\(durMs\)\)/.test(web2), 'the sound lead is not measured');
+  assert.ok(/noteCwInputLag\(e\);/.test(web2) && /noteCwInputLag\(msg\);/.test(web2), 'keyboard and MIDI input lag not measured');
+}]);
+
+cases.push(['cw-diag: the desktop logs one line per over, at most every 3 s', async () => {
+  require('./ws-stub-if-missing');
+  const { RemoteServer } = require('../lib/remote-server');
+  const rs = Object.create(RemoteServer.prototype);
+  require('events').EventEmitter.call(rs);
+  const logs = [];
+  rs.on('log', (m) => logs.push(m));
+  const ws = { _authenticated: true, readyState: 1 };
+  rs._client = ws;
+  const msg = { type: 'cw-diag', elements: 12, wpm: 25, soundAfterChoiceAvgMs: 61, soundAfterChoiceMaxMs: 95, outputLatencyMs: 41, timerLateAvgMs: 3, timerLateMaxMs: 17, inputLagMaxMs: 9 };
+  rs._handleMessage(ws, msg);
+  rs._handleMessage(ws, msg);
+  assert.strictEqual(logs.length, 1, JSON.stringify(logs));
+  assert.ok(/12 elements at 25 wpm/.test(logs[0]) && /61 ms on average \(worst 95 ms\)/.test(logs[0]) && /41 ms of it the device's audio output/.test(logs[0]), logs[0]);
+}]);
+
 (async () => {
   let passed = 0, failed = 0;
   console.log('Paddle contact bounce');
