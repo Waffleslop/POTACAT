@@ -129,25 +129,30 @@ test('old full-size SSTV template photos are shrunk at start-up (880 KB settings
   assert.ok(/t\.updatedAt = Date\.now\(\)/.test(b), 'an edit the cloud merge adopts');
 });
 
-console.log('=== #4 (round 13) a receive report inside a CW hold is logged ===');
+console.log('=== #4 (round 13) an RX readback inside POTACAT\'s own CW keying ===');
 
-test('the radio reporting RX mid CW hold is logged, at most every 10 s', () => {
+test('a key-line hold survives a stale RX readback; the S-meter is not fed the power bar', () => {
   const { rig, codec } = rig480();
   rig._debug = true; // main.js sets this on every controller
   const logs = [];
   rig.on('log', (m) => logs.push(m));
-  rig.noteTransmitting(3000);
-  codec.emit('ptt', false);            // full break-in: RX between elements
-  rig.noteTransmitting(3000);          // the next element re-arms
-  codec.emit('ptt', false);
-  const said = logs.filter((m) => /radio reported receive \d+ ms before POTACAT's CW hold ended/.test(m));
-  assert.strictEqual(said.length, 1, 'not once per element: ' + JSON.stringify(logs));
+  rig.noteTransmitting(3000);          // DTR text: POTACAT keys the line
+  codec.emit('ptt', false);            // LZ3AW 1.11.2: a reply from just before key-down
+  assert.strictEqual(rig._transmitting, true, 'the hold ended on a stale readback');
+  assert.ok(rig._cwHoldTimer, 'the hold timer was cancelled');
+  assert.strictEqual(codec._txHint, true, 'the codec was told RX mid-over');
+  codec.emit('ptt', false);            // and again, still said once
+  const said = logs.filter((m) => /radio reported receive \d+ ms before POTACAT finishes keying/.test(m));
+  assert.strictEqual(said.length, 1, JSON.stringify(logs));
   rig._cancelCwHold();
-  rig._cwHoldRxLoggedAt -= 11000;      // 11 s later, a new over
-  rig.noteTransmitting(3000);
+});
+
+test('the radio\'s own KY buffer still ends its hold on an RX readback', () => {
+  const { rig, codec } = rig480();
+  rig.noteTransmitting(3000, { queue: true });
   codec.emit('ptt', false);
-  assert.strictEqual(logs.filter((m) => /radio reported receive/.test(m)).length, 2);
-  rig._cancelCwHold();
+  assert.strictEqual(rig._transmitting, false);
+  assert.ok(!rig._cwHoldTimer);
 });
 
 console.log(`\nLZ3AW round 12: ${passed} passed, ${failed} failed`);
