@@ -34437,7 +34437,28 @@ app.whenReady().then(() => {
     return { success: true, sent, total: rawQsos.length };
   });
 
-  ipcMain.handle('test-serial-cat', async (_e, config) => {
+  // Every connection test below disconnects the live link to free the port
+  // and, until 2026-10-02, never put it back: a PASSING test was followed by
+  // "Radio not connected - check the USB/serial link" until Settings were
+  // saved, which reads as "the test lied" (KF0TDB, FT-991A). After the test,
+  // pass or fail, reconnect the SAVED rig, once the test has let go of the
+  // port. (test-hamlib restores its own rigctld.)
+  const handleCatTest = (name, label, fn) => ipcMain.handle(name, async (e, config) => {
+    try { return await fn(e, config); }
+    finally {
+      // Not awaited: the operator sees the result now, the reconnect follows.
+      // A serial test waits for Windows to really release the port first
+      // (waitForSerialPortFree, the K5AWJ race).
+      const testedPath = config && (config.portPath || config.path);
+      (async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        if (testedPath) await waitForSerialPortFree(testedPath, 3000);
+        if (settings.catTarget || (settings.rigs || []).some((r) => r && r.catTarget)) connectCatSafe(label + ' finished');
+      })().catch(() => {});
+    }
+  });
+
+  handleCatTest('test-serial-cat', 'serial CAT test', async (_e, config) => {
     const { portPath, baudRate, dtrOff } = config;
     const { SerialPort } = require('serialport');
 
@@ -34522,7 +34543,7 @@ app.whenReady().then(() => {
     });
   });
 
-  ipcMain.handle('test-icom-civ', async (_e, config) => {
+  handleCatTest('test-icom-civ', 'Icom CI-V test', async (_e, config) => {
     const { portPath, baudRate, civAddress } = config;
     const { SerialPort } = require('serialport');
 
@@ -34617,7 +34638,7 @@ app.whenReady().then(() => {
     });
   });
 
-  ipcMain.handle('test-civ-tcp', async (_e, config) => {
+  handleCatTest('test-civ-tcp', 'CI-V over TCP test', async (_e, config) => {
     const { host, port, civAddress } = config || {};
 
     // Temporarily disconnect live CAT to avoid two clients driving the rig.
@@ -34667,7 +34688,7 @@ app.whenReady().then(() => {
     });
   });
 
-  ipcMain.handle('test-icom-network', async (_e, config) => {
+  handleCatTest('test-icom-network', 'Icom network test', async (_e, config) => {
     const { host, controlPort, civPort, username, password, civAddress } = config || {};
 
     if (!String(host || '').trim()) {

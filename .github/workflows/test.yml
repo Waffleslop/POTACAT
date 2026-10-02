@@ -90,6 +90,8 @@ jobs:
         run: node test/mac-titlebar-test.js
       - name: Run VFO card and worked grey-out (N0KAH, KC1SSY)
         run: node test/vfo-and-greyout-test.js
+      - name: Run Test Connection restores the live link (KF0TDB)
+        run: node test/test-connection-restore-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)
