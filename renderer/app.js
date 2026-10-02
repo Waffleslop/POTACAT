@@ -23512,6 +23512,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   const ft8brEl = document.getElementById('welcome-enable-ft8br');
   const ft8brChecked = ft8brEl ? ft8brEl.checked : false;
   const lightModeEnabled = welcomeLightMode.checked;
+  const telemetryEl = document.getElementById('welcome-enable-telemetry');
   const qrzUser = (document.getElementById('welcome-qrz-user')?.value || '').trim().toUpperCase();
   const qrzPass = document.getElementById('welcome-qrz-pass')?.value || '';
   const currentSettings = await window.api.getSettings();
@@ -23535,6 +23536,9 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     lastVersion: currentSettings.appVersion,
     lightMode: lightModeEnabled,
   };
+  // Usage statistics: ticked by default on a new install, the operator's
+  // own choice when the welcome screen is reopened (see main.js telemetry).
+  if (telemetryEl) saveData.enableTelemetry = telemetryEl.checked;
   // Only set QRZ if user filled it in (don't overwrite existing with blank)
   if (qrzUser) {
     saveData.qrzUsername = qrzUser;
@@ -23884,6 +23888,9 @@ async function checkFirstRun(force = false) {
       // attribute handles that); on re-open we reflect whatever the user
       // has saved — `!== false` so undefined stays ON.
       document.getElementById('welcome-enable-auto-sstv').checked = s.enableAutoSstv !== false;
+      // Telemetry: a new install's settings carry enableTelemetry: true; an
+      // older install that never chose has it unset, which stays unticked.
+      { const t = document.getElementById('welcome-enable-telemetry'); if (t) t.checked = s.enableTelemetry === true; }
       document.getElementById('welcome-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
       // Idle-RX mode (WSPR or SSTV) + WSPR band options on the welcome screen
       (function () {

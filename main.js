@@ -730,7 +730,7 @@ function loadSettings() {
     // and navy stays one click away. Idle receive mode is WSPR (Casey
     // 2026-09-25). Written here, not as read-side fallbacks, so installs that
     // never chose keep what they have been looking at: dark navy, SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', lightMode: true, darkVariant: 'charcoal', idleRxMode: 'wspr' };
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', lightMode: true, darkVariant: 'charcoal', idleRxMode: 'wspr', enableTelemetry: true };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
@@ -24575,7 +24575,13 @@ ipcMain.handle('get-release-notes', async (_event, version) => {
   });
 });
 
-// --- Anonymous telemetry (opt-in only) ---
+// --- Anonymous telemetry ---
+// On by default for NEW installs only (Casey 2026-10-01): the fresh-install
+// settings above set enableTelemetry, and the welcome screen shows it as a
+// ticked box the operator can untick. An existing install that never chose
+// has it unset, and unset stays off. Settings > "Share anonymous usage
+// statistics" turns it off at any time. Sends a random ID, version, OS and
+// session length; never callsign, location, contacts or IP-linked records.
 const TELEMETRY_URL = 'https://telemetry.potacat.com/ping';
 let sessionStartTime = Date.now();
 let lastActivityTime = Date.now(); // tracks meaningful user actions for active/idle detection
@@ -24999,8 +25005,14 @@ function postLlotaRespot(spotData) {
   });
 }
 
+// Nothing goes out while the welcome screen is up (firstRun): that is where a
+// new install sees the ticked box and can untick it before anything is sent.
+function telemetryAllowed() {
+  return !!(settings && settings.enableTelemetry && !settings.firstRun);
+}
+
 function sendTelemetry(sessionSeconds) {
-  if (!settings || !settings.enableTelemetry) return Promise.resolve();
+  if (!telemetryAllowed()) return Promise.resolve();
   if (!settings.telemetryId) {
     settings.telemetryId = generateTelemetryId();
     saveSettings(settings);
@@ -25030,7 +25042,7 @@ function sendTelemetry(sessionSeconds) {
 }
 
 function trackTelemetryEvent(endpoint, source) {
-  if (!settings || !settings.enableTelemetry) return;
+  if (!telemetryAllowed()) return;
   const https = require('https');
   const payload = source ? JSON.stringify({ source }) : '';
   const req = https.request({
@@ -30604,7 +30616,7 @@ app.whenReady().then(() => {
     setTimeout(checkForUpdates, 5000);
   }
 
-  // Send telemetry ping on launch (opt-in only, after short delay)
+  // Send telemetry ping on launch (only when enabled, after a short delay)
   setTimeout(() => sendTelemetry(0), 8000);
 
 

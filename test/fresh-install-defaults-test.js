@@ -38,5 +38,26 @@ test('existing installs keep their look: the read-side fallback is still navy', 
   assert.ok(/settings\.darkVariant \|\| 'navy'/.test(main));
 });
 
+// Telemetry (Casey 2026-10-01): on for NEW installs, shown as a ticked box on
+// the welcome screen; an existing install that never chose stays off.
+test('telemetry: on in the fresh-install settings, never forced on an existing install', () => {
+  const load = main.slice(main.indexOf('function loadSettings()'), main.indexOf('function loadSettings()') + 1200);
+  const fresh = (load.match(/return \{ grid: 'FN20jb'[^\n]*\};/) || [''])[0];
+  assert.ok(/enableTelemetry: true/.test(fresh), fresh);
+  // Sending stays gated on the setting itself, so unset (an older install) is off.
+  assert.ok(/function telemetryAllowed\(\) \{\n  return !!\(settings && settings\.enableTelemetry && !settings\.firstRun\);/.test(main),
+    'unset must be off, and nothing may go out while the welcome screen (firstRun) is up');
+  assert.ok(/function sendTelemetry\(sessionSeconds\) \{\n  if \(!telemetryAllowed\(\)\) return/.test(main));
+  assert.ok(/function trackTelemetryEvent\(endpoint, source\) \{\n  if \(!telemetryAllowed\(\)\) return;/.test(main));
+});
+
+test('telemetry: the welcome screen shows the choice, ticked, and saves it', () => {
+  assert.ok(/<input type="checkbox" id="welcome-enable-telemetry" checked>/.test(html));
+  const app = R('renderer/app.js');
+  assert.ok(/if \(telemetryEl\) saveData\.enableTelemetry = telemetryEl\.checked;/.test(app));
+  assert.ok(/t\.checked = s\.enableTelemetry === true;/.test(app), 'reopening the welcome screen does not reflect the saved choice');
+  assert.ok(/setEnableTelemetry\.checked = s\.enableTelemetry === true;/.test(app), 'the Settings checkbox does not reflect it');
+});
+
 console.log(`\nFresh-install defaults: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
