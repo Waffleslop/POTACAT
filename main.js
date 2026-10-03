@@ -313,6 +313,7 @@ const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
+const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/serial-path'); // "COM Port 10" -> COM10 (KF0TDB)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
@@ -26189,6 +26190,15 @@ app.whenReady().then(() => {
     console.error('[multi-op] nested-profile migration failed:', err.message);
   }
   settings = loadSettings();
+  // A port typed as Device Manager shows it ("COM Port 10") never opened.
+  // Repair what is already saved, once, and say so (lib/serial-path.js).
+  {
+    const fixes = normalizeSettingsSerialPaths(settings);
+    if (fixes.length) {
+      saveSettings(settings);
+      for (const f of fixes) sendCatLog(`[CAT] ${f.key} "${f.from}" is not a Windows port name; using ${f.to}`);
+    }
+  }
   // Station Setup's "new for your radio" card compares against the version
   // this launch upgraded FROM — read before What's New rewrites lastVersion.
   _stationSetupLaunchLastVersion = settings.lastVersion || null;
@@ -33590,6 +33600,7 @@ app.whenReady().then(() => {
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
+    for (const f of normalizeSettingsSerialPaths(newSettings)) sendCatLog(`[CAT] ${f.key} "${f.from}" saved as ${f.to}`);
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
     // The renderer saves the WHOLE rig list from the copy it loaded when
@@ -34459,6 +34470,7 @@ app.whenReady().then(() => {
   });
 
   handleCatTest('test-serial-cat', 'serial CAT test', async (_e, config) => {
+    if (config && config.portPath) config.portPath = normalizeSerialPath(config.portPath);
     const { portPath, baudRate, dtrOff } = config;
     const { SerialPort } = require('serialport');
 
@@ -34544,6 +34556,7 @@ app.whenReady().then(() => {
   });
 
   handleCatTest('test-icom-civ', 'Icom CI-V test', async (_e, config) => {
+    if (config && config.portPath) config.portPath = normalizeSerialPath(config.portPath);
     const { portPath, baudRate, civAddress } = config;
     const { SerialPort } = require('serialport');
 

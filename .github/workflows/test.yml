@@ -92,6 +92,8 @@ jobs:
         run: node test/vfo-and-greyout-test.js
       - name: Run Test Connection restores the live link (KF0TDB)
         run: node test/test-connection-restore-test.js
+      - name: Run serial port names (COM Port 10 -> COM10, KF0TDB)
+        run: node test/serial-path-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)
