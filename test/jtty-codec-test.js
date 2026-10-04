@@ -187,6 +187,9 @@ test('TBCC: K=10 generators 1167/1545, tail-biting, Gray tones, linear', () => {
   assert.strictEqual(state, start);
   const tones = F.framesToTones(J.pack('CQ K1ABC CQ').frames);
   assert.strictEqual(tones.length, 59);
+  // The 59 channel symbols WSJT-X's own sjtty (v3.2.0-rc1, built from source)
+  // prints for this message: sync + CRC-12 + TBCC + Gray map, end to end.
+  assert.strictEqual(tones.join(' '), '0 2 2 3 0 0 3 2 1 3 1 2 0 2 0 3 2 0 3 3 0 2 3 2 2 3 1 0 0 1 2 2 3 0 0 3 0 0 3 3 3 3 3 3 2 0 1 3 0 0 3 1 0 2 1 3 2 2 3', 'differs from sjtty');
   assert.deepStrictEqual(tones.slice(0, 13), F.SYNC);
   assert.ok(tones.every((t) => t >= 0 && t <= 3));
 });

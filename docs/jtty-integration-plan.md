@@ -2,8 +2,9 @@
 
 Status: Casey said go on 2026-10-04 ("build something useful and elegant; it's
 okay if it's just a beta"), against rc1. Phase 0 and Phase 1 BUILT the same day
-(see the status notes in each phase). Phase 2's receiver is BUILT and passes
-its acceptance case; its rjtty comparison and Pi timing are open. Phase 3 next.
+(see the status notes in each phase). Phase 2's receiver is BUILT and verified
+against WSJT-X's own tools: identical decisions to rjtty on 40 of 40 noise
+files from -14 to -17 dB. Pi timing is open. Phase 3 next.
 Filed: 2026-10-04 (WSJT-X 3.2.0-rc1, released 2026-09-24)
 Scope: desktop first (engine + JTCAT window), ECHOCAT Web second, mobile by handoff
 Reference: WSJT-X `lib/jtty/jtty_design.md` and `lib/jtty/jtty_source_encoding.txt`
@@ -97,11 +98,17 @@ in the README there (`RAN ALL NIGHT ON BAND NOISE - NO FALSE DECODES!` at
 jtty_source_codec, jtty_mod (pack_jtty), tbcc, the code profile, jtty_fec_mod,
 gen_jttywave, gfsk_pulse, packjt77 pack28/unpack28/callok, chkcall,
 packjt77_grammar sections.
-Open: `sjtty`/`rjtty` are not in the installed WSJT-X (older), there is no
-7-Zip to unpack the rc1 installer, no Linux WSL, and Docker Desktop was not
-running. The cross-check against the reference tools is therefore still owed;
-the Docker route (gfortran + fftw3 container building lib/jtty) is the one to
-take once Docker is up. Everything else in Phase 1 was verified without it.
+Reference tools: built later the same day in a throwaway container (Casey
+started Docker Desktop; nothing installed on the machine). Recipe: `gcc:13`
+image + `apt-get install libfftw3-dev`; multi-pass `gfortran -O2 -c
+-ffree-line-length-none -fallow-argument-mismatch` over lib/jtty/*.f90,
+lib/77bit/*.f90 and from lib/: fftw3mod, wavhdr, gfsk_pulse, four2a, twkfreq,
+db, chkcall, smo121, hash, hashing, shell, indexx, pctile, fmtmsg,
+ft8/watterson; C: lib/lookup3.c, lib/wsprd/nhash.c, lib/wsprd/gran.c; link
+sjtty.o / rjtty.o against the rest EXCLUDING the 77bit test programs
+(call_to_c28, encode77, free_text, hash22calc, nonstd_to_c58, parse77,
+test28) with -lfftw3f -lfftw3. Skip jtty.f90, sjtty_qrm, update, transmit,
+jtty_codewords, jtty_spec, jttycom, c_funcs, cdatetime.
 Finding: rc1's ARRL section table has 86 entries (GH, NS, TER replace GTA,
 MAR, NT; PE and NB appended). POTACAT's FT8 Field Day table in
 lib/ft8_native/ft8_lib/ft8/message.c still has the 84-entry list — if WSJT-X
@@ -135,7 +142,9 @@ against an independent polynomial division; the TBCC is linear, tail-biting
 and all-zero-preserving; the GFSK waveform (384 sps, BT=2, nsps/8 ramps)
 self-demodulates with zero symbol errors. API: `pack(text, profile)`,
 `encode(text, {profile, f0, sampleRate})`, `decodeFrames(frames)`.
-Not yet done: the sjtty/rjtty cross-check (Phase 0's open item).
+Cross-checked against sjtty: our 59 channel symbols for `CQ K1ABC CQ` are
+identical to sjtty's (now a golden case in the test), and rjtty decodes our
+1-, 2- and 9-frame waveforms and the Field Day frame.
 
 - Source grammar **pack**: TEXT5 alphabet, the six call-action forms and the
   standard callsign codec (shared with FT8's `pack28`? JTTY uses "Call8";
@@ -170,8 +179,14 @@ sample decodes to `RAN ALL NIGHT ON BAND NOISE - NO FALSE DECODES!` at
 in a band window and two overlapping signals (second found after
 subtraction) decode; 0/-5/-10 dB (sjtty's SNR) decode; 30 s of noise gives
 zero decodes. 30.2 s of audio took 7.9 s on the dev PC with every band
-window on (~26% of a core). Open: the -15 dB rate against rjtty on the same
-files, and the Pi 5 measurement.
+window on (~26% of a core); rjtty takes 1.4 s for the same file.
+Against rjtty on identical sjtty noise files ("CQ K1ABC CQ", 10 per level):
+decodes at -10/-12/-13/-14/-15/-16/-17 dB were 10/10/10/9/9/4/1 for BOTH, and
+file by file the two make the same decision on all 40 files from -14 to
+-17 dB (test/fixtures/jtty/sjtty-16dB holds five of the -16 dB files with
+rjtty's verdicts, checked in CI). rjtty also printed one junk decode on the
+WSJT-X sample (`4>-P'` at 1696 Hz) that ours did not. Open: the Pi 5
+measurement, and the retro re-sweep.
 
 - Sync search (`jtty_peakup.f90`, `jtty_payload_correlators.f90`,
   `jtty_block_pow.f90`): candidates in time and frequency over a continuous

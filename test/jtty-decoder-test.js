@@ -127,6 +127,16 @@ test('the WSJT-X sample recording decodes to what WSJT-X shows', () => {
   assert.strictEqual(c.filter((u) => u.text !== hit.text).length, 0, 'no other complete messages');
 });
 
+test('on sjtty\'s -16 dB files the decoder makes rjtty\'s decisions, file by file', () => {
+  const dir = path.join(__dirname, 'fixtures', 'jtty', 'sjtty-16dB');
+  const v = JSON.parse(fs.readFileSync(path.join(dir, 'verdicts.json'), 'utf8'));
+  for (const [file, rjttyDecoded] of Object.entries(v.verdicts)) {
+    const d = new JttyDecoder({ qsoFreq: v.f0, qsoTol: 50 });
+    const ours = completes(d.decodeAll(readWav(path.join(dir, file)))).some((u) => u.text === v.message);
+    assert.strictEqual(ours, rjttyDecoded, file + ': rjtty ' + (rjttyDecoded ? 'decoded' : 'did not decode') + ', we ' + (ours ? 'did' : 'did not'));
+  }
+});
+
 if (process.env.JTTY_SWEEP) {
   console.log('\nSNR sweep (sjtty definition, 2500 Hz), 10 trials each:');
   for (const snr of [-8, -10, -12, -13, -14, -15, -16]) {

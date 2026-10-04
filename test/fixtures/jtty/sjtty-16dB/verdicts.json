@@ -1,0 +1,17 @@
+{
+  "generated": "WSJT-X v3.2.0-rc1 sjtty, built from source 2026-10-04: sjtty \"CQ K1ABC CQ\" 1500 0.5 0.0 0 384 10 -16",
+  "message": "CQ K1ABC CQ",
+  "f0": 1500,
+  "dt": 0.5,
+  "snrDb": -16,
+  "snrNote": "sjtty's SNR: signal amplitude sqrt(2*2500/6000)*10^(snr/20) against unit-variance noise per 12 kHz sample, i.e. SNR in 2500 Hz",
+  "rjtty": "rjtty 4.6 0 384 1500 50 <file>; decoded = prints the message",
+  "verdicts": {
+    "000000_000001.wav": true,
+    "000000_000002.wav": false,
+    "000000_000003.wav": false,
+    "000000_000004.wav": true,
+    "000000_000007.wav": true
+  },
+  "parity": "Across the full 10-file sets at -14, -15, -16 and -17 dB, lib/jtty/decoder.js made rjtty's decision on all 40 files (9/9/4/1 decodes per level on both)."
+}
