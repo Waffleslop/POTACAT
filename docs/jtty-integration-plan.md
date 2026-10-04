@@ -256,7 +256,7 @@ measurement, and the retro re-sweep.
   own-echo silence, refusals, re-render on freq/profile change, contract
   surface, manager branch, static wiring guards) in `npm test` and CI.
 
-### Phase 4 — JTCAT window: JTTY pane (~2 days) — DONE 2026-10-04 (beta; live visual check owed)
+### Phase 4 — JTCAT window: JTTY pane (~2 days) — DONE 2026-10-04 (beta; checked live in a dev instance)
 
 - Mode select gains JTTY. Pane modelled on `#jp-psk-pane`: a decodes list
   (UTC, DT, freq, SNR, text; rows addressed to `%M` highlighted; click a row
@@ -302,7 +302,15 @@ measurement, and the retro re-sweep.
 - `settings.jttyAudioFreq` persists the audio frequency on Send and is pushed
   after `jtcat-start` (`jttySyncFreq`), the PSK ordering lesson.
 - Guards: `test/jtty-engine-test.js` "JTCAT pop-out: the JTTY pane (static)".
-  Not yet done: a live look at the pane in a dev instance.
+  Checked live 2026-10-04 in a second instance (`--user-data-dir` scratch
+  profile + `--remote-debugging-port`, driven over CDP): the pane swaps in
+  for JTTY, F2 composes `W9XYZ 599 001` and previews `2 frames · 3.8 s`,
+  the serial button rewrites the exchange and persists, F6 needs Next Call,
+  a 79-character line previews 16 frames, the dials read 14080 on 20 m and
+  the 127 Hz footprint draws beside the marker; no renderer errors beyond
+  Leaflet's pre-existing CSP data-URI complaint. Not yet seen: a live
+  on-air decode in the pane (the decoder itself is proven on WSJT-X's
+  recordings).
 
 ### Phase 5 — Logging (½ day) — DONE 2026-10-04
 

@@ -213,6 +213,7 @@
     /* JTTY pane — shares the PSK31 pane's chrome (.jp-psk-pane/.jp-psk-status/
        .jp-psk-txwrap); decodes are .jp-row messages, not a character stream. */
     .jp-jtty-tx { flex: 1; min-width: 0; font-family: monospace; font-size: 13px; text-transform: uppercase; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    .jp-jtty-tx::placeholder { text-transform: none; }
     .jp-jtty-frames { font-size: 10px; color: var(--text-dim); font-family: monospace; white-space: nowrap; min-width: 96px; text-align: right; }
     .jp-jtty-frames.bad { color: #e94560; white-space: normal; max-width: 260px; }
     .jp-jtty-exch { width: 104px; font-size: 11px; font-family: monospace; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); text-transform: uppercase; }
@@ -594,10 +595,10 @@
           <span style="margin-left:auto;"></span>
           <button id="jp-jtty-send" class="jp-btn" style="border-color:#e94560;color:#e94560;" title="Transmit the composed message as one transmission (Enter)">Send</button>
           <button id="jp-jtty-stop" class="jp-btn jp-halt" title="Stop transmitting immediately (drops PTT)">Stop</button>
-          <button id="jp-jtty-log" class="jp-btn" title="Open QSO log">Log</button>
         </div>
         <div class="jp-psk-macro-row">
           <span id="jp-jtty-templates" style="display:contents;"></span>
+          <button id="jp-jtty-log" class="jp-btn" title="Log the QSO with His Call (opens the Log QSO window)">Log</button>
           <span class="jp-psk-me-hint" style="margin-left:auto;">F-key: compose &middot; Shift: compose and send &middot; right-click: edit</span>
         </div>
         <div id="jp-jtty-editor" class="jp-psk-macro-editor hidden">
