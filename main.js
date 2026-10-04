@@ -2043,7 +2043,7 @@ const FILTER_PRESETS = {
 function getFilterPresets(mode) {
   const m = (mode || '').toUpperCase();
   if (m === 'CW') return FILTER_PRESETS.CW;
-  if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'RTTY' || m === 'PKTUSB' || m === 'PKTLSB' || m.startsWith('PSK')) return FILTER_PRESETS.DIG;
+  if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'RTTY' || m === 'PKTUSB' || m === 'PKTLSB' || m.startsWith('PSK') || m === 'JTTY') return FILTER_PRESETS.DIG;
   return FILTER_PRESETS.SSB; // default for SSB/USB/LSB/FM/AM
 }
 
@@ -9407,6 +9407,34 @@ function jtcatModeHopReset() {
 let jtcatPskRxPending = null;
 let jtcatPskRxTimer = null;
 
+// JTTY continuous RX — decoder updates keyed by message id, flushed to the
+// popout as one `jtcat-jtty-rx { updates: [...] }` every ~250 ms. The newest
+// update for an id replaces the older one, so a message growing frame by
+// frame costs one IPC row per flush, not one per frame.
+let jtcatJttyRxPending = null;   // Map(id -> update)
+let jtcatJttyRxTimer = null;
+function jtcatJttyRxQueue(d) {
+  if (!d) return;
+  if (d.complete) {
+    const utc = new Date(d.utcMs || Date.now());
+    const hhmmss = String(utc.getUTCHours()).padStart(2, '0') + String(utc.getUTCMinutes()).padStart(2, '0') + String(utc.getUTCSeconds()).padStart(2, '0');
+    sendCatLog(`[JTTY] ${hhmmss} ${d.freqHz} Hz ${d.snrDb} dB: ${d.text}`);
+  }
+  if (!jtcatJttyRxPending) {
+    jtcatJttyRxPending = new Map();
+    jtcatJttyRxTimer = setTimeout(() => {
+      const batch = jtcatJttyRxPending ? [...jtcatJttyRxPending.values()] : [];
+      jtcatJttyRxPending = null;
+      jtcatJttyRxTimer = null;
+      if (!batch.length) return;
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        jtcatPopoutWin.webContents.send('jtcat-jtty-rx', { updates: batch });
+      }
+    }, 250);
+  }
+  jtcatJttyRxPending.set(d.id, d);
+}
+
 // The rule itself lives in lib/jtcat-state-machine.js beside the other hunt
 // and run policy, so it can be tested without the app. This wrapper is the
 // text-only form (no spot cross-reference) used for the "is it a CQ at all"
@@ -11217,6 +11245,21 @@ function jtcatAbandonUnencodableQso(engine, data) {
   }
 }
 
+// JTTY exchange profile — one setter for the IPC, the Send payload and
+// (later) the remote twin: validates, persists, applies to a live engine.
+const _jttyEngineMod = require('./lib/jtty-engine');
+function jtcatJttySetProfile(profile) {
+  const p = _jttyEngineMod.PROFILES.includes(profile) ? profile : 'unknown';
+  if (settings.jttyProfile !== p) {
+    settings.jttyProfile = p;
+    saveSettings(settings);
+  }
+  if (ft8Engine && ft8Engine._mode === 'JTTY' && typeof ft8Engine.setProfile === 'function') {
+    ft8Engine.setProfile(p);
+  }
+  return p;
+}
+
 // Persist the operator's chosen FT8/FT4 TX audio offset so Hold TX Freq can
 // re-pin it across band-change engine rebuilds and app restarts (WSJT-X
 // remembers its Tx offset too). Called from the two operator set-tx-freq
@@ -11299,6 +11342,9 @@ function startJtcat(mode) {
     submode: settings.js8Submode || 'NORMAL',
     myCall: (settings.myCallsign || '').toUpperCase(),
     myGrid: (settings.grid || '').toUpperCase(),
+    // JTTY exchange profile (unknown / field-day / rtty-roundup) shapes how
+    // the grammar packs a typed exchange; the engine is built with it.
+    jttyProfile: settings.jttyProfile || 'unknown',
   });
   ft8Engine = jtcatManager.engine; // Phase 0 alias
 
@@ -11477,6 +11523,16 @@ function startJtcat(mode) {
     jtcatPskRxPending.snrDb = d.snrDb;
     jtcatPskRxPending.metric = d.metric;
   });
+
+  // JTTY continuous RX (lib/jtty-engine.js). One event per decoder update —
+  // a message grows frame by frame (complete:false) and closes on its EOM
+  // (complete:true), the way WSJT-X paints it. Like psk-text, NOT routed
+  // through the FT8 'decode' handler: there are no slots, no QSO state
+  // machine, no classification. Batched to ~250 ms per update id for IPC;
+  // a completed message also goes to the CAT log so the mode has a record
+  // before the JTTY pane (Phase 4) exists.
+  ft8Engine.removeAllListeners('jtty-rx');
+  ft8Engine.on('jtty-rx', (d) => jtcatJttyRxQueue(d));
 
   // Catch engine errors (e.g. missing FT4/FT2 decoder on some platforms)
   ft8Engine.on('error', (data) => {
@@ -18521,10 +18577,10 @@ function connectRemote() {
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
     if (!ft8Engine) return;
     markUserActive(); // choosing a mode is the operator, not the idle session
-    // Same family-switch rule as the popout's jtcat-set-mode: PSK31 and JS8
-    // are different engine classes and Ft8Engine.setMode coerces unknown
+    // Same family-switch rule as the popout's jtcat-set-mode: PSK31, JS8 and
+    // JTTY are different engine classes and Ft8Engine.setMode coerces unknown
     // strings to FT8, so crossing families rebuilds the slice.
-    const familyOf = (m) => (m === 'PSK31' ? 'psk' : m === 'JS8' ? 'js8' : 'ft');
+    const familyOf = (m) => (m === 'PSK31' ? 'psk' : m === 'JS8' ? 'js8' : m === 'JTTY' ? 'jtty' : 'ft');
     if (familyOf(mode) !== familyOf(ft8Engine._mode)) {
       startJtcat(mode);
       return;
@@ -25385,7 +25441,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
       mm === 'PKTUSB' || mm === 'PKTLSB' ||
       mm === 'DATA-USB' || mm === 'DATA-LSB' ||
       mm === 'USB-D' || mm === 'LSB-D' ||
-      mm === 'RTTY' || mm === 'JS8' || mm.startsWith('PSK');
+      mm === 'RTTY' || mm === 'JS8' || mm.startsWith('PSK') || mm === 'JTTY';
     if (!isDataish) {
       sendCatLog(`[JTCAT] QSY to ${mm} — stopping FT8/FT4 engine`);
       stopJtcat();
@@ -25432,7 +25488,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     if (mm === 'CW' || mm === 'CW-R' || mm === 'CWR') return 'CW';
     if (mm === 'SSB' || mm === 'USB' || mm === 'LSB') return 'SSB';
     if (mm === 'FT8' || mm === 'FT4' || mm === 'FT2' || mm === 'DIGU' || mm === 'DIGL' ||
-        mm === 'PKTUSB' || mm === 'PKTLSB' || mm === 'RTTY' || mm.startsWith('PSK') || mm === 'JS8') return 'DIG';
+        mm === 'PKTUSB' || mm === 'PKTLSB' || mm === 'RTTY' || mm.startsWith('PSK') || mm === 'JS8' || mm === 'JTTY') return 'DIG';
     return mm; // FM, AM, FREEDV, etc. stay as their own category
   }
   const prevCategory = _modeCategory((_currentMode || '').toUpperCase());
@@ -25451,7 +25507,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     filterWidth = settings.cwFilterWidth || 0;
   } else if (m === 'SSB' || m === 'USB' || m === 'LSB') {
     filterWidth = settings.ssbFilterWidth || 0;
-  } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'PKTUSB' || m === 'PKTLSB' || m.startsWith('PSK')) {
+  } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'PKTUSB' || m === 'PKTLSB' || m.startsWith('PSK') || m === 'JTTY') {
     filterWidth = settings.digitalFilterWidth || 0;
   } else if (m === 'FM') {
     filterWidth = 0; // FM has fixed bandwidth
@@ -25560,7 +25616,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
       const wsjtxTuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
       const freqMhz = wsjtxTuneHz / 1e6;
       const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
-      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK'))
+      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK') || mode === 'JTTY')
         ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
         : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
       sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}->${flexMode} filter=${filterWidth}${useVfoShift ? ` (VFO shifted +${settings.cwXit}Hz for XIT)` : ''}`);
@@ -25615,7 +25671,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     const tuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
     const freqMhz = tuneHz / 1e6;
     const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
-    const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK'))
+    const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK') || mode === 'JTTY')
       ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
       : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
     if (mode) _modeSuppressUntil = Date.now() + 2000;
@@ -25679,7 +25735,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   // re-rewritten here.
   if (settings.jtcatUseDataMode === false && mode && !isFreedvMode) {
     const dm = String(mode).toUpperCase();
-    if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2' || dm === 'DIGU' || dm === 'PKTUSB' || dm === 'JS8' || dm === 'WSPR' || dm.startsWith('PSK')) {
+    if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2' || dm === 'DIGU' || dm === 'PKTUSB' || dm === 'JS8' || dm === 'WSPR' || dm.startsWith('PSK') || dm === 'JTTY') {
       mode = 'USB';
     } else if (dm === 'DIGL' || dm === 'PKTLSB') {
       mode = 'LSB';
@@ -31263,7 +31319,7 @@ app.whenReady().then(() => {
       const sliceIndex = slicePort - 5002;
       const freqHz = Math.round(parseFloat(frequency) * 1000);
       const jtSsbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
-      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'DIGU' || String(mode).startsWith('PSK'))
+      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'DIGU' || String(mode).startsWith('PSK') || mode === 'JTTY')
         ? 'DIGU' : (mode === 'CW' ? 'CW' : (mode === 'SSB' ? jtSsbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))));
       const filterWidth = settings.digitalFilterWidth || 0;
       sendCatLog(`JTCAT tune via SmartSDR: slice=${String.fromCharCode(65 + sliceIndex)} freq=${(freqHz / 1e6).toFixed(6)}MHz mode=${flexMode}`);
@@ -35098,10 +35154,10 @@ app.whenReady().then(() => {
   });
   ipcMain.on('jtcat-set-mode', (_e, mode) => {
     if (!ft8Engine) return;
-    // PSK31 and JS8 live in different engine classes — Ft8Engine.setMode()
+    // PSK31, JS8 and JTTY live in different engine classes — Ft8Engine.setMode()
     // silently coerces unknown strings to 'FT8', so a family switch in ANY
     // direction must rebuild the slice. Same-family switches stay cheap.
-    const familyOf = (m) => (m === 'PSK31' ? 'psk' : m === 'JS8' ? 'js8' : 'ft');
+    const familyOf = (m) => (m === 'PSK31' ? 'psk' : m === 'JS8' ? 'js8' : m === 'JTTY' ? 'jtty' : 'ft');
     if (familyOf(mode) !== familyOf(ft8Engine._mode)) {
       startJtcat(mode);
       // Picking JS8 opens the conversation window — that is where JS8 lives
@@ -35324,6 +35380,27 @@ app.whenReady().then(() => {
       }
     });
   });
+  // JTTY one-shot Send: same shape as PSK31's — Send IS the arm action, the
+  // whole message is one transmission. The engine REFUSES text the grammar
+  // cannot carry (encode-failed reaches the CAT log via the shared handler)
+  // rather than altering it: a JTTY frame is a packed sentence, not a byte
+  // stream, so "trim to fit" would change what the other station reads.
+  ipcMain.on('jtcat-jtty-send', (_e, payload) => {
+    if (!ft8Engine || ft8Engine._mode !== 'JTTY') return;
+    const p = (payload && typeof payload === 'object') ? payload : { text: payload };
+    const t = String(p.text || '');
+    if (!t.trim()) return;
+    if (p.profile && typeof ft8Engine.setProfile === 'function') jtcatJttySetProfile(p.profile);
+    ft8Engine._txEnabled = true;
+    Promise.resolve(ft8Engine.setTxMessage(t)).then((samples) => {
+      if (!ft8Engine || ft8Engine._mode !== 'JTTY') return;
+      if (!samples) return; // refused — encode-failed already logged it
+      if (!ft8Engine.requestTx()) {
+        sendCatLog('[JTCAT] JTTY Send ignored — TX already active or engine not running');
+      }
+    });
+  });
+  ipcMain.on('jtcat-jtty-set-profile', (_e, profile) => jtcatJttySetProfile(profile));
   // Manual TX message validation — ground truth is the native codec (the same
   // pack the TX path runs), so anything accepted here is guaranteed to encode
   // instead of silently skipping TX at the cycle boundary. Falls back to a
@@ -35331,6 +35408,13 @@ app.whenReady().then(() => {
   // or the mode has its own encoder (FT2).
   ipcMain.handle('jtcat-validate-tx-msg', (_e, text) => {
     const mode = (ft8Engine && ft8Engine._mode) || settings.jtcatLastMode || 'FT8';
+    if (mode === 'JTTY') {
+      // The same pure check the engine runs before it renders, so the
+      // composer's verdict and the transmitter's are one verdict. Carries
+      // the frame count so the pane can show the over's length before Send.
+      const v = _jttyEngineMod.validateMessage(text, (ft8Engine && ft8Engine.profile) || settings.jttyProfile || 'unknown');
+      return v.ok ? { ok: true, text: v.text, nframes: v.nframes, durationSec: v.durationSec } : { ok: false, reason: v.reason };
+    }
     if (mode === 'PSK31') {
       // Varicode carries any ASCII, case-sensitive (lowercase is the PSK31
       // convention) — no uppercase/13-char shaping, no codec round-trip.

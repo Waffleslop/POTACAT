@@ -4,7 +4,9 @@ Status: Casey said go on 2026-10-04 ("build something useful and elegant; it's
 okay if it's just a beta"), against rc1. Phase 0 and Phase 1 BUILT the same day
 (see the status notes in each phase). Phase 2's receiver is BUILT and verified
 against WSJT-X's own tools: identical decisions to rjtty on 40 of 40 noise
-files from -14 to -17 dB. Pi timing is open. Phase 3 next.
+files from -14 to -17 dB. Pi timing is open. Phase 3 (engine + main.js
+wiring) is BUILT: JTTY is a JTCAT mode the app can run, headless included;
+what it lacks is a pane (Phase 4). Pi timing is open.
 Filed: 2026-10-04 (WSJT-X 3.2.0-rc1, released 2026-09-24)
 Scope: desktop first (engine + JTCAT window), ECHOCAT Web second, mobile by handoff
 Reference: WSJT-X `lib/jtty/jtty_design.md` and `lib/jtty/jtty_source_encoding.txt`
@@ -204,7 +206,7 @@ measurement, and the retro re-sweep.
 - Addon exposes `decoder_create(sampleRate)`, `decoder_feed(pcm)`,
   `decoder_poll() → [{text, tStart, dt, freqHz, snrDb, eom, nframes}]`.
 
-### Phase 3 — `lib/jtty-engine.js` and main.js wiring (~1 day)
+### Phase 3 — `lib/jtty-engine.js` and main.js wiring (~1 day) — DONE 2026-10-04
 
 - `JttyEngine` with the PSK engine contract: `feedAudio()`, continuous
   decode, emits `jtty-rx` (one event per completed message, plus a
@@ -218,6 +220,41 @@ measurement, and the retro re-sweep.
 - main.js: `jtty-rx` → IPC `jtcat-jtty-rx` (batched like psk-text) and the
   radio-owner lock for TX; no slot or clock-sync logic (none applies).
 - Tests: `lib/jtty-engine-test.js` driving the engine with the fixtures.
+
+**Status 2026-10-04 — built, with these departures from the sketch above:**
+
+- The decoder runs in a **worker thread** (`lib/jtty/decoder-worker.js`),
+  not inline like PSK31: one quarter-frame step costs ~120 ms of CPU every
+  0.47 s, which would stall the Electron main process. `JttyEngine` is the
+  thin host — stream clock, UTC stamps, worker lifecycle (restart on exit,
+  like JS8's). `new JttyEngine({ worker: false })` runs the decoder inline
+  for deterministic tests.
+- One event, `jtty-rx`, per decoder update — `complete:false` while a
+  message grows, `complete:true` on its EOM — rather than a separate
+  `partial:true` event. main.js batches by message id (`jtcat-jtty-rx
+  { updates }`, ~250 ms) and logs every completed message as
+  `[JTTY] HHMMSS 1506.9 Hz -2 dB: TEXT`.
+- During our own transmission the receiver is fed **silence** of the same
+  length, not skipped: the decoder's clock stays continuous (a message
+  spanning our over still assembles) and a loopback echo of our own TX is
+  never decoded.
+- **Refuse, never trim.** The reference packer truncates to character*80
+  because WSJT-X's text box holds no more; `validateMessage()` refuses an
+  81st character, a 17th frame, and anything over the 120 s cap (which the
+  16-frame grammar limit makes unreachable, 30 s). The same function answers
+  `jtcat-validate-tx-msg`, so the composer's verdict is the transmitter's.
+- Rig-mode mapping: everywhere main.js treats `PSK*` as a USB data mode
+  (filter presets, QSY-stops-engine test, mode category, SmartSDR DIGU,
+  `jtcatUseDataMode`), `JTTY` is beside it; the engine test counts the sites.
+- IPC: `jtcat-jtty-send {text, profile}`, `jtcat-jtty-set-profile`
+  (`settings.jttyProfile`, applied live), `jtcat-jtty-rx` out; preload
+  `jtcatJttySend` / `jtcatJttySetProfile` / `onJtcatJttyRx`. Both
+  `familyOf` switches (popout and remote `jtcat-set-mode`) rebuild the
+  slice for JTTY, so a remote client that sends `set-mode JTTY` already
+  works; the remote RX stream and `jtcat-jtty-send` twin are Phase 6.
+- Tests: `test/jtty-engine-test.js` (loopback on both decoder hosts,
+  own-echo silence, refusals, re-render on freq/profile change, contract
+  surface, manager branch, static wiring guards) in `npm test` and CI.
 
 ### Phase 4 — JTCAT window: JTTY pane (~2 days)
 

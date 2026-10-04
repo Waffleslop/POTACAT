@@ -43,6 +43,13 @@ contextBridge.exposeInMainWorld('api', {
   jtcatPskSend: (text) => ipcRenderer.send('jtcat-psk-send', text),
   jtcatPskSetSql: (level) => ipcRenderer.send('jtcat-psk-set-sql', level),
   onJtcatPskRx: (cb) => ipcRenderer.on('jtcat-psk-rx', (_e, data) => cb(data)),
+  // JTTY (WSJT-X 3.2) — one-shot Send with an optional exchange profile, the
+  // profile setter, and the decoder's message updates ({ updates: [...] },
+  // each { id, text, complete, freqHz, snrDb, utcMs }; an id repeats as the
+  // message grows and closes with complete:true).
+  jtcatJttySend: (text, profile) => ipcRenderer.send('jtcat-jtty-send', { text, profile }),
+  jtcatJttySetProfile: (profile) => ipcRenderer.send('jtcat-jtty-set-profile', profile),
+  onJtcatJttyRx: (cb) => ipcRenderer.on('jtcat-jtty-rx', (_e, data) => cb(data)),
   onJtcatDupeWarning: (cb) => ipcRenderer.on('jtcat-dupe-warning', (_e, data) => cb(data)),
   // Stalled-QSO closeout notice ("logged, sending final 73") — informational,
   // NOT the error channel: phase:'error' force-clears qsoState/txEnabled,
