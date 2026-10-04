@@ -2,7 +2,8 @@
 
 Status: Casey said go on 2026-10-04 ("build something useful and elegant; it's
 okay if it's just a beta"), against rc1. Phase 0 and Phase 1 BUILT the same day
-(see the status notes in each phase). Phase 2 next.
+(see the status notes in each phase). Phase 2's receiver is BUILT and passes
+its acceptance case; its rjtty comparison and Pi timing are open. Phase 3 next.
 Filed: 2026-10-04 (WSJT-X 3.2.0-rc1, released 2026-09-24)
 Scope: desktop first (engine + JTCAT window), ECHOCAT Web second, mobile by handoff
 Reference: WSJT-X `lib/jtty/jtty_design.md` and `lib/jtty/jtty_source_encoding.txt`
@@ -152,7 +153,25 @@ Not yet done: the sjtty/rjtty cross-check (Phase 0's open item).
   `pack(text, profile) → {words[]}`.
 - If the grammar proves larger than this estimate, stop here and report.
 
-### Phase 2 — Decoder in C (~4–6 days, the hard part)
+### Phase 2 — Decoder (~4–6 days, the hard part) — BUILT 2026-10-04, in JavaScript
+
+Built as `lib/jtty/dsp.js` (FFT, analytic signal, frequency shift, complex
+GFSK reference), `lib/jtty/list-decoder.js` (the packed-survivor WAVA list
+decoder and the L=1/2/4 + half-symbol ladder) and `lib/jtty/decoder.js`
+(sync surface, QSO-window peak-up, band windows, sync gate, payload
+correlations, subtraction and second pass, message assembly). JavaScript
+first, as the reference implementation a C port would have to match anyway;
+the C port is now a decision for the Pi measurement, not a prerequisite.
+Not ported: the retro re-sweep of previous windows after a subtraction, and
+the Bluestein narrow-window FFT.
+Checkpoint (test/jtty-decoder-test.js, in npm test and CI): the WSJT-X
+sample decodes to `RAN ALL NIGHT ON BAND NOISE - NO FALSE DECODES!` at
+1506.9 Hz; clean one- and multi-frame messages assemble with EOM; a signal
+in a band window and two overlapping signals (second found after
+subtraction) decode; 0/-5/-10 dB (sjtty's SNR) decode; 30 s of noise gives
+zero decodes. 30.2 s of audio took 7.9 s on the dev PC with every band
+window on (~26% of a core). Open: the -15 dB rate against rjtty on the same
+files, and the Pi 5 measurement.
 
 - Sync search (`jtty_peakup.f90`, `jtty_payload_correlators.f90`,
   `jtty_block_pow.f90`): candidates in time and frequency over a continuous
