@@ -1286,20 +1286,25 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // PSK31 and JTTY are transceive keyboard modes: the audio frequency IS
+  // both directions, the pane's own sync (pskSyncFreq / jttySyncFreq) owns
+  // the ordering with the engine, and a split marker makes no sense.
+  function isKeyboardMode() { return modeSelect.value === 'PSK31' || modeSelect.value === 'JTTY'; }
+
   window.api.onJtcatTxStatus(function(data) {
     // Re-anchor the TX display to ENGINE truth. The label/marker were pure
     // renderer-optimism before, so with Hold TX Freq on they could show a
     // frequency the engine never accepted (KF0U 2026-07-17). txFreq rides
     // every tx/rx status; skip per-slice statuses (multi panes have their
-    // own markers) and PSK31 (pskSyncFreq owns that ordering).
-    if (data.txFreq && !data.sliceId && modeSelect.value !== 'PSK31' && jpTxFreqHz !== data.txFreq) {
+    // own markers) and the keyboard modes (their sync owns that ordering).
+    if (data.txFreq && !data.sliceId && !isKeyboardMode() && jpTxFreqHz !== data.txFreq) {
       jpTxFreqHz = data.txFreq;
       txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
     }
     // A CQ has no partner to listen to, so RX comes to our own frequency —
     // replies arrive there. Without this the RX marker (and the engine's RX
     // focus) stayed on the last QSO partner's offset after every QSO.
-    if (data.state === 'tx' && data.txFreq && !data.sliceId && modeSelect.value !== 'PSK31'
+    if (data.state === 'tx' && data.txFreq && !data.sliceId && !isKeyboardMode()
         && /^CQ\s/.test(data.message || '') && jpRxFreqHz !== data.txFreq) {
       jpRxFreqHz = data.txFreq;
       window.api.jtcatSetRxFreq(data.txFreq);
@@ -1570,7 +1575,7 @@ function _applyPopoutTheme(payload) {
   var cycleFillEl = document.getElementById('jp-cycle-fill');
   setInterval(function() {
     var mode = modeSelect.value;
-    if (mode === 'PSK31') {
+    if (mode === 'PSK31' || mode === 'JTTY') {
       // Continuous mode — no periods. During a one-shot Send the bar sweeps
       // across the transmission (main reports the exact buffer duration in
       // tx-status durMs) and the big countdown shows seconds remaining;
@@ -1641,6 +1646,16 @@ function _applyPopoutTheme(payload) {
     '20m': 14070, '17m': 18100, '15m': 21070, '12m': 24920, '10m': 28120,
     '6m': 50291,
   };
+  // JTTY USB dial frequencies (kHz). JTTY has no watering holes yet (WSJT-X
+  // 3.2.0-rc1 shipped 2026-09-24), so these are the RTTY sub-band edges —
+  // 14080 on 20 m and friends — where a 127 Hz keyboard mode belongs and
+  // where WSJT-X users will look first. Click the waterfall to move within
+  // the passband; edit here when the community settles on dials.
+  var JTTY_BAND_FREQS = {
+    '160m': 1838, '80m': 3580, '60m': 5357, '40m': 7080, '30m': 10140,
+    '20m': 14080, '17m': 18100, '15m': 21080, '12m': 24920, '10m': 28080,
+    '6m': 50290, '2m': 144174,
+  };
   // JS8 dial frequencies (kHz) per band — the JS8Call community defaults.
   var JS8_BAND_FREQS = {
     '160m': 1842, '80m': 3578, '60m': 5357, '40m': 7078, '30m': 10130,
@@ -1649,7 +1664,7 @@ function _applyPopoutTheme(payload) {
   };
   function updateBandFreqs() {
     var m = modeSelect.value;
-    var table = m === 'WSPR' ? WSPR_BAND_FREQS : m === 'PSK31' ? PSK_BAND_FREQS : m === 'JS8' ? JS8_BAND_FREQS : m === 'FT2' ? FT2_BAND_FREQS : m === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
+    var table = m === 'WSPR' ? WSPR_BAND_FREQS : m === 'PSK31' ? PSK_BAND_FREQS : m === 'JTTY' ? JTTY_BAND_FREQS : m === 'JS8' ? JS8_BAND_FREQS : m === 'FT2' ? FT2_BAND_FREQS : m === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
     document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
       var band = btn.dataset.band;
       if (table[band]) btn.dataset.freq = table[band];
@@ -1661,9 +1676,11 @@ function _applyPopoutTheme(payload) {
     updateBandFreqs();
     applyWsprMode(modeSelect.value === 'WSPR');
     applyPskMode(modeSelect.value === 'PSK31');
+    applyJttyMode(modeSelect.value === 'JTTY');
     window.api.jtcatSetMode(modeSelect.value);
     // IPC is ordered: this lands after the family-switch rebuild above.
     if (modeSelect.value === 'PSK31') pskSyncFreq();
+    if (modeSelect.value === 'JTTY') jttySyncFreq();
     // Persist the mode so reopening JTCAT comes back in FT4/FT2 instead of
     // silently reverting to FT8 (which left the radio parked on the FT8 sub-
     // band and looked like "FT4 never decodes"). K3SBP 2026-06-10.
@@ -3185,10 +3202,11 @@ function _applyPopoutTheme(payload) {
 
   function applyPskMode(on) {
     if (pskPane) pskPane.classList.toggle('hidden', !on);
-    // applyWsprMode owns these toggles for WSPR; don't fight it when the
-    // current mode is WSPR (mode-change runs applyWsprMode first, then this).
-    if (decodePane) decodePane.classList.toggle('hidden', on || modeSelect.value === 'WSPR');
-    if (controlsBar) controlsBar.classList.toggle('hidden', on || modeSelect.value === 'WSPR');
+    // applyWsprMode / applyJttyMode own these toggles for their modes; don't
+    // fight them (mode-change runs applyWsprMode, then this, then applyJttyMode).
+    var otherPane = modeSelect.value === 'WSPR' || modeSelect.value === 'JTTY';
+    if (decodePane) decodePane.classList.toggle('hidden', on || otherPane);
+    if (controlsBar) controlsBar.classList.toggle('hidden', on || otherPane);
     if (on) setOptionsPopOpen(false); // bar is hiding — don't strand the ⚙ popover
     if (on && qsoTracker) qsoTracker.classList.add('hidden');
     // Multi-slice is FT8-family only.
@@ -3430,18 +3448,410 @@ function _applyPopoutTheme(payload) {
   });
   // ================== end PSK31 ==================
 
+  // ===================== JTTY =====================
+  // WSJT-X 3.2's keyboard/contest mode (lib/jtty-engine.js). Continuous like
+  // PSK31 — no slots, no QSO state machine — but MESSAGE-framed: the engine
+  // reports whole decoder updates (a message grows frame by frame and closes
+  // on its EOM), so this pane is a decodes list, not a character stream, and
+  // the composer is one line of up to 80 characters with WSJT-X's F1–F8
+  // templates (%M my call, %H his call, %E exchange, %Q next call). Send IS
+  // the arm action; main refuses — never trims — a message the grammar
+  // cannot carry, and the frame counter beside the composer says so first.
+  var jttyPane = document.getElementById('jp-jtty-pane');
+  var jttyListEl = document.getElementById('jp-jtty-list');
+  var jttyTxEl = document.getElementById('jp-jtty-tx');
+  var jttyFramesEl = document.getElementById('jp-jtty-frames');
+  var jttyProfileEl = document.getElementById('jp-jtty-profile');
+  var jttyHisEl = document.getElementById('jp-jtty-his');
+  var jttyExchEl = document.getElementById('jp-jtty-exch');
+  var jttySerialEl = document.getElementById('jp-jtty-serial');
+  var jttyQueuedEl = document.getElementById('jp-jtty-queued');
+  var jttyTemplatesEl = document.getElementById('jp-jtty-templates');
+  var jttySendBtn = document.getElementById('jp-jtty-send');
+  var jttyStopBtn = document.getElementById('jp-jtty-stop');
+  var jttyLogBtn = document.getElementById('jp-jtty-log');
+  var jttyClearBtn = document.getElementById('jp-jtty-clear');
+  var JTTY_ROW_CAP = 300;
+  var JTTY_PROFILES = ['unknown', 'field-day', 'rtty-roundup'];
+  // The eight shipped templates, verbatim from jtty_design.md ("Native
+  // message templates"). An unedited one packs its exchange as a native
+  // serial even under the Serial/Unknown profile; an edited one is literal.
+  var JTTY_DEFAULT_TEMPLATES = ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E'];
+  var jttyTemplates = JTTY_DEFAULT_TEMPLATES.slice();
+  var jttyMyCall = '';
+  var jttyRows = {};             // decoder message id -> row element
+  var jttyComposeNative = -1;    // template index that filled the composer; -1 = typed/edited
+  var jttyValidateTimer = null;
+
+  function jttyPad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function applyJttyMode(on) {
+    if (jttyPane) jttyPane.classList.toggle('hidden', !on);
+    var otherPane = modeSelect.value === 'WSPR' || modeSelect.value === 'PSK31';
+    if (decodePane) decodePane.classList.toggle('hidden', on || otherPane);
+    if (controlsBar) controlsBar.classList.toggle('hidden', on || otherPane);
+    if (on) setOptionsPopOpen(false); // bar is hiding — don't strand the ⚙ popover
+    if (on && qsoTracker) qsoTracker.classList.add('hidden');
+    // Multi-slice is FT8-family only.
+    if (multiBtnEl) multiBtnEl.style.display = on ? 'none' : '';
+    if (on) { jttyRenderTemplates(); jttyPreview(); }
+  }
+
+  // Push the displayed audio frequency to the engine. Must run AFTER the
+  // family switch rebuilds the slice — a fresh JttyEngine starts at 1500 Hz
+  // regardless of what the markers show.
+  function jttySyncFreq() {
+    jpTxFreqHz = Math.max(200, Math.min(2700, jpTxFreqHz));
+    jpRxFreqHz = jpTxFreqHz;
+    txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+    window.api.jtcatSetTxFreq(jpTxFreqHz);
+    window.api.jtcatSetRxFreq(jpTxFreqHz);
+  }
+
+  function jttyProfile() {
+    var p = jttyProfileEl ? jttyProfileEl.value : 'unknown';
+    return JTTY_PROFILES.indexOf(p) >= 0 ? p : 'unknown';
+  }
+  function jttySerial() {
+    var n = parseInt(jttySerialEl && jttySerialEl.value, 10);
+    return Math.max(1, Math.min(9999, n > 0 ? n : 1));
+  }
+  function jttySerialText() {
+    var n = jttySerial();
+    return n < 100 ? ('00' + n).slice(-3) : String(n);
+  }
+  // What %E stands for under the current profile: 599 + serial, or the
+  // Field Day class/section the operator keeps under the gear (jtcatFdExch).
+  function jttyDefaultExchange() {
+    if (jttyProfile() === 'field-day') return ((fdExchInput && fdExchInput.value) || '').trim().toUpperCase();
+    return '599 ' + jttySerialText();
+  }
+  // The exchange box follows the serial/profile until the operator types in
+  // it (dataset.auto = '0'); the serial buttons always rewrite it.
+  function jttyRefreshExchange(force) {
+    if (!jttyExchEl) return;
+    if (force || jttyExchEl.dataset.auto !== '0') {
+      jttyExchEl.value = jttyDefaultExchange();
+      jttyExchEl.dataset.auto = '1';
+    }
+  }
+  function jttySubstitute(t) {
+    var his = ((jttyHisEl && jttyHisEl.value) || '').trim().toUpperCase();
+    var q = ((jttyQueuedEl && jttyQueuedEl.value) || '').trim().toUpperCase();
+    var ex = ((jttyExchEl && jttyExchEl.value) || '').trim().toUpperCase();
+    return String(t).replace(/%M/g, jttyMyCall).replace(/%H/g, his).replace(/%Q/g, q).replace(/%E/g, ex)
+      .replace(/\s+/g, ' ').trim();
+  }
+  // Native templates default to a serial exchange even under the Unknown
+  // profile (design doc: "No activity means Unknown even though native macros
+  // default to serial exchanges"). Packing such a message with the RTTY
+  // Roundup rules is what makes "K1ABC 599 001" one frame instead of two; an
+  // edited template is literal text under the operator's own profile, as in
+  // WSJT-X. A per-message profile — it never changes the selector.
+  function jttyPackProfile() {
+    var p = jttyProfile();
+    var i = jttyComposeNative;
+    if (p === 'unknown' && i >= 0 && jttyTemplates[i] === JTTY_DEFAULT_TEMPLATES[i] && /%E/.test(jttyTemplates[i])) return 'rtty-roundup';
+    return p;
+  }
+
+  // Frame count / duration — or the refusal — beside the composer, from the
+  // same validator the engine runs (jtcat-jtty-validate). Debounced per key.
+  function jttyPreview() {
+    if (!jttyTxEl || !jttyFramesEl) return;
+    if (jttyValidateTimer) clearTimeout(jttyValidateTimer);
+    jttyValidateTimer = setTimeout(function() {
+      jttyValidateTimer = null;
+      var text = jttyTxEl.value;
+      if (!text.trim()) {
+        jttyFramesEl.textContent = '';
+        jttyFramesEl.classList.remove('bad');
+        if (jttySendBtn) jttySendBtn.disabled = !!transmitting;
+        return;
+      }
+      if (!window.api.jtcatJttyValidate) return;
+      var profile = jttyPackProfile();
+      window.api.jtcatJttyValidate(text, profile).then(function(v) {
+        if (!v || jttyTxEl.value !== text) return; // stale
+        if (v.ok) {
+          jttyFramesEl.textContent = v.nframes + (v.nframes === 1 ? ' frame · ' : ' frames · ') + v.durationSec.toFixed(1) + ' s';
+          jttyFramesEl.classList.remove('bad');
+          if (jttySendBtn) jttySendBtn.disabled = !!transmitting;
+        } else {
+          jttyFramesEl.textContent = v.reason;
+          jttyFramesEl.classList.add('bad');
+          if (jttySendBtn) jttySendBtn.disabled = true;
+        }
+      }).catch(function() {});
+    }, 120);
+  }
+
+  function jttySend() {
+    if (!jttyTxEl) return;
+    var text = jttyTxEl.value;
+    if (!text.trim() || transmitting) return;
+    var profile = jttyPackProfile();
+    var go = function() {
+      window.api.jtcatJttySend(text, profile);
+      // Persist the audio frequency the operator actually transmits on.
+      window.api.saveSettings({ jttyAudioFreq: jpTxFreqHz });
+    };
+    if (!window.api.jtcatJttyValidate) { go(); return; }
+    window.api.jtcatJttyValidate(text, profile).then(function(v) {
+      if (v && !v.ok) {
+        jttyFramesEl.textContent = v.reason;
+        jttyFramesEl.classList.add('bad');
+        return;
+      }
+      go();
+    }).catch(go);
+  }
+
+  function jttyFlash(el) {
+    if (!el) return;
+    el.style.outline = '2px solid #e94560';
+    setTimeout(function() { el.style.outline = ''; }, 600);
+  }
+  function jttyUseTemplate(i, send) {
+    var t = jttyTemplates[i];
+    if (!t || !jttyTxEl) return;
+    // A template that names a station needs the station — don't send "%H"
+    // expanded to nothing and let the packer fail on an empty word.
+    if (/%H/.test(t) && !((jttyHisEl && jttyHisEl.value) || '').trim()) { if (jttyHisEl) jttyHisEl.focus(); jttyFlash(jttyHisEl); return; }
+    if (/%Q/.test(t) && !((jttyQueuedEl && jttyQueuedEl.value) || '').trim()) { if (jttyQueuedEl) jttyQueuedEl.focus(); jttyFlash(jttyQueuedEl); return; }
+    if (/%M/.test(t) && !jttyMyCall) { jttyFramesEl.textContent = 'Set your callsign in Settings first'; jttyFramesEl.classList.add('bad'); return; }
+    jttyTxEl.value = jttySubstitute(t);
+    jttyComposeNative = i;
+    jttyPreview();
+    if (send) jttySend(); else jttyTxEl.focus();
+  }
+  function jttyRenderTemplates() {
+    if (!jttyTemplatesEl) return;
+    jttyTemplatesEl.innerHTML = '';
+    jttyTemplates.forEach(function(t, i) {
+      var btn = document.createElement('button');
+      btn.className = 'jp-btn jp-jtty-tpl';
+      btn.textContent = 'F' + (i + 1);
+      btn.title = t + '\n→ ' + (jttySubstitute(t) || '(empty)') + '\n\nClick: compose. Shift+click: compose and send. Right-click: edit.';
+      btn.addEventListener('click', function(e) { jttyUseTemplate(i, e.shiftKey); });
+      btn.addEventListener('contextmenu', function(e) { e.preventDefault(); jttyOpenEditor(i); });
+      jttyTemplatesEl.appendChild(btn);
+    });
+  }
+
+  // --- template editor (right-click a template button) ---
+  var jttyEdEl = document.getElementById('jp-jtty-editor');
+  var jttyEdLabelEl = document.getElementById('jp-jtty-ed-label');
+  var jttyEdTextEl = document.getElementById('jp-jtty-ed-text');
+  var jttyEdSlot = -1;
+  function jttyOpenEditor(i) {
+    if (!jttyEdEl) return;
+    jttyEdSlot = i;
+    jttyEdLabelEl.textContent = 'F' + (i + 1);
+    jttyEdTextEl.value = jttyTemplates[i];
+    jttyEdEl.classList.remove('hidden');
+    jttyEdTextEl.focus();
+  }
+  function jttyCloseEditor() {
+    jttyEdSlot = -1;
+    if (jttyEdEl) jttyEdEl.classList.add('hidden');
+  }
+  function jttySaveTemplates(list) {
+    // null = reset: a null setting is the "use defaults" state, like pskMacros.
+    window.api.saveSettings({ jttyTemplates: list });
+    jttyTemplates = list ? list.slice() : JTTY_DEFAULT_TEMPLATES.slice();
+    jttyRenderTemplates();
+    jttyCloseEditor();
+  }
+
+  // --- decodes list ---
+  function jttyPruneRows() {
+    while (jttyListEl.children.length > JTTY_ROW_CAP) {
+      var first = jttyListEl.firstChild;
+      if (first.dataset && first.dataset.id) delete jttyRows[first.dataset.id];
+      jttyListEl.removeChild(first);
+    }
+  }
+  function jttyScrollIfPinned(wasAtBottom) {
+    if (wasAtBottom) jttyListEl.scrollTop = jttyListEl.scrollHeight;
+  }
+  function jttyAtBottom() {
+    return jttyListEl.scrollHeight - jttyListEl.scrollTop - jttyListEl.clientHeight < 40;
+  }
+  function jttyRowFor(u) {
+    var row = jttyRows[u.id];
+    if (row) return row;
+    row = document.createElement('div');
+    row.className = 'jp-row jp-jtty-row';
+    row.dataset.id = String(u.id);
+    row.innerHTML = '<span class="jp-time"></span><span class="jp-db"></span><span class="jp-df"></span><span class="jp-msg"></span>';
+    row.addEventListener('click', function() { jttyPickCall(row.dataset.text || ''); });
+    jttyListEl.appendChild(row);
+    jttyRows[u.id] = row;
+    jttyPruneRows();
+    return row;
+  }
+  // One decoder update: the row for this message id is created or rewritten.
+  function jttyApplyUpdate(u) {
+    if (!jttyListEl || !u || u.id == null) return;
+    var pinned = jttyAtBottom();
+    var row = jttyRowFor(u);
+    var d = new Date(u.utcMs || Date.now());
+    row.querySelector('.jp-time').textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + ':' + jttyPad2(d.getUTCSeconds());
+    row.querySelector('.jp-db').textContent = (u.snrDb > 0 ? '+' : '') + u.snrDb;
+    row.querySelector('.jp-df').textContent = String(Math.round(u.freqHz));
+    row.querySelector('.jp-msg').textContent = u.text + (u.complete ? '' : ' …');
+    row.dataset.text = u.text || '';
+    row.classList.toggle('jp-jtty-growing', !u.complete);
+    var up = String(u.text || '').toUpperCase();
+    row.classList.toggle('jp-cq', /^CQ\b/.test(up));
+    row.classList.toggle('jp-directed', !!jttyMyCall && (' ' + up + ' ').indexOf(' ' + jttyMyCall + ' ') >= 0);
+    jttyScrollIfPinned(pinned);
+  }
+  // Click a row: the first callsign-looking word that isn't ours becomes %H.
+  function jttyPickCall(text) {
+    var words = String(text).toUpperCase().split(/\s+/);
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i].replace(/[^A-Z0-9/]/g, '');
+      if (w && w !== jttyMyCall && w !== 'CQ' && /^[A-Z0-9/]{3,10}$/.test(w) && /\d/.test(w) && /[A-Z]/.test(w) && !/^\d+$/.test(w)) {
+        if (jttyHisEl) jttyHisEl.value = w;
+        jttyRenderTemplates();
+        return;
+      }
+    }
+  }
+
+  if (window.api.onJtcatJttyRx) {
+    window.api.onJtcatJttyRx(function(batch) {
+      if (!batch || !Array.isArray(batch.updates)) return;
+      batch.updates.forEach(jttyApplyUpdate);
+    });
+  }
+
+  // Our own transmission as a row (red, like FT8's TX rows), and the status
+  // strip's sweep — shared with PSK31's (pskTxT0/pskTxDurMs drive it).
+  window.api.onJtcatTxStatus(function(data) {
+    if (modeSelect.value !== 'JTTY' || !jttyListEl) return;
+    if (data.state === 'tx' && data.message) {
+      pskTxT0 = Date.now();
+      pskTxDurMs = data.durMs && data.durMs > 500 ? data.durMs : 0;
+      var pinned = jttyAtBottom();
+      var row = document.createElement('div');
+      row.className = 'jp-row jp-tx jp-jtty-row';
+      var d = new Date();
+      row.innerHTML = '<span class="jp-time"></span><span class="jp-db">TX</span><span class="jp-df"></span><span class="jp-msg"></span>';
+      row.querySelector('.jp-time').textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + ':' + jttyPad2(d.getUTCSeconds());
+      row.querySelector('.jp-df').textContent = String(data.txFreq || jpTxFreqHz);
+      row.querySelector('.jp-msg').textContent = data.message;
+      jttyListEl.appendChild(row);
+      jttyPruneRows();
+      jttyScrollIfPinned(pinned);
+      if (jttySendBtn) jttySendBtn.disabled = true;
+    } else if (data.state !== 'tx') {
+      pskTxDurMs = 0;
+      if (jttySendBtn) jttySendBtn.disabled = false;
+      jttyPreview();
+    }
+  });
+
+  // F1–F8 compose (Shift = compose and send), as in WSJT-X. Only while the
+  // pane is up, and never over a modifier chord the OS or Electron owns.
+  document.addEventListener('keydown', function(e) {
+    if (modeSelect.value !== 'JTTY') return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    var m = /^F([1-8])$/.exec(e.key || '');
+    if (!m) return;
+    e.preventDefault();
+    jttyUseTemplate(parseInt(m[1], 10) - 1, e.shiftKey);
+  });
+
+  function jttyInit(s) {
+    if (!jttyPane) return;
+    s = s || {};
+    jttyMyCall = String(s.myCallsign || '').toUpperCase().trim();
+    if (Array.isArray(s.jttyTemplates) && s.jttyTemplates.length === JTTY_DEFAULT_TEMPLATES.length) {
+      jttyTemplates = s.jttyTemplates.map(function(t, i) {
+        return typeof t === 'string' && t.trim() ? t.trim().slice(0, 80) : JTTY_DEFAULT_TEMPLATES[i];
+      });
+    }
+    if (jttyProfileEl) jttyProfileEl.value = JTTY_PROFILES.indexOf(s.jttyProfile) >= 0 ? s.jttyProfile : 'unknown';
+    if (jttySerialEl) jttySerialEl.value = String(parseInt(s.jttySerial, 10) > 0 ? parseInt(s.jttySerial, 10) : 1);
+    jttyRefreshExchange(true);
+    jttyRenderTemplates();
+    if (s.jttyAudioFreq && modeSelect.value === 'JTTY') {
+      jpTxFreqHz = Math.max(200, Math.min(2700, parseInt(s.jttyAudioFreq, 10) || 1500));
+      jpRxFreqHz = jpTxFreqHz;
+      txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
+    }
+
+    if (jttyProfileEl) jttyProfileEl.addEventListener('change', function() {
+      if (window.api.jtcatJttySetProfile) window.api.jtcatJttySetProfile(jttyProfile());
+      jttyRefreshExchange(true);
+      jttyRenderTemplates();
+      jttyPreview();
+    });
+    function serialChanged() {
+      if (jttySerialEl) jttySerialEl.value = String(jttySerial());
+      window.api.saveSettings({ jttySerial: jttySerial() });
+      jttyRefreshExchange(true);
+      jttyRenderTemplates();
+    }
+    if (jttySerialEl) jttySerialEl.addEventListener('change', serialChanged);
+    var up = document.getElementById('jp-jtty-serial-up');
+    var dn = document.getElementById('jp-jtty-serial-dn');
+    if (up) up.addEventListener('click', function() { jttySerialEl.value = String(jttySerial() + 1); serialChanged(); });
+    if (dn) dn.addEventListener('click', function() { jttySerialEl.value = String(jttySerial() - 1); serialChanged(); });
+    if (jttyExchEl) jttyExchEl.addEventListener('input', function() { jttyExchEl.dataset.auto = '0'; jttyRenderTemplates(); });
+    if (jttyHisEl) jttyHisEl.addEventListener('input', jttyRenderTemplates);
+    if (jttyQueuedEl) jttyQueuedEl.addEventListener('input', jttyRenderTemplates);
+    if (fdExchInput) fdExchInput.addEventListener('change', function() { if (jttyProfile() === 'field-day') { jttyRefreshExchange(false); jttyRenderTemplates(); } });
+
+    if (jttyTxEl) {
+      jttyTxEl.addEventListener('input', function() { jttyComposeNative = -1; jttyPreview(); });
+      jttyTxEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); jttySend(); }
+      });
+    }
+    if (jttySendBtn) jttySendBtn.addEventListener('click', jttySend);
+    if (jttyStopBtn) jttyStopBtn.addEventListener('click', function() { window.api.jtcatHaltTx(); });
+    if (jttyLogBtn) jttyLogBtn.addEventListener('click', function() { window.api.openQsoLog(); });
+    if (jttyClearBtn) jttyClearBtn.addEventListener('click', function() {
+      if (jttyListEl) jttyListEl.innerHTML = '';
+      jttyRows = {};
+    });
+
+    var edSave = document.getElementById('jp-jtty-ed-save');
+    var edCancel = document.getElementById('jp-jtty-ed-cancel');
+    var edReset = document.getElementById('jp-jtty-ed-reset');
+    if (edSave) edSave.addEventListener('click', function() {
+      if (jttyEdSlot < 0) return;
+      var list = jttyTemplates.slice();
+      list[jttyEdSlot] = (jttyEdTextEl.value.trim() || JTTY_DEFAULT_TEMPLATES[jttyEdSlot]).slice(0, 80);
+      jttySaveTemplates(list);
+    });
+    if (edCancel) edCancel.addEventListener('click', jttyCloseEditor);
+    if (edReset) edReset.addEventListener('click', function() { jttySaveTemplates(null); });
+    if (jttyEdEl) jttyEdEl.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') jttyCloseEditor();
+      else if (e.key === 'Enter') { e.preventDefault(); if (edSave) edSave.click(); }
+    });
+  }
+  // ================== end JTTY ==================
+
   // Auto-restore last band, tune, and start decoding
   window.api.getSettings().then(function(s) {
     // Restore the last mode FIRST so the band buttons carry the correct
     // (FT4/FT2) sub-band frequencies before we match/select a band below.
-    if (s.jtcatLastMode === 'FT4' || s.jtcatLastMode === 'FT2' || s.jtcatLastMode === 'WSPR' || s.jtcatLastMode === 'PSK31') {
+    if (s.jtcatLastMode === 'FT4' || s.jtcatLastMode === 'FT2' || s.jtcatLastMode === 'WSPR' || s.jtcatLastMode === 'PSK31' || s.jtcatLastMode === 'JTTY') {
       modeSelect.value = s.jtcatLastMode;
       updateBandFreqs();
     }
     wsprInit(s);
     pskInit(s);
+    jttyInit(s);
     applyWsprMode(modeSelect.value === 'WSPR');
     applyPskMode(modeSelect.value === 'PSK31');
+    applyJttyMode(modeSelect.value === 'JTTY');
     var lastFreq = s.jtcatLastBandFreq || 14074;
     var bandBtn = document.querySelector('.jtcat-band-btn[data-freq="' + lastFreq + '"]');
     // If no exact match, find the band button closest to the requested frequency
@@ -3456,9 +3866,10 @@ function _applyPopoutTheme(payload) {
     if (!bandBtn) bandBtn = document.querySelector('.jtcat-band-btn[data-band="20m"]');
     if (bandBtn) selectBand(bandBtn, false);
     window.api.jtcatStart(modeSelect.value);
-    // IPC is ordered: lands after jtcat-start built the PSK slice, so the
-    // restored audio center survives the fresh engine's 1500 Hz default.
+    // IPC is ordered: lands after jtcat-start built the PSK/JTTY slice, so the
+    // restored audio frequency survives the fresh engine's 1500 Hz default.
     if (modeSelect.value === 'PSK31') pskSyncFreq();
+    if (modeSelect.value === 'JTTY') jttySyncFreq();
     // Start audio capture directly in the popout window
     startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
   });
@@ -4386,6 +4797,13 @@ function _applyPopoutTheme(payload) {
         jpWfCtx.fillRect(txX - 2, 0, 5, h);
         jpWfCtx.shadowBlur = 0;
       }
+      // JTTY is 127 Hz wide — four tones at 31.25 Hz steps ABOVE the marked
+      // lowest tone (the frequency WSJT-X and rjtty report) — so show the
+      // signal's footprint, not just its lower edge.
+      if (modeSelect.value === 'JTTY') {
+        jpWfCtx.fillStyle = transmitting ? 'rgba(255, 34, 34, 0.22)' : 'rgba(78, 204, 163, 0.18)';
+        jpWfCtx.fillRect(txX + 1, 0, Math.max(2, Math.round(127 / 3000 * w)), h);
+      }
 
       // Auto-detect quietest TX frequency (~every 0.5s)
       popoutQuietFreqFrame++;
@@ -4500,9 +4918,9 @@ function _applyPopoutTheme(payload) {
     var rect = jpWaterfall.getBoundingClientRect();
     var x = e.clientX - rect.left;
     var hz = Math.round(x / rect.width * 3000 / 10) * 10;
-    if (e.shiftKey && modeSelect.value !== 'PSK31') {
-      // Shift+click: set TX only (split TX/RX). PSK31 is transceive — the
-      // audio center IS both directions, so split makes no sense there.
+    if (e.shiftKey && !isKeyboardMode()) {
+      // Shift+click: set TX only (split TX/RX). PSK31 and JTTY are transceive
+      // — the audio frequency IS both directions, so split makes no sense.
       jpTxFreqHz = hz;
       txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
       window.api.jtcatSetTxFreq(hz, true); // operator move — honored under Hold TX Freq, re-pins

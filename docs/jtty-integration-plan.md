@@ -256,7 +256,7 @@ measurement, and the retro re-sweep.
   own-echo silence, refusals, re-render on freq/profile change, contract
   surface, manager branch, static wiring guards) in `npm test` and CI.
 
-### Phase 4 — JTCAT window: JTTY pane (~2 days)
+### Phase 4 — JTCAT window: JTTY pane (~2 days) — DONE 2026-10-04 (beta; live visual check owed)
 
 - Mode select gains JTTY. Pane modelled on `#jp-psk-pane`: a decodes list
   (UTC, DT, freq, SNR, text; rows addressed to `%M` highlighted; click a row
@@ -270,6 +270,39 @@ measurement, and the retro re-sweep.
   (e.g. 14.080–14.099) as a user-editable table, same mechanism as
   `PSK_BAND_FREQS`.
 - Waterfall: 127 Hz marker at the TX frequency; click-to-set.
+
+**Status 2026-10-04 — built (`renderer/jtcat-popout.html/.js`, `#jp-jtty-pane`):**
+
+- JTTY is a visible entry in the mode select (PSK/WSPR stay hidden); the
+  pane swaps in like PSK31's and shares its chrome. Decodes are `.jp-row`
+  MESSAGES keyed by decoder id: a row appears on the first frame (italic,
+  trailing …) and is rewritten until its EOM; CQ rows green, rows naming
+  `myCallsign` red-bordered like FT8's directed rows. Click a row → His Call.
+  Our own transmissions are red `TX` rows.
+- Composer: one `<input maxlength=80>`; Enter sends; the frame counter
+  beside it (`jtcat-jtty-validate`, debounced) shows `N frames · X s` or the
+  refusal in red and disables Send. F1–F8 buttons and F-keys compose
+  (Shift = compose and send); right-click edits a template
+  (`settings.jttyTemplates`, null = the eight WSJT-X defaults).
+- Fields: His Call (`%H`), Exchange (`%E`, follows the serial/profile until
+  edited; Field Day takes `jtcatFdExch`), serial spinner (`settings.jttySerial`),
+  Next Call (`%Q`). Exchange profile select (Serial / Field Day / RTTY Roundup →
+  `settings.jttyProfile` via `jtcat-jtty-set-profile`).
+- **Native-serial rule:** an unedited default template containing `%E` under
+  the Serial/Unknown profile is sent with a per-message `rtty-roundup`
+  profile (`JttyEngine.setTxMessage(text, {profile})`), so `K1ABC 599 001`
+  packs as call + SERIAL (2 frames) instead of three text frames — the design
+  doc's "native macros default to serial exchanges". The operator's profile
+  never moves from a Send.
+- Band dials `JTTY_BAND_FREQS`: the RTTY sub-band edges (14080 etc.) until
+  the community settles — not yet a user-editable table.
+- Waterfall: a translucent 127 Hz footprint to the right of the (lowest-tone)
+  marker; Shift+click split is refused in JTTY as in PSK31 (`isKeyboardMode()`).
+  The status strip sweeps across a Send using the PSK31 sweep variables.
+- `settings.jttyAudioFreq` persists the audio frequency on Send and is pushed
+  after `jtcat-start` (`jttySyncFreq`), the PSK ordering lesson.
+- Guards: `test/jtty-engine-test.js` "JTCAT pop-out: the JTTY pane (static)".
+  Not yet done: a live look at the pane in a dev instance.
 
 ### Phase 5 — Logging (½ day)
 

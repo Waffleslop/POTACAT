@@ -210,6 +210,19 @@
     .jp-psk-me-label { width: 70px; font-size: 11px; font-family: monospace; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); }
     .jp-psk-me-hint { font-size: 10px; color: var(--text-dim); }
     .jp-psk-me-text { width: 100%; box-sizing: border-box; resize: vertical; font-family: monospace; font-size: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    /* JTTY pane — shares the PSK31 pane's chrome (.jp-psk-pane/.jp-psk-status/
+       .jp-psk-txwrap); decodes are .jp-row messages, not a character stream. */
+    .jp-jtty-tx { flex: 1; min-width: 0; font-family: monospace; font-size: 13px; text-transform: uppercase; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
+    .jp-jtty-frames { font-size: 10px; color: var(--text-dim); font-family: monospace; white-space: nowrap; min-width: 96px; text-align: right; }
+    .jp-jtty-frames.bad { color: #e94560; white-space: normal; max-width: 260px; }
+    .jp-jtty-exch { width: 104px; font-size: 11px; font-family: monospace; padding: 3px 5px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); text-transform: uppercase; }
+    .jp-jtty-serial-wrap { display: inline-flex; align-items: center; gap: 2px; }
+    .jp-jtty-serial-wrap input { width: 50px; font-size: 11px; font-family: monospace; padding: 3px 4px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); text-align: center; }
+    .jp-jtty-serial-wrap .jp-btn { padding: 1px 7px; }
+    .jp-jtty-select { font-size: 10px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 1px 3px; }
+    .jp-jtty-tpl { min-width: 30px; font-weight: 700; }
+    .jp-row.jp-jtty-row .jp-time { min-width: 60px; }
+    .jp-row.jp-jtty-growing .jp-msg { color: var(--text-dim); font-style: italic; }
 
     /* Controls bar */
     .jp-controls { padding: 6px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 12px; }
@@ -382,6 +395,7 @@
         <option value="FT2">FT2</option>
         <option value="WSPR" hidden>WSPR</option>
         <option value="PSK31" hidden>PSK</option>
+        <option value="JTTY" title="JTTY (WSJT-X 3.2) — keyboard and contest mode, 127 Hz wide, no timed sequences. Beta.">JTTY</option>
       </select>
     </div>
     <span id="jp-radio-freq" style="font-size:12px;font-weight:bold;color:#4fc3f7;white-space:nowrap;font-family:monospace;" title="Radio frequency">—</span>
@@ -538,6 +552,65 @@
             <button id="jp-psk-me-cancel" class="jp-btn">Cancel</button>
             <span style="margin-left:auto;"></span>
             <button id="jp-psk-me-reset" class="jp-btn" title="Restore all six default macros">Reset all</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- JTTY pane (WSJT-X 3.2 keyboard/contest mode; swaps in like the PSK31
+         pane). Decodes are MESSAGES: a row appears when the first frame
+         decodes and grows until its EOM. Click a row to take the callsign.
+         The composer is one line of up to 80 characters; F1-F8 are WSJT-X's
+         templates (%M my call, %H his call, %E exchange, %Q next call);
+         Shift+click or Shift+F-key composes AND sends. Send IS the arm action. -->
+    <div id="jp-jtty-pane" class="jp-psk-pane hidden">
+      <div class="jp-psk-status">
+        <span>JTTY</span>
+        <span class="p-q" title="4-GFSK, 31.25 baud, 1.888 s frames, no timed sequences">127 Hz</span>
+        <label style="display:inline-flex;align-items:center;gap:4px;" title="Exchange profile: how %E and a typed exchange are packed. Serial: 599 and a serial number. Field Day: your class and section (the FD exchange under the gear). RTTY Roundup: serial or state/province.">Exchange
+          <select id="jp-jtty-profile" class="jp-jtty-select">
+            <option value="unknown">Serial</option>
+            <option value="field-day">Field Day</option>
+            <option value="rtty-roundup">RTTY Roundup</option>
+          </select>
+        </label>
+        <span style="margin-left:auto;"></span>
+        <button id="jp-jtty-clear" class="jtcat-filter-btn" title="Clear decodes">Clear</button>
+      </div>
+      <div id="jp-jtty-list" class="jp-decode-list" title="Decoded messages. Click a row to take its callsign."></div>
+      <div class="jp-psk-txwrap">
+        <div class="jp-psk-macro-row">
+          <input id="jp-jtty-tx" class="jp-jtty-tx" type="text" maxlength="80" placeholder="Type a message (up to 80 characters) or press F1-F8. Enter sends." spellcheck="false" autocomplete="off">
+          <span id="jp-jtty-frames" class="jp-jtty-frames" title="How many 1.9 s frames this message takes on air"></span>
+        </div>
+        <div class="jp-psk-macro-row">
+          <input id="jp-jtty-his" class="jp-psk-their" type="text" maxlength="12" placeholder="HIS CALL" title="%H: the station you are working. Click a decoded row to fill it." autocomplete="off">
+          <input id="jp-jtty-exch" class="jp-jtty-exch" type="text" maxlength="20" placeholder="EXCHANGE" title="%E: what you send. 599 and your serial, or your Field Day class and section. Edit freely; the serial buttons rewrite it." autocomplete="off">
+          <span class="jp-jtty-serial-wrap" title="Serial number. Rewrites the exchange.">
+            <button id="jp-jtty-serial-dn" class="jp-btn">&minus;</button>
+            <input id="jp-jtty-serial" type="number" min="1" max="9999" value="1">
+            <button id="jp-jtty-serial-up" class="jp-btn">+</button>
+          </span>
+          <input id="jp-jtty-queued" class="jp-psk-their" type="text" maxlength="12" placeholder="NEXT CALL" title="%Q: the station waiting, for F6 (TU NOW %Q %E)" autocomplete="off">
+          <span style="margin-left:auto;"></span>
+          <button id="jp-jtty-send" class="jp-btn" style="border-color:#e94560;color:#e94560;" title="Transmit the composed message as one transmission (Enter)">Send</button>
+          <button id="jp-jtty-stop" class="jp-btn jp-halt" title="Stop transmitting immediately (drops PTT)">Stop</button>
+          <button id="jp-jtty-log" class="jp-btn" title="Open QSO log">Log</button>
+        </div>
+        <div class="jp-psk-macro-row">
+          <span id="jp-jtty-templates" style="display:contents;"></span>
+          <span class="jp-psk-me-hint" style="margin-left:auto;">F-key: compose &middot; Shift: compose and send &middot; right-click: edit</span>
+        </div>
+        <div id="jp-jtty-editor" class="jp-psk-macro-editor hidden">
+          <div class="jp-psk-me-row">
+            <span id="jp-jtty-ed-label" class="jp-psk-me-label" style="width:auto;"></span>
+            <span class="jp-psk-me-hint">%M my call &middot; %H his call &middot; %E exchange &middot; %Q next call. The eight defaults are WSJT-X's; an edited template is sent as literal text.</span>
+          </div>
+          <input id="jp-jtty-ed-text" class="jp-psk-me-text" type="text" maxlength="80" spellcheck="false" autocomplete="off">
+          <div class="jp-psk-me-row">
+            <button id="jp-jtty-ed-save" class="jp-btn">Save</button>
+            <button id="jp-jtty-ed-cancel" class="jp-btn">Cancel</button>
+            <span style="margin-left:auto;"></span>
+            <button id="jp-jtty-ed-reset" class="jp-btn" title="Restore the eight WSJT-X templates">Reset all</button>
           </div>
         </div>
       </div>

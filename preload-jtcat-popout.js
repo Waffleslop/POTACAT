@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
   // message grows and closes with complete:true).
   jtcatJttySend: (text, profile) => ipcRenderer.send('jtcat-jtty-send', { text, profile }),
   jtcatJttySetProfile: (profile) => ipcRenderer.send('jtcat-jtty-set-profile', profile),
+  jtcatJttyValidate: (text, profile) => ipcRenderer.invoke('jtcat-jtty-validate', { text, profile }),
   onJtcatJttyRx: (cb) => ipcRenderer.on('jtcat-jtty-rx', (_e, data) => cb(data)),
   onJtcatDupeWarning: (cb) => ipcRenderer.on('jtcat-dupe-warning', (_e, data) => cb(data)),
   // Stalled-QSO closeout notice ("logged, sending final 73") — informational,

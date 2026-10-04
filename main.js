@@ -35385,14 +35385,16 @@ app.whenReady().then(() => {
   // cannot carry (encode-failed reaches the CAT log via the shared handler)
   // rather than altering it: a JTTY frame is a packed sentence, not a byte
   // stream, so "trim to fit" would change what the other station reads.
+  // `profile` packs THIS message only (a native template's serial exchange
+  // under an "Unknown" activity); the operator's profile is set by
+  // jtcat-jtty-set-profile and never by a Send.
   ipcMain.on('jtcat-jtty-send', (_e, payload) => {
     if (!ft8Engine || ft8Engine._mode !== 'JTTY') return;
     const p = (payload && typeof payload === 'object') ? payload : { text: payload };
     const t = String(p.text || '');
     if (!t.trim()) return;
-    if (p.profile && typeof ft8Engine.setProfile === 'function') jtcatJttySetProfile(p.profile);
     ft8Engine._txEnabled = true;
-    Promise.resolve(ft8Engine.setTxMessage(t)).then((samples) => {
+    Promise.resolve(ft8Engine.setTxMessage(t, { profile: p.profile })).then((samples) => {
       if (!ft8Engine || ft8Engine._mode !== 'JTTY') return;
       if (!samples) return; // refused — encode-failed already logged it
       if (!ft8Engine.requestTx()) {
@@ -35401,6 +35403,15 @@ app.whenReady().then(() => {
     });
   });
   ipcMain.on('jtcat-jtty-set-profile', (_e, profile) => jtcatJttySetProfile(profile));
+  // Composer preview: frame count and duration before Send, or the refusal —
+  // the same validator the engine runs, under the profile the Send will use.
+  ipcMain.handle('jtcat-jtty-validate', (_e, payload) => {
+    const p = (payload && typeof payload === 'object') ? payload : { text: payload };
+    const profile = _jttyEngineMod.PROFILES.includes(p.profile) ? p.profile
+      : ((ft8Engine && ft8Engine._mode === 'JTTY' && ft8Engine.profile) || settings.jttyProfile || 'unknown');
+    const v = _jttyEngineMod.validateMessage(p.text, profile);
+    return v.ok ? { ok: true, text: v.text, nframes: v.nframes, durationSec: v.durationSec } : { ok: false, reason: v.reason };
+  });
   // Manual TX message validation — ground truth is the native codec (the same
   // pack the TX path runs), so anything accepted here is guaranteed to encode
   // instead of silently skipping TX at the cycle boundary. Falls back to a

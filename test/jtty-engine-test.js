@@ -202,6 +202,26 @@ function onAir(pcm, leadSec, tailSec) {
     assert.deepStrictEqual(PROFILES, ['unknown', 'field-day', 'rtty-roundup']);
   });
 
+  await test('a per-message profile packs a native template\'s serial exchange without moving the operator\'s profile', async () => {
+    const e = new JttyEngine({ worker: false });
+    e.start(); e._txEnabled = true;
+    assert.strictEqual(e.profile, 'unknown');
+    await e.setTxMessage('K1ABC 599 001');
+    const plain = e._txRenderedFrames;
+    await e.setTxMessage('K1ABC 599 001', { profile: 'rtty-roundup' });
+    assert.strictEqual(e.profile, 'unknown', 'the operator\'s profile is untouched');
+    assert.ok(e._txRenderedFrames < plain, `serial exchange is shorter: ${e._txRenderedFrames} vs ${plain}`);
+    let started = null; e.on('tx-start', (d) => { started = d; });
+    assert.strictEqual(e.requestTx(), true, 'rendered under the override is not stale');
+    assert.strictEqual(started.nframes, e._txRenderedFrames);
+    e.txComplete();
+    // A later plain setTxMessage drops the override.
+    await e.setTxMessage('K1ABC 599 001');
+    assert.strictEqual(e._txRenderedFrames, plain);
+    assert.strictEqual(validateMessage('K1ABC 599 001', 'rtty-roundup').nframes, e.validate('K1ABC 599 001', 'rtty-roundup').nframes);
+    e.stop();
+  });
+
   await test('Ft8Engine-contract surface: every method main.js calls unconditionally exists', () => {
     const e = new JttyEngine({ worker: false });
     for (const m of ['start', 'stop', 'feedAudio', 'setTxFreq', 'setRxFreq', 'setTxMessage', 'requestTx', 'txComplete',
@@ -258,7 +278,43 @@ function onAir(pcm, leadSec, tailSec) {
     assert.ok(jttySites >= pskSites, `JTTY appears beside every startsWith('PSK') mapping (${jttySites} vs ${pskSites})`);
     assert.ok(mgr.includes("config.mode === 'JTTY'") && mgr.includes('new JttyEngine({ profile: config.jttyProfile })'), 'manager branch');
     assert.ok(/'js8-tx-done', 'jtty-rx', 'encode-failed'/.test(mgr), 'manager forwards jtty-rx');
-    for (const k of ['jtcatJttySend', 'jtcatJttySetProfile', 'onJtcatJttyRx']) assert.ok(pre.includes(k), 'preload ' + k);
+    for (const k of ['jtcatJttySend', 'jtcatJttySetProfile', 'jtcatJttyValidate', 'onJtcatJttyRx']) assert.ok(pre.includes(k), 'preload ' + k);
+    assert.ok(main.includes("ipcMain.handle('jtcat-jtty-validate'"), 'composer preview IPC');
+    assert.ok(main.includes('setTxMessage(t, { profile: p.profile })'), 'Send carries a per-message profile');
+    assert.ok(!/jtcat-jtty-send[\s\S]{0,600}jtcatJttySetProfile\(p\.profile\)/.test(main), 'a Send never persists the profile');
+  });
+
+  await test('JTCAT pop-out: the JTTY pane (static)', () => {
+    const root = path.join(__dirname, '..');
+    const html = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.html'), 'utf8');
+    const js = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8');
+    assert.ok(/<option value="JTTY"[^>]*>JTTY<\/option>/.test(html), 'JTTY is in the mode select, not hidden');
+    for (const id of ['jp-jtty-pane', 'jp-jtty-list', 'jp-jtty-tx', 'jp-jtty-frames', 'jp-jtty-profile', 'jp-jtty-his', 'jp-jtty-exch',
+      'jp-jtty-serial', 'jp-jtty-serial-up', 'jp-jtty-serial-dn', 'jp-jtty-queued', 'jp-jtty-templates', 'jp-jtty-send', 'jp-jtty-stop',
+      'jp-jtty-log', 'jp-jtty-clear', 'jp-jtty-editor', 'jp-jtty-ed-text', 'jp-jtty-ed-save', 'jp-jtty-ed-cancel', 'jp-jtty-ed-reset']) {
+      assert.ok(html.includes(`id="${id}"`), 'markup ' + id);
+    }
+    assert.ok(html.includes('maxlength="80"'), 'the composer stops at the grammar\'s 80 characters');
+    // The eight templates are WSJT-X's, verbatim (jtty_design.md).
+    const m = js.match(/var JTTY_DEFAULT_TEMPLATES = (\[[^\]]*\]);/);
+    assert.ok(m, 'template table present');
+    assert.deepStrictEqual(JSON.parse(m[1].replace(/'/g, '"')), ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E']);
+    assert.ok(/var JTTY_BAND_FREQS = \{[\s\S]*?'20m': 14080[\s\S]*?\};/.test(js), 'RTTY sub-band dials');
+    assert.ok(js.includes("m === 'JTTY' ? JTTY_BAND_FREQS"), 'band buttons follow the mode');
+    for (const fn of ['function applyJttyMode(', 'function jttySyncFreq(', 'function jttyInit(', 'function jttyPackProfile(', 'function jttyApplyUpdate(', 'function isKeyboardMode(']) {
+      assert.ok(js.includes(fn), fn);
+    }
+    assert.ok(js.includes("applyJttyMode(modeSelect.value === 'JTTY');"), 'mode change swaps the pane');
+    assert.ok(/window\.api\.jtcatStart\(modeSelect\.value\);[\s\S]{0,400}if \(modeSelect\.value === 'JTTY'\) jttySyncFreq\(\);/.test(js), 'restored audio frequency is pushed AFTER jtcat-start');
+    assert.ok(js.includes("s.jtcatLastMode === 'JTTY'"), 'reopening JTCAT comes back in JTTY');
+    // Every PSK-only exclusion that is really "keyboard mode" uses the shared predicate;
+    // the one bare PSK31 guard left is PSK31's own TX-echo handler.
+    assert.strictEqual((js.match(/modeSelect\.value !== 'PSK31'/g) || []).length, 1, 'keyboard-mode guards share isKeyboardMode()');
+    assert.ok(js.includes("if (mode === 'PSK31' || mode === 'JTTY') {"), 'status strip sweeps for JTTY too');
+    assert.ok(/if \(modeSelect\.value === 'JTTY'\) \{\s*jpWfCtx\.fillStyle[\s\S]{0,200}127 \/ 3000/.test(js), '127 Hz footprint on the waterfall');
+    assert.ok(js.includes("jttyTemplates[i] === JTTY_DEFAULT_TEMPLATES[i] && /%E/.test(jttyTemplates[i])) return 'rtty-roundup'"), 'unedited native templates pack a serial exchange');
+    assert.ok(js.includes("window.api.jtcatJttySend(text, profile)"), 'Send passes the per-message profile');
+    assert.ok(js.includes('window.api.onJtcatJttyRx('), 'RX updates are consumed');
   });
 
   console.log(`\nJTTY engine: ${pass} passed, ${fail} failed`);
