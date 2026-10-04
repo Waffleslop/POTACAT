@@ -301,6 +301,14 @@ measurement, and the retro re-sweep.
   The status strip sweeps across a Send using the PSK31 sweep variables.
 - `settings.jttyAudioFreq` persists the audio frequency on Send and is pushed
   after `jtcat-start` (`jttySyncFreq`), the PSK ordering lesson.
+- **Reachable from More ▾ JTTY** (`view-jtty-btn`): saves `jtcatLastMode`
+  for a fresh window AND passes the mode (`jtcatPopoutOpen('JTTY')` →
+  `jtcat-popout-select-mode`), so an already-open JTCAT window switches
+  instead of staying in FT8 — PSK31's entry had that gap and got the same
+  fix. **Tune and ATU** sit in the FT8 controls bar, which the pane swap
+  hides, so the JTTY and PSK31 panes carry their own buttons, driven by the
+  same handlers (`.jp-tune` / `.jp-atu`); the bottom bar's RX, Drive,
+  S-meter, PWR, SWR and TX Pwr meters are outside the swap and stay.
 - Guards: `test/jtty-engine-test.js` "JTCAT pop-out: the JTTY pane (static)".
   Checked live 2026-10-04 in a second instance (`--user-data-dir` scratch
   profile + `--remote-debugging-port`, driven over CDP): the pane swaps in

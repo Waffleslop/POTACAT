@@ -12466,9 +12466,16 @@ bindClick(document.getElementById('view-wspr-btn'), () => {
   window.api.saveSettings({ jtcatLastMode: 'WSPR' });
   window.api.jtcatPopoutOpen();
 });
+// PSK31 / JTTY from the More menu: the mode is saved for a fresh pop-out and
+// ALSO passed along, so an already-open JTCAT window switches instead of
+// staying in FT8 (the saved mode is read only at load).
 bindClick(document.getElementById('view-psk31-btn'), () => {
   window.api.saveSettings({ jtcatLastMode: 'PSK31' });
-  window.api.jtcatPopoutOpen();
+  window.api.jtcatPopoutOpen('PSK31');
+});
+bindClick(document.getElementById('view-jtty-btn'), () => {
+  window.api.saveSettings({ jtcatLastMode: 'JTTY' });
+  window.api.jtcatPopoutOpen('JTTY');
 });
 bindClick(document.getElementById('view-mercury-btn'), () => { if (window.api.mercuryPopoutOpen) window.api.mercuryPopoutOpen(); });
 bindClick(document.getElementById('view-js8call-btn'), () => { if (window.api.js8PopoutOpen) window.api.js8PopoutOpen(); });

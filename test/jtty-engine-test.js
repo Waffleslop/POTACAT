@@ -345,6 +345,23 @@ function onAir(pcm, leadSec, tailSec) {
     assert.ok(js.includes("jttyTemplates[i] === JTTY_DEFAULT_TEMPLATES[i] && /%E/.test(jttyTemplates[i])) return 'rtty-roundup'"), 'unedited native templates pack a serial exchange');
     assert.ok(js.includes("window.api.jtcatJttySend(text, profile)"), 'Send passes the per-message profile');
     assert.ok(js.includes('window.api.onJtcatJttyRx('), 'RX updates are consumed');
+    // Tune and ATU live in the FT8 controls bar, which the pane swap hides —
+    // the keyboard-mode panes carry their own, driven by the same handlers.
+    for (const id of ['jp-jtty-tune', 'jp-jtty-atu', 'jp-psk-tune', 'jp-psk-atu']) assert.ok(html.includes(`id="${id}"`), 'pane control ' + id);
+    assert.ok(/id="jp-jtty-tune" class="jp-btn jp-tune"/.test(html) && /id="jp-jtty-atu" class="jp-btn jp-atu"/.test(html), 'pane buttons share the bar buttons\' classes');
+    assert.ok(js.includes("document.querySelectorAll('.jp-tune')") && js.includes("document.querySelectorAll('.jp-atu')"), 'one handler drives every Tune / ATU button');
+    assert.ok(!js.includes("var tuneBtn = document.getElementById('jp-tune');") || !js.includes('tuneBtn.addEventListener'), 'no single-button tune wiring left');
+    // Reachable from the More menu, and an open window switches rather than staying in FT8.
+    const index = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+    const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
+    const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+    const preload = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
+    const prePop = fs.readFileSync(path.join(root, 'preload-jtcat-popout.js'), 'utf8');
+    assert.ok(index.includes('id="view-jtty-btn"'), 'More menu entry');
+    assert.ok(/view-jtty-btn'\), \(\) => \{\s*window\.api\.saveSettings\(\{ jtcatLastMode: 'JTTY' \}\);\s*window\.api\.jtcatPopoutOpen\('JTTY'\);/.test(app), 'menu saves the mode AND passes it');
+    assert.ok(preload.includes("jtcatPopoutOpen: (mode) => ipcRenderer.send('jtcat-popout-open', mode)"), 'preload passes the mode');
+    assert.ok(main.includes("jtcatPopoutWin.webContents.send('jtcat-popout-select-mode', mode);"), 'main tells an open window');
+    assert.ok(prePop.includes('onJtcatPopoutSelectMode') && js.includes('window.api.onJtcatPopoutSelectMode(') && js.includes("modeSelect.dispatchEvent(new Event('change'))"), 'the window switches through the dropdown handler');
   });
 
   console.log(`\nJTTY engine: ${pass} passed, ${fail} failed`);

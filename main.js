@@ -28571,7 +28571,14 @@ app.whenReady().then(() => {
       }
     });
   };
-  ipcMain.on('jtcat-popout-open', () => {
+  ipcMain.on('jtcat-popout-open', (_e, mode) => {
+    // A More-menu pick (PSK31 / JTTY) names its mode. A fresh window reads
+    // settings.jtcatLastMode (saved by the renderer first, IPC is ordered);
+    // an already-open window must be TOLD, or it stays in whatever it was.
+    const existed = !!(jtcatPopoutWin && !jtcatPopoutWin.isDestroyed());
+    if (existed && typeof mode === 'string' && mode) {
+      jtcatPopoutWin.webContents.send('jtcat-popout-select-mode', mode);
+    }
     // The OPERATOR asked for this window — WSPR/PSK31-on-idle calls
     // openJtcatPopout() directly, never through IPC, so arriving here means a
     // deliberate click. Hand the popout over NOW: opening FT8 counts as

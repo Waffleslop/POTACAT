@@ -402,7 +402,8 @@ contextBridge.exposeInMainWorld('api', {
   vfoTunedSpot: (spot) => ipcRenderer.send('vfo-tuned-spot', spot),
   onVfoPopoutStatus: (cb) => ipcRenderer.on('vfo-popout-status', (_e, open) => cb(open)),
   // JTCAT pop-out
-  jtcatPopoutOpen: () => ipcRenderer.send('jtcat-popout-open'),
+  // Optional mode ('PSK31' | 'JTTY' | ...): an already-open window switches to it.
+  jtcatPopoutOpen: (mode) => ipcRenderer.send('jtcat-popout-open', mode),
   // Spot Target: arm JTCAT to auto-call a clicked FT8/FT4 spot's activator
   // once they're heard (slot parity comes from the decode, never guessed).
   jtcatSpotTargetSet: (t) => ipcRenderer.send('jtcat-spot-target-set', t),

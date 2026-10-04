@@ -1671,6 +1671,17 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // The More menu picked PSK31/JTTY while this window was already open: switch
+  // exactly as if the operator used the dropdown (same handler, same order).
+  if (window.api.onJtcatPopoutSelectMode) {
+    window.api.onJtcatPopoutSelectMode(function(mode) {
+      if (!mode || modeSelect.value === mode) return;
+      if (!Array.prototype.some.call(modeSelect.options, function(o) { return o.value === mode; })) return;
+      modeSelect.value = mode;
+      modeSelect.dispatchEvent(new Event('change'));
+    });
+  }
+
   // --- Mode change ---
   modeSelect.addEventListener('change', function() {
     updateBandFreqs();
@@ -2258,18 +2269,23 @@ function _applyPopoutTheme(payload) {
     setTxMsgDisplay('--');
   });
 
-  if (tuneBtn) {
-    tuneBtn.addEventListener('click', function() { window.api.jtcatTuneToggle(); });
-  }
+  // Tune lives in the FT8 controls bar AND in the PSK31/JTTY panes (the pane
+  // swap hides the bar, which left those modes with no way to tune — Casey
+  // 2026-10-04). Every .jp-tune button is the same control with the same state.
+  var tuneBtns = Array.prototype.slice.call(document.querySelectorAll('.jp-tune'));
+  tuneBtns.forEach(function(b) {
+    b.addEventListener('click', function() { window.api.jtcatTuneToggle(); });
+  });
   window.api.onJtcatTuneState(function(state) {
-    if (!tuneBtn) return;
-    if (state.active) {
-      tuneBtn.classList.add('active');
-      tuneBtn.textContent = 'Tune ' + state.secondsRemaining;
-    } else {
-      tuneBtn.classList.remove('active');
-      tuneBtn.textContent = 'Tune';
-    }
+    tuneBtns.forEach(function(b) {
+      if (state.active) {
+        b.classList.add('active');
+        b.textContent = 'Tune ' + state.secondsRemaining;
+      } else {
+        b.classList.remove('active');
+        b.textContent = 'Tune';
+      }
+    });
   });
 
   qsoCancelBtn.addEventListener('click', function() {
@@ -2288,14 +2304,17 @@ function _applyPopoutTheme(payload) {
   // dispatcher in main. Not a toggle: every press starts a tune (a button that
   // bypassed the tuner on the second tap would be surprising, and the desktop,
   // VFO popout and phone all share this behavior).
-  var atuBtn = document.getElementById('jp-atu');
-  if (atuBtn && window.api.rigControl) {
+  // Same control in the controls bar and in the PSK31/JTTY panes (.jp-atu).
+  var atuBtns = Array.prototype.slice.call(document.querySelectorAll('.jp-atu'));
+  if (atuBtns.length && window.api.rigControl) {
     var atuTimer = null;
-    atuBtn.addEventListener('click', function() {
-      window.api.rigControl({ action: 'atu-tune' });
-      atuBtn.classList.add('tuning');
-      if (atuTimer) clearTimeout(atuTimer);
-      atuTimer = setTimeout(function() { atuBtn.classList.remove('tuning'); atuTimer = null; }, 5000);
+    atuBtns.forEach(function(b) {
+      b.addEventListener('click', function() {
+        window.api.rigControl({ action: 'atu-tune' });
+        atuBtns.forEach(function(x) { x.classList.add('tuning'); });
+        if (atuTimer) clearTimeout(atuTimer);
+        atuTimer = setTimeout(function() { atuBtns.forEach(function(x) { x.classList.remove('tuning'); }); atuTimer = null; }, 5000);
+      });
     });
   }
 

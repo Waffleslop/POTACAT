@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('api', {
   openLogWith: (prefill) => ipcRenderer.send('log-popout-open', prefill),
   onJtcatJttyRx: (cb) => ipcRenderer.on('jtcat-jtty-rx', (_e, data) => cb(data)),
   onJtcatJttyRefused: (cb) => ipcRenderer.on('jtcat-jtty-refused', (_e, data) => cb(data)),
+  // The More menu asked for a mode while this window was already open.
+  onJtcatPopoutSelectMode: (cb) => ipcRenderer.on('jtcat-popout-select-mode', (_e, mode) => cb(mode)),
   onJtcatDupeWarning: (cb) => ipcRenderer.on('jtcat-dupe-warning', (_e, data) => cb(data)),
   // Stalled-QSO closeout notice ("logged, sending final 73") — informational,
   // NOT the error channel: phase:'error' force-clears qsoState/txEnabled,
