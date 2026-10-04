@@ -222,6 +222,7 @@
     .jp-jtty-serial-wrap .jp-btn { padding: 1px 7px; }
     .jp-jtty-select { font-size: 10px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 1px 3px; }
     .jp-jtty-tpl { min-width: 30px; font-weight: 700; }
+    .jp-jtty-tpl .k { font-size: 9px; font-weight: 400; opacity: 0.65; margin-left: 5px; font-family: monospace; }
     .jp-row.jp-jtty-row .jp-time { min-width: 60px; }
     .jp-row.jp-jtty-growing .jp-msg { color: var(--text-dim); font-style: italic; }
 
@@ -563,7 +564,7 @@
          pane). Decodes are MESSAGES: a row appears when the first frame
          decodes and grows until its EOM. Click a row to take the callsign.
          The composer is one line of up to 80 characters; F1-F8 are WSJT-X's
-         templates (%M my call, %H his call, %E exchange, %Q next call);
+         templates (%M my call, %H their call, %E exchange, %Q next call);
          Shift+click or Shift+F-key composes AND sends. Send IS the arm action. -->
     <div id="jp-jtty-pane" class="jp-psk-pane hidden">
       <div class="jp-psk-status">
@@ -586,7 +587,7 @@
           <span id="jp-jtty-frames" class="jp-jtty-frames" title="How many 1.9 s frames this message takes on air"></span>
         </div>
         <div class="jp-psk-macro-row">
-          <input id="jp-jtty-his" class="jp-psk-their" type="text" maxlength="12" placeholder="HIS CALL" title="%H: the station you are working. Click a decoded row to fill it." autocomplete="off">
+          <input id="jp-jtty-his" class="jp-psk-their" type="text" maxlength="12" placeholder="THEIR CALL" title="%H: the station you are working. Click a decoded row to fill it." autocomplete="off">
           <input id="jp-jtty-exch" class="jp-jtty-exch" type="text" maxlength="20" placeholder="EXCHANGE" title="%E: what you send. 599 and your serial, or your Field Day class and section. Edit freely; the serial buttons rewrite it." autocomplete="off">
           <span class="jp-jtty-serial-wrap" title="Serial number. Rewrites the exchange.">
             <button id="jp-jtty-serial-dn" class="jp-btn">&minus;</button>
@@ -602,20 +603,27 @@
         </div>
         <div class="jp-psk-macro-row">
           <span id="jp-jtty-templates" style="display:contents;"></span>
-          <button id="jp-jtty-log" class="jp-btn" title="Log the QSO with His Call (opens the Log QSO window)">Log</button>
-          <span class="jp-psk-me-hint" style="margin-left:auto;">F-key: compose &middot; Shift: compose and send &middot; right-click: edit</span>
+          <button id="jp-jtty-add" class="jp-btn" title="Add a macro">+</button>
+          <button id="jp-jtty-log" class="jp-btn" title="Log the QSO with the station in Their Call (opens the Log QSO window)">Log</button>
+          <span class="jp-psk-me-hint" style="margin-left:auto;">click or hotkey: compose &middot; Shift: compose and send &middot; right-click: edit</span>
         </div>
+        <!-- Macro editor: name, text, hotkey. One macro per hotkey; assigning a
+             key takes it from whoever had it. -->
         <div id="jp-jtty-editor" class="jp-psk-macro-editor hidden">
           <div class="jp-psk-me-row">
-            <span id="jp-jtty-ed-label" class="jp-psk-me-label" style="width:auto;"></span>
-            <span class="jp-psk-me-hint">%M my call &middot; %H his call &middot; %E exchange &middot; %Q next call. The eight defaults are WSJT-X's; an edited template is sent as literal text.</span>
+            <input id="jp-jtty-ed-label" class="jp-psk-me-label" type="text" maxlength="12" placeholder="Name">
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);">Hotkey
+              <select id="jp-jtty-ed-key" class="jp-jtty-select"></select>
+            </label>
+            <span class="jp-psk-me-hint">%M my call &middot; %H their call &middot; %E exchange &middot; %Q next call &middot; %G my grid &middot; %N serial. WSJT-X's eight texts pack natively; anything else is sent as typed.</span>
           </div>
-          <input id="jp-jtty-ed-text" class="jp-psk-me-text" type="text" maxlength="80" spellcheck="false" autocomplete="off">
+          <input id="jp-jtty-ed-text" class="jp-psk-me-text" type="text" maxlength="80" spellcheck="false" autocomplete="off" placeholder="Macro text">
           <div class="jp-psk-me-row">
             <button id="jp-jtty-ed-save" class="jp-btn">Save</button>
             <button id="jp-jtty-ed-cancel" class="jp-btn">Cancel</button>
+            <button id="jp-jtty-ed-remove" class="jp-btn" title="Remove this macro">Remove</button>
             <span style="margin-left:auto;"></span>
-            <button id="jp-jtty-ed-reset" class="jp-btn" title="Restore the eight WSJT-X templates">Reset all</button>
+            <button id="jp-jtty-ed-reset" class="jp-btn" title="Restore the eight WSJT-X templates on F1-F8">Reset all</button>
           </div>
         </div>
       </div>
@@ -880,6 +888,7 @@
   <script src="cq-target.js"></script>
   <script src="../lib/wspr/stats.js"></script>
   <script src="../lib/scope-axis.js"></script>
+  <script src="../lib/jtty-macros.js"></script>
   <script src="waterfall.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>

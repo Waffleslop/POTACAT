@@ -294,8 +294,20 @@ measurement, and the retro re-sweep.
   packs as call + SERIAL (2 frames) instead of three text frames — the design
   doc's "native macros default to serial exchanges". The operator's profile
   never moves from a Send.
-- Band dials `JTTY_BAND_FREQS`: the RTTY sub-band edges (14080 etc.) until
-  the community settles — not yet a user-editable table.
+- Band dials `JTTY_BAND_FREQS`: the WSJT team's preliminary list for rc1
+  (14090 on 20 m, 7090 on 40 m, …). The first cut used the RTTY sub-band
+  edges and put 20 m on **14080 — FT4's dial**; Casey's first live test
+  found only 7.5 s FT4 bursts there (2026-10-04). Not yet a user-editable
+  table.
+- **Macros** (same day, Casey: "pretty names … editable … name, what the
+  macro includes, and a hot key"): `lib/jtty-macros.js` is the one model
+  (`{label, text, key}`, F1–F12 unique, up to 12; WSJT-X's eight are the
+  defaults with names CQ / Reply / TU CQ / My call / Their call / TU Now /
+  Agn? / Exch), dual-mode and inlined into the web page like scope-axis.
+  `settings.jttyMacros`; the pre-macro `jttyTemplates` strings migrate once.
+  Right-click edits name / text / hotkey, + adds, Remove removes, Reset
+  restores. Native packing is decided by the macro's TEXT alone. All copy
+  says "their call", never "his".
 - Waterfall: a translucent 127 Hz footprint to the right of the (lowest-tone)
   marker; Shift+click split is refused in JTTY as in PSK31 (`isKeyboardMode()`).
   The status strip sweeps across a Send using the PSK31 sweep variables.

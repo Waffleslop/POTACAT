@@ -834,12 +834,13 @@
     '20m': 14095.6, '17m': 18104.6, '15m': 21094.6, '12m': 24924.6, '10m': 28124.6,
     '6m': 50293.0,
   };
-  // JTTY USB dial frequencies (kHz) — the RTTY sub-band edges until the
-  // community settles on dials. Mirrors the popout's JTTY_BAND_FREQS.
+  // JTTY USB dial frequencies (kHz) — the WSJT team's preliminary list for
+  // 3.2.0-rc1 (14090 = main meeting place; 14080 is FT4's). Mirrors the
+  // popout's JTTY_BAND_FREQS.
   const JTTY_BAND_FREQS = {
-    '160m': 1838, '80m': 3580, '60m': 5357, '40m': 7080, '30m': 10140,
-    '20m': 14080, '17m': 18100, '15m': 21080, '12m': 24920, '10m': 28080,
-    '6m': 50290,
+    '160m': 1838, '80m': 3575, '60m': 5357, '40m': 7090, '30m': 10140,
+    '20m': 14090, '17m': 18100, '15m': 21090, '12m': 24920, '10m': 28090,
+    '6m': 50160, '2m': 144160,
   };
   // PSK31 USB dial frequencies (kHz) — the conventional watering holes
   // (40m: 7070 Americas convention). Mirrors the popout's table.
@@ -8381,15 +8382,16 @@
   const jttyTemplatesEl = document.getElementById('jtty-templates');
   const JTTY_ROW_CAP = 200;
   const JTTY_PROFILES = ['unknown', 'field-day', 'rtty-roundup'];
-  const JTTY_DEFAULT_TEMPLATES = ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E'];
   const jttyRows = {};           // decoder message id -> row element
-  let jttyComposeNative = -1;    // template index that filled the composer; -1 = typed/edited
+  let jttyComposeNative = -1;    // macro index that filled the composer; -1 = typed/edited
   let jttySeeded = false;
 
   function jttyPad2(n) { return (n < 10 ? '0' : '') + n; }
-  function jttyTemplates() {
-    const saved = echoSettings && Array.isArray(echoSettings.jttyTemplates) && echoSettings.jttyTemplates.length === 8 ? echoSettings.jttyTemplates : null;
-    return JTTY_DEFAULT_TEMPLATES.map((d, i) => (saved && typeof saved[i] === 'string' && saved[i].trim()) ? saved[i].trim() : d);
+  // Macros {label, text, key} — lib/jtty-macros.js, inlined by remote-server
+  // as window.JttyMacros; the desktop owns the list (settings.jttyMacros).
+  function jttyMacros() {
+    const s = echoSettings || {};
+    return JttyMacros.normalize(s.jttyMacros, s.jttyTemplates);
   }
   function jttyProfile() {
     const p = jttyProfileEl ? jttyProfileEl.value : 'unknown';
@@ -8409,21 +8411,24 @@
     if (force || jttyExchEl.dataset.auto !== '0') { jttyExchEl.value = jttyDefaultExchange(); jttyExchEl.dataset.auto = '1'; }
   }
   function jttySubstitute(t) {
-    const my = String(myCallsign || '').toUpperCase().trim();
-    const his = String((jttyHisEl && jttyHisEl.value) || '').toUpperCase().trim();
-    const q = String((jttyQueuedEl && jttyQueuedEl.value) || '').toUpperCase().trim();
-    const ex = String((jttyExchEl && jttyExchEl.value) || '').toUpperCase().trim();
-    return String(t).replace(/%M/g, my).replace(/%H/g, his).replace(/%Q/g, q).replace(/%E/g, ex).replace(/\s+/g, ' ').trim();
+    const n = jttySerial();
+    return JttyMacros.substitute(t, {
+      myCall: myCallsign || '',
+      theirCall: (jttyHisEl && jttyHisEl.value) || '',
+      nextCall: (jttyQueuedEl && jttyQueuedEl.value) || '',
+      exchange: (jttyExchEl && jttyExchEl.value) || '',
+      grid: (echoSettings && echoSettings.grid) || '',
+      serial: n < 100 ? ('00' + n).slice(-3) : String(n),
+    });
   }
-  // Same rule as the popout: an unedited default template with %E under the
-  // Serial profile packs its exchange as a native serial (rtty-roundup rules,
-  // one frame fewer); a typed or edited message is literal under the
-  // operator's profile. Per message — never moves the selector.
+  // Same rule as the popout: a macro whose text is one of WSJT-X's eight,
+  // with %E, under the Serial profile packs its exchange as a native serial
+  // (rtty-roundup rules, one frame fewer); any other text is literal under
+  // the operator's profile. Per message — never moves the selector.
   function jttyPackProfile() {
     const p = jttyProfile();
-    const i = jttyComposeNative;
-    const t = jttyTemplates();
-    if (p === 'unknown' && i >= 0 && t[i] === JTTY_DEFAULT_TEMPLATES[i] && /%E/.test(t[i])) return 'rtty-roundup';
+    const m = jttyComposeNative >= 0 ? jttyMacros()[jttyComposeNative] : null;
+    if (p === 'unknown' && m && JttyMacros.isNativeText(m.text) && /%E/.test(m.text)) return 'rtty-roundup';
     return p;
   }
   function jttyNote(text, bad) {
@@ -8448,11 +8453,12 @@
     ft8Send({ type: 'jtcat-jtty-send', text, profile: jttyPackProfile() });
   }
   function jttyUseTemplate(i, send) {
-    const t = jttyTemplates()[i];
-    if (!t || !jttyTxEl) return;
-    if (/%H/.test(t) && !String((jttyHisEl && jttyHisEl.value) || '').trim()) { if (jttyHisEl) jttyHisEl.focus(); jttyNote('Tap a decoded row or type His Call first', true); return; }
-    if (/%Q/.test(t) && !String((jttyQueuedEl && jttyQueuedEl.value) || '').trim()) { if (jttyQueuedEl) jttyQueuedEl.focus(); jttyNote('Type the next call first', true); return; }
-    jttyTxEl.value = jttySubstitute(t);
+    const m = jttyMacros()[i];
+    if (!m || !jttyTxEl) return;
+    const need = JttyMacros.needs(m.text);
+    if (need.theirCall && !String((jttyHisEl && jttyHisEl.value) || '').trim()) { if (jttyHisEl) jttyHisEl.focus(); jttyNote('Tap a decoded row or type Their Call first', true); return; }
+    if (need.nextCall && !String((jttyQueuedEl && jttyQueuedEl.value) || '').trim()) { if (jttyQueuedEl) jttyQueuedEl.focus(); jttyNote('Type the next call first', true); return; }
+    jttyTxEl.value = jttySubstitute(m.text);
     jttyComposeNative = i;
     jttyCount();
     if (send) jttySend();
@@ -8460,13 +8466,19 @@
   function jttyRenderTemplates() {
     if (!jttyTemplatesEl) return;
     jttyTemplatesEl.innerHTML = '';
-    jttyTemplates().forEach((t, i) => {
+    jttyMacros().forEach((m, i) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ft8-ctrl-btn';
       btn.style.cssText = 'font-size:11px;padding:2px 8px;font-weight:700;';
-      btn.textContent = 'F' + (i + 1);
-      btn.title = t + ' → ' + (jttySubstitute(t) || '(empty)') + '. Hold Shift to send at once.';
+      btn.textContent = m.label;
+      if (m.key) {
+        const k = document.createElement('span');
+        k.style.cssText = 'font-size:9px;font-weight:400;opacity:0.65;margin-left:5px;font-family:monospace;';
+        k.textContent = m.key;
+        btn.appendChild(k);
+      }
+      btn.title = m.text + ' → ' + (jttySubstitute(m.text) || '(empty)') + '. Hold Shift to send at once. Edit macros in the desktop JTCAT window.';
       btn.addEventListener('click', (e) => jttyUseTemplate(i, e.shiftKey));
       jttyTemplatesEl.appendChild(btn);
     });

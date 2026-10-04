@@ -1646,15 +1646,16 @@ function _applyPopoutTheme(payload) {
     '20m': 14070, '17m': 18100, '15m': 21070, '12m': 24920, '10m': 28120,
     '6m': 50291,
   };
-  // JTTY USB dial frequencies (kHz). JTTY has no watering holes yet (WSJT-X
-  // 3.2.0-rc1 shipped 2026-09-24), so these are the RTTY sub-band edges —
-  // 14080 on 20 m and friends — where a 127 Hz keyboard mode belongs and
-  // where WSJT-X users will look first. Click the waterfall to move within
-  // the passband; edit here when the community settles on dials.
+  // JTTY USB dial frequencies (kHz): the "very preliminary" list the WSJT
+  // team published with 3.2.0-rc1 (2026-09-23), 14090 being the main meeting
+  // place. NOT the RTTY sub-band edges — 14080 is FT4's dial, and the first
+  // live test here found only 7.5 s FT4 bursts there (Casey 2026-10-04).
+  // 60 m has no published dial; the PSK/JS8 channel is used. Expect these to
+  // move if JTTY catches on.
   var JTTY_BAND_FREQS = {
-    '160m': 1838, '80m': 3580, '60m': 5357, '40m': 7080, '30m': 10140,
-    '20m': 14080, '17m': 18100, '15m': 21080, '12m': 24920, '10m': 28080,
-    '6m': 50290, '2m': 144174,
+    '160m': 1838, '80m': 3575, '60m': 5357, '40m': 7090, '30m': 10140,
+    '20m': 14090, '17m': 18100, '15m': 21090, '12m': 24920, '10m': 28090,
+    '6m': 50160, '2m': 144160,
   };
   // JS8 dial frequencies (kHz) per band — the JS8Call community defaults.
   var JS8_BAND_FREQS = {
@@ -3473,7 +3474,7 @@ function _applyPopoutTheme(payload) {
   // reports whole decoder updates (a message grows frame by frame and closes
   // on its EOM), so this pane is a decodes list, not a character stream, and
   // the composer is one line of up to 80 characters with WSJT-X's F1–F8
-  // templates (%M my call, %H his call, %E exchange, %Q next call). Send IS
+  // templates (%M my call, %H their call, %E exchange, %Q next call). Send IS
   // the arm action; main refuses — never trims — a message the grammar
   // cannot carry, and the frame counter beside the composer says so first.
   var jttyPane = document.getElementById('jp-jtty-pane');
@@ -3492,12 +3493,14 @@ function _applyPopoutTheme(payload) {
   var jttyClearBtn = document.getElementById('jp-jtty-clear');
   var JTTY_ROW_CAP = 300;
   var JTTY_PROFILES = ['unknown', 'field-day', 'rtty-roundup'];
-  // The eight shipped templates, verbatim from jtty_design.md ("Native
-  // message templates"). An unedited one packs its exchange as a native
-  // serial even under the Serial/Unknown profile; an edited one is literal.
-  var JTTY_DEFAULT_TEMPLATES = ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E'];
-  var jttyTemplates = JTTY_DEFAULT_TEMPLATES.slice();
+  // Macros = { label, text, key } from lib/jtty-macros.js (window.JttyMacros):
+  // the eight WSJT-X templates on F1–F8 by default, editable (name, text,
+  // hotkey, add/remove) and persisted as settings.jttyMacros. A macro whose
+  // text is one of WSJT-X's eight packs its exchange natively even under the
+  // Serial/Unknown profile; any other text is literal.
+  var jttyMacros = JttyMacros.defaults();
   var jttyMyCall = '';
+  var jttyMyGrid = '';
   var jttyRows = {};             // decoder message id -> row element
   var jttyComposeNative = -1;    // template index that filled the composer; -1 = typed/edited
   var jttyValidateTimer = null;
@@ -3554,13 +3557,17 @@ function _applyPopoutTheme(payload) {
       jttyExchEl.dataset.auto = '1';
     }
   }
-  function jttySubstitute(t) {
-    var his = ((jttyHisEl && jttyHisEl.value) || '').trim().toUpperCase();
-    var q = ((jttyQueuedEl && jttyQueuedEl.value) || '').trim().toUpperCase();
-    var ex = ((jttyExchEl && jttyExchEl.value) || '').trim().toUpperCase();
-    return String(t).replace(/%M/g, jttyMyCall).replace(/%H/g, his).replace(/%Q/g, q).replace(/%E/g, ex)
-      .replace(/\s+/g, ' ').trim();
+  function jttyFields() {
+    return {
+      myCall: jttyMyCall,
+      theirCall: (jttyHisEl && jttyHisEl.value) || '',
+      nextCall: (jttyQueuedEl && jttyQueuedEl.value) || '',
+      exchange: (jttyExchEl && jttyExchEl.value) || '',
+      grid: jttyMyGrid,
+      serial: jttySerialText(),
+    };
   }
+  function jttySubstitute(t) { return JttyMacros.substitute(t, jttyFields()); }
   // Native templates default to a serial exchange even under the Unknown
   // profile (design doc: "No activity means Unknown even though native macros
   // default to serial exchanges"). Packing such a message with the RTTY
@@ -3569,8 +3576,8 @@ function _applyPopoutTheme(payload) {
   // WSJT-X. A per-message profile — it never changes the selector.
   function jttyPackProfile() {
     var p = jttyProfile();
-    var i = jttyComposeNative;
-    if (p === 'unknown' && i >= 0 && jttyTemplates[i] === JTTY_DEFAULT_TEMPLATES[i] && /%E/.test(jttyTemplates[i])) return 'rtty-roundup';
+    var m = jttyComposeNative >= 0 ? jttyMacros[jttyComposeNative] : null;
+    if (p === 'unknown' && m && JttyMacros.isNativeText(m.text) && /%E/.test(m.text)) return 'rtty-roundup';
     return p;
   }
 
@@ -3632,14 +3639,15 @@ function _applyPopoutTheme(payload) {
     setTimeout(function() { el.style.outline = ''; }, 600);
   }
   function jttyUseTemplate(i, send) {
-    var t = jttyTemplates[i];
-    if (!t || !jttyTxEl) return;
-    // A template that names a station needs the station — don't send "%H"
+    var m = jttyMacros[i];
+    if (!m || !jttyTxEl) return;
+    // A macro that names a station needs the station — don't send "%H"
     // expanded to nothing and let the packer fail on an empty word.
-    if (/%H/.test(t) && !((jttyHisEl && jttyHisEl.value) || '').trim()) { if (jttyHisEl) jttyHisEl.focus(); jttyFlash(jttyHisEl); return; }
-    if (/%Q/.test(t) && !((jttyQueuedEl && jttyQueuedEl.value) || '').trim()) { if (jttyQueuedEl) jttyQueuedEl.focus(); jttyFlash(jttyQueuedEl); return; }
-    if (/%M/.test(t) && !jttyMyCall) { jttyFramesEl.textContent = 'Set your callsign in Settings first'; jttyFramesEl.classList.add('bad'); return; }
-    jttyTxEl.value = jttySubstitute(t);
+    var need = JttyMacros.needs(m.text);
+    if (need.theirCall && !((jttyHisEl && jttyHisEl.value) || '').trim()) { if (jttyHisEl) jttyHisEl.focus(); jttyFlash(jttyHisEl); return; }
+    if (need.nextCall && !((jttyQueuedEl && jttyQueuedEl.value) || '').trim()) { if (jttyQueuedEl) jttyQueuedEl.focus(); jttyFlash(jttyQueuedEl); return; }
+    if (need.myCall && !jttyMyCall) { jttyFramesEl.textContent = 'Set your callsign in Settings first'; jttyFramesEl.classList.add('bad'); return; }
+    jttyTxEl.value = jttySubstitute(m.text);
     jttyComposeNative = i;
     jttyPreview();
     if (send) jttySend(); else jttyTxEl.focus();
@@ -3647,38 +3655,64 @@ function _applyPopoutTheme(payload) {
   function jttyRenderTemplates() {
     if (!jttyTemplatesEl) return;
     jttyTemplatesEl.innerHTML = '';
-    jttyTemplates.forEach(function(t, i) {
+    jttyMacros.forEach(function(m, i) {
       var btn = document.createElement('button');
       btn.className = 'jp-btn jp-jtty-tpl';
-      btn.textContent = 'F' + (i + 1);
-      btn.title = t + '\n→ ' + (jttySubstitute(t) || '(empty)') + '\n\nClick: compose. Shift+click: compose and send. Right-click: edit.';
+      btn.textContent = m.label;
+      if (m.key) {
+        var k = document.createElement('span');
+        k.className = 'k';
+        k.textContent = m.key;
+        btn.appendChild(k);
+      }
+      btn.title = m.text + '\n→ ' + (jttySubstitute(m.text) || '(empty)') + (m.key ? '\n\nHotkey ' + m.key + '.' : '') + '\nClick: compose. Shift+click: compose and send. Right-click: edit.';
       btn.addEventListener('click', function(e) { jttyUseTemplate(i, e.shiftKey); });
       btn.addEventListener('contextmenu', function(e) { e.preventDefault(); jttyOpenEditor(i); });
       jttyTemplatesEl.appendChild(btn);
     });
   }
 
-  // --- template editor (right-click a template button) ---
+  // --- macro editor (right-click a macro, or + for a new one): name, text, hotkey ---
   var jttyEdEl = document.getElementById('jp-jtty-editor');
   var jttyEdLabelEl = document.getElementById('jp-jtty-ed-label');
   var jttyEdTextEl = document.getElementById('jp-jtty-ed-text');
-  var jttyEdSlot = -1;
+  var jttyEdKeyEl = document.getElementById('jp-jtty-ed-key');
+  var jttyEdSlot = -1; // index being edited; jttyMacros.length = a new macro
+  function jttyFillKeySelect(current) {
+    if (!jttyEdKeyEl) return;
+    jttyEdKeyEl.innerHTML = '';
+    [''].concat(JttyMacros.HOTKEYS).forEach(function(k) {
+      var o = document.createElement('option');
+      o.value = k;
+      var holder = -1;
+      for (var j = 0; j < jttyMacros.length; j++) if (k && jttyMacros[j].key === k && j !== jttyEdSlot) holder = j;
+      o.textContent = k ? (holder >= 0 ? k + ' (' + jttyMacros[holder].label + ')' : k) : 'none';
+      jttyEdKeyEl.appendChild(o);
+    });
+    jttyEdKeyEl.value = current || '';
+  }
   function jttyOpenEditor(i) {
     if (!jttyEdEl) return;
     jttyEdSlot = i;
-    jttyEdLabelEl.textContent = 'F' + (i + 1);
-    jttyEdTextEl.value = jttyTemplates[i];
+    var m = jttyMacros[i] || { label: '', text: '', key: '' };
+    jttyEdLabelEl.value = m.label;
+    jttyEdTextEl.value = m.text;
+    jttyFillKeySelect(m.key);
+    var removeBtn = document.getElementById('jp-jtty-ed-remove');
+    if (removeBtn) removeBtn.disabled = !jttyMacros[i];
     jttyEdEl.classList.remove('hidden');
-    jttyEdTextEl.focus();
+    (m.label ? jttyEdTextEl : jttyEdLabelEl).focus();
   }
   function jttyCloseEditor() {
     jttyEdSlot = -1;
     if (jttyEdEl) jttyEdEl.classList.add('hidden');
   }
-  function jttySaveTemplates(list) {
+  function jttySaveMacros(list) {
     // null = reset: a null setting is the "use defaults" state, like pskMacros.
-    window.api.saveSettings({ jttyTemplates: list });
-    jttyTemplates = list ? list.slice() : JTTY_DEFAULT_TEMPLATES.slice();
+    // (jttyTemplates was the pre-macro shape; clearing it keeps the migration
+    // from resurrecting old text over a reset.)
+    window.api.saveSettings({ jttyMacros: list, jttyTemplates: null });
+    jttyMacros = JttyMacros.normalize(list, null);
     jttyRenderTemplates();
     jttyCloseEditor();
   }
@@ -3781,26 +3815,25 @@ function _applyPopoutTheme(payload) {
     }
   });
 
-  // F1–F8 compose (Shift = compose and send), as in WSJT-X. Only while the
-  // pane is up, and never over a modifier chord the OS or Electron owns.
+  // Hotkeys compose (Shift = compose and send), as in WSJT-X. Only while the
+  // pane is up, never over a modifier chord the OS or Electron owns, and only
+  // keys a macro actually claims — the rest keep their normal meaning.
   document.addEventListener('keydown', function(e) {
     if (modeSelect.value !== 'JTTY') return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
-    var m = /^F([1-8])$/.exec(e.key || '');
-    if (!m) return;
+    if (jttyEdEl && !jttyEdEl.classList.contains('hidden')) return; // editing, not operating
+    var i = JttyMacros.indexForKey(jttyMacros, e.key || '');
+    if (i < 0) return;
     e.preventDefault();
-    jttyUseTemplate(parseInt(m[1], 10) - 1, e.shiftKey);
+    jttyUseTemplate(i, e.shiftKey);
   });
 
   function jttyInit(s) {
     if (!jttyPane) return;
     s = s || {};
     jttyMyCall = String(s.myCallsign || '').toUpperCase().trim();
-    if (Array.isArray(s.jttyTemplates) && s.jttyTemplates.length === JTTY_DEFAULT_TEMPLATES.length) {
-      jttyTemplates = s.jttyTemplates.map(function(t, i) {
-        return typeof t === 'string' && t.trim() ? t.trim().slice(0, 80) : JTTY_DEFAULT_TEMPLATES[i];
-      });
-    }
+    jttyMyGrid = String(s.grid || '').toUpperCase().trim();
+    jttyMacros = JttyMacros.normalize(s.jttyMacros, s.jttyTemplates);
     if (jttyProfileEl) jttyProfileEl.value = JTTY_PROFILES.indexOf(s.jttyProfile) >= 0 ? s.jttyProfile : 'unknown';
     if (jttySerialEl) jttySerialEl.value = String(parseInt(s.jttySerial, 10) > 0 ? parseInt(s.jttySerial, 10) : 1);
     jttyRefreshExchange(true);
@@ -3841,7 +3874,7 @@ function _applyPopoutTheme(payload) {
     }
     if (jttySendBtn) jttySendBtn.addEventListener('click', jttySend);
     if (jttyStopBtn) jttyStopBtn.addEventListener('click', function() { window.api.jtcatHaltTx(); });
-    // Log: with a station in His Call, open the Log QSO window AS that QSO
+    // Log: with a station in Their Call, open the Log QSO window AS that QSO
     // (mode JTTY → ADIF MFSK/JTTY, 599 both ways, the exchange we sent in the
     // comment); with no station, the plain logbook as before.
     if (jttyLogBtn) jttyLogBtn.addEventListener('click', function() {
@@ -3864,15 +3897,29 @@ function _applyPopoutTheme(payload) {
 
     var edSave = document.getElementById('jp-jtty-ed-save');
     var edCancel = document.getElementById('jp-jtty-ed-cancel');
+    var edRemove = document.getElementById('jp-jtty-ed-remove');
     var edReset = document.getElementById('jp-jtty-ed-reset');
+    var edAdd = document.getElementById('jp-jtty-add');
     if (edSave) edSave.addEventListener('click', function() {
       if (jttyEdSlot < 0) return;
-      var list = jttyTemplates.slice();
-      list[jttyEdSlot] = (jttyEdTextEl.value.trim() || JTTY_DEFAULT_TEMPLATES[jttyEdSlot]).slice(0, 80);
-      jttySaveTemplates(list);
+      var text = jttyEdTextEl.value.replace(/\s+/g, ' ').trim();
+      if (!text) { jttyFlash(jttyEdTextEl); jttyEdTextEl.focus(); return; }
+      var list = jttyMacros.map(function(m) { return { label: m.label, text: m.text, key: m.key }; });
+      var entry = { label: jttyEdLabelEl.value.trim() || ('M' + (jttyEdSlot + 1)), text: text, key: '' };
+      if (jttyEdSlot < list.length) list[jttyEdSlot] = entry; else list.push(entry);
+      jttySaveMacros(JttyMacros.assignHotkey(list, Math.min(jttyEdSlot, list.length - 1), jttyEdKeyEl ? jttyEdKeyEl.value : ''));
     });
     if (edCancel) edCancel.addEventListener('click', jttyCloseEditor);
-    if (edReset) edReset.addEventListener('click', function() { jttySaveTemplates(null); });
+    if (edRemove) edRemove.addEventListener('click', function() {
+      if (jttyEdSlot < 0 || jttyEdSlot >= jttyMacros.length) { jttyCloseEditor(); return; }
+      var list = jttyMacros.filter(function(_, i) { return i !== jttyEdSlot; });
+      jttySaveMacros(list.length ? list : null);
+    });
+    if (edReset) edReset.addEventListener('click', function() { jttySaveMacros(null); });
+    if (edAdd) edAdd.addEventListener('click', function() {
+      if (jttyMacros.length >= JttyMacros.MAX_MACROS) { jttyFlash(edAdd); return; }
+      jttyOpenEditor(jttyMacros.length);
+    });
     if (jttyEdEl) jttyEdEl.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') jttyCloseEditor();
       else if (e.key === 'Enter') { e.preventDefault(); if (edSave) edSave.click(); }

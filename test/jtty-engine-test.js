@@ -314,6 +314,37 @@ function onAir(pcm, leadSec, tailSec) {
     assert.ok(fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8').includes("callsign: his, mode: 'JTTY'"), 'pane Log button prefills the QSO');
   });
 
+  await test('macro model: WSJT-X\'s eight on F1-F8, legacy migration, unique hotkeys, both token spellings', () => {
+    const JM = require('../lib/jtty-macros');
+    assert.deepStrictEqual(JM.DEFAULTS.map((d) => d.text), ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E'], 'texts verbatim from jtty_design.md');
+    assert.deepStrictEqual(JM.DEFAULTS.map((d) => d.key), ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
+    assert.ok(JM.DEFAULTS.every((d) => d.label && d.label.length <= JM.MAX_LABEL), 'every default has a name');
+    assert.ok(!JM.DEFAULTS.some((d) => /\bhis\b/i.test(d.label)), 'gender-neutral names');
+    // No settings = defaults; a pre-macro jttyTemplates array migrates slot by slot.
+    assert.deepStrictEqual(JM.normalize(null, null), JM.defaults());
+    const legacy = JM.normalize(null, ['CQ %M CQ', '%H %E', 'MY OWN TEXT', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E']);
+    assert.strictEqual(legacy[2].text, 'MY OWN TEXT');
+    assert.strictEqual(legacy[2].key, 'F3', 'an edited legacy slot keeps its F-key');
+    assert.strictEqual(legacy[2].label, 'M3', 'but not the default\'s name');
+    assert.strictEqual(legacy[1].label, 'Reply');
+    // Saved macros win over legacy; empties drop; duplicate hotkeys resolve first-wins.
+    const n = JM.normalize([{ label: 'A', text: 'X', key: 'F1' }, { label: 'B', text: 'Y', key: 'f1' }, { text: '  ' }, { text: '%E' }], ['ignored']);
+    assert.deepStrictEqual(n.map((m) => [m.label, m.text, m.key]), [['A', 'X', 'F1'], ['B', 'Y', ''], ['Exch', '%E', '']]);
+    assert.strictEqual(JM.normalize(new Array(20).fill({ text: 'T' })).length, JM.MAX_MACROS, 'bounded');
+    // Assigning a hotkey takes it from whoever had it.
+    const re = JM.assignHotkey(JM.defaults(), 7, 'F1');
+    assert.strictEqual(re[7].key, 'F1'); assert.strictEqual(re[0].key, '');
+    assert.strictEqual(JM.indexForKey(JM.defaults(), 'F6'), 5);
+    assert.strictEqual(JM.indexForKey(JM.defaults(), 'F9'), -1, 'unclaimed keys keep their normal meaning');
+    assert.strictEqual(JM.indexForKey(JM.defaults(), 'Enter'), -1);
+    // Native packing is decided by TEXT alone, whitespace-insensitive.
+    assert.ok(JM.isNativeText(' %H  %E ')); assert.ok(!JM.isNativeText('%H %E 73'));
+    // Substitution understands WSJT-X's % tokens and the PSK31-style $ tokens.
+    // Tokens upper-case; literal text keeps its case (PSK31 macros are lowercase on air by convention).
+    assert.strictEqual(JM.substitute('%H %E de $MYCALL $GRID nr %N', { myCall: 'k3sbp', theirCall: 'w9xyz', exchange: '599 001', grid: 'fn20', serial: '001' }), 'W9XYZ 599 001 de K3SBP FN20 nr 001');
+    assert.deepStrictEqual(JM.needs('TU NOW %Q %E'), { theirCall: false, nextCall: true, myCall: false });
+  });
+
   await test('JTCAT pop-out: the JTTY pane (static)', () => {
     const root = path.join(__dirname, '..');
     const html = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.html'), 'utf8');
@@ -325,11 +356,19 @@ function onAir(pcm, leadSec, tailSec) {
       assert.ok(html.includes(`id="${id}"`), 'markup ' + id);
     }
     assert.ok(html.includes('maxlength="80"'), 'the composer stops at the grammar\'s 80 characters');
-    // The eight templates are WSJT-X's, verbatim (jtty_design.md).
-    const m = js.match(/var JTTY_DEFAULT_TEMPLATES = (\[[^\]]*\]);/);
-    assert.ok(m, 'template table present');
-    assert.deepStrictEqual(JSON.parse(m[1].replace(/'/g, '"')), ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E']);
-    assert.ok(/var JTTY_BAND_FREQS = \{[\s\S]*?'20m': 14080[\s\S]*?\};/.test(js), 'RTTY sub-band dials');
+    // Macros come from the one model (lib/jtty-macros.js), loaded by the page.
+    assert.ok(html.includes('<script src="../lib/jtty-macros.js"></script>'), 'macro model loaded');
+    assert.ok(js.includes('JttyMacros.normalize(s.jttyMacros, s.jttyTemplates)'), 'macros normalized from settings (legacy templates migrate)');
+    assert.ok(js.includes("window.api.saveSettings({ jttyMacros: list, jttyTemplates: null })"), 'edits persist as jttyMacros');
+    assert.ok(js.includes('JttyMacros.indexForKey(jttyMacros, e.key'), 'hotkeys come from the macros, not a fixed F1-F8');
+    for (const id of ['jp-jtty-ed-label', 'jp-jtty-ed-key', 'jp-jtty-ed-remove', 'jp-jtty-add']) assert.ok(html.includes(`id="${id}"`), 'editor ' + id);
+    // Dials: the WSJT team's preliminary list (14090 on 20 m) — 14080 is FT4's.
+    assert.ok(/var JTTY_BAND_FREQS = \{[\s\S]*?'40m': 7090[\s\S]*?'20m': 14090[\s\S]*?\};/.test(js), 'WSJT-X preliminary JTTY dials');
+    assert.ok(!/JTTY_BAND_FREQS = \{[^}]*14080/.test(js), 'never FT4\'s dial');
+    // Gender-neutral copy on every surface.
+    for (const [name, src] of [['pop-out html', html], ['pop-out js', js], ['web html', fs.readFileSync(path.join(root, 'renderer', 'remote.html'), 'utf8')], ['web js', fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8')]]) {
+      assert.ok(!/\bhis call\b/i.test(src), name + ' says "their call"');
+    }
     assert.ok(js.includes("m === 'JTTY' ? JTTY_BAND_FREQS"), 'band buttons follow the mode');
     for (const fn of ['function applyJttyMode(', 'function jttySyncFreq(', 'function jttyInit(', 'function jttyPackProfile(', 'function jttyApplyUpdate(', 'function isKeyboardMode(']) {
       assert.ok(js.includes(fn), fn);
@@ -342,7 +381,7 @@ function onAir(pcm, leadSec, tailSec) {
     assert.strictEqual((js.match(/modeSelect\.value !== 'PSK31'/g) || []).length, 1, 'keyboard-mode guards share isKeyboardMode()');
     assert.ok(js.includes("if (mode === 'PSK31' || mode === 'JTTY') {"), 'status strip sweeps for JTTY too');
     assert.ok(/if \(modeSelect\.value === 'JTTY'\) \{\s*jpWfCtx\.fillStyle[\s\S]{0,200}127 \/ 3000/.test(js), '127 Hz footprint on the waterfall');
-    assert.ok(js.includes("jttyTemplates[i] === JTTY_DEFAULT_TEMPLATES[i] && /%E/.test(jttyTemplates[i])) return 'rtty-roundup'"), 'unedited native templates pack a serial exchange');
+    assert.ok(js.includes("JttyMacros.isNativeText(m.text) && /%E/.test(m.text)) return 'rtty-roundup'"), 'a macro with one of WSJT-X\'s texts packs a serial exchange');
     assert.ok(js.includes("window.api.jtcatJttySend(text, profile)"), 'Send passes the per-message profile');
     assert.ok(js.includes('window.api.onJtcatJttyRx('), 'RX updates are consumed');
     // Tune and ATU live in the FT8 controls bar, which the pane swap hides —

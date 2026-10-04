@@ -115,10 +115,12 @@ test('the recent rows are replayed on connect, and main / web wiring is in place
     "ft8Send({ type: 'jtcat-jtty-set-profile', profile: jttyProfile() });", "ft8Mode === 'JTTY' ? JTTY_BAND_FREQS", "if (ft8Mode === 'JTTY') jttyOnTxStatus(msg);"]) {
     assert.ok(web.includes(s), 'remote.js ' + s);
   }
-  const m = web.match(/const JTTY_DEFAULT_TEMPLATES = (\[[^\]]*\]);/);
-  assert.ok(m, 'web template table');
-  assert.deepStrictEqual(JSON.parse(m[1].replace(/'/g, '"')), ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E'], 'same eight templates as the pop-out');
+  // The web renders the same macro model the pop-out does, inlined like scope-axis.
+  assert.ok(web.includes('JttyMacros.normalize(s.jttyMacros, s.jttyTemplates)'), 'web macros from the shared model');
+  assert.ok(rs.includes("'jtty-macros.js'") && rs.includes("'<!-- jtty-macros-js -->'"), 'remote-server inlines lib/jtty-macros.js');
+  assert.ok(/'20m': 14090/.test(web) && !/JTTY_BAND_FREQS = \{[^}]*14080/.test(web), 'web dials match (14090, never FT4\'s 14080)');
   const html = fs.readFileSync(path.join(root, 'renderer', 'remote.html'), 'utf8');
+  assert.ok(html.includes('<!-- jtty-macros-js -->'), 'web page has the inline placeholder');
   for (const id of ['jtty-pane', 'jtty-list', 'jtty-tx', 'jtty-note', 'jtty-profile', 'jtty-his', 'jtty-exch', 'jtty-serial', 'jtty-queued', 'jtty-templates', 'jtty-send', 'jtty-stop', 'jtty-log', 'jtty-clear']) {
     assert.ok(html.includes(`id="${id}"`), 'remote.html ' + id);
   }

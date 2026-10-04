@@ -14624,6 +14624,7 @@ function updateRemoteSettings() {
     // templates (null = WSJT-X defaults) and the running serial.
     jttyProfile: settings.jttyProfile || 'unknown',
     jttyTemplates: Array.isArray(settings.jttyTemplates) ? settings.jttyTemplates : null,
+    jttyMacros: Array.isArray(settings.jttyMacros) ? settings.jttyMacros : null,
     jttySerial: parseInt(settings.jttySerial, 10) > 0 ? parseInt(settings.jttySerial, 10) : 1,
     wsprTxPct: typeof settings.wsprTxPct === 'number' ? settings.wsprTxPct : 20,
     wsprDbm: typeof settings.wsprDbm === 'number' ? settings.wsprDbm : 30,
