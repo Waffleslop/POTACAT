@@ -13388,7 +13388,7 @@ function formatAge(isoStr) {
 }
 
 // --- QSO Logging ---
-const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
+const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK', 'JTTY']);
 
 // Band lookup for ADIF (frequency in kHz -> band string)
 const BAND_RANGES = [

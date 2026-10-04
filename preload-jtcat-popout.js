@@ -50,6 +50,9 @@ contextBridge.exposeInMainWorld('api', {
   jtcatJttySend: (text, profile) => ipcRenderer.send('jtcat-jtty-send', { text, profile }),
   jtcatJttySetProfile: (profile) => ipcRenderer.send('jtcat-jtty-set-profile', profile),
   jtcatJttyValidate: (text, profile) => ipcRenderer.invoke('jtcat-jtty-validate', { text, profile }),
+  // Open the Log QSO window pre-filled (the door the spot Log button and the
+  // JS8/SSTV windows use); the JTTY pane's Log button sends His Call this way.
+  openLogWith: (prefill) => ipcRenderer.send('log-popout-open', prefill),
   onJtcatJttyRx: (cb) => ipcRenderer.on('jtcat-jtty-rx', (_e, data) => cb(data)),
   onJtcatDupeWarning: (cb) => ipcRenderer.on('jtcat-dupe-warning', (_e, data) => cb(data)),
   // Stalled-QSO closeout notice ("logged, sending final 73") — informational,

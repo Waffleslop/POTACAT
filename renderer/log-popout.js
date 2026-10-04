@@ -652,7 +652,7 @@ function _applyPopoutTheme(payload) {
 
   // Modes whose RST is three digits. Mirrors CW_DIGI_MODES_SET in app.js so a
   // spot routed here gets the same 599 the in-window overlay would have given.
-  const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
+  const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK', 'JTTY']);
   // SSTV reports RSV (595: readability, strength, picture) or the P scale
   // (P5); lib/sstv-help.js. Voice keeps 59, keyed and digital modes 599.
   function defaultRstFor(mode) {

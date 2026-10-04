@@ -304,7 +304,7 @@ measurement, and the retro re-sweep.
 - Guards: `test/jtty-engine-test.js` "JTCAT pop-out: the JTTY pane (static)".
   Not yet done: a live look at the pane in a dev instance.
 
-### Phase 5 — Logging (½ day)
+### Phase 5 — Logging (½ day) — DONE 2026-10-04
 
 - ADIF has no JTTY mode. Interim: `MODE=MFSK SUBMODE=JTTY`, the pattern ADIF
   used for FT4 and JS8 (both are MFSK submodes). `lib/adif-writer.js`
@@ -314,6 +314,19 @@ measurement, and the retro re-sweep.
   when ADIF assigns it.
 - QSO popout prefill from a clicked decode: call, exchange received, our
   serial sent.
+
+**Status 2026-10-04 — built:** `adifModeSubmode('JTTY')` → `MFSK`/`JTTY`
+(lib/adif-writer.js; `normalizeMode` and `qso-match.modeKey` already
+collapse an MFSK family MODE to its SUBMODE, so the worked check mark and
+the dupe matcher see "JTTY" and a JTTY contact is distinct from an FT4 one).
+JTTY is an option in every log form — Log QSO window, the three main-window
+mode selects, the ECHOCAT Web log form — with a 599 default report. The
+pane's Log button opens the Log QSO window as the QSO (His Call, mode JTTY,
+599/599, the exchange we sent in the comment); the received exchange is
+still typed by hand. The LoTW upload handler names the missing ADIF submode
+once per session when JTTY QSOs were in the snapshot, since TQSL only says
+"skipped" in its stderr tail. Guard: the "logging" test in
+`test/jtty-engine-test.js`.
 
 ### Phase 6 — ECHOCAT (~1–2 days desktop; mobile by handoff)
 

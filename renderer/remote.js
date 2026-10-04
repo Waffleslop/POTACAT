@@ -2728,7 +2728,7 @@
   }
 
   // Map spot mode to filter category
-  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'JS8', 'FM', 'RTTY', 'PSK31', 'FREEDV']);
+  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'JS8', 'FM', 'RTTY', 'PSK31', 'JTTY', 'FREEDV']);
   function spotModeCategory(mode) {
     // Distinguish "no mode listed" (some POTA activators only spot a
     // freq) from "mode listed but exotic" (AM, etc.). Lets users untick
@@ -6009,7 +6009,7 @@
   // button worked because spot data already carries normalized ADIF
   // modes; the VFO full-view LOG button used currentMode directly,
   // which is what the rig reports.
-  const LOG_MODE_OPTIONS = ['SSB','CW','FT8','FT4','FT2','JS8','FM','RTTY','PSK31','AM'];
+  const LOG_MODE_OPTIONS = ['SSB','CW','FT8','FT4','FT2','JS8','FM','RTTY','PSK31','JTTY','AM'];
   function aliasModeForLogSheet(rawMode) {
     const m = (rawMode || '').toUpperCase();
     if (!m) return 'SSB';

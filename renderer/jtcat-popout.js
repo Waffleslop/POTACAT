@@ -3814,7 +3814,22 @@ function _applyPopoutTheme(payload) {
     }
     if (jttySendBtn) jttySendBtn.addEventListener('click', jttySend);
     if (jttyStopBtn) jttyStopBtn.addEventListener('click', function() { window.api.jtcatHaltTx(); });
-    if (jttyLogBtn) jttyLogBtn.addEventListener('click', function() { window.api.openQsoLog(); });
+    // Log: with a station in His Call, open the Log QSO window AS that QSO
+    // (mode JTTY → ADIF MFSK/JTTY, 599 both ways, the exchange we sent in the
+    // comment); with no station, the plain logbook as before.
+    if (jttyLogBtn) jttyLogBtn.addEventListener('click', function() {
+      var his = ((jttyHisEl && jttyHisEl.value) || '').trim().toUpperCase();
+      if (his && window.api.openLogWith) {
+        var ex = ((jttyExchEl && jttyExchEl.value) || '').trim().toUpperCase();
+        window.api.openLogWith({
+          force: true, type: 'dx', callsign: his, mode: 'JTTY',
+          rstSent: '599', rstRcvd: '599',
+          notes: 'JTTY' + (ex ? ' sent ' + ex : ''),
+        });
+        return;
+      }
+      window.api.openQsoLog();
+    });
     if (jttyClearBtn) jttyClearBtn.addEventListener('click', function() {
       if (jttyListEl) jttyListEl.innerHTML = '';
       jttyRows = {};

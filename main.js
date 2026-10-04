@@ -30725,6 +30725,7 @@ app.whenReady().then(() => {
     }
     return { tqslPath: tqsl, locations, configured: settings.lotwStationLocation || '' };
   });
+  let _lotwJttyNoticed = false; // one JTTY-submode notice per session
   ipcMain.handle('lotw-upload', async (_e, opts) => {
     const { findTqsl, buildTqslArgs, mapTqslExit } = require('./lib/tqsl');
     // Live field values from the Settings dialog win over saved settings so
@@ -30778,6 +30779,14 @@ app.whenReady().then(() => {
             const { parseTqslSkips, stampLotwSent } = require('./lib/lotw-flags');
             const snapshotQsos = parseAllRawQsos(snap);
             const skips = parseTqslSkips(String(stderr || ''));
+            // ADIF has no JTTY submode yet (POTACAT logs MFSK/JTTY, lib/adif-writer.js).
+            // TQSL skips what its config file does not know and says so only
+            // in the stderr tail above — name the cause once per session.
+            const jttyCount = snapshotQsos.filter((q) => String(q.SUBMODE || '').toUpperCase() === 'JTTY').length;
+            if (jttyCount && !_lotwJttyNoticed) {
+              _lotwJttyNoticed = true;
+              sendCatLog(`[LoTW] ${jttyCount} JTTY QSO${jttyCount === 1 ? '' : 's'} in this upload: ADIF has not assigned the JTTY submode yet, so TQSL may have skipped ${jttyCount === 1 ? 'it' : 'them'} (see its detail above). They upload once TQSL's configuration learns JTTY.`);
+            }
             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             let stats;
             mutateQsoLog((qsos) => {

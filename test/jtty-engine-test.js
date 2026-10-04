@@ -284,6 +284,36 @@ function onAir(pcm, leadSec, tailSec) {
     assert.ok(!/jtcat-jtty-send[\s\S]{0,600}jtcatJttySetProfile\(p\.profile\)/.test(main), 'a Send never persists the profile');
   });
 
+  await test('logging: MODE=MFSK SUBMODE=JTTY on disk, "JTTY" everywhere a mode is compared', () => {
+    const { adifModeSubmode, buildAdifFields } = require('../lib/adif-writer');
+    const { normalizeMode } = require('../lib/adif');
+    const { modeKey, sameContact } = require('../lib/qso-match');
+    assert.deepStrictEqual(adifModeSubmode('JTTY'), { mode: 'MFSK', submode: 'JTTY' });
+    assert.deepStrictEqual(adifModeSubmode('jtty'), { mode: 'MFSK', submode: 'JTTY' });
+    const f = buildAdifFields({ callsign: 'K1ABC', mode: 'JTTY', frequency: 14081.5, qsoDate: '20261004', timeOn: '1200', rstSent: '599', rstRcvd: '599' });
+    assert.strictEqual(f.MODE, 'MFSK');
+    assert.strictEqual(f.SUBMODE, 'JTTY');
+    assert.strictEqual(f.BAND, '20m');
+    // The worked check mark and the dupe matcher see the mode anyone means.
+    assert.strictEqual(normalizeMode('MFSK', 'JTTY'), 'JTTY');
+    assert.strictEqual(normalizeMode(f.MODE, f.SUBMODE), normalizeMode('JTTY'));
+    assert.strictEqual(modeKey(f), 'JTTY');
+    const ft4 = buildAdifFields({ callsign: 'K1ABC', mode: 'FT4', frequency: 14081.5, qsoDate: '20261004', timeOn: '1200' });
+    assert.strictEqual(sameContact(f, ft4), false, 'JTTY and FT4 are different contacts even though both are MFSK on disk');
+    assert.strictEqual(sameContact(f, buildAdifFields({ callsign: 'K1ABC', mode: 'JTTY', frequency: 14082, qsoDate: '20261004', timeOn: '1201' })), true);
+    // Every log form offers JTTY and gives it a 599 report.
+    const root = path.join(__dirname, '..');
+    assert.ok(fs.readFileSync(path.join(root, 'renderer', 'log-popout.html'), 'utf8').includes('<option value="JTTY">JTTY</option>'), 'Log QSO window');
+    assert.ok(/CW_DIGI_MODES = new Set\(\[[^\]]*'JTTY'/.test(fs.readFileSync(path.join(root, 'renderer', 'log-popout.js'), 'utf8')), 'Log QSO window RST');
+    assert.strictEqual((fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8').match(/<option value="JTTY">JTTY<\/option>/g) || []).length, 3, 'main window mode selects');
+    assert.ok(/CW_DIGI_MODES_SET = new Set\(\[[^\]]*'JTTY'/.test(fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8')), 'main window RST');
+    const remote = fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8');
+    assert.ok(/KNOWN_MODES = new Set\(\[[^\]]*'JTTY'/.test(remote) && /LOG_MODE_OPTIONS = \[[^\]]*'JTTY'/.test(remote), 'ECHOCAT Web log form');
+    const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+    assert.ok(main.includes("String(q.SUBMODE || '').toUpperCase() === 'JTTY'") && main.includes('_lotwJttyNoticed = true'), 'LoTW upload names the missing submode once');
+    assert.ok(fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8').includes("callsign: his, mode: 'JTTY'"), 'pane Log button prefills the QSO');
+  });
+
   await test('JTCAT pop-out: the JTTY pane (static)', () => {
     const root = path.join(__dirname, '..');
     const html = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.html'), 'utf8');
