@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('api', {
   // JS8/SSTV windows use); the JTTY pane's Log button sends His Call this way.
   openLogWith: (prefill) => ipcRenderer.send('log-popout-open', prefill),
   onJtcatJttyRx: (cb) => ipcRenderer.on('jtcat-jtty-rx', (_e, data) => cb(data)),
+  onJtcatJttyRefused: (cb) => ipcRenderer.on('jtcat-jtty-refused', (_e, data) => cb(data)),
   onJtcatDupeWarning: (cb) => ipcRenderer.on('jtcat-dupe-warning', (_e, data) => cb(data)),
   // Stalled-QSO closeout notice ("logged, sending final 73") — informational,
   // NOT the error channel: phase:'error' force-clears qsoState/txEnabled,

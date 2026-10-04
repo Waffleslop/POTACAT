@@ -9430,6 +9430,9 @@ function jtcatJttyRxQueue(d) {
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
         jtcatPopoutWin.webContents.send('jtcat-jtty-rx', { updates: batch });
       }
+      if (remoteServer && remoteServer.hasClient()) {
+        remoteServer.broadcastJtcatJttyRx(batch);
+      }
     }, 250);
   }
   jtcatJttyRxPending.set(d.id, d);
@@ -11975,6 +11978,14 @@ function startJtcat(mode) {
     // FT4 reply to W1AW/4, 2026-07-22). One line, deduped in the engine.
     sendCatLog(`[JTCAT] TX ENCODE FAILED (${data.mode}): "${data.message}" — ${data.reason}. The rig will NOT key until the TX message changes.`);
     jtcatAbandonUnencodableQso(ft8Engine, data);
+    // JTTY: the composer that asked gets the reason on screen (the pop-out
+    // previews before Send; a remote client has only this).
+    if (data.mode === 'JTTY') {
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        jtcatPopoutWin.webContents.send('jtcat-jtty-refused', { message: data.message, reason: data.reason });
+      }
+      if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatJttyRefused(data);
+    }
   });
 
   ft8Engine.on('tx-start', (data) => {
@@ -14609,6 +14620,11 @@ function updateRemoteSettings() {
     pskMacros: Array.isArray(settings.pskMacros) ? settings.pskMacros : null,
     pskSquelch: parseInt(settings.pskSquelch, 10) || 50,
     pskAudioCenter: settings.pskAudioCenter || 1500,
+    // JTTY seeds for the web/mobile pane: exchange profile, the eight
+    // templates (null = WSJT-X defaults) and the running serial.
+    jttyProfile: settings.jttyProfile || 'unknown',
+    jttyTemplates: Array.isArray(settings.jttyTemplates) ? settings.jttyTemplates : null,
+    jttySerial: parseInt(settings.jttySerial, 10) > 0 ? parseInt(settings.jttySerial, 10) : 1,
     wsprTxPct: typeof settings.wsprTxPct === 'number' ? settings.wsprTxPct : 20,
     wsprDbm: typeof settings.wsprDbm === 'number' ? settings.wsprDbm : 30,
     sstvTemplates: settings.sstvTemplates || [],
@@ -18609,6 +18625,14 @@ function connectRemote() {
         sendCatLog('[JTCAT] PSK Send (remote) ignored — TX already active or engine not running');
       }
     });
+  });
+  // JTTY from a remote client — the pop-out's IPC handlers own the behaviour
+  // (one implementation: refuse-never-trim, per-message profile, persist).
+  remoteServer.on('jtcat-jtty-send', ({ text, profile } = {}) => {
+    ipcMain.emit('jtcat-jtty-send', null, { text, profile });
+  });
+  remoteServer.on('jtcat-jtty-set-profile', ({ profile } = {}) => {
+    ipcMain.emit('jtcat-jtty-set-profile', null, profile);
   });
 
   // Phone-driven WSPR beacon. Routes through the same shared control as the

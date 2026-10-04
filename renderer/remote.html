@@ -95,6 +95,7 @@
       <button class="mp-btn" data-mode="AM">AM</button>
       <button class="mp-btn" data-mode="RTTY">RTTY</button>
       <button class="mp-btn" data-mode="PSK31">PSK31</button>
+      <button class="mp-btn" data-mode="JTTY">JTTY</button>
       <button class="mp-btn" data-mode="FREEDV-RADEV1">RADE</button>
     </div>
 
@@ -1245,6 +1246,7 @@
           <option value="FT2">FT2</option>
           <option value="WSPR">WSPR</option>
           <option value="PSK31">PSK</option>
+          <option value="JTTY">JTTY</option>
         </select>
         <span style="flex:1;"></span>
         <span id="ft8-sync-status">Sync: --</span>
@@ -1316,6 +1318,48 @@
             <button type="button" id="psk-send" class="ft8-ctrl-btn" style="flex:1;">Send</button>
             <button type="button" id="psk-stop" class="ft8-ctrl-btn">Stop</button>
             <button type="button" id="psk-log" class="ft8-ctrl-btn">Log</button>
+          </div>
+        </div>
+      </div>
+      <!-- JTTY pane (web parity with the popout's jp-jtty-pane). WSJT-X 3.2's
+           keyboard/contest mode: decodes are MESSAGES that grow frame by frame
+           and close on their EOM; the composer is one line of up to 80
+           characters; F1-F8 are WSJT-X's templates (%M %H %E %Q). Send IS the
+           arm action; the host refuses, never trims, what cannot be packed. -->
+      <div id="jtty-pane" class="hidden" style="flex:1;min-height:0;flex-direction:column;">
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim);flex-wrap:wrap;">
+          <span style="font-weight:700;color:var(--text);">JTTY</span><span title="4-GFSK, 31.25 baud, 1.888 s frames">127 Hz</span>
+          <label style="display:inline-flex;align-items:center;gap:4px;" title="Exchange profile: how the exchange is packed. Serial: 599 and a serial. Field Day: class and section. RTTY Roundup: serial or state/province.">Exchange
+            <select id="jtty-profile" style="font-size:11px;padding:1px 3px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:3px;">
+              <option value="unknown">Serial</option>
+              <option value="field-day">Field Day</option>
+              <option value="rtty-roundup">RTTY Roundup</option>
+            </select>
+          </label>
+          <span style="margin-left:auto;"></span>
+          <button type="button" id="jtty-clear" class="ft8-filter-btn" style="font-size:9px;padding:1px 6px;">Clear</button>
+        </div>
+        <div id="jtty-list" class="ft8-decode-log" style="flex:1;min-height:0;overflow-y:auto;"></div>
+        <div style="display:flex;gap:4px;padding:4px 10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);">
+          <input id="jtty-his" type="text" maxlength="12" placeholder="HIS CALL" autocapitalize="characters" autocomplete="off" spellcheck="false" style="width:84px;font-size:12px;padding:3px 5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;text-transform:uppercase;">
+          <input id="jtty-exch" type="text" maxlength="20" placeholder="EXCHANGE" autocapitalize="characters" autocomplete="off" spellcheck="false" title="What you send: 599 and your serial, or your Field Day class and section" style="width:96px;font-size:12px;padding:3px 5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;text-transform:uppercase;">
+          <span style="display:inline-flex;align-items:center;gap:2px;" title="Serial number">
+            <button type="button" id="jtty-serial-dn" class="ft8-ctrl-btn" style="padding:1px 7px;">&minus;</button>
+            <input id="jtty-serial" type="number" min="1" max="9999" value="1" style="width:52px;font-size:12px;padding:3px 4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;text-align:center;">
+            <button type="button" id="jtty-serial-up" class="ft8-ctrl-btn" style="padding:1px 7px;">+</button>
+          </span>
+          <input id="jtty-queued" type="text" maxlength="12" placeholder="NEXT CALL" autocapitalize="characters" autocomplete="off" spellcheck="false" title="The station waiting, for F6 (TU NOW %Q %E)" style="width:84px;font-size:12px;padding:3px 5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;text-transform:uppercase;">
+        </div>
+        <div id="jtty-templates" style="display:flex;gap:4px;flex-wrap:wrap;padding:2px 10px 4px;"></div>
+        <div style="display:flex;gap:4px;padding:4px 10px 8px;align-items:stretch;border-top:1px solid var(--border);">
+          <div style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;">
+            <input id="jtty-tx" type="text" maxlength="80" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Type a message (up to 80 characters) or tap F1-F8. Enter sends." style="font-family:monospace;font-size:13px;padding:5px 7px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;text-transform:uppercase;">
+            <span id="jtty-note" style="font-size:10px;color:var(--text-dim);font-family:monospace;min-height:12px;">0/80</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <button type="button" id="jtty-send" class="ft8-ctrl-btn" style="flex:1;">Send</button>
+            <button type="button" id="jtty-stop" class="ft8-ctrl-btn">Stop</button>
+            <button type="button" id="jtty-log" class="ft8-ctrl-btn">Log</button>
           </div>
         </div>
       </div>

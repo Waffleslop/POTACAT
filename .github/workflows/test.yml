@@ -100,6 +100,8 @@ jobs:
         run: node test/jtty-decoder-test.js
       - name: Run JTTY engine (loopback on both decoder hosts, refusals, main.js wiring)
         run: node test/jtty-engine-test.js
+      - name: Run JTTY over ECHOCAT (registry, demux, guest refusal, replay buffer, web pane)
+        run: node test/jtty-remote-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)

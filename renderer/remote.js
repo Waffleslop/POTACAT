@@ -834,6 +834,13 @@
     '20m': 14095.6, '17m': 18104.6, '15m': 21094.6, '12m': 24924.6, '10m': 28124.6,
     '6m': 50293.0,
   };
+  // JTTY USB dial frequencies (kHz) — the RTTY sub-band edges until the
+  // community settles on dials. Mirrors the popout's JTTY_BAND_FREQS.
+  const JTTY_BAND_FREQS = {
+    '160m': 1838, '80m': 3580, '60m': 5357, '40m': 7080, '30m': 10140,
+    '20m': 14080, '17m': 18100, '15m': 21080, '12m': 24920, '10m': 28080,
+    '6m': 50290,
+  };
   // PSK31 USB dial frequencies (kHz) — the conventional watering holes
   // (40m: 7070 Americas convention). Mirrors the popout's table.
   const PSK_BAND_FREQS = {
@@ -846,6 +853,7 @@
   function updateBandFreqs() {
     const table = ft8Mode === 'WSPR' ? WSPR_BAND_FREQS
       : ft8Mode === 'PSK31' ? PSK_BAND_FREQS
+      : ft8Mode === 'JTTY' ? JTTY_BAND_FREQS
       : ft8Mode === 'FT2' ? FT2_BAND_FREQS
       : ft8Mode === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
     Array.from(ft8BandSelect.options).forEach(opt => {
@@ -2337,6 +2345,12 @@
         break;
 
       // --- PSK31 / WSPR (web parity: docs/desktop-handoffs/echocat-web-parity-wspr-psk-menu.md) ---
+      case 'jtcat-jtty-rx':
+        jttyHandleRx(msg);
+        break;
+      case 'jtcat-jtty-refused':
+        jttyShowRefused(msg);
+        break;
       case 'jtcat-psk-rx':
         pskHandleRx(msg);
         break;
@@ -2384,6 +2398,8 @@
           // would land in the *previous* cycle's section.
           ft8PendingTxMsg = ft8TxMsg;
         }
+        // JTTY has no cycles: our transmission is a row in its list right now.
+        if (ft8Mode === 'JTTY') jttyOnTxStatus(msg);
         break;
 
       case 'jtcat-qso-state':
@@ -5756,7 +5772,7 @@
 
   function defaultRst(mode) {
     const m = (mode || '').toUpperCase();
-    if (m === 'CW' || m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'JS8' || m === 'RTTY' || m === 'PSK31' || m === 'PSK') return '599';
+    if (m === 'CW' || m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'JS8' || m === 'RTTY' || m === 'PSK31' || m === 'PSK' || m === 'JTTY') return '599';
     return '59';
   }
 
@@ -8070,13 +8086,16 @@
   function applyDigitalPanes() {
     const wspr = ft8Mode === 'WSPR';
     const psk = ft8Mode === 'PSK31';
+    const jtty = ft8Mode === 'JTTY';
     if (wsprPane) { wsprPane.classList.toggle('hidden', !wspr); wsprPane.style.display = wspr ? 'flex' : ''; }
     if (pskPane) { pskPane.classList.toggle('hidden', !psk); pskPane.style.display = psk ? 'flex' : ''; }
-    ft8DecodeLogEl.classList.toggle('hidden', wspr || psk);
+    if (jttyPane) { jttyPane.classList.toggle('hidden', !jtty); jttyPane.style.display = jtty ? 'flex' : ''; }
+    ft8DecodeLogEl.classList.toggle('hidden', wspr || psk || jtty);
     // The FT8 TX/CQ/auto controls have no meaning in beacon/keyboard modes.
-    if (ft8ControlBar) ft8ControlBar.classList.toggle('hidden', wspr || psk);
+    if (ft8ControlBar) ft8ControlBar.classList.toggle('hidden', wspr || psk || jtty);
     if (wspr) { wsprSeedControls(); wsprStartClock(); } else { wsprStopClock(); }
     if (psk) pskRenderMacros();
+    if (jtty) jttySeed();
   }
 
   // ---------------- WSPR ----------------
@@ -8342,6 +8361,245 @@
       mode: 'PSK31',
       // No freqKhz — see the invariant in openLogSheet.
     });
+  });
+
+  // ---------------- JTTY ----------------
+  // Web parity with the popout's JTTY pane (renderer/jtcat-popout.js). The
+  // host owns packing and refusal; this pane renders message rows, composes
+  // from WSJT-X's eight templates, and sends one line. The one rule the web
+  // can check itself is the grammar's 80 characters (the counter under the
+  // composer); everything else comes back as jtcat-jtty-refused.
+  const jttyPane = document.getElementById('jtty-pane');
+  const jttyListEl = document.getElementById('jtty-list');
+  const jttyTxEl = document.getElementById('jtty-tx');
+  const jttyNoteEl = document.getElementById('jtty-note');
+  const jttyProfileEl = document.getElementById('jtty-profile');
+  const jttyHisEl = document.getElementById('jtty-his');
+  const jttyExchEl = document.getElementById('jtty-exch');
+  const jttySerialEl = document.getElementById('jtty-serial');
+  const jttyQueuedEl = document.getElementById('jtty-queued');
+  const jttyTemplatesEl = document.getElementById('jtty-templates');
+  const JTTY_ROW_CAP = 200;
+  const JTTY_PROFILES = ['unknown', 'field-day', 'rtty-roundup'];
+  const JTTY_DEFAULT_TEMPLATES = ['CQ %M CQ', '%H %E', '%H TU CQ %M CQ', '%M', '%H', 'TU NOW %Q %E', '%H AGN?', '%E'];
+  const jttyRows = {};           // decoder message id -> row element
+  let jttyComposeNative = -1;    // template index that filled the composer; -1 = typed/edited
+  let jttySeeded = false;
+
+  function jttyPad2(n) { return (n < 10 ? '0' : '') + n; }
+  function jttyTemplates() {
+    const saved = echoSettings && Array.isArray(echoSettings.jttyTemplates) && echoSettings.jttyTemplates.length === 8 ? echoSettings.jttyTemplates : null;
+    return JTTY_DEFAULT_TEMPLATES.map((d, i) => (saved && typeof saved[i] === 'string' && saved[i].trim()) ? saved[i].trim() : d);
+  }
+  function jttyProfile() {
+    const p = jttyProfileEl ? jttyProfileEl.value : 'unknown';
+    return JTTY_PROFILES.includes(p) ? p : 'unknown';
+  }
+  function jttySerial() {
+    const n = parseInt(jttySerialEl && jttySerialEl.value, 10);
+    return Math.max(1, Math.min(9999, n > 0 ? n : 1));
+  }
+  function jttyDefaultExchange() {
+    if (jttyProfile() === 'field-day') return String((echoSettings && echoSettings.jtcatFdExch) || '').trim().toUpperCase();
+    const n = jttySerial();
+    return '599 ' + (n < 100 ? ('00' + n).slice(-3) : String(n));
+  }
+  function jttyRefreshExchange(force) {
+    if (!jttyExchEl) return;
+    if (force || jttyExchEl.dataset.auto !== '0') { jttyExchEl.value = jttyDefaultExchange(); jttyExchEl.dataset.auto = '1'; }
+  }
+  function jttySubstitute(t) {
+    const my = String(myCallsign || '').toUpperCase().trim();
+    const his = String((jttyHisEl && jttyHisEl.value) || '').toUpperCase().trim();
+    const q = String((jttyQueuedEl && jttyQueuedEl.value) || '').toUpperCase().trim();
+    const ex = String((jttyExchEl && jttyExchEl.value) || '').toUpperCase().trim();
+    return String(t).replace(/%M/g, my).replace(/%H/g, his).replace(/%Q/g, q).replace(/%E/g, ex).replace(/\s+/g, ' ').trim();
+  }
+  // Same rule as the popout: an unedited default template with %E under the
+  // Serial profile packs its exchange as a native serial (rtty-roundup rules,
+  // one frame fewer); a typed or edited message is literal under the
+  // operator's profile. Per message — never moves the selector.
+  function jttyPackProfile() {
+    const p = jttyProfile();
+    const i = jttyComposeNative;
+    const t = jttyTemplates();
+    if (p === 'unknown' && i >= 0 && t[i] === JTTY_DEFAULT_TEMPLATES[i] && /%E/.test(t[i])) return 'rtty-roundup';
+    return p;
+  }
+  function jttyNote(text, bad) {
+    if (!jttyNoteEl) return;
+    jttyNoteEl.textContent = text;
+    jttyNoteEl.style.color = bad ? '#e94560' : '';
+  }
+  function jttyCount() {
+    if (!jttyTxEl) return;
+    const n = jttyTxEl.value.trim().replace(/\s+/g, ' ').length;
+    jttyNote(n + '/80', n > 80);
+  }
+  function jttyShowRefused(msg) {
+    jttyNote((msg && msg.reason) || 'refused', true);
+  }
+  function jttySend() {
+    if (!jttyTxEl) return;
+    const text = jttyTxEl.value;
+    const n = text.trim().replace(/\s+/g, ' ').length;
+    if (!n || ft8Transmitting) return;
+    if (n > 80) { jttyNote(n + ' characters — JTTY carries at most 80 in one message', true); return; }
+    ft8Send({ type: 'jtcat-jtty-send', text, profile: jttyPackProfile() });
+  }
+  function jttyUseTemplate(i, send) {
+    const t = jttyTemplates()[i];
+    if (!t || !jttyTxEl) return;
+    if (/%H/.test(t) && !String((jttyHisEl && jttyHisEl.value) || '').trim()) { if (jttyHisEl) jttyHisEl.focus(); jttyNote('Tap a decoded row or type His Call first', true); return; }
+    if (/%Q/.test(t) && !String((jttyQueuedEl && jttyQueuedEl.value) || '').trim()) { if (jttyQueuedEl) jttyQueuedEl.focus(); jttyNote('Type the next call first', true); return; }
+    jttyTxEl.value = jttySubstitute(t);
+    jttyComposeNative = i;
+    jttyCount();
+    if (send) jttySend();
+  }
+  function jttyRenderTemplates() {
+    if (!jttyTemplatesEl) return;
+    jttyTemplatesEl.innerHTML = '';
+    jttyTemplates().forEach((t, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ft8-ctrl-btn';
+      btn.style.cssText = 'font-size:11px;padding:2px 8px;font-weight:700;';
+      btn.textContent = 'F' + (i + 1);
+      btn.title = t + ' → ' + (jttySubstitute(t) || '(empty)') + '. Hold Shift to send at once.';
+      btn.addEventListener('click', (e) => jttyUseTemplate(i, e.shiftKey));
+      jttyTemplatesEl.appendChild(btn);
+    });
+  }
+  function jttyAtBottom() { return jttyListEl.scrollHeight - jttyListEl.scrollTop - jttyListEl.clientHeight < 40; }
+  function jttyPrune() {
+    while (jttyListEl.children.length > JTTY_ROW_CAP) {
+      const first = jttyListEl.firstChild;
+      if (first.dataset && first.dataset.id) delete jttyRows[first.dataset.id];
+      jttyListEl.removeChild(first);
+    }
+  }
+  function jttyMakeRow() {
+    const row = document.createElement('div');
+    row.className = 'ft8-decode-line';
+    row.style.cssText = 'display:flex;gap:8px;padding:2px 10px;font-family:monospace;font-size:12px;cursor:pointer;';
+    row.innerHTML = '<span class="j-time" style="color:var(--text-dim);min-width:60px;"></span><span class="j-db" style="min-width:28px;text-align:right;"></span><span class="j-df" style="min-width:36px;text-align:right;color:var(--text-dim);"></span><span class="j-msg" style="flex:1;word-break:break-word;"></span>';
+    return row;
+  }
+  function jttyPickCall(text) {
+    const my = String(myCallsign || '').toUpperCase().trim();
+    for (const raw of String(text).toUpperCase().split(/\s+/)) {
+      const w = raw.replace(/[^A-Z0-9/]/g, '');
+      if (w && w !== my && w !== 'CQ' && /^[A-Z0-9/]{3,10}$/.test(w) && /\d/.test(w) && /[A-Z]/.test(w) && !/^\d+$/.test(w)) {
+        if (jttyHisEl) jttyHisEl.value = w;
+        jttyRenderTemplates();
+        return;
+      }
+    }
+  }
+  function jttyApplyUpdate(u, replay) {
+    if (!jttyListEl || !u || u.id == null) return;
+    const pinned = jttyAtBottom();
+    let row = jttyRows[u.id];
+    if (!row) {
+      row = jttyMakeRow();
+      row.dataset.id = String(u.id);
+      row.addEventListener('click', () => jttyPickCall(row.dataset.text || ''));
+      jttyListEl.appendChild(row);
+      jttyRows[u.id] = row;
+      jttyPrune();
+    }
+    const d = new Date(u.utcMs || Date.now());
+    row.querySelector('.j-time').textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + ':' + jttyPad2(d.getUTCSeconds());
+    row.querySelector('.j-db').textContent = (u.snrDb > 0 ? '+' : '') + u.snrDb;
+    row.querySelector('.j-df').textContent = String(Math.round(u.freqHz));
+    const msgEl = row.querySelector('.j-msg');
+    msgEl.textContent = u.text + (u.complete ? '' : ' …');
+    msgEl.style.fontStyle = u.complete ? '' : 'italic';
+    msgEl.style.color = u.complete ? '' : 'var(--text-dim)';
+    row.dataset.text = u.text || '';
+    const up = String(u.text || '').toUpperCase();
+    const my = String(myCallsign || '').toUpperCase().trim();
+    const directed = !!my && (' ' + up + ' ').indexOf(' ' + my + ' ') >= 0;
+    row.style.background = directed ? 'rgba(180,30,30,0.22)' : /^CQ\b/.test(up) ? 'rgba(0,120,0,0.25)' : '';
+    row.style.borderLeft = directed ? '3px solid #e94560' : '';
+    if (pinned || replay) jttyListEl.scrollTop = jttyListEl.scrollHeight;
+  }
+  function jttyHandleRx(msg) {
+    if (!msg || !Array.isArray(msg.updates)) return;
+    msg.updates.forEach((u) => jttyApplyUpdate(u, !!msg.replay));
+  }
+  function jttyOnTxStatus(msg) {
+    if (!jttyListEl) return;
+    if (msg.state === 'tx' && msg.message) {
+      const pinned = jttyAtBottom();
+      const row = jttyMakeRow();
+      row.style.opacity = '0.75';
+      const d = new Date();
+      row.querySelector('.j-time').textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + ':' + jttyPad2(d.getUTCSeconds());
+      const db = row.querySelector('.j-db'); db.textContent = 'TX'; db.style.color = '#e94560';
+      row.querySelector('.j-df').textContent = String(msg.txFreq || ft8TxFreqHz || '');
+      row.querySelector('.j-msg').textContent = msg.message;
+      jttyListEl.appendChild(row);
+      jttyPrune();
+      if (pinned) jttyListEl.scrollTop = jttyListEl.scrollHeight;
+      jttyNote('Sending…', false);
+    } else if (msg.state !== 'tx') {
+      jttyCount();
+    }
+  }
+  /** Seed the pane from the settings blob the first time (and whenever the mode lands on JTTY). */
+  function jttySeed() {
+    if (!jttyPane) return;
+    if (!jttySeeded && echoSettings) {
+      jttySeeded = true;
+      if (jttyProfileEl && JTTY_PROFILES.includes(echoSettings.jttyProfile)) jttyProfileEl.value = echoSettings.jttyProfile;
+      if (jttySerialEl && parseInt(echoSettings.jttySerial, 10) > 0) jttySerialEl.value = String(parseInt(echoSettings.jttySerial, 10));
+      jttyRefreshExchange(true);
+    }
+    jttyRenderTemplates();
+    jttyCount();
+  }
+  if (jttyProfileEl) jttyProfileEl.addEventListener('change', () => {
+    ft8Send({ type: 'jtcat-jtty-set-profile', profile: jttyProfile() });
+    jttyRefreshExchange(true);
+    jttyRenderTemplates();
+  });
+  function jttySerialChanged() {
+    if (jttySerialEl) jttySerialEl.value = String(jttySerial());
+    jttyRefreshExchange(true);
+    jttyRenderTemplates();
+    // The desktop keeps the serial (settings.jttySerial) — one number per station, not per screen.
+    ft8Send({ type: 'save-settings', settings: { jttySerial: jttySerial() } });
+  }
+  if (jttySerialEl) jttySerialEl.addEventListener('change', jttySerialChanged);
+  const jttyUp = document.getElementById('jtty-serial-up');
+  const jttyDn = document.getElementById('jtty-serial-dn');
+  if (jttyUp) jttyUp.addEventListener('click', () => { jttySerialEl.value = String(jttySerial() + 1); jttySerialChanged(); });
+  if (jttyDn) jttyDn.addEventListener('click', () => { jttySerialEl.value = String(jttySerial() - 1); jttySerialChanged(); });
+  if (jttyExchEl) jttyExchEl.addEventListener('input', () => { jttyExchEl.dataset.auto = '0'; jttyRenderTemplates(); });
+  if (jttyHisEl) jttyHisEl.addEventListener('input', jttyRenderTemplates);
+  if (jttyQueuedEl) jttyQueuedEl.addEventListener('input', jttyRenderTemplates);
+  if (jttyTxEl) {
+    jttyTxEl.addEventListener('input', () => { jttyComposeNative = -1; jttyCount(); });
+    jttyTxEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jttySend(); } });
+  }
+  const jttySendBtn = document.getElementById('jtty-send');
+  if (jttySendBtn) jttySendBtn.addEventListener('click', jttySend);
+  const jttyStopBtn = document.getElementById('jtty-stop');
+  if (jttyStopBtn) jttyStopBtn.addEventListener('click', () => ft8Send({ type: 'jtcat-halt-tx' }));
+  const jttyLogBtn = document.getElementById('jtty-log');
+  if (jttyLogBtn) jttyLogBtn.addEventListener('click', () => {
+    openLogSheet({
+      callsign: String((jttyHisEl && jttyHisEl.value) || '').toUpperCase().trim(),
+      mode: 'JTTY',
+      // No freqKhz — see the invariant in openLogSheet.
+    });
+  });
+  const jttyClearBtn = document.getElementById('jtty-clear');
+  if (jttyClearBtn) jttyClearBtn.addEventListener('click', () => {
+    if (jttyListEl) jttyListEl.innerHTML = '';
+    for (const k of Object.keys(jttyRows)) delete jttyRows[k];
   });
 
   // ---------------- Hamburger nav (mobile TabMenu parity) ----------------

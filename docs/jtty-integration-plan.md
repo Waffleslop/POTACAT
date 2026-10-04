@@ -328,7 +328,7 @@ once per session when JTTY QSOs were in the snapshot, since TQSL only says
 "skipped" in its stderr tail. Guard: the "logging" test in
 `test/jtty-engine-test.js`.
 
-### Phase 6 — ECHOCAT (~1–2 days desktop; mobile by handoff)
+### Phase 6 — ECHOCAT (~1–2 days desktop; mobile by handoff) — DONE 2026-10-04 (desktop + web; mobile handed off)
 
 - Protocol: S2C `jtcat-jtty-rx` (frames with the fields above, replay tail
   on reconnect like PSK), C2S `jtcat-jtty-send {text, profile}`; remote
@@ -336,6 +336,24 @@ once per session when JTTY QSOs were in the snapshot, since TQSL only says
 - ECHOCAT Web: the JTTY pane in the FT8 tab, mirroring Phase 4.
 - Mobile: handoff `potacat-meta/work/open/jtty-mobile.md` after the wire is
   final; the app's PSK31 screen is the template.
+
+**Status 2026-10-04 — built:** registry entries `jtcat-jtty-rx` (S2C,
+`{updates[], replay?}` — message rows, not a `frames` array: the desktop's
+RX stream is already message-framed, so the wire carries what the panes
+draw), `jtcat-jtty-send` (C2S `{text, profile?}`), `jtcat-jtty-set-profile`
+(C2S), `jtcat-jtty-refused` (S2C `{message, reason}` — the engine's
+encode-failed, fanned out so a remote composer sees why); hello capability
+`jtty`. `RemoteServer.broadcastJtcatJttyRx` keeps the newest update per id
+in a 40-row recent list replayed as `replay:true` on every connect path;
+Send and set-profile are **Guest Pass refused** (they key the rig / change
+the operator's settings), exactly as `js8-send`. main.js's remote handlers
+are one-liners into the pop-out's IPC handlers (one implementation). The
+settings blob seeds `jttyProfile`, `jttyTemplates`, `jttySerial`. ECHOCAT
+Web has the pane in the FT8 tab (mode select + VFO mode pad gained JTTY):
+same rows, templates, fields and native-serial rule as the pop-out; its
+only local check is the 80-character counter, every other refusal comes
+back on the wire. Mobile: `potacat-meta/work/open/jtty-mobile.md`. Tests:
+`test/jtty-remote-test.js`.
 
 ### Phase 7 — Later (documented, not built)
 

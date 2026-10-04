@@ -3727,6 +3727,14 @@ function _applyPopoutTheme(payload) {
       batch.updates.forEach(jttyApplyUpdate);
     });
   }
+  // The engine refused a Send (ours or a remote client's) — say why here too.
+  if (window.api.onJtcatJttyRefused) {
+    window.api.onJtcatJttyRefused(function(d) {
+      if (!jttyFramesEl || !d) return;
+      jttyFramesEl.textContent = d.reason || 'refused';
+      jttyFramesEl.classList.add('bad');
+    });
+  }
 
   // Our own transmission as a row (red, like FT8's TX rows), and the status
   // strip's sweep — shared with PSK31's (pskTxT0/pskTxDurMs drive it).
