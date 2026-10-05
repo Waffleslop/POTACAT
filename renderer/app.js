@@ -22080,8 +22080,11 @@ function rigApplyCapabilities(caps) {
   // popover compact for rigs that expose none of them, like the legacy
   // 706MkIIG entry as it was before this expansion).
   if (rigVfoRow)   rigVfoRow.style.display   = (caps.vfo || caps.split) ? '' : 'none';
-  if (rigVfoABtn)  rigVfoABtn.style.display  = caps.vfo   ? '' : 'none';
-  if (rigVfoBBtn)  rigVfoBBtn.style.display  = caps.vfo   ? '' : 'none';
+  // vfoSelect:false = the radio can swap A/B but cannot SELECT one (FT-991A:
+  // no VS command) — keep the swap, hide the A | B pair.
+  const vfoSelect = caps.vfo && caps.vfoSelect !== false;
+  if (rigVfoABtn)  rigVfoABtn.style.display  = vfoSelect ? '' : 'none';
+  if (rigVfoBBtn)  rigVfoBBtn.style.display  = vfoSelect ? '' : 'none';
   if (rigSplitBtn) rigSplitBtn.style.display = caps.split ? '' : 'none';
   if (rigPreampBtn) rigPreampBtn.style.display = caps.preamp ? '' : 'none';
   if (rigAttBtn)    rigAttBtn.style.display    = caps.att    ? '' : 'none';

@@ -213,6 +213,88 @@ test('Yaesu setSplit(false) -> ST0;', () => {
 });
 
 // =========================================================================
+// FT-991A — Artemis's list against the FT-991A CAT reference (2026-10-04):
+// no VS (VFO select) command; split is FT3;/FT2; (TX on B / on A); filter
+// width is SH0nn with the 991A's own chart; the preamp is the IPO/AMP1/AMP2
+// ladder; the tuner toggles with AC001;/AC000; and tunes with AC001;+AC002;.
+console.log('\n=== KenwoodCodec (Yaesu FT-991A, Artemis) ===');
+
+test('FT-991A: no VFO-select command is sent (VS0;/VS1; are invalid there), swap still works', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-991/991A']);
+  assert.strictEqual(RIG_MODELS['FT-991/991A'].caps.vfoSelect, false, 'A | B selector hidden');
+  codec.setVfo('B'); codec.setVfo('A');
+  assert.deepStrictEqual(writes, [], 'nothing written');
+  codec.swapVfo();
+  assert.deepStrictEqual(writes, ['SV;']);
+});
+
+test('FT-991A: split on/off is FT3;/FT2;, reported at once and confirmed with FT;', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-991/991A']);
+  const events = [];
+  codec.on('split', (s) => events.push(s));
+  codec.setSplit(true);
+  codec.setSplit(false);
+  assert.deepStrictEqual(writes, ['FT3;', 'FT;', 'FT2;', 'FT;']);
+  assert.deepStrictEqual(events, [true, false]);
+  assert.ok(!writes.some((w) => /^ST/.test(w)), 'ST is not a 991A command');
+});
+
+test('FT-991A and FT-891: filter width is SH0nn from the 991A chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const id of ['FT-991/991A', 'FT-891']) {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
+    codec._lastParsedMode = 'USB';
+    codec.setFilterWidth(2400);   // index 13 on the 991A chart
+    codec.setFilterWidth(3000);   // index 20 (the FTDX chart would say 19)
+    codec._lastParsedMode = 'CW';
+    codec.setFilterWidth(500);    // index 10
+    codec.setFilterWidth(2400);   // index 16
+    assert.deepStrictEqual(writes, ['SH013;', 'SH020;', 'SH010;', 'SH016;'], id);
+  }
+});
+
+test('FT-991A: preamp ladder is PA00/PA01/PA02 (IPO, AMP1, AMP2)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-991/991A']);
+  codec.setPreamp(0); codec.setPreamp(1); codec.setPreamp(2);
+  assert.deepStrictEqual(writes, ['PA00;', 'PA01;', 'PA02;']);
+});
+
+test('FT-991A: ATU toggle is AC001;/AC000; on serial and rigctld; a Kenwood keeps the controller fallback', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-991/991A']);
+  assert.strictEqual(codec.setAtuEnabled(true), true);
+  assert.strictEqual(codec.setAtuEnabled(false), true);
+  assert.deepStrictEqual(writes, ['AC001;', 'AC000;']);
+  const { codec: rc, writes: rw } = captureWrites(RigctldCodec, RIG_MODELS['FT-991/991A']);
+  rc.setAtuEnabled(true); rc.setAtuEnabled(false);
+  assert.deepStrictEqual(rw, ['w AC001;\n', 'w AC000;\n']);
+  const { codec: kw, writes: kwrites } = captureWrites(KenwoodCodec, RIG_MODELS['TS-590S/SG']);
+  assert.strictEqual(kw.setAtuEnabled(true), false, 'no enable command known: controller falls back to tune/stop');
+  assert.deepStrictEqual(kwrites, []);
+  // An override reaches the toggle too.
+  kw.applyOverrides({ setAtuOn: 'AC110;', setAtuOff: 'AC100;' });
+  assert.strictEqual(kw.setAtuEnabled(true), true);
+  assert.deepStrictEqual(kwrites, ['AC110;']);
+});
+
+test('FT-991A: the command table shows the resolved commands, Split Off and the ATU toggle', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec } = captureWrites(KenwoodCodec, RIG_MODELS['FT-991/991A']);
+  const rows = Object.fromEntries(codec.getCommandTable().map((e) => [e.label, e.value]));
+  assert.strictEqual(rows['Split On'], 'FT3;');
+  assert.strictEqual(rows['Split Off'], 'FT2;');
+  assert.strictEqual(rows['Filter Width'], 'SH0{val:pad2};');
+  assert.strictEqual(rows['ATU Tune'], 'AC001; -> AC002;');
+  assert.strictEqual(rows['ATU On'], 'AC001;');
+  assert.strictEqual(rows['ATU Off (bypass)'], 'AC000;');
+  assert.ok(!('VFO A' in rows) && !('VFO B' in rows), 'no VFO-select rows on a radio without the command');
+  assert.strictEqual(rows['VFO Swap'], 'SV;');
+});
+
+// =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
 const TS590_MODEL = {

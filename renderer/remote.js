@@ -2646,6 +2646,13 @@
       soFilterRow.classList.toggle('hidden', !s.capabilities.filter);
       rcNbGroup.classList.toggle('hidden', !s.capabilities.nb);
       rcAtuGroup.classList.toggle('hidden', !s.capabilities.atu);
+      // vfoSelect:false — the radio swaps A/B but cannot SELECT one (FT-991A
+      // has no VS command); the A | B pair hides, the swap stays.
+      if (rcVfoA && rcVfoB) {
+        const noSelect = s.capabilities.vfoSelect === false;
+        rcVfoA.classList.toggle('hidden', noSelect);
+        rcVfoB.classList.toggle('hidden', noSelect);
+      }
       scopeUpdateTabVisibility();
       soRfGainRow.classList.toggle('hidden', !s.capabilities.rfgain);
       // FM squelch — mode-gated like the desktop: shown in FM (any band) or
