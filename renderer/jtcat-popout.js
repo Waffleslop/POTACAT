@@ -3774,9 +3774,15 @@ function _applyPopoutTheme(payload) {
     }
   }
 
+  var jttyEpoch = 0; // the engine the on-screen rows belong to; ids restart with each engine
+  function jttyClearRows() {
+    if (jttyListEl) jttyListEl.innerHTML = '';
+    jttyRows = {};
+  }
   if (window.api.onJtcatJttyRx) {
     window.api.onJtcatJttyRx(function(batch) {
       if (!batch || !Array.isArray(batch.updates)) return;
+      if (batch.epoch && batch.epoch !== jttyEpoch) { jttyClearRows(); jttyEpoch = batch.epoch; }
       batch.updates.forEach(jttyApplyUpdate);
     });
   }
@@ -3890,10 +3896,7 @@ function _applyPopoutTheme(payload) {
       }
       window.api.openQsoLog();
     });
-    if (jttyClearBtn) jttyClearBtn.addEventListener('click', function() {
-      if (jttyListEl) jttyListEl.innerHTML = '';
-      jttyRows = {};
-    });
+    if (jttyClearBtn) jttyClearBtn.addEventListener('click', jttyClearRows);
 
     var edSave = document.getElementById('jp-jtty-ed-save');
     var edCancel = document.getElementById('jp-jtty-ed-cancel');

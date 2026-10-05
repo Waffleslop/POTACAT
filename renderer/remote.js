@@ -8537,8 +8537,14 @@
     row.style.borderLeft = directed ? '3px solid #e94560' : '';
     if (pinned || replay) jttyListEl.scrollTop = jttyListEl.scrollHeight;
   }
+  let jttyEpoch = 0; // the engine the on-screen rows belong to; ids restart with each engine
+  function jttyClearRows() {
+    if (jttyListEl) jttyListEl.innerHTML = '';
+    for (const k of Object.keys(jttyRows)) delete jttyRows[k];
+  }
   function jttyHandleRx(msg) {
     if (!msg || !Array.isArray(msg.updates)) return;
+    if (msg.epoch && msg.epoch !== jttyEpoch) { jttyClearRows(); jttyEpoch = msg.epoch; }
     msg.updates.forEach((u) => jttyApplyUpdate(u, !!msg.replay));
   }
   function jttyOnTxStatus(msg) {
@@ -8609,10 +8615,7 @@
     });
   });
   const jttyClearBtn = document.getElementById('jtty-clear');
-  if (jttyClearBtn) jttyClearBtn.addEventListener('click', () => {
-    if (jttyListEl) jttyListEl.innerHTML = '';
-    for (const k of Object.keys(jttyRows)) delete jttyRows[k];
-  });
+  if (jttyClearBtn) jttyClearBtn.addEventListener('click', jttyClearRows);
 
   // ---------------- Hamburger nav (mobile TabMenu parity) ----------------
   // One nav, one order: the user's tab order drives BOTH the bar and the

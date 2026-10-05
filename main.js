@@ -9413,6 +9413,11 @@ let jtcatPskRxTimer = null;
 // frame costs one IPC row per flush, not one per frame.
 let jtcatJttyRxPending = null;   // Map(id -> update)
 let jtcatJttyRxTimer = null;
+// Decoder message ids restart at 1 with every engine (a JTTY → FT8 → JTTY
+// round trip rebuilds it), so an id alone cannot key a row across engines.
+// Every batch carries the engine's epoch (start time); the remote server and
+// the clients drop their rows when it changes.
+let jtcatJttyEpoch = 0;
 function jtcatJttyRxQueue(d) {
   if (!d) return;
   if (d.complete) {
@@ -9428,10 +9433,13 @@ function jtcatJttyRxQueue(d) {
       jtcatJttyRxTimer = null;
       if (!batch.length) return;
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-        jtcatPopoutWin.webContents.send('jtcat-jtty-rx', { updates: batch });
+        jtcatPopoutWin.webContents.send('jtcat-jtty-rx', { updates: batch, epoch: jtcatJttyEpoch });
       }
-      if (remoteServer && remoteServer.hasClient()) {
-        remoteServer.broadcastJtcatJttyRx(batch);
+      if (remoteServer) {
+        // Always, client or not: the server's recent-rows buffer must follow
+        // the epoch even while nobody is connected, or the next connect
+        // replays the previous engine's rows.
+        remoteServer.broadcastJtcatJttyRx(batch, jtcatJttyEpoch);
       }
     }, 250);
   }
@@ -11536,6 +11544,14 @@ function startJtcat(mode) {
   // before the JTTY pane (Phase 4) exists.
   ft8Engine.removeAllListeners('jtty-rx');
   ft8Engine.on('jtty-rx', (d) => jtcatJttyRxQueue(d));
+  if (ft8Engine._mode === 'JTTY') {
+    // A new engine is a new epoch: its ids start at 1 again. Drop anything
+    // queued from the old one and tell the remote server to forget its rows.
+    jtcatJttyEpoch = Date.now();
+    if (jtcatJttyRxTimer) { clearTimeout(jtcatJttyRxTimer); jtcatJttyRxTimer = null; }
+    jtcatJttyRxPending = null;
+    if (remoteServer) remoteServer.clearJtcatJttyRecent(jtcatJttyEpoch);
+  }
 
   // Catch engine errors (e.g. missing FT4/FT2 decoder on some platforms)
   ft8Engine.on('error', (data) => {
@@ -14625,6 +14641,10 @@ function updateRemoteSettings() {
     jttyProfile: settings.jttyProfile || 'unknown',
     jttyTemplates: Array.isArray(settings.jttyTemplates) ? settings.jttyTemplates : null,
     jttyMacros: Array.isArray(settings.jttyMacros) ? settings.jttyMacros : null,
+    // The Field Day exchange (class + section) the JTTY/FT8 panes put in %E
+    // under the Field Day profile — remote panes read it from here
+    // (potacat-meta jtty-remote-fd-exch-and-replay).
+    jtcatFdExch: settings.jtcatFdExch || '',
     jttySerial: parseInt(settings.jttySerial, 10) > 0 ? parseInt(settings.jttySerial, 10) : 1,
     wsprTxPct: typeof settings.wsprTxPct === 'number' ? settings.wsprTxPct : 20,
     wsprDbm: typeof settings.wsprDbm === 'number' ? settings.wsprDbm : 30,
@@ -19342,8 +19362,10 @@ function connectRemote() {
     afterSstvSettingsSaved(partial);
     // Echo the CLEANED list back so the sender reconciles to it (the phone
     // adopts settings-update pushes wholesale — same pattern as the
-    // sanitized VFO-profiles echo).
-    if (sdrSync) updateRemoteSettings();
+    // sanitized VFO-profiles echo). The JTTY serial a phone bumps must reach
+    // the web pane and vice versa, so those keys push too.
+    const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
+    if (sdrSync || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
   });
 }
 
@@ -34230,7 +34252,12 @@ app.whenReady().then(() => {
     // ECHOCAT keyer pane shows the user's custom macros (Walt KK4DF).
     // sdrSync: a desktop-side SDR slot edit must reach the phone's list
     // (acceptance: "edit slot 2 on the desktop → phone row 2 updates").
-    if (has('rotorActive') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync) {
+    // jtty*/psk*/jtcatFdExch: the JTTY and PSK31 panes on ECHOCAT Web and the
+    // app render macros, profile, serial and the Field Day exchange from the
+    // blob — a desktop edit that is not pushed is invisible there until the
+    // next reconnect (potacat-meta jtty-remote-fd-exch-and-replay).
+    if (has('rotorActive') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
+        has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyProfile') || has('jttySerial') || has('pskMacros')) {
       updateRemoteSettings();
     }
 

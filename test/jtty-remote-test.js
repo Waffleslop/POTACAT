@@ -100,12 +100,42 @@ test('recent rows: newest update per id wins, the list is bounded, and the clien
   assert.strictEqual(last.reason, 'too long');
 });
 
+test('a new engine epoch empties the recent rows — ids restart at 1 per engine (jtty-remote-fd-exch-and-replay)', () => {
+  const rs = new RemoteServer();
+  const ws = fakeWs();
+  rs._client = ws;
+  rs.broadcastJtcatJttyRx([{ id: 1, text: 'OLD ENGINE ROW 1', complete: true }, { id: 2, text: 'OLD 2', complete: true }], 1000);
+  assert.strictEqual(rs._jtcatJttyEpoch, 1000);
+  // JTTY → FT8 → JTTY: main clears on start, and even without that a batch
+  // from a new epoch must not merge into the old rows by id.
+  rs.broadcastJtcatJttyRx([{ id: 1, text: 'NEW ENGINE ROW 1', complete: false }], 2000);
+  assert.deepStrictEqual(rs._jtcatJttyRecent.map((r) => r.text), ['NEW ENGINE ROW 1'], 'old rows gone, new row 1 is not the old row 1');
+  assert.strictEqual(ws._sent[ws._sent.length - 1].epoch, 2000, 'every batch carries the epoch');
+  rs.clearJtcatJttyRecent(3000);
+  assert.deepStrictEqual(rs._jtcatJttyRecent, []);
+  assert.strictEqual(rs._jtcatJttyEpoch, 3000);
+  rs.broadcastJtcatJttyRx([{ id: 1, text: 'X', complete: true }]); // no epoch given: keeps the current one
+  assert.strictEqual(rs._jtcatJttyEpoch, 3000);
+  assert.ok(protocol.validate({ type: 'jtcat-jtty-rx', updates: [], epoch: 3000 }, protocol.Dir.S2C).ok, 'epoch is registered');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(main.includes('remoteServer.clearJtcatJttyRecent(jtcatJttyEpoch);'), 'main clears the buffer when a JTTY engine starts');
+  assert.ok(main.includes('remoteServer.broadcastJtcatJttyRx(batch, jtcatJttyEpoch);'), 'main sends the epoch with every batch');
+  assert.ok(main.includes("jtcatFdExch: settings.jtcatFdExch || '',"), 'the Field Day exchange is in the settings blob');
+  // A desktop or remote edit of the pane's seeds is pushed, not left for the next reconnect.
+  assert.ok(/has\('jtcatFdExch'\) \|\| has\('jttyMacros'\) \|\| has\('jttyTemplates'\) \|\| has\('jttyProfile'\) \|\| has\('jttySerial'\) \|\| has\('pskMacros'\)\)\s*\{\s*updateRemoteSettings\(\);/.test(main), 'desktop save pushes settings-update for the JTTY/PSK seeds');
+  assert.ok(/const jttyKeys = \['jttySerial', 'jttyMacros', 'jttyProfile', 'jtcatFdExch', 'pskMacros'\];[\s\S]{0,200}updateRemoteSettings\(\);/.test(main), 'remote save pushes settings-update for the JTTY/PSK seeds');
+  for (const [name, file] of [['web', 'renderer/remote.js'], ['pop-out', 'renderer/jtcat-popout.js']]) {
+    const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+    assert.ok(/epoch && (msg|batch)\.epoch !== jttyEpoch\) \{ jttyClearRows\(\);/.test(src), name + ' clears its rows on a new epoch');
+  }
+});
+
 test('the recent rows are replayed on connect, and main / web wiring is in place (static)', () => {
   const root = path.join(__dirname, '..');
   const rs = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8');
-  assert.ok(rs.includes("this._sendTo(ws, { type: 'jtcat-jtty-rx', updates: this._jtcatJttyRecent.slice(), replay: true });"), 'hydration replay');
+  assert.ok(rs.includes("this._sendTo(ws, { type: 'jtcat-jtty-rx', updates: this._jtcatJttyRecent.slice(), replay: true, epoch: this._jtcatJttyEpoch || undefined });"), 'hydration replay carries the epoch');
   const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-  assert.ok(main.includes('remoteServer.broadcastJtcatJttyRx(batch);'), 'RX batches reach remote clients');
+  assert.ok(main.includes('remoteServer.broadcastJtcatJttyRx(batch, jtcatJttyEpoch);'), 'RX batches reach remote clients, with the epoch');
   assert.ok(main.includes("remoteServer.on('jtcat-jtty-send',") && main.includes("ipcMain.emit('jtcat-jtty-send', null, { text, profile });"), 'remote Send is the IPC handler');
   assert.ok(main.includes("remoteServer.on('jtcat-jtty-set-profile',"), 'remote profile twin');
   assert.ok(main.includes('remoteServer.broadcastJtcatJttyRefused(data);'), 'refusals reach remote clients');
