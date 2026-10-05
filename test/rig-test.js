@@ -161,6 +161,23 @@ test('Yaesu ATU ft891 sequence: AC001 + AC002', () => {
   assert.strictEqual(seq[1].delay, 300);
 });
 
+// FT-991A CAT manual: AC P1 P2 P3, P1 and P2 fixed at 0, P3 0 OFF / 1 ON /
+// 2 tuning start. It shipped on the Kenwood-form 'standard' (AC011;) until
+// Artemis asked for AC002 (2026-10-04). Pinned here so a model-table edit
+// can never put it back.
+test('FT-991/991A and FTDX101D/MP ATU are the FT-891 shape (AC001 then AC002), never AC011', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const id of ['FT-991/991A', 'FTDX101D/MP']) {
+    assert.strictEqual(RIG_MODELS[id].atuCmd, 'ft891', id);
+    const { codec } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
+    const seq = codec.getAtuStartSequence();
+    assert.deepStrictEqual(seq.map((s) => s.cmd), ['AC001;', 'AC002;'], id);
+    assert.ok(!seq.some((s) => /AC011/.test(s.cmd)), id);
+    const { codec: rc } = captureWrites(RigctldCodec, RIG_MODELS[id]);
+    assert.deepStrictEqual(rc.getAtuStartSequence().map((s) => s.cmd), ['w AC001;\n', 'w AC002;\n'], id + ' via rigctld');
+  }
+});
+
 test('Yaesu filter SH01 indexed', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setFilterWidth(3000);
