@@ -2091,6 +2091,22 @@ function detectRigType() {
   return 'unknown';
 }
 
+/**
+ * For a no-CAT radio that declares its bands (Pebble HF: 20 m only), the
+ * suffix a tune refusal carries when the asked frequency is outside them —
+ * " — Pebble HF is 20m only" — else ''. Keeps a 40 m spot click from reading
+ * as a frequency the operator should go and dial.
+ */
+function noCatBandNote(mhz) {
+  const model = getActiveRigModel();
+  if (!model || !Array.isArray(model.bands) || !model.bands.length || !Number.isFinite(mhz)) return '';
+  const band = freqToBand(mhz);
+  if (band && model.bands.includes(band)) return '';
+  const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  const name = (rig && rig.model) || 'this radio';
+  return ` — ${name} is ${model.bands.join('/')} only`;
+}
+
 /** Get the active rig's model entry from rig-models.js, or null */
 function getActiveRigModel() {
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
@@ -16367,8 +16383,9 @@ function connectRemote() {
     if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
       if (settings.catTarget && settings.catTarget.type === 'none') {
         const mhz = (parseFloat(freqKhz) / 1000).toFixed(3);
-        sendCatLog(`[Echo CAT] tune: no CAT control — set the radio to ${mhz} MHz by hand (mobile device told)`);
-        remoteServer.sendToClient({ type: 'tune-blocked', reason: `No CAT control — set the radio to ${mhz} MHz by hand` });
+        const bandNote = noCatBandNote(parseFloat(mhz));
+        sendCatLog(`[Echo CAT] tune: no CAT control — set the radio to ${mhz} MHz by hand${bandNote} (mobile device told)`);
+        remoteServer.sendToClient({ type: 'tune-blocked', reason: `No CAT control — set the radio to ${mhz} MHz by hand${bandNote}` });
         return;
       }
       sendCatLog('[Echo CAT] tune refused — radio not connected (mobile device notified)');
@@ -30043,6 +30060,18 @@ app.whenReady().then(() => {
       case 'recheck': break;
       case 'tx-test': await runStationSetupTxTest(rigId); break;
       case 'tx-test-current-power': await runStationSetupTxTest(rigId, { keepPower: true }); break;
+      case 'tune-tone': {
+        // A no-CAT (VOX) radio: nothing to read back, so the test is the tone
+        // itself — 3 s at 1500 Hz down the same route FT8 uses — and the
+        // operator reports whether the radio keyed ('tx-test-confirm').
+        startJtcatTune({ toneHz: 1500 });
+        await sleepMs(3000);
+        stopJtcatTune();
+        const r = stationSetupResultsFor(rigId);
+        r.txTest = { result: 'tune-tone', at: Date.now() };
+        sendCatLog('[Setup] tune tone sent for 3 s (no CAT control — did the radio key?)');
+        break;
+      }
       case 'tx-test-confirm': {
         // The operator watched the radio's own meter move: a real observation
         // on a radio POTACAT cannot measure.
@@ -31408,8 +31437,9 @@ app.whenReady().then(() => {
       if (settings.catTarget && settings.catTarget.type === 'none') {
         // No CAT control is a choice, not a fault: say what to set by hand.
         const mhz = (parseFloat(frequency) / 1000).toFixed(3);
-        sendCatLog(`tune: no CAT control — set the radio to ${mhz} MHz${mode ? ' ' + String(mode).toUpperCase() : ''} by hand`);
-        _e.sender.send('tune-blocked', `No CAT control — set the radio to ${mhz} MHz by hand`);
+        const bandNote = noCatBandNote(parseFloat(mhz));
+        sendCatLog(`tune: no CAT control — set the radio to ${mhz} MHz${mode ? ' ' + String(mode).toUpperCase() : ''} by hand${bandNote}`);
+        _e.sender.send('tune-blocked', `No CAT control — set the radio to ${mhz} MHz by hand${bandNote}`);
         return;
       }
       sendCatLog('tune refused — no radio connected. Check Settings -> My Rigs.');

@@ -2356,7 +2356,10 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
     if (group.models.includes(modelName)) { brand = group.brand; break; }
   }
   if (!brand) return;
-  if (brand === 'FlexRadio') setRadioType('flex');
+  const groupOf = rigModelData.find((g) => g.brand === brand);
+  const noCat = !!(groupOf && Array.isArray(groupOf.noCat) && groupOf.noCat.includes(modelName));
+  if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
+  else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
   else setRadioType('serialcat');
   updateRadioSubPanels();
@@ -23337,6 +23340,8 @@ function updateWelcomeRadioSubPanels() {
   document.getElementById('welcome-icom-config').classList.toggle('hidden', type !== 'icom');
   document.getElementById('welcome-hamlib-config').classList.toggle('hidden', type !== 'hamlib');
   document.getElementById('welcome-rigctldnet-config').classList.toggle('hidden', type !== 'rigctldnet');
+  const wNocat = document.getElementById('welcome-nocat-config');
+  if (wNocat) wNocat.classList.toggle('hidden', type !== 'nocat');
   if (type === 'serialcat' && !welcomeSerialcatLoaded) {
     welcomeSerialcatLoaded = true;
     loadWelcomeSerialcatPorts();
@@ -23437,6 +23442,8 @@ function buildWelcomeCatTarget() {
       host: document.getElementById('welcome-rigctldnet-host').value.trim() || '127.0.0.1',
       port: parseInt(document.getElementById('welcome-rigctldnet-port').value, 10) || 4532,
     };
+  } else if (type === 'nocat') {
+    return { type: 'none' }; // No CAT control (VOX) — see buildCatTargetFromForm
   }
   return null;
 }

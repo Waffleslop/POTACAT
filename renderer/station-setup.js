@@ -286,12 +286,14 @@
     const box = document.createElement('div');
     box.className = 'ss-confirm';
     const keep = confirmTx.action === 'tx-test-current-power';
+    const tone = confirmTx.action === 'tune-tone'; // no-CAT radio: POTACAT cannot set its power
     box.innerHTML =
-      `<div><strong>This will transmit for 3 seconds${keep ? ' at the power the radio is set to now' : ' at low power'}.</strong></div>` +
+      `<div><strong>${tone ? 'This will send a 3-second tone. If the radio\'s VOX is on, it transmits at whatever power it is set to.' : `This will transmit for 3 seconds${keep ? ' at the power the radio is set to now' : ' at low power'}.`}</strong></div>` +
       '<ul class="ss-instr">' +
       '<li>Make sure your antenna or a dummy load is connected.</li>' +
       '<li>Listen first: the frequency the radio is on should be clear.</li>' +
-      (keep ? '' : '<li>POTACAT turns the power down for the test and puts it back afterwards.</li>') +
+      (keep || tone ? '' : '<li>POTACAT turns the power down for the test and puts it back afterwards.</li>') +
+      (tone ? '<li>Watch the radio\'s transmit light, then come back and say whether it keyed.</li>' : '') +
       '</ul>';
     const row = document.createElement('div');
     row.className = 'ss-actions';
@@ -403,6 +405,7 @@
       case 'tx-device-test': return runLocalCheck(st.id, 'txDeviceTest');
       case 'tx-test':
       case 'tx-test-current-power':
+      case 'tune-tone':
         confirmTx = { step: st.id, action: a.id };
         return render();
       case 'open-settings':

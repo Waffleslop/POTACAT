@@ -4460,6 +4460,10 @@
           <label>Host: <input type="text" id="welcome-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="welcome-rigctldnet-port" min="1" max="65535" value="4532"></label>
         </div>
+        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="nocat"> No CAT control (VOX)</label>
+        <div id="welcome-nocat-config" class="radio-sub hidden">
+          <span class="help-text">For a radio with no computer control — a VOX-keyed kit such as the Pebble HF. You tune it by hand; POTACAT's audio keys it through its VOX. Choose the sound card that connects to the radio as the audio Input and Output afterwards (Settings &gt; My Rigs).</span>
+        </div>
         <div class="rig-editor-buttons">
           <button type="button" id="welcome-rig-save-btn">Save Rig</button>
           <button type="button" id="welcome-rig-cancel-btn">Cancel</button>
