@@ -2420,7 +2420,7 @@ function renderRigSetupNotes() {
   rigSetupBtn.classList.toggle('needs-action', open > 0);
   rigSetupBtn.classList.toggle('empty', notes.length === 0);
   rigSetupSummary.textContent = open > 0
-    ? open + ' required radio setting' + (open === 1 ? '' : 's') + ' — CAT or CW will not work without ' + (open === 1 ? 'it' : 'them')
+    ? open + ' required radio setting' + (open === 1 ? '' : 's') + ' — the radio will not work with POTACAT without ' + (open === 1 ? 'it' : 'them')
     : (notes.length ? 'What other operators set on this radio' : 'No setup notes for this radio yet — worked it out? Tell us');
 
   rigSetupPanel.textContent = '';
