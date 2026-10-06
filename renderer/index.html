@@ -1921,6 +1921,10 @@
           <label>Host: <input type="text" id="set-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="set-rigctldnet-port" min="1" max="65535" value="4532"></label>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="nocat"> No CAT control (VOX)</label>
+        <div id="nocat-config" class="radio-sub hidden">
+          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port. POTACAT will not try to connect to anything or key PTT: you tune the radio by hand (spot clicks and band buttons show you the frequency to set) and the radio's VOX keys on POTACAT's audio. Set the audio Input and Output below to the sound card that connects to the radio, and turn its output up enough to trip the VOX.</span>
+        </div>
         <details id="rig-external-atu-details" style="margin-top:8px;">
           <summary style="cursor:pointer;font-size:13px;color:#4fc3f7;">External ATU (optional)</summary>
           <div style="margin-top:6px;margin-left:4px;">

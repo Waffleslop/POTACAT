@@ -2065,6 +2065,8 @@ function updateRadioSubPanels() {
   if (icomNetworkConfig) icomNetworkConfig.classList.toggle('hidden', type !== 'icom-network');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
+  const nocatConfig = document.getElementById('nocat-config');
+  if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
   if (type === 'serialcat' && !serialcatPortsLoaded) {
     loadSerialcatPorts();
   }
@@ -2118,6 +2120,8 @@ async function populateRadioSection(currentTarget) {
     setK4networkHost.value = currentTarget.host || '';
     setK4networkPort.value = currentTarget.port || 9205;
     setK4networkPassword.value = currentTarget.password || '';
+  } else if (currentTarget.type === 'none') {
+    setRadioType('nocat');
   } else if (currentTarget.type === 'serial') {
     setRadioType('serialcat');
     serialcatPortsLoaded = true;
@@ -2747,6 +2751,11 @@ function buildCatTargetFromForm() {
       host: setRigctldnetHost.value.trim() || '127.0.0.1',
       port: parseInt(setRigctldnetPort.value, 10) || 4532,
     };
+  } else if (radioType === 'nocat') {
+    // No CAT control: VOX-keyed kits (Pebble HF, uSDX builds). A real
+    // target, not null, so the rig is "configured" and activates like any
+    // other; main.js treats type 'none' as nothing-to-connect.
+    return { type: 'none' };
   }
   return null;
 }
@@ -16672,7 +16681,7 @@ function syncActivatorCatPill(className, title) {
   }
 }
 
-window.api.onCatStatus(({ connected, error, wsjtxMode }) => {
+window.api.onCatStatus(({ connected, error, wsjtxMode, noCat }) => {
   catConnected = connected;
   updateFlexStatus();
   // Update JTCAT PTT mode indicator
@@ -16685,8 +16694,21 @@ window.api.onCatStatus(({ connected, error, wsjtxMode }) => {
     } else {
       pttModeEl.textContent = 'PTT: VOX';
       pttModeEl.classList.add('vox');
-      pttModeEl.title = 'No CAT connected — enable VOX on your radio. Audio tones trigger TX.';
+      pttModeEl.title = noCat
+        ? 'No CAT control — the radio\'s VOX keys on POTACAT\'s audio.'
+        : 'No CAT connected — enable VOX on your radio. Audio tones trigger TX.';
     }
+  }
+  if (noCat) {
+    // "No CAT control (VOX)" is the operator's choice, not a lost link: a
+    // neutral pill, no red, no disconnect toast (N4FFF's Pebble HF, 2026-10-04).
+    if (catDisconnectTimer) { clearTimeout(catDisconnectTimer); catDisconnectTimer = null; }
+    catStatusEl.textContent = catPillLabel();
+    catStatusEl.className = 'status';
+    const noCatTitle = 'No CAT control — tune the radio by hand; its VOX keys on the audio';
+    catStatusEl.title = noCatTitle;
+    syncActivatorCatPill('status', noCatTitle);
+    return;
   }
   if (wsjtxMode) {
     if (catDisconnectTimer) { clearTimeout(catDisconnectTimer); catDisconnectTimer = null; }

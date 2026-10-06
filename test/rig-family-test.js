@@ -41,6 +41,10 @@ eq(familyFromCatTarget({ type: 'somethingnew' }), 'generic', 'unknown type → g
 
 console.log('rigFamily (rig profile shape):');
 eq(rigFamily(null), 'none', 'null rig');
+// No CAT control (VOX-keyed kits — Pebble HF, uSDX): a real target of type
+// 'none', so the rig activates like any other and nothing tries to connect.
+eq(rigFamily({ catTarget: { type: 'none' } }), 'none', 'no-CAT rig');
+eq(familyFromRadioType('nocat'), 'none', 'rig editor "No CAT control (VOX)"');
 eq(rigFamily({ catTarget: { type: 'icom', path: 'COM7' } }), 'icom', 'IC-7300 rig');
 eq(rigFamily({ catTarget: { type: 'tcp', host: '127.0.0.1', port: 5002 } }), 'flex', 'Flex shim rig');
 eq(rigFamily({ flexApiHost: '192.168.1.50', catTarget: { type: 'tcp', host: '127.0.0.1', port: 5002 } }), 'flex', 'Flex Direct rig');

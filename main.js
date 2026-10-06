@@ -5029,6 +5029,9 @@ async function connectCat() {
     cat.removeAllListeners();
     cat.disconnect();
     _icomNetworkTransport = null;
+    // The dial belonged to the rig we just dropped; the next one reports its
+    // own. Left in place it posed as the new rig's frequency (N4FFF 2026-10-04).
+    _currentFreqHz = 0;
     // Brief delay to let serial port fully release before reconnecting
     // (prevents "Resource busy" on macOS when switching rigs)
     await new Promise(r => setTimeout(r, 300));
@@ -5074,6 +5077,18 @@ async function connectCat() {
       sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > My Rigs.');
       return;
     }
+  }
+  if (target.type === 'none') {
+    // No CAT control (VOX-keyed kits: Pebble HF, uSDX builds without a CAT
+    // port). Nothing to open, nothing to poll, no PTT to send — the operator
+    // tunes by hand and the radio's VOX keys on the audio. Said once, plainly,
+    // instead of a "Radio not connected" that reads as a fault (N4FFF
+    // 2026-10-04: "I can't figure out how to select no CAT").
+    cat = null;
+    _currentFreqHz = 0;
+    sendCatStatus({ connected: false, noCat: true });
+    sendCatLog('[CAT] No CAT control for this radio: tune it by hand, and its VOX keys on POTACAT\'s audio. Spot clicks and band buttons will show the frequency to set.');
+    return;
   }
   if (target.type === 'icom-network' && !_icomNetworkConnectRetryActive && !_icomNetworkConnectRetryTimer) {
     clearIcomNetworkConnectRetry(true);
@@ -12028,7 +12043,12 @@ function startJtcat(mode) {
     // cycle and say exactly what happened and how to re-sync. Tolerance
     // 2.5 kHz: the FT8 audio passband is ~3 kHz wide, so nudging the dial a
     // couple kHz is deliberate operating; cross-band drift is MHz.
-    if (_jtcatExpectedDialHz > 0 && _currentFreqHz > 0 &&
+    // Only a LIVE link can say where the radio is. With no CAT (a VOX-only
+    // rig, or a dead USB link) _currentFreqHz is whatever the previous rig
+    // last reported, and comparing that to the JTTY dial blocked every Send
+    // on a CAT-less Pebble HF with no visible reason (N4FFF 2026-10-04).
+    const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected));
+    if (dialLive && _jtcatExpectedDialHz > 0 && _currentFreqHz > 0 &&
         Math.abs(_currentFreqHz - _jtcatExpectedDialHz) > 2500) {
       const dialMsg = 'TX blocked — the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) +
         ' MHz but JTCAT is set to ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) +
@@ -16345,6 +16365,12 @@ function connectRemote() {
     // COM port for weeks with no error). Reuse the tune-blocked channel the
     // VFO lock already uses — shipped apps render it with zero mobile changes.
     if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+      if (settings.catTarget && settings.catTarget.type === 'none') {
+        const mhz = (parseFloat(freqKhz) / 1000).toFixed(3);
+        sendCatLog(`[Echo CAT] tune: no CAT control — set the radio to ${mhz} MHz by hand (mobile device told)`);
+        remoteServer.sendToClient({ type: 'tune-blocked', reason: `No CAT control — set the radio to ${mhz} MHz by hand` });
+        return;
+      }
       sendCatLog('[Echo CAT] tune refused — radio not connected (mobile device notified)');
       remoteServer.sendToClient({ type: 'tune-blocked', reason: 'Radio not connected — check the rig link on the desktop (USB/serial)' });
       return;
@@ -19530,6 +19556,12 @@ function handleRemotePtt(state, opts = {}) {
     return;
   }
   const target = settings.catTarget;
+  if (target && target.type === 'none') {
+    // No CAT control: the radio's VOX keys on the audio that follows. Not a
+    // failure, so not "PTT FAILED" — one quiet line per edge.
+    sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — no CAT control, the radio's VOX keys on the audio`);
+    return;
+  }
   // "Is this a Flex" for PTT means "can the SmartSDR API key it", NOT "is the
   // CAT target the SmartSDR-Win shim on 5002". Flex Direct and multiFlex-bound
   // stations drive the radio entirely over the API: the tune path has keyed off
@@ -31373,6 +31405,13 @@ app.whenReady().then(() => {
     // a spot click with a dead USB link logged one buried line and the UI
     // moved on as if it worked. (K6RBJ 2026-07-17.)
     if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+      if (settings.catTarget && settings.catTarget.type === 'none') {
+        // No CAT control is a choice, not a fault: say what to set by hand.
+        const mhz = (parseFloat(frequency) / 1000).toFixed(3);
+        sendCatLog(`tune: no CAT control — set the radio to ${mhz} MHz${mode ? ' ' + String(mode).toUpperCase() : ''} by hand`);
+        _e.sender.send('tune-blocked', `No CAT control — set the radio to ${mhz} MHz by hand`);
+        return;
+      }
       sendCatLog('tune refused — no radio connected. Check Settings -> My Rigs.');
       _e.sender.send('tune-blocked', 'Radio not connected — check the USB/serial link (Settings > My Rigs)');
       return;
