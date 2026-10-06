@@ -867,10 +867,6 @@
           <label class="jtcat-tx-label" title="A priori (AP) decode. Runs extra decode passes that hypothesize your callsign (and the station you're working) to recover weak or late replies addressed to you — the RX mirror of Late TX. Requires your callsign set. Off = standard decode only.">
             <input type="checkbox" id="jtcat-ap-decode" checked> AP RX
           </label>
-          <label class="jtcat-tx-label" id="jtcat-ft8br-comment-label" title="FT8 Battle Royale COMMENT field. Sent only on the FT8BR UDP packet — your normal logbook comment is unaffected. Use for /team, /score, etc. Hidden unless FT8BR is enabled in Settings → Logbook." style="display:none;">
-            BR:
-            <input type="text" id="jtcat-ft8br-comment" placeholder="/team Battle Cats" style="width:140px;">
-          </label>
           <label class="jtcat-tx-label" title="Soundcard time delay calibration. Auto: derived from the median of decoded DTs (assumes most stations have NTP-tight clocks). Type a value to pin manually; clear (or click Auto) to re-enable adaptive tuning.">
             Latency:
             <input type="number" id="jtcat-audio-latency-ms" value="0" min="-3000" max="3000" step="100" style="width:64px;">
@@ -2491,22 +2487,6 @@
               </select>
             </label>
             <div class="help-text" style="margin-top:4px;line-height:1.5;">For GridTracker: enable WSJT-X binary, point at the host/port GridTracker is listening on (default 2237). For older ADIF-only tools: switch the format to Plain ADIF.</div>
-          </div>
-        </div>
-        <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
-          <label class="checkbox-label"><input type="checkbox" id="set-ft8br"> Score FT8 / FT4 QSOs in FT8 Battle Royale</label>
-          <span class="help-text" style="margin-left:12px;display:block;">Fires only on FT8 / FT4 QSOs, in parallel to the main logbook and Extra UDP above. Your normal log isn't affected — the FT8BR Comment is only sent on the contest packet so the rest of your records stay clean.</span>
-          <div id="ft8br-config" class="hidden" style="margin-left:12px;margin-top:6px;">
-            <label>Host:
-              <input type="text" id="set-ft8br-host" placeholder="ft8battleroyale.com" style="width:200px;">
-            </label>
-            <label>Port:
-              <input type="number" id="set-ft8br-port" min="1" max="65535" value="2237">
-            </label>
-            <label style="display:block;margin-top:4px;">Comment (per-session, edit anytime in JTCAT):
-              <input type="text" id="set-ft8br-comment" placeholder="/team Battle Cats" style="width:240px;">
-            </label>
-            <div class="help-text" style="margin-top:4px;line-height:1.5;">FT8BR uses the COMMENT field for in-app commands like <code>/team &lt;name&gt;</code> or <code>/score</code>. Set it once here or update it on the JTCAT panel between QSOs. Empty comment is fine — the QSO still scores, just without a command.</div>
           </div>
         </div>
         <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
@@ -4222,13 +4202,6 @@
     <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies. Uses the License Class above.">
       <input type="checkbox" id="welcome-hide-oob"> Hide spots outside my license privileges
     </label>
-
-    <div class="welcome-section-label">FT8 Battle Royale</div>
-    <label class="checkbox-label" style="margin-bottom:4px;">
-      <input type="checkbox" id="welcome-enable-ft8br" checked>
-      Send my FT8/FT4/FT2 QSOs to FT8 Battle Royale
-    </label>
-    <span class="help-text" style="display:block;margin-left:22px;margin-bottom:8px;">FT8 Battle Royale is a worldwide FT8/FT4 contest scored from the QSOs you log — POTACAT forwards each digital QSO to it in parallel with your normal logbook, so nothing else changes.</span>
 
     <div class="welcome-section-label">Idle Mode</div>
     <label class="checkbox-label" style="margin-bottom:4px;">

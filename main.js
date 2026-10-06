@@ -8418,48 +8418,6 @@ async function saveQsoRecord(qsoData, opts) {
     }
   }
 
-  // FT8 Battle Royale — fire only on FT8 / FT4 contacts. Independent of
-  // primary logbook + Extra UDP destinations, so users can still log to
-  // Log4OM / N1MM / GridTracker etc. and ALSO get scored. Comment field
-  // is overridden with settings.ft8brComment (e.g. "/team Battle Cats")
-  // so the user's normal comment isn't polluted with contest commands.
-  // Mode is normalized to FT8 / FT4 — if anything ever writes MFSK we
-  // would need to add a SUBMODE field; today's QSO writer uses MODE=FT4
-  // directly so we just pass it through. (Per Abe's spec 2026-05-05.)
-  if (settings.enableFt8br && !qsoData.skipLogbookForward) {
-    const rawMode = (qsoData.mode || '').toUpperCase();
-    const isDigitalEligible = rawMode === 'FT8' || rawMode === 'FT4';
-    if (isDigitalEligible) {
-      const host = settings.ft8brHost || '';
-      const port = parseInt(settings.ft8brPort, 10) || 2237;
-      if (!host) {
-        sendCatLog('[FT8BR] Skipping — no host configured. Set the FT8 Battle Royale host in Settings → Logbook.');
-      } else {
-        try {
-          if (!ft8brBridge.socket || ft8brBridge.host !== host || ft8brBridge.port !== port) {
-            ft8brBridge.start(host, port);
-          }
-          // Clone qsoData and override the COMMENT so the user's primary
-          // logbook keeps its real comment while FT8BR sees the contest
-          // command string. Force MODE=FT4 / FT8 (never MFSK).
-          const ft8brQso = {
-            ...qsoData,
-            mode: rawMode,
-            comment: settings.ft8brComment || '',
-          };
-          const record = buildAdifRecord(ft8brQso);
-          const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
-          await ft8brBridge.sendQso(ft8brQso, adifText);
-          sendCatLog(`[FT8BR] Scored ${rawMode} ${qsoData.callsign} → ${host}:${port}` +
-            (settings.ft8brComment ? ` (comment: "${settings.ft8brComment}")` : ''));
-        } catch (brErr) {
-          sendCatLog(`[FT8BR] Send failed: ${brErr.message}`);
-          console.error('FT8BR UDP send failed:', brErr.message);
-        }
-      }
-    }
-  }
-
   // Upload to QRZ Logbook if enabled (independent of logbook forwarding)
   if (settings.qrzLogbook && settings.qrzApiKey && !qsoData.skipLogbookForward) {
     try {
@@ -22658,12 +22616,6 @@ function yaesuScopeEnableOnRadio() {
 
 const hamrsBridge = createWsjtxUdpBridge('HamRS');
 const extraUdpBridge = createWsjtxUdpBridge('Extra UDP');
-// FT8 Battle Royale (ft8br) — per-QSO UDP fan-out for the contest. Runs in
-// parallel to extraUdpBridge so users keep their primary log4om/JTAlert
-// destination AND get scored. Only fires for FT8 / FT4 contacts; uses an
-// editable comment override so /team /score etc. flow through without
-// polluting the user's normal logbook comment field. (2026-05-05.)
-const ft8brBridge = createWsjtxUdpBridge('FT8BR');
 
 // --- Logbook forwarding ---
 
@@ -26537,9 +26489,6 @@ app.whenReady().then(() => {
       settings.extraUdpHost || '127.0.0.1',
       parseInt(settings.extraUdpPort, 10) || 2237
     );
-  }
-  if (settings.enableFt8br && settings.ft8brHost) {
-    ft8brBridge.start(settings.ft8brHost, parseInt(settings.ft8brPort, 10) || 2237);
   }
 
   // --- Cloud Sync (optional — module may not be present in open-source builds) ---
@@ -34356,17 +34305,6 @@ app.whenReady().then(() => {
       extraUdpBridge.stop();
     }
 
-    // Start/stop FT8 Battle Royale bridge
-    if (settings.enableFt8br && settings.ft8brHost) {
-      const bp = parseInt(settings.ft8brPort, 10) || 2237;
-      const bh = settings.ft8brHost;
-      if (!ft8brBridge.socket || ft8brBridge.host !== bh || ft8brBridge.port !== bp) {
-        ft8brBridge.start(bh, bp);
-      }
-    } else {
-      ft8brBridge.stop();
-    }
-
     // Auto-parse ADIF and send DXCC data if enabled
     if (settings.enableDxcc) {
       sendDxccData();
@@ -36918,7 +36856,6 @@ function gracefulCleanup() {
   try { stopAutoSstvTimer(); } catch {}
   try { hamrsBridge.stop(); } catch {}
   try { extraUdpBridge.stop(); } catch {}
-  try { ft8brBridge.stop(); } catch {}
   try { if (potaSync) potaSync.stop(); } catch {}
   try { if (cloudTunnel) cloudTunnel.shutdown(); } catch {}
   try { wwbotaDisconnect(); } catch {}

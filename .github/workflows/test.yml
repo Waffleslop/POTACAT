@@ -104,6 +104,8 @@ jobs:
         run: node test/jtty-remote-test.js
       - name: Run No CAT control (VOX) rig type (N4FFF Pebble HF)
         run: node test/nocat-rig-test.js
+      - name: Run removed features stay removed (FT8 Battle Royale)
+        run: node test/removed-features-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)
