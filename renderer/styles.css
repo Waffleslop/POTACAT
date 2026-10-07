@@ -415,6 +415,19 @@ body {
   display: none;
 }
 
+/* macOS draws the traffic lights over the page (titleBarStyle hiddenInset),
+   so a modal that reaches the top of a small window — Settings fills the
+   window minus 16 px — had close/minimize/zoom sitting on its heading.
+   Start every modal below that strip. */
+.platform-darwin dialog[open] {
+  inset-block-start: 36px;
+  max-height: calc(100vh - 44px);
+}
+.platform-darwin #settings-dialog {
+  height: min(900px, calc(100vh - 52px));
+  max-height: calc(100vh - 44px);
+}
+
 header {
   background: var(--bg-secondary);
   padding: 10px 16px;
