@@ -499,10 +499,11 @@ test('rigctld setNb (non-Yaesu) -> U NB 1', () => {
   assert.strictEqual(writes[0], 'U NB 1\n');
 });
 
-test('rigctld ATU (non-Yaesu) -> U TUNER 1', () => {
+test('rigctld ATU (non-Yaesu) -> the codec runs the one-shot itself', () => {
   const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
-  const seq = codec.getAtuStartSequence();
-  assert.strictEqual(seq[0].cmd, 'U TUNER 1\n');
+  // null hands RigController.startTune to codec.startTune (U TUNER 1 + G TUNE).
+  // [U TUNER 1] here sent only the enable (N4RDX IC-7300 MK II, 2026-10-04).
+  assert.strictEqual(codec.getAtuStartSequence(), null);
 });
 
 test('rigctld parse frequency response', () => {
@@ -2723,6 +2724,35 @@ console.log('\n=== CI-V power-on wake preamble ===');
 // =========================================================================
 // Summary
 console.log(`\n${'='.repeat(50)}`);
+// N4RDX 2026-10-04 (IC-7300 MK II over rigctld): the ATU Tune button
+// reaches RigController.startTune, never the codec directly — and that is the
+// path the codec-only tests above never exercised. A truthy start sequence
+// sent only `U TUNER 1` on rigctld, and NOTHING on every CI-V Icom (the
+// sequence's cmd was null and nothing read civCmd). Drive the controller.
+function controllerTuneWrites(model, Codec) {
+  const writes = [];
+  const t = new EventEmitter(); t.connect = () => {}; t.disconnect = () => {};
+  t.write = (d) => writes.push(Buffer.isBuffer(d) ? d.toString('hex') : String(d));
+  const rc = new RigController(model, t, new Codec(model, (d) => t.write(d)));
+  rc.connected = true;
+  rc.startTune();
+  return writes;
+}
+
+test('ATU Tune via the controller: rigctld Icom sends the vfo_op TUNE cycle', () => {
+  const model = Object.assign({}, require('../lib/rig-models').RIG_MODELS['IC-7300 MK II'], { protocol: 'rigctld' });
+  assert.deepStrictEqual(controllerTuneWrites(model, RigctldCodec), ['U TUNER 1\n', 'G TUNE\n']);
+});
+
+test('ATU Tune via the controller: generic rigctld sends the vfo_op TUNE cycle', () => {
+  assert.deepStrictEqual(controllerTuneWrites(RIGCTLD_MODEL, RigctldCodec), ['U TUNER 1\n', 'G TUNE\n']);
+});
+
+test('ATU Tune via the controller: a CI-V Icom sends 1C 01 02 to its own address', () => {
+  assert.deepStrictEqual(controllerTuneWrites(require('../lib/rig-models').RIG_MODELS['IC-7300'], CivCodec), ['fefe94e01c0102fd']);
+  assert.deepStrictEqual(controllerTuneWrites(require('../lib/rig-models').RIG_MODELS['IC-705'], CivCodec), ['fefea4e01c0102fd']);
+});
+
 console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
   console.log('SOME TESTS FAILED');
