@@ -442,6 +442,8 @@ async function writeState(env, state) {
 
 // ---------- HTTP handler ----------
 
+const SPOTS_API = 'https://api.potacat.com/v1/dxpeditions/spots';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET',
@@ -452,6 +454,17 @@ const worker = {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     if (request.method !== 'GET') return new Response('Method Not Allowed', { status: 405 });
+
+    // Spot numbers live on the POTACAT Cloud API (its on-air collector);
+    // served here so the website has one host for everything DXpedition.
+    const spots = /^\/spots(\.json|\/[^/]+\.json)$/.exec(new URL(request.url).pathname);
+    if (spots) {
+      const res = await fetch(`${SPOTS_API}${spots[1]}`, { cf: { cacheTtl: 60, cacheEverything: true } });
+      return new Response(res.body, {
+        status: res.status,
+        headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
+      });
+    }
 
     const url = new URL(request.url);
     const state = await readState(env);

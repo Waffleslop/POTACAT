@@ -35,6 +35,8 @@ Considered but deferred:
 |---|---|
 | `GET /feeds/dxpeditions.xml` | Public XML feed (RSS-reader friendly). |
 | `GET /feeds/dxpeditions.json` | Same data, JSON. Desktop client uses this. |
+| `GET /spots/<CALL>.json` | Spot numbers for one call (last spotted, 24 h counts by band/mode/source). Proxied from `api.potacat.com/v1/dxpeditions/spots/` (potacat-cloudlog, `routes/dxpeditions.js`), cached 60 s. |
+| `GET /spots.json` | The same for every call the API is tracking from this feed. |
 | `GET /healthz` | `{ ok, schemaVersion, lastFetchedAt, generatedAt, count, lastError, sources: { name: { lastFetchedAt, lastOkAt, lastError, lastCount, consecutiveFailures }}}` for monitoring. A source answering with a non-feed page (captcha) or an empty feed counts as a failure. |
 
 CORS is wide-open (`*`) — output is public DXpedition info.
