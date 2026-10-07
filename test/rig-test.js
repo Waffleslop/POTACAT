@@ -2753,6 +2753,37 @@ test('ATU Tune via the controller: a CI-V Icom sends 1C 01 02 to its own address
   assert.deepStrictEqual(controllerTuneWrites(require('../lib/rig-models').RIG_MODELS['IC-705'], CivCodec), ['fefea4e01c0102fd']);
 });
 
+// KT3H 2026-10-05 (TS-590SG over rigctld): Station Setup's test transmit
+// keyed the radio with 0 W. `T 1` is hamlib RIG_PTT_ON → `TX;` = FRONT MIC on
+// a TS-590; data send is `T 3` → `TX1;` (checked against the bundled Hamlib
+// 4.7.0 rigctld -m 2037 with a fake radio). The serial Kenwood codec has sent
+// TX1; since June; the rigctld path never learned it.
+test('rigctld PTT: TS-590S/SG, 890S, 990S key data send (T 3); others stay T 1', () => {
+  const RM = require('../lib/rig-models').RIG_MODELS;
+  for (const m of ['TS-590S/SG', 'TS-890S', 'TS-990S']) {
+    const { codec, writes } = captureWrites(RigctldCodec, RM[m]);
+    codec.setTransmit(true); codec.setTransmit(false);
+    assert.deepStrictEqual(writes, ['T 3\n', 'T 0\n'], m);
+  }
+  for (const m of ['TS-480', 'TS-2000', 'IC-7300', 'FT-710']) {
+    const { codec, writes } = captureWrites(RigctldCodec, RM[m]);
+    codec.setTransmit(true);
+    assert.deepStrictEqual(writes, ['T 1\n'], m);
+  }
+  const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+  codec.setTransmit(true);
+});
+
+test('rigctld PTT readback: 3 (ON_DATA) and 2 (ON_MIC) count as transmitting', () => {
+  const states = [];
+  for (const reply of ['3', '2', '1', '0']) {
+    const { codec } = captureWrites(RigctldCodec, RIGCTLD_MODEL);
+    codec.on('ptt', (v) => states.push(v));
+    codec.getPtt(); codec.onData(reply + '\n');
+  }
+  assert.deepStrictEqual(states, [true, true, true, false]);
+});
+
 console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
   console.log('SOME TESTS FAILED');
