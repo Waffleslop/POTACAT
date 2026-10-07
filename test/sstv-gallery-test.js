@@ -157,7 +157,10 @@ test('protocol: thumbs, the full-picture request, and the capability', () => {
   assert.ok(MESSAGES['sstv-gallery'].fields.error);
   assert.ok(MESSAGES['sstv-get-gallery-image'] && MESSAGES['sstv-gallery-image']);
   const rs = fs.readFileSync(path.join(ROOT, 'lib', 'remote-server.js'), 'utf8');
-  assert.ok(/'sstv-gallery-thumbs'\]/.test(rs));
+  // Presence in the hello capability list, not position — JTTY's 'jtty' was
+  // appended after it (2026-10-04) and the old /'sstv-gallery-thumbs'\]/ went red.
+  const capList = (rs.match(/capabilities: \[[\s\S]*?\],\s*rigModel/) || [''])[0];
+  assert.ok(/'sstv-gallery-thumbs'/.test(capList), 'sstv-gallery-thumbs is a hello capability');
   assert.ok(/case 'sstv-get-gallery-image':/.test(rs) && /thumbs: msg\.thumbs === true/.test(rs));
 });
 
