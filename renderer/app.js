@@ -1791,7 +1791,8 @@ async function loadPrefs() {
   enableSolar = settings.enableSolar === true;   // default false
   // PSTRotator — show quick-toggle when rotor is configured
   rotorConfigured = !!settings.enableRotor;
-  quickRotor.checked = settings.rotorActive !== false; // defaults true when configured
+  // Checked = the antenna actually turns on every QSY; Manual mode never does.
+  quickRotor.checked = settings.rotorActive !== false && settings.rotorMode !== 'manual';
   quickRotorLabel.classList.toggle('hidden', !rotorConfigured);
   quickRotorDivider.classList.toggle('hidden', !rotorConfigured);
   // Color rows — default true (on)
@@ -14940,7 +14941,11 @@ let rotorConfigured = false; // true when enableRotor is on (user has a PSTRotat
 
 quickRotor.addEventListener('change', async () => {
   // Quick toggle changes rotorActive (operational state), NOT enableRotor (config)
-  await window.api.saveSettings({ rotorActive: quickRotor.checked });
+  // ON = auto-rotate on QSY, so it also leaves Manual mode (IK4IDF 2026-10-05:
+  // the toggle read ON under Rotate = Manual and a spot click never turned the rotor).
+  const on = quickRotor.checked;
+  if (on && setRotorMode) setRotorMode.value = 'auto';
+  await window.api.saveSettings(on ? { rotorActive: true, rotorMode: 'auto' } : { rotorActive: false });
 });
 
 // openSettingsBtn — was inside the (now-removed) Settings dropdown

@@ -14566,7 +14566,10 @@ function updateRemoteSettings() {
     enableAtu: !!settings.enableAtu,
     tuneClick: !!settings.tuneClick,
     enableRotor: !!settings.enableRotor,
-    rotorActive: settings.rotorActive !== false,
+    // The phone/web Rotor button means "turn the antenna on every QSY". In
+    // Manual mode that never happens, so report the EFFECTIVE state — a
+    // toggle reading ON while Rotate = Manual is what IK4IDF hit (2026-10-05).
+    rotorActive: settings.rotorActive !== false && settings.rotorMode !== 'manual',
     remoteCwEnabled: !!settings.remoteCwEnabled,
     // CW macros are ONE shared set: settings.cwMacros is canonical (the desktop
     // editor + bar read it, and a phone 'save-cw-macros' now writes it too), so
@@ -17716,6 +17719,8 @@ function connectRemote() {
 
   remoteServer.on('toggle-rotor', ({ enabled }) => {
     settings.rotorActive = enabled;
+    // ON means auto-rotate on QSY; Manual mode would silently ignore it.
+    if (enabled) settings.rotorMode = 'auto';
     saveSettings(settings);
     updateRemoteSettings(); // push updated state back to phone
     console.log('[Echo CAT] Rotor ->', enabled ? 'ON' : 'OFF');
@@ -25648,6 +25653,11 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
 
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {
     sendRotorBearing(Math.round(brng));
+  } else if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode === 'manual'
+      && brng != null && !isNaN(brng) && !tuneRadio._rotorManualNoted) {
+    // Say once why a spot click did not turn the antenna (IK4IDF 2026-10-05).
+    tuneRadio._rotorManualNoted = true;
+    sendCatLog('Rotor: Rotate is set to Manual, so tuning does not turn the antenna. Click the bearing to rotate, or switch Rotate to Auto in Settings.');
   }
 
   // Antenna Genius: switch antenna based on band
@@ -34274,7 +34284,7 @@ app.whenReady().then(() => {
     // app render macros, profile, serial and the Field Day exchange from the
     // blob — a desktop edit that is not pushed is invisible there until the
     // next reconnect (potacat-meta jtty-remote-fd-exch-and-replay).
-    if (has('rotorActive') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
+    if (has('rotorActive') || has('rotorMode') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
         has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyProfile') || has('jttySerial') || has('pskMacros')) {
       updateRemoteSettings();
     }
