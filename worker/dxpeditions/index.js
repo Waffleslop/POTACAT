@@ -55,7 +55,15 @@ async function fetchUrl(url) {
     redirect: 'follow',
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
+  const body = await res.text();
+  // Bot walls answer 2xx with an HTML page (DX-World's host serves a
+  // SiteGround captcha with HTTP 202 to Cloudflare egress IPs). Without
+  // this check that parses as "0 items" and looks like a quiet news day.
+  if (!/<rss\b|<feed\b|<rdf:RDF\b/i.test(body.slice(0, 2000))) {
+    const ct = res.headers.get('content-type') || '?';
+    throw new Error(`non-RSS response (HTTP ${res.status}, ${ct.split(';')[0]})`);
+  }
+  return body;
 }
 
 // Tiny regex-based RSS parser. Avoids pulling a real XML parser into the
@@ -141,7 +149,9 @@ function extractCallsigns(title) {
 const SOURCES = [
   {
     name: 'dx-world',
-    url: 'https://dx-world.net/feed/',
+    // www. host: the bare domain intermittently serves a captcha to
+    // Cloudflare egress; www. returns the feed.
+    url: 'https://www.dx-world.net/feed/',
     extract: (item) => extractCallsigns(item.title),
   },
   {
@@ -177,6 +187,8 @@ function normalize(items, source, now) {
     const calls = source.extract(it);
     if (!calls.length) continue;
     const published = parseDate(it.pubDate) || now;
+    // NG3K items carry no pubDate; `now` above is only a first-seen stand-in
+    // and must not count as "newer" when merging (see headlineRank).
     // Trim down the description: strip HTML tags / collapse whitespace /
     // cap at ~800 chars so we don't store full blog posts (DX-World runs
     // 1-2KB of post body per item). Tooltips and inline note rendering
@@ -190,6 +202,7 @@ function normalize(items, source, now) {
         link: it.link || '',
         publishedAt: new Date(published).toISOString(),
         source: source.name,
+        titleSource: source.name,
         firstSeen: now,
       });
     }
@@ -210,6 +223,16 @@ function parseDate(s) {
   if (!s) return null;
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
+}
+
+// Which record's headline (title/link/publishedAt) should a merged record
+// carry. NG3K is a calendar, not news, and has no pubDate, so its headline
+// only stands in when no news source covers the call. Records written
+// before titleSource existed are recognised by NG3K's " -- " title shape.
+function headlineRank(r) {
+  const src = r.titleSource || (/ -- /.test(r.title || '') ? 'ng3k' : 'news');
+  if (src === 'ng3k') return -1;
+  return Date.parse(r.publishedAt) || 0;
 }
 
 // Merge new records with existing KV state. Preserves firstSeen of records
@@ -234,18 +257,19 @@ function mergeWithExisting(existing, fresh, now) {
     // Merge source list; freshest publishedAt wins for the headline fields.
     const sources = new Set(String(prev.source || '').split(',').filter(Boolean));
     sources.add(r.source);
-    const prevPub = Date.parse(prev.publishedAt) || 0;
-    const currPub = Date.parse(r.publishedAt) || 0;
-    const newer = currPub > prevPub ? r : prev;
+    const rankPrev = headlineRank(prev);
+    const rankCurr = headlineRank(r);
+    // Two NG3K headlines: take the fresh one (its dates may have moved).
+    const newer = rankCurr > rankPrev || (rankCurr === -1 && rankPrev === -1) ? r : prev;
     byCall.set(r.call, {
       ...prev,
       title: newer.title,
-      // Prefer the fresh fetch's description: prev may be from an older
-      // schema version (no description) or a stale CDN cache. Falling
-      // back to prev only when this run's parse came up empty.
-      description: r.description || prev.description || '',
+      // Description travels with the headline so title and body describe
+      // the same story; fall back to whichever side has one.
+      description: newer.description || r.description || prev.description || '',
       link: newer.link,
       publishedAt: newer.publishedAt,
+      titleSource: newer.titleSource || (headlineRank(newer) === -1 ? 'ng3k' : ''),
       source: [...sources].sort().join(','),
     });
   }
@@ -350,6 +374,8 @@ const worker = {
           lastFetchedAt: v.lastFetchedAt ? new Date(v.lastFetchedAt).toISOString() : null,
           lastError: v.lastError || null,
           lastCount: v.lastCount || 0,
+          lastOkAt: v.lastOkAt ? new Date(v.lastOkAt).toISOString() : null,
+          consecutiveFailures: v.consecutiveFailures || 0,
         };
       }
       return new Response(
@@ -387,9 +413,12 @@ const worker = {
       try {
         const xml = await fetchUrl(src.url);
         const items = parseRss(xml);
+        if (!items.length) throw new Error('feed parsed but held no items');
         const fresh = normalize(items, src, now);
         allFresh.push(...fresh);
-        sources[src.name] = { lastFetchedAt: now, lastError: '', lastCount: fresh.length };
+        sources[src.name] = {
+          lastFetchedAt: now, lastOkAt: now, lastError: '', lastCount: fresh.length, consecutiveFailures: 0,
+        };
         anyOk = true;
       } catch (err) {
         const prevSrc = sources[src.name] || {};
@@ -397,6 +426,8 @@ const worker = {
           lastFetchedAt: now,
           lastError: String(err && err.message ? err.message : err),
           lastCount: prevSrc.lastCount || 0,
+          lastOkAt: prevSrc.lastOkAt || 0,
+          consecutiveFailures: (prevSrc.consecutiveFailures || 0) + 1,
         };
       }
     }
