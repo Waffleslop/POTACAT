@@ -9541,7 +9541,38 @@ function updateCompactMode(width) {
       th.childNodes[0].textContent = compact ? labels.compact : labels.full;
     }
   });
+  fitHeaderLabels();
 }
+
+// A column narrower than its full label shows the short one ("Op", not
+// "Operat…") — per column, so a narrow Operator column abbreviates while the
+// rest of the header stays spelled out (Casey 2026-10-07).
+function fitHeaderLabels() {
+  spotsTable.querySelectorAll('thead th[data-col]').forEach(th => {
+    const labels = HEADER_LABELS[th.getAttribute('data-col')];
+    const node = th.childNodes[0];
+    if (!labels || !node || th.clientWidth === 0) return;
+    if (isCompact) { node.textContent = labels.compact; return; }
+    node.textContent = labels.full;
+    if (th.scrollWidth > th.clientWidth + 1) node.textContent = labels.compact;
+  });
+  fitNewParkPills();
+}
+
+// Same rule for the REF column's NEW pill: "N" rather than a clipped "N…".
+function fitNewParkPills() {
+  spotsTable.querySelectorAll('tbody .ref-new-pill').forEach(nb => {
+    const td = nb.parentElement;
+    if (!td || td.clientWidth === 0) return;
+    nb.textContent = 'NEW';
+    if (td.scrollWidth > td.clientWidth + 1) nb.textContent = 'N';
+  });
+}
+
+// ResizeObserver already batches to once per layout; no rAF (a hidden or
+// backgrounded window never runs rAF, which left the labels stale).
+const headerFitObserver = new ResizeObserver(() => fitHeaderLabels());
+spotsTable.querySelectorAll('thead th[data-col]').forEach(th => headerFitObserver.observe(th));
 
 const tableResizeObserver = new ResizeObserver((entries) => {
   for (const entry of entries) {
@@ -13199,6 +13230,7 @@ function render() {
         if (cell.newPark) {
           const nb = document.createElement('span');
           nb.textContent = 'NEW';
+          nb.className = 'ref-new-pill';
           nb.style.cssText = `background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;`;
           td.appendChild(nb);
         }
@@ -13310,6 +13342,7 @@ function render() {
       tr.dataset.spotKey = (s.callsign || '') + '|' + s.frequency;
       tbody.appendChild(tr);
     }
+    fitNewParkPills();
 
     // Scroll-anchor restore: put the first surviving anchor row back at its
     // old offset. Walking the candidate list means even a spot that aged
