@@ -9521,7 +9521,7 @@ let isCompact = false;
 const HEADER_LABELS = {
   callsign: { full: 'Callsign', compact: 'Call' },
   operator: { full: 'Operator', compact: 'Op' },
-  frequency: { full: 'Freq (kHz)', compact: 'Freq' },
+  frequency: { full: 'Freq', compact: 'Freq' },
   locationDesc: { full: 'State', compact: 'St' },
   parkName: { full: 'Name', compact: 'Name' },
 };
