@@ -12,7 +12,7 @@ source (one outage doesn't stop the others).
 
 | Source | URL | Format | Notes |
 |---|---|---|---|
-| DX-World | `https://dx-world.net/feed/` | RSS | Lead-callsign titles, multi-call posts split. |
+| DX-World | `https://www.dx-world.net/feed/` (bare domain serves a captcha to Cloudflare egress) | RSS | Lead-callsign titles, multi-call posts split. |
 | DXNews   | `https://dxnews.com/rss.xml` | RSS | Lead-callsign titles incl. PREFIX/CALL forms. |
 | NG3K ADXO | `https://www.ng3k.com/adxo.xml` | RSS | Canonical title schema; extractor narrows to the call field to skip the QSL manager. |
 
@@ -35,7 +35,7 @@ Considered but deferred:
 |---|---|
 | `GET /feeds/dxpeditions.xml` | Public XML feed (RSS-reader friendly). |
 | `GET /feeds/dxpeditions.json` | Same data, JSON. Desktop client uses this. |
-| `GET /healthz` | `{ ok, schemaVersion, lastFetchedAt, generatedAt, count, lastError, sources: { name: { lastFetchedAt, lastError, lastCount }}}` for monitoring. |
+| `GET /healthz` | `{ ok, schemaVersion, lastFetchedAt, generatedAt, count, lastError, sources: { name: { lastFetchedAt, lastOkAt, lastError, lastCount, consecutiveFailures }}}` for monitoring. A source answering with a non-feed page (captcha) or an empty feed counts as a failure. |
 
 CORS is wide-open (`*`) — output is public DXpedition info.
 
@@ -61,7 +61,43 @@ CORS is wide-open (`*`) — output is public DXpedition info.
 ```
 
 Records are sorted newest-firstSeen first. Records older than
-**60 days** since firstSeen are dropped on the next cron run.
+**60 days** since firstSeen are dropped on the next cron run, unless their
+`end` date is today or later.
+
+### Structured fields (added 2026-10-07, additive — schema stays "1")
+
+Every record also carries these. Unknown is `null` (scalars) or `[]`
+(lists); fields are never omitted.
+
+| Field | Example | Notes |
+|---|---|---|
+| `aliasOf` | `"3A/WE9G"` | Set on a bare call split out of a slash form; build pages for records where it is `null`. |
+| `entity` | `"Maldives"` | DXCC entity name (cty.csv spelling). NG3K's entity wins over the prefix guess. |
+| `dxcc` | `159` | ADIF DXCC number. |
+| `continent` | `"AS"` | |
+| `start`, `end` | `"2026-09-20"` | UTC dates. Either can be null (e.g. "until Oct 20" only). |
+| `datesFrom` | `"ng3k"` | `"ng3k"` (fielded, reliable) or `"article"` (mined from news text, best effort), or null. |
+| `qsl` | `{ via, lotw, oqrs, direct, buro, raw }` | `via` is a callsign or null; flags are booleans; `raw` is the source text. Null when nothing is stated. |
+| `website` | `"https://solomon2026.com/"` | Operation's own site. Never the news story (that stays `link`) and never QRZ. |
+| `qrz` | `"https://www.qrz.com/db/FW1P"` | QRZ page when a source links one. |
+| `iota` | `["OC-047"]` | |
+| `pota` | `["US-1234"]` | Only when the text mentions POTA. |
+| `grid` | `"MJ64me"` | |
+| `bands` | `["20m","15m","10m"]` | Ranges expanded ("160-6m"); 60m/4m only when named. "HF" alone yields nothing. |
+| `modes` | `["CW","SSB","FT8"]` | CW SSB FT8 FT4 RTTY PSK FM AM SSTV Q65 JT65 MSK144 SAT DIGI. |
+| `operators` | `["DJ3JH"]` | From NG3K's "By ..." clause. |
+| `notes` | `"By DJ3JH fm Thulhagiri I ..."` | NG3K's free-text line. |
+
+Sources of these fields: NG3K's description is fielded and parsed
+directly. For DX-World/DXNews the worker fetches each article page once
+(up to 30 per run, shared across calls in one post) and mines the full
+text; until then the RSS excerpt is used. Per-source parses are stored
+under an internal `_d` key in KV and combined at output time
+(`combineDetails` in `details.js`), NG3K first.
+
+DXCC data: `cty-data.js` is generated from AD1C's cty.csv by
+`node build-cty.mjs cty.csv` (https://www.country-files.com/cty/cty.csv).
+Regenerate when a new entity is added or prefixes move.
 
 XML is a direct projection of the JSON; the schema version attribute
 matches.

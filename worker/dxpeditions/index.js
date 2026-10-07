@@ -22,6 +22,10 @@
 //
 // CORS: open (`*`). Output is public DXpedition info; no auth needed.
 
+import {
+  isBareCall, parseNg3kItem, parseArticle, extractArticle, combineDetails,
+} from './details.js';
+
 const KV_KEY = 'feed:v1';
 const SCHEMA_VERSION = '1';
 const FEED_TTL_DAYS = 60; // drop records this many days after first seen
@@ -34,17 +38,11 @@ const BLOCKLIST = new Set([
   'ITU', 'WPX', 'ARRL', 'YOTA', 'OQRS', 'LOTW', 'EQSL', 'OPDX', 'TDDX',
 ]);
 
-// Bare callsign shapes:
-//   1) Letter[Letter|Digit] Digit [Letter]{1,4}    — K3SBP, M0CFW, DL2SBY, WF2A
-//   2) Digit Letter[Letter|Digit] [Digit] [Letter]{1,4}
-//      — 3G0Z, 3B9KW, 4U1ITU, 9V1AB
-const BARE_CALL_RE_1 = /^[A-Z][A-Z0-9]?\d[A-Z]{1,4}$/;
-const BARE_CALL_RE_2 = /^\d[A-Z][A-Z0-9]?\d?[A-Z]{1,4}$/;
-
-function isBareCall(s) {
-  if (!s || s.length < 3 || s.length > 8) return false;
-  return BARE_CALL_RE_1.test(s) || BARE_CALL_RE_2.test(s);
-}
+// Article pages fetched per cron run (new posts first, then backfill of
+// records stored before structured details existed). One fetch serves every
+// call in a multi-call post.
+const ARTICLE_FETCH_BUDGET = 30;
+const ARTICLE_MAX_TRIES = 3;
 
 // ---------- Generic RSS parser ----------
 
@@ -194,9 +192,24 @@ function normalize(items, source, now) {
     // 1-2KB of post body per item). Tooltips and inline note rendering
     // happen client-side; raw structured data is what we owe them.
     const description = compactDescription(it.description);
+    // Per-source structured parse. NG3K's description is fielded; news
+    // items get a first pass over the RSS excerpt, replaced by the full
+    // article once enrichFromArticles fetches it.
+    const detail = source.name === 'ng3k'
+      ? { ...parseNg3kItem(it.description, it.link), parsedFrom: 'feed' }
+      : {
+        ...parseArticle(description, [], new Date(published).toISOString()),
+        articleLink: it.link || '',
+        parsedFrom: 'excerpt',
+      };
+    // Bare calls split out of a slash form ("WE9G" from "3A/WE9G") exist
+    // for spot matching; aliasOf points at the form that says where.
+    const slashForms = calls.filter((c) => c.includes('/'));
     for (const call of calls) {
+      const aliasOf = call.includes('/') ? null : slashForms.find((f) => f.split('/').includes(call)) || null;
       out.push({
         call,
+        aliasOf,
         title: it.title,
         description,
         link: it.link || '',
@@ -204,6 +217,7 @@ function normalize(items, source, now) {
         source: source.name,
         titleSource: source.name,
         firstSeen: now,
+        _d: { [source.name]: detail },
       });
     }
   }
@@ -270,16 +284,107 @@ function mergeWithExisting(existing, fresh, now) {
       link: newer.link,
       publishedAt: newer.publishedAt,
       titleSource: newer.titleSource || (headlineRank(newer) === -1 ? 'ng3k' : ''),
+      _d: mergeDetails(prev._d, r._d),
+      aliasOf: r.aliasOf !== undefined ? r.aliasOf : (prev.aliasOf || null),
       source: [...sources].sort().join(','),
     });
   }
+  // Past the TTL a record survives only while its operation is still
+  // ahead or on the air (NG3K lists some months out).
   const cutoff = now - FEED_TTL_DAYS * 24 * 3600 * 1000;
+  const today = new Date(now).toISOString().slice(0, 10);
   return [...byCall.values()]
-    .filter((r) => r.firstSeen >= cutoff)
+    .filter((r) => {
+      if (r.firstSeen >= cutoff) return true;
+      const { end } = combineDetails(r.aliasOf || r.call, r._d);
+      return !!end && end >= today;
+    })
     .sort((a, b) => b.firstSeen - a.firstSeen);
 }
 
+// Per-source details: a fresh parse replaces the stored one, except that
+// a full-article parse of the same article beats a fresh excerpt parse.
+function mergeDetails(prev, fresh) {
+  const out = { ...(prev || {}) };
+  for (const [src, d] of Object.entries(fresh || {})) {
+    const p = out[src];
+    if (p && p.parsedFrom === 'article' && d.parsedFrom !== 'article' && p.articleLink === d.articleLink) continue;
+    out[src] = d;
+  }
+  return out;
+}
+
+// ---------- Articles ----------
+
+const NEWS_HOSTS = { 'dx-world.net': 'dx-world', 'dxnews.com': 'dxnews' };
+
+function newsSourceOf(link) {
+  try {
+    return NEWS_HOSTS[new URL(link).hostname.replace(/^www\./, '')] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchArticle(url) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,*/*' },
+    redirect: 'follow',
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const html = await res.text();
+  if (!/entry-content|<article\b/i.test(html)) throw new Error('no article body (captcha?)');
+  return extractArticle(html);
+}
+
+// Replace excerpt parses with full-article parses, within the fetch
+// budget. Mutates records. Returns { fetched, failed }.
+async function enrichFromArticles(records) {
+  let budget = ARTICLE_FETCH_BUDGET;
+  let fetched = 0;
+  let failed = 0;
+  const cache = new Map();
+  // Records stored before details existed: seed a slot from the headline
+  // link so they get backfilled too.
+  for (const r of records) {
+    r._d = r._d || {};
+    const src = newsSourceOf(r.link);
+    if (src && !r._d[src]) r._d[src] = { articleLink: r.link, parsedFrom: 'none' };
+  }
+  for (const r of records) {
+    for (const src of Object.values(NEWS_HOSTS)) {
+      const d = r._d[src];
+      if (!d || d.parsedFrom === 'article' || !d.articleLink) continue;
+      if ((d.articleTries || 0) >= ARTICLE_MAX_TRIES) continue;
+      let parsed = cache.get(d.articleLink);
+      if (!parsed) {
+        if (budget <= 0) continue;
+        budget--;
+        try {
+          const { text, hrefs } = await fetchArticle(d.articleLink);
+          parsed = { ...parseArticle(text, hrefs, r.publishedAt), articleLink: d.articleLink, parsedFrom: 'article' };
+          fetched++;
+        } catch {
+          failed++;
+          r._d[src] = { ...d, articleTries: (d.articleTries || 0) + 1 };
+          continue;
+        }
+        cache.set(d.articleLink, parsed);
+      }
+      r._d[src] = parsed;
+    }
+  }
+  return { fetched, failed };
+}
+
 // ---------- Output ----------
+
+// Public shape of a record: stored fields minus internals, plus the
+// combined structured details.
+function publicRecord(r) {
+  const { _d, titleSource, ...rest } = r;
+  return { ...rest, aliasOf: r.aliasOf || null, ...combineDetails(r.aliasOf || r.call, _d) };
+}
 
 function toJson(state) {
   return JSON.stringify({
@@ -287,7 +392,7 @@ function toJson(state) {
     generated: new Date(state.generatedAt || Date.now()).toISOString(),
     count: state.records.length,
     sources: state.sources || {},
-    records: state.records,
+    records: state.records.map(publicRecord),
   });
 }
 
@@ -303,9 +408,11 @@ function toXml(state) {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<dxpeditions version="${SCHEMA_VERSION}" generated="${esc(new Date(state.generatedAt || Date.now()).toISOString())}" count="${state.records.length}">`,
   ];
-  for (const r of state.records) {
+  for (const rec of state.records) {
+    const r = publicRecord(rec);
     lines.push(
-      `  <op call="${esc(r.call)}" published="${esc(r.publishedAt)}" firstSeen="${esc(new Date(r.firstSeen).toISOString())}" source="${esc(r.source)}">`,
+      `  <op call="${esc(r.call)}" published="${esc(r.publishedAt)}" firstSeen="${esc(new Date(r.firstSeen).toISOString())}" source="${esc(r.source)}"`
+        + ` entity="${esc(r.entity)}" dxcc="${esc(r.dxcc)}" start="${esc(r.start)}" end="${esc(r.end)}">`,
       `    <title>${esc(r.title)}</title>`,
       `    <link>${esc(r.link)}</link>`,
       '  </op>',
@@ -441,12 +548,19 @@ const worker = {
       : '';
 
     const merged = anyOk ? mergeWithExisting(prev.records, allFresh, now) : (prev.records || []);
+    let articles = { fetched: 0, failed: 0 };
+    try {
+      articles = await enrichFromArticles(merged);
+    } catch (err) {
+      articles.error = String(err && err.message ? err.message : err);
+    }
     await writeState(env, {
       records: merged,
       generatedAt: anyOk ? now : (prev.generatedAt || 0),
       lastFetchedAt: now,
       lastError: topError,
       sources,
+      articles,
     });
   },
 
