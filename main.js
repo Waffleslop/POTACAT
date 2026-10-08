@@ -23800,6 +23800,18 @@ async function fetchExpeditions() {
   for (const m of meta.values()) if (!m.kind) m.kind = 'dxpedition';
   if (potacatResult.status === 'fulfilled') {
     const kinds = require('./lib/dxpedition-contests').classifyOperations(potacatResult.value);
+    // The feed classifies at the source since Worker ea019b3a (2026-10-08):
+    // its own kind/contest/viaCall win; the classifier covers records without
+    // them (older cached feeds) and contest calls named only inside another
+    // announcement (CQ3W), which the feed has no record for.
+    for (const rec of potacatResult.value) {
+      if (!rec || !rec.call || (rec.kind !== 'contest' && rec.kind !== 'dxpedition')) continue;
+      kinds.set(String(rec.call).toUpperCase(), {
+        kind: rec.kind,
+        contest: rec.contest || (kinds.get(String(rec.call).toUpperCase()) || {}).contest || null,
+        ...(rec.viaCall ? { viaCall: String(rec.viaCall).toUpperCase() } : {}),
+      });
+    }
     for (const [call, k] of kinds) {
       if (dxpAliases.has(call)) continue;
       let m = meta.get(call);

@@ -228,6 +228,8 @@ test('labels: CONTEST vs DXP on every surface; only DXpeditions are pinned and g
   assert.ok(/s\.isContestStation[\s\S]{0,200}CONTEST<\/span>/.test(read('renderer/map-popout.js')), 'map pop-out');
   const m = read('main.js');
   assert.ok(/classifyOperations\(potacatResult\.value\)/.test(m), 'main classifies the feed');
+  assert.ok(/rec\.kind !== 'contest' && rec\.kind !== 'dxpedition'/.test(m) && /kinds\.set\(String\(rec\.call\)\.toUpperCase\(\)/.test(m),
+    "the feed's own kind/contest/viaCall (Worker ea019b3a) win over the classifier");
   assert.ok(/merged\.add\(call\);/.test(m), 'contest calls named inside another announcement are tracked');
   assert.ok(/\.spot-contest-station \{/.test(read('renderer/styles.css')));
   // The catalog's contest end is exclusive (00:00Z of the next day): CQ WW SSB
