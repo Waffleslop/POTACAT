@@ -235,7 +235,8 @@ test('labels: CONTEST vs DXP on every surface; only DXpeditions are pinned and g
   const src = read('renderer/app.js'); const i = src.indexOf('function _dxpRange(e) {');
   const range = new Function(src.slice(i, src.indexOf('\nfunction _dxpAgo', i)) + '; return _dxpRange;')();
   const shown = range({ start: '2026-10-24T00:00:00Z', end: '2026-10-26T00:00:00Z' });
-  assert.ok(/25/.test(shown) && !/26/.test(shown), `exclusive end shows the last day on air: ${shown}`);
+  const days = shown.replace(/\d{4}/g, ''); // the year 2026 must not read as "26"
+  assert.ok(/\b25\b/.test(days) && !/\b26\b/.test(days), `exclusive end shows the last day on air: ${shown}`);
   assert.ok(/5/.test(range({ start: '2026-10-30T00:00:00Z', end: '2026-11-05T23:59:59Z' })), 'a feed window keeps its own last day');
 });
 
