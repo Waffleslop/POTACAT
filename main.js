@@ -2855,7 +2855,51 @@ function paddleKeysOnKeyPortOnly({ keyPortOpen, rigctld, protocol, paddleKey, ta
   if (protocol === 'kenwood' && !(paddleKey === 'ta' && taKeying)) return true;
   return false;
 }
+// ── Which meters this radio actually reports (Casey 2026-10-07: "if the radio
+// lacks SWR, ALC, Power or S Meter values (because we can't poll it), the VFO
+// should not show these elements. Nothing should.") A meter counts once the
+// radio has sent a reading for it — no model table can know what a rigctld
+// backend or a firmware answers. Remembered per rig AND connection type
+// (rig.metersSeen {sig, list}), so SWR/ALC/PWR show from the start next time
+// instead of appearing at the first transmission. Synthetic values (the
+// forward-power decay to 0, the Flex SWR reset) never count: they bypass the
+// sendCat* helpers. A No-CAT rig has none.
+const METER_KEYS = ['smeter', 'swr', 'alc', 'power'];
+const _metersSeenSession = new Set();
+let _metersSaveTimer = null;
+function _meterRigSig(rig) {
+  const t = (rig && rig.catTarget) || settings.catTarget || {};
+  return `${t.type || ''}|${(rig && rig.model) || ''}`;
+}
+function _activeRigForMeters() {
+  return (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+}
+function noteMeterSeen(key) {
+  if (_metersSeenSession.has(key)) return;
+  _metersSeenSession.add(key);
+  const rig = _activeRigForMeters();
+  if (rig) {
+    const sig = _meterRigSig(rig);
+    const prev = rig.metersSeen && rig.metersSeen.sig === sig && Array.isArray(rig.metersSeen.list) ? rig.metersSeen.list : [];
+    if (!prev.includes(key)) {
+      rig.metersSeen = { sig, list: [...prev, key] };
+      if (_metersSaveTimer) clearTimeout(_metersSaveTimer);
+      _metersSaveTimer = setTimeout(() => { _metersSaveTimer = null; saveSettings(settings); }, 2000);
+    }
+  }
+  sendVfoState();
+}
+function vfoMetersAvailable() {
+  const out = {};
+  if ((settings.catTarget || {}).type === 'none') { for (const k of METER_KEYS) out[k] = false; return out; }
+  const rig = _activeRigForMeters();
+  const persisted = rig && rig.metersSeen && rig.metersSeen.sig === _meterRigSig(rig) && Array.isArray(rig.metersSeen.list) ? rig.metersSeen.list : [];
+  for (const k of METER_KEYS) out[k] = _metersSeenSession.has(k) || persisted.includes(k);
+  return out;
+}
+
 function sendCatFwdPower(watts) {
+  noteMeterSeen('power');
   const w = Math.round((Number(watts) || 0) * 10) / 10;
   if (_stationSetupTxTest) {
     _stationSetupTxTest.fwdEvents++;
@@ -3013,6 +3057,7 @@ function sendCatFreqOther(hz) {
 }
 
 function sendCatSmeter(val) {
+  if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('smeter');
   if (win && !win.isDestroyed()) win.webContents.send('cat-smeter', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-smeter', val);
   // JTCAT popout carries S/SWR beside its RX and TX Pwr sliders — a digital
@@ -3025,6 +3070,7 @@ function sendCatSmeter(val) {
 }
 
 function sendCatSwr(val) {
+  if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('swr');
   if (win && !win.isDestroyed()) win.webContents.send('cat-swr', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr', val);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-swr', val);
@@ -3035,6 +3081,7 @@ function sendCatSwr(val) {
 }
 
 function sendCatAlc(val) {
+  if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('alc');
   if (win && !win.isDestroyed()) win.webContents.send('cat-alc', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-alc', val);
   _currentAlc = val;
@@ -5019,6 +5066,9 @@ function logConnectCatSkip(reason) {
 }
 
 async function connectCat() {
+  // A new connection (or another rig) starts with nothing seen this session;
+  // what this rig reported before still comes from rig.metersSeen.
+  _metersSeenSession.clear();
   if (_connectCatPending) {
     if (settings && settings.catTarget && settings.catTarget.type === 'icom-network') {
       appendIcomNetworkDiagnostic('[Icom Network] connectCat skipped because another connect is already pending');
@@ -12902,6 +12952,7 @@ function connectSmartSdr() {
     sendCatFwdPower(w);
   });
   smartSdr.on('swr-ratio', (swr) => {
+    noteMeterSeen('swr');
     if (_flexTxRf && swr > _flexTxRf.maxSwr) _flexTxRf.maxSwr = swr;
     if (win && !win.isDestroyed()) win.webContents.send('cat-swr-ratio', swr);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
@@ -19781,6 +19832,7 @@ function sendVfoState() {
     vfo: _currentVfo,           // active VFO letter + split badge (LZ3AW)
     split: _currentSplit,
     customCatButtons: settings.customCatButtons || [],
+    meters: vfoMetersAvailable(),   // only these meter rows are drawn
   });
 }
 
@@ -33806,7 +33858,7 @@ app.whenReady().then(() => {
     // keys keeps main's — otherwise the next rig edit would wipe them and the
     // checklist would nag about steps that already work.
     if (Array.isArray(newSettings.rigs) && Array.isArray(settings.rigs)) {
-      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured'];
+      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen'];
       newSettings.rigs = newSettings.rigs.map((r) => {
         const cur = r && settings.rigs.find(x => x && x.id === r.id);
         if (!cur) return r;

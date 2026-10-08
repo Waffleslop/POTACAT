@@ -853,6 +853,7 @@ function updateDisplay() {
 
 // --- Radio state from main process ---
 window.api.onRadioState((s) => {
+  if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s.freq) {
     const now = Date.now();
     const armed = _freqSuppressTarget > 0 && now < _freqSuppressDeadline;
@@ -1660,12 +1661,37 @@ async function loadWidgets() {
   syncSettingsCheckboxes();
 }
 
+// Meter rows the radio actually reports (main's vfoMetersAvailable, sent on
+// vfo-radio-state). A row the radio never fills is not drawn, and with none
+// the whole meter block is gone (Casey 2026-10-07: "Nothing should"). The TX
+// row is the PC's own audio level, so it shows once audio has been sent.
+let radioMeters = null;   // null until main says; nothing is drawn meanwhile
+let txPeakSeen = false;
+function applyMeterRows() {
+  const m = radioMeters || {};
+  const rows = { smeter: 'smeter-bar', swr: 'swr-bar', alc: 'alc-bar', power: 'fwdpwr-bar' };
+  let any = false;
+  for (const [k, id] of Object.entries(rows)) {
+    const row = document.getElementById(id)?.closest('.meter-row');
+    if (!row) continue;
+    const on = !!m[k];
+    row.style.display = on ? '' : 'none';
+    any = any || on;
+  }
+  const txRow = document.getElementById('tx-peak-bar')?.closest('.meter-row');
+  if (txRow) txRow.style.display = txPeakSeen ? '' : 'none';
+  any = any || txPeakSeen;
+  const block = document.getElementById('widget-smeter');
+  if (block) block.classList.toggle('visible', !!vfoWidgets.smeter && any);
+}
+
 function applyWidgets() {
   WIDGETS.forEach(w => {
     if (w === 'ptt' || w === 'log') return; // handled below
     const el = document.getElementById('widget-' + w);
     if (el) el.classList.toggle('visible', !!vfoWidgets[w]);
   });
+  applyMeterRows();
   // PTT/LOG row: show if either is enabled, hide individual buttons
   const pttRowEl = document.getElementById('widget-ptt-row');
   const pttBtnEl = document.getElementById('ptt-btn');
@@ -1861,6 +1887,7 @@ function _txMeterTick() {
   const pct = Math.min(1, _txMeterPeakHold);
   const color = pct < 0.005 ? '#666' : pct < 0.5 ? '#4ecca3' : pct < 0.85 ? '#ffd740' : '#e94560';
   txPeakBar.style.width = (pct * 100) + '%';
+  if (!txPeakSeen && pct >= 0.005) { txPeakSeen = true; applyMeterRows(); }
   txPeakBar.style.background = pct < 0.005 ? '#333' : color;
   txPeakText.textContent = pct < 0.005 ? '—' : Math.round(pct * 100) + '%';
   txPeakText.style.color = color;
