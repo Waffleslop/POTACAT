@@ -23528,7 +23528,8 @@ function _summarizePotacatRecord(rec) {
     if (dm) dates = dm[1].replace(/\s*,\s*/, ', ');
     // "By <ops>" — the operator credit line. Stops at the first ";" or end.
     const om = description.match(/\bBy\s+([^;\.]+?)(?:[;\.]|$)/);
-    if (om) operators = om[1].trim();
+    // NG3K appends the location: "By LA6VM LA9DL LA7X fm Longyearbyen".
+    if (om) operators = om[1].replace(/\s+fm\s+.*$/, '').trim();
     // QSL field — NG3K writes "QSL: X" or "QSL via: X".
     const qm = description.match(/QSL(?:\s+via)?:\s*([^-]+?)(?:--|$)/i);
     if (qm) qsl = qm[1].trim();
@@ -23537,12 +23538,15 @@ function _summarizePotacatRecord(rec) {
     const bm = description.match(/[;,]\s*((?:HF|VHF|UHF|160m|80m|40m|20m|17m|15m|12m|10m|6m|2m|\d+-\d+m))\s*[;,]/i);
     if (bm) bands = bm[1].trim();
     // Modes — comma/space separated list of standard mode names.
-    const mm = description.match(/\b(CW|SSB|FM|AM|RTTY|FT8|FT4|JT65|PSK31|EME|SAT|DIGITAL)\b(?:[\s,]+\b(?:CW|SSB|FM|AM|RTTY|FT8|FT4|JT65|PSK31|EME|SAT|DIGITAL)\b){0,5}/i);
+    const mm = description.match(/\b(CW|SSB|FM|AM|RTTY|FT8|FT4|JT65|PSK31|EME|SAT|DIGITAL)\b(?:[\s,]+\b(?:CW|SSB|FM|AM|RTTY|FT8|FT4|JT65|PSK31|EME|SAT|DIGITAL)\b){0,5}/);
+    // Case-sensitive on purpose: NG3K writes modes in capitals, and its "fm"
+    // means "from" ("fm Longyearbyen"), which the old /i flag read as FM.
     if (mm) modes = mm[0].replace(/\s+/g, ' ').trim();
   }
 
   return {
-    entity,
+    // The feed supplies an entity of its own; use it when the title parse finds none.
+    entity: entity || rec.entity || '',
     description,
     title,
     operators,
@@ -23550,6 +23554,14 @@ function _summarizePotacatRecord(rec) {
     modes,
     qsl,
     dates,
+    // Structured window for the Contests view. The feed declares start/end
+    // (null as of 2026-10-07); until it fills them, NG3K's date text is parsed
+    // (lib/dxpedition-contests.js). DX-World prose stays undated.
+    ...(() => {
+      if (rec.start) return { startDate: String(rec.start).slice(0, 10), endDate: String(rec.end || rec.start).slice(0, 10) };
+      const w = require('./lib/dxpedition-contests').parseDxpDates(dates || (/ng3k/.test(rec.source || '') ? title : ''));
+      return w ? { startDate: w.start, endDate: w.end } : { startDate: '', endDate: '' };
+    })(),
     sources: rec.source || '',
     link: rec.link || '',
   };
@@ -23649,6 +23661,31 @@ function fetchClubLogExpeditions() {
       });
     });
     req.on('error', () => resolve([]));
+  });
+}
+
+// Which tracked DXpedition calls are being spotted (PSKReporter, RBN, DX
+// cluster, POTA/SOTA/WWFF) — api.potacat.com's on-air collector, one request
+// for every feed call. Feeds the Contests view's "on air" rows. Cached 5 min.
+let _dxpActivity = { at: 0, calls: {} };
+function fetchDxpeditionActivity() {
+  if (Date.now() - _dxpActivity.at < 5 * 60 * 1000) return Promise.resolve(_dxpActivity.calls);
+  return new Promise((resolve) => {
+    const https = require('https');
+    const req = https.get('https://api.potacat.com/v1/dxpeditions/spots.json',
+      { headers: { 'User-Agent': `POTACAT-Desktop/${app.getVersion ? app.getVersion() : '0'}` }, timeout: 10000 }, (res) => {
+        let body = '';
+        res.on('data', (c) => { body += c; });
+        res.on('end', () => {
+          try {
+            const j = JSON.parse(body);
+            if (res.statusCode === 200 && j && j.calls && typeof j.calls === 'object') _dxpActivity = { at: Date.now(), calls: j.calls };
+          } catch { /* keep the last good copy */ }
+          resolve(_dxpActivity.calls);
+        });
+      });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(_dxpActivity.calls));
   });
 }
 
@@ -31071,7 +31108,11 @@ app.whenReady().then(() => {
     ];
     // Event sponsor sites (13 Colonies, Route 66, ...) come from the event
     // definition itself — see eventUrlAllowed — rather than this list.
-    if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url)) {
+    // A DXpedition's own link (DX-World, DXNews, QRZ) is allowed when the
+    // current feed names that exact URL — data-driven, like contest links.
+    const dxpLink = typeof url === 'string' && /^https?:///.test(url)
+      && [...expeditionMeta.values()].some((m) => m && m.link === url);
+    if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url) || dxpLink) {
       shell.openExternal(url);
     }
   });
@@ -32139,6 +32180,15 @@ app.whenReady().then(() => {
   // ISO strings (Date objects don't survive structured-clone through IPC
   // round-trips cleanly across all Electron versions). Renderer parses
   // back to Date when rendering.
+  // DXpeditions for the Contests view: the feed metadata main already holds
+  // plus who is being spotted right now (lib/dxpedition-contests.js builds rows).
+  ipcMain.handle('get-dxpeditions', async () => {
+    const metadata = {};
+    for (const [cs, m] of expeditionMeta) metadata[cs] = m;
+    const activity = await fetchDxpeditionActivity().catch(() => ({}));
+    return { metadata, activity };
+  });
+
   ipcMain.handle('get-contests', () => {
     const now = new Date();
     const resolved = contestsFeed.resolvedAt(now);

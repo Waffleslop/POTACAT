@@ -10379,3 +10379,31 @@ main.banner-logger-active #event-progress-overlay {
 .er-title { font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
 .er-close { position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--text-dim); font-size: 20px; line-height: 1; cursor: pointer; }
 .er-close:hover { color: var(--text-primary); }
+
+/* DXpeditions in the Contests view (lib/dxpedition-contests.js) */
+.dxp-flagbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 10px; padding: 8px 12px; border-radius: 6px; font-size: 12px;
+  background: color-mix(in srgb, #4ecca3 12%, transparent);
+  border: 1px solid color-mix(in srgb, #4ecca3 45%, transparent);
+  color: var(--text-primary);
+}
+.dxp-flagbar-off {
+  background: color-mix(in srgb, #f0a500 14%, transparent);
+  border-color: color-mix(in srgb, #f0a500 55%, transparent);
+}
+.dxp-flagbar button, .dxp-drawer-turnon {
+  flex-shrink: 0; font: inherit; font-weight: 600; cursor: pointer;
+  padding: 4px 10px; border-radius: 4px; border: 1px solid #f0a500;
+  background: #f0a500; color: #1a1a2e;
+}
+.dxp-drawer-turnon { display: inline-block; margin-top: 6px; text-decoration: none; }
+.dxp-noflag {
+  margin-left: 6px; padding: 0 6px; border-radius: 8px; font-size: 10px; font-weight: 600;
+  background: color-mix(in srgb, #f0a500 22%, transparent); color: var(--text-primary); cursor: help;
+}
+.dxp-row-link { color: var(--accent-blue, #4fc3f7); text-decoration: none; font-size: 12px; white-space: nowrap; }
+.dxp-row-link:hover { text-decoration: underline; }
+.dxp-drawer-flag { margin: 8px 0 12px; padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; }
+.dxp-drawer-flag.on { background: color-mix(in srgb, #4ecca3 12%, transparent); }
+.dxp-drawer-flag.off { background: color-mix(in srgb, #f0a500 14%, transparent); }

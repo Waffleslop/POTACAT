@@ -11869,6 +11869,7 @@ if (viewContestsBtn) viewContestsBtn.addEventListener('click', () => setView('co
 // with status pills for running/upcoming. Data drawn from
 // data/contests.json — sponsor-direct public materials only.
 const CONTESTS_CATEGORY_ORDER = [
+  { key: 'dxpedition',      label: 'DXpeditions' },   // lib/dxpedition-contests.js, not the contests catalog
   { key: 'worldwide-dx',    label: 'Worldwide DX' },
   { key: 'north-american',  label: 'North American' },
   { key: 'state-qso-party', label: 'State QSO Parties' },
@@ -12110,6 +12111,8 @@ async function renderContestsView() {
   _contestsPopulateSourceMenu();
   _contestsPopulateModeMenu();
   _contestsRender();
+  // DXpeditions load beside the catalog and re-render when they arrive.
+  _dxpLoad().then((changed) => { if (changed && currentView === 'contests') _contestsRender(); });
   // Live tick: refresh status labels every 60s so countdowns stay current.
   if (contestsRefreshTimer) clearInterval(contestsRefreshTimer);
   contestsRefreshTimer = setInterval(() => {
@@ -12119,6 +12122,7 @@ async function renderContestsView() {
       return;
     }
     _contestsRender();
+    _dxpLoad().then((changed) => { if (changed && currentView === 'contests') _contestsRender(); });
   }, 60000);
 }
 
@@ -12199,6 +12203,23 @@ function _contestsRender() {
     rows.push(entry);
   }
 
+  // DXpeditions: one more Sources entry, rows from the feed main already holds
+  // plus who is being spotted now (lib/dxpedition-contests.js).
+  dxpEntriesById.clear();
+  let dxpCount = 0;
+  if (filter.dxpedition !== false && dxpCache && window.DxpContests) {
+    for (const e of window.DxpContests.buildDxpeditionEntries(dxpCache.metadata, dxpCache.activity, now.getTime())) {
+      if (!_contestsModeVisible(e, modeFilter)) continue;
+      const status = window.DxpContests.dxpStatus(e, _contestsStatus(e, now), now.getTime());
+      if (!showPast && (status.kind === 'unscheduled' || status.kind === 'ended')) continue;
+      const entry = { ...e, _status: status, _catLabel: 'DXpeditions' };
+      entry._bucket = _contestsBucket(entry, now);
+      rows.push(entry);
+      dxpEntriesById.set(entry.id, entry);
+      dxpCount++;
+    }
+  }
+
   // LIVE bucket sorts DESC (freshest first); every other bucket sorts ASC.
   // Casey: the freshest-running contest is the one users want to see first
   // when they peek at the list mid-stream. Do not unify the sort direction —
@@ -12232,7 +12253,7 @@ function _contestsRender() {
     if (!byKey.has(key)) { const sec = { key, label, accent, rows: [] }; byKey.set(key, sec); sections.push(sec); }
     byKey.get(key).rows.push(r);
   }
-  const html = [`
+  const html = [_dxpFlagBarHtml(dxpCount) + `
     <div class="contest-cols" aria-hidden="true">
       <span>Status</span><span>Contest</span><span>Starts (UTC)</span><span>Length</span><span class="contest-col-modes">Modes</span><span class="contest-col-bands">Bands</span><span class="contest-col-notes">Notes</span><span></span>
     </div>`];
@@ -12243,7 +12264,7 @@ function _contestsRender() {
           <span class="contest-bucket-label">${_contestsEscape(sec.label)}</span>
           <span class="contest-bucket-count">${sec.rows.length}</span>
         </div>
-        ${sec.rows.map((c) => _contestsRowHtml(c, now)).join('')}
+        ${sec.rows.map((c) => (c.dxp ? _dxpRowHtml(c, now) : _contestsRowHtml(c, now))).join('')}
       </div>
     `);
   }
@@ -12251,17 +12272,23 @@ function _contestsRender() {
   const sub = document.getElementById('contests-subtitle');
   if (sub) {
     const live = rows.filter((r) => r._bucket.key === 'live').length;
-    sub.textContent = `${rows.length} contests and special events${live ? ` · ${live} on the air now` : ''} · click a row for details`;
+    const nContests = rows.length - dxpCount;
+    sub.textContent = `${nContests} contests and special events${dxpCount ? ` · ${dxpCount} DXpeditions` : ''}${live ? ` · ${live} on the air now` : ''} · click a row for details`;
   }
 
   // Wire row click → drawer.
   host.querySelectorAll('.contest-row').forEach((el) => {
     el.addEventListener('click', () => {
       const id = el.getAttribute('data-id');
+      if (id && id.startsWith('dxp:')) { const e = dxpEntriesById.get(id); if (e) _dxpOpenDrawer(e); return; }
       const c = contestsCache.contests.find((x) => x.id === id);
       if (c) _contestsOpenDrawer(c);
     });
   });
+  host.querySelectorAll('.dxp-row-link').forEach((el) => {
+    el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); window.api.openExternal(el.getAttribute('data-url')); });
+  });
+  host.querySelector('.dxp-flag-on')?.addEventListener('click', (e) => { e.stopPropagation(); _dxpTurnOnSpots(); });
   host.querySelectorAll('.contest-row-rules').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
@@ -12423,6 +12450,151 @@ function _contestsOpenDrawer(c) {
 document.getElementById('contests-drawer-close')?.addEventListener('click', () => {
   document.getElementById('contests-detail-drawer')?.classList.add('hidden');
 });
+
+// ── DXpeditions in the Contests view (Casey 2026-10-07) ─────────────
+// "Add to the Contest page the DXpeditions that are live and upcoming. Let
+// users select if they want to see them ... make it visible if they have the
+// DXpedition Spot turned on, or not." They are a Sources entry ('dxpedition')
+// like any contest category; rows come from lib/dxpedition-contests.js; a bar
+// above the list says whether DXpedition spot flags (enableDxe) are on, with
+// a one-click Turn on — tracking a future DXpedition with the flag off means
+// never seeing it marked in the spot table.
+let dxpCache = null;            // { metadata, activity, at }
+const dxpEntriesById = new Map();
+const DXP_SOURCE_LABELS = { clublog: 'Club Log', 'dx-world': 'DX-World', dxnews: 'DXNews', ng3k: 'NG3K' };
+
+async function _dxpLoad(force) {
+  if (!force && dxpCache && Date.now() - dxpCache.at < 5 * 60 * 1000) return false;
+  try {
+    const d = await window.api.getDxpeditions();
+    dxpCache = { metadata: (d && d.metadata) || {}, activity: (d && d.activity) || {}, at: Date.now() };
+    return true;
+  } catch { return false; }
+}
+
+function _dxpRange(e) {
+  if (!e.start) return e.whenRule || '';
+  const s = new Date(e.start); const t = new Date(e.end || e.start);
+  const fmt = (d, withYear) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}), timeZone: 'UTC' });
+  const sameDay = s.toISOString().slice(0, 10) === t.toISOString().slice(0, 10);
+  return sameDay ? fmt(s, true) : `${fmt(s, s.getUTCFullYear() !== t.getUTCFullYear())} – ${fmt(t, true)}`;
+}
+
+function _dxpAgo(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 2) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h} h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+// Why a DXpedition will or will not be marked in the spot list.
+function _dxpFlagState(call) {
+  if (!enableDxe) return { flagged: false, why: 'DXpedition spots are off' };
+  if (isExpeditionVisible(call)) return { flagged: true, why: '' };
+  const m = expeditionMeta.get(String(call).toUpperCase());
+  const srcs = String((m && m.sources) || '').split(',').filter(Boolean).map((k) => DXP_SOURCE_LABELS[k] || k);
+  return { flagged: false, why: `Its source (${srcs.join(', ') || 'unknown'}) is off in Spots › DX Expeditions` };
+}
+
+function _dxpFlagBarHtml(count) {
+  if (!count) return '';
+  if (!enableDxe) {
+    return `<div class="dxp-flagbar dxp-flagbar-off" role="status">
+      <span><strong>DXpedition spots are off.</strong> The ${count} DXpeditions below will not be marked in your spot table, map or panadapter when they are spotted, so a future one you are waiting for can go by unnoticed.</span>
+      <button type="button" class="dxp-flag-on">Turn on DXpedition spots</button></div>`;
+  }
+  return `<div class="dxp-flagbar" role="status"><span><strong>DXpedition spots are on.</strong> When one of these stations is spotted, it is marked in your spot table and map. Sources are in Spots › DX Expeditions.</span></div>`;
+}
+
+function _dxpTurnOnSpots() {
+  enableDxe = true;
+  if (spotsDxe) spotsDxe.checked = true;
+  window.api.saveSettings({ enableDxe: true, enableDxeSources: { ...enableDxeSources } });
+  if (typeof render === 'function') render();
+  _contestsRender();
+}
+
+function _dxpRowHtml(c, now) {
+  const s = c._status; const d = c.dxp;
+  let pillText = s.label;
+  if (s.kind === 'live') pillText = s.dxpLabel && s.dxpLabel !== 'running' ? s.dxpLabel : (s.end ? _contestsRunningEndLabel(s.end, now) : 'on air');
+  if (s.kind === 'unscheduled') pillText = 'dates TBA';
+  const flag = _dxpFlagState(d.call);
+  const flagChip = enableDxe && !flag.flagged
+    ? `<span class="dxp-noflag" title="${_contestsEscape(flag.why)}">not flagged</span>` : '';
+  const heard = d.heard
+    ? `Spotted ${_dxpAgo(d.heard.at)}${d.heard.band || d.heard.mode ? ' · ' + [d.heard.band, d.heard.mode].filter(Boolean).join(' ') : ''}`
+    : '';
+  const notes = [heard, c.notes].filter(Boolean).join(' · ');
+  const days = c.durationHours ? `${Math.max(1, Math.round(c.durationHours / 24))}d` : '';
+  const modes = (c.modes || []).join(', ');
+  return `
+    <div class="contest-row dxp-row" data-id="${_contestsEscape(c.id)}" title="${_contestsEscape(d.entity || '')}">
+      <span class="contest-pill contest-pill-${s.kind}">${_contestsEscape(pillText)}</span>
+      <div class="contest-row-name">
+        <span class="contest-row-title">${_contestsEscape(c.name)}</span>${flagChip}
+        <span class="contest-row-sponsor">${_contestsEscape(c.sponsor)}</span>
+      </div>
+      <span class="contest-row-when">${_contestsEscape(_dxpRange(c))}</span>
+      <span class="contest-row-len">${days}</span>
+      <span class="contest-row-modes contest-col-modes" title="${_contestsEscape(modes)}">${_contestsEscape(modes)}</span>
+      <span class="contest-row-bands contest-col-bands">${_contestsEscape(_contestsBandsLabel(c.bands))}</span>
+      <span class="contest-row-notes contest-col-notes" title="${_contestsEscape(notes)}">${_contestsEscape(notes)}</span>
+      ${d.link ? `<a href="#" class="dxp-row-link" data-url="${_contestsEscape(d.link)}">Info &#x2197;</a>` : '<span></span>'}
+    </div>`;
+}
+
+function _dxpOpenDrawer(c) {
+  const drawer = document.getElementById('contests-detail-drawer');
+  const body = document.getElementById('contests-drawer-body');
+  if (!drawer || !body) return;
+  const d = c.dxp; const s = c._status || {};
+  const flag = _dxpFlagState(d.call);
+  const watching = typeof _hasInGeneralWatchlist === 'function' && _hasInGeneralWatchlist(d.call);
+  const heard = d.heard
+    ? `${_dxpAgo(d.heard.at)}${d.heard.band || d.heard.mode ? ' on ' + [d.heard.band, d.heard.mode].filter(Boolean).join(' ') : ''}${d.heard.count24h ? ` · ${d.heard.count24h} spots in 24 h` : ''}`
+    : 'Not spotted yet';
+  const status = s.kind === 'live' ? (s.dxpLabel === 'running' ? 'On now (within its announced dates)' : s.dxpLabel === 'active' ? 'Recently active (uploading logs to Club Log)' : 'On the air now')
+    : s.kind === 'soon' || s.kind === 'imminent' ? `Starts ${s.label}` : s.kind === 'ended' ? 'Ended' : 'Dates not announced';
+  body.innerHTML = `
+    <h3>${_contestsEscape(d.call)}</h3>
+    <div class="contests-drawer-sponsor">${_contestsEscape(c.sponsor)}</div>
+    <div class="dxp-drawer-flag ${flag.flagged ? 'on' : 'off'}">
+      ${flag.flagged
+        ? '<strong>Spot flag on.</strong> This station is marked in your spot table and map when it is spotted.'
+        : `<strong>Not flagged.</strong> ${_contestsEscape(flag.why)}, so this station will not be marked when it is spotted.${!enableDxe ? ' <a href="#" class="dxp-drawer-turnon">Turn on DXpedition spots</a>' : ''}`}
+    </div>
+    <dl class="contests-drawer-dl">
+      <dt>Status</dt><dd>${_contestsEscape(status)}</dd>
+      <dt>Dates</dt><dd>${_contestsEscape(_dxpRange(c) || 'Not announced')}${c.durationHours ? ` (${Math.max(1, Math.round(c.durationHours / 24))} days)` : ''}</dd>
+      <dt>Last spotted</dt><dd>${_contestsEscape(heard)}</dd>
+      ${d.operators ? `<dt>Operators</dt><dd>${_contestsEscape(d.operators)}</dd>` : ''}
+      ${d.qsl ? `<dt>QSL</dt><dd>${_contestsEscape(d.qsl)}</dd>` : ''}
+      ${c.bands.length ? `<dt>Bands</dt><dd>${_contestsEscape(c.bands.join(', '))}</dd>` : ''}
+      ${c.modes.length ? `<dt>Modes</dt><dd>${_contestsEscape(c.modes.join(', '))}</dd>` : ''}
+      <dt>Announced by</dt><dd>${_contestsEscape(d.sources.map((k) => DXP_SOURCE_LABELS[k] || k).join(', '))}</dd>
+    </dl>
+    <div class="contests-drawer-actions">
+      <a href="#" class="contests-drawer-btn contests-drawer-btn-primary dxp-watch">${watching ? 'Remove from watchlist' : 'Add to watchlist'}</a>
+      ${d.link ? `<a href="#" class="contests-drawer-btn dxp-open" data-url="${_contestsEscape(d.link)}">Announcement &#x2197;</a>` : ''}
+      <a href="#" class="contests-drawer-btn dxp-open" data-url="https://potacat.com/onair/${encodeURIComponent(d.call).replace(/%2F/g, '/')}">On-air page &#x2197;</a>
+    </div>`;
+  body.querySelector('.dxp-watch')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (_hasInGeneralWatchlist(d.call)) _removeFromGeneralWatchlist(d.call); else _addToGeneralWatchlist(d.call);
+    if (typeof render === 'function') render();
+    _dxpOpenDrawer(c);
+  });
+  body.querySelector('.dxp-drawer-turnon')?.addEventListener('click', (e) => {
+    e.preventDefault(); _dxpTurnOnSpots(); _dxpOpenDrawer(c);
+  });
+  body.querySelectorAll('.dxp-open').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault(); window.api.openExternal(a.getAttribute('data-url'));
+  }));
+  drawer.classList.remove('hidden');
+}
 document.getElementById('contests-show-past')?.addEventListener('change', () => {
   if (contestsCache) _contestsRender();
 });
@@ -16878,6 +17050,7 @@ window.api.onDonorCallsigns((list) => {
 
 // --- DX Expedition callsigns listener ---
 window.api.onExpeditionCallsigns((data) => {
+  if (typeof dxpCache !== 'undefined' && dxpCache) dxpCache.at = 0; // Contests view reloads on its next tick
   if (Array.isArray(data)) {
     // backward compat: plain array of callsigns
     expeditionCallsigns = new Set(data.map(cs => cs.toUpperCase()));
