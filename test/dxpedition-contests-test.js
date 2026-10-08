@@ -230,6 +230,13 @@ test('labels: CONTEST vs DXP on every surface; only DXpeditions are pinned and g
   assert.ok(/classifyOperations\(potacatResult\.value\)/.test(m), 'main classifies the feed');
   assert.ok(/merged\.add\(call\);/.test(m), 'contest calls named inside another announcement are tracked');
   assert.ok(/\.spot-contest-station \{/.test(read('renderer/styles.css')));
+  // The catalog's contest end is exclusive (00:00Z of the next day): CQ WW SSB
+  // 2026 must read 24-25 Oct, not 24-26 (website session, 2026-10-07).
+  const src = read('renderer/app.js'); const i = src.indexOf('function _dxpRange(e) {');
+  const range = new Function(src.slice(i, src.indexOf('\nfunction _dxpAgo', i)) + '; return _dxpRange;')();
+  const shown = range({ start: '2026-10-24T00:00:00Z', end: '2026-10-26T00:00:00Z' });
+  assert.ok(/25/.test(shown) && !/26/.test(shown), `exclusive end shows the last day on air: ${shown}`);
+  assert.ok(/5/.test(range({ start: '2026-10-30T00:00:00Z', end: '2026-11-05T23:59:59Z' })), 'a feed window keeps its own last day');
 });
 
 console.log(`\nDXpeditions in Contests: ${passed} passed, ${failed} failed`);

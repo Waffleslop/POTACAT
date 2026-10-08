@@ -12502,7 +12502,11 @@ async function _dxpLoad(force) {
 
 function _dxpRange(e) {
   if (!e.start) return e.whenRule || '';
-  const s = new Date(e.start); const t = new Date(e.end || e.start);
+  const s = new Date(e.start);
+  // A catalog contest window ends at 00:00Z of the day AFTER (exclusive): CQ WW
+  // SSB 2026 is 24-25 Oct with end 2026-10-26T00:00Z. Show the last day on air.
+  const endMs = Date.parse(e.end || e.start);
+  const t = new Date(/T00:00:00(\.000)?Z$/.test(String(e.end || '')) && endMs > s.getTime() ? endMs - 1 : endMs);
   const fmt = (d, withYear) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}), timeZone: 'UTC' });
   const sameDay = s.toISOString().slice(0, 10) === t.toISOString().slice(0, 10);
   return sameDay ? fmt(s, true) : `${fmt(s, s.getUTCFullYear() !== t.getUTCFullYear())} – ${fmt(t, true)}`;
