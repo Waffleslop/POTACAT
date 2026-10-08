@@ -43,6 +43,11 @@ const BLOCKLIST = new Set([
 // call in a multi-call post.
 const ARTICLE_FETCH_BUDGET = 30;
 const ARTICLE_MAX_TRIES = 3;
+// DX-World's host serves a captcha to Cloudflare egress for article pages
+// (only /feed/ gets through), so articles are fetched by the POTACAT Cloud
+// API from the droplet. Needs the ARTICLE_PROXY_TOKEN secret, which matches
+// DXP_ARTICLE_TOKEN in the droplet .env.
+const ARTICLE_PROXY = 'https://api.potacat.com/v1/dxpeditions/article';
 
 // ---------- Generic RSS parser ----------
 
@@ -326,10 +331,11 @@ function newsSourceOf(link) {
   }
 }
 
-async function fetchArticle(url) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,*/*' },
-    redirect: 'follow',
+async function fetchArticle(url, env) {
+  const token = env && env.ARTICLE_PROXY_TOKEN;
+  if (!token) throw new Error('ARTICLE_PROXY_TOKEN not set');
+  const res = await fetch(`${ARTICLE_PROXY}?url=${encodeURIComponent(url)}`, {
+    headers: { 'User-Agent': USER_AGENT, 'X-DXP-Token': token },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
@@ -339,11 +345,12 @@ async function fetchArticle(url) {
 
 // Replace excerpt parses with full-article parses, within the fetch
 // budget. Mutates records. Returns { fetched, failed }.
-async function enrichFromArticles(records) {
+async function enrichFromArticles(records, env) {
   let budget = ARTICLE_FETCH_BUDGET;
   let fetched = 0;
   let failed = 0;
   const cache = new Map();
+  const failedLinks = new Set(); // one failure per article per run, not per call
   // Records stored before details existed: seed a slot from the headline
   // link so they get backfilled too.
   for (const r of records) {
@@ -355,18 +362,21 @@ async function enrichFromArticles(records) {
     for (const src of Object.values(NEWS_HOSTS)) {
       const d = r._d[src];
       if (!d || d.parsedFrom === 'article' || !d.articleLink) continue;
-      if ((d.articleTries || 0) >= ARTICLE_MAX_TRIES) continue;
+      // articleFails, not the old articleTries: tries spent while every
+      // direct fetch hit the captcha don't count against the article.
+      if ((d.articleFails || 0) >= ARTICLE_MAX_TRIES || failedLinks.has(d.articleLink)) continue;
       let parsed = cache.get(d.articleLink);
       if (!parsed) {
         if (budget <= 0) continue;
         budget--;
         try {
-          const { text, hrefs } = await fetchArticle(d.articleLink);
+          const { text, hrefs } = await fetchArticle(d.articleLink, env);
           parsed = { ...parseArticle(text, hrefs, r.publishedAt), articleLink: d.articleLink, parsedFrom: 'article' };
           fetched++;
         } catch {
           failed++;
-          r._d[src] = { ...d, articleTries: (d.articleTries || 0) + 1 };
+          failedLinks.add(d.articleLink);
+          r._d[src] = { ...d, articleFails: (d.articleFails || 0) + 1 };
           continue;
         }
         cache.set(d.articleLink, parsed);
@@ -563,7 +573,7 @@ const worker = {
     const merged = anyOk ? mergeWithExisting(prev.records, allFresh, now) : (prev.records || []);
     let articles = { fetched: 0, failed: 0 };
     try {
-      articles = await enrichFromArticles(merged);
+      articles = await enrichFromArticles(merged, env);
     } catch (err) {
       articles.error = String(err && err.message ? err.message : err);
     }
