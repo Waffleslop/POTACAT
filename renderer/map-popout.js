@@ -406,8 +406,12 @@ function updateMapMarkers(spots) {
       : '';
 
     const newBadge = s.isNewPark ? ` <span style="background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">NEW</span>` : '';
-    const expTitle = s.expeditionEntity ? `DX Expedition: ${s.expeditionEntity}` : 'DX Expedition';
-    const expeditionBadge = s.isExpedition ? ` <span style="background:#ff1744;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">DXP</span>` : '';
+    const expTitle = String(s.expeditionNote || (s.expeditionEntity ? `DX Expedition: ${s.expeditionEntity}` : 'DX Expedition')).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const expeditionBadge = s.isExpedition
+      ? ` <span style="background:#ff1744;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">DXP</span>`
+      : s.isContestStation
+        ? ` <span style="background:#7c4dff;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">CONTEST</span>`
+        : '';
     const wwffBadge = s.wwffReference ? ` <span style="background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">WWFF</span>` : '';
     const wwffRefLine = s.wwffReference ? `<br><b>${s.wwffReference}</b> ${s.wwffParkName || ''} <span style="color:${SOURCE_COLORS_ACTIVE.wwff};font-size:11px;">[WWFF]</span>` : '';
     const opLine = s.opName ? `<span style="color:#b0bec5;font-size:11px;">${s.opName}</span><br>` : '';

@@ -117,5 +117,120 @@ test('renderer: a Sources entry, the spot-flag bar with Turn on, and the shared 
   assert.ok(/<script src="\.\.\/lib\/dxpedition-contests\.js"><\/script>/.test(read('renderer/index.html')));
 });
 
+// ── Contest station or DXpedition (Casey 2026-10-07). Wording copied from the
+// live feed (DX-World, NG3K), trimmed.
+const { classifyOperations } = require('../lib/dxpedition-contests');
+const FEED = [
+  { call: 'PJ4K', title: 'PJ4K – Bonaire', description: 'Team consisting of K1DG, K9VV and KM3T will be active as PJ4K during the CQWW SSB contest (Oct 24-25). Category: M/2. QSL via KU9C.' },
+  { call: '3B8M', title: '3B8M – Mauritius', description: '[INFO] – This year for the CQWW CW contest, KX7M, 4O3A, E70A and YT1CI will be active as 3B8M.' },
+  { call: 'FS/K0CD', title: 'FS/K0CD – St Martin', description: 'Philip, K0CD will be active during the CQWW CW contest (November 28-29) from St Martin as FS/K0CD. Entry: SOAB, QRP.' },
+  { call: 'EX9A', title: 'Kyryzstan: Sep 26-27, 2026 -- EX9A -- QSL via: EX7CQ', description: 'Sep 26-27, 2026 -- Kyryzstan -- EX9A -- QSL: EX7CQ -- By EX2M EX7CQ EX7DY; QRV for CQWW DX RTTY Contest; M/S, high power' },
+  { call: '4A5E', title: 'Mexico: Sep 26-27, 2026 -- 4A5E -- QSL via: LoTW', description: 'Sep 26-27, 2026 -- Mexico -- 4A5E -- By XE1EE; SOAB HP entry in CQWW DX RTTY Contest' },
+  { call: 'T32AZ', title: 'T32AZ – Kiritimati, East Kiribati', description: '[REFRESH] – Running the Oceania DX SSB contest and Arizona QSO party look for Ken KH6QJ to again be active from Kiritimati.' },
+  { call: 'C56XA', title: 'C56XA – The Gambia', description: 'Alan, G3XAQ will be active from The Gambia as C56XA during November 17 to December 1, 2026. QRV holiday-style on CW & FT8. Participation in the CQWW CW contest (SOSB, 15m LP).' },
+  { call: 'OX7AM', title: 'OX7AM – Greenland', description: 'Nadia, OZ7AM will be active from Kangerlussuaq, Greenland as OX7AM during November 23 to December 7, 2026. QRV on CW only. Participation in the CQWW CW contest (SOAB).' },
+  { call: '3DA0GY', title: 'eSwatini: Oct 15-Nov 2, 2026 -- 3DA0GY -- QSL via: LoTW', description: 'Oct 15-Nov 2, 2026 -- eSwatini -- 3DA0GY -- By LA9GY fm Piggs Peak; 40-10m; CW SSB; QRV in Worked All Germany SSB and CQWW DX SSB' },
+  { call: 'CT9/DF7EE', title: 'CT9/DF7EE & CQ3W – Madeira', description: 'Helmut, DF7EE will again be active from Madeira as CT9/DF7EE during October 20-27, 2026. Participation in the CQ WW SSB contest as CQ3W.' },
+  { call: 'N7NU/VP9', title: 'N7NU/VP9 & VP9I – Bermuda', description: 'From September 23-29, 2026, Lee N7NU, Ron WJ7R and Al K7AR will be active from Bermuda as N7NU/VP9. Participation in the CQWW DX RTTY contest as VP9I.' },
+  { call: 'VP9I', title: 'Bermuda: Sep 23-29, 2026 -- VP9I -- QSL via: LoTW', description: 'Sep 23-29, 2026 -- Bermuda -- VP9I -- By N7NU WJ7R K7AR; CQWW DX RTTY; QRV Sep 23-29 as N7NU/VP9' },
+  { call: 'JW6VM', title: 'JW6VM, JW7XK & JW9DL – Svalbard', description: 'LA6VM, LA7XK & LA9DL will again be active from Svalbard during October 7-12, 2026. Activity as JW5X during the SSB Scandinavian Activity Contest (Oct 10-11).' },
+  { call: 'H49A', title: 'Solomon Is: Oct 7-21, 2026 -- H49A', description: 'Oct 7-21, 2026 -- Solomon Is -- H49A -- By a team; 160-6m; CW SSB FT8' },
+];
+
+test('contest stations and DXpeditions are told apart (real feed wording)', () => {
+  const k = classifyOperations(FEED);
+  const kind = (c) => (k.get(c) || {}).kind;
+  for (const c of ['PJ4K', '3B8M', 'FS/K0CD', 'EX9A', '4A5E', 'T32AZ']) assert.strictEqual(kind(c), 'contest', c);
+  for (const c of ['C56XA', 'OX7AM', '3DA0GY', 'H49A', 'JW6VM']) assert.strictEqual(kind(c), 'dxpedition', c + ' (a DXpedition, contest on the side)');
+  assert.strictEqual(k.get('PJ4K').contest, 'CQ WW SSB');
+  assert.strictEqual(k.get('C56XA').contest, 'CQ WW CW', 'the DXpedition keeps its contest as a note');
+  assert.strictEqual(k.get('H49A').contest, null);
+});
+
+test('"contest as CQ3W": the announced call is the DXpedition, the named call is the contest station', () => {
+  const k = classifyOperations(FEED);
+  assert.strictEqual(k.get('CT9/DF7EE').kind, 'dxpedition');
+  assert.deepStrictEqual(k.get('CQ3W'), { kind: 'contest', contest: 'CQ WW SSB', viaCall: 'CT9/DF7EE' }, 'a call named only inside another announcement is added');
+  assert.strictEqual(k.get('N7NU/VP9').kind, 'dxpedition');
+  assert.strictEqual(k.get('VP9I').kind, 'contest', 'its own NG3K record (a 7-day window) is still the contest call');
+  assert.strictEqual(k.get('JW5X').kind, 'contest');
+  assert.strictEqual(k.get('JW5X').viaCall, 'JW6VM');
+});
+
+test('rows: a contest station is its own Contests category with a clear sponsor line', () => {
+  const rows = buildDxpeditionEntries({
+    PJ4K: { kind: 'contest', contest: 'CQ WW SSB', entity: 'Bonaire', sources: 'dx-world' },
+    CQ3W: { kind: 'contest', contest: 'CQ WW SSB', entity: 'Madeira', viaCall: 'CT9/DF7EE', sources: 'dx-world' },
+    C56XA: { kind: 'dxpedition', contest: 'CQ WW CW', entity: 'The Gambia', sources: 'dx-world' },
+  }, {}, NOW);
+  const r = Object.fromEntries(rows.map((e) => [e.name, e]));
+  assert.strictEqual(r.PJ4K.category, 'contest-station');
+  assert.strictEqual(r.PJ4K.sponsor, 'Contest station · CQ WW SSB · Bonaire');
+  assert.strictEqual(r.CQ3W.sponsor, 'Contest station · CQ WW SSB · Madeira · contest call of CT9/DF7EE');
+  assert.strictEqual(r.C56XA.category, 'dxpedition');
+  assert.strictEqual(r.C56XA.sponsor, 'DXpedition · The Gambia · also in CQ WW CW');
+});
+
+test("a contest station's dates come from its contest in the catalog", () => {
+  const { contestWindowFor } = require('../lib/dxpedition-contests');
+  const now = Date.UTC(2026, 9, 7);
+  const catalog = [
+    { id: 'cq-ww-ssb', name: 'CQ WW DX Contest, SSB', start: '2026-10-24T00:00:00Z', end: '2026-10-26T00:00:00Z' },
+    { id: 'cq-ww-cw', name: 'CQ WW DX Contest, CW', start: '2026-11-28T00:00:00Z', end: '2026-11-30T00:00:00Z' },
+    { id: 'sac-ssb', name: 'Scandinavian Activity Contest, SSB', start: '2026-10-10T12:00:00Z', end: '2026-10-11T12:00:00Z' },
+    { id: 'cq-ww-rtty', name: 'CQ WW RTTY DX Contest', start: '2027-09-25T00:00:00Z', end: '2027-09-27T00:00:00Z' },
+  ];
+  assert.strictEqual(contestWindowFor('CQ WW SSB', catalog, now).id, 'cq-ww-ssb');
+  assert.strictEqual(contestWindowFor('CQ WW CW', catalog, now).id, 'cq-ww-cw');
+  assert.strictEqual(contestWindowFor('CQ WW DX RTTY', catalog, now), null, "next year's RTTY weekend is not this announcement's");
+  const rows = Object.fromEntries(buildDxpeditionEntries({
+    PJ4K: { kind: 'contest', contest: 'CQ WW SSB', sources: 'dx-world' },
+    JW5X: { kind: 'contest', contest: 'Scandinavian Activity Contest SSB', startDate: '2026-10-07', endDate: '2026-10-12', sources: 'ng3k' },
+    K0CD: { kind: 'contest', contest: 'CQ WW CW', aliasOf: 'FS/K0CD', sources: 'dx-world' },
+  }, {}, now, catalog).map((e) => [e.name, e]));
+  assert.strictEqual(rows.PJ4K.start, '2026-10-24T00:00:00Z');
+  assert.strictEqual(rows.PJ4K.whenRule, 'During CQ WW DX Contest, SSB');
+  assert.strictEqual(rows.JW5X.start, '2026-10-10T12:00:00Z', 'the contest weekend beats the whole-trip window NG3K lists');
+  assert.ok(!rows.K0CD, 'a bare call split from a slash form is not listed as its own operation');
+});
+
+test("an operator's home call listed beside the operation is not labelled", () => {
+  const { findAliases } = require('../lib/dxpedition-contests');
+  const recs = [
+    { call: 'FS/K0CD', title: 'FS/K0CD – St Martin', link: 'https://dx-world.net/fs-k0cd/' },
+    { call: 'K0CD', title: 'FS/K0CD – St Martin', link: 'https://dx-world.net/fs-k0cd/' },
+    { call: 'VE9MY', title: 'x', aliasOf: 'VE9MY/P' },
+    { call: 'N7NU/VP9', title: 'N7NU/VP9 & VP9I – Bermuda' },
+    { call: 'N7NU', title: 'N7NU/VP9 & VP9I – Bermuda' },
+    { call: 'H49A', title: 'Solomon Is' },
+    { call: 'W1AW', title: 'another announcement' },
+    { call: 'KH6/W1AW', title: 'a different trip' },
+  ];
+  const a = findAliases(recs);
+  assert.strictEqual(a.get('K0CD'), 'FS/K0CD');
+  assert.strictEqual(a.get('N7NU'), 'N7NU/VP9');
+  assert.strictEqual(a.get('VE9MY'), 'VE9MY/P', 'the feed\'s own aliasOf');
+  assert.ok(!a.has('H49A') && !a.has('FS/K0CD'));
+  assert.ok(!a.has('W1AW'), 'a home call from a DIFFERENT announcement is its own operation');
+  assert.ok(/if \(dxpAliases\.has\(upper\)\) continue;/.test(read('main.js')), 'main skips aliases');
+});
+
+test('labels: CONTEST vs DXP on every surface; only DXpeditions are pinned and get the DXP pin', () => {
+  const a = read('renderer/app.js');
+  assert.ok(/dxp\.textContent = contestStation \? 'CONTEST' : 'DXP';/.test(a), 'spot table badge');
+  assert.ok(/>CONTEST<\/span>/.test(a), 'map popup badge');
+  assert.ok(/const aExp = isDxpeditionVisible\(a\.callsign\)/.test(a), 'only DXpeditions are pinned to the top');
+  assert.ok(/const isExpedition = isDxpeditionVisible\(s\.callsign\);/.test(a), 'the DXpedition map pin is for DXpeditions');
+  assert.ok(/classList\.add\('spot-contest-station'\)/.test(a), 'contest station row mark');
+  assert.ok(/Contest station: \$\{m\.contest\}/.test(a), 'the note says "Contest station: CQ WW SSB"');
+  assert.ok(/\{ key: 'contest-station', label: 'Contest stations \(DX\)' \}/.test(a), 'own Sources entry in Contests');
+  assert.ok(/isContestStation: isContestStationVisible\(s\.callsign\)/.test(a));
+  assert.ok(/s\.isContestStation[\s\S]{0,200}CONTEST<\/span>/.test(read('renderer/map-popout.js')), 'map pop-out');
+  const m = read('main.js');
+  assert.ok(/classifyOperations\(potacatResult\.value\)/.test(m), 'main classifies the feed');
+  assert.ok(/merged\.add\(call\);/.test(m), 'contest calls named inside another announcement are tracked');
+  assert.ok(/\.spot-contest-station \{/.test(read('renderer/styles.css')));
+});
+
 console.log(`\nDXpeditions in Contests: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

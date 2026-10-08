@@ -182,6 +182,12 @@ function expeditionNote(callsign) {
   const bm = [m.bands, m.modes].filter(Boolean).join(' ');
   if (bm) segs.push(bm);
   if (m.qsl) segs.push('QSL ' + m.qsl);
+  if (m.kind === 'contest') {
+    const c = [m.contest ? `Contest station: ${m.contest}` : 'Contest station'];
+    if (m.viaCall) c.push(`contest call of ${m.viaCall}`);
+    return [...c, ...segs.filter((x) => x !== m.dates)].join(' · ');
+  }
+  if (m.contest) segs.push(`also in ${m.contest}`);
   if (!segs.length) return 'DXP';
   return 'DXP: ' + segs.join(' · ');
 }
@@ -189,6 +195,19 @@ function expeditionNote(callsign) {
 // True iff a callsign's expedition status should be honored in the UI.
 // Centralizes the per-source visibility check so every existing site that
 // asked "is this call an expedition?" gets the same answer.
+// Contest station or DXpedition (main's classifyOperations, lib/dxpedition-contests.js).
+// Casey 2026-10-07: "There's a difference between contest stations and
+// DXpeditions and we need to make that clear and label spots correctly."
+// Both stay under Spots › DX Expeditions; only a DXpedition gets the red DXP
+// badge, the pinned-to-top sort and the DXpedition map pin. A contest station
+// gets a CONTEST badge.
+function operationKind(callsign) {
+  const m = expeditionMeta.get(String(callsign || '').toUpperCase());
+  return m && m.kind === 'contest' ? 'contest' : 'dxpedition';
+}
+function isDxpeditionVisible(callsign) { return isExpeditionVisible(callsign) && operationKind(callsign) === 'dxpedition'; }
+function isContestStationVisible(callsign) { return isExpeditionVisible(callsign) && operationKind(callsign) === 'contest'; }
+
 function isExpeditionVisible(callsign) {
   if (!enableDxe) return false;
   const up = String(callsign || '').toUpperCase();
@@ -9364,8 +9383,9 @@ function sortSpots(spots) {
     const bNet = b.source === 'net' ? 1 : 0;
     if (aNet !== bNet) return bNet - aNet;
     // Pin DX expeditions to the top (only when DXE display enabled)
-    const aExp = isExpeditionVisible(a.callsign) ? 1 : 0;
-    const bExp = isExpeditionVisible(b.callsign) ? 1 : 0;
+    // Contest stations are not pinned: a contest weekend would bury the table.
+    const aExp = isDxpeditionVisible(a.callsign) ? 1 : 0;
+    const bExp = isDxpeditionVisible(b.callsign) ? 1 : 0;
     if (aExp !== bExp) return bExp - aExp;
 
     // KW4FM request: when enabled, group unworked POTA/WWFF parks at the top.
@@ -10598,8 +10618,12 @@ function updateMapMarkers(filtered) {
     const mapNewPark = (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference);
     const newBadge = mapNewPark ? ` <span style="background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">NEW</span>` : '';
     const expMeta = expeditionMeta.get(s.callsign.toUpperCase());
-    const expTitle = expMeta ? `DX Expedition: ${expMeta.entity}` : 'DX Expedition';
-    const expeditionBadge = isExpeditionVisible(s.callsign) ? ` <span style="background:#ff1744;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">DXP</span>` : '';
+    const expTitle = _contestsEscape(expeditionNote(s.callsign) || (expMeta ? `DX Expedition: ${expMeta.entity}` : 'DX Expedition'));
+    const expeditionBadge = isDxpeditionVisible(s.callsign)
+      ? ` <span style="background:#ff1744;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">DXP</span>`
+      : isContestStationVisible(s.callsign)
+        ? ` <span style="background:#7c4dff;color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;" title="${expTitle}">CONTEST</span>`
+        : '';
     const mapEvent = getEventForCallsign(s.callsign);
     const eventBadgeHtml = mapEvent ? ` <span style="background:${mapEvent.badgeColor || '#ff6b00'};color:#fff;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">${mapEvent.badge || 'EVT'}</span>` : '';
     const wwffBadge = s.wwffReference ? ` <span style="background:${SOURCE_COLORS_ACTIVE.wwff};color:#000;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;">WWFF</span>` : '';
@@ -10623,7 +10647,7 @@ function updateMapMarkers(filtered) {
     // Pin color matches source: POTA green, SOTA orange, DXC purple, etc.
     const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
     const worked = hasWorkedOnBandMode(s);
-    const isExpedition = isExpeditionVisible(s.callsign);
+    const isExpedition = isDxpeditionVisible(s.callsign);
     const sourceIcon = sourceIcons[s.source] || sourceIcons.pota;
     const markerOptions = isExpedition
       ? { icon: expeditionIcon, zIndexOffset: 500 }
@@ -11870,6 +11894,7 @@ if (viewContestsBtn) viewContestsBtn.addEventListener('click', () => setView('co
 // data/contests.json — sponsor-direct public materials only.
 const CONTESTS_CATEGORY_ORDER = [
   { key: 'dxpedition',      label: 'DXpeditions' },   // lib/dxpedition-contests.js, not the contests catalog
+  { key: 'contest-station', label: 'Contest stations (DX)' }, // same feed, classified as contest operations
   { key: 'worldwide-dx',    label: 'Worldwide DX' },
   { key: 'north-american',  label: 'North American' },
   { key: 'state-qso-party', label: 'State QSO Parties' },
@@ -12207,12 +12232,13 @@ function _contestsRender() {
   // plus who is being spotted now (lib/dxpedition-contests.js).
   dxpEntriesById.clear();
   let dxpCount = 0;
-  if (filter.dxpedition !== false && dxpCache && window.DxpContests) {
-    for (const e of window.DxpContests.buildDxpeditionEntries(dxpCache.metadata, dxpCache.activity, now.getTime())) {
+  if ((filter.dxpedition !== false || filter['contest-station'] !== false) && dxpCache && window.DxpContests) {
+    for (const e of window.DxpContests.buildDxpeditionEntries(dxpCache.metadata, dxpCache.activity, now.getTime(), contestsCache.contests)) {
+      if (filter[e.category] === false) continue;
       if (!_contestsModeVisible(e, modeFilter)) continue;
       const status = window.DxpContests.dxpStatus(e, _contestsStatus(e, now), now.getTime());
       if (!showPast && (status.kind === 'unscheduled' || status.kind === 'ended')) continue;
-      const entry = { ...e, _status: status, _catLabel: 'DXpeditions' };
+      const entry = { ...e, _status: status, _catLabel: e.category === 'contest-station' ? 'Contest stations' : 'DXpeditions' };
       entry._bucket = _contestsBucket(entry, now);
       rows.push(entry);
       dxpEntriesById.set(entry.id, entry);
@@ -12273,7 +12299,9 @@ function _contestsRender() {
   if (sub) {
     const live = rows.filter((r) => r._bucket.key === 'live').length;
     const nContests = rows.length - dxpCount;
-    sub.textContent = `${nContests} contests and special events${dxpCount ? ` · ${dxpCount} DXpeditions` : ''}${live ? ` · ${live} on the air now` : ''} · click a row for details`;
+    const nStations = [...dxpEntriesById.values()].filter((e) => e.category === 'contest-station').length;
+    const nDxp = dxpCount - nStations;
+    sub.textContent = `${nContests} contests and special events${nDxp ? ` · ${nDxp} DXpedition${nDxp === 1 ? '' : 's'}` : ''}${nStations ? ` · ${nStations} contest station${nStations === 1 ? '' : 's'}` : ''}${live ? ` · ${live} on the air now` : ''} · click a row for details`;
   }
 
   // Wire row click → drawer.
@@ -12752,7 +12780,9 @@ function enrichSpotsForPopout(filtered) {
     ...s,
     isWorked: hasWorkedOnBandMode(s),
     isWorkedToday: isWorkedSpot(s),
-    isExpedition: isExpeditionVisible(s.callsign),
+    isExpedition: isDxpeditionVisible(s.callsign),
+    isContestStation: isContestStationVisible(s.callsign),
+    expeditionNote: expeditionNote(s.callsign),
     expeditionEntity: (expeditionMeta.get(s.callsign.toUpperCase()) || {}).entity || '',
     isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
     isOop: isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
@@ -13006,7 +13036,8 @@ function render() {
         // event watchlist is felt even though the event badge already marks it.
         tr.classList.add('spot-event-watch');
       }
-      if (isExpeditionVisible(s.callsign)) tr.classList.add('spot-expedition');
+      if (isDxpeditionVisible(s.callsign)) tr.classList.add('spot-expedition');
+      else if (isContestStationVisible(s.callsign)) tr.classList.add('spot-contest-station');
       if (s.comments && /POTA.?CAT/i.test(s.comments)) tr.classList.add('potacat-respot');
 
       // License privilege check
@@ -13254,7 +13285,9 @@ function render() {
         } else {
           dxp.title = 'DX Expedition (Club Log)';
         }
-        dxp.textContent = 'DXP';
+        const contestStation = operationKind(s.callsign) === 'contest';
+        if (contestStation) dxp.classList.add('contest-station-badge');
+        dxp.textContent = contestStation ? 'CONTEST' : 'DXP';
         callTd.appendChild(dxp);
       }
       if (s.source === 'net') {

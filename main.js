@@ -23616,6 +23616,7 @@ function _summarizePotacatRecord(rec) {
     })(),
     sources: rec.source || '',
     link: rec.link || '',
+    aliasOf: rec.aliasOf || null,   // bare call split from a slash form (K0CD of FS/K0CD)
   };
 }
 
@@ -23766,10 +23767,16 @@ async function fetchExpeditions() {
   // POTACAT community feed: structured records with title / source list /
   // link / publishedAt. Richer than Club Log; supplies the tooltip text
   // and the "in N feeds" corroboration signal.
+  // An operator's home call listed beside the operation's slash call (K0CD of
+  // FS/K0CD) is not the operation: labelling it would mark their ordinary spots
+  // from home DXP or CONTEST (lib/dxpedition-contests.js findAliases).
+  const dxpAliases = potacatResult.status === 'fulfilled'
+    ? require('./lib/dxpedition-contests').findAliases(potacatResult.value) : new Map();
   if (potacatResult.status === 'fulfilled') {
     for (const rec of potacatResult.value) {
       if (!rec || !rec.call) continue;
       const upper = String(rec.call).toUpperCase();
+      if (dxpAliases.has(upper)) continue;
       merged.add(upper);
       const summary = _summarizePotacatRecord(rec);
       // If we already have a Club Log entry, merge the sources lists so the
@@ -23782,6 +23789,32 @@ async function fetchExpeditions() {
         summary.sources = [...prevSources].sort().join(',');
       }
       meta.set(upper, summary);
+    }
+  }
+
+  // Contest station or DXpedition (lib/dxpedition-contests.js classifyOperations).
+  // The feed announces both; a contest station is labelled CONTEST everywhere
+  // and never gets a DXpedition's priority or map pin. A contest call named only
+  // inside another announcement ("... contest as CQ3W") is added so its spots
+  // are labelled too. Club Log's list is DXpeditions.
+  for (const m of meta.values()) if (!m.kind) m.kind = 'dxpedition';
+  if (potacatResult.status === 'fulfilled') {
+    const kinds = require('./lib/dxpedition-contests').classifyOperations(potacatResult.value);
+    for (const [call, k] of kinds) {
+      if (dxpAliases.has(call)) continue;
+      let m = meta.get(call);
+      if (!m) {
+        const parent = k.viaCall ? meta.get(k.viaCall) : null;
+        m = {
+          entity: (parent && parent.entity) || '', description: '', title: '', operators: '', bands: '', modes: '', qsl: '',
+          dates: '', startDate: '', endDate: '', sources: (parent && parent.sources) || '', link: (parent && parent.link) || '',
+        };
+        meta.set(call, m);
+        merged.add(call);
+      }
+      m.kind = k.kind;
+      m.contest = k.contest || '';
+      if (k.viaCall) m.viaCall = k.viaCall;
     }
   }
 

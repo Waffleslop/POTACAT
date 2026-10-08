@@ -4401,6 +4401,16 @@ tr.wl-group-2 td:last-child {
   cursor: default;
 }
 
+/* A contest station (on the air for a contest weekend) is not a DXpedition:
+   its own colour and label, a lighter row mark, no pin to the top. */
+.spot-contest-station {
+  border-left: 3px solid #7c4dff;
+}
+.expedition-badge.contest-station-badge {
+  background: #7c4dff;
+  color: #fff;
+}
+
 .net-badge {
   margin-left: 4px;
   font-size: 9px;
