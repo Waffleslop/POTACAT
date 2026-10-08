@@ -17086,6 +17086,18 @@ window.api.onDonorCallsigns((list) => {
 });
 
 // --- DX Expedition callsigns listener ---
+// A phone switched DXpedition spot flags (ECHOCAT save-settings): apply them
+// here too, so the Spots menu, the spot table and the Contests notice agree
+// with the phone without a restart (potacat-meta dxe-flags-to-remote).
+if (window.api.onDxeSettings) window.api.onDxeSettings((d) => {
+  if (!d) return;
+  enableDxe = d.enableDxe !== false;
+  if (d.enableDxeSources) for (const k of DXE_SOURCE_KEYS) enableDxeSources[k] = d.enableDxeSources[k] !== false;
+  if (typeof syncSpotsPanel === 'function') syncSpotsPanel();
+  if (typeof render === 'function') render();
+  if (currentView === 'contests' && typeof _contestsRender === 'function') _contestsRender();
+});
+
 window.api.onExpeditionCallsigns((data) => {
   if (typeof dxpCache !== 'undefined' && dxpCache) dxpCache.at = 0; // Contests view reloads on its next tick
   if (Array.isArray(data)) {

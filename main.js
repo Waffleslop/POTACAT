@@ -2864,6 +2864,19 @@ function paddleKeysOnKeyPortOnly({ keyPortOpen, rigctld, protocol, paddleKey, ta
 // instead of appearing at the first transmission. Synthetic values (the
 // forward-power decay to 0, the Flex SWR reset) never count: they bypass the
 // sendCat* helpers. A No-CAT rig has none.
+const DXE_SOURCE_KEYS_MAIN = ['clublog', 'dx-world', 'dxnews', 'ng3k'];
+function dxeSourcesForRemote() {
+  const src = settings.enableDxeSources || {};
+  const out = {};
+  for (const k of DXE_SOURCE_KEYS_MAIN) out[k] = src[k] !== false;
+  return out;
+}
+// A phone changed the DXpedition flags: the desktop window applies them live
+// (it otherwise reads them only at startup).
+function pushDxeSettingsToWindow() {
+  if (win && !win.isDestroyed()) win.webContents.send('dxe-settings', { enableDxe: settings.enableDxe !== false, enableDxeSources: dxeSourcesForRemote() });
+}
+
 const METER_KEYS = ['smeter', 'swr', 'alc', 'power'];
 const _metersSeenSession = new Set();
 let _metersSaveTimer = null;
@@ -14621,6 +14634,11 @@ function updateRemoteSettings() {
     // Manual mode that never happens, so report the EFFECTIVE state — a
     // toggle reading ON while Rotate = Manual is what IK4IDF hit (2026-10-05).
     rotorActive: settings.rotorActive !== false && settings.rotorMode !== 'manual',
+    // DXpedition spot flags (potacat-meta dxe-flags-to-remote): the phone reads
+    // these to badge spots and to say "DXpedition spots are off" truthfully.
+    // Defaults on, exactly as the desktop window reads them.
+    enableDxe: settings.enableDxe !== false,
+    enableDxeSources: dxeSourcesForRemote(),
     remoteCwEnabled: !!settings.remoteCwEnabled,
     // CW macros are ONE shared set: settings.cwMacros is canonical (the desktop
     // editor + bar read it, and a phone 'save-cw-macros' now writes it too), so
@@ -19414,15 +19432,24 @@ function connectRemote() {
       Object.assign(partial, sdrSync.slotKeys);
     }
     stampSstvTemplatesPatch(partial);
+    // A phone may send one source; merge so it never clears the others.
+    if (partial && partial.enableDxeSources && typeof partial.enableDxeSources === 'object') {
+      const merged = { ...(settings.enableDxeSources || {}) };
+      for (const k of DXE_SOURCE_KEYS_MAIN) if (typeof partial.enableDxeSources[k] === 'boolean') merged[k] = partial.enableDxeSources[k];
+      partial.enableDxeSources = merged;
+    }
+    if (partial && 'enableDxe' in partial) partial.enableDxe = partial.enableDxe !== false;
     Object.assign(settings, partial);
     saveSettings(settings);
     afterSstvSettingsSaved(partial);
+    const dxeChanged = !!partial && ('enableDxe' in partial || 'enableDxeSources' in partial);
+    if (dxeChanged) pushDxeSettingsToWindow();
     // Echo the CLEANED list back so the sender reconciles to it (the phone
     // adopts settings-update pushes wholesale — same pattern as the
     // sanitized VFO-profiles echo). The JTTY serial a phone bumps must reach
     // the web pane and vice versa, so those keys push too.
     const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
-    if (sdrSync || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
+    if (sdrSync || dxeChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
   });
 }
 
@@ -34432,7 +34459,8 @@ app.whenReady().then(() => {
     // blob — a desktop edit that is not pushed is invisible there until the
     // next reconnect (potacat-meta jtty-remote-fd-exch-and-replay).
     if (has('rotorActive') || has('rotorMode') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
-        has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyProfile') || has('jttySerial') || has('pskMacros')) {
+        has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyProfile') || has('jttySerial') || has('pskMacros') ||
+        has('enableDxe') || has('enableDxeSources')) {
       updateRemoteSettings();
     }
 

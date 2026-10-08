@@ -122,7 +122,8 @@ test('a new engine epoch empties the recent rows — ids restart at 1 per engine
   assert.ok(main.includes('remoteServer.broadcastJtcatJttyRx(batch, jtcatJttyEpoch);'), 'main sends the epoch with every batch');
   assert.ok(main.includes("jtcatFdExch: settings.jtcatFdExch || '',"), 'the Field Day exchange is in the settings blob');
   // A desktop or remote edit of the pane's seeds is pushed, not left for the next reconnect.
-  assert.ok(/has\('jtcatFdExch'\) \|\| has\('jttyMacros'\) \|\| has\('jttyTemplates'\) \|\| has\('jttyProfile'\) \|\| has\('jttySerial'\) \|\| has\('pskMacros'\)\)\s*\{\s*updateRemoteSettings\(\);/.test(main), 'desktop save pushes settings-update for the JTTY/PSK seeds');
+  // The condition may list more keys after these (the DXpedition flags joined it).
+  assert.ok(/has\('jtcatFdExch'\) \|\| has\('jttyMacros'\) \|\| has\('jttyTemplates'\) \|\| has\('jttyProfile'\) \|\| has\('jttySerial'\) \|\| has\('pskMacros'\)[^{]*\)\s*\{\s*updateRemoteSettings\(\);/.test(main), 'desktop save pushes settings-update for the JTTY/PSK seeds');
   assert.ok(/const jttyKeys = \['jttySerial', 'jttyMacros', 'jttyProfile', 'jtcatFdExch', 'pskMacros'\];[\s\S]{0,200}updateRemoteSettings\(\);/.test(main), 'remote save pushes settings-update for the JTTY/PSK seeds');
   for (const [name, file] of [['web', 'renderer/remote.js'], ['pop-out', 'renderer/jtcat-popout.js']]) {
     const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');

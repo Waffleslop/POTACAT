@@ -333,6 +333,7 @@ contextBridge.exposeInMainWorld('api', {
   refreshWatchlistGroup: (idx) => ipcRenderer.invoke('watchlist-group-refresh', idx),
   onExpeditionCallsigns: (cb) => ipcRenderer.on('expedition-callsigns', (_e, data) => cb(data)),
   getDxpeditions: () => ipcRenderer.invoke('get-dxpeditions'),
+  onDxeSettings: (cb) => ipcRenderer.on('dxe-settings', (_e, data) => cb(data)),
   // Directory (HF Nets & SWL Broadcasts)
   onDirectoryData: (cb) => ipcRenderer.on('directory-data', (_e, data) => cb(data)),
   fetchDirectory: () => ipcRenderer.send('fetch-directory'),

@@ -110,6 +110,8 @@ jobs:
         run: node test/dxpedition-contests-test.js
       - name: Run VFO view shows only the meters the radio reports
         run: node test/vfo-meters-test.js
+      - name: Run DXpedition spot flags reach ECHOCAT
+        run: node test/dxe-remote-test.js
       - name: Run SSTV live-engine E2E + real-world front door
         run: node test/sstv-e2e-test.js
       - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)
