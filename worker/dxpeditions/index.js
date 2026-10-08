@@ -25,6 +25,7 @@
 import {
   isBareCall, parseNg3kItem, parseArticle, extractArticle, combineDetails,
 } from './details.js';
+import { classifyOperations, findAliases } from './contests.js';
 
 const KV_KEY = 'feed:v1';
 const SCHEMA_VERSION = '1';
@@ -389,20 +390,40 @@ async function enrichFromArticles(records, env) {
 
 // ---------- Output ----------
 
+// Feed-wide labels, worked out over every record at output time so records
+// stored before a rule existed get it too:
+//   aliasOf  the stored value, else a bare home call that sits beside a slash
+//            call from the same announcement (K0CD beside FS/K0CD)
+//   kind     'contest' | 'dxpedition', with contest (name or null) and viaCall
+//            (the announcement that named this contest call). An alias takes
+//            its parent's label.
+// Rules are the desktop's (contests.js, vendored) so app and feed agree.
+function annotate(records) {
+  const aliases = findAliases(records);
+  const kinds = classifyOperations(records);
+  return (r) => {
+    const aliasOf = aliases.get(String(r.call).toUpperCase()) || r.aliasOf || null;
+    const k = kinds.get(String(aliasOf || r.call).toUpperCase()) || { kind: 'dxpedition', contest: null };
+    return { aliasOf, kind: k.kind, contest: k.contest || null, viaCall: k.viaCall || null };
+  };
+}
+
 // Public shape of a record: stored fields minus internals, plus the
-// combined structured details.
-function publicRecord(r) {
+// feed-wide labels and the combined structured details.
+function publicRecord(r, label) {
   const { _d, titleSource, ...rest } = r;
-  return { ...rest, aliasOf: r.aliasOf || null, ...combineDetails(r.aliasOf || r.call, _d) };
+  const l = label(r);
+  return { ...rest, ...l, ...combineDetails(l.aliasOf || r.call, _d) };
 }
 
 function toJson(state) {
+  const label = annotate(state.records);
   return JSON.stringify({
     version: SCHEMA_VERSION,
     generated: new Date(state.generatedAt || Date.now()).toISOString(),
     count: state.records.length,
     sources: state.sources || {},
-    records: state.records.map(publicRecord),
+    records: state.records.map((r) => publicRecord(r, label)),
   });
 }
 
@@ -418,11 +439,12 @@ function toXml(state) {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<dxpeditions version="${SCHEMA_VERSION}" generated="${esc(new Date(state.generatedAt || Date.now()).toISOString())}" count="${state.records.length}">`,
   ];
+  const label = annotate(state.records);
   for (const rec of state.records) {
-    const r = publicRecord(rec);
+    const r = publicRecord(rec, label);
     lines.push(
       `  <op call="${esc(r.call)}" published="${esc(r.publishedAt)}" firstSeen="${esc(new Date(r.firstSeen).toISOString())}" source="${esc(r.source)}"`
-        + ` entity="${esc(r.entity)}" dxcc="${esc(r.dxcc)}" start="${esc(r.start)}" end="${esc(r.end)}">`,
+        + ` entity="${esc(r.entity)}" dxcc="${esc(r.dxcc)}" kind="${esc(r.kind)}" contest="${esc(r.contest)}" viaCall="${esc(r.viaCall)}" aliasOf="${esc(r.aliasOf)}" start="${esc(r.start)}" end="${esc(r.end)}">`,
       `    <title>${esc(r.title)}</title>`,
       `    <link>${esc(r.link)}</link>`,
       '  </op>',

@@ -73,7 +73,10 @@ Every record also carries these. Unknown is `null` (scalars) or `[]`
 
 | Field | Example | Notes |
 |---|---|---|
-| `aliasOf` | `"3A/WE9G"` | Set on a bare call split out of a slash form; build pages for records where it is `null`. |
+| `aliasOf` | `"FS/K0CD"` | Set on a bare home call beside a slash call from the same announcement; build pages for records where it is `null`. |
+| `kind` | `"contest"` | `"contest"` (a contest station) or `"dxpedition"`. Rules vendored from the desktop (`contests.js`). An alias takes its parent's kind. |
+| `contest` | `"CQ WW SSB"` | Contest named in the announcement, or `null`. A DXpedition can carry one too ("also in"). |
+| `viaCall` | `"N7NU/VP9"` | For a contest call named inside another announcement (VP9I), that announcement's call; else `null`. |
 | `entity` | `"Maldives"` | DXCC entity name (cty.csv spelling). NG3K's entity wins over the prefix guess. |
 | `dxcc` | `159` | ADIF DXCC number. |
 | `continent` | `"AS"` | |
