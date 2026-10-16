@@ -277,7 +277,7 @@ console.log('\nNo POTA hardcode remains in the log-building paths');
   // and the Act screen refuses a contact with no frequency.
   const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf-8');
   const save = main.slice(main.indexOf('async function saveQsoRecord('), main.indexOf('async function saveQsoRecord(') + 6000);
-  check(/activationStationFillFor\(qsoData\)/.test(save), 'saveQsoRecord fills activation station fields');
+  check(/activationStationFillFor\(qsoData, ops\)/.test(save), 'saveQsoRecord fills activation station fields (from the operator being logged for)');
   const exportCalls = main.match(/writeActivationAdifRaw\([^)]*\)/g) || [];
   check(exportCalls.length >= 3 && exportCalls.every(c => /fillActivationExport\(/.test(c)), 'every activation export is filled (' + exportCalls.length + ')');
   const app = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf-8');

@@ -1099,6 +1099,7 @@
             <input type="text" id="lt-respot-comment" placeholder="Comment">
           </div>
         </div>
+        <label id="lt-log-as-wrap" class="log-as-wrap hidden">Log as <select id="lt-log-as" class="log-as-select"></select></label>
         <button type="button" id="lt-save" class="lt-save-btn">Save QSO</button>
       </div>
     </div>
@@ -1139,6 +1140,7 @@
       <div id="quick-log-form" class="hidden">
         <div class="ql-row">
           <input type="text" id="ql-call" placeholder="Callsign" autocapitalize="characters" autocorrect="off" spellcheck="false">
+          <select id="ql-log-as" class="log-as-select ql-log-as hidden" title="Log as"></select>
           <button type="button" id="ql-log-btn" class="ql-log-btn">LOG</button>
         </div>
         <div id="ql-call-info" class="ql-call-info hidden"></div>
@@ -1688,6 +1690,7 @@
         <input type="hidden" id="log-sig">
         <input type="hidden" id="log-sig-info">
         <div class="log-buttons">
+          <label id="log-log-as-wrap" class="log-as-wrap hidden">Log as <select id="log-log-as" class="log-as-select"></select></label>
           <button type="button" id="log-cancel" class="log-btn-cancel">Cancel</button>
           <button type="submit" id="log-save" class="log-btn-save">Save</button>
         </div>

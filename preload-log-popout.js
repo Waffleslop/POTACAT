@@ -41,6 +41,8 @@ const apiSurface = {
 
   // --- QSO save (reuses the same handler as the main window) ---
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
+  // Operators on this machine, for the "Log as" chooser (KD9WI)
+  profilesList: () => ipcRenderer.invoke('profiles-list'),
 
   // --- Combined callsign lookup (QRZ info + past QSOs from local log) ---
   callsignInfo: (call, limit) => ipcRenderer.invoke('log-popout-callsign-info', call, limit),

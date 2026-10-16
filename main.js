@@ -313,6 +313,7 @@ const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
+const LogAs = require('./lib/log-as'); // log a QSO for another operator on this machine (KD9WI)
 const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/serial-path'); // "COM Port 10" -> COM10 (KF0TDB)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
@@ -828,6 +829,42 @@ function listProfiles() {
       .map(profileCallFromDirName)
       .sort();
   } catch { return []; }
+}
+
+// --- Log as another operator (KD9WI 2026-10-16, lib/log-as.js) -----------
+// A read-only view of another operator's settings: their profile file under
+// this machine's global keys, the precedence loadSettings() applies to the
+// active operator. Built per save, never cached, never written back.
+function operatorSettingsFor(call) {
+  const c = LogAs.normCall(call);
+  const file = _readJsonSafe(profileSettingsPath(c), {});
+  return LogAs.operatorSettings(file, _splitSettings(settings).global, {
+    call: c,
+    profileLogPath: path.join(profileDir(c), 'potacat_qso_log.adi'),
+  });
+}
+// qsoData.logAs names the operator a QSO is for. Stripped here so it never
+// reaches the ADIF. null = the active operator; { error } = unknown profile.
+function resolveLogAsForSave(qsoData) {
+  const requested = qsoData ? qsoData.logAs : '';
+  if (qsoData) delete qsoData.logAs;
+  const r = LogAs.resolveLogAs(requested, {
+    activeCall: settings.activeProfile || settings.myCallsign,
+    profiles: listProfiles(),
+  });
+  if (!r || r.error) return r;
+  return { call: r.call, settings: operatorSettingsFor(r.call) };
+}
+// The operator list the ECHOCAT clients draw their Log-as chooser from
+// (S2C operators; hydrated at connect, pushed after add/archive).
+function operatorsPayload() {
+  return {
+    active: settings && settings.activeProfile ? String(settings.activeProfile).toUpperCase() : '',
+    profiles: listProfiles(),
+  };
+}
+function pushOperatorsToClients() {
+  if (remoteServer && typeof remoteServer.sendOperators === 'function') remoteServer.sendOperators(operatorsPayload());
 }
 
 function addProfile(callsign) {
@@ -8150,11 +8187,11 @@ function shouldForwardClientDriven() {
 // Fill the station side of an activation record from the park DB. Used by
 // saveQsoRecord and every activation export (the export writes the renderer's
 // copies, which never saw what saveQsoRecord stamped). Fills blanks only.
-function activationStationFillFor(rec) {
+function activationStationFillFor(rec, s = settings) {
   if (!rec || !rec.mySigInfo) return {};
   let park = null;
   try { park = getParkDb(parksMap, rec.mySigInfo) || null; } catch {}
-  return activationStationFill(rec, { myCallsign: settings.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation });
+  return activationStationFill(rec, { myCallsign: s.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation });
 }
 function fillActivationExport(qsos) {
   return (qsos || []).map(q => ({ ...q, ...activationStationFillFor(q) }));
@@ -8203,6 +8240,18 @@ function reviewAskTick() {
 async function saveQsoRecord(qsoData, opts) {
   opts = opts || {};
   const origin = opts.origin || 'local-manual';
+
+  // Log as another operator (KD9WI 2026-10-16, lib/log-as.js): the record
+  // goes into THAT operator's logbook under their callsign, with their QRZ
+  // key and their Cloud account. `ops` is whose settings the rest of this
+  // function reads for identity, logbook file and uploads; the active
+  // operator's own caches (worked lists, parks, events) are left alone below.
+  const logAs = resolveLogAsForSave(qsoData);
+  if (logAs && logAs.error) {
+    sendCatLog(`[QSO] Not logged: ${logAs.error}`);
+    return { success: false, error: logAs.error };
+  }
+  const ops = logAs ? logAs.settings : settings;
 
   // ─── Architecture B host-forward branch (gap #10, Brief C §2d) ──
   // Client-driven origins (ws-log-qso, jtcat-engine) get evaluated
@@ -8259,24 +8308,30 @@ async function saveQsoRecord(qsoData, opts) {
   }
 
   // Inject operator callsign from settings
-  if (settings.myCallsign && !qsoData.operator) {
-    qsoData.operator = settings.myCallsign.toUpperCase();
+  if (ops.myCallsign && !qsoData.operator) {
+    qsoData.operator = ops.myCallsign.toUpperCase();
   }
   // Inject station callsign from settings (ADIF STATION_CALLSIGN,
   // §97.119 station ID). The field was silently blank in every row
   // until 2026-06-05; LOTW + contest log validation both want it
-  // populated. Manual save path: stamp from settings.myCallsign.
+  // populated. Manual save path: stamp from ops.myCallsign.
   // Host-forward path (Architecture B): the client's inbound
   // 'qso-attributed' handler pre-stamps stationCallsign from its
   // cached host fingerprint BEFORE calling saveQsoRecord, so this
   // guard preserves that value via the !qsoData.stationCallsign
   // check.
-  if (settings.myCallsign && !qsoData.stationCallsign) {
-    qsoData.stationCallsign = settings.myCallsign.toUpperCase();
+  if (ops.myCallsign && !qsoData.stationCallsign) {
+    qsoData.stationCallsign = ops.myCallsign.toUpperCase();
+  }
+  // Logging for another operator: the record is theirs, whatever the form
+  // pre-filled from the active operator.
+  if (logAs) {
+    qsoData.operator = logAs.call;
+    qsoData.stationCallsign = logAs.call;
   }
   // Activation record: MY_GRIDSQUARE / MY_STATE from the park when the
   // logging path did not supply them (lib/activation-station.js).
-  Object.assign(qsoData, activationStationFillFor(qsoData));
+  Object.assign(qsoData, activationStationFillFor(qsoData, ops));
 
   // Auto-fill TX power from the live CAT reading (matches the TX Power slider)
   // when the caller didn't supply one — typical for the Logbook pop-out's
@@ -8286,7 +8341,7 @@ async function saveQsoRecord(qsoData, opts) {
   // transports downstream do string work on this field (W9TEF 2026-09-19).
   if (!qsoData.txPower) {
     if (_currentTxPower > 0) qsoData.txPower = String(_currentTxPower);
-    else if (settings.defaultPower) qsoData.txPower = String(settings.defaultPower);
+    else if (ops.defaultPower) qsoData.txPower = String(ops.defaultPower);
   } else {
     qsoData.txPower = String(qsoData.txPower);
   }
@@ -8335,7 +8390,7 @@ async function saveQsoRecord(qsoData, opts) {
   // here so SSB, JTCAT, and phone-logged QSOs all get it. Real contests with
   // ADIF CONTEST_ID vocabulary keep riding actual contest modes (Field Day
   // today) — this is award/QSL provenance, not a contest exchange.
-  if (!qsoData.eventId && qsoData.callsign) {
+  if (!logAs && !qsoData.eventId && qsoData.callsign) {
     const evMatch = matchEventQsoForStamp(activeEvents, settings.events, qsoData.callsign, new Date());
     if (evMatch) {
       qsoData.eventId = evMatch.eventId;
@@ -8360,14 +8415,16 @@ async function saveQsoRecord(qsoData, opts) {
     }
   }
 
-  const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+  const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
   if (!qsoData.uuid) qsoData.uuid = require('crypto').randomUUID();
   // The cloud copy is exactly the record written to the file. (The journal
   // used to upper-case qsoData's own keys: CALLSIGN, QSODATE, FREQUENCY.)
-  QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink: qsoLogSink });
+  const sink = logAs ? logAsLogSink(ops) : qsoLogSink;
+  QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink });
+  if (logAs) sendCatLog(`[QSO] Logged ${qsoData.callsign} for ${logAs.call}: their logbook, callsign, QRZ and Cloud settings (the active operator's worked lists are untouched)`);
 
-  // Notify QSO pop-out window
-  if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+  // Notify QSO pop-out window (it shows the active operator's logbook)
+  if (!logAs && qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
     qsoPopoutWin.webContents.send('qso-popout-added', qsoData);
   }
 
@@ -8376,7 +8433,7 @@ async function saveQsoRecord(qsoData, opts) {
   // chime hangs off this (N2FSM 2026-09-12).
   _lastQsoLoggedAt = Date.now(); // the Rate-ECHOCAT card never lands on a fresh QSO
   if (win && !win.isDestroyed()) {
-    win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode });
+    win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode, logAs: logAs ? logAs.call : "" });
   }
 
   // Track QSO in telemetry (fire-and-forget)
@@ -8384,14 +8441,15 @@ async function saveQsoRecord(qsoData, opts) {
   trackQso(['pota', 'sota', 'wwff', 'llota', 'wwbota'].includes(qsoSource) ? qsoSource : null);
 
   // Check if QSO matches any active event and auto-mark progress
-  checkEventQso(qsoData);
+  if (!logAs) checkEventQso(qsoData);
 
   // Contest history: lazy full rebuild (debounced 2 min) so a QSO logged
   // mid-contest shows up in the phone's per-year tally without a restart.
-  scheduleContestHistoryRebuild();
+  if (!logAs) scheduleContestHistoryRebuild();
 
-  // Update worked QSOs map and notify renderer
-  if (qsoData.callsign) {
+  // Update worked QSOs map and notify renderer (the active operator's; a
+  // QSO logged for another operator is not one of theirs)
+  if (!logAs && qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
     const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
     if (!workedQsos.has(call)) workedQsos.set(call, []);
@@ -8420,7 +8478,7 @@ async function saveQsoRecord(qsoData, opts) {
   const loggedParkRef = qsoData.potaRef
     || qsoData.wwffRef
     || ((qsoData.sig === 'POTA' || qsoData.sig === 'WWFF') && qsoData.sigInfo ? qsoData.sigInfo.toUpperCase() : '');
-  if (loggedParkRef && !workedParks.has(loggedParkRef)) {
+  if (!logAs && loggedParkRef && !workedParks.has(loggedParkRef)) {
     workedParks.set(loggedParkRef, { reference: loggedParkRef });
     saveLocalWorkedPark(loggedParkRef); // persist to disk
     if (win && !win.isDestroyed()) {
@@ -8431,20 +8489,20 @@ async function saveQsoRecord(qsoData, opts) {
     }
   }
   // Debounced POTA.app pull — no-ops unless the user has enabled auto-sync.
-  if (loggedParkRef && potaSync) { try { potaSync.noteQsoLogged(); } catch {} }
+  if (!logAs && loggedParkRef && potaSync) { try { potaSync.noteQsoLogged(); } catch {} }
 
   // Forward to external logbook if enabled
   // skipLogbookForward: multi-park activations send one ADIF record per park ref,
   // but external logbooks only need one QSO per physical contact
   let logbookError, qrzError;
 
-  if (settings.sendToLogbook && settings.logbookType && !qsoData.skipLogbookForward) {
+  if (ops.sendToLogbook && ops.logbookType && !qsoData.skipLogbookForward) {
     try {
       // Name the TARGET: a UDP send "succeeds" whether or not anything is
       // listening, so when a logbook never receives, the host:port in this
       // line is the whole diagnosis (KI4GT's WRL report had no way to tell).
-      sendCatLog(`[Logbook] Forwarding QSO to ${settings.logbookType} at ${settings.logbookHost || '127.0.0.1'}:${settings.logbookPort || '(default port)'}: ${qsoData.callsign} ${qsoData.frequency}kHz ${qsoData.mode}`);
-      await forwardToLogbook(qsoData);
+      sendCatLog(`[Logbook] Forwarding QSO to ${ops.logbookType} at ${ops.logbookHost || '127.0.0.1'}:${ops.logbookPort || '(default port)'}: ${qsoData.callsign} ${qsoData.frequency}kHz ${qsoData.mode}`);
+      await forwardToLogbook(qsoData, ops);
       sendCatLog(`[Logbook] QSO sent (UDP delivery is fire-and-forget — if the logbook never receives, check the host/port above and that it is actually listening)`);
     } catch (fwdErr) {
       sendCatLog(`[Logbook] Forwarding failed: ${fwdErr.message}`);
@@ -8456,10 +8514,10 @@ async function saveQsoRecord(qsoData, opts) {
   // Optional: also fire the QSO at a user-defined extra UDP destination
   // (parallel to the main logbook). For users who want GridTracker / JTAlert
   // / etc. to see logged QSOs without going through Log4OM as a middleman.
-  if (settings.extraUdpEnabled && !qsoData.skipLogbookForward) {
-    const host = settings.extraUdpHost || '127.0.0.1';
-    const port = parseInt(settings.extraUdpPort, 10) || 2237;
-    const format = settings.extraUdpFormat || 'wsjtx';
+  if (ops.extraUdpEnabled && !qsoData.skipLogbookForward) {
+    const host = ops.extraUdpHost || '127.0.0.1';
+    const port = parseInt(ops.extraUdpPort, 10) || 2237;
+    const format = ops.extraUdpFormat || 'wsjtx';
     try {
       sendCatLog(`[Extra UDP] Broadcasting QSO to ${host}:${port} (${format})`);
       if (format === 'wsjtx') {
@@ -8482,9 +8540,9 @@ async function saveQsoRecord(qsoData, opts) {
   }
 
   // Upload to QRZ Logbook if enabled (independent of logbook forwarding)
-  if (settings.qrzLogbook && settings.qrzApiKey && !qsoData.skipLogbookForward) {
+  if (ops.qrzLogbook && ops.qrzApiKey && !qsoData.skipLogbookForward) {
     try {
-      await sendToQrzLogbook(qsoData);
+      await sendToQrzLogbook(qsoData, ops);
     } catch (qrzErr) {
       console.error('QRZ Logbook upload failed:', qrzErr.message);
       qrzError = qrzErr.message;
@@ -8503,17 +8561,17 @@ async function saveQsoRecord(qsoData, opts) {
     qsoData.respotComment = qsoData.respotComment
       .replace(/\{op_firstname\}/gi, opName)
       .replace(/\{rst\}/gi, qsoData.rstSent || '59')
-      .replace(/\{mycallsign\}/gi, settings.myCallsign || '')
-      .replace(/\{QTH\}/gi, settings.grid || '')
+      .replace(/\{mycallsign\}/gi, ops.myCallsign || '')
+      .replace(/\{QTH\}/gi, ops.grid || '')
       .replace(/\{call\}/gi, qsoData.callsign || '');
   }
 
   // Re-spot on POTA if requested
-  if (qsoData.respot && qsoData.sig === 'POTA' && qsoData.sigInfo && settings.myCallsign) {
+  if (qsoData.respot && qsoData.sig === 'POTA' && qsoData.sigInfo && ops.myCallsign) {
     try {
       await postPotaRespot({
         activator: qsoData.callsign,
-        spotter: settings.myCallsign.toUpperCase(),
+        spotter: ops.myCallsign.toUpperCase(),
         frequency: qsoData.frequency,
         reference: qsoData.sigInfo,
         mode: qsoData.mode,
@@ -8527,14 +8585,14 @@ async function saveQsoRecord(qsoData, opts) {
   }
 
   // Re-spot on WWFF if requested — validate ref starts with KFF/xFF (WWFF format)
-  if (qsoData.wwffRespot && qsoData.wwffReference && settings.myCallsign) {
+  if (qsoData.wwffRespot && qsoData.wwffReference && ops.myCallsign) {
     if (!/^[A-Z0-9]{1,4}FF-\d{4}$/i.test(qsoData.wwffReference)) {
       console.warn('WWFF re-spot skipped: reference does not match WWFF format:', qsoData.wwffReference);
     } else {
       try {
         await postWwffRespot({
           activator: qsoData.callsign,
-          spotter: settings.myCallsign.toUpperCase(),
+          spotter: ops.myCallsign.toUpperCase(),
           frequency: qsoData.frequency,
           reference: qsoData.wwffReference,
           mode: qsoData.mode,
@@ -8574,7 +8632,7 @@ async function saveQsoRecord(qsoData, opts) {
   // Re-spot on WWBOTA if requested — bunker references are B/<scheme>-####
   // (e.g. B/G-2392, B/HB-3477). WWBOTA's POST /spots/ requires the comment
   // to embed the reference, so we prepend it if missing.
-  if (qsoData.wwbotaRespot && qsoData.wwbotaReference && settings.myCallsign) {
+  if (qsoData.wwbotaRespot && qsoData.wwbotaReference && ops.myCallsign) {
     if (!/^B\/[A-Z0-9]+-\d{1,5}$/i.test(qsoData.wwbotaReference)) {
       console.warn('WWBOTA re-spot skipped: reference does not match B/xx-#### format:', qsoData.wwbotaReference);
     } else {
@@ -8585,7 +8643,7 @@ async function saveQsoRecord(qsoData, opts) {
         // POTACAT stores frequency in kHz; WWBOTA expects MHz.
         const freqMHz = Number(qsoData.frequency) / 1000;
         await postWwbotaSpot({
-          spotter: settings.myCallsign.toUpperCase(),
+          spotter: ops.myCallsign.toUpperCase(),
           call: qsoData.callsign,
           freq: freqMHz,
           mode: qsoData.mode,
@@ -8603,11 +8661,11 @@ async function saveQsoRecord(qsoData, opts) {
   // codes like DL/EW-017, WWFF-style KFF-2112, etc.), so we only sanity-check
   // that a reference is present and post it as a DX line to the GMA cluster
   // (cqgma.org:7300), the same way WWFF Spotline re-spots work.
-  if (qsoData.gmaRespot && qsoData.gmaReference && settings.myCallsign) {
+  if (qsoData.gmaRespot && qsoData.gmaReference && ops.myCallsign) {
     try {
       await postGmaRespot({
         activator: qsoData.callsign,
-        spotter: settings.myCallsign.toUpperCase(),
+        spotter: ops.myCallsign.toUpperCase(),
         frequency: qsoData.frequency,
         reference: qsoData.gmaReference,
         mode: qsoData.mode,
@@ -8674,7 +8732,7 @@ async function saveQsoRecord(qsoData, opts) {
   // save is what produced the 9.6MB frames of BUG-N3VD-20260701.
   try {
     if (remoteServer && remoteServer.running) {
-      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       const qsos = parseAllRawQsos(logPath);
       const mapped = qsos.map((q, i) => ({ idx: i, ...q }));
       const last = mapped.length ? mapped[mapped.length - 1] : null;
@@ -17335,6 +17393,7 @@ function connectRemote() {
   });
   remoteServer.on('skip-spot', ({ call, frequency, skipped }) => changeSpotSkips(call, frequency, skipped));
   remoteServer.sendSpotHides(spotHidesNow(), spotSkipsNow()); // this server's hydrate copy
+  remoteServer.sendOperators(operatorsPayload()); // the web client's Log-as chooser (KD9WI)
 
   remoteServer.on('set-spot-mute-rules', (rules) => {
     settings.spotMuteRules = normalizeMuteRules(rules);
@@ -18178,6 +18237,14 @@ function connectRemote() {
       }
       if (settings.txPower) {
         qsoData.txPower = String(settings.txPower);
+      }
+      // Log as another operator on this machine (KD9WI): the client picked
+      // one from S2C operators. A Guest Pass never may — its QSOs are
+      // forwarded to the guest anyway, and the owner's other operators are
+      // not the guest's to log for.
+      {
+        const ctxLogAs = typeof remoteServer.activeClientContext === 'function' ? remoteServer.activeClientContext() : null;
+        if (data.logAs && !(ctxLogAs && ctxLogAs.passSession)) qsoData.logAs = String(data.logAs);
       }
 
       // Activator mode: inject mySig fields from phone or desktop settings
@@ -21921,6 +21988,13 @@ function qsoLogPath() {
 function qsoLogSink(changes) {
   if (cloudIpc) cloudIpc.recordLogChanges(changes);
 }
+// "Log as" another operator: journal the change under THEIR cloud account. It
+// parks until they sign in on this machine; if they never have (owner null)
+// nothing is journaled and the sign-in catch-up (/v1/sync/missing) finds the
+// record in their logbook then.
+function logAsLogSink(ops) {
+  return (changes) => { if (cloudIpc) cloudIpc.recordLogChangesFor(cloudIpc.ownerIdFor(ops), changes); };
+}
 
 function mutateQsoLog(mutate) {
   return QsoLog.mutateLog(qsoLogPath(), mutate, { sink: qsoLogSink });
@@ -22759,16 +22833,16 @@ function rawQsoToQsoData(raw) {
   };
 }
 
-function forwardToLogbook(qsoData) {
-  const type = settings.logbookType;
-  const host = settings.logbookHost || '127.0.0.1';
-  const port = parseInt(settings.logbookPort, 10);
+function forwardToLogbook(qsoData, s = settings) {
+  const type = s.logbookType;
+  const host = s.logbookHost || '127.0.0.1';
+  const port = parseInt(s.logbookPort, 10);
 
   if (type === 'log4om') {
     // Optional: send via WSJT-X binary protocol. Required for Log4OM to
     // propagate QSOs to QRZ/Clublog (plain ADIF UDP is treated as a batch
     // import and skips upstream sync hooks).
-    if (settings.log4omWsjtxBinary) {
+    if (s.log4omWsjtxBinary) {
       const record = buildAdifRecord(qsoData);
       const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
       const hp = port || 2237;
@@ -23020,13 +23094,13 @@ function sendWavelogHttp(qsoData) {
  * Upload a QSO to QRZ Logbook via their API.
  * Throws on failure (caller handles gracefully).
  */
-async function sendToQrzLogbook(qsoData) {
-  const apiKey = settings.qrzApiKey;
+async function sendToQrzLogbook(qsoData, s = settings) {
+  const apiKey = s.qrzApiKey;
   if (!apiKey) throw new Error('QRZ API key not configured');
 
   // Comment already enriched with park name in saveQsoRecord()
   const record = buildAdifRecord(qsoData);
-  await QrzClient.uploadQso(apiKey, record, settings.myCallsign || '');
+  await QrzClient.uploadQso(apiKey, record, s.myCallsign || '');
 }
 
 // --- App lifecycle ---
@@ -33229,7 +33303,7 @@ app.whenReady().then(() => {
       profiles: listProfiles(),
     };
   });
-  ipcMain.handle('profiles-add', (_e, callsign) => addProfile(callsign));
+  ipcMain.handle('profiles-add', (_e, callsign) => { const r = addProfile(callsign); pushOperatorsToClients(); return r; });
   ipcMain.handle('profiles-switch', (_e, callsign) => {
     const r = switchProfile(callsign);
     if (r.ok && r.restartRequired) {
@@ -33249,7 +33323,7 @@ app.whenReady().then(() => {
     }
     return r;
   });
-  ipcMain.handle('profiles-archive', (_e, callsign) => archiveProfile(callsign));
+  ipcMain.handle('profiles-archive', (_e, callsign) => { const r = archiveProfile(callsign); pushOperatorsToClients(); return r; });
 
   // QSO counts grouped by mode-family — feeds the Settings → Summary
   // Logbook card. Falls back to zeros if the log file is missing

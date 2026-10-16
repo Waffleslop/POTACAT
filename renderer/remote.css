@@ -4296,3 +4296,10 @@ body.popout-mode .popout-only { display: flex; }
 }
 .vf-solar-pills.hidden { display: none; }
 
+/* "Log as" another operator set up on the desktop (KD9WI 2026-10-16). Shown
+   only when the desktop reports two or more operators (S2C operators). */
+.log-as-wrap { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: 13px; color: var(--text-secondary, #a0a0c0); }
+.log-as-wrap.hidden { display: none; }
+.log-as-select { padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border, #333); border-radius: 4px; max-width: 140px; }
+.ql-log-as { flex: 0 0 auto; }
+.ql-log-as.hidden { display: none; }

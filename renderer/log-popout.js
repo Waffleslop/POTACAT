@@ -53,6 +53,42 @@ function _applyPopoutTheme(payload) {
   const notesInput = document.getElementById('lp-notes');
   const saveBtn = document.getElementById('lp-save');
   const clearBtn = document.getElementById('lp-clear');
+
+  // --- Log as another operator (KD9WI 2026-10-16) ---
+  // Operators set up on this machine; with two or more the chooser shows and
+  // a pick rides as qsoData.logAs (main writes into THAT operator's logbook,
+  // callsign, QRZ and Cloud — lib/log-as.js). The choice stays while this
+  // window is open; the Save button names the operator.
+  const logAsWrap = document.getElementById('lp-log-as-wrap');
+  const logAsSelect = document.getElementById('lp-log-as');
+  let logAsOperators = { active: '', profiles: [] };
+  function logAsChosen() {
+    if (!logAsWrap || logAsWrap.classList.contains('hidden')) return '';
+    const v = String(logAsSelect.value || '').toUpperCase();
+    return v && v !== logAsOperators.active ? v : '';
+  }
+  function logAsTail() { const v = logAsChosen(); return v ? ' for ' + v : ''; }
+  function updateLogAsSaveLabel() { const v = logAsChosen(); saveBtn.textContent = v ? 'Save for ' + v : 'Save QSO'; }
+  async function loadLogAsOperators() {
+    if (!window.api || typeof window.api.profilesList !== 'function' || !logAsWrap) return;
+    try {
+      const r = await window.api.profilesList();
+      logAsOperators = {
+        active: String((r && r.active) || '').toUpperCase(),
+        profiles: (r && Array.isArray(r.profiles)) ? r.profiles.map(c => String(c).toUpperCase()) : [],
+      };
+    } catch { logAsOperators = { active: '', profiles: [] }; }
+    const others = logAsOperators.profiles.filter(c => c !== logAsOperators.active);
+    const show = !!logAsOperators.active && others.length > 0;
+    logAsWrap.classList.toggle('hidden', !show);
+    logAsSelect.innerHTML = show
+      ? [logAsOperators.active, ...others].map(c => '<option value="' + c + '">' + c + (c === logAsOperators.active ? ' (active)' : '') + '</option>').join('')
+      : '';
+    if (show) logAsSelect.value = logAsOperators.active;
+    updateLogAsSaveLabel();
+  }
+  if (logAsSelect) logAsSelect.addEventListener('change', updateLogAsSaveLabel);
+  loadLogAsOperators();
   const minBtn = document.getElementById('lp-min');
   const closeBtn = document.getElementById('lp-close');
   const pastEl = document.getElementById('lp-past');
@@ -476,6 +512,8 @@ function _applyPopoutTheme(payload) {
     }
     const info = lastQrzInfo;
     const data = {
+      // Another operator on this machine, or '' for the active one (lib/log-as.js)
+      logAs: logAsChosen(),
       callsign: callsignRaw,
       frequency: String(freqKhzNum),
       mode,
@@ -536,7 +574,7 @@ function _applyPopoutTheme(payload) {
       const result = await window.api.saveQso(built.data);
       if (result && result.success) {
         const call = built.data.callsign;
-        showToast(`✓ Saved ${call}`);
+        showToast(`✓ Saved ${call}${logAsTail()}`);
         // Sticky form on save: clear callsign-specific fields, keep
         // freq/mode/power so consecutive ragchews are quick. Refresh the
         // past-QSOs panel to include the freshly-saved QSO if user retypes

@@ -94,6 +94,10 @@
     .lp-buttons { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
     .lp-buttons button { padding: 6px 14px; font-size: 13px; border: 1px solid var(--border-primary, #333); background: var(--bg-input, #0f1419); color: var(--text-primary); border-radius: 3px; cursor: pointer; }
     .lp-buttons button:hover { background: var(--bg-hover); }
+    /* "Log as" another operator on this machine (KD9WI 2026-10-16) */
+    .lp-log-as { display: flex; align-items: center; gap: 6px; margin-right: auto; font-size: 12px; color: var(--text-secondary); }
+    .lp-log-as select { padding: 3px 6px; font-size: 12px; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; }
+    .lp-log-as.hidden { display: none; }
     /* Save QSO — use --accent-green-btn (the non-themed mint #4ecca3) so the
        button looks the same on both themes and black text passes contrast. The
        previous --accent-green is dark forest in light mode and made the button
@@ -239,6 +243,7 @@
 
     <!-- Buttons -->
     <div class="lp-buttons">
+      <label id="lp-log-as-wrap" class="lp-log-as hidden" title="Log this QSO for another operator set up on this computer: their logbook, callsign, QRZ Logbook key and Cloud account">Log as <select id="lp-log-as"></select></label>
       <button type="button" id="lp-clear">Clear</button>
       <button type="button" id="lp-save">Save QSO</button>
     </div>

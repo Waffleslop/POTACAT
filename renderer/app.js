@@ -13878,6 +13878,7 @@ function openLogPopup(spot) {
 
   logComment.value = '';
 
+  refreshLogAsOperators(); // Log as: back to the active operator on every open
   logDialog.showModal();
   // Focus RST Sent so user can immediately type signal report
   if (n1mmRst) {
@@ -13988,6 +13989,56 @@ logDialog.addEventListener('keydown', (e) => {
 });
 
 // Save QSO
+// --- Log as another operator (KD9WI 2026-10-16) ---
+// The operators set up on this machine (Settings > Summary > Add operator).
+// With two or more, the Log QSO dialog shows a "Log as" chooser; picking
+// another operator sends qsoData.logAs and main writes the QSO into THEIR
+// logbook under their callsign, with their QRZ key and Cloud account
+// (lib/log-as.js). The chooser is re-read every time the dialog opens and
+// starts on the active operator: logging into the wrong book silently is
+// the failure to avoid, so the Save button names the operator too.
+let logAsOperators = { active: '', profiles: [] };
+const logAsWrap = document.getElementById('log-as-wrap');
+const logAsSelect = document.getElementById('log-as-select');
+async function refreshLogAsOperators() {
+  try {
+    const r = await window.api.profilesList();
+    logAsOperators = {
+      active: String((r && r.active) || '').toUpperCase(),
+      profiles: (r && Array.isArray(r.profiles)) ? r.profiles.map(c => String(c).toUpperCase()) : [],
+    };
+  } catch { logAsOperators = { active: '', profiles: [] }; }
+  renderLogAsChooser();
+}
+function renderLogAsChooser() {
+  if (!logAsWrap || !logAsSelect) return;
+  const { active, profiles } = logAsOperators;
+  const others = profiles.filter(c => c !== active);
+  const show = !!active && others.length > 0;
+  logAsWrap.classList.toggle('hidden', !show);
+  logAsSelect.innerHTML = show
+    ? [active, ...others].map(c => `<option value="${c}">${c}${c === active ? ' (active)' : ''}</option>`).join('')
+    : '';
+  if (show) logAsSelect.value = active;
+  updateLogAsSaveLabel();
+}
+// '' = the active operator (nothing to send); otherwise the other operator's callsign.
+function logAsChosen() {
+  if (!logAsWrap || !logAsSelect || logAsWrap.classList.contains('hidden')) return '';
+  const v = String(logAsSelect.value || '').toUpperCase();
+  return v && v !== logAsOperators.active ? v : '';
+}
+function logAsTail() {
+  const v = logAsChosen();
+  return v ? ` for ${v}` : '';
+}
+function updateLogAsSaveLabel() {
+  const v = logAsChosen();
+  logSaveBtn.textContent = v ? `Save for ${v}` : 'Save QSO';
+}
+if (logAsSelect) logAsSelect.addEventListener('change', updateLogAsSaveLabel);
+refreshLogAsOperators();
+
 logSaveBtn.addEventListener('click', async () => {
   const rawCallsign = logCallsign.value.trim().toUpperCase();
   const frequency = logFrequency.value.trim();
@@ -14161,6 +14212,8 @@ logSaveBtn.addEventListener('click', async () => {
         wwbotaReference: ci === 0 && wantsWwbotaRespot && parsedByType.wwbota ? parsedByType.wwbota.primary : '',
         dxcRespot: ci === 0 && wantsDxcRespot,
         respotComment: ci === 0 && (wantsRespot || wantsWwffRespot || wantsLlotaRespot || wantsWwbotaRespot || wantsDxcRespot) ? commentText : '',
+        // Another operator on this machine, or '' for the active one (lib/log-as.js)
+        logAs: logAsChosen(),
       };
 
       lastResult = await window.api.saveQso(qsoData);
@@ -14310,9 +14363,9 @@ logSaveBtn.addEventListener('click', async () => {
           showLogToast(`Logged ${displayCalls} to ADIF, but ${respotErrSpec.net} re-spot failed: ${respotErrSpec.msg}`, { warn: true, duration: 8000 });
         } else if (lastResult.resposted) {
           const sources = logTargets.filter(t => respotCheckbox.checked).map(t => RESPOT_NAMES[t]).join(' & ');
-          showLogToast(`Logged ${displayCalls} — re-spotted on ${sources || 'POTA'}`);
+          showLogToast(`Logged ${displayCalls}${logAsTail()} — re-spotted on ${sources || 'POTA'}`);
         } else {
-          showLogToast(`Logged ${displayCalls}`);
+          showLogToast(`Logged ${displayCalls}${logAsTail()}`);
         }
       }
     } else if (lastResult) {

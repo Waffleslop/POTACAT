@@ -717,6 +717,42 @@
   bindRespotPersist(logRespotComment);
   bindRespotPersist(ltRespotComment);
   const ltSave = document.getElementById('lt-save');
+
+  // --- Log as another operator (KD9WI 2026-10-16) ---
+  // S2C operators {active, profiles} (desktop capability 'log-as'): with two
+  // or more operators set up on the desktop, every log form here shows a
+  // chooser, and the pick rides as log-qso.logAs so the desktop writes the
+  // QSO into THAT operator's logbook, callsign, QRZ and Cloud. ONE choice for
+  // all three forms (one person holds this device), kept until changed; it
+  // is dropped if the operator list no longer holds it. A Guest Pass never
+  // receives the list.
+  let logAsOperators = { active: '', profiles: [] };
+  let logAsCall = ''; // '' = the desktop's active operator
+  const logAsSelects = ['lt-log-as', 'log-log-as', 'ql-log-as'].map(function (id) { return document.getElementById(id); }).filter(Boolean);
+  function logAsTail() { return logAsCall ? ' for ' + logAsCall : ''; }
+  function renderLogAsChoosers() {
+    const active = logAsOperators.active;
+    const others = logAsOperators.profiles.filter(function (c) { return c !== active; });
+    const show = !!active && others.length > 0;
+    if (logAsCall && !others.includes(logAsCall)) logAsCall = '';
+    logAsSelects.forEach(function (sel) {
+      const wrap = sel.parentElement && sel.parentElement.classList.contains('log-as-wrap') ? sel.parentElement : sel;
+      wrap.classList.toggle('hidden', !show);
+      sel.innerHTML = show
+        ? [active].concat(others).map(function (c) { return '<option value="' + c + '">' + c + (c === active ? ' (active)' : '') + '</option>'; }).join('')
+        : '';
+      if (show) sel.value = logAsCall || active;
+    });
+    if (ltSave) ltSave.textContent = logAsCall ? 'Save for ' + logAsCall : 'Save QSO';
+    if (logSaveBtn) logSaveBtn.textContent = logAsCall ? 'Save for ' + logAsCall : 'Save';
+  }
+  logAsSelects.forEach(function (sel) {
+    sel.addEventListener('change', function () {
+      const v = String(sel.value || '').toUpperCase();
+      logAsCall = v && v !== logAsOperators.active ? v : '';
+      renderLogAsChoosers();
+    });
+  });
   const ltNotes = document.getElementById('lt-notes');
   const logNotes = document.getElementById('log-notes');
   const qlNotes = document.getElementById('ql-notes');
@@ -2028,13 +2064,21 @@
         renderSpots();
         break;
 
+      case 'operators':
+        logAsOperators = {
+          active: String(msg.active || '').toUpperCase(),
+          profiles: Array.isArray(msg.profiles) ? msg.profiles.map(function (c) { return String(c).toUpperCase(); }) : [],
+        };
+        renderLogAsChoosers();
+        break;
+
       case 'log-ok':
         logSaveBtn.disabled = false;
         ltSave.disabled = false;
         if (msg.success) {
           closeLogSheet();
           resetLogTabForm();
-          let toastMsg = 'Logged ' + (msg.callsign || '');
+          let toastMsg = 'Logged ' + (msg.callsign || '') + logAsTail();
           if (msg.resposted) toastMsg += ' \u2014 re-spotted';
           if (msg.respotError) toastMsg += ' (respot failed)';
           showLogToast(toastMsg);
@@ -5990,6 +6034,8 @@
       }
       if (phoneGrid) baseData.myGridsquare = phoneGrid;
 
+      if (logAsCall) baseData.logAs = logAsCall; // another operator on the desktop
+
       // Send one log-qso per callsign
       for (var ci = 0; ci < calls.length; ci++) {
         var logData = Object.assign({}, baseData, { callsign: calls[ci] });
@@ -6223,6 +6269,8 @@
         baseData.mySigInfo = activationRef;
       }
       if (phoneGrid) baseData.myGridsquare = phoneGrid;
+
+      if (logAsCall) baseData.logAs = logAsCall; // another operator on the desktop
 
       // Send one log-qso per callsign
       for (var ci = 0; ci < calls.length; ci++) {
@@ -6701,6 +6749,8 @@
     if (phoneGrid) {
       data.myGridsquare = phoneGrid;
     }
+
+    if (logAsCall) data.logAs = logAsCall; // another operator on the desktop
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'log-qso', data }));

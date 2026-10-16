@@ -10449,3 +10449,28 @@ main.banner-logger-active #event-progress-overlay {
   cursor: pointer;
 }
 .text-size-reset:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+
+/* Log QSO dialog: "Log as" chooser, shown with two or more operators set up
+   on this machine (KD9WI 2026-10-16). Overrides the dialog's block label /
+   full-width select defaults so it sits left of the buttons. */
+.log-as-wrap {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0 !important;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.log-as-wrap select {
+  display: inline-block !important;
+  width: auto !important;
+  margin: 0 !important;
+  padding: 3px 6px;
+  font-size: 13px;
+}
+.log-as-hint {
+  font-size: 11px;
+  color: var(--text-dim, var(--text-tertiary));
+  white-space: normal;
+}
