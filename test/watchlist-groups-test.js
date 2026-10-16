@@ -5,7 +5,7 @@
 'use strict';
 
 const assert = require('assert');
-const { parseCallsignList, buildGroupLookup, matchDecode } = require('../lib/watchlist-groups');
+const { parseCallsignList, buildGroupLookup, matchDecode, matchSpot, stateTokenOf, spotStates } = require('../lib/watchlist-groups');
 
 let passed = 0, failed = 0;
 function check(cond, label) {
@@ -128,6 +128,42 @@ console.log('groups are loaded at startup (renderer/app.js):');
   check(r.watchlistGroupLookup.get('W2XYZ') && r.watchlistGroupLookup.get('W2XYZ').idx === 0, 'a hand-typed group call is in the lookup');
   check(r.watchlistGroups[0].color === '#123456' && r.watchlistGroups[1].color === '#82b1ff', 'saved colour kept, defaults filled');
   check(run({}).watchlistGroupLookup.size === 0, 'no groups saved -> empty lookup, no throw');
+}
+
+// --- States in the watchlist (N0KAH 2026-10-06) ---
+console.log('\nstates:');
+{
+  check(stateTokenOf('US-NJ') === 'US-NJ' && stateTokenOf('us-nj') === 'US-NJ', 'POTA form, any case');
+  check(stateTokenOf('nj') === 'US-NJ' && stateTokenOf('ON') === 'CA-ON' && stateTokenOf('DC') === 'US-DC', 'bare state / province / DC');
+  check(stateTokenOf('AS') === null && stateTokenOf('US-AS') === 'US-AS', 'a territory is written in full (bare AS stays the CQ tag)');
+  check(stateTokenOf('K3SBP') === null && stateTokenOf('NA') === null && stateTokenOf('POTA') === null && stateTokenOf('W1AW/*') === null, 'callsigns, CQ tags and wildcards are not states');
+  check(spotStates('US-NJ,US-PA').join(',') === 'US-NJ,US-PA' && spotStates('').length === 0 && spotStates('Alpine Ridge').length === 0, 'spot states parsed from a park location, free text ignored');
+
+  const lk = buildGroupLookup([
+    { name: 'States I need', callsigns: 'US-NJ, wy, NA' },
+    { name: 'Friends', callsigns: 'K1ABC, W1AW/*, nj' },
+  ]);
+  check(lk._states.get('US-NJ').idx === 0 && lk._states.get('US-WY').idx === 0, 'state tokens land in _states under the first group that names them');
+  check(!lk.has('US-NJ') && !lk.has('WY'), 'a state token is never an exact-call entry');
+  check(lk._tags.has('NA') && lk._tags.has('WY'), 'a bare code is still a CQ tag too (additive)');
+  check(matchSpot(lk, 'N2XYZ', 'US-NJ').idx === 0, 'a park spot from a listed state takes that group');
+  check(matchSpot(lk, 'N2XYZ', 'US-PA,US-NJ').idx === 0, 'a park on a state line matches either state');
+  check(matchSpot(lk, 'K1ABC', 'US-NJ').idx === 1, 'an exact call beats a state in an earlier group');
+  check(matchSpot(lk, 'W1AW/4', 'US-NJ').idx === 1, 'a wildcard (W1AW/*) beats a state too');
+  check(matchSpot(lk, 'N2XYZ', 'US-TX') === null && matchSpot(lk, 'N2XYZ', '') === null, 'no listed state, or no location = no match');
+  check(matchSpot(lk, 'N2XYZ', 'US-WY').idx === 0, 'bare WY matched a Wyoming park');
+  check(matchDecode(lk, 'N2XYZ', 'CQ NA N2XYZ FN20', 'NA').idx === 0, 'decode matching unchanged (CQ tag)');
+
+  const fs2 = require('fs'), path2 = require('path');
+  const R = (f) => fs2.readFileSync(path2.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+  const app = R('renderer/app.js'), main = R('main.js');
+  for (const [name, src] of [['app.js', app], ['main.js', main]]) {
+    check(/const state = (window\.)?WatchlistGroups\.stateTokenOf\(parts\[0\]\);\n\s*const rule = state \? \{ callsign: null, state, band: null, mode: null \}/.test(src), name + ': parseWatchlist makes a state rule');
+    check(/function watchlistMatch\(rules, callsign, band, mode, locationDesc\)/.test(src) && /if \(r\.state\) \{/.test(src), name + ': watchlistMatch takes the spot location');
+  }
+  check((app.match(/watchlistMatch\(watchlist, s\.callsign, s\.band, s\.mode, s\.locationDesc\)/g) || []).length === 4, 'every renderer caller passes the spot location');
+  check(/lookupWatchlistGroup\(s\.callsign, s\.locationDesc\)/.test(app) && /WatchlistGroups\.matchSpot\(watchlistGroupLookup, callsign, locationDesc\)/.test(app), 'the row colour resolves through matchSpot');
+  check(/watchlistMatch\(potaSotaWatchRules, spot\.callsign, spot\.band, spot\.mode, spot\.locationDesc\)/.test(main), 'desktop notifications see the state too');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -314,6 +314,7 @@ const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
 const LogAs = require('./lib/log-as'); // log a QSO for another operator on this machine (KD9WI)
+const WatchlistGroups = require('./lib/watchlist-groups'); // state tokens in the watchlist (N0KAH)
 const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/serial-path'); // "COM Port 10" -> COM10 (KF0TDB)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
@@ -2290,8 +2291,10 @@ function _rigCapabilitiesForType(rigType) {
 const recentNotifications = new Map(); // callsign -> timestamp for dedup (5-min window)
 
 // Parse watchlist string into array of { callsign, band, mode } rules.
-// Format: "K3SBP, K4SWL:20m, KI6NAZ:CW, W1AW:40m:SSB"
-// Band/mode qualifiers are optional — omitted means match any.
+// Format: "K3SBP, K4SWL:20m, KI6NAZ:CW, W1AW:40m:SSB, US-NJ, WY:20m"
+// Band/mode qualifiers are optional — omitted means match any. A state
+// token (`US-NJ`, bare `NJ`, `CA-ON`) is a STATE rule matched against a
+// park spot's location (N0KAH 2026-10-06); mirrors renderer/app.js.
 const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm']);
 function parseWatchlist(str) {
   if (!str) return [];
@@ -2299,7 +2302,8 @@ function parseWatchlist(str) {
   for (const entry of str.split(',')) {
     const parts = entry.trim().toUpperCase().split(':').map(p => p.trim());
     if (!parts[0]) continue;
-    const rule = { callsign: parts[0], band: null, mode: null };
+    const state = WatchlistGroups.stateTokenOf(parts[0]);
+    const rule = state ? { callsign: null, state, band: null, mode: null } : { callsign: parts[0], band: null, mode: null };
     for (let i = 1; i < parts.length; i++) {
       if (WATCH_BANDS.has(parts[i].toLowerCase())) rule.band = parts[i].toLowerCase();
       else if (parts[i]) rule.mode = parts[i];
@@ -2309,12 +2313,16 @@ function parseWatchlist(str) {
   return rules;
 }
 
-function watchlistMatch(rules, callsign, band, mode) {
+function watchlistMatch(rules, callsign, band, mode, locationDesc) {
   const cs = (callsign || '').toUpperCase();
   const b = (band || '').toLowerCase();
   const m = (mode || '').toUpperCase();
+  let states = null;
   for (const r of rules) {
-    if (r.callsign !== cs) continue;
+    if (r.state) {
+      if (states === null) states = WatchlistGroups.spotStates(locationDesc);
+      if (!states.includes(r.state)) continue;
+    } else if (r.callsign !== cs) continue;
     if (r.band && r.band !== b) continue;
     if (r.mode && r.mode !== m) continue;
     return true;
@@ -21881,7 +21889,7 @@ async function refreshSpots() {
     const potaSotaWatchRules = parseWatchlist(settings.watchlist);
     if (potaSotaWatchRules.length > 0) {
       for (const spot of lastPotaSotaSpots) {
-        if (watchlistMatch(potaSotaWatchRules, spot.callsign, spot.band, spot.mode)) {
+        if (watchlistMatch(potaSotaWatchRules, spot.callsign, spot.band, spot.mode, spot.locationDesc)) {
           notifyWatchlistSpot({
             callsign: spot.callsign,
             frequency: spot.frequency,

@@ -82,9 +82,12 @@ function hydrateWatchlistGroups(s) {
   rebuildWatchlistGroupLookup();
 }
 
-function lookupWatchlistGroup(callsign) {
-  if (!callsign) return null;
-  return watchlistGroupLookup.get(callsign.toUpperCase()) || null;
+// A spot's group: exact call, then a `W1AW/*` prefix, then the park's
+// state(s) (N0KAH 2026-10-06: `US-NJ` / `NJ` tokens in a group light every
+// park spot from that state). Shared resolution in lib/watchlist-groups.js.
+function lookupWatchlistGroup(callsign, locationDesc) {
+  if (!callsign && !locationDesc) return null;
+  return window.WatchlistGroups.matchSpot(watchlistGroupLookup, callsign, locationDesc);
 }
 
 // --- Event watchlist overlay ---
@@ -1677,8 +1680,11 @@ document.addEventListener('keydown', (e) => {
 });
 
 // --- Load preferences from settings ---
-// Parse watchlist string into array of { callsign, band, mode } rules.
-// Format: "K3SBP, K4SWL:20m, KI6NAZ:CW, W1AW:40m:SSB"
+// Parse watchlist string into array of { callsign|state, band, mode } rules.
+// Format: "K3SBP, K4SWL:20m, KI6NAZ:CW, W1AW:40m:SSB, US-NJ, WY:20m"
+// A state token (`US-NJ`, bare `NJ`, `CA-ON`) is a STATE rule: it matches
+// every park spot whose location names that state (N0KAH 2026-10-06).
+// Mirrored in main.js for the desktop notifications.
 const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm']);
 function parseWatchlist(str) {
   if (!str) return [];
@@ -1686,7 +1692,8 @@ function parseWatchlist(str) {
   for (const entry of str.split(',')) {
     const parts = entry.trim().toUpperCase().split(':').map(p => p.trim());
     if (!parts[0]) continue;
-    const rule = { callsign: parts[0], band: null, mode: null };
+    const state = window.WatchlistGroups.stateTokenOf(parts[0]);
+    const rule = state ? { callsign: null, state, band: null, mode: null } : { callsign: parts[0], band: null, mode: null };
     for (let i = 1; i < parts.length; i++) {
       if (WATCH_BANDS.has(parts[i].toLowerCase())) rule.band = parts[i].toLowerCase();
       else if (parts[i]) rule.mode = parts[i];
@@ -1696,12 +1703,16 @@ function parseWatchlist(str) {
   return rules;
 }
 
-function watchlistMatch(rules, callsign, band, mode) {
+function watchlistMatch(rules, callsign, band, mode, locationDesc) {
   const cs = (callsign || '').toUpperCase();
   const b = (band || '').toLowerCase();
   const m = (mode || '').toUpperCase();
+  let states = null; // the spot's states, parsed once and only if a state rule exists
   for (const r of rules) {
-    if (r.callsign !== cs) continue;
+    if (r.state) {
+      if (states === null) states = window.WatchlistGroups.spotStates(locationDesc);
+      if (!states.includes(r.state)) continue;
+    } else if (r.callsign !== cs) continue;
     if (r.band && r.band !== b) continue;
     if (r.mode && r.mode !== m) continue;
     return true;
@@ -9297,7 +9308,7 @@ function getFiltered() {
       (s.source === 'rbn' && !enableRbn) ||
       (s.source === 'pskr' && !enablePskr) ||
       (s.source === 'freedv' && !enablePskr);
-    const isWatched = watchlistMatch(watchlist, s.callsign, s.band, s.mode);
+    const isWatched = watchlistMatch(watchlist, s.callsign, s.band, s.mode, s.locationDesc);
 
     if (sourceOff) {
       if (!isWatched || spotAgeSecs(s.spotTime) > 300) return false;
@@ -10608,7 +10619,7 @@ function updateMapMarkers(filtered) {
     if (s.lat == null || s.lon == null) continue;
 
     const distStr = s.distance != null ? formatDistance(s.distance) + ' ' + unit : '';
-    const watched = watchlistMatch(watchlist, s.callsign, s.band, s.mode);
+    const watched = watchlistMatch(watchlist, s.callsign, s.band, s.mode, s.locationDesc);
 
     const sourceLabel = (s.source || 'pota').toUpperCase();
     const sourceColor = SOURCE_COLORS_ACTIVE[s.source] || SOURCE_COLORS_ACTIVE.pota;
@@ -12820,7 +12831,7 @@ function enrichSpotsForPopout(filtered) {
     expeditionEntity: (expeditionMeta.get(s.callsign.toUpperCase()) || {}).entity || '',
     isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
     isOop: isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
-    isWatched: watchlistMatch(watchlist, s.callsign, s.band, s.mode),
+    isWatched: watchlistMatch(watchlist, s.callsign, s.band, s.mode, s.locationDesc),
     opName: qrzDisplayName(qrzData.get(s.callsign.toUpperCase().split('/')[0])),
   }));
 }
@@ -13060,7 +13071,7 @@ function render() {
       // Watchlist group — color the whole row when the activator's call
       // is in any of the three groups. Same per-row pattern as the source
       // tags above; CSS handles the box treatment.
-      const wlMatch = lookupWatchlistGroup(s.callsign);
+      const wlMatch = lookupWatchlistGroup(s.callsign, s.locationDesc);
       if (wlMatch) {
         tr.classList.add(`wl-group-${wlMatch.idx}`);
         const wlName = (watchlistGroups[wlMatch.idx] && watchlistGroups[wlMatch.idx].name) || '';
@@ -13224,7 +13235,7 @@ function render() {
       cellMap.set('log', logTd);
 
       // Callsign cell — clickable link to QRZ
-      const isWatched = watchlistMatch(watchlist, s.callsign, s.band, s.mode);
+      const isWatched = watchlistMatch(watchlist, s.callsign, s.band, s.mode, s.locationDesc);
       const callTd = document.createElement('td');
       callTd.className = 'callsign-cell';
       callTd.setAttribute('data-col', 'callsign');

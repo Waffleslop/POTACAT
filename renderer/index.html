@@ -2128,12 +2128,12 @@
       <label class="checkbox-label" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies."><input type="checkbox" id="set-hide-out-of-band"> Hide spots outside my license privileges</label>
       <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings → Operator). If that's set to None, nothing is hidden.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-hide-worked"> Hide already-worked stations</label>
-      <label>Watchlist (comma-separated, optional band:mode filter):
-        <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL:CW, K0BUF:20m, W1AW:40m:SSB">
-        <span class="help-text" style="display:block;">Matching activators get a ⭐ + desktop notification (existing behavior). For visual group highlighting, use the three colored groups below.</span>
+      <label>Watchlist (callsigns or states, comma-separated, optional band:mode filter):
+        <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL:CW, K0BUF:20m, W1AW:40m:SSB, US-NJ, WY:20m">
+        <span class="help-text" style="display:block;">Matching activators get a ⭐ + desktop notification (existing behavior). A state (US-NJ or just NJ; CA-ON for a province) matches every park spot from that state. For visual group highlighting, use the three colored groups below.</span>
       </label>
       <div class="wl-groups-block">
-        <div class="wl-groups-header">Watchlist Groups — colored outline around the callsign</div>
+        <div class="wl-groups-header">Watchlist Groups — colored outline around the callsign. Callsigns or states (US-NJ, NJ, CA-ON): a group of the states you still need lights every park spot from them.</div>
         <!-- Special event watchlists (e.g. 13 Colonies) — rendered from the
              Events system. One distinct, stroked card per active/upcoming
              event, above the three user color groups. -->
@@ -2147,7 +2147,7 @@
             <button type="button" class="wl-csv-btn" data-wl-csv="0" title="Import callsigns from a CSV file (first column or single column)">Import CSV</button>
             <button type="button" class="wl-clear-btn" data-wl-clear="0" title="Remove all callsigns from this group">Clear</button>
           </div>
-          <textarea id="wl-calls-0" class="wl-callsigns" rows="2" placeholder="Comma-separated callsigns — K3SBP, KC9ZMA, NC3Z"></textarea>
+          <textarea id="wl-calls-0" class="wl-callsigns" rows="2" placeholder="Comma-separated callsigns or states — K3SBP, KC9ZMA, US-NJ, WY"></textarea>
           <div class="wl-url-row">
             <input type="url" id="wl-url-0" class="wl-url" placeholder="Ham2K PoLo callsign-notes URL — https://example.club/members.txt">
             <button type="button" class="wl-refresh-btn" data-wl-refresh="0" title="Fetch the latest list from this URL now">Refresh</button>
@@ -2163,7 +2163,7 @@
             <button type="button" class="wl-csv-btn" data-wl-csv="1" title="Import callsigns from a CSV file">Import CSV</button>
             <button type="button" class="wl-clear-btn" data-wl-clear="1" title="Remove all callsigns from this group">Clear</button>
           </div>
-          <textarea id="wl-calls-1" class="wl-callsigns" rows="2" placeholder="Comma-separated callsigns"></textarea>
+          <textarea id="wl-calls-1" class="wl-callsigns" rows="2" placeholder="Comma-separated callsigns or states"></textarea>
           <div class="wl-url-row">
             <input type="url" id="wl-url-1" class="wl-url" placeholder="Ham2K PoLo callsign-notes URL">
             <button type="button" class="wl-refresh-btn" data-wl-refresh="1" title="Fetch the latest list from this URL now">Refresh</button>
@@ -2179,7 +2179,7 @@
             <button type="button" class="wl-csv-btn" data-wl-csv="2" title="Import callsigns from a CSV file">Import CSV</button>
             <button type="button" class="wl-clear-btn" data-wl-clear="2" title="Remove all callsigns from this group">Clear</button>
           </div>
-          <textarea id="wl-calls-2" class="wl-callsigns" rows="2" placeholder="Comma-separated callsigns"></textarea>
+          <textarea id="wl-calls-2" class="wl-callsigns" rows="2" placeholder="Comma-separated callsigns or states"></textarea>
           <div class="wl-url-row">
             <input type="url" id="wl-url-2" class="wl-url" placeholder="Ham2K PoLo callsign-notes URL">
             <button type="button" class="wl-refresh-btn" data-wl-refresh="2" title="Fetch the latest list from this URL now">Refresh</button>
