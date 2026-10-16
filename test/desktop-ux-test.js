@@ -28,7 +28,7 @@ test('Hunt: an exclusive view is switched to the table before the split opens; m
 
 test('chime: main emits qso-logged from saveQsoRecord, the one log choke point', () => {
   const fn = main.slice(main.indexOf('async function saveQsoRecord'), main.indexOf('async function saveQsoRecord') + 20000);
-  assert.ok(/win\.webContents\.send\("qso-logged", \{ callsign: qsoData\.callsign, band: qsoData\.band, mode: qsoData\.mode \}\);/.test(fn));
+  assert.ok(/win\.webContents\.send\("qso-logged", \{ callsign: qsoData\.callsign, band: qsoData\.band, mode: qsoData\.mode, logAs: logAs \? logAs\.call : "" \}\);/.test(fn));
   assert.strictEqual((main.match(/send\("qso-logged"/g) || []).length, 1, 'exactly one emitter');
   assert.ok(/onQsoLogged: \(cb\) => ipcRenderer\.on\('qso-logged'/.test(preload));
 });
