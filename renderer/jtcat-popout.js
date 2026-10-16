@@ -1166,6 +1166,14 @@ function _applyPopoutTheme(payload) {
   var clockReBtn    = document.getElementById('jp-clock-recheck');
   var clockBannerHideTimer = null;
 
+  // The banner's face is one of three classes (styled in jtcat-popout.html),
+  // never an inline colour — so the buttons' contrast follows the face.
+  function setClockBannerLevel(level) {
+    if (!clockBanner) return;
+    clockBanner.classList.remove('bad', 'warn', 'ok');
+    clockBanner.classList.add(level);
+  }
+
   function fmtOffset(ms) {
     return (ms > 0 ? '+' : '') + (ms / 1000).toFixed(1) + 's';
   }
@@ -1195,8 +1203,7 @@ function _applyPopoutTheme(payload) {
       syncEl.classList.add('jtcat-synced');
       if (d.rebaselined && clockBanner && clockMsg) {
         clockMsg.textContent = '✓ Clock corrected — FT8 timing re-baselined, decoding resumed.';
-        clockBanner.style.background = '#1a5a2a';
-        clockBanner.style.borderBottom = '2px solid #4ecca3';
+        setClockBannerLevel('ok');
         clockBanner.classList.remove('hidden');
         clearTimeout(clockBannerHideTimer);
         clockBannerHideTimer = setTimeout(function () { clockBanner.classList.add('hidden'); }, 6000);
@@ -1221,8 +1228,7 @@ function _applyPopoutTheme(payload) {
         ? '⚠ PC clock is ' + off + ' off UTC — stations you call will NOT decode you, so nobody answers.'
           + (deaf ? ' Your own decoding will fail too.' : ' You will still decode them normally, which is why this is easy to miss.')
         : '⚠ PC clock is ' + off + ' off UTC — you will decode fine, but weaker stations may not decode YOU. Sync recommended.';
-      clockBanner.style.background    = bad ? '#5a1a1a' : '#5a4a1a';
-      clockBanner.style.borderBottom  = '2px solid ' + (bad ? '#e94560' : '#f0a500');
+      setClockBannerLevel(bad ? 'bad' : 'warn');
       clockBanner.classList.remove('hidden');
     }
   }

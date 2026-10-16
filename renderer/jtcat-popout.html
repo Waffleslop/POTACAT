@@ -226,6 +226,24 @@
     .jp-row.jp-jtty-row .jp-time { min-width: 60px; }
     .jp-row.jp-jtty-growing .jp-msg { color: var(--text-dim); font-style: italic; }
 
+    /* Clock-sync banner. Solid faces in the pop-out's own TX-red / tune-amber /
+       running-green identities, so it reads the same on every theme — the old
+       maroon-with-pink-text face and grey 10 px filter buttons were unreadable
+       (Casey 2026-10-16: "weird colors and hard to read the button text").
+       White on #c62828 is 5.6:1, black on #f0a500 is 11:1. */
+    .jp-clock-banner { display: flex; align-items: center; gap: 10px; padding: 6px 12px; font-size: 12px; font-weight: 600; border-bottom: 2px solid transparent; }
+    .jp-clock-banner.bad  { background: #c62828; color: #fff; border-bottom-color: #7a0f22; }
+    .jp-clock-banner.warn { background: #f0a500; color: #000; border-bottom-color: #9a6a00; }
+    .jp-clock-banner.ok   { background: #2e7d5a; color: #fff; border-bottom-color: #1b5e3b; }
+    .jp-clock-btn { padding: 3px 10px; border-radius: 4px; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .jp-clock-banner.bad .jp-clock-btn:hover, .jp-clock-banner.ok .jp-clock-btn:hover { background: rgba(255,255,255,0.18); }
+    .jp-clock-banner.warn .jp-clock-btn:hover { background: rgba(0,0,0,0.12); }
+    .jp-clock-banner.bad .jp-clock-btn.primary  { background: #fff; color: #c62828; border-color: #fff; }
+    .jp-clock-banner.warn .jp-clock-btn.primary { background: #000; color: #f0a500; border-color: #000; }
+    .jp-clock-banner.bad .jp-clock-btn.primary:hover  { background: #ffe3e3; }
+    .jp-clock-banner.warn .jp-clock-btn.primary:hover { background: #333; }
+    .jp-clock-banner.ok .jp-clock-btn { display: none; }
+
     /* Controls bar */
     .jp-controls { padding: 6px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 12px; }
     /* Bottom status strip (user report 2026-07-11: countdown hard to read).
@@ -418,11 +436,11 @@
   <!-- Clock-sync warning banner. FT8 is time-locked; an off PC clock zeroes
        out decodes while audio/waterfall still look fine. Shown only when the
        measured NTP offset is marginal/bad. -->
-  <div id="jp-clock-banner" class="hidden" style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:#5a1a1a;border-bottom:2px solid #e94560;color:#ffd9d9;font-size:12px;font-weight:600;">
+  <div id="jp-clock-banner" class="jp-clock-banner bad hidden">
     <span id="jp-clock-msg" style="flex:1;">⚠ PC clock is off — FT8 will not decode.</span>
-    <button type="button" id="jp-clock-sync" class="jtcat-filter-btn" style="background:var(--accent-red, #e94560);color:#fff;border-color:#e94560;font-weight:700;" title="Set the clock from an internet time server. If the Windows Time service is switched off or has never synced — the usual cause — this turns it on and configures it too, which needs one Administrator prompt.">Fix it now</button>
-    <button type="button" id="jp-clock-settings" class="jtcat-filter-btn" title="Open Windows Date &amp; Time settings and do it by hand instead">Time settings…</button>
-    <button type="button" id="jp-clock-recheck" class="jtcat-filter-btn" title="Re-measure clock offset">Recheck</button>
+    <button type="button" id="jp-clock-sync" class="jp-clock-btn primary" title="Set the clock from an internet time server. If the Windows Time service is switched off or has never synced — the usual cause — this turns it on and configures it too, which needs one Administrator prompt.">Fix it now</button>
+    <button type="button" id="jp-clock-settings" class="jp-clock-btn" title="Open Windows Date &amp; Time settings and do it by hand instead">Time settings…</button>
+    <button type="button" id="jp-clock-recheck" class="jp-clock-btn" title="Re-measure clock offset">Recheck</button>
   </div>
 
   <!-- Spot Target banner — armed by clicking an FT8/FT4 spot in the desktop
