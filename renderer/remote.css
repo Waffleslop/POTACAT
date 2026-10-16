@@ -20,7 +20,7 @@
   --bg-header: #0f3460;
   --accent: #e94560;
   --text: #e0e0e0;
-  --text-dim: #888;
+  --text-dim: #9a9ab0; /* raised 2026-10-16, LZ3AW: grey text unreadable */
   --pota: #4ecca3;
   --sota: #f0a500;
   --dxc: #e040fb;
@@ -611,7 +611,7 @@ html, body {
 .so-footer-links { display: flex; justify-content: center; gap: 8px; font-size: 12px; }
 .so-footer-links a { color: #4fc3f7; text-decoration: none; }
 .so-footer-links a:active { text-decoration: underline; }
-.so-footer-dot { color: #555; }
+.so-footer-dot { color: var(--text-dim); }
 
 .rc-btn {
   min-width: 36px;
@@ -995,6 +995,7 @@ html, body {
 .spot-card.source-pskr { border-left-color: var(--pskr); }
 .spot-card.source-net  { border-left-color: var(--net); }
 
+.spot-call { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; } /* tap = QRZ (LZ3AW 2026-10-16) */
 .spot-call {
   font-weight: 700;
   font-size: 15px;
@@ -2747,8 +2748,8 @@ html, body {
 }
 .ft8-row:active { background: rgba(255,255,255,0.05); }
 .ft8-row .ft8-time { color: #4fc3f7; min-width: 52px; }
-.ft8-row .ft8-db { color: #8a8aa0; min-width: 28px; text-align: right; }
-.ft8-row .ft8-dt { color: #666; min-width: 30px; text-align: right; font-size: 11px; }
+.ft8-row .ft8-db { color: #b4b4cc; min-width: 28px; text-align: right; }
+.ft8-row .ft8-dt { color: var(--text-dim); min-width: 30px; text-align: right; font-size: 12px; }
 .ft8-row .ft8-df { color: #4fc3f7; min-width: 36px; text-align: right; }
 .ft8-row .ft8-msg { color: #c8c8d8; }
 .ft8-row.ft8-cq { border-left-color: var(--pota); }
@@ -2774,7 +2775,7 @@ html, body {
 .ft8-badge-donor { background: transparent; font-size: 10px; padding: 0 1px; }
 .donor-paw { margin-left: 3px; cursor: default; font-size: 11px; }
 .ft8-row.ft8-watched { background: rgba(255, 64, 129, 0.12); }
-.ft8-entity { font-size: 10px; color: #666; margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
+.ft8-entity { font-size: 11px; color: var(--text-dim); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
 
 .ft8-waterfall {
   width: 100%;
@@ -2895,7 +2896,7 @@ html, body {
   --bg-header: #e8eaed;
   --accent: #c62828;
   --text: #1a1a2e;
-  --text-dim: #6a6a80;
+  --text-dim: #5e5e76;
   --border: #ccc;
 }
 

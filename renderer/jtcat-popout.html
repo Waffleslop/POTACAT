@@ -41,10 +41,11 @@
     .jp-row { display: flex; gap: 6px; padding: 1px 8px; cursor: pointer; align-items: baseline; border: 1.5px solid transparent; border-radius: 6px; }
     .jp-row:hover { background: var(--bg-hover); }
     /* My Activity inlines the cycle time per row (no separator line) — see jp-my-activity. */
-    .jp-row .jp-time { min-width: 52px; text-align: right; color: var(--text-dim, #666); font-size: 11px; font-variant-numeric: tabular-nums; padding-right: 4px; border-right: 1px solid var(--border-primary); margin-right: 2px; }
+    /* Time / dB / DT / DF / country: secondary (not dim) and 12 px — LZ3AW 2026-10-16. */
+    .jp-row .jp-time { min-width: 52px; text-align: right; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; padding-right: 4px; border-right: 1px solid var(--border-primary); margin-right: 2px; }
     .jp-row .jp-db { min-width: 28px; text-align: right; color: var(--text-secondary); }
-    .jp-row .jp-dt { min-width: 30px; text-align: right; color: var(--text-dim); font-size: 11px; }
-    .jp-row .jp-df { min-width: 36px; text-align: right; color: var(--text-dim); }
+    .jp-row .jp-dt { min-width: 30px; text-align: right; color: var(--text-secondary); font-size: 12px; }
+    .jp-row .jp-df { min-width: 36px; text-align: right; color: var(--text-secondary); }
     .jp-row .jp-msg { flex: 1; }
     .jp-row.jp-cq { background: rgba(0, 120, 0, 0.25); }
     .jp-row.jp-cq .jp-msg { color: var(--accent-green, #4ecca3); font-weight: bold; }
@@ -141,7 +142,7 @@
     [data-theme="light"] .jp-wspr-row .w-dist { color: #8a6a00; }
     .jp-wspr-beacon-status { font-size: 11px; margin-left: 6px; color: var(--text-secondary, #9aa); }
     .jp-wspr-beacon-status.tx { color: #e94560; font-weight: 600; }
-    .jp-entity { font-size: 10px; color: var(--text-dim, #666); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+    .jp-entity { font-size: 11px; color: var(--text-secondary); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 
     /* WSPR pane */
     .jp-wspr-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border-primary); }
@@ -466,7 +467,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter..." style="width:70px;font-size:10px;padding:1px 4px;border:1px solid var(--border-primary);background:var(--bg-primary);color:var(--text-primary);border-radius:3px;" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="CQ/73 only">CQ/73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter..." title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" style="width:70px;font-size:10px;padding:1px 4px;border:1px solid var(--border-primary);background:var(--bg-primary);color:var(--text-primary);border-radius:3px;" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="CQ/73 only">CQ/73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>

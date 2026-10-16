@@ -64,9 +64,11 @@
   /* Text */
   --text-primary: #e0e0e0;
   --text-secondary: #a0a0c0;
-  --text-tertiary: #808090;
-  --text-dim: #606080;
-  --text-dimmer: #404060;
+  /* Raised 2026-10-16 (LZ3AW: "grayed inscriptions" unreadable everywhere):
+     tertiary/dim/dimmer stay a visible step below secondary (#a0a0c0). */
+  --text-tertiary: #9494ac;
+  --text-dim: #7c7c9c;
+  --text-dimmer: #5c5c80;
 
   /* Accents */
   --accent-red: #e94560;
@@ -196,9 +198,9 @@
   /* Text — cooler whites, fewer perceptible steps */
   --text-primary: #e6e9ee;
   --text-secondary: #8b919b;
-  --text-tertiary: #6a6f78;
-  --text-dim: #555a62;
-  --text-dimmer: #404550;
+  --text-tertiary: #8a9099;
+  --text-dim: #767d88;
+  --text-dimmer: #5a616c;
 
   /* Accents — softened versions of navy's saturated hues so they don't
      vibrate against near-black. Same hue family, lower saturation.
@@ -243,9 +245,9 @@
   --border-secondary: #d8dce4;
   --text-primary: #1a1a2e;
   --text-secondary: #4a4a6a;
-  --text-tertiary: #6a6a80;
-  --text-dim: #8a8a9a;
-  --text-dimmer: #a0a0b0;
+  --text-tertiary: #5e5e76;
+  --text-dim: #74748a;
+  --text-dimmer: #8c8c9e;
   --accent-red: #c62828;
   --accent-blue: #1976d2;
   --accent-green: #2e7d5a;

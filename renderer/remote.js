@@ -841,6 +841,7 @@
   let ft8ChaseTarget = '';     // chase tag ('' = none); shared with the desktop
   let ft8SortSignal = false;   // Sort decodes by signal strength
   let ft8SearchFilter = '';    // Text search filter
+  let ft8SearchTokens = [];    // split on commas/spaces; a line shows if it contains ANY (LZ3AW 2026-10-16)
   let ft8TxFreqHz = 1500;      // TX frequency in Hz (for waterfall marker)
 
   // FT2 dial frequencies (kHz) per band — from IU8LMC published table
@@ -1530,6 +1531,11 @@
       case 'hello':
         // Server's protocol-version + version banner. Store on the ws
         // for later UI use; no behavior change today.
+        // `now`: the desktop's wall clock at send time. The FT8 period bar
+        // and countdown run on it, not on this device's clock, which can be
+        // seconds off (LZ3AW 2026-10-16: "moving line for the period is not
+        // on time"). One sample at connect; the hop latency is tens of ms.
+        if (typeof msg.now === 'number' && Number.isFinite(msg.now)) serverClockOffsetMs = msg.now - Date.now();
         try {
           ws._serverProtocolVersion = msg.protocolVersion | 0;
           ws._serverVersion = String(msg.serverVersion || '');
@@ -3184,6 +3190,15 @@
           llotaRef: card.dataset.llotaRef || '',
         });
       }
+      return;
+    }
+    // The callsign opens QRZ, as on the desktop; the rest of the card (the
+    // frequency included) tunes (LZ3AW 2026-10-16).
+    const callTarget = e.target.closest('.spot-call');
+    if (callTarget) {
+      const callCard = callTarget.closest('.spot-card');
+      const base = String((callCard && callCard.dataset.call) || '').toUpperCase().split('/').filter(Boolean).sort(function (a, b) { return b.length - a.length; })[0] || '';
+      if (base) window.open('https://www.qrz.com/db/' + encodeURIComponent(base), '_blank', 'noopener');
       return;
     }
     const card = e.target.closest('.spot-card');
@@ -6044,7 +6059,26 @@
     }
   }
 
+  // Date/time on the Log tab: stamped with now (UTC) and kept current until
+  // the operator edits either field, then left alone (LZ3AW 2026-10-16:
+  // "show the current time and date with option to change it"). The log
+  // sheet has done this since round 12; this is the same contract.
+  const ltDateEl = document.getElementById('lt-date');
+  const ltTimeEl = document.getElementById('lt-time');
+  let ltTimeDirty = false;
+  function ltStampNow() {
+    const d = new Date();
+    if (ltDateEl) ltDateEl.value = d.toISOString().slice(0, 10);
+    if (ltTimeEl) ltTimeEl.value = d.toISOString().slice(11, 16);
+  }
+  if (ltDateEl) ltDateEl.addEventListener('input', () => { ltTimeDirty = true; });
+  if (ltTimeEl) ltTimeEl.addEventListener('input', () => { ltTimeDirty = true; });
+  setInterval(() => { if (!ltTimeDirty) ltStampNow(); }, 15000);
+  ltStampNow();
+
   function resetLogTabForm() {
+    ltTimeDirty = false;
+    ltStampNow();
     ltCall.value = '';
     ltCallInfo.classList.add('hidden');
     ltCallInfo.textContent = '';
@@ -7489,7 +7523,7 @@
         if (ft8CqFilter && !isCq && !is73 && !isDirected && !isHunt && !isQsoPartner) return;
         if (ft8WantedFilter && !isWanted && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
         if (ft8ChaseFilter && !d.chaseMatch && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
-        if (ft8SearchFilter && upper.indexOf(ft8SearchFilter) === -1) return;
+        if (ft8SearchTokens.length && !ft8SearchTokens.some(function (t) { return upper.indexOf(t) !== -1; })) return;
 
         // Build needed badges + entity
         let badges = '';
@@ -7710,12 +7744,14 @@
   }
 
   // --- Countdown timer + progress bar ---
+  // Desktop clock minus this device's clock, from the server hello (item 17).
+  var serverClockOffsetMs = 0;
   var ft8CycleBar = document.getElementById('ft8-cycle-bar');
   function ft8StartCountdown() {
     if (ft8CountdownTimer) clearInterval(ft8CountdownTimer);
     const cycleSec = ft8Mode === 'FT2' ? 3.8 : ft8Mode === 'FT4' ? 7.5 : 15;
     ft8CountdownTimer = setInterval(() => {
-      const now = Date.now() / 1000;
+      const now = (Date.now() + serverClockOffsetMs) / 1000; // the desktop's clock, not the phone's
       const inCycle = now % cycleSec;
       const remaining = cycleSec - inCycle;
       const pct = (inCycle / cycleSec) * 100;
@@ -7922,6 +7958,7 @@
   if (ft8SearchInput) {
     ft8SearchInput.addEventListener('input', function() {
       ft8SearchFilter = ft8SearchInput.value.toUpperCase().trim();
+      ft8SearchTokens = ft8SearchFilter.split(/[\s,;]+/).filter(Boolean);
     });
   }
 
@@ -9369,9 +9406,46 @@
   let cwLiveMode = localStorage.getItem('echocat-cw-live') === '1';
   let cwLiveSent = 0;
   const cwLiveBtn = document.getElementById('cw-live-btn');
+  const vfCwLiveBtn = document.getElementById('vf-cw-live');
+  let vfCwLiveSent = 0; // the VFO pane's own cursor into its own field
   function reflectCwLive() {
     if (cwLiveBtn) cwLiveBtn.classList.toggle('active', cwLiveMode);
+    if (vfCwLiveBtn) vfCwLiveBtn.classList.toggle('active', cwLiveMode);
   }
+  // Key-as-I-type for one text field: send what was appended since the last
+  // input event; a deletion only moves the cursor back (nothing to unsend).
+  function cwLiveInputDelta(inputEl, sent) {
+    const v = inputEl.value.toUpperCase();
+    if (v.length <= sent) return { sent: v.length, delta: '' };
+    return { sent: v.length, delta: v.slice(sent) };
+  }
+  function cwLiveSend(delta) {
+    if (!delta.trim() && !delta.includes(' ')) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cw-text', text: delta, live: true }));
+    }
+    playCwTextSidetone(delta, { append: true });
+  }
+  // The VFO pane's CW field shares the Live state with the CW tab (one
+  // keyer, one mode) — LZ3AW 2026-10-16 asked for the button there too.
+  if (vfCwLiveBtn) vfCwLiveBtn.addEventListener('click', () => {
+    cwLiveMode = !cwLiveMode;
+    const vfIn = document.getElementById('vf-cw-input');
+    vfCwLiveSent = vfIn ? vfIn.value.length : 0;
+    cwLiveSent = cwTextInput ? cwTextInput.value.length : 0;
+    localStorage.setItem('echocat-cw-live', cwLiveMode ? '1' : '0');
+    reflectCwLive();
+  });
+  (function () {
+    const vfIn = document.getElementById('vf-cw-input');
+    if (!vfIn) return;
+    vfIn.addEventListener('input', () => {
+      if (!cwLiveMode) return;
+      const r = cwLiveInputDelta(vfIn, vfCwLiveSent);
+      vfCwLiveSent = r.sent;
+      if (r.delta) cwLiveSend(r.delta);
+    });
+  })();
   reflectCwLive();
   if (cwLiveBtn) cwLiveBtn.addEventListener('click', () => {
     cwLiveMode = !cwLiveMode;
@@ -9381,15 +9455,9 @@
   });
   if (cwTextInput) cwTextInput.addEventListener('input', () => {
     if (!cwLiveMode) return;
-    const v = cwTextInput.value.toUpperCase();
-    if (v.length <= cwLiveSent) { cwLiveSent = v.length; return; }
-    const delta = v.slice(cwLiveSent);
-    cwLiveSent = v.length;
-    if (!delta.trim() && !delta.includes(' ')) return;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'cw-text', text: delta, live: true }));
-    }
-    playCwTextSidetone(delta, { append: true });
+    const r = cwLiveInputDelta(cwTextInput, cwLiveSent);
+    cwLiveSent = r.sent;
+    if (r.delta) cwLiveSend(r.delta);
   });
 
   /** The callsign a macro's {call} should send RIGHT NOW.
@@ -13258,6 +13326,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (vfCwWpmDn) vfCwWpmDn.addEventListener('click', () => { if (cwWpmDn) cwWpmDn.click(); vfCwSync(); });
     if (vfCwWpmUp) vfCwWpmUp.addEventListener('click', () => { if (cwWpmUp) cwWpmUp.click(); vfCwSync(); });
     if (vfCwSend) vfCwSend.addEventListener('click', () => {
+      // Live mode: the letters already went out as they were typed; TX only
+      // clears the box (sending the line again would key it twice).
+      if (cwLiveMode) { vfCwInput.value = ''; vfCwLiveSent = 0; return; }
       const t = vfCwInput.value.trim();
       if (t) { sendCwText(t); vfCwInput.value = ''; }
     });

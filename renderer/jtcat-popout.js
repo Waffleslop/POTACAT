@@ -40,6 +40,7 @@ function _applyPopoutTheme(payload) {
   var chaseTarget = '';   // current chase tag ('' = none); shared with phone
   var sortBySignal = false;
   var searchFilter = '';
+  var searchTokens = []; // the filter split on commas/spaces: a line shows if it contains ANY (LZ3AW 2026-10-16)
   var txEnabled = false;
   var transmitting = false;
   var jpTxFreqHz = 1500;
@@ -889,7 +890,7 @@ function _applyPopoutTheme(payload) {
     // useful (needed / new band-mode slot); worked ones are mid-sweep noise.
     if (eventFilter && !(c.d.eventMatch && c.d.eventMatch.status !== 'worked')
         && !c.isDirected && !c.is73) return false;
-    if (searchFilter && c.upper.indexOf(searchFilter) === -1) return false;
+    if (searchTokens.length && !searchTokens.some(function (t) { return c.upper.indexOf(t) !== -1; })) return false;
     return true;
   }
 
@@ -1857,6 +1858,7 @@ function _applyPopoutTheme(payload) {
   var searchInput = document.getElementById('jp-search');
   searchInput.addEventListener('input', function() {
     searchFilter = searchInput.value.toUpperCase().trim();
+    searchTokens = searchFilter.split(/[\s,;]+/).filter(Boolean);
     rebuildBandActivity();
   });
 

@@ -10881,6 +10881,16 @@ document.addEventListener('keydown', (e) => {
   // because this listener didn't check modifiers, and the user-defined
   // tune binding never reached the rig.
   const bareFKey = !e.ctrlKey && !e.altKey && !e.metaKey;
+  // F1–F12 send CW macros 1–12 while the CW macro box is open (LZ3AW
+  // 2026-10-16: "keyboard F buttons functionality for CW macros"). Opening
+  // the box is the operator saying they are running CW; with it closed the
+  // F keys keep their usual jobs below. Works from the box's own text field
+  // too, as a contest logger would. User-defined bindings (Ctrl+F1 …) are
+  // untouched — those carry a modifier.
+  if (bareFKey && !e.shiftKey && /^F([1-9]|1[0-2])$/.test(e.key) && cwMacroBoxVisible
+      && (!e.target.matches('input, select, textarea') || e.target === cwMacroInput)) {
+    if (sendCwMacroByIndex(parseInt(e.key.slice(1), 10) - 1)) { e.preventDefault(); return; }
+  }
   // F1 — Hotkeys help
   if (e.key === 'F1' && bareFKey && !e.shiftKey && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
@@ -21034,6 +21044,15 @@ async function updateCwMacroBar() {
 }
 // Invalidate cache when settings are saved so macro bar picks up edits
 function invalidateCwMacroCache() { _cwMacroCache = null; }
+// Send CW macro i (0-based) exactly as its button would. False when there is
+// no such macro, so a bare F key with nothing behind it keeps its default.
+function sendCwMacroByIndex(i) {
+  if (!_cwMacroCache) { updateCwMacroBar(); return false; } // bar never rendered yet: load it, this press keeps its default
+  const m = _cwMacroCache && _cwMacroCache[i];
+  if (!m || (!m.label && !m.text) || !m.text) return false;
+  window.api.sendCwText(expandDesktopCwMacros(m.text));
+  return true;
+}
 // Callsign typed in the Log pop-out (a separate BrowserWindow, so its field
 // is invisible to this document). Kept current by main's relay.
 let _logPopoutCallsign = '';
