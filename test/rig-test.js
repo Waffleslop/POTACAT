@@ -794,6 +794,137 @@ test('CIV setMode sends the 2-byte [mode, filter] form, echoing the last-seen fi
   const hex = writes[0];
   // Frame: FE FE 94 E0 06 03 01 FD — mode 0x03 (CW) + filter byte FIL1
   assert.ok(hex.includes('060301fd'), `Expected [mode, FIL1] form, got: ${hex}`);
+  // DATA off is the documented two-byte `00 00`, never a bare `00`.
+  assert.ok(writes[1].includes('1a060000fd'), `Expected 1A 06 00 00, got: ${writes[1]}`);
+});
+
+// =========================================================================
+console.log('\n=== CivCodec: DATA mode is two bytes, and the radio picks the D-number (WF4I IC-7610 #96/#97) ===');
+
+const IC7610_MODEL = {
+  brand: 'Icom', protocol: 'civ', civAddr: 0x98,
+  caps: { nb: true, atu: true, filter: true, filterType: 'civ' },
+  cw: {}, maxPower: 100,
+};
+// Reply frames FROM the radio (0x98) TO the controller (0xE0).
+function civReply(bytes) { return Buffer.from([0xFE, 0xFE, 0xE0, 0x98].concat(bytes, [0xFD])); }
+
+test('CIV: a DATA set is [D-number, filter], DATA1 until the radio has reported one', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7610_MODEL);
+  codec.setMode('DIGU', 14074000);
+  assert.ok(writes[0].includes('060101fd'), `mode USB FIL1: ${writes[0]}`);
+  assert.ok(writes[1].includes('1a060101fd'), `DATA1 + FIL1, never a lone 01: ${writes[1]}`);
+});
+
+test('CIV: the D-number the radio reports (USB-D2) is the one re-selected', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7610_MODEL);
+  codec.onData(civReply([0x04, 0x01, 0x02]));       // USB, FIL2
+  codec.onData(civReply([0x1A, 0x06, 0x02, 0x02])); // DATA2, FIL2
+  assert.deepStrictEqual(codec.dataModeState, { on: true, data: 2 });
+  writes.length = 0;
+  codec.setMode('FT8', 7074000);
+  assert.ok(writes[0].includes('060102fd'), `USB with its own FIL2: ${writes[0]}`);
+  assert.ok(writes[1].includes('1a060202fd'), `DATA2 + FIL2: ${writes[1]}`);
+});
+
+test('CIV: DATA off is always 00 00 — the IC-7610 reset to FIL1 on a bare 00', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7610_MODEL);
+  codec.onData(civReply([0x04, 0x03, 0x03])); // CW FIL3 reported
+  writes.length = 0;
+  codec.setMode('CW', 14030000);
+  assert.ok(writes[0].includes('060303fd'), `CW keeps its FIL3: ${writes[0]}`);
+  assert.ok(writes[1].includes('1a060000fd'), `DATA off = 00 00: ${writes[1]}`);
+});
+
+test('CIV: per-mode filter memory — a mode set carries that mode\'s filter, not the current one', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7610_MODEL);
+  codec.onData(civReply([0x04, 0x01, 0x02])); // USB FIL2
+  codec.onData(civReply([0x04, 0x03, 0x03])); // now CW FIL3 (current)
+  writes.length = 0;
+  codec.setMode('SSB', 14250000);
+  assert.ok(writes[0].includes('060102fd'), `USB gets its remembered FIL2, not CW's FIL3: ${writes[0]}`);
+  writes.length = 0;
+  codec.setMode('AM', 1000000);              // never reported: falls back to the current FIL3
+  assert.ok(writes[0].includes('060203fd'), `unknown mode falls back to the current filter: ${writes[0]}`);
+});
+
+test('CIV: USB and USB-D keep separate filter memories', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7610_MODEL);
+  codec.onData(civReply([0x1A, 0x06, 0x00, 0x00])); // data off
+  codec.onData(civReply([0x04, 0x01, 0x02]));       // USB FIL2 (voice)
+  codec.onData(civReply([0x1A, 0x06, 0x02, 0x01])); // operator went to USB-D2 FIL1
+  writes.length = 0;
+  codec.setMode('DIGU', 14074000);
+  assert.ok(writes[0].includes('060101fd'), `USB-D uses its own FIL1: ${writes[0]}`);
+  assert.ok(writes[1].includes('1a060201fd'), `DATA2 + FIL1: ${writes[1]}`);
+  writes.length = 0;
+  codec.setMode('USB', 14250000);
+  assert.ok(writes[0].includes('060102fd'), `plain USB goes back to FIL2: ${writes[0]}`);
+});
+
+test('CIV: getDataMode asks 1A 06; the IC-7200 asks 1A 04', () => {
+  const a = captureWrites(CivCodec, IC7610_MODEL);
+  a.codec.getDataMode();
+  assert.ok(a.writes[0].includes('1a06fd'), `1A 06 query: ${a.writes[0]}`);
+  const b = captureWrites(CivCodec, { brand: 'Icom', protocol: 'civ', civAddr: 0x76, civDataModeSub: 0x04, caps: {}, cw: {} });
+  b.codec.setMode('DIGU', 14074000);
+  assert.ok(b.writes[1].includes('1a040101fd'), `IC-7200 DATA set via sub 04: ${b.writes[1]}`);
+  b.writes.length = 0;
+  b.codec.getDataMode();
+  assert.ok(b.writes[0].includes('1a04fd'), `IC-7200 query via sub 04: ${b.writes[0]}`);
+});
+
+test('CIV: a radio without 1A 06 NAKs the probe three times, then it is never sent again', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7610_MODEL);
+  const errors = [];
+  const logs = [];
+  codec.on('error', (e) => errors.push(e.message));
+  codec.on('log', (l) => logs.push(l));
+  for (let i = 0; i < 3; i++) {
+    codec.getDataMode();
+    codec.onData(civReply([0xFA]));
+  }
+  assert.strictEqual(errors.length, 0, 'the probe\'s own NAKs are not logged as CI-V NAK');
+  assert.ok(logs.some((l) => /not supported/.test(l)), logs.join('|'));
+  writes.length = 0;
+  codec.getDataMode();
+  assert.strictEqual(writes.length, 0, 'latched off');
+  // A NAK with no probe outstanding is still a real error.
+  codec.onData(civReply([0xFA]));
+  assert.strictEqual(errors.length, 1);
+});
+
+test('CIV: a radio that has answered 1A 06 never latches it off', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7610_MODEL);
+  const errors = [];
+  codec.on('error', (e) => errors.push(e.message));
+  codec.getDataMode();
+  codec.onData(civReply([0x1A, 0x06, 0x01, 0x01]));
+  for (let i = 0; i < 5; i++) { codec.getDataMode(); codec.onData(civReply([0xFA])); }
+  assert.strictEqual(errors.length, 5, 'later NAKs are real errors, not probe misses');
+  writes.length = 0;
+  codec.getDataMode();
+  assert.strictEqual(writes.length, 1, 'still polled');
+});
+
+test('CIV: the DATA mode line is logged on change only', () => {
+  const { codec } = captureWrites(CivCodec, IC7610_MODEL);
+  const logs = [];
+  codec.on('log', (l) => logs.push(l));
+  codec.onData(civReply([0x1A, 0x06, 0x02, 0x02]));
+  codec.onData(civReply([0x1A, 0x06, 0x02, 0x02]));
+  codec.onData(civReply([0x1A, 0x06, 0x00, 0x00]));
+  const lines = logs.filter((l) => /DATA mode/.test(l));
+  assert.deepStrictEqual(lines, ['rx: DATA mode DATA2 FIL2', 'rx: DATA mode off']);
+});
+
+test('CIV: the controller polls DATA mode on the slow cycle, after the other readbacks', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  const atu = src.indexOf('this._codec.getAtuEnabled()');
+  const dm = src.indexOf('this._codec.getDataMode()');
+  assert.ok(atu > 0 && dm > atu, 'getDataMode() is polled, and last in the burst');
+  const civ = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'), 'utf8');
+  assert.ok(!/_sendCmd\(0x1A, 0x06, \[0x0[01]\]\)/.test(civ), 'no one-byte 1A 06 form survives in the codec');
 });
 
 // =========================================================================
@@ -1960,8 +2091,9 @@ test('civ: a frame we do not consume is logged once per command byte', () => {
   const { codec } = captureWrites(CivCodec, { brand: 'Icom', protocol: 'civ', civAddr: 0x94, caps: {}, cw: {} });
   const logs = [];
   codec.on('log', (m) => logs.push(m));
-  // cmd 0x1A (rig-specific settings) — addressed to us, framed fine, unconsumed.
-  const f = Buffer.from([0xFE, 0xFE, 0xE0, 0x94, 0x1A, 0x06, 0x01, 0xFD]);
+  // cmd 0x1A sub 0x09 (rig-specific settings) — addressed to us, framed
+  // fine, unconsumed. (Sub 0x06 is the DATA mode reply and IS consumed now.)
+  const f = Buffer.from([0xFE, 0xFE, 0xE0, 0x94, 0x1A, 0x09, 0x01, 0xFD]);
   codec.onData(f);
   codec.onData(f);
   const hits = logs.filter((l) => l.includes('unhandled CI-V frame'));
