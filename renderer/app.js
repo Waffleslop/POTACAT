@@ -11003,27 +11003,57 @@ document.addEventListener('keydown', (e) => {
     openQuickLog();
     return;
   }
-  // Ctrl+= / Ctrl+- / Ctrl+0 — UI zoom
+  // Ctrl+= / Ctrl+- / Ctrl+0 — UI zoom (the same thing Settings > Display > Text size drives)
   if (e.ctrlKey || e.metaKey) {
-    const ZOOM_KEY = 'pota-cat-zoom';
-    const ZOOM_MIN = 0.6, ZOOM_MAX = 2.0, ZOOM_STEP = 0.1;
     if (e.key === '=' || e.key === '+') {
       e.preventDefault();
-      const z = Math.min(ZOOM_MAX, window.api.getZoom() + ZOOM_STEP);
-      window.api.setZoom(z);
-      localStorage.setItem(ZOOM_KEY, z.toFixed(1));
+      stepUiZoom(+1);
     } else if (e.key === '-') {
       e.preventDefault();
-      const z = Math.max(ZOOM_MIN, window.api.getZoom() - ZOOM_STEP);
-      window.api.setZoom(z);
-      localStorage.setItem(ZOOM_KEY, z.toFixed(1));
+      stepUiZoom(-1);
     } else if (e.key === '0') {
       e.preventDefault();
-      window.api.setZoom(1.0);
-      localStorage.removeItem(ZOOM_KEY);
+      setUiZoom(1.0);
     }
   }
 });
+
+// --- UI zoom (text size) ---
+// One writer for the window's zoom factor: the Ctrl +/-/0 keys, the startup
+// restore and the Settings > Display "Text size" row all go through here, so
+// the readout in Settings always shows what the keys did (Casey 2026-10-16:
+// users were not finding Ctrl +/-). Stored in localStorage, not settings.json,
+// because it is read before settings arrive and is a per-screen preference.
+const UI_ZOOM_KEY = 'pota-cat-zoom';
+const UI_ZOOM_MIN = 0.6, UI_ZOOM_MAX = 2.0, UI_ZOOM_STEP = 0.1;
+function setUiZoom(z) {
+  z = Math.round(Math.max(UI_ZOOM_MIN, Math.min(UI_ZOOM_MAX, z)) * 10) / 10;
+  window.api.setZoom(z);
+  if (Math.abs(z - 1.0) < 0.001) localStorage.removeItem(UI_ZOOM_KEY);
+  else localStorage.setItem(UI_ZOOM_KEY, z.toFixed(1));
+  refreshUiZoomReadout(z);
+}
+function stepUiZoom(dir) {
+  setUiZoom(window.api.getZoom() + dir * UI_ZOOM_STEP);
+}
+function refreshUiZoomReadout(z) {
+  const el = document.getElementById('set-text-size-value');
+  if (!el) return;
+  if (typeof z !== 'number') z = window.api.getZoom();
+  el.textContent = Math.round(z * 100) + '%';
+  const down = document.getElementById('set-text-size-down');
+  const up = document.getElementById('set-text-size-up');
+  if (down) down.disabled = z <= UI_ZOOM_MIN + 0.001;
+  if (up) up.disabled = z >= UI_ZOOM_MAX - 0.001;
+}
+(function wireTextSizeRow() {
+  const down = document.getElementById('set-text-size-down');
+  const up = document.getElementById('set-text-size-up');
+  const reset = document.getElementById('set-text-size-reset');
+  if (down) down.addEventListener('click', () => stepUiZoom(-1));
+  if (up) up.addEventListener('click', () => stepUiZoom(+1));
+  if (reset) reset.addEventListener('click', () => setUiZoom(1.0));
+})();
 
 // --- Quick Re-spot (Ctrl+R) ---
 // SOURCE_COLORS is now managed by SOURCE_COLORS_ACTIVE (see colorblind palettes above)
@@ -26914,10 +26944,11 @@ if (hunterParkInput) {
   });
 }
 
-// Restore saved zoom level
+// Restore saved zoom level (text size)
 (function restoreZoom() {
-  const saved = parseFloat(localStorage.getItem('pota-cat-zoom'));
-  if (saved && saved >= 0.6 && saved <= 2.0) window.api.setZoom(saved);
+  const saved = parseFloat(localStorage.getItem(UI_ZOOM_KEY));
+  if (saved && saved >= UI_ZOOM_MIN && saved <= UI_ZOOM_MAX) setUiZoom(saved);
+  else refreshUiZoomReadout();
 })();
 
 // Init

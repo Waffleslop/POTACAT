@@ -10417,3 +10417,38 @@ main.banner-logger-active #event-progress-overlay {
 .dxp-drawer-flag { margin: 8px 0 12px; padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; }
 .dxp-drawer-flag.on { background: color-mix(in srgb, #4ecca3 12%, transparent); }
 .dxp-drawer-flag.off { background: color-mix(in srgb, #f0a500 14%, transparent); }
+
+/* Settings > Display > Text size (the Ctrl +/- zoom, made findable) */
+.text-size-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px 12px;
+  font-size: 13px;
+}
+.text-size-label { color: var(--text-secondary); margin-right: 4px; }
+.text-size-btn {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.text-size-btn:hover:not(:disabled) { border-color: var(--accent-blue); }
+.text-size-btn:disabled { opacity: 0.4; cursor: default; }
+.text-size-value { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.text-size-reset {
+  padding: 2px 8px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.text-size-reset:hover { color: var(--text-primary); border-color: var(--accent-blue); }

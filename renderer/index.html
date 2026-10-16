@@ -2719,6 +2719,14 @@
         <label class="radio-inline"><input type="radio" name="set-dark-variant" value="navy" checked> Navy <span class="dark-variant-sub">(classic)</span></label>
         <label class="radio-inline"><input type="radio" name="set-dark-variant" value="charcoal"> Charcoal <span class="dark-variant-sub">(modern, OLED-friendly)</span></label>
       </div>
+      <div class="text-size-row">
+        <span class="text-size-label">Text size:</span>
+        <button type="button" id="set-text-size-down" class="text-size-btn" title="Smaller text (Ctrl &minus;)">&minus;</button>
+        <span id="set-text-size-value" class="text-size-value">100%</span>
+        <button type="button" id="set-text-size-up" class="text-size-btn" title="Larger text (Ctrl +)">+</button>
+        <button type="button" id="set-text-size-reset" class="text-size-reset" title="Back to 100% (Ctrl 0)">Reset</button>
+      </div>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Font size for the whole window, applied right away. <kbd>Ctrl +</kbd> and <kbd>Ctrl &minus;</kbd> do the same from anywhere in the app, <kbd>Ctrl 0</kbd> resets.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-colorblind"> Colorblind mode (deuteranopia)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-wcag-mode"> High contrast (WCAG AA)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-color-rows" checked> Color table rows by spot source</label>
