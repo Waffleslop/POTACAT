@@ -4623,25 +4623,27 @@ tr.wl-group-2 td:last-child {
 
 /* Settings → Display → "Dark variant" radio group. Indented under the
    Dark/Light switch as a sub-option. */
+/* Laid out like the Text size row under it: same indent, same label
+   (Casey 2026-10-16: "not aligned well ... didn't seem clear"). */
 .dark-variant-group {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
-  margin: 0 0 8px 28px;
-  font-size: 12px;
-  color: var(--text-secondary);
+  margin: 6px 0 4px 0;
+  font-size: 13px;
+  color: var(--text-primary);
 }
 .dark-variant-label {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-right: 4px;
 }
 .radio-inline {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  margin-bottom: 0; /* `dialog label` adds 12px, which floated the option names 6px above their label */
+  color: var(--text-primary);
   cursor: pointer;
 }
 .radio-inline input[type="radio"] {
@@ -4650,11 +4652,6 @@ tr.wl-group-2 td:last-child {
   margin: 0;
   accent-color: var(--accent-blue);
 }
-.dark-variant-sub {
-  color: var(--text-dim);
-  font-size: 11px;
-}
-
 .settings-footer {
   position: relative; /* anchor for the absolutely-positioned π easter egg */
   text-align: center;
@@ -10423,7 +10420,7 @@ main.banner-logger-active #event-progress-overlay {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 6px 0 2px 12px;
+  margin: 6px 0 2px 0;
   font-size: 13px;
 }
 .text-size-label { color: var(--text-secondary); margin-right: 4px; }
