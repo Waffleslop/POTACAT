@@ -146,22 +146,22 @@ section('REPLY mode — happy paths');
     assertEq(r.q.phase, '73', `r+report → 73 on ${trig}`);
   }
 
-  // Courtesy 73 cycle: phase=73 first call → wait one cycle
+  // Courtesy 73 cycle: the 73 has not gone out yet → wait
   {
     const q = baseQ();
     q.phase = '73';
     q.txMsg = 'W1ABC K3SBP 73';
     const eng = makeEngine();
     const r = drive(q, [], eng);
-    assertEq(r.q.phase, '73', 'phase=73 first cycle stays in 73 (courtesy wait)');
-    assertEq(r.q._courtesySent, true, '_courtesySent flag set');
+    assertEq(r.q.phase, '73', 'phase=73 stays in 73 until the 73 has been transmitted (courtesy wait)');
+    assertEq(r.q._courtesyWaits, 1, 'one courtesy wait counted');
   }
-  // Second cycle: terminate
+  // The 73 went out (main stamps _txSentMsg at tx-start): terminate
   {
     const q = baseQ();
     q.phase = '73';
-    q._courtesySent = true;
     q.txMsg = 'W1ABC K3SBP 73';
+    q._txSentMsg = q.txMsg;
     const eng = makeEngine();
     const r = drive(q, [], eng);
     assertEq(r.q.phase, 'done', 'phase=73 second cycle → done');
@@ -343,10 +343,11 @@ section('Stalled QSO — closeoutStalledQso (log + final 73)');
     const eng = makeEngine();
     eng._txEnabled = true;
     let r = drive(q, [], eng);
-    assertEq(r.q.phase, '73', 'first courtesy cycle waits');
-    assertEq(r.q._courtesySent, true, '_courtesySent set');
+    assertEq(r.q.phase, '73', 'courtesy cycle waits until the 73 has gone out');
+    assertEq(r.q._courtesyWaits, 1, 'one courtesy wait counted');
+    q._txSentMsg = q.txMsg; // the 73 went out
     r = drive(q, [], eng);
-    assertEq(r.q.phase, 'done', 'second courtesy cycle → done');
+    assertEq(r.q.phase, 'done', 'cycle after the 73 went out → done');
     assertEq(eng._txEnabled, false, 'engine TX disabled by courtesy teardown');
     assertEq(eng._lastTxMsg, '', 'TX message cleared');
     assertEq(eng._lastSlot, 'auto', 'TX slot back to auto');
@@ -402,6 +403,8 @@ section('Stalled QSO — end-to-end KQ4MHD scenario (partner heard, never sends 
   assertEq(doneCount, 1, 'QSO logged exactly once');
   assertEq(lastTx, 'W1ABC K3SBP 73', 'final 73 queued');
   drive(q, [], eng);
+  assertEq(q.phase, '73', 'courtesy leg holds until the 73 has gone out');
+  q._txSentMsg = q.txMsg; // the 73 went out
   drive(q, [], eng);
   assertEq(q.phase, 'done', 'courtesy leg completes');
   assertEq(eng._txEnabled, false, 'TX disabled at done');
@@ -481,13 +484,13 @@ section('CQ mode — happy path');
     q.phase = 'cq-rr73';
     const eng = makeEngine();
     const r = drive(q, [], eng);
-    assertEq(r.q.phase, 'cq-rr73', 'first cycle stays — courtesy wait');
-    assertEq(r.q._courtesySent, true, '_courtesySent set');
+    assertEq(r.q.phase, 'cq-rr73', 'stays — courtesy wait until the RR73 has gone out');
+    assertEq(r.q._courtesyWaits, 1, 'one courtesy wait counted');
   }
   {
     const q = baseQ();
     q.phase = 'cq-rr73';
-    q._courtesySent = true;
+    q._txSentMsg = q.txMsg; // the RR73 went out
     const eng = makeEngine();
     const r = drive(q, [], eng);
     assertEq(r.q.phase, 'done', 'second cycle → done');
@@ -735,10 +738,11 @@ section('End-to-end QSO arcs');
   sm.advanceJtcatQso(q, [decode('K3SBP W1ABC RR73')], () => {}, () => { doneCount++; }, { engine: makeEngine(), log: () => {} });
   assertEq(q.phase, '73', 'arc-3: → 73');
   assertEq(doneCount, 1, 'arc-3: logged at RR73');
-  // Cycle 4: courtesy wait
+  // Cycle 4: courtesy wait (the 73 has not gone out yet)
   drive(q, [], makeEngine());
   assertEq(q.phase, '73', 'arc-4: courtesy wait (still 73)');
-  // Cycle 5: terminate
+  // Cycle 5: the 73 went out → terminate
+  q._txSentMsg = q.txMsg;
   const eng = makeEngine();
   drive(q, [], eng);
   assertEq(q.phase, 'done', 'arc-5: done');
@@ -758,8 +762,97 @@ section('End-to-end QSO arcs');
   assertEq(d2, 1, 'cq-arc-2: logged at R-report');
   drive(q2, [], makeEngine()); // courtesy
   assertEq(q2.phase, 'cq-rr73', 'cq-arc-3: courtesy wait');
+  q2._txSentMsg = q2.txMsg; // the RR73 went out
   drive(q2, [], makeEngine());
   assertEq(q2.phase, 'done', 'cq-arc-4: done');
+}
+
+// ============================================================
+// Group 4c2: Courtesy leg waits for its own transmission (IK4IDF 2026-10-15)
+// ============================================================
+section('Courtesy leg — ends when the 73/RR73 has actually been transmitted');
+{
+  // main.js stamps q._txSentMsg at the tx-start dispatch with the message that
+  // went out. Decode events arrive every period (our own TX period included),
+  // so the old fixed "wait one cycle" assumed the courtesy went out in the very
+  // next slot — a decode that lands after that slot's TX has started sends the
+  // OLD message once more, and the two-cycle count then tore the QSO down with
+  // the 73 never sent ("to end the QSO I have to double-click the report").
+  const mk = () => ({
+    mode: 'reply', phase: '73', call: 'W1ABC', grid: 'FN42',
+    txMsg: 'W1ABC K3SBP 73', report: '-05', sentReport: '-08',
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+    _txSentMsg: 'W1ABC K3SBP R-08', // the last thing that went out was the R-report
+  });
+  // Late decode: two cycles pass and the 73 has still not gone out — hold.
+  {
+    const q = mk();
+    const eng = makeEngine(); eng._txEnabled = true;
+    drive(q, [], eng);
+    drive(q, [], eng);
+    assertEq(q.phase, '73', 'the 73 leg holds while the 73 has not been transmitted');
+    assertEq(eng._txEnabled, true, 'TX stays armed so the 73 goes out in the next own slot');
+    assertEq(eng._lastTxMsg, null, 'the TX message is not cleared while holding');
+    q._txSentMsg = q.txMsg; // tx-start of the 73
+    drive(q, [], eng);
+    assertEq(q.phase, 'done', 'the decode after the 73 went out closes the QSO');
+    assertEq(eng._txEnabled, false, 'engine disarmed once the 73 is out');
+    assertEq(eng._lastTxMsg, '', 'TX message cleared once the 73 is out');
+  }
+  // Still on the air: the stamp is there but the transmission has not ended.
+  {
+    const q = mk();
+    q._txSentMsg = q.txMsg;
+    const eng = makeEngine(); eng._txEnabled = true; eng._txActive = true;
+    drive(q, [], eng);
+    assertEq(q.phase, '73', 'a 73 still being transmitted is not torn down under itself');
+    eng._txActive = false;
+    drive(q, [], eng);
+    assertEq(q.phase, 'done', 'done once the transmission has ended');
+  }
+  // Bounded: a 73 that can never go out (SWR latch, radio owned elsewhere,
+  // operator TX off) still closes the QSO.
+  {
+    const q = mk();
+    const eng = makeEngine(); eng._txEnabled = true;
+    for (let i = 0; i < sm.COURTESY_MAX_WAIT_CYCLES; i++) drive(q, [], eng);
+    assertEq(q.phase, '73', `still holding after ${sm.COURTESY_MAX_WAIT_CYCLES} cycles`);
+    drive(q, [], eng);
+    assertEq(q.phase, 'done', 'closes without the 73 after the bound');
+    assertEq(eng._txEnabled, false, 'engine disarmed at the bound');
+  }
+  // CQ side: the RR73 leg has the same contract.
+  {
+    const q = {
+      mode: 'cq', phase: 'cq-rr73', call: 'N4XYZ', grid: 'EM12',
+      txMsg: 'N4XYZ K3SBP RR73', report: '-15', sentReport: '-08',
+      myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0, _txSentMsg: 'N4XYZ K3SBP -08',
+    };
+    const eng = makeEngine(); eng._txEnabled = true;
+    drive(q, [], eng); drive(q, [], eng);
+    assertEq(q.phase, 'cq-rr73', 'the RR73 leg holds while the RR73 has not been transmitted');
+    q._txSentMsg = q.txMsg;
+    drive(q, [], eng);
+    assertEq(q.phase, 'done', 'RR73 out → done');
+  }
+  // Wiring: main stamps the QSO at the ONE tx-start dispatch point (both the
+  // single-slice and the multi-slice handlers), right beside the per-try
+  // period stamp, and the retry-stall counter leaves courtesy legs alone.
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const single = MAIN.indexOf('ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);');
+    assert(single > 0 && MAIN.indexOf('jtcatNoteTxSent(data.message);', single) - single < 200,
+      'single-slice tx-start stamps the courtesy message beside the try stamp');
+    const multi = MAIN.indexOf("engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');");
+    assert(multi > 0 && MAIN.indexOf('jtcatNoteTxSent(data.message);', multi) - multi < 200,
+      'multi-slice tx-start stamps the courtesy message beside the try stamp');
+    const stall = MAIN.indexOf('function jtcatHandleRetryStall(o) {');
+    const body = MAIN.slice(stall, stall + 1200);
+    assert(/qso\.phase === '73' \|\| qso\.phase === 'cq-rr73'/.test(body),
+      'the retry-stall counter returns early on courtesy legs');
+  }
 }
 
 // ============================================================
@@ -1296,6 +1389,7 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       q.phase = 'cq-rr73';
       const r1 = drive(q, [], eng);
       assertEq(r1.q.phase, 'cq-rr73', 'FD CQ: cq-rr73 first cycle waits');
+      q._txSentMsg = q.txMsg; // the R+exchange went out
       const r2 = drive(q, [], eng);
       assertEq(r2.q.phase, 'done', 'FD CQ: cq-rr73 second cycle → done');
       assertEq(eng._txEnabled, false, 'FD CQ: TX disabled on done');
@@ -1342,6 +1436,7 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       q.phase = '73';
       drive(q, [], eng);
       assertEq(q.phase, '73', 'FD S&P: 73 first cycle waits');
+      q._txSentMsg = q.txMsg; // the 73 went out
       drive(q, [], eng);
       assertEq(q.phase, 'done', 'FD S&P: 73 second cycle → done');
       assertEq(eng._lastTxMsg, '', 'FD S&P: TX message cleared on done');

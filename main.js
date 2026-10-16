@@ -10977,6 +10977,16 @@ async function popoutJtcatSetTxMsg(msg) {
   if (txEng) await txEng.setTxMessage(msg);
   popoutBroadcastQso();
 }
+// The courtesy leg (73 / RR73 after the log) ends only once its message has
+// actually gone out: stamp the QSO(s) whose pending message this transmission
+// carries. Called from the tx-start dispatch, after every TX-block guard, so a
+// refused cycle never counts as sent (lib/jtcat-state-machine.js
+// _courtesyPending; IK4IDF 2026-10-15).
+function jtcatNoteTxSent(message) {
+  for (const q of [popoutJtcatQso, remoteJtcatQso]) {
+    if (q && q.txMsg && q.txMsg === message) q._txSentMsg = message;
+  }
+}
 function popoutJtcatOnDone(qso) {
   return async () => {
     await jtcatAutoLog(qso); // use captured ref, not global (global may be replaced by auto-CQ)
@@ -11102,6 +11112,10 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
 //   abort    → tear down TX, drop the QSO unlogged, notify
 function jtcatHandleRetryStall(o) {
   const qso = o.qso;
+  // A courtesy leg (73 / RR73 after the log) waits for its OWN transmission,
+  // not for a reply — there is nothing to retry, and counting its hold cycles
+  // as tries could abort the QSO (and the 73 with it) under a low tries cap.
+  if (qso.phase === '73' || qso.phase === 'cq-rr73') return;
   // The period whose audio was decoded (the engine stamps it on the decode),
   // not the clock now: on a slow PC the decode lands after the next TX has
   // started and been stamped, so "now" named our own TX period, every stall
@@ -12148,6 +12162,7 @@ function startJtcat(mode) {
     // counts one try per stamped TX (never per decode period). Placed after
     // every TX-block guard above so refused cycles don't count as tries.
     if (ft8Engine) ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);
+    jtcatNoteTxSent(data.message);
     const networkStartDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
     handleRemotePtt(true, { audio: true });
     armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : (settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : 'local audio'), data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
@@ -36126,6 +36141,7 @@ app.whenReady().then(() => {
         // Per-TX try stamp — same contract as the single-slice tx-start
         // handler; jtcatHandleRetryStall counts one try per stamped TX.
         engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');
+        jtcatNoteTxSent(data.message);
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
         handleRemotePtt(true);
