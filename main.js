@@ -1905,6 +1905,28 @@ const RelogGuard = require('./lib/jtcat-relog-guard');
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
 const { TypedCallTracker } = require('./lib/typed-call');
 const typedCalls = new TypedCallTracker();
+const CwRemoteExpand = require('./lib/cw-remote-expand');
+/**
+ * Fill {call}/{op_firstname}/{state} left in CW text from a device (the
+ * mobile app sends macros unexpanded; ECHOCAT Web expands its own). {call} =
+ * the callsign typed most recently on any surface, else the desktop's tuned
+ * spot. Name and state come from the QRZ cache only, never a fresh lookup:
+ * CW must not wait on the network. (N4RDX 2026-10-11)
+ */
+function expandRemoteCwText(text) {
+  if (!CwRemoteExpand.hasPlaceholders(text)) return text;
+  const tuned = _lastVfoTunedSpot && Array.isArray(_lastVfoTunedSpot.ops) && _lastVfoTunedSpot.ops[0];
+  const call = typedCalls.current() || (tuned && tuned.callsign) || '';
+  let info = null;
+  try { info = call && qrz && qrz._cache ? qrz._cache.get(call.toUpperCase().split('/')[0]) : null; } catch {}
+  const r = CwRemoteExpand.expandRemoteCw(text, {
+    call,
+    opFirstname: info ? (info.nickname || info.fname || '') : '',
+    state: info ? (info.state || '') : '',
+  });
+  if (r.missingCall) sendCatLog('[CW] Macro {call} had no callsign: nothing typed in a callsign field and no tuned spot on the desktop. Sent without it.');
+  return r.text;
+}
 function setTypedCall(source, call) {
   const prev = typedCalls.current();
   const now = typedCalls.set(source, call);
@@ -17158,7 +17180,7 @@ function connectRemote() {
     // (no preceding cw-config) still keys at the right speed — and it flows
     // through the one authoritative writer, keeping settings.cwWpm current.
     if (typeof wpm === 'number') applyCwWpm(wpm, 'remote');
-    sendCwTextToRadio(text, { live: !!live, fromRemote: true });
+    sendCwTextToRadio(expandRemoteCwText(text), { live: !!live, fromRemote: true });
   });
 
   // Sanitize a VFO-profile list arriving from a remote client before it
