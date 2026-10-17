@@ -457,8 +457,15 @@ function pushJtcatSpotsHighlight(filtered) {
   try { window.api.jtcatSpotsHighlight({ calls }); } catch {}
 }
 
+// The spot the VFO window's card is showing. Its LOG button logs THIS one:
+// the card follows the radio onto any spot (knob, VFO window, pop-outs, the
+// mobile app), while lastTunedSpot is only a main-window click and drops at
+// 0.5 kHz, so the log opened blank under a filled card (K3SBP 2026-10-17).
+let vfoCardSpot = null;
+
 /** Send tuned spot info to VFO popout */
 function notifyVfoTunedSpot(spot) {
+  vfoCardSpot = spot || null;
   if (!spot) { window.api.vfoTunedSpot(null); return; }
   // Every activator on the same frequency that the TABLE is showing — its
   // filters, source toggles, hidden calls and age limit — plus the tuned spot
@@ -23440,11 +23447,16 @@ window.api.onFreedvStatus(() => {});
 // (or worst-case missing) mode in v1.5.5. We still keep the spot's
 // callsign / reference / source so the form is usefully pre-filled.
 window.api.onOpenLogForm(() => {
-  if (lastTunedSpot) {
+  // The card's spot while the radio is still near it (SSB operators sit a
+  // little off the spotted frequency); a card left behind by a QSY is not.
+  const cardNear = vfoCardSpot && (radioFreqKhzExact == null ||
+    Math.abs(parseFloat(vfoCardSpot.frequency) - radioFreqKhzExact) <= 3);
+  const spot = cardNear ? vfoCardSpot : lastTunedSpot;
+  if (spot) {
     routeLogForSpot({
-      ...lastTunedSpot,
-      frequency: radioFreqKhz ? String(radioFreqKhz) : lastTunedSpot.frequency,
-      mode: radioMode || lastTunedSpot.mode,
+      ...spot,
+      frequency: radioFreqKhz ? String(radioFreqKhz) : spot.frequency,
+      mode: radioMode || spot.mode,
     });
   } else {
     openQuickLog();
