@@ -8590,7 +8590,7 @@ async function saveQsoRecord(qsoData, opts) {
       } catch { /* QRZ lookup failed — leave blank */ }
     }
     qsoData.respotComment = qsoData.respotComment
-      .replace(/\{op_firstname\}/gi, opName)
+      .replace(/\{op_firstname\}/gi, opName || 'OM') // OM like the desktop log dialog; '' left a double space
       .replace(/\{rst\}/gi, qsoData.rstSent || '59')
       .replace(/\{mycallsign\}/gi, ops.myCallsign || '')
       .replace(/\{QTH\}/gi, ops.grid || '')

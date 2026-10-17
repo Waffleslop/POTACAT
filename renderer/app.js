@@ -11152,6 +11152,7 @@ async function openQuickRespot() {
     : targets.includes('pota') ? 'pota'
     : targets.includes('wwff') ? 'wwff'
     : targets.includes('llota') ? 'llota'
+    : targets.includes('wwbota') ? 'wwbota'
     : 'pota';
   const tmpl = respotTemplateFor(tmplNetwork);
   const spotQrz = s.callsign ? qrzData.get(s.callsign.toUpperCase().split('/')[0]) : null;
@@ -11488,6 +11489,7 @@ function updateLogRespot() {
       : targets.includes('pota') ? 'pota'
       : targets.includes('wwff') ? 'wwff'
       : targets.includes('llota') ? 'llota'
+      : targets.includes('wwbota') ? 'wwbota'
       : 'pota';
     respotComment.value = respotTemplateFor(tmplNetwork);
     // Flick rotation: option 1 is the per-program template (above), then each

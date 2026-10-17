@@ -34,5 +34,15 @@ test('saving any re-spot setting re-pushes to connected devices', () => {
   }
 });
 
+test('a phone-sent comment gets OM, not a blank, when no first name is known', () => {
+  assert.ok(src.includes("opName || 'OM')"));
+});
+
+test('both desktop re-spot dialogs use the WWBOTA template for a WWBOTA target', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const hits = app.split(": targets.includes('wwbota') ? 'wwbota'").length - 1;
+  assert.strictEqual(hits, 2, 'openQuickRespot and updateLogRespot');
+});
+
 console.log(`\nRe-spot templates to ECHOCAT: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
