@@ -27799,7 +27799,7 @@ function renderJtcatDecodes() {
           var upper = (d.text || '').toUpperCase();
           var isCq = upper.startsWith('CQ ');
           var is73 = upper.indexOf('RR73') >= 0 || upper.indexOf(' 73') >= 0;
-          var isDirected = myCall && upper.indexOf(' ' + myCall + ' ') >= 0;
+          var isDirected = myCall && JtcatParser.isAddressedTo(upper, myCall);
           if (!isCq && !is73 && !isDirected) continue;
         }
         var cls = getJtcatDecodeClass(d);
@@ -28381,7 +28381,7 @@ function getJtcatDecodeClass(d) {
   var text = d.text || '';
   if (text.startsWith('CQ ')) return 'jtcat-cq';
   var myCall = getMyCallsign();
-  if (myCall && text.toUpperCase().indexOf(' ' + myCall + ' ') >= 0) return 'jtcat-directed';
+  if (myCall && JtcatParser.isAddressedTo(text, myCall)) return 'jtcat-directed';
   // Highlight if callsign is a POTA/SOTA activator
   var words = text.split(/\s+/);
   for (var i = 0; i < words.length; i++) {

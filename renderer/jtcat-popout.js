@@ -873,7 +873,7 @@ function _applyPopoutTheme(payload) {
       text: text,
       upper: upper,
       isCq: upper.startsWith('CQ '),
-      isDirected: myCallsign && (upper.indexOf(' ' + myCallsign + ' ') >= 0 || upper.startsWith(myCallsign + ' ') || upper.endsWith(' ' + myCallsign)),
+      isDirected: !!myCallsign && JtcatParser.isAddressedTo(upper, myCallsign),
       is73: upper.indexOf('RR73') >= 0 || upper.indexOf(' 73') >= 0,
       isWanted: d.newDxcc || d.newCall || d.newGrid,
     };
@@ -3766,7 +3766,7 @@ function _applyPopoutTheme(payload) {
     row.classList.toggle('jp-jtty-growing', !u.complete);
     var up = String(u.text || '').toUpperCase();
     row.classList.toggle('jp-cq', /^CQ\b/.test(up));
-    row.classList.toggle('jp-directed', !!jttyMyCall && (' ' + up + ' ').indexOf(' ' + jttyMyCall + ' ') >= 0);
+    row.classList.toggle('jp-directed', !!jttyMyCall && JtcatParser.isAddressedTo(up, jttyMyCall));
     jttyScrollIfPinned(pinned);
   }
   // Click a row: the first callsign-looking word that isn't ours becomes %H.

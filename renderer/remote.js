@@ -7477,7 +7477,9 @@
         const text = d.text || '';
         const upper = text.toUpperCase();
         const isCq = upper.startsWith('CQ ');
-        const isDirected = myCallsign && upper.indexOf(myCallsign.toUpperCase()) >= 0;
+        const isDirected = !!myCallsign && (typeof JtcatParser !== 'undefined' && JtcatParser.isAddressedTo
+          ? JtcatParser.isAddressedTo(upper, myCallsign)
+          : upper.indexOf(myCallsign.toUpperCase()) >= 0);
         const isHunt = ft8HuntCall && upper.indexOf(ft8HuntCall) >= 0;
         const is73 = upper.indexOf('RR73') >= 0 || upper.indexOf(' 73') >= 0;
 

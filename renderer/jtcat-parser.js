@@ -52,6 +52,21 @@
     return c;
   }
 
+  // Is this decode addressed to (or from) my call? Compares every token as a
+  // base call, so a compound call matches in all the forms a decode carries:
+  // "<K9CYT/8> W1ABC -10" (report legs hash a nonstandard call), "K9CYT/8"
+  // in full (type-4 legs) and plain "K9CYT". The surfaces used to look for
+  // " K9CYT/8 " with spaces round it, which the brackets defeat (K9CYT 10/12).
+  function isAddressedTo(text, myCall) {
+    var me = normalizeCall(myCall);
+    if (!me) return false;
+    var toks = String(text || '').toUpperCase().split(/\s+/);
+    for (var i = 0; i < toks.length; i++) {
+      if (toks[i] && normalizeCall(toks[i]) === me) return true;
+    }
+    return false;
+  }
+
   // Remove a hashed-call <...> wrapper but keep portable affixes intact
   // ("<PJ4/K1ABC>" -> "PJ4/K1ABC"). Unlike normalizeCall this preserves the
   // full transmittable call — use it when building TX messages, use
@@ -260,6 +275,7 @@
     looksLikeCallsign: looksLikeCallsign,
     normalizeCall: normalizeCall,
     stripHashBrackets: stripHashBrackets,
+    isAddressedTo: isAddressedTo,
     isStandardCall: isStandardCall,
     formatDirectedMsg: formatDirectedMsg,
     isCqText: isCqText,

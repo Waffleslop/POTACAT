@@ -187,6 +187,22 @@ eq(step('CQ W1ABC FN42', ME), { step: 'reply-cq', call: 'W1ABC' }, 'CQ fire text
 eq(step('K2XYZ W1ABC RR73', ME), { step: 'reply-cq', call: 'W1ABC' }, 'tail fire text -> inferReplyStep reply-cq targeting sender');
 
 // ---------------------------------------------------------------------
+// isAddressedTo: a compound call is "mine" in every form a decode carries it
+// (K9CYT/8 2026-10-12: report legs arrive hash-bracketed, and every surface
+// looked for " K9CYT/8 " with spaces round it, so nothing was highlighted).
+const to = P.isAddressedTo;
+eq(to('<K9CYT/8> W1ABC -10', 'K9CYT/8'), true, 'hash-bracketed report leg to me');
+eq(to('K9CYT/8 W1ABC RR73', 'K9CYT/8'), true, 'full compound call');
+eq(to('W1ABC <K9CYT/8> R-08', 'K9CYT/8'), true, 'bracketed as the sender');
+eq(to('K9CYT W1ABC FN42', 'K9CYT/8'), true, 'base call alone');
+eq(to('K3SBP W1ABC -10', 'K3SBP'), true, 'standard call unchanged');
+eq(to('K3SBP/P W1ABC', 'K3SBP'), true, 'my /P');
+eq(to('<...> W1ABC -10', 'K9CYT/8'), false, 'unresolved hash is nobody');
+eq(to('K9CYTX W1ABC -10', 'K9CYT/8'), false, 'a longer call is not mine');
+eq(to('W1ABC K2XYZ -10', 'K9CYT/8'), false, "someone else's QSO");
+eq(to('K9CYT/8 W1ABC -10', ''), false, 'no call configured');
+
+// ---------------------------------------------------------------------
 console.log('\n============================================================');
 console.log(`Results: ${pass} passed, ${fail} failed`);
 if (fail > 0) { console.log('FAILURES PRESENT'); process.exit(1); }
