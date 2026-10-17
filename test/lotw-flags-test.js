@@ -94,5 +94,41 @@ test('each skip carries TQSL\'s reason and detail', () => {
   assert.ok(!/TQSL Version|Signing using/.test(cr2t.reason + cr2t.detail));
 });
 
+// K3SBP 2026-10-17: TQSL listed every duplicate as "Previously Signed QSO
+// detected on line N"; they were treated as failures, left unmarked, and
+// each became its own "reason" because the line number differs.
+test('previously signed QSOs are already at LoTW, not skips', () => {
+  const { summarizeSkips, isAlreadyAtLotw, stampLotwSent } = require('../lib/lotw-flags');
+  const skips = [
+    { reason: 'Previously Signed QSO detected on line 6', CALL: 'W1AW', QSO_DATE: '20261001', TIME_ON: '1200' },
+    { reason: 'Previously Signed QSO detected on line 8', CALL: 'K1ABC', QSO_DATE: '20261001', TIME_ON: '1210' },
+    { reason: 'Invalid MODE (DIGU) on line 10', CALL: 'KM4ACK', QSO_DATE: '20261015', TIME_ON: '2039' },
+  ];
+  assert.ok(isAlreadyAtLotw(skips[0]));
+  const sum = summarizeSkips(skips);
+  assert.strictEqual(sum.dupes.length, 2);
+  assert.strictEqual(sum.real.length, 1);
+  const qsos = skips.map((k) => ({ CALL: k.CALL, QSO_DATE: k.QSO_DATE, TIME_ON: k.TIME_ON }));
+  const stats = stampLotwSent(qsos, qsos, sum.real, '20261017');
+  assert.strictEqual(stats.stamped, 2, 'the two LoTW already has are stamped');
+  assert.strictEqual(qsos[2].LOTW_QSL_SENT, undefined, 'the real skip stays unmarked');
+});
+
+test('skips group by reason and detail without line numbers', () => {
+  const { summarizeSkips } = require('../lib/lotw-flags');
+  const loc = (line, grid) => ({ reason: 'Station Location does not match QSO details', detail: `The Station Location 'Gridsquare' has value 'FN20JB' while QSO has '${grid}' on line ${line}`, CALL: 'X' + line, QSO_DATE: '1' });
+  const g = summarizeSkips([loc(40, 'FN20JC'), loc(42, 'FN20JC'), loc(44, 'FN12RK'), { reason: 'Invalid BAND () on line 36', CALL: 'Y', QSO_DATE: '1' }]).groups;
+  assert.strictEqual(g.length, 3);
+  assert.strictEqual(g[0].n, 2);
+  assert.ok(/FN20JC'$/.test(g[0].text), g[0].text);
+  assert.ok(!g.some((x) => /on line/.test(x.text)));
+});
+
+test('main.js reports grouped real skips and the true total', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(src.includes('const skips = skipSummary.real;'));
+  assert.ok(src.includes('r.skippedTotal = skips.length;'));
+});
+
 console.log(`\nLoTW flags: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

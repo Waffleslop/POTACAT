@@ -5111,7 +5111,10 @@ lotwUploadBtn.addEventListener('click', async () => {
       det.style.marginTop = '4px';
       det.style.color = 'var(--text-primary)';
       const sum = document.createElement('summary');
-      sum.textContent = `Show the ${r.skipped.length} skipped QSO${r.skipped.length === 1 ? '' : 's'}`;
+      const total = r.skippedTotal || r.skipped.length;
+      sum.textContent = total > r.skipped.length
+        ? `Show the first ${r.skipped.length} of ${total} QSOs not uploaded`
+        : `Show the ${total} QSO${total === 1 ? '' : 's'} not uploaded`;
       det.appendChild(sum);
       const ul = document.createElement('ul');
       ul.style.margin = '4px 0 0 16px';

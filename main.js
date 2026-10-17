@@ -31178,9 +31178,13 @@ app.whenReady().then(() => {
           // skipped. Dupes aren't listed (uploaded.db skips them silently)
           // and ARE stamped — a dupe is at LoTW by definition.
           try {
-            const { parseTqslSkips, stampLotwSent } = require('./lib/lotw-flags');
+            const { parseTqslSkips, stampLotwSent, summarizeSkips } = require('./lib/lotw-flags');
             const snapshotQsos = parseAllRawQsos(snap);
-            const skips = parseTqslSkips(String(stderr || ''));
+            // "Previously Signed QSO" is TQSL saying LoTW already has it: those
+            // are stamped as sent like silent dupes, never reported as skips.
+            const skipSummary = summarizeSkips(parseTqslSkips(String(stderr || '')));
+            const skips = skipSummary.real;
+            const alreadyAtLotw = skipSummary.dupes.length;
             // ADIF has no JTTY submode yet (POTACAT logs MFSK/JTTY, lib/adif-writer.js).
             // TQSL skips what its config file does not know and says so only
             // in the stderr tail above — name the cause once per session.
@@ -31201,6 +31205,7 @@ app.whenReady().then(() => {
               }
             }
             sendCatLog(`[LoTW] Marked ${stats.stamped} QSOs as uploaded` +
+              (alreadyAtLotw ? ` (${alreadyAtLotw} TQSL reported as previously signed, so already at LoTW)` : '') +
               (stats.alreadyStamped ? ` (${stats.alreadyStamped} already marked)` : '') +
               (skips.length ? `; ${skips.length} skipped by TQSL stay unmarked` : ''));
             // Say WHICH QSOs TQSL skipped and why, in the log and in the
@@ -31208,15 +31213,16 @@ app.whenReady().then(() => {
             for (const sk of skips) {
               sendCatLog(`[LoTW] skipped ${sk.CALL} ${sk.QSO_DATE} ${sk.TIME_ON || ''}${sk.STATION_CALLSIGN ? ' as ' + sk.STATION_CALLSIGN : ''} — ${sk.reason || 'no reason given'}${sk.detail ? ' (' + sk.detail + ')' : ''}`);
             }
-            const byReason = new Map();
-            for (const sk of skips) byReason.set(sk.reason || 'no reason given', (byReason.get(sk.reason || 'no reason given') || 0) + 1);
-            const reasons = [...byReason].map(([why, n]) => `${n} "${why}"`).join(', ');
+            const reasons = skipSummary.groups.map((g) => `${g.n} × ${g.text}`).join('; ');
+            r.skippedTotal = skips.length;
             r.skipped = skips.slice(0, 200).map(sk => ({
               call: sk.CALL, date: sk.QSO_DATE, time: sk.TIME_ON || '', station: sk.STATION_CALLSIGN || '',
               reason: sk.reason || '', detail: sk.detail || '',
             }));
             if (stats.stamped > 0 || skips.length > 0) {
-              r.message += ` ${stats.stamped} QSOs marked as uploaded${skips.length ? `; ${skips.length} skipped by TQSL: ${reasons}. These stay unmarked until fixed.` : '.'}`;
+              r.message += ` ${stats.stamped} QSOs marked as uploaded` +
+                (alreadyAtLotw ? ` (${alreadyAtLotw} of them LoTW already had)` : '') +
+                (skips.length ? `. ${skips.length} not uploaded: ${reasons}. These stay unmarked until fixed.` : '.');
             }
           } catch (stampErr) {
             sendCatLog('[LoTW] Sent-flag stamping failed (upload itself succeeded): ' + stampErr.message);
