@@ -2035,19 +2035,39 @@ let pttPreTap = null;
 let pttPostTap = null;
 let pttMeterTimer = null;
 
+// Every press and release bumps pttGen. pttStart awaits settings, the mic,
+// the worklet module and the context resume; a release during any of those
+// used to find nothing to stop, and the start then finished anyway: its mic
+// tap posted chunks forever (each leaked tap is another copy of the voice in
+// the next transmission, interleaved = slow, long echo after release, K3SBP
+// 2026-10-17) and its nakedPtt(true) keyed the radio AFTER the release. A
+// start that finds its generation stale tears down what it made and returns.
+let pttGen = 0;
+
 async function pttStart() {
   if (pttDown) return;
   pttDown = true;
+  const gen = ++pttGen;
+  const stale = () => gen !== pttGen;
   pttBtn.classList.add('active');
   pttBtn.textContent = 'TX';
   if (kiwiGainNode) kiwiGainNode.gain.value = 0;
-  // Start mic → radio TX
+  // Start mic → radio TX. Built on locals and published to the globals only
+  // while this press is still current, so an abandoned start never
+  // overwrites (or leaks next to) a newer press's graph.
+  let stream = null, ctx = null;
+  const abandon = () => {
+    if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch {} }
+    if (ctx) { ctx.close().catch(() => {}); }
+  };
   {
     try {
       const s = await window.api.getSettings();
+      if (stale()) return;
       const micConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
       if (pttMicDeviceId) micConstraints.deviceId = { exact: pttMicDeviceId };
-      pttMicStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints });
+      if (stale()) { abandon(); return; }
 
       // Same rule the audio bridge uses to decide between VITA-49 direct
       // and the legacy DAX/CODEC sink path. Computed here from settings
@@ -2060,13 +2080,17 @@ async function pttStart() {
         // Direct path: mic → EQ → AudioWorklet → dax-tx-chunk IPC. Use a
         // 24 kHz context so the worklet's downsample logic matches the
         // bridge's. AudioWorklet module is shared with the bridge.
-        pttDaxCtx = new AudioContext({ sampleRate: 24000 });
-        await pttDaxCtx.audioWorklet.addModule('dax-tx-worklet.js');
-        if (pttDaxCtx.state === 'suspended') await pttDaxCtx.resume();
+        ctx = new AudioContext({ sampleRate: 24000 });
+        await ctx.audioWorklet.addModule('dax-tx-worklet.js');
+        if (stale()) { abandon(); return; }
+        if (ctx.state === 'suspended') await ctx.resume();
+        if (stale()) { abandon(); return; }
+        pttMicStream = stream;
+        pttDaxCtx = ctx;
         pttSourceNode = pttDaxCtx.createMediaStreamSource(pttMicStream);
         pttDaxWorklet = new AudioWorkletNode(pttDaxCtx, 'dax-tx-processor');
         pttDaxWorklet.port.onmessage = (ev) => {
-          if (ev.data) window.api.daxTxChunk(ev.data);
+          if (ev.data && !stale()) window.api.daxTxChunk(ev.data);
         };
         if (!pttPreTap)  { pttPreTap  = pttDaxCtx.createAnalyser(); pttPreTap.fftSize  = 1024; pttPreTap.smoothingTimeConstant = 0; }
         if (!pttPostTap) { pttPostTap = pttDaxCtx.createAnalyser(); pttPostTap.fftSize = 1024; pttPostTap.smoothingTimeConstant = 0; }
@@ -2077,11 +2101,15 @@ async function pttStart() {
       } else {
         // Legacy path: mic → EQ → ctx.destination (setSinkId routes to
         // the rig's USB CODEC sink via DAX or a USB audio device).
-        pttMicCtx = new AudioContext();
-        if (pttMicCtx.state === 'suspended') await pttMicCtx.resume();
-        if (s.remoteAudioOutput && pttMicCtx.setSinkId) {
-          await pttMicCtx.setSinkId(s.remoteAudioOutput);
+        ctx = new AudioContext();
+        if (ctx.state === 'suspended') await ctx.resume();
+        if (stale()) { abandon(); return; }
+        if (s.remoteAudioOutput && ctx.setSinkId) {
+          await ctx.setSinkId(s.remoteAudioOutput);
+          if (stale()) { abandon(); return; }
         }
+        pttMicStream = stream;
+        pttMicCtx = ctx;
         pttSourceNode = pttMicCtx.createMediaStreamSource(pttMicStream);
         if (!pttPreTap)  { pttPreTap  = pttMicCtx.createAnalyser(); pttPreTap.fftSize  = 1024; pttPreTap.smoothingTimeConstant = 0; }
         if (!pttPostTap) { pttPostTap = pttMicCtx.createAnalyser(); pttPostTap.fftSize = 1024; pttPostTap.smoothingTimeConstant = 0; }
@@ -2090,6 +2118,7 @@ async function pttStart() {
       }
     } catch (e) {
       console.error('[VFO] Mic PTT failed:', e.message);
+      if (stale()) { abandon(); return; }
     }
   }
   // Start the VU meter loop. Polls pre + post taps every 50 ms and
@@ -2107,6 +2136,7 @@ async function pttStart() {
 function pttStop() {
   if (!pttDown) return;
   pttDown = false;
+  pttGen++; // abandons a start still awaiting the mic or worklet
   pttBtn.classList.remove('active');
   pttBtn.textContent = 'PTT';
   window.api.nakedPtt(false);

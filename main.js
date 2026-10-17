@@ -1736,6 +1736,11 @@ function swrGuardAnnounce(msg) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
   }
+  // VFO window: its PTT button is a TX source too, and a trip there showed
+  // only in the CAT log (K3SBP 2026-10-17).
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+    vfoPopoutWin.webContents.send('tune-blocked', msg);
+  }
   // JS8 window: the persistent SWR banner + ATU affordance. The window
   // shows no CAT log, so before this a JS8 transmission just died at ~0.5s
   // with nothing on screen (Casey 2026-08-09).
@@ -19767,6 +19772,11 @@ function handleRemotePtt(state, opts = {}) {
   // device PTT, naked PTT) in one place. Releases (state=false) always pass.
   if (state && _swrTripped) {
     sendCatLog('[SWR GUARD] PTT blocked — SWR guard tripped. Run the ATU or change bands to re-enable TX.');
+    // Say it where the press happened: the VFO window's PTT button showed TX
+    // and nothing else while every press was refused.
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+      vfoPopoutWin.webContents.send('tune-blocked', 'PTT blocked — the SWR guard tripped. Run the ATU or change bands to re-enable TX.');
+    }
     if (remoteServer && remoteServer.running) {
       remoteServer.sendToClient({ type: 'tune-blocked', reason: 'PTT blocked — SWR guard tripped. Run the ATU or change bands on the desktop.' });
     }
