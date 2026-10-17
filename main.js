@@ -19673,6 +19673,17 @@ function assertFlexTxDaxForTx() {
   // Direct station the two could name different slices and the second write
   // silently undid the first.
   try { if (smartSdr && smartSdr.connected) smartSdr.setTxSlice(flexPttSliceIndex()); } catch { /* best effort */ }
+  // dax=1 alone is not enough: only ONE dax_tx stream is the transmit stream
+  // (its tx=1 flag). SmartSDR's DAX control panel claims it for its own
+  // stream, and the radio then keys with silence while our audio goes
+  // nowhere — 0 W, no modulation, no error (K3SBP 2026-10-17, SSB with
+  // SmartSDR + DAX open). Claim it for our stream; key-up hands it back.
+  try {
+    const from = smartSdrAudio.claimTxStream();
+    if (from !== false) {
+      sendCatLog(`[SmartSDR] DAX TX: POTACAT's stream is now the transmit stream${from != null ? ` (taken from stream 0x${from.toString(16)}, the DAX control panel's — handed back after)` : ''}`);
+    }
+  } catch { /* best effort */ }
   if (prior === true) return;     // already the TX source — nothing to do or restore
   if (!_sendFlexTxDax(true)) return;
   _flexTxDaxPrior = (prior === false) ? false : null;
@@ -19680,6 +19691,10 @@ function assertFlexTxDaxForTx() {
 }
 
 function restoreFlexTxDax() {
+  try {
+    const back = smartSdrAudio && smartSdrAudio.returnTxStream ? smartSdrAudio.returnTxStream() : null;
+    if (back != null) sendCatLog(`[SmartSDR] DAX TX: transmit stream handed back to 0x${back.toString(16)}`);
+  } catch { /* best effort */ }
   if (_flexTxDaxPrior !== false) { _flexTxDaxPrior = null; return; }
   _flexTxDaxPrior = null;
   if (_sendFlexTxDax(false)) {
