@@ -23263,6 +23263,7 @@ function createWindow() {
     settings.clusterPopoutOpen = !!(clusterPopoutWin && !clusterPopoutWin.isDestroyed());
     settings.vfoPopoutOpen = !!(vfoPopoutWin && !vfoPopoutWin.isDestroyed());
     settings.logPopoutOpen = !!(logPopoutWin && !logPopoutWin.isDestroyed());
+    settings.conditionsPopoutOpen = !!(conditionsPopoutWin && !conditionsPopoutWin.isDestroyed());
     saveSettings(settings);
     // Every other window, ENUMERATED rather than listed by name.
     //
@@ -23454,6 +23455,12 @@ function createWindow() {
     // CAT-fed default state, same as a manual reopen.
     if (settings.logPopoutOpen) {
       ipcMain.emit('log-popout-open');
+    }
+    // Auto-reopen Conditions if it was open when the app last closed. Its
+    // size, position and zoom were already saved on close; without this flag
+    // a restart never brought the window back to use them.
+    if (settings.conditionsPopoutOpen) {
+      ipcMain.emit('conditions-popout-open');
     }
   });
 }
