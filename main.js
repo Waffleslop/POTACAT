@@ -1717,6 +1717,8 @@ let _swrTripMessage = '';       // the operator-readable trip reason, for the JS
 let _swrTrippedBand = '';       // band at trip time — leaving it clears the latch
 let _swrHuntNoted = false;      // Hunt has logged once that the latch is why it is not answering
 let _swrGuardHits = 0;          // consecutive over-limit frames (debounce = 3)
+let _flexLastFwdW = 0;          // newest Flex forward-power reading (W) and when
+let _flexLastFwdAt = 0;
 let _swrGuardSuppressUntil = 0; // no tripping during/just after an ATU tune
 let _swrLastAutoTune = 0;       // last auto-tune start (60 s gate)
 let _swrAutoTuneFailedBand = ''; // band whose auto-tune the radio reported as no match — no retry this session
@@ -13084,6 +13086,9 @@ function connectSmartSdr() {
   // after they stop rather than displaying stale watts forever.
   smartSdr.on('fwd-power', (watts) => {
     const w = Math.round((Number(watts) || 0) * 10) / 10;
+    // The SWR guard judges each SWR frame with the power beside it.
+    _flexLastFwdW = Number(watts) || 0;
+    _flexLastFwdAt = Date.now();
     if (_flexTxRf) {
       _flexTxRf.frames++;
       if (w > _flexTxRf.peakW) _flexTxRf.peakW = w;
@@ -13109,10 +13114,14 @@ function connectSmartSdr() {
     // suppressed entirely during/just after an ATU tune (see
     // noteAtuTuneStarted). Values are the radio's own bridge, raw/128 — a
     // true ratio, not a scaled meter.
+    // A frame at near-zero forward power (between words on SSB) neither
+    // counts nor resets — it used to reset, so voice never tripped.
     if (settings.swrGuard !== false && !_swrTripped && Date.now() > _swrGuardSuppressUntil) {
-      if (swr > swrGuardMax()) {
+      const fwdW = (Date.now() - _flexLastFwdAt < 500) ? _flexLastFwdW : null;
+      const verdict = SwrGuard.swrFrameVerdict({ swr, fwdW, limit: swrGuardMax() });
+      if (verdict === 'over') {
         if (++_swrGuardHits >= 3) tripSwrGuard(swr);
-      } else {
+      } else if (verdict === 'ok') {
         _swrGuardHits = 0;
       }
     }

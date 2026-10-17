@@ -183,5 +183,27 @@ check('Hunt does not engage a caller while the latch holds, and says so once per
   assert.ok(/_swrHuntNoted = false;/.test(clr), 'a new latch must be allowed to explain itself again');
 });
 
+check('SSB: a low-power frame between words neither counts nor resets', () => {
+  assert.strictEqual(G.swrFrameVerdict({ swr: 36, fwdW: 20, limit: 3 }), 'over');
+  assert.strictEqual(G.swrFrameVerdict({ swr: 1.0, fwdW: 0.3, limit: 3 }), 'ignore');
+  assert.strictEqual(G.swrFrameVerdict({ swr: 1.2, fwdW: 60, limit: 3 }), 'ok');
+  assert.strictEqual(G.swrFrameVerdict({ swr: 5, fwdW: null, limit: 3 }), 'over', 'no forward meter judges SWR alone');
+  // The K3SBP sequence: peaks over the limit with quiet frames between.
+  let hits = 0, tripped = false;
+  for (const [swr, fwdW] of [[36, 20], [1.0, 0.2], [30, 15], [1.0, 0.1], [35, 18]]) {
+    const v = G.swrFrameVerdict({ swr, fwdW, limit: 3 });
+    if (v === 'over' && ++hits >= 3) tripped = true;
+    else if (v === 'ok') hits = 0;
+  }
+  assert.ok(tripped, 'voice into 36:1 must trip');
+});
+
+check('main judges each SWR frame with the fresh forward power', () => {
+  const at = mainSrc.indexOf("smartSdr.on('swr-ratio'");
+  const body = mainSrc.slice(at, at + 2500);
+  assert.ok(/SwrGuard\.swrFrameVerdict\(\{ swr, fwdW, limit: swrGuardMax\(\) \}\)/.test(body));
+  assert.ok(/else if \(verdict === 'ok'\) \{\s*_swrGuardHits = 0;/.test(body), 'only a real reading resets');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
