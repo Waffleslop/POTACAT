@@ -180,6 +180,7 @@ const MODE_RES = {
   try { await loadActivePack(); } catch (e) { console.error('[SSTV] Pack load error:', e); }
   rebuildLook();
   try { const on = document.getElementById('op-name'); if (on) on.value = settings.sstvOperatorName || ''; } catch {}
+  try { const sa = document.getElementById('save-all-decodes'); if (sa) sa.checked = settings.sstvSaveAllDecodes === true; } catch {}
   try { await refreshPacks(); } catch (e) { console.error('[SSTV] Packs list error:', e); }
 
   // Load saved templates
@@ -3097,6 +3098,10 @@ function showLookLock() {
   if (shuf) shuf.disabled = !!settings.sstvLookLocked;
 }
 document.getElementById('look-lock').addEventListener('click', () => setLookLocked(!settings.sstvLookLocked));
+document.getElementById('save-all-decodes').addEventListener('change', (e) => {
+  settings.sstvSaveAllDecodes = !!e.target.checked;
+  window.api.saveSettings({ sstvSaveAllDecodes: settings.sstvSaveAllDecodes });
+});
 document.getElementById('op-name').addEventListener('change', (e) => {
   settings.sstvOperatorName = e.target.value.trim();
   window.api.saveSettings({ sstvOperatorName: settings.sstvOperatorName });

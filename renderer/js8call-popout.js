@@ -48,9 +48,32 @@
   var lastDecodeTs = 0;           // for the "am I receiving?" age chip
   var wfHidden = false;           // waterfall hidden by the operator (persisted)
 
-  // Directed queries, one tap. They FILL the box rather than sending, so
-  // what leaves is still seen first.
-  var CHIPS = ['SNR?', 'GRID?', 'INFO?', 'QSL', '73'];
+  // Directed commands, one tap. They FILL the box rather than sending, so
+  // what leaves is still seen first. The set is JS8Call's own directed
+  // command list (lib/js8-varicode.js DIRECTED_CMDS), not a new vocabulary —
+  // K9CYT 2026-10-04 missed QUERY CALL and HW CPY? from the original five.
+  // A chip ending in a space takes an argument the operator types next.
+  var CHIPS = [
+    { t: 'SNR?', h: 'Ask for your signal report' },
+    { t: 'GRID?', h: 'Ask for their grid square' },
+    { t: 'INFO?', h: 'Ask for their station info' },
+    { t: 'STATUS?', h: 'Ask for their status' },
+    { t: 'HEARING?', h: 'Ask who they are hearing' },
+    { t: 'HW CPY?', h: 'How do you copy?' },
+    { t: 'AGN?', h: 'Ask them to repeat their last message' },
+    { t: 'QSL?', h: 'Ask whether they received your message' },
+    { t: 'QUERY CALL ', h: 'Ask whether they can hear a callsign: type the call, then ?' },
+    { t: 'QUERY MSGS', h: 'Ask whether they hold messages for you' },
+    { t: 'MSG ', h: 'Leave a message in their inbox: type it after MSG' },
+    { t: 'QSL', h: 'Message received' },
+    { t: 'RR', h: 'Roger roger' },
+    { t: 'FB', h: 'Fine business' },
+    { t: 'ACK', h: 'Acknowledge' },
+    { t: 'YES', h: 'Yes' },
+    { t: 'NO', h: 'No' },
+    { t: 'SK', h: 'End of contact' },
+    { t: '73', h: 'Best regards' },
+  ];
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -144,14 +167,15 @@
     var want = toEl.value || openCall || '@ALLCALL';
     var opts = knownGroups(list).slice();
     if (openCall && opts.indexOf(openCall) < 0) opts.unshift(openCall);
+    opts.unshift(NO_ADDRESS);
     heard.forEach(function (h) { if (opts.indexOf(h.call) < 0) opts.push(h.call); });
     toEl.innerHTML = '';
     opts.forEach(function (o) {
       var opt = document.createElement('option');
-      opt.value = o; opt.textContent = o;
+      opt.value = o; opt.textContent = o === NO_ADDRESS ? 'No address' : o;
       toEl.appendChild(opt);
     });
-    toEl.value = opts.indexOf(want) >= 0 ? want : opts[0];
+    toEl.value = opts.indexOf(want) >= 0 ? want : (openCall || '@ALLCALL');
   }
 
   function setUnreadTotal(n) {
@@ -297,18 +321,19 @@
 
   function renderChips() {
     chipsEl.innerHTML = '';
-    CHIPS.forEach(function (label) {
+    CHIPS.forEach(function (chip) {
       var b = document.createElement('button');
       b.className = 'jc-chip';
       b.type = 'button';
-      b.textContent = label;
+      b.textContent = chip.t.trim();
       b.disabled = !running;
-      b.title = 'Put "' + label + '" in the message box';
+      b.title = chip.h + ' (fills the message box)';
       b.addEventListener('click', function () {
         // Body only — the To box already carries the destination, and a second
         // one in the text would be transmitted verbatim.
-        textEl.value = label;
+        textEl.value = chip.t;
         textEl.focus();
+        textEl.setSelectionRange(textEl.value.length, textEl.value.length);
         refreshCompose();
       });
       chipsEl.appendChild(b);
@@ -328,12 +353,24 @@
   function isAddressed(t) {
     return /^@[A-Z0-9/]{2,}(s|$)/i.test(t) || /^[A-Z0-9/]{2,}:/i.test(t);
   }
+  // "No address" in the To list: the message goes out as JS8Call sends free
+  // text, identified with our callsign (js8-engine.js forceIdentify).
+  var NO_ADDRESS = '-';
+  function toValue() {
+    var v = (toEl.value || '').trim().toUpperCase();
+    return v === NO_ADDRESS ? '' : v;
+  }
   function outgoing() {
     var body = textEl.value.trim();
     if (!body) return '';
     if (isAddressed(body)) return body;
-    var to = (toEl.value || '').trim().toUpperCase();
-    if (!to) return body;
+    var to = toValue();
+    if (!to) {
+      var me = (stationEl.textContent || '').trim().toUpperCase();
+      // CQ and HB pack as beacons that already carry our call.
+      var beacon = /^(CQ|HB|HEARTBEAT)\b/i.test(body);
+      return me && !beacon && body.toUpperCase().indexOf(me) < 0 ? me + ': ' + body : body;
+    }
     var group = to.charAt(0) === '@' || GROUPS.indexOf(to) >= 0;
     return group ? to + ' ' + body : to + ': ' + body;
   }
@@ -372,7 +409,7 @@
 
   sendBtn.addEventListener('click', function () {
     var body = textEl.value.trim();
-    if (body) transmit(body, toEl.value);
+    if (body) transmit(body, toValue());
   });
   toEl.addEventListener('change', refreshCompose);
   textEl.addEventListener('keydown', function (e) {

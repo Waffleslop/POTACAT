@@ -1900,6 +1900,7 @@ let _currentVfo = 'A';
 let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s)
 let _currentFilterWidth = 0;
 
+const RelogGuard = require('./lib/jtcat-relog-guard');
 // The callsign being worked — CW-macro {call} on every surface. See
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
 const { TypedCallTracker } = require('./lib/typed-call');
@@ -10798,6 +10799,9 @@ function popoutBroadcastQso() {
   }
 }
 
+// call|band|mode -> ms of the last JTCAT auto-log (lib/jtcat-relog-guard.js).
+const _jtcatRecentLogs = new Map();
+
 async function jtcatAutoLog(qso) {
   const q = qso || remoteJtcatQso;
   if (!q || !q.call) {
@@ -10835,6 +10839,23 @@ async function jtcatAutoLog(qso) {
   const freqMhz = freqKhz / 1000;
   const band = freqToBand(freqMhz) || '';
   const mode = ft8Engine ? ft8Engine._mode : 'FT8';
+  // Re-log guard (K9CYT 2026-10-04): answering a repeated R-report starts a
+  // NEW QSO object, so _logged above cannot see it. Same call, band and mode
+  // logged inside the cool-down = the same contact; the RR73 still goes out.
+  const relogKeyStr = RelogGuard.relogKey(q.call, band, mode);
+  const relogWindow = RelogGuard.cooldownMinutes(settings.jtcatRelogCooldownMin);
+  const relog = RelogGuard.checkRelog(_jtcatRecentLogs, relogKeyStr, Date.now(), relogWindow);
+  if (relog.skip) {
+    const ago = relog.agoMin < 1 ? 'under a minute' : `${relog.agoMin} min`;
+    sendCatLog(`[JTCAT] Not logged again: ${q.call.toUpperCase()} was logged on ${band} ${mode} ${ago} ago (re-log guard, ${relogWindow} min)`);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-dupe-warning', {
+        message: `${q.call.toUpperCase()} not logged again`,
+        sub: `Already logged on ${band} ${mode} ${ago} ago. Change the window in the gear menu.`,
+      });
+    }
+    return;
+  }
   const qsoData = {
     callsign: q.call.toUpperCase(),
     frequency: String(freqKhz),
@@ -10976,6 +10997,7 @@ async function jtcatAutoLog(qso) {
     }
 
     console.log('[JTCAT] Auto-logged QSO:', q.call, 'OK');
+    RelogGuard.noteLogged(_jtcatRecentLogs, relogKeyStr, Date.now());
     // Notify the popout window
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-qso-logged', {
@@ -29612,7 +29634,7 @@ app.whenReady().then(() => {
       if (data.redecode) {
         sendCatLog(`[SSTV] Redecode result: ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}${data.weak ? ' (weak)' : ''}`);
       } else if (data.weak) {
-        sendCatLog(`[SSTV] WEAK decode shown (not auto-saved): ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}`);
+        sendCatLog(`[SSTV] WEAK decode shown (${settings.sstvSaveAllDecodes === true ? 'saved as partial — Save every picture is on' : 'not auto-saved'}): ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}`);
       } else {
         sendCatLog(`[SSTV] Image decoded: ${data.width}x${data.height} ${data.mode} — saving to gallery`);
       }
@@ -29620,7 +29642,11 @@ app.whenReady().then(() => {
       applySstvPostProcess(data);
       // Save to gallery (good-tier live decodes only — weak decodes and
       // manual redecodes display without touching the on-disk gallery)
-      const saved = (data.weak || data.redecode) ? null : await saveSstvImage(data);
+      // ...unless the operator turned on "Save every picture" (K9CYT
+      // 2026-10-04: a 95%-readable image that lost its header was never kept).
+      // Rejected noise never reaches here, so this saves weak decodes only.
+      const saveWeak = data.weak && settings.sstvSaveAllDecodes === true;
+      const saved = (data.redecode || (data.weak && !saveWeak)) ? null : await saveSstvImage(data);
       // Send to popout
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-image', {
@@ -29814,7 +29840,7 @@ app.whenReady().then(() => {
       const heardHz = data.freqHz !== undefined ? data.freqHz : (_currentFreqHz || null);
       const freqPart = heardHz ? `${Math.round(heardHz / 1000)}kHz` : '';
       const callPart = sanitizeSstvFilenamePart(settings.myCallsign || '', '');
-      const pieces = ['sstv', modePart, freqPart, callPart, ts].filter(Boolean);
+      const pieces = ['sstv', modePart, freqPart, callPart, ts, data.weak ? 'partial' : ''].filter(Boolean);
       const filename = `${pieces.join('_')}.png`;
       const { nativeImage } = require('electron');
       // ImageData is RGBA, nativeImage expects BGRA — convert
@@ -29844,6 +29870,9 @@ app.whenReady().then(() => {
         rigMode: data.rigMode !== undefined ? (data.rigMode || '') : (_currentMode || ''),
         callsign: settings.myCallsign || '',
         postProcessed: settings.sstvPostProcess !== false,
+        // A weak-tier decode kept by "Save every picture" — the sidecar says
+        // so, and the filename carries "partial" so a folder sort shows it.
+        partial: !!data.weak,
       };
       await fs.promises.writeFile(filePath.replace(/\.png$/i, '.json'), JSON.stringify(meta, null, 2), 'utf-8');
       _sstvLastSaved = { jsonPath: filePath.replace(/\.png$/i, '.json'), at: Date.now() };
@@ -30436,7 +30465,9 @@ app.whenReady().then(() => {
 
     sstvManager.on('rx-image', async (data) => {
       applySstvPostProcess(data);
-      const saved = await saveSstvImage(data);
+      // Same rule as the single-receiver path: weak decodes are kept only
+      // when "Save every picture" is on.
+      const saved = (data.weak && settings.sstvSaveAllDecodes !== true) ? null : await saveSstvImage(data);
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-image', {
           imageData: Array.from(data.imageData),

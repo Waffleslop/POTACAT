@@ -80,6 +80,10 @@ function _applyPopoutTheme(payload) {
     if (maxAttemptsInput && typeof s.jtcatMaxQsoAttempts === 'number') {
       maxAttemptsInput.value = s.jtcatMaxQsoAttempts;
     }
+    if (relogMinInput) {
+      var rm = parseInt(s.jtcatRelogCooldownMin, 10);
+      relogMinInput.value = (isFinite(rm) && rm >= 0) ? Math.min(rm, 120) : 15;
+    }
     if (reworkDaysInput && typeof s.jtcatReworkDays === 'number') {
       reworkDaysInput.value = s.jtcatReworkDays;
     }
@@ -209,6 +213,7 @@ function _applyPopoutTheme(payload) {
     if (window.api.openWatchlistSettings) window.api.openWatchlistSettings();
   });
   var reworkDaysInput = document.getElementById('jp-rework-days');
+  var relogMinInput = document.getElementById('jp-relog-min');
   var runPauseInput = document.getElementById('jp-run-pause-after');
   var wfSpeedInput = document.getElementById('jp-wf-speed');
   var wfFloorInput = document.getElementById('jp-wf-floor');
@@ -2423,6 +2428,15 @@ function _applyPopoutTheme(payload) {
       if (n > 3650) n = 3650;
       reworkDaysInput.value = n;
       window.api.saveSettings({ jtcatReworkDays: n });
+    });
+  }
+  if (relogMinInput) {
+    relogMinInput.addEventListener('change', function() {
+      var n = parseInt(relogMinInput.value, 10);
+      if (!isFinite(n) || n < 0) n = 0;  // 0 = guard off, log every exchange
+      if (n > 120) n = 120;
+      relogMinInput.value = n;
+      window.api.saveSettings({ jtcatRelogCooldownMin: n });
     });
   }
   if (runPauseInput) {
