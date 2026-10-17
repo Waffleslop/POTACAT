@@ -127,7 +127,8 @@ test('skips group by reason and detail without line numbers', () => {
 test('main.js reports grouped real skips and the true total', () => {
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
   assert.ok(src.includes('const skips = skipSummary.real;'));
-  assert.ok(src.includes('r.skippedTotal = skips.length;'));
+  // The total counts every batch's TQSL skips plus held-back activations.
+  assert.ok(src.includes('r.skippedTotal = notUploaded.length;'));
 });
 
 console.log(`\nLoTW flags: ${pass} passed, ${fail} failed`);

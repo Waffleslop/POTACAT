@@ -31145,6 +31145,7 @@ app.whenReady().then(() => {
   let _lotwJttyNoticed = false; // one JTTY-submode notice per session
   ipcMain.handle('lotw-upload', async (_e, opts) => {
     const { findTqsl, buildTqslArgs, mapTqslExit } = require('./lib/tqsl');
+    const { splitForLotw, buildActivationTqslArgs, batchAdif } = require('./lib/lotw-split');
     // Live field values from the Settings dialog win over saved settings so
     // the button works before the operator hits Save.
     const location = (opts && opts.location) || settings.lotwStationLocation;
@@ -31154,11 +31155,106 @@ app.whenReady().then(() => {
     if (!location) return { ok: false, message: 'Pick your TQSL Station Location first.' };
     const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     if (!fs.existsSync(logPath)) return { ok: false, message: 'No QSO log to upload yet.' };
-    // Snapshot the log so an append mid-upload can't tear the file TQSL reads.
-    const snap = path.join(app.getPath('userData'), 'lotw-upload.adi');
-    fs.copyFileSync(logPath, snap);
-    const args = buildTqslArgs({ location, adifPath: snap, password });
-    sendCatLog(`[LoTW] tqsl ${args.filter((x) => !password || x !== password).join(' ')}`);
+    // One read of the log is the snapshot every batch is cut from, so an
+    // append mid-upload can't tear what TQSL reads.
+    let allQsos;
+    try { allQsos = parseAllRawQsos(logPath); } catch (e) { return { ok: false, message: 'Could not read the QSO log: ' + e.message }; }
+    // Activations are signed one at a time in TQSL's QTH update mode with NO
+    // Station Location, so a park's grid and state come from its own records
+    // and never from the home location (lib/lotw-split.js). Blank grid/state
+    // are filled from the park list the same way saveQsoRecord fills them.
+    const { home, activations } = splitForLotw(allQsos, {
+      myCallsign: settings.myCallsign,
+      fill: (q) => {
+        const f = activationStationFillFor({
+          mySigInfo: q.MY_POTA_REF || q.MY_SIG_INFO || q.MY_SOTA_REF || q.MY_WWFF_REF,
+          operator: q.OPERATOR, stationCallsign: q.STATION_CALLSIGN,
+          myGridsquare: q.MY_GRIDSQUARE, myState: q.MY_STATE,
+        });
+        return { MY_GRIDSQUARE: f.myGridsquare, MY_STATE: f.myState };
+      },
+    });
+    const runs = [];
+    if (home.length) runs.push({ label: 'Home', records: home, args: (p) => buildTqslArgs({ location, adifPath: p, password }) });
+    for (const b of activations) {
+      if (b.skip) continue;
+      runs.push({ label: b.label, records: b.records, args: (p) => buildActivationTqslArgs({ call: b.call, adifPath: p, password }) });
+    }
+    const held = activations.filter((b) => b.skip);
+    for (const b of held) sendCatLog(`[LoTW] Activation ${b.label}: ${b.records.length} QSO${b.records.length === 1 ? '' : 's'} not uploaded — ${b.skip}`);
+    if (!runs.length) {
+      return { ok: false, message: held.length ? `Nothing could be uploaded: ${held.map((b) => `${b.label}: ${b.skip}`).join('; ')}.` : 'No QSOs in the log to upload.' };
+    }
+    if (activations.length) {
+      sendCatLog(`[LoTW] Uploading in ${runs.length} part${runs.length === 1 ? '' : 's'}: ${runs.map((x) => `${x.label} (${x.records.length})`).join(', ')}`);
+    }
+    const done = [];
+    for (let i = 0; i < runs.length; i++) {
+      const run = runs[i];
+      const snap = path.join(app.getPath('userData'), `lotw-upload-${i}.adi`);
+      fs.writeFileSync(snap, batchAdif(run.records), 'utf-8');
+      const res = await runLotwBatch(tqsl, run.args(snap), snap, password, mapTqslExit, run.label);
+      try { fs.unlinkSync(snap); } catch { /* best effort */ }
+      done.push({ run, res });
+      // A failed run (wrong password, no network, LoTW down) fails the same
+      // way for every batch after it — stop instead of repeating it.
+      if (!res.r.ok) break;
+    }
+    if (done.some((d) => d.res.r.ok)) {
+      settings.lastLotwUploadAt = Date.now();
+      saveSettings(settings);
+    }
+    if (done.some((d) => d.res.stamped > 0) && qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+      qsoPopoutWin.webContents.send('qso-popout-refresh');
+    }
+    // Everything not uploaded, TQSL's skips and held-back activations alike,
+    // in the one list the Settings result shows (GitHub #92).
+    const notUploaded = [];
+    for (const d of done) {
+      for (const sk of d.res.skips) {
+        notUploaded.push({ call: sk.CALL, date: sk.QSO_DATE, time: sk.TIME_ON || '', station: sk.STATION_CALLSIGN || '', reason: sk.reason || '', detail: sk.detail || '' });
+      }
+    }
+    for (const b of held) {
+      for (const q of b.records) {
+        notUploaded.push({ call: q.CALL, date: q.QSO_DATE, time: q.TIME_ON || '', station: b.call, reason: `Activation ${b.ref} not uploaded`, detail: b.skip });
+      }
+    }
+    let r;
+    if (done.length === 1 && !activations.length) {
+      // Home only: the message reads exactly as before.
+      r = done[0].res.r;
+    } else {
+      const failed = done.find((d) => !d.res.r.ok);
+      const parts = done.map((d) => {
+        const x = d.res;
+        if (!x.r.ok) return `${d.run.label}: ${x.r.message}`;
+        return `${d.run.label}: ${x.stamped} marked as uploaded` +
+          (x.alreadyAtLotw ? ` (${x.alreadyAtLotw} LoTW already had)` : '') +
+          (x.skips.length ? `, ${x.skips.length} not uploaded (${x.groups.map((g) => `${g.n} × ${g.text}`).join('; ')})` : '') + '.';
+      });
+      const unrun = runs.slice(done.length).map((x) => x.label);
+      r = {
+        ok: !failed,
+        message: (failed ? `LoTW upload stopped at ${failed.run.label}.` : `Uploaded to LoTW in ${done.length} part${done.length === 1 ? '' : 's'}: home, and each activation with its own grid and state.`) +
+          ' ' + parts.join(' ') +
+          (unrun.length ? ` Not tried after the failure: ${unrun.join(', ')}.` : '') +
+          (held.length ? ` Not uploaded: ${held.map((b) => `${b.label}: ${b.skip}`).join('; ')}.` : '') +
+          (notUploaded.length ? ' These stay unmarked until fixed.' : ''),
+      };
+      if (failed && failed.res.r.detail) r.detail = failed.res.r.detail;
+    }
+    if (notUploaded.length) {
+      r.skippedTotal = notUploaded.length;
+      r.skipped = notUploaded.slice(0, 200);
+    }
+    return r;
+  });
+
+  // One TQSL run over one batch file: exit code → outcome, then stamp the
+  // batch's QSOs as sent except the ones TQSL named as skipped.
+  function runLotwBatch(tqsl, args, snap, password, mapTqslExit, label) {
+    sendCatLog(`[LoTW] ${label}: tqsl ${args.filter((x) => !password || x !== password).map((x) => (x === '' ? '""' : x)).join(' ')}`);
     return new Promise((resolve) => {
       const { execFile } = require('child_process');
       // maxBuffer: tqsl prints a multi-line complaint PER SKIPPED QSO to
@@ -31167,6 +31263,7 @@ app.whenReady().then(() => {
       // ("stderr maxBuffer length exceeded", LZ3AW's "-1", 2026-08-14).
       execFile(tqsl, args, { timeout: 120000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
         const code = err ? (typeof err.code === 'number' ? err.code : -1) : 0;
+        const out = { r: null, stamped: 0, alreadyAtLotw: 0, skips: [], groups: [] };
         let r;
         if (err && typeof err.code !== 'number') {
           // execFile failed BEFORE tqsl could report an exit code — the old
@@ -31181,17 +31278,16 @@ app.whenReady().then(() => {
         } else {
           r = mapTqslExit(code);
         }
+        out.r = r;
         // TQSL prints its story to stderr in batch mode — keep the tail.
         const tail = String(stderr || stdout || '').trim().split(/\r?\n/).slice(-3).join(' | ');
         if (tail) r.detail = tail;
-        sendCatLog(`[LoTW] ${r.ok ? 'OK' : 'FAILED'} (exit ${code}${err && err.signal ? ' signal ' + err.signal : ''}${err && typeof err.code === 'string' ? ' ' + err.code : ''}): ${r.message}${tail ? ' — ' + tail : ''}`);
+        sendCatLog(`[LoTW] ${label}: ${r.ok ? 'OK' : 'FAILED'} (exit ${code}${err && err.signal ? ' signal ' + err.signal : ''}${err && typeof err.code === 'string' ? ' ' + err.code : ''}): ${r.message}${tail ? ' — ' + tail : ''}`);
         if (r.ok) {
-          settings.lastLotwUploadAt = Date.now();
-          saveSettings(settings);
           // Phase 1.5: stamp LOTW_QSL_SENT/LOTW_QSLSDATE on everything that
-          // was in the uploaded snapshot except what tqsl's stderr named as
-          // skipped. Dupes aren't listed (uploaded.db skips them silently)
-          // and ARE stamped — a dupe is at LoTW by definition.
+          // was in this batch except what tqsl's stderr named as skipped.
+          // Dupes aren't listed (uploaded.db skips them silently) and ARE
+          // stamped — a dupe is at LoTW by definition.
           try {
             const { parseTqslSkips, stampLotwSent, summarizeSkips } = require('./lib/lotw-flags');
             const snapshotQsos = parseAllRawQsos(snap);
@@ -31214,12 +31310,7 @@ app.whenReady().then(() => {
               stats = stampLotwSent(qsos, snapshotQsos, skips, today);
               if (!stats.stamped) return false;
             });
-            if (stats.stamped > 0) {
-              if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
-                qsoPopoutWin.webContents.send('qso-popout-refresh');
-              }
-            }
-            sendCatLog(`[LoTW] Marked ${stats.stamped} QSOs as uploaded` +
+            sendCatLog(`[LoTW] ${label}: marked ${stats.stamped} QSOs as uploaded` +
               (alreadyAtLotw ? ` (${alreadyAtLotw} TQSL reported as previously signed, so already at LoTW)` : '') +
               (stats.alreadyStamped ? ` (${stats.alreadyStamped} already marked)` : '') +
               (skips.length ? `; ${skips.length} skipped by TQSL stay unmarked` : ''));
@@ -31228,13 +31319,12 @@ app.whenReady().then(() => {
             for (const sk of skips) {
               sendCatLog(`[LoTW] skipped ${sk.CALL} ${sk.QSO_DATE} ${sk.TIME_ON || ''}${sk.STATION_CALLSIGN ? ' as ' + sk.STATION_CALLSIGN : ''} — ${sk.reason || 'no reason given'}${sk.detail ? ' (' + sk.detail + ')' : ''}`);
             }
-            const reasons = skipSummary.groups.map((g) => `${g.n} × ${g.text}`).join('; ');
-            r.skippedTotal = skips.length;
-            r.skipped = skips.slice(0, 200).map(sk => ({
-              call: sk.CALL, date: sk.QSO_DATE, time: sk.TIME_ON || '', station: sk.STATION_CALLSIGN || '',
-              reason: sk.reason || '', detail: sk.detail || '',
-            }));
+            out.stamped = stats.stamped;
+            out.alreadyAtLotw = alreadyAtLotw;
+            out.skips = skips;
+            out.groups = skipSummary.groups;
             if (stats.stamped > 0 || skips.length > 0) {
+              const reasons = skipSummary.groups.map((g) => `${g.n} × ${g.text}`).join('; ');
               r.message += ` ${stats.stamped} QSOs marked as uploaded` +
                 (alreadyAtLotw ? ` (${alreadyAtLotw} of them LoTW already had)` : '') +
                 (skips.length ? `. ${skips.length} not uploaded: ${reasons}. These stay unmarked until fixed.` : '.');
@@ -31243,11 +31333,10 @@ app.whenReady().then(() => {
             sendCatLog('[LoTW] Sent-flag stamping failed (upload itself succeeded): ' + stampErr.message);
           }
         }
-        try { fs.unlinkSync(snap); } catch { /* best effort */ }
-        resolve(r);
+        resolve(out);
       });
     });
-  });
+  }
 
   // ── LoTW Phase 3: confirmation download (lotwreport.adi) ────────────
   // Different auth than upload: the LoTW WEBSITE login, not the TQSL cert.
