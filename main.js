@@ -14685,6 +14685,16 @@ function updateRemoteSettings() {
     logCommentTags: settings.logCommentTags !== false,
     respotTemplate: settings.respotTemplate || '{rst} in {QTH} 73s {mycallsign} via POTACAT',
     dxRespotTemplate: settings.dxRespotTemplate || 'Heard in {QTH} 73s {mycallsign} via POTACAT',
+    // Per-program templates (blank = use respotTemplate) and the saved
+    // re-spot messages the desktop log dialog cycles with its button (K8IKO
+    // 2026-10-02, handoff potacat-meta respot-templates-mobile). Additive:
+    // older clients ignore them.
+    wwffRespotTemplate: typeof settings.wwffRespotTemplate === 'string' ? settings.wwffRespotTemplate : '',
+    llotaRespotTemplate: typeof settings.llotaRespotTemplate === 'string' ? settings.llotaRespotTemplate : '',
+    wwbotaRespotTemplate: typeof settings.wwbotaRespotTemplate === 'string' ? settings.wwbotaRespotTemplate : '',
+    respotPresets: Array.isArray(settings.respotPresets)
+      ? settings.respotPresets.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim())
+      : [],
     scanDwell: parseInt(settings.scanDwell, 10) || 7,
     refreshInterval: settings.refreshInterval || 30,
     maxAgeMin: settings.maxAgeMin != null ? settings.maxAgeMin : 5,
@@ -34595,7 +34605,11 @@ app.whenReady().then(() => {
     // next reconnect (potacat-meta jtty-remote-fd-exch-and-replay).
     if (has('rotorActive') || has('rotorMode') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
         has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyProfile') || has('jttySerial') || has('pskMacros') ||
-        has('enableDxe') || has('enableDxeSources')) {
+        has('enableDxe') || has('enableDxeSources') ||
+        // Re-spot templates and saved messages: a connected device kept the
+        // old text until it reconnected (K8IKO respot-templates-mobile).
+        has('respotTemplate') || has('dxRespotTemplate') || has('wwffRespotTemplate') ||
+        has('llotaRespotTemplate') || has('wwbotaRespotTemplate') || has('respotPresets') || has('respotDefault')) {
       updateRemoteSettings();
     }
 
