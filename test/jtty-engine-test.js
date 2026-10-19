@@ -342,7 +342,119 @@ function onAir(pcm, leadSec, tailSec) {
     // Substitution understands WSJT-X's % tokens and the PSK31-style $ tokens.
     // Tokens upper-case; literal text keeps its case (PSK31 macros are lowercase on air by convention).
     assert.strictEqual(JM.substitute('%H %E de $MYCALL $GRID nr %N', { myCall: 'k3sbp', theirCall: 'w9xyz', exchange: '599 001', grid: 'fn20', serial: '001' }), 'W9XYZ 599 001 de K3SBP FN20 nr 001');
-    assert.deepStrictEqual(JM.needs('TU NOW %Q %E'), { theirCall: false, nextCall: true, myCall: false });
+    assert.deepStrictEqual(JM.needs('TU NOW %Q %E'), { theirCall: false, nextCall: true, myCall: false, report: false, grid: false });
+  });
+
+  await test('macro model: FT8 style is the default, WSJT-X 3.3 templates verbatim, measured reports', () => {
+    const JM = require('../lib/jtty-macros');
+    // WSJT-X 3.3.0-beta1 widgets/JttyMessages.hpp ft8StyleMacroTemplate(), F1-F6.
+    assert.deepStrictEqual(JM.FT8_DEFAULTS.map((d) => [d.key, d.text]),
+      [['F1', '%H %M %G'], ['F2', '%H %M %R'], ['F3', '%H %M R%R'], ['F4', '%H %M RRR'], ['F5', '%H %M 73'], ['F6', 'CQ %M %G']]);
+    assert.ok(JM.FT8_DEFAULTS.every((d) => d.label && d.label.length <= JM.MAX_LABEL), 'every FT8-style default has a name');
+    // No saved style = FT8 (K3SBP 2026-10-18: the contest exchange is not a normal QSO).
+    assert.strictEqual(JM.DEFAULT_STYLE, 'ft8');
+    const fresh = JM.forSettings({});
+    assert.strictEqual(fresh.style, 'ft8');
+    assert.deepStrictEqual(fresh.macros, JM.defaults('ft8'));
+    assert.strictEqual(JM.forSettings({ jttyMacroStyle: 'bogus' }).style, 'ft8', 'unknown style = FT8');
+    // A station that saved contest macros keeps them under Contest; FT8 starts from its defaults.
+    const saved = { jttyMacros: [{ label: 'Mine', text: 'CQ TEST %M', key: 'F1' }], jttyFt8Macros: null };
+    assert.deepStrictEqual(JM.forSettings(saved).macros, JM.defaults('ft8'));
+    assert.strictEqual(JM.forSettings(Object.assign({ jttyMacroStyle: 'contest' }, saved)).macros[0].text, 'CQ TEST %M');
+    // The legacy jttyTemplates array is contest-only.
+    assert.deepStrictEqual(JM.normalize(null, ['X'], 'ft8'), JM.defaults('ft8'));
+    assert.strictEqual(JM.settingsKey('ft8'), 'jttyFt8Macros');
+    assert.strictEqual(JM.settingsKey('contest'), 'jttyMacros');
+    // FT8-style texts are literal, never native (WSJT-X packs them as typed).
+    for (const d of JM.FT8_DEFAULTS) assert.ok(!JM.isNativeText(d.text), d.text + ' is literal');
+    // %R = "%+03d" as WSJT-X's formatSnr; R%R keeps its R.
+    assert.strictEqual(JM.formatReport(-7), '-07');
+    assert.strictEqual(JM.formatReport(3), '+03');
+    assert.strictEqual(JM.formatReport(0), '+00');
+    assert.strictEqual(JM.formatReport(-7.6), '-08');
+    assert.strictEqual(JM.formatReport(-45), '-30', 'two digits on the wire');
+    assert.strictEqual(JM.formatReport(null), '');
+    assert.strictEqual(JM.formatReport(undefined), '');
+    const f = { myCall: 'k1abc', theirCall: 'w9xyz', grid: 'fn20', report: '-07' };
+    assert.deepStrictEqual(JM.FT8_DEFAULTS.map((d) => JM.substitute(d.text, f)),
+      ['W9XYZ K1ABC FN20', 'W9XYZ K1ABC -07', 'W9XYZ K1ABC R-07', 'W9XYZ K1ABC RRR', 'W9XYZ K1ABC 73', 'CQ K1ABC FN20'], 'the WSJT-X 3.3 test vectors');
+    assert.deepStrictEqual(JM.needs('%H %M R%R'), { theirCall: true, nextCall: false, myCall: true, report: true, grid: false });
+    assert.ok(JM.needs('CQ %M %G').grid);
+    assert.strictEqual(JM.substitute('CQ %M %G', { myCall: 'k1abc', grid: 'fn20jb' }), 'CQ K1ABC FN20', '%G is the 4-character locator, as WSJT-X truncates it');
+    // Who sent a decode ("TO FROM ..."), their grid, the report they gave us.
+    const cases = [
+      ['CQ W9XYZ EN52', 'W9XYZ', 'EN52', ''],
+      ['CQ W9XYZ CQ', 'W9XYZ', '', ''],
+      ['K1ABC W9XYZ EN52', 'W9XYZ', 'EN52', ''],
+      ['K1ABC W9XYZ -12', 'W9XYZ', '', '-12'],
+      ['K1ABC W9XYZ R+03', 'W9XYZ', '', '+03'],
+      ['K1ABC W9XYZ RR73', 'W9XYZ', '', ''],
+      ['K1ABC W9XYZ 73', 'W9XYZ', '', ''],
+      ['W9XYZ', 'W9XYZ', '', ''],
+      ['W9XYZ 599 101', '', '', ''],
+      ['599 057', '', '', ''],
+      ['HELLO FROM OHIO', '', '', ''],
+      ['N0CALL W9XYZ -05', 'W9XYZ', '', ''],
+    ];
+    for (const [t, sender, grid, rpt] of cases) {
+      assert.strictEqual(JM.senderOf(t), sender, 'sender of ' + t);
+      assert.strictEqual(JM.gridOf(t), grid, 'grid of ' + t);
+      assert.strictEqual(JM.reportTo(t, 'K1ABC'), rpt, 'report to us in ' + t);
+    }
+    // Each FT8-style message fits one transmission well inside the 80-character / 16-frame limits.
+    const { validateMessage } = require('../lib/jtty-engine');
+    for (const t of ['CQ K1ABC FN20', 'W9XYZ K1ABC FN20', 'W9XYZ K1ABC -07', 'W9XYZ K1ABC R-07', 'W9XYZ K1ABC RRR', 'W9XYZ K1ABC 73']) {
+      const v = validateMessage(t, 'unknown');
+      assert.ok(v.ok && v.nframes <= 3, t + ' packs (' + v.nframes + ' frames)');
+    }
+  });
+
+  await test('frequency etiquette: answer on their frequency, stay put when called, Clear spot finds the quietest gap', () => {
+    const JM = require('../lib/jtty-macros');
+    // Who moves us (K3SBP 2026-10-18: RTTY convention, not 1500 for all, not random).
+    const me = 'K1ABC';
+    assert.strictEqual(JM.shouldFollowStation('CQ W9XYZ FN20', me, false), true, 'answering a CQ moves onto it');
+    assert.strictEqual(JM.shouldFollowStation('CQ W9XYZ CQ', me, false), true, 'contest CQ too');
+    assert.strictEqual(JM.shouldFollowStation('N0XX W9XYZ -07', me, false), true, 'a station working someone else (to call after)');
+    assert.strictEqual(JM.shouldFollowStation('K1ABC W9XYZ -07', me, false), false, 'a station calling US never moves us');
+    assert.strictEqual(JM.shouldFollowStation('W9XYZ', me, false), false, 'a lone call answers a CQ (likely ours): a running station stays');
+    assert.strictEqual(JM.shouldFollowStation('W9XYZ 599 101', me, false), false, 'no sender, no move');
+    assert.strictEqual(JM.shouldFollowStation('HELLO FROM OHIO', me, false), false, 'free text does not move');
+    assert.strictEqual(JM.shouldFollowStation('CQ W9XYZ FN20', me, true), false, 'Hold TX freezes it');
+    // Running average.
+    let acc = JM.accumulateLevels(null, [0, 10], 0.5);
+    assert.deepStrictEqual(Array.from(acc), [0, 10], 'first frame seeds');
+    acc = JM.accumulateLevels(acc, [10, 10], 0.5);
+    assert.deepStrictEqual(Array.from(acc), [5, 10]);
+    assert.strictEqual(JM.accumulateLevels(acc, [1, 2, 3], 0.5).length, 3, 'a new bin count restarts');
+    // Clearest spot over 0-3000 Hz at 10 Hz bins.
+    const lv = new Array(300).fill(10);
+    for (let i = 140; i < 165; i++) lv[i] = 200;   // a signal at 1400-1650
+    for (let i = 180; i < 200; i++) lv[i] = 3;     // a quiet hole at 1800-2000
+    const spot = JM.clearestSpot(lv, 10, { prefer: 1500 });
+    assert.ok(spot.hz >= 1800 && spot.hz + JM.JTTY_BW <= 2000, 'lands inside the hole with the whole 127 Hz: ' + spot.hz);
+    const flat = new Array(300).fill(10);
+    assert.strictEqual(JM.clearestSpot(flat, 10, { prefer: 1500 }).hz, 1500, 'an even band keeps you where you are');
+    assert.strictEqual(JM.clearestSpot(flat, 10, { prefer: 3000 }).hz, JM.TONE_MAX, 'never past the engine\'s 2700 Hz lowest tone');
+    assert.strictEqual(JM.clearestSpot(flat, 10, { prefer: 100 }).hz, JM.TONE_MIN, 'never under 200 Hz');
+    assert.strictEqual(JM.clearestSpot([], 10, {}), null, 'no data, no answer');
+    const { F0_MIN, F0_MAX } = (() => { const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'jtty-engine.js'), 'utf8');
+      return { F0_MIN: Number(/const F0_MIN = (\d+)/.exec(src)[1]), F0_MAX: Number(/const F0_MAX = (\d+)/.exec(src)[1]) }; })();
+    assert.strictEqual(JM.TONE_MIN, F0_MIN, 'tone limits match the engine');
+    assert.strictEqual(JM.TONE_MAX, F0_MAX, 'tone limits match the engine');
+    // Wiring: both panes follow on a row click, honour Hold, and measure for Clear spot.
+    const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+    const popHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
+    const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+    const webHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.html'), 'utf8');
+    assert.ok(pop.includes('JttyMacros.shouldFollowStation(text, jttyMyCall, holdTxFreq)'), 'pop-out row click follows by the rule, under the shared Hold TX');
+    assert.ok(pop.includes("if (modeSelect.value === 'JTTY' && !transmitting) jttyFeedLevels(freqData, passbandBins);"), 'pop-out measures RX only, never our TX');
+    assert.ok(pop.includes('JttyMacros.clearestSpot(jttyOcc, jttyOccHzPerBin, { prefer: jpTxFreqHz })'), 'pop-out Clear spot');
+    for (const id of ['jp-jtty-clearspot', 'jp-jtty-hold']) assert.ok(popHtml.includes('id="' + id + '"'), 'pop-out ' + id);
+    assert.ok(web.includes("JttyMacros.shouldFollowStation(text, String(myCallsign || ''), jttyHoldTx)"), 'web row tap follows by the rule');
+    assert.ok(web.includes("case 'jtcat-hold-tx-state':") && web.includes("ft8Send({ type: 'jtcat-set-hold-tx-freq', enabled: jttyHoldTx });"), 'web Hold is the desktop\'s Hold TX');
+    assert.ok(web.includes('if (typeof jttyFeedSpectrum === \'function\') jttyFeedSpectrum(msg.bins);'), 'web Clear spot listens to the streamed spectrum');
+    for (const id of ['jtty-clearspot', 'jtty-hold']) assert.ok(webHtml.includes('id="' + id + '"'), 'web ' + id);
   });
 
   await test('JTCAT pop-out: the JTTY pane (static)', () => {
@@ -358,8 +470,12 @@ function onAir(pcm, leadSec, tailSec) {
     assert.ok(html.includes('maxlength="80"'), 'the composer stops at the grammar\'s 80 characters');
     // Macros come from the one model (lib/jtty-macros.js), loaded by the page.
     assert.ok(html.includes('<script src="../lib/jtty-macros.js"></script>'), 'macro model loaded');
-    assert.ok(js.includes('JttyMacros.normalize(s.jttyMacros, s.jttyTemplates)'), 'macros normalized from settings (legacy templates migrate)');
-    assert.ok(js.includes("window.api.saveSettings({ jttyMacros: list, jttyTemplates: null })"), 'edits persist as jttyMacros');
+    assert.ok(js.includes('jttyStyle = JttyMacros.forSettings(s).style;') && js.includes("JttyMacros.forSettings(Object.assign({}, jttySaved, { jttyMacroStyle: jttyStyle })).macros"), 'macros from settings, per style (legacy templates migrate under Contest)');
+    assert.ok(js.includes('patch[JttyMacros.settingsKey(jttyStyle)] = list;') && js.includes("if (jttyStyle === 'contest') patch.jttyTemplates = null;"), 'edits persist under the active style\'s key');
+    assert.ok(js.includes("window.api.saveSettings({ jttyMacroStyle: jttyStyle });"), 'the style selector persists');
+    for (const id of ['jp-jtty-style', 'jp-jtty-rpt']) assert.ok(html.includes(`id="${id}"`), 'markup ' + id);
+    assert.ok(/<select id="jp-jtty-style"[^>]*>\s*<option value="ft8">FT8<\/option>\s*<option value="contest">Contest<\/option>/.test(html), 'FT8 listed first');
+    assert.ok(js.includes("rstRcvd: jttyRcvdRptByCall[his] || '599'"), 'FT8-style Log carries the report they gave us');
     assert.ok(js.includes('JttyMacros.indexForKey(jttyMacros, e.key'), 'hotkeys come from the macros, not a fixed F1-F8');
     for (const id of ['jp-jtty-ed-label', 'jp-jtty-ed-key', 'jp-jtty-ed-remove', 'jp-jtty-add']) assert.ok(html.includes(`id="${id}"`), 'editor ' + id);
     // Dials: the WSJT team's preliminary list (14090 on 20 m) — 14080 is FT4's.
@@ -381,7 +497,7 @@ function onAir(pcm, leadSec, tailSec) {
     assert.strictEqual((js.match(/modeSelect\.value !== 'PSK31'/g) || []).length, 1, 'keyboard-mode guards share isKeyboardMode()');
     assert.ok(js.includes("if (mode === 'PSK31' || mode === 'JTTY') {"), 'status strip sweeps for JTTY too');
     assert.ok(/if \(modeSelect\.value === 'JTTY'\) \{\s*jpWfCtx\.fillStyle[\s\S]{0,200}127 \/ 3000/.test(js), '127 Hz footprint on the waterfall');
-    assert.ok(js.includes("JttyMacros.isNativeText(m.text) && /%E/.test(m.text)) return 'rtty-roundup'"), 'a macro with one of WSJT-X\'s texts packs a serial exchange');
+    assert.ok(js.includes("if (jttyStyle === 'contest' && p === 'unknown' && m && JttyMacros.isNativeText(m.text) && /%E/.test(m.text)) return 'rtty-roundup'"), 'a Contest macro with one of WSJT-X\'s texts packs a serial exchange');
     assert.ok(js.includes("window.api.jtcatJttySend(text, profile)"), 'Send passes the per-message profile');
     assert.ok(js.includes('window.api.onJtcatJttyRx('), 'RX updates are consumed');
     // Tune and ATU live in the FT8 controls bar, which the pane swap hides —

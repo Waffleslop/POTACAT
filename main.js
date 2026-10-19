@@ -9963,7 +9963,7 @@ async function jtcatBuildCqQso(modifier) {
     ? Math.min(ft8Engine._lateStartTxMs, 7000)
     : 500; // FT4/late-start-off: only the 500 ms pad window reaches the current slot
   ft8Engine.setTxSlot(msIntoCycle <= lateCap ? curSlot : (curSlot === 'even' ? 'odd' : 'even'));
-  const qso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg,
+  const qso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, cqMsg: txMsg,
     report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
   if (fd) { qso.fd = true; qso.myExch = fd.myExch; }
   ft8Engine._txEnabled = true;
@@ -11484,7 +11484,9 @@ function jtcatJttySetProfile(profile) {
 function rememberJtcatTxFreq(eng) {
   if (!eng || eng._mode === 'PSK31') return;
   if (Number.isFinite(eng._txFreq)) {
-    settings.jtcatTxFreqHz = eng._txFreq;
+    // JTTY keeps its own audio frequency; it must not move FT8's held offset.
+    if (eng._mode === 'JTTY') settings.jttyAudioFreq = eng._txFreq;
+    else settings.jtcatTxFreqHz = eng._txFreq;
     saveSettings(settings);
   }
 }
@@ -11596,9 +11598,15 @@ function startJtcat(mode) {
       // code re-enabled hold WITHOUT restoring the choice, silently
       // re-pinning at 1500 (KF0U 2026-07-17: "the 2850 I selected").
       if (settings.jtcatHoldTxFreq && typeof settings.jtcatTxFreqHz === 'number' &&
-          ft8Engine._mode !== 'PSK31') {
+          ft8Engine._mode !== 'PSK31' && ft8Engine._mode !== 'JTTY') {
         ft8Engine.setTxFreq(settings.jtcatTxFreqHz, { operator: true });
       }
+    }
+    // JTTY comes back on its own remembered audio frequency (jttyAudioFreq,
+    // written by every JTTY move on every surface) — never FT8's held offset.
+    if (ft8Engine._mode === 'JTTY') {
+      const jttyHz = parseInt(settings.jttyAudioFreq, 10);
+      if (jttyHz >= 200 && jttyHz <= 2700) ft8Engine.setTxFreq(jttyHz);
     }
     // PSK31: apply the operator's squelch level (popout SQL slider). Real
     // band noise varies too much for one hardcoded threshold — first on-air
@@ -14878,6 +14886,10 @@ function updateRemoteSettings() {
     jttyProfile: settings.jttyProfile || 'unknown',
     jttyTemplates: Array.isArray(settings.jttyTemplates) ? settings.jttyTemplates : null,
     jttyMacros: Array.isArray(settings.jttyMacros) ? settings.jttyMacros : null,
+    // Message style (lib/jtty-macros.js): 'ft8' unless the operator chose
+    // 'contest'; the FT8 style's own list (null = WSJT-X 3.3's defaults).
+    jttyMacroStyle: settings.jttyMacroStyle === 'contest' ? 'contest' : 'ft8',
+    jttyFt8Macros: Array.isArray(settings.jttyFt8Macros) ? settings.jttyFt8Macros : null,
     // The Field Day exchange (class + section) the JTTY/FT8 panes put in %E
     // under the Field Day profile — remote panes read it from here
     // (potacat-meta jtty-remote-fd-exch-and-replay).
@@ -18647,7 +18659,7 @@ function connectRemote() {
       // (same defect class as the popout's optimistic label; KF0U 2026-07-17).
       remoteServer.broadcastJtcatTxStatus({ state: 'rx', txFreq: ft8Engine._txFreq, slot: nextSlot });
     }
-    remoteJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+    remoteJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, cqMsg: txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
     await remoteJtcatSetTxMsg(txMsg); // encode first, then enable TX
     ft8Engine._txEnabled = true;
     ft8Engine.tryImmediateTx();
@@ -18691,7 +18703,9 @@ function connectRemote() {
     if (targetEngine._txActive) targetEngine.txComplete();
     // Hound mode: fox at 300–900 Hz, hounds must call 1000–4000 Hz (see the
     // popout handler for the full rule). Hounds also call the fox's BASE call.
-    const houndReply = !!settings.jtcatHoundMode && !jtcatFdContext();
+    const foxClick = !!(data.text && (JtcatParser.inferReplyStep({ text: data.text }, myCall) || {}).fox);
+    const houndReply = (!!settings.jtcatHoundMode || foxClick) && !jtcatFdContext();
+    if (foxClick && !settings.jtcatHoundMode) sendCatLog('[JTCAT] Calling a DXpedition Fox (compound message) as a Hound: above 1000 Hz, its base call, no 73');
     if (houndReply && call) call = JtcatParser.normalizeCall(call) || call;
     let replyTxFreq = df;
     if (houndReply && replyTxFreq < 1000) replyTxFreq = 1000 + Math.floor(Math.random() * 2000);
@@ -19628,7 +19642,7 @@ function connectRemote() {
     // adopts settings-update pushes wholesale — same pattern as the
     // sanitized VFO-profiles echo). The JTTY serial a phone bumps must reach
     // the web pane and vice versa, so those keys push too.
-    const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
+    const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyFt8Macros', 'jttyMacroStyle', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
     if (sdrSync || dxeChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
   });
 }
@@ -30663,7 +30677,12 @@ app.whenReady().then(() => {
     // RX on the fox; move our TX up if the click landed in the fox zone.
     // (The state machine QSYs TX down to the fox's frequency for the R+rpt
     // leg once the fox answers.)
-    const houndReply = !!settings.jtcatHoundMode && !jtcatFdContext();
+    // A double-click on a Fox's compound message ("A RR73; B <FOX> -04")
+    // calls the fox as a Hound even with the Hound toggle off — a fox
+    // ignores calls in its own 300-900 Hz zone, so a plain reply never works.
+    const foxClick = !!(data.text && myCall && (JtcatParser.inferReplyStep({ text: data.text }, myCall) || {}).fox);
+    const houndReply = (!!settings.jtcatHoundMode || foxClick) && !jtcatFdContext();
+    if (foxClick && !settings.jtcatHoundMode) sendCatLog('[JTCAT] Calling a DXpedition Fox (compound message) as a Hound: above 1000 Hz, its base call, no 73');
     let replyTxFreq = data.df || 1500;
     if (houndReply && replyTxFreq < 1000) replyTxFreq = 1000 + Math.floor(Math.random() * 2000);
     replyEngine.setTxFreq(replyTxFreq);
@@ -30881,7 +30900,7 @@ app.whenReady().then(() => {
     // TX on opposite slot from last decode; default to 'even' if no decodes yet
     const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
     ft8Engine.setTxSlot(nextSlot);
-    popoutJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
+    popoutJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, cqMsg: txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
     if (fdCtx) { popoutJtcatQso.fd = true; popoutJtcatQso.myExch = fdCtx.myExch; }
     ft8Engine._txEnabled = true;
     sendCatLog(`[JTCAT] CQ encoding: ${txMsg} slot=${nextSlot} @ ${jtcatQuietFreq}Hz (quiet)`);
@@ -34789,7 +34808,7 @@ app.whenReady().then(() => {
     // blob — a desktop edit that is not pushed is invisible there until the
     // next reconnect (potacat-meta jtty-remote-fd-exch-and-replay).
     if (has('rotorActive') || has('rotorMode') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
-        has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyProfile') || has('jttySerial') || has('pskMacros') ||
+        has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyFt8Macros') || has('jttyMacroStyle') || has('jttyProfile') || has('jttySerial') || has('pskMacros') ||
         has('enableDxe') || has('enableDxeSources') ||
         // Re-spot templates and saved messages: a connected device kept the
         // old text until it reconnected (K8IKO respot-templates-mobile).

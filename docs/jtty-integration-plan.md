@@ -414,3 +414,50 @@ Total: roughly two weeks of focused work, Phase 2 being the uncertain half.
    clean Phase 1 checkpoint?
 2. **Build against rc1** knowing the format may still change before 3.2.0
    final, or wait for the final tag?
+
+## Message style: FT8 is the default (2026-10-18)
+
+Casey: "The FT8-style should be default. The current style is not right."
+WSJT-X 3.3.0-beta1 (2026-10-07) added a **Message style** chooser for F1-F8
+(`widgets/JttyMessages.hpp`, `ft8StyleMacroTemplate()`): Contest (the 3.2
+templates above, still WSJT-X's own default) and FT8, an ordinary QSO with
+grids and measured reports. POTACAT defaults to FT8.
+
+| Key | Template | Example | Frames |
+|---|---|---|---:|
+| F1 | `%H %M %G` | `W9XYZ K1ABC FN20` | 3 |
+| F2 | `%H %M %R` | `W9XYZ K1ABC -07` | 3 |
+| F3 | `%H %M R%R` | `W9XYZ K1ABC R-07` | 3 |
+| F4 | `%H %M RRR` | `W9XYZ K1ABC RRR` | 3 |
+| F5 | `%H %M 73` | `W9XYZ K1ABC 73` | 3 |
+| F6 | `CQ %M %G` | `CQ K1ABC FN20` | 3 |
+
+- `settings.jttyMacroStyle` ('ft8' unless 'contest'); each style keeps its own
+  list (`jttyFt8Macros` / `jttyMacros`), so a contest set survives a switch.
+- `%R` = the SNR measured on their signal: every decode is attributed to its
+  sender (`JttyMacros.senderOf`, "TO FROM ..."), and the RPT field follows
+  Their Call until the operator types in it. `formatReport` is WSJT-X's
+  `formatSnr` ("%+03d"). `%G` is truncated to 4 characters, as WSJT-X does.
+- FT8-style texts are literal (never native), so the per-message
+  `rtty-roundup` override is Contest-only.
+- Log (FT8 style): RST sent = RPT, RST received = the report they sent us
+  (`reportTo`), their grid in the comment (pop-out).
+- ECHOCAT: `jttyMacroStyle`/`jttyFt8Macros` in the settings blob; the web pane
+  saves the style with `save-settings` and now re-renders on `settings-update`
+  (it never picked up desktop macro edits before). Mobile: potacat-meta
+  `work/open/jtty-ft8-style-mobile.md`.
+
+## Frequency etiquette (2026-10-18)
+
+Not "everyone on 1500 Hz" (no T/R slots: two QSOs on one offset collide for
+their whole length) and not a random offset (it gives up the QSO-window
+peak-up and makes a station hard to find again). The RTTY convention:
+transceive; clicking a CQ, or a station working someone else, moves TX/RX
+onto its lowest tone (`shouldFollowStation`); a message addressed to us or a
+lone call never moves us (a running station does not follow its callers);
+Hold (the shared `jtcatHoldTxFreq`) freezes it; **Clear spot** suggests the
+quietest 127 + 2×15 Hz window over a ~30 s running average of RX audio
+(`accumulateLevels` / `clearestSpot`, ties go to the spot nearest the current
+frequency, limits = the engine's 200-2700 Hz lowest tone). Pop-out measures
+its own analyser (never during our TX); the web averages the streamed
+`jtcat-spectrum`. Mobile: potacat-meta `work/open/jtty-ft8-style-mobile.md`.

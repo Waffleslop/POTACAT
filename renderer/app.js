@@ -28011,7 +28011,7 @@ function getMyGrid() {
 
 // Phase definitions for the sequence display
 var QSO_PHASES_CQ = [
-  { key: 'cq',        dir: 'tx', label: function(q) { return 'CQ ' + q.myCall + ' ' + q.myGrid; } },
+  { key: 'cq',        dir: 'tx', label: function(q) { return q.cqMsg || ('CQ ' + q.myCall + ' ' + q.myGrid); } },
   { key: 'cq-reply',  dir: 'rx', label: function(q) { return (q.call || '?') + ' ' + q.myCall + ' ' + (q.grid || '??'); } },
   { key: 'cq-report', dir: 'tx', label: function(q) { return (q.call || '?') + ' ' + q.myCall + ' ' + (q.sentReport || '-XX'); } },
   { key: 'cq-r+rpt',  dir: 'rx', label: function(q) { return q.myCall + ' ' + (q.call || '?') + ' R' + (q.report || '-XX'); } },

@@ -223,6 +223,9 @@
     .jp-jtty-serial-wrap .jp-btn { padding: 1px 7px; }
     .jp-jtty-select { font-size: 10px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 1px 3px; }
     .jp-jtty-tpl { min-width: 30px; font-weight: 700; }
+    .jp-jtty-rpt { width: 46px; text-align: center; }
+    #jp-jtty-pane.jtty-ft8 .jp-jtty-contest { display: none !important; }
+    #jp-jtty-pane:not(.jtty-ft8) .jp-jtty-ft8 { display: none !important; }
     .jp-jtty-tpl .k { font-size: 9px; font-weight: 400; opacity: 0.65; margin-left: 5px; font-family: monospace; }
     .jp-row.jp-jtty-row .jp-time { min-width: 60px; }
     .jp-row.jp-jtty-growing .jp-msg { color: var(--text-dim); font-style: italic; }
@@ -287,6 +290,9 @@
     /* Now lives in the QSO tracker header. flex 0 1 auto (not 1) so it
        shrinks to an ellipsis on a narrow window without eating the free
        space that pushes the × button to the far right. */
+    /* Hidden while it only repeats the highlighted TX step (K3SBP 2026-10-18). */
+    .jp-tx-msg.jp-tx-msg-dup { display: none; }
+    .jp-qso-step.step-current.step-tx { cursor: text; }
     .jp-tx-msg { flex: 0 1 auto; min-width: 0; font-size: 11px; font-family: monospace; color: var(--accent-blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
     .jp-status { font-family: monospace; color: var(--text-dim); font-size: 11px; }
     /* PTT method chip — theme-token driven (no hardcoded hex). CAT = neutral
@@ -395,19 +401,24 @@
 
   <!-- Toolbar -->
   <div class="jtcat-toolbar">
-    <div class="jtcat-band-buttons">
-      <button class="jtcat-band-btn" data-band="160m" data-freq="1840">160</button>
-      <button class="jtcat-band-btn" data-band="80m" data-freq="3573">80</button>
-      <button class="jtcat-band-btn" data-band="60m" data-freq="5357">60</button>
-      <button class="jtcat-band-btn" data-band="40m" data-freq="7074">40</button>
-      <button class="jtcat-band-btn" data-band="30m" data-freq="10136">30</button>
-      <button class="jtcat-band-btn active" data-band="20m" data-freq="14074">20</button>
-      <button class="jtcat-band-btn" data-band="17m" data-freq="18100">17</button>
-      <button class="jtcat-band-btn" data-band="15m" data-freq="21074">15</button>
-      <button class="jtcat-band-btn" data-band="12m" data-freq="24915">12</button>
-      <button class="jtcat-band-btn" data-band="10m" data-freq="28074">10</button>
-      <button class="jtcat-band-btn" data-band="6m" data-freq="50313">6</button>
-      <button class="jtcat-band-btn" data-band="2m" data-freq="144174">2</button>
+    <!-- Band: a dropdown (K3SBP 2026-10-18 — the button row took the whole
+         toolbar). Each option carries data-band / data-freq and the "active"
+         class exactly as the buttons did, so every band path is unchanged. -->
+    <div class="jtcat-mode-select">
+      <select id="jp-band" title="Band (tunes the radio to this mode's frequency on the band)">
+        <option class="jp-band-opt" value="160m" data-band="160m" data-freq="1840">160m</option>
+        <option class="jp-band-opt" value="80m" data-band="80m" data-freq="3573">80m</option>
+        <option class="jp-band-opt" value="60m" data-band="60m" data-freq="5357">60m</option>
+        <option class="jp-band-opt" value="40m" data-band="40m" data-freq="7074">40m</option>
+        <option class="jp-band-opt" value="30m" data-band="30m" data-freq="10136">30m</option>
+        <option class="jp-band-opt active" value="20m" data-band="20m" data-freq="14074" selected>20m</option>
+        <option class="jp-band-opt" value="17m" data-band="17m" data-freq="18100">17m</option>
+        <option class="jp-band-opt" value="15m" data-band="15m" data-freq="21074">15m</option>
+        <option class="jp-band-opt" value="12m" data-band="12m" data-freq="24915">12m</option>
+        <option class="jp-band-opt" value="10m" data-band="10m" data-freq="28074">10m</option>
+        <option class="jp-band-opt" value="6m" data-band="6m" data-freq="50313">6m</option>
+        <option class="jp-band-opt" value="2m" data-band="2m" data-freq="144174">2m</option>
+      </select>
     </div>
     <div class="jtcat-mode-select">
       <select id="jp-mode">
@@ -420,7 +431,7 @@
       </select>
     </div>
     <span id="jp-radio-freq" style="font-size:12px;font-weight:bold;color:#4fc3f7;white-space:nowrap;font-family:monospace;" title="Radio frequency">—</span>
-    <span id="jp-ptt-mode" class="jp-ptt-mode is-cat" title="PTT method">PTT: CAT</span>
+    <span id="jp-ptt-mode" class="jp-ptt-mode is-cat" title="PTT method" style="display:none;">PTT: CAT</span>
     <span id="jp-tx-freq-label" style="font-size:12px;font-weight:bold;color:#ff4444;white-space:nowrap;cursor:pointer;" title="Click to set TX frequency">TX: 1500 Hz</span>
     <div class="jtcat-status">
       <span id="jp-utc-clock" style="font-size:11px;font-family:monospace;color:#4fc3f7;white-space:nowrap;" title="UTC date & time"></span>
@@ -589,7 +600,13 @@
       <div class="jp-psk-status">
         <span>JTTY</span>
         <span class="p-q" title="4-GFSK, 31.25 baud, 1.888 s frames, no timed sequences">127 Hz</span>
-        <label style="display:inline-flex;align-items:center;gap:4px;" title="Exchange profile: how %E and a typed exchange are packed. Serial: 599 and a serial number. Field Day: your class and section (the FD exchange under the gear). RTTY Roundup: serial or state/province.">Exchange
+        <label style="display:inline-flex;align-items:center;gap:4px;" title="Message style for the macro buttons. FT8: an ordinary QSO with grids and signal reports, as in FT8 (WSJT-X 3.3's FT8 style). Contest: the RTTY-contest exchange, 599 and a serial number. Each style keeps its own macros.">Style
+          <select id="jp-jtty-style" class="jp-jtty-select">
+            <option value="ft8">FT8</option>
+            <option value="contest">Contest</option>
+          </select>
+        </label>
+        <label class="jp-jtty-contest" style="display:inline-flex;align-items:center;gap:4px;" title="Exchange profile: how %E and a typed exchange are packed. Serial: 599 and a serial number. Field Day: your class and section (the FD exchange under the gear). RTTY Roundup: serial or state/province.">Exchange
           <select id="jp-jtty-profile" class="jp-jtty-select">
             <option value="unknown">Serial</option>
             <option value="field-day">Field Day</option>
@@ -597,9 +614,11 @@
           </select>
         </label>
         <span style="margin-left:auto;"></span>
+        <button id="jp-jtty-clearspot" class="jtcat-filter-btn" title="Move to the quietest 150 Hz of the passband over the last 30 seconds, nearest where you are. Use it before calling CQ.">Clear spot</button>
+        <button id="jp-jtty-hold" class="jtcat-filter-btn" title="Hold TX frequency: clicking a station's row does not move you onto their frequency. Same setting as Hold TX frequency under the gear.">Hold</button>
         <button id="jp-jtty-clear" class="jtcat-filter-btn" title="Clear decodes">Clear</button>
       </div>
-      <div id="jp-jtty-list" class="jp-decode-list" title="Decoded messages. Click a row to take its callsign."></div>
+      <div id="jp-jtty-list" class="jp-decode-list" title="Decoded messages. Click a row to take its callsign; a CQ, or a station working someone else, also moves you onto their frequency (not with Hold on, and never for a station calling you)."></div>
       <div class="jp-psk-txwrap">
         <div class="jp-psk-macro-row">
           <input id="jp-jtty-tx" class="jp-jtty-tx" type="text" maxlength="80" placeholder="Type a message (up to 80 characters) or press F1-F8. Enter sends." spellcheck="false" autocomplete="off">
@@ -607,13 +626,14 @@
         </div>
         <div class="jp-psk-macro-row">
           <input id="jp-jtty-his" class="jp-psk-their" type="text" maxlength="12" placeholder="THEIR CALL" title="%H: the station you are working. Click a decoded row to fill it." autocomplete="off">
-          <input id="jp-jtty-exch" class="jp-jtty-exch" type="text" maxlength="20" placeholder="EXCHANGE" title="%E: what you send. 599 and your serial, or your Field Day class and section. Edit freely; the serial buttons rewrite it." autocomplete="off">
-          <span class="jp-jtty-serial-wrap" title="Serial number. Rewrites the exchange.">
+          <input id="jp-jtty-rpt" class="jp-jtty-exch jp-jtty-rpt jp-jtty-ft8" type="text" maxlength="3" placeholder="RPT" title="%R: the report you send them, the SNR measured on their signal. Fills in when you click their row or type their call; edit freely." autocomplete="off">
+          <input id="jp-jtty-exch" class="jp-jtty-exch jp-jtty-contest" type="text" maxlength="20" placeholder="EXCHANGE" title="%E: what you send. 599 and your serial, or your Field Day class and section. Edit freely; the serial buttons rewrite it." autocomplete="off">
+          <span class="jp-jtty-serial-wrap jp-jtty-contest" title="Serial number. Rewrites the exchange.">
             <button id="jp-jtty-serial-dn" class="jp-btn">&minus;</button>
             <input id="jp-jtty-serial" type="number" min="1" max="9999" value="1">
             <button id="jp-jtty-serial-up" class="jp-btn">+</button>
           </span>
-          <input id="jp-jtty-queued" class="jp-psk-their" type="text" maxlength="12" placeholder="NEXT CALL" title="%Q: the station waiting, for F6 (TU NOW %Q %E)" autocomplete="off">
+          <input id="jp-jtty-queued" class="jp-psk-their jp-jtty-contest" type="text" maxlength="12" placeholder="NEXT CALL" title="%Q: the station waiting, for F6 (TU NOW %Q %E)" autocomplete="off">
           <span style="margin-left:auto;"></span>
           <button id="jp-jtty-send" class="jp-btn" style="border-color:#e94560;color:#e94560;" title="Transmit the composed message as one transmission (Enter)">Send</button>
           <button id="jp-jtty-stop" class="jp-btn jp-halt" title="Stop transmitting immediately (drops PTT)">Stop</button>
@@ -634,7 +654,7 @@
             <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);">Hotkey
               <select id="jp-jtty-ed-key" class="jp-jtty-select"></select>
             </label>
-            <span class="jp-psk-me-hint">%M my call &middot; %H their call &middot; %E exchange &middot; %Q next call &middot; %G my grid &middot; %N serial. WSJT-X's eight texts pack natively; anything else is sent as typed.</span>
+            <span class="jp-psk-me-hint">%M my call &middot; %H their call &middot; %E exchange &middot; %Q next call &middot; %G my grid &middot; %R report &middot; %N serial. The Contest style's eight WSJT-X texts pack natively; anything else is sent as typed.</span>
           </div>
           <input id="jp-jtty-ed-text" class="jp-psk-me-text" type="text" maxlength="80" spellcheck="false" autocomplete="off" placeholder="Macro text">
           <div class="jp-psk-me-row">
@@ -642,7 +662,7 @@
             <button id="jp-jtty-ed-cancel" class="jp-btn">Cancel</button>
             <button id="jp-jtty-ed-remove" class="jp-btn" title="Remove this macro">Remove</button>
             <span style="margin-left:auto;"></span>
-            <button id="jp-jtty-ed-reset" class="jp-btn" title="Restore the eight WSJT-X templates on F1-F8">Reset all</button>
+            <button id="jp-jtty-ed-reset" class="jp-btn" title="Restore this style's WSJT-X macros">Reset all</button>
           </div>
         </div>
       </div>

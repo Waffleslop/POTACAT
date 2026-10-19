@@ -2238,6 +2238,11 @@
             localCwKeyer.setSwap(cwSwapPaddles);
           }
           syncTuningUI();
+          // JTTY macros, style, serial, profile: the pane renders from echoSettings.
+          if (['jttyMacros', 'jttyTemplates', 'jttyFt8Macros', 'jttyMacroStyle', 'jttySerial', 'jttyProfile', 'jtcatFdExch'].some((k) => k in msg.settings)) {
+            echoSettings = Object.assign(echoSettings || {}, msg.settings);
+            if (typeof jttyOnSettings === 'function') jttyOnSettings(msg.settings);
+          }
           // Sync SSTV templates if updated
           if (msg.settings.sstvTemplates || msg.settings.sstvTextElements) {
             echoSettings = Object.assign(echoSettings || {}, msg.settings);
@@ -2439,7 +2444,7 @@
         txBanner.classList.toggle('hidden', !ft8Transmitting);
         if (msg.txFreq != null) {
           ft8TxFreqHz = msg.txFreq;
-          ft8TxFreqDisplay.textContent = 'TX: ' + msg.txFreq + ' Hz';
+          ft8TxFreqDisplay.textContent = 'TX: ' + Math.round(msg.txFreq) + ' Hz';
         }
         if (ft8Transmitting && ft8TxMsg) {
           // Remember what we're sending so the cycle-decode handler can
@@ -2474,6 +2479,11 @@
 
       case 'jtcat-spectrum':
         ft8RenderWaterfall(msg.bins);
+        if (typeof jttyFeedSpectrum === 'function') jttyFeedSpectrum(msg.bins);
+        break;
+      case 'jtcat-hold-tx-state':
+        // The desktop's Hold TX frequency (one setting for FT8 and JTTY).
+        if (typeof jttySetHold === 'function') jttySetHold(!!msg.enabled);
         break;
 
       case 'scope-frame':
@@ -8476,7 +8486,45 @@
   const jttySerialEl = document.getElementById('jtty-serial');
   const jttyQueuedEl = document.getElementById('jtty-queued');
   const jttyTemplatesEl = document.getElementById('jtty-templates');
+  const jttyStyleEl = document.getElementById('jtty-style');
+  const jttyRptEl = document.getElementById('jtty-rpt');
   const JTTY_ROW_CAP = 200;
+  // Per sender (JttyMacros.senderOf): the SNR measured on them (their %R),
+  // their grid, and the report they gave us — the FT8 style's Log prefill.
+  const jttySnrByCall = {};
+  const jttyGridByCall = {};
+  const jttyRcvdRptByCall = {};
+  // Frequency etiquette (lib/jtty-macros.js), as the pop-out: tapping a CQ or
+  // a station working someone else moves onto them; a station calling us
+  // never moves us; Hold TX (the desktop's setting) freezes it. jttyOcc is a
+  // ~30 s running average of the spectrum the desktop streams, for Clear spot.
+  let jttyHoldTx = false;
+  let jttyOcc = null;
+  let jttyOccMs = 0;
+  let jttyOccLastTs = 0;
+  function jttySetHold(on) {
+    jttyHoldTx = !!on;
+    const b = document.getElementById('jtty-hold');
+    if (b) b.classList.toggle('active', jttyHoldTx);
+  }
+  function jttyFeedSpectrum(bins) {
+    if (ft8Mode !== 'JTTY' || ft8Transmitting || !bins || !bins.length) return;
+    const now = Date.now();
+    const dt = jttyOccLastTs ? Math.min(1000, now - jttyOccLastTs) : 0;
+    jttyOccLastTs = now;
+    jttyOcc = JttyMacros.accumulateLevels(jttyOcc, bins, dt / 30000);
+    jttyOccMs += dt;
+  }
+  function jttyMoveTo(hz, note) {
+    const f = Math.max(JttyMacros.TONE_MIN, Math.min(JttyMacros.TONE_MAX, Math.round(Number(hz) || 0)));
+    if (!f) return;
+    ft8TxFreqHz = f;
+    if (ft8TxFreqDisplay) ft8TxFreqDisplay.textContent = 'TX: ' + f + ' Hz';
+    ft8Send({ type: 'jtcat-set-tx-freq', hz: f });
+    // The desktop restores the JTTY audio frequency from this on reopen.
+    ft8Send({ type: 'save-settings', settings: { jttyAudioFreq: f } });
+    if (note) jttyNote(note.replace('%F', String(f)), false);
+  }
   const JTTY_PROFILES = ['unknown', 'field-day', 'rtty-roundup'];
   const jttyRows = {};           // decoder message id -> row element
   let jttyComposeNative = -1;    // macro index that filled the composer; -1 = typed/edited
@@ -8484,10 +8532,38 @@
 
   function jttyPad2(n) { return (n < 10 ? '0' : '') + n; }
   // Macros {label, text, key} — lib/jtty-macros.js, inlined by remote-server
-  // as window.JttyMacros; the desktop owns the list (settings.jttyMacros).
+  // as window.JttyMacros; the desktop owns the lists (settings.jttyFt8Macros
+  // for the FT8 style, the default, and settings.jttyMacros for Contest).
+  function jttyStyle() { return JttyMacros.styleOf((echoSettings || {}).jttyMacroStyle); }
   function jttyMacros() {
-    const s = echoSettings || {};
-    return JttyMacros.normalize(s.jttyMacros, s.jttyTemplates);
+    return JttyMacros.forSettings(echoSettings || {}).macros;
+  }
+  function jttyApplyStyle() {
+    const ft8 = jttyStyle() === 'ft8';
+    if (jttyStyleEl) jttyStyleEl.value = jttyStyle();
+    if (jttyPane) {
+      jttyPane.querySelectorAll('.jtty-contest-only').forEach((el) => { el.style.display = ft8 ? 'none' : ''; });
+      jttyPane.querySelectorAll('.jtty-ft8-only').forEach((el) => { el.style.display = ft8 ? '' : 'none'; });
+    }
+  }
+  // The report follows the SNR measured on Their Call until one is typed.
+  function jttyRefreshReport(force) {
+    if (!jttyRptEl) return;
+    if (!force && jttyRptEl.dataset.auto === '0') return;
+    const his = String((jttyHisEl && jttyHisEl.value) || '').trim().toUpperCase();
+    jttyRptEl.value = his && jttySnrByCall[his] != null ? JttyMacros.formatReport(jttySnrByCall[his]) : '';
+    jttyRptEl.dataset.auto = '1';
+  }
+  /** A settings-update carried JTTY keys: redraw from the merged blob. */
+  function jttyOnSettings(changed) {
+    if (changed && parseInt(changed.jttySerial, 10) > 0 && jttySerialEl && document.activeElement !== jttySerialEl) {
+      jttySerialEl.value = String(parseInt(changed.jttySerial, 10));
+      jttyRefreshExchange(false);
+    }
+    if (changed && JTTY_PROFILES.includes(changed.jttyProfile) && jttyProfileEl) jttyProfileEl.value = changed.jttyProfile;
+    if (changed && 'jttyMacroStyle' in changed) jttyComposeNative = -1;
+    jttyApplyStyle();
+    jttyRenderTemplates();
   }
   function jttyProfile() {
     const p = jttyProfileEl ? jttyProfileEl.value : 'unknown';
@@ -8515,6 +8591,7 @@
       exchange: (jttyExchEl && jttyExchEl.value) || '',
       grid: (echoSettings && echoSettings.grid) || '',
       serial: n < 100 ? ('00' + n).slice(-3) : String(n),
+      report: (jttyRptEl && jttyRptEl.value) || '',
     });
   }
   // Same rule as the popout: a macro whose text is one of WSJT-X's eight,
@@ -8522,9 +8599,10 @@
   // (rtty-roundup rules, one frame fewer); any other text is literal under
   // the operator's profile. Per message — never moves the selector.
   function jttyPackProfile() {
+    if (jttyStyle() === 'ft8') return 'unknown'; // picker hidden: no unseen contest profile
     const p = jttyProfile();
     const m = jttyComposeNative >= 0 ? jttyMacros()[jttyComposeNative] : null;
-    if (p === 'unknown' && m && JttyMacros.isNativeText(m.text) && /%E/.test(m.text)) return 'rtty-roundup';
+    if (jttyStyle() === 'contest' && p === 'unknown' && m && JttyMacros.isNativeText(m.text) && /%E/.test(m.text)) return 'rtty-roundup';
     return p;
   }
   function jttyNote(text, bad) {
@@ -8554,6 +8632,8 @@
     const need = JttyMacros.needs(m.text);
     if (need.theirCall && !String((jttyHisEl && jttyHisEl.value) || '').trim()) { if (jttyHisEl) jttyHisEl.focus(); jttyNote('Tap a decoded row or type Their Call first', true); return; }
     if (need.nextCall && !String((jttyQueuedEl && jttyQueuedEl.value) || '').trim()) { if (jttyQueuedEl) jttyQueuedEl.focus(); jttyNote('Type the next call first', true); return; }
+    if (need.grid && !String((echoSettings && echoSettings.grid) || '').trim()) { jttyNote('Set your grid in the desktop Settings first', true); return; }
+    if (need.report && !String((jttyRptEl && jttyRptEl.value) || '').trim()) { if (jttyRptEl) jttyRptEl.focus(); jttyNote('No report yet: tap their row, or type one', true); return; }
     jttyTxEl.value = jttySubstitute(m.text);
     jttyComposeNative = i;
     jttyCount();
@@ -8600,6 +8680,7 @@
       const w = raw.replace(/[^A-Z0-9/]/g, '');
       if (w && w !== my && w !== 'CQ' && /^[A-Z0-9/]{3,10}$/.test(w) && /\d/.test(w) && /[A-Z]/.test(w) && !/^\d+$/.test(w)) {
         if (jttyHisEl) jttyHisEl.value = w;
+        jttyRefreshReport(true);
         jttyRenderTemplates();
         return;
       }
@@ -8612,7 +8693,13 @@
     if (!row) {
       row = jttyMakeRow();
       row.dataset.id = String(u.id);
-      row.addEventListener('click', () => jttyPickCall(row.dataset.text || ''));
+      row.addEventListener('click', () => {
+        const text = row.dataset.text || '';
+        jttyPickCall(text);
+        if (row.dataset.freq && JttyMacros.shouldFollowStation(text, String(myCallsign || ''), jttyHoldTx)) {
+          jttyMoveTo(row.dataset.freq, 'On their freq: %F Hz');
+        }
+      });
       jttyListEl.appendChild(row);
       jttyRows[u.id] = row;
       jttyPrune();
@@ -8626,8 +8713,18 @@
     msgEl.style.fontStyle = u.complete ? '' : 'italic';
     msgEl.style.color = u.complete ? '' : 'var(--text-dim)';
     row.dataset.text = u.text || '';
+    if (u.freqHz > 0) row.dataset.freq = String(Math.round(u.freqHz));
     const up = String(u.text || '').toUpperCase();
     const my = String(myCallsign || '').toUpperCase().trim();
+    const sender = JttyMacros.senderOf(u.text);
+    if (sender) {
+      if (typeof u.snrDb === 'number') jttySnrByCall[sender] = u.snrDb;
+      const g = JttyMacros.gridOf(u.text);
+      if (g) jttyGridByCall[sender] = g;
+      const r = JttyMacros.reportTo(u.text, my);
+      if (r) jttyRcvdRptByCall[sender] = r;
+      if (sender === String((jttyHisEl && jttyHisEl.value) || '').trim().toUpperCase()) jttyRefreshReport(false);
+    }
     const directed = !!my && (' ' + up + ' ').indexOf(' ' + my + ' ') >= 0;
     row.style.background = directed ? 'rgba(180,30,30,0.22)' : /^CQ\b/.test(up) ? 'rgba(0,120,0,0.25)' : '';
     row.style.borderLeft = directed ? '3px solid #e94560' : '';
@@ -8671,9 +8768,20 @@
       if (jttySerialEl && parseInt(echoSettings.jttySerial, 10) > 0) jttySerialEl.value = String(parseInt(echoSettings.jttySerial, 10));
       jttyRefreshExchange(true);
     }
+    jttyApplyStyle();
     jttyRenderTemplates();
     jttyCount();
   }
+  if (jttyStyleEl) jttyStyleEl.addEventListener('change', () => {
+    const style = JttyMacros.styleOf(jttyStyleEl.value);
+    // The desktop keeps the style (settings.jttyMacroStyle), like the serial.
+    echoSettings = Object.assign(echoSettings || {}, { jttyMacroStyle: style });
+    jttyComposeNative = -1;
+    jttyApplyStyle();
+    jttyRenderTemplates();
+    ft8Send({ type: 'save-settings', settings: { jttyMacroStyle: style } });
+  });
+  if (jttyRptEl) jttyRptEl.addEventListener('input', () => { jttyRptEl.dataset.auto = jttyRptEl.value.trim() ? '0' : '1'; jttyRenderTemplates(); });
   if (jttyProfileEl) jttyProfileEl.addEventListener('change', () => {
     ft8Send({ type: 'jtcat-jtty-set-profile', profile: jttyProfile() });
     jttyRefreshExchange(true);
@@ -8692,7 +8800,7 @@
   if (jttyUp) jttyUp.addEventListener('click', () => { jttySerialEl.value = String(jttySerial() + 1); jttySerialChanged(); });
   if (jttyDn) jttyDn.addEventListener('click', () => { jttySerialEl.value = String(jttySerial() - 1); jttySerialChanged(); });
   if (jttyExchEl) jttyExchEl.addEventListener('input', () => { jttyExchEl.dataset.auto = '0'; jttyRenderTemplates(); });
-  if (jttyHisEl) jttyHisEl.addEventListener('input', jttyRenderTemplates);
+  if (jttyHisEl) jttyHisEl.addEventListener('input', () => { jttyRefreshReport(false); jttyRenderTemplates(); });
   if (jttyQueuedEl) jttyQueuedEl.addEventListener('input', jttyRenderTemplates);
   if (jttyTxEl) {
     jttyTxEl.addEventListener('input', () => { jttyComposeNative = -1; jttyCount(); });
@@ -8704,14 +8812,33 @@
   if (jttyStopBtn) jttyStopBtn.addEventListener('click', () => ft8Send({ type: 'jtcat-halt-tx' }));
   const jttyLogBtn = document.getElementById('jtty-log');
   if (jttyLogBtn) jttyLogBtn.addEventListener('click', () => {
+    const his = String((jttyHisEl && jttyHisEl.value) || '').toUpperCase().trim();
+    // FT8 style: the report we sent and the one they gave us. Contest style
+    // leaves both to the sheet's 599 default.
+    const ft8 = jttyStyle() === 'ft8';
     openLogSheet({
-      callsign: String((jttyHisEl && jttyHisEl.value) || '').toUpperCase().trim(),
+      callsign: his,
       mode: 'JTTY',
+      rstSent: ft8 ? String((jttyRptEl && jttyRptEl.value) || '').trim() : '',
+      rstRcvd: ft8 ? (jttyRcvdRptByCall[his] || '') : '',
       // No freqKhz — see the invariant in openLogSheet.
     });
   });
   const jttyClearBtn = document.getElementById('jtty-clear');
   if (jttyClearBtn) jttyClearBtn.addEventListener('click', jttyClearRows);
+  const jttyClearSpotBtn = document.getElementById('jtty-clearspot');
+  if (jttyClearSpotBtn) jttyClearSpotBtn.addEventListener('click', () => {
+    if (!jttyOcc || jttyOccMs < 5000) { jttyNote('Listening, try again shortly', false); return; }
+    // The streamed spectrum spans 0-3000 Hz, like the waterfall it draws.
+    const spot = JttyMacros.clearestSpot(jttyOcc, 3000 / jttyOcc.length, { prefer: ft8TxFreqHz });
+    if (!spot) { jttyNote('No audio to measure yet', false); return; }
+    jttyMoveTo(spot.hz, spot.hz === ft8TxFreqHz ? 'Already quietest (%F Hz)' : 'Quietest spot: %F Hz');
+  });
+  const jttyHoldBtn = document.getElementById('jtty-hold');
+  if (jttyHoldBtn) jttyHoldBtn.addEventListener('click', () => {
+    jttySetHold(!jttyHoldTx);
+    ft8Send({ type: 'jtcat-set-hold-tx-freq', enabled: jttyHoldTx });
+  });
 
   // ---------------- Hamburger nav (mobile TabMenu parity) ----------------
   // One nav, one order: the user's tab order drives BOTH the bar and the

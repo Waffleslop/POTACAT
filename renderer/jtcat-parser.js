@@ -183,9 +183,16 @@
       for (var si = 0; si < segs.length; si++) {
         if (normalizeCall(segs[si].split(/\s+/)[0]) === me) { mine = segs[si]; break; }
       }
-      if (!mine) return null;
-      var mineParts = mine.split(/\s+/);
       var sender = (segs[1].split(/\s+/)[1] || '');
+      if (!mine) {
+        // Not to us: the operator wants to CALL the station sending it — a
+        // Fox working two hounds at once (K3SBP 2026-10-18, "<P4/WE9V>").
+        // fox:true tells main to call as a Hound (above 1000 Hz, base call).
+        var foxCall = stripHashBrackets(sender);
+        if (!looksLikeCallsign(foxCall) || normalizeCall(foxCall) === me) return null;
+        return { step: 'reply-cq', call: foxCall, fox: true };
+      }
+      var mineParts = mine.split(/\s+/);
       var rebuilt = mineParts.length === 2
         ? mineParts[0] + ' ' + sender + ' ' + mineParts[1]   // "K3SBP RR73" + sender
         : mine;                                              // "K3SBP <AF0E> -14" already names them

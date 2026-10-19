@@ -97,7 +97,18 @@ section('inferReplyStep — compound messages (two QSOs in one transmission)');
 // in the second half. Our half is rebuilt with the sender and classified.
 eq(step('K3SBP RR73; AI5MM <AF0E> -14', ME), { step: 'send-73', call: 'AF0E' }, 'RR73 half for us -> 73 to the sender');
 eq(step('AI5MM RR73; K3SBP <AF0E> -14', ME), { step: 'send-r-report', call: 'AF0E' }, 'report half for us -> R+report');
-eq(step('W1AW RR73; AI5MM <AF0E> -14', ME), null, 'compound with no half for us is not actionable');
+// K3SBP 2026-10-18: a compound with no half for us is a Fox working two hounds;
+// double-clicking it CALLS the fox (fox:true → main calls as a Hound).
+eq(P.inferReplyStep({ text: 'K9NW RR73; KI5QQG <P4/WE9V> -04' }, ME), { step: 'reply-cq', call: 'P4/WE9V', fox: true }, 'compound not for us -> call the fox');
+eq(step('W1AW RR73; AI5MM <AF0E> -14', ME), { step: 'reply-cq', call: 'AF0E' }, 'any compound sender can be called');
+eq(step('W1AW RR73; AI5MM <...> -14', ME), null, 'an unresolved hash cannot be called');
+eq(step('W1AW RR73; AI5MM <K3SBP> -14', ME), null, 'never call ourselves');
+eq(step('K9NW RR73; K3SBP <P4/WE9V> -04', ME), { step: 'send-r-report', call: 'P4/WE9V' }, 'the fox answering us is still our half');
+// The decode's sender (map, DXCC entity) is the bracketed call, never "RR73;" (R = European Russia).
+const { extractCallsigns } = require('../lib/wsjtx');
+eq(extractCallsigns('K9NW RR73; KI5QQG <P4/WE9V> -04'), { deCall: 'K9NW', dxCall: 'P4/WE9V' }, 'compound sender for map/entity');
+eq(extractCallsigns('K9NW RR73; KI5QQG <...> -04').dxCall, '', 'unresolved hash = no sender');
+eq(extractCallsigns('W2XYZ K1ABC -05'), { deCall: 'W2XYZ', dxCall: 'K1ABC' }, 'plain messages unchanged');
 eq(step('K3SBP W1ABC RRR', ME), { step: 'send-73', call: 'W1ABC' }, 'RRR -> 73');
 
 section('inferReplyStep — CQ + tail-end + null');
@@ -201,6 +212,16 @@ eq(to('<...> W1ABC -10', 'K9CYT/8'), false, 'unresolved hash is nobody');
 eq(to('K9CYTX W1ABC -10', 'K9CYT/8'), false, 'a longer call is not mine');
 eq(to('W1ABC K2XYZ -10', 'K9CYT/8'), false, "someone else's QSO");
 eq(to('K9CYT/8 W1ABC -10', ''), false, 'no call configured');
+
+section('CQ modifier reaches the QSO tracker (K3SBP 2026-10-18: "CQ DX" showed as "CQ K3SBP FN20")');
+{
+  const fs = require('fs');
+  const path = require('path');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+  eq((main.match(/phase: 'cq', txMsg, cqMsg: txMsg,/g) || []).length, 3, 'every CQ QSO (pop-out, Run, ECHOCAT) carries the CQ as sent');
+  eq(pop.includes("return q.cqMsg || ('CQ ' + q.myCall + ' ' + q.myGrid);"), true, 'the tracker shows it');
+}
 
 // ---------------------------------------------------------------------
 console.log('\n============================================================');
