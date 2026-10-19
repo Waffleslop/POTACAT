@@ -420,6 +420,30 @@ parcSetLogger(sendCatLog); // PARC (Protected Area Radio Community) — N3FMC re
 const { fetchNets: fetchDirectoryNets, fetchSwl: fetchDirectorySwl } = require('./lib/directory');
 const { QrzClient } = require('./lib/qrz');
 const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, nearbyParks: nearbyParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
+
+// A hunted park's record for logging. The parks DB holds only the operator's
+// OWN program (a US hunter's copy has no CA-xxxx), so a park abroad came back
+// empty: no name in the notes tag (N0KAH 2026-10-07, Canadian parks) and no
+// park state/grid in the log (W9TEF 2026-10-19). The live spot for exactly
+// that park carries its name, location and coordinates; a grid comes from
+// those. An n-fer spot is skipped: its name belongs to its first park only.
+function parkInfoFor(ref) {
+  let db = null;
+  try { db = getParkDb(parksMap, ref) || null; } catch { db = null; }
+  if (db && db.name) return db;
+  const want = String(ref || '').trim().toUpperCase();
+  if (!want) return db;
+  const sp = (typeof lastMergedSpots !== 'undefined' ? lastMergedSpots : []).find((x) => x && x.parkName
+    && String(x.reference || '').trim().toUpperCase() === want);
+  if (!sp) return db;
+  const hasPos = typeof sp.lat === 'number' && typeof sp.lon === 'number' && !(sp.lat === 0 && sp.lon === 0);
+  return {
+    reference: want, name: sp.parkName, locationDesc: sp.locationDesc || '',
+    grid: hasPos ? latLonToGrid(sp.lat, sp.lon) : '',
+    latitude: hasPos ? sp.lat : null, longitude: hasPos ? sp.lon : null,
+    fromSpot: true,
+  };
+}
 // NOTE: lib/dxcal.js (danplanet iCal) was retired 2026-05-29 in favor of
 // the community feed served by worker/dxpeditions — aggregated DX-World +
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
@@ -8522,7 +8546,8 @@ async function saveQsoRecord(qsoData, opts) {
     const stripped = stripSigTag(qsoData.comment, qsoData.sig || 'POTA', qsoData.sigInfo || parkRef);
     let parkTag = '';
     if (logCommentTags) {
-      const park = getParkDb(parksMap, parkRef);
+      // parkInfoFor: the DB, else the live spot (a park abroad, N0KAH).
+      const park = parkInfoFor(parkRef);
       if (park && park.name) {
         parkTag = `[${[qsoData.sig || 'POTA', parkRef, park.locationDesc || '', park.name || ''].filter(Boolean).join(' ')}]`;
       } else {
@@ -18457,7 +18482,7 @@ function connectRemote() {
       }
       let parkLocState = '', parkLocGrid = '';
       if (sig === 'POTA' && sigInfo) {
-        const park = getParkDb(parksMap, sigInfo);
+        const park = parkInfoFor(sigInfo); // DB, else the live spot (a park abroad)
         if (park) {
           // Multi-state parks ("US-WI,US-MI") get NO state here — the
           // activator is only in one of them and we can't prompt the
@@ -37169,7 +37194,8 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-park', (_e, ref) => {
-    return getParkDb(parksMap, ref);
+    // The DB, else the live spot — every log form's park lookup comes here.
+    return parkInfoFor(ref);
   });
 
   ipcMain.handle('parks-db-status', () => {

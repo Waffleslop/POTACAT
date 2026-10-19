@@ -54,5 +54,23 @@ eq(ensureSigTag('worked him at us-7413', 'POTA', 'US-7413'), 'worked him at us-7
 eq(ensureSigTag('plain ragchew', '', ''), 'plain ragchew', 'no sig/sigInfo → passthrough');
 eq(ensureSigTag(null, 'POTA', 'US-7413'), '[POTA US-7413]', 'null comment → tag only');
 
+console.log('a park outside the operator\'s own program still gets its name (N0KAH, Canadian parks):');
+{
+  // The park DB holds only the operator's own program, so saveQsoRecord falls
+  // back to the live spot for exactly that park (source guard on main.js).
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const i = main.indexOf('if (logCommentTags) {');
+  const block = main.slice(i, main.indexOf('qsoData.comment = appendTag(stripped, parkTag);', i));
+  check(/const park = parkInfoFor\(parkRef\);/.test(block), 'the notes tag uses parkInfoFor');
+  const fs0 = main.indexOf('function parkInfoFor(ref) {');
+  const f = main.slice(fs0, main.indexOf('\n}\n', fs0));
+  check(/getParkDb\(parksMap, ref\)/.test(f), 'park DB first');
+  check(/String\(x\.reference \|\| ''\)\.trim\(\)\.toUpperCase\(\) === want/.test(f),
+    'then the live spot for exactly that park (an n-fer spot\'s name is its first park\'s)');
+  check(/grid: hasPos \? latLonToGrid\(sp\.lat, sp\.lon\) : ''/.test(f), 'a grid from the spot\'s coordinates');
+  check(/ipcMain\.handle\('get-park', \(_e, ref\) => \{[\s\S]{0,120}return parkInfoFor\(ref\);/.test(main), 'every log form\'s park lookup gets the fallback');
+  check(/const park = parkInfoFor\(sigInfo\);/.test(main), 'the ECHOCAT log path too');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 assert.strictEqual(failed, 0, 'log-comment tests failed');
