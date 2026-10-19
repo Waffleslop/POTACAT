@@ -86,6 +86,8 @@ jobs:
         run: node test/lz3aw-round11-test.js
       - name: Run LZ3AW round 12 (VFO/split from FR/FT, S-meter vs power by TX state)
         run: node test/lz3aw-round12-test.js
+      - name: Run LZ3AW round 14 (web FT8 band follow, Logbook filters, Prop view, PSK31 pane, DX Expeditions)
+        run: node test/lz3aw-round14-test.js
       - name: Run paddle contact bounce (one tap is one element, web and desktop keyers)
         run: node test/paddle-bounce-test.js
       - name: Run spot hides/skips sync (one desktop-owned list for every surface)

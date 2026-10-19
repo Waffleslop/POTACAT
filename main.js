@@ -24208,7 +24208,12 @@ async function fetchExpeditions() {
       metadata,
     });
   }
+  // ECHOCAT too — the web Spots menu has the same DX Expeditions sources (LZ3AW).
+  _lastExpeditionPayload = { callsigns: [...merged], metadata: Object.fromEntries(meta) };
+  if (remoteServer && typeof remoteServer.setExpeditions === 'function') remoteServer.setExpeditions(_lastExpeditionPayload);
 }
+// The last list, for a server rebuilt by connectRemote (onRemoteServer below).
+let _lastExpeditionPayload = null;
 
 // --- Active Events (remote endpoint) ---
 // Built-in event definitions — remote endpoint overrides these.
@@ -27313,6 +27318,8 @@ app.whenReady().then(() => {
   setInterval(_refreshAltHosts, 10 * 60 * 1000);
   // A rebuilt server starts with no alt hosts; don't leave it that way for 10 min.
   onRemoteServer(() => _refreshAltHosts());
+  // A rebuilt server starts with no expedition list — hand it the last one.
+  onRemoteServer((rs) => { if (_lastExpeditionPayload && typeof rs.setExpeditions === 'function') rs.setExpeditions(_lastExpeditionPayload); });
 
   ipcMain.handle('cloud-tunnel-get-state', () => {
     return cloudTunnel ? cloudTunnel.getState() : { enabled: false, status: 'off' };

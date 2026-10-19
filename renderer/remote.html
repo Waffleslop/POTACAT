@@ -920,6 +920,8 @@
       <button class="tab" data-tab="logbook">LB</button>
       <button class="tab" data-tab="activate">Act <span id="tab-activate-badge" class="tab-badge hidden">0</span></button>
       <button class="tab" data-tab="ft8">FT8</button>
+      <!-- Where you are being heard: RBN + PSKReporter, as the desktop Prop view (LZ3AW) -->
+      <button class="tab" data-tab="prop">Prop</button>
       <button class="tab hidden" data-tab="dir" id="dir-tab-btn">Dir</button>
       <button class="tab" data-tab="sstv">SSTV</button>
       <!-- Band scope: shown when the shack's rig streams its own spectrum (FT-710 over USB) -->
@@ -995,6 +997,13 @@
           <label class="rc-spots-toggle"><input type="checkbox" data-src="wwff"> <span style="color:var(--wwff)">WWFF</span></label>
           <label class="rc-spots-toggle"><input type="checkbox" data-src="llota"> <span style="color:var(--llota)">LLOTA</span></label>
           <label class="rc-spots-toggle"><input type="checkbox" data-src="dxc"> <span style="color:var(--dxc)">DX Cluster</span></label>
+          <label class="rc-spots-toggle"><input type="checkbox" id="rc-dxe"> DX Expeditions</label>
+          <div class="rc-dxe-sources">
+            <label class="rc-spots-toggle rc-dxe-src"><input type="checkbox" data-dxe-src="clublog"> Club Log</label>
+            <label class="rc-spots-toggle rc-dxe-src"><input type="checkbox" data-dxe-src="dx-world"> DX-World</label>
+            <label class="rc-spots-toggle rc-dxe-src"><input type="checkbox" data-dxe-src="dxnews"> DXNews</label>
+            <label class="rc-spots-toggle rc-dxe-src"><input type="checkbox" data-dxe-src="ng3k"> NG3K ADXO</label>
+          </div>
           <div class="rc-spots-divider"></div>
           <label class="rc-spots-toggle rc-new-only-row" style="display:none"><input type="checkbox" id="rc-new-only"> <span style="color:#66ff99">NEW parks only</span></label>
           <label class="rc-spots-toggle rc-hide-worked-row" style="display:none"><input type="checkbox" id="rc-hide-worked"> Hide worked</label>
@@ -1213,6 +1222,23 @@
         <input type="text" id="lb-search" placeholder="Search callsign, park, notes...">
         <span id="lb-count" class="lb-count"></span>
       </div>
+      <!-- Filter bar, as in the desktop Logbook window (LZ3AW item 6). -->
+      <div class="lb-filter-bar" id="lb-filter-bar">
+        <select id="lb-filter-band" title="Band">
+          <option value="">All bands</option>
+          <option>160m</option><option>80m</option><option>60m</option><option>40m</option>
+          <option>30m</option><option>20m</option><option>17m</option><option>15m</option>
+          <option>12m</option><option>10m</option><option>6m</option><option>2m</option><option>70cm</option>
+        </select>
+        <select id="lb-filter-mode" title="Mode">
+          <option value="">All modes</option>
+          <option>CW</option><option>SSB</option><option>FT8</option><option>FT4</option><option>FT2</option>
+          <option>PSK</option><option>FM</option><option>RTTY</option><option>AM</option>
+        </select>
+        <input type="date" id="lb-filter-from" title="From (UTC date)">
+        <input type="date" id="lb-filter-to" title="To (UTC date)">
+        <button type="button" id="lb-filter-clear" class="lb-filter-clear">Clear</button>
+      </div>
       <div id="lb-list" class="lb-list"></div>
     </div>
 
@@ -1338,12 +1364,29 @@
         <div style="display:flex;align-items:center;gap:12px;padding:4px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim);">
           <span id="psk-freq">AFC: -- Hz</span><span id="psk-quality">Q -- &middot; SNR --</span>
           <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">SQL <input id="psk-sql" type="range" min="10" max="90" value="50" style="width:80px;"><span id="psk-sql-val">50</span></span>
+          <!-- Desktop PSK31 pane parity (LZ3AW): clear RX, tune tone, ATU -->
+          <button type="button" id="psk-clear" class="ft8-ctrl-btn" style="font-size:11px;" title="Clear the received text">Clear</button>
+          <button type="button" id="psk-tune" class="ft8-ctrl-btn" style="font-size:11px;" title="Tune tone on the PSK31 frequency">Tune</button>
+          <button type="button" id="psk-atu" class="ft8-ctrl-btn" style="font-size:11px;" title="Run the antenna tuner">ATU</button>
         </div>
         <div id="psk-rx" style="flex:1;min-height:0;overflow-y:auto;font-family:monospace;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word;padding:6px 10px;"></div>
         <div id="psk-chips" style="display:none;gap:4px;flex-wrap:wrap;padding:2px 10px;border-top:1px solid var(--border);"></div>
         <div style="display:flex;gap:4px;padding:4px 10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);">
           <input id="psk-their" type="text" maxlength="10" placeholder="their call" autocapitalize="characters" autocomplete="off" spellcheck="false" style="width:82px;font-size:12px;padding:3px 5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;text-transform:uppercase;">
           <div id="psk-macros" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+        </div>
+        <!-- Macro editor: long-press (or right-click) a macro; an empty slot opens it on a tap. -->
+        <div id="psk-macro-editor" class="hidden" style="flex-direction:column;gap:4px;padding:6px 10px;border-top:1px solid var(--border);">
+          <div style="display:flex;gap:4px;align-items:center;">
+            <input id="psk-me-label" type="text" maxlength="8" placeholder="label" style="width:80px;font-size:12px;padding:3px 5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;">
+            <span style="font-size:11px;color:var(--text-dim);">$MYCALL $CALL $GRID</span>
+          </div>
+          <textarea id="psk-me-text" rows="2" autocapitalize="off" autocorrect="off" spellcheck="false" style="font-family:monospace;font-size:12px;padding:4px 6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;resize:none;"></textarea>
+          <div style="display:flex;gap:4px;">
+            <button type="button" id="psk-me-save" class="ft8-ctrl-btn">Save</button>
+            <button type="button" id="psk-me-cancel" class="ft8-ctrl-btn">Cancel</button>
+            <button type="button" id="psk-me-reset" class="ft8-ctrl-btn" style="margin-left:auto;" title="Put all six macros back to the defaults">Reset all</button>
+          </div>
         </div>
         <div style="display:flex;gap:4px;padding:4px 10px 8px;align-items:stretch;">
           <!-- Verbatim contract: varicode is case-sensitive and lowercase is the
@@ -1451,6 +1494,26 @@
     </div>
 
     <!-- Directory view (HF Nets & SWL) -->
+    <div id="prop-view" class="hidden">
+      <div class="prop-toolbar">
+        <label class="prop-src"><input type="checkbox" id="prop-src-rbn" checked> RBN</label>
+        <label class="prop-src"><input type="checkbox" id="prop-src-pskr" checked> PSKReporter</label>
+        <select id="prop-band" title="Band">
+          <option value="">All bands</option>
+          <option>160m</option><option>80m</option><option>60m</option><option>40m</option><option>30m</option>
+          <option>20m</option><option>17m</option><option>15m</option><option>12m</option><option>10m</option><option>6m</option><option>2m</option>
+        </select>
+        <select id="prop-age" title="How far back">
+          <option value="15">15 min</option>
+          <option value="60" selected>1 hour</option>
+          <option value="360">6 hours</option>
+          <option value="1440">24 hours</option>
+        </select>
+        <span id="prop-count" class="prop-count"></span>
+      </div>
+      <div id="prop-map" class="prop-map"></div>
+      <div id="prop-list" class="prop-list"></div>
+    </div>
     <div id="dir-view" class="hidden">
       <div class="dir-toolbar">
         <div class="dir-tabs">
