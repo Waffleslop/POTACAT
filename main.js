@@ -37192,7 +37192,7 @@ app.whenReady().then(() => {
       // onto the upload page. Then open the upload page itself.
       const { shell } = require('electron');
       try { shell.showItemInFolder(filePath); } catch {}
-      try { shell.openExternal('https://pota.app/#/upload'); } catch {}
+      try { shell.openExternal('https://pota.app/adifupload'); } catch {}
       return { success: true, path: filePath, fileName, qsoCount: qsos.length };
     } catch (err) {
       return { success: false, error: err.message };
