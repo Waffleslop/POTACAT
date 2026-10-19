@@ -337,7 +337,9 @@ const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
-const { loadCtyDat, resolveCallsign, getAllEntities } = require('./lib/cty');
+const { loadCtyDat, resolveCallsign, resolveZones, getAllEntities } = require('./lib/cty');
+const CallZones = require('./lib/call-zones'); // CQ/ITU zones for spots + logbook rows (LZ3AW item 30)
+const ClusterNodeChoice = require('./lib/cluster-node-choice'); // turn saved cluster nodes on/off from the Source menu (LZ3AW item 1)
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
@@ -485,6 +487,9 @@ let parksDbLoading = false;
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
+// Memoized call -> {cqZone, ituZone}; `undefined` while cty.dat is still loading
+// so nothing caches a miss that is only a not-ready.
+const callZonesOf = CallZones.zoneResolver((call) => (ctyDb ? resolveZones(call, ctyDb) : undefined));
 
 // --- SSTV CW ID helper ---
 // SSTV engine emits audio at 48 kHz; CW ID is appended at the same
@@ -6002,6 +6007,32 @@ function getClusterNodeList() {
   return nodes;
 }
 
+// The Spots Source menu's cluster-node choice (LZ3AW item 1): ONE writer for
+// the desktop menu and ECHOCAT. Turns a SAVED node on/off (lib/cluster-node-
+// choice.js — max 3 on, never adds one), saves, reconnects when the cluster is
+// on, and echoes the list to every surface so they agree.
+function pushClusterNodeChoices() {
+  const list = ClusterNodeChoice.nodesForMenu(settings.clusterNodes);
+  if (win && !win.isDestroyed()) win.webContents.send('cluster-node-choices', list);
+  if (remoteServer && remoteServer.running) updateRemoteSettings();
+}
+function applyClusterNodeChoice(id, enabled, origin) {
+  const r = ClusterNodeChoice.setNodeEnabled(settings.clusterNodes || [], id, enabled);
+  if (r.error) {
+    pushClusterNodeChoices(); // put the asking surface back to the truth
+    return { ok: false, error: r.error };
+  }
+  if (r.changed) {
+    settings.clusterNodes = r.nodes;
+    saveSettings(settings);
+    const n = r.nodes.find((x) => String(x.id) === String(id));
+    sendCatLog(`[cluster] ${n ? (n.name || n.host) : id} turned ${enabled ? 'on' : 'off'} from the ${origin} Source menu`);
+    if (settings.enableCluster) connectCluster();
+  }
+  pushClusterNodeChoices();
+  return { ok: true, nodes: ClusterNodeChoice.nodesForMenu(settings.clusterNodes) };
+}
+
 function sendClusterNodesToPopout() {
   if (clusterPopoutWin && !clusterPopoutWin.isDestroyed()) {
     clusterPopoutWin.webContents.send('cluster-popout-nodes', getClusterNodeList());
@@ -6478,6 +6509,7 @@ function connectRbn() {
         lat: actLat,
         lon: actLon,
         spotTime: raw.spotTime,
+        spotter: spotter || '',
       };
       // Deduplicate: keep only the most recent spot per callsign+band
       rbnWatchSpots = rbnWatchSpots.filter(s =>
@@ -9028,7 +9060,7 @@ async function saveQsoRecord(qsoData, opts) {
     if (remoteServer && remoteServer.running && remoteServer.hasClient()) {
       const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       const qsos = parseAllRawQsos(logPath);
-      const mapped = qsos.map((q, i) => ({ idx: i, ...q }));
+      const mapped = CallZones.withQsoZones(qsos.map((q, i) => ({ idx: i, ...q })), callZonesOf); // + derived CQ/ITU zones (display only)
       const last = mapped.length ? mapped[mapped.length - 1] : null;
       if (!last || !remoteServer.sendQsoAdded(last, mapped.length)) {
         remoteServer.sendAllQsos(mapped);
@@ -14961,6 +14993,9 @@ function updateRemoteSettings() {
     // Defaults on, exactly as the desktop window reads them.
     enableDxe: settings.enableDxe !== false,
     enableDxeSources: dxeSourcesForRemote(),
+    // Saved cluster nodes for the Spots Source menu (id/name/host/enabled only —
+    // never a login or password). Set with C2S set-cluster-node (LZ3AW item 1).
+    clusterNodeChoices: ClusterNodeChoice.nodesForMenu(settings.clusterNodes),
     remoteCwEnabled: !!settings.remoteCwEnabled,
     // CW macros are ONE shared set: settings.cwMacros is canonical (the desktop
     // editor + bar read it, and a phone 'save-cw-macros' now writes it too), so
@@ -18332,7 +18367,7 @@ function connectRemote() {
       const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       const qsos = parseAllRawQsos(logPath);
       // Send with idx so phone can reference by index for edit/delete
-      const mapped = qsos.map((q, i) => ({ idx: i, ...q }));
+      const mapped = CallZones.withQsoZones(qsos.map((q, i) => ({ idx: i, ...q })), callZonesOf); // + derived CQ/ITU zones (display only)
       remoteServer.sendAllQsos(mapped);
     } catch (err) {
       console.error('[Echo CAT] get-all-qsos error:', err.message);
@@ -18991,6 +19026,13 @@ function connectRemote() {
     sendCatLog('[JS8] heartbeat auto-reply (HB ACK) ' + (js8HbAck ? 'ON' : 'off') + ' (remote)');
     js8PushStatus();
   });
+  // Cluster node on/off from the ECHOCAT Spots Source menu (owner only —
+  // remote-server refuses a Guest Pass). Same writer as the desktop menu.
+  remoteServer.on('set-cluster-node', ({ id, enabled } = {}) => {
+    const r = applyClusterNodeChoice(id, enabled, 'ECHOCAT');
+    if (!r.ok && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'cluster-node-result', ok: false, error: r.error });
+  });
+
   // The whole of Idle Mode from a mobile device. Every field is optional and
   // validated on its own: a bad one is dropped (and named in the reply), the
   // rest still apply — an unknown program from a newer client must never
@@ -21154,6 +21196,8 @@ async function processSotaSpots(raw) {
       band: freqToBand(freqMHz),
       spotTime: s.timeStamp || '',
       continent,
+      // SOTAwatch's `callsign` is the POSTER; the activator is activatorCallsign.
+      spotter: (s.callsign || '').toUpperCase(),
     };
   });
   // Dedupe: keep latest spot per callsign+band (allows multi-band activations)
@@ -21293,6 +21337,7 @@ function processGmaSpots(raw) {
       band: freqToBand(freqMHz),
       spotTime,
       continent,
+      spotter: s.spotter || '',
     };
   });
   // Dedupe: keep latest spot per callsign+band (allows multi-band activations)
@@ -21346,6 +21391,7 @@ function processParcSpots(raw) {
       band: freqToBand(freqMHz),
       spotTime,
       continent,
+      spotter: s.spotter || '',
     };
   });
   // Dedupe: keep latest spot per callsign+band (allows multi-band activations)
@@ -21764,6 +21810,9 @@ function sendMergedSpots() {
   const netSpots = getActiveNetSpots();
   const raw = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
   const merged = dedupeCrossSource(raw);
+  // CQ/ITU zones on every spot, every source (optional columns/fields on the
+  // desktop table and ECHOCAT cards — LZ3AW item 30).
+  CallZones.stampSpotZones(merged, callZonesOf);
   lastMergedSpots = merged; // cached for the bandspread-popout-push override
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
@@ -34829,6 +34878,8 @@ app.whenReady().then(() => {
       } else {
         disconnectCluster();
       }
+      // Nodes added/removed/toggled in Settings: the Source menus follow.
+      pushClusterNodeChoices();
     }
 
     // Re-push the directory snapshot so ECHOCAT phone clients see new /
@@ -35866,6 +35917,10 @@ app.whenReady().then(() => {
   });
   // A contact as the operator logged it — logContact decides its records.
   // Every desktop log form uses this; save-qso stays for one finished record.
+  // Desktop Spots Source menu: turn a saved cluster node on/off.
+  ipcMain.handle('cluster-node-enable', (_e, { id, enabled } = {}) => applyClusterNodeChoice(id, enabled, 'desktop'));
+  ipcMain.handle('cluster-node-choices', () => ClusterNodeChoice.nodesForMenu(settings.clusterNodes));
+
   ipcMain.handle('log-contact', async (_e, entry) => {
     markUserActive();
     try {
@@ -37232,7 +37287,7 @@ app.whenReady().then(() => {
     try {
       if (!fs.existsSync(logPath)) return [];
       const qsos = parseAllRawQsos(logPath);
-      return qsos.map((fields, idx) => ({ idx, ...fields }));
+      return CallZones.withQsoZones(qsos.map((fields, idx) => ({ idx, ...fields })), callZonesOf); // + derived CQ/ITU zones (display only)
     } catch {
       return [];
     }

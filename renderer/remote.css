@@ -1045,6 +1045,26 @@ html, body {
   min-width: 28px;
 }
 
+/* Spotter and CQ/ITU zone columns (LZ3AW items 2 and 30) */
+.spot-spotter {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.spot-zone {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  text-align: center;
+}
+/* Cluster nodes under the DX Cluster source toggle (LZ3AW item 1) */
+.rc-cluster-nodes .rc-cluster-node {
+  padding-left: 22px;
+  font-size: 12px;
+}
+
 .spot-name {
   font-size: 11px;
   color: var(--text-dim);
@@ -2538,6 +2558,7 @@ html, body {
 .lb-mode { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #333; color: var(--text-dim); }
 .lb-ref { font-size: 12px; color: var(--pota); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lb-date { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.lb-zones { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 
 .lb-detail {
   padding: 0 12px 12px;

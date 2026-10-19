@@ -113,6 +113,8 @@
               <label class="spots-toggle"><input type="checkbox" id="spots-gma"> <span style="color:#a98467">GMA</span></label>
               <label class="spots-toggle" title="PARC: Protected Area Radio Community — parks program spots from parc-community.com"><input type="checkbox" id="spots-parc"> <span style="color:#7cb342">PARC</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-cluster"> <span style="color:#e040fb">DX Cluster</span></label>
+              <!-- The saved cluster nodes (Settings > Spots), on/off from here; filled by app.js renderClusterNodeChoices -->
+              <div id="spots-cluster-nodes"></div>
               <label class="spots-toggle"><input type="checkbox" id="spots-cwspots"> <span style="color:#ffd740">CW Spots</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-rbn"> <span style="color:#00bcd4">RBN</span></label>
               <label class="spots-toggle"><input type="checkbox" id="spots-pskr"> <span style="color:#ff6b6b">FreeDV</span></label>
@@ -683,9 +685,12 @@
                 <th data-sort="parkName" data-col="parkName">Name</th>
                 <th data-sort="locationDesc" data-col="locationDesc">State</th>
                 <th data-sort="grid" data-col="grid">Grid</th>
+                <th data-sort="cqZone" data-col="cqz" title="CQ zone (from cty.dat)">CQ</th>
+                <th data-sort="ituZone" data-col="ituz" title="ITU zone (from cty.dat)">ITU</th>
                 <th data-sort="distance" data-col="distance" id="dist-header">Dist (mi)</th>
                 <th data-sort="bearing" data-col="bearing" class="bearing-col">Heading</th>
                 <th data-sort="spotTime" data-col="spotTime" id="time-header">Age</th>
+                <th data-sort="spotter" data-col="spotter" title="Who spotted the station">Spotter</th>
                 <th data-sort="comments" data-col="comments">Comments</th>
                 <th class="no-sort" data-col="skip">Skip</th>
                 <th class="no-sort" data-col="hide">Hide</th>

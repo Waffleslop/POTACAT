@@ -48,6 +48,8 @@ jobs:
         run: node test/sstv-audio-device-test.js
       - name: Run SSTV live path (stopped decoder, idle SSTV band, reject logging)
         run: node test/sstv-live-path-test.js
+      - name: Run LZ3AW batch B (spotter column, CQ/ITU zones, cluster node choice)
+        run: node test/lz3aw-batch-b-test.js
       - name: Run (tr)uSDX CAT polling (slow poll, none during TX)
         run: node test/trusdx-poll-test.js
       - name: Run rigctld sideband width (band change keeps the filter)
