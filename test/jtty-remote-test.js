@@ -43,7 +43,7 @@ test('the four JTTY messages are registered with the right direction', () => {
 });
 
 test('the server hello advertises the jtty capability', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
   const m = src.match(/capabilities: \[([\s\S]*?)\],\n\s*rigModel:/);
   assert.ok(m, 'hello capability list found');
   assert.ok(/'jtty'/.test(m[1]), 'jtty advertised');
@@ -133,7 +133,7 @@ test('a new engine epoch empties the recent rows — ids restart at 1 per engine
 
 test('the recent rows are replayed on connect, and main / web wiring is in place (static)', () => {
   const root = path.join(__dirname, '..');
-  const rs = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8');
+  const rs = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(rs.includes("this._sendTo(ws, { type: 'jtcat-jtty-rx', updates: this._jtcatJttyRecent.slice(), replay: true, epoch: this._jtcatJttyEpoch || undefined });"), 'hydration replay carries the epoch');
   const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
   assert.ok(main.includes('remoteServer.broadcastJtcatJttyRx(batch, jtcatJttyEpoch);'), 'RX batches reach remote clients, with the epoch');
@@ -170,7 +170,7 @@ test('the recent rows are replayed on connect, and main / web wiring is in place
 // Mobile review 2026-10-18 (potacat-app docs/desktop-handoffs/jtcat-jtty-2026-10-18-mobile-review.md).
 test('mobile review: capabilities, FT8-style packing, a JTTY spectrum, the JTTY frequency restored by main', () => {
   const root = path.join(__dirname, '..');
-  const rs = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8');
+  const rs = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
   const caps = rs.match(/capabilities: \[([\s\S]*?)\],\n\s*rigModel:/)[1];
   assert.ok(/'jtcat-fox-call'/.test(caps), 'the app gates the Fox tap on jtcat-fox-call');
   assert.ok(/'jtty-ft8-style'/.test(caps), 'and the style selector on jtty-ft8-style');
