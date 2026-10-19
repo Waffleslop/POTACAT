@@ -8841,7 +8841,11 @@ async function saveQsoRecord(qsoData, opts) {
   // byte-capped legacy frame) — re-pushing the whole log on every
   // save is what produced the 9.6MB frames of BUG-N3VD-20260701.
   try {
-    if (remoteServer && remoteServer.running) {
+    // Only with a device connected: this re-parses the WHOLE log, synchronously.
+    // On a 124k-QSO log that held the main process ~1 s after every save with
+    // the ECHOCAT server merely listening, and the FT8 engine missed the 73's
+    // slot (IK4IDF 2026-10-17). A device that connects later gets the log then.
+    if (remoteServer && remoteServer.running && remoteServer.hasClient()) {
       const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
       const qsos = parseAllRawQsos(logPath);
       const mapped = qsos.map((q, i) => ({ idx: i, ...q }));
