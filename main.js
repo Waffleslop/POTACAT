@@ -12531,6 +12531,26 @@ function broadcastJtcatClock(payload) {
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('jtcat-clock', payload);
 }
 
+// The "Fix it" button on every surface (FT8, JS8, Station Setup). The fix is
+// judged by the re-measure, never by Windows having accepted the commands: a
+// resync that only SLEWS the clock was reported as success while the banner
+// stayed exactly where it was (K3SBP 2026-10-15), and a button that does
+// nothing visible with no word why is worse than no button.
+async function runClockFix() {
+  const before = jtcatLastClock && Number.isFinite(jtcatLastClock.offsetMs) ? jtcatLastClock.offsetMs : null;
+  const sync = await syncSystemClock();
+  // Give the clock a moment to settle before re-measuring.
+  await new Promise(r => setTimeout(r, 1500));
+  const clock = await runJtcatClockCheck();
+  sendCatLog(`[Clock] Fix: ${sync.message}` + (before != null ? ` Before ${(before / 1000).toFixed(2)}s` : '') +
+    (Number.isFinite(clock.offsetMs) ? `, after ${(clock.offsetMs / 1000).toFixed(2)}s.` : '.'));
+  if (sync.success && clock.level !== 'ok' && Number.isFinite(clock.offsetMs)) {
+    sync.success = false;
+    sync.message = `Windows accepted the change, but the clock still reads ${(clock.offsetMs / 1000).toFixed(2)}s off UTC`;
+  }
+  return { sync, clock };
+}
+
 async function runJtcatClockCheck() {
   const prevLevel = jtcatLastClock && jtcatLastClock.level;
   try {
@@ -30611,9 +30631,7 @@ app.whenReady().then(() => {
       }
       case 'check-clock': await runJtcatClockCheck(); break;
       case 'sync-clock': {
-        const res = await syncSystemClock();
-        await sleepMs(1500);
-        await runJtcatClockCheck();
+        const { sync: res } = await runClockFix();
         if (res && res.success === false && res.message) message = res.message;
         break;
       }
@@ -36290,13 +36308,7 @@ app.whenReady().then(() => {
   // now" without elevation.
   ipcMain.handle('jtcat-get-clock', () => jtcatLastClock);
   ipcMain.handle('jtcat-check-clock', async () => await runJtcatClockCheck());
-  ipcMain.handle('jtcat-sync-clock', async () => {
-    const sync = await syncSystemClock();
-    // Give the clock a moment to settle before re-measuring.
-    await new Promise(r => setTimeout(r, 1500));
-    const clock = await runJtcatClockCheck();
-    return { sync, clock };
-  });
+  ipcMain.handle('jtcat-sync-clock', async () => await runClockFix());
   ipcMain.handle('jtcat-open-time-settings', async () => {
     const { shell } = require('electron');
     if (process.platform === 'win32') return shell.openExternal('ms-settings:dateandtime');

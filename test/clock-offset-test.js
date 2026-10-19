@@ -169,4 +169,51 @@ t('a warning line carries every server reading', () => {
   assert.ok(/Readings: \$\{jtcatLastClock\.readings\}/.test(src));
 });
 
+// The Fix button (K3SBP 2026-10-15: +0.4 s, UAC approved, nothing changed).
+// w32tm /resync only SLEWS an error this small, over hours, so the fix has to
+// STEP the clock by the measured offset and tighten Windows Time's discipline.
+const { buildTimeSyncBatch, MAX_STEP_MS } = require('../lib/ntp');
+console.log('\nbuildTimeSyncBatch()');
+
+t('steps the clock by the measured offset, in the sign NTP measures', () => {
+  // theta = server - local: +366 means the PC is behind, so ADD 366 ms.
+  const b = buildTimeSyncBatch(366).join('\n');
+  assert.ok(/Set-Date -Adjust \(\[TimeSpan\]::FromMilliseconds\(366\)\)/.test(b), b);
+  assert.ok(/FromMilliseconds\(-1234\)/.test(buildTimeSyncBatch(-1234).join('\n')));
+});
+
+t('the step comes before the resync, which comes last', () => {
+  const b = buildTimeSyncBatch(400);
+  const step = b.findIndex(l => /Set-Date/.test(l));
+  const resync = b.findIndex(l => /w32tm \/resync/.test(l));
+  assert.ok(step > 0 && resync > step, 'a resync first would start a slew towards the old error');
+  assert.strictEqual(b[b.length - 1], 'exit /b 0');
+});
+
+t('Windows Time gets the high-accuracy poll and better peers', () => {
+  const b = buildTimeSyncBatch(400).join('\n');
+  assert.ok(b.includes('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\W32Time\\Config" /v MinPollInterval /t REG_DWORD /d 6 /f'));
+  assert.ok(/\/v MaxPollInterval \/t REG_DWORD \/d 6 /.test(b));
+  assert.ok(/\/v UpdateInterval \/t REG_DWORD \/d 100 /.test(b));
+  assert.ok(/TimeProviders\\NtpClient" \/v SpecialPollInterval \/t REG_DWORD \/d 64 /.test(b));
+  assert.ok(/manualpeerlist:"time\.cloudflare\.com,0x9 time\.google\.com,0x9/.test(b));
+  assert.ok(/sc config w32time start= auto/.test(b) && /net start w32time/.test(b));
+});
+
+t('no step without a measurement, for zero, or for an absurd reading', () => {
+  for (const off of [null, undefined, NaN, 0, MAX_STEP_MS + 1, -(MAX_STEP_MS + 1)]) {
+    const b = buildTimeSyncBatch(off).join('\n');
+    assert.ok(!/Set-Date/.test(b), String(off));
+    assert.ok(/w32tm \/resync \/force/.test(b), 'still resyncs');
+  }
+});
+
+t('the Fix result is judged by the re-measure, on every surface (source guard)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/ipcMain\.handle\('jtcat-sync-clock', async \(\) => await runClockFix\(\)\);/.test(src));
+  assert.ok(/case 'sync-clock': \{\s*const \{ sync: res \} = await runClockFix\(\);/.test(src));
+  assert.ok(/if \(sync\.success && clock\.level !== 'ok' && Number\.isFinite\(clock\.offsetMs\)\) \{\s*sync\.success = false;/.test(src));
+  assert.strictEqual((src.match(/syncSystemClock\(/g) || []).length, 1, 'only runClockFix calls it');
+});
+
 console.log(`\n${passed} passed`);
