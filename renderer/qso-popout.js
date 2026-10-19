@@ -94,6 +94,16 @@ const ALL_COLUMNS = [
   // activations are invisible in their logbook.
   { key: 'MY_SIG_INFO', label: 'My Park', sort: 'MY_SIG_INFO', field: 'MY_SIG_INFO', w: 86, off: true,
     get: (q) => q.MY_SIG_INFO || q.MY_POTA_REF || '' },
+  // My refs for the other programs (LZ3AW item 7: MY_SOTA_REF). The writer
+  // fills MY_<PROGRAM>_REF from MY_SIG on every activation record, and a
+  // cross-program activation writes the second program's ref only there, so
+  // a summit activator could not see or fix it. Editable like My Park.
+  { key: 'MY_SOTA_REF', label: 'My Summit', sort: 'MY_SOTA_REF', field: 'MY_SOTA_REF', w: 90, off: true,
+    get: (q) => q.MY_SOTA_REF || (q.MY_SIG === 'SOTA' ? q.MY_SIG_INFO || '' : '') },
+  { key: 'MY_WWFF_REF', label: 'My WWFF', sort: 'MY_WWFF_REF', field: 'MY_WWFF_REF', w: 86, off: true,
+    get: (q) => q.MY_WWFF_REF || (q.MY_SIG === 'WWFF' ? q.MY_SIG_INFO || '' : '') },
+  { key: 'MY_LLOTA_REF', label: 'My LLOTA', sort: 'MY_LLOTA_REF', field: 'MY_LLOTA_REF', w: 86, off: true,
+    get: (q) => q.MY_LLOTA_REF || (q.MY_SIG === 'LLOTA' ? q.MY_SIG_INFO || '' : '') },
   { key: 'GRIDSQUARE', label: 'Grid', sort: 'GRIDSQUARE', field: 'GRIDSQUARE', w: 62, get: (q) => q.GRIDSQUARE || '' },
   { key: 'STATE', label: 'State', sort: 'STATE', field: 'STATE', w: 52, get: (q) => q.STATE || '' },
   { key: 'COUNTRY', label: 'Country', sort: 'COUNTRY', field: 'COUNTRY', w: 110, get: (q) => q.COUNTRY || '' },
