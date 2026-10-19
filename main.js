@@ -5656,7 +5656,7 @@ async function connectCat() {
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
-    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay });
+    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: model.serialHandshake });
   }
 
   bindRigStateEvents(cat);
