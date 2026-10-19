@@ -64,6 +64,11 @@ function applyState(s) {
   pill.className = 'sc-pill ' + (state.status || 'stopped');
   pill.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[state.status] || state.status;
   $('sc-synth-badge').style.display = state.kind === 1 ? '' : 'none';
+  // An SDR source (lib/sdr-scope.js) has no sweep speed and no SCU-LAN10.
+  const sdr = state.source === 'sdr' && state.kind !== 1;
+  $('sc-sdr-badge').style.display = sdr ? '' : 'none';
+  $('sc-speed-wrap').style.display = sdr ? 'none' : '';
+  $('sc-sculan-wrap').style.display = sdr ? 'none' : '';
   $('sc-span').textContent = A.formatSpan(state.spanHz);
   $('sc-mode').textContent = state.anchor ? state.anchor.toUpperCase() + (state.anchor !== 'center' ? ' (axis assumed)' : '') : '—';
   $('sc-speed').textContent = state.speed || '—';
