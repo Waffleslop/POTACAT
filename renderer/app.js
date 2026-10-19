@@ -3768,8 +3768,9 @@ async function saveBannerQso() {
   const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota' || type === 'wwbota';
   if (needsRef && !rawRef) { blRef.focus(); return; }
   const mode = blMode.value;
-  const rstSent = blRstSent.value.trim() || '59';
-  const rstRcvd = blRstRcvd.value.trim() || '59';
+  // Empty = the mode decides (59 / 599 / -00, lib/qso-expand.js defaultRst).
+  const rstSent = blRstSent.value.trim();
+  const rstRcvd = blRstRcvd.value.trim();
   const timeVal = blTime.value.trim();
   const now = new Date();
   const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');

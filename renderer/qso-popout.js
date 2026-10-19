@@ -1008,6 +1008,21 @@ const newQsoRstR = document.getElementById('qso-new-rst-r');
 const newQsoDate = document.getElementById('qso-new-date');
 const newQsoTime = document.getElementById('qso-new-time');
 const newQsoComment = document.getElementById('qso-new-comment');
+// RST by mode, as main defaults an empty one (lib/qso-expand.js defaultRst):
+// the form showed 59 for every mode, so an FT8 or CW entry logged 59.
+function newQsoDefaultRst(mode) {
+  const m = String(mode || '').toUpperCase();
+  if (m === 'CW') return '599';
+  if (['SSB', 'USB', 'LSB', 'AM', 'FM', 'DV', ''].includes(m)) return '59';
+  return '-00';
+}
+if (newQsoMode) newQsoMode.addEventListener('change', () => {
+  // Follow the mode while the operator has not typed a report of their own.
+  const defaults = ['59', '599', '-00', ''];
+  const d = newQsoDefaultRst(newQsoMode.value);
+  if (defaults.includes(newQsoRstS.value.trim())) newQsoRstS.value = d;
+  if (defaults.includes(newQsoRstR.value.trim())) newQsoRstR.value = d;
+});
 // Pre-fill UTC now; an operator entering a past QSO overwrites it.
 function stampNewQsoNow() {
   const iso = new Date().toISOString();
@@ -1131,8 +1146,8 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
     mode,
     qsoDate,
     timeOn,
-    rstSent: newQsoRstS.value.trim() || '59',
-    rstRcvd: newQsoRstR.value.trim() || '59',
+    rstSent: newQsoRstS.value.trim(),
+    rstRcvd: newQsoRstR.value.trim(),
     comment: newQsoComment.value.trim(),
   };
   // Map the type chip + ref to the ADIF SIG/SIG_INFO + the per-program
@@ -1182,8 +1197,8 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
   // Clear form and refresh
   newQsoCall.value = '';
   newQsoFreq.value = '';
-  newQsoRstS.value = '59';
-  newQsoRstR.value = '59';
+  newQsoRstS.value = newQsoDefaultRst(newQsoMode.value);
+  newQsoRstR.value = newQsoRstS.value;
   newQsoRef.value = '';
   newQsoComment.value = '';
   stampNewQsoNow();

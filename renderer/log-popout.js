@@ -540,8 +540,9 @@ function _applyPopoutTheme(payload) {
       band,
       qsoDate: date,
       timeOn: time,
-      rstSent: (rstSentInput.value || '59').slice(0, 3),
-      rstRcvd: (rstRcvdInput.value || '59').slice(0, 3),
+      // Empty = the mode decides (59 / 599 / -00) in main.
+      rstSent: (rstSentInput.value || '').slice(0, 3),
+      rstRcvd: (rstRcvdInput.value || '').slice(0, 3),
       // String, like every other field here — main normalizes too, but a
       // Number leaving this form is what broke WRL forwarding (W9TEF). A
       // non-numeric entry stays undefined so main's auto-fill still runs,
