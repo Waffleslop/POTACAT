@@ -619,8 +619,21 @@ contextBridge.exposeInMainWorld('api', {
   cloudDownloadAdif: () => ipcRenderer.invoke('cloud-download-adif'),
   cloudVerifySubscription: () => ipcRenderer.invoke('cloud-verify-subscription'),
   cloudSaveBmacEmail: (email) => ipcRenderer.invoke('cloud-save-bmac-email', email),
-  cloudOpenSubscribe: () => ipcRenderer.invoke('cloud-open-subscribe'),
+  // Billing (lib/cloud-billing-ui.js decides what shows; lib/cloud-ipc.js
+  // opens every Stripe URL from main). cloudOpenSubscribe('monthly'|'yearly')
+  // = Stripe checkout; cloudOpenSubscribe() or ({bmac:true}) = Buy Me a Coffee.
+  cloudOpenSubscribe: (arg) => ipcRenderer.invoke('cloud-open-subscribe', arg),
   cloudOpenManage: () => ipcRenderer.invoke('cloud-open-manage'),
+  cloudOpenBillingAction: (billing) => ipcRenderer.invoke('cloud-open-billing-action', billing),
+  cloudOpenJoinPage: (arg) => ipcRenderer.invoke('cloud-open-join-page', arg),
+  cloudCheckoutState: () => ipcRenderer.invoke('cloud-checkout-state'),
+  cloudRefreshSubscription: () => ipcRenderer.invoke('cloud-refresh-subscription'),
+  onCloudBillingState: (cb) => ipcRenderer.on('cloud-billing-state', (_e, data) => cb(data)),
+  onCloudCheckoutState: (cb) => ipcRenderer.on('cloud-checkout-state', (_e, data) => cb(data)),
+  // The in-app Cloud prompt (50+ local QSOs, no account): main supplies the
+  // inputs, the renderer decides and draws, main persists the snooze.
+  cloudPromptGet: () => ipcRenderer.invoke('cloud-prompt-get'),
+  cloudPromptSnooze: () => ipcRenderer.invoke('cloud-prompt-snooze'),
   cloudGetSettings: () => ipcRenderer.invoke('cloud-get-settings'),
   cloudPutSettings: (data) => ipcRenderer.invoke('cloud-put-settings', data),
   onCloudSyncStatus: (cb) => ipcRenderer.on('cloud-sync-status', (_e, data) => cb(data)),

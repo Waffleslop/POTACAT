@@ -27,8 +27,29 @@
   const subLevelSpan = document.getElementById('cloud-sub-level');
   const trialInfoSpan = document.getElementById('cloud-trial-info');
   const subscribeSection = document.getElementById('cloud-subscribe-section');
-  const subscribeBtn = document.getElementById('cloud-subscribe-btn');
+  const subscribeBtn = document.getElementById('cloud-subscribe-btn'); // "Prefer Buy Me a Coffee?"
   const verifyBtn = document.getElementById('cloud-verify-btn');
+  // Billing (lib/cloud-billing-ui.js decides; this file only draws).
+  const billingStrip = document.getElementById('cloud-billing-strip');
+  const manageRow = document.getElementById('cloud-manage-row');
+  const manageBtn = document.getElementById('cloud-manage-btn');
+  const accessThroughSpan = document.getElementById('cloud-access-through');
+  const subscribeHeading = document.getElementById('cloud-subscribe-heading');
+  const stripeButtons = document.getElementById('cloud-stripe-buttons');
+  const subscribeMonthlyBtn = document.getElementById('cloud-subscribe-monthly');
+  const subscribeYearlyBtn = document.getElementById('cloud-subscribe-yearly');
+  const checkoutWait = document.getElementById('cloud-checkout-wait');
+  const checkoutRefresh = document.getElementById('cloud-checkout-refresh');
+  const stripeNote = document.getElementById('cloud-stripe-note');
+  const bmacVerifyDetails = document.getElementById('cloud-bmac-verify');
+  const uploadNudge = document.getElementById('cloud-upload-nudge');
+  const uploadNudgeBtn = document.getElementById('cloud-upload-nudge-btn');
+  const joinWebLink = document.getElementById('cloud-join-web-link');
+  const Billing = window.CloudBillingUi || null;
+  let _stripeConfigured = true;      // false after a 503 stripe_not_configured
+  let _lastStatus = null;            // the last cloud-get-status payload
+  let _lastBilling = null;           // subscription.billing, for the strip's button
+  let _autoUploadAfterRegister = false; // set by openCloudSignup({autoUpload})
   const syncEnabledCheck = document.getElementById('cloud-sync-enabled');
   const syncControls = document.getElementById('cloud-sync-controls');
   const deviceNameInput = document.getElementById('cloud-device-name');
@@ -95,31 +116,68 @@
     if (!accountCallsign) openCallsignEditor('missing');
     else if (callsignEditorMode === 'missing') closeCallsignEditor();
 
-    if (subscription && subscription.status === 'active') {
-      subStatusSpan.textContent = 'active';
-      subStatusSpan.className = 'status connected';
-      subLevelSpan.textContent = subscription.level ? `(${subscription.level})` : '';
-      trialInfoSpan.classList.add('hidden');
-      subscribeSection.style.display = 'none';
-      updateCloudPill('connected');
-    } else if (subscription && subscription.status === 'trial') {
-      const days = subscription.trialDaysLeft || 0;
-      subStatusSpan.textContent = 'trial';
-      subStatusSpan.className = 'status connected';
-      subLevelSpan.textContent = '';
-      trialInfoSpan.textContent = `${days} day${days !== 1 ? 's' : ''} remaining`;
-      trialInfoSpan.classList.remove('hidden');
-      subscribeSection.style.display = '';
-      updateCloudPill('connected');
-    } else {
-      const trialExpired = subscription?.trialActive === false && subscription?.trialExpiresAt;
-      subStatusSpan.textContent = trialExpired ? 'trial expired' : (subscription?.status || 'inactive');
-      subStatusSpan.className = 'status disconnected';
-      subLevelSpan.textContent = '';
-      trialInfoSpan.classList.add('hidden');
-      subscribeSection.style.display = '';
-      updateCloudPill('disconnected');
+    renderBilling(subscription);
+  }
+
+  /**
+   * The status pill, the billing strip, the subscribe section and the
+   * manage row — all from one describeBilling() so they cannot disagree.
+   * The server writes the sentence (billing.message); we choose where.
+   */
+  function renderBilling(subscription) {
+    const d = Billing ? Billing.describeBilling(subscription, { stripeConfigured: _stripeConfigured }) : null;
+    _lastBilling = (subscription && subscription.billing) || null;
+    if (!d) {
+      // No policy module (should not happen) — the old active/inactive view.
+      const active = subscription && subscription.status === 'active';
+      subStatusSpan.textContent = subscription?.status || 'inactive';
+      subStatusSpan.className = 'status ' + (active ? 'connected' : 'disconnected');
+      subscribeSection.style.display = active ? 'none' : '';
+      updateCloudPill(active ? 'connected' : 'disconnected');
+      return;
     }
+
+    subStatusSpan.textContent = d.pill.text;
+    subStatusSpan.className = 'status ' + d.pill.cls;
+    subLevelSpan.textContent = (d.access && !d.trial && subscription?.level && d.provider !== 'stripe') ? `(${subscription.level})` : '';
+    if (d.trialLine) {
+      trialInfoSpan.textContent = d.trialLine.text;
+      trialInfoSpan.className = 'cloud-trial-line' + (d.trialLine.urgent ? ' urgent' : '');
+    } else {
+      trialInfoSpan.className = 'hidden';
+      trialInfoSpan.textContent = '';
+    }
+    updateCloudPill(d.access ? 'connected' : 'disconnected');
+
+    if (billingStrip) {
+      if (d.strip) {
+        billingStrip.className = 'cloud-billing-strip ' + d.strip.tone;
+        billingStrip.querySelector('.cbs-msg').textContent = d.strip.message;
+        billingStrip.querySelector('.cbs-action').textContent = d.strip.actionLabel;
+      } else {
+        billingStrip.className = 'cloud-billing-strip hidden';
+      }
+    }
+
+    if (manageRow) {
+      const show = !!(d.manage || d.accessThrough);
+      manageRow.classList.toggle('hidden', !show);
+      if (manageBtn) {
+        manageBtn.classList.toggle('hidden', !d.manage);
+        if (d.manage) manageBtn.textContent = d.manage.label;
+      }
+      if (accessThroughSpan) accessThroughSpan.textContent = d.accessThrough || '';
+    }
+
+    subscribeSection.style.display = d.subscribe.show ? '' : 'none';
+    if (subscribeHeading) subscribeHeading.textContent = d.subscribe.heading;
+    if (stripeButtons) stripeButtons.classList.toggle('hidden', !d.subscribe.stripe);
+    if (stripeNote) {
+      stripeNote.classList.toggle('hidden', !d.subscribe.show);
+      // With Stripe unavailable the BMAC link is the primary way to pay.
+      if (subscribeBtn) subscribeBtn.textContent = d.subscribe.stripe ? 'Prefer Buy Me a Coffee?' : 'Subscribe on Buy Me a Coffee';
+    }
+    if (bmacVerifyDetails) bmacVerifyDetails.classList.toggle('hidden', !d.verify.show);
   }
 
   function showError(msg) {
@@ -176,7 +234,9 @@
       };
       if (sub.status === 'inactive' && sub.trialActive) sub.status = 'trial';
 
+      _lastStatus = status;
       showAccount(status.user, sub);
+      renderUploadNudge(status, sub);
 
       if (status.sync) {
         qsoCountSpan.textContent = status.sync.totalQsos ?? '--';
@@ -265,6 +325,13 @@
         } else {
           passwordInput.value = '';
           await refreshStatus();
+          // From the Cloud prompt: the upload IS the activation event (half
+          // of the trials that upload convert; none of the ones that do not),
+          // so it runs now rather than waiting to be found as a button.
+          if (_autoUploadAfterRegister) {
+            _autoUploadAfterRegister = false;
+            await runInitialUpload({ confirm: false });
+          }
         }
       } finally {
         emailRegisterBtn.disabled = false;
@@ -399,8 +466,10 @@
   }
 
   if (subscribeBtn) {
-    subscribeBtn.addEventListener('click', () => {
-      window.api.cloudOpenSubscribe();
+    // "Prefer Buy Me a Coffee?" — the membership page, as before Stripe.
+    subscribeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.api.cloudOpenSubscribe({ bmac: true });
     });
   }
 
@@ -492,11 +561,12 @@
     });
   }
 
-  const supporterLink = document.getElementById('cloud-supporter-link');
-  if (supporterLink) {
-    supporterLink.addEventListener('click', (e) => {
+  // Signed out, would rather pay than trial: the potacat.com join page
+  // (prefilled from the Station callsign) creates the account on payment.
+  if (joinWebLink) {
+    joinWebLink.addEventListener('click', (e) => {
       e.preventDefault();
-      window.api.cloudOpenSubscribe();
+      window.api.cloudOpenJoinPage({ plan: 'monthly' });
     });
   }
 
@@ -636,48 +706,64 @@
     });
   }
 
-  if (initialUploadBtn) {
-    initialUploadBtn.addEventListener('click', async () => {
-      // Step 1: Count QSOs and estimate time
-      initialUploadBtn.disabled = true;
-      initialUploadBtn.textContent = 'Scanning log...';
-
-      try {
-        const prep = await window.api.cloudBulkPrepare();
-        if (prep.error) {
-          alert('Error reading log: ' + prep.error);
-          return;
-        }
-
-        if (prep.qsoCount === 0) {
-          alert('No QSOs found in your log file.');
-          return;
-        }
-
-        // Step 2: Show estimate and confirm
+  /**
+   * The first upload of the local log. Shared by the Upload button (asks
+   * first), the "not backed up yet" nudge and the Cloud prompt's sign-up
+   * (which already promised the upload, so {confirm:false}).
+   */
+  async function runInitialUpload(opts) {
+    const ask = !(opts && opts.confirm === false);
+    const buttons = [initialUploadBtn, uploadNudgeBtn].filter(Boolean);
+    buttons.forEach(b => { b.disabled = true; });
+    if (initialUploadBtn) initialUploadBtn.textContent = 'Scanning log...';
+    try {
+      const prep = await window.api.cloudBulkPrepare();
+      if (prep.error) {
+        alert('Error reading log: ' + prep.error);
+        return;
+      }
+      if (prep.qsoCount === 0) {
+        if (ask) alert('No QSOs found in your log file.');
+        return;
+      }
+      if (ask) {
         const msg = `Your log has ${prep.qsoCount.toLocaleString()} QSOs.\n\nEstimated upload time: ${prep.estimatedTime}.\n\nUpload to POTACAT Cloud?`;
         if (!confirm(msg)) return;
-
-        // Step 3: Upload
-        uploadProgress.classList.remove('hidden');
-        uploadBar.value = 0;
-        uploadText.textContent = `Uploading 0 / ${prep.qsoCount.toLocaleString()} QSOs...`;
-
-        const result = await window.api.cloudBulkUpload();
-        if (result.error) {
-          alert('Upload failed: ' + result.error);
-        } else {
-          uploadText.textContent = `Done! ${result.imported.toLocaleString()} QSOs uploaded, ${result.duplicates.toLocaleString()} duplicates skipped.`;
-          await refreshStatus();
-        }
-      } catch (err) {
-        alert('Upload error: ' + err.message);
-      } finally {
-        initialUploadBtn.disabled = false;
-        initialUploadBtn.textContent = 'Upload Existing Log';
-        setTimeout(() => uploadProgress.classList.add('hidden'), 8000);
       }
-    });
+      uploadProgress.classList.remove('hidden');
+      uploadBar.value = 0;
+      uploadText.textContent = `Uploading 0 / ${prep.qsoCount.toLocaleString()} QSOs...`;
+
+      const result = await window.api.cloudBulkUpload();
+      if (result.error) {
+        alert('Upload failed: ' + result.error);
+      } else {
+        uploadText.textContent = `Done! ${result.imported.toLocaleString()} QSOs uploaded, ${result.duplicates.toLocaleString()} duplicates skipped.`;
+        await refreshStatus();
+      }
+    } catch (err) {
+      alert('Upload error: ' + err.message);
+    } finally {
+      buttons.forEach(b => { b.disabled = false; });
+      if (initialUploadBtn) initialUploadBtn.textContent = 'Upload Existing Log';
+      setTimeout(() => uploadProgress.classList.add('hidden'), 8000);
+    }
+  }
+
+  if (initialUploadBtn) initialUploadBtn.addEventListener('click', () => runInitialUpload({ confirm: true }));
+  if (uploadNudgeBtn) uploadNudgeBtn.addEventListener('click', () => runInitialUpload({ confirm: true }));
+
+  /** "Your log is not backed up yet" — an account that has never uploaded. */
+  function renderUploadNudge(status, sub) {
+    if (!uploadNudge) return;
+    const d = Billing ? Billing.decideUploadNudge({
+      loggedIn: !!(status && status.loggedIn),
+      subscription: sub,
+      cloudQsos: status && status.sync ? status.sync.totalQsos : null,
+      localQsos: status ? status.localQsos : null,
+    }) : { show: false };
+    uploadNudge.classList.toggle('hidden', !d.show);
+    if (d.show) uploadNudge.querySelector('span').textContent = `Your log is not backed up yet: ${d.localQsos.toLocaleString()} QSOs live only on this PC.`;
   }
 
   if (downloadAdifBtn) {
@@ -777,6 +863,137 @@
       } catch {}
     });
   }
+
+  // ── Billing: subscribe, manage, the strip's button, the checkout wait ──
+  //
+  // Every Stripe URL opens from MAIN (lib/cloud-ipc.js) — the renderer's
+  // open-external allow-list has no Stripe host and fails closed silently.
+
+  async function startCheckout(plan, btn) {
+    const buttons = [subscribeMonthlyBtn, subscribeYearlyBtn].filter(Boolean);
+    buttons.forEach(b => { b.disabled = true; });
+    const label = btn ? btn.textContent : '';
+    if (btn) btn.textContent = 'Opening checkout…';
+    try {
+      const r = await window.api.cloudOpenSubscribe(plan);
+      if (r && r.error === 'stripe_not_configured') {
+        // Server has no Stripe key: the membership page is the way to pay.
+        _stripeConfigured = false;
+        if (_lastStatus) renderBilling(_lastStatus.subscription);
+        return;
+      }
+      if (r && r.error === 'auth-required') { showLogin(false); return; }
+      if (r && r.error) {
+        alert('Could not open checkout: ' + (r.message || r.error) + '\n\nYou can also subscribe on Buy Me a Coffee.');
+        return;
+      }
+      showCheckoutWait(true);
+    } finally {
+      buttons.forEach(b => { b.disabled = false; });
+      if (btn) btn.textContent = label;
+    }
+  }
+  if (subscribeMonthlyBtn) subscribeMonthlyBtn.addEventListener('click', () => startCheckout('monthly', subscribeMonthlyBtn));
+  if (subscribeYearlyBtn) subscribeYearlyBtn.addEventListener('click', () => startCheckout('yearly', subscribeYearlyBtn));
+
+  function showCheckoutWait(on) {
+    if (checkoutWait) checkoutWait.classList.toggle('hidden', !on);
+  }
+  // "Refresh" beside the status pill — what the Stripe return page and the
+  // welcome email tell a member to click if the card still shows the old
+  // status (a payment made on potacat.com has no checkout watch here).
+  const refreshLink = document.getElementById('cloud-refresh-link');
+  if (refreshLink) {
+    refreshLink.addEventListener('click', async (e) => {
+      e.preventDefault();
+      refreshLink.textContent = 'Checking…';
+      try { await window.api.cloudRefreshSubscription(); await refreshStatus(); }
+      finally { refreshLink.textContent = 'Refresh'; }
+    });
+  }
+  if (checkoutRefresh) {
+    checkoutRefresh.addEventListener('click', async (e) => {
+      e.preventDefault();
+      checkoutRefresh.textContent = 'Checking…';
+      try { await window.api.cloudRefreshSubscription(); await refreshStatus(); }
+      finally { checkoutRefresh.textContent = 'Refresh'; }
+    });
+  }
+  // The watch lives in main; it tells us when the payment landed (or not).
+  if (window.api.onCloudCheckoutState) {
+    window.api.onCloudCheckoutState((st) => {
+      if (!st) return;
+      if (st.stripeConfigured === false) _stripeConfigured = false;
+      showCheckoutWait(st.phase === 'waiting');
+      if (st.phase === 'active' || st.phase === 'timeout') refreshStatus();
+    });
+  }
+  // A status fetched anywhere (launch check, checkout watch, the web
+  // bridge) repaints the card if it is open.
+  if (window.api.onCloudBillingState) {
+    window.api.onCloudBillingState((p) => {
+      if (!p || !p.subscription || !isLoggedIn) return;
+      if (_lastStatus) {
+        _lastStatus.subscription = p.subscription;
+        if (typeof p.localQsos === 'number') _lastStatus.localQsos = p.localQsos;
+      }
+      renderBilling(p.subscription);
+      if (_lastStatus) renderUploadNudge(_lastStatus, p.subscription);
+    });
+  }
+
+  if (manageBtn) {
+    manageBtn.addEventListener('click', async () => {
+      manageBtn.disabled = true;
+      try {
+        const r = await window.api.cloudOpenManage();
+        if (r && r.error) alert('Could not open your billing page: ' + (r.message || r.error));
+      } finally { manageBtn.disabled = false; }
+    });
+  }
+  if (billingStrip) {
+    billingStrip.querySelector('.cbs-action').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await window.api.cloudOpenBillingAction(_lastBilling || {});
+        if (r && r.error) alert('Could not open your billing page: ' + (r.message || r.error));
+      } finally { btn.disabled = false; }
+    });
+  }
+
+  /**
+   * Open Settings › Cloud on the create-account form. Used by the Summary
+   * card, the pairing panel, the share-rig notice and the Cloud prompt
+   * (which also asks for the upload to run right after sign-up).
+   */
+  window.openCloudSignup = function (opts) {
+    const o = opts || {};
+    _autoUploadAfterRegister = !!o.autoUpload;
+    const dlg = document.getElementById('settings-dialog');
+    if (dlg && typeof dlg.showModal === 'function' && !dlg.open) {
+      try { dlg.showModal(); } catch {}
+    }
+    const cloudTabBtn = document.querySelector('.settings-tab[data-tab="cloud"]');
+    if (cloudTabBtn) cloudTabBtn.click();
+    if (!isLoggedIn) {
+      setCloudAuthMode(o.mode === 'signin' ? 'signin' : 'register');
+      if (callsignInput && !callsignInput.value) {
+        window.api.getSettings().then(s => {
+          if (s && s.myCallsign && !callsignInput.value) callsignInput.value = String(s.myCallsign).toUpperCase();
+        }).catch(() => {});
+      }
+      const first = (callsignInput && !callsignInput.value) ? callsignInput : emailInput;
+      if (first) { try { first.focus(); } catch {} }
+    } else if (subscribeSection && subscribeSection.style.display !== 'none') {
+      subscribeSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (loginSection) loginSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  // Render hooks for a live check over DevTools (the contextBridge api
+  // cannot be stubbed from the page). Read-only use; nothing calls them.
+  window.__cloudUi = { showAccount, renderBilling, renderUploadNudge, showLogin };
 
   // ── Init ──────────────────────────────────────────────────────────
 
@@ -997,13 +1214,19 @@
       try {
         const res = await window.api.cloudTunnelEnable();
         if (res && res.error === 'entitlement-required') {
-          // Route to existing paywall — the Cloud login section's
-          // "Become a Supporter" button is the established path.
-          const sub = document.getElementById('cloud-subscribe-btn');
-          if (sub) sub.click();
-          else if (ctError) {
-            ctError.textContent = 'POTACAT Cloud subscription required. Subscribe in the Sync section above.';
+          // The wall itself: the user just tried to use the thing, so the
+          // fix is one click away. The server's sentence says why (a lapsed
+          // grant, a failed card); the subscribe buttons sit right above.
+          const b = res.billing || _lastBilling;
+          if (ctError) {
+            ctError.textContent = (b && b.message) || 'POTACAT Cloud subscription required. Subscribe in the section above.';
             ctError.classList.remove('hidden');
+          }
+          if (b && b.action && b.action.label && b.state !== 'none' && b.state !== 'trial_expired') {
+            window.api.cloudOpenBillingAction(b).catch(() => {});
+          } else if (subscribeSection) {
+            subscribeSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (subscribeMonthlyBtn) { try { subscribeMonthlyBtn.focus(); } catch {} }
           }
         } else if (res && res.code === 'no_callsign') {
           // The tunnel hostname is <callsign>.potacat.com — no callsign on

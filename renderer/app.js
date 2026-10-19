@@ -5233,6 +5233,115 @@ function _gpFmtRemaining(seconds) {
   return `in ${m}m ${String(sec).padStart(2, '0')}s`;
 }
 
+// ── POTACAT Cloud billing banner + the Cloud prompt ────────────────────
+// (lib/cloud-billing-ui.js decides; cloud handoffs BILLING_UX + CLOUD_PROMPT,
+// 2026-10-14). The banner shows for grace / payment problem / expired and the
+// last days of a trial — the server's sentence, one button, dismiss = this
+// launch. The prompt shows once per launch to a station with 50+ local QSOs
+// and no Cloud account, after the Station Setup card has had its turn.
+(function _cloudBillingInit() {
+  const banner = document.getElementById('cloud-billing-banner');
+  const text = document.getElementById('cloud-billing-banner-text');
+  const action = document.getElementById('cloud-billing-banner-action');
+  const dismiss = document.getElementById('cloud-billing-banner-dismiss');
+  const Billing = window.CloudBillingUi;
+  let current = null;             // the banner view model on screen
+  let currentBilling = null;      // subscription.billing behind it
+  const dismissed = new Set();    // banner keys hidden this launch
+
+  function render(sub) {
+    if (!banner || !Billing) return;
+    const d = Billing.describeBilling(sub);
+    currentBilling = (sub && sub.billing) || null;
+    const b = d.banner;
+    if (!b || dismissed.has(b.key)) { banner.className = 'hidden'; current = null; return; }
+    current = b;
+    banner.className = b.tone;
+    if (text) text.textContent = b.message;
+    if (action) action.textContent = b.actionLabel;
+  }
+
+  if (action) action.addEventListener('click', async () => {
+    if (!current) return;
+    action.disabled = true;
+    try {
+      if (current.action === 'subscribe') {
+        const r = await window.api.cloudOpenSubscribe(current.plan || 'monthly');
+        if (r && r.error === 'stripe_not_configured') await window.api.cloudOpenSubscribe({ bmac: true });
+        else if (r && r.error) alert('Could not open checkout: ' + (r.message || r.error));
+        else action.textContent = 'Waiting for payment…';
+      } else {
+        const r = await window.api.cloudOpenBillingAction(currentBilling || {});
+        if (r && r.error) alert('Could not open your billing page: ' + (r.message || r.error));
+      }
+    } finally { action.disabled = false; }
+  });
+  if (dismiss) dismiss.addEventListener('click', () => {
+    if (current) dismissed.add(current.key);
+    if (banner) banner.className = 'hidden';
+    current = null;
+  });
+
+  if (window.api && window.api.onCloudBillingState) {
+    window.api.onCloudBillingState((p) => {
+      if (!p) return;
+      render(p.subscription || null);
+      if (typeof _summaryCloudFromBillingState === 'function') _summaryCloudFromBillingState(p);
+    });
+  }
+  // A payment that lands while the banner is up clears it on the next
+  // status; the checkout watch forces that status.
+  if (window.api && window.api.onCloudCheckoutState) {
+    window.api.onCloudCheckoutState((st) => {
+      if (st && st.phase === 'active' && banner) { banner.className = 'hidden'; current = null; }
+    });
+  }
+
+  // ── The Cloud prompt ──
+  const card = document.getElementById('cloud-prompt-card');
+  const cardText = document.getElementById('cloud-prompt-text');
+  const cardOffer = document.getElementById('cloud-prompt-offer');
+  const startBtn = document.getElementById('cloud-prompt-start');
+  const laterBtn = document.getElementById('cloud-prompt-later');
+  let promptShown = false;
+  let promptTries = 0;
+
+  async function promptCheck() {
+    if (!card || !Billing || !window.api || !window.api.cloudPromptGet) return;
+    let inputs = null;
+    try { inputs = await window.api.cloudPromptGet(); } catch { return; }
+    if (!inputs) return;
+    const ssCard = document.getElementById('station-setup-card');
+    const whatsNew = document.getElementById('whats-new-dialog');
+    const settingsDlg = document.getElementById('settings-dialog');
+    const otherCardVisible = (ssCard && !ssCard.classList.contains('hidden'))
+      || (whatsNew && whatsNew.open) || (settingsDlg && settingsDlg.open);
+    const d = Billing.decideCloudPrompt({ ...inputs, otherCardVisible, shownThisLaunch: promptShown });
+    if (d.show) {
+      promptShown = true;
+      const copy = Billing.promptCopy(d.qsos);
+      if (cardText) cardText.textContent = copy.body;
+      if (cardOffer) cardOffer.textContent = copy.offer;
+      card.classList.remove('hidden');
+      return;
+    }
+    // Busy or another card up: try again in a minute, a few times.
+    if (d.retry && ++promptTries < 10) setTimeout(promptCheck, 60000);
+  }
+  function hidePrompt() { if (card) card.classList.add('hidden'); }
+  if (startBtn) startBtn.addEventListener('click', () => {
+    hidePrompt();
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', autoUpload: true });
+  });
+  if (laterBtn) laterBtn.addEventListener('click', () => {
+    hidePrompt();
+    if (window.api.cloudPromptSnooze) window.api.cloudPromptSnooze().catch(() => {});
+  });
+  // After the Station Setup launch card (12 s) and What's New have had
+  // their turn; the decision re-checks that nothing else is on screen.
+  setTimeout(promptCheck, 25000);
+})();
+
 let _gpOwnerBannerTimer = null;
 let _gpOwnerBannerExpiresAtMs = 0;
 
@@ -6466,10 +6575,18 @@ async function _shareRigIssue() {
     const res = await window.api.passesIssue(body);
     if (!res || res.error) {
       const errMap = {
-        subscription_required: 'POTACAT Cloud subscription required to share your rig. Sign up from the Cloud card.',
+        // The 403 body carries the server's own sentence (why access is
+        // off, and where it is fixed) — prefer it over the generic line.
+        subscription_required: (res && res.billing && res.billing.message) || 'Sharing your rig needs an active POTACAT Cloud subscription. Subscribe from Settings › Cloud.',
         unauthorized: 'Sign in to POTACAT Cloud first.',
       };
       status.textContent = errMap[res && res.error] || ('Error: ' + (res && res.error ? res.error : 'unknown'));
+      if (res && res.error === 'subscription_required' && res.billing && res.billing.action && res.billing.action.label
+          && res.billing.state !== 'none' && res.billing.state !== 'trial_expired') {
+        window.api.cloudOpenBillingAction(res.billing).catch(() => {});
+      } else if (res && res.error === 'subscription_required' && typeof window.openCloudSignup === 'function') {
+        window.openCloudSignup({});
+      }
       return;
     }
     _shareRigShowResultView();
@@ -6672,7 +6789,8 @@ function _esc(s) {
     const a = e.target.closest('[data-act="open-cloud-signup"]');
     if (!a) return;
     e.preventDefault();
-    window.api.cloudOpenSubscribe();
+    // Signed out → the free-trial form; signed in → the subscribe section.
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
   });
 
   const issueBtn = document.getElementById('share-rig-issue');
@@ -7722,16 +7840,29 @@ async function _renderSummaryLogbook() {
 // the ECHOCAT settings tab (Casey wants the same control surface in
 // both places). Builds the inner HTML once from a single fetch, then
 // injects into every `[data-summary-card="cloud"]` host.
+let _summaryLastCloudStatus = null;
 async function _renderSummaryCloud() {
   const hosts = document.querySelectorAll('[data-summary-card="cloud"]');
   if (hosts.length === 0) return;
   let html = '';
   try {
     const status = await window.api.cloudGetStatus();
+    _summaryLastCloudStatus = status;
     html = _buildCloudCardHTML(status);
   } catch (err) {
     html = _buildCloudCardHTML(null);
   }
+  for (const host of hosts) host.innerHTML = html;
+}
+// A billing state pushed by main (launch check, checkout watch) repaints
+// the card from the payload — never by fetching again, which would loop:
+// cloud-get-status itself emits cloud-billing-state.
+function _summaryCloudFromBillingState(p) {
+  if (!p || !p.subscription || !_summaryLastCloudStatus || !_summaryLastCloudStatus.loggedIn) return;
+  _summaryLastCloudStatus.subscription = p.subscription;
+  const hosts = document.querySelectorAll('[data-summary-card="cloud"]');
+  if (!hosts.length) return;
+  const html = _buildCloudCardHTML(_summaryLastCloudStatus);
   for (const host of hosts) host.innerHTML = html;
 }
 
@@ -7740,46 +7871,31 @@ function _buildCloudCardHTML(status) {
     return _summaryCardChrome('POTACAT Cloud', '—', '',
       '<div class="summary-line">(Cloud status unavailable)</div>', '');
   }
-  const loggedIn = !!status.loggedIn;
-  const sub = status.subscription || null;
-  const subStatus = sub && sub.status ? String(sub.status).toLowerCase() : '';
-  // `active` must win over `trial`: a member who subscribed inside their first
-  // 30 days still has a future trial_expires_at (so trialActive=true) while being
-  // fully paid/active — showing them "Free Trial" is wrong and a bad look. Match
-  // the server guard (trialActive && status !== 'active') and the Settings panel
-  // (only promotes to trial when inactive). (K4PEZ, paid annual, shown Free Trial.)
-  const trial = !!(sub && (sub.trialActive === true || subStatus === 'trial')) && subStatus !== 'active';
-  const active = subStatus === 'active' || trial;
-  // "Manage subscription" is honest about where the button goes —
-  // cloud-open-manage opens the BMAC membership page.
-  const syncActions = '<button type="button" class="primary" data-act="cloud-sync-now">Sync now</button>'
-    + '<button type="button" data-act="cloud-manage">Manage subscription</button>';
-  let pillTxt, pillCls, backupTxt, metaTxt, actions;
-  if (!loggedIn) {
-    pillTxt = 'Inactive'; pillCls = 'bad';
-    backupTxt = 'Your logbook is NOT backed up to the POTACAT Cloud.';
-    metaTxt = 'Sign up for a free trial to enable QSO + settings backup.';
-    actions = '<button type="button" class="primary" data-act="cloud-signup">Sign up — Free trial</button>';
-  } else if (trial) {
-    pillTxt = 'Free Trial'; pillCls = 'warn';
-    backupTxt = 'Your logbook is backed up to the POTACAT Cloud.';
-    metaTxt = _summaryFormatLastSync(status);
-    actions = syncActions;
-  } else if (active) {
-    pillTxt = 'Active'; pillCls = 'ok';
-    backupTxt = 'Your logbook is backed up to the POTACAT Cloud.';
-    metaTxt = _summaryFormatLastSync(status);
-    actions = syncActions;
-  } else {
-    pillTxt = 'Signed in'; pillCls = '';
-    backupTxt = 'Your logbook is NOT backed up — no active subscription.';
-    metaTxt = '';
-    actions = '<button type="button" class="primary" data-act="cloud-signup">Subscribe</button>';
+  // lib/cloud-billing-ui.js decides the pill, the sentence and the buttons
+  // from the server's billing object — the same decision the Cloud tab and
+  // the ECHOCAT web client draw from. `active` wins over `trial` there too
+  // (K4PEZ, paid annual, was shown Free Trial). The trial card's action is
+  // the subscribe button: this is the card a trial member looks at daily.
+  const view = window.CloudBillingUi ? window.CloudBillingUi.summaryCard(status) : null;
+  if (!view) {
+    return _summaryCardChrome('POTACAT Cloud', '—', '',
+      '<div class="summary-line">(Cloud status unavailable)</div>', '');
   }
-  const body = '<div class="summary-line">' + _esc(backupTxt) + '</div>'
-    + '<div class="summary-sub">' + _esc(metaTxt) + '</div>'
+  const BTN = {
+    'signup': '<button type="button" class="primary" data-act="cloud-signup">Start free trial</button>',
+    'subscribe-monthly': '<button type="button" class="primary" data-act="cloud-subscribe-monthly">Subscribe — $5/month</button>',
+    'subscribe-yearly': '<button type="button" data-act="cloud-subscribe-yearly">$50/year</button>',
+    'sync-now': '<button type="button" data-act="cloud-sync-now">Sync now</button>',
+    'manage': '<button type="button" data-act="cloud-manage">Manage subscription</button>',
+    'billing': '<button type="button" class="primary" data-act="cloud-billing">' + _esc((status.subscription && status.subscription.billing && status.subscription.billing.action && status.subscription.billing.action.label) || 'Fix billing') + '</button>',
+  };
+  const actions = view.actions.map(a => BTN[a] || '').join('');
+  let meta = view.meta;
+  if (!meta && status.loggedIn && view.tone === 'ok') meta = _summaryFormatLastSync(status);
+  const body = '<div class="summary-line">' + _esc(view.backup) + '</div>'
+    + '<div class="summary-sub">' + _esc(meta || '') + '</div>'
     + '<div class="summary-card-actions">' + actions + '</div>';
-  return _summaryCardChrome('POTACAT Cloud', pillTxt, pillCls, body);
+  return _summaryCardChrome('POTACAT Cloud', view.pill, view.tone, body);
 }
 
 // Tiny helper to keep card head HTML consistent across all builders.
@@ -8148,8 +8264,28 @@ function _wireSummaryCardActionsOnce() {
     if (!inSummaryHost) return;
     const act = btn.dataset.act;
     try {
-      if (act === 'cloud-signup') await window.api.cloudOpenSubscribe();
-      else if (act === 'cloud-manage') await window.api.cloudOpenManage();
+      if (act === 'cloud-signup') {
+        // Signed out: the in-app create-account form (free trial), not a
+        // payment page. Signed in without access: the subscribe section.
+        if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+      }
+      else if (act === 'cloud-manage') {
+        const r = await window.api.cloudOpenManage();
+        if (r && r.error) alert('Could not open your billing page: ' + (r.message || r.error));
+      }
+      else if (act === 'cloud-subscribe-monthly' || act === 'cloud-subscribe-yearly') {
+        btn.disabled = true;
+        const r = await window.api.cloudOpenSubscribe(act === 'cloud-subscribe-yearly' ? 'yearly' : 'monthly');
+        btn.disabled = false;
+        if (r && r.error === 'stripe_not_configured') await window.api.cloudOpenSubscribe({ bmac: true });
+        else if (r && r.error) alert('Could not open checkout: ' + (r.message || r.error));
+        else btn.textContent = 'Waiting for payment…';
+      }
+      else if (act === 'cloud-billing') {
+        const b = _summaryLastCloudStatus && _summaryLastCloudStatus.subscription && _summaryLastCloudStatus.subscription.billing;
+        const r = await window.api.cloudOpenBillingAction(b || {});
+        if (r && r.error) alert('Could not open your billing page: ' + (r.message || r.error));
+      }
       else if (act === 'cloud-sync-now') {
         btn.disabled = true;
         btn.textContent = 'Syncing…';
@@ -8160,11 +8296,14 @@ function _wireSummaryCardActionsOnce() {
         const r = await window.api.cloudTunnelEnable();
         if (r && r.error) {
           const map = {
-            'entitlement-required': 'POTACAT Cloud Tunnel requires an active POTACAT Cloud subscription. Sign up from the Cloud card above to enable it.',
+            'entitlement-required': (r.billing && r.billing.message) || 'POTACAT Cloud Tunnel needs an active POTACAT Cloud subscription. Subscribe from the Cloud card to turn it on.',
             'cloudflared-missing': 'POTACAT can\'t find the cloudflared helper. Reinstall POTACAT (the installer bundles it).',
             'auth-required': 'You need to sign in to POTACAT Cloud first. Use the Cloud card above to sign in.',
           };
           alert(map[r.error] || ('Could not turn on the tunnel: ' + r.error));
+          // The wall: the fix is the subscribe section, one click away.
+          if (r.error === 'entitlement-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({});
+          if (r.error === 'auth-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'signin' });
         }
       }
       else if (act === 'tunnel-off') await window.api.cloudTunnelDisable();
@@ -8245,6 +8384,9 @@ let _pairLastTunnelState = null;
 let _pairLastCloudStatus = null;
 
 function _pairIsCloudEntitled(sub) {
+  // One access rule everywhere (lib/cloud-billing-ui.js): a member who
+  // cancelled at period end, or whose card is in retry, still has access.
+  if (window.CloudBillingUi) return window.CloudBillingUi.hasAccess(sub);
   if (!sub) return false;
   if (sub.status === 'active') return true;
   if (sub.status === 'trial') return true;
@@ -8270,7 +8412,6 @@ function _pairRenderState() {
   const entitled = loggedIn && _pairIsCloudEntitled(sub);
   const tunnelLive = !!(tunnel && tunnel.status === 'live' && tunnel.cloudHost);
 
-  const bmacUrl = 'https://buymeacoffee.com/potacat/membership';
   const remoteInstructionsUrl = 'https://potacat.com/remote-instructions';
 
   if (entitled && tunnelLive) {
@@ -8327,31 +8468,48 @@ function _pairRenderState() {
   _pairCurrentMode = 'lan';
   panel.className = 'pair-state-display';
   if (pairBtn) pairBtn.textContent = 'Open pairing QR (Tailscale)';
-  let title, body, primaryLabel;
+  // Signed in without access = the trial is over (or never started): the
+  // honest button is Subscribe, straight to checkout. It used to be a raw
+  // Buy Me a Coffee link labelled "Start free trial".
+  let title, body, primaryLabel, primaryAct;
   if (loggedIn) {
+    const b = sub && sub.billing;
+    title = 'Join POTACAT Cloud to instantly and securely connect to your radio while remote';
+    body = ((b && b.message) || 'Your free trial has ended.') + ' Subscribe and the tunnel is on in a minute. Alternatively, enable Tailscale on your shack computer and mobile device (turn on MagicDNS and HTTPS Certificates).';
+    primaryLabel = 'Subscribe — $5/month';
+    primaryAct = 'subscribe';
+  } else {
     title = 'Join POTACAT Cloud to instantly and securely connect to your radio while remote';
     body = 'Start a free 30-day trial — no credit card needed. Alternatively, enable Tailscale on your shack computer and mobile device (turn on MagicDNS and HTTPS Certificates).';
     primaryLabel = 'Start free trial';
-  } else {
-    title = 'Join POTACAT Cloud to instantly and securely connect to your radio while remote';
-    body = 'Sign in to POTACAT Cloud and start a free trial. Alternatively, enable Tailscale on your shack computer and mobile device (turn on MagicDNS and HTTPS Certificates).';
-    primaryLabel = 'Sign in to POTACAT Cloud';
+    primaryAct = 'signup';
   }
   panel.innerHTML =
     '<span class="pair-state-title">' + title + '</span>' +
-    '<span class="pair-state-body">' + body + '</span>' +
+    '<span class="pair-state-body">' + _pairEscape(body) + '</span>' +
     '<div class="pair-state-actions">' +
-      (loggedIn
-        ? '<a href="' + bmacUrl + '" target="_blank" class="btn btn-primary btn-sm">' + primaryLabel + '</a>'
-        : '<button type="button" id="pair-signin-btn" class="btn btn-primary btn-sm">' + primaryLabel + '</button>') +
+      '<button type="button" id="pair-signin-btn" class="btn btn-primary btn-sm">' + primaryLabel + '</button>' +
       '<a href="' + remoteInstructionsUrl + '" target="_blank" class="btn btn-sm">Remote-access guide</a>' +
     '</div>';
   const signinBtn = document.getElementById('pair-signin-btn');
   if (signinBtn) {
-    signinBtn.addEventListener('click', () => {
-      // Jump the Settings dialog to the Cloud tab so the user can sign in.
-      const cloudTab = document.querySelector('.settings-tab[data-tab="cloud"]');
-      if (cloudTab) cloudTab.click();
+    signinBtn.addEventListener('click', async () => {
+      if (primaryAct === 'subscribe') {
+        signinBtn.disabled = true;
+        signinBtn.textContent = 'Opening checkout…';
+        const r = await window.api.cloudOpenSubscribe('monthly');
+        if (r && r.error === 'stripe_not_configured') await window.api.cloudOpenSubscribe({ bmac: true });
+        else if (r && r.error) alert('Could not open checkout: ' + (r.message || r.error));
+        signinBtn.disabled = false;
+        signinBtn.textContent = (r && !r.error) ? 'Waiting for payment…' : primaryLabel;
+        return;
+      }
+      // Jump the Settings dialog to the Cloud tab's create-account form.
+      if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+      else {
+        const cloudTab = document.querySelector('.settings-tab[data-tab="cloud"]');
+        if (cloudTab) cloudTab.click();
+      }
     });
   }
 }

@@ -31,6 +31,15 @@
       <span class="gp-revoke-link">Revoke access</span>
     </div>
   </div>
+  <!-- POTACAT Cloud billing banner: grace / payment problem / expired, and
+       the last days of a free trial. The server writes the sentence
+       (subscription.billing.message); lib/cloud-billing-ui.js decides when it
+       shows. Dismiss = this launch only. -->
+  <div id="cloud-billing-banner" class="hidden" role="status">
+    <div style="flex:1;line-height:1.35;"><span id="cloud-billing-banner-text"></span></div>
+    <button type="button" id="cloud-billing-banner-action" class="cbb-action"></button>
+    <button type="button" id="cloud-billing-banner-dismiss" class="cbb-dismiss" title="Hide until next launch" aria-label="Dismiss">&times;</button>
+  </div>
   <header>
     <div class="filters">
       <!-- Event Focus (mobile parity, desktop-handoff event-focus-spot-view):
@@ -3196,7 +3205,7 @@
             <li>Restore your log if your PC dies or your file gets corrupted</li>
             <li>Version history &mdash; undo accidental edits or deletes</li>
           </ul>
-          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">Try it free for 30 days. <a href="#" id="cloud-supporter-link" style="color:var(--accent-green);">Become a supporter</a> to keep your subscription.</p>
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">Try it free for 30 days, then $5 a month or $50 a year. Cancel any time from this screen.</p>
         </div>
         <!-- Callsign is only needed to CREATE an account — sign-in uses email
              + password alone (cloud-ui.js cloudLogin). Hidden in sign-in mode
@@ -3239,8 +3248,22 @@
           </div>
         </div>
         <p id="cloud-login-signout" class="hidden" style="margin-top:8px;font-size:12px;color:var(--text-secondary);">Having trouble? <a href="#" id="cloud-login-signout-link" style="color:var(--accent-red);">Sign out and start fresh</a></p>
+        <!-- Would rather pay than trial (an existing supporter, an impatient
+             buyer): the potacat.com join page creates the account on payment
+             and emails a set-password link. Signed-IN members never go there;
+             in-app checkout carries their user id. -->
+        <p id="cloud-join-web-line" style="margin-top:10px;font-size:12px;color:var(--text-secondary);border-top:1px solid var(--border-primary);padding-top:8px;">
+          Prefer to subscribe first? <a href="#" id="cloud-join-web-link" style="color:var(--accent-green);">Join at potacat.com/cloud</a> and we create your account for you.
+        </p>
       </div>
       <div id="cloud-account-section" class="hidden">
+        <!-- Billing strip: the server's own sentence for ending_soon / canceled
+             (yellow), grace / billing_issue (orange), expired (red). Never
+             dismissable — it is the source of truth. -->
+        <div id="cloud-billing-strip" class="cloud-billing-strip hidden" role="status">
+          <span class="cbs-msg"></span>
+          <button type="button" class="btn btn-sm cbs-action"></button>
+        </div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <span><strong id="cloud-user-callsign"></strong> &mdash; <span id="cloud-user-email" style="color:var(--text-secondary);"></span></span>
           <a href="#" id="cloud-callsign-edit-link" class="hidden" style="font-size:11px;color:var(--accent-blue);">Change callsign</a>
@@ -3264,18 +3287,45 @@
           <span id="cloud-sub-status" class="status disconnected">inactive</span>
           <span id="cloud-sub-level" style="font-size:11px;color:var(--text-secondary);margin-left:4px;"></span>
           <span id="cloud-trial-info" class="hidden" style="font-size:11px;color:var(--accent-blue);margin-left:4px;"></span>
+          <a href="#" id="cloud-refresh-link" style="font-size:11px;color:var(--accent-blue);margin-left:10px;" title="Ask POTACAT Cloud for your current status">Refresh</a>
         </div>
-        <div id="cloud-subscribe-section">
-          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Keep your cloud sync active by becoming a POTACAT supporter.</p>
-          <button type="button" id="cloud-subscribe-btn" class="btn btn-primary" style="margin-right:6px;">Become a Supporter</button>
-          <button type="button" id="cloud-verify-btn" class="btn btn-sm">Already a supporter? Verify</button>
-          <div style="margin-top:10px;">
-            <label style="margin-bottom:0;">BuyMeACoffee Email <span style="font-size:11px;color:var(--text-tertiary);">(if different from your account email)</span>
-              <input type="email" id="cloud-bmac-email" placeholder="Leave blank if same">
-            </label>
-            <p style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">We match your supporter status by email. If you use a different email on BuyMeACoffee, enter it here so we can find your membership.</p>
-            <button type="button" id="cloud-save-bmac-email" class="btn btn-sm" style="margin-top:4px;">Save &amp; Verify</button>
+        <!-- Manage (a paying member): label and target follow billing.provider —
+             Stripe → Customer Portal, BMAC → membership page, Apple/Google →
+             the store. A donation/admin grant shows "Access through <date>". -->
+        <div id="cloud-manage-row" class="hidden" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <button type="button" id="cloud-manage-btn" class="btn btn-sm">Manage subscription</button>
+          <span id="cloud-access-through" class="help-text" style="margin:0;"></span>
+        </div>
+        <!-- Never uploaded: the one thing that turns a trial into a member. -->
+        <div id="cloud-upload-nudge" class="cloud-upload-nudge hidden">
+          <span>Your log is not backed up yet.</span>
+          <button type="button" id="cloud-upload-nudge-btn" class="btn btn-sm btn-primary">Upload existing log</button>
+        </div>
+        <div id="cloud-subscribe-section" class="cloud-subscribe-section">
+          <p id="cloud-subscribe-heading" style="font-size:12px;color:var(--text-primary);margin-bottom:8px;"></p>
+          <div id="cloud-stripe-buttons" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button type="button" id="cloud-subscribe-monthly" class="btn btn-primary">Subscribe &mdash; $5/month</button>
+            <button type="button" id="cloud-subscribe-yearly" class="btn btn-primary cloud-yearly-btn">$50/year &mdash; 2 months free</button>
           </div>
+          <p id="cloud-checkout-wait" class="hidden" style="font-size:12px;color:var(--accent-blue);margin:8px 0 0;">
+            Waiting for your payment to come through&hellip; this usually takes a few seconds.
+            <a href="#" id="cloud-checkout-refresh" style="color:var(--accent-blue);margin-left:6px;">Refresh</a>
+          </p>
+          <p id="cloud-stripe-note" style="font-size:11px;color:var(--text-tertiary);margin:8px 0 0;">
+            Opens Stripe's secure checkout in your browser. Cancel any time from this screen.
+            <a href="#" id="cloud-subscribe-btn" style="color:var(--text-secondary);margin-left:4px;">Prefer Buy Me a Coffee?</a>
+          </p>
+          <details id="cloud-bmac-verify" style="margin-top:10px;">
+            <summary style="font-size:12px;color:var(--text-secondary);cursor:pointer;">Already paying on Buy Me a Coffee?</summary>
+            <div style="margin-top:8px;">
+              <button type="button" id="cloud-verify-btn" class="btn btn-sm">Verify my membership</button>
+              <label style="margin:8px 0 0;">Buy Me a Coffee email <span style="font-size:11px;color:var(--text-tertiary);">(if different from your account email)</span>
+                <input type="email" id="cloud-bmac-email" placeholder="Leave blank if same">
+              </label>
+              <p style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">We match your membership by email. If you use a different email on Buy Me a Coffee, enter it here so we can find it.</p>
+              <button type="button" id="cloud-save-bmac-email" class="btn btn-sm" style="margin-top:4px;">Save &amp; Verify</button>
+            </div>
+          </details>
         </div>
       </div>
     </fieldset>
@@ -4153,6 +4203,20 @@
       <button type="button" id="ss-card-never" class="ss-link">Don't ask again</button>
     </div>
   </div>
+  <!-- The in-app Cloud prompt (cloud handoff CLOUD_PROMPT, 2026-10-14): 50+
+       QSOs in the local log and no Cloud account. Once per launch, after the
+       Station Setup card has had its turn, never while the rig is keyed.
+       "Not now" snoozes 30 days. Start free trial = the in-app sign-up with
+       the log upload run automatically after it. -->
+  <div id="cloud-prompt-card" class="station-setup-card cloud-prompt-card hidden" role="status">
+    <div id="cloud-prompt-title" class="cp-title">Your log lives on one disk.</div>
+    <div id="cloud-prompt-text" class="ss-card-text"></div>
+    <div id="cloud-prompt-offer" class="cp-offer"></div>
+    <div class="ss-card-buttons">
+      <button type="button" id="cloud-prompt-start" class="ss-btn ss-btn-primary">Start free trial</button>
+      <button type="button" id="cloud-prompt-later" class="ss-btn">Not now</button>
+    </div>
+  </div>
   <dialog id="whats-new-dialog">
     <div class="log-dialog-header">
       <h3 id="whats-new-title">What's New</h3>
@@ -4472,6 +4536,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/cloud-billing-ui.js"></script>
   <script src="../lib/rig-gain-steps.js"></script>
   <script src="../lib/spot-mute-rules.js"></script>
   <script src="../lib/call-filter.js"></script>

@@ -1544,6 +1544,12 @@ let _freedvAudioMuted = false; // true when ECHOCAT audio is muted for FreeDV
 let freedvReporterSpots = []; // accumulates FreeDV spots
 let freedvReporterFlushTimer = null;
 let workedQsos = new Map(); // callsign -> [{date, ref}] from QSO log (all QSOs, not just confirmed)
+/** Size of the local log — the Cloud prompt's trigger (lib/cloud-billing-ui.js). */
+function localQsoCount() {
+  let n = 0;
+  for (const arr of workedQsos.values()) n += Array.isArray(arr) ? arr.length : 0;
+  return n;
+}
 // Richer per-callsign QSO history used by the "ragchew logger" pop-out
 // (W9TEF feature: show past QSOs when typing a callsign in the log form).
 // Keyed by callsign uppercase, /SUFFIX stripped. Each value is an array of
@@ -1962,6 +1968,7 @@ const RelogGuard = require('./lib/jtcat-relog-guard');
 // The callsign being worked — CW-macro {call} on every surface. See
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
 const { TypedCallTracker } = require('./lib/typed-call');
+const CloudBillingUi = require('./lib/cloud-billing-ui');
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
 /**
@@ -17507,9 +17514,17 @@ function connectRemote() {
 
   cloudBridge('cloud-get-status', async () => {
     if (!settings.cloudAccessToken) return { loggedIn: false };
+    // The web client's Cloud section draws the trial countdown, the billing
+    // strip and the subscribe/manage buttons from `subscription` (live, with
+    // the cached copy when the cloud is unreachable) — the same object the
+    // desktop card renders from.
+    const subscription = cloudIpc ? ((await cloudIpc.refreshSubscription('web-status')) || cloudIpc.cachedSubscription()) : null;
     return {
       loggedIn: true,
       user: settings.cloudUser,
+      subscription,
+      localQsos: localQsoCount(),
+      checkout: cloudIpc ? cloudIpc.checkoutState() : null,
       lastSyncAt: settings.cloudLastSyncAt,
       ...(cloudIpc ? cloudIpc.pendingStatus() : { pendingChanges: 0 }),
       sync: {
@@ -17517,6 +17532,19 @@ function connectRemote() {
         deviceCount: settings.cloudDeviceCount ?? null,
       },
     };
+  });
+
+  // Stripe from an ECHOCAT client (web + app): main mints the URL and hands
+  // it back; the CLIENT opens it in its own browser/tab, because the system
+  // browser on the shack PC is no use to a phone. The checkout watch still
+  // runs here, so the activation reaches every surface.
+  cloudBridge('cloud-stripe-checkout', async (msg) => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    return cloudIpc.startCheckout(msg && msg.plan, 'echocat', { noOpen: true });
+  });
+  cloudBridge('cloud-stripe-portal', async () => {
+    if (!cloudIpc) return { error: 'Cloud not initialized' };
+    return cloudIpc.portalUrl();
   });
 
   cloudBridge('cloud-sync-now', async () => {
@@ -23594,6 +23622,10 @@ function createWindow() {
     // Fetch donor list (async, non-blocking)
     fetchDonorList();
     setInterval(fetchDonorList, 24 * 3600000); // refresh supporter list daily
+    // Billing at launch (lib/cloud-ipc.js refreshBillingIfStale): a status
+    // older than 12 h is fetched, else the cached one is replayed — either
+    // way the main-window banner and the ECHOCAT clients get one state.
+    setTimeout(() => { if (cloudIpc) cloudIpc.refreshBillingIfStale().catch(() => {}); }, 20000);
     // Fetch each watchlist group's Ham2K PoLo URL (if configured). Per
     // spec, refresh is app-driven — no HTTP cache semantics. We fetch
     // on boot + on URL change; a manual Refresh button covers user-
@@ -27109,6 +27141,13 @@ app.whenReady().then(() => {
       sendToRenderer: (channel, data) => {
         if (win && !win.isDestroyed()) win.webContents.send(channel, data);
       },
+      // Billing (lib/cloud-billing-ui.js): the Cloud prompt's trigger and the
+      // "not backed up yet" nudge need the size of the LOCAL log.
+      getLocalQsoCount: () => localQsoCount(),
+      // A billing state or checkout result also reaches every ECHOCAT
+      // client (web + app) so a trial ending or a failed card shows there.
+      onBillingState: (payload) => { if (remoteServer) remoteServer.broadcastCloudBilling(payload); },
+      onCheckoutState: (payload) => { if (remoteServer) remoteServer.broadcastCloudCheckout(payload); },
       // Owner revoked a Guest Pass here: end the guest riding it NOW.
       // PassEnforcement's 'ended' → broadcastPassEnded() kicks the WS
       // clients and purges the browser sign-ins for that pass.
@@ -27321,6 +27360,26 @@ app.whenReady().then(() => {
     return Object.assign({ enabled: true }, remoteServer ? remoteServer.serverState() : (_echocatServerState || { listening: false }));
   });
 
+  // The in-app Cloud prompt (lib/cloud-billing-ui.js decideCloudPrompt): main
+  // supplies the inputs; the renderer decides, draws, and reports "Not now".
+  // radioBusy = never over a transmission (any owner of the radio, a remote
+  // PTT, or a CAT link that says it is keyed).
+  ipcMain.handle('cloud-prompt-get', () => ({
+    loggedIn: !!settings.cloudAccessToken,
+    localQsos: localQsoCount(),
+    snoozedUntil: settings.cloudPromptSnoozedUntil || 0,
+    radioBusy: !!((typeof radioOwner === 'string' && radioOwner !== 'none')
+      || (remoteServer && remoteServer._pttActive)
+      || (cat && cat._transmitting)),
+    guestPass: false,
+  }));
+  ipcMain.handle('cloud-prompt-snooze', () => {
+    settings.cloudPromptSnoozedUntil = Date.now() + CloudBillingUi.PROMPT_SNOOZE_MS;
+    saveSettings(settings);
+    sendCatLog('[Cloud] Cloud prompt: "Not now" — asking again in 30 days');
+    return { ok: true, until: settings.cloudPromptSnoozedUntil };
+  });
+
   ipcMain.handle('cloud-tunnel-enable', async () => {
     if (!cloudTunnel) return { error: 'cloud-tunnel module not initialized' };
     try {
@@ -27328,7 +27387,9 @@ app.whenReady().then(() => {
       return { ok: true, state };
     } catch (err) {
       const msg = err.message || String(err);
-      if (msg === 'entitlement-required') return { error: 'entitlement-required' };
+      // The 403 body's billing object says WHY (lapsed grant, failed card)
+      // and carries the fix; the renderer shows that sentence, not ours.
+      if (msg === 'entitlement-required') return { error: 'entitlement-required', billing: (err.cause && err.cause.body && err.cause.body.billing) || null };
       if (msg === 'cloudflared-missing') return { error: 'cloudflared-missing' };
       if (msg === 'auth-required') return { error: 'auth-required' };
       sendCatLog('[cloud-tunnel] enable failed: ' + msg);

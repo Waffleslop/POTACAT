@@ -10417,6 +10417,70 @@ main.banner-logger-active #event-progress-overlay {
 .dxp-drawer-flag.on { background: color-mix(in srgb, #4ecca3 12%, transparent); }
 .dxp-drawer-flag.off { background: color-mix(in srgb, #f0a500 14%, transparent); }
 
+/* POTACAT Cloud billing (lib/cloud-billing-ui.js, 2026-10-14). Three tones
+   with fixed meanings everywhere: yellow = still working, a date is coming;
+   orange = act this week; red = sync and tunnel are paused. */
+.cloud-billing-strip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 8px 10px; border-radius: 6px; font-size: 13px; line-height: 1.4;
+  color: var(--text-primary);
+  background: color-mix(in srgb, #f0a500 14%, transparent);
+  border: 1px solid color-mix(in srgb, #f0a500 55%, transparent);
+}
+.cloud-billing-strip .cbs-msg { flex: 1 1 240px; }
+.cloud-billing-strip .cbs-action { white-space: nowrap; font-weight: 600; }
+.cloud-billing-strip.orange {
+  background: color-mix(in srgb, #ff8a3d 16%, transparent);
+  border-color: color-mix(in srgb, #ff8a3d 60%, transparent);
+}
+.cloud-billing-strip.red {
+  background: color-mix(in srgb, var(--accent-red) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-red) 65%, transparent);
+}
+.cloud-subscribe-section { margin-top: 4px; }
+.cloud-subscribe-section .btn-primary { font-size: 14px; padding: 8px 14px; }
+.cloud-subscribe-section .cloud-yearly-btn { background: #1f6f9f; border-color: #1f6f9f; }
+.cloud-trial-line { font-size: 12px; color: var(--accent-blue); margin-left: 4px; }
+.cloud-trial-line.urgent { color: #f0a500; font-weight: 600; }
+.cloud-upload-nudge {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 8px 10px; border-radius: 6px; font-size: 13px;
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 50%, transparent);
+}
+
+/* Main-window banner (next to #gp-owner-banner). */
+#cloud-billing-banner {
+  display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;
+  padding: 8px 14px; font-size: 14px; color: #0a0e1a;
+  background: linear-gradient(180deg, #f0a500 0%, color-mix(in srgb, #f0a500 80%, #000) 100%);
+  border-bottom: 2px solid #f0a500;
+}
+#cloud-billing-banner.orange {
+  background: linear-gradient(180deg, #ff8a3d 0%, color-mix(in srgb, #ff8a3d 80%, #000) 100%);
+  border-bottom-color: #ff8a3d;
+}
+#cloud-billing-banner.red {
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent-red) 0%, color-mix(in srgb, var(--accent-red) 80%, #000) 100%);
+  border-bottom-color: var(--accent-red);
+}
+#cloud-billing-banner .cbb-action {
+  white-space: normal; max-width: 100%; font-size: 14px; font-weight: 700; padding: 6px 14px; border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.35); background: rgba(255,255,255,0.92); color: #0a0e1a; cursor: pointer;
+}
+#cloud-billing-banner .cbb-action:hover { background: #fff; }
+#cloud-billing-banner .cbb-dismiss {
+  background: none; border: none; color: inherit; font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px; opacity: 0.8;
+}
+#cloud-billing-banner .cbb-dismiss:hover { opacity: 1; }
+
+/* The Cloud prompt card (same chrome as the Station Setup launch card). */
+.cloud-prompt-card { border-color: #4ecca3; }
+.cloud-prompt-card .cp-title { font-weight: 700; color: var(--text-primary); margin-bottom: 6px; font-size: 16px; }
+.cloud-prompt-card .cp-offer { font-weight: 600; color: #4ecca3; margin: -4px 0 10px; }
+.cloud-prompt-card .ss-btn-primary { background: #1f8f6f; border-color: #1f8f6f; }
+
 /* Settings > Display > Text size (the Ctrl +/- zoom, made findable) */
 .text-size-row {
   display: flex;

@@ -13,6 +13,7 @@
   <!-- cq-target-js -->
   <!-- jtcat-parser-js -->
   <!-- scope-axis-js -->
+  <!-- cloud-billing-ui-js -->
   <!-- jtty-macros-js -->
   <script>if(localStorage.getItem('echocat-theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').content='#e8eaed'}</script>
 </head>
@@ -78,6 +79,14 @@
     <!-- Guest Pass banner (ECHOCAT Web over POTACAT Cloud): filled from
          auth-ok.passSession, hidden for owners. -->
     <div id="pass-banner" class="hidden"></div>
+    <!-- POTACAT Cloud billing: grace / payment problem / expired, and the
+         last days of a trial. The server's sentence, one button, dismiss =
+         this page load. lib/cloud-billing-ui.js decides. -->
+    <div id="cloud-billing-banner" class="hidden" role="status">
+      <span class="cbb-text" id="cloud-billing-banner-text"></span>
+      <button type="button" class="cbb-action" id="cloud-billing-banner-action"></button>
+      <button type="button" class="cbb-dismiss" id="cloud-billing-banner-dismiss" aria-label="Dismiss">&times;</button>
+    </div>
 
     <!-- Hamburger nav menu — rows built by JS from the user's tab order
          (one order drives BOTH the bar and this menu). -->
@@ -828,7 +837,30 @@
             <span class="so-label"><strong id="echo-cloud-user-callsign"></strong> &mdash; <span id="echo-cloud-user-email" style="opacity:0.6;"></span></span>
           </div>
           <div class="so-row">
-            <span class="so-label">Status: <span id="echo-cloud-sub-status" style="color:#4ecca3;">--</span></span>
+            <span class="so-label">Status: <span id="echo-cloud-sub-status" style="color:#4ecca3;">--</span>
+              <span id="echo-cloud-trial-line" class="echo-trial-line hidden"></span></span>
+          </div>
+          <!-- Billing strip: the server's own sentence (ending soon / cancelled
+               = yellow, grace / payment problem = orange, expired = red). -->
+          <div id="echo-cloud-billing-strip" class="echo-billing-strip hidden" role="status">
+            <span class="ebs-msg"></span>
+            <button type="button" class="so-step-btn ebs-action" style="padding:6px 10px;border-radius:6px;"></button>
+          </div>
+          <div id="echo-cloud-manage-row" class="hidden" style="margin:6px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button type="button" id="echo-cloud-manage-btn" class="so-step-btn" style="padding:6px 12px;border-radius:6px;">Manage subscription</button>
+            <span id="echo-cloud-access-through" style="font-size:11px;opacity:0.6;"></span>
+          </div>
+          <!-- Subscribe (trial, after a trial, no access): Stripe checkout in a
+               new tab; main runs the checkout watch and pushes the result. -->
+          <div id="echo-cloud-subscribe" class="hidden">
+            <div id="echo-cloud-subscribe-heading" class="echo-subscribe-heading"></div>
+            <div id="echo-cloud-stripe-buttons" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" id="echo-cloud-subscribe-monthly" class="so-step-btn echo-subscribe-btn" style="flex:1;min-width:120px;border-radius:6px;">Subscribe &mdash; $5/month</button>
+              <button type="button" id="echo-cloud-subscribe-yearly" class="so-step-btn echo-subscribe-btn yearly" style="flex:1;min-width:120px;border-radius:6px;">$50/year &mdash; 2 months free</button>
+            </div>
+            <div id="echo-cloud-checkout-wait" class="hidden" style="font-size:12px;color:#4fc3f7;margin-top:6px;">Waiting for your payment to come through&hellip; this usually takes a few seconds.</div>
+            <div class="echo-subscribe-note">Opens Stripe's secure checkout. Cancel any time from POTACAT.
+              <a href="https://buymeacoffee.com/potacat/membership" id="echo-cloud-bmac-link" target="_blank" rel="noopener">Prefer Buy Me a Coffee?</a></div>
           </div>
           <div style="margin-top:6px;">
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -840,7 +872,7 @@
           <div id="echo-cloud-sync-msg" style="font-size:11px;opacity:0.6;margin-top:4px;" class="hidden"></div>
           <!-- Account actions: Verify Membership + Sign Out side-by-side -->
           <div style="display:flex;gap:6px;margin-top:10px;">
-            <button type="button" id="echo-cloud-verify-toggle" class="so-step-btn" style="flex:1;min-width:0;padding:8px;font-size:12px;border-radius:6px;opacity:0.8;">Verify Membership</button>
+            <button type="button" id="echo-cloud-verify-toggle" class="so-step-btn" style="flex:1;min-width:0;padding:8px;font-size:12px;border-radius:6px;opacity:0.8;">Paying on Buy Me a Coffee?</button>
             <button type="button" id="echo-cloud-signout-btn" class="so-step-btn" style="flex:1;min-width:0;padding:8px;font-size:12px;border-radius:6px;opacity:0.7;">Sign Out</button>
           </div>
           <div id="echo-cloud-verify-panel" class="hidden" style="margin-top:8px;">

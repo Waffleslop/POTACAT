@@ -1561,6 +1561,9 @@
           scopeUpdateTabVisibility();
           scopeSubscribedSent = false; // a fresh connection knows nothing — re-send if a scope surface is up
           scopeSyncSubscription(activeTab);
+          // Billing at connect: a trial ending or a failed card shows at the
+          // top of the page without opening Settings.
+          if (ws._serverCapabilities.indexOf('cloud-billing') !== -1 && typeof echoCloudRefresh === 'function') setTimeout(echoCloudRefresh, 800);
         } catch {}
         break;
       case 'auth-mode':
@@ -5793,6 +5796,9 @@
   // Guest Pass banner under the status bar: who issued it and what it
   // allows, so a guest is never surprised by a refused mode or power.
   function renderPassBanner(ps) {
+    // A Guest Pass session must never see the owner's billing (Cloud section
+    // + top banner read this flag).
+    window.__echoGuestPass = !!(ps && ps.code);
     var el = document.getElementById('pass-banner');
     if (!el) return;
     if (!ps || !ps.code) { el.classList.add('hidden'); el.textContent = ''; return; }
@@ -11170,6 +11176,122 @@ var _paddleHoldTimer = { dit: null, dah: null };
     }
   }
 
+  // ── Billing (lib/cloud-billing-ui.js, inlined by the server) ──────
+  // The trial countdown, the billing strip, subscribe and manage — the same
+  // decision the desktop Cloud card draws from. A Guest Pass sees none of
+  // it (not their account).
+  var echoCloudSub = null;        // last subscription object
+  var echoCloudBilling = null;    // its billing object
+  var echoCloudStripeOk = true;   // false after stripe_not_configured
+  var echoCloudPendingTab = null; // a tab opened on click, pointed at the URL when it arrives
+  var echoCloudBannerDismissed = {};
+  var echoCloudBannerCurrent = null;
+  function echoCloudIsGuest() { return !!window.__echoGuestPass; }
+
+  function echoCloudRenderBilling(sub) {
+    var B = window.CloudBillingUi;
+    echoCloudSub = sub || null;
+    echoCloudBilling = (sub && sub.billing) || null;
+    var strip = document.getElementById('echo-cloud-billing-strip');
+    var trialLine = document.getElementById('echo-cloud-trial-line');
+    var manageRow = document.getElementById('echo-cloud-manage-row');
+    var manageBtn = document.getElementById('echo-cloud-manage-btn');
+    var accessThrough = document.getElementById('echo-cloud-access-through');
+    var subscribe = document.getElementById('echo-cloud-subscribe');
+    var heading = document.getElementById('echo-cloud-subscribe-heading');
+    var stripeBtns = document.getElementById('echo-cloud-stripe-buttons');
+    var verifyToggle = document.getElementById('echo-cloud-verify-toggle');
+    if (!B || !sub || echoCloudIsGuest()) {
+      [strip, manageRow, subscribe].forEach(function (el) { if (el) el.classList.add('hidden'); });
+      if (trialLine) trialLine.classList.add('hidden');
+      return;
+    }
+    var d = B.describeBilling(sub, { stripeConfigured: echoCloudStripeOk });
+    if (echoCloudSubStatus) {
+      echoCloudSubStatus.textContent = d.pill.text;
+      echoCloudSubStatus.style.color = d.pill.tone === 'ok' ? '#4ecca3' : d.pill.tone === 'warn' ? '#f0a500' : '#e94560';
+    }
+    if (trialLine) {
+      if (d.trialLine) { trialLine.textContent = '— ' + d.trialLine.text.replace('Free trial — ', ''); trialLine.className = 'echo-trial-line' + (d.trialLine.urgent ? ' urgent' : ''); }
+      else trialLine.className = 'echo-trial-line hidden';
+    }
+    if (strip) {
+      if (d.strip) {
+        strip.className = 'echo-billing-strip ' + d.strip.tone;
+        strip.querySelector('.ebs-msg').textContent = d.strip.message;
+        strip.querySelector('.ebs-action').textContent = d.strip.actionLabel;
+      } else strip.className = 'echo-billing-strip hidden';
+    }
+    if (manageRow) {
+      manageRow.classList.toggle('hidden', !(d.manage || d.accessThrough));
+      if (manageBtn) { manageBtn.classList.toggle('hidden', !d.manage); if (d.manage) manageBtn.textContent = d.manage.label; }
+      if (accessThrough) accessThrough.textContent = d.accessThrough || '';
+    }
+    if (subscribe) {
+      subscribe.classList.toggle('hidden', !d.subscribe.show);
+      if (heading) heading.textContent = d.subscribe.heading;
+      if (stripeBtns) stripeBtns.classList.toggle('hidden', !d.subscribe.stripe);
+    }
+    if (verifyToggle) verifyToggle.classList.toggle('hidden', !d.verify.show);
+    echoCloudRenderBanner(d);
+  }
+
+  function echoCloudRenderBanner(d) {
+    var banner = document.getElementById('cloud-billing-banner');
+    var text = document.getElementById('cloud-billing-banner-text');
+    var action = document.getElementById('cloud-billing-banner-action');
+    if (!banner) return;
+    var b = d && d.banner;
+    if (!b || echoCloudBannerDismissed[b.key] || echoCloudIsGuest()) { banner.className = 'hidden'; echoCloudBannerCurrent = null; return; }
+    echoCloudBannerCurrent = b;
+    banner.className = b.tone;
+    if (text) text.textContent = b.message;
+    if (action) action.textContent = b.actionLabel;
+  }
+
+  // Stripe URLs arrive over the WebSocket, so the tab is opened on the
+  // click (synchronously, or the browser blocks it) and pointed at the URL
+  // when it comes back; on an error the blank tab is closed.
+  function echoCloudOpenLater() {
+    try { echoCloudPendingTab = window.open('', '_blank'); } catch (e) { echoCloudPendingTab = null; }
+  }
+  function echoCloudResolveTab(url) {
+    if (echoCloudPendingTab && !echoCloudPendingTab.closed) {
+      if (url) { try { echoCloudPendingTab.location = url; } catch (e) { window.open(url, '_blank'); } }
+      else { try { echoCloudPendingTab.close(); } catch (e) {} }
+    } else if (url) {
+      window.open(url, '_blank');
+    }
+    echoCloudPendingTab = null;
+  }
+  function echoCloudCheckout(plan) {
+    if (!ws || ws.readyState !== 1) return;
+    echoCloudOpenLater();
+    ws.send(JSON.stringify({ type: 'cloud-stripe-checkout', plan: plan === 'yearly' ? 'yearly' : 'monthly' }));
+  }
+  function echoCloudPortal() {
+    if (!ws || ws.readyState !== 1) return;
+    echoCloudOpenLater();
+    ws.send(JSON.stringify({ type: 'cloud-stripe-portal' }));
+  }
+  function echoCloudOpenBillingAction(b) {
+    if (b && b.action && b.action.url) { window.open(b.action.url, '_blank'); return; }
+    if (b && b.provider === 'stripe') { echoCloudPortal(); return; }
+    window.open(window.CloudBillingUi ? window.CloudBillingUi.BMAC_MEMBERSHIP_URL : 'https://buymeacoffee.com/potacat/membership', '_blank');
+  }
+  function echoCloudOpenManage() {
+    var m = window.CloudBillingUi ? window.CloudBillingUi.manageFor(echoCloudSub) : null;
+    if (m && m.kind === 'portal') { if (m.url) window.open(m.url, '_blank'); else echoCloudPortal(); return; }
+    if (m && m.url) { window.open(m.url, '_blank'); return; }
+    window.open('https://buymeacoffee.com/potacat/membership', '_blank');
+  }
+  function echoCloudShowCheckoutWait(on) {
+    var el = document.getElementById('echo-cloud-checkout-wait');
+    if (el) el.classList.toggle('hidden', !on);
+  }
+  // Render hook for a live check (nothing in the page calls it).
+  window.__echoCloudRender = echoCloudRenderBilling;
+
   function echoCloudShowMsg(text) {
     if (echoCloudSyncMsg) {
       echoCloudSyncMsg.textContent = text;
@@ -11197,8 +11319,42 @@ var _paddleHoldTimer = { dit: null, dah: null };
   function handleCloudMessage(msg) {
     switch (msg.type) {
       case 'cloud-status':
-        if (msg.loggedIn) echoCloudShowAccount(msg.user);
-        else echoCloudShowLogin();
+        if (msg.loggedIn) {
+          echoCloudShowAccount(msg.user);
+          echoCloudRenderBilling(msg.subscription || null);
+          echoCloudShowCheckoutWait(!!(msg.checkout && msg.checkout.phase === 'waiting'));
+          if (msg.checkout && msg.checkout.stripeConfigured === false) echoCloudStripeOk = false;
+        } else {
+          echoCloudShowLogin();
+          echoCloudRenderBilling(null);
+        }
+        break;
+      case 'cloud-billing-state':
+        // Pushed by the desktop: launch check, checkout watch, any status
+        // fetch. Repaint from the payload — never fetch again (that loops).
+        if (msg.subscription) echoCloudRenderBilling(msg.subscription);
+        break;
+      case 'cloud-checkout-state':
+        if (msg.stripeConfigured === false) echoCloudStripeOk = false;
+        echoCloudShowCheckoutWait(msg.phase === 'waiting');
+        if (msg.phase === 'active') { showToast('POTACAT Cloud is active. Thank you for subscribing.', 6000); echoCloudRefresh(); }
+        if (msg.phase === 'timeout') echoCloudRefresh();
+        break;
+      case 'cloud-stripe-result':
+        if (msg.error === 'stripe_not_configured') {
+          echoCloudStripeOk = false;
+          echoCloudResolveTab(window.CloudBillingUi ? window.CloudBillingUi.BMAC_MEMBERSHIP_URL : 'https://buymeacoffee.com/potacat/membership');
+          echoCloudRenderBilling(echoCloudSub);
+        } else if (msg.error === 'guest_pass') {
+          echoCloudResolveTab(null);
+          showToast('A Guest Pass cannot change the owner’s subscription.', 4000, true);
+        } else if (msg.error) {
+          echoCloudResolveTab(null);
+          showToast('Could not open ' + (msg.kind === 'portal' ? 'your billing page' : 'checkout') + ': ' + (msg.message || msg.error), 5000, true);
+        } else {
+          echoCloudResolveTab(msg.url);
+          if (msg.kind === 'checkout') echoCloudShowCheckoutWait(true);
+        }
         break;
       case 'cloud-login-result':
       case 'cloud-register-result':
@@ -11272,7 +11428,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   if (echoCloudVerifyToggle && echoCloudVerifyPanel) {
     echoCloudVerifyToggle.addEventListener('click', function() {
       echoCloudVerifyPanel.classList.toggle('hidden');
-      echoCloudVerifyToggle.textContent = echoCloudVerifyPanel.classList.contains('hidden') ? 'Verify Membership' : 'Cancel';
+      echoCloudVerifyToggle.textContent = echoCloudVerifyPanel.classList.contains('hidden') ? 'Paying on Buy Me a Coffee?' : 'Cancel';
     });
   }
   if (echoCloudBmacVerifyBtn) {
@@ -11285,9 +11441,35 @@ var _paddleHoldTimer = { dit: null, dah: null };
       }
       // Collapse panel after verify
       if (echoCloudVerifyPanel) echoCloudVerifyPanel.classList.add('hidden');
-      if (echoCloudVerifyToggle) echoCloudVerifyToggle.textContent = 'Verify Membership';
+      if (echoCloudVerifyToggle) echoCloudVerifyToggle.textContent = 'Paying on Buy Me a Coffee?';
     });
   }
+
+  // Billing buttons (lib/cloud-billing-ui.js decides what is visible).
+  (function echoCloudBillingInit() {
+    var monthly = document.getElementById('echo-cloud-subscribe-monthly');
+    var yearly = document.getElementById('echo-cloud-subscribe-yearly');
+    var manage = document.getElementById('echo-cloud-manage-btn');
+    var strip = document.getElementById('echo-cloud-billing-strip');
+    var bannerAction = document.getElementById('cloud-billing-banner-action');
+    var bannerDismiss = document.getElementById('cloud-billing-banner-dismiss');
+    var banner = document.getElementById('cloud-billing-banner');
+    if (monthly) monthly.addEventListener('click', function () { echoCloudCheckout('monthly'); });
+    if (yearly) yearly.addEventListener('click', function () { echoCloudCheckout('yearly'); });
+    if (manage) manage.addEventListener('click', echoCloudOpenManage);
+    if (strip) strip.querySelector('.ebs-action').addEventListener('click', function () { echoCloudOpenBillingAction(echoCloudBilling); });
+    if (bannerAction) bannerAction.addEventListener('click', function () {
+      var b = echoCloudBannerCurrent;
+      if (!b) return;
+      if (b.action === 'subscribe') echoCloudCheckout(b.plan || 'monthly');
+      else echoCloudOpenBillingAction(echoCloudBilling);
+    });
+    if (bannerDismiss) bannerDismiss.addEventListener('click', function () {
+      if (echoCloudBannerCurrent) echoCloudBannerDismissed[echoCloudBannerCurrent.key] = true;
+      if (banner) banner.className = 'hidden';
+      echoCloudBannerCurrent = null;
+    });
+  })();
 
   // Refresh cloud status when settings overlay is opened
   if (settingsOverlay) {

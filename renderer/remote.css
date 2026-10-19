@@ -4297,6 +4297,42 @@ body.popout-mode .popout-only { display: flex; }
 }
 .vf-solar-pills.hidden { display: none; }
 
+
+/* POTACAT Cloud billing (lib/cloud-billing-ui.js, 2026-10-14). Yellow =
+   still working, a date is coming; orange = act this week; red = sync and
+   tunnel are paused. */
+#cloud-billing-banner {
+  display: flex; align-items: center; gap: 8px 10px; flex-shrink: 0; flex-wrap: wrap; width: 100%; box-sizing: border-box;
+  padding: 8px 12px; font-size: 13px; line-height: 1.35; color: #0a0e1a;
+  background: #f0a500; border-bottom: 1px solid rgba(0,0,0,0.25);
+}
+#cloud-billing-banner.orange { background: #ff8a3d; }
+#cloud-billing-banner.red { background: #e94560; color: #fff; }
+#cloud-billing-banner .cbb-text { flex: 1 1 220px; min-width: 0; }
+#cloud-billing-banner .cbb-action {
+  white-space: normal; max-width: 100%; text-align: center; font-size: 13px; font-weight: 700; padding: 7px 12px; border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.35); background: rgba(255,255,255,0.92); color: #0a0e1a; cursor: pointer;
+}
+#cloud-billing-banner .cbb-dismiss {
+  background: none; border: none; color: inherit; font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px; opacity: 0.8;
+}
+.echo-billing-strip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.4;
+  background: rgba(240,165,0,0.16); border: 1px solid rgba(240,165,0,0.6); color: var(--text);
+}
+.echo-billing-strip.orange { background: rgba(255,138,61,0.18); border-color: rgba(255,138,61,0.65); }
+.echo-billing-strip.red { background: rgba(233,69,96,0.18); border-color: rgba(233,69,96,0.7); }
+.echo-billing-strip .ebs-msg { flex: 1 1 200px; }
+.echo-billing-strip .so-step-btn { font-weight: 600; }
+.echo-trial-line { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+.echo-trial-line.urgent { color: #f0a500; opacity: 1; font-weight: 600; }
+.echo-subscribe-heading { font-size: 12px; opacity: 0.8; margin: 8px 0 6px; line-height: 1.4; }
+.echo-subscribe-btn { font-size: 14px; font-weight: 700; padding: 10px 8px; }
+.echo-subscribe-btn.yearly { background: #1f6f9f; color: #fff; }
+.echo-subscribe-note { font-size: 11px; opacity: 0.55; margin-top: 6px; line-height: 1.4; }
+.echo-subscribe-note a { color: inherit; }
+
 /* "Log as" another operator set up on the desktop (KD9WI 2026-10-16). Shown
    only when the desktop reports two or more operators (S2C operators). */
 .log-as-wrap { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: 13px; color: var(--text-secondary, #a0a0c0); }
