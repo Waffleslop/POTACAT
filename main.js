@@ -1640,6 +1640,35 @@ let _clientDisconnectGraceTimer = null;
 let _audioBridgeSilent = false;
 let _audioBridgeSilentSince = 0;
 let _currentFreqHz = 0;    // tracked for remote radio status
+
+// Flex Direct: the dial POTACAT's own slice was last on, remembered across
+// restarts (`settings.flexLastSlice = {hz, mode}`), because the radio's band
+// persistence is exactly the thing that can come back empty — then the slice
+// POTACAT creates for itself should reappear where the operator left it, not
+// on a default. Written from the slice's own status stream, debounced: a knob
+// turn is hundreds of frequency events.
+let _flexLastSliceSaveTimer = null;
+function rememberFlexSlice(patch) {
+  const cur = settings.flexLastSlice || {};
+  const next = { ...cur, ...patch };
+  if (next.hz === cur.hz && next.mode === cur.mode) return;
+  settings.flexLastSlice = next;
+  if (_flexLastSliceSaveTimer) clearTimeout(_flexLastSliceSaveTimer);
+  _flexLastSliceSaveTimer = setTimeout(() => {
+    _flexLastSliceSaveTimer = null;
+    try { saveSettings(settings); } catch (err) { console.error('[Flex] could not persist flexLastSlice:', err.message); }
+  }, 3000);
+}
+
+/** What SmartSdrClient asks for when it must create POTACAT's slice: this
+ *  session's dial first, else the remembered one, else null (= the library's
+ *  20 m FT8 default). */
+function flexSelfSliceWanted() {
+  const remembered = settings.flexLastSlice || {};
+  const hz = _currentFreqHz || _lastTuneFreq || remembered.hz || 0;
+  if (!(hz > 0)) return null;
+  return { freqMHz: hz / 1e6, mode: remembered.mode || '' };
+}
 // Dial JTCAT last tuned ITSELF (popout band button / phone set-band). Spot
 // clicks, scan, and VFO tunes deliberately don't move this anchor — the
 // pre-TX dial guard compares it against _currentFreqHz to refuse wrong-band
@@ -2738,7 +2767,12 @@ function sendCatStatus(s) {
       _catLinkUpLast = linkUp;
       stationSetupNotify();
       if (!linkUp) {
-        sendCatLog('[CAT] RADIO LINK LOST — the rig is no longer reachable (USB/serial dropped?). Tunes will be refused until it returns.');
+        // A Flex Direct station has no USB to drop: "lost" there means the
+        // radio holds no slice POTACAT can tune (it will create one).
+        const flexDirect = !!(smartSdr && smartSdr.connected && smartSdr.mode === 'self');
+        sendCatLog(flexDirect
+          ? '[CAT] RADIO LINK LOST — the Flex has no slice for POTACAT to tune. Tunes will be refused until one exists (POTACAT creates one after a few seconds).'
+          : '[CAT] RADIO LINK LOST — the rig is no longer reachable (USB/serial dropped?). Tunes will be refused until it returns.');
         // De-key the dedicated CW key line too. It's a SEPARATE USB-serial
         // adapter from the CAT port, so the rig/PTT reconnect safety never
         // touched it — a CW send caught mid-key by a serial glitch could latch
@@ -2756,7 +2790,7 @@ function sendCatStatus(s) {
           win.webContents.send('app-notice', {
             message: rfSuspect
               ? 'Radio link lost during CW TX — RF may be resetting the USB. Add a ferrite/ground; the key line will be released when it returns.'
-              : 'Radio link lost — check the USB/serial connection',
+              : (flexDirect ? 'Radio link lost — the Flex has no slice for POTACAT; creating one' : 'Radio link lost — check the USB/serial connection'),
             warn: true, duration: 8000,
           });
         }
@@ -13092,6 +13126,26 @@ function connectSmartSdr() {
   // multiFlex: register POTACAT as its own GUI client even when SmartSDR is
   // open, so it owns transmit. Default on; flexMultiflex=false rides along.
   smartSdr.setMultiflex(settings.flexMultiflex !== false);
+  // Flex Direct: when `client gui` restores no slice for our client_id, the
+  // library creates one (SmartSdrClient._ensureSelfSlice) and asks here where
+  // to put it: the dial of this session, else the dial remembered from the
+  // last one, else its own 20 m FT8 default. Until 2026-10-17 a radio whose
+  // persisted layout held no slice left POTACAT "Flex Direct active" and
+  // "RADIO LINK LOST" in the same second, every tune refused, with nothing in
+  // the log to say why (K3SBP's 8600 after a ghost registration was dropped).
+  smartSdr.setSliceSupplier(flexSelfSliceWanted);
+  smartSdr.on('slice-created', ({ index, freqMHz, mode }) => {
+    sendCatLog(`Flex Direct: the radio restored no slice for POTACAT, so POTACAT created slice ${index} at ${freqMHz.toFixed(3)} MHz ${mode}.`);
+  });
+  smartSdr.on('slice-create-failed', ({ error }) => {
+    sendCatLog(`Flex Direct: the radio restored no slice for POTACAT and refused to create one (${error}). Free a slice in SmartSDR / Maestro or reboot the radio, then reconnect.`);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: 'Flex has no slice for POTACAT and refused to create one — free a slice or reboot the radio', warn: true, duration: 10000 });
+    }
+  });
+  smartSdr.on('slice-lost', ({ index }) => {
+    sendCatLog(`Flex Direct: slice ${index} was removed from the radio — POTACAT will create a new one.`);
+  });
   // Single-GUI-slot handoff: when SmartSDR/AetherSDR is launching, yield the
   // slot and bind instead of re-grabbing it (which locks the GUI client out
   // with "In use: POTACAT"). Set by checkFlexHandoff; survives the reconnect.
@@ -13208,7 +13262,10 @@ function connectSmartSdr() {
     } else {
       sendCatLog(`Flex Direct active — POTACAT is the GUI client; radio control works with no SmartSDR open (client_id=${clientId})`);
     }
-    sendCatStatus({ connected: true });
+    // The link pill lights on 'slice-ready', not here: registration alone
+    // cannot tune anything (canTune needs the slice), and claiming "restored"
+    // now made the next CAT-shim failure print "RADIO LINK LOST" a second
+    // later whenever the radio restored no slice.
     // Now that POTACAT is a registered GUI client, the dedicated audio
     // connection can bind to it. The connect-time 1s timer fires too early
     // (before `client gui` completes), so kick the audio client here.
@@ -13223,6 +13280,8 @@ function connectSmartSdr() {
   smartSdr.on('slice-ready', ({ index }) => {
     if (smartSdr.mode === 'self') {
       sendCatLog(`Flex Direct: tuning radio slice ${index}`);
+      // THIS is the moment the radio is controllable (canTune just went true).
+      sendCatStatus({ connected: true });
       // Slice setup begins here — extend the DAX conflict-latch grace in case
       // GUI registration landed long after 'connected' (busy radio).
       _daxBringupQuietAt = Math.max(_daxBringupQuietAt, Date.now() + 10000);
@@ -13350,9 +13409,11 @@ function connectSmartSdr() {
   // SmartSDR's slice, not ours — so OUR slice's freq/mode (from the API) is
   // authoritative for the display even though cat is connected.
   smartSdr.on('frequency', (hz) => {
+    if (smartSdr.mode === 'self') rememberFlexSlice({ hz });
     if (smartSdr.mode === 'self' || !cat || !cat.connected) sendCatFrequency(hz);
   });
   smartSdr.on('mode', (md) => {
+    if (smartSdr.mode === 'self') rememberFlexSlice({ mode: md });
     if (smartSdr.mode === 'self' || !cat || !cat.connected) sendCatMode(md);
   });
   // Use per-rig flexApiHost if set, else smartSdrHost global, else catTarget host, else localhost
