@@ -4652,12 +4652,16 @@
   var customSliderDesk = {};   // slot -> the desktop's saved value as last received
 
   // Substitute the slider value into a command template — SAME contract as the
-  // desktop's customSliderCommand(): {v} bare, {v2}/{v3}/{v4} zero-padded, and
+  // desktop's customSliderCommand(): {v} bare, {v2}/{v3}/{v4} zero-padded,
+  // {bcd} an Icom CI-V level as two BCD bytes ("02 55"), and
   // a template with no placeholder gets the value appended.
   function customSliderCommand(template, value) {
     var v = String(Math.round(value));
     var out = template;
     var found = false;
+    var bcd = ('0000' + v).slice(-4);
+    var bcdOut = /\s/.test(template) ? bcd.slice(0, 2) + ' ' + bcd.slice(2) : bcd; // {bcd}: Icom level, 255 -> "02 55"
+    while (out.indexOf('{bcd}') !== -1) { out = out.replace('{bcd}', bcdOut); found = true; }
     var widths = [4, 3, 2];
     for (var w = 0; w < widths.length; w++) {
       var ph = '{v' + widths[w] + '}';
@@ -4827,7 +4831,7 @@
       cmdInput.className = 'cce-cmd';
       cmdInput.placeholder = slotType === 'toggle' ? 'On command'
         : slotType === 'slider' ? 'Command with {v}' : 'CAT command';
-      if (slotType === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ). No placeholder = value appended.';
+      if (slotType === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ), {bcd} for an Icom level as two bytes (FE FE 94 E0 14 02 {bcd} FD sends 255 as 02 55). No placeholder = value appended.';
       else cmdInput.title = 'Text commands as your manual prints them (FA014074000; ). Icom CI-V as hex bytes (FE FE 80 E0 12 00 FD).';
       cmdInput.maxLength = 64;
       cmdInput.value = entry.command || '';

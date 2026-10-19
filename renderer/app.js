@@ -23259,12 +23259,17 @@ let customToggleState = {};
 
 // Substitute the slider value into a command template. Placeholders: {v} =
 // bare integer, {v2}/{v3}/{v4} = zero-padded to that many digits (Kenwood
-// SQ0{v3}; etc.). A template with no placeholder gets the bare value
-// appended, so a plain prefix like "SQ0" still works.
+// SQ0{v3}; etc.), {bcd} = an Icom CI-V level as two BCD bytes, 255 -> "02 55"
+// (K8IKO IC-7410: {v4} gave "0255", which is not a byte pair, so the whole
+// command was sent as text). A template with no placeholder gets the bare
+// value appended, so a plain prefix like "SQ0" still works.
 function customSliderCommand(template, value) {
   const v = String(Math.round(value));
   let out = template;
   let found = false;
+  const bcd = v.padStart(4, '0').slice(-4);
+  const bcdOut = /\s/.test(template) ? bcd.slice(0, 2) + ' ' + bcd.slice(2) : bcd; // spaced bytes, or one unbroken frame
+  while (out.includes('{bcd}')) { out = out.replace('{bcd}', bcdOut); found = true; }
   for (const w of [4, 3, 2]) {
     const ph = '{v' + w + '}';
     while (out.includes(ph)) { out = out.replace(ph, v.padStart(w, '0')); found = true; }
@@ -23315,7 +23320,7 @@ function createCustomSlot(i) {
   cmdInput.value = b.command || '';
   cmdInput.placeholder = type === 'toggle' ? 'On command'
     : type === 'slider' ? 'Command with {v}' : 'CAT command';
-  if (type === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ). No placeholder = value appended.';
+  if (type === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ), {bcd} for an Icom level as two bytes (FE FE 94 E0 14 02 {bcd} FD sends 255 as 02 55). No placeholder = value appended.';
   // K8IKO had no way to tell whether his Icom frame was typed wrongly or
   // POTACAT was mishandling it. Name both accepted forms.
   else cmdInput.title = 'Text commands as your manual prints them (FA014074000; ). Icom CI-V as hex bytes (FE FE 80 E0 12 00 FD).';

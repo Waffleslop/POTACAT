@@ -1138,6 +1138,9 @@ function customSliderCommand(template, value) {
   var v = String(Math.round(value));
   var out = template;
   var found = false;
+  var bcd = ('0000' + v).slice(-4);
+  var bcdOut = /\s/.test(template) ? bcd.slice(0, 2) + ' ' + bcd.slice(2) : bcd; // {bcd}: Icom level, 255 -> "02 55"
+  while (out.indexOf('{bcd}') !== -1) { out = out.replace('{bcd}', bcdOut); found = true; }
   var widths = [4, 3, 2];
   for (var w = 0; w < widths.length; w++) {
     var ph = '{v' + widths[w] + '}';

@@ -66,6 +66,10 @@ const VECTORS = [
   ['{v}-{v2}', 3, '3-03'],         // mixed widths
   ['{v}', 42.6, '43'],             // rounds, never truncates
   ['{v3}', 0, '000'],
+  // {bcd}: an Icom CI-V level, two BCD bytes (K8IKO IC-7410, 0-255)
+  ['FE FE 80 E0 14 02 {bcd} FD', 255, 'FE FE 80 E0 14 02 02 55 FD'],
+  ['FE FE 80 E0 14 02 {bcd} FD', 7, 'FE FE 80 E0 14 02 00 07 FD'],
+  ['fefe80e01402{bcd}fd', 128, 'fefe80e014020128fd'], // unbroken frame stays unbroken
 ];
 
 test('desktop, web and VFO pop-out slider substitution agree on every vector', () => {
