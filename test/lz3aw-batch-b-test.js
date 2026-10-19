@@ -78,10 +78,13 @@ const NODES = [
   { id: 'c', name: 'Local', host: '192.168.1.5', port: 7300, enabled: true },
   { id: 'd', name: 'Four', host: 'four.example', port: 23, enabled: true },
 ];
-test('the menu list carries id/name/host/enabled and never a password or port', () => {
+test('the menu list carries id/name/host/enabled/connected and never a password or port', () => {
   const list = ClusterNodeChoice.nodesForMenu(NODES);
   assert.strictEqual(list.length, 4);
-  for (const n of list) assert.deepStrictEqual(Object.keys(n).sort(), ['enabled', 'host', 'id', 'name']);
+  for (const n of list) assert.deepStrictEqual(Object.keys(n).sort(), ['connected', 'enabled', 'host', 'id', 'name']);
+  // connected = the node's session is up; a switched-off node is never "connected".
+  const up = ClusterNodeChoice.nodesForMenu(NODES, (id) => id === 'a' || id === 'b');
+  for (const n of up) assert.strictEqual(n.connected, n.enabled && (n.id === 'a' || n.id === 'b'), n.id);
   assert.ok(!JSON.stringify(list).includes('secret'));
   assert.deepStrictEqual(ClusterNodeChoice.nodesForMenu(undefined), []);
 });
@@ -138,7 +141,9 @@ test('one cluster-node writer, reached from desktop IPC and ECHOCAT', () => {
   assert.ok(i > 0);
   const cr = main.indexOf('function connectRemote(');
   assert.ok(cr > 0 && i > cr, 'listener lives inside connectRemote (rewire rule)');
-  assert.ok(/clusterNodeChoices: ClusterNodeChoice\.nodesForMenu\(settings\.clusterNodes\)/.test(main));
+  assert.ok(/clusterNodeChoices: ClusterNodeChoice\.nodesForMenu\(settings\.clusterNodes, clusterNodeConnected\),/.test(main));
+  assert.ok(/clusterNodeMax: ClusterNodeChoice\.MAX_ENABLED,/.test(main), 'the limit is advertised');
+  assert.ok(/type: 'cluster-node-result', ok: !!r\.ok, error: r\.ok \? undefined : r\.error, reqId \}/.test(main), 'every request answered with its reqId');
 });
 test('the server refuses a Guest Pass and the protocol registers both messages', () => {
   const i = rs.indexOf("case 'set-cluster-node'");

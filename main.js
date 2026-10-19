@@ -6038,8 +6038,12 @@ function getClusterNodeList() {
 // the desktop menu and ECHOCAT. Turns a SAVED node on/off (lib/cluster-node-
 // choice.js — max 3 on, never adds one), saves, reconnects when the cluster is
 // on, and echoes the list to every surface so they agree.
+function clusterNodeConnected(id) {
+  const entry = clusterClients.get(id);
+  return !!(entry && entry.client && entry.client.connected);
+}
 function pushClusterNodeChoices() {
-  const list = ClusterNodeChoice.nodesForMenu(settings.clusterNodes);
+  const list = ClusterNodeChoice.nodesForMenu(settings.clusterNodes, clusterNodeConnected);
   if (win && !win.isDestroyed()) win.webContents.send('cluster-node-choices', list);
   if (remoteServer && remoteServer.running) updateRemoteSettings();
 }
@@ -6057,7 +6061,7 @@ function applyClusterNodeChoice(id, enabled, origin) {
     if (settings.enableCluster) connectCluster();
   }
   pushClusterNodeChoices();
-  return { ok: true, nodes: ClusterNodeChoice.nodesForMenu(settings.clusterNodes) };
+  return { ok: true, nodes: ClusterNodeChoice.nodesForMenu(settings.clusterNodes, clusterNodeConnected) };
 }
 
 function sendClusterNodesToPopout() {
@@ -15022,7 +15026,8 @@ function updateRemoteSettings() {
     enableDxeSources: dxeSourcesForRemote(),
     // Saved cluster nodes for the Spots Source menu (id/name/host/enabled only —
     // never a login or password). Set with C2S set-cluster-node (LZ3AW item 1).
-    clusterNodeChoices: ClusterNodeChoice.nodesForMenu(settings.clusterNodes),
+    clusterNodeChoices: ClusterNodeChoice.nodesForMenu(settings.clusterNodes, clusterNodeConnected),
+    clusterNodeMax: ClusterNodeChoice.MAX_ENABLED, // so a client greys out the next switch
     remoteCwEnabled: !!settings.remoteCwEnabled,
     // CW macros are ONE shared set: settings.cwMacros is canonical (the desktop
     // editor + bar read it, and a phone 'save-cw-macros' now writes it too), so
@@ -19056,9 +19061,11 @@ function connectRemote() {
   });
   // Cluster node on/off from the ECHOCAT Spots Source menu (owner only —
   // remote-server refuses a Guest Pass). Same writer as the desktop menu.
-  remoteServer.on('set-cluster-node', ({ id, enabled } = {}) => {
+  remoteServer.on('set-cluster-node', ({ id, enabled, reqId } = {}) => {
     const r = applyClusterNodeChoice(id, enabled, 'ECHOCAT');
-    if (!r.ok && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'cluster-node-result', ok: false, error: r.error });
+    // Answered every time, with the request's reqId, so two quick taps can
+    // each be matched to their own result (the blob echoes the truth too).
+    if (remoteServer.hasClient()) remoteServer.sendToClient({ type: 'cluster-node-result', ok: !!r.ok, error: r.ok ? undefined : r.error, reqId });
   });
 
   // The whole of Idle Mode from a mobile device. Every field is optional and
