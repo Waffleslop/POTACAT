@@ -29,7 +29,7 @@ function test(name, fn) {
 }
 
 const ROOT = path.join(__dirname, '..');
-const ADDON = path.join(ROOT, 'lib', 'ft8_native', 'build', 'Release', 'ft8_native.node');
+const ADDON = process.env.FT8_NATIVE_ADDON || path.join(ROOT, 'lib', 'ft8_native', 'build', 'Release', 'ft8_native.node');
 const SRC = fs.readFileSync(path.join(ROOT, 'lib', 'ft8_native', 'ft8_addon.c'), 'utf8');
 
 console.log('ft8 native decoder');
@@ -117,7 +117,45 @@ if (!fs.existsSync(ADDON)) {
       assert.ok(Math.abs(d.db - snr) <= 1.5, `true ${snr} dB read ${d.db.toFixed(1)} dB`);
     }
   });
+
+  // 4. Our own nonstandard call resolves before we ever transmit (K9CYT/8,
+  //    2026-10-12). A report leg to a compound call carries only its hash; the
+  //    table used to learn our call from our own TX, so until then a call to
+  //    us decoded as "<...>" and no surface could tell it was ours. Encode and
+  //    decode in SEPARATE processes: the encoder seeds the table too.
+  test('decode seeds our own call, so a hashed call to us resolves', () => {
+    const os = require('os');
+    const tmp = path.join(os.tmpdir(), `ft8-seed-${process.pid}.f32`);
+    const run = (src) => spawnSync(process.execPath, ['-e', src], { encoding: 'utf8' });
+    const enc = run(`
+      const n = require(${JSON.stringify(ADDON)});
+      const w = n.encode('<K9CYT/8> W1ABC -10', 1200, 'FT8');
+      const x = new Float32Array(180000); x.set(w, 6000);
+      require('fs').writeFileSync(${JSON.stringify(tmp)}, Buffer.from(x.buffer));`);
+    assert.strictEqual(enc.status, 0, enc.stderr);
+    const dec = (seed) => {
+      const r = run(`
+        const n = require(${JSON.stringify(ADDON)});
+        const b = require('fs').readFileSync(${JSON.stringify(tmp)});
+        const x = new Float32Array(b.buffer, b.byteOffset, b.length / 4);
+        process.stdout.write(JSON.stringify(n.decode(x, 'FT8', '', '', 0, ${JSON.stringify(seed)}).map(d => d.text)));`);
+      assert.strictEqual(r.status, 0, r.stderr);
+      return JSON.parse(r.stdout);
+    };
+    try {
+      assert.deepStrictEqual(dec(''), ['<...> W1ABC -10'], 'unseeded: the hash is unknown');
+      assert.deepStrictEqual(dec('K9CYT/8'), ['<K9CYT/8> W1ABC -10'], 'seeded: our call is named');
+    } finally { try { fs.unlinkSync(tmp); } catch (e) {} }
+  });
 }
+
+test('the worker seeds our own call on every FT8 and FT4 decode (source guard)', () => {
+  const worker = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-worker.js'), 'utf8');
+  const engine = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-engine.js'), 'utf8');
+  assert.ok(/nativeDecode\(samples, 'FT8', [^)]*msg\.seedCall/.test(worker), 'FT8 decode passes seedCall');
+  assert.ok(/nativeDecode\(samples, 'FT4', [^)]*msg\.seedCall/.test(worker), 'FT4 decode passes seedCall');
+  assert.ok(/seedCall: this\._apMyCall,/.test(engine), 'the engine sends it whether AP is on or not');
+});
 
 test('the worker keeps the native SNR (fixSNR is the WASM fallback only)', () => {
   const worker = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-worker.js'), 'utf8');

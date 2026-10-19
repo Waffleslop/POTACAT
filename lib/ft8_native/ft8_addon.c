@@ -178,6 +178,27 @@ static ftx_callsign_hash_interface_t hash_if = {
 #define AP_I3_LO    74
 #define AP_I3_HI    76
 
+/* Seed the operator's own call into the hash table (WSJT-X does this at
+ * startup). A nonstandard call (K9CYT/8, GB13COL) reaches us only as a hash in
+ * the report legs, "<K9CYT/8> W1ABC -10"; until our own TX had seeded the table
+ * those decoded as "<...>" and nothing could tell they were addressed to us.
+ * Same n22 hash as message.c save_callsign (base-38, padded to 11 chars).
+ * Re-seeded on every decode so pruning by age never drops it. */
+static void ht_seed_own_call(const char* call) {
+    static const char tbl[] = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/";
+    if (call == NULL || call[0] == '\0') return;
+    uint64_t n58 = 0;
+    int i = 0;
+    for (; call[i] != '\0' && i < 11; ++i) {
+        const char* p = strchr(tbl, call[i]);
+        if (p == NULL) return;
+        n58 = 38 * n58 + (uint64_t)(p - tbl);
+    }
+    if (call[i] != '\0') return; // longer than 11: not a packable call
+    for (; i < 11; ++i) n58 = 38 * n58;
+    ht_add(call, (uint32_t)(((47055833459ull * n58) >> (64 - 22)) & 0x3FFFFFul));
+}
+
 static bool ap_probe_lookup(ftx_callsign_hash_type_t t, uint32_t h, char* c) { (void)t; (void)h; c[0] = '\0'; return false; }
 static void ap_probe_save(const char* c, uint32_t h) { (void)c; (void)h; }
 static ftx_callsign_hash_interface_t ap_probe_hash_if = { .lookup_hash = ap_probe_lookup, .save_hash = ap_probe_save };
@@ -1086,13 +1107,13 @@ static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t*
 
 /* N-API decode function */
 static napi_value Decode(napi_env env, napi_callback_info info) {
-    size_t argc = 5;
-    napi_value args[5];
+    size_t argc = 6;
+    napi_value args[6];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
     const double t_start_ms = now_ms();
 
     if (argc < 1) {
-        napi_throw_error(env, NULL, "Expected (samples, protocol?, myCall?, dxCall?, budgetMs?)");
+        napi_throw_error(env, NULL, "Expected (samples, protocol?, myCall?, dxCall?, budgetMs?, seedCall?)");
         return NULL;
     }
 
@@ -1129,6 +1150,15 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
     if (argc >= 4) { size_t n; napi_get_value_string_utf8(env, args[3], ap_dxcall, sizeof(ap_dxcall), &n); }
     ap_refresh(ap_mycall, ap_dxcall);
     ++ht_epoch;
+
+    /* Own call to seed into the hash table (args[5]), independent of AP so a
+     * station with AP decode off still sees "<K9CYT/8>" rather than "<...>". */
+    if (argc >= 6) {
+        char seed_call[16] = {0};
+        size_t n;
+        if (napi_get_value_string_utf8(env, args[5], seed_call, sizeof(seed_call), &n) == napi_ok)
+            ht_seed_own_call(seed_call);
+    }
 
     /* Time budget (args[4], ms, 0/absent = none). The multi-pass decoder
      * (#87) costs ~0.35-0.7 s a busy slot on a fast PC and several times that

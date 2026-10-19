@@ -34,6 +34,10 @@ jobs:
           node-version: '20'
       - name: Run JTCAT regression suite
         run: node test/jtcat-test.js
+      - name: Run JTCAT parser suite
+        run: node test/jtcat-parser-test.js
+      - name: Run FT8 native decoder checks (source guards without the addon)
+        run: node test/ft8-native-decoder-test.js
       - name: Run SSTV regression suite
         run: node test/sstv-test.js
       - name: Run SSTV PSNR-quality matrix

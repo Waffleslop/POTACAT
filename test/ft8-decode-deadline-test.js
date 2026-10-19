@@ -118,7 +118,7 @@ test('main counts tries by the decoded slot at every call site (source guard)', 
 });
 
 test('the worker hands the budget to the native decoder (source guard)', () => {
-  assert.ok(/nativeDecode\(samples, 'FT8', msg\.myCall \|\| '', msg\.dxCall \|\| '', msg\.budgetMs \|\| 0\)/.test(WORKER));
+  assert.ok(/nativeDecode\(samples, 'FT8', msg\.myCall \|\| '', msg\.dxCall \|\| '', msg\.budgetMs \|\| 0[,)]/.test(WORKER));
   assert.ok(/results, stats \}/.test(WORKER), 'decode stats must reach the engine');
 });
 
