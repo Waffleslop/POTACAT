@@ -1997,6 +1997,7 @@ const { TypedCallTracker } = require('./lib/typed-call');
 const CloudBillingUi = require('./lib/cloud-billing-ui');
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
+const CwGreeting = require('./lib/cw-greeting'); // {greeting} = GM/GA/GE by the other station's local time
 /**
  * Fill {call}/{op_firstname}/{state} left in CW text from a device (the
  * mobile app sends macros unexpanded; ECHOCAT Web expands its own). {call} =
@@ -2017,6 +2018,32 @@ function expandRemoteCwText(text) {
   });
   if (r.missingCall) sendCatLog('[CW] Macro {call} had no callsign: nothing typed in a callsign field and no tuned spot on the desktop. Sent without it.');
   return r.text;
+}
+/**
+ * Fill {greeting} (LZ3AW item 10) — here, at the one place every CW send
+ * passes, so desktop macros, the VFO pop-out, ECHOCAT Web and device text all
+ * agree. The station is the callsign being worked (the same rule as {call}:
+ * typed most recently anywhere, else the tuned spot); their longitude is their
+ * QRZ grid when cached, else the cty.dat call-area/entity position. Never a
+ * network lookup: CW must not wait.
+ */
+function expandCwGreeting(text) {
+  if (!CwGreeting.hasGreeting(text)) return text;
+  const tuned = _lastVfoTunedSpot && Array.isArray(_lastVfoTunedSpot.ops) && _lastVfoTunedSpot.ops[0];
+  const call = typedCalls.current() || (tuned && tuned.callsign) || '';
+  let lon = null;
+  try {
+    const info = call && qrz && qrz._cache ? qrz._cache.get(JtcatParser.baseCall(call)) : null;
+    const pos = info && info.grid ? gridToLatLon(info.grid) : null;
+    if (pos) lon = pos.lon;
+    if (lon == null && call && ctyDb) {
+      const entity = resolveCallsign(String(call).trim(), ctyDb);
+      const area = entity ? getCallAreaCoords(call, entity.name) : null;
+      if (area) lon = area.lon;
+      else if (entity && entity.lon != null) lon = entity.lon;
+    }
+  } catch { lon = null; }
+  return CwGreeting.expandGreeting(text, lon, Date.now());
 }
 function setTypedCall(source, call) {
   const prev = typedCalls.current();
@@ -15836,6 +15863,7 @@ function sendCwTextToRadio(text, opts) {
   // Timestamp the transmit so a CAT link loss in the next few seconds is
   // recognized as RF-into-USB rather than a generic cable fault.
   if (text) _lastCwKeyMs = Date.now();
+  if (text) text = expandCwGreeting(text);
   // A CW keystroke must never crash the app. Every backend below touches
   // serial/spawn/native code that can throw synchronously; without this a
   // single bad send (KM4CFT's FT-891 key-port path, 2026-07-21) took the whole
