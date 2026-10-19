@@ -11480,12 +11480,15 @@ function jtcatJttySetProfile(profile) {
 // re-pin it across band-change engine rebuilds and app restarts (WSJT-X
 // remembers its Tx offset too). Called from the two operator set-tx-freq
 // handlers and on hold-enable — the held value is the value at pin time or
-// the last deliberate move. PSK31 keeps its own pskAudioCenter persistence.
+// the last deliberate move. JTTY and PSK31 file theirs under jttyAudioFreq /
+// pskAudioCenter, the keys their pop-out panes start from.
 function rememberJtcatTxFreq(eng) {
-  if (!eng || eng._mode === 'PSK31') return;
+  if (!eng) return;
   if (Number.isFinite(eng._txFreq)) {
-    // JTTY keeps its own audio frequency; it must not move FT8's held offset.
+    // JTTY and PSK31 keep their own audio frequency; neither may move FT8's
+    // held offset.
     if (eng._mode === 'JTTY') settings.jttyAudioFreq = eng._txFreq;
+    else if (eng._mode === 'PSK31') settings.pskAudioCenter = eng._txFreq;
     else settings.jtcatTxFreqHz = eng._txFreq;
     saveSettings(settings);
   }
@@ -12304,7 +12307,7 @@ function startJtcat(mode) {
     }
 
     const modeForTx = ft8Engine ? ft8Engine._mode : 'FT8';
-    jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq);
+    jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq, ft8Engine ? ft8Engine._txFreq : undefined);
     // Stamp the period this transmission goes out in — jtcatHandleRetryStall
     // counts one try per stamped TX (never per decode period). Placed after
     // every TX-block guard above so refused cycles don't count as tries.
@@ -19054,6 +19057,15 @@ function connectRemote() {
     if (eng) {
       eng.setTxFreq(hz, { operator: true });
       rememberJtcatTxFreq(eng);
+      sendCatLog(`[JTCAT] TX freq -> ${eng._txFreq} Hz (ECHOCAT, ${eng._mode || '?'})`);
+      // Tell the pop-out too. Its keyboard panes (JTTY/PSK31) hold their own
+      // copy of the frequency and push it back to the engine on every mode
+      // change and save it on every Send, so a move it never heard about was
+      // reverted the next time it was touched (K3SBP 2026-10-19: every JTTY
+      // transmission went out at 1500 Hz however the mobile device moved it).
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        jtcatPopoutWin.webContents.send('jtcat-tx-freq-set', { hz: eng._txFreq, mode: eng._mode });
+      }
       if (remoteServer.hasClient()) {
         remoteServer.broadcastJtcatTxStatus({ state: eng._txActive ? 'tx' : 'rx', txFreq: eng._txFreq });
       }
@@ -19791,10 +19803,13 @@ function logFlexTxRfSummary() {
 // for the operator who never reads logs. Deliberate QRP is respected: the
 // notice says what is happening and where the slider is, and does not block.
 let _jtcatLowPowerNoticedWatts = 0;
-function jtcatNoteTxPowerForMode(mode, message, freqHz) {
+function jtcatNoteTxPowerForMode(mode, message, freqHz, engineHz) {
   const w = _currentTxPower;
   const setTo = w > 0 ? `RF power set to ${w} W` : 'RF power unknown (no readback from the radio)';
-  sendCatLog(`[JTCAT] TX start: ${mode} "${message || ''}" @ ${freqHz || '?'} Hz, ${setTo}`);
+  // The engine's own TX offset, when it differs from the frame's: a mismatch
+  // is how a reverted operator move shows up in a pasted log.
+  const eng = Number.isFinite(engineHz) && engineHz !== freqHz ? ` (engine TX freq ${engineHz} Hz)` : '';
+  sendCatLog(`[JTCAT] TX start: ${mode} "${message || ''}" @ ${freqHz || '?'} Hz${eng}, ${setTo}`);
   if (!(w > 0) || w > JTCAT_WSPR_MAX_WATTS || mode === 'WSPR') {
     if (w > JTCAT_WSPR_MAX_WATTS) _jtcatLowPowerNoticedWatts = 0;
     return;

@@ -45,6 +45,12 @@ function _applyPopoutTheme(payload) {
   var transmitting = false;
   var jpTxFreqHz = 1500;
   var jpRxFreqHz = 1500;
+  // Each keyboard mode's own audio frequency while another mode is showing.
+  // jpTxFreqHz is ONE variable for every mode, so without this a switch into
+  // JTTY pushed FT8's offset (or 1500) into the JTTY engine and the next Send
+  // saved it as jttyAudioFreq.
+  var kbFreqHz = { PSK31: 0, JTTY: 0 };
+  var kbLastMode = '';
   var myCallsign = '';
   var myGrid = '';
   var stations = {};   // callsign -> {marker, grid, lat, lon, lastSeen}
@@ -1328,6 +1334,25 @@ function _applyPopoutTheme(payload) {
   // the ordering with the engine, and a split marker makes no sense.
   function isKeyboardMode() { return modeSelect.value === 'PSK31' || modeSelect.value === 'JTTY'; }
 
+  // A TX frequency the mobile device set. The keyboard panes keep their own
+  // copy and push it back on every mode change and save it on every Send, so
+  // they MUST adopt it — the tx-status re-anchor below skips them, and a move
+  // they never heard about was reverted (K3SBP 2026-10-19, JTTY stuck at
+  // 1500 Hz). Transceive modes move RX with it, like a waterfall click.
+  if (window.api.onJtcatTxFreqSet) window.api.onJtcatTxFreqSet(function(data) {
+    var hz = data && Math.round(Number(data.hz));
+    if (!hz) return;
+    if (kbFreqHz.hasOwnProperty(data.mode)) kbFreqHz[data.mode] = hz;
+    if (data.mode && data.mode !== modeSelect.value) return;
+    jpTxFreqHz = hz;
+    if (isKeyboardMode()) {
+      jpRxFreqHz = hz;
+      window.api.jtcatSetRxFreq(hz);
+      if (modeSelect.value === 'PSK31') updatePskStatus(hz, null, null);
+    }
+    txFreqLabel.textContent = txFreqText(jpTxFreqHz);
+  });
+
   window.api.onJtcatTxStatus(function(data) {
     // Re-anchor the TX display to ENGINE truth. The label/marker were pure
     // renderer-optimism before, so with Hold TX Freq on they could show a
@@ -1722,6 +1747,12 @@ function _applyPopoutTheme(payload) {
 
   // --- Mode change ---
   modeSelect.addEventListener('change', function() {
+    if (kbFreqHz.hasOwnProperty(kbLastMode)) kbFreqHz[kbLastMode] = jpTxFreqHz;
+    if (kbFreqHz[modeSelect.value]) {
+      jpTxFreqHz = kbFreqHz[modeSelect.value];
+      txFreqLabel.textContent = txFreqText(jpTxFreqHz);
+    }
+    kbLastMode = modeSelect.value;
     updateBandFreqs();
     applyWsprMode(modeSelect.value === 'WSPR');
     applyPskMode(modeSelect.value === 'PSK31');
@@ -3416,6 +3447,7 @@ function _applyPopoutTheme(payload) {
         if (window.api.jtcatPskSetSql) window.api.jtcatPskSetSql(parseInt(pskSqlEl.value, 10));
       });
     }
+    if (s && s.pskAudioCenter) kbFreqHz.PSK31 = Math.max(100, Math.min(3000, parseInt(s.pskAudioCenter, 10) || 1500));
     if (s && s.pskAudioCenter && modeSelect.value === 'PSK31') {
       jpTxFreqHz = Math.max(100, Math.min(3000, parseInt(s.pskAudioCenter, 10) || 1500));
       jpRxFreqHz = jpTxFreqHz;
@@ -4005,6 +4037,7 @@ function _applyPopoutTheme(payload) {
     if (jttySerialEl) jttySerialEl.value = String(parseInt(s.jttySerial, 10) > 0 ? parseInt(s.jttySerial, 10) : 1);
     jttyRefreshExchange(true);
     jttyRenderTemplates();
+    if (s.jttyAudioFreq) kbFreqHz.JTTY = Math.max(200, Math.min(2700, parseInt(s.jttyAudioFreq, 10) || 1500));
     if (s.jttyAudioFreq && modeSelect.value === 'JTTY') {
       jpTxFreqHz = Math.max(200, Math.min(2700, parseInt(s.jttyAudioFreq, 10) || 1500));
       jpRxFreqHz = jpTxFreqHz;
@@ -4126,6 +4159,7 @@ function _applyPopoutTheme(payload) {
       modeSelect.value = s.jtcatLastMode;
       updateBandFreqs();
     }
+    kbLastMode = modeSelect.value;
     wsprInit(s);
     pskInit(s);
     jttyInit(s);
