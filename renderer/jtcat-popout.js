@@ -4924,6 +4924,48 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // --- Band Activity / My Activity splitter (LZ3AW item 12) — the vertical
+  // twin of the map splitter: drag the divider, the share persists per
+  // machine, double-click resets 50/50. flex-grow ratios, so both lists keep
+  // their proportion when the window is resized. The FT8/FT4/FT2 decode pane
+  // only; the keyboard modes have their own panes.
+  var actSplitEl = document.getElementById('jp-activity-splitter');
+  var actSections = decodePaneEl ? decodePaneEl.querySelectorAll(':scope > .jp-decode-section') : [];
+  var ACT_SPLIT_LS_KEY = 'jtcat-popout-activity-split-pct';
+  function applyActivitySplitPct(pct) {
+    if (actSections.length !== 2) return;
+    var p = Math.max(15, Math.min(85, pct));
+    actSections[0].style.flex = String(p) + ' 1 0';
+    actSections[1].style.flex = String(100 - p) + ' 1 0';
+  }
+  if (actSplitEl && actSections.length === 2) {
+    var savedActPct = parseFloat(localStorage.getItem(ACT_SPLIT_LS_KEY));
+    if (!isNaN(savedActPct)) applyActivitySplitPct(savedActPct);
+    var actDragging = false;
+    actSplitEl.addEventListener('mousedown', function(e) {
+      actDragging = true;
+      actSplitEl.classList.add('dragging');
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!actDragging) return;
+      var r = decodePaneEl.getBoundingClientRect();
+      if (r.height <= 0) return;
+      applyActivitySplitPct(((e.clientY - r.top) / r.height) * 100);
+    });
+    document.addEventListener('mouseup', function() {
+      if (!actDragging) return;
+      actDragging = false;
+      actSplitEl.classList.remove('dragging');
+      var applied = parseFloat(actSections[0].style.flex) || 50;
+      try { localStorage.setItem(ACT_SPLIT_LS_KEY, String(applied)); } catch (e) {}
+    });
+    actSplitEl.addEventListener('dblclick', function() {
+      applyActivitySplitPct(50);
+      try { localStorage.setItem(ACT_SPLIT_LS_KEY, '50'); } catch (e) {}
+    });
+  }
+
   mapPopoutBtn.addEventListener('click', function() {
     window.api.jtcatMapPopout();
   });

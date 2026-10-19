@@ -28,5 +28,15 @@ test('the panes it sizes sit beside the map in the same row', () => {
   }
   assert.ok(/\.jp-psk-pane \{ flex: 1;/.test(HTML), 'the CSS default the inline split must override');
 });
+// LZ3AW item 12: Band Activity / My Activity are resizable the same way.
+test('a divider between Band Activity and My Activity, persisted, double-click resets', () => {
+  const main = HTML.slice(HTML.indexOf('<div class="jp-decode-pane">'), HTML.indexOf('id="jp-wspr-pane"'));
+  const band = main.indexOf('id="jp-band-activity"'), div = main.indexOf('id="jp-activity-splitter"'), mine = main.indexOf('id="jp-my-activity"');
+  assert.ok(band > 0 && div > band && mine > div, 'the divider sits between the two lists');
+  assert.ok(/\.jp-hsplitter \{[^}]*cursor: row-resize/.test(HTML), 'styled as a row splitter');
+  assert.ok(/var ACT_SPLIT_LS_KEY = 'jtcat-popout-activity-split-pct';/.test(JS), 'persisted per machine');
+  assert.ok(/actSections\[0\]\.style\.flex = String\(p\) \+ ' 1 0';/.test(JS) && /actSections\[1\]\.style\.flex = String\(100 - p\) \+ ' 1 0';/.test(JS), 'flex ratios, not pixels');
+  assert.ok(/actSplitEl\.addEventListener\('dblclick'[\s\S]{0,120}applyActivitySplitPct\(50\)/.test(JS), 'double-click resets');
+});
 console.log(`\nJTCAT split panes: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
