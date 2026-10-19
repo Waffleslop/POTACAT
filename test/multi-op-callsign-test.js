@@ -38,5 +38,15 @@ test('the other log forms keep splitting (bottom bar, Log QSO dialog, ECHOCAT We
   assert.ok(/raw\.split\(','\)\.map\(function \(s\) \{ return s\.trim\(\); \}\)\.filter\(Boolean\)/.test(R('renderer/remote.js')));
 });
 
+test('Log QSO window logs a POTA contact at the park, not the QRZ home address (W9TEF)', () => {
+  const js = R('renderer/log-popout.js');
+  const pre = R('preload-log-popout.js');
+  assert.ok(/getPark: \(ref\) => ipcRenderer\.invoke\('get-park', ref\)/.test(pre), 'preload exposes the park lookup');
+  assert.ok(/if \(built\.data\.sig === 'POTA' && built\.data\.potaRef && window\.api\.getPark\)/.test(js), 'looks the park up');
+  assert.ok(/parkLoc = \{ state: states\.length === 1 \? states\[0\] : '', grid: park\.grid \|\| '' \};/.test(js), 'a multi-state park logs no state');
+  assert.ok(/if \(data\.sig\) data\.state = parkLoc \? parkLoc\.state : '';/.test(js), 'never the QRZ home state for a park');
+  assert.ok(/if \(parkLoc && parkLoc\.grid\) data\.gridsquare = parkLoc\.grid;/.test(js), 'the park grid');
+});
+
 console.log(`\nMulti-op callsigns: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

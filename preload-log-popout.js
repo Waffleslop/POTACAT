@@ -46,6 +46,9 @@ const apiSurface = {
 
   // --- Combined callsign lookup (QRZ info + past QSOs from local log) ---
   callsignInfo: (call, limit) => ipcRenderer.invoke('log-popout-callsign-info', call, limit),
+  // The park's own location for a POTA contact (state, grid) — the same
+  // lookup the Log QSO dialog and the bottom bar use.
+  getPark: (ref) => ipcRenderer.invoke('get-park', ref),
 
   // --- Open the QSO Logbook pop-out and pre-fill its search with this call ---
   searchInLogbook: (call) => ipcRenderer.send('qso-popout-search-call', call),

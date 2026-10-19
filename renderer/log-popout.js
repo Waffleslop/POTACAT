@@ -597,6 +597,27 @@ function _applyPopoutTheme(payload) {
       // This window used to save "K1A,K1B,K1C" as ONE callsign, which a
       // logbook like DXKeeper then refused (W9TEF 2026-10-18).
       const calls = built.data.callsign.split(',').map((c) => c.trim()).filter(Boolean);
+      // A POTA contact is logged at the PARK, not the activator's QRZ home
+      // address — as the Log QSO dialog, the bottom bar and ECHOCAT already
+      // do (W9TEF 2026-10-19: hunters' logs fill up with wrong states and
+      // grids that matter for WAS and grid chasing). A park spanning states
+      // logs no state rather than a guess; with a reference but no park
+      // data, no state either (the QRZ one is the home QTH).
+      let parkLoc = null;
+      if (built.data.sig === 'POTA' && built.data.potaRef && window.api.getPark) {
+        try {
+          const park = await window.api.getPark(built.data.potaRef);
+          if (park) {
+            const states = [];
+            for (const part of String(park.locationDesc || '').split(',')) {
+              const seg = part.trim();
+              const st = seg.indexOf('-') >= 0 ? seg.slice(seg.indexOf('-') + 1).trim() : '';
+              if (st && states.indexOf(st) < 0) states.push(st);
+            }
+            parkLoc = { state: states.length === 1 ? states[0] : '', grid: park.grid || '' };
+          }
+        } catch {}
+      }
       let result = null;
       for (let ci = 0; ci < calls.length; ci++) {
         const data = { ...built.data, callsign: calls[ci] };
@@ -611,6 +632,8 @@ function _applyPopoutTheme(payload) {
           data.gridsquare = info ? (info.grid || '') : '';
           data.country = info ? (info.country || '') : '';
         }
+        if (data.sig) data.state = parkLoc ? parkLoc.state : '';
+        if (parkLoc && parkLoc.grid) data.gridsquare = parkLoc.grid;
         result = await window.api.saveQso(data);
         if (!result || !result.success) break;
       }
