@@ -71,7 +71,8 @@ test('no unfilled {placeholder} survives resolution', () => {
       for (const platform of PLATFORMS) {
         for (const n of resolve({ model, radioType, platform })) {
           const text = [n.title, n.why, ...n.steps].join(' ');
-          assert.ok(!/\{\w+\}/.test(text), `${n.id} for ${model || '(no model)'}/${radioType}/${platform}: ${text}`);
+          // udev rules are literal ATTR{name} keys the operator types, not placeholders.
+          assert.ok(!/\{\w+\}/.test(text.replace(/ATTR\{\w+\}/g, '')), `${n.id} for ${model || '(no model)'}/${radioType}/${platform}: ${text}`);
         }
       }
     }

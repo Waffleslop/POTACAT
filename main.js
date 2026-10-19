@@ -346,6 +346,7 @@ const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sy
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { buildWrlContactInfo } = require('./lib/wrl-packet');
 const YaesuScope = require('./lib/yaesu-scope');
+const SdrScope = require('./lib/sdr-scope');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
@@ -2326,6 +2327,9 @@ function getRigCapabilities(rigType) {
   // reports one. That is how all three clients get bench-tested without an
   // FT-710 in the room (mobile handoff, follow-up 4).
   if (yaesuScopeSynth && !caps.nativeScope) caps.nativeScope = 'synthetic';
+  // A band scope from a separate SDR (lib/sdr-scope.js) gives ANY rig one —
+  // the same flag, so the More menu, ECHOCAT Web and the app light up.
+  if (!caps.nativeScope && sdrScopeSettingsForActiveRig().enabled) caps.nativeScope = 'sdr';
   return caps;
 }
 
@@ -22794,6 +22798,7 @@ const yaesuScopeState = {
   centerHz: 0, frames: 0, misaligned: 0,
   diag: null,          // { key, severity, headline, detail, action } — what to tell the operator
   helperPath: '',
+  source: 'radio',     // 'radio' (FT-710 over USB, or synthetic) | 'sdr' (rtl_tcp, lib/sdr-scope.js)
 };
 
 function yaesuScopeRigHasScope() {
@@ -22827,7 +22832,7 @@ function yaesuScopeStatePayload() {
     synth: yaesuScopeSynth,
     // Whether the active rig can do this at all — the JTCAT pop-out and the
     // web client show their band-scope controls only when it is true.
-    available: yaesuScopeSynth || yaesuScopeRigHasScope(),
+    available: yaesuScopeSynth || !!scopeSourceKind(),
   };
 }
 
@@ -22846,9 +22851,9 @@ function yaesuScopeRemotePayload(extra) {
   const diag = (yaesuScopeRemoteIsGuest && asksForEnable) ? YAESU_SCOPE_GUEST_DIAG : s.diag;
   return {
     status: s.status, kind: s.kind, spanHz: s.spanHz, anchor: s.anchor, speed: s.speed,
-    scuLan: s.scuLan, centerHz: s.centerHz, diag,
+    scuLan: s.scuLan, centerHz: s.centerHz, diag, source: s.source,
     axis: YaesuScope.scopeAxis({ centerHz: s.centerHz, spanHz: s.spanHz, anchor: s.anchor }),
-    available: yaesuScopeSynth || yaesuScopeRigHasScope(),
+    available: yaesuScopeSynth || !!scopeSourceKind(),
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
     ...(extra || {}),
@@ -22877,6 +22882,7 @@ function yaesuScopeNoteFrequency(hz) {
   if (!(hz > 0)) return;
   yaesuScopeState.centerHz = hz;
   if (yaesuScopeState.status === 'stopped') return;
+  sdrScopeFollowDial(hz);
   // The pop-out already receives cat-frequency; ECHOCAT wants the axis re-sent, throttled.
   if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
 }
@@ -22885,6 +22891,7 @@ function startYaesuScope() {
   if (yaesuScopeProc) return;
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   const synth = yaesuScopeSynth;
+  if (!synth && scopeSourceKind() === 'sdr') { startSdrScope(); return; }
   if (!synth && isRemoteActive()) {
     yaesuScopeSetStatus('unavailable', { key: 'remote', severity: 'blocker',
       headline: 'The Band Scope reads the radio on this PC',
@@ -22894,7 +22901,7 @@ function startYaesuScope() {
   if (!synth && !yaesuScopeRigHasScope()) {
     yaesuScopeSetStatus('unavailable', { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
-      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable. Pick the FT-710 in Settings > My Rigs, or try the synthetic signal from the gear menu.' });
+      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable, or a separate SDR through rtl_tcp (Settings > My Rigs > Band scope from an SDR). Or try the synthetic signal from the gear menu.' });
     return;
   }
   const helperPath = findYaesuScopeHelper();
@@ -22927,6 +22934,7 @@ function startYaesuScope() {
   yaesuScopeProc = proc;
   yaesuScopeStderr = '';
   yaesuScopeState.helperPath = helperPath;
+  yaesuScopeState.source = 'radio';
   yaesuScopeState.kind = synth ? 1 : 0;
   yaesuScopeState.frames = 0;
   yaesuScopeState.misaligned = 0;
@@ -22967,6 +22975,7 @@ function startYaesuScope() {
 
 function stopYaesuScope(why) {
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
+  if (sdrScopeClient) { stopSdrScope(why); return; }
   yaesuScopeStopCatPolling();
   if (yaesuScopeScuLanWeSet) {
     yaesuScopeScuLanWeSet = false;
@@ -22993,7 +23002,7 @@ function yaesuScopeOnFrame(f) {
   if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
   if (yaesuScopeState.status !== 'live') {
     yaesuScopeRestarts = 0;
-    sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : 'live radio') + ')');
+    sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : 'live radio') + ')');
     yaesuScopeSetStatus('live', null);
   }
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
@@ -23091,6 +23100,108 @@ function yaesuScopeEnableOnRadio() {
     yaesuScopeReadRadio();
     if (!yaesuScopeProc && yaesuScopeWanted()) { yaesuScopeRestarts = 0; startYaesuScope(); }
   }, 700);
+}
+
+// ═══ Band scope from a separate SDR (rtl_tcp) ═══════════════════════════════════
+// Any radio can have a scope from its own receiver: an RTL-SDR or SDRplay
+// behind rtl_tcp / rsp_tcp (lib/sdr-scope.js owns the protocol and the
+// picture). It plugs into the FT-710 scope's state, watchers and fan-out
+// above, so the pop-out, the JTCAT strip and ECHOCAT need nothing new: the
+// frames are the same 850 levels and the axis is KNOWN (POTACAT sets the
+// SDR's centre and rate), so click-to-tune works. Per rig: rig.sdrScope.
+// It runs only while somebody watches (yaesuScopeWanted) and follows the
+// dial through sendCatFrequency → yaesuScopeNoteFrequency.
+let sdrScopeClient = null;
+let sdrScopeBuilder = null;
+let sdrScopeCfg = null;
+let sdrScopeTunedHz = 0;
+let sdrScopeRetuneTimer = null;
+
+function sdrScopeSettingsForActiveRig() {
+  const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  return SdrScope.normalizeSdrSettings(rig && rig.sdrScope);
+}
+
+/** Which source a scope start uses: 'sdr', 'yaesu' (FT-710 USB), or null. */
+function scopeSourceKind() {
+  const sdr = sdrScopeSettingsForActiveRig();
+  const native = yaesuScopeRigHasScope();
+  if (sdr.enabled && (!native || sdr.preferSdr)) return 'sdr';
+  return native ? 'yaesu' : null;
+}
+
+function startSdrScope() {
+  if (sdrScopeClient) return;
+  const cfg = sdrScopeSettingsForActiveRig();
+  sdrScopeCfg = cfg;
+  const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
+  Object.assign(yaesuScopeState, {
+    source: 'sdr', kind: 0, spanCode: null, spanHz: SdrScope.spanForRate(cfg.sampleRate), anchor: 'center',
+    modeCode: null, speed: null, scuLan: null, frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: dial || yaesuScopeState.centerHz,
+  });
+  const client = new SdrScope.RtlTcpClient({ host: cfg.host, port: cfg.port });
+  const builder = new SdrScope.SpectrumBuilder({ sampleRate: cfg.sampleRate, fps: Math.min(30, settings.yaesuScopeFps || 12) });
+  sdrScopeClient = client;
+  sdrScopeBuilder = builder;
+  sdrScopeTunedHz = SdrScope.sdrCenterForDial(dial, cfg.offsetHz);
+  builder.on('frame', (f) => { if (sdrScopeClient === client) yaesuScopeOnFrame(f); });
+  client.on('iq', (chunk) => { if (sdrScopeClient === client) builder.feed(chunk); });
+  client.on('header', (h) => {
+    // Every greeting, not just the first: a restarted rtl_tcp comes back at
+    // its own default rate and frequency.
+    for (const b of SdrScope.setupCommands(cfg, sdrScopeTunedHz)) client.send(b);
+    sendCatLog(`[Scope] SDR connected: ${cfg.host}:${cfg.port}, ${h.tunerName}, ${(cfg.sampleRate / 1e6).toFixed(3)} MS/s, gain ${cfg.gain === 'auto' ? 'auto' : cfg.gain + ' dB'}`
+      + (cfg.directSampling !== 'off' ? `, direct sampling ${cfg.directSampling.toUpperCase()}` : '')
+      + (cfg.offsetHz ? `, offset ${cfg.offsetHz} Hz` : ''));
+  });
+  client.on('state', (st, info) => {
+    if (sdrScopeClient !== client) return;
+    if (st === 'retrying' && info) {
+      sendCatLog(`[Scope] SDR: ${info.headline}${info.detail ? ' — ' + info.detail : ''} (retrying in ${Math.round(info.retryInMs / 1000)} s)`);
+      yaesuScopeSetStatus(info.severity === 'blocker' ? 'blocked' : 'error', info);
+    }
+  });
+  sendCatLog(`[Scope] SDR source: connecting to rtl_tcp at ${cfg.host}:${cfg.port}`);
+  yaesuScopeSetStatus('starting', null);
+  client.start();
+}
+
+function stopSdrScope(why) {
+  const client = sdrScopeClient;
+  sdrScopeClient = null;
+  sdrScopeBuilder = null;
+  if (sdrScopeRetuneTimer) { clearTimeout(sdrScopeRetuneTimer); sdrScopeRetuneTimer = null; }
+  if (client) {
+    client.stop();
+    sendCatLog('[Scope] SDR source stopped' + (why ? ' — ' + why : ''));
+  }
+  if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
+}
+
+/** Retune the SDR to the dial, debounced so a spun knob is one command per 150 ms. */
+function sdrScopeFollowDial(dialHz) {
+  if (!sdrScopeClient || !sdrScopeCfg) return;
+  const target = SdrScope.sdrCenterForDial(dialHz, sdrScopeCfg.offsetHz);
+  if (!target || target === sdrScopeTunedHz) return;
+  if (sdrScopeRetuneTimer) return;
+  sdrScopeRetuneTimer = setTimeout(() => {
+    sdrScopeRetuneTimer = null;
+    if (!sdrScopeClient || !sdrScopeCfg) return;
+    const hz = SdrScope.sdrCenterForDial(yaesuScopeState.centerHz, sdrScopeCfg.offsetHz);
+    if (hz && hz !== sdrScopeTunedHz) { sdrScopeTunedHz = hz; sdrScopeClient.setFrequency(hz); }
+  }, 150);
+}
+
+/** The scope settings changed in the rig editor: re-advertise caps, restart what runs. */
+function sdrScopeSettingsChanged(before, after) {
+  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  try { broadcastRigState(); } catch { /* no rig yet */ }
+  if (yaesuScopeProc || sdrScopeClient || yaesuScopeState.status !== 'stopped') {
+    stopYaesuScope('scope source settings changed');
+    yaesuScopeRestarts = 0;
+    setTimeout(() => { if (yaesuScopeWanted()) startYaesuScope(); }, 400);
+  }
 }
 
 const hamrsBridge = createWsjtxUdpBridge('HamRS');
@@ -34564,6 +34675,7 @@ app.whenReady().then(() => {
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
+    const sdrScopeBefore = sdrScopeSettingsForActiveRig(); // compared after the save (sdrScopeSettingsChanged)
     for (const f of normalizeSettingsSerialPaths(newSettings)) sendCatLog(`[CAT] ${f.key} "${f.from}" saved as ${f.to}`);
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
@@ -35171,6 +35283,10 @@ app.whenReady().then(() => {
     if (newSettings.sotaUpload && newSettings.sotaUsername) {
       sotaUploader.configure(newSettings.sotaUsername, newSettings.sotaPassword || '');
     }
+
+    // Band scope from an SDR: a changed rig.sdrScope (or a different active
+    // rig) re-advertises caps and restarts a running scope on the new source.
+    sdrScopeSettingsChanged(sdrScopeBefore, sdrScopeSettingsForActiveRig());
 
     // Restart auto-SSTV timer if settings changed
     if (has('enableAutoSstv') || has('autoSstvInactivityMin')) {

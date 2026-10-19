@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
 
 const start = MAIN.indexOf('async function saveQsoRecord(');
 assert.ok(start > 0, 'saveQsoRecord');

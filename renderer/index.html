@@ -1952,6 +1952,35 @@
             </div>
           </div>
         </details>
+        <details id="rig-sdr-scope" style="margin-top:8px;">
+          <summary>Band scope from an SDR</summary>
+          <div style="margin-top:6px;">
+            <label class="checkbox-label"><input type="checkbox" id="set-sdr-scope-enabled"> Show a band scope from a separate SDR (RTL-SDR, SDRplay) for this rig</label>
+            <span class="help-text" style="display:block;margin:2px 0 6px 24px;">POTACAT reads the SDR through an rtl_tcp server: run <b>rtl_tcp</b> for an RTL-SDR or <b>rsp_tcp</b> for an SDRplay, then open More &gt; Band Scope. The SDR follows your dial; click a signal to tune there.</span>
+            <div id="sdr-scope-config" style="margin-left:24px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;">
+              <label>Server: <input type="text" id="set-sdr-scope-host" value="127.0.0.1" style="width:120px;"></label>
+              <label>Port: <input type="number" id="set-sdr-scope-port" min="1" max="65535" value="1234" style="width:70px;"></label>
+              <label>Span:
+                <select id="set-sdr-scope-rate">
+                  <option value="250000">200 kHz</option>
+                  <option value="1024000" selected>800 kHz</option>
+                  <option value="2048000">1.6 MHz</option>
+                </select>
+              </label>
+              <label title="auto, or a gain in dB (0-50 on most RTL-SDR tuners)">Gain: <input type="text" id="set-sdr-scope-gain" value="auto" style="width:60px;"></label>
+              <label title="RTL-SDR V3/V4 receive HF (below 24 MHz) in Q-branch direct sampling. Leave Off for SDRplay or an upconverter.">HF direct sampling:
+                <select id="set-sdr-scope-direct">
+                  <option value="off">Off</option>
+                  <option value="q">Q branch (RTL-SDR V3/V4 on HF)</option>
+                  <option value="i">I branch</option>
+                </select>
+              </label>
+              <label title="Frequency correction for the dongle's crystal">PPM: <input type="number" id="set-sdr-scope-ppm" min="-200" max="200" value="0" style="width:60px;"></label>
+              <label title="Added to the radio's dial before the SDR tunes: an upconverter (e.g. 125000000), or a radio's IF output">Offset (Hz): <input type="number" id="set-sdr-scope-offset" value="0" style="width:110px;"></label>
+              <label class="checkbox-label" id="sdr-scope-prefer-wrap" title="The FT-710 has its own USB band scope; tick this to show the SDR instead"><input type="checkbox" id="set-sdr-scope-prefer"> Use the SDR instead of the FT-710's own scope</label>
+            </div>
+          </div>
+        </details>
         <div class="rig-editor-buttons">
           <button type="button" id="rig-save-btn">Save Rig</button>
           <button type="button" id="rig-cancel-btn">Cancel</button>

@@ -2810,6 +2810,53 @@ document.getElementById('set-icom-network-tx-gain')?.addEventListener('input', (
   setIcomNetworkTxGainPct(e.target.value);
 });
 
+// Band scope from an SDR (lib/sdr-scope.js, rtl_tcp): per rig, rig.sdrScope.
+function fillSdrScopeForm(cfg) {
+  const c = cfg || {};
+  const el = (id) => document.getElementById(id);
+  if (!el('set-sdr-scope-enabled')) return;
+  el('set-sdr-scope-enabled').checked = c.enabled === true;
+  el('set-sdr-scope-host').value = c.host || '127.0.0.1';
+  el('set-sdr-scope-port').value = c.port || 1234;
+  el('set-sdr-scope-rate').value = String(c.sampleRate || 1024000);
+  el('set-sdr-scope-gain').value = c.gain == null || c.gain === '' ? 'auto' : String(c.gain);
+  el('set-sdr-scope-direct').value = c.directSampling || 'off';
+  el('set-sdr-scope-ppm').value = c.ppm || 0;
+  el('set-sdr-scope-offset').value = c.offsetHz || 0;
+  el('set-sdr-scope-prefer').checked = c.preferSdr === true;
+  syncSdrScopeForm();
+}
+function syncSdrScopeForm() {
+  const en = document.getElementById('set-sdr-scope-enabled');
+  const cfgEl = document.getElementById('sdr-scope-config');
+  if (en && cfgEl) cfgEl.style.display = en.checked ? 'flex' : 'none';
+  const prefer = document.getElementById('sdr-scope-prefer-wrap');
+  const model = rigModelSelect ? rigModelSelect.value : '';
+  if (prefer) prefer.style.display = /FT-?710/i.test(model || '') ? '' : 'none';
+}
+function readSdrScopeForm() {
+  const el = (id) => document.getElementById(id);
+  if (!el('set-sdr-scope-enabled')) return undefined;
+  const gainRaw = String(el('set-sdr-scope-gain').value || '').trim().toLowerCase();
+  const gainNum = parseFloat(gainRaw);
+  return {
+    enabled: el('set-sdr-scope-enabled').checked,
+    host: String(el('set-sdr-scope-host').value || '').trim() || '127.0.0.1',
+    port: parseInt(el('set-sdr-scope-port').value, 10) || 1234,
+    sampleRate: parseInt(el('set-sdr-scope-rate').value, 10) || 1024000,
+    gain: !gainRaw || gainRaw === 'auto' || !Number.isFinite(gainNum) ? 'auto' : gainNum,
+    directSampling: el('set-sdr-scope-direct').value || 'off',
+    ppm: parseInt(el('set-sdr-scope-ppm').value, 10) || 0,
+    offsetHz: parseInt(el('set-sdr-scope-offset').value, 10) || 0,
+    preferSdr: el('set-sdr-scope-prefer').checked,
+  };
+}
+{
+  const en = document.getElementById('set-sdr-scope-enabled');
+  if (en) en.addEventListener('change', syncSdrScopeForm);
+  if (rigModelSelect) rigModelSelect.addEventListener('change', syncSdrScopeForm);
+}
+
 async function openRigEditor(mode, rigId) {
   rigEditorMode = mode;
   editingRigId = rigId || null;
@@ -2854,6 +2901,7 @@ async function openRigEditor(mode, rigId) {
       // Per-rig Flex band→antenna map. Always rebuilt so editing a
       // different rig doesn't show the previous rig's selections.
       buildFlexBandAntennaMap(rig.flexBandAntennaMap || {});
+      fillSdrScopeForm(rig.sdrScope);
     }
   } else {
     rigEditorTitle.textContent = 'Add Rig';
@@ -2867,6 +2915,7 @@ async function openRigEditor(mode, rigId) {
     setRadioType('flex');
     updateRadioSubPanels();
     buildFlexBandAntennaMap({});
+    fillSdrScopeForm(null);
     await populateRigAudioDevices('', '');
   }
 
@@ -2985,6 +3034,7 @@ async function saveRigEditor() {
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex
   // rigs — empty map serializes as `{}`, no runtime impact).
   const flexBandAntennaMap = getFlexBandAntennaMap();
+  const rigSdrScope = readSdrScopeForm();
   if (rigEditorMode === 'edit' && editingRigId) {
     const rig = currentRigs.find(r => r.id === editingRigId);
     if (rig) {
@@ -3004,6 +3054,7 @@ async function saveRigEditor() {
       rig.externalAtuWatts = rigExternalAtuWatts;
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.flexBandAntennaMap = flexBandAntennaMap;
+      if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
     }
   } else {
@@ -3025,6 +3076,7 @@ async function saveRigEditor() {
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,
       flexBandAntennaMap,
+      ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
     };
     currentRigs.push(newRig);
