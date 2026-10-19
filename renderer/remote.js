@@ -1795,6 +1795,7 @@
         // server closes the socket right after this.
         if (webCookieMode()) { webSignOutAndReload('revoked'); break; }
         wasKicked = true;
+        endAudioWithSession();
         releaseWakeLock();
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         mainUI.classList.add('hidden');
@@ -1986,6 +1987,12 @@
       case 'kicked':
         // Stop reconnect loop — another client took over intentionally
         wasKicked = true;
+        // Drop this page's audio too. WebRTC runs peer to peer, so closing
+        // the WebSocket leaves the call — and this device's microphone —
+        // live into the shack after another device has taken the rig
+        // (KF0U 2026-10-17: two tabs open, the FT-710 sat keyed at 0 W until
+        // one tab was closed; HALT on the other did nothing).
+        endAudioWithSession();
         releaseWakeLock();
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         mainUI.classList.add('hidden');
@@ -5610,6 +5617,12 @@
     }
   }
 
+  // A session that ends for good (kicked, revoked, signed out) ends its audio
+  // with it: the WebRTC call is peer to peer and outlives the WebSocket.
+  function endAudioWithSession() {
+    try { if (audioEnabled || pc || localAudioStream) stopAudio(); } catch (e) { /* page tearing down */ }
+  }
+
   function stopAudio() {
     if (ssbPlayingIdx >= 0) stopSsbPlayback();
     if (typeof smCleanupAudio === 'function') smCleanupAudio();
@@ -5779,6 +5792,7 @@
   }
   function webSignOut(notice) {
     wasKicked = true; // stop the reconnect loop
+    endAudioWithSession();
     releaseWakeLock();
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     try { if (ws) ws.close(); } catch {}
@@ -5799,6 +5813,7 @@
   };
   function showWebSessionEnded(notice) {
     wasKicked = true;
+    endAudioWithSession();
     releaseWakeLock();
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     mainUI.classList.add('hidden');
