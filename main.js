@@ -8153,6 +8153,7 @@ function connectPskrMap() {
   const myPos = gridToLatLon(settings.grid);
   const myCall = settings.myCallsign.toUpperCase();
 
+  const PSKR_MAP_PER_BAND_CAP = 500; // reports kept per band (24 h max-age prune below)
   pskrMap.on('spot', (raw) => {
     // Only keep spots where WE are the sender
     if (raw.callsign.toUpperCase() !== myCall) return;
@@ -8200,8 +8201,14 @@ function connectPskrMap() {
     const idx = pskrMapSpots.findIndex(s => s.receiver === spot.receiver && s.band === spot.band);
     if (idx !== -1) pskrMapSpots.splice(idx, 1);
     pskrMapSpots.push(spot);
-    if (pskrMapSpots.length > 500) {
-      pskrMapSpots = pskrMapSpots.slice(-500);
+    // Capped PER BAND: one shared cap of 500 let a busy 40m session push
+    // every 20m report out, and a poll only reaches back 15 minutes, so they
+    // never came back — "40m reports but no 20m for the last day" (K3SBP
+    // 2026-10-19, while 104 stations were hearing him on 20m).
+    const sameBand = pskrMapSpots.filter((s) => s.band === spot.band);
+    if (sameBand.length > PSKR_MAP_PER_BAND_CAP) {
+      const drop = new Set(sameBand.slice(0, sameBand.length - PSKR_MAP_PER_BAND_CAP));
+      pskrMapSpots = pskrMapSpots.filter((s) => !drop.has(s));
     }
 
     // Throttle: flush to renderer at most once every 2s
