@@ -142,6 +142,8 @@ jobs:
         run: node test/qso-expand-test.js
       - name: Run logging parity guards (every log surface through logContact)
         run: node test/logging-parity-test.js
+      - name: Run watchlist sync (desktop <-> ECHOCAT, edit by operation)
+        run: node test/watchlist-sync-test.js
       - name: Run WRL packet suite (numeric fields must not break forwarding)
         run: node test/wrl-packet-test.js
       - name: Run raw CAT command suite (rigctld binary escapes)

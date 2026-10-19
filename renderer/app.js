@@ -17272,6 +17272,14 @@ window.api.onDonorCallsigns((list) => {
 // A phone switched DXpedition spot flags (ECHOCAT save-settings): apply them
 // here too, so the Spots menu, the spot table and the Contests notice agree
 // with the phone without a restart (potacat-meta dxe-flags-to-remote).
+// A mobile device edited the watchlist (ECHOCAT watchlist sync).
+if (window.api.onWatchlistUpdated) window.api.onWatchlistUpdated((raw) => {
+  watchlistRaw = String(raw || '');
+  watchlist = parseWatchlist(watchlistRaw);
+  if (setWatchlist && document.activeElement !== setWatchlist) setWatchlist.value = watchlistRaw;
+  if (typeof render === 'function') render();
+});
+
 if (window.api.onDxeSettings) window.api.onDxeSettings((d) => {
   if (!d) return;
   enableDxe = d.enableDxe !== false;

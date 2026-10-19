@@ -328,6 +328,7 @@ const { freqToBand } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
+const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
 const wsprnet = require('./lib/wspr/wsprnet');
 const wsprBands = require('./lib/wspr/bands');
 const wsprlive = require('./lib/wspr/wsprlive');
@@ -15045,6 +15046,9 @@ function updateRemoteSettings() {
     // each group's remoteEntries cache rides this push so mobile decorates
     // matching spots without having to fetch URLs itself.
     watchlistGroups: settings.watchlistGroups || null,
+    // The general watchlist, raw (the string parseWatchlist reads). Edited
+    // from a device with watchlist-edit (capability 'watchlist-sync').
+    watchlist: settings.watchlist || '',
     // Special-event subscriptions (13 Colonies et al.) — kept SEPARATE from
     // watchlistGroups because events carry a schedule, callsign-pattern matching,
     // and per-device mute. `eventSubscriptions` = tracked events the phone should
@@ -18455,8 +18459,11 @@ function connectRemote() {
   });
 
   remoteServer.on('log-qso', async (data) => {
+    // reqId rides back on every reply, so a device matches a refusal to the
+    // save that caused it.
+    const reqId = data && typeof data.reqId === 'string' ? data.reqId : undefined;
     if (!data || !data.callsign) {
-      remoteServer.sendLogResult({ success: false, error: 'Missing callsign' });
+      remoteServer.sendLogResult({ success: false, error: 'Missing callsign', reqId });
       return;
     }
     try {
@@ -18541,6 +18548,14 @@ function connectRemote() {
         // Final identity of the logged record — lets the device stamp its
         // local copy with the SAME uuid so cloud sync sees one QSO, not two.
         uuid: (result.records[0] && result.records[0].uuid) || '',
+        // Every record this contact became, with the uuid it was written
+        // under — a device keeping its own copies adopts THESE so the cloud
+        // sees one record each, never two (capability 'log-contact').
+        records: result.records.map((r) => ({
+          uuid: r.uuid || '', callsign: r.callsign, sig: r.sig || '', sigInfo: r.sigInfo || '',
+          mySig: r.mySig || '', mySigInfo: r.mySigInfo || '',
+        })),
+        reqId,
         resposted: result.resposted || false,
         respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
       });
@@ -18549,7 +18564,7 @@ function connectRemote() {
       if (result.calls.length > 1) remoteServer.sendSessionContacts();
     } catch (err) {
       console.error('[Echo CAT] Log QSO error:', err.message);
-      remoteServer.sendLogResult({ success: false, error: err.message });
+      remoteServer.sendLogResult({ success: false, error: err.message, reqId });
     }
   });
 
@@ -19061,6 +19076,27 @@ function connectRemote() {
   });
   // Cluster node on/off from the ECHOCAT Spots Source menu (owner only —
   // remote-server refuses a Guest Pass). Same writer as the desktop menu.
+  // Watchlist sync (capability 'watchlist-sync'): a device edits the general
+  // watchlist by operations, applied to the list as it is NOW, so the desktop
+  // and the device editing at once never overwrite each other
+  // (lib/watchlist-edit.js). Owner only — remote-server refuses a Guest Pass.
+  remoteServer.on('watchlist-edit', ({ add, remove, reqId } = {}) => {
+    markUserActive();
+    const r = WatchlistEdit.applyWatchlistEdit(settings.watchlist, { add, remove });
+    if (r.changed) {
+      settings.watchlist = r.next;
+      saveSettings(settings);
+      if (win && !win.isDestroyed()) win.webContents.send('watchlist-updated', settings.watchlist);
+      sendCatLog(`[watchlist] from ECHOCAT: ${r.added.length ? 'added ' + r.added.join(', ') : ''}${r.added.length && r.removed.length ? '; ' : ''}${r.removed.length ? 'removed ' + r.removed.join(', ') : ''}`);
+    }
+    remoteServer.sendToClient({
+      type: 'watchlist-result', ok: r.rejected.length === 0, reqId,
+      error: r.rejected.length ? `Not a watchlist entry: ${r.rejected.join(', ')}` : undefined,
+      added: r.added, removed: r.removed,
+    });
+    updateRemoteSettings(); // every client, the sender included, gets the list as it is now
+  });
+
   remoteServer.on('set-cluster-node', ({ id, enabled, reqId } = {}) => {
     const r = applyClusterNodeChoice(id, enabled, 'ECHOCAT');
     // Answered every time, with the request's reqId, so two quick taps can
@@ -35149,6 +35185,8 @@ app.whenReady().then(() => {
     if (has('rotorActive') || has('rotorMode') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
         has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyFt8Macros') || has('jttyMacroStyle') || has('jttyProfile') || has('jttySerial') || has('pskMacros') ||
         has('enableDxe') || has('enableDxeSources') ||
+        // Watchlist: an open mobile device follows the desktop's edits live.
+        has('watchlist') ||
         // Idle Mode: an open mobile device follows the desktop window live.
         has('enableAutoSstv') || has('autoSstvInactivityMin') || has('idleRxMode') ||
         has('idleWsprBand') || has('idleWsprBandHop') || has('idlePskBand') ||
