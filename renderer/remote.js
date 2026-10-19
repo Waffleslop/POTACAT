@@ -727,29 +727,41 @@
   // is dropped if the operator list no longer holds it. A Guest Pass never
   // receives the list.
   let logAsOperators = { active: '', profiles: [] };
-  let logAsCall = ''; // '' = the desktop's active operator
+  let logAsCall = ''; // '' = the desktop's active operator; LOG_AS_ALL = every operator
+  // "Log as: both" (KD9WI 2026-10-17): one choice logs the QSO once for every
+  // operator, each into their own logbook (the desktop takes an array).
+  const LOG_AS_ALL = '__all';
   const logAsSelects = ['lt-log-as', 'log-log-as', 'ql-log-as'].map(function (id) { return document.getElementById(id); }).filter(Boolean);
-  function logAsTail() { return logAsCall ? ' for ' + logAsCall : ''; }
+  function logAsAllCalls() {
+    const active = logAsOperators.active;
+    return [active].concat(logAsOperators.profiles.filter(function (c) { return c !== active; }));
+  }
+  // What log-qso.logAs carries: '' / one callsign / every callsign.
+  function logAsValue() { return logAsCall === LOG_AS_ALL ? logAsAllCalls() : logAsCall; }
+  function logAsTail() { return logAsCall === LOG_AS_ALL ? ' for ' + logAsAllCalls().join(' and ') : logAsCall ? ' for ' + logAsCall : ''; }
+  function logAsSaveLabel(plain) { return logAsCall === LOG_AS_ALL ? 'Save for ' + logAsAllCalls().join(' + ') : logAsCall ? 'Save for ' + logAsCall : plain; }
   function renderLogAsChoosers() {
     const active = logAsOperators.active;
     const others = logAsOperators.profiles.filter(function (c) { return c !== active; });
     const show = !!active && others.length > 0;
-    if (logAsCall && !others.includes(logAsCall)) logAsCall = '';
+    if (logAsCall && logAsCall !== LOG_AS_ALL && !others.includes(logAsCall)) logAsCall = '';
+    if (logAsCall === LOG_AS_ALL && !show) logAsCall = '';
     logAsSelects.forEach(function (sel) {
       const wrap = sel.parentElement && sel.parentElement.classList.contains('log-as-wrap') ? sel.parentElement : sel;
       wrap.classList.toggle('hidden', !show);
       sel.innerHTML = show
-        ? [active].concat(others).map(function (c) { return '<option value="' + c + '">' + c + (c === active ? ' (active)' : '') + '</option>'; }).join('')
+        ? [active].concat(others).map(function (c) { return '<option value="' + c + '">' + c + (c === active ? ' (active)' : '') + '</option>'; }).join('') +
+          '<option value="' + LOG_AS_ALL + '">' + (others.length === 1 ? 'Both (' + active + ' + ' + others[0] + ')' : 'All ' + (others.length + 1) + ' operators') + '</option>'
         : '';
       if (show) sel.value = logAsCall || active;
     });
-    if (ltSave) ltSave.textContent = logAsCall ? 'Save for ' + logAsCall : 'Save QSO';
-    if (logSaveBtn) logSaveBtn.textContent = logAsCall ? 'Save for ' + logAsCall : 'Save';
+    if (ltSave) ltSave.textContent = logAsSaveLabel('Save QSO');
+    if (logSaveBtn) logSaveBtn.textContent = logAsSaveLabel('Save');
   }
   logAsSelects.forEach(function (sel) {
     sel.addEventListener('change', function () {
-      const v = String(sel.value || '').toUpperCase();
-      logAsCall = v && v !== logAsOperators.active ? v : '';
+      const v = String(sel.value || '');
+      logAsCall = v === LOG_AS_ALL ? LOG_AS_ALL : (v.toUpperCase() && v.toUpperCase() !== logAsOperators.active ? v.toUpperCase() : '');
       renderLogAsChoosers();
     });
   });
@@ -6065,7 +6077,7 @@
       }
       if (phoneGrid) baseData.myGridsquare = phoneGrid;
 
-      if (logAsCall) baseData.logAs = logAsCall; // another operator on the desktop
+      if (logAsCall) baseData.logAs = logAsValue(); // another operator (or all of them) on the desktop
 
       // Send one log-qso per callsign
       for (var ci = 0; ci < calls.length; ci++) {
@@ -6320,7 +6332,7 @@
       }
       if (phoneGrid) baseData.myGridsquare = phoneGrid;
 
-      if (logAsCall) baseData.logAs = logAsCall; // another operator on the desktop
+      if (logAsCall) baseData.logAs = logAsValue(); // another operator (or all of them) on the desktop
 
       // Send one log-qso per callsign
       for (var ci = 0; ci < calls.length; ci++) {
@@ -6800,7 +6812,7 @@
       data.myGridsquare = phoneGrid;
     }
 
-    if (logAsCall) data.logAs = logAsCall; // another operator on the desktop
+    if (logAsCall) data.logAs = logAsValue(); // another operator (or all of them) on the desktop
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'log-qso', data }));

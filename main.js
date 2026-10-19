@@ -8351,6 +8351,28 @@ async function saveQsoRecord(qsoData, opts) {
   opts = opts || {};
   const origin = opts.origin || 'local-manual';
 
+  // Log for several operators at once (KD9WI 2026-10-17, "Log as: both"):
+  // one record into each operator's own logbook, each through this same
+  // function, so each gets their callsign, QRZ and Cloud. Only the first copy
+  // re-spots (lib/log-as.js splitForOperators). One refusal never stops the
+  // others; the result names who was not logged.
+  const targets = qsoData ? LogAs.logAsTargets(qsoData.logAs) : [];
+  if (targets.length > 1) {
+    const results = [];
+    for (const q of LogAs.splitForOperators(qsoData, targets)) {
+      results.push({ call: q.logAs, r: await saveQsoRecord(q, opts) });
+    }
+    const failed = results.filter((x) => !x.r || !x.r.success);
+    const first = (results[0] && results[0].r) || {};
+    return {
+      ...first,
+      success: failed.length < results.length,
+      loggedFor: results.filter((x) => x.r && x.r.success).map((x) => x.call),
+      error: failed.length ? failed.map((x) => `${x.call}: ${(x.r && x.r.error) || 'not logged'}`).join('; ') : undefined,
+    };
+  }
+  if (qsoData && targets.length === 1) qsoData.logAs = targets[0];
+
   // Log as another operator (KD9WI 2026-10-16, lib/log-as.js): the record
   // goes into THAT operator's logbook under their callsign, with their QRZ
   // key and their Cloud account. `ops` is whose settings the rest of this
@@ -8394,7 +8416,9 @@ async function saveQsoRecord(qsoData, opts) {
   }
 
   // Duplicate-save guard — see _qsoSaveHistory comment above.
-  const dedupKey = _qsoDedupKey(qsoData);
+  // Keyed per operator too: the same contact logged for two operators is two
+  // records, not a double-fire.
+  const dedupKey = _qsoDedupKey(qsoData) + '|' + (logAs ? logAs.call : '');
   const now = Date.now();
   const lastTs = _qsoSaveHistory.get(dedupKey);
   if (lastTs && now - lastTs < _QSO_DEDUP_WINDOW_MS) {
@@ -18488,7 +18512,8 @@ function connectRemote() {
       // not the guest's to log for.
       {
         const ctxLogAs = typeof remoteServer.activeClientContext === 'function' ? remoteServer.activeClientContext() : null;
-        if (data.logAs && !(ctxLogAs && ctxLogAs.passSession)) qsoData.logAs = String(data.logAs);
+        // An array = several operators at once (capability 'log-as-multi').
+        if (data.logAs && !(ctxLogAs && ctxLogAs.passSession)) qsoData.logAs = Array.isArray(data.logAs) ? data.logAs.map(String) : String(data.logAs);
       }
 
       // Activator mode: inject mySig fields from phone or desktop settings

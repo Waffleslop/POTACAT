@@ -98,6 +98,8 @@
     .lp-log-as { display: flex; align-items: center; gap: 6px; margin-right: auto; font-size: 12px; color: var(--text-secondary); }
     .lp-log-as select { padding: 3px 6px; font-size: 12px; background: var(--bg-input, #0f1419); border: 1px solid var(--border-primary, #333); color: var(--text-primary); border-radius: 3px; }
     .lp-log-as.hidden { display: none; }
+    .lp-log-as-checks { display: inline-flex; gap: 10px; flex-wrap: wrap; }
+    .lp-log-as-checks label { display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); cursor: pointer; }
     /* Save QSO — use --accent-green-btn (the non-themed mint #4ecca3) so the
        button looks the same on both themes and black text passes contrast. The
        previous --accent-green is dark forest in light mode and made the button
@@ -243,7 +245,7 @@
 
     <!-- Buttons -->
     <div class="lp-buttons">
-      <label id="lp-log-as-wrap" class="lp-log-as hidden" title="Log this QSO for another operator set up on this computer: their logbook, callsign, QRZ Logbook key and Cloud account">Log as <select id="lp-log-as"></select></label>
+      <div id="lp-log-as-wrap" class="lp-log-as hidden" title="Log this QSO for each operator ticked: one record in each one's logbook, under their callsign, with their QRZ Logbook key and Cloud account. Tick both when you both worked the station.">Log for <span id="lp-log-as" class="lp-log-as-checks"></span></div>
       <button type="button" id="lp-clear">Clear</button>
       <button type="button" id="lp-save">Save QSO</button>
     </div>

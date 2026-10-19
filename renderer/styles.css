@@ -10535,6 +10535,17 @@ main.banner-logger-active #event-progress-overlay {
   padding: 3px 6px;
   font-size: 13px;
 }
+.log-as-checks { display: inline-flex; gap: 12px; flex-wrap: wrap; }
+.log-as-checks label {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  margin: 0 !important;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.log-as-checks input { width: auto !important; margin: 0 !important; }
 .log-as-hint {
   font-size: 11px;
   color: var(--text-dim, var(--text-tertiary));

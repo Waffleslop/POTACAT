@@ -4080,7 +4080,7 @@
         <span class="help-text">{rst} signal report, {QTH} grid, {mycallsign} your call, {op_firstname} their name (OM if unknown)</span>
       </label>
     </div>
-    <label id="log-as-wrap" class="log-as-wrap hidden" title="Log this QSO for another operator set up on this computer: it goes into their logbook under their callsign, with their QRZ Logbook key and Cloud account">Log as <select id="log-as-select"></select><span class="log-as-hint">their logbook, callsign, QRZ and Cloud</span></label>
+    <div id="log-as-wrap" class="log-as-wrap hidden" title="Log this QSO for each operator ticked: one record in each one's logbook, under their callsign, with their QRZ Logbook key and Cloud account. Tick both when you both worked the station.">Log for <span id="log-as-select" class="log-as-checks"></span><span class="log-as-hint">each into their own logbook, QRZ and Cloud</span></div>
     <div class="dialog-buttons">
       <button type="button" id="log-cancel">Cancel</button>
       <button type="button" id="log-save" class="log-save-btn">Save QSO</button>

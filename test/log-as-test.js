@@ -121,7 +121,7 @@ test('resolveLogAsForSave strips logAs from the record and checks the profile ex
   assert.ok(/function operatorSettingsFor\(call\) \{[\s\S]*?_readJsonSafe\(profileSettingsPath\(c\), \{\}\)[\s\S]*?_splitSettings\(settings\)\.global/.test(main));
 });
 test('ECHOCAT log-qso passes logAs through, except for a Guest Pass', () => {
-  assert.ok(/if \(data\.logAs && !\(ctxLogAs && ctxLogAs\.passSession\)\) qsoData\.logAs = String\(data\.logAs\);/.test(main));
+  assert.ok(/if \(data\.logAs && !\(ctxLogAs && ctxLogAs\.passSession\)\) qsoData\.logAs = Array\.isArray\(data\.logAs\) \? data\.logAs\.map\(String\) : String\(data\.logAs\);/.test(main));
   assert.ok(/remoteServer\.sendOperators\(operatorsPayload\(\)\);/.test(main), 'hydrate copy beside spot-hides');
   assert.ok(/'profiles-add', \(_e, callsign\) => \{ const r = addProfile\(callsign\); pushOperatorsToClients\(\);/.test(main));
   assert.ok(/'profiles-archive', \(_e, callsign\) => \{ const r = archiveProfile\(callsign\); pushOperatorsToClients\(\);/.test(main));
@@ -138,7 +138,7 @@ test('desktop Log QSO dialog: chooser, re-read on open, sent as logAs, named on 
   assert.ok(/id="log-as-select"/.test(html));
   assert.ok(/refreshLogAsOperators\(\); \/\/ Log as: back to the active operator on every open\n\s*logDialog\.showModal\(\);/.test(app));
   assert.ok(/logAs: logAsChosen\(\),/.test(app));
-  assert.ok(/logSaveBtn\.textContent = v \? `Save for \$\{v\}` : 'Save QSO';/.test(app));
+  assert.ok(/: `Save for \$\{t\.join\(' \+ '\)\}`;/.test(app), 'the button names every operator ticked');
   assert.ok(/showLogToast\(`Logged \$\{displayCalls\}\$\{logAsTail\(\)\}`\)/.test(app));
 });
 test('Log QSO pop-out: chooser from its own preload, sent as logAs', () => {
@@ -152,9 +152,46 @@ test('ECHOCAT Web: one choice for the Log tab, the log sheet and the quick log',
   const html = R('renderer/remote.html');
   for (const id of ['lt-log-as', 'log-log-as', 'ql-log-as']) assert.ok(new RegExp('id="' + id + '"').test(html), id);
   assert.ok(/case 'operators':/.test(js));
-  assert.strictEqual((js.match(/if \(logAsCall\) baseData\.logAs = logAsCall;/g) || []).length, 2, 'Log tab + sheet');
-  assert.ok(/if \(logAsCall\) data\.logAs = logAsCall;/.test(js), 'quick log');
+  assert.strictEqual((js.match(/if \(logAsCall\) baseData\.logAs = logAsValue\(\);/g) || []).length, 2, 'Log tab + sheet');
+  assert.ok(/if \(logAsCall\) data\.logAs = logAsValue\(\);/.test(js), 'quick log');
   assert.ok(/'Logged ' \+ \(msg\.callsign \|\| ''\) \+ logAsTail\(\)/.test(js));
+});
+
+// "Log as: both" (KD9WI 2026-10-17): tick both operators, one record each.
+test('logAsTargets: array, comma list or one call; unique, order kept', () => {
+  assert.deepStrictEqual(LogAs.logAsTargets(['kd9wi', 'W9XYZ', 'KD9WI']), ['KD9WI', 'W9XYZ']);
+  assert.deepStrictEqual(LogAs.logAsTargets('KD9WI, w9xyz'), ['KD9WI', 'W9XYZ']);
+  assert.deepStrictEqual(LogAs.logAsTargets('W9XYZ'), ['W9XYZ']);
+  assert.deepStrictEqual(LogAs.logAsTargets(''), []);
+  assert.deepStrictEqual(LogAs.logAsTargets(undefined), []);
+});
+test('splitForOperators: one copy each; only the first re-spots or keeps the record id', () => {
+  const q = { callsign: 'N0OTS', respot: true, wwffRespot: true, dxcRespot: true, gmaRespot: true, llotaRespot: true, wwbotaRespot: true, uuid: 'u-1', sigInfo: 'US-1234', logAs: ['KD9WI', 'W9XYZ'] };
+  const [a, b] = LogAs.splitForOperators(q, ['KD9WI', 'W9XYZ']);
+  assert.strictEqual(a.logAs, 'KD9WI'); assert.strictEqual(b.logAs, 'W9XYZ');
+  assert.strictEqual(a.respot, true); assert.strictEqual(a.uuid, 'u-1');
+  for (const k of LogAs.RESPOT_KEYS) assert.ok(!(k in b), 'second copy never re-spots: ' + k);
+  assert.ok(!('uuid' in b), 'second copy gets its own record id');
+  assert.strictEqual(b.sigInfo, 'US-1234', 'the contact itself is identical');
+  assert.strictEqual(q.logAs.length, 2, 'the request is not mutated');
+});
+test('saveQsoRecord fans out per operator and the duplicate guard is per operator', () => {
+  assert.ok(/const targets = qsoData \? LogAs\.logAsTargets\(qsoData\.logAs\) : \[\];\n\s*if \(targets\.length > 1\) \{/.test(main));
+  assert.ok(/for \(const q of LogAs\.splitForOperators\(qsoData, targets\)\)/.test(main));
+  assert.ok(/const dedupKey = _qsoDedupKey\(qsoData\) \+ '\|' \+ \(logAs \? logAs\.call : ''\);/.test(main),
+    "the second operator's copy is not suppressed as a double-fire");
+  assert.ok(/'log-as-multi'/.test(R('lib/remote-server.js')), 'capability for clients that send an array');
+});
+test('desktop dialog and pop-out: a checkbox per operator, active ticked, none = no save', () => {
+  for (const js of [R('renderer/app.js'), R('renderer/log-popout.js')]) {
+    assert.ok(/type="checkbox" value="/.test(js), 'checkboxes');
+    assert.ok(/if \(logAsChosen\(\) === null\) return; \/\/ Log for: nobody ticked/.test(js), 'nobody ticked never saves');
+  }
+});
+test('ECHOCAT Web: a Both / All choice sends every operator', () => {
+  const js = R('renderer/remote.js');
+  assert.ok(/function logAsValue\(\) \{ return logAsCall === LOG_AS_ALL \? logAsAllCalls\(\) : logAsCall; \}/.test(js));
+  assert.ok(/'Both \(' \+ active \+ ' \+ ' \+ others\[0\] \+ '\)'/.test(js));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

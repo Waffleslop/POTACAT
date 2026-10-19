@@ -62,13 +62,33 @@ function _applyPopoutTheme(payload) {
   const logAsWrap = document.getElementById('lp-log-as-wrap');
   const logAsSelect = document.getElementById('lp-log-as');
   let logAsOperators = { active: '', profiles: [] };
-  function logAsChosen() {
-    if (!logAsWrap || logAsWrap.classList.contains('hidden')) return '';
-    const v = String(logAsSelect.value || '').toUpperCase();
-    return v && v !== logAsOperators.active ? v : '';
+  // One tick per operator, the active one ticked; tick both and the QSO is
+  // logged once for each (KD9WI 2026-10-17). '' = just the active operator,
+  // a callsign = one other, an array = several, null = none ticked.
+  function logAsShown() { return !!(logAsWrap && !logAsWrap.classList.contains('hidden')); }
+  function logAsTicked() {
+    if (!logAsShown()) return [];
+    return Array.prototype.map.call(logAsSelect.querySelectorAll('input[type=checkbox]:checked'), (i) => String(i.value).toUpperCase());
   }
-  function logAsTail() { const v = logAsChosen(); return v ? ' for ' + v : ''; }
-  function updateLogAsSaveLabel() { const v = logAsChosen(); saveBtn.textContent = v ? 'Save for ' + v : 'Save QSO'; }
+  function logAsChosen() {
+    if (!logAsShown()) return '';
+    const t = logAsTicked();
+    if (!t.length) return null;
+    if (t.length === 1) return t[0] === logAsOperators.active ? '' : t[0];
+    return t;
+  }
+  function logAsTail() {
+    const t = logAsTicked();
+    return !t.length || (t.length === 1 && t[0] === logAsOperators.active) ? '' : ' for ' + t.join(' and ');
+  }
+  function updateLogAsSaveLabel() {
+    const t = logAsTicked();
+    const none = logAsShown() && !t.length;
+    saveBtn.disabled = none;
+    saveBtn.textContent = none ? 'Tick an operator'
+      : (!t.length || (t.length === 1 && t[0] === logAsOperators.active)) ? 'Save QSO'
+      : 'Save for ' + t.join(' + ');
+  }
   async function loadLogAsOperators() {
     if (!window.api || typeof window.api.profilesList !== 'function' || !logAsWrap) return;
     try {
@@ -82,9 +102,8 @@ function _applyPopoutTheme(payload) {
     const show = !!logAsOperators.active && others.length > 0;
     logAsWrap.classList.toggle('hidden', !show);
     logAsSelect.innerHTML = show
-      ? [logAsOperators.active, ...others].map(c => '<option value="' + c + '">' + c + (c === logAsOperators.active ? ' (active)' : '') + '</option>').join('')
+      ? [logAsOperators.active, ...others].map(c => '<label><input type="checkbox" value="' + c + '"' + (c === logAsOperators.active ? ' checked' : '') + '>' + c + '</label>').join('')
       : '';
-    if (show) logAsSelect.value = logAsOperators.active;
     updateLogAsSaveLabel();
   }
   if (logAsSelect) logAsSelect.addEventListener('change', updateLogAsSaveLabel);
@@ -554,6 +573,7 @@ function _applyPopoutTheme(payload) {
   }
 
   async function doSave() {
+    if (logAsChosen() === null) return; // Log for: nobody ticked
     const built = buildQsoData();
     if (built.error) { showToast(built.error, 'error'); return; }
     // Defensive: WG9I on macOS darwin v1.5.14 saw

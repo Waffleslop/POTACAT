@@ -14207,30 +14207,45 @@ function renderLogAsChooser() {
   const others = profiles.filter(c => c !== active);
   const show = !!active && others.length > 0;
   logAsWrap.classList.toggle('hidden', !show);
+  // One tick per operator, the active one ticked: tick both and the QSO is
+  // logged once for each (KD9WI 2026-10-17, "Log as: both").
   logAsSelect.innerHTML = show
-    ? [active, ...others].map(c => `<option value="${c}">${c}${c === active ? ' (active)' : ''}</option>`).join('')
+    ? [active, ...others].map(c => `<label><input type="checkbox" value="${c}"${c === active ? ' checked' : ''}>${c}</label>`).join('')
     : '';
-  if (show) logAsSelect.value = active;
   updateLogAsSaveLabel();
 }
-// '' = the active operator (nothing to send); otherwise the other operator's callsign.
+// The operators ticked. '' = just the active operator (nothing to send), a
+// callsign = one other operator, an array = several; null = none ticked.
+function logAsShown() { return !!(logAsWrap && logAsSelect && !logAsWrap.classList.contains('hidden')); }
+function logAsTicked() {
+  if (!logAsShown()) return [];
+  return [...logAsSelect.querySelectorAll('input[type=checkbox]:checked')].map(i => String(i.value).toUpperCase());
+}
 function logAsChosen() {
-  if (!logAsWrap || !logAsSelect || logAsWrap.classList.contains('hidden')) return '';
-  const v = String(logAsSelect.value || '').toUpperCase();
-  return v && v !== logAsOperators.active ? v : '';
+  if (!logAsShown()) return '';
+  const t = logAsTicked();
+  if (!t.length) return null;
+  if (t.length === 1) return t[0] === logAsOperators.active ? '' : t[0];
+  return t;
 }
 function logAsTail() {
-  const v = logAsChosen();
-  return v ? ` for ${v}` : '';
+  const t = logAsTicked();
+  return !t.length || (t.length === 1 && t[0] === logAsOperators.active) ? '' : ` for ${t.join(' and ')}`;
 }
 function updateLogAsSaveLabel() {
-  const v = logAsChosen();
-  logSaveBtn.textContent = v ? `Save for ${v}` : 'Save QSO';
+  const t = logAsTicked();
+  const none = logAsShown() && !t.length;
+  logSaveBtn.disabled = none;
+  logSaveBtn.textContent = none ? 'Tick an operator'
+    : !t.length ? 'Save QSO'
+    : (t.length === 1 && t[0] === logAsOperators.active) ? 'Save QSO'
+    : `Save for ${t.join(' + ')}`;
 }
 if (logAsSelect) logAsSelect.addEventListener('change', updateLogAsSaveLabel);
 refreshLogAsOperators();
 
 logSaveBtn.addEventListener('click', async () => {
+  if (logAsChosen() === null) return; // Log for: nobody ticked
   const rawCallsign = logCallsign.value.trim().toUpperCase();
   const frequency = logFrequency.value.trim();
   const mode = logMode.value;
