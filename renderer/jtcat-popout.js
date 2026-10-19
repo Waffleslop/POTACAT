@@ -4881,16 +4881,22 @@ function _applyPopoutTheme(payload) {
   var splitterEl = document.getElementById('jp-splitter');
   var decodePaneEl = document.querySelector('.jp-decode-pane');
   var SPLIT_LS_KEY = 'jtcat-popout-split-pct';
+  // The left side is the FT8 decode pane OR, in PSK31/JTTY, that mode's own
+  // pane (the decode pane is hidden then). Every one of them gets the split:
+  // set on the decode pane alone, the map's 20-80 weight fought a keyboard
+  // pane's CSS flex:1 and took ~98% of the window, and dragging only moved
+  // the hidden pane (Chris / W7RTA 2026-10-17, PSK31 and JTTY).
+  var splitLeftPanes = [decodePaneEl, document.getElementById('jp-psk-pane'), document.getElementById('jp-jtty-pane')].filter(Boolean);
   function applySplitPct(pct) {
     if (!decodePaneEl || !mapPane) return;
     var p = Math.max(20, Math.min(80, pct));
-    decodePaneEl.style.flex = String(p) + ' 1 0';
+    splitLeftPanes.forEach(function(el) { el.style.flex = String(p) + ' 1 0'; });
     mapPane.style.flex = String(100 - p) + ' 1 0';
     if (map) setTimeout(function() { map.invalidateSize(); }, 50);
   }
   if (splitterEl && decodePaneEl && mapPane) {
     var savedPct = parseFloat(localStorage.getItem(SPLIT_LS_KEY));
-    if (!isNaN(savedPct)) applySplitPct(savedPct);
+    applySplitPct(isNaN(savedPct) ? 50 : savedPct); // always, so a keyboard pane never keeps flex:1 against the map
     var dragging = false;
     splitterEl.addEventListener('mousedown', function(e) {
       dragging = true;
