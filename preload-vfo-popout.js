@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('api', {
   setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
   onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
+  onSwrGuardState: (cb) => ipcRenderer.on('vfo-swr-guard-state', (_e, st) => cb(st)),
+  swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   setMode: (mode) => ipcRenderer.send('vfo-set-mode', mode),
   setFilterWidth: (hz) => ipcRenderer.send('vfo-set-filter-width', hz),
   // rig-control is registered with ipcMain.handle (main.js), so it must be
@@ -27,6 +29,7 @@ contextBridge.exposeInMainWorld('api', {
   // when the user is just keying TX from the popout button.
   nakedPtt: (state) => ipcRenderer.send('naked-ptt', state),
   openLogForm: () => ipcRenderer.send('vfo-open-log'),
+  openWebSdrSettings: () => ipcRenderer.send('vfo-open-websdr-settings'),
   setAlwaysOnTop: (on) => ipcRenderer.send('vfo-set-always-on-top', on),
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),
   voiceMacroLoad: (idx) => ipcRenderer.invoke('voice-macro-load', idx),

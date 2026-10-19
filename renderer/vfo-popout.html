@@ -5,728 +5,691 @@
   <script src="popout-theme-boot.js"></script>
   <title>VFO</title>
   <style>
+    /* Three themes, matching styles.css: navy (default), charcoal, light.
+       This popout is self-styled, so it mirrors the app's palettes itself.
+       The short tokens (--g, --s, --t ...) drive the layout; the long names
+       (--bg-input, --text-dim ...) stay for inline styles and the script. */
     :root {
-      --bg-primary: #1a1a2e; --bg-secondary: #16213e; --bg-input: #0d0d1a;
-      --bg-hover: #1a4080; --bg-btn: #2a2a4a; --bg-btn-hover: #3a3a5a;
-      --border: #3a3a5a; --border-accent: #4fc3f7;
-      --text-primary: #e0e0e0; --text-secondary: #aaa; --text-dim: #888; --text-dimmer: #666;
-      --accent-blue: #4fc3f7; --accent-green: #4ecca3; --accent-red: #e94560;
-      --accent-gold: #ffd740;
+      --g: #1a1a2e; --s: #16213e; --s2: #2a2a4a; --s3: #33335a; --in: #0d0d1a; --line: rgba(255,255,255,.06);
+      --t: #e0e0e0; --t2: #b4b4c8; --t3: #8e8ea8;
+      --blue: #4fc3f7; --green: #4ecca3; --red: #e94560; --gold: #ffd740; --amber: #f0a500;
+      --on-blue: #0d1b2a; --green-tint: rgba(78,204,163,.16); --red-tint: #3a1828; --red-text: #ffc7d1;
+      --ptt: #c8334f; --ptt-on: #e94560; --log-bg: rgba(78,204,163,.16);
+      --knob-housing-a: #404058; --knob-housing-b: #2a2a3a; --knob-housing-c: #1a1a28; --knob-base: #222233;
+      --knob-a: #4a4a62; --knob-b: #353548; --knob-c: #28283a;
+      --knob-ridge: rgba(255,255,255,0.1); --knob-bevel: rgba(255,255,255,0.08);
+      --knob-dimple-a: #1a1a28; --knob-dimple-b: #2a2a3a;
+      --card-shadow: none; --sheet-shadow: 0 -8px 30px rgba(0,0,0,.4);
+
+      --bg-primary: var(--g); --bg-secondary: var(--s); --bg-input: var(--in); --bg-tertiary: var(--s3);
+      --bg-hover: #1a4080; --bg-btn: var(--s2); --bg-btn-hover: var(--s3);
+      --border: #3a3a5a; --border-accent: var(--blue);
+      --text-primary: var(--t); --text-secondary: var(--t2); --text-dim: var(--t3); --text-dimmer: #6a6a84;
+      --accent-blue: var(--blue); --accent-green: var(--green); --accent-red: var(--red); --accent-gold: var(--gold);
     }
-    /* Dark — Charcoal variant. This popout is self-styled (own var names, no
-       styles.css), so it must mirror styles.css [data-dark-variant="charcoal"]
-       itself — without this block the popout stayed navy while the app ran
-       charcoal. Placed BEFORE the light block so light wins if both attrs are
-       ever set (same ordering rationale as styles.css). */
+    /* Placed BEFORE the light block so light wins if both attrs are ever set
+       (same ordering rationale as styles.css). */
     [data-dark-variant="charcoal"] {
-      --bg-primary: #0b0d10; --bg-secondary: #15181d; --bg-input: #0b0d10;
-      --bg-hover: #262b33; --bg-btn: #1d2127; --bg-btn-hover: #262b33;
-      --border: #262b33; --border-accent: #38bdf8;
-      --text-primary: #e6e9ee; --text-secondary: #8b919b; --text-dim: #555a62; --text-dimmer: #404550;
-      --accent-blue: #38bdf8; --accent-green: #52c992; --accent-red: #ef4444;
-      --accent-gold: #fbbf24;
+      --g: #0b0d10; --s: #15181d; --s2: #1d2127; --s3: #262b33; --in: #0b0d10; --line: rgba(255,255,255,.06);
+      --t: #e6e9ee; --t2: #a9afb8; --t3: #858b95;
+      --blue: #38bdf8; --green: #52c992; --red: #ef4444; --gold: #fbbf24; --amber: #f59e0b;
+      --on-blue: #06131c; --green-tint: rgba(82,201,146,.15); --red-tint: #2e1414; --red-text: #fecaca;
+      --ptt: #c93636; --ptt-on: #ef4444; --log-bg: rgba(82,201,146,.15);
+      --knob-housing-a: #3a3e46; --knob-housing-b: #23262c; --knob-housing-c: #121417; --knob-base: #0e1013;
+      --knob-a: #3c4048; --knob-b: #2a2e35; --knob-c: #1c1f24;
+      --knob-ridge: rgba(255,255,255,0.09); --knob-bevel: rgba(255,255,255,0.07);
+      --knob-dimple-a: #0c0d10; --knob-dimple-b: #20232a;
+      --bg-hover: #262b33; --border: #262b33; --text-dimmer: #555a62;
     }
     [data-theme="light"] {
-      --bg-primary: #f0f2f5; --bg-secondary: #ffffff; --bg-input: #ffffff;
-      --bg-hover: #d0d4da; --bg-btn: #e0e2e8; --bg-btn-hover: #d0d4da;
-      --border: #c0c4cc; --border-accent: #1976d2;
-      --text-primary: #1a1a2e; --text-secondary: #4a4a6a; --text-dim: #6a6a80; --text-dimmer: #8a8a9a;
-      --accent-blue: #1976d2; --accent-green: #2e7d5a; --accent-red: #c62828;
-      --accent-gold: #b8860b;
+      --g: #f0f2f5; --s: #ffffff; --s2: #e6e8ed; --s3: #d6d9e0; --in: #e9ecf1; --line: rgba(0,0,0,.07);
+      --t: #1a1a2e; --t2: #4a4a6a; --t3: #5f5f78;
+      --blue: #1976d2; --green: #2e7d5a; --red: #c62828; --gold: #8a6508; --amber: #b26a00;
+      --on-blue: #ffffff; --green-tint: #dcefe6; --red-tint: #fde8e8; --red-text: #8e1c1c;
+      --ptt: #c62828; --ptt-on: #e53935; --log-bg: #dcefe6;
+      --knob-housing-a: #ffffff; --knob-housing-b: #dde0e6; --knob-housing-c: #bfc4ce; --knob-base: #b4b9c4;
+      --knob-a: #fbfbfd; --knob-b: #e3e6eb; --knob-c: #cdd1d9;
+      --knob-ridge: rgba(20,30,60,0.16); --knob-bevel: rgba(255,255,255,0.9);
+      --knob-dimple-a: #b9bec9; --knob-dimple-b: #d9dce3;
+      --card-shadow: 0 1px 2px rgba(20,30,60,.08), 0 0 0 1px rgba(20,30,60,.05);
+      --sheet-shadow: 0 -8px 30px rgba(20,30,60,.18);
+      --bg-hover: #d0d4da; --border: #c0c4cc; --text-dimmer: #8a8a9a;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: var(--bg-primary); color: var(--text-primary);
+      font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+      background: var(--g); color: var(--t);
       overflow: hidden; user-select: none;
       display: flex; flex-direction: column; height: 100vh;
     }
+    button { font-family: inherit; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--s3); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--t3); }
+    .mono { font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace; font-variant-numeric: tabular-nums; }
+    .hidden { display: none !important; }
 
     /* --- Title bar (frameless) --- */
     .titlebar {
-      display: flex; align-items: center; justify-content: space-between;
-      background: var(--bg-secondary); padding: 4px 8px; -webkit-app-region: drag;
-      font-size: 12px; color: var(--text-dim); min-height: 28px;
+      display: flex; align-items: center; gap: 2px; height: 36px; flex: none;
+      padding: 0 6px 0 14px; -webkit-app-region: drag;
     }
-    .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 4px; }
-    /* macOS: the system traffic lights replace these buttons (popout-theme-boot.js). */
+    .titlebar-title { font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--t3); flex: 1; }
+    .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 2px; }
+    /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js). */
     .platform-darwin .titlebar { padding-left: 80px; }
-    .platform-darwin .titlebar-btns { display: none; }
-    .titlebar-btns button {
-      background: none; border: none; color: var(--text-dim); font-size: 14px;
-      cursor: pointer; padding: 2px 6px; border-radius: 3px;
+    .platform-darwin .titlebar-btns .win-btn { display: none; }
+    .ib {
+      width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent;
+      color: var(--t2); display: inline-flex; align-items: center; justify-content: center;
+      cursor: pointer; flex: none;
     }
-    .titlebar-btns button:hover { background: var(--bg-btn); color: #fff; }
-    .titlebar-btns .close-btn:hover { background: var(--accent-red, #e94560); color: #fff; }
+    .ib:hover { background: var(--s2); color: var(--t); }
+    .ib.on { color: var(--blue); }
+    .ib.close-btn:hover { background: var(--red); color: #fff; }
+    .ib svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
-    /* --- Frequency display --- */
-    .freq-row {
-      display: flex; align-items: baseline; justify-content: center;
-      padding: 12px 16px 4px; gap: 6px;
+    /* --- Layout --- */
+    .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+    .card { background: var(--s); border-radius: 14px; box-shadow: var(--card-shadow); }
+    .chip {
+      font-size: 11px; font-weight: 500; line-height: 1; letter-spacing: .04em; padding: 5px 8px;
+      border-radius: 6px; background: var(--s2); color: var(--t2); border: 0; white-space: nowrap;
     }
+    button.chip, select.chip { cursor: pointer; }
+    button.chip:hover, select.chip:hover { color: var(--t); }
+    .chip.mode { background: var(--green-tint); color: var(--green); font-weight: 600; }
+    .chip.vfoab { background: var(--s3); color: var(--t); }
+    .chip.split { background: var(--amber); color: #111; font-weight: 600; }
+    .chip.sdr { background: var(--green); color: #111; font-weight: 600; }
+    .chip.tx { background: var(--ptt-on); color: #fff; font-weight: 600; }
+    select.chip { appearance: none; -webkit-appearance: none; font-family: inherit; outline: none; }
+    select.chip option { background: var(--s); color: var(--t); }
+    .lbl { font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: .12em; color: var(--t3); text-transform: uppercase; }
+    .section { display: flex; flex-direction: column; gap: 8px; }
+    .section-head { display: flex; align-items: center; }
+    .section-head .lbl { flex: 1; }
+
+    /* --- Header card: chips, frequency, meters --- */
+    .head-card { padding: 10px 10px 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+    .chip-row { display: flex; align-items: flex-start; gap: 4px; min-height: 32px; }
+    .chip-row .chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 4px; }
     .freq-display {
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 36px; font-weight: bold; color: var(--accent-blue);
-      letter-spacing: 1px; cursor: pointer;
+      border: 0; background: transparent; color: var(--t); text-align: left; cursor: text;
+      display: flex; align-items: baseline; gap: 2px; padding: 0; font-weight: 500;
     }
-    .freq-display.editing { color: #f0a500; }
-    /* The OTHER VFO while split is on (TX side) — one line under the dial,
-       amber like every TX-adjacent accent. Hidden unless split. */
-    .freq-other-row { display: none; justify-content: center; align-items: baseline;
-      gap: 6px; margin-top: -4px; padding-bottom: 2px; }
+    .freq-display .fq-main { font-size: 44px; letter-spacing: -0.02em; }
+    .freq-display .fq-sub { font-size: 26px; color: var(--t2); }
+    .freq-display .fq-unit { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: var(--t3); margin-left: 8px; }
+    .freq-display:hover .fq-main { color: var(--blue); }
+    /* The OTHER VFO while split is on (TX side), amber like every TX-adjacent accent. */
+    .freq-other-row { display: none; align-items: baseline; gap: 6px; margin-top: -4px; }
     .freq-other-row.show { display: flex; }
-    .freq-other { font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 18px; font-weight: bold; color: #f0a500; letter-spacing: 1px; }
-    .freq-other-tag { font-size: 11px; color: #f0a500; font-weight: 700; }
-    .freq-unit { font-size: 14px; color: var(--text-dimmer); }
-    .mode-badge {
-      font-size: 14px; font-weight: bold; padding: 2px 10px;
-      border-radius: 10px; background: var(--bg-btn); color: var(--accent-green);
-      cursor: pointer;
-    }
-    .filter-badge {
-      font-size: 11px; color: var(--text-dim); cursor: pointer;
-    }
-    .audio-btn {
-      background: none; border: 1px solid var(--border); color: var(--text-dim);
-      font-size: 16px; padding: 2px 6px; border-radius: 4px; cursor: pointer;
-      line-height: 1;
-    }
-    .audio-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
-    .audio-btn.active { color: var(--accent-green); border-color: var(--accent-green); }
-    .audio-btn.muted { color: var(--accent-red); border-color: var(--accent-red); }
-    .vfo-lock-btn {
-      background: none; border: 1px solid var(--border); color: var(--text-dim);
-      font-size: 16px; padding: 2px 6px; border-radius: 4px; cursor: pointer;
-      line-height: 1; white-space: nowrap; transition: all 0.15s ease;
-    }
-    .vfo-lock-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
-    .vfo-lock-btn.locked {
-      background: var(--accent-red); border-color: var(--accent-red); color: #fff;
-      font-weight: bold; animation: lock-pulse 1.5s ease-in-out infinite;
-    }
-    @keyframes lock-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-    .vfo-lock-toast {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      background: var(--accent-red); color: #fff; padding: 12px 24px; border-radius: 8px;
-      font-size: 15px; font-weight: bold; z-index: 9999; pointer-events: none;
-      box-shadow: 0 4px 20px rgba(233, 69, 96, 0.5); opacity: 0; transition: opacity 0.2s;
-    }
-    .vfo-lock-toast.show { opacity: 1; }
+    .freq-other { font-size: 18px; font-weight: 600; color: var(--amber); }
+    .freq-other-tag { font-size: 11px; color: var(--amber); font-weight: 700; }
+    .freq-unit { font-size: 12px; color: var(--t3); }
+    .audio-btn.active { color: var(--green); }
+    .audio-btn.muted { color: var(--red); }
+    .vfo-lock-btn.locked { background: var(--red); color: #fff; animation: lock-pulse 1.5s ease-in-out infinite; }
+    @keyframes lock-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
-    /* --- Tabs --- */
-    .tabs {
-      display: flex; gap: 0; padding: 0 8px; border-bottom: 1px solid #2a2a4a;
-    }
-    .tab-btn {
-      background: none; border: none; color: var(--text-dimmer); font-size: 12px;
-      padding: 6px 14px; cursor: pointer; border-bottom: 2px solid transparent;
-    }
-    .tab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
-    .tab-btn:hover { color: var(--text-secondary); }
-
-    /* --- Tab content --- */
-    .tab-content { flex: 1; overflow-y: auto; padding: 8px; }
-    .tab-pane { display: none; height: 100%; }
-    .tab-pane.active { display: flex; flex-direction: column; }
-
-    /* --- VFO Dial tab --- */
-    .dial-wrap { display: flex; justify-content: center; padding: 8px 0; width: 200px; height: 200px; flex-shrink: 0; }
-    .step-row { display: flex; justify-content: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
-    .step-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-secondary);
-      padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
-    }
-    .step-btn.active { background: #4fc3f7; color: #1a1a2e; border-color: var(--accent-blue); }
-    .op-info {
-      font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.3;
-      padding: 0 2px; margin-bottom: 6px; overflow: hidden;
-    }
-    .op-info:empty { margin-bottom: 0; }
-    .op-photo {
-      width: 80px; height: 80px; border-radius: 6px; object-fit: cover;
-      border: 2px solid var(--border); display: block; margin: 0 auto 4px;
-    }
-    .op-call { color: var(--accent-blue); font-weight: bold; font-size: 28px; font-family: 'Consolas', monospace; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .op-detail { color: var(--text-secondary); font-size: 16px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .op-ref { color: var(--accent-green); font-weight: bold; font-size: 17px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .op-dupe { display: inline-block; background: var(--accent-red, #e94560); color: #fff; font-weight: 800; font-size: 12px; letter-spacing: 0.6px; padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle; cursor: help; }
-    /* HF Net card — distinctive pill to separate from operator/park info. */
-    .op-net-name { color: #ffd740; font-weight: bold; font-size: 22px; font-family: inherit; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .op-net-badge { display: inline-block; background: #ffd740; color: #000; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 2px 8px; border-radius: 999px; margin-top: 2px; }
-    /* 2-3 ops: one line per op */
-    .op-multi-line { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
-    .op-multi-line .op-ml-call { color: var(--accent-blue); font-weight: bold; font-family: 'Consolas', monospace; }
-    .op-multi-line .op-ml-name { color: var(--text-secondary); margin-left: 4px; }
-    .op-multi-line .op-ml-ref { color: var(--accent-green); font-weight: bold; margin-left: 6px; }
-    .op-multi-line .op-ml-src { color: var(--text-dim); font-size: 10px; margin-left: 6px; letter-spacing: 0.5px; }
-    /* 4+ ops: inline comma-separated */
-    .op-crowd { font-size: 13px; line-height: 1.6; }
-    .op-crowd-call { color: var(--accent-blue); font-weight: bold; font-family: 'Consolas', monospace; }
-    .op-crowd-more { color: var(--text-dim); font-style: italic; }
-    .solar-pills {
-      display: flex; flex-direction: row; gap: 3px;
-    }
-    .solar-pill {
-      display: flex; align-items: center; gap: 2px;
-      background: var(--bg-input); border: 1px solid #2a2a4a; border-radius: 3px;
-      padding: 1px 5px;
-    }
-    .solar-label {
-      font-size: 8px; color: var(--text-dimmer); font-weight: bold; letter-spacing: 0.5px;
-    }
-    .solar-val {
-      font-size: 11px; font-family: monospace; font-weight: bold; color: var(--accent-green);
-    }
-    .solar-val.warn { color: var(--accent-gold); }
-    .solar-val.bad { color: #e94560; }
-    .rig-toggles-shared { justify-content: flex-start; }
-    .toggle-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-secondary);
-      padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;
-      font-weight: bold;
-    }
-    .toggle-btn:hover { background: var(--bg-btn-hover); }
-    .toggle-btn.on { background: #4ecca3; color: #1a1a2e; border-color: var(--accent-green); }
-    .cat-cmd-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-secondary);
-      padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;
-    }
-    .cat-cmd-btn:hover { background: var(--bg-btn-hover); }
-    .cat-cmd-btn:active { background: #4a4a6a; }
-    /* Custom-CAT slider slot (see buildCustomCatBtns) */
-    .custom-cat-slider {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: var(--bg-btn); border: 1px solid var(--border);
-      color: var(--text-secondary); padding: 4px 10px; border-radius: 4px; font-size: 12px;
-    }
-    .ccs-range { width: 110px; accent-color: var(--accent, #e94560); }
-    .ccs-val { min-width: 2.5em; text-align: right; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-
-    /* --- Keypad tab --- */
-    .keypad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 300px; margin: 0 auto; padding: 8px 0; }
-    .kp-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-primary);
-      font-size: 20px; padding: 14px 0; border-radius: 6px; cursor: pointer;
-      text-align: center;
-    }
-    .kp-btn:hover { background: var(--bg-btn-hover); }
-    .kp-btn:active { background: #4a4a6a; }
-    .kp-btn.kp-action { font-size: 14px; font-weight: bold; }
-    .kp-btn.kp-go { background: #4ecca3; color: #1a1a2e; border-color: var(--accent-green); }
-    .kp-btn.kp-clear { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; }
-    .kp-input {
-      grid-column: 1 / -1; text-align: center; font-family: 'Consolas', monospace;
-      font-size: 24px; background: var(--bg-input); border: 1px solid var(--border);
-      color: #f0a500; padding: 8px; border-radius: 4px;
-    }
-    .kp-digits {
-      grid-column: 1 / -1;
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-    }
-
-    /* --- Mode tab --- */
-    .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 0; }
-    .mode-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-secondary);
-      padding: 10px 4px; border-radius: 6px; font-size: 13px; cursor: pointer;
-      text-align: center; font-weight: bold;
-    }
-    .mode-btn:hover { background: var(--bg-btn-hover); }
-    .mode-btn.active { background: #4ecca3; color: #1a1a2e; border-color: var(--accent-green); }
-
-    .section-label { font-size: 11px; color: var(--text-dimmer); padding: 8px 0 4px; text-transform: uppercase; letter-spacing: 1px; }
-
-    /* --- Band buttons --- */
-    .band-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 4px 0; }
-    .band-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-secondary);
-      padding: 6px 2px; border-radius: 4px; font-size: 12px; cursor: pointer;
-      text-align: center;
-    }
-    .band-btn:hover { background: var(--bg-btn-hover); }
-    .band-btn.active { background: #4fc3f7; color: #1a1a2e; border-color: var(--accent-blue); }
-
-    /* --- Filter width --- */
-    .filter-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
-    .filter-row label { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
-    .filter-row input[type="range"] { flex: 1; accent-color: var(--accent-blue); }
-    .filter-row .filter-val { font-size: 12px; color: var(--accent-blue); min-width: 50px; text-align: right; font-family: monospace; }
-
-    /* --- Profiles tab --- */
-    .profile-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; flex: 1; overflow-y: auto; }
-    .profile-item {
-      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-      background: var(--bg-btn); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-    }
-    .profile-item:hover { background: var(--bg-btn-hover); }
-    .profile-drag { color: var(--text-dimmer); font-size: 12px; cursor: grab; padding: 0 2px; user-select: none; line-height: 1; }
-    .profile-drag:active { cursor: grabbing; }
-    .profile-item.dragging { opacity: 0.45; }
-    .profile-item.drop-above { box-shadow: inset 0 2px 0 0 var(--accent-blue, #4fc3f7); }
-    .profile-item.drop-below { box-shadow: inset 0 -2px 0 0 var(--accent-blue, #4fc3f7); }
-    .profile-name { font-weight: bold; color: var(--text-primary); flex: 1; }
-    .profile-detail { font-size: 11px; color: var(--text-dim); font-family: monospace; }
-    .profile-del, .profile-edit {
-      background: none; border: none; color: var(--text-dimmer); font-size: 14px;
-      cursor: pointer; padding: 0 4px;
-    }
-    .profile-del:hover { color: #e94560; }
-    .profile-edit:hover { color: var(--accent-blue, #4fc3f7); }
-    .profile-name-edit {
-      flex: 1; background: var(--bg-input); border: 1px solid var(--accent-blue, #4fc3f7);
-      color: var(--text-primary); padding: 2px 6px; border-radius: 3px; font-size: 13px;
-      font-family: inherit; min-width: 0;
-    }
-    .profile-item.editing { background: var(--bg-btn-hover); }
-    .profile-item.editing:hover { background: var(--bg-btn-hover); }
-    .profile-add-row {
-      display: flex; gap: 6px; padding: 8px 0;
-    }
-    .profile-add-row input {
-      flex: 1; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary);
-      padding: 6px 8px; border-radius: 4px; font-size: 13px;
-    }
-    .profile-add-row button {
-      background: #4ecca3; color: #1a1a2e; border: none; padding: 6px 14px;
-      border-radius: 4px; font-size: 13px; font-weight: bold; cursor: pointer;
-    }
-    .profile-add-row button:hover { background: #3ba882; }
-    .profile-empty { text-align: center; color: var(--text-dimmer); padding: 20px; font-size: 13px; }
-    .settings-toggle {
-      display: flex; align-items: center; gap: 10px;
-      font-size: 14px; color: var(--text-primary); padding: 8px 4px; cursor: pointer;
-    }
-    .settings-toggle input[type="checkbox"] {
-      width: 18px; height: 18px; accent-color: var(--accent-blue); cursor: pointer;
-    }
-    .band-checkboxes {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 8px;
-    }
-    .band-checkboxes label {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 13px; color: var(--text-secondary); padding: 3px 0; cursor: pointer;
-    }
-    .band-checkboxes input[type="checkbox"] {
-      width: 16px; height: 16px; accent-color: var(--accent-blue); cursor: pointer;
-    }
-
-    /* --- Widgets (S-meter, PTT, CW macros) --- */
-    .widget-area { padding: 0 8px; }
+    /* Meters (inside the header card) */
     .widget-section { display: none; }
     .widget-section.visible { display: block; }
-    .meter-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-    .meter-label { font-size: 10px; color: var(--text-dim); width: 26px; text-align: right; }
-    .meter-bar-wrap {
-      flex: 1; height: 10px; background: var(--bg-input); border-radius: 3px; overflow: hidden;
-      border: 1px solid #2a2a4a;
+    #widget-smeter.visible { display: flex; flex-direction: column; gap: 6px; padding: 2px 6px 0 0; }
+    .meter-row { display: flex; align-items: center; gap: 10px; }
+    .meter-label { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11px; font-weight: 600; color: var(--t3); width: 30px; }
+    .meter-bar-wrap { flex: 1; height: 8px; background: var(--in); border-radius: 4px; overflow: hidden; }
+    .meter-bar { height: 100%; width: 0%; transition: width 0.1s; border-radius: 4px; }
+    .meter-text { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; font-weight: 600; min-width: 44px; text-align: right; color: var(--t); }
+    input[type="range"] { accent-color: var(--blue); }
+
+    /* --- SWR guard card --- */
+    .swr-alert { display: none; padding: 16px; background: var(--red-tint); border-radius: 14px; flex-direction: column; gap: 10px; color: var(--red-text); }
+    .swr-alert.show { display: flex; }
+    .swr-alert-title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+    .swr-alert-title svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .swr-alert-text { font-size: 13px; line-height: 1.5; }
+    .swr-alert-btns { display: flex; gap: 8px; }
+    .swr-alert-btns button { height: 44px; border: 0; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    #swr-tune-btn { flex: 1; background: var(--ptt-on); color: #fff; }
+    #swr-override-btn { padding: 0 16px; background: transparent; color: var(--red-text); font-weight: 500; font-size: 13px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red-text) 40%, transparent); }
+
+    /* --- Knob + activator card --- */
+    .knob-card { padding: 14px; display: flex; gap: 14px; align-items: flex-start; }
+    .dial-wrap { width: 150px; height: 150px; flex: none; }
+    #vfo-dial { width: 150px; height: 150px; display: block; cursor: grab; touch-action: none; }
+    #vfo-dial:active { cursor: grabbing; }
+    .knob-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding-top: 4px; align-self: stretch; }
+    .op-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow: hidden; flex: 1; }
+    .op-empty { font-size: 13px; color: var(--t2); line-height: 1.5; }
+    .op-photo { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; display: block; margin-bottom: 2px; }
+    .op-call { color: var(--blue); font-weight: 600; font-size: 24px; font-family: 'Cascadia Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-name { color: var(--t); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-detail { color: var(--t2); font-size: 12px; line-height: 1.35; }
+    .op-dim { color: var(--t3); font-size: 11px; }
+    .op-ref-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-width: 0; }
+    .op-ref-row .chip { padding: 4px 6px; }
+    .op-ref { color: var(--green); font-weight: 600; font-size: 13px; font-family: 'Cascadia Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-dupe { display: inline-block; background: var(--red); color: #fff; font-weight: 700; font-size: 11px; letter-spacing: .06em; padding: 3px 7px; border-radius: 5px; cursor: help; align-self: flex-start; }
+    /* HF Net card */
+    .op-net-name { color: var(--gold); font-weight: 600; font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .op-net-badge { align-self: flex-start; background: var(--gold); color: #000; font-weight: 700; font-size: 11px; letter-spacing: .08em; padding: 3px 8px; border-radius: 999px; }
+    /* 2-3 ops: one line per op */
+    .op-multi-line { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.6; }
+    .op-multi-line .op-ml-call { color: var(--blue); font-weight: 600; font-family: 'Cascadia Mono', Consolas, monospace; }
+    .op-multi-line .op-ml-name { color: var(--t2); margin-left: 4px; }
+    .op-multi-line .op-ml-ref { color: var(--green); font-weight: 600; margin-left: 6px; }
+    .op-multi-line .op-ml-src { color: var(--t3); font-size: 10px; margin-left: 6px; letter-spacing: .05em; }
+    /* 4+ ops: inline comma-separated */
+    .op-crowd { font-size: 13px; line-height: 1.6; }
+    .op-crowd-call { color: var(--blue); font-weight: 600; font-family: 'Cascadia Mono', Consolas, monospace; }
+    .op-crowd-more { color: var(--t3); font-style: italic; }
+
+    /* --- Bands, filter, controls --- */
+    .tog {
+      border: 0; border-radius: 8px; background: var(--s2); color: var(--t); font-size: 12px; font-weight: 500;
+      padding: 9px 14px; cursor: pointer; line-height: 1;
     }
-    .meter-bar { height: 100%; width: 0%; transition: width 0.1s; border-radius: 2px; }
-    .meter-text { font-size: 11px; font-family: monospace; min-width: 42px; text-align: right; }
-    .ptt-log-row { display: flex; gap: 6px; padding: 4px 0; }
+    .tog:hover { background: var(--s3); }
+    .tog.on, .tog.active { background: var(--blue); color: var(--on-blue); font-weight: 600; }
+    .band-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+    .band-btn { padding: 9px 0; }
+    .seg { display: flex; background: var(--in); border-radius: 8px; padding: 3px; gap: 3px; }
+    /* Lightly stroked so each width reads as a button, not a label */
+    .seg button { flex: 1; border: 0; background: transparent; color: var(--t2); font-size: 12px; font-weight: 500; padding: 8px 0; border-radius: 6px; cursor: pointer; min-width: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t3) 40%, transparent); }
+    .seg button:hover { color: var(--t); background: var(--s2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t2) 55%, transparent); }
+    .seg button.active, .seg button.active:hover { background: var(--blue); color: var(--on-blue); font-weight: 600; box-shadow: none; }
+    .filter-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--t3); }
+    .filter-row input[type="range"] { flex: 1; }
+    .filter-val { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; font-weight: 500; color: var(--blue); }
+    .controls-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .controls-row .spacer { flex: 1; }
+    .rig-toggles-shared { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .toggle-btn.on { background: var(--green); color: var(--on-blue); }
+    .cat-cmd-btn.active { background: var(--blue); color: var(--on-blue); }
+    /* Custom-CAT slider slot (see buildCustomCatBtns) */
+    .custom-cat-slider { display: inline-flex; align-items: center; gap: 6px; background: var(--s2); color: var(--t2); padding: 4px 10px; border-radius: 8px; font-size: 12px; }
+    .ccs-range { width: 110px; }
+    .ccs-val { min-width: 2.5em; text-align: right; color: var(--t); font-variant-numeric: tabular-nums; }
+    .solar-pills { display: flex; gap: 4px; }
+    .solar-val { font-family: 'Cascadia Mono', Consolas, monospace; font-weight: 600; color: var(--green); }
+    .solar-val.warn { color: var(--gold); }
+    .solar-val.bad { color: var(--red); }
+
+    /* --- Macros, CW, WebSDR --- */
+    .tool-card { padding: 10px 12px; display: none; flex-direction: column; gap: 8px; }
+    .tool-card.visible { display: flex; }
+    .macro-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .macro-label { font-size: 10px; font-weight: 600; letter-spacing: .12em; color: var(--t3); text-transform: uppercase; width: 44px; }
+    .cw-ctrl-row { display: flex; align-items: center; gap: 6px; }
+    .cw-wpm-btn { width: 30px; height: 30px; border: 0; border-radius: 8px; background: var(--s2); color: var(--t); font-size: 16px; font-weight: 600; cursor: pointer; }
+    .cw-wpm-btn:hover { background: var(--s3); }
+    .cw-wpm-val { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 16px; font-weight: 600; color: var(--gold); min-width: 26px; text-align: center; }
+    .cw-wpm-unit { font-size: 10px; color: var(--t3); }
+    .cw-spot-wpm { font-size: 11px; color: var(--t2); margin-left: 4px; }
+    .cw-sync-btn { border: 0; background: var(--blue); color: var(--on-blue); font-size: 11px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .cw-text-row { display: flex; gap: 6px; }
+    .cw-text-input { flex: 1; min-width: 0; height: 34px; background: var(--in); border: 0; color: var(--t); padding: 0 10px; border-radius: 8px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 13px; text-transform: uppercase; outline: none; }
+    .cw-text-input:focus { box-shadow: inset 0 0 0 2px var(--blue); }
+    .cw-send-btn { border: 0; background: var(--gold); color: #111; font-weight: 600; padding: 0 14px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+    .cw-macro-btn, .voice-macro-btn { border: 0; background: var(--s2); padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
+    .cw-macro-btn { color: var(--gold); }
+    .voice-macro-btn { color: var(--blue); }
+    .cw-macro-btn:hover, .voice-macro-btn:hover { background: var(--s3); }
+    .voice-macro-btn.active { background: var(--blue); color: var(--on-blue); }
+    .voice-macro-btn.empty { opacity: 0.35; cursor: default; }
+    .voice-stop-btn, .cw-cancel-btn { border: 0; background: var(--red); color: #fff; padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
+    .ptt-log-row { display: flex; gap: 6px; align-items: center; }
+    .sdr-btn-vfo { border: 0; padding: 9px 12px; font-size: 13px; font-weight: 600; background: var(--s2); color: var(--gold); border-radius: 8px; cursor: pointer; }
+    .sdr-btn-vfo:hover { background: var(--s3); }
+    .sdr-btn-vfo.active { background: var(--gold); color: #111; }
+    /* SDR selector: one dropdown + status chip. "SDR: [Twente v][OFF]" */
+    .sdr-sel-label { font-size: 10px; font-weight: 600; letter-spacing: .12em; color: var(--t3); padding-right: 2px; }
+    .sdr-sel-btn { flex: 3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+    .sdr-chip { flex: 0 0 56px; }
+    .sdr-chip.on { background: var(--gold); color: #111; }
+    .sdr-dd { position: fixed; z-index: 500; max-height: 45vh; overflow-y: auto; background: var(--s); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 4px; }
+    .sdr-dd-item { padding: 8px 12px; font-size: 13px; color: var(--t); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; }
+    .sdr-dd-item:hover { background: var(--s2); }
+    .sdr-dd-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+    .sdr-dd-item.add { color: var(--blue); font-weight: 600; }
+    .sheet-link-btn { margin-top: 8px; height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--s2); color: var(--blue); font-size: 13px; font-weight: 600; cursor: pointer; }
+    .sheet-link-btn:hover { background: var(--s3); }
+    /* The chosen SDR: same row, bold, with a bar. (Not .sel: that is the select-box class.) */
+    .sdr-dd-item.current { font-weight: 700; background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: inset 3px 0 0 var(--blue); }
+    .sdr-dd-item.current:hover { background: color-mix(in srgb, var(--blue) 24%, transparent); }
+    .sdr-dd-item.conn::after { content: ' \25CF'; color: var(--green); }
+
+    /* --- Bottom bar: PTT, transmit audio, LOG --- */
+    .bar { flex: none; padding: 12px; background: var(--s); display: flex; gap: 8px; border-top: 1px solid var(--line); }
+    .bar.widget-section.visible { display: flex; }
     .ptt-btn {
-      flex: 3; padding: 10px;
-      font-size: 16px; font-weight: bold; border: 2px solid var(--accent-red);
-      background: var(--bg-btn); color: var(--accent-red); border-radius: 6px; cursor: pointer;
-      text-align: center; user-select: none;
+      flex: 1; height: 52px; border: 0; border-radius: 12px; background: var(--ptt); color: #fff;
+      font-size: 16px; font-weight: 600; letter-spacing: .08em; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
     }
-    .ptt-btn:hover { background: var(--bg-btn-hover); }
-    .ptt-btn.active { background: var(--accent-red); color: #fff; }
-    .log-btn-vfo {
-      flex: 1; padding: 10px;
-      font-size: 14px; font-weight: bold; border: 2px solid var(--accent-green);
-      background: var(--bg-btn); color: var(--accent-green); border-radius: 6px; cursor: pointer;
-      text-align: center; user-select: none;
+    .ptt-btn:hover { filter: brightness(1.08); }
+    .ptt-btn.active { background: var(--ptt-on); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ptt-on) 28%, transparent); letter-spacing: .04em; font-size: 15px; }
+    .ptt-btn.blocked { background: var(--s2); color: var(--t3); font-size: 14px; letter-spacing: .02em; cursor: not-allowed; filter: none; }
+    .ptt-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .sq { width: 52px; height: 52px; border: 0; border-radius: 12px; background: var(--s2); color: var(--t2); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+    .sq:hover, .sq.on { background: var(--s3); color: var(--t); }
+    .sq svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+    .log-btn-vfo { width: 92px; height: 52px; border: 0; border-radius: 12px; background: var(--log-bg); color: var(--green); font-size: 15px; font-weight: 600; letter-spacing: .06em; cursor: pointer; flex: none; }
+    .log-btn-vfo:hover { filter: brightness(1.1); }
+    .bar.log-only .log-btn-vfo { flex: 1; width: auto; }
+
+    /* Transmit audio panel (the EQ button) sits just above the bar */
+    .tx-audio-panel { display: none; flex: none; background: var(--s); border-top: 1px solid var(--line); padding: 12px 14px; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; }
+    .tx-audio-panel.show { display: flex; }
+    .field-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+    .sel { height: 34px; border: 0; border-radius: 8px; background: var(--s2); color: var(--t); font-size: 12px; padding: 0 8px; min-width: 0; outline: none; font-family: inherit; }
+    .sel option { background: var(--s); color: var(--t); }
+    .link-btn { border: 0; background: transparent; color: var(--blue); font-size: 12px; font-weight: 500; cursor: pointer; padding: 0 6px; height: 34px; }
+
+    /* --- Type-to-tune pane (the keypad) --- */
+    .kp-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+    .kp-input {
+      width: 100%; height: 58px; border: 0; border-radius: 10px; background: var(--in);
+      box-shadow: inset 0 0 0 2px var(--blue); color: var(--t); font-size: 32px; font-weight: 500; padding: 0 14px; outline: none;
     }
-    .log-btn-vfo:hover { background: var(--bg-btn-hover); }
-    .sdr-btn-vfo {
-      flex: 1; padding: 10px;
-      font-size: 14px; font-weight: bold; border: 2px solid var(--accent-gold);
-      background: var(--bg-btn); color: var(--accent-gold); border-radius: 6px; cursor: pointer;
-      text-align: center; user-select: none;
+    .kp-help { font-size: 12px; color: var(--t2); line-height: 1.5; }
+    .kp-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+    .keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .kp-btn { height: 48px; border: 0; border-radius: 10px; background: var(--s2); color: var(--t); font-family: 'Cascadia Mono', Consolas, monospace; font-size: 18px; font-weight: 500; cursor: pointer; }
+    .kp-btn:hover { background: var(--s3); }
+    .kp-btn.kp-word { font-family: inherit; font-size: 14px; }
+    .kp-actions { display: flex; gap: 6px; }
+    .kp-actions button { height: 48px; border: 0; border-radius: 10px; font-size: 14px; cursor: pointer; }
+    #kp-cancel { flex: 1; background: var(--s2); color: var(--t); font-weight: 500; }
+    #kp-go { flex: 2; background: var(--blue); color: var(--on-blue); font-weight: 600; }
+    #kp-go:disabled { opacity: .5; cursor: default; }
+    .pane { display: none; flex-direction: column; gap: 10px; }
+    .pane.active { display: flex; }
+
+    /* --- Profiles --- */
+    .profile-list { display: flex; flex-direction: column; gap: 4px; }
+    .profile-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--s2); border-radius: 8px; cursor: pointer; }
+    .profile-item:hover { background: var(--s3); }
+    .profile-drag { color: var(--t3); font-size: 12px; cursor: grab; padding: 0 2px; line-height: 1; }
+    .profile-drag:active { cursor: grabbing; }
+    .profile-item.dragging { opacity: 0.45; }
+    .profile-item.drop-above { box-shadow: inset 0 2px 0 0 var(--blue); }
+    .profile-item.drop-below { box-shadow: inset 0 -2px 0 0 var(--blue); }
+    .profile-name { font-weight: 600; color: var(--t); flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .profile-detail { font-size: 11px; color: var(--t2); font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; }
+    .profile-del, .profile-edit { background: none; border: none; color: var(--t3); font-size: 14px; cursor: pointer; padding: 0 4px; }
+    .profile-del:hover { color: var(--red); }
+    .profile-edit:hover { color: var(--blue); }
+    .profile-name-edit { flex: 1; background: var(--in); border: 0; box-shadow: inset 0 0 0 1px var(--blue); color: var(--t); padding: 3px 6px; border-radius: 5px; font-size: 13px; font-family: inherit; min-width: 0; outline: none; }
+    .profile-item.editing, .profile-item.editing:hover { background: var(--s3); }
+    .profile-add-row { display: flex; gap: 6px; }
+    .profile-add-row input { flex: 1; min-width: 0; height: 34px; background: var(--in); border: 0; color: var(--t); padding: 0 10px; border-radius: 8px; font-size: 13px; outline: none; font-family: inherit; }
+    .profile-add-row input:focus { box-shadow: inset 0 0 0 2px var(--blue); }
+    .profile-add-row button { border: 0; background: var(--blue); color: var(--on-blue); padding: 0 12px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .profile-empty { color: var(--t3); padding: 10px 2px; font-size: 12px; }
+
+    /* --- Settings sheet (gear) --- */
+    .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 200; }
+    .sheet-backdrop.show { display: block; }
+    .sheet {
+      position: fixed; left: 0; right: 0; bottom: 0; top: 48px; z-index: 201; background: var(--s);
+      border-radius: 18px 18px 0 0; box-shadow: var(--sheet-shadow); display: none; flex-direction: column;
     }
-    .sdr-btn-vfo:hover { background: var(--bg-btn-hover); }
-    .sdr-btn-vfo.active { background: var(--accent-gold); color: #1a1a2e; }
-    /* SDR selector — one dropdown + status chip instead of N station buttons.
-       The full-list sync (sdr-list-full-sync) means users may have 25+ SDRs;
-       a button per station stopped scaling. "SDR: [Twente ▾][OFF]" */
-    .sdr-sel-label { align-self: center; font-size: 11px; font-weight: bold; color: var(--text-dim); padding: 0 2px 0 4px; user-select: none; }
-    .sdr-sel-btn { flex: 3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sdr-chip { flex: 0 0 52px; }
-    .sdr-chip.on { background: var(--accent-gold); color: #1a1a2e; }
-    .sdr-dd { position: fixed; z-index: 500; max-height: 45vh; overflow-y: auto; background: var(--bg-input); border: 1px solid var(--accent-gold); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.55); }
-    .sdr-dd-item { padding: 8px 12px; font-size: 13px; color: var(--text-primary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sdr-dd-item:hover { background: var(--bg-btn-hover); }
-    .sdr-dd-item.sel { color: var(--accent-gold); font-weight: bold; }
-    .sdr-dd-item.conn::after { content: ' ●'; color: var(--accent-green); }
-    .macro-row { display: flex; align-items: center; gap: 4px; padding: 4px 0; flex-wrap: wrap; }
-    .macro-label {
-      font-size: 10px; font-weight: bold; color: var(--text-dimmer); text-transform: uppercase;
-      width: 36px; min-width: 36px; text-align: right; letter-spacing: 1px;
+    .sheet.show { display: flex; }
+    .sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--s3); margin: 10px auto 0; flex: none; }
+    .sheet-head { display: flex; align-items: center; padding: 8px 18px 4px; flex: none; }
+    .sheet-head .sheet-title { font-size: 17px; font-weight: 600; flex: 1; }
+    .sheet-done { height: 34px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--blue); color: var(--on-blue); font-size: 13px; font-weight: 600; cursor: pointer; }
+    .sheet-body { flex: 1; overflow-y: auto; padding: 0 18px 18px; }
+    .sheet-body > .lbl { display: block; margin: 18px 0 4px; }
+    .settings-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 42px; font-size: 14px; color: var(--t); border-bottom: 1px solid var(--line); cursor: pointer; }
+    .order-note { font-size: 12px; color: var(--t3); margin: 0 0 6px; }
+    .order-list { display: flex; flex-direction: column; }
+    .order-row { display: flex; align-items: center; gap: 8px; min-height: 42px; font-size: 14px; color: var(--t); border-bottom: 1px solid var(--line); cursor: grab; user-select: none; }
+    .order-row.dragging { opacity: .4; }
+    .order-row.drop-before { box-shadow: inset 0 2px 0 var(--blue); }
+    .order-row.drop-after { box-shadow: inset 0 -2px 0 var(--blue); }
+    .order-row .grip { width: 16px; height: 16px; color: var(--t3); flex: none; }
+    .order-row .grip svg, .order-move svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+    .order-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .order-row.off .order-name { color: var(--t3); }
+    .order-off { font-size: 11px; color: var(--t3); }
+    .order-move { width: 30px; height: 30px; border: 0; border-radius: 8px; background: var(--s2); color: var(--t2); cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; }
+    .order-move:hover:not(:disabled) { background: var(--s3); color: var(--t); }
+    .order-move:disabled { opacity: .35; cursor: default; }
+    .settings-toggle input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; flex: none; }
+    .settings-note { font-size: 12px; color: var(--t2); line-height: 1.5; margin-top: 8px; }
+    .band-checkboxes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px 8px; padding-top: 4px; }
+    .band-checkboxes label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--t2); padding: 5px 0; cursor: pointer; }
+    .band-checkboxes input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--blue); cursor: pointer; }
+
+    /* --- Toast + mode picker --- */
+    .vfo-lock-toast {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: calc(100% - 40px);
+      background: var(--red); color: #fff; padding: 12px 18px; border-radius: 10px; text-align: center;
+      font-size: 14px; font-weight: 600; z-index: 9999; pointer-events: none;
+      box-shadow: 0 6px 24px rgba(0,0,0,.4); opacity: 0; transition: opacity 0.2s;
     }
-    .cw-macro-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
-    .cw-ctrl-row {
-      display: flex; align-items: center; gap: 6px; padding: 2px 0 2px 40px;
-    }
-    .cw-wpm-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--text-primary);
-      width: 26px; height: 26px; border-radius: 4px; font-size: 16px; font-weight: bold;
-      cursor: pointer; text-align: center; line-height: 1;
-    }
-    .cw-wpm-btn:hover { background: var(--bg-btn-hover); }
-    .cw-wpm-val { font-family: monospace; font-size: 16px; font-weight: bold; color: var(--accent-gold); min-width: 24px; text-align: center; }
-    .cw-wpm-unit { font-size: 10px; color: var(--text-dimmer); }
-    .cw-spot-wpm { font-size: 11px; color: var(--text-dim); margin-left: 4px; }
-    .cw-sync-btn {
-      background: var(--accent-blue); border: none; color: #fff; font-size: 10px;
-      padding: 2px 8px; border-radius: 3px; cursor: pointer; font-weight: bold;
-    }
-    .cw-sync-btn:hover { opacity: 0.8; }
-    .cw-text-row {
-      display: flex; gap: 4px; padding: 2px 0 4px 40px;
-    }
-    .cw-text-input {
-      flex: 1; background: var(--bg-input); border: 1px solid var(--border);
-      color: var(--text-primary); padding: 4px 8px; border-radius: 4px;
-      font-family: monospace; font-size: 13px; text-transform: uppercase;
-    }
-    .cw-send-btn {
-      background: var(--accent-gold); border: none; color: #1a1a2e; font-weight: bold;
-      padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;
-    }
-    .cw-send-btn:hover { opacity: 0.8; }
-    .cw-macro-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--accent-gold);
-      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
-      font-weight: bold;
-    }
-    .cw-macro-btn:hover { background: var(--bg-btn-hover); }
-    .voice-macro-btn {
-      background: var(--bg-btn); border: 1px solid var(--border); color: var(--accent-blue);
-      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
-      font-weight: bold;
-    }
-    .voice-macro-btn:hover { background: var(--bg-btn-hover); }
-    .voice-macro-btn.active { background: #4fc3f7; color: #1a1a2e; }
-    .voice-macro-btn.empty { opacity: 0.3; cursor: default; }
-    .voice-stop-btn {
-      background: var(--accent-red, #e94560); border: 1px solid #e94560; color: #fff;
-      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
-      font-weight: bold;
-    }
-    .cw-cancel-btn {
-      background: var(--accent-red, #e94560); border: 1px solid #e94560; color: #fff;
-      padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
-      font-weight: bold;
-    }
+    .vfo-lock-toast.show { opacity: 1; }
+    .mode-picker { position: fixed; z-index: 300; background: var(--s); border-radius: 12px; padding: 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; box-shadow: 0 8px 28px rgba(0,0,0,.45); }
+    [data-theme="light"] .mode-picker { box-shadow: 0 8px 28px rgba(20,30,60,.2), 0 0 0 1px rgba(20,30,60,.06); }
+    .mode-btn { border: 0; background: var(--s2); color: var(--t); padding: 9px 4px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; min-width: 56px; }
+    .mode-btn:hover { background: var(--s3); }
+    .mode-btn.active { background: var(--green-tint); color: var(--green); }
   </style>
 </head>
 <body>
-  <!-- Titlebar -->
+  <!-- Titlebar: settings and keep-on-top live here, beside the window buttons -->
   <div class="titlebar">
-    <span>VFO</span>
+    <span class="titlebar-title">VFO</span>
     <div class="titlebar-btns">
-      <button onclick="window.api.minimize()">&#x2013;</button>
-      <button onclick="window.api.maximize()">&#x25A1;</button>
-      <button class="close-btn" onclick="window.api.close()">&#x2715;</button>
+      <button class="ib" id="gear-btn" title="VFO settings" aria-label="VFO settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>
+      <button class="ib" id="pin-btn" title="Keep this window on top" aria-label="Keep on top"><svg viewBox="0 0 24 24"><path d="M12 17v5"></path><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"></path></svg></button>
+      <button class="ib win-btn" onclick="window.api.minimize()" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 24 24"><path d="M6 12h12"></path></svg></button>
+      <button class="ib win-btn close-btn" onclick="window.api.close()" title="Close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
     </div>
   </div>
 
-  <!-- Frequency + mode display -->
-  <div class="freq-row">
-    <span class="freq-display" id="freq-display" title="Click to type frequency">---.---.---</span>
-    <span class="freq-unit">kHz</span>
-    <span class="mode-badge" id="mode-badge" title="Click to change mode">---</span>
-    <button class="audio-btn" id="audio-btn" title="Radio audio monitor">&#x1F508;</button>
-    <button class="vfo-lock-btn" id="vfo-lock-btn" title="Click to lock VFO">&#x1F513;</button>
-  </div>
-  <!-- Split: both frequencies visible, one under the other (TS-480 ask). -->
-  <div class="freq-other-row" id="freq-other-row" title="TX frequency (the other VFO) — split is on">
-    <span class="freq-other-tag">TX</span>
-    <span class="freq-other" id="freq-other">---.---.---</span>
-    <span class="freq-unit">kHz</span>
-  </div>
-  <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:0 0 2px;">
-    <span class="filter-badge" id="filter-badge"></span>
-    <span id="vfo-badge" style="display:none;font-size:10px;font-weight:bold;background:var(--bg-tertiary);color:var(--text-primary);padding:1px 6px;border-radius:8px;letter-spacing:0.5px;" title="Active VFO (from the radio)">VFO A</span>
-    <span id="split-badge" style="display:none;font-size:10px;font-weight:bold;background:#f0a500;color:#000;padding:1px 6px;border-radius:8px;letter-spacing:0.5px;" title="Split operation — transmitting on the other VFO">SPLIT</span>
-    <span id="kiwi-rx-badge" style="display:none;font-size:10px;font-weight:bold;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;letter-spacing:0.5px;">SDR RX</span>
-  </div>
-  <!-- Widgets (always visible when enabled) -->
-  <div class="widget-area">
-    <div class="widget-section" id="widget-smeter">
-      <div class="meter-row">
-        <span class="meter-label">S</span>
-        <div class="meter-bar-wrap"><div class="meter-bar" id="smeter-bar"></div></div>
-        <span class="meter-text" id="smeter-text">---</span>
-      </div>
-      <div class="meter-row">
-        <span class="meter-label">SWR</span>
-        <div class="meter-bar-wrap"><div class="meter-bar" id="swr-bar"></div></div>
-        <span class="meter-text" id="swr-text">&mdash;</span>
-      </div>
-      <div class="meter-row">
-        <span class="meter-label">ALC</span>
-        <div class="meter-bar-wrap"><div class="meter-bar" id="alc-bar"></div></div>
-        <span class="meter-text" id="alc-text">&mdash;</span>
-      </div>
-      <div class="meter-row" title="Measured forward power during TX (Flex)">
-        <span class="meter-label">PWR</span>
-        <div class="meter-bar-wrap"><div class="meter-bar" id="fwdpwr-bar"></div></div>
-        <span class="meter-text" id="fwdpwr-text">&mdash;</span>
-      </div>
-      <div class="meter-row" title="PC-side peak audio level being sent to the radio's USB CODEC. If this rises during voice macros / PTT-Mic but ALC stays flat, the radio's USB MOD LEVEL needs to be raised. If both stay flat, check Windows audio output device + the radio's AF Output Level menu.">
-        <span class="meter-label">TX</span>
-        <div class="meter-bar-wrap"><div class="meter-bar" id="tx-peak-bar"></div></div>
-        <span class="meter-text" id="tx-peak-text">&mdash;</span>
-      </div>
-      <div class="meter-row" title="Radio audio monitor volume — how loud the click-to-listen (speaker button) audio plays. Independent of your PC's master volume.">
-        <span class="meter-label">VOL</span>
-        <input type="range" id="vol-slider" min="0" max="150" value="100" style="flex:1;margin:0 2px;accent-color:#4fc3f7;">
-        <span class="meter-text" id="vol-text">100%</span>
-      </div>
-    </div>
-    <div class="widget-section" id="widget-ptt-row">
-      <div class="ptt-log-row">
-        <button class="ptt-btn" id="ptt-btn" style="display:none;">PTT</button>
-        <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
-      </div>
-      <!-- TX EQ + compressor controls. Visible whenever the PTT widget
-           is on; the actual DSP only fires while PTT is held + the mic
-           is open. State is shared with Settings dialog + ECHOCAT iOS
-           via the tx-eq-update broadcast. -->
-      <div class="vfo-tx-eq-row" id="vfo-tx-eq-row" style="display:none;padding:4px 8px;font-size:11px;color:var(--text-dim);align-items:center;gap:6px;flex-wrap:wrap;">
-        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-          <input type="checkbox" id="vfo-tx-eq-enabled">
-          <span>TX EQ</span>
-        </label>
-        <select id="vfo-tx-eq-preset" style="flex:1;min-width:90px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:2px 4px;border-radius:3px;font-size:11px;">
-          <option value="ragchew">Ragchew</option>
-          <option value="pileup">Pileup</option>
-          <option value="dx">DX</option>
-          <option value="custom">Custom</option>
-        </select>
-        <button id="vfo-tx-eq-rig-default-btn" type="button" title="Save current EQ as the default for the currently-active rig profile" style="font-size:10px;padding:2px 6px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);border-radius:3px;cursor:pointer;">Save as rig default</button>
-        <!-- VU meter — pre (post-EQ, pre-comp) vs post (post-makeup).
-             Visible only when EQ is enabled; the gap between the two
-             bars is the gain reduction the compressor is applying. -->
-        <div id="vfo-tx-eq-meter" style="display:none;flex-basis:100%;align-items:center;gap:6px;padding-top:4px;">
-          <span style="font-size:9px;color:var(--text-dim);min-width:24px;">Pre</span>
-          <div style="flex:1;height:6px;background:var(--bg-input);border:1px solid var(--border);border-radius:2px;overflow:hidden;">
-            <div id="vfo-tx-eq-pre-bar" style="height:100%;width:0%;background:var(--accent-blue);transition:width 0.05s linear;"></div>
-          </div>
-          <span style="font-size:9px;color:var(--text-dim);min-width:24px;">Post</span>
-          <div style="flex:1;height:6px;background:var(--bg-input);border:1px solid var(--border);border-radius:2px;overflow:hidden;">
-            <div id="vfo-tx-eq-post-bar" style="height:100%;width:0%;background:var(--accent-green);transition:width 0.05s linear;"></div>
-          </div>
+  <div class="scroll" id="scroll">
+    <!-- Header card: what the radio is doing -->
+    <div class="card head-card">
+      <div class="chip-row">
+        <div class="chips">
+        <span class="chip vfoab" id="vfo-badge" style="display:none" title="Active VFO (from the radio)">VFO A</span>
+        <button class="chip mode" id="mode-badge" title="Click to change mode">---</button>
+        <span class="chip" id="filter-badge" title="Receive filter width"></span>
+        <span class="vfo-section" id="sec-step"><select class="chip" id="step-select" title="Tuning step for the knob and mouse wheel" aria-label="Tuning step"></select></span>
+        <span class="chip split" id="split-badge" style="display:none" title="Split operation: transmitting on the other VFO">SPLIT</span>
+        <span class="chip sdr" id="kiwi-rx-badge" style="display:none">SDR RX</span>
+        <span class="chip tx hidden" id="tx-chip">TX</span>
         </div>
-        <!-- Custom sliders. Shown only when preset === 'custom'. Each
-             change is persisted live via setTxEq so muscle-memory tweaks
-             stick across PTT cycles. -->
-        <details id="vfo-tx-eq-custom" style="display:none;flex-basis:100%;margin-top:4px;">
-          <summary style="cursor:pointer;font-size:10px;color:var(--text-dim);">Custom EQ + Compressor</summary>
-          <div class="vfo-tx-eq-sliders" style="display:grid;grid-template-columns:auto 1fr auto;column-gap:6px;row-gap:3px;margin-top:4px;font-size:10px;color:var(--text-dim);">
-            <span title="Low shelf gain at 120 Hz">Low (120 Hz)</span>
-            <input type="range" id="vfo-tx-eq-low" min="-12" max="12" step="0.5" value="0">
-            <span id="vfo-tx-eq-low-val">0 dB</span>
-            <span title="High shelf gain at 2 kHz">High (2 kHz)</span>
-            <input type="range" id="vfo-tx-eq-high" min="-12" max="12" step="0.5" value="0">
-            <span id="vfo-tx-eq-high-val">0 dB</span>
-            <span title="Compressor threshold — below this is uncompressed">Threshold</span>
-            <input type="range" id="vfo-tx-eq-thr" min="-60" max="0" step="1" value="-24">
-            <span id="vfo-tx-eq-thr-val">-24 dB</span>
-            <span title="Compression ratio (inputs above threshold are reduced by this factor)">Ratio</span>
-            <input type="range" id="vfo-tx-eq-ratio" min="1" max="20" step="0.5" value="2">
-            <span id="vfo-tx-eq-ratio-val">2:1</span>
-            <span title="Attack time in ms (how fast comp kicks in)">Attack</span>
-            <input type="range" id="vfo-tx-eq-attack" min="0" max="100" step="1" value="3">
-            <span id="vfo-tx-eq-attack-val">3 ms</span>
-            <span title="Release time in ms (how fast comp lets go)">Release</span>
-            <input type="range" id="vfo-tx-eq-release" min="10" max="1000" step="10" value="250">
-            <span id="vfo-tx-eq-release-val">250 ms</span>
-            <span title="Soft-knee width in dB (smooths the comp curve around threshold)">Knee</span>
-            <input type="range" id="vfo-tx-eq-knee" min="0" max="40" step="1" value="30">
-            <span id="vfo-tx-eq-knee-val">30 dB</span>
-            <span title="Make-up gain after compression — compensates for level lost to comp">Makeup</span>
-            <input type="range" id="vfo-tx-eq-makeup" min="0" max="24" step="0.5" value="0">
-            <span id="vfo-tx-eq-makeup-val">0 dB</span>
-          </div>
-        </details>
+        <button class="ib audio-btn" id="audio-btn" title="Radio audio monitor" aria-label="Radio audio monitor"></button>
+        <button class="ib vfo-lock-btn" id="vfo-lock-btn" title="Click to lock VFO" aria-label="Lock frequency"></button>
+      </div>
+      <button class="freq-display mono" id="freq-display" title="Click to type a frequency"><span class="fq-main">--.---</span><span class="fq-sub">.---</span><span class="fq-unit">MHz</span></button>
+      <!-- Split: both frequencies visible, one under the other (TS-480 ask). -->
+      <div class="freq-other-row" id="freq-other-row" title="TX frequency (the other VFO), split is on">
+        <span class="freq-other-tag">TX</span>
+        <span class="freq-other mono" id="freq-other">---.---.---</span>
+        <span class="freq-unit">kHz</span>
+      </div>
+      <div class="widget-section" id="widget-smeter">
+        <div class="meter-row">
+          <span class="meter-label">S</span>
+          <div class="meter-bar-wrap"><div class="meter-bar" id="smeter-bar"></div></div>
+          <span class="meter-text" id="smeter-text">---</span>
+        </div>
+        <div class="meter-row">
+          <span class="meter-label">SWR</span>
+          <div class="meter-bar-wrap"><div class="meter-bar" id="swr-bar"></div></div>
+          <span class="meter-text" id="swr-text">&mdash;</span>
+        </div>
+        <div class="meter-row">
+          <span class="meter-label">ALC</span>
+          <div class="meter-bar-wrap"><div class="meter-bar" id="alc-bar"></div></div>
+          <span class="meter-text" id="alc-text">&mdash;</span>
+        </div>
+        <div class="meter-row" title="Measured forward power during TX">
+          <span class="meter-label">PWR</span>
+          <div class="meter-bar-wrap"><div class="meter-bar" id="fwdpwr-bar"></div></div>
+          <span class="meter-text" id="fwdpwr-text">&mdash;</span>
+        </div>
+        <div class="meter-row" title="PC-side peak audio level being sent to the radio's USB CODEC. If this rises during voice macros / PTT-Mic but ALC stays flat, the radio's USB MOD LEVEL needs to be raised. If both stay flat, check Windows audio output device + the radio's AF Output Level menu.">
+          <span class="meter-label">TX</span>
+          <div class="meter-bar-wrap"><div class="meter-bar" id="tx-peak-bar"></div></div>
+          <span class="meter-text" id="tx-peak-text">&mdash;</span>
+        </div>
+        <div class="meter-row" title="Radio audio monitor volume: how loud the click-to-listen (speaker button) audio plays. Independent of your PC's master volume.">
+          <span class="meter-label">VOL</span>
+          <input type="range" id="vol-slider" min="0" max="150" value="100" style="flex:1;">
+          <span class="meter-text" id="vol-text">100%</span>
+        </div>
       </div>
     </div>
-    <div class="widget-section" id="widget-kiwi">
-      <div class="ptt-log-row" id="kiwi-btn-row"></div>
-      <div id="kiwi-volume-row" style="display:none;align-items:center;gap:8px;padding:4px 8px;font-size:11px;color:var(--text-dim);">
-        <span style="min-width:42px;">Volume</span>
-        <input type="range" id="kiwi-volume" min="0" max="150" value="80" style="flex:1;">
-        <span id="kiwi-volume-val" style="min-width:32px;text-align:right;">80%</span>
-      </div>
-    </div>
-    <div class="widget-section" id="widget-cw-controls">
-      <div class="cw-ctrl-row">
-        <button class="cw-wpm-btn" id="vfo-cw-down" title="Decrease WPM">-</button>
-        <span class="cw-wpm-val" id="vfo-cw-wpm">20</span>
-        <span class="cw-wpm-unit">WPM</span>
-        <button class="cw-wpm-btn" id="vfo-cw-up" title="Increase WPM">+</button>
-        <span class="cw-spot-wpm" id="vfo-cw-spot-wpm"></span>
-        <button class="cw-sync-btn hidden" id="vfo-cw-sync" title="Match their speed">Sync</button>
-      </div>
-      <div class="cw-text-row">
-        <input type="text" class="cw-text-input" id="vfo-cw-input" placeholder="Type CW text..." spellcheck="false" autocomplete="off">
-        <button class="cw-send-btn" id="vfo-cw-send">TX</button>
-      </div>
-    </div>
-    <div class="widget-section" id="widget-cw">
-      <div class="macro-row"><span class="macro-label">CW</span><div class="cw-macro-row" id="cw-macro-row" style="display:contents"></div></div>
-    </div>
-    <div class="widget-section" id="widget-voice">
-      <div class="macro-row"><span class="macro-label">Voice</span><div class="cw-macro-row" id="voice-macro-row" style="display:contents"></div></div>
-    </div>
-  </div>
 
-  <!-- Tabs -->
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="dial">Dial</button>
-    <button class="tab-btn" data-tab="keypad">Keypad</button>
-    <button class="tab-btn" data-tab="profiles">Profiles</button>
-    <button class="tab-btn" data-tab="settings">Settings</button>
-  </div>
+    <!-- SWR guard: stays up until the guard clears (ATU match, band change, override) -->
+    <div class="swr-alert" id="swr-alert" role="alert">
+      <div class="swr-alert-title"><svg viewBox="0 0 24 24"><path d="M12 3l10 18H2z"></path><path d="M12 10v5"></path><path d="M12 18h0"></path></svg>Transmit blocked</div>
+      <div class="swr-alert-text" id="swr-alert-text">The SWR guard stopped the last transmission.</div>
+      <div class="swr-alert-btns">
+        <button id="swr-tune-btn">Tune ATU</button>
+        <button id="swr-override-btn" title="Allow transmitting again without retuning">Override</button>
+      </div>
+    </div>
 
-  <!-- Tab content -->
-  <div class="tab-content">
-    <!-- Dial tab -->
-    <div class="tab-pane active" id="tab-dial">
-      <div style="display:flex;align-items:stretch;justify-content:center;gap:8px;">
+    <!-- Dial pane -->
+    <div class="pane active" id="tab-dial">
+      <div class="card knob-card" id="blk-knob">
         <div class="dial-wrap vfo-section" id="sec-dial">
-          <canvas id="vfo-dial" width="200" height="200"></canvas>
+          <canvas id="vfo-dial" width="150" height="150"></canvas>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;flex:1;min-width:0;">
-          <div class="op-info" id="op-info" style="padding-top:4px;width:100%;max-width:100%;overflow:hidden;"></div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding-bottom:2px;">
-            <div class="vfo-section solar-pills" id="sec-solar">
-              <div class="solar-pill" title="Solar Flux Index"><span class="solar-label">SFI</span><span class="solar-val" id="sv-sfi">--</span></div>
-              <div class="solar-pill" title="K-Index"><span class="solar-label">K</span><span class="solar-val" id="sv-k">--</span></div>
-              <div class="solar-pill" title="A-Index"><span class="solar-label">A</span><span class="solar-val" id="sv-a">--</span></div>
-            </div>
-            <div class="vfo-section" id="sec-step">
-              <select id="step-select" style="background:var(--bg-btn);border:1px solid var(--border);color:var(--accent-blue);padding:4px 6px;border-radius:4px;font-size:11px;cursor:pointer;"></select>
-            </div>
-          </div>
+        <div class="knob-side">
+          <div class="op-info" id="op-info"></div>
         </div>
       </div>
-      <div class="vfo-section" id="sec-band">
-        <div class="section-label">Quick Band</div>
+      <div class="section vfo-section" id="sec-band">
+        <div class="lbl">Band</div>
         <div class="band-grid" id="band-grid-dial"></div>
       </div>
-      <div class="vfo-section" id="sec-filter">
-        <div class="section-label">Filter</div>
-        <div class="step-row filter-quick-shared"></div>
+      <div class="section vfo-section" id="sec-filter">
+        <div class="section-head"><span class="lbl">Filter</span><span class="filter-val" id="filter-val">2400 Hz</span></div>
+        <div class="seg filter-quick-shared"></div>
       </div>
       <div class="vfo-section" id="sec-filter-slider">
-        <div class="filter-row">
-          <label>BW</label>
-          <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400">
-          <span class="filter-val" id="filter-val">2400 Hz</span>
+        <label class="filter-row">Width
+          <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400" aria-label="Filter width">
+        </label>
+      </div>
+      <div class="controls-row" id="blk-controls">
+        <div class="vfo-section rig-toggles-shared" id="sec-controls"></div>
+        <span class="spacer"></span>
+        <div class="vfo-section solar-pills" id="sec-solar">
+          <span class="chip" title="Solar Flux Index">SFI <span class="solar-val" id="sv-sfi">--</span></span>
+          <span class="chip" title="K-Index">K <span class="solar-val" id="sv-k">--</span></span>
+          <span class="chip" title="A-Index">A <span class="solar-val" id="sv-a">--</span></span>
         </div>
       </div>
-      <div class="vfo-section" id="sec-controls">
-        <div class="section-label">Controls</div>
-        <div class="step-row rig-toggles-shared"></div>
-      </div>
-      <div class="vfo-section" id="sec-profiles-inline" style="display:none">
-        <div class="section-label">Profiles</div>
+      <div class="section vfo-section" id="sec-profiles-inline" style="display:none">
+        <div class="lbl">Profiles</div>
         <div class="profile-list" id="profile-list-inline"></div>
       </div>
-    </div>
 
-    <!-- Keypad tab -->
-    <div class="tab-pane" id="tab-keypad">
-      <div class="keypad">
-        <input type="text" class="kp-input" id="kp-input" placeholder="MHz" readonly>
-        <div class="kp-digits">
-          <button class="kp-btn" data-digit="1">1</button>
-          <button class="kp-btn" data-digit="2">2</button>
-          <button class="kp-btn" data-digit="3">3</button>
-          <button class="kp-btn" data-digit="4">4</button>
-          <button class="kp-btn" data-digit="5">5</button>
-          <button class="kp-btn" data-digit="6">6</button>
-          <button class="kp-btn" data-digit="7">7</button>
-          <button class="kp-btn" data-digit="8">8</button>
-          <button class="kp-btn" data-digit="9">9</button>
+      <div class="card tool-card widget-section" id="widget-cw-controls">
+        <div class="cw-ctrl-row">
+          <span class="macro-label">CW</span>
+          <button class="cw-wpm-btn" id="vfo-cw-down" title="Decrease WPM">-</button>
+          <span class="cw-wpm-val" id="vfo-cw-wpm">20</span>
+          <span class="cw-wpm-unit">WPM</span>
+          <button class="cw-wpm-btn" id="vfo-cw-up" title="Increase WPM">+</button>
+          <span class="cw-spot-wpm" id="vfo-cw-spot-wpm"></span>
+          <button class="cw-sync-btn hidden" id="vfo-cw-sync" title="Match their speed">Sync</button>
         </div>
-        <button class="kp-btn kp-action kp-clear" id="kp-clear">CLR</button>
-        <button class="kp-btn" data-digit="0">0</button>
+        <div class="cw-text-row">
+          <input type="text" class="cw-text-input" id="vfo-cw-input" placeholder="Type CW text..." spellcheck="false" autocomplete="off">
+          <button class="cw-send-btn" id="vfo-cw-send">TX</button>
+        </div>
+      </div>
+      <div class="card tool-card widget-section" id="widget-cw">
+        <div class="macro-row"><span class="macro-label">CW</span><div id="cw-macro-row" style="display:contents"></div></div>
+      </div>
+      <div class="card tool-card widget-section" id="widget-voice">
+        <div class="macro-row"><span class="macro-label">Voice</span><div id="voice-macro-row" style="display:contents"></div></div>
+      </div>
+      <div class="card tool-card widget-section" id="widget-kiwi">
+        <div class="ptt-log-row" id="kiwi-btn-row"></div>
+        <div id="kiwi-volume-row" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);">
+          <span style="min-width:42px;">Volume</span>
+          <input type="range" id="kiwi-volume" min="0" max="150" value="80" style="flex:1;">
+          <span id="kiwi-volume-val" style="min-width:32px;text-align:right;">80%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Type-to-tune pane (click the frequency, or type digits) -->
+    <div class="pane" id="tab-keypad">
+      <div class="card kp-card">
+        <label class="section">
+          <span class="lbl">Type a frequency</span>
+          <input type="text" class="kp-input mono" id="kp-input" placeholder="14.074" readonly aria-label="Frequency">
+        </label>
+        <div class="kp-help">Enter tunes, Esc cancels. 7.185 and 7185 both mean 7.185 MHz.</div>
+      </div>
+      <div class="section" id="kp-recent-wrap" style="display:none">
+        <div class="lbl">Recent</div>
+        <div class="kp-recent" id="kp-recent"></div>
+      </div>
+      <div class="keypad">
+        <button class="kp-btn" data-digit="1">1</button>
+        <button class="kp-btn" data-digit="2">2</button>
+        <button class="kp-btn" data-digit="3">3</button>
+        <button class="kp-btn" data-digit="4">4</button>
+        <button class="kp-btn" data-digit="5">5</button>
+        <button class="kp-btn" data-digit="6">6</button>
+        <button class="kp-btn" data-digit="7">7</button>
+        <button class="kp-btn" data-digit="8">8</button>
+        <button class="kp-btn" data-digit="9">9</button>
         <button class="kp-btn" id="kp-dot">.</button>
-        <button class="kp-btn kp-action kp-go" id="kp-go">GO</button>
+        <button class="kp-btn" data-digit="0">0</button>
+        <button class="kp-btn kp-word" id="kp-del">Del</button>
       </div>
-      <div style="text-align:center; padding:6px; font-size:11px; color:#666;">
-        Enter frequency in MHz (e.g. 14.025)
+      <div class="kp-actions">
+        <button id="kp-cancel">Cancel</button>
+        <button id="kp-go" disabled>Tune</button>
       </div>
-      <div class="vfo-section" id="sec-filter-kp">
-        <div class="section-label">Filter</div>
-        <div class="step-row filter-quick-shared"></div>
-      </div>
-      <div class="vfo-section" id="sec-controls-kp">
-        <div class="section-label">Controls</div>
-        <div class="step-row rig-toggles-shared"></div>
-      </div>
-    </div>
-
-    <!-- Profiles tab -->
-    <div class="tab-pane" id="tab-profiles">
-      <div class="profile-add-row">
-        <input type="text" id="profile-name-input" placeholder="Profile name (e.g. 20m CW)">
-        <button id="profile-save-btn">Save Current</button>
-      </div>
-      <div class="profile-list" id="profile-list">
-        <div class="profile-empty">No profiles yet. Tune to a frequency and save it above.</div>
-      </div>
-    </div>
-
-    <!-- Settings tab -->
-    <div class="tab-pane" id="tab-settings">
-      <div class="section-label">Widgets</div>
-      <label class="settings-toggle"><input type="checkbox" id="w-smeter"> S-meter / SWR</label>
-      <div style="display:flex;gap:16px;">
-        <label class="settings-toggle"><input type="checkbox" id="w-ptt"> PTT</label>
-        <label class="settings-toggle"><input type="checkbox" id="w-log"> LOG</label>
-      </div>
-      <div id="mic-select-row" style="padding-left:28px;padding-bottom:4px;display:none;">
-        <label style="font-size:11px;color:var(--text-dim);display:block;padding-bottom:2px;">Microphone</label>
-        <select id="mic-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:12px;"></select>
-      </div>
-      <label class="settings-toggle"><input type="checkbox" id="w-op-photo"> Operator Photo (QRZ)</label>
-      <label class="settings-toggle"><input type="checkbox" id="w-bearing"> Beam Heading (bearing to spot)</label>
-      <label class="settings-toggle"><input type="checkbox" id="w-cw"> CW Macros</label>
-      <label class="settings-toggle"><input type="checkbox" id="w-cw-controls"> CW Speed / Text Input</label>
-      <label class="settings-toggle"><input type="checkbox" id="w-voice"> Voice Macros</label>
-      <div class="section-label">WebSDR</div>
-      <label class="settings-toggle"><input type="checkbox" id="w-kiwi"> Enable WebSDR RX</label>
-      <div id="kiwi-config" style="padding-left:24px;display:none;">
-        <select id="kiwi-station-select" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px;margin:4px 0;">
-          <option value="">-- select station --</option>
-        </select>
-        <span style="font-size:10px;color:var(--text-dim);display:block;">Configure stations in POTACAT Settings → WebSDR</span>
-      </div>
-      <div class="section-label">Window</div>
-      <label class="settings-toggle"><input type="checkbox" id="s-always-on-top" checked> Always on top</label>
-      <div class="section-label">Dial Sections</div>
-      <label class="settings-toggle"><input type="checkbox" id="s-dial" checked> VFO Knob</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-solar" checked> Solar (SFI/K/A)</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-step" checked> Step Size</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-band" checked> Quick Band</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-filter" checked> Filter Buttons</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-filter-slider" checked> Filter Slider</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-controls" checked> Controls</label>
-      <label class="settings-toggle"><input type="checkbox" id="s-profiles-inline"> Profiles (inline)</label>
-      <div class="section-label">Quick Bands</div>
-      <div class="band-checkboxes" id="band-checkboxes"></div>
     </div>
   </div>
-  <div class="vfo-lock-toast" id="vfo-lock-toast">🔒 VFO Locked — Unlock VFO to change frequency</div>
+
+  <!-- Transmit audio: microphone + EQ, opened from the bar's EQ button -->
+  <div class="tx-audio-panel" id="tx-audio-panel">
+    <div class="lbl">Transmit audio</div>
+    <div class="field-row" id="mic-select-row" style="display:none;">
+      <span>Microphone</span>
+      <select class="sel" id="mic-select" style="max-width:200px;"></select>
+    </div>
+    <div class="vfo-tx-eq-row" id="vfo-tx-eq-row" style="display:none;font-size:12px;color:var(--text-dim);align-items:center;gap:8px;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--t);font-size:13px;">
+        <input type="checkbox" id="vfo-tx-eq-enabled" style="width:16px;height:16px;accent-color:var(--blue);">
+        <span>EQ</span>
+      </label>
+      <select class="sel" id="vfo-tx-eq-preset" style="flex:1;min-width:90px;">
+        <option value="ragchew">Ragchew</option>
+        <option value="pileup">Pileup</option>
+        <option value="dx">DX</option>
+        <option value="custom">Custom</option>
+      </select>
+      <button class="link-btn" id="vfo-tx-eq-rig-default-btn" type="button" title="Save current EQ as the default for the currently-active rig profile">Save for rig</button>
+      <!-- VU meter: pre (post-EQ, pre-comp) vs post (post-makeup). Visible
+           only when EQ is enabled; the gap between the two bars is the gain
+           reduction the compressor is applying. -->
+      <div id="vfo-tx-eq-meter" style="display:none;flex-basis:100%;align-items:center;gap:6px;">
+        <span style="font-size:10px;min-width:26px;">Pre</span>
+        <div class="meter-bar-wrap"><div id="vfo-tx-eq-pre-bar" class="meter-bar" style="background:var(--blue);transition:width 0.05s linear;"></div></div>
+        <span style="font-size:10px;min-width:26px;">Post</span>
+        <div class="meter-bar-wrap"><div id="vfo-tx-eq-post-bar" class="meter-bar" style="background:var(--green);transition:width 0.05s linear;"></div></div>
+      </div>
+      <!-- Custom sliders. Shown only when preset === 'custom'. Each change
+           is persisted live via setTxEq so tweaks stick across PTT cycles. -->
+      <details id="vfo-tx-eq-custom" style="display:none;flex-basis:100%;">
+        <summary style="cursor:pointer;font-size:11px;">Custom EQ + Compressor</summary>
+        <div class="vfo-tx-eq-sliders" style="display:grid;grid-template-columns:auto 1fr auto;column-gap:8px;row-gap:4px;margin-top:6px;font-size:11px;">
+          <span title="Low shelf gain at 120 Hz">Low (120 Hz)</span>
+          <input type="range" id="vfo-tx-eq-low" min="-12" max="12" step="0.5" value="0">
+          <span id="vfo-tx-eq-low-val">0 dB</span>
+          <span title="High shelf gain at 2 kHz">High (2 kHz)</span>
+          <input type="range" id="vfo-tx-eq-high" min="-12" max="12" step="0.5" value="0">
+          <span id="vfo-tx-eq-high-val">0 dB</span>
+          <span title="Compressor threshold: below this is uncompressed">Threshold</span>
+          <input type="range" id="vfo-tx-eq-thr" min="-60" max="0" step="1" value="-24">
+          <span id="vfo-tx-eq-thr-val">-24 dB</span>
+          <span title="Compression ratio (inputs above threshold are reduced by this factor)">Ratio</span>
+          <input type="range" id="vfo-tx-eq-ratio" min="1" max="20" step="0.5" value="2">
+          <span id="vfo-tx-eq-ratio-val">2:1</span>
+          <span title="Attack time in ms (how fast comp kicks in)">Attack</span>
+          <input type="range" id="vfo-tx-eq-attack" min="0" max="100" step="1" value="3">
+          <span id="vfo-tx-eq-attack-val">3 ms</span>
+          <span title="Release time in ms (how fast comp lets go)">Release</span>
+          <input type="range" id="vfo-tx-eq-release" min="10" max="1000" step="10" value="250">
+          <span id="vfo-tx-eq-release-val">250 ms</span>
+          <span title="Soft-knee width in dB (smooths the comp curve around threshold)">Knee</span>
+          <input type="range" id="vfo-tx-eq-knee" min="0" max="40" step="1" value="30">
+          <span id="vfo-tx-eq-knee-val">30 dB</span>
+          <span title="Make-up gain after compression: compensates for level lost to comp">Makeup</span>
+          <input type="range" id="vfo-tx-eq-makeup" min="0" max="24" step="0.5" value="0">
+          <span id="vfo-tx-eq-makeup-val">0 dB</span>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- Bottom bar: PTT, transmit audio, LOG -->
+  <div class="bar widget-section" id="widget-ptt-row">
+    <button class="ptt-btn" id="ptt-btn" style="display:none;">PTT</button>
+    <button class="sq" id="eq-btn" style="display:none;" title="Transmit audio: microphone and EQ" aria-label="Transmit audio: microphone and EQ"><svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></button>
+    <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
+  </div>
+
+  <!-- Settings sheet (gear) -->
+  <div class="sheet-backdrop" id="sheet-backdrop"></div>
+  <div class="sheet" id="tab-settings" role="dialog" aria-label="VFO settings">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <span class="sheet-title">VFO settings</span>
+      <button class="sheet-done" id="sheet-done">Done</button>
+    </div>
+    <div class="sheet-body">
+      <span class="lbl">Show in this window</span>
+      <label class="settings-toggle">Meters <input type="checkbox" id="w-smeter"></label>
+      <label class="settings-toggle">PTT button <input type="checkbox" id="w-ptt"></label>
+      <label class="settings-toggle">LOG button <input type="checkbox" id="w-log"></label>
+      <label class="settings-toggle">VFO knob <input type="checkbox" id="s-dial" checked></label>
+      <label class="settings-toggle">Operator photo (QRZ) <input type="checkbox" id="w-op-photo"></label>
+      <label class="settings-toggle">Beam heading to the spot <input type="checkbox" id="w-bearing"></label>
+      <label class="settings-toggle">Tuning step chip <input type="checkbox" id="s-step" checked></label>
+      <label class="settings-toggle">Bands <input type="checkbox" id="s-band" checked></label>
+      <label class="settings-toggle">Filter buttons <input type="checkbox" id="s-filter" checked></label>
+      <label class="settings-toggle">Filter slider <input type="checkbox" id="s-filter-slider" checked></label>
+      <label class="settings-toggle">NB, ATU and custom buttons <input type="checkbox" id="s-controls" checked></label>
+      <label class="settings-toggle">Solar (SFI, K, A) <input type="checkbox" id="s-solar" checked></label>
+      <label class="settings-toggle">CW macros <input type="checkbox" id="w-cw"></label>
+      <label class="settings-toggle">CW speed and text <input type="checkbox" id="w-cw-controls"></label>
+      <label class="settings-toggle">Voice macros <input type="checkbox" id="w-voice"></label>
+      <label class="settings-toggle">Profiles under the dial <input type="checkbox" id="s-profiles-inline"></label>
+
+      <span class="lbl">Order</span>
+      <div class="order-note">Drag a row, or use the arrows.</div>
+      <div class="order-list" id="order-list"></div>
+
+      <span class="lbl">Profiles</span>
+      <div class="profile-add-row">
+        <input type="text" id="profile-name-input" placeholder="Profile name (e.g. 20m CW)">
+        <button id="profile-save-btn">Save current</button>
+      </div>
+      <div class="profile-list" id="profile-list" style="margin-top:8px;">
+        <div class="profile-empty">No profiles yet. Tune to a frequency and save it above.</div>
+      </div>
+
+      <span class="lbl">Bands</span>
+      <div class="band-checkboxes" id="band-checkboxes"></div>
+
+      <span class="lbl">WebSDR</span>
+      <label class="settings-toggle">Enable WebSDR receive <input type="checkbox" id="w-kiwi"></label>
+      <div id="kiwi-config" style="display:none;padding-top:8px;">
+        <select class="sel" id="kiwi-station-select" style="width:100%;">
+          <option value="">-- select station --</option>
+        </select>
+        <div class="settings-note">Configure stations in POTACAT Settings, WebSDR.</div>
+      </div>
+      <button class="sheet-link-btn" id="sdr-add-sheet-btn">Add or edit SDRs</button>
+
+      <span class="lbl">Window</span>
+      <label class="settings-toggle">Always on top <input type="checkbox" id="s-always-on-top" checked></label>
+    </div>
+  </div>
+
+  <div class="vfo-lock-toast" id="vfo-lock-toast">VFO locked. Unlock the VFO to change frequency.</div>
 
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
@@ -761,6 +724,16 @@ let profileDragFrom = null; // index of the profile being dragged (drag-to-reord
 let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
 let vfoLocked = false;
 
+const ICONS = {
+  lockOpen: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 7.5-2"></path></svg>',
+  lockShut: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>',
+  speaker: '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path></svg>',
+  speakerOn: '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 5.5a9 9 0 0 1 0 13"></path></svg>',
+  grip: '<svg viewBox="0 0 24 24"><path d="M5 9h14M5 15h14"></path></svg>',
+  up: '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"></path></svg>',
+  down: '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"></path></svg>',
+  speakerMuted: '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"></path><path d="M16 9l5 6M21 9l-5 6"></path></svg>',
+};
 const freqDisplay = document.getElementById('freq-display');
 const modeBadge = document.getElementById('mode-badge');
 const filterBadge = document.getElementById('filter-badge');
@@ -772,11 +745,11 @@ let _lockToastTimer = null;
 
 function updateLockBtn() {
   if (vfoLocked) {
-    vfoLockBtn.innerHTML = '&#x1F512;';
+    vfoLockBtn.innerHTML = ICONS.lockShut;
     vfoLockBtn.classList.add('locked');
     vfoLockBtn.title = 'VFO Locked — click to unlock';
   } else {
-    vfoLockBtn.innerHTML = '&#x1F513;';
+    vfoLockBtn.innerHTML = ICONS.lockOpen;
     vfoLockBtn.classList.remove('locked');
     vfoLockBtn.title = 'Click to lock VFO';
   }
@@ -788,6 +761,7 @@ vfoLockBtn.addEventListener('click', () => {
   updateLockBtn();
 });
 
+updateLockBtn();
 window.api.onVfoLockState((locked) => {
   vfoLocked = locked;
   updateLockBtn();
@@ -808,7 +782,7 @@ window.api.onTuneBlocked((msg) => {
   // lock was open (#76). The lock wording only appears when it IS the lock.
   vfoLockToast.textContent = (typeof msg === 'string' && msg)
     ? msg
-    : (vfoLocked ? '🔒 VFO Locked — Unlock VFO to change frequency' : 'Tuning unavailable — no radio connected');
+    : (vfoLocked ? 'VFO locked. Unlock the VFO to change frequency.' : 'Tuning unavailable: no radio connected');
   vfoLockToast.classList.add('show');
   clearTimeout(_lockToastTimer);
   _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 3000);
@@ -816,14 +790,27 @@ window.api.onTuneBlocked((msg) => {
 const filterSlider = document.getElementById('filter-slider');
 const filterVal = document.getElementById('filter-val');
 
-// --- Tabs ---
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-  });
+// --- Panes + settings sheet ---
+// The window has one main pane (the dial) and a type-to-tune pane opened by
+// clicking the frequency or typing digits. Settings is a sheet over both.
+function showPane(name) {
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  if (name === 'keypad') { kpBuffer = ''; kpRender(); }
+}
+const sheetEl = document.getElementById('tab-settings');
+const sheetBackdrop = document.getElementById('sheet-backdrop');
+function openSheet(open) {
+  if (open) renderOrderList();
+  sheetEl.classList.toggle('show', open);
+  sheetBackdrop.classList.toggle('show', open);
+  document.getElementById('gear-btn').classList.toggle('on', open);
+}
+document.getElementById('gear-btn').addEventListener('click', () => openSheet(!sheetEl.classList.contains('show')));
+document.getElementById('sheet-done').addEventListener('click', () => openSheet(false));
+sheetBackdrop.addEventListener('click', () => openSheet(false));
+const sheetOpen = () => sheetEl.classList.contains('show');
+sheetEl.addEventListener('change', (e) => {
+  if (e.target && e.target.type === 'checkbox' && sheetOpen()) renderOrderList();
 });
 
 // --- Frequency display ---
@@ -837,8 +824,22 @@ function formatFreqKhz(hz) {
   return `${mhz}.${String(whole).padStart(3, '0')}.${String(frac).padStart(2, '0')}`;
 }
 
+// 14.285 big, .500 smaller (the Hz inside the kHz), then MHz.
+function renderFreqDisplay(hz) {
+  let main = '--.---', sub = '.---';
+  if (hz) {
+    const totalHz = Math.round(hz);
+    const mhz = Math.floor(totalHz / 1e6);
+    const khz = Math.floor((totalHz % 1e6) / 1000);
+    const rest = totalHz % 1000;
+    main = mhz + '.' + String(khz).padStart(3, '0');
+    sub = '.' + String(rest).padStart(3, '0');
+  }
+  freqDisplay.innerHTML = '<span class="fq-main">' + main + '</span><span class="fq-sub">' + sub + '</span><span class="fq-unit">MHz</span>';
+}
+
 function updateDisplay() {
-  freqDisplay.textContent = formatFreqKhz(currentFreqHz);
+  renderFreqDisplay(currentFreqHz);
   const m = (currentMode || '').toUpperCase();
   modeBadge.textContent = m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
   if (currentFilterWidth > 0) {
@@ -848,6 +849,7 @@ function updateDisplay() {
   } else {
     filterBadge.textContent = '';
   }
+  filterBadge.style.display = currentFilterWidth > 0 ? '' : 'none';
   updateBandHighlight();
 }
 
@@ -955,7 +957,7 @@ function buildBandGrid(container) {
   for (const b of BANDS) {
     if (vfoHiddenBands.includes(b.label)) continue;
     const btn = document.createElement('button');
-    btn.className = 'band-btn';
+    btn.className = 'tog band-btn';
     btn.textContent = b.label;
     btn.dataset.freq = b.freq;
     btn.addEventListener('click', () => {
@@ -998,14 +1000,10 @@ function updateModeHighlight() {
   });
 }
 
-// Frequency display click → switch to keypad tab
+// Frequency display click → type-to-tune pane
 freqDisplay.addEventListener('click', () => {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-  document.querySelector('[data-tab="keypad"]').classList.add('active');
-  document.getElementById('tab-keypad').classList.add('active');
-  kpBuffer = '';
-  kpInput.value = '';
+  if (vfoLocked) { window.api.setVfoLock(true); return; }
+  showPane('keypad');
 });
 
 // Mode badge click → show inline picker
@@ -1015,12 +1013,15 @@ modeBadge.addEventListener('click', (e) => {
   if (picker) { picker.remove(); return; }
   picker = document.createElement('div');
   picker.id = 'mode-picker-popup';
-  picker.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);top:70px;z-index:100;background:var(--bg-secondary);border:1px solid #4fc3f7;border-radius:8px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center;max-width:280px;box-shadow:0 4px 16px rgba(0,0,0,0.5);';
+  picker.className = 'mode-picker';
+  const br = modeBadge.getBoundingClientRect();
+  picker.style.top = (br.bottom + 6) + 'px';
+  picker.style.left = '12px';
+  picker.style.right = '12px';
   MODES.forEach(m => {
     const btn = document.createElement('button');
     btn.className = 'mode-btn' + (currentMode.toUpperCase() === m || (m === 'RADE' && currentMode.toUpperCase().includes('FREEDV')) ? ' active' : '');
     btn.textContent = m;
-    btn.style.cssText = 'padding:8px 12px;font-size:13px;min-width:52px;';
     btn.addEventListener('click', () => {
       const catMode = m === 'RADE' ? 'FREEDV-RADEV1' : m;
       window.api.setMode(catMode);
@@ -1045,9 +1046,10 @@ function buildFilterQuick() {
     row.innerHTML = '';
     FILTER_QUICK.forEach(hz => {
       const btn = document.createElement('button');
-      btn.className = 'step-btn fq-btn' + (currentFilterWidth === hz ? ' active' : '');
+      btn.className = 'fq-btn' + (nearestFilterQuick(currentFilterWidth) === hz ? ' active' : '');
       btn.dataset.hz = hz;
       btn.textContent = hz >= 1000 ? (hz / 1000) + 'k' : hz;
+      btn.title = hz >= 1000 ? (hz / 1000).toFixed(1) + ' kHz' : hz + ' Hz';
       btn.addEventListener('click', () => {
         currentFilterWidth = hz;
         window.api.setFilterWidth(hz);
@@ -1060,9 +1062,19 @@ function buildFilterQuick() {
     });
   });
 }
+// The radio reports the width it actually set (2350, 2700 from a Flex
+// low/high pair...), so light the nearest button when it is within a few
+// percent, the same width the label above rounds to. Further off, none.
+function nearestFilterQuick(hz) {
+  if (!(hz > 0)) return 0;
+  let best = 0, bestD = Infinity;
+  for (const q of FILTER_QUICK) { const d = Math.abs(q - hz); if (d < bestD) { best = q; bestD = d; } }
+  return bestD <= Math.max(50, best * 0.05) ? best : 0;
+}
 function updateFilterQuickHighlight() {
+  const pick = nearestFilterQuick(currentFilterWidth);
   document.querySelectorAll('.fq-btn').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.hz) === currentFilterWidth);
+    btn.classList.toggle('active', parseInt(btn.dataset.hz) === pick);
   });
 }
 buildFilterQuick();
@@ -1087,7 +1099,7 @@ function buildRigToggles() {
   document.querySelectorAll('.rig-toggles-shared').forEach(row => {
     row.innerHTML = '';
     const nbBtn = document.createElement('button');
-    nbBtn.className = 'toggle-btn nb-toggle' + (nbOn ? ' on' : '');
+    nbBtn.className = 'tog toggle-btn nb-toggle' + (nbOn ? ' on' : '');
     nbBtn.textContent = 'NB';
     nbBtn.title = 'Noise Blanker';
     nbBtn.addEventListener('click', () => {
@@ -1100,7 +1112,7 @@ function buildRigToggles() {
     row.appendChild(nbBtn);
 
     const atuBtn = document.createElement('button');
-    atuBtn.className = 'toggle-btn atu-toggle' + (atuOn ? ' on' : '');
+    atuBtn.className = 'tog toggle-btn atu-toggle' + (atuOn ? ' on' : '');
     atuBtn.textContent = 'ATU';
     atuBtn.title = 'Start ATU tune cycle';
     // Momentary: atu-tune runs a tune cycle on every press (NOT a toggle — see
@@ -1198,7 +1210,7 @@ function buildCustomCatBtns() {
         return;
       }
       const btn = document.createElement('button');
-      btn.className = 'cat-cmd-btn custom-cat-injected';
+      btn.className = 'tog cat-cmd-btn custom-cat-injected';
       if (b.type === 'toggle') {
         // Session-only "last sent" state, like the other windows: POTACAT
         // cannot read back an arbitrary user-typed command.
@@ -1249,7 +1261,7 @@ const stepSelect = document.getElementById('step-select');
 STEPS.forEach((s, i) => {
   const opt = document.createElement('option');
   opt.value = i;
-  opt.textContent = 'Step: ' + s.label;
+  opt.textContent = s.label + ' step';
   if (i === stepIdx) opt.selected = true;
   stepSelect.appendChild(opt);
 });
@@ -1258,30 +1270,52 @@ stepSelect.addEventListener('change', () => { stepIdx = parseInt(stepSelect.valu
 // --- VFO Dial (canvas) ---
 const canvas = document.getElementById('vfo-dial');
 const ctx = canvas.getContext('2d');
-const CX = canvas.width / 2, CY = canvas.height / 2;
-const HOUSING_R = 94, KNOB_R = 73;
+const DIAL_PX = 150;
+const CX = DIAL_PX / 2, CY = DIAL_PX / 2;
+const HOUSING_R = 71, KNOB_R = 55;
+function sizeDialCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(DIAL_PX * dpr);
+  canvas.height = Math.round(DIAL_PX * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+sizeDialCanvas();
+// The knob's colours come from the theme (--knob-* in the stylesheet).
+let knobColors = null;
+function readKnobColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n) => cs.getPropertyValue(n).trim();
+  knobColors = {
+    base: v('--knob-base'), ha: v('--knob-housing-a'), hb: v('--knob-housing-b'), hc: v('--knob-housing-c'),
+    bevel: v('--knob-bevel'), mark: v('--green'),
+    ka: v('--knob-a'), kb: v('--knob-b'), kc: v('--knob-c'),
+    ridge: v('--knob-ridge'), da: v('--knob-dimple-a'), db: v('--knob-dimple-b'),
+  };
+}
+readKnobColors();
 let vfoAngle = 0, vfoAccum = 0;
 const STEP_ANGLE = Math.PI / 6; // 30 deg per step
 
 function drawVfoDial() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const k = knobColors;
+  ctx.clearRect(0, 0, DIAL_PX, DIAL_PX);
   // Housing
   ctx.beginPath(); ctx.arc(CX, CY + 1, HOUSING_R, 0, Math.PI * 2);
-  ctx.fillStyle = '#222233'; ctx.fill();
+  ctx.fillStyle = k.base; ctx.fill();
   const hg = ctx.createLinearGradient(CX - HOUSING_R, CY - HOUSING_R, CX + HOUSING_R, CY + HOUSING_R);
-  hg.addColorStop(0, '#404058'); hg.addColorStop(0.5, '#2a2a3a'); hg.addColorStop(1, '#1a1a28');
+  hg.addColorStop(0, k.ha); hg.addColorStop(0.5, k.hb); hg.addColorStop(1, k.hc);
   ctx.beginPath(); ctx.arc(CX, CY, HOUSING_R, 0, Math.PI * 2);
   ctx.fillStyle = hg; ctx.fill();
   // Bevel
   ctx.beginPath(); ctx.arc(CX, CY, HOUSING_R - 1, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = k.bevel; ctx.lineWidth = 1.5; ctx.stroke();
   // Indicator
-  ctx.beginPath(); ctx.moveTo(CX, CY - HOUSING_R + 2); ctx.lineTo(CX, CY - HOUSING_R + 14);
-  ctx.strokeStyle = '#4ecca3'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(CX, CY - HOUSING_R + 2); ctx.lineTo(CX, CY - HOUSING_R + 12);
+  ctx.strokeStyle = k.mark; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
 
   // Knob
-  const kg = ctx.createRadialGradient(CX - 10, CY - 10, 10, CX, CY, KNOB_R);
-  kg.addColorStop(0, '#4a4a62'); kg.addColorStop(0.7, '#353548'); kg.addColorStop(1, '#28283a');
+  const kg = ctx.createRadialGradient(CX - 8, CY - 8, 8, CX, CY, KNOB_R);
+  kg.addColorStop(0, k.ka); kg.addColorStop(0.7, k.kb); kg.addColorStop(1, k.kc);
   ctx.beginPath(); ctx.arc(CX, CY, KNOB_R, 0, Math.PI * 2);
   ctx.fillStyle = kg; ctx.fill();
 
@@ -1289,20 +1323,20 @@ function drawVfoDial() {
   const N_RIDGES = 48;
   for (let i = 0; i < N_RIDGES; i++) {
     const a = vfoAngle + (i / N_RIDGES) * Math.PI * 2;
-    const r1 = KNOB_R - 2, r2 = KNOB_R - 8;
+    const r1 = KNOB_R - 2, r2 = KNOB_R - 7;
     ctx.beginPath();
     ctx.moveTo(CX + Math.cos(a) * r1, CY + Math.sin(a) * r1);
     ctx.lineTo(CX + Math.cos(a) * r2, CY + Math.sin(a) * r2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = k.ridge; ctx.lineWidth = 1; ctx.stroke();
   }
 
   // Finger dimple
   const da = vfoAngle - Math.PI / 2;
   const dr = KNOB_R * 0.55;
   const dx = CX + Math.cos(da) * dr, dy = CY + Math.sin(da) * dr;
-  const dg = ctx.createRadialGradient(dx - 1, dy - 1, 1, dx, dy, 8);
-  dg.addColorStop(0, '#1a1a28'); dg.addColorStop(1, '#2a2a3a');
-  ctx.beginPath(); ctx.arc(dx, dy, 8, 0, Math.PI * 2);
+  const dg = ctx.createRadialGradient(dx - 1, dy - 1, 1, dx, dy, 7);
+  dg.addColorStop(0, k.da); dg.addColorStop(1, k.db);
+  ctx.beginPath(); ctx.arc(dx, dy, 7, 0, Math.PI * 2);
   ctx.fillStyle = dg; ctx.fill();
 }
 drawVfoDial();
@@ -1312,8 +1346,8 @@ let dragging = false, lastAngle = 0, velocity = 0, inertiaId = null;
 
 function getAngle(e) {
   const r = canvas.getBoundingClientRect();
-  const x = (e.clientX || e.touches[0].clientX) - r.left - CX;
-  const y = (e.clientY || e.touches[0].clientY) - r.top - CY;
+  const x = (e.clientX || e.touches[0].clientX) - r.left - r.width / 2;
+  const y = (e.clientY || e.touches[0].clientY) - r.top - r.height / 2;
   return Math.atan2(y, x);
 }
 
@@ -1378,25 +1412,77 @@ freqDisplay.addEventListener('wheel', handleFreqWheel, { passive: false });
 const kpInput = document.getElementById('kp-input');
 let kpBuffer = '';
 
+const kpGo = document.getElementById('kp-go');
+// What the typed text means, in kHz, or 0 when it means nothing yet.
+function kpTargetKhz(buf) {
+  const val = parseFloat(buf);
+  if (isNaN(val) || val <= 0) return 0;
+  // If the input has a decimal point, treat as MHz (user was explicit)
+  // Otherwise: > 300 = kHz, > 300000 = Hz, else MHz
+  let mhz;
+  if (buf.includes('.')) mhz = val;
+  else if (val > 300000) mhz = val / 1000000;
+  else if (val > 300) mhz = val / 1000;
+  else mhz = val;
+  return mhz * 1000;
+}
+function fmtMhz(khz) {
+  return (khz / 1000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+function kpRender() {
+  kpInput.value = kpBuffer;
+  const khz = kpTargetKhz(kpBuffer);
+  kpGo.disabled = !khz;
+  kpGo.textContent = khz ? 'Tune ' + fmtMhz(khz) + ' MHz' : 'Tune';
+}
+// Recent frequencies typed here (this device only).
+const KP_RECENT_KEY = 'vfoRecentKhz';
+function kpRecentList() {
+  try { const a = JSON.parse(localStorage.getItem(KP_RECENT_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+function kpRememberRecent(khz) {
+  const list = kpRecentList().filter(x => Math.abs(x - khz) > 0.0005);
+  list.unshift(khz);
+  try { localStorage.setItem(KP_RECENT_KEY, JSON.stringify(list.slice(0, 6))); } catch {}
+  kpRenderRecent();
+}
+function kpRenderRecent() {
+  const list = kpRecentList();
+  const wrap = document.getElementById('kp-recent-wrap');
+  const row = document.getElementById('kp-recent');
+  wrap.style.display = list.length ? '' : 'none';
+  row.innerHTML = '';
+  list.forEach(khz => {
+    const b = document.createElement('button');
+    b.className = 'tog mono';
+    b.textContent = fmtMhz(khz);
+    b.addEventListener('click', () => { kpBuffer = fmtMhz(khz); kpGo.click(); });
+    row.appendChild(b);
+  });
+}
+kpRenderRecent();
+
 document.querySelectorAll('.kp-btn[data-digit]').forEach(btn => {
   btn.addEventListener('click', () => {
     if (kpBuffer.length >= 10) return;
     kpBuffer += btn.dataset.digit;
-    kpInput.value = kpBuffer;
+    kpRender();
   });
 });
 
 document.getElementById('kp-dot').addEventListener('click', () => {
-  if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpInput.value = kpBuffer; }
+  if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpRender(); }
 });
 
-document.getElementById('kp-clear').addEventListener('click', () => {
-  kpBuffer = '';
-  kpInput.value = '';
+document.getElementById('kp-del').addEventListener('click', () => {
+  kpBuffer = kpBuffer.slice(0, -1);
+  kpRender();
 });
 
-document.getElementById('kp-go').addEventListener('click', () => {
-  if (vfoLocked) return;
+document.getElementById('kp-cancel').addEventListener('click', () => showPane('dial'));
+
+kpGo.addEventListener('click', () => {
+  if (vfoLocked) { window.api.setVfoLock(true); return; }
   const val = parseFloat(kpBuffer);
   if (isNaN(val) || val <= 0) return;
   // If the input has a decimal point, treat as MHz (user was explicit)
@@ -1414,25 +1500,37 @@ document.getElementById('kp-go').addEventListener('click', () => {
   const khz = mhz * 1000;
   tuneFromPopout(khz);
   currentFreqHz = khz * 1000;
+  kpRememberRecent(khz);
   kpBuffer = '';
-  kpInput.value = '';
+  kpRender();
   updateDisplay();
+  showPane('dial');
 });
 
-// Keyboard support for keypad
+// Keyboard: typing digits anywhere opens type-to-tune (never while a text
+// field has focus: CW text, profile names).
 document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if (e.key === 'Escape') {
+    if (sheetOpen()) { openSheet(false); return; }
+    showPane('dial');
+    return;
+  }
+  if (sheetOpen()) return;
+  const kpActive = document.getElementById('tab-keypad').classList.contains('active');
   if (e.key >= '0' && e.key <= '9') {
+    if (!kpActive) showPane('keypad');
     const btn = document.querySelector(`.kp-btn[data-digit="${e.key}"]`);
     if (btn) btn.click();
   } else if (e.key === '.' || e.key === ',') {
-    if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpInput.value = kpBuffer; }
-  } else if (e.key === 'Backspace') {
+    if (!kpActive) showPane('keypad');
+    if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpRender(); }
+  } else if (kpActive && e.key === 'Backspace') {
     kpBuffer = kpBuffer.slice(0, -1);
-    kpInput.value = kpBuffer;
-  } else if (e.key === 'Enter') {
-    document.getElementById('kp-go').click();
-  } else if (e.key === 'Escape') {
-    document.getElementById('kp-clear').click();
+    kpRender();
+  } else if (kpActive && e.key === 'Enter') {
+    kpGo.click();
   }
 });
 
@@ -1647,13 +1745,133 @@ let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, 'cw-control
 const SECTIONS = ['dial', 'solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
 let vfoSections = { dial: true, solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
+// --- Dial-pane order (settings.vfoOrder) ---
+// The blocks under the header, top to bottom. Unknown keys from a newer build
+// are dropped and a block added later lands in its default place.
+const ORDER_BLOCKS = [
+  { key: 'knob', el: 'blk-knob', name: 'Knob and activator' },
+  { key: 'band', el: 'sec-band', name: 'Bands' },
+  { key: 'filter', el: 'sec-filter', name: 'Filter buttons' },
+  { key: 'filter-slider', el: 'sec-filter-slider', name: 'Filter slider' },
+  { key: 'controls', el: 'blk-controls', name: 'NB, ATU, custom buttons and solar' },
+  { key: 'profiles', el: 'sec-profiles-inline', name: 'Profiles' },
+  { key: 'cw-controls', el: 'widget-cw-controls', name: 'CW speed and text' },
+  { key: 'cw', el: 'widget-cw', name: 'CW macros' },
+  { key: 'voice', el: 'widget-voice', name: 'Voice macros' },
+  { key: 'kiwi', el: 'widget-kiwi', name: 'WebSDR' },
+];
+const DEFAULT_ORDER = ORDER_BLOCKS.map(b => b.key);
+let vfoOrder = DEFAULT_ORDER.slice();
+
+function normalizeOrder(saved) {
+  const out = [];
+  if (Array.isArray(saved)) for (const k of saved) if (DEFAULT_ORDER.includes(k) && !out.includes(k)) out.push(k);
+  DEFAULT_ORDER.forEach((k, i) => {
+    if (out.includes(k)) return;
+    // A block this profile never ordered goes after its default predecessor.
+    const prev = DEFAULT_ORDER.slice(0, i).reverse().find(p => out.includes(p));
+    out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, k);
+  });
+  return out;
+}
+
+function applyOrder() {
+  const pane = document.getElementById('tab-dial');
+  for (const k of vfoOrder) {
+    const b = ORDER_BLOCKS.find(x => x.key === k);
+    const el = b && document.getElementById(b.el);
+    if (el) pane.appendChild(el);
+  }
+}
+
+function orderBlockShown(b) {
+  const el = document.getElementById(b.el);
+  if (!el) return false;
+  if (b.key === 'controls') return !!(vfoSections.controls || vfoSections.solar);
+  if (el.style.display === 'none') return false;
+  if (el.classList.contains('widget-section') && !el.classList.contains('visible')) return false;
+  return true;
+}
+
+function moveOrder(key, toIndex) {
+  const from = vfoOrder.indexOf(key);
+  if (from < 0) return;
+  toIndex = Math.max(0, Math.min(vfoOrder.length - 1, toIndex));
+  if (toIndex === from) return;
+  vfoOrder.splice(from, 1);
+  vfoOrder.splice(toIndex, 0, key);
+  applyOrder();
+  renderOrderList();
+  window.api.saveSettings({ vfoOrder });
+}
+
+let _orderDragKey = null;
+function renderOrderList() {
+  const list = document.getElementById('order-list');
+  if (!list) return;
+  list.innerHTML = '';
+  vfoOrder.forEach((k, i) => {
+    const b = ORDER_BLOCKS.find(x => x.key === k);
+    if (!b) return;
+    const row = document.createElement('div');
+    const shown = orderBlockShown(b);
+    row.className = 'order-row' + (shown ? '' : ' off');
+    row.draggable = true;
+    row.dataset.key = k;
+    row.innerHTML = '<span class="grip">' + ICONS.grip + '</span>'
+      + '<span class="order-name"></span>'
+      + (shown ? '' : '<span class="order-off">hidden</span>')
+      + '<button class="order-move" title="Move up" aria-label="Move up">' + ICONS.up + '</button>'
+      + '<button class="order-move" title="Move down" aria-label="Move down">' + ICONS.down + '</button>';
+    row.querySelector('.order-name').textContent = b.name;
+    const [upBtn, downBtn] = row.querySelectorAll('.order-move');
+    upBtn.disabled = i === 0;
+    downBtn.disabled = i === vfoOrder.length - 1;
+    upBtn.addEventListener('click', () => moveOrder(k, i - 1));
+    downBtn.addEventListener('click', () => moveOrder(k, i + 1));
+    row.addEventListener('dragstart', (e) => {
+      _orderDragKey = k;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', k);
+    });
+    row.addEventListener('dragend', () => {
+      _orderDragKey = null;
+      list.querySelectorAll('.order-row').forEach(r => r.classList.remove('dragging', 'drop-before', 'drop-after'));
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!_orderDragKey || _orderDragKey === k) return;
+      e.preventDefault();
+      const r = row.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      row.classList.toggle('drop-after', after);
+      row.classList.toggle('drop-before', !after);
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-before', 'drop-after'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const dragKey = _orderDragKey;
+      if (!dragKey || dragKey === k) return;
+      const after = row.classList.contains('drop-after');
+      const from = vfoOrder.indexOf(dragKey);
+      let to = vfoOrder.indexOf(k) + (after ? 1 : 0);
+      if (from < to) to -= 1;
+      moveOrder(dragKey, to);
+    });
+    list.appendChild(row);
+  });
+}
+
 async function loadWidgets() {
   const s = await window.api.getSettings();
+  vfoOrder = normalizeOrder(s.vfoOrder);
+  applyOrder();
   if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
   if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
   if (s.vfoHiddenBands) vfoHiddenBands = s.vfoHiddenBands;
   if (s.vfoPttMicDevice) pttMicDeviceId = s.vfoPttMicDevice;
   sAlwaysOnTop.checked = s.vfoAlwaysOnTop !== false; // default true
+  paintPin();
   applyWidgets();
   applySections();
   rebuildAllBandGrids();
@@ -1700,6 +1918,9 @@ function applyWidgets() {
   pttRowEl.classList.toggle('visible', eitherOn);
   pttBtnEl.style.display = vfoWidgets.ptt ? '' : 'none';
   logBtnEl.style.display = vfoWidgets.log ? '' : 'none';
+  document.getElementById('eq-btn').style.display = vfoWidgets.ptt ? '' : 'none';
+  pttRowEl.classList.toggle('log-only', !vfoWidgets.ptt && !!vfoWidgets.log);
+  if (!vfoWidgets.ptt) showTxAudioPanel(false);
   if (micSelectRow) micSelectRow.style.display = vfoWidgets.ptt ? '' : 'none';
   const vfoTxEqRowEl = document.getElementById('vfo-tx-eq-row');
   if (vfoTxEqRowEl) vfoTxEqRowEl.style.display = vfoWidgets.ptt ? 'flex' : 'none';
@@ -1788,7 +2009,26 @@ micSelect.addEventListener('change', () => {
 
 sAlwaysOnTop.addEventListener('change', () => {
   window.api.setAlwaysOnTop(sAlwaysOnTop.checked);
+  paintPin();
 });
+// Title-bar pin = the same setting as "Always on top" in the sheet.
+const pinBtn = document.getElementById('pin-btn');
+function paintPin() {
+  pinBtn.classList.toggle('on', sAlwaysOnTop.checked);
+  pinBtn.title = sAlwaysOnTop.checked ? 'Kept on top: click to release' : 'Keep this window on top';
+}
+pinBtn.addEventListener('click', () => {
+  sAlwaysOnTop.checked = !sAlwaysOnTop.checked;
+  window.api.setAlwaysOnTop(sAlwaysOnTop.checked);
+  paintPin();
+});
+// The EQ button opens the transmit audio panel (microphone + EQ).
+const txAudioPanel = document.getElementById('tx-audio-panel');
+function showTxAudioPanel(open) {
+  txAudioPanel.classList.toggle('show', open);
+  document.getElementById('eq-btn').classList.toggle('on', open);
+}
+document.getElementById('eq-btn').addEventListener('click', () => showTxAudioPanel(!txAudioPanel.classList.contains('show')));
 
 async function populateMicDevices() {
   try {
@@ -2044,13 +2284,44 @@ let pttMeterTimer = null;
 // start that finds its generation stale tears down what it made and returns.
 let pttGen = 0;
 
+// The PTT button's face. One place, so the press, the radio's own TX state
+// and the SWR guard can never disagree about what it says.
+let _pttOnAirAt = 0, _pttOnAirTimer = null, _pttTx = false, _swrBlocked = false;
+const PTT_LOCK_ICON = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>';
+function paintPtt() {
+  const txChip = document.getElementById('tx-chip');
+  if (txChip) txChip.classList.toggle('hidden', !_pttTx);
+  pttBtn.classList.toggle('active', _pttTx);
+  pttBtn.classList.toggle('blocked', _swrBlocked && !_pttTx);
+  if (_pttTx) {
+    const s = Math.max(0, Math.floor((Date.now() - _pttOnAirAt) / 1000));
+    pttBtn.textContent = 'ON AIR \u00b7 ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  } else if (_swrBlocked) {
+    pttBtn.innerHTML = PTT_LOCK_ICON + 'PTT blocked';
+  } else {
+    pttBtn.textContent = 'PTT';
+  }
+}
+function setPttVisual(tx) {
+  if (tx && !_pttTx) {
+    _pttOnAirAt = Date.now();
+    clearInterval(_pttOnAirTimer);
+    _pttOnAirTimer = setInterval(paintPtt, 1000);
+  } else if (!tx) {
+    clearInterval(_pttOnAirTimer);
+    _pttOnAirTimer = null;
+  }
+  _pttTx = !!tx;
+  paintPtt();
+}
+
 async function pttStart() {
   if (pttDown) return;
+  if (_swrBlocked) { showSwrAlertPulse(); return; }
   pttDown = true;
   const gen = ++pttGen;
   const stale = () => gen !== pttGen;
-  pttBtn.classList.add('active');
-  pttBtn.textContent = 'TX';
+  setPttVisual(true);
   if (kiwiGainNode) kiwiGainNode.gain.value = 0;
   // Start mic → radio TX. Built on locals and published to the globals only
   // while this press is still current, so an abandoned start never
@@ -2137,8 +2408,7 @@ function pttStop() {
   if (!pttDown) return;
   pttDown = false;
   pttGen++; // abandons a start still awaiting the mic or worklet
-  pttBtn.classList.remove('active');
-  pttBtn.textContent = 'PTT';
+  setPttVisual(false);
   window.api.nakedPtt(false);
   if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   // Stop mic + tear down whichever audio context was used.
@@ -2357,6 +2627,39 @@ pttBtn.addEventListener('mousedown', (e) => { e.preventDefault(); pttStart(); })
 pttBtn.addEventListener('mouseup', (e) => { e.preventDefault(); pttStop(); });
 pttBtn.addEventListener('mouseleave', () => { if (pttDown) pttStop(); });
 
+// --- SWR guard card ---
+const swrAlert = document.getElementById('swr-alert');
+function showSwrAlertPulse() {
+  swrAlert.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 240 });
+}
+function applySwrGuardState(st) {
+  _swrBlocked = !!(st && st.tripped);
+  swrAlert.classList.toggle('show', _swrBlocked);
+  if (_swrBlocked) {
+    const t = document.getElementById('swr-alert-text');
+    if (st.atuFailed) {
+      t.textContent = 'The ATU could not match. A tuner cannot fix this: check the antenna, feedline and antenna switch, then tune again, change band, or override.';
+    } else if (Number.isFinite(st.swr) && Number.isFinite(st.limit)) {
+      t.innerHTML = 'SWR reached <b class="mono">' + st.swr.toFixed(1) + ':1</b>' + (st.band ? ' on ' + esc(st.band) : '')
+        + ', over your ' + st.limit.toFixed(1) + ':1 limit. Tune the antenna or change band to transmit again.';
+    } else {
+      t.textContent = st.message || 'The SWR guard stopped the last transmission. Tune the antenna or change band to transmit again.';
+    }
+    document.getElementById('swr-tune-btn').disabled = false;
+    document.getElementById('swr-tune-btn').textContent = st.tuning ? 'Tuning...' : 'Tune ATU';
+  }
+  paintPtt();
+}
+document.getElementById('swr-tune-btn').addEventListener('click', () => {
+  const b = document.getElementById('swr-tune-btn');
+  b.textContent = 'Tuning...';
+  window.api.rigControl({ action: 'atu-tune' });
+});
+document.getElementById('swr-override-btn').addEventListener('click', () => {
+  if (window.api.swrGuardOverride) window.api.swrGuardOverride();
+});
+if (window.api.onSwrGuardState) window.api.onSwrGuardState(applySwrGuardState);
+
 // LOG button
 document.getElementById('log-btn-vfo').addEventListener('click', () => {
   window.api.openLogForm();
@@ -2365,14 +2668,12 @@ document.getElementById('log-btn-vfo').addEventListener('click', () => {
 // TX state from radio (external PTT)
 window.api.onTxState((state) => {
   if (state) {
-    pttBtn.classList.add('active');
-    pttBtn.textContent = 'TX';
+    setPttVisual(true);
     // VK3AWA: cut SDR audio while transmitting so the user doesn't hear
     // their own TX through the remote receiver.
     if (kiwiGainNode) kiwiGainNode.gain.value = 0;
   } else {
-    pttBtn.classList.remove('active');
-    pttBtn.textContent = 'PTT';
+    setPttVisual(false);
     pttDown = false;
     if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   }
@@ -2651,16 +2952,16 @@ function stopAudioMonitor() {
 
 function updateAudioBtn() {
   if (!audioMonitorActive) {
-    audioBtn.textContent = '\u{1F508}'; // speaker low
-    audioBtn.className = 'audio-btn';
+    audioBtn.innerHTML = ICONS.speaker;
+    audioBtn.className = 'ib audio-btn';
     audioBtn.title = 'Click to listen to radio audio';
   } else if (audioMonitorMuted) {
-    audioBtn.textContent = '\u{1F507}'; // speaker muted
-    audioBtn.className = 'audio-btn muted';
+    audioBtn.innerHTML = ICONS.speakerMuted;
+    audioBtn.className = 'ib audio-btn muted';
     audioBtn.title = 'Muted — click to unmute';
   } else {
-    audioBtn.textContent = '\u{1F50A}'; // speaker high
-    audioBtn.className = 'audio-btn active';
+    audioBtn.innerHTML = ICONS.speakerOn;
+    audioBtn.className = 'ib audio-btn active';
     audioBtn.title = 'Listening — click to mute';
   }
 }
@@ -2741,6 +3042,8 @@ window.api.onSmartSdrAudio((d) => {
 window.api.onTheme((p) => {
   if (typeof window.applyPopoutTheme === 'function') window.applyPopoutTheme(p);
   else document.documentElement.setAttribute('data-theme', (p && p.theme) || p);
+  readKnobColors();
+  drawVfoDial();
 });
 
 // --- Operator info (tuned spot) ---
@@ -2758,7 +3061,7 @@ function renderOpInfo(spot) {
   // Support new { ops: [...] } format and legacy single-spot format
   const ops = spot && spot.ops ? spot.ops : (spot && spot.callsign ? [spot] : []);
   if (!ops.length) {
-    opInfoEl.innerHTML = '';
+    opInfoEl.innerHTML = '<div class="op-empty">Tune a spot to see the activator here.</div>';
     cwSpotWpmVal = null;
     cwTunedCall = '';
     cwTunedOpName = '';
@@ -2795,19 +3098,23 @@ function renderOpInfo(spot) {
         const detail = [hhmm && (hhmm + ' UTC'), fMHz && (fMHz + ' MHz'), d.mode].filter(Boolean).join(' · ');
         html += '<span class="op-dupe" title="' + esc(detail ? 'Already worked: ' + detail : 'Already worked this activation today') + '">DUPE</span>';
       }
-      if (op.displayName) html += '<span class="op-detail">' + esc(op.displayName) + '</span>';
+      if (op.displayName) html += '<span class="op-name">' + esc(op.displayName) + '</span>';
       const locParts = [];
       if (op.country) locParts.push(op.country === 'United States' ? 'USA' : op.country);
       if (op.grid) locParts.push(op.grid);
-      if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' / ')) + '</span>';
-      if (op.reference) html += '<span class="op-ref">' + esc(op.reference) + '</span>';
+      if (locParts.length) html += '<span class="op-detail">' + esc(locParts.join(' \u00b7 ')) + '</span>';
+      if (op.reference) {
+        const prog = opSourceLabel(op.source);
+        html += '<span class="op-ref-row">' + (prog ? '<span class="chip mode">' + esc(prog) + '</span>' : '')
+          + '<span class="op-ref">' + esc(op.reference) + '</span></span>';
+      }
       if (op.parkName) html += '<span class="op-detail">' + esc(op.parkName) + '</span>';
       // Beam heading — opt-in via Settings → Widgets → Beam Heading. Underneath
       // the park name per KM4CFT request. Padded to 3 digits for visual stability
       // when the radio's panning across an arc (e.g. "Beam: 042°" not "42°").
       if (vfoWidgets.bearing && typeof op.bearing === 'number' && isFinite(op.bearing)) {
         const bDeg = ((Math.round(op.bearing) % 360) + 360) % 360;
-        html += '<span class="op-detail">Beam: ' + String(bDeg).padStart(3, '0') + '°</span>';
+        html += '<span class="op-dim">Beam ' + String(bDeg).padStart(3, '0') + '\u00b0</span>';
       }
     }
   } else if (n <= 3) {
@@ -2957,7 +3264,7 @@ async function toggleKiwiDropdown() {
   kiwiStations.forEach((st) => {
     const item = document.createElement('div');
     item.className = 'sdr-dd-item'
-      + (st.fullHost === selHost ? ' sel' : '')
+      + (st.fullHost === selHost ? ' current' : '')
       + (kiwiConnected && st.fullHost === kiwiConnectedHost ? ' conn' : '');
     item.textContent = st.label;
     item.title = st.fullHost;
@@ -2971,13 +3278,42 @@ async function toggleKiwiDropdown() {
     });
     dd.appendChild(item);
   });
-  const r = anchor.getBoundingClientRect();
-  dd.style.left = r.left + 'px';
-  dd.style.top = (r.bottom + 4) + 'px';
-  dd.style.minWidth = r.width + 'px';
-  document.body.appendChild(dd);
+  const sep = document.createElement('div');
+  sep.className = 'sdr-dd-sep';
+  dd.appendChild(sep);
+  const add = document.createElement('div');
+  add.className = 'sdr-dd-item add';
+  add.textContent = 'Add new SDR';
+  add.title = 'Opens POTACAT Settings at WebSDR';
+  add.addEventListener('click', () => {
+    closeKiwiDropdown();
+    window.api.openWebSdrSettings();
+  });
+  dd.appendChild(add);
+  placeKiwiDropdown(dd, anchor);
   kiwiDdEl = dd;
   setTimeout(() => document.addEventListener('click', kiwiDdOutsideClick, true), 0);
+}
+
+// The SDR row usually sits at the bottom of the window, so a menu hung
+// below it was cut off. Open on whichever side has more room, sized to that
+// room (scrolls if the list is longer), and keep it inside the window.
+function placeKiwiDropdown(dd, anchor) {
+  anchor.scrollIntoView({ block: 'nearest' });
+  const r = anchor.getBoundingClientRect();
+  const M = 8;
+  const below = window.innerHeight - r.bottom - M - 4;
+  const above = r.top - M - 4;
+  const up = below < 160 && above > below;
+  dd.style.maxHeight = Math.max(80, up ? above : below) + 'px';
+  dd.style.minWidth = r.width + 'px';
+  dd.style.maxWidth = (window.innerWidth - 2 * M) + 'px';
+  dd.style.visibility = 'hidden';
+  document.body.appendChild(dd);
+  const w = dd.offsetWidth, h = dd.offsetHeight;
+  dd.style.left = Math.max(M, Math.min(r.left, window.innerWidth - w - M)) + 'px';
+  dd.style.top = (up ? r.top - 4 - h : r.bottom + 4) + 'px';
+  dd.style.visibility = '';
 }
 
 function kiwiDdOutsideClick(e) {
@@ -2994,6 +3330,11 @@ function closeKiwiDropdown() {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeKiwiDropdown();
+});
+window.addEventListener('resize', closeKiwiDropdown);
+document.getElementById('sdr-add-sheet-btn').addEventListener('click', () => {
+  openSheet(false);
+  window.api.openWebSdrSettings();
 });
 
 wKiwiCb.addEventListener('change', async () => {
@@ -3120,6 +3461,9 @@ window.api.onSolarData((d) => {
 });
 
 // --- Init ---
+renderOpInfo(null);
+updateDisplay();
+updateAudioBtn();
 loadProfiles().catch(e => console.error('[VFO] loadProfiles error:', e));
 loadWidgets().catch(e => console.error('[VFO] loadWidgets error:', e));
 </script>

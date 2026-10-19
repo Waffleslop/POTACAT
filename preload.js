@@ -329,6 +329,7 @@ contextBridge.exposeInMainWorld('api', {
   // Ham2K PoLo URL fetch (boot, save, or manual refresh). Renderer
   // rebuilds the lookup map + re-renders the table.
   onOpenSettingsWatchlist: (cb) => ipcRenderer.on('open-settings-watchlist', () => cb()),
+  onOpenSettingsWebSdr: (cb) => ipcRenderer.on('open-settings-websdr', () => cb()),
   onWatchlistGroupsUpdated: (cb) => ipcRenderer.on('watchlist-groups-updated', (_e, data) => cb(data)),
   refreshWatchlistGroup: (idx) => ipcRenderer.invoke('watchlist-group-refresh', idx),
   onExpeditionCallsigns: (cb) => ipcRenderer.on('expedition-callsigns', (_e, data) => cb(data)),

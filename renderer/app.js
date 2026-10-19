@@ -15972,6 +15972,15 @@ async function openSettingsDialog(tab) {
   if (setKiwiLabel1) setKiwiLabel1.value = s.kiwiSdrLabel1 || '';
   if (setKiwiLabel2) setKiwiLabel2.value = s.kiwiSdrLabel2 || '';
   if (setKiwiLabel3) setKiwiLabel3.value = s.kiwiSdrLabel3 || '';
+  // The list is the source of truth (the slot keys are a view onto rows 0-2).
+  if (Array.isArray(s.kiwiSdrList) && s.kiwiSdrList.length) {
+    [[setKiwiLabel1, setKiwiHost1], [setKiwiLabel2, setKiwiHost2], [setKiwiLabel3, setKiwiHost3]].forEach(([l, h], i) => {
+      const e = s.kiwiSdrList[i] || {};
+      if (l) l.value = e.label || '';
+      if (h) h.value = e.host || '';
+    });
+  }
+  renderKiwiExtraRows(Array.isArray(s.kiwiSdrList) ? s.kiwiSdrList.slice(3) : []);
   setTciHost.value = s.tciHost || '127.0.0.1';
   setTciPort.value = s.tciPort || 50001;
   setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
@@ -16191,6 +16200,28 @@ if (window.api && window.api.onOpenSettingsWatchlist) {
         if (block) block.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 200);
     } catch { /* best-effort — the dialog still opened on its default tab */ }
+  });
+}
+if (window.api && window.api.onOpenSettingsWebSdr) {
+  // VFO window SDR menu > "Add new SDR": open Settings on the Station tab at
+  // the WebSDR block and put the cursor in the first empty host slot.
+  window.api.onOpenSettingsWebSdr(async () => {
+    try {
+      await openSettingsDialog('station');
+      setTimeout(() => {
+        const hosts = [1, 2, 3].map(i => document.getElementById('set-kiwi-host-' + i)).filter(Boolean);
+        const block = hosts[0] && hosts[0].closest('fieldset');
+        if (block) {
+          block.classList.remove('collapsed');
+          block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        const empty = firstEmptyKiwiHost();
+        if (empty) {
+          empty.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          empty.focus({ preventScroll: true });
+        }
+      }, 200);
+    } catch { /* best-effort — the dialog still opened */ }
   });
 }
 if (window.api && window.api.onWatchlistGroupsUpdated) {
@@ -16797,12 +16828,9 @@ settingsSave.addEventListener('click', async () => {
     smartSdrSpots: smartSdrSpotsEnabled,
     smartSdrMaxAge: smartSdrMaxAgeVal,
     smartSdrMaxSpots: smartSdrMaxSpotsVal,
-    kiwiSdrHost1: setKiwiHost1 ? setKiwiHost1.value.trim() : '',
-    kiwiSdrHost2: setKiwiHost2 ? setKiwiHost2.value.trim() : '',
-    kiwiSdrHost3: setKiwiHost3 ? setKiwiHost3.value.trim() : '',
-    kiwiSdrLabel1: setKiwiLabel1 ? setKiwiLabel1.value.trim() : '',
-    kiwiSdrLabel2: setKiwiLabel2 ? setKiwiLabel2.value.trim() : '',
-    kiwiSdrLabel3: setKiwiLabel3 ? setKiwiLabel3.value.trim() : '',
+    // The whole list, rows 4+ included (main derives the 3 legacy slot
+    // keys from it). Sending only the slots could never add a fourth SDR.
+    kiwiSdrList: collectKiwiSdrRows(),
     tciSpots: tciSpotsEnabled,
     tciHost: tciHostVal,
     tciPort: tciPortVal,
@@ -29444,8 +29472,11 @@ if (window.api.onAppNotice) {
   dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
   // Wire up the Browse buttons next to each slot.
-  document.querySelectorAll('.kiwi-browse-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+  // Delegated: rows past the third are added at run time.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target && e.target.closest && e.target.closest('.kiwi-browse-btn');
+    if (!btn) return;
+    {
       targetSlot = parseInt(btn.dataset.slot, 10) || 1;
       slotLabel.textContent = `(slot ${targetSlot})`;
       // Reset filters each time so the user always sees the full list initially.
@@ -29466,6 +29497,58 @@ if (window.api.onAppNotice) {
         try { dialog.show(); } catch (e2) { console.error('[kiwi-picker] show also failed:', e2); }
       }
       try { searchInput.focus(); } catch {}
-    });
+    }
+  });
+})();
+
+// --- WebSDR rows past the three fixed slots (settings.kiwiSdrList[3..]) ---
+// Rows 1-3 are static markup; the rest are built here with the same ids
+// (set-kiwi-label-N / set-kiwi-host-N) so Browse fills them the same way.
+function kiwiSdrRowCount() {
+  const extra = document.getElementById('kiwi-extra-rows');
+  return 3 + (extra ? extra.children.length : 0);
+}
+function addKiwiSdrRow(entry) {
+  const extra = document.getElementById('kiwi-extra-rows');
+  if (!extra) return null;
+  const n = kiwiSdrRowCount() + 1;
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;margin-top:4px;align-items:center;';
+  row.innerHTML = '<label style="flex:1;">Label: <input type="text" id="set-kiwi-label-' + n + '" style="width:100%;max-width:80px;"></label>'
+    + '<label style="flex:3;">Host: <input type="text" id="set-kiwi-host-' + n + '" placeholder="host:port" style="width:100%;max-width:260px;"></label>'
+    + '<button type="button" class="kiwi-browse-btn" data-slot="' + n + '" style="white-space:nowrap;">Browse&hellip;</button>';
+  row.querySelector('#set-kiwi-label-' + n).value = (entry && entry.label) || '';
+  row.querySelector('#set-kiwi-host-' + n).value = (entry && entry.host) || '';
+  extra.appendChild(row);
+  return row.querySelector('#set-kiwi-host-' + n);
+}
+function renderKiwiExtraRows(entries) {
+  const extra = document.getElementById('kiwi-extra-rows');
+  if (!extra) return;
+  extra.innerHTML = '';
+  for (const e of entries) addKiwiSdrRow(e);
+}
+function collectKiwiSdrRows() {
+  const out = [];
+  for (let i = 1; i <= kiwiSdrRowCount(); i++) {
+    const host = (document.getElementById('set-kiwi-host-' + i) || {}).value || '';
+    const label = (document.getElementById('set-kiwi-label-' + i) || {}).value || '';
+    if (host.trim()) out.push({ label: label.trim(), host: host.trim() });
+  }
+  return out;
+}
+/** The first empty host field, adding a row when every one is filled. */
+function firstEmptyKiwiHost() {
+  for (let i = 1; i <= kiwiSdrRowCount(); i++) {
+    const h = document.getElementById('set-kiwi-host-' + i);
+    if (h && !h.value.trim()) return h;
+  }
+  return addKiwiSdrRow(null);
+}
+(function () {
+  const btn = document.getElementById('kiwi-add-row-btn');
+  if (btn) btn.addEventListener('click', () => {
+    const h = firstEmptyKiwiHost();
+    if (h) h.focus();
   });
 })();

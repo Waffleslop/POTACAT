@@ -1714,6 +1714,8 @@ let _flexTxRf = null;   // { startedAt, peakW, maxSwr, frames }
 // deliberately no pre-TX prediction from stale readings.
 let _swrTripped = false;
 let _swrTripMessage = '';       // the operator-readable trip reason, for the JS8 banner
+let _swrTripSwr = 0;            // the SWR that tripped it, for the VFO window's card
+let _swrAtuFailed = false;      // the ATU reported no match while latched
 let _swrTrippedBand = '';       // band at trip time — leaving it clears the latch
 let _swrHuntNoted = false;      // Hunt has logged once that the latch is why it is not answering
 let _swrGuardHits = 0;          // consecutive over-limit frames (debounce = 3)
@@ -1762,6 +1764,7 @@ function clearSwrTrip(reason) {
   if (!_swrTripped) return;
   _swrTripped = false;
   _swrTripMessage = '';
+  _swrAtuFailed = false;
   _swrTrippedBand = '';
   _swrHuntNoted = false;
   _swrGuardHits = 0;
@@ -1772,6 +1775,20 @@ function clearSwrTrip(reason) {
   // Clear the JS8 window's persistent SWR banner (js8-state.swrTripped).
   try { js8PushStatus(); } catch { /* pre-init */ }
   pushSstvRigState();
+  pushVfoSwrState();
+}
+
+/** The VFO window's SWR card: shown while the guard is latched, gone when it
+ *  clears. The 'tune-blocked' toast alone vanished after 3 s. */
+function pushVfoSwrState() {
+  if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
+  try {
+    vfoPopoutWin.webContents.send('vfo-swr-guard-state', {
+      tripped: !!_swrTripped, message: _swrTripMessage || '',
+      swr: _swrTripped ? _swrTripSwr : null, limit: swrGuardMax(), band: _swrTrippedBand || '',
+      atuFailed: !!(_swrTripped && _swrAtuFailed),
+    });
+  } catch {}
 }
 
 /** The SSTV window's view of the radio: whether it has a tuner, and the SWR
@@ -1845,7 +1862,9 @@ function onAtuStatus(kv) {
   const where = episode.band ? `on ${episode.band}` : 'here';
   const msg = `ATU could not match (${kv.status}) — TX stays disabled. A tuner can't fix this; check the antenna, feedline and antenna switch ${where}. Run the ATU again once it's fixed, change bands, or override the guard.`;
   _swrTripMessage = msg;
+  _swrAtuFailed = true;
   swrGuardAnnounce(msg);
+  pushVfoSwrState();
 }
 
 function tripSwrGuard(swr) {
@@ -1855,6 +1874,8 @@ function tripSwrGuard(swr) {
   _swrTrippedBand = _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
   const msg = `TX aborted — SWR ${swr.toFixed(1)}:1 exceeded the ${swrGuardMax().toFixed(1)}:1 limit. Run the ATU or change bands to re-enable TX (or turn off the SWR guard in Settings > My Rigs).`;
   _swrTripMessage = msg;
+  _swrTripSwr = swr;
+  _swrAtuFailed = false;
   // Kill whatever is transmitting, through the normal teardown paths.
   if (jtcatTuneState.active) stopJtcatTune();
   if (jtcatFullAutoCq) stopFullAutoCq('SWR guard tripped');
@@ -1872,6 +1893,7 @@ function tripSwrGuard(swr) {
   }
   swrGuardAnnounce(msg);
   pushSstvRigState();
+  pushVfoSwrState();
   // ⚙ Optional self-heal (settings.swrAutoTune): run the Flex ATU to re-match
   // instead of making the operator do it. The tune does NOT clear the latch —
   // only the radio's TUNE_OK does (see noteAtuTuneStarted/onAtuStatus) — and
@@ -28632,7 +28654,7 @@ app.whenReady().then(() => {
     const isMac = process.platform === 'darwin';
     const vfoAlwaysOnTop = settings.vfoAlwaysOnTop !== false; // default true
     vfoPopoutWin = new BrowserWindow({
-      width: 340, height: 560, title: 'VFO',
+      width: 360, height: 760, title: 'VFO',
       backgroundColor: getThemeWindowBg(),
       show: false,
       alwaysOnTop: vfoAlwaysOnTop,
@@ -28665,6 +28687,7 @@ app.whenReady().then(() => {
       // the spot at the radio's frequency when it hears the VFO opened.
       if (_lastVfoTunedSpot) vfoPopoutWin.webContents.send('vfo-tuned-spot', _lastVfoTunedSpot);
       if (_cachedSolarData) vfoPopoutWin.webContents.send('solar-data', _cachedSolarData);
+      pushVfoSwrState();
       vfoPopoutWin.webContents.send('vfo-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
       // Initial TX EQ state so the popout's controls hydrate to the
       // current setting on every open (live updates flow through
@@ -30935,6 +30958,17 @@ app.whenReady().then(() => {
 
   // Gear > "Watchlist colors..." — focus the main window and open Settings
   // scrolled to the watchlist groups (the popout has no editor of its own).
+  // VFO window SDR menu > "Add new SDR": the station list is edited in the
+  // main window's Settings > Station > WebSDR, so focus it and open there.
+  ipcMain.on('vfo-open-websdr-settings', () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send('open-settings-websdr');
+    }
+  });
+
   ipcMain.on('jtcat-open-watchlist-settings', () => {
     if (win && !win.isDestroyed()) {
       if (win.isMinimized()) win.restore();
