@@ -31998,10 +31998,16 @@ app.whenReady().then(() => {
       'https://potacat.com/', 'https://docs.potacat.com/', 'https://buymeacoffee.com/potacat', 'https://docs.google.com/spreadsheets/',
       'https://pota.app/', 'https://www.sotadata.org.uk/', 'https://wwff.co/', 'https://llota.app/',
       'https://tailscale.com', 'https://worldradioleague.com',
+      // Tailscale admin DNS page (MagicDNS / HTTPS certs help in Settings);
+      // 'https://tailscale.com' does not cover the login. host.
+      'https://login.tailscale.com/admin/',
       // TrustedQSL download — the LoTW upload block in Settings > Logging.
       'https://www.arrl.org/tqsl-download', 'https://lotw.arrl.org/',
       // Club Log — Application Passwords page link in Settings > Logging.
       'https://clublog.org/',
+      // FCC Part 97 §97.119 (station identification) — the link in Settings >
+      // Share Rig. Never on this list, so the click was refused in silence.
+      'https://www.ecfr.gov/current/title-47/',
       'https://api.potacat.com/',
       'http://rx.linkfanel.net', 'http://kiwisdr.com', 'http://websdr.org',
       // ECHOCAT mobile app store links (Settings footer promo).
