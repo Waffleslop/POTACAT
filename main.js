@@ -8355,6 +8355,31 @@ async function saveQsoRecord(qsoData, opts) {
   opts = opts || {};
   const origin = opts.origin || 'local-manual';
 
+  // A comma-separated callsign is several QSOs (multi-op activation). Every
+  // log form splits it itself, with per-call QRZ data; this is the net for
+  // any caller that does not (W9TEF 2026-10-18: the Log QSO window saved
+  // "K1A,K1B,K1C" as one callsign and DXKeeper refused it). Later copies
+  // never re-spot and drop the first call's QRZ name and country.
+  const callList = qsoData && typeof qsoData.callsign === 'string' && qsoData.callsign.includes(',')
+    ? qsoData.callsign.split(',').map((c) => c.trim()).filter(Boolean) : null;
+  if (callList && callList.length > 1) {
+    sendCatLog(`[QSO] "${qsoData.callsign}" is ${callList.length} callsigns — logging one QSO each`);
+    let last = null;
+    for (let i = 0; i < callList.length; i++) {
+      const q = { ...qsoData, callsign: callList[i] };
+      if (i > 0) {
+        for (const k of LogAs.RESPOT_KEYS) delete q[k];
+        delete q.uuid;
+        q.name = '';
+        q.country = '';
+      }
+      last = await saveQsoRecord(q, opts);
+      if (!last || !last.success) break;
+    }
+    return last;
+  }
+  if (callList) qsoData.callsign = callList[0] || '';
+
   // Log for several operators at once (KD9WI 2026-10-17, "Log as: both"):
   // one record into each operator's own logbook, each through this same
   // function, so each gets their callsign, QRZ and Cloud. Only the first copy

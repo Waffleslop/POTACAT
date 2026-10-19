@@ -591,9 +591,31 @@ function _applyPopoutTheme(payload) {
     }
     saveBtn.disabled = true;
     try {
-      const result = await window.api.saveQso(built.data);
+      // Several activators at one park, comma-separated: one QSO each, the
+      // way the Log QSO dialog and the bottom bar have always done it — each
+      // with its own QRZ name and location, and only the first re-spots.
+      // This window used to save "K1A,K1B,K1C" as ONE callsign, which a
+      // logbook like DXKeeper then refused (W9TEF 2026-10-18).
+      const calls = built.data.callsign.split(',').map((c) => c.trim()).filter(Boolean);
+      let result = null;
+      for (let ci = 0; ci < calls.length; ci++) {
+        const data = { ...built.data, callsign: calls[ci] };
+        if (calls.length > 1) {
+          if (ci > 0) {
+            for (const k of ['respot', 'wwffRespot', 'wwffReference', 'llotaRespot', 'llotaReference', 'wwbotaRespot', 'wwbotaReference', 'dxcRespot', 'respotComment']) delete data[k];
+          }
+          let info = null;
+          try { const r = await window.api.callsignInfo(calls[ci], 1); info = r && r.qrz; } catch {}
+          data.name = info ? qrzDisplayName(info) : '';
+          data.state = info ? (info.state || '') : '';
+          data.gridsquare = info ? (info.grid || '') : '';
+          data.country = info ? (info.country || '') : '';
+        }
+        result = await window.api.saveQso(data);
+        if (!result || !result.success) break;
+      }
       if (result && result.success) {
-        const call = built.data.callsign;
+        const call = calls.join(', ');
         showToast(`✓ Saved ${call}${logAsTail()}`);
         // Sticky form on save: clear callsign-specific fields, keep
         // freq/mode/power so consecutive ragchews are quick. Refresh the
