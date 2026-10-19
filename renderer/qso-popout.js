@@ -1168,7 +1168,16 @@ document.getElementById('qso-new-save').addEventListener('click', async () => {
   if (s.myCallsign) qsoData.stationCallsign = s.myCallsign.toUpperCase();
   if (s.grid) qsoData.myGridsquare = s.grid;
 
-  const result = await window.api.saveQso(qsoData);
+  // logContact, like every log form: a comma list of callsigns or refs
+  // becomes one record each, with each call's QRZ data and a park contact's
+  // park location. activation:false — a QSO typed in here is often a past
+  // one, never today's activation by assumption.
+  qsoData.activation = false;
+  const result = await window.api.logContact(qsoData);
+  if (!result || !result.success) {
+    toast(`Not saved: ${(result && result.error) || 'unknown error'}`);
+    return;
+  }
 
   // Clear form and refresh
   newQsoCall.value = '';

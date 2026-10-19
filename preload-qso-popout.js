@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('api', {
   getPark: (ref) => ipcRenderer.invoke('get-park', ref),
   resendQsosToLogbook: (qsos) => ipcRenderer.invoke('resend-qsos-to-logbook', qsos),
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
+  // One contact as logged (comma lists welcome); main builds its records.
+  logContact: (entry) => ipcRenderer.invoke('log-contact', entry),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   minimize: () => ipcRenderer.send('qso-popout-minimize'),
   maximize: () => ipcRenderer.send('qso-popout-maximize'),

@@ -41,6 +41,8 @@ const apiSurface = {
 
   // --- QSO save (reuses the same handler as the main window) ---
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
+  // One contact as logged (comma lists welcome); main builds its records.
+  logContact: (entry) => ipcRenderer.invoke('log-contact', entry),
   // Operators on this machine, for the "Log as" chooser (KD9WI)
   profilesList: () => ipcRenderer.invoke('profiles-list'),
 

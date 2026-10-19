@@ -167,9 +167,6 @@ function _applyPopoutTheme(payload) {
   let freqUserEdited = false;
   let modeUserEdited = false;
   let clockTimer = null;
-  // Activation context — passed through prefill, applied to qsoData on save
-  // so a ragchew QSO during an activation is still tagged with mySig/mySigInfo.
-  let activationCtx = null;
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -529,7 +526,11 @@ function _applyPopoutTheme(payload) {
       else if (selectedType === 'llota') respotFields = { llotaRespot: true, llotaReference: ref, respotComment };
       else if (selectedType === 'dx') respotFields = { dxcRespot: true, respotComment };
     }
-    const info = lastQrzInfo;
+    // Only what the operator entered: QRZ name/location, the park's location
+    // and the running activation's refs are main's (logContact), read when
+    // the QSO is SAVED — not a snapshot from when this window opened, which
+    // left JS8/SSTV/JTTY contacts with no MY_SIG and could carry the previous
+    // call's QRZ data (logging parity audit 2026-10-19).
     const data = {
       // Another operator on this machine, or '' for the active one (lib/log-as.js)
       logAs: logAsChosen(),
@@ -553,17 +554,7 @@ function _applyPopoutTheme(payload) {
       potaRef,
       sotaRef,
       wwffRef,
-      name: info ? qrzDisplayName(info) : '',
-      state: info ? (info.state || '') : '',
-      gridsquare: info ? (info.grid || '') : '',
-      country: info ? (info.country || '') : '',
       comment: notesInput.value.trim(),
-      // Activation context — only added if an activation was running when
-      // this popout instance opened. Tags the QSO with mySig=POTA + the
-      // activator's primary park ref.
-      ...(activationCtx && activationCtx.mySig
-        ? { mySig: activationCtx.mySig, mySigInfo: activationCtx.mySigInfo }
-        : {}),
       // Re-spot fields (only when chip is POTA/WWFF/LLOTA and checkbox
       // is checked). saveQsoRecord on main reads these and triggers the
       // appropriate postPotaRespot / postWwffRespot / postLlotaRespot.
@@ -591,52 +582,10 @@ function _applyPopoutTheme(payload) {
     }
     saveBtn.disabled = true;
     try {
-      // Several activators at one park, comma-separated: one QSO each, the
-      // way the Log QSO dialog and the bottom bar have always done it — each
-      // with its own QRZ name and location, and only the first re-spots.
-      // This window used to save "K1A,K1B,K1C" as ONE callsign, which a
-      // logbook like DXKeeper then refused (W9TEF 2026-10-18).
+      // One contact, as entered (comma lists of callsigns or refs welcome):
+      // logContact turns it into its records, as every log form does.
       const calls = built.data.callsign.split(',').map((c) => c.trim()).filter(Boolean);
-      // A POTA contact is logged at the PARK, not the activator's QRZ home
-      // address — as the Log QSO dialog, the bottom bar and ECHOCAT already
-      // do (W9TEF 2026-10-19: hunters' logs fill up with wrong states and
-      // grids that matter for WAS and grid chasing). A park spanning states
-      // logs no state rather than a guess; with a reference but no park
-      // data, no state either (the QRZ one is the home QTH).
-      let parkLoc = null;
-      if (built.data.sig === 'POTA' && built.data.potaRef && window.api.getPark) {
-        try {
-          const park = await window.api.getPark(built.data.potaRef);
-          if (park) {
-            const states = [];
-            for (const part of String(park.locationDesc || '').split(',')) {
-              const seg = part.trim();
-              const st = seg.indexOf('-') >= 0 ? seg.slice(seg.indexOf('-') + 1).trim() : '';
-              if (st && states.indexOf(st) < 0) states.push(st);
-            }
-            parkLoc = { state: states.length === 1 ? states[0] : '', grid: park.grid || '' };
-          }
-        } catch {}
-      }
-      let result = null;
-      for (let ci = 0; ci < calls.length; ci++) {
-        const data = { ...built.data, callsign: calls[ci] };
-        if (calls.length > 1) {
-          if (ci > 0) {
-            for (const k of ['respot', 'wwffRespot', 'wwffReference', 'llotaRespot', 'llotaReference', 'wwbotaRespot', 'wwbotaReference', 'dxcRespot', 'respotComment']) delete data[k];
-          }
-          let info = null;
-          try { const r = await window.api.callsignInfo(calls[ci], 1); info = r && r.qrz; } catch {}
-          data.name = info ? qrzDisplayName(info) : '';
-          data.state = info ? (info.state || '') : '';
-          data.gridsquare = info ? (info.grid || '') : '';
-          data.country = info ? (info.country || '') : '';
-        }
-        if (data.sig) data.state = parkLoc ? parkLoc.state : '';
-        if (parkLoc && parkLoc.grid) data.gridsquare = parkLoc.grid;
-        result = await window.api.saveQso(data);
-        if (!result || !result.success) break;
-      }
+      const result = await window.api.logContact(built.data);
       if (result && result.success) {
         const call = calls.join(', ');
         showToast(`✓ Saved ${call}${logAsTail()}`);
@@ -821,17 +770,13 @@ function _applyPopoutTheme(payload) {
   if (window.api.onPrefill) {
     window.api.onPrefill((p) => {
       if (!p) return;
-      if (p.force) { activationCtx = p.activationCtx || null; applySpotPrefill(p); return; }
+      if (p.force) { applySpotPrefill(p); return; }
       if (p.freqKhz && !freqUserEdited) freqInput.value = String(Math.round(p.freqKhz));
       if (p.mode && !modeUserEdited) {
         const m = modeFamily(p.mode);
         if ([...modeSelect.options].some((o) => o.value === m)) modeSelect.value = m;
       }
       if (p.power && !powerInput.value) powerInput.value = String(p.power);
-      // Carry activation context for save-time tagging. Refreshed on every
-      // open so a user toggling activation on/off mid-session sees consistent
-      // behavior.
-      activationCtx = p.activationCtx || null;
       // Pre-fill from a currently-tuned spot: jump callsign in, then skip
       // straight to RST Sent so the operator can type the signal report
       // without an extra click. (W9TEF: "the call should pre-fill, and it

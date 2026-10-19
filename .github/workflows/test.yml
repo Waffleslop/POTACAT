@@ -130,6 +130,10 @@ jobs:
         run: node test/hunted-park-test.js
       - name: Run log-comment suite
         run: node test/log-comment-test.js
+      - name: Run QSO expansion (one contact -> its ADIF records)
+        run: node test/qso-expand-test.js
+      - name: Run logging parity guards (every log surface through logContact)
+        run: node test/logging-parity-test.js
       - name: Run WRL packet suite (numeric fields must not break forwarding)
         run: node test/wrl-packet-test.js
       - name: Run raw CAT command suite (rigctld binary escapes)

@@ -312,6 +312,8 @@ contextBridge.exposeInMainWorld('api', {
   wsjtxReply: (decode) => ipcRenderer.send('wsjtx-reply', decode),
   wsjtxHaltTx: () => ipcRenderer.send('wsjtx-halt-tx'),
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
+  // One contact as logged (comma lists welcome); main builds its records.
+  logContact: (entry) => ipcRenderer.invoke('log-contact', entry),
   quickRespot: (data) => ipcRenderer.invoke('quick-respot', data),
   sendClusterCommand: (text, nodeId) => ipcRenderer.invoke('send-cluster-command', text, nodeId),
   getRecentQsos: () => ipcRenderer.invoke('get-recent-qsos'),

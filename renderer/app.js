@@ -3813,7 +3813,6 @@ async function saveBannerQso() {
   else if (type === 'llota' && primaryRef) { sig = 'LLOTA'; llotaRef = primaryRef; sigInfo = primaryRef; }
   else if (type === 'wwbota' && primaryRef) { sig = 'WWBOTA'; wwbotaRef = primaryRef; sigInfo = primaryRef; }
   const notes = blNotes.value.trim();
-  const commentBase = [notes, sigInfo ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' ');
 
   // Respot
   const wantsRespot = blRespot.checked && !blRespotLabel.classList.contains('hidden');
@@ -3826,139 +3825,45 @@ async function saveBannerQso() {
     respotCommentText = tmpl.replace(/\{rst\}/gi, rstSent).replace(/\{QTH\}/gi, grid).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
   }
 
-  // Park location lookup for POTA
-  let parkLocState = '', parkLocGrid = '';
+  // A park that spans states: ask which one (WG9I). The records themselves —
+  // QRZ name/location per call, the park's location, call × park ×
+  // activation ref, re-spot once, forward once per call — are logContact's.
+  let parkState = '';
   if (sig === 'POTA' && potaRef) {
     try {
       const parkData = await window.api.getPark(potaRef);
-      if (parkData) {
-        // Single-state park fills STATE directly; a multi-state park
-        // ("US-WI,US-MI") prompts — the activator is only in one (WG9I).
-        const states = parkStatesFromLocationLocal(parkData.locationDesc);
-        if (states.length === 1) parkLocState = states[0];
-        else if (states.length > 1) parkLocState = await promptParkState(potaRef, parkData.locationDesc);
-        parkLocGrid = parkData.grid || '';
-      }
+      const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
+      if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
     } catch {}
   }
 
   blLogBtn.disabled = true;
-  blLogBtn.textContent = 'Saving\u2026';
+  blLogBtn.textContent = 'Saving…';
   let lastResult = null;
-  // Per-callsign record lists for the activation contact push below.
+  // The records each callsign became, for the activation contact push below.
   const bannerLogRecords = new Map();
   try {
-    for (let ci = 0; ci < callsigns.length; ci++) {
-      const cs = callsigns[ci];
-      // Resolve the operator name reliably before building the record. A bare
-      // cache read raced the on-screen lookup (and missed on case-mismatch:
-      // the cache is keyed uppercase) so the ADIF <NAME> was written empty
-      // even when the name showed on screen. Cache-first, awaited fallback.
-      const blBareCall = JtcatParser.baseCall(cs).toUpperCase();
-      let qrzInfo = qrzData.get(blBareCall);
-      if (!qrzInfo) {
-        try { qrzInfo = await window.api.qrzLookup(cs); } catch {}
-        if (qrzInfo) qrzData.set(blBareCall, qrzInfo);
-      }
-      const qsoData = {
-        callsign: cs,
-        frequency: String(freqKhz),
-        mode,
-        qsoDate,
-        timeOn,
-        rstSent,
-        rstRcvd,
-        txPower: String(defaultPower),
-        band,
-        sig,
-        sigInfo,
-        potaRef,
-        sotaRef,
-        wwffRef,
-        llotaRef,
-        wwbotaRef,
-        name: qrzInfo ? [cleanQrzName(qrzInfo.nickname) || cleanQrzName(qrzInfo.fname), cleanQrzName(qrzInfo.name)].filter(Boolean).join(' ') : '',
-        state: parkLocState || (!sig && qrzInfo ? (qrzInfo.state || '') : ''),
-        county: !parkLocState && !sig && qrzInfo && qrzInfo.state && qrzInfo.county ? `${qrzInfo.state},${qrzInfo.county}` : '',
-        gridsquare: parkLocGrid || (qrzInfo ? (qrzInfo.grid || '') : ''),
-        country: qrzInfo ? (qrzInfo.country || '') : '',
-        comment: commentBase,
-        // Include activation context whenever an activation is running, even
-        // if the user has switched the UI to Hunter mode to use the banner
-        // logger. Dean N7VBN / Bob N7FQT report: "when I start an activation
-        // then hunt a P2P, my park info is dropped from the log." Gate only
-        // on activationActive — appMode is a UI-view choice, not a log
-        // semantic. The activation ends with endActivation(), which clears
-        // the flag and stops the auto-inject.
-        ...(activationActive && activatorParkRefs.length > 0
-          ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
-          : {}),
-        // Only respot on the first callsign
-        respot: ci === 0 && wantsRespot && type === 'pota',
-        wwffRespot: ci === 0 && wantsRespot && type === 'wwff',
-        wwffReference: ci === 0 && wantsRespot && type === 'wwff' ? primaryRef : '',
-        llotaRespot: ci === 0 && wantsRespot && type === 'llota',
-        llotaReference: ci === 0 && wantsRespot && type === 'llota' ? primaryRef : '',
-        wwbotaRespot: ci === 0 && wantsRespot && type === 'wwbota',
-        wwbotaReference: ci === 0 && wantsRespot && type === 'wwbota' ? primaryRef : '',
-        dxcRespot: ci === 0 && wantsRespot && type === '' && clusterConnected,
-        respotComment: ci === 0 && wantsRespot ? respotCommentText : '',
-      };
-
-      lastResult = await window.api.saveQso(qsoData);
-      if (!lastResult || !lastResult.success) break;
-      const savedForCall = [qsoData];
-
-      // Save additional park records (two-fer / three-fer)
-      for (const addlRef of addlRefs) {
-        const addlComment = [notes, `[${sig} ${addlRef}]`].filter(Boolean).join(' ');
-        const addlData = {
-          ...qsoData,
-          sigInfo: addlRef,
-          potaRef: sig === 'POTA' ? addlRef : qsoData.potaRef,
-          sotaRef: sig === 'SOTA' ? addlRef : qsoData.sotaRef,
-          wwffRef: sig === 'WWFF' ? addlRef : qsoData.wwffRef,
-          llotaRef: sig === 'LLOTA' ? addlRef : qsoData.llotaRef,
-          wwbotaRef: sig === 'WWBOTA' ? addlRef : qsoData.wwbotaRef,
-          comment: addlComment,
-          respot: false, wwffRespot: false, llotaRespot: false, wwbotaRespot: false, dxcRespot: false, respotComment: '',
-          skipLogbookForward: true,
-        };
-        const addlResult = await window.api.saveQso(addlData);
-        if (!addlResult || !addlResult.success) { lastResult = addlResult; break; }
-        savedForCall.push(addlData);
-      }
-      if (lastResult && !lastResult.success) break;
-
-      // Cross-product for the remaining activation refs — same fix as the
-      // spot-log form (SP5GB 2026-07-27): the record above carries only
-      // activatorParkRefs[0]; parks 2..N and cross-program refs each need
-      // their own MY_SIG record. Best-effort so a failed extra never unwinds
-      // the saved QSO.
-      if (activationActive && activatorParkRefs.length > 0) {
-        // activationMyRefs() is primaries-then-cross-refs, deduped and in
-        // order, so [0] is the ref the record above already carries and the
-        // tail is exactly the extras — with the primary/X-Ref duplicate a
-        // non-POTA activator used to have to create by hand now collapsed.
-        const extraMyRefs = activationMyRefs().slice(1);
-        const parkOneRecords = savedForCall.slice();
-        for (const mr of extraMyRefs) {
-          for (const base of parkOneRecords) {
-            const rec = {
-              ...base,
-              mySig: mr.sig,
-              mySigInfo: mr.ref,
-              respot: false, wwffRespot: false, llotaRespot: false, wwbotaRespot: false, dxcRespot: false, respotComment: '',
-              skipLogbookForward: true,
-            };
-            try {
-              const r = await window.api.saveQso(rec);
-              if (r && r.success) savedForCall.push(rec);
-            } catch { /* keep going — primary record is already saved */ }
-          }
-        }
-      }
-      bannerLogRecords.set(cs, savedForCall);
+    lastResult = await window.api.logContact({
+      callsign: callsigns.join(','),
+      frequency: String(freqKhz),
+      mode, qsoDate, timeOn, rstSent, rstRcvd, band,
+      // No txPower: main fills the radio's live power, else the default.
+      sig, sigInfo: allRefs.filter(Boolean).join(','), potaRef, sotaRef, wwffRef, llotaRef, wwbotaRef,
+      parkState,
+      comment: notes,
+      respot: wantsRespot && type === 'pota',
+      wwffRespot: wantsRespot && type === 'wwff',
+      wwffReference: wantsRespot && type === 'wwff' ? primaryRef : '',
+      llotaRespot: wantsRespot && type === 'llota',
+      llotaReference: wantsRespot && type === 'llota' ? primaryRef : '',
+      wwbotaRespot: wantsRespot && type === 'wwbota',
+      wwbotaReference: wantsRespot && type === 'wwbota' ? primaryRef : '',
+      dxcRespot: wantsRespot && type === '' && clusterConnected,
+      respotComment: wantsRespot ? respotCommentText : '',
+    });
+    for (const rec of (lastResult && lastResult.records) || []) {
+      if (!bannerLogRecords.has(rec.callsign)) bannerLogRecords.set(rec.callsign, []);
+      bannerLogRecords.get(rec.callsign).push(rec);
     }
 
     const result = lastResult;
@@ -11810,11 +11715,8 @@ function openQuickLog() {
   // window (renderer/log-popout.html) instead of the modal dialog. The
   // spot-click → openLogPopup() path is unchanged: that flow has richer
   // pre-fill (park name, source, etc.) that the ragchew form doesn't need.
-  // Pass current rig freq/mode + any active activation context so a ragchew
-  // during an activation is still tagged with mySig/mySigInfo on save.
-  const activationCtx = (activationActive && activatorParkRefs.length > 0)
-    ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
-    : null;
+  // Pass current rig freq/mode. The activation (MY_SIG for every park) is
+  // applied by main when the QSO is saved (logContact), not snapshotted here.
   // If a spot is currently tuned (user QSY'd via the table), pre-fill the
   // callsign from that spot — operator hits Ctrl+L right after tuning,
   // expects to start typing RST immediately. The popout sees `callsign`
@@ -11826,7 +11728,6 @@ function openQuickLog() {
     freqKhz: radioFreqKhz || null,
     mode: radioMode || null,
     power: radioPower || lastLogPower || null,
-    activationCtx,
   });
 }
 
@@ -14029,9 +13930,6 @@ function routeLogForSpot(spot) {
   }
   const p = detectSpotPrograms(spot);
   const type = p.types[0] || 'dx';
-  const activationCtx = (activationActive && activatorParkRefs.length > 0)
-    ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
-    : null;
   window.api.openLogPopout({
     callsign: spot.callsign || '',
     freqKhz: parseFloat(spot.frequency) || null,
@@ -14039,7 +13937,6 @@ function routeLogForSpot(spot) {
     // Same precedence as the overlay: live CAT reading, then last entered,
     // then the settings default.
     power: radioPower > 0 ? radioPower : (lastLogPower > 0 ? lastLogPower : (defaultPower || null)),
-    activationCtx,
     type,
     reference: p.refs[type] || '',
     parkName: p.names[type] || '',
@@ -14331,7 +14228,7 @@ logSaveBtn.addEventListener('click', async () => {
   // also drives the n-fer record loop: one ADIF record per primary ref,
   // each carrying secondary _REF fields with comma-joined additional
   // values from the other active programs.
-  const SIG_BY_TYPE = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA' };
+  const SIG_BY_TYPE = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', wwbota: 'WWBOTA' }; // WWBOTA logged no SIG at all (parity audit)
   let primaryType = '';
   for (const t of LOG_OTA_TYPES) {
     if (parsedByType[t] && parsedByType[t].primary) { primaryType = t; break; }
@@ -14397,148 +14294,50 @@ logSaveBtn.addEventListener('click', async () => {
   const rstRcvd = getRstDigits('rst-rcvd-digits', '59');
   const txPower = logPower.value.trim();
   lastLogPower = parseInt(txPower, 10) || 0; // remember for next log
-  const commentBase = [logComment.value.trim(), sigInfo && !logComment.value.includes(sigInfo) ? `[${sig} ${sigInfo}]` : ''].filter(Boolean).join(' ');
 
   logSaveBtn.disabled = true;
   const origText = logSaveBtn.textContent;
   logSaveBtn.textContent = 'Saving\u2026';
   try {
-    // For POTA/WWFF spots, look up the park's actual location for state/grid/country
-    let parkLocState = '', parkLocGrid = '', parkLocCountry = '';
+    // A park that spans states: ask which one the activator is in (WG9I).
+    // Everything else about the records — QRZ name and location per call,
+    // the park's location, one record per call × park × activation ref,
+    // re-spot once, forward once per call — is logContact's (main.js,
+    // lib/qso-expand.js), the same for every log surface.
+    let parkState = '';
     if (sig === 'POTA' && potaRef) {
       try {
         const parkData = await window.api.getPark(potaRef);
-        if (parkData) {
-          // locationDesc is "US-ME", "VE-ON", or comma-separated for parks
-          // spanning states ("US-WI,US-MI") — single state fills STATE,
-          // multiple prompts the operator (WG9I).
-          const states = parkStatesFromLocationLocal(parkData.locationDesc);
-          if (states.length === 1) parkLocState = states[0];
-          else if (states.length > 1) parkLocState = await promptParkState(potaRef, parkData.locationDesc);
-          parkLocGrid = parkData.grid || '';
-        }
+        const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
+        if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
       } catch {}
     }
-
-    let lastResult = null;
-    // Per-callsign record lists (primary + n-fer + activation cross-product) —
-    // the activation contact push below needs the real qsoDataList, not a
-    // stub (SP5GB 2026-07-27: stub contacts broke per-park export).
+    const allRefs = sigInfo ? [sigInfo, ...addlParks].join(',') : '';
+    const wantsAnyRespot = wantsRespot || wantsWwffRespot || wantsLlotaRespot || wantsWwbotaRespot || wantsDxcRespot;
+    const lastResult = await window.api.logContact({
+      callsign: callsigns.join(','),
+      frequency, mode, qsoDate, timeOn, rstSent, rstRcvd, txPower, band,
+      sig, sigInfo: allRefs, potaRef, sotaRef, wwffRef, llotaRef, wwbotaRef,
+      parkState,
+      name: logOpName.value.trim(), // what the form shows for callsign 1
+      comment: logComment.value.trim(),
+      respot: wantsRespot,
+      wwffRespot: wantsWwffRespot,
+      wwffReference: wantsWwffRespot ? respotWwffRef : '',
+      llotaRespot: wantsLlotaRespot,
+      llotaReference: wantsLlotaRespot && parsedByType.llota ? parsedByType.llota.primary : '',
+      wwbotaRespot: wantsWwbotaRespot,
+      wwbotaReference: wantsWwbotaRespot && parsedByType.wwbota ? parsedByType.wwbota.primary : '',
+      dxcRespot: wantsDxcRespot,
+      respotComment: wantsAnyRespot ? commentText : '',
+      // Another operator on this machine, several, or '' for the active one (lib/log-as.js)
+      logAs: logAsChosen(),
+    });
+    // The records each callsign became, for the live activation log below.
     const spotLogRecords = new Map();
-    for (let ci = 0; ci < callsigns.length; ci++) {
-      const cs = callsigns[ci];
-      const logQrzInfo = qrzData.get(JtcatParser.baseCall(cs));
-
-      const qsoData = {
-        callsign: cs,
-        frequency,
-        mode,
-        qsoDate,
-        timeOn,
-        rstSent,
-        rstRcvd,
-        txPower,
-        band,
-        sig,
-        sigInfo,
-        potaRef,
-        sotaRef,
-        wwffRef,
-        llotaRef,
-        wwbotaRef,
-        name: logQrzInfo ? [cleanQrzName(logQrzInfo.nickname) || cleanQrzName(logQrzInfo.fname), cleanQrzName(logQrzInfo.name)].filter(Boolean).join(' ') : '',
-        // For park/summit activators, use park location instead of QRZ home QTH
-        // For POTA activators, use the park's state/grid instead of QRZ home QTH
-        state: parkLocState || (!sig && logQrzInfo ? logQrzInfo.state : ''),
-        county: !parkLocState && !sig && logQrzInfo && logQrzInfo.state && logQrzInfo.county ? `${logQrzInfo.state},${logQrzInfo.county}` : '',
-        gridsquare: parkLocGrid || (logQrzInfo ? logQrzInfo.grid : ''),
-        country: logQrzInfo ? logQrzInfo.country : '',
-        comment: commentBase,
-        // Include activation context whenever an activation is running —
-        // see the banner-logger comment above (Dean/Bob report). Gate is
-        // activationActive only, not appMode.
-        ...(activationActive && activatorParkRefs.length > 0
-          ? { mySig: primaryProgram(), mySigInfo: activatorParkRefs[0].ref }
-          : {}),
-        // Only respot on the first callsign
-        respot: ci === 0 && wantsRespot,
-        wwffRespot: ci === 0 && wantsWwffRespot,
-        wwffReference: ci === 0 && wantsWwffRespot ? respotWwffRef : '',
-        llotaRespot: ci === 0 && wantsLlotaRespot,
-        llotaReference: ci === 0 && wantsLlotaRespot && parsedByType.llota ? parsedByType.llota.primary : '',
-        wwbotaRespot: ci === 0 && wantsWwbotaRespot,
-        wwbotaReference: ci === 0 && wantsWwbotaRespot && parsedByType.wwbota ? parsedByType.wwbota.primary : '',
-        dxcRespot: ci === 0 && wantsDxcRespot,
-        respotComment: ci === 0 && (wantsRespot || wantsWwffRespot || wantsLlotaRespot || wantsWwbotaRespot || wantsDxcRespot) ? commentText : '',
-        // Another operator on this machine, or '' for the active one (lib/log-as.js)
-        logAs: logAsChosen(),
-      };
-
-      lastResult = await window.api.saveQso(qsoData);
-      if (!lastResult.success) break;
-      const savedForCall = [qsoData];
-
-      // Save additional park records (two-fer / three-fer) from comma-separated refs
-      for (const addlRef of addlParks) {
-        const addlComment = [logComment.value.trim(), `[${sig} ${addlRef}]`].filter(Boolean).join(' ');
-        const addlData = {
-          ...qsoData,
-          sigInfo: addlRef,
-          potaRef: sig === 'POTA' ? addlRef : qsoData.potaRef,
-          sotaRef: sig === 'SOTA' ? addlRef : qsoData.sotaRef,
-          wwffRef: sig === 'WWFF' ? addlRef : qsoData.wwffRef,
-          llotaRef: sig === 'LLOTA' ? addlRef : qsoData.llotaRef,
-          wwbotaRef: sig === 'WWBOTA' ? addlRef : qsoData.wwbotaRef,
-          comment: addlComment,
-          respot: false,
-          wwffRespot: false,
-          llotaRespot: false,
-          wwbotaRespot: false,
-          dxcRespot: false,
-          respotComment: '',
-          skipLogbookForward: true,
-        };
-        const addlResult = await window.api.saveQso(addlData);
-        if (!addlResult.success) { lastResult = addlResult; break; }
-        savedForCall.push(addlData);
-      }
-      if (lastResult && !lastResult.success) break;
-
-      // Cross-product for the REMAINING activation refs. The primary record
-      // above carries only activatorParkRefs[0]; parks 2..N and cross-program
-      // refs each need their own MY_SIG record, exactly like the Act-screen
-      // logger builds (SP5GB 2026-07-27: multipark spot-log QSOs landed in
-      // park 1 only). Best-effort: a failed extra record must not unwind the
-      // already-saved QSO.
-      if (activationActive && activatorParkRefs.length > 0) {
-        // activationMyRefs() is primaries-then-cross-refs, deduped and in
-        // order, so [0] is the ref the record above already carries and the
-        // tail is exactly the extras — with the primary/X-Ref duplicate a
-        // non-POTA activator used to have to create by hand now collapsed.
-        const extraMyRefs = activationMyRefs().slice(1);
-        const parkOneRecords = savedForCall.slice();
-        for (const mr of extraMyRefs) {
-          for (const base of parkOneRecords) {
-            const rec = {
-              ...base,
-              mySig: mr.sig,
-              mySigInfo: mr.ref,
-              respot: false,
-              wwffRespot: false,
-              llotaRespot: false,
-              wwbotaRespot: false,
-              dxcRespot: false,
-              respotComment: '',
-              skipLogbookForward: true,
-            };
-            try {
-              const r = await window.api.saveQso(rec);
-              if (r && r.success) savedForCall.push(rec);
-            } catch { /* keep going — primary record is already saved */ }
-          }
-        }
-      }
-      spotLogRecords.set(cs, savedForCall);
+    for (const rec of (lastResult && lastResult.records) || []) {
+      if (!spotLogRecords.has(rec.callsign)) spotLogRecords.set(rec.callsign, []);
+      spotLogRecords.get(rec.callsign).push(rec);
     }
 
     const displayCalls = callsigns.join(', ');
@@ -26166,96 +25965,49 @@ async function activatorLogContact() {
   const timeUtc = `${hh}:${mm}`;
 
   const myParks = activatorParkRefs;                              // always >= 1
-  const theirParks = hunterParkRefs.length > 0 ? hunterParkRefs : [null];
 
-  // Log each callsign as a separate QSO with identical fields
-  for (const callsign of callsigns) {
-    // Pull the operator name so it lands in the ADIF <NAME> field and the
-    // in-memory log row. The name shown during entry comes from a QRZ lookup
-    // (Tab handler / debounce) that does NOT always populate qrzData, so a
-    // bare cache read here races the on-screen display and frequently misses
-    // — writing an empty NAME to the ADIF even though the operator saw the
-    // name (Casey 2026-06-16: "ADIF NAME column blank"). Read the cache
-    // first, then fall back to an awaited lookup so the name is reliably
-    // resolved before we build the QSO record, and seed the cache for reuse.
-    const bareCall = JtcatParser.baseCall(callsign).toUpperCase();
-    let qrzInfo = qrzData.get(bareCall);
-    if (!qrzInfo) {
-      try { qrzInfo = await window.api.qrzLookup(callsign); } catch {}
-      if (qrzInfo) qrzData.set(bareCall, qrzInfo);
-    }
-    const opName = qrzInfo ? qrzDisplayName(qrzInfo) : '';
-    const baseFields = {
-      callsign,
-      frequency: freqKhz ? String(freqKhz) : '',
-      mode,
-      band,
-      qsoDate,
-      timeOn,
-      rstSent,
-      rstRcvd,
-      txPower: defaultPower ? String(defaultPower) : '',
-      name: opName,
-      state: stateVal,
-      stationCallsign: myCallsign || '',
-      operator: myCallsign || '',
+  // One contact, every callsign: logContact writes callsign × hunter park ×
+  // MY park records (this activation's refs, read live by main), forwards
+  // each callsign once, logs a park-to-park contact at the HUNTER's park
+  // rather than their QRZ home state, and fills each call's QRZ name.
+  let res = null;
+  try {
+    res = await window.api.logContact({
+      callsign: callsigns.join(','),
+      frequency: String(freqKhz),
+      mode, band, qsoDate, timeOn, rstSent, rstRcvd,
+      state: stateVal, // what the operator typed/kept for callsign 1 (a park contact uses the park's)
       myGridsquare: activatorParkGrid || '',
-    };
-
-    // Cross-product: one ADIF record per MY_SIG_INFO × SIG_INFO combination.
-    // Primary refs and cross-program refs come from ONE deduped list. Before
-    // this, mySig here was the literal 'POTA', so a SOTA activator had to
-    // enter the summit twice — primary field (logged POTA, wrong) plus the
-    // X-Ref slot (logged SOTA, right) — and their upload worked only because
-    // of that second record. Now the primary reports its real program, those
-    // two ARE the same record, and activationMyRefs() collapses them.
-    // MY_SOTA_REF / MY_WWFF_REF / MY_LLOTA_REF need no explicit assignment:
-    // buildAdifRecord derives each from mySig (lib/adif-writer.js:89-92).
-    const allQsoData = [];
-    for (const myRef of activationMyRefs()) {
-      for (const theirPark of theirParks) {
-        const qsoData = { ...baseFields, mySig: myRef.sig, mySigInfo: myRef.ref };
-        if (theirPark) { qsoData.sig = theirPark.program || 'POTA'; qsoData.sigInfo = theirPark.ref; }
-        allQsoData.push(qsoData);
-      }
+      hunted: hunterParkRefs.map((p) => ({ sig: p.program || 'POTA', ref: p.ref })),
+    });
+  } catch (err) {
+    res = { success: false, error: err.message };
+  }
+  if (!res || !res.success) {
+    // Never list a contact that is not in the log.
+    showLogToast(`Not logged: ${(res && res.error) || 'save failed'}`, { warn: true, duration: 6000 });
+    return;
+  }
+  // Fire cross-program self-spots (WWFF/LLOTA) via quick-respot
+  for (const xr of activatorCrossRefs) {
+    if ((xr.program === 'WWFF' || xr.program === 'LLOTA') && xr.ref) {
+      window.api.quickRespot({
+        callsign: myCallsign,
+        frequency: String(freqKhz),
+        mode,
+        wwffRespot: xr.program === 'WWFF',
+        wwffReference: xr.program === 'WWFF' ? xr.ref : '',
+        llotaRespot: xr.program === 'LLOTA',
+        llotaReference: xr.program === 'LLOTA' ? xr.ref : '',
+        comment: '',
+      }).catch(err => console.warn('[Activator] ' + xr.program + ' self-spot failed:', err));
     }
+  }
 
-    // Save all cross-product records via existing pipeline
-    // Only forward the first record to external logbook — ACLog etc. only
-    // need one QSO per physical contact, not one per park ref
-    try {
-      for (let qi = 0; qi < allQsoData.length; qi++) {
-        const qsoData = allQsoData[qi];
-        if (qi > 0) qsoData.skipLogbookForward = true;
-        await window.api.saveQso(qsoData);
-      }
-      // Fire cross-program self-spots (WWFF/LLOTA) via quick-respot
-      for (const xr of activatorCrossRefs) {
-        if (xr.program === 'WWFF' && xr.ref) {
-          window.api.quickRespot({
-            callsign: myCallsign,
-            frequency: freqKhz ? String(freqKhz) : '',
-            mode,
-            wwffRespot: true,
-            wwffReference: xr.ref,
-            comment: '',
-          }).catch(err => console.warn('[Activator] WWFF self-spot failed:', err));
-        }
-        if (xr.program === 'LLOTA' && xr.ref) {
-          window.api.quickRespot({
-            callsign: myCallsign,
-            frequency: freqKhz ? String(freqKhz) : '',
-            mode,
-            llotaRespot: true,
-            llotaReference: xr.ref,
-            comment: '',
-          }).catch(err => console.warn('[Activator] LLOTA self-spot failed:', err));
-        }
-      }
-    } catch (err) {
-      console.error('[Activator] Failed to save QSO:', err);
-    }
-
+  for (const callsign of callsigns) {
+    const allQsoData = res.records.filter((r) => r.callsign === callsign);
+    const primary = allQsoData[0] || {};
+    const opName = primary.name || '';
     // Add to in-memory list — one entry per physical QSO
     const contact = {
       callsign,
@@ -26265,7 +26017,7 @@ async function activatorLogContact() {
       band,
       rstSent,
       rstRcvd,
-      state: stateVal,
+      state: primary.state || '',
       name: opName,
       myParks: [...myParks.map(p => p.ref), ...activatorCrossRefs.map(xr => xr.ref)],
       theirParks: hunterParkRefs.map(p => p.ref),

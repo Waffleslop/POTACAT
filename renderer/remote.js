@@ -6047,13 +6047,13 @@
 
     ltSave.disabled = true;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      const typeToSig = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA' };
+      const typeToSig = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', wwbota: 'WWBOTA' };
       const sig = typeToSig[ltSelectedType] || '';
       const rawRef = ltRefInput.value.trim().toUpperCase();
       const refs = rawRef.split(',').map(function (r) { return r.trim(); }).filter(Boolean);
       const typedRef = refs[0] || '';
-      const addlRefs = refs.slice(1);
-      const sigInfo = (ltSelectedType && ltSelectedType !== 'dx' && typedRef) ? typedRef : '';
+      // Every ref (a two-fer is a comma list); the desktop writes one record each.
+      const sigInfo = (ltSelectedType && ltSelectedType !== 'dx' && typedRef) ? refs.join(',') : '';
 
       const userComment = ltNotes.value.trim();
       const baseData = {
@@ -6080,14 +6080,11 @@
         const targets = (ltRespotSection.dataset.targets || '').split(',').filter(Boolean);
         const comment = ltRespotComment.value.trim();
         if (targets.includes('pota')) { baseData.respot = true; }
-        if (targets.includes('wwff')) { baseData.wwffRespot = true; baseData.wwffReference = sigInfo; }
-        if (targets.includes('llota')) { baseData.llotaRespot = true; baseData.llotaReference = sigInfo; }
+        if (targets.includes('wwff')) { baseData.wwffRespot = true; baseData.wwffReference = typedRef; }
+        if (targets.includes('llota')) { baseData.llotaRespot = true; baseData.llotaReference = typedRef; }
         if (targets.includes('dxc')) { baseData.dxcRespot = true; }
         if (comment) baseData.respotComment = comment;
       }
-
-      // Additional parks from comma-separated refs (two-fer / three-fer)
-      if (addlRefs.length > 0) baseData.additionalParks = addlRefs;
 
       // Include activator fields when activation is running
       if (activationSig && activationRef) {
@@ -6098,11 +6095,10 @@
 
       if (logAsCall) baseData.logAs = logAsValue(); // another operator (or all of them) on the desktop
 
-      // Send one log-qso per callsign
-      for (var ci = 0; ci < calls.length; ci++) {
-        var logData = Object.assign({}, baseData, { callsign: calls[ci] });
-        ws.send(JSON.stringify({ type: 'log-qso', data: logData }));
-      }
+      // ONE contact, every callsign and ref in it: the desktop's logContact
+      // writes one record per call × park and re-spots once. One message per
+      // callsign used to re-spot the activator once per operator.
+      ws.send(JSON.stringify({ type: 'log-qso', data: Object.assign({}, baseData, { callsign: calls.join(',') }) }));
     }
   }
 
@@ -6290,13 +6286,15 @@
     logSaveBtn.disabled = true;
     if (ws && ws.readyState === WebSocket.OPEN) {
       // Determine sig/sigInfo from type picker + ref input (comma-separated for two-fer)
-      const typeToSig = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA' };
+      const typeToSig = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', wwbota: 'WWBOTA' };
       const sig = typeToSig[logSelectedType] || logSig.value || '';
       const rawRef = logRefInput.value.trim().toUpperCase();
       const logRefs = rawRef.split(',').map(function (r) { return r.trim(); }).filter(Boolean);
       const typedRef = logRefs[0] || '';
-      const logAddlRefs = logRefs.slice(1);
-      const sigInfo = (logSelectedType && logSelectedType !== 'dx' && typedRef) ? typedRef : logSigInfo.value || '';
+      // Every ref (a two-fer is a comma list); the desktop writes one record
+      // each, each with its own POTA_REF (this sheet sent "US-1,US-2" as the
+      // POTA_REF of both records).
+      const sigInfo = (logSelectedType && logSelectedType !== 'dx' && typedRef) ? logRefs.join(',') : logSigInfo.value || '';
 
       const logSheetComment = logNotes.value.trim();
       const baseData = {
@@ -6335,14 +6333,11 @@
         const targets = (logRespotSection.dataset.targets || '').split(',').filter(Boolean);
         const comment = logRespotComment.value.trim();
         if (targets.includes('pota')) { baseData.respot = true; }
-        if (targets.includes('wwff')) { baseData.wwffRespot = true; baseData.wwffReference = sigInfo; }
-        if (targets.includes('llota')) { baseData.llotaRespot = true; baseData.llotaReference = sigInfo; }
+        if (targets.includes('wwff')) { baseData.wwffRespot = true; baseData.wwffReference = typedRef || sigInfo; }
+        if (targets.includes('llota')) { baseData.llotaRespot = true; baseData.llotaReference = typedRef || sigInfo; }
         if (targets.includes('dxc')) { baseData.dxcRespot = true; }
         if (comment) baseData.respotComment = comment;
       }
-
-      // Additional parks from comma-separated refs (two-fer / three-fer)
-      if (logAddlRefs.length > 0) baseData.additionalParks = logAddlRefs;
 
       // Include activator fields when activation is running
       if (activationSig && activationRef) {
@@ -6353,11 +6348,10 @@
 
       if (logAsCall) baseData.logAs = logAsValue(); // another operator (or all of them) on the desktop
 
-      // Send one log-qso per callsign
-      for (var ci = 0; ci < calls.length; ci++) {
-        var logData = Object.assign({}, baseData, { callsign: calls[ci] });
-        ws.send(JSON.stringify({ type: 'log-qso', data: logData }));
-      }
+      // ONE contact, every callsign in it — the desktop's logContact writes
+      // one record per call × park and re-spots once (one message per
+      // callsign re-spotted the activator once per operator).
+      ws.send(JSON.stringify({ type: 'log-qso', data: Object.assign({}, baseData, { callsign: calls.join(',') }) }));
     }
   });
 
@@ -6840,7 +6834,9 @@
     } else {
       // Offline — queue locally
       const now = new Date();
-      offlineQueue.push({ ...data, _offline: true, _ts: now.toISOString() });
+      // qsoAt: when the contact was made — the desktop stamps the drain time
+      // otherwise (logging parity audit 2026-10-19).
+      offlineQueue.push({ ...data, qsoAt: now.getTime(), _offline: true, _ts: now.toISOString() });
       localStorage.setItem('echocat-offline-queue', JSON.stringify(offlineQueue));
       sessionContacts.push({
         nr: sessionContacts.length + 1,
@@ -6945,6 +6941,8 @@
     const item = offlineQueue.shift();
     localStorage.setItem('echocat-offline-queue', JSON.stringify(offlineQueue));
     const data = { ...item };
+    // Items queued by an older page carry only _ts.
+    if (!data.qsoAt && data._ts) { const ms = Date.parse(data._ts); if (Number.isFinite(ms)) data.qsoAt = ms; }
     delete data._offline;
     delete data._ts;
     ws.send(JSON.stringify({ type: 'log-qso', data }));

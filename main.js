@@ -327,6 +327,7 @@ const { activationStationFill } = require('./lib/activation-station'); // N7VBN:
 const { freqToBand } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
+const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
 const wsprnet = require('./lib/wspr/wsprnet');
 const wsprBands = require('./lib/wspr/bands');
 const wsprlive = require('./lib/wspr/wsprlive');
@@ -8375,34 +8376,128 @@ function reviewAskTick() {
   win.webContents.send('echocat-review-ask', { stores: d.stores });
 }
 
+// ── Logging a contact ─────────────────────────────────────────────────────
+// THE way a contact is logged, from every surface: the Log QSO dialog, the
+// bottom bar, the Log QSO window (and JS8/SSTV/JTTY through it), the
+// activation logger, the Logbook's New QSO, ECHOCAT, JTCAT auto-log and the
+// WSJT-X bridge. A surface sends what the operator logged — comma lists of
+// callsigns and refs included — and this decides the records
+// (lib/qso-expand.js: calls × their refs × my activation refs, re-spot once,
+// forward once per call, the park's location for a park contact) and writes
+// each through saveQsoRecord. Surfaces used to build records themselves and
+// drifted apart (logging parity audit 2026-10-19).
+//
+// entry.mySig/mySigInfo = exactly that one ref of mine; otherwise the live
+// activation's refs, unless entry.activation === false (a past QSO typed into
+// the Logbook is not part of today's activation).
+function liveActivationMyRefs() {
+  const parkRefs = (settings.activatorParkRefs || []).filter((p) => p && p.ref);
+  if (!(settings.activationActive || settings.appMode === 'activator') || !parkRefs.length) return [];
+  return activationProgram.activationMyRefs(parkRefs, settings.activatorCrossRefs || []);
+}
+async function qrzStationInfo(call) {
+  if (!qrz || !qrz.configured || !settings.enableQrz) return null;
+  let q = null;
+  try { q = await qrz.lookup(JtcatParser.baseCall(call)); } catch { q = null; }
+  if (!q) return null;
+  return {
+    name: [cleanQrzName(q.nickname) || cleanQrzName(q.fname), cleanQrzName(q.name)].filter(Boolean).join(' '),
+    country: q.country || '', state: q.state || '', county: q.county || '', grid: q.grid || '',
+  };
+}
+// An activation contact logged outside the Act screen (JTCAT, the WSJT-X
+// bridge, ECHOCAT) still belongs in the live activation log and the mobile
+// device's session list. No-op when no activation is running.
+function announceActivationContact(entry, records, freqKhz) {
+  const mine = (records || []).filter((r) => r && r.mySig);
+  if (!mine.length) return;
+  const first = mine[0];
+  const timeOn = String(first.timeOn || '');
+  const timeUtc = timeOn.length >= 4 ? `${timeOn.slice(0, 2)}:${timeOn.slice(2, 4)}` : '';
+  const calls = [...new Set(mine.map((r) => r.callsign))];
+  for (const call of calls) {
+    const list = mine.filter((r) => r.callsign === call);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('wsjtx-activator-qso', {
+        callsign: call,
+        timeUtc,
+        freqDisplay: freqKhz ? (Number(freqKhz) / 1000).toFixed(3) : '',
+        mode: first.mode,
+        band: first.band || '',
+        rstSent: first.rstSent,
+        rstRcvd: first.rstRcvd,
+        name: list[0].name || '',
+        myParks: [...new Set(list.map((r) => r.mySigInfo))],
+        theirParks: [...new Set(list.map((r) => r.sigInfo).filter(Boolean))],
+        qsoData: list[0],
+        qsoDataList: list,
+      });
+    }
+    if (remoteServer && remoteServer.running) {
+      const dupe = remoteServer.getSessionContacts().some((c) =>
+        c.callsign && c.callsign.toUpperCase() === call && c.band === (first.band || ''));
+      remoteServer.addSessionContact({
+        callsign: call, timeUtc: timeOn, freqKhz: String(freqKhz || ''), mode: first.mode,
+        band: first.band || '', rstSent: first.rstSent, rstRcvd: first.rstRcvd, dupe,
+      });
+      remoteServer.sendSessionContacts();
+    }
+  }
+}
+
+async function logContact(entry, opts) {
+  opts = opts || {};
+  if (!entry || !String(entry.callsign || '').trim()) return { success: false, error: 'Missing callsign', records: [] };
+  const calls = QsoExpand.splitList(entry.callsign);
+  const infos = new Map();
+  await Promise.all(calls.map(async (c) => { infos.set(c, await qrzStationInfo(c)); }));
+  const myRefs = entry.mySig && entry.mySigInfo
+    ? [{ sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo }]
+    : (entry.activation === false ? [] : liveActivationMyRefs());
+  const e = { ...entry };
+  delete e.activation;
+  const records = QsoExpand.expandContact(e, {
+    myRefs,
+    callInfo: (c) => infos.get(c) || null,
+    parkInfo: (ref) => {
+      const p = parkInfoFor(ref);
+      return p ? { states: parkStatesFromLocation(p.locationDesc || ''), grid: p.grid || '' } : null;
+    },
+  });
+  const written = [];
+  let first = null, failure = null;
+  for (const rec of records) {
+    const r = await saveQsoRecord(rec, opts);
+    if (!first) first = r;
+    if (r && r.success) written.push(rec);
+    else if (!failure) failure = r;
+  }
+  return {
+    ...(first || {}),
+    success: written.length > 0,
+    error: failure ? failure.error : undefined,
+    records: written,
+    calls,
+  };
+}
+
 async function saveQsoRecord(qsoData, opts) {
   opts = opts || {};
   const origin = opts.origin || 'local-manual';
 
-  // A comma-separated callsign is several QSOs (multi-op activation). Every
-  // log form splits it itself, with per-call QRZ data; this is the net for
-  // any caller that does not (W9TEF 2026-10-18: the Log QSO window saved
-  // "K1A,K1B,K1C" as one callsign and DXKeeper refused it). Later copies
-  // never re-spot and drop the first call's QRZ name and country.
-  const callList = qsoData && typeof qsoData.callsign === 'string' && qsoData.callsign.includes(',')
-    ? qsoData.callsign.split(',').map((c) => c.trim()).filter(Boolean) : null;
-  if (callList && callList.length > 1) {
-    sendCatLog(`[QSO] "${qsoData.callsign}" is ${callList.length} callsigns — logging one QSO each`);
-    let last = null;
-    for (let i = 0; i < callList.length; i++) {
-      const q = { ...qsoData, callsign: callList[i] };
-      if (i > 0) {
-        for (const k of LogAs.RESPOT_KEYS) delete q[k];
-        delete q.uuid;
-        q.name = '';
-        q.country = '';
-      }
-      last = await saveQsoRecord(q, opts);
-      if (!last || !last.success) break;
+  // A comma-separated callsign is not a record but a contact (multi-op
+  // activation, W9TEF): hand it to logContact, which gives every call its own
+  // records and QRZ data. Every desktop form already goes there; this catches
+  // any other caller (an older mobile build) — the half-copy that stood here
+  // kept callsign 1's state/county/grid on the others (parity audit).
+  if (qsoData && typeof qsoData.callsign === 'string' && qsoData.callsign.includes(',')) {
+    const calls = qsoData.callsign.split(',').map((c) => c.trim()).filter(Boolean);
+    if (calls.length > 1) {
+      sendCatLog(`[QSO] "${qsoData.callsign}" is ${calls.length} callsigns — logging one QSO each`);
+      return logContact(qsoData, opts);
     }
-    return last;
+    qsoData.callsign = calls[0] || '';
   }
-  if (callList) qsoData.callsign = callList[0] || '';
 
   // Log for several operators at once (KD9WI 2026-10-17, "Log as: both"):
   // one record into each operator's own logbook, each through this same
@@ -9035,75 +9130,18 @@ function connectWsjtx() {
         operator: f.OPERATOR || settings.myCallsign || '',
       };
 
-      // In activator mode, inject MY_SIG fields for each park ref (cross-
-      // product). Same gate as jtcatAutoLog: activation RUNNING or the legacy
-      // appMode view check — never view-only (W7RTA 2026-07-18).
-      const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
-      if ((settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0) {
-        const allQsoData = [];
-        for (let i = 0; i < parkRefs.length; i++) {
-          const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref };
-          allQsoData.push(parkQso);
-          await saveQsoRecord(parkQso, { origin: 'wsjtx-bridge' });
-        }
-        // Cross-program references (WWFF, LLOTA for same park). Skip any that
-        // duplicate a primary: now the primary reports its real program, a
-        // SOTA activator's summit is BOTH the primary ref and the X-Ref they
-        // had to add as a workaround, and nothing downstream would catch the
-        // duplicate (_qsoDedupKey includes mySigInfo so real n-fers survive).
-        const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
-        const primaryKeys = activationProgram.myRefKeys(parkRefs);
-        for (const xr of crossRefs) {
-          if (primaryKeys.has(activationProgram.refKey(xr.program, xr.ref))) continue;
-          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref };
-          if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
-          else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
-          else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
-          allQsoData.push(xrQso);
-          await saveQsoRecord(xrQso, { origin: 'wsjtx-bridge' });
-        }
-        // Notify renderer so activator view gets the contact
-        if (win && !win.isDestroyed()) {
-          const freqKhz = Math.round(freqMHz * 1000);
-          const timeOn = qsoData.timeOn || '';
-          const timeUtc = timeOn.length >= 4 ? `${timeOn.slice(0, 2)}:${timeOn.slice(2, 4)}` : '';
-          win.webContents.send('wsjtx-activator-qso', {
-            callsign: qsoData.callsign,
-            timeUtc,
-            freqDisplay: freqMHz.toFixed(3),
-            mode: qsoData.mode,
-            band: qsoData.band || '',
-            rstSent: qsoData.rstSent,
-            rstRcvd: qsoData.rstRcvd,
-            name: qsoData.name || '',
-            myParks: parkRefs.map(p => p.ref),
-            theirParks: [],
-            qsoData: allQsoData[0],
-            qsoDataList: allQsoData,
-          });
-        }
-        // Phone session list — same gap as jtcatAutoLog (found in the
-        // 2026-07-11 activation-log audit): the desktop Act screen heard
-        // about bridge QSOs but the phone's session view never did.
-        if (remoteServer && remoteServer.running) {
-          const bandStr = qsoData.band || '';
-          const dupe = remoteServer.getSessionContacts().some(c =>
-            c.callsign && c.callsign.toUpperCase() === qsoData.callsign.toUpperCase() && c.band === bandStr);
-          remoteServer.addSessionContact({
-            callsign: qsoData.callsign,
-            timeUtc: qsoData.timeOn || '',
-            freqKhz: String(Math.round(freqMHz * 1000)),
-            mode: qsoData.mode,
-            band: bandStr,
-            rstSent: qsoData.rstSent,
-            rstRcvd: qsoData.rstRcvd,
-            dupe,
-          });
-          remoteServer.sendSessionContacts();
-        }
-      } else {
-        await saveQsoRecord(qsoData, { origin: 'wsjtx-bridge' });
+      // WSJT-X's contest exchange (Field Day / RTTY RU) rides through.
+      for (const [k, f2] of [['contestId', 'CONTEST_ID'], ['class', 'CLASS'], ['arrlSect', 'ARRL_SECT'], ['stxString', 'STX_STRING'], ['srxString', 'SRX_STRING']]) {
+        if (f[f2]) qsoData[k] = f[f2];
       }
+      // A station WSJT-X worked at a park is a park contact, as in JTCAT.
+      if (!qsoData.sig) {
+        const hunted = HuntedPark.findHuntedRefs(lastMergedSpots, qsoData.callsign, { freqKhz: Math.round(freqMHz * 1000), myCall: settings.myCallsign });
+        if (hunted) qsoData.hunted = hunted.refs.map((r) => ({ sig: r.sig, ref: r.ref }));
+      }
+      qsoData.gridHeard = !!qsoData.gridsquare; // their decoded grid, not a home QTH
+      const res = await logContact(qsoData, { origin: 'wsjtx-bridge' });
+      if (res.success) announceActivationContact(qsoData, res.records, Math.round(freqMHz * 1000));
     } catch (err) {
       console.error('Failed to log WSJT-X QSO:', err.message);
     }
@@ -10985,7 +11023,7 @@ function popoutBroadcastQso() {
 // call|band|mode -> ms of the last JTCAT auto-log (lib/jtcat-relog-guard.js).
 const _jtcatRecentLogs = new Map();
 
-async function jtcatAutoLog(qso) {
+async function jtcatAutoLog(qso, opts) {
   const q = qso || remoteJtcatQso;
   if (!q || !q.call) {
     sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
@@ -10998,7 +11036,7 @@ async function jtcatAutoLog(qso) {
       sendCatLog(`[JTCAT] Auto-log skipped — no Field Day exchange received for ${q.call}`);
       return;
     }
-  } else if (!q.report && !q.sentReport) {
+  } else if (!q.report && !q.sentReport && !(opts && opts.manual)) {
     sendCatLog(`[JTCAT] Auto-log skipped — no signal reports exchanged for ${q.call}`);
     return;
   }
@@ -11064,11 +11102,12 @@ async function jtcatAutoLog(qso) {
     freqKhz, myCall: settings.myCallsign,
   });
   if (hunted) {
-    qsoData.sig = hunted.sig;
-    qsoData.sigInfo = hunted.primaryRef;
-    qsoData[hunted.refField] = hunted.primaryRef;
+    // Every ref (an n-fer, or the same site in two programs): logContact
+    // writes one record per ref, each with only its own program's field.
+    qsoData.hunted = hunted.refs.map((r) => ({ sig: r.sig, ref: r.ref }));
     sendCatLog(`[JTCAT] Hunted park matched: ${q.call} @ ${hunted.refs.map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
   }
+  qsoData.gridHeard = !!qsoData.gridsquare; // their decoded grid, not a home QTH
 
   // ARRL Field Day: log the class + ARRL/RAC section exchange (ADIF contest fields)
   if (q.fd && q.theirExch) {
@@ -11081,103 +11120,13 @@ async function jtcatAutoLog(qso) {
   }
 
   try {
-    // Activation mode: add park refs so JTCAT QSOs log to the activation
-    // logbook. Gate on the activation RUNNING (settings.activationActive, set
-    // by the desktop's Start/Stop buttons) OR the legacy appMode check — the
-    // appMode-only gate dropped every QSO once the operator pressed
-    // "← Hunter" to open JTCAT, even though the activation was still active
-    // (W7RTA 2026-07-18). appMode stays as the OR-fallback because the
-    // mobile-device flow sets it without ever touching activationActive.
-    const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
-    if ((settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0) {
-      sendCatLog(`[JTCAT] Activation mode — logging to ${parkRefs.map(p => p.ref).join(', ')}`);
-      const allQsoData = [];
-      for (let i = 0; i < parkRefs.length; i++) {
-        const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref };
-        allQsoData.push(parkQso);
-        await saveQsoRecord(parkQso, { origin: 'jtcat-engine' });
-      }
-      // Cross-program refs (WWFF, LLOTA) — duplicates of a primary skipped;
-      // see the wsjtx-bridge path above for why that can now happen.
-      const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
-      const primaryKeys = activationProgram.myRefKeys(parkRefs);
-      for (const xr of crossRefs) {
-        if (primaryKeys.has(activationProgram.refKey(xr.program, xr.ref))) continue;
-        const xrQso = { ...qsoData, mySig: (xr.program || 'WWFF').toUpperCase(), mySigInfo: xr.ref };
-        if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
-        else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
-        else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
-        allQsoData.push(xrQso);
-        await saveQsoRecord(xrQso, { origin: 'jtcat-engine' });
-      }
-      // Feed the ACTIVATION LOG (user report 2026-07-11: "JTCAT contacts do
-      // not populate in the activation log"). The ADIF side above was always
-      // right, but the Act screen's contact list lives in the RENDERER
-      // (activatorContacts) and the phone's session list in remote-server —
-      // and neither ever heard about auto-logged FT8 QSOs. Reuse the
-      // wsjtx-activator-qso channel: the renderer handler already does the
-      // list push + activation-map popout + QRZ enrichment for the WSJT-X
-      // bridge; same event, same handler, no new plumbing.
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('wsjtx-activator-qso', {
-          callsign: qsoData.callsign,
-          timeUtc: qsoTime.length >= 4 ? `${qsoTime.slice(0, 2)}:${qsoTime.slice(2, 4)}` : '',
-          freqDisplay: freqMhz.toFixed(3),
-          mode: qsoData.mode,
-          band,
-          rstSent: qsoData.rstSent,
-          rstRcvd: qsoData.rstRcvd,
-          name: '',
-          myParks: parkRefs.map(p => p.ref),
-          theirParks: hunted ? hunted.refs.map(r => r.ref) : [],
-          // The full per-park record set — the base qsoData has no MY_SIG, so
-          // sending [qsoData] made JTCAT contacts export into UNKNOWN.adi in
-          // the per-park flow (SP5GB 2026-07-27 audit).
-          qsoData: allQsoData[0] || qsoData,
-          qsoDataList: allQsoData.length ? allQsoData : [qsoData],
-        });
-      }
-      // Phone session list — the same contact shape the phone log-qso path
-      // adds, with the same same-call-same-band dupe flag.
-      if (remoteServer && remoteServer.running) {
-        const dupe = remoteServer.getSessionContacts().some(c =>
-          c.callsign && c.callsign.toUpperCase() === qsoData.callsign && c.band === band);
-        remoteServer.addSessionContact({
-          callsign: qsoData.callsign,
-          timeUtc: qsoTime,
-          freqKhz: String(freqKhz),
-          mode: qsoData.mode,
-          band,
-          rstSent: qsoData.rstSent,
-          rstRcvd: qsoData.rstRcvd,
-          dupe,
-        });
-        remoteServer.sendSessionContacts();
-      }
-    } else {
-      await saveQsoRecord(qsoData, { origin: 'jtcat-engine' });
-    }
-
-    // Additional hunted refs (n-fer activator spotted at several parks, or
-    // cross-program for the same site): one record per extra ref, mirroring
-    // the SSB log-form behavior. In activation mode they pair with the
-    // primary my-park ref (already on qsoData via the loop above) — POTA
-    // upload needs one my-park file per contact, not a full cross-product.
-    if (hunted && hunted.refs.length > 1) {
-      // Activation RUNNING, not the view (W7RTA 2026-07-18), and the park's
-      // real program — this was the last literal MY_SIG 'POTA'.
-      const inActivation = (settings.activationActive || settings.appMode === 'activator') && parkRefs.length > 0;
-      for (const extra of hunted.refs.slice(1)) {
-        const extraQso = { ...qsoData, uuid: undefined, sig: extra.sig, sigInfo: extra.ref };
-        delete extraQso[hunted.refField];
-        extraQso[extra.refField] = extra.ref;
-        if (inActivation) {
-          extraQso.mySig = activationProgram.programOf(parkRefs[0]);
-          extraQso.mySigInfo = parkRefs[0].ref;
-        }
-        await saveQsoRecord(extraQso, { origin: 'jtcat-engine' });
-      }
-    }
+    // One call: the activation's refs (if running), the hunted park(s), and
+    // which copy is forwarded / re-spotted are all logContact's to decide —
+    // this path used to forward every multi-park copy to the external
+    // logbook, QRZ and Club Log (logging parity audit 2026-10-19).
+    const res = await logContact(qsoData, { origin: 'jtcat-engine' });
+    if (!res.success) throw new Error(res.error || 'not logged');
+    announceActivationContact(qsoData, res.records, freqKhz);
 
     console.log('[JTCAT] Auto-logged QSO:', q.call, 'OK');
     RelogGuard.noteLogged(_jtcatRecentLogs, relogKeyStr, Date.now());
@@ -18436,258 +18385,93 @@ function connectRemote() {
       return;
     }
     try {
-      // qsoAt (epoch ms): the EXCHANGE time, not the tap time. JS8 is a
-      // ragchew mode — logging happens after the conversation, and the
-      // prefill's whole point is the trailing session's real times. Also
-      // fixes late write-ups and paper batch entry. Fallback: now, the old
-      // behavior, so every existing caller is unchanged (mobile ask
-      // 2026-08-09, docs/desktop-asks/js8-logging-gaps.md #1).
+      // What the operator logged, as an entry for logContact — which decides
+      // the records exactly as every desktop form does (QRZ name per call,
+      // the park's location for a park contact, one record per call × park ×
+      // activation ref, re-spot once, forward once per call). This handler
+      // used to rebuild all of that itself, three activation loops included.
+      //
+      // qsoAt (epoch ms) is the EXCHANGE time — JS8 is logged after the
+      // conversation, the web's offline queue after reconnecting.
       const at = Number(data.qsoAt);
-      const now = Number.isFinite(at) && at > 0 ? new Date(at) : new Date();
-      const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
-      const qsoTime = now.toISOString().slice(11, 16).replace(/:/g, '');
       const freqKhz = parseFloat(data.freqKhz) || 0;
-      const freqMhz = freqKhz / 1000;
-      const band = freqToBand(freqMhz) || '';
-
-      const sig = data.sig || '';
-      const sigInfo = data.sigInfo || '';
-      // Multi-type cross-program refs — iOS/ECHOCAT-Web pass these
-      // when the spot was tagged with secondary OTA programs during
-      // dedup. Desktop popup already does the same. Empty-string
-      // safe: buildAdifRecord skips empty fields.
-      // The worked station's grid (ADIF GRIDSQUARE — the writer already
-      // supports it; this field was simply never mapped). JS8 prefills carry
-      // it from the heartbeat capture; FT8 could too (#3 of the same ask).
+      const band = freqToBand(freqKhz / 1000) || '';
+      // The worked station's grid as SAID on the air (JS8 heartbeat, FT8).
       const theirGrid = /^[A-R]{2}[0-9]{2}([A-Xa-x]{2})?$/.test(String(data.theirGrid || '')) ? String(data.theirGrid).toUpperCase() : '';
-      const potaRef = data.potaRef || '';
-      const sotaRef = data.sotaRef || '';
-      const wwffRef = data.wwffRef || '';
-      const llotaRef = data.llotaRef || '';
-      const userComment = (data.userComment || '').trim();
-      let comment = '';
-      if (sigInfo && userComment) comment = `[${sig} ${sigInfo}] ${userComment}`;
-      else if (sigInfo) comment = `[${sig} ${sigInfo}]`;
-      else comment = userComment;
-
-      // QRZ + park enrichment — mirror the desktop banner-logger so a phone-
-      // logged QSO carries the same name/state/grid/country into N3FJP and
-      // ADIF as the same contact logged from the desktop. Without this,
-      // KK4DF reported phone-logged QSOs landed in N3FJP with empty operator
-      // fields while desktop-logged ones were fully populated.
-      let qrzInfo = null;
-      if (qrz.configured && settings.enableQrz) {
-        try { qrzInfo = await qrz.lookup(JtcatParser.baseCall(data.callsign)); }
-        catch { /* QRZ failed — leave qrzInfo null and emit empty fields */ }
-      }
-      let parkLocState = '', parkLocGrid = '';
-      if (sig === 'POTA' && sigInfo) {
-        const park = parkInfoFor(sigInfo); // DB, else the live spot (a park abroad)
-        if (park) {
-          // Multi-state parks ("US-WI,US-MI") get NO state here — the
-          // activator is only in one of them and we can't prompt the
-          // phone operator mid-log (WG9I). Desktop log paths prompt.
-          const states = parkStatesFromLocation(park.locationDesc);
-          if (states.length === 1) parkLocState = states[0];
-          parkLocGrid = park.grid || '';
-        }
-      }
-      const qrzName = qrzInfo
-        ? [cleanQrzName(qrzInfo.nickname) || cleanQrzName(qrzInfo.fname), cleanQrzName(qrzInfo.name)].filter(Boolean).join(' ')
-        : '';
-
-      const upMode = (data.mode || '').toUpperCase();
-      // Mode-aware RST fallback. Pre-2026-06-06 we defaulted both
-      // sides to '59' which silently corrupted FT8/FT4 QSOs from the
-      // mobile app when the phone didn't populate rstRcvd — N3FJP
-      // and ADIF ended up with "59" instead of the FT8 SNR. KW4N
-      // reported the symptom on 6m FT8 from the Android app. The
-      // mobile-side root cause (missing rstRcvd in the log-qso
-      // envelope) is being fixed separately; this is the safety net.
-      const isDigi = upMode === 'FT8' || upMode === 'FT4' || upMode === 'JS8' || upMode === 'JT65' || upMode === 'JT9';
-      const defaultRst = isDigi ? '-00' : '59';
-      const qsoData = {
-        callsign: data.callsign.toUpperCase(),
+      // Additional parks (older app builds) join the comma list of refs.
+      const refs = [data.sigInfo, ...(Array.isArray(data.additionalParks) ? data.additionalParks : [])]
+        .filter(Boolean).join(',');
+      const upMode = String(data.mode || '').toUpperCase();
+      const entry = {
+        callsign: String(data.callsign),
         frequency: String(freqKhz),
         mode: upMode,
         band,
-        qsoDate,
-        timeOn: qsoTime,
-        rstSent: data.rstSent || defaultRst,
-        rstRcvd: data.rstRcvd || defaultRst,
-        sig,
-        sigInfo,
-        potaRef,
-        sotaRef,
-        wwffRef,
-        llotaRef,
-        comment,
-        // QRZ-derived fields. The state/county branch suppresses the worked
-        // op's home QTH on POTA contacts (the park's state goes there
-        // instead) — matches desktop banner-logger semantics.
-        name: qrzName,
-        state: parkLocState || (!sig && qrzInfo ? (qrzInfo.state || '') : ''),
-        county: !parkLocState && !sig && qrzInfo && qrzInfo.state && qrzInfo.county ? `${qrzInfo.state},${qrzInfo.county}` : '',
-        // Precedence: what the station SAID on the air (theirGrid — a JS8
-        // heartbeat capture or an FT8 decode) beats a park's location beats
-        // the QRZ database's idea of home.
-        gridsquare: theirGrid || parkLocGrid || (qrzInfo ? (qrzInfo.grid || '') : ''),
-        country: qrzInfo ? (qrzInfo.country || '') : '',
+        qsoAt: Number.isFinite(at) && at > 0 ? at : Date.now(),
+        rstSent: data.rstSent || '',
+        rstRcvd: data.rstRcvd || '',
+        sig: data.sig || '',
+        sigInfo: refs,
+        potaRef: data.potaRef || '',
+        sotaRef: data.sotaRef || '',
+        wwffRef: data.wwffRef || '',
+        llotaRef: data.llotaRef || '',
+        comment: String(data.userComment || '').trim(),
+        gridsquare: theirGrid,
+        gridHeard: !!theirGrid,
+        myGridsquare: data.myGridsquare || '', // the device's own grid; else the park's (saveQsoRecord), never home
       };
-
-      // Shared QSO identity (dupe fix, K3SBP 2026-07-08): if the phone sends
-      // the UUID of ITS local copy, stamp our record with it so the phone's
-      // own cloud journal entry and ours are the SAME cloud record instead
-      // of two. Without this the desktop mints a fresh UUID here, the phone
-      // journals its copy under another, and every device ends up with the
-      // QSO twice (cloud merge only matches by UUID). The log-ok reply also
-      // echoes the final UUID so the phone can adopt ours instead.
-      if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) {
-        qsoData.uuid = data.uuid;
-      }
-
-      // Pass through respot flags from phone
-      if (data.respot) qsoData.respot = true;
-      if (data.wwffRespot) { qsoData.wwffRespot = true; qsoData.wwffReference = data.wwffReference || ''; }
-      if (data.llotaRespot) { qsoData.llotaRespot = true; qsoData.llotaReference = data.llotaReference || ''; }
-      if (data.dxcRespot) qsoData.dxcRespot = true;
-      if (data.respotComment) qsoData.respotComment = data.respotComment;
-
-      // Add station fields from settings
-      if (settings.myCallsign) {
-        qsoData.stationCallsign = settings.myCallsign.toUpperCase();
-      }
-      if (settings.txPower) {
-        qsoData.txPower = String(settings.txPower);
-      }
-      // Log as another operator on this machine (KD9WI): the client picked
-      // one from S2C operators. A Guest Pass never may — its QSOs are
-      // forwarded to the guest anyway, and the owner's other operators are
-      // not the guest's to log for.
+      // One cloud record, shared with the device's own copy (dupe fix 2026-07-08).
+      if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) entry.uuid = data.uuid;
+      for (const k of ['respot', 'wwffRespot', 'llotaRespot', 'wwbotaRespot', 'dxcRespot']) if (data[k]) entry[k] = true;
+      for (const k of ['wwffReference', 'llotaReference', 'wwbotaReference', 'respotComment']) if (data[k]) entry[k] = data[k];
+      // Log as another operator on this machine (KD9WI). Never for a Guest Pass.
       {
         const ctxLogAs = typeof remoteServer.activeClientContext === 'function' ? remoteServer.activeClientContext() : null;
         // An array = several operators at once (capability 'log-as-multi').
-        if (data.logAs && !(ctxLogAs && ctxLogAs.passSession)) qsoData.logAs = Array.isArray(data.logAs) ? data.logAs.map(String) : String(data.logAs);
+        if (data.logAs && !(ctxLogAs && ctxLogAs.passSession)) entry.logAs = Array.isArray(data.logAs) ? data.logAs.map(String) : String(data.logAs);
+      }
+      // A device's own activation ref is used as-is only when this desktop
+      // runs no activation; when it does, its full set of parks + cross refs
+      // applies (logContact), as the old cross-product here did.
+      if (data.mySig && data.mySigInfo && !liveActivationMyRefs().length) {
+        entry.mySig = String(data.mySig).toUpperCase();
+        entry.mySigInfo = data.mySigInfo;
       }
 
-      // Activator mode: inject mySig fields from phone or desktop settings
-      const mySig = data.mySig || '';
-      const mySigInfo = data.mySigInfo || '';
-      // The mobile device's own grid when it sent one; otherwise the park's,
-      // filled in saveQsoRecord — never the HOME grid (N7VBN 2026-09-22).
-      const myGrid = data.myGridsquare || '';
+      const result = await logContact(entry, { origin: 'ws-log-qso' });
+      if (!result.success) throw new Error(result.error || 'not logged');
 
-      let result = { success: true };
-      if (mySig && mySigInfo) {
-        // Phone sent explicit park ref — use multi-park cross-product from desktop
-        const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
-        // Compare against the activation's own primary program, not the
-        // literal 'POTA' — that test skipped the cross-product outright for
-        // a SOTA or WWFF activation started from the phone.
-        if (mySig === activationProgram.primaryProgram(parkRefs) && parkRefs.length > 1) {
-          // Cross-product: one ADIF record per park
-          for (let i = 0; i < parkRefs.length; i++) {
-            const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
-            // Only the FIRST record keeps the shared uuid — the cross-product
-            // copies are distinct cloud records and must mint their own.
-            if (i > 0) { parkQso.skipLogbookForward = true; parkQso.uuid = undefined; }
-            const r = await saveQsoRecord(parkQso, { origin: 'ws-log-qso' });
-            if (r) Object.assign(result, r);
-          }
-        } else {
-          qsoData.mySig = mySig;
-          qsoData.mySigInfo = mySigInfo;
-          qsoData.myGridsquare = myGrid;
-          const r = await saveQsoRecord(qsoData, { origin: 'ws-log-qso' });
-          if (r) Object.assign(result, r);
-        }
-        // Cross-program references (WWFF, LLOTA for same park).
-        // uuid: undefined — saveQsoRecord mutates qsoData.uuid on the primary
-        // save above, so a plain spread would journal the SAME uuid twice and
-        // the cloud would collapse the cross-ref into the primary record.
-        const crossRefs1 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
-        const primaryKeys1 = activationProgram.myRefKeys(parkRefs);
-        for (const xr of crossRefs1) {
-          if (primaryKeys1.has(activationProgram.refKey(xr.program, xr.ref))) continue;
-          const xrQso = { ...qsoData, uuid: undefined, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
-          if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
-          else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
-          else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
-          await saveQsoRecord(xrQso, { origin: 'ws-log-qso' });
-        }
-      } else if (settings.appMode === 'activator') {
-        // Desktop is in activator mode but phone didn't send mySig — use desktop park refs
-        const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
-        if (parkRefs.length > 0) {
-          for (let i = 0; i < parkRefs.length; i++) {
-            const parkQso = { ...qsoData, mySig: activationProgram.programOf(parkRefs[i]), mySigInfo: parkRefs[i].ref, myGridsquare: myGrid };
-            if (i > 0) { parkQso.skipLogbookForward = true; parkQso.uuid = undefined; }
-            const r = await saveQsoRecord(parkQso, { origin: 'ws-log-qso' });
-            if (r) Object.assign(result, r);
-          }
-          // Cross-program references (WWFF, LLOTA for same park) — uuid
-          // stripped for the same reason as the mySig branch above; duplicates
-          // of a primary skipped for the reason given in the wsjtx path.
-          const crossRefs2 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
-          const primaryKeys2 = activationProgram.myRefKeys(parkRefs);
-          for (const xr of crossRefs2) {
-            if (primaryKeys2.has(activationProgram.refKey(xr.program, xr.ref))) continue;
-            const xrQso = { ...qsoData, uuid: undefined, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
-            if (xr.program === 'SOTA') xrQso.mySotaRef = xr.ref;
-            else if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
-            else if (xr.program === 'LLOTA') xrQso.myLlotaRef = xr.ref;
-            await saveQsoRecord(xrQso, { origin: 'ws-log-qso' });
-          }
-        } else {
-          const r = await saveQsoRecord(qsoData, { origin: 'ws-log-qso' });
-          if (r) Object.assign(result, r);
-        }
-      } else {
-        const r = await saveQsoRecord(qsoData, { origin: 'ws-log-qso' });
-        if (r) Object.assign(result, r);
+      // Session contacts (dupe = same call + band in this session), one per call.
+      let first = null;
+      for (const call of result.calls) {
+        const isDupe = remoteServer.getSessionContacts().some((c) => c.callsign.toUpperCase() === call && c.band === band);
+        const rec = result.records.find((r) => r.callsign === call) || result.records[0];
+        const contact = remoteServer.addSessionContact({
+          callsign: call, timeUtc: rec.timeOn, freqKhz: String(freqKhz), mode: rec.mode, band,
+          rstSent: rec.rstSent, rstRcvd: rec.rstRcvd, dupe: isDupe,
+        });
+        if (!first) first = contact;
       }
-
-      // Handle additional parks from phone
-      const additionalParks = data.additionalParks || [];
-      for (const addlRef of additionalParks) {
-        if (!addlRef) continue;
-        const addlQso = { ...qsoData, uuid: undefined, sigInfo: addlRef, respot: false, wwffRespot: false,
-          llotaRespot: false, dxcRespot: false, respotComment: '', skipLogbookForward: true };
-        await saveQsoRecord(addlQso, { origin: 'ws-log-qso' });
-      }
-
-      // Track session contact and send enhanced log-ok
-      // Dupe check: same callsign + same band in current activation session
-      const existingContacts = remoteServer.getSessionContacts();
-      const callUpper = qsoData.callsign.toUpperCase();
-      const isDupe = existingContacts.some(c => c.callsign.toUpperCase() === callUpper && c.band === band);
-      const contactData = {
-        callsign: qsoData.callsign,
-        timeUtc: qsoTime,
-        freqKhz: String(freqKhz),
-        mode: qsoData.mode,
-        band,
-        rstSent: qsoData.rstSent,
-        rstRcvd: qsoData.rstRcvd,
-        dupe: isDupe,
-      };
-      const contact = remoteServer.addSessionContact(contactData);
       remoteServer.sendLogResult({
         success: true,
-        callsign: qsoData.callsign,
-        nr: contact.nr,
-        timeUtc: contact.timeUtc,
-        freqKhz: contact.freqKhz,
-        mode: contact.mode,
-        band: contact.band,
-        rstSent: contact.rstSent,
-        rstRcvd: contact.rstRcvd,
-        // Final identity of the logged record — lets the phone stamp its
+        callsign: result.calls.join(', '),
+        nr: first.nr,
+        timeUtc: first.timeUtc,
+        freqKhz: first.freqKhz,
+        mode: first.mode,
+        band: first.band,
+        rstSent: first.rstSent,
+        rstRcvd: first.rstRcvd,
+        // Final identity of the logged record — lets the device stamp its
         // local copy with the SAME uuid so cloud sync sees one QSO, not two.
-        uuid: qsoData.uuid || '',
+        uuid: (result.records[0] && result.records[0].uuid) || '',
         resposted: result.resposted || false,
         respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
       });
+      // Several callsigns in one contact: the reply above describes the
+      // first; the session list (one row per call) is the truth.
+      if (result.calls.length > 1) remoteServer.sendSessionContacts();
     } catch (err) {
       console.error('[Echo CAT] Log QSO error:', err.message);
       remoteServer.sendLogResult({ success: false, error: err.message });
@@ -19655,38 +19439,15 @@ function connectRemote() {
       console.log('[JTCAT Remote] Log QSO requested but no active QSO');
       return;
     }
-    try {
-      const q = remoteJtcatQso;
-      const now = new Date();
-      const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
-      const qsoTime = now.toISOString().slice(11, 16).replace(/:/g, '');
-      const freqKhz = _currentFreqHz ? _currentFreqHz / 1000 : 0;
-      const freqMhz = freqKhz / 1000;
-      const band = freqToBand(freqMhz) || '';
-      const mode = ft8Engine ? ft8Engine._mode : 'FT8';
-
-      const qsoData = {
-        callsign: q.call.toUpperCase(),
-        frequency: String(freqKhz),
-        mode,
-        band,
-        qsoDate,
-        timeOn: qsoTime,
-        rstSent: q.sentReport || '-00',
-        rstRcvd: q.report || '-00',
-        gridsquare: q.grid || '',
-        comment: 'JTCAT FT8',
-      };
-
-      const result = await saveQsoRecord(qsoData, { origin: 'jtcat-engine' });
-      console.log('[JTCAT Remote] QSO logged:', q.call, result.success ? 'OK' : result.error);
-
-      // Broadcast updated worked QSOs so the phone's spot list updates
-      if (result.success && win && !win.isDestroyed()) {
-        win.webContents.send('jtcat-decode', { cycle: 0, mode, results: [] }); // trigger UI refresh
-      }
-    } catch (err) {
-      console.error('[JTCAT Remote] Log QSO failed:', err.message);
+    // The same log as an automatic one — hunted park, activation records,
+    // re-log guard, popout notice — instead of a thinner copy that wrote
+    // none of those (logging parity audit 2026-10-19). `manual`: the
+    // operator asked, so a QSO with no report exchanged is logged anyway.
+    const q = remoteJtcatQso;
+    await jtcatAutoLog(q, { manual: true });
+    const mode = ft8Engine ? ft8Engine._mode : 'FT8';
+    if (q._logged && win && !win.isDestroyed()) {
+      win.webContents.send('jtcat-decode', { cycle: 0, mode, results: [] }); // trigger UI refresh
     }
   });
 
@@ -36094,6 +35855,16 @@ app.whenReady().then(() => {
       return await saveQsoRecord(qsoData, { origin: 'local-manual' });
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  });
+  // A contact as the operator logged it — logContact decides its records.
+  // Every desktop log form uses this; save-qso stays for one finished record.
+  ipcMain.handle('log-contact', async (_e, entry) => {
+    markUserActive();
+    try {
+      return await logContact(entry, { origin: 'local-manual' });
+    } catch (err) {
+      return { success: false, error: err.message, records: [] };
     }
   });
 

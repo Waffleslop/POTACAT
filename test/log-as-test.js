@@ -121,7 +121,7 @@ test('resolveLogAsForSave strips logAs from the record and checks the profile ex
   assert.ok(/function operatorSettingsFor\(call\) \{[\s\S]*?_readJsonSafe\(profileSettingsPath\(c\), \{\}\)[\s\S]*?_splitSettings\(settings\)\.global/.test(main));
 });
 test('ECHOCAT log-qso passes logAs through, except for a Guest Pass', () => {
-  assert.ok(/if \(data\.logAs && !\(ctxLogAs && ctxLogAs\.passSession\)\) qsoData\.logAs = Array\.isArray\(data\.logAs\) \? data\.logAs\.map\(String\) : String\(data\.logAs\);/.test(main));
+  assert.ok(/if \(data\.logAs && !\(ctxLogAs && ctxLogAs\.passSession\)\) entry\.logAs = Array\.isArray\(data\.logAs\) \? data\.logAs\.map\(String\) : String\(data\.logAs\);/.test(main));
   assert.ok(/remoteServer\.sendOperators\(operatorsPayload\(\)\);/.test(main), 'hydrate copy beside spot-hides');
   assert.ok(/'profiles-add', \(_e, callsign\) => \{ const r = addProfile\(callsign\); pushOperatorsToClients\(\);/.test(main));
   assert.ok(/'profiles-archive', \(_e, callsign\) => \{ const r = archiveProfile\(callsign\); pushOperatorsToClients\(\);/.test(main));
