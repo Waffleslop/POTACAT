@@ -9590,7 +9590,7 @@ let jtcatJttyRxTimer = null;
 let jtcatJttyEpoch = 0;
 function jtcatJttyRxQueue(d) {
   if (!d) return;
-  if (d.complete) {
+  if (d.complete && !d.marker) {
     const utc = new Date(d.utcMs || Date.now());
     const hhmmss = String(utc.getUTCHours()).padStart(2, '0') + String(utc.getUTCMinutes()).padStart(2, '0') + String(utc.getUTCSeconds()).padStart(2, '0');
     sendCatLog(`[JTTY] ${hhmmss} ${d.freqHz} Hz ${d.snrDb} dB: ${d.text}`);
@@ -14808,7 +14808,12 @@ function updateRemoteSettings() {
     // (AB9AI 2026-07-24). tuneRadio already honors it; this only closes the
     // display gap. Default-true idiom, like logCommentTags above.
     jtcatUseDataMode: settings.jtcatUseDataMode !== false,
-    idleRxMode: ['wspr', 'psk31', 'js8'].includes(settings.idleRxMode) ? settings.idleRxMode : 'sstv',
+    idleRxMode: IDLE_RX_MODES.includes(settings.idleRxMode) ? settings.idleRxMode : 'sstv',
+    // The rest of Idle Mode, so a mobile device can show and set all of it
+    // (capability 'idle-mode'), with the desktop window's own defaults.
+    idleWsprBand: IDLE_WSPR_BANDS.includes(settings.idleWsprBand) ? settings.idleWsprBand : '20m',
+    idleWsprBandHop: settings.idleWsprBandHop === true,
+    idlePskBand: Object.prototype.hasOwnProperty.call(PSK_IDLE_DIALS, settings.idlePskBand) ? settings.idlePskBand : '20m',
     enableAtu: !!settings.enableAtu,
     tuneClick: !!settings.tuneClick,
     enableRotor: !!settings.enableRotor,
@@ -18990,13 +18995,21 @@ function connectRemote() {
     sendCatLog('[JS8] heartbeat auto-reply (HB ACK) ' + (js8HbAck ? 'ON' : 'off') + ' (remote)');
     js8PushStatus();
   });
-  remoteServer.on('set-idle-rx', ({ mode } = {}) => {
-    markUserActive();
-    const v = ['sstv', 'wspr', 'psk31', 'js8'].includes(mode) ? mode : 'sstv';
-    settings.idleRxMode = v;
-    saveSettings(settings);
-    sendCatLog('[Auto-RX] idle program set to ' + v.toUpperCase() + ' (remote)');
-    updateRemoteSettings();   // echo the choice back to every client
+  // The whole of Idle Mode from a mobile device. Every field is optional and
+  // validated on its own: a bad one is dropped (and named in the reply), the
+  // rest still apply — an unknown program from a newer client must never
+  // quietly become SSTV. Changing the settings while an idle session runs
+  // leaves that session alone (they apply the next time the station goes
+  // idle); only turning Idle Mode OFF ends it. Owner-only (remote-server).
+  remoteServer.on('set-idle-rx', (msg = {}) => {
+    // The operator is at a control, so the idle clock restarts — but
+    // selfDriven, or markUserActive would end the session being configured.
+    markUserActive({ selfDriven: true });
+    const r = applyIdleModeChange(msg);
+    if (r.changed.length) sendCatLog('[Auto-RX] Idle Mode from ECHOCAT: ' + r.changed.join(', '));
+    if (r.rejected.length) sendCatLog('[Auto-RX] Idle Mode from ECHOCAT ignored: ' + r.rejected.join(', '));
+    remoteServer.sendIdleModeResult({ ok: r.rejected.length === 0, applied: r.applied, rejected: r.rejected, reqId: msg.reqId });
+    updateRemoteSettings();   // always — the device sets its controls from the echo
   });
   remoteServer.on('js8-send-sms', ({ kind, to, text, reqId } = {}) => {
     markUserActive();
@@ -19240,20 +19253,15 @@ function connectRemote() {
   // Phone tapped the AUTO-SSTV banner to disable the idle-trigger feature.
   // Persist the flag, cancel any active auto-SSTV session, and broadcast a
   // fresh sstv-tx-status so the banner clears on the phone. (Gap 14.)
+  // Older app builds; a client that sees 'idle-mode' uses set-idle-rx.
   remoteServer.on('sstv-set-auto-enabled', ({ enabled }) => {
-    if (settings.enableAutoSstv === enabled) return;
-    settings.enableAutoSstv = !!enabled;
-    saveSettings(settings);
-    if (!enabled) {
-      stopAutoSstvTimer();
-      if (autoSstvActive) cancelAutoSstv();
-    } else {
-      startAutoSstvTimer();
-    }
+    const r = applyIdleModeChange({ enabled: !!enabled });
     if (remoteServer) {
-      remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+      // 'auto-rx' means SSTV Auto-RX to the app — never for idle WSPR/JS8.
+      remoteServer.broadcastSstvTxStatus({ state: autoRxKind() === 'sstv' ? 'auto-rx' : 'rx' });
     }
-    sendCatLog(`[Echo CAT] Phone toggled auto-SSTV: ${enabled ? 'enabled' : 'disabled'}`);
+    if (r.changed.length) sendCatLog(`[Echo CAT] Phone toggled Idle Mode: ${enabled ? 'enabled' : 'disabled'}`);
+    updateRemoteSettings();   // every client, even when nothing changed
   });
 
   // Phone requested an immediate TX abort.
@@ -25204,7 +25212,8 @@ let autoIdleJtcatOpenedPopout = false;
 let _autoRxDeferLogged = false; // one "Deferred" line per deferral, not per tick
 let autoIdleJs8Active = false;
 let autoIdleJs8OpenedPopout = false;
-let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JS8' — names the stop log line
+let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JTTY' | 'JS8' — names the stop log line
+let autoIdleJttyBand = null; // the band an idle JTTY session is on ('20m' day / '40m' night)
 
 // Which idle-RX session is running, or null. `autoSstvActive` is the flag
 // for EVERY idle mode (the name predates WSPR/PSK31/JS8), so anything that
@@ -25214,7 +25223,7 @@ let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JS8' — names the stop log l
 function autoRxKind() {
   if (!autoSstvActive) return null;
   if (autoIdleJs8Active) return 'js8';
-  if (autoIdleJtcatActive) return autoIdleRxLabel === 'PSK31' ? 'psk31' : 'wspr';
+  if (autoIdleJtcatActive) return autoIdleRxLabel === 'PSK31' ? 'psk31' : autoIdleRxLabel === 'JTTY' ? 'jtty' : 'wspr';
   return 'sstv';
 }
 // PSK31 watering-hole USB dials (kHz), mirrored from the popout's
@@ -25223,6 +25232,78 @@ const PSK_IDLE_DIALS = {
   '80m': 3580, '40m': 7070, '30m': 10142, '20m': 14070,
   '17m': 18100, '15m': 21070, '10m': 28120,
 };
+// JTTY-on-idle follows the sun like SSTV: 20 m by day, 40 m at night, on the
+// pop-out's own JTTY dials (JTTY_BAND_FREQS — never 14080, FT4's dial).
+const JTTY_IDLE_DIALS = { '20m': 14090, '40m': 7090 };
+const IDLE_RX_MODES = ['sstv', 'wspr', 'psk31', 'js8', 'jtty'];
+const IDLE_WSPR_BANDS = ['40m', '30m', '20m', '17m', '15m', '10m'];
+const IDLE_TIMEOUT_MIN = 5, IDLE_TIMEOUT_MAX = 1440;
+
+// ONE writer for Idle Mode from outside the Settings window (ECHOCAT). Each
+// field is checked alone; returns which applied, which were refused, and a
+// readable list of what actually changed.
+function applyIdleModeChange(msg) {
+  const applied = [], rejected = [], changed = [];
+  const take = (key, ok, settingKey, value, label) => {
+    if (msg[key] === undefined || msg[key] === null) return false;
+    if (!ok) { rejected.push(key); return false; }
+    applied.push(key);
+    if (settings[settingKey] === value) return false;
+    settings[settingKey] = value;
+    changed.push(label);
+    return true;
+  };
+  const mode = String(msg.mode || '').toLowerCase();
+  take('mode', IDLE_RX_MODES.includes(mode), 'idleRxMode', mode, 'program ' + mode.toUpperCase());
+  const enabledChanged = take('enabled', typeof msg.enabled === 'boolean', 'enableAutoSstv', msg.enabled,
+    msg.enabled ? 'enabled' : 'disabled');
+  const t = Number(msg.timeoutMin);
+  const tOk = Number.isInteger(t) && t >= IDLE_TIMEOUT_MIN && t <= IDLE_TIMEOUT_MAX;
+  const timeoutChanged = take('timeoutMin', tOk, 'autoSstvInactivityMin', t, 'timeout ' + t + ' min');
+  take('wsprBand', IDLE_WSPR_BANDS.includes(msg.wsprBand), 'idleWsprBand', msg.wsprBand, 'WSPR band ' + msg.wsprBand);
+  take('wsprHop', typeof msg.wsprHop === 'boolean', 'idleWsprBandHop', msg.wsprHop, msg.wsprHop ? 'WSPR band hopping' : 'WSPR single band');
+  take('pskBand', Object.prototype.hasOwnProperty.call(PSK_IDLE_DIALS, msg.pskBand), 'idlePskBand', msg.pskBand, 'PSK31 band ' + msg.pskBand);
+  if (changed.length) saveSettings(settings);
+  if (enabledChanged && !settings.enableAutoSstv) {
+    stopAutoSstvTimer();
+    if (autoSstvActive) cancelAutoSstv();
+  } else if (enabledChanged || timeoutChanged) {
+    startAutoSstvTimer();   // same as the Settings window's save path
+  }
+  return { applied, rejected, changed };
+}
+
+function isDaytimeAtStation() {
+  const pos = gridToLatLon(settings.grid);
+  if (!pos) return true;
+  const now = new Date();
+  const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const sun = getSunTimes(pos.lat, pos.lon, now);
+  return utcH >= sun.sunrise && utcH < sun.sunset;
+}
+
+// Idle JTTY: move to the other band at sunrise/sunset, and say so IN the feed
+// — a marker row on the pop-out, ECHOCAT Web and the mobile device (it rides
+// the JTTY row stream, so the replay at connect carries it too), or a row of
+// silence on a new band reads as a dead band.
+function autoIdleJttyFollowSun() {
+  const day = isDaytimeAtStation();
+  const band = day ? '20m' : '40m';
+  if (band === autoIdleJttyBand) return;
+  autoIdleJttyBand = band;
+  const khz = JTTY_IDLE_DIALS[band];
+  settings.jtcatLastBandFreq = khz;
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-idle-qsy', { band, freqKhz: khz });
+  } else {
+    tuneRadio(khz, 'DIGU');
+  }
+  const why = day ? 'sunrise' : 'sunset';
+  sendCatLog(`[Auto-RX] JTTY band change at ${why}: ${band} (${(khz / 1000).toFixed(3)} MHz)`);
+  const now = Date.now();
+  jtcatJttyRxQueue({ id: 'band-' + now, marker: true, complete: true, utcMs: now, freqHz: 0, snrDb: 0,
+    band, freqKhz: khz, text: `Band changed to ${band} (${(khz / 1000).toFixed(3)} MHz) at ${why}` });
+}
 
 function getSunTimes(lat, lon, date) {
   const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
@@ -25238,12 +25319,8 @@ function getSunTimes(lat, lon, date) {
 }
 
 function getSstvAutoFreq() {
-  const pos = gridToLatLon(settings.grid);
-  if (!pos) return { freqKhz: 14230, mode: 'USB' };
-  const now = new Date();
-  const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
-  const sun = getSunTimes(pos.lat, pos.lon, now);
-  const daytime = utcH >= sun.sunrise && utcH < sun.sunset;
+  if (!gridToLatLon(settings.grid)) return { freqKhz: 14230, mode: 'USB' };
+  const daytime = isDaytimeAtStation();
   // 40 m SSTV is LSB in North America (7.171 LSB, like 80 m's 3.845); a USB
   // night session heard nothing but inverted garbage.
   return daytime ? { freqKhz: 14230, mode: 'USB' } : { freqKhz: 7171, mode: 'LSB' };
@@ -25270,6 +25347,7 @@ function startAutoSstvTimer() {
     // (WSPR-on-idle manages its own bands via the hop scheduler — skip.
     // JS8-on-idle owns its own day/night QSY too — without the exclusion
     // this branch retuned a JS8 idle session to the SSTV frequency.)
+    if (autoSstvActive && autoIdleJtcatActive && autoIdleRxLabel === 'JTTY') autoIdleJttyFollowSun();
     if (autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) {
       const newBand = getSstvAutoFreq();
       if (newBand.freqKhz !== autoSstvCurrentFreq) {
@@ -25328,7 +25406,7 @@ function triggerAutoSstv() {
     pushActivityState();
     return;
   }
-  if (idleMode === 'wspr' || idleMode === 'psk31') {
+  if (idleMode === 'wspr' || idleMode === 'psk31' || idleMode === 'jtty') {
     autoSstvActive = true;
     autoIdleJtcatActive = true;
     autoIdlePrevJtcatMode = settings.jtcatLastMode || 'FT8';
@@ -25345,6 +25423,24 @@ function triggerAutoSstv() {
       if (openJtcatPopout) openJtcatPopout();
       sendCatLog('[Auto-RX] WSPR receive started — ' +
         (settings.wsprHopEnabled ? 'band hopping' : band + ' (' + dialMhz.toFixed(4) + ' MHz)'));
+    } else if (idleMode === 'jtty') {
+      // Receive only: the JTTY pane decodes and nothing transmits by itself.
+      const band = isDaytimeAtStation() ? '20m' : '40m';
+      const dialKhz = JTTY_IDLE_DIALS[band];
+      autoIdleJttyBand = band;
+      settings.jtcatLastMode = 'JTTY';
+      settings.jtcatLastBandFreq = dialKhz;
+      autoIdleRxLabel = 'JTTY';
+      saveSettings(settings);
+      if (!autoIdleJtcatOpenedPopout && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        // An already-open window keeps its mode unless told (never through
+        // the jtcat-popout-open IPC — that one means the operator clicked).
+        jtcatPopoutWin.webContents.send('jtcat-popout-select-mode', 'JTTY');
+        jtcatPopoutWin.webContents.send('jtcat-idle-qsy', { band, freqKhz: dialKhz });
+      } else if (openJtcatPopout) {
+        openJtcatPopout();
+      }
+      sendCatLog('[Auto-RX] JTTY receive started — ' + band + ' (' + (dialKhz / 1000).toFixed(3) + ' MHz), 20m by day / 40m at night');
     } else {
       const band = settings.idlePskBand || '20m';
       const dialKhz = PSK_IDLE_DIALS[band] || 14070;
@@ -25414,6 +25510,7 @@ function cancelAutoSstv() {
     autoIdleJtcatOpenedPopout = false;
     sendCatLog('[Auto-RX] ' + (autoIdleRxLabel || 'WSPR') + ' receive stopped');
     autoIdleRxLabel = null;
+    autoIdleJttyBand = null;
     autoSstvPrevFreq = null;
     autoSstvPrevMode = null;
     pushActivityState();
@@ -34825,6 +34922,9 @@ app.whenReady().then(() => {
     if (has('rotorActive') || has('rotorMode') || has('enableRotor') || has('customCatButtons') || has('cwMacros') || sdrSync ||
         has('jtcatFdExch') || has('jttyMacros') || has('jttyTemplates') || has('jttyFt8Macros') || has('jttyMacroStyle') || has('jttyProfile') || has('jttySerial') || has('pskMacros') ||
         has('enableDxe') || has('enableDxeSources') ||
+        // Idle Mode: an open mobile device follows the desktop window live.
+        has('enableAutoSstv') || has('autoSstvInactivityMin') || has('idleRxMode') ||
+        has('idleWsprBand') || has('idleWsprBandHop') || has('idlePskBand') ||
         // Re-spot templates and saved messages: a connected device kept the
         // old text until it reconnected (K8IKO respot-templates-mobile).
         has('respotTemplate') || has('dxRespotTemplate') || has('wwffRespotTemplate') ||

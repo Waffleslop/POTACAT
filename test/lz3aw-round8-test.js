@@ -91,7 +91,7 @@ test('the desktop does not mix a second sidetone for a client that plays its own
   assert.ok(/_clientHasOwnSidetone = !!\(_cwClient && _cwClient\.capabilities\.includes\('local-cw-sidetone'\)\)/.test(fn));
   assert.ok(/!_clientHasOwnSidetone\) \{\s*remoteAudioWin\.webContents\.send\('cw-sidetone-play'/.test(fn), 'the bridge copy is gated');
   assert.ok(/opts\.fromRemote/.test(fn), 'only for text the client itself sent (a desktop macro still reaches the listener)');
-  assert.ok(/sendCwTextToRadio\(text, \{ live: !!live, fromRemote: true \}\)/.test(main), 'the ECHOCAT cw-text path marks its origin');
+  assert.ok(/sendCwTextToRadio\([^;]*\{ live: !!live, fromRemote: true \}\)/.test(main), 'the ECHOCAT cw-text path marks its origin');
   const web = R('renderer/remote.js');
   assert.ok(/capabilities: \[[^\]]*'local-cw-sidetone'/.test(web), 'ECHOCAT Web declares it in hello');
 });

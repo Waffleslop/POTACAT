@@ -1334,6 +1334,15 @@ function _applyPopoutTheme(payload) {
   // the ordering with the engine, and a split marker makes no sense.
   function isKeyboardMode() { return modeSelect.value === 'PSK31' || modeSelect.value === 'JTTY'; }
 
+  // Idle JTTY moved bands at sunrise/sunset: select that band here, so the
+  // window, the radio and the band menu agree (the marker row arrives on the
+  // JTTY row stream).
+  if (window.api.onJtcatIdleQsy) window.api.onJtcatIdleQsy(function(d) {
+    if (!d || !d.band) return;
+    var btn = document.querySelector('.jp-band-opt[data-band="' + d.band + '"]');
+    if (btn && modeSelect.value === 'JTTY') selectBand(btn, true);
+  });
+
   // A TX frequency the mobile device set. The keyboard panes keep their own
   // copy and push it back on every mode change and save it on every Send, so
   // they MUST adopt it — the tx-status re-anchor below skips them, and a move
@@ -3924,8 +3933,25 @@ function _applyPopoutTheme(payload) {
     return row;
   }
   // One decoder update: the row for this message id is created or rewritten.
+  // A marker row (idle JTTY's sunrise/sunset band change): a divider, not a
+  // decode — nothing to click, no SNR, no sender.
+  function jttyApplyMarker(u) {
+    if (jttyRows[u.id]) return;
+    var pinned = jttyAtBottom();
+    var row = document.createElement('div');
+    row.className = 'jp-row jp-jtty-marker';
+    row.dataset.id = String(u.id);
+    row.style.cssText = 'justify-content:center;text-align:center;color:var(--accent-blue,#4fc3f7);border-top:1px solid var(--accent-blue,#4fc3f7);border-bottom:1px solid var(--accent-blue,#4fc3f7);margin:4px 0;padding:2px 0;font-weight:bold;';
+    var d = new Date(u.utcMs || Date.now());
+    row.textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + 'Z  ' + u.text;
+    jttyListEl.appendChild(row);
+    jttyRows[u.id] = row;
+    jttyPruneRows();
+    jttyScrollIfPinned(pinned);
+  }
   function jttyApplyUpdate(u) {
     if (!jttyListEl || !u || u.id == null) return;
+    if (u.marker) { jttyApplyMarker(u); return; }
     var pinned = jttyAtBottom();
     var row = jttyRowFor(u);
     var d = new Date(u.utcMs || Date.now());

@@ -35,7 +35,7 @@ test('both keys ride the ECHOCAT settings blob', () => {
 });
 
 test('a desktop change pushes settings-update', () => {
-  assert.ok(/has\('enableDxe'\) \|\| has\('enableDxeSources'\)\) \{\n\s+updateRemoteSettings\(\);/.test(main));
+  assert.ok(/has\('enableDxe'\) \|\| has\('enableDxeSources'\)[\s\S]{0,1200}?\)\) \{\n\s+updateRemoteSettings\(\);/.test(main));
 });
 
 test('a phone change merges sources, refreshes the desktop window, and echoes to every client', () => {

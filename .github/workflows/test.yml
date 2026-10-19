@@ -104,6 +104,8 @@ jobs:
         run: node test/jtty-remote-test.js
       - name: Run JTTY/PSK31 TX freq from ECHOCAT reaches the pop-out (K3SBP 1500 Hz revert)
         run: node test/jtty-txfreq-remote-test.js
+      - name: Run Idle Mode over ECHOCAT (per-field setter, echo, guest refusal, JTTY day/night)
+        run: node test/idle-mode-remote-test.js
       - name: Run No CAT control (VOX) rig type (N4FFF Pebble HF)
         run: node test/nocat-rig-test.js
       - name: Run removed features stay removed (FT8 Battle Royale)

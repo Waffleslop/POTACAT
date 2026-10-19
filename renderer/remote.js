@@ -8689,6 +8689,20 @@
   function jttyApplyUpdate(u, replay) {
     if (!jttyListEl || !u || u.id == null) return;
     const pinned = jttyAtBottom();
+    if (u.marker) {
+      // Idle JTTY changed band at sunrise/sunset: a divider, not a decode.
+      if (jttyRows[u.id]) return;
+      const m = document.createElement('div');
+      m.dataset.id = String(u.id);
+      m.style.cssText = 'text-align:center;color:var(--accent-blue,#4fc3f7);border-top:1px solid currentColor;border-bottom:1px solid currentColor;margin:4px 0;padding:2px 0;font-weight:bold;';
+      const d = new Date(u.utcMs || Date.now());
+      m.textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + 'Z  ' + u.text;
+      jttyListEl.appendChild(m);
+      jttyRows[u.id] = m;
+      jttyPrune();
+      if (pinned || replay) jttyListEl.scrollTop = jttyListEl.scrollHeight;
+      return;
+    }
     let row = jttyRows[u.id];
     if (!row) {
       row = jttyMakeRow();

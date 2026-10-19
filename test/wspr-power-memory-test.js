@@ -135,7 +135,7 @@ t('the [TX] RF out line carries the commanded level beside the measured one', ()
   assert.ok(main.includes('RF power set to ${_currentTxPower} W'));
 });
 t('every JTCAT tx-start logs the RF power and warns at the cap in a non-WSPR mode', () => {
-  assert.ok(main.includes('jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq)'));
+  assert.ok(main.includes('jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq'));
   assert.ok(main.includes("mode === 'WSPR'"), 'WSPR itself must not warn about its own cap');
 });
 

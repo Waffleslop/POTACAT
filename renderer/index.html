@@ -1522,8 +1522,8 @@
       <span class="help-text" style="margin-left:24px;display:block;">Uncheck for older Yaesu rigs (FTDX3000, FT-950, etc.) where DATA / Packet-USB caps IF bandwidth too narrow for FT8/FT4. Off keeps the radio in plain USB; route the USB CODEC audio at the rig. Same fix as the FreeDV option above. (AB9AI)</span>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> Idle Mode</label>
       <span class="help-text" style="margin-left:12px;display:block;">
-        When this station is idle for the defined time, POTACAT opens your chosen program — WSPR, PSK31, SSTV, or JS8 (heartbeat net, auto-replies, mailbox, and APRS gateway keep running while you are away).
-        <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="480" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
+        When this station is idle for the defined time, POTACAT opens your chosen program — WSPR, PSK31, JTTY, SSTV, or JS8 (heartbeat net, auto-replies, mailbox, and APRS gateway keep running while you are away).
+        <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="1440" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
       </span>
       <div id="idle-rx-opts" style="margin-left:24px;margin-top:4px;display:none;">
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;">Receive:
@@ -1531,6 +1531,7 @@
             <option value="sstv">SSTV</option>
             <option value="wspr">WSPR</option>
             <option value="psk31">PSK31</option>
+            <option value="jtty">JTTY</option>
             <option value="js8">JS8</option>
           </select>
         </label>
@@ -1562,6 +1563,7 @@
           </label>
         </div>
         <span id="idle-sstv-note" class="help-text" style="display:block;margin-top:4px;">SSTV: POTACAT flips to 20m (14.230 MHz) in the daytime and 40m (7.171 MHz) at night, based on your grid square.</span>
+        <span id="idle-jtty-note" class="help-text" style="display:none;margin-top:4px;">JTTY: receive on 20m (14.090 MHz) in the daytime and 40m (7.090 MHz) at night, based on your grid square. Each band change is marked in the JTTY feed.</span>
       </div>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-sstv-post-process" checked> Polish decoded SSTV images (MMSSTV-style)</label>
       <span class="help-text" style="margin-left:12px;display:block;">
@@ -4222,12 +4224,13 @@
     </label>
     <div style="margin-left:22px;margin-bottom:8px;display:flex;align-items:center;gap:6px;font-size:13px;">
       <span>After</span>
-      <input type="number" id="welcome-auto-sstv-min" min="5" max="600" value="90" style="width:60px;">
+      <input type="number" id="welcome-auto-sstv-min" min="5" max="1440" value="90" style="width:60px;">
       <span>minutes of no activity, receive</span>
       <select id="welcome-idle-rx-mode" style="font-size:13px;">
         <option value="sstv">SSTV</option>
         <option value="wspr" selected>WSPR</option>
         <option value="psk31">PSK31</option>
+        <option value="jtty">JTTY</option>
         <option value="js8">JS8</option>
       </select>
     </div>
