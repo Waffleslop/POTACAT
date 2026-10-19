@@ -20292,7 +20292,12 @@ function broadcastRemoteRadioStatus() {
   const now = Date.now();
   // Suppress rfgain/txpower echo-back to ECHOCAT while user is actively adjusting
   const rfg = (typeof _rfGainSuppressBroadcast !== 'undefined' && now < _rfGainSuppressBroadcast) ? undefined : _currentRfGain;
-  const txp = (typeof _txPowerSuppressBroadcast !== 'undefined' && now < _txPowerSuppressBroadcast) ? undefined : _currentTxPower;
+  // `_currentTxPower` 0 means "not read from the radio yet". Sent as 0 it put
+  // a freshly opened ECHOCAT app's slider at 0 W (N4RDX 2026-10-14, IC-7300
+  // MK II over rigctld: "always reverts my power to 0 watts"). Unknown is
+  // left out, so the app shows no level until the radio reports one.
+  const txPowerKnown = _currentTxPower > 0 || !!(_lastPowerReadback && _lastPowerReadback.at);
+  const txp = ((typeof _txPowerSuppressBroadcast !== 'undefined' && now < _txPowerSuppressBroadcast) || !txPowerKnown) ? undefined : _currentTxPower;
   // Suppress stale mode during tune transition — phone has optimistic update, don't overwrite with old mode
   let modeVal = (now < _modeSuppressUntil) ? undefined : (_currentMode || '');
   // When FreeDV engine is active, show the FreeDV codec mode instead of raw USB/LSB

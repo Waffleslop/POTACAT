@@ -100,7 +100,9 @@ test('TX power and RF gain set from ECHOCAT are confirmed once the echo window c
   assert.ok(/_rfGainSuppressBroadcast = Date\.now\(\) \+ 500;[^\n]*\n\s*if \(_rfGainEchoTimer\) clearTimeout\(_rfGainEchoTimer\);\s*_rfGainEchoTimer = setTimeout\(\(\) => \{ _rfGainEchoTimer = null; broadcastRemoteRadioStatus\(\); \}, 550\);/.test(main),
     'set-rfgain does the same');
   // The window the timer outlives: the status builder still blanks the field inside it.
-  assert.ok(/now < _txPowerSuppressBroadcast\) \? undefined : _currentTxPower/.test(main), 'suppression inside the window is unchanged');
+  assert.ok(/now < _txPowerSuppressBroadcast\) \|\| !txPowerKnown\) \? undefined : _currentTxPower/.test(main), 'suppression inside the window is unchanged');
+  // N4RDX 2026-10-14: an unread level (0 = unknown) is left out, never sent as 0 W.
+  assert.ok(/const txPowerKnown = _currentTxPower > 0 \|\| !!\(_lastPowerReadback && _lastPowerReadback\.at\);/.test(main), 'unknown TX power is not reported as 0 W');
 });
 
 console.log(`\nVFO meters: ${passed} passed, ${failed} failed`);
