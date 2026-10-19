@@ -1797,7 +1797,10 @@ th.col-drop-right { border-right: 2px solid var(--accent-blue) !important; }
 .hide-col-skip [data-col="skip"],
 .hide-col-hide [data-col="hide"],
 .hide-col-comments [data-col="comments"],
-.hide-col-grid [data-col="grid"] {
+.hide-col-grid [data-col="grid"],
+.hide-col-cqz [data-col="cqz"],
+.hide-col-ituz [data-col="ituz"],
+.hide-col-spotter [data-col="spotter"] {
   display: none;
 }
 

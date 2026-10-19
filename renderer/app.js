@@ -9553,8 +9553,11 @@ const HIDEABLE_COLUMNS = [
   { key: 'parkName', label: 'Name' },
   { key: 'locationDesc', label: 'State' },
   { key: 'grid', label: 'Grid' },
+  { key: 'cqz', label: 'CQ zone' },
+  { key: 'ituz', label: 'ITU zone' },
   { key: 'distance', label: 'Distance' },
   { key: 'spotTime', label: 'Age' },
+  { key: 'spotter', label: 'Spotter' },
   { key: 'comments', label: 'Comments' },
   { key: 'skip', label: 'Skip' },
   { key: 'hide', label: 'Hide' },
@@ -9576,11 +9579,18 @@ function loadHiddenColumns() {
         localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify([...set]));
         localStorage.setItem('pota-cat-wpm-col-seeded', '1');
       }
+      // Same for Spotter and the CQ/ITU zone columns (LZ3AW items 2 and 30,
+      // 2026-10-19): they arrive hidden; right-click a header to show them.
+      if (!localStorage.getItem('pota-cat-spotter-zone-cols-seeded')) {
+        set.add('spotter'); set.add('cqz'); set.add('ituz');
+        localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify([...set]));
+        localStorage.setItem('pota-cat-spotter-zone-cols-seeded', '1');
+      }
       return set;
     }
   } catch { /* ignore */ }
-  // Default: hide comments, grid, and WPM (CW-only) columns on fresh install
-  return new Set(['comments', 'grid', 'wpm']);
+  // Default: hide comments, grid, WPM (CW-only), spotter and zone columns on fresh install
+  return new Set(['comments', 'grid', 'wpm', 'spotter', 'cqz', 'ituz']);
 }
 
 function saveHiddenColumns() {
@@ -9754,7 +9764,7 @@ mapResizeObserver.observe(mapPaneEl);
 const COL_ORDER_KEY = 'pota-cat-col-order-v1';
 const DEFAULT_COL_ORDER = [
   'log','callsign','operator','frequency','mode','wpm','source','reference',
-  'parkName','locationDesc','grid','distance','bearing','spotTime','comments','skip','hide'
+  'parkName','locationDesc','grid','cqz','ituz','distance','bearing','spotTime','spotter','comments','skip','hide'
 ];
 
 function loadColOrder() {
@@ -9803,7 +9813,7 @@ const COL_WIDTHS_KEY = 'pota-cat-col-pct-v10';
 const COL_WIDTHS_KEY_V9 = 'pota-cat-col-pct-v9';
 const DEFAULT_COL_PCT_OBJ = {
   log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, wpm: 4, source: 5, reference: 6,
-  parkName: 14, locationDesc: 7, grid: 5, distance: 6, bearing: 5, spotTime: 5, comments: 10, skip: 4, hide: 4
+  parkName: 14, locationDesc: 7, grid: 5, cqz: 3, ituz: 3, distance: 6, bearing: 5, spotTime: 5, spotter: 7, comments: 10, skip: 4, hide: 4
 };
 
 function loadColWidths() {
@@ -13562,9 +13572,12 @@ function render() {
         { val: parkDisplay, col: 'parkName' },
         { val: s.locationDesc, col: 'locationDesc' },
         { val: (s.lat != null && s.lon != null) ? latLonToGridLocal(s.lat, s.lon).slice(0, 4) : '', col: 'grid' },
+        { val: s.cqZone != null ? String(s.cqZone) : '', col: 'cqz' },
+        { val: s.ituZone != null ? String(s.ituZone) : '', col: 'ituz' },
         { val: formatDistance(s.distance), col: 'distance' },
         { val: formatBearing(s.bearing), cls: 'bearing-col', col: 'bearing' },
         { val: formatAge(s.spotTime), col: 'spotTime' },
+        { val: s.spotter || '', col: 'spotter' },
         // Prepend the DXP one-liner to the spot's existing comment when the
         // call is flagged as a DXpedition. POTA / cluster comments stay
         // intact after the " | " separator. Casey 2026-05-30: surface
@@ -19566,6 +19579,51 @@ window.api.onDxccData((data) => {
 });
 
 // --- Cluster status listener ---
+// --- Spots Source menu: which saved cluster nodes feed spots (LZ3AW item 1) ---
+// One row per node saved in Settings > Spots; ticking turns it on/off through
+// main (the one writer, shared with ECHOCAT Web), which reconnects and echoes
+// the list back. The Settings dialog's own copy follows, so saving Settings
+// later never undoes a choice made here.
+const spotsClusterNodesEl = document.getElementById('spots-cluster-nodes');
+function renderClusterNodeChoices(list) {
+  if (!spotsClusterNodesEl) return;
+  spotsClusterNodesEl.textContent = '';
+  if (typeof currentClusterNodes !== 'undefined' && Array.isArray(currentClusterNodes)) {
+    for (const n of list || []) {
+      const mine = currentClusterNodes.find((c) => c && String(c.id) === n.id);
+      if (mine) mine.enabled = n.enabled;
+    }
+  }
+  if (!list || !list.length) {
+    const hint = document.createElement('div');
+    hint.className = 'spots-toggle spots-toggle-child';
+    hint.style.cssText = 'opacity:0.7;cursor:default;';
+    hint.textContent = '   ↳ No nodes yet — add one in Settings';
+    spotsClusterNodesEl.appendChild(hint);
+    return;
+  }
+  for (const n of list) {
+    const label = document.createElement('label');
+    label.className = 'spots-toggle spots-toggle-child';
+    label.title = n.host ? `${n.name} (${n.host})` : n.name;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = n.enabled;
+    cb.addEventListener('change', async () => {
+      const r = await window.api.clusterNodeEnable(n.id, cb.checked);
+      if (r && !r.ok) {
+        cb.checked = !cb.checked;
+        if (r.error) showLogToast(r.error, { warn: true, duration: 5000 });
+      }
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode('   ↳ ' + n.name));
+    spotsClusterNodesEl.appendChild(label);
+  }
+}
+if (window.api.clusterNodeChoices) window.api.clusterNodeChoices().then(renderClusterNodeChoices).catch(() => {});
+if (window.api.onClusterNodeChoices) window.api.onClusterNodeChoices(renderClusterNodeChoices);
+
 window.api.onClusterStatus((s) => {
   if (s.nodes) {
     clusterNodeStatuses = s.nodes;

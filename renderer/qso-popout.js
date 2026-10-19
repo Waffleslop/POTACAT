@@ -107,6 +107,12 @@ const ALL_COLUMNS = [
   { key: 'GRIDSQUARE', label: 'Grid', sort: 'GRIDSQUARE', field: 'GRIDSQUARE', w: 62, get: (q) => q.GRIDSQUARE || '' },
   { key: 'STATE', label: 'State', sort: 'STATE', field: 'STATE', w: 52, get: (q) => q.STATE || '' },
   { key: 'COUNTRY', label: 'Country', sort: 'COUNTRY', field: 'COUNTRY', w: 110, get: (q) => q.COUNTRY || '' },
+  // CQ / ITU zones (LZ3AW item 30): the record's own CQZ/ITUZ, else main's
+  // cty.dat value (`_cqz`/`_ituz`, display only). Editing writes the real field.
+  { key: 'CQZ', label: 'CQ', sort: 'CQZ', field: 'CQZ', w: 36, off: true, get: (q) => q.CQZ || q._cqz || '',
+    title: 'CQ zone — the QSO\'s own, or from cty.dat when the record has none' },
+  { key: 'ITUZ', label: 'ITU', sort: 'ITUZ', field: 'ITUZ', w: 36, off: true, get: (q) => q.ITUZ || q._ituz || '',
+    title: 'ITU zone — the QSO\'s own, or from cty.dat when the record has none' },
   { key: 'QSL', label: 'QSL', sort: 'LOTW_QSL_SENT', w: 56, get: (q) => qslMarks(q),
     title: 'QSL status: L = uploaded to LoTW, L✓ = LoTW confirmed, P = paper QSL received. Double-click to toggle paper QSL.' },
   { key: 'COMMENT', label: 'Notes', field: 'COMMENT', w: 150, get: (q) => q.COMMENT || '' },
@@ -311,6 +317,11 @@ function render() {
   filtered.sort((a, b) => {
     let va = (a[sortCol] || ''), vb = (b[sortCol] || '');
     if (sortCol === 'FREQ') return (parseFloat(va) - parseFloat(vb)) * dir;
+    if (sortCol === 'CQZ' || sortCol === 'ITUZ') {
+      // Numeric, and the derived cty.dat zone counts when the record has none.
+      const d = sortCol === 'CQZ' ? '_cqz' : '_ituz';
+      return ((parseInt(a[sortCol] || a[d], 10) || 0) - (parseInt(b[sortCol] || b[d], 10) || 0)) * dir;
+    }
     if (sortCol === 'QSO_DATE') {
       const ka = (a.QSO_DATE || '') + (a.TIME_ON || '');
       const kb = (b.QSO_DATE || '') + (b.TIME_ON || '');

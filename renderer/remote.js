@@ -414,12 +414,16 @@
     name: colPrefs.name === true, // off by default — park name / comments
     region: colPrefs.region === true, // off by default — state/region (e.g. US-CO)
     src: colPrefs.src === true,   // off by default — source (POTA/SOTA/DXC)
+    // LZ3AW items 2 and 30 (2026-10-19), off by default like the desktop's.
+    spotter: colPrefs.spotter === true, // who spotted the station
+    cqz: colPrefs.cqz === true,         // CQ zone (from the desktop's cty.dat)
+    ituz: colPrefs.ituz === true,       // ITU zone
     skip: colPrefs.skip !== false,
     log: colPrefs.log !== false,
     hide: colPrefs.hide !== false,
   };
   // Column ordering — array of column keys in display order
-  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'region', 'src', 'age', 'skip', 'hide', 'log'];
+  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'region', 'cqz', 'ituz', 'src', 'age', 'spotter', 'skip', 'hide', 'log'];
   var colOrder = colPrefs.order && Array.isArray(colPrefs.order) ? colPrefs.order : defaultColOrder.slice();
   // Ensure any new columns are present in colOrder
   for (var k of defaultColOrder) { if (colOrder.indexOf(k) === -1) colOrder.push(k); }
@@ -2268,6 +2272,9 @@
         clusterConnected = !!msg.connected;
         break;
 
+      case 'cluster-node-result':
+        if (msg.ok === false && msg.error) showToast(msg.error, 4000, true);
+        break;
       case 'settings-update':
         if (msg.settings && msg.settings.pskSquelch != null) {
           const sqEl = document.getElementById('psk-sql');
@@ -2278,6 +2285,7 @@
           }
         }
         if (msg.settings) {
+          if (Array.isArray(msg.settings.clusterNodeChoices)) renderClusterNodeChoices(msg.settings.clusterNodeChoices);
           if (msg.settings.scanDwell != null) { scanDwell = msg.settings.scanDwell; soDwellVal.textContent = scanDwell + 's'; }
           if (msg.settings.refreshInterval != null) { refreshInterval = msg.settings.refreshInterval; refreshRateBtn.textContent = refreshInterval + 's'; soRefreshVal.textContent = refreshInterval + 's'; }
           if (msg.settings.maxAgeMin != null) { maxAgeMin = msg.settings.maxAgeMin; soMaxageVal.textContent = maxAgeMin + 'm'; }
@@ -2982,7 +2990,8 @@
   const SPOT_COL_WIDTHS = {
     call: 120, freq: 80, mode: 56, band: 48,
     dist: 60, ref: 84, name: 150, region: 56,
-    src: 56, age: 52, skip: 40, hide: 40, log: 40
+    src: 56, age: 52, skip: 40, hide: 40, log: 40,
+    spotter: 84, cqz: 34, ituz: 34
   };
   function computeSpotGrid() {
     const parts = [SPOT_COL_WIDTHS.call + 'px'];
@@ -3057,6 +3066,9 @@
           }
           case 'src': return `<span class="spot-src source-${src}">${srcLabel}</span>`;
           case 'age': return `<span class="spot-age">${age}</span>`;
+          case 'spotter': return `<span class="spot-spotter" title="Spotted by ${esc(s.spotter || '')}">${esc(s.spotter || '—')}</span>`;
+          case 'cqz': return `<span class="spot-zone" title="CQ zone">${s.cqZone != null ? esc(String(s.cqZone)) : '—'}</span>`;
+          case 'ituz': return `<span class="spot-zone" title="ITU zone">${s.ituZone != null ? esc(String(s.ituZone)) : '—'}</span>`;
           case 'skip': return skipBtn;
           case 'log': return logBtn;
           case 'hide': return hideBtn;
@@ -3500,6 +3512,31 @@
   initMultiDropdown(regionFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); sendFilters(); });
 
   // --- Spots dropdown ---
+  // DX cluster node choice (LZ3AW item 1): the nodes saved in the desktop's
+  // Settings, never a server this page names itself. Built with DOM nodes,
+  // never innerHTML — node names are free text.
+  function renderClusterNodeChoices(list) {
+    const box = document.getElementById('rc-cluster-nodes');
+    if (!box) return;
+    box.textContent = '';
+    if (!list.length) return;
+    for (const n of list) {
+      const label = document.createElement('label');
+      label.className = 'rc-spots-toggle rc-cluster-node';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.clusterNode = n.id;
+      cb.checked = !!n.enabled;
+      const span = document.createElement('span');
+      span.textContent = n.name || n.host || n.id;
+      if (n.host && n.name && n.name !== n.host) span.title = n.host;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' '));
+      label.appendChild(span);
+      box.appendChild(label);
+    }
+  }
+
   spotsDropdown.querySelector('.rc-dropdown-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.rc-dropdown.open').forEach(d => { if (d !== spotsDropdown) d.classList.remove('open'); });
@@ -3516,6 +3553,16 @@
   ddPanel(spotsDropdown).addEventListener('click', (e) => e.stopPropagation());
   ddPanel(spotsDropdown).addEventListener('change', (e) => {
     const cb = e.target;
+    if (cb.dataset.clusterNode) {
+      // One of the cluster nodes saved in the desktop's Settings (LZ3AW
+      // item 1). The desktop decides and echoes the true list back in
+      // settings-update; a refusal (Guest Pass, 3-node cap) arrives as
+      // cluster-node-result and the next echo puts the box back.
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'set-cluster-node', id: cb.dataset.clusterNode, enabled: cb.checked }));
+      }
+      return;
+    }
     if (cb.dataset.src) {
       // Desktop's set-sources handler keys on settings-flag names
       // (enable<Foo> minus the prefix), and the receive path on this side
@@ -5313,7 +5360,7 @@
   }
 
   // Spot column order + toggles — dynamic list with up/down buttons
-  var colLabels = { freq: 'Freq', mode: 'Mode', band: 'Band', dist: 'Dist', ref: 'Ref/Park', name: 'Name', region: 'Region', src: 'Source', age: 'Age', skip: 'Skip', log: 'Log' };
+  var colLabels = { freq: 'Freq', mode: 'Mode', band: 'Band', dist: 'Dist', ref: 'Ref/Park', name: 'Name', region: 'Region', src: 'Source', age: 'Age', spotter: 'Spotter', cqz: 'CQ zone', ituz: 'ITU zone', skip: 'Skip', log: 'Log' };
   function buildColOrderUI() {
     var container = document.getElementById('col-order-list');
     if (!container) return;
@@ -7659,6 +7706,14 @@
       const date = formatLbDate(q.QSO_DATE || '');
       const time = formatLbTime(q.TIME_ON || '');
       const isExpanded = expandedQsoIdx === idx;
+      // CQ/ITU zones (LZ3AW item 30): the record's own CQZ/ITUZ, else the
+      // desktop's cty.dat answer (_cqz/_ituz, display only). Shown when the
+      // zone columns are on in the spot list — one zone choice per device.
+      const cqz = q.CQZ || (q._cqz != null ? String(q._cqz) : '');
+      const ituz = q.ITUZ || (q._ituz != null ? String(q._ituz) : '');
+      let zones = '';
+      if (colShow.cqz && cqz) zones += `CQ ${esc(cqz)}`;
+      if (colShow.ituz && ituz) zones += (zones ? ' · ' : '') + `ITU ${esc(ituz)}`;
 
       let detail = '';
       if (isExpanded) {
@@ -7687,6 +7742,10 @@
             <div class="log-field"><label>Park/Ref</label><input type="text" data-field="SIG_INFO" value="${esc(q.SIG_INFO || '')}"></div>
             <div class="log-field"><label>Notes</label><input type="text" data-field="COMMENT" value="${comment}"></div>
           </div>
+          <div class="log-row">
+            <div class="log-field"><label>CQ zone</label><input type="text" inputmode="numeric" data-field="CQZ" data-orig="${esc(q.CQZ || '')}" value="${esc(q.CQZ || '')}" placeholder="${q._cqz != null ? esc(String(q._cqz)) : ''}"></div>
+            <div class="log-field"><label>ITU zone</label><input type="text" inputmode="numeric" data-field="ITUZ" data-orig="${esc(q.ITUZ || '')}" value="${esc(q.ITUZ || '')}" placeholder="${q._ituz != null ? esc(String(q._ituz)) : ''}"></div>
+          </div>
           <div class="lb-actions">
             <button type="button" class="lb-save-btn" data-idx="${idx}">Save</button>
             <button type="button" class="lb-delete-btn" data-idx="${idx}">Delete</button>
@@ -7700,6 +7759,7 @@
           <span class="lb-freq">${freqMhz}</span>
           <span class="lb-mode">${mode}</span>
           <span class="lb-ref">${ref}</span>
+          ${zones ? `<span class="lb-zones">${zones}</span>` : ''}
           <span class="lb-date">${date} ${time}</span>
         </div>
         ${detail}
@@ -7729,6 +7789,9 @@
       const card = saveBtn.closest('.lb-card');
       const fields = {};
       card.querySelectorAll('.lb-detail input[data-field]').forEach(input => {
+        // A zone the record never had and nobody typed stays absent — the
+        // cty.dat guess in the placeholder is never written to the log.
+        if (input.dataset.orig != null && input.value === '' && input.dataset.orig === '') return;
         fields[input.dataset.field] = input.value;
       });
       if (ws && ws.readyState === WebSocket.OPEN) {
