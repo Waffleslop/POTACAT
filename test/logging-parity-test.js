@@ -89,5 +89,9 @@ test('logContact resolves QRZ, parks and the live activation for qso-expand', ()
   assert.ok(/parkInfoFor\(ref\)/.test(lc) && /qrzStationInfo\(c\)/.test(lc));
 });
 
+test("ECHOCAT advertises 'log-contact' so a device can send one contact", () => {
+  assert.ok(/'log-contact',/.test(R('lib/remote-server.js')));
+});
+
 console.log(`\nLogging parity: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
