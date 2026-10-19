@@ -22858,6 +22858,9 @@ if (rigTxPowerSelect) {
 // Listen for rig state updates from main process
 window.api.onRigState((state) => {
   if (!state) return;
+  // Custom toggles that follow a radio state (lib/custom-cat-follow.js) relight.
+  customRigState = state;
+  for (const reflect of customToggleReflectors) reflect();
   // Apply model capabilities before syncing values so Field-specific power
   // decimals/limits and target-specific preamp labels are already in place.
   if (state.capabilities) rigApplyCapabilities(state.capabilities);
@@ -23056,6 +23059,10 @@ while (customCatButtons.length > 1 && !customCatButtons[customCatButtons.length 
 // codec), so the lit state means "last thing this button sent" — nothing
 // more. Cleared when slots are edited/removed so indexes can't go stale.
 let customToggleState = {};
+// A toggle may FOLLOW a state the radio reports (slot.follows, see
+// lib/custom-cat-follow.js); the latest rig-state and each toggle's relight.
+let customRigState = null;
+let customToggleReflectors = [];
 
 // Substitute the slider value into a command template. Placeholders: {v} =
 // bare integer, {v2}/{v3}/{v4} = zero-padded to that many digits (Kenwood
@@ -23159,20 +23166,43 @@ function createCustomSlot(i) {
     });
     slot.appendChild(offInput);
 
+    // Follows: light from a state POTACAT reads from the radio (LZ3AW).
+    const followSel = document.createElement('select');
+    followSel.className = 'rig-custom-type rig-custom-follows';
+    followSel.title = 'Follow the radio: the light shows what the radio reports, and a click sends whichever command moves it the other way. "Last sent" shows only the last command this button sent.';
+    for (const [v, lbl] of [['', 'Last sent'], ...CustomCatFollow.FOLLOWABLE.map((f) => [f.key, 'Follows ' + f.label])]) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = lbl;
+      followSel.appendChild(o);
+    }
+    followSel.value = CustomCatFollow.isFollowable(b.follows) ? b.follows : '';
+    followSel.addEventListener('change', () => {
+      if (!customCatButtons[i]) return;
+      if (followSel.value) customCatButtons[i].follows = followSel.value;
+      else delete customCatButtons[i].follows;
+      saveCustomButtons();
+      reflect();
+    });
+    slot.appendChild(followSel);
+
     const tglBtn = document.createElement('button');
     tglBtn.className = 'rig-btn rig-custom-send';
     const reflect = () => {
-      const on = !!customToggleState[i];
-      tglBtn.textContent = on ? 'On' : 'Off';
-      tglBtn.classList.toggle('rig-custom-toggle-on', on);
-      tglBtn.title = on
-        ? 'Last sent: the On command. Click to send the Off command. (Shows the last command sent, not the radio state.)'
-        : 'Click to send the On command. (Shows the last command sent, not the radio state.)';
+      const v = CustomCatFollow.toggleView(customCatButtons[i] || {}, customRigState, customToggleState[i]);
+      tglBtn.textContent = v.on ? 'On' : 'Off';
+      tglBtn.classList.toggle('rig-custom-toggle-on', v.on);
+      tglBtn.title = v.fromRadio
+        ? (v.on ? 'The radio reports it ON. Click to send the Off command.' : 'The radio reports it OFF. Click to send the On command.')
+        : (v.on
+          ? 'Last sent: the On command. Click to send the Off command. (Shows the last command sent, not the radio state.)'
+          : 'Click to send the On command. (Shows the last command sent, not the radio state.)');
     };
     reflect();
+    customToggleReflectors.push(reflect);
     tglBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const goingOn = !customToggleState[i];
+      const v = CustomCatFollow.toggleView(customCatButtons[i] || {}, customRigState, customToggleState[i]);
+      const goingOn = v.nextCommand === 'on';
       const cmd = (goingOn ? cmdInput.value : offInput.value).trim();
       if (!cmd) return;
       window.api.rigControl({ action: 'send-custom-cat', command: cmd });
@@ -23249,6 +23279,7 @@ function createCustomSlot(i) {
 }
 
 function renderCustomSlots() {
+  customToggleReflectors = [];
   rigCustomSlotsContainer.innerHTML = '';
   for (let i = 0; i < customCatButtons.length; i++) {
     rigCustomSlotsContainer.appendChild(createCustomSlot(i));

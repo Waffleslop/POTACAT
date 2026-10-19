@@ -2614,6 +2614,12 @@
 
   // --- Status ---
   function updateStatus(s) {
+    // Merged copy for custom toggles that follow the radio (fields a push
+    // leaves out keep their last value).
+    if (s && typeof s === 'object') {
+      for (var ck in s) if (Object.prototype.hasOwnProperty.call(s, ck) && s[ck] !== undefined) customRadioState[ck] = s[ck];
+      refreshCustomToggles();
+    }
     if (s.freq > 100000) { // ignore bogus values below 100 kHz
       freqDisplay.textContent = formatFreq(s.freq);
       const prevFreqKhz = currentFreqKhz;
@@ -4654,6 +4660,34 @@
   // to user-typed raw commands, so the lit state means "the last thing this
   // button sent" and nothing more. Not persisted; reset when slots change.
   var customToggleState = {};
+  // The radio's last reported state, merged across status pushes (a push may
+  // leave fields out), for toggles that FOLLOW it (lib/custom-cat-follow.js).
+  var customRadioState = {};
+  function customToggleView(e, idx) {
+    return window.CustomCatFollow
+      ? CustomCatFollow.toggleView(e || {}, customRadioState, customToggleState[idx])
+      : { on: !!customToggleState[idx], fromRadio: false, nextCommand: customToggleState[idx] ? 'off' : 'on' };
+  }
+  function paintCustomToggle(btn, e, idx) {
+    var v = customToggleView(e, idx);
+    btn.textContent = (e.name || ('CAT ' + (idx + 1))) + ' ' + (v.on ? 'On' : 'Off');
+    btn.classList.toggle('rc-custom-cat-on', v.on);
+    btn.title = v.fromRadio ? 'Shows what the radio reports.' : 'Shows the last command sent, not the radio state.';
+  }
+  // A status push relights every toggle that follows the radio, in place.
+  function refreshCustomToggles() {
+    var btns = document.querySelectorAll('.rc-custom-cat-btn[data-toggle="1"]');
+    var changed = false;
+    for (var n = 0; n < btns.length; n++) {
+      var idx = parseInt(btns[n].dataset.idx, 10);
+      if (!customCatData[idx]) continue;
+      var before = btns[n].textContent;
+      paintCustomToggle(btns[n], customCatData[idx], idx);
+      if (btns[n].textContent !== before) changed = true;
+    }
+    // The VFO panel's row is a snapshot of these buttons.
+    if (changed && window.__vfRenderCustomCat) window.__vfRenderCustomCat();
+  }
   var customSliderTimers = {};
   var customSliderSent = {};   // slot -> value this device last sent (see loadCustomCatButtons)
   var customSliderDesk = {};   // slot -> the desktop's saved value as last received
@@ -4746,20 +4780,18 @@
       btn.dataset.idx = i;
       var label = entry.name || ('CAT ' + (i + 1));
       if (type === 'toggle') {
-        var on = !!customToggleState[i];
-        btn.textContent = label + ' ' + (on ? 'On' : 'Off');
-        btn.classList.toggle('rc-custom-cat-on', on);
-        btn.title = 'Shows the last command sent, not the radio state.';
+        btn.dataset.toggle = '1';
+        paintCustomToggle(btn, entry, i);
         btn.addEventListener('click', function() {
           var idx = parseInt(this.dataset.idx, 10);
           var e = customCatData[idx];
           if (!e) return;
-          var goingOn = !customToggleState[idx];
+          // Following the radio: the command that moves it AWAY from what it reports.
+          var goingOn = customToggleView(e, idx).nextCommand === 'on';
           var cmd = (goingOn ? e.command : e.commandOff) || '';
           if (!sendCustomCat(cmd.trim())) return;
           customToggleState[idx] = goingOn;
-          this.textContent = (e.name || ('CAT ' + (idx + 1))) + ' ' + (goingOn ? 'On' : 'Off');
-          this.classList.toggle('rc-custom-cat-on', goingOn);
+          paintCustomToggle(this, e, idx);
           // The VFO panel's copy of this row is a snapshot — refresh it.
           if (window.__vfRenderCustomCat) window.__vfRenderCustomCat();
         });
@@ -4853,6 +4885,19 @@
         offInput.maxLength = 64;
         offInput.value = entry.commandOff || '';
         row.appendChild(offInput);
+        // Follow a state the radio reports (same list as the desktop).
+        var followSel = document.createElement('select');
+        followSel.className = 'cce-type cce-follow';
+        followSel.title = 'Follow the radio: the light shows what the radio reports, and a click sends whichever command moves it the other way.';
+        var FOLLOWS = [['', 'Last sent']].concat(((window.CustomCatFollow && CustomCatFollow.FOLLOWABLE) || []).map(function (f) { return [f.key, 'Follows ' + f.label]; }));
+        for (var fo = 0; fo < FOLLOWS.length; fo++) {
+          var fopt = document.createElement('option');
+          fopt.value = FOLLOWS[fo][0];
+          fopt.textContent = FOLLOWS[fo][1];
+          followSel.appendChild(fopt);
+        }
+        followSel.value = (window.CustomCatFollow && CustomCatFollow.isFollowable(entry.follows)) ? entry.follows : '';
+        row.appendChild(followSel);
       } else if (slotType === 'slider') {
         var minInput = document.createElement('input');
         minInput.className = 'cce-num cce-min';
@@ -4890,6 +4935,8 @@
         next.command = r.querySelector('.cce-cmd').value.trim();
         var offEl = r.querySelector('.cce-off');
         if (offEl) next.commandOff = offEl.value.trim();
+        var followEl = r.querySelector('.cce-follow');
+        if (followEl) { if (followEl.value) next.follows = followEl.value; else delete next.follows; }
         var minEl = r.querySelector('.cce-min');
         var maxEl = r.querySelector('.cce-max');
         if (minEl) next.min = Number(minEl.value) || 0;

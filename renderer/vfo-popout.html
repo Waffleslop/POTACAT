@@ -694,6 +694,7 @@
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
 <script src="tx-eq-chain.js"></script>
+<script src="../lib/custom-cat-follow.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -856,6 +857,11 @@ function updateDisplay() {
 // --- Radio state from main process ---
 window.api.onRadioState((s) => {
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
+  if (s) {
+    // Custom toggles that follow a radio state relight.
+    customRadioState = s;
+    document.querySelectorAll('.custom-cat-injected').forEach((el) => { if (el._paint) el._paint(); });
+  }
   if (s.freq) {
     const now = Date.now();
     const armed = _freqSuppressTarget > 0 && now < _freqSuppressDeadline;
@@ -1215,17 +1221,18 @@ function buildCustomCatBtns() {
       const btn = document.createElement('button');
       btn.className = 'tog cat-cmd-btn custom-cat-injected';
       if (b.type === 'toggle') {
-        // Session-only "last sent" state, like the other windows: POTACAT
-        // cannot read back an arbitrary user-typed command.
+        // A toggle that FOLLOWS a radio state (b.follows) lights from what
+        // the radio reports; otherwise session-only "last sent", like the
+        // other windows — POTACAT cannot read back an arbitrary typed command.
         const key = customToggleKey(b);
         const paint = () => {
-          const on = !!customToggleState[key];
-          btn.textContent = b.name + ' ' + (on ? 'On' : 'Off');
-          btn.classList.toggle('active', on);
+          const v = CustomCatFollow.toggleView(b, customRadioState, customToggleState[key]);
+          btn.textContent = b.name + ' ' + (v.on ? 'On' : 'Off');
+          btn.classList.toggle('active', v.on);
+          btn.title = v.fromRadio ? 'Shows what the radio reports.' : 'Shows the last command sent, not the radio state.';
         };
-        btn.title = 'Shows the last command sent, not the radio state.';
         btn.addEventListener('click', () => {
-          const goingOn = !customToggleState[key];
+          const goingOn = CustomCatFollow.toggleView(b, customRadioState, customToggleState[key]).nextCommand === 'on';
           const cmd = String((goingOn ? b.command : b.commandOff) || '').trim();
           if (!cmd) return;
           window.api.sendCustomCat(cmd);
@@ -1244,6 +1251,7 @@ function buildCustomCatBtns() {
   });
 }
 const customToggleState = {};
+let customRadioState = null; // latest vfo-radio-state, for toggles that follow the radio
 const customToggleKey = (b) => [b.name, b.command, b.commandOff || ''].join('');
 buildCustomCatBtns();
 

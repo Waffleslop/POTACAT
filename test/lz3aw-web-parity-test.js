@@ -88,7 +88,8 @@ test('web: toggle state survives a settings push for unchanged slots', () => {
   assert.ok(!/customToggleState = \{\};\n\s+renderCustomCatButtons\(\);/.test(fn), 'no blanket reset');
 });
 test('web VFO widget copy: refreshed after a toggle press and shows the lit state', () => {
-  assert.ok(/this\.classList\.toggle\('rc-custom-cat-on', goingOn\);\n\s+\/\/ The VFO panel's copy[\s\S]{0,200}window\.__vfRenderCustomCat\(\);/.test(web));
+  // The lit state is painted by paintCustomToggle (it may follow the radio).
+  assert.ok(/paintCustomToggle\(this, e, idx\);\n\s+\/\/ The VFO panel's copy[\s\S]{0,200}window\.__vfRenderCustomCat\(\);/.test(web));
   // The mirror walks every slot now (buttons AND slider spans), so the source
   // element is `slot`; copying the lit state is the behaviour pinned here.
   assert.ok(/if \(slot\.classList\.contains\('rc-custom-cat-on'\)\) btn\.classList\.add\('active'\);/.test(web));
@@ -99,7 +100,7 @@ test('desktop VFO pop-out: a toggle alternates On and Off commands; a slider is 
   assert.ok(!/b\.type !== 'slider'/.test(vfo), 'no longer filtered out');
   assert.ok(/window\.api\.sendCustomCat\(customSliderCommand\(b\.command, \+range\.value\)\)/.test(vfo));
   assert.ok(/const cmd = String\(\(goingOn \? b\.command : b\.commandOff\) \|\| ''\)\.trim\(\);/.test(vfo));
-  assert.ok(/btn\.textContent = b\.name \+ ' ' \+ \(on \? 'On' : 'Off'\);/.test(vfo));
+  assert.ok(/btn\.textContent = b\.name \+ ' ' \+ \(v\.on \? 'On' : 'Off'\);/.test(vfo));
 });
 
 console.log('\n=== #13 {call}: the most recently changed field, on any surface ===');

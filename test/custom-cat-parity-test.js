@@ -116,5 +116,45 @@ test('the desktop type vocabulary is exactly what the web accepts', () => {
   }
 });
 
+// LZ3AW 2026-10-17: a toggle can FOLLOW a state the radio reports. One list
+// (lib/custom-cat-follow.js) for all three surfaces, and each surface asks it
+// both what to show and which command a click sends.
+const Follow = require('../lib/custom-cat-follow.js');
+const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+
+test('follow: radio state wins, last-sent is the fallback, the click moves AWAY from the radio', () => {
+  const slot = { follows: 'split' };
+  assert.deepStrictEqual(Follow.toggleView(slot, { split: true }, false), { on: true, fromRadio: true, nextCommand: 'off' });
+  assert.deepStrictEqual(Follow.toggleView(slot, { split: false }, true), { on: false, fromRadio: true, nextCommand: 'on' });
+  assert.deepStrictEqual(Follow.toggleView(slot, {}, true), { on: true, fromRadio: false, nextCommand: 'off' }, 'state not reported: last sent');
+  assert.deepStrictEqual(Follow.toggleView({}, { split: true }, false), { on: false, fromRadio: false, nextCommand: 'on' }, 'unlinked toggle ignores the radio');
+  assert.strictEqual(Follow.followedState('atu', { atuActive: true }), true, 'main window field name');
+  assert.strictEqual(Follow.followedState('atu', { atu: false }), false, 'VFO/ECHOCAT field name');
+  assert.strictEqual(Follow.followedState('nope', { nope: true }), null);
+  assert.ok(Follow.FOLLOWABLE.every((f) => f.key && f.label && f.fields.length));
+});
+
+test('follow: every surface loads the one list and uses it for paint AND click', () => {
+  assert.ok(/<script src="\.\.\/lib\/custom-cat-follow\.js"><\/script>/.test(R('index.html')), 'desktop loads it');
+  assert.ok(/<script src="\.\.\/lib\/custom-cat-follow\.js"><\/script>/.test(VFO), 'VFO pop-out loads it');
+  assert.ok(/<!-- custom-cat-follow-js -->/.test(R('remote.html')), 'web page placeholder');
+  assert.ok(/html\.replace\('<!-- custom-cat-follow-js -->'/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8')), 'server inlines it');
+  for (const [name, src] of [['desktop', APP], ['web', REMOTE], ['VFO', VFO]]) {
+    assert.ok(/CustomCatFollow\.toggleView\(/.test(src), name + ' paints from toggleView');
+    assert.ok(/nextCommand === 'on'/.test(src), name + ' clicks by nextCommand');
+  }
+  assert.ok(/CustomCatFollow\.FOLLOWABLE/.test(APP) && /CustomCatFollow\.FOLLOWABLE/.test(REMOTE), 'both editors offer the same Follows list');
+  assert.ok(/if \(followEl\) \{ if \(followEl\.value\) next\.follows = followEl\.value; else delete next\.follows; \}/.test(REMOTE), 'the web editor saves follows');
+});
+
+test('follow: every followable state reaches the VFO pop-out and ECHOCAT', () => {
+  const vfoState = MAIN.slice(MAIN.indexOf('function sendVfoState() {'), MAIN.indexOf('function applyFreedvAudioMute('));
+  const remote = MAIN.slice(MAIN.indexOf('function broadcastRemoteRadioStatus() {'), MAIN.indexOf('function broadcastRemoteRadioStatus() {') + 6000);
+  for (const f of Follow.FOLLOWABLE) {
+    assert.ok(f.fields.some((fld) => new RegExp('\\b' + fld + ':').test(vfoState)), 'VFO state lacks ' + f.key);
+    assert.ok(f.fields.some((fld) => new RegExp('\\b' + fld + ':').test(remote)), 'ECHOCAT status lacks ' + f.key);
+  }
+});
+
 console.log(`\nCustom CAT parity: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

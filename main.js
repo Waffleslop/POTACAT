@@ -20096,6 +20096,16 @@ function sendVfoState() {
     txPower: _currentTxPower,   // lets the popout snapshot power into a VFO profile
     vfo: _currentVfo,           // active VFO letter + split badge (LZ3AW)
     split: _currentSplit,
+    // The radio states a custom CAT toggle can FOLLOW (lib/custom-cat-follow.js).
+    preamp: _currentPreampState,
+    att: _currentAttState,
+    comp: _currentCompState,
+    vox: _currentVoxState,
+    nr: _currentNrState,
+    anf: _currentAnfState,
+    mon: _currentMonState,
+    rit: _currentRitState,
+    breakIn: _currentBreakInState,
     customCatButtons: settings.customCatButtons || [],
     meters: vfoMetersAvailable(),   // only these meter rows are drawn
   });
@@ -20188,6 +20198,7 @@ function broadcastRemoteRadioStatus() {
     daxRouteOk: _daxRouteOk,
     mon: _currentMonState,
     rit: _currentRitState,
+    breakIn: _currentBreakInState, // a custom CAT toggle may follow it (lib/custom-cat-follow.js)
     nrLevel: _currentNrLevel,
     nbLevel: _currentNbLevel,
     voxLevel: _currentVoxLevel,
