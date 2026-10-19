@@ -2503,6 +2503,36 @@ html, body {
 
 #lb-search:focus { border-color: var(--accent); }
 
+/* Logbook filter bar (band, mode, date range), as in the desktop Logbook. */
+.lb-filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 0 12px 8px;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+.lb-filter-bar select,
+.lb-filter-bar input[type="date"] {
+  font-size: 13px;
+  padding: 4px 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid #444;
+  border-radius: 6px;
+  min-width: 0;
+}
+.lb-filter-clear {
+  font-size: 13px;
+  padding: 4px 10px;
+  background: none;
+  color: var(--text-dim);
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
 .lb-count {
   font-size: 12px;
   color: var(--text-dim);
@@ -3367,7 +3397,7 @@ html, body {
     z-index: 50;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   }
-  #spot-list, #spot-map, #log-tab-view, #log-view, #logbook-view, #ft8-view, #dir-view {
+  #spot-list, #spot-map, #log-tab-view, #log-view, #logbook-view, #ft8-view, #dir-view, #prop-view {
     padding-bottom: 56px;
   }
   .ptt-button { width: 52px; height: 52px; font-size: 14px; font-weight: 800; border-width: 3px; }
@@ -4191,6 +4221,7 @@ body.popout-mode #log-view,
 body.popout-mode #logbook-view,
 body.popout-mode #ft8-view,
 body.popout-mode #dir-view,
+body.popout-mode #prop-view,
 body.popout-mode #sstv-view { display: none !important; }
 
 /* Map popout */
@@ -4340,3 +4371,54 @@ body.popout-mode .popout-only { display: flex; }
 .log-as-select { padding: 4px 6px; font-size: 13px; background: var(--bg-input, #0f1419); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border, #333); border-radius: 4px; max-width: 140px; }
 .ql-log-as { flex: 0 0 auto; }
 .ql-log-as.hidden { display: none; }
+
+/* Prop tab — where this station is heard (RBN + PSKReporter), as the
+   desktop Prop view. Map on top, newest reports below. */
+#prop-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#prop-view.hidden { display: none; }
+.prop-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+.prop-toolbar select {
+  font-size: 13px;
+  padding: 4px 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+.prop-src { font-size: 13px; color: var(--text); display: inline-flex; align-items: center; gap: 4px; }
+.prop-count { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+.prop-map { height: 42%; min-height: 160px; flex-shrink: 0; }
+.prop-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.prop-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 46px 52px 58px;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border, #2a2a3e);
+  font-size: 13px;
+}
+.prop-row .prop-age { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.prop-row .prop-station { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prop-row .prop-src-tag { font-size: 10px; color: var(--text-dim); margin-left: 4px; }
+.prop-row .prop-band { font-weight: 600; }
+.prop-row .prop-snr, .prop-row .prop-dist { text-align: right; font-variant-numeric: tabular-nums; }
+.prop-empty { padding: 16px 12px; color: var(--text-dim); font-size: 13px; }
+
+/* DX Expeditions (Spots menu) — the desktop's DXP / CONTEST badges */
+.rc-dxe-sources .rc-dxe-src { padding-left: 28px; }
+.rc-dxe-sources.off { opacity: 0.45; }
+.dxe-badge { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #fff; background: #e94560; vertical-align: middle; }
+.dxe-badge.contest { background: #4fc3f7; color: #10131f; }

@@ -355,6 +355,7 @@
   const refreshRateBtn = document.getElementById('refresh-rate-btn');
   const filterToolbar = document.getElementById('filter-toolbar');
   const dirView = document.getElementById('dir-view');
+  const propView = document.getElementById('prop-view'); // here, not with its code: switchTab can run during the initial restore
   const dirList = document.getElementById('dir-list');
   const dirSearch = document.getElementById('dir-search');
   const sortSelect = document.getElementById('sort-select');
@@ -898,6 +899,19 @@
     '20m': 14070, '17m': 18100, '15m': 21070, '12m': 24920, '10m': 28120,
     '6m': 50291,
   };
+
+  // Where the FT8 tab last was ({freqKhz, band, mode}); restored on return.
+  var ft8TabDial = null;
+  /**
+   * The dial to return to on the FT8 tab: the remembered one when it is on
+   * the band the select shows and the mode is unchanged; otherwise null (the
+   * band's own dial). Pure — test/lz3aw-round14-test.js.
+   */
+  function ft8ReturnDial(left, band, mode) {
+    if (!left || !(left.freqKhz > 0)) return null;
+    if (left.band !== band || left.mode !== mode) return null;
+    return left.freqKhz;
+  }
 
   /** Update band button data-freq attributes for current mode */
   function updateBandFreqs() {
@@ -1708,6 +1722,11 @@
           if (msg.settings.respotTemplate) respotTemplate = msg.settings.respotTemplate;
           if (msg.settings.dxRespotTemplate) dxRespotTemplate = msg.settings.dxRespotTemplate;
           scanDwell = msg.settings.scanDwell || 7;
+          dxeState.enable = msg.settings.enableDxe === true;
+          if (msg.settings.enableDxeSources && typeof msg.settings.enableDxeSources === 'object') {
+            dxeState.sources = Object.assign({}, DXE_DEFAULT_SOURCES, msg.settings.enableDxeSources);
+          }
+          reflectDxeToggles();
           refreshInterval = msg.settings.refreshInterval || 30;
           refreshRateBtn.textContent = refreshInterval + 's';
           maxAgeMin = msg.settings.maxAgeMin != null ? msg.settings.maxAgeMin : 5;
@@ -2204,6 +2223,28 @@
         }
         break;
       }
+
+      // Where this station is heard — the desktop pushes both at connect and
+      // on every change (they were sent to the page and never drawn).
+      case 'jtcat-tune-state': {
+        // The tune tone is on: light the PSK31 pane's Tune button.
+        const tb = document.getElementById('psk-tune');
+        if (tb) tb.classList.toggle('active', !!msg.active);
+        break;
+      }
+      case 'expedition-callsigns':
+        dxeState.calls = new Set((msg.callsigns || []).map(c => String(c).toUpperCase()));
+        dxeState.meta = msg.metadata && typeof msg.metadata === 'object' ? msg.metadata : {};
+        renderSpots();
+        break;
+      case 'rbn-prop-spots':
+        propRbn = Array.isArray(msg.spots) ? msg.spots : [];
+        if (activeTab === 'prop') renderProp();
+        break;
+      case 'pskr-map-spots':
+        propPskr = Array.isArray(msg.spots) ? msg.spots : [];
+        if (activeTab === 'prop') renderProp();
+        break;
 
       case 'solar-data': {
         // Desktop status-bar parity: SFI/K/A pills with the same color
@@ -2854,6 +2895,42 @@
     return 'other';
   }
 
+  // DX Expeditions — the desktop's Spots > DX Expeditions toggles. Main
+  // pushes the merged expedition list ('expedition-callsigns'); a call is
+  // flagged only while the master toggle is on and at least one of the feeds
+  // that listed it is on (app.js isExpeditionVisible). A DXpedition gets the
+  // red DXP badge and sorts to the top, a contest station a CONTEST badge.
+  const DXE_DEFAULT_SOURCES = { clublog: true, 'dx-world': true, dxnews: true, ng3k: true };
+  const dxeState = { enable: false, sources: Object.assign({}, DXE_DEFAULT_SOURCES), calls: new Set(), meta: {} };
+  function dxeKind(callsign, st) {
+    if (!st || !st.enable) return '';
+    const up = String(callsign || '').toUpperCase();
+    if (!st.calls || !st.calls.has(up)) return '';
+    const m = st.meta ? st.meta[up] : null;
+    let visible = !m || !m.sources;
+    if (!visible) {
+      for (const src of String(m.sources).split(',')) {
+        if (st.sources && st.sources[src.trim()]) { visible = true; break; }
+      }
+    }
+    if (!visible) return '';
+    return m && m.kind === 'contest' ? 'contest' : 'dxpedition';
+  }
+  function dxeTitle(callsign) {
+    const m = dxeState.meta[String(callsign || '').toUpperCase()];
+    if (!m) return '';
+    return [m.contest, m.entity, m.dates, m.operators ? 'By ' + m.operators : '', m.qsl ? 'QSL ' + m.qsl : '']
+      .filter(Boolean).join(' · ');
+  }
+  function reflectDxeToggles() {
+    const master = document.getElementById('rc-dxe');
+    if (!master) return;
+    master.checked = dxeState.enable;
+    const box = document.querySelector('.rc-dxe-sources');
+    if (box) box.classList.toggle('off', !dxeState.enable);
+    document.querySelectorAll('[data-dxe-src]').forEach(c => { c.checked = !!dxeState.sources[c.dataset.dxeSrc]; });
+  }
+
   function getFilteredSpots() {
     const bands = getDropdownValues(bandFilterEl);
     const modes = getDropdownValues(modeFilterEl);
@@ -2875,6 +2952,9 @@
       const aNet = a.source === 'net' ? 1 : 0;
       const bNet = b.source === 'net' ? 1 : 0;
       if (aNet !== bNet) return bNet - aNet;
+      const aDxp = dxeKind(a.callsign, dxeState) === 'dxpedition' ? 1 : 0;
+      const bDxp = dxeKind(b.callsign, dxeState) === 'dxpedition' ? 1 : 0;
+      if (aDxp !== bDxp) return bDxp - aDxp;
       if (spotSort === 'freq') {
         return parseFloat(a.frequency) - parseFloat(b.frequency);
       } else if (spotSort === 'dist') {
@@ -2946,7 +3026,9 @@
       const freqStr = formatSpotFreq(s.frequency);
       const src = s.source || 'pota';
       const srcLabel = src.toUpperCase();
-      const newBadge = newPark ? '<span class="new-badge">N</span>' : '';
+      const dxe = dxeKind(s.callsign, dxeState);
+      const newBadge = (newPark ? '<span class="new-badge">N</span>' : '')
+        + (dxe ? `<span class="dxe-badge${dxe === 'contest' ? ' contest' : ''}" title="${esc(dxeTitle(s.callsign))}">${dxe === 'contest' ? 'CONTEST' : 'DXP'}</span>` : '');
       const logBtn = isNet ? '<span class="spot-btn-empty"></span>' : '<button type="button" class="spot-log-btn">L</button>';
       const skipBtn = isNet ? '<span class="spot-btn-empty"></span>' : `<button type="button" class="spot-skip-btn" data-skipfreq="${esc(String(s.frequency))}" data-skipcall="${esc(s.callsign)}">${isSkipped ? 'U' : 'S'}</button>`;
       const hideBtn = (isNet || !s.band)
@@ -3297,8 +3379,17 @@
     // FT8/FT4 spot -> switch to FT8 tab and hunt the station
     const modeUpper = (mode || '').toUpperCase();
     if ((modeUpper === 'FT8' || modeUpper === 'FT4' || modeUpper === 'FT2') && callsign) {
+      // The spot's mode becomes the tab's mode — the band dials follow it, and
+      // a RUNNING engine is told (it only heard 'jtcat-start' when stopped, so
+      // an FT4 spot was hunted by an FT8 engine; LZ3AW item 15).
+      const modeChanged = ft8Mode !== modeUpper;
       ft8Mode = modeUpper;
       ft8ModeSelect.value = ft8Mode;
+      if (modeChanged) {
+        updateBandFreqs();
+        if (ft8Running) ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
+        if (typeof applyDigitalPanes === 'function') applyDigitalPanes();
+      }
       ft8HuntCall = callsign.toUpperCase();
       // Clear decode log for fresh start
       ft8DecodeLog = [];
@@ -3440,6 +3531,16 @@
       });
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set-sources', sources }));
+      }
+    } else if (cb.id === 'rc-dxe' || cb.dataset.dxeSrc) {
+      // Same settings the desktop's Spots > DX Expeditions toggles write;
+      // main merges a partial enableDxeSources (dxe-remote-test).
+      if (cb.id === 'rc-dxe') dxeState.enable = cb.checked;
+      else dxeState.sources[cb.dataset.dxeSrc] = cb.checked;
+      reflectDxeToggles();
+      renderSpots();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'save-settings', settings: { enableDxe: dxeState.enable, enableDxeSources: Object.assign({}, dxeState.sources) } }));
       }
     } else if (cb.id === 'rc-new-only') {
       showNewOnly = cb.checked;
@@ -6462,6 +6563,12 @@
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
     try { scopeSyncSubscription(tab); } catch { /* pre-init */ }
+    // Leaving FT8: remember where it was, to come back to it (item 15).
+    try {
+      if (activeTab === 'ft8' && tab !== 'ft8' && currentFreqKhz > 0) {
+        ft8TabDial = { freqKhz: currentFreqKhz, band: freqToBandLocal(currentFreqKhz), mode: ft8Mode };
+      }
+    } catch { /* pre-init */ }
     activeTab = tab;
     tabBar.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     // Hide all content areas
@@ -6472,6 +6579,7 @@
     logView.classList.add('hidden');
     logbookView.classList.add('hidden');
     ft8View.classList.add('hidden');
+    if (propView) propView.classList.add('hidden');
     if (dirView) dirView.classList.add('hidden');
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
     if (scopeView) { scopeView.classList.add('hidden'); scopeView.style.display = 'none'; }
@@ -6529,25 +6637,30 @@
       // and skip the default band tune (the spot already tuned the radio)
       var spotFreq = opts && opts.freqKhz ? parseFloat(opts.freqKhz) : 0;
       if (spotFreq > 0) {
-        // Select the band dropdown option matching the spot frequency
+        // The BAND field follows the spot by its band, not by nearness to a
+        // dial: a spot 2 kHz off the watering hole (or an FT4 spot judged
+        // against FT8 dials) matched nothing and left the old band showing.
+        var spotBand = freqToBandLocal(spotFreq);
         for (var oi = 0; oi < ft8BandSelect.options.length; oi++) {
-          var optFreq = parseInt(ft8BandSelect.options[oi].dataset.freq, 10);
-          if (Math.abs(optFreq - spotFreq) < 2) {
-            ft8BandSelect.selectedIndex = oi;
-            break;
-          }
+          if (ft8BandSelect.options[oi].value === spotBand) { ft8BandSelect.selectedIndex = oi; break; }
         }
+        ft8TabDial = { freqKhz: spotFreq, band: spotBand, mode: ft8Mode };
         // Don't send jtcat-set-band — the spot tune already set the frequency
       } else {
-        // Normal tab switch — tune to the active band
+        // Back on the FT8 tab: return to where FT8 was left (a spot's dial or
+        // a band dial), not the band's default — and not wherever another
+        // tab moved the rig. The band select still decides the band.
         var selectedOpt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
         if (selectedOpt) {
-          var freqKhz = parseInt(selectedOpt.dataset.freq, 10);
+          var back = ft8ReturnDial(ft8TabDial, selectedOpt.value, ft8Mode);
+          var freqKhz = back || parseInt(selectedOpt.dataset.freq, 10);
           ft8Send({ type: 'jtcat-set-band', band: selectedOpt.value, freqKhz: freqKhz });
         }
       }
       ft8StartCountdown();
       if (ft8BsOn && scopeAvailable()) { scopeSizeCanvases(); scopeDrawAll(); }
+    } else if (tab === 'prop') {
+      showPropView();
     } else if (tab === 'dir') {
       if (dirView) dirView.classList.remove('hidden');
       renderDirectoryTab();
@@ -7359,6 +7472,103 @@
   });
 
   // =============================================
+  // PROP VIEW — RBN + PSKReporter (LZ3AW): where this station is heard
+  // =============================================
+  const propList = document.getElementById('prop-list');
+  const propCount = document.getElementById('prop-count');
+  const propSrcRbn = document.getElementById('prop-src-rbn');
+  const propSrcPskr = document.getElementById('prop-src-pskr');
+  const propBandSel = document.getElementById('prop-band');
+  const propAgeSel = document.getElementById('prop-age');
+  let propRbn = [];
+  let propPskr = [];
+  let propMap = null;
+  let propLayer = null;
+  // Band colours of the desktop Prop view (RBN_BAND_COLORS_NORMAL).
+  const PROP_BAND_COLORS = {
+    '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3', '30m': '#00cccc',
+    '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff', '12m': '#ff44cc', '10m': '#ff4488',
+    '6m': '#e0e0e0', '2m': '#88ff88',
+  };
+
+  /**
+   * Pure: the reports the Prop tab shows, newest first — RBN and/or
+   * PSKReporter, one band or all, no older than ageMin. Each row carries
+   * its source and the station that heard us. test/lz3aw-round14-test.js.
+   */
+  function propFilter(rbn, pskr, f) {
+    const now = f.now || Date.now();
+    const maxAgeMs = (Number(f.ageMin) || 60) * 60000;
+    const out = [];
+    const take = (list, source, station) => {
+      for (const s of list || []) {
+        if (!s) continue;
+        if (f.band && s.band !== f.band) continue;
+        const t = Date.parse(s.spotTime);
+        if (Number.isFinite(t) && now - t > maxAgeMs) continue;
+        out.push({ source, station: s[station] || '', band: s.band || '', mode: s.mode || '', snr: s.snr,
+          wpm: s.wpm, distance: s.distance, lat: s.lat, lon: s.lon, locationDesc: s.locationDesc || '', at: Number.isFinite(t) ? t : 0 });
+      }
+    };
+    if (f.rbn !== false) take(rbn, 'RBN', 'spotter');
+    if (f.pskr !== false) take(pskr, 'PSKR', 'receiver');
+    return out.sort((a, b) => b.at - a.at);
+  }
+
+  function propAgeText(at) {
+    if (!at) return '';
+    const m = Math.max(0, Math.round((Date.now() - at) / 60000));
+    return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h';
+  }
+
+  function renderProp() {
+    if (!propList) return;
+    const rows = propFilter(propRbn, propPskr, {
+      rbn: propSrcRbn ? propSrcRbn.checked : true,
+      pskr: propSrcPskr ? propSrcPskr.checked : true,
+      band: propBandSel ? propBandSel.value : '',
+      ageMin: propAgeSel ? propAgeSel.value : 60,
+    });
+    if (propCount) propCount.textContent = rows.length + (rows.length === 1 ? ' report' : ' reports');
+    propList.innerHTML = rows.length ? rows.map(r =>
+      '<div class="prop-row">' +
+        '<span class="prop-age">' + propAgeText(r.at) + '</span>' +
+        '<span class="prop-station">' + esc(r.station) + '<span class="prop-src-tag">' + r.source + (r.locationDesc ? ' ' + esc(r.locationDesc) : '') + '</span></span>' +
+        '<span class="prop-band" style="color:' + (PROP_BAND_COLORS[r.band] || 'var(--text)') + '">' + esc(r.band) + '</span>' +
+        '<span class="prop-snr">' + (r.snr != null && r.snr !== '' ? esc(String(r.snr)) + ' dB' : '') + '</span>' +
+        '<span class="prop-dist">' + formatSpotDist(r.distance) + '</span>' +
+      '</div>').join('')
+      : '<div class="prop-empty">No reports in this window. RBN hears CW; PSKReporter hears FT8 and the other digital modes — they appear here after you transmit.</div>';
+    if (propMap && propLayer) {
+      propLayer.clearLayers();
+      for (const r of rows) {
+        if (typeof r.lat !== 'number' || typeof r.lon !== 'number') continue;
+        L.circleMarker([r.lat, r.lon], {
+          radius: 6, color: PROP_BAND_COLORS[r.band] || '#ffffff', weight: 1, fillOpacity: 0.7,
+        }).bindPopup(esc(r.station) + ' (' + r.source + ')<br>' + esc(r.band) + ' ' + esc(r.mode) +
+          (r.snr != null && r.snr !== '' ? ' ' + esc(String(r.snr)) + ' dB' : '')).addTo(propLayer);
+      }
+    }
+  }
+
+  function showPropView() {
+    if (!propView) return;
+    propView.classList.remove('hidden');
+    if (!propMap && typeof L !== 'undefined') {
+      propMap = L.map('prop-map', { zoomControl: true, minZoom: 1, worldCopyJump: true }).setView([30, -40], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OSM', className: 'dark-tiles',
+      }).addTo(propMap);
+      propLayer = L.layerGroup().addTo(propMap);
+    }
+    if (propMap) setTimeout(() => propMap.invalidateSize(), 100);
+    renderProp();
+  }
+  [propSrcRbn, propSrcPskr, propBandSel, propAgeSel].forEach(el => {
+    if (el) el.addEventListener('change', renderProp);
+  });
+
+  // =============================================
   // LOGBOOK VIEW
   // =============================================
 
@@ -7368,20 +7578,53 @@
     }
   }
 
+  // Filter bar (band, mode, date range), as in the desktop Logbook window.
+  const lbFilterBand = document.getElementById('lb-filter-band');
+  const lbFilterMode = document.getElementById('lb-filter-mode');
+  const lbFilterFrom = document.getElementById('lb-filter-from');
+  const lbFilterTo = document.getElementById('lb-filter-to');
+  const lbFilterClear = document.getElementById('lb-filter-clear');
+
+  /**
+   * The mode a QSO is filed under in the Mode filter — the family, as the
+   * desktop Logbook shows it: USB/LSB are SSB, MFSK+SUBMODE FT4 is FT4,
+   * PSK31/63 are PSK.
+   */
+  function lbModeFamily(q) {
+    const sub = String(q.SUBMODE || '').toUpperCase();
+    const m = String(q.MODE || '').toUpperCase();
+    const v = (m === 'MFSK' && sub) ? sub : m;
+    if (v === 'USB' || v === 'LSB') return 'SSB';
+    if (/^PSK/.test(v)) return 'PSK';
+    return v;
+  }
+
+  /** Pure: the QSOs a search + filter set shows. test/lz3aw-round14-test.js. */
+  function lbFilterQsos(qsos, f) {
+    const query = String(f.query || '').trim().toUpperCase();
+    const band = String(f.band || '').toUpperCase();
+    const mode = String(f.mode || '').toUpperCase();
+    const from = String(f.from || '').replace(/-/g, '');
+    const to = String(f.to || '').replace(/-/g, '');
+    return qsos.filter(q => {
+      if (band && String(q.BAND || '').toUpperCase() !== band) return false;
+      if (mode && lbModeFamily(q) !== mode) return false;
+      const d = String(q.QSO_DATE || '');
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      if (!query) return true;
+      return [q.CALL, q.SIG_INFO, q.COMMENT, q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
+    });
+  }
+
   function getFilteredLogbook() {
-    const query = (lbSearch.value || '').trim().toUpperCase();
-    let filtered = logbookQsos;
-    if (query) {
-      filtered = logbookQsos.filter(q => {
-        const call = (q.CALL || '').toUpperCase();
-        const sigInfo = (q.SIG_INFO || '').toUpperCase();
-        const comment = (q.COMMENT || '').toUpperCase();
-        const mode = (q.MODE || '').toUpperCase();
-        const band = (q.BAND || '').toUpperCase();
-        return call.includes(query) || sigInfo.includes(query) || comment.includes(query) ||
-               mode.includes(query) || band.includes(query);
-      });
-    }
+    const filtered = lbFilterQsos(logbookQsos, {
+      query: lbSearch.value,
+      band: lbFilterBand ? lbFilterBand.value : '',
+      mode: lbFilterMode ? lbFilterMode.value : '',
+      from: lbFilterFrom ? lbFilterFrom.value : '',
+      to: lbFilterTo ? lbFilterTo.value : '',
+    });
     // Newest first (reverse index order)
     return [...filtered].reverse();
   }
@@ -7466,6 +7709,14 @@
 
   // Search input
   lbSearch.addEventListener('input', () => {
+    renderLogbook();
+  });
+  [lbFilterBand, lbFilterMode, lbFilterFrom, lbFilterTo].forEach(el => {
+    if (el) el.addEventListener('change', renderLogbook);
+  });
+  if (lbFilterClear) lbFilterClear.addEventListener('click', () => {
+    [lbFilterBand, lbFilterMode, lbFilterFrom, lbFilterTo].forEach(el => { if (el) el.value = ''; });
+    lbSearch.value = '';
     renderLogbook();
   });
 
@@ -8227,6 +8478,7 @@
   ft8BandSelect.addEventListener('change', () => {
     const opt = ft8BandSelect.options[ft8BandSelect.selectedIndex];
     const band = opt.value;
+    ft8TabDial = null; // a band chosen here is its dial
     if (ft8Mode === 'WSPR') {
       // Host derives the WSPR dial from the band name — no client freq.
       ft8Send({ type: 'jtcat-set-band', band });
@@ -8439,19 +8691,68 @@
       .replace(/\$CALL/g, their);
   }
 
+  // Macro editor — the desktop pane's: long-press / right-click a macro, an
+  // empty slot opens it on a tap; Save writes all six (settings.pskMacros,
+  // the key the desktop pop-out reads), Reset all = the defaults.
+  const pskMacroEditor = document.getElementById('psk-macro-editor');
+  const pskMeLabel = document.getElementById('psk-me-label');
+  const pskMeText = document.getElementById('psk-me-text');
+  let pskEditIdx = -1;
+  function pskOpenMacroEditor(i) {
+    if (!pskMacroEditor) return;
+    const defs = pskNormalizeMacros(echoSettings && echoSettings.pskMacros);
+    pskEditIdx = i;
+    pskMeLabel.value = defs[i].label;
+    pskMeText.value = defs[i].text.replace(/\n$/, '');
+    pskMacroEditor.classList.remove('hidden');
+    pskMacroEditor.style.display = 'flex';
+    pskMeText.focus();
+  }
+  function pskCloseMacroEditor() {
+    pskEditIdx = -1;
+    if (pskMacroEditor) { pskMacroEditor.classList.add('hidden'); pskMacroEditor.style.display = 'none'; }
+  }
+  function pskSaveMacros(list) {
+    if (!echoSettings) echoSettings = {};
+    echoSettings.pskMacros = list;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'save-settings', settings: { pskMacros: list } }));
+    pskRenderMacros();
+  }
+  const pskMeSave = document.getElementById('psk-me-save');
+  if (pskMeSave) pskMeSave.addEventListener('click', () => {
+    if (pskEditIdx < 0) return;
+    const defs = pskNormalizeMacros(echoSettings && echoSettings.pskMacros);
+    const label = pskMeLabel.value.trim().slice(0, 8) || ('M' + (pskEditIdx + 1));
+    const body = pskMeText.value.replace(/\s+$/, '');
+    defs[pskEditIdx] = { label, text: body ? body + '\n' : '' };
+    pskSaveMacros(defs);
+    pskCloseMacroEditor();
+  });
+  const pskMeCancel = document.getElementById('psk-me-cancel');
+  if (pskMeCancel) pskMeCancel.addEventListener('click', pskCloseMacroEditor);
+  const pskMeReset = document.getElementById('psk-me-reset');
+  if (pskMeReset) pskMeReset.addEventListener('click', () => { pskSaveMacros(null); pskCloseMacroEditor(); });
+
   function pskRenderMacros() {
     if (!pskMacrosEl) return;
     const defs = pskNormalizeMacros(echoSettings && echoSettings.pskMacros);
     pskMacrosEl.innerHTML = '';
-    defs.forEach((m) => {
-      if (!m.text) return; // blank free-text slots aren't useful without the editor
+    defs.forEach((m, i) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ft8-ctrl-btn';
       btn.style.fontSize = '11px';
       btn.textContent = m.label;
-      btn.title = m.text.trim().slice(0, 120);
+      btn.title = m.text ? m.text.trim().slice(0, 120) : 'Empty - tap to write a macro';
+      if (!m.text) btn.style.opacity = '0.55';
+      // Long-press (touch) or right-click edits; a tap on an empty slot too.
+      let pressTimer = null;
+      btn.addEventListener('contextmenu', (e) => { e.preventDefault(); pskOpenMacroEditor(i); });
+      btn.addEventListener('touchstart', () => { pressTimer = setTimeout(() => { pressTimer = 'fired'; pskOpenMacroEditor(i); }, 550); }, { passive: true });
+      btn.addEventListener('touchend', () => { if (pressTimer && pressTimer !== 'fired') clearTimeout(pressTimer); });
       btn.addEventListener('click', () => {
+        if (pressTimer === 'fired') { pressTimer = null; return; }
+        if (!m.text) { pskOpenMacroEditor(i); return; }
         // Insert the substituted text at the cursor (popout parity).
         const sub = pskSubstituteMacro(m.text);
         const start = pskTxEl.selectionStart == null ? pskTxEl.value.length : pskTxEl.selectionStart;
@@ -8478,6 +8779,18 @@
     if (pskChipScanTimer) clearTimeout(pskChipScanTimer);
     pskChipScanTimer = setTimeout(pskScanCallsigns, 500);
   }
+
+  const pskClearBtn = document.getElementById('psk-clear');
+  if (pskClearBtn) pskClearBtn.addEventListener('click', () => {
+    if (pskRxEl) pskRxEl.textContent = '';
+    if (pskChipsEl) { pskChipsEl.innerHTML = ''; pskChipsEl.style.display = 'none'; }
+  });
+  // Tune / ATU: the pane hides the FT8 controls bar, so it carries its own,
+  // as the desktop JTTY/PSK31 panes do.
+  const pskTuneBtn = document.getElementById('psk-tune');
+  if (pskTuneBtn) pskTuneBtn.addEventListener('click', () => ft8Send({ type: 'jtcat-tune-toggle' }));
+  const pskAtuBtn = document.getElementById('psk-atu');
+  if (pskAtuBtn) pskAtuBtn.addEventListener('click', () => { if (rcAtuBtn) rcAtuBtn.click(); });
 
   function pskScanCallsigns() {
     if (!pskChipsEl || !pskRxEl) return;
