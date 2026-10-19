@@ -439,7 +439,7 @@ function _applyPopoutTheme(payload) {
       link.textContent = s._station;
       link.addEventListener('click', function(e) {
         e.preventDefault();
-        window.api.openExternal('https://www.qrz.com/db/' + encodeURIComponent(s._station.split('/')[0]));
+        window.api.openExternal('https://www.qrz.com/db/' + encodeURIComponent(JtcatParser.baseCall(s._station)));
       });
       stationTd.appendChild(link);
       tr.appendChild(stationTd);

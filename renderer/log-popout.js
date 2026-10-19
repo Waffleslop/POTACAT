@@ -658,8 +658,8 @@ function _applyPopoutTheme(payload) {
   qrzBtn.addEventListener('click', () => {
     const call = callInput.value.trim().toUpperCase();
     if (!call) return;
-    const baseCall = call.split('/')[0];
-    window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(baseCall)}`);
+    // The station's own call: M/NT6B -> NT6B, not M (JtcatParser.baseCall).
+    window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(JtcatParser.baseCall(call))}`);
   });
 
   // Past QSOs "View all" → opens QSO Logbook pop-out filtered by callsign

@@ -221,7 +221,7 @@ function render() {
     callLink.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      window.api.openExternal(`https://www.qrz.com/db/${s.callsign}`);
+      window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(JtcatParser.baseCall(s.callsign))}`);
     });
 
     // Park links

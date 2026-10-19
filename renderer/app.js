@@ -3709,16 +3709,16 @@ blCallsign.addEventListener('input', () => {
   // free, so we can populate grid/distance/heading instantly from the
   // current allSpots even before QRZ comes back. The QRZ result will
   // upgrade the row if it has a more precise grid.
-  const base = cs.split('/')[0];
-  _blRenderStationInfo(null, cs, ctyGeoCache.get(base) || null);
+  const base = JtcatParser.baseCall(cs);
+  _blRenderStationInfo(null, cs, ctyGeoCache.get(cs) || null);
   blLookupTimer = setTimeout(async () => {
     // cty.dat geo fallback — cheap local lookup (no network), cached per base
     // call. Resolved up front so every render below carries the entity centroid
     // as a last-resort grid/distance/heading source.
-    let ctyGeo = ctyGeoCache.get(base);
+    let ctyGeo = ctyGeoCache.get(cs); // the FULL call: M/NT6B is England, NT6B is not
     if (ctyGeo === undefined) {
       try { ctyGeo = await window.api.resolveCallsignGeo(cs); } catch { ctyGeo = null; }
-      ctyGeoCache.set(base, ctyGeo || null);
+      ctyGeoCache.set(cs, ctyGeo || null);
       if (blCallsign.value.trim().toUpperCase() !== cs) return; // stale
     }
     const cached = qrzData.get(base);
@@ -3817,7 +3817,7 @@ async function saveBannerQso() {
 
   // Respot
   const wantsRespot = blRespot.checked && !blRespotLabel.classList.contains('hidden');
-  const opQrz = qrzData.get(callsign.split('/')[0]);
+  const opQrz = qrzData.get(JtcatParser.baseCall(callsign));
   const opFirstname = (opQrz && (cleanQrzName(opQrz.nickname) || cleanQrzName(opQrz.fname))) || 'OM';
   let respotCommentText = '';
   if (wantsRespot) {
@@ -3854,7 +3854,7 @@ async function saveBannerQso() {
       // cache read raced the on-screen lookup (and missed on case-mismatch:
       // the cache is keyed uppercase) so the ADIF <NAME> was written empty
       // even when the name showed on screen. Cache-first, awaited fallback.
-      const blBareCall = cs.split('/')[0].toUpperCase();
+      const blBareCall = JtcatParser.baseCall(cs).toUpperCase();
       let qrzInfo = qrzData.get(blBareCall);
       if (!qrzInfo) {
         try { qrzInfo = await window.api.qrzLookup(cs); } catch {}
@@ -10864,7 +10864,7 @@ function updateMapMarkers(filtered) {
     const donorBadge = (!popupIsOwnCall && donorCallsigns.has(s.callsign.toUpperCase())) ? ' <span style="font-size:12px;" title="POTACAT Supporter">\uD83D\uDC3E</span>' : '';
     const creatorBadge = (!popupIsOwnCall && s.callsign.toUpperCase() === 'K3SBP') ? ' <span style="font-size:12px;" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>' : '';
     const wwffRefLine = s.wwffReference ? `<br><b>${s.wwffReference}</b> ${s.wwffParkName || ''} <span style="color:${SOURCE_COLORS_ACTIVE.wwff};font-size:11px;">[WWFF]</span>` : '';
-    const qrzOp = qrzData.get(s.callsign.toUpperCase().split('/')[0]);
+    const qrzOp = qrzData.get(JtcatParser.baseCall(s.callsign.toUpperCase()));
     const opName = qrzDisplayName(qrzOp);
     const opLine = opName ? `<span style="color:#b0bec5;font-size:11px;">${opName}</span><br>` : '';
     const popupContent = `
@@ -10919,7 +10919,7 @@ function bindPopupClickHandlers(mapInstance) {
     container.querySelectorAll('.popup-qrz').forEach((link) => {
       link.addEventListener('click', (ev) => {
         ev.preventDefault();
-        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(link.dataset.call.split('/')[0])}`);
+        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(JtcatParser.baseCall(link.dataset.call))}`);
       });
     });
     container.querySelectorAll('.log-popup-btn').forEach((btn) => {
@@ -11372,7 +11372,7 @@ async function openQuickRespot() {
     : targets.includes('wwbota') ? 'wwbota'
     : 'pota';
   const tmpl = respotTemplateFor(tmplNetwork);
-  const spotQrz = s.callsign ? qrzData.get(s.callsign.toUpperCase().split('/')[0]) : null;
+  const spotQrz = s.callsign ? qrzData.get(JtcatParser.baseCall(s.callsign.toUpperCase())) : null;
   const spotFirstname = (spotQrz && (cleanQrzName(spotQrz.nickname) || cleanQrzName(spotQrz.fname))) || 'OM';
   commentField.value = tmpl
     .replace(/\{QTH\}/gi, grid)
@@ -11839,7 +11839,7 @@ logCallsign.addEventListener('input', () => {
   if (cs.length < 3) { logOpName.value = ''; return; }
   quickLogLookupTimer = setTimeout(async () => {
     // Check local cache first
-    const cached = qrzData.get(cs.split('/')[0]);
+    const cached = qrzData.get(JtcatParser.baseCall(cs));
     if (cached) {
       logOpName.value = qrzDisplayName(cached);
       return;
@@ -11847,7 +11847,7 @@ logCallsign.addEventListener('input', () => {
     // Fetch from QRZ via IPC
     const result = await window.api.qrzLookup(cs);
     if (result && logCallsign.value.trim().toUpperCase() === cs) {
-      qrzData.set(cs.split('/')[0], result);
+      qrzData.set(JtcatParser.baseCall(cs), result);
       logOpName.value = qrzDisplayName(result);
     }
   }, 500);
@@ -13064,7 +13064,7 @@ function enrichSpotsForPopout(filtered) {
     isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
     isOop: isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
     isWatched: watchlistMatch(watchlist, s.callsign, s.band, s.mode, s.locationDesc),
-    opName: qrzDisplayName(qrzData.get(s.callsign.toUpperCase().split('/')[0])),
+    opName: qrzDisplayName(qrzData.get(JtcatParser.baseCall(s.callsign.toUpperCase()))),
   }));
 }
 
@@ -13502,7 +13502,7 @@ function render() {
         callLink.textContent = s.callsign;
         callLink.href = '#';
         callLink.className = 'qrz-link';
-        const qrzHover = qrzData.get(s.callsign.toUpperCase().split('/')[0]);
+        const qrzHover = qrzData.get(JtcatParser.baseCall(s.callsign.toUpperCase()));
         if (qrzHover) {
           const hoverName = qrzDisplayName(qrzHover);
           if (hoverName) callLink.title = hoverName;
@@ -13510,7 +13510,7 @@ function render() {
         callLink.addEventListener('click', (e) => {
           e.stopPropagation();
           e.preventDefault();
-          window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s.callsign.split('/')[0])}`);
+          window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(JtcatParser.baseCall(s.callsign))}`);
         });
         callTd.appendChild(callLink);
       }
@@ -13617,7 +13617,7 @@ function render() {
       const operatorTd = document.createElement('td');
       operatorTd.setAttribute('data-col', 'operator');
       operatorTd.className = 'operator-col';
-      const qrzInfo = qrzData.get(s.callsign.toUpperCase().split('/')[0]);
+      const qrzInfo = qrzData.get(JtcatParser.baseCall(s.callsign.toUpperCase()));
       if (qrzInfo) {
         operatorTd.textContent = qrzDisplayName(qrzInfo);
         operatorTd.title = [qrzInfo.nickname || qrzInfo.fname, qrzInfo.name].filter(Boolean).join(' ');
@@ -14052,7 +14052,7 @@ function routeLogForSpot(spot) {
 function openLogPopup(spot) {
   currentLogSpot = spot;
   logCallsign.value = spot.callsign || '';
-  const logQrz = qrzData.get((spot.callsign || '').toUpperCase().split('/')[0]);
+  const logQrz = qrzData.get(JtcatParser.baseCall((spot.callsign || '').toUpperCase()));
   logOpName.value = logQrz ? [cleanQrzName(logQrz.nickname) || cleanQrzName(logQrz.fname), cleanQrzName(logQrz.name)].filter(Boolean).join(' ') : '';
   logFrequency.value = parseFloat(spot.frequency).toFixed(1);
 
@@ -14389,7 +14389,7 @@ logSaveBtn.addEventListener('click', async () => {
     : ((currentLogSpot && currentLogSpot.wwffReference) ? currentLogSpot.wwffReference : '');
   // Resolve {op_firstname} from QRZ data for the primary callsign; fall back to "OM"
   const primaryCall = callsigns[0] || '';
-  const primaryQrz = qrzData.get(primaryCall.split('/')[0]);
+  const primaryQrz = qrzData.get(JtcatParser.baseCall(primaryCall));
   const opFirstname = (primaryQrz && (cleanQrzName(primaryQrz.nickname) || cleanQrzName(primaryQrz.fname))) || 'OM';
   const commentText = respotComment.value.trim().replace(/\{rst\}/gi, getRstDigits('rst-sent-digits', '59')).replace(/\{QTH\}/gi, grid).replace(/\{mycallsign\}/gi, myCallsign).replace(/\{op_firstname\}/gi, opFirstname);
 
@@ -14427,7 +14427,7 @@ logSaveBtn.addEventListener('click', async () => {
     const spotLogRecords = new Map();
     for (let ci = 0; ci < callsigns.length; ci++) {
       const cs = callsigns[ci];
-      const logQrzInfo = qrzData.get(cs.split('/')[0]);
+      const logQrzInfo = qrzData.get(JtcatParser.baseCall(cs));
 
       const qsoData = {
         callsign: cs,
@@ -20823,7 +20823,7 @@ function renderRbnTable() {
     stationLink.className = 'qrz-link';
     stationLink.addEventListener('click', (e) => {
       e.preventDefault();
-      window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s._station.split('/')[0])}`);
+      window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(JtcatParser.baseCall(s._station))}`);
     });
     stationTd.appendChild(stationLink);
     tr.appendChild(stationTd);
@@ -21340,7 +21340,7 @@ function expandDesktopCwMacros(text) {
   const call = _logPopoutCallsign || live
     || (lastTunedSpot ? lastTunedSpot.callsign : '');
   // {op_firstname} — nickname (preferred) or first name from QRZ
-  const bareCall = call.split('/')[0];
+  const bareCall = JtcatParser.baseCall(call);
   const qrzOp = bareCall ? qrzData.get(bareCall) : null;
   const opName = (qrzOp && (cleanQrzName(qrzOp.nickname) || cleanQrzName(qrzOp.fname))) || '';
   // {state} — state from QRZ
@@ -26178,7 +26178,7 @@ async function activatorLogContact() {
     // name (Casey 2026-06-16: "ADIF NAME column blank"). Read the cache
     // first, then fall back to an awaited lookup so the name is reliably
     // resolved before we build the QSO record, and seed the cache for reuse.
-    const bareCall = callsign.split('/')[0].toUpperCase();
+    const bareCall = JtcatParser.baseCall(callsign).toUpperCase();
     let qrzInfo = qrzData.get(bareCall);
     if (!qrzInfo) {
       try { qrzInfo = await window.api.qrzLookup(callsign); } catch {}

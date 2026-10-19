@@ -1926,7 +1926,7 @@
       }
 
       case 'qrz-result':
-        if (msg.callsign && msg.callsign.toUpperCase() === tunedCallsign.toUpperCase().split('/')[0]) {
+        if (msg.callsign && msg.callsign.toUpperCase() === JtcatParser.baseCall(tunedCallsign)) {
           // Prefer nickname over fname (matches desktop QRZ display logic)
           tunedOpName = msg.nickname || msg.fname || '';
           tunedState = msg.state || '';
@@ -3229,7 +3229,7 @@
     const callTarget = e.target.closest('.spot-call');
     if (callTarget) {
       const callCard = callTarget.closest('.spot-card');
-      const base = String((callCard && callCard.dataset.call) || '').toUpperCase().split('/').filter(Boolean).sort(function (a, b) { return b.length - a.length; })[0] || '';
+      const base = JtcatParser.baseCall((callCard && callCard.dataset.call) || '');
       if (base) window.open('https://www.qrz.com/db/' + encodeURIComponent(base), '_blank', 'noopener');
       return;
     }
@@ -3283,7 +3283,7 @@
     // activation's session contacts.
     tunedDupe = findEchoSessionDupe(callsign, freqKhz, mode);
     if (callsign && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: callsign.toUpperCase().split('/')[0] }));
+      ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: JtcatParser.baseCall(callsign) }));
     }
     spotList.querySelectorAll('.spot-card.tuned').forEach(c => c.classList.remove('tuned'));
     card.classList.add('tuned');

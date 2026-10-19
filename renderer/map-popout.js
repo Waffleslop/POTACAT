@@ -457,7 +457,7 @@ function bindPopupClickHandlers(mapInstance) {
     container.querySelectorAll('.popup-qrz').forEach((link) => {
       link.addEventListener('click', (ev) => {
         ev.preventDefault();
-        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(link.dataset.call.split('/')[0])}`);
+        window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(JtcatParser.baseCall(link.dataset.call))}`);
       });
     });
     // Event-site links in the event pin popups (main.js gates the URL).

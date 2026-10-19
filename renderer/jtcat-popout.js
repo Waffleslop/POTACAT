@@ -3202,7 +3202,7 @@ function _applyPopoutTheme(payload) {
       a.addEventListener('click', function(ev) {
         ev.preventDefault();
         var c = a.dataset.call;
-        if (c && window.api.openExternal) window.api.openExternal('https://www.qrz.com/db/' + encodeURIComponent(c));
+        if (c && window.api.openExternal) window.api.openExternal('https://www.qrz.com/db/' + encodeURIComponent(JtcatParser.baseCall(c)));
       });
     });
   }

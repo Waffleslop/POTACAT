@@ -52,6 +52,26 @@
     return c;
   }
 
+  // The station's own callsign out of a compound one — what QRZ indexes and
+  // what a lookup or a QRZ link must use (N0KAH 2026-10-14: "M/NT6B" opened
+  // qrz.com/db/M, because every caller took the text before the first "/").
+  // A segment counts as a callsign when it has a digit AND ends in a letter
+  // (K1ABC, VP2E); a pure prefix ends in its digit (KH6, VE3, DL) or has no
+  // digit (M, F), and a suffix is short (P, QRP, 8, MM). Longest callsign
+  // segment wins, so a prefix that also looks like a call (VP2E/K1ABC) still
+  // yields K1ABC; with none, the old normalizeCall rule; then the first piece.
+  //   M/NT6B -> NT6B   NT6B/P -> NT6B   KH6/K1A -> K1A   DL/K3SBP/P -> K3SBP
+  function baseCall(call) {
+    var c = String(call || '').toUpperCase().replace(/[<>]/g, '').trim();
+    if (c.indexOf('/') < 0) return c;
+    var segs = c.split('/').filter(Boolean);
+    var best = '';
+    for (var i = 0; i < segs.length; i++) {
+      if (/[0-9]/.test(segs[i]) && /[A-Z]$/.test(segs[i]) && segs[i].length > best.length) best = segs[i];
+    }
+    return best || normalizeCall(c);
+  }
+
   // Is this decode addressed to (or from) my call? Compares every token as a
   // base call, so a compound call matches in all the forms a decode carries:
   // "<K9CYT/8> W1ABC -10" (report legs hash a nonstandard call), "K9CYT/8"
@@ -281,6 +301,7 @@
   return {
     looksLikeCallsign: looksLikeCallsign,
     normalizeCall: normalizeCall,
+    baseCall: baseCall,
     stripHashBrackets: stripHashBrackets,
     isAddressedTo: isAddressedTo,
     isStandardCall: isStandardCall,

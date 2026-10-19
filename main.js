@@ -1984,7 +1984,7 @@ function expandRemoteCwText(text) {
   const tuned = _lastVfoTunedSpot && Array.isArray(_lastVfoTunedSpot.ops) && _lastVfoTunedSpot.ops[0];
   const call = typedCalls.current() || (tuned && tuned.callsign) || '';
   let info = null;
-  try { info = call && qrz && qrz._cache ? qrz._cache.get(call.toUpperCase().split('/')[0]) : null; } catch {}
+  try { info = call && qrz && qrz._cache ? qrz._cache.get(JtcatParser.baseCall(call)) : null; } catch {}
   const r = CwRemoteExpand.expandRemoteCw(text, {
     call,
     opFirstname: info ? (info.nickname || info.fname || '') : '',
@@ -8717,7 +8717,7 @@ async function saveQsoRecord(qsoData, opts) {
     let opName = '';
     if (qrz.configured && settings.enableQrz && qsoData.callsign) {
       try {
-        const qrzData = await qrz.lookup(qsoData.callsign.split('/')[0]);
+        const qrzData = await qrz.lookup(JtcatParser.baseCall(qsoData.callsign));
         if (qrzData) opName = qrzData.nickname || qrzData.fname || '';
       } catch { /* QRZ lookup failed — leave blank */ }
     }
@@ -18452,7 +18452,7 @@ function connectRemote() {
       // fields while desktop-logged ones were fully populated.
       let qrzInfo = null;
       if (qrz.configured && settings.enableQrz) {
-        try { qrzInfo = await qrz.lookup(data.callsign.split('/')[0]); }
+        try { qrzInfo = await qrz.lookup(JtcatParser.baseCall(data.callsign)); }
         catch { /* QRZ failed — leave qrzInfo null and emit empty fields */ }
       }
       let parkLocState = '', parkLocGrid = '';
@@ -34183,7 +34183,7 @@ app.whenReady().then(() => {
       // Reuse the existing QRZ lookup pipeline. Strip /SUFFIX so the lookup
       // hits the base callsign (QRZ doesn't index portable variants).
       if (qrz.configured && settings.enableQrz) {
-        qrzInfo = await qrz.lookup(trimmed.split('/')[0]);
+        qrzInfo = await qrz.lookup(JtcatParser.baseCall(trimmed));
       }
     } catch {}
     const all = lookupPastQsos(trimmed);
