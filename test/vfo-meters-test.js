@@ -90,5 +90,18 @@ test('VFO window: rows follow the list; with none the meter block is gone', () =
   assert.ok(/function applyWidgets\(\) \{[\s\S]{0,400}applyMeterRows\(\);/.test(vfo), 'the widget toggle cannot bring back empty rows');
 });
 
+// K3SBP 2026-10-18 (potacat-app txpower-echo-after-suppression): a phone-set TX
+// power or RF gain never echoed back on a Flex over LAN — the radio's readback
+// landed inside the 500 ms echo-suppress window and nothing broadcast after it.
+test('TX power and RF gain set from ECHOCAT are confirmed once the echo window closes', () => {
+  assert.ok(/let _rfGainEchoTimer = null;\s*let _txPowerEchoTimer = null;/.test(main), 'one timer per level');
+  assert.ok(/_txPowerSuppressBroadcast = Date\.now\(\) \+ 500;\s*if \(_txPowerEchoTimer\) clearTimeout\(_txPowerEchoTimer\);\s*_txPowerEchoTimer = setTimeout\(\(\) => \{ _txPowerEchoTimer = null; broadcastRemoteRadioStatus\(\); \}, 550\);/.test(main),
+    'set-txpower re-broadcasts the status after the 500 ms window');
+  assert.ok(/_rfGainSuppressBroadcast = Date\.now\(\) \+ 500;[^\n]*\n\s*if \(_rfGainEchoTimer\) clearTimeout\(_rfGainEchoTimer\);\s*_rfGainEchoTimer = setTimeout\(\(\) => \{ _rfGainEchoTimer = null; broadcastRemoteRadioStatus\(\); \}, 550\);/.test(main),
+    'set-rfgain does the same');
+  // The window the timer outlives: the status builder still blanks the field inside it.
+  assert.ok(/now < _txPowerSuppressBroadcast\) \? undefined : _currentTxPower/.test(main), 'suppression inside the window is unchanged');
+});
+
 console.log(`\nVFO meters: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

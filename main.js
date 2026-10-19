@@ -1999,6 +1999,15 @@ let _currentTxPower = 0; // 0 = unknown until radio reports actual power
 let _vfoLocked = false;  // VFO lock — blocks tune requests from spots/table/map
 let _rfGainSuppressBroadcast = 0;  // timestamp: suppress ECHOCAT echo-back until this time
 let _txPowerSuppressBroadcast = 0;
+// One more status once each echo window closes. A Flex on the LAN answers
+// `transmit rfpower=` well inside the 500 ms window, so the status its
+// readback triggered went out with the field undefined, and a radio sitting
+// still triggers no further broadcast — the phone's slider snapped back to the
+// stale level while the radio was set correctly (K3SBP 2026-10-18, potacat-app
+// docs/desktop-handoffs/txpower-echo-after-suppression.md). The window itself
+// stays: it is what keeps a dragging slider from being fought by its own echo.
+let _rfGainEchoTimer = null;
+let _txPowerEchoTimer = null;
 // Phase-1 expanded rig modifiers (2026-05-25 — Flex 8600M underbuild fix).
 // All boolean toggles default to false until the user (or the rig) tells us
 // otherwise; AGC stays unset so the dropdown shows "—" rather than guessing.
@@ -17755,6 +17764,8 @@ function connectRemote() {
   remoteServer.on('set-rfgain', ({ value }) => {
     _currentRfGain = value;
     _rfGainSuppressBroadcast = Date.now() + 500; // suppress echo-back for 500ms
+    if (_rfGainEchoTimer) clearTimeout(_rfGainEchoTimer);
+    _rfGainEchoTimer = setTimeout(() => { _rfGainEchoTimer = null; broadcastRemoteRadioStatus(); }, 550);
     // Debounce the actual radio command (50ms)
     if (_rfGainTimer) clearTimeout(_rfGainTimer);
     _rfGainTimer = setTimeout(() => {
@@ -17783,6 +17794,8 @@ function connectRemote() {
     // The operator has taken the level over — a WSPR restore must not undo it.
     if (!wsprBeaconArmed()) wsprForgetPreCapPower();
     _txPowerSuppressBroadcast = Date.now() + 500;
+    if (_txPowerEchoTimer) clearTimeout(_txPowerEchoTimer);
+    _txPowerEchoTimer = setTimeout(() => { _txPowerEchoTimer = null; broadcastRemoteRadioStatus(); }, 550);
     if (_txPowerTimer) clearTimeout(_txPowerTimer);
     _txPowerTimer = setTimeout(() => {
       _txPowerTimer = null;
