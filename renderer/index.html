@@ -3447,7 +3447,9 @@
            OS unless the operator presses Turn on. -->
       <div id="cloud-tunnel-startup" class="hidden" style="margin-top:8px;padding:8px 10px;border-radius:6px;background:var(--bg-tertiary);border-left:3px solid var(--accent-blue);font-size:12px;line-height:1.5;color:var(--text-secondary);">
         <div><strong style="color:var(--text-primary);">After a restart, nothing reconnects until POTACAT is opened.</strong> Start POTACAT when this computer starts, so the tunnel comes back on its own.</div>
-        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;">
+        <!-- .checkbox-label: the settings dialog's generic input rule gives a
+             bare checkbox a third of the row (Casey 2026-10-20, "looks silly"). -->
+        <label class="checkbox-label" style="margin-top:6px;margin-bottom:0;cursor:pointer;">
           <input type="checkbox" id="cloud-tunnel-startup-launcher" checked>
           <span>Also keep the Remote Launcher running, so your mobile device can restart POTACAT if it closes (adds a second login item, port 7301).</span>
         </label>
@@ -3525,6 +3527,16 @@
           <tr style="color:var(--text-secondary);">
             <th style="text-align:left;padding:4px 0;font-weight:600;">Widget</th>
             <th style="text-align:right;padding:4px 0;font-weight:600;"></th>
+          </tr>
+          <!-- The on-air badge first: the one most hams put on QRZ. Not an
+               iframe — an image link served from potacat.com (Worker edge);
+               the builder page makes HTML, BBCode and Markdown versions. -->
+          <tr style="border-top:1px solid var(--border-primary);">
+            <td style="padding:6px 0;">On-air badge <span style="color:var(--text-tertiary);">(last heard, for QRZ and forums)</span></td>
+            <td style="text-align:right;padding:6px 0;white-space:nowrap;">
+              <a href="#" class="cloud-embed-view" data-widget="onair-badge" style="color:var(--accent-blue);margin-right:8px;">Build</a>
+              <a href="#" class="cloud-embed-copy" data-widget="onair-badge" style="color:var(--accent-green);">Copy Embed</a>
+            </td>
           </tr>
           <tr style="border-top:1px solid var(--border-primary);">
             <td style="padding:6px 0;">Latest Activation</td>

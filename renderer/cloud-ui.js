@@ -644,12 +644,20 @@
     } catch { return ''; }
   }
 
+  // The on-air badge is not an iframe: an image link served from potacat.com
+  // (potacat-cloudlog docs/onair-badge-plan.md). "Build" opens the builder,
+  // which also makes BBCode and Markdown; Copy gives the HTML form.
+  const onairBadgeBuilder = 'https://potacat.com/badge/';
+  const onairBadgeEmbed = (cs) =>
+    `<a href="https://potacat.com/onair/${cs}" title="${cs} on the air, tracked by POTACAT"><img src="https://potacat.com/badge/${cs}.svg" alt="${cs} last on air" width="260" height="64"></a>`;
+
   document.querySelectorAll('.cloud-embed-view').forEach(link => {
     link.addEventListener('click', async (e) => {
       e.preventDefault();
+      const widget = link.dataset.widget;
+      if (widget === 'onair-badge') { window.api.openExternal(onairBadgeBuilder); return; }
       const cs = await getCallsignForEmbed();
       if (!cs) return alert('No callsign found. Sign in to POTACAT Cloud first.');
-      const widget = link.dataset.widget;
       const extra = link.dataset.extra || '';
       const url = `${embedBaseUrl}/${widget}/${cs}${extra}`;
       window.api.openExternal(url);
@@ -664,7 +672,9 @@
       const widget = link.dataset.widget;
       const extra = link.dataset.extra || '';
       const height = link.dataset.height || '150';
-      const embedCode = `<iframe src="${embedBaseUrl}/${widget}/${cs}${extra}" style="border:none;width:400px;height:${height}px;" loading="lazy"></iframe>`;
+      const embedCode = widget === 'onair-badge'
+        ? onairBadgeEmbed(cs)
+        : `<iframe src="${embedBaseUrl}/${widget}/${cs}${extra}" style="border:none;width:400px;height:${height}px;" loading="lazy"></iframe>`;
 
       navigator.clipboard.writeText(embedCode).then(() => {
         if (embedCopiedMsg) {

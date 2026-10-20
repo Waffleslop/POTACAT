@@ -6749,6 +6749,17 @@ a.settings-echocat-badge-link:hover {
 }
 .cat-popover-wsjtx-warning.hidden { display: none; }
 
+/* Settings > Cloud > POTACAT Tunnel: the live <callsign>.potacat.com link had
+   no colour of its own and fell back to the browser's default link blue,
+   which is nearly invisible on charcoal (Casey 2026-10-20). */
+#cloud-tunnel-host a {
+  color: var(--accent-blue);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#cloud-tunnel-host a:hover { color: var(--accent-green); }
+
 /* CW Popover — volume/WPM dropdown from status bar */
 .cw-popover {
   position: absolute;
