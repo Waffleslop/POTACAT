@@ -3445,8 +3445,14 @@
     panel.style.left = Math.max(margin, left) + 'px';
     panel.style.top = (rect.bottom + 4) + 'px';
     // A fixed panel does not follow its button, so scrolling the bar (or the
-    // page) closes it rather than leaving it pointing at nothing.
-    const close = () => { closeAllDropdowns(); detach(); };
+    // page) closes it rather than leaving it pointing at nothing. Scrolling
+    // INSIDE the panel is the one scroll that must not close it: the capture
+    // listener below sees that too, and a menu taller than a phone screen
+    // vanished the moment a finger moved on it (LZ3AW 2026-10-20).
+    const close = (e) => {
+      if (e && e.target && e.target !== window && e.target !== document && panel.contains(e.target)) return;
+      closeAllDropdowns(); detach();
+    };
     const detach = () => {
       if (_filterScroll) _filterScroll.removeEventListener('scroll', close);
       window.removeEventListener('scroll', close, true);
