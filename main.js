@@ -4001,6 +4001,8 @@ function rigSetupNotesFor(q) {
     cwKeyLine: q.cwKeyLine || 'auto',
     platform: process.platform,
     done: q.done,
+    // The dialout note names THIS login, not "$USER" (Douglas 2026-10-20).
+    linuxUser: (() => { try { return require('os').userInfo().username; } catch { return ''; } })(),
   });
 }
 

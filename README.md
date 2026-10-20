@@ -153,6 +153,9 @@ sudo dnf install ./potacat-<ver>.x86_64.rpm       # or .aarch64.rpm on a Pi
 sudo usermod -aG dialout $USER
 ```
 
+Type it exactly as shown: `$USER` is a shell variable the terminal fills in with your own
+login name (or type your login name in its place — `whoami` prints it).
+
 **Sandbox.** On hardened or very new distros, Chromium's sandbox needs unprivileged user
 namespaces. POTACAT detects that and falls back on its own. If an AppImage still refuses to
 start, run it with `--no-sandbox`.

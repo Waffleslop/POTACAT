@@ -63,6 +63,9 @@ sudo usermod -aG dialout "$USER"
 # log out and back in (or reboot) for the group to take effect
 ```
 
+`"$USER"` is not something to replace: the shell fills it in with your login name. If in
+doubt, `whoami` prints the name and you can type that instead.
+
 ### C. Keep ModemManager off the port
 
 ModemManager probes new serial devices at plug-in — it can assert RTS/DTR (keying

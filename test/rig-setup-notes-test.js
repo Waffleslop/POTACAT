@@ -152,5 +152,20 @@ test('main keys the CW Key Port with the same resolver the notes quote', () => {
   assert.ok(/ipcMain\.handle\('get-rig-setup-notes'/.test(MAIN), 'IPC handler missing');
 });
 
+console.log('\n=== linux-dialout names the login, never a word to replace ===');
+test('the dialout command carries the real username when known, the shell\'s $USER otherwise', () => {
+  const { resolveSetupNotes } = require('../lib/rig-setup-notes');
+  const pick = (notes) => notes.find((n) => n.id === 'linux-dialout');
+  const withUser = pick(resolveSetupNotes({ radioType: 'serialcat', platform: 'linux', linuxUser: 'douglas' }));
+  assert.ok(withUser, 'note applies to a serial rig on linux');
+  assert.ok(withUser.steps[0].includes('sudo usermod -aG dialout douglas'), withUser.steps[0]);
+  assert.ok(/type exactly/.test(withUser.steps[0]), 'says to type it as shown');
+  const without = pick(resolveSetupNotes({ radioType: 'serialcat', platform: 'linux' }));
+  assert.ok(without.steps[0].includes('sudo usermod -aG dialout "$USER"'), without.steps[0]);
+  assert.ok(!pick(resolveSetupNotes({ radioType: 'serialcat', platform: 'win32' })), 'not on Windows');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/linuxUser: \(\(\) => \{ try \{ return require\('os'\)\.userInfo\(\)\.username; \} catch \{ return ''; \} \}\)\(\),/.test(main), 'main passes the login name');
+});
+
 console.log(`\nRig setup notes: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
