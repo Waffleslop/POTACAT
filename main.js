@@ -8820,8 +8820,18 @@ async function saveQsoRecord(qsoData, opts) {
   // cached host fingerprint BEFORE calling saveQsoRecord, so this
   // guard preserves that value via the !qsoData.stationCallsign
   // check.
+  // An activation record (it carries the activation's MY_SIG_INFO) takes the
+  // activation's on-air callsign — G8LIY/P, GM8LIY — as STATION_CALLSIGN;
+  // OPERATOR stays the Station callsign. Hunter QSOs and a blank on-air
+  // callsign keep the Station callsign (G8LIY, 2026-10-20: "STATION_CALLSIGN
+  // = the callsign used over the air, OPERATOR = the logging person").
   if (ops.myCallsign && !qsoData.stationCallsign) {
-    qsoData.stationCallsign = ops.myCallsign.toUpperCase();
+    const onAir = String(ops.activatorOnAirCallsign || '').trim().toUpperCase();
+    qsoData.stationCallsign = (onAir && qsoData.mySigInfo) ? onAir : ops.myCallsign.toUpperCase();
+  }
+  // OWNER_CALLSIGN only when the operator set one (Settings > Station).
+  if (ops.ownerCallsign && !qsoData.ownerCallsign) {
+    qsoData.ownerCallsign = String(ops.ownerCallsign).trim().toUpperCase();
   }
   // Logging for another operator: the record is theirs, whatever the form
   // pre-filled from the active operator.
@@ -23383,6 +23393,7 @@ function rawQsoToQsoData(raw) {
     mySotaRef: raw.MY_SOTA_REF || '',
     myGridsquare: raw.MY_GRIDSQUARE || '',
     stationCallsign: raw.STATION_CALLSIGN || '',
+    ownerCallsign: raw.OWNER_CALLSIGN || '',
     // Stable per-QSO identity — the WRL (N1MM UDP) sender emits it as <ID> so
     // the listener can dedup by contact, not by timestamp fingerprint. A
     // resend of the SAME QSO keeps the same ID; distinct QSOs never collide.

@@ -1008,6 +1008,7 @@ const setPskrUpload = document.getElementById('set-pskr-upload');
 const pskrUploadConfig = document.getElementById('pskr-upload-config');
 const setPskrAntenna = document.getElementById('set-pskr-antenna');
 const setMyCallsign = document.getElementById('set-my-callsign');
+const setOwnerCallsign = document.getElementById('set-owner-callsign');
 const setEnableClusterTerminal = document.getElementById('set-enable-cluster-terminal');
 const clusterTerminalBtn = document.getElementById('cluster-terminal-btn');
 const clusterConfig = document.getElementById('cluster-config');
@@ -15843,6 +15844,7 @@ async function openSettingsDialog(tab) {
   }
   setEnableRbn.checked = s.enableRbn === true;
   setMyCallsign.value = s.myCallsign || '';
+  if (setOwnerCallsign) setOwnerCallsign.value = s.ownerCallsign || '';
   // Load cluster nodes (migrate legacy if needed)
   if (s.clusterNodes && s.clusterNodes.length > 0) {
     currentClusterNodes = JSON.parse(JSON.stringify(s.clusterNodes));
@@ -16771,6 +16773,7 @@ settingsSave.addEventListener('click', async () => {
     wsjtxHighlight: wsjtxHighlightEnabled,
     wsjtxAutoLog: wsjtxAutoLogEnabled,
     myCallsign: myCallsign,
+    ownerCallsign: setOwnerCallsign ? setOwnerCallsign.value.trim().toUpperCase() : '',
     clusterNodes: clusterNodes,
     clusterSpotterContinents,
     clusterSpotterCqZones: clusterSpotterCqZonesStr,
@@ -25795,6 +25798,20 @@ if (activatorParkRefInput) {
   if (gridInput) {
     gridInput.addEventListener('input', () => {
       activatorParkGrid = gridInput.value.trim().toUpperCase();
+    });
+  }
+  // On-air callsign for this activation (STATION_CALLSIGN on its QSOs).
+  // Remembered across restarts like the park refs; blank = Station callsign.
+  const onAirInput = document.getElementById('activator-oncall');
+  if (onAirInput) {
+    window.api.getSettings().then((s) => {
+      onAirInput.value = (s && s.activatorOnAirCallsign) || '';
+      if (s && s.myCallsign) onAirInput.placeholder = String(s.myCallsign).toUpperCase();
+    }).catch(() => {});
+    onAirInput.addEventListener('change', () => {
+      const v = onAirInput.value.trim().toUpperCase().replace(/[^A-Z0-9/]/g, '');
+      onAirInput.value = v;
+      window.api.saveSettings({ activatorOnAirCallsign: v });
     });
   }
 }

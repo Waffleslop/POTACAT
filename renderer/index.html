@@ -492,6 +492,10 @@
       </div>
       <span id="activator-park-name" class="activator-park-name"></span>
       <input type="text" id="activator-grid" class="activator-grid" placeholder="Grid" maxlength="6" spellcheck="false" autocomplete="off" title="Park grid square (editable)">
+      <!-- The callsign used over the air for this activation (G8LIY/P, GM8LIY):
+           logged as STATION_CALLSIGN on the activation's QSOs; OPERATOR stays
+           the Station callsign. Blank = the Station callsign (G8LIY 2026-10-20). -->
+      <input type="text" id="activator-oncall" class="activator-grid" style="width:92px;" placeholder="On-air call" maxlength="12" spellcheck="false" autocomplete="off" title="Callsign used on the air for this activation (e.g. G8LIY/P) — logged as STATION_CALLSIGN; OPERATOR stays your Station callsign. Blank = Station callsign">
       <span id="activator-park-extra" class="activator-park-extra hidden" title="Additional parks"></span>
       <div id="activator-crossref-wrap" class="activator-crossref-wrap hidden">
         <button id="activator-crossref-toggle" class="activator-crossref-toggle" title="Cross-program references (SOTA, WWFF, LLOTA)">X-Ref</button>
@@ -1468,7 +1472,9 @@
       <legend class="collapsible-legend" data-target="station-body">Station <span class="collapse-arrow">&#9662;</span></legend>
       <div id="station-body">
       <label>My Callsign: <input type="text" id="set-my-callsign" maxlength="10" placeholder="WB6ACU"></label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Required for DX Cluster, Reverse Beacon Network, and QSO Logging</span>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Required for DX Cluster, Reverse Beacon Network, and QSO Logging. Logged as OPERATOR and, unless an activation sets an on-air callsign, as STATION_CALLSIGN.</span>
+      <label>Owner callsign (optional): <input type="text" id="set-owner-callsign" maxlength="12" placeholder="same as My Callsign"></label>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">ADIF OWNER_CALLSIGN — the station licensee, when that is not you. Left blank, nothing is written.</span>
       <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-qrz"> QRZ.com Callsign Lookup</label>
       <div id="qrz-config" class="radio-sub hidden">
