@@ -408,6 +408,35 @@ const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
 const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir, sessionLogRotationMoves } = require('./lib/bug-report-log');
 const { healActiveRig } = require('./lib/active-rig');
+const { decideAtuKeepOn, ATU_KEEP_ON_POLL_MS, ATU_KEEP_ON_FIRST_POLL_MS } = require('./lib/atu-keep-on');
+// Per-rig "Keep the tuner on after a tune cycle" (lib/atu-keep-on.js): after
+// the tune command, ask `AC;` until the radio reports the tuner off, then
+// send the enable command. One watcher at a time; a new tune replaces it.
+let _atuKeepOnTimer = null;
+function armAtuKeepOn(rig) {
+  if (_atuKeepOnTimer) { clearTimeout(_atuKeepOnTimer); _atuKeepOnTimer = null; }
+  if (!rig || !rig.atuKeepOn) return;
+  const rigCat = cat;
+  const t0 = Date.now();
+  const step = async () => {
+    _atuKeepOnTimer = null;
+    if (cat !== rigCat || !cat || !cat.connected) return;
+    let reply = null;
+    try { reply = await cat.queryRaw('AC;', { timeoutMs: 800 }); } catch { reply = null; }
+    const d = decideAtuKeepOn({ reply, elapsedMs: Date.now() - t0 });
+    if (d.action === 'send-on') {
+      sendCatLog('[ATU] Tune cycle finished and the radio switched the tuner off — sending AC001; to keep it on (rig setting "Keep the tuner on after a tune cycle")');
+      try { if (typeof cat.setAtuEnabled === 'function') cat.setAtuEnabled(true); } catch {}
+      _currentAtuState = true;
+      broadcastRigState();
+      return;
+    }
+    if (d.action === 'done') { sendCatLog(`[ATU] Tune cycle finished — ${d.reason}`); return; }
+    if (d.action === 'give-up') { sendCatLog(`[ATU] Keep-tuner-on gave up: ${d.reason}`); return; }
+    _atuKeepOnTimer = setTimeout(step, ATU_KEEP_ON_POLL_MS);
+  };
+  _atuKeepOnTimer = setTimeout(step, ATU_KEEP_ON_FIRST_POLL_MS);
+}
 // activeRigId must name the rig catTarget connects to (lib/active-rig.js,
 // SP5GB 1.11.7: "None" in the editor while COM15 kept connecting). Run at
 // load and before every connect; adopt-only, logged once per repair.
@@ -32538,6 +32567,7 @@ app.whenReady().then(() => {
         } else if (cat && cat.connected) {
           noteAtuTuneStarted();
           cat.startTune();
+          armAtuKeepOn(rig);
         }
         _currentAtuState = true;
         broadcastRigState();

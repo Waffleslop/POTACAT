@@ -2904,6 +2904,8 @@ async function openRigEditor(mode, rigId) {
       if (extAtuEl) extAtuEl.value = rig.externalAtu || '';
       if (extAtuWattsEl) extAtuWattsEl.value = rig.externalAtuWatts || 10;
       if (extAtuSecsEl) extAtuSecsEl.value = rig.externalAtuSeconds || 4;
+      const atuKeepOnEl = document.getElementById('set-atu-keep-on');
+      if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
       // Per-rig Flex band→antenna map. Always rebuilt so editing a
       // different rig doesn't show the previous rig's selections.
       buildFlexBandAntennaMap(rig.flexBandAntennaMap || {});
@@ -3036,6 +3038,8 @@ async function saveRigEditor() {
   const rigExternalAtu = extAtuEl ? extAtuEl.value : '';
   const rigExternalAtuWatts = extAtuWattsEl ? Math.max(1, Math.min(25, parseInt(extAtuWattsEl.value, 10) || 10)) : 10;
   const rigExternalAtuSeconds = extAtuSecsEl ? Math.max(1, Math.min(15, parseFloat(extAtuSecsEl.value) || 4)) : 4;
+  const atuKeepOnEl = document.getElementById('set-atu-keep-on');
+  const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
 
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex
   // rigs — empty map serializes as `{}`, no runtime impact).
@@ -3059,6 +3063,7 @@ async function saveRigEditor() {
       rig.externalAtu = rigExternalAtu;
       rig.externalAtuWatts = rigExternalAtuWatts;
       rig.externalAtuSeconds = rigExternalAtuSeconds;
+      rig.atuKeepOn = rigAtuKeepOn;
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -3081,6 +3086,7 @@ async function saveRigEditor() {
       externalAtu: rigExternalAtu,
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,
+      atuKeepOn: rigAtuKeepOn,
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
