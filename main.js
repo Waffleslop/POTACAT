@@ -406,7 +406,10 @@ const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message cl
 const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
-const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir } = require('./lib/bug-report-log');
+const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir, sessionLogRotationMoves } = require('./lib/bug-report-log');
+// Lines kept before the "recording started" marker: a report is usually
+// filed AFTER the thing happened (lib/bug-report-log.js, KF0U 2026-10-20).
+const BUG_REPORT_BEFORE_MARKER = 150;
 const { RemoteClient, tsWssUrl } = require('./lib/remote-client');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
 // and every other call is a stable no-op — safe to require unconditionally.
@@ -2854,7 +2857,15 @@ setInterval(() => {
   } catch { /* status is best-effort */ }
 }, 2000).unref();
 
+// A PTT release that found the CAT link down (handleRemotePtt) — sent on the
+// next link-up, whichever way the link comes back.
+let _pttReleasePending = false;
 function sendCatStatus(s) {
+  if (s && s.connected && _pttReleasePending && cat && cat.connected) {
+    _pttReleasePending = false;
+    sendCatLog('[PTT] Radio link is back — sending the RX that was requested while it was down');
+    try { gatedSetTransmit(false); } catch {}
+  }
   // The radio IS controllable via the FlexLib API even if the port-5002 CAT
   // shim (`cat`) never connected — true for self-host (Flex Direct, POTACAT
   // is the GUI client) AND for bound mode (AetherSDR / SmartSDR-Win is the
@@ -3488,11 +3499,7 @@ function appendSessionLog(line) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
       _sessionLogPath = path.join(dir, 'session.log');
       try {
-        if (fs.existsSync(_sessionLogPath)) {
-          const old = _sessionLogPath + '.old';
-          try { fs.unlinkSync(old); } catch {}
-          fs.renameSync(_sessionLogPath, old);
-        }
+        if (fs.existsSync(_sessionLogPath)) rotateSessionLog();
       } catch {}
       const header = `POTACAT v${PACKAGE_VERSION} session log -- ${new Date().toISOString()} platform=${process.platform}\n`;
       fs.writeFileSync(_sessionLogPath, header);
@@ -3502,15 +3509,25 @@ function appendSessionLog(line) {
     fs.appendFileSync(_sessionLogPath, out);
     _sessionLogBytes += out.length;
     if (_sessionLogBytes > SESSION_LOG_MAX_BYTES) {
-      const old = _sessionLogPath + '.old';
-      try { fs.unlinkSync(old); } catch {}
-      fs.renameSync(_sessionLogPath, old);
+      rotateSessionLog();
       _sessionLogRotatedMidRun = true;
       fs.writeFileSync(_sessionLogPath, '(rotated — earlier lines of this run are in session.log.old)\n');
       _sessionLogBytes = 0;
     }
   } catch {
     _sessionLogFailed = true; // disk/permissions trouble — never loop on it
+  }
+}
+// session.log → .old → .old2 → .old3 (SESSION_LOG_GENERATIONS runs kept). The
+// previous run is always `.old`, which is what the crash report reads; the
+// older ones are for the operator who restarted twice before anyone asked
+// for the file (lib/bug-report-log.js sessionLogRotationMoves).
+const SESSION_LOG_GENERATIONS = 3;
+function rotateSessionLog() {
+  const plan = sessionLogRotationMoves(_sessionLogPath, SESSION_LOG_GENERATIONS);
+  try { fs.unlinkSync(plan.unlink); } catch {}
+  for (const m of plan.moves) {
+    try { if (fs.existsSync(m.from)) fs.renameSync(m.from, m.to); } catch {}
   }
 }
 // Read back this run's full session log, oldest first. Spans the mid-run
@@ -20189,8 +20206,19 @@ function handleRemotePtt(state, opts = {}) {
     } else if (state) {
       console.warn('[PTT] Cannot key TX — CAT not connected');
       sendCatLog('PTT FAILED: CAT not connected (TX audio may play but radio will not transmit)');
+    } else {
+      // A release while the link is down used to be dropped here in silence.
+      // A transport reconnect sends its own PTT off, but a link the staleness
+      // watchdog declared DOWN comes back on the next reply with no such
+      // safety — so the radio stayed keyed by a TX1; whose TX0; never went
+      // out, until something else happened to send one (KF0U's FT-710 at
+      // 0 W for hours, released only by closing the browser or POTACAT,
+      // 2026-10-19/20). Remember it; sendCatStatus sends it on link-up.
+      _pttReleasePending = true;
+      sendCatLog('[PTT] RX requested while the radio link is down — it will be sent the moment the link is back');
     }
   }
+  if (state) _pttReleasePending = false;
 
   if (!state && _ssbModeBeforePtt) {
     // Restore original voice mode after PTT release (mode-only, no retune).
@@ -32006,7 +32034,7 @@ app.whenReady().then(() => {
           prevCrash = { session: prevSession, startup: prevStartup };
         }
       }
-      const sel = selectReportLines(sessionLines, { marker: BUG_REPORT_MARKER });
+      const sel = selectReportLines(sessionLines, { marker: BUG_REPORT_MARKER, beforeMarker: BUG_REPORT_BEFORE_MARKER });
       const home = (() => { try { return require('os').homedir(); } catch { return ''; } })();
       const clean = (lines) => maskHomeDir(redactLogLines(lines), home);
       return {

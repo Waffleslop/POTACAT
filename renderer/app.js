@@ -20147,7 +20147,7 @@ catLogClearBtn.addEventListener('click', () => {
         if (pkg.startup && pkg.startup.length) {
           logSections.push('### Startup log', '```', pkg.startup.join('\n'), '```', '');
         }
-        logSections.push('### Log (from launch — repro follows the "recording started" marker)', '```', body.join('\n'), '```');
+        logSections.push('### Log (from launch — the minutes before and after the "recording started" marker)', '```', body.join('\n'), '```');
       }
     } catch {}
     if (!logSections) {
