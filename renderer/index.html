@@ -3494,6 +3494,28 @@
       </div>
     </fieldset>
 
+    <!-- API keys — shown only when signed in (cloud-ui.js toggles `hidden`
+         with the account view, like the Sign Out fieldset). The docs on
+         api.potacat.com say "Settings → Cloud → API keys": keep this label. -->
+    <fieldset id="cloud-api-keys-fieldset" class="source-toggles hidden" data-settings-tab="cloud">
+      <legend>API keys</legend>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Let another program log to your POTACAT Cloud logbook. A key writes only to this account's log; every QSO it logs shows up here and on ECHOCAT at the next sync.</p>
+      <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">Reference and examples: <a href="https://api.potacat.com/developer" data-external style="color:var(--accent-blue);">api.potacat.com/developer</a>. A key is shown once, when it is created.</p>
+      <div id="cloud-api-keys-list" style="font-size:12px;"></div>
+      <div id="cloud-api-keys-new" class="hidden" style="margin-top:8px;padding:8px;border:1px solid var(--accent-green);border-radius:4px;">
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">New key — copy it now; POTACAT Cloud will not show it again.</div>
+        <code id="cloud-api-keys-token" style="display:block;word-break:break-all;font-size:12px;padding:4px;background:var(--bg-tertiary);border-radius:2px;"></code>
+        <button type="button" id="cloud-api-keys-copy" class="btn" style="margin-top:6px;">Copy key</button>
+        <span id="cloud-api-keys-copied" class="hidden" style="font-size:11px;color:var(--accent-green);margin-left:8px;">Copied</span>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <input type="text" id="cloud-api-keys-name" placeholder="Name, e.g. N1MM shack PC" maxlength="60" style="flex:1;min-width:160px;">
+        <label class="checkbox-label" style="margin:0;"><input type="checkbox" id="cloud-api-keys-readonly"> Read only</label>
+        <button type="button" id="cloud-api-keys-create" class="btn">Create key</button>
+      </div>
+      <div id="cloud-api-keys-status" class="help-text" style="margin-top:4px;"></div>
+    </fieldset>
+
     <fieldset class="source-toggles" data-settings-tab="cloud">
       <legend>Embeddable Widgets</legend>
       <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Show your POTA activity on your QRZ page, website, or blog.</p>

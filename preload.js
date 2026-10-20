@@ -203,6 +203,9 @@ contextBridge.exposeInMainWorld('api', {
   passesList: () => ipcRenderer.invoke('passes-list'),
   passesRevoke: (code) => ipcRenderer.invoke('passes-revoke', code),
   passesQrPng: (text) => ipcRenderer.invoke('passes-qr-png', text),
+  apiKeysList: () => ipcRenderer.invoke('api-keys-list'),
+  apiKeysCreate: (body) => ipcRenderer.invoke('api-keys-create', body),
+  apiKeysRevoke: (id) => ipcRenderer.invoke('api-keys-revoke', id),
   cloudForgotPassword: (email) => ipcRenderer.invoke('cloud-forgot-password', email),
   onOpenSettingsPanel: (cb) => {
     const handler = (_e, payload) => cb(payload);

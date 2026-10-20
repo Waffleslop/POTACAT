@@ -94,6 +94,7 @@
     loginSection.classList.remove('hidden');
     accountSection.classList.add('hidden');
     if (signOutFieldset) signOutFieldset.classList.add('hidden');
+    if (apiKeysFieldset) apiKeysFieldset.classList.add('hidden');
     isLoggedIn = false;
     accountCallsign = '';
     closeCallsignEditor();
@@ -117,6 +118,128 @@
     else if (callsignEditorMode === 'missing') closeCallsignEditor();
 
     renderBilling(subscription);
+    if (apiKeysFieldset) { apiKeysFieldset.classList.remove('hidden'); loadApiKeys(); }
+  }
+
+  // ── API keys (Settings > Cloud > API keys) ───────────────────────────
+  // Shapes: potacat-cloudlog CLOUD_TO_DESKTOP_HANDOFF_2026-10-20_PUBLIC_API_REPLY.md §1.
+  const apiKeysFieldset = document.getElementById('cloud-api-keys-fieldset');
+  const apiKeysList = document.getElementById('cloud-api-keys-list');
+  const apiKeysNew = document.getElementById('cloud-api-keys-new');
+  const apiKeysToken = document.getElementById('cloud-api-keys-token');
+  const apiKeysCopy = document.getElementById('cloud-api-keys-copy');
+  const apiKeysCopied = document.getElementById('cloud-api-keys-copied');
+  const apiKeysName = document.getElementById('cloud-api-keys-name');
+  const apiKeysReadonly = document.getElementById('cloud-api-keys-readonly');
+  const apiKeysCreate = document.getElementById('cloud-api-keys-create');
+  const apiKeysStatus = document.getElementById('cloud-api-keys-status');
+  let apiKeysLoading = false;
+
+  function apiKeysSay(msg, color) {
+    if (!apiKeysStatus) return;
+    apiKeysStatus.textContent = msg || '';
+    apiKeysStatus.style.color = color || '';
+  }
+
+  // One sentence per server code; the server's own message otherwise.
+  function apiKeysErrorText(r) {
+    if (!r) return 'No reply from POTACAT Cloud.';
+    if (r.status === 404) return 'The API is not available on POTACAT Cloud yet.';
+    if (r.error === 'callsign_required') return 'Set your callsign first (Account, above).';
+    if (r.error === 'too_many_keys') return 'At most 20 active keys per account — revoke one you no longer use.';
+    if (r.error === 'AUTH_EXPIRED' || r.status === 401) return 'Sign in again to manage API keys.';
+    return r.message || r.error || 'Could not reach POTACAT Cloud.';
+  }
+
+  function fmtWhen(ts) {
+    if (!ts) return 'never';
+    try { return new Date(ts).toLocaleDateString(); } catch { return String(ts); }
+  }
+
+  function renderApiKeys(keys) {
+    if (!apiKeysList) return;
+    apiKeysList.innerHTML = '';
+    if (!keys.length) {
+      apiKeysList.innerHTML = '<div style="color:var(--text-tertiary);">No keys yet.</div>';
+      return;
+    }
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;';
+    table.innerHTML = '<tr style="color:var(--text-secondary);"><th style="text-align:left;padding:4px 0;font-weight:600;">Name</th><th style="text-align:left;padding:4px 0;font-weight:600;">Key</th><th style="text-align:left;padding:4px 0;font-weight:600;">Last used</th><th></th></tr>';
+    for (const k of keys) {
+      const tr = document.createElement('tr');
+      tr.style.borderTop = '1px solid var(--border-primary)';
+      const revoked = !!k.revokedAt;
+      if (revoked) tr.style.color = 'var(--text-tertiary)';
+      const scope = (k.scopes || []).includes('qsos:write') ? '' : ' (read only)';
+      const used = revoked ? 'revoked ' + fmtWhen(k.revokedAt)
+        : (k.lastUsedAt ? fmtWhen(k.lastUsedAt) + (k.lastProgramId ? ' by ' + k.lastProgramId : '') : 'never');
+      const name = document.createElement('td'); name.style.padding = '6px 0'; name.textContent = (k.name || '') + scope;
+      const pre = document.createElement('td'); pre.style.padding = '6px 0'; pre.innerHTML = '<code>' + String(k.prefix || '').replace(/[<>&]/g, '') + '…</code>';
+      const last = document.createElement('td'); last.style.padding = '6px 0'; last.textContent = used;
+      const act = document.createElement('td'); act.style.cssText = 'text-align:right;padding:6px 0;';
+      if (!revoked) {
+        const a = document.createElement('a');
+        a.href = '#'; a.textContent = 'Revoke'; a.style.color = 'var(--accent-red)';
+        a.addEventListener('click', async (e) => {
+          e.preventDefault();
+          if (!confirm(`Revoke "${k.name}"? Programs using it stop logging immediately.`)) return;
+          const r = await window.api.apiKeysRevoke(k.id);
+          if (r && r.error) { apiKeysSay(apiKeysErrorText(r), 'var(--accent-red)'); return; }
+          apiKeysSay(`Revoked "${k.name}".`, 'var(--accent-green)');
+          loadApiKeys();
+        });
+        act.appendChild(a);
+      }
+      tr.appendChild(name); tr.appendChild(pre); tr.appendChild(last); tr.appendChild(act);
+      table.appendChild(tr);
+    }
+    apiKeysList.appendChild(table);
+  }
+
+  async function loadApiKeys() {
+    if (!apiKeysList || apiKeysLoading) return;
+    apiKeysLoading = true;
+    try {
+      const r = await window.api.apiKeysList();
+      if (r && r.error) {
+        apiKeysList.innerHTML = '';
+        apiKeysSay(apiKeysErrorText(r), r.status === 404 ? '' : 'var(--accent-red)');
+        if (apiKeysCreate) apiKeysCreate.disabled = r.status === 404;
+        return;
+      }
+      if (apiKeysCreate) apiKeysCreate.disabled = false;
+      renderApiKeys((r && r.data) || []);
+    } finally { apiKeysLoading = false; }
+  }
+
+  if (apiKeysCreate) {
+    apiKeysCreate.addEventListener('click', async () => {
+      const name = (apiKeysName && apiKeysName.value.trim()) || '';
+      if (!name) { apiKeysSay('Give the key a name — the program that will use it.', 'var(--accent-red)'); return; }
+      const scopes = apiKeysReadonly && apiKeysReadonly.checked ? ['qsos:read'] : ['qsos:read', 'qsos:write'];
+      apiKeysCreate.disabled = true;
+      apiKeysSay('Creating…');
+      const r = await window.api.apiKeysCreate({ name, scopes });
+      apiKeysCreate.disabled = false;
+      if (!r || r.error) { apiKeysSay(apiKeysErrorText(r), 'var(--accent-red)'); return; }
+      const key = r.data || {};
+      if (apiKeysToken) apiKeysToken.textContent = key.token || '';
+      if (apiKeysNew) apiKeysNew.classList.remove('hidden');
+      if (apiKeysCopied) apiKeysCopied.classList.add('hidden');
+      if (apiKeysName) apiKeysName.value = '';
+      apiKeysSay(`Created "${key.name}". Paste the key into the program's POTACAT Cloud settings.`, 'var(--accent-green)');
+      loadApiKeys();
+    });
+  }
+  if (apiKeysCopy) {
+    apiKeysCopy.addEventListener('click', () => {
+      const t = apiKeysToken ? apiKeysToken.textContent : '';
+      if (!t) return;
+      navigator.clipboard.writeText(t).then(() => {
+        if (apiKeysCopied) { apiKeysCopied.classList.remove('hidden'); setTimeout(() => apiKeysCopied.classList.add('hidden'), 3000); }
+      });
+    });
   }
 
   /**
