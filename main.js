@@ -2823,6 +2823,33 @@ function spawnRigctld(target, portOverride) {
   });
 }
 
+// The RIG POWER answer for ECHOCAT's status: true / false / null = cannot
+// tell. Always sent (null, not omitted): the device merges status over the
+// last one, so an omitted key would hold a stale true.
+// A Flex the API drives is on when the API answers; anything else is on when
+// it answers CAT polls (RigController.radioPowerEvidence). "Answered before"
+// = this rig's Station Setup radio-control step has passed, so silence now is
+// the radio switched off, not a wrong port.
+function rigPoweredForStatus() {
+  if (smartSdr && smartSdr.canTune && (smartSdr.mode === 'self' || !cat || !cat.connected)) return true;
+  if (!cat || typeof cat.radioPowerEvidence !== 'function') return null;
+  let before = false;
+  try {
+    const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+    before = !!(rig && rig.setupPassed && rig.setupPassed['radio-control']);
+  } catch { /* no rig list */ }
+  return cat.radioPowerEvidence(before);
+}
+// Status goes out on frequency/meter changes, and a radio switched off
+// changes neither — so a flip of the answer is pushed on its own.
+let _rigPoweredLast;
+setInterval(() => {
+  try {
+    const v = rigPoweredForStatus();
+    if (v !== _rigPoweredLast) { _rigPoweredLast = v; broadcastRemoteRadioStatus(); }
+  } catch { /* status is best-effort */ }
+}, 2000).unref();
+
 function sendCatStatus(s) {
   // The radio IS controllable via the FlexLib API even if the port-5002 CAT
   // shim (`cat`) never connected — true for self-host (Flex Direct, POTACAT
@@ -8537,11 +8564,21 @@ async function logContact(entry, opts) {
   });
   const written = [];
   let first = null, failure = null;
+  // Several operators ("Log as: both") are split HERE, not inside
+  // saveQsoRecord, so every copy is reported with the uuid it was written
+  // under and whose logbook it went into (`operator` on log-ok records).
+  const activeCall = String(settings.myCallsign || '').toUpperCase();
   for (const rec of records) {
-    const r = await saveQsoRecord(rec, opts);
-    if (!first) first = r;
-    if (r && r.success) written.push(rec);
-    else if (!failure) failure = r;
+    const targets = LogAs.logAsTargets(rec.logAs);
+    const copies = targets.length > 1 ? LogAs.splitForOperators(rec, targets) : [rec];
+    for (const q of copies) {
+      const r = await saveQsoRecord(q, opts);
+      if (!first) first = r;
+      if (r && r.success) {
+        q.bookOf = (typeof q.logAs === 'string' && q.logAs.trim()) ? q.logAs.trim().toUpperCase() : activeCall;
+        written.push(q);
+      } else if (!failure) failure = r;
+    }
   }
   return {
     ...(first || {}),
@@ -18503,6 +18540,9 @@ function connectRemote() {
         gridHeard: !!theirGrid,
         myGridsquare: data.myGridsquare || '', // the device's own grid; else the park's (saveQsoRecord), never home
       };
+      // The state the activator was in, for a park spanning several
+      // (lib/qso-expand.js parkStateFor: "NJ", "US-NJ" or "US-0001:NJ,...").
+      if (typeof data.parkState === 'string' && data.parkState.length <= 200) entry.parkState = data.parkState;
       // One cloud record, shared with the device's own copy (dupe fix 2026-07-08).
       if (data.uuid && typeof data.uuid === 'string' && data.uuid.length <= 64) entry.uuid = data.uuid;
       for (const k of ['respot', 'wwffRespot', 'llotaRespot', 'wwbotaRespot', 'dxcRespot']) if (data[k]) entry[k] = true;
@@ -18554,6 +18594,8 @@ function connectRemote() {
         records: result.records.map((r) => ({
           uuid: r.uuid || '', callsign: r.callsign, sig: r.sig || '', sigInfo: r.sigInfo || '',
           mySig: r.mySig || '', mySigInfo: r.mySigInfo || '',
+          // Whose logbook this copy went into (Log as / Log as: both).
+          operator: r.bookOf || '',
         })),
         reqId,
         // Whether the desktop takes care of the Cloud copy, so a device that
@@ -20242,6 +20284,10 @@ function broadcastRemoteRadioStatus() {
     // null here (both objects absent) reads as "missing" to the mobile
     // merge-over-previous logic and would hold a stale connected state.
     catConnected: !!((cat && cat.connected) || (smartSdr && smartSdr.connected)),
+    // Whether the RADIO is switched on (null = cannot tell): catConnected
+    // is only the port, which a USB CAT link keeps
+    // open with the radio off. rigPoweredForStatus() has the evidence.
+    rigPowered: rigPoweredForStatus(),
     // Effective state — covers user PTT, FT8, voice macros, AND the CW
     // text path (which doesn't engage handleRemotePtt). The iOS app's
     // defensive audio-health gate keys off this field per the mobile-
