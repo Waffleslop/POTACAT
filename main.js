@@ -23267,6 +23267,12 @@ function sdrScopeSettingsChanged(before, after) {
 }
 
 const hamrsBridge = createWsjtxUdpBridge('HamRS');
+// Logbooks that take QSOs as WSJT-X datagrams (heartbeat, LOGGED_ADIF, then
+// QSO_LOGGED) over hamrsBridge. One list: the startup bridge start, the
+// save-settings restart and forwardToLogbook all read it, so a logger added
+// here is live from launch — MacLoggerDX used to be missing from the startup
+// start and only got its heartbeat after the first Settings save.
+const WSJTX_BINARY_LOGGERS = new Set(['hamrs', 'logger32', 'macloggerdx', 'rumlogng']);
 const extraUdpBridge = createWsjtxUdpBridge('Extra UDP');
 
 // --- Logbook forwarding ---
@@ -23345,8 +23351,9 @@ function forwardToLogbook(qsoData, s = settings) {
   if (type === 'hrd') {
     return sendUdpAdif(qsoData, host, port || 2333);
   }
-  if (type === 'macloggerdx') {
-    // MacLoggerDX speaks WSJT-X binary protocol (same as HamRS)
+  if (type === 'macloggerdx' || type === 'rumlogng') {
+    // MacLoggerDX and RUMlogNG (Preferences > UDP > "Save QSOs to logbook")
+    // speak the WSJT-X binary protocol (same as HamRS)
     const record = buildAdifRecord(qsoData);
     const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
     const hp = port || 2237;
@@ -27325,7 +27332,7 @@ app.whenReady().then(() => {
   // PSKReporter Map (5-min poll for "where am I being heard on FT8/digital")
   // — auto-connects with myCallsign for the same reason as RBN.
   if (settings.myCallsign) connectPskrMap();
-  if (settings.sendToLogbook && (settings.logbookType === 'hamrs' || settings.logbookType === 'logger32')) {
+  if (settings.sendToLogbook && WSJTX_BINARY_LOGGERS.has(settings.logbookType)) {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
   }
   if (settings.extraUdpEnabled && (settings.extraUdpFormat || 'wsjtx') === 'wsjtx') {
@@ -35311,12 +35318,11 @@ app.whenReady().then(() => {
       updateRemoteSettings();
     }
 
-    // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX and
-    // Log4OM-binary all share this path — they recognize POTACAT as a
+    // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX, RUMlogNG
+    // and Log4OM-binary all share this path — they recognize POTACAT as a
     // WSJT-X peer via periodic status heartbeats.
-    const wsjtxBinaryLoggers = new Set(['hamrs', 'logger32', 'macloggerdx']);
     const log4omBinary = settings.logbookType === 'log4om' && settings.log4omWsjtxBinary;
-    if (settings.sendToLogbook && (wsjtxBinaryLoggers.has(settings.logbookType) || log4omBinary)) {
+    if (settings.sendToLogbook && (WSJTX_BINARY_LOGGERS.has(settings.logbookType) || log4omBinary)) {
       const hp = parseInt(settings.logbookPort, 10) || 2237;
       const hh = settings.logbookHost || '127.0.0.1';
       if (!hamrsBridge.socket || hamrsBridge.host !== hh || hamrsBridge.port !== hp) {
