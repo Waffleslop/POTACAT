@@ -3015,6 +3015,7 @@ html, body {
 [data-theme="light"] .spot-card.tuned { background: rgba(79, 195, 247, 0.08); }
 [data-theme="light"] .spot-call { color: #1a1a2e; }
 [data-theme="light"] .spot-mode { background: #e0e0e0; }
+.spot-wpm { font-size: 11px; opacity: 0.75; white-space: nowrap; }
 [data-theme="light"] .spot-band { color: #1565c0; }
 [data-theme="light"] .spot-region { color: #1565c0; }
 [data-theme="light"] .spot-name { color: #555; }

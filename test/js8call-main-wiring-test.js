@@ -188,7 +188,7 @@ test('every remote JS8 handler reuses the popout path', () => {
   // the phone and the desktop end up addressing the same message differently.
   const at = RAW.indexOf("remoteServer.on('js8-start'");
   assert.ok(at > 0, 'remote js8-start handler missing');
-  const seg = RAW.slice(at, at + 6000);   // widened as the remote handler block grew (idle-rx, sms, mail)
+  const seg = RAW.slice(at, at + 9000);   // widened as the remote handler block grew (idle-rx, sms, mail, idle mode)
   for (const call of ['startJtcat(\'JS8\')', 'js8SetHeartbeat', 'js8Transmit',
     'js8Threads.setOpen', 'stopJtcat()']) {
     assert.ok(seg.includes(call), 'remote JS8 handlers must reuse ' + call);

@@ -3051,7 +3051,7 @@
         if (!colShow[key]) return '';
         switch (key) {
           case 'freq': return `<span class="spot-freq">${freqStr}</span>`;
-          case 'mode': return `<span class="spot-mode">${esc(s.mode || '')}</span>`;
+          case 'mode': return `<span class="spot-mode">${esc(s.mode || '')}</span>${s.wpm ? ` <span class="spot-wpm" title="CW speed${s.wpmFrom === 'skimmer' ? ' measured by a skimmer' : ''}">${esc(String(s.wpm))}</span>` : ''}`;
           case 'band': return `<span class="spot-band">${esc(s.band || '')}</span>`;
           case 'dist': return `<span class="spot-dist">${formatSpotDist(s.distance)}</span>`;
           case 'ref': return `<span class="spot-ref ${refClass}">${esc(ref)}</span>`;

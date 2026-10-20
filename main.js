@@ -1523,6 +1523,10 @@ let rbn = null;
 let rbnSpots = []; // streaming RBN spots (FIFO, max 500)
 let rbnFlushTimer = null; // throttle timer for RBN -> renderer updates
 let rbnWatchSpots = []; // RBN spots for watchlist callsigns, merged into main table
+// Skimmed CW speeds (RBN, CW Spots, cluster), filled into CW spots that carry
+// none — POTA/SOTA/WWFF spots never say how fast (lib/cw-speed.js).
+const { CwSpeedCache } = require('./lib/cw-speed');
+const cwSpeeds = new CwSpeedCache();
 // Mercury HF data modem (external GPL-3.0 process; see lib/mercury-process.js).
 // Phase 1: launch + supervise + readiness probe. The persistent TNC client
 // (lib/mercury-client.js) and PTT/audio arbiter land in later phases.
@@ -6170,6 +6174,7 @@ function connectCluster() {
       // Dedupe: keep only the latest spot per callsign+band (across all nodes)
       const idx = clusterSpots.findIndex(s => s.callsign === spot.callsign && s.band === spot.band);
       if (idx !== -1) clusterSpots.splice(idx, 1);
+      if (spot.wpm && String(spot.mode || '').toUpperCase() === 'CW') cwSpeeds.note(spot.callsign, spot.frequency, spot.wpm);
       clusterSpots.push(spot);
       if (clusterSpots.length > 500) {
         clusterSpots = clusterSpots.slice(-500);
@@ -6280,6 +6285,7 @@ function connectCwSpots() {
       const spot = buildClusterSpot(raw, myPos, myEntity);
       spot.source = 'cwspots';
       spot.cwClub = clubTag; // tag with club name for badge display
+      if (spot.wpm) cwSpeeds.note(spot.callsign, spot.frequency, spot.wpm);
       // Dedup by callsign+band
       const idx = cwSpots.findIndex(s => s.callsign === spot.callsign && s.band === spot.band);
       if (idx !== -1) cwSpots.splice(idx, 1);
@@ -6465,6 +6471,7 @@ function connectRbn() {
   rbn = new RbnClient();
   const myPos = gridToLatLon(settings.grid);
 
+  rbn.on('cw-speed', (r) => cwSpeeds.note(r.callsign, r.freqKhz, r.wpm));
   rbn.on('spot', (raw) => {
     // Strip skimmer suffix (e.g. KM3T-# -> KM3T)
     const spotter = raw.spotter.replace(/-[#\d]+$/, '');
@@ -21948,7 +21955,9 @@ function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
   const raw = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
-  const merged = dedupeCrossSource(raw);
+  // A CW spot with no speed (POTA/SOTA/WWFF) takes the speed a skimmer
+  // measured on the same station and frequency in the last 15 minutes.
+  const merged = cwSpeeds.fillSpots(dedupeCrossSource(raw));
   // CQ/ITU zones on every spot, every source (optional columns/fields on the
   // desktop table and ECHOCAT cards — LZ3AW item 30).
   CallZones.stampSpotZones(merged, callZonesOf);
