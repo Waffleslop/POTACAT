@@ -2348,6 +2348,11 @@ async function loadSerialcatPorts(savedTarget) {
     setSerialcatBaud.value = String(savedTarget.baudRate);
   }
   setSerialcatDtrOff.checked = !!(savedTarget && savedTarget.dtrOff);
+  const hsSel = document.getElementById('set-serialcat-handshake');
+  if (hsSel) {
+    const hs = savedTarget && savedTarget.serialHandshake;
+    hsSel.value = hs === 'none' || hs === 'hardware' ? hs : 'auto';
+  }
   serialcatPortsLoaded = true;
 }
 
@@ -2725,6 +2730,7 @@ function buildCatTargetFromForm() {
       path: getEffectiveSerialcatPort(),
       baudRate: parseInt(setSerialcatBaud.value, 10) || 9600,
       dtrOff: setSerialcatDtrOff.checked,
+      serialHandshake: (document.getElementById('set-serialcat-handshake') || {}).value || 'auto',
     };
   } else if (radioType === 'icom') {
     const modelSelect = document.getElementById('set-icom-model');

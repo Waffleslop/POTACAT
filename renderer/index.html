@@ -1760,6 +1760,14 @@
             <input type="checkbox" id="set-serialcat-dtr-off"> Disable DTR/RTS on connect
           </label>
           <span class="help-text" style="margin-top:2px;display:block;">Required for QRPLabs QMX/QDX (uses DTR for PTT). Also check for Digirig, SignaLink, and similar USB interfaces. <b>Leave this unchecked for most Yaesu radios</b> — if a Yaesu connects but won't change frequency, uncheck this and set the radio's "CAT RTS" menu (e.g. FTDX3000 menu 040) to Enable.</span>
+          <label style="margin-top:6px;">RTS line:
+            <select id="set-serialcat-handshake">
+              <option value="auto" selected>Auto (by radio model)</option>
+              <option value="none">Held low</option>
+              <option value="hardware">RTS/CTS flow control</option>
+            </select>
+          </label>
+          <span class="help-text" style="margin-top:2px;display:block;">Auto uses RTS/CTS flow control for the Kenwood TS-590 and TS-990 and holds RTS low for every other radio. Choose <b>Held low</b> if the radio transmits as soon as POTACAT connects: some radios that copy the TS-590's commands (FX4CR) key PTT on RTS.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="serialcat-test-btn">Test Connection</button>
             <span id="serialcat-test-result" style="font-size:12px;"></span>

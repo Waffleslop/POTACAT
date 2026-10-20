@@ -321,7 +321,7 @@ const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 const { CivCodec } = require('./lib/codecs/civ-codec');
-const { getTuneQuirks } = require('./lib/rig-models');
+const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand } = require('./lib/bands');
@@ -5318,6 +5318,43 @@ function logConnectCatSkip(reason) {
   sendCatLog(reason);
 }
 
+// A radio that emulates a TS-590 (FX4CR on F5BUD firmware) may key PTT on
+// RTS, and RTS/CTS flow control holds RTS asserted from the moment the port
+// opens: the radio transmits until the cable is pulled (SP5GB, 1.11.7). When
+// the handshake came from the MODEL default and the radio reports TX in the
+// first seconds after connect, with POTACAT never having keyed, the RTS line
+// is what keyed it: remember "held low" on this rig and reconnect. A choice
+// the operator made on the rig is never overridden.
+const SERIAL_HS_FALLBACK_MS = 15000;
+function armSerialHandshakeFallback(rigCat, target) {
+  const armedAt = Date.now();
+  // The controller's 'ptt' true comes from the radio's IF readback or a CW
+  // hold; setTransmit(true) sets the flag first and never emits it. So a
+  // 'ptt' true with no CW hold running is the radio saying it keyed itself.
+  const onTx = (on) => {
+    if (cat !== rigCat || Date.now() - armedAt > SERIAL_HS_FALLBACK_MS) { rigCat.removeListener('ptt', onTx); return; }
+    if (!on) return;
+    if (rigCat._cwHoldTimer) return;
+    rigCat.removeListener('ptt', onTx);
+    sendCatLog('[CAT] The radio reported TRANSMIT right after connecting, and POTACAT had not keyed it: its RTS line keys PTT, and RTS/CTS flow control holds RTS asserted. Switching this rig to RTS held low and reconnecting.');
+    // By port, not activeRigId: a rig picked from the CAT popover can be live
+    // with an activeRigId that names nothing (SP5GB's report).
+    const path = target && target.path;
+    for (const r of settings.rigs || []) {
+      if (r && r.catTarget && r.catTarget.type === 'serial' && r.catTarget.path === path) r.catTarget.serialHandshake = 'none';
+    }
+    if (target) target.serialHandshake = 'none';
+    if (settings.catTarget && settings.catTarget.type === 'serial' && settings.catTarget.path === path) settings.catTarget.serialHandshake = 'none';
+    saveSettings(settings);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: 'The radio keyed itself on connect (its RTS line is PTT) — POTACAT now holds RTS low for this rig', warn: true, duration: 12000 });
+    }
+    try { rigCat.setTransmit(false); } catch { /* reconnect drops the lines anyway */ }
+    setTimeout(() => connectCatSafe('rts-fallback'), 300);
+  };
+  rigCat.on('ptt', onTx);
+}
+
 async function connectCat() {
   // A new connection (or another rig) starts with nothing seen this session;
   // what this rig reported before still comes from rig.metersSeen.
@@ -5799,7 +5836,12 @@ async function connectCat() {
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
-    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: model.serialHandshake });
+    const hs = resolveSerialHandshake(model, target);
+    if (hs.handshake === 'hardware') {
+      sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
+      if (hs.source === 'model') armSerialHandshakeFallback(cat, target);
+    }
+    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: hs.handshake });
   }
 
   bindRigStateEvents(cat);
@@ -34724,6 +34766,12 @@ app.whenReady().then(() => {
         if (!cur) return r;
         const out = { ...r };
         for (const k of SETUP_KEYS) if (!(k in out) && k in cur) out[k] = cur[k];
+        // "RTS held low" written by armSerialHandshakeFallback after Settings
+        // opened: a stale copy without the key must not put RTS back up.
+        if (out.catTarget && cur.catTarget && out.catTarget.type === 'serial' && !('serialHandshake' in out.catTarget)
+          && cur.catTarget.serialHandshake && out.catTarget.path === cur.catTarget.path) {
+          out.catTarget = { ...out.catTarget, serialHandshake: cur.catTarget.serialHandshake };
+        }
         return out;
       });
     }

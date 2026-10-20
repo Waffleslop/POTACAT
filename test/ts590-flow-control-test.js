@@ -64,10 +64,31 @@ section('Transport (lib/transport.js SerialTransport — the direct-serial path)
   assert(/port\.set\(this\._guardPins\(this\._lastPinState\)\)/.test(src), 'the reconnect pin restore goes through the guard');
   // main.js hands the model flag to the transport on the Kenwood/Yaesu path.
   const main = read('main.js');
-  assert(/serialHandshake: model\.serialHandshake/.test(main), 'main.js passes model.serialHandshake on the direct-serial connect');
+  assert(/const hs = resolveSerialHandshake\(model, target\)/.test(main) && /serialHandshake: hs\.handshake/.test(main), 'main.js resolves the handshake (rig setting, else model) on the direct-serial connect');
   // The legacy CatClient serial opener (lib/cat.js) mirrors the same rule.
   const cat = read('lib/cat.js');
   assert(/rtscts: hardware,/.test(cat) && /this\._serialHandshake === 'hardware' \? \{ dtr: val \} : \{ dtr: val, rts: val \}/.test(cat), 'lib/cat.js CatClient mirrors the rule');
+}
+
+section('SP5GB FX4CR (1.11.7): a radio that keys PTT on RTS — the rig setting wins, and a self-key on connect falls back');
+{
+  const { resolveSerialHandshake } = require('../lib/rig-models');
+  const m590 = RIG_MODELS['TS-590S/SG'];
+  assert(resolveSerialHandshake(m590, { type: 'serial' }).handshake === 'hardware', 'TS-590 model, no rig setting: hardware (N7UVH)');
+  assert(resolveSerialHandshake(m590, { serialHandshake: 'auto' }).source === 'model', "'auto' follows the model");
+  assert(resolveSerialHandshake(m590, { serialHandshake: 'none' }).handshake === 'none', 'rig setting "Held low" beats the TS-590 model (FX4CR)');
+  assert(resolveSerialHandshake(m590, { serialHandshake: 'none' }).source === 'rig', 'and says the rig decided');
+  assert(resolveSerialHandshake(RIG_MODELS['TS-480'], { serialHandshake: 'hardware' }).handshake === 'hardware', 'rig setting can turn flow control on for any model');
+  assert(resolveSerialHandshake(RIG_MODELS['TS-480'], {}).handshake === 'none', 'TS-480 default: none');
+  assert(resolveSerialHandshake(null, null).handshake === 'none', 'no model, no target: none');
+  const main = read('main.js');
+  assert(/if \(hs\.source === 'model'\) armSerialHandshakeFallback\(cat, target\)/.test(main), 'the self-key fallback is armed only for a MODEL default, never over the operator\'s choice');
+  assert(/r\.catTarget\.path === path\) r\.catTarget\.serialHandshake = 'none'/.test(main), 'the fallback remembers "held low" on every rig on that port (activeRigId can name nothing)');
+  assert(/!\('serialHandshake' in out\.catTarget\)/.test(main), 'a stale Settings save keeps the remembered setting');
+  const html = read('renderer/index.html');
+  assert(/id="set-serialcat-handshake"/.test(html), 'rig editor has the RTS line choice');
+  const app = read('renderer/app.js');
+  assert(/serialHandshake: \(document\.getElementById\('set-serialcat-handshake'\)/.test(app), 'the editor saves it on the serial target');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
