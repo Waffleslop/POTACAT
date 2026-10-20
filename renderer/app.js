@@ -22221,7 +22221,15 @@ function positionCwPopover() {
   const bar = cwKeyerStatusEl.closest('.status-bar');
   const barRect = bar.getBoundingClientRect();
   cwPopover.style.top = (rect.bottom - barRect.top + 4) + 'px';
-  cwPopover.style.left = (rect.left - barRect.left) + 'px';
+  // Right edge on the button's right edge, clamped inside the status bar —
+  // the same rule as positionRigPopover(). Left-aligning to a button at the
+  // right end of the bar put the whole popover off-screen (N6UGP 2026-10-20:
+  // "WPM shows 2", the slider clipped, following the window edge as it grew).
+  const popW = cwPopover.offsetWidth || 200;
+  let left = rect.right - barRect.left - popW;
+  if (left < 0) left = 0;
+  if (left + popW > barRect.width) left = Math.max(0, barRect.width - popW);
+  cwPopover.style.left = left + 'px';
 }
 
 function openCwPopover() {
@@ -22229,8 +22237,9 @@ function openCwPopover() {
   cwPopoverVolume.value = setCwSidetoneVolume.value;
   cwPopoverVolumeLabel.textContent = setCwSidetoneVolume.value + '%';
   cwPopoverWpm.value = setCwWpm.value;
-  positionCwPopover();
+  // Unhide first: a display:none box has no width to clamp against.
   cwPopover.classList.remove('hidden');
+  positionCwPopover();
   cwPopoverOpen = true;
 }
 

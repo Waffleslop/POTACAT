@@ -6753,7 +6753,11 @@ a.settings-echocat-badge-link:hover {
 .cw-popover {
   position: absolute;
   top: 100%;
-  right: 0;
+  /* No `right: 0` here: positionCwPopover() sets `left`, and with BOTH set
+     the box stretched from the CW button to the bar's right edge, then
+     min-width pushed it 200 px past the window. The CW button sits at the
+     right end of the bar, so the volume slider and WPM were always clipped
+     (N6UGP, 1.11.8 on macOS). */
   z-index: 10001;
   background: var(--bg-secondary);
   border: 1px solid var(--border-secondary);
