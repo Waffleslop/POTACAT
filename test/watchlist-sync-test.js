@@ -60,6 +60,8 @@ test('log-qso replies carry reqId and the records written, with their uuids', ()
   const h = main.slice(main.indexOf("remoteServer.on('log-qso'"), main.indexOf('// --- JTCAT remote control'));
   assert.strictEqual((h.match(/sendLogResult\(\{[^}]*reqId/g) || []).length >= 2, true, 'refusals carry reqId');
   assert.ok(/records: result\.records\.map\(\(r\) => \(\{\n\s*uuid: r\.uuid \|\| ''/.test(h), 'success lists each record\'s uuid');
+  assert.ok(/cloudJournal: \(\(\) => \{/.test(h) && /cloudIpc\.currentOwnerId\(\)/.test(h), 'says whether the desktop journals it to the Cloud');
+  assert.ok(/LogAs\.logAsTargets\(entry\.logAs\)\.some\(\(c\) => c !== active\)/.test(h), 'another operator\'s QSO is never the device\'s to push');
 });
 
 console.log(`\nWatchlist sync: ${passed} passed, ${failed} failed`);

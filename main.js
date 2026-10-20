@@ -18556,6 +18556,17 @@ function connectRemote() {
           mySig: r.mySig || '', mySigInfo: r.mySigInfo || '',
         })),
         reqId,
+        // Whether the desktop takes care of the Cloud copy, so a device that
+        // mirrors these records knows if it must push them itself (under
+        // these uuids, so a later sync from both never duplicates). True when
+        // the desktop is signed in (it journals under its account), and for
+        // a QSO logged for ANOTHER operator — journaled under their account
+        // when they sign in, never the device's to push.
+        cloudJournal: (() => {
+          const active = String(settings.activeProfile || settings.myCallsign || '').toUpperCase();
+          if (LogAs.logAsTargets(entry.logAs).some((c) => c !== active)) return true;
+          return !!(cloudIpc && typeof cloudIpc.currentOwnerId === 'function' && cloudIpc.currentOwnerId());
+        })(),
         resposted: result.resposted || false,
         respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
       });
