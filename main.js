@@ -407,6 +407,18 @@ const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" ta
 const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
 const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir, sessionLogRotationMoves } = require('./lib/bug-report-log');
+const { healActiveRig } = require('./lib/active-rig');
+// activeRigId must name the rig catTarget connects to (lib/active-rig.js,
+// SP5GB 1.11.7: "None" in the editor while COM15 kept connecting). Run at
+// load and before every connect; adopt-only, logged once per repair.
+function healActiveRigNow(where) {
+  const r = healActiveRig(settings);
+  if (r.changed) {
+    sendCatLog(`[CAT] activeRigId named no rig (${r.staleId || 'unset'}); adopted "${r.rig.name || r.rig.model || 'rig'}" because its connection target is the one in use (${where})`);
+    try { saveSettings(settings); } catch {}
+  }
+  return r;
+}
 // Lines kept before the "recording started" marker: a report is usually
 // filed AFTER the thing happened (lib/bug-report-log.js, KF0U 2026-10-20).
 const BUG_REPORT_BEFORE_MARKER = 150;
@@ -5425,6 +5437,7 @@ async function connectCat() {
     _setCwPaddleAvailability(_pa.available, _pa.reason || 'rig-changed');
   }
   killRigctld();
+  healActiveRigNow('connect');
   let target = settings.catTarget;
   if (!target) {
     // A rig configured in My Rigs but never ACTIVATED leaves the global
@@ -27173,6 +27186,7 @@ app.whenReady().then(() => {
     console.error('[multi-op] nested-profile migration failed:', err.message);
   }
   settings = loadSettings();
+  healActiveRigNow('startup');
   // A port typed as Device Manager shows it ("COM Port 10") never opened.
   // Repair what is already saved, once, and say so (lib/serial-path.js).
   {

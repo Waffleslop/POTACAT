@@ -16703,6 +16703,12 @@ settingsSave.addEventListener('click', async () => {
   await window.api.saveSettings({
     rigs: currentRigs,
     activeRigId: selectedRigId || null,
+    // The connection target rides with the selected rig. This save used to
+    // send only activeRigId, so an edited rig (new id, same port) left the
+    // global catTarget pointing at the old entry: "None" in the editor, COM15
+    // still connecting (SP5GB, 1.11.7). None selected → the target is left
+    // alone; the CAT pill's None is the explicit disconnect.
+    ...(rigTarget ? { catTarget: rigTarget } : {}),
     grid: setGrid.value.trim() || 'FN20jb',
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
