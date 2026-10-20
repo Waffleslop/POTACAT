@@ -22,9 +22,19 @@ test('tunnel host link has its own colour (theme accent, not the browser default
   assert.ok(/\[data-dark-variant="charcoal"\] \{[\s\S]*?--accent-blue: #38bdf8;/.test(css), 'charcoal defines the accent the link now uses');
 });
 
-test('start-at-login checkbox row uses .checkbox-label (width: auto on the box)', () => {
-  assert.ok(/<label class="checkbox-label" style="margin-top:6px;margin-bottom:0;cursor:pointer;">\n\s*<input type="checkbox" id="cloud-tunnel-startup-launcher" checked>/.test(html));
+test('start-at-login: two state-reflecting checkboxes, no "Turn on / Not now"', () => {
+  assert.ok(/<input type="checkbox" id="cloud-tunnel-startup-launch">/.test(html) && /<input type="checkbox" id="cloud-tunnel-startup-launcher">/.test(html));
+  assert.ok(!/cloud-tunnel-startup-not-now/.test(html) && !/cloud-tunnel-startup-on"/.test(html), 'the offer buttons are gone');
+  assert.ok(!/ct-startup-offer-dismissed/.test(ui), 'no session dismissal either');
+  const rows = html.slice(html.indexOf('id="cloud-tunnel-startup"'), html.indexOf('id="cloud-tunnel-startup-done"'));
+  assert.strictEqual((rows.match(/class="checkbox-label"/g) || []).length, 2, 'both rows use .checkbox-label (width: auto on the box)');
   assert.ok(/\.checkbox-label input\[type="checkbox"\] \{\n\s*width: auto;/.test(css));
+  assert.ok(/ctStartupLaunch\.checked = !!\(s && s\.launchAtStartup === true\);/.test(ui), 'launch box shows the setting');
+  assert.ok(/ctStartupLauncher\.checked = !!\(ls && ls\.installed\);/.test(ui), 'launcher box shows the install state');
+  assert.ok(/saveSettings\(\{ launchAtStartup: on \}\)/.test(ui), 'launch box applies on change');
+  assert.ok(/on \? await window\.api\.launcherInstall\(\) : await window\.api\.launcherUninstall\(\)/.test(ui), 'launcher box installs/uninstalls');
+  assert.ok(/ctStartupLauncher\.checked = !on;/.test(ui), 'a failed install/uninstall reverts the box');
+  assert.ok(/if \(!state \|\| !state\.enabled\) \{ ctStartup\.classList\.add\('hidden'\); return; \}/.test(ui), 'shown whenever the tunnel is on');
 });
 
 test('on-air badge is the first embed: Build opens the builder, Copy gives the image link', () => {

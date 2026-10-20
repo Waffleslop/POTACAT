@@ -163,9 +163,13 @@
       apiKeysList.innerHTML = '<div style="color:var(--text-tertiary);">No keys yet.</div>';
       return;
     }
+    // Fixed column widths: the settings pane is narrow and the key column
+    // used to run into "Last used". Every key shares the pc_live_ prefix, so
+    // the cell shows only the 8 characters that tell keys apart.
     const table = document.createElement('table');
-    table.style.cssText = 'width:100%;border-collapse:collapse;';
-    table.innerHTML = '<tr style="color:var(--text-secondary);"><th style="text-align:left;padding:4px 0;font-weight:600;">Name</th><th style="text-align:left;padding:4px 0;font-weight:600;">Key</th><th style="text-align:left;padding:4px 0;font-weight:600;">Last used</th><th></th></tr>';
+    table.style.cssText = 'width:100%;border-collapse:collapse;table-layout:fixed;';
+    table.innerHTML = '<colgroup><col style="width:38%"><col style="width:22%"><col style="width:28%"><col style="width:12%"></colgroup>'
+      + '<tr style="color:var(--text-secondary);"><th style="text-align:left;padding:4px 0;font-weight:600;">Name</th><th style="text-align:left;padding:4px 0;font-weight:600;">Key</th><th style="text-align:left;padding:4px 0;font-weight:600;">Last used</th><th></th></tr>';
     for (const k of keys) {
       const tr = document.createElement('tr');
       tr.style.borderTop = '1px solid var(--border-primary)';
@@ -174,9 +178,12 @@
       const scope = (k.scopes || []).includes('qsos:write') ? '' : ' (read only)';
       const used = revoked ? 'revoked ' + fmtWhen(k.revokedAt)
         : (k.lastUsedAt ? fmtWhen(k.lastUsedAt) + (k.lastProgramId ? ' by ' + k.lastProgramId : '') : 'never');
-      const name = document.createElement('td'); name.style.padding = '6px 0'; name.textContent = (k.name || '') + scope;
-      const pre = document.createElement('td'); pre.style.padding = '6px 0'; pre.innerHTML = '<code>' + String(k.prefix || '').replace(/[<>&]/g, '') + '…</code>';
-      const last = document.createElement('td'); last.style.padding = '6px 0'; last.textContent = used;
+      const name = document.createElement('td'); name.style.cssText = 'padding:6px 6px 6px 0;overflow-wrap:anywhere;'; name.textContent = (k.name || '') + scope;
+      const prefix = String(k.prefix || '');
+      const tail = prefix.replace(/^pc_[a-z]+_/, '');
+      const pre = document.createElement('td'); pre.style.cssText = 'padding:6px 6px 6px 0;white-space:nowrap;';
+      const code = document.createElement('code'); code.textContent = '…' + tail; code.title = prefix + '…'; pre.appendChild(code);
+      const last = document.createElement('td'); last.style.cssText = 'padding:6px 6px 6px 0;overflow-wrap:anywhere;'; last.textContent = used;
       const act = document.createElement('td'); act.style.cssText = 'text-align:right;padding:6px 0;';
       if (!revoked) {
         const a = document.createElement('a');
@@ -1190,49 +1197,57 @@
   // they are OFFERED here, at the one moment they matter, and stay offered
   // (quietly) while the tunnel is on and POTACAT is not set to start at
   // login. "Not now" hides it for this session only.
+  // Two checkboxes that show the real state (settings.launchAtStartup; the
+  // launcher's install state) and apply on change. The old "Turn on / Not
+  // now" offer had an answer nobody would pick (Casey 2026-10-20); the
+  // opt-in rule is unchanged — nothing is added to the OS until a box is
+  // ticked, and unticking removes it.
   const ctStartup = document.getElementById('cloud-tunnel-startup');
+  const ctStartupLaunch = document.getElementById('cloud-tunnel-startup-launch');
   const ctStartupLauncher = document.getElementById('cloud-tunnel-startup-launcher');
-  const ctStartupOn = document.getElementById('cloud-tunnel-startup-on');
-  const ctStartupNotNow = document.getElementById('cloud-tunnel-startup-not-now');
   const ctStartupDone = document.getElementById('cloud-tunnel-startup-done');
-  let startupOfferDismissed = false;
-  try { startupOfferDismissed = sessionStorage.getItem('ct-startup-offer-dismissed') === '1'; } catch {}
 
-  /** Show the offer iff the tunnel is on, POTACAT is not a login item, and it was not dismissed this session. */
+  function startupSay(msg, color) {
+    if (!ctStartupDone) return;
+    ctStartupDone.textContent = msg || '';
+    ctStartupDone.style.color = color || 'var(--accent-green,#4ecca3)';
+    ctStartupDone.classList.toggle('hidden', !msg);
+  }
+
+  /** Show the row while the tunnel is on, with both boxes reflecting the real state. */
   async function refreshStartupOffer(state) {
     if (!ctStartup || !window.api || !window.api.getSettings) return;
-    if (!state || !state.enabled || startupOfferDismissed) { ctStartup.classList.add('hidden'); return; }
+    if (!state || !state.enabled) { ctStartup.classList.add('hidden'); return; }
     let s = null;
     try { s = await window.api.getSettings(); } catch {}
-    if (!s || s.launchAtStartup === true) { ctStartup.classList.add('hidden'); return; }
-    if (ctStartupDone) ctStartupDone.classList.add('hidden');
+    if (ctStartupLaunch) ctStartupLaunch.checked = !!(s && s.launchAtStartup === true);
+    if (ctStartupLauncher && window.api.launcherStatus) {
+      try { const ls = await window.api.launcherStatus(); ctStartupLauncher.checked = !!(ls && ls.installed); } catch {}
+    }
     ctStartup.classList.remove('hidden');
   }
 
-  if (ctStartupOn) {
-    ctStartupOn.addEventListener('click', async () => {
-      ctStartupOn.disabled = true;
-      try {
-        const wantLauncher = !!(ctStartupLauncher && ctStartupLauncher.checked);
-        // launchAtStartup is applied live at the OS by main on save.
-        await window.api.saveSettings({ launchAtStartup: true });
-        let note = 'POTACAT will start when this computer starts.';
-        if (wantLauncher && window.api.launcherInstall) {
-          const r = await window.api.launcherInstall();
-          note += (r && r.ok) ? ' The Remote Launcher is installed too.' : ' (The Remote Launcher could not be installed: ' + ((r && r.error) || 'unknown error') + ')';
-        }
-        if (ctStartupDone) { ctStartupDone.textContent = note; ctStartupDone.classList.remove('hidden'); }
-        setTimeout(() => { if (ctStartup) ctStartup.classList.add('hidden'); }, 4000);
-      } finally {
-        ctStartupOn.disabled = false;
-      }
+  if (ctStartupLaunch) {
+    ctStartupLaunch.addEventListener('change', async () => {
+      const on = ctStartupLaunch.checked;
+      // launchAtStartup is applied live at the OS by main on save.
+      await window.api.saveSettings({ launchAtStartup: on });
+      startupSay(on ? 'POTACAT will start when this computer starts.' : 'POTACAT will no longer start with this computer.');
     });
   }
-  if (ctStartupNotNow) {
-    ctStartupNotNow.addEventListener('click', () => {
-      startupOfferDismissed = true;
-      try { sessionStorage.setItem('ct-startup-offer-dismissed', '1'); } catch {}
-      if (ctStartup) ctStartup.classList.add('hidden');
+  if (ctStartupLauncher) {
+    ctStartupLauncher.addEventListener('change', async () => {
+      const on = ctStartupLauncher.checked;
+      ctStartupLauncher.disabled = true;
+      try {
+        const r = on ? await window.api.launcherInstall() : await window.api.launcherUninstall();
+        if (r && r.ok === false) {
+          ctStartupLauncher.checked = !on;
+          startupSay('The Remote Launcher could not be ' + (on ? 'installed' : 'removed') + ': ' + (r.error || 'unknown error'), 'var(--accent-red)');
+        } else {
+          startupSay(on ? 'The Remote Launcher is installed and will start at login.' : 'The Remote Launcher login item was removed.');
+        }
+      } finally { ctStartupLauncher.disabled = false; }
     });
   }
   const ctOriginTitle = document.getElementById('cloud-tunnel-origin-title');

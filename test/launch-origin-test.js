@@ -297,14 +297,19 @@ check('launcher: the login item is installed only on an explicit opt-in, and Ins
 check('cloud tab: start-at-login is OFFERED after enabling the tunnel, never applied silently', () => {
   const ui = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(/async function refreshStartupOffer\(state\)/.test(ui));
-  assert.ok(/if \(!state \|\| !state\.enabled \|\| startupOfferDismissed\) \{ ctStartup\.classList\.add\('hidden'\); return; \}/.test(ui), 'only while the tunnel is on');
-  assert.ok(/if \(!s \|\| s\.launchAtStartup === true\) \{ ctStartup\.classList\.add\('hidden'\); return; \}/.test(ui), 'and only while POTACAT is not a login item');
+  // 2026-10-20: the "Turn on / Not now" offer became two state-reflecting
+  // checkboxes (Casey: nobody picks Not now). The opt-in rule is unchanged:
+  // the login item is written only from the operator's own tick, through
+  // the normal settings path, and main never flips it by itself.
+  assert.ok(/if \(!state \|\| !state\.enabled\) \{ ctStartup\.classList\.add\('hidden'\); return; \}/.test(ui), 'only while the tunnel is on');
+  assert.ok(/ctStartupLaunch\.checked = !!\(s && s\.launchAtStartup === true\);/.test(ui), 'the box shows the real login-item state');
   assert.ok(/refreshStartupOffer\(state\)\.catch\(\(\) => \{\}\);\n\s+\}/.test(ui), 'evaluated on every tunnel state render');
-  assert.ok(/await window\.api\.saveSettings\(\{ launchAtStartup: true \}\);/.test(ui), 'Turn on sets the login item through the normal settings path');
-  assert.ok(/if \(wantLauncher && window\.api\.launcherInstall\)/.test(ui), 'the launcher rides the same yes, and only if ticked');
+  assert.ok(/ctStartupLaunch\.addEventListener\('change', async \(\) => \{\n\s*const on = ctStartupLaunch\.checked;[\s\S]*?await window\.api\.saveSettings\(\{ launchAtStartup: on \}\);/.test(ui), 'the tick sets the login item through the normal settings path');
+  assert.ok(/on \? await window\.api\.launcherInstall\(\) : await window\.api\.launcherUninstall\(\)/.test(ui), 'the launcher has its own tick, installed only when ticked');
   assert.ok(!/launchAtStartup: true/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/applyLaunchAtStartup\(true\)/g, '')), 'main never flips launchAtStartup on its own');
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
-  for (const id of ['cloud-tunnel-startup', 'cloud-tunnel-startup-launcher', 'cloud-tunnel-startup-on', 'cloud-tunnel-startup-not-now']) assert.ok(html.includes(`id="${id}"`), id);
+  for (const id of ['cloud-tunnel-startup', 'cloud-tunnel-startup-launch', 'cloud-tunnel-startup-launcher']) assert.ok(html.includes(`id="${id}"`), id);
+  assert.ok(!html.includes('id="cloud-tunnel-startup-not-now"'), 'no Not now');
 });
 
 (async () => {

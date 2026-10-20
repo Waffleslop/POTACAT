@@ -48,5 +48,12 @@ test('card: one sentence per server code', () => {
   assert.ok(/'revoked ' \+ fmtWhen\(k\.revokedAt\)/.test(ui) && /if \(revoked\) tr\.style\.color = 'var\(--text-tertiary\)';/.test(ui), 'revoked keys listed greyed');
 });
 
+test('card: fixed columns; the Key cell shows only the 8 characters that tell keys apart', () => {
+  // Every key shares pc_live_; the full prefix ran into "Last used" in the narrow pane (Casey 2026-10-20).
+  assert.ok(/table-layout:fixed;/.test(ui) && /<colgroup><col style="width:38%"><col style="width:22%"><col style="width:28%"><col style="width:12%"><\/colgroup>/.test(ui));
+  assert.ok(/const tail = prefix\.replace\(\/\^pc_\[a-z\]\+_\/, ''\);/.test(ui) && /code\.textContent = '…' \+ tail; code\.title = prefix \+ '…';/.test(ui), 'tail shown, full prefix on hover');
+  assert.ok(/white-space:nowrap;/.test(ui) && /overflow-wrap:anywhere;/.test(ui), 'key never wraps; name and last-used may');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
