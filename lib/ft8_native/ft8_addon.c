@@ -423,7 +423,10 @@ static napi_value Encode(napi_env env, napi_callback_info info) {
  *
  * FT8 only: FT4's 48 ms symbol is not an integer number of 200 Hz samples and
  * there is no FT4 reference set to measure against, so FT4 keeps ft8_lib's
- * single waterfall pass (with the larger candidate/decode limits). */
+ * single waterfall pass (with the larger candidate/decode limits). FT4's SNR
+ * is measured on that waterfall instead (ft4_measure_snr): until 2026-10-20
+ * FT4 reported the candidate's sync SCORE as dB, so every FT4 signal report
+ * JTCAT sent was a confidence number, not a signal-to-noise ratio (K9CYT). */
 
 #include <fft/kiss_fft.h>
 #include <ft8/ldpc.h>
@@ -1018,6 +1021,54 @@ static double now_ms(void) {
  * deadline (now_ms() clock, 0 = none): once it passes, candidates skip the
  * refined demodulator (the expensive part) and get the plain waterfall decode
  * plus waterfall AP, which is the whole pre-#87 decoder. *out_of_time is set. */
+/* FT4 SNR from the decoder's own waterfall (WSJT-X definition: signal power
+ * over the noise power in 2500 Hz). For every data symbol the decoded tone's
+ * bin is the signal and the mean of the other three tone bins is the noise,
+ * both as linear power from ft8_lib's 0.5 dB magnitudes; averaged over the
+ * 103 symbols, the bin noise is subtracted from the tone and the ratio is
+ * referred from one Hann-windowed bin to 2500 Hz by FT4_SNR_OFFSET_DB
+ * (calibrated in test/ft8-native-decoder-test.js against synthesized FT4 in
+ * white noise, the same recipe as the FT8 measurement). Above ~+10 dB the
+ * neighbouring symbols leak into the noise bins and the reading compresses,
+ * which is where FT4 reports stop mattering. */
+#define FT4_SNR_OFFSET_DB (-22.0f)
+static float ft4_measure_snr(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, const uint8_t* tones) {
+    if (cand->freq_offset < 2 || cand->freq_offset + 5 >= wf->num_bins) return -24.0f;
+    int offset = cand->time_offset;
+    offset = (offset * wf->time_osr) + cand->time_sub;
+    offset = (offset * wf->freq_osr) + cand->freq_sub;
+    offset = (offset * wf->num_bins) + cand->freq_offset;
+    const WF_ELEM_T* base = wf->mag + offset;
+    double ps = 0, pn = 0; int cnt = 0;
+    for (int k = 1; k + 1 < FT4_NN; ++k) {           /* skip the two ramp symbols */
+        int blk = cand->time_offset + k;
+        if (blk < 0) continue;
+        if (blk >= wf->num_blocks) break;
+        const WF_ELEM_T* p = base + k * wf->block_stride;
+        int t = tones[k] & 3;
+        /* The analysis frame is two symbols long and the GFSK tone glides
+         * between symbols, so the other three tone bins carry the signal's
+         * own splatter at about -14 dB — counting them as noise capped the
+         * reading near -8 dB. Noise is read one tone-spacing OUTSIDE the
+         * four-tone span instead (two bins below tone 0, two above tone 3),
+         * taking the quieter side so one adjacent station does not pass as
+         * noise. */
+        double sig = pow(10.0, WF_ELEM_MAG(p[t]) / 10.0);
+        double lo = 0.5 * (pow(10.0, WF_ELEM_MAG(p[-2]) / 10.0) + pow(10.0, WF_ELEM_MAG(p[-1]) / 10.0));
+        double hi = 0.5 * (pow(10.0, WF_ELEM_MAG(p[4]) / 10.0) + pow(10.0, WF_ELEM_MAG(p[5]) / 10.0));
+        ps += sig;
+        pn += (lo < hi) ? lo : hi;
+        ++cnt;
+    }
+    if (cnt == 0 || pn <= 0) return -24.0f;
+    double s = ps / cnt - pn / cnt;
+    if (s <= 0) return -24.0f;
+    float db = (float)(10.0 * log10(s / (pn / cnt))) + FT4_SNR_OFFSET_DB;
+    if (db < -24.0f) db = -24.0f;
+    if (db > 30.0f) db = 30.0f;
+    return db;
+}
+
 static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t* bb, cpxf* cbuf,
                        ft_result_t* res, int nres, int max_res, double deadline, bool* out_of_time) {
     monitor_config_t cfg = {
@@ -1069,6 +1120,11 @@ static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t*
         ftx_message_t message;
         ftx_decode_status_t status;
         if (ftx_decode_candidate(&mon.wf, cand, LDPC_ITERATIONS, &message, &status)) {
+            if (protocol == FTX_PROTOCOL_FT4) {
+                uint8_t t4[FT4_NN];
+                ft4_encode(message.payload, t4);
+                snr = ft4_measure_snr(&mon.wf, cand, t4);
+            }
             record_result(res, &nres, max_res, &message, false, freq_hz, time_sec, snr, false, 0, 0);
             continue;
         }
@@ -1092,9 +1148,18 @@ static int decode_pass(const float* x, int n, ftx_protocol_t protocol, bb_ctx_t*
             continue;
         }
         /* FT4 (no refined path), or FT8 out of time: waterfall AP as before. */
+        bool ap_ok = false;
         if (ap2_valid && ftx_decode_candidate_ap(&mon.wf, cand, LDPC_ITERATIONS, ap2_mask, ap2_bits, &message, &status)) {
-            record_result(res, &nres, max_res, &message, true, freq_hz, time_sec, snr, false, 0, 0);
+            ap_ok = true;
         } else if (ap1_valid && ftx_decode_candidate_ap(&mon.wf, cand, LDPC_ITERATIONS, ap1_mask, ap1_bits, &message, &status)) {
+            ap_ok = true;
+        }
+        if (ap_ok) {
+            if (protocol == FTX_PROTOCOL_FT4) {
+                uint8_t t4[FT4_NN];
+                ft4_encode(message.payload, t4);
+                snr = ft4_measure_snr(&mon.wf, cand, t4);
+            }
             record_result(res, &nres, max_res, &message, true, freq_hz, time_sec, snr, false, 0, 0);
         }
     }

@@ -43,6 +43,13 @@ test('hash table prunes before it can fill (source guard)', () => {
   assert.ok(/HASH_SIZE \* 3 \/ 4/.test(at) && size >= 512, 'prune threshold must leave empty slots');
 });
 
+test('every FT4 result is measured, never the sync score (source guard)', () => {
+  assert.ok(/static float ft4_measure_snr\(/.test(SRC), 'ft4_measure_snr() missing');
+  const calls = SRC.match(/snr = ft4_measure_snr\(&mon\.wf, cand, t4\);/g) || [];
+  assert.strictEqual(calls.length, 2, 'the plain decode and the AP decode both measure FT4');
+  assert.ok(/#define FT4_SNR_OFFSET_DB \(-22\.0f\)/.test(SRC), 'one Hann bin → 2500 Hz: the calibrated offset');
+});
+
 if (!fs.existsSync(ADDON)) {
   skip++;
   console.log('  skip native addon not built (npm run build-ft8)');
@@ -115,6 +122,40 @@ if (!fs.existsSync(ADDON)) {
       const d = n.decode(x, 'FT8', '', '').find((r) => r.text === text);
       assert.ok(d, `no decode at ${snr} dB`);
       assert.ok(Math.abs(d.db - snr) <= 1.5, `true ${snr} dB read ${d.db.toFixed(1)} dB`);
+    }
+  });
+
+  // 3b. FT4 too. Until 2026-10-20 an FT4 result carried the candidate's sync
+  //     SCORE (× 0.5) as its dB, so every FT4 report JTCAT sent was a
+  //     confidence number (K9CYT: "reporting confidence level instead of
+  //     SNR in FT4"). ft4_measure_snr reads the decoded tone's bin against
+  //     the bins one tone-spacing outside the four-tone span. The addon's FT4
+  //     decoder (single pass, no refined path) has no decodes below about
+  //     -14 dB, so the range starts at -12; above +8 the reading compresses
+  //     by a dB or two, which is where FT4 reports stop mattering.
+  test('FT4 SNR is measured, not the sync score', () => {
+    const n = require(ADDON);
+    let s = 0x9e3779b9;
+    const rnd = () => {
+      s = (s + 0x6d2b79f5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return (((t ^ (t >>> 14)) >>> 0) + 0.5) / 4294967296;
+    };
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd())) * Math.cos(2 * Math.PI * rnd());
+    const text = 'K1ABC W9XYZ EN37';
+    const w = n.encode(text, 1234.5, 'FT4');
+    assert.ok(w && w.length === 60480, 'FT4 waveform (105 symbols × 576 samples)');
+    let pw = 0; for (let i = 0; i < w.length; i++) pw += w[i] * w[i]; pw /= w.length;
+    for (const snr of [-12, -8, -4, 0, 4, 8]) {
+      const x = new Float32Array(90000);
+      for (let i = 0; i < x.length; i++) x[i] = gauss();
+      const g = Math.sqrt((2500 / 6000) * Math.pow(10, snr / 10) / pw);
+      for (let i = 0; i < w.length; i++) x[6000 + i] += g * w[i];
+      const d = n.decode(x, 'FT4', '', '').find((r) => r.text === text);
+      assert.ok(d, `no FT4 decode at ${snr} dB`);
+      assert.ok(Math.abs(d.db - snr) <= 2, `true ${snr} dB read ${d.db.toFixed(1)} dB`);
     }
   });
 
