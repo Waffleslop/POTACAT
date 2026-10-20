@@ -206,6 +206,8 @@ contextBridge.exposeInMainWorld('api', {
   apiKeysList: () => ipcRenderer.invoke('api-keys-list'),
   apiKeysCreate: (body) => ipcRenderer.invoke('api-keys-create', body),
   apiKeysRevoke: (id) => ipcRenderer.invoke('api-keys-revoke', id),
+  embedSettingsGet: () => ipcRenderer.invoke('embed-settings-get'),
+  embedSettingsPut: (isPublic) => ipcRenderer.invoke('embed-settings-put', isPublic),
   cloudForgotPassword: (email) => ipcRenderer.invoke('cloud-forgot-password', email),
   onOpenSettingsPanel: (cb) => {
     const handler = (_e, payload) => cb(payload);

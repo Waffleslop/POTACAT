@@ -38,7 +38,7 @@ test('card: label matches the docs, follows the account view, token shown once',
   assert.ok(/if \(apiKeysFieldset\) apiKeysFieldset\.classList\.add\('hidden'\);/.test(ui), 'hidden on showLogin');
   assert.ok(/if \(apiKeysFieldset\) \{ apiKeysFieldset\.classList\.remove\('hidden'\); loadApiKeys\(\); \}/.test(ui), 'shown + loaded on showAccount');
   assert.ok(/apiKeysToken\.textContent = key\.token \|\| ''/.test(ui) && /POTACAT Cloud will not show it again/.test(html), 'token once, with the warning');
-  assert.ok(/\['qsos:read'\] : \['qsos:read', 'qsos:write'\]/.test(ui), 'read-only box → qsos:read only');
+  assert.ok(/readonly:\s*\{ kind: 'secret',\s*environment: 'live', scopes: \['qsos:read'\] \}/.test(ui), 'read-only kind → qsos:read only');
 });
 
 test('card: one sentence per server code', () => {

@@ -119,6 +119,60 @@
 
     renderBilling(subscription);
     if (apiKeysFieldset) { apiKeysFieldset.classList.remove('hidden'); loadApiKeys(); }
+    loadEmbedPublic();
+  }
+
+  // ── Embeddable Widgets consent (cloud users.embed_public) ───────────────
+  const embedPublic = document.getElementById('cloud-embed-public');
+  const embedPublicStatus = document.getElementById('cloud-embed-public-status');
+  function embedSay(msg, color) {
+    if (!embedPublicStatus) return;
+    embedPublicStatus.textContent = msg || '';
+    embedPublicStatus.style.color = color || '';
+  }
+  async function loadEmbedPublic() {
+    if (!embedPublic || !window.api.embedSettingsGet) return;
+    try {
+      const r = await window.api.embedSettingsGet();
+      if (r && r.error) { embedSay(r.status === 404 ? '' : ''); return; }
+      embedPublic.checked = !!(r && r.data && r.data.public);
+      embedSay(embedPublic.checked ? '' : 'Off: every widget shows "turned off by its owner" and browser API keys are refused.');
+    } catch {}
+  }
+  if (embedPublic) {
+    embedPublic.addEventListener('change', async () => {
+      const on = embedPublic.checked;
+      embedPublic.disabled = true;
+      try {
+        const r = await window.api.embedSettingsPut(on);
+        if (r && r.error) { embedPublic.checked = !on; embedSay('Could not save: ' + (r.message || r.error), 'var(--accent-red)'); return; }
+        embedSay(on ? 'Your widgets are public.' : 'Off: every widget shows "turned off by its owner" and browser API keys are refused.', on ? 'var(--accent-green)' : '');
+      } finally { embedPublic.disabled = false; }
+    });
+  }
+
+  // "Import a log into Cloud…": the Logbook's own ADIF import (sameness
+  // dedupe against the local log), then a sync so the new records go up.
+  const importAdifBtn = document.getElementById('cloud-import-adif');
+  if (importAdifBtn) {
+    importAdifBtn.addEventListener('click', async () => {
+      importAdifBtn.disabled = true;
+      const old = importAdifBtn.textContent;
+      importAdifBtn.textContent = 'Importing…';
+      try {
+        const result = await window.api.importAdif();
+        if (!result) return;
+        if (!result.success) { alert('Import failed' + (result.error ? ': ' + result.error : '')); return; }
+        const parts = [`${Number(result.imported || 0).toLocaleString()} QSOs imported`];
+        if (result.skipped > 0) parts.push(`${Number(result.skipped).toLocaleString()} already in the log`);
+        if (result.imported > 0 && window.api.cloudSyncNow) {
+          importAdifBtn.textContent = 'Syncing…';
+          try { await window.api.cloudSyncNow(); parts.push('synced to the cloud'); } catch { parts.push('sync them with Sync Now'); }
+          refreshStatus();
+        }
+        alert(parts.join(' · '));
+      } finally { importAdifBtn.disabled = false; importAdifBtn.textContent = old; }
+    });
   }
 
   // ── API keys (Settings > Cloud > API keys) ───────────────────────────
@@ -130,8 +184,21 @@
   const apiKeysCopy = document.getElementById('cloud-api-keys-copy');
   const apiKeysCopied = document.getElementById('cloud-api-keys-copied');
   const apiKeysName = document.getElementById('cloud-api-keys-name');
-  const apiKeysReadonly = document.getElementById('cloud-api-keys-readonly');
+  const apiKeysKind = document.getElementById('cloud-api-keys-kind');
+  const apiKeysOrigin = document.getElementById('cloud-api-keys-origin');
   const apiKeysCreate = document.getElementById('cloud-api-keys-create');
+  // Key kinds → the create body (Phase 2 reply §4). Scopes: qsos:read,
+  // qsos:write, logbook:admin (imports + webhooks), station:read.
+  const API_KEY_KINDS = {
+    standard:    { kind: 'secret',      environment: 'live', scopes: ['qsos:read', 'qsos:write'] },
+    readonly:    { kind: 'secret',      environment: 'live', scopes: ['qsos:read'] },
+    admin:       { kind: 'secret',      environment: 'live', scopes: ['qsos:read', 'qsos:write', 'logbook:admin'] },
+    publishable: { kind: 'publishable', environment: 'live', scopes: ['qsos:read', 'station:read'] },
+    test:        { kind: 'secret',      environment: 'test', scopes: ['qsos:read', 'qsos:write', 'logbook:admin'] },
+  };
+  if (apiKeysKind && apiKeysOrigin) {
+    apiKeysKind.addEventListener('change', () => apiKeysOrigin.classList.toggle('hidden', apiKeysKind.value !== 'publishable'));
+  }
   const apiKeysStatus = document.getElementById('cloud-api-keys-status');
   let apiKeysLoading = false;
 
@@ -175,7 +242,13 @@
       tr.style.borderTop = '1px solid var(--border-primary)';
       const revoked = !!k.revokedAt;
       if (revoked) tr.style.color = 'var(--text-tertiary)';
-      const scope = (k.scopes || []).includes('qsos:write') ? '' : ' (read only)';
+      const scopes = k.scopes || [];
+      const tags = [];
+      if (k.environment === 'test') tags.push('test');
+      if (k.kind === 'publishable') tags.push('browser');
+      else if (!scopes.includes('qsos:write')) tags.push('read only');
+      if (scopes.includes('logbook:admin')) tags.push('imports + webhooks');
+      const scope = tags.length ? ' (' + tags.join(', ') + ')' : '';
       const used = revoked ? 'revoked ' + fmtWhen(k.revokedAt)
         : (k.lastUsedAt ? fmtWhen(k.lastUsedAt) + (k.lastProgramId ? ' by ' + k.lastProgramId : '') : 'never');
       const name = document.createElement('td'); name.style.cssText = 'padding:6px 6px 6px 0;overflow-wrap:anywhere;'; name.textContent = (k.name || '') + scope;
@@ -224,10 +297,16 @@
     apiKeysCreate.addEventListener('click', async () => {
       const name = (apiKeysName && apiKeysName.value.trim()) || '';
       if (!name) { apiKeysSay('Give the key a name — the program that will use it.', 'var(--accent-red)'); return; }
-      const scopes = apiKeysReadonly && apiKeysReadonly.checked ? ['qsos:read'] : ['qsos:read', 'qsos:write'];
+      const spec = API_KEY_KINDS[(apiKeysKind && apiKeysKind.value) || 'standard'] || API_KEY_KINDS.standard;
+      const body = { name, kind: spec.kind, environment: spec.environment, scopes: spec.scopes };
+      if (spec.kind === 'publishable') {
+        const origin = (apiKeysOrigin && apiKeysOrigin.value.trim()) || '';
+        if (!/^https:\/\/[^/\s]+$/.test(origin)) { apiKeysSay('A browser key needs the website that will use it, as an origin: https://your-site.example (no path).', 'var(--accent-red)'); return; }
+        body.allowedOrigins = [origin];
+      }
       apiKeysCreate.disabled = true;
       apiKeysSay('Creating…');
-      const r = await window.api.apiKeysCreate({ name, scopes });
+      const r = await window.api.apiKeysCreate(body);
       apiKeysCreate.disabled = false;
       if (!r || r.error) { apiKeysSay(apiKeysErrorText(r), 'var(--accent-red)'); return; }
       const key = r.data || {};

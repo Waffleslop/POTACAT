@@ -3483,6 +3483,10 @@
         <div style="display:flex;gap:6px;margin-bottom:8px;">
           <button type="button" id="cloud-sync-now" class="btn btn-primary">Sync Now</button>
           <button type="button" id="cloud-initial-upload" class="btn">Upload Existing Log</button>
+          <!-- "Move your log from World Radio League": their ADIF export goes
+               through the Logbook's own import (sameness dedupe against the
+               local log), and the journal pushes the new records. -->
+          <button type="button" id="cloud-import-adif" class="btn" title="Import an ADIF file (a WRL, QRZ or other logger export) into this logbook; the new QSOs sync to the cloud">Import a log into Cloud…</button>
         </div>
         <div id="cloud-upload-progress" class="hidden" style="margin-bottom:8px;">
           <progress id="cloud-upload-bar" max="100" value="0" style="width:100%;height:18px;"></progress>
@@ -3514,15 +3518,28 @@
       </div>
       <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <input type="text" id="cloud-api-keys-name" placeholder="Name, e.g. N1MM shack PC" maxlength="60" style="flex:1;min-width:160px;">
-        <label class="checkbox-label" style="margin:0;"><input type="checkbox" id="cloud-api-keys-readonly"> Read only</label>
+        <select id="cloud-api-keys-kind" title="What the key may do">
+          <option value="standard">Log and read</option>
+          <option value="readonly">Read only</option>
+          <option value="admin">Log, read, imports and webhooks</option>
+          <option value="publishable">Browser (read only, one website)</option>
+          <option value="test">Test (sandbox, nothing reaches your log)</option>
+        </select>
+        <input type="text" id="cloud-api-keys-origin" class="hidden" placeholder="https://your-site.example" style="min-width:180px;" title="The website that may call the API with this key (exact origin, no path)">
         <button type="button" id="cloud-api-keys-create" class="btn">Create key</button>
       </div>
+      <span class="help-text" style="display:block;margin-top:2px;">Self-serve page for the same keys: <a href="https://login.potacat.com/keys" data-external style="color:var(--accent-blue);">login.potacat.com/keys</a>.</span>
       <div id="cloud-api-keys-status" class="help-text" style="margin-top:4px;"></div>
     </fieldset>
 
     <fieldset class="source-toggles" data-settings-tab="cloud">
       <legend>Embeddable Widgets</legend>
       <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Show your POTA activity on your QRZ page, website, or blog.</p>
+      <!-- Consent switch (cloud users.embed_public, Phase 2 reply §3): off =
+           every widget says "turned off by its owner" and browser API keys
+           are refused. Loaded from the cloud when the account view shows. -->
+      <label class="checkbox-label" id="cloud-embed-public-row" style="margin-top:4px;"><input type="checkbox" id="cloud-embed-public" checked> Show my widgets publicly (and allow browser API keys)</label>
+      <span id="cloud-embed-public-status" class="help-text" style="margin-left:24px;display:block;margin-bottom:6px;"></span>
       <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">Click <strong>Copy Embed</strong> to copy an iframe tag to your clipboard, then paste it into your page's HTML. Add <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:2px;">?theme=light</code> for light mode or <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:2px;">?display=square</code> for a square layout.</p>
       <div id="cloud-embeds-section">
         <table style="width:100%;font-size:12px;border-collapse:collapse;" id="cloud-embed-table">

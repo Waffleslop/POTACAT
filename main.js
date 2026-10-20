@@ -32133,6 +32133,7 @@ app.whenReady().then(() => {
       // Share Rig. Never on this list, so the click was refused in silence.
       'https://www.ecfr.gov/current/title-47/',
       'https://api.potacat.com/',
+      'https://login.potacat.com/',
       'http://rx.linkfanel.net', 'http://kiwisdr.com', 'http://websdr.org',
       // ECHOCAT mobile app store links (Settings footer promo).
       'https://apps.apple.com/', 'https://play.google.com/',
