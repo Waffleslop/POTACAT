@@ -4593,6 +4593,89 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // --- Fine control on the level sliders (K4RVC 2026-10-20) ----------------
+  // The TX Pwr / Drive / RX gain sliders are 56-80 px wide, so a mouse drag
+  // moves several units per pixel. Two extra ways in, both feeding the same
+  // 'input'/'change' events the existing handlers listen to: the mouse wheel
+  // over the slider or its readout steps by the slider's own step (Shift =
+  // 5 steps), and a click on the readout turns it into a box to type the
+  // number. A choices list (a radio with fixed power steps) is stepped
+  // option by option.
+  function jpWheelAndType(ctrl, valEl, opts) {
+    if (!ctrl || !valEl) return;
+    opts = opts || {};
+    var sel = opts.select || null;
+    function liveCtrl() { return (sel && !sel.classList.contains('hidden')) ? sel : ctrl; }
+    function fire(el) {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    function stepBy(dir, big) {
+      var el = liveCtrl();
+      if (el.disabled) return;
+      if (el.tagName === 'SELECT') {
+        var i = Math.max(0, Math.min(el.options.length - 1, el.selectedIndex + dir));
+        if (i === el.selectedIndex) return;
+        el.selectedIndex = i;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+      }
+      var step = Number(el.step) || 1;
+      var min = Number(el.min) || 0, max = Number(el.max);
+      if (!isFinite(max)) max = 100;
+      var v = Number(el.value) + dir * step * (big ? 5 : 1);
+      v = Math.max(min, Math.min(max, v));
+      var d = String(step).split('.')[1];
+      v = Number(v.toFixed(d ? d.length : 0));
+      if (v === Number(el.value)) return;
+      el.value = v;
+      fire(el);
+    }
+    function onWheel(e) {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      stepBy(e.deltaY < 0 ? 1 : -1, e.shiftKey);
+    }
+    ctrl.addEventListener('wheel', onWheel, { passive: false });
+    if (sel) sel.addEventListener('wheel', onWheel, { passive: false });
+    valEl.addEventListener('wheel', onWheel, { passive: false });
+    valEl.style.cursor = 'text';
+    if (!valEl.title) valEl.title = 'Scroll to adjust, click to type a value';
+    valEl.addEventListener('click', function () {
+      var el = liveCtrl();
+      if (el.disabled || el.tagName === 'SELECT' || valEl.querySelector('input')) return;
+      var box = document.createElement('input');
+      box.type = 'number';
+      box.min = el.min; box.max = el.max; box.step = el.step || 1;
+      box.value = String(Number(el.value));
+      box.style.cssText = 'width:52px;font-size:11px;background:var(--bg-tertiary,#0f1419);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;padding:0 3px;';
+      var old = valEl.textContent;
+      valEl.textContent = '';
+      valEl.appendChild(box);
+      box.focus(); box.select();
+      var done = false;
+      function finish(commit) {
+        if (done) return; done = true;
+        var v = Number(box.value);
+        if (commit && isFinite(v) && box.value.trim() !== '') {
+          v = Math.max(Number(el.min) || 0, Math.min(Number(el.max) || 100, v));
+          el.value = v;
+          fire(el);
+        } else {
+          valEl.textContent = old;
+        }
+      }
+      box.addEventListener('keydown', function (k) {
+        if (k.key === 'Enter') { k.preventDefault(); finish(true); }
+        else if (k.key === 'Escape') { k.preventDefault(); finish(false); }
+      });
+      box.addEventListener('blur', function () { finish(true); });
+    });
+  }
+  jpWheelAndType(jpRxGain, jpRxGainVal);
+  jpWheelAndType(jpTxGain, jpTxGainVal);
+  jpWheelAndType(jpRfRange, jpRfVal, { select: jpRfSelect });
+
   function stopPopoutAudio() {
     if (popoutAudioProcessor) { popoutAudioProcessor.disconnect(); popoutAudioProcessor = null; }
     popoutAnalyser = null;
