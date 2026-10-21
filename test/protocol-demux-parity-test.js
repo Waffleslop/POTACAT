@@ -82,7 +82,6 @@ const KNOWN_DRIFT = new Set([
   'freedv-set-tx:enabled',
   'freedv-set-squelch:enabled',
   'freedv-set-squelch:threshold',
-  'jtcat-set-band:freqKhz',
   'jtcat-waterfall:visible',
   'jtcat-start-multi-remote:slices',
   'save-echo-pref:key',

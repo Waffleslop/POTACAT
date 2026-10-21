@@ -83,6 +83,18 @@ function logStartupStage(name) {
 }
 
 const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard, powerSaveBlocker } = require('electron');
+// Desktop-to-desktop, Phase B: every JTCAT pop-out channel in
+// lib/remote-bridge.js OUT is routed through bridgeIpcToShack() first, so in
+// remote mode the SHACK's engine answers it and the local handler never runs.
+// One interception point instead of a remote branch in each handler (the
+// function itself is defined with the other remote-mode helpers below).
+const RemoteBridge = require('./lib/remote-bridge');
+{
+  const _ipcOn = ipcMain.on.bind(ipcMain);
+  ipcMain.on = (channel, fn) => _ipcOn(channel, RemoteBridge.OUT[channel]
+    ? (e, ...args) => { if (bridgeIpcToShack(channel, args, e)) return undefined; return fn(e, ...args); }
+    : fn);
+}
 const path = require('path');
 const fs = require('fs');
 const PACKAGE_VERSION = require('./package.json').version;
@@ -5270,6 +5282,59 @@ function pushActivationToRemoteShack() {
   });
 }
 
+// The JTCAT bridge (lib/remote-bridge.js): pop-out IPC → the shack's wire,
+// and the shack's JTCAT frames → the pop-out channels.
+const _remoteBridgeState = { holdTx: false, fullAuto: false, tune: false, running: false };
+let _remoteJtcatMode = '';
+let _remoteSpectrumTimers = [];
+function remoteJtcatSubscribeSpectrum(on) {
+  // A shack engine (re)start or a family switch stops its spectrum loop, so
+  // the subscription is re-sent after each, twice to outlast the rebuild.
+  for (const t of _remoteSpectrumTimers) clearTimeout(t);
+  _remoteSpectrumTimers = [];
+  if (!isRemoteLinked()) return;
+  if (!on) { remoteClient.sendRaw({ type: 'jtcat-spectrum-subscribe', on: false }); return; }
+  for (const ms of [400, 1600]) {
+    _remoteSpectrumTimers.push(setTimeout(() => {
+      if (isRemoteLinked()) remoteClient.sendRaw({ type: 'jtcat-spectrum-subscribe', on: true });
+    }, ms));
+  }
+}
+function bridgeIpcToShack(channel, args, e) {
+  if (!isRemoteMode()) return false;
+  const rule = RemoteBridge.OUT[channel];
+  if (!rule) return false;
+  const r = rule(args || [], _remoteBridgeState) || { drop: true };
+  if (r.drop) return true;
+  if (r.refuse) {
+    sendCatLog('[JTCAT] ' + r.refuse);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
+    return true;
+  }
+  if (!isRemoteLinked()) {
+    refuseRemoteNotLinked(e && e.sender);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) {
+      jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: REMOTE_NOT_LINKED_MSG });
+    }
+    return true;
+  }
+  for (const m of r.send || []) remoteClient.sendRaw(m);
+  if (channel === 'jtcat-start' || channel === 'jtcat-set-mode') _remoteJtcatMode = String((args && args[0]) || _remoteJtcatMode || 'FT8');
+  if (r.after === 'spectrum') remoteJtcatSubscribeSpectrum(true);
+  return true;
+}
+function bridgeInboundFromShack(msg) {
+  const rule = RemoteBridge.IN[msg.type];
+  if (!rule) return false;
+  RemoteBridge.trackState(_remoteBridgeState, msg);
+  const out = rule(msg) || [];
+  for (const [ch, payload] of out) {
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send(ch, payload);
+    if ((ch === 'jtcat-decode' || ch === 'jtcat-qso-state') && jtcatMapPopoutWin && !jtcatMapPopoutWin.isDestroyed()) jtcatMapPopoutWin.webContents.send(ch, payload);
+  }
+  return true;
+}
+
 const REMOTE_NO_RADIO_TO_SHARE_MSG = 'This POTACAT is itself driving a remote shack and has no radio to share. Connect your device to the shack directly.';
 const REMOTE_NOT_LINKED_MSG = 'The remote shack is not connected right now. POTACAT is reconnecting; try again in a moment.';
 
@@ -5405,6 +5470,10 @@ function ensureRemoteClient() {
     remoteShackInfo = null;
     pushRemoteShackInfo();
     if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true });
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
+      remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
+      remoteJtcatSubscribeSpectrum(true);
+    }
     if (settings.appMode === 'activator' || settings.activationActive) pushActivationToRemoteShack();
     // Update lastConnectedAt + lastReachableLeg on the persisted row.
     target.lastConnectedAt = Date.now();
@@ -5475,6 +5544,13 @@ function ensureRemoteClient() {
   // when a full snapshot arrived; the PTT watchdog and the VFO lock never
   // reached this desktop at all.
   remoteClient.on('message', (msg) => {
+    if (bridgeInboundFromShack(msg)) return;
+    // Skip Grid / Hound ride the shack's settings blob, not a JTCAT frame.
+    if (msg.type === 'settings-update' && msg.settings && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      for (const key of ['jtcatSkipTx1', 'jtcatHoundMode']) {
+        if (typeof msg.settings[key] === 'boolean') jtcatPopoutWin.webContents.send('jtcat-flag-state', { key, enabled: msg.settings[key] });
+      }
+    }
     const field = remoteRig.applyFrame(msg);
     if (field) {
       const v = remoteRig.get(field);
@@ -19630,6 +19706,22 @@ function connectRemote() {
     sendCatLog(`[JTCAT] ${label}: ${v ? 'ON' : 'OFF'} (remote)`);
   };
   remoteServer.on('jtcat-set-skip-tx1', ({ enabled } = {}) => applyJtcatFlag('jtcatSkipTx1', enabled, 'Skip Grid'));
+  // A remote JTCAT window's per-profile preference (lib/remote-bridge.js JTCAT_PREFS).
+  remoteServer.on('jtcat-set-pref', ({ key, value } = {}) => {
+    const v = RemoteBridge.acceptPref(key, value);
+    if (v === undefined) return;
+    if (key === 'jtcatSkipTx1' || key === 'jtcatHoundMode') { applyJtcatFlag(key, v, key === 'jtcatSkipTx1' ? 'Skip Grid' : 'Hound mode'); return; }
+    settings[key] = v;
+    saveSettings(settings);
+    sendCatLog(`[JTCAT] ${key} = ${JSON.stringify(v)} (remote)`);
+  });
+  // A remote JTCAT window's action that has no wire message of its own runs
+  // through this shack's handler of the same name (RELAY_CHANNELS only).
+  remoteServer.on('jtcat-relay', ({ channel, args } = {}) => {
+    if (!RemoteBridge.RELAY_CHANNELS.includes(channel)) return;
+    const fakeEvent = { sender: { send() {}, isDestroyed: () => true, id: -1 } };
+    ipcMain.emit(channel, fakeEvent, ...(Array.isArray(args) ? args.slice(0, 4) : []));
+  });
   remoteServer.on('jtcat-set-hound-mode', ({ enabled } = {}) => applyJtcatFlag('jtcatHoundMode', enabled, 'Hound mode'));
 
   remoteServer.on('jtcat-halt-tx', () => {
@@ -30137,6 +30229,15 @@ app.whenReady().then(() => {
     });
     jtcatPopoutWin.on('closed', () => {
       jtcatPopoutWin = null;
+      if (isRemoteMode()) {
+        // As locally: closing the window clears its QSO and halts TX, here on the shack.
+        if (isRemoteLinked()) {
+          remoteClient.sendRaw({ type: 'jtcat-cancel-qso' });
+          remoteClient.sendRaw({ type: 'jtcat-halt-tx' });
+          remoteJtcatSubscribeSpectrum(false);
+        }
+        _remoteJtcatMode = '';
+      }
       // The operator closed the window an idle-RX session was running in (a
       // teardown that closes it itself clears the flag first). The session is
       // over — without this its flag outlived the engine.
@@ -30190,7 +30291,6 @@ app.whenReady().then(() => {
     });
   };
   ipcMain.on('jtcat-popout-open', (_e, mode) => {
-    if (refuseRemoteFeature('jtcat')) return;
     // A More-menu pick (PSK31 / JTTY) names its mode. A fresh window reads
     // settings.jtcatLastMode (saved by the renderer first, IPC is ordered);
     // an already-open window must be TOLD, or it stays in whatever it was.
@@ -33099,6 +33199,16 @@ app.whenReady().then(() => {
     // the laptop.
     if (isRemoteMode()) {
       if (!isRemoteLinked()) { refuseRemoteNotLinked(_e.sender); return; }
+      // A band pick in the JTCAT window: the shack's jtcat-set-band, which also
+      // moves its pre-TX dial anchor (a plain tune would leave the anchor on
+      // the old band and the shack would refuse to transmit on the new one).
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _e.sender === jtcatPopoutWin.webContents) {
+        const khz = parseFloat(frequency);
+        if (isFinite(khz) && khz > 0) {
+          remoteClient.sendRaw({ type: 'jtcat-set-band', band: freqToBand(khz / 1000) || '', freqKhz: khz });
+          return;
+        }
+      }
       // tuneRadio's `frequency` param is kHz; sendTune expects Hz (it
       // formats the wire's freqKhz itself — see remote-client.js). Passing
       // kHz straight through shrank every QSY 1000× on the wire: the shack
@@ -33822,7 +33932,7 @@ app.whenReady().then(() => {
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
-  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion() }));
+  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode() }));
   // Hidden spots (see changeSpotHides). The window's pre-sync list lived in its
   // localStorage; it is folded in once and then cleared there.
   ipcMain.handle('spot-hides-get', () => ({ hides: spotHidesNow(), skips: spotSkipsNow(), migrated: !!settings.spotHidesMigrated }));
@@ -35546,6 +35656,9 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-settings', (_e, newSettings) => {
+    if (isRemoteLinked() && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _e.sender === jtcatPopoutWin.webContents) {
+      for (const m of RemoteBridge.prefMessages(newSettings)) remoteClient.sendRaw(m);
+    }
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
@@ -37080,7 +37193,7 @@ app.whenReady().then(() => {
   });
 
   // --- JTCAT IPC ---
-  ipcMain.on('jtcat-start', (_e, mode) => { if (!refuseRemoteFeature('jtcat')) startJtcat(mode); });
+  ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
   ipcMain.on('jtcat-stop', () => {
     stopJtcat(); // clears the spot target too (single choke point in stopJtcat)
   });

@@ -1,6 +1,11 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // Driving a remote shack: its FT8 engine's spectrum (0..3000 Hz, 0..255 bins).
+  onJtcatRemoteSpectrum: (cb) => ipcRenderer.on('jtcat-remote-spectrum', (_e, bins) => cb(bins)),
+  // Mode hopping (the window called these without the preload having them).
+  jtcatModeHop: (opts) => ipcRenderer.send('jtcat-mode-hop', opts),
+  onJtcatModeHopped: (cb) => ipcRenderer.on('jtcat-mode-hopped', (_e, d) => cb(d)),
   platform: process.platform,
   // JTCAT engine control
   jtcatStart: (mode) => ipcRenderer.send('jtcat-start', mode),

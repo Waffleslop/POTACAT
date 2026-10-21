@@ -67,6 +67,12 @@ function _applyPopoutTheme(payload) {
   // Flex-specific fault (the slice isn't routed to POTACAT's DAX RX channel),
   // not a meaningful signal on any other rig, so the hint is Flex-only.
   var popoutIsFlex = false;
+  // Driving a remote shack (main get-settings remoteShack): the FT8 engine,
+  // its audio and its transmitter are the SHACK's. This window captures
+  // nothing, sends no audio, and draws the shack's spectrum (spec B2).
+  var remoteShackMode = false;
+  var remoteWfBins = null;      // the latest jtcat-spectrum bins from the shack (0..3000 Hz, 0..255)
+  var remoteWfNewFrame = false; // one waterfall line per frame that arrives
 
   // ULTRACAT (tier-2 easter egg) — reveal/hide the Full Auto CQ controls.
   function applyUltracat(on) {
@@ -148,7 +154,7 @@ function _applyPopoutTheme(payload) {
     // Evaluated at popout open; a rig switch mid-session re-opens JTCAT anyway.
     if (window.RigFamily) {
       var activeRigForMulti = (s.rigs || []).find(function(r) { return r && r.id === s.activeRigId; });
-      popoutIsFlex = window.RigFamily.isFlex(activeRigForMulti);
+      popoutIsFlex = !s.remoteShack && window.RigFamily.isFlex(activeRigForMulti);
       if (!popoutIsFlex) {
         var multiBtnEl = document.getElementById('jp-multi-btn');
         if (multiBtnEl) multiBtnEl.classList.add('hidden');
@@ -2134,6 +2140,7 @@ function _applyPopoutTheme(payload) {
     var sliceData = multiSliceConfigs.map(function(c) {
       return { sliceId: c.sliceId, mode: modeSelect.value, band: c.band, freqKhz: BAND_FREQS[c.band] || 14074, slicePort: c.slicePort };
     });
+    if (remoteShackMode) return; // multi-slice runs on the shack PC
     window.api.jtcatStartMulti(sliceData);
 
     // Start audio captures
@@ -4205,18 +4212,50 @@ function _applyPopoutTheme(payload) {
     }
     if (!bandBtn) bandBtn = document.querySelector('.jp-band-opt[data-band="20m"]');
     if (bandBtn) selectBand(bandBtn, false);
+    if (s.remoteShack) enterRemoteShackMode();
     window.api.jtcatStart(modeSelect.value);
     // IPC is ordered: lands after jtcat-start built the PSK/JTTY slice, so the
     // restored audio frequency survives the fresh engine's 1500 Hz default.
     if (modeSelect.value === 'PSK31') pskSyncFreq();
     if (modeSelect.value === 'JTTY') jttySyncFreq();
-    // Start audio capture directly in the popout window
-    startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
+    // Start audio capture directly in the popout window (never for a remote
+    // shack: its engine hears its own radio).
+    if (!remoteShackMode) startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
   });
+
+  // The shack's FT8 engine, from here. The waterfall loop below reads a
+  // stand-in analyser that serves the shack's bins as the first half of a
+  // 6 kHz-wide spectrum, so markers, floor and the JTTY clear-spot search all
+  // work unchanged; one line is drawn per frame that arrives (~10 a second).
+  function enterRemoteShackMode() {
+    if (remoteShackMode) return;
+    remoteShackMode = true;
+    popoutAnalyser = {
+      get frequencyBinCount() { return remoteWfBins ? remoteWfBins.length * 2 : 320; },
+      getByteFrequencyData: function(arr) {
+        arr.fill(0);
+        if (remoteWfBins) for (var i = 0; i < remoteWfBins.length && i < arr.length; i++) arr[i] = remoteWfBins[i];
+      },
+    };
+    if (window.api.onJtcatRemoteSpectrum) {
+      window.api.onJtcatRemoteSpectrum(function(bins) {
+        if (!bins || !bins.length) return;
+        remoteWfBins = bins;
+        remoteWfNewFrame = true;
+      });
+    }
+    var mb = document.getElementById('jp-multi-btn');
+    if (mb) mb.classList.add('hidden');
+    var mp = document.getElementById('jp-multi-panel');
+    if (mp) mp.classList.add('hidden');
+    if (!popoutWaterfallAnim) popoutWaterfallAnim = requestAnimationFrame(popoutWaterfallLoop);
+    if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT popout] Driving the remote shack\'s FT8 engine: no local audio capture');
+  }
 
   // Silence watchdog: engine detected 3+ cycles of zeros — restart audio capture
   if (window.api.onRestartPopoutAudio) {
     window.api.onRestartPopoutAudio(async function() {
+      if (remoteShackMode) return;
       console.log('[JTCAT popout] Silence watchdog — restarting audio capture');
       var s = await window.api.getSettings();
       startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
@@ -5206,7 +5245,9 @@ function _applyPopoutTheme(payload) {
 
       var wfNowMs = Date.now();
       // >=60 means "every animation frame" — don't let timer jitter drop lines.
-      var dueForLine = wfLinesPerSec >= 60 || (wfNowMs - wfLastLineTs) >= (1000 / wfLinesPerSec);
+      var dueForLine = remoteShackMode ? remoteWfNewFrame
+        : (wfLinesPerSec >= 60 || (wfNowMs - wfLastLineTs) >= (1000 / wfLinesPerSec));
+      if (remoteShackMode) remoteWfNewFrame = false;
       if (dueForLine) {
         wfLastLineTs = wfNowMs;
 
@@ -5281,7 +5322,7 @@ function _applyPopoutTheme(payload) {
 
       // Auto-detect quietest TX frequency (~every 0.5s)
       popoutQuietFreqFrame++;
-      if (popoutQuietFreqFrame % 30 === 0) {
+      if (!remoteShackMode && popoutQuietFreqFrame % 30 === 0) {
         var binHz = nyquist / freqData.length;
         var windowBins = Math.round(50 / binHz);
         var startBin = Math.round(200 / binHz);
@@ -5302,7 +5343,7 @@ function _applyPopoutTheme(payload) {
 
       // Send spectrum to main process for remote/ECHOCAT (~10fps)
       popoutSpectrumFrame++;
-      if (popoutSpectrumFrame % 6 === 0) {
+      if (!remoteShackMode && popoutSpectrumFrame % 6 === 0) {
         var specBins = new Array(w);
         for (var sx = 0; sx < w; sx++) {
           specBins[sx] = freqData[Math.floor(sx * passbandBins / w)];
