@@ -2925,6 +2925,50 @@ test('rigctld PTT readback: 3 (ON_DATA) and 2 (ON_MIC) count as transmitting', (
   assert.deepStrictEqual(states, [true, true, true, false]);
 });
 
+console.log('\n=== CivCodec: a lost DATA frame is noticed and re-sent (IK4IDF IC-7300, 2026-10-21) ===');
+{
+  const IC7300_MODEL = { brand: 'Icom', protocol: 'civ', civAddr: 0x94, caps: { filter: true, filterType: 'civ' }, cw: {}, maxPower: 100 };
+  const reply = (bytes) => Buffer.from([0xFE, 0xFE, 0xE0, 0x94].concat(bytes, [0xFD]));
+  test('CIV: the radio still in USB after a DATA set gets DATA re-sent, twice at most, and the log says why', () => {
+    const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+    const logs = [];
+    codec.on('log', (l) => logs.push(l));
+    codec.onData(reply([0x04, 0x01, 0x02]));       // USB, FIL2
+    codec.setMode('FT8', 28074000);
+    assert.ok(writes.some(w => w.includes('1a060102fd')), 'DATA1 + FIL2 sent');
+    writes.length = 0;
+    codec.onData(reply([0x1A, 0x06, 0x00, 0x00])); // the radio says DATA off: the frame was lost
+    assert.ok(writes.some(w => w.includes('1a060102fd')), 're-sent: ' + writes.join(' '));
+    assert.ok(logs.some(l => /DATA frame was lost/.test(l)));
+    writes.length = 0;
+    codec.onData(reply([0x1A, 0x06, 0x00, 0x00]));
+    codec.onData(reply([0x1A, 0x06, 0x00, 0x00]));
+    assert.strictEqual(writes.filter(w => w.includes('1a0601')).length, 1, 'two re-sends in all, then it stops');
+    assert.ok(logs.some(l => /stayed in DATA off after 2 re-sends/.test(l)));
+  });
+  test('CIV: a confirmed DATA state, by reply or by the radio\'s own 0x26 broadcast, sends nothing more', () => {
+    const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+    codec.onData(reply([0x04, 0x01, 0x02]));
+    codec.setMode('FT8', 7074000);
+    writes.length = 0;
+    codec.onData(reply([0x26, 0x00, 0x01, 0x01, 0x02])); // transceive: USB, DATA1, FIL2
+    codec.onData(reply([0x1A, 0x06, 0x01, 0x02]));
+    assert.strictEqual(writes.length, 0);
+    // An SSB tune wants DATA off and gets it: nothing re-sent either.
+    codec.setMode('USB', 14304000);
+    writes.length = 0;
+    codec.onData(reply([0x1A, 0x06, 0x00, 0x00]));
+    assert.strictEqual(writes.length, 0);
+  });
+  test('CIV: the 0x26 broadcast no longer logs "unhandled frame" on every tune', () => {
+    const { codec } = captureWrites(CivCodec, IC7300_MODEL);
+    const logs = [];
+    codec.on('log', (l) => logs.push(l));
+    codec.onData(reply([0x26, 0x00, 0x01, 0x01, 0x02]));
+    assert.ok(!logs.some(l => /unhandled CI-V frame cmd=0x26/.test(l)));
+  });
+}
+
 console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
   console.log('SOME TESTS FAILED');
