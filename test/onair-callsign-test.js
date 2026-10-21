@@ -54,5 +54,17 @@ test('Settings > Station: owner callsign populated and saved', () => {
   assert.ok(/ownerCallsign: setOwnerCallsign \? setOwnerCallsign\.value\.trim\(\)\.toUpperCase\(\) : '',/.test(app));
 });
 
+test('ECHOCAT wire: set-activator-park.onAirCallsign in, activator-state.onAirCallsign out, capability advertised', () => {
+  const srv = R('lib/remote-server.js'), proto = R('lib/echocat-protocol.js'), pre = R('preload.js');
+  assert.ok(/onAirCallsign: typeof msg\.onAirCallsign === 'string' \? msg\.onAirCallsign : undefined,/.test(srv), 'absent stays undefined (leave alone), "" clears');
+  assert.ok(/'activation-onair-call',/.test(srv), 'capability');
+  assert.ok(/'set-activator-park': \{[^\n]*onAirCallsign: f\.optString/.test(proto), 'registry field');
+  assert.ok(/if \(typeof onAirCallsign === 'string'\) \{\n\s*settings\.activatorOnAirCallsign = cleanOnAirCallsign\(onAirCallsign\);/.test(main), 'main stores it cleaned');
+  assert.ok(/function cleanOnAirCallsign\(v\) \{\n\s*return String\(v \|\| ''\)\.toUpperCase\(\)\.replace\(\/\[\^A-Z0-9\/\]\/g, ''\)\.slice\(0, 12\);/.test(main));
+  assert.ok(/onAirCallsign: settings\.activatorOnAirCallsign \|\| '',/.test(main), 'activator-state carries it (also replayed at connect)');
+  assert.ok(/\(has\('activatorOnAirCallsign'\) && newSettings\.activatorOnAirCallsign !== settings\.activatorOnAirCallsign\)/.test(main), 'a desktop edit pushes to the device');
+  assert.ok(/onActivatorOnAirCallsign:/.test(pre) && /window\.api\.onActivatorOnAirCallsign\(\(v\) => \{ onAirInput\.value = v \|\| ''; \}\);/.test(app), 'a device edit shows on the desktop bar');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

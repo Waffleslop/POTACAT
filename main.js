@@ -15113,6 +15113,10 @@ function agSwitchForFreq(freqKhz) {
 }
 
 // --- ECHOCAT ---
+// On-air callsign as the activator bar stores it: A-Z 0-9 /, at most 12.
+function cleanOnAirCallsign(v) {
+  return String(v || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
+}
 function pushActivatorStateToPhone() {
   if (!remoteServer || !remoteServer.hasClient()) return;
   const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref).map(p => ({ ref: p.ref, name: p.name || '' }));
@@ -15120,6 +15124,7 @@ function pushActivatorStateToPhone() {
     appMode: settings.appMode || 'hunter',
     parkRefs,
     grid: settings.grid || '',
+    onAirCallsign: settings.activatorOnAirCallsign || '', // '' = the Station callsign
   });
   remoteServer.sendSessionContacts();
 }
@@ -18334,9 +18339,15 @@ function connectRemote() {
     sendCatLog(`[events] set-event-progress ${eventId}: ${itemId}=${!!worked}`);
   });
 
-  remoteServer.on('set-activator-park', async ({ parkRef, activationType, activationName: actName, sig }) => {
+  remoteServer.on('set-activator-park', async ({ parkRef, activationType, activationName: actName, sig, onAirCallsign }) => {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType);
     settings.appMode = 'activator';
+    // The device's On-air call field: absent leaves the remembered value,
+    // '' clears it. Same cleaning as the desktop activator bar.
+    if (typeof onAirCallsign === 'string') {
+      settings.activatorOnAirCallsign = cleanOnAirCallsign(onAirCallsign);
+      if (win && !win.isDestroyed()) win.webContents.send('activator-onair-callsign', settings.activatorOnAirCallsign);
+    }
     if (parkRef) {
       // The phone has always sent `sig` on this message (lib/echocat-protocol.js)
       // and main destructured it without ever reading it, so a phone-started
@@ -35020,6 +35031,7 @@ app.whenReady().then(() => {
       (has('wkPttTail') && newSettings.wkPttTail !== settings.wkPttTail);
 
     const activatorStateChanged = (has('appMode') && newSettings.appMode !== settings.appMode) ||
+      (has('activatorOnAirCallsign') && newSettings.activatorOnAirCallsign !== settings.activatorOnAirCallsign) ||
       (has('activatorParkRefs') && JSON.stringify(newSettings.activatorParkRefs) !== JSON.stringify(settings.activatorParkRefs));
 
     // Net reminders: deep-equal so the common case (user toggling

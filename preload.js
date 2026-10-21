@@ -315,6 +315,7 @@ contextBridge.exposeInMainWorld('api', {
   choosePotaActivationsFile: () => ipcRenderer.invoke('choose-pota-activations-file'),
   getActivatedParks: () => ipcRenderer.invoke('get-activated-parks'),
   onActivatedParks: (cb) => ipcRenderer.on('activated-parks', (_e, data) => cb(data)),
+  onActivatorOnAirCallsign: (cb) => ipcRenderer.on('activator-onair-callsign', (_e, v) => cb(v)),
   onWsjtxStatus: (cb) => ipcRenderer.on('wsjtx-status', (_e, s) => cb(s)),
   onWsjtxState: (cb) => ipcRenderer.on('wsjtx-state', (_e, s) => cb(s)),
   onWsjtxDecode: (cb) => ipcRenderer.on('wsjtx-decode', (_e, d) => cb(d)),

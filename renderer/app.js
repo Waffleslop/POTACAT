@@ -25851,6 +25851,10 @@ if (activatorParkRefInput) {
   // On-air callsign for this activation (STATION_CALLSIGN on its QSOs).
   // Remembered across restarts like the park refs; blank = Station callsign.
   const onAirInput = document.getElementById('activator-oncall');
+  // Set from an ECHOCAT device (set-activator-park.onAirCallsign).
+  if (onAirInput && window.api.onActivatorOnAirCallsign) {
+    window.api.onActivatorOnAirCallsign((v) => { onAirInput.value = v || ''; });
+  }
   if (onAirInput) {
     window.api.getSettings().then((s) => {
       onAirInput.value = (s && s.activatorOnAirCallsign) || '';
