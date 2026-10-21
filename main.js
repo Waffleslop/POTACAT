@@ -5431,7 +5431,7 @@ function ensureRemoteClient() {
   remoteClient.on('log', (msg) => sendCatLog(msg));
   remoteClient.on('connecting', ({ leg, host }) => {
     if (win && !win.isDestroyed()) {
-      win.webContents.send('remote-client-status', { state: 'connecting', leg, host });
+      win.webContents.send('remote-client-status', { state: 'connecting', leg, host, targetId: target.id, name: target.name });
     }
   });
   remoteClient.on('connected', (info) => {
@@ -5482,7 +5482,7 @@ function ensureRemoteClient() {
   });
   remoteClient.on('disconnected', ({ wasAuthed }) => {
     if (win && !win.isDestroyed()) {
-      win.webContents.send('remote-client-status', { state: 'disconnected', wasAuthed });
+      win.webContents.send('remote-client-status', { state: 'disconnected', wasAuthed, targetId: target.id, name: target.name });
       if (wasAuthed) win.webContents.send('cat-status', { connected: false });
     }
     // Tear the answerer down with the link — its peer is dead and the creds
@@ -15644,6 +15644,16 @@ function agSwitchForFreq(freqKhz) {
 function cleanOnAirCallsign(v) {
   return String(v || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
 }
+// The rig list a connected device (phone, or another POTACAT driving this
+// shack) switches between. `family` lets it hide rig-scoped UI (multi-slice
+// is Flex-only) without knowing catTarget shapes. Sent at connect and on
+// every rig-list or active-rig change.
+function pushRigListToRemote() {
+  if (!remoteServer || !remoteServer.hasClient || !remoteServer.hasClient()) return;
+  const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name, family: RigFamily.rigFamily(r) }));
+  remoteServer.sendRigsToClient(rigs, settings.activeRigId || null);
+}
+
 function pushActivatorStateToPhone() {
   if (!remoteServer || !remoteServer.hasClient()) return;
   const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref).map(p => ({ ref: p.ref, name: p.name || '' }));
@@ -17916,8 +17926,7 @@ function connectRemote() {
     });
     // Send rig list so phone can switch rigs. `family` lets the phone hide
     // rig-scoped UI (multi-slice is Flex-only) without knowing catTarget shapes.
-    const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name, family: RigFamily.rigFamily(r) }));
-    remoteServer.sendRigsToClient(rigs, settings.activeRigId || null);
+    pushRigListToRemote();
     // Push activator state
     pushActivatorStateToPhone();
     // Push TX EQ state so the iOS app's EQ controls hydrate to current
@@ -35656,6 +35665,8 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-settings', (_e, newSettings) => {
+    const _rigsBeforeSave = JSON.stringify(settings.rigs || []);
+    const _activeRigBeforeSave = settings.activeRigId;
     if (isRemoteLinked() && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _e.sender === jtcatPopoutWin.webContents) {
       for (const m of RemoteBridge.prefMessages(newSettings)) remoteClient.sendRaw(m);
     }
@@ -36131,6 +36142,9 @@ app.whenReady().then(() => {
     }
 
     // Push activator state to phone when park refs or app mode change
+    if ((has('rigs') && JSON.stringify(newSettings.rigs) !== _rigsBeforeSave) || (has('activeRigId') && newSettings.activeRigId !== _activeRigBeforeSave)) {
+      pushRigListToRemote();
+    }
     if (activatorStateChanged) {
       pushActivatorStateToPhone();
       pushActivationToRemoteShack();
