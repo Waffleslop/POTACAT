@@ -13,4 +13,6 @@ contextBridge.exposeInMainWorld('api', {
   onStunConfig: (cb) => ipcRenderer.on('rac-stun-config', (_e, c) => cb(c)),
   onPtt: (cb) => ipcRenderer.on('rac-ptt', (_e, on) => cb(on)),
   onStop: (cb) => ipcRenderer.on('rac-stop', () => cb()),
+  // Output device, mic, volume, mute for the shack's audio (settings.remoteShackAudio).
+  onConfig: (cb) => ipcRenderer.on('rac-config', (_e, c) => cb(c)),
 });

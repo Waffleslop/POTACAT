@@ -239,6 +239,28 @@ test('the renderer greys unavailable entry points and answers a click with the r
   assert.ok(/onRemoteShackInfo\(\(info\) => applyRemoteFeatureGating\(!!\(info && info\.remote\)\)\)/.test(app));
 });
 
+test('shack audio: chosen devices are applied, refused out loud, never swapped', () => {
+  const ans = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote-audio-answerer.js'), 'utf8');
+  assert.ok(/if \(this\._micDeviceId\) audio\.deviceId = \{ exact: this\._micDeviceId \};/.test(ans), 'exact mic, no fallback');
+  const shell = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote-audio-client.html'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/catch \(e\) \{\n\s+el\.muted = true;\n\s+window\.api\.state\(\{ sinkError:/.test(shell), 'an output that will not open mutes, it does not fall back');
+  assert.ok(/a\.setMicDeviceId\(cfg\.inputId\); a\.start\(\);/.test(shell), 'the mic is chosen before capture');
+  assert.ok(/peak > 1e-4/.test(shell) && /now - silentSince > 10000/.test(shell), 'digital silence for 10 s is reported');
+  const h = main.slice(main.indexOf("ipcMain.on('rac-state', (_e, s) => {"));
+  assert.ok(/if \(s\.sinkError\)/.test(h.slice(0, 2500)) && /if \(typeof s\.rxSilent === 'boolean'\)/.test(h.slice(0, 2500)));
+  const start = fnBody(main, 'async function startRemoteClientAudio() {');
+  assert.ok(start.indexOf("send('rac-config'") > 0 && start.indexOf("send('rac-config'") < start.lastIndexOf("send('rac-start')"), 'config before start');
+  assert.ok(/'remoteShackAudio',/.test(main.slice(main.indexOf('const GLOBAL_KEYS'), main.indexOf('const GLOBAL_KEYS') + 3000)), 'machine-scoped');
+});
+
+test('hold-a-key PTT: off by default, never while typing, released on keyup and blur', () => {
+  const prefs = fnBody(main, 'function remoteShackAudioPrefs() {');
+  assert.ok(/pttKey: REMOTE_SHACK_PTT_KEYS\.includes\(a\.pttKey\) \? a\.pttKey : ''/.test(prefs));
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/e\.repeat \|\| e\.ctrlKey \|\| e\.altKey \|\| e\.metaKey\) return;\n\s+if \(typingIn\(document\.activeElement\)\) return;/.test(app));
+  assert.ok(/window\.addEventListener\('blur', \(\) => \{ if \(_pttKeyHeld\) \{ _pttKeyHeld = false; ptt\.up\(\); \} \}\);/.test(app));
+});
+
 const asyncTests = [];
 asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
   const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));

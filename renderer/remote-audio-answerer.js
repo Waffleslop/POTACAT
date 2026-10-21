@@ -31,7 +31,13 @@
       // ICE that arrives before we've applied the remote offer must be
       // buffered, or addIceCandidate throws and the candidate is lost.
       this._pendingIce = [];
+      this._micDeviceId = '';
     }
+
+    // The microphone to open at start() ('' = the system default). A chosen
+    // device that cannot be opened is reported, never swapped for another
+    // (the audio rule: a chosen device is never silently replaced).
+    setMicDeviceId(id) { this._micDeviceId = String(id || ''); }
 
     // Adopt ICE config from the shack's stun-config. Full TURN iceServers
     // when present (Model A), else legacy STUN, else local-only.
@@ -86,9 +92,9 @@
       if (this._started) return;
       this._started = true;
       try {
-        this._mic = await this._getUserMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-        });
+        const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+        if (this._micDeviceId) audio.deviceId = { exact: this._micDeviceId };
+        this._mic = await this._getUserMedia({ audio });
         // Muted until PTT — no VOX, no accidental open mic.
         this._mic.getAudioTracks().forEach((t) => { t.enabled = false; });
       } catch (e) {

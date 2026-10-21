@@ -644,6 +644,7 @@ const GLOBAL_KEYS = new Set([
   'profiles',          // (reserved — currently unused but reserved against name collision)
   'rigs',              // rig hardware definitions
   'activeRigId',       // last-selected rig (global default)
+  'remoteShackAudio',  // this PC's speaker/mic/volume/PTT key for a remote shack (machine devices)
   'firstRun',          // first-time-launch flag
   'yaesuScopeFps',     // band-scope helper frame rate — a display/machine property
   'yaesuScopeHelperPath', // explicit yaesu-scope binary on THIS machine
@@ -5160,6 +5161,8 @@ function remoteShackInfoNow() {
     activeRigId: info.activeRigId || null,
     rigName: activeRig ? (activeRig.name || '') : (target.rigModel || ''),
     radioConnected: remoteRig.catConnected(),
+    audioSilent: !!info.audioSilent,
+    audio: remoteShackAudioPrefs(),
     stationCallsign: target.stationCallsign || null,
   };
 }
@@ -21009,6 +21012,50 @@ function _racSend(channel, payload) {
   remoteAudioClientWin.webContents.send(channel, payload);
 }
 
+// The shack's audio on this desktop: where it plays, which mic keys into it,
+// how loud, and the optional hold-a-key PTT. Saved as settings.remoteShackAudio
+// (machine devices, so the one PC's choice). Spec A5.
+const REMOTE_SHACK_PTT_KEYS = ['', 'Space', 'Backquote', 'F12'];
+function remoteShackAudioPrefs() {
+  const a = (settings && settings.remoteShackAudio) || {};
+  const vol = Number(a.volume);
+  return {
+    outputId: typeof a.outputId === 'string' ? a.outputId : '',
+    inputId: typeof a.inputId === 'string' ? a.inputId : '',
+    volume: Number.isFinite(vol) ? Math.max(0, Math.min(1, vol)) : 1,
+    muted: !!a.muted,
+    pttKey: REMOTE_SHACK_PTT_KEYS.includes(a.pttKey) ? a.pttKey : '',
+  };
+}
+function pushRemoteShackAudioConfig() {
+  const p = remoteShackAudioPrefs();
+  _racSend('rac-config', { outputId: p.outputId, inputId: p.inputId, volume: p.volume, muted: p.muted });
+  if (win && !win.isDestroyed()) win.webContents.send('remote-shack-audio', p);
+}
+ipcMain.handle('remote-shack-audio-get', () => remoteShackAudioPrefs());
+ipcMain.handle('remote-shack-audio-set', (_e, patch) => {
+  const before = remoteShackAudioPrefs();
+  const next = { ...before };
+  if (patch && typeof patch === 'object') {
+    if (typeof patch.outputId === 'string') next.outputId = patch.outputId.slice(0, 256);
+    if (typeof patch.inputId === 'string') next.inputId = patch.inputId.slice(0, 256);
+    if (patch.volume !== undefined && Number.isFinite(Number(patch.volume))) next.volume = Math.max(0, Math.min(1, Number(patch.volume)));
+    if (patch.muted !== undefined) next.muted = !!patch.muted;
+    if (patch.pttKey !== undefined && REMOTE_SHACK_PTT_KEYS.includes(patch.pttKey)) next.pttKey = patch.pttKey;
+  }
+  settings.remoteShackAudio = next;
+  saveSettings(settings);
+  pushRemoteShackAudioConfig();
+  // A different mic only takes effect on a fresh capture: restart the link's
+  // audio (it reconnects in about a second).
+  if (next.inputId !== before.inputId && remoteAudioClientWin && !remoteAudioClientWin.isDestroyed()) {
+    sendCatLog('[remote-client-audio] microphone changed — restarting the shack audio');
+    stopRemoteClientAudio();
+    setTimeout(() => { if (isRemoteLinked()) startRemoteClientAudio(); }, 300);
+  }
+  return next;
+});
+
 async function startRemoteClientAudio() {
   if (!remoteClient) { sendCatLog('[remote-client-audio] no active remote shack to listen to'); return; }
   if (process.platform === 'darwin') {
@@ -21018,6 +21065,7 @@ async function startRemoteClientAudio() {
     }
   }
   if (remoteAudioClientWin && !remoteAudioClientWin.isDestroyed()) {
+    pushRemoteShackAudioConfig();
     remoteAudioClientWin.webContents.send('rac-start'); // re-arm an existing window
     return;
   }
@@ -21040,6 +21088,9 @@ async function startRemoteClientAudio() {
   remoteAudioClientWin.loadFile(path.join(__dirname, 'renderer', 'remote-audio-client.html'));
   remoteAudioClientWin.webContents.on('did-finish-load', () => {
     if (!remoteAudioClientWin || remoteAudioClientWin.isDestroyed()) return;
+    // Device + level first, so the mic opened at start is the chosen one.
+    const p = remoteShackAudioPrefs();
+    remoteAudioClientWin.webContents.send('rac-config', { outputId: p.outputId, inputId: p.inputId, volume: p.volume, muted: p.muted });
     remoteAudioClientWin.webContents.send('rac-start');
     // Window is live — flush any rac-* that raced ahead of the load.
     _racReady = true;
@@ -21068,6 +21119,19 @@ ipcMain.on('rac-out-signal', (_e, data) => { if (remoteClient && data) remoteCli
 ipcMain.on('rac-state', (_e, s) => {
   if (!s) return;
   if (s.error) sendCatLog('[remote-client-audio] ' + s.error);
+  if (s.error && /^mic:/.test(s.error) && win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: 'The microphone for the remote shack would not open (' + s.error.slice(4).trim() + '). Pick one in Settings > ECHOCAT > Driving a remote shack. Listening still works.', warn: true, duration: 12000 });
+  }
+  if (s.sinkError) {
+    const msg = 'The speaker chosen for the remote shack would not open (' + s.sinkError + '). The shack audio is muted rather than sent somewhere else. Pick another in Settings > ECHOCAT > Driving a remote shack.';
+    sendCatLog('[remote-client-audio] ' + msg);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
+  }
+  if (typeof s.rxSilent === 'boolean') {
+    remoteShackInfo = { ...(remoteShackInfo || {}), audioSilent: s.rxSilent };
+    sendCatLog(s.rxSilent ? '[remote-client-audio] no audio arriving from the shack for 10 s (the link is up; the shack\'s audio source or its ECHOCAT audio may be off)' : '[remote-client-audio] audio from the shack is arriving again');
+    pushRemoteShackInfo();
+  }
   // Relay diagnostics — make the double-CGNAT verification self-evident in the
   // [CAT] log instead of "no audio, no idea why".
   if (s.adopted) {

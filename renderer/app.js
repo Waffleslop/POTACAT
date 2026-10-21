@@ -7387,10 +7387,13 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     if (state.state === 'connected') {
       const rig = remoteShack.rigName ? (' · ' + remoteShack.rigName) : '';
       const rtt = Number.isFinite(remoteShack.rttMs) ? (' · ' + remoteShack.rttMs + ' ms') : '';
-      chip.textContent = '🔗 ' + name + rig + leg + rtt;
+      const silent = remoteShack.audioSilent ? ' · NO AUDIO' : '';
+      chip.textContent = '🔗 ' + name + rig + leg + rtt + silent;
       chip.style.background = '#4ecca3';
       chip.style.color = '#0a1a14';
-      chip.title = 'Connected to ' + name + ' — click to manage';
+      chip.title = remoteShack.audioSilent
+        ? 'Connected to ' + name + ', but no audio has arrived from the shack for 10 s. Check the shack\'s audio source and that ECHOCAT is on there.'
+        : 'Connected to ' + name + ' — click to manage';
     } else if (state.state === 'connecting' || state.state === 'authing') {
       chip.textContent = '🔗 ' + name + ' · connecting';
       chip.style.background = '#d4a64a';
@@ -7489,6 +7492,83 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     if (ptt && window.api.onRemoteClientPttReleased) {
       window.api.onRemoteClientPttReleased(() => { ptt.up(); });
     }
+    // Hold-a-key PTT (Settings > ECHOCAT > Driving a remote shack; off by
+    // default). Never while typing in a box, never on a key repeat, and any
+    // release, modifier chord or focus loss lets go.
+    let _pttKey = '';
+    let _pttKeyHeld = false;
+    const typingIn = (el) => !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
+    if (ptt) {
+      document.addEventListener('keydown', (e) => {
+        if (!_pttKey || e.code !== _pttKey || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+        if (typingIn(document.activeElement)) return;
+        e.preventDefault();
+        if (ptt.down()) _pttKeyHeld = true;
+      });
+      document.addEventListener('keyup', (e) => {
+        if (!_pttKeyHeld || e.code !== _pttKey) return;
+        _pttKeyHeld = false;
+        ptt.up();
+      });
+      window.addEventListener('blur', () => { if (_pttKeyHeld) { _pttKeyHeld = false; ptt.up(); } });
+    }
+    // Volume / mute beside HOLD TO TALK, and the device pickers in Settings.
+    const audioCtl = document.getElementById('remote-audio-ctl');
+    const volEl = document.getElementById('remote-audio-volume');
+    const muteEl = document.getElementById('remote-audio-mute');
+    const outSel = document.getElementById('remote-shack-output');
+    const inSel = document.getElementById('remote-shack-input');
+    const keySel = document.getElementById('remote-shack-ptt-key');
+    const applyAudioPrefs = (p) => {
+      if (!p) return;
+      _pttKey = p.pttKey || '';
+      if (volEl && document.activeElement !== volEl) volEl.value = String(Math.round((p.volume == null ? 1 : p.volume) * 100));
+      if (muteEl) { muteEl.textContent = p.muted ? '🔇' : '🔊'; muteEl.title = p.muted ? 'Unmute the shack audio' : 'Mute the shack audio'; }
+      if (keySel) keySel.value = _pttKey;
+      if (outSel) outSel.dataset.want = p.outputId || '';
+      if (inSel) inSel.dataset.want = p.inputId || '';
+    };
+    // Device lists by LABEL from this PC; a saved device that is not plugged
+    // in stays listed as "(not found)" rather than silently becoming another.
+    const fillDevices = async () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      let devs = [];
+      try { devs = await navigator.mediaDevices.enumerateDevices(); } catch (e) { return; }
+      const fill = (sel, kind) => {
+        if (!sel) return;
+        const want = sel.dataset.want || '';
+        sel.innerHTML = '<option value="">System default</option>';
+        let found = !want;
+        for (const d of devs) {
+          if (d.kind !== kind || !d.deviceId || d.deviceId === 'default' || d.deviceId === 'communications') continue;
+          const o = document.createElement('option');
+          o.value = d.deviceId;
+          o.textContent = d.label || (kind === 'audiooutput' ? 'Speaker' : 'Microphone');
+          sel.appendChild(o);
+          if (d.deviceId === want) found = true;
+        }
+        if (!found) {
+          const o = document.createElement('option');
+          o.value = want;
+          o.textContent = 'Saved device (not found)';
+          sel.appendChild(o);
+        }
+        sel.value = want;
+      };
+      fill(outSel, 'audiooutput');
+      fill(inSel, 'audioinput');
+    };
+    if (window.api.remoteShackAudioGet) {
+      window.api.remoteShackAudioGet().then((p) => { applyAudioPrefs(p); fillDevices(); }).catch(() => {});
+      if (window.api.onRemoteShackInfo) window.api.onRemoteShackInfo((info) => { if (info && info.audio) applyAudioPrefs(info.audio); });
+      if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', fillDevices);
+      const set = (patch) => window.api.remoteShackAudioSet(patch).then(applyAudioPrefs).catch(() => {});
+      if (volEl) volEl.addEventListener('input', () => set({ volume: Number(volEl.value) / 100, muted: false }));
+      if (muteEl) muteEl.addEventListener('click', () => set({ muted: muteEl.textContent !== '🔇' }));
+      if (outSel) outSel.addEventListener('change', () => { outSel.dataset.want = outSel.value; set({ outputId: outSel.value }); });
+      if (inSel) inSel.addEventListener('change', () => { inSel.dataset.want = inSel.value; set({ inputId: inSel.value }); });
+      if (keySel) keySel.addEventListener('change', () => set({ pttKey: keySel.value }));
+    }
     let _racOn = false;
     window.api.onRemoteClientStatus((s) => {
       const connected = !!(s && s.state === 'connected');
@@ -7501,6 +7581,7 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       }
       if (ptt) ptt.setActive(connected); // force-releases TX if we just dropped
       if (pttBtn) pttBtn.classList.toggle('hidden', !connected);
+      if (audioCtl) audioCtl.classList.toggle('hidden', !connected);
     });
   }
   // Hydrate on load.

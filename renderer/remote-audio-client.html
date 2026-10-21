@@ -11,6 +11,49 @@
 <script>
 'use strict';
 let answerer = null;
+let cfg = { outputId: '', inputId: '', volume: 1, muted: false };
+
+// Output device, volume, mute (main 'rac-config'). A chosen output that will
+// not open is REFUSED and reported, never replaced by the default.
+async function applyOutput() {
+  const el = document.getElementById('rig-audio');
+  el.volume = cfg.muted ? 0 : Math.max(0, Math.min(1, Number(cfg.volume)));
+  if (typeof el.setSinkId !== 'function') return;
+  const want = cfg.outputId || '';
+  if (el.sinkId === want) return;
+  try { await el.setSinkId(want); window.api.state({ sink: want || 'default' }); }
+  catch (e) {
+    el.muted = true;
+    window.api.state({ sinkError: (e && e.message) || String(e), sink: want });
+    return;
+  }
+  el.muted = false;
+}
+
+// Digital silence from the shack (all-zero samples for 10 s while the link is
+// up) is a broken audio path, not a quiet band: a band is never zero.
+let silentSince = 0, silentReported = null, levelTimer = null, audioCtx = null;
+function watchLevel(stream) {
+  try {
+    if (levelTimer) clearInterval(levelTimer);
+    if (audioCtx) audioCtx.close().catch(() => {});
+    audioCtx = new AudioContext();
+    const an = audioCtx.createAnalyser();
+    an.fftSize = 2048;
+    audioCtx.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    silentSince = Date.now();
+    levelTimer = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      let peak = 0;
+      for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > peak) peak = v; }
+      const now = Date.now();
+      if (peak > 1e-4) silentSince = now;
+      const silent = now - silentSince > 10000;
+      if (silent !== silentReported) { silentReported = silent; window.api.state({ rxSilent: silent }); }
+    }, 1000);
+  } catch (e) { window.api.state({ error: 'level: ' + (e && e.message || e) }); }
+}
 
 function ensureAnswerer() {
   if (answerer) return answerer;
@@ -19,7 +62,7 @@ function ensureAnswerer() {
     // Outbound WebRTC (SDP answer / ICE / start-audio) → main → RemoteClient → shack.
     onSignal: (data) => window.api.outSignal(data),
     // Rig RX audio → speakers.
-    onTrack: (stream) => { audioEl.srcObject = stream; audioEl.play().catch(() => {}); },
+    onTrack: (stream) => { audioEl.srcObject = stream; applyOutput(); audioEl.play().catch(() => {}); watchLevel(stream); },
     onState: (s) => window.api.state(s),
   });
   return answerer;
@@ -27,11 +70,15 @@ function ensureAnswerer() {
 
 // stun-config can arrive before or after start; ensureAnswerer() handles both.
 window.api.onStunConfig((cfg) => { ensureAnswerer().setIceConfig(cfg); });
-window.api.onStart(() => { ensureAnswerer().start(); });
+window.api.onStart(() => { const a = ensureAnswerer(); a.setMicDeviceId(cfg.inputId); a.start(); });
+window.api.onConfig((c) => { cfg = { ...cfg, ...(c || {}) }; if (answerer) answerer.setMicDeviceId(cfg.inputId); applyOutput(); });
 window.api.onSignal((data) => { ensureAnswerer().handleSignal(data); });
 window.api.onPtt((on) => { if (answerer) answerer.setMicEnabled(on); });
 window.api.onStop(() => {
   if (answerer) { answerer.stop(); answerer = null; }
+  if (levelTimer) { clearInterval(levelTimer); levelTimer = null; }
+  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+  silentReported = null;
   const el = document.getElementById('rig-audio');
   if (el) el.srcObject = null;
 });

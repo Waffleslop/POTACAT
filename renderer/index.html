@@ -227,6 +227,10 @@
            transmit voice — explicit, never a keyboard hijack, so there's no
            accidental TX. Keys the remote rig + opens our mic for the session. -->
       <button id="remote-ptt-btn" class="status hidden" style="background:var(--accent-red, #e94560);color:#fff;cursor:pointer;border:none;font-weight:600;" title="Hold to talk to the remote rig">🎙 HOLD TO TALK</button>
+        <span id="remote-audio-ctl" class="status hidden" style="display:inline-flex;align-items:center;gap:4px;padding:0 6px;" title="Remote shack audio on this PC">
+          <button type="button" id="remote-audio-mute" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font-size:13px;" title="Mute the shack audio">🔊</button>
+          <input type="range" id="remote-audio-volume" min="0" max="100" step="1" value="100" style="width:70px;" title="Shack audio volume" aria-label="Shack audio volume">
+        </span>
       <!-- Split-mode indicator. Hidden by default; shown when settings.enableSplit
            is true. Click to disable (asks for confirmation since some operators
            do use split legitimately). KQ4MHD report 2026-04-30. -->
@@ -3094,6 +3098,27 @@
            [data-summary-card] host on every refreshSummaryCard tick. -->
       <div class="summary-card" data-summary-card="cloud" style="margin-bottom:12px;"></div>
       <div class="summary-card" data-summary-card="echocat" style="margin-bottom:14px;"></div>
+
+      <!-- Desktop-to-desktop: this PC's speaker/mic for a remote shack -->
+      <div class="pair-section" id="remote-shack-audio-section">
+        <strong>Driving a remote shack</strong>
+        <span class="help-text" style="display:block;margin:2px 0 6px;">When this desktop operates another POTACAT (More &gt; Remote Radios), the shack's audio plays here and your microphone goes to its radio while you hold PTT.</span>
+        <label style="display:block;margin-bottom:4px;">Speaker:
+          <select id="remote-shack-output" style="min-width:220px;"><option value="">System default</option></select>
+        </label>
+        <label style="display:block;margin-bottom:4px;">Microphone:
+          <select id="remote-shack-input" style="min-width:220px;"><option value="">System default</option></select>
+        </label>
+        <label style="display:block;">Hold a key to talk:
+          <select id="remote-shack-ptt-key">
+            <option value="">Off (use the HOLD TO TALK button)</option>
+            <option value="Space">Space bar</option>
+            <option value="Backquote">` (backquote)</option>
+            <option value="F12">F12</option>
+          </select>
+        </label>
+        <span class="help-text" style="display:block;margin-top:3px;">The key only keys while the main window has focus and you are not typing in a box. Letting go, or switching windows, always releases.</span>
+      </div>
 
       <!-- Remote CW Keyer -->
       <div class="pair-section">

@@ -101,6 +101,8 @@ contextBridge.exposeInMainWorld('api', {
   // The shack this desktop is driving: name, leg, round trip, its rigs.
   remoteShackInfo: () => ipcRenderer.invoke('remote-shack-info'),
   remoteShackSwitchRig: (rigId) => ipcRenderer.invoke('remote-shack-switch-rig', rigId),
+  remoteShackAudioGet: () => ipcRenderer.invoke('remote-shack-audio-get'),
+  remoteShackAudioSet: (patch) => ipcRenderer.invoke('remote-shack-audio-set', patch),
   onRemoteShackInfo: (cb) => {
     const handler = (_e, info) => cb(info || {});
     ipcRenderer.on('remote-shack-info', handler);
