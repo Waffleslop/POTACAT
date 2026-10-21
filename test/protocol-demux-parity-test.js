@@ -62,7 +62,6 @@ const ALWAYS_ALLOWED = new Set(['type', 'id', 'reqId', 'seq', 'ts']);
  */
 const KNOWN_DRIFT = new Set([
   'log-qso:data',
-  'set-activator-park:parkRef',
   'get-activation-map-data:parkRef',
   'get-activation-map-data:date',
   'get-activation-map-data:contacts',

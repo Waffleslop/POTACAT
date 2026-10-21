@@ -5247,6 +5247,26 @@ function remoteShackScopeState(state) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-state', payload);
 }
 
+// An activation run on this desktop while driving a remote shack: the shack
+// must know it too, because QSOs its engines log (FT8 auto-log, JTTY) are
+// built THERE, with its activation refs, then forwarded here (spec B8).
+// Sent on every change and at connect.
+function pushActivationToRemoteShack() {
+  if (!isRemoteLinked()) return;
+  const active = settings.appMode === 'activator' || !!settings.activationActive;
+  const refs = active ? (settings.activatorParkRefs || []).filter(p => p && p.ref) : [];
+  const first = refs[0] || null;
+  remoteClient.sendRaw({
+    type: 'set-activator-park',
+    end: !active,                              // back to hunter on the shack too
+    parkRef: first ? first.ref : '',           // what the shack's demux reads today
+    parkRefs: refs.map(p => p.ref),            // what the registry declares
+    sig: first ? (first.program || 'POTA') : '',
+    activationType: first ? String(first.program || 'POTA').toLowerCase() : 'pota',
+    onAirCallsign: settings.activatorOnAirCallsign || '',
+  });
+}
+
 const REMOTE_NO_RADIO_TO_SHARE_MSG = 'This POTACAT is itself driving a remote shack and has no radio to share. Connect your device to the shack directly.';
 const REMOTE_NOT_LINKED_MSG = 'The remote shack is not connected right now. POTACAT is reconnecting; try again in a moment.';
 
@@ -5382,6 +5402,7 @@ function ensureRemoteClient() {
     remoteShackInfo = null;
     pushRemoteShackInfo();
     if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true });
+    if (settings.appMode === 'activator' || settings.activationActive) pushActivationToRemoteShack();
     // Update lastConnectedAt + lastReachableLeg on the persisted row.
     target.lastConnectedAt = Date.now();
     target.lastReachableLeg = remoteClient.state().leg;
@@ -18733,9 +18754,9 @@ function connectRemote() {
     sendCatLog(`[events] set-event-progress ${eventId}: ${itemId}=${!!worked}`);
   });
 
-  remoteServer.on('set-activator-park', async ({ parkRef, activationType, activationName: actName, sig, onAirCallsign }) => {
-    console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType);
-    settings.appMode = 'activator';
+  remoteServer.on('set-activator-park', async ({ parkRef, activationType, activationName: actName, sig, onAirCallsign, end }) => {
+    console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType, end ? '(ended)' : '');
+    settings.appMode = end ? 'hunter' : 'activator';
     // The device's On-air call field: absent leaves the remembered value,
     // '' clears it. Same cleaning as the desktop activator bar.
     if (typeof onAirCallsign === 'string') {
@@ -35941,6 +35962,7 @@ app.whenReady().then(() => {
     // Push activator state to phone when park refs or app mode change
     if (activatorStateChanged) {
       pushActivatorStateToPhone();
+      pushActivationToRemoteShack();
     }
 
     // VFO Profiles changed (typically from the desktop popout's Save / Delete

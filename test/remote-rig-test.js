@@ -356,6 +356,18 @@ test('band scope: the shack\'s, subscribed while watched, resubscribed after a r
   assert.strictEqual(require('../lib/remote-features').check('scope').ok, true);
 });
 
+test('an activation on the laptop is the shack\'s too (its engines log with the refs), and can end', () => {
+  const push = fnBody(main, 'function pushActivationToRemoteShack() {');
+  assert.ok(/type: 'set-activator-park',\n\s+end: !active,/.test(push) && /parkRef: first \? first\.ref : ''/.test(push) && /onAirCallsign: settings\.activatorOnAirCallsign/.test(push));
+  assert.ok(/pushActivatorStateToPhone\(\);\n\s+pushActivationToRemoteShack\(\);/.test(main), 'on every activator change');
+  const conn = handlerBody(main, "remoteClient.on('connected', (info) => {");
+  assert.ok(/pushActivationToRemoteShack\(\)/.test(conn), 'and at connect');
+  const shack = main.slice(main.indexOf("remoteServer.on('set-activator-park', async ("), main.indexOf("remoteServer.on('set-activator-park', async (") + 400);
+  assert.ok(/settings\.appMode = end \? 'hunter' : 'activator';/.test(shack), 'a client can end an activation it started');
+  const { MESSAGES } = require('../lib/echocat-protocol');
+  assert.ok(MESSAGES['set-activator-park'].fields.end && MESSAGES['set-activator-park'].fields.parkRef);
+});
+
 const asyncTests = [];
 asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
   const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));
