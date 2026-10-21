@@ -80,7 +80,6 @@ const KNOWN_DRIFT = new Set([
   'set-ssb-filter:value',
   'set-digital-filter:value',
   'set-tune-click:value',
-  'lookup-call:callsign',
   'freedv-set-tx:enabled',
   'freedv-set-squelch:enabled',
   'freedv-set-squelch:threshold',
