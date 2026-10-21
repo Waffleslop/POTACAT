@@ -257,7 +257,7 @@ t('main.js: settings saves keep setup progress; test-transmit restore trusts onl
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\s+/g, ' ');
   const has = (snip) => assert.ok(main.includes(snip.replace(/\s+/g, ' ')), 'main.js missing: ' + snip);
   has("const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen'];");
-  has('_lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() }; if (!isRemoteActive()) stationSetupReconcilePower(Number(watts) || 0);');
+  has('_lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() }; if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);');
   has('const back = await waitForPowerReadback(sentAt, (w) => w > testW + 0.5, 6000);');
   has("if (process.platform === 'win32') pre('PATH', ';');");
   has("proc = spawn(helperPath, args, { stdio: ['pipe', 'pipe', 'pipe'], env });");

@@ -788,6 +788,17 @@ window.api.onTuneBlocked((msg) => {
   clearTimeout(_lockToastTimer);
   _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 3000);
 });
+if (window.api.onRemotePttReleased) {
+  window.api.onRemotePttReleased((info) => {
+    pttStop();
+    if (info && info.message) {
+      vfoLockToast.textContent = info.message;
+      vfoLockToast.classList.add('show');
+      clearTimeout(_lockToastTimer);
+      _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 5000);
+    }
+  });
+}
 const filterSlider = document.getElementById('filter-slider');
 const filterVal = document.getElementById('filter-val');
 

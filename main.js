@@ -452,6 +452,7 @@ function healActiveRigNow(where) {
 // filed AFTER the thing happened (lib/bug-report-log.js, KF0U 2026-10-20).
 const BUG_REPORT_BEFORE_MARKER = 150;
 const { RemoteClient, tsWssUrl } = require('./lib/remote-client');
+const { RemoteRigState } = require('./lib/remote-rig');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
 // and every other call is a stable no-op — safe to require unconditionally.
 const alsa = require('./lib/alsa');
@@ -1719,6 +1720,11 @@ let alsaSessions = null;
 // activeTargetId or removes the target row.
 let remoteClient = null;
 let _remoteClientLastStatus = null; // last status snapshot from shack — for re-broadcast on window create
+// The shack's radio as this desktop sees it (lib/remote-rig.js): merged status
+// snapshots + discrete meter frames. Mirrored into the _current* rig state by
+// applyRemoteRigSnapshot(); getRigCapabilities() returns its caps in remote mode.
+const remoteRig = new RemoteRigState();
+const REMOTE_METER_FIELDS = new Set(['smeter', 'swr', 'swrRatio', 'alc', 'power', 'fwdPower', 'freq', 'txState', 'audioOk', 'audioExpected']);
 let cwKeyPort = null;      // Dedicated SerialPort for DTR CW keying (external USB-serial adapter)
 let _cwKeyPortEverOpened = false; // Becomes true after the first successful open this session — gates startup vs reconnect auto-open
 let remoteAudioWin = null; // hidden BrowserWindow for WebRTC audio bridge
@@ -2432,6 +2438,9 @@ function getFlexBandAntenna(band) {
  * you buy an outboard one.
  */
 function getRigCapabilities(rigType) {
+  // Driving a remote shack: the radio's capabilities are the shack's, not
+  // whatever (absent) rig this PC has configured.
+  if (isRemoteMode() && remoteRig.seen) return remoteRig.capabilities();
   const caps = _rigCapabilitiesForType(rigType);
   const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
   if (activeRig && activeRig.externalAtu === 'rf-sense') caps.atu = true;
@@ -3257,10 +3266,10 @@ function sendCatPower(watts) {
   broadcastRigState();
   // A stale WSPR pre-beacon marker with the radio still at the 1 W cap is a
   // restore that never landed — this readback is where it gets put back.
-  if (!isRemoteActive()) wsprReconcilePreCapPower(watts);
+  if (!isRemoteMode()) wsprReconcilePreCapPower(watts);
   // Same for a Station Setup test transmit (lowered to QRP for the test).
   _lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() };
-  if (!isRemoteActive()) stationSetupReconcilePower(Number(watts) || 0);
+  if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);
 }
 
 function sendCatNb(on) {
@@ -3512,7 +3521,7 @@ function jtcatPopoutRigPowerPayload() {
     watts: _currentTxPower,
     // Roaming (host-while-roaming) forwards rig-control to the remote shack,
     // so the set takes there even with no local link.
-    settable: !!caps.txpower && (linkUp || isRemoteActive()),
+    settable: !!caps.txpower && (linkUp || isRemoteLinked()),
     known: _currentTxPower > 0,
     minPower: caps.minPower != null ? caps.minPower : 0,
     maxPower: caps.maxPower != null ? caps.maxPower : 100,
@@ -5063,8 +5072,117 @@ function teardownCloudDeviceHeartbeat() {
 // shack, the local backends are quiesced; switching back re-engages
 // them.
 
-function isRemoteActive() {
-  return !!(remoteClient && remoteClient.state && remoteClient.state().authed);
+// Remote MODE is the operator's choice (a connection target is active); the
+// LINK is whether the shack is answering right now. They used to be one
+// predicate (authed), so during every reconnect the app believed it was local:
+// a spot click tuned a rig that isn't there and the local CAT guards dropped,
+// opening this PC's serial port mid-blip. Guards key off the mode; sends need
+// the link and say so when it is down. (Spec A1, docs/remote-desktop-parity-spec.md.)
+function isRemoteMode() {
+  const id = settings && settings.activeTargetId;
+  if (!id) return false;
+  return (settings.connectionTargets || []).some(t => t && t.id === id);
+}
+
+function isRemoteLinked() {
+  return !!(isRemoteMode() && remoteClient && remoteClient.state && remoteClient.state().authed);
+}
+
+// Leaving remote mode: the mirrored shack state must not pose as this PC's
+// radio until the local rig reports (each value is its declaration default).
+function resetRemoteMirroredRigState() {
+  remoteRig.reset();
+  _currentNbState = false;
+  _currentRfGain = 0;
+  _currentSquelch = 0;
+  _currentTxPower = 0;
+  _currentFilterWidth = 0;
+  _currentAtuState = false;
+  _currentPreampState = false;
+  _currentAttState = false;
+  _currentPreampStep = 0;
+  _currentAttStep = 0;
+  _currentCompState = false;
+  _currentNrState = false;
+  _currentAnfState = false;
+  _currentApfState = false;
+  _currentNrlState = false;
+  _currentNrsState = false;
+  _currentRnnState = false;
+  _currentNrfState = false;
+  _currentNrlLevel = 0;
+  _currentNrsLevel = 0;
+  _currentNrfLevel = 0;
+  _currentWnbState = false;
+  _currentWnbLevel = 0;
+  _currentRfGainDb = null;
+  _currentVoxState = false;
+  _currentAgcMode = '';
+  _currentSliceDax = null;
+  _daxRouteOk = true;
+  _currentNrLevel = 0;
+  _currentNbLevel = 0;
+  _currentVoxLevel = 0;
+  _currentMonState = false;
+  _currentMonLevel = 0;
+  _currentRitState = false;
+  _currentBreakInState = false;
+  _currentVfo = 'A';
+  _currentSplit = false;
+}
+
+const REMOTE_NOT_LINKED_MSG = 'The remote shack is not connected right now. POTACAT is reconnecting; try again in a moment.';
+
+// A send that needs the shack, with the link down: tell the window that asked
+// (same channel the VFO lock uses) instead of doing nothing.
+function refuseRemoteNotLinked(sender) {
+  try { if (sender && !sender.isDestroyed()) sender.send('tune-blocked', REMOTE_NOT_LINKED_MSG); } catch {}
+  if (win && !win.isDestroyed() && sender !== win.webContents) win.webContents.send('tune-blocked', REMOTE_NOT_LINKED_MSG);
+}
+
+// Mirror the shack's snapshot into this desktop's rig state, so every reader
+// of it (rig panel, VFO window, JTCAT power, SSTV) shows the SHACK's radio.
+// The field list is lib/remote-rig.js STATUS_TO_RIG_STATE (mode is mirrored by
+// the status handler, which skips an empty one); test/remote-rig-test.js fails
+// if a mapped field has no assignment here.
+function applyRemoteRigSnapshot(s) {
+  if (s.nb !== undefined) _currentNbState = s.nb;
+  if (s.rfgain !== undefined) _currentRfGain = s.rfgain;
+  if (s.squelch !== undefined) _currentSquelch = s.squelch;
+  if (s.txpower !== undefined) _currentTxPower = s.txpower;
+  if (s.filterWidth !== undefined) _currentFilterWidth = s.filterWidth;
+  if (s.atu !== undefined) _currentAtuState = s.atu;
+  if (s.preamp !== undefined) _currentPreampState = s.preamp;
+  if (s.att !== undefined) _currentAttState = s.att;
+  if (s.preampStep !== undefined) _currentPreampStep = s.preampStep;
+  if (s.attStep !== undefined) _currentAttStep = s.attStep;
+  if (s.comp !== undefined) _currentCompState = s.comp;
+  if (s.nr !== undefined) _currentNrState = s.nr;
+  if (s.anf !== undefined) _currentAnfState = s.anf;
+  if (s.apf !== undefined) _currentApfState = s.apf;
+  if (s.nrl !== undefined) _currentNrlState = s.nrl;
+  if (s.nrs !== undefined) _currentNrsState = s.nrs;
+  if (s.rnn !== undefined) _currentRnnState = s.rnn;
+  if (s.nrf !== undefined) _currentNrfState = s.nrf;
+  if (s.nrlLevel !== undefined) _currentNrlLevel = s.nrlLevel;
+  if (s.nrsLevel !== undefined) _currentNrsLevel = s.nrsLevel;
+  if (s.nrfLevel !== undefined) _currentNrfLevel = s.nrfLevel;
+  if (s.wnb !== undefined) _currentWnbState = s.wnb;
+  if (s.wnbLevel !== undefined) _currentWnbLevel = s.wnbLevel;
+  if (s.rfgainDb !== undefined) _currentRfGainDb = s.rfgainDb;
+  if (s.vox !== undefined) _currentVoxState = s.vox;
+  if (s.agc !== undefined) _currentAgcMode = s.agc;
+  if (s.sliceDax !== undefined) _currentSliceDax = s.sliceDax;
+  if (s.daxRouteOk !== undefined) _daxRouteOk = s.daxRouteOk;
+  if (s.nrLevel !== undefined) _currentNrLevel = s.nrLevel;
+  if (s.nbLevel !== undefined) _currentNbLevel = s.nbLevel;
+  if (s.voxLevel !== undefined) _currentVoxLevel = s.voxLevel;
+  if (s.mon !== undefined) _currentMonState = s.mon;
+  if (s.monLevel !== undefined) _currentMonLevel = s.monLevel;
+  if (s.rit !== undefined) _currentRitState = s.rit;
+  if (s.breakIn !== undefined) _currentBreakInState = s.breakIn;
+  if (s.vfo !== undefined) _currentVfo = s.vfo;
+  if (s.split !== undefined) _currentSplit = s.split;
 }
 
 function ensureRemoteClient() {
@@ -5119,6 +5237,9 @@ function ensureRemoteClient() {
       });
       win.webContents.send('cat-status', { connected: true, mode: '', freq: 0 });
     }
+    // A fresh session: drop the previous one's snapshot so its caps cannot
+    // light controls this shack's radio lacks; the first status refills it.
+    remoteRig.reset();
     // Update lastConnectedAt + lastReachableLeg on the persisted row.
     target.lastConnectedAt = Date.now();
     target.lastReachableLeg = remoteClient.state().leg;
@@ -5148,6 +5269,8 @@ function ensureRemoteClient() {
   });
   remoteClient.on('status', (snap) => {
     _remoteClientLastStatus = snap;
+    const changed = remoteRig.applyStatus(snap);
+    applyRemoteRigSnapshot(snap);
     // Mirror the shack's freq/mode into main-process state FIRST — surfaces
     // that render from it (the VFO popout's vfo-radio-state above all) showed
     // dashes and dead controls in remote-client mode because only the main
@@ -5161,7 +5284,11 @@ function ensureRemoteClient() {
     if (typeof snap.smeter === 'number') sendCatSmeter(snap.smeter);
     if (typeof snap.swr === 'number') sendCatSwr(snap.swr);
     if (typeof snap.alc === 'number') sendCatAlc(snap.alc);
-    if (typeof snap.power === 'number') sendCatPower(snap.power);
+    // RF power SETTING (txpower) — the wattmeter rides fwd-power frames.
+    if (typeof snap.txpower === 'number' && changed.includes('txpower')) sendCatPower(snap.txpower);
+    // Rig panel / VFO window state and caps: re-broadcast only when something
+    // other than a meter changed (snapshots arrive every poll).
+    if (changed.some(k => !REMOTE_METER_FIELDS.has(k))) broadcastRigState();
     if (!win || win.isDestroyed()) return;
     // Forward shack status fields into the local cat-* channels so
     // the renderer's existing handlers update transparently.
@@ -5175,6 +5302,50 @@ function ensureRemoteClient() {
       win.webContents.send('cat-frequency', snap.freq);
     }
     if (snap.mode) win.webContents.send('cat-mode', snap.mode);
+  });
+  // Frames the shack sends between snapshots. The meters used to update only
+  // when a full snapshot arrived; the PTT watchdog and the VFO lock never
+  // reached this desktop at all.
+  remoteClient.on('message', (msg) => {
+    const field = remoteRig.applyFrame(msg);
+    if (field) {
+      const v = remoteRig.get(field);
+      if (msg.type === 'smeter') sendCatSmeter(v);
+      else if (msg.type === 'swr') sendCatSwr(v);
+      else if (msg.type === 'alc') sendCatAlc(v);
+      else if (msg.type === 'fwd-power') sendCatFwdPower(v);
+      else if (msg.type === 'power') sendCatPower(v);
+      else if (msg.type === 'swr-ratio') {
+        for (const w of [win, vfoPopoutWin, jtcatPopoutWin]) {
+          if (w && !w.isDestroyed()) w.webContents.send('cat-swr-ratio', v);
+        }
+      }
+      return;
+    }
+    switch (msg.type) {
+      case 'ptt-timeout':
+      case 'ptt-force-rx': {
+        // The SHACK released PTT (its safety timeout, or its radio link
+        // dropped). This desktop's PTT buttons must let go too, or they read
+        // ON AIR over a receiving radio and the next press does nothing.
+        const message = String(msg.message || 'The shack released PTT');
+        sendCatLog('[RemoteClient] ' + message);
+        for (const w of [win, vfoPopoutWin]) {
+          if (w && !w.isDestroyed()) w.webContents.send('remote-client-ptt-released', { reason: msg.type, message });
+        }
+        if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, warn: true, duration: 8000 });
+        break;
+      }
+      case 'vfo-lock-state': {
+        // The shack owns the lock; mirror it so the tune guard and every
+        // window's lock pill agree with it.
+        _vfoLocked = !!msg.locked;
+        for (const wc of require('electron').webContents.getAllWebContents()) wc.send('vfo-lock-state', _vfoLocked);
+        break;
+      }
+      default:
+        break;
+    }
   });
   remoteClient.on('spots', (data) => {
     if (win && !win.isDestroyed()) win.webContents.send('spots', data);
@@ -5264,10 +5435,12 @@ function tearDownRemoteClient() {
   remoteClient.removeAllListeners();
   remoteClient = null;
   _remoteClientLastStatus = null;
+  resetRemoteMirroredRigState();
   if (win && !win.isDestroyed()) {
     win.webContents.send('remote-client-status', { state: 'idle' });
     win.webContents.send('cat-status', { connected: false });
   }
+  broadcastRigState();
 }
 
 let _connectCatPending = false;
@@ -5453,8 +5626,9 @@ async function connectCat() {
     return; // prevent concurrent connectCat() calls
   }
   // If we're in remote-client mode, the "CAT" is a shack on the other
-  // end of a WebSocket — skip the local connection chain entirely.
-  if (isRemoteActive()) {
+  // end of a WebSocket — skip the local connection chain entirely. Mode, not
+  // link: a reconnecting shack must not let this PC open its own port.
+  if (isRemoteMode()) {
     logConnectCatSkip('[CAT] Not connecting to the local radio: POTACAT is operating a REMOTE shack ' +
       '(Settings > Connections). The rig in Settings > My Rigs is deliberately left alone — ' +
       'switch back to this station to use it.');
@@ -20148,6 +20322,11 @@ function jtcatNoteTxPowerForMode(mode, message, freqHz, engineHz) {
 
 function handleRemotePtt(state, opts = {}) {
   pushActivityState();   // busy.tx edges reach the activity feed (debounced)
+  // Driving a remote shack: every PTT source on this desktop (the VFO
+  // window's button, HOLD TO TALK, voice keying) keys the SHACK's radio and
+  // opens this desktop's mic into the audio link. There is no local radio to
+  // key, and the shack runs its own SWR guard and PTT watchdog.
+  if (isRemoteMode()) { keyRemoteShack(state); return; }
   // SWR-guard latch backstop — covers every PTT source (voice macros, mobile
   // device PTT, naked PTT) in one place. Releases (state=false) always pass.
   if (state && _swrTripped) {
@@ -20820,10 +20999,25 @@ ipcMain.on('rac-state', (_e, s) => {
 });
 ipcMain.handle('remote-client-audio-start', () => { startRemoteClientAudio(); return { ok: true }; });
 ipcMain.handle('remote-client-audio-stop', () => { stopRemoteClientAudio(); return { ok: true }; });
-ipcMain.on('remote-client-audio-ptt', (_e, on) => {
-  if (remoteAudioClientWin && !remoteAudioClientWin.isDestroyed()) remoteAudioClientWin.webContents.send('rac-ptt', !!on);
-  if (remoteClient) remoteClient.sendPtt(!!on);
-});
+// Key (or release) the remote shack: this desktop's mic track goes live in
+// the audio link and the shack is told to key. A key-down with the link down
+// is refused out loud; a release is always sent (and is harmless if dead).
+function keyRemoteShack(on) {
+  on = !!on;
+  if (on && !isRemoteLinked()) {
+    sendCatLog('[PTT] Not keyed: ' + REMOTE_NOT_LINKED_MSG);
+    refuseRemoteNotLinked(null);
+    for (const w of [win, vfoPopoutWin]) {
+      if (w && !w.isDestroyed()) w.webContents.send('remote-client-ptt-released', { reason: 'not-linked', message: REMOTE_NOT_LINKED_MSG });
+    }
+    return false;
+  }
+  if (remoteAudioClientWin && !remoteAudioClientWin.isDestroyed()) remoteAudioClientWin.webContents.send('rac-ptt', on);
+  if (remoteClient) remoteClient.sendPtt(on);
+  return true;
+}
+
+ipcMain.on('remote-client-audio-ptt', (_e, on) => { keyRemoteShack(on); });
 
 // --- Remote Audio (hidden BrowserWindow for WebRTC) ---
 // Single source of truth for the config payload sent to the audio bridge
@@ -23086,7 +23280,7 @@ function startYaesuScope() {
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   const synth = yaesuScopeSynth;
   if (!synth && scopeSourceKind() === 'sdr') { startSdrScope(); return; }
-  if (!synth && isRemoteActive()) {
+  if (!synth && isRemoteMode()) {
     yaesuScopeSetStatus('unavailable', { key: 'remote', severity: 'blocker',
       headline: 'The Band Scope reads the radio on this PC',
       detail: 'This desktop is controlling a remote shack. Open the scope on the shack PC, or in ECHOCAT.' });
@@ -29469,13 +29663,14 @@ app.whenReady().then(() => {
   // existing handlers apply them. Without this the VFO popout's buttons were
   // silent no-ops in remote mode (NA7C 2026-07-17); only 'tune' was routed.
   ipcMain.on('vfo-set-mode', (_e, mode) => {
-    if (isRemoteActive() && remoteClient) { remoteClient.sendSetMode(mode); return; }
+    if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendSetMode(mode); else refuseRemoteNotLinked(_e.sender); return; }
     if (!_currentFreqHz) return;
     _lastTuneFreq = 0; // reset rate limiter
     tuneRadio(_currentFreqHz / 1000, mode);
   });
   ipcMain.on('vfo-set-filter-width', (_e, hz) => {
-    if (isRemoteActive() && remoteClient) {
+    if (isRemoteMode()) {
+      if (!isRemoteLinked()) { refuseRemoteNotLinked(_e.sender); return; }
       remoteClient.sendRaw({ type: 'set-filter', width: Number(hz) || 0 });
       _currentFilterWidth = hz;
       return;
@@ -32266,7 +32461,14 @@ app.whenReady().then(() => {
       remoteServer.setVfoLocked(_vfoLocked);
     }
   }
-  ipcMain.on('vfo-set-lock', (_e, locked) => applyVfoLock(locked));
+  ipcMain.on('vfo-set-lock', (_e, locked) => {
+    if (isRemoteMode()) {
+      if (isRemoteLinked()) remoteClient.sendRaw({ type: 'vfo-set-lock', locked: !!locked });
+      else refuseRemoteNotLinked(_e.sender);
+      return;
+    }
+    applyVfoLock(locked);
+  });
   // ECHOCAT clients toggle via WS; remote-server emits this event.
   onRemoteServer((rs) => {
     rs.on('vfo-set-lock', (locked) => applyVfoLock(locked));
@@ -32505,7 +32707,8 @@ app.whenReady().then(() => {
     // local CAT subsystem. Auto-tune-KiwiSDR is intentionally NOT
     // applied here since KiwiSDR routing belongs to the shack, not
     // the laptop.
-    if (isRemoteActive()) {
+    if (isRemoteMode()) {
+      if (!isRemoteLinked()) { refuseRemoteNotLinked(_e.sender); return; }
       // tuneRadio's `frequency` param is kHz; sendTune expects Hz (it
       // formats the wire's freqKhz itself — see remote-client.js). Passing
       // kHz straight through shrank every QSY 1000× on the wire: the shack
@@ -33217,8 +33420,10 @@ app.whenReady().then(() => {
     // Remote-client mode: forward to the shack as the same 'rig-control' C2S
     // the phone uses — its applyRigControl runs there. Covers every DSP /
     // custom-CAT button in one place (NA7C: dead VFO-popout buttons).
-    if (isRemoteActive() && remoteClient) {
-      remoteClient.sendRaw({ type: 'rig-control', ...data });
+    if (isRemoteMode() && !(data && data.action === 'get-state')) {
+      if (!isRemoteLinked()) { refuseRemoteNotLinked(_e.sender); return { ok: false, error: REMOTE_NOT_LINKED_MSG }; }
+      // Canonical nested shape (remote-server 'rig-control' reads msg.data).
+      remoteClient.sendRaw({ type: 'rig-control', data });
       return { ok: true, remote: true };
     }
     return applyRigControl(data, 'desktop');
@@ -33883,7 +34088,7 @@ app.whenReady().then(() => {
     }
     const target = targets.find(t => t.id === id);
     if (!target) return { ok: false, reason: 'not-found' };
-    if (settings.activeTargetId === id && isRemoteActive()) {
+    if (settings.activeTargetId === id && isRemoteLinked()) {
       return { ok: true, alreadyActive: true };
     }
     settings.activeTargetId = id;
@@ -36392,7 +36597,7 @@ app.whenReady().then(() => {
     // Don't touch local CAT in remote-client mode — the rig lives on
     // the shack. The user must explicitly switch back via the Remote
     // Radios panel before changing the local rig target.
-    if (isRemoteActive()) {
+    if (isRemoteMode()) {
       sendCatLog('[CAT] Skipping local CAT connect — running in remote-client mode');
       return;
     }

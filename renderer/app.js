@@ -7372,6 +7372,9 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       pttBtn.addEventListener('pointercancel', up);
       window.addEventListener('blur', up);
     }
+    if (ptt && window.api.onRemoteClientPttReleased) {
+      window.api.onRemoteClientPttReleased(() => { ptt.up(); });
+    }
     let _racOn = false;
     window.api.onRemoteClientStatus((s) => {
       const connected = !!(s && s.state === 'connected');

@@ -96,6 +96,13 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('remote-client-status', handler);
     return () => ipcRenderer.removeListener('remote-client-status', handler);
   },
+  // The shack released PTT (its safety timeout / its radio link dropped) or a
+  // key-down was refused with the link down: let go of every PTT button.
+  onRemoteClientPttReleased: (cb) => {
+    const handler = (_e, info) => cb(info || {});
+    ipcRenderer.on('remote-client-ptt-released', handler);
+    return () => ipcRenderer.removeListener('remote-client-ptt-released', handler);
+  },
   onRemoteClientDisplaced: (cb) => {
     const handler = (_e, info) => cb(info);
     ipcRenderer.on('remote-client-displaced', handler);
