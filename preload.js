@@ -312,6 +312,9 @@ contextBridge.exposeInMainWorld('api', {
   onSpotHides: (cb) => ipcRenderer.on('spot-hides', (_e, state) => cb(state)), // { hides, skips }
   onCreditedParks: (cb) => ipcRenderer.on('credited-parks', (_e, refs) => cb(refs)),
   choosePotaParksFile: () => ipcRenderer.invoke('choose-pota-parks-file'),
+  choosePotaActivationsFile: () => ipcRenderer.invoke('choose-pota-activations-file'),
+  getActivatedParks: () => ipcRenderer.invoke('get-activated-parks'),
+  onActivatedParks: (cb) => ipcRenderer.on('activated-parks', (_e, data) => cb(data)),
   onWsjtxStatus: (cb) => ipcRenderer.on('wsjtx-status', (_e, s) => cb(s)),
   onWsjtxState: (cb) => ipcRenderer.on('wsjtx-state', (_e, s) => cb(s)),
   onWsjtxDecode: (cb) => ipcRenderer.on('wsjtx-decode', (_e, d) => cb(d)),

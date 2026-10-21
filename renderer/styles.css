@@ -7961,6 +7961,20 @@ a.settings-echocat-badge-link:hover {
   margin-left: auto;
   white-space: nowrap;
 }
+/* Activator park picker: this station's activation status per park
+   (pota.app Activations CSV + the local log). NEW is the one to notice. */
+.activator-dropdown-new,
+.activator-dropdown-done {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 9px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.activator-dropdown-new { background: var(--source-pota, #4ecca3); color: #1a1a2e; }
+.activator-dropdown-done { background: var(--bg-tertiary); color: var(--text-tertiary); font-weight: 600; }
 
 .activator-park-name {
   color: var(--accent-green);

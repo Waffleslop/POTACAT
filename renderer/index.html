@@ -2026,6 +2026,14 @@
           </div>
         </label>
         <span class="help-text" style="display:block;margin-top:4px;">Go to pota.app/#/user/stats, under Hunted Parks, click "Export CSV"</span>
+        <label style="margin-top:8px;">POTA Activations CSV (activator):
+          <div style="display:flex;gap:6px;margin-top:4px;">
+            <input type="text" id="set-pota-activations-path" readonly placeholder="No file selected" style="flex:1;">
+            <button type="button" id="pota-activations-browse-btn">Browse</button>
+            <button type="button" id="pota-activations-clear-btn" title="Clear activations file" style="display:none;">&times;</button>
+          </div>
+        </label>
+        <span class="help-text" style="display:block;margin-top:4px;">pota.app/#/user/stats, under Activations, "Export CSV". Parks you have activated (this file plus your POTACAT log) are marked in the activator park picker; the rest show NEW.</span>
         <label class="checkbox-label" style="margin-top:4px;"><input type="checkbox" id="set-hide-worked-parks"> Hide already-worked parks</label>
         <div id="worked-parks-import-row" style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
           <button type="button" id="worked-parks-import-btn">Import existing logs…</button>

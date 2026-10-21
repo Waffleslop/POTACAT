@@ -1181,6 +1181,14 @@ var JTCAT_MAX_QSO_RETRIES = 6;   // per-phase retry limit during QSO exchange
 const setPotaParksPath = document.getElementById('set-pota-parks-path');
 const potaParksBrowseBtn = document.getElementById('pota-parks-browse-btn');
 const potaParksClearBtn = document.getElementById('pota-parks-clear-btn');
+const setPotaActivationsPath = document.getElementById('set-pota-activations-path');
+const potaActivationsBrowseBtn = document.getElementById('pota-activations-browse-btn');
+const potaActivationsClearBtn = document.getElementById('pota-activations-clear-btn');
+// Parks this station has activated (pota.app Activations CSV + the local
+// log), ref → { date, qsoCount, source }. The activator park picker marks
+// the rest NEW.
+let activatedParksMap = new Map();
+let activatedParksLoaded = false;
 const potaParksPicker = document.getElementById('pota-parks-picker');
 const setHideWorkedParks = document.getElementById('set-hide-worked-parks');
 const parksStatsOverlay = document.getElementById('parks-stats-overlay');
@@ -8978,6 +8986,27 @@ potaParksClearBtn.addEventListener('click', () => {
   potaParksClearBtn.style.display = 'none';
 });
 
+if (potaActivationsBrowseBtn) {
+  potaActivationsBrowseBtn.addEventListener('click', async () => {
+    const filePath = await window.api.choosePotaActivationsFile();
+    if (filePath) {
+      setPotaActivationsPath.value = filePath;
+      potaActivationsClearBtn.style.display = '';
+    }
+  });
+  potaActivationsClearBtn.addEventListener('click', () => {
+    setPotaActivationsPath.value = '';
+    potaActivationsClearBtn.style.display = 'none';
+  });
+}
+if (window.api.onActivatedParks) {
+  window.api.onActivatedParks((entries) => { activatedParksMap = new Map(entries || []); activatedParksLoaded = true; });
+}
+async function refreshActivatedParks() {
+  if (!window.api.getActivatedParks) return;
+  try { activatedParksMap = new Map(await window.api.getActivatedParks() || []); activatedParksLoaded = true; } catch {}
+}
+
 // Rig search filtering
 setRigSearch.addEventListener('input', () => {
   const query = setRigSearch.value.toLowerCase();
@@ -16000,6 +16029,10 @@ async function openSettingsDialog(tab) {
   clublogConfig.classList.toggle('hidden', !s.clublogEnable);
   setPotaParksPath.value = s.potaParksPath || '';
   potaParksClearBtn.style.display = s.potaParksPath ? '' : 'none';
+  if (setPotaActivationsPath) {
+    setPotaActivationsPath.value = s.potaActivationsPath || '';
+    potaActivationsClearBtn.style.display = s.potaActivationsPath ? '' : 'none';
+  }
   setHideWorkedParks.checked = s.hideWorkedParks === true;
   // Panadapter & Bandscope source-set: sync defaults true (matches today's
   // behavior). Per-source picks default false (only consulted when sync is off).
@@ -16852,6 +16885,7 @@ settingsSave.addEventListener('click', async () => {
     verboseLog: verboseLogEnabled,
     lightIcon: lightIconEnabled,
     potaParksPath: potaParksPath,
+    potaActivationsPath: setPotaActivationsPath ? (setPotaActivationsPath.value.trim() || '') : '',
     hideWorkedParks: hideWorkedParksEnabled,
     enableLogging: loggingEnabled,
     enableBannerLogger: setEnableBannerLogger.checked,
@@ -25751,6 +25785,7 @@ if (activatorParkRefInput) {
       return;
     }
     parkSearchTimeout = setTimeout(async () => {
+      if (!activatedParksLoaded) await refreshActivatedParks();
       const results = await window.api.searchParks(query);
       if (!results || !results.length) {
         activatorParkDropdown.classList.add('hidden');
@@ -25760,7 +25795,18 @@ if (activatorParkRefInput) {
       for (const park of results) {
         const item = document.createElement('div');
         item.className = 'activator-dropdown-item';
-        item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span><span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
+        // Activated before (pota.app Activations CSV or the local log) vs NEW
+        // for this station — the two freshly added parks that "didn't stand
+        // out" (AZ activator, 2026-10-20). Only once something is known: with
+        // no CSV and an empty log every park would read NEW and mean nothing.
+        let status = '';
+        if (activatedParksMap.size > 0) {
+          const a = activatedParksMap.get(String(park.reference || '').toUpperCase());
+          status = a
+            ? `<span class="activator-dropdown-done" title="You have activated this park${a.date ? ' (first ' + a.date + ')' : ''}${a.qsoCount ? ', ' + a.qsoCount + ' QSOs' : ''}">activated</span>`
+            : '<span class="activator-dropdown-new" title="You have never activated this park">NEW</span>';
+        }
+        item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span>${status}<span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
           selectParkMulti(park);

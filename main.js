@@ -395,7 +395,7 @@ const sstvPost = require('./lib/sstv-post');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
-const { parsePotaParksCSV } = require('./lib/pota-parks');
+const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
 const { PotaSync } = require('./lib/pota-sync');
 const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
@@ -34891,6 +34891,7 @@ app.whenReady().then(() => {
     // renderer AND the phone). 2026-08-19.
     const adifLogPathChanged = has('adifLogPath') && newSettings.adifLogPath !== settings.adifLogPath;
     const potaParksPathChanged = has('potaParksPath') && newSettings.potaParksPath !== settings.potaParksPath;
+    const potaActivationsPathChanged = has('potaActivationsPath') && newSettings.potaActivationsPath !== settings.potaActivationsPath;
 
     const clusterChanged = (has('enableCluster') && newSettings.enableCluster !== settings.enableCluster) ||
       (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign) ||
@@ -35442,6 +35443,12 @@ app.whenReady().then(() => {
     // Reload worked parks if CSV path changed
     if (potaParksPathChanged) {
       loadWorkedParks();
+    }
+    // Activated parks: reload on a new CSV, and when an activation starts or
+    // ends (the log just gained one). loadActivatedParks pushes the fresh
+    // map to the renderer.
+    if (potaActivationsPathChanged || (has('activationActive') && !!newSettings.activationActive !== !!settings.activationActive)) {
+      try { loadActivatedParks(); } catch {}
     }
 
     // Swap app icon on all windows if setting changed
@@ -37508,6 +37515,50 @@ app.whenReady().then(() => {
   }
 
   ipcMain.handle('get-past-activations', () => getPastActivations());
+
+  // Parks THIS station has activated: the pota.app Activations export
+  // (settings.potaActivationsPath) plus every activation in the local log
+  // (MY_SIG_INFO). The activator park picker marks the rest as NEW, which is
+  // how two freshly added parks stand out (AZ activator, 2026-10-20).
+  let activatedParks = new Map(); // ref → { date, qsoCount, source: 'csv'|'log'|'both' }
+  function loadActivatedParks() {
+    const out = new Map();
+    if (settings.potaActivationsPath) {
+      try {
+        for (const [ref, a] of parsePotaActivationsCSV(settings.potaActivationsPath)) {
+          out.set(ref, { date: a.date || '', qsoCount: a.qsoCount || 0, source: 'csv' });
+        }
+      } catch (err) {
+        sendCatLog(`[activations] could not read the pota.app Activations CSV: ${err.message}`);
+      }
+    }
+    try {
+      for (const a of getPastActivations()) {
+        const ref = String(a.parkRef || '').toUpperCase();
+        if (!ref) continue;
+        const prev = out.get(ref);
+        const n = (a.contacts || []).length;
+        if (!prev) out.set(ref, { date: a.date || '', qsoCount: n, source: 'log' });
+        else { prev.source = 'both'; prev.qsoCount = Math.max(prev.qsoCount, n); }
+      }
+    } catch { /* no log yet */ }
+    activatedParks = out;
+    if (win && !win.isDestroyed()) win.webContents.send('activated-parks', [...out.entries()]);
+    return out;
+  }
+  loadActivatedParks();
+  // The cached map: a reload scans the whole log, so it runs at startup, on
+  // a CSV change and at activation start/stop, not per keystroke.
+  ipcMain.handle('get-activated-parks', () => [...activatedParks.entries()]);
+  ipcMain.handle('choose-pota-activations-file', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Select the pota.app Activations CSV',
+      filters: [{ name: 'CSV Files', extensions: ['csv'] }, { name: 'All Files', extensions: ['*'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
 
   // --- Delete activation (removes matching QSOs from ADIF log) ---
   // First arg: a single park ref string (legacy), or an array of
