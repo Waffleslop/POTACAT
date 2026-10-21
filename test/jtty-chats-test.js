@@ -205,13 +205,35 @@ test('the composer sends what it shows: the THEIR MY line, validated and counted
   assert.ok(/jttyCountEl\.textContent = chat \? n \+ '\/80' : ''/.test(js));
 });
 
-test('a CQ goes out on the clearest spot (never with Hold on, never with nothing measured)', () => {
+test('a CQ goes out on the clearest spot: the decision is pure, and never with Hold on or nothing measured', () => {
+  // 160 bins over 0-3000 Hz: a busy 1500 Hz (bins 72-88 loud), a quiet stretch around 2100 Hz.
+  const levels = new Array(160).fill(120);
+  for (let i = 72; i <= 88; i++) levels[i] = 240;
+  for (let i = 105; i <= 120; i++) levels[i] = 20;
+  const hzPerBin = 3000 / 160;
+  const hz = JttyMacros.cqSpot('CQ K3SBP FN20', levels, hzPerBin, { hold: false, measuredMs: 30000, current: 1500 });
+  assert.ok(hz >= 1950 && hz <= 2250, 'moves to the quiet stretch: ' + hz);
+  assert.strictEqual(JttyMacros.cqSpot('W9XYZ K3SBP FN20', levels, hzPerBin, { measuredMs: 30000, current: 1500 }), null, 'only a CQ');
+  assert.strictEqual(JttyMacros.cqSpot('CQ K3SBP FN20', levels, hzPerBin, { hold: true, measuredMs: 30000, current: 1500 }), null, 'Hold TX');
+  assert.strictEqual(JttyMacros.cqSpot('CQ K3SBP FN20', levels, hzPerBin, { measuredMs: 2000, current: 1500 }), null, 'under 5 s measured');
+  assert.strictEqual(JttyMacros.cqSpot('CQ K3SBP FN20', null, hzPerBin, { measuredMs: 30000, current: 1500 }), null, 'nothing measured');
+  assert.strictEqual(JttyMacros.cqSpot('CQ K3SBP FN20', levels, hzPerBin, { measuredMs: 30000, current: hz }), null, 'already there');
+});
+
+test('the move runs on the SHACK\'s send path, so a CQ from any surface gets it', () => {
+  const main = R('main.js');
+  const send = main.slice(main.indexOf("ipcMain.on('jtcat-jtty-send', (_e, payload) => {"), main.indexOf("ipcMain.on('jtcat-jtty-set-profile'"));
+  assert.ok(/jttyCqToClearSpot\(ft8Engine, t\);[^\n]*\n\s+ft8Engine\._txEnabled = true;/.test(send), 'before the waveform is built');
+  assert.ok(/remoteServer\.on\('jtcat-jtty-send', \(\{ text, profile \} = \{\}\) => \{\n\s+ipcMain\.emit\('jtcat-jtty-send'/.test(main), 'a phone\'s CQ takes the same path');
+  const fn = main.slice(main.indexOf('function jttyCqToClearSpot(eng, text) {'), main.indexOf('function jttyCqToClearSpot(eng, text) {') + 1200);
+  assert.ok(/hold: !!settings\.jtcatHoldTxFreq, measuredMs: _jttyLevelsMs, current: eng\._txFreq/.test(fn));
+  assert.ok(/eng\.setTxFreq\(hz, \{ operator: true \}\);\n\s+rememberJtcatTxFreq\(eng\);/.test(fn));
+  assert.ok(/'jtcat-tx-freq-set', \{ hz: eng\._txFreq, mode: 'JTTY', note:/.test(fn), 'the window learns the move');
+  assert.ok(/broadcastJtcatTxStatus\(\{ state: 'rx', txFreq: eng\._txFreq \}\)/.test(fn), 'the phones learn the move');
+  assert.ok(/if \(eng\._txActive\) \{ _jttyLevelsLastTs = Date\.now\(\); return; \}/.test(main), 'our own transmission is never measured');
   const js = R('renderer/jtcat-popout.js');
-  const fn = js.slice(js.indexOf('function jttyCqOnClearSpot(text) {'), js.indexOf('function jttySend() {'));
-  assert.ok(/if \(!\/\^CQ\\b\/i\.test\(String\(text\)\.trim\(\)\) \|\| holdTxFreq\) return;/.test(fn));
-  assert.ok(/if \(!jttyOcc \|\| jttyOccMs < 5000\) return;/.test(fn));
-  assert.ok(/JttyMacros\.clearestSpot\(jttyOcc, jttyOccHzPerBin, \{ prefer: jpTxFreqHz \}\)/.test(fn), 'the Clear spot button\'s measurement');
-  assert.ok(/jttyCqOnClearSpot\(text\);\n\s+window\.api\.jtcatJttySend\(text, profile\);/.test(js), 'moved before the transmission starts');
+  assert.ok(!/function jttyCqOnClearSpot/.test(js), 'no second copy in the window');
+  assert.ok(/if \(data\.note && data\.mode === 'JTTY'/.test(js), 'the window shows the note');
 });
 
 test('a saved JTTY QSO reaches the window from the one event every log path passes through', () => {

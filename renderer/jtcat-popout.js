@@ -1366,6 +1366,8 @@ function _applyPopoutTheme(payload) {
       if (modeSelect.value === 'PSK31') updatePskStatus(hz, null, null);
     }
     txFreqLabel.textContent = txFreqText(jpTxFreqHz);
+    // The shack moved a JTTY CQ to the clearest spot: say so by the composer.
+    if (data.note && data.mode === 'JTTY' && typeof jttyNoteFreq === 'function') jttyNoteFreq(String(data.note).replace('%F', String(hz)));
   });
 
   window.api.onJtcatTxStatus(function(data) {
@@ -3788,27 +3790,16 @@ function _applyPopoutTheme(payload) {
     }, 120);
   }
 
-  // A CQ goes out on the clearest spot, not wherever the dial happened to be
-  // (a fresh engine sits at 1500 Hz, where everyone else's does too). FT8
-  // does the same with jtcatQuietFreq; here it is the same measurement the
-  // Clear spot button uses, over the last 30 s. Hold TX means "do not move
-  // me", so it is honoured; with nothing measured yet the CQ goes as is.
-  function jttyCqOnClearSpot(text) {
-    if (!/^CQ\b/i.test(String(text).trim()) || holdTxFreq) return;
-    if (!jttyOcc || jttyOccMs < 5000) return;
-    var spot = JttyMacros.clearestSpot(jttyOcc, jttyOccHzPerBin, { prefer: jpTxFreqHz });
-    if (!spot || spot.hz === jpTxFreqHz) return;
-    var was = jpTxFreqHz;
-    jttyMoveTo(spot.hz, 'CQ on the clearest spot: %F Hz');
-    if (window.api.jtcatLog) window.api.jtcatLog('[JTTY] CQ on the clearest spot: ' + spot.hz + ' Hz (was ' + was + ' Hz)');
-  }
+  // A CQ goes out on the clearest spot: decided on the SHACK's send path
+  // (main.js jttyCqToClearSpot, the Clear spot measurement), so a CQ from
+  // this window, a phone or a remote POTACAT is treated alike; the move
+  // comes back as jtcat-tx-freq-set with a note.
   function jttySend() {
     if (!jttyTxEl) return;
     var text = jttyOutgoingText();
     if (!text.trim() || transmitting) return;
     var profile = jttyPackProfile();
     var go = function() {
-      jttyCqOnClearSpot(text);
       window.api.jtcatJttySend(text, profile);
       if (jttyActiveChat()) { jttyTxEl.value = ''; jttyComposeNative = -1; jttyRefreshPrefix(); }
       // Persist the audio frequency the operator actually transmits on.

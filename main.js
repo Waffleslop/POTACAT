@@ -13896,6 +13896,46 @@ function stopJtcatTune() {
 const { computeSpectrumBins } = require('./lib/spectrum-fft');
 const SPECTRUM_INTERVAL_MS = 100;
 const SPECTRUM_BIN_COUNT = 160;
+// JTTY: a running average of the passband while the engine listens (the
+// Clear spot measurement, here on the shack), so a CQ from ANY surface — the
+// pop-out, a phone, a remote POTACAT — goes out on the clearest spot
+// (lib/jtty-macros.js cqSpot). The engine feeds nothing while it transmits.
+const JttyMacrosMain = require('./lib/jtty-macros');
+let _jttyLevels = null;
+let _jttyLevelsMs = 0;
+let _jttyLevelsLastTs = 0;
+setInterval(() => {
+  const eng = ft8Engine;
+  if (!eng || eng._mode !== 'JTTY' || !eng._audioBuffer) { _jttyLevels = null; _jttyLevelsMs = 0; _jttyLevelsLastTs = 0; return; }
+  if (eng._txActive) { _jttyLevelsLastTs = Date.now(); return; }
+  const now = Date.now();
+  const dt = _jttyLevelsLastTs ? Math.min(2000, now - _jttyLevelsLastTs) : 0;
+  _jttyLevelsLastTs = now;
+  try {
+    const bins = computeSpectrumBins(eng._audioBuffer, eng._audioOffset || 0, SPECTRUM_BIN_COUNT);
+    _jttyLevels = JttyMacrosMain.accumulateLevels(_jttyLevels, bins, dt / 30000);
+    _jttyLevelsMs += dt;
+  } catch { /* a spectrum miss is not worth a crash */ }
+}, 1000).unref();
+// Move a JTTY CQ to the clearest spot before it is sent. Says so to the
+// pop-out (its frequency label and note) and to the phones (tx-status).
+function jttyCqToClearSpot(eng, text) {
+  const hz = JttyMacrosMain.cqSpot(text, _jttyLevels, 3000 / SPECTRUM_BIN_COUNT, {
+    hold: !!settings.jtcatHoldTxFreq, measuredMs: _jttyLevelsMs, current: eng._txFreq,
+  });
+  if (!hz) return false;
+  const was = eng._txFreq;
+  eng.setTxFreq(hz, { operator: true });
+  rememberJtcatTxFreq(eng);
+  sendCatLog(`[JTTY] CQ on the clearest spot: ${eng._txFreq} Hz (was ${was} Hz)`);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-tx-freq-set', { hz: eng._txFreq, mode: 'JTTY', note: 'CQ on the clearest spot: %F Hz' });
+  }
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    remoteServer.broadcastJtcatTxStatus({ state: 'rx', txFreq: eng._txFreq });
+  }
+  return true;
+}
 let _spectrumTimer = null;
 // Sticky intent: the mobile FT8 waterfall panel is open and wants the feed.
 // It is the source of truth for resuming the loop on reconnect — recovery no
@@ -37808,6 +37848,7 @@ app.whenReady().then(() => {
     const p = (payload && typeof payload === 'object') ? payload : { text: payload };
     const t = String(p.text || '');
     if (!t.trim()) return;
+    jttyCqToClearSpot(ft8Engine, t); // before the waveform is built at the (new) offset
     ft8Engine._txEnabled = true;
     Promise.resolve(ft8Engine.setTxMessage(t, { profile: p.profile })).then((samples) => {
       if (!ft8Engine || ft8Engine._mode !== 'JTTY') return;
