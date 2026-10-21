@@ -113,6 +113,14 @@ test('preferences: only the allowlist, only the right type, bounded', () => {
   assert.strictEqual(B.acceptPref('jtcatFdExch', 'x'.repeat(200)).length, 64);
 });
 
+test('a hand-over with the shack\'s own JTCAT window is said in this window', () => {
+  const back = B.IN['jtcat-owner']({ owner: 'shack', message: 'The shack took it' });
+  assert.deepStrictEqual(back.map(x => x[0]), ['jtcat-qso-state', 'jtcat-status']);
+  assert.strictEqual(back[1][1].state, 'stopped');
+  assert.deepStrictEqual(B.IN['jtcat-owner']({ owner: 'you', message: 'You took it' }), [['jtcat-qso-notice', { message: 'You took it' }]]);
+  assert.ok(/type: 'jtcat-owner', owner: 'you'/.test(main) && /type: 'jtcat-owner', owner: 'shack'/.test(main), 'the shack says it both ways');
+});
+
 console.log('\nwiring');
 
 test('main intercepts at the IPC layer before any handler registers', () => {

@@ -19351,6 +19351,8 @@ function connectRemote() {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       sendCatLog('[JTCAT] Closing popout — ECHOCAT taking over FT8');
       jtcatPopoutWin.close();
+      // Tell the device that took it, too: the shack's own window was running FT8.
+      remoteServer.sendToActor({ type: 'jtcat-owner', owner: 'you', message: "You took over FT8 from the shack's own JTCAT window." });
       // Surface the takeover in the main window — from the desktop's chair the
       // popout otherwise just vanishes (device-neutral: could be a tablet).
       if (win && !win.isDestroyed()) {
@@ -30197,6 +30199,11 @@ app.whenReady().then(() => {
         remoteServer.broadcastJtcatStatus({ running: false });
       }
       sendCatLog('[JTCAT] Stopping ECHOCAT FT8 — popout taking over');
+    }
+    // A connected device (phone, or another POTACAT) running FT8 here is told
+    // the shack's own window took it, and how to take it back.
+    if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+      remoteServer.sendToClient({ type: 'jtcat-owner', owner: 'shack', message: "The shack's own JTCAT window took over FT8. Start FT8 here again to take it back." });
     }
     const isMac = process.platform === 'darwin';
     jtcatPopoutWin = new BrowserWindow({
