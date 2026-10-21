@@ -386,6 +386,18 @@ asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', as
   assert.strictEqual(closed, 1008);
 }]);
 
+asyncTests.push(['a dial that fails says which leg failed and why, in one line', async () => {
+  const { RemoteClient } = require('../lib/remote-client');
+  const c = new RemoteClient({ id: 'x', name: 'x', lanHost: 'wss://127.0.0.1:1', fingerprint: 'AB' });
+  const logs = [];
+  c.on('log', (l) => logs.push(l));
+  c.on('error', () => {});
+  c.connect();
+  await new Promise((r) => setTimeout(r, 1500));
+  c.close();
+  assert.ok(logs.some(l => /could not reach the shack: lan refused/.test(l)), logs.join('\n'));
+}]);
+
 (async () => {
   for (const [name, fn] of asyncTests) {
     try { await fn(); passed++; console.log('  ok  ' + name); }
