@@ -31679,8 +31679,11 @@ app.whenReady().then(() => {
     return {
       myCall: settings.myCallsign || '',
       grid: settings.grid || '',
-      park: primaryParkRef(),
-      parkName: primaryParkName(),
+      // The renderer's primaryParkRef()/primaryParkName() do not exist in main:
+      // calling them threw on every request, so no template ever got
+      // {PARK}/{NAME}/{RIG}/{CALL} (since 1.11.0). Same rule, from settings.
+      park: ((settings.activatorParkRefs || [])[0] || {}).ref || '',
+      parkName: ((settings.activatorParkRefs || [])[0] || {}).name || '',
       name: settings.sstvOperatorName || settings.operatorName || '',
       rig: rigLabel ? (rigLabel + (watts ? ' · ' + Math.round(watts) + ' W' : '')) : '',
       typedCall: typedCalls.current() || '',
@@ -35962,11 +35965,6 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-settings', (_e, newSettings) => {
-    const _rigsBeforeSave = JSON.stringify(settings.rigs || []);
-    const _activeRigBeforeSave = settings.activeRigId;
-    if (isRemoteLinked() && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _e.sender === jtcatPopoutWin.webContents) {
-      for (const m of RemoteBridge.prefMessages(newSettings)) remoteClient.sendRaw(m);
-    }
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
@@ -35974,6 +35972,12 @@ app.whenReady().then(() => {
     for (const f of normalizeSettingsSerialPaths(newSettings)) sendCatLog(`[CAT] ${f.key} "${f.from}" saved as ${f.to}`);
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    const _rigsBeforeSave = JSON.stringify(settings.rigs || []);
+    const _activeRigBeforeSave = settings.activeRigId;
+    // A remote shack's JTCAT window: its per-profile prefs reach the shack too.
+    if (isRemoteLinked() && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _e.sender === jtcatPopoutWin.webContents) {
+      for (const m of RemoteBridge.prefMessages(newSettings)) remoteClient.sendRaw(m);
+    }
     // The renderer saves the WHOLE rig list from the copy it loaded when
     // Settings opened. Station Setup progress is written by main after that
     // (a passed test, "don't ask again"), so an incoming rig that lacks those
