@@ -281,7 +281,7 @@ test('Tailscale leg: a public certificate is checked by its CA, not the LAN pin'
 
 test('Remove unpairs at the shack when linked, and gives the radio back to this PC', () => {
   const rm = handlerBody(main, "ipcMain.handle('connection-targets-remove', (_e, id) => {");
-  assert.ok(/if \(isRemoteLinked\(\)\) \{ remoteClient\.sendRaw\(\{ type: 'unpair-self' \}\); unpairedAtShack = true; \}/.test(rm));
+  assert.ok(/if \(isRemoteLinked\(\)\) \{[\s\S]{0,300}remoteClient\.sendRaw\(\{ type: 'unpair-self' \}\);\n\s+unpairedAtShack = true;/.test(rm));
   assert.ok(/connectCatSafe\('remote shack removed'\)/.test(rm));
   const { MESSAGES } = require('../lib/echocat-protocol');
   assert.ok(MESSAGES['unpair-self'] && MESSAGES['unpair-self'].dir === 'c2s');
@@ -366,6 +366,20 @@ test('an activation on the laptop is the shack\'s too (its engines log with the 
   assert.ok(/settings\.appMode = end \? 'hunter' : 'activator';/.test(shack), 'a client can end an activation it started');
   const { MESSAGES } = require('../lib/echocat-protocol');
   assert.ok(MESSAGES['set-activator-park'].fields.end && MESSAGES['set-activator-park'].fields.parkRef);
+});
+
+test('an n-fer started on a device reaches the shack as every park; Remove waits for the shack\'s answer', () => {
+  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  assert.ok(/parkRefs: Array\.isArray\(msg\.parkRefs\)/.test(srv), 'the demux passes parkRefs');
+  const at = main.indexOf("remoteServer.on('set-activator-park', async (");
+  const h = main.slice(at, at + 2000);
+  assert.ok(/\(Array\.isArray\(parkRefs\) && parkRefs\.length\) \? parkRefs : \(parkRef \? \[parkRef\] : \[\]\)/.test(h));
+  assert.ok(/for \(const entry of settings\.activatorParkRefs\)/.test(h), 'every park gets its name');
+  assert.ok(/pushActivatorStateToPhone\(\);/.test(h), 'end:true re-broadcasts activator-state with no refs');
+  const rm = handlerBody(main, "ipcMain.handle('connection-targets-remove', (_e, id) => {");
+  assert.ok(/rc\.once\('revoked'/.test(rm) && /setTimeout\(done, 2000\)/.test(rm));
+  const rv = handlerBody(main, "remoteClient.on('revoked', ({ reason }) => {");
+  assert.ok(/if \(_remoteUnpairingSelf\)/.test(rv), 'Remove is not reported as the operator revoking');
 });
 
 const asyncTests = [];

@@ -5161,6 +5161,7 @@ function resetRemoteMirroredRigState() {
 // the leg in use, the round trip, its rig list (the `rigs` frame) and which
 // rig is active. Pushed on change as 'remote-shack-info'.
 let remoteShackInfo = null;
+let _remoteUnpairingSelf = false; // Remove sent unpair-self; the shack's `revoked` is expected
 let _remoteClientAuthFail = null; // {targetId, reason} — the shack refused this pairing
 function remoteShackInfoNow() {
   if (!isRemoteMode()) return { remote: false };
@@ -5966,6 +5967,8 @@ function ensureRemoteClient() {
   // expired so Remote Radios shows it needs a re-pair. Same cleanup
   // shape as pass-ended above. 2026-06-12.
   remoteClient.on('revoked', ({ reason }) => {
+    // This desktop asked to be forgotten (Remove): the Remove handler cleans up.
+    if (_remoteUnpairingSelf) { sendCatLog('[remote] the shack forgot this desktop (Remove)'); return; }
     sendCatLog(`[remote] pairing revoked by the shack operator: ${reason}`);
     target.expiresAt = Date.now();
     settings.activeTargetId = null;
@@ -19107,7 +19110,7 @@ function connectRemote() {
     sendCatLog(`[events] set-event-progress ${eventId}: ${itemId}=${!!worked}`);
   });
 
-  remoteServer.on('set-activator-park', async ({ parkRef, activationType, activationName: actName, sig, onAirCallsign, end }) => {
+  remoteServer.on('set-activator-park', async ({ parkRef, parkRefs, activationType, activationName: actName, sig, onAirCallsign, end }) => {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType, end ? '(ended)' : '');
     settings.appMode = end ? 'hunter' : 'activator';
     // The device's On-air call field: absent leaves the remembered value,
@@ -19116,19 +19119,19 @@ function connectRemote() {
       settings.activatorOnAirCallsign = cleanOnAirCallsign(onAirCallsign);
       if (win && !win.isDestroyed()) win.webContents.send('activator-onair-callsign', settings.activatorOnAirCallsign);
     }
-    if (parkRef) {
+    // Every ref of an n-fer (parkRefs), else the single parkRef.
+    const refs = end ? [] : ((Array.isArray(parkRefs) && parkRefs.length) ? parkRefs : (parkRef ? [parkRef] : []));
+    if (refs.length) {
       // The phone has always sent `sig` on this message (lib/echocat-protocol.js)
       // and main destructured it without ever reading it, so a phone-started
       // SOTA activation was wrong at the source.
-      settings.activatorParkRefs = activationProgram.normalizeParkRefs([{ id: parkRef, ref: parkRef, name: '', program: sig }]);
-      // Look up park name
-      let parkName = '';
-      try {
-        const park = getParkDb(parksMap, parkRef);
-        if (park && park.name) parkName = park.name;
-      } catch {}
-      if (parkName) {
-        settings.activatorParkRefs[0].name = parkName;
+      settings.activatorParkRefs = activationProgram.normalizeParkRefs(refs.map(r => ({ id: r, ref: r, name: '', program: sig })));
+      // Look up park names
+      for (const entry of settings.activatorParkRefs) {
+        try {
+          const park = getParkDb(parksMap, entry.ref);
+          if (park && park.name) entry.name = park.name;
+        } catch {}
       }
     } else {
       settings.activatorParkRefs = [];
@@ -30452,7 +30455,7 @@ app.whenReady().then(() => {
     // A connected device (phone, or another POTACAT) running FT8 here is told
     // the shack's own window took it, and how to take it back.
     if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
-      remoteServer.sendToClient({ type: 'jtcat-owner', owner: 'shack', message: "The shack's own JTCAT window took over FT8. Start FT8 here again to take it back." });
+      remoteServer.sendToJtcatOwner({ type: 'jtcat-owner', owner: 'shack', message: "The shack's own JTCAT window took over FT8. Start FT8 here again to take it back." });
     }
     const isMac = process.platform === 'darwin';
     jtcatPopoutWin = new BrowserWindow({
@@ -34870,10 +34873,20 @@ app.whenReady().then(() => {
     // otherwise its My devices list keeps a row this desktop no longer holds.
     let unpairedAtShack = false;
     if (settings.activeTargetId === id) {
-      if (isRemoteLinked()) { remoteClient.sendRaw({ type: 'unpair-self' }); unpairedAtShack = true; }
+      if (isRemoteLinked()) {
+        // The shack answers with `revoked` and closes the socket (4004); wait
+        // for that (up to 2 s) so the request is not lost to our own close.
+        _remoteUnpairingSelf = true;
+        remoteClient.sendRaw({ type: 'unpair-self' });
+        unpairedAtShack = true;
+      }
       settings.activeTargetId = null;
-      // Let the frame leave before the socket closes.
-      setTimeout(() => { tearDownRemoteClient(); connectCatSafe('remote shack removed'); }, unpairedAtShack ? 250 : 0);
+      const done = () => { _remoteUnpairingSelf = false; tearDownRemoteClient(); connectCatSafe('remote shack removed'); };
+      if (unpairedAtShack) {
+        const rc = remoteClient;
+        const timer = setTimeout(done, 2000);
+        rc.once('revoked', () => { clearTimeout(timer); setImmediate(done); });
+      } else done();
     }
     saveSettings(settings);
     if (win && !win.isDestroyed()) {

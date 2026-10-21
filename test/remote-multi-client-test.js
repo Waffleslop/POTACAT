@@ -114,6 +114,32 @@ async function connected(rc) {
   check(rs._pttActive === false && ptts[ptts.length - 1] === false, 'the transmitting device leaving releases PTT');
   check(rs._openClients().length === 1, 'the other device stays connected');
 
+  // one transmitter across devices: CW / FT8 / SSTV from another device are refused while one keys
+  const b2 = b; const gb2 = gb;
+  const a1 = client(PORT + 1, fp, TOKEN, 'laptopX'); const ga1 = collect(a1);
+  await connected(a1);
+  gb2.length = 0;
+  a1.sendPtt(true);
+  await sleep(200);
+  const cwSeen = [];
+  rs.on('cw-text', (m) => cwSeen.push(m));
+  b2.sendRaw({ type: 'cw-text', text: 'CQ' });
+  b2.sendRaw({ type: 'cw-key', at: 1, down: true });
+  b2.sendRaw({ type: 'jtcat-call-cq', modifier: '' });
+  await sleep(250);
+  check(cwSeen.length === 0 && gb2.filter(m => m.type === 'ptt-refused').length === 3, 'CW text, a paddle element and an FT8 CQ are refused while another device holds PTT');
+  // a forced unkey updates presence
+  ga1.length = 0;
+  rs.forcePttRelease();
+  await sleep(200);
+  const afterForce = ga1.filter(m => m.type === 'clients-list').pop();
+  check(afterForce && !afterForce.clients.some(c => c.keyed), 'a forced unkey clears keyed in presence');
+  b2.sendRaw({ type: 'cw-text', text: 'CQ' });
+  await sleep(200);
+  check(cwSeen.length === 1, 'after the unkey the other device may send');
+  a1.close();
+  await sleep(300);
+
   // reconnect A; replies and forwarded QSOs
   const a2 = client(PORT + 1, fp, TOKEN, 'laptop2'); const ga2 = collect(a2);
   await connected(a2);
@@ -142,6 +168,18 @@ async function connected(rc) {
   rs.relaySignalToClient({ type: 'sdp', sdp: 'x' });
   await sleep(200);
   check(gb.some(m => m.type === 'signal') && !ga2.some(m => m.type === 'signal'), 'audio signalling goes to the device that asked last');
+  const audioRow = ga2.filter(m => m.type === 'clients-list').pop();
+  check(audioRow && audioRow.clients.filter(c => c.audio).length === 1 && !audioRow.clients.find(c => c.you).audio, 'presence says which device has the audio');
+
+  // jtcat-owner 'shack' goes to the device that ran FT8, not to everyone
+  ga2.length = 0; gb.length = 0;
+  a2.sendRaw({ type: 'jtcat-start', mode: 'FT8' });
+  await sleep(150);
+  b.sendRaw({ type: 'set-mode', mode: 'USB' }); // the phone operates something else
+  await sleep(150);
+  rs.sendToJtcatOwner({ type: 'jtcat-owner', owner: 'shack', message: 'x' });
+  await sleep(200);
+  check(ga2.some(m => m.type === 'jtcat-owner') && !gb.some(m => m.type === 'jtcat-owner'), 'only the device that ran FT8 hears the shack took it back');
 
   a2.close(); b.close(); rs.stop();
   await sleep(300);
