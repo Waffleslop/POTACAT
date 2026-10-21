@@ -340,6 +340,22 @@ test('voice macros: the shack\'s, played into its radio', () => {
   assert.strictEqual(RF.check('voiceMacros').ok, true);
 });
 
+test('band scope: the shack\'s, subscribed while watched, resubscribed after a reconnect', () => {
+  const start = fnBody(main, 'function startYaesuScope() {');
+  assert.ok(/^function startYaesuScope\(\) \{\n(\s*\/\/.*\n)*\s+if \(isRemoteMode\(\)\) \{ remoteShackScopeSubscribe\(true\); return; \}/.test(start), 'first, before any local source');
+  const stop = fnBody(main, 'function stopYaesuScope(why) {');
+  assert.ok(/if \(isRemoteMode\(\)\) \{ remoteShackScopeSubscribe\(false\); return; \}/.test(stop));
+  const sub = fnBody(main, 'function remoteShackScopeSubscribe(on) {');
+  assert.ok(/type: 'scope-subscribe', on: !!on/.test(sub));
+  const msg = handlerBody(main, "remoteClient.on('message', (msg) => {");
+  assert.ok(/case 'scope-frame':[\s\S]{0,400}scopePopoutWin\.webContents\.send\('scope-frame', f\)/.test(msg));
+  assert.ok(/case 'scope-state':/.test(msg));
+  const conn = handlerBody(main, "remoteClient.on('connected', (info) => {");
+  assert.ok(/if \(_remoteScopeWanted\) remoteClient\.sendRaw\(\{ type: 'scope-subscribe', on: true \}\);/.test(conn));
+  assert.ok(/type: 'scope-enable-radio'/.test(handlerBody(main, "ipcMain.on('scope-enable-on-radio', () => {")));
+  assert.strictEqual(require('../lib/remote-features').check('scope').ok, true);
+});
+
 const asyncTests = [];
 asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
   const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));

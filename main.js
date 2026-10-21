@@ -5230,6 +5230,23 @@ function remotePaddleEdge(down) {
   } else if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
 }
 
+// The shack's band scope on this desktop (spec B5): subscribed while the scope
+// window (or the JTCAT strip) watches, re-subscribed after a reconnect.
+let _remoteScopeWanted = false;
+function remoteShackScopeSubscribe(on) {
+  _remoteScopeWanted = !!on;
+  if (!isRemoteLinked()) {
+    if (on) remoteShackScopeState({ status: 'unavailable', available: false, diag: { key: 'remote-link', severity: 'blocker', headline: 'Waiting for the shack', detail: REMOTE_NOT_LINKED_MSG } });
+    return;
+  }
+  remoteClient.sendRaw({ type: 'scope-subscribe', on: !!on });
+}
+function remoteShackScopeState(state) {
+  const payload = { ...(state || {}), remote: true };
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-state', payload);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-state', payload);
+}
+
 const REMOTE_NO_RADIO_TO_SHARE_MSG = 'This POTACAT is itself driving a remote shack and has no radio to share. Connect your device to the shack directly.';
 const REMOTE_NOT_LINKED_MSG = 'The remote shack is not connected right now. POTACAT is reconnecting; try again in a moment.';
 
@@ -5364,6 +5381,7 @@ function ensureRemoteClient() {
     remoteRig.reset();
     remoteShackInfo = null;
     pushRemoteShackInfo();
+    if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true });
     // Update lastConnectedAt + lastReachableLeg on the persisted row.
     target.lastConnectedAt = Date.now();
     target.lastReachableLeg = remoteClient.state().leg;
@@ -5469,6 +5487,17 @@ function ensureRemoteClient() {
           rigs: (Array.isArray(msg.data) ? msg.data : []).map(r => ({ id: String(r.id || ''), name: String(r.name || ''), family: r.family || '' })).filter(r => r.id),
           activeRigId: msg.activeRigId || null };
         pushRemoteShackInfo();
+        break;
+      }
+      case 'scope-frame': {
+        const f = { seq: msg.seq, kind: msg.kind, bins: msg.bins };
+        if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-frame', f);
+        if (yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-frame', f);
+        break;
+      }
+      case 'scope-state': {
+        const { type, ...state } = msg;
+        remoteShackScopeState(state);
         break;
       }
       case 'cw-available': {
@@ -5612,6 +5641,8 @@ function tearDownRemoteClient() {
   pushRemoteShackInfo();
   remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
   remoteShackVoice = { labels: [], filled: [] };
+  // A scope window left open goes back to this PC's own source (or says why not).
+  if (_remoteScopeWanted) { _remoteScopeWanted = false; if (yaesuScopeWanted()) startYaesuScope(); }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
@@ -23552,16 +23583,14 @@ function yaesuScopeNoteFrequency(hz) {
 }
 
 function startYaesuScope() {
+  // Driving a remote shack: the scope is the SHACK's (its FT-710 bridge or its
+  // SDR). Subscribe while a window here watches; its frames and state are
+  // forwarded to the windows below (remoteClient 'message' scope-frame/state).
+  if (isRemoteMode()) { remoteShackScopeSubscribe(true); return; }
   if (yaesuScopeProc) return;
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   const synth = yaesuScopeSynth;
   if (!synth && scopeSourceKind() === 'sdr') { startSdrScope(); return; }
-  if (!synth && isRemoteMode()) {
-    yaesuScopeSetStatus('unavailable', { key: 'remote', severity: 'blocker',
-      headline: 'The Band Scope reads the radio on this PC',
-      detail: 'This desktop is controlling a remote shack. Open the scope on the shack PC, or in ECHOCAT.' });
-    return;
-  }
   if (!synth && !yaesuScopeRigHasScope()) {
     yaesuScopeSetStatus('unavailable', { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
@@ -23638,6 +23667,7 @@ function startYaesuScope() {
 }
 
 function stopYaesuScope(why) {
+  if (isRemoteMode()) { remoteShackScopeSubscribe(false); return; }
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   if (sdrScopeClient) { stopSdrScope(why); return; }
   yaesuScopeStopCatPolling();
@@ -31453,7 +31483,7 @@ app.whenReady().then(() => {
     });
   };
 
-  ipcMain.on('scope-popout-open', () => { if (!refuseRemoteFeature('scope')) openScopePopout(); });
+  ipcMain.on('scope-popout-open', () => openScopePopout());
 
   // --- Station Setup checklist (lib/station-setup.js; state gathering above
   // stationSetupPayload). Registered here so 'open-scope' can reach
@@ -31584,7 +31614,11 @@ app.whenReady().then(() => {
   ipcMain.on('scope-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
   ipcMain.on('scope-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('scope-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
-  ipcMain.on('scope-enable-on-radio', () => yaesuScopeEnableOnRadio());
+  ipcMain.on('scope-enable-on-radio', () => {
+    // Remote shack: its own Enable (SCU-LAN10 on the shack's FT-710).
+    if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendRaw({ type: 'scope-enable-radio' }); else refuseRemoteNotLinked(null); return; }
+    yaesuScopeEnableOnRadio();
+  });
   // The JTCAT pop-out's band-scope strip: it watches while shown, like a
   // subscribed ECHOCAT client, and the helper runs for whoever is watching.
   ipcMain.on('jtcat-scope-watch', (_e, on) => {
