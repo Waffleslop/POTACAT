@@ -1682,6 +1682,13 @@ let pskrMap = null;            // PskrClient for dedicated PSKReporter Map view
 let pskrMapSpots = [];         // receiver spots for PSKReporter Map (FIFO, max 500)
 let pskrMapFlushTimer = null;  // throttle timer for PSKReporter Map -> renderer
 let keyer = null;          // IambicKeyer instance for CW MIDI keying
+// THE paddle-to-rig router (Flex API, main-port DTR/RTS, CW Key Port,
+// WinKeyer, rigctld refusal), built once where the ECHOCAT keyer output is
+// wired and shared by the desktop's own MIDI/keyboard keyer. Until
+// 2026-10-20 the local keyer only spoke to SmartSDR, so a Vail or VBand
+// paddle keyed a Flex and nothing else — while the same paddle on the phone
+// keyed everything (QMX+ report).
+let paddleKeyRig = null;
 let winKeyer = null;       // K1EL WinKeyer instance for hardware CW keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
 // Wiring that must survive connectRemote() replacing the server. That
@@ -16797,6 +16804,239 @@ function changeSpotHides(op) {
   publishSpotHides();
 }
 
+// Builds THE paddle-to-rig router once and keeps it in paddleKeyRig. It used
+// to live inside connectRemote(), so with ECHOCAT switched off it was never
+// built and the desktop keyer fell back to SmartSDR-only (the Vail/QMX+
+// report, 2026-10-20). Nothing in it belongs to the remote server; the
+// server merely subscribes to it.
+function buildPaddleKeyRig() {
+  if (paddleKeyRig) return paddleKeyRig;
+  let _cwPollResumeTimer = null;
+  let _cwKeyLoggedRoute = false;
+  let _cwKeyPortLineLogged = '';   // the key-port line last announced
+  let _cwTxrxPttOnlyLogged = false;
+  paddleKeyRig = ({ down }) => {
+    // A paddle keys the rig outside the controller's own PTT path. Hold the
+    // TX flag past each edge so a CAT-muted TS-480 is not declared DOWN ten
+    // seconds into an over — which forced the key line low mid-word
+    // (LZ3AW's TinyMidi paddle: "stops transmitting after a few seconds").
+    if (down && cat && typeof cat.noteTransmitting === 'function') cat.noteTransmitting(2000);
+    // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
+    if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
+      if (down) {
+        smartSdr.cwPttOn();
+      }
+      smartSdr.cwKey(down);
+    }
+    // Serial CAT keying — method depends on radio model
+    const rigType = detectRigType();
+    const rigModel = getActiveRigModel();
+    const cwCaps = rigModel?.cw || {};
+    // Which modem-control line(s) key CW on the main CAT port: rig-model default
+    // (cw.dtrPins) unless the operator overrode it per-rig (rig.cwKeyLine) to match
+    // their radio's USB Keying (CW) = DTR/RTS menu. resolveCwKeyPins forces the
+    // un-keyed line low so node-serialport can't latch it (see setCwKeyDtr).
+    const _cwActiveRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    const cwKeyPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
+    if (cat && cat.connected && rigType !== 'flex') {
+      // Pause polling so commands don't interleave with CW keying — but only
+      // when the keying goes over the CAT port. A dedicated CW Key Port
+      // (Kenwood-CAT rigs, DTR models, rigctld) keys a different port, so the
+      // pause bought nothing and cost every meter reading for as long as the
+      // paddle was in use (LZ3AW TS-480 + COM4 key port, 2026-09-29: "the
+      // power meter ... sometimes takes longer to visualise").
+      const _keyPortOnly = paddleKeysOnKeyPortOnly({
+        keyPortOpen: !!(cwKeyPort && cwKeyPort.isOpen),
+        rigctld: !!(settings.catTarget && settings.catTarget.type === 'rigctld'),
+        protocol: rigModel && rigModel.protocol,
+        paddleKey: cwCaps.paddleKey,
+        taKeying: !!(cwCaps.taKey && typeof cat.supportsCwKeyTa === 'function' && cat.supportsCwKeyTa()),
+      });
+      if (_keyPortOnly) {
+        // Nothing to pause (a pause from before the port opened is still
+        // resumed by its own timer).
+      } else if (down) {
+        if (_cwPollResumeTimer) { clearTimeout(_cwPollResumeTimer); _cwPollResumeTimer = null; }
+        cat.pausePolling();
+      } else {
+        // Resume polling 1.5s after last key-up
+        if (_cwPollResumeTimer) clearTimeout(_cwPollResumeTimer);
+        _cwPollResumeTimer = setTimeout(() => {
+          _cwPollResumeTimer = null;
+          cat.resumePolling();
+        }, 1500);
+      }
+      // Lazy-open the dedicated CW Key Port (if configured) on the first
+      // paddle event of the session. Originally gated on `paddleKey === 'dtr'`
+      // models (Icom-style USB-A DTR keying) but rigctld users with a Yaesu
+      // FTDx10 (`paddleKey: 'txrx'`) ALSO need a dedicated key port to do
+      // paddle CW at all — see rigctld branch below — so always try the lazy
+      // open. If they don't have one configured, ensureCwKeyPortLazyOpen()
+      // is a no-op.
+      if (down && !cwKeyPort) {
+        ensureCwKeyPortLazyOpen();
+      }
+      // Rigctld has no per-element CW keying command — its "T 1"/"T 0" only
+      // toggles the mic PTT line, so the radio TX-keys with zero CW output
+      // (KM4CFT IC-7300 MK II via rigctld, 2026-04-23). The dedicated CW Key
+      // Port path below DOES work over rigctld (it uses node-serialport DTR
+      // directly, bypassing rigctld). So skip the cat-side keying for
+      // rigctld users but fall through to the cwKeyPort handler.
+      const isRigctld = settings.catTarget && settings.catTarget.type === 'rigctld';
+      if (isRigctld) {
+        const dedicatedAvail = cwKeyPort && cwKeyPort.isOpen;
+        if (!_cwKeyLoggedRoute) {
+          _cwKeyLoggedRoute = true;
+          if (dedicatedAvail) {
+            sendCatLog('[CW] Rigctld backend can\'t key per-element — paddle keying via dedicated CW Key Port (DTR) instead.');
+          } else {
+            sendCatLog('[CW] Paddle keying is not supported over rigctld — hamlib has no per-element CW keying command, only mic PTT (T 1/T 0). The radio would TX with no CW output. ' +
+              'Workarounds: (1) type text in the CW widget\'s text box — that uses hamlib\'s send_morse and works correctly; (2) wire an external USB-UART (FTDI / CH340) to the rig\'s CW KEY jack and set it as "CW Key Port" in Settings → Rig.');
+            // Tell the phone its paddle won\'t make RF — suppresses local
+            // sidetone and shows a red banner with the workaround. G5HOW
+            // FTDx10 + Hamlib v1.5.11 2026-04-30.
+            _setCwPaddleAvailability(false, 'rigctld-no-per-element-cw');
+          }
+        }
+        // Skip the cat-side keying methods. Fall through to the cwKeyPort
+        // block at the bottom of the callback — it handles the real keying.
+      } else {
+      // Route keying based on model's preferred paddle method
+      // Icom default: txrx (CI-V PTT 0x1C) — universal, no DTR config needed
+      // Models with DTR keying support can override via cw.paddleKey: 'dtr'
+      let paddleMethod = cwCaps.paddleKey || 'txrx';
+      // DTR keying without a dedicated CW key port: fall back to toggling DTR on
+      // the main CAT serial port. This is what the radio's "USB Keying (CW) = USB(A) DTR"
+      // menu actually reads, and it produces real RF rather than silent PTT.
+      // Falling back to txrx would send CI-V 0x1C 0x00 (PTT only) — on an IC-7300 that
+      // keys the transmitter with no CW output (KM4CFT, 2026-04-21).
+      if (paddleMethod === 'dtr' && !(cwKeyPort && cwKeyPort.isOpen)) {
+        paddleMethod = 'main-dtr';
+      }
+      if (!_cwKeyLoggedRoute) {
+        _cwKeyLoggedRoute = true;
+        sendCatLog(`[CW] Keying route: ${paddleMethod}${cwKeyPort && cwKeyPort.isOpen ? ' + dedicated key port' : ''} (model: ${rigModel?.brand || '?'})`);
+        // Actionable hint when we're toggling a control line on the main CAT
+        // port — a very common "radio doesn't key" gotcha is the rig menu keying
+        // line (DTR vs RTS) not matching what POTACAT drives. (KQ3Q on IC-7300.)
+        if (paddleMethod === 'main-dtr') {
+          const brand = (rigModel?.brand || '').toLowerCase();
+          const line = (cwKeyPins.dtr && cwKeyPins.rts) ? 'DTR+RTS' : (cwKeyPins.rts ? 'RTS' : 'DTR');
+          let hint;
+          if (brand === 'icom') {
+            hint = `IC-7300/705/7610: SET > Connectors > USB SEND/Keying > USB Keying (CW) = ${line}. ` +
+              `POTACAT is driving ${line}; if your radio menu uses the other line, change one to match (Settings > Rig > CW keying line).`;
+          } else if (brand === 'yaesu') {
+            hint = `Yaesu: OPERATION SETTING > TUNING > CAT PORT setup + CW KEYING source = ${line}.`;
+          } else if (brand === 'kenwood') {
+            hint = `Kenwood: Menu > PC Port / USB > CW Keying = ${line}.`;
+          } else {
+            hint = `Check your rig menu — "USB Keying (CW) = ${line}" (or equivalent) must match, or the ${line} pulses POTACAT sends won't key the radio.`;
+          }
+          sendCatLog(`[CW] If the radio isn't keying, verify the rig menu: ${hint}${activeRigSetupPointer('CW')}`);
+        }
+      }
+      if (paddleMethod === 'dtr') {
+        // Dedicated CW Key Port is handling DTR — skip main CAT port
+      } else if (paddleMethod === 'main-dtr') {
+        // Toggle DTR/RTS on the main CAT serial port (no second adapter).
+        // Requires the radio's "USB Keying (CW)" menu to be set to USB(A) DTR/RTS.
+        // On Linux cdc_acm radios this fails silently — the transport emits
+        // 'pin-unsupported' on first try and we drop phone-side sidetone via
+        // _setCwPaddleAvailability(false). Subsequent calls here are no-ops
+        // since rig-controller latches `_dtrUnsupported` after the first error.
+        if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwKeyPins);
+      } else if (paddleMethod === 'ta' && cwCaps.taKey && typeof cat.supportsCwKeyTa === 'function' && cat.supportsCwKeyTa()) {
+        // Only when the codec really keys with TA. No codec does today, and
+        // RigController's fallback is bare PTT: TS-480/590/890/990 paddles
+        // asserted TX;/RX; over CAT on top of the CW Key Port's real keying,
+        // and the PTT hold-off's RX; cut the over a few seconds in (LZ3AW's
+        // TinyMidi paddle, rounds 4–7). Those rigs take the Kenwood branch
+        // below: the key port keys, or the paddle is reported unavailable.
+        cat.setCwKeyTa(down);
+      } else if (rigModel?.protocol === 'kenwood') {
+        // Yaesu/Kenwood CAT has NO per-element CW key command — the txrx route is
+        // bare PTT (TX1;/TX0; or TX;/RX;), which keys the transmitter with ZERO CW
+        // output and no rig sidetone (G5HOW FTDx10, 2026-06-29). So NEVER dead-key
+        // PTT for a paddle here. If a dedicated CW Key Port is open (e.g. the
+        // FTDX10's second/Standard USB COM port with PC KEYING = DTR/RTS), the block
+        // below does the real per-element keying — so we skip cat-side entirely,
+        // mirroring the Icom-'dtr'-with-keyport and rigctld branches. Previously we
+        // fell through to setCwKeyTxRx and dead-keyed PTT on the CAT port on top of
+        // the key port's real keying (held the rig in SEND). With no key port there's
+        // no way to make CW from a paddle at all, so tell the phone it won't make RF.
+        // Suppress the "would only key PTT / unavailable" notice when a CW Key
+        // Port is configured on a platform where the persistent pyserial keyer
+        // can drive it (non-win32) — the key-port block below keys for real, so
+        // the paddle IS available (KM4CFT FT-891 cp210x). Only warn when there's
+        // genuinely no working key-port route.
+        // A configured key port that is still OPENING is possible too: the
+        // first paddle press of a session is what starts the lazy open, so
+        // "not open yet" used to mark the paddle unavailable for the whole
+        // session on Windows — and mid-press, which left the radio keyed
+        // (LZ3AW TS-480 + COM4 key port, 1.10.25). Only a Windows driver that
+        // rejected the pin ioctl really cannot key (that path reports itself).
+        const _keyPortPaddlePossible = !!settings.cwKeyPort &&
+          !(process.platform === 'win32' && _cwKeyPortIoctlLatched && _cwKeyPortPathForPython === settings.cwKeyPort);
+        if (!(cwKeyPort && cwKeyPort.isOpen) && !_keyPortPaddlePossible && !_cwTxrxPttOnlyLogged) {
+          _cwTxrxPttOnlyLogged = true;
+          sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +
+            'For a real paddle: connect the rig\'s OTHER USB COM port (the one not used for CAT — "Standard" on the FTDX10, "Enhanced/CAT-2" on FT-710/991), ' +
+            'set the rig menu PC KEYING (or USB Keying (CW)) = DTR or RTS, and select that port as the CW Key Port in Settings → Rig — then set Settings → Rig → CW keying line to match, and enable BK-IN. ' +
+            'Or type in the CW text box — that uses the rig\'s internal keyer and makes real RF. See docs/linux-cw-keying.md.');
+          _setCwPaddleAvailability(false, 'txrx-ptt-only');
+        }
+        // Skip cat-side keying; the dedicated CW Key Port block below (if open) keys.
+      } else {
+        cat.setCwKeyTxRx(down);
+      }
+      } // end non-rigctld branch
+    }
+    // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter,
+    // a QMX second port, or a Yaesu's second (Standard/Enhanced) USB COM port.
+    // Which line(s) the key port drives. Default: the model's key pins when it
+    // names one that includes DTR (QMX = DTR+RTS); otherwise DTR — the near-
+    // universal default for an external transistor adapter AND the Yaesu
+    // "PC KEYING = DTR" case. The per-rig cwKeyLine override lets a Yaesu user
+    // who set PC KEYING = RTS (or an RTS-wired adapter) select RTS instead.
+    // (We deliberately don't use the RADIO's main-port dtrPins here — that's the
+    // rig's own USB-keying line, e.g. IC-7300 RTS, which is a different port than
+    // an external key adapter that's almost always DTR.) Drive BOTH lines
+    // explicitly so node-serialport can't latch the un-keyed one.
+    const kpPins = resolveKeyPortPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
+    // TIOCMSET-rejecting port (Linux cp210x): real-time paddle via the
+    // persistent pyserial keyer, which the per-element node-serialport set()
+    // below can't do. First key-edge of a session bootstraps the port open
+    // (async ENOTTY sets _cwKeyPortPathForPython) — that one edge is dropped,
+    // subsequent edges key. (KM4CFT FT-891 built-in CP2105.)
+    if (process.platform !== 'win32' && settings.cwKeyPort && !(cwKeyPort && cwKeyPort.isOpen)) {
+      if (_cwKeyPortPathForPython) {
+        if (cwPersistentKey(!!down, kpPins)) return;
+      } else if (!cwKeyPort) {
+        ensureCwKeyPortLazyOpen(); // open once so ENOTTY marks the pyserial path
+      }
+    }
+    if (cwKeyPort && cwKeyPort.isOpen) {
+      // Say which line the key port drives, once per line: the radio's own
+      // keying menu (Yaesu PC KEYING) has to name the same one or nothing
+      // goes out, and nothing else in the log says which line that is.
+      const kpLabel = keyLineLabel(kpPins);
+      if (down && _cwKeyPortLineLogged !== kpLabel) {
+        _cwKeyPortLineLogged = kpLabel;
+        sendCatLog(`[CW] Keying on the CW Key Port with ${kpLabel}. The radio's PC KEYING (or CW keying) menu must be set to ${kpLabel}${activeRigSetupPointer('CW')}`);
+      }
+      const pinState = { dtr: kpPins.dtr ? !!down : false, rts: kpPins.rts ? !!down : false };
+      cwKeyPort.set(pinState, (err) => {
+        if (err && !cwKeyPort._dtrLoggedError) {
+          console.log(`[CW Key Port] Pin set error: ${err.message} (pins: ${JSON.stringify(pinState)})`);
+          cwKeyPort._dtrLoggedError = true; // log once, don't spam
+        }
+      });
+    }
+  };
+  return paddleKeyRig;
+}
+
 function connectRemote() {
   disconnectRemote();
   if (!settings.enableRemote) return;
@@ -17356,229 +17596,7 @@ function connectRemote() {
   });
 
   // CW keyer output: route IambicKeyer key events to radio
-  let _cwPollResumeTimer = null;
-  let _cwKeyLoggedRoute = false;
-  let _cwKeyPortLineLogged = '';   // the key-port line last announced
-  let _cwTxrxPttOnlyLogged = false;
-  remoteServer.setCwKeyerOutput(({ down }) => {
-    // A paddle keys the rig outside the controller's own PTT path. Hold the
-    // TX flag past each edge so a CAT-muted TS-480 is not declared DOWN ten
-    // seconds into an over — which forced the key line low mid-word
-    // (LZ3AW's TinyMidi paddle: "stops transmitting after a few seconds").
-    if (down && cat && typeof cat.noteTransmitting === 'function') cat.noteTransmitting(2000);
-    // FlexRadio via SmartSDR TCP API — only when Flex is the active CAT rig
-    if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
-      if (down) {
-        smartSdr.cwPttOn();
-      }
-      smartSdr.cwKey(down);
-    }
-    // Serial CAT keying — method depends on radio model
-    const rigType = detectRigType();
-    const rigModel = getActiveRigModel();
-    const cwCaps = rigModel?.cw || {};
-    // Which modem-control line(s) key CW on the main CAT port: rig-model default
-    // (cw.dtrPins) unless the operator overrode it per-rig (rig.cwKeyLine) to match
-    // their radio's USB Keying (CW) = DTR/RTS menu. resolveCwKeyPins forces the
-    // un-keyed line low so node-serialport can't latch it (see setCwKeyDtr).
-    const _cwActiveRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
-    const cwKeyPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
-    if (cat && cat.connected && rigType !== 'flex') {
-      // Pause polling so commands don't interleave with CW keying — but only
-      // when the keying goes over the CAT port. A dedicated CW Key Port
-      // (Kenwood-CAT rigs, DTR models, rigctld) keys a different port, so the
-      // pause bought nothing and cost every meter reading for as long as the
-      // paddle was in use (LZ3AW TS-480 + COM4 key port, 2026-09-29: "the
-      // power meter ... sometimes takes longer to visualise").
-      const _keyPortOnly = paddleKeysOnKeyPortOnly({
-        keyPortOpen: !!(cwKeyPort && cwKeyPort.isOpen),
-        rigctld: !!(settings.catTarget && settings.catTarget.type === 'rigctld'),
-        protocol: rigModel && rigModel.protocol,
-        paddleKey: cwCaps.paddleKey,
-        taKeying: !!(cwCaps.taKey && typeof cat.supportsCwKeyTa === 'function' && cat.supportsCwKeyTa()),
-      });
-      if (_keyPortOnly) {
-        // Nothing to pause (a pause from before the port opened is still
-        // resumed by its own timer).
-      } else if (down) {
-        if (_cwPollResumeTimer) { clearTimeout(_cwPollResumeTimer); _cwPollResumeTimer = null; }
-        cat.pausePolling();
-      } else {
-        // Resume polling 1.5s after last key-up
-        if (_cwPollResumeTimer) clearTimeout(_cwPollResumeTimer);
-        _cwPollResumeTimer = setTimeout(() => {
-          _cwPollResumeTimer = null;
-          cat.resumePolling();
-        }, 1500);
-      }
-      // Lazy-open the dedicated CW Key Port (if configured) on the first
-      // paddle event of the session. Originally gated on `paddleKey === 'dtr'`
-      // models (Icom-style USB-A DTR keying) but rigctld users with a Yaesu
-      // FTDx10 (`paddleKey: 'txrx'`) ALSO need a dedicated key port to do
-      // paddle CW at all — see rigctld branch below — so always try the lazy
-      // open. If they don't have one configured, ensureCwKeyPortLazyOpen()
-      // is a no-op.
-      if (down && !cwKeyPort) {
-        ensureCwKeyPortLazyOpen();
-      }
-      // Rigctld has no per-element CW keying command — its "T 1"/"T 0" only
-      // toggles the mic PTT line, so the radio TX-keys with zero CW output
-      // (KM4CFT IC-7300 MK II via rigctld, 2026-04-23). The dedicated CW Key
-      // Port path below DOES work over rigctld (it uses node-serialport DTR
-      // directly, bypassing rigctld). So skip the cat-side keying for
-      // rigctld users but fall through to the cwKeyPort handler.
-      const isRigctld = settings.catTarget && settings.catTarget.type === 'rigctld';
-      if (isRigctld) {
-        const dedicatedAvail = cwKeyPort && cwKeyPort.isOpen;
-        if (!_cwKeyLoggedRoute) {
-          _cwKeyLoggedRoute = true;
-          if (dedicatedAvail) {
-            sendCatLog('[CW] Rigctld backend can\'t key per-element — paddle keying via dedicated CW Key Port (DTR) instead.');
-          } else {
-            sendCatLog('[CW] Paddle keying is not supported over rigctld — hamlib has no per-element CW keying command, only mic PTT (T 1/T 0). The radio would TX with no CW output. ' +
-              'Workarounds: (1) type text in the CW widget\'s text box — that uses hamlib\'s send_morse and works correctly; (2) wire an external USB-UART (FTDI / CH340) to the rig\'s CW KEY jack and set it as "CW Key Port" in Settings → Rig.');
-            // Tell the phone its paddle won\'t make RF — suppresses local
-            // sidetone and shows a red banner with the workaround. G5HOW
-            // FTDx10 + Hamlib v1.5.11 2026-04-30.
-            _setCwPaddleAvailability(false, 'rigctld-no-per-element-cw');
-          }
-        }
-        // Skip the cat-side keying methods. Fall through to the cwKeyPort
-        // block at the bottom of the callback — it handles the real keying.
-      } else {
-      // Route keying based on model's preferred paddle method
-      // Icom default: txrx (CI-V PTT 0x1C) — universal, no DTR config needed
-      // Models with DTR keying support can override via cw.paddleKey: 'dtr'
-      let paddleMethod = cwCaps.paddleKey || 'txrx';
-      // DTR keying without a dedicated CW key port: fall back to toggling DTR on
-      // the main CAT serial port. This is what the radio's "USB Keying (CW) = USB(A) DTR"
-      // menu actually reads, and it produces real RF rather than silent PTT.
-      // Falling back to txrx would send CI-V 0x1C 0x00 (PTT only) — on an IC-7300 that
-      // keys the transmitter with no CW output (KM4CFT, 2026-04-21).
-      if (paddleMethod === 'dtr' && !(cwKeyPort && cwKeyPort.isOpen)) {
-        paddleMethod = 'main-dtr';
-      }
-      if (!_cwKeyLoggedRoute) {
-        _cwKeyLoggedRoute = true;
-        sendCatLog(`[CW] Keying route: ${paddleMethod}${cwKeyPort && cwKeyPort.isOpen ? ' + dedicated key port' : ''} (model: ${rigModel?.brand || '?'})`);
-        // Actionable hint when we're toggling a control line on the main CAT
-        // port — a very common "radio doesn't key" gotcha is the rig menu keying
-        // line (DTR vs RTS) not matching what POTACAT drives. (KQ3Q on IC-7300.)
-        if (paddleMethod === 'main-dtr') {
-          const brand = (rigModel?.brand || '').toLowerCase();
-          const line = (cwKeyPins.dtr && cwKeyPins.rts) ? 'DTR+RTS' : (cwKeyPins.rts ? 'RTS' : 'DTR');
-          let hint;
-          if (brand === 'icom') {
-            hint = `IC-7300/705/7610: SET > Connectors > USB SEND/Keying > USB Keying (CW) = ${line}. ` +
-              `POTACAT is driving ${line}; if your radio menu uses the other line, change one to match (Settings > Rig > CW keying line).`;
-          } else if (brand === 'yaesu') {
-            hint = `Yaesu: OPERATION SETTING > TUNING > CAT PORT setup + CW KEYING source = ${line}.`;
-          } else if (brand === 'kenwood') {
-            hint = `Kenwood: Menu > PC Port / USB > CW Keying = ${line}.`;
-          } else {
-            hint = `Check your rig menu — "USB Keying (CW) = ${line}" (or equivalent) must match, or the ${line} pulses POTACAT sends won't key the radio.`;
-          }
-          sendCatLog(`[CW] If the radio isn't keying, verify the rig menu: ${hint}${activeRigSetupPointer('CW')}`);
-        }
-      }
-      if (paddleMethod === 'dtr') {
-        // Dedicated CW Key Port is handling DTR — skip main CAT port
-      } else if (paddleMethod === 'main-dtr') {
-        // Toggle DTR/RTS on the main CAT serial port (no second adapter).
-        // Requires the radio's "USB Keying (CW)" menu to be set to USB(A) DTR/RTS.
-        // On Linux cdc_acm radios this fails silently — the transport emits
-        // 'pin-unsupported' on first try and we drop phone-side sidetone via
-        // _setCwPaddleAvailability(false). Subsequent calls here are no-ops
-        // since rig-controller latches `_dtrUnsupported` after the first error.
-        if (cat.setCwKeyDtr) cat.setCwKeyDtr(down, cwKeyPins);
-      } else if (paddleMethod === 'ta' && cwCaps.taKey && typeof cat.supportsCwKeyTa === 'function' && cat.supportsCwKeyTa()) {
-        // Only when the codec really keys with TA. No codec does today, and
-        // RigController's fallback is bare PTT: TS-480/590/890/990 paddles
-        // asserted TX;/RX; over CAT on top of the CW Key Port's real keying,
-        // and the PTT hold-off's RX; cut the over a few seconds in (LZ3AW's
-        // TinyMidi paddle, rounds 4–7). Those rigs take the Kenwood branch
-        // below: the key port keys, or the paddle is reported unavailable.
-        cat.setCwKeyTa(down);
-      } else if (rigModel?.protocol === 'kenwood') {
-        // Yaesu/Kenwood CAT has NO per-element CW key command — the txrx route is
-        // bare PTT (TX1;/TX0; or TX;/RX;), which keys the transmitter with ZERO CW
-        // output and no rig sidetone (G5HOW FTDx10, 2026-06-29). So NEVER dead-key
-        // PTT for a paddle here. If a dedicated CW Key Port is open (e.g. the
-        // FTDX10's second/Standard USB COM port with PC KEYING = DTR/RTS), the block
-        // below does the real per-element keying — so we skip cat-side entirely,
-        // mirroring the Icom-'dtr'-with-keyport and rigctld branches. Previously we
-        // fell through to setCwKeyTxRx and dead-keyed PTT on the CAT port on top of
-        // the key port's real keying (held the rig in SEND). With no key port there's
-        // no way to make CW from a paddle at all, so tell the phone it won't make RF.
-        // Suppress the "would only key PTT / unavailable" notice when a CW Key
-        // Port is configured on a platform where the persistent pyserial keyer
-        // can drive it (non-win32) — the key-port block below keys for real, so
-        // the paddle IS available (KM4CFT FT-891 cp210x). Only warn when there's
-        // genuinely no working key-port route.
-        // A configured key port that is still OPENING is possible too: the
-        // first paddle press of a session is what starts the lazy open, so
-        // "not open yet" used to mark the paddle unavailable for the whole
-        // session on Windows — and mid-press, which left the radio keyed
-        // (LZ3AW TS-480 + COM4 key port, 1.10.25). Only a Windows driver that
-        // rejected the pin ioctl really cannot key (that path reports itself).
-        const _keyPortPaddlePossible = !!settings.cwKeyPort &&
-          !(process.platform === 'win32' && _cwKeyPortIoctlLatched && _cwKeyPortPathForPython === settings.cwKeyPort);
-        if (!(cwKeyPort && cwKeyPort.isOpen) && !_keyPortPaddlePossible && !_cwTxrxPttOnlyLogged) {
-          _cwTxrxPttOnlyLogged = true;
-          sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +
-            'For a real paddle: connect the rig\'s OTHER USB COM port (the one not used for CAT — "Standard" on the FTDX10, "Enhanced/CAT-2" on FT-710/991), ' +
-            'set the rig menu PC KEYING (or USB Keying (CW)) = DTR or RTS, and select that port as the CW Key Port in Settings → Rig — then set Settings → Rig → CW keying line to match, and enable BK-IN. ' +
-            'Or type in the CW text box — that uses the rig\'s internal keyer and makes real RF. See docs/linux-cw-keying.md.');
-          _setCwPaddleAvailability(false, 'txrx-ptt-only');
-        }
-        // Skip cat-side keying; the dedicated CW Key Port block below (if open) keys.
-      } else {
-        cat.setCwKeyTxRx(down);
-      }
-      } // end non-rigctld branch
-    }
-    // Dedicated CW Key Port — DTR/RTS keying via external USB-serial adapter,
-    // a QMX second port, or a Yaesu's second (Standard/Enhanced) USB COM port.
-    // Which line(s) the key port drives. Default: the model's key pins when it
-    // names one that includes DTR (QMX = DTR+RTS); otherwise DTR — the near-
-    // universal default for an external transistor adapter AND the Yaesu
-    // "PC KEYING = DTR" case. The per-rig cwKeyLine override lets a Yaesu user
-    // who set PC KEYING = RTS (or an RTS-wired adapter) select RTS instead.
-    // (We deliberately don't use the RADIO's main-port dtrPins here — that's the
-    // rig's own USB-keying line, e.g. IC-7300 RTS, which is a different port than
-    // an external key adapter that's almost always DTR.) Drive BOTH lines
-    // explicitly so node-serialport can't latch the un-keyed one.
-    const kpPins = resolveKeyPortPins({ modelPins: cwCaps.dtrPins, cwKeyLine: _cwActiveRig && _cwActiveRig.cwKeyLine });
-    // TIOCMSET-rejecting port (Linux cp210x): real-time paddle via the
-    // persistent pyserial keyer, which the per-element node-serialport set()
-    // below can't do. First key-edge of a session bootstraps the port open
-    // (async ENOTTY sets _cwKeyPortPathForPython) — that one edge is dropped,
-    // subsequent edges key. (KM4CFT FT-891 built-in CP2105.)
-    if (process.platform !== 'win32' && settings.cwKeyPort && !(cwKeyPort && cwKeyPort.isOpen)) {
-      if (_cwKeyPortPathForPython) {
-        if (cwPersistentKey(!!down, kpPins)) return;
-      } else if (!cwKeyPort) {
-        ensureCwKeyPortLazyOpen(); // open once so ENOTTY marks the pyserial path
-      }
-    }
-    if (cwKeyPort && cwKeyPort.isOpen) {
-      // Say which line the key port drives, once per line: the radio's own
-      // keying menu (Yaesu PC KEYING) has to name the same one or nothing
-      // goes out, and nothing else in the log says which line that is.
-      const kpLabel = keyLineLabel(kpPins);
-      if (down && _cwKeyPortLineLogged !== kpLabel) {
-        _cwKeyPortLineLogged = kpLabel;
-        sendCatLog(`[CW] Keying on the CW Key Port with ${kpLabel}. The radio's PC KEYING (or CW keying) menu must be set to ${kpLabel}${activeRigSetupPointer('CW')}`);
-      }
-      const pinState = { dtr: kpPins.dtr ? !!down : false, rts: kpPins.rts ? !!down : false };
-      cwKeyPort.set(pinState, (err) => {
-        if (err && !cwKeyPort._dtrLoggedError) {
-          console.log(`[CW Key Port] Pin set error: ${err.message} (pins: ${JSON.stringify(pinState)})`);
-          cwKeyPort._dtrLoggedError = true; // log once, don't spam
-        }
-      });
-    }
-  });
+  remoteServer.setCwKeyerOutput(buildPaddleKeyRig());
 
   // CW WPM from the phone — make it authoritative (persist settings.cwWpm +
   // sync every surface) instead of a transient keyer poke. Keyer MODE stays
@@ -21027,13 +21045,10 @@ function connectKeyer() {
   keyer.setSwapPaddles(!!settings.cwSwapPaddles);
 
   keyer.on('key', ({ down }) => {
-    // Send raw key event directly to radio with timestamps — preserves operator's fist
-    if (smartSdr && smartSdr.connected) {
-      if (down) {
-        smartSdr.cwPttOn();  // activate CW PTT (with holdoff auto-release)
-      }
-      smartSdr.cwKey(down);
-    }
+    // Same router as the ECHOCAT paddle: Flex API, main-port DTR/RTS (QMX,
+    // Icom USB keying), CW Key Port, WinKeyer. The old direct-to-SmartSDR
+    // call left every non-Flex rig silent under a local Vail/VBand paddle.
+    try { buildPaddleKeyRig()({ down }); } catch (err) { console.error('[CW] local paddle route:', err.message); }
 
     // Forward to renderer for sidetone
     if (win && !win.isDestroyed()) {
