@@ -6,7 +6,7 @@ POTACAT: the ability for a POTACAT Desktop instance running on a laptop (the
 (the "shack server") over LAN, Tailscale, or POTACAT Cloud Tunnel.
 
 It assumes the reader has not seen the design conversation. Read the whole
-thing before writing code. Status: **design, not started**. Target: ship
+thing before writing code. Status: Phase 1 control shipped in v1.8.6/1.8.7, the audio leg in v1.8.14; the remaining work is specified in `docs/remote-desktop-parity-spec.md` (2026-10-21). Original target: ship
 Phase 1 as part of v1.9.x.
 
 ---
