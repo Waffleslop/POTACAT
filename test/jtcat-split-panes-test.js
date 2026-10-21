@@ -15,8 +15,14 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
 test('every left pane gets the split, not only the FT8 decode pane', () => {
-  assert.ok(/var splitLeftPanes = \[decodePaneEl, document\.getElementById\('jp-psk-pane'\), document\.getElementById\('jp-jtty-pane'\)\]/.test(JS));
+  // A hard-coded list missed WSPR (2026-10-21: the map took 98% in WSPR and
+  // dragging did nothing). It is every child of the row left of the splitter.
+  assert.ok(/var splitLeftPanes = Array\.prototype\.filter\.call\(\n\s+\(document\.querySelector\('\.jp-main'\) \|\| document\.body\)\.children,/.test(JS));
   assert.ok(/splitLeftPanes\.forEach\(function\(el\) \{ el\.style\.flex = String\(p\) \+ ' 1 0'; \}\);/.test(JS));
+  assert.ok(/localStorage\.setItem\(SPLIT_LS_KEY, String\(splitCurrentPct\)\)/.test(JS), 'saves the applied split, whichever pane is showing');
+  // Every pane in that row is one the split now reaches.
+  const row = HTML.slice(HTML.lastIndexOf('<div class="jp-main">'), HTML.indexOf('class="jp-map-pane"', HTML.lastIndexOf('<div class="jp-main">')));
+  for (const id of ['class="jp-decode-pane"', 'id="jp-wspr-pane"', 'id="jp-psk-pane"', 'id="jp-jtty-pane"']) assert.ok(row.indexOf(id) > 0, id + ' sits left of the splitter');
 });
 test('the split is applied at load even with nothing saved (keyboard panes never keep flex:1)', () => {
   assert.ok(/applySplitPct\(isNaN\(savedPct\) \? 50 : savedPct\);/.test(JS));

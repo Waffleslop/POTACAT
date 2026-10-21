@@ -5008,10 +5008,19 @@ function _applyPopoutTheme(payload) {
   // set on the decode pane alone, the map's 20-80 weight fought a keyboard
   // pane's CSS flex:1 and took ~98% of the window, and dragging only moved
   // the hidden pane (Chris / W7RTA 2026-10-17, PSK31 and JTTY).
-  var splitLeftPanes = [decodePaneEl, document.getElementById('jp-psk-pane'), document.getElementById('jp-jtty-pane')].filter(Boolean);
+  // WSPR's spot list was left off that list too, so in WSPR the map took 98%
+  // of the window and dragging did nothing (user screenshots 2026-10-21:
+  // "a small sliver of the table to the left"). Every pane left of the
+  // splitter gets the split now, whatever mode it belongs to — a new mode's
+  // pane cannot be forgotten again.
+  var splitLeftPanes = Array.prototype.filter.call(
+    (document.querySelector('.jp-main') || document.body).children,
+    function(el) { return el !== splitterEl && el !== mapPane && !(mapPane && el.contains(mapPane)); });
+  var splitCurrentPct = 50;
   function applySplitPct(pct) {
     if (!decodePaneEl || !mapPane) return;
     var p = Math.max(20, Math.min(80, pct));
+    splitCurrentPct = p;
     splitLeftPanes.forEach(function(el) { el.style.flex = String(p) + ' 1 0'; });
     mapPane.style.flex = String(100 - p) + ' 1 0';
     if (map) setTimeout(function() { map.invalidateSize(); }, 50);
@@ -5036,9 +5045,8 @@ function _applyPopoutTheme(payload) {
       if (!dragging) return;
       dragging = false;
       splitterEl.classList.remove('dragging');
-      // Persist what's actually applied (post-clamp).
-      var applied = parseFloat(decodePaneEl.style.flex) || 50;
-      try { localStorage.setItem(SPLIT_LS_KEY, String(applied)); } catch (e) {}
+      // Persist what's actually applied (post-clamp), whichever pane is showing.
+      try { localStorage.setItem(SPLIT_LS_KEY, String(splitCurrentPct)); } catch (e) {}
     });
     splitterEl.addEventListener('dblclick', function() {
       applySplitPct(50);
