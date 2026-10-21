@@ -161,5 +161,107 @@ test('leaving remote mode resets the mirror and redraws', () => {
   assert.ok(/resetRemoteMirroredRigState\(\);/.test(t) && /broadcastRigState\(\);\n\}/.test(t));
 });
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+console.log('\nshack rigs, round trip, gating, own clients');
+
+test('the shack\'s rig list and round trip reach the chip and the CAT popover', () => {
+  const msg = handlerBody(main, "remoteClient.on('message', (msg) => {");
+  assert.ok(/case 'rigs': \{[\s\S]*pushRemoteShackInfo\(\);/.test(msg));
+  assert.ok(/case 'tx-drive-state':/.test(msg), 'the shack\'s TX drive echo');
+  const sw = main.slice(main.indexOf("ipcMain.handle('remote-shack-switch-rig'"));
+  assert.ok(/remoteClient\.sendRaw\(\{ type: 'switch-rig', rigId: String\(rigId\) \}\)/.test(sw.slice(0, 600)));
+  const rc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-client.js'), 'utf8');
+  assert.ok(/this\.emit\('rtt', rtt\)/.test(rc) && /rttMs: this\._rttMs/.test(rc));
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/if \(remoteShack && remoteShack\.remote\) \{\n\s+renderRemoteShackRigs\(remoteShack\);/.test(app), 'CAT popover lists the shack\'s rigs');
+  assert.ok(/window\.api\.remoteShackSwitchRig\(rig\.id\)/.test(app));
+  assert.ok(/connectionTargetsActivate\(null\)/.test(app.slice(app.indexOf('function renderRemoteShackRigs'))), 'a way back to this PC\'s radio');
+});
+
+test('round trip: RemoteClient measures the pong it already gets', () => {
+  const { RemoteClient } = require('../lib/remote-client');
+  const c = new RemoteClient({ id: 't', name: 'shack' });
+  let got = null;
+  c.on('rtt', (ms) => { got = ms; });
+  c._handleMessage(JSON.stringify({ type: 'pong', ts: Date.now() - 42 }));
+  assert.ok(got >= 42 && got < 1000, 'rtt ' + got);
+  assert.strictEqual(c.state().rttMs, got);
+  c._handleMessage(JSON.stringify({ type: 'pong' })); // an old shack: no ts, no figure, no throw
+});
+
+test('TX drive in remote mode is the shack\'s, never this PC\'s rig setting', () => {
+  const h = handlerBody(main, "ipcMain.on('tx-drive-set', (_e, value) => {");
+  const remote = h.slice(0, h.indexOf('settings.txDrive = v;'));
+  assert.ok(/if \(isRemoteMode\(\)\) \{[\s\S]*type: 'set-tx-drive', value: v[\s\S]*return;\n\s+\}/.test(remote));
+});
+
+test('remote-features: every unavailable entry point exists and has a reason', () => {
+  const RF = require('../lib/remote-features');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  for (const { id, reason, name } of RF.unavailableElements()) {
+    assert.ok(html.includes(`id="${id}"`), `${name}: #${id} is in index.html`);
+    assert.ok(reason && reason.length > 20, `${name} has a reason`);
+  }
+  for (const [name, f] of Object.entries(RF.FEATURES)) {
+    assert.ok(['shack', 'here', 'unavailable'].includes(f.where), name);
+    if (f.where === 'unavailable') assert.ok(f.reason, name + ' reason');
+  }
+  assert.deepStrictEqual(RF.check('nope'), { ok: true });
+  assert.ok(/<script src="\.\.\/lib\/remote-features\.js"><\/script>/.test(html));
+});
+
+test('main refuses an unavailable feature with the same text, at its entry IPC', () => {
+  const refuse = fnBody(main, 'function refuseRemoteFeature(feature) {');
+  assert.ok(/RemoteFeatures\.check\(feature\)/.test(refuse) && /app-notice/.test(refuse));
+  const guards = {
+    jtcat: ["ipcMain.on('jtcat-popout-open', (_e, mode) => {\n    if (refuseRemoteFeature('jtcat')) return;",
+            "ipcMain.on('jtcat-start', (_e, mode) => { if (!refuseRemoteFeature('jtcat')) startJtcat(mode); });"],
+    js8: ["if (!refuseRemoteFeature('js8')) openJs8Popout();"],
+    mercury: ["if (!refuseRemoteFeature('mercury')) openMercuryPopout();"],
+    scope: ["if (!refuseRemoteFeature('scope')) openScopePopout();"],
+    sstv: ["if (!refuseRemoteFeature('sstv')) openSstvPopout();"],
+    voiceMacros: ["if (state && refuseRemoteFeature('voiceMacros')) return;"],
+    cw: ["ipcMain.on('send-cw-text', (_e, text, opts) => {\n    if (refuseRemoteFeature('cw')) return;"],
+  };
+  const RF = require('../lib/remote-features');
+  for (const [name, needles] of Object.entries(guards)) {
+    if (RF.FEATURES[name].where !== 'unavailable') continue; // bridged: that guard is gone by design
+    for (const n of needles) assert.ok(main.includes(n), `${name}: ${n.slice(0, 50)}`);
+  }
+  const ss = fnBody(main, 'function stationSetupPayload(rigId) {');
+  assert.ok(/if \(isRemoteMode\(\)\) \{[\s\S]*remote: true, reason: c\.reason/.test(ss), 'no checklist for a radio that is not here');
+});
+
+test('the renderer greys unavailable entry points and answers a click with the reason', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const g = app.slice(app.indexOf('function applyRemoteFeatureGating(on) {'), app.indexOf('// Remote mode: the radios on offer are the SHACK\'s.'));
+  assert.ok(/RemoteFeatures\.unavailableElements\(\)/.test(g) && /data-remote-unavailable/.test(g));
+  assert.ok(/e\.stopImmediatePropagation\(\);\n\s+showLogToast\(el\.getAttribute\('data-remote-unavailable'\)/.test(g));
+  assert.ok(/onRemoteShackInfo\(\(info\) => applyRemoteFeatureGating\(!!\(info && info\.remote\)\)\)/.test(app));
+});
+
+const asyncTests = [];
+asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
+  const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));
+  assert.ok(/^[^\n]*\n[\s\S]{0,400}if \(isRemoteMode\(\)\) \{[\s\S]{0,200}remoteServer\.refuseCurrentClient\(REMOTE_NO_RADIO_TO_SHARE_MSG\);\n\s+return;/.test(cc));
+  const ens = fnBody(main, 'function ensureRemoteClient() {');
+  assert.ok(/remoteServer\.hasClient\(\)\) \{[\s\S]{0,200}refuseCurrentClient/.test(ens), 'a phone already attached is told too');
+  const { RemoteServer } = require('../lib/remote-server');
+  const rs = new RemoteServer();
+  const sent = [];
+  let closed = null;
+  rs._client = { readyState: 1, close: (code) => { closed = code; } };
+  rs._sendTo = (ws, m) => sent.push(m);
+  assert.strictEqual(rs.refuseCurrentClient('no radio'), true);
+  assert.deepStrictEqual(sent, [{ type: 'rig-blocked', reason: 'no radio' }]);
+  await new Promise((r) => setTimeout(r, 900));
+  assert.strictEqual(closed, 1008);
+}]);
+
+(async () => {
+  for (const [name, fn] of asyncTests) {
+    try { await fn(); passed++; console.log('  ok  ' + name); }
+    catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
+  }
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();

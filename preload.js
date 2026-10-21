@@ -98,6 +98,14 @@ contextBridge.exposeInMainWorld('api', {
   },
   // The shack released PTT (its safety timeout / its radio link dropped) or a
   // key-down was refused with the link down: let go of every PTT button.
+  // The shack this desktop is driving: name, leg, round trip, its rigs.
+  remoteShackInfo: () => ipcRenderer.invoke('remote-shack-info'),
+  remoteShackSwitchRig: (rigId) => ipcRenderer.invoke('remote-shack-switch-rig', rigId),
+  onRemoteShackInfo: (cb) => {
+    const handler = (_e, info) => cb(info || {});
+    ipcRenderer.on('remote-shack-info', handler);
+    return () => ipcRenderer.removeListener('remote-shack-info', handler);
+  },
   onRemoteClientPttReleased: (cb) => {
     const handler = (_e, info) => cb(info || {});
     ipcRenderer.on('remote-client-ptt-released', handler);

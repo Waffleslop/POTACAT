@@ -453,6 +453,7 @@ function healActiveRigNow(where) {
 const BUG_REPORT_BEFORE_MARKER = 150;
 const { RemoteClient, tsWssUrl } = require('./lib/remote-client');
 const { RemoteRigState } = require('./lib/remote-rig');
+const RemoteFeatures = require('./lib/remote-features');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
 // and every other call is a stable no-op — safe to require unconditionally.
 const alsa = require('./lib/alsa');
@@ -4155,6 +4156,12 @@ function stationSetupLive(rig) {
 }
 
 function stationSetupPayload(rigId) {
+  // Driving a remote shack: this PC's checklist would grade a radio that is
+  // not here (and the launch card would nag about it).
+  if (isRemoteMode()) {
+    const c = RemoteFeatures.check('stationSetup');
+    return { rig: null, remote: true, reason: c.reason, steps: [], summary: { total: 0, ok: 0, requiredLeft: 0, complete: true, next: null } };
+  }
   const rig = stationSetupRigById(rigId);
   if (!rig) return { rig: null, steps: [], summary: { total: 0, ok: 0, requiredLeft: 0, complete: true, next: null } };
   const radioType = radioTypeFromCatTarget(rig.catTarget);
@@ -5131,6 +5138,51 @@ function resetRemoteMirroredRigState() {
   _currentSplit = false;
 }
 
+// What the status chip and the CAT popover show about the shack: its name,
+// the leg in use, the round trip, its rig list (the `rigs` frame) and which
+// rig is active. Pushed on change as 'remote-shack-info'.
+let remoteShackInfo = null;
+function remoteShackInfoNow() {
+  if (!isRemoteMode()) return { remote: false };
+  const target = (settings.connectionTargets || []).find(t => t && t.id === settings.activeTargetId) || {};
+  const st = remoteClient && remoteClient.state ? remoteClient.state() : {};
+  const info = remoteShackInfo || {};
+  const rigs = Array.isArray(info.rigs) ? info.rigs : [];
+  const activeRig = rigs.find(r => r && r.id === info.activeRigId) || null;
+  return {
+    remote: true,
+    linked: isRemoteLinked(),
+    name: target.name || 'Remote shack',
+    kind: target.kind || '',
+    leg: st.leg || null,
+    rttMs: Number.isFinite(st.rttMs) ? st.rttMs : null,
+    rigs,
+    activeRigId: info.activeRigId || null,
+    rigName: activeRig ? (activeRig.name || '') : (target.rigModel || ''),
+    radioConnected: remoteRig.catConnected(),
+    stationCallsign: target.stationCallsign || null,
+  };
+}
+function pushRemoteShackInfo() {
+  const payload = remoteShackInfoNow();
+  for (const w of [win, vfoPopoutWin]) {
+    if (w && !w.isDestroyed()) w.webContents.send('remote-shack-info', payload);
+  }
+}
+
+// Driving a remote shack and `feature` needs the radio on this PC: say so
+// where the operator is looking and in the log (lib/remote-features.js holds
+// the wording the renderer shows too). Returns true when refused.
+function refuseRemoteFeature(feature) {
+  if (!isRemoteMode()) return false;
+  const c = RemoteFeatures.check(feature);
+  if (c.ok) return false;
+  sendCatLog('[Remote] ' + c.reason);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: c.reason, warn: true, duration: 9000 });
+  return true;
+}
+
+const REMOTE_NO_RADIO_TO_SHARE_MSG = 'This POTACAT is itself driving a remote shack and has no radio to share. Connect your device to the shack directly.';
 const REMOTE_NOT_LINKED_MSG = 'The remote shack is not connected right now. POTACAT is reconnecting; try again in a moment.';
 
 // A send that needs the shack, with the link down: tell the window that asked
@@ -5214,6 +5266,11 @@ function ensureRemoteClient() {
     cat = null;
   }
   killRigctld();
+  // A phone attached to THIS desktop loses its radio now (spec A8).
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    sendCatLog('[Echo CAT] Device disconnected: ' + REMOTE_NO_RADIO_TO_SHARE_MSG);
+    remoteServer.refuseCurrentClient(REMOTE_NO_RADIO_TO_SHARE_MSG);
+  }
   remoteClient = new RemoteClient(target, {
     clientVersion: app.getVersion() || '',
     clientPlatform: 'desktop-' + process.platform,
@@ -5240,6 +5297,8 @@ function ensureRemoteClient() {
     // A fresh session: drop the previous one's snapshot so its caps cannot
     // light controls this shack's radio lacks; the first status refills it.
     remoteRig.reset();
+    remoteShackInfo = null;
+    pushRemoteShackInfo();
     // Update lastConnectedAt + lastReachableLeg on the persisted row.
     target.lastConnectedAt = Date.now();
     target.lastReachableLeg = remoteClient.state().leg;
@@ -5289,6 +5348,7 @@ function ensureRemoteClient() {
     // Rig panel / VFO window state and caps: re-broadcast only when something
     // other than a meter changed (snapshots arrive every poll).
     if (changed.some(k => !REMOTE_METER_FIELDS.has(k))) broadcastRigState();
+    if (changed.includes('catConnected')) pushRemoteShackInfo();
     if (!win || win.isDestroyed()) return;
     // Forward shack status fields into the local cat-* channels so
     // the renderer's existing handlers update transparently.
@@ -5336,6 +5396,23 @@ function ensureRemoteClient() {
         if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, warn: true, duration: 8000 });
         break;
       }
+      case 'rigs': {
+        // The shack's rig list: the CAT popover offers these instead of this
+        // PC's rigs, and a click switches the SHACK's radio (switch-rig).
+        remoteShackInfo = { ...(remoteShackInfo || {}),
+          rigs: (Array.isArray(msg.data) ? msg.data : []).map(r => ({ id: String(r.id || ''), name: String(r.name || ''), family: r.family || '' })).filter(r => r.id),
+          activeRigId: msg.activeRigId || null };
+        pushRemoteShackInfo();
+        break;
+      }
+      case 'tx-drive-state': {
+        const v = Number(msg.value);
+        if (!Number.isFinite(v)) break;
+        for (const w of [win, vfoPopoutWin]) {
+          if (w && !w.isDestroyed()) w.webContents.send('tx-drive-update', v);
+        }
+        break;
+      }
       case 'vfo-lock-state': {
         // The shack owns the lock; mirror it so the tune guard and every
         // window's lock pill agree with it.
@@ -5347,6 +5424,7 @@ function ensureRemoteClient() {
         break;
     }
   });
+  remoteClient.on('rtt', () => pushRemoteShackInfo());
   remoteClient.on('spots', (data) => {
     if (win && !win.isDestroyed()) win.webContents.send('spots', data);
   });
@@ -5436,6 +5514,8 @@ function tearDownRemoteClient() {
   remoteClient = null;
   _remoteClientLastStatus = null;
   resetRemoteMirroredRigState();
+  remoteShackInfo = null;
+  pushRemoteShackInfo();
   if (win && !win.isDestroyed()) {
     win.webContents.send('remote-client-status', { state: 'idle' });
     win.webContents.send('cat-status', { connected: false });
@@ -17514,6 +17594,13 @@ function connectRemote() {
     }
   });
   remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {
+    // This desktop is driving a remote shack: it has no radio of its own to
+    // lend a phone, and chaining one link through another is not supported.
+    if (isRemoteMode()) {
+      sendCatLog('[Echo CAT] Device refused: ' + REMOTE_NO_RADIO_TO_SHARE_MSG);
+      remoteServer.refuseCurrentClient(REMOTE_NO_RADIO_TO_SHARE_MSG);
+      return;
+    }
     // Cancel any pending teardown — the phone came back inside the
     // grace window, so the engine kept running and we're whole.
     if (_clientDisconnectGraceTimer) {
@@ -21018,6 +21105,16 @@ function keyRemoteShack(on) {
 }
 
 ipcMain.on('remote-client-audio-ptt', (_e, on) => { keyRemoteShack(on); });
+ipcMain.handle('remote-shack-info', () => remoteShackInfoNow());
+// Switch the SHACK's radio (its own rig list). The shack answers with a new
+// `rigs` frame and a fresh status snapshot carrying the new rig's caps.
+ipcMain.handle('remote-shack-switch-rig', (_e, rigId) => {
+  if (!isRemoteMode()) return { ok: false, error: 'Not driving a remote shack' };
+  if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
+  if (!rigId) return { ok: false, error: 'No rig chosen' };
+  remoteClient.sendRaw({ type: 'switch-rig', rigId: String(rigId) });
+  return { ok: true };
+});
 
 // --- Remote Audio (hidden BrowserWindow for WebRTC) ---
 // Single source of truth for the config payload sent to the audio bridge
@@ -29805,6 +29902,7 @@ app.whenReady().then(() => {
     });
   };
   ipcMain.on('jtcat-popout-open', (_e, mode) => {
+    if (refuseRemoteFeature('jtcat')) return;
     // A More-menu pick (PSK31 / JTTY) names its mode. A fresh window reads
     // settings.jtcatLastMode (saved by the renderer first, IPC is ordered);
     // an already-open window must be TOLD, or it stays in whatever it was.
@@ -29988,7 +30086,7 @@ app.whenReady().then(() => {
       if (input.key === 'F12' && input.type === 'keyDown') js8PopoutWin.webContents.toggleDevTools();
     });
   }
-  ipcMain.on('js8call-popout-open', () => openJs8Popout());
+  ipcMain.on('js8call-popout-open', () => { if (!refuseRemoteFeature('js8')) openJs8Popout(); });
 
   // --- JS8 Heartbeat Map (RX-only reachability: heard / heard-by / both) ---
   ipcMain.on('js8-map-popout', () => {
@@ -30182,7 +30280,7 @@ app.whenReady().then(() => {
     return { ok: true, prefill: q };
   });
 
-  ipcMain.on('mercury-popout-open', () => openMercuryPopout());
+  ipcMain.on('mercury-popout-open', () => { if (!refuseRemoteFeature('mercury')) openMercuryPopout(); });
   ipcMain.on('mercury-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('mercury-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
   ipcMain.on('mercury-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
@@ -31173,7 +31271,7 @@ app.whenReady().then(() => {
     });
   };
 
-  ipcMain.on('scope-popout-open', () => openScopePopout());
+  ipcMain.on('scope-popout-open', () => { if (!refuseRemoteFeature('scope')) openScopePopout(); });
 
   // --- Station Setup checklist (lib/station-setup.js; state gathering above
   // stationSetupPayload). Registered here so 'open-scope' can reach
@@ -31334,7 +31432,7 @@ app.whenReady().then(() => {
     yaesuScopeRestartLater('frame rate changed');
   });
 
-  ipcMain.on('sstv-popout-open', () => openSstvPopout());
+  ipcMain.on('sstv-popout-open', () => { if (!refuseRemoteFeature('sstv')) openSstvPopout(); });
 
   ipcMain.on('sstv-popout-theme', (_e, theme) => {
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
@@ -34519,6 +34617,13 @@ app.whenReady().then(() => {
   ipcMain.on('tx-drive-set', (_e, value) => {
     const v = Math.max(0, Math.min(200, Math.round(Number(value))));
     if (!Number.isFinite(v)) return;
+    // Remote shack: TX drive is the SHACK's gain on this desktop's mic audio.
+    // It lives there (tx-drive-state echoes back); this PC's rigs keep theirs.
+    if (isRemoteMode()) {
+      if (isRemoteLinked()) remoteClient.sendRaw({ type: 'set-tx-drive', value: v });
+      else refuseRemoteNotLinked(_e.sender);
+      return;
+    }
     settings.txDrive = v;
     const activeRig = (settings.rigs || []).find((r) => r.id === settings.activeRigId);
     if (activeRig) activeRig.txDrive = v;
@@ -36629,7 +36734,7 @@ app.whenReady().then(() => {
   });
 
   // --- JTCAT IPC ---
-  ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
+  ipcMain.on('jtcat-start', (_e, mode) => { if (!refuseRemoteFeature('jtcat')) startJtcat(mode); });
   ipcMain.on('jtcat-stop', () => {
     stopJtcat(); // clears the spot target too (single choke point in stopJtcat)
   });
@@ -38132,6 +38237,7 @@ app.whenReady().then(() => {
   // USB CODEC, so SSB-over-DATA's mode switch IS appropriate here when
   // the user has it enabled.
   ipcMain.on('voice-macro-ptt', (_e, state) => {
+    if (state && refuseRemoteFeature('voiceMacros')) return;
     handleRemotePtt(!!state, { audio: true });
   });
 
@@ -38191,6 +38297,7 @@ app.whenReady().then(() => {
   });
   // Desktop CW text sending (macros)
   ipcMain.on('send-cw-text', (_e, text, opts) => {
+    if (refuseRemoteFeature('cw')) return;
     sendCwTextToRadio(text, opts);
   });
   // Desktop CW cancel / abort — fires from the ESC button in the main

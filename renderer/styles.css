@@ -6612,6 +6612,9 @@ a.settings-echocat-badge-link:hover {
   margin: 2px 12px;
 }
 
+/* Desktop-to-desktop: a feature that needs the radio on this PC (remote mode) */
+.remote-unavailable { opacity: 0.45; cursor: not-allowed; }
+
 /* CAT Popover — rig switcher dropdown */
 .cat-popover {
   position: fixed;

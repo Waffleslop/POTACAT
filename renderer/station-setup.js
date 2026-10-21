@@ -69,7 +69,12 @@
     if (!current || !current.rig) {
       $('ss-title').textContent = 'Station Setup';
       progressEl.textContent = '';
-      stepsEl.innerHTML = '<p class="ss-detail">Add your radio first: Settings, then My Rigs, then Add Rig.</p>';
+      stepsEl.innerHTML = '';
+      const msg = document.createElement('p');
+      msg.className = 'ss-detail';
+      // Driving a remote shack: the radio is not on this PC (main says why).
+      msg.textContent = (current && current.remote && current.reason) || 'Add your radio first: Settings, then My Rigs, then Add Rig.';
+      stepsEl.appendChild(msg);
       rigSel.classList.add('hidden');
       return;
     }

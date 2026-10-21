@@ -347,7 +347,10 @@ let activeRigName = ''; // name of the currently active rig profile
 // multi-rig operator sees WHICH radio is connected at a glance ("991",
 // "7300") — N7FQT 2026-08-16. Empty = the classic "CAT".
 let activeRigCatLabel = '';
+// The shack this desktop drives (main 'remote-shack-info'), or {remote:false}.
+let remoteShack = { remote: false };
 function catPillLabel() {
+  if (remoteShack.remote) return 'RMT';
   const s = String(activeRigCatLabel || '').trim().toUpperCase().slice(0, 4);
   return s || 'CAT';
 }
@@ -1554,8 +1557,106 @@ function positionCatPopover() {
   catPopover.style.left = left + 'px';
 }
 
+// Remote mode: grey every entry point of a feature that needs the radio on
+// this PC (lib/remote-features.js) and answer a click with the reason. Never
+// hidden: the operator should see the feature exists and why it is off.
+let _remoteGatingOn = false;
+function applyRemoteFeatureGating(on) {
+  if (typeof RemoteFeatures === 'undefined') return;
+  _remoteGatingOn = !!on;
+  for (const { id, reason } of RemoteFeatures.unavailableElements()) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (on) {
+      if (!el.hasAttribute('data-remote-title')) el.setAttribute('data-remote-title', el.getAttribute('title') || '');
+      el.setAttribute('data-remote-unavailable', reason);
+      el.setAttribute('aria-disabled', 'true');
+      el.classList.add('remote-unavailable');
+      el.title = reason;
+    } else if (el.hasAttribute('data-remote-unavailable')) {
+      el.removeAttribute('data-remote-unavailable');
+      el.removeAttribute('aria-disabled');
+      el.classList.remove('remote-unavailable');
+      const t = el.getAttribute('data-remote-title');
+      if (t) el.title = t; else el.removeAttribute('title');
+      el.removeAttribute('data-remote-title');
+    }
+  }
+}
+document.addEventListener('click', (e) => {
+  if (!_remoteGatingOn) return;
+  const el = e.target && e.target.closest ? e.target.closest('[data-remote-unavailable]') : null;
+  if (!el) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  showLogToast(el.getAttribute('data-remote-unavailable'), { warn: true, duration: 7000 });
+}, true);
+
+// Remote mode: the radios on offer are the SHACK's. A click switches the
+// shack's rig; the last row hands the radio back to this PC.
+function renderRemoteShackRigs(info) {
+  catPopoverRigs.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'cat-popover-rig-desc';
+  head.style.padding = '4px 8px';
+  head.textContent = (info.name || 'Remote shack') + (info.linked ? '' : ' (reconnecting)');
+  catPopoverRigs.appendChild(head);
+  const rigs = info.rigs || [];
+  if (!rigs.length) {
+    const none = document.createElement('div');
+    none.className = 'cat-popover-rig-desc';
+    none.style.padding = '4px 8px';
+    none.textContent = info.linked ? 'The shack has not sent its radio list yet.' : 'Waiting for the shack.';
+    catPopoverRigs.appendChild(none);
+  }
+  for (const rig of rigs) {
+    const isActive = rig.id === info.activeRigId;
+    const rigEl = document.createElement('div');
+    rigEl.className = 'cat-popover-rig' + (isActive ? ' active' : '');
+    const dot = document.createElement('span');
+    dot.className = 'cat-popover-rig-dot';
+    const nfo = document.createElement('div');
+    nfo.className = 'cat-popover-rig-info';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'cat-popover-rig-name';
+    nameEl.textContent = rig.name || 'Unnamed Rig';
+    const descEl = document.createElement('div');
+    descEl.className = 'cat-popover-rig-desc';
+    descEl.textContent = isActive ? (info.radioConnected ? 'On the shack, connected' : 'On the shack, not connected') : 'On the shack';
+    nfo.appendChild(nameEl);
+    nfo.appendChild(descEl);
+    rigEl.appendChild(dot);
+    rigEl.appendChild(nfo);
+    rigEl.addEventListener('click', async () => {
+      if (isActive) { closeCatPopover(); return; }
+      const r = await window.api.remoteShackSwitchRig(rig.id);
+      if (!r || !r.ok) showLogToast((r && r.error) || 'Could not switch the shack\'s radio', { warn: true, duration: 6000 });
+      closeCatPopover();
+    });
+    catPopoverRigs.appendChild(rigEl);
+  }
+  const back = document.createElement('div');
+  back.className = 'cat-popover-rig';
+  back.innerHTML = '<span class="cat-popover-rig-dot"></span><div class="cat-popover-rig-info"><div class="cat-popover-rig-name">Use this PC\'s radio</div><div class="cat-popover-rig-desc">Disconnect from the shack</div></div>';
+  back.addEventListener('click', async () => {
+    closeCatPopover();
+    try { await window.api.connectionTargetsActivate(null); } catch (e) {}
+  });
+  catPopoverRigs.appendChild(back);
+}
+
 async function openCatPopover(anchor) {
   if (anchor) _catPopoverAnchor = anchor;
+  if (window.api.remoteShackInfo) {
+    try { remoteShack = await window.api.remoteShackInfo(); } catch (e) {}
+  }
+  if (remoteShack && remoteShack.remote) {
+    renderRemoteShackRigs(remoteShack);
+    positionCatPopover();
+    catPopover.classList.remove('hidden');
+    catPopoverOpen = true;
+    return;
+  }
   const settings = await window.api.getSettings();
   const rigs = settings.rigs || [];
   const activeId = settings.activeRigId || null;
@@ -7284,7 +7385,9 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     const name = state.name || 'shack';
     const leg = state.leg ? (' · ' + state.leg.toUpperCase()) : '';
     if (state.state === 'connected') {
-      chip.textContent = '🔗 ' + name + leg;
+      const rig = remoteShack.rigName ? (' · ' + remoteShack.rigName) : '';
+      const rtt = Number.isFinite(remoteShack.rttMs) ? (' · ' + remoteShack.rttMs + ' ms') : '';
+      chip.textContent = '🔗 ' + name + rig + leg + rtt;
       chip.style.background = '#4ecca3';
       chip.style.color = '#0a1a14';
       chip.title = 'Connected to ' + name + ' — click to manage';
@@ -7316,6 +7419,17 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     }
   };
   chip.addEventListener('click', _remoteRadiosOpen);
+  if (window.api && window.api.onRemoteShackInfo) {
+    const applyInfo = (info) => {
+      remoteShack = info && info.remote ? info : { remote: false };
+      refreshCatPillLabel();
+      if (_lastChipState) setChip(_lastChipState);
+      if (catPopoverOpen && remoteShack.remote) renderRemoteShackRigs(remoteShack);
+    };
+    window.api.onRemoteShackInfo(applyInfo);
+    window.api.onRemoteShackInfo((info) => applyRemoteFeatureGating(!!(info && info.remote)));
+    if (window.api.remoteShackInfo) window.api.remoteShackInfo().then(applyInfo).catch(() => {});
+  }
   if (window.api && window.api.onRemoteClientStatus) {
     window.api.onRemoteClientStatus(setChip);
     // Loud, app-wide notice when a Guest Pass session ends — the user may
