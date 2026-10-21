@@ -183,7 +183,9 @@ test('CW Key Port: key-as-I-type APPENDS to the DTR queue instead of cancelling 
   assert.ok(/_cwDtrQueueEndAt = Date\.now\(\) \+ t;/.test(fn));
   assert.ok(/cat\.noteTransmitting\(t \+ 200\)/.test(fn), 'the link watchdog is told');
   assert.ok(/sendCwTextViaDtrKey\(expanded, wpm, txtPins, \{ live \}\)/.test(main), 'the live flag reaches the key port');
-  assert.ok(/remoteServer\.setCwKeyerOutput\(\(\{ down \}\) => \{\n[\s\S]{0,500}if \(down && cat && typeof cat\.noteTransmitting === 'function'\) cat\.noteTransmitting\(2000\);/.test(main), 'paddle edges hold TX too');
+  // The paddle router is buildPaddleKeyRig()/paddleKeyRig since 2026-10-20
+  // (shared by the desktop keyer and the ECHOCAT keyer); same first rule.
+  assert.ok(/paddleKeyRig = \(\{ down \}\) => \{\n[\s\S]{0,500}if \(down && cat && typeof cat\.noteTransmitting === 'function'\) cat\.noteTransmitting\(2000\);/.test(main), 'paddle edges hold TX too');
 });
 test('manual entry: desktop New QSO and the web Log tab take a UTC date and time', () => {
   const html = R('qso-popout.html'), js = R('qso-popout.js');
