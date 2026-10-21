@@ -94,6 +94,11 @@ const RemoteBridge = require('./lib/remote-bridge');
   ipcMain.on = (channel, fn) => _ipcOn(channel, RemoteBridge.OUT[channel]
     ? (e, ...args) => { if (bridgeIpcToShack(channel, args, e)) return undefined; return fn(e, ...args); }
     : fn);
+  // Invokes that answer from the shack (the JS8 window): undefined = run locally.
+  const _ipcHandle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => _ipcHandle(channel, RemoteBridge.JS8_INVOKES.includes(channel)
+    ? async (e, ...args) => { const r = await bridgeInvokeToShack(channel, args, e); return r !== undefined ? r : fn(e, ...args); }
+    : fn);
 }
 const path = require('path');
 const fs = require('fs');
@@ -5324,15 +5329,143 @@ function bridgeIpcToShack(channel, args, e) {
   return true;
 }
 function bridgeInboundFromShack(msg) {
+  if (remoteJs8Inbound(msg)) return true;
   const rule = RemoteBridge.IN[msg.type];
   if (!rule) return false;
   RemoteBridge.trackState(_remoteBridgeState, msg);
   const out = rule(msg) || [];
   for (const [ch, payload] of out) {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send(ch, payload);
+    if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send(ch, payload);
     if ((ch === 'jtcat-decode' || ch === 'jtcat-qso-state') && jtcatMapPopoutWin && !jtcatMapPopoutWin.isDestroyed()) jtcatMapPopoutWin.webContents.send(ch, payload);
   }
   return true;
+}
+
+// JS8 on the shack (spec B6). The shack sends its JS8 state, threads and
+// heard lists at connect and on change, so they are cached here: a JS8
+// window opened later is filled from the cache, not left blank. Replies
+// (js8-send-result, js8-log-prefill) resolve the invoke that asked by reqId;
+// js8-thread answers thread opens in order (it carries no reqId).
+const _remoteJs8 = { state: null, threads: { list: [], unread: 0 }, heard: [], heardBy: [], tail: [], pending: new Map(), threadWaiters: [] };
+let _remoteJs8Seq = 0;
+function remoteJs8Reset() {
+  for (const p of _remoteJs8.pending.values()) p(null);
+  for (const w of _remoteJs8.threadWaiters) w(null);
+  Object.assign(_remoteJs8, { state: null, threads: { list: [], unread: 0 }, heard: [], heardBy: [], tail: [], pending: new Map(), threadWaiters: [] });
+}
+function remoteJs8Await(reqId, ms) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { _remoteJs8.pending.delete(reqId); resolve(null); }, ms);
+    _remoteJs8.pending.set(reqId, (m) => { clearTimeout(t); _remoteJs8.pending.delete(reqId); resolve(m); });
+  });
+}
+function remoteJs8Inbound(msg) {
+  switch (msg.type) {
+    case 'js8-state': _remoteJs8.state = { ...msg }; delete _remoteJs8.state.type; return false; // and the IN rule
+    case 'js8-threads': _remoteJs8.threads = { list: Array.isArray(msg.list) ? msg.list : _remoteJs8.threads.list, unread: Number(msg.unread) || 0 }; return false;
+    case 'js8-heard': _remoteJs8.heard = Array.isArray(msg.list) ? msg.list : []; return false;
+    case 'js8-heard-by': _remoteJs8.heardBy = Array.isArray(msg.list) ? msg.list : []; return true;
+    case 'js8-activity': {
+      const { type, replay, ...e } = msg;
+      _remoteJs8.tail.push(e);
+      if (_remoteJs8.tail.length > 300) _remoteJs8.tail.shift();
+      return false;
+    }
+    case 'js8-thread': {
+      const w = _remoteJs8.threadWaiters.shift();
+      if (w) w(msg.thread || null);
+      return true;
+    }
+    case 'js8-send-result':
+    case 'js8-log-prefill': {
+      const p = msg.reqId && _remoteJs8.pending.get(msg.reqId);
+      if (p) { p(msg); return true; }
+      if (msg.type === 'js8-send-result' && js8PopoutWin && !js8PopoutWin.isDestroyed()) {
+        const { type, reqId, ...r } = msg;
+        js8PopoutWin.webContents.send('js8call-send-result', r);
+      }
+      return true;
+    }
+    case 'js8-mail': {
+      if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: 'JS8 message at the shack from ' + (msg.from || 'a station'), duration: 8000 });
+      return true;
+    }
+    default: return false;
+  }
+}
+async function bridgeInvokeToShack(channel, args, e) {
+  if (!isRemoteMode()) return undefined;
+  if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
+  const reqId = 'd2d-' + (++_remoteJs8Seq);
+  const st = _remoteJs8.state || {};
+  const send = (m) => remoteClient.sendRaw(m);
+  const replyOf = (r) => (r ? { ok: !!r.ok, error: r.error || undefined, text: r.text, frames: r.frames } : { ok: false, error: 'The shack did not answer.' });
+  switch (channel) {
+    case 'js8-start': {
+      send({ type: 'js8-start', reqId });
+      remoteJtcatSubscribeSpectrum(true);
+      const r = await remoteJs8Await(reqId, 1500); // only a refusal answers
+      return r ? { ok: false, error: r.error || 'The shack refused to start JS8.' } : { ok: true };
+    }
+    case 'js8-stop': send({ type: 'js8-stop', reqId }); return { ok: true };
+    case 'js8-heartbeat': {
+      const o = args[0] || {};
+      const m = { type: 'js8-heartbeat', reqId };
+      if (o.enabled !== undefined) m.enabled = !!o.enabled;
+      if (o.intervalMin !== undefined) m.intervalMin = Number(o.intervalMin);
+      send(m);
+      return { ok: true, enabled: o.enabled !== undefined ? !!o.enabled : !!st.heartbeat, intervalMin: o.intervalMin !== undefined ? Number(o.intervalMin) : st.heartbeatMin };
+    }
+    case 'js8-send-hb': send({ type: 'js8-send-hb', reqId }); return replyOf(await remoteJs8Await(reqId, 10000));
+    case 'js8call-send': {
+      const a = args[0];
+      const text = (a && typeof a === 'object') ? a.text : a;
+      const to = (a && typeof a === 'object') ? a.to : undefined;
+      const m = { type: 'js8-send', text: String(text || ''), reqId };
+      if (to) m.to = String(to);
+      send(m);
+      return replyOf(await remoteJs8Await(reqId, 10000));
+    }
+    case 'js8-send-sms': {
+      const o = args[0] || {};
+      send({ type: 'js8-send-sms', kind: String(o.kind || ''), to: String(o.to || ''), text: String(o.text || ''), reqId });
+      return replyOf(await remoteJs8Await(reqId, 10000));
+    }
+    case 'js8-log-prefill': {
+      send({ type: 'js8-log-prefill', id: String(args[0] || ''), reqId });
+      const r = await remoteJs8Await(reqId, 6000);
+      const q = r && r.prefill;
+      if (!q) return { ok: false, error: (r && r.error) || 'The shack did not answer.' };
+      // This PC's Log window — the contact goes in this desktop's logbook.
+      ipcMain.emit('log-popout-open', null, { callsign: q.callsign, freqKhz: q.freqKhz, mode: 'JS8', rstSent: q.rstSent, rstRcvd: q.rstRcvd, qsoDate: q.qsoDate, timeOn: q.timeOn, type: 'dx', force: true });
+      return { ok: true, prefill: q };
+    }
+    case 'js8call-threads':
+      return { list: _remoteJs8.threads.list, unread: _remoteJs8.threads.unread, heard: _remoteJs8.heard, station: st.station || null };
+    case 'js8call-thread': {
+      const p = new Promise((resolve) => {
+        const t = setTimeout(() => { const i = _remoteJs8.threadWaiters.indexOf(done); if (i >= 0) _remoteJs8.threadWaiters.splice(i, 1); resolve(null); }, 4000);
+        const done = (th) => { clearTimeout(t); resolve(th); };
+        _remoteJs8.threadWaiters.push(done);
+      });
+      send({ type: 'js8-thread-open', id: String(args[0] || '') });
+      return { thread: await p, list: _remoteJs8.threads.list, unread: _remoteJs8.threads.unread };
+    }
+    case 'js8-set-band': {
+      const band = String(args[0] || '');
+      const khz = JS8_DIAL_KHZ[band];
+      if (!khz) return { ok: false, error: 'No JS8 frequency for ' + band };
+      send({ type: 'js8-set-band', band, reqId });
+      return { ok: true, freqKhz: khz };
+    }
+    case 'js8-set-offset': {
+      const hz = Math.round(Number(args[0]) || 1500);
+      send({ type: 'js8-set-offset', hz });
+      return { ok: true, txOffset: hz };
+    }
+    default: return undefined;
+  }
 }
 
 const REMOTE_NO_RADIO_TO_SHARE_MSG = 'This POTACAT is itself driving a remote shack and has no radio to share. Connect your device to the shack directly.';
@@ -5462,6 +5595,7 @@ function ensureRemoteClient() {
     _remoteClientAuthFail = null;
     remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
     remoteShackVoice = { labels: [], filled: [] };
+    remoteJs8Reset();
     _vfoLocked = !!info.vfoLocked;
     for (const wc of require('electron').webContents.getAllWebContents()) wc.send('vfo-lock-state', _vfoLocked);
     // A fresh session: drop the previous one's snapshot so its caps cannot
@@ -5535,10 +5669,12 @@ function ensureRemoteClient() {
       freq: snap.freq || 0,
       rigType: snap.rigType || 'remote',
     });
-    if (typeof snap.freq === 'number' && snap.freq > 0) {
-      win.webContents.send('cat-frequency', snap.freq);
+    // The JS8 and SSTV windows show the dial too (they hear cat-* locally).
+    for (const w of [win, js8PopoutWin, sstvPopoutWin]) {
+      if (!w || w.isDestroyed()) continue;
+      if (typeof snap.freq === 'number' && snap.freq > 0) w.webContents.send('cat-frequency', snap.freq);
+      if (snap.mode) w.webContents.send('cat-mode', snap.mode);
     }
-    if (snap.mode) win.webContents.send('cat-mode', snap.mode);
   });
   // Frames the shack sends between snapshots. The meters used to update only
   // when a full snapshot arrived; the PTT watchdog and the VFO lock never
@@ -5560,7 +5696,7 @@ function ensureRemoteClient() {
       else if (msg.type === 'fwd-power') sendCatFwdPower(v);
       else if (msg.type === 'power') sendCatPower(v);
       else if (msg.type === 'swr-ratio') {
-        for (const w of [win, vfoPopoutWin, jtcatPopoutWin]) {
+        for (const w of [win, vfoPopoutWin, jtcatPopoutWin, js8PopoutWin, sstvPopoutWin]) {
           if (w && !w.isDestroyed()) w.webContents.send('cat-swr-ratio', v);
         }
       }
@@ -8620,6 +8756,10 @@ function pushJs8Tail(entry) {
   js8Tail.push(entry);
   if (js8Tail.length > JS8_TAIL_CAP) js8Tail.shift();
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('js8call-activity', entry);
+  // A connected device's band-activity pane (a remote POTACAT's JS8 window).
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient() && typeof remoteServer.broadcastJs8Activity === 'function') {
+    remoteServer.broadcastJs8Activity(entry);
+  }
 }
 
 
@@ -13691,11 +13831,15 @@ function startInProcessSpectrum() {
   if (remoteServer && remoteServer.hasClient()) _acquireSpectrumPowerSave();
   if (_spectrumTimer) return;
   _spectrumTimer = setInterval(() => {
-    if (!ft8Engine || !ft8Engine._audioBuffer) return;
+    // A JS8 engine keeps its spectrum ring as _specBuffer/_specOffset; the
+    // FT8 family as _audioBuffer/_audioOffset. Reading only the latter left
+    // a remote JS8 waterfall black.
+    const specBuf = ft8Engine && (ft8Engine._audioBuffer || ft8Engine._specBuffer);
+    if (!specBuf) return;
     if (!remoteServer || !remoteServer.hasClient()) return;
     const bins = computeSpectrumBins(
-      ft8Engine._audioBuffer,
-      ft8Engine._audioOffset || 0,
+      specBuf,
+      (ft8Engine._audioBuffer ? ft8Engine._audioOffset : ft8Engine._specOffset) || 0,
       SPECTRUM_BIN_COUNT,
     );
     // Convert Uint8Array to plain array — JSON.stringify on Uint8Array
@@ -18134,6 +18278,9 @@ function connectRemote() {
       // owns the engine (a keyed carrier with no operator is the worst case).
       const remotePttStuck = !!(remoteServer && remoteServer._pttActive);
       if (!desktopOwnsJtcat && ft8Engine) {
+        // A JS8 heartbeat left armed with no engine would read as "HB on"
+        // to whoever opens JS8 next.
+        try { if (js8Engine()) js8SetHeartbeat(false); } catch { /* no JS8 */ }
         stopJtcat();
         if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
         console.log('[JTCAT] Mobile device disconnected (60s grace expired) — engine stopped, audio released');
@@ -19950,6 +20097,30 @@ function connectRemote() {
     markUserActive();
     js8HbLastActivity = Date.now();   // retuning IS operator activity
     js8TuneBand(String(band || ''));
+  });
+
+  // The JS8 window's offset, mail options and SWR auto-tune from a remote
+  // POTACAT — the same effects as this desktop's own JS8 window.
+  remoteServer.on('js8-set-offset', ({ hz }) => {
+    markUserActive();
+    const eng = js8Engine();
+    if (!eng || !Number.isFinite(hz)) return;
+    eng.setTxFreq(Math.max(200, Math.min(2800, hz)));
+    js8TxHeld = true;
+    js8PushStatus();
+  });
+  remoteServer.on('js8-set-mail-opts', ({ hold, unattended }) => {
+    markUserActive();
+    if (hold !== undefined) settings.js8MailHold = !!hold;
+    if (unattended !== undefined) settings.js8MailUnattended = !!unattended;
+    saveSettings(settings);
+    js8PushStatus();
+  });
+  remoteServer.on('js8-set-swr-autotune', ({ enabled }) => {
+    markUserActive();
+    settings.swrAutoTune = !!enabled;
+    saveSettings(settings);
+    js8PushStatus();
   });
 
   remoteServer.on('js8-log-prefill', ({ id, reqId }) => {
@@ -26526,6 +26697,8 @@ function autoSstvBlockedByJtcat() {
 }
 
 function triggerAutoSstv() {
+  // Driving a remote shack: idle receive is the shack's own setting.
+  if (isRemoteMode()) return;
   if (autoSstvBlockedByJtcat()) {
     // Log the state ONCE per deferral, not on every 30 s tick. Left
     // unthrottled this emitted ~120 lines/hour of pure noise, which is
@@ -30245,6 +30418,10 @@ app.whenReady().then(() => {
     });
     jtcatPopoutWin.on('closed', () => {
       jtcatPopoutWin = null;
+      // The operator closed the window an idle-RX session was running in (a
+      // teardown that closes it itself clears the flag first). The session is
+      // over — without this its flag outlived the engine.
+      if (autoIdleJtcatActive) markUserActive();
       if (isRemoteMode()) {
         // As locally: closing the window clears its QSO and halts TX, here on the shack.
         if (isRemoteLinked()) {
@@ -30254,10 +30431,6 @@ app.whenReady().then(() => {
         }
         _remoteJtcatMode = '';
       }
-      // The operator closed the window an idle-RX session was running in (a
-      // teardown that closes it itself clears the flag first). The session is
-      // over — without this its flag outlived the engine.
-      if (autoIdleJtcatActive) markUserActive();
       if (js8Engine()) js8AudioFeed(true); // its worklet was the JS8 engine's audio; the main window takes over
       yaesuScopeJtcatWants = false;
       if (!yaesuScopeWanted()) { try { stopYaesuScope('JTCAT window closed'); } catch { /* not running */ } }
@@ -30451,6 +30624,18 @@ app.whenReady().then(() => {
     js8PopoutWin.on('closed', () => {
       js8PopoutWin = null;
       if (autoIdleJs8Active) markUserActive(); // see the JTCAT window's closed handler
+      if (isRemoteMode()) {
+        // Close = stop, as locally — on the shack (unless FT8 is open here).
+        if (isRemoteLinked()) {
+          remoteClient.sendRaw({ type: 'js8-thread-closed' });
+          if (_remoteJs8.state && _remoteJs8.state.running) {
+            remoteClient.sendRaw({ type: 'js8-heartbeat', enabled: false });
+            remoteClient.sendRaw({ type: 'js8-stop' });
+          }
+          if (!(jtcatPopoutWin && !jtcatPopoutWin.isDestroyed())) remoteJtcatSubscribeSpectrum(false);
+        }
+        return;
+      }
       stopJs8Spectrum();
       // Close = stop, like the JTCAT popout — free the radio/slice when the
       // window goes away. Skipped if a remote client (phone) is connected and
@@ -30464,6 +30649,19 @@ app.whenReady().then(() => {
     js8PopoutWin.webContents.on('did-finish-load', () => {
       if (!js8PopoutWin || js8PopoutWin.isDestroyed()) return;
       js8PopoutWin.webContents.send('js8call-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
+      // Driving a remote shack: fill the window from the shack's JS8 (cached
+      // frames), and open = start THERE. No local engine, capture or spectrum.
+      if (isRemoteMode()) {
+        const c = _remoteJs8;
+        if (c.state) js8PopoutWin.webContents.send('js8call-status', { ...c.state, connected: !!c.state.running });
+        for (const e of c.tail) js8PopoutWin.webContents.send('js8call-activity', { ...e, replay: true });
+        js8PopoutWin.webContents.send('js8call-threads', { list: c.threads.list, unread: c.threads.unread });
+        js8PopoutWin.webContents.send('js8call-heard', c.heard);
+        if (jtcatLastClock) js8PopoutWin.webContents.send('jtcat-clock', jtcatLastClock);
+        if (isRemoteLinked() && !(c.state && c.state.running) && settings.myCallsign) bridgeInvokeToShack('js8-start', []);
+        else remoteJtcatSubscribeSpectrum(true);
+        return;
+      }
       // Reflect state and replay the tail so a reopened window isn't blank
       // mid-session — the same reason the Mercury popout keeps a transcript.
       js8LastStatus = null;
@@ -30490,7 +30688,7 @@ app.whenReady().then(() => {
       if (input.key === 'F12' && input.type === 'keyDown') js8PopoutWin.webContents.toggleDevTools();
     });
   }
-  ipcMain.on('js8call-popout-open', () => { if (!refuseRemoteFeature('js8')) openJs8Popout(); });
+  ipcMain.on('js8call-popout-open', () => openJs8Popout());
 
   // --- JS8 Heartbeat Map (RX-only reachability: heard / heard-by / both) ---
   ipcMain.on('js8-map-popout', () => {

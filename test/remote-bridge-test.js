@@ -22,6 +22,9 @@ const main = R('main.js');
 const popout = R('renderer/jtcat-popout.js');
 const outgoing = [...new Set([...preload.matchAll(/ipcRenderer\.(?:send|invoke)\('([a-z0-9:-]+)'/g)].map(m => m[1]))];
 const incoming = new Set([...preload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)].map(m => m[1]));
+const js8Preload = R('preload-js8call-popout.js');
+const js8Out = [...new Set([...js8Preload.matchAll(/ipcRenderer\.(?:send|invoke)\('([a-z0-9:-]+)'/g)].map(m => m[1]))];
+for (const m of js8Preload.matchAll(/ipcRenderer\.on\('([a-z0-9:-]+)'/g)) incoming.add(m[1]);
 
 console.log('JTCAT remote bridge');
 
@@ -31,7 +34,7 @@ test('every channel the pop-out sends is bridged or deliberately local', () => {
 });
 
 test('every bridged channel is one the pop-out really sends', () => {
-  const stale = Object.keys(B.OUT).filter(ch => !outgoing.includes(ch));
+  const stale = Object.keys(B.OUT).filter(ch => !outgoing.includes(ch) && !js8Out.includes(ch));
   assert.deepStrictEqual(stale, []);
 });
 
@@ -64,6 +67,30 @@ test('the relayed channels have a handler of that name on the shack', () => {
 
 test('every preference the bridge forwards is one the pop-out saves', () => {
   for (const key of Object.keys(B.JTCAT_PREFS)) assert.ok(popout.includes(key), key);
+});
+
+test('every channel the JS8 window sends or invokes is bridged, answered, or deliberately local', () => {
+  const missing = js8Out.filter(ch => !B.JS8_OUT[ch] && !B.JS8_INVOKES.includes(ch) && !B.JS8_LOCAL_ONLY[ch]);
+  assert.deepStrictEqual(missing, []);
+  for (const ch of B.JS8_INVOKES) assert.ok(js8Out.includes(ch), ch + ' is a real JS8 invoke');
+  const inv = main.slice(main.indexOf('async function bridgeInvokeToShack('), main.indexOf('async function bridgeInvokeToShack(') + 7000);
+  for (const ch of B.JS8_INVOKES) assert.ok(inv.includes(`case '${ch}':`), ch + ' answered');
+  assert.ok(/ipcMain\.handle = \(channel, fn\) => _ipcHandle\(channel, RemoteBridge\.JS8_INVOKES\.includes\(channel\)/.test(main), 'invokes are wrapped');
+  for (const m of inv.matchAll(/type: '(js8-[a-z-]+)'/g)) assert.ok(MESSAGES[m[1]], m[1] + ' is registered');
+});
+
+test('JS8: the window is filled from the shack, open starts there, close stops there', () => {
+  const at = main.indexOf("js8PopoutWin.webContents.on('did-finish-load', () => {");
+  const open = main.slice(at, at + 1800);
+  assert.ok(/if \(isRemoteMode\(\)\) \{[\s\S]*bridgeInvokeToShack\('js8-start', \[\]\)[\s\S]*return;\n\s+\}/.test(open), 'no local startJtcat in remote mode');
+  const cAt = main.indexOf("js8PopoutWin.on('closed', () => {");
+  assert.ok(/type: 'js8-stop'/.test(main.slice(cAt, cAt + 900)));
+  assert.deepStrictEqual(B.IN['js8-state']({ type: 'js8-state', running: true, tx: false }), [['js8call-status', { running: true, tx: false, connected: true }]]);
+  assert.deepStrictEqual(B.IN['js8-heard']({ list: [{ call: 'K1ABC' }] }), [['js8call-heard', [{ call: 'K1ABC' }]]]);
+  assert.ok(/if \(isRemoteMode\(\)\) return;\n\s+if \(autoSstvBlockedByJtcat\(\)\)/.test(main), "this PC's idle receive never drives the shack");
+  const srv = R('lib/remote-server.js');
+  assert.ok(/_js8ActivityGuestSafe/.test(srv) && /case 'js8-set-offset':\n\s+if \(ws\._passSession\)/.test(srv), 'guest privacy and owner-only controls');
+  assert.ok(/ft8Engine\._audioBuffer \|\| ft8Engine\._specBuffer/.test(main), "the shack's spectrum loop reads a JS8 engine too");
 });
 
 console.log('\nbehaviour');
