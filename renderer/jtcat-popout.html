@@ -232,6 +232,36 @@
     .jp-jtty-tpl .k { font-size: 9px; font-weight: 400; opacity: 0.65; margin-left: 5px; font-family: monospace; }
     .jp-row.jp-jtty-row .jp-time { min-width: 60px; }
     .jp-row.jp-jtty-growing .jp-msg { color: var(--text-dim); font-style: italic; }
+    /* JTTY chats (lib/jtty-chats.js): a tab per station, bubbles, the composer first. */
+    .jp-jtty-tabs { display: flex; gap: 4px; padding: 3px 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; overflow-x: auto; }
+    .jp-jtty-tab { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid var(--border-primary); border-radius: 10px; font-size: 11px; cursor: pointer; color: var(--text-secondary); background: var(--bg-primary); white-space: nowrap; user-select: none; }
+    .jp-jtty-tab.active { color: var(--text-primary); border-color: var(--accent-green, #4ecca3); }
+    .jp-jtty-tab.idle { opacity: 0.55; }
+    .jp-jtty-tab.logged { border-style: dashed; }
+    .jp-jtty-tab .badge { background: #e94560; color: #fff; border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: bold; }
+    .jp-jtty-tab .x { color: var(--text-dim); margin-left: 2px; }
+    .jp-jtty-tab .x:hover { color: #e94560; }
+    .jp-jtty-chat { flex: 1; overflow-y: auto; padding: 6px 10px; background: var(--bg-primary); display: flex; flex-direction: column; gap: 4px; }
+    .jp-jtty-chat.hidden { display: none; }
+    .jp-bubble { max-width: 78%; padding: 4px 9px; border-radius: 10px; font-family: monospace; font-size: 13px; line-height: 1.4; word-break: break-word; border: 1.5px solid transparent; }
+    .jp-bubble.theirs { align-self: flex-start; background: var(--bg-secondary); border-bottom-left-radius: 3px; }
+    .jp-bubble.ours { align-self: flex-end; background: rgba(233, 69, 96, 0.22); border-bottom-right-radius: 3px; }
+    .jp-bubble.growing { border-style: dashed; border-color: var(--text-dim); color: var(--text-dim); font-style: italic; }
+    .jp-bubble .pair { color: var(--text-dim); margin-right: 5px; }
+    .jp-bubble .meta { display: block; font-size: 10px; color: var(--text-dim); font-style: normal; margin-top: 1px; }
+    .jp-jtty-chat .jp-empty { align-self: center; color: var(--text-dim); font-size: 11px; margin-top: 20px; }
+    .jp-jtty-prefix { font-family: monospace; font-size: 13px; color: var(--text-dim); white-space: nowrap; }
+    .jp-jtty-prefix.hidden { display: none; }
+    .jp-jtty-count { font-size: 10px; color: var(--text-dim); font-family: monospace; white-space: nowrap; }
+    .jp-jtty-count.bad { color: #e94560; }
+    #jp-jtty-pane.jtty-chat .jp-jtty-quickwrap { display: none; }
+    #jp-jtty-pane.jtty-chat.jtty-quick .jp-jtty-quickwrap { display: flex; }
+    #jp-jtty-quick { display: none; }
+    #jp-jtty-pane.jtty-chat #jp-jtty-quick { display: inline-block; }
+    #jp-jtty-pane.jtty-chat #jp-jtty-list { display: none; }
+    .jp-jtty-menu { position: fixed; z-index: 50; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px; padding: 4px 0; min-width: 150px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+    .jp-jtty-menu div { padding: 4px 12px; font-size: 12px; cursor: pointer; }
+    .jp-jtty-menu div:hover { background: var(--bg-hover); }
 
     /* Clock-sync banner. Solid faces in the pop-out's own TX-red / tune-amber /
        running-green identities, so it reads the same on every theme — the old
@@ -624,13 +654,18 @@
         <button id="jp-jtty-hold" class="jtcat-filter-btn" title="Hold TX frequency: clicking a station's row does not move you onto their frequency. Same setting as Hold TX frequency under the gear.">Hold</button>
         <button id="jp-jtty-clear" class="jtcat-filter-btn" title="Clear decodes">Clear</button>
       </div>
-      <div id="jp-jtty-list" class="jp-decode-list" title="Decoded messages. Click a row to take its callsign; a CQ, or a station working someone else, also moves you onto their frequency (not with Hold on, and never for a station calling you)."></div>
+      <div id="jp-jtty-tabs" class="jp-jtty-tabs" title="All traffic, and one chat per station. Double-click a row to open a chat; a station calling you opens one. Right-click a tab for Log and Close."></div>
+      <div id="jp-jtty-list" class="jp-decode-list" title="Decoded messages. Click a row to take its callsign; a CQ, or a station working someone else, also moves you onto their frequency (not with Hold on, and never for a station calling you). Double-click to open a chat with the station."></div>
+      <div id="jp-jtty-chat" class="jp-jtty-chat hidden"></div>
       <div class="jp-psk-txwrap">
         <div class="jp-psk-macro-row">
+          <span id="jp-jtty-prefix" class="jp-jtty-prefix hidden" title="Sent ahead of your text, so the other station's software knows who it is from. It counts toward the 80 characters."></span>
           <input id="jp-jtty-tx" class="jp-jtty-tx" type="text" maxlength="80" placeholder="Type a message (up to 80 characters) or press F1-F8. Enter sends." spellcheck="false" autocomplete="off">
+          <span id="jp-jtty-count" class="jp-jtty-count" title="Characters on air, of 80"></span>
           <span id="jp-jtty-frames" class="jp-jtty-frames" title="How many 1.9 s frames this message takes on air"></span>
+          <button id="jp-jtty-quick" class="jp-btn" title="The macro buttons and the fields they use (Their call, report, exchange)">Quick</button>
         </div>
-        <div class="jp-psk-macro-row">
+        <div class="jp-psk-macro-row jp-jtty-quickwrap">
           <input id="jp-jtty-his" class="jp-psk-their" type="text" maxlength="12" placeholder="THEIR CALL" title="%H: the station you are working. Click a decoded row to fill it." autocomplete="off">
           <input id="jp-jtty-rpt" class="jp-jtty-exch jp-jtty-rpt jp-jtty-ft8" type="text" maxlength="3" placeholder="RPT" title="%R: the report you send them, the SNR measured on their signal. Fills in when you click their row or type their call; edit freely." autocomplete="off">
           <input id="jp-jtty-exch" class="jp-jtty-exch jp-jtty-contest" type="text" maxlength="20" placeholder="EXCHANGE" title="%E: what you send. 599 and your serial, or your Field Day class and section. Edit freely; the serial buttons rewrite it." autocomplete="off">
@@ -646,7 +681,7 @@
           <button id="jp-jtty-tune" class="jp-btn jp-tune" title="Steady-tone tune carrier (click again to stop early)">Tune</button>
           <button id="jp-jtty-atu" class="jp-btn jp-atu" title="Run the radio's antenna tuner match cycle">ATU</button>
         </div>
-        <div class="jp-psk-macro-row">
+        <div class="jp-psk-macro-row jp-jtty-quickwrap">
           <span id="jp-jtty-templates" style="display:contents;"></span>
           <button id="jp-jtty-add" class="jp-btn" title="Add a macro">+</button>
           <button id="jp-jtty-log" class="jp-btn" title="Log the QSO with the station in Their Call (opens the Log QSO window)">Log</button>
@@ -938,6 +973,7 @@
   <script src="../lib/wspr/stats.js"></script>
   <script src="../lib/scope-axis.js"></script>
   <script src="../lib/jtty-macros.js"></script>
+  <script src="../lib/jtty-chats.js"></script>
   <script src="waterfall.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>

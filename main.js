@@ -9727,6 +9727,13 @@ async function saveQsoRecord(qsoData, opts) {
   if (win && !win.isDestroyed()) {
     win.webContents.send("qso-logged", { callsign: qsoData.callsign, band: qsoData.band, mode: qsoData.mode, logAs: logAs ? logAs.call : "" });
   }
+  // The JTCAT window's JTTY chats: a saved JTTY QSO marks that station's
+  // chat logged (and closes it after "Log and close"), from whichever path
+  // logged it — this event is the one every path passes through.
+  if (!logAs && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()
+      && /^JTTY$/i.test(String(qsoData.submode || (/^MFSK$/i.test(String(qsoData.mode || '')) ? '' : qsoData.mode) || ''))) {
+    jtcatPopoutWin.webContents.send('jtcat-jtty-logged', { callsign: String(qsoData.callsign || '').toUpperCase() });
+  }
 
   // Track QSO in telemetry (fire-and-forget)
   const qsoSource = (qsoData.sig || '').toLowerCase();

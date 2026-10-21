@@ -3622,6 +3622,19 @@ function _applyPopoutTheme(payload) {
   var jttyMyCall = '';
   var jttyMyGrid = '';
   var jttyRows = {};             // decoder message id -> row element
+  // The row MODEL the chats are a view over (lib/jtty-chats.js): every line,
+  // ours included, as {key, kind, text, complete, freqHz, snrDb, utcMs}. The
+  // DOM rows above are its rendering; a chat renders the rows chatRows picks.
+  var jttyRowList = [];
+  var jttyRowByKey = {};
+  var jttyChatState = new JttyChats.ChatState();
+  var jttyChatPendingClose = '';  // "Log and close": close this chat when its JTTY QSO is saved
+  var jttyTabsEl = document.getElementById('jp-jtty-tabs');
+  var jttyChatEl = document.getElementById('jp-jtty-chat');
+  var jttyPrefixEl = document.getElementById('jp-jtty-prefix');
+  var jttyCountEl = document.getElementById('jp-jtty-count');
+  var jttyQuickBtn = document.getElementById('jp-jtty-quick');
+  var jttyTxSeq = 0;
   var jttyComposeNative = -1;    // template index that filled the composer; -1 = typed/edited
   var jttyValidateTimer = null;
 
@@ -3749,7 +3762,9 @@ function _applyPopoutTheme(payload) {
     if (jttyValidateTimer) clearTimeout(jttyValidateTimer);
     jttyValidateTimer = setTimeout(function() {
       jttyValidateTimer = null;
-      var text = jttyTxEl.value;
+      jttyRefreshPrefix();
+      var typed = jttyTxEl.value;
+      var text = jttyOutgoingText(); // in a chat: with the THEIR MY pair, which is on air and counts
       if (!text.trim()) {
         jttyFramesEl.textContent = '';
         jttyFramesEl.classList.remove('bad');
@@ -3759,7 +3774,7 @@ function _applyPopoutTheme(payload) {
       if (!window.api.jtcatJttyValidate) return;
       var profile = jttyPackProfile();
       window.api.jtcatJttyValidate(text, profile).then(function(v) {
-        if (!v || jttyTxEl.value !== text) return; // stale
+        if (!v || jttyTxEl.value !== typed) return; // stale
         if (v.ok) {
           jttyFramesEl.textContent = v.nframes + (v.nframes === 1 ? ' frame · ' : ' frames · ') + v.durationSec.toFixed(1) + ' s';
           jttyFramesEl.classList.remove('bad');
@@ -3773,13 +3788,29 @@ function _applyPopoutTheme(payload) {
     }, 120);
   }
 
+  // A CQ goes out on the clearest spot, not wherever the dial happened to be
+  // (a fresh engine sits at 1500 Hz, where everyone else's does too). FT8
+  // does the same with jtcatQuietFreq; here it is the same measurement the
+  // Clear spot button uses, over the last 30 s. Hold TX means "do not move
+  // me", so it is honoured; with nothing measured yet the CQ goes as is.
+  function jttyCqOnClearSpot(text) {
+    if (!/^CQ\b/i.test(String(text).trim()) || holdTxFreq) return;
+    if (!jttyOcc || jttyOccMs < 5000) return;
+    var spot = JttyMacros.clearestSpot(jttyOcc, jttyOccHzPerBin, { prefer: jpTxFreqHz });
+    if (!spot || spot.hz === jpTxFreqHz) return;
+    var was = jpTxFreqHz;
+    jttyMoveTo(spot.hz, 'CQ on the clearest spot: %F Hz');
+    if (window.api.jtcatLog) window.api.jtcatLog('[JTTY] CQ on the clearest spot: ' + spot.hz + ' Hz (was ' + was + ' Hz)');
+  }
   function jttySend() {
     if (!jttyTxEl) return;
-    var text = jttyTxEl.value;
+    var text = jttyOutgoingText();
     if (!text.trim() || transmitting) return;
     var profile = jttyPackProfile();
     var go = function() {
+      jttyCqOnClearSpot(text);
       window.api.jtcatJttySend(text, profile);
+      if (jttyActiveChat()) { jttyTxEl.value = ''; jttyComposeNative = -1; jttyRefreshPrefix(); }
       // Persist the audio frequency the operator actually transmits on.
       window.api.saveSettings({ jttyAudioFreq: jpTxFreqHz });
     };
@@ -3887,6 +3918,10 @@ function _applyPopoutTheme(payload) {
   }
   function jttyApplyStyle() {
     if (jttyPane) jttyPane.classList.toggle('jtty-ft8', jttyStyle === 'ft8');
+    if (jttyStyle !== 'ft8' && jttyChatState.active) jttyChatState.activate('');
+    if (jttyPane) jttyPane.classList.toggle('jtty-chat', !!jttyActiveChat());
+    jttyRenderTabs();
+    jttyRenderChat();
     if (jttyStyleEl) jttyStyleEl.value = jttyStyle;
     jttyMacros = JttyMacros.forSettings(Object.assign({}, jttySaved, { jttyMacroStyle: jttyStyle })).macros;
     jttyComposeNative = -1;
@@ -3934,6 +3969,12 @@ function _applyPopoutTheme(payload) {
         jttyMoveTo(row.dataset.freq, 'On their freq: %F Hz');
       }
     });
+    // Double-click: a chat with the station (FT8 style; Contest stays in the feed).
+    row.addEventListener('dblclick', function() {
+      if (jttyStyle !== 'ft8') return;
+      var call = jttyChatCallOf(row.dataset.text || '');
+      if (call) jttyOpenChat(call, true);
+    });
     jttyListEl.appendChild(row);
     jttyRows[u.id] = row;
     jttyPruneRows();
@@ -3955,6 +3996,7 @@ function _applyPopoutTheme(payload) {
     jttyRows[u.id] = row;
     jttyPruneRows();
     jttyScrollIfPinned(pinned);
+    jttyModelUpsert({ key: 'mk-' + jttyEpoch + '-' + u.id, kind: 'marker', text: u.text || '', complete: true, freqHz: null, snrDb: null, utcMs: u.utcMs || Date.now() });
   }
   function jttyApplyUpdate(u) {
     if (!jttyListEl || !u || u.id == null) return;
@@ -3983,6 +4025,12 @@ function _applyPopoutTheme(payload) {
     row.classList.toggle('jp-cq', /^CQ\b/.test(up));
     row.classList.toggle('jp-directed', !!jttyMyCall && JtcatParser.isAddressedTo(up, jttyMyCall));
     jttyScrollIfPinned(pinned);
+    // The model, and the chats: a station calling us opens one (never
+    // switching to it); the open chat redraws if this line is in it.
+    var m = jttyModelUpsert({ key: 'rx-' + jttyEpoch + '-' + u.id, kind: 'rx', text: u.text || '', complete: !!u.complete,
+      freqHz: u.freqHz > 0 ? u.freqHz : null, snrDb: typeof u.snrDb === 'number' ? u.snrDb : null, utcMs: u.utcMs || Date.now() });
+    if (jttyStyle === 'ft8' && jttyChatState.noteRow(m, jttyMyCall)) jttyRenderTabs();
+    jttyChatRowChanged(m);
   }
   // Click a row: the first callsign-looking word that isn't ours becomes %H.
   function jttyPickCall(text) {
@@ -3998,10 +4046,206 @@ function _applyPopoutTheme(payload) {
     }
   }
 
+  // --- chats (lib/jtty-chats.js): a tab per station over the row model ---
+  function jttyActiveChat() { return jttyStyle === 'ft8' ? jttyChatState.get(jttyChatState.active) : null; }
+  // The station a row is about, for opening a chat: whoever sent it, else
+  // the first callsign in it that is not ours.
+  function jttyChatCallOf(text) {
+    var s = JttyChats.senderOf(text);
+    if (s && s !== jttyMyCall) return s;
+    var w = String(text).toUpperCase().split(/\s+/);
+    for (var i = 0; i < w.length; i++) {
+      var c = w[i].replace(/^</, '').replace(/>$/, '');
+      if (c !== jttyMyCall && c !== 'CQ' && /^[A-Z0-9/]{3,11}$/.test(c) && /\d/.test(c) && /[A-Z]/.test(c)) return c;
+    }
+    return '';
+  }
+  function jttyOpenChat(call, activate) {
+    jttyChatState.open(call, { activate: !!activate });
+    if (activate) jttySetActiveChat(call);
+    else jttyRenderTabs();
+  }
+  function jttySetActiveChat(call) {
+    jttyChatState.leave();
+    jttyChatState.activate(call || '');
+    var chat = jttyActiveChat();
+    if (jttyPane) jttyPane.classList.toggle('jtty-chat', !!chat);
+    if (jttyPane && !chat) jttyPane.classList.remove('jtty-quick');
+    // The chat's station is Their Call, so the macros and the prefix agree.
+    if (chat && jttyHisEl && jttyHisEl.value.trim().toUpperCase() !== chat.call) {
+      jttyHisEl.value = chat.call;
+      jttyRefreshReport(true);
+      jttyRenderTemplates();
+    }
+    jttyRenderTabs();
+    jttyRenderChat();
+    jttyPreview();
+    if (chat && jttyTxEl) jttyTxEl.focus();
+  }
+  function jttyCloseChat(call) {
+    var rows = JttyChats.chatRows(jttyRowList, call, jttyMyCall);
+    var last = rows.length ? rows[rows.length - 1] : null;
+    // A line still arriving must not reopen the chat it was just closed on.
+    jttyChatState.close(call, last && last.kind === 'rx' && !last.complete ? last.key : '');
+    if (jttyChatPendingClose === String(call).toUpperCase()) jttyChatPendingClose = '';
+    jttySetActiveChat(jttyChatState.active);
+  }
+  function jttyLogChat(call, andClose) {
+    var his = String(call || '').toUpperCase();
+    if (!his || !window.api.openLogWith) return;
+    var grid = jttyGridByCall[his] || '';
+    var sent = (his === ((jttyHisEl && jttyHisEl.value) || '').trim().toUpperCase() && jttyRptEl && jttyRptEl.value.trim())
+      || (jttySnrByCall[his] != null ? JttyMacros.formatReport(jttySnrByCall[his]) : '') || '599';
+    window.api.openLogWith({
+      force: true, type: 'dx', callsign: his, mode: 'JTTY',
+      rstSent: sent, rstRcvd: jttyRcvdRptByCall[his] || '599',
+      notes: 'JTTY' + (grid ? ' grid ' + grid : ''),
+    });
+    jttyChatPendingClose = andClose ? his : '';
+  }
+  function jttyRenderTabs() {
+    if (!jttyTabsEl) return;
+    jttyTabsEl.innerHTML = '';
+    if (jttyStyle !== 'ft8') { jttyTabsEl.style.display = 'none'; return; }
+    jttyTabsEl.style.display = '';
+    var now = Date.now();
+    var mk = function(label, call, active) {
+      var t = document.createElement('div');
+      t.className = 'jp-jtty-tab' + (active ? ' active' : '');
+      var name = document.createElement('span');
+      name.textContent = label;
+      t.appendChild(name);
+      t.addEventListener('click', function() { jttySetActiveChat(call); });
+      return t;
+    };
+    jttyTabsEl.appendChild(mk('All traffic', '', !jttyChatState.active));
+    jttyChatState.chats.forEach(function(chat) {
+      var rows = JttyChats.chatRows(jttyRowList, chat.call, jttyMyCall);
+      var t = mk(chat.call, chat.call, jttyChatState.active === chat.call);
+      var unread = jttyChatState.active === chat.call ? 0 : JttyChats.chatUnread(rows, chat.lastViewedMs);
+      if (unread) { var b = document.createElement('span'); b.className = 'badge'; b.textContent = String(unread); t.appendChild(b); }
+      var heard = JttyChats.chatLastHeard(rows);
+      if (heard != null && now - heard > JttyChats.IDLE_MS) t.classList.add('idle');
+      if (chat.logged) t.classList.add('logged');
+      t.title = chat.call + (chat.logged ? ' (logged)' : '') + (heard != null ? ' — last heard ' + Math.round((now - heard) / 60000) + ' min ago' : '') + '\nRight-click: Log, Close.';
+      var x = document.createElement('span');
+      x.className = 'x';
+      x.textContent = '\u00d7';
+      x.title = 'Close this chat (the lines stay in All traffic)';
+      x.addEventListener('click', function(e) { e.stopPropagation(); jttyCloseChat(chat.call); });
+      t.appendChild(x);
+      t.addEventListener('contextmenu', function(e) { e.preventDefault(); jttyTabMenu(e, chat.call); });
+      jttyTabsEl.appendChild(t);
+    });
+  }
+  var jttyMenuEl = null;
+  function jttyHideMenu() { if (jttyMenuEl) { jttyMenuEl.remove(); jttyMenuEl = null; } }
+  function jttyTabMenu(e, call) {
+    jttyHideMenu();
+    var m = document.createElement('div');
+    m.className = 'jp-jtty-menu';
+    var items = [
+      ['Log ' + call, function() { jttyLogChat(call, false); }],
+      ['Log and close', function() { jttyLogChat(call, true); }],
+      ['Close', function() { jttyCloseChat(call); }],
+      ['Close all logged', function() { jttyChatState.closeLogged(); jttySetActiveChat(jttyChatState.active); }],
+    ];
+    items.forEach(function(it) {
+      var d = document.createElement('div');
+      d.textContent = it[0];
+      d.addEventListener('click', function() { jttyHideMenu(); it[1](); });
+      m.appendChild(d);
+    });
+    m.style.left = Math.min(e.clientX, window.innerWidth - 170) + 'px';
+    m.style.top = Math.min(e.clientY, window.innerHeight - 120) + 'px';
+    document.body.appendChild(m);
+    jttyMenuEl = m;
+  }
+  document.addEventListener('click', jttyHideMenu);
+  function jttyRenderChat() {
+    if (!jttyChatEl) return;
+    var chat = jttyActiveChat();
+    jttyChatEl.classList.toggle('hidden', !chat);
+    if (!chat) { jttyChatEl.innerHTML = ''; return; }
+    var pinned = jttyChatEl.scrollHeight - jttyChatEl.scrollTop - jttyChatEl.clientHeight < 40;
+    jttyChatEl.innerHTML = '';
+    var rows = JttyChats.chatRows(jttyRowList, chat.call, jttyMyCall);
+    if (!rows.length) {
+      var em = document.createElement('div');
+      em.className = 'jp-empty';
+      em.textContent = 'Nothing with ' + chat.call + ' yet. Type below; your line goes out as "' + chat.call + ' ' + jttyMyCall + ' ..."';
+      jttyChatEl.appendChild(em);
+      return;
+    }
+    rows.forEach(function(r) {
+      var b = document.createElement('div');
+      var ours = r.kind === 'tx';
+      b.className = 'jp-bubble ' + (ours ? 'ours' : 'theirs') + (r.complete ? '' : ' growing');
+      var parts = JttyChats.bubbleParts(r.text, chat.call, jttyMyCall);
+      if (parts.pair) { var p = document.createElement('span'); p.className = 'pair'; p.textContent = parts.pair; b.appendChild(p); }
+      b.appendChild(document.createTextNode(parts.body + (r.complete ? '' : ' \u2026')));
+      var d = new Date(r.utcMs);
+      var meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + 'Z'
+        + (r.freqHz ? ' \u00b7 ' + Math.round(r.freqHz) + ' Hz' : '') + (r.snrDb != null ? ' \u00b7 ' + (r.snrDb > 0 ? '+' : '') + r.snrDb + ' dB' : '');
+      b.appendChild(meta);
+      jttyChatEl.appendChild(b);
+    });
+    if (pinned) jttyChatEl.scrollTop = jttyChatEl.scrollHeight;
+  }
+  // A row arrived or grew: redraw the open chat when it belongs there, and
+  // the tabs (unread counts) otherwise.
+  function jttyChatRowChanged(row) {
+    if (jttyStyle !== 'ft8') return;
+    var chat = jttyActiveChat();
+    if (chat && JttyChats.chatRows([row], chat.call, jttyMyCall).length) jttyRenderChat();
+    else if (chat && JttyChats.chatRows(jttyRowList, chat.call, jttyMyCall).some(function(r) { return r.key === row.key; })) jttyRenderChat();
+    jttyRenderTabs();
+  }
+  // What the composer will send: in a chat, the "THEIR MY" pair ahead of the text.
+  function jttyOutgoingText() {
+    var text = jttyTxEl ? jttyTxEl.value : '';
+    var chat = jttyActiveChat();
+    return chat ? JttyChats.chatOutgoing(text, chat.call, jttyMyCall) : text.replace(/\s+/g, ' ').trim();
+  }
+  function jttyRefreshPrefix() {
+    var chat = jttyActiveChat();
+    var prefix = chat ? JttyChats.chatPrefix(jttyTxEl ? jttyTxEl.value : '', chat.call, jttyMyCall) : '';
+    if (jttyPrefixEl) { jttyPrefixEl.textContent = prefix; jttyPrefixEl.classList.toggle('hidden', !prefix); }
+    if (jttyCountEl) {
+      var n = jttyOutgoingText().length;
+      jttyCountEl.textContent = chat ? n + '/80' : '';
+      jttyCountEl.classList.toggle('bad', n > 80);
+    }
+  }
+  // A QSO with this station was logged (any route: the Log window, the quick
+  // log, a phone): the tab shows it, and "Log and close" closes it.
+  if (window.api.onJtcatJttyLogged) {
+    window.api.onJtcatJttyLogged(function(d) {
+      var call = String((d && d.callsign) || '').toUpperCase();
+      if (!call || !jttyChatState.markLogged(call)) return;
+      if (jttyChatPendingClose === call) { jttyChatPendingClose = ''; jttyCloseChat(call); return; }
+      jttyRenderTabs();
+    });
+  }
+
   var jttyEpoch = 0; // the engine the on-screen rows belong to; ids restart with each engine
   function jttyClearRows() {
     if (jttyListEl) jttyListEl.innerHTML = '';
     jttyRows = {};
+    jttyRowList = [];
+    jttyRowByKey = {};
+    jttyRenderChat();
+    jttyRenderTabs();
+  }
+  function jttyModelUpsert(row) {
+    var cur = jttyRowByKey[row.key];
+    if (cur) { Object.assign(cur, row); return cur; }
+    jttyRowList.push(row);
+    jttyRowByKey[row.key] = row;
+    while (jttyRowList.length > JTTY_ROW_CAP) { var gone = jttyRowList.shift(); delete jttyRowByKey[gone.key]; }
+    return row;
   }
   if (window.api.onJtcatJttyRx) {
     window.api.onJtcatJttyRx(function(batch) {
@@ -4038,6 +4282,9 @@ function _applyPopoutTheme(payload) {
       jttyPruneRows();
       jttyScrollIfPinned(pinned);
       if (jttySendBtn) jttySendBtn.disabled = true;
+      var txRow = jttyModelUpsert({ key: 'tx-' + (++jttyTxSeq), kind: 'tx', text: String(data.message), complete: true,
+        freqHz: Number(data.txFreq || jpTxFreqHz) || null, snrDb: null, utcMs: Date.now() });
+      jttyChatRowChanged(txRow);
     } else if (data.state !== 'tx') {
       pskTxDurMs = 0;
       if (jttySendBtn) jttySendBtn.disabled = false;
@@ -4106,8 +4353,9 @@ function _applyPopoutTheme(payload) {
     if (jttyQueuedEl) jttyQueuedEl.addEventListener('input', jttyRenderTemplates);
     if (fdExchInput) fdExchInput.addEventListener('change', function() { if (jttyProfile() === 'field-day') { jttyRefreshExchange(false); jttyRenderTemplates(); } });
 
+    if (jttyQuickBtn) jttyQuickBtn.addEventListener('click', function() { if (jttyPane) jttyPane.classList.toggle('jtty-quick'); });
     if (jttyTxEl) {
-      jttyTxEl.addEventListener('input', function() { jttyComposeNative = -1; jttyPreview(); });
+      jttyTxEl.addEventListener('input', function() { jttyComposeNative = -1; jttyRefreshPrefix(); jttyPreview(); });
       jttyTxEl.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') { e.preventDefault(); jttySend(); }
       });
