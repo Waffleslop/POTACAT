@@ -86,8 +86,6 @@ const KNOWN_DRIFT = new Set([
   'jtcat-start-multi-remote:slices',
   'save-echo-pref:key',
   'save-echo-pref:value',
-  'sstv-photo:image',
-  'sstv-photo:mode',
 ]);
 
 /** Messages the demux handles that the registry never declares at all. Same

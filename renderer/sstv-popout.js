@@ -261,6 +261,7 @@ window.api.onRefocusQsy((target) => {
 // switch, or a new input picked in My Rigs). Re-read it on focus and reopen
 // the capture when the device SSTV should use is no longer the one it has.
 async function refreshRxDevice() {
+  if (settings.remoteShack) return;
   try {
     const fresh = await window.api.getSettings();
     if ((fresh.remoteAudioInput || '') === (settings.remoteAudioInput || '')
@@ -1367,7 +1368,7 @@ window.api.onSstvTxAudio(async (data) => {
   // call sstvTxComplete here. K3SBP 2026-05-28.
   if (data && data.daxTx) {
     const durationSec = data.durationSec || 0;
-    statusBar.textContent = 'Transmitting ' + modeSelect.value + ' via Flex Direct... ' + durationSec.toFixed(0) + 's';
+    statusBar.textContent = 'Transmitting ' + modeSelect.value + ' via ' + (data.directTxLabel || 'Flex Direct') + '... ' + durationSec.toFixed(0) + 's';
     const startTime = Date.now();
     const iv = setInterval(() => {
       const pct = Math.min(100, ((Date.now() - startTime) / 1000 / durationSec) * 100);
@@ -1483,8 +1484,12 @@ window.api.onSstvTxStatus((data) => {
     isTx = false;
     txBtn.textContent = replyImage ? 'REPLY' : 'TRANSMIT';
     txBtn.classList.remove('transmitting');
+    // A refusal (the shack's, or the link being down) says why.
+    if (data.error) statusBar.textContent = data.error;
   }
 });
+// The shack is not connected, or it refused a tune / PTT.
+if (window.api.onTuneBlocked) window.api.onTuneBlocked((msg) => { if (msg) statusBar.textContent = msg; });
 
 // Paint the TX canvas when ECHOCAT sends a photo — so the operator at the
 // desktop sees what their phone is transmitting. This replaces any local
@@ -1752,6 +1757,9 @@ audioOutputSelect.addEventListener('change', () => {
 });
 
 async function startRxAudio() {
+  // Driving a remote shack (get-settings remoteShack): the shack's SSTV window
+  // hears its radio and decodes; this window captures nothing (spec B4).
+  if (settings.remoteShack) return;
   // Stop existing capture
   if (sstvWorkletNode) { try { sstvWorkletNode.disconnect(); } catch {} sstvWorkletNode = null; }
   if (sstvStream) { sstvStream.getTracks().forEach(t => t.stop()); sstvStream = null; }
@@ -1872,7 +1880,8 @@ function _markDecoderAudio(samples, source) {
 setInterval(() => {
   const badge = document.getElementById('rx-no-audio');
   if (!badge) return;
-  const dead = !isTx && (Date.now() - _lastDecoderAudioTs) > 5000;
+  // Remote shack: no audio arrives here by design (the shack decodes).
+  const dead = !settings.remoteShack && !isTx && (Date.now() - _lastDecoderAudioTs) > 5000;
   badge.style.display = dead ? '' : 'none';
   // Level readout + low badge
   const peak = _rxLevelPeak;
@@ -2137,6 +2146,7 @@ function buildRxGrid() {
 }
 
 async function startMultiAudio() {
+  if (settings.remoteShack) return; // multi-slice runs on the shack PC
   stopMultiAudio();
 
   // Check for duplicate or missing audio devices — each slice needs a different DAX channel
@@ -2500,6 +2510,16 @@ let wfRemoteCounter = 0;
 // adaptive ranging. feedWaterfall() still owns the FFT and just hands the
 // per-bin magnitudes here; the component auto-ranges, so maxMag is unused.
 let sstvWaterfall = null;
+// Driving a remote shack: its SSTV window's waterfall bins (129 bins over
+// 1000-2500 Hz, ~1.2 frames a second) drawn here; each frame is repeated so
+// the scroll speed matches a local waterfall.
+if (window.api.onSstvRemoteWfBins) {
+  window.api.onSstvRemoteWfBins((bins) => {
+    if (!bins || !bins.length) return;
+    for (let k = 0; k < 8; k++) drawWaterfallLine(bins);
+  });
+}
+
 function drawWaterfallLine(mags) {
   if (!sstvWaterfall) {
     sstvWaterfall = new Waterfall(wfCanvas, {
@@ -3135,7 +3155,11 @@ function showRigScopedControls() {
     const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
     flex = rig ? window.RigFamily.isFlex(rig) : window.RigFamily.familyFromCatTarget(settings.catTarget || {}) === 'flex';
   } catch {}
+  if (settings.remoteShack) flex = false;
   document.getElementById('multi-row').hidden = !flex && !multiActive;
+  // Redecode replays the decoder's own audio buffer, which is on the shack.
+  const redecode = document.getElementById('rx-redecode');
+  if (redecode) redecode.hidden = !!settings.remoteShack;
 }
 
 function setStatusDevice(label, fromRigs) {

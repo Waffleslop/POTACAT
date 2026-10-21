@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
+  // Driving a remote shack: its SSTV waterfall bins, and "not connected".
+  onSstvRemoteWfBins: (cb) => ipcRenderer.on('sstv-remote-wf-bins', (_e, bins) => cb(bins)),
+  onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   // SSTV control
   sstvEncode: (data) => ipcRenderer.send('sstv-encode', data),
   sstvStop: () => ipcRenderer.send('sstv-stop'),

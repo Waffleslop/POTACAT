@@ -96,7 +96,7 @@ const RemoteBridge = require('./lib/remote-bridge');
     : fn);
   // Invokes that answer from the shack (the JS8 window): undefined = run locally.
   const _ipcHandle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = (channel, fn) => _ipcHandle(channel, RemoteBridge.JS8_INVOKES.includes(channel)
+  ipcMain.handle = (channel, fn) => _ipcHandle(channel, (RemoteBridge.JS8_INVOKES.includes(channel) || RemoteBridge.SSTV_INVOKES.includes(channel))
     ? async (e, ...args) => { const r = await bridgeInvokeToShack(channel, args, e); return r !== undefined ? r : fn(e, ...args); }
     : fn);
 }
@@ -5311,15 +5311,38 @@ function bridgeIpcToShack(channel, args, e) {
   if (!rule) return false;
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
   if (r.drop) return true;
+  const fromSstv = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed() && e && e.sender === sstvPopoutWin.webContents);
   if (r.refuse) {
-    sendCatLog('[JTCAT] ' + r.refuse);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
+    sendCatLog('[Remote] ' + r.refuse);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
+    else { try { if (e && e.sender && !e.sender.isDestroyed()) e.sender.send('tune-blocked', r.refuse); } catch {} }
     return true;
   }
   if (!isRemoteLinked()) {
     refuseRemoteNotLinked(e && e.sender);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) {
       jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: REMOTE_NOT_LINKED_MSG });
+    }
+    // An SSTV send left on "Encoding..." with HALT showing is the failure to avoid.
+    if (fromSstv) sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx', error: REMOTE_NOT_LINKED_MSG });
+    return true;
+  }
+  if (r.photo) {
+    // The composed TX canvas (RGBA) as a PNG data URL: lossless, the exact
+    // pixels; the shack's sstv-photo decodes PNG or JPEG and its worker scales.
+    try {
+      const d = (args && args[0]) || {};
+      const w = Number(d.width) || 0, h = Number(d.height) || 0;
+      const rgba = Buffer.from(d.imageData || []);
+      if (!w || !h || rgba.length !== w * h * 4) throw new Error('no picture to send');
+      const bgra = Buffer.alloc(rgba.length);
+      for (let i = 0; i < rgba.length; i += 4) { bgra[i] = rgba[i + 2]; bgra[i + 1] = rgba[i + 1]; bgra[i + 2] = rgba[i]; bgra[i + 3] = rgba[i + 3]; }
+      const png = nativeImage.createFromBitmap(bgra, { width: w, height: h }).toPNG();
+      remoteClient.sendRaw({ type: 'sstv-photo', image: 'data:image/png;base64,' + png.toString('base64'), mode: String(d.mode || 'martin1') });
+      sendCatLog(`[SSTV] Sent a ${w}x${h} picture to the shack to transmit in ${d.mode || 'martin1'}`);
+    } catch (err) {
+      sendCatLog('[SSTV] Could not send the picture to the shack: ' + (err.message || err));
+      if (fromSstv) sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx', error: 'Could not send the picture to the shack: ' + (err.message || err) });
     }
     return true;
   }
@@ -5330,6 +5353,7 @@ function bridgeIpcToShack(channel, args, e) {
 }
 function bridgeInboundFromShack(msg) {
   if (remoteJs8Inbound(msg)) return true;
+  if (remoteSstvInbound(msg)) return true;
   const rule = RemoteBridge.IN[msg.type];
   if (!rule) return false;
   RemoteBridge.trackState(_remoteBridgeState, msg);
@@ -5337,8 +5361,56 @@ function bridgeInboundFromShack(msg) {
   for (const [ch, payload] of out) {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send(ch, payload);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send(ch, payload);
+    if (ch.startsWith('sstv-') && sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send(ch, payload);
     if ((ch === 'jtcat-decode' || ch === 'jtcat-qso-state') && jtcatMapPopoutWin && !jtcatMapPopoutWin.isDestroyed()) jtcatMapPopoutWin.webContents.send(ch, payload);
   }
+  return true;
+}
+
+// SSTV on the shack (spec B4): a finished picture arrives as a PNG data URL.
+// It is decoded to RGBA for the SSTV window, and saved to THIS PC's gallery
+// when the shack saved it (msg.filename) so Reply, Log and the gallery work
+// unchanged. The shack replays its last picture at every connect: dedupe by
+// timestamp. The first time the shack reports its SSTV window open after
+// ours asked, this window's frequency pick is re-sent (the shack's window
+// tunes to its own menu choice on load and would otherwise win).
+let saveSstvImageRef = null;       // assigned beside saveSstvImage()
+let _remoteSstvLastTs = 0;
+let _remoteSstvWindowOpen = false;
+let _remoteSstvTune = null;        // {frequency, mode} the SSTV window last asked for
+let _remoteSstvTx = false;
+function remoteSstvInbound(msg) {
+  if (msg.type === 'sstv-tx-status') { _remoteSstvTx = msg.state === 'tx'; return false; }
+  if (msg.type === 'sstv-decoder-state') {
+    const open = !!msg.windowOpen;
+    if (open && !_remoteSstvWindowOpen && _remoteSstvTune && isRemoteLinked() && sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+      const t = _remoteSstvTune;
+      setTimeout(() => { if (isRemoteLinked()) remoteClient.sendTune({ frequency: Math.round(parseFloat(t.frequency) * 1000), mode: t.mode }); }, 1500);
+    }
+    _remoteSstvWindowOpen = open;
+    return false;
+  }
+  if (msg.type !== 'sstv-rx-image') return false;
+  const ts = Number(msg.timestamp) || 0;
+  if (ts && ts === _remoteSstvLastTs) return true;
+  _remoteSstvLastTs = ts;
+  if (!sstvPopoutWin || sstvPopoutWin.isDestroyed() || !msg.image) return true;
+  (async () => {
+    try {
+      const img = nativeImage.createFromDataURL(String(msg.image));
+      const { width, height } = img.getSize();
+      if (!width || !height) return;
+      const bgra = img.toBitmap();
+      const rgba = new Uint8ClampedArray(bgra.length);
+      for (let i = 0; i < bgra.length; i += 4) { rgba[i] = bgra[i + 2]; rgba[i + 1] = bgra[i + 1]; rgba[i + 2] = bgra[i]; rgba[i + 3] = 255; }
+      const meta = { imageData: rgba, width, height, mode: msg.mode || '', freqHz: msg.freqHz || _currentFreqHz || 0, rigMode: msg.rigMode || _currentMode || '', weak: !!msg.weak };
+      let saved = null;
+      if (msg.filename && saveSstvImageRef) { try { saved = await saveSstvImageRef(meta); } catch (err) { sendCatLog('[SSTV] Could not save the shack\'s picture here: ' + (err.message || err)); } }
+      if (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) return;
+      sstvPopoutWin.webContents.send('sstv-rx-image', { ...meta, imageData: Array.from(rgba), saved, redecode: false, stats: {} });
+      sendCatLog(`[SSTV] Picture from the shack: ${msg.mode || '?'} ${width}x${height}${saved ? ' (saved here too)' : ''}`);
+    } catch (err) { sendCatLog('[SSTV] Could not show the shack\'s picture: ' + (err.message || err)); }
+  })();
   return true;
 }
 
@@ -5459,6 +5531,9 @@ async function bridgeInvokeToShack(channel, args, e) {
       send({ type: 'js8-set-band', band, reqId });
       return { ok: true, freqKhz: khz };
     }
+    case 'sstv-atu-tune':
+      send({ type: 'rig-control', data: { action: 'atu-tune' } });
+      return { ok: true };
     case 'js8-set-offset': {
       const hz = Math.round(Number(args[0]) || 1500);
       send({ type: 'js8-set-offset', hz });
@@ -5604,6 +5679,7 @@ function ensureRemoteClient() {
     remoteShackInfo = null;
     pushRemoteShackInfo();
     if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true });
+    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
       remoteJtcatSubscribeSpectrum(true);
@@ -26697,8 +26773,6 @@ function autoSstvBlockedByJtcat() {
 }
 
 function triggerAutoSstv() {
-  // Driving a remote shack: idle receive is the shack's own setting.
-  if (isRemoteMode()) return;
   if (autoSstvBlockedByJtcat()) {
     // Log the state ONCE per deferral, not on every 30 s tick. Left
     // unthrottled this emitted ~120 lines/hour of pure noise, which is
@@ -26712,6 +26786,8 @@ function triggerAutoSstv() {
     return;
   }
   _autoRxDeferLogged = false;
+  // Driving a remote shack: idle receive is the shack's own setting.
+  if (isRemoteMode()) return;
   // WSPR/PSK31-on-idle variant: open the JTCAT popout in that mode (it owns
   // audio capture + the spot list/map) instead of SSTV. The popout auto-starts
   // from settings.jtcatLastMode and tunes to settings.jtcatLastBandFreq, so
@@ -31447,6 +31523,7 @@ app.whenReady().then(() => {
     return s || fallback || 'sstv';
   }
 
+  saveSstvImageRef = (d) => saveSstvImage(d);
   async function saveSstvImage(data) {
     try {
       const galleryDir = ensureSstvGalleryDir();
@@ -31761,7 +31838,9 @@ app.whenReady().then(() => {
       try { sstvPopoutWin.webContents.send('sstv-refocus-qsy', target); } catch {}
       // An open pop-out means the operator expects RX: restart a decoder a
       // 'sstv-stop' left stopped (startSstv is a no-op on a running one).
-      if (startSstv) startSstv();
+      // Driving a remote shack: the decoder is the shack's.
+      if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendRaw({ type: 'sstv-open' }); }
+      else if (startSstv) startSstv();
       sstvPopoutWin.focus();
       return;
     }
@@ -31806,6 +31885,15 @@ app.whenReady().then(() => {
     sstvPopoutWin.on('closed', () => {
       sstvPopoutWin = null;
       sstvPopoutOpenedBy = null;
+      if (isRemoteMode()) {
+        // The shack's decoder and transmitter: stop them there, as locally.
+        if (isRemoteLinked()) {
+          if (_remoteSstvTx) remoteClient.sendRaw({ type: 'sstv-halt-tx' });
+          remoteClient.sendRaw({ type: 'sstv-stop', reason: 'user' });
+        }
+        _remoteSstvWindowOpen = false; _remoteSstvTune = null; _remoteSstvTx = false;
+        return;
+      }
       stopSstv(); // pushes sstv-decoder-state {running:false, windowOpen:false}
     });
     pushSstvDecoderState();
@@ -31813,8 +31901,11 @@ app.whenReady().then(() => {
       // Send theme
       const themePayload = { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' };
       sstvPopoutWin.webContents.send('sstv-popout-theme', themePayload);
-      // Start SSTV engine when popout opens
-      startSstv();
+      // Start SSTV engine when popout opens (the SHACK's, when driving one)
+      if (isRemoteMode()) {
+        if (isRemoteLinked()) remoteClient.sendRaw({ type: 'sstv-open' });
+        else sstvPopoutWin.webContents.send('tune-blocked', REMOTE_NOT_LINKED_MSG);
+      } else startSstv();
       pushSstvRigState();
     });
     sstvPopoutWin.webContents.on('before-input-event', (_e, input) => {
@@ -32038,7 +32129,7 @@ app.whenReady().then(() => {
     yaesuScopeRestartLater('frame rate changed');
   });
 
-  ipcMain.on('sstv-popout-open', () => { if (!refuseRemoteFeature('sstv')) openSstvPopout(); });
+  ipcMain.on('sstv-popout-open', () => openSstvPopout());
 
   ipcMain.on('sstv-popout-theme', (_e, theme) => {
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
@@ -33416,6 +33507,7 @@ app.whenReady().then(() => {
       // A band pick in the JTCAT window: the shack's jtcat-set-band, which also
       // moves its pre-TX dial anchor (a plain tune would leave the anchor on
       // the old band and the shack would refuse to transmit on the new one).
+      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed() && _e.sender === sstvPopoutWin.webContents) _remoteSstvTune = { frequency, mode };
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _e.sender === jtcatPopoutWin.webContents) {
         const khz = parseFloat(frequency);
         if (isFinite(khz) && khz > 0) {
