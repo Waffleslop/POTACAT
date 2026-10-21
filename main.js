@@ -5143,6 +5143,7 @@ function resetRemoteMirroredRigState() {
 // the leg in use, the round trip, its rig list (the `rigs` frame) and which
 // rig is active. Pushed on change as 'remote-shack-info'.
 let remoteShackInfo = null;
+let _remoteClientAuthFail = null; // {targetId, reason} — the shack refused this pairing
 function remoteShackInfoNow() {
   if (!isRemoteMode()) return { remote: false };
   const target = (settings.connectionTargets || []).find(t => t && t.id === settings.activeTargetId) || {};
@@ -5294,9 +5295,22 @@ function ensureRemoteClient() {
         expiresAt: info.expiresAt || null,
         accountLinked: !!info.accountLinked,
         trusted: !!info.trusted,
+        passSession: info.passSession || null,
       });
       win.webContents.send('cat-status', { connected: true, mode: '', freq: 0 });
     }
+    // The shack is the authority on this pairing's expiry and trust: write
+    // them back so Remote Radios stops showing a pair link's 24 h lifetime.
+    if (target.kind !== 'pass') {
+      target.expiresAt = (typeof info.expiresAt === 'number' && info.expiresAt > 0) ? info.expiresAt : null;
+      target.trusted = !!info.trusted;
+      if (info.accountLinked) target.accountLinked = true;
+      if (info.trusted && target.trust === 'guest') target.trust = 'trusted';
+    }
+    // The Tailscale leg presents a public (Let's Encrypt) certificate when the
+    // shack says so; pinning the LAN cert's fingerprint there can only fail.
+    if (typeof info.tsCertPublic === 'boolean') target.tsCertPublic = info.tsCertPublic;
+    _remoteClientAuthFail = null;
     // A fresh session: drop the previous one's snapshot so its caps cannot
     // light controls this shack's radio lacks; the first status refills it.
     remoteRig.reset();
@@ -5322,6 +5336,7 @@ function ensureRemoteClient() {
     }
   });
   remoteClient.on('auth-fail', ({ reason }) => {
+    _remoteClientAuthFail = { targetId: target.id, reason: reason || 'refused' };
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-client-status', { state: 'auth-fail', reason });
     }
@@ -27307,7 +27322,10 @@ async function redeemPairLinkUrl(rawUrl) {
         tsHost,
         cloudHost,
         pairedAt: Date.now(),
-        expiresAt: expHint ? Number(expHint) : null,
+        // `exp` is the LINK's lifetime (it can be redeemed until then), not the
+        // pairing's: an owned pairing never expires and a guest one slides.
+        // The real expiry arrives in auth-ok and is written back on connect.
+        expiresAt: null,
         trust: 'guest',
         lastConnectedAt: null,
         lastReachableLeg: cand.leg,
@@ -34162,6 +34180,8 @@ app.whenReady().then(() => {
       pairedAt: t.pairedAt || null,
       expiresAt: t.expiresAt || null,
       trust: t.trust || 'guest',
+      trusted: !!t.trusted,
+      accountLinked: !!t.accountLinked,
       ownerCallsign: t.ownerCallsign || '',
       maxPowerW: t.maxPowerW || null,
       privilegeClass: t.privilegeClass || null,
@@ -34217,18 +34237,21 @@ app.whenReady().then(() => {
     const before = settings.connectionTargets.length;
     settings.connectionTargets = settings.connectionTargets.filter(t => t.id !== id);
     if (settings.connectionTargets.length === before) return { ok: false, reason: 'not-found' };
+    // Tell the shack to forget this desktop while the link is up (unpair-self);
+    // otherwise its My devices list keeps a row this desktop no longer holds.
+    let unpairedAtShack = false;
     if (settings.activeTargetId === id) {
+      if (isRemoteLinked()) { remoteClient.sendRaw({ type: 'unpair-self' }); unpairedAtShack = true; }
       settings.activeTargetId = null;
-      tearDownRemoteClient();
+      // Let the frame leave before the socket closes.
+      setTimeout(() => { tearDownRemoteClient(); connectCatSafe('remote shack removed'); }, unpairedAtShack ? 250 : 0);
     }
     saveSettings(settings);
     if (win && !win.isDestroyed()) {
       win.webContents.send('connection-targets-updated', settings.connectionTargets);
     }
-    // Best-effort unpair against the shack — fire and forget, ignore
-    // failures (shack might be offline; row removed locally either way).
-    // TODO: wire DELETE /api/devices/{deviceId} when the shack side adds it.
-    return { ok: true };
+    if (!unpairedAtShack) sendCatLog('[RemoteClient] Removed a remote shack while not connected to it; it still lists this desktop under My devices until removed there.');
+    return { ok: true, unpairedAtShack };
   });
 
   // Activate a connection target — switches this desktop into
@@ -34263,6 +34286,9 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('connection-targets-get-status', () => {
+    if (_remoteClientAuthFail && _remoteClientAuthFail.targetId === settings.activeTargetId) {
+      return { state: 'auth-fail', targetId: _remoteClientAuthFail.targetId, reason: _remoteClientAuthFail.reason };
+    }
     if (!remoteClient) return { state: 'idle' };
     const s = remoteClient.state();
     return {
@@ -34471,7 +34497,49 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('cloud-pair-shack', async (_e, shackDeviceId) => {
+  ipcMain.handle('cloud-pair-shack', (_e, shackDeviceId) => cloudPairShackById(shackDeviceId));
+
+  // Re-pair a shack whose pairing the shack refused (expired / removed there).
+  // Account-linked: find it again in the Cloud account (same fingerprint or
+  // tunnel host) and pair in one click, replacing the dead row. Others need a
+  // fresh link from the shack, which the caller is told.
+  ipcMain.handle('connection-targets-repair', async (_e, id) => {
+    const old = (settings.connectionTargets || []).find(t => t && t.id === id);
+    if (!old) return { ok: false, error: 'That shack is no longer in the list.' };
+    if (old.kind === 'pass') return { ok: false, error: 'A Guest Pass cannot be re-paired. Ask the owner for a fresh pass.' };
+    if (!(old.trust === 'account' || old.accountLinked)) {
+      return { ok: false, needsLink: true, error: 'On the shack, click Pair my device... on the ECHOCAT card, copy the link, and paste it in the box at the top.' };
+    }
+    if (!settings.cloudAccessToken) return { ok: false, error: 'Sign in to POTACAT Cloud first (Settings > Cloud), then Re-pair.' };
+    if (!cloudIpc || !cloudIpc.getCloudSync()) return { ok: false, error: 'Cloud sync unavailable' };
+    let shacks = [];
+    try {
+      await ensureCloudDeviceRegistered();
+      const r = await cloudIpc.getCloudSync().listDevices('shack');
+      shacks = Array.isArray(r && r.devices) ? r.devices : [];
+    } catch (err) { return { ok: false, error: 'Could not list your shacks: ' + (err.message || err) }; }
+    const norm = (x) => String(x || '').toUpperCase().replace(/:/g, '');
+    const match = shacks.find(s => s && old.fingerprint && norm(s.fingerprint) === norm(old.fingerprint))
+      || shacks.find(s => s && old.cloudHost && (s.cloud_host || s.cloudHost) === old.cloudHost)
+      || shacks.find(s => s && (s.name || '') === (old.name || ''));
+    if (!match) return { ok: false, error: 'That shack is not in your Cloud account any more. Turn on Cloud on the shack, then try again.' };
+    const r = await cloudPairShackById(match.device_id || match.deviceId);
+    if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'Re-pair failed' };
+    if (r.targetId !== id) {
+      settings.connectionTargets = (settings.connectionTargets || []).filter(t => t.id !== id);
+    }
+    if (settings.activeTargetId === id || settings.activeTargetId === r.targetId) {
+      tearDownRemoteClient();
+      settings.activeTargetId = r.targetId;
+    }
+    saveSettings(settings);
+    ensureRemoteClient();
+    if (win && !win.isDestroyed()) win.webContents.send('connection-targets-updated', settings.connectionTargets);
+    sendCatLog(`[RemoteClient] Re-paired with ${old.name || 'the shack'} through the Cloud account`);
+    return { ok: true, targetId: r.targetId };
+  });
+
+  async function cloudPairShackById(shackDeviceId) {
     if (!cloudIpc) return { error: 'Cloud not initialized' };
     if (!settings.cloudAccessToken) return { error: 'Not signed in to POTACAT Cloud' };
     const sync = cloudIpc.getCloudSync();
@@ -34541,7 +34609,7 @@ app.whenReady().then(() => {
       }
     }
     return { error: lastErr ? (lastErr.message || String(lastErr)) : 'all legs failed' };
-  });
+  }
 
   // Multi-operator profiles — back the Settings → Summary → Operator
   // dropdown + Manage Operators dialog. Returning shape matches what

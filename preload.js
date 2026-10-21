@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('api', {
   connectionTargetsRemove: (id) => ipcRenderer.invoke('connection-targets-remove', id),
   // Pass null to switch back to the local rig.
   connectionTargetsActivate: (id) => ipcRenderer.invoke('connection-targets-activate', id),
+  connectionTargetsRepair: (id) => ipcRenderer.invoke('connection-targets-repair', id),
   connectionTargetsGetStatus: () => ipcRenderer.invoke('connection-targets-get-status'),
   // Remote-shack audio (desktop-as-client answerer; remote-desktop Phase 2).
   // Start/stop listening to the remote rig's audio (and sending mic for PTT);

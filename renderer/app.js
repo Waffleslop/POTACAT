@@ -7012,7 +7012,7 @@ async function _remoteRadiosRefreshList() {
   if (localMeta) localMeta.textContent = 'This computer';
 
   if (!Array.isArray(targets) || targets.length === 0) {
-    listEl.innerHTML = '<li class="remote-radios-empty">No remote shacks paired yet. Open <b>Summary → Pair another desktop&hellip;</b> on your shack to generate a link.</li>';
+    listEl.innerHTML = '<li class="remote-radios-empty">No remote shacks paired yet. On your shack, click <b>Pair my device&hellip;</b> on the ECHOCAT card and paste the link here, or sign in to POTACAT Cloud on both computers.</li>';
     return;
   }
 
@@ -7065,7 +7065,9 @@ async function _remoteRadiosRefreshList() {
       if (isActive && status.state === 'auth-fail') {
         return t.kind === 'pass'
           ? '<b>Pass refused.</b> It may have expired or been revoked — ask the owner for a fresh link.'
-          : '<b>Auth failed.</b> Token may have expired — re-pair from your shack.';
+          : ((t.trust === 'account' || t.accountLinked)
+            ? '<b>Pairing refused.</b> Click Re-pair to pair again through your Cloud account.'
+            : '<b>Pairing refused.</b> It expired or was removed on the shack. On the shack, click Pair my device&hellip; and paste the new link above.');
       }
       if (isActive && status.state === 'disconnected') return '<b>Reconnecting&hellip;</b>';
       if (t.kind === 'pass' && t.expiresAt != null && t.expiresAt <= Date.now()) {
@@ -7074,6 +7076,9 @@ async function _remoteRadiosRefreshList() {
       return 'Last connected ' + _esc(fmtAge(t.lastConnectedAt));
     })();
     const actionBtnHtml = (() => {
+      if (isActive && status.state === 'auth-fail' && t.kind !== 'pass') {
+        return '<button type="button" class="primary" data-act="rr-repair" data-id="' + _esc(t.id) + '">Re-pair</button>';
+      }
       if (isActive && status.state === 'connected') {
         return '<button type="button" class="primary" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Disconnect</button>';
       }
@@ -7101,6 +7106,18 @@ async function _remoteRadiosRefreshList() {
       + '</div>'
       + '</li>';
   }).join('');
+}
+
+async function _remoteRadiosRepair(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Re-pairing...'; }
+  let r = null;
+  try { r = await window.api.connectionTargetsRepair(id); } catch (e) { r = { ok: false, error: e.message || String(e) }; }
+  if (r && r.ok) { showLogToast('Re-paired. Connecting to the shack...', { duration: 5000 }); }
+  else {
+    showLogToast((r && r.error) || 'Re-pair failed', { warn: true, duration: 10000 });
+    if (r && r.needsLink) { const inp = document.getElementById('remote-radios-paste-input'); if (inp) inp.focus(); }
+  }
+  _remoteRadiosRefreshList();
 }
 
 async function _remoteRadiosConnect(id) {
@@ -7224,6 +7241,7 @@ async function _remoteRadiosRemove(id) {
     if (act === 'rr-disconnect') return _remoteRadiosDisconnect();
     if (act === 'rr-rename') return _remoteRadiosRename(id, btn.dataset.name || '');
     if (act === 'rr-remove') return _remoteRadiosRemove(id);
+    if (act === 'rr-repair') return _remoteRadiosRepair(id, btn);
   });
 
   // Live status pushes.

@@ -261,6 +261,51 @@ test('hold-a-key PTT: off by default, never while typing, released on keyup and 
   assert.ok(/window\.addEventListener\('blur', \(\) => \{ if \(_pttKeyHeld\) \{ _pttKeyHeld = false; ptt\.up\(\); \} \}\);/.test(app));
 });
 
+test('pairing: the shack\'s expiry and trust are written back; a link\'s TTL never is', () => {
+  const redeem = main.slice(main.indexOf('async function redeemPairLinkUrl'), main.indexOf('async function redeemPairLinkUrl') + 4000);
+  assert.ok(!/expiresAt: expHint \? Number\(expHint\) : null/.test(redeem), 'the link exp is not the pairing expiry');
+  const conn = handlerBody(main, "remoteClient.on('connected', (info) => {");
+  assert.ok(/target\.expiresAt = \(typeof info\.expiresAt === 'number' && info\.expiresAt > 0\) \? info\.expiresAt : null;/.test(conn));
+  assert.ok(/target\.trusted = !!info\.trusted;/.test(conn));
+  assert.ok(/passSession: info\.passSession \|\| null/.test(conn), 'the Guest Pass profile reaches the renderer');
+  assert.ok(/target\.tsCertPublic = info\.tsCertPublic/.test(conn));
+});
+
+test('Tailscale leg: a public certificate is checked by its CA, not the LAN pin', () => {
+  const { RemoteClient } = require('../lib/remote-client');
+  const pinned = new RemoteClient({ id: 'a', tsHost: 'shack.tail1.ts.net', fingerprint: 'AB:CD' })._candidates();
+  assert.strictEqual(pinned[0].pin, 'AB:CD');
+  const pub = new RemoteClient({ id: 'b', tsHost: 'shack.tail1.ts.net', fingerprint: 'AB:CD', tsCertPublic: true })._candidates();
+  assert.strictEqual(pub[0].pin, '');
+});
+
+test('Remove unpairs at the shack when linked, and gives the radio back to this PC', () => {
+  const rm = handlerBody(main, "ipcMain.handle('connection-targets-remove', (_e, id) => {");
+  assert.ok(/if \(isRemoteLinked\(\)\) \{ remoteClient\.sendRaw\(\{ type: 'unpair-self' \}\); unpairedAtShack = true; \}/.test(rm));
+  assert.ok(/connectCatSafe\('remote shack removed'\)/.test(rm));
+  const { MESSAGES } = require('../lib/echocat-protocol');
+  assert.ok(MESSAGES['unpair-self'] && MESSAGES['unpair-self'].dir === 'c2s');
+  const { RemoteServer } = require('../lib/remote-server');
+  const rs = new RemoteServer();
+  let revoked = null;
+  rs.revokeDevice = (id) => { revoked = id; return true; };
+  const ws = { readyState: 1, _authenticated: true, _pairedDevice: { id: 'dev-7', name: 'laptop' } };
+  rs._client = ws;
+  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  assert.ok(/case 'unpair-self': \{\n\s+const dev = ws\._pairedDevice;[\s\S]{0,300}this\.revokeDevice\(dev\.id\);/.test(srv.replace(/\r\n/g, '\n')));
+});
+
+test('Re-pair: one click for an account-linked shack, a clear instruction otherwise', () => {
+  const rp = handlerBody(main, "ipcMain.handle('connection-targets-repair', async (_e, id) => {");
+  assert.ok(/needsLink: true/.test(rp) && /cloudPairShackById\(match\.device_id \|\| match\.deviceId\)/.test(rp));
+  assert.ok(/norm\(s\.fingerprint\) === norm\(old\.fingerprint\)/.test(rp), 'the same shack, by fingerprint first');
+  const st = handlerBody(main, "ipcMain.handle('connection-targets-get-status', () => {");
+  assert.ok(/state: 'auth-fail'/.test(st), 'a refused pairing survives a list refresh');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/data-act="rr-repair"/.test(app) && /act === 'rr-repair'\) return _remoteRadiosRepair\(id, btn\)/.test(app));
+  assert.ok(!/Pair another desktop/.test(app), 'the copy names the real button');
+});
+
 const asyncTests = [];
 asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
   const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));
