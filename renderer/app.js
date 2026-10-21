@@ -1701,7 +1701,7 @@ document.addEventListener('keydown', (e) => {
 // A state token (`US-NJ`, bare `NJ`, `CA-ON`) is a STATE rule: it matches
 // every park spot whose location names that state (N0KAH 2026-10-06).
 // Mirrored in main.js for the desktop notifications.
-const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm']);
+const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm']);
 function parseWatchlist(str) {
   if (!str) return [];
   const rules = [];
@@ -3252,14 +3252,14 @@ initMultiDropdown(propModeFilterEl, 'Mode', rerenderRbn);
 // --- Band QSY buttons (shown when Radio band filter is active) ---
 const BAND_QSY_FREQS = {
   // SSB calling frequencies (kHz) — used for SSB/phone modes
-  ssb: { '160m': 1900, '80m': 3860, '60m': 5357, '40m': 7200, '30m': 10130, '20m': 14260, '17m': 18130, '15m': 21300, '12m': 24960, '10m': 28400, '6m': 50125, '4m': 70200, '2m': 144200, '70cm': 432100 },
+  ssb: { '160m': 1900, '80m': 3860, '60m': 5357, '40m': 7200, '30m': 10130, '20m': 14260, '17m': 18130, '15m': 21300, '12m': 24960, '10m': 28400, '6m': 50125, '4m': 70200, '2m': 144200, '70cm': 432100, '1.25m': 222100, '33cm': 903100, '23cm': 1296100 },
   // CW calling frequencies
-  cw: { '160m': 1820, '80m': 3530, '60m': 5332, '40m': 7030, '30m': 10110, '20m': 14030, '17m': 18080, '15m': 21030, '12m': 24900, '10m': 28030, '6m': 50090, '4m': 70100, '2m': 144050, '70cm': 432050 },
-  // Digital/FT8 frequencies
-  digi: { '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '4m': 70154, '2m': 144174, '70cm': 432065 },
+  cw: { '160m': 1820, '80m': 3530, '60m': 5332, '40m': 7030, '30m': 10110, '20m': 14030, '17m': 18080, '15m': 21030, '12m': 24900, '10m': 28030, '6m': 50090, '4m': 70100, '2m': 144050, '70cm': 432050, '1.25m': 222100, '33cm': 903100, '23cm': 1296100 },
+  // Digital/FT8 frequencies (above 2m: WSJT-X defaults; 33cm has none, so the weak-signal calling frequency)
+  digi: { '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '4m': 70154, '2m': 144174, '70cm': 432065, '1.25m': 222065, '33cm': 903100, '23cm': 1296174 },
 };
-const BAND_QSY_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm'];
-const BAND_QSY_LABELS = { '160m': '160', '80m': '80', '60m': '60', '40m': '40', '30m': '30', '20m': '20', '17m': '17', '15m': '15', '12m': '12', '10m': '10', '6m': '6', '4m': '4', '2m': '2', '70cm': '70cm' };
+const BAND_QSY_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
+const BAND_QSY_LABELS = { '160m': '160', '80m': '80', '60m': '60', '40m': '40', '30m': '30', '20m': '20', '17m': '17', '15m': '15', '12m': '12', '10m': '10', '6m': '6', '4m': '4', '2m': '2', '70cm': '70cm', '1.25m': '222', '33cm': '33cm', '23cm': '23cm' };
 const bandButtonsEl = document.getElementById('band-buttons');
 
 function buildBandButtons() {
@@ -10034,11 +10034,13 @@ const RBN_BAND_COLORS_NORMAL = {
   '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3',
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
   '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '4m': '#b0e0e6', '2m': '#88ff88', '70cm': '#ffaa44',
+  '1.25m': '#c8a2ff', '33cm': '#ffd59e', '23cm': '#9ef5e0',
 };
 const RBN_BAND_COLORS_CB = {
   '160m': '#ffa726', '80m': '#ffca28', '60m': '#fff176', '40m': '#4fc3f7',
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
   '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '4m': '#b0e0e6', '2m': '#88ff88', '70cm': '#ffaa44',
+  '1.25m': '#c8a2ff', '33cm': '#ffd59e', '23cm': '#9ef5e0',
 };
 
 let SOURCE_COLORS_ACTIVE = { ...SOURCE_COLORS_NORMAL };
@@ -13075,7 +13077,7 @@ splitSplitterEl.addEventListener('mousedown', (e) => {
 });
 
 // --- DXCC Matrix Rendering ---
-const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm'];
+const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
 
 function isEntityConfirmedOnBand(ent, band, modeFilter) {
   const modes = ent.confirmed[band];
@@ -13879,7 +13881,7 @@ const BAND_RANGES = [
   [7000, 7300, '40m'], [10100, 10150, '30m'], [14000, 14350, '20m'],
   [18068, 18168, '17m'], [21000, 21450, '15m'], [24890, 24990, '12m'],
   [28000, 29700, '10m'], [50000, 54000, '6m'], [70000, 70500, '4m'], [144000, 148000, '2m'],
-  [420000, 450000, '70cm'],
+  [420000, 450000, '70cm'], [222000, 225000, '1.25m'], [902000, 928000, '33cm'], [1240000, 1300000, '23cm'],
 ];
 
 function freqKhzToBand(khz) {
@@ -20400,7 +20402,7 @@ window.api.onSolarData((payload) => {
 
 
 // --- Band Activity Heatmap ---
-const HEATMAP_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm'];
+const HEATMAP_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
 const HEATMAP_CONTINENTS = ['EU', 'NA', 'SA', 'AS', 'AF', 'OC'];
 
 function updateBandActivityVisibility() {
@@ -20707,7 +20709,7 @@ function renderRbnMarkers() {
 
 function renderRbnLegend(activeBands) {
   rbnLegendEl.innerHTML = '';
-  const sortedBands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm'];
+  const sortedBands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
   for (const band of sortedBands) {
     if (!activeBands.has(band)) continue;
     const item = document.createElement('span');
@@ -27022,8 +27024,12 @@ function freqToBandActivator(khz) {
   if (khz >= 24890 && khz <= 24990) return '12m';
   if (khz >= 28000 && khz <= 29700) return '10m';
   if (khz >= 50000 && khz <= 54000) return '6m';
+  if (khz >= 70000 && khz <= 70500) return '4m';
   if (khz >= 144000 && khz <= 148000) return '2m';
+  if (khz >= 222000 && khz <= 225000) return '1.25m';
   if (khz >= 420000 && khz <= 450000) return '70cm';
+  if (khz >= 902000 && khz <= 928000) return '33cm';
+  if (khz >= 1240000 && khz <= 1300000) return '23cm';
   return '';
 }
 

@@ -74,6 +74,9 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="4m"> 4m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="2m"> 2m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="70cm"> 70cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
         </div>
       </div>
       <div class="band-buttons hidden" id="band-buttons"></div>
@@ -777,6 +780,8 @@
           <button class="jtcat-band-btn" data-band="10m" data-freq="28074">10</button>
           <button class="jtcat-band-btn" data-band="6m" data-freq="50313">6</button>
           <button class="jtcat-band-btn" data-band="2m" data-freq="144174">2</button>
+          <button class="jtcat-band-btn" data-band="1.25m" data-freq="222065">222</button>
+          <button class="jtcat-band-btn" data-band="23cm" data-freq="1296174">23cm</button>
         </div>
         <div class="jtcat-mode-select">
           <select id="jtcat-mode">
@@ -953,6 +958,9 @@
             <option value="4m">4m</option>
             <option value="2m">2m</option>
             <option value="70cm">70cm</option>
+            <option value="1.25m">1.25m</option>
+            <option value="33cm">33cm</option>
+            <option value="23cm">23cm</option>
           </select>
         </label>
         <label class="dxcc-filter-label">Mode:
@@ -986,8 +994,12 @@
               <th class="dxcc-band-col">12m</th>
               <th class="dxcc-band-col">10m</th>
               <th class="dxcc-band-col">6m</th>
+              <th class="dxcc-band-col">4m</th>
               <th class="dxcc-band-col">2m</th>
               <th class="dxcc-band-col">70cm</th>
+              <th class="dxcc-band-col">1.25m</th>
+              <th class="dxcc-band-col">33cm</th>
+              <th class="dxcc-band-col">23cm</th>
             </tr>
           </thead>
           <tbody id="dxcc-matrix-body"></tbody>
@@ -1129,6 +1141,9 @@
             <label class="multi-dropdown-item"><input type="checkbox" value="4m"> 4m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="2m"> 2m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="70cm"> 70cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
           </div>
         </div>
         <div class="multi-dropdown" id="prop-mode-filter">

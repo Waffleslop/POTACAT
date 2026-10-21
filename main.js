@@ -2509,7 +2509,7 @@ const recentNotifications = new Map(); // callsign -> timestamp for dedup (5-min
 // Band/mode qualifiers are optional — omitted means match any. A state
 // token (`US-NJ`, bare `NJ`, `CA-ON`) is a STATE rule matched against a
 // park spot's location (N0KAH 2026-10-06); mirrors renderer/app.js.
-const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm']);
+const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm']);
 function parseWatchlist(str) {
   if (!str) return [];
   const rules = [];

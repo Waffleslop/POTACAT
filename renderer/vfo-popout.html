@@ -934,8 +934,12 @@ const BANDS = [
   { label: '12m', freq: 24890 },
   { label: '10m', freq: 28000 },
   { label: '6m', freq: 50000 },
+  { label: '4m', freq: 70000 },
   { label: '2m', freq: 144000 },
+  { label: '1.25m', freq: 222000 },
   { label: '70cm', freq: 420000 },
+  { label: '33cm', freq: 902000 },
+  { label: '23cm', freq: 1240000 },
 ];
 
 function freqToBand(hz) {
@@ -952,8 +956,12 @@ function freqToBand(hz) {
     if (b.label === '12m' && khz >= 24890 && khz <= 24990) return b.label;
     if (b.label === '10m' && khz >= 28000 && khz <= 29700) return b.label;
     if (b.label === '6m' && khz >= 50000 && khz <= 54000) return b.label;
+    if (b.label === '4m' && khz >= 70000 && khz <= 70500) return b.label;
     if (b.label === '2m' && khz >= 144000 && khz <= 148000) return b.label;
+    if (b.label === '1.25m' && khz >= 222000 && khz <= 225000) return b.label;
     if (b.label === '70cm' && khz >= 420000 && khz <= 450000) return b.label;
+    if (b.label === '33cm' && khz >= 902000 && khz <= 928000) return b.label;
+    if (b.label === '23cm' && khz >= 1240000 && khz <= 1300000) return b.label;
   }
   return null;
 }
