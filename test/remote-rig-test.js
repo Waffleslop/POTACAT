@@ -382,6 +382,18 @@ test('an n-fer started on a device reaches the shack as every park; Remove waits
   assert.ok(/if \(_remoteUnpairingSelf\)/.test(rv), 'Remove is not reported as the operator revoking');
 });
 
+test('ending an activation is sent only to a shack that advertises activation-end', () => {
+  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  assert.ok(/'activation-end',/.test(srv), 'this shack advertises it');
+  const push = fnBody(main, 'function pushActivationToRemoteShack() {');
+  assert.ok(/if \(!active && !caps\.includes\('activation-end'\)\) return;/.test(push), 'an older shack is not told to end (it would stay in activator mode with no park)');
+  const { RemoteClient } = require('../lib/remote-client');
+  const c = new RemoteClient({ id: 'x', name: 'x' });
+  c._ws = null;
+  c._handleMessage(JSON.stringify({ type: 'hello', protocolVersion: 1, capabilities: ['activation-end', 'js8'] }));
+  assert.deepStrictEqual(c.state().serverCapabilities, ['activation-end', 'js8']);
+});
+
 const asyncTests = [];
 asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
   const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));

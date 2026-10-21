@@ -5276,6 +5276,11 @@ function remoteShackScopeState(state) {
 function pushActivationToRemoteShack() {
   if (!isRemoteLinked()) return;
   const active = settings.appMode === 'activator' || !!settings.activationActive;
+  // Ending needs a shack that understands end:true ('activation-end'): a
+  // 1.12.0 shack sets activator mode on EVERY set-activator-park, so an end
+  // sent there would leave it activating with no park. Say nothing instead.
+  const caps = (remoteClient.state && remoteClient.state().serverCapabilities) || [];
+  if (!active && !caps.includes('activation-end')) return;
   const refs = active ? (settings.activatorParkRefs || []).filter(p => p && p.ref) : [];
   const first = refs[0] || null;
   remoteClient.sendRaw({
