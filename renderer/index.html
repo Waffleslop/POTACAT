@@ -254,6 +254,7 @@
         <div class="rig-popover-tabs">
           <button class="rig-tab-btn active" data-rig-tab="controls">Controls</button>
           <button class="rig-tab-btn" data-rig-tab="custom">Custom</button>
+          <button class="rig-tab-btn" data-rig-tab="presets" title="Named TX power / RF gain / AF gain sets — one tap, or applied by themselves when the mode changes">Presets</button>
           <button class="rig-tab-btn" data-rig-tab="commands">Commands</button>
         </div>
         <div id="rig-tab-controls" class="rig-tab-panel">
@@ -433,6 +434,30 @@
         <div id="rig-tab-custom" class="rig-tab-panel hidden">
           <div id="rig-custom-slots"></div>
           <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add</button>
+        </div>
+        <div id="rig-tab-presets" class="rig-tab-panel hidden">
+          <!-- Rig presets (lib/rig-presets.js): list (tap = apply), the
+               mode-family assignments, and an inline editor. Rendered by
+               rigPresetsRender() in app.js from the main process payload. -->
+          <div id="rig-preset-caps-note" class="rig-preset-note hidden"></div>
+          <div id="rig-preset-list" class="rig-preset-list"></div>
+          <div class="rig-preset-actions">
+            <button class="rig-btn" id="rig-preset-new" style="font-size:11px;padding:2px 8px;">+ New preset</button>
+          </div>
+          <div id="rig-preset-editor" class="rig-preset-editor hidden">
+            <div class="rig-popover-row"><label>Name</label><input type="text" id="rig-preset-name" maxlength="40" placeholder="e.g. FT8" style="flex:1;"></div>
+            <div class="rig-popover-row" id="rig-preset-txpower-row"><label>TX power</label><input type="number" id="rig-preset-txpower" min="0" max="2000" step="1" placeholder="leave as is" style="width:90px;"><span>W</span></div>
+            <div class="rig-popover-row" id="rig-preset-rfgain-row"><label>RF gain</label><input type="number" id="rig-preset-rfgain" min="0" max="100" step="1" placeholder="leave as is" style="width:90px;"><span>%</span></div>
+            <div class="rig-popover-row" id="rig-preset-afgain-row"><label>AF gain</label><input type="number" id="rig-preset-afgain" min="0" max="100" step="1" placeholder="leave as is" style="width:90px;"><span>%</span></div>
+            <div class="rig-preset-actions">
+              <button class="rig-btn" id="rig-preset-use-current" title="Fill the fields with the radio's current levels">Use current</button>
+              <button class="rig-btn" id="rig-preset-save">Save</button>
+              <button class="rig-btn" id="rig-preset-cancel">Cancel</button>
+            </div>
+            <div class="rig-preset-note">A blank field leaves that level alone. AF gain is the radio's speaker level: 0 silences the shack for FT8.</div>
+          </div>
+          <div class="rig-preset-note" style="margin-top:8px;">Apply by itself when the mode changes to:</div>
+          <div id="rig-preset-bymode" class="rig-preset-bymode"></div>
         </div>
         <div id="rig-tab-commands" class="rig-tab-panel hidden">
           <div id="rig-cmd-header" style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px;"></div>

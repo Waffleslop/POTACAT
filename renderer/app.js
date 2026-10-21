@@ -23448,11 +23448,130 @@ rigTabBtns.forEach(btn => {
     rigTabBtns.forEach(b => b.classList.toggle('active', b === btn));
     rigTabControls.classList.toggle('hidden', tab !== 'controls');
     rigTabCustom.classList.toggle('hidden', tab !== 'custom');
+    rigTabPresets.classList.toggle('hidden', tab !== 'presets');
     rigTabCommands.classList.toggle('hidden', tab !== 'commands');
     rigPopover.classList.toggle('rig-popover-wide', tab === 'commands');
     if (tab === 'commands') loadRigCommandTable();
+    if (tab === 'presets') rigPresetsLoad();
   });
 });
+
+// --- Rig presets (lib/rig-presets.js) ---
+// Named TX power / RF gain / AF gain sets for the ACTIVE rig. Main owns the
+// list (settings.rigPresets, per rig) and the family map; this tab renders
+// the payload it sends, applies by id, and saves whole lists back. The same
+// payload drives the VFO window, ECHOCAT Web and the app.
+const rigTabPresets = document.getElementById('rig-tab-presets');
+const rigPresetListEl = document.getElementById('rig-preset-list');
+const rigPresetByModeEl = document.getElementById('rig-preset-bymode');
+const rigPresetEditor = document.getElementById('rig-preset-editor');
+const rigPresetCapsNote = document.getElementById('rig-preset-caps-note');
+let rigPresetsData = { presets: [], byMode: {}, caps: {}, details: {}, families: [], familyLabels: {} };
+let rigPresetEditingId = null; // null = new
+
+function rigPresetsLoad() {
+  if (!window.api.rigPresetsGet) return;
+  window.api.rigPresetsGet().then((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } }).catch(() => {});
+}
+if (window.api.onRigPresetsChanged) window.api.onRigPresetsChanged((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } });
+
+function rigPresetsRender() {
+  const d = rigPresetsData;
+  const caps = d.caps || {};
+  const anyCap = !!(caps.txpower || caps.rfgain || caps.afgain);
+  rigPresetCapsNote.classList.toggle('hidden', anyCap);
+  rigPresetCapsNote.textContent = anyCap ? '' : 'This radio reports no adjustable TX power, RF gain or AF gain, so a preset has nothing to set here. Presets are kept per rig.';
+  // List
+  rigPresetListEl.innerHTML = '';
+  if (!d.presets.length) {
+    const e = document.createElement('div'); e.className = 'rig-preset-note';
+    e.textContent = 'No presets for this rig yet. Set the radio the way you want it for a mode, then + New preset and Use current.';
+    rigPresetListEl.appendChild(e);
+  }
+  for (const p of d.presets) {
+    const det = (d.details && d.details[p.id]) || { text: '', skipped: [] };
+    const row = document.createElement('div');
+    row.className = 'rig-preset-item';
+    row.title = 'Apply "' + p.name + '"';
+    const name = document.createElement('span'); name.className = 'rig-preset-name'; name.textContent = p.name;
+    const detail = document.createElement('span'); detail.className = 'rig-preset-detail'; detail.textContent = det.text || '(nothing set)';
+    row.appendChild(name); row.appendChild(detail);
+    if (det.skipped && det.skipped.length) {
+      const sk = document.createElement('span'); sk.className = 'rig-preset-skipped'; sk.textContent = det.skipped.join(' ');
+      sk.title = 'Not available on this radio'; row.appendChild(sk);
+    }
+    const edit = document.createElement('button'); edit.innerHTML = '&#x270E;'; edit.title = 'Edit';
+    edit.addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(p); });
+    const del = document.createElement('button'); del.className = 'rig-preset-del'; del.innerHTML = '&times;'; del.title = 'Delete';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      rigPresetsSave({ presets: d.presets.filter(x => x.id !== p.id), byMode: d.byMode });
+    });
+    row.appendChild(edit); row.appendChild(del);
+    row.addEventListener('click', () => { window.api.rigPresetsApply(p.id); });
+    rigPresetListEl.appendChild(row);
+  }
+  // Family assignments
+  rigPresetByModeEl.innerHTML = '';
+  for (const fam of (d.families || [])) {
+    const lab = document.createElement('span'); lab.textContent = (d.familyLabels && d.familyLabels[fam]) || fam;
+    const sel = document.createElement('select');
+    const none = document.createElement('option'); none.value = ''; none.textContent = '— leave the radio as it is'; sel.appendChild(none);
+    for (const p of d.presets) {
+      const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o);
+    }
+    sel.value = (d.byMode && d.byMode[fam]) || '';
+    sel.addEventListener('change', () => {
+      const byMode = { ...(d.byMode || {}) };
+      if (sel.value) byMode[fam] = sel.value; else delete byMode[fam];
+      rigPresetsSave({ presets: d.presets, byMode });
+    });
+    rigPresetByModeEl.appendChild(lab); rigPresetByModeEl.appendChild(sel);
+  }
+  // Editor fields the radio cannot take are hidden (never a wrong number sent).
+  document.getElementById('rig-preset-txpower-row').style.display = caps.txpower ? '' : 'none';
+  document.getElementById('rig-preset-rfgain-row').style.display = caps.rfgain ? '' : 'none';
+  document.getElementById('rig-preset-afgain-row').style.display = caps.afgain ? '' : 'none';
+}
+
+function rigPresetsSave(data) {
+  if (!window.api.rigPresetsSave) return;
+  window.api.rigPresetsSave(data).then((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } }).catch(() => {});
+}
+
+function rigPresetOpenEditor(p) {
+  rigPresetEditingId = p ? p.id : null;
+  document.getElementById('rig-preset-name').value = p ? p.name : '';
+  document.getElementById('rig-preset-txpower').value = p && p.txPower != null ? p.txPower : '';
+  document.getElementById('rig-preset-rfgain').value = p && p.rfGain != null ? p.rfGain : '';
+  document.getElementById('rig-preset-afgain').value = p && p.afGain != null ? p.afGain : '';
+  rigPresetEditor.classList.remove('hidden');
+  document.getElementById('rig-preset-name').focus();
+}
+document.getElementById('rig-preset-new').addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(null); });
+document.getElementById('rig-preset-cancel').addEventListener('click', (e) => { e.stopPropagation(); rigPresetEditor.classList.add('hidden'); });
+document.getElementById('rig-preset-use-current').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const s = customRigState || {};
+  if (s.txPower > 0) document.getElementById('rig-preset-txpower').value = s.txPower;
+  if (s.rfGain != null) document.getElementById('rig-preset-rfgain').value = s.rfGain;
+  if (s.afGain != null) document.getElementById('rig-preset-afgain').value = s.afGain;
+});
+document.getElementById('rig-preset-save').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const name = document.getElementById('rig-preset-name').value.trim();
+  if (!name) { document.getElementById('rig-preset-name').focus(); return; }
+  const num = (id) => { const v = document.getElementById(id).value; return v === '' ? undefined : Number(v); };
+  const edited = { id: rigPresetEditingId || undefined, name, txPower: num('rig-preset-txpower'), rfGain: num('rig-preset-rfgain'), afGain: num('rig-preset-afgain') };
+  const list = rigPresetsData.presets.slice();
+  const i = list.findIndex(x => x.id === rigPresetEditingId);
+  if (i >= 0) list[i] = { ...list[i], ...edited }; else list.push(edited);
+  rigPresetEditor.classList.add('hidden');
+  rigPresetsSave({ presets: list, byMode: rigPresetsData.byMode });
+});
+// Keystrokes inside the editor must not reach the popover's close/keyboard handlers.
+rigPresetEditor.addEventListener('click', (e) => e.stopPropagation());
+rigPresetEditor.addEventListener('keydown', (e) => e.stopPropagation());
 
 // --- Custom CAT Buttons ---
 const rigCustomSlotsContainer = document.getElementById('rig-custom-slots');

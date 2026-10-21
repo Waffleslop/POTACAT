@@ -661,6 +661,8 @@ const GLOBAL_KEYS = new Set([
   'profiles',          // (reserved — currently unused but reserved against name collision)
   'rigs',              // rig hardware definitions
   'activeRigId',       // last-selected rig (global default)
+  'rigPresets',        // named TX power / RF gain / AF gain sets, per rig (lib/rig-presets.js)
+  'rigPresetByMode',   // { rigId|'*': { ssb|cw|digital|fm|am: presetId } } — applied on a mode-family change
   'remoteShackAudio',  // this PC's speaker/mic/volume/PTT key for a remote shack (machine devices)
   'echocatMultiClient', // this shack lets the owner's devices connect together (server property)
   'firstRun',          // first-time-launch flag
@@ -2141,6 +2143,7 @@ function setTypedCall(source, call) {
   if (remoteServer && remoteServer.running) remoteServer.sendTypedCall(now);
 }
 let _currentRfGain = 0;
+let _currentAfGain = null; // 0–100, the last AF level POTACAT SENT — no CAT protocol here reads it back
 let _currentSquelch = 0; // FM squelch threshold 0-100 (see applyRigControl 'set-squelch')
 let _currentTxPower = 0; // 0 = unknown until radio reports actual power
 let _vfoLocked = false;  // VFO lock — blocks tune requests from spots/table/map
@@ -2472,6 +2475,9 @@ function getRigCapabilities(rigType) {
   // A band scope from a separate SDR (lib/sdr-scope.js) gives ANY rig one —
   // the same flag, so the More menu, ECHOCAT Web and the app light up.
   if (!caps.nativeScope && sdrScopeSettingsForActiveRig().enabled) caps.nativeScope = 'sdr';
+  // AF (speaker) level: the Flex slice's audio_level, or a codec with
+  // setAfGain (CI-V 14 01, Kenwood/Yaesu AG, rigctld L AF). Set-only.
+  caps.afgain = rigSupportsAfGain(rigType);
   return caps;
 }
 
@@ -3168,6 +3174,7 @@ function sendCatMode(mode) {
   // The SSTV window compares it with where a picture was heard (reply bar).
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-mode', mode);
   _currentMode = mode; // keep real mode internally for CAT
+  rigPresetOnMode(mode); // the one mode sink: a family change may apply a rig preset
   // Don't clear mode suppress — handleRemotePtt sets a long suppress during
   // SSB-over-DATA transitions to prevent ECHOCAT from seeing transient DATA modes
   sendVfoState();
@@ -3188,6 +3195,210 @@ function sendCatMode(mode) {
 // S/SWR/ALC, which have no hold, moved perfectly). One read period of hold
 // still bridges a CW gap.
 const _fwdPowerHold = require('./lib/meter-peak-hold').createPeakHold({ holdMs: 350, decayPerSec: 0.9 });
+
+// ─── Rig presets (lib/rig-presets.js) ───────────────────────────────────────
+// A named TX power / RF gain / AF gain set, applied by a tap on any surface
+// (Rig menu, VFO window, ECHOCAT Web, the app) or by itself when the rig's
+// mode moves into a family the operator assigned it to. The case that asked
+// for it: SSB hunting at 100 W, then an FT8 session started from a phone at
+// the same 100 W. The decision is pure (decideModePreset); this is the glue.
+const RigPresets = require('./lib/rig-presets');
+let _rigPresetFamily = null;   // the mode family last SETTLED on (null until the first mode)
+let _rigPresetPending = null;  // { preset, family } waiting for the mode to settle
+let _rigPresetTimer = null;
+const RIG_PRESET_SETTLE_MS = 1500;
+
+function rigSupportsAfGain(rigType) {
+  if (rigType === 'flex') return true;
+  if (rigType === 'none') return false;
+  if (cat && cat._codec && typeof cat._codec.setAfGain === 'function') return true;
+  return rigType === 'rigctld' || rigType === 'icom' || rigType === 'kenwood' || rigType === 'yaesu';
+}
+
+function rigPresetCaps() {
+  const caps = getRigCapabilities(detectRigType()) || {};
+  return { txpower: !!caps.txpower, rfgain: !!caps.rfgain, afgain: !!caps.afgain };
+}
+
+/** What every surface renders: the active rig's presets, its family map,
+ *  the rig id the list is for, and which levels this radio takes. */
+function rigPresetsPayload() {
+  const rigId = settings.activeRigId || null;
+  const all = RigPresets.sanitizePresets(settings.rigPresets);
+  const caps = rigPresetCaps();
+  const presets = RigPresets.presetsForRig(all, rigId);
+  const details = {};
+  for (const p of presets) details[p.id] = RigPresets.describePreset(p, caps);
+  return {
+    presets,
+    byMode: RigPresets.byModeForRig(settings.rigPresetByMode, rigId),
+    rigId,
+    caps,
+    details, // id → { text: '60 W · RF 50%', skipped: ['AF 0%'] } so every surface shows one wording
+    families: RigPresets.FAMILIES,
+    familyLabels: RigPresets.FAMILY_LABELS,
+  };
+}
+
+function rigPresetsBroadcast() {
+  const payload = rigPresetsPayload();
+  if (win && !win.isDestroyed()) win.webContents.send('rig-presets-changed', payload);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('rig-presets-changed', payload);
+  if (remoteServer && remoteServer.running && typeof remoteServer.sendRigPresets === 'function') remoteServer.sendRigPresets(payload);
+}
+
+/**
+ * Save a list edited on one surface. The surface holds the ACTIVE rig's
+ * presets and family map; presets of other rigs are kept untouched. A new
+ * preset without a rig is stamped with the active rig — 60 W means something
+ * different on the next radio.
+ */
+function saveRigPresets({ presets, byMode }, origin) {
+  const rigId = settings.activeRigId || null;
+  const key = RigPresets.rigKey(rigId);
+  const existing = RigPresets.sanitizePresets(settings.rigPresets);
+  const others = existing.filter(p => p.rigId && p.rigId !== String(rigId));
+  // A preset that already exists without a rig stays any-rig (an echo from a
+  // surface must not pull it out of the other rigs' lists); only a NEW one
+  // without a rig is stamped with the active rig.
+  const anyRigIds = new Set(existing.filter(p => !p.rigId).map(p => p.id));
+  const incoming = RigPresets.sanitizePresets(presets).map(p => (rigId && !p.rigId && !anyRigIds.has(p.id)) ? { ...p, rigId: String(rigId) } : p);
+  const merged = others.concat(incoming);
+  const map = (settings.rigPresetByMode && typeof settings.rigPresetByMode === 'object') ? { ...settings.rigPresetByMode } : {};
+  if (byMode && typeof byMode === 'object' && !Array.isArray(byMode)) map[key] = byMode;
+  settings.rigPresets = merged;
+  settings.rigPresetByMode = RigPresets.sanitizeByMode(map, merged);
+  saveSettings(settings);
+  if (origin !== 'settings') sendCatLog(`[Rig preset] ${incoming.length} preset(s) saved for this rig (${origin})`);
+  rigPresetsBroadcast();
+}
+
+/** Apply one preset: each level the preset holds AND this radio takes goes
+ *  through the one rig-control dispatcher. `why` is for the log line. */
+function applyRigPreset(idOrPreset, origin, why) {
+  const payload = rigPresetsPayload();
+  const preset = (idOrPreset && typeof idOrPreset === 'object') ? idOrPreset : RigPresets.findPreset(payload.presets, idOrPreset);
+  if (!preset) { sendCatLog(`[Rig preset] Not applied — no preset "${idOrPreset}" for this rig`); return false; }
+  if (isRemoteMode()) { sendCatLog(`[Rig preset] "${preset.name}" not applied here — this desktop is driving a remote shack; use the shack's own presets`); return false; }
+  const cmds = RigPresets.presetCommands(preset, payload.caps);
+  const desc = RigPresets.describePreset(preset, payload.caps);
+  if (!cmds.length) {
+    sendCatLog(`[Rig preset] "${preset.name}" has nothing this radio can set${desc.skipped.length ? ` (${desc.skipped.join(', ')} not available on it)` : ''}`);
+    return false;
+  }
+  const source = origin === 'device' ? 'echocat' : 'desktop';
+  for (const c of cmds) {
+    try { applyRigControl({ action: c.action, value: c.value }, source); }
+    catch (e) { sendCatLog(`[Rig preset] ${c.action} failed: ${e.message}`); }
+  }
+  const skipped = desc.skipped.length ? `; ${desc.skipped.join(', ')} not available on this radio` : '';
+  sendCatLog(`[Rig preset] "${preset.name}" applied (${desc.text})${why ? ` — ${why}` : ''}${skipped}`);
+  if (why && win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: `Rig preset "${preset.name}": ${desc.text} — ${why}`, duration: 6000 });
+  }
+  // Every device hears about it — taps from another device included — because
+  // the phone sees power only through the readback and AF gain never (ECHOCAT
+  // review, approved by Casey). Same capability as the list ('rig-presets').
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    remoteServer.sendToClient({ type: 'rig-preset-applied', id: preset.id, name: preset.name, text: desc.text, skipped: desc.skipped, why: why || 'tap' });
+  }
+  return true;
+}
+
+function rigPresetTransmitting() {
+  if (_remoteTxState) return true;
+  if (cat && cat._transmitting) return true;
+  if (ft8Engine && ft8Engine._txActive) return true;
+  return false;
+}
+
+function rigPresetClearPending() {
+  if (_rigPresetTimer) { clearTimeout(_rigPresetTimer); _rigPresetTimer = null; }
+  _rigPresetPending = null;
+}
+
+/** Every mode the rig reports comes through here (sendCatMode). A family
+ *  change arms a short settle timer — an Icom flips USB→USB-D for the length
+ *  of a voice PTT and a tune passes through transient modes — and the preset
+ *  goes on when the new family is still there at the end of it. */
+function rigPresetOnMode(mode) {
+  const d = RigPresets.decideModePreset({
+    mode, prevFamily: _rigPresetFamily, transmitting: rigPresetTransmitting(), remote: isRemoteMode(),
+    presets: settings.rigPresets, byMode: settings.rigPresetByMode, rigId: settings.activeRigId || null,
+  });
+  if (d.reason === 'apply') {
+    if (_rigPresetPending && _rigPresetPending.family === d.family) return; // already settling
+    rigPresetClearPending();
+    _rigPresetPending = { preset: d.apply, family: d.family, tries: 0 };
+    _rigPresetTimer = setTimeout(rigPresetSettle, RIG_PRESET_SETTLE_MS);
+    return;
+  }
+  if (d.reason === 'transmitting') {
+    // Ask again after the unkey; the family is not advanced until then.
+    if (!_rigPresetTimer) _rigPresetTimer = setTimeout(() => { _rigPresetTimer = null; rigPresetOnMode(_currentMode); }, 1000);
+    return;
+  }
+  // same / first / unassigned / no-family / remote: settle on that family now.
+  if (_rigPresetPending && _rigPresetPending.family !== d.family) rigPresetClearPending();
+  _rigPresetFamily = d.family;
+}
+
+/** `force`: apply even while something reads as transmitting — the JTCAT
+ *  tx-start flush runs after the engine has set _txActive but BEFORE PTT is
+ *  keyed (lib/ft8-engine.js sets the flag, then emits tx-start), so the
+ *  levels can still go on ahead of the key-down. Found by the ECHOCAT
+ *  review: without it the flush always deferred and the first FT8 frame
+ *  after a mode change went out at the old power. */
+function rigPresetSettle(force) {
+  _rigPresetTimer = null;
+  const pending = _rigPresetPending;
+  if (!pending) return;
+  const nowFamily = RigPresets.modeFamily(_currentMode);
+  if (nowFamily !== pending.family) { rigPresetClearPending(); _rigPresetFamily = nowFamily || _rigPresetFamily; return; }
+  if (!force && rigPresetTransmitting()) {
+    // Stay pending until the unkey — a JTTY line or an SSTV picture can run
+    // minutes. Give up only after 15 min, and say so.
+    if (++pending.tries > 900) {
+      sendCatLog(`[Rig preset] "${pending.preset.name}" not applied — the radio stayed keyed for 15 min after the mode changed to ${_currentMode}; tap it to apply`);
+      rigPresetClearPending(); _rigPresetFamily = nowFamily; return;
+    }
+    _rigPresetTimer = setTimeout(rigPresetSettle, 1000);
+    return;
+  }
+  rigPresetClearPending();
+  _rigPresetFamily = nowFamily;
+  applyRigPreset(pending.preset, 'mode', `mode changed to ${_currentMode}`);
+}
+
+/** Called right before JTCAT keys: a preset still settling for the current
+ *  family goes on now rather than after the first transmission. PTT is not
+ *  down yet at this point, whatever the engine's own flag says. */
+function rigPresetFlushPending() {
+  if (!_rigPresetPending) return;
+  if (RigPresets.modeFamily(_currentMode) !== _rigPresetPending.family) return;
+  if (_rigPresetTimer) { clearTimeout(_rigPresetTimer); _rigPresetTimer = null; }
+  rigPresetSettle(true);
+}
+
+/** A digital engine (FT8/FT4/JS8/PSK/JTTY/WSPR) is starting. If the rig is
+ *  already in a data mode there is no family change to catch, so the Digital
+ *  preset is applied here. A pending one is flushed instead of applied twice. */
+function rigPresetOnEngineStart() {
+  if (isRemoteMode()) return;
+  if (_rigPresetPending) { rigPresetFlushPending(); return; }
+  if (RigPresets.modeFamily(_currentMode) !== 'digital') return; // the mode change will do it
+  const rigId = settings.activeRigId || null;
+  const map = RigPresets.byModeForRig(settings.rigPresetByMode, rigId);
+  if (!map.digital) return;
+  const preset = RigPresets.findPreset(RigPresets.presetsForRig(RigPresets.sanitizePresets(settings.rigPresets), rigId), map.digital);
+  if (!preset) return;
+  _rigPresetFamily = 'digital';
+  applyRigPreset(preset, 'mode', 'digital engine started');
+}
+
+ipcMain.handle('rig-presets-get', () => rigPresetsPayload());
+ipcMain.handle('rig-presets-save', (_e, data) => { saveRigPresets(data || {}, 'desktop'); return rigPresetsPayload(); });
+ipcMain.handle('rig-presets-apply', (_e, id) => applyRigPreset(id, 'desktop'));
 
 /** Does paddle keying on this station touch ONLY the dedicated CW Key Port?
  *  Mirrors the routing in the keyer output below: Kenwood-protocol rigs key
@@ -3457,6 +3668,7 @@ function broadcastRigState() {
     rfGain: _currentRfGain,
     squelch: _currentSquelch,
     txPower: _currentTxPower,
+    afGain: _currentAfGain,     // last SENT AF level (set-only), null until a preset or slider set one
     filterWidth: _currentFilterWidth,
     atuActive: _currentAtuState,
     mode: _currentMode,
@@ -12648,6 +12860,9 @@ function startJtcat(mode) {
   jtcatAutoCqWorkedSession.clear();
   jtcatAutoCqOwner = null;
   jtcatHuntFallbackMode = '';
+  // A digital engine starting is the moment the Digital preset is for, even
+  // when the rig already sat in a data mode (no family change to catch).
+  rigPresetOnEngineStart();
   jtcatHuntQuietPeriods = 0;
   jtcatFullAutoCq = false;
   jtcatFullAutoCqOwner = null;
@@ -13404,6 +13619,7 @@ function startJtcat(mode) {
     }
 
     const modeForTx = ft8Engine ? ft8Engine._mode : 'FT8';
+    rigPresetFlushPending(); // a preset still settling for this mode goes on BEFORE the key-down
     jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq, ft8Engine ? ft8Engine._txFreq : undefined);
     // Stamp the period this transmission goes out in — jtcatHandleRetryStall
     // counts one try per stamped TX (never per decode period). Placed after
@@ -18275,6 +18491,8 @@ function connectRemote() {
     // VFO Profiles — send current list so phone's profiles widget can render
     // immediately. Phone edits push back via 'vfo-profiles-update'.
     remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
+    // Rig presets (TX power / RF gain / AF gain sets) for the active rig.
+    remoteServer.sendRigPresets(rigPresetsPayload());
     // Sync voice macros to phone
     ensureVoiceMacroDir();
     const vmLabels = settings.voiceMacroLabels || [];
@@ -18553,6 +18771,16 @@ function connectRemote() {
       vfoPopoutWin.webContents.send('vfo-profile-applied', profile);
     }
     console.log(`[VFO Profiles] Phone applied "${profile.name || ''}" — ${profile.freqKhz} kHz ${profile.mode || ''}`);
+  });
+
+  // Rig presets from a device: a tap applies one through the same function
+  // the desktop uses; an edited list is sanitized, saved and echoed to every
+  // surface. Both are refused for a Guest Pass in the remote-server demux.
+  remoteServer.on('apply-rig-preset', ({ id }) => {
+    applyRigPreset(id, 'device');
+  });
+  remoteServer.on('rig-presets-update', ({ presets, byMode }) => {
+    saveRigPresets({ presets, byMode }, 'device');
   });
 
   // Phone requests to toggle remote CW on/off
@@ -18837,6 +19065,7 @@ function connectRemote() {
       connectCwKeyPort();
     }
     saveSettings(settings);
+    rigPresetsBroadcast(); // per-rig presets follow the switch
     if (!settings.enableWsjtx) connectCatSafe('rig switch from mobile device');
     connectSmartSdr();
     // Restart audio bridge with new rig's audio devices
@@ -21290,6 +21519,8 @@ function sendVfoState() {
     nb: _currentNbState,
     atu: _currentAtuState,
     txPower: _currentTxPower,   // lets the popout snapshot power into a VFO profile
+    rfGain: _currentRfGain,     // + RF/AF so "Save current" on a rig preset has them
+    afGain: _currentAfGain,
     vfo: _currentVfo,           // active VFO letter + split badge (LZ3AW)
     split: _currentSplit,
     // The radio states a custom CAT toggle can FOLLOW (lib/custom-cat-follow.js).
@@ -33756,6 +33987,27 @@ app.whenReady().then(() => {
         broadcastRigState();
         break;
       }
+      case 'set-af-gain': {
+        // The radio's own AF (speaker) level, 0–100. Set-only: no codec here
+        // reads it back, so _currentAfGain is what POTACAT last sent. A rig
+        // preset uses it to silence the shack speaker for FT8.
+        if (!getRigCapabilities(rigType).afgain) { sendCatLog('[CAT] AF gain is not available on this radio'); break; }
+        if (flexNeedsApi) { _flexWarnOnce('AF gain requires SmartSDR API — not connected'); break; }
+        const value = Math.max(0, Math.min(100, Number(data.value) || 0));
+        if (flexSdr()) {
+          // audio_level, never audio_mute — on 4.2.x a muted slice also loses
+          // its DAX tap (lib/smartsdr.js setSliceAudioLevel).
+          const idx = flexPttSliceIndex();
+          if (idx != null && idx >= 0) smartSdr.setSliceAudioLevel(idx, value);
+        } else if (cat && cat.connected) {
+          // rigctld's L AF takes a 0.0–1.0 fraction, like RF gain; the CI-V and
+          // Kenwood codecs take the percent.
+          cat.setAfGain(rigType === 'rigctld' ? value / 100 : value);
+        }
+        _currentAfGain = value;
+        broadcastRigState();
+        break;
+      }
       case 'set-squelch': {
         if (!getRigCapabilities(rigType).squelch) break;
         if (flexNeedsApi) { _flexWarnOnce('Squelch requires SmartSDR API — not connected'); break; }
@@ -36423,6 +36675,7 @@ app.whenReady().then(() => {
       const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
       if (rig) _applyRigEqDefault(rig);
       try { remoteServer && remoteServer.setRigModel(rig?.model || ''); } catch {}
+      rigPresetsBroadcast(); // presets are per rig: every surface shows the new rig's
     }
 
     // Reconnect CW Spots if settings changed
@@ -36552,6 +36805,11 @@ app.whenReady().then(() => {
     // and don't hit this path, so no echo loop.
     if (has('vfoProfiles') && remoteServer && remoteServer.running) {
       remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
+    }
+    // Rig presets saved through the generic settings path (the VFO window's
+    // settings sheet): sanitize and tell every surface, like the IPC save.
+    if (has('rigPresets') || has('rigPresetByMode')) {
+      saveRigPresets({ presets: settings.rigPresets, byMode: settings.rigPresetByMode }, 'settings');
     }
 
     // Reconnect CW keyer if settings changed
@@ -38320,6 +38578,7 @@ app.whenReady().then(() => {
         // handler; jtcatHandleRetryStall counts one try per stamped TX.
         engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');
         jtcatNoteTxSent(data.message);
+        rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
         handleRemotePtt(true);

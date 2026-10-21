@@ -1939,6 +1939,20 @@
           window.__vfReceiveProfiles(Array.isArray(msg.profiles) ? msg.profiles : []);
         }
         break;
+      case 'rig-presets':
+        // The active rig's presets (lib/rig-presets.js), hydrated at connect
+        // and after every change on any surface.
+        if (typeof window.__vfReceiveRigPresets === 'function') window.__vfReceiveRigPresets(msg);
+        break;
+      case 'rig-preset-applied':
+        // A preset went on (a tap here or elsewhere, or the shack on a mode
+        // change): say so, since AF gain has no readback and the power only
+        // arrives through the next status.
+        showToast('Rig preset ' + (msg.name || '') + ': ' + (msg.text || '') + (msg.why && msg.why !== 'tap' ? ' — ' + msg.why : ''), 4000);
+        break;
+      case 'rig-presets-refused':
+        showToast('A Guest Pass cannot change the rig presets', 3000, true);
+        break;
 
       case 'freedv-sync': {
         var syncEl = document.getElementById('echo-freedv-sync');
@@ -13984,7 +13998,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // overlay so we don't duplicate complex audio/playback logic.
   (function setupVfoWidgets() {
     const VFO_WIDGETS_KEY = 'echocat-vfo-widgets';
-    const WIDGET_IDS = ['meter', 'rigctl', 'filter', 'cw', 'voice', 'customcat', 'profiles'];
+    const WIDGET_IDS = ['meter', 'rigctl', 'filter', 'cw', 'voice', 'customcat', 'profiles', 'presets'];
     let widgetState = {};
     try { widgetState = JSON.parse(localStorage.getItem(VFO_WIDGETS_KEY) || '{}') || {}; } catch { widgetState = {}; }
 
@@ -14371,6 +14385,70 @@ var _paddleHoldTimer = { dit: null, dah: null };
       vfoProfiles = Array.isArray(list) ? list.slice() : [];
       renderVfProfiles();
     };
+
+    // ----- Rig presets widget (lib/rig-presets.js) -----
+    // The desktop sends { type:'rig-presets', presets, byMode, rigId, caps,
+    // details } for the ACTIVE rig; a tap sends apply-rig-preset {id}; Save
+    // sends the whole list back as rig-presets-update (new entries are
+    // stamped with the active rig on the desktop). Levels and the mode
+    // assignments are edited on the desktop's Rig menu.
+    let rigPresets = { presets: [], byMode: {}, caps: {}, details: {} };
+    const vfPresetList = document.getElementById('vf-preset-list');
+    const vfPresetNameInput = document.getElementById('vf-preset-name');
+    const vfPresetSaveBtn = document.getElementById('vf-preset-save');
+
+    function renderVfPresets() {
+      if (!vfPresetList) return;
+      if (!rigPresets.presets.length) {
+        vfPresetList.innerHTML = '<div class="vf-profile-empty">No rig presets. Set the radio, name it, tap Save. Edit on the desktop Rig menu.</div>';
+        return;
+      }
+      vfPresetList.innerHTML = '';
+      rigPresets.presets.forEach((p) => {
+        const det = (rigPresets.details && rigPresets.details[p.id]) || {};
+        const row = document.createElement('div');
+        row.className = 'vf-profile-item';
+        const name = document.createElement('span'); name.className = 'vf-profile-item-name'; name.textContent = p.name;
+        const detail = document.createElement('span'); detail.className = 'vf-profile-item-detail'; detail.textContent = det.text || '(nothing set)';
+        row.appendChild(name); row.appendChild(detail);
+        const del = document.createElement('button'); del.type = 'button'; del.className = 'vf-profile-item-del'; del.textContent = '×'; del.title = 'Delete';
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          ws.send(JSON.stringify({ type: 'rig-presets-update', presets: rigPresets.presets.filter(x => x.id !== p.id), byMode: rigPresets.byMode }));
+        });
+        row.appendChild(del);
+        row.addEventListener('click', () => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          ws.send(JSON.stringify({ type: 'apply-rig-preset', id: p.id }));
+        });
+        vfPresetList.appendChild(row);
+      });
+    }
+    if (vfPresetSaveBtn) {
+      vfPresetSaveBtn.addEventListener('click', () => {
+        const name = (vfPresetNameInput && vfPresetNameInput.value || '').trim();
+        if (!name) { if (vfPresetNameInput) vfPresetNameInput.focus(); return; }
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        // The radio's current levels as this page knows them — the rig-control
+        // sliders, fed by status.txpower / status.rfgain. Power 0 = unknown.
+        const p = { name };
+        const tp = rcTxPowerSlider ? Number(rcTxPowerSlider.value) : 0;
+        const rg = rcRfGainSlider ? Number(rcRfGainSlider.value) : NaN;
+        if (Number.isFinite(tp) && tp > 0) p.txPower = tp;
+        if (Number.isFinite(rg) && rigPresets.caps && rigPresets.caps.rfgain) p.rfGain = rg;
+        ws.send(JSON.stringify({ type: 'rig-presets-update', presets: rigPresets.presets.concat([p]), byMode: rigPresets.byMode }));
+        if (vfPresetNameInput) vfPresetNameInput.value = '';
+      });
+    }
+    window.__vfReceiveRigPresets = function(msg) {
+      rigPresets = {
+        presets: Array.isArray(msg.presets) ? msg.presets.slice() : [],
+        byMode: msg.byMode || {}, caps: msg.caps || {}, details: msg.details || {},
+      };
+      renderVfPresets();
+    };
+    renderVfPresets();
 
     // First paint
     applyVisibility();

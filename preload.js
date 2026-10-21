@@ -601,6 +601,11 @@ contextBridge.exposeInMainWorld('api', {
   uninstallLauncher: () => ipcRenderer.invoke('uninstall-launcher'),
   // Rig Control Panel
   rigControl: (data) => ipcRenderer.invoke('rig-control', data),
+  // Rig presets (TX power / RF gain / AF gain sets, lib/rig-presets.js)
+  rigPresetsGet: () => ipcRenderer.invoke('rig-presets-get'),
+  rigPresetsSave: (data) => ipcRenderer.invoke('rig-presets-save', data),
+  rigPresetsApply: (id) => ipcRenderer.invoke('rig-presets-apply', id),
+  onRigPresetsChanged: (cb) => ipcRenderer.on('rig-presets-changed', (_e, payload) => cb(payload)),
   getRigCommands: () => ipcRenderer.invoke('get-rig-commands'),
   saveRigCommandOverride: (key, value) => ipcRenderer.invoke('save-rig-command-override', { key, value }),
   resetAllRigCommands: () => ipcRenderer.invoke('reset-all-rig-commands'),

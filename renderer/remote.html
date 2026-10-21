@@ -306,6 +306,17 @@
           </div>
           <div id="vf-profile-list" class="vf-profile-list"></div>
         </div>
+        <!-- Rig presets — named TX power / RF gain / AF gain sets for the
+             active rig (lib/rig-presets.js). Tap to apply; Save captures the
+             radio's current levels. Editing levels and the mode-family
+             assignments are on the desktop's Rig menu. -->
+        <div class="vf-widget hidden" data-vf-widget="presets">
+          <div class="vf-profile-add">
+            <input type="text" id="vf-preset-name" placeholder="Preset name (e.g. FT8)" autocomplete="off" maxlength="40">
+            <button type="button" id="vf-preset-save" class="vf-rig-btn">Save</button>
+          </div>
+          <div id="vf-preset-list" class="vf-profile-list"></div>
+        </div>
       </div>
       <div class="vf-ptt-row">
         <button type="button" id="vf-ptt" class="vf-ptt-btn">PTT</button>
@@ -680,6 +691,10 @@
         <div class="so-row" title="Saved frequency/mode/filter profiles. Tap to apply; saves sync to the desktop VFO popout.">
           <label class="so-label">Profiles</label>
           <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-profiles">Off</button></div>
+        </div>
+        <div class="so-row" title="Rig presets: TX power, RF gain and AF gain in one tap, wherever the radio is tuned. Edit them and assign them to modes on the desktop's Rig menu.">
+          <label class="so-label">Rig presets</label>
+          <div class="so-controls"><button type="button" class="rc-btn rc-toggle" id="so-vfw-presets">Off</button></div>
         </div>
 
         <!-- CW Keyer settings -->

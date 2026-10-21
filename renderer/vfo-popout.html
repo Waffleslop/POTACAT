@@ -495,6 +495,7 @@
       <div class="section vfo-section" id="sec-profiles-inline" style="display:none">
         <div class="lbl">Profiles</div>
         <div class="profile-list" id="profile-list-inline"></div>
+        <div class="profile-list" id="rig-preset-list-inline" style="margin-top:6px;"></div>
       </div>
 
       <div class="card tool-card widget-section" id="widget-cw-controls">
@@ -671,6 +672,16 @@
         <div class="profile-empty">No profiles yet. Tune to a frequency and save it above.</div>
       </div>
 
+      <span class="lbl">Rig presets</span>
+      <div class="order-note">TX power, RF gain and AF gain in one tap, wherever the radio is tuned. Edit a preset or have one apply itself on a mode change in the main window's Rig menu, Presets tab.</div>
+      <div class="profile-add-row">
+        <input type="text" id="rig-preset-name-input" placeholder="Preset name (e.g. FT8)" maxlength="40">
+        <button id="rig-preset-save-btn" title="Save the radio's current TX power, RF gain and AF gain">Save current</button>
+      </div>
+      <div class="profile-list" id="rig-preset-list" style="margin-top:8px;">
+        <div class="profile-empty">No rig presets yet.</div>
+      </div>
+
       <span class="lbl">Bands</span>
       <div class="band-checkboxes" id="band-checkboxes"></div>
 
@@ -720,6 +731,8 @@ function tuneFromPopout(freqKhz, mode, bearing, slicePort) {
 }
 let currentFilterWidth = 0;
 let currentTxPower = null; // watts — tracked from vfo-radio-state so profiles can snapshot it
+let currentRfGain = null;  // 0–100, from vfo-radio-state (rig presets "Save current")
+let currentAfGain = null;  // 0–100, the last AF level main SENT (set-only); null = never set
 let profiles = [];
 let profileDragFrom = null; // index of the profile being dragged (drag-to-reorder)
 let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
@@ -901,6 +914,8 @@ window.api.onRadioState((s) => {
     updateFilterQuickHighlight();
   }
   if (s.txPower != null) currentTxPower = s.txPower; // so "Save profile" can snapshot it
+  if (s.rfGain != null) currentRfGain = s.rfGain;   // + RF/AF for "Save current" on a rig preset
+  if (s.afGain !== undefined) currentAfGain = s.afGain;
   if (s.nb != null) {
     nbOn = s.nb;
     document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
@@ -1735,6 +1750,69 @@ async function saveProfiles() {
   await window.api.saveSettings({ vfoProfiles: profiles });
   renderInlineProfiles();
 }
+
+// --- Rig presets (lib/rig-presets.js) ---
+// Main owns the list for the ACTIVE rig; this window lists them (tap =
+// apply), saves the radio's current levels under a name, and deletes.
+// Editing levels and the mode-family assignments live in the main window's
+// Rig menu. The payload carries `details[id]` so the wording matches there.
+let rigPresets = { presets: [], byMode: {}, caps: {}, details: {} };
+function rigPresetDetail(p) {
+  const d = rigPresets.details && rigPresets.details[p.id];
+  return d && d.text ? d.text : '(nothing set)';
+}
+function renderRigPresets() {
+  const targets = [document.getElementById('rig-preset-list'), document.getElementById('rig-preset-list-inline')];
+  for (const list of targets) {
+    if (!list) continue;
+    const inline = list.id === 'rig-preset-list-inline';
+    if (!rigPresets.presets.length) {
+      list.innerHTML = inline ? '' : '<div class="profile-empty">No rig presets yet.</div>';
+      continue;
+    }
+    list.innerHTML = '';
+    rigPresets.presets.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'profile-item';
+      item.title = 'Apply "' + p.name + '"';
+      item.innerHTML = `
+        <span class="profile-name">${esc(p.name)}</span>
+        <span class="profile-detail">${esc(rigPresetDetail(p))}</span>
+        ${inline ? '' : '<button class="profile-del" title="Delete preset">&times;</button>'}
+      `;
+      item.addEventListener('click', (e) => {
+        if (e.target.closest('.profile-del')) return;
+        if (window.api.rigPresetsApply) window.api.rigPresetsApply(p.id);
+      });
+      const del = item.querySelector('.profile-del');
+      if (del) del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.api.rigPresetsSave({ presets: rigPresets.presets.filter(x => x.id !== p.id), byMode: rigPresets.byMode })
+          .then((pl) => { if (pl) { rigPresets = pl; renderRigPresets(); } });
+      });
+      list.appendChild(item);
+    });
+  }
+}
+if (window.api.rigPresetsGet) {
+  window.api.rigPresetsGet().then((pl) => { if (pl) { rigPresets = pl; renderRigPresets(); } }).catch(() => {});
+}
+if (window.api.onRigPresetsChanged) {
+  window.api.onRigPresetsChanged((pl) => { if (pl) { rigPresets = pl; renderRigPresets(); } });
+}
+document.getElementById('rig-preset-save-btn').addEventListener('click', () => {
+  const input = document.getElementById('rig-preset-name-input');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  // Only levels the radio has reported: power 0 = unknown, AF only if ever sent.
+  const p = { name };
+  if (currentTxPower > 0) p.txPower = currentTxPower;
+  if (currentRfGain != null) p.rfGain = currentRfGain;
+  if (currentAfGain != null) p.afGain = currentAfGain;
+  window.api.rigPresetsSave({ presets: rigPresets.presets.concat([p]), byMode: rigPresets.byMode })
+    .then((pl) => { if (pl) { rigPresets = pl; renderRigPresets(); } });
+  input.value = '';
+});
 
 // Listen for profile-list changes initiated elsewhere (typically the
 // ECHOCAT phone's VFO Profiles widget). Re-render both the tab and the

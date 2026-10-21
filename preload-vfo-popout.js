@@ -80,6 +80,11 @@ contextBridge.exposeInMainWorld('api', {
   // window) edits settings.vfoProfiles. Fires after a save() or delete on
   // the phone-side widget; lets the popout re-render without a manual reload.
   onVfoProfilesChanged: (cb) => ipcRenderer.on('vfo-profiles-changed', (_e, list) => cb(list)),
+  // Rig presets (TX power / RF gain / AF gain sets, lib/rig-presets.js)
+  rigPresetsGet: () => ipcRenderer.invoke('rig-presets-get'),
+  rigPresetsSave: (data) => ipcRenderer.invoke('rig-presets-save', data),
+  rigPresetsApply: (id) => ipcRenderer.invoke('rig-presets-apply', id),
+  onRigPresetsChanged: (cb) => ipcRenderer.on('rig-presets-changed', (_e, payload) => cb(payload)),
   minimize: () => ipcRenderer.send('vfo-popout-minimize'),
   maximize: () => ipcRenderer.send('vfo-popout-maximize'),
   close: () => ipcRenderer.send('vfo-popout-close'),
