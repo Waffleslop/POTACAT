@@ -171,6 +171,22 @@ async function connected(rc) {
   const audioRow = ga2.filter(m => m.type === 'clients-list').pop();
   check(audioRow && audioRow.clients.filter(c => c.audio).length === 1 && !audioRow.clients.find(c => c.you).audio, 'presence says which device has the audio');
 
+  // auth-ok says who has the audio, so a newcomer need not take it
+  {
+    const c3 = client(PORT + 1, fp, TOKEN, 'tablet');
+    const info = await new Promise((resolve) => { c3.once('connected', resolve); c3.connect(); setTimeout(() => resolve(null), 6000); });
+    check(info && info.audioHeldBy && info.audioHeldBy.platform === 'ios', 'auth-ok carries audioHeldBy (the device holding the bridge)');
+    c3.close();
+    await sleep(200);
+    const srv = rs;
+    const self = { readyState: 1, _pairedDevice: { id: 'same' } };
+    srv._audioWs = { readyState: 1, _pairedDevice: { id: 'same' } };
+    check(srv._audioHeldByFor(self) === null, 'null when the holder is this same device reconnecting');
+    srv._audioWs = { readyState: 1, _passSession: { code: 'g' } };
+    check(srv._audioHeldByFor(self) === null, 'null when the holder is a Guest Pass');
+    srv._audioWs = b._ws ? [...srv._clients].find(c => c._clientPlatform === 'ios') : null;
+  }
+
   // jtcat-owner 'shack' goes to the device that ran FT8, not to everyone
   ga2.length = 0; gb.length = 0;
   a2.sendRaw({ type: 'jtcat-start', mode: 'FT8' });

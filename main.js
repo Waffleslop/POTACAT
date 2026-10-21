@@ -5183,6 +5183,7 @@ function remoteShackInfoNow() {
     radioConnected: remoteRig.catConnected(),
     audioSilent: !!info.audioSilent,
     audioElsewhere: !!info.audioElsewhere,
+    audioHolder: info.audioHolder || '',
     alsoConnected: Array.isArray(info.alsoConnected) ? info.alsoConnected : [],
     audio: remoteShackAudioPrefs(),
     stationCallsign: target.stationCallsign || null,
@@ -5654,6 +5655,7 @@ function ensureRemoteClient() {
         accountLinked: !!info.accountLinked,
         trusted: !!info.trusted,
         passSession: info.passSession || null,
+        audioHeldBy: info.audioHeldBy || null,
       });
       win.webContents.send('cat-status', { connected: true, mode: '', freq: 0 });
     }
@@ -5677,7 +5679,9 @@ function ensureRemoteClient() {
     // A fresh session: drop the previous one's snapshot so its caps cannot
     // light controls this shack's radio lacks; the first status refills it.
     remoteRig.reset();
-    remoteShackInfo = null;
+    // Another of the owner's devices already has the audio: say so on the chip
+    // and turn the speaker button into "Operate from this device".
+    remoteShackInfo = info.audioHeldBy ? { audioElsewhere: true, audioHolder: String(info.audioHeldBy.name || '') } : null;
     pushRemoteShackInfo();
     if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true });
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
@@ -5825,8 +5829,8 @@ function ensureRemoteClient() {
       case 'audio-moved': {
         const message = String(msg.message || 'The shack audio moved to another device.');
         sendCatLog('[remote-client-audio] ' + message);
-        if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: message + ' Click the speaker beside HOLD TO TALK to bring it back here.', duration: 9000 });
-        remoteShackInfo = { ...(remoteShackInfo || {}), audioElsewhere: true };
+        if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: message + ' Click Operate from this device (beside HOLD TO TALK) to take it back.', duration: 9000 });
+        remoteShackInfo = { ...(remoteShackInfo || {}), audioElsewhere: true, audioHolder: String((msg.by && msg.by.name) || '') };
         pushRemoteShackInfo();
         break;
       }
@@ -30501,6 +30505,7 @@ app.whenReady().then(() => {
       // teardown that closes it itself clears the flag first). The session is
       // over — without this its flag outlived the engine.
       if (autoIdleJtcatActive) markUserActive();
+      if (js8Engine()) js8AudioFeed(true); // its worklet was the JS8 engine's audio; the main window takes over
       if (isRemoteMode()) {
         // As locally: closing the window clears its QSO and halts TX, here on the shack.
         if (isRemoteLinked()) {
@@ -30510,7 +30515,6 @@ app.whenReady().then(() => {
         }
         _remoteJtcatMode = '';
       }
-      if (js8Engine()) js8AudioFeed(true); // its worklet was the JS8 engine's audio; the main window takes over
       yaesuScopeJtcatWants = false;
       if (!yaesuScopeWanted()) { try { stopYaesuScope('JTCAT window closed'); } catch { /* not running */ } }
       // Clear popout QSO state and halt TX so engine doesn't keep transmitting

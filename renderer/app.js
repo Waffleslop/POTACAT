@@ -7540,11 +7540,24 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     const outSel = document.getElementById('remote-shack-output');
     const inSel = document.getElementById('remote-shack-input');
     const keySel = document.getElementById('remote-shack-ptt-key');
+    // The audio is on another of your devices: the speaker button becomes the
+    // way to take it (the same words the app uses).
+    let _lastShackInfo = null;
+    const showAudioElsewhere = (src) => {
+      if (!muteEl) return;
+      const r = src || remoteShack;
+      if (r && r.audioElsewhere) {
+        muteEl.textContent = 'Operate from this device';
+        muteEl.title = 'The shack audio is on ' + (r.audioHolder || 'another device') + '. Click to take it.';
+        if (volEl) volEl.classList.add('hidden');
+      } else if (volEl) volEl.classList.remove('hidden');
+    };
     const applyAudioPrefs = (p) => {
       if (!p) return;
       _pttKey = p.pttKey || '';
       if (volEl && document.activeElement !== volEl) volEl.value = String(Math.round((p.volume == null ? 1 : p.volume) * 100));
       if (muteEl) { muteEl.textContent = p.muted ? '🔇' : '🔊'; muteEl.title = p.muted ? 'Unmute the shack audio' : 'Mute the shack audio'; }
+      showAudioElsewhere(_lastShackInfo);
       if (keySel) keySel.value = _pttKey;
       if (outSel) outSel.dataset.want = p.outputId || '';
       if (inSel) inSel.dataset.want = p.inputId || '';
@@ -7581,13 +7594,14 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     };
     if (window.api.remoteShackAudioGet) {
       window.api.remoteShackAudioGet().then((p) => { applyAudioPrefs(p); fillDevices(); }).catch(() => {});
-      if (window.api.onRemoteShackInfo) window.api.onRemoteShackInfo((info) => { if (info && info.audio) applyAudioPrefs(info.audio); });
+      if (window.api.onRemoteShackInfo) window.api.onRemoteShackInfo((info) => { _lastShackInfo = info || null; if (info && info.audio) applyAudioPrefs(info.audio); else showAudioElsewhere(info); });
       if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', fillDevices);
       const set = (patch) => window.api.remoteShackAudioSet(patch).then(applyAudioPrefs).catch(() => {});
       if (volEl) volEl.addEventListener('input', () => set({ volume: Number(volEl.value) / 100, muted: false }));
       if (muteEl) muteEl.addEventListener('click', () => {
         // The audio went to another device: this click brings it back here.
-        if (remoteShack && remoteShack.audioElsewhere && window.api.remoteClientAudioReclaim) { window.api.remoteClientAudioReclaim(); return; }
+        const r = _lastShackInfo || remoteShack;
+        if (r && r.audioElsewhere && window.api.remoteClientAudioReclaim) { window.api.remoteClientAudioReclaim(); return; }
         set({ muted: muteEl.textContent !== '🔇' });
       });
       if (outSel) outSel.addEventListener('change', () => { outSel.dataset.want = outSel.value; set({ outputId: outSel.value }); });
@@ -7597,7 +7611,12 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     let _racOn = false;
     window.api.onRemoteClientStatus((s) => {
       const connected = !!(s && s.state === 'connected');
-      if (connected && !_racOn) {
+      // Another of your devices is listening to the shack: don't take the audio
+      // from it on connect. The speaker button beside HOLD TO TALK brings it here.
+      if (connected && !_racOn && s.audioHeldBy) {
+        _racOn = true;
+        showLogToast('The shack audio is on ' + (s.audioHeldBy.name || 'another device') + '. Click Operate from this device (beside HOLD TO TALK) to take it.', { duration: 9000 });
+      } else if (connected && !_racOn) {
         _racOn = true;
         window.api.remoteClientAudioStart().catch(() => {});
       } else if (!connected && _racOn) {
