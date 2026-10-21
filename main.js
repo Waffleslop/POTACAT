@@ -28601,13 +28601,31 @@ app.whenReady().then(() => {
   // truth — Tailscale state is read via lib/remote-server's
   // tailscaleStatus() shell-out + lib/cloud-tunnel's getCloudHost().
   // Recomputed at startup, on cloudTunnel 'change', and every 10 min.
+  let _altHostsNoteLogged = '';
   function _refreshAltHosts() {
     if (!remoteServer) return;
     let tsHost = '';
     let tsIp = '';
     try {
-      const { tailscaleStatus } = require('./lib/remote-server');
+      const { tailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces } = require('./lib/remote-server');
       const ts = tailscaleStatus();
+      // The CLI is not the only evidence. A tailnet address on an interface
+      // means this PC is on a tailnet whatever the CLI said, and that
+      // address is what a phone dials (pinned, so no name is needed). Before
+      // this, a Linux shack whose `tailscale` command POTACAT could not run
+      // published no Tailscale leg at all: pairing worked on the LAN and
+      // nowhere else, and nothing said why.
+      if (!(ts && ts.loggedIn)) {
+        const ifIp = tailnetIpFromInterfaces();
+        if (ifIp) {
+          const port = settings.remotePort || 7300;
+          tsIp = ifIp + ':' + port;
+          const probe = tailscaleProbeState();
+          const why = ts ? `Tailscale reports ${ts.backendState || 'not running'}` : `POTACAT could not run the tailscale command (${probe.error || 'not found'})`;
+          const line = `[alt-hosts] This PC is on a Tailscale network at ${ifIp}, but ${why}. Phones and other POTACATs will reach it at ${tsIp}; for its MagicDNS name as well, make the tailscale command available to POTACAT.`;
+          if (line !== _altHostsNoteLogged) { _altHostsNoteLogged = line; sendCatLog(line); }
+        }
+      }
       if (ts && ts.loggedIn && ts.hostname) {
         const port = settings.remotePort || 7300;
         tsHost = ts.hostname.replace(/\.$/, '') + ':' + port;
@@ -34421,9 +34439,11 @@ app.whenReady().then(() => {
   // for the Settings UI status display and as a manual "renew"
   // hook when a user wants to force a refresh.
   ipcMain.handle('echocat-tailscale-status', async () => {
-    const { tailscaleStatus, loadCachedTailscaleCert } = require('./lib/remote-server');
+    const { tailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces, loadCachedTailscaleCert } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
     const ts = tailscaleStatus();
+    const probe = tailscaleProbeState();
+    const ipFromInterfaces = tailnetIpFromInterfaces();
     // Pass the current hostname so a cert left over from a renamed
     // tailnet/device reads as "not set up" in the Settings UI.
     const cached = loadCachedTailscaleCert(certDir, ts && ts.loggedIn && ts.hostname ? ts.hostname : null);
@@ -34436,6 +34456,10 @@ app.whenReady().then(() => {
       certCached: !!cached,
       certExpiresAt: cached ? cached.validTo.toISOString() : null,
       daysLeft: cached ? Math.floor(cached.daysLeft) : null,
+      // The tailnet address seen on this PC's interfaces (null = none), and
+      // why the CLI gave nothing: the card tells the operator which it is.
+      ipFromInterfaces: ipFromInterfaces || null,
+      cliError: ts ? '' : (probe.error || ''),
     };
   });
 
@@ -34658,7 +34682,9 @@ app.whenReady().then(() => {
       sendCatLog('[Pair QR] PNG render failed: ' + err.message);
       if (!qrError) qrError = err.message;
     }
-    sendCatLog(`[Pair QR] OK — host=${wsUrl}${cloudHost ? ' cloudHost=' + cloudHost : ''} fp=${fingerprint ? fingerprint.slice(0, 16) + '…' : 'none'} svg=${svg ? 'yes' : 'no'} png=${dataUrl ? 'yes' : 'no'}${qrError && !(svg || dataUrl) ? ' qrError=' + qrError : ''}`);
+    // Every leg the QR carries: a phone pairing away from the LAN can only
+    // use what is listed here, so a bug report shows what it had.
+    sendCatLog(`[Pair QR] OK — mode=${effectiveMode} lan=${effectiveMode === 'cloud' ? 'none' : wsUrl} tailscale=${tsHost || tsIp ? [tsHost, tsIp].filter(Boolean).join(' / ') : 'none'} cloud=${cloudHost || 'none'} fp=${fingerprint ? fingerprint.slice(0, 16) + '…' : 'none'} svg=${svg ? 'yes' : 'no'} png=${dataUrl ? 'yes' : 'no'}${qrError && !(svg || dataUrl) ? ' qrError=' + qrError : ''}`);
     return {
       qrText,
       dataUrl,

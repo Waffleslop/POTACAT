@@ -6083,7 +6083,14 @@ async function echocatRefreshTailscaleStatus() {
   // Each branch points the user at exactly the next thing to fix.
   // Deep links go straight to the correct admin page so users
   // don't have to hunt through Tailscale's docs.
-  if (!s.installed) {
+  if (!s.installed && s.ipFromInterfaces) {
+    // On a tailnet, but POTACAT cannot run the CLI: pairing still carries the
+    // address, only the MagicDNS name and the public cert need the command.
+    echocatTsStatus.innerHTML =
+      'Tailscale: this PC is on a tailnet at <b>' + _esc(s.ipFromInterfaces) + '</b>, but POTACAT could not run the <code>tailscale</code> command'
+      + (s.cliError ? ' (' + _esc(s.cliError) + ')' : '') + '. Phones will reach this PC by that address. '
+      + 'For the MagicDNS name and a public certificate too, make the <code>tailscale</code> command available to POTACAT (on Linux, install the CLI package or add it to PATH).';
+  } else if (!s.installed) {
     echocatTsStatus.innerHTML =
       'Tailscale not detected. <a href="https://tailscale.com/download" target="_blank" style="color:#4fc3f7;">Install Tailscale</a> for iOS app pairing.';
     return;
