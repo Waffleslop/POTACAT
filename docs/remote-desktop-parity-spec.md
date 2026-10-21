@@ -4,6 +4,16 @@
 
 **The report that prompted it** (Ride1226, Discord 2026-10-21): a second POTACAT at work, paired to the shack at home, shows HOLD TO TALK but "the cat controls for my radio back home aren't lighting up". He also looked for docs and found none.
 
+## Build status (2026-10-21, end of the build session)
+
+Committed on master (not pushed, not released): A1-A6 and A8 (remote mode vs link, the shack's rig state and caps, rig list, round trip, PTT from every source, gating, audio devices/volume/key PTT/NO AUDIO, pairing expiry/Re-pair/unpair/Tailscale cert, own-device refusal), B1-B9 (lib/remote-bridge.js; JTCAT, CW + paddle, voice macros, SSTV, scope, JS8, activation push, FT8 hand-over notice), C1-C6 behind `echocatMultiClient`, D5 (one-line dial diagnosis).
+
+Verified live in a two-instance run (scratch shack with a Hamlib Dummy rig + scratch laptop, separate profiles and ports): pairing over pinned WSS, direct audio, the shack's caps/NB/rig list on the laptop, tune and rig-control reaching the shack's radio, JTCAT window driving the shack's FT8 engine with no local capture, a TX-offset round trip, a second device joining without displacing the laptop, the Remote CW refusal, refusal while the shack was down (no local port opened), leaving remote mode cleanly, the JS8 window running the shack's JS8, the SSTV window opening the shack's decoder. Not verified live: any transmission (it would have played through the shack PC's speakers), a received SSTV picture, a JS8 send.
+
+Deliberately not built: per-peer audio (C5 is last-listener-wins with `audio-moved`), Station Setup run on the shack from the laptop (D2), editing the shack's rigs from the laptop (D3), a cloud bandwidth mode (D4; the spectrum is ~6 kB/s), chaining a phone through the laptop.
+
+A7 docs page and the mobile messages are handoffs: potacat-docs `DESKTOP_TO_DOCS_HANDOFF_2026-10-21_REMOTE_DESKTOP.md`, potacat-app `docs/desktop-handoffs/multi-client-and-desktop-to-desktop.md`.
+
 ## 1. Where it stands
 
 What the laptop has today, verified in code:
