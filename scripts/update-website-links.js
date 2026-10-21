@@ -126,6 +126,11 @@ if (startRe.test(html)) {
   updated = html.replace(bootstrap, block);
 }
 
+// The hero's "On an Intel Mac? Get the Intel build" link sits OUTSIDE the
+// DOWNLOAD block, so the block rewrite left it on the previous release
+// (1.13.0 shipped with the hero pointing at 1.12.0). Rewrite its href too.
+updated = updated.replace(/(<a class="intel-mac" href=")[^"]*(")/g, `$1${urls.macDmgX64}$2`);
+
 if (updated === html) {
   console.log('No changes needed — already at v' + version);
   process.exit(0);
