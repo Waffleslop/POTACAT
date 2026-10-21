@@ -306,6 +306,40 @@ test('Re-pair: one click for an account-linked shack, a clear instruction otherw
   assert.ok(!/Pair another desktop/.test(app), 'the copy names the real button');
 });
 
+test('CW: text, cancel, speed and the paddle key the SHACK, gated on its Remote CW switch', () => {
+  const send = handlerBody(main, "ipcMain.on('send-cw-text', (_e, text, opts) => {");
+  assert.ok(/if \(isRemoteMode\(\)\) \{ sendRemoteCwText\(text, opts\); return; \}/.test(send));
+  const txt = fnBody(main, 'function sendRemoteCwText(text, opts) {');
+  assert.ok(/remoteCwRefusal\(false\)/.test(txt) && /type: 'cw-text', text: String\(text \|\| ''\), wpm: settings\.cwWpm \|\| undefined, live: !!\(opts && opts\.live\)/.test(txt));
+  const cancel = handlerBody(main, "ipcMain.on('cw-cancel', () => {");
+  assert.ok(/type: 'cw-stop'/.test(cancel));
+  const wpm = handlerBody(main, "ipcMain.on('cw-set-wpm', (e, wpm) => {");
+  assert.ok(/type: 'cw-config', wpm: v/.test(wpm));
+  const key = main.slice(main.indexOf("keyer.on('key', ({ down }) => {"), main.indexOf("keyer.on('key', ({ down }) => {") + 500);
+  assert.ok(/if \(isRemoteMode\(\)\) \{\n\s+remotePaddleEdge\(down\);/.test(key), 'before the local rig router');
+  const edge = fnBody(main, 'function remotePaddleEdge(down) {');
+  assert.ok(/type: 'cw-key', at, down: !!down/.test(edge) && /type: 'cw-key', hold: true/.test(edge) && /, 400\)/.test(edge));
+  assert.ok(/if \(down\) return;/.test(edge), 'a refused press never keys; a release always goes');
+  const conn = handlerBody(main, "remoteClient.on('connected', (info) => {");
+  assert.ok(/remoteShackCw = \{ enabled: !!info\.cwAvailable, paddle: !!info\.cwPaddleAvailable/.test(conn));
+  const rc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-client.js'), 'utf8');
+  assert.ok(/cwAvailable: !!msg\.cwAvailable/.test(rc) && /vfoLocked: !!msg\.vfoLocked/.test(rc));
+});
+
+test('voice macros: the shack\'s, played into its radio', () => {
+  const msg = handlerBody(main, "remoteClient.on('message', (msg) => {");
+  assert.ok(/case 'voice-macro-sync':/.test(msg) && /case 'voice-macro-labels':/.test(msg));
+  const play = main.slice(main.indexOf("ipcMain.handle('remote-voice-macro-play'"), main.indexOf("ipcMain.handle('remote-voice-macro-play'") + 700);
+  assert.ok(/type: 'voice-macro-play', idx: i/.test(play));
+  const list = handlerBody(main, "ipcMain.handle('voice-macro-list', () => {");
+  assert.ok(/if \(isRemoteMode\(\)\) return remoteShackVoice\.filled/.test(list));
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/if \(remoteShack && remoteShack\.remote\) \{ window\.api\.remoteVoiceMacroPlay\(idx\); return; \}/.test(app));
+  const RF = require('../lib/remote-features');
+  assert.strictEqual(RF.check('cw').ok, true);
+  assert.strictEqual(RF.check('voiceMacros').ok, true);
+});
+
 const asyncTests = [];
 asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
   const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));

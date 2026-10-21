@@ -5186,6 +5186,50 @@ function refuseRemoteFeature(feature) {
   return true;
 }
 
+// CW and voice macros on the shack (spec B3). The shack's Remote CW Keyer
+// switch gates both text and paddle; its voice macros are its own recordings
+// (it syncs them to every client at connect), played into its radio there.
+let remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
+let remoteShackVoice = { labels: [], filled: [] };
+const REMOTE_CW_OFF_MSG = 'Remote CW is off on the shack. Turn on Settings > ECHOCAT > Remote CW Keyer on the shack PC.';
+function remoteCwRefusal(paddle) {
+  if (!remoteShackCw.enabled) return REMOTE_CW_OFF_MSG;
+  if (paddle && !remoteShackCw.paddle) return 'The shack cannot key a paddle right now' + (remoteShackCw.paddleReason ? ': ' + remoteShackCw.paddleReason : '.');
+  return '';
+}
+function sendRemoteCwText(text, opts) {
+  if (!isRemoteLinked()) { refuseRemoteNotLinked(null); return false; }
+  const why = remoteCwRefusal(false);
+  if (why) {
+    sendCatLog('[CW] ' + why);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 9000 });
+    return false;
+  }
+  remoteClient.sendRaw({ type: 'cw-text', text: String(text || ''), wpm: settings.cwWpm || undefined, live: !!(opts && opts.live) });
+  return true;
+}
+// The local paddle keyer, keying the shack: each edge goes as a timed cw-key
+// element (the shack replays them at this keyer's spacing through its jitter
+// buffer, the ECHOCAT Web path), with a 400 ms keepalive while a contact is
+// held so the shack's watchdog does not release a long dah.
+let _remotePaddleHoldTimer = null;
+let _remotePaddleRefusedLogged = false;
+function remotePaddleEdge(down) {
+  if (!isRemoteLinked()) { if (down) refuseRemoteNotLinked(null); return; }
+  const why = remoteCwRefusal(true);
+  if (why) {
+    if (down && !_remotePaddleRefusedLogged) { _remotePaddleRefusedLogged = true; sendCatLog('[CW] ' + why); if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 9000 }); }
+    if (down) return;
+  } else _remotePaddleRefusedLogged = false;
+  const at = Number(process.hrtime.bigint() / 1000n) / 1000; // ms, monotonic
+  remoteClient.sendRaw({ type: 'cw-key', at, down: !!down });
+  if (down) {
+    if (!_remotePaddleHoldTimer) _remotePaddleHoldTimer = setInterval(() => {
+      if (isRemoteLinked()) remoteClient.sendRaw({ type: 'cw-key', hold: true });
+    }, 400);
+  } else if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
+}
+
 const REMOTE_NO_RADIO_TO_SHARE_MSG = 'This POTACAT is itself driving a remote shack and has no radio to share. Connect your device to the shack directly.';
 const REMOTE_NOT_LINKED_MSG = 'The remote shack is not connected right now. POTACAT is reconnecting; try again in a moment.';
 
@@ -5311,6 +5355,10 @@ function ensureRemoteClient() {
     // shack says so; pinning the LAN cert's fingerprint there can only fail.
     if (typeof info.tsCertPublic === 'boolean') target.tsCertPublic = info.tsCertPublic;
     _remoteClientAuthFail = null;
+    remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
+    remoteShackVoice = { labels: [], filled: [] };
+    _vfoLocked = !!info.vfoLocked;
+    for (const wc of require('electron').webContents.getAllWebContents()) wc.send('vfo-lock-state', _vfoLocked);
     // A fresh session: drop the previous one's snapshot so its caps cannot
     // light controls this shack's radio lacks; the first status refills it.
     remoteRig.reset();
@@ -5421,6 +5469,34 @@ function ensureRemoteClient() {
           rigs: (Array.isArray(msg.data) ? msg.data : []).map(r => ({ id: String(r.id || ''), name: String(r.name || ''), family: r.family || '' })).filter(r => r.id),
           activeRigId: msg.activeRigId || null };
         pushRemoteShackInfo();
+        break;
+      }
+      case 'cw-available': {
+        remoteShackCw.enabled = !!msg.enabled;
+        break;
+      }
+      case 'cw-paddle-available': {
+        remoteShackCw.paddle = !!msg.available;
+        remoteShackCw.paddleReason = String(msg.reason || '');
+        break;
+      }
+      case 'cw-state': {
+        // The shack is keying (text or paddle): this window's keying lamp.
+        if (win && !win.isDestroyed()) win.webContents.send('cw-key', { down: !!msg.keying });
+        break;
+      }
+      case 'voice-macro-sync': {
+        const i = Number(msg.idx);
+        if (!Number.isInteger(i) || i < 0 || i > 9) break;
+        if (msg.label !== undefined) remoteShackVoice.labels[i] = String(msg.label || '');
+        if (msg.audio && !remoteShackVoice.filled.includes(i)) remoteShackVoice.filled.push(i);
+        if (!msg.audio && msg.audio !== undefined) remoteShackVoice.filled = remoteShackVoice.filled.filter(x => x !== i);
+        if (win && !win.isDestroyed()) win.webContents.send('remote-voice-macros', remoteShackVoice);
+        break;
+      }
+      case 'voice-macro-labels': {
+        if (Array.isArray(msg.labels)) remoteShackVoice.labels = msg.labels.map(l => String(l || ''));
+        if (win && !win.isDestroyed()) win.webContents.send('remote-voice-macros', remoteShackVoice);
         break;
       }
       case 'tx-drive-state': {
@@ -5534,6 +5610,14 @@ function tearDownRemoteClient() {
   resetRemoteMirroredRigState();
   remoteShackInfo = null;
   pushRemoteShackInfo();
+  remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
+  remoteShackVoice = { labels: [], filled: [] };
+  if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
+  // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
+  if (_vfoLocked) {
+    _vfoLocked = false;
+    for (const wc of require('electron').webContents.getAllWebContents()) wc.send('vfo-lock-state', false);
+  }
   if (win && !win.isDestroyed()) {
     win.webContents.send('remote-client-status', { state: 'idle' });
     win.webContents.send('cat-status', { connected: false });
@@ -21185,6 +21269,16 @@ function keyRemoteShack(on) {
 
 ipcMain.on('remote-client-audio-ptt', (_e, on) => { keyRemoteShack(on); });
 ipcMain.handle('remote-shack-info', () => remoteShackInfoNow());
+ipcMain.handle('remote-voice-macros', () => (isRemoteMode() ? remoteShackVoice : null));
+ipcMain.handle('remote-voice-macro-play', (_e, idx) => {
+  const i = Number(idx);
+  if (!isRemoteMode()) return { ok: false };
+  if (!isRemoteLinked()) { refuseRemoteNotLinked(null); return { ok: false, error: REMOTE_NOT_LINKED_MSG }; }
+  if (!Number.isInteger(i) || i < 0 || i > 4) return { ok: false, error: 'No such macro' };
+  remoteClient.sendRaw({ type: 'voice-macro-play', idx: i });
+  sendCatLog(`[Voice] Playing the shack's voice macro ${i + 1}`);
+  return { ok: true };
+});
 // Switch the SHACK's radio (its own rig list). The shack answers with a new
 // `rigs` frame and a fresh status snapshot carrying the new rig's caps.
 ipcMain.handle('remote-shack-switch-rig', (_e, rigId) => {
@@ -21450,6 +21544,12 @@ function connectKeyer() {
   keyer.setSwapPaddles(!!settings.cwSwapPaddles);
 
   keyer.on('key', ({ down }) => {
+    // Driving a remote shack: the paddle keys the SHACK's radio.
+    if (isRemoteMode()) {
+      remotePaddleEdge(down);
+      if (win && !win.isDestroyed()) win.webContents.send('cw-key', { down });
+      return;
+    }
     // Same router as the ECHOCAT paddle: Flex API, main-port DTR/RTS (QMX,
     // Icom USB keying), CW Key Port, WinKeyer. The old direct-to-SmartSDR
     // call left every non-Flex rig silent under a local Vail/VBand paddle.
@@ -38355,12 +38455,17 @@ app.whenReady().then(() => {
     if (keyer) keyer.paddleDah(pressed);
   });
   ipcMain.on('cw-set-wpm', (e, wpm) => {
+    if (isRemoteMode() && isRemoteLinked()) {
+      const v = Math.max(5, Math.min(50, Math.round(Number(wpm) || 0)));
+      if (v) remoteClient.sendRaw({ type: 'cw-config', wpm: v });
+    }
     // Origin from the sending window so applyCwWpm doesn't echo back to it
     // (the main-window CW bar and the VFO popout both use this channel).
     const fromVfo = vfoPopoutWin && !vfoPopoutWin.isDestroyed() && e.sender === vfoPopoutWin.webContents;
     applyCwWpm(wpm, fromVfo ? 'vfo' : 'main');
   });
   ipcMain.on('cw-stop', () => {
+    if (isRemoteMode() && isRemoteLinked()) remoteClient.sendRaw({ type: 'cw-stop' });
     if (keyer) keyer.stop();
     if (winKeyer && winKeyer.connected) winKeyer.cancelText();
     if (smartSdr && smartSdr.connected) smartSdr.cwStop();
@@ -38369,7 +38474,6 @@ app.whenReady().then(() => {
   // USB CODEC, so SSB-over-DATA's mode switch IS appropriate here when
   // the user has it enabled.
   ipcMain.on('voice-macro-ptt', (_e, state) => {
-    if (state && refuseRemoteFeature('voiceMacros')) return;
     handleRemotePtt(!!state, { audio: true });
   });
 
@@ -38413,6 +38517,8 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('voice-macro-list', () => {
+    // Remote shack: the macros on offer are the shack's (synced at connect).
+    if (isRemoteMode()) return remoteShackVoice.filled.slice().sort((a, b) => a - b);
     ensureVoiceMacroDir();
     const filled = [];
     for (let i = 0; i < VOICE_MACRO_MAX; i++) { if (fs.existsSync(voiceMacroPath(i))) filled.push(i); }
@@ -38429,12 +38535,13 @@ app.whenReady().then(() => {
   });
   // Desktop CW text sending (macros)
   ipcMain.on('send-cw-text', (_e, text, opts) => {
-    if (refuseRemoteFeature('cw')) return;
+    if (isRemoteMode()) { sendRemoteCwText(text, opts); return; }
     sendCwTextToRadio(text, opts);
   });
   // Desktop CW cancel / abort — fires from the ESC button in the main
   // window's CW macro bar and from the VFO popout's cancel button.
   ipcMain.on('cw-cancel', () => {
+    if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendRaw({ type: 'cw-stop' }); return; }
     cancelAllCwSends();
   });
 }).catch((err) => {

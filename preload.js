@@ -103,6 +103,13 @@ contextBridge.exposeInMainWorld('api', {
   remoteShackInfo: () => ipcRenderer.invoke('remote-shack-info'),
   remoteShackSwitchRig: (rigId) => ipcRenderer.invoke('remote-shack-switch-rig', rigId),
   remoteShackAudioGet: () => ipcRenderer.invoke('remote-shack-audio-get'),
+  remoteVoiceMacros: () => ipcRenderer.invoke('remote-voice-macros'),
+  remoteVoiceMacroPlay: (idx) => ipcRenderer.invoke('remote-voice-macro-play', idx),
+  onRemoteVoiceMacros: (cb) => {
+    const handler = (_e, v) => cb(v || null);
+    ipcRenderer.on('remote-voice-macros', handler);
+    return () => ipcRenderer.removeListener('remote-voice-macros', handler);
+  },
   remoteShackAudioSet: (patch) => ipcRenderer.invoke('remote-shack-audio-set', patch),
   onRemoteShackInfo: (cb) => {
     const handler = (_e, info) => cb(info || {});

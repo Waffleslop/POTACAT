@@ -7446,6 +7446,7 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       refreshCatPillLabel();
       if (_lastChipState) setChip(_lastChipState);
       if (catPopoverOpen && remoteShack.remote) renderRemoteShackRigs(remoteShack);
+      if (typeof updateVoiceMacroBar === 'function') updateVoiceMacroBar();
     };
     window.api.onRemoteShackInfo(applyInfo);
     window.api.onRemoteShackInfo((info) => applyRemoteFeatureGating(!!(info && info.remote)));
@@ -21765,11 +21766,36 @@ let voicePreviewCtx = null;
   updateVoiceMacroBar();
 })();
 
+// Driving a remote shack: the buttons are the SHACK's macros (its labels and
+// recordings, synced at connect) and a click plays them into its radio.
+var remoteVoice = null;
+if (window.api.onRemoteVoiceMacros) {
+  window.api.onRemoteVoiceMacros(function(v) { remoteVoice = v; updateVoiceMacroBar(); });
+}
 async function updateVoiceMacroBar() {
   if (!voiceMacroBar) return;
   voiceMacroBar.classList.toggle('hidden', !voiceMacroBoxVisible);
   if (quickShowVoiceMacros) quickShowVoiceMacros.checked = voiceMacroBoxVisible;
   if (!voiceMacroBoxVisible) return;
+  if (remoteShack && remoteShack.remote) {
+    try { remoteVoice = await window.api.remoteVoiceMacros(); } catch (e) {}
+    var rv = remoteVoice || { labels: [], filled: [] };
+    voiceMacroBtns.innerHTML = '';
+    for (var r = 0; r < VOICE_MACRO_MAX; r++) {
+      if (rv.filled.indexOf(r) === -1) continue;
+      (function(idx) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.idx = String(idx);
+        b.textContent = rv.labels[idx] || ('V' + (idx + 1));
+        b.title = 'Play the shack\'s voice macro on its radio';
+        b.addEventListener('click', function() { window.api.remoteVoiceMacroPlay(idx); });
+        voiceMacroBtns.appendChild(b);
+      })(r);
+    }
+    if (!voiceMacroBtns.children.length) voiceMacroBtns.innerHTML = '<span class="help-text">The shack has no voice macros recorded.</span>';
+    return;
+  }
   var filled = await window.api.voiceMacroList();
   voiceMacroBtns.innerHTML = '';
   for (var i = 0; i < VOICE_MACRO_MAX; i++) {
@@ -21797,6 +21823,8 @@ async function updateVoiceMacroBar() {
 }
 
 async function playVoiceMacro(idx, btn) {
+  // Remote shack: its macro, played into its radio (hotkeys land here too).
+  if (remoteShack && remoteShack.remote) { window.api.remoteVoiceMacroPlay(idx); return; }
   if (voicePlayingIdx >= 0) stopVoicePlayback();
   var base64 = await window.api.voiceMacroLoad(idx);
   if (!base64) return;
