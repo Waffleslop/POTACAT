@@ -37395,13 +37395,12 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('export-activation-adif', async (event, data) => {
-    const { writeActivationAdifRaw } = require('./lib/adif-writer');
+    const { writeActivationAdifRaw, activationFileDate } = require('./lib/adif-writer');
     const { qsos, parkRef, myCallsign: activatorCall } = data;
     if (!qsos || !qsos.length) return { success: false, error: 'No contacts to export' };
     try {
       const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const dateStr = activationFileDate(qsos);
       const defaultName = `${activatorCall || 'POTACAT'}@${parkRef || 'PARK'}-${dateStr}.adi`;
       const result = await dialog.showSaveDialog(parentWin, {
         title: 'Export Activation ADIF',
@@ -37429,14 +37428,13 @@ app.whenReady().then(() => {
   // dev team), and v3 will ship real API keys "next year-ish". Until then
   // this manual-but-streamlined flow is the only sanctioned path.
   ipcMain.handle('upload-activation-to-pota', async (_e, data) => {
-    const { writeActivationAdifRaw } = require('./lib/adif-writer');
+    const { writeActivationAdifRaw, activationFileDate } = require('./lib/adif-writer');
     const { qsos, parkRef, myCallsign: activatorCall } = data || {};
     if (!qsos || !qsos.length) return { success: false, error: 'No contacts to upload' };
     try {
       const dir = path.join(app.getPath('userData'), 'pota-uploads');
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const dateStr = activationFileDate(qsos);
       const safeCall = (activatorCall || 'POTACAT').replace(/[^A-Za-z0-9_-]/g, '_');
       const safeRef = (parkRef || 'PARK').replace(/[^A-Za-z0-9_-]/g, '_');
       const fileName = `${safeCall}@${safeRef}-${dateStr}.adi`;
@@ -37454,7 +37452,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('export-activation-adif-perpark', async (event, data) => {
-    const { writeActivationAdifRaw } = require('./lib/adif-writer');
+    const { writeActivationAdifRaw, activationFileDate } = require('./lib/adif-writer');
     const { qsosByPark, myCallsign: activatorCall } = data;
     if (!qsosByPark || !Object.keys(qsosByPark).length) return { success: false, error: 'No contacts to export' };
     try {
@@ -37471,12 +37469,11 @@ app.whenReady().then(() => {
         settings.lastAdifExportDir = folder;
         saveSettings(settings);
       }
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
       let fileCount = 0;
       let totalQsos = 0;
       for (const [ref, qsos] of Object.entries(qsosByPark)) {
         const safeRef = ref.replace(/[^A-Za-z0-9_-]/g, '_');
+        const dateStr = activationFileDate(qsos);
         const fileName = `${activatorCall || 'POTACAT'}@${safeRef}-${dateStr}.adi`;
         const filePath = path.join(folder, fileName);
         writeActivationAdifRaw(filePath, fillActivationExport(qsos));
