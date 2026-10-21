@@ -107,7 +107,7 @@ Laptop-only. No shack change, no protocol change. Everything it consumes is alre
 5. **The mode banner.** The chip grows into the status bar's rig pill: `K3SBP's shack · FTDX10 · via Tailscale · 84 ms`. Click: Remote Radios. Round-trip from the ping/pong already running.
 6. **Audio:** output device picker, volume, mute, mic picker in Settings > ECHOCAT > "When driving a remote shack"; keyboard PTT (hold Space when the main window has focus, configurable; release on blur, same as the mouse path); the shack's `audio-health` → an inline "no rig audio arriving" line instead of silence; `echoTxGuardMs` honoured on the mic track.
 7. **Pairing fixes:** write `auth-ok.expiresAt`/`trusted` back to the row; the pair-link `exp` is never the device expiry; wire the re-pair flow on `auth-fail` (chip → "Re-pair": cloud shacks re-pair in one click, LAN shacks re-open Remote Radios with the paste row focused); `passSession` → the renderer (the Guest Pass banner the phone shows: class, power cap, expiry); honour `tsCertPublic` on the Tailscale leg (SPKI pin, `cert_spki_pin` memory); server-side unpair on Remove (TODO at ~33863); fix the dialog copy.
-8. **Docs:** `docs.potacat.com` page "Two POTACATs: run your shack from a laptop" (pairing paths, what works, what doesn't yet, the single-client rule until Phase C). The Discord question had no page to point to.
+8. **Docs (handoff, not my edit):** `DESKTOP_TO_DOCS_HANDOFF_2026-10-21_REMOTE_DESKTOP.md` in potacat-docs asking for a `docs.potacat.com` page "Two POTACATs: run your shack from a laptop" (pairing paths, what works, what doesn't yet, the single-client rule until Phase C). The Discord question had no page to point to.
 9. **Tests:** `test/remote-rig-controller-test.js` (fake shack: every `status` field → the matching `rig-state` field and cap; every controller method → the expected frame; refused methods reject with the text, never throw); extend `test/remote-desktop-e2e-test.js` with set-vfo/split/ptt/switch-rig round trips; a source guard that no `isRemoteActive()` branch remains in an IPC handler outside the bridge; `test/remote-features-test.js` asserting every rig-scoped control id in `index.html` has a gating row.
 
 ### Phase B: engines over the wire
@@ -181,7 +181,11 @@ A1 remote intent flag + guards · A2 `RemoteRigController` + inbound fan-in + te
 B1 `remote-bridge` + parity test · B2 JTCAT · B3 CW + voice macros · B4 SSTV · B5 scope · B6 JS8 · B7 FreeDV/Kiwi/TGXL/rotor/custom CAT/VFO profiles · B8 activator wire · B9 engine-owner + take-over.
 C1 `_clients` behind the flag · C2 presence · C3 attribution · C4 PTT arbitration · C5 audio per peer · C6 guest + owner · C7 mobile handoff · C8 tests.
 
-## 8. Files
+## 8. Boundaries
+
+I build only `potacat-dev`. The docs page (A.8), any cloud/worker change, and every mobile-facing message (`engine-owner`, `clients:list`, `originClientId`, `ptt-refused`, the Take-over flow) are handoff documents: `potacat-app/docs/desktop-handoffs/`, the cloudlog root, potacat-docs. The desktop must work with the other side unchanged.
+
+## 9. Files
 
 Phase A: `lib/remote-rig-controller.js` (new), `lib/remote-features.js` (new), `main.js` (`ensureRemoteClient`, `isRemoteActive`, the four inline branches removed, `handleRemotePtt`), `renderer/app.js` (gating, pill, audio settings, keyboard PTT, re-pair), `renderer/index.html`, `renderer/remote-audio-answerer.js` (device/volume), `lib/remote-client.js` (SPKI pin, tsCertPublic), tests above, potacat-docs page.
 Phase B: `lib/remote-bridge.js` (new), the pop-out IPC registrations in `main.js`, `lib/remote-server.js` (`engine-owner`, `jtcat-set-pref`), `test/remote-bridge-parity-test.js`.
