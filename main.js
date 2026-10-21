@@ -2908,6 +2908,25 @@ setInterval(() => {
 // A PTT release that found the CAT link down (handleRemotePtt) — sent on the
 // next link-up, whichever way the link comes back.
 let _pttReleasePending = false;
+// Peak microphone level from the device during the current remote PTT press
+// (fed by the bridge's TX meter); summarised to the log on release.
+const _remoteTxPress = { on: false, peak: 0, since: 0 };
+const REMOTE_TX_SILENT_PEAK = 0.003; // ≈ -50 dBFS: below this nothing was said
+function noteRemoteTxPress(down) {
+  if (down) {
+    if (!_remoteTxPress.on) { _remoteTxPress.on = true; _remoteTxPress.peak = 0; _remoteTxPress.since = Date.now(); }
+    return;
+  }
+  if (!_remoteTxPress.on) return;
+  _remoteTxPress.on = false;
+  const secs = ((Date.now() - _remoteTxPress.since) / 1000).toFixed(1);
+  const p = _remoteTxPress.peak;
+  if (p < REMOTE_TX_SILENT_PEAK) {
+    sendCatLog(`[Echo CAT Audio] device microphone during that ${secs} s press: SILENT — no audio arrived from the device (its mic permission, mic level or mute; the radio was keyed with nothing to send)`);
+  } else {
+    sendCatLog(`[Echo CAT Audio] device microphone during that ${secs} s press: peak ${(20 * Math.log10(p)).toFixed(0)} dBFS`);
+  }
+}
 function sendCatStatus(s) {
   if (s && s.connected && _pttReleasePending && cat && cat.connected) {
     _pttReleasePending = false;
@@ -17239,6 +17258,11 @@ function connectRemote() {
 
   remoteServer.on('ptt', ({ state }) => {
     const _pttT0 = Date.now(); // → ptt-applied latency reply below
+    // One line per press saying whether any microphone audio arrived from the
+    // device while the radio was keyed (the bridge's TX peak meter fed the VFO
+    // window and the phone, never the log). "PTT works but no modulation" is
+    // either this line saying SILENT, or the output device named above it.
+    noteRemoteTxPress(!!state);
     // FT8 PTT is engine-owned. A remote voice-PTT *release* must not cut an
     // in-progress engine transmission out from under the rig — the engine keys
     // via handleRemotePtt(true) from tx-start and releases on its own schedule
@@ -34580,6 +34604,9 @@ app.whenReady().then(() => {
     if (status.captureLabel) {
       sendCatLog(`[Echo CAT Audio] capturing radio audio from: ${status.captureLabel}`);
     }
+    if (status.txOutputLabel) {
+      sendCatLog(`[Echo CAT Audio] playing the device's microphone to: ${status.txOutputLabel}`);
+    }
     if (status.warning) {
       sendCatLog(`[Echo CAT Audio] WARNING: ${status.warning}`);
     }
@@ -34595,6 +34622,7 @@ app.whenReady().then(() => {
   // can't see the desktop VFO can monitor their own TX level from the phone
   // Settings panel.
   ipcMain.on('remote-audio-tx-meter', (_e, peak) => {
+    if (_remoteTxPress.on && Number(peak) > _remoteTxPress.peak) _remoteTxPress.peak = Number(peak);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
       vfoPopoutWin.webContents.send('vfo-popout-tx-meter', peak);
     }

@@ -170,6 +170,20 @@ window.api.onStartAudio(async (config) => {
     // When phone's mic audio arrives, route to radio's USB audio input
     pc.ontrack = async (event) => {
       audioEl.srcObject = event.streams[0];
+      // Say where the device's microphone goes — the one thing a "PTT keys
+      // but no modulation" report needs and the log never had (KI7LIK,
+      // IC-7300 on Linux, 2026-10-20). Label resolved by id; an unset id is
+      // the system default output, which is rarely the radio.
+      try {
+        let label = 'the system default output (set the rig\'s audio Output in Settings > My Rigs)';
+        if (config.daxTxDirect) label = 'SmartSDR direct (dax_tx stream)';
+        else if (config.outputDeviceId) {
+          const devs = await navigator.mediaDevices.enumerateDevices();
+          const d = devs.find((x) => x.kind === 'audiooutput' && x.deviceId === config.outputDeviceId);
+          label = d ? (d.label || config.outputDeviceId) : ('an output device that is not present (' + config.outputDeviceId.slice(0, 12) + '…) — re-pick it in Settings > My Rigs');
+        }
+        window.api.sendAudioStatus({ txOutputLabel: label });
+      } catch {}
       // Direct DAX TX path: when the user is on the SmartSDR Direct audio
       // source AND the dax_tx stream is subscribed in main, we bypass the
       // Windows DAX TX device entirely — tap the WebRTC stream through an
