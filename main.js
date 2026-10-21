@@ -645,6 +645,7 @@ const GLOBAL_KEYS = new Set([
   'rigs',              // rig hardware definitions
   'activeRigId',       // last-selected rig (global default)
   'remoteShackAudio',  // this PC's speaker/mic/volume/PTT key for a remote shack (machine devices)
+  'echocatMultiClient', // this shack lets the owner's devices connect together (server property)
   'firstRun',          // first-time-launch flag
   'yaesuScopeFps',     // band-scope helper frame rate — a display/machine property
   'yaesuScopeHelperPath', // explicit yaesu-scope binary on THIS machine
@@ -5163,6 +5164,8 @@ function remoteShackInfoNow() {
     rigName: activeRig ? (activeRig.name || '') : (target.rigModel || ''),
     radioConnected: remoteRig.catConnected(),
     audioSilent: !!info.audioSilent,
+    audioElsewhere: !!info.audioElsewhere,
+    alsoConnected: Array.isArray(info.alsoConnected) ? info.alsoConnected : [],
     audio: remoteShackAudioPrefs(),
     stationCallsign: target.stationCallsign || null,
   };
@@ -5519,6 +5522,44 @@ function ensureRemoteClient() {
       case 'scope-state': {
         const { type, ...state } = msg;
         remoteShackScopeState(state);
+        break;
+      }
+      case 'ptt-refused': {
+        const message = String(msg.message || 'Another device is transmitting.');
+        sendCatLog('[PTT] ' + message);
+        for (const w of [win, vfoPopoutWin]) {
+          if (w && !w.isDestroyed()) w.webContents.send('remote-client-ptt-released', { reason: 'refused', message });
+        }
+        if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, warn: true, duration: 6000 });
+        break;
+      }
+      case 'audio-moved': {
+        const message = String(msg.message || 'The shack audio moved to another device.');
+        sendCatLog('[remote-client-audio] ' + message);
+        if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: message + ' Click the speaker beside HOLD TO TALK to bring it back here.', duration: 9000 });
+        remoteShackInfo = { ...(remoteShackInfo || {}), audioElsewhere: true };
+        pushRemoteShackInfo();
+        break;
+      }
+      case 'client-action': {
+        const by = (msg.by && msg.by.name) || 'Another device';
+        let what = '';
+        if (msg.action === 'tune') what = 'tuned to ' + (msg.freqKhz ? Number(msg.freqKhz).toFixed(1) + ' kHz' : 'a new frequency') + (msg.mode ? ' ' + msg.mode : '');
+        else if (msg.action === 'set-mode') what = 'changed the mode' + (msg.mode ? ' to ' + msg.mode : '');
+        else if (msg.action === 'switch-rig') what = 'switched the radio';
+        else if (msg.action === 'jtcat-start') what = 'started FT8';
+        else if (msg.action === 'jtcat-stop') what = 'stopped FT8';
+        else if (msg.action === 'jtcat-call-cq') what = 'called CQ on FT8';
+        else if (msg.action === 'jtcat-reply') what = 'answered a station on FT8';
+        else if (msg.action === 'cw-text') what = 'sent CW';
+        else if (msg.action === 'sstv-photo') what = 'sent an SSTV picture';
+        if (what && win && !win.isDestroyed()) win.webContents.send('app-notice', { message: by + ' ' + what + '.', duration: 4000 });
+        break;
+      }
+      case 'clients-list': {
+        const others = (Array.isArray(msg.clients) ? msg.clients : []).filter(c => c && !c.you).map(c => String(c.name || 'Another device'));
+        remoteShackInfo = { ...(remoteShackInfo || {}), alsoConnected: others };
+        pushRemoteShackInfo();
         break;
       }
       case 'cw-available': {
@@ -9204,7 +9245,9 @@ async function saveQsoRecord(qsoData, opts) {
       return { success: false, error: 'client_capability_missing' };
     }
     try {
-      remoteServer.sendToClient({ type: 'qso-attributed', qso: qsoData });
+      // The device that ran this QSO, only: with several devices connected,
+      // sending it to all of them logged the contact once per device.
+      remoteServer.sendToActor({ type: 'qso-attributed', qso: qsoData });
       sendCatLog(`[architecture-b] forwarded ${origin} QSO to client (${qsoData.callsign || '?'})`);
       return { success: true, forwarded: true };
     } catch (err) {
@@ -17512,6 +17555,8 @@ function connectRemote() {
   // Tap-to-pair toggle. Default on; operator can flip off in
   // Settings → ECHOCAT if they share their LAN with strangers.
   try { remoteServer.setAllowPairRequests(settings.allowPairRequests !== false); } catch {}
+  // More than one of the owner's devices at a time (default off for one release).
+  try { remoteServer.setMultiClient(settings.echocatMultiClient === true); } catch {}
   // When the server adds or revokes a device, persist the new list.
   remoteServer.on('paired-devices-changed', () => {
     try {
@@ -21320,6 +21365,16 @@ function keyRemoteShack(on) {
 }
 
 ipcMain.on('remote-client-audio-ptt', (_e, on) => { keyRemoteShack(on); });
+// Take the shack's audio back after another device asked for it (the bridge
+// has one peer): a fresh capture asks the shack again.
+ipcMain.handle('remote-client-audio-reclaim', () => {
+  if (!isRemoteLinked()) return { ok: false, error: REMOTE_NOT_LINKED_MSG };
+  stopRemoteClientAudio();
+  setTimeout(() => { if (isRemoteLinked()) startRemoteClientAudio(); }, 300);
+  remoteShackInfo = { ...(remoteShackInfo || {}), audioElsewhere: false };
+  pushRemoteShackInfo();
+  return { ok: true };
+});
 ipcMain.handle('remote-shack-info', () => remoteShackInfoNow());
 ipcMain.handle('remote-voice-macros', () => (isRemoteMode() ? remoteShackVoice : null));
 ipcMain.handle('remote-voice-macro-play', (_e, idx) => {
@@ -35606,6 +35661,9 @@ app.whenReady().then(() => {
 
     // Tap-to-pair toggle is a live setting — no remoteServer
     // restart needed, just push the new value through.
+    if (has('echocatMultiClient') && newSettings.echocatMultiClient !== settings.echocatMultiClient && remoteServer) {
+      try { remoteServer.setMultiClient(newSettings.echocatMultiClient === true); } catch {}
+    }
     if (has('allowPairRequests') && newSettings.allowPairRequests !== settings.allowPairRequests) {
       try { remoteServer.setAllowPairRequests(newSettings.allowPairRequests !== false); } catch {}
     }

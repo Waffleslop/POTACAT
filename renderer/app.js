@@ -1381,6 +1381,7 @@ const remoteConfig = null;
 const setRemotePort = document.getElementById('set-remote-port');
 const setRemoteRequireToken = document.getElementById('set-remote-require-token');
 const setAllowPairRequests = document.getElementById('set-allow-pair-requests');
+const setEchocatMultiClient = document.getElementById('set-echocat-multi-client');
 const remoteTokenRow = document.getElementById('remote-token-row');
 const setRemoteToken = document.getElementById('set-remote-token');
 const remoteRegenToken = document.getElementById('remote-regen-token');
@@ -7405,8 +7406,9 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     if (state.state === 'connected') {
       const rig = remoteShack.rigName ? (' · ' + remoteShack.rigName) : '';
       const rtt = Number.isFinite(remoteShack.rttMs) ? (' · ' + remoteShack.rttMs + ' ms') : '';
-      const silent = remoteShack.audioSilent ? ' · NO AUDIO' : '';
-      chip.textContent = '🔗 ' + name + rig + leg + rtt + silent;
+      const silent = remoteShack.audioElsewhere ? ' · AUDIO ON ANOTHER DEVICE' : (remoteShack.audioSilent ? ' · NO AUDIO' : '');
+      const also = (remoteShack.alsoConnected && remoteShack.alsoConnected.length) ? ' · +' + remoteShack.alsoConnected.length : '';
+      chip.textContent = '🔗 ' + name + rig + leg + rtt + also + silent;
       chip.style.background = '#4ecca3';
       chip.style.color = '#0a1a14';
       chip.title = remoteShack.audioSilent
@@ -7583,7 +7585,11 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', fillDevices);
       const set = (patch) => window.api.remoteShackAudioSet(patch).then(applyAudioPrefs).catch(() => {});
       if (volEl) volEl.addEventListener('input', () => set({ volume: Number(volEl.value) / 100, muted: false }));
-      if (muteEl) muteEl.addEventListener('click', () => set({ muted: muteEl.textContent !== '🔇' }));
+      if (muteEl) muteEl.addEventListener('click', () => {
+        // The audio went to another device: this click brings it back here.
+        if (remoteShack && remoteShack.audioElsewhere && window.api.remoteClientAudioReclaim) { window.api.remoteClientAudioReclaim(); return; }
+        set({ muted: muteEl.textContent !== '🔇' });
+      });
       if (outSel) outSel.addEventListener('change', () => { outSel.dataset.want = outSel.value; set({ outputId: outSel.value }); });
       if (inSel) inSel.addEventListener('change', () => { inSel.dataset.want = inSel.value; set({ inputId: inSel.value }); });
       if (keySel) keySel.addEventListener('change', () => set({ pttKey: keySel.value }));
@@ -16348,6 +16354,7 @@ async function openSettingsDialog(tab) {
   setRemoteRequireToken.checked = requireToken;
   remoteTokenRow.classList.toggle('hidden', !requireToken);
   if (setAllowPairRequests) setAllowPairRequests.checked = s.allowPairRequests !== false;
+  if (setEchocatMultiClient) setEchocatMultiClient.checked = s.echocatMultiClient === true;
   setRemoteToken.value = s.remoteToken || '';
   setRemotePttTimeout.value = s.remotePttTimeout || 180;
   if (setEchocatPairHost) setEchocatPairHost.value = s.echocatPairHost || '';
@@ -16901,6 +16908,7 @@ settingsSave.addEventListener('click', async () => {
   const remotePortVal = parseInt(setRemotePort.value, 10) || 7300;
   const remoteRequireTokenVal = setRemoteRequireToken.checked;
   const allowPairRequestsVal = setAllowPairRequests ? setAllowPairRequests.checked : true;
+  const echocatMultiClientVal = setEchocatMultiClient ? setEchocatMultiClient.checked : false;
   const remoteTokenVal = setRemoteToken.value;
   const remotePttTimeoutVal = parseInt(setRemotePttTimeout.value, 10) || 180;
   const ssbOverDataVal = setSsbOverData.checked;
@@ -17179,6 +17187,7 @@ settingsSave.addEventListener('click', async () => {
     remotePort: remotePortVal,
     remoteRequireToken: remoteRequireTokenVal,
     allowPairRequests: allowPairRequestsVal,
+    echocatMultiClient: echocatMultiClientVal,
     remoteToken: remoteTokenVal,
     remotePttTimeout: remotePttTimeoutVal,
     echocatPairHost: setEchocatPairHost ? setEchocatPairHost.value.trim() : '',

@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('api', {
   remoteClientAudioStart: () => ipcRenderer.invoke('remote-client-audio-start'),
   remoteClientAudioStop: () => ipcRenderer.invoke('remote-client-audio-stop'),
   remoteClientAudioPtt: (on) => ipcRenderer.send('remote-client-audio-ptt', on),
+  remoteClientAudioReclaim: () => ipcRenderer.invoke('remote-client-audio-reclaim'),
   // mDNS discovery of nearby POTACAT shacks for welcome-screen "we
   // found a shack on your network" and Remote-Radios "+ Add new"
   // same-LAN add. Returns [{name, host, port, fingerprint, rigModel, …}].
