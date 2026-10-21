@@ -4515,6 +4515,15 @@
           </span>
         </button>
       </div>
+      <!-- Email + password, the same sign-in as Settings > Cloud. The button
+           above used to start Google sign-in, which needs a client id POTACAT
+           does not ship, so it could only answer "Google Client ID not
+           configured" (fresh install, 2026-10-21). -->
+      <div id="welcome-cloud-login" class="hidden" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+        <input type="email" id="welcome-cloud-email" placeholder="Email" autocomplete="username" style="flex:1;min-width:150px;">
+        <input type="password" id="welcome-cloud-password" placeholder="Password" autocomplete="current-password" style="flex:1;min-width:120px;">
+        <button type="button" id="welcome-cloud-signin" class="btn btn-primary">Sign in</button>
+      </div>
 
       <div class="welcome-remote-alt-row">
         <div class="welcome-remote-paste-row">

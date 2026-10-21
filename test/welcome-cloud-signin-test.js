@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+'use strict';
+// Fresh install, setup screen, "Sign in to POTACAT Cloud" → "Sign-in failed:
+// Google Client ID not configured" (2026-10-21). The button called Google
+// sign-in, which needs settings.cloudGoogleClientId / GOOGLE_CLIENT_ID —
+// never shipped — so it could only fail. It now uses the email + password
+// sign-in that Settings > Cloud uses.
+// Run: node test/welcome-cloud-signin-test.js
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+let passed = 0, failed = 0;
+function test(name, fn) {
+  try { fn(); passed++; console.log('  ok  ' + name); }
+  catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
+}
+console.log('Welcome screen Cloud sign-in');
+const app = R('renderer/app.js'), html = R('renderer/index.html');
+
+test('the setup screen never calls Google sign-in', () => {
+  const block = app.slice(app.indexOf("const cloudBtn = document.getElementById('welcome-remote-cloud-btn');"), app.indexOf('async function checkFirstRun('));
+  assert.ok(block.length > 100, 'welcome cloud block found');
+  assert.ok(!/cloudGoogleSignIn/.test(block), 'no Google sign-in in the welcome flow');
+  assert.ok(/await window\.api\.cloudLogin\(email, password\)/.test(block), 'email + password, the Settings > Cloud path');
+  assert.ok(/if \(st && st\.loggedIn\) \{ _welcomeRemoteShowCloudShacks\(\); return; \}/.test(block), 'already signed in skips the form');
+  assert.ok(/_welcomeRemoteShowCloudShacks\(\);\n\s*\} catch/.test(block), 'shows the shacks after sign-in');
+});
+
+test('the form exists and Enter submits', () => {
+  for (const id of ['welcome-cloud-login', 'welcome-cloud-email', 'welcome-cloud-password', 'welcome-cloud-signin']) assert.ok(html.includes(`id="${id}"`), id);
+  assert.ok(/cloudPassword\.addEventListener\('keydown', \(e\) => \{ if \(e\.key === 'Enter'\)/.test(app));
+});
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);

@@ -24445,24 +24445,45 @@ function _welcomeRemoteClose() {
     if (e.key === 'Enter') { e.preventDefault(); _welcomeRemotePasteLink(); }
   });
   const cloudBtn = document.getElementById('welcome-remote-cloud-btn');
+  // Email + password, the same sign-in as Settings > Cloud. This used to call
+  // Google sign-in, which needs a client id POTACAT does not ship, so on every
+  // fresh install it answered "Google Client ID not configured".
+  const cloudLoginRow = document.getElementById('welcome-cloud-login');
+  const cloudEmail = document.getElementById('welcome-cloud-email');
+  const cloudPassword = document.getElementById('welcome-cloud-password');
+  const cloudSignin = document.getElementById('welcome-cloud-signin');
   if (cloudBtn) cloudBtn.addEventListener('click', async () => {
-    _welcomeRemoteStatus('Opening sign-in…', null);
     try {
-      // First check if already signed in — skip the OAuth popup if so.
       let st = null;
       try { st = await window.api.cloudGetStatus(); } catch {}
-      if (!st || !st.loggedIn) {
-        const r = await window.api.cloudGoogleSignIn();
-        if (r && r.error) {
-          _welcomeRemoteStatus('Sign-in failed: ' + r.error, 'error');
-          return;
-        }
-      }
-      _welcomeRemoteShowCloudShacks();
+      if (st && st.loggedIn) { _welcomeRemoteShowCloudShacks(); return; }
+      if (cloudLoginRow) cloudLoginRow.classList.remove('hidden');
+      _welcomeRemoteStatus('Sign in with your POTACAT Cloud email and password.', null);
+      if (cloudEmail) cloudEmail.focus();
     } catch (err) {
       _welcomeRemoteStatus('Sign-in failed: ' + (err.message || err), 'error');
     }
   });
+  async function welcomeCloudSignIn() {
+    const email = (cloudEmail && cloudEmail.value.trim()) || '';
+    const password = (cloudPassword && cloudPassword.value) || '';
+    if (!email || !password) { _welcomeRemoteStatus('Enter your email and password.', 'error'); return; }
+    if (cloudSignin) cloudSignin.disabled = true;
+    _welcomeRemoteStatus('Signing in…', null);
+    try {
+      const r = await window.api.cloudLogin(email, password);
+      if (r && r.error) { _welcomeRemoteStatus('Sign-in failed: ' + r.error, 'error'); return; }
+      if (cloudPassword) cloudPassword.value = '';
+      if (cloudLoginRow) cloudLoginRow.classList.add('hidden');
+      _welcomeRemoteShowCloudShacks();
+    } catch (err) {
+      _welcomeRemoteStatus('Sign-in failed: ' + (err.message || err), 'error');
+    } finally {
+      if (cloudSignin) cloudSignin.disabled = false;
+    }
+  }
+  if (cloudSignin) cloudSignin.addEventListener('click', welcomeCloudSignIn);
+  if (cloudPassword) cloudPassword.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); welcomeCloudSignIn(); } });
   // Suppress the global pair-link-redeemed alert while the welcome
   // dialog is visible — show the result inline instead.
   if (window.api && window.api.onPairLinkRedeemed) {
