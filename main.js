@@ -8919,6 +8919,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         // Packet is FM (an Icom keys it in FM-D through forceDataMode); HF modems are USB data.
         tuneRadio(Number(dialKhz), mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
         winlinkState.setSession({ tuned: true });
+        winlinkFlexDaxOn();
         _winlinkShimArmed = true;
         _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`), capMin * 60000);
         _winlinkWatchdog = setInterval(() => {
@@ -8935,6 +8936,32 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     }
   })();
   return { ok: true };
+}
+
+// A Winlink modem (ardopcf / Dire Wolf / Mercury) sends its audio to the DAX
+// TX device through SmartSDR's DAX program, so on a Flex the radio's TX audio
+// source must be DAX for the session — or it keys the silent mic (K3SBP
+// 2026-10-22: Voice PTT on, 0.014 W, no modulation). assertFlexTxDaxForTx()
+// deliberately leaves the DAX button alone for audioSource 'dax' (that is
+// the operator's discipline for POTACAT's OWN audio), and must not claim the
+// dax_tx stream either: the DAX program's stream carries the modem's audio.
+// So: set dax=1 for the session, put back a captured 0 at the end (js8KeyForTx
+// part 1, the same lesson).
+let _winlinkFlexDaxPrior = null; // null = untouched; false = restore to mic at session end
+function winlinkFlexDaxOn() {
+  let fam = '';
+  try { fam = RigFamily.rigFamily(winlinkActiveRig()); } catch {}
+  if (fam !== 'flex' || !smartSdr || !smartSdr.connected) return;
+  const prior = smartSdr.txDaxOn; // true / false / null
+  if (prior === true) return;
+  if (!_sendFlexTxDax(true)) return;
+  _winlinkFlexDaxPrior = prior === false ? false : null;
+  winlinkLog(`Flex TX audio → DAX for this session${prior === false ? ' (was mic — put back after)' : ''}`);
+}
+function winlinkFlexDaxRestore() {
+  if (_winlinkFlexDaxPrior !== false) { _winlinkFlexDaxPrior = null; return; }
+  _winlinkFlexDaxPrior = null;
+  if (_sendFlexTxDax(false)) winlinkLog('Flex TX audio → mic (put back)');
 }
 
 /** Disconnect Mercury's own TNC client so Pat can connect (one host at a time). */
@@ -8981,6 +9008,7 @@ function winlinkEndSession(state, text, received = 0) {
     if (s.tuned && s.returnTo && s.returnTo.mode && s.returnTo.freqHz) {
       setTimeout(() => { try { tuneRadio(s.returnTo.freqHz / 1000, s.returnTo.mode, undefined, { origin: 'Winlink session ended' }); } catch {} }, 1500);
     }
+    winlinkFlexDaxRestore();
     releaseRadio('winlink');
   }
   winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', ptt: false, prompt: null });

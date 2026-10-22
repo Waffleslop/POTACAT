@@ -69,6 +69,13 @@ test('radio sound just works: picked automatically at session start, kept throug
   assert.ok(/const SETUP_KEYS = \[[^\]]*'winlinkAudio'/.test(main), 'a pick saved by main survives the main window\'s older rig list');
 });
 
+test('a Flex keys the modem\'s DAX audio, not the silent mic, and gets its mic back', () => {
+  assert.ok(/winlinkFlexDaxOn\(\);/.test(fnBody(main, 'winlinkStartSession')));
+  assert.ok(/winlinkFlexDaxRestore\(\);/.test(fnBody(main, 'winlinkEndSession')));
+  const on = fnBody(main, 'winlinkFlexDaxOn');
+  assert.ok(/_sendFlexTxDax\(true\)/.test(on) && !/claimTxStream/.test(on), 'sets dax=1 but never takes the DAX program\'s stream');
+});
+
 console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
