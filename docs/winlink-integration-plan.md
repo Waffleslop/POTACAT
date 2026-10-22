@@ -43,6 +43,16 @@ Added the same day (Casey: "ARDOP then AX.25"; VARA not offered in the first rel
 - ARDOP matcher fixed for ardopcf's 31-char names (real 26-device listing is a fixture); the
   connect URL is the gateway list's own (keeps `bw=2000MAX`).
 
+**ARDOP over Flex Direct / Icom Network (2026-10-22, after the first on-air try):** with the rig on
+DAX, ardopcf keyed in step and the radio's TX source was DAX, yet 0 W — the DAX TX endpoint took no
+audio from ardopcf (nor from ffplay). Same fragility Flex Direct exists to avoid, so ardopcf got a
+**socket audio backend** (`third_party/ardopcf/src/SocketAudio.c` + a generated patch): device
+`tcp:<port>` → it takes RX audio from, and sends TX audio to, `lib/modem-audio-server.js` on
+loopback (12 kHz s16, raw), which POTACAT feeds from the dax_rx / RS-BA1 frames and drains into
+dax_tx / RS-BA1 voice TX while the shim holds PTT. No DAX, no sound card, no device picking on
+those rigs. Packet (Dire Wolf) and Mercury still open a device; a Dire Wolf UDP/stdin variant is
+the natural next step. CI: winlink-helpers now compiles the backend on all runners.
+
 Still owed: a CI run of the helper builds (Dire Wolf's Windows build against the official
 Hamlib zip is the least certain step); Phase 0's live checks with a real account
 (telnet session, wrong password, registration); a dummy-load bench of the shim with real
