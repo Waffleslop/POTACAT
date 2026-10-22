@@ -186,7 +186,22 @@
       showReader(html);
       var rp = $('wl-reply'); if (rp) rp.onclick = function () { compose({ to: m.from, subject: /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject, body: '\n\n--- ' + m.from + ' wrote:\n' + (m.body || '').split('\n').map(function (l) { return '> ' + l; }).join('\n') }); };
       $('wl-fwd').onclick = function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); };
-      $('wl-del').onclick = function () {
+      // Delete asks first: the button becomes "Delete this message?" with a
+      // Cancel beside it, and reverts by itself after a few seconds.
+      var delBtn = $('wl-del');
+      var delArmed = null;
+      delBtn.onclick = function () {
+        if (!delArmed) {
+          delBtn.textContent = 'Delete this message?';
+          var cancel = document.createElement('button');
+          cancel.className = 'wl-btn'; cancel.textContent = 'Cancel'; cancel.id = 'wl-del-cancel';
+          delBtn.parentNode.insertBefore(cancel, delBtn);
+          var disarm = function () { if (!delArmed) return; clearTimeout(delArmed); delArmed = null; delBtn.textContent = 'Delete'; cancel.remove(); };
+          cancel.onclick = disarm;
+          delArmed = setTimeout(disarm, 5000);
+          return;
+        }
+        clearTimeout(delArmed); delArmed = null;
         window.api.del(box, mid).then(function (d) { if (d && d.ok) { openMid = null; showReader('<div class="wl-empty">Deleted.</div>'); } });
       };
       Array.prototype.forEach.call(document.querySelectorAll('.wl-att'), function (b) {
@@ -266,6 +281,33 @@
   var wf = null, wfMode = 'none', wfAcc = new Float32Array(WF_N), wfAccLen = 0, wfRate = 24000;
   var wfSpeed = 60, wfShown = true, wfHidden = false;
   var wfAvg = new Float32Array(WF_BINS), wfAvgN = 0, wfLastLineMs = 0;
+  // Busy: a signal in the modem's band that stands above the passband's noise
+  // floor. Floor = the 20th percentile of all bins (what empty spectrum looks
+  // like whatever the AGC does); band level = the 90th percentile of the
+  // marked bins; busy when that is ≥ 8 dB over the floor, held for 3 s so a
+  // pause between a station's overs still reads Busy.
+  var busyLoBin = 0, busyHiBin = WF_BINS, busyUntil = 0, busyPeakDb = 0, busyLastRender = 0;
+  var busySorted = new Float32Array(WF_BINS), busyBand = new Float32Array(WF_BINS);
+  function busyUpdate(mags) {
+    busySorted.set(mags); Array.prototype.sort.call(busySorted);
+    var floor = busySorted[(WF_BINS * 0.2) | 0];
+    var n = 0;
+    for (var b = busyLoBin; b < busyHiBin; b++) busyBand[n++] = mags[b];
+    if (!n) return;
+    var band = busyBand.subarray(0, n); Array.prototype.sort.call(band);
+    var level = band[(n * 0.9) | 0];
+    var db = (level - floor) * 4.3429; // mags are ln(power): 10·log10 = 4.343·ln
+    var now = performance.now();
+    if (db >= 8) { busyUntil = now + 3000; if (db > busyPeakDb) busyPeakDb = db; }
+    if (now - busyLastRender < 250) return;
+    busyLastRender = now;
+    var el = $('wl-wf-busy');
+    var busy = now < busyUntil;
+    if (!busy) busyPeakDb = 0;
+    el.className = 'wl-busy ' + (busy ? 'busy' : 'clear');
+    el.textContent = busy ? 'BUSY +' + Math.round(busyPeakDb) + ' dB' : 'Clear';
+    el.title = busy ? 'A signal in the modem’s band, ' + Math.round(busyPeakDb) + ' dB over the noise — wait, or pick another gateway' : 'Nothing above the noise in the modem’s band';
+  }
   var wfCtx = null, wfStream = null, wfAnalyser = null, wfTimer = null;
   var wfRe = new Float32Array(WF_N), wfIm = new Float32Array(WF_N), wfWin = null, wfMags = new Float32Array(WF_BINS);
 
@@ -311,6 +353,7 @@
     for (var i = 0; i < WF_N; i++) { wfRe[i] = wfAcc[i] * wfWin[i]; wfIm[i] = 0; }
     fft(wfRe, wfIm);
     for (var b = 0; b < WF_BINS; b++) wfMags[b] = Math.log(wfRe[b] * wfRe[b] + wfIm[b] * wfIm[b] + 1e-12);
+    busyUpdate(wfMags); // on every line, before any averaging
     if (wfSpeed >= 60) { wf.pushFrame(wfMags); return; }
     for (var k = 0; k < WF_BINS; k++) wfAvg[k] += wfMags[k];
     wfAvgN++;
@@ -340,6 +383,9 @@
     // ARDOP's signal sits on 1500 Hz, its bandwidth either side; packet (1200 baud AFSK) on 1200/2200.
     var bw = mode === 'ardop' ? (Number((state && state.ardopBw) || 500)) : 2000;
     var lo = (1500 - bw / 2) / 3000, hi = (1500 + bw / 2) / 3000;
+    if (mode === 'packet') { lo = 1000 / 3000; hi = 2400 / 3000; }
+    busyLoBin = Math.max(0, (lo * WF_BINS) | 0); busyHiBin = Math.min(WF_BINS, Math.ceil(hi * WF_BINS));
+    busyUntil = 0; busyPeakDb = 0; $('wl-wf-busy').className = 'wl-busy'; $('wl-wf-busy').textContent = '—';
     wf.setMarkers([{ pos: lo, color: [0.3, 0.8, 0.6, 0.8] }, { pos: hi, color: [0.3, 0.8, 0.6, 0.8] }]);
     $('wl-wf-note').textContent = mode === 'packet' ? 'Packet tones 1200 / 2200 Hz' : 'ARDOP centre 1500 Hz, ' + bw + ' Hz wide';
   }

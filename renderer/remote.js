@@ -14581,7 +14581,17 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailEl('mail-back').onclick = mailShowList;
     var rp = mailEl('mail-reply');
     if (rp) rp.onclick = function () { mailCompose(m.from, /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject); };
-    mailEl('mail-del').onclick = function () { mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList(); };
+    var delArmed = null;
+    mailEl('mail-del').onclick = function () {
+      var b = mailEl('mail-del');
+      if (!delArmed) {
+        b.textContent = 'Delete this message?';
+        delArmed = setTimeout(function () { delArmed = null; b.textContent = 'Delete'; }, 5000);
+        return;
+      }
+      clearTimeout(delArmed); delArmed = null;
+      mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
+    };
     Array.prototype.forEach.call(r.querySelectorAll('.mail-att'), function (b) {
       b.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: b.getAttribute('data-name') }); };
     });
