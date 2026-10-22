@@ -227,7 +227,10 @@ function waitFor(emitter, ev, ms = 5000) {
     has("ipcMain.handle('rotctld-list-models'");
   });
   await t('release builds ship rotctld beside rigctld on macOS and Linux; Windows has it in assets', () => {
-    const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8');
+    // The Intel mac job's helpers are built by a script it runs (Intel Homebrew
+    // under Rosetta, 2026-10-22), so read that beside the workflow.
+    const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8')
+      + fs.readFileSync(path.join(__dirname, '..', 'scripts', 'build-mac-x64-helpers.sh'), 'utf8');
     const count = (snippet) => yml.split(snippet).length - 1;
     assert.strictEqual(count('cp "$HAMLIB_PREFIX/bin/rotctld" assets/hamlib/rotctld'), 2, 'macOS jobs copy rotctld');
     assert.strictEqual(count('cp /usr/local/bin/rotctld assets/hamlib/rotctld'), 2, 'Linux jobs copy rotctld');

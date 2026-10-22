@@ -147,6 +147,13 @@ function bundle(binary) {
   }
 }
 
+/** A helper built for the wrong CPU cannot run at all on the Mac it ships to. */
+function archProblem(name, arch, expectArch) {
+  if (!expectArch) return null;
+  if (String(arch || '').split(/\s+/).includes(expectArch)) return null;
+  return `${name}: built for ${arch || 'an unknown architecture'}, expected ${expectArch} — it cannot run on that Mac (dyld error -86)`;
+}
+
 /**
  * The rule, as a pure function so it can be tested off a Mac: every load
  * command must resolve on a machine that has never heard of Homebrew.
@@ -187,13 +194,13 @@ function verify(dirs, expectArch) {
       checked++;
       const arch = archOf(file);
       console.log(`[bundle-mac-deps] ${path.join(path.basename(dir), entry)} (${arch})`);
-      if (expectArch && !arch.split(/\s+/).includes(expectArch)) {
-        // NOT fatal: the x64 job cross-compiles on an ARM runner, so `brew
-        // install hamlib` there yields arm64 helpers in the Intel DMG. Known
-        // and tracked (potacat-meta work/open/macos-x64-hamlib-arch.md) —
-        // this keeps it visible in every build log instead of silent.
-        console.log(`[bundle-mac-deps] WARNING: ${entry} is ${arch}, expected ${expectArch} — it cannot run on that Mac`);
-      }
+      // Fatal since 2026-10-22. It was a warning while the x64 job installed
+      // the ARM Homebrew, and every Intel Mac shipped an arm64 rigctld, rotctld
+      // and wsprd: "spawnSync … rigctld Unknown system error -86" (bad CPU
+      // type), so no Hamlib and no WSPR on Intel (KL4XQ's FT-818). The x64 job
+      // now builds them with the Intel Homebrew (scripts/build-mac-x64-helpers.sh).
+      const wrongArch = archProblem(entry, arch, expectArch);
+      if (wrongArch) problems.push(wrongArch);
       const deps = loadedDylibs(file);
       for (const dep of deps) console.log(`[bundle-mac-deps]     -> ${dep}`);
       entries.push({ name: entry, deps, shipped: present });
@@ -242,4 +249,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { bundleProblems, isSystem, isOurs };
+module.exports = { bundleProblems, archProblem, isSystem, isOurs };

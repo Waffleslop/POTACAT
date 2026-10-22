@@ -8,7 +8,9 @@
 // bundling ever regresses, these two shapes must still be rejected.
 'use strict';
 const assert = require('assert');
-const { bundleProblems, isSystem, isOurs } = require('../scripts/bundle-mac-deps');
+const fs = require('fs');
+const path = require('path');
+const { bundleProblems, archProblem, isSystem, isOurs } = require('../scripts/bundle-mac-deps');
 
 let passed = 0;
 function t(name, fn) {
@@ -116,6 +118,23 @@ t('ours means @loader_path, exactly', () => {
   assert.ok(isOurs('@loader_path/libhamlib.4.dylib'));
   assert.ok(!isOurs('@rpath/libhamlib.4.dylib'));
   assert.ok(!isOurs('/opt/homebrew/lib/libhamlib.4.dylib'));
+});
+
+t('a helper built for the wrong CPU fails the build (KL4XQ: arm64 rigctld in the Intel DMG, error -86)', () => {
+  assert.ok(/expected x86_64/.test(archProblem('rigctld', 'arm64', 'x86_64')));
+  assert.strictEqual(archProblem('rigctld', 'x86_64', 'x86_64'), null);
+  assert.strictEqual(archProblem('rigctld', 'x86_64 arm64', 'arm64'), null, 'a universal binary runs on both');
+  assert.strictEqual(archProblem('rigctld', 'arm64', null), null, 'no expectation, no verdict');
+});
+
+t('the Intel job builds its helpers with the Intel Homebrew (source guard)', () => {
+  const root = path.join(__dirname, '..');
+  const wf = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const x64 = wf.slice(wf.indexOf('build-macos-x64:'), wf.indexOf('  build-linux:'));
+  assert.ok(/scripts\/build-mac-x64-helpers\.sh/.test(x64), 'the x64 job runs the shared helper script');
+  assert.ok(!/^\s+brew install (hamlib|fftw)/m.test(x64), 'the ARM Homebrew must not build Intel helpers again');
+  const sh = fs.readFileSync(path.join(root, 'scripts/build-mac-x64-helpers.sh'), 'utf8');
+  assert.ok(/arch -x86_64/.test(sh) && /--expect-arch=x86_64/.test(sh));
 });
 
 console.log(`\n${passed} passed`);

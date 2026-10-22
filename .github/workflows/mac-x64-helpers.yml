@@ -1,0 +1,33 @@
+# Builds the Intel macOS helpers (rigctld, rotctld, wsprd) WITHOUT cutting a
+# release, with the same script the release's x64 job runs. Until 2026-10-22
+# that job shipped arm64 helpers in the Intel DMG (KL4XQ: "rigctld Unknown
+# system error -86"), and a release is the wrong place to find out the fix
+# does not build. Triggers on a change to the script, the bundler, or this
+# file, and on demand.
+name: mac x64 helpers
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/build-mac-x64-helpers.sh'
+      - 'scripts/bundle-mac-deps.js'
+      - '.github/workflows/mac-x64-helpers.yml'
+
+jobs:
+  build:
+    runs-on: macos-14 # ARM64, the same host as the release's x64 job
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build Intel helpers
+        run: bash scripts/build-mac-x64-helpers.sh
+      - name: Every shipped helper is x86_64
+        run: |
+          set -e
+          for f in assets/hamlib/rigctld assets/hamlib/rotctld assets/wsprd/wsprd; do
+            echo "$f: $(lipo -archs "$f")"
+            lipo -archs "$f" | grep -qw x86_64
+          done

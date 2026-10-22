@@ -201,8 +201,8 @@ jobs:
   # to the slow WASM decoder (N3VD 2026-07-10, late-start TX every cycle).
   # `--arch=x64` makes gyp emit ARCHS=x86_64; the verify step below fails the
   # release if the shipped decoder is ever the wrong arch again.
-  # KNOWN GAP: `brew install hamlib` on this ARM host bundles arm64 rigctld
-  # into the x64 DMG — tracked in potacat-meta work/open/macos-x64-hamlib-arch.md.
+  # Hamlib and wsprd come from an Intel Homebrew under Rosetta
+  # (scripts/build-mac-x64-helpers.sh) — the ARM one shipped arm64 helpers.
   build-macos-x64:
     runs-on: macos-14 # ARM64 host — x64 artifacts are cross-compiled
     steps:
@@ -234,42 +234,13 @@ jobs:
           test -f "$NODE_FILE"
           lipo -archs "$NODE_FILE"
           lipo -archs "$NODE_FILE" | grep -q x86_64
-      - name: Bundle hamlib into assets/hamlib/
-        # Same script as the arm64 job. NOTE the runner is ARM (macos-14),
-        # so brew installs the arm64 formula — the bundled rigctld is arm64
-        # inside the Intel DMG and the gate warns about it every build
-        # (potacat-meta work/open/macos-x64-hamlib-arch.md).
-        run: |
-          set -e
-          brew install hamlib
-          HAMLIB_PREFIX=$(brew --prefix hamlib)
-          rm -f assets/hamlib/*.dll assets/hamlib/*.exe
-          cp "$HAMLIB_PREFIX/bin/rigctld" assets/hamlib/rigctld
-          cp "$HAMLIB_PREFIX/bin/rotctld" assets/hamlib/rotctld   # Hamlib rotor control (KD9WI)
-          # Homebrew bakes ABSOLUTE Cellar paths into rigctld, so the copy
-          # above still loads /opt/homebrew/Cellar/hamlib/<ver>/lib/... — a
-          # path that exists on this runner and on no user's Mac. The script
-          # ships libhamlib/libusb alongside it, repoints the load commands at
-          # @loader_path, and FAILS THE BUILD if any absolute path survives.
-          # Hand-rolling that in shell is exactly what shipped a rigctld no
-          # Mac could launch, from the first release pipeline commit until
-          # WB0MMC reported "No rigs found" on 2026-08-31.
-          node scripts/bundle-mac-deps.js --expect-arch=x86_64 assets/hamlib/rigctld assets/hamlib/rotctld
-          ls -la assets/hamlib/
-      - name: Build wsprd (WSPR decoder — GPLv3 separate exe)
-        # NOTE: built for the RUNNER arch. On the cross-compiled x64 job this
-        # bundles an arm64 wsprd — same known gap as hamlib there (tracked in
-        # potacat-meta work/open/macos-x64-hamlib-arch.md).
-        run: |
-          brew install fftw gcc
-          gfortran -O3 -o assets/wsprd/wsprd third_party/wsprd/src/*.c third_party/wsprd/src/*.f90 -I"$(brew --prefix fftw)/include" "$(brew --prefix fftw)/lib/libfftw3f.a" -lm -static-libgfortran -static-libgcc
-          test -f assets/wsprd/wsprd
-          # -static-libgfortran/-static-libgcc do NOT cover libquadmath: wsprd
-          # shipped linked to /opt/homebrew/opt/gcc/.../libquadmath.0.dylib and
-          # died in dyld on every Mac, exactly the way rigctld did (found
-          # 2026-08-31 while fixing that one). assets/wsprd's extraResources
-          # filter already ships *.dylib, so the bundled copy rides along.
-          node scripts/bundle-mac-deps.js --expect-arch=x86_64 assets/wsprd/wsprd
+      - name: Build Intel helpers (rigctld, rotctld, wsprd) with the Intel Homebrew
+        # This runner is ARM: its Homebrew gave the Intel DMG arm64 helpers
+        # until 2026-10-22 ("rigctld Unknown system error -86" on every Intel
+        # Mac, KL4XQ). The script installs an x86_64 Homebrew under Rosetta,
+        # builds/bundles from it, and bundle-mac-deps FAILS the build on any
+        # absolute library path or any helper that is not x86_64.
+        run: bash scripts/build-mac-x64-helpers.sh
       - name: Build yaesu-scope (FT-710 band-scope helper; loads FTDI at run time, no SDK)
         run: |
           clang -O2 -Wall -arch x86_64 -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -lpthread -lm
