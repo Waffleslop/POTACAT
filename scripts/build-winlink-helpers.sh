@@ -60,9 +60,13 @@ checkout() { # repo tag sha dir
 if [[ " $want " == *" pat "* ]]; then
   checkout "$PAT_REPO" "$PAT_TAG" "$PAT_SHA" "$WORK/pat"
   mkdir -p "$ROOT/assets/pat"
-  # CGO off: one static binary per OS/arch, no libax25 (AX.25 is not a
-  # transport POTACAT offers). The web UI is committed at the tag (web/dist).
-  ( cd "$WORK/pat" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$ROOT/assets/pat/pat$EXE" . )
+  # CGO off on Windows/Linux: one static binary, no libax25 (POTACAT's packet
+  # goes through Dire Wolf's AGWPE port, not kernel AX.25). macOS needs CGO
+  # on: the serial library Pat imports reads termios through cgo there (CI
+  # 2026-10-22: "retrieveTermSettings undefined" with CGO off), and Pat's own
+  # macOS builds are cgo builds. The web UI is committed at the tag (web/dist).
+  CGO=0; [ "$HOST" = mac ] && CGO=1
+  ( cd "$WORK/pat" && CGO_ENABLED=$CGO go build -trimpath -ldflags "-s -w" -o "$ROOT/assets/pat/pat$EXE" . )
   test -f "$ROOT/assets/pat/pat$EXE"
   "$ROOT/assets/pat/pat$EXE" version || true
   cp "$WORK/pat/LICENSE" "$ROOT/third_party/pat/LICENSE"
@@ -75,11 +79,14 @@ if [[ " $want " == *" ardop "* ]]; then
   else
     checkout "$ARDOP_REPO" "$ARDOP_TAG" "$ARDOP_SHA" "$WORK/ardop"
     mkdir -p "$ROOT/assets/ardopcf"
-    # Static on Windows so no MinGW runtime DLL has to ship beside it.
+    # C17: GCC 15 (current MSYS2) defaults to C23, where ardopcf's old-style
+    # "f()" declarations mean "no arguments" and ws_server.c fails to build;
+    # its own releases use GCC 14. Static on Windows so no MinGW runtime DLL
+    # has to ship beside it.
     if [ "$HOST" = win ]; then
-      ( cd "$WORK/ardop" && make ardopcf LDFLAGS="-Xlinker -Map=output.map -static" )
+      ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" LDFLAGS="-Xlinker -Map=output.map -static" )
     else
-      ( cd "$WORK/ardop" && make ardopcf )
+      ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" )
     fi
     cp "$WORK/ardop/ardopcf$EXE" "$ROOT/assets/ardopcf/ardopcf$EXE"
     test -f "$ROOT/assets/ardopcf/ardopcf$EXE"
@@ -101,7 +108,8 @@ if [[ " $want " == *" direwolf "* ]]; then
       echo "$HAMLIB_WIN_SHA256  $WORK/hamlib.zip" | sha256sum -c -
       rm -rf "$WORK/hamlib" && mkdir -p "$WORK/hamlib" && unzip -q "$WORK/hamlib.zip" -d "$WORK/hamlib"
       HL="$WORK/hamlib/hamlib-w64-4.7.0"
-      ( cd "$WORK/direwolf/build" && cmake -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release \
+      # gnu17 for the same GCC 15 / C23 reason as ardopcf.
+      ( cd "$WORK/direwolf/build" && CFLAGS="-std=gnu17" cmake -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release \
           -DHAMLIB_INCLUDE_DIR="$HL/include" -DHAMLIB_LIBRARY="$HL/lib/gcc/libhamlib.dll.a" .. && make -j4 direwolf )
       cp "$WORK/direwolf/build/src/direwolf.exe" "$OUT/"
       # Its runtime: Hamlib and what Hamlib needs, from the same zip.
