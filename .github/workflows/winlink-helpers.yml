@@ -1,0 +1,94 @@
+# Builds the Winlink sidecars (Pat, ardopcf, Dire Wolf) on every release
+# runner WITHOUT cutting a release, with the same script the release jobs run
+# (scripts/build-winlink-helpers.sh). A release is the wrong place to find out
+# that Dire Wolf will not link the Hamlib zip on Windows. Triggers on a change
+# to the script or this file, and on demand. Then smoke-tests each binary.
+name: winlink helpers
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/build-winlink-helpers.sh'
+      - '.github/workflows/winlink-helpers.yml'
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Pat
+        shell: bash
+        run: bash scripts/build-winlink-helpers.sh pat
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake make git unzip
+      - name: ardopcf + Dire Wolf
+        shell: msys2 {0}
+        run: bash scripts/build-winlink-helpers.sh ardop direwolf
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -e
+          ./assets/pat/pat.exe version
+          ./assets/ardopcf/ardopcf.exe -h | head -3 || true
+          ls -la assets/direwolf
+          ./assets/direwolf/direwolf.exe -h 2>&1 | head -3 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winlink-helpers-windows
+          path: |
+            assets/pat/pat.exe
+            assets/ardopcf/ardopcf.exe
+            assets/direwolf/
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build all three
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libasound2-dev libhamlib-dev cmake patchelf
+          bash scripts/build-winlink-helpers.sh pat ardop direwolf
+      - name: Smoke test
+        run: |
+          set -e
+          ./assets/pat/pat version
+          ./assets/ardopcf/ardopcf -h | head -3 || true
+          ldd assets/direwolf/direwolf | grep -i hamlib
+          ./assets/direwolf/direwolf -h 2>&1 | head -3 || true
+
+  mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-14, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Pat (ardopcf and Dire Wolf are not built on macOS yet)
+        run: bash scripts/build-winlink-helpers.sh pat
+      - name: Smoke test
+        run: |
+          ./assets/pat/pat version
+          file assets/pat/pat
