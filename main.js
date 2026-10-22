@@ -3521,6 +3521,7 @@ function sendCatFwdPower(watts) {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', v);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', v);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-fwd-power', v);
+    if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-fwd-power', v);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: v });
   };
   push(_fwdPowerHold.sample(w));
@@ -3688,6 +3689,7 @@ function sendCatSwr(val) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-swr', val);
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-swr', val);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-swr', val);
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-swr', val);
   _currentSwr = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr', value: val });
 }
@@ -3774,6 +3776,7 @@ function broadcastRigState() {
   sendVfoState();
   broadcastRemoteRadioStatus();
   pushJtcatPopoutRigPower();
+  pushWinlinkRigPower();
 }
 
 // The JTCAT popout's "TX Pwr" slider is the RADIO's RF power, in watts, and
@@ -3802,6 +3805,15 @@ function jtcatPopoutRigPowerPayload() {
     powerDecimals: caps.powerDecimals != null ? caps.powerDecimals : 0,
     powerChoices: Array.isArray(caps.powerChoices) ? caps.powerChoices : null,
   };
+}
+let _winlinkRigPowerSig = '';
+function pushWinlinkRigPower(force) {
+  if (!winlinkPopoutWin || winlinkPopoutWin.isDestroyed()) { _winlinkRigPowerSig = ''; return; }
+  const payload = jtcatPopoutRigPowerPayload();
+  const sig = JSON.stringify(payload);
+  if (!force && sig === _winlinkRigPowerSig) return;
+  _winlinkRigPowerSig = sig;
+  try { winlinkPopoutWin.webContents.send('winlink-rig-power', payload); } catch {}
 }
 function pushJtcatPopoutRigPower(force) {
   if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed()) { _jtcatPopoutRigPowerSig = ''; return; }
@@ -15713,6 +15725,7 @@ function connectSmartSdr() {
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-swr-ratio', swr);
+    if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-swr-ratio', swr);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: swr });
     // SWR guard: these frames only flow during TX (src=TX- bridge meter), so
@@ -32235,7 +32248,24 @@ app.whenReady().then(() => {
     winlinkPopoutWin.show();
     winlinkPopoutWin.setMenuBarVisibility(false);
     winlinkPopoutWin.loadFile(path.join(__dirname, 'renderer', 'winlink-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
+    // Position and size are saved on every move/resize (debounced), not only
+    // on close, so they survive a quit with the window open or a kill.
+    let winlinkBoundsTimer = null;
+    const saveWinlinkBounds = () => {
+      if (!winlinkPopoutWin || winlinkPopoutWin.isDestroyed()) return;
+      if (winlinkPopoutWin.isMaximized() || winlinkPopoutWin.isMinimized()) return;
+      if (winlinkBoundsTimer) clearTimeout(winlinkBoundsTimer);
+      winlinkBoundsTimer = setTimeout(() => {
+        winlinkBoundsTimer = null;
+        if (!winlinkPopoutWin || winlinkPopoutWin.isDestroyed()) return;
+        settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds();
+        saveSettings(settings);
+      }, 400);
+    };
+    winlinkPopoutWin.on('resize', saveWinlinkBounds);
+    winlinkPopoutWin.on('move', saveWinlinkBounds);
     winlinkPopoutWin.on('close', () => {
+      if (winlinkBoundsTimer) clearTimeout(winlinkBoundsTimer);
       if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed() && !winlinkPopoutWin.isMaximized() && !winlinkPopoutWin.isMinimized()) {
         settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
       }
@@ -32246,6 +32276,7 @@ app.whenReady().then(() => {
       for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
       winlinkPopoutSend('winlink-session', { ...winlinkState.session, remainingSec: winlinkState.remainingSec() });
       winlinkPopoutSend('winlink-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
+      pushWinlinkRigPower(true);
     });
     winlinkPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') winlinkPopoutWin.webContents.toggleDevTools();

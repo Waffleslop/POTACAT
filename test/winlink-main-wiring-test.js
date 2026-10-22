@@ -167,3 +167,22 @@ test('Pat and ardopcf are packaged, attributed and pinned', () => {
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
+
+console.log('power and SWR in the mail window');
+test('the mail window gets the RF power setting, forward power and SWR, and sets power through rig-control', () => {
+  // The same payload the JTCAT window gets, pushed from broadcastRigState and on load.
+  assert.ok(/function pushWinlinkRigPower\(force\)[\s\S]*jtcatPopoutRigPowerPayload\(\)[\s\S]*'winlink-rig-power'/.test(main));
+  assert.ok(/pushJtcatPopoutRigPower\(\);\n\s*pushWinlinkRigPower\(\);/.test(main), 'pushed beside the JTCAT window\'s');
+  assert.ok(/pushWinlinkRigPower\(true\);/.test(main), 'pushed on did-finish-load');
+  for (const ch of ['cat-fwd-power', 'cat-swr', 'cat-swr-ratio']) {
+    assert.ok(main.includes(`winlinkPopoutWin.webContents.send('${ch}'`), `${ch} reaches the mail window`);
+  }
+  const pre = read('preload-winlink-popout.js');
+  assert.ok(/rigControl: \(d\) => ipcRenderer\.invoke\('rig-control', d\)/.test(pre), 'power is set through the ONE dispatcher');
+  const popout = read('renderer/winlink-popout.js');
+  assert.ok(/action: 'set-tx-power'/.test(popout));
+  assert.ok(/onCatSwrRatio/.test(popout) && /onCatFwdPower/.test(popout));
+  // Position and size: saved on move/resize as well as close.
+  assert.ok(/winlinkPopoutWin\.on\('resize', saveWinlinkBounds\);\n\s*winlinkPopoutWin\.on\('move', saveWinlinkBounds\);/.test(main));
+  assert.ok(/settings\.winlinkPopoutBounds = winlinkPopoutWin\.getBounds\(\); saveSettings\(settings\);/.test(main));
+});

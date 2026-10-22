@@ -52,6 +52,15 @@ contextBridge.exposeInMainWorld('api', {
   openSettings: () => ipcRenderer.send('winlink-open-settings'),
   openFolder: () => ipcRenderer.send('winlink-open-folder'),
 
+  // The radio: RF power setting (same payload as the JTCAT window), the
+  // measured forward power and SWR, and the ONE dispatcher every surface
+  // sets power through (rig-control set-tx-power).
+  rigControl: (d) => ipcRenderer.invoke('rig-control', d),
+  onRigPower: (cb) => ipcRenderer.on('winlink-rig-power', (_e, p) => cb(p)),
+  onCatFwdPower: (cb) => ipcRenderer.on('cat-fwd-power', (_e, v) => cb(v)),
+  onCatSwr: (cb) => ipcRenderer.on('cat-swr', (_e, v) => cb(v)),
+  onCatSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, v) => cb(v)),
+
   // Events
   onState: (cb) => ipcRenderer.on('winlink-state', (_e, d) => cb(d)),
   onMailbox: (cb) => ipcRenderer.on('winlink-mailbox', (_e, d) => cb(d)),

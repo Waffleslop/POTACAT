@@ -66,6 +66,13 @@
     .wl-bar { flex: 0 0 120px; height: 6px; background: var(--bg-tertiary, #2a2a40); border-radius: 3px; overflow: hidden; }
     .wl-bar > div { height: 100%; width: 0; background: var(--accent-blue, #4fc3f7); }
     .wl-text { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .wl-rig { display: inline-flex; gap: 10px; align-items: center; font-size: 12px; white-space: nowrap; }
+    .wl-rig label { color: var(--text-dim); }
+    .wl-rig input, .wl-rig select { font-size: 12px; padding: 1px 4px; }
+    .wl-meter { font-family: monospace; min-width: 70px; color: var(--text-dim); }
+    .wl-meter.live { color: var(--accent-green, #4ecca3); font-weight: 700; }
+    .wl-meter.high { color: #e94560; font-weight: 700; }
+    .hidden { display: none !important; }
     .wl-prompt { display: none; gap: 6px; align-items: center; padding: 6px 10px; background: #3a2f10; color: #f0c040; border-bottom: 1px solid var(--border-primary); font-size: 12px; }
     .wl-prompt.show { display: flex; }
     .light .wl-prompt { background: #fff4d6; color: #7a5600; }
@@ -158,6 +165,11 @@
     <div class="wl-bar"><div id="wl-bar"></div></div>
     <span class="wl-text" id="wl-text"></span>
     <span id="wl-remaining"></span>
+    <span class="wl-rig">
+      <label title="The radio's RF power setting">Power <input type="number" id="wl-pwr" min="1" max="100" step="1" style="width:52px;"><select id="wl-pwr-sel" class="hidden"></select> W</label>
+      <span class="wl-meter" id="wl-fwd" title="Measured forward power">PWR —</span>
+      <span class="wl-meter" id="wl-swr" title="Measured SWR">SWR —</span>
+    </span>
   </div>
   <div class="wl-prompt" id="wl-prompt">
     <span id="wl-prompt-text"></span>

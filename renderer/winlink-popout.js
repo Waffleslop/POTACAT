@@ -564,6 +564,53 @@
     });
   }
 
+  // ── the radio: power setting, forward power, SWR ──────────────────────────
+  var pwrIn = $('wl-pwr'), pwrSel = $('wl-pwr-sel'), pwrTimer = null, pwrEditing = false, pwrLast = null;
+  function renderRigPower(p) {
+    if (!p) return;
+    pwrLast = p;
+    var choices = Array.isArray(p.powerChoices) && p.powerChoices.length ? p.powerChoices : null;
+    pwrSel.classList.toggle('hidden', !choices);
+    pwrIn.classList.toggle('hidden', !!choices);
+    if (choices) {
+      if (pwrSel.options.length !== choices.length) pwrSel.innerHTML = choices.map(function (w) { return '<option value="' + w + '">' + w + '</option>'; }).join('');
+      if (p.known) pwrSel.value = String(p.watts);
+      pwrSel.disabled = !p.settable;
+    } else {
+      pwrIn.min = p.minPower != null ? p.minPower : 1; pwrIn.max = p.maxPower != null ? p.maxPower : 100; pwrIn.step = p.powerStep || 1;
+      if (p.known && !pwrEditing) pwrIn.value = p.powerDecimals ? Number(p.watts).toFixed(p.powerDecimals) : String(Math.round(p.watts));
+      pwrIn.disabled = !p.settable;
+    }
+    pwrIn.title = p.settable ? 'The radio\'s RF power setting' : 'This radio does not take a power setting over CAT';
+  }
+  function sendPower(v) {
+    var w = Number(v);
+    if (!isFinite(w) || w <= 0) return;
+    window.api.rigControl({ action: 'set-tx-power', value: w }).then(function (r) {
+      if (r && r.ok === false && r.error) $('wl-text').textContent = r.error;
+    });
+  }
+  pwrIn.addEventListener('focus', function () { pwrEditing = true; });
+  pwrIn.addEventListener('blur', function () { pwrEditing = false; if (pwrLast) renderRigPower(pwrLast); });
+  pwrIn.addEventListener('input', function () { clearTimeout(pwrTimer); pwrTimer = setTimeout(function () { sendPower(pwrIn.value); }, 400); });
+  pwrIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { clearTimeout(pwrTimer); sendPower(pwrIn.value); pwrIn.blur(); } });
+  pwrSel.addEventListener('change', function () { sendPower(pwrSel.value); });
+  window.api.onRigPower(renderRigPower);
+  var fwdEl = $('wl-fwd'), swrEl = $('wl-swr'), swrRatioSeen = false;
+  window.api.onCatFwdPower(function (v) {
+    var w = Number(v) || 0;
+    fwdEl.textContent = w > 0 ? 'PWR ' + (w >= 10 ? Math.round(w) : w.toFixed(1)) + ' W' : 'PWR —';
+    fwdEl.className = 'wl-meter' + (w > 0 ? ' live' : '');
+  });
+  function showSwr(r) {
+    if (!(r > 0)) { swrEl.textContent = 'SWR —'; swrEl.className = 'wl-meter'; return; }
+    swrEl.textContent = 'SWR ' + r.toFixed(1);
+    swrEl.className = 'wl-meter ' + (r >= 3 ? 'high' : 'live');
+  }
+  // cat-swr is the Flex-style 0-255 wire value; cat-swr-ratio the true ratio and wins when it arrives.
+  window.api.onCatSwr(function (v) { if (swrRatioSeen) return; var n = Number(v) || 0; showSwr(n > 0 ? 1 + n / 60 : 0); });
+  window.api.onCatSwrRatio(function (v) { swrRatioSeen = true; showSwr(Number(v) || 0); });
+
   // ── wiring ───────────────────────────────────────────────────────────────
   window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); });
   window.api.onSession(function (ss) { if (state) state.session = ss; renderSession(ss); });
