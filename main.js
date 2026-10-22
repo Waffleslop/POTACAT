@@ -8664,6 +8664,7 @@ async function spawnDirewolf() {
   if (!DirewolfProcess.direwolfSupported(process.platform)) throw new Error('Packet on macOS is not ready yet');
   if (!_winlinkShimPort) throw new Error('The radio control shim is not running — restart Winlink');
   const labels = winlinkArdopLabels();
+  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('Pick the radio\'s sound devices first: Settings > Station > Winlink > Find the radio\'s sound devices');
   const listing = await listArdopDevices();
   if (!listing.ok) throw new Error(listing.error);
   const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
@@ -8746,11 +8747,12 @@ async function spawnArdop() {
   killArdop();
   if (!ArdopProcess.ardopSupported(process.platform)) throw new Error('ARDOP (ardopcf) has no macOS build');
   const labels = winlinkArdopLabels();
+  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('Pick the radio\'s sound devices first: Settings > Station > Winlink > Find the radio\'s sound devices');
   const listing = await listArdopDevices();
   if (!listing.ok) throw new Error(listing.error);
   const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
   if (!r.ok) {
-    throw new Error(`ARDOP audio device missing: ${r.missing.join(', ')} not in ardopcf's list (${listing.devices.capture.length} capture, ${listing.devices.playback.length} playback) — pick them in Settings > Station > Winlink`);
+    throw new Error(`The radio's sound device is not connected now: ${r.missing.join(', ')} is not in the device list (${listing.devices.capture.length} capture, ${listing.devices.playback.length} playback) — pick them in Settings > Station > Winlink`);
   }
   const p = winlinkPaths();
   fs.mkdirSync(p.ardopLogs, { recursive: true });
@@ -8868,6 +8870,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         // fires and the operator sees the move before Pat keys anything.
         // Packet is FM (an Icom keys it in FM-D through forceDataMode); HF modems are USB data.
         tuneRadio(Number(dialKhz), mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
+        winlinkState.setSession({ tuned: true });
         _winlinkShimArmed = true;
         _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`), capMin * 60000);
         _winlinkWatchdog = setInterval(() => {
@@ -8927,7 +8930,7 @@ function winlinkEndSession(state, text, received = 0) {
     if (s.mode === 'packet') killDirewolf();
     if (s.mode === 'mercury') winlinkTakeMercuryBack();
     // Pat QSXes the dial back itself; POTACAT puts the MODE back too.
-    if (s.returnTo && s.returnTo.mode && s.returnTo.freqHz) {
+    if (s.tuned && s.returnTo && s.returnTo.mode && s.returnTo.freqHz) {
       setTimeout(() => { try { tuneRadio(s.returnTo.freqHz / 1000, s.returnTo.mode, undefined, { origin: 'Winlink session ended' }); } catch {} }, 1500);
     }
     releaseRadio('winlink');
