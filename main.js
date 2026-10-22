@@ -2144,7 +2144,7 @@ function setTypedCall(source, call) {
   if (remoteServer && remoteServer.running) remoteServer.sendTypedCall(now);
 }
 let _currentRfGain = 0;
-let _currentAfGain = null; // 0–100, the last AF level POTACAT SENT — no CAT protocol here reads it back
+let _currentAfGain = null; // 0–100: the radio's readback where the codec has one (Yaesu AG0;), else the last level POTACAT SENT
 let _currentSquelch = 0; // FM squelch threshold 0-100 (see applyRigControl 'set-squelch')
 let _currentTxPower = 0; // 0 = unknown until radio reports actual power
 let _vfoLocked = false;  // VFO lock — blocks tune requests from spots/table/map
@@ -3548,6 +3548,7 @@ function bindRigStateEvents(controller) {
   if (!controller || controller._potacatRigStateEventsBound) return;
   controller._potacatRigStateEventsBound = true;
   controller.on('rfgain', sendCatRfGain);
+  controller.on('afgain', (v) => { if (v !== _currentAfGain) { _currentAfGain = v; broadcastRigState(); } });
   controller.on('nbLevel', sendCatNbLevel);
   controller.on('nr', sendCatNr);
   controller.on('nrLevel', sendCatNrLevel);

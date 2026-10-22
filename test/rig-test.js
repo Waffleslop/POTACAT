@@ -141,6 +141,22 @@ test('Yaesu setRfGain 50% -> RG0128; (50*2.55=127.5->128)', () => {
   assert.ok(writes[0] === 'RG0127;' || writes[0] === 'RG0128;', `Got: ${writes[0]}`);
 });
 
+test('Yaesu reads RF and AF gain back (rig preset "Use current", FT-710 2026-10-22)', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
+  codec.getRfGain();
+  codec.getAfGain();
+  assert.deepStrictEqual(writes, ['RG0;', 'AG0;']);
+  let rf = null, af = null;
+  codec.on('rfgain', (v) => { rf = v; });
+  codec.on('afgain', (v) => { af = v; });
+  codec.onData('RG0128;AG0000;');
+  assert.strictEqual(rf, 50);
+  assert.strictEqual(af, 0);
+  const { codec: k, writes: kw } = captureWrites(KenwoodCodec, { protocol: 'kenwood' });
+  k.getAfGain();
+  assert.strictEqual(kw.length, 0, 'Kenwood table has no AF read — unchanged');
+});
+
 test('Yaesu setTxPower clamps to min 5W', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   codec.setTxPower(0);
