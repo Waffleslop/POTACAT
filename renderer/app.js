@@ -2490,13 +2490,18 @@ let editingRigId = null;
 let currentRigs = []; // local copy of settings.rigs
 // The ARDOP device picks belong to the ACTIVE rig (a different radio has a
 // different sound card); stamped onto it at Save.
+// Stamped IN PLACE on currentRigs: the rig editor saves currentRigs as is,
+// so a stamp on a copy would be lost by the next rig edit.
 function winlinkStampRigAudio(rigs) {
   if (!setWinlinkArdopIn || !Array.isArray(rigs)) return rigs;
   const cap = setWinlinkArdopIn.value, play = setWinlinkArdopOut.value;
   const drive = Math.max(1, Math.min(100, parseInt(setWinlinkArdopDrive.value, 10) || 90));
-  return rigs.map((r) => (r && r.id === currentActiveRigId && (cap || play || r.winlinkAudio))
-    ? { ...r, winlinkAudio: { captureLabel: cap || '', playbackLabel: play || '', driveLevel: drive } }
-    : r);
+  for (const r of rigs) {
+    if (r && r.id === currentActiveRigId && (cap || play)) {
+      r.winlinkAudio = { captureLabel: cap || '', playbackLabel: play || '', driveLevel: drive };
+    }
+  }
+  return rigs;
 }
 let currentActiveRigId = null; // local copy of settings.activeRigId
 let rigModelData = []; // populated from main process on first use
