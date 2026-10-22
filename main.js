@@ -8737,7 +8737,7 @@ function winlinkSessionPush() {
  * the pop-out's Connect and ECHOCAT's winlink-connect, both operator actions.
  * @returns {{ok:boolean, error?:string, reason?:string}}
  */
-async function winlinkStartSession({ mode, gateway, dialKhz, origin } = {}) {
+async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin } = {}) {
   if (!settings.enableWinlink) return { ok: false, error: 'Winlink is off — turn it on in Settings > Station', reason: 'disabled' };
   if (!patClient || !winlinkState.snapshot().patReady) return { ok: false, error: 'Pat is not running yet' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
@@ -8748,7 +8748,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, origin } = {}) {
   if (!m) return { ok: false, error: `Unknown mode ${mode}` };
   if (!m.available) return { ok: false, error: m.reason, reason: 'unavailable' };
   const radio = WinlinkModes.isRadioMode(mode);
-  const url = WinlinkPat.connectUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined });
+  const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, rowUrl });
   if (!url) return { ok: false, error: 'Pick a gateway first' };
   if (radio) {
     if (!_winlinkShimPort) return { ok: false, error: 'The radio control shim is not running — restart Winlink' };
@@ -9033,7 +9033,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
       }
       case 'winlink-connect':
         // An operator's tap on the phone — the same Connect as the window's.
-        result('connect', await winlinkStartSession({ mode: req.mode, gateway: req.gateway, dialKhz: req.dialKhz, origin: 'ECHOCAT device' }));
+        result('connect', await winlinkStartSession({ mode: req.mode, gateway: req.gateway, dialKhz: req.dialKhz, url: req.url, origin: 'ECHOCAT device' }));
         return;
       case 'winlink-abort':
         winlinkAbortSession('stopped from an ECHOCAT device');
@@ -32342,7 +32342,7 @@ app.whenReady().then(() => {
   ipcMain.handle('winlink-cmd-posreport', (_e, o = {}) => winlinkPosReport(o));
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
     if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
-    return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, origin: 'mail window' });
+    return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, url: o.url, origin: 'mail window' });
   });
   ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator'));
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });

@@ -291,7 +291,7 @@
       if (m.id !== 'telnet') {
         var g = gateways[parseInt($('wl-gateway').value, 10)];
         if (!g) { $('wl-text').textContent = 'Pick a gateway first'; return; }
-        o.gateway = g.call; o.dialKhz = g.dialKhz;
+        o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
       }
       window.api.connect(o).then(function (r) {
         if (r && !r.ok) { $('wl-text').textContent = r.error || 'Could not start'; $('wl-text').style.color = '#e94560'; }

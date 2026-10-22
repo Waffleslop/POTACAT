@@ -14648,7 +14648,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
         if (mode !== 'telnet') {
           var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
           if (!g) { showToast('Pick a gateway first', 3000, true); return; }
-          o.gateway = g.call; o.dialKhz = g.dialKhz;
+          o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
         }
         mailSend(o);
       });

@@ -81,6 +81,18 @@ test('a gateway that is not a callsign is refused', () => {
   assert.strictEqual(W.connectUrl({ mode: 'pactor', gateway: 'W1AW' }), null);
 });
 
+test('a list row URL is used when it names the same gateway and transport (keeps bw=2000MAX)', () => {
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, rowUrl: 'ardop:///KG4OCM?bw=2000MAX&freq=7102.1' }), 'ardop:///KG4OCM?bw=2000MAX&freq=7102.1');
+  assert.strictEqual(W.sessionUrl({ mode: 'mercury', gateway: 'K7EK-10', dialKhz: 14105, rowUrl: 'varahf:///K7EK-10?bw=2300&freq=14105' }), 'varahf:///K7EK-10?bw=2300&freq=14105');
+});
+test('a row URL for another gateway, another transport or a host is ignored', () => {
+  const built = 'ardop:///KG4OCM?freq=7102.1';
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, rowUrl: 'ardop:///W1AW-10?bw=2000MAX&freq=7101' }), built);
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, rowUrl: 'varahf:///KG4OCM?freq=7102.1' }), built);
+  assert.strictEqual(W.sessionUrl({ mode: 'ardop', gateway: 'KG4OCM', dialKhz: 7102.1, rowUrl: 'telnet://evil.example.com:8772/wl2k' }), built);
+  assert.strictEqual(W.sessionUrl({ mode: 'telnet', rowUrl: 'ardop:///KG4OCM' }), 'telnet');
+});
+
 console.log('rmslist');
 const RMS = [
   { callsign: 'W1AW-10', gridsquare: 'FN31', distance: 120.4, azimuth: 45.6, modes: 'ARDOP 2000', freq: { hz: 7103000, khz: 7103 }, dial: { hz: 7101500, khz: 7101.5 }, url: 'ardop:///W1AW-10?freq=7101.5', prediction: { link_quality: 72 } },
