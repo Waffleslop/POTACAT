@@ -1,0 +1,63 @@
+
+
+ardopcf Version 1.0.4.1.3 (https://www.github.com/pflarue/ardop)
+Copyright (c) 2014-2024 Rick Muething, John Wiseman, Peter LaRue
+See https://github.com/pflarue/ardop/blob/master/LICENSE for licence details including
+  information about authors of external libraries used and their licenses.
+Capture Devices
+0 Mic In (Elgato Wave:3)
+1 DAX RX 5 (FlexRadio DAX)
+2 Voicemeeter Out A5 (VB-Audio Vo
+3 Wave Link Stream (Elgato Wave:3
+4 DAX IQ 1 (FlexRadio DAX)
+5 Wave Link Monitor (Elgato Wave:
+6 DAX RX 4 (FlexRadio DAX)
+7 DAX RX 1 (FlexRadio DAX)
+8 Voicemeeter Out B2 (VB-Audio Vo
+9 DAX IQ RX 2 (FlexRadio Systems 
+10 DAX IQ RX 3 (FlexRadio Systems 
+11 DAX IQ 4 (FlexRadio DAX)
+12 DAX Mic (FlexRadio DAX)
+13 DAX RX 2 (FlexRadio DAX)
+14 DAX RX 3 (FlexRadio DAX)
+15 DAX IQ 3 (FlexRadio DAX)
+16 Voicemeeter Out A2 (VB-Audio Vo
+17 Voicemeeter Out A3 (VB-Audio Vo
+18 VoiceMeeter Output (2- VB-Audio
+19 DAX Audio RX 6 (FlexRadio Syste
+20 DAX Audio RX 8 (FlexRadio Syste
+21 DAX RX 6 (FlexRadio DAX)
+22 DAX Audio RX 5 (FlexRadio Syste
+23 DAX IQ RX 4 (FlexRadio Systems 
+24 DAX IQ 2 (FlexRadio DAX)
+25 DAX Audio RX 7 (FlexRadio Syste
+26 Voicemeeter Out B3 (VB-Audio Vo
+27 Wave Link MicrophoneFX (Elgato 
+28 Voicemeeter Out B1 (VB-Audio Vo
+29 DAX MIC Audio (FlexRadio System
+30 DAX Audio RX 2 (FlexRadio Syste
+31 Voicemeeter Out A1 (VB-Audio Vo
+32 DAX RX 7 (FlexRadio DAX)
+33 DAX Audio RX 3 (FlexRadio Syste
+34 DAX RX 8 (FlexRadio DAX)
+35 DAX Audio RX 1 (FlexRadio Syste
+36 DAX IQ RX 1 (FlexRadio Systems 
+37 DAX RESERVED AUDIO TX (FlexRadi
+38 Voicemeeter Out A4 (VB-Audio Vo
+Playback Devices
+0 Digital Audio (S/PDIF) (High De
+1 PA248QV (NVIDIA High Definition
+2 Voicemeeter In 4 (VB-Audio Voic
+3 Voicemeeter Input (VB-Audio Voi
+4 Voicemeeter VAIO3 Input (VB-Aud
+5 VoiceMeeter Input (2- VB-Audio 
+6 Voicemeeter AUX Input (VB-Audio
+7 Headphones (Elgato Wave:3)
+8 Voicemeeter In 3 (VB-Audio Voic
+9 Voicemeeter In 1 (VB-Audio Voic
+10 VG278 (NVIDIA High Definition A
+11 Voicemeeter In 2 (VB-Audio Voic
+12 DAX TX (FlexRadio DAX)
+13 Voicemeeter In 5 (VB-Audio Voic
+ERROR: playbackdevice = 'POTACAT-LIST-DEVICES' not found.  Try using one of the names or numbers (0-13) listed above.
+Error in InitSound().  Stopping ardop.

@@ -185,6 +185,13 @@ async function test(name, fn) {
     const unsure = A.proposeArdopDevices({ devices: { capture: [{ id: '1', name: 'USB Audio CODEC' }, { id: '2', name: 'USB Audio CODEC' }], playback: [] }, family: 'serial' });
     assert.deepStrictEqual([unsure.capture, unsure.playback, unsure.why], [null, null, 'none'], 'two equal candidates → ask, never guess');
   });
+  await test('a real DAXv2 station (39 capture / 14 playback, old names lingering): picks DAX RX 1 / DAX TX', () => {
+    const fs = require('fs');
+    const d = A.parseArdopDeviceList(fs.readFileSync(require('path').join(__dirname, 'fixtures/winlink/ardopcf-list-windows-daxv2.txt'), 'utf8'));
+    assert.deepStrictEqual([d.capture.length, d.playback.length], [39, 14]);
+    const p = A.proposeArdopDevices({ devices: d, family: 'flex' });
+    assert.deepStrictEqual([p.capture.name, p.playback.name, p.why], ['DAX RX 1 (FlexRadio DAX)', 'DAX TX (FlexRadio DAX)', 'flex-dax']);
+  });
   await test('two equally good matches are refused, never guessed', () => {
     const devices = { capture: [{ id: '1', name: 'USB Audio CODEC' }, { id: '2', name: 'USB Audio CODEC' }], playback: [] };
     assert.strictEqual(A.matchArdopDevice('Microphone (USB Audio CODEC)', devices.capture), null);
