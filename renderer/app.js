@@ -2759,6 +2759,7 @@ function renderRigList(rigs, activeRigId) {
   myRigsList.innerHTML = '';
   currentRigs = rigs || [];
   currentActiveRigId = activeRigId || null;
+  if (window.refreshWinlinkAudioRow) window.refreshWinlinkAudioRow();
 
   // "None" option
   const noneItem = document.createElement('div');
@@ -5126,6 +5127,22 @@ if (setMercuryEnable) {
     });
     // ARDOP sound devices: ardopcf's own list (its names are what it opens),
     // pre-picked to match the active rig's FT8 audio devices.
+    // On Flex Direct and Icom Network the modem's audio is POTACAT's own
+    // stream (mirror of main's winlinkSocketAudioRoute): no sound device, so
+    // the device picker is hidden — offering 26 capture devices for a radio
+    // that needs none sent the operator looking for a "DAX playback" that
+    // does not exist without DAX (K3SBP 2026-10-22).
+    window.refreshWinlinkAudioRow = function refreshWinlinkAudioRow() {
+      const via = document.getElementById('winlink-audio-via');
+      const pick = document.getElementById('winlink-audio-pick');
+      if (!via || !pick) return;
+      const rig = (typeof currentRigs !== 'undefined' && Array.isArray(currentRigs) ? currentRigs : []).find((x) => x.id === currentActiveRigId) || {};
+      const src = rig.audioSource || '';
+      const socket = src === 'smartsdr' || src === 'icom-network';
+      via.classList.toggle('hidden', !socket);
+      pick.classList.toggle('hidden', socket);
+      if (socket) via.textContent = `${rig.name || 'This radio'} is on ${src === 'smartsdr' ? 'Flex Direct' : 'Icom Network'}: the modem's audio rides POTACAT's own stream — no sound device to pick, nothing to set up.`;
+    };
     const ardopBtn = document.getElementById('winlink-ardop-discover');
     const ardopStatus = document.getElementById('winlink-ardop-status');
     const ardopDevs = document.getElementById('winlink-ardop-devices');
@@ -16447,6 +16464,7 @@ async function openSettingsDialog(tab) {
   if (setWinlinkEnable) {
     setWinlinkEnable.checked = s.enableWinlink === true;
     winlinkConfig.classList.toggle('hidden', !s.enableWinlink);
+    if (window.refreshWinlinkAudioRow) window.refreshWinlinkAudioRow();
     setWinlinkPassword.value = s.winlinkPassword || '';
     setWinlinkAutoCheck.checked = s.winlinkTelnetAutoCheck === true;
     setWinlinkAutoCheckMin.value = s.winlinkTelnetAutoCheckMin || 30;
