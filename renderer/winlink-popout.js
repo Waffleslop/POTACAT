@@ -307,6 +307,7 @@
     var a = (state && state.audio) || {};
     var el = $('wl-sound');
     if (!a.needed) { el.textContent = ''; return; }
+    if (a.viaPotacat) { el.textContent = 'Radio sound: via POTACAT (' + a.capture + '), no sound card needed'; return; }
     el.innerHTML = a.ready
       ? 'Radio sound: ' + esc(shortName(a.capture)) + ' / ' + esc(shortName(a.playback)) + ' · <a id="wl-sound-change">Change</a>'
       : 'Radio sound not set · <a id="wl-sound-change">Choose</a>';

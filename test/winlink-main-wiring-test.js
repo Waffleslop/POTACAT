@@ -76,6 +76,18 @@ test('a Flex keys the modem\'s DAX audio, not the silent mic, and gets its mic b
   assert.ok(/_sendFlexTxDax\(true\)/.test(on) && !/claimTxStream/.test(on), 'sets dax=1 but never takes the DAX program\'s stream');
 });
 
+test('modem audio rides POTACAT\'s radio link on Flex Direct / Icom Network — no DAX', () => {
+  assert.ok(/winlinkFeedRx\(pcm, sampleRate\)/.test(main.slice(main.indexOf("smartSdrAudio.on('audio-frame'"), main.indexOf("smartSdrAudio.on('audio-frame'") + 300)), 'Flex dax_rx frames feed the modem');
+  assert.ok(/if \(!meta\.silence\) winlinkFeedRx\(pcm, sampleRate\)/.test(fnBody(main, 'handleIcomNetworkPacedRxFrame')), 'Icom paced frames feed the modem');
+  const sock = fnBody(main, 'spawnArdopSocket');
+  assert.ok(/capture: dev, playback: dev/.test(sock) && /tcp:\$\{winlinkAudio\.port\}/.test(sock), 'ardopcf gets tcp:<port> for both devices');
+  assert.ok(/if \(winlinkSocketAudioRoute\(\)\) return spawnArdopSocket\(\);/.test(fnBody(main, 'spawnArdop')));
+  const tx = fnBody(main, 'startWinlinkAudio');
+  assert.ok(/if \(!winlinkTxActive\) return;/.test(tx) && /pushTxAudioChunk\(mono24k\)/.test(tx) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(tx), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
+  assert.ok(/icomNetworkVoiceTx\(true, 'Winlink'\)/.test(fnBody(main, 'startWinlinkShim')), 'Icom voice TX opens with the key-down');
+  assert.ok(/new ModemAudioServer\(/.test(tx) && /listen\(0\)/.test(tx));
+});
+
 console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');

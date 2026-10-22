@@ -48,7 +48,9 @@ want="${*:-pat ardop direwolf}"
 
 checkout() { # repo tag sha dir
   rm -rf "$4"
-  git clone --quiet --depth 1 --branch "$2" "$1" "$4"
+  # LF checkouts on every OS: the Windows runner defaults to autocrlf=true, which turned
+  # the sources CRLF and made the LF patch "not apply" (CI 2026-10-22).
+  git -c core.autocrlf=false clone --quiet --depth 1 --branch "$2" "$1" "$4"
   local got
   got="$(git -C "$4" rev-parse HEAD)"
   if [ "$got" != "$3" ]; then
@@ -99,7 +101,7 @@ if [[ " $want " == *" ardop "* ]]; then
     # makes ardopcf take its receive audio from, and send its transmit audio
     # to, a loopback port POTACAT serves — no sound card, no DAX program.
     cp "$ROOT/third_party/ardopcf/src/SocketAudio.c" "$ROOT/third_party/ardopcf/src/SocketAudio.h" "$WORK/ardop/src/common/"
-    git -C "$WORK/ardop" apply "$ROOT/third_party/ardopcf/potacat-socket-audio.patch"       || { echo "::error::potacat-socket-audio.patch did not apply to ardopcf $ARDOP_TAG"; exit 1; }
+    git -C "$WORK/ardop" apply --ignore-whitespace "$ROOT/third_party/ardopcf/potacat-socket-audio.patch" || { echo "::error::potacat-socket-audio.patch did not apply to ardopcf $ARDOP_TAG"; exit 1; }
     grep -q 'sa_active' "$WORK/ardop/src/windows/Waveout.c" || { echo "::error::socket audio hook missing"; exit 1; }
     # The loops have no bound of their own: cap the device count at the table size.
     sed -i -e 's/CaptureCount = waveInGetNumDevs();/CaptureCount = waveInGetNumDevs(); if (CaptureCount > 64) CaptureCount = 64;/' \

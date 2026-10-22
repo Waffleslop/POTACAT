@@ -230,9 +230,15 @@ async function test(name, fn) {
     const ok = M.winlinkModesFor(base);
     assert.deepStrictEqual(ok.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['mercury', true], ['vara', true]]);
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr' });
-    assert.ok(flex.filter((m) => m.id !== 'telnet').every((m) => !m.available && /Flex Direct/.test(m.reason)));
+    assert.ok(flex.filter((m) => m.id !== 'telnet' && m.id !== 'ardop').every((m) => !m.available && /Flex Direct/.test(m.reason)), 'packet/Mercury/VARA still need a device');
+    assert.ok(!flex[1].available && /Flex Direct/.test(flex[1].reason), 'ARDOP too, without the socket backend');
+    const flexSock = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', ardopSocketAudio: true });
+    assert.ok(flexSock[1].available, 'ARDOP over Flex Direct via POTACAT socket audio');
+    assert.ok(!flexSock[2].available, 'packet still needs a device');
     const icom = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network' });
     assert.ok(/Icom Network/.test(icom[1].reason));
+    assert.ok(M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', ardopSocketAudio: true })[1].available);
+    assert.ok(!M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', ardopSocketAudio: true, remote: true })[1].available, 'never on a laptop driving a shack');
     const mac = M.winlinkModesFor({ ...base, platform: 'darwin' });
     assert.ok(!mac[1].available && /macOS/.test(mac[1].reason));
     assert.ok(!mac[2].available && /macOS/.test(mac[2].reason), 'packet not on macOS yet');

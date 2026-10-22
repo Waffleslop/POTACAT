@@ -398,6 +398,7 @@ const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
 const WinlinkModes = require('./lib/winlink-modes');
+const { ModemAudioServer } = require('./lib/modem-audio-server');
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const QsoLog = require('./lib/qso-log');
 const OriginHealth = require('./lib/origin-health');
@@ -1632,6 +1633,7 @@ let _winlinkShimPort = 0;
 let _winlinkShimArmed = false;  // Pat may tune/key only while a radio session runs
 let ardopProc = null;           // ardopcf for an ARDOP session
 let direwolfProc = null;        // Dire Wolf for a packet (AX.25) session
+let winlinkAudio = null;        // ModemAudioServer: the modem's audio over POTACAT's radio link (no sound card)
 let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
 let _winlinkTxFailsafeTimer = null;
 let _winlinkCapTimer = null;
@@ -8336,6 +8338,7 @@ function winlinkModes() {
     varaPort: _winlinkVaraPort(),
     ardopFound: ArdopProcess.ardopSupported(process.platform) ? findArdop().found : false,
     direwolfFound: DirewolfProcess.direwolfSupported(process.platform) ? findDirewolf().found : false,
+    ardopSocketAudio: true, // ardopcf carries POTACAT's socket audio backend (Flex Direct / Icom Network need no sound card)
     showVara: settings.winlinkShowVara === true, // hidden: VARA is not offered in the first release
   });
 }
@@ -8365,6 +8368,10 @@ function winlinkPayload() {
       const rig = winlinkActiveRig();
       const a = (rig && rig.winlinkAudio) || {};
       const needed = winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet'));
+      if (winlinkSocketAudioRoute()) {
+        const via = settings.audioSource === 'smartsdr' ? 'Flex Direct' : 'Icom Network';
+        return { needed, ready: true, viaPotacat: true, capture: via, playback: via, rigName: (rig && rig.name) || '' };
+      }
       return { needed, ready: !!(a.captureLabel && a.playbackLabel), capture: a.captureLabel || '', playback: a.playbackLabel || '', rigName: (rig && rig.name) || '' };
     })(),
   });
@@ -8604,6 +8611,7 @@ function disconnectWinlink({ quit } = {}) {
 
 async function startWinlinkShim() {
   stopWinlinkShim();
+  await startWinlinkAudio();
   const port = await winlinkFreePort(WinlinkPat.PAT_DEFAULTS.shimPortRange);
   if (!port) { winlinkLog('no free port 4540-4549 for the radio control shim — radio sessions are off this run'); return; }
   winlinkShim = createRigctldServer({
@@ -8618,6 +8626,7 @@ async function startWinlinkShim() {
       if (!on) {
         clearWinlinkTxFailsafe();
         if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+        if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
         winlinkState.setSession({ ptt: false }); winlinkSessionPush();
         return true;
       }
@@ -8625,6 +8634,7 @@ async function startWinlinkShim() {
       if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); return false; }
       winlinkTxActive = true;
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
+      if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
       try { handleRemotePtt(true, { audio: true, forceDataMode: icom }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
       armWinlinkTxFailsafe();
       winlinkSessionTouch();
@@ -8638,6 +8648,7 @@ async function startWinlinkShim() {
 
 function stopWinlinkShim() {
   _winlinkShimArmed = false;
+  stopWinlinkAudio();
   if (winlinkShim) { try { winlinkShim.close(); } catch {} winlinkShim = null; }
   _winlinkShimPort = 0;
 }
@@ -8654,6 +8665,52 @@ function armWinlinkTxFailsafe() {
     try { handleRemotePtt(false); } catch {}
     winlinkAbortSession('the transmitter stayed keyed for 30 s');
   }, WINLINK_PTT_FAILSAFE_MS);
+}
+
+// ── modem audio over POTACAT's own radio link ───────────────────────────────
+// A rig whose audio is Flex Direct (VITA-49) or Icom Network (RS-BA1) has no
+// sound device for a modem to open. For those, ardopcf (POTACAT's socket
+// backend) takes its audio from this loopback server instead: the receive
+// frames POTACAT already has in main are fed in, and the modem's transmit
+// audio goes out on the same dax_tx / RS-BA1 voice path the phone mic uses.
+
+function winlinkSocketAudioRoute() {
+  return settings.audioSource === 'smartsdr' || settings.audioSource === 'icom-network';
+}
+
+async function startWinlinkAudio() {
+  stopWinlinkAudio();
+  if (!winlinkSocketAudioRoute()) return;
+  const srv = new ModemAudioServer({
+    makeResampler: (a, b) => new mercuryAudioBridge.StreamingResampler(a, b),
+    txOutRate: 24000,
+    log: winlinkLog,
+  });
+  srv.on('modem-connected', () => winlinkLog(`modem audio: ardopcf connected — radio audio via ${settings.audioSource === 'smartsdr' ? 'Flex Direct' : 'Icom Network'}, no sound card`));
+  srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
+  srv.on('tx', (mono24k) => {
+    if (!winlinkTxActive) return; // the modem only sends while it has PTT; anything else is a stray
+    if (settings.audioSource === 'smartsdr') {
+      if (smartSdrAudio && smartSdrAudio.txReady) smartSdrAudio.pushTxAudioChunk(mono24k);
+    } else if (settings.audioSource === 'icom-network') {
+      pushIcomNetworkVoiceChunk(mono24k);
+    }
+  });
+  try {
+    await srv.listen(0);
+    winlinkAudio = srv;
+  } catch (e) {
+    winlinkLog(`modem audio server could not listen: ${e.message}`);
+  }
+}
+
+function stopWinlinkAudio() {
+  if (winlinkAudio) { try { winlinkAudio.close(); } catch {} winlinkAudio = null; }
+}
+
+/** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
+function winlinkFeedRx(pcm, sampleRate) {
+  if (winlinkAudio && winlinkAudio.connected) winlinkAudio.feedRx(pcm, sampleRate);
 }
 
 // ── ardopcf ─────────────────────────────────────────────────────────────────
@@ -8755,6 +8812,7 @@ function winlinkSaveRigAudio({ captureLabel, playbackLabel }) {
 async function winlinkAutoAudio({ inputLabel, outputLabel } = {}) {
   const rig = winlinkActiveRig();
   if (!rig) return { ok: false, error: 'No radio set up' };
+  if (winlinkSocketAudioRoute()) return { ok: true, auto: true, viaPotacat: true, capture: settings.audioSource, playback: settings.audioSource };
   const saved = rig.winlinkAudio || {};
   if (saved.captureLabel && saved.playbackLabel) return { ok: true, auto: false, capture: saved.captureLabel, playback: saved.playbackLabel };
   if (!ArdopProcess.ardopSupported(process.platform) || !findArdop().found) return { ok: false, error: 'No device list on this system' };
@@ -8771,6 +8829,22 @@ async function winlinkAutoAudio({ inputLabel, outputLabel } = {}) {
     return { ok: true, auto: true, capture: p.capture.name, playback: p.playback.name, why: p.why };
   }
   return { ok: true, auto: false, devices: listing.devices, proposal: { capture: p.capture && p.capture.name, playback: p.playback && p.playback.name } };
+}
+
+/** ardopcf with POTACAT's socket audio backend: no device listing, no sound card. */
+async function spawnArdopSocket() {
+  if (!winlinkAudio || !winlinkAudio.port) await startWinlinkAudio();
+  if (!winlinkAudio || !winlinkAudio.port) throw new Error('POTACAT\'s modem audio server is not running — restart Winlink');
+  if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected — the radio must be on for ARDOP');
+  if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error('Icom Network audio is not connected — the radio must be on for ARDOP');
+  const p = winlinkPaths();
+  fs.mkdirSync(p.ardopLogs, { recursive: true });
+  const dev = `tcp:${winlinkAudio.port}`;
+  const args = ArdopProcess.buildArdopArgs({ port: _winlinkArdopPort(), capture: dev, playback: dev, logDir: p.ardopLogs, driveLevel: winlinkArdopLabels().driveLevel, mycall: settings.myCallsign });
+  const bin = findArdop();
+  winlinkLog(`ardop: audio via POTACAT (${settings.audioSource === 'smartsdr' ? 'Flex Direct' : 'Icom Network'}, no sound card)`);
+  winlinkLog('ardop spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
+  return spawnArdopProcess(bin, args);
 }
 
 /** Run ardopcf once to list its audio devices (it lists, fails on the impossible device, exits). */
@@ -8792,6 +8866,7 @@ function listArdopDevices() {
 async function spawnArdop() {
   killArdop();
   if (!ArdopProcess.ardopSupported(process.platform)) throw new Error('ARDOP (ardopcf) has no macOS build');
+  if (winlinkSocketAudioRoute()) return spawnArdopSocket();
   let labels = winlinkArdopLabels();
   if (!labels.captureLabel || !labels.playbackLabel) { await winlinkAutoAudio(); labels = winlinkArdopLabels(); }
   if (!labels.captureLabel || !labels.playbackLabel) throw new Error('POTACAT could not tell which sound devices are your radio\'s — choose them in the Winlink window');
@@ -8807,7 +8882,11 @@ async function spawnArdop() {
   const bin = findArdop();
   winlinkLog(`ardop: ${r.captureName} → in, ${r.playbackName} → out`);
   winlinkLog('ardop spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
-  return await new Promise((resolve, reject) => {
+  return spawnArdopProcess(bin, args);
+}
+
+function spawnArdopProcess(bin, args) {
+  return new Promise((resolve, reject) => {
     let proc;
     try { proc = spawn(bin.path, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
     catch (e) { return reject(e); }
@@ -15892,6 +15971,7 @@ function startSmartSdrAudio() {
   smartSdrAudio = new SmartSdrAudio();
   smartSdrAudio.on('log', (msg) => sendCatLog('[SmartSDR-Audio] ' + msg));
   smartSdrAudio.on('audio-frame', ({ pcm, sampleRate }) => {
+    winlinkFeedRx(pcm, sampleRate); // Winlink modem over Flex Direct (no DAX)
     // Send the Float32Array directly. Electron's structured clone preserves
     // TypedArrays, and the receiver already wraps via `new Float32Array(...)`.
     // Both calls below are routed through audioSafeSend so a stalled
@@ -16499,6 +16579,7 @@ function queueIcomNetworkJtcatUiAudio(pcm, sampleRate, peak, jtcatRunning) {
 }
 
 function handleIcomNetworkPacedRxFrame(pcm, sampleRate, meta = {}) {
+  if (!meta.silence) winlinkFeedRx(pcm, sampleRate); // Winlink modem over Icom Network
   if (!pcm || !pcm.length) return;
   const peak = meta.silence ? 0 : peakFloat32(pcm);
 
