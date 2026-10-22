@@ -15586,6 +15586,67 @@ function noteIcomNetworkRxDiagnostics(frame, pcm, sampleRate, peak) {
   return dt;
 }
 
+// --- Icom Network voice TX (mic → RS-BA1 → radio) ---------------------------
+// Every voice PTT on an Icom Network rig — the VFO window's button and an
+// ECHOCAT device — sends its mic over the LAN. The mic chunks arrive on
+// dax-tx-chunk at 24 kHz and are resampled to the rate the radio negotiated.
+// Until 2026-10-22 nothing fed the stream: the phone's PTT opened it and sent
+// silence, and the VFO window played the Mac's mic to the Mac's speakers
+// (KG5EIU IC-9700: "massive feedback").
+let _rsba1TxChunkCount = 0;
+let _rsba1TxLastPeakReport = 0;
+let _rsba1VoiceResampler = null;
+
+function icomNetworkVoiceRoute() {
+  return settings.audioSource === 'icom-network' && ICOM_NETWORK_TX_AUDIO_ENABLED;
+}
+
+// Starts or stops the RS-BA1 voice stream for a PTT edge. Returns true when
+// this PTT's audio goes over the LAN (the caller then keys in DATA mode).
+function icomNetworkVoiceTx(state, who) {
+  if (!icomNetworkVoiceRoute()) return false;
+  const t = _icomNetworkTransport;
+  if (state) {
+    if (!t || !t.txReady) {
+      sendCatLog(`[Icom-Network-Audio] ${who}: the radio's network TX audio is not ready — keying without mic audio`);
+      return true;
+    }
+    if (!t.voiceTxActive) {
+      try {
+        _rsba1TxChunkCount = 0;       // reset per-PTT so "chunk #1" fires on every key-down
+        _rsba1TxLastPeakReport = 0;
+        _rsba1VoiceResampler = new mercuryAudioBridge.StreamingResampler(24000, (t.audio && t.audio.txSampleRate) || 48000);
+        t.startVoiceTx();
+        sendCatLog(`[Icom-Network-Audio] Voice TX started (${who})`);
+      } catch (e) {
+        sendCatLog('[Icom-Network-Audio] Voice TX start failed: ' + e.message);
+      }
+    }
+  } else if (t && t.voiceTxActive) {
+    t.stopVoiceTx();
+    sendCatLog(`[Icom-Network-Audio] Voice TX stopped (${who} release)`);
+  }
+  return true;
+}
+
+// One 24 kHz mic chunk from the VFO window or the ECHOCAT bridge.
+function pushIcomNetworkVoiceChunk(samples) {
+  const t = _icomNetworkTransport;
+  if (!t || !t.voiceTxActive || !_rsba1VoiceResampler) return;
+  const out = _rsba1VoiceResampler.process(samples);
+  _rsba1TxChunkCount++;
+  const peak = peakFloat32(out);
+  if (peak > _rsba1TxLastPeakReport) _rsba1TxLastPeakReport = peak;
+  // Heartbeat about once a second (24 kHz / 128-sample chunks ≈ 188/s).
+  if (_rsba1TxChunkCount === 1 || _rsba1TxChunkCount % 188 === 0) {
+    sendCatLog(`[Icom-Network-Audio] voice TX chunk #${_rsba1TxChunkCount}: max peak=${_rsba1TxLastPeakReport.toFixed(4)}`);
+    _rsba1TxLastPeakReport = 0;
+  }
+  try { t.pushVoiceChunk(out); } catch (e) {
+    console.warn('[Icom-Network-Audio] pushVoiceChunk error:', e.message);
+  }
+}
+
 function handleIcomNetworkAudioFrame(frame) {
   if (!frame || !frame.pcm) return;
   const sampleRate = frame.sampleRate || 48000;
@@ -18320,29 +18381,13 @@ function connectRemote() {
       sendCatLog('[PTT] Ignored remote PTT-release during engine-owned FT8 TX');
       return;
     }
-    // RS-BA1 streaming voice TX: start/stop the ring-buffer pump when the phone
-    // keys/unkeys. Only when the active audio source is the Icom network rig.
-    if (settings.audioSource === 'icom-network') {
-      if (state) {
-        if (_icomNetworkTransport && _icomNetworkTransport.txReady &&
-            !_icomNetworkTransport.voiceTxActive) {
-          try {
-            _rsba1TxChunkCount = 0;       // reset per-PTT so "chunk #1" fires on every key-down
-            _rsba1TxLastPeakReport = 0;
-            _icomNetworkTransport.startVoiceTx();
-            sendCatLog('[Icom-Network-Audio] Voice TX started (ECHOCAT phone PTT)');
-          } catch (e) {
-            sendCatLog('[Icom-Network-Audio] Voice TX start failed: ' + e.message);
-          }
-        }
-      } else {
-        if (_icomNetworkTransport && _icomNetworkTransport.voiceTxActive) {
-          _icomNetworkTransport.stopVoiceTx();
-          sendCatLog('[Icom-Network-Audio] Voice TX stopped (ECHOCAT phone PTT release)');
-        }
-      }
+    // RS-BA1 streaming voice TX: the phone's mic goes to the radio over the
+    // LAN, and the radio takes LAN audio only in its DATA mode.
+    if (icomNetworkVoiceTx(state, 'ECHOCAT phone PTT')) {
+      handleRemotePtt(state, { audio: true, forceDataMode: true });
+    } else {
+      handleRemotePtt(state);
     }
-    handleRemotePtt(state);
     // True key-up latency for the phone's Diagnostics (frame receive →
     // key command issued; excludes WS RTT and the rig's own T/R switch).
     // The whole handler is deliberately synchronous — nothing awaits ahead
@@ -21334,7 +21379,14 @@ function handleRemotePtt(state, opts = {}) {
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
     if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
-      const dataMode = (curMode === 'LSB') ? 'DIGL' : 'DIGU';
+      // FM and AM have their own data forms on an Icom (FM-D / AM-D). Sending
+      // them to USB-D moved an IC-9700 off FM for every voice over (KG5EIU).
+      const _dataRig = getActiveRigModel();
+      const _icomData = !!(_dataRig && _dataRig.brand === 'Icom');
+      const dataMode = (curMode === 'LSB') ? 'DIGL'
+        : (_icomData && curMode === 'FM') ? 'DIGFM'
+        : (_icomData && curMode === 'AM') ? 'DIGAM'
+        : 'DIGU';
       _ssbModeBeforePtt = curMode;
       // Capture the dial BEFORE the swap. During TX in DATA mode a Yaesu with
       // DATA MODE = PSK reports the subcarrier-shifted TX carrier (~1.5 kHz
@@ -22049,7 +22101,10 @@ function _buildAudioBridgeConfig() {
   const t = settings.catTarget || {};
   const daxTxDirect =
     (settings.audioSource === 'smartsdr' && smartSdrAudio && smartSdrAudio.txReady) ||
-    (t.type === 'k4-network' && cat && cat.connected);
+    (t.type === 'k4-network' && cat && cat.connected) ||
+    // Icom Network: the client's mic goes over RS-BA1, never to a PC sound
+    // device (the legacy route played it on this computer's speakers).
+    (settings.audioSource === 'icom-network' && !!(_icomNetworkTransport && _icomNetworkTransport.txReady));
   return {
     inputDeviceId:  settings.remoteAudioInput  || '',
     outputDeviceId: settings.remoteAudioOutput || '',
@@ -38253,6 +38308,17 @@ app.whenReady().then(() => {
   let _daxTxLastVoiceLogMs = 0;
   let _daxTxLastPeakReport = 0;
   ipcMain.on('dax-tx-chunk', (_e, buf) => {
+    // Icom Network: the same 24 kHz mic chunks (VFO window PTT or the ECHOCAT
+    // bridge) go to the radio over RS-BA1 while a voice PTT holds the stream.
+    if (_icomNetworkTransport && _icomNetworkTransport.voiceTxActive) {
+      let mic;
+      if (buf instanceof Float32Array) mic = buf;
+      else if (ArrayBuffer.isView(buf) || buf instanceof ArrayBuffer) mic = new Float32Array(buf);
+      else if (Array.isArray(buf)) mic = new Float32Array(buf);
+      else { try { mic = new Float32Array(Object.values(buf)); } catch { return; } }
+      pushIcomNetworkVoiceChunk(mic);
+      return;
+    }
     if (!smartSdrAudio || !smartSdrAudio.txReady) return;
     // Only stream the phone's mic to the radio's dax_tx WHILE transmitting.
     // The renderer's dax_tx tap runs continuously once the iOS app's WebRTC
@@ -38318,37 +38384,6 @@ app.whenReady().then(() => {
     // (60 ms @ 12 kHz) frames before encoding.
     if (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected) {
       _pushK4TxSamples(samples);
-    }
-  });
-
-  // RS-BA1 voice TX chunks from remote-audio.html (ECHOCAT phone mic → WebRTC
-  // → renderer tap → IPC chunk → here → AudioStream ring buffer → UDP to radio).
-  // Each chunk is a Float32Array of 128 mono samples at 48 kHz (one AudioWorklet
-  // quantum). The renderer only sends while kiwiTxMuted=true (PTT is held), but
-  // main-process also guards at the transport level: pushVoiceChunk() is a no-op
-  // when _voiceTxActive is false. Logging mirrors the DAX TX handler above.
-  let _rsba1TxChunkCount = 0;
-  let _rsba1TxLastPeakReport = 0;
-  ipcMain.on('rsba1-voice-tx-chunk', (_e, buf) => {
-    if (!_icomNetworkTransport || !_icomNetworkTransport.voiceTxActive) return;
-    let samples;
-    if (buf instanceof Float32Array) samples = buf;
-    else if (ArrayBuffer.isView(buf) || buf instanceof ArrayBuffer) samples = new Float32Array(buf);
-    else if (Array.isArray(buf)) samples = new Float32Array(buf);
-    else { try { samples = new Float32Array(Object.values(buf)); } catch { return; } }
-    _rsba1TxChunkCount++;
-    let peak = 0;
-    for (let i = 0; i < samples.length; i++) {
-      const v = Math.abs(samples[i]); if (v > peak) peak = v;
-    }
-    if (peak > _rsba1TxLastPeakReport) _rsba1TxLastPeakReport = peak;
-    // Heartbeat every ~1 s (chunks arrive at ~375/s at 48 kHz / 128 samples)
-    if (_rsba1TxChunkCount === 1 || _rsba1TxChunkCount % 375 === 0) {
-      sendCatLog(`[Icom-Network-Audio] RS-BA1 voice TX chunk #${_rsba1TxChunkCount}: max peak=${_rsba1TxLastPeakReport.toFixed(4)}`);
-      _rsba1TxLastPeakReport = 0;
-    }
-    try { _icomNetworkTransport.pushVoiceChunk(samples); } catch (e) {
-      console.warn('[Icom-Network-Audio] pushVoiceChunk error:', e.message);
     }
   });
 
@@ -39399,7 +39434,13 @@ app.whenReady().then(() => {
   // disabling the rig mic. The popout's mic capture (if any) goes to the
   // user's local speaker / sinkId, not necessarily the rig — so the
   // mode-switch assumption is wrong. Treat this as audio:false.
+  // Icom Network is the exception: the window streams its mic to the radio
+  // over the LAN (dax-tx-chunk), and the radio takes LAN audio in DATA mode.
   ipcMain.on('naked-ptt', (_e, state) => {
+    if (icomNetworkVoiceTx(!!state, 'VFO window PTT')) {
+      handleRemotePtt(!!state, { audio: true, forceDataMode: true });
+      return;
+    }
     handleRemotePtt(!!state, { audio: false });
   });
 

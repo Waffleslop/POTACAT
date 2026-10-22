@@ -2453,7 +2453,10 @@ async function pttStart() {
       // because the VFO popout doesn't get the bridge's config object.
       const isDaxTxDirect =
         (s.audioSource === 'smartsdr') ||
-        (s.catTarget && s.catTarget.type === 'k4-network');
+        (s.catTarget && s.catTarget.type === 'k4-network') ||
+        // Icom Network: the mic goes to the radio over RS-BA1. The legacy
+        // branch played it on this computer's speakers (KG5EIU IC-9700 feedback).
+        (s.audioSource === 'icom-network');
 
       if (isDaxTxDirect && window.api.daxTxChunk) {
         // Direct path: mic → EQ → AudioWorklet → dax-tx-chunk IPC. Use a
@@ -3010,7 +3013,9 @@ async function startAudioMonitor() {
   if (audioMonitorCtx) return;
   try {
     const s = await window.api.getSettings();
-    if (s.audioSource === 'smartsdr') {
+    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network') {
+      // Icom Network is the same: its RX audio arrives as packets, and the
+      // capture branch below opened this computer's MIC (feedback, no radio).
       // SmartSDR Direct: the Windows DAX RX device is silent (no DAX program
       // is running), so capturing it would give nothing. Play the VITA-49
       // audio frames POTACAT receives directly instead — see onSmartSdrAudio.
@@ -3104,6 +3109,7 @@ audioBtn.addEventListener('contextmenu', (e) => {
 // cursor back if a burst pushes it more than 500 ms ahead of now.
 window.api.onSmartSdrAudio((d) => {
   if (!audioMonitorActive || !audioMonitorDirect || !audioMonitorCtx) return;
+  if (pttDown) return; // never play the radio back into a live mic
   try {
     const sr = d.sampleRate || 24000;
     const pcm = (d.pcm instanceof Float32Array) ? d.pcm : new Float32Array(d.pcm);
