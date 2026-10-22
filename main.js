@@ -336,6 +336,7 @@ const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/ser
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
+const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
@@ -3410,7 +3411,7 @@ function paddleKeysOnKeyPortOnly({ keyPortOpen, rigctld, protocol, paddleKey, ta
   if (!keyPortOpen) return false;
   if (rigctld) return true;
   if (paddleKey === 'dtr') return true;
-  if (protocol === 'kenwood' && !(paddleKey === 'ta' && taKeying)) return true;
+  if ((protocol === 'kenwood' || protocol === 'yaesu-legacy') && !(paddleKey === 'ta' && taKeying)) return true;
   return false;
 }
 // ── Which meters this radio actually reports (Casey 2026-10-07: "if the radio
@@ -6865,7 +6866,9 @@ async function connectCat() {
     transport = new SerialTransport();
     const model = rigModel || { brand: 'Kenwood', protocol: 'kenwood', caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
-    codec = new KenwoodCodec(model, (data) => transport.write(data));
+    codec = model.protocol === 'yaesu-legacy'
+      ? new YaesuLegacyCodec(model, (data) => transport.write(data))
+      : new KenwoodCodec(model, (data) => transport.write(data));
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
@@ -6889,7 +6892,7 @@ async function connectCat() {
       sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
       if (hs.source === 'model') armSerialHandshakeFallback(cat, target);
     }
-    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: hs.handshake });
+    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
 
   bindRigStateEvents(cat);
@@ -18010,7 +18013,7 @@ function buildPaddleKeyRig() {
         // TinyMidi paddle, rounds 4–7). Those rigs take the Kenwood branch
         // below: the key port keys, or the paddle is reported unavailable.
         cat.setCwKeyTa(down);
-      } else if (rigModel?.protocol === 'kenwood') {
+      } else if (rigModel?.protocol === 'kenwood' || rigModel?.protocol === 'yaesu-legacy') {
         // Yaesu/Kenwood CAT has NO per-element CW key command — the txrx route is
         // bare PTT (TX1;/TX0; or TX;/RX;), which keys the transmitter with ZERO CW
         // output and no rig sidetone (G5HOW FTDx10, 2026-06-29). So NEVER dead-key

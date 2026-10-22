@@ -56,7 +56,7 @@ section('Transport (lib/transport.js SerialTransport — the direct-serial path)
   assert(JSON.stringify(t._guardPins({ dtr: false, rts: false })) === JSON.stringify({ dtr: false, rts: false }), 'no handshake: pins untouched (every other rig)');
 
   const src = read('lib/transport.js');
-  assert(/connect\(\{ path, baudRate, dtrOff, connectDelay, serialHandshake \}\)/.test(src), 'connect() takes serialHandshake');
+  assert(/connect\(\{ path, baudRate, dtrOff, connectDelay, serialHandshake[,} ]/.test(src), 'connect() takes serialHandshake');
   assert(/rtscts: hardware,/.test(src), 'rtscts follows the model flag (false for every other rig)');
   assert(/hardware \? \{ dtr: false, rts: true \} : \{ dtr: false, rts: false \}/.test(src), 'dtrOff at open drops only DTR under hardware flow control');
   assert(/this\._port\.set\(this\._guardPins\(this\._lastPinState\)/.test(src), 'setPin (CW keying) goes through the guard');

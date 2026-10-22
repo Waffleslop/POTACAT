@@ -23871,7 +23871,7 @@ async function loadRigCommandTable() {
     return;
   }
   rigCmdData = result.commands;
-  const PROTO_LABELS = { civ: 'CI-V', rigctld: 'rigctld', smartsdr: 'SmartSDR', kenwood: 'Kenwood' };
+  const PROTO_LABELS = { civ: 'CI-V', rigctld: 'rigctld', smartsdr: 'SmartSDR', kenwood: 'Kenwood', 'yaesu-legacy': 'Yaesu 5-byte CAT' };
   const proto = PROTO_LABELS[result.protocol] || result.protocol;
   rigCmdHeader.textContent = `${result.modelName || 'Unknown'} — ${proto}`;
   renderRigCommandTable();
