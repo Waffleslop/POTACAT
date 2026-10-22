@@ -191,6 +191,10 @@ async function test(name, fn) {
     assert.throws(() => D.buildDirewolfConfig({ mycall: 'K3SBP', capture: 0, playback: 0 }), /shim/);
     assert.ok(D.buildDirewolfConfig({ mycall: 'K3SBP', capture: 'plughw:1,0', playback: 'plughw:1,0', shimPort: 1, modem: 4800 }).includes('MODEM 1200'), 'unknown speed falls back');
   });
+  await test('Dire Wolf gets its config by bare name (it truncates a long -c path)', () => {
+    assert.deepStrictEqual(D.buildDirewolfArgs({ configName: 'direwolf.conf' }), ['-c', 'direwolf.conf', '-t', '0']);
+    assert.ok(!D.buildDirewolfArgs().some((a) => /[\\/]/.test(a)));
+  });
   await test('Dire Wolf output that needs action is named — a build without Hamlib above all', () => {
     assert.strictEqual(D.classifyDirewolfLine('Config file line 7: PTT with RIG is only available when hamlib support is enabled.'), 'no-hamlib');
     assert.strictEqual(D.classifyDirewolfLine('Ready to accept AGW client application 0 on port 8010 ...'), 'ready');

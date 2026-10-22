@@ -8676,7 +8676,7 @@ async function spawnDirewolf() {
     modem: settings.winlinkPacketModem, agwPort: _winlinkAgwPort(), shimPort: _winlinkShimPort,
   }));
   const bin = findDirewolf();
-  const args = DirewolfProcess.buildDirewolfArgs({ configPath: confPath });
+  const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) }); // spawned with cwd = p.dir
   winlinkLog(`direwolf: ${r.captureName} → in, ${r.playbackName} → out, ${DirewolfProcess.MODEMS.includes(Number(settings.winlinkPacketModem)) ? settings.winlinkPacketModem : 1200} baud`);
   winlinkLog('direwolf spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
   return await new Promise((resolve, reject) => {
