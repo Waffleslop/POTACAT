@@ -74,7 +74,7 @@ async function test(name, fn) {
     const hooks = { getFreqHz: () => 7101500, setFreqHz: () => true, getPtt: () => true, setPtt: () => true };
     const r = (l) => R.rigctldReply(R.parseRigctldLine(l), hooks);
     assert.deepStrictEqual(r('dump_caps'), ['Model name:\tPOTACAT']);
-    assert.deepStrictEqual(r('\\chk_vfo'), ['CHKVFO 0']);
+    assert.deepStrictEqual(r('\\chk_vfo'), ['0']);
     assert.deepStrictEqual(r('\\get_freq'), ['7101500']);
     assert.deepStrictEqual(r('f'), ['7101500']);
     assert.deepStrictEqual(r('\\set_freq 7101500'), ['RPRT 0']);
@@ -122,7 +122,7 @@ async function test(name, fn) {
     await ask('\\set_freq 7101500', 4);
     await ask('\\set_ptt 1', 5);
     await ask('t', 6);
-    assert.deepStrictEqual(lines, ['Model name:\tPOTACAT', 'CHKVFO 0', '14105000', 'RPRT 0', 'RPRT 0', '1']);
+    assert.deepStrictEqual(lines, ['Model name:\tPOTACAT', '0', '14105000', 'RPRT 0', 'RPRT 0', '1']);
     assert.deepStrictEqual(log, [['F', 7101500], ['T', true]]);
     sock.destroy();
     await srv.close();
