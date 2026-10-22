@@ -232,7 +232,8 @@ function waitFor(emitter, ev, ms = 5000) {
     const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8')
       + fs.readFileSync(path.join(__dirname, '..', 'scripts', 'build-mac-x64-helpers.sh'), 'utf8');
     const count = (snippet) => yml.split(snippet).length - 1;
-    assert.strictEqual(count('cp "$HAMLIB_PREFIX/bin/rotctld" assets/hamlib/rotctld'), 2, 'macOS jobs copy rotctld');
+    assert.strictEqual(count('cp "$HAMLIB_PREFIX/bin/rotctld" assets/hamlib/rotctld')
+      + count('cp "$WORK/hamlib-out/bin/rotctld" assets/hamlib/rotctld'), 2, 'macOS jobs copy rotctld (arm64 from Homebrew, x64 from source)');
     assert.strictEqual(count('cp /usr/local/bin/rotctld assets/hamlib/rotctld'), 2, 'Linux jobs copy rotctld');
     assert.strictEqual(count('--expect-arch=arm64 assets/hamlib/rigctld assets/hamlib/rotctld')
       + count('--expect-arch=x86_64 assets/hamlib/rigctld assets/hamlib/rotctld'), 2, 'macOS jobs bundle rotctld dylibs');

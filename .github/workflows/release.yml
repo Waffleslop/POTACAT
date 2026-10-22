@@ -201,10 +201,11 @@ jobs:
   # to the slow WASM decoder (N3VD 2026-07-10, late-start TX every cycle).
   # `--arch=x64` makes gyp emit ARCHS=x86_64; the verify step below fails the
   # release if the shipped decoder is ever the wrong arch again.
-  # Hamlib and wsprd come from an Intel Homebrew under Rosetta
-  # (scripts/build-mac-x64-helpers.sh) — the ARM one shipped arm64 helpers.
+  # Since 2026-10-22 this job runs on GitHub's Intel image: Hamlib and wsprd
+  # are built natively for x86_64 (scripts/build-mac-x64-helpers.sh) — the
+  # ARM runner's Homebrew had shipped arm64 helpers in the Intel DMG.
   build-macos-x64:
-    runs-on: macos-14 # ARM64 host — x64 artifacts are cross-compiled
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -235,11 +236,11 @@ jobs:
           lipo -archs "$NODE_FILE"
           lipo -archs "$NODE_FILE" | grep -q x86_64
       - name: Build Intel helpers (rigctld, rotctld, wsprd) with the Intel Homebrew
-        # This runner is ARM: its Homebrew gave the Intel DMG arm64 helpers
-        # until 2026-10-22 ("rigctld Unknown system error -86" on every Intel
-        # Mac, KL4XQ). The script installs an x86_64 Homebrew under Rosetta,
-        # builds/bundles from it, and bundle-mac-deps FAILS the build on any
-        # absolute library path or any helper that is not x86_64.
+        # Until 2026-10-22 an ARM runner's Homebrew gave the Intel DMG arm64
+        # helpers ("rigctld Unknown system error -86" on every Intel Mac,
+        # KL4XQ). The script builds Hamlib and FFTW from pinned source for
+        # macOS 12, and bundle-mac-deps FAILS the build on any absolute
+        # library path or any helper that is not x86_64.
         run: bash scripts/build-mac-x64-helpers.sh
       - name: Build yaesu-scope (FT-710 band-scope helper; loads FTDI at run time, no SDK)
         run: |

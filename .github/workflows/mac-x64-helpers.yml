@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14 # ARM64, the same host as the release's x64 job
+    runs-on: macos-15-intel # the same host as the release's x64 job
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4

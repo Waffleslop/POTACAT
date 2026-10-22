@@ -127,14 +127,15 @@ t('a helper built for the wrong CPU fails the build (KL4XQ: arm64 rigctld in the
   assert.strictEqual(archProblem('rigctld', 'arm64', null), null, 'no expectation, no verdict');
 });
 
-t('the Intel job builds its helpers with the Intel Homebrew (source guard)', () => {
+t('the Intel job builds its helpers on an Intel runner (source guard)', () => {
   const root = path.join(__dirname, '..');
   const wf = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8').replace(/\r\n/g, '\n');
   const x64 = wf.slice(wf.indexOf('build-macos-x64:'), wf.indexOf('  build-linux:'));
   assert.ok(/scripts\/build-mac-x64-helpers\.sh/.test(x64), 'the x64 job runs the shared helper script');
   assert.ok(!/^\s+brew install (hamlib|fftw)/m.test(x64), 'the ARM Homebrew must not build Intel helpers again');
   const sh = fs.readFileSync(path.join(root, 'scripts/build-mac-x64-helpers.sh'), 'utf8');
-  assert.ok(/arch -x86_64/.test(sh) && /--expect-arch=x86_64/.test(sh));
+  assert.ok(/runs-on: macos-15-intel/.test(x64), 'the Intel DMG is built on an Intel runner');
+  assert.ok(/--expect-arch=x86_64/.test(sh) && /shasum -a 256 -c/.test(sh), 'helpers are arch-checked and their sources checksummed');
 });
 
 console.log(`\n${passed} passed`);

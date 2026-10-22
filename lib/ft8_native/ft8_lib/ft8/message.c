@@ -3,13 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* MSVC doesn't have stpcpy — provide a fallback */
-#ifdef _MSC_VER
-static char* stpcpy(char* dest, const char* src) {
+/* Our own stpcpy, on every platform. MSVC has none, and glibc hides it under
+ * -std=c11 (binding.gyp): GCC 14 refuses the implicit declaration, and older
+ * GCC accepted it as returning int, truncating the 64-bit pointer. */
+static char* ft8_stpcpy(char* dest, const char* src) {
     while ((*dest = *src) != '\0') { dest++; src++; }
     return dest;
 }
-#endif
 
 #define LOG_LEVEL LOG_WARN
 #include "debug.h"
@@ -1479,7 +1479,7 @@ static int unpackgrid(uint16_t igrid4, uint8_t ir, char* extra, ftx_field_t* ext
         if (ir > 0)
         {
             // In case of ir=1 add an "R " before grid
-            dst = stpcpy(dst, "R ");
+            dst = ft8_stpcpy(dst, "R ");
         }
 
         uint16_t n = igrid4;
