@@ -944,6 +944,8 @@
       <button class="tab" data-tab="sstv">SSTV</button>
       <!-- Band scope: shown when the shack's rig streams its own spectrum (FT-710 over USB) -->
       <button class="tab hidden" data-tab="scope" id="scope-tab-btn">Scope</button>
+      <!-- Winlink email through the shack (shown while the shack has Winlink on) -->
+      <button class="tab hidden" data-tab="mail" id="mail-tab-btn">Mail <span id="tab-mail-badge" class="tab-badge hidden">0</span></button>
     </div>
 
     <!-- Filter toolbar -->
@@ -1708,6 +1710,35 @@
       <canvas id="scope-phone-trace" width="320" height="80" style="width:100%;height:80px;display:block;background:#000;"></canvas>
       <canvas id="scope-phone-wf" width="320" height="240" style="width:100%;flex:1;min-height:120px;display:block;background:#000;image-rendering:pixelated;"></canvas>
       <div id="scope-phone-axis" style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 8px;color:var(--text-dim);background:var(--bg-header);border-top:1px solid var(--border);flex-shrink:0;"><span id="scope-phone-ax-lo">—</span><span id="scope-phone-ax-c" style="color:#e94560;font-weight:700">—</span><span id="scope-phone-ax-hi">—</span></div>
+    </div>
+    <div id="mail-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;flex-wrap:wrap;">
+        <select id="mail-box" style="font-size:12px;"><option value="in">Inbox</option><option value="out">Outbox</option><option value="sent">Sent</option><option value="archive">Archive</option></select>
+        <button type="button" id="mail-new" style="font-size:12px;">New</button>
+        <span style="flex:1"></span>
+        <select id="mail-mode" style="font-size:12px;max-width:150px;"></select>
+        <button type="button" id="mail-connect" style="font-size:12px;font-weight:700;">Send / Receive</button>
+        <button type="button" id="mail-abort" class="hidden" style="font-size:12px;color:#e94560;">Abort</button>
+      </div>
+      <div id="mail-radio" class="hidden" style="display:flex;gap:6px;align-items:center;padding:4px 10px;border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap;">
+        <select id="mail-band" style="font-size:12px;"><option value="">All bands</option><option>80m</option><option>60m</option><option>40m</option><option>30m</option><option>20m</option><option>17m</option><option>15m</option><option>12m</option><option>10m</option></select>
+        <select id="mail-gateway" style="font-size:12px;flex:1;min-width:160px;"><option value="">Load gateways</option></select>
+      </div>
+      <div id="mail-session" style="padding:4px 10px;font-size:12px;color:var(--text-dim);border-bottom:1px solid var(--border);min-height:16px;"></div>
+      <div id="mail-prompt" class="hidden" style="padding:6px 10px;font-size:12px;background:#3a2f10;color:#f0c040;display:flex;gap:6px;align-items:center;"></div>
+      <div id="mail-list" style="flex:1;overflow-y:auto;min-height:0;"></div>
+      <div id="mail-reader" class="hidden" style="flex:1;overflow-y:auto;min-height:0;padding:8px 10px;"></div>
+      <div id="mail-compose" class="hidden" style="flex:1;display:flex;flex-direction:column;gap:6px;padding:8px 10px;min-height:0;">
+        <input type="text" id="mail-to" placeholder="To: callsign or email" style="font-size:14px;">
+        <input type="text" id="mail-subj" placeholder="Subject" maxlength="128" style="font-size:14px;">
+        <textarea id="mail-body" placeholder="Message (plain text, keep it short over HF)" style="flex:1;min-height:120px;font-size:14px;font-family:monospace;"></textarea>
+        <div id="mail-err" style="color:#e94560;font-size:12px;"></div>
+        <div style="display:flex;gap:6px;justify-content:flex-end;"><button type="button" id="mail-cancel">Cancel</button><button type="button" id="mail-queue" style="font-weight:700;">Put in Outbox</button></div>
+      </div>
+      <div id="mail-notice" class="hidden" style="padding:12px 14px;font-size:13px;line-height:1.5;border-top:1px solid var(--border);background:var(--bg-card);">
+        <div id="mail-notice-text"></div>
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;"><button type="button" id="mail-notice-no">Not now</button><button type="button" id="mail-notice-ok" style="font-weight:700;">I understand</button></div>
+      </div>
     </div>
     <div id="bottom-bar">
       <!-- Initial state: big connect button for new users -->

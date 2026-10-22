@@ -1344,6 +1344,20 @@ const setMercuryOut = document.getElementById('set-mercury-out');
 const setMercuryBw = document.getElementById('set-mercury-bw');
 const setMercuryTxGain = document.getElementById('set-mercury-txgain');
 const setMercuryListen = document.getElementById('set-mercury-listen');
+// Winlink (Pat) settings
+const setWinlinkEnable = document.getElementById('set-winlink-enable');
+const winlinkConfig = document.getElementById('winlink-config');
+const setWinlinkPassword = document.getElementById('set-winlink-password');
+const setWinlinkAutoCheck = document.getElementById('set-winlink-autocheck');
+const setWinlinkAutoCheckMin = document.getElementById('set-winlink-autocheck-min');
+const setWinlinkArdopIn = document.getElementById('set-winlink-ardop-in');
+const setWinlinkArdopOut = document.getElementById('set-winlink-ardop-out');
+const setWinlinkArdopBw = document.getElementById('set-winlink-ardop-bw');
+const setWinlinkArdopDrive = document.getElementById('set-winlink-ardop-drive');
+const setWinlinkVaraBw = document.getElementById('set-winlink-vara-bw');
+const setWinlinkVaraPort = document.getElementById('set-winlink-vara-port');
+const setWinlinkCap = document.getElementById('set-winlink-cap');
+const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
 const setTciPort = document.getElementById('set-tci-port');
 const setTciMaxAge = document.getElementById('set-tci-max-age');
 // CW Keyer
@@ -2015,6 +2029,8 @@ async function loadPrefs() {
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
   var mercuryBtn = document.getElementById('view-mercury-btn');
   if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
+  var winlinkBtn = document.getElementById('view-winlink-btn');
+  if (winlinkBtn) winlinkBtn.classList.toggle('hidden', !settings.enableWinlink);
   updateDxccButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
@@ -2471,6 +2487,16 @@ async function loadSerialcatPorts(savedTarget) {
 let rigEditorMode = null; // null | 'add' | 'edit'
 let editingRigId = null;
 let currentRigs = []; // local copy of settings.rigs
+// The ARDOP device picks belong to the ACTIVE rig (a different radio has a
+// different sound card); stamped onto it at Save.
+function winlinkStampRigAudio(rigs) {
+  if (!setWinlinkArdopIn || !Array.isArray(rigs)) return rigs;
+  const cap = setWinlinkArdopIn.value, play = setWinlinkArdopOut.value;
+  const drive = Math.max(1, Math.min(100, parseInt(setWinlinkArdopDrive.value, 10) || 90));
+  return rigs.map((r) => (r && r.id === currentActiveRigId && (cap || play || r.winlinkAudio))
+    ? { ...r, winlinkAudio: { captureLabel: cap || '', playbackLabel: play || '', driveLevel: drive } }
+    : r);
+}
 let currentActiveRigId = null; // local copy of settings.activeRigId
 let rigModelData = []; // populated from main process on first use
 
@@ -5068,6 +5094,63 @@ if (setMercuryEnable) {
   setMercuryEnable.addEventListener('change', () => {
     mercuryConfig.classList.toggle('hidden', !setMercuryEnable.checked);
   });
+  // --- Winlink ---
+  if (setWinlinkEnable) {
+    setWinlinkEnable.addEventListener('change', () => winlinkConfig.classList.toggle('hidden', !setWinlinkEnable.checked));
+    const patBrowse = document.getElementById('winlink-pat-browse');
+    if (patBrowse) patBrowse.addEventListener('click', async () => {
+      const p = await window.api.echocatPickFile({ title: 'Select the Pat binary', filters: [{ name: 'Executables', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }] });
+      if (p) setWinlinkPatPath.value = p;
+    });
+    const acctStatus = document.getElementById('winlink-account-status');
+    const regBox = document.getElementById('winlink-register');
+    const acctBtn = document.getElementById('winlink-account-check');
+    if (acctBtn) acctBtn.addEventListener('click', async () => {
+      acctStatus.textContent = 'Checking…';
+      const r = await window.api.winlinkAccountCheck();
+      if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
+      acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account.` : `${r.callsign} has no Winlink account yet.`;
+      regBox.classList.toggle('hidden', !!r.exists);
+    });
+    const regBtn = document.getElementById('winlink-register-btn');
+    if (regBtn) regBtn.addEventListener('click', async () => {
+      const r = await window.api.winlinkRegister({ password: setWinlinkPassword.value, recoveryEmail: document.getElementById('set-winlink-recovery').value.trim() });
+      acctStatus.textContent = r && r.ok ? 'Account created. Your password is saved.' : ((r && r.error) || 'Could not create the account');
+      if (r && r.ok) regBox.classList.add('hidden');
+    });
+    // ARDOP sound devices: ardopcf's own list (its names are what it opens),
+    // pre-picked to match the active rig's FT8 audio devices.
+    const ardopBtn = document.getElementById('winlink-ardop-discover');
+    const ardopStatus = document.getElementById('winlink-ardop-status');
+    const ardopDevs = document.getElementById('winlink-ardop-devices');
+    const fillArdop = (sel, list, want, rigDeviceLabel) => {
+      sel.innerHTML = '<option value="">(choose)</option>' + list.map((d) => `<option value="${_esc(d.name)}">${_esc(d.name)}</option>`).join('');
+      const pick = list.find((d) => d.name === want) || (rigDeviceLabel ? list.find((d) => {
+        const a = String(rigDeviceLabel).toLowerCase(); const b = d.name.toLowerCase().replace(/\s+\)$/, ')');
+        return a.includes(b) || b.includes(a.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/, ''));
+      }) : null);
+      if (pick) sel.value = pick.name;
+    };
+    if (ardopBtn) ardopBtn.addEventListener('click', async () => {
+      ardopStatus.textContent = 'Asking ardopcf…';
+      const r = await window.api.winlinkListArdopDevices();
+      if (!r || !r.ok) { ardopStatus.textContent = (r && r.error) || 'ardopcf did not answer'; return; }
+      const rig = currentRigs.find((x) => x.id === currentActiveRigId) || {};
+      const saved = rig.winlinkAudio || {};
+      let inLabel = '', outLabel = '';
+      try {
+        const devs = await navigator.mediaDevices.enumerateDevices();
+        const i = devs.find((d) => d.kind === 'audioinput' && d.deviceId === rig.remoteAudioInput);
+        const o = devs.find((d) => d.kind === 'audiooutput' && d.deviceId === rig.remoteAudioOutput);
+        inLabel = i ? i.label : ''; outLabel = o ? o.label : '';
+      } catch {}
+      fillArdop(setWinlinkArdopIn, r.devices.capture, saved.captureLabel, inLabel);
+      fillArdop(setWinlinkArdopOut, r.devices.playback, saved.playbackLabel, outLabel);
+      ardopDevs.classList.remove('hidden');
+      ardopStatus.textContent = `${r.devices.capture.length} capture, ${r.devices.playback.length} playback — saved for ${rig.name || 'the active radio'} when you press Save`;
+    });
+  }
+
   const mercuryPathBrowse = document.getElementById('mercury-path-browse');
   if (mercuryPathBrowse) mercuryPathBrowse.addEventListener('click', async () => {
     const p = await window.api.echocatPickFile({
@@ -13209,6 +13292,24 @@ bindClick(document.getElementById('view-jtty-btn'), () => {
   window.api.jtcatPopoutOpen('JTTY');
 });
 bindClick(document.getElementById('view-mercury-btn'), () => { if (window.api.mercuryPopoutOpen) window.api.mercuryPopoutOpen(); });
+bindClick(document.getElementById('view-winlink-btn'), () => { if (window.api.winlinkPopoutOpen) window.api.winlinkPopoutOpen(); });
+// Unread Winlink mail on the More menu entry (main pushes winlink-state).
+if (window.api.onWinlinkState) window.api.onWinlinkState((st) => {
+  const b = document.getElementById('winlink-unread-badge');
+  if (!b) return;
+  const n = (st && st.unread) || 0;
+  b.textContent = n ? `(${n})` : '';
+  b.classList.toggle('hidden', !n);
+});
+if (window.api.onOpenSettingsWinlink) window.api.onOpenSettingsWinlink(async () => {
+  try {
+    await openSettingsDialog('station');
+    setTimeout(() => {
+      const block = document.getElementById('winlink-fieldset');
+      if (block) { block.classList.remove('collapsed'); block.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }, 60);
+  } catch {}
+});
 bindClick(document.getElementById('view-js8call-btn'), () => { if (window.api.js8PopoutOpen) window.api.js8PopoutOpen(); });
 bindClick(document.getElementById('view-sstv-btn'), () => window.api.sstvPopoutOpen());
 bindClick(document.getElementById('view-scope-btn'), () => { if (window.api.scopePopoutOpen) window.api.scopePopoutOpen(); });
@@ -16337,6 +16438,25 @@ async function openSettingsDialog(tab) {
   setTciPort.value = s.tciPort || 50001;
   setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
   tciConfig.classList.toggle('hidden', !s.tciSpots);
+  if (setWinlinkEnable) {
+    setWinlinkEnable.checked = s.enableWinlink === true;
+    winlinkConfig.classList.toggle('hidden', !s.enableWinlink);
+    setWinlinkPassword.value = s.winlinkPassword || '';
+    setWinlinkAutoCheck.checked = s.winlinkTelnetAutoCheck === true;
+    setWinlinkAutoCheckMin.value = s.winlinkTelnetAutoCheckMin || 30;
+    setWinlinkArdopBw.value = String(s.winlinkArdopBw || 500);
+    setWinlinkVaraBw.value = String(s.winlinkVaraBw || 2300);
+    setWinlinkVaraPort.value = s.winlinkVaraPort || 8300;
+    setWinlinkCap.value = s.winlinkSessionCapMin || 30;
+    setWinlinkPatPath.value = s.winlinkPatPath || '';
+    const rig = (s.rigs || []).find((x) => x.id === s.activeRigId) || {};
+    const wa = rig.winlinkAudio || {};
+    setWinlinkArdopDrive.value = wa.driveLevel || 90;
+    // Show the saved picks without running ardopcf; Find refreshes the lists.
+    setWinlinkArdopIn.innerHTML = wa.captureLabel ? `<option value="${_esc(wa.captureLabel)}">${_esc(wa.captureLabel)}</option>` : '';
+    setWinlinkArdopOut.innerHTML = wa.playbackLabel ? `<option value="${_esc(wa.playbackLabel)}">${_esc(wa.playbackLabel)}</option>` : '';
+    document.getElementById('winlink-ardop-devices').classList.toggle('hidden', !wa.captureLabel && !wa.playbackLabel);
+  }
   if (setMercuryEnable) {
     setMercuryEnable.checked = s.enableMercury === true;
     setMercuryPath.value = s.mercuryPath || '';
@@ -17009,7 +17129,7 @@ settingsSave.addEventListener('click', async () => {
   // spot-toggle respawn crash on the main side — this was the renderer half).
 
   await window.api.saveSettings({
-    rigs: currentRigs,
+    rigs: winlinkStampRigAudio(currentRigs),
     activeRigId: selectedRigId || null,
     // The connection target rides with the selected rig. This save used to
     // send only activeRigId, so an edited rig (new id, same port) left the
@@ -17197,6 +17317,17 @@ settingsSave.addEventListener('click', async () => {
     tciHost: tciHostVal,
     tciPort: tciPortVal,
     tciMaxAge: tciMaxAgeVal,
+    ...(setWinlinkEnable ? {
+      enableWinlink: setWinlinkEnable.checked,
+      winlinkPassword: setWinlinkPassword.value,
+      winlinkTelnetAutoCheck: setWinlinkAutoCheck.checked,
+      winlinkTelnetAutoCheckMin: Math.max(10, Math.min(240, parseInt(setWinlinkAutoCheckMin.value, 10) || 30)),
+      winlinkArdopBw: parseInt(setWinlinkArdopBw.value, 10) || 500,
+      winlinkVaraBw: parseInt(setWinlinkVaraBw.value, 10) || 2300,
+      winlinkVaraPort: parseInt(setWinlinkVaraPort.value, 10) || 8300,
+      winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
+      winlinkPatPath: setWinlinkPatPath.value.trim(),
+    } : {}),
     ...(setMercuryEnable ? {
       enableMercury: setMercuryEnable.checked,
       mercuryPath: setMercuryPath.value.trim(),
@@ -17249,6 +17380,8 @@ settingsSave.addEventListener('click', async () => {
   // Reflect the Mercury enable state in the More ▾ menu without a reload.
   var mercuryViewBtn = document.getElementById('view-mercury-btn');
   if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !setMercuryEnable.checked);
+  var winlinkViewBtn = document.getElementById('view-winlink-btn');
+  if (winlinkViewBtn && setWinlinkEnable) winlinkViewBtn.classList.toggle('hidden', !setWinlinkEnable.checked);
   grid = setGrid.value.trim();
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -20417,6 +20550,9 @@ catLogClearBtn.addEventListener('click', () => {
       const t = await window.api.cloudTunnelGetState();
       if (t && t.enabled) echocatServer += `; tunnel ${t.status}` + (t.origin ? `, origin ${t.origin.state}` : '');
     } catch {}
+    // Winlink: Pat's state, the shim, the session — only when it is on.
+    let winlinkLine = '';
+    try { if (s.enableWinlink && window.api.winlinkDiag) winlinkLine = await window.api.winlinkDiag(); } catch {}
     const md = {
       version: window._appVersion || s.appVersion || 'unknown',
       platform: window.api.platform,
@@ -20427,6 +20563,7 @@ catLogClearBtn.addEventListener('click', () => {
       setupNotes,
       stationSetup,
       echocatServer,
+      winlink: winlinkLine,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
     // capture everything since process start, including the pre-window lines
@@ -20486,6 +20623,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Setup notes:** ' + md.setupNotes,
       '**Station Setup:** ' + md.stationSetup,
       '**ECHOCAT server:** ' + md.echocatServer,
+      ...(md.winlink ? ['**Winlink:** ' + md.winlink] : []),
       '',
       '### What I tried to do',
       '<!-- fill in: the steps you took -->',

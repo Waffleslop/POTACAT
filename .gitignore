@@ -70,3 +70,8 @@ ui-test-entry.js
 assets/yaesu-scope/yaesu-scope
 assets/yaesu-scope/yaesu-scope.exe
 helpers/yaesu-scope/build/
+# Winlink sidecars staged into the package at build time (scripts/build-winlink-helpers.sh)
+assets/pat/pat
+assets/pat/pat.exe
+assets/ardopcf/ardopcf
+assets/ardopcf/ardopcf.exe

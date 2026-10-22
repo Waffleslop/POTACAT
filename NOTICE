@@ -46,6 +46,18 @@ or in the LICENSES/ directory of the distribution where applicable.
     License: GNU General Public License v3.0 (GPLv3)
     Source: https://sourceforge.net/p/wsjt/wsjtx/ (third_party/wsprd/)
 
+  Pat (Winlink client) — bundled as a SEPARATE executable, run as a local
+    process and spoken to over loopback HTTP; NOT linked into POTACAT.
+    Copyright (c) 2020 Martin Hebnes Pedersen (LA5NTA)
+    License: MIT
+    Source: https://github.com/la5nta/pat (third_party/pat/: pinned tag + LICENSE)
+
+  ardopcf (ARDOP modem) — bundled as a SEPARATE executable (Windows/Linux),
+    reached over its loopback host port; NOT linked into POTACAT.
+    Copyright (c) 2014-2024 Rick Muething, John Wiseman, Peter LaRue
+    License: MIT
+    Source: https://github.com/pflarue/ardop (third_party/ardopcf/: pinned tag + LICENSE)
+
   kissfft
     Copyright (c) 2003-2010 Mark Borgerding and contributors
     License: BSD-3-Clause

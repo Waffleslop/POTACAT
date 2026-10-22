@@ -195,6 +195,7 @@
                  has a Start button and nothing to configure. -->
             <button class="view-menu-item" id="view-js8call-btn">JS8</button>
             <button class="view-menu-item hidden" id="view-mercury-btn">Mercury HF Data</button>
+            <button class="view-menu-item hidden" id="view-winlink-btn">Winlink Mail <span id="winlink-unread-badge" class="hidden" style="color:var(--accent-green,#4ecca3);font-weight:700;"></span></button>
             <button class="view-menu-item" id="view-sstv-btn">SSTV</button>
             <!-- Shown only for a rig whose capabilities declare nativeScope
                  (the FT-710's scope over USB) — see rigApplyCapabilities. -->
@@ -2980,6 +2981,67 @@
           <input type="checkbox" id="set-mercury-listen"> Listen for incoming calls
         </label>
         <span class="help-text" style="display:block;">An inbound call keys PTT automatically — keep the station attended (Part 97). Off by default.</span>
+      </div>
+    </fieldset>
+    <!-- 8a3. Winlink email (Pat) -->
+    <fieldset class="source-toggles collapsible" data-settings-tab="station" id="winlink-fieldset">
+      <legend>Winlink (email over radio)</legend>
+      <label class="checkbox-label">
+        <input type="checkbox" id="set-winlink-enable"> Enable Winlink email
+      </label>
+      <div id="winlink-config" class="radio-sub hidden">
+        <span class="help-text" style="display:block;margin-bottom:6px;">Send and receive Winlink email from POTACAT, and from ECHOCAT on your phone. POTACAT runs Pat, the open-source Winlink client, in the background. Over the internet it works with no radio; over the radio, POTACAT tunes and keys for the session through its own CAT control. Open it from More &rarr; Winlink Mail.</span>
+        <label>Winlink password:
+          <input type="password" id="set-winlink-password" autocomplete="off" style="width:150px;" placeholder="6 to 12 characters">
+        </label>
+        <button type="button" id="winlink-account-check">Check my account</button>
+        <span class="help-text" id="winlink-account-status" style="margin-left:6px;"></span>
+        <div id="winlink-register" class="hidden" style="margin-top:6px;padding:7px 9px;border:1px solid var(--border-primary);border-radius:4px;">
+          <span class="help-text" style="display:block;margin-bottom:4px;">No Winlink account for your callsign yet. Choose a password (6 to 12 characters) and, if you like, a recovery email, then create it.</span>
+          <label>Recovery email (optional): <input type="text" id="set-winlink-recovery" style="width:200px;"></label>
+          <button type="button" id="winlink-register-btn">Create my Winlink account</button>
+        </div>
+        <label class="checkbox-label" style="margin-top:8px;">
+          <input type="checkbox" id="set-winlink-autocheck"> Check mail over the internet every
+          <input type="number" id="set-winlink-autocheck-min" min="10" max="240" value="30" style="width:55px;"> minutes
+        </label>
+        <span class="help-text" style="display:block;">Internet only, never the radio. A radio session always starts from your Send / Receive.</span>
+
+        <div style="margin-top:10px;font-weight:600;">Over the radio</div>
+        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP is open and built into POTACAT (Windows and Linux). Mercury uses your Mercury setup above. VARA HF uses your own copy of VARA (Windows) &mdash; start it yourself and set its PTT to None, so POTACAT keys the radio. The modem needs a sound device for the radio: DAX on a Flex, or the radio's USB sound card.</span>
+        <div style="margin-top:4px;">
+          <button type="button" id="winlink-ardop-discover">Find ARDOP sound devices</button>
+          <span class="help-text" id="winlink-ardop-status" style="margin-left:6px;"></span>
+        </div>
+        <div id="winlink-ardop-devices" class="hidden" style="margin-top:5px;display:flex;gap:12px;flex-wrap:wrap;">
+          <label>From the radio (capture): <select id="set-winlink-ardop-in" style="max-width:260px;"></select></label>
+          <label>To the radio (playback): <select id="set-winlink-ardop-out" style="max-width:260px;"></select></label>
+        </div>
+        <span class="help-text" style="display:block;">Saved for the active radio. POTACAT pre-picks the devices your FT8 audio uses.</span>
+        <label style="margin-top:6px;">ARDOP bandwidth:
+          <select id="set-winlink-ardop-bw" style="width:80px;"><option value="500">500</option><option value="2000">2000</option></select>
+        </label>
+        <label style="margin-left:8px;">ARDOP drive level:
+          <input type="number" id="set-winlink-ardop-drive" min="1" max="100" value="90" style="width:55px;"> %
+        </label>
+        <label style="margin-left:8px;">VARA HF bandwidth:
+          <select id="set-winlink-vara-bw" style="width:80px;"><option value="500">500</option><option value="2300" selected>2300</option><option value="2750">2750</option></select>
+        </label>
+        <label style="margin-left:8px;">VARA port:
+          <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;">
+        </label>
+        <label style="margin-top:6px;">End a radio session after
+          <input type="number" id="set-winlink-cap" min="10" max="60" value="30" style="width:50px;"> minutes
+        </label>
+        <span class="help-text" style="display:block;">A stuck session also ends after 3 minutes with no progress, and the transmitter is released if it stays keyed for 30 seconds.</span>
+        <details style="margin-top:6px;">
+          <summary class="help-text">Advanced</summary>
+          <label>Pat binary:
+            <input type="text" id="set-winlink-pat-path" placeholder="bundled / leave blank" style="width:230px;">
+            <button type="button" id="winlink-pat-browse">Browse&hellip;</button>
+          </label>
+          <span class="help-text" style="display:block;">Pat is MIT-licensed, by LA5NTA (<a href="https://getpat.io/" data-external style="color:var(--accent-blue,#4fc3f7);">getpat.io</a>). ARDOP is ardopcf (MIT, <a href="https://github.com/pflarue/ardop" data-external style="color:var(--accent-blue,#4fc3f7);">github.com/pflarue/ardop</a>). Winlink is run by the Amateur Radio Safety Foundation (<a href="https://winlink.org/" data-external style="color:var(--accent-blue,#4fc3f7);">winlink.org</a>).</span>
+        </details>
       </div>
     </fieldset>
     <!-- 8b. WebSDR (KiwiSDR) -->

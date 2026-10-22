@@ -391,6 +391,12 @@ const radioOwnerLib = require('./lib/radio-owner');
 const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const MercuryAppProto = require('./lib/mercury-app-protocol');
+const WinlinkPat = require('./lib/winlink-pat');
+const { WinlinkClient } = require('./lib/winlink-client');
+const WinlinkStateLib = require('./lib/winlink-state');
+const { createRigctldServer } = require('./lib/rigctld-server');
+const ArdopProcess = require('./lib/ardop-process');
+const WinlinkModes = require('./lib/winlink-modes');
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const QsoLog = require('./lib/qso-log');
 const OriginHealth = require('./lib/origin-health');
@@ -697,6 +703,10 @@ const GLOBAL_KEYS = new Set([
   'launchAtStartup',   // OS login item — machine-scoped by nature
   'setupSharePending', // Station Setup shares not yet delivered (retried at launch) — about this machine's radios
   'echocatReviewAsk',  // the one-time "Rate ECHOCAT" card: state, snooze, days a phone connected (per install)
+  'winlinkPatPath',    // Winlink: explicit Pat binary on THIS machine
+  'winlinkArdopPath',  // Winlink: explicit ardopcf binary on THIS machine
+  'winlinkArdopPort',  // Winlink: ardopcf host port on this machine (default 8515)
+  'winlinkVaraPort',   // Winlink: the operator's own VARA HF TNC port on this machine (default 8300)
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
@@ -1608,6 +1618,25 @@ let mercuryPopoutWin = null;    // the chat/file UI window (Phase 5)
 let mercuryReassembler = null;  // app-protocol frame reassembler on the data socket
 let mercuryChatTail = [];       // recent chat/system lines for replay on popout open (cap 200)
 let mercuryRxFile = null;       // in-progress inbound file { name, size, received, path, ws }
+// Winlink via Pat (lib/winlink-*.js; the section after disconnectMercury()).
+let patProc = null;             // the `pat http` child process
+let patClient = null;           // WinlinkClient on Pat's loopback API
+let _patHttpPort = 0;           // Pat's API port this run (127.0.0.1 only)
+let _patVaraAddr = '';          // varahf.addr in the config Pat has loaded
+const winlinkState = new WinlinkStateLib.WinlinkState();
+let winlinkShim = null;         // loopback rigctld shim Pat keys and tunes through
+let _winlinkShimPort = 0;
+let _winlinkShimArmed = false;  // Pat may tune/key only while a radio session runs
+let ardopProc = null;           // ardopcf for an ARDOP session
+let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
+let _winlinkTxFailsafeTimer = null;
+let _winlinkCapTimer = null;
+let _winlinkWatchdog = null;
+let _winlinkLastActivity = 0;
+let _winlinkSessionError = '';
+let _winlinkMercuryWasConnected = false;
+let _winlinkAutoCheckTimer = null;
+let winlinkPopoutWin = null;
 
 // ─── JS8 (native) state ──────────────────────────────────────────────────────
 // POTACAT IS the JS8 station — the JS8Call modem is compiled in (GPLv3; see
@@ -1630,7 +1659,7 @@ let js8MapWin = null;           // the Heartbeat Map window
 let js8RxAssembler = new Js8RxAssembler({});
 // The exclusive radio TX/audio path can be held by at most one mode engine at a
 // time (lib/radio-owner.js). JTCAT and Mercury must never both key the rig.
-let radioOwner = 'none';        // 'none' | 'jtcat' | 'mercury'
+let radioOwner = 'none';        // 'none' | 'jtcat' | 'mercury' | 'winlink'
 let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
 let smartSdrAudio = null;     // separate non-GUI TCP for slice audio (DAX-free path)
@@ -7749,6 +7778,7 @@ function acquireRadio(who) {
       sendCatLog(`[radio] ${who} is transmitting — ${d.preempted} stands down (it cannot be asked to stop mid-frame)`);
       if (d.preempted === 'jtcat') haltJtcatForPreemption();
       else if (d.preempted === 'mercury' && mercuryClient) { try { mercuryClient.abort(); } catch { /* already gone */ } }
+      else if (d.preempted === 'winlink') winlinkAbortSession('another engine took the radio');
     }
     radioOwner = d.owner;
     return true;
@@ -8192,6 +8222,862 @@ function disconnectMercury() {
   if (mercuryRxFile) { try { mercuryRxFile.ws.end(); } catch {} mercuryRxFile = null; }
   mercuryLastStatus = null;
   sendMercuryStatus({ connected: false });
+}
+
+
+// ─── Winlink (email over radio, via Pat) ─────────────────────────────────────
+// docs/winlink-integration-plan.md. POTACAT runs Pat ("pat http", MIT) as a
+// sidecar per operator profile and drives it over its loopback HTTP API
+// (lib/winlink-client.js); every decision about Pat's bytes is in
+// lib/winlink-pat.js. Mail and session state live HERE (lib/winlink-state.js)
+// so the pop-out, ECHOCAT Web and the phone render one payload.
+//
+// Radio sessions: Pat speaks Winlink, the modem (ardopcf / Mercury / the
+// operator's VARA) makes the audio, and PTT + QSY come back into POTACAT
+// through the loopback rigctld shim (lib/rigctld-server.js) — so keying goes
+// through handleRemotePtt under radio owner 'winlink' with a 30 s failsafe,
+// and QSY through tuneRadio (SWR latch, Guest Pass, rig presets all apply).
+//
+// Part 97: a radio session starts ONLY from an operator's Connect
+// (winlinkStartSession's callers are the pop-out button and the ECHOCAT
+// winlink-connect message). The auto-check timer is internet-only by
+// construction. Pat is never given --listen.
+
+const _wlNet = require('net');
+const WINLINK_PTT_FAILSAFE_MS = 30000;
+const WINLINK_NO_PROGRESS_MS = 180000;
+const WINLINK_PAT_READY_MS = 10000;
+const WINLINK_NOTICE_TEXT = 'Winlink is amateur radio: no business or commercial traffic, nothing that needs privacy (messages are not encrypted and can be read by anyone), and messages for third parties in other countries only where your licence allows it.';
+
+function winlinkLog(msg) { sendCatLog(`[Winlink] ${msg}`); }
+
+function winlinkDir() {
+  const call = String(settings.activeProfile || settings.myCallsign || '').trim();
+  return call ? path.join(profileDir(call), 'winlink') : path.join(app.getPath('userData'), 'winlink');
+}
+
+function winlinkPaths() {
+  const dir = winlinkDir();
+  return {
+    dir,
+    config: path.join(dir, 'pat-config.json'),
+    mbox: path.join(dir, 'mailbox'),
+    log: path.join(dir, 'pat.log'),
+    eventLog: path.join(dir, 'pat-events.json'),
+    forms: path.join(dir, 'forms'),
+    downloads: path.join(dir, 'downloads'),
+    ardopLogs: path.join(dir, 'ardop-logs'),
+  };
+}
+
+function _findBinary(candidates, bareName) {
+  for (const p of candidates) {
+    try { fs.accessSync(p, fs.constants.X_OK); return { path: p, found: true }; } catch { /* next */ }
+  }
+  return { path: bareName, found: false };
+}
+
+function findPat() {
+  return _findBinary(WinlinkPat.patPathCandidates({
+    settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
+  }), WinlinkPat.patBinaryName(process.platform));
+}
+
+function findArdop() {
+  return _findBinary(ArdopProcess.ardopPathCandidates({
+    settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
+  }), ArdopProcess.ardopBinaryName(process.platform));
+}
+
+/** First port in [lo, hi] that 127.0.0.1 can bind right now. */
+function winlinkFreePort([lo, hi]) {
+  return new Promise((resolve) => {
+    const tryPort = (p) => {
+      if (p > hi) return resolve(0);
+      const probe = _wlNet.createServer();
+      probe.once('error', () => tryPort(p + 1));
+      probe.once('listening', () => probe.close(() => resolve(p)));
+      probe.listen(p, '127.0.0.1');
+    };
+    tryPort(lo);
+  });
+}
+
+function winlinkActiveRig() {
+  return (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+}
+
+function winlinkModes() {
+  const rig = winlinkActiveRig();
+  let family = 'none';
+  try { family = rig ? RigFamily.rigFamily(rig) : (settings.catTarget ? RigFamily.familyFromCatTarget(settings.catTarget) : 'none'); } catch {}
+  return WinlinkModes.winlinkModesFor({
+    rigFamily: family,
+    audioSource: settings.audioSource || (rig && rig.audioSource) || 'dax',
+    platform: process.platform,
+    remote: isRemoteMode(),
+    mercuryEnabled: !!settings.enableMercury,
+    mercuryPort: mercuryProcess.mercuryPorts(settings).control,
+    varaPort: _winlinkVaraPort(),
+    ardopFound: ArdopProcess.ardopSupported(process.platform) ? findArdop().found : false,
+  });
+}
+
+function _winlinkVaraPort() {
+  const n = parseInt(settings.winlinkVaraPort, 10);
+  return n > 0 && n < 65536 ? n : WinlinkPat.PAT_DEFAULTS.varaPort;
+}
+function _winlinkArdopPort() {
+  const n = parseInt(settings.winlinkArdopPort, 10);
+  return n > 0 && n < 65536 ? n : ArdopProcess.ARDOP_DEFAULTS.port;
+}
+
+/** The one payload every surface renders. Never carries the password or a message body. */
+function winlinkPayload() {
+  winlinkState.setModes(winlinkModes());
+  winlinkState.setAutoCheck({ enabled: !!settings.winlinkTelnetAutoCheck, min: _winlinkAutoCheckMin() });
+  return winlinkState.snapshot({
+    enabled: !!settings.enableWinlink,
+    mycall: String(settings.myCallsign || '').toUpperCase(),
+    hasPassword: !!settings.winlinkPassword,
+    noticeAccepted: !!settings.winlinkNoticeAcceptedAt,
+    noticeText: WINLINK_NOTICE_TEXT,
+    mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
+    lastGateway: settings.winlinkLastGateway || null,
+  });
+}
+
+function winlinkPopoutSend(channel, payload) {
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send(channel, payload);
+}
+
+let _winlinkPushTimer = null;
+/** Push state to the pop-out, the main window and every ECHOCAT client (coalesced). */
+function winlinkPush() {
+  if (_winlinkPushTimer) return;
+  _winlinkPushTimer = setTimeout(() => {
+    _winlinkPushTimer = null;
+    const p = winlinkPayload();
+    winlinkPopoutSend('winlink-state', p);
+    if (win && !win.isDestroyed()) win.webContents.send('winlink-state', { enabled: p.enabled, unread: p.unread, patReady: p.patReady, session: { state: p.session.state } });
+    if (remoteServer && remoteServer.broadcastWinlinkState) { try { remoteServer.broadcastWinlinkState(p); } catch {} }
+  }, 50);
+}
+
+function winlinkPushMailbox(box) {
+  const msg = { box, messages: winlinkState.list(box), total: winlinkState.total(box) };
+  winlinkPopoutSend('winlink-mailbox', msg);
+  if (remoteServer && remoteServer.broadcastWinlinkMailbox) { try { remoteServer.broadcastWinlinkMailbox(msg); } catch {} }
+}
+
+async function winlinkRefreshMailboxes(boxes = WinlinkStateLib.BOXES) {
+  if (!patClient) return;
+  for (const box of boxes) {
+    try {
+      winlinkState.applyMailbox(box, await patClient.mailbox(box));
+      winlinkPushMailbox(box);
+    } catch (e) {
+      winlinkLog(`could not list ${box}: ${e.message}`);
+    }
+  }
+  winlinkPush();
+}
+
+/** Write Pat's config for this launch / this session. Returns the varahf address written. */
+function writePatConfig({ varaAddr } = {}) {
+  const p = winlinkPaths();
+  fs.mkdirSync(p.dir, { recursive: true });
+  fs.mkdirSync(p.mbox, { recursive: true });
+  const addr = varaAddr || `127.0.0.1:${_winlinkVaraPort()}`;
+  const cfg = WinlinkPat.buildPatConfig({
+    mycall: settings.myCallsign,
+    password: settings.winlinkPassword || '',
+    grid: settings.grid,
+    httpPort: _patHttpPort,
+    shimPort: _winlinkShimPort || null,
+    transport: {
+      ardopPort: _winlinkArdopPort(),
+      ardopBw: settings.winlinkArdopBw,
+      varaAddr: addr,
+      varaBw: settings.winlinkVaraBw,
+    },
+  });
+  // Written owner-only where the OS honours it: it holds the Winlink password.
+  fs.writeFileSync(p.config, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  _patVaraAddr = addr;
+  return addr;
+}
+
+function killPat() {
+  if (patClient) { try { patClient.close(); } catch {} patClient = null; }
+  if (patProc) { patProc._potacatStopping = true; try { patProc.kill(); } catch {} patProc = null; }
+}
+
+function spawnPat() {
+  return new Promise((resolve, reject) => {
+    const bin = findPat();
+    const p = winlinkPaths();
+    const args = WinlinkPat.buildPatArgs({ configPath: p.config, mboxDir: p.mbox, logPath: p.log, eventLogPath: p.eventLog, formsDir: p.forms });
+    killPat();
+    let tail = '';
+    winlinkLog('spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
+    let proc;
+    try { proc = spawn(bin.path, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+    catch (e) { return reject(e); }
+    patProc = proc;
+    const relay = (chunk) => {
+      const text = chunk.toString();
+      tail = (tail + text).slice(-4096);
+      // Pat's session chatter goes to pat.log (tailed over /ws); stdout/stderr
+      // carry startup and fatal lines only — worth the log, never a flood.
+      for (const line of text.split(/\r?\n/).filter(Boolean).slice(0, 20)) winlinkLog(`pat: ${line}`);
+    };
+    proc.stdout.on('data', relay);
+    proc.stderr.on('data', relay);
+    let settled = false;
+    proc.on('error', (err) => { if (patProc === proc) patProc = null; if (!settled) { settled = true; reject(err); } });
+    proc.on('exit', (code) => {
+      if (patProc === proc) patProc = null;
+      const last = tail.trim().split(/\r?\n/).pop() || `pat exited with code ${code}`;
+      if (!settled) { settled = true; reject(new Error(last)); return; }
+      if (proc._potacatStopping) return; // POTACAT stopped it (relaunch / off / quit)
+      winlinkState.setPat({ ready: false, error: last });
+      winlinkLog(`Pat stopped: ${last}`);
+      if (winlinkSessionActive()) winlinkEndSession('error', 'Pat stopped during the session');
+      winlinkPush();
+    });
+    setTimeout(() => { if (!settled) { settled = true; resolve(proc); } }, 500);
+  });
+}
+
+async function winlinkWaitPatReady(ms = WINLINK_PAT_READY_MS) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (!patProc || !patClient) return false;
+    try { await patClient.status(); return true; } catch { /* not yet */ }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
+}
+
+function winlinkOnPatEvent(ev) {
+  if (!ev) return;
+  if (ev.kind === 'progress') {
+    winlinkState.applyProgress(ev);
+    winlinkSessionTouch();
+    winlinkSessionPush();
+    return;
+  }
+  if (ev.kind === 'status') {
+    if (winlinkSessionActive()) {
+      winlinkSessionTouch();
+      if (ev.connected && winlinkState.session.state === 'connecting') {
+        winlinkState.setSession({ state: 'connected', text: `Connected${ev.remoteAddr ? ' to ' + ev.remoteAddr : ''}` });
+        winlinkSessionPush();
+      }
+    }
+    return;
+  }
+  if (ev.kind === 'mailbox-changed') { winlinkRefreshMailboxes(); return; }
+  if (ev.kind === 'notification') {
+    if (ev.title || ev.body) winlinkLog(`${ev.title}${ev.body ? ' — ' + ev.body : ''}`);
+    return;
+  }
+  if (ev.kind === 'prompt') {
+    const auto = WinlinkPat.autoPromptAnswer(ev, { password: settings.winlinkPassword });
+    if (auto != null && patClient) { patClient.respondPrompt(ev.id, auto); return; }
+    // The operator decides: a busy channel (wait or abort), or the CMS's
+    // new-account password message (accept to download it).
+    winlinkState.setSession({ prompt: { id: ev.id, kind: ev.prompt, message: ev.message } });
+    winlinkLog(ev.prompt === 'busy-channel' ? 'the channel is busy — waiting for it to clear (Abort to give up)' : `Pat asks: ${ev.message}`);
+    winlinkSessionPush();
+    return;
+  }
+  if (ev.kind === 'prompt-abort') {
+    const s = winlinkState.session;
+    if (s.prompt && s.prompt.id === ev.id) { winlinkState.setSession({ prompt: null }); winlinkSessionPush(); }
+    return;
+  }
+  if (ev.kind === 'log') {
+    if (!winlinkSessionActive()) return;
+    winlinkSessionTouch();
+    // Pat's log is the session transcript; it stays in pat.log. Only the lines
+    // an operator can act on are said, once each, in POTACAT's words.
+    if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; }
+    else if (ev.class === 'no-answer') { _winlinkSessionError = `${winlinkState.session.gateway || 'The gateway'} did not answer — try another gateway or band`; }
+    else if (ev.class === 'transport-down') { _winlinkSessionError = winlinkTransportDownText(winlinkState.session.mode); }
+    else if (ev.class === 'rig-refused') { _winlinkSessionError = 'POTACAT refused Pat\'s tune or PTT — see the [Winlink] lines above'; }
+    winlinkState.setSession({ text: ev.text.slice(0, 160) });
+    winlinkSessionPush();
+  }
+}
+
+function winlinkTransportDownText(mode) {
+  if (mode === 'vara') return `VARA HF is not answering on port ${_winlinkVaraPort()} — start VARA (and set its PTT to None) first`;
+  if (mode === 'mercury') return 'Mercury is not answering — check Mercury in Settings > Station';
+  if (mode === 'ardop') return 'ardopcf is not answering — see the [Winlink] ardop lines above';
+  return 'The modem is not answering';
+}
+
+async function connectWinlink() {
+  disconnectWinlink();
+  if (!settings.enableWinlink) { winlinkPush(); return; }
+  const call = String(settings.myCallsign || '').trim();
+  if (!call) {
+    winlinkState.setPat({ ready: false, error: 'Set your callsign in Settings first' });
+    winlinkLog('not starting Pat — no callsign set');
+    winlinkPush();
+    return;
+  }
+  _patHttpPort = await winlinkFreePort(WinlinkPat.PAT_DEFAULTS.httpPortRange);
+  if (!_patHttpPort) {
+    winlinkState.setPat({ ready: false, error: 'No free local port for Pat (8590-8599)' });
+    winlinkLog('no free port 8590-8599 for Pat\'s API');
+    winlinkPush();
+    return;
+  }
+  await startWinlinkShim();
+  try { writePatConfig(); }
+  catch (e) { winlinkState.setPat({ ready: false, error: e.message }); winlinkLog(`could not write Pat's config: ${e.message}`); winlinkPush(); return; }
+  try { await spawnPat(); }
+  catch (err) {
+    const msg = err && err.code === 'ENOENT'
+      ? 'Pat not found — the bundled copy is missing; set its path in Settings > Station > Winlink'
+      : (err && err.message) || String(err);
+    winlinkState.setPat({ ready: false, error: msg });
+    winlinkLog(msg);
+    winlinkPush();
+    return;
+  }
+  patClient = new WinlinkClient({ port: _patHttpPort });
+  patClient.on('event', winlinkOnPatEvent);
+  patClient.openEvents();
+  if (!(await winlinkWaitPatReady())) {
+    const err = `Pat is running but its API on 127.0.0.1:${_patHttpPort} never answered — see ${winlinkPaths().log}`;
+    winlinkState.setPat({ ready: false, error: err });
+    winlinkLog(err);
+    winlinkPush();
+    return;
+  }
+  winlinkState.setPat({ ready: true, error: '' });
+  winlinkLog(`Pat ready on 127.0.0.1:${_patHttpPort} as ${call.toUpperCase()}${settings.winlinkPassword ? '' : ' — no Winlink password set yet'}`);
+  await winlinkRefreshMailboxes();
+  winlinkArmAutoCheck();
+}
+
+function disconnectWinlink({ quit } = {}) {
+  if (winlinkSessionActive()) winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off');
+  clearTimeout(_winlinkAutoCheckTimer); _winlinkAutoCheckTimer = null;
+  killArdop();
+  killPat();
+  stopWinlinkShim();
+  winlinkState.setPat({ ready: false, error: '' });
+  if (!quit) winlinkPush();
+}
+
+// ── the rigctld shim: Pat's PTT and QSY come back into POTACAT ──────────────
+
+async function startWinlinkShim() {
+  stopWinlinkShim();
+  const port = await winlinkFreePort(WinlinkPat.PAT_DEFAULTS.shimPortRange);
+  if (!port) { winlinkLog('no free port 4540-4549 for the radio control shim — radio sessions are off this run'); return; }
+  winlinkShim = createRigctldServer({
+    getFreqHz: () => _currentFreqHz || 0,
+    getPtt: () => winlinkTxActive,
+    setFreqHz: (hz) => {
+      if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog(`refused Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — no radio session is running`); return false; }
+      tuneRadio(hz / 1000, undefined, undefined, { origin: 'Winlink (Pat via the rigctld shim)' });
+      return true;
+    },
+    setPtt: (on) => {
+      if (!on) {
+        clearWinlinkTxFailsafe();
+        if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+        winlinkState.setSession({ ptt: false }); winlinkSessionPush();
+        return true;
+      }
+      if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog('refused Pat\'s PTT — no radio session is running'); return false; }
+      if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); return false; }
+      winlinkTxActive = true;
+      const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
+      try { handleRemotePtt(true, { audio: true, forceDataMode: icom }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
+      armWinlinkTxFailsafe();
+      winlinkSessionTouch();
+      winlinkState.setSession({ ptt: true }); winlinkSessionPush();
+      return true;
+    },
+  }, { host: '127.0.0.1', log: winlinkLog });
+  try { _winlinkShimPort = await winlinkShim.listen(port); }
+  catch (e) { winlinkLog(`radio control shim could not listen: ${e.message}`); winlinkShim = null; _winlinkShimPort = 0; }
+}
+
+function stopWinlinkShim() {
+  _winlinkShimArmed = false;
+  if (winlinkShim) { try { winlinkShim.close(); } catch {} winlinkShim = null; }
+  _winlinkShimPort = 0;
+}
+
+function clearWinlinkTxFailsafe() {
+  if (_winlinkTxFailsafeTimer) { clearTimeout(_winlinkTxFailsafeTimer); _winlinkTxFailsafeTimer = null; }
+}
+function armWinlinkTxFailsafe() {
+  clearWinlinkTxFailsafe();
+  _winlinkTxFailsafeTimer = setTimeout(() => {
+    if (!winlinkTxActive) return;
+    winlinkLog(`TX failsafe — no PTT off within ${WINLINK_PTT_FAILSAFE_MS / 1000}s; forcing PTT off and ending the session`);
+    winlinkTxActive = false;
+    try { handleRemotePtt(false); } catch {}
+    winlinkAbortSession('the transmitter stayed keyed for 30 s');
+  }, WINLINK_PTT_FAILSAFE_MS);
+}
+
+// ── ardopcf ─────────────────────────────────────────────────────────────────
+
+function killArdop() {
+  if (ardopProc) { try { ardopProc.kill(); } catch {} ardopProc = null; }
+}
+
+function winlinkArdopLabels() {
+  const rig = winlinkActiveRig();
+  const a = (rig && rig.winlinkAudio) || {};
+  return {
+    // Names from ardopcf's own device list, picked in Settings > Station >
+    // Winlink (pre-matched there to the rig's FT8 audio devices).
+    captureLabel: a.captureLabel || '',
+    playbackLabel: a.playbackLabel || '',
+    driveLevel: a.driveLevel,
+  };
+}
+
+/** Run ardopcf once to list its audio devices (it lists, fails on the impossible device, exits). */
+function listArdopDevices() {
+  return new Promise((resolve) => {
+    const bin = findArdop();
+    execFile(bin.path, ArdopProcess.buildArdopListArgs({ port: _winlinkArdopPort() + 9 }), { timeout: 8000, windowsHide: true }, (err, stdout, stderr) => {
+      const devices = ArdopProcess.parseArdopDeviceList(`${stdout || ''}\n${stderr || ''}`);
+      const n = devices.capture.length + devices.playback.length;
+      if (!n && err) {
+        resolve({ ok: false, error: err.code === 'ENOENT' ? 'ardopcf not found' : (err.message || 'ardopcf did not run'), devices });
+        return;
+      }
+      resolve({ ok: true, devices });
+    });
+  });
+}
+
+async function spawnArdop() {
+  killArdop();
+  if (!ArdopProcess.ardopSupported(process.platform)) throw new Error('ARDOP (ardopcf) has no macOS build');
+  const labels = winlinkArdopLabels();
+  const listing = await listArdopDevices();
+  if (!listing.ok) throw new Error(listing.error);
+  const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
+  if (!r.ok) {
+    throw new Error(`ARDOP audio device missing: ${r.missing.join(', ')} not in ardopcf's list (${listing.devices.capture.length} capture, ${listing.devices.playback.length} playback) — pick them in Settings > Station > Winlink`);
+  }
+  const p = winlinkPaths();
+  fs.mkdirSync(p.ardopLogs, { recursive: true });
+  const args = ArdopProcess.buildArdopArgs({ port: _winlinkArdopPort(), capture: r.capture, playback: r.playback, logDir: p.ardopLogs, driveLevel: labels.driveLevel, mycall: settings.myCallsign });
+  const bin = findArdop();
+  winlinkLog(`ardop: ${r.captureName} → in, ${r.playbackName} → out`);
+  winlinkLog('ardop spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
+  return await new Promise((resolve, reject) => {
+    let proc;
+    try { proc = spawn(bin.path, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+    catch (e) { return reject(e); }
+    ardopProc = proc;
+    let settled = false;
+    let lines = 0;
+    const onLine = (chunk) => {
+      for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) {
+        const kind = ArdopProcess.classifyArdopLine(line);
+        if (kind === 'device-error' || kind === 'port-busy') {
+          winlinkLog(`ardop: ${line}`);
+          if (!settled) { settled = true; reject(new Error(kind === 'port-busy' ? `ardopcf port ${_winlinkArdopPort()} is in use — is another ARDOP (Winlink Express?) running?` : line)); }
+        } else if (lines++ < 40) winlinkLog(`ardop: ${line}`);
+      }
+    };
+    proc.stdout.on('data', onLine);
+    proc.stderr.on('data', onLine);
+    proc.on('error', (e) => { if (ardopProc === proc) ardopProc = null; if (!settled) { settled = true; reject(e); } });
+    proc.on('exit', (code) => {
+      if (ardopProc === proc) ardopProc = null;
+      if (!settled) { settled = true; reject(new Error(`ardopcf exited (code ${code})`)); return; }
+      if (winlinkSessionActive() && winlinkState.session.mode === 'ardop') winlinkAbortSession('ardopcf stopped');
+    });
+    // Ready = its host port accepts a connection.
+    const until = Date.now() + 8000;
+    const probe = () => {
+      if (settled) return;
+      const s = _wlNet.connect(_winlinkArdopPort(), '127.0.0.1');
+      s.once('connect', () => { s.destroy(); if (!settled) { settled = true; resolve(proc); } });
+      s.once('error', () => { s.destroy(); if (Date.now() > until) { if (!settled) { settled = true; reject(new Error(`ardopcf never opened port ${_winlinkArdopPort()}`)); } } else setTimeout(probe, 300); });
+    };
+    setTimeout(probe, 400);
+  });
+}
+
+// ── sessions ────────────────────────────────────────────────────────────────
+
+function winlinkSessionActive() {
+  return ['starting', 'connecting', 'connected', 'disconnecting'].includes(winlinkState.session.state);
+}
+
+function winlinkSessionTouch() { _winlinkLastActivity = Date.now(); }
+
+function winlinkSessionPush() {
+  const s = { ...winlinkState.session, remainingSec: winlinkState.remainingSec() };
+  winlinkPopoutSend('winlink-session', s);
+  if (remoteServer && remoteServer.broadcastWinlinkSession) { try { remoteServer.broadcastWinlinkSession(s); } catch {} }
+  winlinkPush();
+}
+
+/**
+ * Start a session. The ONLY entry point for a radio connect — reached from
+ * the pop-out's Connect and ECHOCAT's winlink-connect, both operator actions.
+ * @returns {{ok:boolean, error?:string, reason?:string}}
+ */
+async function winlinkStartSession({ mode, gateway, dialKhz, origin } = {}) {
+  if (!settings.enableWinlink) return { ok: false, error: 'Winlink is off — turn it on in Settings > Station', reason: 'disabled' };
+  if (!patClient || !winlinkState.snapshot().patReady) return { ok: false, error: 'Pat is not running yet' };
+  if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
+  if (!settings.winlinkPassword) return { ok: false, error: 'Set your Winlink password in Settings > Station > Winlink first' };
+  if (winlinkSessionActive()) return { ok: false, error: 'A Winlink session is already running' };
+  const modes = winlinkModes();
+  const m = modes.find((x) => x.id === mode);
+  if (!m) return { ok: false, error: `Unknown mode ${mode}` };
+  if (!m.available) return { ok: false, error: m.reason, reason: 'unavailable' };
+  const radio = WinlinkModes.isRadioMode(mode);
+  const url = WinlinkPat.connectUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined });
+  if (!url) return { ok: false, error: 'Pick a gateway first' };
+  if (radio) {
+    if (!_winlinkShimPort) return { ok: false, error: 'The radio control shim is not running — restart Winlink' };
+    if (_swrTripped) return { ok: false, error: 'The SWR guard has tripped — fix the antenna match first' };
+    if (!acquireRadio('winlink')) return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
+  }
+
+  const capMin = Math.max(10, Math.min(60, parseInt(settings.winlinkSessionCapMin, 10) || 30));
+  winlinkState.setSession({
+    state: 'starting', mode, gateway: radio ? String(gateway).toUpperCase() : 'CMS (internet)', dialKhz: radio ? Number(dialKhz) || null : null,
+    capSec: radio ? capMin * 60 : 0,
+    returnTo: radio ? { freqHz: _currentFreqHz || 0, mode: _currentMode || '' } : null,
+    text: radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
+  });
+  _winlinkSessionError = '';
+  winlinkSessionTouch();
+  winlinkSessionPush();
+  winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
+  if (radio) {
+    settings.winlinkLastGateway = { call: String(gateway).toUpperCase(), mode, dialKhz: Number(dialKhz) || null };
+    saveSettings(settings);
+  }
+
+  // Run the rest without blocking the caller (the pop-out / phone get pushes).
+  (async () => {
+    try {
+      if (mode === 'ardop') await spawnArdop();
+      if (mode === 'mercury') winlinkHandMercuryToPat();
+      if (mode === 'mercury' || mode === 'vara') {
+        const want = mode === 'mercury' ? `127.0.0.1:${mercuryProcess.mercuryPorts(settings).control}` : `127.0.0.1:${_winlinkVaraPort()}`;
+        if (want !== _patVaraAddr) {
+          writePatConfig({ varaAddr: want });
+          await patClient.reload().catch(() => {});
+          if (!(await winlinkWaitPatReady(15000))) throw new Error('Pat did not come back after switching its VARA port');
+        }
+      }
+      if (radio) {
+        // POTACAT's own QSY first, in data mode, so the rig preset for digital
+        // fires and the operator sees the move before Pat keys anything.
+        tuneRadio(Number(dialKhz), 'DIGU', undefined, { origin: 'Winlink session' });
+        _winlinkShimArmed = true;
+        _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`), capMin * 60000);
+        _winlinkWatchdog = setInterval(() => {
+          if (Date.now() - _winlinkLastActivity > WINLINK_NO_PROGRESS_MS) winlinkAbortSession('nothing moved for 3 minutes');
+          else winlinkSessionPush(); // keeps the countdown fresh on every surface
+        }, 15000);
+      }
+      winlinkState.setSession({ state: 'connecting', text: radio ? `Calling ${String(gateway).toUpperCase()}` : 'Connecting to the CMS' });
+      winlinkSessionPush();
+      const received = await patClient.connect(url);
+      winlinkEndSession('done', winlinkSessionSummary(mode, winlinkState.session.sent, received, gateway), received);
+    } catch (e) {
+      winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
+    }
+  })();
+  return { ok: true };
+}
+
+/** Disconnect Mercury's own TNC client so Pat can connect (one host at a time). */
+function winlinkHandMercuryToPat() {
+  if (mercuryClient) {
+    _winlinkMercuryWasConnected = true;
+    try { mercuryClient.disconnect(); } catch {}
+    winlinkLog('Mercury handed to Pat for the session');
+  }
+}
+function winlinkTakeMercuryBack() {
+  if (!_winlinkMercuryWasConnected) return;
+  _winlinkMercuryWasConnected = false;
+  if (mercuryClient && settings.enableMercury) {
+    const { control, data } = mercuryProcess.mercuryPorts(settings);
+    try { mercuryClient.connect({ host: '127.0.0.1', controlPort: control, dataPort: data }); } catch {}
+    winlinkLog('Mercury back with POTACAT');
+  }
+}
+
+/** One plain sentence for a finished session — what every surface shows. */
+function winlinkSessionSummary(mode, sent, received, gateway) {
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const via = mode === 'telnet' ? 'over the internet' : `via ${String(gateway || '').toUpperCase()} (${(WinlinkModes.LABELS[mode] || mode).replace(/ \(.*\)$/, '')})`;
+  const out = sent ? `Sent ${plural(sent, 'message')} ${via}` : `Checked mail ${via} — nothing to send`;
+  const inb = received ? `${plural(received, 'new message')} in your Inbox` : 'no new mail';
+  return `${out}; ${inb}.`;
+}
+
+function winlinkEndSession(state, text, received = 0) {
+  if (!winlinkSessionActive() && state !== 'error') return;
+  const s = winlinkState.session;
+  clearTimeout(_winlinkCapTimer); _winlinkCapTimer = null;
+  clearInterval(_winlinkWatchdog); _winlinkWatchdog = null;
+  clearWinlinkTxFailsafe();
+  _winlinkShimArmed = false;
+  if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+  const radio = WinlinkModes.isRadioMode(s.mode);
+  if (radio) {
+    if (s.mode === 'ardop') killArdop();
+    if (s.mode === 'mercury') winlinkTakeMercuryBack();
+    // Pat QSXes the dial back itself; POTACAT puts the MODE back too.
+    if (s.returnTo && s.returnTo.mode && s.returnTo.freqHz) {
+      setTimeout(() => { try { tuneRadio(s.returnTo.freqHz / 1000, s.returnTo.mode, undefined, { origin: 'Winlink session ended' }); } catch {} }, 1500);
+    }
+    releaseRadio('winlink');
+  }
+  winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', ptt: false, prompt: null });
+  winlinkLog(`session ${state === 'done' ? 'finished' : 'failed'}: ${text}`);
+  winlinkSessionPush();
+  winlinkRefreshMailboxes();
+}
+
+function winlinkAbortSession(why) {
+  if (!winlinkSessionActive()) return;
+  winlinkLog(`aborting the session — ${why}`);
+  _winlinkSessionError = `Stopped: ${why}`;
+  winlinkState.setSession({ state: 'disconnecting', text: `Stopping — ${why}` });
+  winlinkSessionPush();
+  if (patClient) patClient.disconnect(true).catch(() => {});
+  // Pat's connect returns once the transport closes; if it doesn't, end here.
+  setTimeout(() => { if (winlinkSessionActive()) winlinkEndSession('error', `Stopped: ${why}`); }, 6000);
+}
+
+function winlinkAnswerPrompt(id, value) {
+  const s = winlinkState.session;
+  if (!s.prompt || s.prompt.id !== id || !patClient) return false;
+  patClient.respondPrompt(id, value);
+  winlinkState.setSession({ prompt: null });
+  winlinkSessionPush();
+  return true;
+}
+
+// ── internet auto-check (never radio) ───────────────────────────────────────
+
+function _winlinkAutoCheckMin() {
+  return Math.max(10, Math.min(240, parseInt(settings.winlinkTelnetAutoCheckMin, 10) || 30));
+}
+
+function winlinkArmAutoCheck() {
+  clearTimeout(_winlinkAutoCheckTimer); _winlinkAutoCheckTimer = null;
+  if (!settings.enableWinlink || !settings.winlinkTelnetAutoCheck) return;
+  _winlinkAutoCheckTimer = setTimeout(async () => {
+    _winlinkAutoCheckTimer = null;
+    // Internet only, by construction: this function never passes a radio mode.
+    if (!winlinkSessionActive() && settings.winlinkPassword && settings.winlinkNoticeAcceptedAt) {
+      const r = await winlinkStartSession({ mode: 'telnet', origin: 'auto-check (internet)' });
+      winlinkState.setAutoCheck({ lastAt: Date.now(), lastResult: r.ok ? 'started' : r.error });
+    }
+    winlinkArmAutoCheck();
+  }, _winlinkAutoCheckMin() * 60000);
+}
+
+// ── mailbox actions shared by every surface ─────────────────────────────────
+
+async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
+  if (!patClient) return { ok: false, error: 'Pat is not running' };
+  if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
+  const c = WinlinkPat.composeFields({ to, cc, subject, body, p2p });
+  if (!c.ok) return c;
+  const files = (Array.isArray(attachments) ? attachments : []).filter((a) => a && a.name && a.data).map((a) => ({ name: path.basename(String(a.name)), data: Buffer.isBuffer(a.data) ? a.data : Buffer.from(String(a.data), 'base64') }));
+  const total = files.reduce((n, f) => n + f.data.length, 0);
+  if (total > 2 * 1024 * 1024) return { ok: false, error: `Attachments are ${(total / 1048576).toFixed(1)} MB — Winlink over radio needs them far smaller (keep it under 100 kB for HF)` };
+  try {
+    await patClient.send(c.fields, files);
+    winlinkLog(`queued "${c.fields.subject}" to ${c.fields.to}${files.length ? ` with ${files.length} attachment${files.length === 1 ? '' : 's'}` : ''} — it goes out on the next session`);
+    await winlinkRefreshMailboxes(['out']);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function winlinkRead(box, mid) {
+  if (!patClient) return { ok: false, error: 'Pat is not running' };
+  try {
+    const msg = await patClient.message(box, mid);
+    if (box === 'in' && msg && !winlinkState.find('in', mid)?.read) {
+      patClient.markRead(box, mid).catch(() => {});
+      if (winlinkState.markRead(mid)) { winlinkPushMailbox('in'); winlinkPush(); }
+    }
+    return { ok: true, message: msg };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function winlinkDelete(box, mid) {
+  if (!patClient) return { ok: false, error: 'Pat is not running' };
+  try {
+    await patClient.delete(box, mid);
+    winlinkState.remove(box, mid);
+    winlinkPushMailbox(box);
+    winlinkPush();
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function winlinkAttachment(box, mid, name) {
+  if (!patClient) return { ok: false, error: 'Pat is not running' };
+  try { return { ok: true, data: await patClient.attachment(box, mid, name) }; }
+  catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function winlinkGateways(mode, band) {
+  if (!patClient) return { ok: false, error: 'Pat is not running' };
+  // Winlink lists Mercury-capable gateways under VARA (Mercury speaks VARA's
+  // TNC protocol); the operator's own tagged list rides on top.
+  const patMode = mode === 'ardop' ? 'ardop' : 'varahf';
+  try {
+    let list = await patClient.rmslist({ mode: patMode, band });
+    if (mode === 'mercury') {
+      const tagged = new Set((settings.winlinkMercuryGateways || []).map((c) => String(c).toUpperCase()));
+      list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
+    }
+    winlinkState.setGateways(mode, band, list);
+    return { ok: true, mode, band: band || '', list };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function winlinkAcceptNotice() {
+  if (!settings.winlinkNoticeAcceptedAt) {
+    settings.winlinkNoticeAcceptedAt = new Date().toISOString();
+    saveSettings(settings);
+    winlinkLog('Winlink notice accepted');
+  }
+  winlinkPush();
+  return { ok: true };
+}
+
+async function winlinkPosReport({ lat, lon, comment } = {}) {
+  if (!patClient) return { ok: false, error: 'Pat is not running' };
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) {
+    const g = gridToLatLon(settings.grid || '');
+    if (!g) return { ok: false, error: 'Set your grid square in Settings first' };
+    lat = g.lat; lon = g.lon;
+  }
+  try {
+    await patClient.posreport({ lat, lon, comment: comment || '' });
+    winlinkLog(`position report queued (${Number(lat).toFixed(3)}, ${Number(lon).toFixed(3)}) — it goes out on the next session`);
+    await winlinkRefreshMailboxes(['out']);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function winlinkSetMode(mode) {
+  if (!WinlinkPat.WINLINK_MODES.includes(mode)) return false;
+  settings.winlinkDefaultMode = mode;
+  saveSettings(settings);
+  winlinkPush();
+  return true;
+}
+
+// ECHOCAT: every winlink-* request from a device. Registered through
+// onRemoteServer so it survives connectRemote() rebuilding the server. The
+// server already refused Guest Passes; `reply` answers the device that asked.
+async function winlinkHandleRemote({ type, req = {}, reply }) {
+  const result = (op, r) => reply({ type: 'winlink-result', op, ok: !!(r && r.ok), ...(r && r.error ? { error: String(r.error) } : {}) });
+  try {
+    switch (type) {
+      case 'winlink-list': {
+        const box = WinlinkStateLib.BOXES.includes(req.box) ? req.box : 'in';
+        await winlinkRefreshMailboxes([box]);
+        reply({ type: 'winlink-mailbox', box, messages: winlinkState.list(box), total: winlinkState.total(box) });
+        return;
+      }
+      case 'winlink-read': {
+        const r = await winlinkRead(String(req.box || 'in'), String(req.mid || ''));
+        if (r.ok) reply({ type: 'winlink-message', box: String(req.box || 'in'), mid: String(req.mid), message: r.message });
+        else result('read', r);
+        return;
+      }
+      case 'winlink-attachment-get': {
+        const r = await winlinkAttachment(String(req.box || 'in'), String(req.mid || ''), String(req.name || ''));
+        if (!r.ok) { result('attachment', r); return; }
+        if (r.data.length > 2 * 1024 * 1024) { result('attachment', { ok: false, error: 'Attachment too large to send to the phone' }); return; }
+        reply({ type: 'winlink-attachment', box: String(req.box), mid: String(req.mid), name: String(req.name), size: r.data.length, dataBase64: r.data.toString('base64') });
+        return;
+      }
+      case 'winlink-delete':
+        result('delete', await winlinkDelete(String(req.box || 'in'), String(req.mid || '')));
+        return;
+      case 'winlink-compose': {
+        const atts = (req.attachments || []).filter((a) => a && typeof a.name === 'string' && typeof a.dataBase64 === 'string')
+          .map((a) => ({ name: a.name, data: a.dataBase64 }));
+        result('compose', await winlinkSend({ to: req.to, cc: req.cc, subject: req.subject, body: req.body, p2p: req.p2p, attachments: atts }));
+        return;
+      }
+      case 'winlink-connect':
+        // An operator's tap on the phone — the same Connect as the window's.
+        result('connect', await winlinkStartSession({ mode: req.mode, gateway: req.gateway, dialKhz: req.dialKhz, origin: 'ECHOCAT device' }));
+        return;
+      case 'winlink-abort':
+        winlinkAbortSession('stopped from an ECHOCAT device');
+        result('abort', { ok: true });
+        return;
+      case 'winlink-prompt':
+        winlinkAnswerPrompt(String(req.id || ''), String(req.value || ''));
+        return;
+      case 'winlink-gateways-get': {
+        const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '');
+        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list });
+        else result('gateways', r);
+        return;
+      }
+      case 'winlink-posreport':
+        result('posreport', await winlinkPosReport({ lat: req.lat, lon: req.lon, comment: req.comment }));
+        return;
+      case 'winlink-accept-notice':
+        result('accept-notice', winlinkAcceptNotice());
+        return;
+      case 'winlink-set-mode':
+        winlinkSetMode(req.mode);
+        return;
+      default:
+    }
+  } catch (e) {
+    result(type.replace(/^winlink-/, ''), { ok: false, error: e.message });
+  }
+}
+onRemoteServer((rs) => {
+  rs.on('winlink-request', (e) => { winlinkHandleRemote(e); });
+  // A freshly built server hydrates new devices from its own cache — on or
+  // off: an off shack hydrates {enabled:false} rather than nothing.
+  if (typeof rs.broadcastWinlinkState === 'function' && settings) winlinkPush();
+});
+
+function winlinkDiagLine() {
+  if (!settings.enableWinlink) return 'off';
+  const p = winlinkState.snapshot();
+  const s = p.session;
+  return `${p.patReady ? `Pat ready :${_patHttpPort}` : `Pat not ready${p.patError ? ' (' + p.patError + ')' : ''}`}`
+    + `, shim :${_winlinkShimPort || '-'}, mode ${settings.winlinkDefaultMode || 'telnet'}`
+    + `, password ${settings.winlinkPassword ? 'set' : 'MISSING'}, notice ${settings.winlinkNoticeAcceptedAt ? 'accepted' : 'not accepted'}`
+    + `, session ${s.state}${s.error ? ' (' + s.error + ')' : ''}`;
 }
 
 
@@ -28724,6 +29610,7 @@ app.whenReady().then(() => {
   // ever flipped on by the user.
   if (settings.myCallsign) connectRbn();
   if (settings.enableMercury) connectMercury();
+  if (settings.enableWinlink) connectWinlink();
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
   connectAntennaGenius();
@@ -31040,6 +31927,41 @@ app.whenReady().then(() => {
       if (input.key === 'F12' && input.type === 'keyDown') mercuryPopoutWin.webContents.toggleDevTools();
     });
   }
+  // ─── Winlink mail window ───────────────────────────────────────────────────
+  function openWinlinkPopout() {
+    if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) { winlinkPopoutWin.focus(); return; }
+    const isMac = process.platform === 'darwin';
+    winlinkPopoutWin = new BrowserWindow({
+      width: 900, height: 640, title: 'POTACAT — Winlink Mail',
+      backgroundColor: getThemeWindowBg(), show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-winlink-popout.js'),
+        contextIsolation: true, nodeIntegration: false,
+      },
+    });
+    const saved = settings.winlinkPopoutBounds;
+    if (saved && saved.width > 500 && saved.height > 360 && isOnScreen(saved)) winlinkPopoutWin.setBounds(clampToWorkArea(saved));
+    winlinkPopoutWin.show();
+    winlinkPopoutWin.setMenuBarVisibility(false);
+    winlinkPopoutWin.loadFile(path.join(__dirname, 'renderer', 'winlink-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
+    winlinkPopoutWin.on('close', () => {
+      if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed() && !winlinkPopoutWin.isMaximized() && !winlinkPopoutWin.isMinimized()) {
+        settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
+      }
+    });
+    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; });
+    winlinkPopoutWin.webContents.on('did-finish-load', () => {
+      winlinkPopoutSend('winlink-state', winlinkPayload());
+      for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
+      winlinkPopoutSend('winlink-session', { ...winlinkState.session, remainingSec: winlinkState.remainingSec() });
+      winlinkPopoutSend('winlink-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
+    });
+    winlinkPopoutWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') winlinkPopoutWin.webContents.toggleDevTools();
+    });
+  }
   // ─── JS8Call message view ──────────────────────────────────────────────────
   function openJs8Popout() {
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) { js8PopoutWin.focus(); return; }
@@ -31378,6 +32300,81 @@ app.whenReady().then(() => {
     const r = await dialog.showOpenDialog(mercuryPopoutWin || win, { properties: ['openFile'], title: 'Send a file over Mercury' });
     if (r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
     return sendMercuryFile(r.filePaths[0]);
+  });
+  // ─── Winlink IPC (the mail window + Settings). Every surface goes through
+  // the same winlink* functions; a radio session starts only from Connect.
+  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); });
+  ipcMain.on('winlink-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
+  ipcMain.on('winlink-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
+  ipcMain.on('winlink-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
+  ipcMain.handle('winlink-diag', () => winlinkDiagLine());
+  ipcMain.handle('winlink-cmd-state', () => winlinkPayload());
+  ipcMain.handle('winlink-cmd-list', async (_e, box) => {
+    const b = WinlinkStateLib.BOXES.includes(box) ? box : 'in';
+    await winlinkRefreshMailboxes([b]);
+    return { ok: true, box: b, messages: winlinkState.list(b) };
+  });
+  ipcMain.handle('winlink-cmd-read', (_e, { box, mid } = {}) => winlinkRead(String(box), String(mid)));
+  ipcMain.handle('winlink-cmd-delete', (_e, { box, mid } = {}) => winlinkDelete(String(box), String(mid)));
+  ipcMain.handle('winlink-cmd-save-attachment', async (_e, { box, mid, name } = {}) => {
+    const r = await winlinkAttachment(String(box), String(mid), String(name));
+    if (!r.ok) return r;
+    const safe = path.basename(String(name)).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'attachment';
+    const pick = await dialog.showSaveDialog(winlinkPopoutWin || win, { title: 'Save attachment', defaultPath: path.join(app.getPath('downloads'), safe) });
+    if (pick.canceled || !pick.filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(pick.filePath, r.data);
+    return { ok: true, path: pick.filePath };
+  });
+  ipcMain.handle('winlink-pick-attachments', async () => {
+    const r = await dialog.showOpenDialog(winlinkPopoutWin || win, { properties: ['openFile', 'multiSelections'], title: 'Attach files (keep them small for radio)' });
+    if (r.canceled || !r.filePaths) return { ok: false, canceled: true };
+    const files = [];
+    for (const f of r.filePaths) {
+      const st = fs.statSync(f);
+      if (st.size > 2 * 1024 * 1024) return { ok: false, error: `${path.basename(f)} is ${(st.size / 1048576).toFixed(1)} MB — too large for Winlink` };
+      files.push({ name: path.basename(f), size: st.size, dataBase64: fs.readFileSync(f).toString('base64') });
+    }
+    return { ok: true, files };
+  });
+  ipcMain.handle('winlink-cmd-send', (_e, m = {}) => winlinkSend({
+    ...m, attachments: (m.attachments || []).map((a) => ({ name: a.name, data: a.dataBase64 })),
+  }));
+  ipcMain.handle('winlink-cmd-posreport', (_e, o = {}) => winlinkPosReport(o));
+  ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
+    if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
+    return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, origin: 'mail window' });
+  });
+  ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator'));
+  ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
+  ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
+  ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));
+  ipcMain.handle('winlink-cmd-accept-notice', () => winlinkAcceptNotice());
+  ipcMain.on('winlink-open-settings', () => {
+    if (win && !win.isDestroyed()) { win.show(); win.focus(); win.webContents.send('open-settings-winlink'); }
+  });
+  ipcMain.on('winlink-open-folder', () => {
+    try { require('electron').shell.openPath(winlinkPaths().dir); } catch {}
+  });
+  ipcMain.handle('winlink-list-ardop-devices', async () => {
+    if (!ArdopProcess.ardopSupported(process.platform)) return { ok: false, error: 'ARDOP (ardopcf) has no macOS build' };
+    return listArdopDevices();
+  });
+  ipcMain.handle('winlink-account-check', async (_e, call) => {
+    if (!patClient) return { ok: false, error: 'Turn Winlink on and save first — the check runs through Pat' };
+    try { return { ok: true, ...(await patClient.accountExists(String(call || settings.myCallsign || ''))) }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('winlink-register', async (_e, { password, recoveryEmail } = {}) => {
+    if (!patClient) return { ok: false, error: 'Turn Winlink on and save first — registration runs through Pat' };
+    const pw = String(password || '');
+    if (pw.length < 6 || pw.length > 12) return { ok: false, error: 'The Winlink password must be 6 to 12 characters' };
+    try {
+      await patClient.register({ callsign: String(settings.myCallsign || '').toUpperCase(), password: pw, recoveryEmail });
+      settings.winlinkPassword = pw; saveSettings(settings);
+      winlinkLog(`Winlink account created for ${String(settings.myCallsign || '').toUpperCase()}`);
+      connectWinlink();
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
   });
   ipcMain.on('mercury-open-downloads', () => {
     try { require('electron').shell.openPath(path.join(app.getPath('userData'), 'mercury-downloads')); } catch {}
@@ -33536,6 +34533,8 @@ app.whenReady().then(() => {
       'https://hamlib.github.io/', 'https://github.com/Hamlib/', 'https://discord.gg/',
       // Mercury HF data modem (Rhizomatica) — download + docs links in Settings.
       'https://github.com/Rhizomatica/', 'https://rhizomatica.github.io/',
+      // Winlink: Pat, ardopcf and the Winlink network (Settings > Station > Winlink).
+      'https://getpat.io/', 'https://github.com/la5nta/', 'https://github.com/pflarue/', 'https://winlink.org/', 'https://www.winlink.org/',
       // JS8Call — download + docs links in Settings. The gate is a prefix
       // match that fails CLOSED with no error, so the scheme matters: the
       // project site is http-only.
@@ -36458,6 +37457,13 @@ app.whenReady().then(() => {
     // an unrelated settings save never kills+respawns the modem (the rigctld
     // respawn-race lesson, N4RDX v1.9.8). Audio-device/gain changes also
     // require a relaunch since they're baked into the ini + CLI args at spawn.
+    // Winlink (Pat) relaunches only for keys baked into its config / launch.
+    // The password is in pat-config.json, so a new one needs a relaunch too.
+    const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort',
+      'winlinkArdopBw', 'winlinkVaraBw', 'myCallsign', 'grid']
+      .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
+    const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
+      .some((k) => has(k) && newSettings[k] !== settings[k]);
     const mercuryChanged = (has('enableMercury') && newSettings.enableMercury !== settings.enableMercury) ||
       (has('mercuryPath') && newSettings.mercuryPath !== settings.mercuryPath) ||
       (has('mercuryBasePort') && newSettings.mercuryBasePort !== settings.mercuryBasePort) ||
@@ -36779,6 +37785,16 @@ app.whenReady().then(() => {
     if (mercuryChanged) {
       if (settings.enableMercury) connectMercury();
       else disconnectMercury();
+    }
+
+    // Winlink: relaunch Pat for a config key; re-arm the internet auto-check;
+    // otherwise just re-push (modes depend on the rig, Mercury and VARA port).
+    if (winlinkChanged) {
+      if (settings.enableWinlink) connectWinlink();
+      else disconnectWinlink();
+    } else {
+      if (winlinkAutoCheckChanged) winlinkArmAutoCheck();
+      winlinkPush();
     }
 
     // JS8 runs natively under JTCAT — a callsign/grid change must reach the
@@ -39615,6 +40631,8 @@ function gracefulCleanup() {
       alsaSessions.clear();
     }
   } catch {}
+  // Winlink before the CAT link goes: ending a live session unkeys the radio.
+  try { disconnectWinlink({ quit: true }); } catch {}
   killRigctld();
   try { stopRotctld(); } catch {}
   try { killMercury(); } catch {}

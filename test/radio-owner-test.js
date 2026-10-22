@@ -99,5 +99,17 @@ test('an unknown owner cannot acquire or preempt', () => {
   assert.strictEqual(r.owner, 'jtcat', 'and the current owner keeps the radio');
 });
 
+test('a Winlink radio session is exclusive with JTCAT and Mercury, both ways', () => {
+  assert.ok(OWNERS.includes('winlink'));
+  assert.strictEqual(decideAcquire('none', 'winlink').ok, true);
+  assert.strictEqual(decideAcquire('jtcat', 'winlink').ok, false);
+  assert.strictEqual(decideAcquire('mercury', 'winlink').ok, false);
+  assert.strictEqual(decideAcquire('winlink', 'jtcat').ok, false);
+  assert.strictEqual(decideAcquire('winlink', 'mercury').ok, false);
+  assert.strictEqual(decideRelease('winlink', 'jtcat').owner, 'winlink', 'only the owner releases');
+  assert.strictEqual(decideRelease('winlink', 'winlink').owner, 'none');
+  assert.strictEqual(isPreemptive('winlink'), false, 'POTACAT keys it — never observed-only');
+});
+
 console.log(`\nRadio-owner arbiter: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

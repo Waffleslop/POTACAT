@@ -371,6 +371,7 @@ contextBridge.exposeInMainWorld('api', {
   // rebuilds the lookup map + re-renders the table.
   onOpenSettingsWatchlist: (cb) => ipcRenderer.on('open-settings-watchlist', () => cb()),
   onOpenSettingsWebSdr: (cb) => ipcRenderer.on('open-settings-websdr', () => cb()),
+  onOpenSettingsWinlink: (cb) => ipcRenderer.on('open-settings-winlink', () => cb()),
   onWatchlistGroupsUpdated: (cb) => ipcRenderer.on('watchlist-groups-updated', (_e, data) => cb(data)),
   refreshWatchlistGroup: (idx) => ipcRenderer.invoke('watchlist-group-refresh', idx),
   onExpeditionCallsigns: (cb) => ipcRenderer.on('expedition-callsigns', (_e, data) => cb(data)),
@@ -458,6 +459,13 @@ contextBridge.exposeInMainWorld('api', {
   js8PopoutOpen: () => ipcRenderer.send('js8call-popout-open'),
   onJs8Status: (cb) => ipcRenderer.on('js8call-status', (_e, s) => cb(s)),
   mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
+  // Winlink (Pat) — the mail window, Settings helpers, the bug-report line.
+  winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
+  winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
+  winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
+  winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),
+  winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),
+  onWinlinkState: (cb) => ipcRenderer.on('winlink-state', (_e, s) => cb(s)),
   jtcatSetUltracat: (on) => ipcRenderer.send('jtcat-set-ultracat', on),
   jtcatPopoutTheme: (theme) => ipcRenderer.send('jtcat-popout-theme', theme),
   onJtcatPopoutStatus: (cb) => ipcRenderer.on('jtcat-popout-status', (_e, open) => cb(open)),

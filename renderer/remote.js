@@ -941,6 +941,7 @@
   // lands where the label says. Shown only when the shack advertises
   // 'scope' AND the active rig declares nativeScope.
   const scopeView = document.getElementById('scope-view');
+  const mailView = document.getElementById('mail-view');
   const scopeTabBtn = document.getElementById('scope-tab-btn');
   let scopeServerOk = false;
   // The desktop replays this page's own keyer (cw-key) instead of re-keying
@@ -1949,6 +1950,43 @@
         // change): say so, since AF gain has no readback and the power only
         // arrives through the next status.
         showToast('Rig preset ' + (msg.name || '') + ': ' + (msg.text || '') + (msg.why && msg.why !== 'tap' ? ' — ' + msg.why : ''), 4000);
+        break;
+      case 'winlink-state':
+        mailState = msg;
+        mailRenderState();
+        break;
+      case 'winlink-mailbox':
+        mailLists[msg.box] = msg.messages || [];
+        if (msg.box === mailBox) mailRenderList();
+        break;
+      case 'winlink-session':
+        if (mailState) mailState.session = msg.session || {};
+        mailRenderSession();
+        break;
+      case 'winlink-message':
+        mailShowMessage(msg);
+        break;
+      case 'winlink-gateways':
+        mailGateways = msg.list || [];
+        mailRenderGateways();
+        break;
+      case 'winlink-attachment':
+        try {
+          var bin = atob(msg.dataBase64 || '');
+          var bytes = new Uint8Array(bin.length);
+          for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
+          var url = URL.createObjectURL(new Blob([bytes]));
+          var a = document.createElement('a'); a.href = url; a.download = msg.name || 'attachment';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+        } catch (e) { showToast('Could not save the attachment', 3000, true); }
+        break;
+      case 'winlink-result':
+        if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
+        else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
+        break;
+      case 'winlink-refused':
+        showToast(msg.reason === 'guest-pass' ? 'Winlink mail belongs to the shack\'s owner — not available on a Guest Pass' : 'Not available', 4000, true);
         break;
       case 'rig-presets-refused':
         showToast('A Guest Pass cannot change the rig presets', 3000, true);
@@ -6538,15 +6576,16 @@
     if (dirView) dirView.classList.add('hidden');
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
     if (scopeView) { scopeView.classList.add('hidden'); scopeView.style.display = 'none'; }
+    if (mailView) { mailView.classList.add('hidden'); mailView.style.display = 'none'; }
     // Popout trigger: visible only on the Map tab, and only in non-popout windows
     if (mapPopoutBtn) mapPopoutBtn.classList.toggle('hidden', isPopout || tab !== 'map');
     if (scanning) stopScan();
     // Show/hide PTT button — hide when FT8/SSTV tab is active
-    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope') ? 'none' : '';
+    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
     // Hide entire bottom bar on FT8/SSTV tab
-    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope') ? 'none' : '';
+    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
     // Hide Scan button and freq step arrows on FT8/SSTV tab
-    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope') ? 'none' : '';
+    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
     var freqStepBtns = document.getElementById('freq-step-btns');
     if (freqStepBtns) freqStepBtns.style.display = tab === 'ft8' ? 'none' : '';
     // Hide CW/SSB panels on tabs where they're not relevant
@@ -6619,6 +6658,9 @@
     } else if (tab === 'dir') {
       if (dirView) dirView.classList.remove('hidden');
       renderDirectoryTab();
+    } else if (tab === 'mail') {
+      if (mailView) { mailView.classList.remove('hidden'); mailView.style.display = 'flex'; }
+      mailOnOpen();
     } else if (tab === 'scope') {
       if (scopeView) { scopeView.classList.remove('hidden'); scopeView.style.display = 'flex'; }
       scopeSizeCanvases();
@@ -14446,6 +14488,180 @@ var _paddleHoldTimer = { dit: null, dah: null };
       if (!snapshotReceived) setStatus(false, 'Waiting for main POTACAT Remote window…');
     }, 1500);
   }
+
+  // ── Winlink mail (the shack's Pat; owner only) ────────────────────────
+  // The shack holds the mailbox and runs the session; this tab composes,
+  // reads and presses Send / Receive. State arrives as winlink-state.
+  var mailState = null;
+  var mailLists = { in: [], out: [], sent: [], archive: [] };
+  var mailBox = 'in';
+  var mailGateways = [];
+  var mailNoticeThen = null;
+  function mailSend(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+  function mailEl(id) { return document.getElementById(id); }
+  function mailRenderState() {
+    var s = mailState || {};
+    var btn = mailEl('mail-tab-btn');
+    if (btn) btn.classList.toggle('hidden', !s.enabled);
+    var badge = mailEl('tab-mail-badge');
+    if (badge) { badge.textContent = String(s.unread || 0); badge.classList.toggle('hidden', !s.unread); }
+    var sel = mailEl('mail-mode');
+    if (sel) {
+      var cur = sel.value || s.mode || 'telnet';
+      sel.innerHTML = (s.modes || []).map(function (m) {
+        return '<option value="' + esc(m.id) + '"' + (m.available ? '' : ' disabled') + '>' + esc(m.label) + (m.available ? '' : ' (unavailable)') + '</option>';
+      }).join('');
+      var ok = (s.modes || []).some(function (m) { return m.id === cur && m.available; });
+      sel.value = ok ? cur : 'telnet';
+      mailEl('mail-radio').classList.toggle('hidden', sel.value === 'telnet');
+    }
+    mailRenderSession();
+  }
+  function mailActive(ss) { return ['starting', 'connecting', 'connected', 'disconnecting'].indexOf(ss.state) >= 0; }
+  function mailRenderSession() {
+    var s = mailState || {};
+    var ss = s.session || {};
+    var el = mailEl('mail-session');
+    if (!el) return;
+    if (!s.patReady) { el.textContent = s.patError ? 'Shack: ' + s.patError : 'The shack is starting Pat…'; }
+    else {
+      var t = ss.state === 'error' ? (ss.error || 'Session failed') : (ss.text || '');
+      if (mailActive(ss) && ss.subject) t = (ss.direction === 'receiving' ? 'Receiving ' : 'Sending ') + '"' + ss.subject + '" ' + (ss.pct || 0) + '%';
+      if (mailActive(ss) && ss.remainingSec != null) t += ' · ' + Math.floor(ss.remainingSec / 60) + ' min left';
+      if (mailActive(ss) && ss.mode !== 'telnet') t = (ss.ptt ? 'TX · ' : 'RX · ') + t;
+      var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: 'Failed: ' };
+      el.textContent = (words[ss.state] ? words[ss.state] + (ss.state === 'error' ? '' : ' · ') : '') + t;
+      el.style.color = ss.state === 'error' ? '#e94560' : ss.state === 'done' ? '#4ecca3' : '';
+      el.style.fontWeight = (ss.state === 'done' || ss.state === 'error') ? '700' : '';
+    }
+    mailEl('mail-connect').classList.toggle('hidden', mailActive(ss));
+    mailEl('mail-abort').classList.toggle('hidden', !mailActive(ss));
+    var pr = mailEl('mail-prompt');
+    var p = ss.prompt;
+    pr.classList.toggle('hidden', !p);
+    if (p) {
+      var busy = p.kind === 'busy-channel';
+      pr.innerHTML = '<span style="flex:1">' + esc(busy ? 'The frequency is busy.' : (p.message || 'Decision needed')) + '</span>'
+        + '<button type="button" id="mail-p-yes">' + (busy ? 'Keep waiting' : 'Accept') + '</button>'
+        + '<button type="button" id="mail-p-no">' + (busy ? 'Give up' : 'Decline') + '</button>';
+      mailEl('mail-p-yes').onclick = function () { if (busy) pr.classList.add('hidden'); else mailSend({ type: 'winlink-prompt', id: p.id, value: 'accept' }); };
+      mailEl('mail-p-no').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: busy ? 'abort' : 'decline' }); };
+    }
+  }
+  function mailShowList() {
+    mailEl('mail-list').classList.remove('hidden');
+    mailEl('mail-reader').classList.add('hidden');
+    mailEl('mail-compose').classList.add('hidden');
+    mailRenderList();
+  }
+  function mailRenderList() {
+    var rows = mailLists[mailBox] || [];
+    var el = mailEl('mail-list');
+    if (!el) return;
+    if (!rows.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px;">Nothing here.</div>'; return; }
+    el.innerHTML = rows.map(function (m) {
+      var who = mailBox === 'in' ? m.from : (m.to || []).join(', ');
+      return '<div class="mail-row" data-mid="' + esc(m.mid) + '" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;">'
+        + '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim);"><span>' + esc(who) + '</span><span>' + esc(new Date(m.date).toLocaleDateString()) + '</span></div>'
+        + '<div style="font-size:14px;' + (m.read ? '' : 'font-weight:700;') + '">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div>';
+    }).join('');
+  }
+  function mailShowMessage(msg) {
+    var m = msg.message || {};
+    var r = mailEl('mail-reader');
+    mailEl('mail-list').classList.add('hidden');
+    mailEl('mail-compose').classList.add('hidden');
+    r.classList.remove('hidden');
+    r.innerHTML = '<div style="display:flex;gap:6px;margin-bottom:8px;"><button type="button" id="mail-back">Back</button>'
+      + (msg.box === 'in' ? '<button type="button" id="mail-reply">Reply</button>' : '')
+      + '<span style="flex:1"></span><button type="button" id="mail-del" style="color:#e94560;">Delete</button></div>'
+      + '<div style="font-size:12px;color:var(--text-dim);line-height:1.6;"><b style="color:var(--text)">' + esc(m.subject || '') + '</b><br>From ' + esc(m.from) + '<br>To ' + esc((m.to || []).join(', ')) + '</div>'
+      + '<div style="white-space:pre-wrap;word-break:break-word;font-family:monospace;font-size:13px;margin-top:8px;">' + esc(m.body || '') + '</div>'
+      + (m.attachments || []).map(function (a) { return '<button type="button" class="mail-att" data-name="' + esc(a.name) + '" style="margin:6px 6px 0 0;">Save ' + esc(a.name) + '</button>'; }).join('');
+    mailEl('mail-back').onclick = mailShowList;
+    var rp = mailEl('mail-reply');
+    if (rp) rp.onclick = function () { mailCompose(m.from, /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject); };
+    mailEl('mail-del').onclick = function () { mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList(); };
+    Array.prototype.forEach.call(r.querySelectorAll('.mail-att'), function (b) {
+      b.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: b.getAttribute('data-name') }); };
+    });
+  }
+  function mailRequireNotice(then) {
+    if (mailState && mailState.noticeAccepted) { then(); return; }
+    mailNoticeThen = then;
+    mailEl('mail-notice-text').textContent = (mailState && mailState.noticeText) || '';
+    mailEl('mail-notice').classList.remove('hidden');
+  }
+  function mailCompose(to, subj) {
+    mailRequireNotice(function () {
+      mailEl('mail-list').classList.add('hidden');
+      mailEl('mail-reader').classList.add('hidden');
+      mailEl('mail-compose').classList.remove('hidden');
+      mailEl('mail-to').value = to || '';
+      mailEl('mail-subj').value = subj || '';
+      mailEl('mail-body').value = '';
+      mailEl('mail-err').textContent = '';
+    });
+  }
+  function mailRenderGateways() {
+    var sel = mailEl('mail-gateway');
+    if (!mailGateways.length) { sel.innerHTML = '<option value="">No gateways for that band</option>'; return; }
+    sel.innerHTML = mailGateways.slice(0, 80).map(function (g, i) {
+      return '<option value="' + i + '">' + esc(g.call + ' ' + (g.dialKhz ? g.dialKhz.toFixed(1) + ' kHz' : '') + (g.distKm != null ? ' ' + g.distKm + ' km' : '')) + '</option>';
+    }).join('');
+  }
+  function mailLoadGateways() {
+    var mode = mailEl('mail-mode').value;
+    if (mode === 'telnet') return;
+    mailEl('mail-gateway').innerHTML = '<option value="">Loading…</option>';
+    mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailEl('mail-band').value });
+  }
+  function mailOnOpen() {
+    mailSend({ type: 'winlink-list', box: mailBox });
+    mailShowList();
+  }
+  (function mailWire() {
+    if (!mailEl('mail-view')) return;
+    mailEl('mail-box').addEventListener('change', function () { mailBox = mailEl('mail-box').value; mailOnOpen(); });
+    mailEl('mail-new').addEventListener('click', function () { mailCompose('', ''); });
+    mailEl('mail-list').addEventListener('click', function (e) {
+      var row = e.target.closest('.mail-row');
+      if (row) mailSend({ type: 'winlink-read', box: mailBox, mid: row.getAttribute('data-mid') });
+    });
+    mailEl('mail-cancel').addEventListener('click', mailShowList);
+    mailEl('mail-queue').addEventListener('click', function () {
+      if (!mailEl('mail-to').value.trim() || !mailEl('mail-subj').value.trim()) { mailEl('mail-err').textContent = 'Add a recipient and a subject'; return; }
+      mailSend({ type: 'winlink-compose', to: mailEl('mail-to').value, subject: mailEl('mail-subj').value, body: mailEl('mail-body').value });
+    });
+    mailEl('mail-mode').addEventListener('change', function () {
+      var mode = mailEl('mail-mode').value;
+      mailSend({ type: 'winlink-set-mode', mode: mode });
+      mailEl('mail-radio').classList.toggle('hidden', mode === 'telnet');
+      mailGateways = [];
+      mailLoadGateways();
+    });
+    mailEl('mail-band').addEventListener('change', mailLoadGateways);
+    mailEl('mail-connect').addEventListener('click', function () {
+      mailRequireNotice(function () {
+        var mode = mailEl('mail-mode').value || 'telnet';
+        var o = { type: 'winlink-connect', mode: mode };
+        if (mode !== 'telnet') {
+          var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
+          if (!g) { showToast('Pick a gateway first', 3000, true); return; }
+          o.gateway = g.call; o.dialKhz = g.dialKhz;
+        }
+        mailSend(o);
+      });
+    });
+    mailEl('mail-abort').addEventListener('click', function () { mailSend({ type: 'winlink-abort' }); });
+    mailEl('mail-notice-ok').addEventListener('click', function () {
+      mailSend({ type: 'winlink-accept-notice' });
+      if (mailState) mailState.noticeAccepted = true;
+      mailEl('mail-notice').classList.add('hidden');
+      var f = mailNoticeThen; mailNoticeThen = null; if (f) f();
+    });
+    mailEl('mail-notice-no').addEventListener('click', function () { mailEl('mail-notice').classList.add('hidden'); mailNoticeThen = null; });
+  })();
 
   // Auto-connect on page load (or bootstrap popout view)
   if (isPopout) {

@@ -53,7 +53,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-fortran mingw-w64-x86_64-fftw
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-fortran mingw-w64-x86_64-fftw make git
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe; packaged users had none, #wsprd)
         shell: msys2 {0}
         run: |
@@ -65,6 +65,26 @@ jobs:
           gcc -O2 -Wall -o assets/yaesu-scope/yaesu-scope.exe helpers/yaesu-scope/yaesu-scope.c -static
           test -f assets/yaesu-scope/yaesu-scope.exe
           ./assets/yaesu-scope/yaesu-scope.exe --synth --once | head -c 2 | grep -q YS
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build Pat (Winlink client — MIT, separate exe)
+        shell: bash
+        # Winlink sidecars (docs/winlink-integration-plan.md), built from the
+        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
+        # until the first green run on every runner: without them POTACAT says
+        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
+        continue-on-error: true
+        run: bash scripts/build-winlink-helpers.sh pat
+      - name: Build ardopcf (ARDOP modem — MIT, separate exe)
+        shell: msys2 {0}
+        # Winlink sidecars (docs/winlink-integration-plan.md), built from the
+        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
+        # until the first green run on every runner: without them POTACAT says
+        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
+        continue-on-error: true
+        run: bash scripts/build-winlink-helpers.sh ardop
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=win
       - name: Build Windows installers
@@ -159,6 +179,17 @@ jobs:
           clang -O2 -Wall -arch arm64 -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -lpthread -lm
           test -f assets/yaesu-scope/yaesu-scope
           ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build Pat (Winlink client — MIT, separate exe; no ardopcf on macOS)
+        # Winlink sidecars (docs/winlink-integration-plan.md), built from the
+        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
+        # until the first green run on every runner: without them POTACAT says
+        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
+        continue-on-error: true
+        run: bash scripts/build-winlink-helpers.sh pat
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
       - name: Build macOS dmg (arm64)
@@ -247,6 +278,17 @@ jobs:
           clang -O2 -Wall -arch x86_64 -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -lpthread -lm
           test -f assets/yaesu-scope/yaesu-scope
           file assets/yaesu-scope/yaesu-scope | grep -q x86_64
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build Pat (Winlink client — MIT, separate exe; no ardopcf on macOS)
+        # Winlink sidecars (docs/winlink-integration-plan.md), built from the
+        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
+        # until the first green run on every runner: without them POTACAT says
+        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
+        continue-on-error: true
+        run: bash scripts/build-winlink-helpers.sh pat
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=x64
       - name: Build macOS dmg (x64)
@@ -394,6 +436,19 @@ jobs:
           gcc -O2 -Wall -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -ldl -lpthread -lm
           test -f assets/yaesu-scope/yaesu-scope
           ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build Pat + ardopcf (Winlink client + ARDOP modem — MIT, separate exes)
+        # Winlink sidecars (docs/winlink-integration-plan.md), built from the
+        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
+        # until the first green run on every runner: without them POTACAT says
+        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y libasound2-dev
+          bash scripts/build-winlink-helpers.sh pat ardop
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=x64
       - name: Build Linux packages
@@ -526,6 +581,19 @@ jobs:
           gcc -O2 -Wall -o assets/yaesu-scope/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -ldl -lpthread -lm
           test -f assets/yaesu-scope/yaesu-scope
           ./assets/yaesu-scope/yaesu-scope --synth --once | head -c 2 | grep -q YS
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build Pat + ardopcf (Winlink client + ARDOP modem — MIT, separate exes)
+        # Winlink sidecars (docs/winlink-integration-plan.md), built from the
+        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
+        # until the first green run on every runner: without them POTACAT says
+        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y libasound2-dev
+          bash scripts/build-winlink-helpers.sh pat ardop
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=arm64
       - name: Build Linux packages (arm64)
