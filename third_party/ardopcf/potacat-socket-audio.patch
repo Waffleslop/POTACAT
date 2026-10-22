@@ -1,0 +1,180 @@
+--- a/src/windows/Waveout.c
++++ b/src/windows/Waveout.c
+@@ -31,6 +31,7 @@
+ #include <math.h>
+ 
+ #include "common/ardopcommon.h"
++#include "common/SocketAudio.h"
+ 
+ void GetSoundDevices();
+ 
+@@ -540,6 +541,14 @@
+ 		return &buffer[Index][0];
+ 	}
+ 
++	if (sa_active()) {
++		sa_write((const short *)buf, n);
++		while (sa_tx_backlog_ms() > 100)
++			txSleep(10);  // keep one buffer ahead, as the sound card did
++		Index = !Index;
++		return &buffer[Index][0];
++	}
++
+ 	header[Index].dwBufferLength = n * 2;
+ 	waveOutPrepareHeader(hWaveOut, &header[Index], sizeof(WAVEHDR));
+ 	waveOutWrite(hWaveOut, &header[Index], sizeof(WAVEHDR));
+@@ -614,6 +623,8 @@
+ 	int i, ret;
+ 	if (strcmp(PlaybackDevice, "NOSOUND") == 0)
+ 		return TRUE;
++	if (sa_active())
++		return sa_init(CaptureDevice, PlaybackDevice) ? TRUE : FALSE;
+ 
+ 	header[0].dwFlags = WHDR_DONE;
+ 	header[1].dwFlags = WHDR_DONE;
+@@ -711,6 +722,17 @@
+ {
+ 	if (strcmp(PlaybackDevice, "NOSOUND") == 0)
+ 		return;
++	if (sa_active()) {
++		static short sabuf[ReceiveSize];
++		int n;
++		while ((n = sa_read(sabuf, ReceiveSize)) > 0) {
++			if (rxwf != NULL)
++				WriteWav(sabuf, n, rxwf);
++			if (Capturing && Loopback == FALSE)
++				ProcessNewSamples(sabuf, n);
++		}
++		return;
++	}
+ 	// Process any captured samples
+ 	// Ideally call at least every 100 mS, more than 200 will loose data
+ 
+@@ -817,6 +839,10 @@
+ }
+ void CloseSound()
+ {
++	if (sa_active()) {
++		sa_close();
++		return;
++	}
+ 	waveInClose(hWaveIn);
+ 	waveOutClose(hWaveOut);
+ }
+@@ -850,7 +876,10 @@
+ 	SendtoCard(buffer[Index], Number);
+ 
+ 	// Wait for all sound output to complete
+-	if (strcmp(PlaybackDevice, "NOSOUND") != 0) {
++	if (sa_active()) {
++		while (sa_tx_backlog_ms() > 0)
++			txSleep(10);
++	} else if (strcmp(PlaybackDevice, "NOSOUND") != 0) {
+ 		while (!(header[0].dwFlags & WHDR_DONE))
+ 			txSleep(10);
+ 		while (!(header[1].dwFlags & WHDR_DONE))
+--- a/src/linux/ALSASound.c
++++ b/src/linux/ALSASound.c
+@@ -21,6 +21,7 @@
+ #define HANDLE int
+ 
+ #include "common/ardopcommon.h"
++#include "common/SocketAudio.h"
+ #include "common/wav.h"
+ #include "rockliff/rrs.h"
+ 
+@@ -1587,6 +1588,15 @@
+ 		ProcessNewSamples(buf, 1200);  // signed
+ 	}
+ 
++	if (sa_active()) {
++		sa_write(&buffer[Index][0], n);
++		if (txwff != NULL)
++			WriteWav(&buffer[Index][0], n, txwff);
++		while (sa_tx_backlog_ms() > 100)
++			txSleep(10);
++		return &buffer[Index][0];
++	}
++
+ 	if (playhandle)
+ 		SoundCardWrite(&buffer[Index][0], n);
+ 	if (txwff != NULL)
+@@ -1610,6 +1620,8 @@
+ {
+ 	if (strcmp(PlaybackDevice, "NOSOUND") == 0)
+ 		return (1);
++	if (sa_active())
++		return sa_init(CaptureDevice, PlaybackDevice);
+ 	GetInputDeviceCollection();
+ 	GetOutputDeviceCollection();
+ 	return OpenSoundCard(CaptureDevice, PlaybackDevice, 12000, 12000, NULL);
+@@ -1623,6 +1635,17 @@
+ {
+ 	if (strcmp(PlaybackDevice, "NOSOUND") == 0)
+ 		return;
++	if (sa_active()) {
++		static short sabuf[ReceiveSize];
++		int n;
++		while ((n = sa_read(sabuf, ReceiveSize)) > 0) {
++			if (rxwf != NULL)
++				WriteWav(sabuf, n, rxwf);
++			if (Capturing && Loopback == FALSE)
++				ProcessNewSamples(sabuf, n);
++		}
++		return;
++	}
+ 
+ 	// Process any captured samples
+ 	// Ideally call at least every 100 mS, more than 200 will loose data
+@@ -1708,7 +1731,7 @@
+ {
+ 	Capturing = FALSE;
+ 
+-	if (strcmp(PlaybackDevice, "NOSOUND") == 0)
++	if (strcmp(PlaybackDevice, "NOSOUND") == 0 || sa_active())
+ 		return;
+ 
+ #ifdef SHARECAPTURE
+@@ -1723,12 +1746,21 @@
+ void StartCodec(char * strFault)
+ {
+ 	strFault[0] = 0;
++	if (sa_active()) {
++		if (!sa_init(CaptureDevice, PlaybackDevice))
++			strcpy(strFault, "socket audio connect failed");
++		return;
++	}
+ 	OpenSoundCard(CaptureDevice, PlaybackDevice, 12000, 12000, strFault);
+ }
+ 
+ void StopCodec(char * strFault)
+ {
+ 	strFault[0] = 0;
++	if (sa_active()) {
++		sa_close();
++		return;
++	}
+ 	CloseSoundCard();
+ }
+ 
+@@ -1743,6 +1775,10 @@
+ }
+ void CloseSound()
+ {
++	if (sa_active()) {
++		sa_close();
++		return;
++	}
+ 	CloseSoundCard();
+ }
+ 
+--- a/Makefile
++++ b/Makefile
+@@ -48,6 +48,7 @@
+ 	lib/rockliff/rrs.o \
+ 	lib/ws_server/ws_server.o \
+ 	src/common/ARDOPC.o \
++	src/common/SocketAudio.o \
+ 	src/common/ARDOPCommon.o \
+ 	src/common/ardopSampleArrays.o \
+ 	src/common/ARQ.o \

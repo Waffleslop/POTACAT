@@ -93,6 +93,14 @@ if [[ " $want " == *" ardop "* ]]; then
       "$W"
     grep -q 'CaptureNames\[64\]' "$W" && grep -q 'PlaybackNames\[64\]' "$W" && grep -q '(CaptureCount + 1)' "$W" \
       || { echo "::error::ardopcf device-table patch did not apply"; exit 1; }
+    # POTACAT socket audio backend (third_party/ardopcf/src/SocketAudio.*,
+    # hooked in by potacat-socket-audio.patch — regenerate with
+    # scripts/gen-ardopcf-patch.py when the pin moves): device "tcp:<port>"
+    # makes ardopcf take its receive audio from, and send its transmit audio
+    # to, a loopback port POTACAT serves — no sound card, no DAX program.
+    cp "$ROOT/third_party/ardopcf/src/SocketAudio.c" "$ROOT/third_party/ardopcf/src/SocketAudio.h" "$WORK/ardop/src/common/"
+    git -C "$WORK/ardop" apply "$ROOT/third_party/ardopcf/potacat-socket-audio.patch"       || { echo "::error::potacat-socket-audio.patch did not apply to ardopcf $ARDOP_TAG"; exit 1; }
+    grep -q 'sa_active' "$WORK/ardop/src/windows/Waveout.c" || { echo "::error::socket audio hook missing"; exit 1; }
     # The loops have no bound of their own: cap the device count at the table size.
     sed -i -e 's/CaptureCount = waveInGetNumDevs();/CaptureCount = waveInGetNumDevs(); if (CaptureCount > 64) CaptureCount = 64;/' \
            -e 's/PlaybackCount = waveOutGetNumDevs();/PlaybackCount = waveOutGetNumDevs(); if (PlaybackCount > 64) PlaybackCount = 64;/' "$W"
