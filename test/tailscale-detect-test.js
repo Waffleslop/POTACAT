@@ -70,5 +70,16 @@ test('a failed cert never disappears silently (source guard)', () => {
   assert.ok(/const certResult = await ensureTailscaleCertReady\(\(msg\) => sendCatLog\('\[Pair-Link\] '/.test(main), 'the share-link path reads the result');
 });
 
+test('Linux operators are told the operator step before and after a failure (source guard)', () => {
+  const main = R('main.js'), app = R('renderer/app.js'), html = R('renderer/index.html');
+  assert.ok(/certError: cached \? '' : _tailscaleCertError,/.test(main), 'status carries the last cert error');
+  assert.ok(/platform: process\.platform,/.test(main), 'status carries the platform');
+  assert.ok(/if \(!s\.certCached && s\.certError\)/.test(app), 'the card shows the failure');
+  assert.ok(/if \(!s\.certCached && s\.platform === 'linux'\)/.test(app), 'the card names the step on Linux before any failure');
+  assert.ok(/sudo tailscale set --operator=\$USER/.test(html), 'the setup steps name it');
+  assert.ok(!/if \(certResult && certResult\.error\) \{\n\s+return \{ error/.test(main), 'a cert failure must not withhold the LAN pairing QR');
+  assert.ok(/certWarning,\n\s+\};/.test(main) && /r\.certWarning/.test(app), 'the share-link dialog shows the reason');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

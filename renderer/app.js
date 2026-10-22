@@ -6105,6 +6105,17 @@ async function echocatRefreshTailscaleStatus() {
       'Tailscale connected, but <strong>MagicDNS is off</strong>. Enable it at <a href="https://login.tailscale.com/admin/dns" target="_blank" style="color:#4fc3f7;">admin → DNS</a> (toggle MagicDNS on, then HTTPS Certificates).';
     return;
   }
+  if (!s.certCached && s.certError) {
+    echocatTsStatus.innerHTML =
+      `Tailscale: <code>${_esc(s.hostname || '')}</code>. <strong>Phones cannot connect over Tailscale yet</strong>: ${_esc(s.certError)}`;
+    return;
+  }
+  if (!s.certCached && s.platform === 'linux') {
+    echocatTsStatus.innerHTML =
+      `Tailscale: <code>${_esc(s.hostname || '')}</code>. On Linux, Tailscale gives certificates only to its operator. ` +
+      `Run once in a terminal: <code>sudo tailscale set --operator=$USER</code>, restart POTACAT, then open the pairing QR.`;
+    return;
+  }
   if (!s.certCached) {
     echocatTsStatus.innerHTML =
       `Tailscale: <code>${s.hostname}</code>. Tap "Open pairing QR" to issue a TLS cert. ` +
@@ -7712,6 +7723,9 @@ async function _pairDeviceQrGenerate() {
   }
   _pairDeviceQrLastData = r;
   if (copyBtn) copyBtn.disabled = !r.url;
+  // The link still pairs on the home network; this says why it will not
+  // connect over Tailscale (Linux: the operator rule).
+  if (status && r.certWarning) status.textContent = r.certWarning;
 
   // Render QR. SVG first (crisp), PNG fallback, then text-only fallback.
   let shown = false;

@@ -245,7 +245,11 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
       - name: Web row alignment (source guards)
         run: node test/web-row-alignment-test.js
+      - name: Build the native FT8/FT4/FT2 decoder (what users run)
+        run: cd lib/ft8_native && ../../node_modules/.bin/node-gyp rebuild
       - name: Decoder output contract (FT8 / FT4 / FT2)
+        env:
+          NATIVE_REQUIRED: '1'
         run: node test/decode-contract-test.js
       - name: Rendered row alignment (ECHOCAT Web + JTCAT window)
         env:

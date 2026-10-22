@@ -56,7 +56,13 @@ async function runPath(forceWasm) {
 
   const info = await Promise.race([readyP, new Promise((_, rej) => setTimeout(() => rej(new Error('worker not ready')), 60000))]);
   const via = info.native ? 'native' : 'WASM';
-  if (!forceWasm && !info.native) { await w.terminate(); console.log('  skip native decoder not built here (npm run build-ft8)'); return; }
+  if (!forceWasm && !info.native) {
+    await w.terminate();
+    // CI builds the addon and sets this: the native decoder is what users run.
+    if (process.env.NATIVE_REQUIRED === '1') { console.log('  FAIL native decoder required but not loaded (npm run build-ft8)'); process.exit(1); }
+    console.log('  skip native decoder not built here (npm run build-ft8)');
+    return;
+  }
   console.log(`decode contract — ${via} decoders`);
 
   for (const [mode, m] of Object.entries(MODES)) {

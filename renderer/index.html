@@ -3242,6 +3242,7 @@
         <ol class="pair-tailscale-steps" style="margin-top:8px;">
           <li>Install <a href="https://tailscale.com/download" data-external="1">Tailscale</a> on this computer and your phone; sign both in to the same tailnet.</li>
           <li>Open <a href="https://login.tailscale.com/admin/dns" data-external="1">login.tailscale.com/admin/dns</a> and turn on <strong>MagicDNS</strong> AND <strong>HTTPS Certificates</strong>.</li>
+          <li><strong>Linux only:</strong> let POTACAT ask Tailscale for a certificate. Run once in a terminal: <code>sudo tailscale set --operator=$USER</code>, then restart POTACAT.</li>
           <li>POTACAT will detect Tailscale and issue a TLS cert automatically — pair from the ECHOCAT card above.</li>
         </ol>
         <div class="pair-tailscale-status">

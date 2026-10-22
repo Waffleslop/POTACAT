@@ -34693,6 +34693,9 @@ app.whenReady().then(() => {
   // issuance. Returns {error} on hard failure, {warn} on a soft
   // problem (e.g. Tailscale missing — pair will likely fail but we
   // still show the QR), or null on success.
+  // The last reason `tailscale cert` failed ('' once one is issued), so the
+  // Settings card can say why phones cannot connect over the tailnet.
+  let _tailscaleCertError = '';
   async function ensureTailscaleCertReady(progressCb) {
     const { tailscaleStatus, loadCachedTailscaleCert, issueTailscaleCert } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
@@ -34718,8 +34721,10 @@ app.whenReady().then(() => {
       // Without a Tailscale cert the phone's tailnet leg meets the
       // self-signed cert and iOS refuses it, so this must reach the log.
       sendCatLog(`[Tailscale] Cert for ${ts.hostname} not issued — phones cannot connect over Tailscale until it is: ${err.message}`);
+      _tailscaleCertError = err.message;
       return { error: err.message };
     }
+    _tailscaleCertError = '';
     progressCb('Reloading ECHOCAT with new cert…');
     if (remoteServer && remoteServer.running) {
       try { await remoteServer.stop(); } catch {}
@@ -34762,6 +34767,8 @@ app.whenReady().then(() => {
       // why the CLI gave nothing: the card tells the operator which it is.
       ipFromInterfaces: ipFromInterfaces || null,
       cliError: ts ? '' : (probe.error || ''),
+      certError: cached ? '' : _tailscaleCertError,
+      platform: process.platform,
     };
   });
 
@@ -34783,8 +34790,10 @@ app.whenReady().then(() => {
       issueTailscaleCert(certDir, ts.hostname);
     } catch (err) {
       sendCatLog(`[Tailscale] Cert issuance failed: ${err.message}`);
+      _tailscaleCertError = err.message;
       return { ok: false, error: err.message };
     }
+    _tailscaleCertError = '';
     sendCatLog(`[Tailscale] Cert issued for ${ts.hostname}.`);
     // Restart ECHOCAT so the new cert is loaded. If it wasn't
     // running, this is a no-op the next time the user enables it.
@@ -34819,10 +34828,10 @@ app.whenReady().then(() => {
     let softWarn = '';
     try {
       const certResult = await ensureTailscaleCertReady(sendProgress);
-      if (certResult && certResult.error) {
-        return { error: certResult.error };
-      }
-      if (certResult && certResult.warn) softWarn = certResult.warn;
+      // A cert failure only costs the tailnet leg; the QR still pairs on the
+      // home network, so show the reason beside it instead of no QR at all.
+      if (certResult && certResult.error) softWarn = 'Pairs on your home network only. Over Tailscale: ' + certResult.error;
+      else if (certResult && certResult.warn) softWarn = certResult.warn;
     } catch (err) {
       sendCatLog('[Pair QR] Cert setup threw: ' + (err.message || err));
       // Continue with whatever cert we have — don't block pair-QR generation.
@@ -35021,12 +35030,14 @@ app.whenReady().then(() => {
     if (!remoteServer || !remoteServer.running) {
       return { error: 'ECHOCAT server is not running. Enable it in Settings first.' };
     }
+    let certWarning = '';
     // Best-effort Tailscale cert nudge — same as the QR flow. If the
     // operator hasn't issued a cert yet and is sharing a Tailscale-
     // capable link, this gets them an LE cert before the recipient
     // tries to pin a self-signed fingerprint.
     try {
       const certResult = await ensureTailscaleCertReady((msg) => sendCatLog('[Pair-Link] ' + msg));
+      if (certResult && certResult.error) certWarning = 'Pairs on your home network only. Over Tailscale: ' + certResult.error;
       if (certResult && certResult.warn) sendCatLog('[Pair-Link] ' + certResult.warn);
     } catch (err) {
       sendCatLog('[Pair-Link] Cert setup threw: ' + (err.message || err));
@@ -35110,6 +35121,7 @@ app.whenReady().then(() => {
         cloud: !!cloudHost,
       },
       hostname,
+      certWarning,
     };
   });
 
