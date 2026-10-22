@@ -256,14 +256,137 @@
   });
   $('wl-settings').addEventListener('click', function () { window.api.openSettings(); });
 
+  // ── waterfall: is the gateway frequency in use? ──────────────────────────
+  // 0–3000 Hz of the receiver's passband, from main's direct-audio frames
+  // (Flex Direct / Icom Network) or, on a sound-device rig, the rig's own
+  // input captured here. Shown while a radio mode is selected.
+  var WF_BINS = 256;                       // 0..3000 Hz at 11.7 Hz
+  var WF_N = 2048;                         // FFT size at 24 kHz (85 ms)
+  var wf = null, wfMode = 'none', wfAcc = new Float32Array(WF_N), wfAccLen = 0, wfRate = 24000;
+  var wfCtx = null, wfStream = null, wfAnalyser = null, wfTimer = null;
+  var wfRe = new Float32Array(WF_N), wfIm = new Float32Array(WF_N), wfWin = null, wfMags = new Float32Array(WF_BINS);
+
+  function fft(re, im) {
+    var n = re.length;
+    for (var i = 1, j = 0; i < n; i++) {
+      var bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { var t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (var len = 2; len <= n; len <<= 1) {
+      var half = len >> 1, ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (var s = 0; s < n; s += len) {
+        var cr = 1, ci = 0;
+        for (var k = 0; k < half; k++) {
+          var a = s + k, b = a + half;
+          var tr = cr * re[b] - ci * im[b], ti = cr * im[b] + ci * re[b];
+          re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+          var nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr;
+        }
+      }
+    }
+  }
+  function wfPush(samples, rate) {
+    // Resample to 24 kHz by simple decimation/duplication so the bin→Hz map is fixed.
+    var step = rate / 24000;
+    for (var i = 0; i < samples.length; i += step) {
+      wfAcc[wfAccLen++] = samples[i | 0];
+      if (wfAccLen >= WF_N) { wfFrame(); wfAccLen = 0; }
+    }
+  }
+  function wfFrame() {
+    if (!wf) return;
+    if (!wfWin) { wfWin = new Float32Array(WF_N); for (var w = 0; w < WF_N; w++) wfWin[w] = 0.5 - 0.5 * Math.cos(2 * Math.PI * w / (WF_N - 1)); }
+    for (var i = 0; i < WF_N; i++) { wfRe[i] = wfAcc[i] * wfWin[i]; wfIm[i] = 0; }
+    fft(wfRe, wfIm);
+    for (var b = 0; b < WF_BINS; b++) wfMags[b] = Math.log(wfRe[b] * wfRe[b] + wfIm[b] * wfIm[b] + 1e-12);
+    wf.pushFrame(wfMags);
+  }
+  function wfMarkers(mode) {
+    if (!wf) return;
+    // ARDOP's signal sits on 1500 Hz, its bandwidth either side; packet (1200 baud AFSK) on 1200/2200.
+    var bw = mode === 'ardop' ? (Number((state && state.ardopBw) || 500)) : 2000;
+    var lo = (1500 - bw / 2) / 3000, hi = (1500 + bw / 2) / 3000;
+    wf.setMarkers([{ pos: lo, color: [0.3, 0.8, 0.6, 0.8] }, { pos: hi, color: [0.3, 0.8, 0.6, 0.8] }]);
+    $('wl-wf-note').textContent = mode === 'packet' ? 'packet tones 1200 / 2200 Hz' : 'ARDOP centre 1500 Hz (' + bw + ' Hz)';
+  }
+  function wfStart(mode) {
+    var a = (state && state.audio) || {};
+    if (!wf) {
+      try { wf = new Waterfall($('wl-wf-canvas'), { bins: WF_BINS, historyRows: 256, gamma: 0.6, crop: true }); } catch (e) { wf = null; }
+      if (!wf || !wf.supported) { $('wl-wf').classList.remove('show'); return; }
+    }
+    $('wl-wf').classList.add('show');
+    wfMarkers(mode);
+    if (a.viaPotacat) {
+      // Frames from main (the same ones the modem gets).
+      if (wfMode !== 'frames') { wfStopCapture(); wfMode = 'frames'; window.api.watchAudio(true); }
+      return;
+    }
+    // A sound-device rig: capture its input here (the rig's FT8 input device).
+    if (wfMode === 'capture') return;
+    wfMode = 'capture';
+    window.api.watchAudio(false);
+    window.api.audioRig().then(function (rig) {
+      var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
+      return navigator.mediaDevices.getUserMedia(c);
+    }).then(function (stream) {
+      if (wfMode !== 'capture') { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+      wfStream = stream;
+      wfCtx = new AudioContext({ sampleRate: 48000 });
+      var src = wfCtx.createMediaStreamSource(stream);
+      wfAnalyser = wfCtx.createAnalyser();
+      wfAnalyser.fftSize = 4096;
+      src.connect(wfAnalyser);
+      var buf = new Float32Array(4096);
+      wfTimer = setInterval(function () {
+        if (!wfAnalyser) return;
+        wfAnalyser.getFloatTimeDomainData(buf);
+        wfAccLen = 0; wfPush(buf, wfCtx.sampleRate);
+      }, 90);
+    }).catch(function (e) { $('wl-wf-note').textContent = 'No radio audio: ' + (e && e.message || e); });
+  }
+  function wfStopCapture() {
+    if (wfTimer) { clearInterval(wfTimer); wfTimer = null; }
+    if (wfStream) { wfStream.getTracks().forEach(function (t) { t.stop(); }); wfStream = null; }
+    if (wfCtx) { try { wfCtx.close(); } catch (e) {} wfCtx = null; }
+    wfAnalyser = null;
+  }
+  function wfStop() {
+    wfStopCapture();
+    if (wfMode === 'frames') window.api.watchAudio(false);
+    wfMode = 'none';
+    $('wl-wf').classList.remove('show');
+  }
+  window.api.onAudioFrame(function (d) {
+    if (wfMode !== 'frames' || !d || !d.pcm) return;
+    var pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm);
+    wfPush(pcm, d.sampleRate || 24000);
+  });
+  function wfSync() {
+    var m = currentMode();
+    if (m.id !== 'telnet' && m.available) wfStart(m.id); else wfStop();
+  }
+
   // ── sessions ─────────────────────────────────────────────────────────────
   $('wl-mode').addEventListener('change', function () {
     gateways = [];
     $('wl-gateway').innerHTML = '<option value="">Load gateways…</option>';
     window.api.setMode($('wl-mode').value);
     renderModeNote();
+    wfSync();
   });
   $('wl-band').addEventListener('change', function () { loadGateways(false); });
+  // Picking a gateway tunes the radio to it at once, so the waterfall shows
+  // that frequency; the dial goes back when the session ends or the window closes.
+  $('wl-gateway').addEventListener('change', function () {
+    var g = gateways[parseInt($('wl-gateway').value, 10)];
+    if (!g || !g.dialKhz) return;
+    window.api.qsy({ dialKhz: g.dialKhz, mode: currentMode().id }).then(function (r) {
+      if (r && !r.ok && r.error) { $('wl-text').textContent = r.error; }
+    });
+  });
   $('wl-gw-refresh').addEventListener('click', function () { loadGateways(true); });
 
   function loadGateways() {
@@ -360,12 +483,12 @@
   }
 
   // ── wiring ───────────────────────────────────────────────────────────────
-  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); });
+  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); });
   window.api.onSession(function (ss) { if (state) state.session = ss; renderSession(ss); });
   window.api.onMailbox(function (d) {
     if (!d || !lists.hasOwnProperty(d.box)) return;
     lists[d.box] = d.messages || [];
     if (d.box === box) renderList();
   });
-  window.api.getState().then(function (s) { state = s; renderState(); renderSound(); autoSound(); });
+  window.api.getState().then(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); });
 })();

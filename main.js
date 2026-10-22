@@ -1643,6 +1643,8 @@ let _winlinkSessionError = '';
 let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
 let winlinkPopoutWin = null;
+let _winlinkWatchAudio = false;      // the mail window shows the waterfall
+let _winlinkPreviewReturnTo = null;  // dial/mode before a gateway pick tuned the radio
 
 // ─── JS8 (native) state ──────────────────────────────────────────────────────
 // POTACAT IS the JS8 station — the JS8Call modem is compiled in (GPLv3; see
@@ -8364,6 +8366,7 @@ function winlinkPayload() {
     noticeText: WINLINK_NOTICE_TEXT,
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
     lastGateway: settings.winlinkLastGateway || null,
+    ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
     audio: (() => {
       const rig = winlinkActiveRig();
       const a = (rig && rig.winlinkAudio) || {};
@@ -8711,6 +8714,39 @@ function stopWinlinkAudio() {
 /** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
 function winlinkFeedRx(pcm, sampleRate) {
   if (winlinkAudio && winlinkAudio.connected) winlinkAudio.feedRx(pcm, sampleRate);
+  // The mail window's waterfall ("is this frequency in use?") on the rigs
+  // whose audio only main has; a sound-device rig's window captures its own.
+  if (_winlinkWatchAudio && winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) {
+    audioSafeSend(winlinkPopoutWin.webContents, 'winlink-audio-frame', { pcm, sampleRate });
+  }
+}
+
+/**
+ * A gateway was picked (not yet connected): tune there now, so the waterfall
+ * shows that frequency and the operator can see whether it is in use. The
+ * dial/mode from before the FIRST pick is remembered and put back when the
+ * session ends — or when the window closes with no session. Session start
+ * tunes again regardless, so a dial moved in between is corrected before
+ * the first transmission.
+ */
+function winlinkPreviewQsy({ dialKhz, mode } = {}) {
+  const khz = Number(dialKhz);
+  if (!Number.isFinite(khz) || khz <= 0) return { ok: false, error: 'No frequency' };
+  if (!settings.enableWinlink) return { ok: false, error: 'Winlink is off' };
+  if (isRemoteMode()) return { ok: false, error: 'Radio sessions key the shack\'s radio — tune from the shack PC', reason: 'remote' };
+  if (winlinkSessionActive()) return { ok: false, error: 'A session is running' };
+  if (radioOwner !== 'none' && radioOwner !== 'winlink') return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
+  if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = { freqHz: _currentFreqHz, mode: _currentMode || '' };
+  tuneRadio(khz, mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink gateway pick' });
+  winlinkLog(`listening on ${khz.toFixed(1)} kHz for the picked gateway (the radio goes back to ${_winlinkPreviewReturnTo ? (_winlinkPreviewReturnTo.freqHz / 1e6).toFixed(4) + ' MHz' : 'where it was'} after)`);
+  return { ok: true };
+}
+
+function winlinkPreviewRestore(why) {
+  const r = _winlinkPreviewReturnTo;
+  _winlinkPreviewReturnTo = null;
+  if (!r || !r.freqHz || winlinkSessionActive()) return;
+  try { tuneRadio(r.freqHz / 1000, r.mode || undefined, undefined, { origin: `Winlink ${why}` }); } catch {}
 }
 
 // ── ardopcf ─────────────────────────────────────────────────────────────────
@@ -8966,10 +9002,11 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   winlinkState.setSession({
     state: 'starting', mode, gateway: radio ? String(gateway).toUpperCase() : 'CMS (internet)', dialKhz: radio ? Number(dialKhz) || null : null,
     capSec: radio ? capMin * 60 : 0,
-    returnTo: radio ? { freqHz: _currentFreqHz || 0, mode: _currentMode || '' } : null,
+    returnTo: radio ? (_winlinkPreviewReturnTo || { freqHz: _currentFreqHz || 0, mode: _currentMode || '' }) : null,
     text: radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
   });
   _winlinkSessionError = '';
+  if (radio) _winlinkPreviewReturnTo = null; // the session's returnTo carries it now
   winlinkSessionTouch();
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
@@ -9282,6 +9319,9 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
       case 'winlink-abort':
         winlinkAbortSession('stopped from an ECHOCAT device');
         result('abort', { ok: true });
+        return;
+      case 'winlink-qsy':
+        result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode }));
         return;
       case 'winlink-prompt':
         winlinkAnswerPrompt(String(req.id || ''), String(req.value || ''));
@@ -32197,7 +32237,7 @@ app.whenReady().then(() => {
         settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
       }
     });
-    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; });
+    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkPreviewRestore('window closed'); });
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
@@ -32591,6 +32631,8 @@ app.whenReady().then(() => {
     return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, url: o.url, origin: 'mail window' });
   });
   ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator'));
+  ipcMain.handle('winlink-cmd-qsy', (_e, o = {}) => winlinkPreviewQsy(o));
+  ipcMain.on('winlink-watch-audio', (_e, on) => { _winlinkWatchAudio = !!on; });
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
   ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
   ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));

@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('api', {
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),
   abort: () => ipcRenderer.send('winlink-cmd-abort'),
+  qsy: (o) => ipcRenderer.invoke('winlink-cmd-qsy', o),
+  watchAudio: (on) => ipcRenderer.send('winlink-watch-audio', !!on),
+  onAudioFrame: (cb) => ipcRenderer.on('winlink-audio-frame', (_e, d) => cb(d)),
   answerPrompt: (id, value) => ipcRenderer.send('winlink-cmd-prompt', { id, value }),
   gateways: (mode, band) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band }),
   setMode: (mode) => ipcRenderer.send('winlink-cmd-set-mode', mode),

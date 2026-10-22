@@ -14641,6 +14641,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
       mailLoadGateways();
     });
     mailEl('mail-band').addEventListener('change', mailLoadGateways);
+    mailEl('mail-gateway').addEventListener('change', function () {
+      var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
+      if (g && g.dialKhz) mailSend({ type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailEl('mail-mode').value });
+    });
     mailEl('mail-connect').addEventListener('click', function () {
       mailRequireNotice(function () {
         var mode = mailEl('mail-mode').value || 'telnet';

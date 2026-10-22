@@ -88,6 +88,15 @@ test('modem audio rides POTACAT\'s radio link on Flex Direct / Icom Network — 
   assert.ok(/new ModemAudioServer\(/.test(tx) && /listen\(0\)/.test(tx));
 });
 
+test('a gateway pick tunes the radio only outside a session, and the dial goes back', () => {
+  const q = fnBody(main, 'winlinkPreviewQsy');
+  assert.ok(/if \(winlinkSessionActive\(\)\) return \{ ok: false/.test(q));
+  assert.ok(/if \(isRemoteMode\(\)\) return \{ ok: false/.test(q));
+  assert.ok(/tuneRadio\(khz, mode === 'packet' \? 'FM' : 'DIGU'/.test(q));
+  assert.ok(/returnTo: radio \? \(_winlinkPreviewReturnTo \|\|/.test(fnBody(main, 'winlinkStartSession')), 'the session returns to the pre-pick dial');
+  assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
+});
+
 console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
