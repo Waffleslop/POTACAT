@@ -21,7 +21,24 @@ contextBridge.exposeInMainWorld('api', {
   qsy: (o) => ipcRenderer.invoke('winlink-cmd-qsy', o),
   watchAudio: (on) => ipcRenderer.send('winlink-watch-audio', !!on),
   setPref: (key, value) => ipcRenderer.send('winlink-cmd-pref', { key, value }),
-  onAudioFrame: (cb) => ipcRenderer.on('winlink-audio-frame', (_e, d) => cb(d)),
+  onAudioFrame: (cb) => {
+    // main sends frames through audioSafeSend, which bounds its backlog on
+    // ACKs from here (batched, with a periodic flush). Without them main
+    // pauses after 120 frames and resyncs every 2 s — the waterfall ran in
+    // bursts (K3SBP 2026-10-22). Same idiom as preload-vfo-popout.js.
+    let _ackCount = 0;
+    const flush = () => {
+      if (_ackCount > 0) {
+        ipcRenderer.send('audio-ack', { channel: 'winlink-audio-frame', count: _ackCount });
+        _ackCount = 0;
+      }
+    };
+    ipcRenderer.on('winlink-audio-frame', (_e, d) => {
+      if (++_ackCount >= 8) flush();
+      try { cb(d); } catch (e) { /* one bad frame must not stop acking */ }
+    });
+    setInterval(flush, 100);
+  },
   answerPrompt: (id, value) => ipcRenderer.send('winlink-cmd-prompt', { id, value }),
   gateways: (mode, band) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band }),
   setMode: (mode) => ipcRenderer.send('winlink-cmd-set-mode', mode),

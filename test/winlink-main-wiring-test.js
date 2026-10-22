@@ -97,6 +97,12 @@ test('a gateway pick tunes the radio only outside a session, and the dial goes b
   assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
 });
 
+test('the mail window acknowledges audio frames, or main pauses the waterfall every 120 frames', () => {
+  const pre = read('preload-winlink-popout.js');
+  assert.ok(/ipcRenderer\.send\('audio-ack', \{ channel: 'winlink-audio-frame', count: _ackCount \}\)/.test(pre));
+  assert.ok(/setInterval\(flush, \d+\)/.test(pre), 'a periodic flush so a slow handler cannot freeze the credit');
+});
+
 console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
