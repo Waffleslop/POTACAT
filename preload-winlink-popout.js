@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('api', {
   setMode: (mode) => ipcRenderer.send('winlink-cmd-set-mode', mode),
   acceptNotice: () => ipcRenderer.invoke('winlink-cmd-accept-notice'),
   getState: () => ipcRenderer.invoke('winlink-cmd-state'),
+  // Radio sound: picked automatically when POTACAT can tell, asked only when not.
+  audioRig: () => ipcRenderer.invoke('winlink-audio-rig'),
+  audioAuto: (o) => ipcRenderer.invoke('winlink-audio-auto', o),
+  audioSave: (o) => ipcRenderer.invoke('winlink-audio-save', o),
+  audioList: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   openSettings: () => ipcRenderer.send('winlink-open-settings'),
   openFolder: () => ipcRenderer.send('winlink-open-folder'),
 

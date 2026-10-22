@@ -8361,6 +8361,12 @@ function winlinkPayload() {
     noticeText: WINLINK_NOTICE_TEXT,
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
     lastGateway: settings.winlinkLastGateway || null,
+    audio: (() => {
+      const rig = winlinkActiveRig();
+      const a = (rig && rig.winlinkAudio) || {};
+      const needed = winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet'));
+      return { needed, ready: !!(a.captureLabel && a.playbackLabel), capture: a.captureLabel || '', playback: a.playbackLabel || '', rigName: (rig && rig.name) || '' };
+    })(),
   });
 }
 
@@ -8663,8 +8669,9 @@ async function spawnDirewolf() {
   killDirewolf();
   if (!DirewolfProcess.direwolfSupported(process.platform)) throw new Error('Packet on macOS is not ready yet');
   if (!_winlinkShimPort) throw new Error('The radio control shim is not running — restart Winlink');
-  const labels = winlinkArdopLabels();
-  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('Pick the radio\'s sound devices first: Settings > Station > Winlink > Find the radio\'s sound devices');
+  let labels = winlinkArdopLabels();
+  if (!labels.captureLabel || !labels.playbackLabel) { await winlinkAutoAudio(); labels = winlinkArdopLabels(); }
+  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('POTACAT could not tell which sound devices are your radio\'s — choose them in the Winlink window');
   const listing = await listArdopDevices();
   if (!listing.ok) throw new Error(listing.error);
   const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
@@ -8727,6 +8734,45 @@ function winlinkArdopLabels() {
   };
 }
 
+/** Save the radio's Winlink sound devices on the active rig (main's copy is the truth). */
+function winlinkSaveRigAudio({ captureLabel, playbackLabel }) {
+  const rig = winlinkActiveRig();
+  if (!rig) return false;
+  rig.winlinkAudio = { ...(rig.winlinkAudio || {}), captureLabel: String(captureLabel || ''), playbackLabel: String(playbackLabel || '') };
+  saveSettings(settings);
+  return true;
+}
+
+/**
+ * "It just works": pick the radio's sound devices without asking whenever
+ * POTACAT can tell (the rig's own FT8 devices, a Flex's DAX RX 1 / DAX TX, one
+ * obvious USB CODEC — lib/ardop-process.js proposeArdopDevices), save them on
+ * the rig, and say what was chosen. Only an undecidable side is left for the
+ * operator. `inputLabel`/`outputLabel` are the rig's FT8 device names, which
+ * only a renderer can resolve; without them the Flex/CODEC rules still apply.
+ * @returns {Promise<{ok, auto?, capture?, playback?, devices?, proposal?, error?}>}
+ */
+async function winlinkAutoAudio({ inputLabel, outputLabel } = {}) {
+  const rig = winlinkActiveRig();
+  if (!rig) return { ok: false, error: 'No radio set up' };
+  const saved = rig.winlinkAudio || {};
+  if (saved.captureLabel && saved.playbackLabel) return { ok: true, auto: false, capture: saved.captureLabel, playback: saved.playbackLabel };
+  if (!ArdopProcess.ardopSupported(process.platform) || !findArdop().found) return { ok: false, error: 'No device list on this system' };
+  const listing = await listArdopDevices();
+  if (!listing.ok) return { ok: false, error: listing.error };
+  let family = 'none';
+  try { family = RigFamily.rigFamily(rig); } catch {}
+  const p = ArdopProcess.proposeArdopDevices({ devices: listing.devices, inputLabel, outputLabel, family });
+  if (p.capture && p.playback) {
+    winlinkSaveRigAudio({ captureLabel: p.capture.name, playbackLabel: p.playback.name });
+    const why = { rig: 'the same devices as its FT8 audio', 'flex-dax': 'its DAX channel 1', codec: 'its USB sound card' }[p.why] || 'the devices found';
+    winlinkLog(`radio sound for ${rig.name || 'the radio'}: ${p.capture.name} (from the radio) and ${p.playback.name} (to the radio) — ${why}`);
+    winlinkPush();
+    return { ok: true, auto: true, capture: p.capture.name, playback: p.playback.name, why: p.why };
+  }
+  return { ok: true, auto: false, devices: listing.devices, proposal: { capture: p.capture && p.capture.name, playback: p.playback && p.playback.name } };
+}
+
 /** Run ardopcf once to list its audio devices (it lists, fails on the impossible device, exits). */
 function listArdopDevices() {
   return new Promise((resolve) => {
@@ -8746,8 +8792,9 @@ function listArdopDevices() {
 async function spawnArdop() {
   killArdop();
   if (!ArdopProcess.ardopSupported(process.platform)) throw new Error('ARDOP (ardopcf) has no macOS build');
-  const labels = winlinkArdopLabels();
-  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('Pick the radio\'s sound devices first: Settings > Station > Winlink > Find the radio\'s sound devices');
+  let labels = winlinkArdopLabels();
+  if (!labels.captureLabel || !labels.playbackLabel) { await winlinkAutoAudio(); labels = winlinkArdopLabels(); }
+  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('POTACAT could not tell which sound devices are your radio\'s — choose them in the Winlink window');
   const listing = await listArdopDevices();
   if (!listing.ok) throw new Error(listing.error);
   const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
@@ -32439,6 +32486,18 @@ app.whenReady().then(() => {
   ipcMain.on('winlink-open-folder', () => {
     try { require('electron').shell.openPath(winlinkPaths().dir); } catch {}
   });
+  // The rig's FT8 sound device ids, so the mail window can resolve their names.
+  ipcMain.handle('winlink-audio-rig', () => {
+    const rig = winlinkActiveRig();
+    return rig ? { ok: true, inputId: rig.remoteAudioInput || '', outputId: rig.remoteAudioOutput || '', rigName: rig.name || '' } : { ok: false };
+  });
+  ipcMain.handle('winlink-audio-auto', (_e, o = {}) => winlinkAutoAudio(o));
+  ipcMain.handle('winlink-audio-save', (_e, o = {}) => {
+    if (!o.captureLabel || !o.playbackLabel) return { ok: false, error: 'Choose both' };
+    const ok = winlinkSaveRigAudio(o);
+    winlinkPush();
+    return { ok };
+  });
   ipcMain.handle('winlink-list-ardop-devices', async () => {
     if (!ArdopProcess.ardopSupported(process.platform)) return { ok: false, error: 'ARDOP (ardopcf) has no macOS build' };
     return listArdopDevices();
@@ -37489,7 +37548,7 @@ app.whenReady().then(() => {
     // keys keeps main's — otherwise the next rig edit would wipe them and the
     // checklist would nag about steps that already work.
     if (Array.isArray(newSettings.rigs) && Array.isArray(settings.rigs)) {
-      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen'];
+      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio'];
       newSettings.rigs = newSettings.rigs.map((r) => {
         const cur = r && settings.rigs.find(x => x && x.id === r.id);
         if (!cur) return r;

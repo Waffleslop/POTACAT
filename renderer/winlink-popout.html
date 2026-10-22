@@ -34,6 +34,11 @@
     .wl-mycall { font-family: monospace; font-weight: 700; color: var(--accent-green, #4ecca3); }
     #wl-gateway { min-width: 260px; max-width: 420px; }
     .wl-mode-note { color: #f0a500; font-size: 11px; }
+    .wl-sound { font-size: 11px; color: var(--text-dim); }
+    .wl-sound a { color: var(--accent-blue, #4fc3f7); cursor: pointer; text-decoration: underline; }
+    .wl-sound-card { display: none; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 12px; }
+    .wl-sound-card.show { display: flex; }
+    .wl-sound-card select { max-width: 280px; }
 
     /* Session strip */
     .wl-session { display: flex; gap: 12px; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--border-primary); font-size: 12px; color: var(--text-dim); flex-shrink: 0; min-height: 20px; }
@@ -122,6 +127,15 @@
     <button class="wl-btn primary" id="wl-connect">Send / Receive</button>
     <button class="wl-btn danger" id="wl-abort" disabled>Abort</button>
     <span class="wl-mode-note" id="wl-mode-note"></span>
+    <span class="wl-sound" id="wl-sound"></span>
+  </div>
+  <div class="wl-sound-card" id="wl-sound-card">
+    <b id="wl-sound-title">Which sound devices are your radio?</b>
+    <label>From the radio <select id="wl-sound-in"></select></label>
+    <label>To the radio <select id="wl-sound-out"></select></label>
+    <button class="wl-btn primary" id="wl-sound-ok">Use these</button>
+    <button class="wl-btn" id="wl-sound-cancel">Cancel</button>
+    <span class="wl-sound" id="wl-sound-hint"></span>
   </div>
 
   <div class="wl-session">

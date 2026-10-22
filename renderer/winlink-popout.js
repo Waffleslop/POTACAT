@@ -300,13 +300,71 @@
   });
   $('wl-abort').addEventListener('click', function () { window.api.abort(); });
 
+  // ── radio sound: automatic, asked only when POTACAT cannot tell ──────────
+  var soundTried = false;
+  function shortName(n) { return String(n || '').replace(/\s*\(.*$/, ''); }
+  function renderSound() {
+    var a = (state && state.audio) || {};
+    var el = $('wl-sound');
+    if (!a.needed) { el.textContent = ''; return; }
+    el.innerHTML = a.ready
+      ? 'Radio sound: ' + esc(shortName(a.capture)) + ' / ' + esc(shortName(a.playback)) + ' · <a id="wl-sound-change">Change</a>'
+      : 'Radio sound not set · <a id="wl-sound-change">Choose</a>';
+    var ch = $('wl-sound-change');
+    if (ch) ch.onclick = function () { openSoundCard(null); };
+  }
+  function fillSelect(sel, list, pick) {
+    sel.innerHTML = '<option value="">(choose)</option>' + list.map(function (d) {
+      return '<option value="' + esc(d.name) + '"' + (d.name === pick ? ' selected' : '') + '>' + esc(d.name) + '</option>';
+    }).join('');
+  }
+  function openSoundCard(prefill) {
+    var card = $('wl-sound-card');
+    $('wl-sound-hint').textContent = 'Listing the sound devices…';
+    card.classList.add('show');
+    window.api.audioList().then(function (r) {
+      if (!r || !r.ok) { $('wl-sound-hint').textContent = (r && r.error) || 'Could not list the sound devices'; return; }
+      var a = (state && state.audio) || {};
+      fillSelect($('wl-sound-in'), r.devices.capture, (prefill && prefill.capture) || a.capture);
+      fillSelect($('wl-sound-out'), r.devices.playback, (prefill && prefill.playback) || a.playback);
+      $('wl-sound-hint').textContent = 'The same devices your radio uses for FT8 — on a Flex, DAX RX and DAX TX.';
+    });
+  }
+  $('wl-sound-ok').addEventListener('click', function () {
+    var c = $('wl-sound-in').value, p = $('wl-sound-out').value;
+    if (!c || !p) { $('wl-sound-hint').textContent = 'Choose both.'; return; }
+    window.api.audioSave({ captureLabel: c, playbackLabel: p }).then(function () { $('wl-sound-card').classList.remove('show'); });
+  });
+  $('wl-sound-cancel').addEventListener('click', function () { $('wl-sound-card').classList.remove('show'); });
+
+  // Resolve the rig's FT8 device NAMES here (only a renderer can), then let
+  // main pick and save. Silent when it can tell; a card for what it can't.
+  function autoSound() {
+    var a = (state && state.audio) || {};
+    if (soundTried || !a.needed || a.ready) return;
+    soundTried = true;
+    window.api.audioRig().then(function (rig) {
+      var labels = Promise.resolve({});
+      if (rig && rig.ok && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        labels = navigator.mediaDevices.enumerateDevices().then(function (devs) {
+          var i = devs.find(function (d) { return d.kind === 'audioinput' && d.deviceId === rig.inputId; });
+          var o = devs.find(function (d) { return d.kind === 'audiooutput' && d.deviceId === rig.outputId; });
+          return { inputLabel: i ? i.label : '', outputLabel: o ? o.label : '' };
+        }).catch(function () { return {}; });
+      }
+      return labels.then(function (l) { return window.api.audioAuto(l); });
+    }).then(function (r) {
+      if (r && r.ok && !r.auto && r.proposal && !((state.audio || {}).ready)) openSoundCard(r.proposal);
+    });
+  }
+
   // ── wiring ───────────────────────────────────────────────────────────────
-  window.api.onState(function (s) { state = s; renderState(); });
+  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); });
   window.api.onSession(function (ss) { if (state) state.session = ss; renderSession(ss); });
   window.api.onMailbox(function (d) {
     if (!d || !lists.hasOwnProperty(d.box)) return;
     lists[d.box] = d.messages || [];
     if (d.box === box) renderList();
   });
-  window.api.getState().then(function (s) { state = s; renderState(); });
+  window.api.getState().then(function (s) { state = s; renderState(); renderSound(); autoSound(); });
 })();

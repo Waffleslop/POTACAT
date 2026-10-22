@@ -170,6 +170,21 @@ async function test(name, fn) {
     assert.strictEqual(A.matchArdopDevice(d.capture[22].name, d.capture).id, d.capture[22].id);
     assert.strictEqual(A.matchArdopDevice('DAX Audio TX (FlexRadio Systems DAX TX)', d.playback), null, 'not in this list → refused, never a guess');
   });
+  await test('the proposal: the rig\'s FT8 devices first, then a Flex\'s live DAXv2 pair, then one USB CODEC', () => {
+    // K3SBP's PC with the DAX app running: DAXv2 names AND the old ones.
+    const devices = {
+      capture: [{ id: '7', name: 'DAX RX 1 (FlexRadio DAX)' }, { id: '13', name: 'DAX RX 2 (FlexRadio DAX)' }, { id: '30', name: 'DAX Audio RX 1 (FlexRadio Syste' }, { id: '0', name: 'Mic In (Elgato Wave:3)' }],
+      playback: [{ id: '12', name: 'DAX TX (FlexRadio DAX)' }, { id: '3', name: 'DAX Audio TX (FlexRadio Systems' }, { id: '0', name: 'Speakers (Realtek(R) Audio)' }],
+    };
+    const flex = A.proposeArdopDevices({ devices, family: 'flex' });
+    assert.deepStrictEqual([flex.capture.id, flex.playback.id, flex.why], ['7', '12', 'flex-dax'], 'the live DAXv2 pair wins over the stale names');
+    const rig = A.proposeArdopDevices({ devices, family: 'flex', inputLabel: 'DAX RX 2 (FlexRadio DAX)', outputLabel: 'DAX TX (FlexRadio DAX)' });
+    assert.deepStrictEqual([rig.capture.id, rig.why], ['13', 'rig'], 'the rig\'s own FT8 devices beat the default DAX channel');
+    const codec = A.proposeArdopDevices({ devices: { capture: [{ id: '1', name: 'Microphone (USB Audio CODEC )' }, { id: '0', name: 'Mic In' }], playback: [{ id: '2', name: 'Speakers (USB Audio CODEC )' }] }, family: 'serial' });
+    assert.deepStrictEqual([codec.capture.id, codec.playback.id, codec.why], ['1', '2', 'codec']);
+    const unsure = A.proposeArdopDevices({ devices: { capture: [{ id: '1', name: 'USB Audio CODEC' }, { id: '2', name: 'USB Audio CODEC' }], playback: [] }, family: 'serial' });
+    assert.deepStrictEqual([unsure.capture, unsure.playback, unsure.why], [null, null, 'none'], 'two equal candidates → ask, never guess');
+  });
   await test('two equally good matches are refused, never guessed', () => {
     const devices = { capture: [{ id: '1', name: 'USB Audio CODEC' }, { id: '2', name: 'USB Audio CODEC' }], playback: [] };
     assert.strictEqual(A.matchArdopDevice('Microphone (USB Audio CODEC)', devices.capture), null);

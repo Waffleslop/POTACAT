@@ -63,6 +63,12 @@ test('Dire Wolf\'s config comes from the guarded builder and keys through the sh
   assert.ok(!/PTT (COM|RTS|DTR|GPIO|VOX)/i.test(sd));
 });
 
+test('radio sound just works: picked automatically at session start, kept through Settings saves', () => {
+  for (const fn of ['spawnArdop', 'spawnDirewolf']) assert.ok(/await winlinkAutoAudio\(\)/.test(fnBody(main, fn)), fn + ' tries the automatic pick before refusing');
+  assert.ok(/ArdopProcess\.proposeArdopDevices\(/.test(fnBody(main, 'winlinkAutoAudio')));
+  assert.ok(/const SETUP_KEYS = \[[^\]]*'winlinkAudio'/.test(main), 'a pick saved by main survives the main window\'s older rig list');
+});
+
 console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
