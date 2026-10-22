@@ -9028,6 +9028,11 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
 // part 1, the same lesson).
 let _winlinkFlexDaxPrior = null; // null = untouched; false = restore to mic at session end
 function winlinkFlexDaxOn() {
+  // On the socket-audio route the modem's audio goes out on POTACAT's own
+  // dax_tx stream and handleRemotePtt asserts the TX source per key-down
+  // (assertFlexTxDaxForTx) — nothing to switch here, and the DAX-panel
+  // advice below would be wrong.
+  if (winlinkSocketAudioRoute()) return;
   let fam = '';
   try { fam = RigFamily.rigFamily(winlinkActiveRig()); } catch {}
   if (fam !== 'flex') { if (fam && fam !== 'none') winlinkLog(`TX audio source: not a Flex (${fam}) — nothing to switch`); return; }
