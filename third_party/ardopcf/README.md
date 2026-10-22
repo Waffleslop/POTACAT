@@ -12,6 +12,12 @@ its loopback host port — never linked.
 - Built by `scripts/build-winlink-helpers.sh` (make; MSYS2 MINGW64 on
   Windows, statically linked), staged to `assets/ardopcf/`, packaged to
   `resources/bin/ardopcf[.exe]`.
+- **Patched in our build** (`scripts/build-winlink-helpers.sh`): the Windows
+  device-name tables are 64 entries instead of 16 and the device count is
+  capped at 64. Upstream copies every sound device's name into a 16-entry
+  table, so a PC with SmartSDR's DAX running (~40 devices) crashed with
+  0xC0000005 before opening audio. Upstream has stopped development, so the
+  patch lives here.
 - **POTACAT never gives it a PTT or CAT flag** (`-p/-c/-g/-k/-u`): it only
   reports PTT to its host, Pat keys through POTACAT's rigctld shim, and
   POTACAT keys the radio. `lib/ardop-process.js` refuses those flags.

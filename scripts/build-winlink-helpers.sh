@@ -78,6 +78,25 @@ if [[ " $want " == *" ardop "* ]]; then
     echo "ardopcf: no macOS build (no CoreAudio backend) — skipped"
   else
     checkout "$ARDOP_REPO" "$ARDOP_TAG" "$ARDOP_SHA" "$WORK/ardop"
+    # POTACAT patch (MIT allows it; recorded in third_party/ardopcf/README.md):
+    # ardopcf's Windows device tables hold 16 names, and it copies EVERY
+    # waveIn/waveOut name into them — a station with SmartSDR's DAX running
+    # has ~40 capture devices, so it wrote past the end and crashed with
+    # 0xC0000005 before opening any audio (K3SBP, 2026-10-22). Room for 64,
+    # and the comma-joined device string sized for its leading comma.
+    W="$WORK/ardop/src/windows/Waveout.c"
+    sed -i \
+      -e 's/char CaptureNames\[16\]\[MAXPNAMELEN + 2\]/char CaptureNames[64][MAXPNAMELEN + 2]/' \
+      -e 's/char PlaybackNames\[16\]\[MAXPNAMELEN + 2\]/char PlaybackNames[64][MAXPNAMELEN + 2]/' \
+      -e 's/malloc((MAXPNAMELEN + 2) \* CaptureCount)/malloc((MAXPNAMELEN + 4) * (CaptureCount + 1))/' \
+      -e 's/malloc((MAXPNAMELEN + 2) \* PlaybackCount)/malloc((MAXPNAMELEN + 4) * (PlaybackCount + 1))/' \
+      "$W"
+    grep -q 'CaptureNames\[64\]' "$W" && grep -q 'PlaybackNames\[64\]' "$W" && grep -q '(CaptureCount + 1)' "$W" \
+      || { echo "::error::ardopcf device-table patch did not apply"; exit 1; }
+    # The loops have no bound of their own: cap the device count at the table size.
+    sed -i -e 's/CaptureCount = waveInGetNumDevs();/CaptureCount = waveInGetNumDevs(); if (CaptureCount > 64) CaptureCount = 64;/' \
+           -e 's/PlaybackCount = waveOutGetNumDevs();/PlaybackCount = waveOutGetNumDevs(); if (PlaybackCount > 64) PlaybackCount = 64;/' "$W"
+    grep -q 'if (CaptureCount > 64)' "$W" || { echo "::error::ardopcf device-count cap did not apply"; exit 1; }
     mkdir -p "$ROOT/assets/ardopcf"
     # C17: GCC 15 (current MSYS2) defaults to C23, where ardopcf's old-style
     # "f()" declarations mean "no arguments" and ws_server.c fails to build;

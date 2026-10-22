@@ -8781,7 +8781,8 @@ async function spawnArdop() {
     proc.on('error', (e) => { if (ardopProc === proc) ardopProc = null; if (!settled) { settled = true; reject(e); } });
     proc.on('exit', (code) => {
       if (ardopProc === proc) ardopProc = null;
-      if (!settled) { settled = true; reject(new Error(`ardopcf exited (code ${code})`)); return; }
+      // 3221225477 = 0xC0000005, an access violation inside ardopcf (e.g. upstream's 16-device table).
+      if (!settled) { settled = true; reject(new Error(code === 3221225477 || code === -1073741819 ? 'ardopcf crashed while opening the sound devices — update POTACAT (the bundled build is patched for PCs with many sound devices)' : `ardopcf exited (code ${code})`)); return; }
       if (winlinkSessionActive() && winlinkState.session.mode === 'ardop') winlinkAbortSession('ardopcf stopped');
     });
     // Ready = its host port accepts a connection.
