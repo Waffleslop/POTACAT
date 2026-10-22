@@ -8951,10 +8951,11 @@ let _winlinkFlexDaxPrior = null; // null = untouched; false = restore to mic at 
 function winlinkFlexDaxOn() {
   let fam = '';
   try { fam = RigFamily.rigFamily(winlinkActiveRig()); } catch {}
-  if (fam !== 'flex' || !smartSdr || !smartSdr.connected) return;
+  if (fam !== 'flex') { if (fam && fam !== 'none') winlinkLog(`TX audio source: not a Flex (${fam}) — nothing to switch`); return; }
+  if (!smartSdr || !smartSdr.connected) { winlinkLog('TX audio source: SmartSDR API not connected — cannot switch the Flex to DAX'); return; }
   const prior = smartSdr.txDaxOn; // true / false / null
-  if (prior === true) return;
-  if (!_sendFlexTxDax(true)) return;
+  if (prior === true) { winlinkLog('Flex TX audio source is already DAX (radio reports dax=1) — the modem’s audio must then be reaching the DAX TX device: check the DAX control panel’s TX row is enabled and its level moves while sending'); return; }
+  if (!_sendFlexTxDax(true)) { winlinkLog('TX audio source: no SmartSDR connection could set dax=1'); return; }
   _winlinkFlexDaxPrior = prior === false ? false : null;
   winlinkLog(`Flex TX audio → DAX for this session${prior === false ? ' (was mic — put back after)' : ''}`);
 }
