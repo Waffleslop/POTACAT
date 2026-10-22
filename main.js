@@ -34715,6 +34715,9 @@ app.whenReady().then(() => {
     try {
       issueTailscaleCert(certDir, ts.hostname);
     } catch (err) {
+      // Without a Tailscale cert the phone's tailnet leg meets the
+      // self-signed cert and iOS refuses it, so this must reach the log.
+      sendCatLog(`[Tailscale] Cert for ${ts.hostname} not issued — phones cannot connect over Tailscale until it is: ${err.message}`);
       return { error: err.message };
     }
     progressCb('Reloading ECHOCAT with new cert…');
@@ -35023,7 +35026,8 @@ app.whenReady().then(() => {
     // capable link, this gets them an LE cert before the recipient
     // tries to pin a self-signed fingerprint.
     try {
-      await ensureTailscaleCertReady((msg) => sendCatLog('[Pair-Link] ' + msg));
+      const certResult = await ensureTailscaleCertReady((msg) => sendCatLog('[Pair-Link] ' + msg));
+      if (certResult && certResult.warn) sendCatLog('[Pair-Link] ' + certResult.warn);
     } catch (err) {
       sendCatLog('[Pair-Link] Cert setup threw: ' + (err.message || err));
     }

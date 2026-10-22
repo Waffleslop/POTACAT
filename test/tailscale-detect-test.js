@@ -57,5 +57,18 @@ test('main publishes the interface address as the tailnet leg when the CLI gives
   assert.ok(/if \(!s\.installed && s\.ipFromInterfaces\) \{/.test(app), 'the card tells the truth');
 });
 
+test('a refused tailscale cert names the operator command (KX4MG, Linux)', () => {
+  const m = RS.describeTailscaleCertError("Access denied: cert access denied\n\nUse 'sudo tailscale cert' or 'tailscale up --operator=$USER' to not require root.");
+  assert.ok(/sudo tailscale set --operator=\$USER/.test(m), m);
+  assert.ok(/not enabled in your Tailscale admin console/.test(RS.describeTailscaleCertError('your Tailscale account does not support getting TLS certs; HTTPS is not enabled')));
+  assert.strictEqual(RS.describeTailscaleCertError('', 'boom'), 'tailscale cert failed: boom');
+});
+
+test('a failed cert never disappears silently (source guard)', () => {
+  const main = R('main.js');
+  assert.ok(/\[Tailscale\] Cert for \$\{ts\.hostname\} not issued/.test(main), 'ensureTailscaleCertReady logs the failure');
+  assert.ok(/const certResult = await ensureTailscaleCertReady\(\(msg\) => sendCatLog\('\[Pair-Link\] '/.test(main), 'the share-link path reads the result');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
