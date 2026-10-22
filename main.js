@@ -396,6 +396,7 @@ const { WinlinkClient } = require('./lib/winlink-client');
 const WinlinkStateLib = require('./lib/winlink-state');
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
+const DirewolfProcess = require('./lib/direwolf-process');
 const WinlinkModes = require('./lib/winlink-modes');
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const QsoLog = require('./lib/qso-log');
@@ -707,6 +708,8 @@ const GLOBAL_KEYS = new Set([
   'winlinkArdopPath',  // Winlink: explicit ardopcf binary on THIS machine
   'winlinkArdopPort',  // Winlink: ardopcf host port on this machine (default 8515)
   'winlinkVaraPort',   // Winlink: the operator's own VARA HF TNC port on this machine (default 8300)
+  'winlinkDirewolfPath', // Winlink: explicit Dire Wolf binary on THIS machine
+  'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
@@ -1628,6 +1631,7 @@ let winlinkShim = null;         // loopback rigctld shim Pat keys and tunes thro
 let _winlinkShimPort = 0;
 let _winlinkShimArmed = false;  // Pat may tune/key only while a radio session runs
 let ardopProc = null;           // ardopcf for an ARDOP session
+let direwolfProc = null;        // Dire Wolf for a packet (AX.25) session
 let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
 let _winlinkTxFailsafeTimer = null;
 let _winlinkCapTimer = null;
@@ -8283,6 +8287,17 @@ function findPat() {
   }), WinlinkPat.patBinaryName(process.platform));
 }
 
+function findDirewolf() {
+  return _findBinary(DirewolfProcess.direwolfPathCandidates({
+    settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
+  }), DirewolfProcess.direwolfBinaryName(process.platform));
+}
+
+function _winlinkAgwPort() {
+  const n = parseInt(settings.winlinkAgwPort, 10);
+  return n > 0 && n < 65536 ? n : DirewolfProcess.DIREWOLF_DEFAULTS.agwPort;
+}
+
 function findArdop() {
   return _findBinary(ArdopProcess.ardopPathCandidates({
     settings, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir: __dirname, platform: process.platform,
@@ -8320,6 +8335,7 @@ function winlinkModes() {
     mercuryPort: mercuryProcess.mercuryPorts(settings).control,
     varaPort: _winlinkVaraPort(),
     ardopFound: ArdopProcess.ardopSupported(process.platform) ? findArdop().found : false,
+    direwolfFound: DirewolfProcess.direwolfSupported(process.platform) ? findDirewolf().found : false,
     showVara: settings.winlinkShowVara === true, // hidden: VARA is not offered in the first release
   });
 }
@@ -8401,6 +8417,7 @@ function writePatConfig({ varaAddr } = {}) {
       ardopBw: settings.winlinkArdopBw,
       varaAddr: addr,
       varaBw: settings.winlinkVaraBw,
+      agwPort: _winlinkAgwPort(),
     },
   });
   // Written owner-only where the OS honours it: it holds the Winlink password.
@@ -8570,6 +8587,7 @@ function disconnectWinlink({ quit } = {}) {
   if (winlinkSessionActive()) winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off');
   clearTimeout(_winlinkAutoCheckTimer); _winlinkAutoCheckTimer = null;
   killArdop();
+  killDirewolf();
   killPat();
   stopWinlinkShim();
   winlinkState.setPat({ ready: false, error: '' });
@@ -8633,6 +8651,64 @@ function armWinlinkTxFailsafe() {
 }
 
 // ── ardopcf ─────────────────────────────────────────────────────────────────
+
+// ── Dire Wolf (packet) ─────────────────────────────────────────────────────
+
+function killDirewolf() {
+  if (direwolfProc) { try { direwolfProc.kill(); } catch {} direwolfProc = null; }
+}
+
+/** Launch Dire Wolf for a packet session: devices resolved fresh, PTT through the shim. */
+async function spawnDirewolf() {
+  killDirewolf();
+  if (!DirewolfProcess.direwolfSupported(process.platform)) throw new Error('Packet on macOS is not ready yet');
+  if (!_winlinkShimPort) throw new Error('The radio control shim is not running — restart Winlink');
+  const labels = winlinkArdopLabels();
+  const listing = await listArdopDevices();
+  if (!listing.ok) throw new Error(listing.error);
+  const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
+  if (!r.ok) throw new Error(`Packet audio device missing: ${r.missing.join(', ')} — pick them in Settings > Station > Winlink`);
+  const p = winlinkPaths();
+  fs.mkdirSync(p.dir, { recursive: true });
+  const confPath = path.join(p.dir, 'direwolf.conf');
+  fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfConfig({
+    mycall: settings.myCallsign, capture: r.capture, playback: r.playback,
+    modem: settings.winlinkPacketModem, agwPort: _winlinkAgwPort(), shimPort: _winlinkShimPort,
+  }));
+  const bin = findDirewolf();
+  const args = DirewolfProcess.buildDirewolfArgs({ configPath: confPath });
+  winlinkLog(`direwolf: ${r.captureName} → in, ${r.playbackName} → out, ${DirewolfProcess.MODEMS.includes(Number(settings.winlinkPacketModem)) ? settings.winlinkPacketModem : 1200} baud`);
+  winlinkLog('direwolf spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
+  return await new Promise((resolve, reject) => {
+    let proc;
+    try { proc = spawn(bin.path, args, { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+    catch (e) { return reject(e); }
+    direwolfProc = proc;
+    let settled = false;
+    let lines = 0;
+    const fail = (msg) => { if (!settled) { settled = true; try { proc.kill(); } catch {} reject(new Error(msg)); } };
+    const onLine = (chunk) => {
+      for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) {
+        const kind = DirewolfProcess.classifyDirewolfLine(line);
+        if (kind === 'ready') { winlinkLog(`direwolf: ${line}`); if (!settled) { settled = true; resolve(proc); } continue; }
+        if (kind === 'no-hamlib') { winlinkLog(`direwolf: ${line}`); fail('This Dire Wolf was built without Hamlib, so POTACAT cannot key the radio through it — use the bundled one'); continue; }
+        if (kind === 'device-error') { winlinkLog(`direwolf: ${line}`); fail(line); continue; }
+        if (kind === 'ptt-error') { winlinkLog(`direwolf: ${line}`); fail('Dire Wolf could not reach POTACAT\'s radio control: ' + line); continue; }
+        if (kind === 'port-busy') { winlinkLog(`direwolf: ${line}`); fail(`Dire Wolf's AGW port ${_winlinkAgwPort()} is in use — is another packet program running?`); continue; }
+        if (lines++ < 40) winlinkLog(`direwolf: ${line}`);
+      }
+    };
+    proc.stdout.on('data', onLine);
+    proc.stderr.on('data', onLine);
+    proc.on('error', (e) => { if (direwolfProc === proc) direwolfProc = null; if (!settled) { settled = true; reject(e); } });
+    proc.on('exit', (code) => {
+      if (direwolfProc === proc) direwolfProc = null;
+      if (!settled) { settled = true; reject(new Error(`Dire Wolf exited (code ${code})`)); return; }
+      if (winlinkSessionActive() && winlinkState.session.mode === 'packet') winlinkAbortSession('Dire Wolf stopped');
+    });
+    setTimeout(() => fail(`Dire Wolf never opened its AGW port ${_winlinkAgwPort()}`), 10000);
+  });
+}
 
 function killArdop() {
   if (ardopProc) { try { ardopProc.kill(); } catch {} ardopProc = null; }
@@ -8777,6 +8853,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   (async () => {
     try {
       if (mode === 'ardop') await spawnArdop();
+      if (mode === 'packet') await spawnDirewolf();
       if (mode === 'mercury') winlinkHandMercuryToPat();
       if (mode === 'mercury' || mode === 'vara') {
         const want = mode === 'mercury' ? `127.0.0.1:${mercuryProcess.mercuryPorts(settings).control}` : `127.0.0.1:${_winlinkVaraPort()}`;
@@ -8789,7 +8866,8 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (radio) {
         // POTACAT's own QSY first, in data mode, so the rig preset for digital
         // fires and the operator sees the move before Pat keys anything.
-        tuneRadio(Number(dialKhz), 'DIGU', undefined, { origin: 'Winlink session' });
+        // Packet is FM (an Icom keys it in FM-D through forceDataMode); HF modems are USB data.
+        tuneRadio(Number(dialKhz), mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
         _winlinkShimArmed = true;
         _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`), capMin * 60000);
         _winlinkWatchdog = setInterval(() => {
@@ -8846,6 +8924,7 @@ function winlinkEndSession(state, text, received = 0) {
   const radio = WinlinkModes.isRadioMode(s.mode);
   if (radio) {
     if (s.mode === 'ardop') killArdop();
+    if (s.mode === 'packet') killDirewolf();
     if (s.mode === 'mercury') winlinkTakeMercuryBack();
     // Pat QSXes the dial back itself; POTACAT puts the MODE back too.
     if (s.returnTo && s.returnTo.mode && s.returnTo.freqHz) {
@@ -8952,7 +9031,7 @@ async function winlinkGateways(mode, band) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   // Winlink lists Mercury-capable gateways under VARA (Mercury speaks VARA's
   // TNC protocol); the operator's own tagged list rides on top.
-  const patMode = mode === 'ardop' ? 'ardop' : 'varahf';
+  const patMode = mode === 'ardop' ? 'ardop' : mode === 'packet' ? 'packet' : 'varahf';
   try {
     let list = await patClient.rmslist({ mode: patMode, band });
     if (mode === 'mercury') {
@@ -37461,7 +37540,7 @@ app.whenReady().then(() => {
     // Winlink (Pat) relaunches only for keys baked into its config / launch.
     // The password is in pat-config.json, so a new one needs a relaunch too.
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort',
-      'winlinkArdopBw', 'winlinkVaraBw', 'myCallsign', 'grid']
+      'winlinkArdopBw', 'winlinkVaraBw', 'winlinkAgwPort', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
     const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
       .some((k) => has(k) && newSettings[k] !== settings[k]);

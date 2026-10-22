@@ -57,6 +57,12 @@ test('radio shape: every transport keys through the POTACAT shim', () => {
   assert.strictEqual(c.varahf.bandwidth, 2750);
   assert.deepStrictEqual(c.listen, []);
 });
+test('packet: Pat uses AX.25 over Dire Wolf\'s AGWPE port, rig "potacat" for QSY only', () => {
+  const c = W.buildPatConfig({ mycall: 'K3SBP', httpPort: 1, shimPort: 4541, transport: { agwPort: 8011 } });
+  assert.deepStrictEqual(c.ax25, { engine: 'agwpe', rig: 'potacat', beacon: { every: 0, message: '', destination: '' } });
+  assert.deepStrictEqual(c.agwpe, { addr: '127.0.0.1:8011', radio_port: 0 });
+  assert.ok(!W.buildPatConfig({ mycall: 'K3SBP', httpPort: 1 }).ax25, 'no packet in the internet-only shape');
+});
 test('a bandwidth outside the 2.8 kHz-legal set falls back', () => {
   const c = W.buildPatConfig({ mycall: 'K3SBP', httpPort: 1, shimPort: 2, transport: { ardopBw: 9999, varaBw: 4000 } });
   assert.strictEqual(c.ardop.arq_bandwidth.Max, 500);
@@ -75,6 +81,10 @@ test('ARDOP carries the DIAL in kHz', () => {
 test('Mercury and VARA both go out on Pat\'s varahf transport', () => {
   assert.strictEqual(W.connectUrl({ mode: 'mercury', gateway: 'K7EK-10', dialKhz: 14105, bw: 2300 }), 'varahf:///K7EK-10?bw=2300&freq=14105');
   assert.strictEqual(W.connectUrl({ mode: 'vara', gateway: 'K7EK-10' }), 'varahf:///K7EK-10');
+});
+test('packet goes out on Pat\'s ax25 transport, with the gateway list\'s own URL', () => {
+  assert.strictEqual(W.connectUrl({ mode: 'packet', gateway: 'K3FZT-10', dialKhz: 145670 }), 'ax25:///K3FZT-10?freq=145670');
+  assert.strictEqual(W.sessionUrl({ mode: 'packet', gateway: 'K3FZT-10', dialKhz: 145670, rowUrl: 'ax25:///K3FZT-10?freq=145670' }), 'ax25:///K3FZT-10?freq=145670');
 });
 test('a gateway that is not a callsign is refused', () => {
   assert.strictEqual(W.connectUrl({ mode: 'ardop', gateway: 'x?freq=1' }), null);

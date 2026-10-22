@@ -3008,9 +3008,9 @@
         <span class="help-text" style="display:block;">Internet only, never the radio. A radio session always starts from your Send / Receive.</span>
 
         <div style="margin-top:10px;font-weight:600;">Over the radio</div>
-        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP is open and built into POTACAT (Windows and Linux). Mercury uses your Mercury setup above. The modem needs a sound device for the radio: DAX on a Flex (with DAX running), or the radio's USB sound card.</span>
+        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT (Windows and Linux). Mercury uses your Mercury setup above. The modem needs a sound device for the radio: DAX on a Flex (with DAX running), or the radio's USB sound card.</span>
         <div style="margin-top:4px;">
-          <button type="button" id="winlink-ardop-discover">Find ARDOP sound devices</button>
+          <button type="button" id="winlink-ardop-discover">Find the radio's sound devices</button>
           <span class="help-text" id="winlink-ardop-status" style="margin-left:6px;"></span>
         </div>
         <div id="winlink-ardop-devices" class="hidden" style="margin-top:5px;display:flex;gap:12px;flex-wrap:wrap;">
@@ -3020,6 +3020,9 @@
         <span class="help-text" style="display:block;">Saved for the active radio. POTACAT pre-picks the devices your FT8 audio uses.</span>
         <label style="margin-top:6px;">ARDOP bandwidth:
           <select id="set-winlink-ardop-bw" style="width:80px;"><option value="500">500</option><option value="2000">2000</option></select>
+        </label>
+        <label style="margin-left:8px;">Packet speed:
+          <select id="set-winlink-packet-modem" style="width:80px;"><option value="1200">1200</option><option value="9600">9600</option></select>
         </label>
         <label style="margin-left:8px;">ARDOP drive level:
           <input type="number" id="set-winlink-ardop-drive" min="1" max="100" value="90" style="width:55px;"> %

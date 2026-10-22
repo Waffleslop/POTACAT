@@ -31,7 +31,20 @@ Facts settled from Pat's source while building (they replace the spike questions
   lists fresh and resolves the operator's chosen name before every launch.
 - Pat's tag commits `web/dist`, so `CGO_ENABLED=0 go build` (Go >= 1.24) is the whole build.
 
-Still owed: a CI run of the helper builds; Phase 0's live checks with a real account
+Added the same day (Casey: "ARDOP then AX.25"; VARA not offered in the first release):
+- **Packet (AX.25)** — 1,261 Winlink packet gateways (14 within 80 km of FN20, K3FZT-10 at 5 km).
+  Dire Wolf 1.8.1 (GPL-2.0, separate exe) launched per session, built WITH Hamlib; its only PTT
+  is `PTT RIG 2 127.0.0.1:<shim>`, so it keys through POTACAT. The shim speaks Hamlib's NET-rig
+  handshake (`\dump_state` replayed from Hamlib 4.7.0's Dummy rig; proven by
+  `test/rigctld-shim-hamlib-test.js` running the bundled rigctld as a client). Sound devices come
+  from ardopcf's listing (same waveIn indices on Windows, same ALSA names on Linux). Session QSY
+  in FM; Pat `ax25` engine `agwpe`. Windows/Linux; macOS later. Settings: packet speed 1200/9600.
+- **VARA hidden** (`settings.winlinkShowVara` brings it back).
+- ARDOP matcher fixed for ardopcf's 31-char names (real 26-device listing is a fixture); the
+  connect URL is the gateway list's own (keeps `bw=2000MAX`).
+
+Still owed: a CI run of the helper builds (Dire Wolf's Windows build against the official
+Hamlib zip is the least certain step); Phase 0's live checks with a real account
 (telnet session, wrong password, registration); a dummy-load bench of the shim with real
 Pat; an on-air ARDOP session; Mercury P2P between two scratch instances; reading
 winlink.org's terms in a browser before release.

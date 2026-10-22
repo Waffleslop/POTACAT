@@ -1355,6 +1355,7 @@ const setWinlinkArdopOut = document.getElementById('set-winlink-ardop-out');
 const setWinlinkArdopBw = document.getElementById('set-winlink-ardop-bw');
 const setWinlinkArdopDrive = document.getElementById('set-winlink-ardop-drive');
 const setWinlinkVaraBw = document.getElementById('set-winlink-vara-bw');
+const setWinlinkPacketModem = document.getElementById('set-winlink-packet-modem');
 const setWinlinkVaraPort = document.getElementById('set-winlink-vara-port');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
@@ -16446,6 +16447,7 @@ async function openSettingsDialog(tab) {
     setWinlinkAutoCheckMin.value = s.winlinkTelnetAutoCheckMin || 30;
     setWinlinkArdopBw.value = String(s.winlinkArdopBw || 500);
     setWinlinkVaraBw.value = String(s.winlinkVaraBw || 2300);
+    setWinlinkPacketModem.value = String(s.winlinkPacketModem || 1200);
     setWinlinkVaraPort.value = s.winlinkVaraPort || 8300;
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     setWinlinkPatPath.value = s.winlinkPatPath || '';
@@ -17324,6 +17326,7 @@ settingsSave.addEventListener('click', async () => {
       winlinkTelnetAutoCheckMin: Math.max(10, Math.min(240, parseInt(setWinlinkAutoCheckMin.value, 10) || 30)),
       winlinkArdopBw: parseInt(setWinlinkArdopBw.value, 10) || 500,
       winlinkVaraBw: parseInt(setWinlinkVaraBw.value, 10) || 2300,
+      winlinkPacketModem: parseInt(setWinlinkPacketModem.value, 10) === 9600 ? 9600 : 1200,
       winlinkVaraPort: parseInt(setWinlinkVaraPort.value, 10) || 8300,
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPatPath: setWinlinkPatPath.value.trim(),

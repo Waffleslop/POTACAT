@@ -1,0 +1,3 @@
+wb2osz/direwolf 1.8.1
+commit a231971a652bfb574a4bae9a5d875fbce53d2267
+https://github.com/wb2osz/direwolf/tree/1.8.1

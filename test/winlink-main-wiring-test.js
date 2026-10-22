@@ -57,6 +57,12 @@ test('Pat never gets --listen / --send-only; ardopcf never gets a PTT or CAT fla
   assert.ok(/ArdopProcess\.buildArdopArgs\(/.test(spawnArdop), 'args come from the guarded builder');
 });
 
+test('Dire Wolf\'s config comes from the guarded builder and keys through the shim port', () => {
+  const sd = fnBody(main, 'spawnDirewolf');
+  assert.ok(/DirewolfProcess\.buildDirewolfConfig\(/.test(sd) && /shimPort: _winlinkShimPort/.test(sd));
+  assert.ok(!/PTT (COM|RTS|DTR|GPIO|VOX)/i.test(sd));
+});
+
 console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
@@ -113,6 +119,9 @@ test('Pat and ardopcf are packaged, attributed and pinned', () => {
   const ver = (f) => read(f).split('\n')[1].replace('commit ', '').trim();
   assert.ok(script.includes(`PAT_SHA=${ver('third_party/pat/VERSION.txt')}`), 'Pat pin matches VERSION.txt');
   assert.ok(script.includes(`ARDOP_SHA=${ver('third_party/ardopcf/VERSION.txt')}`), 'ardopcf pin matches VERSION.txt');
+  assert.ok(script.includes(`DIREWOLF_SHA=${ver('third_party/direwolf/VERSION.txt')}`), 'Dire Wolf pin matches VERSION.txt');
+  assert.ok(from.includes('assets/direwolf') && /Dire Wolf \(AX\.25 packet software TNC\)/.test(notice));
+  assert.ok(/ldd "\$OUT\/direwolf\$EXE" \| grep -qi 'libhamlib'/.test(script), 'the build refuses a Dire Wolf without Hamlib');
   assert.ok(read('.github/workflows/release.yml').split('build-winlink-helpers.sh').length > 5, 'every release job builds them');
 });
 

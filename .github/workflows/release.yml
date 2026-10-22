@@ -53,7 +53,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-fortran mingw-w64-x86_64-fftw make git
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-fortran mingw-w64-x86_64-fftw mingw-w64-x86_64-cmake make git unzip
       - name: Build wsprd (WSPR decoder — GPLv3 separate exe; packaged users had none, #wsprd)
         shell: msys2 {0}
         run: |
@@ -77,14 +77,14 @@ jobs:
         # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
         continue-on-error: true
         run: bash scripts/build-winlink-helpers.sh pat
-      - name: Build ardopcf (ARDOP modem — MIT, separate exe)
+      - name: Build ardopcf + Dire Wolf (ARDOP modem MIT, packet TNC GPL-2.0 — separate exes)
         shell: msys2 {0}
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
         # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
         # until the first green run on every runner: without them POTACAT says
         # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
         continue-on-error: true
-        run: bash scripts/build-winlink-helpers.sh ardop
+        run: bash scripts/build-winlink-helpers.sh ardop direwolf
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=win
       - name: Build Windows installers
@@ -440,15 +440,15 @@ jobs:
         with:
           go-version: '1.24'
           cache: false
-      - name: Build Pat + ardopcf (Winlink client + ARDOP modem — MIT, separate exes)
+      - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
         # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
         # until the first green run on every runner: without them POTACAT says
         # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
         continue-on-error: true
         run: |
-          sudo apt-get install -y libasound2-dev
-          bash scripts/build-winlink-helpers.sh pat ardop
+          sudo apt-get install -y libasound2-dev libhamlib-dev cmake patchelf
+          bash scripts/build-winlink-helpers.sh pat ardop direwolf
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=x64
       - name: Build Linux packages
@@ -585,15 +585,15 @@ jobs:
         with:
           go-version: '1.24'
           cache: false
-      - name: Build Pat + ardopcf (Winlink client + ARDOP modem — MIT, separate exes)
+      - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
         # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
         # until the first green run on every runner: without them POTACAT says
         # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
         continue-on-error: true
         run: |
-          sudo apt-get install -y libasound2-dev
-          bash scripts/build-winlink-helpers.sh pat ardop
+          sudo apt-get install -y libasound2-dev libhamlib-dev cmake patchelf
+          bash scripts/build-winlink-helpers.sh pat ardop direwolf
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=arm64
       - name: Build Linux packages (arm64)

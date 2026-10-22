@@ -58,6 +58,12 @@ or in the LICENSES/ directory of the distribution where applicable.
     License: MIT
     Source: https://github.com/pflarue/ardop (third_party/ardopcf/: pinned tag + LICENSE)
 
+  Dire Wolf (AX.25 packet software TNC) — bundled as a SEPARATE executable
+    (Windows/Linux), reached over its loopback AGWPE port; NOT linked into POTACAT.
+    Copyright (c) John Langner (WB2OSZ)
+    License: GNU General Public License v2.0 (GPLv2)
+    Source: https://github.com/wb2osz/direwolf (third_party/direwolf/: pinned tag + LICENSE)
+
   kissfft
     Copyright (c) 2003-2010 Mark Borgerding and contributors
     License: BSD-3-Clause

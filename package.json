@@ -65,6 +65,8 @@
       "third_party/pat/VERSION.txt",
       "third_party/ardopcf/LICENSE",
       "third_party/ardopcf/VERSION.txt",
+      "third_party/direwolf/LICENSE",
+      "third_party/direwolf/VERSION.txt",
       "assets/app-store-badge.svg",
       "assets/google-play-badge.png",
       "data/**/*",
@@ -199,6 +201,16 @@
         "filter": [
           "ardopcf",
           "ardopcf.exe"
+        ]
+      },
+      {
+        "from": "assets/direwolf",
+        "to": "direwolf",
+        "filter": [
+          "direwolf",
+          "direwolf.exe",
+          "*.dll",
+          "*.so*"
         ]
       },
       {

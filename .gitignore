@@ -75,3 +75,7 @@ assets/pat/pat
 assets/pat/pat.exe
 assets/ardopcf/ardopcf
 assets/ardopcf/ardopcf.exe
+assets/direwolf/direwolf
+assets/direwolf/direwolf.exe
+assets/direwolf/*.dll
+assets/direwolf/*.so*

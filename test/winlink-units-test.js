@@ -13,6 +13,7 @@ const { WinlinkState } = require('../lib/winlink-state');
 const R = require('../lib/rigctld-server');
 const A = require('../lib/ardop-process');
 const M = require('../lib/winlink-modes');
+const D = require('../lib/direwolf-process');
 const { WinlinkClient } = require('../lib/winlink-client');
 
 let pass = 0, fail = 0;
@@ -179,19 +180,38 @@ async function test(name, fn) {
     assert.strictEqual(A.ardopSupported('darwin'), false);
   });
 
+  console.log('direwolf');
+  await test('Dire Wolf keys ONLY through the POTACAT shim; nothing transmits on its own', () => {
+    const conf = D.buildDirewolfConfig({ mycall: 'k3sbp', capture: '22', playback: '3', modem: 9600, agwPort: 8010, shimPort: 4541 });
+    const lines = conf.split('\n');
+    assert.ok(lines.includes('PTT RIG 2 127.0.0.1:4541'));
+    assert.strictEqual(lines.filter((l) => /^PTT\b/.test(l)).length, 1, 'one PTT line, the shim');
+    assert.ok(lines.includes('ADEVICE 22 3') && lines.includes('MYCALL K3SBP') && lines.includes('MODEM 9600') && lines.includes('AGWPORT 8010') && lines.includes('KISSPORT 0'));
+    assert.ok(!/^(PBEACON|BEACON|DIGIPEAT|IGSERVER|CBEACON|OBEACON|TBEACON)/m.test(conf), 'no beacons, digipeating or IGate');
+    assert.throws(() => D.buildDirewolfConfig({ mycall: 'K3SBP', capture: 0, playback: 0 }), /shim/);
+    assert.ok(D.buildDirewolfConfig({ mycall: 'K3SBP', capture: 'plughw:1,0', playback: 'plughw:1,0', shimPort: 1, modem: 4800 }).includes('MODEM 1200'), 'unknown speed falls back');
+  });
+  await test('Dire Wolf output that needs action is named — a build without Hamlib above all', () => {
+    assert.strictEqual(D.classifyDirewolfLine('Config file line 7: PTT with RIG is only available when hamlib support is enabled.'), 'no-hamlib');
+    assert.strictEqual(D.classifyDirewolfLine('Ready to accept AGW client application 0 on port 8010 ...'), 'ready');
+    assert.strictEqual(D.classifyDirewolfLine('"XYZ" doesn\'t match any of the input devices.'), 'device-error');
+    assert.strictEqual(D.direwolfSupported('darwin'), false);
+  });
+
   console.log('winlink-modes');
   await test('telnet everywhere; radio modes need CAT, a sound device, and the right OS', () => {
-    const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8301, ardopFound: true, showVara: true };
+    const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8301, ardopFound: true, direwolfFound: true, showVara: true };
     const ok = M.winlinkModesFor(base);
-    assert.deepStrictEqual(ok.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['mercury', true], ['vara', true]]);
+    assert.deepStrictEqual(ok.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['mercury', true], ['vara', true]]);
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr' });
     assert.ok(flex.filter((m) => m.id !== 'telnet').every((m) => !m.available && /Flex Direct/.test(m.reason)));
     const icom = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network' });
     assert.ok(/Icom Network/.test(icom[1].reason));
     const mac = M.winlinkModesFor({ ...base, platform: 'darwin' });
     assert.ok(!mac[1].available && /macOS/.test(mac[1].reason));
-    assert.ok(!mac[3].available && /Windows/.test(mac[3].reason));
-    assert.ok(mac[2].available, 'Mercury runs on macOS');
+    assert.ok(!mac[2].available && /macOS/.test(mac[2].reason), 'packet not on macOS yet');
+    assert.ok(!mac[4].available && /Windows/.test(mac[4].reason));
+    assert.ok(mac[3].available, 'Mercury runs on macOS');
     const noCat = M.winlinkModesFor({ ...base, rigFamily: 'none' });
     assert.ok(noCat.slice(1).every((m) => !m.available));
     const remote = M.winlinkModesFor({ ...base, remote: true });
@@ -199,13 +219,13 @@ async function test(name, fn) {
   });
   await test('VARA on Mercury\'s port is refused with the reason; Mercury off is named', () => {
     const clash = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8300, ardopFound: true, showVara: true });
-    assert.ok(!clash[3].available && /same port/.test(clash[3].reason));
+    assert.ok(!clash[4].available && /same port/.test(clash[4].reason));
     const off = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: false, ardopFound: true });
-    assert.ok(!off[2].available && /Mercury/.test(off[2].reason));
+    assert.ok(!off[3].available && /Mercury/.test(off[3].reason));
   });
   await test('VARA is not offered unless the hidden switch is on', () => {
     const m = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', ardopFound: true });
-    assert.deepStrictEqual(m.map((x) => x.id), ['telnet', 'ardop', 'mercury']);
+    assert.deepStrictEqual(m.map((x) => x.id), ['telnet', 'ardop', 'packet', 'mercury']);
   });
   await test('pickWinlinkMode falls back to telnet', () => {
     const modes = [{ id: 'telnet', available: true }, { id: 'ardop', available: false }];
