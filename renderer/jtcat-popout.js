@@ -881,17 +881,11 @@ function _applyPopoutTheme(payload) {
   function addToMyActivity(d) {
     var mEmpty = myActivity.querySelector('.jp-empty');
     if (mEmpty) mEmpty.remove();
-    var time = cycleBoundaryUtc();
-    var text = d.text || '';
-    var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
     var row = document.createElement('div');
     row.className = 'jp-row jp-cq';
-    row.innerHTML =
-      '<span class="jp-time">' + time + '</span>' +
-      '<span class="jp-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
-      '<span class="jp-dt">' + dtStr + '</span>' +
-      '<span class="jp-df">' + d.df + '</span>' +
-      '<span class="jp-msg">' + esc(text) + '</span>';
+    // Cells and number formats: lib/decode-row.js (the audio offset here was
+    // printed unrounded; the shared builder rounds every number).
+    row.innerHTML = DecodeRow.popoutRowInner(d, { time: cycleBoundaryUtc(), text: d.text || '' });
     // No AP badge, deliberately (K3SBP 2026-08-05). How the decoder recovered
     // a call — plain pass or a-priori — is decoder internals; the operator
     // wants the spot. d.ap still rides along on the decode for the engine and
@@ -998,23 +992,17 @@ function _applyPopoutTheme(payload) {
     }
     row.className = 'jp-row' + (c.isCq ? ' jp-cq' : '') + (c.isDirected ? ' jp-directed' : '') + (c.isWanted ? ' jp-wanted' : '') + (d.newDxcc ? ' jp-new-dxcc' : '') + (d.chaseMatch ? ' jp-chase' : '') + (d.watched ? ' jp-watched' : '') + spotClass + wlClass;
     if (spotMatch && spotMatch.reference) row.title = 'Spotted at ' + spotMatch.reference + (spotMatch.isNewPark ? ' (new park)' : '');
-    var dtStr = d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '';
     // Band badge for multi-slice decodes
     var bandBadge = '';
     if (d.band && multiActive) {
       var bColor = BAND_COLORS[d.band] || '#888';
       bandBadge = '<span class="jp-badge jp-badge-band" style="background:' + bColor + ';color:#000;" title="Band — this decode was received on the ' + esc(d.band) + ' slice">' + d.band + '</span>';
     }
-    row.innerHTML =
-      (bandBadge ? bandBadge : '') +
-      '<span class="jp-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
-      '<span class="jp-dt">' + dtStr + '</span>' +
-      '<span class="jp-df">' + Math.round(d.df) + '</span>' +
-      '<span class="jp-msg">' + esc(c.text) +
-        (wl && wl.emoji ? '<span class="jp-wl-emoji">' + esc(wl.emoji) + '</span>' : '') +
-      '</span>' +
-      (badges ? '<span class="jp-badges">' + badges + '</span>' : '') +
-      entityStr;
+    // Cells and number formats: lib/decode-row.js, the copy the layout test renders.
+    row.innerHTML = DecodeRow.popoutRowInner(d, {
+      bandBadgeHtml: bandBadge, text: c.text, wlEmoji: wl && wl.emoji,
+      badgesHtml: badges, entityHtml: entityStr,
+    });
     row.addEventListener('dblclick', (function(decode) { return function() { onDecodeRowClick(decode); }; })(d));
     return row;
   }
@@ -1419,7 +1407,7 @@ function _applyPopoutTheme(payload) {
       // evict it like any decode cycle. Without the separator the row is
       // orphaned and accumulates forever (one per TX slot). (78hawkeye, PR #54.)
       var txTime = cycleBoundaryUtc();
-      var txRowHtml = '<span class="jp-db">TX</span><span class="jp-df">--</span><span class="jp-msg">' + esc(data.message) + '</span>';
+      var txRowHtml = DecodeRow.txRowInner(data.message, 'jp', '--');
       var baEmpty = bandActivity.querySelector('.jp-empty');
       if (baEmpty) baEmpty.remove();
       var baSep = document.createElement('div');
@@ -3996,8 +3984,8 @@ function _applyPopoutTheme(payload) {
     var row = jttyRowFor(u);
     var d = new Date(u.utcMs || Date.now());
     row.querySelector('.jp-time').textContent = jttyPad2(d.getUTCHours()) + ':' + jttyPad2(d.getUTCMinutes()) + ':' + jttyPad2(d.getUTCSeconds());
-    row.querySelector('.jp-db').textContent = (u.snrDb > 0 ? '+' : '') + u.snrDb;
-    row.querySelector('.jp-df').textContent = String(Math.round(u.freqHz));
+    row.querySelector('.jp-db').textContent = DecodeRow.formatDb(u.snrDb);
+    row.querySelector('.jp-df').textContent = DecodeRow.formatDf(u.freqHz);
     row.querySelector('.jp-msg').textContent = u.text + (u.complete ? '' : ' …');
     row.dataset.text = u.text || '';
     if (u.freqHz > 0) row.dataset.freq = String(Math.round(u.freqHz));

@@ -423,7 +423,7 @@
     hide: colPrefs.hide !== false,
   };
   // Column ordering — array of column keys in display order
-  var defaultColOrder = ['freq', 'mode', 'band', 'dist', 'ref', 'name', 'region', 'cqz', 'ituz', 'src', 'age', 'spotter', 'skip', 'hide', 'log'];
+  var defaultColOrder = SpotRow.DEFAULT_COL_ORDER.slice(); // lib/spot-row.js
   var colOrder = colPrefs.order && Array.isArray(colPrefs.order) ? colPrefs.order : defaultColOrder.slice();
   // Ensure any new columns are present in colOrder
   for (var k of defaultColOrder) { if (colOrder.indexOf(k) === -1) colOrder.push(k); }
@@ -2997,25 +2997,9 @@
     return filtered;
   }
 
-  // Per-column grid-track widths (px). Callsign is always the first column.
-  // These widths are what drive row alignment: every .spot-card shares the
-  // same grid-template-columns so callsign/freq/dist/buttons stack in the
-  // same X coordinates regardless of content length.
-  const SPOT_COL_WIDTHS = {
-    call: 120, freq: 80, mode: 56, band: 48,
-    dist: 60, ref: 84, name: 150, region: 56,
-    src: 56, age: 52, skip: 40, hide: 40, log: 40,
-    spotter: 84, cqz: 34, ituz: 34
-  };
-  function computeSpotGrid() {
-    const parts = [SPOT_COL_WIDTHS.call + 'px'];
-    for (const key of colOrder) {
-      if (!colShow[key]) continue;
-      const w = SPOT_COL_WIDTHS[key];
-      if (w) parts.push(w + 'px');
-    }
-    return parts.join(' ');
-  }
+  // Grid, cells and formatters live in lib/spot-row.js (inlined above), the
+  // one copy the layout test renders (test/layout-alignment-test.js).
+  function computeSpotGrid() { return SpotRow.computeSpotGrid(colOrder, colShow); }
 
   function renderSpots() {
     const filtered = getFilteredSpots();
@@ -3030,126 +3014,30 @@
     spotList.style.setProperty('--spot-grid', computeSpotGrid());
 
     spotList.innerHTML = filtered.map(s => {
-      const srcClass = 'source-' + (s.source || 'pota');
-      const tunedClass = (tunedFreqKhz && s.frequency === tunedFreqKhz) ? ' tuned' : '';
       const newPark = isNewPark(s);
-      const newClass = newPark ? ' new-park' : '';
       const workedToday = isWorkedSpot(s);
       const workedEver = !workedToday && hasWorkedOnBandMode(s);
-      const workedClass = workedToday ? ' worked-today' : workedEver ? ' worked' : '';
       const isSkipped = scanSkipped.has(spotSkipKey(s)) || (workedToday && !scanForceUnskipped.has(spotSkipKey(s)));
-      const skipClass = isSkipped ? ' scan-skipped' : '';
-      const workedCheck = (workedToday || workedEver) ? '<span class="worked-check">\u2713</span>' : '';
-      const refClass = s.source === 'sota' ? 'sota' : s.source === 'dxc' ? 'dxc' : '';
-      // Ref column: only show actual park/summit references (e.g. K-1234, W7A/PE-097)
-      // locationDesc is a region code like "US-FL" for POTA, or a country name for DXC — don't show country names here
-      const ref = s.reference || '\u2014';
-      const isNet = s.source === 'net';
-      const age = isNet ? (s.comments || '') : formatAge(s.spotTime);
-      const freqStr = formatSpotFreq(s.frequency);
-      const src = s.source || 'pota';
-      const srcLabel = src.toUpperCase();
       const dxe = dxeKind(s.callsign, dxeState);
-      const newBadge = (newPark ? '<span class="new-badge">N</span>' : '')
-        + (dxe ? `<span class="dxe-badge${dxe === 'contest' ? ' contest' : ''}" title="${esc(dxeTitle(s.callsign))}">${dxe === 'contest' ? 'CONTEST' : 'DXP'}</span>` : '');
-      const logBtn = isNet ? '<span class="spot-btn-empty"></span>' : '<button type="button" class="spot-log-btn">L</button>';
-      const skipBtn = isNet ? '<span class="spot-btn-empty"></span>' : `<button type="button" class="spot-skip-btn" data-skipfreq="${esc(String(s.frequency))}" data-skipcall="${esc(s.callsign)}">${isSkipped ? 'U' : 'S'}</button>`;
-      const hideBtn = (isNet || !s.band)
-        ? '<span class="spot-btn-empty"></span>'
-        : `<button type="button" class="spot-hide-btn" data-hidecall="${esc(s.callsign)}" data-hideband="${esc(s.band)}" title="Hide ${esc(s.callsign)} on ${esc(s.band)} until QSY">H</button>`;
-      const opName = qrzNameCache[(s.callsign || '').toUpperCase()] || '';
-      const spotName = opName || s.parkName || s.comments || '';
-
-      // Build columns in user-defined order
-      const colHtml = colOrder.map(key => {
-        if (!colShow[key]) return '';
-        switch (key) {
-          case 'freq': return `<span class="spot-freq">${freqStr}</span>`;
-          case 'mode': return `<span class="spot-mode">${esc(s.mode || '')}</span>${s.wpm ? ` <span class="spot-wpm" title="CW speed${s.wpmFrom === 'skimmer' ? ' measured by a skimmer' : ''}">${esc(String(s.wpm))}</span>` : ''}`;
-          case 'band': return `<span class="spot-band">${esc(s.band || '')}</span>`;
-          case 'dist': return `<span class="spot-dist">${formatSpotDist(s.distance)}</span>`;
-          case 'ref': return `<span class="spot-ref ${refClass}">${esc(ref)}</span>`;
-          case 'name': return `<span class="spot-name">${esc(spotName)}</span>`;
-          case 'region': {
-            let rgn = s.locationDesc || '';
-            const fullName = rgn;
-            // POTA region codes like "US-FL" are already short — pass through
-            // Country names need abbreviation
-            if (rgn.length > 6) rgn = abbreviateCountry(rgn);
-            return rgn ? `<span class="spot-region" title="${esc(fullName)}">${esc(rgn)}</span>` : '<span class="spot-region">\u2014</span>';
-          }
-          case 'src': return `<span class="spot-src source-${src}">${srcLabel}</span>`;
-          case 'age': return `<span class="spot-age">${age}</span>`;
-          case 'spotter': return `<span class="spot-spotter" title="Spotted by ${esc(s.spotter || '')}">${esc(s.spotter || '—')}</span>`;
-          case 'cqz': return `<span class="spot-zone" title="CQ zone">${s.cqZone != null ? esc(String(s.cqZone)) : '—'}</span>`;
-          case 'ituz': return `<span class="spot-zone" title="ITU zone">${s.ituZone != null ? esc(String(s.ituZone)) : '—'}</span>`;
-          case 'skip': return skipBtn;
-          case 'log': return logBtn;
-          case 'hide': return hideBtn;
-          default: return '';
-        }
-      }).join('');
-
-      // Secondary refs from cross-source dedup. Multi-type spots
-      // (POTA + SOTA on the same activator) carry these so the log
-      // popup can display + forward all programs without a re-query.
-      const potaRefAttr  = s.potaReference  ? ` data-pota-ref="${esc(s.potaReference)}"`   : '';
-      const sotaRefAttr  = s.sotaReference  ? ` data-sota-ref="${esc(s.sotaReference)}"`   : '';
-      const wwffRefAttr  = s.wwffReference  ? ` data-wwff-ref="${esc(s.wwffReference)}"`   : '';
-      const llotaRefAttr = s.llotaReference ? ` data-llota-ref="${esc(s.llotaReference)}"` : '';
-      return `<div class="spot-card ${srcClass}${tunedClass}${newClass}${workedClass}${skipClass}" data-freq="${s.frequency}" data-mode="${s.mode || ''}" data-bearing="${s.bearing || ''}" data-call="${esc(s.callsign)}" data-ref="${esc(ref)}" data-src="${src}"${potaRefAttr}${sotaRefAttr}${wwffRefAttr}${llotaRefAttr}>
-        <span class="spot-call">${workedCheck}${esc(s.callsign)}${donorCallsigns.has((s.callsign || '').toUpperCase()) ? '<span class="donor-paw" title="POTACAT Supporter">\uD83D\uDC3E</span>' : ''}${(s.callsign || '').toUpperCase() === 'K3SBP' ? '<span class="donor-paw" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>' : ''}${newBadge}</span>
-        ${colHtml}
-      </div>`;
+      const call = (s.callsign || '').toUpperCase();
+      return SpotRow.spotRowHtml(s, {
+        tuned: !!(tunedFreqKhz && s.frequency === tunedFreqKhz),
+        newPark, workedToday, workedEver, isSkipped,
+        dxe: dxe === 'contest' ? 'contest' : dxe ? 'dxpedition' : '',
+        dxeTitle: dxe ? dxeTitle(s.callsign) : '',
+        opName: qrzNameCache[call] || '',
+        age: formatAge(s.spotTime),
+        donor: donorCallsigns.has(call),
+        creator: call === 'K3SBP',
+        distUnit,
+      }, { colOrder, colShow });
     }).join('');
   }
 
-  function formatSpotFreq(kHz) {
-    const num = parseFloat(kHz);
-    if (isNaN(num)) return kHz;
-    return num.toFixed(1);
-  }
+  function formatSpotFreq(kHz) { return SpotRow.formatSpotFreq(kHz); }
+  function abbreviateCountry(name) { return SpotRow.abbreviateCountry(name); }
 
-  function abbreviateCountry(name) {
-    var map = {
-      'United States':'USA','Canada':'CAN','Mexico':'MEX','Japan':'JPN','China':'CHN',
-      'Australia':'AUS','New Zealand':'NZL','Brazil':'BRA','Argentina':'ARG',
-      'Germany':'DEU','Fed. Rep. of Germany':'DEU','France':'FRA','Italy':'ITA',
-      'Spain':'ESP','United Kingdom':'GBR','England':'ENG','Scotland':'SCO',
-      'Wales':'WAL','Netherlands':'NLD','Belgium':'BEL','Switzerland':'CHE',
-      'Austria':'AUT','Poland':'POL','Sweden':'SWE','Norway':'NOR','Denmark':'DNK',
-      'Finland':'FIN','Portugal':'PRT','Czech Republic':'CZE','Hungary':'HUN',
-      'Romania':'ROU','Greece':'GRC','Turkey':'TUR','Israel':'ISR',
-      'South Korea':'KOR','India':'IND','Russia':'RUS',
-      'European Russia':'RUS','Asiatic Russia':'RUS',
-      'South Africa':'ZAF','Thailand':'THA','Philippines':'PHL',
-      'Indonesia':'IDN','Colombia':'COL','Chile':'CHL','Peru':'PER',
-      'Hawaii':'HI','Alaska':'AK','Puerto Rico':'PR',
-      'Guadeloupe':'GLP','Curacao':'CUR','Bermuda':'BMU',
-      'Turks & Caicos Islands':'TCA','Cayman Islands':'CYM',
-      'US Virgin Islands':'USVI','British Virgin Islands':'BVI',
-      'Trinidad & Tobago':'TTO','Dominican Republic':'DOM',
-      'Costa Rica':'CRI','Panama':'PAN','Venezuela':'VEN',
-      'Ukraine':'UKR','Ireland':'IRL','Croatia':'HRV','Serbia':'SRB',
-      'Bulgaria':'BGR','Slovakia':'SVK','Slovenia':'SVN','Lithuania':'LTU',
-      'Latvia':'LVA','Estonia':'EST','Iceland':'ISL','Luxembourg':'LUX',
-      'Malta':'MLT','Cyprus':'CYP','Taiwan':'TWN','Singapore':'SGP',
-      'Malaysia':'MYS','Vietnam':'VNM','Pakistan':'PAK','Bangladesh':'BGD',
-      'Sri Lanka':'LKA','Egypt':'EGY','Morocco':'MAR','Kenya':'KEN',
-      'Nigeria':'NGA','Ghana':'GHA','Algeria':'DZA','Tunisia':'TUN',
-    };
-    return map[name] || name.slice(0, 4);
-  }
-
-  const MI_TO_KM = 1.60934;
-  function formatSpotDist(miles) {
-    if (miles == null) return '';
-    const d = distUnit === 'km' ? Math.round(miles * MI_TO_KM) : Math.round(miles);
-    // Compact: 1.2k mi instead of 1,234 mi
-    if (d >= 10000) return (d / 1000).toFixed(0) + 'k';
-    if (d >= 1000) return (d / 1000).toFixed(1) + 'k';
-    return d + (distUnit === 'km' ? 'km' : 'mi');
-  }
+  function formatSpotDist(miles) { return SpotRow.formatSpotDist(miles, distUnit); }
 
   const SOURCE_COLORS_MAP = { pota: '#4ecca3', sota: '#f0a500', dxc: '#e040fb', rbn: '#4fc3f7', pskr: '#ff6b6b', net: '#ffd740', wwff: '#26a69a', llota: '#42a5f5' };
 
@@ -7887,7 +7775,7 @@
         // next quiet cycle shows "No decodes" again.
         const row = document.createElement('div');
         row.className = 'ft8-row ft8-tx';
-        row.innerHTML = '<span class="ft8-db">TX</span><span class="ft8-msg">' + esc(ft8PendingTxMsg) + '</span>';
+        row.innerHTML = DecodeRow.txRowInner(ft8PendingTxMsg, 'ft8');
         log.appendChild(row);
         ft8PendingTxMsg = '';
       } else {
@@ -7966,13 +7854,8 @@
 
         const row = document.createElement('div');
         row.className = 'ft8-row' + (isCq ? ' ft8-cq' : '') + (isDirected ? ' ft8-directed' : '') + (isHunt ? ' ft8-hunt' : '') + (isWanted ? ' ft8-wanted' : '') + (d.chaseMatch ? ' ft8-chase' : '') + (d.watched ? ' ft8-watched' : '');
-        row.innerHTML =
-          '<span class="ft8-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
-          '<span class="ft8-dt">' + (d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '') + '</span>' +
-          '<span class="ft8-df">' + Math.round(d.df) + '</span>' +
-          '<span class="ft8-msg">' + esc(text) + '</span>' +
-          (badges ? '<span class="ft8-badges">' + badges + '</span>' : '') +
-          entityStr;
+        // Cells and number formats: lib/decode-row.js (inlined above).
+        row.innerHTML = DecodeRow.webRowInner(d, text, badges, entityStr);
         // Click to reply
         row.addEventListener('click', () => ft8ClickDecode(d));
         log.appendChild(row);
@@ -8022,9 +7905,7 @@
     const log = ft8DecodeLogEl;
     const row = document.createElement('div');
     row.className = 'ft8-row ft8-tx';
-    row.innerHTML =
-      '<span class="ft8-db">TX</span>' +
-      '<span class="ft8-msg">' + esc(message) + '</span>';
+    row.innerHTML = DecodeRow.txRowInner(message, 'ft8');
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }

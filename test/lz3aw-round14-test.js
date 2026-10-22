@@ -149,7 +149,9 @@ test('DXE: web Spots menu toggles save the desktop settings and badge spots', ()
   assert.ok(/settings: \{ enableDxe: dxeState\.enable, enableDxeSources:/.test(web));
   assert.ok(/case 'expedition-callsigns':/.test(web));
   assert.ok(/dxeState\.enable = msg\.settings\.enableDxe === true;/.test(web));
-  assert.ok(/class="dxe-badge/.test(web));
+  // The badge markup moved into lib/spot-row.js (2026-10-22); the page hands it the kind.
+  assert.ok(/class="dxe-badge/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'spot-row.js'), 'utf8')));
+  assert.ok(/dxe: dxe === 'contest' \? 'contest' : dxe \? 'dxpedition' : ''/.test(web), 'the page passes the expedition kind to SpotRow');
   assert.ok(/dxeKind\(a\.callsign, dxeState\) === 'dxpedition'/.test(body(web, 'function getFilteredSpots(')), 'DXpeditions sort first');
 });
 

@@ -66,7 +66,7 @@ test('wired: RBN, CW Spots and cluster feed the cache; merged spots are filled; 
   assert.ok(/rbn\.on\('cw-speed', \(r\) => cwSpeeds\.note\(/.test(main));
   assert.ok(/cwSpeeds\.fillSpots\(dedupeCrossSource\(raw\)\)/.test(main));
   assert.strictEqual((main.match(/cwSpeeds\.note\(spot\.callsign, spot\.frequency, spot\.wpm\)/g) || []).length, 2);
-  assert.ok(/class="spot-wpm"/.test(R('renderer/remote.js')));
+  assert.ok(/class="spot-wpm"/.test(R('lib/spot-row.js')) && /SpotRow\.spotRowHtml\(/.test(R('renderer/remote.js')));
 });
 
 console.log(`\nCW speed: ${passed} passed, ${failed} failed`);

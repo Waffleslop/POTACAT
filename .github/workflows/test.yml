@@ -223,6 +223,35 @@ jobs:
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the
   # push that introduces the drift instead of at release-tag time.
+  # Rendered layout checks (2026-10-22). Two row-layout bugs shipped in
+  # 1.11.7–1.13.0 while every test passed, because nothing looked at a page:
+  # the CW speed shifted spot-table columns, and FT4's dB arrived as a raw
+  # float. This job installs Electron (npm ci), renders the real row builders
+  # with the real stylesheets on a virtual display, and measures every cell;
+  # LAYOUT_REQUIRED=1 makes "could not render" a failure, never a skip. The
+  # decode contract drives the real decoder worker (WASM here; the native
+  # addon is not built in this job) and checks every result is screen-ready.
+  layout-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: npm ci (installs Electron)
+        run: npm ci --no-audit --no-fund
+      - name: Virtual display
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      - name: Web row alignment (source guards)
+        run: node test/web-row-alignment-test.js
+      - name: Decoder output contract (FT8 / FT4 / FT2)
+        run: node test/decode-contract-test.js
+      - name: Rendered row alignment (ECHOCAT Web + JTCAT window)
+        env:
+          LAYOUT_REQUIRED: '1'
+        run: xvfb-run -a node test/layout-alignment-test.js
+
   lockfile-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
