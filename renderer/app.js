@@ -20357,7 +20357,10 @@ catLogClearBtn.addEventListener('click', () => {
     const rigActive = !!(activeRig && activeRig.id === s.activeRigId);
     const rigDesc = activeRig
       ? [activeRig.name, activeRig.model, activeRig.catTarget && activeRig.catTarget.type,
-         activeRig.catTarget && (activeRig.catTarget.host ? activeRig.catTarget.host + ':' + activeRig.catTarget.port : activeRig.catTarget.path)]
+         activeRig.catTarget && (activeRig.catTarget.host
+           // Icom Network keeps its port as controlPort; "host:undefined" told a reader nothing (KG5EIU).
+           ? activeRig.catTarget.host + ((activeRig.catTarget.port || activeRig.catTarget.controlPort) ? ':' + (activeRig.catTarget.port || activeRig.catTarget.controlPort) : '')
+           : activeRig.catTarget.path)]
         .filter(Boolean).join(' / ') + (rigActive ? '' : '  [NOT THE ACTIVE RIG — activeRigId matches nothing]')
       : '(none configured)';
     // Two settings silently stop POTACAT touching the local radio, and neither
