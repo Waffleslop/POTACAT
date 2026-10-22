@@ -40,11 +40,16 @@
     .wl-sound-card.show { display: flex; }
     .wl-sound-card select { max-width: 280px; }
     /* Waterfall: is the gateway frequency in use? 0-3000 Hz of the receiver's passband. */
-    .wl-wf { display: none; flex-direction: column; border-bottom: 1px solid var(--border-primary); background: #000; flex-shrink: 0; }
+    /* At the bottom, like the JTCAT pop-out's. */
+    .wl-wf { display: none; flex-direction: column; border-top: 1px solid var(--border-primary); background: #000; flex-shrink: 0; }
     .wl-wf.show { display: flex; }
-    .wl-wf canvas { width: 100%; height: 72px; display: block; }
+    .wl-wf canvas { width: 100%; height: 80px; display: block; }
+    .wl-wf-bar { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-dim); padding: 3px 8px; background: var(--bg-secondary); }
+    .wl-wf-bar b { color: var(--accent-green, #4ecca3); font-family: monospace; }
+    .wl-wf-bar input[type=range] { width: 110px; vertical-align: middle; }
     .wl-wf-axis { display: flex; justify-content: space-between; font-family: monospace; font-size: 10px; color: var(--text-dim); padding: 1px 6px; background: var(--bg-secondary); }
-    .wl-wf-axis b { color: var(--accent-green, #4ecca3); }
+    .wl-wf-show { display: none; justify-content: flex-end; padding: 2px 8px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); flex-shrink: 0; }
+    .wl-wf-show.show { display: flex; }
 
     /* Session strip */
     .wl-session { display: flex; gap: 12px; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--border-primary); font-size: 12px; color: var(--text-dim); flex-shrink: 0; min-height: 20px; }
@@ -144,10 +149,6 @@
     <span class="wl-sound" id="wl-sound-hint"></span>
   </div>
 
-  <div class="wl-wf" id="wl-wf">
-    <canvas id="wl-wf-canvas" width="640" height="72"></canvas>
-    <div class="wl-wf-axis"><span>0</span><span>1000 Hz</span><span><b id="wl-wf-note">ARDOP centre 1500 Hz</b></span><span>2000 Hz</span><span>3000 Hz</span></div>
-  </div>
   <div class="wl-session">
     <span class="wl-state idle" id="wl-state">idle</span>
     <span class="wl-ptt" id="wl-ptt"></span>
@@ -188,6 +189,18 @@
     </div>
   </div>
   <div class="wl-off" id="wl-off" style="display:none"></div>
+
+  <div class="wl-wf" id="wl-wf">
+    <div class="wl-wf-bar">
+      <span><b id="wl-wf-note">ARDOP centre 1500 Hz</b></span>
+      <span class="wl-spacer"></span>
+      <label>Speed <input type="range" id="wl-wf-speed" min="1" max="60" step="1" value="60"> <span id="wl-wf-speed-val">60</span> lines/s</label>
+      <button class="wl-btn" id="wl-wf-hide">Hide</button>
+    </div>
+    <canvas id="wl-wf-canvas" width="640" height="80"></canvas>
+    <div class="wl-wf-axis"><span>0</span><span>1000 Hz</span><span>2000 Hz</span><span>3000 Hz</span></div>
+  </div>
+  <div class="wl-wf-show" id="wl-wf-show"><button class="wl-btn" id="wl-wf-show-btn">Show waterfall</button></div>
 
   <div class="wl-notice" id="wl-notice">
     <div class="wl-notice-card">

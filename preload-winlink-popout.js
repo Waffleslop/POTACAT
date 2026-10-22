@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   abort: () => ipcRenderer.send('winlink-cmd-abort'),
   qsy: (o) => ipcRenderer.invoke('winlink-cmd-qsy', o),
   watchAudio: (on) => ipcRenderer.send('winlink-watch-audio', !!on),
+  setPref: (key, value) => ipcRenderer.send('winlink-cmd-pref', { key, value }),
   onAudioFrame: (cb) => ipcRenderer.on('winlink-audio-frame', (_e, d) => cb(d)),
   answerPrompt: (id, value) => ipcRenderer.send('winlink-cmd-prompt', { id, value }),
   gateways: (mode, band) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band }),

@@ -711,6 +711,8 @@ const GLOBAL_KEYS = new Set([
   'winlinkVaraPort',   // Winlink: the operator's own VARA HF TNC port on this machine (default 8300)
   'winlinkDirewolfPath', // Winlink: explicit Dire Wolf binary on THIS machine
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
+  'winlinkWaterfallSpeed', // mail-window waterfall lines/sec — a display property of this screen (as jtcatWaterfallSpeed)
+  'winlinkWaterfallShown', // mail-window waterfall shown/hidden — display
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
@@ -8367,6 +8369,7 @@ function winlinkPayload() {
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
     lastGateway: settings.winlinkLastGateway || null,
     ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
+    wf: { speed: Math.max(1, Math.min(60, parseInt(settings.winlinkWaterfallSpeed, 10) || 60)), shown: settings.winlinkWaterfallShown !== false },
     audio: (() => {
       const rig = winlinkActiveRig();
       const a = (rig && rig.winlinkAudio) || {};
@@ -32633,6 +32636,13 @@ app.whenReady().then(() => {
   ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator'));
   ipcMain.handle('winlink-cmd-qsy', (_e, o = {}) => winlinkPreviewQsy(o));
   ipcMain.on('winlink-watch-audio', (_e, on) => { _winlinkWatchAudio = !!on; });
+  // Display preferences of the mail window (speed as the JTCAT pop-out's: slower = averaged, never dropped).
+  ipcMain.on('winlink-cmd-pref', (_e, { key, value } = {}) => {
+    if (key === 'winlinkWaterfallSpeed') settings.winlinkWaterfallSpeed = Math.max(1, Math.min(60, parseInt(value, 10) || 60));
+    else if (key === 'winlinkWaterfallShown') settings.winlinkWaterfallShown = value !== false;
+    else return;
+    saveSettings(settings);
+  });
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
   ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
   ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));

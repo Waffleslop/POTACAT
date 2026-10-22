@@ -261,8 +261,11 @@
   // (Flex Direct / Icom Network) or, on a sound-device rig, the rig's own
   // input captured here. Shown while a radio mode is selected.
   var WF_BINS = 256;                       // 0..3000 Hz at 11.7 Hz
-  var WF_N = 2048;                         // FFT size at 24 kHz (85 ms)
+  var WF_N = 2048;                         // FFT window at 24 kHz (85 ms)
+  var WF_HOP = 512;                        // a new line every 21 ms (~47/s) before averaging
   var wf = null, wfMode = 'none', wfAcc = new Float32Array(WF_N), wfAccLen = 0, wfRate = 24000;
+  var wfSpeed = 60, wfShown = true, wfHidden = false;
+  var wfAvg = new Float32Array(WF_BINS), wfAvgN = 0, wfLastLineMs = 0;
   var wfCtx = null, wfStream = null, wfAnalyser = null, wfTimer = null;
   var wfRe = new Float32Array(WF_N), wfIm = new Float32Array(WF_N), wfWin = null, wfMags = new Float32Array(WF_BINS);
 
@@ -292,27 +295,58 @@
     var step = rate / 24000;
     for (var i = 0; i < samples.length; i += step) {
       wfAcc[wfAccLen++] = samples[i | 0];
-      if (wfAccLen >= WF_N) { wfFrame(); wfAccLen = 0; }
+      if (wfAccLen >= WF_N) {
+        wfFrame();
+        // Keep the last WF_N - WF_HOP samples: the next window overlaps this one.
+        wfAcc.copyWithin(0, WF_HOP, WF_N);
+        wfAccLen = WF_N - WF_HOP;
+      }
     }
   }
+  // Speed as the JTCAT pop-out's: lines between drawn lines are AVERAGED,
+  // not dropped, so slowing down integrates weak signals. 60 = every line.
   function wfFrame() {
     if (!wf) return;
     if (!wfWin) { wfWin = new Float32Array(WF_N); for (var w = 0; w < WF_N; w++) wfWin[w] = 0.5 - 0.5 * Math.cos(2 * Math.PI * w / (WF_N - 1)); }
     for (var i = 0; i < WF_N; i++) { wfRe[i] = wfAcc[i] * wfWin[i]; wfIm[i] = 0; }
     fft(wfRe, wfIm);
     for (var b = 0; b < WF_BINS; b++) wfMags[b] = Math.log(wfRe[b] * wfRe[b] + wfIm[b] * wfIm[b] + 1e-12);
-    wf.pushFrame(wfMags);
+    if (wfSpeed >= 60) { wf.pushFrame(wfMags); return; }
+    for (var k = 0; k < WF_BINS; k++) wfAvg[k] += wfMags[k];
+    wfAvgN++;
+    var now = performance.now();
+    if (now - wfLastLineMs >= 1000 / wfSpeed) {
+      for (var m = 0; m < WF_BINS; m++) { wfMags[m] = wfAvg[m] / wfAvgN; wfAvg[m] = 0; }
+      wfAvgN = 0;
+      wfLastLineMs = now;
+      wf.pushFrame(wfMags);
+    }
   }
+  function wfApplyPrefs() {
+    var p = (state && state.wf) || {};
+    if (typeof p.speed === 'number') { wfSpeed = p.speed; $('wl-wf-speed').value = String(wfSpeed); $('wl-wf-speed-val').textContent = String(wfSpeed); }
+    if (typeof p.shown === 'boolean') wfShown = p.shown;
+  }
+  $('wl-wf-speed').addEventListener('input', function () {
+    wfSpeed = Math.max(1, Math.min(60, parseInt($('wl-wf-speed').value, 10) || 60));
+    $('wl-wf-speed-val').textContent = String(wfSpeed);
+    wfAvgN = 0; wfLastLineMs = 0;
+    window.api.setPref('winlinkWaterfallSpeed', wfSpeed);
+  });
+  $('wl-wf-hide').addEventListener('click', function () { wfShown = false; window.api.setPref('winlinkWaterfallShown', false); wfSync(); });
+  $('wl-wf-show-btn').addEventListener('click', function () { wfShown = true; window.api.setPref('winlinkWaterfallShown', true); wfSync(); });
   function wfMarkers(mode) {
     if (!wf) return;
     // ARDOP's signal sits on 1500 Hz, its bandwidth either side; packet (1200 baud AFSK) on 1200/2200.
     var bw = mode === 'ardop' ? (Number((state && state.ardopBw) || 500)) : 2000;
     var lo = (1500 - bw / 2) / 3000, hi = (1500 + bw / 2) / 3000;
     wf.setMarkers([{ pos: lo, color: [0.3, 0.8, 0.6, 0.8] }, { pos: hi, color: [0.3, 0.8, 0.6, 0.8] }]);
-    $('wl-wf-note').textContent = mode === 'packet' ? 'packet tones 1200 / 2200 Hz' : 'ARDOP centre 1500 Hz (' + bw + ' Hz)';
+    $('wl-wf-note').textContent = mode === 'packet' ? 'Packet tones 1200 / 2200 Hz' : 'ARDOP centre 1500 Hz, ' + bw + ' Hz wide';
   }
   function wfStart(mode) {
     var a = (state && state.audio) || {};
+    $('wl-wf-show').classList.toggle('show', !wfShown);
+    if (!wfShown) { wfStop(true); return; }
     if (!wf) {
       try { wf = new Waterfall($('wl-wf-canvas'), { bins: WF_BINS, historyRows: 256, gamma: 0.6, crop: true }); } catch (e) { wf = null; }
       if (!wf || !wf.supported) { $('wl-wf').classList.remove('show'); return; }
@@ -353,11 +387,12 @@
     if (wfCtx) { try { wfCtx.close(); } catch (e) {} wfCtx = null; }
     wfAnalyser = null;
   }
-  function wfStop() {
+  function wfStop(keepShowButton) {
     wfStopCapture();
     if (wfMode === 'frames') window.api.watchAudio(false);
     wfMode = 'none';
     $('wl-wf').classList.remove('show');
+    if (!keepShowButton) $('wl-wf-show').classList.remove('show');
   }
   window.api.onAudioFrame(function (d) {
     if (wfMode !== 'frames' || !d || !d.pcm) return;
@@ -365,6 +400,7 @@
     wfPush(pcm, d.sampleRate || 24000);
   });
   function wfSync() {
+    wfApplyPrefs();
     var m = currentMode();
     if (m.id !== 'telnet' && m.available) wfStart(m.id); else wfStop();
   }
