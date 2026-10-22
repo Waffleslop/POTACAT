@@ -8320,6 +8320,7 @@ function winlinkModes() {
     mercuryPort: mercuryProcess.mercuryPorts(settings).control,
     varaPort: _winlinkVaraPort(),
     ardopFound: ArdopProcess.ardopSupported(process.platform) ? findArdop().found : false,
+    showVara: settings.winlinkShowVara === true, // hidden: VARA is not offered in the first release
   });
 }
 

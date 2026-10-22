@@ -157,6 +157,18 @@ async function test(name, fn) {
     assert.ok(!miss.ok);
     assert.match(miss.missing[0], /DAX Audio RX 1/);
   });
+  await test('a real Windows listing (31-char names): each DAX channel resolves to ITS index', () => {
+    const fs = require('fs');
+    const d = A.parseArdopDeviceList(fs.readFileSync(require('path').join(__dirname, 'fixtures/winlink/ardopcf-list-windows.txt'), 'utf8'));
+    assert.ok(d.capture.length >= 20 && d.playback.length >= 10, `${d.capture.length} capture, ${d.playback.length} playback`);
+    const byName = (n) => d.capture.find((x) => x.name.startsWith(n)).id;
+    assert.strictEqual(A.matchArdopDevice('DAX Audio RX 1 (FlexRadio Systems DAX Audio)', d.capture).id, byName('DAX Audio RX 1 '));
+    assert.strictEqual(A.matchArdopDevice('DAX Audio RX 2 (FlexRadio Systems DAX Audio)', d.capture).id, byName('DAX Audio RX 2 '));
+    assert.strictEqual(A.matchArdopDevice('Default - Mic In (Elgato Wave:3) (0fd9:0070)', d.capture).id, '0');
+    // A name picked from the list itself (what Settings saves) is an exact match.
+    assert.strictEqual(A.matchArdopDevice(d.capture[22].name, d.capture).id, d.capture[22].id);
+    assert.strictEqual(A.matchArdopDevice('DAX Audio TX (FlexRadio Systems DAX TX)', d.playback), null, 'not in this list → refused, never a guess');
+  });
   await test('two equally good matches are refused, never guessed', () => {
     const devices = { capture: [{ id: '1', name: 'USB Audio CODEC' }, { id: '2', name: 'USB Audio CODEC' }], playback: [] };
     assert.strictEqual(A.matchArdopDevice('Microphone (USB Audio CODEC)', devices.capture), null);
@@ -169,7 +181,7 @@ async function test(name, fn) {
 
   console.log('winlink-modes');
   await test('telnet everywhere; radio modes need CAT, a sound device, and the right OS', () => {
-    const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8301, ardopFound: true };
+    const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8301, ardopFound: true, showVara: true };
     const ok = M.winlinkModesFor(base);
     assert.deepStrictEqual(ok.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['mercury', true], ['vara', true]]);
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr' });
@@ -186,10 +198,14 @@ async function test(name, fn) {
     assert.ok(remote.slice(1).every((m) => /shack/.test(m.reason)));
   });
   await test('VARA on Mercury\'s port is refused with the reason; Mercury off is named', () => {
-    const clash = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8300, ardopFound: true });
+    const clash = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8300, ardopFound: true, showVara: true });
     assert.ok(!clash[3].available && /same port/.test(clash[3].reason));
     const off = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: false, ardopFound: true });
     assert.ok(!off[2].available && /Mercury/.test(off[2].reason));
+  });
+  await test('VARA is not offered unless the hidden switch is on', () => {
+    const m = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', ardopFound: true });
+    assert.deepStrictEqual(m.map((x) => x.id), ['telnet', 'ardop', 'mercury']);
   });
   await test('pickWinlinkMode falls back to telnet', () => {
     const modes = [{ id: 'telnet', available: true }, { id: 'ardop', available: false }];

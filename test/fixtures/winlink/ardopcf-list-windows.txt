@@ -1,0 +1,49 @@
+
+
+ardopcf Version 1.0.4.1.3 (https://www.github.com/pflarue/ardop)
+Copyright (c) 2014-2024 Rick Muething, John Wiseman, Peter LaRue
+See https://github.com/pflarue/ardop/blob/master/LICENSE for licence details including
+  information about authors of external libraries used and their licenses.
+Capture Devices
+0 Mic In (Elgato Wave:3)
+1 Voicemeeter Out A5 (VB-Audio Vo
+2 Wave Link Stream (Elgato Wave:3
+3 Wave Link Monitor (Elgato Wave:
+4 Voicemeeter Out B2 (VB-Audio Vo
+5 DAX IQ RX 2 (FlexRadio Systems 
+6 DAX IQ RX 3 (FlexRadio Systems 
+7 Voicemeeter Out A2 (VB-Audio Vo
+8 Voicemeeter Out A3 (VB-Audio Vo
+9 VoiceMeeter Output (2- VB-Audio
+10 DAX Audio RX 6 (FlexRadio Syste
+11 DAX Audio RX 8 (FlexRadio Syste
+12 DAX Audio RX 5 (FlexRadio Syste
+13 DAX IQ RX 4 (FlexRadio Systems 
+14 DAX Audio RX 7 (FlexRadio Syste
+15 Voicemeeter Out B3 (VB-Audio Vo
+16 Wave Link MicrophoneFX (Elgato 
+17 Voicemeeter Out B1 (VB-Audio Vo
+18 DAX MIC Audio (FlexRadio System
+19 DAX Audio RX 2 (FlexRadio Syste
+20 Voicemeeter Out A1 (VB-Audio Vo
+21 DAX Audio RX 3 (FlexRadio Syste
+22 DAX Audio RX 1 (FlexRadio Syste
+23 DAX IQ RX 1 (FlexRadio Systems 
+24 DAX RESERVED AUDIO TX (FlexRadi
+25 Voicemeeter Out A4 (VB-Audio Vo
+Playback Devices
+0 Digital Audio (S/PDIF) (High De
+1 PA248QV (NVIDIA High Definition
+2 Voicemeeter In 4 (VB-Audio Voic
+3 Voicemeeter Input (VB-Audio Voi
+4 Voicemeeter VAIO3 Input (VB-Aud
+5 VoiceMeeter Input (2- VB-Audio 
+6 Voicemeeter AUX Input (VB-Audio
+7 Headphones (Elgato Wave:3)
+8 Voicemeeter In 3 (VB-Audio Voic
+9 Voicemeeter In 1 (VB-Audio Voic
+10 VG278 (NVIDIA High Definition A
+11 Voicemeeter In 2 (VB-Audio Voic
+12 Voicemeeter In 5 (VB-Audio Voic
+ERROR: playbackdevice = 'POTACAT-LIST-DEVICES' not found.  Try using one of the names or numbers (0-12) listed above.
+Error in InitSound().  Stopping ardop.
