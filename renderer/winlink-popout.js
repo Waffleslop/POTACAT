@@ -280,25 +280,28 @@
   var WF_HOP = 512;                        // a new line every 21 ms (~47/s) before averaging
   var wf = null, wfMode = 'none', wfAcc = new Float32Array(WF_N), wfAccLen = 0, wfRate = 24000;
   var wfSpeed = 60, wfShown = true, wfHidden = false;
+  var wfRemote = false; // an ECHOCAT device is watching through the shack
   var wfAvg = new Float32Array(WF_BINS), wfAvgN = 0, wfLastLineMs = 0;
   // Busy: a signal in the modem's band that stands above the passband's noise
-  // floor. Floor = the 20th percentile of all bins (what empty spectrum looks
-  // like whatever the AGC does); band level = the 90th percentile of the
-  // marked bins; busy when that is ≥ 8 dB over the floor, held for 3 s so a
-  // pause between a station's overs still reads Busy.
+  // floor. Like with like (the rule in lib/winlink-spectrum.js, which decides
+  // the same badge for ECHOCAT devices): the 90th percentile of the marked
+  // band against the 90th percentile of the bins OUTSIDE it, so noise reads
+  // 0 dB whatever its level; busy at +8 dB (a modem or voice filling the
+  // band) or a +20 dB peak (one strong carrier), held for 3 s so a pause
+  // between a station's overs still reads Busy.
   var busyLoBin = 0, busyHiBin = WF_BINS, busyUntil = 0, busyPeakDb = 0, busyLastRender = 0;
-  var busySorted = new Float32Array(WF_BINS), busyBand = new Float32Array(WF_BINS);
+  var busyOut = new Float32Array(WF_BINS), busyBand = new Float32Array(WF_BINS);
   function busyUpdate(mags) {
-    busySorted.set(mags); Array.prototype.sort.call(busySorted);
-    var floor = busySorted[(WF_BINS * 0.2) | 0];
-    var n = 0;
-    for (var b = busyLoBin; b < busyHiBin; b++) busyBand[n++] = mags[b];
-    if (!n) return;
+    var n = 0, m = 0;
+    for (var b = 0; b < WF_BINS; b++) { if (b >= busyLoBin && b < busyHiBin) busyBand[n++] = mags[b]; else busyOut[m++] = mags[b]; }
+    if (!n || !m) return;
     var band = busyBand.subarray(0, n); Array.prototype.sort.call(band);
-    var level = band[(n * 0.9) | 0];
-    var db = (level - floor) * 4.3429; // mags are ln(power): 10·log10 = 4.343·ln
+    var out = busyOut.subarray(0, m); Array.prototype.sort.call(out);
+    var ref = out[(m * 0.9) | 0];
+    var db = (band[(n * 0.9) | 0] - ref) * 4.3429; // mags are ln(power): 10·log10 = 4.343·ln
+    var peak = (band[n - 1] - ref) * 4.3429;
     var now = performance.now();
-    if (db >= 8) { busyUntil = now + 3000; if (db > busyPeakDb) busyPeakDb = db; }
+    if (db >= 8 || peak >= 20) { busyUntil = now + 3000; var d = Math.max(db, peak); if (d > busyPeakDb) busyPeakDb = d; }
     if (now - busyLastRender < 250) return;
     busyLastRender = now;
     var el = $('wl-wf-busy');
@@ -348,12 +351,14 @@
   // Speed as the JTCAT pop-out's: lines between drawn lines are AVERAGED,
   // not dropped, so slowing down integrates weak signals. 60 = every line.
   function wfFrame() {
-    if (!wf) return;
+    if (!wf && !wfRemote) return;
     if (!wfWin) { wfWin = new Float32Array(WF_N); for (var w = 0; w < WF_N; w++) wfWin[w] = 0.5 - 0.5 * Math.cos(2 * Math.PI * w / (WF_N - 1)); }
     for (var i = 0; i < WF_N; i++) { wfRe[i] = wfAcc[i] * wfWin[i]; wfIm[i] = 0; }
     fft(wfRe, wfIm);
     for (var b = 0; b < WF_BINS; b++) wfMags[b] = Math.log(wfRe[b] * wfRe[b] + wfIm[b] * wfIm[b] + 1e-12);
     busyUpdate(wfMags); // on every line, before any averaging
+    if (wfRemote && wfMode === 'capture') window.api.spectrumMags(Array.from(wfMags));
+    if (!wf || !$('wl-wf').classList.contains('show')) return;
     if (wfSpeed >= 60) { wf.pushFrame(wfMags); return; }
     for (var k = 0; k < WF_BINS; k++) wfAvg[k] += wfMags[k];
     wfAvgN++;
@@ -392,13 +397,21 @@
   function wfStart(mode) {
     var a = (state && state.audio) || {};
     $('wl-wf-show').classList.toggle('show', !wfShown);
-    if (!wfShown) { wfStop(true); return; }
-    if (!wf) {
-      try { wf = new Waterfall($('wl-wf-canvas'), { bins: WF_BINS, historyRows: 256, gamma: 0.6, crop: true }); } catch (e) { wf = null; }
-      if (!wf || !wf.supported) { $('wl-wf').classList.remove('show'); return; }
+    // Hidden here but a phone is watching on a sound-device rig: keep capturing
+    // (the shack has no other copy of this radio's audio) and relay the
+    // magnitudes to main; nothing is drawn.
+    var relayOnly = !wfShown && wfRemote && !a.viaPotacat;
+    if (!wfShown && !relayOnly) { wfStop(true); return; }
+    if (relayOnly) {
+      $('wl-wf').classList.remove('show');
+    } else {
+      if (!wf) {
+        try { wf = new Waterfall($('wl-wf-canvas'), { bins: WF_BINS, historyRows: 256, gamma: 0.6, crop: true }); } catch (e) { wf = null; }
+        if (!wf || !wf.supported) { $('wl-wf').classList.remove('show'); return; }
+      }
+      $('wl-wf').classList.add('show');
+      wfMarkers(mode);
     }
-    $('wl-wf').classList.add('show');
-    wfMarkers(mode);
     if (a.viaPotacat) {
       // Frames from main (the same ones the modem gets).
       if (wfMode !== 'frames') { wfStopCapture(); wfMode = 'frames'; window.api.watchAudio(true); }
@@ -440,6 +453,7 @@
     $('wl-wf').classList.remove('show');
     if (!keepShowButton) $('wl-wf-show').classList.remove('show');
   }
+  window.api.onRemoteWatch(function (on) { wfRemote = on; wfSync(); });
   window.api.onAudioFrame(function (d) {
     if (wfMode !== 'frames' || !d || !d.pcm) return;
     var pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm);

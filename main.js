@@ -1646,6 +1646,14 @@ let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
 let winlinkPopoutWin = null;
 let _winlinkWatchAudio = false;      // the mail window shows the waterfall
+// ECHOCAT devices watching the Winlink waterfall (C2S winlink-watch): the
+// shack computes the spectrum AND the Busy/Clear verdict (lib/winlink-spectrum.js)
+// and pushes winlink-spectrum frames, so a phone draws what it is sent.
+const WinlinkSpectrum = require('./lib/winlink-spectrum');
+let _winlinkRemoteWatchers = 0;
+let _winlinkSpecAcc = null;
+let _winlinkBusySt = { until: 0, peakDb: 0 };
+let _winlinkSpecLastAt = 0;
 let _winlinkPreviewReturnTo = null;  // dial/mode before a gateway pick tuned the radio
 
 // ─── JS8 (native) state ──────────────────────────────────────────────────────
@@ -8734,6 +8742,41 @@ function winlinkFeedRx(pcm, sampleRate) {
   if (_winlinkWatchAudio && winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) {
     audioSafeSend(winlinkPopoutWin.webContents, 'winlink-audio-frame', { pcm, sampleRate });
   }
+  if (_winlinkRemoteWatchers > 0) winlinkSpecAcc().push(pcm, sampleRate);
+}
+
+function winlinkSpecAcc() {
+  if (!_winlinkSpecAcc) _winlinkSpecAcc = new WinlinkSpectrum.SpectrumAccumulator((m) => winlinkSpectrumPublish(m));
+  return _winlinkSpecAcc;
+}
+
+/**
+ * One waterfall frame for the watching devices: 128 bins over 0–3000 Hz, the
+ * modem's band markers and the Busy/Clear verdict (the verdict runs on EVERY
+ * frame so its 3 s hold is right; frames go out at ~10/s). Fed by main's own
+ * audio on the Flex Direct / Icom Network routes, or by the mail window's
+ * magnitudes on a sound-device rig (winlink-spectrum-mags IPC).
+ */
+function winlinkSpectrumPublish(mags) {
+  if (_winlinkRemoteWatchers <= 0 || !remoteServer || !remoteServer.running) return;
+  const now = Date.now();
+  const mode = WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
+  const band = WinlinkSpectrum.markerBand(mode, settings.winlinkArdopBw);
+  const v = WinlinkSpectrum.busyVerdict(mags, band.lo, band.hi, _winlinkBusySt, now);
+  if (now - _winlinkSpecLastAt < 100) return;
+  _winlinkSpecLastAt = now;
+  remoteServer.broadcastWinlinkSpectrum({ bins: WinlinkSpectrum.wireBins(mags), busy: v.busy, peakDb: v.peakDb, lo: band.lo, hi: band.hi, label: band.label });
+}
+
+function winlinkSetRemoteWatch(count) {
+  const n = Math.max(0, Number(count) | 0);
+  if (n === _winlinkRemoteWatchers) return;
+  _winlinkRemoteWatchers = n;
+  if (!n && _winlinkSpecAcc) _winlinkSpecAcc.reset();
+  // A sound-device rig's audio only the mail window has: it keeps capturing
+  // (even with its own waterfall hidden) and relays magnitudes while a device watches.
+  winlinkPopoutSend('winlink-remote-watch', n > 0);
+  winlinkLog(n > 0 ? `${n} ECHOCAT device${n > 1 ? 's' : ''} watching the waterfall` : 'no ECHOCAT device watching the waterfall');
 }
 
 /**
@@ -9338,6 +9381,10 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
       case 'winlink-qsy':
         result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode }));
         return;
+      case 'winlink-qsy-restore':
+        winlinkPreviewRestore('ECHOCAT device left its Mail tab');
+        result('qsy-restore', { ok: true });
+        return;
       case 'winlink-prompt':
         winlinkAnswerPrompt(String(req.id || ''), String(req.value || ''));
         return;
@@ -9364,6 +9411,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
 }
 onRemoteServer((rs) => {
   rs.on('winlink-request', (e) => { winlinkHandleRemote(e); });
+  rs.on('winlink-watch', ({ count } = {}) => winlinkSetRemoteWatch(count));
   // A freshly built server hydrates new devices from its own cache — on or
   // off: an off shack hydrates {enabled:false} rather than nothing.
   if (typeof rs.broadcastWinlinkState === 'function' && settings) winlinkPush();
@@ -32277,6 +32325,7 @@ app.whenReady().then(() => {
       winlinkPopoutSend('winlink-session', { ...winlinkState.session, remainingSec: winlinkState.remainingSec() });
       winlinkPopoutSend('winlink-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
       pushWinlinkRigPower(true);
+      winlinkPopoutSend('winlink-remote-watch', _winlinkRemoteWatchers > 0);
     });
     winlinkPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') winlinkPopoutWin.webContents.toggleDevTools();
@@ -32667,6 +32716,13 @@ app.whenReady().then(() => {
   ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator'));
   ipcMain.handle('winlink-cmd-qsy', (_e, o = {}) => winlinkPreviewQsy(o));
   ipcMain.on('winlink-watch-audio', (_e, on) => { _winlinkWatchAudio = !!on; });
+  // The mail window's own FFT on a sound-device rig, relayed to watching devices
+  // (never on the socket routes — main runs its own FFT there, and two sources
+  // would double the frame rate).
+  ipcMain.on('winlink-spectrum-mags', (_e, arr) => {
+    if (!Array.isArray(arr) || arr.length !== WinlinkSpectrum.MAGS || winlinkSocketAudioRoute()) return;
+    winlinkSpectrumPublish(Float32Array.from(arr, Number));
+  });
   // Display preferences of the mail window (speed as the JTCAT pop-out's: slower = averaged, never dropped).
   ipcMain.on('winlink-cmd-pref', (_e, { key, value } = {}) => {
     if (key === 'winlinkWaterfallSpeed') settings.winlinkWaterfallSpeed = Math.max(1, Math.min(60, parseInt(value, 10) || 60));

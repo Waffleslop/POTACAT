@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('api', {
   qsy: (o) => ipcRenderer.invoke('winlink-cmd-qsy', o),
   watchAudio: (on) => ipcRenderer.send('winlink-watch-audio', !!on),
   setPref: (key, value) => ipcRenderer.send('winlink-cmd-pref', { key, value }),
+  // A phone is watching the waterfall through the shack: on a sound-device
+  // rig this window is the only thing hearing the radio, so it relays its
+  // magnitudes to main (which decides Busy/Clear and pushes the frames).
+  onRemoteWatch: (cb) => ipcRenderer.on('winlink-remote-watch', (_e, on) => cb(!!on)),
+  spectrumMags: (mags) => ipcRenderer.send('winlink-spectrum-mags', mags),
   onAudioFrame: (cb) => {
     // main sends frames through audioSafeSend, which bounds its backlog on
     // ACKs from here (batched, with a periodic flush). Without them main

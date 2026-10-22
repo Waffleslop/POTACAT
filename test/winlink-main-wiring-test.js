@@ -186,3 +186,17 @@ test('the mail window gets the RF power setting, forward power and SWR, and sets
   assert.ok(/winlinkPopoutWin\.on\('resize', saveWinlinkBounds\);\n\s*winlinkPopoutWin\.on\('move', saveWinlinkBounds\);/.test(main));
   assert.ok(/settings\.winlinkPopoutBounds = winlinkPopoutWin\.getBounds\(\); saveSettings\(settings\);/.test(main));
 });
+
+console.log('waterfall for ECHOCAT devices');
+test('winlink-watch subscribes a device; the shack computes bins and the Busy verdict and pushes winlink-spectrum', () => {
+  const proto = require('../lib/echocat-protocol');
+  assert.ok(proto.MESSAGES['winlink-watch'] && proto.MESSAGES['winlink-spectrum'], 'both on the wire');
+  const server = read('lib/remote-server.js');
+  assert.ok(/case 'winlink-watch':[\s\S]*?ws\._passSession[\s\S]*?winlink-refused/.test(server), 'a Guest Pass never sees the shack audio');
+  assert.ok(/broadcastWinlinkSpectrum\(frame\)[\s\S]*?bufferedAmount > 8192\) continue/.test(server), 'frames are dropped, never queued');
+  assert.ok(/_onClientGone\(ws\) \{\n\s*const watchedWinlink = !!ws\._winlinkWatch;/.test(server), 'a vanished watcher is recounted');
+  assert.ok(/rs\.on\('winlink-watch', \(\{ count \} = \{\}\) => winlinkSetRemoteWatch\(count\)\);/.test(main), 'wired inside onRemoteServer');
+  assert.ok(/function winlinkSpectrumPublish\(mags\)[\s\S]*?WinlinkSpectrum\.busyVerdict\(mags, band\.lo, band\.hi, _winlinkBusySt, now\)[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack');
+  assert.ok(/if \(_winlinkRemoteWatchers > 0\) winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);/.test(main), 'fed from the socket routes only while watched');
+  assert.ok(/winlink-spectrum-mags[\s\S]*?winlinkSocketAudioRoute\(\)\) return;/.test(main), 'the window relays only on a sound-device rig');
+});
