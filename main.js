@@ -33256,7 +33256,7 @@ app.whenReady().then(() => {
       if (data.redecode) {
         sendCatLog(`[SSTV] Redecode result: ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}${data.weak ? ' (weak)' : ''}`);
       } else if (data.weak) {
-        sendCatLog(`[SSTV] WEAK decode shown (${settings.sstvSaveAllDecodes === true ? 'saved as partial — Save every picture is on' : 'not auto-saved'}): ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}`);
+        sendCatLog(`[SSTV] WEAK decode shown (${settings.sstvSaveAllDecodes === true ? 'saved as partial — Save every picture is on' : 'not auto-saved — Keep saves it'}): ${data.width}x${data.height} ${data.mode} sync=${stats.sync}% spread=${stats.spread}`);
       } else {
         sendCatLog(`[SSTV] Image decoded: ${data.width}x${data.height} ${data.mode} — saving to gallery`);
       }
@@ -33754,6 +33754,14 @@ app.whenReady().then(() => {
     return { dataUrl, filePath };
   });
 
+  // Keep: the operator saves a weak decode that looks right to them. It is
+  // their judgement, so it is saved as a normal picture, not "partial".
+  ipcMain.handle('sstv-keep-image', async (_e, d = {}) => {
+    if (!d || !Array.isArray(d.imageData) || !(d.width > 0) || !(d.height > 0) || d.imageData.length !== d.width * d.height * 4) return null;
+    const saved = await saveSstvImage({ imageData: d.imageData, width: d.width, height: d.height, mode: String(d.mode || 'unknown'), freqHz: d.freqHz || undefined, rigMode: d.rigMode, weak: false });
+    if (saved) sendCatLog(`[SSTV] Kept a weak decode at the operator's request: ${saved.filename || ''}`);
+    return saved;
+  });
   ipcMain.on('sstv-open-gallery-folder', () => {
     const galleryDir = ensureSstvGalleryDir();
     require('electron').shell.openPath(galleryDir);

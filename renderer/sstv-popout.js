@@ -1680,6 +1680,30 @@ function setReplyImage(entry) {
 }
 
 // On-canvas Reply button — the latest decode
+// Keep a weak decode: save it to Received exactly like an automatic save.
+const rxKeepBtnEl = document.getElementById('rx-keep-btn');
+if (rxKeepBtnEl) {
+  rxKeepBtnEl.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!lastRxImage || lastRxImage.filename) return;
+    rxKeepBtnEl.disabled = true;
+    const saved = await window.api.sstvKeepImage({
+      imageData: Array.from(lastRxImage.imageData), width: lastRxImage.width, height: lastRxImage.height,
+      mode: lastRxImage.mode, freqHz: lastRxImage.freqHz, rigMode: lastRxImage.rigMode,
+    });
+    rxKeepBtnEl.disabled = false;
+    if (!saved) { statusBar.textContent = 'Could not save the picture — see the log'; return; }
+    lastRxImage.filename = saved.filename;
+    const entry = galleryImages.find((g) => g.weak && !g.filename && g.timestamp >= lastRxImage.at - 1000);
+    if (entry) { entry.filename = saved.filename; entry.weak = false; }
+    rxKeepBtnEl.style.display = 'none';
+    const weakBadge = document.getElementById('rx-weak-badge');
+    if (weakBadge) weakBadge.style.display = 'none';
+    statusBar.textContent = 'Saved to Received: ' + saved.filename;
+    renderGallery();
+  });
+}
+
 const rxReplyBtnEl = document.getElementById('rx-reply-btn');
 if (rxReplyBtnEl) {
   rxReplyBtnEl.addEventListener('click', (e) => {
@@ -2352,6 +2376,11 @@ window.api.onSstvRxImage((data) => {
     // Weak-signal badge over the RX canvas
     const weakBadge = document.getElementById('rx-weak-badge');
     if (weakBadge) weakBadge.style.display = data.weak ? '' : 'none';
+    // A weak decode can look perfect — the gate judges the sync pulses, not
+    // the picture (Barbara in Maine, 2026-10-23: good pictures not kept,
+    // noisy ones kept). Keep lets the operator decide.
+    const keepBtn = document.getElementById('rx-keep-btn');
+    if (keepBtn) keepBtn.style.display = (data.weak && !data.saved) ? '' : 'none';
     // Stash the latest decode so the on-canvas Reply button can grab it
     lastRxImage = {
       imageData: new Uint8ClampedArray(data.imageData),
@@ -3622,7 +3651,7 @@ function clearRxPicture() {
   lastRxImage = null;
   rxCtx.fillStyle = '#000';
   rxCtx.fillRect(0, 0, rxCanvas.width, rxCanvas.height);
-  ['rx-weak-badge', 'rx-reply-btn', 'rx-slant-btn', 'rx-redecode', 'rx-clear-btn'].forEach((id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  ['rx-weak-badge', 'rx-keep-btn', 'rx-reply-btn', 'rx-slant-btn', 'rx-redecode', 'rx-clear-btn'].forEach((id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   const row = document.getElementById('rx-slant-row'); if (row) row.style.display = 'none';
   rxInfo.textContent = 'Listening…';
 }
