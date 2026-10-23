@@ -3006,12 +3006,12 @@
       <div id="winlink-config" class="radio-sub">
         <span class="help-text" style="display:block;margin-bottom:6px;">Send and receive Winlink email from POTACAT, and from ECHOCAT on your phone. POTACAT runs Pat, the open-source Winlink client, in the background. Over the internet it works with no radio; over the radio, POTACAT tunes and keys for the session through its own CAT control. Open it from More &rarr; Winlink Mail.</span>
         <label>Winlink password:
-          <input type="password" id="set-winlink-password" autocomplete="off" style="width:150px;" placeholder="6 to 12 characters">
+          <input type="password" id="set-winlink-password" autocomplete="off" style="width:150px;" placeholder="6 to 12 characters" maxlength="12" title="6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ (no dash, no space)">
         </label>
         <button type="button" id="winlink-account-check">Check my account</button>
         <span class="help-text" id="winlink-account-status" style="margin-left:6px;"></span>
         <div id="winlink-register" class="hidden" style="margin-top:6px;padding:7px 9px;border:1px solid var(--border-primary);border-radius:4px;">
-          <span class="help-text" style="display:block;margin-bottom:4px;">No Winlink account for your callsign yet. Choose a password (6 to 12 characters) and, if you like, a recovery email, then create it.</span>
+          <span class="help-text" style="display:block;margin-bottom:4px;">No Winlink account for your callsign yet. Choose a password (6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ — Winlink allows no dash or space) and, if you like, a recovery email, then create it.</span>
           <label>Recovery email (optional): <input type="text" id="set-winlink-recovery" style="width:200px;"></label>
           <button type="button" id="winlink-register-btn">Create my Winlink account</button>
         </div>

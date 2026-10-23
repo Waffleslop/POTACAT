@@ -122,6 +122,19 @@ test('band filter is by the dial\'s band', () => {
   assert.deepStrictEqual(W.normalizeRmslist(RMS, { band: '20m' }).map((x) => x.call), ['N0XYZ-10']);
 });
 
+console.log('password rule');
+test('Winlink\'s rule: 6 to 12 of letters, digits and . ! @ # $ % ^ & * ( ) _ — a dash is named, not just "6 to 12" (N0KAH)', () => {
+  assert.strictEqual(W.passwordProblem('Abc.12'), '');
+  assert.strictEqual(W.passwordProblem('a!@#$%^&*()_'), '');
+  assert.ok(/6 to 12/.test(W.passwordProblem('abc12')));
+  assert.ok(/6 to 12/.test(W.passwordProblem('abcdefghijklm')));
+  assert.strictEqual(W.passwordProblem('my-pass1'), '"-" is not allowed in a Winlink password. Allowed: letters, numbers and . ! @ # $ % ^ & * ( ) _');
+  assert.ok(/^A space is not allowed/.test(W.passwordProblem('my pass1')));
+  assert.ok(/"ä"/.test(W.passwordProblem('päss123')));
+  assert.ok(W.WINLINK_PASSWORD_RE.test('K3SBP_1') && !W.WINLINK_PASSWORD_RE.test('K3SBP-1'));
+  assert.ok(/no dash, no space/.test(W.WINLINK_PASSWORD_HINT));
+});
+
 console.log('propagation ranking');
 test('every row carries the quality as a word; no prediction is null, never Poor', () => {
   const r = W.normalizeRmslist(RMS);

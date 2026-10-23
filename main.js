@@ -9696,8 +9696,7 @@ async function winlinkAccountCheck(call) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 function winlinkPasswordProblem(pw) {
-  if (pw.length < 6 || pw.length > 12) return 'The Winlink password must be 6 to 12 characters';
-  return '';
+  return WinlinkPat.passwordProblem(pw);
 }
 /** An existing account's password, typed on any surface: saved, Pat relaunched with it. */
 async function winlinkSetPassword(password, origin) {

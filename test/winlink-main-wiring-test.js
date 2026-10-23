@@ -360,6 +360,22 @@ test('on a sound-device rig the bridge window carries the modem audio; the modem
   assert.ok(!/proposeArdopDevices\(/.test(fnBody(main, 'spawnArdop')), 'no device pick for ARDOP');
 });
 
+console.log('Winlink password rule, one copy on every surface');
+test('main, the pop-out and the web page enforce the identical rule and wording', () => {
+  const lib = read('lib/winlink-pat.js');
+  const re = lib.match(/const WINLINK_PASSWORD_RE = (\/[^\n]+\/);/)[1];
+  const hint = lib.match(/const WINLINK_PASSWORD_HINT = '([^']+)';/)[1];
+  assert.ok(/function winlinkPasswordProblem\(pw\) \{\n\s*return WinlinkPat\.passwordProblem\(pw\);/.test(main), 'main delegates');
+  for (const f of ['renderer/winlink-popout.js', 'renderer/remote.js']) {
+    const src = read(f);
+    assert.ok(src.includes('var WINLINK_PASSWORD_RE = ' + re + ';'), f + ' carries the regex verbatim');
+    assert.ok(src.includes("var WINLINK_PASSWORD_HINT = '" + hint + "';"), f + ' carries the hint verbatim');
+    assert.ok(src.includes("is not allowed in a Winlink password. Allowed: letters, numbers and . ! @ # $ % ^ & * ( ) _'"), f + ' names the character');
+    assert.ok(!/pw\.length < 6 \|\| pw\.length > 12/.test(src), f + ' has no length-only check left');
+  }
+  for (const f of ['renderer/winlink-popout.html', 'renderer/remote.html', 'renderer/index.html']) assert.ok(read(f).includes(hint), f + ' shows the hint');
+});
+
 console.log('propagation-ranked gateways');
 test('Pat gets a prediction engine on every config write, decided in one place', () => {
   assert.ok(/prediction: winlinkPredictionConfig\(\),/.test(fnBody(main, 'writePatConfig')), 'writePatConfig passes it');

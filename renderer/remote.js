@@ -14543,10 +14543,21 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (msg.ok) { mailEl('mail-acct-pw').value = ''; showToast(mailAcct.exists ? 'Saved. Try Send / Receive over the internet.' : 'Account created. Send / Receive over the internet is your first login.', 4000); }
     else mailEl('mail-acct-text').textContent = msg.error || 'That did not work.';
   }
+  // Winlink's password rule, a verbatim copy of lib/winlink-pat.js (pinned by test).
+  var WINLINK_PASSWORD_RE = /^[A-Za-z0-9.!@#$%^&*()_]{6,12}$/;
+  var WINLINK_PASSWORD_HINT = '6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ (no dash, no space)';
+  function winlinkPasswordProblem(pw) {
+    var s = String(pw == null ? '' : pw);
+    if (s.length < 6 || s.length > 12) return 'The Winlink password must be ' + WINLINK_PASSWORD_HINT;
+    var bad = s.match(/[^A-Za-z0-9.!@#$%^&*()_]/);
+    if (bad) return (bad[0] === ' ' ? 'A space' : '"' + bad[0] + '"') + ' is not allowed in a Winlink password. Allowed: letters, numbers and . ! @ # $ % ^ & * ( ) _';
+    return '';
+  }
   document.addEventListener('click', function (e) {
     if (!e.target || e.target.id !== 'mail-acct-go') return;
     var pw = mailEl('mail-acct-pw').value;
-    if (pw.length < 6 || pw.length > 12) { mailEl('mail-acct-text').textContent = 'The password must be 6 to 12 characters.'; return; }
+    var pwProblem = winlinkPasswordProblem(pw);
+    if (pwProblem) { mailEl('mail-acct-text').textContent = pwProblem; return; }
     if (mailAcct.exists) mailSend({ type: 'winlink-set-password', password: pw });
     else mailSend({ type: 'winlink-register', password: pw, recoveryEmail: mailEl('mail-acct-email').value.trim() || undefined });
   });
