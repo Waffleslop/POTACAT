@@ -20294,6 +20294,34 @@ window.api.onCatPower((watts) => {
 const meterBox = document.getElementById('meter-box');
 let meterBoxVisible = localStorage.getItem('meterBoxVisible') !== 'false'; // default visible
 
+// A dragged floating box (meter box, CW macros) remembers where the operator
+// put it, but a window made smaller must MOVE it, never cover it: dragging the
+// Mac window's corner in left the meter box under the edge (2026-10-23). The
+// saved spot is the intent; the shown spot is that spot clamped into the
+// parent, re-applied on every resize, so growing the window puts it back.
+function clampFloatingBox(box, storageKey) {
+  if (!box || !box.parentElement || box.offsetParent === null) return;
+  let pos = null;
+  try { pos = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch {}
+  if (!pos || !Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return; // default corner anchoring already follows the window
+  const parent = box.parentElement.getBoundingClientRect();
+  const w = box.offsetWidth, h = box.offsetHeight;
+  const left = Math.max(0, Math.min(pos.left, parent.width - w - 4));
+  const top = Math.max(0, Math.min(pos.top, parent.height - h - 4));
+  box.style.left = left + 'px';
+  box.style.top = top + 'px';
+  box.style.right = 'auto';
+  box.style.bottom = 'auto';
+}
+let _floatingBoxResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_floatingBoxResizeTimer);
+  _floatingBoxResizeTimer = setTimeout(() => {
+    clampFloatingBox(document.getElementById('meter-box'), 'meterBoxPos');
+    clampFloatingBox(document.getElementById('cw-macro-bar'), 'cwMacroBoxPos');
+  }, 50);
+});
+
 // Draggable meter box
 (function() {
   let dragging = false, startX, startY, startLeft, startTop;
@@ -20307,6 +20335,8 @@ let meterBoxVisible = localStorage.getItem('meterBoxVisible') !== 'false'; // de
       meterBox.style.right = 'auto';
       meterBox.style.bottom = 'auto';
     } catch {}
+    // The window may have opened smaller than when the box was placed.
+    requestAnimationFrame(() => clampFloatingBox(meterBox, 'meterBoxPos'));
   }
   meterBox.addEventListener('mousedown', (e) => {
     dragging = true;
