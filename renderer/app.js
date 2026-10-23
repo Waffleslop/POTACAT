@@ -1357,6 +1357,16 @@ const setWinlinkArdopDrive = document.getElementById('set-winlink-ardop-drive');
 const setWinlinkVaraBw = document.getElementById('set-winlink-vara-bw');
 const setWinlinkPacketModem = document.getElementById('set-winlink-packet-modem');
 const setWinlinkVaraPort = document.getElementById('set-winlink-vara-port');
+// The operator's own VARA (Windows only; the section stays hidden elsewhere).
+const winlinkVaraSection = document.getElementById('winlink-vara-section');
+const setVaraHfEnable = document.getElementById('set-vara-hf-enable');
+const setVaraHfPath = document.getElementById('set-vara-hf-path');
+const setVaraFmEnable = document.getElementById('set-vara-fm-enable');
+const setVaraFmPath = document.getElementById('set-vara-fm-path');
+const setVaraFmPort = document.getElementById('set-vara-fm-port');
+const setVaraAutoLaunch = document.getElementById('set-vara-autolaunch');
+const setVaraCableIn = document.getElementById('set-vara-cable-in');
+const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
 const setTciPort = document.getElementById('set-tci-port');
@@ -2502,6 +2512,11 @@ function winlinkStampRigAudio(rigs) {
   for (const r of rigs) {
     if (r && r.id === currentActiveRigId && (cap || play)) {
       r.winlinkAudio = { captureLabel: cap || '', playbackLabel: play || '', driveLevel: drive };
+    }
+    // The virtual cable VARA is wired to (phase 4): saved on the active rig like its audio devices.
+    if (r && r.id === currentActiveRigId && setVaraCableIn && winlinkVaraSection && !winlinkVaraSection.classList.contains('hidden')) {
+      const inputId = setVaraCableIn.value || '', outputId = setVaraCableOut.value || '';
+      r.modemCable = (inputId || outputId) ? { inputId, outputId } : null;
     }
   }
   return rigs;
@@ -5117,6 +5132,47 @@ if (setMercuryEnable) {
       const p = await window.api.echocatPickFile({ title: 'Select the Pat binary', filters: [{ name: 'Executables', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }] });
       if (p) setWinlinkPatPath.value = p;
     });
+    // The operator's own VARA: Browse / Find per kind, and the virtual cable's two devices.
+    for (const kind of ['hf', 'fm']) {
+      const pathEl = kind === 'hf' ? setVaraHfPath : setVaraFmPath;
+      const statusEl = document.getElementById(`vara-${kind}-status`);
+      const browse = document.getElementById(`vara-${kind}-browse`);
+      const find = document.getElementById(`vara-${kind}-find`);
+      if (browse) browse.addEventListener('click', async () => {
+        const p = await window.api.echocatPickFile({ title: `Select ${kind === 'fm' ? 'VARAFM.exe' : 'VARA.exe'}`, filters: [{ name: 'Programs', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }] });
+        if (p) pathEl.value = p;
+      });
+      if (find) find.addEventListener('click', async () => {
+        statusEl.textContent = 'Looking…';
+        const r = await window.api.winlinkVaraFind(kind);
+        if (!r) { statusEl.textContent = 'No answer'; return; }
+        if (r.found && !pathEl.value) pathEl.value = r.path;
+        statusEl.textContent = r.text || '';
+      });
+    }
+    window.fillVaraCableDevices = async function fillVaraCableDevices(wantIn, wantOut) {
+      if (!setVaraCableIn || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      let devs = [];
+      try { devs = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+      const fill = (sel, kind, want) => {
+        sel.innerHTML = '<option value="">(none — VARA opens the radio itself)</option>';
+        let found = !want;
+        // Cables first: that is what this picker is for.
+        const list = devs.filter((d) => d.kind === kind && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+        list.sort((a, b) => (/cable|vb-audio|voicemeeter/i.test(b.label) ? 1 : 0) - (/cable|vb-audio|voicemeeter/i.test(a.label) ? 1 : 0));
+        for (const d of list) {
+          const o = document.createElement('option');
+          o.value = d.deviceId;
+          o.textContent = d.label || (kind === 'audiooutput' ? 'Speaker' : 'Microphone');
+          sel.appendChild(o);
+          if (d.deviceId === want) found = true;
+        }
+        if (!found) { const o = document.createElement('option'); o.value = want; o.textContent = 'Saved device (not found)'; sel.appendChild(o); }
+        sel.value = want || '';
+      };
+      fill(setVaraCableIn, 'audioinput', wantIn || '');
+      fill(setVaraCableOut, 'audiooutput', wantOut || '');
+    };
     const acctStatus = document.getElementById('winlink-account-status');
     const regBox = document.getElementById('winlink-register');
     const acctBtn = document.getElementById('winlink-account-check');
@@ -5148,7 +5204,7 @@ if (setMercuryEnable) {
       const src = rig.audioSource || '';
       const socket = src === 'smartsdr' || src === 'icom-network';
       via.classList.toggle('hidden', !socket);
-      pick.classList.toggle('hidden', socket);
+      pick.classList.add('hidden'); // both bundled modems ride POTACAT's audio now; the pick is for a hand-built modem only
       if (socket) via.textContent = `${rig.name || 'This radio'} is on ${src === 'smartsdr' ? 'Flex Direct' : 'Icom Network'}: the modem's audio rides POTACAT's own stream — no sound device to pick, nothing to set up.`;
       else via.textContent = '';
     };
@@ -16590,6 +16646,17 @@ async function openSettingsDialog(tab) {
     setWinlinkVaraBw.value = String(s.winlinkVaraBw || 2300);
     setWinlinkPacketModem.value = String(s.winlinkPacketModem || 1200);
     setWinlinkVaraPort.value = s.winlinkVaraPort || 8300;
+    if (winlinkVaraSection) {
+      winlinkVaraSection.classList.toggle('hidden', window.api.platform !== 'win32');
+      setVaraHfEnable.checked = s.enableVaraHf === true || (s.enableVaraHf == null && s.winlinkShowVara === true);
+      setVaraFmEnable.checked = s.enableVaraFm === true;
+      setVaraHfPath.value = s.winlinkVaraHfPath || '';
+      setVaraFmPath.value = s.winlinkVaraFmPath || '';
+      setVaraFmPort.value = s.winlinkVaraFmPort || 8310;
+      setVaraAutoLaunch.checked = s.winlinkVaraAutoLaunch !== false;
+      const cab = ((s.rigs || []).find((x) => x.id === s.activeRigId) || {}).modemCable || {};
+      if (window.fillVaraCableDevices) window.fillVaraCableDevices(cab.inputId || '', cab.outputId || '');
+    }
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     setWinlinkPatPath.value = s.winlinkPatPath || '';
     const rig = (s.rigs || []).find((x) => x.id === s.activeRigId) || {};
@@ -17470,6 +17537,14 @@ settingsSave.addEventListener('click', async () => {
       winlinkVaraBw: parseInt(setWinlinkVaraBw.value, 10) || 2300,
       winlinkPacketModem: parseInt(setWinlinkPacketModem.value, 10) === 9600 ? 9600 : 1200,
       winlinkVaraPort: parseInt(setWinlinkVaraPort.value, 10) || 8300,
+      ...(winlinkVaraSection ? {
+        enableVaraHf: setVaraHfEnable.checked,
+        enableVaraFm: setVaraFmEnable.checked,
+        winlinkVaraHfPath: setVaraHfPath.value.trim(),
+        winlinkVaraFmPath: setVaraFmPath.value.trim(),
+        winlinkVaraFmPort: parseInt(setVaraFmPort.value, 10) || 8310,
+        winlinkVaraAutoLaunch: setVaraAutoLaunch.checked,
+      } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPatPath: setWinlinkPatPath.value.trim(),
     } : {}),

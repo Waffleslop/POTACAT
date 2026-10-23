@@ -41,7 +41,7 @@ test('internet-only shape: loopback API, no rigs, no modems, no schedule, no lis
   assert.deepStrictEqual(c.listen, []);
   assert.deepStrictEqual(c.schedule, {});
   assert.deepStrictEqual(c.hamlib_rigs, {});
-  assert.ok(!c.ardop && !c.varahf);
+  assert.ok(!c.ardop && !c.varahf && !c.varafm);
   assert.strictEqual(c.auto_download_size_limit, -1);
   assert.strictEqual(c.gpsd.enable_http, false);
 });

@@ -3022,10 +3022,10 @@
         <span class="help-text" style="display:block;">Internet only, never the radio. A radio session always starts from your Send / Receive.</span>
 
         <div style="margin-top:10px;font-weight:600;">Over the radio</div>
-        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT (Windows and Linux). Mercury uses your Mercury setup above.</span>
+        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT on Windows, macOS and Linux. Their audio goes through POTACAT on every radio, using the Audio devices set for the radio in My Rigs — nothing to pick. Mercury uses your Mercury setup above.</span>
         <span class="help-text hidden" id="winlink-audio-via" style="display:block;margin-bottom:4px;color:var(--accent-green,#4ecca3);"></span>
-        <div id="winlink-audio-pick" style="margin-top:4px;">
-        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP's audio goes through POTACAT on every radio, using the Audio devices set for the radio in My Rigs — nothing to pick. Packet (Dire Wolf) still opens the radio's sound card itself; choose its devices here if the automatic pick is wrong.</span>
+        <div id="winlink-audio-pick" class="hidden" style="margin-top:4px;">
+        <span class="help-text" style="display:block;margin-bottom:4px;">Sound devices for a modem you built yourself (the bundled ones never open a sound card).</span>
         <div style="margin-top:4px;">
           <button type="button" id="winlink-ardop-discover">Find the radio's sound devices (packet)</button>
           <span class="help-text" id="winlink-ardop-status" style="margin-left:6px;"></span>
@@ -3045,12 +3045,32 @@
         <label style="margin-left:8px;">ARDOP drive level:
           <input type="number" id="set-winlink-ardop-drive" min="1" max="100" value="90" style="width:55px;"> %
         </label>
-        <label style="margin-left:8px;" class="hidden" title="VARA is not offered yet">VARA HF bandwidth:
-          <select id="set-winlink-vara-bw" style="width:80px;"><option value="500">500</option><option value="2300" selected>2300</option><option value="2750">2750</option></select>
-        </label>
-        <label style="margin-left:8px;" class="hidden" title="VARA is not offered yet">VARA port:
-          <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;">
-        </label>
+        <div id="winlink-vara-section" class="hidden" style="margin-top:10px;">
+          <div style="font-weight:600;">VARA (your own copy, Windows)</div>
+          <span class="help-text" style="display:block;margin-bottom:4px;">VARA is EA5HVK's modem, installed and licensed by you (<a href="https://rosmodem.wordpress.com/" data-external style="color:var(--accent-blue,#4fc3f7);">rosmodem.wordpress.com</a>); POTACAT points its Winlink client at it and keys the radio. In VARA set PTT to <b>None</b>. Without a licence VARA runs at reduced speed. Nothing of VARA is installed or downloaded by POTACAT.</span>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <label class="checkbox-label"><input type="checkbox" id="set-vara-hf-enable"> Use VARA HF</label>
+            <label>Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
+            <label>Port: <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;"></label>
+            <label>Bandwidth: <select id="set-winlink-vara-bw" style="width:80px;"><option value="500">500</option><option value="2300" selected>2300</option><option value="2750">2750</option></select></label>
+            <span class="help-text" id="vara-hf-status"></span>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px;">
+            <label class="checkbox-label"><input type="checkbox" id="set-vara-fm-enable"> Use VARA FM</label>
+            <label>Program: <input type="text" id="set-vara-fm-path" placeholder="C:\VARA FM\VARAFM.exe (found for you)" style="width:210px;"> <button type="button" id="vara-fm-browse">Browse&hellip;</button> <button type="button" id="vara-fm-find">Find / test</button></label>
+            <label>Port: <input type="number" id="set-vara-fm-port" min="1" max="65535" value="8310" style="width:70px;"></label>
+            <span class="help-text" id="vara-fm-status"></span>
+          </div>
+          <span class="help-text" style="display:block;">VARA FM ships on port 8300, the same as VARA HF: set 8310 in VARA FM's Settings so both can be installed.</span>
+          <label class="checkbox-label" style="margin-top:4px;"><input type="checkbox" id="set-vara-autolaunch" checked> Start VARA for me when a session needs it (it stays open; POTACAT never closes it)</label>
+          <div style="margin-top:6px;font-weight:600;">Audio between VARA and the radio</div>
+          <span class="help-text" style="display:block;margin-bottom:4px;">Recommended: a virtual audio cable (VB-Cable or similar; two cables, one each way). POTACAT carries the audio between the cable and the radio the way it does for ARDOP, so VARA never touches DAX or the radio's sound card, and it works on Flex Direct and Icom Network too. In VARA choose the cables' other ends. Leave both blank and VARA opens the radio's sound card itself.</span>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <label>From VARA (the cable POTACAT listens to): <select id="set-vara-cable-in" style="max-width:260px;"></select></label>
+            <label>To VARA (the cable POTACAT plays into): <select id="set-vara-cable-out" style="max-width:260px;"></select></label>
+          </div>
+          <span class="help-text" style="display:block;">Saved for the active radio.</span>
+        </div>
         <label style="margin-top:6px;">End a radio session after
           <input type="number" id="set-winlink-cap" min="10" max="60" value="30" style="width:50px;"> minutes
         </label>

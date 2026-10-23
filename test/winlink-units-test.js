@@ -241,7 +241,7 @@ async function test(name, fn) {
 
   console.log('winlink-modes');
   await test('telnet everywhere; radio modes need CAT, a sound device, and the right OS', () => {
-    const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8301, ardopFound: true, direwolfFound: true, showVara: true };
+    const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopFound: true, direwolfFound: true, varaHf: { enabled: true, port: 8301, cable: false } };
     const ok = M.winlinkModesFor(base);
     assert.deepStrictEqual(ok.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['mercury', true], ['vara', true]]);
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr' });
@@ -269,12 +269,12 @@ async function test(name, fn) {
     assert.ok(remote.slice(1).every((m) => /shack/.test(m.reason)));
   });
   await test('VARA on Mercury\'s port is refused with the reason; Mercury off is named', () => {
-    const clash = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, varaPort: 8300, ardopFound: true, showVara: true });
+    const clash = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopFound: true, varaHf: { enabled: true, port: 8300 } });
     assert.ok(!clash[4].available && /same port/.test(clash[4].reason));
     const off = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: false, ardopFound: true });
     assert.ok(!off[3].available && /Mercury/.test(off[3].reason));
   });
-  await test('VARA is not offered unless the hidden switch is on', () => {
+  await test('VARA is not offered unless the operator turned it on in Settings (test/winlink-vara-test.js has the rest)', () => {
     const m = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', ardopFound: true });
     assert.deepStrictEqual(m.map((x) => x.id), ['telnet', 'ardop', 'packet', 'mercury']);
   });

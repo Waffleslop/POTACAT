@@ -143,7 +143,8 @@ test('modem audio rides POTACAT\'s radio link on Flex Direct / Icom Network — 
   assert.ok(/capture: dev, playback: dev/.test(sock) && /tcp:\$\{winlinkAudio\.port\}/.test(fnBody(main, 'winlinkModemAudioReady')), 'ardopcf gets tcp:<port> for both devices');
   assert.ok(/return spawnArdopSocket\(\); \/\/ every rig/.test(fnBody(main, 'spawnArdop')), 'ardopcf is always on the socket');
   const tx = fnBody(main, 'startWinlinkAudio');
-  assert.ok(/if \(!winlinkTxActive\) return;/.test(tx) && /pushTxAudioChunk\(mono24k\)/.test(tx) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(tx), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
+  const dispatch = fnBody(main, 'winlinkDispatchTx');
+  assert.ok(/if \(!winlinkTxActive\) return;[\s\S]{0,80}winlinkDispatchTx\(mono24k\)/.test(tx) && /pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
   assert.ok(/icomNetworkVoiceTx\(true, 'Winlink'\)/.test(fnBody(main, 'startWinlinkShim')), 'Icom voice TX opens with the key-down');
   assert.ok(/new ModemAudioServer\(/.test(tx) && /listen\(0\)/.test(tx));
 });
@@ -224,9 +225,6 @@ test('Pat and ardopcf are packaged, attributed and pinned', () => {
   assert.ok(/ldd "\$OUT\/direwolf\$EXE" \| grep -qi 'libhamlib'/.test(script), 'the build refuses a Dire Wolf without Hamlib');
   assert.ok(read('.github/workflows/release.yml').split('build-winlink-helpers.sh').length > 5, 'every release job builds them');
 });
-
-console.log(`\n${pass} passed, ${fail} failed`);
-if (fail) process.exit(1);
 
 console.log('power and SWR in the mail window');
 test('the mail window gets the RF power setting, forward power and SWR, and sets power through rig-control', () => {
@@ -346,14 +344,14 @@ console.log('the modem audio bridge (every rig, no device picker for ARDOP)');
 test('on a sound-device rig the bridge window carries the modem audio; the modem never opens a device', () => {
   assert.ok(/function winlinkSocketAudioRoute\(\) \{ return true; \}/.test(main), 'every rig is a socket rig');
   assert.ok(/function winlinkIpAudioRoute\(\)/.test(main));
-  const srv = fnBody(main, 'startWinlinkAudio');
+  const srv = fnBody(main, 'winlinkDispatchTx');
   assert.ok(/audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-tx', \{ pcm: mono24k \}\)/.test(srv), 'TX goes to the bridge window on a sound-device rig');
   const spawn = fnBody(main, 'winlinkModemAudioReady');
   assert.ok(/if \(!winlinkIpAudioRoute\(\)\) \{[\s\S]*?modemBridgeReady\(10000\)[\s\S]*?throw new Error\(modemBridge\.error/.test(spawn), 'the session waits for the bridge and fails with its reason');
   assert.ok(/ipcMain\.on\('modem-bridge-rx'[\s\S]{0,400}winlinkFeedRx\(pcm, /.test(main), 'bridge RX feeds the server (and the waterfall)');
   assert.ok(/if \(s\.captureEnded && winlinkSessionActive\(\)\) winlinkAbortSession\(modemBridge\.error\);/.test(main), 'an unplugged device ends the session');
   assert.ok(/try \{ stopModemBridge\('quit'\); \} catch \{\}/.test(main), 'stopped at quit');
-  const start = fnBody(main, 'startModemBridge');
+  const start = fnBody(main, 'ensureModemBridgeWindow');
   assert.ok(/backgroundThrottling: false/.test(start), 'a throttled worklet starves the modem');
   const page = read('renderer/modem-audio-bridge.js');
   assert.ok(/deviceId: \{ exact: c\.inputId \}/.test(page) && /microphone was NOT used/.test(page), 'the chosen device exactly, never the default mic');
@@ -361,3 +359,9 @@ test('on a sound-device rig the bridge window carries the modem audio; the modem
   // Nothing in the repo ships, downloads or bundles a device-opening modem path for ARDOP.
   assert.ok(!/proposeArdopDevices\(/.test(fnBody(main, 'spawnArdop')), 'no device pick for ARDOP');
 });
+
+// The summary LAST. Until 2026-10-23 it sat above the later sections, so a
+// failure down here never reached the exit code — two stale assertions rode
+// through CI that way.
+console.log(`\n${pass} passed, ${fail} failed`);
+if (fail) process.exit(1);

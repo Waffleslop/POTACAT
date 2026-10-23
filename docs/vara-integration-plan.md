@@ -1,6 +1,6 @@
 # VARA HF and VARA FM in POTACAT Winlink — plan
 
-**Status (2026-10-23): planned, not started.** Owner: desktop. Casey asked for the plan after the
+**Status (2026-10-23): BUILT as modem-audio-bridge phase 4 — VARA HF and VARA FM via the virtual cable (`lib/vara-process.js`, the cable side of `renderer/modem-audio-bridge.js`, `rig.modemCable`, Settings > Station > Winlink "VARA (your own copy, Windows)"); the DAX / direct-device route stays as the fallback when no cable is set. Not yet run against a real VARA (no VARA on the dev PC; the spike in Phases below is still owed by the first operator who has one). Tests: `test/winlink-vara-test.js`.** Owner: desktop. Casey asked for the plan after the
 gateway census below. Decision context: Casey prefers open modems (ARDOP is bundled, Mercury is
 listed); VARA is **bring-your-own** — nothing of VARA is ever shipped, downloaded, licensed or
 configured for the operator beyond pointing Pat at it. VARA HF is already built behind a hidden

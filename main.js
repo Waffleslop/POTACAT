@@ -397,6 +397,7 @@ const WinlinkStateLib = require('./lib/winlink-state');
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
+const VaraProcess = require('./lib/vara-process');
 const WinlinkModes = require('./lib/winlink-modes');
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioServer } = ModemAudioServerMod;
@@ -725,6 +726,10 @@ const GLOBAL_KEYS = new Set([
   'winlinkArdopPath',  // Winlink: explicit ardopcf binary on THIS machine
   'winlinkArdopPort',  // Winlink: ardopcf host port on this machine (default 8515)
   'winlinkVaraPort',   // Winlink: the operator's own VARA HF TNC port on this machine (default 8300)
+  'winlinkVaraFmPort', // Winlink: the operator's own VARA FM port on this machine (default 8310 — VARA FM ships on 8300 too)
+  'winlinkVaraHfPath', // Winlink: where VARA.exe is on THIS machine (blank = the usual places)
+  'winlinkVaraFmPath', // Winlink: where VARAFM.exe is on THIS machine
+  'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT)
   'winlinkDirewolfPath', // Winlink: explicit Dire Wolf binary on THIS machine
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
   'winlinkWaterfallSpeed', // mail-window waterfall lines/sec — a display property of this screen (as jtcatWaterfallSpeed)
@@ -8454,14 +8459,94 @@ function winlinkModes() {
     varaPort: _winlinkVaraPort(),
     ardopFound: ArdopProcess.ardopSupported(process.platform) ? findArdop().found : false,
     direwolfFound: DirewolfProcess.direwolfSupported(process.platform) ? findDirewolf().found : false,
-    ardopSocketAudio: true, // ardopcf carries POTACAT's socket audio backend (Flex Direct / Icom Network need no sound card)
-    showVara: settings.winlinkShowVara === true, // hidden: VARA is not offered in the first release
+    ardopSocketAudio: true, // ardopcf and Dire Wolf carry POTACAT's socket audio backends (no sound card of their own on any rig)
+    // The operator's own VARA (Windows): listed only when turned on in Settings.
+    varaHf: { enabled: _winlinkVaraEnabled('hf'), port: _winlinkVaraPort(), cable: winlinkCableConfigured() },
+    varaFm: { enabled: _winlinkVaraEnabled('fm'), port: _winlinkVaraFmPort(), cable: winlinkCableConfigured() },
   });
 }
 
 function _winlinkVaraPort() {
   const n = parseInt(settings.winlinkVaraPort, 10);
   return n > 0 && n < 65536 ? n : WinlinkPat.PAT_DEFAULTS.varaPort;
+}
+function _winlinkVaraFmPort() {
+  const n = parseInt(settings.winlinkVaraFmPort, 10);
+  return n > 0 && n < 65536 ? n : WinlinkPat.PAT_DEFAULTS.varaFmPort;
+}
+/** The operator turned this VARA on (the old hidden `winlinkShowVara` switch counts as VARA HF on). */
+function _winlinkVaraEnabled(kind) {
+  if (kind === 'fm') return settings.enableVaraFm === true;
+  if (settings.enableVaraHf != null) return settings.enableVaraHf === true;
+  return settings.winlinkShowVara === true;
+}
+function findVara(kind) {
+  return _findBinary(VaraProcess.varaPathCandidates({ settings, kind }), VaraProcess.varaBinaryName(kind));
+}
+
+/**
+ * The operator's VARA must be running before Pat is pointed at it: probe its
+ * port, start the program for them when asked (detached, their window, never
+ * stopped by POTACAT), wait for the port, or say exactly what is missing.
+ */
+async function winlinkVaraReady(mode) {
+  const kind = VaraProcess.kindOfMode(mode);
+  const name = VaraProcess.varaName(kind);
+  const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
+  let probe = await VaraProcess.probeVaraPort(port);
+  if (!probe.ok) {
+    const bin = findVara(kind);
+    if (settings.winlinkVaraAutoLaunch !== false && bin.found) {
+      winlinkLog(`${name}: nothing on 127.0.0.1:${port} — starting ${bin.path}`);
+      try {
+        const child = spawn(bin.path, [], { ...VaraProcess.varaSpawnOptions(), cwd: path.dirname(bin.path) });
+        child.on('error', (e) => winlinkLog(`${name}: could not start: ${e.message}`));
+        child.unref();
+      } catch (e) {
+        throw new Error(`${name} could not be started (${e.message}) — start it yourself, with its PTT set to None`);
+      }
+      const until = Date.now() + VaraProcess.VARA_DEFAULTS.launchWaitMs;
+      while (!probe.ok && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 1000));
+        probe = await VaraProcess.probeVaraPort(port);
+      }
+      if (!probe.ok) throw new Error(`${name} was started but is not answering on port ${port} — check the port in its Settings (POTACAT expects ${port}) and that its PTT is set to None`);
+    } else if (bin.found) {
+      throw new Error(`${name} is not running — start it (with its PTT set to None), or turn on "Start VARA for me" in Settings > Station > Winlink`);
+    } else {
+      throw new Error(`${name} is not answering on port ${port} and its program was not found — start it yourself, or set its path in Settings > Station > Winlink`);
+    }
+  }
+  winlinkLog(`${name} ready on 127.0.0.1:${port}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
+}
+
+/**
+ * VARA's audio: through the virtual cable POTACAT bridges to the radio
+ * (recommended — VARA never touches the radio's device, works on Flex Direct
+ * and Icom Network too), or VARA opens the radio's sound card itself.
+ * @returns {Promise<'cable'|'direct'>}
+ */
+async function winlinkVaraAudioReady() {
+  if (!winlinkCableConfigured()) {
+    if (winlinkIpAudioRoute()) throw new Error(`VARA cannot open this radio's audio (${winlinkAudioRouteName()}) — set up the virtual audio cable in Settings > Station > Winlink`);
+    winlinkLog('vara: no virtual cable set — VARA opens the radio\'s sound card itself (choose the radio\'s devices in VARA)');
+    return 'direct';
+  }
+  if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected — the radio must be on for VARA');
+  if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error('Icom Network audio is not connected — the radio must be on for VARA');
+  if (!winlinkIpAudioRoute()) {
+    // The radio side carries the cable's audio to and from the sound card.
+    if (modemBridge.state === 'off') startModemBridge({ playback: true });
+    else if (!modemBridge.playback) modemBridgePlayback(true);
+    const ok = await modemBridgeReady(10000);
+    if (!ok) throw new Error(modemBridge.error || 'The radio\'s sound card did not open in time — see the [Winlink] lines in the log');
+  }
+  startModemBridgeCable();
+  const ok = await modemBridgeCableReady(10000);
+  if (!ok) throw new Error(modemBridge.cable.error || 'The virtual audio cable did not open in time — check the two cable devices in Settings > Station > Winlink');
+  const c = modemBridge.cable;
+  winlinkLog(`vara: audio via the virtual cable (${c.captureLabel || 'from VARA'} → radio, radio → ${c.playbackLabel || 'to VARA'}) and ${winlinkAudioRouteName()}`);
+  return 'cable';
 }
 function _winlinkArdopPort() {
   const n = parseInt(settings.winlinkArdopPort, 10);
@@ -8490,21 +8575,24 @@ function winlinkPayload() {
       const rig = winlinkActiveRig();
       const a = (rig && rig.winlinkAudio) || {};
       const modes = winlinkState.snapshot().modes;
-      const packetOn = modes.some((m) => m.available && m.id === 'packet');
-      const anyRadio = modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet'));
+      const anyRadio = modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet' || m.id === 'vara' || m.id === 'varafm'));
+      const cableDev = winlinkCableDevices();
+      const cable = { configured: !!(cableDev.inputId && cableDev.outputId), state: modemBridge.cable.state, error: modemBridge.cable.error, capture: modemBridge.cable.captureLabel || '', playback: modemBridge.cable.playbackLabel || '' };
       // `needed`/`ready` = "does the packet picker still have work": Dire Wolf
       // opens the sound card itself until its socket patch (plan phase 3).
       // ARDOP never needs a pick on any rig — the bridge carries its audio.
       if (winlinkIpAudioRoute()) {
         const via = winlinkAudioRouteName();
-        return { needed: anyRadio, ready: true, viaPotacat: true, capture: via, playback: via, rigName: (rig && rig.name) || '' };
+        return { needed: anyRadio, ready: true, viaPotacat: true, capture: via, playback: via, cable, rigName: (rig && rig.name) || '' };
       }
-      const packetReady = !!(a.captureLabel && a.playbackLabel);
+      // No device pick is left for any modem: ARDOP and Dire Wolf ride the
+      // bridge; VARA rides the virtual cable (`cable`) or opens the radio itself.
       return {
-        needed: anyRadio, ready: !packetOn || packetReady, viaPotacat: true,
+        needed: anyRadio, ready: true, viaPotacat: true,
         capture: modemBridge.captureLabel || 'the radio\'s audio input', playback: modemBridge.playbackLabel || 'the radio\'s audio output',
         bridge: { state: modemBridge.state, error: modemBridge.error },
-        packet: { needed: packetOn, ready: packetReady, capture: a.captureLabel || '', playback: a.playbackLabel || '' },
+        packet: { needed: false, ready: true, capture: a.captureLabel || '', playback: a.playbackLabel || '' },
+        cable,
         rigName: (rig && rig.name) || '',
       };
     })(),
@@ -8564,6 +8652,7 @@ function writePatConfig({ varaAddr } = {}) {
       ardopBw: settings.winlinkArdopBw,
       varaAddr: addr,
       varaBw: settings.winlinkVaraBw,
+      varaFmAddr: `127.0.0.1:${_winlinkVaraFmPort()}`,
       agwPort: _winlinkAgwPort(),
     },
   });
@@ -8679,6 +8768,7 @@ function winlinkOnPatEvent(ev) {
 
 function winlinkTransportDownText(mode) {
   if (mode === 'vara') return `VARA HF is not answering on port ${_winlinkVaraPort()} — start VARA (and set its PTT to None) first`;
+  if (mode === 'varafm') return `VARA FM is not answering on port ${_winlinkVaraFmPort()} — start VARA FM (PTT None; port ${_winlinkVaraFmPort()} in its Settings) first`;
   if (mode === 'mercury') return 'Mercury is not answering — check Mercury in Settings > Station';
   if (mode === 'ardop') return 'ardopcf is not answering — see the [Winlink] ardop lines above';
   return 'The modem is not answering';
@@ -8887,13 +8977,7 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
   srv.on('tx', (mono24k) => {
     if (!winlinkTxActive) return; // the modem only sends while it has PTT; anything else is a stray
-    if (settings.audioSource === 'smartsdr') {
-      if (smartSdrAudio && smartSdrAudio.txReady) smartSdrAudio.pushTxAudioChunk(mono24k);
-    } else if (settings.audioSource === 'icom-network') {
-      pushIcomNetworkVoiceChunk(mono24k);
-    } else if (modemBridgeWin && !modemBridgeWin.isDestroyed() && modemBridge.playback) {
-      audioSafeSend(modemBridgeWin.webContents, 'modem-bridge-tx', { pcm: mono24k });
-    }
+    winlinkDispatchTx(mono24k);
   });
   try {
     await srv.listen(0);
@@ -8939,15 +9023,33 @@ async function winlinkModemAudioReady({ modemRate, modemName }) {
 // session — and adds playback for the length of a session. Hidden, never
 // shown; destroyed when nothing wants it, and in gracefulCleanup.
 let modemBridgeWin = null;
-const modemBridge = { state: 'off', error: '', captureLabel: '', playbackLabel: '', playback: false, sampleRate: 0, level: 0, startedAt: 0 };
+let _modemBridgeLoaded = false;
+const modemBridge = {
+  state: 'off', error: '', captureLabel: '', playbackLabel: '', playback: false, sampleRate: 0, level: 0, startedAt: 0,
+  // The CABLE side (phase 4): the virtual audio cable VARA is wired to. Capture
+  // = what VARA transmits (→ the radio while it has PTT); playback = what VARA
+  // hears (the radio's receive audio). Session-only, radio side or not.
+  cable: { state: 'off', error: '', captureLabel: '', playbackLabel: '', sampleRate: 0, level: 0 },
+};
 const _modemBridgeWaiters = [];
+const _modemBridgeCableWaiters = [];
 function modemBridgeDevices() {
   const rig = winlinkActiveRig();
   return { inputId: (rig && rig.remoteAudioInput) || settings.remoteAudioInput || '', outputId: (rig && rig.remoteAudioOutput) || settings.remoteAudioOutput || '' };
 }
+/** The virtual cable's two endpoints as POTACAT opens them (rig.modemCable: inputId = the cable VARA plays into, outputId = the cable VARA listens to). */
+function winlinkCableDevices() {
+  const rig = winlinkActiveRig();
+  const c = (rig && rig.modemCable) || {};
+  return { inputId: c.inputId || '', outputId: c.outputId || '' };
+}
+function winlinkCableConfigured() {
+  const c = winlinkCableDevices();
+  return !!(c.inputId && c.outputId);
+}
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
-  if (!winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet'))) return false;
+  if (!winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet' || ((m.id === 'vara' || m.id === 'varafm') && winlinkCableConfigured())))) return false;
   return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive());
 }
 function modemBridgeSettle(ok) {
@@ -8967,9 +9069,46 @@ function startModemBridge({ playback } = {}) {
   const cfg = { ...dev, playback: !!playback, txGain: _jtcatDirectTxGainLevel };
   modemBridge.state = 'starting'; modemBridge.error = ''; modemBridge.playback = !!playback; modemBridge.startedAt = Date.now();
   if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
-    modemBridgeWin.webContents.send('modem-bridge-start', cfg);
+    if (_modemBridgeLoaded) modemBridgeWin.webContents.send('modem-bridge-start', cfg);
+    return; // not loaded yet: did-finish-load sends the start for every side that wants one
+  }
+  ensureModemBridgeWindow();
+  winlinkLog(`modem audio bridge: opening the radio's sound card (${dev.inputId ? 'input set' : 'NO input set'}, ${dev.outputId ? 'output set' : 'NO output set'})`);
+}
+/** The cable side: the virtual cable VARA is wired to (capture = VARA's TX, playback = the radio's RX for VARA). */
+function startModemBridgeCable() {
+  const dev = winlinkCableDevices();
+  modemBridge.cable.state = 'starting'; modemBridge.cable.error = '';
+  if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
+    if (_modemBridgeLoaded) modemBridgeWin.webContents.send('modem-bridge-cable-start', { ...dev, txGain: 1 });
     return;
   }
+  ensureModemBridgeWindow();
+  winlinkLog(`modem audio bridge: opening the virtual cable for VARA (${dev.inputId ? 'from-VARA set' : 'NO from-VARA device'}, ${dev.outputId ? 'to-VARA set' : 'NO to-VARA device'})`);
+}
+function stopModemBridgeCable() {
+  if (modemBridge.cable.state === 'off') return;
+  if (modemBridgeWin && !modemBridgeWin.isDestroyed() && _modemBridgeLoaded) { try { modemBridgeWin.webContents.send('modem-bridge-cable-stop'); } catch {} }
+  modemBridge.cable = { state: 'off', error: '', captureLabel: '', playbackLabel: '', sampleRate: 0, level: 0 };
+  _cableRxResampler = null; _cableTxResampler = null;
+  modemBridgeCableSettle(false);
+}
+function modemBridgeCableSettle(ok) {
+  while (_modemBridgeCableWaiters.length) { const w = _modemBridgeCableWaiters.shift(); clearTimeout(w.timer); w.resolve(ok); }
+}
+function modemBridgeCableReady(timeoutMs = 8000) {
+  const c = modemBridge.cable;
+  if (c.state === 'ok') return Promise.resolve(true);
+  if (c.state === 'error' || c.state === 'off') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const w = { resolve, timer: setTimeout(() => { const i = _modemBridgeCableWaiters.indexOf(w); if (i >= 0) _modemBridgeCableWaiters.splice(i, 1); resolve(modemBridge.cable.state === 'ok'); }, timeoutMs) };
+    _modemBridgeCableWaiters.push(w);
+  });
+}
+/** Create the hidden window once; on load, start every side that is waiting. */
+function ensureModemBridgeWindow() {
+  if (modemBridgeWin && !modemBridgeWin.isDestroyed()) return;
+  _modemBridgeLoaded = false;
   modemBridgeWin = new BrowserWindow({
     width: 320, height: 200, show: false, skipTaskbar: true,
     webPreferences: {
@@ -8982,10 +9121,16 @@ function startModemBridge({ playback } = {}) {
   modemBridgeWin.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
   modemBridgeWin.loadFile(path.join(__dirname, 'renderer', 'modem-audio-bridge.html'));
   modemBridgeWin.webContents.on('did-finish-load', () => {
-    if (modemBridgeWin && !modemBridgeWin.isDestroyed()) modemBridgeWin.webContents.send('modem-bridge-start', { ...modemBridgeDevices(), playback: modemBridge.playback, txGain: _jtcatDirectTxGainLevel });
+    if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
+    _modemBridgeLoaded = true;
+    if (modemBridge.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-start', { ...modemBridgeDevices(), playback: modemBridge.playback, txGain: _jtcatDirectTxGainLevel });
+    if (modemBridge.cable.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-cable-start', { ...winlinkCableDevices(), txGain: 1 });
   });
-  modemBridgeWin.on('closed', () => { modemBridgeWin = null; if (modemBridge.state !== 'off') { modemBridge.state = 'off'; modemBridgeSettle(false); } });
-  winlinkLog(`modem audio bridge: opening the radio's sound card (${dev.inputId ? 'input set' : 'NO input set'}, ${dev.outputId ? 'output set' : 'NO output set'})`);
+  modemBridgeWin.on('closed', () => {
+    modemBridgeWin = null; _modemBridgeLoaded = false;
+    if (modemBridge.state !== 'off') { modemBridge.state = 'off'; modemBridgeSettle(false); }
+    if (modemBridge.cable.state !== 'off') { modemBridge.cable.state = 'off'; modemBridgeCableSettle(false); }
+  });
 }
 function stopModemBridge(why) {
   if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
@@ -8996,12 +9141,34 @@ function stopModemBridge(why) {
   }
   modemBridge.state = 'off'; modemBridge.playback = false; modemBridge.captureLabel = ''; modemBridge.playbackLabel = ''; modemBridge.error = '';
   modemBridgeSettle(false);
+  modemBridge.cable = { state: 'off', error: '', captureLabel: '', playbackLabel: '', sampleRate: 0, level: 0 };
+  _cableRxResampler = null; _cableTxResampler = null;
+  modemBridgeCableSettle(false);
 }
 /** Open or close the bridge to match demand; call whenever demand may have changed. */
 function winlinkSyncModemBridge() {
   const want = modemBridgeWanted();
-  if (want && !modemBridgeWin) startModemBridge({ playback: winlinkSessionActive() });
-  else if (!want && modemBridgeWin) stopModemBridge();
+  if (want && modemBridge.state === 'off') startModemBridge({ playback: winlinkSessionActive() });
+  else if (!want && modemBridgeWin && modemBridge.cable.state === 'off') stopModemBridge();
+  else if (!want && modemBridge.state !== 'off' && modemBridgeWin) {
+    // The cable side still runs (a VARA session): drop only the radio side.
+    try { modemBridgeWin.webContents.send('modem-bridge-stop-radio'); } catch {}
+    modemBridge.state = 'off'; modemBridge.playback = false; modemBridge.captureLabel = ''; modemBridge.playbackLabel = ''; modemBridge.error = '';
+    modemBridgeSettle(false);
+  }
+}
+let _cableRxResampler = null;   // radio RX (any rate) → 24 kHz for the cable's play worklet
+let _cableTxResampler = null;   // VARA's TX (the cable's capture rate) → 24 kHz for the radio TX path
+let _cableRxRate = 0, _cableTxRate = 0;
+/** The one place modem TX audio (24 kHz mono) meets the radio: Flex stream, Icom Network, or the radio side of the bridge. */
+function winlinkDispatchTx(mono24k) {
+  if (settings.audioSource === 'smartsdr') {
+    if (smartSdrAudio && smartSdrAudio.txReady) smartSdrAudio.pushTxAudioChunk(mono24k);
+  } else if (settings.audioSource === 'icom-network') {
+    pushIcomNetworkVoiceChunk(mono24k);
+  } else if (modemBridgeWin && !modemBridgeWin.isDestroyed() && modemBridge.playback) {
+    audioSafeSend(modemBridgeWin.webContents, 'modem-bridge-tx', { pcm: mono24k });
+  }
 }
 function modemBridgePlayback(on) {
   modemBridge.playback = !!on;
@@ -9013,6 +9180,13 @@ function modemBridgePlayback(on) {
 /** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
 function winlinkFeedRx(pcm, sampleRate) {
   if (winlinkAudio && winlinkAudio.connected) winlinkAudio.feedRx(pcm, sampleRate);
+  // VARA hears the radio through the virtual cable: the cable side's playback.
+  if (modemBridge.cable.state === 'ok' && modemBridgeWin && !modemBridgeWin.isDestroyed()) {
+    const f32 = pcm instanceof Float32Array ? pcm : new Float32Array(pcm);
+    if (sampleRate !== _cableRxRate) { _cableRxRate = sampleRate; _cableRxResampler = sampleRate === 24000 ? null : new mercuryAudioBridge.StreamingResampler(sampleRate, 24000); }
+    const out = _cableRxResampler ? _cableRxResampler.process(f32) : f32;
+    if (out.length) audioSafeSend(modemBridgeWin.webContents, 'modem-bridge-cable-tx', { pcm: out });
+  }
   // The mail window's waterfall ("is this frequency in use?") on the rigs
   // whose audio only main has; a sound-device rig's window captures its own.
   if (_winlinkWatchAudio && winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) {
@@ -9331,6 +9505,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (mode === 'ardop') await spawnArdop();
       if (mode === 'packet') await spawnDirewolf();
       if (mode === 'mercury') winlinkHandMercuryToPat();
+      if (mode === 'vara' || mode === 'varafm') { await winlinkVaraReady(mode); await winlinkVaraAudioReady(); }
       if (mode === 'mercury' || mode === 'vara') {
         const want = mode === 'mercury' ? `127.0.0.1:${mercuryProcess.mercuryPorts(settings).control}` : `127.0.0.1:${_winlinkVaraPort()}`;
         if (want !== _patVaraAddr) {
@@ -9342,8 +9517,8 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (radio) {
         // POTACAT's own QSY first, in data mode, so the rig preset for digital
         // fires and the operator sees the move before Pat keys anything.
-        // Packet is FM (an Icom keys it in FM-D through forceDataMode); HF modems are USB data.
-        tuneRadio(Number(dialKhz), mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
+        // Packet and VARA FM are FM (an Icom keys it in FM-D through forceDataMode); HF modems are USB data.
+        tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
         winlinkState.setSession({ tuned: true });
         winlinkFlexDaxOn();
         _winlinkShimArmed = true;
@@ -9443,7 +9618,8 @@ function winlinkEndSession(state, text, received = 0) {
     }
     winlinkFlexDaxRestore();
     releaseRadio('winlink');
-    if (modemBridgeWin) modemBridgePlayback(false);
+    stopModemBridgeCable();
+    if (modemBridgeWin && modemBridge.state !== 'off') modemBridgePlayback(false);
     setTimeout(winlinkSyncModemBridge, 0);
   }
   winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', errorKind: state === 'error' ? (_winlinkSessionErrorKind || 'failed') : '', ptt: false, prompt: null });
@@ -9634,7 +9810,7 @@ async function winlinkGateways(mode, band) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   // Winlink lists Mercury-capable gateways under VARA (Mercury speaks VARA's
   // TNC protocol); the operator's own tagged list rides on top.
-  const patMode = mode === 'ardop' ? 'ardop' : mode === 'packet' ? 'packet' : 'varahf';
+  const patMode = mode === 'ardop' ? 'ardop' : mode === 'packet' ? 'packet' : mode === 'varafm' ? 'varafm' : 'varahf';
   try {
     let list = await patClient.rmslist({ mode: patMode, band });
     if (mode === 'mercury') {
@@ -9793,7 +9969,10 @@ function winlinkDiagLine() {
   return `${p.patReady ? `Pat ready :${_patHttpPort}` : `Pat not ready${p.patError ? ' (' + p.patError + ')' : ''}`}`
     + `, shim :${_winlinkShimPort || '-'}, mode ${settings.winlinkDefaultMode || 'telnet'}`
     + `, password ${settings.winlinkPassword ? 'set' : 'MISSING'}, notice ${settings.winlinkNoticeAcceptedAt ? 'accepted' : 'not accepted'}`
-    + `, session ${s.state}${s.error ? ' (' + s.error + ')' : ''}, ${audioLine}`;
+    + `, session ${s.state}${s.error ? ' (' + s.error + ')' : ''}, ${audioLine}`
+    + `, ${VaraProcess.describeVara('hf', { enabled: _winlinkVaraEnabled('hf'), found: findVara('hf').found })}`
+    + `, ${VaraProcess.describeVara('fm', { enabled: _winlinkVaraEnabled('fm'), found: findVara('fm').found })}`
+    + `, cable ${winlinkCableConfigured() ? (modemBridge.cable.state === 'off' ? 'set' : modemBridge.cable.state + (modemBridge.cable.error ? ' ' + modemBridge.cable.error : '')) : 'not set'}`;
 }
 
 
@@ -33190,6 +33369,38 @@ app.whenReady().then(() => {
     const pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm.buffer ? d.pcm.buffer : d.pcm);
     winlinkFeedRx(pcm, Number(d.sampleRate) || 48000);
   });
+  // The cable side: what VARA transmits into the virtual cable → the radio,
+  // only while VARA has PTT (through Pat and the shim); anything else is a
+  // stray and VARA's idle hiss must never reach the transmitter.
+  ipcMain.on('modem-bridge-cable-rx', (e, d) => {
+    if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents || !d || !d.pcm) return;
+    if (!winlinkTxActive) return;
+    const pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm.buffer ? d.pcm.buffer : d.pcm);
+    const rate = Number(d.sampleRate) || 48000;
+    if (rate !== _cableTxRate) { _cableTxRate = rate; _cableTxResampler = rate === 24000 ? null : new mercuryAudioBridge.StreamingResampler(rate, 24000); }
+    const out = _cableTxResampler ? _cableTxResampler.process(pcm) : pcm;
+    if (out.length) winlinkDispatchTx(out);
+  });
+  ipcMain.on('modem-bridge-cable-status', (e, s = {}) => {
+    if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents) return;
+    const c = modemBridge.cable;
+    if (typeof s.level === 'number') { c.level = s.level; return; }
+    if (s.stopped) return;
+    if (s.ok) {
+      c.state = 'ok'; c.error = '';
+      if (s.captureLabel) c.captureLabel = s.captureLabel;
+      if (s.playbackLabel) c.playbackLabel = s.playbackLabel;
+      if (s.sampleRate) c.sampleRate = s.sampleRate;
+      winlinkLog(`modem audio bridge: virtual cable ${c.captureLabel || 'from VARA'} → radio, radio → ${c.playbackLabel || 'to VARA'} ready${c.sampleRate ? ' at ' + c.sampleRate + ' Hz' : ''}`);
+      modemBridgeCableSettle(true);
+    } else {
+      c.state = 'error'; c.error = String(s.error || 'unknown error');
+      winlinkLog(`modem audio bridge (cable): ${c.error}`);
+      modemBridgeCableSettle(false);
+      if (s.captureEnded && winlinkSessionActive()) winlinkAbortSession(c.error);
+    }
+    winlinkPush();
+  });
   ipcMain.on('modem-bridge-status', (e, s = {}) => {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents) return;
     if (typeof s.level === 'number') { modemBridge.level = s.level; return; }
@@ -33242,6 +33453,14 @@ app.whenReady().then(() => {
     return rig ? { ok: true, inputId: rig.remoteAudioInput || '', outputId: rig.remoteAudioOutput || '', rigName: rig.name || '' } : { ok: false };
   });
   ipcMain.handle('winlink-audio-auto', (_e, o = {}) => winlinkAutoAudio(o));
+  // The operator's own VARA: where it is, and whether it answers (Settings "Find" / "Test").
+  ipcMain.handle('winlink-vara-find', async (_e, o = {}) => {
+    const kind = o.kind === 'fm' ? 'fm' : 'hf';
+    const bin = findVara(kind);
+    const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
+    const probe = await VaraProcess.probeVaraPort(port, { timeoutMs: 1500 });
+    return { kind, found: bin.found, path: bin.found ? bin.path : '', port, running: probe.ok, version: probe.version || '', text: VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe }) };
+  });
   ipcMain.handle('winlink-audio-save', (_e, o = {}) => {
     if (!o.captureLabel || !o.playbackLabel) return { ok: false, error: 'Choose both' };
     const ok = winlinkSaveRigAudio(o);
@@ -38292,7 +38511,7 @@ app.whenReady().then(() => {
     // keys keeps main's — otherwise the next rig edit would wipe them and the
     // checklist would nag about steps that already work.
     if (Array.isArray(newSettings.rigs) && Array.isArray(settings.rigs)) {
-      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio'];
+      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio', 'modemCable'];
       newSettings.rigs = newSettings.rigs.map((r) => {
         const cur = r && settings.rigs.find(x => x && x.id === r.id);
         if (!cur) return r;
@@ -38347,7 +38566,7 @@ app.whenReady().then(() => {
     // Winlink (Pat) relaunches only for keys baked into its config / launch.
     // The password is in pat-config.json, so a new one needs a relaunch too.
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
-    const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort',
+    const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort',
       'winlinkArdopBw', 'winlinkVaraBw', 'winlinkAgwPort', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
     const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
