@@ -6647,10 +6647,15 @@ async function connectCat() {
     // 2026-10-04: "I can't figure out how to select no CAT").
     cat = null;
     _currentFreqHz = 0;
+    closeNocatPttPort();
     sendCatStatus({ connected: false, noCat: true });
-    sendCatLog('[CAT] No CAT control for this radio: tune it by hand, and its VOX keys on POTACAT\'s audio. Spot clicks and band buttons will show the frequency to set.');
+    const keyed = target.ptt === 'cm108' ? 'the USB sound card keys it'
+      : target.ptt === 'serial' ? `${target.pttLine === 'dtr' ? 'DTR' : 'RTS'} on ${target.pttPort || '(no PTT port set)'} keys it`
+      : 'its VOX keys on POTACAT\'s audio';
+    sendCatLog(`[CAT] No CAT control for this radio: tune it by hand, and ${keyed}. Spot clicks and band buttons will show the frequency to set.`);
     return;
   }
+  closeNocatPttPort();
   if (target.type === 'icom-network' && !_icomNetworkConnectRetryActive && !_icomNetworkConnectRetryTimer) {
     clearIcomNetworkConnectRetry(true);
   }
@@ -18567,6 +18572,98 @@ function connectCwKeyPort() {
   });
 }
 
+// ── No-CAT serial PTT line ─────────────────────────────────────────────
+// A radio with no CAT whose interface keys it from a serial control line
+// (Digirig Mobile: RTS -> PTT; the Yaesu FTM-510D's DATA jack PKS pin,
+// 2026-10-23). Opened lazily on the first key-down and kept open — opening a
+// port blips DTR/RTS on most drivers, which would be a stray key-up/down per
+// transmission — both lines dropped at open (hupcl drops them again on
+// close), then the chosen line follows PTT. Closed on a rig change and at quit.
+let _nocatPttPort = null;
+let _nocatPttPath = '';
+let _nocatPttOpening = false;
+let _nocatPttPending = null;   // the state asked for while the open is in flight
+let _nocatPttFailedPath = '';  // one FAILED line per port, not one per edge
+
+function closeNocatPttPort() {
+  const port = _nocatPttPort;
+  _nocatPttPort = null;
+  _nocatPttPath = '';
+  _nocatPttPending = null;
+  if (!port || !port.isOpen) return;
+  try {
+    port.set({ dtr: false, rts: false }, () => { try { port.close(() => {}); } catch {} });
+  } catch { try { port.close(() => {}); } catch {} }
+}
+
+function nocatSerialPtt(state, target) {
+  const portPath = String(target.pttPort || '').trim();
+  const line = target.pttLine === 'dtr' ? 'dtr' : 'rts';
+  if (!portPath) {
+    sendCatLog('[PTT] FAILED: no PTT port is set. Settings > My Rigs > this radio > Transmit (PTT): pick the interface\'s COM port.');
+    return;
+  }
+  if (settings.cwKeyPort && settings.cwKeyPort.toLowerCase() === portPath.toLowerCase()) {
+    sendCatLog(`[PTT] FAILED: ${portPath} is also the CW Key Port. One port cannot be both; clear the CW Key Port in Settings > CW or pick another port for PTT.`);
+    return;
+  }
+  const apply = (port) => {
+    try {
+      port.set({ [line]: state }, (err) => {
+        if (err) sendCatLog(`[PTT] FAILED: ${line.toUpperCase()} on ${portPath}: ${err.message}`);
+        else sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — ${line.toUpperCase()} ${state ? 'raised' : 'dropped'} on ${portPath}`);
+      });
+    } catch (e) {
+      sendCatLog(`[PTT] FAILED: ${line.toUpperCase()} on ${portPath}: ${e.message}`);
+    }
+  };
+  if (_nocatPttPort && _nocatPttPath === portPath) {
+    if (_nocatPttOpening) { _nocatPttPending = state; return; }
+    if (_nocatPttPort.isOpen) { apply(_nocatPttPort); return; }
+  }
+  if (_nocatPttPort && _nocatPttPath !== portPath) closeNocatPttPort();
+  if (!state) {
+    // Nothing is open, so nothing is keyed: a release needs no port.
+    if (_nocatPttOpening) _nocatPttPending = false;
+    return;
+  }
+  const { SerialPort } = require('serialport');
+  let port;
+  try {
+    port = new SerialPort({ path: portPath, baudRate: 9600, autoOpen: false, rtscts: false, hupcl: true });
+  } catch (e) {
+    sendCatLog(`[PTT] FAILED: could not open ${portPath} for the PTT line: ${e.message}`);
+    return;
+  }
+  _nocatPttPort = port;
+  _nocatPttPath = portPath;
+  _nocatPttOpening = true;
+  _nocatPttPending = state;
+  port.on('error', (err) => { console.log(`[PTT port] ${portPath}: ${err.message}`); });
+  port.on('close', () => { if (_nocatPttPort === port) { _nocatPttPort = null; _nocatPttPath = ''; } });
+  port.open((err) => {
+    _nocatPttOpening = false;
+    if (err) {
+      if (_nocatPttPort === port) { _nocatPttPort = null; _nocatPttPath = ''; }
+      _nocatPttPending = null;
+      if (_nocatPttFailedPath !== portPath) {
+        _nocatPttFailedPath = portPath;
+        sendCatLog(`[PTT] FAILED: could not open ${portPath} for the PTT line: ${err.message}. Is it the interface's port, and is nothing else using it?`);
+      }
+      return;
+    }
+    _nocatPttFailedPath = '';
+    sendCatLog(`[PTT] Opened ${portPath} for the PTT line (${line.toUpperCase()})`);
+    const wanted = _nocatPttPending;
+    _nocatPttPending = null;
+    // Both lines down first: the open may have raised them.
+    port.set({ dtr: false, rts: false }, () => {
+      if (_nocatPttPort !== port || !port.isOpen) return;
+      if (wanted) apply(port);
+    });
+  });
+}
+
 function disconnectCwKeyPort() {
   // The persistent pyserial keyer holds the same physical port — release it too
   // (it respawns on the next CW activity once the port path is re-established).
@@ -23321,6 +23418,12 @@ function handleRemotePtt(state, opts = {}) {
       const gpio = Number.isInteger(target.gpio) ? target.gpio : 3;
       if (win && !win.isDestroyed()) win.webContents.send('cm108-ptt', { state: !!state, gpio });
       else sendCatLog('[PTT] FAILED: the sound-card PTT needs the POTACAT window, which is not open');
+      return;
+    }
+    // A serial line on the interface's own port (Digirig Mobile: RTS to the
+    // radio's PTT pin — the FTM-510D's DATA jack PKS, 2026-10-23).
+    if (target.ptt === 'serial') {
+      nocatSerialPtt(!!state, target);
       return;
     }
     // Otherwise the radio's VOX keys on the audio that follows. Not a
@@ -41904,6 +42007,7 @@ function gracefulCleanup() {
   // handle that the OS may write to after we've torn down our refs,
   // surfacing as "WriteFileEx invalid handle" on quit.
   try { disconnectCwKeyPort(); } catch {}
+  try { closeNocatPttPort(); } catch {}
   try { stopJtcat(); } catch {}
   try { stopSstv(); } catch {}
   try { stopSstvMulti(); } catch {}

@@ -2289,9 +2289,12 @@ async function populateRadioSection(currentTarget) {
     setK4networkPassword.value = currentTarget.password || '';
   } else if (currentTarget.type === 'none') {
     setRadioType('nocat');
-    { const ps = document.getElementById('set-nocat-ptt'); if (ps) ps.value = currentTarget.ptt === 'cm108' ? 'cm108' : 'vox'; }
+    { const ps = document.getElementById('set-nocat-ptt'); if (ps) ps.value = currentTarget.ptt === 'cm108' ? 'cm108' : currentTarget.ptt === 'serial' ? 'serial' : 'vox'; }
     { const gs = document.getElementById('set-nocat-gpio'); if (gs) gs.value = String(currentTarget.gpio || 3); }
+    { const pp = document.getElementById('set-nocat-ptt-port'); if (pp) pp.value = currentTarget.pttPort || ''; }
+    { const pl = document.getElementById('set-nocat-ptt-line'); if (pl) pl.value = currentTarget.pttLine === 'dtr' ? 'dtr' : 'rts'; }
     { const row = document.getElementById('nocat-cm108-row'); if (row) row.classList.toggle('hidden', currentTarget.ptt !== 'cm108'); }
+    { const row = document.getElementById('nocat-serial-row'); if (row) row.classList.toggle('hidden', currentTarget.ptt !== 'serial'); }
   } else if (currentTarget.type === 'serial') {
     setRadioType('serialcat');
     serialcatPortsLoaded = true;
@@ -2959,6 +2962,13 @@ function buildCatTargetFromForm() {
     const pttSel = document.getElementById('set-nocat-ptt');
     if (pttSel && pttSel.value === 'cm108') {
       return { type: 'none', ptt: 'cm108', gpio: parseInt(document.getElementById('set-nocat-gpio').value, 10) || 3 };
+    }
+    if (pttSel && pttSel.value === 'serial') {
+      // A serial line on the interface's own port (Digirig Mobile: RTS -> the
+      // radio's PTT pin; the FTM-510D's DATA jack PKS). main.js raises it.
+      const pttPort = (document.getElementById('set-nocat-ptt-port').value || '').trim();
+      const pttLine = document.getElementById('set-nocat-ptt-line').value === 'dtr' ? 'dtr' : 'rts';
+      return { type: 'none', ptt: 'serial', pttPort, pttLine };
     }
     return { type: 'none' };
   }
@@ -12316,7 +12326,11 @@ if (window.api.onCm108Ptt) {
 (function wireNocatPtt() {
   const sel = document.getElementById('set-nocat-ptt');
   const row = document.getElementById('nocat-cm108-row');
-  if (sel && row) sel.addEventListener('change', () => row.classList.toggle('hidden', sel.value !== 'cm108'));
+  const serialRow = document.getElementById('nocat-serial-row');
+  if (sel && row) sel.addEventListener('change', () => {
+    row.classList.toggle('hidden', sel.value !== 'cm108');
+    if (serialRow) serialRow.classList.toggle('hidden', sel.value !== 'serial');
+  });
   const find = document.getElementById('nocat-cm108-find');
   const status = document.getElementById('nocat-cm108-status');
   if (find) find.addEventListener('click', async () => {
@@ -16812,12 +16826,15 @@ async function openSettingsDialog(tab) {
   try {
     const cwPorts = await window.api.listPorts();
     const cwDl = document.getElementById('cw-key-port-list');
+    const pttDl = document.getElementById('nocat-ptt-port-list');
     cwDl.innerHTML = '';
+    if (pttDl) pttDl.innerHTML = '';
     for (const p of cwPorts) {
       const opt = document.createElement('option');
       opt.value = p.path;
       opt.label = `${p.path} — ${p.friendlyName}`;
       cwDl.appendChild(opt);
+      if (pttDl) pttDl.appendChild(opt.cloneNode(true));
     }
     if (s.cwKeyPort) setCwKeyPort.value = s.cwKeyPort;
   } catch { /* ports unavailable */ }

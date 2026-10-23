@@ -1994,13 +1994,19 @@
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="nocat-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, or a handheld such as a Baofeng on a sound-card interface. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
+          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, a handheld such as a Baofeng on a sound-card interface, or a mobile FM radio such as the <b>Yaesu FTM-510D</b> through its DATA jack. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
           <label style="display:block;margin-top:6px;">Transmit (PTT):
             <select id="set-nocat-ptt">
               <option value="vox">The radio's VOX keys on POTACAT's audio</option>
               <option value="cm108">The USB sound card keys it (Digirig Lite, CM108 / CM119 PTT)</option>
+              <option value="serial">A serial port line keys it (Digirig Mobile and most data cables: RTS or DTR)</option>
             </select>
           </label>
+          <div id="nocat-serial-row" class="hidden" style="margin-top:4px;">
+            <label>PTT port: <input list="nocat-ptt-port-list" id="set-nocat-ptt-port" style="width:200px;background:var(--bg-input);border:1px solid var(--border-primary);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:13px;" placeholder="COM port of the interface"><datalist id="nocat-ptt-port-list"></datalist></label>
+            <label style="margin-left:8px;">Line: <select id="set-nocat-ptt-line"><option value="rts" selected>RTS (Digirig)</option><option value="dtr">DTR</option></select></label>
+            <span class="help-text" style="display:block;font-size:11px;">The interface's own serial port, which goes to the radio's PTT pin. Raised to transmit, dropped to receive; both lines are dropped when the port opens. Linux: your user needs the dialout group.</span>
+          </div>
           <div id="nocat-cm108-row" class="hidden" style="margin-top:4px;">
             <label>PTT pin: GPIO <select id="set-nocat-gpio"><option value="3" selected>3 (Digirig Lite, most cables)</option><option value="1">1</option><option value="2">2</option><option value="4">4</option></select></label>
             <button type="button" id="nocat-cm108-find" style="margin-left:6px;">Find the sound card</button>
