@@ -2,13 +2,19 @@
 # runner WITHOUT cutting a release, with the same script the release jobs run
 # (scripts/build-winlink-helpers.sh). A release is the wrong place to find out
 # that Dire Wolf will not link the Hamlib zip on Windows. Triggers on a change
-# to the script or this file, and on demand. Then smoke-tests each binary.
+# to the script, the ardopcf patch and its sources, the pinned versions, or
+# this file, and on demand (the release skill dispatches it). Then smoke-tests
+# each binary.
 name: winlink helpers
 on:
   workflow_dispatch:
   push:
     paths:
       - 'scripts/build-winlink-helpers.sh'
+      - 'scripts/gen-ardopcf-patch.py'
+      - 'third_party/ardopcf/**'
+      - 'third_party/pat/**'
+      - 'third_party/direwolf/**'
       - '.github/workflows/winlink-helpers.yml'
 
 jobs:
