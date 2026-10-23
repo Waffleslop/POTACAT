@@ -8393,10 +8393,10 @@ function _buildEchocatWebHTML(web) {
         ? ''
         : '<div class="echo-web-extra">MagicDNS is off — this uses your Tailscale IP, so you\'ll get a certificate warning. Turn on MagicDNS for a clean link.</div>')
     : '';
-  const tokenLine = web.token
-    ? '<div class="echo-web-token">Token <code>' + _esc(web.token) + '</code>'
-      + '<button type="button" class="echo-web-copy" data-act="echo-copy-weburl" data-copy="' + _esc(web.token) + '" title="Copy token">Copy</button></div>'
-    : '';
+  // No password display here: the one place for the ECHOCAT password is the
+  // "Password-protect your rig" setting right under these URLs (Casey
+  // 2026-10-23: "no other token section should exist").
+  const tokenLine = '';
   const extrasLine = extras.length
     ? '<div class="echo-web-extra">Other home addresses: ' + extras.map((u) => '<code>' + _esc(u) + '</code>').join(', ') + '</div>'
     : '';
@@ -15840,14 +15840,7 @@ async function refreshEchoCatInfo() {
       echoCatUrl.textContent = 'No network found';
     }
     const requireToken = s.remoteRequireToken === true;
-    const tokenRow = echoCatToken.closest('.echo-cat-token-row');
-    if (requireToken && token) {
-      echoCatToken.textContent = token;
-      if (tokenRow) tokenRow.classList.remove('hidden');
-    } else {
-      echoCatToken.textContent = '';
-      if (tokenRow) tokenRow.classList.add('hidden');
-    }
+    void requireToken; // the password lives in its own setting (ECHOCAT tab)
     // Populate quick audio device dropdowns
     await populateQuickAudioDevices(s.remoteAudioInput || '', s.remoteAudioOutput || '');
   }
@@ -15924,7 +15917,7 @@ echoCatCopyUrl.addEventListener('click', async () => {
 });
 
 // Copy URL + token
-echoCatCopy.addEventListener('click', async () => {
+if (echoCatCopy) echoCatCopy.addEventListener('click', async () => {
   const s = await window.api.getSettings();
   const port = s.remotePort || 7300;
   const token = s.remoteToken || '';
