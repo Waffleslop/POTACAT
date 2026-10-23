@@ -5204,7 +5204,7 @@ if (setMercuryEnable) {
       } catch {}
       if (btn) btn.disabled = true;
       varaSetupStatus.style.color = '';
-      varaSetupStatus.textContent = 'Setting up… (starts VARA, about 10 seconds)';
+      varaSetupStatus.textContent = 'Setting up… (starts VARA and waits for it to open the devices, about 20 seconds)';
       let r = null;
       try { r = await window.api.winlinkVaraSetup(kind, devs, labels); } catch (e) { r = { ok: false, error: e.message }; }
       if (btn) btn.disabled = false;

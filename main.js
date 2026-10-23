@@ -8572,6 +8572,7 @@ async function winlinkVaraSetup({ kind: k, devices, inputLabel, outputLabel } = 
   if (!c.ok) return c;
   const { plan, bin, port } = c;
   let version = '';
+  const launchedAt = Date.now();
   try {
     await winlinkVaraReady(VaraProcess.varaModeId(kind), { configured: true });
     const p2 = await VaraProcess.probeVaraPort(port, { timeoutMs: 1500 });
@@ -8579,17 +8580,21 @@ async function winlinkVaraSetup({ kind: k, devices, inputLabel, outputLabel } = 
   } catch (e) {
     return { ok: false, step: 'start', error: e.message };
   }
-  await new Promise((r) => setTimeout(r, 4000));
+  // VARA checks its devices within ~10 s of starting and complains in its log
+  // (older builds every 10 s). Only lines written after THIS launch count.
+  await new Promise((r) => setTimeout(r, 12000));
   let problem = '';
   try {
     const logPath = path.join(path.dirname(bin.path), kind === 'fm' ? 'VARAFM.log' : 'VARAHF.log');
     const st = fs.statSync(logPath);
-    const fd = fs.openSync(logPath, 'r');
-    const len = Math.min(st.size, 8192);
-    const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, st.size - len);
-    fs.closeSync(fd);
-    problem = VaraSetup.varaLogDeviceProblem(buf.toString('utf8'));
+    if (st.mtimeMs >= launchedAt - 2000) {
+      const fd = fs.openSync(logPath, 'r');
+      const len = Math.min(st.size, 8192);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, st.size - len);
+      fs.closeSync(fd);
+      problem = VaraSetup.varaLogDeviceProblem(buf.toString('utf8'), launchedAt);
+    }
   } catch { /* no log yet: nothing to report */ }
   if (problem) { winlinkLog(`${name} setup: ${problem}`); return { ok: false, step: 'devices', error: problem, cable: plan.potacat || null }; }
   const text = VaraSetup.describeSetup({ kind, plan, path: bin.path, port, version, iniChanged: c.iniChanged });

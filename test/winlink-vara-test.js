@@ -295,8 +295,20 @@ function fnBody(src, name) {
   });
   await test('VARA\'s log names the device it could not open', () => {
     assert.strictEqual(S.varaLogDeviceProblem('2026-10-23 12:00:00    WARNING: VARA is not connected to any App via TCP Port 8300\n'), '');
-    assert.ok(/input and output device/.test(S.varaLogDeviceProblem('x\n2026-09-30 18:30:27    Soundcard Output Device missing in action !\n2026-09-30 18:30:27    Soundcard Input Device missing in action !\n')));
+    const old = 'x\n2026-09-30 18:30:27    Soundcard Output Device missing in action !\n2026-09-30 18:30:27    Soundcard Input Device missing in action !\n';
+    assert.ok(/input and output device/.test(S.varaLogDeviceProblem(old)));
     assert.ok(/^VARA could not open its output device/.test(S.varaLogDeviceProblem('Soundcard Output Device missing in action !')));
+    // K3SBP 2026-10-23: September's lines at the tail of an untouched log are not today's verdict.
+    const launched = new Date(2026, 9, 23, 14, 49, 1).getTime();
+    assert.strictEqual(S.varaLogDeviceProblem(old, launched), '', 'lines before the launch do not count');
+    assert.ok(/input device/.test(S.varaLogDeviceProblem(old + '2026-10-23 14:49:09    Soundcard Input Device missing in action !\n', launched)), 'a line after the launch does');
+    assert.strictEqual(S.varaLogDeviceProblem('Soundcard Output Device missing in action !', launched), '', 'an undated line cannot be placed, so it does not count against this launch');
+    // The exact 31st character: a trimmed listing name is restored from the label it was cut from.
+    const MME2 = { capture: [{ name: 'CABLE Output (VB-Audio Virtual' }], playback: [{ name: 'CABLE Input (VB-Audio Virtual C' }] };
+    const n = S.mmeNamesFor('CABLE', MME2, { captureLabel: 'CABLE Output (VB-Audio Virtual Cable)', playbackLabel: 'Speakers (VB-Audio Virtual Cable)' });
+    assert.strictEqual(n.capture, 'CABLE Output (VB-Audio Virtual ', 'trailing space restored');
+    assert.strictEqual(n.capture.length, 31);
+    assert.strictEqual(n.playback, 'CABLE Input (VB-Audio Virtual C', 'already 31: unchanged');
   });
   await test('wiring: the button, the IPC, the preload, the ini written only while VARA is closed, a backup first', () => {
     const html = read('renderer/index.html');
