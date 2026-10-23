@@ -216,3 +216,28 @@ test('the session-end dial restore and Pat\'s QSX wait for a running ATU tune; t
   assert.ok(/if \(_atuTuneEpisode && Math\.abs\(hz - \(_currentFreqHz \|\| 0\)\) > 100\)/.test(shim), 'the shim holds a QSY under a tune');
   assert.ok(/g\.suppressed\+\+/.test(main) && /SWR guard did not trip:/.test(main), 'the RF summary says why the guard stayed quiet');
 });
+
+console.log('the account from a device');
+test('account check / set-password / register / recovery email are on the wire, demuxed, handled, and never echo the password', () => {
+  const proto = require('../lib/echocat-protocol');
+  for (const t of ['winlink-account-check', 'winlink-set-password', 'winlink-register', 'winlink-recovery-email-get', 'winlink-recovery-email-set', 'winlink-account', 'winlink-recovery-email']) {
+    assert.ok(proto.MESSAGES[t], t + ' registered');
+    assert.strictEqual(proto.MESSAGES[t].feature, 'winlink');
+  }
+  const server = read('lib/remote-server.js');
+  for (const t of ['winlink-account-check', 'winlink-set-password', 'winlink-register', 'winlink-recovery-email-get', 'winlink-recovery-email-set']) {
+    assert.ok(server.includes(`      case '${t}':`), t + ' demuxed with the other winlink-* (Guest Pass refusal first)');
+    assert.ok(main.includes(`      case '${t}'`), t + ' handled in winlinkHandleRemote');
+  }
+  assert.ok(/'winlink-account',/.test(server), 'hello capability');
+  // The password is saved and never said back.
+  const fns = ['winlinkSetPassword', 'winlinkRegister'].map((n) => fnBody(main, n)).join('\n');
+  assert.ok(!/winlinkLog\([^)]*\bpw\b/.test(fns), 'no log line carries the password');
+  assert.ok(!/password: settings\.winlinkPassword/.test(fnBody(main, 'winlinkPayload')), 'winlink-state carries hasPassword only');
+  assert.ok(/hasPassword: !!settings\.winlinkPassword/.test(fnBody(main, 'winlinkPayload')));
+  // Settings IPC and the device share one implementation.
+  assert.ok(/ipcMain\.handle\('winlink-register', \(_e, o = \{\}\) => winlinkRegister\(o, 'Settings'\)\);/.test(main));
+  // session.errorKind rides beside the text.
+  assert.ok(/errorKind: state === 'error' \? \(_winlinkSessionErrorKind \|\| 'failed'\) : ''/.test(main));
+  assert.ok(/_winlinkSessionErrorKind = 'login-failed'/.test(main));
+});

@@ -1642,6 +1642,7 @@ let _winlinkCapTimer = null;
 let _winlinkWatchdog = null;
 let _winlinkLastActivity = 0;
 let _winlinkSessionError = '';
+let _winlinkSessionErrorKind = '';   // 'login-failed' | 'no-answer' | 'transport-down' | 'rig-refused' | 'stopped' | '' — session.errorKind for clients
 let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
 let winlinkPopoutWin = null;
@@ -8563,10 +8564,10 @@ function winlinkOnPatEvent(ev) {
     winlinkSessionTouch();
     // Pat's log is the session transcript; it stays in pat.log. Only the lines
     // an operator can act on are said, once each, in POTACAT's words.
-    if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; }
-    else if (ev.class === 'no-answer') { _winlinkSessionError = `${winlinkState.session.gateway || 'The gateway'} did not answer — try another gateway or band`; }
-    else if (ev.class === 'transport-down') { _winlinkSessionError = winlinkTransportDownText(winlinkState.session.mode); }
-    else if (ev.class === 'rig-refused') { _winlinkSessionError = 'POTACAT refused Pat\'s tune or PTT — see the [Winlink] lines above'; }
+    if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; _winlinkSessionErrorKind = 'login-failed'; }
+    else if (ev.class === 'no-answer') { _winlinkSessionError = `${winlinkState.session.gateway || 'The gateway'} did not answer — try another gateway or band`; _winlinkSessionErrorKind = 'no-answer'; }
+    else if (ev.class === 'transport-down') { _winlinkSessionError = winlinkTransportDownText(winlinkState.session.mode); _winlinkSessionErrorKind = 'transport-down'; }
+    else if (ev.class === 'rig-refused') { _winlinkSessionError = 'POTACAT refused Pat\'s tune or PTT — see the [Winlink] lines above'; _winlinkSessionErrorKind = 'rig-refused'; }
     winlinkState.setSession({ text: ev.text.slice(0, 160) });
     winlinkSessionPush();
   }
@@ -9069,6 +9070,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     text: radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
   });
   _winlinkSessionError = '';
+  _winlinkSessionErrorKind = '';
   if (radio) _winlinkPreviewReturnTo = null; // the session's returnTo carries it now
   winlinkSessionTouch();
   winlinkSessionPush();
@@ -9196,7 +9198,7 @@ function winlinkEndSession(state, text, received = 0) {
     winlinkFlexDaxRestore();
     releaseRadio('winlink');
   }
-  winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', ptt: false, prompt: null });
+  winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', errorKind: state === 'error' ? (_winlinkSessionErrorKind || 'failed') : '', ptt: false, prompt: null });
   winlinkLog(`session ${state === 'done' ? 'finished' : 'failed'}: ${text}`);
   winlinkSessionPush();
   winlinkRefreshMailboxes();
@@ -9218,10 +9220,76 @@ function winlinkRestoreDial(returnTo, waitedMs = 0) {
   try { tuneRadio(returnTo.freqHz / 1000, returnTo.mode || undefined, undefined, { origin: 'Winlink session ended' }); } catch {}
 }
 
+// ── the Winlink account, from Settings or an ECHOCAT device ──────────────────
+// Everything runs through Pat over the internet. The password is saved and
+// never said back: not in winlink-state (hasPassword only), the log, the
+// diagnostic snapshot or the settings push (an explicit whitelist).
+function winlinkAccountGate(what) {
+  if (!settings.enableWinlink) return { ok: false, error: `Turn Winlink on and save first — ${what} runs through Pat` };
+  if (!patClient) return { ok: false, error: `Turn Winlink on and save first — ${what} runs through Pat` };
+  return null;
+}
+async function winlinkAccountCheck(call) {
+  const gate = winlinkAccountGate('the check'); if (gate) return gate;
+  const callsign = String(call || settings.myCallsign || '').toUpperCase();
+  if (!callsign) return { ok: false, error: 'Set your callsign first' };
+  try {
+    const r = await patClient.accountExists(callsign);
+    return { ok: true, callsign, exists: !!(r && r.exists) };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+function winlinkPasswordProblem(pw) {
+  if (pw.length < 6 || pw.length > 12) return 'The Winlink password must be 6 to 12 characters';
+  return '';
+}
+/** An existing account's password, typed on any surface: saved, Pat relaunched with it. */
+function winlinkSetPassword(password, origin) {
+  const gate = winlinkAccountGate('the password'); if (gate) return gate;
+  const pw = String(password || '');
+  const problem = winlinkPasswordProblem(pw); if (problem) return { ok: false, error: problem };
+  if (winlinkSessionActive()) return { ok: false, error: 'A session is running — set the password when it has finished' };
+  settings.winlinkPassword = pw; saveSettings(settings);
+  winlinkLog(`Winlink password saved (${origin}) — Pat restarts with it`);
+  connectWinlink();
+  winlinkPush();
+  return { ok: true };
+}
+async function winlinkRegister({ password, recoveryEmail } = {}, origin) {
+  const gate = winlinkAccountGate('registration'); if (gate) return gate;
+  const pw = String(password || '');
+  const problem = winlinkPasswordProblem(pw); if (problem) return { ok: false, error: problem };
+  const callsign = String(settings.myCallsign || '').toUpperCase();
+  if (!callsign) return { ok: false, error: 'Set your callsign first' };
+  try {
+    await patClient.register({ callsign, password: pw, recoveryEmail: recoveryEmail ? String(recoveryEmail).trim() : '' });
+    settings.winlinkPassword = pw; saveSettings(settings);
+    winlinkLog(`Winlink account created for ${callsign} (${origin}) — Pat restarts with the password`);
+    connectWinlink();
+    winlinkPush();
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+async function winlinkRecoveryEmailGet() {
+  const gate = winlinkAccountGate('the recovery address'); if (gate) return gate;
+  try {
+    const r = await patClient.recoveryEmail();
+    const email = r && (r.recovery_email || r.RecoveryEmail || r.email) || '';
+    return { ok: true, email: String(email) };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+async function winlinkRecoveryEmailSet(email) {
+  const gate = winlinkAccountGate('the recovery address'); if (gate) return gate;
+  const addr = String(email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) return { ok: false, error: 'That is not an email address' };
+  try { await patClient.setRecoveryEmail(addr); winlinkLog('Winlink password-recovery address updated'); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+}
+
 function winlinkAbortSession(why) {
   if (!winlinkSessionActive()) return;
   winlinkLog(`aborting the session — ${why}`);
   _winlinkSessionError = `Stopped: ${why}`;
+  _winlinkSessionErrorKind = 'stopped';
   winlinkState.setSession({ state: 'disconnecting', text: `Stopping — ${why}` });
   winlinkSessionPush();
   if (patClient) patClient.disconnect(true).catch(() => {});
@@ -9408,6 +9476,28 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         return;
       case 'winlink-prompt':
         winlinkAnswerPrompt(String(req.id || ''), String(req.value || ''));
+        return;
+      // The account, from the phone (potacat-app winlink-mail.md revision c).
+      case 'winlink-account-check': {
+        const r = await winlinkAccountCheck(settings.myCallsign);
+        if (r.ok) reply({ type: 'winlink-account', callsign: r.callsign, exists: r.exists });
+        else result('account-check', r);
+        return;
+      }
+      case 'winlink-set-password':
+        result('set-password', winlinkSetPassword(req.password, 'ECHOCAT device'));
+        return;
+      case 'winlink-register':
+        result('register', await winlinkRegister({ password: req.password, recoveryEmail: req.recoveryEmail }, 'ECHOCAT device'));
+        return;
+      case 'winlink-recovery-email-get': {
+        const r = await winlinkRecoveryEmailGet();
+        if (r.ok) reply({ type: 'winlink-recovery-email', email: r.email });
+        else result('recovery-email', r);
+        return;
+      }
+      case 'winlink-recovery-email-set':
+        result('recovery-email', await winlinkRecoveryEmailSet(req.email));
         return;
       case 'winlink-gateways-get': {
         const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '');
@@ -32800,23 +32890,8 @@ app.whenReady().then(() => {
     if (!ArdopProcess.ardopSupported(process.platform)) return { ok: false, error: 'ARDOP (ardopcf) has no macOS build' };
     return listArdopDevices();
   });
-  ipcMain.handle('winlink-account-check', async (_e, call) => {
-    if (!patClient) return { ok: false, error: 'Turn Winlink on and save first — the check runs through Pat' };
-    try { return { ok: true, ...(await patClient.accountExists(String(call || settings.myCallsign || ''))) }; }
-    catch (e) { return { ok: false, error: e.message }; }
-  });
-  ipcMain.handle('winlink-register', async (_e, { password, recoveryEmail } = {}) => {
-    if (!patClient) return { ok: false, error: 'Turn Winlink on and save first — registration runs through Pat' };
-    const pw = String(password || '');
-    if (pw.length < 6 || pw.length > 12) return { ok: false, error: 'The Winlink password must be 6 to 12 characters' };
-    try {
-      await patClient.register({ callsign: String(settings.myCallsign || '').toUpperCase(), password: pw, recoveryEmail });
-      settings.winlinkPassword = pw; saveSettings(settings);
-      winlinkLog(`Winlink account created for ${String(settings.myCallsign || '').toUpperCase()}`);
-      connectWinlink();
-      return { ok: true };
-    } catch (e) { return { ok: false, error: e.message }; }
-  });
+  ipcMain.handle('winlink-account-check', (_e, call) => winlinkAccountCheck(call));
+  ipcMain.handle('winlink-register', (_e, o = {}) => winlinkRegister(o, 'Settings'));
   ipcMain.on('mercury-open-downloads', () => {
     try { require('electron').shell.openPath(path.join(app.getPath('userData'), 'mercury-downloads')); } catch {}
   });
