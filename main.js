@@ -698,6 +698,8 @@ const GLOBAL_KEYS = new Set([
   'telemetry',         // telemetry opt-in
   'windowState',       // window geometry
   'n1mmUdpPort',       // N1MM broadcast port
+  'enableLoggerCat',   // TS-2000 CAT over TCP for N1MM+ and other loggers (lib/ts2000-cat-server.js)
+  'loggerCatPort',
   'audioInputDeviceId', 'audioOutputDeviceId',  // OS audio device picks
   'jtcatRxGain',       // JTCAT RX gain 0–1 — synced slider, machine audio property
   'jtcatRxGainByBand', // per-band memory for the above (same machine property)
@@ -5160,6 +5162,71 @@ function sendRotorBearing(azimuth) {
 let n1mmSocket = null;
 let _n1mmLastFreq = 0;
 let _n1mmLastMode = '';
+
+// ── Logger CAT: a TS-2000 on TCP for N1MM+ (lib/ts2000-cat-server.js) ───────
+// N1MM+ Config > Configure Ports: Port "TCP", Radio "TS-2000", address
+// 127.0.0.1:<loggerCatPort>. Everything it asks of the radio goes through
+// POTACAT — so on a laptop driving a remote shack, N1MM at home tunes, keys
+// and sends CW on the shack's radio (NK8Q 2026-10-23).
+const { createTs2000Server } = require('./lib/ts2000-cat-server');
+let loggerCatServer = null;
+let _loggerCatPtt = false;
+let _loggerCatClients = 0;
+function loggerCatState() {
+  return { freqHz: _currentFreqHz || 0, mode: _currentMode || 'USB', ptt: _loggerCatPtt, smeter: _currentSmeter || 0, powerW: _currentTxPower || 100, wpm: settings.cwWpm || 20 };
+}
+function loggerCatAction(a) {
+  if (a.setFreqHz) {
+    const khz = a.setFreqHz / 1000;
+    if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendTune({ frequency: a.setFreqHz }); return; }
+    _lastTuneFreq = 0;
+    tuneRadio(khz, undefined, undefined, { origin: 'N1MM+ / logger CAT' });
+  } else if (a.setMode) {
+    if (isRemoteMode()) { if (isRemoteLinked() && _currentFreqHz) remoteClient.sendTune({ frequency: _currentFreqHz, mode: a.setMode }); return; }
+    if (!_currentFreqHz) return;
+    _lastTuneFreq = 0;
+    tuneRadio(_currentFreqHz / 1000, a.setMode, undefined, { origin: 'N1MM+ / logger CAT' });
+  } else if (typeof a.ptt === 'boolean') {
+    _loggerCatPtt = a.ptt;
+    handleRemotePtt(a.ptt);
+  } else if (a.cw) {
+    if (isRemoteMode()) sendRemoteCwText(a.cw);
+    else sendCwTextToRadio(a.cw);
+  } else if (a.wpm) {
+    applyCwWpm(a.wpm, 'logger-cat');
+  } else if (a.powerW) {
+    try { applyRigControl({ action: 'set-tx-power', value: a.powerW }, 'logger-cat'); } catch {}
+  }
+}
+function startLoggerCat() {
+  stopLoggerCat();
+  if (!settings.enableLoggerCat) return;
+  const port = Number(settings.loggerCatPort) || 4535;
+  try {
+    loggerCatServer = createTs2000Server({
+      getState: loggerCatState,
+      onAction: loggerCatAction,
+      onClient: (sock) => {
+        _loggerCatClients++;
+        sendCatLog(`[Logger CAT] a logger connected (TS-2000 on 127.0.0.1:${port})`);
+        sock.on('close', () => {
+          _loggerCatClients = Math.max(0, _loggerCatClients - 1);
+          // A logger that drops while keyed must not leave the radio keyed.
+          if (_loggerCatPtt && !_loggerCatClients) { _loggerCatPtt = false; handleRemotePtt(false); sendCatLog('[Logger CAT] logger disconnected while transmitting — PTT released'); }
+        });
+      },
+    }, { host: '127.0.0.1', port });
+    loggerCatServer.on('listening', () => sendCatLog(`[Logger CAT] TS-2000 CAT ready on 127.0.0.1:${port} — in N1MM+ choose Port TCP, Radio TS-2000, that address`));
+    loggerCatServer.on('error', (err) => sendCatLog(`[Logger CAT] could not listen on 127.0.0.1:${port}: ${err.message}${err.code === 'EADDRINUSE' ? ' — another program has that port; pick another in Settings' : ''}`));
+  } catch (err) {
+    sendCatLog(`[Logger CAT] could not start: ${err.message}`);
+  }
+}
+function stopLoggerCat() {
+  if (_loggerCatPtt) { _loggerCatPtt = false; try { handleRemotePtt(false); } catch {} }
+  if (loggerCatServer) { try { loggerCatServer.close(); } catch {} loggerCatServer = null; }
+  _loggerCatClients = 0;
+}
 
 function sendN1mmRadioInfo() {
   if (!settings.enableN1mmUdp) return;
@@ -30203,6 +30270,7 @@ app.whenReady().then(() => {
   // Propagation popout always has data, regardless of whether enableRbn was
   // ever flipped on by the user.
   if (settings.myCallsign) connectRbn();
+  startLoggerCat();
   if (settings.enableMercury) connectMercury();
   if (settings.winlinkPassword) connectWinlink(); // an account holder: inbox ready; others start on first use
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
@@ -38098,6 +38166,7 @@ app.whenReady().then(() => {
     // require a relaunch since they're baked into the ini + CLI args at spawn.
     // Winlink (Pat) relaunches only for keys baked into its config / launch.
     // The password is in pat-config.json, so a new one needs a relaunch too.
+    if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort',
       'winlinkArdopBw', 'winlinkVaraBw', 'winlinkAgwPort', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
@@ -41213,6 +41282,7 @@ function gracefulCleanup() {
   // radio before the SmartSDR/CAT/keyer connections close — otherwise the
   // radio can stay keyed with no audio (a silent-carrier FCC issue).
   try { handleRemotePtt(false); } catch {}
+  try { stopLoggerCat(); } catch {}
   // A WSPR beacon armed at quit must give the radio its power back NOW, while
   // the CAT/SmartSDR links below are still open — stopJtcat() runs after they
   // are torn down and could no longer reach the rig. (smartsdr.disconnect()

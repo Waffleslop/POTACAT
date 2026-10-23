@@ -2512,6 +2512,11 @@
           </div>
         </div>
       </div>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-logger-cat"> Let N1MM+ (or another logger) control the radio</label>
+      <div id="logger-cat-config" class="radio-sub hidden">
+        <span class="help-text" style="font-size:12px;">POTACAT acts as a Kenwood TS-2000 on a local TCP port, and passes everything on to the radio it controls — including a remote shack you are driving from this PC. In N1MM+: Config &gt; Configure Ports, Port <b>TCP</b>, Radio <b>TS-2000</b>, address <b>127.0.0.1</b> and the port below. Frequency, mode, PTT and CW (sent as CAT text) all work; N1MM's voice keyer plays through this PC's sound card, so use POTACAT's own voice macros for remote SSB.</span>
+        <label style="display:block;margin-top:4px;">Port: <input type="number" id="set-logger-cat-port" value="4535" min="1024" max="65535" style="width:80px;"></label>
+      </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-n1mm-udp"> N1MM+ RadioInfo UDP broadcast</label>
       <div id="n1mm-udp-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Broadcasts frequency/mode as N1MM+ RadioInfo XML via UDP. Used by band decoders (FreqEZ, MKII), antenna switches, and logging software.</span>
