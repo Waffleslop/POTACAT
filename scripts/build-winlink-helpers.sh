@@ -129,6 +129,13 @@ if [[ " $want " == *" ardop "* ]]; then
       # hands a hid_device* to int parameters (a warning under GCC, an error
       # under Apple clang 16); POTACAT never gives ardopcf a PTT flag, so that
       # code is never reached.
+      # zf_log statically asserts ZF_LOG_BUF_SZ (ardopcf's log.h: 4000) <= PIPE_BUF,
+      # which is 4096 on Linux and 512 on macOS. The assert guards write()
+      # atomicity to a PIPE; ardopcf logs to files and stderr, so on macOS the
+      # line becomes a comment (first Mac build, run 39905899155).
+      Z="$WORK/ardop/lib/zf_log/zf_log/zf_log.c"
+      sed -i.bak 's|STATIC_ASSERT(buf_sz_less_than_pipe_buf, ZF_LOG_BUF_SZ <= PIPE_BUF);|/* POTACAT macOS: pipe-atomicity assert dropped (PIPE_BUF is 512 here; ardopcf logs to files) */|' "$Z" && rm -f "$Z.bak"
+      grep -q 'POTACAT macOS: pipe-atomicity' "$Z" || { echo "::error::zf_log PIPE_BUF assert patch did not apply"; exit 1; }
       ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
     else
       ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" )
