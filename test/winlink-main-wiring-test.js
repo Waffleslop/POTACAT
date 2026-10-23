@@ -360,6 +360,37 @@ test('on a sound-device rig the bridge window carries the modem audio; the modem
   assert.ok(!/proposeArdopDevices\(/.test(fnBody(main, 'spawnArdop')), 'no device pick for ARDOP');
 });
 
+console.log('propagation-ranked gateways');
+test('Pat gets a prediction engine on every config write, decided in one place', () => {
+  assert.ok(/prediction: winlinkPredictionConfig\(\),/.test(fnBody(main, 'writePatConfig')), 'writePatConfig passes it');
+  const fn = fnBody(main, 'winlinkPredictionConfig');
+  assert.ok(/settings\.winlinkPrediction !== false/.test(fn), 'default on');
+  assert.ok(/C:\\\\itshfbc\\\\bin_win\\\\voacapw\.exe/.test(fn), 'the operator\'s own Windows VOACAP wins (and the path keeps its backslashes)');
+  assert.ok(/'voacapl'/.test(fn), 'voacapl on PATH elsewhere');
+  assert.ok(/WinlinkPat\.predictionConfig\(\{ enabled, localVoacap, serviceUrl: settings\.winlinkPredictionUrl \}\)/.test(fn));
+  assert.ok(/'winlinkPredictionUrl',/.test(read('main.js').slice(0, 60000)), 'the service override is a machine key');
+  assert.ok(/'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid'\]/.test(main), 'a change relaunches Pat');
+});
+test('the gateway reply says how it is ordered, on every surface', () => {
+  const fn = fnBody(main, 'winlinkGateways');
+  assert.ok(/const predicted = list\.some\(\(g\) => g\.quality != null\);/.test(fn));
+  assert.ok(/WinlinkPat\.rankingNote\(\{ predicted, count: list\.length, hf \}\)/.test(fn));
+  assert.ok(/return \{ ok: true, mode, band: band \|\| '', list, predicted, note \};/.test(fn));
+  assert.ok(/type: 'winlink-gateways', mode: r\.mode, band: r\.band, list: r\.list, predicted: !!r\.predicted, note: r\.note \|\| ''/.test(main), 'ECHOCAT gets predicted + note');
+  const proto = read('lib/echocat-protocol.js');
+  assert.ok(/'winlink-gateways': \{[^}]*predicted: f\.optBoolean, note: f\.optString/.test(proto), 'declared on the wire');
+  const popout = read('renderer/winlink-popout.js');
+  assert.ok(/function gatewayLabel\(g\)/.test(popout) && /g\.qualityWord \+ \(g\.quality != null \? ' ' \+ g\.quality \+ '%' : ''\)/.test(popout), 'pop-out shows the word before the percent');
+  assert.ok(/note\.textContent = r\.note \|\| ''/.test(popout));
+  const web = read('renderer/remote.js');
+  assert.ok(/function mailGatewayLabel\(g\)/.test(web) && /mailGatewayNote = msg\.note \|\| ''/.test(web), 'web shows the same word and note');
+  const html = read('renderer/index.html');
+  assert.ok(/id="set-winlink-prediction" checked/.test(html), 'the switch is on by default');
+  assert.ok(/api\.potacat\.com/.test(html.slice(html.indexOf('set-winlink-prediction'), html.indexOf('set-winlink-prediction') + 900)), 'the copy says where the grid goes');
+  const app = read('renderer/app.js');
+  assert.ok(/winlinkPrediction: setWinlinkPrediction \? setWinlinkPrediction\.checked : true,/.test(app));
+});
+
 // The summary LAST. Until 2026-10-23 it sat above the later sections, so a
 // failure down here never reached the exit code — two stale assertions rode
 // through CI that way.

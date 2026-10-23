@@ -3071,6 +3071,8 @@
           </div>
           <span class="help-text" style="display:block;">Saved for the active radio.</span>
         </div>
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-prediction" checked> Rank gateways by predicted propagation</label>
+        <span class="help-text" style="display:block;">The gateway list is ordered by the path VOACAP expects to be open right now, not by distance. Your grid square and each gateway's are sent to POTACAT's VOACAP service at api.potacat.com; a VOACAP you installed yourself is used instead. Off = nearest first, nothing sent.</span>
         <label style="margin-top:6px;">End a radio session after
           <input type="number" id="set-winlink-cap" min="10" max="60" value="30" style="width:50px;"> minutes
         </label>

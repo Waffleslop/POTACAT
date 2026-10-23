@@ -273,3 +273,7 @@ Pat missing (ENOENT → "bundled copy missing; set its path in Settings"), no fr
 - No external audio path on Flex Direct (mac/Linux) and Icom Network → RF modes hidden there with the reason.
 - `/api/connect` is a long call; the session state machine treats a dropped `/ws` as `error`.
 - Mail privacy: owner-only hydration; bodies never logged; the password is in SECRET_KEYS and redacted from reports.
+
+## Propagation-ranked gateways (2026-10-23, BUILT desktop side; cloud route pending)
+
+Pat sorts gateways by its VOACAP link-quality index when it has an engine, else by distance. POTACAT writes `prediction` into Pat's config on every launch (`lib/winlink-pat.js predictionConfig`, `main.js winlinkPredictionConfig`): the operator's own VOACAP when installed (`c:\itshfbc\bin_win\voacapw.exe`, `voacapl` on PATH), else `voacap-api` at `https://api.potacat.com/v1/voacap` (cloudlog `DESKTOP_TO_CLOUD_HANDOFF_2026-10-23_VOACAP_API.md`: POST the deck to `/predict`, GET `/version`), off = `disabled`. Every row carries `qualityWord` (Good ≥ 65 / Fair ≥ 35 / Poor; null with no prediction) and the reply carries `predicted` + `note` so the pop-out, the web Mail tab and the phone show the same word and the same one-line order explanation. Setting: Settings > Station > Winlink > "Rank gateways by predicted propagation" (default on; `winlinkPredictionUrl` GLOBAL_KEY for a self-hosted service). Until the route is live every list says "Nearest first. No propagation prediction came back."

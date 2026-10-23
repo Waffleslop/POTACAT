@@ -541,18 +541,33 @@
   });
   $('wl-gw-refresh').addEventListener('click', function () { loadGateways(true); });
 
+  // One line per gateway, the prediction as a word first: what the operator
+  // decides on is whether the path is open, not a percentage.
+  function gatewayLabel(g) {
+    var parts = [g.call];
+    if (g.dialKhz) parts.push(g.dialKhz.toFixed(1) + ' kHz');
+    if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
+    if (g.distKm != null) parts.push(g.distKm + ' km');
+    if (g.mercury) parts.push('(Mercury)');
+    return parts.join('  ');
+  }
+
   function loadGateways() {
     var m = currentMode();
     if (m.id === 'telnet' || !m.available) return;
     var sel = $('wl-gateway');
-    sel.innerHTML = '<option value="">Loading gateways…</option>';
+    var note = $('wl-gw-note');
+    var hf = m.id !== 'packet' && m.id !== 'varafm';
+    sel.innerHTML = '<option value="">' + (hf ? 'Loading gateways and predicting propagation…' : 'Loading gateways…') + '</option>';
+    if (note) note.textContent = '';
     window.api.gateways(m.id, $('wl-band').value).then(function (r) {
       if (!r || !r.ok) { sel.innerHTML = '<option value="">' + esc((r && r.error) || 'No list') + '</option>'; return; }
       gateways = r.list || [];
+      if (note) note.textContent = r.note || '';
       if (!gateways.length) { sel.innerHTML = '<option value="">No gateways for that band</option>'; return; }
       var last = state && state.lastGateway;
       sel.innerHTML = gateways.slice(0, 120).map(function (g, i) {
-        var label = g.call + '  ' + (g.dialKhz ? g.dialKhz.toFixed(1) + ' kHz' : '') + (g.distKm != null ? '  ' + g.distKm + ' km' : '') + (g.quality != null ? '  ' + g.quality + '%' : '') + (g.mercury ? '  (Mercury)' : '');
+        var label = gatewayLabel(g);
         var selAttr = last && last.call === g.call && last.dialKhz === g.dialKhz ? ' selected' : '';
         return '<option value="' + i + '"' + selAttr + '>' + esc(label) + '</option>';
       }).join('');

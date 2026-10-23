@@ -122,6 +122,41 @@ test('band filter is by the dial\'s band', () => {
   assert.deepStrictEqual(W.normalizeRmslist(RMS, { band: '20m' }).map((x) => x.call), ['N0XYZ-10']);
 });
 
+console.log('propagation ranking');
+test('every row carries the quality as a word; no prediction is null, never Poor', () => {
+  const r = W.normalizeRmslist(RMS);
+  assert.strictEqual(r[0].qualityWord, 'Good');
+  assert.strictEqual(r[1].quality, null);
+  assert.strictEqual(r[1].qualityWord, null);
+  assert.strictEqual(W.qualityWord(65), 'Good');
+  assert.strictEqual(W.qualityWord(64), 'Fair');
+  assert.strictEqual(W.qualityWord(35), 'Fair');
+  assert.strictEqual(W.qualityWord(34), 'Poor');
+  assert.strictEqual(W.qualityWord(0), 'Poor');
+  assert.strictEqual(W.qualityWord(undefined), null);
+  assert.strictEqual(W.qualityWord('abc'), null);
+});
+test('the engine: own VOACAP if installed, else the hosted one, off = disabled and nothing sent', () => {
+  assert.deepStrictEqual(W.predictionConfig(), { engine: 'voacap-api', voacap_api: { base_url: 'https://api.potacat.com/v1/voacap' } });
+  assert.deepStrictEqual(W.predictionConfig({ localVoacap: true }), { engine: 'voacap' });
+  assert.deepStrictEqual(W.predictionConfig({ enabled: false, localVoacap: true }), { engine: 'disabled' });
+  assert.deepStrictEqual(W.predictionConfig({ serviceUrl: 'http://localhost:3000/' }), { engine: 'voacap-api', voacap_api: { base_url: 'http://localhost:3000' } });
+  assert.ok(W.PAT_DEFAULTS.predictionUrl.startsWith('https://api.potacat.com/'), 'the hosted engine is POTACAT\'s own');
+});
+test('the prediction block rides into Pat\'s config only when given', () => {
+  const c = W.buildPatConfig({ mycall: 'K3SBP', httpPort: 1, prediction: W.predictionConfig() });
+  assert.strictEqual(c.prediction.engine, 'voacap-api');
+  assert.strictEqual(c.prediction.voacap_api.base_url, 'https://api.potacat.com/v1/voacap');
+  assert.ok(!('prediction' in W.buildPatConfig({ mycall: 'K3SBP', httpPort: 1 })), 'absent = Pat autodetects');
+  assert.ok(!('prediction' in W.buildPatConfig({ mycall: 'K3SBP', httpPort: 1, prediction: {} })));
+});
+test('the ranking note says which order the list is in', () => {
+  assert.strictEqual(W.rankingNote({ predicted: true, count: 5 }), 'Best predicted path first, for right now');
+  assert.strictEqual(W.rankingNote({ predicted: false, count: 5 }), 'Nearest first. No propagation prediction came back.');
+  assert.strictEqual(W.rankingNote({ predicted: false, count: 5, hf: false }), 'Nearest first');
+  assert.strictEqual(W.rankingNote({ predicted: true, count: 0 }), '');
+});
+
 console.log('messages');
 const PATMSG = {
   MID: 'ABC123XYZ', Date: '2026-10-22T14:00:00Z', From: { Proto: '', Addr: 'W1AW' },

@@ -144,8 +144,9 @@
         <option>2m</option><option>1.25m</option><option>70cm</option>
         <option>80m</option><option>60m</option><option>40m</option><option>30m</option><option>20m</option><option>17m</option><option>15m</option><option>12m</option><option>10m</option>
       </select>
-      <select id="wl-gateway" title="Gateways, nearest or best-predicted first"><option value="">Load gateways…</option></select>
+      <select id="wl-gateway" title="Gateways, best predicted path first (nearest first with no prediction)"><option value="">Load gateways…</option></select>
       <button class="wl-btn" id="wl-gw-refresh" title="Fetch the gateway list">&#8635;</button>
+      <span class="wl-mode-note" id="wl-gw-note"></span>
     </span>
     <button class="wl-btn primary" id="wl-connect">Send / Receive</button>
     <button class="wl-btn danger" id="wl-abort" disabled>Abort</button>

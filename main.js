@@ -729,6 +729,7 @@ const GLOBAL_KEYS = new Set([
   'winlinkVaraFmPort', // Winlink: the operator's own VARA FM port on this machine (default 8310 — VARA FM ships on 8300 too)
   'winlinkVaraHfPath', // Winlink: where VARA.exe is on THIS machine (blank = the usual places)
   'winlinkVaraFmPath', // Winlink: where VARAFM.exe is on THIS machine
+  'winlinkPredictionUrl', // Winlink: a VOACAP service other than api.potacat.com (dev / self-hosted); blank = POTACAT's
   'winlinkVaraAutoLaunch', // Winlink: start the operator's VARA when a session needs it (default on; never stopped by POTACAT)
   'winlinkDirewolfPath', // Winlink: explicit Dire Wolf binary on THIS machine
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
@@ -8635,6 +8636,31 @@ async function winlinkRefreshMailboxes(boxes = WinlinkStateLib.BOXES) {
   winlinkPush();
 }
 
+/**
+ * Which propagation engine Pat gets (lib/winlink-pat.js predictionConfig):
+ * the operator's own VOACAP when one is installed, else POTACAT's hosted one,
+ * else nothing when they turned ranking off. Logged once per launch so the
+ * gateway order is explainable from the log.
+ */
+function winlinkPredictionConfig() {
+  const enabled = settings.winlinkPrediction !== false;
+  let localVoacap = false;
+  if (enabled) {
+    if (process.platform === 'win32') {
+      try { fs.accessSync('C:\\itshfbc\\bin_win\\voacapw.exe'); localVoacap = true; } catch { /* none */ }
+    } else {
+      localVoacap = (process.env.PATH || '').split(path.delimiter).some((d) => {
+        try { fs.accessSync(path.join(d, 'voacapl'), fs.constants.X_OK); return true; } catch { return false; }
+      });
+    }
+  }
+  const cfg = WinlinkPat.predictionConfig({ enabled, localVoacap, serviceUrl: settings.winlinkPredictionUrl });
+  const how = cfg.engine === 'disabled' ? 'off — gateways nearest first' : cfg.engine === 'voacap' ? 'your own VOACAP install' : `POTACAT's VOACAP service (${cfg.voacap_api.base_url})`;
+  if (how !== _winlinkPredictionLogged) { _winlinkPredictionLogged = how; winlinkLog(`gateway ranking: ${how}`); }
+  return cfg;
+}
+let _winlinkPredictionLogged = '';
+
 /** Write Pat's config for this launch / this session. Returns the varahf address written. */
 function writePatConfig({ varaAddr } = {}) {
   const p = winlinkPaths();
@@ -8655,6 +8681,7 @@ function writePatConfig({ varaAddr } = {}) {
       varaFmAddr: `127.0.0.1:${_winlinkVaraFmPort()}`,
       agwPort: _winlinkAgwPort(),
     },
+    prediction: winlinkPredictionConfig(),
   });
   // Written owner-only where the OS honours it: it holds the Winlink password.
   fs.writeFileSync(p.config, JSON.stringify(cfg, null, 2), { mode: 0o600 });
@@ -9818,9 +9845,18 @@ async function winlinkGateways(mode, band) {
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
     }
     winlinkState.setGateways(mode, band, list);
-    return { ok: true, mode, band: band || '', list };
+    // Pat ranks by predicted link quality when its engine answered; a row
+    // with no quality means the engine was off, unreachable, or the gateway
+    // is above HF (VOACAP stops at 30 MHz). Say which order the list is in.
+    const hf = !WinlinkModes.isFmMode(mode);
+    const predicted = list.some((g) => g.quality != null);
+    const note = WinlinkPat.rankingNote({ predicted, count: list.length, hf });
+    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? ' — no prediction came back (VOACAP service unreachable?)' : '')}`;
+    if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
+    return { ok: true, mode, band: band || '', list, predicted, note };
   } catch (e) { return { ok: false, error: e.message }; }
 }
+let _winlinkGatewaysLogged = '';
 
 function winlinkAcceptNotice() {
   if (!settings.winlinkNoticeAcceptedAt) {
@@ -9934,7 +9970,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         return;
       case 'winlink-gateways-get': {
         const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '');
-        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list });
+        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list, predicted: !!r.predicted, note: r.note || '' });
         else result('gateways', r);
         return;
       }
@@ -38572,7 +38608,7 @@ app.whenReady().then(() => {
     // The password is in pat-config.json, so a new one needs a relaunch too.
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort',
-      'winlinkArdopBw', 'winlinkVaraBw', 'winlinkAgwPort', 'myCallsign', 'grid']
+      'winlinkArdopBw', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
     const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
       .some((k) => has(k) && newSettings[k] !== settings[k]);

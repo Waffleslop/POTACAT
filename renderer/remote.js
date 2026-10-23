@@ -1971,6 +1971,7 @@
         break;
       case 'winlink-gateways':
         mailGateways = msg.list || [];
+        mailGatewayNote = msg.note || '';
         mailRenderGateways();
         break;
       case 'winlink-attachment':
@@ -14509,6 +14510,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   var mailLists = { in: [], out: [], sent: [], archive: [] };
   var mailBox = 'in';
   var mailGateways = [];
+  var mailGatewayNote = '';
   var mailNoticeThen = null;
   function mailSend(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
   function mailEl(id) { return document.getElementById(id); }
@@ -14664,17 +14666,27 @@ var _paddleHoldTimer = { dit: null, dah: null };
       mailEl('mail-err').textContent = '';
     });
   }
+  function mailGatewayLabel(g) {
+    var parts = [g.call];
+    if (g.dialKhz) parts.push(g.dialKhz.toFixed(1) + ' kHz');
+    if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
+    if (g.distKm != null) parts.push(g.distKm + ' km');
+    return parts.join('  ');
+  }
   function mailRenderGateways() {
     var sel = mailEl('mail-gateway');
+    var note = mailEl('mail-gw-note');
+    if (note) note.textContent = mailGatewayNote;
     if (!mailGateways.length) { sel.innerHTML = '<option value="">No gateways for that band</option>'; return; }
     sel.innerHTML = mailGateways.slice(0, 80).map(function (g, i) {
-      return '<option value="' + i + '">' + esc(g.call + ' ' + (g.dialKhz ? g.dialKhz.toFixed(1) + ' kHz' : '') + (g.distKm != null ? ' ' + g.distKm + ' km' : '')) + '</option>';
+      return '<option value="' + i + '">' + esc(mailGatewayLabel(g)) + '</option>';
     }).join('');
   }
   function mailLoadGateways() {
     var mode = mailEl('mail-mode').value;
     if (mode === 'telnet') return;
-    mailEl('mail-gateway').innerHTML = '<option value="">Loading…</option>';
+    mailEl('mail-gateway').innerHTML = '<option value="">' + (mode === 'packet' || mode === 'varafm' ? 'Loading…' : 'Loading, predicting propagation…') + '</option>';
+    mailGatewayNote = '';
     mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailEl('mail-band').value });
   }
   function mailOnOpen() {
