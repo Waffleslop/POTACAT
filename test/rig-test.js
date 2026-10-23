@@ -1244,7 +1244,9 @@ test('FTX-1 RM6 reply routes to swr', () => {
   codec.on('swr', (v) => { swr = v; });
   codec.on('alc', (v) => { alc = v; });
   codec.onData(Buffer.from('RM6055;'));
-  assert.strictEqual(swr, 55);
+  // Hamlib's yaesu_default_swr_cal: raw 55 sits between 39 (1.35) and 65 (1.5)
+  // -> 1.44:1 -> wire (1.44 - 1) * 60 = 27.
+  assert.strictEqual(swr, 27);
   assert.strictEqual(alc, null);
 });
 
@@ -1542,8 +1544,8 @@ test('Yaesu SM passes through unscaled (already 0-255)', () => {
 test('Yaesu RM keeps the 3-digit clamp (FTX-1 extra-field guard intact)', () => {
   const codec = new KenwoodCodec(FT891_MODEL, () => {});
   let v = null; codec.on('swr', (x) => { v = x; });
-  codec.onData(Buffer.from('RM4120999;')); // value 120, appended fields ignored
-  assert.strictEqual(v, 120);
+  codec.onData(Buffer.from('RM6089999;')); // value 89, appended fields ignored
+  assert.strictEqual(v, 60);                // Hamlib: RM6 89 = 2.0:1 -> wire 60
 });
 
 test('Non-Kenwood non-Yaesu brand passes through (no unmeasured scaling)', () => {
@@ -2992,3 +2994,35 @@ if (failed > 0) {
 } else {
   console.log('ALL TESTS PASSED');
 }
+
+// Yaesu SWR is RM6, ALC is RM4 (Hamlib 4.7.0 newcat.c). 507cab2a read RM4 as SWR,
+// so every Yaesu showed its ALC meter as SWR (3.3:1 into a 1.00 match, 2026-10-23).
+test('Yaesu (FT-991A / FTDX10 / FT-891) reads SWR on RM6 and ALC on RM4', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const name of ['FT-991/991A', 'FTDX10', 'FT-891', 'FT-710', 'FTDX101D/MP', 'FTDX3000']) {
+    const w = [];
+    const c = new KenwoodCodec({ ...RIG_MODELS[name], brand: 'Yaesu' }, (x) => w.push(String(x)));
+    c.getSwr(); c.getAlc();
+    assert.ok(w.includes('RM6;') && w.includes('RM4;'), name + ' asked ' + w.join(' '));
+    let swr = null, alc = null;
+    c.on('swr', (v) => { swr = v; }); c.on('alc', (v) => { alc = v; });
+    c.onData(Buffer.from('RM4200;'));
+    assert.strictEqual(swr, null, name + ': ALC never reaches the SWR meter');
+    assert.ok(alc > 0);
+    c.onData(Buffer.from('RM6000;'));
+    assert.ok(1 + swr / 60 < 1.05, name + ': a match reads ~1.0, got ' + (1 + swr / 60));
+    c.onData(Buffer.from('RM6089;'));
+    assert.strictEqual(swr, 60, name + ': raw 89 = 2.0:1');
+  }
+});
+
+test("Icom SWR meter is mapped through Hamlib's IC-7300 table (48 = 1.5, 80 = 2.0, 120 = 3.0)", () => {
+  const { CivCodec } = require('../lib/codecs/civ-codec');
+  const c = new CivCodec({ civAddr: 0x94 }, () => {});
+  let swr = null; c.on('swr', (v) => { swr = v; });
+  const frame = (bcd) => Buffer.from([0xFE, 0xFE, 0xE0, 0x94, 0x15, 0x12, ...bcd, 0xFD]);
+  for (const [bcd, ratio] of [[[0x00, 0x00], 1.0], [[0x00, 0x48], 1.5], [[0x00, 0x80], 2.0], [[0x01, 0x20], 3.0]]) {
+    c.onData(frame(bcd));
+    assert.ok(Math.abs((1 + swr / 60) - ratio) < 0.02, `raw ${bcd} -> ${(1 + swr / 60).toFixed(2)}, want ${ratio}`);
+  }
+});
