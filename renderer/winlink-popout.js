@@ -34,6 +34,61 @@
 
   // ── state ────────────────────────────────────────────────────────────────
   var STATE_WORDS = { idle: '', starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: 'Finished', error: 'Failed' };
+  // ── account: shown until the shack has a Winlink password ────────────────
+  var acct = { checked: false, exists: null, busy: false };
+  function acctRender(s) {
+    var card = $('wl-acct-card');
+    var need = !!(s && s.patReady && !s.hasPassword);
+    card.classList.toggle('show', need);
+    if (!need) { acct.checked = false; return; }
+    if (!acct.checked && !acct.busy) acctCheck();
+  }
+  function acctCheck() {
+    acct.busy = true;
+    $('wl-acct-text').textContent = 'Checking whether your callsign has an account…';
+    $('wl-acct-form').style.display = 'none';
+    window.api.accountCheck().then(function (r) {
+      acct.busy = false; acct.checked = true;
+      $('wl-acct-form').style.display = 'inline-flex';
+      $('wl-acct-retry').style.display = 'none';
+      if (!r || !r.ok) {
+        $('wl-acct-text').textContent = 'Could not reach Winlink to check: ' + ((r && r.error) || 'no answer');
+        $('wl-acct-retry').style.display = '';
+        $('wl-acct-go').style.display = 'none';
+        $('wl-acct-email-row').style.display = 'none';
+        return;
+      }
+      acct.exists = !!r.exists;
+      $('wl-acct-go').style.display = '';
+      if (r.exists) {
+        $('wl-acct-text').textContent = r.callsign + ' already has a Winlink account. Enter its password.';
+        $('wl-acct-go').textContent = 'Save password';
+        $('wl-acct-email-row').style.display = 'none';
+      } else {
+        $('wl-acct-text').textContent = r.callsign + ' has no Winlink account yet. Create one here; winlink.org does not sign up new users on its website.';
+        $('wl-acct-go').textContent = 'Create my Winlink account';
+        $('wl-acct-email-row').style.display = '';
+      }
+    });
+  }
+  $('wl-acct-retry').addEventListener('click', acctCheck);
+  $('wl-acct-go').addEventListener('click', function () {
+    var pw = $('wl-acct-pw').value;
+    if (pw.length < 6 || pw.length > 12) { $('wl-acct-text').textContent = 'The password must be 6 to 12 characters.'; return; }
+    var btn = $('wl-acct-go'); btn.disabled = true;
+    var done = function (r) {
+      btn.disabled = false;
+      if (r && r.ok) {
+        $('wl-acct-pw').value = '';
+        $('wl-acct-text').textContent = acct.exists ? 'Saved. Winlink restarts with it — try Send / Receive over the internet.' : 'Account created and saved. Send / Receive over the internet is your first login.';
+      } else {
+        $('wl-acct-text').textContent = (r && r.error) || 'That did not work.';
+      }
+    };
+    if (acct.exists) window.api.setPassword(pw).then(done);
+    else window.api.register({ password: pw, recoveryEmail: $('wl-acct-email').value.trim() }).then(done);
+  });
+
   function renderState() {
     var s = state || {};
     $('wl-mycall').textContent = s.mycall || '—';
@@ -43,6 +98,7 @@
     $('wl-off').innerHTML = off ? off + '<br><br><button class="wl-btn" id="wl-off-settings">Open Settings</button>' : '';
     $('wl-off').style.display = off ? '' : 'none';
     $('wl-main').style.display = off ? 'none' : '';
+    acctRender(s);
     var os = $('wl-off-settings'); if (os) os.addEventListener('click', function () { window.api.openSettings(); });
 
     // Modes

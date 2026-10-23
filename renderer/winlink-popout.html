@@ -38,6 +38,8 @@
     .wl-sound a { color: var(--accent-blue, #4fc3f7); cursor: pointer; text-decoration: underline; }
     .wl-sound-card { display: none; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 12px; }
     .wl-sound-card.show { display: flex; }
+    .wl-acct-card { display: none; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--accent-blue, #4fc3f7); font-size: 12px; }
+    .wl-acct-card.show { display: flex; }
     .wl-sound-card select { max-width: 280px; }
     /* Waterfall: is the gateway frequency in use? 0-3000 Hz of the receiver's passband. */
     /* At the bottom, like the JTCAT pop-out's. */
@@ -149,6 +151,18 @@
     <button class="wl-btn danger" id="wl-abort" disabled>Abort</button>
     <span class="wl-mode-note" id="wl-mode-note"></span>
     <span class="wl-sound" id="wl-sound"></span>
+  </div>
+  <!-- No Winlink password yet: set the account up right here. winlink.org has
+       no web sign-up; an account is created by a client, which is this. -->
+  <div class="wl-acct-card" id="wl-acct-card">
+    <b>Set up your Winlink account</b>
+    <span class="wl-sound" id="wl-acct-text">Checking whether your callsign has an account…</span>
+    <span id="wl-acct-form" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;">
+      <label>Password <input type="password" id="wl-acct-pw" placeholder="6 to 12 characters" maxlength="12" style="width:130px;" autocomplete="new-password"></label>
+      <label id="wl-acct-email-row">Recovery email (optional) <input type="text" id="wl-acct-email" style="width:190px;"></label>
+      <button class="wl-btn primary" id="wl-acct-go">Create my Winlink account</button>
+      <button class="wl-btn" id="wl-acct-retry" style="display:none;">Try again</button>
+    </span>
   </div>
   <div class="wl-sound-card" id="wl-sound-card">
     <b id="wl-sound-title">Which sound devices are your radio?</b>

@@ -33074,7 +33074,8 @@ app.whenReady().then(() => {
     return listArdopDevices();
   });
   ipcMain.handle('winlink-account-check', (_e, call) => winlinkAccountCheck(call));
-  ipcMain.handle('winlink-register', (_e, o = {}) => winlinkRegister(o, 'Settings'));
+  ipcMain.handle('winlink-register', (_e, o = {}) => winlinkRegister(o, (o && o.origin) || 'Settings'));
+  ipcMain.handle('winlink-cmd-set-password', (_e, pw) => winlinkSetPassword(pw, 'mail window'));
   ipcMain.on('mercury-open-downloads', () => {
     try { require('electron').shell.openPath(path.join(app.getPath('userData'), 'mercury-downloads')); } catch {}
   });

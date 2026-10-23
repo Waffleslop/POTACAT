@@ -1712,6 +1712,13 @@
       <div id="scope-phone-axis" style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 8px;color:var(--text-dim);background:var(--bg-header);border-top:1px solid var(--border);flex-shrink:0;"><span id="scope-phone-ax-lo">—</span><span id="scope-phone-ax-c" style="color:#e94560;font-weight:700">—</span><span id="scope-phone-ax-hi">—</span></div>
     </div>
     <div id="mail-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
+      <div id="mail-acct" class="hidden" style="padding:10px;border-bottom:1px solid var(--accent-blue,#4fc3f7);font-size:13px;display:flex;flex-direction:column;gap:6px;">
+        <b>Set up your Winlink account</b>
+        <span id="mail-acct-text">Checking whether your callsign has an account…</span>
+        <input type="password" id="mail-acct-pw" placeholder="Password, 6 to 12 characters" maxlength="12" autocomplete="new-password" style="font-size:14px;">
+        <input type="email" id="mail-acct-email" placeholder="Recovery email (optional)" style="font-size:14px;">
+        <button type="button" id="mail-acct-go" style="font-weight:700;">Create my Winlink account</button>
+      </div>
       <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;flex-wrap:wrap;">
         <select id="mail-box" style="font-size:12px;"><option value="in">Inbox</option><option value="out">Outbox</option><option value="sent">Sent</option><option value="archive">Archive</option></select>
         <button type="button" id="mail-new" style="font-size:12px;">New</button>

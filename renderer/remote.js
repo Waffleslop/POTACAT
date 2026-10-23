@@ -1955,6 +1955,9 @@
         mailState = msg;
         mailRenderState();
         break;
+      case 'winlink-account':
+        mailAcctAnswer(msg);
+        break;
       case 'winlink-mailbox':
         mailLists[msg.box] = msg.messages || [];
         if (msg.box === mailBox) mailRenderList();
@@ -1982,6 +1985,7 @@
         } catch (e) { showToast('Could not save the attachment', 3000, true); }
         break;
       case 'winlink-result':
+        if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
         if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
         else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
         break;
@@ -14508,8 +14512,46 @@ var _paddleHoldTimer = { dit: null, dah: null };
   var mailNoticeThen = null;
   function mailSend(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
   function mailEl(id) { return document.getElementById(id); }
+  // No Winlink password on the shack yet: set the account up from here.
+  // winlink.org has no web sign-up; the shack's Pat creates the account.
+  var mailAcct = { asked: false, exists: null };
+  function mailAcctRender(s) {
+    var card = mailEl('mail-acct');
+    if (!card) return;
+    var need = !!(s.enabled && s.hasPassword === false && (s.patReady || s.patStarted === false));
+    card.classList.toggle('hidden', !need);
+    card.style.display = need ? 'flex' : 'none';
+    if (!need) { mailAcct.asked = false; return; }
+    if (!mailAcct.asked) { mailAcct.asked = true; mailSend({ type: 'winlink-account-check' }); }
+  }
+  function mailAcctAnswer(msg) {
+    mailAcct.exists = !!msg.exists;
+    mailEl('mail-acct-text').textContent = msg.exists
+      ? msg.callsign + ' already has a Winlink account. Enter its password.'
+      : msg.callsign + ' has no Winlink account yet. Create one here; winlink.org does not sign up new users on its website.';
+    mailEl('mail-acct-email').style.display = msg.exists ? 'none' : '';
+    mailEl('mail-acct-go').textContent = msg.exists ? 'Save password' : 'Create my Winlink account';
+  }
+  function mailAcctResult(msg) {
+    if (msg.op === 'account-check') {
+      mailEl('mail-acct-text').textContent = 'Could not reach Winlink to check: ' + (msg.error || 'no answer') + '. Close and reopen Mail to try again.';
+      mailAcct.asked = false;
+      return;
+    }
+    if (msg.ok) { mailEl('mail-acct-pw').value = ''; showToast(mailAcct.exists ? 'Saved. Try Send / Receive over the internet.' : 'Account created. Send / Receive over the internet is your first login.', 4000); }
+    else mailEl('mail-acct-text').textContent = msg.error || 'That did not work.';
+  }
+  document.addEventListener('click', function (e) {
+    if (!e.target || e.target.id !== 'mail-acct-go') return;
+    var pw = mailEl('mail-acct-pw').value;
+    if (pw.length < 6 || pw.length > 12) { mailEl('mail-acct-text').textContent = 'The password must be 6 to 12 characters.'; return; }
+    if (mailAcct.exists) mailSend({ type: 'winlink-set-password', password: pw });
+    else mailSend({ type: 'winlink-register', password: pw, recoveryEmail: mailEl('mail-acct-email').value.trim() || undefined });
+  });
+
   function mailRenderState() {
     var s = mailState || {};
+    mailAcctRender(s);
     var btn = mailEl('mail-tab-btn');
     if (btn) btn.classList.toggle('hidden', !s.enabled);
     var badge = mailEl('tab-mail-badge');

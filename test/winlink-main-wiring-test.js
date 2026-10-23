@@ -267,3 +267,17 @@ test('Winlink is always available and Pat starts on first use', () => {
     assert.ok(/await winlinkEnsureStarted\(\)/.test(fnBody(main, f)), f + ' starts Pat first');
   }
 });
+
+console.log('account setup in the mail window and the web Mail tab');
+test('with no Winlink password, the mail window and the web Mail tab offer check / create / save right there', () => {
+  const html = read('renderer/winlink-popout.html');
+  const js = read('renderer/winlink-popout.js');
+  const pre = read('preload-winlink-popout.js');
+  assert.ok(/id="wl-acct-card"/.test(html) && /id="wl-acct-go"/.test(html));
+  assert.ok(/var need = !!\(s && s\.patReady && !s\.hasPassword\);/.test(js), 'shown until the shack has a password');
+  assert.ok(/window\.api\.register\(\{ password: pw, recoveryEmail:/.test(js) && /window\.api\.setPassword\(pw\)/.test(js));
+  assert.ok(/setPassword: \(pw\) => ipcRenderer\.invoke\('winlink-cmd-set-password', pw\)/.test(pre));
+  assert.ok(/ipcMain\.handle\('winlink-cmd-set-password', \(_e, pw\) => winlinkSetPassword\(pw, 'mail window'\)\);/.test(main));
+  const web = read('renderer/remote.js');
+  assert.ok(/mailSend\(\{ type: 'winlink-account-check' \}\)/.test(web) && /mailSend\(\{ type: 'winlink-register', password: pw/.test(web) && /mailSend\(\{ type: 'winlink-set-password', password: pw \}\)/.test(web));
+});
