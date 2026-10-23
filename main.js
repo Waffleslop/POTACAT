@@ -19005,9 +19005,24 @@ function _spawnLauncherProc(launcherDest) {
 // when the script has gone missing between sessions (POTACAT upgrade
 // wiped appdata, user manually cleaned, etc.) without making the user
 // do a manual Uninstall + Install round-trip.
+// The bundled launcher script. A packaged build carries it twice: inside
+// app.asar (files) and beside it as Resources/scripts/launcher.js
+// (extraResources — the copy `--launcher` mode runs). W0EGR's 1.13.0 Mac
+// build had only the second, and Install read only the first: "ENOENT,
+// scripts/launcher.js not found in .../app.asar" on every click. Read
+// whichever exists, the on-disk copy first.
+function _bundledLauncherSource() {
+  const candidates = [
+    ...(app.isPackaged ? [path.join(process.resourcesPath, 'scripts', 'launcher.js')] : []),
+    path.join(__dirname, 'scripts', 'launcher.js'),
+  ];
+  for (const p of candidates) {
+    try { return fs.readFileSync(p, 'utf8'); } catch {}
+  }
+  throw new Error(`the launcher script is missing from this install (looked in ${candidates.join(' and ')}) — reinstall POTACAT`);
+}
 function _extractLauncherScript(launcherDest) {
-  const srcLauncher = path.join(__dirname, 'scripts', 'launcher.js');
-  const srcContent = fs.readFileSync(srcLauncher, 'utf8');
+  const srcContent = _bundledLauncherSource();
   fs.mkdirSync(path.dirname(launcherDest), { recursive: true });
   fs.writeFileSync(launcherDest, srcContent);
 }
@@ -19099,7 +19114,7 @@ async function _refreshInstalledLauncher() {
   try {
     const { launcherDest, launcherCfgDir } = _launcherPaths();
     if (!fs.existsSync(launcherDest)) return; // never installed
-    const bundled = fs.readFileSync(path.join(__dirname, 'scripts', 'launcher.js'), 'utf8');
+    const bundled = _bundledLauncherSource();
     if (fs.readFileSync(launcherDest, 'utf8') === bundled) return;
     fs.writeFileSync(launcherDest, bundled);
     let pid = 0;

@@ -204,6 +204,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Check the macOS bundle carries the files the app reads at run time
+        run: node scripts/check-mac-bundle.js
       - name: Rename channel file so it survives artifact staging
         # Both mac jobs write "latest-mac.yml" (electron-builder's channel
         # filename is fixed per-OS, NOT per-arch). Staged together, one copy
@@ -306,6 +308,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Check the macOS bundle carries the files the app reads at run time
+        run: node scripts/check-mac-bundle.js
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos-x64
