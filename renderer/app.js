@@ -15867,7 +15867,7 @@ echoCatCopy.addEventListener('click', async () => {
   const best = ips.find(ip => ip.tailscale) || ips[0];
   const url = best ? `https://${best.address}:${port}` : '';
   const requireToken = s.remoteRequireToken === true;
-  const text = (requireToken && token) ? `${url}\nToken: ${token}` : url;
+  const text = (requireToken && token) ? `${url}\nPassword: ${token}` : url;
   try {
     await navigator.clipboard.writeText(text);
     echoCatCopy.textContent = 'Copied!';

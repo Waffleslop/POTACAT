@@ -200,3 +200,10 @@ test('winlink-watch subscribes a device; the shack computes bins and the Busy ve
   assert.ok(/if \(_winlinkRemoteWatchers > 0\) winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);/.test(main), 'fed from the socket routes only while watched');
   assert.ok(/winlink-spectrum-mags[\s\S]*?winlinkSocketAudioRoute\(\)\) return;/.test(main), 'the window relays only on a sound-device rig');
 });
+
+console.log('SWR guard');
+test('an SWR-guard trip aborts a running Winlink session with the reason in session.error', () => {
+  const trip = fnBody(main, 'tripSwrGuard');
+  assert.ok(/if \(winlinkSessionActive\(\)\) winlinkAbortSession\(`SWR \$\{swr\.toFixed\(1\)\}:1/.test(trip), 'tripSwrGuard stops the session');
+  assert.ok(/_winlinkSessionError = `Stopped: \$\{why\}`;/.test(fnBody(main, 'winlinkAbortSession')), 'the reason reaches session.error');
+});

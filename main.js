@@ -2083,6 +2083,9 @@ function tripSwrGuard(swr) {
   }
   handleRemotePtt(false);
   if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
+  // A Winlink session keys through the shim and would re-key on Pat's next
+  // frame: stop it, with the reason every surface shows ("Stopped: SWR 3.4:1 …").
+  if (winlinkSessionActive()) winlinkAbortSession(`SWR ${swr.toFixed(1)}:1 — the SWR guard stopped the transmission`);
   // The SSTV window plays the picture itself and was never told: the audio
   // kept playing into an unkeyed radio and TRANSMIT stayed on HALT until
   // pressed (Casey 2026-09-29). Stop it and show the trip there.
