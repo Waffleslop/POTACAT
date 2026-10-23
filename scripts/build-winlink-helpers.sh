@@ -89,13 +89,15 @@ if [[ " $want " == *" ardop "* ]]; then
     # has ~40 capture devices, so it wrote past the end and crashed with
     # 0xC0000005 before opening any audio (K3SBP, 2026-10-22). Room for 64,
     # and the comma-joined device string sized for its leading comma.
+    # (`sed -i.bak`: the one in-place spelling GNU and BSD sed share — a bare
+    # `-i -e` made BSD sed take "-e" as the backup suffix on the first macOS build.)
     W="$WORK/ardop/src/windows/Waveout.c"
-    sed -i \
+    sed -i.bak \
       -e 's/char CaptureNames\[16\]\[MAXPNAMELEN + 2\]/char CaptureNames[64][MAXPNAMELEN + 2]/' \
       -e 's/char PlaybackNames\[16\]\[MAXPNAMELEN + 2\]/char PlaybackNames[64][MAXPNAMELEN + 2]/' \
       -e 's/malloc((MAXPNAMELEN + 2) \* CaptureCount)/malloc((MAXPNAMELEN + 4) * (CaptureCount + 1))/' \
       -e 's/malloc((MAXPNAMELEN + 2) \* PlaybackCount)/malloc((MAXPNAMELEN + 4) * (PlaybackCount + 1))/' \
-      "$W"
+      "$W" && rm -f "$W.bak"
     grep -q 'CaptureNames\[64\]' "$W" && grep -q 'PlaybackNames\[64\]' "$W" && grep -q '(CaptureCount + 1)' "$W" \
       || { echo "::error::ardopcf device-table patch did not apply"; exit 1; }
     # POTACAT socket audio backend (third_party/ardopcf/src/SocketAudio.*,
@@ -107,8 +109,8 @@ if [[ " $want " == *" ardop "* ]]; then
     git -C "$WORK/ardop" apply --ignore-whitespace "$ROOT/third_party/ardopcf/potacat-socket-audio.patch" || { echo "::error::potacat-socket-audio.patch did not apply to ardopcf $ARDOP_TAG"; exit 1; }
     grep -q 'sa_active' "$WORK/ardop/src/windows/Waveout.c" || { echo "::error::socket audio hook missing"; exit 1; }
     # The loops have no bound of their own: cap the device count at the table size.
-    sed -i -e 's/CaptureCount = waveInGetNumDevs();/CaptureCount = waveInGetNumDevs(); if (CaptureCount > 64) CaptureCount = 64;/' \
-           -e 's/PlaybackCount = waveOutGetNumDevs();/PlaybackCount = waveOutGetNumDevs(); if (PlaybackCount > 64) PlaybackCount = 64;/' "$W"
+    sed -i.bak -e 's/CaptureCount = waveInGetNumDevs();/CaptureCount = waveInGetNumDevs(); if (CaptureCount > 64) CaptureCount = 64;/' \
+           -e 's/PlaybackCount = waveOutGetNumDevs();/PlaybackCount = waveOutGetNumDevs(); if (PlaybackCount > 64) PlaybackCount = 64;/' "$W" && rm -f "$W.bak"
     grep -q 'if (CaptureCount > 64)' "$W" || { echo "::error::ardopcf device-count cap did not apply"; exit 1; }
     mkdir -p "$ROOT/assets/ardopcf"
     # C17: GCC 15 (current MSYS2) defaults to C23, where ardopcf's old-style
