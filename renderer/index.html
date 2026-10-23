@@ -203,6 +203,7 @@
             <button class="view-menu-item" id="view-bandspread-btn">Bandspread</button>
             <button class="view-menu-item" id="view-rbn-btn">Propagation</button>
             <button class="view-menu-item" id="view-contests-btn">Contests</button>
+            <button class="view-menu-item" id="view-was-btn" title="Worked All States: which states you have worked and confirmed, by band and mode">Worked All States</button>
             <button class="view-menu-item" id="cluster-terminal-btn">Terminal</button>
             <button class="view-menu-item" id="view-directory-btn">SWL/HF Net Directory</button>
             <button class="view-menu-item" id="view-conditions-btn" title="Open Solar &amp; Propagation Conditions in a new window">Conditions &#x2197;</button>
@@ -1036,6 +1037,67 @@
         </table>
       </div>
       <div id="dxcc-placeholder" class="hidden">No QSOs logged yet. Log some contacts or import a log to see DXCC progress.</div>
+    </div>
+    <div id="was-view" class="hidden">
+      <div class="dxcc-header was-header">
+        <label class="dxcc-filter-label">Mode:
+          <select id="was-mode-select">
+            <option value="all">Any mode</option>
+            <option value="phone">Phone</option>
+            <option value="cw">CW</option>
+            <option value="digital">Digital</option>
+            <option value="FT8">FT8 only</option>
+            <option value="FT4">FT4 only</option>
+            <option value="RTTY">RTTY only</option>
+          </select>
+        </label>
+        <label class="dxcc-filter-label">Count:
+          <select id="was-count-select">
+            <option value="worked">Worked</option>
+            <option value="confirmed">Confirmed</option>
+          </select>
+        </label>
+        <span class="dxcc-progress">
+          <span id="was-count">0 / 50</span>
+          <span id="was-award-label"></span>
+        </span>
+        <span class="was-legend">
+          <span class="was-swatch was-swatch-worked"></span>Worked
+          <span class="was-swatch was-swatch-confirmed"></span>Confirmed
+        </span>
+        <span class="was-tools">
+          <button type="button" id="was-backfill-btn" class="event-overlay-btn" title="Older QSOs with no state get the state QRZ lists for the call, or the park's state for a park contact. A log edit you can undo in the Logbook.">Fill missing states from QRZ</button>
+          <span id="was-backfill-status" class="was-backfill-status"></span>
+        </span>
+      </div>
+      <div class="dxcc-table-container">
+        <table class="dxcc-matrix was-matrix">
+          <thead>
+            <tr>
+              <th class="dxcc-entity-col">State</th>
+              <th class="dxcc-band-col">160m</th>
+              <th class="dxcc-band-col">80m</th>
+              <th class="dxcc-band-col">60m</th>
+              <th class="dxcc-band-col">40m</th>
+              <th class="dxcc-band-col">30m</th>
+              <th class="dxcc-band-col">20m</th>
+              <th class="dxcc-band-col">17m</th>
+              <th class="dxcc-band-col">15m</th>
+              <th class="dxcc-band-col">12m</th>
+              <th class="dxcc-band-col">10m</th>
+              <th class="dxcc-band-col">6m</th>
+              <th class="dxcc-band-col">4m</th>
+              <th class="dxcc-band-col">2m</th>
+              <th class="dxcc-band-col">70cm</th>
+              <th class="dxcc-band-col">1.25m</th>
+              <th class="dxcc-band-col">33cm</th>
+              <th class="dxcc-band-col">23cm</th>
+            </tr>
+          </thead>
+          <tbody id="was-matrix-body"></tbody>
+        </table>
+      </div>
+      <div id="was-placeholder" class="hidden">No states yet. A QSO counts for a state from its STATE field: POTACAT fills it from the park or from QRZ when you log, and "Fill missing states from QRZ" fills older contacts.</div>
     </div>
     <div id="directory-view" class="hidden">
       <div class="directory-view-header">
@@ -4899,6 +4961,8 @@
   <script src="../lib/activation-program.js"></script>
   <script src="../lib/prop-empty-state.js"></script>
   <script src="../lib/dxpedition-contests.js"></script>
+  <script src="../lib/worked-roster.js"></script>
+  <script src="was-view.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>
   <script src="app.js"></script>

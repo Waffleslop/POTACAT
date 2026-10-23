@@ -420,6 +420,7 @@ const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state')
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
+const WorkedRoster = require('./lib/worked-roster'); // states + DXCC entities worked/confirmed by band and mode (WAS, map overlays)
 const { describeJtcatTxAudioFault } = require('./lib/jtcat-tx-audio-fault'); // renderer TX route refused: configured output device unavailable
 const EventRegistry = require('./lib/event-registry'); // unified Events/Contests registry (roadmap #1 Phase A)
 const { SstvManager } = require('./lib/sstv-manager');
@@ -1738,6 +1739,7 @@ function localQsoCount() {
 // startup and on log-path change; appended to incrementally on each save.
 let qsoDetails = new Map(); // callsign -> [{date, time, mode, freq, band, comment, ref}, ...]
 let rosterWorkedDxcc = new Set();  // "EntityName|20m" — DXCC entities worked per band
+let workedRoster = WorkedRoster.empty(); // lib/worked-roster.js: states/entities × band × mode, worked + confirmed (pushed as 'worked-roster')
 let rosterWorkedCalls = new Set(); // "K1ABC" — all callsigns ever worked
 let rosterWorkedGrids = new Set(); // "FN42" — all grids ever worked
 let workedParks = new Map(); // reference -> park data from POTA parks CSV
@@ -11915,6 +11917,7 @@ async function saveQsoRecord(qsoData, opts) {
   if (!logAs && qsoData.callsign) {
     const call = qsoData.callsign.toUpperCase();
     const entry = { date: qsoData.qsoDate || '', ref: (qsoData.sigInfo || '').toUpperCase(), myRef: (qsoData.mySigInfo || qsoData.myPotaRef || '').toUpperCase(), band: (qsoData.band || '').toUpperCase(), mode: normalizeLogMode(qsoData.mode, qsoData.submode) };
+    if (qsoData.state) entry.state = String(qsoData.state).trim().toUpperCase();
     if (!workedQsos.has(call)) workedQsos.set(call, []);
     workedQsos.get(call).push(entry);
     // Mirror into the richer ragchew-logger index so a freshly-saved QSO
@@ -11935,6 +11938,7 @@ async function saveQsoRecord(qsoData, opts) {
       const entity = resolveCallsign(call, ctyDb);
       if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
     }
+    workedRosterAdd(call, entry);
   }
 
   // Update worked parks set when a POTA/WWFF park is logged (live "new-to-me" update)
@@ -12364,6 +12368,7 @@ function connectWsjtx() {
         const entity = resolveCallsign(call, ctyDb);
         if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
       }
+      workedRosterAdd(call, entry);
       // Update workedParks if activator was at a park
       if (spot && spot.reference) {
         const parkRef = spot.reference.toUpperCase();
@@ -25940,6 +25945,40 @@ function loadWorkedQsos() {
   }
   buildQsoDetailsIndex();
   buildRosterSets();
+  rebuildWorkedRoster();
+}
+
+// --- Worked roster (WAS / worked-countries): built from the same entries as
+// everything else that asks "have I worked this", so the tracker, the map
+// tints and a decode's wanted badge can never disagree with the check mark.
+function rosterEntityOf(call) {
+  if (!ctyDb || !call) return '';
+  const e = resolveCallsign(call, ctyDb);
+  return e ? e.name : '';
+}
+
+function rebuildWorkedRoster() {
+  try {
+    workedRoster = WorkedRoster.build(workedQsos, rosterEntityOf);
+  } catch (err) {
+    console.error('[Roster] worked roster build failed:', err.message);
+    workedRoster = WorkedRoster.empty();
+  }
+  sendWorkedRoster();
+}
+
+function sendWorkedRoster() {
+  if (win && !win.isDestroyed()) win.webContents.send('worked-roster', workedRoster);
+}
+
+/** A logged QSO just saved: fold it into the roster without a re-parse. */
+function workedRosterAdd(call, entry) {
+  try {
+    WorkedRoster.addEntry(workedRoster, call, entry, rosterEntityOf(call));
+    sendWorkedRoster();
+  } catch (err) {
+    console.error('[Roster] worked roster add failed:', err.message);
+  }
 }
 
 // --- Daily QSO milestone broadcast (ECHOCAT parity of the renderer's cat
@@ -39477,6 +39516,88 @@ app.whenReady().then(() => {
 
   ipcMain.handle('parse-adif', async () => {
     return await buildDxccData();
+  });
+
+  // --- Worked roster (Worked All States view, map overlays) ---
+  ipcMain.handle('worked-roster-get', () => workedRoster);
+
+  // "Fill missing states from QRZ": a log EDIT the operator asks for, through
+  // lib/qso-log.js so the cloud copy follows. Records with no STATE whose
+  // call is a US/Canadian/Australian one get the state QRZ lists for the
+  // call; a contact logged at a park takes the PARK's state when the park
+  // sits in one state, and is left alone when it straddles (the park, not
+  // the home QTH, is where they were). Nothing is guessed from a grid.
+  ipcMain.handle('was-backfill-states', async () => {
+    const MAX_LIVE_LOOKUPS = 150; // one press = one bounded run; press again for more
+    if (!(qrz && qrz.configured && settings.enableQrz)) {
+      return { ok: false, error: 'QRZ lookups are not set up. Turn on "QRZ.com Callsign Lookup" under Settings > Station and enter your QRZ login first.' };
+    }
+    const logPath = qsoLogPath();
+    if (!fs.existsSync(logPath) || isSqliteFile(logPath)) return { ok: false, error: 'No POTACAT log to fill.' };
+    const { mutateLog } = require('./lib/qso-log');
+    let raw;
+    try { raw = parseAllRawQsos(logPath); } catch (err) { return { ok: false, error: 'Could not read the log: ' + err.message }; }
+
+    const parkStateOf = (rec) => {
+      const ref = String(rec.SIG_INFO || rec.POTA_REF || '').trim().toUpperCase();
+      if (!ref) return null; // not a park contact
+      const info = parkInfoFor(ref);
+      const states = String((info && info.locationDesc) || '').split(',').map((s) => s.trim().split('-').pop().toUpperCase()).filter(Boolean);
+      return states.length === 1 ? states[0] : ''; // '' = park known to straddle or unknown: leave alone
+    };
+
+    // Candidates: no STATE, an entity whose STATE field is a state the
+    // roster tracks (lib/worked-roster.js stateKeys).
+    const TRACKED = new Set(['United States', 'Alaska', 'Hawaii', 'Canada', 'Australia']);
+    const wantCalls = new Set();
+    let candidates = 0;
+    for (const rec of raw) {
+      if (rec.STATE) continue;
+      const ent = rosterEntityOf(rec.CALL);
+      if (!TRACKED.has(ent)) continue;
+      candidates++;
+      if (parkStateOf(rec) !== null) continue; // park contact: the park decides, QRZ is not consulted
+      wantCalls.add(JtcatParser.baseCall(String(rec.CALL).toUpperCase()));
+    }
+
+    const found = new Map();
+    let live = 0;
+    let skippedForBudget = 0;
+    for (const call of wantCalls) {
+      const cached = qrz.cached ? qrz.cached(call) : undefined;
+      let q = cached;
+      if (cached === undefined) {
+        if (live >= MAX_LIVE_LOOKUPS) { skippedForBudget++; continue; }
+        live++;
+        try { q = await qrz.lookup(call); } catch { q = null; }
+      }
+      if (q && q.state) found.set(call, String(q.state).trim().toUpperCase());
+    }
+
+    let filled = 0;
+    let fromPark = 0;
+    try {
+      mutateLog(logPath, (qsos) => {
+        for (const rec of qsos) {
+          if (rec.STATE) continue;
+          const ent = rosterEntityOf(rec.CALL);
+          const ps = parkStateOf(rec);
+          let state = '';
+          if (ps !== null) { state = ps; if (state) fromPark++; }
+          else state = found.get(JtcatParser.baseCall(String(rec.CALL || '').toUpperCase())) || '';
+          if (!state || !WorkedRoster.stateKeys(ent, state).length) continue; // a province on a US call, a typo: never written
+          rec.STATE = state;
+          filled++;
+        }
+        return filled ? undefined : false;
+      }, { sink: qsoLogSink });
+    } catch (err) {
+      return { ok: false, error: 'Could not update the log: ' + err.message };
+    }
+    if (filled) loadWorkedQsos();
+    const remaining = candidates - filled;
+    sendCatLog(`[WAS] Filled STATE on ${filled} QSO${filled === 1 ? '' : 's'} (${fromPark} from the park, ${filled - fromPark} from QRZ; ${live} QRZ lookups); ${remaining} still without a state` + (skippedForBudget ? ` — ${skippedForBudget} calls not looked up yet, press again` : ''));
+    return { ok: true, filled, fromPark, remaining, live, more: skippedForBudget > 0 };
   });
 
   // --- Log Import IPC ---

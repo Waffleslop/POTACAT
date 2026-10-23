@@ -59,6 +59,7 @@ const TESTS = [
   'test/gma-test.js',
   'test/parc-test.js',
   'test/worked-before-test.js',
+  'test/worked-roster-test.js',
   'test/watchlist-groups-test.js',
   'test/cert-san-policy-test.js',
   'test/merge-latest-mac-test.js',

@@ -286,6 +286,11 @@ contextBridge.exposeInMainWorld('api', {
   importAdif: () => ipcRenderer.invoke('import-adif'),
   parseAdif: () => ipcRenderer.invoke('parse-adif'),
   onDxccData: (cb) => ipcRenderer.on('dxcc-data', (_e, data) => cb(data)),
+  // Worked roster (Worked All States view, map overlays): states + DXCC
+  // entities worked/confirmed by band and mode, from lib/worked-roster.js.
+  onWorkedRoster: (cb) => ipcRenderer.on('worked-roster', (_e, roster) => cb(roster)),
+  getWorkedRoster: () => ipcRenderer.invoke('worked-roster-get'),
+  wasBackfillStates: () => ipcRenderer.invoke('was-backfill-states'),
   onClusterStatus: (cb) => ipcRenderer.on('cluster-status', (_e, s) => cb(s)),
   // Spots Source menu: saved cluster nodes on/off (main is the one writer).
   clusterNodeChoices: () => ipcRenderer.invoke('cluster-node-choices'),

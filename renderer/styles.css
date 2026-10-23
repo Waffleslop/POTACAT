@@ -5767,6 +5767,21 @@ a.settings-echocat-badge-link:hover {
   font-weight: bold;
 }
 
+/* Worked All States view: POTACAT's own tints, blue = worked, green = confirmed */
+.was-header { flex-wrap: wrap; row-gap: 6px; }
+.was-matrix .dxcc-entity-col { min-width: 150px; }
+.was-code { color: var(--text-tertiary); font-size: 10px; margin-left: 6px; font-family: Consolas, "Courier New", monospace; }
+.was-worked { color: #4fc3f7; background: rgba(79, 195, 247, 0.16); font-weight: bold; }
+.was-confirmed { color: #4ecca3; background: rgba(78, 204, 163, 0.22); font-weight: bold; }
+.was-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.was-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-left: 8px; }
+.was-swatch-worked { background: rgba(79, 195, 247, 0.5); border: 1px solid #4fc3f7; }
+.was-swatch-confirmed { background: rgba(78, 204, 163, 0.55); border: 1px solid #4ecca3; }
+.was-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.was-backfill-status { font-size: 11px; color: var(--text-secondary); }
+#was-count.was-count-confirmed { color: #4ecca3; }
+#was-placeholder { text-align: center; padding: 16px 20px; color: var(--text-tertiary); font-size: 12px; }
+
 .dxcc-unworked {
   opacity: 0.4;
 }

@@ -26,12 +26,17 @@ and spots from a state or country still needed.
 ## Decisions
 
 1. **"Worked" comes from the operator's own log**, the same file every worked-before
-   check reads (`qsoLogPath()`), plus the DXCC tracker's import file when one is set
-   (`settings.adifPath`, union): that is where LoTW-confirmed downloads land.
-   Never from the spot list or the decode history.
+   check reads (`qsoLogPath()`). The DXCC tracker reads that same file (the
+   `adifPath` import setting is gone), and the LoTW download writes its
+   confirmations into it, so there is ONE source. Never from the spot list or the
+   decode history.
 2. **Two states per place: worked and confirmed.** WAS and DXCC are awarded on
-   confirmations, so the map shows three tints, as GridTracker does: dark = not worked,
-   yellow = worked, green = confirmed. Confirmed = the DXCC tracker's rule.
+   confirmations, so the map shows three tints: not worked = no fill (a faint outline
+   only), worked = POTACAT blue (`#4fc3f7`, the link colour, ~35 % fill), confirmed =
+   POTA green (`#4ecca3`, ~45 % fill) drawn over worked. Casey 2026-10-23: "make the
+   colors OUR color. I don't want to copy GridTracker" (no yellow/green). Confirmed =
+   the DXCC tracker's rule. The tints are the one table in `lib/worked-overlay.js
+   styleFor` and the legend reads them from there.
 3. **Scope is band and mode family, with a switch.** Scope values: *any* (ever),
    *band* (this band, any mode), *band + mode*. Mode = the award family
    (phone / CW / digital, `modeFamily` as rig-presets uses it), because the WAS digital
@@ -49,7 +54,9 @@ and spots from a state or country still needed.
      while the state overlay or badge is on, only with QRZ configured) fills the cache.
    - Country is exact from cty.dat, as today.
    - **Hunt never answers on a guess**: the "Wanted states" hunt option answers a CQ
-     only when the state is certain. The badge shows `NJ?` for a straddler.
+     when the state is certain, or when the grid straddles states and EVERY candidate
+     is wanted (Casey 2026-10-23: a `NJ/PA` straddler with both needed is answered;
+     `NJ/PA` with PA worked is not). The badge shows `NJ/PA?` for a straddler.
 5. **The roster never guesses.** A logged QSO counts for a state only from its `STATE`
    field. Older records with no `STATE` can be filled from the QRZ cache with a button
    ("Fill missing states from QRZ"), recorded as a log edit through `lib/qso-log.js`,
@@ -95,6 +102,15 @@ and spots from a state or country still needed.
 ### Phases
 1. **Roster and WAS tracker** (no map): state and confirmation in the worked entries,
    `worked-roster`, the WAS view with counts and the QRZ backfill. Proves the data.
+   **BUILT 2026-10-23**: `lib/worked-roster.js` (+ `test/worked-roster-test.js`),
+   `parseWorkedQsos` entries carry `state`/`confirmed` only when present (the
+   ECHOCAT worked-qsos payload is size-capped), main builds `workedRoster` in
+   `loadWorkedQsos` and folds in both live-add sites, pushes `worked-roster`;
+   More > Worked All States (`renderer/was-view.js`, Mode: any/phone/CW/digital/
+   FT8/FT4/RTTY, Count: worked/confirmed, blue/green cells); "Fill missing states
+   from QRZ" = IPC `was-backfill-states` (park state for a single-state park
+   contact, QRZ for the rest, 150 live lookups per press, a `mutateLog` edit).
+   Checked live in a scratch profile with a six-QSO log.
 2. **Badges and Hunt**: decode and spot badges with certainty, the Hunt option.
 3. **Map overlays**: geo assets, the layer on the three maps, F6/F7/F8, legend, scope
    following the radio.
@@ -104,9 +120,9 @@ and spots from a state or country still needed.
 Rough size: phase 1 a day, 2 half a day, 3 a day and a half (most of it the asset
 build and three map surfaces), 4 half a day plus the app's own work.
 
-## Open questions for Casey
-- F6 / F7 / F8 rather than F1 (which is help): fine?
-- Default scope *band + mode family*, following the radio: fine, or *any band* first?
-- Hunt answers only certain states. Also answer straddlers (`NJ/PA`) when both are wanted?
-- Confirmed-only as the default tint rule for the award, or worked (yellow) as the
-  headline with confirmed (green) on top, as GridTracker does?
+## Answered by Casey (2026-10-23)
+- F6 / F7 / F8: yes.
+- Default scope band + mode family, following the radio: yes.
+- Hunt answers a straddler when all of its states are wanted: yes.
+- Worked as the headline tint with confirmed on top: yes, in POTACAT's own colours
+  (blue worked, green confirmed), never GridTracker's yellow/green.

@@ -987,6 +987,19 @@ const popoutMapBtn = document.getElementById('popout-map-btn');
 const dxccBoardBtn = document.getElementById('dxcc-board-btn');
 const dxccView = document.getElementById('dxcc-view');
 const dxccMatrixBody = document.getElementById('dxcc-matrix-body');
+// Worked All States view (renderer/was-view.js draws it from the roster main pushes)
+const wasView = document.getElementById('was-view');
+const wasEls = {
+  body: document.getElementById('was-matrix-body'),
+  count: document.getElementById('was-count'),
+  award: document.getElementById('was-award-label'),
+  placeholder: document.getElementById('was-placeholder'),
+  modeSelect: document.getElementById('was-mode-select'),
+  countSelect: document.getElementById('was-count-select'),
+  backfillBtn: document.getElementById('was-backfill-btn'),
+  backfillStatus: document.getElementById('was-backfill-status'),
+};
+let workedRoster = null; // lib/worked-roster.js shape, from main ('worked-roster')
 const dxccCountEl = document.getElementById('dxcc-count');
 const dxccPlaceholder = document.getElementById('dxcc-placeholder');
 const dxccBandSelectEl = document.getElementById('dxcc-band-select');
@@ -2132,6 +2145,8 @@ async function loadPrefs() {
         setView('rbn');
       } else if (viewState.lastView === 'dxcc' && enableDxcc) {
         setView('dxcc');
+      } else if (viewState.lastView === 'was') {
+        setView('was');
       } else if (viewState.lastView === 'directory' && settings.enableDirectory) {
         setView('directory');
       } else {
@@ -12529,8 +12544,8 @@ window.api.onJtcatPopoutStatus((open) => {
 // RBN and DXCC are exclusive views that hide the split container.
 
 function setView(view) {
-  // Called for exclusive views (rbn, dxcc, directory, contests) or to force a specific state
-  if (view === 'rbn' || view === 'dxcc' || view === 'directory' || view === 'contests') {
+  // Called for exclusive views (rbn, dxcc, was, directory, contests) or to force a specific state
+  if (view === 'rbn' || view === 'dxcc' || view === 'was' || view === 'directory' || view === 'contests') {
     currentView = view;
     showTable = false;
     showMap = false;
@@ -12550,6 +12565,7 @@ function updateViewLayout() {
   updateTitleBar();
   // Hide exclusive views
   dxccView.classList.add('hidden');
+  if (wasView) wasView.classList.add('hidden');
   rbnView.classList.add('hidden');
   jtcatView.classList.add('hidden');
   if (directoryView) directoryView.classList.add('hidden');
@@ -12566,6 +12582,15 @@ function updateViewLayout() {
     splitContainerEl.classList.add('hidden');
     dxccView.classList.remove('hidden');
     renderDxccMatrix();
+    updateParksStatsOverlay();
+    saveViewState();
+    return;
+  }
+
+  if (currentView === 'was') {
+    splitContainerEl.classList.add('hidden');
+    if (wasView) wasView.classList.remove('hidden');
+    renderWasView();
     updateParksStatsOverlay();
     saveViewState();
     return;
@@ -12660,7 +12685,7 @@ function saveViewState() {
 }
 
 viewTableBtn.addEventListener('click', () => {
-  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat' || currentView === 'directory' || currentView === 'contests') {
+  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'was' || currentView === 'jtcat' || currentView === 'directory' || currentView === 'contests') {
     // Switching from exclusive view -> table only
     if (currentView === 'jtcat') stopJtcatView();
     currentView = 'table';
@@ -12691,7 +12716,7 @@ viewMapBtn.addEventListener('click', () => {
     window.api.popoutMapOpen(); // focuses existing window
     return;
   }
-  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat' || currentView === 'directory') {
+  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'was' || currentView === 'jtcat' || currentView === 'directory' || currentView === 'contests') {
     // Switching from exclusive view -> map only
     if (currentView === 'jtcat') stopJtcatView();
     currentView = 'map';
@@ -12718,6 +12743,70 @@ viewMapBtn.addEventListener('click', () => {
 
 viewRbnBtn.addEventListener('click', () => setView('rbn'));
 if (viewContestsBtn) viewContestsBtn.addEventListener('click', () => setView('contests'));
+bindClick(document.getElementById('view-was-btn'), () => setView('was'));
+
+// --- Worked All States view ---
+// The roster comes from main (lib/worked-roster.js over the operator's log);
+// this side only chooses the scope and draws. Filter choice is device-local.
+const WAS_FILTER_KEY = 'pota-cat-was-filter';
+function initWasFilters() {
+  if (!wasEls.modeSelect) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(WAS_FILTER_KEY));
+    if (saved) {
+      if (saved.mode) wasEls.modeSelect.value = saved.mode;
+      if (saved.count) wasEls.countSelect.value = saved.count;
+    }
+  } catch { /* ignore */ }
+  const onChange = () => {
+    localStorage.setItem(WAS_FILTER_KEY, JSON.stringify({ mode: wasEls.modeSelect.value, count: wasEls.countSelect.value }));
+    if (currentView === 'was') renderWasView();
+  };
+  wasEls.modeSelect.addEventListener('change', onChange);
+  wasEls.countSelect.addEventListener('change', onChange);
+  if (wasEls.backfillBtn) {
+    wasEls.backfillBtn.addEventListener('click', async () => {
+      wasEls.backfillBtn.disabled = true;
+      wasEls.backfillStatus.textContent = 'Looking up...';
+      try {
+        const r = await window.api.wasBackfillStates();
+        if (!r || !r.ok) {
+          wasEls.backfillStatus.textContent = (r && r.error) || 'Could not fill states.';
+        } else if (!r.filled) {
+          wasEls.backfillStatus.textContent = r.remaining
+            ? `No states found for the ${r.remaining} QSO${r.remaining === 1 ? '' : 's'} still without one.`
+            : 'Every QSO already has a state.';
+        } else {
+          wasEls.backfillStatus.textContent = `Filled ${r.filled} QSO${r.filled === 1 ? '' : 's'}` +
+            (r.remaining ? `, ${r.remaining} still without a state` : '') +
+            (r.more ? ' (press again for more)' : '') + '.';
+        }
+      } catch (err) {
+        wasEls.backfillStatus.textContent = 'Could not fill states: ' + (err.message || err);
+      } finally {
+        wasEls.backfillBtn.disabled = false;
+      }
+    });
+  }
+}
+initWasFilters();
+
+function renderWasView() {
+  if (!wasEls.body || !window.WasView) return;
+  window.WasView.render(wasEls, workedRoster, { modeValue: wasEls.modeSelect.value, countValue: wasEls.countSelect.value });
+}
+
+if (window.api.onWorkedRoster) {
+  window.api.onWorkedRoster((roster) => {
+    workedRoster = roster;
+    if (currentView === 'was') renderWasView();
+  });
+}
+if (window.api.getWorkedRoster) {
+  window.api.getWorkedRoster().then((roster) => {
+    if (roster && !workedRoster) { workedRoster = roster; if (currentView === 'was') renderWasView(); }
+  }).catch(() => {});
+}
 
 // --- Contests view ---
 // Card-grouped layout (one card per category in CONTESTS_CATEGORY_ORDER)
